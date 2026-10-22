@@ -13,6 +13,8 @@
 const Q = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
 const TOKEN = Q.get("t") || "";
 const PAGE = Q.get("page") || "main";
+// PAD-668: rings inserts on the field view's picture (set by fieldView)
+let markInserts = null;
 
 // ---------------------------------------------------------------- transport
 function api(m, ...a) {
@@ -300,25 +302,33 @@ function startMain() {
     else v = waitingView(main);
     let panel = null;
     if (S.panel) { panel = keyPanel(S.panel); body.append(panel.el); }
+    // before padbinds brings the key panel, the side panel is the window's own:
+    // the ball controls (PAD-668: never over the playfield) under the info
+    let side = panel ? panel.el : null;
+    if (!side && ((S.view && S.view.info) || v.side)) { side = el("aside", "pf-panel"); body.append(side); }
     // the extra information (PAD-238) sits at the head of the side panel,
-    // folded away, never over the playfield; before padbinds brings the key
-    // panel the side panel holds only this
+    // folded away, never over the playfield
     let info = null;
     if (S.view && S.view.info) {
       info = infoPanel(S.view.info, S.live || []);
-      if (panel) panel.el.prepend(info.el);
-      else { const side = el("aside", "pf-panel"); side.append(info.el); body.append(side); }
+      side.prepend(info.el);
     }
+    // the ball controls right under it, where the key panel's BALLS section sits
+    if (v.side) { if (info) info.el.after(v.side); else side.prepend(v.side); }
+    const top = v.side && info ? { el: v.side } : info;
     // the cabinet's shaker motor (PAD-424): open under the info, because it
     // is the one coil the artwork has no place for
     let shaker = null;
     if (info && S.view.shaker) {
       shaker = shakerPanel(S.view.shaker, (S.dyn || {}).shaker);
-      info.el.after(shaker.el);
+      top.el.after(shaker.el);
     }
     // the cabinet's own lighting (PAD-500): what the column holds, and the
     // "Expression lights" tick box on a title that has blades or speakers
-    if (info && S.view.cab_panel) (shaker || info).el.after(cabPanel(S.view.cab_panel).el);
+    let cabp = null;
+    if (info && S.view.cab_panel) { cabp = cabPanel(S.view.cab_panel); (shaker || top).el.after(cabp.el); }
+    // the single-colour inserts' colours (PAD-668), last in the column
+    if (info && S.view.lens && S.view.lens.length) (cabp || shaker || top).el.after(lensPanel(S.view.lens).el);
     app.append(body, status);
     view = {
       frame(f) {
@@ -427,11 +437,26 @@ function startMain() {
   }
 
   // ---- the action row (only without a key panel: PAD-134) ---------------------
-  function actionRow() {
-    if (!S.acts || !S.acts.length) return null;
-    const row = el("div", "pf-acts");
-    for (const [i, label] of S.acts) row.append(btn(label, () => api("action", i)));
-    return row;
+  // ---- the ball controls before the key panel comes (PAD-668) ---------------
+  // Until the game's key bindings arrive (the first seconds of a run, or never
+  // on a replay) the window still offers the trough and the actions - in the
+  // side panel, where the key panel's BALLS section puts them once it comes,
+  // never over the playfield picture. null when there is nothing to offer.
+  function ballsBox(V, D) {
+    const acts = S.acts && S.acts.length ? S.acts : [];
+    if (!V.trough && !acts.length) return null;
+    const sec = el("div", "kp-sec pf-balls");
+    const h = el("div", "kp-head");
+    h.append(el("span", "kp-group", "BALLS"));
+    sec.append(h);
+    let trough = null;
+    if (V.trough) { trough = troughStrip(V.trough, D.trough); sec.append(trough.el); }
+    if (acts.length) {
+      const bs = el("div", "kp-btns");
+      for (const [i, label] of acts) bs.append(btn(label, () => api("action", i)));
+      sec.append(bs);
+    }
+    return { el: sec, trough };
   }
 
   // ---- a trough strip that IS the control (the fallback) ----------------------
@@ -493,15 +518,37 @@ function startMain() {
       };
       shown();
     }
+    // PAD-668: how inserts take a mode's colours - as the machine has its LEDs,
+    // or as if every insert were RGB (what the Modes tab's preview shows)
+    let insLook = V.insert_look === "rgb" ? "rgb" : "real";
+    const insBox = el("div", "pf-look pf-inslook");
+    const insPick = {};
+    for (const [k, label, words] of [
+      ["real", "Real LEDs", "As the machine: an RGB insert in the colour the game gives it; a single-colour "
+        + "insert only gets brighter or dimmer and glows in its own colour (INSERT COLOURS in the side panel; "
+        + "white = not set)"],
+      ["rgb", "All RGB", "As if every insert were RGB: a single-colour insert is drawn in the colour it was "
+        + "asked for, where the view knows it - the machine cannot show that"],
+    ]) {
+      insPick[k] = btn(label, () => {
+        insPick[k].blur();              // never keep the keyboard: the space bar is the Action Button
+        if (insLook === k) return;
+        insLook = k;
+        for (const q in insPick) insPick[q].classList.toggle("on", q === insLook);
+        api("insert_look", k);
+      });
+      insPick[k].title = words;
+      insPick[k].classList.toggle("on", k === insLook);
+      insBox.append(insPick[k]);
+    }
     const cv = el("canvas");
     stage.append(cv);
     if (lookBox) stage.append(lookBox);
-    const overlay = el("div", "pf-overlay");
-    let trough = null;
-    if (V.trough) { trough = troughStrip(V.trough, D.trough); overlay.append(trough.el); }
-    const acts = actionRow();
-    if (acts) overlay.append(acts);
-    stage.append(overlay);
+    stage.append(insBox);
+    // the ball controls before the key panel comes: in the side panel, never
+    // over the picture (PAD-668)
+    const balls = ballsBox(V, D);
+    const trough = balls ? balls.trough : null;
     // the cabinet column (PAD-500), left of the artwork at its scale
     const cab = V.cab ? cabColumn(V.cab, D.cab) : null;
     if (cab) wrap.append(cab.el);
@@ -517,6 +564,9 @@ function startMain() {
     let ripping = null;
     let shakeLvl = D.shaker ? D.shaker[0] : 0, jiggled = false;
     let scale = 1, dirty = true;
+    // PAD-668: the inserts the INSERT COLOURS row under the mouse names
+    let marked = null;
+    markInserts = (fids) => { marked = fids && fids.length ? fids : null; dirty = true; };
 
     function fit() {
       const r = wrap.getBoundingClientRect();
@@ -578,6 +628,15 @@ function startMain() {
           g.restore();
           g.lineWidth = 1; g.strokeStyle = "rgba(0,0,0,.4)"; g.stroke();
         }
+      }
+      if (marked) {
+        g.save();
+        g.lineWidth = 2; g.strokeStyle = "#ffd400"; g.setLineDash([3, 2]);
+        for (const [fid, x, y] of V.fixtures) {
+          if (!marked.includes(fid)) continue;
+          g.beginPath(); g.arc(x * scale, y * scale, LED_R + 6, 0, Math.PI * 2); g.stroke();
+        }
+        g.restore();
       }
       for (const [k, x, y, key] of V.coils) {
         const cx = x * scale, cy = y * scale, h = 7;
@@ -665,6 +724,7 @@ function startMain() {
         if (f.sw) { Object.assign(made, f.sw); dirty = true; }
         if (f.trough && trough) trough.update(f.trough);
       },
+      side: balls ? balls.el : null,
     };
   }
 
@@ -792,21 +852,70 @@ function startMain() {
     return { el: acc };
   }
 
+  // The side panel's INSERT COLOURS table (PAD-668). A single-colour insert
+  // has one brightness and no colour on the wire: on the machine it glows in
+  // its own LED's and lens's colour, which no table in the game names. So it
+  // is drawn white until the user gives it its colour here; playfield.py
+  // keeps the table per title, for the next run. Hovering a row rings that
+  // insert on the picture.
+  function lensPanel(rows) {
+    const acc = el("details", "kp-acc pf-lens");
+    try { acc.open = localStorage.getItem("pf-acc-lens") === "1"; } catch (e) { /* no storage */ }
+    const sum = el("summary", null, "INSERT COLOURS");
+    const cnt = el("span", "cnt", "");
+    sum.append(cnt);
+    // never keep the keyboard: a focused summary would eat the space bar
+    sum.tabIndex = -1;
+    sum.addEventListener("mousedown", (ev) => ev.preventDefault());
+    acc.addEventListener("toggle", () => {
+      try { localStorage.setItem("pf-acc-lens", acc.open ? "1" : "0"); } catch (e) { /* no storage */ }
+    });
+    const box = el("div", "body");
+    box.append(el("div", "note", "One-colour inserts: the game sets only how bright they are, and each glows "
+      + "in its own colour. White = not set. Give each its colour here; kept for this title."));
+    const list = el("div", "list");
+    box.append(list);
+    acc.append(sum, box);
+    const count = () => {
+      const n = rows.filter((r) => r[1]).length;
+      cnt.textContent = `${n} of ${rows.length} set`;
+    };
+    for (const r of rows) {
+      const [name, hex, fids] = r;
+      const row = el("div", "r");
+      const pick = el("input");
+      pick.type = "color";
+      pick.value = hex || "#ffffff";
+      pick.title = "The colour this insert glows on the machine";
+      const lab = el("span", "k", name);
+      const clr = btn("\u00d7", () => {
+        api("lens", name, null).then((v) => { r[1] = v || ""; pick.value = "#ffffff"; show(); });
+      }, "x");
+      clr.title = "Back to white (not set)";
+      clr.tabIndex = -1;
+      function show() { clr.style.visibility = r[1] ? "" : "hidden"; row.classList.toggle("set", !!r[1]); count(); }
+      pick.addEventListener("change", () => {
+        api("lens", name, pick.value).then((v) => { r[1] = v || ""; show(); });
+        // never keep the keyboard: a focused picker would eat the flipper keys
+        pick.blur();
+      });
+      row.addEventListener("pointerenter", () => { if (markInserts) markInserts(fids); });
+      row.addEventListener("pointerleave", () => { if (markInserts) markInserts(null); });
+      row.append(pick, lab, clr);
+      list.append(row);
+      show();
+    }
+    return { el: acc };
+  }
+
   // ================================================== the schematic view
   function schematicView(main) {
     const V = S.view, D = S.dyn || {};
     const bar = el("div", "pf-bar");
     bar.append(el("div", "txt", V.bar));
-    const acts = actionRow();
-    if (acts) bar.append(acts);
     main.append(bar);
-    let trough = null;
-    if (V.trough) {
-      const strip = el("div", "pf-strip");
-      trough = troughStrip(V.trough, D.trough);
-      strip.append(trough.el);
-      main.append(strip);
-    }
+    const balls = ballsBox(V, D);
+    const trough = balls ? balls.trough : null;
     const body = el("div", "pf-schem");
     const grid = el("div", "pf-grid");
     const rows = el("div", "pf-rows");
@@ -893,6 +1002,7 @@ function startMain() {
         if (f.grid) { for (const k in f.grid) { gridData[k] = f.grid[k]; paintCell(k); } }
         if (f.trough && trough) trough.update(f.trough);
       },
+      side: balls ? balls.el : null,
     };
   }
 

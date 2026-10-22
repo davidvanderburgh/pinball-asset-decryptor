@@ -947,6 +947,119 @@ def art_look():
     return look if look in ART_LOOKS else ART_LOOKS[0]
 
 
+#: PAD-668: how inserts take a mode's colours - "real" (as the machine: a
+#: single-colour insert glows in its own colour, from INSERT COLOURS, else
+#: white) or "rgb" (as if every insert were RGB: a single-colour insert a mode
+#: holds is drawn in the colour the mode painted, PAD-658's view)
+INSERT_LOOKS = ("real", "rgb")
+
+
+def insert_look():
+    """The picture's Real LEDs / All RGB switch (PAD-668), Real LEDs until it
+    is first switched; kept in the state file like the X-ray switch."""
+    look = load_state().get("insert_look")
+    return look if look in INSERT_LOOKS else INSERT_LOOKS[0]
+
+
+def tinted(vals, F, tints):
+    """A single-colour fixture's values as the colour a MODE painted it, else
+    ``vals`` as they are - the All RGB look (PAD-668; PAD-658 drew this
+    always). The hue from the mode (coilmap.paint_tints, padled's paint
+    plane), the brightness - and so the timing - from what the game actually
+    sent the board."""
+    if not tints or set(vals) != {"W"}:
+        return vals
+    tint = tints.get(F["channels"]["W"])
+    v = vals.get("W") or 0
+    if not tint or not v:
+        return vals
+    m = max(tint)
+    return {c: t * v // m for c, t in zip("RGB", tint)}
+
+
+#: PAD-668: a single-colour insert's colour until the user sets one: white,
+#: "colour not known" (see fixture_color)
+LENS_DEFAULT = (255, 255, 255)
+
+
+def _hex_rgb(s):
+    """'#rrggbb' -> (r, g, b), or None for anything else"""
+    s = str(s or "")
+    if len(s) == 7 and s[0] == "#":
+        try:
+            return tuple(int(s[i:i + 2], 16) for i in (1, 3, 5))
+        except ValueError:
+            return None
+    return None
+
+
+def lens_colours(title=None):
+    """{insert name: (r, g, b)} - the colours the user gave this title's
+    single-colour inserts (PAD-668), from the state file's "lens_colours"
+    {title: {name: "#rrggbb"}}. By NAME, so a table survives a new build of
+    the title; by title, because LE and Pro need not share their lenses."""
+    got = (load_state().get("lens_colours") or {}).get(title or GAME or "") or {}
+    out = {}
+    for name, h in got.items():
+        rgb = _hex_rgb(h)
+        if rgb:
+            out[name] = rgb
+    return out
+
+
+def save_lens_colour(name, colour, title=None):
+    """Set (``colour`` '#rrggbb') or clear (None) one insert's colour in the
+    state file; returns the title's table as lens_colours() reads it."""
+    st = load_state()
+    table = st.setdefault("lens_colours", {}).setdefault(title or GAME or "", {})
+    rgb = _hex_rgb(colour)
+    if rgb:
+        table[name] = "#%02x%02x%02x" % rgb
+    else:
+        table.pop(name, None)
+    with open(STATE, "w") as f:
+        json.dump(st, f, indent=1)
+    global _LENS
+    _LENS = None
+    return lens_colours(title)
+
+
+_LENS = None
+_STATE_SEEN = [None, 0.0]       # the state file's mtime when last read, the time it was last looked at
+
+
+def lens_of(name):
+    """One insert's colour from the user's table (read once, re-read after a
+    save or when the file changes - state_changed), or None for the default."""
+    global _LENS
+    if _LENS is None:
+        _LENS = lens_colours()
+    return _LENS.get(name)
+
+
+def state_changed(every=1.0):
+    """True when the state file changed since it was last looked at - at most
+    once every ``every`` s. The Modes tab's Light shows writes the same
+    INSERT COLOURS table and Real LEDs / All RGB switch (PAD-668:
+    pinball_decryptor/plugins/stern/insert_colours.py), so a colour set there
+    reaches an open window within a second. Drops the table's cache."""
+    global _LENS
+    now = time.monotonic()
+    if now - _STATE_SEEN[1] < every:
+        return False
+    _STATE_SEEN[1] = now
+    try:
+        mt = os.stat(STATE).st_mtime
+    except OSError:
+        mt = None
+    if mt == _STATE_SEEN[0]:
+        return False
+    first = _STATE_SEEN[0] is None and mt is not None and _LENS is None
+    _STATE_SEEN[0] = mt
+    _LENS = None
+    return not first
+
+
 def cabinet_names(boards=None, expression=True):
     """{(node, channel): name} for the cabinet's own lights (cablights.py),
     which GROUP_NODE has no node for - so the swatch grid can name a blade or a
@@ -1115,8 +1228,10 @@ def group_fixtures(leds):
     return order
 
 
-def fixture_color(vals):
+def fixture_color(vals, lens=None):
     """(r, g, b), level for a fixture's channel values, or (None, 0) when off.
+    ``lens``: a single-colour insert's colour (r, g, b) from the user's table
+    (lens_colours), None for the default.
 
     TWO ANSWERS, NOT ONE, and the split is the whole point. The COLOUR is
     brightness-lifted hue-preservingly (sqrt, close enough to display gamma)
@@ -1128,15 +1243,23 @@ def fixture_color(vals):
     brightness shown by transparency AND size, and folding brightness into
     the colour is exactly what makes both of those impossible.
 
-    Single-channel inserts keep the orange ramp the window has always used -
-    the lens colour is not in any table, and the coil flash's "nothing else
-    here is magenta" contrast depends on it.
+    A SINGLE-CHANNEL INSERT HAS ONE LEVEL AND NO COLOUR ON THE WIRE (PAD-668):
+    on the machine it glows in its own LED's and lens's colour, which no table
+    in the game names (the device records' part numbers are the board, shared
+    by RGB and one-colour inserts). So it is drawn in the colour the user gave
+    it in the side panel's INSERT COLOURS table, else WHITE - "colour not
+    known", where the old orange ramp read as "this insert is yellow". The
+    same holds while a MODE lights one: the mode's colour reaches the board as
+    one level, so PAD-658's painting it in the show's colour showed what the
+    machine cannot; the colour asked for is in its tooltip instead, and the
+    picture's All RGB switch draws it that way on request (tinted).
     """
     if "W" in vals:
         v = vals.get("W") or 0
         if not v:
             return None, 0.0
-        return (255, 60 + v * 3 // 4, 0), v / 255.0
+        s = (v / 255.0) ** 0.5
+        return tuple(int(c * s + 0.5) for c in (lens or LENS_DEFAULT)), v / 255.0
     r, g, b = (vals.get(c) or 0 for c in "RGB")
     m = max(r, g, b)
     if not m:
@@ -1144,24 +1267,6 @@ def fixture_color(vals):
     k = 255.0 * (m / 255.0) ** 0.5 / m
     return ((min(255, int(r * k)), min(255, int(g * k)), min(255, int(b * k))),
             m / 255.0)
-
-
-def tinted(vals, F, tints):
-    """A one-colour fixture's values as the colour a MODE painted it (PAD-658), else ``vals`` as they are.
-
-    The wire gives a single-colour insert one level and no colour, so it is drawn on the orange ramp above - and a
-    blocks mode's light show, red or blue over the whole playfield, read as yellow dots here while the Modes tab's
-    preview paints every insert in the show's colour. The mode runtime publishes the colour it painted
-    (coilmap.paint_tints, padled's paint plane): such an insert becomes R/G/B at the WIRE's level - the hue from
-    the mode, the brightness (and so the timing) from what the game actually sent the board."""
-    if not tints or set(vals) != {"W"}:
-        return vals
-    tint = tints.get(F["channels"]["W"])
-    v = vals.get("W") or 0
-    if not tint or not v:
-        return vals
-    m = max(tint)
-    return {c: t * v // m for c, t in zip("RGB", tint)}
 
 
 #: How a level (0..1) becomes a marker. Both floors are deliberate: a lamp at
@@ -2625,7 +2730,8 @@ class LedGrid(LedRing):
             self._rebuild()
         lit = 0
         for C in self.cells:
-            rgb, level = fixture_color(self._chan_vals(C, d, now))
+            rgb, level = fixture_color(self._chan_vals(C, d, now),
+                                       lens_of(C["name"]))
             if rgb:
                 lit += 1
             st = (rgb, level)
@@ -3515,6 +3621,7 @@ class Field(LedRing):
                 self.chan_fix.setdefault(key, []).append(F)
 
         self.sw_rows = list(self.switches)
+        self.insert_look = insert_look()        # PAD-668
         # PAD-500: the cabinet's own lights, in a column left of the art
         self.cab = CabinetLights(expression_on())
         self._sw_named = None
@@ -3544,6 +3651,7 @@ class Field(LedRing):
             "info": self.info,
             "art": "art" if self.art else None,
             "look": art_look(),
+            "insert_look": self.insert_look,
             "base": list(self.base or (313, 710)),
             "fixtures": [[F["fid"], round(F["x"], 2), round(F["y"], 2)]
                          for F in self.fixtures],
@@ -3557,7 +3665,30 @@ class Field(LedRing):
             "shaker": self.shaker.spec() if self.shaker else None,
             "cab": self.cab_spec(),
             "cab_panel": self.cab.panel(),
+            "lens": self.lens_spec(),
         }
+
+    def lens_spec(self):
+        """PAD-668: the side panel's INSERT COLOURS table - every positioned
+        single-colour insert, by name, with the colour the user gave it ("" =
+        the default, white). [[name, "#rrggbb" or "", [fid, ...]], ...]; the
+        fids light the insert on the picture while its row is hovered."""
+        rows = {}
+        for F in self.fixtures:
+            if set(F["channels"]) == {"W"}:
+                rows.setdefault(F["name"], []).append(F["fid"])
+        out = []
+        for name in sorted(rows):
+            rgb = lens_of(name)
+            out.append([name, "#%02x%02x%02x" % rgb if rgb else "", rows[name]])
+        return out
+
+    def lens_changed(self, name=None):
+        """Redraw an insert whose colour the user just changed (every insert:
+        None)."""
+        for F in self.fixtures:
+            if name is None or F["name"] == name:
+                F["state"] = None
 
     def cab_spec(self):
         """The cabinet column (PAD-500), or None on a title with none.
@@ -3658,8 +3789,23 @@ class Field(LedRing):
                  % (d.get("group", -1), idx))
         if "W" in d["channels"]:
             node, idx = d["channels"]["W"]
-            return ("LED  %s\n%s\nvalue %s"
-                    % (d["name"], where(node, idx), fmt(vals.get("W"))))
+            # PAD-668: a mode's colour here is what it ASKED for; a
+            # one-colour insert shows its lens's colour whatever it asks
+            asked = coilmap.paint_tints(self.last, GROUP_NODE).get((node, idx))
+            lens = lens_of(d["name"])
+            if asked and self.insert_look == "rgb":
+                asks = ("\ndrawn #%02x%02x%02x, the mode's colour (All RGB);"
+                        "\non the machine it glows in its own colour" % asked)
+            elif asked:
+                asks = ("\na mode asks for #%02x%02x%02x; one colour, so it"
+                        "\nglows in its own colour on the machine" % asked)
+            else:
+                asks = ""
+            return ("LED  %s   (one colour)\n%s\nvalue %s\n%s%s"
+                    % (d["name"], where(node, idx), fmt(vals.get("W")),
+                       "its colour #%02x%02x%02x, as set under INSERT COLOURS" % lens
+                       if lens else "its colour not set (white): see INSERT COLOURS",
+                       asks))
         lines = ["LED  %s   (RGB fixture)" % d["name"]]
         for chan in "RGB":
             if chan in d["channels"]:
@@ -3821,9 +3967,15 @@ class Field(LedRing):
         decoded state moves - the honest picture rate - not tween frames."""
         lit = 0
         changed = 0
-        tints = coilmap.paint_tints(d, GROUP_NODE)
+        if state_changed():
+            # the Modes tab changed a colour or the switch (PAD-668)
+            self.insert_look = insert_look()
+            self.lens_changed(None)
+        tints = (coilmap.paint_tints(d, GROUP_NODE)
+                 if self.insert_look == "rgb" else None)
         for F in self.fixtures:
-            rgb, level = fixture_color(tinted(self._chan_vals(F, d, now), F, tints))
+            rgb, level = fixture_color(
+                tinted(self._chan_vals(F, d, now), F, tints), lens_of(F["name"]))
             if rgb:
                 lit += 1
             st = (rgb, level)
@@ -4094,7 +4246,26 @@ class Schematic:
                 "shaker": self.shaker.spec() if self.shaker else None,
                 "trough": self.trough.spec() if (
                     self.trough is not None and self.trough.clickable)
-                else None}
+                else None,
+                "lens": self.lens_spec()}
+
+    def lens_spec(self):
+        """PAD-668: INSERT COLOURS for a title with no artwork - the named
+        single-colour lamps of the grid's name table (Field.lens_spec)."""
+        chans = {}
+        for name in self.leds.names.values():
+            stem, chan = split_channel(name)
+            chans.setdefault(stem, set()).add(chan)
+        out = []
+        for name in sorted(n for n, c in chans.items() if c == {"W"}):
+            rgb = lens_of(name)
+            out.append([name, "#%02x%02x%02x" % rgb if rgb else "", []])
+        return out
+
+    def lens_changed(self, name):
+        for C in self.leds.cells:
+            if C["name"] == name:
+                C["state"] = None
 
     def dyn(self):
         return {"sw": {str(s): v for s, v in self._dot_drawn.items()},
@@ -4904,6 +5075,38 @@ class Playfield:
         except Exception:                                   # noqa: BLE001
             pass
         return on
+
+    def api_lens(self, name, colour):
+        """PAD-668: the INSERT COLOURS table - one single-colour insert's
+        colour set ('#rrggbb') or put back to the default (None), kept for
+        the next run. Returns what the row now holds."""
+        name = str(name)
+        try:
+            save_lens_colour(name, colour)
+        except Exception:                                   # noqa: BLE001
+            pass
+        v = self.view
+        if v is not None and hasattr(v, "lens_changed"):
+            v.lens_changed(name)
+        rgb = lens_of(name)
+        return "#%02x%02x%02x" % rgb if rgb else ""
+
+    def api_insert_look(self, look):
+        """PAD-668: the picture's Real LEDs / All RGB switch, kept for the
+        next run; every insert is drawn again in the new look."""
+        look = look if look in INSERT_LOOKS else INSERT_LOOKS[0]
+        try:
+            st = load_state()
+            st["insert_look"] = look
+            with open(STATE, "w") as f:
+                json.dump(st, f, indent=1)
+        except Exception:                                   # noqa: BLE001
+            pass
+        v = self.view
+        if v is not None and hasattr(v, "insert_look"):
+            v.insert_look = look
+            v.lens_changed(None)
+        return look
 
     def api_art_look(self, look):
         """PAD-628: the picture's X-ray / Drawing switch, kept for the next

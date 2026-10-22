@@ -169,8 +169,10 @@ struct padled_shm {
      * 8-byte entry per port lamp (the runtime's lamp index): I/O group, index
      * (the port's "I/O group G index I"; the reader maps group to node as it
      * does for the device table), r, g, b, on, 2 spare. An entry counts only
-     * while `on` and paint_magic is 'PINT' (0x544e4950); the view then draws
-     * that insert in that hue at the wire's level. The shim never touches it,
+     * while `on` and paint_magic is 'PINT' (0x544e4950). PAD-668: the view no
+     * longer DRAWS that hue - on the machine a one-colour insert glows in its
+     * lens's colour whatever a show asks - it names it in the insert's
+     * tooltip. The shim never touches it,
      * so `version` stays what the shim's mapping holds. Offsets for a Python
      * reader: paint_magic 13500, paint_gen 13504, paint 13508. */
     unsigned paint_magic;

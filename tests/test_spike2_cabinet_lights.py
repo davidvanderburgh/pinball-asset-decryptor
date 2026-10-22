@@ -538,7 +538,7 @@ def test_the_page_folds_the_box_like_game_hardware():
 def test_the_schematic_drops_the_blades_and_speakers_blocks(pf):
     S = object.__new__(pf.Schematic)
     S.cab = pf.CabinetLights(False)
-    S.leds = types.SimpleNamespace(cells=[], spec=lambda: {"gen": 1, "blocks": [
+    S.leds = types.SimpleNamespace(cells=[], names={}, spec=lambda: {"gen": 1, "blocks": [
         {"node": 2, "cells": []}, {"node": 7, "cells": []}, {"node": 8, "cells": []}]})
     S.bar, S.info, S.entries, S.trough, S.shaker = "", [], [], None, None
     spec = S.spec()

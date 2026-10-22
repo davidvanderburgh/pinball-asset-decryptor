@@ -286,9 +286,9 @@ def test_a_machine_with_no_tables_still_opens_the_window():
 # off the canvas, a control simply missing. And v0.207.0 was yanked because a
 # test asserted a row COUNT that is really a font measurement.
 #
-# pf.css makes the action row a flex-wrap row (.pf-acts, wrap-reverse so the
-# overflow climbs upward the way the Tk wrap did) beside a separate state
-# cluster. A flex container lays every child out in flow: two buttons cannot
+# The actions are a grid of buttons in the side panel's BALLS box (pf.js
+# ballsBox, PAD-668: never over the playfield picture), apart from the state
+# cluster on the bottom bar. Grid and flex lay every child out in flow: two buttons cannot
 # overlap and none can land off the left edge, BY CONSTRUCTION, at any window
 # width and in any font, so there is no geometry left in Python to measure.
 # What stays checkable here is the half Python still owns - that the page is

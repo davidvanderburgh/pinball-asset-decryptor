@@ -787,6 +787,8 @@ HI_READ = HI_OFF + NODES * HI_IDX
 #: PAD-658: the colour a MODE painted on a one-colour insert, written by the mode runtime (pad_mode_runtime.c
 #: lamp_paint_note) right after the hi plane: magic 'PINT', a gen, then 256 entries of [group, index, r, g, b, on,
 #: 0, 0]. padled.h carries the meaning; tests/test_pad658_show_view.py pins the offset to padled.h and the runtime.
+#: PAD-668: the playfield view names that colour in the insert's tooltip and does not draw it - on the machine a
+#: one-colour insert glows in its lens's colour, whatever a show asks.
 PAINT_OFF = HI_READ
 PAINT_MAGIC = 0x544E4950
 PAINT_N = 256

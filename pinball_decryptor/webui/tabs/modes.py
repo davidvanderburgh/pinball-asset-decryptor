@@ -30,6 +30,7 @@ import tempfile
 import threading
 
 from ...plugins.stern import block_modes as BM   # PAD-232
+from ...plugins.stern import insert_colours as IC   # PAD-668
 from ...plugins.stern import mode_assets as MA
 from ...plugins.stern import mode_project as MP
 from ...plugins.stern import mode_tryit as MT
@@ -3106,7 +3107,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     def blocks_playfield(self):
         """PAD-612: what the Playfield view draws for the shown title: the game's own playfield picture off the
         project's card (a data: URL, "" with ``why`` when there is none) and the port's inserts on it, each with the
-        shots it lights for. ``{"art", "w", "h", "why", "inserts": [{name, x, y, shots}]}``."""
+        shots it lights for. ``{"art", "w", "h", "why", "inserts": [{name, x, y, mono, shots}], "game", "lens", "look"}``:
+        ``mono`` a single-colour insert, ``lens`` the colours the user gave them ({name: "#rrggbb"}), ``look`` the
+        Real LEDs / All RGB switch (insert_colours, PAD-668)."""
         from pinball_decryptor.plugins.stern import playfield_art as PA
         from ..shellx_common import off_loop
         p = self._shown or self._profile
@@ -3116,9 +3119,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return out
         port = p.port if os.path.isabs(p.port) else os.path.join(MP.PORTS_DIR, p.port)
         for i in PA.insert_places(port):
-            out["inserts"].append({"name": i["name"], "x": i["x"], "y": i["y"],
+            out["inserts"].append({"name": i["name"], "x": i["x"], "y": i["y"], "mono": i["mono"],
                                    "shots": [n for n, m in p.shots if m & i["shot"]]})
         game = p.game_dir
+        # PAD-668: the single-colour inserts' own colours and the Real LEDs / All RGB switch, shared with the
+        # emulator's playfield window
+        out["game"], out["lens"], out["look"] = game, IC.table(game), IC.look()
         card, _via = self._title_card(self.project())
         # PAD-623: the project's card first, then any other card of this game the app was pointed at, then the
         # picture kept from an earlier read - a moved or deleted card still shows the playfield
@@ -3138,6 +3144,17 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         else:
             out["why"] = "No playfield picture: %s." % str(where).rstrip(".")
         return out
+
+    @rpc
+    def blocks_insert_colour(self, game, name, colour):
+        """PAD-668: one single-colour insert's own colour set ("#rrggbb") or put back to white (None), in the table
+        the emulator's playfield window reads too. Returns the game's table."""
+        return IC.set_colour(game, name, colour)
+
+    @rpc
+    def blocks_insert_look(self, look):
+        """PAD-668: the Real LEDs / All RGB switch, shared with the emulator's playfield window."""
+        return IC.set_look(look)
 
     #: the remembered card paths (Settings' path history) a playfield picture may be read from
     PLAYFIELD_HISTORY = ("extract_input", "write_original", "partition_image", "compare_a", "compare_b")

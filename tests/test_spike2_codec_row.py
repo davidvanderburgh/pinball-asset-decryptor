@@ -148,12 +148,15 @@ def test_unbacked_pointers_are_rejected():
 
 
 @pytest.mark.parametrize("chan", [1, 2])
-def test_no_probe_reads_outside_the_two_rows(chan):
+def test_no_probe_reads_outside_the_probe_rows(chan):
+    """Rows S, S-1 and (PAD-674, Jurassic Park LE 1.13) S-3, nothing else."""
     words = {}
-    for d in (0, -1):
+    for d in Spike2Emu._PROBE_ROWS:
         for s in range(4):
-            words[_row(20 + d, s)] = 0x5000 + (d + 1) * 0x10 + s
+            words[_row(20 + d, s)] = 0x5000 + (d + 3) * 0x10 + s
     e = _emu(words)
     e._slot_candidates({"scale": 20, "chan": chan})
+    rows = {(addr - DISPATCH) // ROW - 20 for addr in e.mu.reads}
+    assert rows == set(Spike2Emu._PROBE_ROWS), rows
     for addr in e.mu.reads:
-        assert _row(19, 0) <= addr <= _row(20, 3)
+        assert _row(20 + min(Spike2Emu._PROBE_ROWS), 0) <= addr <= _row(20, 3)

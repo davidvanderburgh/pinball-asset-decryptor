@@ -174,6 +174,7 @@ def test_candidates_are_offered_in_dispatch_order():
             return (addr & 0xFFFF).to_bytes(4, "little")
 
     emu.mu = _Mu()
-    places = [pl for _fn, pl in emu._slot_candidates({"scale": 2, "chan": 1})]
+    places = [pl for _fn, pl in emu._slot_candidates({"scale": 4, "chan": 1})]
     assert places == [(0, 0), (0, 1), (0, 2), (0, 3),
-                      (-1, 0), (-1, 1), (-1, 2), (-1, 3)]
+                      (-1, 0), (-1, 1), (-1, 2), (-1, 3),
+                      (-3, 0), (-3, 1), (-3, 2), (-3, 3)]      # PAD-674: JP 1.13's row

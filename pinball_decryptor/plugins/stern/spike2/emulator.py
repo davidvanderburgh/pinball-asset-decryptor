@@ -38,6 +38,7 @@ from unicorn.arm_const import (UC_ARM_REG_C1_C0_2, UC_ARM_REG_FPEXC,
 
 from . import rbtree as RB
 from .elf import parse_elf
+from .netbridge import BoardFirmwareError  # noqa: F401  (the engine's)
 
 # r0..r12 as an explicit ordered list (don't assume the unicorn const ids are
 # contiguous).  Index 9 = r9, etc.
@@ -440,6 +441,22 @@ def audio_decode_missing(game_real_path):
     return locate.missing(raw=raw)
 
 
+def board_bus(game_real_path):
+    """The bus addresses of a board-keyed program (``BUS_XCHG``, ``BUS_SEED``,
+    ``BUS_SEEDS``; see :mod:`.netbridge`), or None for a program that carries
+    its own key.  The engine uses it to copy the board's program off the card
+    beside ``game_real``, where :class:`Spike2Emu` looks for it."""
+    try:
+        raw = open(game_real_path, "rb").read()
+        st = _static_analysis(raw, parse_elf(raw)[0])
+    except Exception:
+        return None
+    a = st.addrs or {}
+    if not a.get("BUS_XCHG"):
+        return None
+    return {k: a[k] for k in ("BUS_XCHG", "BUS_SEED", "BUS_SEEDS")}
+
+
 class _Static:
     """What :class:`Spike2Emu` reads off a game program before it boots it."""
     __slots__ = ("generic", "addrs", "audio_supported", "atomic_pcs", "plt_entry")
@@ -669,6 +686,13 @@ class Spike2Emu:
         # can bail early instead of burning the whole instruction cap.
         self._watchdog = None
         self._hooks()
+        # PAD-674: a board-keyed program gets the CPU board's answers from the
+        # board's own program, copied off the card beside game_real
+        self.board = None
+        if self.BUS:
+            from . import netbridge
+            self.board = netbridge.beside(game_real_path)
+            self.extra[self.BUS["xchg"]] = self._at_bus
 
         # decode scratch (set up lazily by setup_decode)
         self.BBSZ = 0
@@ -697,6 +721,9 @@ class Spike2Emu:
         self.MASTERDIR_MALLOC = MASTERDIR_MALLOC
         self.BANDLOOP = BANDLOOP; self.BANDOBJ = BANDOBJ
         self.CHAIN_STUBS = CHAIN_STUBS; self.LENGTH_XOR = LENGTH_XOR
+        # PAD-674: a board-keyed program's bus exchange, slot setter and the
+        # four slot seeds (see netbridge.py); None on a program with its own key
+        self.BUS = None
         self.OBJREG = 7
         self.FIND_BL = None
         # Where the record count is provably live (see locate._find_internal_pcs).
@@ -722,6 +749,9 @@ class Spike2Emu:
             self.COUNTREG = addrs.get("COUNTREG")
             self.MASTERDIR_CRYPTO = addrs.get("MASTERDIR_CRYPTO")
             self.BAND_RENDER = addrs.get("BAND_RENDER")
+            if addrs.get("BUS_XCHG"):
+                self.BUS = dict(xchg=addrs["BUS_XCHG"], seed=addrs["BUS_SEED"],
+                                seeds=tuple(addrs["BUS_SEEDS"]))
             self.OBJREG = addrs["OBJREG"]
             # generic derive skips the template lookup (find-skip) instead of
             # stubbing the chain helpers, and takes the length from the raw obj.
@@ -1347,8 +1377,35 @@ class Spike2Emu:
         finally:
             self._narrow_derive_end(state)
 
+    def _at_bus(self, eng):
+        """The game's bus exchange ``(frame, reply, len) -> ok`` answered by the
+        board (:mod:`.netbridge`): a ``0d 05 <op> <word>`` frame gets the
+        board's 4-byte answer written to the reply buffer; anything else is
+        refused, as the rig's hwshim refuses it."""
+        mu = self.mu
+        frame = bytes(mu.mem_read(mu.reg_read(UC_ARM_REG_R0), 8))
+        if frame[0] != 0x0d or frame[1] != 5:
+            self._ret(0)
+            return
+        rep = self.board.ask(frame[2], struct.unpack_from("<I", frame, 3)[0])
+        out = mu.reg_read(UC_ARM_REG_R1)
+        if rep is not None and out:
+            mu.mem_write(out, struct.pack("<I", rep))
+        self._ret(1)
+
+    def _seed_board(self):
+        """What the game does before its sound init on a board-keyed program:
+        set each of the board's four slots and seed its own reply mask for
+        the slot with the same constant, through the game's slot setter."""
+        for slot, seed in enumerate(self.BUS["seeds"]):
+            st = self.call(self.BUS["seed"], (slot << 4, seed), limit=2_000_000)
+            if st[0] != "ok":
+                raise RuntimeError("Spike 2 boot: the bus slot %d seed failed: %r" % (slot, st))
+
     def _boot(self):
         """:meth:`boot` itself, under whichever hooks are in place."""
+        if self.board is not None:
+            self._seed_board()
         if not self._build_keystream():
             raise RuntimeError("Spike 2 boot: keystream/rt build failed")
         if self._generic:
@@ -1945,7 +2002,14 @@ class Spike2Emu:
     # first clearly-audio candidate).  Row S-1 of scale 0 sits before DISPATCH,
     # which is still inside the firmware image and is where Venom really keeps
     # scale 0's stereo codec, so the row index is deliberately not clamped at 0.
-    _PROBE_ROWS = (0, -1)
+    #
+    # Row S-3 is Jurassic Park LE 1.13's (PAD-674, a board-keyed build): its
+    # audio entries sit three rows below the sound's own scale row, stereo on
+    # the even sub-slots and mono on the odd ones (mapped by decoding a
+    # stereo and a mono sound through every entry of the table; rows 0 and -1
+    # read as noise on both).  A later row is only reached when the earlier
+    # ones gave nothing, so every build that resolved before resolves the same.
+    _PROBE_ROWS = (0, -1, -3)
 
     # The WRONG codec for a sound (a mono codec fed a stereo body, or vice
     # versa) decodes to near-white noise at roughly a third of full scale --

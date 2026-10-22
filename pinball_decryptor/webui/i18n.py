@@ -110,6 +110,17 @@ class Catalog:
         got = self.exact.get(s)
         if got is not None:
             return got
+        # sentences the catalog knows each of, word for word, before any
+        # template: a template's holes can span the sentence breaks ("{}'s own
+        # {} from the {}" over "...the board's own program from the card, but
+        # ..."), and a text made of known sentences is the more exact match
+        if _depth == 0:
+            parts = _SENTENCE.split(s)
+            if len(parts) > 1:
+                known = [self.exact.get(normalize(p)) if _LETTER.search(p) else p
+                         for p in parts]
+                if all(k is not None for k in known):
+                    return " ".join(known)
         # the most specific template first, whichever bucket it came from
         cands = sorted(self.buckets.get("p" + s[:2], []) + self.buckets.get("s" + s[-2:], [])
                        + self.general, key=lambda e: -e[0])

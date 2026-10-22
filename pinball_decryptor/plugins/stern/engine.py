@@ -8496,10 +8496,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                 gr_path, img_path, params, _chain_edits, np, log,
                                 loops=_loop_idx,
                                 gains=_sm_gains(slot_gains, sound_mode_used),
-                                level_refs=dict(_mode_music_level_refs(
+                                level_refs=_chain_level_refs(_mode_music_level_refs(
                                     gr_path, img_path, params, desc_sites,
                                     _loop_idx, log, used=mode_own_used),
-                                    **_sm_level_refs(sound_mode_used)),
+                                    sound_mode_used),
                                 progress=_span(progress, 45, 75),
                                 cancel=cancel, body_cache=chain_cache)
                             audio_patches.update(_cp)
@@ -10543,6 +10543,15 @@ def _sm_level_refs(used):
     """``{host: slot}``: each music mode's file matches the loudness of the slot it plays for (of
     a song in parts, its longest part: PAD-511)."""
     return {int(u["host"]): int(u.get("level_ref", u["slot"])) for u in used or ()}
+
+
+def _chain_level_refs(mode_refs, used):
+    """The chain encode's ``{idx: ref_idx}``: the modes' music beds' (*mode_refs*) and each
+    music mode / in-turn / attract flipper file's (*used*, :func:`_sm_level_refs`), the
+    latter winning. PAD-679: both are keyed by an int sound idx, which ``dict(a, **b)``
+    refuses ("keywords must be strings"): a build with a mode's own sound beside flipper
+    sounds could not be prepared."""
+    return {**(mode_refs or {}), **_sm_level_refs(used)}
 
 
 def _sm_gains(gains, used):

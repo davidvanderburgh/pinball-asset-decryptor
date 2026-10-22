@@ -45,9 +45,9 @@ const TIP = {
   runWhen: "Put a Run the light show block for this show at the end of a rule, or in a new one.",
   noArt: "The game's own playfield picture could not be read from the card, so the inserts are drawn on an outline.",
   legacy: "A Run the light show block with steps of its own, made in the Blocks tab before this page: bring it in here as one of the mode's shows, to preview and change.",
-  real: "As the machine plays it: an RGB insert in the show's colour; a single-colour insert only gets brighter or dimmer and glows in its own colour (Insert colours; white = not set).",
-  rgb: "As if every insert were RGB: every insert in the show's colour. The machine cannot show that on its single-colour inserts.",
-  lens: "The game's single-colour inserts: the show only sets how bright they are, and each glows in its own colour. Give each its colour here; the emulator's playfield window uses the same colours.",
+  real: "As the machine plays it: an RGB insert in the show's color; a single-color insert only gets brighter or dimmer and glows in its own color (Insert colors; white = not set).",
+  rgb: "As if every insert were RGB: every insert in the show's color. The machine cannot show that on its single-color inserts.",
+  lens: "The game's single-color inserts: the show only sets how bright they are, and each glows in its own color. Give each its color here; the emulator's playfield window uses the same colors.",
   lensX: "Back to white (not set)",
 };
 const WORDS = { xy: "a point of its own" };
@@ -325,7 +325,7 @@ function InsertColours({ pf, lens, setColour, setMarked }) {
   const n = names.filter((x) => lens[x]).length;
   return html`<div class="ls-lens">
     <button type="button" class="ls-lens-hd" aria-expanded=${open} ...${tip(TIP.lens)} onClick=${() => setOpen(!open)}>
-      <span class=${cx("ls-caret", open && "open")}></span><span>Insert colours</span><span class="sp"></span>
+      <span class=${cx("ls-caret", open && "open")}></span><span>Insert colors</span><span class="sp"></span>
       <span class="small muted">${n} of ${names.length} set</span></button>
     ${open ? html`<div class="ls-lens-list" onMouseLeave=${() => setMarked(null)}>
       ${names.map((name) => html`<div key=${name} class=${cx("ls-lens-row", lens[name] && "set")} onMouseEnter=${() => setMarked(name)}>

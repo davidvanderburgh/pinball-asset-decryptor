@@ -353,14 +353,21 @@ def test_the_progress_panel_lists_every_modes_latest_note_newest_first(harness):
     words a note's big line and its leading number; a mode that starts loses its line and takes the panel down."""
     out = play(harness, "shot", "Powerline left", "secs", 2, "shot", "Maser target", "secs", 2,
                "shot", "Left ramp", "secs", 2, "shot", "Maser target", "secs", 2, "shot", "Maser target", "secs", 2)
-    rows = re.findall(r"WORDS PadMode_Progress_R(\d): (.*)", out)
-    assert ("1", "POWERLINES 1 OF 3") in rows
-    assert ("1", "MASER 1 OF 3") in rows and ("2", "POWERLINES 1 OF 3") in rows
-    assert ("1", "5 RAMPS TO BIOLLANTE") in rows and ("2", "MASER 1 OF 3") in rows and ("3", "POWERLINES 1 OF 3") in rows
-    assert ("1", "MASER 2 OF 3") in rows                                            # its line moves up with its note
+    def slot(seg, slug):                 # the slot the mode's badge was last shown in within a stretch of the run
+        hits = re.findall(r"PadMode_Progress_S(\d)_%s 1" % slug, seg)
+        return hits[-1] if hits else None
+    masers = [m.start() for m in re.finditer(r">> shot Maser target", out)]
+    a = out[out.index(">> shot Powerline left"):masers[0]]
+    b = out[masers[0]:out.index(">> shot Left ramp")]
+    c = out[out.index(">> shot Left ramp"):masers[1]]
+    d = out[masers[1]:masers[2]]
+    assert slot(a, "ghidorah_heads") == "1"
+    assert slot(b, "maser_barrage") == "1" and slot(b, "ghidorah_heads") == "2"
+    assert slot(c, "biollante") in ("1", "2") and int(slot(c, "ghidorah_heads")) >= 3   # others note on a ramp too
+    assert slot(d, "maser_barrage") == "1"                                           # its badge moves up with its note
+    assert re.search(r"WORDS PadMode_Progress_S\d_Num: 5$", c, re.M)   # a code mode's number leads its big line
     after = out[out.index("[MASER BARRAGE] START"):]
-    assert "SHOW PadMode_Progress 0" in after
-    assert not [r for _n, r in re.findall(r"WORDS PadMode_Progress_R(\d): (.*)", after) if "MASER" in r]
+    assert "SHOW PadMode_Progress 0" in after and re.search(r"PadMode_Progress_S\d_maser_barrage 0", after)
 
 
 def test_ghidorah_counts_the_powerlines_on_its_hud_until_it_starts(harness):

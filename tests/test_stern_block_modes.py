@@ -1341,16 +1341,18 @@ def test_a_progress_note_also_stands_on_the_progress_panel(tmp_path):
     while one of ours runs, and a game over clears it."""
     out = play(tmp_path, _noting_prog(), "shot", "Big loop", "secs", 4, "shot", "Big loop", "secs", 1,
                "battle", 1, "secs", 1, "battle", 0, "secs", 1, "shot", "Maser target", "secs", 1)
-    assert "progress panel found: 4 line(s)" in out
+    assert "progress panel found: 4 badge slot(s)" in out
+    assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in out[:out.index(">> shot Big loop")]     # its badges hidden at the find
     first = out[out.index(">> shot Big loop"):out.rindex(">> shot Big loop")]
-    assert "WORDS PadMode_Progress_R1: LOOPS  1" in first and "SHOW PadMode_Progress 1" in first
-    assert "WORDS PadMode_Progress_R1: LOOPS  2" in out[out.rindex(">> shot Big loop"):]   # its line, its newest note
+    assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 1" in first and "WORDS PadMode_Progress_S1_Num: 1" in first
+    assert "SHOW PadMode_Progress 1" in first
+    assert "WORDS PadMode_Progress_S1_Num: 2" in out[out.rindex(">> shot Big loop"):]   # its badge, its newest note
     battle = out[out.index(">> battle 1"):out.index(">> battle 0")]
     assert "SHOW PadMode_Progress 0" in battle and "progress panel down for now" in battle
     assert "SHOW PadMode_Progress 1" in out[out.index(">> battle 0"):out.index(">> shot Maser target")]
     started = out[out.index(">> shot Maser target"):]
     assert "START (a block)" in started and "SHOW PadMode_Progress 0" in started
-    assert "WORDS PadMode_Progress_R1:  " in started                                   # its line gone
+    assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in started and "WORDS PadMode_Progress_S1_Num:  " in started
 
 
 def test_every_note_under_a_display_of_the_games_shows_at_once(tmp_path):

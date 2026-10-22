@@ -1094,92 +1094,114 @@ static KIT_UNUSED void kit_hud_gauge(struct kit_hud *h, int level, const char *l
     if (label) kit_copy(h->want_glabel, sizeof h->want_glabel, label);
 }
 
-/* ---- PAD-680: the progress panel - every mode's latest progress note as a standing line -----------------------
+/* ---- PAD-680: the progress panel - every mode's latest progress note as a standing badge --------------------
  * David's Premium, 2026-10-22: a progress note flashes for 3 s, and the game's own screens, its timed modes (the
  * middle of the screen 39% of a game, 50-70 s at a time) and its battles had it hidden or held most of the
  * time - "i almost never saw on-screen progress towards modes". So every progress note ALSO goes on a panel of
- * KIT_PROG_ROWS lines at the right edge, built once into the HUD scene (mode_hud.build_huds: PadMode_Progress):
- * one line a mode, newest first, the words of its latest note ("RAMPS TO KING KONG  4"), for the player up,
- * until that mode starts or the game ends. Up through the game's screens and timed modes; down while one of
- * ours runs or has its TOTAL up, and during the game's own battles (their RIGHT spins sit where it is).
- * Shared by every mode of the pack: weak, as kit_hud_up. A card built before PAD-680 has no panel: nothing. */
-#define KIT_PROG_ROWS 4
+ * KIT_PROG_SLOTS badges at the right edge, built once into the HUD scene (mode_hud.build_huds: PadMode_Progress):
+ * each slot holds every mode's badge (the one its timer wears - its label on the panel, its icon on the disc),
+ * hidden; the kit shows the badge of the mode whose note is newest in slot 1, the next in slot 2, and writes the
+ * slot's number: the shots the mode still needs, the number its note's sub line starts with ("4  -  SHOOT THE
+ * LEFT RAMP" -> 4; a code mode's "5 RAMPS TO BIOLLANTE" -> 5; a note with none, READY, shows 0), for the player up, until that mode starts or the game
+ * ends. Up through the game's screens and timed modes; down while one of ours runs or has its TOTAL up, and
+ * during the game's own battles (their RIGHT spins sit where it is). Shared by every mode of the pack: weak, as
+ * kit_hud_up. A card built before PAD-680 has no panel: nothing. */
+#define KIT_PROG_SLOTS 4
 struct kit_prog_row {
     char slug[32];                         /* the mode's folder: the key; "" = a free row */
-    char words[KIT_HUD_WORDS];
+    char num[8];                           /* the shots still needed, as its note said */
     unsigned player;
     unsigned long at;                      /* pm_ms() of its latest note: the order */
 };
+struct kit_prog_slot {
+    void *num, *badge;                     /* the slot's number text; the badge shown in it (0 = none) */
+    char slug[32], written[8];
+};
 struct kit_prog {
-    struct kit_prog_row row[KIT_PROG_ROWS];
-    void *group, *text[KIT_PROG_ROWS];
-    char written[KIT_PROG_ROWS][KIT_HUD_WORDS];
+    struct kit_prog_row row[KIT_PROG_SLOTS];
+    struct kit_prog_slot slot[KIT_PROG_SLOTS];
+    void *group;
     int found, up;                         /* up: what the glass was last told (-1 = nothing yet) */
     unsigned tries;
 };
 __attribute__((weak, visibility("hidden"))) struct kit_prog kit_prog;
 
-/* the mode's line: its note's big line, then the number its sub line starts with ("4  -  SHOOT THE LEFT RAMP" ->
- * "RAMPS TO KING KONG  4"); a note with no number is its big line alone ("MELTDOWN IS READY") */
 static KIT_UNUSED void kit_prog_set(const char *slug, const char *big, const char *sub)
 {
-    char words[KIT_HUD_WORDS];
-    unsigned n = 0, i, k = KIT_PROG_ROWS, p = pm_player();
+    char num[8];
+    unsigned n = 0, i, k = KIT_PROG_SLOTS, p = pm_player();
     if (!slug || !big || !big[0] || p < 1 || p > 4) return;
-    for (i = 0; big[i] && n < sizeof words - 1; i++) words[n++] = big[i];
-    if (sub && sub[0] >= '0' && sub[0] <= '9' && n + 3 < sizeof words - 1) {
-        words[n++] = ' ';
-        words[n++] = ' ';
-        for (i = 0; sub[i] && sub[i] != ' ' && n < sizeof words - 1; i++) words[n++] = sub[i];
-    }
-    words[n] = 0;
-    for (i = 0; i < KIT_PROG_ROWS; i++)        /* its own row, else a free one, else the oldest */
+    for (i = 0; sub && sub[i] && ((sub[i] >= '0' && sub[i] <= '9') || sub[i] == ',') && n < sizeof num - 1; i++)
+        if (sub[i] != ',') num[n++] = sub[i];
+    for (i = 0; !n && big[i] >= '0' && big[i] <= '9' && n < sizeof num - 1; i++)   /* a code mode's "5 RAMPS TO ..." */
+        num[n++] = big[i];
+    if (!n) num[n++] = '0';
+    num[n] = 0;
+    for (i = 0; i < KIT_PROG_SLOTS; i++)       /* its own row, else a free one, else the oldest */
         if (kit_prog.row[i].slug[0] && kit_prog.row[i].player == p && kit_same(kit_prog.row[i].slug, slug)) k = i;
-    if (k == KIT_PROG_ROWS)
-        for (i = 0; i < KIT_PROG_ROWS; i++)
+    if (k == KIT_PROG_SLOTS)
+        for (i = 0; i < KIT_PROG_SLOTS; i++)
             if (!kit_prog.row[i].slug[0]) { k = i; break; }
-    if (k == KIT_PROG_ROWS) {
+    if (k == KIT_PROG_SLOTS) {
         k = 0;
-        for (i = 1; i < KIT_PROG_ROWS; i++)
+        for (i = 1; i < KIT_PROG_SLOTS; i++)
             if ((long)(kit_prog.row[i].at - kit_prog.row[k].at) < 0) k = i;
     }
     kit_copy(kit_prog.row[k].slug, sizeof kit_prog.row[k].slug, slug);
-    kit_copy(kit_prog.row[k].words, sizeof kit_prog.row[k].words, words);
+    kit_copy(kit_prog.row[k].num, sizeof kit_prog.row[k].num, num);
     kit_prog.row[k].player = p;
     kit_prog.row[k].at = pm_ms() ? pm_ms() : 1;
 }
 
-static KIT_UNUSED void kit_prog_clear(const char *slug)        /* the mode started (or 0: a game ended): its line goes */
+static KIT_UNUSED void kit_prog_clear(const char *slug)        /* the mode started (or 0: a game ended): its badge goes */
 {
     unsigned i;
-    for (i = 0; i < KIT_PROG_ROWS; i++)
+    for (i = 0; i < KIT_PROG_SLOTS; i++)
         if (kit_prog.row[i].slug[0] && (!slug || kit_same(kit_prog.row[i].slug, slug))) kit_prog.row[i].slug[0] = 0;
 }
 
-/* every tick, from every mode of the pack (the same answer from each): find the panel, keep its lines the player
- * up's newest first, and show it when nothing of ours and no battle of the game's has the glass */
-static KIT_UNUSED void kit_prog_tick(void)
+static KIT_UNUSED void *kit_prog_badge(unsigned k, const char *slug)
 {
+    char path[160];
+    pm_snprintf(path, sizeof path, "PadMode_Progress.PadMode_Progress_S%u.PadMode_Progress_S%u_%s", k + 1, k + 1, slug);
+    return pm_node("hud", path);
+}
+
+/* every tick, from every mode of the pack (the same answer from each; `mine` is the caller's folder, whose badges
+ * it hides once when the panel is found - a built badge is visible until a mode hides it): find the panel, keep
+ * its slots the player up's newest first, and show it when nothing of ours and no battle of the game's has the
+ * glass */
+static KIT_UNUSED void kit_prog_tick(const char *mine)
+{
+    static int hid_mine;
     unsigned i, j, n = 0, p = pm_player();
-    unsigned order[KIT_PROG_ROWS];
+    unsigned order[KIT_PROG_SLOTS];
     int up;
     if (!pm_can(PM_CAN_SCREENS)) return;
     if (!kit_prog.found) {
-        char path[64];
+        char path[96];
         if ((kit_prog.tries++ % KIT_POLL) != 0) return;
         kit_prog.group = pm_node("hud", "PadMode_Progress");
         if (!kit_prog.group) return;
-        for (i = 0; i < KIT_PROG_ROWS; i++) {
-            pm_snprintf(path, sizeof path, "PadMode_Progress.PadMode_Progress_R%u", i + 1);
-            kit_prog.text[i] = pm_text("hud", path);
-            kit_prog.written[i][0] = 0;
+        for (i = 0; i < KIT_PROG_SLOTS; i++) {
+            pm_snprintf(path, sizeof path, "PadMode_Progress.PadMode_Progress_S%u.PadMode_Progress_S%u_Num", i + 1, i + 1);
+            kit_prog.slot[i].num = pm_text("hud", path);
+            kit_prog.slot[i].badge = 0;
+            kit_prog.slot[i].slug[0] = kit_prog.slot[i].written[0] = 0;
         }
         kit_prog.found = 1;
         kit_prog.up = -1;
-        pm_log("progress panel found: %d line(s) at the right edge", KIT_PROG_ROWS);
+        pm_log("progress panel found: %d badge slot(s) at the right edge", KIT_PROG_SLOTS);
+    }
+    if (!hid_mine && mine) {
+        for (i = 0; i < KIT_PROG_SLOTS; i++) {
+            void *b = kit_prog_badge(i, mine);
+            if (b) pm_show(b, 0);
+        }
+        hid_mine = 1;
     }
     if (!pm_in_game()) kit_prog_clear(0);
-    for (i = 0; i < KIT_PROG_ROWS; i++) {
+    for (i = 0; i < KIT_PROG_SLOTS; i++) {
         if (!kit_prog.row[i].slug[0] || kit_prog.row[i].player != p) continue;
         for (j = n; j > 0 && (long)(kit_prog.row[order[j - 1]].at - kit_prog.row[i].at) < 0; j--) order[j] = order[j - 1];
         order[j] = i;
@@ -1193,9 +1215,17 @@ static KIT_UNUSED void kit_prog_tick(void)
         if (kit_prog.up >= 0) pm_log("progress panel %s", up ? "up" : (n ? "down for now" : "empty"));
         kit_prog.up = up;
     }
-    for (i = 0; i < KIT_PROG_ROWS; i++)
-        kit_hud_text(kit_prog.text[i], kit_prog.written[i], sizeof kit_prog.written[i],
-                     i < n ? kit_prog.row[order[i]].words : " ");
+    for (i = 0; i < KIT_PROG_SLOTS; i++) {
+        struct kit_prog_slot *s = &kit_prog.slot[i];
+        const char *slug = i < n ? kit_prog.row[order[i]].slug : "";
+        if (!kit_same(s->slug, slug)) {         /* another mode's badge in this slot (or none) */
+            if (s->badge) pm_show(s->badge, 0);
+            s->badge = slug[0] ? kit_prog_badge(i, slug) : 0;
+            if (s->badge) pm_show(s->badge, 1);
+            kit_copy(s->slug, sizeof s->slug, slug);
+        }
+        kit_hud_text(s->num, s->written, sizeof s->written, i < n ? kit_prog.row[order[i]].num : " ");
+    }
 }
 
 /* a big line and a smaller one under it, for `ms` (a jackpot, a head severed) */
@@ -1342,8 +1372,8 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     const char *title, *line, *award, *awardsub;
     kit_hud_find(h);
     kit_hud_recheck(h);
-    kit_prog_tick();                                   /* PAD-680: the pack's progress panel */
-    if (h->up && !h->noting && !h->metering) kit_prog_clear(h->slug);   /* the mode is running: its line goes */
+    kit_prog_tick(h->slug);                            /* PAD-680: the pack's progress panel */
+    if (h->up && !h->noting && !h->metering) kit_prog_clear(h->slug);   /* the mode is running: its badge goes */
     if (kit_gives_way(h->up && !h->metering, &h->begun)) {   /* a meter waits its turn by itself */
         pm_log("hud %s: another mode began - its %s gives way", h->slug, h->noting ? "note" : "ending");
         kit_hud_show(h, 0);

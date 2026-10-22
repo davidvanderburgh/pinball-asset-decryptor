@@ -2449,7 +2449,13 @@ static void ck_idle_tick(void);           /* PAD-530: the game's main-play video
  * 3 s, under the satellite. So while a FOREGROUND effect of the game has the screen (the manager's effect now, `data
  * display_effects`, is one whose table record lacks the background flag 1 - Bond Women's 007 SCORING, effect 226, has
  * it, as the in-game display 29 does) the game's loop stays; once that effect is over, the mode's clip comes back at
- * once (the game asks for its main-play video then too). A port without `data display_effects` keeps the one pass. */
+ * once (the game asks for its main-play video then too). A port without `data display_effects` keeps the one pass.
+ * PAD-639 round 2 (luvthatapex on v1.220.1: "skill shots ... are covering the film clips"): a clip the game plays ONCE
+ * can have a display over it too. A skill shot award (effects 392-394, priority 193) plays its hat toss on this surface
+ * and then holds "CLASSIFIED SKILL SHOT" and its hats over the clip's last frame until the surface is idle (3.4 s in
+ * the emulator). The mode's clip went back the moment the hat toss ended; with the surface playing again the effect
+ * never ended, and its picture sat over the mode's video for the rest of the mode. So the wait is for any clip of the
+ * game's while a foreground effect has the screen, and the backdrop loop (bd2_tick) waits the same way. */
 #define CK_END_MS 500                     /* this close to its end, a clip counts as over */
 #define CK_LOOP_MS 3000                   /* a loop of the game's is shown this long at most, then ours comes back */
 static struct {
@@ -2603,18 +2609,21 @@ static void ck_tick(void)
     }
     surf = clip2_surface();
     if (!surf) return;
-    if (ck.loop && !ck.back) {            /* a loop of the game's: one pass of it, at most CK_LOOP_MS */
+    if (!ck.back) {                       /* PAD-639: a display of the game's over the TV: its clip stays till it ends */
         unsigned fx = disp_foreground_effect();
-        if (fx) {                         /* PAD-639: the backdrop of a display of the game's over the TV: it stays */
-            if (!ck.fx) say("clip: the game's display effect %u is over its loop \"%.60s\" - \"%s\" waits for its end",
+        if (fx) {
+            if (!ck.fx) say("clip: the game's display effect %u is over its clip \"%.60s\" - \"%s\" waits for its end",
                             fx, ck.game, ck.name);
             ck.fx = fx;
             return;
         }
         if (ck.fx) {
             say("clip: the game's display effect %u is over - \"%s\" comes back", ck.fx, ck.name);
-            ck.back = 1;
+            ck.fx = 0;
+            if (ck.loop) ck.back = 1;     /* (a clip it plays once is still waited out) */
         }
+    }
+    if (ck.loop && !ck.back) {            /* a loop of the game's: one pass of it, at most CK_LOOP_MS */
         if (ck.loop_len <= 0) ck.loop_len = ck_ms("surface_duration", surf);
         if (pm_ms() - ck.loop_ms >= (unsigned long)(ck.loop_len > 0 && ck.loop_len < CK_LOOP_MS ? ck.loop_len : CK_LOOP_MS))
             ck.back = 1;
@@ -3308,6 +3317,7 @@ static void bd2_tick(void)
     if (bd.pending) { bd2_play(surf); return; }
     if (pm_ms() - bd.since < 500) return;  /* just played: the surface may not say "playing" yet */
     if (((int (*)(void *))(unsigned long)fn("surface_state"))(surf) == (int)pm_port_value("surface_playing", 2)) return;
+    if (!ck_last_ours && disp_foreground_effect()) return;   /* PAD-639: a display of the game's holds its clip's end */
     bd2_play(surf);                       /* its end, the one-shot's or the game's clip over: the loop (again) */
 }
 

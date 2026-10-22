@@ -604,9 +604,11 @@ class EmulateTab(TabService):
             return
 
         def run():
-            from ...core.backup_image import reason
+            # not_a_card: a backup, or a file off the card's boot partition
+            # (D:\stern-spike2.dtb, PAD-659) - no card image at all
+            from ...core.backup_image import not_a_card
             try:
-                why = reason(path)
+                why = not_a_card(path)
             except Exception:                            # noqa: BLE001
                 why = ""
             if why:

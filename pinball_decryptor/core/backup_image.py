@@ -84,3 +84,49 @@ def reason(path, kind=None):
             "put it in a reader and pick From SD card on Select card, or Save "
             "card as image… there to keep a .img copy."
             % (name, kind))
+
+
+#: What a whole-card image is called: the app's own Save card as image, Win32
+#: Disk Imager and Stern's own downloads all use one of these.
+CARD_EXTS = (".raw", ".img", ".bin")
+
+#: The files on a Spike 2 card's boot partition (the one Windows gives a
+#: drive letter), by their first bytes: a device tree, the kernel.
+_BOOT_FILE_MAGIC = (b"\xd0\x0d\xfe\xed",)
+_ZIMAGE_MAGIC = b"\x18\x28\x6f\x01"            # at 0x24 in an ARM zImage
+
+_USE_A_CARD = ("Pick a card image instead: Save card as image… on Select card "
+               "makes one from the card in the reader.")
+
+
+def not_a_card(path):
+    """:func:`reason`, or why *path* is no card image at all (PAD-659), or "".
+
+    For the Emulate tab, which runs whole-card images only.  Two more cases:
+
+    * one of the files on the card's own boot partition - the partition
+      Windows shows as a drive, so ``D:\\stern-spike2.dtb`` is what a user
+      browsing to "the card" finds (Level_up did);
+    * any other file with no partition table that is not even NAMED like a
+      card image.  A ``.raw``/``.img``/``.bin`` without one is left to the
+      run, which says so in its own words: a copy still being written can be
+      all zeros at its start.
+    """
+    why = reason(path)
+    if why or not path or is_device_path(path):
+        return why
+    try:
+        with open(path, "rb") as f:
+            head = f.read(512)
+    except OSError:
+        return ""
+    name = os.path.basename(path) or "This file"
+    if (head.startswith(_BOOT_FILE_MAGIC)
+            or head[0x24:0x28] == _ZIMAGE_MAGIC):
+        return ("%s is one of the files on the card's boot partition, not a "
+                "copy of the whole card. %s" % (name, _USE_A_CARD))
+    if (os.path.splitext(path)[1].lower() not in CARD_EXTS
+            and not (len(head) == 512 and head[510:512] == b"\x55\xaa")):
+        return ("%s is not a card image: it has no partition table, so it is "
+                "not a copy of a whole card. %s" % (name, _USE_A_CARD))
+    return ""

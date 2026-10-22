@@ -788,88 +788,223 @@ def missing(game_real_path=None, raw=None):
     return _locate(raw)[1]
 
 
-def _asks_bus_master(fw, fn, span=0x100):
-    """True if *fn* builds a ``0d 05`` node-bus frame on its stack: the
-    request that has the CPU board's bus master compute a 4-byte answer
-    (``mov rX,#0xd ; strb rX,[sp,#n]`` and ``mov rY,#5 ; strb rY,[sp,#n+1]``,
-    JP 1.13's 0x46474c).  PAD-603 met it in Venom LE 0.95."""
-    regs = {}; stores = {}
+# --------------------------------------------------------------------------
+# board-keyed builds (PAD-674): the sound key comes from the CPU board
+# --------------------------------------------------------------------------
+def _fn_ins(fw, fn, span=0x100):
+    """*fn*'s instructions up to the next ``push {..,lr}`` or *span* bytes."""
     t = fw.secs[".text"]
     hi = min(fn + span, t["addr"] + (t["size"] & ~3))
     if not t["addr"] <= fn < hi:
-        return False
-    for va in range(fn + 4, hi, 4):                 # up to the next push {..,lr}
+        return []
+    for va in range(fn + 4, hi, 4):
         w = _u32(fw.raw, t["off"] + (va - t["addr"]))
         if (w & 0xFFFF0000) == 0xE92D0000 and (w & 0x4000):
             hi = va
             break
-    ins = list(_disasm(fw, fn, hi))
-    for x in ins:
+    return list(_disasm(fw, fn, hi))
+
+
+def _frame_sender(fw, fn, span=0x100):
+    """If *fn* builds a ``0d 05`` node-bus frame on its stack -- the request
+    that has the CPU board's bus master compute a 4-byte answer (``mov
+    rX,#0xd ; strb rX,[sp,#n]`` and ``mov rY,#5 ; strb rY,[sp,#n+1]``, JP
+    1.13's 0x46474c; PAD-603 met the frame in Venom LE 0.95) -- the target
+    of the ``bl`` that sends it: the bus exchange ``(frame, reply, len) ->
+    ok``.  None otherwise."""
+    regs = {}; stores = {}
+    built = False
+    for x in _fn_ins(fw, fn, span):
         ops = [o.strip() for o in x.op_str.split(",")]
         if x.mnemonic == "mov" and len(ops) == 2 and ops[1].startswith("#"):
             try:
                 regs[ops[0]] = int(ops[1][1:], 0)
             except ValueError:
                 regs.pop(ops[0], None)
-        elif x.mnemonic == "strb" and len(ops) == 3 and ops[1] == "[sp" \
-                and ops[2].startswith("#") and ops[0] in regs:
-            stores[int(ops[2][1:].rstrip("]"), 0)] = regs[ops[0]]
+        elif x.mnemonic == "strb" and ops[0] in regs and ops[1].startswith("[sp"):
+            if len(ops) == 2 and ops[1] == "[sp]":
+                off = 0
+            elif len(ops) == 3 and ops[1] == "[sp" and ops[2].startswith("#"):
+                off = int(ops[2][1:].rstrip("]"), 0)
+            else:
+                off = None
+            if off is not None:
+                stores[off] = regs[ops[0]]
+                built = any(v == 0xd and stores.get(o + 1) == 5 for o, v in stores.items())
+        elif x.mnemonic == "bl" and built:
+            return int(x.op_str.lstrip("#"), 0)
         elif ops and ops[0] in regs and x.mnemonic not in ("strb", "str", "cmp", "tst"):
             regs.pop(ops[0], None)
-    return any(v == 0xd and stores.get(o + 1) == 5 for o, v in stores.items())
+    return None
 
 
-def _board_keyed(fw):
-    """True if this program builds its sound key from the CPU board's
-    answers (PAD-674): the boot that first calls the master-directory decoder
-    calls, before that, a key builder that asks the bus master (:func:`_asks_bus_master`)
-    instead of seeding from constants.  Every released build in the library
-    seeds from constants; early ones (Jurassic Park 1.13, Venom LE 0.95)
-    ask the board, and since every build's sound bank is keyed to its own
-    program, nothing on the card can stand in for the board's answers."""
-    md = _find_masterdir_decode(fw)
-    if md is None:
-        return False
+def _masks_slot(fw, fn):
+    """True if *fn* takes its frame's op from ``r0 & 0x30``: the slot setter
+    (JP 1.13's 0x4646cc), which also seeds the game's own reply mask."""
+    return any(x.mnemonic == "and" and x.op_str.endswith("#0x30")
+               for x in _fn_ins(fw, fn))
+
+
+_ARG_REGS = {"r0": 0, "r1": 1, "r2": 2, "r3": 3, "ip": 12, "lr": 14}
+
+
+def _init_seeds(fw, site):
+    """The four slot seeds the bus init at *site* (a ``bl``) is called with:
+    its 3rd to 6th arguments ``(r2, r3, [sp], [sp+4])``, constants the caller
+    builds with movw/movt just before the call.  None if any is not a
+    constant there."""
+    start = _func_start(fw, site) or site - 0x80
+    ins = list(_disasm(fw, max(start, site - 0x80), site))
+    consts = {}
+    stack = {}
+    for x in ins:
+        mm = _decode_movw_movt(fw.w_text(x.address))
+        if mm and mm[0] == "movw":
+            consts[mm[1]] = mm[2]
+        elif mm and mm[0] == "movt" and mm[1] in consts:
+            consts[mm[1]] = (consts[mm[1]] & 0xffff) | (mm[2] << 16)
+        elif x.mnemonic == "str":
+            ops = [o.strip() for o in x.op_str.split(",")]
+            if len(ops) == 2 and ops[1] == "[sp]":
+                stack[0] = _ARG_REGS.get(ops[0])
+            elif len(ops) == 3 and ops[1] == "[sp" and ops[2] == "#4]":
+                stack[4] = _ARG_REGS.get(ops[0])
+    regs = [2, 3, stack.get(0), stack.get(4)]
+    if any(r is None or r not in consts for r in regs):
+        return None
+    return tuple(consts[r] for r in regs)
+
+
+def _bucket_off(fw, md, bss, default=0xad8):
+    """Where the master-directory decoder keeps the band-template map's
+    bucket count, as an offset from the sound object *bss*: the ``ldr r1,
+    [rX, #off]`` right after rX is built as *bss* (0xad8 on JP LE 1.16, 0xa88
+    on 1.13).  The emulator writes a nonzero count at REG_BASE + 0xad8, so
+    REG_BASE is set from this."""
+    ins = list(_disasm(fw, md, _func_end(fw, md, maxspan=0x2400)))
+    pend = {}
+    armed = None
+    for x in ins:
+        mm = _decode_movw_movt(fw.w_text(x.address))
+        if mm and mm[0] == "movw":
+            pend[mm[1]] = (mm[2], x.address)
+        elif mm and mm[0] == "movt" and mm[1] in pend:
+            if ((mm[2] << 16) | pend[mm[1]][0]) == bss:
+                armed = (mm[1], x.address)
+        elif armed and x.mnemonic == "ldr" and x.address - armed[1] <= 12:
+            ops = [o.strip() for o in x.op_str.split(",")]
+            if (len(ops) == 3 and ops[0] == "r1" and _reg_index(ops[1].lstrip("[")) == armed[0]
+                    and ops[2].startswith("#")):
+                return int(ops[2][1:].rstrip("]"), 0)
+    return default
+
+
+def _bus_parts(fw, md):
+    """What a board-keyed program (see :mod:`.netbridge`) needs besides the
+    codec addresses, or None for a program that seeds from constants:
+
+    * ``BOOT_LO``/``BOOT_HI``: the sound init that calls the master-directory
+      decoder *md*, up to that call; before it, it calls a key builder that
+      asks the bus (:func:`_frame_sender`).  ``VF2_VA`` is the .data table the
+      init hands the key builder, ``BSS`` its sound object.
+    * ``BUS_XCHG``: the bus exchange the frame builders call.
+    * ``BUS_SEED``: the slot setter (:func:`_masks_slot`); ``BUS_SEEDS``: the
+      four seeds its init is called with (:func:`_init_seeds`), slot order.
+      Both None when the program asks the bus but these aren't found.
+    """
     t = fw.secs[".text"]
-    for site, tgt in _bl_sites(fw, t["addr"], t["addr"] + (t["size"] & ~3)):
+    text = (t["addr"], t["addr"] + (t["size"] & ~3))
+    sites = _bl_sites(fw, *text)
+    boot = ask_fn = xchg = md_site = None
+    for site, tgt in sites:
         if tgt != md:
             continue
-        boot = _func_start(fw, site)
-        if boot is None:
+        start = _func_start(fw, site)
+        if start is None:
             continue
-        for _s, fn in _bl_sites(fw, boot, site):
+        for _s, fn in _bl_sites(fw, start, site):
             if fn == md:
                 break
-            if _asks_bus_master(fw, fn):
-                return True
-            for _s2, fn2 in _bl_sites(fw, fn, _func_end(fw, fn)):
-                if _asks_bus_master(fw, fn2):
-                    return True
-    return False
+            for c in [fn] + [f2 for _s2, f2 in _bl_sites(fw, fn, _func_end(fw, fn))]:
+                x = _frame_sender(fw, c)
+                if x is not None:
+                    boot, ask_fn, xchg, md_site = start, c, x, site
+                    break
+            if boot is not None:
+                break
+        if boot is not None:
+            break
+    if boot is None:
+        return None
+    out = dict(BOOT_LO=boot, BOOT_HI=md_site - 4, MASTERDIR_DECODE=md,
+               BUS_XCHG=xchg, BUS_ASK=ask_fn, BUS_SEED=None, BUS_SEEDS=None,
+               VF2_VA=None, BSS=None)
+    for _at, v in _func_const_loads(fw, boot, span=md_site - boot):
+        s = _sec_of(fw, v)
+        if s == ".data" and out["VF2_VA"] is None:
+            out["VF2_VA"] = v
+        elif s == ".bss" and out["BSS"] is None:
+            out["BSS"] = v
+    callers = sorted({_func_start(fw, s) for s, tg in sites if tg == xchg} - {None})
+    for fn in callers:
+        if fn != ask_fn and _frame_sender(fw, fn) == xchg and _masks_slot(fw, fn):
+            out["BUS_SEED"] = fn
+            break
+    if out["BUS_SEED"] is None:
+        return out
+    inits = sorted({_func_start(fw, s) for s, tg in sites if tg == out["BUS_SEED"]} - {None})
+    for init in inits:
+        n = sum(1 for _s, tg in _bl_sites(fw, init, _func_end(fw, init)) if tg == out["BUS_SEED"])
+        if n < 4:
+            continue
+        for s, tg in sites:
+            if tg == init:
+                seeds = _init_seeds(fw, s)
+                if seeds:
+                    out["BUS_SEEDS"] = seeds
+                    return out
+    return out
 
 
 def _locate(raw):
     """``(addresses or None, [what is missing])`` for :func:`locate_all` and
-    :func:`missing`; ``["BOARD_KEY"]`` when the program's sound key comes
-    from the CPU board (:func:`_board_keyed`), which no locator fix can
-    change."""
+    :func:`missing`.  A program that doesn't locate the usual way and asks
+    the CPU board for its sound key (:func:`_bus_parts`) is located with its
+    sound init, bus exchange and seeds; one whose bus parts can't all be
+    found is ``["BOARD_KEY"]``."""
     res, gone = _locate_parts(raw)
-    if gone and not gone[0].startswith("ELF"):
-        try:
-            if _board_keyed(_FwView(raw)):
-                return None, ["BOARD_KEY"]
-        except Exception:
-            pass
-    return res, gone
+    if not gone or gone[0].startswith("ELF"):
+        return res, gone
+    try:
+        fw = _FwView(raw)
+        md = _find_masterdir_decode(fw)
+        bus = _bus_parts(fw, md) if md is not None else None
+    except Exception:
+        return res, gone
+    if bus is None:
+        return res, gone
+    if not bus["BUS_SEEDS"] or bus["VF2_VA"] is None or bus["BSS"] is None:
+        return None, ["BOARD_KEY"]
+    res2, gone2 = _locate_parts(
+        raw, boot=dict(BOOT_LO=bus["BOOT_LO"], VF2_VA=bus["VF2_VA"], REG_BASE=bus["BSS"]),
+        md_bh=(md, bus["BOOT_HI"]))
+    if res2 is None:
+        return None, gone2
+    res2["REG_BASE"] = bus["BSS"] + _bucket_off(fw, md, bus["BSS"]) - 0xad8
+    for k in ("BUS_XCHG", "BUS_ASK", "BUS_SEED", "BUS_SEEDS"):
+        res2[k] = bus[k]
+    return res2, []
 
 
-def _locate_parts(raw):
+def _locate_parts(raw, boot=None, md_bh=None):
+    """The codec addresses; *boot* and *md_bh* stand in for the boot finder
+    and the boot's master-directory call on a board-keyed program."""
     step = "ELF"
     try:
         fw = _FwView(raw)
         idx = _loader_index(fw)
         step = "BOOT_LO"
-        boot = _find_boot(fw, idx) or {}
+        boot = dict(boot) if boot else (_find_boot(fw, idx) or {})
         step = "CAT0_REGISTER"
         cat0 = _find_cat0(fw, idx)
         step = "DISPATCH"
@@ -880,7 +1015,7 @@ def _locate_parts(raw):
         if early:
             return None, early
         step = "MASTERDIR_DECODE"
-        md, bh = _boot_md_hi(fw, boot["BOOT_LO"])
+        md, bh = md_bh if md_bh else _boot_md_hi(fw, boot["BOOT_LO"])
         if md is None or bh is None:
             return None, [k for k, v in (("MASTERDIR_DECODE", md),
                                          ("BOOT_HI", bh)) if v is None]

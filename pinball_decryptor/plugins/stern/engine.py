@@ -391,15 +391,15 @@ def _sounds_unread_why(missing, job="extract"):
     for the developer rather than guessing at a codec.
 
     ``["BOARD_KEY"]`` (PAD-674) is an early build whose sound key comes from
-    the machine's CPU board (:func:`.spike2.locate._board_keyed`): the card
-    can't stand in for the board, so this says so instead of asking for the
-    program."""
+    the machine's CPU board (:mod:`.spike2.netbridge`) and whose bus parts
+    the locator couldn't all find, so the app can't run the board for it;
+    this says so instead of asking for the program."""
     if list(missing) == ["BOARD_KEY"]:
         return ("%s: it's an early version of the game code, which gets the "
                 "key to its sounds from the machine's CPU board instead of "
-                "carrying it. The key isn't anywhere on the card, so these "
-                "sounds can't be read off it. Later versions of the game "
-                "carry their key, and their sounds extract normally."
+                "carrying it. The app can stand in for the board by running "
+                "the board's own program from the card, but this card's board "
+                "program isn't one it knows yet."
                 % _SOUNDS_UNREAD[job])
     return ("%s: its game program isn't one this version of the app can find "
             "the sound decoder in (for the developer: %s not found). That "
@@ -453,7 +453,44 @@ def _extract_inputs(disk_f, partitions, work_dir, log, read_progress=None):
     reader.extract_file(fw_node, gr_path)
     log("Extracting image.bin (%.0f MB)..." % (img_node["size"] / 1e6), "info")
     reader.extract_file(img_node, img_path, progress=read_progress)
+    from .spike2.emulator import board_bus
+    if board_bus(gr_path):
+        _extract_board_firmware(disk_f, partitions, work_dir, log)
     return gr_path, img_path, reader, fw_node, img_node
+
+
+def _extract_board_firmware(disk_f, partitions, work_dir, log):
+    """PAD-674: the CPU board's program (``usr/local/spike/netbridge.hex``, a
+    symlink to the versioned file) copied beside ``game_real`` under its
+    versioned name, for a game program that keys its sounds through the board
+    (:mod:`.spike2.netbridge`).  Returns the copy's path, or None when the
+    card has none (the codec emulator then says so)."""
+    from .ext4 import S_IFLNK, S_IFMT, Ext4Reader
+    for off, size in partitions:
+        try:
+            r = Ext4Reader(disk_f, off, size)
+            ino = r.find_files(["netbridge.hex"]).get("netbridge.hex")
+            if ino is None:
+                continue
+            node = r.read_inode(ino)
+            name = "netbridge.hex"
+            if (node["mode"] & S_IFMT) == S_IFLNK:
+                target = r.read_symlink(node)
+                if isinstance(target, bytes):
+                    target = target.decode("utf-8", "surrogateescape")
+                name = os.path.basename(target)
+                t = r.find_files([name]).get(name)
+                if t is None:
+                    continue
+                node = r.read_inode(t)
+            dst = os.path.join(work_dir, name)
+            log("Extracting the CPU board's program (%s): this game code keys its "
+                "sounds through the board." % name, "info")
+            r.extract_file(node, dst)
+            return dst
+        except Exception:
+            continue
+    return None
 
 
 _EXTRACT_INPUTS = _extract_inputs
@@ -611,6 +648,10 @@ def _extract_inputs_kept(disk_f, partitions, work_dir, log, read_progress=None):
             log("Extracting image.bin (%.0f MB, this card's kept copy)..."
                 % (img_node["size"] / 1e6), "info")
             _copy_with_progress(k_img, img_path, read_progress)
+            import glob
+            import shutil
+            for nb in glob.glob(os.path.join(kept, "netbridge*.hex")):
+                shutil.copyfile(nb, os.path.join(work_dir, os.path.basename(nb)))
             try:
                 os.utime(kept, None)
             except OSError:
@@ -629,6 +670,9 @@ def _extract_inputs_kept(disk_f, partitions, work_dir, log, read_progress=None):
             os.makedirs(tmp)
             shutil.copyfile(gr_path, os.path.join(tmp, "game_real"))
             shutil.copyfile(img_path, os.path.join(tmp, "image.bin"))
+            import glob
+            for nb in glob.glob(os.path.join(work_dir, "netbridge*.hex")):
+                shutil.copyfile(nb, os.path.join(tmp, os.path.basename(nb)))
             shutil.rmtree(kept, ignore_errors=True)
             os.replace(tmp, kept)
             log("Kept a copy of this card's firmware and sound bank (%.0f MB) in %s "
@@ -2837,6 +2881,13 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 except Exception:
                     pass
                 emu = None
+            from .spike2.netbridge import BoardFirmwareError
+            if isinstance(e, BoardFirmwareError):
+                # PAD-674: a board-keyed program without a board program the
+                # app can run; the message says which, and nothing is saved
+                log(str(e), "warning")
+                phase(5)  # Checksums
+                return 0
             saved = _save_firmware_for_support(gr_path, output_dir, log)
             log("Audio couldn't be extracted from this card: the engine could "
                 "not map this firmware build's audio codec (%s). This is "

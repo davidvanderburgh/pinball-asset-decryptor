@@ -1,15 +1,12 @@
-"""PAD-674 proof shot: the Extract log for a game program whose sound key
-comes from the machine's CPU board.
+"""PAD-674 proof shot: the Extract log on a card whose game program keys its
+sounds through the machine's CPU board (Jurassic Park LE 1.13).
 
-    python scripts/shot_pad674.py <repo> <out.png> <game program> [card.raw]
+    python scripts/shot_pad674.py <repo> <out.png> <card.raw>
 
 <repo> is the source tree to serve (the ticket branch, or a ``git archive`` of
-main for the "before" shot).  Runs a real Audio-only extract of Jurassic Park
-LE 1.16 into a scratch project folder; the served app reads the card's game
-program as it always does, and then <game program> (the Jurassic Park 1.13
-program a user sent in; never committed) is put in its place before the app
-looks at it.  The card itself is only read.  Waits for the extract to finish,
-then shoots the tab with the log open.
+main for the "before" shot).  Runs a real Audio-only extract of the card into
+a scratch project folder and shoots the tab with the log open once it is
+done.  The card is only read.  The card itself (a user's) is never committed.
 """
 
 import json
@@ -22,38 +19,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
-CARD = r"D:\Pinball\images\Stern\spike2\jurassic_park_le-1_16_0.Release.8G.sdcard.raw"
-
+# The guard matters: the extract decodes in a multiprocessing pool, and each
+# spawned worker imports this file as its __main__ -- unguarded, every worker
+# started a second app server instead of decoding, and the extract sat at
+# "Decoding 3985 sounds across 8 processes..." for good.
 LAUNCHER = r'''
 import sys
 sys.path.insert(0, %r)
-from pinball_decryptor.plugins.stern import engine as E
-from pinball_decryptor.plugins.stern.spike2 import locate as L
-
-_real = E._extract_inputs
-
-
-def _changed(*a, **k):
-    out = _real(*a, **k)
-    with open(%r, "rb") as f:
-        raw = f.read()
-    with open(out[0], "wb") as f:
-        f.write(raw)
-    return out
-
-
-E._extract_inputs = _changed
-from pinball_decryptor.webui import host
-sys.argv = ["host"] + sys.argv[1:]
-sys.exit(host.main())
+if __name__ == "__main__":
+    from pinball_decryptor.webui import host
+    sys.argv = ["host"] + sys.argv[1:]
+    sys.exit(host.main())
 '''
 
 
 def main():
     repo = os.path.abspath(sys.argv[1])
     out = os.path.abspath(sys.argv[2])
-    program = os.path.abspath(sys.argv[3])
-    card = sys.argv[4] if len(sys.argv) > 4 else CARD
+    card = os.path.abspath(sys.argv[3])
     scratch = tempfile.mkdtemp(prefix="pad674-")
     project = os.path.join(scratch, "Jurassic Park 1.13")
     settings = os.path.join(scratch, "settings.json")
@@ -66,7 +49,7 @@ def main():
                            "images": False, "text": False}}}}}, f)
     launcher = os.path.join(scratch, "launch674.py")
     with open(launcher, "w", encoding="utf-8") as f:
-        f.write(LAUNCHER % (repo, program))
+        f.write(LAUNCHER % repo)
     import site
     proc, url = webui_shot.start_server(
         settings, scratch, app_cmd=[sys.executable, launcher],
@@ -83,13 +66,16 @@ def main():
         t0 = time.time()
         time.sleep(3)
         while webui_shot.state(url)["shell"].get("running"):
-            if time.time() - t0 > 1200:
+            if time.time() - t0 > 3600:
                 raise SystemExit("the extract never finished")
             time.sleep(2)
         time.sleep(2)
         print("extract took %.0fs" % (time.time() - t0), flush=True)
-        print("project holds:", sorted(os.listdir(project))
-              if os.path.isdir(project) else None, flush=True)
+        names = sorted(os.listdir(project)) if os.path.isdir(project) else None
+        print("project holds:", names, flush=True)
+        audio = os.path.join(project, "audio")
+        if os.path.isdir(audio):
+            print("sounds:", len([n for n in os.listdir(audio) if n.endswith(".wav")]), flush=True)
         if os.environ.get("PAD_PWLIB"):
             sys.path.insert(0, os.environ["PAD_PWLIB"])
         from playwright.sync_api import sync_playwright

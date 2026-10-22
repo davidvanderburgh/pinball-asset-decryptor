@@ -883,9 +883,6 @@ static void chg_mode_ended(int was_taker);
 static volatile int chg_end_owed;           /* PAD-663: the challenge's "end this ball now", owed to the game's next bus call */
 static volatile unsigned long chg_end_owed_ms;
 static void chg_end_ball_now(const char *from);
-static void chg_end_ball_check(void);
-static volatile int chg_end_tries;          /* PAD-663: asked again, after a ball end the game did not take */
-static volatile unsigned long chg_end_check_ms;
 
 int pm_begin(void)
 {
@@ -8785,7 +8782,6 @@ static void on_tick(unsigned *r)
     launch_tick();                            /* PAD-643: a mode's challenge ball launched for the player */
     chg_pages_tick();                         /* PAD-663: a champion page cut short gives its entry back */
     if (chg_end_owed && pm_ms() - chg_end_owed_ms > 1000) chg_end_ball_now("the tick");   /* PAD-663: no bus call came */
-    chg_end_ball_check();                     /* PAD-663: a ball end the game did not take is asked again */
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
@@ -9283,7 +9279,6 @@ static void chg_mode_ended(int ran)
     }
     say("challenge: its mode ended - the ball ends now, as the game's own challenges do (0x%08x)", f);
     chg_end_owed_ms = pm_ms();
-    chg_end_tries = 0;
     chg_end_owed = 1;                /* made from the game's next bus call (on_event_dispatch), else the tick's */
 }
 
@@ -9292,20 +9287,6 @@ static void chg_mode_ended(int ran)
  * crashed (null read at 0x6dd2c) as a mode's challenge ended. The game's own challenge endings call it from a process,
  * as a handler of a bus call; so is ours now, at the start of the next bus call (a game in play makes several a
  * second), and from the tick as before only when none comes within a second. */
-/* PAD-663: a ball end the game did not take (John Wick Pro 1.02, once in four rig runs: called from a bus call, the game
- * stayed in play and the challenge game never ended) is asked again three seconds on while the game is still in
- * play - twice more, the last time from the tick */
-static void chg_end_ball_check(void)
-{
-    if (!chg_end_check_ms || pm_ms() - chg_end_check_ms <= 3000) return;
-    chg_end_check_ms = 0;
-    if (pm_in_game() != 1 || chg_end_tries >= 2) return;
-    chg_end_tries++;
-    say("challenge: the ball did not end - asked again (%d)", chg_end_tries);
-    chg_end_owed_ms = chg_end_tries >= 2 ? pm_ms() - 1001 : pm_ms();
-    chg_end_owed = 1;
-}
-
 static void chg_end_ball_now(const char *from)
 {
     unsigned f = fn("challenge_end_ball");
@@ -9313,7 +9294,6 @@ static void chg_end_ball_now(const char *from)
     if (!f || !pm_in_game()) return;
     say("challenge: the ball ended from %s, %lu ms after the mode", from, pm_ms() - chg_end_owed_ms);
     ((int (*)(int, int))(unsigned long)f)(1, 1);
-    chg_end_check_ms = pm_ms();
 }
 
 int pm_challenge_slots(void)

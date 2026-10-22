@@ -608,6 +608,12 @@ int pm_sound_fade(unsigned request, unsigned ms)
     snd_drop(request);
     return was;
 }
+int pm_sound_duck(unsigned request, unsigned steps, unsigned ms)
+{
+    if (snd_find(request) < 0) return 0;
+    printf("%6lu DUCK %u %u %u\n", now_ms, request, steps, ms);
+    return 1;
+}
 int pm_sound_sid(unsigned request, unsigned sid)
 {
     printf("%6lu SID %u %u\n", now_ms, request, sid);

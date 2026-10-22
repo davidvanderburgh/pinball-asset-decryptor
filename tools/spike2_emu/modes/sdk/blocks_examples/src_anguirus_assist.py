@@ -424,12 +424,10 @@ DESK = [
       "Hud_AwardSub: 0  -  BITES HELD", "Hud_Title: 3 BITES TO GO"]),
     ("his clock runs out: a quarter of the pot", _CALL3 + _CHARGE + ["secs", 90],
      ["END (time ran out)", "Hud_Title: ANGUIRUS FALLS", "SCORE +750000", "lamps held 0"]),
-    # PAD-680: the seventh hit, in the battle, still counts; its note waits for the middle and shows as the battle
-    # ends; the eighth, after it, calls him
+    # PAD-680: the seventh hit, in the battle, still counts and its note shows at once; the eighth, after it, calls him
     ("a battle holds his start off: he counts through it",
      _SH * 6 + ["battle", 1, "secs", 1] + _SH + ["secs", 1, "battle", 0, "secs", 1] + _SH + ["secs", 3],
-     ["its note waits for the game's mode to give the middle back", "its note shows - the game's mode gave the middle back",
-      "Hud_AwardSub: 1  -  MORE TO CALL ANGUIRUS", "[ANGUIRUS] START"]),
+     [">> battle 1", "Hud_AwardSub: 1  -  MORE TO CALL ANGUIRUS", ">> battle 0", "[ANGUIRUS] START"]),
     ("a drain", _CALL3 + _JOIN + ["shot", "Shield target left", "secs", 1, "ball_end", "secs", 7,
                                              "shot", "Slingshot", "secs", 1],
      ["END (ball ended)", "own clip lost", "SCORE +250000", "lamps held 0"]),

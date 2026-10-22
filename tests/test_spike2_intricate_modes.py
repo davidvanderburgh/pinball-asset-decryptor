@@ -348,6 +348,21 @@ def test_ghidorah_waits_for_the_games_own_battle_and_runs_once_a_ball(harness):
     assert has(out, g, "not counted - it already ran twice this game")
 
 
+def test_the_progress_panel_lists_every_modes_latest_note_newest_first(harness):
+    """PAD-680: the pack's progress panel (PadMode_Progress) - a line a mode, the newest note's at the top, the
+    words a note's big line and its leading number; a mode that starts loses its line and takes the panel down."""
+    out = play(harness, "shot", "Powerline left", "secs", 2, "shot", "Maser target", "secs", 2,
+               "shot", "Left ramp", "secs", 2, "shot", "Maser target", "secs", 2, "shot", "Maser target", "secs", 2)
+    rows = re.findall(r"WORDS PadMode_Progress_R(\d): (.*)", out)
+    assert ("1", "POWERLINES 1 OF 3") in rows
+    assert ("1", "MASER 1 OF 3") in rows and ("2", "POWERLINES 1 OF 3") in rows
+    assert ("1", "5 RAMPS TO BIOLLANTE") in rows and ("2", "MASER 1 OF 3") in rows and ("3", "POWERLINES 1 OF 3") in rows
+    assert ("1", "MASER 2 OF 3") in rows                                            # its line moves up with its note
+    after = out[out.index("[MASER BARRAGE] START"):]
+    assert "SHOW PadMode_Progress 0" in after
+    assert not [r for _n, r in re.findall(r"WORDS PadMode_Progress_R(\d): (.*)", after) if "MASER" in r]
+
+
 def test_ghidorah_counts_the_powerlines_on_its_hud_until_it_starts(harness):
     out = play(harness, "shot", "Powerline left", "secs", 1, "shot", "Powerline right", "secs", 3)
     s = "ghidorah_heads"
@@ -643,15 +658,14 @@ def test_a_note_is_not_shown_while_the_games_mode_has_the_middle(harness):
     assert not [ms for ms, w in hud(out, "ghidorah_heads", "Award") if t0 <= ms < t1 and w == "POWERLINES 1 OF 3"]
 
 
-def test_a_note_up_when_the_games_mode_begins_waits_off_the_glass(harness):
-    """a note already up when one of the game's modes begins: its words are blanked (the HUD says why)"""
+def test_a_note_up_when_the_games_mode_begins_stays_on_the_glass(harness):
+    """PAD-680: a note already up when one of the game's modes begins stays up for its time (PAD-390 blanked it)"""
     out = play(harness, "shot", "Powerline left", "secs", 0.5, "battle", 1, "secs", 1)
     t = _at(out, ">> battle 1")
     assert [ms for ms, w in hud(out, "ghidorah_heads", "Award") if ms < t and w == "POWERLINES 1 OF 3"]
-    assert has(out, "KING GHIDORAH",
-               "hud ghidorah_heads: its note waits while the game's mode has the middle of the screen")
+    assert not has(out, "KING GHIDORAH", "its note waits")
     blank = [ms for ms, w in hud(out, "ghidorah_heads", "Award") if ms >= t and w.strip() == ""]
-    assert blank and blank[0] <= t + 100
+    assert not [b for b in blank if b < t + 900]                        # its 1.5 s run on through the battle
 
 
 def test_the_final_wars_note_waits_for_another_modes_total_to_go(harness):

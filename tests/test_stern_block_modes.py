@@ -1324,18 +1324,33 @@ def _noting_prog():
     return p
 
 
-def test_a_note_asked_for_in_the_games_battle_shows_when_it_ends(tmp_path):
-    """PAD-680 (David's card: no "3 more for KING KONG"): a note asked for while one of the game's battles has the middle
-    was dropped (PAD-390); the newest one now waits, and shows once the battle gives the middle back."""
-    out = play(tmp_path, _noting_prog(), "battle", 1, "secs", 0.5, "shot", "Big loop", "secs", 0.5,
+def test_a_note_asked_for_in_the_games_battle_shows_at_once(tmp_path):
+    """PAD-680 (David's card: no "3 more for KING KONG" - the game's own modes had the middle 39% of a game, and PAD-390
+    held every note through them): a note shows at once during the game's battles and modes too, as before PAD-390."""
+    out = play(tmp_path, _noting_prog(), "battle", 1, "secs", 0.5, "shot", "Big loop", "secs", 4,
                "shot", "Big loop", "secs", 1, "battle", 0, "secs", 1)
-    assert "its note waits for the game's mode to give the middle back" in out
-    after = out[out.index(">> battle 0"):]
-    assert "its note shows - the game's mode gave the middle back" in after
-    assert "2  -  TO GO" in after and "1  -  TO GO" not in out              # the newest of the two
-    out = play(tmp_path, _noting_prog(), "battle", 1, "secs", 0.5, "shot", "Big loop", "secs", 1,
-               "game_over", "secs", 0.2, "battle", 0, "secs", 1)
-    assert "its note shows" not in out                                     # a game over drops it
+    battle = out[out.index(">> battle 1"):out.index(">> battle 0")]
+    assert "Hud_AwardSub: 1  -  TO GO" in battle and "Hud_AwardSub: 2  -  TO GO" in battle
+    assert "its note waits" not in out and "SHOW PadMode_blk_Hud 1" in battle
+
+
+def test_a_progress_note_also_stands_on_the_progress_panel(tmp_path):
+    """PAD-680 (David's Premium: the game's timed modes held the middle 39% of a game and every note waited or
+    went): a mode's latest note stands on the pack's progress panel (PadMode_Progress, built into the HUD scene)
+    as one line, its number after it, until the mode starts; the panel is down during the game's battles and
+    while one of ours runs, and a game over clears it."""
+    out = play(tmp_path, _noting_prog(), "shot", "Big loop", "secs", 4, "shot", "Big loop", "secs", 1,
+               "battle", 1, "secs", 1, "battle", 0, "secs", 1, "shot", "Maser target", "secs", 1)
+    assert "progress panel found: 4 line(s)" in out
+    first = out[out.index(">> shot Big loop"):out.rindex(">> shot Big loop")]
+    assert "WORDS PadMode_Progress_R1: LOOPS  1" in first and "SHOW PadMode_Progress 1" in first
+    assert "WORDS PadMode_Progress_R1: LOOPS  2" in out[out.rindex(">> shot Big loop"):]   # its line, its newest note
+    battle = out[out.index(">> battle 1"):out.index(">> battle 0")]
+    assert "SHOW PadMode_Progress 0" in battle and "progress panel down for now" in battle
+    assert "SHOW PadMode_Progress 1" in out[out.index(">> battle 0"):out.index(">> shot Maser target")]
+    started = out[out.index(">> shot Maser target"):]
+    assert "START (a block)" in started and "SHOW PadMode_Progress 0" in started
+    assert "WORDS PadMode_Progress_R1:  " in started                                   # its line gone
 
 
 def test_every_note_under_a_display_of_the_games_shows_at_once(tmp_path):

@@ -726,11 +726,28 @@ def bar_gauge(p, ids, g, gauge, sec, textures):
     return gk
 
 
+#: PAD-680: the pack's progress panel - one line a mode, at the right edge under the stock rage meter (the right
+#: counter's column, where nothing of the game's sits outside its battles, when the kit takes it down)
+PROGRESS_GROUP = "PadMode_Progress"
+PROGRESS_ROWS = 4
+PROGRESS_X, PROGRESS_Y, PROGRESS_DY = 1000.0, 110.0, 34.0
+
+
+def progress_group(p, ids, fonts):
+    """The Sprite group ``PadMode_Progress`` (bytes): PROGRESS_ROWS blank lines (``_R1`` .. ``_R<n>``) the kit
+    writes a mode's latest progress note on, newest first (intricate_kit.h, kit_prog_tick)."""
+    prim = fonts["GameFont_Primary"][0]
+    kids = [_text_node(p, ids, "%s_R%d" % (PROGRESS_GROUP, k + 1), " ", prim, PROGRESS_X, PROGRESS_Y + PROGRESS_DY * k,
+                       (-2.0, -2.0, 348.0, 31.6)) for k in range(PROGRESS_ROWS)]
+    return _group_node(p, ids, PROGRESS_GROUP, kids)
+
+
 def build_huds(p, data, huds, font_scene):
     """(library entry, [group bytes], {slug: hud_names}) for ``huds`` = [(slug, spec)] in the profiled
     scene ``data`` (``p`` its profile, rebased when ``data`` has grown): the game font carried from
-    ``font_scene`` (the bytes of :data:`GAME_FONT_SCENE`) and one HUD group per mode. Called by
-    :func:`scene_write.add_screens`, which splices them in with the screens and clips in one pass."""
+    ``font_scene`` (the bytes of :data:`GAME_FONT_SCENE`), one HUD group per mode and (PAD-680) the pack's
+    progress panel. Called by :func:`scene_write.add_screens`, which splices them in with the screens and
+    clips in one pass."""
     if not p.scene_id.startswith("32e6ae28"):
         raise HudError("a mode's HUD goes in Godzilla's slide-outs scene 32e6ae28, not %s" % p.label)
     base = p.first_free_id + FONT_BASE_GAP
@@ -748,6 +765,8 @@ def build_huds(p, data, huds, font_scene):
             raise HudError("the HUD scene already has %s" % name)
         groups.append(hud_group(p, ids, slug, spec or {}, fonts, art, textures))
         names[slug] = hud_names(slug)
+    if huds and SW.string(PROGRESS_GROUP) not in data:
+        groups.append(progress_group(p, ids, fonts))
     # No byte search for the ids (a screen's seven are checked that way): two thousand FLAG|id words
     # meet the textures' random bytes. The profile's first_free_id is above every id the file uses,
     # and ours start FONT_BASE_GAP past it, clear of the screens' (7 each) and a graft's.

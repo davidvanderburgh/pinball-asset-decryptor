@@ -869,7 +869,7 @@ _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block
                         r"site challenge_end_ball|"   # PAD-630
                         r"site challenge_score(?:s|_entry|s_gate)|value challenge_scores_cat(?:_\d+)?|"   # PAD-640 (PAD-663: + the gate)
                         r"value challenge_scores_gate_(?:id|cat_at|entry_at)|data challenge_scores_(?:table|count)|"
-                        r"value challenge_record_(?:check_at|score_at|score_size)|"   # PAD-663: the records' layout
+                        r"value challenge_record_(?:check_at|score_at|score_size)|value challenge_page_title_max|"   # PAD-663: the records' layout
                         r"site challenge_page(?:_text|_yield)?|value challenge_page_(?:cat|title)|site challenge_pages_\d+|site challenge_list_page|"   # PAD-660
                         r"site ball_launch|value ball_launch_(?:wait_)?flag|site challenge_plain_\d+)\b")   # PAD-643
 

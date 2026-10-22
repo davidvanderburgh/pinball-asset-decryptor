@@ -9984,6 +9984,8 @@ static int chg_scores_count(void)
 
 /* a mode's page title: "<NAME> CHAMPION", the name alone where that would not fit the game's longest (27) or it says
  * CHAMPION itself (tests lift it verbatim) */
+static unsigned chg_title_max = 27;     /* PAD-663: the port's challenge_page_title_max (the 800x480 one-screen cabinets) */
+
 static void chg_champion_title(char *out, unsigned cap, const char *name)
 {
     static const char tail[] = " CHAMPION";
@@ -9991,7 +9993,7 @@ static void chg_champion_title(char *out, unsigned cap, const char *name)
     while (name[n]) n++;
     for (k = 0; k < n && k + 1 < cap; k++) out[k] = name[k];
     out[k] = 0;
-    if (n + t > 27 || n + t + 1 > cap) return;
+    if (n + t > chg_title_max || n + t + 1 > cap) return;
     if (n >= t - 1) {
         for (k = 0; k + 1 < t && name[n - (t - 1) + k] == tail[k + 1]; k++) ;
         if (k + 1 == t) return;
@@ -10104,6 +10106,8 @@ static void chg_pages_arm(void)
 {
     char key[32];
     int k, n = 0;
+    long tmax = pm_port_value("challenge_page_title_max", 27);
+    if (tmax >= 8 && tmax <= 40) chg_title_max = (unsigned)tmax;   /* the name alone past it, no " CHAMPION" */
     for (k = 0; k < CHG_PAGES_SITES; k++) {
         chg_pages_key(key, sizeof key, k);
         n += site(key) != 0;

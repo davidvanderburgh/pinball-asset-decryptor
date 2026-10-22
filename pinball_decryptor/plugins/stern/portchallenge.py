@@ -180,6 +180,8 @@ def find(elf):
     # build too, in HIGHEST SCORES' place, with the game's own records shut for that game
     named = sum(1 for l in lines if l.startswith("site  challenge_go_"))
     scores = scores_lines(e, named)
+    if scores:
+        scores += screen_lines(e)
     # PAD-643: a mode's challenge ball launched for the player, and the game's own ball-start work that skips a
     # challenge game run in a mode's
     return (flag_lines(e) + lines + balls_lines(e) + extra_ball_lines(e) + menu + end_ball + scores
@@ -1310,6 +1312,21 @@ def scores_lines(e, n_challenges):
             break
         pages = page_lines(e, base + 4 * ents[0], c)
     return out + (pages or list_page_lines(e, base + 4 * ents[0]))      # PAD-663: else HIGHEST SCORES' list page
+
+
+#: PAD-663: the one-screen cabinets' 800x480 panel (tools/spike2_emu/display2.py REPORTED_PANELS: reported from real
+#: machines, in no game program) - a mode's champion page title past ~20 characters runs off its edges (Star Wars
+#: Home Edition, Jurassic Park The Pin), so it drops " CHAMPION" there. The program names its own title.
+SMALL_SCREEN_TITLES = ("james_bond_60th_le", "star_wars_elg", "jurassic_park_the_pin")
+SMALL_SCREEN_TITLE_MAX = 18
+
+
+def screen_lines(e):
+    """`value challenge_page_title_max` on a build of an 800x480 one-screen cabinet (empty on every other)."""
+    if not any(b"\0" + t.encode() + b"\0" in e.d for t in SMALL_SCREEN_TITLES):
+        return []
+    return ["# PAD-663: an 800x480 one-screen cabinet: a mode's champion title past this many characters is its name alone",
+            "value challenge_page_title_max %d" % SMALL_SCREEN_TITLE_MAX]
 
 
 #: PAD-663: a champion record's layout, as HIGHEST SCORES' compare (category 1's +0x10) reads it:

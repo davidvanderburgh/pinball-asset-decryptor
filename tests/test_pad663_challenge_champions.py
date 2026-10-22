@@ -180,6 +180,7 @@ def test_the_docs_say_how():
 # ---- the attract mode's champion page ------------------------------------------------------
 PAGES_MAIN = r"""
 #include <stdio.h>
+static unsigned chg_title_max = 27;
 @FNS@
 int main(void)
 {
@@ -188,6 +189,10 @@ int main(void)
     chg_champion_title(t, sizeof t, "PAD CHALLENGE"); printf("[%s]\n", t);
     chg_champion_title(t, sizeof t, "COMBO CHAMPION"); printf("[%s]\n", t);
     chg_champion_title(t, sizeof t, "A VERY LONG MODE NAME HERE"); printf("[%s]\n", t);
+    chg_title_max = 18;                                 /* an 800x480 one-screen cabinet (Star Wars ELG, The Pin) */
+    chg_champion_title(t, sizeof t, "PAD CHALLENGE"); printf("[%s]\n", t);
+    chg_champion_title(t, sizeof t, "TAKEN"); printf("[%s]\n", t);
+    chg_title_max = 27;
     /* a category past the table's (Avengers shows its last scores under 55 of 38): never the cycle's */
     printf("%d", chg_pages_follow(55, 38, &first));
     /* the cycle's first page: category 2 (Iron Maiden's page starts there), then 3 .. - only 2 again follows */
@@ -209,7 +214,8 @@ def test_a_modes_page_is_titled_like_the_games_champions_and_follows_the_cycles_
         "static void chg_champion_title(char *out, unsigned cap, const char *name)",
         "static int chg_pages_follow(int cat, int count, int *first)"))
     out = R._host_run(tmp_path, PAGES_MAIN.replace("@FNS@", fns)).splitlines()
-    assert out == ["[PAD CHALLENGE CHAMPION]", "[COMBO CHAMPION]", "[A VERY LONG MODE NAME HERE]", "0101100"]
+    assert out == ["[PAD CHALLENGE CHAMPION]", "[COMBO CHAMPION]", "[A VERY LONG MODE NAME HERE]",
+                   "[PAD CHALLENGE]", "[TAKEN CHAMPION]", "0101100"]
 
 
 def test_the_page_repeat_follows_only_an_entrys_first_page_in_the_attract_mode():
@@ -357,3 +363,34 @@ def test_the_runtime_takes_the_layout_from_the_port_and_refuses_one_that_does_no
         assert 'pm_port_value("challenge_record_%s", %d)' % (v, dflt) in arm
     # every read of a record's score goes through the layout (the attract pages' and the end-of-game wrap's)
     assert "+ 72)" not in src[src.index("#define CHG_REC_SIZE 96"):]
+
+
+# ---- the one-screen cabinets' page title ----------------------------------------------------
+def test_the_small_screen_titles_are_the_reported_800x480_panels():
+    """A mode's champion title ran off the 800x480 panel of Star Wars Home Edition and The Pin ("PAD CHALLENGE
+    CHAMPION" cut at both ends, rig): the panels are the reported ones, the only place that size is known."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("display2", ROOT / "tools" / "spike2_emu" / "display2.py")
+    d2 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(d2)
+    small = {t for t, v in d2.REPORTED_PANELS.items() if v.get("screen") == (800, 480)}
+    assert set(PC.SMALL_SCREEN_TITLES) == small
+
+
+def test_a_build_names_its_small_screen_by_its_own_title():
+    class _E:
+        def __init__(self, d):
+            self.d = d
+    assert PC.screen_lines(_E(b"x\0star_wars_elg\0y"))[1:] == ["value challenge_page_title_max 18"]
+    assert PC.screen_lines(_E(b"x\0star_wars_le\0star_wars_elgx\0")) == []          # whole names only
+    key, rest = PC.screen_lines(_E(b"\0jurassic_park_the_pin\0"))[1].split(" ", 1)
+    assert portgen.generated(key, rest)
+
+
+def test_only_the_small_screen_ports_cut_the_title():
+    have = sorted(p.stem for p in PORTS.glob("*.port")
+                  if "challenge_page_title_max" in MP.read_port(str(p)).get("value", {}))
+    assert have == ["jurassic_park_the_pin-1.05", "star_wars_elg-1.10"]
+    src = RUNTIME.read_text(encoding="utf-8")
+    arm = _host()._lift(src, "static void chg_pages_arm(void)")
+    assert 'pm_port_value("challenge_page_title_max", 27)' in arm and "chg_title_max = (unsigned)tmax;" in arm

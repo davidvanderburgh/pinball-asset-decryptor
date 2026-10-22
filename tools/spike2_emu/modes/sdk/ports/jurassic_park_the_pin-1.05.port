@@ -590,3 +590,5 @@ value challenge_scores_cat   1
 # PAD-663: the champion page function(s) (each called per category; the attract mode's is the one it calls): a mode's challenge champion is shown on it after the lowest category the attract mode shows
 site  challenge_pages_0     0x000504a8 0xe92d4ff0 0xe1a0b001
 site  challenge_pages_1     0x00020a18 0xe92d4030 0xe3a01000
+# PAD-663: an 800x480 one-screen cabinet: a mode's champion title past this many characters is its name alone
+value challenge_page_title_max 18

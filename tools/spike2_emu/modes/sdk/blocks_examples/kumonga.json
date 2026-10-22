@@ -12,7 +12,7 @@
   }
  },
  "based_on": "",
- "about": "New (PAD-658). Loop the Big loop to wake her there (3 loops, 6, then 9); four stages, each one's shots named on the line (tear the web on the shield platform while she webs it again, cut the strands on every spinner, the sting hurry-up, burn her with Godzilla and Minilla); cash the pot out at the right scoop. Son of Godzilla (1967).",
+ "about": "New (PAD-658). Loop the Big loop to wake her there (6 loops, 12, then 18); four stages, each one's shots named on the line (tear the web on the shield platform while she webs it again, cut the strands on every spinner, the sting hurry-up, burn her with Godzilla and Minilla); cash the pot out at the right scoop. Son of Godzilla (1967).",
  "lost": [],
  "program": {
   "name": "KUMONGA",
@@ -638,7 +638,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 3
+           "v": 6
           },
           "b": {
            "k": "op",
@@ -705,7 +705,7 @@
               "op": "*",
               "a": {
                "k": "num",
-               "v": 3
+               "v": 6
               },
               "b": {
                "k": "op",

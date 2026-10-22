@@ -20,7 +20,7 @@
    }
   }
  },
- "about": "The C example SPACEGODZILLA rebuilt in blocks and taken deeper (PAD-658): Right ramps plant the crystals (one a crystal the first time, two the second, three the third), and three crystals start a 3-ball multiball in three stages: CRYSTAL TOWERS (the ramps and the Building, a super at the Big loop), M.O.G.U.E.R.A. (the shoulder crystals at the shields, every hit a spiral grenade raising the jackpots, the super twice its sum at the Godzilla target) and SPACE BEAST (his own music, the powerlines cut, FUKUOKA TOWER at the Building: three times the sum and every super before). Each super adds a ball. On a Pro the Maser target is the centre shoulder crystal.",
+ "about": "The C example SPACEGODZILLA rebuilt in blocks and taken deeper (PAD-658): Right ramps plant the crystals (two a crystal the first time, four the second, six the third), and three crystals start a 3-ball multiball in three stages: CRYSTAL TOWERS (the ramps and the Building, a super at the Big loop), M.O.G.U.E.R.A. (the shoulder crystals at the shields, every hit a spiral grenade raising the jackpots, the super twice its sum at the Godzilla target) and SPACE BEAST (his own music, the powerlines cut, FUKUOKA TOWER at the Building: three times the sum and every super before). Each super adds a ball. On a Pro the Maser target is the centre shoulder crystal.",
  "lost": [
   "No points while the mode is not running: the C pays 250,000 a crystal times its number (250,000, 500,000, 750,000) as it is planted; the blocks' Score only scores while the mode runs.",
   "The crystals are planted at the Right ramp, not locked at the Big loop after the powerlines light a lock (PAD-658: the powerlines are KING GHIDORAH's start, the Big loop KUMONGA's): no lock is lit, and only the full set (three crystals, waiting for the game's mode to end) chases purple at the Right ramp.",
@@ -928,7 +928,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 1
+           "v": 2
           },
           "b": {
            "k": "op",
@@ -1066,7 +1066,7 @@
             "op": "*",
             "a": {
              "k": "num",
-             "v": 1
+             "v": 2
             },
             "b": {
              "k": "op",

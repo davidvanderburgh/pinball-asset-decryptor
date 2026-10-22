@@ -7,7 +7,7 @@
   "godzilla_pro"
  ],
  "based_on": "",
- "about": "New (PAD-658). Shots up the Mecha lane wake him at its top (3, 6, then 9); four stages (smoke rings, the tail stomp and his first ray, beating the bully Gabara, a father-and-son two-ball multiball), the line naming the shots each one wants; cash the pot out at the right scoop. Son of Godzilla (1967) and All Monsters Attack (1969).",
+ "about": "New (PAD-658). Shots up the Mecha lane wake him at its top (6, 12, then 18); four stages (smoke rings, the tail stomp and his first ray, beating the bully Gabara, a father-and-son two-ball multiball), the line naming the shots each one wants; cash the pot out at the right scoop. Son of Godzilla (1967) and All Monsters Attack (1969).",
  "lost": [],
  "program": {
   "name": "MINILLA",
@@ -32,6 +32,10 @@
    },
    {
     "name": "grown",
+    "reset": "game"
+   },
+   {
+    "name": "plunge",
     "reset": "game"
    },
    {
@@ -597,6 +601,23 @@
   "scripts": [
    {
     "hat": {
+     "kind": "event",
+     "event": "ball_start",
+     "when": "any"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "plunge",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
      "kind": "shot",
      "shot": "Mecha exit top",
      "when": "idle"
@@ -605,95 +626,65 @@
      {
       "op": "if",
       "cond": {
-       "k": "and",
+       "k": "cmp",
+       "op": "=",
        "a": {
-        "k": "cmp",
-        "op": "<",
-        "a": {
-         "k": "balls"
-        },
-        "b": {
-         "k": "num",
-         "v": 2
-        }
+        "k": "var",
+        "name": "plunge"
        },
        "b": {
-        "k": "cmp",
-        "op": "=",
-        "a": {
-         "k": "var",
-         "name": "ready"
-        },
-        "b": {
-         "k": "num",
-         "v": 0
-        }
+        "k": "num",
+        "v": 1
        }
       },
       "then": [
        {
-        "op": "change",
-        "var": "calls",
-        "by": {
+        "op": "set",
+        "var": "plunge",
+        "value": {
          "k": "num",
-         "v": 1
+         "v": 0
         }
-       },
+       }
+      ],
+      "else": [
        {
         "op": "if",
         "cond": {
-         "k": "cmp",
-         "op": ">=",
+         "k": "and",
          "a": {
-          "k": "var",
-          "name": "calls"
-         },
-         "b": {
-          "k": "op",
-          "op": "*",
+          "k": "cmp",
+          "op": "<",
           "a": {
-           "k": "num",
-           "v": 3
+           "k": "balls"
           },
           "b": {
-           "k": "op",
-           "op": "+",
-           "a": {
-            "k": "var",
-            "name": "grown"
-           },
-           "b": {
-            "k": "num",
-            "v": 1
-           }
+           "k": "num",
+           "v": 2
+          }
+         },
+         "b": {
+          "k": "cmp",
+          "op": "=",
+          "a": {
+           "k": "var",
+           "name": "ready"
+          },
+          "b": {
+           "k": "num",
+           "v": 0
           }
          }
         },
         "then": [
          {
-          "op": "set",
-          "var": "ready",
-          "value": {
+          "op": "change",
+          "var": "calls",
+          "by": {
            "k": "num",
            "v": 1
           }
          },
-         {
-          "op": "light_mode",
-          "shot": "Mecha exit top",
-          "color": "#40ff60",
-          "pattern": "chase",
-          "insert": "MECHA LANE"
-         },
-         {
-          "op": "hud_award",
-          "text": "MINILLA IS LIT",
-          "value": null,
-          "sub": "SHOOT THE MECHA LANE TO THE TOP",
-          "seconds": 3
-         }
-        ],
-        "else": [
          {
           "op": "if",
           "cond": {
@@ -704,54 +695,18 @@
             "name": "calls"
            },
            "b": {
-            "k": "var",
-            "name": "note at"
-           }
-          },
-          "then": [
-           {
-            "op": "hud_award",
-            "text": "TOP OF THE MECHA",
-            "value": {
-             "k": "op",
-             "op": "-",
-             "a": {
-              "k": "op",
-              "op": "*",
-              "a": {
-               "k": "num",
-               "v": 3
-              },
-              "b": {
-               "k": "op",
-               "op": "+",
-               "a": {
-                "k": "var",
-                "name": "grown"
-               },
-               "b": {
-                "k": "num",
-                "v": 1
-               }
-              }
-             },
-             "b": {
-              "k": "var",
-              "name": "calls"
-             }
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 6
             },
-            "sub": "MORE TO WAKE MINILLA",
-            "seconds": 3
-           },
-           {
-            "op": "set",
-            "var": "note at",
-            "value": {
+            "b": {
              "k": "op",
              "op": "+",
              "a": {
               "k": "var",
-              "name": "calls"
+              "name": "grown"
              },
              "b": {
               "k": "num",
@@ -759,13 +714,122 @@
              }
             }
            }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "ready",
+            "value": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "light_mode",
+            "shot": "Mecha exit top",
+            "color": "#40ff60",
+            "pattern": "chase",
+            "insert": "MECHA LANE"
+           },
+           {
+            "op": "hud_award",
+            "text": "MINILLA IS LIT",
+            "value": null,
+            "sub": "SHOOT THE MECHA LANE TO THE TOP",
+            "seconds": 3
+           }
           ],
-          "else": null
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": ">=",
+             "a": {
+              "k": "var",
+              "name": "calls"
+             },
+             "b": {
+              "k": "var",
+              "name": "note at"
+             }
+            },
+            "then": [
+             {
+              "op": "hud_award",
+              "text": "TOP OF THE MECHA",
+              "value": {
+               "k": "op",
+               "op": "-",
+               "a": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 6
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "grown"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "calls"
+               }
+              },
+              "sub": "MORE TO WAKE MINILLA",
+              "seconds": 3
+             },
+             {
+              "op": "set",
+              "var": "note at",
+              "value": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "calls"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             }
+            ],
+            "else": null
+           }
+          ]
          }
-        ]
+        ],
+        "else": null
        }
-      ],
-      "else": null
+      ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "any_shot",
+     "when": "any"
+    },
+    "do": [
+     {
+      "op": "set",
+      "var": "plunge",
+      "value": {
+       "k": "num",
+       "v": 0
+      }
      }
     ]
    },

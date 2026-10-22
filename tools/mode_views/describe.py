@@ -156,6 +156,8 @@ def hat(h):
         return "When %s is made%s" % (h.get("shot") or "?", when)
     if k == "any_shot":
         return "When any shot is made%s" % when
+    if k == "switch":
+        return "When any playfield switch is hit%s" % when
     if k == "every":
         return "Every %s s while it runs" % h.get("seconds")
     if k == "seconds_left":

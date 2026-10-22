@@ -217,6 +217,7 @@ void pm_end(void)
     if (!running) mechs_let_go("the mode ended");
 }
 int pm_running(void) { return running && running == current; }
+int pm_other_running(void) { return running && running != current; }   /* PAD-675 */
 unsigned pm_callout_id(const char *role)
 {
     return !strcmp(role, "countdown") ? 1287 : !strcmp(role, "ten_seconds") ? 1291 : !strcmp(role, "time_up") ? 1295 : 0;
@@ -1030,6 +1031,10 @@ int main(int argc, char **argv)
             dispatch(0x1);
             dispatch(mask);
             ticks_for_ms(50);
+        } else if (!strcmp(c, "switches")) {          /* PAD-675: n playfield switch hits (0x1 each), 20 ms apart */
+            long n = atol(argv[++k]);
+            printf("%6lu >> switches %ld\n", now_ms, n);
+            while (n-- > 0) { dispatch(0x1); ticks_for_ms(20); }
         } else if (!strcmp(c, "raw")) {
             dispatch(strtoull(argv[++k], 0, 0));
         } else if (!strcmp(c, "event")) {

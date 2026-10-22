@@ -7,7 +7,7 @@
   "godzilla_pro"
  ],
  "based_on": "destoroyah.c",
- "about": "Reworked (PAD-658): DESTOROYAH's waves as Kamacuras, now harder to start (50 Top spinner spins, then its own right scoop) and with its mantis shots far more obvious (chasing in the ring's colour, the HUD's title and line naming where they are, 10 s at each shot, a swoop clip and light show as each lands), then the biggest mantis at the Building for 40 s. Son of Godzilla (1967) and Godzilla: Final Wars (2004).",
+ "about": "Reworked (PAD-658): DESTOROYAH's waves as Kamacuras, now harder to start (80 Top spinner spins, then its own right scoop) and with its mantis shots far more obvious (chasing in the ring's colour, the HUD's title and line naming where they are, 10 s at each shot, a swoop clip and light show as each lands), then the biggest mantis at the Building for 40 s. Son of Godzilla (1967) and Godzilla: Final Wars (2004).",
  "lost": [],
  "program": {
   "name": "KAMACURAS",
@@ -571,7 +571,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 50
+           "v": 80
           },
           "b": {
            "k": "op",
@@ -638,7 +638,7 @@
               "op": "*",
               "a": {
                "k": "num",
-               "v": 50
+               "v": 80
               },
               "b": {
                "k": "op",

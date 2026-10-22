@@ -45,7 +45,7 @@ SLUG, NAME = "kamacuras", "KAMACURAS"
 GREEN, YELLOW, RED, WHITE, DARK = "#20ff40", "#d0ff00", "#ff1010", "#ffffff", "#002008"
 SPIN, START_SHOT = "Top spinner", pack.CASH_SHOT
 START_INSERTS = ",".join(pack.CASH_INSERTS)
-NEED = pack.need(50, "fought")  # 50 spins, then 100, then 150
+NEED = pack.need(80, "fought")  # 80 spins, then 160, then 240 (PAD-675: was 50)
 #: the rings, far to close: the shots a mantis lands on (the HUD says them in pack.SHOT_WORDS)
 RINGS = (
     ("Powerline left", "Powerline center", "Powerline right"),
@@ -283,7 +283,7 @@ PROGRAM = {
 
 EXAMPLE = {
     "name": NAME, "slug": SLUG, "order": 4, "titles": ["godzilla_le", "godzilla_pro"], "based_on": "destoroyah.c",
-    "about": ("Reworked (PAD-658): DESTOROYAH's waves as Kamacuras, now harder to start (50 Top spinner spins, then "
+    "about": ("Reworked (PAD-658): DESTOROYAH's waves as Kamacuras, now harder to start (80 Top spinner spins, then "
               "its own right scoop) and with its mantis shots far more obvious (chasing in the ring's colour, the "
               "HUD's title and line naming where they are, 10 s at each shot, a swoop clip and light show as each "
               "lands), then the biggest mantis at the Building for 40 s. Son of Godzilla (1967) and Godzilla: Final "
@@ -304,9 +304,11 @@ _SWEEP = ["shot", "Powerline left", "ms", 300, "shot", "Powerline center", "ms",
           "ms", 300]
 _WAVES = _START + _SWEEP * 40 + ["secs", 4]
 DESK = [
-    ("fifty spins then the scoop", _spins(30) + ["shot", "Right scoop", "secs", 1] + _spins(20) +
-     ["shot", "Right scoop", "secs", 3],
-     ["Hud_Title: SPIN THE TOP SPINNER", "Hud_Line: 49  -  SPINS TO KAMACURAS", "Hud_Line: 29  -  SPINS TO KAMACURAS",
+    # PAD-675: on a full card the 50th spin starts DESTOROYAH (the same spinner; that spin may not count here) and
+    # nothing counts while he runs: stop him, then 32 more (80 and one to spare)
+    ("eighty spins then the scoop", _spins(50) + ["secs", 2, "trigger", "destoroyah.stop", "secs", 4] +
+     ["shot", "Right scoop", "secs", 1] + _spins(32) + ["shot", "Right scoop", "secs", 3],
+     ["Hud_Title: SPIN THE TOP SPINNER", "Hud_Line: 79  -  SPINS TO KAMACURAS", "Hud_Line: 29  -  SPINS TO KAMACURAS",
       "Hud_Title: KAMACURAS IS LIT", "[KAMACURAS] START (its lit shot)", "LAMP SELECT CITY 20ff40 chase"]),
     ("a mantis is obvious, a near kill pays 2x", _START + ["secs", 12, "shot", "Left ramp", "secs", 1],
      ["Hud_Title: SHOOT THE LEFT POWERLINE", "Hud_Line: THE CLOSER IT IS, THE MORE IT PAYS",

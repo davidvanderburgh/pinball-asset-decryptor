@@ -10,7 +10,7 @@
  "title_alt": {
   "godzilla_pro": {}
  },
- "about": "The C example OXYGEN DESTROYER rebuilt in blocks and taken deeper (PAD-658): 25 Left spinner spins start it (50 the second time, 75 the third). Four stages of 40 s each: the C's hurry-up (20,000,000 draining over the stage, the Left ramp collects it into the pot, the Godzilla target holds it off), the dive (hit the moving sonar ping 3 times: the line names its target), the descent (spin the Left spinner 20 times to lower the device), and Serizawa's choice (the Right ramp: the pot twice over and 25M). Cash the pot out at the right scoop after any stage; the clock or a drain pays a quarter of it.",
+ "about": "The C example OXYGEN DESTROYER rebuilt in blocks and taken deeper (PAD-658): 40 Left spinner spins start it (80 the second time, 120 the third). Four stages of 40 s each: the C's hurry-up (20,000,000 draining over the stage, the Left ramp collects it into the pot, the Godzilla target holds it off), the dive (hit the moving sonar ping 3 times: the line names its target), the descent (spin the Left spinner 20 times to lower the device), and Serizawa's choice (the Right ramp: the pot twice over and 25M). Cash the pot out at the right scoop after any stage; the clock or a drain pays a quarter of it.",
  "lost": [
   "Every stage has 40 s on every start (PAD-658's round 3: time to do it): the C's hurry-up drained 20,000,000 over 25 s (800,000 a second), and round 2 gave the dive and the descent 30 s and Serizawa's choice 15 s; the sonar ping moved every 3 s (2.3 s, 1.6 s on later starts), now every 10 s.",
   "A new stage is named by the HUD's title (STAGE 2: THE DIVE ...), not by a note over the one the stage before ended on (COLLECTED, GODZILLA FOUND, ON THE SEA BED): that note stays its 3 s.",
@@ -826,7 +826,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 25
+           "v": 40
           },
           "b": {
            "k": "op",
@@ -884,7 +884,7 @@
               "op": "*",
               "a": {
                "k": "num",
-               "v": 25
+               "v": 40
               },
               "b": {
                "k": "op",
@@ -919,7 +919,7 @@
                  "op": "*",
                  "a": {
                   "k": "num",
-                  "v": 25
+                  "v": 40
                  },
                  "b": {
                   "k": "op",
@@ -983,7 +983,7 @@
                      "op": "*",
                      "a": {
                       "k": "num",
-                      "v": 25
+                      "v": 40
                      },
                      "b": {
                       "k": "op",
@@ -1023,7 +1023,7 @@
                      "op": "*",
                      "a": {
                       "k": "num",
-                      "v": 25
+                      "v": 40
                      },
                      "b": {
                       "k": "op",
@@ -1057,7 +1057,7 @@
                        "op": "*",
                        "a": {
                         "k": "num",
-                        "v": 25
+                        "v": 40
                        },
                        "b": {
                         "k": "op",
@@ -1106,7 +1106,7 @@
                     "op": "*",
                     "a": {
                      "k": "num",
-                     "v": 25
+                     "v": 40
                     },
                     "b": {
                      "k": "op",

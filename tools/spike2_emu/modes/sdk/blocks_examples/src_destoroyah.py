@@ -6,7 +6,7 @@ Lyman Sheats' Horde in The Walking Dead (walkers advance on you, a kill is worth
 pays a super worth the wave), his stages with their own shots (EHoH's House), a pot to cash out or put at risk
 (Metallica's Crank It Up) and supers worth your history.
 
-- LIGHT IT: 30 spins of the Top spinner (none in a multiball, PAD-669) start it at once; 60 the second time, 90 the third. A note
+- LIGHT IT: 50 spins of the Top spinner (none in a multiball, PAD-669) start it at once; 100 the second time, 150 the third. A note
   every 5 spins says how many are left (SPIN THE TOP SPINNER / 20 - SPINS TO DESTOROYAH).
 - STAGE 1, THE SWARM: aggregates come over the top at the POWERLINES (far, x1) and advance every 10 s to the RAMPS,
   the BUILDING or the BIG LOOP (near, x2), to the MASER, the SHIELDS or the CAPTIVE BALL (close, x4), and then into
@@ -83,7 +83,7 @@ SKY_XY = dict(x=150, y=240)
 TIMERS = ("step a", "step b", "spawn", "kill", "boss", "lamps", "next", "fly")
 NEED = add(FIRST_NEED - 1, var("wave"))                       # this wave's kills
 LEFT = sub(NEED, var("kills"))
-SPINS_NEED = pack.need(30, "plays")                           # 30 spins, then 60, then 90
+SPINS_NEED = pack.need(50, "plays")                           # 50 spins, then 100, then 150 (PAD-675: was 30)
 SPIN_NOTE_EVERY = 5                                           # the qualifying note: every 5 spins
 SUPER = add(var("kill total"), mul(var("pot"), 2))
 CLOSER = "THE CLOSER IT IS, THE MORE IT PAYS"
@@ -425,8 +425,8 @@ EXAMPLE = {
     #: the Pro (two fixed shields): the close ring's middle shield is the Mecha lane (Mecha exit bottom), as close
     #: to the flippers, so the close ring keeps five shots
     "title_alt": {"godzilla_pro": {"shots": dict(_PRO_SHOT), "words": _PRO_WORDS}},
-    "about": ("The C example DESTOROYAH rebuilt in blocks and taken deeper (PAD-658): 30 Top spinner spins start it "
-              "(60 the second time, 90 the third). Three stages: THE SWARM (three waves of aggregates advance from "
+    "about": ("The C example DESTOROYAH rebuilt in blocks and taken deeper (PAD-658): 50 Top spinner spins start it "
+              "(100 the second time, 150 the third). Three stages: THE SWARM (three waves of aggregates advance from "
               "the Powerlines to the ramps and loop to the close targets, 10 s at each, a kill paying more the closer "
               "it is, each cleared wave into the pot; the title and line name where they are), his FLYING FORM (four "
               "hits in 40 s where he flies over the ramps and the Big loop, moving on every 10 s), then his PERFECT "
@@ -490,14 +490,15 @@ _WAVES = _START + ["secs", 4] + _SWEEP + ["secs", 1]
 #: the flying form starts over the Left ramp and moves on with every hit
 _FLY = _shots(["Left ramp", "Big loop", "Right ramp"] * 2, 300) + ["secs", 2]
 DESK = [
-    # PAD-669: a multiball's spins count for nothing: back to one ball, 5 more say 25 to go, no start
-    ("no spin counts in a multiball", ["balls", 2] + ["shot", SPIN, "ms", 60] * 30 + ["balls", 1, "secs", 1] + ["shot", SPIN, "ms", 60] * 5 + ["secs", 2],
-     ["Hud_Line: 25  -  SPINS TO DESTOROYAH", "![DESTOROYAH] START (a block)"]),
-    ("thirty spins the first time, sixty the second",
-     ["shot", SPIN, "ms", 60] * 30 + ["secs", 4, "trigger", "destoroyah.stop", "secs", 4] +
-     ["shot", SPIN, "ms", 60] * 55 + ["secs", 4] + ["shot", SPIN, "ms", 60] * 5 + ["secs", 4],
-     ["Hud_Title: SPIN THE TOP SPINNER", "Hud_Line: 25  -  SPINS TO DESTOROYAH", "[DESTOROYAH] START (a block)",
-      "Hud_Line: 55  -  SPINS TO DESTOROYAH", "Hud_Line: 5  -  SPINS TO DESTOROYAH", "LAMP POWERLINE LEFT ffc800 blink 700",
+    # PAD-669: a multiball's spins count for nothing: back to one ball, 49 more do not start him (one of the 50 in
+    # the multiball counted would). No note line asked: on a card with KAMACURAS too, her note has the glass
+    ("no spin counts in a multiball", ["balls", 2] + ["shot", SPIN, "ms", 60] * 50 + ["balls", 1, "secs", 1] + ["shot", SPIN, "ms", 60] * 49 + ["secs", 2],
+     ["![DESTOROYAH] START (a block)"]),
+    ("fifty spins the first time, a hundred the second",
+     ["shot", SPIN, "ms", 60] * 50 + ["secs", 4, "trigger", "destoroyah.stop", "secs", 4] +
+     ["shot", SPIN, "ms", 60] * 95 + ["secs", 4] + ["shot", SPIN, "ms", 60] * 5 + ["secs", 4],
+     # his early notes are KAMACURAS's glass on a full card (the same spinner): the last 5 are his once she is lit
+     ["Hud_Title: SPIN THE TOP SPINNER", "[DESTOROYAH] START (a block)", "Hud_Line: 5  -  SPINS TO DESTOROYAH", "LAMP POWERLINE LEFT ffc800 blink 700",
       "SHIELD toward"]),
     ("the title and the line name the aggregates", _START + ["secs", 5],
      ["Hud_Title: SHOOT THE LEFT POWERLINE", "Hud_Line: OR THE CENTER POWERLINE",
@@ -544,7 +545,7 @@ DESK = [
 #: the same mode as a Pro gets it (title_alt): the Mecha lane is a close shot
 DESK_PRO = [
     ("the Pro: spins, the swarm, the flying form and the perfect form",
-     ["shot", SPIN, "ms", 60] * 30 + ["secs", 4] + _SWEEP + ["secs", 1] + ["secs", 2] + _FLY + ["secs", 3] +
+     ["shot", SPIN, "ms", 60] * 50 + ["secs", 4] + _SWEEP + ["secs", 1] + ["secs", 2] + _FLY + ["secs", 3] +
      _shots([BOSS] * 3, 400) + ["secs", 6],
      ["[DESTOROYAH] START (a block)", "Hud_Award: WAVE CLEARED", "Hud_Title: FLYING DESTOROYAH",
       "Hud_Award: SHOT DOWN", "Hud_Award: SUPER JACKPOT", "Hud_Title: DESTOROYAH DEFEATED", "lamps held 0"]),

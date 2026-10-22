@@ -53,7 +53,7 @@ TIMERS = ("window", "lights", "next", "tank", "up")
 WINDOW_MS = pack.WINDOW_S * 1000           # PAD-658 round 3: every window (it was 7 s, down to 4 s: too short)
 WINDOW_LEFT = timer_left("window")
 WINDOW_SECS = div(add(WINDOW_LEFT, 999), 1000)
-NEED = pack.need(3, "fired")               # Maser target hits: 3, then 6, then 9
+NEED = pack.need(5, "fired")               # Maser target hits: 5, then 10, then 15 (PAD-675: was 3)
 #: what counter 3 counts in each stage: (its label, its sub, the variable)
 COUNTS = {1: ("BARRAGES", "OF 2", "barrages"), 2: ("VOLLEYS", "OF 2", "volleys"), 3: ("DIRECT HITS", "OF 3", "step")}
 
@@ -335,8 +335,8 @@ PROGRAM = {
 EXAMPLE = {
     "name": NAME, "slug": SLUG, "order": 103, "titles": ["godzilla_le", "godzilla_pro"],
     "based_on": "maser_barrage.c",
-    "about": ("The C example MASER BARRAGE rebuilt in blocks, three stages deep: the Maser target 3 times in a ball "
-              "starts it (6 the second time, 9 the third). OPEN FIRE is the C's chain (Left ramp, Right ramp, "
+    "about": ("The C example MASER BARRAGE rebuilt in blocks, three stages deep: the Maser target 5 times in a ball "
+              "starts it (10 the second time, 15 the third). OPEN FIRE is the C's chain (Left ramp, Right ramp, "
               "Building, each within the window; a barrage pays 5M x the multiplier into the pot, up to x5); "
               "CROSSFIRE puts the three powerline tanks in line and fires the Maser target (10M x); GODZILLA IN THE "
               "SIGHTS aims at the Big loop and fires at the Godzilla target, three direct hits for the pot twice "
@@ -376,7 +376,7 @@ def build():
 
 
 _M = ["shot", START_SHOT, "ms", 300]
-MASER3 = _M * 3 + ["secs", 1]
+MASER5 = _M * 5 + ["secs", 1]
 _START = ["trigger", "maser_barrage.start", "secs", 1]
 _CHAIN = ["shot", "Left ramp", "ms", 400, "shot", "Right ramp", "ms", 400, "shot", "Building", "ms", 400]
 _STAGE1 = _CHAIN * 2 + ["secs", 1]
@@ -386,23 +386,23 @@ _STAGE2 = (_LINE + ["shot", START_SHOT, "ms", 500]) * 2 + ["secs", 1]
 _SHOT3 = ["shot", AIM, "secs", 2, "shot", TARGET, "secs", 2]
 #: the desk scenarios (make_examples.py --desk): what, the harness's commands, lines its output must hold
 DESK = [
-    # PAD-669: a multiball's Maser hits count for nothing: back to one ball, 1 more says 2 to go, no start
-    ("no hit counts in a multiball", ["balls", 2] + MASER3 + ["balls", 1, "secs", 1] + _M + ["secs", 2],
-     ["Hud_Line: 2  -  MORE TO OPEN FIRE", "![MASER BARRAGE] START (a block)"]),
-    ("three Maser hits start it", _M * 2 + ["shot", START_SHOT, "secs", 5],
-     ["Hud_Title: MASER TARGET", "Hud_Line: 2  -  MORE TO OPEN FIRE", "Hud_Line: 1  -  MORE TO OPEN FIRE",
+    # PAD-669: a multiball's Maser hits count for nothing: back to one ball, 1 more says 4 to go, no start
+    ("no hit counts in a multiball", ["balls", 2] + MASER5 + ["balls", 1, "secs", 1] + _M + ["secs", 2],
+     ["Hud_Line: 4  -  MORE TO OPEN FIRE", "![MASER BARRAGE] START (a block)"]),
+    ("five Maser hits start it", _M * 4 + ["shot", START_SHOT, "secs", 5],
+     ["Hud_Title: MASER TARGET", "Hud_Line: 4  -  MORE TO OPEN FIRE", "Hud_Line: 1  -  MORE TO OPEN FIRE",
       "[MASER BARRAGE] START (a block)", "Hud_Line: SHOOT THE LEFT RAMP", "LAMP LEFT RAMP 005aff blink 500",
       "Hud_C1_Sub: JACKPOT 5M", "Hud_C3_Label: BARRAGES", "Hud_C3_Sub: OF 2"]),
     # PAD-658: only the next shot lit, the line counting its window down; 19 s on, the window still holds
-    ("the window gives 20 s", MASER3 + ["shot", "Left ramp", "secs", 19, "shot", "Right ramp", "secs", 1],
+    ("the window gives 20 s", MASER5 + ["shot", "Left ramp", "secs", 19, "shot", "Right ramp", "secs", 1],
      ["Hud_Line: SHOOT THE RIGHT RAMP IN 20", "LAMP RIGHT RAMP 005aff blink 500", "LAMP OFF RIGHT RAMP",
       "Hud_Award: RIGHT RAMP X", "Hud_AwardSub: 1  -  NOW THE BUILDING", "Hud_Line: SHOOT THE BUILDING IN 20"]),
-    # the next ball: three hits do not start it again this game, six do
-    ("three hits the first time, six the second", MASER3 + ["trigger", "maser_barrage.stop", "secs", 4, "ball_end",
-                                                            "secs", 2] + _M * 3 + ["secs", 1] + _M * 3 + ["secs", 2],
+    # the next ball: five hits do not start it again this game, ten do
+    ("five hits the first time, ten the second", MASER5 + ["trigger", "maser_barrage.stop", "secs", 4, "ball_end",
+                                                           "secs", 2] + _M * 7 + ["secs", 1] + _M * 3 + ["secs", 2],
      ["[MASER BARRAGE] START (a block)", "END (trigger file)", "Hud_Line: 3  -  MORE TO OPEN FIRE",
       "Hud_Line: 1  -  MORE TO OPEN FIRE"]),
-    ("a barrage, then the chain breaks", MASER3 +
+    ("a barrage, then the chain breaks", MASER5 +
      ["shot", "Right ramp", "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Building",
       "secs", 1, "shot", "Left ramp", "secs", 21, "shot", "Left ramp", "secs", 1],
      ["SCORE +1000000", "Hud_Award: BARRAGE JACKPOT", "Hud_AwardSub: 5,000,000  -  NOW X2: THE LEFT RAMP",
@@ -436,7 +436,7 @@ DESK = [
 
 #: the Pro (Godzilla Pro 1.16) has every shot and insert it names (MASER READY too): the same rules, played there
 DESK_PRO = [
-    ("three Maser hits start it", _M * 2 + ["shot", START_SHOT, "secs", 5],
+    ("five Maser hits start it", _M * 4 + ["shot", START_SHOT, "secs", 5],
      ["[MASER BARRAGE] START (a block)", "LAMP LEFT RAMP 005aff blink 500"]),
     ("all three stages", _START + _STAGE1 + _STAGE2 + ["secs", 3] + _SHOT3 * 3 + ["secs", 6],
      ["Hud_Award: MASER VOLLEY", "LAMP MASER READY ffffff blink", "LAMP MAGNA GRAB ff0000 blink",

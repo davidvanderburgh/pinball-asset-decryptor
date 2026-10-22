@@ -230,6 +230,7 @@ HATS = {
     "mode_end": "When the mode ends",
     "shot": "When a shot is made",
     "any_shot": "When any shot is made",
+    "switch": "When any playfield switch is hit",     # PAD-675: every switch's own hit, as the C modes counted them
     "every": "Every few seconds while it runs",
     "seconds_left": "When seconds are left",
     "ball_end": "When the ball drains",
@@ -1331,7 +1332,7 @@ def notes(program):
         out.append("A When the player picks a challenge script with no Start the mode in it starts nothing: the "
                    "game's own challenge does not run either.")
     idle = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") in ("mode_end", "ball_end")
-            or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "event")
+            or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "switch", "event")
                 and (s.get("hat") or {}).get("when") == "idle")]
     if any(b.get("op") in ("hold", "scoop_hold", "shield", "building") for s in idle for b in _walk(s.get("do") or [])):
         out.append("A mechanism is held only while the mode runs: a hold in When the mode ends, When the "
@@ -1406,7 +1407,7 @@ def _check_hat(hat, n, ctx):
         return
     if kind in ("shot",):
         _check_shot(hat.get("shot"), where + "'s When", ctx)
-    if kind in ("shot", "any_shot", "event") and hat.get("when", "any") not in WHEN:
+    if kind in ("shot", "any_shot", "switch", "event") and hat.get("when", "any") not in WHEN:
         ctx["out"].append("%s's When has no while." % where)
     if kind == "event":
         ev = hat.get("event")
@@ -2345,12 +2346,18 @@ def to_c(program, slug):
             # a shot or event is judged by the mode's state BEFORE it: the shot that starts
             # the mode is not also one "while it runs"
             gate = {"idle": "!was_on", "running": "was_on"}.get(when)
+            if kind in ("shot", "any_shot", "switch") and when == "idle":
+                gate = "idle"                   # PAD-675: not running, and no other mode is either
             if kind == "shot":
                 test = "(%s && (shot & %s))" % (g.shot(hat.get("shot")), g.shot(hat.get("shot")))
                 if gate:
                     test = "(%s && %s)" % (gate, test)
             elif kind == "any_shot":
                 test = "(shot & named)"
+                if gate:
+                    test = "(%s && %s)" % (gate, test)
+            elif kind == "switch":                       # PAD-675: the game's 0x1 dispatch, one a switch hit
+                test = "(shot & 1ull)"
                 if gate:
                     test = "(%s && %s)" % (gate, test)
             elif kind == "event":
@@ -2894,6 +2901,15 @@ def to_c(program, slug):
     L.append("    return !run.on && pm_in_game() && !((WAITS_OUT_MULTIBALL || GAME_MODES) && game_busy());")
     L.append("}")
     L.append("")
+    L.append("/* PAD-675: \"another mode runs\": one of ours, or a battle, multiball or mode of the game's. While it does, this")
+    L.append(" * one is out of play - its light is down, its meter hidden, its idle scripts count nothing - as David's")
+    L.append(" * machine showed a lit mode's inserts still flashing through a battle. The game's own count only for a mode")
+    L.append(" * that waits them out: one that stacks with them plays on beside them */")
+    L.append("UNUSED static int out_of_play(void)")
+    L.append("{")
+    L.append("    return !run.on && (pm_other_running() || ((WAITS_OUT_MULTIBALL || GAME_MODES) && game_busy() != 0));")
+    L.append("}")
+    L.append("")
     L.append("static void start(const char *why, int counted);")
     L.append("static void end(const char *why);")
     L.append("static void end_now(const char *why);")
@@ -3176,7 +3192,18 @@ def to_c(program, slug):
     L.append("{")
     L.append("    unsigned p = pm_player();")
     L.append("    int i, was_on = run.on;           /* the mode's state before this shot */")
+    L.append("    int idle;")
     L.append("    if (!pm_in_game() || p < 1 || p > 4) return;")
+    L.append("    /* PAD-675: while the mode is not running, and no other mode is - one of ours, or a battle, multiball or")
+    L.append("     * mode of the game's - its idle scripts count toward it; while another runs it is out of play: nothing")
+    L.append("     * counts, notes or shows */")
+    L.append("    idle = !was_on && !out_of_play();")
+    L.append("    (void)idle;")
+    switch_scripts = scripts_of("switch")
+    if switch_scripts:
+        L.append("    if (shot & 1ull) {                /* PAD-675: a playfield switch was hit (its 0x1 dispatch) */")
+        L.extend("    " + line if line else line for code in switch_scripts for line in code.split("\n"))
+        L.append("    }")
     L.append("    if (!(shot & named)) return;      /* a switch's 0x1 dispatch, not a shot */")
     L.append("    for (i = 0; i < %d; i++)" % len(g.hits))
     L.append("        if (S[(int)HIT_OF[i]] & shot) H[i][p]++;")
@@ -3280,7 +3307,7 @@ def to_c(program, slug):
         L.append("    }")
     if has_hud and gauge_live is not None and hud["gauge"]["meter"]:
         L.append("    if (!run.on) {                    /* PAD-658: the gauge as a meter while it is not running */")
-        L.append("        if (in_game) {")
+        L.append("        if (in_game && !out_of_play()) {   /* PAD-675: hidden while another mode runs */")
         L.append("            hud_level = %s;" % gauge_live)
         L.append("            gauge_now(hud_level, 1);")
         L.append("        } else kit_hud_meter(&hud, -1, 0);")
@@ -3337,6 +3364,9 @@ def to_c(program, slug):
     L.append("static void drain_end(void)")
     L.append("{")
     L.append("    unsigned ms;")
+    L.append("    /* PAD-675: not running, and nothing of its own on the glass: the drain is another's. Its end_now here gave")
+    L.append("     * up the display priority and dropped the HUD under the mode whose TOTAL the drain was showing */")
+    L.append("    if (!run.on && !total_due && !hide_ticks) return;")
     L.append("    drain_long = run.on && pm_can(PM_CAN_BALL_END_HOLD);   /* its TOTAL as long as the game's own then */")
     if has_hud:
         L.append("    ms = drain_long ? DRAIN_TOTAL_MS : 0;   /* the HUD's TOTAL */")
@@ -3952,7 +3982,7 @@ static void lit_tick(void)
     if (pm_in_game() && p >= 1 && p <= 4 && !run.on) want = lit_as[p];
     /* its shot is claimed while it would start there now: the game's own starts on that shot are held off (on James
      * Bond the Right ramp starts its henchman and villain modes, and the game handles a shot before the modes do) */
-    waiting = want && pm_game_wizard_way() == 0;
+    waiting = want && (pm_game_wizard_way() == 0 || out_of_play());   /* PAD-675: and while another mode runs */
     pm_lit_claim(want && can_start() && !waiting ? S[LIT_AT[want - 1].shot] : 0);
     if (want == lit_shown && (!want || (p == lit_player && waiting == lit_waiting))) return;
     lit_off();
@@ -4257,6 +4287,8 @@ def _hat_words(hat):
         return "when %s is made, %s" % (hat.get("shot") or "(no shot)", when)
     if kind == "any_shot":
         return "when any shot is made, %s" % when
+    if kind == "switch":
+        return "when any playfield switch is hit, %s" % when
     if kind == "every":
         return "every %s seconds while it runs" % hat.get("seconds")
     if kind == "seconds_left":

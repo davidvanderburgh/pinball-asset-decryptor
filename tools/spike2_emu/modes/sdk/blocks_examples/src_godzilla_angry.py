@@ -4,10 +4,11 @@ made EHoH's Gappa Angry: how many balls are locked decides WHICH multiball.
 Godzilla vs. Mechagodzilla II (1993): G-Force carries Baby Godzilla away as bait; Godzilla comes for him, past
 Rodan's nest, Mechagodzilla, the Garuda gunship and the reborn Fire Rodan, to Super Mechagodzilla at Makuhari.
 
-- THE RAGE: every shot the program names fills the meter while the mode is not running (through other modes and
-  multiballs too, quietly in a multiball): five stretches of 20, 25, 30, 35, 40 (150) the first time, TWICE that
-  (300) the second, three times (450) the third (pack.need's rule: each start costs more); a note every quarter of
-  a stretch, RAGE n% at each stretch's end; full, GODZILLA IS ANGRY lights the Building.
+- THE RAGE: every playfield switch hit fills the meter while no mode runs (PAD-675, David: "we should have our
+  required switch counts in there still that we had before (something like 1000 switch hits)"; not in a multiball,
+  as the C): five stretches of 150, 175, 200, 225, 250 (1000) the first time, TWICE that (2000) the second, three
+  times (3000) the third (pack.need's rule: each start costs more); a note every quarter of a stretch, RAGE n% at
+  each stretch's end; full, GODZILLA IS ANGRY lights the Building.
 - THE CHASE, five stages, deeper and deeper: five places, each a set of red shots (any order) and then a lock
   (white, hurrying), pack.STAGE_S (40 s) a place, 45 at KYOTO's five shots and 50 at MAKUHARI's six, the same every
   time (PAD-658 round 3: it was 30 s, and 25 then 20 once the meter had been spent; a lit shot with under 15 s left
@@ -46,7 +47,7 @@ from itertools import combinations
 import pack
 from blk import (AND, BALLS, LIT, NOT, OR, SECS_LEFT, a_show, add, award, beds, change, clip, clips, div, end, eq,
                  every, ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, light_mode, lt,
-                 mul, multiball, music, ne, off, off_insert, on_any_shot, on_end, on_shot, on_start, on_timer, score,
+                 mul, multiball, music, ne, off, off_insert, on_any_shot, on_end, on_shot, on_start, on_switch, on_timer, score,
                  secs_left,
                  set_, set_time, shake, shake_game, show, sound, sounds, step, sub, timer_left, timer_start,
                  timer_stop, var)
@@ -101,14 +102,14 @@ LX, LY = 282, 393
 
 TIMERS = ("enter", "lights", "made", "lock", "jp", "mbstart", "grace")
 
-# ---- the RAGE meter: a fifth of the C's 750 switch hits, as it counts the named shots only; x(times spent + 1) ----
+# ---- the RAGE meter: 1000 switch hits (PAD-675; the C had 750); x(times spent + 1) ----
 L, PLAYS = var("level"), var("plays")
 TIMES = add(PLAYS, 1)
-#: the stretch now: 20, 25 ... 40 the first time, twice that the second
-NEED = mul(add(20, mul(5, L)), TIMES)
+#: the stretch now: 150, 175 ... 250 the first time, twice that the second
+NEED = mul(add(150, mul(25, L)), TIMES)
 #: the hits of the stretches done
-CUM = mul(add(mul(20, L), div(mul(mul(5, L), sub(L, 1)), 2)), TIMES)
-TOTAL_RAGE = mul(150, TIMES)
+CUM = mul(add(mul(150, L), div(mul(mul(25, L), sub(L, 1)), 2)), TIMES)
+TOTAL_RAGE = mul(1000, TIMES)
 DONE = add(CUM, var("rage"))
 #: the shot's pay in the chase: 500,000 +500,000 a place +25,000 a shot made within it
 VALUE = add(add(500000, mul(500000, var("place"))), mul(25000, var("made")))
@@ -258,8 +259,8 @@ def lit_building():
     return light_mode(START_SHOT, RED, "pulse")
 
 
-RAGE = on_any_shot(
-    if_(eq("ready", 0), [
+RAGE = on_switch(
+    if_(AND(eq("ready", 0), lt(BALLS, 2)), [         # not in a multiball, as the C (David: "not counting switch hits")
         change("rage", 1),
         if_(ge("rage", NEED), [
             change("level", 1), set_("rage", 0),
@@ -271,8 +272,10 @@ RAGE = on_any_shot(
             # a quarter of a stretch: how far it is (not in a multiball: it counts quietly)
             [if_(AND(lt(BALLS, 2), ne(div(mul(var("rage"), 4), NEED), div(mul(sub(var("rage"), 1), 4), NEED))), [
                 award("GODZILLA RAGE", value=sub(TOTAL_RAGE, DONE), sub="MORE TO GODZILLA ANGRY", seconds=pack.NOTE_S)])]),
-    ], [
-        # full: lit at the Building again after a start or a new ball, and said once a multiball is over
+    ]), when="idle")
+#: full: lit at the Building again after a start or a new ball, and said once a multiball is over
+RAGE_FULL = on_any_shot(
+    if_(eq("ready", 1), [
         if_(NOT(LIT), [lit_building()]),
         if_(AND(eq("owed", 1), lt(BALLS, 2)), [set_("owed", 0)] + angry_now()),
     ]), when="idle")
@@ -423,6 +426,7 @@ def ending():
 
 SCRIPTS = [
     RAGE,
+    RAGE_FULL,
     # ---- the chase -----------------------------------------------------------------------------------------------
     on_start(set_("place", var("trail place")), set_("jackpot", var("trail jackpot")),
              set_("super", var("trail super")), if_(eq("super", 0), [set_("super", 5000000)]),
@@ -435,8 +439,9 @@ SCRIPTS = [
              timer_start("enter", 1)),
     on_timer("enter", *enter_place()),
     on_timer("lights", *lights_and_line()),
-    # every shot feeds the SUPER (on the right counter once BABY is the shot)
-    on_any_shot(if_(eq("mb", 0), [change("super", 10000), if_(eq("place", 5), [hud_counter(3, var("super"))])])),
+    # every switch hit feeds the SUPER, as the C (on the right counter once BABY is the shot)
+    on_switch(if_(eq("mb", 0), [change("super", 10000), if_(eq("place", 5), [hud_counter(3, var("super"))])]),
+              when="running"),
     on_shot(LR, *chase_shot("lr done"), *mb_shot(LR)),
     on_shot(RR, *chase_shot("rr done"), *mb_shot(RR)),
     on_shot(BL, *chase_shot("bl done"), *mb_shot(BL)),
@@ -500,11 +505,8 @@ PROGRAM = {
 }
 
 LOST = [
-    "The RAGE meter counts only the shots this program names (the ramps, Big loop, Building, center powerline, "
-    "captive ball, Maser and Mecha lane): the blocks never see a switch's own hit, where the C counts every "
-    "playfield switch. So the meter is a fifth as long (stretches of 20, 25, 30, 35, 40 hits the first time, twice "
-    "that the second, where the C has 100 to 200 and 25 more), and the SUPER JACKPOT grows 10,000 a named shot "
-    "rather than a switch.",
+    "The RAGE meter counts every playfield switch hit (PAD-675), 1000 the first time (stretches of 150 to 250), "
+    "where the C had 750 (100 to 200); it waits while another mode runs, where the C counted through them.",
     "No points while the mode is not running: the C pays 1,000,000 (+500,000 a stretch) at each RAGE stretch's end; "
     "the blocks' Score only scores while the mode runs, so a stretch is a note, a roar and a light show only.",
     "No ball save: the C gives a 5 s ball save at the start and keeps one running from the first lock, so a drain "
@@ -545,8 +547,8 @@ LOST = [
 EXAMPLE = {
     "name": NAME, "slug": SLUG, "order": 107, "titles": ["godzilla_le", "godzilla_pro"],
     "based_on": "godzilla_angry.c",
-    "about": ("The C example GODZILLA ANGRY rebuilt in blocks and made Elvira's Gappa Angry: 150 named shots fill "
-              "the RAGE meter (300 the second time, 450 the third) and light the Building; a chase through five "
+    "about": ("The C example GODZILLA ANGRY rebuilt in blocks and made Elvira's Gappa Angry: 1000 playfield switch "
+              "hits fill the RAGE meter (2000 the second time, 3000 the third) and light the Building; a chase through five "
               "places, each with its red shots and a lock, to BABY at the Building; how many balls are locked picks "
               "the multiball: RODAN'S NEST (2 balls), MECHAGODZILLA (3), GARUDA (4), FIRE RODAN (5) or SUPER "
               "MECHAGODZILLA (6, after BABY FOUND's super jackpot), each with its own clips, music, jackpot shots, "
@@ -581,8 +583,8 @@ def _locks(n):
     return out
 
 
-#: 150 named shots fill the meter (the Big loop's: no other example here counts it while it is not lit)
-_FILL = _shots(*([BL] * 150), gap=60) + ["secs", 1]
+#: 1000 playfield switch hits fill the meter (PAD-675)
+_FILL = ["switches", 1000, "secs", 1]
 _END = ["secs", 20, "balls", 1, "secs", 8]
 NL = chr(10)                            # a shake's line ending there: it was not refused
 def _mb(n):
@@ -592,7 +594,7 @@ def _mb(n):
 
 DESK = [
     ("the rage lights the building", _FILL + ["shot", BD, "secs", 2],
-     ["GODZILLA RAGE", "145  -  MORE TO GODZILLA ANGRY", "10  -  MORE TO GODZILLA ANGRY", "13  -  PERCENT", "show Rage level",
+     ["GODZILLA RAGE", "962  -  MORE TO GODZILLA ANGRY", "62  -  MORE TO GODZILLA ANGRY", "15  -  PERCENT", "show Rage level",
       "[GODZILLA ANGRY] lit at Building", "show Angry:", "[GODZILLA ANGRY] START (its lit shot)",
       "Hud_AwardSub: THEY TOOK BABY GODZILLA", "Hud_Line: LOCK IS LIT: SHOOT THE GODZILLA TARGET",
       "Hud_C3_Label: LOCK"]),
@@ -657,11 +659,11 @@ DESK = [
     # YOKKAICHI's 40 s has run to about 11 when the Left ramp is made
     ("a lit shot puts the clock back to fifteen", _START + _shots(GT) + ["secs", 30] + _shots(LR) + ["secs", 1],
      ["Hud_Award: YOKKAICHI", "Hud_AwardSub: 1,000,000", "Hud_Timer_Num: 11", "Hud_Timer_Num: 15"]),
-    # David: each start costs more. 150 shots light it the first time; after its multiball 150 are only half
+    # David: each start costs more. 1000 switch hits light it the first time; after its multiball 1000 are only half
     ("the second time the meter is twice as long",
-     _START + _locks(1) + _mb(1) + _END + _FILL + ["shot", BD, "secs", 2] + _shots(*([BL] * 150), gap=60)
+     _START + _locks(1) + _mb(1) + _END + _FILL + ["shot", BD, "secs", 2] + ["switches", 1000]
      + ["secs", 1, "shot", BD, "secs", 2],
-     ["Hud_Title: RODAN'S NEST TOTAL", "290  -  MORE TO GODZILLA ANGRY", "132  -  MORE TO GODZILLA ANGRY",
+     ["Hud_Title: RODAN'S NEST TOTAL", "1,925  -  MORE TO GODZILLA ANGRY", "125  -  MORE TO GODZILLA ANGRY",
       "[GODZILLA ANGRY] lit at Building", "[GODZILLA ANGRY] START (its lit shot)"]),
 ]
 

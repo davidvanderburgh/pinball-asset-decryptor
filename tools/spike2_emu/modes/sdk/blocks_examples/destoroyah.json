@@ -18,7 +18,7 @@
    }
   }
  },
- "about": "The C example DESTOROYAH rebuilt in blocks and taken deeper (PAD-658): 30 Top spinner spins start it (60 the second time, 90 the third). Three stages: THE SWARM (three waves of aggregates advance from the Powerlines to the ramps and loop to the close targets, 10 s at each, a kill paying more the closer it is, each cleared wave into the pot; the title and line name where they are), his FLYING FORM (four hits in 40 s where he flies over the ramps and the Big loop, moving on every 10 s), then his PERFECT FORM (three Building hits in 40 s, the super jackpot every kill and the pot twice over). Cash the pot out at the right scoop once the swarm is beaten.",
+ "about": "The C example DESTOROYAH rebuilt in blocks and taken deeper (PAD-658): 50 Top spinner spins start it (100 the second time, 150 the third). Three stages: THE SWARM (three waves of aggregates advance from the Powerlines to the ramps and loop to the close targets, 10 s at each, a kill paying more the closer it is, each cleared wave into the pot; the title and line name where they are), his FLYING FORM (four hits in 40 s where he flies over the ramps and the Big loop, moving on every 10 s), then his PERFECT FORM (three Building hits in 40 s, the super jackpot every kill and the pot twice over). Cash the pot out at the right scoop once the swarm is beaten.",
  "lost": [
   "No randomness in blocks: each aggregate's next shot is dealt in turn from a counter that runs all game (the far ring left, center, right, the near ring and the close ring likewise, skipping the shot the other aggregate stands on), where the C picked one at random; the flying form flies over the Left ramp, the Big loop and the Right ramp in that order. A player who learns the order can wait for it.",
   "Aggregates come to the shield targets at once: the C sent none there until the shield platform had turned to face the player (or ever, with the shields fixed away).",
@@ -662,7 +662,7 @@
         "op": "*",
         "a": {
          "k": "num",
-         "v": 30
+         "v": 50
         },
         "b": {
          "k": "op",
@@ -720,7 +720,7 @@
             "op": "*",
             "a": {
              "k": "num",
-             "v": 30
+             "v": 50
             },
             "b": {
              "k": "op",
@@ -792,7 +792,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 30
+                 "v": 50
                 },
                 "b": {
                  "k": "op",

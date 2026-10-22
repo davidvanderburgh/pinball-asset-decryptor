@@ -51,7 +51,7 @@ def _project(tmp_path, slugs=("maser_barrage", "kamacuras")):
 def test_a_shot_count_start_its_stages_and_cash_out():
     w = _words("maser_barrage")
     assert w["name"] == "MASER BARRAGE"
-    assert w["start"] == "Maser target 3 / 6 / 9, in one ball"        # its hits this ball: 3 x (starts + 1)
+    assert w["start"] == "Maser target 5 / 10 / 15, in one ball"      # its hits this ball: 5 x (starts + 1)
     assert len(w["stages"]) == 3
     assert w["stages"][0].startswith("Left ramp") and "Building" in w["stages"][0]
     assert w["stages"][1].startswith("Crossfire: Powerline left")
@@ -60,22 +60,22 @@ def test_a_shot_count_start_its_stages_and_cash_out():
 
 def test_a_start_lit_at_another_shot_and_a_mode_with_no_clock():
     w = _words("kamacuras")                                       # 0 seconds: no clock, its waves end it
-    assert w["start"] == "Top spinner 50 / 100 / 150; then the Right scoop"
+    assert w["start"] == "Top spinner 80 / 160 / 240; then the Right scoop"
     assert len(w["stages"]) == 4 and w["stages"][-1].startswith("The Biggest Mantis: Building 3x")
     assert w["cash"] == ""
 
 
 def test_counters_that_level_up_weighted_shots_and_shots_in_turn():
-    assert _words("godzilla_angry")["start"] == "Any 150 / 300 / 450 shots; then the Building"
-    assert _words("king_caesar")["start"] == ("Pop bumper 25 / 50 / 75 (Right return lane counts 2, Mecha exit "
+    assert _words("godzilla_angry")["start"] == "1000 / 2000 / 3000 playfield switch hits; then the Building"
+    assert _words("king_caesar")["start"] == ("Pop bumper 50 / 100 / 150 (Right return lane counts 2, Mecha exit "
                                               "bottom counts 3); then the Mecha exit bottom")
-    assert _words("ghidorah_heads")["start"] == "Powerline left, center and right 3 / 6 / 9 in all, in one ball"
-    assert _words("oxygen_destroyer")["start"] == "Left spinner 25 / 50 / 75, in one ball"
+    assert _words("ghidorah_heads")["start"] == "Powerline left, center and right 6 / 12 / 18 in all, in one ball"
+    assert _words("oxygen_destroyer")["start"] == "Left spinner 40 / 80 / 120, in one ball"
 
 
-def test_a_mode_that_joins_the_games_own_and_one_the_other_modes_light():
-    assert _words("anguirus_assist")["start"] == ("Shield target left, center or right 3 / 6 / 9; joins the game's "
-                                                  "next mode")
+def test_a_mode_of_its_own_and_one_the_other_modes_light():
+    # PAD-675: JET JAGUAR no longer joins the game's next mode - a mode of his own
+    assert _words("anguirus_assist")["start"] == "Shield target left, center or right 8 / 16 / 24"
     w = _words("final_wars", others=("ghidorah_heads", "oxygen_destroyer", "maser_barrage", "kumonga"))
     assert w["start"] == ("1 / 2 / 3 rounds of KING GHIDORAH, OXYGEN DESTROYER and MASER BARRAGE; "
                           "then the Building")
@@ -94,10 +94,10 @@ def test_every_shipped_example_is_worded(slug):
 def test_the_desk_game_follows_the_blocks():
     prog = _program("meltdown")
     sim = BS.Sim(prog)
-    for _ in range(10):
+    for _ in range(15):
         sim.shot("Godzilla target")
         sim.advance(RS.SHOT_GAP_MS)
-    # the tenth hit lights it there, and a light that shot put on waits for the next hit
+    # the fifteenth hit lights it there, and a light that shot put on waits for the next hit
     assert sim.lit == "Godzilla target" and not sim.running
     sim.shot("Godzilla target")
     assert sim.running and sim.lit is None
@@ -144,7 +144,7 @@ def test_the_sheet_its_own_words_order_and_modes_left_off(tmp_path):
     assert [r["slug"] for r in sheet["rows"]] == ["maser_barrage", "kamacuras"]
     assert km["start"] == "Top spinner 50 / 100 / 150 lights the Right scoop" and km["tag"] == "REWORKED"
     assert km["stages"] == ["Waves of mantises", "The biggest one"]
-    assert km["gen"]["start"] == "Top spinner 50 / 100 / 150; then the Right scoop"   # the app's, kept beside
+    assert km["gen"]["start"] == "Top spinner 80 / 160 / 240; then the Right scoop"   # the app's, kept beside
 
     RS.save_mode_words(project, "kamacuras", {})                      # empty: the app's words again
     assert not os.path.exists(RS.mode_words_path(project, "kamacuras"))

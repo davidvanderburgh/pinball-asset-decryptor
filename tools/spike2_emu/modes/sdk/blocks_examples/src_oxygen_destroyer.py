@@ -4,7 +4,7 @@ Dr. Serizawa's dive in four stages, a pot cashed out at the right scoop, and the
 Godzilla (1954): the hurry-up is the C's own rule (stage 1); then the divers go over the side, find Godzilla by
 sonar, lower the device to the sea bed, and Serizawa makes his choice.
 
-- START: Left spinner spins in one ball: 25 the first time, 50 the second, 75 the third (pack.need); up to 3 times a
+- START: Left spinner spins in one ball: 40 the first time, 80 the second, 120 the third (pack.need); up to 3 times a
   game per player, and not again for 15 s after it ends. No spin counts in a multiball (PAD-669); counted out
   while one runs, the next spin after it starts it.
   The note OXYGEN DESTROYER / 20 - LEFT SPINNER SPINS TO GO comes on the first spin, every 5 to go and the last 3
@@ -43,7 +43,7 @@ OXY_DEEP, OXY_AQUA, SONAR = "#001446", "#3cdcff", "#00ffc8"
 MAGNA_XY, LRAMP_XY, RRAMP_XY, LSPIN_XY = (89, 260), (69, 272), (199, 189), (55, 373)
 SPIN, HOLD, COLLECT, SUPER_SHOT = "Left spinner", "Godzilla target", "Left ramp", "Right ramp"
 PINGS = ("Powerline left", "Powerline center", "Powerline right", "Big loop")
-NEED = pack.need(25, "ran game")            # 25 spins, then 50, then 75
+NEED = pack.need(40, "ran game")            # 40 spins, then 80, then 120 (PAD-675: was 25)
 SPINS_LEFT = sub(NEED, var("spins"))
 #: stage 1's hurry-up runs the stage's clock: 20,000,000 falling to 0 over pack.STAGE_S seconds
 OXY_MS = pack.STAGE_S * 1000
@@ -158,7 +158,7 @@ def setup_stage():
 HURRYING = AND(eq("stage", 1), gt(timer_left("oxygen"), 0))
 
 SCRIPTS = [
-    # ---- the start: 25 spins of the Left spinner (50, 75); a note on the first, every 5 to go and the last 3 --------
+    # ---- the start: 40 spins of the Left spinner (80, 120); a note on the first, every 5 to go and the last 3 --------
     # (PAD-669: no spin counts in a multiball; one counted out but held off starts it on the next spin)
     on_shot(SPIN, if_(AND(lt("ran game", 3), eq("cooling", 0)), [
         if_(ge("spins", NEED), [start()], [if_(pack.ONE_BALL, [
@@ -302,8 +302,8 @@ EXAMPLE = {
     "based_on": "oxygen_destroyer.c",
     # every shot, show and insert it names is on a Pro 1.16 too (its own shows, not the game's): nothing to swap
     "title_alt": {"godzilla_pro": {}},
-    "about": ("The C example OXYGEN DESTROYER rebuilt in blocks and taken deeper (PAD-658): 25 Left spinner spins "
-              "start it (50 the second time, 75 the third). Four stages of 40 s each: the C's hurry-up (20,000,000 "
+    "about": ("The C example OXYGEN DESTROYER rebuilt in blocks and taken deeper (PAD-658): 40 Left spinner spins "
+              "start it (80 the second time, 120 the third). Four stages of 40 s each: the C's hurry-up (20,000,000 "
               "draining over the stage, the Left ramp collects it into the pot, the Godzilla target holds it off), "
               "the dive (hit the moving sonar ping 3 times: the line names its target), the descent (spin the Left "
               "spinner 20 times to lower the device), and Serizawa's choice (the Right ramp: the pot twice over and "
@@ -362,17 +362,17 @@ _S2 = ["shot", "Powerline left", "ms", 400, "shot", "Powerline center", "ms", 40
 _S3 = _spins(20) + ["secs", 2]
 #: the desk scenarios (make_examples.py --desk): what, the harness's commands, lines its output must hold
 DESK = [
-    # PAD-669: a multiball's spins count for nothing: back to one ball, 5 more say 20 to go, no start
-    ("no spin counts in a multiball", ["balls", 2] + _spins(25) + ["balls", 1, "secs", 1] + _spins(5) + ["secs", 2],
-     ["Hud_Line: 20  -  LEFT SPINNER SPINS TO GO", "![OXYGEN DESTROYER] START (a block)"]),
-    ("25 spins start it, 50 the second time",
-     _GT * 3 + ["secs", 3] + _spins(24) + ["secs", 1] + _spins(1) + ["secs", 5, "trigger", "oxygen_destroyer.stop",
-                                                                    "secs", 17] + _spins(25) + ["secs", 2],
-     ["Hud_Title: OXYGEN DESTROYER", "Hud_Line: 24  -  LEFT SPINNER SPINS TO GO",
+    # PAD-669: a multiball's spins count for nothing: back to one ball, 5 more say 35 to go, no start
+    ("no spin counts in a multiball", ["balls", 2] + _spins(40) + ["balls", 1, "secs", 1] + _spins(5) + ["secs", 2],
+     ["Hud_Line: 35  -  LEFT SPINNER SPINS TO GO", "![OXYGEN DESTROYER] START (a block)"]),
+    ("40 spins start it, 80 the second time",
+     _GT * 3 + ["secs", 3] + _spins(39) + ["secs", 1] + _spins(1) + ["secs", 5, "trigger", "oxygen_destroyer.stop",
+                                                                    "secs", 17] + _spins(40) + ["secs", 2],
+     ["Hud_Title: OXYGEN DESTROYER", "Hud_Line: 39  -  LEFT SPINNER SPINS TO GO",
       "Hud_Line: 20  -  LEFT SPINNER SPINS TO GO", "Hud_Line: 2  -  LEFT SPINNER SPINS TO GO",
       "Hud_Line: 1 MORE LEFT SPINNER SPIN", "[OXYGEN DESTROYER] START (a block)",
       "Hud_Line: LEFT RAMP COLLECTS  GODZILLA TARGET +2 S", "Hud_C2_Value: 20.0M", "LAMP LEFT RAMP 00ff3c blink",
-      "LAMP MAGNA GRAB ffffff pulse 1000", "END (trigger file)", "Hud_Line: 25  -  LEFT SPINNER SPINS TO GO"]),
+      "LAMP MAGNA GRAB ffffff pulse 1000", "END (trigger file)", "Hud_Line: 40  -  LEFT SPINNER SPINS TO GO"]),
     ("held off, collected, then cash out", _START + ["secs", 4] + _GT + ["secs", 2] + _S1 + ["secs", 3, "shot", "Right scoop",
                                                                                           "secs", 5],
      ["Hud_Award: HELD OFF", "Hud_AwardSub: +2 SECONDS  -  NOW THE LEFT RAMP", "Hud_C3_Value: 2",
@@ -400,7 +400,7 @@ DESK = [
 ]
 #: the same mode as a Godzilla Pro 1.16 gets it (nothing differs: the scenarios prove it builds and plays there)
 DESK_PRO = [
-    ("25 spins start it on the Pro", _spins(25) + ["secs", 2] + _S1,
+    ("40 spins start it on the Pro", _spins(40) + ["secs", 2] + _S1,
      ["[OXYGEN DESTROYER] START (a block)", "Hud_Award: COLLECTED", "Hud_Line: SHOOT THE LEFT POWERLINE"]),
     ("all four stages on the Pro", _START + _S1 + _S2 + _S3 + ["shot", SUPER_SHOT, "secs", 5],
      ["Hud_Award: GODZILLA FOUND", "Hud_Award: ON THE SEA BED", "Hud_Title: GODZILLA IS GONE", "lamps held 0"]),

@@ -7,9 +7,9 @@
   "godzilla_pro"
  ],
  "based_on": "godzilla_angry.c",
- "about": "The C example GODZILLA ANGRY rebuilt in blocks and made Elvira's Gappa Angry: 150 named shots fill the RAGE meter (300 the second time, 450 the third) and light the Building; a chase through five places, each with its red shots and a lock, to BABY at the Building; how many balls are locked picks the multiball: RODAN'S NEST (2 balls), MECHAGODZILLA (3), GARUDA (4), FIRE RODAN (5) or SUPER MECHAGODZILLA (6, after BABY FOUND's super jackpot), each with its own clips, music, jackpot shots, multiplier, light shows and shakes.",
+ "about": "The C example GODZILLA ANGRY rebuilt in blocks and made Elvira's Gappa Angry: 1000 playfield switch hits fill the RAGE meter (2000 the second time, 3000 the third) and light the Building; a chase through five places, each with its red shots and a lock, to BABY at the Building; how many balls are locked picks the multiball: RODAN'S NEST (2 balls), MECHAGODZILLA (3), GARUDA (4), FIRE RODAN (5) or SUPER MECHAGODZILLA (6, after BABY FOUND's super jackpot), each with its own clips, music, jackpot shots, multiplier, light shows and shakes.",
  "lost": [
-  "The RAGE meter counts only the shots this program names (the ramps, Big loop, Building, center powerline, captive ball, Maser and Mecha lane): the blocks never see a switch's own hit, where the C counts every playfield switch. So the meter is a fifth as long (stretches of 20, 25, 30, 35, 40 hits the first time, twice that the second, where the C has 100 to 200 and 25 more), and the SUPER JACKPOT grows 10,000 a named shot rather than a switch.",
+  "The RAGE meter counts every playfield switch hit (PAD-675), 1000 the first time (stretches of 150 to 250), where the C had 750 (100 to 200); it waits while another mode runs, where the C counted through them.",
   "No points while the mode is not running: the C pays 1,000,000 (+500,000 a stretch) at each RAGE stretch's end; the blocks' Score only scores while the mode runs, so a stretch is a note, a roar and a light show only.",
   "No ball save: the C gives a 5 s ball save at the start and keeps one running from the first lock, so a drain with locks sends the locked balls straight into the multiball. In blocks a drain ends the chase; the place, its locks, the jackpot and the super wait for the next start at the Building (as the C does for a drain with no lock).",
   "No randomness: each multiball's JACKPOT starts on its kind's first shot, moves on to the next of its four as its clock runs out and back one when it is hit, where the C's BABY jumped to another of four shots at random.",
@@ -203,7 +203,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 20
+           "v": 150
           },
           "b": {
            "k": "var",
@@ -221,7 +221,7 @@
             "op": "*",
             "a": {
              "k": "num",
-             "v": 5
+             "v": 25
             },
             "b": {
              "k": "var",
@@ -275,7 +275,7 @@
       "op": "*",
       "a": {
        "k": "num",
-       "v": 150
+       "v": 1000
       },
       "b": {
        "k": "op",
@@ -1223,22 +1223,36 @@
   "scripts": [
    {
     "hat": {
-     "kind": "any_shot",
+     "kind": "switch",
      "when": "idle"
     },
     "do": [
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "ready"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
        },
        "b": {
-        "k": "num",
-        "v": 0
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
        }
       },
       "then": [
@@ -1267,14 +1281,14 @@
            "op": "+",
            "a": {
             "k": "num",
-            "v": 20
+            "v": 150
            },
            "b": {
             "k": "op",
             "op": "*",
             "a": {
              "k": "num",
-             "v": 5
+             "v": 25
             },
             "b": {
              "k": "var",
@@ -1425,7 +1439,7 @@
                     "op": "*",
                     "a": {
                      "k": "num",
-                     "v": 20
+                     "v": 150
                     },
                     "b": {
                      "k": "var",
@@ -1443,7 +1457,7 @@
                       "op": "*",
                       "a": {
                        "k": "num",
-                       "v": 5
+                       "v": 25
                       },
                       "b": {
                        "k": "var",
@@ -1497,7 +1511,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 150
+                 "v": 1000
                 },
                 "b": {
                  "k": "op",
@@ -1574,14 +1588,14 @@
                "op": "+",
                "a": {
                 "k": "num",
-                "v": 20
+                "v": 150
                },
                "b": {
                 "k": "op",
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 5
+                 "v": 25
                 },
                 "b": {
                  "k": "var",
@@ -1634,14 +1648,14 @@
                "op": "+",
                "a": {
                 "k": "num",
-                "v": 20
+                "v": 150
                },
                "b": {
                 "k": "op",
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 5
+                 "v": 25
                 },
                 "b": {
                  "k": "var",
@@ -1677,7 +1691,7 @@
               "op": "*",
               "a": {
                "k": "num",
-               "v": 150
+               "v": 1000
               },
               "b": {
                "k": "op",
@@ -1706,7 +1720,7 @@
                  "op": "*",
                  "a": {
                   "k": "num",
-                  "v": 20
+                  "v": 150
                  },
                  "b": {
                   "k": "var",
@@ -1724,7 +1738,7 @@
                    "op": "*",
                    "a": {
                     "k": "num",
-                    "v": 5
+                    "v": 25
                    },
                    "b": {
                     "k": "var",
@@ -1778,7 +1792,31 @@
         ]
        }
       ],
-      "else": [
+      "else": null
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "any_shot",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "cmp",
+       "op": "=",
+       "a": {
+        "k": "var",
+        "name": "ready"
+       },
+       "b": {
+        "k": "num",
+        "v": 1
+       }
+      },
+      "then": [
        {
         "op": "if",
         "cond": {
@@ -1855,7 +1893,8 @@
         ],
         "else": null
        }
-      ]
+      ],
+      "else": null
      }
     ]
    },
@@ -5606,7 +5645,7 @@
    },
    {
     "hat": {
-     "kind": "any_shot",
+     "kind": "switch",
      "when": "running"
     },
     "do": [

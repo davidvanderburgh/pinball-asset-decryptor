@@ -8,7 +8,7 @@ After Lyman Sheats: a start that costs more each time (Metallica's Sparky), stag
 your history (Batman '66), a meter you ride or cool (the C's core), and failing still pays (the core blowing pays a
 quarter of what it held).
 
-- LIGHT IT: captive ball hits (the Godzilla target, MAGNA GRAB): 10 the first time, 20 the second, 30 the third;
+- LIGHT IT: captive ball hits (the Godzilla target, MAGNA GRAB): 15 the first time, 30 the second, 45 the third;
   then it pulses red and the next hit starts it (not beside the game's own battle or multiball: it waits, ready).
   The note (GODZILLA TARGET, 9 MORE FOR MELTDOWN) comes every hit the first time, then at every 5 left and the last 5.
 - START: a 3-ball multiball with a 15 s ball save; the shields turn toward the player.
@@ -60,7 +60,7 @@ HEART_LINE = "RAMPS, BIG LOOP, BUILDING: 2X"                  # + the heart's sh
 RAY_LINE = "JACKPOT:"                                           # + the ray's ramp: JACKPOT: LEFT RAMP
 JUNIOR_LINE = "JACKPOT: " + " OR ".join(pack.SHOT_WORDS[s] for s in JUNIOR)
 #: the start: 10 captive ball hits the first time, 20 the second, 30 the third
-NEED = pack.need(10, "starts")
+NEED = pack.need(15, "starts")                    # PAD-675: was 10
 MOVE_S = 10                                                     # the heart stays this long at least before it moves
 
 SHOWS = [
@@ -200,7 +200,7 @@ def back_to_burn(core):
 
 
 SCRIPTS = [
-    # ---- light it: captive ball hits (10, then 20, then 30) ----------------------------------------------------------
+    # ---- light it: captive ball hits (15, then 30, then 45) ----------------------------------------------------------
     # the note names the shot: every hit the first time (10), then at every 5 left and the last 5 (20, 30)
     on_shot(LIGHT_SHOT, if_(AND(eq("ready", 0), lt(BALLS, 2)), [
         change("hits", 1),
@@ -355,7 +355,7 @@ EXAMPLE = {
     "name": NAME, "slug": SLUG, "order": 106, "titles": ["godzilla_le", "godzilla_pro"], "based_on": "meltdown.c",
     # the Pro has two shields, left and right: the cadmium is those two
     "title_alt": {"godzilla_pro": {"shots": {"Shield target center": None}}},
-    "about": ("The C example MELTDOWN rebuilt in blocks and taken deeper: captive ball hits (10, then 20, then 30) "
+    "about": ("The C example MELTDOWN rebuilt in blocks and taken deeper: captive ball hits (15, then 30, then 45) "
               "light a 3-ball multiball where the core heats by itself and with every jackpot (x1 to x5) and the "
               "shields cool it; three stages with their own jackpot shots and music (BURNING GODZILLA's four "
               "jackpot shots and the moving heart that pays double, DESTOROYAH's spiral ray at one ramp then the "
@@ -420,16 +420,17 @@ _RAYS = ["shot", "Left ramp", "ms", 300, "shot", "Right ramp", "ms", 300] * 7 + 
 #: stage 3: Junior's two shots (8% a jackpot)
 _JUNIOR = ["shot", "Big loop", "ms", 300, "shot", "Mecha exit bottom", "ms", 300] * 5 + ["secs", 3]
 DESK = [
-    ("ten hits light it and the next starts it", _shots(LIGHT_SHOT, 10, 300) + ["secs", 1, "lamps"] +
+    ("fifteen hits light it and the next starts it", _shots(LIGHT_SHOT, 15, 300) + ["secs", 1, "lamps"] +
      ["shot", LIGHT_SHOT, "secs", 2],
-     ["Hud_Title: GODZILLA TARGET", "Hud_Line: 9  -  MORE FOR MELTDOWN", "Hud_Line: 6  -  MORE FOR MELTDOWN",
+     ["Hud_Title: GODZILLA TARGET", "Hud_Line: 14  -  MORE FOR MELTDOWN", "Hud_Line: 6  -  MORE FOR MELTDOWN",
       "Hud_Title: MELTDOWN IS READY", "Hud_Line: HIT THE GODZILLA TARGET", "LAMP MAGNA GRAB ff1400 pulse",
       "[MELTDOWN] START (its lit shot)", "MULTIBALL 3 balls, save 15 s", "SHIELD toward",
       "Hud_Award: MELTDOWN MULTIBALL", "Hud_Line: RAMPS, BIG LOOP, BUILDING: 2X LEFT RAMP"]),
-    # the second time (20): the note at 15, 10 and the last 5
-    ("ten the first time, twenty the second", _shots(LIGHT_SHOT, 10, 300) + ["secs", 1, "shot", LIGHT_SHOT, "secs", 2,
-                                                                              "trigger", "meltdown.stop", "secs", 5]
-     + ["balls", 1, "secs", 1] + _shots(LIGHT_SHOT, 19, 300) + ["secs", 1, "lamps", "shot", LIGHT_SHOT, "secs", 1,
+    # the second time (30): the note at 25, 20, 15, 10 and the last 5
+    ("fifteen the first time, thirty the second", _shots(LIGHT_SHOT, 15, 300) + ["secs", 1, "shot", LIGHT_SHOT,
+                                                                                 "secs", 2, "trigger",
+                                                                                 "meltdown.stop", "secs", 5]
+     + ["balls", 1, "secs", 1] + _shots(LIGHT_SHOT, 29, 300) + ["secs", 1, "lamps", "shot", LIGHT_SHOT, "secs", 1,
                                                                  "lamps"],
      ["[MELTDOWN] START (its lit shot)", "END (trigger file)", "Hud_Line: 15  -  MORE FOR MELTDOWN",
       "Hud_Line: 10  -  MORE FOR MELTDOWN", "Hud_Line: 4  -  MORE FOR MELTDOWN",
@@ -470,7 +471,7 @@ DESK_PRO = [
     ("the pro's two shields cool the core", _START + _HEARTS + ["secs", 1, "shot", "Shield target right", "secs", 1,
                                                                  "lamps"],
      ["Hud_Award: CADMIUM MISSILE", "HELD SHIELD RIGHT 78d2ff pulse 900", "MULTIBALL 3 balls, save 15 s"]),
-    ("the pro lights it and reaches destoroyah", _shots(LIGHT_SHOT, 10, 300) + ["secs", 1, "shot", LIGHT_SHOT,
+    ("the pro lights it and reaches destoroyah", _shots(LIGHT_SHOT, 15, 300) + ["secs", 1, "shot", LIGHT_SHOT,
                                                                                  "secs", 2] + _TO_MELTDOWN +
      ["shot", "Building", "secs", 6],
      ["[MELTDOWN] START (its lit shot)", "Hud_Award: SUPER JACKPOT", "Hud_Award: DESTOROYAH",

@@ -331,6 +331,12 @@ def test_the_runtime_ends_a_challenge_ball_and_starts_nothing_after():
     disp = src[src.index("static void on_event_dispatch(unsigned *r)\n{"):]
     assert 'chg_end_ball_now("the game\'s bus call")' in disp[:disp.index("\n}\n")]
     assert 'chg_end_ball_now("the tick")' in src
+    # PAD-663: a ball end the game did not take (John Wick 1.02) is asked again while the game is still in play
+    chk = src[src.index("static void chg_end_ball_check(void)\n{"):]
+    chk = chk[:chk.index("\n}\n")]
+    assert "pm_ms() - chg_end_check_ms <= 3000" in chk and "pm_in_game() != 1 || chg_end_tries >= 2" in chk
+    assert "chg_end_owed = 1;" in chk and "chg_end_check_ms = pm_ms();" in now
+    assert "chg_end_tries = 0;" in ended
     veto = src[src.index("static int challenge_veto("):]
     veto = veto[:veto.index("\n}\n")]
     assert veto.count("chg_picked(") == 2                         # a claimed challenge, and one of a mode's own

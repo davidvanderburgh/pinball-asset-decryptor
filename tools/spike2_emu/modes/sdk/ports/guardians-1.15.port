@@ -462,3 +462,24 @@ site  challenge_end_ball  0x00217dd0 0xe30f211e 0xe3402062
 site  ball_launch         0x00213c44 0xe92d4010 0xe305445c
 value ball_launch_flag       12
 value ball_launch_wait_flag  13
+
+# ---- PAD-663: the game's champions for a mode's challenge game, read off this build's own code (portchallenge.py) ----
+# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own)
+site  challenge_scores       0x00178bc8 0xe92d4ff0 0xe24dd0bc
+site  challenge_score_entry  0x001780fc 0xe1a03000 0xe3020864
+# PAD-663: its question to the bus before it files a player under a category's entry ({player, category +2, entry +4}): in a mode's challenge game only the mode's record says yes
+site  challenge_scores_gate  0x00178e34 0xeb06b8f4 0xe3500000
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+# PAD-663: the category table (36 bytes each; +28 the entry list a category's insert shifts) and its count
+data  challenge_scores_table 0x005babdc
+data  challenge_scores_count 0x004dce34
+# PAD-663: HIGHEST SCORES, whose first entry a mode's challenge game goes in as the mode's own record
+value challenge_scores_cat   1
+# PAD-660: the attract mode's last challenge champion page; a mode's challenge champion is shown after it, in the same page
+site  challenge_page        0x00117554 0xe92d4ff0 0xe3a00005
+site  challenge_page_text   0x002327f0 0xe92d4008 0xe30d3104
+site  challenge_page_yield  0x002fa390 0xe30a3e70 0xe3403062
+value challenge_page_cat    5
+value challenge_page_title  3242

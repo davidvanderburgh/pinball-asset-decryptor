@@ -4124,6 +4124,68 @@ in Final Showdown's place, its record seeded: `FINAL SHOWDOWN CHALLENGE` BRE 25,
 `DAV` / `12,345,670`. The first Bond run put the record back at ANY yield: the mode's record showed under
 `HMSS CHALLENGE` - hence the page's own. The control on the released runtime: no page of the mode's.
 
+**On every Spike 2 game (PAD-663).** Every Spike 2 build keeps its champions in the same framework - one category
+table (category 1 is HIGHEST SCORES on all of them), the entry lookup and one end-of-game function - but most keep no
+champion per challenge, so a mode's challenge game went in under the game's own: HIGHEST SCORES, a challenge of the
+game's (Avengers' `BATTLE ROYALE CHALLENGE SCORE #3`) or the one CHALLENGE CHAMPION (Mandalorian, Venom). Before
+the end-of-game function files a player under a category's entry it asks the bus, the same code on every build:
+
+```
+mov r0, #0x5b ; add r1, sp, #0x48 ; ... ; bl <dispatch> ; cmp r0, #0     ; {player, category +2, entry +4} at sp + 0x48
+```
+
+and the game's own handlers say no to what does not belong to the kind of game played. The port names that call:
+
+```
+site  challenge_scores_gate  0x00392080 0xebff5412 0xe3500000    # Avengers LE 1.10: the bl (hook_call)
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+value challenge_scores_cat   1                                     # HIGHEST SCORES: every challenge game's place
+```
+
+In a mode's challenge game the category's first entry (`challenge_scores_cat_<n>` where the build has one per
+challenge, else `challenge_scores_cat`) points at the mode's record as above, its award (entry +0x20: what beating the
+GRAND CHAMPION wins) is off for the call, and the gate answers yes only for that entry and no for every other: the
+game's own champions and high scores are not touched by a mode's challenge game at all. The initials entry says the
+mode's name (`PAD CHALLENGE`). The score belongs to the game its mode began in: Avengers starts the ball, where a
+menu pick is taken, before it counts the game's start.
+
+The attract mode: Bond and Stranger Things show a page process per category (PAD-660's route above, also Aerosmith
+and Guardians on their last such category). Most builds show every champion through ONE page function instead,
+called once per category and returning when the page's time is up - `page(object, category, n, frames, ..)`
+(Avengers, Deadpool, Godzilla), `page(category, n)` (Batman 66), `page(category)` (Foo Fighters, John Wick). It
+reads the entry's record and its title (the entry's titles list, +0x18, or the entry's own title callback, +0x10):
+
+```
+site  challenge_pages_0     0x000214d8 0xe307c8c4 0xe340c075    # Avengers LE 1.10 (it opens with movw/movt ip)
+```
+
+The site is the function's first word, before the push where the function sets a register up first: Avengers'
+`movw ip ; movt ip`, Sword of Rage's `movw ip ; movt ip ; ldr ip, [ip]`, TMNT's two pairs and a load. Wrapped at the
+push, the page runs with that register unset (Sword of Rage crashed in the attract mode).
+
+A build may have more than one function of that shape (Deadpool, Batman 66, Jaws, The Beatles): all are named,
+`challenge_pages_0` .. `_3`, and the runtime follows the one the attract mode calls. Jurassic Park The Pin shows
+HIGHEST SCORES one row per page, each a small function of its own handing the entry to a page body that reads its
+titles: the GRAND CHAMPION's row page is named with them. Teenage Mutant Ninja Turtles and Venom show their other
+champions on bespoke pages (the title is in the scene), and HIGHEST SCORES on one list page of five rows, each row
+asked of the category's list:
+
+```
+site  challenge_list_page   0x000301e8 0xe30b3afc 0xe30d16f0    # TMNT LE 1.59: HIGHEST SCORES' list page
+```
+
+repeated with the category's list cut to its first entry, pointed at the mode's record, so it lists the mode's
+champion alone.
+
+The wrapped page runs the game's own call first, noting (the entry lookup, logged on the same thread) which category
+it showed. After the call for the lowest category the attract mode shows (its cycle's first page, the grand
+champion's where it has one) the page is called again with the same arguments, once per mode with a champion, the
+category's first entry pointed at a copy of the mode's record and titled `<NAME> CHAMPION`, and put back as each
+call returns. Nothing is repeated with a game in play; a page cut short gives the entry back on the next tick, and
+the end-of-game function's wrap puts it back before anything else.
+
 ## Holding the end of a ball (PAD-622)
 
 James Bond's own mini-wizards end on a drain with their TOTAL: the mode's last clip, then its TOTAL under the bar,

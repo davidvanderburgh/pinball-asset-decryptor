@@ -323,7 +323,18 @@ def test_the_runtime_ends_a_challenge_ball_and_starts_nothing_after():
     assert "chg_mode_ended(1)" in end
     ended = src[src.index("static void chg_mode_ended(int ran)"):]
     ended = ended[:ended.index("\n}\n")]
-    assert 'fn("challenge_end_ball")' in ended and "(1, 1)" in ended and "beh.asking" in ended
+    assert 'fn("challenge_end_ball")' in ended and "chg_end_owed = 1;" in ended and "beh.asking" in ended
+    # PAD-663: made from the game's next bus call (a process of the game's: The Beatles crashed from the tick)
+    now = src[src.index("static void chg_end_ball_now(const char *from)\n{"):]
+    now = now[:now.index("\n}\n")]
+    assert "__sync_bool_compare_and_swap(&chg_end_owed, 1, 0)" in now and "(1, 1)" in now
+    disp = src[src.index("static void on_event_dispatch(unsigned *r)\n{"):]
+    assert 'chg_end_ball_now("the game\'s bus call")' in disp[:disp.index("\n}\n")]
+    # PAD-663: only from a bus call on the game-logic thread (John Wick 1.02 stopped when ended from another)
+    assert "chg_end_owed && chg_game_tid && syscall(SYS_GETTID) == chg_game_tid" in disp[:disp.index("\n}\n")]
+    tick = src[src.index("static void on_tick(unsigned *r)\n{"):]
+    assert "if (!chg_game_tid) chg_game_tid = syscall(SYS_GETTID);" in tick[:tick.index("\n}\n")]
+    assert 'chg_end_ball_now("the tick")' in src
     veto = src[src.index("static int challenge_veto("):]
     veto = veto[:veto.index("\n}\n")]
     assert veto.count("chg_picked(") == 2                         # a claimed challenge, and one of a mode's own

@@ -176,9 +176,12 @@ def find(elf):
     if generic:
         menu = generic["lines"]
     # PAD-640: a mode's challenge game keeps its own high score - on the handler builds (Bond, Stranger Things), where
-    # the pick's flag stays set and the game files the game under that challenge's champion; the flag route clears it
+    # the pick's flag stays set and the game files the game under that challenge's champion; PAD-663: on every other
+    # build too, in HIGHEST SCORES' place, with the game's own records shut for that game
     named = sum(1 for l in lines if l.startswith("site  challenge_go_"))
-    scores = scores_lines(e, named) if named else []
+    scores = scores_lines(e, named)
+    if scores:
+        scores += screen_lines(e)
     # PAD-643: a mode's challenge ball launched for the player, and the game's own ball-start work that skips a
     # challenge game run in a mode's
     return (flag_lines(e) + lines + balls_lines(e) + extra_ball_lines(e) + menu + end_ball + scores
@@ -1235,17 +1238,19 @@ def menu_live(e, names, on_flag):
             "value challenge_menu_caption   %d" % caption]
 
 
-#: PAD-640: the game's champions (one framework on Bond LE/Pro 1.06 and Stranger Things): categories 1.. of 36 bytes
-#: each in one table, {per-player bytes, score getter, reset, compare, qualify, fn, char **titles, u16 *entries,
-#: flags}, their count in a word. The category lookup checks the id against that count, then indexes the table:
+#: PAD-640: the game's champions (one framework on every Spike 2 build, PAD-663): categories 1.. of 36 bytes each in
+#: one table, {per-player bytes, score getter, reset, compare, qualify, fn, char **titles, u16 *entries, flags},
+#: their count in a word. The category lookup checks the id against that count, then indexes the table:
 #:   cmp r0,#0 ; push {r3,lr} ; beq ; movw/movt r3 <count> ; ldr r3,[r3] ; cmp r0,r3 ; bcs ;
 #:   add r0,r0,r0,lsl #3 ; movw/movt r3 <table> ; add r0,r3,r0,lsl #2 ; ldr r3,[r0,#28]
 #: The entry lookup, (category, n) -> the n-th score entry:
 #:   mov r3,r0 ; movw r0 <map> ; push {r4,lr} ; movt r0 ; mov r4,r1 ; mov r1,r3 ; bl ; .. ; ldr r0,[r0,#28]
 #: and the end-of-game high scores, the one function that loads the table with movwhi/movthi.
 def scores_lines(e, n_challenges):
-    """The `site challenge_scores` / `challenge_score_entry` and `value challenge_scores_cat_<n>` lines (empty when
-    the build has not exactly one of each, or not one "... CHALLENGE CHAMPION" category per challenge)."""
+    """The `site challenge_scores` / `challenge_score_entry` / `challenge_scores_gate` lines, `value
+    challenge_scores_cat` (HIGHEST SCORES: every challenge game's) and, where the build has one "... CHALLENGE
+    CHAMPION" category per challenge (Bond, Stranger Things), `value challenge_scores_cat_<n>`. Empty when the build
+    has not exactly one of each function, or neither the per-challenge categories nor the gate."""
     w, base = e.words, e.text_va
     n = len(w)
     cats = [k for k in range(n - 13) if w[k] == 0xE3500000 and w[k + 1] == 0xE92D4008
@@ -1271,22 +1276,274 @@ def scores_lines(e, n_challenges):
     top = next((s for s in range(ends[0], max(ends[0] - 64, 0), -1) if (w[s] & 0xFFFF4000) == 0xE92D4000), None)
     if top is None:
         return []
-    picked = []
+    titles = {}
     for c in range(1, count):
         at = table + 36 * c
-        titles = e.word(at + 24) if e.off(at + 24) is not None else 0
-        title = e.cstr(e.word(titles)) if titles and e.off(titles) is not None else None
-        if title and title.endswith("CHALLENGE CHAMPION"):
-            picked.append((c, title))
-    if len(picked) != n_challenges:
+        tl = e.word(at + 24) if e.off(at + 24) is not None else 0
+        titles[c] = e.cstr(e.word(tl)) if tl and e.off(tl) is not None else None
+    picked = [(c, t) for c, t in sorted(titles.items()) if t and t.endswith("CHALLENGE CHAMPION")]
+    per = n_challenges > 0 and len(picked) == n_challenges
+    gate = gate_lines(e, top)
+    if not per and not gate:
         return []
-    out = ["# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own) and each "
-           "challenge's champion category",
+    out = ["# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own)",
            "site  challenge_scores       0x%08x 0x%08x 0x%08x" % (base + 4 * top, w[top], w[top + 1]),
            "site  challenge_score_entry  0x%08x 0x%08x 0x%08x" % (base + 4 * ents[0], w[ents[0]], w[ents[0] + 1])]
-    for slot, (c, title) in enumerate(picked):
-        out += ["# %s" % title.replace("/'", "'"), "value challenge_scores_cat_%d  %d" % (slot, c)]
-    return out + page_lines(e, base + 4 * ents[0], picked[-1][0])
+    out += gate
+    if gate:
+        out += ["# PAD-663: the category table (36 bytes each; +28 the entry list a category's insert shifts) and its "
+                "count",
+                "data  challenge_scores_table 0x%08x" % table,
+                "data  challenge_scores_count 0x%08x" % count_at]
+    if gate and titles.get(1):
+        out += ["# PAD-663: %s, whose first entry a mode's challenge game goes in as the mode's own record" % titles[1],
+                "value challenge_scores_cat   1"]
+    out += record_lines(e, table)
+    if per:
+        out.append("# PAD-640: each challenge's champion category")
+        for slot, (c, title) in enumerate(picked):
+            out += ["# %s" % title.replace("/'", "'"), "value challenge_scores_cat_%d  %d" % (slot, c)]
+        return out + page_lines(e, base + 4 * ents[0], picked[-1][0])
+    pages = pages_lines(e, base + 4 * ents[0])
+    # PAD-663: no page function, but a page process per category (Aerosmith, Guardians: Bond's shape): PAD-660's
+    # route on the last category with one
+    for c in sorted(titles, reverse=True):
+        if pages or c < 2:
+            break
+        pages = page_lines(e, base + 4 * ents[0], c)
+    return out + (pages or list_page_lines(e, base + 4 * ents[0]))      # PAD-663: else HIGHEST SCORES' list page
+
+
+#: PAD-663: the one-screen cabinets' 800x480 panel (tools/spike2_emu/display2.py REPORTED_PANELS: reported from real
+#: machines, in no game program) - a mode's champion page title past ~20 characters runs off its edges (Star Wars
+#: Home Edition, Jurassic Park The Pin), so it drops " CHAMPION" there. The program names its own title.
+SMALL_SCREEN_TITLES = ("james_bond_60th_le", "star_wars_elg", "jurassic_park_the_pin")
+SMALL_SCREEN_TITLE_MAX = 18
+
+
+def screen_lines(e):
+    """`value challenge_page_title_max` on a build of an 800x480 one-screen cabinet (empty on every other)."""
+    if not any(b"\0" + t.encode() + b"\0" in e.d for t in SMALL_SCREEN_TITLES):
+        return []
+    return ["# PAD-663: an 800x480 one-screen cabinet: a mode's champion title past this many characters is its name alone",
+            "value challenge_page_title_max %d" % SMALL_SCREEN_TITLE_MAX]
+
+
+#: PAD-663: a champion record's layout, as HIGHEST SCORES' compare (category 1's +0x10) reads it:
+#:   ldr r4, [r1] ; mov r1, #<check at> ; .. ; ldrh r5, [r4, #<check at>] ; bl <byte sum> ; .. ; blx r3 (the score)
+#:   ; ldrd r2, r3, [r4, #<score at>] (u64) or ldr r3, [r4, #<score at>] (u32)
+#: Most builds: u64 score at +72, check at +88 (the runtime's default). The Beatles 1.29 and Star Wars ELG 1.10: u32
+#: at +80, check at +84 - a record of the default layout fails their check and the game resets the category.
+RECORD_DEFAULT = (88, 72, 8)
+
+
+def record_lines(e, table):
+    """`value challenge_record_check_at` / `_score_at` / `_score_size` when the build's records are not laid out as
+    the runtime's default (empty when they are, or the compare is not of the known shape)."""
+    if e.off(table + 36 + 16) is None:
+        return []
+    fn = e.word(table + 36 + 16)
+    if e.off(fn) is None or fn % 4 or not e.text_va <= fn < e.text_va + 4 * len(e.words):
+        return []
+    w = e.words[(fn - e.text_va) // 4:(fn - e.text_va) // 4 + 24]
+    movs = {x & 0xFF for x in w[:8] if (x & 0xFFFFFF00) == 0xE3A01000}
+    checks = [(x >> 4 & 0xF0) | (x & 0xF) for x in w[:8] if (x & 0xFFF000F0) == 0xE1D000B0]
+    if len(checks) != 1 or checks[0] not in movs or 0xE12FFF33 not in w:
+        return []
+    after = w[w.index(0xE12FFF33) + 1:]
+    score = next(((((x >> 4 & 0xF0) | (x & 0xF)), 8) if (x & 0xFFF000F0) == 0xE1C000D0 else (x & 0xFFF, 4)
+                  for x in after[:3] if (x & 0xFFF000F0) == 0xE1C000D0 or (x & 0xFFF00000) == 0xE5900000), None)
+    if score is None or (checks[0], score[0], score[1]) == RECORD_DEFAULT:
+        return []
+    return ["# PAD-663: the champion records' layout (the score's place and size, the check's place)",
+            "value challenge_record_check_at   %d" % checks[0],
+            "value challenge_record_score_at   %d" % score[0],
+            "value challenge_record_score_size %d" % score[1]]
+
+
+#: PAD-663: the end-of-game function asks the bus before it files a player under a category's entry, one shape on
+#: every build: {u8 player, u16 category, int entry} stored at sp + X (strb / strh / str), then
+#:   mov r0, #<id> ; add r1, sp, #X ; .. ; bl <dispatch> ; cmp r0, #0
+#: - the only one of its bus calls whose answer it tests.
+def gate_lines(e, top):
+    """`site challenge_scores_gate` (the bl) and `value challenge_scores_gate_id` / `_cat_at` / `_entry_at`, for the
+    end-of-game function at word `top` (empty unless exactly one call of that shape)."""
+    w, base = e.words, e.text_va
+    hits = []
+    for q in range(top + 8, min(len(w) - 1, top + 1600)):
+        if w[q] >> 24 != 0xEB or w[q + 1] != 0xE3500000:
+            continue
+        j = q - 1                                                   # its arguments: after the call before it
+        while j > q - 7 and w[j] >> 24 != 0xEB:
+            j -= 1
+        before = w[j + 1:q]
+        r0 = [x & 0xFF for x in before if (x & 0xFFFFFF00) == 0xE3A00000]
+        r1 = [rot_imm(x & 0xFFF) for x in before if (x & 0xFFFFF000) == 0xE28D1000]
+        if len(r0) != 1 or len(r1) != 1:
+            continue
+        x = r1[0]
+        prior = w[max(top, q - 60):q]
+        if _sp_store(prior, 0xE5C00000, x) and _sp_strh(prior, x + 2) and _sp_store(prior, 0xE5800000, x + 4):
+            hits.append((q, r0[0]))
+    if len(hits) != 1:
+        return []
+    q, ident = hits[0]
+    return ["# PAD-663: its question to the bus before it files a player under a category's entry ({player, category "
+            "+2, entry +4}): in a mode's challenge game only the mode's record says yes",
+            "site  challenge_scores_gate  0x%08x 0x%08x 0x%08x" % (base + 4 * q, w[q], w[q + 1]),
+            "value challenge_scores_gate_id       %d" % ident,
+            "value challenge_scores_gate_cat_at   2",
+            "value challenge_scores_gate_entry_at 4"]
+
+
+def _sp_store(words, op, at):
+    """1 when one of `words` is `op` (strb / str, immediate offset) of a register to [sp, #at]."""
+    return any((y & 0xFFFF0FFF) == (op | 0xD0000 | at) for y in words)
+
+
+def _sp_strh(words, at):
+    """1 when one of `words` is `strh rX, [sp, #at]`."""
+    return any((y & 0xFFFF0FFF) == (0xE1CD00B0 | (at >> 4) << 8 | (at & 0xF)) for y in words)
+
+
+#: PAD-663: most builds show every champion through ONE page function (not Bond's page process per category), called by
+#: the attract mode once per category: it looks the category's entry up with the category from a register, keeps the
+#: entry (`subs/mov rE, r0` before any other call) and reads its titles list (`ldr rX, [rE, #0x18]`). It may open
+#: with `movw/movt ip` before its push (Avengers LE 1.10). A build may have more than one of that shape (Deadpool,
+#: Batman 66, Jaws, The Beatles): all are named (four at most), and the runtime follows the one the attract mode calls.
+def pages_lines(e, entry_va):
+    """`site challenge_pages_<k>` for the build's champion page functions (empty when it has none of that shape)."""
+    found = _page_fns(e, entry_va, False)
+    row = _row_page(e, entry_va)
+    if row is not None and row not in found:
+        found = (found + [row])[-4:] if len(found) >= 4 else found + [row]
+    if not found:
+        return []
+    w, base = e.words, e.text_va
+    out = ["# PAD-663: the champion page function(s) (each called per category; the attract mode's is the one it calls): "
+           "a mode's challenge champion is shown on it after the lowest category the attract mode shows"]
+    for i, k in enumerate(found):
+        out.append("site  challenge_pages_%d     0x%08x 0x%08x 0x%08x" % (i, base + 4 * k, w[k], w[k + 1]))
+    return out
+
+
+#: PAD-663: a build with no page function of that shape (Teenage Mutant Ninja Turtles: a bespoke page per category,
+#: its title in the scene) still lists HIGHEST SCORES on one page: `mov r0, #1 ; mov r1, rN ; bl <entry lookup>` in
+#: a loop over its rows, each row's title through the entry (+0x18, or its callback +0x10). Repeated with the category's
+#: list cut to its first entry, pointed at the mode's record, that page lists the mode's champion alone.
+def list_page_lines(e, entry_va):
+    """`site challenge_list_page` (the lowest such function; empty when none)."""
+    found = _page_fns(e, entry_va, True)
+    if not found:
+        return []
+    w, base = e.words, e.text_va
+    k = found[0]
+    return ["# PAD-663: HIGHEST SCORES' list page: a mode's challenge champion is listed alone on it after the game's",
+            "site  challenge_list_page   0x%08x 0x%08x 0x%08x" % (base + 4 * k, w[k], w[k + 1])]
+
+
+#: PAD-663: Jurassic Park The Pin shows HIGHEST SCORES one row per page, each its own small function: `mov r0, #1 ;
+#: mov r1, #<row> ; bl <entry lookup> ; mov rE, r0 ; .. ; mov r1, rE ; bl <page body>`, the body reading the entry's
+#: titles (+0x18). The GRAND CHAMPION's (row 0) is named with the page functions (pages_lines): its category's first
+#: entry is the one a mode's record stands in.
+def _row_page(e, entry_va):
+    """The word index of HIGHEST SCORES' row-0 page of that shape (None when none, or not one)."""
+    w, base = e.words, e.text_va
+    n = len(w)
+    found = []
+    for q in range(8, n - 30):
+        if w[q] >> 24 != 0xEB or bl_target(base + 4 * q, w[q]) != entry_va:
+            continue
+        if not (0xE3A00001 in w[q - 3:q] and 0xE3A01000 in w[q - 3:q]):            # mov r0, #1 ; mov r1, #0
+            continue
+        keep = next(((x >> 12) & 0xF for x in w[q + 1:q + 5] if (x & 0xFFFF0FFF) == 0xE1A00000), None)
+        if keep is None or keep in (0, 1, 13, 15):
+            continue
+        body = None
+        for j in range(q + 1, q + 30):
+            if w[j] >> 24 == 0xEB and (0xE1A01000 | keep) in w[j - 4:j]:
+                body = bl_target(base + 4 * j, w[j])
+                break
+        if body is None or e.off(body) is None:
+            continue
+        bw = [e.word(body + 4 * i) for i in range(400)]
+        held = [(x >> 12) & 0xF for x in bw[:8] if (x & 0xFFFF0FFF) == 0xE1A00001]   # mov rY, r1
+        if not held or not any((x & 0xFFFF0FFF) == (0xE5900018 | held[0] << 16) for x in bw):
+            continue
+        top = next((t for t in range(q, max(q - 60, 0), -1) if (w[t] & 0xFFFF4000) == 0xE92D4000), None)
+        top = None if top is None else _prologue_start(w, top)
+        if top is not None and _openable(w[top], w[top + 1]) and top not in found:
+            found.append(top)
+    return found[0] if len(found) == 1 else None
+
+
+def _page_fns(e, entry_va, listed):
+    """Word indexes of the functions of the champion page shape (listed: HIGHEST SCORES' list page instead)."""
+    w, base = e.words, e.text_va
+    n = len(w)
+    found = []
+    for q in range(8, n - 8):
+        if w[q] >> 24 != 0xEB or bl_target(base + 4 * q, w[q]) != entry_va:
+            continue
+        imm = [x & 0xFF for x in w[q - 4:q] if (x & 0xFFFFFF00) == 0xE3A00000]
+        r1reg = any((x & 0xFFFFFFF0) == 0xE1A01000 and x & 0xF not in (13, 15) for x in w[q - 4:q])
+        if listed and not (imm == [1] and r1reg):                     # mov r0, #1 ; mov r1, <row>
+            continue
+        if not listed and any((x & 0xFFFFFF00) == 0xE3A00000 for x in w[q - 6:q]):   # a page of its own category
+            continue
+        keep, handed = None, None
+        for j, x in enumerate(w[q + 1:q + 7]):
+            if x >> 24 in (0xEB, 0xFA, 0xFB) or (x & 0x0FFFFFF0) == 0x012FFF30:
+                if x >> 24 == 0xEB and keep == 1:                       # mov r1, r0 ; .. ; bl <its formatter>
+                    handed = bl_target(base + 4 * (q + 1 + j), x)
+                break
+            if (x & 0xFFFF0FFF) in (0xE2500000, 0xE1A00000) and (x >> 12) & 0xF not in (0, 13, 15):
+                keep = (x >> 12) & 0xF
+                if keep != 1:
+                    break
+        if keep is None:
+            continue
+        after = w[q + 2:min(n, q + 400)]
+        titles = keep != 1 and any((x & 0xFFFF0FFF) == (0xE5900018 | keep << 16) for x in after)
+        # ... or its title through the entry's own callback (+0x10: Foo Fighters, John Wick): ldr rX, [rE, #0x10] ;
+        # .. ; blx rX - or the entry handed to a formatter that calls it (The Beatles: mov r1, r0 ; bl <f>, f opening
+        # `.. ; ldr ip, [r1, #0x10] ; .. ; bx ip`)
+        told = any((x & 0xFFFF0FFF) == (0xE5900010 | keep << 16)
+                   and any(y == 0xE12FFF30 | (x >> 12) & 0xF for y in after[j + 1:j + 6]) for j, x in enumerate(after[:40]))
+        if handed is not None and e.off(handed) is not None:
+            f = [e.word(handed + 4 * i) for i in range(10)]
+            told = told or any((x & 0xFFFF0FFF) == 0xE5910010 and (0xE12FFF10 | (x >> 12) & 0xF) in f[i + 1:i + 4]
+                               for i, x in enumerate(f))
+        if not titles and not told:
+            continue
+        top = next((t for t in range(q, max(q - 4000, 0), -1) if (w[t] & 0xFFFF4000) == 0xE92D4000), None)
+        if top is None:
+            continue
+        top = _prologue_start(w, top)
+        if top not in found:
+            found.append(top)
+    return [k for k in sorted(found) if _openable(w[k], w[k + 1])][:4]
+
+
+def _prologue_start(w, push):
+    """The word index a function starts at, given its push: back over the movw / movt before the push (Avengers:
+    `movw ip ; movt ip ; push`), and the load of that address (Sword of Rage: `movw ip ; movt ip ; ldr ip, [ip] ;
+    push` - wrapped at the push, the page ran with ip unset and the game crashed in attract)."""
+    k = push
+    x = w[k - 1] if k > 0 else 0
+    if (x & 0xFFF00000) == 0xE5900000 and (x >> 16) & 0xF == (x >> 12) & 0xF:   # ldr rX, [rX, #imm]
+        k -= 1
+    top = k
+    while top > 0 and push - top < 8 and (w[top - 1] & 0xFFF00000) in (0xE3000000, 0xE3400000):
+        top -= 1
+    return top if top < k else push
+
+
+def _openable(w0, w1):
+    """1 when hook_wrap_at takes a function opening with these two words: hook_wrap's push and a word not reading pc,
+    or movw / movt / push only (pad_mode_runtime.c hook_wrap_at's checks)."""
+    plain = lambda x: (x & 0xFFF00000) in (0xE3000000, 0xE3400000) or (x & 0xFFFF0000) == 0xE92D0000
+    return _wrappable(w0, w1) or (plain(w0) and plain(w1) and not (w0 | w1) & 0xE92D8000 == 0xE92D8000)
 
 
 def _wrappable(w0, w1):

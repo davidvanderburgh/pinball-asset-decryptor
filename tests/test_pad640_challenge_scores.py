@@ -133,6 +133,7 @@ RECORDS_MAIN = r"""
 #include <string.h>
 #include <stdint.h>
 #define CHG_REC_SIZE 96
+static unsigned chg_rec_check_at = 88, chg_rec_score_at = 72, chg_rec_score_size = 8;
 static int hexval(int c)
 {
     return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10
@@ -144,19 +145,23 @@ int main(void)
     unsigned char a[CHG_REC_SIZE], b[CHG_REC_SIZE], got[CHG_REC_SIZE];
     static char t1[4096], t2[4096], t3[4096];
     long n1, n2, n3;
+#ifdef SHORT_RECORDS
+    chg_rec_check_at = 84; chg_rec_score_at = 80; chg_rec_score_size = 4;     /* PAD-663: The Beatles 1.29, SW ELG */
+#endif
     chg_rec_fresh(a, "MXV");
-    printf("fresh %s %llu check %d\n", (char *)a + 32, (unsigned long long)*(uint64_t *)(a + 72),
-           (a[88] | a[89] << 8) == chg_rec_check(a));
+    printf("fresh %s %llu check %d\n", (char *)a + 32, chg_rec_score(a),
+           (a[chg_rec_check_at] | a[chg_rec_check_at + 1] << 8) == chg_rec_check(a));
     n1 = chg_rec_put("", 0, "BON APPETIT", a, t1, sizeof t1);
     memcpy(b, a, sizeof b);
-    *(uint64_t *)(b + 72) = 123456789ull;
+    memset(b + chg_rec_score_at, 0, chg_rec_score_size);
+    b[chg_rec_score_at] = 0x15; b[chg_rec_score_at + 1] = 0xcd; b[chg_rec_score_at + 2] = 0x5b; b[chg_rec_score_at + 3] = 0x07;
     memcpy(b + 32, "DAV", 4);
-    { unsigned short c = chg_rec_check(b); b[88] = (unsigned char)c; b[89] = (unsigned char)(c >> 8); }
+    { unsigned short c = chg_rec_check(b); b[chg_rec_check_at] = (unsigned char)c; b[chg_rec_check_at + 1] = (unsigned char)(c >> 8); }
     n2 = chg_rec_put(t1, n1, "YOLT WIZARD", b, t2, sizeof t2);
     n3 = chg_rec_put(t2, n2, "BON APPETIT", b, t3, sizeof t3);      /* replaces BON APPETIT's, keeps YOLT's */
     printf("lines %d %d\n", (int)(n2 / (2 * CHG_REC_SIZE + 1)), (int)(n3 / (2 * CHG_REC_SIZE + 1)));
     printf("find %d", chg_rec_find(t3, n3, "BON APPETIT", got));
-    printf(" %llu %s", (unsigned long long)*(uint64_t *)(got + 72), (char *)got + 32);
+    printf(" %llu %s", chg_rec_score(got), (char *)got + 32);
     printf(" %d %d %d\n", chg_rec_find(t3, n3, "YOLT WIZARD", got), chg_rec_find(t3, n3, "BON", got),
            chg_rec_find(t3, n3, "BON APPETIT X", got));
     t3[10] = t3[10] == '0' ? '1' : '0';                              /* a damaged line: its check fails */
@@ -167,16 +172,21 @@ int main(void)
 """
 
 
-def test_the_records_file_keeps_one_line_per_mode_and_refuses_a_damaged_one(tmp_path):
+@pytest.mark.parametrize("short", [False, True])
+def test_the_records_file_keeps_one_line_per_mode_and_refuses_a_damaged_one(tmp_path, short):
+    """PAD-663: and so on The Beatles 1.29 / Star Wars ELG 1.10's shorter records (a u32 score at +80, the check at
+    +84): a record checked at +88 there failed the game's check and the game reset the category."""
     R = _host()
     src = RUNTIME.read_text(encoding="utf-8")
     fns = "\n".join(R._lift(src, sig) for sig in (
         "static unsigned short chg_rec_check(const unsigned char *rec)",
+        "static unsigned long long chg_rec_score(const unsigned char *rec)",
         "static void chg_rec_fresh(unsigned char *rec, const char *initials)",
         "static int chg_rec_line_is(const char *b, long i, long e, const char *name)",
         "static int chg_rec_find(const char *b, long n, const char *name, unsigned char *rec)",
         "static long chg_rec_put(const char *b, long n, const char *name, const unsigned char *rec, char *out, long cap)"))
-    out = R._host_run(tmp_path, RECORDS_MAIN.replace("@FNS@", fns)).splitlines()
+    main = RECORDS_MAIN.replace("@FNS@", fns)
+    out = R._host_run(tmp_path, ("#define SHORT_RECORDS\n" if short else "") + main).splitlines()
     assert out[0] == "fresh MXV 0 check 1"
     assert out[1] == "lines 2 2"
     assert out[2] == "find 1 123456789 DAV 1 0 0"
@@ -188,10 +198,10 @@ def test_the_wrap_points_the_entry_at_the_modes_record_and_puts_it_back():
     src = RUNTIME.read_text(encoding="utf-8")
     body = _host()._lift(src, "static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     swap = body.index("ent[0] = (unsigned)(unsigned long)chg_rec;")
-    call = body.index("ret = chg_scores_game(r0, r1, r2, r3);")
+    call = body.index("ret = chg_scores_game(r0, r1, r2, r3);", swap)        # PAD-663: an early return calls it too
     back = body.index("ent[0] = was[0]; ent[5] = was[1]; ent[6] = was[2];")
     assert swap < call < back                          # the game's own record is pointed back to before anything else
-    assert "chg_hs.slot = -1;" in body.split("if (slot >= 0", 1)[0]   # one game's, once
+    assert "chg_hs.on = 0;" in body.split("if (on && ", 1)[0]       # one game's, once (PAD-663: a flag, not slot -1)
     arm = _host()._lift(src, "static void chg_scores_arm(void)")
     assert "hook_wrap(fn(\"challenge_scores\")" in arm
     assert "chg_picked(own_challenge[k].by, 0, own_challenge[k].name);" in src      # an own one plays as challenge 0's

@@ -656,3 +656,27 @@ value switch_edge_shots     0
 site  ball_launch         0x001fb150 0xe92d4010 0xe3084ab0
 value ball_launch_flag       12
 value ball_launch_wait_flag  13
+
+# ---- PAD-663: the game's champions for a mode's challenge game, read off this build's own code (portchallenge.py) ----
+# PAD-640: the game's end-of-game high scores (a mode's challenge game keeps the mode's own)
+site  challenge_scores       0x0019db34 0xe92d4ff0 0xe24dd0bc
+site  challenge_score_entry  0x0019d088 0xe1a03000 0xe30f0abc
+# PAD-663: its question to the bus before it files a player under a category's entry ({player, category +2, entry +4}): in a mode's challenge game only the mode's record says yes
+site  challenge_scores_gate  0x0019dda0 0xeb050de8 0xe3500000
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+# PAD-663: the category table (36 bytes each; +28 the entry list a category's insert shifts) and its count
+data  challenge_scores_table 0x00556e80
+data  challenge_scores_count 0x0049b8a0
+# PAD-663: HIGHEST SCORES, whose first entry a mode's challenge game goes in as the mode's own record
+value challenge_scores_cat   1
+# PAD-663: the champion records' layout (the score's place and size, the check's place)
+value challenge_record_check_at   84
+value challenge_record_score_at   80
+value challenge_record_score_size 4
+# PAD-663: the champion page function(s) (each called per category; the attract mode's is the one it calls): a mode's challenge champion is shown on it after the lowest category the attract mode shows
+site  challenge_pages_0     0x00031f08 0xe92d40f0 0xe24dd0cc
+site  challenge_pages_1     0x00044ac8 0xe92d43f0 0xe1a06000
+site  challenge_pages_2     0x00044dd0 0xe92d43f0 0xe3033050
+site  challenge_pages_3     0x00045394 0xe92d47f0 0xe3033050

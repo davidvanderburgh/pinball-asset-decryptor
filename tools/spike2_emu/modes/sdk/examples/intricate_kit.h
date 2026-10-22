@@ -1029,6 +1029,7 @@ static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
         o->hide_at = 0;
         o->noting = 0;
         o->metering = 0;
+        o->off = 0;
         if (o->group) pm_show(o->group, 0);
     }
     if (on) kit_hud_up = h;
@@ -1041,6 +1042,10 @@ static KIT_UNUSED void kit_hud_show(struct kit_hud *h, int on)
         h->noting = 0;
         h->metering = 0;
         h->aside = 0;                      /* PAD-347: said again the next time it is up beside a game mode */
+        /* PAD-680: and its words waiting is looked at afresh. A note hidden while a display of the game's covered
+         * it left this set, and the next note, shown under the game's battle TOTAL, never waited it out: its 3 s
+         * ran under the TOTAL (emulator, KING KONG's ramps note after GODZILLA VS DESTROYAH) */
+        h->off = 0;
     }
     if (h->group) pm_show(h->group, on);
 }

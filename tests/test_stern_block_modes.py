@@ -1310,6 +1310,42 @@ def test_a_drain_takes_the_loop_with_its_total(tmp_path, monkeypatch):
     assert abs(_at(out, "BACKDROP OFF") - on) <= 40
 
 
+def _noting_prog():
+    p = maser_hud()
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "change", "var": "loops", "by": num(1)},
+        {"op": "hud_award", "text": "LOOPS", "value": var("loops"), "sub": "TO GO", "seconds": 3}]})
+    p["vars"].append({"name": "loops", "reset": "game"})
+    return p
+
+
+def test_a_note_asked_for_in_the_games_battle_shows_when_it_ends(tmp_path):
+    """PAD-680 (David's card: no "3 more for KING KONG"): a note asked for while one of the game's battles has the middle
+    was dropped (PAD-390); the newest one now waits, and shows once the battle gives the middle back."""
+    out = play(tmp_path, _noting_prog(), "battle", 1, "secs", 0.5, "shot", "Big loop", "secs", 0.5,
+               "shot", "Big loop", "secs", 1, "battle", 0, "secs", 1)
+    assert "its note waits for the game's mode to give the middle back" in out
+    after = out[out.index(">> battle 0"):]
+    assert "its note shows - the game's mode gave the middle back" in after
+    assert "2  -  TO GO" in after and "1  -  TO GO" not in out              # the newest of the two
+    out = play(tmp_path, _noting_prog(), "battle", 1, "secs", 0.5, "shot", "Big loop", "secs", 1,
+               "game_over", "secs", 0.2, "battle", 0, "secs", 1)
+    assert "its note shows" not in out                                     # a game over drops it
+
+
+def test_a_second_note_under_a_display_of_the_games_waits_it_out_too(tmp_path):
+    """PAD-680 (emulator, KING KONG's ramps note after GODZILLA VS DESTROYAH): a note hidden while a display of the
+    game's covered it left its words marked waiting, and the next note, shown under the game's battle TOTAL, never
+    waited: its time ran out under the TOTAL. Each note waits the display out."""
+    # the first note is let go under the display (held up to 8 s), the second asked for under another
+    out = play(tmp_path, _noting_prog(), "covered", 1, "shot", "Big loop", "secs", 12, "covered", 0, "secs", 1,
+               "covered", 1, "shot", "Big loop", "secs", 2, "covered", 0, "secs", 1)
+    second = out[out.rindex(">> covered 1"):]
+    assert "its words wait while a display of the game's has the screen" in second
+    shown = second[second.index(">> covered 0"):]
+    assert "its words are back" in shown and "2  -  TO GO" in shown
+
+
 def test_a_note_shows_over_the_modes_loop(tmp_path, monkeypatch):
     """PAD-658 (run bedfix_pro_r1, bf_ready_c: HE JOINS THE NEXT BATTLE over the live city's TANKS 0/10): a note shows
     over the mode's own loop, as the game's feedback screens show over a clip of theirs; it goes with the note, and a

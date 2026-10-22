@@ -640,6 +640,7 @@ carrier at its bed while it runs:
 |---|---|
 | make a request play ONE sound id | `pm_sound_sid(request, sid)`; `pm_sound_sid(request, 0)` puts the request's own list back. 1 = done; 0 without the port's request table |
 | fade a request out, then stop it | `pm_sound_fade(request, ms)` - linear in dB (the codec's volume step, 1/3 dB each, on every voice of every channel playing it) down to -86 dB, then the stop, in silence. Without the port's `value sound_channel_*` / `sound_voice_volume` lines it stops at once. `pm_sound` on a request still fading ends that fade first |
+| duck a request under another (PAD-678) | `pm_sound_duck(request, steps, ms)` - takes `steps` more (1/3 dB each) off every voice playing it, on top of its own volume, ramped over `ms`; `steps` 0 ramps it back. A stop or a `pm_sound_fade` ends it. A mode file's music goes down 28 steps this way while one of its own calls plays: the game's speech carriers already duck it 20, and the game's own clip sounds duck its music 48 (Bond LE 1.06, measured) |
 | see what plays | `pm_sound_playing(requests, buses, max)` - the request and bus bits (0x01 music, 0x02 voice) of every channel playing; -1 without `data sound_channels` |
 
 The mode file says it with a second number: `music 125 618` = carrier 125 playing bed sid 618.
@@ -2802,7 +2803,10 @@ loop that is the backdrop of one of the game's display effects (Bond's spinner s
 75, a see-through picture over `Diamond_EarthSpin`) stays for as long as that effect has the
 screen, and the mode's clip comes back when it ends: with `data display_effects` (the effect
 manager pointer) the runtime reads the effect now, and one whose table record lacks the
-background flag 1 is over the TV (PAD-639). A clip
+background flag 1 is over the TV (PAD-639). The same wait holds for a clip the game plays once
+under such an effect: Bond's skill shot awards (effects 392-394 LE, 391-393 Pro) play a hat toss
+and keep their picture over its last frame until the surface is idle, so the mode's clip (or a
+backdrop loop) going back at the toss's end kept that picture up for good. A clip
 the game plays once (a lock, a start, an award) is waited out. It does not come back if
 the mode ended, another mode of ours began, or its time ran out under the game's clip. James
 Bond LE and Pro 1.06 name them (LE at `surface_play` - 0x36c, - 0x6b4 and - 0x510, Pro the

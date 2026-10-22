@@ -369,3 +369,14 @@ def test_an_extract_of_the_card_has_them_back(tmp_path):
     assert SMo.load(proj).attract == [os.path.join(folder, "Shaken.wav"), os.path.join(folder, "Bond.wav")]
     assert any(t.startswith("Attract flipper sounds: this card's flipper buttons play 2 sound(s) in attract "
                             "mode; they are back in the Audio tab") for t in said)
+
+
+def test_the_chain_encode_takes_the_modes_and_the_flipper_sounds_levels_together():
+    """PAD-679 (Bond LE, 13 flipper sounds beside code modes' own music: "Your edits could not be
+    prepared: keywords must be strings"): both level maps are keyed by an int sound idx, which
+    dict(a, **b) refuses. The flipper sounds' own entry wins over the modes' for the same idx."""
+    used = [{"rel": CARRIER, "slot": 801, "mode": SMo.attract_mode(1), "host": 2400},
+            {"rel": CARRIER, "slot": 801, "mode": SMo.attract_mode(2), "host": 2401, "level_ref": 46}]
+    assert E._chain_level_refs({2149: 1890, 2400: 7}, used) == {2149: 1890, 2400: 801, 2401: 46}
+    assert E._chain_level_refs({}, used) == {2400: 801, 2401: 46}
+    assert E._chain_level_refs({2149: 1890}, None) == {2149: 1890}

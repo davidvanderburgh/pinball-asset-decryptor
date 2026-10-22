@@ -53,6 +53,7 @@ static struct { int ours, due; } gbg;              /* PAD-658: Godzilla's route 
 static int disp_clip_ours;
 static int bd_v2 = 1;
 static int ck_ours, ck_last_ours;                                /* PAD-530: our own asks of the surface */
+static unsigned disp_foreground_effect(void) { return 0; }       /* PAD-639: no display of the game's over the TV */
 struct pm_mode { const char *name; };
 static const struct pm_mode *running, *current;                 /* PAD-658: whose the backdrop is */
 """

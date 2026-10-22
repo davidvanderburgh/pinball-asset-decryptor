@@ -52,8 +52,9 @@ def test_a_bank_gives_a_record_more_fragments_past_the_records():
         (2241, 0, None), (1239, 1, None), (2241, 2, 0), (2241, 3, 0), (1239, 4, 1)]
     assert [SB.record_of(p) for p in places] == [0, 1, 0, 0, 1]
     assert recs == places[:2] and d.count == 2
-    # five fragments in the table before the bodies, five descriptor slots after them
-    tables = 5 * SB.DEFAULT_STRIDE * SB.FRAG_SLOT + 16
+    # five fragments in the table before the bodies (which start past room for
+    # MD.GROW_SLOTS of them, PAD-677), five descriptor slots after them
+    tables = MD.GROW_SLOTS * SB.DEFAULT_STRIDE * SB.FRAG_SLOT + 16
     assert recs[0].body_off == MD.align16(SB.HDR_LEN + tables) + MD.BODY_PAD
     desc0 = MD.align16(recs[1].body_off + 500 + MD.BODY_PAD)
     assert [p.desc_off for p in places] == [desc0 + SB.DESC_SLOT * n for n in range(5)]

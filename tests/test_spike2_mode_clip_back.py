@@ -381,15 +381,25 @@ int main(void)
     printf("waits %d\n", ck.lost);
     ticks(11, 100);
     printf("on %d\n", clip.on);
+    printf("-- a skill shot: effect 392 plays its hat toss once and holds its picture over the last frame\n");
+    tick(2000);
+    { unsigned str = std_string("SkillShot_Bond_BrownTrilby"); set_video(&surf_obj, &str); play(&surf_obj, 0, -1); }
+    fx_now = 392;
+    ticks(34, 100);                                /* 3 s: the toss is over, the surface idle; the picture still up */
+    printf("idle %d waits %d\n", state != 2, ck.lost);
+    fx_now = 0; tick(16);                          /* the effect ends: ours */
+    printf("on %d\n", clip.on);
     printf("done\n");
     return 0;
 }
 """
 
 
-def test_a_loop_under_a_display_effect_of_the_games_stays_until_it_ends(tmp_path):
+def test_a_clip_under_a_display_effect_of_the_games_stays_until_it_ends(tmp_path):
     # PAD-639 (luvthatapex, Bond LE): the spinner's satellite is a see-through picture over the game's Diamond_EarthSpin
-    # loop for as long as the spinner spins; the one pass put the mode's clip back under the satellite after 3 s
+    # loop for as long as the spinner spins; the one pass put the mode's clip back under the satellite after 3 s.
+    # Round 2 (on v1.220.1): a skill shot award plays its hat toss ONCE and keeps its picture over the toss's last frame
+    # until the surface is idle; ours back at the toss's end kept the effect (and its picture) up for good
     src = RUNTIME.read_text(encoding="utf-8")
     parts = [_ck_struct(src)] + [_lift(src, s) for s in (
         "static long long ck_ms(const char *which, void *surf)", "static int ck_mode_runs(void)",
@@ -408,8 +418,19 @@ def test_a_loop_under_a_display_effect_of_the_games_stays_until_it_ends(tmp_path
         "PLAY PadMode_long_Clip", "SEEK", "on 1",
         "-- a loop with no effect over it: one pass, as before",
         "PLAY BondWomen_007_Loop (looped)", "waits 1",
+        "PLAY PadMode_long_Clip", "SEEK", "on 1",
+        "-- a skill shot: effect 392 plays its hat toss once and holds its picture over the last frame",
+        "PLAY SkillShot_Bond_BrownTrilby", "idle 1 waits 1",    # not back at the toss's end: the picture is up
         "PLAY PadMode_long_Clip", "SEEK", "on 1", "done"]
     assert 19000 <= seeks[0] <= 19200                           # 4 s in + 15 s under the game's: where it would be
+    assert seeks[2] - seeks[1] >= 2000 + 3400                   # where it would be after the skill shot's 3.4 s
+
+
+def test_the_backdrop_loop_waits_for_a_display_of_the_games_too():
+    # the backdrop loop goes back on an idle surface: not while the game's effect holds its clip's last frame there
+    body = _lift(RUNTIME.read_text(encoding="utf-8"), "static void bd2_tick(void)\n{")
+    assert "if (!ck_last_ours && disp_foreground_effect()) return;" in body
+    assert body.index("disp_foreground_effect()") > body.index("if (bd.pending) { bd2_play(surf); return; }")
 
 
 FX_HEAD = r"""

@@ -1205,6 +1205,89 @@ static void sound_fades_tick(void)
     }
 }
 
+/* ---- PAD-678: a request ducked under another, the way the game ducks its music -------------
+ * The game's mixer takes "duck group" levels off a voice that listens to the group, and a sound's
+ * own descriptor raises a group while it plays (Bond LE 1.06, read and emulator-measured: its music
+ * listens to group 0, a speech line raises it 20 steps, a clip's effect sound 48). pm_sound_duck
+ * takes `steps` more off every voice playing `request` (on top of the voice's own volume step),
+ * ramped over `ms`; steps 0 ramps it back. The voice's own step is read when a duck starts and
+ * again whenever the descriptor has set it anew (a restart), so the duck never moves the base. */
+#define DUCKS_MAX 4
+static struct { unsigned request; int base, from, to, now; unsigned long t0, ms; } ducks[DUCKS_MAX];
+
+static int fading(unsigned request)
+{
+    int i;
+    for (i = 0; i < FADES_MAX; i++) if (fades[i].request == request) return 1;
+    return 0;
+}
+
+/* every voice of every channel playing `request` to volume step `step` exactly */
+static void set_voices(unsigned request, int step)
+{
+    long o_req = pm_port_value("sound_channel_request", -1), o_voices = pm_port_value("sound_channel_voices", -1),
+         o_vp = pm_port_value("sound_channel_voice_ptrs", -1), o_vol = pm_port_value("sound_voice_volume", -1),
+         n_ch = pm_port_value("sound_channel_count", 8);
+    int i, b;
+    if (!sound_channel(0) || o_req < 0 || o_voices < 0 || o_vp < 0 || o_vol < 0) return;
+    if (step > 255) step = 255;
+    if (step < 0) step = 0;
+    for (i = 0; i < n_ch; i++) {
+        unsigned char *c = sound_channel(i);
+        unsigned bits;
+        if (!c || !(bits = c[o_voices]) || *(unsigned short *)(c + o_req) != request) continue;
+        for (b = 0; b < 8; b++) {
+            unsigned char *v;
+            if (!(bits >> b & 1u)) continue;
+            v = (unsigned char *)(unsigned long)*(unsigned *)(c + o_vp + 4 * b);
+            if (v) *(unsigned short *)(v + o_vol) = (unsigned short)step;
+        }
+    }
+}
+
+int pm_sound_duck(unsigned request, unsigned steps, unsigned ms)
+{
+    int i, free_i = -1, base;
+    if (!request || steps > 255) return 0;
+    for (i = 0; i < DUCKS_MAX; i++) {
+        if (ducks[i].request == request) { free_i = i; break; }
+        if (!ducks[i].request && free_i < 0) free_i = i;
+    }
+    if (free_i < 0) return 0;
+    if (ducks[free_i].request != request) {
+        if (!steps) return 1;                        /* nothing ducked: nothing to bring back */
+        if ((base = fade_voices(request, -1)) < 0) return 0;     /* not playing, or no voice offsets */
+        ducks[free_i].base = base;
+        ducks[free_i].now = 0;
+    }
+    if (ducks[free_i].request == request && ducks[free_i].to == (int)steps) return 1;
+    ducks[free_i].from = ducks[free_i].now;
+    ducks[free_i].to = (int)steps;
+    ducks[free_i].t0 = pm_ms();
+    ducks[free_i].ms = ms;
+    ducks[free_i].request = request;
+    return 1;
+}
+
+/* every tick, after the fades: a fade or a stop ends a duck (the fade starts from where the duck is) */
+static void sound_ducks_tick(void)
+{
+    unsigned long now = pm_ms(), el;
+    int i, step;
+    for (i = 0; i < DUCKS_MAX; i++) {
+        unsigned r = ducks[i].request;
+        if (!r) continue;
+        if (fading(r) || !pm_sound_active(r)) { ducks[i].request = 0; continue; }
+        step = fade_voices(r, -1);
+        if (step >= 0 && step != ducks[i].base + ducks[i].now) ducks[i].base = step;   /* set anew: a restart */
+        el = now - ducks[i].t0;
+        ducks[i].now = el >= ducks[i].ms ? ducks[i].to
+                     : ducks[i].from + (int)((ducks[i].to - ducks[i].from) * (long)el / (long)ducks[i].ms);
+        set_voices(r, ducks[i].base + ducks[i].now);
+        if (!ducks[i].now && !ducks[i].to) ducks[i].request = 0;      /* all the way back */
+    }
+}
+
 /* The play chain resolves a request to an 8-byte container key and looks it up (item 130);
  * while armed, the lookup hook points it at OUR key. A handoff between two threads that
  * fails closed: at worst one callout plays the stock sound. */
@@ -2366,7 +2449,13 @@ static void ck_idle_tick(void);           /* PAD-530: the game's main-play video
  * 3 s, under the satellite. So while a FOREGROUND effect of the game has the screen (the manager's effect now, `data
  * display_effects`, is one whose table record lacks the background flag 1 - Bond Women's 007 SCORING, effect 226, has
  * it, as the in-game display 29 does) the game's loop stays; once that effect is over, the mode's clip comes back at
- * once (the game asks for its main-play video then too). A port without `data display_effects` keeps the one pass. */
+ * once (the game asks for its main-play video then too). A port without `data display_effects` keeps the one pass.
+ * PAD-639 round 2 (luvthatapex on v1.220.1: "skill shots ... are covering the film clips"): a clip the game plays ONCE
+ * can have a display over it too. A skill shot award (effects 392-394, priority 193) plays its hat toss on this surface
+ * and then holds "CLASSIFIED SKILL SHOT" and its hats over the clip's last frame until the surface is idle (3.4 s in
+ * the emulator). The mode's clip went back the moment the hat toss ended; with the surface playing again the effect
+ * never ended, and its picture sat over the mode's video for the rest of the mode. So the wait is for any clip of the
+ * game's while a foreground effect has the screen, and the backdrop loop (bd2_tick) waits the same way. */
 #define CK_END_MS 500                     /* this close to its end, a clip counts as over */
 #define CK_LOOP_MS 3000                   /* a loop of the game's is shown this long at most, then ours comes back */
 static struct {
@@ -2520,18 +2609,21 @@ static void ck_tick(void)
     }
     surf = clip2_surface();
     if (!surf) return;
-    if (ck.loop && !ck.back) {            /* a loop of the game's: one pass of it, at most CK_LOOP_MS */
+    if (!ck.back) {                       /* PAD-639: a display of the game's over the TV: its clip stays till it ends */
         unsigned fx = disp_foreground_effect();
-        if (fx) {                         /* PAD-639: the backdrop of a display of the game's over the TV: it stays */
-            if (!ck.fx) say("clip: the game's display effect %u is over its loop \"%.60s\" - \"%s\" waits for its end",
+        if (fx) {
+            if (!ck.fx) say("clip: the game's display effect %u is over its clip \"%.60s\" - \"%s\" waits for its end",
                             fx, ck.game, ck.name);
             ck.fx = fx;
             return;
         }
         if (ck.fx) {
             say("clip: the game's display effect %u is over - \"%s\" comes back", ck.fx, ck.name);
-            ck.back = 1;
+            ck.fx = 0;
+            if (ck.loop) ck.back = 1;     /* (a clip it plays once is still waited out) */
         }
+    }
+    if (ck.loop && !ck.back) {            /* a loop of the game's: one pass of it, at most CK_LOOP_MS */
         if (ck.loop_len <= 0) ck.loop_len = ck_ms("surface_duration", surf);
         if (pm_ms() - ck.loop_ms >= (unsigned long)(ck.loop_len > 0 && ck.loop_len < CK_LOOP_MS ? ck.loop_len : CK_LOOP_MS))
             ck.back = 1;
@@ -3225,6 +3317,7 @@ static void bd2_tick(void)
     if (bd.pending) { bd2_play(surf); return; }
     if (pm_ms() - bd.since < 500) return;  /* just played: the surface may not say "playing" yet */
     if (((int (*)(void *))(unsigned long)fn("surface_state"))(surf) == (int)pm_port_value("surface_playing", 2)) return;
+    if (!ck_last_ours && disp_foreground_effect()) return;   /* PAD-639: a display of the game's holds its clip's end */
     bd2_play(surf);                       /* its end, the one-shot's or the game's clip over: the loop (again) */
 }
 
@@ -8771,6 +8864,7 @@ static void on_tick(unsigned *r)
     clip_tick();
     sb_tick();                                /* PAD-521: the status bar held */
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
+    sound_ducks_tick();                       /* PAD-678: a duck after the fades, which end it */
     sound_swaps_tick();                       /* item 163: swapped carrier keys come back */
     events_deliver();
     event_census();                           /* PAD-420: `value event_census 1` */

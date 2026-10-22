@@ -1040,16 +1040,28 @@ int pm_sound_stop(unsigned request)
 
 /* A request record is 20 bytes: three pointers (the sid list at +8), then +16 priority and
  * +17 flags, both copied into the channel when it plays (the worker, item 150). The table is
- * `data sound_requests`, the number of requests the u32 at `data sound_request_count`. */
+ * `data sound_requests`, the number of requests the u32 at `data sound_request_count`.
+ * PAD-682: the card's own pair of every request changed is kept the first time it changes, for
+ * pm_sound_priority_stock. */
+#define PRIO_STOCK_MAX 48
+static struct { unsigned request; int pair; } prio_stock[PRIO_STOCK_MAX];
+
 int pm_sound_priority(unsigned request, int priority, int flags)
 {
     unsigned table = data("sound_requests"), count = data("sound_request_count");
     unsigned char *rec;
-    int old;
+    int old, i;
     if (!table || !count || !request || request >= *(unsigned *)(unsigned long)count) return -1;
     rec = (unsigned char *)(unsigned long)(table + request * 20);
     if (!*(unsigned *)(rec + 8) || rec[16] > 9 || rec[19] != 0) return -1;
     old = rec[16] << 8 | rec[17];
+    if ((priority >= 0 && priority != rec[16]) || (flags >= 0 && flags != rec[17])) {
+        for (i = 0; i < PRIO_STOCK_MAX && prio_stock[i].request && prio_stock[i].request != request; i++) ;
+        if (i < PRIO_STOCK_MAX && !prio_stock[i].request) {
+            prio_stock[i].pair = old;
+            prio_stock[i].request = request;
+        }
+    }
     if (priority >= 0) rec[16] = (unsigned char)priority;
     if (flags >= 0) rec[17] = (unsigned char)flags;
     return old;
@@ -1372,6 +1384,24 @@ static void sound_swaps_tick(void)
         if (swaps[i].old >= 0) pm_sound_priority(r, swaps[i].old >> 8, swaps[i].old & 0xff);
     }
     swaps_live = live;
+}
+
+/* PAD-682: the card's own priority and flags back on `request` (as pm_sound_priority first found them), and on a
+ * swap still armed on it, which would otherwise put back what it found when it was armed. A carrier the census never
+ * heard the game play can still be one the game plays (Bond LE 1.06: music carrier 94 is Bird One Multiball's
+ * music); with its steal flag left cleared, the game's next music could not take the bus from it and it played on
+ * through the rest of the game. Returns the pair it had, or -1 without a request table. */
+int pm_sound_priority_stock(unsigned request)
+{
+    int i, j;
+    for (i = 0; i < PRIO_STOCK_MAX && prio_stock[i].request; i++) {
+        int pair = prio_stock[i].pair;
+        if (prio_stock[i].request != request) continue;
+        for (j = 0; j < SWAPS_MAX; j++)
+            if (swaps[j].request == request && swaps[j].old >= 0) swaps[j].old = pair;
+        return pm_sound_priority(request, pair >> 8, pair & 0xff);
+    }
+    return pm_sound_priority(request, -1, -1);   /* never changed: it has its own */
 }
 
 static int key_is(const unsigned char *a, const unsigned char *b)

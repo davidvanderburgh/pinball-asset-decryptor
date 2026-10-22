@@ -608,11 +608,11 @@ int pm_sound_fade(unsigned request, unsigned ms)
     snd_drop(request);
     return was;
 }
-/* PAD-678's music duck: the desk has no voice offsets, so a mode's music is never ducked here */
 int pm_sound_duck(unsigned request, unsigned steps, unsigned ms)
 {
-    (void)request; (void)steps; (void)ms;
-    return 0;
+    if (snd_find(request) < 0) return 0;
+    printf("%6lu DUCK %u %u %u\n", now_ms, request, steps, ms);
+    return 1;
 }
 int pm_sound_sid(unsigned request, unsigned sid)
 {
@@ -651,6 +651,15 @@ int pm_sound_priority(unsigned request, int priority, int flags)
         snd_prio[i].pair = ((priority >= 0 ? priority : old >> 8) << 8) | (flags >= 0 ? flags : (old & 0xff));
         printf("%6lu PRIO %u %d %d\n", now_ms, request, snd_prio[i].pair >> 8, snd_prio[i].pair & 0xff);
     }
+    return old;
+}
+int pm_sound_priority_stock(unsigned request)
+{
+    int i, old;
+    for (i = 0; i < snd_prio_n && snd_prio[i].req != request; i++) ;
+    if (i == snd_prio_n) return -1;
+    old = snd_prio[i].pair;
+    snd_prio[i].pair = (request == MUSIC_CARRIER || request == GAME_MUSIC) ? (1 << 8 | 1) : (2 << 8 | 1);
     return old;
 }
 int pm_stock_mode_running(unsigned kinds)

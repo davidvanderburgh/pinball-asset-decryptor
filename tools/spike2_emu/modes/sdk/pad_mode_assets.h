@@ -548,9 +548,10 @@ static PA_UNUSED void pa_music_start_now(void)
 static PA_UNUSED void pa_music_begin(struct pa_assets *a)
 {
     unsigned reqs[8], buses[8], carry;
-    int n, i;
+    int n, i, fading;
     if (!a->music) return;
     carry = pa_music.after_game;          /* the last mode's music still fading: the game's music */
+    fading = pa_music.after_request == a->music;
     pa_music.after_request = pa_music.after_game = 0;
     pa_music.request = a->music;
     pa_music.sid = a->music_sid;
@@ -574,6 +575,13 @@ static PA_UNUSED void pa_music_begin(struct pa_assets *a)
         pm_sound_fade(pa_music.game, 250);
         pa_music.start_due = pm_ms() + PA_MUSIC_WAIT_MS;
         pm_log("own sound: the game's music %u fades out (250 ms) before music %u starts", pa_music.game, a->music);
+    } else if (!fading && pm_sound_active(a->music)) {
+        /* PAD-682: the game's own play of the carrier (Bond LE: Bird One Multiball's music is 94): faded first, or
+         * ours would never start - the engine does not start a request that still sounds */
+        pm_sound_fade(a->music, 250);
+        pa_music.game = carry;
+        pa_music.start_due = pm_ms() + PA_MUSIC_WAIT_MS;
+        pm_log("own sound: the game's own music on carrier %u fades out (250 ms) before the mode's starts", a->music);
     } else {
         pa_music.game = carry;
         pa_music_start_now();
@@ -696,6 +704,16 @@ static PA_UNUSED int pa_music_bed(struct pa_assets *a, const char *name)
     return 1;
 }
 
+/* PAD-682: the carrier's own priority and steal flag back once the mode's music is over: the game may play that
+ * request itself (Bond LE 1.06: music carrier 94 is Bird One Multiball's music), and with the flag left cleared its
+ * next music could not take the bus back - Bird One's played on through the rest of the game. */
+static PA_UNUSED void pa_music_stock(unsigned request)
+{
+    int was = pm_sound_priority_stock(request), now = pm_sound_priority(request, -1, -1);
+    if (was >= 0 && now != was)
+        pm_log("own sound: music %u has its own priority and flags again (%d, %d)", request, now >> 8, now & 0xff);
+}
+
 static PA_UNUSED void pa_music_finish(struct pa_assets *a)
 {
     int playing;
@@ -731,6 +749,7 @@ static PA_UNUSED void pa_music_after(void)
     if (!pa_music.after_request || pm_ms() < pa_music.after_due) return;
     if (pm_sound_active(pa_music.after_request)) { pa_music.after_due = pm_ms() + 50; return; }
     pm_sound_sid(pa_music.after_request, 0);
+    pa_music_stock(pa_music.after_request);
     if (pa_music.after_game && pm_in_game())
         pm_log("own sound: music %u (%s's) faded out; the game's music %u %s", pa_music.after_request,
                pa_music.after_owner ? pa_music.after_owner : "?", pa_music.after_game,

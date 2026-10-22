@@ -496,6 +496,39 @@ def test_the_mode_music_ducks_under_its_own_calls():
         assert steps in text and call in text and music in text, path
 
 
+def test_the_music_carrier_gets_its_own_steal_flag_back():
+    """PAD-682 (Bond LE 1.06: music carrier 94 is Bird One Multiball's own music, played through the game's music
+    process 0x19c91c, which no census reached): a mode clears the carrier's steal flag while its music plays, and
+    with it left cleared the game's next music could not take the bus back - Bird One's music played on through the
+    rest of the game. The runtime keeps each request's own pair the first time it changes it and puts it back (on a
+    swap still armed too); both music paths do that once the mode's music has faded, and fade the game's own play of
+    the carrier out before the mode's music starts on it."""
+    h = open(os.path.join(SDK, "pad_mode.h"), encoding="utf-8").read()
+    c = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
+    decl = "int pm_sound_priority_stock(unsigned request);"
+    assert decl in h and decl[:-1] + chr(10) + "{" in c
+    prio = c[c.index("int pm_sound_priority(unsigned request, int priority, int flags)" + chr(10)):]
+    prio = prio[:prio.index(chr(10) + "}" + chr(10))]
+    assert "prio_stock[i].pair = old;" in prio and prio.index("prio_stock[i].pair = old;") < prio.index("rec[16] = ")
+    stock = c[c.index("int pm_sound_priority_stock(unsigned request)" + chr(10)):]
+    stock = stock[:stock.index(chr(10) + "}" + chr(10))]
+    assert "swaps[j].old = pair;" in stock and "pm_sound_priority(request, pair >> 8, pair & 0xff)" in stock
+    mf = open(os.path.join(SDK, "mode_file.c"), encoding="utf-8").read()
+    after = mf[mf.index("static void own_music_after_tick(void)"):]
+    after = after[:after.index(chr(10) + "}" + chr(10))]
+    assert after.index("pm_sound_active(music.after_request)") < after.index("pm_sound_priority_stock(music.after_request)")
+    pa = open(os.path.join(SDK, "pad_mode_assets.h"), encoding="utf-8").read()
+    after = pa[pa.index("static PA_UNUSED void pa_music_after(void)"):]
+    after = after[:after.index(chr(10) + "}" + chr(10))]
+    assert after.index("pm_sound_active(pa_music.after_request)") < after.index("pa_music_stock(pa_music.after_request);")
+    for text, begin, carrier in ((mf, "static void own_sounds_start(", "S->music"),
+                                 (pa, "static PA_UNUSED void pa_music_begin(", "a->music")):
+        body = text[text.index(begin):]
+        body = body[:body.index(chr(10) + "}" + chr(10))]
+        assert "} else if (!fading && pm_sound_active(%s)) {" % carrier in body, begin
+        assert "pm_sound_fade(%s, 250);" % carrier in body, begin
+
+
 def test_mode_file_c_fades_a_call_out_at_its_stop():
     """A call whose own sound is over is faded (40 ms) before it is stopped, never cut (item 150
     follow-up: a stop mid-sample is a click)."""

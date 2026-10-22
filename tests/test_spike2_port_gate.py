@@ -265,6 +265,9 @@ static volatile int challenge_ours;
 static unsigned long challenge_ours_ms;
 unsigned long pm_ms(void) { return 0; }
 static void challenge_ball_start(void) {}
+static volatile int chg_end_owed;                    /* PAD-663's, not under test here */
+static volatile long chg_game_tid;
+static void chg_end_ball_now(const char *from) {}
 @SWITCHES@
 @DISPATCH@
 int main(void)

@@ -871,6 +871,12 @@ static void own_music_after_tick(void)
     if (!music.after_request || pm_ms() < music.after_due) return;
     if (pm_sound_active(music.after_request)) { music.after_due = pm_ms() + 50; return; }
     pm_sound_sid(music.after_request, 0);
+    {   /* PAD-682: the carrier's own priority and steal flag back - the game may play it itself (Bond LE: 94 is Bird
+         * One Multiball's music), and with the flag left cleared its next music could not take the bus back */
+        int was = pm_sound_priority_stock(music.after_request), now = pm_sound_priority(music.after_request, -1, -1);
+        if (was >= 0 && now != was)
+            pm_log("own sound: music %u has its own priority and flags again (%d, %d)", music.after_request, now >> 8, now & 0xff);
+    }
     if (music.after_game && pm_in_game()) {
         pm_log("own sound: music %u faded out; the game's music %u %s", music.after_request, music.after_game,
                pm_sound(music.after_game) ? "is playing again" : "could NOT be started again");
@@ -982,7 +988,8 @@ static void own_sounds_clear(struct slot *M)
  * and the calls go to priority 3 (shot) and 4 (start, end), also WITHOUT the steal flag (item
  * 150 follow-up: with it, the game's equal-priority speech and the mode's own next call cut a
  * call mid-sound, a click each time). Only a handful of the game's requests sit at 4 or above.
- * Carriers are requests the game never plays, so this changes nothing the game plays itself.
+ * Carriers are requests no census heard the game play; the music's own pair is put back once it
+ * has faded at the end all the same (PAD-682: Bond LE's carrier 94 is Bird One Multiball's music).
  * A call swapped in (item 163) takes its priority for each play only (pm_sound_swap).
  * A port without the request table leaves every carrier as it is. */
 static const unsigned own_prio[3] = { 4, 3, 4 };      /* start, shot, end */
@@ -1027,13 +1034,14 @@ static void own_sounds_start(struct slot *M)
 {
     struct own_sounds *S = &own_sounds[M->index];
     unsigned reqs[8], buses[8], carry;
-    int n, i;
+    int n, i, fading;
     S->music_restarts = 0;
     S->shot_until = 0;
     own_sounds_priorities(S);
     if (S->start) own_call(S->start, own_swap_of(S, S->start), own_sid_of(S, S->start), S->start_ms, own_prio[0], 1500, "start call");
     if (!S->music) return;
     carry = music.after_game;           /* the last mode's music still fading: the game's music */
+    fading = music.after_request == S->music;
     music.after_request = music.after_game = 0;         /* a new start: nothing to put back yet */
     music.request = S->music;
     music.sid = S->music_sid;
@@ -1054,6 +1062,13 @@ static void own_sounds_start(struct slot *M)
         pm_sound_fade(music.game, 250);
         music.start_due = pm_ms() + MUSIC_FADE_IN_WAIT_MS;
         pm_log("own sound: the game's music %u fades out (250 ms) before music %u starts", music.game, S->music);
+    } else if (!fading && pm_sound_active(S->music)) {
+        /* PAD-682: the game's own play of the carrier (Bond LE: Bird One Multiball's music is 94): faded first, or
+         * ours would never start - the engine does not start a request that still sounds */
+        pm_sound_fade(S->music, 250);
+        music.game = carry;
+        music.start_due = pm_ms() + MUSIC_FADE_IN_WAIT_MS;
+        pm_log("own sound: the game's own music on carrier %u fades out (250 ms) before the mode's starts", S->music);
     } else {
         music.game = carry;
         own_music_start_now();

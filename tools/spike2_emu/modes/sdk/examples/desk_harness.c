@@ -653,6 +653,15 @@ int pm_sound_priority(unsigned request, int priority, int flags)
     }
     return old;
 }
+int pm_sound_priority_stock(unsigned request)
+{
+    int i, old;
+    for (i = 0; i < snd_prio_n && snd_prio[i].req != request; i++) ;
+    if (i == snd_prio_n) return -1;
+    old = snd_prio[i].pair;
+    snd_prio[i].pair = (request == MUSIC_CARRIER || request == GAME_MUSIC) ? (1 << 8 | 1) : (2 << 8 | 1);
+    return old;
+}
 int pm_stock_mode_running(unsigned kinds)
 {
     if ((kinds & PM_STOCK_BATTLE) && battle) return PM_STOCK_BATTLE;

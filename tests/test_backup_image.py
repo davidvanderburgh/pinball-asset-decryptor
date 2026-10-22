@@ -161,3 +161,66 @@ def test_emulate_a_card_image_starts_as_before(tmp_path, monkeypatch, rig_on):
         w.call("emulate.toggle")
         _wait(w, lambda: any("watch.sh" in " ".join(c) for c in rec.calls))
         _wait(w, lambda: svc._proc is None and not svc._starting)
+
+
+# ---------------------------------------------------------------------------
+# Emulate: a file that is no card image at all (PAD-659, D:\stern-spike2.dtb)
+# ---------------------------------------------------------------------------
+
+def _mbr():
+    b = bytearray(4096)
+    b[510:512] = b"\x55\xaa"
+    return bytes(b)
+
+
+def test_not_a_card_names_a_boot_partition_file(tmp_path):
+    dtb = tmp_path / "stern-spike2.dtb"
+    dtb.write_bytes(b"\xd0\x0d\xfe\xed" + bytes(1000))
+    zimg = tmp_path / "zImage"
+    zimg.write_bytes(bytes(0x24) + b"\x18\x28\x6f\x01" + bytes(1000))
+    for p in (dtb, zimg):
+        why = B.not_a_card(str(p))
+        assert "one of the files on the card's boot partition" in why
+        assert "Save card as image" in why
+    # named like a card image, still not one
+    odd = tmp_path / "card.raw"
+    odd.write_bytes(b"\xd0\x0d\xfe\xed" + bytes(1000))
+    assert "boot partition" in B.not_a_card(str(odd))
+
+
+def test_not_a_card_names_a_file_without_a_partition_table(tmp_path):
+    p = tmp_path / "notes.txt"
+    p.write_bytes(b"hello" * 200)
+    assert "has no partition table" in B.not_a_card(str(p))
+
+
+def test_not_a_card_leaves_card_images_alone(tmp_path):
+    for name, data in (("card.raw", _mbr()), ("card.iso", _mbr()),
+                       ("copying.raw", bytes(4096)),      # still being written
+                       ("card.img", bytes(512)), ("card.bin", b"")):
+        p = tmp_path / name
+        p.write_bytes(data)
+        assert B.not_a_card(str(p)) == "", name
+    assert B.not_a_card(str(tmp_path / "gone.dtb")) == ""
+    assert B.not_a_card(r"\.\PHYSICALDRIVE1") == ""
+
+
+def test_not_a_card_still_names_backups(tmp_path):
+    p = tmp_path / "card.mrimgx"
+    p.write_bytes(_NOISE)
+    assert "Macrium Reflect backup" in B.not_a_card(str(p))
+
+
+def test_emulate_refuses_a_boot_partition_file(tmp_path, monkeypatch, rig_on):
+    card = tmp_path / "stern-spike2.dtb"
+    card.write_bytes(b"\xd0\x0d\xfe\xed" + bytes(4000))
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        rec = _patch(svc, monkeypatch)
+        w.run(lambda: w.window.emulate_card_var.set(str(card)))
+        _wait(w, lambda: bool(w.state("emulate").get("not_card")))
+        assert "boot partition" in w.state("emulate")["not_card"]
+        w.call("emulate.toggle")
+        w.drain()
+        assert "boot partition" in svc.last_refusal
+        assert not any("watch.sh" in " ".join(c) for c in rec.calls)

@@ -411,6 +411,8 @@ def sound_modes_of(data):
         out["mode_random"] = mrandom
     if attract:
         out["attract"] = attract
+        if raw.get("attract_gap"):
+            out["attract_gap"] = raw["attract_gap"]      # PAD-641 round 2
     return out
 
 
@@ -473,9 +475,10 @@ def merge_sound_modes(data, rec):
         elif not str(names[i] or "").strip():
             names[i] = name
     # PAD-641: the record's flipper sounds in attract, when it has any, in place of these
-    attract = list(here.get("attract") or [])
+    attract, gap = list(here.get("attract") or []), here.get("attract_gap")
     if rec.get("attract"):
         attract = [f for f in rec["attract"] if isinstance(f, str) and f.strip()]
+        gap = rec.get("attract_gap")
         n += 1
     if not n and names == here["names"]:
         return 0
@@ -527,5 +530,7 @@ def merge_sound_modes(data, rec):
             out["mode_turn_levels"] = mode_levels
     if attract:
         out["attract"] = attract
+        if gap:
+            out["attract_gap"] = gap
     data[SOUND_MODES_KEY] = out
     return n

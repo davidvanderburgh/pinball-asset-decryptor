@@ -673,3 +673,6 @@ value challenge_scores_cat   1
 # PAD-663: the champion page function(s) (each called per category; the attract mode's is the one it calls): a mode's challenge champion is shown on it after the lowest category the attract mode shows
 site  challenge_pages_0     0x000212e8 0xe30dcafc 0xe340c08a
 site  challenge_pages_1     0x00067e70 0xe92d4ff0 0xe24dd034
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x00473518 0xe92d4ff0 0xe24dd0bc

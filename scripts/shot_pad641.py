@@ -57,7 +57,7 @@ def _project(scratch):
         own.append(os.path.join(mine, name))
         shutil.copy2(os.path.join(EXTRACT, "audio", src), own[-1])
     with open(os.path.join(dst, ".staged_changes.json"), "w", encoding="utf-8") as f:
-        json.dump({"sound_modes": {"names": [], "slots": {}, "attract": own}}, f, indent=2)
+        json.dump({"sound_modes": {"names": [], "slots": {}, "attract": own, "attract_gap": 30}}, f, indent=2)
     return dst
 
 
@@ -71,7 +71,8 @@ def main():
     proc, url = S._serve(repo, scratch, project)
     api = lambda m, *a: webui_shot.api(url, m, *a)          # noqa: E731
     state = lambda: webui_shot.state(url)                    # noqa: E731
-    out = os.path.join(out_dir, ("after_" if after else "before_") + "audio_attract.png")
+    out = os.path.join(out_dir, ("after_" if after else "before_") + os.environ.get("PAD641_SHOT", "audio_attract")
+                       + ".png")
     from playwright.sync_api import sync_playwright
     try:
         with sync_playwright() as p:
@@ -101,6 +102,11 @@ def main():
                 btn.click()
                 time.sleep(1)
                 print("menu:", page.locator(".menu .mi").all_inner_texts(), flush=True)
+                gap = page.locator(".menu .mi:has-text('Time between sounds')").first
+                if gap.count():                  # round 2: the time between two, its submenu open
+                    gap.hover()
+                    time.sleep(1)
+                    print("menu now:", page.locator(".menu .mi").all_inner_texts(), flush=True)
             else:
                 print("no Attract flipper sounds button", flush=True)
             page.screenshot(path=out)

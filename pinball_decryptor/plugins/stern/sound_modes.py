@@ -118,6 +118,11 @@ SHOWN_MODES = 4
 #: is built under (:func:`attract_mode`; above :data:`TURN_BASE`, so the build treats it as a file in
 #: turn: cut to its carrier's length, matched to the carrier's loudness)
 ATTRACT_MAX = 16
+#: PAD-641 round 2: the times the Audio tab offers between two of them, in seconds (0: any time, once
+#: the last one has played), the owner's "only allow playing the flipper sounds every so often like 30
+#: seconds"; a project's own value is kept within 0..ATTRACT_GAP_MAX
+ATTRACT_GAPS = (0, 10, 30, 60, 120, 300)
+ATTRACT_GAP_MAX = 3600
 ATTRACT_BASE = 200
 #: PAD-645: the pseudo file the build adds after them, a short silence: the game's own sound at the
 #: press plays it instead (``aquiet`` in sounds.cfg), so only the project's file is heard
@@ -205,6 +210,8 @@ class Modes:
     mode_random: dict = field(default_factory=dict)
     mode_turn_levels: dict = field(default_factory=dict)
     attract: list = field(default_factory=list)    # PAD-641: [file 1, file 2, ...]
+    #: PAD-641 round 2: at least this many seconds from one of them to the next (0: any time)
+    attract_gap: int = 0
     #: PAD-641: the carrier's slot the attract files are built on (a build sets it; never saved)
     attract_rel: str = ""
     #: PAD-641: the build's carrier for them: ``{"request", "slot", "switches"}`` (never saved)
@@ -266,6 +273,16 @@ class Modes:
         if self.levels is None:
             return None
         return int((self.levels.get(rel) or {}).get(mode, 0) or 0)
+
+
+def clean_gap(v):
+    """PAD-641 round 2: a time between two flipper sounds as kept: whole seconds within
+    0..:data:`ATTRACT_GAP_MAX` (0 for junk)."""
+    try:
+        v = int(round(float(v)))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(ATTRACT_GAP_MAX, v))
 
 
 def attract_mode(k):
@@ -487,6 +504,7 @@ def clean(raw):
     attract = raw.get("attract")
     if isinstance(attract, (list, tuple)):
         out.attract = [f for f in attract if isinstance(f, str) and f.strip()][:ATTRACT_MAX]
+    out.attract_gap = clean_gap(raw.get("attract_gap")) if out.attract else 0
     levels = raw.get("levels")
     if not isinstance(levels, dict):
         out.levels = None
@@ -538,6 +556,8 @@ def to_json(modes):
             out["mode_turn_levels"] = ml
     if modes.attract:
         out["attract"] = list(modes.attract)
+        if modes.attract_gap:
+            out["attract_gap"] = int(modes.attract_gap)
     if modes.levels is not None:
         out["levels"] = {rel: {str(m): int(db) for m, db in sorted(v.items()) if db}
                          for rel, v in sorted(modes.levels.items()) if any(v.values())}
@@ -818,6 +838,8 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
             lines.append("afile\t%d\t%s\t%d" % (k, bytes(key).hex(), int(ms)))
         if attract.get("quiet"):
             lines.append("aquiet\t%s" % bytes(attract["quiet"]).hex())
+        if attract.get("gap_ms"):
+            lines.append("agap\t%d" % int(attract["gap_ms"]))      # PAD-641 round 2
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -839,6 +861,8 @@ REC_MTURN, REC_MRANDOM = "#mturn", "#mrandom"
 #: PAD-641: a flipper button sound in attract: ``#attract <k> <slot idx> <record idx> - <slot rel>
 #: <the file's own name>`` (the slot is the carrier's)
 REC_ATTRACT = "#attract"
+#: PAD-641 round 2: the time between two of them: ``#agap <seconds>``
+REC_AGAP = "#agap"
 #: PAD-608: a file in a sound bank names its record as ``<bank category>:<record idx>`` (an app
 #: before PAD-608 skips such a line: its record field is not a number)
 _BANK_HOST = re.compile(r"^(\d{1,2}):(\d+)$")
@@ -912,6 +936,8 @@ def card_record(modes, used):
     out += ["%s\t%d\t%d\t%s" % (REC_MRANDOM, m, mlanded[(rel, m)], _rec_word(rel))
             for rel in sorted(modes.mode_random) for m in sorted(modes.mode_random[rel])
             if (rel, m) in mlanded]
+    if modes.attract_gap and any(u.get("lines") and is_attract(u["mode"]) for u in used):
+        out.append("%s\t%d" % (REC_AGAP, int(modes.attract_gap)))
     return out
 
 
@@ -925,6 +951,7 @@ def read_card_record(text):
     sound bank has ``"bank"``, the bank's category, and ``"host"`` is the bank's record."""
     names, files, turns, rnd, attract, seen = {}, [], [], [], [], False
     mturns, mrnd = [], []
+    agap = 0
     for line in str(text or "").splitlines():
         f = line.split("\t")
         try:
@@ -972,6 +999,8 @@ def read_card_record(text):
                     attract.append(dict({"k": k, "slot": int(f[2]), "host": host, "rel": f[5],
                                          "name": f[6] if len(f) > 6 else ""},
                                         **({"bank": bank} if bank is not None else {})))
+            elif f[0] == REC_AGAP and len(f) >= 2:
+                agap = clean_gap(f[1])
         except ValueError:
             continue
     if not seen:
@@ -984,6 +1013,8 @@ def read_card_record(text):
             out["random"] = rnd
     if attract:
         out["attract"] = sorted(attract, key=lambda a: a["k"])
+        if agap:
+            out["attract_gap"] = agap
     if mturns:
         out["mode_turns"] = mturns
         if mrnd:

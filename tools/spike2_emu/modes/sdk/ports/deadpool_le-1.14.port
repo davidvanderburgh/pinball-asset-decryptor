@@ -495,3 +495,6 @@ value switch_edge_shots     0
 site  ball_launch         0x001921d0 0xe92d4010 0xe3074ea4
 value ball_launch_flag       12
 value ball_launch_wait_flag  13
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x00325de8 0xe92d4ff0 0xe24dd0c4

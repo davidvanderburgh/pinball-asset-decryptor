@@ -380,3 +380,122 @@ def test_the_chain_encode_takes_the_modes_and_the_flipper_sounds_levels_together
     assert E._chain_level_refs({2149: 1890, 2400: 7}, used) == {2149: 1890, 2400: 801, 2401: 46}
     assert E._chain_level_refs({}, used) == {2400: 801, 2401: 46}
     assert E._chain_level_refs({2149: 1890}, None) == {2149: 1890}
+
+
+# ---- round 2 (the owner: "Only allow playing the flipper sounds every so often like 30 seconds") -----
+def test_the_record_keeps_the_time_between_two_with_the_files():
+    m = SMo.clean({"attract": ["a.wav"], "attract_gap": "30"})
+    assert m.attract_gap == 30
+    assert SMo.to_json(m)["attract_gap"] == 30
+    assert SMo.clean({"attract_gap": 30}).attract_gap == 0                 # no files: nothing to space out
+    assert "attract_gap" not in SMo.to_json(SMo.clean({"attract": ["a.wav"]}))
+    assert [SMo.clean_gap(v) for v in ("x", -5, 12.4, 10 ** 6)] == [0, 0, 12, SMo.ATTRACT_GAP_MAX]
+    assert SMo.ATTRACT_GAPS[:3] == (0, 10, 30)
+
+
+def test_the_runtime_table_says_the_time_between_two():
+    a = bytes(range(8))
+    att = {"request": 1057, "key": b"C" * 8, "switches": [64, 63], "files": [(a, 800)], "gap_ms": 30000}
+    assert "agap\t30000" in SMo.cfg_text(0, 0, [], True, attract=att).splitlines()
+    att.pop("gap_ms")
+    assert not any(line.startswith("agap") for line in SMo.cfg_text(0, 0, [], True, attract=att).splitlines())
+
+
+def test_the_build_puts_the_time_between_two_in_the_table():
+    params = [{"idx": 46, "findkey": b"C" * 8}, {"idx": 80, "findkey": b"A" * 8, "grown": True}]
+    m = SMo.clean({"attract": ["a.wav"], "attract_gap": 60})
+    m.attract_rel, m.attract_plan = CARRIER, {"request": 1057, "slot": 46, "switches": [64, 63]}
+    used = [{"rel": CARRIER, "slot": 46, "mode": SMo.attract_mode(1), "host": 80, "frames": 35280}]
+    assert E._attract_lines(params, used, m, lambda *a, **k: None)["gap_ms"] == 60000
+    rec = SMo.read_card_record(SMo.cfg_text(0, 0, [], True, record=SMo.card_record(m, used)))
+    assert rec["attract_gap"] == 60
+
+
+def test_the_runtime_waits_the_time_between_two():
+    with open(RUNTIME, encoding="utf-8") as f:
+        c = f.read()
+    assert 'str_eq(f[0], "agap")' in c and "att_gap_line(f[1]);" in c
+    assert "return now + (att.gap_ms > d ? att.gap_ms : d);" in c
+    assert c.count("att.until = att_next(now, att.ms[") == 2         # a new press and the replay at the release
+
+
+def test_the_time_between_two_is_carried_with_the_files(tmp_path):
+    from pinball_decryptor.core import staged_changes as SC
+    from pinball_decryptor.core import mod_transfer as MT
+    rec = SC.sound_modes_of({"sound_modes": {"attract": ["a.wav"], "attract_gap": 30}})
+    assert rec["attract_gap"] == 30
+    tgt = {"sound_modes": {"attract": ["mine.wav"], "attract_gap": 10}}
+    SC.merge_sound_modes(tgt, rec)
+    assert tgt["sound_modes"]["attract"] == ["a.wav"] and tgt["sound_modes"]["attract_gap"] == 30
+    tgt = {}
+    MT._apply_sound_modes(tgt, {"sound_modes": {"matched": [], "remapped": [], "names": [], "levels": {},
+                                                "attract": ["a.wav"], "attract_gap": 120}}, {"sound_modes": {}},
+                          {}, False)
+    assert tgt["sound_modes"]["attract_gap"] == 120
+
+
+def test_the_audio_tab_sets_the_time_between_two(tmp_path, monkeypatch):
+    from tests.test_webui_audio import _open, _project, _sidecar, _wav as wav
+    from tests.webui_harness import web_app
+    monkeypatch.setattr(SMo, "offer", lambda project, rels, probe=True: ("not here", {}))
+    monkeypatch.setattr(SMo, "offer_turns", lambda project, rels, probe=True: ("not here", {}))
+    monkeypatch.setattr(SMo, "offer_attract", lambda project, probe=True: "")
+    proj = _project(tmp_path)
+    a = str(tmp_path / "mine" / "Shaken.wav")
+    wav(a)
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        _open(w, proj)
+        assert w.call("audio.attract_action", "gap:30") is False          # no files yet
+        w.answers.append(a)
+        assert w.call("audio.attract_action", "add") is True
+        st = w.state("audio")["attract"]
+        assert st["gap"] == 0
+        assert [g["label"] for g in st["gaps"]] == [
+            "Any time", "At most one every 10 seconds", "At most one every 30 seconds",
+            "At most one every 1 minute", "At most one every 2 minutes", "At most one every 5 minutes"]
+        assert w.call("audio.attract_action", "gap:30") is True
+        assert _sidecar(proj)["sound_modes"]["attract_gap"] == 30
+        st = w.state("audio")["attract"]
+        assert st["gap"] == 30 and st["tip"][-1] == "At most one every 30 seconds."
+        assert w.call("audio.attract_action", "gap:0") is True
+        assert "attract_gap" not in _sidecar(proj)["sound_modes"]
+
+
+def test_they_never_play_while_a_high_score_s_initials_are_entered():
+    """The owner: "Disallow playing attract mode sounds when entering high scores". The flipper buttons pick
+    the letters there, and the game's end-of-game high scores call runs until the initials are in: one
+    wrapper of it (shared with PAD-640's challenge scores) holds chg_scores_running for the whole call."""
+    with open(RUNTIME, encoding="utf-8") as f:
+        c = f.read()
+    assert c.count("hook_wrap(at, (void *)scores_wrap)") == 1               # wrapped once, for both
+    assert 'hook_wrap(fn("challenge_scores")' not in c
+    assert "if (chg_scores_on) return chg_scores_wrap(r0, r1, r2, r3);" in c
+    assert "|| !(chg_scores_game = scores_orig)) {" in c and "chg_scores_on = 1;" in c
+    edge = c[c.index("static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, "
+                     "unsigned mask)\n{"):]
+    edge = edge[:edge.index("\n}\n")]
+    assert edge.index("if (chg_scores_running) {") < edge.index("pm_sound(att.request);")
+    arm = c[c.index("static void att_arm(void)"):]
+    assert 'if ((!site("challenge_scores") && !site("game_scores")) || !scores_wrap_arm())' in arm[:arm.index("\n}\n")]
+    assert 'fn("challenge_scores") ? fn("challenge_scores") : fn("game_scores")' in c
+
+
+def test_every_shipped_port_names_the_game_s_end_of_game_high_scores():
+    """`site game_scores` on every build (PAD-641 round 2: 69 of 69, the older versions read off their cards), the
+    same function as `site challenge_scores` wherever a port has both."""
+    import glob
+    ports = sorted(glob.glob(os.path.join(HERE, "..", "tools", "spike2_emu", "modes", "sdk", "ports", "*.port")))
+    assert len(ports) >= 69
+    for p in ports:
+        port = MP.read_port(p)
+        assert "game_scores" in port["site"], os.path.basename(p)
+        if "challenge_scores" in port["site"]:
+            assert port["site"]["game_scores"] == port["site"]["challenge_scores"], os.path.basename(p)
+
+
+def test_a_derived_port_gets_the_game_s_end_of_game_high_scores(monkeypatch):
+    from pinball_decryptor.plugins.stern import portchallenge as PC
+    from pinball_decryptor.plugins.stern import portgen as G
+    assert G.generated("site", "game_scores 0x004e87dc 0xe92d4ff0 0xe24dd0bc")   # never carried from a reference
+    monkeypatch.setattr(PC, "_scores_fn", lambda e: None)
+    assert PC.game_scores(PC.Elf.__new__(PC.Elf)) == []

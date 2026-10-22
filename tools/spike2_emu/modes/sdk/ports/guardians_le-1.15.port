@@ -490,3 +490,6 @@ site  challenge_page_text   0x0034bad8 0xe92d4008 0xe30a3e7c
 site  challenge_page_yield  0x003e1e3c 0xe3013788 0xe3403067
 value challenge_page_cat    5
 value challenge_page_title  3242
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x00239a00 0xe92d4ff0 0xe24dd0bc

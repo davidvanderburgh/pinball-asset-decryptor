@@ -642,3 +642,6 @@ text  wizard_film_1   three modes started
 data  wizard_obj_2    0x007e7bf8   # ctavern_brawl, a multiball
 text  wizard_name_2   Tavern Brawl
 text  wizard_film_2   Dragon and Gelatinous Cube multiballs, a dungeon
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x004ee2e0 0xe92d4ff0 0xe24dd0bc

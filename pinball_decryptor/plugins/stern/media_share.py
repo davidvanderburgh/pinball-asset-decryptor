@@ -277,6 +277,8 @@ def save_music_modes(project, path):
         head["mode_random"] = mrnd                      # PAD-638: a music mode's own, at random
     if attract:
         head["attract"] = attract
+        if modes.attract_gap:
+            head["attract_gap"] = int(modes.attract_gap)
     every = {f for _r, _m, f in modes.files()} | set(modes.attract)
     _write_zip(path, head, [(mem, f) for f, mem in ((f, _member(members, f)) for f in every) if mem])
     out = {"slots": len(slots), "files": len(members), "gone": gone}
@@ -436,6 +438,8 @@ def load_music_modes(project, path):
         record["mode_random"] = mrnd
     if attract:
         record["attract"] = attract
+        if SMo.clean_gap(head.get("attract_gap")):
+            record["attract_gap"] = SMo.clean_gap(head.get("attract_gap"))
     return {"record": record, "loaded": len(slots), "files": len(cache), "found": found,
             "left": left, "about": head.get("from") or {}}
 
@@ -511,6 +515,7 @@ def put_music(project, record, keep_own=False):
         rec["slots"] = {rel: by for rel, by in rec["slots"].items() if by}
         if now.attract:                     # PAD-641: its own flipper sounds in attract stay
             rec.pop("attract", None)
+            rec.pop("attract_gap", None)
     data = staged_changes.load(project)
     n = staged_changes.merge_sound_modes(data, rec)
     if n:
@@ -647,6 +652,8 @@ def music_from_card(project, cfg_text):
         out["random"] = rnd
     if attract:
         out["attract"] = attract
+        if rec.get("attract_gap"):
+            out["attract_gap"] = rec["attract_gap"]
     return out, left
 
 
@@ -673,6 +680,8 @@ def _built_project_modes(card):
     attract = [f for f in modes.attract if os.path.isfile(f)]      # PAD-641
     if attract:
         rec["attract"] = attract
+        if modes.attract_gap:
+            rec["attract_gap"] = int(modes.attract_gap)
     if modes.levels is not None:
         rec["levels"] = {rel: {str(m): db for m, db in v.items() if str(m) in files.get(rel, {})}
                          for rel, v in modes.levels.items()}

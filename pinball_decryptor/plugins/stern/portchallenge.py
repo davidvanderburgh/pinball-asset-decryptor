@@ -1246,12 +1246,11 @@ def menu_live(e, names, on_flag):
 #: The entry lookup, (category, n) -> the n-th score entry:
 #:   mov r3,r0 ; movw r0 <map> ; push {r4,lr} ; movt r0 ; mov r4,r1 ; mov r1,r3 ; bl ; .. ; ldr r0,[r0,#28]
 #: and the end-of-game high scores, the one function that loads the table with movwhi/movthi.
-def scores_lines(e, n_challenges):
-    """The `site challenge_scores` / `challenge_score_entry` / `challenge_scores_gate` lines, `value
-    challenge_scores_cat` (HIGHEST SCORES: every challenge game's) and, where the build has one "... CHALLENGE
-    CHAMPION" category per challenge (Bond, Stranger Things), `value challenge_scores_cat_<n>`. Empty when the build
-    has not exactly one of each function, or neither the per-challenge categories nor the gate."""
-    w, base = e.words, e.text_va
+def _scores_fn(e):
+    """``(top, ents, cats, count_at, table)`` of the game's end-of-game high scores: *top* its first word's index (the
+    push) in the text, or ``None`` when the build has not exactly one of each function (the category lookup and
+    the entry lookup) or the table does not read."""
+    w = e.words
     n = len(w)
     cats = [k for k in range(n - 13) if w[k] == 0xE3500000 and w[k + 1] == 0xE92D4008
             and (w[k + 3] & 0xFFF0F000) == 0xE3003000 and (w[k + 4] & 0xFFF0F000) == 0xE3403000
@@ -1262,20 +1261,49 @@ def scores_lines(e, n_challenges):
             and w[k + 2] == 0xE92D4010 and (w[k + 3] & 0xFFF0F000) == 0xE3400000 and w[k + 4] == 0xE1A04001
             and w[k + 5] == 0xE1A01003 and w[k + 6] >> 24 == 0xEB and w[k + 9] == 0xE590001C]
     if len(cats) != 1 or len(ents) != 1:
-        return []
+        return None
     k = cats[0]
     count_at = _imm16(w[k + 3]) | _imm16(w[k + 4]) << 16
     table = _imm16(w[k + 9]) | _imm16(w[k + 10]) << 16
     if e.off(count_at) is None or e.off(table) is None:
-        return []
+        return None
     count = e.word(count_at)
     ends = [q for q in range(n - 1) if (w[q] & 0xFFF0F000) == 0x83003000 and _imm16(w[q]) == table & 0xFFFF
             and (w[q + 1] & 0xFFF0F000) == 0x83403000 and _imm16(w[q + 1]) == table >> 16]
     if len(ends) != 1 or not 2 <= count < 64:
-        return []
+        return None
     top = next((s for s in range(ends[0], max(ends[0] - 64, 0), -1) if (w[s] & 0xFFFF4000) == 0xE92D4000), None)
     if top is None:
+        return None
+    return top, ents, cats, count_at, table
+
+
+def game_scores(elf):
+    """PAD-641 round 2: the `site game_scores` line - the game's end-of-game high scores, the call that runs until a
+    new high score's initials are in (the attract flipper sounds keep quiet for it) - of EVERY build where it is
+    found, challenges or not (`challenge_scores` is the same function, written only where a mode's challenge game
+    keeps its own score). ``[]`` when it is not found."""
+    e = elf if isinstance(elf, Elf) else Elf(elf)
+    got = _scores_fn(e)
+    if got is None:
         return []
+    top = got[0]
+    w = e.words
+    return ["# PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in)",
+            "site  game_scores            0x%08x 0x%08x 0x%08x" % (e.text_va + 4 * top, w[top], w[top + 1])]
+
+
+def scores_lines(e, n_challenges):
+    """The `site challenge_scores` / `challenge_score_entry` / `challenge_scores_gate` lines, `value
+    challenge_scores_cat` (HIGHEST SCORES: every challenge game's) and, where the build has one "... CHALLENGE
+    CHAMPION" category per challenge (Bond, Stranger Things), `value challenge_scores_cat_<n>`. Empty when the build
+    has not exactly one of each function, or neither the per-challenge categories nor the gate."""
+    w, base = e.words, e.text_va
+    got = _scores_fn(e)
+    if got is None:
+        return []
+    top, ents, _cats, count_at, table = got
+    count = e.word(count_at)
     titles = {}
     for c in range(1, count):
         at = table + 36 * c

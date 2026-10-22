@@ -358,7 +358,7 @@ def test_the_runtime_takes_the_layout_from_the_port_and_refuses_one_that_does_no
     src = RUNTIME.read_text(encoding="utf-8")
     arm = _host()._lift(src, "static void chg_scores_arm(void)")
     take = arm.index("chg_rec_check_at = (unsigned)check_at;")
-    assert arm.index("check_at + 2 > CHG_REC_SIZE") < take < arm.index("hook_wrap(fn(\"challenge_scores\")")
+    assert arm.index("check_at + 2 > CHG_REC_SIZE") < take < arm.index("scores_wrap_arm()")   # PAD-641: shared wrap
     for v, dflt in (("check_at", 88), ("score_at", 72), ("score_size", 8)):
         assert 'pm_port_value("challenge_record_%s", %d)' % (v, dflt) in arm
     # every read of a record's score goes through the layout (the attract pages' and the end-of-game wrap's)

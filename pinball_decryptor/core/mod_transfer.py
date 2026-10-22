@@ -1516,7 +1516,8 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
                            "random": list((sm or {}).get("random") or []),
                            "mode_random": dict((sm or {}).get("mode_random") or {}),
                            # PAD-641: the flipper buttons' sounds in attract (no slot: as they are)
-                           "attract": list((sm or {}).get("attract") or [])},
+                           "attract": list((sm or {}).get("attract") or []),
+                           "attract_gap": (sm or {}).get("attract_gap") or 0},
         "toggles": {k: saved[k] for k in _TOGGLE_KEYS if k in saved},
         "defaults": {k: dict(saved[k]) for k in _MERGE_KEYS
                      if isinstance(saved.get(k), dict) and saved[k]},
@@ -2090,6 +2091,8 @@ def _apply_sound_modes(tgt, plan, record, prior, include_flagged):
            "random": []}
     if sm.get("attract"):
         rec["attract"] = list(sm["attract"])
+        if sm.get("attract_gap"):
+            rec["attract_gap"] = sm["attract_gap"]
     for e in entries:
         rec["slots"][e["tgt_rel"]] = dict(e["repl"])
         if e["src_rel"] in (sm.get("random") or ()):

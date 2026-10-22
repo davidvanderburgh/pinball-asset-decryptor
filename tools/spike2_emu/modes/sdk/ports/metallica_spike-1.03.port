@@ -670,3 +670,6 @@ site  challenge_end_ball  0x0036cbd4 0xe3062956 0xe34026ff
 site  ball_launch         0x00368aa4 0xe92d4010 0xe3014350
 value ball_launch_flag       12
 value ball_launch_wait_flag  13
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x00361b48 0xe92d4ff0 0xe24dd0bc

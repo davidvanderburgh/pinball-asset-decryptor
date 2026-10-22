@@ -308,8 +308,8 @@ DESK = [
     # nothing counts while he runs: stop him, then 32 more (80 and one to spare)
     ("eighty spins then the scoop", _spins(50) + ["secs", 2, "trigger", "destoroyah.stop", "secs", 4] +
      ["shot", "Right scoop", "secs", 1] + _spins(32) + ["shot", "Right scoop", "secs", 3],
-     ["Hud_Title: SPIN THE TOP SPINNER", "Hud_Line: 79  -  SPINS TO KAMACURAS", "Hud_Line: 29  -  SPINS TO KAMACURAS",
-      "Hud_Title: KAMACURAS IS LIT", "[KAMACURAS] START (its lit shot)", "LAMP SELECT CITY 20ff40 chase"]),
+     ["Hud_Award: SPIN THE TOP SPINNER", "Hud_AwardSub: 79  -  SPINS TO KAMACURAS", "Hud_AwardSub: 29  -  SPINS TO KAMACURAS",
+      "Hud_Award: KAMACURAS IS LIT", "[KAMACURAS] START (its lit shot)", "LAMP SELECT CITY 20ff40 chase"]),
     ("a mantis is obvious, a near kill pays 2x", _START + ["secs", 12, "shot", "Left ramp", "secs", 1],
      ["Hud_Title: SHOOT THE LEFT POWERLINE", "Hud_Line: THE CLOSER IT IS, THE MORE IT PAYS",
       "LAMP POWERLINE LEFT 20ff40 chase 160", "Hud_Title: SHOOT THE LEFT RAMP", "LAMP LEFT RAMP d0ff00 chase 110",

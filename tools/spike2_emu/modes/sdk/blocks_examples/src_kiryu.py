@@ -418,12 +418,12 @@ _GRAPPLE = ["shot", LANE, "ms", 500, "shot", "Big loop", "ms", 600] * 3 + ["secs
 DESK = [
     # PAD-669: a multiball's spins count for nothing: back to one ball, 11 more say 49 to go, no start
     ("no spin counts in a multiball", ["balls", 2] + _shots(SPIN, 60) + ["balls", 1, "secs", 1] + _shots(SPIN, 11) + ["secs", 2],
-     ["Hud_Line: 49  -  SHOOT THE SPINNER", "![KIRYU] START (a block)"]),
+     ["Hud_AwardSub: 49  -  SHOOT THE SPINNER", "![KIRYU] START (a block)"]),
     ("sixty spins the first time, a hundred and twenty the second",
      _shots(SPIN, 60) + ["secs", 1, "trigger", "kiryu.stop", "secs", 4] + _shots(SPIN, 119) + ["secs", 2] +
      _shots(SPIN, 1) + ["secs", 2],
-     ["Hud_Title: SPINS TO KIRYU", "Hud_Line: 59  -  SHOOT THE SPINNER", "[KIRYU] START (a block)",
-      "Hud_Line: 119  -  SHOOT THE SPINNER", "Hud_Line: 9  -  SHOOT THE SPINNER", "SHIELD toward"]),
+     ["Hud_Award: SPINS TO KIRYU", "Hud_AwardSub: 59  -  SHOOT THE SPINNER", "[KIRYU] START (a block)",
+      "Hud_AwardSub: 119  -  SHOOT THE SPINNER", "Hud_AwardSub: 9  -  SHOOT THE SPINNER", "SHIELD toward"]),
     # the fire shot goes dark once it has fired; the arsenal lights at once, its note waits out the fire's
     ("charge and fire: into the pot, the arsenal is next", _START + _FIRE + ["secs", 5],
      ["Hud_Line: CHARGE IT: SHOOT ANY LIT SHOT", "Hud_Award: ABSOLUTE ZERO",

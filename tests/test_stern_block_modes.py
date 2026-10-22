@@ -1205,10 +1205,10 @@ def test_an_award_before_the_mode_runs_is_a_note(tmp_path):
          "seconds": 2}]})
     out = play(tmp_path, p, "shot", "Big loop", "secs", 3, slug="maser")
     note = out[out.index(">> shot Big loop"):]
-    # PAD-658: a note is lettered where the game letters its own mode titles, not over its live screen's words
-    assert "Hud_Title: MASER" in note and "Hud_Line: 1  -  TEST MODE" in note
+    # PAD-680: a note is in the award line, in the middle, as the code modes' were (PAD-658 had it in the title place)
+    assert "Hud_Award: MASER" in note and "Hud_AwardSub: 1  -  TEST MODE" in note
     assert "SHOW PadMode_maser_Hud 1" in note and "SHOW PadMode_maser_Hud 0" in note
-    assert "Hud_Award:  " in note                  # the award line stays clear
+    assert "Hud_Title: MASER" not in note
 
 
 def test_keep_at_least_puts_the_clock_up_only_when_it_is_under(tmp_path):
@@ -1226,22 +1226,20 @@ def test_keep_at_least_puts_the_clock_up_only_when_it_is_under(tmp_path):
     assert _hud_words(out[out.rindex(">> shot Big loop"):], "Timer_Num")[0] == "15"   # 10 s left: up to 15
 
 
-def test_a_note_waits_out_a_display_of_the_games(tmp_path):
-    """PAD-658 (run agm_pro_r3: ANGUIRUS IS READY over the Pro's MASER CANNON CHARGING): with no mode running a note
-    still keeps off a display of the game's, and shows its whole time once that is gone."""
+def test_a_note_shows_at_once_over_a_display_of_the_games(tmp_path):
+    """PAD-680 (David, after PAD-658's notes waited out the game's displays: "i almost never saw on-screen progress
+    towards modes"): the game puts a screen up for nearly every shot, so a note shows at once, over it, for its time."""
     p = maser_hud()
     p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
         {"op": "hud_award", "text": "MASER", "value": {"k": "hits", "shot": "Big loop"}, "sub": "",
          "seconds": 2}]})
     out = play(tmp_path, p, "covered", 1, "shot", "Big loop", "secs", 4, "covered", 0, "secs", 3, slug="maser")
     under = out[out.index(">> shot Big loop"):out.index(">> covered 0")]
-    assert "its words wait while a display of the game's has the screen" in under
-    assert "Hud_Title: MASER" not in under and "SHOW PadMode_maser_Hud 0" not in under   # held, not timed out
-    after = out[out.index(">> covered 0"):]
-    assert "its words are back" in after and "Hud_Title: MASER" in after
-    back = _at(out, ">> covered 0")
-    hidden = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_maser_Hud 0", after, re.M)]
-    assert hidden and 1900 <= hidden[0] - back <= 2100, (back, hidden)
+    assert "its words wait while a display" not in under
+    assert "Hud_Award: MASER" in under
+    shot = _at(out, ">> shot Big loop")
+    hidden = [int(t) for t in re.findall(r"^\s*(\d+) SHOW PadMode_maser_Hud 0", under, re.M)]
+    assert hidden and 1900 <= hidden[0] - shot <= 2100, (shot, hidden)
 
 
 def test_a_clip_behind_the_hud_as_the_mode_ends_plays_full_screen(tmp_path, monkeypatch):
@@ -1340,17 +1338,15 @@ def test_a_note_asked_for_in_the_games_battle_shows_when_it_ends(tmp_path):
     assert "its note shows" not in out                                     # a game over drops it
 
 
-def test_a_second_note_under_a_display_of_the_games_waits_it_out_too(tmp_path):
-    """PAD-680 (emulator, KING KONG's ramps note after GODZILLA VS DESTROYAH): a note hidden while a display of the
-    game's covered it left its words marked waiting, and the next note, shown under the game's battle TOTAL, never
-    waited: its time ran out under the TOTAL. Each note waits the display out."""
-    # the first note is let go under the display (held up to 8 s), the second asked for under another
-    out = play(tmp_path, _noting_prog(), "covered", 1, "shot", "Big loop", "secs", 12, "covered", 0, "secs", 1,
-               "covered", 1, "shot", "Big loop", "secs", 2, "covered", 0, "secs", 1)
-    second = out[out.rindex(">> covered 1"):]
-    assert "its words wait while a display of the game's has the screen" in second
-    shown = second[second.index(">> covered 0"):]
-    assert "its words are back" in shown and "2  -  TO GO" in shown
+def test_every_note_under_a_display_of_the_games_shows_at_once(tmp_path):
+    """PAD-680 (emulator, the same shots on the 2026-10-07 code-mode card and on the blocks card: a note after 8 of 15
+    shots against 4): each note shows at once over the game's shot screen, the second as the first."""
+    out = play(tmp_path, _noting_prog(), "covered", 1, "shot", "Big loop", "secs", 4, "covered", 0, "secs", 1,
+               "covered", 1, "shot", "Big loop", "secs", 1, "covered", 0, "secs", 1)
+    first = out[out.index(">> shot Big loop"):out.index(">> covered 0")]
+    second = out[out.rindex(">> covered 1"):out.rindex(">> covered 0")]
+    assert "Hud_AwardSub: 1  -  TO GO" in first and "Hud_AwardSub: 2  -  TO GO" in second
+    assert "its words wait while a display" not in out
 
 
 def test_a_note_shows_over_the_modes_loop(tmp_path, monkeypatch):

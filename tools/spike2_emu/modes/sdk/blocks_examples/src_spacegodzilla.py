@@ -382,10 +382,10 @@ _RAMP = _shots("Right ramp", gap=600)
 DESK = [
     ("two Right ramps a crystal the first time, four the second",
      _RAMP * 6 + ["secs", 7] + _STOP + _RAMP * 12 + ["secs", 7],
-     ["Hud_Title: CRYSTAL 1 PLANTED", "Hud_Line: THE RIGHT RAMP PLANTS THE NEXT", "Hud_Title: CRYSTAL 3 PLANTED",
+     ["Hud_Award: CRYSTAL 1 PLANTED", "Hud_AwardSub: THE RIGHT RAMP PLANTS THE NEXT", "Hud_Award: CRYSTAL 3 PLANTED",
       "[SPACEGODZILLA] START (a block)", "MULTIBALL 3 balls, save 15 s", "Hud_Title: CRYSTAL TOWERS",
       "Hud_Line: TOPPLE THE TOWERS: RAMPS AND BUILDING", "Hud_C1_Sub: HITS TO GO", "Hud_C1_Value: 6",
-      "LAMP LEFT RAMP be28ff chase 160", "Hud_Title: RIGHT RAMP", "Hud_Line: 1  -  MORE TO PLANT A CRYSTAL",
+      "LAMP LEFT RAMP be28ff chase 160", "Hud_Award: RIGHT RAMP", "Hud_AwardSub: 1  -  MORE TO PLANT A CRYSTAL",
       "LAMP LEFT RAMP be28ff chase 220"]),        # the second multiball: towers one hit stronger
     ("towers fall, the super is their sum and adds a ball, M.O.G.U.E.R.A. comes",
      _START + _STAGE1 + _shots("Big loop") + ["secs", 5],

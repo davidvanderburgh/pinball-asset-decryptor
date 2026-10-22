@@ -422,8 +422,8 @@ _JUNIOR = ["shot", "Big loop", "ms", 300, "shot", "Mecha exit bottom", "ms", 300
 DESK = [
     ("fifteen hits light it and the next starts it", _shots(LIGHT_SHOT, 15, 300) + ["secs", 1, "lamps"] +
      ["shot", LIGHT_SHOT, "secs", 2],
-     ["Hud_Title: GODZILLA TARGET", "Hud_Line: 14  -  MORE FOR MELTDOWN", "Hud_Line: 6  -  MORE FOR MELTDOWN",
-      "Hud_Title: MELTDOWN IS READY", "Hud_Line: HIT THE GODZILLA TARGET", "LAMP MAGNA GRAB ff1400 pulse",
+     ["Hud_Award: GODZILLA TARGET", "Hud_AwardSub: 14  -  MORE FOR MELTDOWN", "Hud_AwardSub: 6  -  MORE FOR MELTDOWN",
+      "Hud_Award: MELTDOWN IS READY", "Hud_AwardSub: HIT THE GODZILLA TARGET", "LAMP MAGNA GRAB ff1400 pulse",
       "[MELTDOWN] START (its lit shot)", "MULTIBALL 3 balls, save 15 s", "SHIELD toward",
       "Hud_Award: MELTDOWN MULTIBALL", "Hud_Line: RAMPS, BIG LOOP, BUILDING: 2X LEFT RAMP"]),
     # the second time (30): the note at 25, 20, 15, 10 and the last 5
@@ -432,9 +432,9 @@ DESK = [
                                                                                  "meltdown.stop", "secs", 5]
      + ["balls", 1, "secs", 1] + _shots(LIGHT_SHOT, 29, 300) + ["secs", 1, "lamps", "shot", LIGHT_SHOT, "secs", 1,
                                                                  "lamps"],
-     ["[MELTDOWN] START (its lit shot)", "END (trigger file)", "Hud_Line: 15  -  MORE FOR MELTDOWN",
-      "Hud_Line: 10  -  MORE FOR MELTDOWN", "Hud_Line: 4  -  MORE FOR MELTDOWN",
-      "Hud_Line: 1  -  MORE FOR MELTDOWN", "Hud_Title: MELTDOWN IS READY"]),
+     ["[MELTDOWN] START (its lit shot)", "END (trigger file)", "Hud_AwardSub: 15  -  MORE FOR MELTDOWN",
+      "Hud_AwardSub: 10  -  MORE FOR MELTDOWN", "Hud_AwardSub: 4  -  MORE FOR MELTDOWN",
+      "Hud_AwardSub: 1  -  MORE FOR MELTDOWN", "Hud_Award: MELTDOWN IS READY"]),
     ("jackpots heat the core and cadmium cools it", _START + _HEARTS + ["shot", "Left ramp", "ms", 300] +
      ["secs", 1, "shot", "Shield target left", "secs", 1, "lamps"],
      ["SCORE +4000000", "Hud_Award: HEART JACKPOT", "Hud_AwardSub: 4,000,000  -  2X NOW: RIGHT RAMP",

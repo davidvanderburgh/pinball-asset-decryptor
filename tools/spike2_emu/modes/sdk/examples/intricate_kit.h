@@ -1281,6 +1281,11 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
      * step aside as they do for the game's modes: the lines in the award line, the counters hidden; a note goes in the
      * award line, which those screens keep clear */
     words = !aside && pm_game_words();
+    /* PAD-680: a progress note shows at once, over the game's own shot screens, as the code modes' did (David: "i
+     * almost never saw on-screen progress towards modes ... that I used to"). The game puts a screen up for nearly
+     * every shot, and a note that waited them out ran out behind them: the emulator, the same 32 shots, showed a
+     * note after 8 of the first 15 on the 2026-10-07 card and 4 on the one that waited */
+    if (h->noting && !h->metering) covered = 0;
     off = covered || (h->noting && aside);
     if (h->noting && !h->metering && h->hide_at) {
         /* PAD-658: a note WAITS out a display of the game's (run agm_pro_r3: ANGUIRUS IS READY over the Pro's MASER
@@ -1312,12 +1317,13 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
     awardsub = h->want_awardsub;
     if (off) {
         title = line = award = awardsub = "";
+    } else if (h->noting && !h->metering) {
+        /* PAD-680: a progress note is in the award line, in the middle, as the code modes' were: the place PAD-658
+         * moved it to, above the score panel, is where the game letters the words of its own shot screens */
     } else if (h->noting && words) {
-        /* PAD-662: the award line, clear of the game's screen's words (the place a note had before PAD-658) */
+        /* PAD-662: the award line, clear of the game's screen's words */
     } else if (h->noting) {
-        /* PAD-658: a note goes where the game letters its own mode titles, above the score panel: the award line in
-         * the middle of the live screen sits on the game's own RAID / BRIDGE / POWER words there (emulator run
-         * oxygen_destroyer_r1, od_note.png) */
+        /* PAD-658: a corner meter's note goes where the game letters its own mode titles, above the score panel */
         title = award;
         line = awardsub;
         award = awardsub = "";

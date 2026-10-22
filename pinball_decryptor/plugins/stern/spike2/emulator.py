@@ -2002,14 +2002,17 @@ class Spike2Emu:
     # first clearly-audio candidate).  Row S-1 of scale 0 sits before DISPATCH,
     # which is still inside the firmware image and is where Venom really keeps
     # scale 0's stereo codec, so the row index is deliberately not clamped at 0.
-    #
-    # Row S-3 is Jurassic Park LE 1.13's (PAD-674, a board-keyed build): its
-    # audio entries sit three rows below the sound's own scale row, stereo on
-    # the even sub-slots and mono on the odd ones (mapped by decoding a
-    # stereo and a mono sound through every entry of the table; rows 0 and -1
-    # read as noise on both).  A later row is only reached when the earlier
-    # ones gave nothing, so every build that resolved before resolves the same.
-    _PROBE_ROWS = (0, -1, -3)
+    _PROBE_ROWS = (0, -1)
+
+    # Jurassic Park LE 1.13 (PAD-674, a board-keyed build) packs its table at
+    # HALF the stride: 8 entries (0x20 bytes) a scale, so scale S's codecs
+    # are at DISPATCH + S * 0x20, stereo on the even sub-slots and mono on the
+    # odd ones.  Mapped by decoding a mono and a stereo sound of scales 6, 18,
+    # 19, 22 and 31 through every entry of the table: each one's audio entries
+    # were exactly there (row S/2, sub-slots 0-7 for an even scale, 8-15 for
+    # an odd one), and rows S and S-1 read as noise.  Probed after the rows
+    # above, so every build that resolved before resolves the same.
+    _HALF_STRIDE = 0x20
 
     # The WRONG codec for a sound (a mono codec fed a stereo body, or vice
     # versa) decodes to near-white noise at roughly a third of full scale --
@@ -2192,22 +2195,26 @@ class Spike2Emu:
         no matter which one gets there first.  This list used to lead with the
         place that won for the last scale of the same channel count, which made
         the answer depend on a worker's history: see :meth:`_resolve_entry` for
-        the extract that decoded 29 sounds differently because of it."""
+        the extract that decoded 29 sounds differently because of it.
+
+        Last come the half-stride places (:data:`_HALF_STRIDE`), as
+        ``("half", sub_slot)``."""
         scale = p["scale"]
         places = []
         for d in self._PROBE_ROWS:
             for s in self._PROBE_SLOTS:
-                places.append((d, s))
+                places.append(((d, s), self.DISPATCH + (scale + d) * 0x40 + s * 4))
+        for s in self._PROBE_SLOTS:
+            places.append((("half", s), self.DISPATCH + scale * self._HALF_STRIDE + s * 4))
         out, seen = [], set()
-        for d, s in places:
-            addr = self.DISPATCH + (scale + d) * 0x40 + s * 4
+        for place, addr in places:
             try:
                 fnv = _u32(bytes(self.mu.mem_read(addr, 4)))
             except UcError:
                 continue          # a row off the end of the mapped table
             if fnv and fnv not in seen and self._backing_off(fnv) is not None:
                 seen.add(fnv)
-                out.append((fnv, (d, s)))
+                out.append((fnv, place))
         return out
 
     def _backing_off(self, va):

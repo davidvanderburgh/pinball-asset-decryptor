@@ -279,8 +279,18 @@ def test_the_1_13_card_reads_and_decodes(card113):
     params = e.derive_params()
     assert len(params) == 3985
     assert crc and crc["got"] == crc["want"] == 0x45295a11
-    mono = next(p for p in params if p["chan"] == 1 and p["length"] > 40000)
-    r = e.decode(mono, max_secs=1.5)
-    assert r is not None
-    assert EM.Spike2Emu._specflat(r[0]) < 0.45
+    # one sound per (chan, scale) the card has, low and high scales alike
+    # (scales 19+ sit in rows only the half-stride probe reaches)
+    seen = set()
+    for p in params:
+        key = (p["chan"], p["scale"])
+        if key in seen or p["length"] < 30000:
+            continue
+        seen.add(key)
+        r = e.decode(p, max_secs=1.0)
+        assert r is not None, key
+        flat = max(EM.Spike2Emu._specflat(r[0]),
+                   EM.Spike2Emu._specflat(r[1]) if p["chan"] == 2 else 0)
+        assert flat < 0.6, (key, flat)
+    assert len(seen) >= 60
     e.close()

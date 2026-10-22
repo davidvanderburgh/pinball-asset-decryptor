@@ -19,12 +19,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
+# The guard matters: the extract decodes in a multiprocessing pool, and each
+# spawned worker imports this file as its __main__ -- unguarded, every worker
+# started a second app server instead of decoding, and the extract sat at
+# "Decoding 3985 sounds across 8 processes..." for good.
 LAUNCHER = r'''
 import sys
 sys.path.insert(0, %r)
-from pinball_decryptor.webui import host
-sys.argv = ["host"] + sys.argv[1:]
-sys.exit(host.main())
+if __name__ == "__main__":
+    from pinball_decryptor.webui import host
+    sys.argv = ["host"] + sys.argv[1:]
+    sys.exit(host.main())
 '''
 
 

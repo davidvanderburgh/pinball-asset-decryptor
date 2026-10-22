@@ -148,15 +148,30 @@ def test_unbacked_pointers_are_rejected():
 
 
 @pytest.mark.parametrize("chan", [1, 2])
-def test_no_probe_reads_outside_the_probe_rows(chan):
-    """Rows S, S-1 and (PAD-674, Jurassic Park LE 1.13) S-3, nothing else."""
+def test_no_probe_reads_outside_the_two_rows(chan):
+    """Rows S and S-1, plus (PAD-674) the four half-stride places of Jurassic
+    Park LE 1.13's 0x20-a-scale table; nothing else."""
     words = {}
-    for d in Spike2Emu._PROBE_ROWS:
+    for d in (0, -1):
         for s in range(4):
-            words[_row(20 + d, s)] = 0x5000 + (d + 3) * 0x10 + s
+            words[_row(20 + d, s)] = 0x5000 + (d + 1) * 0x10 + s
+    half = [DISPATCH + 20 * Spike2Emu._HALF_STRIDE + s * 4 for s in range(4)]
+    for s, addr in enumerate(half):
+        words[addr] = 0x6000 + s
     e = _emu(words)
     e._slot_candidates({"scale": 20, "chan": chan})
-    rows = {(addr - DISPATCH) // ROW - 20 for addr in e.mu.reads}
-    assert rows == set(Spike2Emu._PROBE_ROWS), rows
     for addr in e.mu.reads:
-        assert _row(20 + min(Spike2Emu._PROBE_ROWS), 0) <= addr <= _row(20, 3)
+        assert _row(19, 0) <= addr <= _row(20, 3) or addr in half, hex(addr)
+    assert set(half) <= set(e.mu.reads)
+
+
+def test_half_stride_entry_is_reachable_for_every_scale():
+    """PAD-674: JP 1.13 keeps scale S's codecs at DISPATCH + S * 0x20 (stereo
+    even, mono odd sub-slot); scales 19..31 sit in rows no S/S-1 probe reaches."""
+    for scale in (6, 18, 19, 31):
+        words = {}
+        addr = DISPATCH + scale * Spike2Emu._HALF_STRIDE + 1 * 4
+        words[addr] = 0x7000 + scale
+        cands = _emu(words)._slot_candidates({"scale": scale, "chan": 1})
+        assert dict(cands).get(0x7000 + scale) in (("half", 1), (scale // 2 - scale, 1),
+                                                   (-1, 1), (0, 1)), (scale, cands)

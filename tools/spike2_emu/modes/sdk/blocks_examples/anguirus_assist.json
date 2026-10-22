@@ -22,14 +22,9 @@
    }
   }
  },
- "about": "The C example ANGUIRUS rebuilt in blocks and taken deeper: shield hits call him (3, then 6, then 9) and he joins the game's own battle; four stages (charge the spikes at the shields, three rolling attacks at the Big loop, 20 s apart at most, three bites at the chasing ramp, the allies' hurry-up at the Building), his title saying what is left and his line the shot; cash the pot out at the right scoop after any stage. Destroy All Monsters (1968) and Final Wars (2004).",
+ "about": "The C example ANGUIRUS rebuilt in blocks and taken deeper: shield hits call him (8, then 16, then 24), a mode of his own for 90 s; four stages (charge the spikes at the shields, three rolling attacks at the Big loop, 20 s apart at most, three bites at the chasing ramp, the allies' hurry-up at the Building), his title saying what is left and his line the shot; cash the pot out at the right scoop after any stage. Destroy All Monsters (1968) and Final Wars (2004).",
  "lost": [
-  "He joins on the first shot after one of the game's own modes begins (blocks only look at a shot), where the C looked twice a second; and blocks cannot tell a battle from the game's other modes: he joins any of its modes while one ball is in play (its multiballs are left out), where the C joined only kaiju battles.",
-  "He leaves within a second of the game's mode ending (an Every second check) and his award shows at once; the C waited for the battle's own total screen first, then kept his 4 s in view.",
-  "Ended while the battle still runs (a stop, another of our modes), his total shows under the runtime's ANGUIRUS TOTAL: the C put ANGUIRUS RETREATS under it.",
-  "While the battle runs his counters are hidden (the battle's own are in their places), so his title says what is left of the stage (3 ROLLS TO GO) and his line the shot (SHOOT THE BIG LOOP), in the award line between his awards: the C said the stage with its awards alone.",
-  "His screen is not shared in moments: with the HUD on he holds display priority 180 the whole time he runs, where the C held it only for each moment (entrance, a spike, the roll, a rolling attack) and gave the battle its own displays between them.",
-  "His entrance (clip, music, words) comes a fixed 2 s after he joins; the C waited until the battle's start screen had gone (up to 12 s). His music starts as he joins, not with the entrance.",
+  "PAD-675: he is a mode of his own, held off by the game's modes and holding them off, 90 s on his clock; the C joined the game's kaiju battles and left with them (half the pot).",
   "The SPIKES gauge keeps its label: the C relabelled it ROLLING! while he rolls; from THE BITE on it stays full. A charged spike's shield goes dark (it no longer counts; the gauge shows the charge), where the C lit it solid.",
   "The roll's window is 20 s, the same each time he joins (PAD-658: a window inside a stage is 20 s at least), where the C's was 6 s.",
   "The Big loop's chase turns to a fast blink in the window's last 5 s (looked at once a second), where the C stepped its blink every tick.",
@@ -38,17 +33,13 @@
  ],
  "program": {
   "name": "ANGUIRUS",
-  "seconds": 0,
+  "seconds": 90,
   "ends_on_drain": true,
   "screen": false,
-  "game_modes": "stack",
-  "wait_multiball": false,
-  "priority": 0,
+  "game_modes": "block",
+  "wait_multiball": true,
+  "priority": 180,
   "vars": [
-   {
-    "name": "joined",
-    "reset": "game"
-   },
    {
     "name": "ready",
     "reset": "game"
@@ -103,10 +94,6 @@
    },
    {
     "name": "cashed",
-    "reset": "mode"
-   },
-   {
-    "name": "left",
     "reset": "mode"
    },
    {
@@ -166,9 +153,9 @@
     }
    ],
    "timer": {
-    "on": false,
-    "label": "",
-    "icon": "xilien"
+    "on": true,
+    "label": "ANGUIRUS",
+    "icon": "radiation"
    },
    "gauge": {
     "on": true,
@@ -712,7 +699,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 3
+           "v": 8
           },
           "b": {
            "k": "op",
@@ -738,11 +725,7 @@
           }
          },
          {
-          "op": "hud_award",
-          "text": "ANGUIRUS IS READY",
-          "value": null,
-          "sub": "HE JOINS THE NEXT BATTLE",
-          "seconds": 3
+          "op": "start_mode"
          }
         ],
         "else": [
@@ -757,7 +740,7 @@
             "op": "*",
             "a": {
              "k": "num",
-             "v": 3
+             "v": 8
             },
             "b": {
              "k": "op",
@@ -783,7 +766,29 @@
         ]
        }
       ],
-      "else": null
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "ready"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "start_mode"
+         }
+        ],
+        "else": null
+       }
+      ]
      }
     ]
    },
@@ -845,7 +850,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 3
+           "v": 8
           },
           "b": {
            "k": "op",
@@ -871,11 +876,7 @@
           }
          },
          {
-          "op": "hud_award",
-          "text": "ANGUIRUS IS READY",
-          "value": null,
-          "sub": "HE JOINS THE NEXT BATTLE",
-          "seconds": 3
+          "op": "start_mode"
          }
         ],
         "else": [
@@ -890,7 +891,7 @@
             "op": "*",
             "a": {
              "k": "num",
-             "v": 3
+             "v": 8
             },
             "b": {
              "k": "op",
@@ -916,7 +917,29 @@
         ]
        }
       ],
-      "else": null
+      "else": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "ready"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "start_mode"
+         }
+        ],
+        "else": null
+       }
+      ]
      }
     ]
    },
@@ -978,7 +1001,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 3
+           "v": 8
           },
           "b": {
            "k": "op",
@@ -1004,11 +1027,7 @@
           }
          },
          {
-          "op": "hud_award",
-          "text": "ANGUIRUS IS READY",
-          "value": null,
-          "sub": "HE JOINS THE NEXT BATTLE",
-          "seconds": 3
+          "op": "start_mode"
          }
         ],
         "else": [
@@ -1023,7 +1042,7 @@
             "op": "*",
             "a": {
              "k": "num",
-             "v": 3
+             "v": 8
             },
             "b": {
              "k": "op",
@@ -1049,89 +1068,27 @@
         ]
        }
       ],
-      "else": null
-     }
-    ]
-   },
-   {
-    "hat": {
-     "kind": "any_shot",
-     "when": "idle"
-    },
-    "do": [
-     {
-      "op": "if",
-      "cond": {
-       "k": "and",
-       "a": {
-        "k": "stock"
-       },
-       "b": {
-        "k": "cmp",
-        "op": "<",
-        "a": {
-         "k": "balls"
-        },
-        "b": {
-         "k": "num",
-         "v": 2
-        }
-       }
-      },
-      "then": [
+      "else": [
        {
         "op": "if",
         "cond": {
-         "k": "and",
+         "k": "cmp",
+         "op": "=",
          "a": {
-          "k": "cmp",
-          "op": "=",
-          "a": {
-           "k": "var",
-           "name": "joined"
-          },
-          "b": {
-           "k": "num",
-           "v": 0
-          }
+          "k": "var",
+          "name": "ready"
          },
          "b": {
-          "k": "cmp",
-          "op": "=",
-          "a": {
-           "k": "var",
-           "name": "ready"
-          },
-          "b": {
-           "k": "num",
-           "v": 1
-          }
+          "k": "num",
+          "v": 1
          }
         },
         "then": [
-         {
-          "op": "set",
-          "var": "joined",
-          "value": {
-           "k": "num",
-           "v": 1
-          }
-         },
          {
           "op": "start_mode"
          }
         ],
         "else": null
-       }
-      ],
-      "else": [
-       {
-        "op": "set",
-        "var": "joined",
-        "value": {
-         "k": "num",
-         "v": 0
-        }
        }
       ]
      }
@@ -1142,14 +1099,6 @@
      "kind": "mode_start"
     },
     "do": [
-     {
-      "op": "set",
-      "var": "joined",
-      "value": {
-       "k": "num",
-       "v": 1
-      }
-     },
      {
       "op": "set",
       "var": "ready",
@@ -1233,14 +1182,6 @@
      {
       "op": "set",
       "var": "cashed",
-      "value": {
-       "k": "num",
-       "v": 0
-      }
-     },
-     {
-      "op": "set",
-      "var": "left",
       "value": {
        "k": "num",
        "v": 0
@@ -4446,29 +4387,6 @@
        }
       ],
       "else": null
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "not",
-       "a": {
-        "k": "stock"
-       }
-      },
-      "then": [
-       {
-        "op": "set",
-        "var": "left",
-        "value": {
-         "k": "num",
-         "v": 1
-        }
-       },
-       {
-        "op": "end_mode"
-       }
-      ],
-      "else": null
      }
     ]
    },
@@ -4591,115 +4509,15 @@
       "cond": {
        "k": "and",
        "a": {
-        "k": "and",
-        "a": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "won"
-         },
-         "b": {
-          "k": "num",
-          "v": 0
-         }
-        },
-        "b": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "cashed"
-         },
-         "b": {
-          "k": "num",
-          "v": 0
-         }
-        }
-       },
-       "b": {
         "k": "cmp",
         "op": "=",
         "a": {
          "k": "var",
-         "name": "left"
+         "name": "won"
         },
         "b": {
          "k": "num",
-         "v": 1
-        }
-       }
-      },
-      "then": [
-       {
-        "op": "score",
-        "points": {
-         "k": "op",
-         "op": "/",
-         "a": {
-          "k": "var",
-          "name": "pot"
-         },
-         "b": {
-          "k": "num",
-          "v": 2
-         }
-        }
-       },
-       {
-        "op": "hud_text",
-        "which": "title",
-        "text": "HE LEAVES WITH IT",
-        "value": null
-       },
-       {
-        "op": "hud_text",
-        "which": "line",
-        "text": "HALF THE POT",
-        "value": null
-       },
-       {
-        "op": "clip",
-        "clip": "won",
-        "where": "full"
-       },
-       {
-        "op": "show",
-        "show": "mine",
-        "name": "Going home"
-       }
-      ],
-      "else": null
-     },
-     {
-      "op": "if",
-      "cond": {
-       "k": "and",
-       "a": {
-        "k": "and",
-        "a": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "won"
-         },
-         "b": {
-          "k": "num",
-          "v": 0
-         }
-        },
-        "b": {
-         "k": "cmp",
-         "op": "=",
-         "a": {
-          "k": "var",
-          "name": "cashed"
-         },
-         "b": {
-          "k": "num",
-          "v": 0
-         }
+         "v": 0
         }
        },
        "b": {
@@ -4707,7 +4525,7 @@
         "op": "=",
         "a": {
          "k": "var",
-         "name": "left"
+         "name": "cashed"
         },
         "b": {
          "k": "num",

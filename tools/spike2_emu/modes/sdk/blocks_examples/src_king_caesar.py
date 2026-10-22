@@ -45,7 +45,7 @@ START_INSERTS = "MECHA LANE,POP BUMPER"
 BEAM = ("Left ramp", "Big loop", "Right ramp", "Building")
 KC_X, KC_Y = 262, 405
 #: the prayer it takes: 25, and 15 more each time he has woken
-NEED = pack.need(25, "woken")   # the prayer: 25, then 50, then 75 (each start costs more)
+NEED = pack.need(50, "woken")   # the prayer: 50, then 100, then 150 (PAD-675: was 25)
 #: each stage's clock and title
 STAGE_SECS = {1: pack.STAGE_S + 5, 2: pack.STAGE_S + 15, 3: pack.STAGE_S + 10, 4: pack.STAGE_S + 5}
 TITLES = {1: "KING CAESAR: AWAKENING", 2: "KING CAESAR: REFLECT", 3: "KING CAESAR: TAG TEAM",
@@ -358,10 +358,10 @@ _STAGE1 = ["shot", "Pop bumper", "ms", 400, "shot", "Right ramp", "ms", 400, "sh
 _STAGE2 = ["shot", "Left ramp", "ms", 300, "shot", "Mecha exit bottom", "ms", 300] * 3 + ["secs", 1]
 _STAGE3 = ["shot", "Godzilla target", "ms", 500, "shot", "Pop bumper", "ms", 500] * 3 + ["secs", 1]
 DESK = [
-    ("the prayer lights it", _shots("Pop bumper", 24) + ["secs", 1] + _shots("Pop bumper", 1) +
+    ("the prayer lights it", _shots("Pop bumper", 49) + ["secs", 1] + _shots("Pop bumper", 1) +
      ["shot", "Mecha exit bottom", "secs", 2],
      ["WORDS PadMode_king_caesar_Hud_Title: KING CAESAR IS LIT", "[KING CAESAR] START (its lit shot)",
-      "Hud_Title: HIT THE POP BUMPERS", "Hud_Line: 24  -  TO WAKE KING CAESAR"]),
+      "Hud_Title: HIT THE POP BUMPERS", "Hud_Line: 49  -  TO WAKE KING CAESAR"]),
     ("stage one then cash out", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
      ["Hud_Title: KING CAESAR: AWAKENING", "Hud_Line: POP BUMPERS, RIGHT RAMP AND MECHA LANE",
       "Hud_Line: SHOOT THE RIGHT RAMP AND MECHA LANE", "Hud_AwardSub: NOW RIGHT RAMP AND MECHA LANE",

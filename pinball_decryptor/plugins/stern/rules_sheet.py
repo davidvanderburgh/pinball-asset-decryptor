@@ -46,6 +46,9 @@ SPINS, POPS = 10, 4                      # the switch hits of one spinner shot, 
 COUNT_MAX = 9                            # a shot made more often than this in a stage is said without its count
 FIELDS = ("start", "stages", "cash", "tag")
 ANY_SHOT = "(any shot)"
+SWITCH = "(any switch)"                  # PAD-675: a When any playfield switch is hit rule
+SWITCH_TRIES = 6 * START_TRIES           # switch hits come by the thousand (GODZILLA ANGRY's 1000, 2000, 3000)
+SWITCH_GAP_MS = 100                      # ... and fast
 
 
 # ------------------------------------------------------------------ words
@@ -113,6 +116,8 @@ def _idle_shots(program):
             out.append(h["shot"])
         elif h.get("kind") == "any_shot" and ANY_SHOT not in out:
             out.append(ANY_SHOT)
+        elif h.get("kind") == "switch" and SWITCH not in out:
+            out.insert(0, SWITCH)               # first: a shot is its switch's hit too, so it counts there as well
     return out
 
 
@@ -143,9 +148,15 @@ def _hit_until(sim, shot, tries=START_TRIES, probe=None):
     """Make ``shot`` until the mode starts (or is lit, and then its lit shot), or ``probe`` (a test on a copy of the
     game after each hit) says it would start - and then start it that way. Returns ``(hits, how)`` - how: "start",
     "lit:<shot>", "probe" - with ``sim`` left at the start, or None."""
+    if shot == SWITCH and tries == START_TRIES:
+        tries = SWITCH_TRIES
     for n in range(1, tries + 1):
-        sim.shot(shot)
-        sim.advance(SHOT_GAP_MS)
+        if shot == SWITCH:
+            sim.switches(1)
+            sim.advance(SWITCH_GAP_MS)
+        else:
+            sim.shot(shot)
+            sim.advance(SHOT_GAP_MS)
         if sim.running:
             return n, "start"
         if sim.lit is not None:
@@ -208,6 +219,8 @@ def start_rule(program, others=()):
         best = max(idle, key=lambda s: (s in firsts, firsts[s][0] if s in firsts else 0, -idle.index(s)))
         n, how, sim, probe = firsts[best]
         same = [s for s in idle if s in firsts and firsts[s][0] == n]
+        if SWITCH in same:                      # PAD-675: any shot counts there only as its switch's hit
+            same = [SWITCH]
         weights = ["%s counts %d" % (shot_word(s), round(n / float(firsts[s][0])))
                    for s in idle if s in firsts and s not in same and firsts[s][0]
                    and round(n / float(firsts[s][0])) > 1]
@@ -274,6 +287,8 @@ def _lit_tail(how, shots):
 def _start_words(program, shots, counts, how, weights, every=False, probe=None):
     if shots == [ANY_SHOT]:
         what = "Any %s shots" % counts_words(counts)
+    elif shots == [SWITCH]:
+        what = "%s playfield switch hits" % counts_words(counts)
     elif every:
         what = "%s %s in all" % (join_shots(shots, "and"), counts_words(counts))
     else:
@@ -290,7 +305,7 @@ def _start_words(program, shots, counts, how, weights, every=False, probe=None):
 def _one_ball(program, shots, counts, every=False, probe=None):
     """True when the hits must all come in one ball: the first start's count split over two balls does not start
     it (or light it, or make it ready to join the game's next mode)."""
-    if not shots or shots[0] == ANY_SHOT or not counts or counts[0] < 2:
+    if not shots or shots[0] in (ANY_SHOT, SWITCH) or not counts or counts[0] < 2:
         return False
     sim = BS.Sim(program)
     order = shots if every else shots[:1]

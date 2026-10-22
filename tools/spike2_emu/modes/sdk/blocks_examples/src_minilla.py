@@ -9,7 +9,8 @@ After Lyman Sheats: a start that costs more each time (Metallica's Sparky), stag
 a hurry-up (EHoH's), a boss that heals when left alone (KING GHIDORAH's heads), a multiball finale whose jackpots
 pay the history back (Batman '66's supers), a pot to cash out or risk, and failing still pays a quarter.
 
-- UP THE LANE: shots up the Mecha lane to its top; 3 light it there (6 the second time, 9 the third), and the next
+- UP THE LANE: shots up the Mecha lane to its top; 6 light it there (12 the second time, 18 the third; PAD-675: the
+  plunge, which passes the top of the lane, is not one), and the next
   one wakes him (PAD-658: the Godzilla target is MELTDOWN's to count, so no two modes share a start). Every shot
   says how many are left (TOP OF THE MECHA, 2 MORE TO WAKE MINILLA).
 - STAGE 1, SMOKE RINGS: the ramps, the Big loop and the Building glow cyan; each one is a ring, bigger than the last:
@@ -34,7 +35,7 @@ import itertools
 
 from blk import (AND, BALLS, a_show, add, award, callout, change, clip, clips, div, end, eq, every, ge,
                  gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, lt, mul, multiball, off,
-                 on_end, on_shot, on_start, on_timer, score, secs_left, set_, set_time, shake, shake_game, show, sound,
+                 on_any_shot, on_end, on_shot, on_start, on_timer, score, secs_left, set_, set_time, shake, shake_game, show, sound,
                  sounds, step, sub, timer_left, timer_start, timer_stop, var)
 import pack
 
@@ -45,7 +46,7 @@ RINGS = (("ring lr", "Left ramp"), ("ring rr", "Right ramp"), ("ring bl", "Big l
 GABARA = ("Left ramp", "Big loop", "Right ramp")
 DADS = ("Godzilla target", "Building")
 SONS = (TOP, "Right ramp")
-NEED = pack.need(3, "grown")    # the top of the Mecha lane: 3 shots, then 6, then 9 (David's example)
+NEED = pack.need(6, "grown")    # the top of the Mecha lane: 6 shots, then 12, then 18 (PAD-675: was 3)
 TIMERS = ("ring", "ray", "gabara", "heal", "hit", "next", "dad", "son")
 MX, MY = 247, 265               # his art beside Mechagodzilla, top right of the playfield picture
 MOVE_S = 10                     # Gabara stays this long at least before he moves on
@@ -205,9 +206,15 @@ def dad_or_son(which, other):
 
 SCRIPTS = [
     # ---- up the lane: lit at the top of the Mecha lane ------------------------------------------------------------
-    on_shot(TOP, *notes_stay(pack.count_up("calls", 1, NEED, "ready", "note at", TOP, GREEN, "MECHA LANE",
-                                           "MINILLA IS LIT", "SHOOT THE MECHA LANE TO THE TOP", pack.SHOT_WORDS[TOP],
-                                           "MORE TO WAKE MINILLA", step=1)), when="idle"),
+    # PAD-675 (David: "every plunge increments the necessary switch"): a ball plunged passes the top of the Mecha lane
+    # on its way in; the first one of a ball is the plunge, not a shot (any other shot of his first means the plunge
+    # went elsewhere). "in play" is a ball's: 0 again each ball and each game (the game's ball-start event comes
+    # before the blocks see a new game, whose reset would wipe a flag that event set: emulator, ball 1)
+    on_shot(TOP, if_(eq("in play", 0), [set_("in play", 1)],
+                     notes_stay(pack.count_up("calls", 1, NEED, "ready", "note at", TOP, GREEN, "MECHA LANE",
+                                              "MINILLA IS LIT", "SHOOT THE MECHA LANE TO THE TOP",
+                                              pack.SHOT_WORDS[TOP], "MORE TO WAKE MINILLA", step=1))), when="idle"),
+    on_any_shot(set_("in play", 1), when="any"),
     pack.relight("ready", TOP, GREEN, "MECHA LANE"),
 
     # ---- he hatches --------------------------------------------------------------------------------------------------
@@ -318,7 +325,7 @@ SCRIPTS = [
 PROGRAM = {
     "name": NAME, "seconds": CLOCK[1], "ends_on_drain": True, "screen": False, "game_modes": "block",
     "wait_multiball": True, "priority": 180,
-    "vars": pack.pack_vars() + [{"name": n, "reset": "game"} for n in ("calls", "ready", "note at", "grown")] + [
+    "vars": pack.pack_vars() + [{"name": n, "reset": "game"} for n in ("calls", "ready", "note at", "grown")] + [{"name": "in play", "reset": "ball"}] + [
         {"name": n, "reset": "mode"} for n in ("stage", "pot", "rings", "ring value", "ray value", "gabara",
                                                 "gabara at", "mb on", "dad", "son", "hugs", "won", "cashed")] + [
         {"name": v, "reset": "mode"} for v, _s in RINGS],
@@ -336,7 +343,7 @@ PROGRAM = {
 
 EXAMPLE = {
     "name": NAME, "slug": SLUG, "order": 3, "titles": ["godzilla_le", "godzilla_pro"], "based_on": "",
-    "about": ("New (PAD-658). Shots up the Mecha lane wake him at its top (3, 6, then 9); four stages "
+    "about": ("New (PAD-658). Shots up the Mecha lane wake him at its top (6, 12, then 18); four stages "
               "(smoke rings, the tail stomp and his first ray, beating the bully Gabara, a father-and-son "
               "two-ball multiball), the line naming the shots each one wants; cash the pot out at the right scoop. "
               "Son of Godzilla (1967) and All Monsters Attack (1969)."),
@@ -353,11 +360,14 @@ _STAGE4 = ["balls", 2, "secs", 2, "shot", "Godzilla target", "ms", 400, "shot", 
            "shot", "Building", "ms", 400, "shot", "Right ramp", "ms", 400, "balls", 1, "secs", 2]
 _TOP = ["shot", "Mecha exit top", "ms", 400]
 DESK = [
-    ("three shots the first time, six the second", _TOP * 3 + ["shot", "Mecha exit top", "secs", 2, "trigger", "minilla.stop",
-                                                               "secs", 4] + _TOP * 5 + ["secs", 3] + _TOP + ["secs", 2],
+    # PAD-675: each ball's first Mecha exit top is its plunge: _TOP * 7 is the plunge and six
+    ("the plunge is not a shot", _TOP * 6 + ["secs", 2],
+     ["Hud_Line: 5  -  MORE TO WAKE MINILLA", "Hud_Line: 1  -  MORE TO WAKE MINILLA"]),
+    ("six shots the first time, twelve the second", _TOP * 7 + ["shot", "Mecha exit top", "secs", 2, "trigger", "minilla.stop",
+                                                                "secs", 4] + _TOP * 11 + ["secs", 3] + _TOP + ["secs", 2],
      ["[MINILLA] START (its lit shot)", "END (trigger file)", "Hud_Title: TOP OF THE MECHA",
       "Hud_Line: 1  -  MORE TO WAKE MINILLA", "Hud_Title: MINILLA IS LIT"]),
-    ("up the lane lights it", _TOP * 3 + ["shot", "Mecha exit top", "secs", 2],
+    ("up the lane lights it", _TOP * 7 + ["shot", "Mecha exit top", "secs", 2],
      ["Hud_Title: MINILLA IS LIT", "[MINILLA] START (its lit shot)", "LAMP MECHA LANE 40ff60 chase",
       "Hud_Award: MINILLA HATCHES", "Hud_Line: SHOOT THE RAMPS, BIG LOOP OR BUILDING"]),
     ("all four stages", _START + _STAGE1 + _STAGE2 + _STAGE3 + _STAGE4 + ["secs", 6],

@@ -4,7 +4,7 @@ three-stage multiball that goes deeper and deeper.
 Godzilla vs. SpaceGodzilla (1994): SpaceGodzilla plants crystal towers across Fukuoka to draw power; Godzilla and
 M.O.G.U.E.R.A. tear them down, break the crystals on his shoulders and cut his power at Fukuoka Tower.
 
-- PLANT A CRYSTAL at the Right ramp: one ramp a crystal the first time, two the second, three the third (3, 6, 9
+- PLANT A CRYSTAL at the Right ramp: two ramps a crystal the first time, four the second, six the third (6, 12, 18
   ramps for the three); every ramp a note names it and says how many more (RIGHT RAMP, 1  -  MORE TO PLANT A
   CRYSTAL). Nothing plants in a multiball. PAD-658: the Right ramp alone, so no two modes share a start (the powerlines
   are KING GHIDORAH's, the Big loop KUMONGA's).
@@ -56,7 +56,7 @@ HPS = ("hp1", "hp2", "hp3")
 TIMERS = ("ramp", "arrive", "jp", "window", "next", "lights", "super", "announce")
 SUPER_MS = pack.WINDOW_S * 1000      # the super's window (20 s)
 HP = add(add(var("hp1"), var("hp2")), var("hp3"))
-NEED = pack.need(1, "plays")         # Right ramps a crystal: 1 the first time, 2 the second, 3 the third
+NEED = pack.need(2, "plays")         # Right ramps a crystal: 2 the first time, 4 the second, 6 the third (PAD-675: was 1)
 #: the port's lamp places: the Big loop (where he lands), the Building (Fukuoka Tower), the centre shield
 BL, BLD, SHC = dict(x=195, y=251), dict(x=123, y=202), dict(x=199, y=346)
 
@@ -350,7 +350,7 @@ EXAMPLE = {
         "SHOOT THE LEFT OR CENTER SHIELD": "SHOOT THE LEFT SHIELD OR MASER",
         "SPIRAL GRENADES: THE SHIELDS": "SPIRAL GRENADES: SHIELDS AND MASER"}}},
     "about": ("The C example SPACEGODZILLA rebuilt in blocks and taken deeper (PAD-658): Right ramps plant the "
-              "crystals (one a crystal the first time, two the second, three the third), and three crystals "
+              "crystals (two a crystal the first time, four the second, six the third), and three crystals "
               "start a 3-ball multiball in three stages: CRYSTAL TOWERS (the ramps and the Building, a "
               "super at the Big loop), M.O.G.U.E.R.A. (the shoulder crystals at the shields, every hit a spiral "
               "grenade raising the jackpots, the super twice its sum at the Godzilla target) and SPACE BEAST (his "
@@ -380,8 +380,8 @@ _STAGE2 = _shots(*[s for s in SHIELDS for _i in (1, 2)]) + ["secs", 1]
 _STAGE3 = _shots(*[s for s in POWERLINES for _i in (1, 2, 3)]) + ["secs", 1]
 _RAMP = _shots("Right ramp", gap=600)
 DESK = [
-    ("one Right ramp a crystal the first time, two the second",
-     _RAMP * 3 + ["secs", 7] + _STOP + _RAMP * 6 + ["secs", 7],
+    ("two Right ramps a crystal the first time, four the second",
+     _RAMP * 6 + ["secs", 7] + _STOP + _RAMP * 12 + ["secs", 7],
      ["Hud_Title: CRYSTAL 1 PLANTED", "Hud_Line: THE RIGHT RAMP PLANTS THE NEXT", "Hud_Title: CRYSTAL 3 PLANTED",
       "[SPACEGODZILLA] START (a block)", "MULTIBALL 3 balls, save 15 s", "Hud_Title: CRYSTAL TOWERS",
       "Hud_Line: TOPPLE THE TOWERS: RAMPS AND BUILDING", "Hud_C1_Sub: HITS TO GO", "Hud_C1_Value: 6",
@@ -414,9 +414,11 @@ DESK = [
       "SCORE +1050000", "lamps held 0"]),
     ("a drain ends it", _START + _shots("Left ramp") + ["secs", 1, "ball_end", "secs", 8],
      ["END (ball ended)", "lamps held 0"]),
+    # PAD-675: nothing plants while the game's mode runs either: the full set is made just before it begins, and
+    # SpaceGodzilla, arriving NOTE_S after the third crystal, waits for it
     ("nothing plants in a multiball, a full set waits for the game's mode",
-     ["balls", 2, "secs", 1] + _RAMP + ["balls", 1, "secs", 1] + _RAMP * 2 +
-     ["timed", 1, "secs", 1] + _RAMP + ["secs", 4, "timed", 0, "secs", 1] + _RAMP + ["secs", 2],
+     ["balls", 2, "secs", 1] + _RAMP * 2 + ["balls", 1, "secs", 1] + _RAMP * 6 +
+     ["timed", 1, "secs", 5, "timed", 0, "secs", 1] + _RAMP + ["secs", 2],
      ["not started", "LAMP RIGHT RAMP be28ff chase", "[SPACEGODZILLA] START (its lit shot)",
       "MULTIBALL 3 balls, save 15 s"]),
 ]

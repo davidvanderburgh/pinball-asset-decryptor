@@ -1665,3 +1665,21 @@ def test_pad363_the_hand_written_godzilla_profile_offers_its_ports_modes():
     p = MP.profile("godzilla_pro_1_15")
     assert dict((i, n) for i, n, _on in p.game_modes)[21] == "Jet Fighter Attack"
     assert p.game_modes == MP.profile_from_port(MP.port_path(p)).game_modes
+
+
+def test_the_one_blocks_example_is_target_rush(tmp_path, preview_on):
+    """PAD-675 (David): the modes converted from C to blocks "don't look normal like what a human would program";
+    TARGET RUSH, the plain starter on the card's own shots, is New mode > Blocks' one example on every game."""
+    import json
+    proj = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        assert [e["name"] for e in w.state("modes")["blocks_examples"]] == ["TARGET RUSH"]
+        assert w.call("modes.blocks_example", "GODZILLA ANGRY") is False          # a converted one: not offered
+        assert w.call("modes.blocks_example", "TARGET RUSH") is True
+        with open(proj / "modes" / "target_rush" / "blocks.json", encoding="utf-8") as f:
+            prog = json.load(f)
+        assert prog["name"] == "TARGET RUSH"
+        starts = [s["hat"]["shot"] for s in prog["scripts"] if s["hat"].get("kind") == "shot"
+                  and s["hat"].get("when") == "idle"]
+        assert starts and starts[0]                                        # a start shot of the card's own

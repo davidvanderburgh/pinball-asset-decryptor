@@ -7,7 +7,7 @@
   "godzilla_pro"
  ],
  "based_on": "maser_barrage.c",
- "about": "The C example MASER BARRAGE rebuilt in blocks, three stages deep: the Maser target 3 times in a ball starts it (6 the second time, 9 the third). OPEN FIRE is the C's chain (Left ramp, Right ramp, Building, each within the window; a barrage pays 5M x the multiplier into the pot, up to x5); CROSSFIRE puts the three powerline tanks in line and fires the Maser target (10M x); GODZILLA IN THE SIGHTS aims at the Big loop and fires at the Godzilla target, three direct hits for the pot twice over. Cash the pot at the right scoop after any stage; failing pays a quarter.",
+ "about": "The C example MASER BARRAGE rebuilt in blocks, three stages deep: the Maser target 5 times in a ball starts it (10 the second time, 15 the third). OPEN FIRE is the C's chain (Left ramp, Right ramp, Building, each within the window; a barrage pays 5M x the multiplier into the pot, up to x5); CROSSFIRE puts the three powerline tanks in line and fires the Maser target (10M x); GODZILLA IN THE SIGHTS aims at the Big loop and fires at the Godzilla target, three direct hits for the pot twice over. Cash the pot at the right scoop after any stage; failing pays a quarter.",
  "lost": [
   "The start counts every Maser target hit this ball, with no 250 ms debounce, and the chain's shots have none either: a ball rattling in the Left ramp's entrance can count twice (the C counted one a quarter second).",
   "The next shot's blink quickens once a second as its window closes (the C every tick), and the HUD shows the multiplier as 2 where the C showed X2. The window's seconds ride on the line (SHOOT THE RIGHT RAMP IN 18) where the C had a WINDOW counter.",
@@ -718,7 +718,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 3
+           "v": 5
           },
           "b": {
            "k": "op",
@@ -776,7 +776,7 @@
               "op": "*",
               "a": {
                "k": "num",
-               "v": 3
+               "v": 5
               },
               "b": {
                "k": "op",
@@ -809,7 +809,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 3
+                 "v": 5
                 },
                 "b": {
                  "k": "op",

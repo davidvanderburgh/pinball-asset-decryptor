@@ -891,6 +891,7 @@ void pm_end(void)
     if (!running) shake_mode_ended();
 }
 int pm_running(void) { return running && running == current; }
+int pm_other_running(void) { return running && running != current; }   /* PAD-675 */
 
 /* ---- sound ---------------------------------------------------------------------------------- */
 unsigned pm_callout_id(const char *role)

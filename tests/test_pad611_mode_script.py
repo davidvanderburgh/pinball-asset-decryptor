@@ -55,7 +55,8 @@ EVERY_COND = [{"k": "cmp", "op": o, "a": {"k": "secs_left"}, "b": num(3)} for o 
     {"k": "and", "a": {"k": "running"}, "b": {"k": "lit"}}, {"k": "or", "a": {"k": "stock"}, "b": {"k": "can_start"}},
     {"k": "not", "a": {"k": "running"}}, {"k": "running"}, {"k": "can_start"}, {"k": "lit"}, {"k": "stock"}]
 EVERY_HAT = [{"kind": "mode_start"}, {"kind": "mode_end"}, {"kind": "shot", "shot": "Left ramp", "when": "running"},
-             {"kind": "any_shot", "when": "idle"}, {"kind": "every", "seconds": 5}, {"kind": "seconds_left", "seconds": 10},
+             {"kind": "any_shot", "when": "idle"},
+             {"kind": "switch", "when": "idle"}, {"kind": "every", "seconds": 5}, {"kind": "seconds_left", "seconds": 10},
              {"kind": "ball_end"}, {"kind": "event", "event": "ball_saved", "when": "any"},
              {"kind": "timer_done", "timer": "window"},
              {"kind": "challenge", "challenge": "Ahoy Mr. Bond"}]                                  # PAD-615

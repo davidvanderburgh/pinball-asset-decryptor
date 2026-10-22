@@ -271,7 +271,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 146 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 147 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -289,6 +289,7 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_begin()` | 1 = this mode is now the one running | T P F | items 133, 134 (refusals both ways) |
 | `pm_end()` | this mode stopped | T P F | items 133, 134 |
 | `pm_running()` | this mode is the one running | none | not measured |
+| `pm_other_running()` | PAD-675: another of our modes is the one running (not this one). A blocks mode is out of play while it is, or while one of the game's battles, multiballs or modes runs: its lit start shot is dark, its meter hidden, its idle scripts count nothing | none | PAD-675, desk (make_examples.py --desk) |
 | `pm_running_name(name)` | PAD-363: after `pm_begin`, the name the runtime's own lines give this mode while it runs (`block: ... - BLOCKTEST is running`), for one mode object that runs several; `pm_end` forgets it | F | PAD-363, emulator (Deadpool LE 1.14) |
 | `pm_begun()` | PAD-413: how many times one of our modes has begun. A mode remembers it at its end; when it moves while the ending is on the glass (its TOTAL, its own screen, a note) the ending is dropped at once. `pm_begin` also stops a full-screen clip another mode played | F | PAD-413, desk only (tests/test_spike2_mode_ending_gives_way.py, test_spike2_intricate_modes.py, test_stern_block_modes.py) |
 | `pm_score_add(player, points)` | through the game's scoring and its multiplier; returns what was added | T P F | items 125-134; the multiplier's effect not measured separately |

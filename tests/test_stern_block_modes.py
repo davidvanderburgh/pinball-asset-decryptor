@@ -560,8 +560,8 @@ def test_a_start_waits_out_a_multiball_and_the_next_one_after_it_starts_it(tmp_p
     ], seconds=0, wait_multiball=True)
     out = play(tmp_path, p, "balls", 2, "shot", "Left ramp", "multiball", 1, "balls", 1, "shot", "Left ramp",
                "multiball", 0, "shot", "Left ramp")
-    assert out.count("] cannot\n") == 2 and out.count("] can\n") == 1
-    assert out.count("still ready") == 1                          # said once in 10 s, not at every shot
+    # PAD-675: while the multiball runs the mode is out of play - its idle scripts do not run at all
+    assert out.count("] cannot\n") == 0 and out.count("] can\n") == 1
     assert out.count("START (a block)") == 1
     assert out.index("START (a block)") > out.index(">> multiball 0")
     # without the option a multiball does not stop it
@@ -795,12 +795,59 @@ def test_give_way_waits_for_the_games_mode_and_ends_when_one_begins(tmp_path):
     out = play(tmp_path, prog(GATE, seconds=0, game_modes="give_way"),
                "battle", 1, "shot", "Building", "battle", 0, "balls", 2, "shot", "Building", "balls", 1,
                "shot", "Building", "shot", "Maser target", "timed", 1, "secs", 0.5, "shot", "Maser target")
-    assert "not started (a block): a battle is running" in out
+    assert "not started" not in out                              # PAD-675: in the battle it is out of play
     assert out.count("START (a block)") == 1                     # the third Building: none running
     assert "gives way - one of the game's modes starting ends it" in out
     assert "END (the game's own mode began)" in out
     assert scores(out) == [5]                                     # the Maser after it ended pays nothing
     assert "BLOCK" not in out
+
+
+# ---- PAD-675: out of play while another mode runs; a switch hit counts ----------------------------------------
+COUNT = [{"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [
+    {"op": "change", "var": "n", "by": num(1)},
+    {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "var", "name": "n"}, "b": num(2)},
+     "then": [{"op": "start_mode"}], "else": None}]}]
+NV = [{"name": "n", "reset": "game"}]
+
+
+def test_a_mode_that_waits_the_games_modes_out_counts_nothing_while_one_runs(tmp_path):
+    # David's machine (PAD-675): a lit mode's inserts flashed through a battle. Two Buildings in the battle count
+    # nothing; after it, two more start it
+    out = play(tmp_path, prog(COUNT, NV, seconds=5, game_modes="block"),
+               "battle", 1, "shot", "Building", "shot", "Building", "secs", 1, "battle", 0, "secs", 1,
+               "shot", "Building", "secs", 1)
+    assert "START" not in out
+    out = play(tmp_path, prog(COUNT, NV, seconds=5, game_modes="block"),
+               "battle", 1, "shot", "Building", "battle", 0, "secs", 1, "shot", "Building", "shot", "Building")
+    assert out.count("START (a block)") == 1
+
+
+def test_a_mode_that_stacks_still_counts_through_the_games_modes(tmp_path):
+    out = play(tmp_path, prog(COUNT, NV, seconds=5), "battle", 1, "shot", "Building", "shot", "Building")
+    assert "START (a block)" in out
+
+
+def test_a_lit_mode_is_dark_while_the_games_mode_runs(tmp_path):
+    lit = [{"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [
+        {"op": "light_mode", "shot": "Left ramp", "color": "#ff0000", "pattern": "blink"}]}]
+    out = play(tmp_path, prog(lit, seconds=5, game_modes="block"),
+               "shot", "Building", "secs", 1, "battle", 1, "secs", 1, "battle", 0, "secs", 1)
+    seq = [ln.split(None, 1)[1] for ln in out.splitlines() if "LEFT RAMP" in ln or ">> battle" in ln]
+    assert seq == ["LAMP LEFT RAMP ff0000 blink 500 TEST MODE", ">> battle 1", "LAMP OFF LEFT RAMP TEST MODE",
+                   ">> battle 0", "LAMP LEFT RAMP ff0000 blink 500 TEST MODE"]
+
+
+def test_a_switch_hit_counts_toward_a_start(tmp_path):
+    sw = [{"hat": {"kind": "switch", "when": "idle"}, "do": [
+        {"op": "change", "var": "n", "by": num(1)},
+        {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "var", "name": "n"}, "b": num(50)},
+         "then": [{"op": "start_mode"}], "else": None}]}]
+    out = play(tmp_path, prog(sw, NV, seconds=5, game_modes="block"), "switches", 49, "secs", 1)
+    assert "START" not in out
+    out = play(tmp_path, prog(sw, NV, seconds=5, game_modes="block"), "switches", 48, "shot", "Building", "secs", 1,
+               "shot", "Left ramp")
+    assert "START (a block)" in out                  # a shot is its switch's hit too
 
 
 def test_block_holds_the_ticked_modes_off_while_it_runs(tmp_path):
@@ -832,7 +879,7 @@ def test_start_mode_now_does_not_wait_for_the_games_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_DUMP", str(dump))
     out = play(tmp_path, prog(GATE, seconds=0, game_modes="give_way"), "timed", 1, "shot", "Building",
                "trigger", "blk.start", "secs", 1)
-    assert "not started (a block): a stock mode is running" in out
+    assert "not started" not in out                              # PAD-675: out of play, the Building counts nothing
     assert "START (trigger file)" in out
 
 
@@ -1609,7 +1656,8 @@ def test_a_lit_mode_waits_lit_while_the_game_is_busy_and_a_new_game_puts_it_out(
                "event", "skill_shot", "battle", 1, "shot", "Right ramp", "secs", 0.2, "lamps",   # in the way: stays lit
                "battle", 0, "shot", "Right ramp")                                                # now it starts
     assert re.search(r"not started \(its lit shot\): .+ is running - still ready", out)
-    assert re.findall(r"HELD (RIGHT RAMP|MASER READY)", out) == ["RIGHT RAMP", "MASER READY"]
+    # PAD-675 (David's machine: a lit mode's inserts flashed through a battle): its light is dark while it waits
+    assert re.findall(r"HELD (RIGHT RAMP|MASER READY|none)", out) == ["none"]
     assert out.count("START (its lit shot)") == 1 and out.index("START (its lit shot)") > out.index(">> battle 0")
     out = play(tmp_path, _lit_prog(), "event", "skill_shot", "secs", 0.2, "game_over", "secs", 0.2, "lamps",
                "new_game", "secs", 0.2, "shot", "Right ramp")
@@ -1656,7 +1704,7 @@ def test_a_lit_mode_waits_out_the_games_own_modes_as_its_mini_wizards_do(tmp_pat
     p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]}],
              seconds=5, game_modes="give_way")
     out = play(tmp_path, p, "way", 0, "shot", "Left ramp", "way", 1, "shot", "Left ramp")
-    assert "one of the game's own modes is running - still ready" in out
+    assert "still ready" not in out                              # PAD-675: out of play, the shot counts nothing
     assert out.count("START (a block)") == 1 and out.index("START (a block)") > out.index(">> way 1")
     out = play(tmp_path, dict(p, game_modes="stack"), "way", 0, "shot", "Left ramp")
     assert "START (a block)" in out
@@ -2178,7 +2226,7 @@ def rage_meter():
                        "meter": True, "value": var("rage")}})
 
 
-def test_a_corner_meter_shows_before_its_mode_starts_and_beside_another_modes_hud(tmp_path):
+def test_a_corner_meter_shows_before_its_mode_starts_and_hides_while_another_mode_runs(tmp_path):
     p = rage_meter()
     assert BM.problems(p, SHOTS) == []
     assert BM.hud_spec(p, "rage")["gauge"] == {"label": " ", "kind": "bar", "count": 20, "icon": "rage",
@@ -2189,16 +2237,18 @@ def test_a_corner_meter_shows_before_its_mode_starts_and_beside_another_modes_hu
     out = play_many(tmp_path, {"rage": p, "maser": other},
                     "secs", 1, "shot", "Left ramp", "secs", 1, "shot", "Left ramp", "secs", 1,
                     "shot", "Maser target", "secs", 2,                         # the other mode runs: its HUD up
-                    "shot", "Left ramp", "secs", 1, "shot", "Left ramp", "secs", 22,   # it times out
+                    "shot", "Left ramp", "secs", 1, "shot", "Left ramp", "secs", 22,   # nothing counts; it times out
+                    "shot", "Left ramp", "secs", 1, "shot", "Left ramp", "secs", 1,
                     "shot", "Building", "secs", 7)                             # the rage mode itself
     # in a game, before anything: the bar at 0%, then 25%, 50%
     assert _hud_words(out, "Gauge_Label")[:3] == ["0%", "25%", "50%"]
     gauge = re.compile(r"SHOW \S*PadMode_rage_Hud_Gauge (\d)")
     assert "SHOW PadMode_rage_Hud 1" in out and gauge.findall(out)[0] == "1"
-    after = out[out.index(">> shot Maser target"):out.index(">> shot Building")]
-    # the other mode's HUD came up BESIDE it: the bar was not taken down, and it went on filling to ANGRY!
-    assert "SHOW PadMode_maser_Hud 1" in after
-    assert "SHOW PadMode_rage_Hud 0" not in after and "0" not in gauge.findall(after)
+    during = out[out.index(">> shot Maser target"):out.index("] END (time ran out)")]
+    after = out[out.index("] END (time ran out)"):out.index(">> shot Building")]
+    # PAD-675: the other mode runs alone - the bar is taken down and counts nothing; after it, it fills on to ANGRY!
+    assert "SHOW PadMode_maser_Hud 1" in during and "SHOW PadMode_rage_Hud 0" in during
+    assert "75%" not in _hud_words(during, "Gauge_Label")
     assert "75%" in _hud_words(after, "Gauge_Label") and "ANGRY!" in _hud_words(after, "Gauge_Label")
     # its own mode: the bar stays up and full until its end
     mine = out[out.index(">> shot Building"):]

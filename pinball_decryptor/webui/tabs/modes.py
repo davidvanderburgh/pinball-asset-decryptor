@@ -720,12 +720,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             for name in CM.example_names():
                 items.append({"name": name, "label": name + self.CODE_EXAMPLE_SUFFIX,
                               "code": True, "disabled": False})
-        game_dir = str(getattr(p, "game_dir", "") or "") if p is not None else ""
-        blocks = [{"name": name, "about": BM.example(name).get("about", ""),            # PAD-658: made of blocks
-                   "lost": [str(t) for t in BM.example(name).get("lost") or ()],   # what a rebuild lost against its C
-                   "based_on": bool(BM.example(name).get("based_on"))}
-                  for name in (BM.example_names(game_dir) if game_dir else ())
-                  if BM.fits(BM.example(name), p)]                       # only what builds on this card
+        # PAD-675 (David: the modes converted from C to blocks "don't look normal like what a human would program"):
+        # the one blocks example is TARGET RUSH on this card's own shots, on every game. The Godzilla programs in
+        # the SDK's blocks_examples are the block compiler's test material, not offered here
+        blocks = [{"name": BM.BASIC_EXAMPLE, "about": BM.BASIC_ABOUT, "lost": [], "based_on": False}] \
+            if p is not None else []
         ex_ok = bool(self._ex_ok and not self._no_port)
         self.set(examples=items, blocks_examples=blocks, new_ok=bool(self._new_ok and not self._no_port), ex_ok=ex_ok,
                  ex_tip="" if ex_ok else (self._no_port or MP.NO_PROJECT_HELP))
@@ -3005,8 +3004,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         data["summary"] = BM.summary(program)
 
     @rpc
-    def new_blocks_mode(self, name):
-        """New mode ▸ Blocks: a mode made of blocks, from a starter program on the card's shots."""
+    def new_blocks_mode(self, name, shots=None):
+        """New mode ▸ Blocks: a mode made of blocks, from a starter program on the card's shots (``shots``: in this
+        order, its start shot and jackpot first)."""
         if not self.project():
             self._tryit_note(MP.NO_PROJECT_HELP)
             return None
@@ -3018,9 +3018,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return None
         self._save_if_edited()
         p = self._shown or self._profile
-        shots = [n for n, _m in p.shots] if p is not None else list(self._shot_names)
-        taken = MP.start_shots_taken(self.project())        # PAD-666: start on a shot no other mode starts on
-        shots = [n for n in shots if n not in taken] + [n for n in shots if n in taken]
+        if shots is None:
+            shots = [n for n, _m in p.shots] if p is not None else list(self._shot_names)
+            taken = MP.start_shots_taken(self.project())    # PAD-666: start on a shot no other mode starts on
+            shots = [n for n in shots if n not in taken] + [n for n in shots if n in taken]
         try:
             slug, _path = BM.new_blocks_mode(self.project(), str(name).strip(), shots=shots)
         except (MT.TryItError, OSError) as e:
@@ -3033,56 +3034,15 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     @rpc
     def blocks_example(self, name, dirs=None, wait=False):
-        """New mode ▸ Blocks ▸ one of the blocks examples (PAD-658): its blocks, and its own clips, sounds and music
-        cut from the person's films (asked for when they are not found where a mode already cut from)."""
-        project = self.project()
-        why = self._refusal() if project else MP.NO_PROJECT_HELP
-        ex = BM.example(name)
+        """New mode ▸ Blocks ▸ the blocks example: TARGET RUSH on the card's own shots (PAD-675). The Godzilla programs
+        in the SDK's blocks_examples (PAD-658) are the block compiler's test material and are refused here."""
         p = self._shown or self._profile
-        game_dir = str(getattr(p, "game_dir", "") or "") if p is not None else ""
-        if not why and (ex is None or name not in BM.example_names(game_dir)):
-            why = "%s is not a blocks example for %s." % (name, p.label if p is not None else "this card")
-        if why:
-            self._tryit_note(why)
+        if name != BM.BASIC_EXAMPLE or p is None:
+            self._tryit_note("%s is not a blocks example for %s." % (name, p.label if p is not None else "this card"))
             return False
-        if os.path.exists(MP.mode_folder(project, ex["slug"])):
-            self._tryit_note("%s is already in this project (modes/%s)." % (name, ex["slug"]))
-            return False
-        from ...plugins.stern import code_modes as CM
-        found = list(dirs or ()) + CM.film_dirs(project)
-        missing = [k for k in BM.example_films(ex) if not CM.find_film(k, found)]
-        if missing and dirs is None:
-            got = self._ask_films_dir("Where are the films? %s's clips and sounds are cut from %s"
-                                      % (name, CM.missing_words(missing)))
-            if got:
-                found = [got] + found
-        self._save_if_edited()
-        ffmpeg = self._ffmpeg_path()
-        title = p.key if p is not None else ""
-        self._tryit_note("adding the example %s (blocks)…" % name)
-
-        def work():
-            try:
-                slug, missing = BM.add_example(project, name, dirs=found, ffmpeg=ffmpeg,
-                                               log=lambda m, *a: self._say(m), profile=p)
-            except Exception as e:                          # noqa: BLE001
-                self._tryit_note("%s could not be added: %s" % (name, e))
-                self._post_refresh_code()
-                return
-            self.stamp_code_title(project, slug, title)
-            self._tryit_note(("added the example %s as modes/%s, made of blocks: its own clips, sounds and music "
-                              "were cut from the films." % (name, slug)) if not missing else
-                             ("added the example %s as modes/%s, made of blocks. Its clips, sounds and music are cut "
-                              "from your copy of %s, which was not found, so it plays the game's own callouts for "
-                              "now: delete it and add it again once the films are found." % (name, slug,
-                                                                                    CM.missing_words(missing))))
-            self._post_refresh_code(slug)
-
-        t = threading.Thread(target=work, daemon=True, name="modes-blocks-example")
-        t.start()
-        if wait:
-            t.join()
-        return True
+        spec = MP.blank_spec(p, name, taken=MP.start_shots_taken(self.project()))
+        first = [spec.start_shot] + [s for s in spec.scoring_shots if s != spec.start_shot]
+        return bool(self.new_blocks_mode(name, shots=first + [n for n, _m in p.shots if n not in first]))
 
     @rpc
     def blocks_save(self, slug, program):

@@ -31,7 +31,7 @@
    }
   }
  },
- "about": "The C example BIOLLANTE rebuilt in blocks and taken deeper (PAD-658): four Left ramps start her (8 the second time, 12 the third) and every shot feeds the SAP JACKPOT. Four stages: THE ROSE (cut the Shield and Powerline vine banks to collect the sap x1, x2 into the pot), ROSE ABLAZE (burn the lit petal as Godzilla's ray moves across the ramps and the Big loop), REGROWTH (cut all six vines while she grows them back), then her BEAST form: the final blow at the Building, the pot twice over. 40 s a stage; the line names the shots (SHIELDS: 2 TO GO  POWERLINES: 3 TO GO, SHOOT THE BIG LOOP). Cash the pot out at the right scoop after any stage; the clock or a drain pays a quarter.",
+ "about": "The C example BIOLLANTE rebuilt in blocks and taken deeper (PAD-658): six Left ramps start her (12 the second time, 18 the third) and every shot feeds the SAP JACKPOT. Four stages: THE ROSE (cut the Shield and Powerline vine banks to collect the sap x1, x2 into the pot), ROSE ABLAZE (burn the lit petal as Godzilla's ray moves across the ramps and the Big loop), REGROWTH (cut all six vines while she grows them back), then her BEAST form: the final blow at the Building, the pot twice over. 40 s a stage; the line names the shots (SHIELDS: 2 TO GO  POWERLINES: 3 TO GO, SHOOT THE BIG LOOP). Cash the pot out at the right scoop after any stage; the clock or a drain pays a quarter.",
  "lost": [
   "Every stage has 40 s, the beast's too (PAD-658's round 3: time to do it): round 2 gave the beast 20 s, and she grew a vine back after 6 s alone (5 s, 4 s the more she had been fought), now after 20 s.",
   "A new stage is named by the HUD's title (ROSE ABLAZE, REGROWTH, BIOLLANTE BEAST), not by a note over the one the stage before ended on (THE ROSE IS CUT, THE ROSE IS ABLAZE, THE VINES ARE DOWN): that note stays its 3 s and says what comes next; the beast's BEAST FORM! note is gone.",
@@ -808,7 +808,7 @@
           "op": "*",
           "a": {
            "k": "num",
-           "v": 4
+           "v": 6
           },
           "b": {
            "k": "op",
@@ -866,7 +866,7 @@
               "op": "*",
               "a": {
                "k": "num",
-               "v": 4
+               "v": 6
               },
               "b": {
                "k": "op",
@@ -899,7 +899,7 @@
                 "op": "*",
                 "a": {
                  "k": "num",
-                 "v": 4
+                 "v": 6
                 },
                 "b": {
                  "k": "op",

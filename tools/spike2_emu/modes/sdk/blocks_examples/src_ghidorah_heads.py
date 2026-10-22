@@ -6,7 +6,7 @@ Maser gets one shot at the body. Round 2 (David: "multi-stage like what we did h
 through the stages, cashed out at the right scoop once a stage is done, each start costing more and playing harder,
 and failing still pays a quarter of the pot.
 
-- START: powerline hits in one ball: each of the three once the first time (3), twice the second (6), three times
+- START: powerline hits in one ball: each of the three twice the first time (6), four times the second (12), six times
   the third (9). Once a ball per player. No hit counts in a multiball (PAD-669). It waits out one of the game's
   battles or a multiball: the next powerline hit after it starts it. Every hit says how many are left (POWERLINE
   HITS, 2 TO SUMMON GHIDORAH); a powerline that has counted all it may says ANOTHER POWERLINE.
@@ -49,7 +49,7 @@ HEADS = (("LEFT HEAD", "Left ramp", "Powerline left", "hp l", "regrow l", "pl le
 WINGS = (("Big loop", "THE BIG LOOP", ""), ("Mecha exit bottom", "THE MECHA LANE", "MECHA LANE"))
 FINAL_SHOT, FINAL_INSERT = "Maser target", "MASER READY"
 TIMERS = ("turn", "regrow l", "regrow m", "regrow r", "hit", "lights", "next")
-NEED = pack.need(3, "starts")                      # powerline hits: 3, then 6, then 9
+NEED = pack.need(6, "starts")                      # powerline hits: 6, then 12, then 18 (PAD-675: was 3)
 WINGS_NEED = add(3, var("starts"))                 # wing hits: 4, then 5, then 6
 SUPER = add(20000000, mul(1000000, SECS_LEFT))
 MOVE_S = 10                                        # the lit head stays this long at least before it turns
@@ -159,7 +159,7 @@ def qualify(i):
     # (counted out but held off by one of the game's battles: any powerline starts it once it may)
     return on_shot(HEADS[i][2], if_(eq("ran ball", 0), [
         if_(ge("pl hits", NEED), [start()], [if_(pack.ONE_BALL, [      # PAD-669: none counts in a multiball
-            if_(le(pl, var("starts")), [
+            if_(lt(pl, mul(2, add(var("starts"), 1))), [            # each: twice a start so far, plus two
                 change(pl, 1), change("pl hits", 1),
                 if_(ge("pl hits", NEED), [start()], [
                     award("POWERLINE HITS", value=left, sub="TO SUMMON GHIDORAH", seconds=pack.NOTE_S)]),
@@ -196,7 +196,7 @@ def wing_lights():
 
 
 SCRIPTS = [
-    # ---- the start: powerline hits in one ball (3, then 6, then 9) ------------------------------------------------
+    # ---- the start: powerline hits in one ball (6, then 12, then 18) ------------------------------------------------
     qualify(0), qualify(1), qualify(2),
     on_start(set_("ran ball", 1), change("starts", 1), set_("ghidorah played", 1),
              set_("pl left", 0), set_("pl center", 0), set_("pl right", 0), set_("pl hits", 0),
@@ -342,7 +342,7 @@ EXAMPLE = {
     "name": NAME, "slug": SLUG, "order": 101, "titles": ["godzilla_le", "godzilla_pro"],
     "based_on": "ghidorah_heads.c",
     "about": ("The C example KING GHIDORAH rebuilt in blocks, three stages deep. Powerline hits in one ball start it "
-              "(each powerline once, twice the second time, three times the third). THE HEADS is the C's battle: "
+              "(each powerline twice, four times the second time, six times the third). THE HEADS is the C's battle: "
               "only the lit head (two shots each, lit gold and named on the line) takes damage, it turns, a wounded "
               "head grows back, each sever pays into the pot; THE WINGS: hit the Big loop and the Mecha lane in "
               "turn to ground him; THE FINAL BLOW: the Maser's super jackpot and the pot twice over. Cash the pot "
@@ -392,7 +392,8 @@ def build():
 
 
 _PL = ["shot", "Powerline left", "ms", 300, "shot", "Powerline center", "ms", 300, "shot", "Powerline right"]
-POWER3 = _PL + ["secs", 1]
+#: each powerline twice (PAD-675: a powerline counts up to twice a start so far, plus two)
+POWER6 = _PL + ["ms", 300] + _PL + ["secs", 1]
 _START = ["trigger", "ghidorah_heads.start", "secs", 1]
 _SEVER_ALL = ["shot", "Left ramp", "ms", 300, "shot", "Right ramp", "ms", 300, "shot", "Powerline left", "secs", 1,
               "shot", "Building", "ms", 300, "shot", "Powerline center", "secs", 1,
@@ -400,20 +401,22 @@ _SEVER_ALL = ["shot", "Left ramp", "ms", 300, "shot", "Right ramp", "ms", 300, "
 _WINGS = ["shot", "Big loop", "ms", 600, "shot", "Mecha exit bottom", "ms", 600] * 2 + ["secs", 1]
 #: the desk scenarios (make_examples.py --desk): what, the harness's commands, lines its output must hold
 DESK = [
-    # PAD-669: a multiball's powerline hits count for nothing: back to one ball, 1 more says 2 to go, no start
-    ("no hit counts in a multiball", ["balls", 2] + POWER3 + ["balls", 1, "secs", 1] + ["shot", "Powerline left"] + ["secs", 2],
-     ["Hud_Line: 2  -  TO SUMMON GHIDORAH", "![KING GHIDORAH] START (a block)"]),
-    ("the powerlines start it", ["shot", "Powerline left", "secs", 1] + POWER3 + ["secs", 5],
-     ["Hud_Title: POWERLINE HITS", "Hud_Line: 2  -  TO SUMMON GHIDORAH", "Hud_Title: ANOTHER POWERLINE",
+    # PAD-669: a multiball's powerline hits count for nothing: back to one ball, 1 more says 5 to go, no start
+    ("no hit counts in a multiball", ["balls", 2] + POWER6 + ["balls", 1, "secs", 1] + ["shot", "Powerline left"] + ["secs", 2],
+     ["Hud_Line: 5  -  TO SUMMON GHIDORAH", "![KING GHIDORAH] START (a block)"]),
+    # the Left powerline a third time does not count: ANOTHER POWERLINE
+    ("the powerlines start it", ["shot", "Powerline left", "secs", 1, "shot", "Powerline left", "secs", 1] + POWER6 +
+     ["secs", 5],
+     ["Hud_Title: POWERLINE HITS", "Hud_Line: 5  -  TO SUMMON GHIDORAH", "Hud_Title: ANOTHER POWERLINE",
       "Hud_Line: 1  -  TO SUMMON GHIDORAH",
       "[KING GHIDORAH] START (a block)", "Hud_Award: GHIDORAH ATTACKS", "Hud_Line: SHOOT THE LEFT RAMP OR LEFT POWERLINE",
       "Hud_C1_Sub: >> LIT <<", "LAMP LEFT RAMP ffaa00 blink 700", "LAMP POWERLINE LEFT ffaa00 blink 700"]),
-    # the next ball: each powerline once does not start it again this game, twice does
-    ("three hits the first time, six the second", POWER3 + ["trigger", "ghidorah_heads.stop", "secs", 4, "ball_end",
-                                                            "secs", 2] + POWER3 + _PL + ["secs", 2],
+    # the next ball: each powerline twice does not start it again this game, four times does
+    ("six hits the first time, twelve the second", POWER6 + ["trigger", "ghidorah_heads.stop", "secs", 4, "ball_end",
+                                                             "secs", 2] + POWER6 + POWER6 + ["secs", 2],
      ["[KING GHIDORAH] START (a block)", "END (trigger file)", "Hud_Line: 3  -  TO SUMMON GHIDORAH",
       "Hud_Line: 1  -  TO SUMMON GHIDORAH"]),
-    ("the heads, then cash out", POWER3 + _SEVER_ALL + ["secs", 7, "shot", "Right scoop", "secs", 5],
+    ("the heads, then cash out", POWER6 + _SEVER_ALL + ["secs", 7, "shot", "Right scoop", "secs", 5],
      ["SCORE +2000000", "SCORE +250000", "Hud_Award: LEFT HEAD -2", "Hud_AwardSub: AGAIN: LEFT RAMP OR LEFT POWERLINE",
       "Hud_Award: GLANCING BLOW", "Hud_AwardSub: NOW: LEFT RAMP OR LEFT POWERLINE",
       "Hud_Award: LEFT HEAD", "Hud_AwardSub: 5,000,000  -  SEVERED  +10 SECONDS",
@@ -422,7 +425,7 @@ DESK = [
       "Hud_AwardSub: BIG LOOP AND MECHA LANE, IN TURN",
       "Hud_C1_Label: WING HITS", "LAMP BIG LOOP ffaf00 chase 90", "LAMP SELECT CITY ffffff chase",
       "Hud_Award: CASHED OUT", "Hud_Title: GHIDORAH FLEES", "END (a block)", "lamps held 0"]),
-    ("all three stages", POWER3 + _SEVER_ALL + ["secs", 3] + _WINGS + ["secs", 3, "shot", "Maser target", "secs", 6],
+    ("all three stages", POWER6 + _SEVER_ALL + ["secs", 3] + _WINGS + ["secs", 3, "shot", "Maser target", "secs", 6],
      ["Hud_Award: WING HIT", "Hud_AwardSub: 10,000,000  -  NOW THE MECHA LANE",
       "Hud_AwardSub: 15,000,000  -  NOW THE BIG LOOP", "Hud_Line: THE WINGS: NOW THE MECHA LANE",
       "Hud_Award: GHIDORAH FALLS",
@@ -444,8 +447,8 @@ DESK = [
 
 #: the Pro (Godzilla Pro 1.16) has every shot and insert it names (MASER READY too): the same rules, played there
 DESK_PRO = [
-    ("the powerlines start it", POWER3 + ["secs", 5],
+    ("the powerlines start it", POWER6 + ["secs", 5],
      ["[KING GHIDORAH] START (a block)", "LAMP LEFT RAMP ffaa00 blink 700"]),
-    ("all three stages", POWER3 + _SEVER_ALL + ["secs", 3] + _WINGS + ["secs", 3, "shot", "Maser target", "secs", 6],
+    ("all three stages", POWER6 + _SEVER_ALL + ["secs", 3] + _WINGS + ["secs", 3, "shot", "Maser target", "secs", 6],
      ["Hud_Award: GHIDORAH FALLS", "LAMP MASER READY ffffff blink", "Hud_Title: GHIDORAH DEFEATED", "lamps held 0"]),
 ]

@@ -47,7 +47,7 @@ WEBS = (("web l", "Shield target left"), ("web c", "Powerline center"), ("web r"
         ("web lr", "Left ramp"), ("web rr", "Right ramp"))
 SPINNERS = ("Left spinner", "Top spinner", "Shield ramp spinner")
 SPINNER_INSERTS = ("LEFT SPINNER", "TOP SPINNER")   # the spinner shots light no insert of their own
-NEED = pack.need(3, "fought")   # 3 Big loops, then 6, then 9
+NEED = pack.need(6, "fought")   # 6 Big loops, then 12, then 18 (PAD-675: was 3)
 TIMERS = ("tear", "regrow", "next", "burn", "fire", "say")
 KX, KY = 251, 302              # her art on the playfield picture, above the scoop
 #: each stage's clock and title; her regrowth and FIRE's window (PAD-658 round 3: a window inside a stage)
@@ -315,7 +315,7 @@ EXAMPLE = {
     "name": NAME, "slug": SLUG, "order": 2, "titles": ["godzilla_le", "godzilla_pro"],
     # a Pro's port calls the spinner on the shield ramp the Right spinner; its shields are fixed (no platform to turn)
     "title_shots": {"godzilla_pro": {"Shield ramp spinner": "Right spinner"}}, "based_on": "",
-    "about": ("New (PAD-658). Loop the Big loop to wake her there (3 loops, 6, then 9); four stages, each one's shots "
+    "about": ("New (PAD-658). Loop the Big loop to wake her there (6 loops, 12, then 18); four stages, each one's shots "
               "named on the line (tear the web on the shield platform while she webs it again, cut the strands on "
               "every spinner, the sting hurry-up, burn her with Godzilla and Minilla); cash the pot out at the right "
               "scoop. Son of Godzilla (1967)."),
@@ -337,9 +337,9 @@ _STAGE2 = _shots("Top spinner", 60, 60) + ["secs", 1]
 _STAGE3 = ["secs", 4, "shot", "Big loop", "secs", 1]
 _STAGE4 = ["shot", "Building", "ms", 500, "shot", "Right ramp", "ms", 500] * 3 + ["secs", 6]
 DESK = [
-    ("three loops light it, the next one wakes her",
-     ["shot", "Big loop", "secs", 1] * 3 + ["shot", "Big loop", "secs", 2],
-     ["Hud_Title: SHOOT THE BIG LOOP", "Hud_Line: 2  -  MORE TO WAKE KUMONGA", "Hud_Line: 1  -  MORE TO WAKE KUMONGA",
+    ("six loops light it, the next one wakes her",
+     ["shot", "Big loop", "secs", 1] * 6 + ["shot", "Big loop", "secs", 2],
+     ["Hud_Title: SHOOT THE BIG LOOP", "Hud_Line: 5  -  MORE TO WAKE KUMONGA", "Hud_Line: 1  -  MORE TO WAKE KUMONGA",
       "Hud_Title: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)", "SHIELD toward",
       "Hud_Title: KUMONGA: THE WEB", "Hud_Line: ANY LIT SHOT: 5 TO GO"]),
     # her regrowth is a window (20 s): the torn Left ramp webbed again
@@ -371,7 +371,7 @@ def build():
 
 #: PAD-658: as a Pro gets it - the spinner on the shield ramp is the Pro's Right spinner, and its shields are fixed
 DESK_PRO = [
-    ("three loops light it on the Pro", ["shot", "Big loop", "secs", 1] * 3 + ["shot", "Big loop", "secs", 2],
+    ("six loops light it on the Pro", ["shot", "Big loop", "secs", 1] * 6 + ["shot", "Big loop", "secs", 2],
      ["Hud_Title: KUMONGA IS LIT", "[KUMONGA] START (its lit shot)"]),
     ("the web on the fixed shields", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
      ["Hud_Title: KUMONGA RETREATS", "SCORE +20000000"]),

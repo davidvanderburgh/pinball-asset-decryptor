@@ -192,13 +192,15 @@ function valueTemplates(ch, vars, timers) {
 }
 
 const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and", a: null, b: null },
-  { k: "or", a: null, b: null }, { k: "not", a: null }, { k: "running" }, { k: "can_start" }, { k: "lit" }, { k: "stock" }];
+  { k: "or", a: null, b: null }, { k: "not", a: null }, { k: "running" }, { k: "can_start" }, { k: "lit" }, { k: "stock" },
+  { k: "shields_away" }];
 
 const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot this ball", scored: "times it has scored",
   total: "points so far", secs_left: "seconds left", timer_left: "ms left on a timer", balls: "balls in play",
   player: "the player up", op: "a sum" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
-  can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs" };
+  can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
+  shields_away: "the shield targets face away" };
 export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",

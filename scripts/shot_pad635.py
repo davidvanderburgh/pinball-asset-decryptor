@@ -11,6 +11,12 @@ Writes, under the same names before and after:
 - audio_requests.png   the list, the cursor on a played sound's Requests cell (its tip)
 - audio_unused.png     sorted by Requests, fewest first: the None sounds on top, one's tip
 
+With --old-extract (and the ``sound_requests.tsv`` an extract before v1.217.0 wrote, e.g.
+PAD455_AUDIO's own) it writes only:
+
+- audio_old_extract.png  a project extracted before the full map: no column, and the note
+                         saying to extract again (PAD-635 round 2: a tester saw neither)
+
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
 import json
@@ -94,6 +100,14 @@ def _shot(repo, out, tsv, after):
             time.sleep(2)
             st = state().get("audio") or {}
             print("req_cap:", st.get("req_cap"), "rows:", len(st.get("rows") or []), flush=True)
+            if "--old-extract" in sys.argv:
+                print("req_note:", st.get("req_note"), flush=True)
+                page.mouse.move(5, 990)
+                time.sleep(0.6)
+                page.screenshot(path=os.path.join(out, pre + "audio_old_extract.png"))
+                print("page errors:", errors, flush=True)
+                browser.close()
+                return
             played = next((r for r in st.get("rows") or [] if PLAYED in r["k"]), {})
             print("played row:", played.get("k"), played.get("rq"), played.get("rq_tip"))
             _hover(page, PLAYED, after)

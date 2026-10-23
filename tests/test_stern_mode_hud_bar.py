@@ -5,7 +5,10 @@ it looks like a glitch. also, can we make this meter look more stock like the me
 meter should be 100% towards the mode". The game draws its pictures premultiplied, so a soft edge of ours in plain
 alpha came out as solid colour; and the meter is now one tube filled by slices, in the stock POWERUP meter's manner.
 """
+import os
+
 import numpy as np
+import pytest
 
 from pinball_decryptor.plugins.stern import mode_hud as H
 
@@ -49,3 +52,61 @@ def test_the_liquid_runs_through_its_colours_from_the_empty_end():
     mid = liquid.shape[0] // 2
     left, right = liquid[mid, 4, :3].astype(int), liquid[mid, -5, :3].astype(int)
     assert left[0] < right[0] and left[1] < right[1]               # dark red to orange
+
+
+# ---- PAD-690: the progress panel - a badge for every mode, each its own icon, scaled to fit -----------------------
+def test_every_mode_of_a_pack_wears_its_own_badge_icon():
+    huds = [("a", {"timer": {"label": "A", "icon": "claw"}}), ("b", {"timer": {"label": "B", "icon": "claw"}}),
+            ("c", {"badge": {"label": "C", "icon": "rose"}}), ("d", {}),
+            ("e", {"timer": {"label": "E", "icon": "claw"}, "icon_file": "e/badge.png"})]
+    out = dict(H.unique_icons(huds))
+    got = {slug: spec.get("badge_icon") for slug, spec in out.items()}
+    assert got == {"a": "claw", "b": "xilien", "c": "rose", "d": "radiation", "e": None}   # e wears its picture
+    assert out["e"]["icon_file"] == "e/badge.png"
+
+
+def test_a_modes_own_picture_is_its_badge_icon(tmp_path):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (120, 60), (0, 0, 0, 0))
+    ImageDraw.Draw(im).ellipse((10, 5, 110, 55), fill=(200, 30, 30, 255))       # a wide shape on a clear ground
+    im.save(tmp_path / "badge.png")
+    a = H.badge_icon({"icon_file": str(tmp_path / "badge.png")}, {})
+    assert a.shape == (44, 44) and a.max() == 255
+    assert a[0].max() == 0 and a[22].max() == 255                               # fitted on its longer side, centred
+    assert (H.badge_icon({}, {"icon": "rose"}) == H.icon("rose")).all()
+    with pytest.raises(H.HudError):
+        H.badge_icon({"icon_file": str(tmp_path / "none.png")}, {})
+
+
+def test_every_icon_a_badge_may_wear_is_drawn_and_none_alike():
+    seen = {}
+    for kind in H.ICONS:
+        a = H.icon(kind)
+        assert a.shape == (44, 44) and a.max() == 255, kind
+        assert a.tobytes() not in seen, (kind, seen.get(a.tobytes()))
+        seen[a.tobytes()] = kind
+
+
+def test_the_panel_fits_every_mode_between_the_rage_meter_and_the_score_panels():
+    for n in (1, 4, 13, H.PROGRESS_MAX):
+        s, x, ys = H.progress_layout(n, 210)
+        assert len(ys) == n and 0 < s <= 1.0
+        assert abs(ys[0] + 267.0 * s - H.PROGRESS_Y) < 0.01                             # the first badge's top
+        assert ys[-1] + 267.0 * s + H.PROGRESS_DY * s <= H.PROGRESS_BOTTOM + 0.01        # the last one's bottom
+        assert x + s * (210 - 21.0) <= H.GLASS_W                                         # on the glass
+    assert H.progress_layout(13, 210)[0] < H.progress_layout(4, 210)[0]
+
+
+def test_the_build_hands_a_modes_badge_picture_to_its_hud(tmp_path):
+    from types import SimpleNamespace
+    from pinball_decryptor.plugins.stern import mode_assets as MA, mode_project as MP
+    project = str(tmp_path)
+    for slug in ("one", "two"):
+        os.makedirs(MP.mode_folder(project, slug))
+    open(os.path.join(MP.mode_folder(project, "two"), MA.BADGE_ICON_FILE), "wb").close()
+    prof = SimpleNamespace(can=lambda what: True, lcd=lambda what: "x/" + MA.HUD_SCENE)
+    code = [("one", SimpleNamespace(hud={"title": "ONE"})), ("two", SimpleNamespace(hud={"title": "TWO"})),
+            ("off", SimpleNamespace(hud={}))]
+    huds = dict(MA._code_huds(project, code, prof, b"font"))
+    assert set(huds) == {"one", "two"} and "icon_file" not in huds["one"]
+    assert huds["two"]["icon_file"] == os.path.join(MP.mode_folder(project, "two"), MA.BADGE_ICON_FILE)

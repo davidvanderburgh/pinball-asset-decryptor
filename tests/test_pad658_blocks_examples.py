@@ -1,10 +1,11 @@
-"""PAD-658: whole modes made of BLOCKS as examples - the four new ones (KING CAESAR, KUMONGA, MINILLA, KAMACURAS) and
-the SDK's eleven C examples rebuilt in blocks - and what the blocks gained on the way.
+"""PAD-658: whole modes made of BLOCKS for Godzilla - the four new ones (KING CAESAR, KUMONGA, MINILLA, KAMACURAS) and
+the eleven C modes rebuilt in blocks - and what the blocks gained on the way. PAD-691: none of them is in the app; they
+are the block compiler's test material, in tests/mode_examples/blocks (the C ones in tests/mode_examples/c).
 
 - Everywhere: every example JSON is the program its Python writes, fit to build on Godzilla Premium/LE 1.16 (no
-  problem on its card), its clips and sounds each cut by its recipe from a film the app knows, each rebuild says
-  what it lost; the wizard offers them per title; adding one cuts its media from the films, or (no films) plays
-  the game's own callouts in their place.
+  problem on its card), its clips and sounds each named by its recipe from a film the recipes know, each rebuild says
+  what it lost; Premium/LE and Pro get the same new modes; added to a project without its media it plays the game's
+  own callouts in their place.
 - The Godzilla ports name the right scoop and the top of the Mecha lane as switch shots.
 - The desk harness (an ELF host compiler): every example plays its own scenarios (make_examples.py --desk), and the
   generator's new pieces - a counter's label from a block, an ending title in the place of "<NAME> TOTAL", the shot
@@ -24,8 +25,10 @@ from pinball_decryptor.plugins.stern import mode_project as MP
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SDK = os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk")
-EXDIR = os.path.join(SDK, "blocks_examples")
+EXDIR = os.path.join(ROOT, "tests", "mode_examples", "blocks")
+CDIR = os.path.join(ROOT, "tests", "mode_examples", "c")
 sys.path.insert(0, EXDIR)
+import examples as BX  # noqa: E402
 import make_examples as ME  # noqa: E402
 
 NEW = ("king_caesar", "kumonga", "minilla", "kamacuras")
@@ -34,14 +37,21 @@ REBUILT = ("ghidorah_heads", "oxygen_destroyer", "maser_barrage", "final_wars", 
 
 
 def _example(slug):
-    return next(e for e in BM.EXAMPLES if e["slug"] == slug)
+    return next(e for e in BX.EXAMPLES if e["slug"] == slug)
+
+
+def _c_examples():
+    """The C modes' entries in film_recipes.json (name, slug, source, recipe)."""
+    with open(os.path.join(CDIR, "film_recipes.json"), encoding="utf-8") as f:
+        return json.load(f)["examples"]
 
 
 # ---- the examples ---------------------------------------------------------------------------------------------
 def test_every_example_is_there_and_every_c_example_is_rebuilt():
-    slugs = [e["slug"] for e in BM.EXAMPLES]
+    slugs = [e["slug"] for e in BX.EXAMPLES]
     assert set(NEW) | set(REBUILT) <= set(slugs)
-    assert sorted(set(REBUILT)) == sorted(e["slug"] for e in CM.EXAMPLES)       # every C example, once
+    assert sorted(set(REBUILT)) == sorted(e["slug"] for e in _c_examples())     # every C example, once
+    assert all(os.path.isfile(os.path.join(CDIR, e["source"])) for e in _c_examples())
     assert slugs[:4] == list(NEW)                                               # the new ones first
 
 
@@ -63,7 +73,8 @@ def test_an_example_is_its_python_and_builds_on_godzilla_le(slug):
 
 @pytest.mark.parametrize("slug", REBUILT)
 def test_a_rebuild_keeps_its_c_examples_name_clock_and_cues(slug):
-    ex, c = _example(slug), CM.example(_example(slug)["name"])
+    ex = _example(slug)
+    c = next((e for e in _c_examples() if e["name"] == ex["name"]), None)
     assert c is not None and c["slug"] == slug
     r = c["recipe"]
     # every cue of its C's, with the same pick (round 2's stages add cues of their own)
@@ -72,21 +83,21 @@ def test_a_rebuild_keeps_its_c_examples_name_clock_and_cues(slug):
             assert ex["recipe"][kind].get(cue) == pick, (kind, cue)
 
 
-def test_the_wizard_offers_what_builds_on_the_card():
+def test_premium_and_pro_get_the_same_new_modes():
     """Premium/LE and Pro get the same new modes (a Pro's spinner on the shield ramp is its Right spinner, and it has
-    no shield platform to turn); an example is offered only where it builds once adapted to the card."""
+    no shield platform to turn); each builds once adapted to the card."""
     le = MP.profile("godzilla_le_1_16")
-    assert all(BM.fits(BM.example(n), le) for n in BM.example_names("godzilla_le"))
-    assert {BM.example(n)["slug"] for n in BM.example_names("godzilla_le")} == set(NEW) | set(REBUILT)
+    assert all(BX.fits(BX.example(n), le) for n in BX.example_names("godzilla_le"))
+    assert {BX.example(n)["slug"] for n in BX.example_names("godzilla_le")} == set(NEW) | set(REBUILT)
     pro = MP.profile("godzilla_pro_1_16")
-    offered = {BM.example(n)["slug"] for n in BM.example_names("godzilla_pro") if BM.fits(BM.example(n), pro)}
-    assert set(NEW) <= offered
-    kumonga = BM.adapt(_example("kumonga"), pro)
+    built = {BX.example(n)["slug"] for n in BX.example_names("godzilla_pro") if BX.fits(BX.example(n), pro)}
+    assert set(NEW) <= built
+    kumonga = BX.adapt(_example("kumonga"), pro)
     shots = {(s["hat"] or {}).get("shot") for s in kumonga["scripts"]}
     assert "Right spinner" in shots and "Shield ramp spinner" not in shots
     assert not any(b.get("op") == "shield" for s in kumonga["scripts"] for b in BM._walk(s["do"]))
-    assert any(b.get("op") == "shield" for s in BM.adapt(_example("kumonga"), le)["scripts"] for b in BM._walk(s["do"]))
-    assert BM.example_names("jaws_le") == []
+    assert any(b.get("op") == "shield" for s in BX.adapt(_example("kumonga"), le)["scripts"] for b in BM._walk(s["do"]))
+    assert BX.example_names("jaws_le") == []
 
 
 # ---- the ports' switch shots -----------------------------------------------------------------------------------
@@ -107,8 +118,8 @@ def test_the_le_port_names_the_scoop_and_the_top_of_the_mecha_lane():
 def test_without_its_films_it_plays_the_games_callouts(tmp_path):
     project = tmp_path / "proj"
     project.mkdir()
-    slug, missing = BM.add_example(str(project), "KING CAESAR", dirs=[])
-    assert slug == "king_caesar" and missing == ["mg74"]
+    slug = BX.add_example(str(project), "KING CAESAR")
+    assert slug == "king_caesar" and BX.example_films(BX.example("KING CAESAR")) == ["mg74"]
     prog = BM.load(str(project), slug)
     assert prog["clips"] == [] and prog["sounds"] == [] and prog["music"] == ""
     ops = {b.get("op") for s in prog["scripts"] for b in BM._walk(s["do"])}
@@ -117,51 +128,14 @@ def test_without_its_films_it_plays_the_games_callouts(tmp_path):
     assert BM.problems(prog, folder=folder, **BM.card_checks(MP.profile("godzilla_le_1_16"))) == []
     assert os.path.isfile(os.path.join(folder, slug + ".c")) and os.path.isfile(os.path.join(folder, BM.KIT_FILE))
     with pytest.raises(BM.BlocksError, match="already in this project"):
-        BM.add_example(str(project), "KING CAESAR")
+        BX.add_example(str(project), "KING CAESAR")
     # a sound block with a fallback callout keeps it
-    p = BM.without_media({"scripts": [{"hat": {"kind": "mode_start"}, "do": [
+    p = BX.without_media({"scripts": [{"hat": {"kind": "mode_start"}, "do": [
         {"op": "sound", "sound": "x", "fallback": "time_up"},
         {"op": "if", "cond": {"k": "running"}, "then": [{"op": "clip", "clip": "y", "where": "full"}],
          "else": [{"op": "sound", "sound": "z", "fallback": ""}]}]}]})
     assert p["scripts"][0]["do"] == [{"op": "callout", "role": "time_up"},
                                      {"op": "if", "cond": {"k": "running"}, "then": [], "else": []}]
-
-
-def test_with_its_films_it_cuts_them_into_its_folder(tmp_path, monkeypatch):
-    from pinball_decryptor.core.audio import find_ffmpeg
-    ffmpeg = find_ffmpeg()
-    if not ffmpeg:
-        pytest.skip("no ffmpeg")
-    films = tmp_path / "films"
-    films.mkdir()
-    film = films / "a_film.mp4"
-    subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30",
-                    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "6",
-                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(film)],
-                   check=True, capture_output=True)
-    monkeypatch.setitem(CM.FILMS, "tst", "a_film.mp4")
-    ex = {"name": "TEST CUT", "slug": "test_cut", "titles": ["godzilla_le"], "based_on": "", "lost": [],
-          "program": BM.normalize({"name": "TEST CUT", "clips": [{"name": "intro", "file": "intro.mp4"}],
-                                   "sounds": [{"name": "roar", "file": "roar.wav", "priority": 3}],
-                                   "music": "music.wav", "scripts": [{"hat": {"kind": "mode_start"}, "do": [
-                                       {"op": "clip", "clip": "intro", "where": "full"},
-                                       {"op": "sound", "sound": "roar", "fallback": ""}]}]}),
-          "recipe": {"clips": {"intro": {"film": "tst", "from": 1.0, "length": 2.0, "crop": "fill", "what": "x"}},
-                     "music": {"film": "tst", "from": 0.5, "length": 3.0, "what": "x"},
-                     "calls": {"roar": {"film": "tst", "from": 2.0, "length": 1.0, "priority": 3, "what": "x"}}}}
-    monkeypatch.setattr(BM, "EXAMPLES", [ex])
-    project = tmp_path / "proj"
-    project.mkdir()
-    slug, missing = BM.add_example(str(project), "TEST CUT", dirs=[str(films)], ffmpeg=ffmpeg)
-    assert (slug, missing) == ("test_cut", [])
-    folder = MP.mode_folder(str(project), slug)
-    for f in ("intro.mp4", "roar.wav", "music.wav", "test_cut.c", BM.BLOCKS_FILE):
-        assert os.path.isfile(os.path.join(folder, f)), f
-    prog = BM.load(str(project), slug)
-    assert [c["name"] for c in prog["clips"]] == ["intro"] and prog["music"] == "music.wav"
-    assert BM.problems(prog, folder=folder) == []
-    spec = CM.load(str(project), slug)
-    assert spec.clips == {"intro": "intro.mp4"} and spec.music == "music.wav"
 
 
 # ---- the desk ---------------------------------------------------------------------------------------------------
@@ -316,7 +290,7 @@ def test_a_play_the_music_block_switches_the_bed(tmp_path):
     assert "music 125 switches to its own bed (sound id 610)" in out
     assert re.search(r"SID 125 611\n.*\n\s*\d+ SOUND 125", out) or out.count("SOUND 125") >= 3
     # without its own media the block is dropped with the rest
-    assert all(b.get("op") != "music" for s in BM.without_media(p)["scripts"] for b in BM._walk(s["do"]))
+    assert all(b.get("op") != "music" for s in BX.without_media(p)["scripts"] for b in BM._walk(s["do"]))
 
 
 def test_every_example_fits_the_glass():
@@ -325,7 +299,7 @@ def test_every_example_fits_the_glass():
         pytest.skip("no Godzilla LE 1.16 card here to read the game's font from")
     import hud_fit
     font = hud_fit.font_from_card(card)
-    bad = {ex["slug"]: hud_fit.check(font, ex) for ex in BM.EXAMPLES}
+    bad = {ex["slug"]: hud_fit.check(font, ex) for ex in BX.EXAMPLES}
     assert not {k: v for k, v in bad.items() if v}
 
 
@@ -349,7 +323,7 @@ def test_the_pro_gets_alternate_rules_where_its_layout_differs():
                   {"op": "game_show", "name": "Insert chase"}, {"op": "game_show", "name": "Playfield wave"},
                   {"op": "light_shot", "insert": "GODZILLA SPOT", "color": "#ffffff", "pattern": "solid"},
                   {"op": "light_shot", "shot": "Shield target center", "color": "#ffffff", "pattern": "solid"}]}]})}
-    p = BM.adapt(ex, pro)
+    p = BX.adapt(ex, pro)
     hats = [s["hat"].get("shot") for s in p["scripts"]]
     assert hats == ["Right spinner", None]                                   # the centre shield's script is gone
     assert p["scripts"][0]["do"][0]["cond"]["a"]["shot"] == "Right spinner"   # its hits too
@@ -357,5 +331,5 @@ def test_the_pro_gets_alternate_rules_where_its_layout_differs():
     assert [b["op"] for b in start] == ["hold", "game_show", "light_shot"]
     assert start[0]["what"] == "magnet" and start[1]["name"] == "Glow" and start[2]["insert"] == "MASER FLASH"
     assert BM.problems(p, **BM.card_checks(pro)) == []
-    assert BM.adapt(ex, le) == ex["program"]                                # Premium/LE: as written
-    assert BM.fits(ex, pro) and BM.fits(ex, le)
+    assert BX.adapt(ex, le) == ex["program"]                                # Premium/LE: as written
+    assert BX.fits(ex, pro) and BX.fits(ex, le)

@@ -12,8 +12,7 @@ with the loop below. Everything you need is in these files.
 |---|---|
 | `pad_mode.h` | The API. Every call a mode can make, documented. |
 | `template_mode.c` | A complete mode (TARGET RUSH) that uses nearly every call. Start here. |
-| `examples/powerline_blitz.c` | A second mode: each target pays once, completing ends it, a shield ends it early, and a test trigger feeds shots by name. An AI agent given only this folder wrote it, and it ran correctly in the emulator the first time. |
-| `examples/README.md` | Five INTRICATE modes and their rules sheets (item 152): a boss battle with health, a hurry-up, a combo chain started by the skill shot event, a multi-phase wizard mode, and an ally that stacks with the game's own battle. They share `examples/intricate_kit.h` (a shot debounce, screen lines, lights, countdown, a pack ledger). `examples/desk_harness.c` plays any mode at the desk against a fake game. Each has its own clip, picture, music and calls cut from the films (`examples/film_recipes.json`). |
+| `examples/README.md` | The kit every code and blocks mode can build with, `examples/intricate_kit.h` (a shot debounce, the HUD at the glass's edges, the playfield's inserts, light shows, the display priority, a countdown, a pack ledger), and `examples/desk_harness.c`, which plays any mode at the desk against a fake game. No example modes: the app ships none written for one title (PAD-691). |
 | `pad_mode_assets.h` | A code mode's OWN clip, screen, music and calls, as the build carried them (see "A code mode's own clip, screen, music and calls"). |
 | `mode_file.c` | The mode that runs the Modes tab's mode files. It is an ordinary mode on this API. |
 | `MODE_PARAMETERS.md` | Every key a mode file takes, every field the Modes tab saves, every call above, and what is measured about each. |
@@ -27,7 +26,7 @@ with the loop below. Everything you need is in these files.
 
 ## The mode maker is a preview feature (in the app)
 
-In the app the mode maker ships DARK: the Modes tab, its Examples and film cutter, Try it,
+In the app the mode maker ships DARK: the Modes tab, its example (TARGET RUSH) and film cutter, Try it,
 the Write tab's "Pending (Modes)" rows, a Write carrying a project's modes and code modes,
 and the game's own modes' numbers (item 145) reaching a card all ride on one preview
 switch, and it is off in every copy until a personal code turns it on (Settings, the gear,
@@ -799,10 +798,7 @@ whenever that changes and a second after the end (`own sound: the music bus now 
 
 On the card the files sit beside `mode.so` in `/usr/local/padmode` (`mode_install.py --asset`); a
 card of code modes only carries no mode file at all. The emulator's card reader (`../cardmodes.sh`)
-and Try it's installer (`../tryit.sh install`) put them in `/dump`. The Modes tab's Examples offer
-the five intricate modes this way: each brings its code and a recipe of film times
-(`examples/film_recipes.json`) that the tab cuts with the film cutter from the person's own films.
-Emulator-proven on Godzilla Premium 1.16 (the showcase card, 2026-09-18).
+and Try it's installer (`../tryit.sh install`) put them in `/dump`. Emulator-proven on Godzilla Premium 1.16 (the showcase card, 2026-09-18).
 
 ### What is measured, and what is not
 
@@ -1193,7 +1189,10 @@ site balls_in_play         0x001fd194 0xe92d4010 0xe3084ab0
 
 While a multiball is being served it answers the balls the multiball asked for (the
 framework's ball manager, byte `+0xa`); otherwise the balls installed less those in the
-trough and the other ball devices. Two or more is `PM_STOCK_MULTIBALL`. It says nothing of
+trough and the other ball devices. Two or more, kept for 3 s, is `PM_STOCK_MULTIBALL`
+(PAD-687: a ball down an outlane is saved early on James Bond - the new ball is served while
+the drained one is still on its way to the trough, and the count reads 2 for about a second;
+taken for a multiball, it ended the mode, and in a mode's challenge game the ball). It says nothing of
 the title's other modes, so on these titles `stack no` waits for the game's multiballs only,
 and the Modes tab says so. A ball that is out of the trough and every ball device counts as in
 play, so a ball stuck on the playfield (or, in the rig, one of a six-ball multiball the script
@@ -1873,8 +1872,18 @@ the adjustments (desk only: `pm_shield` says 0).
 ## The building (Godzilla Premium/LE, PAD-393)
 
 Godzilla Premium and LE have a building on a stepper motor. The game moves it by FLOOR: 0 is where it
-rests (beside its home switch, BUILDING UP), and 1, 2 and 3 are 2500, 5000 and 7500 steps further. A mode
-asks for a floor and nothing else:
+rests (beside its home switch, BUILDING UP), and 1, 2 and 3 are 2500, 5000 and 7500 steps further.
+
+**Its lock is closed while one of our modes runs (PAD-684).** The game parks the building on floor 1 while its
+lock is lit (0x7d24c asks RuleBuildingLocks' "lock lit" query, 0x12e7d8, and moves it there; floor 0 when it is
+not), and on floor 1 a ball goes into the building. A lock lit before one of our modes began stayed open through
+it: balls locked, and the third lock's Godzilla Multiball, which the mode keeps from starting, never came - the game
+went into ball search (David's Premium, 2026-10-22). So while one of ours runs and has not put the building on a
+floor of its own, the runtime sends a building parked above floor 0 to 0, within the limits below, and puts it back
+where it was when the mode ends, which reopens the lock (mode.log: `building: floor 1 -> 0 - its lock closed while
+<mode> runs`). Nothing to do in a mode for it.
+
+A mode asks for a floor and nothing else:
 
 ```c
 pm_building(3);                           /* the floor furthest from home, at the operator's speeds */
@@ -1987,8 +1996,7 @@ and the longer shake wins as in the game.
 whose port has no shaker lines (`pm_can(PM_CAN_SHAKER)`; a Pro's program has the call too, not yet ported).
 A mode file says the same with `shake start|shot|end <ms> <strength> [mask]` or `shake start|shot|end game
 <name> [mask]` (MODE_PARAMETERS.md); a blocks mode with *Shake the cabinet for N ms* and *Shake it the game's
-way*; the form with Mode > Shaker. `examples/final_wars.c` starts with the game's multiball start and ends its
-wizard jackpot with the game's jackpot shake; `examples/destoroyah.c` its super jackpot.
+way*; the form with Mode > Shaker.
 
 **How it works** (Premium/LE 1.16). `shake(ms, strength, force)` (`0x189a54`) is the one call every shake of
 the game's goes through (about 340 of them): it reads adjustment 335 (AD_SHAKER_MOTOR, 0..4; past 4 is error
@@ -2804,10 +2812,15 @@ loop that is the backdrop of one of the game's display effects (Bond's spinner s
 75, a see-through picture over `Diamond_EarthSpin`) stays for as long as that effect has the
 screen, and the mode's clip comes back when it ends: with `data display_effects` (the effect
 manager pointer) the runtime reads the effect now, and one whose table record lacks the
-background flag 1 is over the TV (PAD-639). The same wait holds for a clip the game plays once
-under such an effect: Bond's skill shot awards (effects 392-394 LE, 391-393 Pro) play a hat toss
-and keep their picture over its last frame until the surface is idle, so the mode's clip (or a
-backdrop loop) going back at the toss's end kept that picture up for good. A clip
+background flag 1 and whose priority is at least `value display_over_tv_min` (128) is over the
+TV (PAD-639; Bond's serve, effect 55 at 96, draws nothing there). The same wait holds for a clip
+the game plays once under such an effect: Bond's skill shot awards (effects 392-394 LE, 391-393
+Pro) play a hat toss and keep their picture over its last frame until the surface is idle, so the
+mode's clip (or a backdrop loop) going back at the toss's end kept that picture up for good. An
+effect owns the game's clip when the game put it on the surface (not its main-play video) at most
+1 s before the effect began, or while it ran. While it does, nothing of the mode's takes the
+surface: not the clip put back, not the backdrop loop (even the one due at once after the mode's
+start clip), and a new `pm_clip` waits for the effect's end and then plays from its start. A clip
 the game plays once (a lock, a start, an award) is waited out. It does not come back if
 the mode ended, another mode of ours began, or its time ran out under the game's clip. James
 Bond LE and Pro 1.06 name them (LE at `surface_play` - 0x36c, - 0x6b4 and - 0x510, Pro the
@@ -3010,7 +3023,7 @@ pointing here. What each part of the tab needs from the port:
 | Tab section | Needs in the port | Also needs |
 |---|---|---|
 | Starts on, Shots that score | `shot` lines (and `shot_mask_bits` when the game sends 32 bits), and `switch` lines with a `switch_hit` site | a port not in `SWITCH_SHOTS_PROVEN` says its switch shots are not proven |
-| Examples | `text example_start_shot` | Godzilla's ready-made modes appear wherever every shot they name exists |
+| Examples | `text example_start_shot` | TARGET RUSH, the one example on every title, starts on it |
 | Sound: count down | the `callout` and `callout_nth` sites, and `callout countdown` | `callout ten_seconds` adds the call at 10 s; without it the count is 5..1 only. `value countdown_first <n>` when the request's list opens with something else: the clip "one" is in (Iron Maiden 1.16's 351 opens with a sting, so 1); `pm_callout_nth` adds it to any clip asked of the countdown role. `value countdown_step <n>` when every number is a request of its own: `callout countdown` names the "one" request and the others follow it by that step (Star Wars ELG 168, Munsters, Jurassic Park Pin, Batman 66 1061 count down the ids; Led Zeppelin, Sword of Rage count up; Bond 60th 542 steps by 2, each number in two voices). `value countdown_stride <n>` when one request holds every number in several voices, number by number: the clip for the count is `n * stride + countdown_first` (Deadpool LE 962 / Pro 967: five voices each, "ten" first, so first 5, stride 5) |
 | Sound: the game's own call | `callout time_up` | without it nothing plays when time is up |
 | Sound: my sound | the `sound_lookup` site and `callout time_up` (the call it replaces) | a time-up request with variants (Guardians' 254: "Time's up." / "Your time is up!" ...) gets the sound in place of every variant, so whichever the game picks plays it |
@@ -3970,6 +3983,31 @@ the game's own (flags 29, 37). The start menu on every build of the generation: 
   the entry itself and known after by the name it points to, and the ball's start hands the game to the mode -
   one ball, as every mode's challenge game. Other layouts name their fields: `value challenge_menu_kind_at`,
   `challenge_menu_caption_at`, `challenge_menu_caption2_at`, `challenge_menu_name_at`.
+* **One entry for every mode (PAD-686)** - Godzilla Premium/LE 1.16's start menu lists game-mode table indices
+  (u32s on its stack, room for nine), not entries of its own, so thirteen modes would not fit. The runtime appends
+  ONE more entry, King of the Monsters' own index a second time, at a point inside the menu's loop:
+
+  ```
+  site  challenge_menu_frame             <inside the loop, past where it jumps back: the buttons in a register>
+  value challenge_menu_frame_buttons_reg 5      # left flipper bit 4, right bit 2
+  value challenge_menu_frame_cursor_reg  6
+  value challenge_menu_frame_list_at     300    # count at 64, cap 9
+  value challenge_menu_frame_entry       4      # the index the entry repeats
+  value challenge_menu_slot              0
+  data  game_play_modes                  0x007b2814
+  value challenge_mode_plain             1
+  value challenge_menu_sets_on           1
+  ```
+
+  With the cursor on it the name message (`challenge_name_msg_0`) letters the mode shown, and a flipper press steps
+  to the next or previous mode instead of moving the cursor; past the last (or before the first) it moves on as the
+  game's own would. The menu applies the entry under the cursor live and the game applies the picked index's flags
+  again as the game starts, so a pick left on King of the Monsters starts its battle with the game and the mode is
+  refused ("a battle is running"): on our entry the pick is Standard's and flag 40 cleared, and the menu's pick alone
+  makes it the mode's one-ball challenge game. Back onto the game's own entry, index 4 and flag 40 again.
+  Proven (emulator, 2026-10-22, David's Heisei card with 13 modes, hidden, muted): the entry stepped through all 13
+  names and on to STANDARD; JET JAGUAR, KING KONG and OXYGEN DESTROYER picked, each START as the ball started, one
+  ball; MODE CHALLENGE then left back onto KING OF THE MONSTERS played the game's own challenge (its battle, no mode).
 * **No challenge at all** - King Kong 0.97, X-Men 0.98 and D&D have none among their game modes; Bond 60th's only
   one is Challenge Mode, the whole game against the clock: their profiles say so.
 
@@ -4517,8 +4555,8 @@ both; a card written by the app with both (the mode files reached the guest the 
 
 ## The showcase: five code modes that light their shots and hold a display priority (item 157)
 
-`examples/` holds five intricate modes (KING GHIDORAH, OXYGEN DESTROYER, MASER BARRAGE, FINAL WARS,
-ANGUIRUS; their rules sheets are `examples/README.md`) with their own clip, panel, music and calls. Item
+Five intricate modes written for Godzilla (KING GHIDORAH, OXYGEN DESTROYER, MASER BARRAGE, FINAL WARS,
+ANGUIRUS; since PAD-691 not in the SDK or the app, kept as test material in `tests/mode_examples/c/`). Item
 157 lit them the way a rules designer lights a Stern mode and put them in the game's display order, with
 two helpers in `examples/intricate_kit.h`:
 
@@ -4831,8 +4869,15 @@ kerning, carried in from the Ebirah battle scene) and hidden until the mode show
 - `counters`: up to three across the top (x 17.6 / 573.6 / 1123.6): a label, a big value, a sub-label;
 - an award line and a line under it in the middle (for a moment: a jackpot, a head severed);
 - `timer`: the stock BATTLE badge's panel with the mode's own green LED label and a glowing disc with its
-  icon (`bolt`, `oxygen`, `maser`, `xilien`, `anguirus`, `radiation`), in the BATTLE badge's slot (y 267),
-  the seconds in its window;
+  icon (`xilien`, `radiation`, `bolt`, `ghidorah`, `oxygen`, `maser`, `anguirus`, `rage`, `crystal`, `snowflake`,
+  `rose`, `claw`), in the BATTLE badge's slot (y 267), the seconds in its window. A picture named `badge.png` in
+  the mode's folder is its icon instead (PAD-690: its alpha, or its brightness, fitted into the disc). No two modes
+  of a card wear the same drawn icon: the build gives a mode whose icon an earlier mode took, or that names none,
+  the next free one;
+- the progress panel (PAD-680, PAD-690): a column at the right edge, under the rage meter and over the player
+  score panels, with a slot for every mode of the card, each badge scaled down to fit; a mode's latest progress
+  note stands in it (its badge and the shots it still needs, newest on top) until the mode starts or the game
+  ends. A mode with the timer off still has a badge there (its label and icon);
 - `gauge`: pips on the right edge (`spike`, `segment` - filled from the bottom - or `diamond`), each a lit
   and a dark picture; or (`"kind": "bar"`, PAD-416) ONE meter in the stock POWERUP meter's manner at the
   glass's top-right corner - a metal frame with the mode's `icon` in a diamond, a glass tube in five cells and
@@ -5085,7 +5130,7 @@ dialog on the glass (its service is tested in-process).
 Designed at the desk on 2026-09-23 from item 158's reading of the game's own rules (above), built on
 item 160's per-rule wrap of the shot-handler vtable slot (the section above). The pieces in the repo:
 `pad_stock.h` (the header an author's C sees), its implementation in `pad_mode_runtime.c` ("STOCK
-RULES IN C"), `examples/ebirah_rewrite.c` (a worked example: battle vs Ebirah with three different
+RULES IN C"), `ebirah_rewrite.c` (a worked example: battle vs Ebirah with three different
 shots in order, then the Building), and the port lines the accessors read in both Godzilla ports. The
 readable pseudo-C of Ebirah's and tank attack's own code is reference material (Stern's logic) and is
 NOT in the repo. What is emulator-proven is at the end of this section.
@@ -5132,7 +5177,8 @@ WON, i.e. the battle's own ending plays. Replaying the game's handler with a cho
 rewrite keeps the game's ending without re-implementing it; item 158 proved (emulator) that those two
 paths do exactly this when the real switches drive them.
 
-**What the example does** (`examples/ebirah_rewrite.c`): after the battle's own START it puts the Left
+**What the example does** (`ebirah_rewrite.c`; since PAD-691 test material in `tests/mode_examples/c/`, not
+shipped, so the app offers no template for the rule): after the battle's own START it puts the Left
 ramp in the field and holds its insert (yellow blink, `pm_lamp_shot`); a Left ramp hit pays what a spin
 pays (200,000 x factor, `pm_stock_award`), takes the game's first stage award, and lights the Right ramp;
 then the Big loop; then the Building, whose hit is the game's final blow. Any other shot does nothing,

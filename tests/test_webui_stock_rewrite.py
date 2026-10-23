@@ -65,8 +65,11 @@ def test_no_project_and_a_card_without_rules_have_no_rows(tmp_path, preview_on):
         assert "names none" in why and not os.path.exists(os.path.join(str(jaws), "modes"))
 
 
-def test_a_code_row_per_rule_and_a_rewrite_made_from_the_template(tmp_path, preview_on):
+def test_a_code_row_per_rule_and_a_rewrite_made_from_the_template(tmp_path, preview_on, monkeypatch):
     from pinball_decryptor.plugins.stern import stock_rewrite as SW
+    # PAD-691: the app ships no template; Ebirah's is test material
+    monkeypatch.setattr(SW, "TEMPLATES", {12: "ebirah_rewrite.c"})
+    monkeypatch.setattr(SW, "TEMPLATE_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "mode_examples", "c"))
     proj = _card_project(tmp_path / "gz", "godzilla_le-1_16_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)

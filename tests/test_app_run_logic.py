@@ -13,6 +13,7 @@ import time
 import pytest
 
 from tests.webui_harness import web_app
+from tests.mode_examples import form as MX  # noqa: E402
 
 
 def _wait(w, pred, timeout=15.0):
@@ -327,7 +328,7 @@ def test_the_write_scan_lists_no_mode_rows_with_the_switch_off(
     from pinball_decryptor.plugins.stern import stock_modes as SM
     from pinball_decryptor.webui import write_scan
     project = str(tmp_path / "project")
-    for _name, spec in MP.example_specs()[:2]:
+    for _name, spec in MX.example_specs()[:2]:
         MP.new_mode(project, spec=spec)
     monkeypatch.setattr(SM, "staged_edits", lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("read with the switch off")))

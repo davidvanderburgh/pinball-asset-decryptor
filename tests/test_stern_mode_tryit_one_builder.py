@@ -26,12 +26,13 @@ MT = pytest.importorskip("pinball_decryptor.plugins.stern.mode_tryit")
 from pinball_decryptor.plugins.stern import cards                # noqa: E402
 from pinball_decryptor.plugins.stern import engine as E          # noqa: E402
 from pinball_decryptor.plugins.stern import mode_project as MP  # noqa: E402
+from tests.mode_examples import form as MX  # noqa: E402
 from pinball_decryptor.plugins.stern import mode_write as MW    # noqa: E402
 
 
 def test_try_it_builds_its_set_with_writes_code(monkeypatch, tmp_path):
     project = str(tmp_path / "project")
-    for _name, spec in MP.example_specs()[:2]:
+    for _name, spec in MX.example_specs()[:2]:
         MP.new_mode(project, spec=spec)
     card = tmp_path / "card.raw"
     card.write_bytes(b"\0" * 4096)
@@ -65,7 +66,7 @@ def test_writes_builder_prepares_from_the_base_card_and_runs_over_the_picked_one
     two roles, so a card PAD built from the project runs the modes prepared from the card the
     project was measured on."""
     project = str(tmp_path / "project")
-    for _name, spec in MP.example_specs()[:2]:
+    for _name, spec in MX.example_specs()[:2]:
         MP.new_mode(project, spec=spec)
     picked = str(tmp_path / "built.raw")
     with open(picked, "wb") as f:

@@ -956,10 +956,20 @@ CHALLENGE_MENU_PROVEN = {
 #: Bond's: Standard, Competition and the five challenges (Tournament and DJ Mixer when switched on take two more)
 CHALLENGE_MENU_GAMES_OWN = 7
 CHALLENGE_NEW = 16                   #: ModeSpec.challenge for a challenge of the mode's own (the runtime's first own slot)
+#: PAD-686: the builds whose start menu lists game-mode indices (Godzilla's), seen in the emulator showing ONE MODE
+#: CHALLENGE entry whose flippers step through every challenge of the modes' own, one picked starting its mode as a
+#: one-ball challenge game
+CHALLENGE_MENU_FRAME_PROVEN = {
+    "godzilla_le-1.16": "PAD-686, 2026-10-22: one MODE CHALLENGE entry stepped through 13 modes; JET JAGUAR, KING KONG and OXYGEN DESTROYER picked, each started as the ball did (one ball)",
+}
+#: the runtime's room for challenges of the modes' own (N_OWN_CHALLENGE): one MODE CHALLENGE entry holds them all
+CHALLENGE_FRAME_ROOM = 16
 
 
 def _challenge_menu(key, port):
     """PAD-615 round 2: how many challenges of the modes' own the build's start menu has room for (0 = none)."""
+    if port and key in CHALLENGE_MENU_FRAME_PROVEN and "challenge_menu_frame" in port["site"]:
+        return CHALLENGE_FRAME_ROOM                                  # PAD-686: one entry, every mode
     if not port or key not in CHALLENGE_MENU_PROVEN or not {"challenge_menu", "challenge_menu_pick"} <= set(port["site"]):
         return 0
     try:
@@ -988,7 +998,7 @@ def _challenge_cannot(key, label, port=None):
                                   "is not one the app can add a challenge to." % label),)
         return (("challenge", "%s's Player Challenge mode has no list of challenges a mode of yours can take a place "
                               "in, and no start menu the app can add one to." % label),)
-    if key in CHALLENGE_PROVEN or key in CHALLENGE_MENU_PROVEN:
+    if key in CHALLENGE_PROVEN or key in CHALLENGE_MENU_PROVEN or key in CHALLENGE_MENU_FRAME_PROVEN:
         return ()
     return (("challenge", "The app has found %s's challenges but has not yet seen a mode of yours start from one in "
                           "the emulator, so it cannot here yet." % label),)
@@ -3288,51 +3298,6 @@ def new_mode(project, name=None, spec=None):
     return slug, spec
 
 
-# ---- the examples -------------------------------------------------------------------
-def example_specs():
-    """The modes the tab offers ready-made, in menu order, as ``[(name, ModeSpec)]``.
-
-    The first is KAIJU RUSH exactly as it ran on a real Godzilla Premium 1.16
-    (2026-09-16: video, audio, scenes and scoring all working) - a mode that is known to
-    work, so a person can start from one. The others are variations on it that need no
-    file of their own (a generated panel and a title card each), so they build as they
-    are; item 143 is where footage from the films replaces the title cards."""
-    def make(name, **kw):
-        return name, ModeSpec(name=name, **kw)
-    return [
-        make("KAIJU RUSH", start_shot="Maser target", start_count=3, seconds=30,
-             scoring_shots=["Powerline left", "Powerline center", "Powerline right",
-                            "Left ramp", "Right ramp"],
-             award=1000000, screen=True, clip="title", clip_when="start",
-             countdown=True, lights=True, light_color="#00ff00"),
-        make("ATOMIC BREATH", start_shot="Godzilla target", start_count=2, seconds=25,
-             scoring_shots=["Building", "Left ramp", "Right ramp"], award=750000,
-             panel_color="#0b3d91", title_color="#7fe7ff", clip="title", clip_when="start",
-             light_color="#00c8ff"),
-        make("MOTHRA'S SONG", start_shot="Big loop", start_count=2, seconds=40,
-             scoring_shots=["Shield target left", "Shield target right", "Big loop"],
-             award=500000, panel_color="#6b4e00", title_color="#fff1a8", clip="title",
-             clip_when="end", light_color="#ffd200"),
-        make("MECHAGODZILLA", start_shot="Building", start_count=3, seconds=20,
-             scoring_shots=["Powerline center", "Maser target", "Godzilla target"],
-             award=1500000, panel_color="#3a3a3a", title_color="#ff3b3b", clip="title",
-             clip_when="start", light_color="#ff0000"),
-    ]
-
-
-#: PAD-414: the examples' shakes, where the game can shake its cabinet (:func:`examples_for`): MECHAGODZILLA starts big
-#: (the game's own multiball start) and every Godzilla target is a jackpot (the game's jackpot shake)
-EXAMPLE_SHAKES = {"MECHAGODZILLA": [["start", "multiball_start", 0, ""], ["shot", "jackpot", 0, "Godzilla target"]]}
-
-
-def example(name):
-    """The example called ``name``, or None."""
-    for n, spec in example_specs():
-        if n == name:
-            return spec
-    return None
-
-
 # ---- modes for any ported title (item 148) --------------------------------------------
 def _switch_off_what_it_cannot(spec, p):
     """Turn off the parts ``p`` cannot do, so a new mode starts buildable and honest."""
@@ -3428,21 +3393,8 @@ def blank_spec(p, name="NEW MODE", taken=()):
 
 
 def examples_for(p):
-    """The ready-made modes for title ``p``, as ``[(name, ModeSpec)]``: Godzilla's four
-    (:func:`example_specs`) wherever every shot each one names exists, else one starter,
-    TARGET RUSH, built from the port's example start shot."""
-    names = {n for n, _m in p.shots}
-    out = []
-    for name, spec in example_specs():
-        if spec.start_shot in names and all(s in names for s in spec.scoring_shots):
-            spec.title = p.key
-            games = {n for n, _l in getattr(p, "shakes", ())}
-            shakes = EXAMPLE_SHAKES.get(name, [])                # PAD-414: where the game can shake its cabinet
-            if p.can("shaker") and all(r[1] in games and (not r[3] or r[3] in names) for r in shakes):
-                spec.shakes = [list(r) for r in shakes]
-            out.append((name, _switch_off_what_it_cannot(spec, p)))
-    if out:
-        return out
+    """The ready-made modes for title ``p``, as ``[(name, ModeSpec)]``: one starter on every title, TARGET RUSH,
+    built from the port's example start shot (PAD-691: no title has examples of its own)."""
     spec = blank_spec(p, "TARGET RUSH")
     return [(spec.name, spec)]
 

@@ -305,8 +305,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     SEQ_ROWS = MP.SEQUENCE_MAX
     PARAM_SECOND_CLIP = (("none", "None"), ("same", "The same clip"), ("title", "A title card"),
                          ("file", "My video…"))
-    CODE_EXAMPLE_SUFFIX = " (code mode)"
-    VIDEO_TYPES = [("Videos", "*.mp4 *.mov *.m4v *.mkv *.avi *.webm"), ("All files", "*.*")]
+    #: PAD-693: an animated GIF is a clip too (ffmpeg makes it a video like any other; it plays once)
+    VIDEO_TYPES = [("Videos", "*.mp4 *.mov *.m4v *.mkv *.avi *.webm *.gif"), ("All files", "*.*")]
     #: the Tk tab's ttk.Spinbox bounds (from_, to[, step]), keyed by the form field; the
     #: page draws each as a number field with arrows. ``callout_secs`` is the four callout
     #: rows' seconds. (The film dialog's length is bounded by its own ``film.max``.)
@@ -687,9 +687,6 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         p = self._profile
         if p is None:
             text = "No modes of your own yet."
-        elif any(n == "KAIJU RUSH" for n, _s in MP.examples_for(p)):
-            text = ("No modes yet. Start from an example (KAIJU RUSH is the one that has run on "
-                    "a machine), or make a blank one.")
         else:
             text = "No modes yet. Start from an example, or make a blank one."
         if self._game_ids():
@@ -710,30 +707,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._publish_examples()
 
     def _publish_examples(self):
-        """The Examples menu for the CARD's title: Godzilla's four (and its code examples)
-        only on Godzilla, a plain starter mode on any other title, nothing with no title."""
+        """The Examples menu for the CARD's title: one starter mode, TARGET RUSH, on every title (as a form mode and
+        in blocks), nothing with no title. PAD-691 (David: "we don't need game-specific demo modes like this committed
+        to the app"): no title has examples of its own, and none is in C."""
         p = self._profile
         items = [{"name": name, "code": False, "disabled": bool(self._at_cap)}
                  for name, _s in (MP.examples_for(p) if p is not None else ())]
-        from ...plugins.stern import code_modes as CM
-        if self._code_examples_ok():
-            for name in CM.example_names():
-                items.append({"name": name, "label": name + self.CODE_EXAMPLE_SUFFIX,
-                              "code": True, "disabled": False})
         # PAD-675 (David: the modes converted from C to blocks "don't look normal like what a human would program"):
-        # the one blocks example is TARGET RUSH on this card's own shots, on every game. The Godzilla programs in
-        # the SDK's blocks_examples are the block compiler's test material, not offered here
+        # the one blocks example is TARGET RUSH on this card's own shots, on every game
         blocks = [{"name": BM.BASIC_EXAMPLE, "about": BM.BASIC_ABOUT, "lost": [], "based_on": False}] \
             if p is not None else []
         ex_ok = bool(self._ex_ok and not self._no_port)
         self.set(examples=items, blocks_examples=blocks, new_ok=bool(self._new_ok and not self._no_port), ex_ok=ex_ok,
                  ex_tip="" if ex_ok else (self._no_port or MP.NO_PROJECT_HELP))
-
-    def _code_examples_ok(self):
-        """The code examples are Godzilla's (their shots, films and sounds): offered, and
-        accepted by the server, only when the card's title is Godzilla."""
-        p = self._profile
-        return p is not None and str(getattr(p, "game_dir", "")).startswith("godzilla")
 
     _new_ok = False
     _ex_ok = False
@@ -2748,8 +2734,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return str(e)
         if not code:
             return ("No code modes in this project. New code mode… starts one from the SDK's "
-                    "template; Examples has six written in C, with clips, music and calls cut "
-                    "from the films.")
+                    "template.")
         parts = []
         for slug, spec in code:
             parts.append(self._code_words_one(spec))
@@ -2763,13 +2748,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                 ("picture", spec.screen_art), ("music", spec.music)) if on]
         if spec.calls:
             have.append("%d call(s)" % len(spec.calls))
-        recipe = (spec.film or {}).get("recipe")
         if have:                                    # the HUD is built by Write, not cut: only beside assets
             if getattr(spec, "hud", None):
                 have.insert(1 if clips else 0, "its HUD")
             return "%s (%s)" % (spec.name, ", ".join(have))
-        if recipe:
-            return "%s (its film assets are not cut yet)" % spec.name
         return "%s (the game's own sounds)" % spec.name
 
     def _refresh_code_modes(self, project):
@@ -2831,8 +2813,6 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 path = os.path.join(folder, wav) if wav else ""
                 calls.append({"cue": cue, "wav": wav, "priority": prio,
                               "path": path if path and os.path.isfile(path) else ""})
-            film = spec.film or {}
-            needs, needs_files = self._films_needed(spec, folder)
             try:
                 words = CM.describe(slug, spec, prof=self._profile)
             except Exception:                               # noqa: BLE001
@@ -2845,8 +2825,6 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 music=spec.music, calls=calls, clips=clips, hud=dict(spec.hud or {}), files=files, describe=words,
                 summary=self._code_words_one(spec),
                 game_modes=self._code_game_modes(spec),                       # PAD-363
-                recipe=CM.recipe_lines(film.get("recipe")),
-                needs_films=needs, needs_files=needs_files,
                 status=("Cannot be built for this card yet: " + self._refusal()
                         if self._refusal() else
                         "Ready to build." if not problems
@@ -3034,8 +3012,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     @rpc
     def blocks_example(self, name, dirs=None, wait=False):
-        """New mode ▸ Blocks ▸ the blocks example: TARGET RUSH on the card's own shots (PAD-675). The Godzilla programs
-        in the SDK's blocks_examples (PAD-658) are the block compiler's test material and are refused here."""
+        """New mode ▸ Blocks ▸ the blocks example: TARGET RUSH on the card's own shots (PAD-675), the only one."""
         p = self._shown or self._profile
         if name != BM.BASIC_EXAMPLE or p is None:
             self._tryit_note("%s is not a blocks example for %s." % (name, p.label if p is not None else "this card"))
@@ -3241,31 +3218,6 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.open_path(os.path.join(MP.mode_folder(project, slug), slug + ".c"))
         return True
 
-    @staticmethod
-    def _films_needed(spec, folder):
-        """``(titles, files)``: the films a C example's recipe cuts from ("Godzilla (1954) and
-        ...") and the file names looked for, while a part it names (clip, picture, music, calls)
-        is not in its folder yet; ``("", "")`` once it is cut, or with no recipe."""
-        from ...plugins.stern import code_modes as CM
-        r = (spec.film or {}).get("recipe") or {}
-        if not r:
-            return "", ""
-        have = {"clip": spec.clip, "art": spec.screen_art, "music": spec.music}
-        cut = all(have[k] and os.path.isfile(os.path.join(folder, have[k]))
-                  for k in ("clip", "art", "music") if r.get(k))
-        if r.get("calls"):
-            cut = cut and bool(spec.calls) and all(
-                wav and os.path.isfile(os.path.join(folder, wav)) for _c, wav, _p in spec.call_list())
-        if r.get("clips"):                                  # hud-layers: every clip of the recipe cut
-            names = dict(spec.clip_list())
-            cut = cut and all(names.get(cue) and os.path.isfile(os.path.join(folder, names[cue])) for cue in r["clips"])
-        if cut:
-            return "", ""
-        keys = CM.recipe_films({"recipe": r})
-        titles = [CM.FILM_TITLES.get(k, k) for k in keys]
-        words = titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + " and " + titles[-1]
-        return words, ", ".join(CM.FILMS.get(k, k) for k in keys)
-
     @rpc
     def new_code_mode(self, name):
         """New code mode…: the page asked "What is the mode called?"."""
@@ -3375,47 +3327,6 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.refresh()
         return True
 
-    def _ask_films_dir(self, why):
-        return self.window.ask_folder("modes_films", why) or ""
-
-    def add_code_example(self, name, dirs=None, wait=False):
-        from ...plugins.stern import code_modes as CM
-        project = self.project()
-        if not project:
-            self._tryit_note(MP.NO_PROJECT_HELP)
-            return None
-        ex = CM.example(name)
-        if ex is None:
-            return None
-        if not self._code_examples_ok():
-            self._tryit_note("%s is an example for Godzilla; this card is not." % name)
-            return None
-        title = self._profile.key
-        if os.path.exists(MP.mode_folder(project, ex["slug"])):
-            self._tryit_note("%s is already in this project (modes/%s)." % (name, ex["slug"]))
-            return None
-        dirs = list(dirs or ()) + CM.film_dirs(project)
-        ffmpeg = self._ffmpeg_path()
-        self._tryit_note("adding the example %s (code mode)…" % name)
-
-        def work():
-            try:
-                slug, missing = CM.add_example(project, name, dirs=dirs, ffmpeg=ffmpeg,
-                                               log=lambda m, *a: self._say(m))
-            except Exception as e:                          # noqa: BLE001
-                self._tryit_note("%s could not be added: %s" % (name, e))
-                self._post_refresh_code()
-                return
-            self.stamp_code_title(project, slug, title)
-            self._tryit_note(self._code_example_note(name, slug, missing, CM))
-            self._post_refresh_code(slug)
-
-        t = threading.Thread(target=work, daemon=True, name="modes-code-example")
-        t.start()
-        if wait:
-            t.join()
-        return t
-
     def _post_refresh_code(self, select_code=None):
         def again():
             if self.project():
@@ -3449,97 +3360,6 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._show_code(self._code_slug)
         self._show_cap(project, len(self._slugs))
         self._publish_rows()
-
-    @staticmethod
-    def _code_example_note(name, slug, missing, CM):
-        if missing:
-            return ("added the example %s as modes/%s with its code. Its clip, picture, music and "
-                    "calls are cut from your copy of %s, which was not found, so for now it plays "
-                    "the game's own sounds on a plain panel. On its page, press Choose your films "
-                    "folder… and pick the folder that holds the film%s." % (name, slug, CM.missing_words(missing),
-                                                       "s" if len(missing) > 1 else ""))
-        return ("added the example %s as modes/%s: its code, and its own clip, picture, music and "
-                "calls cut from the films. Try it builds it in; Write puts it on the card."
-                % (name, slug))
-
-    @rpc
-    def code_example(self, name):
-        from ...plugins.stern import code_modes as CM
-        project = self.project()
-        why = self._refusal() if project else ""
-        if not why and project and not self._code_examples_ok():
-            why = ("%s is an example for Godzilla; this card is %s."
-                   % (name, self._profile.label if self._profile is not None else "not Godzilla"))
-        if why:
-            self._tryit_note(why)
-            return False
-        ex = CM.example(name)
-        if not project or ex is None:
-            return bool(self.add_code_example(name))
-        dirs = CM.film_dirs(project)
-        missing = [k for k in CM.recipe_films(ex) if not CM.find_film(k, dirs)]
-        extra = []
-        if missing:
-            got = self._ask_films_dir("Where are the films? %s's assets are cut from %s"
-                                      % (name, CM.missing_words(missing)))
-            if got:
-                extra = [got]
-        return bool(self.add_code_example(name, dirs=extra))
-
-    def recut_code_modes(self, dirs, wait=False, only=None):
-        from ...plugins.stern import code_modes as CM
-        project = self.project()
-        if not project:
-            return None
-        try:
-            code = [(s, c) for s, c in CM.list_code(project) if (c.film or {}).get("recipe")
-                    and (only is None or s == only)]
-        except CM.CodeModeError as e:
-            self._tryit_note(str(e))
-            return None
-        if not code:
-            self._tryit_note("no code mode here has a film recipe to cut from.")
-            return None
-        ffmpeg = self._ffmpeg_path()
-
-        def work():
-            done, left = [], {}
-            for slug, spec in code:
-                try:
-                    missing = CM.recut_example(project, slug, list(dirs) + CM.film_dirs(project),
-                                               ffmpeg=ffmpeg, log=lambda m, *a: self._say(m))
-                except Exception as e:                      # noqa: BLE001
-                    self._tryit_note("%s could not be cut: %s" % (spec.name, e))
-                    continue
-                if missing:
-                    left[spec.name] = missing
-                else:
-                    done.append(spec.name)
-            words = []
-            if done:
-                words.append("cut the film assets of %s" % ", ".join(done))
-            for n, m in left.items():
-                words.append("%s needs %s, which is not in that folder" % (n, CM.missing_words(m)))
-            self._tryit_note("; ".join(words) + ".")
-            self._post_refresh_code()
-
-        t = threading.Thread(target=work, daemon=True, name="modes-recut")
-        t.start()
-        if wait:
-            t.join()
-        return t
-
-    @rpc
-    def cut_films(self, slug=None):
-        """Choose your films folder… on a C example's page (``slug``), or every C example's
-        film assets at once (no slug)."""
-        if not self.project():
-            self._tryit_note(MP.NO_PROJECT_HELP)
-            return None
-        got = self._ask_films_dir("Pick the folder that holds the Godzilla films")
-        if not got:
-            return None
-        return bool(self.recut_code_modes([got], only=slug or None))
 
     # ------------------------------------------------------------------
     # Try it: the footer's calls

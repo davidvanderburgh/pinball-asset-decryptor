@@ -80,7 +80,6 @@ const T = {
   startNow: "Start the mode open on the left in the running game, without its starting shots. A game must be in play.",
   endNow: "End whichever of this project's modes is running.",
   codeMode: "A mode written in C, for what the form cannot do: a copy of the Mode SDK's template in this project's modes folder. Try it builds it in with the others.",
-  cutFilms: "Cut this example's clip, picture, music and calls from your own copy of the films. Pick the folder that holds them; the app keeps only the cuts.",
   challengeLaunch: "The challenge's ball waits in the shooter lane as the mode starts. The game launches it for the player once the mode's start clip is over (at once with no start clip), a set number of seconds after the mode starts, or not at all: the player launches it. Otherwise the ball starts as any other ball does: on James Bond, the left flipper button held at the launch opens the loop.",
   challenge: "The mode is played in the game's own Player Challenge mode: a one-ball game, picked on the game's start menu (both flipper buttons held in attract) as a game starts, or every game when the service menu's Default Game Mode is set to a challenge. Pick one of the game's own challenges and this mode starts as the ball starts in its place, the game's own never running, and the start menu shows the mode's name there; or pick A new challenge of its own and the start menu lists the mode after the game's own entries. The game ends when the ball ends. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge.",
   countsAs: "A shot of your choosing counts as one of this mode's own while it runs: a Left ramp can reach the battle vs Ebirah as a left spin (its points, and the count down by one). One ramp is one spin, so a ramp standing in for a spinner needs the spinner's count of hits. Saved with this project and put on the card by Write with the modes; with no rows the mode plays as it always did.",
@@ -975,11 +974,6 @@ function CodePane({ s }) {
     </div>
     ${c.status && !ready ? html`<div class="modes-status warn">${c.status}</div>` : null}
     ${c.error ? html`<div class="modes-status warn">${c.error}</div>` : null}
-    ${c.needs_films ? html`<div class="modes-status warn row modes-films" role="status">
-        <span class="grow">This example's clip, picture and music are cut from ${c.needs_films}, which can't ship with the app. Until then it plays the game's own sounds on a plain panel.</span>
-        <${Button} size="sm" icon="film" disabled=${!s.cut_ok} title=${T.cutFilms + (c.needs_files ? "\nIt looks for: " + c.needs_files : "")}
-          onClick=${() => call("modes.cut_films", c.slug)}>Choose your films folder…<//>
-      </div>` : null}
     <div class="pages" role="tablist">
       ${[["code", "Code"], ["assets", "Assets"]].map(([k, l]) => html`<button type="button" role="tab" aria-selected=${page === k} class=${page === k ? "on" : ""} onClick=${() => setPage(k)}>${l}</button>`)}
     </div>
@@ -1005,8 +999,6 @@ function CodePane({ s }) {
           <span class="k">Clip</span><span class="row">${c.clip || "none"}${c.files && c.files.clip ? html`<${Button} size="xs" kind="ghost" icon="play" onClick=${() => s._showClip(c.files.clip, c.name)}>Play<//>` : null}</span>
           <span class="k">Music</span><span class="row">${c.music || "none"}<${PlayButton} path=${c.files && c.files.music} /></span>
           ${c.game_modes ? html`<span class="k">The game's modes</span><span class="small wrap">${c.game_modes}</span>` : null}
-          <span class="k">Film recipe</span><span class="stack small" style="gap:2px">${(c.recipe || []).length
-            ? c.recipe.map((line) => html`<span class="wrap" key=${line}>${line}</span>`) : "none"}</span>
         </div>
         ${c.files && c.files.art ? html`<div class="thumb modes-preview"><img src=${mediaUrl(c.files.art)} alt="The mode's picture" /></div>` : null}
         ${c.screen ? html`<div class="row small modes-layout">

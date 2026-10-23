@@ -2488,7 +2488,9 @@ static void ck_idle_tick(void);           /* PAD-530: the game's main-play video
  * and then holds "CLASSIFIED SKILL SHOT" and its hats over the clip's last frame until the surface is idle (3.4 s in
  * the emulator). The mode's clip went back the moment the hat toss ended; with the surface playing again the effect
  * never ended, and its picture sat over the mode's video for the rest of the mode. So the wait is for any clip of the
- * game's while a foreground effect has the screen, and the backdrop loop (bd2_tick) waits the same way. */
+ * game's while a foreground effect has the screen, and the backdrop loop (bd2_tick) waits the same way.
+ * Round 3 (below, ck_game_display): the effect must own the game's clip, the loop's play-at-once waits too, and so does
+ * a new clip of ours (ck_wait). */
 #define CK_END_MS 500                     /* this close to its end, a clip counts as over */
 #define CK_LOOP_MS 3000                   /* a loop of the game's is shown this long at most, then ours comes back */
 static struct {
@@ -2521,6 +2523,38 @@ static unsigned long ck_idle_due;
 static unsigned disp_foreground_effect(void);   /* PAD-639: the display priority section, below */
 static int sv_hook(void);
 static int have_sites(const char *const *names);
+
+/* PAD-639 round 3 (luvthatapex on v1.238.2: a skill shot made while the mode's START clip played, and combos, still
+ * left the game's picture over the mode's video for good). Two more of ours took the surface while the game's display
+ * held its clip's end: the mode's loop (bd2_tick) plays AT ONCE after a full-screen clip of ours - the start clip, which
+ * the hat toss took the surface from - and a mode can play a new clip (pm_clip) at any time. So one test for every
+ * place: is the game's own clip on the surface the one a display effect of the game shows (ck_game_display)? Not
+ * every foreground effect: the serve's (Bond 55, priority 96, up to 22 s while the ball waits to be launched) draws
+ * nothing over the TV, and a mode starting then must show its clip. The effect is the clip's when the game put the
+ * clip on the surface (not its main-play video) at most CK_FX_WINDOW_MS before the effect began, or while it ran -
+ * the spinner's effect 75 was seen 200 ms after its Diamond_EarthSpin, a skill shot's 392 200 ms before its toss. */
+#define CK_FX_WINDOW_MS 1000
+static unsigned long ck_game_clip_ms;     /* pm_ms() the game put a clip of its own on the surface (0: its main-play) */
+static unsigned ck_fx_now;                /* the foreground effect now, as ck_fx_track last saw it */
+static unsigned long ck_fx_since;         /* pm_ms() it began */
+
+/* every tick, from clip_tick: when the foreground effect now began */
+static void ck_fx_track(void)
+{
+    unsigned fx = disp_foreground_effect();
+    if (fx != ck_fx_now) {
+        ck_fx_now = fx;
+        ck_fx_since = pm_ms();
+    }
+}
+
+/* the game's display effect whose clip the bank's surface holds now (its clip playing, or its end held), else 0 */
+static unsigned ck_game_display(void)
+{
+    ck_fx_track();
+    if (!ck_fx_now || ck_last_ours || !ck_game_clip_ms) return 0;
+    return ck_game_clip_ms + CK_FX_WINDOW_MS >= ck_fx_since ? ck_fx_now : 0;
+}
 
 static long long ck_ms(const char *which, void *surf)
 {
@@ -2578,6 +2612,7 @@ static void ck_seen(unsigned *r)
         is_idle = !idle[i];
     }
     ck_last_ours = 0;                     /* round 4: the game has the surface now */
+    ck_game_clip_ms = is_idle ? 0 : pm_ms() | 1;   /* PAD-639 round 3: a clip of its own, for ck_game_display */
     if (is_idle) {
         for (i = 0; name[i] && i + 1 < sizeof ck_idle; i++) ck_idle[i] = name[i];
         ck_idle[i] = 0;
@@ -2643,7 +2678,7 @@ static void ck_tick(void)
     surf = clip2_surface();
     if (!surf) return;
     if (!ck.back) {                       /* PAD-639: a display of the game's over the TV: its clip stays till it ends */
-        unsigned fx = disp_foreground_effect();
+        unsigned fx = ck_game_display();
         if (fx) {
             if (!ck.fx) say("clip: the game's display effect %u is over its clip \"%.60s\" - \"%s\" waits for its end",
                             fx, ck.game, ck.name);
@@ -2697,10 +2732,56 @@ static void ck_arm(void)
     }
 }
 
+/* PAD-639 round 3: a clip of ours asked for while a display of the game's shows its clip on the surface (or holds its
+ * end) waits for that display's end, then plays from its start - put on the surface at once it kept the display, and
+ * its picture, over our clip for good. It is dropped if its mode ends or another of ours begins first. */
+static struct {
+    char name[96];
+    const struct pm_mode *owner, *running;
+    unsigned begun, fx;
+} ck_wait;
+static int ck_wait_in;
+
+static void ck_wait_tick(void)
+{
+    const struct pm_mode *was;
+    if (!ck_wait.name[0]) return;
+    if (running != ck_wait.running || begun != ck_wait.begun) {
+        say("clip: \"%s\" is not played - %s before the game's display effect %u was over", ck_wait.name,
+            running == ck_wait.running ? "another mode of ours began" : "its mode ended", ck_wait.fx);
+        ck_wait.name[0] = 0;
+        return;
+    }
+    if (ck_game_display()) return;
+    say("clip: the game's display effect %u is over - \"%s\" plays now", ck_wait.fx, ck_wait.name);
+    was = current;
+    current = ck_wait.owner;
+    ck_wait_in = 1;
+    pm_clip(ck_wait.name);
+    ck_wait_in = 0;
+    current = was;
+    ck_wait.name[0] = 0;
+}
+
 int pm_clip(const char *name)
 {
     unsigned i;
     if (!(can & PM_CAN_CLIPS) || !name || !*name) return 0;
+    if (clip_v2 && ck_can && !ck_wait_in) {
+        unsigned fx = ck_game_display();
+        ck_wait.name[0] = 0;              /* (a newer clip asked for replaces one that waits) */
+        if (fx) {
+            for (i = 0; name[i] && i + 1 < sizeof ck_wait.name; i++) ck_wait.name[i] = name[i];
+            ck_wait.name[i] = 0;
+            ck_wait.owner = current;
+            ck_wait.running = running;
+            ck_wait.begun = begun;
+            ck_wait.fx = fx;
+            ck_drop(0);                   /* an older clip of ours does not come back over it */
+            say("clip: \"%s\" waits - the game's display effect %u shows its own clip on the surface", name, fx);
+            return 1;
+        }
+    }
     if (clip_layer) {
         void *video = clip_layer_video();
         unsigned str;
@@ -2768,6 +2849,7 @@ static void clip_other_began(void)
 void pm_clip_stop(void)
 {
     if (!(can & PM_CAN_CLIPS)) return;
+    ck_wait.name[0] = 0;                  /* PAD-639: one that waits is not played either */
     if (clip_layer) {
         clip_layer_out();
     } else if (clip_v2) {
@@ -2798,8 +2880,10 @@ static void clip_tick(void)
     display_tick();                           /* item 154 display: the hold, the covered state */
     gw_tick();                                /* PAD-662: the game's own words up or gone, said as they change */
     block_tick();                             /* PAD-347: a block ends with its mode */
+    if (ck_can) ck_fx_track();                /* PAD-639: when the game's display effect now began */
     bd2_tick();                               /* PAD-521: the loop on the bank's surface */
     ck_tick();                                /* PAD-530: a mode's clip back after the game's */
+    ck_wait_tick();                           /* PAD-639: a clip of ours asked for under a display of the game's */
     ck_idle_tick();                           /* PAD-530: the game's main-play video back after ours ended */
     if (!clip.on && clip_v2 && !clip2_hidden && pm_ms() - clip2_tried > 1000) {
         clip2_tried = pm_ms();                /* a grafted surface out of sight, once its scene is up */
@@ -3350,10 +3434,10 @@ static void bd2_tick(void)
     }
     surf = clip2_surface();
     if (!surf) return;
+    if (ck_game_display()) return;        /* PAD-639: a display of the game's shows its clip there, or holds its end */
     if (bd.pending) { bd2_play(surf); return; }
     if (pm_ms() - bd.since < 500) return;  /* just played: the surface may not say "playing" yet */
     if (((int (*)(void *))(unsigned long)fn("surface_state"))(surf) == (int)pm_port_value("surface_playing", 2)) return;
-    if (!ck_last_ours && disp_foreground_effect()) return;   /* PAD-639: a display of the game's holds its clip's end */
     bd2_play(surf);                       /* its end, the one-shot's or the game's clip over: the loop (again) */
 }
 
@@ -3680,17 +3764,24 @@ static unsigned disp_level_now(unsigned char *m) { return *(m + pm_port_value("d
 
 /* PAD-639: the effect of the game's that has the screen now when it is a FOREGROUND one - its table record (data
  * award_screen_arg: {records, count}, a record {process, u16 flags, u8 priority}) lacks the background flag 1 - else 0.
- * Needs only the manager (data display_effects), so a port without the other display lines has it too. */
+ * Needs only the manager (data display_effects), so a port without the other display lines has it too.
+ * Round 3: and its priority is at least `value display_over_tv_min` (128). Bond's six foreground effects below it (LE
+ * 12, 24, 28, 37, 51 and 55) draw nothing over the TV: 55 is the serve's, up until the ball is launched while the
+ * game's ball-start film intro plays - a mode starting at the serve waited for the launch. Every award, combo, lock and
+ * jackpot display is 128 or more (176-195 most of them; the spinner's 132, a skill shot's 193). */
 static unsigned disp_foreground_effect(void)
 {
     unsigned char *m = disp_manager();
     const unsigned *t;
+    const unsigned char *rec;
     unsigned now;
     if (!m) return 0;
     now = disp_now(m);
     t = (const unsigned *)(unsigned long)data("award_screen_arg");
     if (!now || !t[0] || now >= t[1]) return 0;
-    return *(const unsigned short *)(unsigned long)(t[0] + 8u * now + 4) & 1 ? 0 : now;
+    rec = (const unsigned char *)(unsigned long)(t[0] + 8u * now);
+    if (*(const unsigned short *)(rec + 4) & 1) return 0;
+    return rec[6] >= (unsigned)pm_port_value("display_over_tv_min", 128) ? now : 0;
 }
 
 static void disp_release(const char *why)
@@ -4360,6 +4451,33 @@ static int stock_objects(void)
     return 0;
 }
 
+/* PAD-687 (luvthatapex, Bond LE): a ball down an outlane is saved EARLY - the game serves the new ball while the
+ * drained one is still on its way to the trough, so the balls in play read 2 for a moment. Taken for one of the
+ * game's multiballs, it ended the mode (and, in a mode's challenge game, the ball: flippers dead). Two balls count
+ * as a multiball once they have stayed in play STOCK_MB_SETTLE_MS; the game's own multiballs last far longer.
+ * since: when two or more were first seen (0 = not now). 1 = a multiball (tests lift it verbatim). */
+#define STOCK_MB_SETTLE_MS 3000
+static int balls_multiball(unsigned n, unsigned long now, unsigned long *since)
+{
+    if (n < 2) {
+        *since = 0;
+        return 0;
+    }
+    if (!*since) *since = now ? now : 1;
+    return now - *since >= STOCK_MB_SETTLE_MS;
+}
+
+static unsigned long two_since;   /* PAD-687: kept up every tick (stock_balls_tick), not only when asked */
+
+static void stock_balls_tick(void)
+{
+    if (!fn("balls_in_play") || !pm_player()) {
+        two_since = 0;
+        return;
+    }
+    balls_multiball(((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu, pm_ms(), &two_since);
+}
+
 static int stock_balls(unsigned kinds)
 {
     unsigned n;
@@ -4377,7 +4495,8 @@ static int stock_balls(unsigned kinds)
     if (stock_objects_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_objects())
         return (int)PM_STOCK_BATTLE;
     n = ((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu;
-    return n >= 2 && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY)) ? (int)PM_STOCK_MULTIBALL : 0;
+    return balls_multiball(n, pm_ms(), &two_since) && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY))
+        ? (int)PM_STOCK_MULTIBALL : 0;
 }
 
 int pm_stock_mode_running(unsigned kinds)
@@ -6202,10 +6321,59 @@ static void building_let_go(const char *why)
     bld.putback_why = why;
 }
 
+/* PAD-684: the building's lock is CLOSED while one of our modes runs. The game parks the building on floor 1 while
+ * its lock is lit (0x7d24c: RuleBuildingLocks' "lock lit" query 0x12e7d8, then building_move) and on 0, where it
+ * rests, while it is not; on floor 1 a ball goes into the building. David's Premium (2026-10-22): a lock lit before
+ * one of ours began stayed open through it, balls locked, and the third lock's Godzilla Multiball - which our mode
+ * keeps from starting - never came: ball search. So while one of ours runs (and has not asked for a floor of its
+ * own), a building parked above 0 is sent to 0, within pm_building's limits, and put back where it was when the
+ * mode ends (building_tick), which reopens the lock. Not while one of the game's own modes has the stage (pm_aside):
+ * the building is its then. (tests lift building_close_why verbatim) */
+static const char *building_close_why(int running_mode, int in_game, int aside, int putting_back, int asked, int at,
+                                      int to, int busy, int off, unsigned long last, unsigned long now,
+                                      const unsigned long starts[MAGNET_PER_MIN])
+{
+    unsigned i, recent = 0;
+    if (!running_mode || !in_game || aside || putting_back) return "not ours to close now";
+    if (asked > 0) return "the mode has it on a floor of its own";
+    if (at == 0 && to == 0) return "closed already";
+    if (to != at || busy) return "moving";
+    if (off) return "the stepper is off or faulted";
+    if (last && now - last < MAGNET_COOL_MS) return "the last move started less than 3 s ago";
+    for (i = 0; i < MAGNET_PER_MIN; i++)
+        if (starts[i] && now - starts[i] < 60000ul) recent++;
+    if (recent >= MAGNET_PER_MIN) return "six moves in the last minute already";
+    return 0;
+}
+
+static void building_keep_closed(void)
+{
+    static unsigned said;
+    unsigned obj = building_obj();
+    unsigned long now = pm_ms();
+    int at, to;
+    if (!obj || !running) return;
+    at = building_field(obj, "building_at", 44);
+    to = building_field(obj, "building_target_at", 48);
+    if (building_close_why(running != 0, pm_in_game(), pm_aside() != 0, bld.putback_until != 0, bld.ours, at, to,
+                           building_busy(obj), ((coil_virtual(obj, 2) | coil_virtual(obj, 0)) & 0xffu) != 0,
+                           bld.last, now, bld.starts))
+        return;
+    if (bld.home < 0) bld.home = at;
+    bld.ours = 0;
+    bld.last = now;
+    bld.starts[bld.next++ % MAGNET_PER_MIN] = now;
+    building_send(obj, 0);
+    if (said++ < 3 || said % 10 == 0)
+        say("building: floor %d -> 0 - its lock closed while %s runs (a ball locked now would wait for a multiball "
+            "the mode keeps from starting); put back on %d when it ends", at, mode_name(running, "the mode"), bld.home);
+}
+
 static void building_tick(void)
 {
     unsigned obj;
     int to;
+    building_keep_closed();                     /* PAD-684 */
     if (bld.home < 0) return;
     if (!bld.putback_until) {
         if (!pm_in_game()) building_let_go("the game ended or tilted");
@@ -8905,6 +9073,7 @@ static void on_tick(unsigned *r)
     events_deliver();
     event_census();                           /* PAD-420: `value event_census 1` */
     switches_deliver();
+    stock_balls_tick();                       /* PAD-687: how long two balls have been in play */
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
@@ -9321,7 +9490,7 @@ static unsigned long challenge_ours_ms;   /* PAD-619: when it was taken */
 static char challenge_title[N_CHALLENGE][40];   /* round 2: the name the start menu shows for a taken one ("" = its own) */
 /* round 2: challenges of a mode's own, added to the game's start menu: slot CHALLENGE_OWN + k */
 #define CHALLENGE_OWN 16
-#define N_OWN_CHALLENGE 4
+#define N_OWN_CHALLENGE 16       /* PAD-686: Godzilla's MODE CHALLENGE steps through every mode of a pack (13 and more) */
 static struct { int (*fn)(unsigned slot); const struct pm_mode *by; char name[40]; int launch; } own_challenge[N_OWN_CHALLENGE];
 static int challenge_launch[N_CHALLENGE];   /* PAD-643: pm_challenge_launch - 0 its start clip, -1 the player, ms */
 static volatile int own_pending = -1;    /* the own challenge picked on the start menu, until its ball starts */
@@ -9487,7 +9656,7 @@ int pm_challenge_title(unsigned slot, const char *words)
     long msg;
     if (slot >= (unsigned)pm_challenge_slots() || challenge_by[slot] != current || !challenge_fn[slot]) return 0;
     challenge_words(challenge_title[slot], words);                       /* the holder only */
-    if (pm_challenge_menu()) return 1;
+    if (pm_challenge_menu() && !site("challenge_menu_frame")) return 1;    /* PAD-686: Godzilla's draws messages */
     /* PAD-619: a menu drawn from message ids (Godzilla's game-mode table): the challenge's name message says ours */
     pm_snprintf(key, sizeof key, "challenge_name_msg_%u", slot);
     msg = pm_port_value(key, 0);
@@ -9533,7 +9702,7 @@ void pm_challenge_release(unsigned slot)
     if (slot < N_CHALLENGE && challenge_fn[slot] && challenge_by[slot] == current) {
         char key[28];
         pm_snprintf(key, sizeof key, "challenge_name_msg_%u", slot);
-        if (challenge_title[slot][0] && !pm_challenge_menu() && pm_port_value(key, 0) > 0)
+        if (challenge_title[slot][0] && (!pm_challenge_menu() || site("challenge_menu_frame")) && pm_port_value(key, 0) > 0)
             pm_message_restore((unsigned)pm_port_value(key, 0));     /* PAD-619: the game's own name again */
         challenge_title[slot][0] = 0;
         challenge_fn[slot] = 0; challenge_by[slot] = 0;
@@ -10442,7 +10611,125 @@ static void challenge_menu_picked(unsigned *r)
     }
 }
 
+/* ---- PAD-686: Godzilla's start menu, ONE "MODE CHALLENGE" entry for every challenge of the modes' own ----------------
+ * Godzilla Premium/LE 1.16's start menu (both flipper buttons in attract: CHOOSE YOUR MODE OF PLAY, process 0x5f930)
+ * lists GAME-MODE TABLE INDICES, not entries of its own: u32s on its stack (`value challenge_menu_frame_list_at`, the
+ * count at `..._count_at`, room for `..._cap`: 9, the next local right after it), STANDARD 1, COMPETITION 3, KING OF THE
+ * MONSTERS CHALLENGE 4 on a stock card. Every frame it reads the buttons (left flipper bit 4: the cursor - r6 - back,
+ * wrapping; right bit 2: on), applies the index under the cursor LIVE (GamePlayModes +8, then its flags), and draws the
+ * index's caption and name messages. David (2026-10-22): "One MODE CHALLENGE entry whose flippers step through all 13
+ * modes, then the menu moves on" - thirteen entries would not fit in nine. So at the frame point (`site
+ * challenge_menu_frame`: inside the loop, which jumps back past where the buttons are first read - the buttons in
+ * `value challenge_menu_frame_buttons_reg`, the cursor in `..._cursor_reg`; hook_full) the runtime appends the King of the Monsters
+ * challenge's own index (`value challenge_menu_frame_entry`) a second time: picked, the game makes its own real one-ball
+ * challenge game of it, and the ball's start hands it to the mode (challenge_ball_start, `value challenge_menu_slot 0`:
+ * its flag cleared, the game's own never starts). While the cursor is on that entry its name message (the challenge's
+ * `challenge_name_msg_0`) letters the mode's name, and a flipper press steps to the next or previous mode instead of
+ * moving the cursor - past the last (or before the first) it moves on as the game's own would. Off it, the game's words
+ * again. (tests lift challenge_frame_step verbatim) */
 static void game_flag_clear(unsigned id);
+static void game_flag_set(unsigned id);
+
+static int frame_sub;                       /* the mode the entry shows: a position among the modes' own */
+static int frame_on;                        /* the cursor was on our entry last frame */
+static unsigned long frame_sp;              /* the menu's frame we appended to (a new menu: a new list) */
+
+/* A frame with the cursor on our entry, from the state alone: `n` the modes' own challenges, `sub` the one shown,
+ * `left` / `right` this frame's flipper presses. Returns the one shown after it; *eat 1 = take the left press out of
+ * the game's buttons (the cursor stays), 2 = the right; 0 = let the press move the cursor on, past the first or last. */
+static int challenge_frame_step(int n, int sub, int left, int right, unsigned *eat)
+{
+    *eat = 0;
+    if (n <= 0) return 0;
+    if (sub < 0 || sub >= n) sub = 0;
+    if (left && sub > 0) { sub--; *eat = 1; }
+    else if (right && sub < n - 1) { sub++; *eat = 2; }
+    return sub;
+}
+
+/* The mode shown as the cursor arrives: from the entry before ours (a right press) the first, from after it the last */
+static int challenge_frame_arrive(int n, int from_before)
+{
+    return n <= 0 ? 0 : from_before ? 0 : n - 1;
+}
+
+static void challenge_menu_frame(unsigned *r)
+{
+    unsigned char *sp = (unsigned char *)(r + 14);
+    unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_list_at", 300));
+    unsigned *count = (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_count_at", 64));
+    unsigned cap = (unsigned)pm_port_value("challenge_menu_frame_cap", 9);
+    unsigned entry = (unsigned)pm_port_value("challenge_menu_frame_entry", 4);
+    unsigned lbit = (unsigned)pm_port_value("challenge_menu_frame_left", 4);
+    unsigned rbit = (unsigned)pm_port_value("challenge_menu_frame_right", 2);
+    unsigned creg = (unsigned)pm_port_value("challenge_menu_frame_cursor_reg", 6);
+    unsigned breg = (unsigned)pm_port_value("challenge_menu_frame_buttons_reg", 0);
+    long msg = pm_port_value("challenge_name_msg_0", 0);
+    long slot = pm_port_value("challenge_menu_slot", -1), flag = 0;
+    unsigned *gpm = data("game_play_modes") && pm_port_value("challenge_mode_plain", -1) >= 0
+        ? (unsigned *)(unsigned long)(data("game_play_modes") + (unsigned)pm_port_value("game_play_mode_at", 8)) : 0;
+    static unsigned ours_at;                 /* the list position of our entry */
+    static int said_n, room_said;
+    int own[N_OWN_CHALLENGE], n = 0, k, on, prev_sub = frame_sub;
+    unsigned cursor, eat;
+    if (creg > 12 || breg > 12) return;
+    if (slot >= 0) {
+        char key[24];
+        pm_snprintf(key, sizeof key, "challenge_flag_%ld", slot);
+        flag = pm_port_value(key, 0);
+    }
+    cursor = r[creg];
+    for (k = 0; k < N_OWN_CHALLENGE; k++)
+        if (own_challenge[k].fn) own[n++] = k;
+    if (!n || *count > cap) return;
+    if ((unsigned long)sp != frame_sp || ours_at >= *count || list[ours_at] != entry) {   /* a new menu: append ours */
+        frame_sp = (unsigned long)sp;
+        frame_on = 0;
+        if (*count >= cap) {
+            if (!room_said++) say("challenge menu: no room for MODE CHALLENGE - the game's menu holds %u entries", cap);
+            return;
+        }
+        ours_at = *count;
+        list[ours_at] = entry;
+        *count = ours_at + 1;
+        if (n != said_n)
+            say("challenge menu: MODE CHALLENGE appended (entry %u of %u, the game-mode index %u) - its flippers step "
+                "through %d mode(s)", ours_at + 1, *count, entry, n);
+        said_n = n;
+    }
+    on = cursor == ours_at;
+    if (on) {
+        frame_sub = challenge_frame_step(n, frame_sub, (r[breg] & lbit) != 0, (r[breg] & rbit) != 0, &eat);
+        if (eat == 1) r[breg] &= ~lbit;
+        if (eat == 2) r[breg] &= ~rbit;
+        if (msg > 0) pm_message_set((unsigned)msg, own_challenge[own[frame_sub]].name);
+        if (!frame_on || frame_sub != prev_sub)
+            say("challenge menu: MODE CHALLENGE shows %s (%d of %d)", own_challenge[own[frame_sub]].name, frame_sub + 1, n);
+        own_pending = own[frame_sub];
+        /* the menu applied the entry LIVE as the cursor came (the game-play mode's index, then its flags), and the
+         * game's start applies that index's flags again: left on King of the Monsters, the game starts its battle with
+         * the game, before any ball's start, and the picked mode is refused ("a battle is running"). So the pick is
+         * Standard's (`value challenge_mode_plain`) and the challenge's flag cleared: the game plays a plain game, the
+         * menu's pick makes it the mode's one-ball challenge game (`value challenge_menu_sets_on`) */
+        if (gpm) *gpm = (unsigned)pm_port_value("challenge_mode_plain", 1);
+        if (flag > 0) game_flag_clear((unsigned)flag);
+    } else {
+        if (frame_on) {
+            if (msg > 0) pm_message_restore((unsigned)msg);      /* the game's King of the Monsters again */
+            own_pending = -1;
+            if (cursor < *count && list[cursor] == entry) {     /* onto the game's own entry: its pick again */
+                if (gpm) *gpm = entry;
+                if (flag > 0) game_flag_set((unsigned)flag);
+            }
+        }
+        /* this frame's press moves the cursor after this point: onto ours from before it, or from after it (a wrap) */
+        if ((r[breg] & rbit) && (cursor + 1 == ours_at || (ours_at == 0 && cursor + 1 == *count)))
+            frame_sub = challenge_frame_arrive(n, 1);
+        else if ((r[breg] & lbit) && (cursor == ours_at + 1 || (cursor == 0 && ours_at + 1 == *count)))
+            frame_sub = challenge_frame_arrive(n, 0);
+    }
+    frame_on = on;
+}
 
 /* PAD-619: challenge n's pick in this game - 1 / 0, -1 unknown: its flag, or the game-play mode's index */
 static int challenge_picked(unsigned n)
@@ -10788,6 +11075,19 @@ static void challenges_arm(void)
                 pm_port_value("challenge_menu_cap", 0));
         } else {
             say("challenge menu: its sites could not be hooked - the menu stays the game's own");
+        }
+    }
+    /* PAD-686: Godzilla's menu of game-mode indices - one MODE CHALLENGE entry steps through the modes' own */
+    if (site("challenge_menu_frame") && challenges_n && pm_port_value("challenge_menu_slot", -1) == 0
+        && pm_port_value("challenge_menu_frame_cap", 0) > 0 && pm_port_value("challenge_menu_frame_list_at", 0) > 0
+        && pm_port_value("challenge_menu_frame_count_at", 0) > 0 && pm_port_value("challenge_name_msg_0", 0) > 0) {
+        if (fn("challenge_menu_frame") && hook_full(fn("challenge_menu_frame"), challenge_menu_frame)) {
+            can |= PM_CAN_CHALLENGE_MENU;
+            say("challenge menu: the start menu's frame at 0x%08x - one MODE CHALLENGE entry (as %s's game-mode index "
+                "%ld) steps through the modes' own challenges", fn("challenge_menu_frame"), pm_challenge_name(0),
+                pm_port_value("challenge_menu_frame_entry", 4));
+        } else {
+            say("challenge menu: its frame site could not be hooked - the menu stays the game's own");
         }
     }
 }

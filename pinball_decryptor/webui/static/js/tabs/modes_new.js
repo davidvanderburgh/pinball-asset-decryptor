@@ -2,10 +2,10 @@
 // three tiles, one per way of building a mode, each saying what it takes and what it can do:
 // Blocks (recommended), C (recommended to hand to an AI agent) and the form (a playground).
 // The second step is that way's own: a name for blocks; a name, an optional brief for an
-// agent and the C examples for C; a blank form or one of the card's form examples.
+// agent and the SDK's guide for C; a blank form or the form example (PAD-691: TARGET RUSH on every game).
 // The first-mode page shows the same tiles in place, and a tile there opens the wizard at
 // its second step. Python makes the mode (modes.new / example / new_blocks_mode /
-// new_code_mode / code_example); this only asks.
+// new_code_mode / blocks_example); this only asks.
 
 import { html, useEffect, useRef, useState, Modal, Button, Field, Chip, Note, Icon, tip, cx, call } from "../core/ui.js";
 
@@ -151,8 +151,7 @@ function BlocksStep({ s, name, setName, onExample }) {
   </div>`;
 }
 
-function CStep({ s, name, setName, brief, setBrief, onExample }) {
-  const code = (s.examples || []).filter((x) => x.code);
+function CStep({ s, name, setName, brief, setBrief }) {
   return html`<div class="nmw-step">
     <div class="nmw-cols">
       <div class="stack nmw-col">
@@ -167,10 +166,8 @@ function CStep({ s, name, setName, brief, setBrief, onExample }) {
         </div>
       </div>
       <div class="stack nmw-col">
-        <div class="nmw-sub">Or start from an example in C</div>
-        ${code.length ? html`<div class="nmw-exlist">${code.map((x) => html`<button type="button" key=${x.name} class="nmw-ex"
-            onClick=${() => onExample(x.name)}><${Icon} name="file" /><span class="ellip">${x.name}</span><${Icon} name="right" /></button>`)}</div>`
-          : html`<div class="small dim">No example in C for this game.</div>`}
+        <div class="nmw-sub">The SDK's guide</div>
+        <div class="small muted wrap">Every call a mode can make, what each does on the machine, and how to build and try it.</div>
         <button type="button" class="modes-doc-link small nmw-sdk" ...${tip(s.sdk_doc || "")} onClick=${() => call("modes.open_sdk_doc")}>
           <${Icon} name="file" /> Open MODE_SDK.md, the SDK's guide</button>
       </div>
@@ -185,10 +182,9 @@ function FormStep({ s, onBlank, onExample }) {
     <div class="nmw-exgrid">
       <button type="button" class="nmw-ex big" disabled=${!s.new_ok} onClick=${onBlank} ...${s.new_ok ? {} : tip(s.cap_text || s.project_label)}>
         <${Icon} name="plus" /><span class="nmw-ex-words"><b>Blank mode</b><span class="small muted">Start empty and fill in the boxes.</span></span></button>
-      ${ex.map((x) => html`<button type="button" key=${x.name} class=${cx("nmw-ex big", x.name === "KAIJU RUSH" && "rec")}
+      ${ex.map((x) => html`<button type="button" key=${x.name} class="nmw-ex big"
           disabled=${!s.ex_ok || x.disabled} onClick=${() => onExample(x.name)}>
-        <${Icon} name="play" /><span class="nmw-ex-words"><b>${x.name}</b><span class="small muted">${x.name === "KAIJU RUSH"
-          ? "An example that has run on a real machine." : "A finished example to play and change."}</span></span></button>`)}
+        <${Icon} name="play" /><span class="nmw-ex-words"><b>${x.name}</b><span class="small muted">A finished example to play and change.</span></span></button>`)}
     </div>
     ${!ex.length && s.ex_tip ? html`<div class="small dim">${s.ex_tip}</div>` : null}
   </div>`;
@@ -237,8 +233,7 @@ export function NewModeWizard({ s, start = "", onClose }) {
         <span class="nmw-pitch">${k.pitch}</span></div>
       ${kind === "blocks" ? html`<${BlocksStep} s=${s} name=${name} setName=${setName}
             onExample=${(n) => { call("modes.blocks_example", n); onClose(); }} />`
-        : kind === "c" ? html`<${CStep} s=${s} name=${name} setName=${setName} brief=${brief} setBrief=${setBrief}
-            onExample=${(n) => { call("modes.code_example", n); onClose(); }} />`
+        : kind === "c" ? html`<${CStep} s=${s} name=${name} setName=${setName} brief=${brief} setBrief=${setBrief} />`
         : html`<${FormStep} s=${s} onBlank=${() => { call("modes.new"); onClose(); }}
             onExample=${(n) => { call("modes.example", n); onClose(); }} />`}`}
     ${k && kind !== "form" ? html`<${EnterKey} onEnter=${() => make(false)} />` : null}

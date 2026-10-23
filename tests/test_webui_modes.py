@@ -121,19 +121,17 @@ def test_examples_duplicate_delete_and_the_cap(tmp_path, preview_on, monkeypatch
     proj = tmp_path / "proj"
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
-        names = [e["name"] for e in w.state("modes")["examples"] if not e["code"]]
-        assert names[:4] == ["KAIJU RUSH", "ATOMIC BREATH", "MOTHRA'S SONG", "MECHAGODZILLA"]
-        codes = [e for e in w.state("modes")["examples"] if e["code"]]
-        assert codes and codes[0]["label"].endswith(" (code mode)")
-        assert w.call("modes.example", "KAIJU RUSH") == "kaiju_rush"
-        assert w.state("modes")["form"]["name"] == "KAIJU RUSH"
+        names = [e["name"] for e in w.state("modes")["examples"]]
+        assert names == ["TARGET RUSH"]                 # PAD-691: the one example, on Godzilla too; none in C
+        assert w.call("modes.example", "TARGET RUSH") == "target_rush"
+        assert w.state("modes")["form"]["name"] == "TARGET RUSH"
         assert w.call("modes.duplicate")
         assert len(_modes_on_disk(proj)) == 2
         # Delete asks first; "no" keeps it
         w.answers.append("no")
         assert w.call("modes.delete") is False
         assert w.asked[-1]["title"] == "Delete mode"
-        assert w.asked[-1]["message"].startswith("Delete KAIJU RUSH COPY, with its picture")
+        assert w.asked[-1]["message"].startswith("Delete TARGET RUSH COPY, with its picture")
         w.answers.append("yes")
         assert w.call("modes.delete") is True
         assert len(_modes_on_disk(proj)) == 1
@@ -146,8 +144,7 @@ def test_examples_duplicate_delete_and_the_cap(tmp_path, preview_on, monkeypatch
         assert len(_modes_on_disk(proj)) == 3
         assert st["new_ok"] is False
         assert st["cap_text"].startswith("3 of 3 modes: delete one to add another.")
-        assert all(e["disabled"] for e in st["examples"] if not e["code"])
-        assert not any(e["disabled"] for e in st["examples"] if e["code"])
+        assert all(e["disabled"] for e in st["examples"])
         # the plugin's refusal is a message box titled as the Tk one
         n = len(w.asked)
         w.call("modes.new")
@@ -607,22 +604,6 @@ def test_film_cut_becomes_the_modes_clip_and_saves(tmp_path, preview_on):
         assert st["labels"]["film"].startswith("Clip: 2 s from 0:01.")
         data = json.loads((folder / "mode.json").read_text("utf-8"))
         assert data["clip_file"] == "clip.mp4" and data["clip_source"] == os.path.abspath(str(film))
-
-
-# ------------------------------------------------------------------ a code example
-def test_a_code_example_without_its_films(tmp_path, preview_on):
-    proj = tmp_path / "proj"
-    with web_app(tmp_path, mfr="stern") as w:
-        _project(w, proj)
-        code = [e["name"] for e in w.state("modes")["examples"] if e["code"]]
-        name = code[0]
-        w.answers.append("")                  # "Where are the films?" - cancelled
-        assert w.call("modes.code_example", name)
-        assert w.asked[-1]["kind"] == "file" and w.asked[-1]["title"].startswith("Where are the films? ")
-        assert _wait(w, lambda: w.state("modes")["tryit_line"].startswith("added the example "),
-                     timeout=60)
-        assert _wait(w, lambda: any(r["kind"] == "code" for r in w.state("modes")["rows"]))
-        assert w.state("modes")["sel"]["kind"] == "code"
 
 
 # ------------------------------------------------------------------ the game's own modes, staged
@@ -1315,9 +1296,7 @@ def test_godzilla_uses_its_shipped_port_while_the_card_is_read(tmp_path, preview
         st = w.state("modes")
         assert _reading(w)["state"] == "reading"
         assert st["profile"]["key"] == "godzilla_pro_1_15" and st["new_ok"] and not st["no_port"]
-        names = [e["name"] for e in st["examples"] if not e["code"]]
-        assert names[:4] == ["KAIJU RUSH", "ATOMIC BREATH", "MOTHRA'S SONG", "MECHAGODZILLA"]
-        assert any(e["code"] for e in st["examples"])
+        assert [e["name"] for e in st["examples"]] == ["TARGET RUSH"]      # PAD-691
         assert w.call("modes.new") == "new_mode"
         gate.set()
         assert _wait(w, lambda: _reading(w)["state"] == "done")
@@ -1558,7 +1537,7 @@ def test_copy_to_puts_the_modes_in_another_cards_project(tmp_path, preview_on):
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, src, card=None)
         assert w.state("modes")["copy_ok"] is False
-        assert w.call("modes.example", "KAIJU RUSH") == "kaiju_rush"
+        assert w.call("modes.example", "TARGET RUSH") == "target_rush"
         assert w.state("modes")["copy_ok"] is True
         # cancelled: nothing copied
         w.answers.append("")
@@ -1568,11 +1547,11 @@ def test_copy_to_puts_the_modes_in_another_cards_project(tmp_path, preview_on):
         w.answers.append(str(dest))
         r = w.call("modes.copy_to")
         assert r["label"] == "Godzilla Pro 1.16"
-        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "kaiju_rush")]
-        assert _modes_on_disk(dest) == ["kaiju_rush"]
+        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "target_rush")]
+        assert _modes_on_disk(dest) == ["target_rush"]
         assert w.asked[-1]["title"] == "Copy modes"
         assert w.asked[-1]["message"].startswith("Copied 1 mode into ")
-        assert "KAIJU RUSH -> modes/kaiju_rush: runs on Godzilla Pro 1.16 as it is" in w.asked[-1]["message"]
+        assert "TARGET RUSH -> modes/target_rush: runs on Godzilla Pro 1.16 as it is" in w.asked[-1]["message"]
         # this project itself is refused in a message box
         w.answers.append(str(src))
         assert w.call("modes.copy_to") is None
@@ -1593,18 +1572,18 @@ def test_pad396_port_to_the_other_model(tmp_path, preview_on):
         assert st["port_shown"] is True and st["port_ok"] is False
         assert st["port_word"] == "Pro"
         assert st["port_targets"] == [{"folder": str(dest), "label": "Godzilla Pro 1.16 (pro)"}]
-        assert w.call("modes.example", "KAIJU RUSH") == "kaiju_rush"
+        assert w.call("modes.example", "TARGET RUSH") == "target_rush"
         assert w.state("modes")["port_ok"] is True
         r = w.call("modes.port_to", str(dest))
-        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "kaiju_rush")]
+        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "target_rush")]
         assert w.asked[-1]["title"] == "Port modes" and w.asked[-1]["message"].startswith("Ported 1 mode into ")
         w.answers.append("no")
         assert w.call("modes.port_to", str(dest)) is None
-        assert "KAIJU RUSH is already in pro" in w.asked[-1]["message"]
+        assert "TARGET RUSH is already in pro" in w.asked[-1]["message"]
         w.answers.append("yes")
         r = w.call("modes.port_to", str(dest))
-        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "kaiju_rush")]
-        assert _modes_on_disk(dest) == ["kaiju_rush"]
+        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "target_rush")]
+        assert _modes_on_disk(dest) == ["target_rush"]
         _project(w, tmnt)
         assert w.state("modes")["port_shown"] is True and w.state("modes")["port_targets"] == []
 

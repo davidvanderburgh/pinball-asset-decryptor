@@ -3069,8 +3069,8 @@ PREVIEW_HELP = {
                 "- **C** (best with an AI agent): the Mode SDK, for anything a mode can do.\n"
                 "- **Form** (a playground): boxes to fill in, nothing more.\n\n"
                 "A project with no mode yet shows the same tiles on the page. The Form "
-                "makes a blank mode or one from an example (KAIJU RUSH is the one that "
-                "has run on a real machine). For a form mode, then:\n\n"
+                "makes a blank mode or one from the example, TARGET RUSH, on the card's own "
+                "shots. For a form mode, then:\n\n"
                 "1. **Name it.**\n"
                 "2. **Starts on:** the shot that starts it and how many times (up to "
                 "999); the two *or* lists add up to two more shots whose hits count "
@@ -3188,12 +3188,6 @@ PREVIEW_HELP = {
                 "numbered: **Save** (or Ctrl+S) writes it. **Open … in my editor** opens it "
                 "in your computer's editor instead; **Read again** picks up a change made "
                 "there.",
-                {"note": "On a Godzilla title, New mode > C offers examples written "
-                         "in C, among them the MELTDOWN multiball, lit by ten Magna "
-                         "captive-ball hits. Each plays its clips full screen behind a HUD "
-                         "of its own. Their clips, music and calls are cut from your own "
-                         "copy of the films: until they are, the example's page says which "
-                         "films it needs, with **Choose your films folder…**."},
             ]),
             ("The game's own modes",
              "They are listed under yours. Pick one to see its page.\n\n"

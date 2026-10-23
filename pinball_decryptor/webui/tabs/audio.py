@@ -419,7 +419,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._adv_full = (mfr.key == "stern"
                           and getattr(mfr, "current_era", "spike2")
                           == "spike2")
-        self.set(col=col,
+        self.set(col=col, req_cap=False, req_note="",
                  level_cap=bool(getattr(caps, "audio_level_offset", False)),
                  dups_cap=getattr(mfr, "find_duplicate_sounds", None)
                  is not None,
@@ -662,6 +662,12 @@ class AudioTab(FindOriginalsMixin, TabService):
                     assets_path, [s.rel_path for s in slots]) if mfr else None)
             except Exception:                           # noqa: BLE001
                 uses = None
+            # and why there is no map for a project that could have one
+            try:
+                req_why = ((mfr.sound_request_why(assets_path) or "")
+                           if mfr and uses is None else "")
+            except Exception:                           # noqa: BLE001
+                req_why = ""
             # PAD-637: which slots' files are several variants of one sound
             try:
                 variants = (mfr.sound_variant_counts(
@@ -671,7 +677,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             if self._scan_id != scan_id:
                 return
             self._post(self._populate_after_scan, slots, scan_id,
-                       assets_path, cats, offer, uses, variants)
+                       assets_path, cats, offer, uses, variants, req_why)
 
         self._set_scanning(True)
         threading.Thread(target=_work, daemon=True,
@@ -717,7 +723,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         return True
 
     def _populate_after_scan(self, slots, scan_id, scan_dir, cats=None,
-                             offer=None, uses=None, variants=None):
+                             offer=None, uses=None, variants=None,
+                             req_why=""):
         from ...core import staged_changes
         if self._scan_id != scan_id:
             return
@@ -727,7 +734,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._variants = variants if isinstance(variants, dict) else {}
         if self._uses is None and self._sort[0] == "rq":
             self._sort = ("#0", False)
-        self.set(req_cap=self._uses is not None, req_tip=_REQ_TIP)
+        self.set(req_cap=self._uses is not None, req_tip=_REQ_TIP,
+                 req_note=(req_why or "") if self._uses is None else "")
         self._sm_offer = offer if isinstance(offer, dict) else None
         if scan_dir != self._scan_dir:
             self.audio_type_var.set("All types")

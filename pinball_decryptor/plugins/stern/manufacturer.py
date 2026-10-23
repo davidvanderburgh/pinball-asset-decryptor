@@ -1021,6 +1021,10 @@ class SternManufacturer(Manufacturer):
                 out[rel] = list(uses.get(int(m.group(1)), ()))
         return out
 
+    def sound_request_why(self, assets_dir):
+        from .clip_sounds import sound_uses_why
+        return sound_uses_why(assets_dir)
+
     def sound_variant_counts(self, assets_dir, rels):
         # PAD-637: Extract's sound_variants.json - the decoded sounds whose
         # file is several variants of one sound, one after another

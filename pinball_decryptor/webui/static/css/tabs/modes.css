@@ -91,7 +91,6 @@ button.modes-list-grp:hover { color: var(--ink-2); background: var(--panel-2); }
 .modes-list .li.modes-list-all:hover { color: var(--ink-2); }
 
 /* a C example that still needs its films; a game mode's counts-as rows */
-.modes-films { gap: 12px; align-items: center; }
 .modes-ca-row { gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); }
 
 /* the first mode: three ways in */
@@ -165,7 +164,6 @@ html.bp-1280 .nmw-tiles.compact { grid-template-columns: minmax(0, 1fr); }
 .nmw-ex:hover:not(:disabled), .nmw-ex:focus-visible { border-color: var(--accent); outline: none; }
 .nmw-ex:disabled { opacity: .5; cursor: not-allowed; }
 .nmw-ex.big { padding: 12px 14px; }
-.nmw-ex.rec { border-color: var(--accent-line); }
 .nmw-ex-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .nmw-sdk { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; }
 

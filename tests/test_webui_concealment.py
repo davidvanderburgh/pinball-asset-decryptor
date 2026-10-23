@@ -14,6 +14,7 @@ import re
 import pytest
 
 from tests.webui_harness import web_app
+from tests.mode_examples import form as MX  # noqa: E402
 
 #: the preview feature's words, as the browser sweep searched them
 WORDS = re.compile(r"\b(modes?|mode maker|mode editor|try it|code modes?|film cutter|"
@@ -75,7 +76,7 @@ def _scratch_project(tmp_path):
         "input_path": str(tmp_path / "godzilla_pro-1_15_0.raw"),
         "input_name": "godzilla_pro-1_15_0.raw"}), encoding="utf-8")
     from pinball_decryptor.plugins.stern import mode_project as MP
-    MP.save(str(proj), "kaiju_rush", dict(MP.example_specs())["KAIJU RUSH"])
+    MP.save(str(proj), "kaiju_rush", dict(MX.example_specs())["KAIJU RUSH"])
     return proj
 
 

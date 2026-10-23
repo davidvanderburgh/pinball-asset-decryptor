@@ -1465,6 +1465,7 @@ teardown() {
     pad_pkill -9 -f 'padvidhost.py'
     [ -n "$AUTOPG" ] && kill -9 -"$AUTOPG" 2>/dev/null
     pad_pkill -9 -f 'autoattract.sh'
+    [ -n "${PFWATCHPID:-}" ] && kill "$PFWATCHPID" 2>/dev/null
     [ -n "$BALLPG" ] && kill -9 -"$BALLPG" 2>/dev/null
     pad_pkill -9 -f 'ballfeed[.]py'
     [ -n "${SPEEDPG:-}" ] && kill -9 -"$SPEEDPG" 2>/dev/null
@@ -2805,7 +2806,17 @@ grep -a '^\[modes\] ' "$LOG" 2>/dev/null
 # NOT when PAD opened the window (PF_WINLAUNCH): that one has no WSL-side
 # process to find and the app reports its own failures - the same asymmetry
 # teardown documents at length. NOT when nothing was launched either.
-if [ "${PF_LAUNCHED:-0}" = 1 ] && ! pf_up; then
+#
+# ...AND ASKED AGAIN UNTIL THE WINDOW SAYS IT IS UP (PAD-629). The guest is up
+# a second or so after the launch on a fast PC, and a Windows window through
+# interop is not even running its first line by then: its WSL-side stub
+# answers pf_up, so a window that quit three seconds later - a traceback, or
+# a "window already exists" exit - passed this check and the run log said
+# nothing at all ("missing playfield", restart WSL, Reset windows, still
+# missing). pfweb prints "pfweb: window up" once the window system has it;
+# until that line or the process's end, a watcher keeps asking, and says
+# which it was. Quiet when the run itself is ending: teardown closes it.
+pf_said_why() {
     echo "[watch] the playfield window is not running - it started and stopped."
     if [ -s "$PFLOG" ]; then
         echo "[watch]   what it said (full log: $PFLOG):"
@@ -2817,6 +2828,30 @@ if [ "${PF_LAUNCHED:-0}" = 1 ] && ! pf_up; then
         echo "[watch]   by hand to see why: $PF_PY <rig>/playfield.py $GAME"
     fi
     echo "[watch]   the game itself is unaffected."
+}
+PFWATCHPID=""
+if [ "${PF_LAUNCHED:-0}" = 1 ]; then
+    if ! pf_up; then
+        pf_said_why
+    else
+        (
+            _i=0; _n=$(( ${PAD_PF_WAIT:-60} * 2 ))
+            while [ "$_i" -lt "$_n" ]; do
+                grep -aq '^pfweb: window up' "$PFLOG" 2>/dev/null && exit 0
+                pf_up || break
+                sleep 0.5
+                _i=$((_i + 1))
+            done
+            pad_guest_up || exit 0
+            if pf_up; then
+                echo "[watch] the playfield window has not come up after $((_i / 2)) s."
+                [ -s "$PFLOG" ] && tail -8 "$PFLOG" | sed 's/^/[watch]   /'
+            else
+                pf_said_why
+            fi
+        ) &
+        PFWATCHPID=$!
+    fi
 fi
 
 # Carry the game from Tech Alerts to attract mode without a human. It is a

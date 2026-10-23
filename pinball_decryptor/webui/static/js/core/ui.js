@@ -69,6 +69,7 @@ const P = {
   disk: "M4 5h16v14H4zM4 15h16M8 18h.01",
   upload: "M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3",
   download: "M12 4v12M7 11l5 5 5-5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3",
+  print: "M7 9V3h10v6M7 17H4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-3M7 14h10v7H7z",
   undo: "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3",
   redo: "M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3",
   lock: "M6 11h12v9H6zM8 11V7a4 4 0 0 1 8 0v4",

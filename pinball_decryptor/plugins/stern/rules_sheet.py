@@ -937,6 +937,33 @@ HTML_CSS = """
   .foot { font-size: %(foot)spt; margin: 7pt 0 0; color: #222; }
   @media screen { body { margin: 0.4in 0.45in; } }
 """
+# PAD-695: printed from a browser (Print... prints the dialog's preview; a saved page prints the same) the page sets
+# its rows a little taller than the PDF does, so on Letter the foot ran on to a second page. Before it prints it lays
+# itself out at the paper's width and shrinks its type until it fits the page's height, as the PDF does; after, its
+# own sizes come back. Print... calls padFitPage() itself too, so it holds wherever print events do not reach.
+HTML_FIT = """
+(function () {
+  var W = %(w)s, H = %(h)s, base = null;
+  function els() { return [document.querySelector("table"), document.querySelector(".sub"),
+                           document.querySelector(".foot")]; }
+  function fit() {
+    var e = els(), b = document.body, s = b.style, keep = [s.width, s.margin];
+    unfit();
+    if (!base) base = e.map(function (x) { return x ? parseFloat(getComputedStyle(x).fontSize) : 0; });
+    s.width = W + "px"; s.margin = "0";
+    for (var f = 1; f >= 0.5; f -= 0.02) {
+      e.forEach(function (x, i) { if (x) x.style.fontSize = (base[i] * f) + "px"; });
+      if (b.getBoundingClientRect().height <= H) break;
+    }
+    s.width = keep[0]; s.margin = keep[1];
+  }
+  function unfit() { els().forEach(function (x) { if (x) x.style.fontSize = ""; }); }
+  window.padFitPage = fit;
+  addEventListener("beforeprint", fit);
+  addEventListener("afterprint", unfit);
+})();
+"""
+PAGE_MARGIN_IN = (0.4, 0.45)             # the @page margins above: top/bottom, left/right
 HEAD_ROW = ('<tr><th class="mode">Mode</th><th class="start">Start</th><th>Stages</th>'
             '<th class="cash">Cash out</th></tr>')
 
@@ -955,12 +982,15 @@ def to_html(sheet, paper=None):
                                                        E(r["cash"]) if r.get("cash") else "&mdash;"))
     size, sub, foot = _fit(sheet, paper)
     css = HTML_CSS % {"paper": PAPERS[paper][0].lower(), "size": size, "sub": sub, "foot": foot}
+    _label, pw, ph = PAPERS[paper]                  # the page's room in CSS px (96 a inch), a little held back
+    fit = HTML_FIT % {"w": "%.1f" % ((pw / 72.0 - 2 * PAGE_MARGIN_IN[1]) * 96),
+                      "h": "%.1f" % ((ph / 72.0 - 2 * PAGE_MARGIN_IN[0]) * 96 * 0.98)}
     return "\n".join([
         "<!doctype html>", '<html lang="en">', "<head>", '<meta charset="utf-8">',
         "<title>%s</title>" % E(sheet["title"]), "<style>%s</style>" % css, "</head>", "<body>",
         "<h1>%s</h1>" % E(sheet["title"]), '<p class="sub">%s</p>' % E(sheet["intro"]),
         "<table>", "  <thead>", "    " + HEAD_ROW, "  </thead>", "  <tbody>", "\n".join(rows), "  </tbody>", "</table>",
-        '<p class="foot">%s</p>' % E(sheet["foot"]), "</body>", "</html>", ""])
+        '<p class="foot">%s</p>' % E(sheet["foot"]), "<script>%s</script>" % fit, "</body>", "</html>", ""])
 
 
 def to_pdf(sheet, paper=None, measure=False):

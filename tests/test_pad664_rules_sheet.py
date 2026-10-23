@@ -250,7 +250,7 @@ def test_every_call_the_dialog_makes_is_one_the_tab_answers():
     calls = set(re.findall(r'call\("modes\.([a-z_]+)"', js + tab))
     sheet_calls = {c for c in calls if c.startswith("sheet_")}
     assert sheet_calls == {"sheet_open", "sheet_close", "sheet_words", "sheet_setting", "sheet_on", "sheet_move",
-                           "sheet_save"}, sheet_calls
+                           "sheet_save", "sheet_print"}, sheet_calls
     for name in sheet_calls:
         assert getattr(getattr(M.ModesTab, name), "__pad_rpc__", None), name
     assert ">Rules sheet…<//>" in tab and 'import { RulesSheetDialog } from "./modes_sheet.js";' in tab
@@ -314,3 +314,50 @@ def test_the_dialog_from_open_to_saved(tmp_path, monkeypatch):
     assert tab.said and "1 mode" in tab.said[-1]
     tab.sheet_close()
     assert tab.state["sheet"] is None
+
+
+# ------------------------------------------------------------------ PAD-695: Print...
+def test_print_prints_the_preview_page_or_opens_the_pdf():
+    """Print... prints the preview's own page (its @page rule lays it out, landscape on the chosen paper) where the
+    window can; elsewhere it asks the tab for the PDF in the system's viewer."""
+    with open(os.path.join(TABS, "modes_sheet.js"), encoding="utf-8") as f:
+        js = f.read()
+    assert ">Print…<//>" in js and "printSheet(frame.current)" in js
+    assert "<iframe ref=${frame}" in js and "w.print()" in js and 'call("modes.sheet_print")' in js
+    page = RS.to_html({"title": "T", "intro": "", "foot": "", "rows": [], "paper": "a4"}, "a4")
+    assert "@page { size: a4 landscape;" in page
+    assert "if (w.padFitPage) w.padFitPage(); w.focus(); w.print();" in js
+
+
+def test_the_page_fits_itself_to_one_printed_page():
+    """Printed from a browser the page's rows run taller than the PDF's (Letter put the foot on a page of its own):
+    before it prints it lays itself out at the paper's width and shrinks its type to the page's height."""
+    sheet = {"title": "T", "intro": "i", "foot": "f", "rows": [], "paper": "letter"}
+    for paper, w, h in (("letter", 969.6, 724.4), ("a4", 1036.1, 702.6)):
+        page = RS.to_html(sheet, paper)
+        assert "var W = %.1f, H = %.1f," % (w, h) in page, paper
+        assert "window.padFitPage = fit;" in page and 'addEventListener("beforeprint", fit);' in page
+        assert page.index("<script>") > page.index('<p class="foot">')    # it runs on the whole page
+
+
+def test_sheet_print_opens_the_pdf_in_the_viewer(tmp_path, monkeypatch):
+    import tempfile
+    import threading
+    from pinball_decryptor.core import desktop
+    project = _project(tmp_path)
+    monkeypatch.setattr(threading, "Thread", lambda target, **k: type("T", (), {"start": lambda s: target()})())
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "tmp"))
+    opened = []
+    monkeypatch.setattr(desktop, "open_path", lambda p: (opened.append(p), (True, ""))[1])
+    tab = _Tab(project)
+    assert tab.sheet_print() is None                        # no dialog open: nothing
+    tab.sheet_open()
+    tab.sheet_setting("title", 'Godzilla: "Custom" Modes')
+    path = tab.sheet_print()
+    assert opened == [path] and os.path.basename(path) == "Godzilla_ _Custom_ Modes.pdf"
+    assert tab.said[-1] == "opened the rules sheet to print: %s" % path
+    with open(path, "rb") as f:
+        assert f.read(5) == b"%PDF-"
+    monkeypatch.setattr(desktop, "open_path", lambda p: (False, "no viewer"))
+    tab.sheet_print()
+    assert "no viewer" in tab.said[-1] and path in tab.said[-1]

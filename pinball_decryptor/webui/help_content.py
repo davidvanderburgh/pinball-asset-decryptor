@@ -3259,7 +3259,8 @@ PREVIEW_HELP = {
              "Click a mode to put your own words in any field: yours win, and an empty "
              "field gives the app's back. Untick a mode to leave it off, and move it up "
              "or down. **Save as PDF…** lays it out on one Letter or A4 page when it "
-             "fits; **Save as HTML…** saves the same sheet as a web page."),
+             "fits; **Save as HTML…** saves the same sheet as a web page; **Print…** "
+             "prints it, on the paper chosen beside it."),
             ("Five things people ask for", _limits("Examples")),
             ("Why your mode always gives way", _limits("Why your mode always gives way")),
             ("Sizes", _limits("Sizes")),

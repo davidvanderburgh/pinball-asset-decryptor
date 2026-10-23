@@ -1193,7 +1193,10 @@ site balls_in_play         0x001fd194 0xe92d4010 0xe3084ab0
 
 While a multiball is being served it answers the balls the multiball asked for (the
 framework's ball manager, byte `+0xa`); otherwise the balls installed less those in the
-trough and the other ball devices. Two or more is `PM_STOCK_MULTIBALL`. It says nothing of
+trough and the other ball devices. Two or more, kept for 3 s, is `PM_STOCK_MULTIBALL`
+(PAD-687: a ball down an outlane is saved early on James Bond - the new ball is served while
+the drained one is still on its way to the trough, and the count reads 2 for about a second;
+taken for a multiball, it ended the mode, and in a mode's challenge game the ball). It says nothing of
 the title's other modes, so on these titles `stack no` waits for the game's multiballs only,
 and the Modes tab says so. A ball that is out of the trough and every ball device counts as in
 play, so a ball stuck on the playfield (or, in the rig, one of a six-ball multiball the script

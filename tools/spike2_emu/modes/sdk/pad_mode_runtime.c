@@ -12089,25 +12089,29 @@ static void att_arm(void)
  * same song twice in a game, and each song's intro video (its name in it) with its own song. Beatles 1.29
  * (emulator) starts a song mode at its start function (the port's block_start_<n>), asks for its intro clip
  * by name on the bank's surface ("FeatureStarts.Spinner_Start" for Ticket to Ride; before or after the song,
- * up to 3 s later) and looks its song's record up (request 83's); a song in parts its lead-in's record first
- * and then its body's, again each time the body loops. sounds.cfg says:
- *   jmode <start site> <its intro clip's name, or -> <body key>[,<lead-in key>...]   one per song mode
- *   jsong <weight 1..9> <the song's record key> [<its intro clip's name>]            one per song
- *   jquiet <a silent record's key>                                                   what a lead-in plays
+ * up to 3 s later) and looks its song's records up: its opening's (Drive My Car: idx 200, 19.7 s), and once
+ * that has played its body's (idx 417), again each time the body loops. The game moves on when the record it
+ * was handed has played whole, whatever its length (a 55 s record in the 19.7 s opening's place: the body
+ * looked up 55 s later), so a song in an opening's place plays to its end. sounds.cfg says:
+ *   jmode <start site> <its intro clips' names, or -> <record key>[,<record key>...]  one per song mode
+ *   jsong <weight 1..9> <the song's record key> [<its intro clip's name>]             one per song
  * The mode's start DRAWS a song for it: at random, a song of weight w w times as likely as one of weight 1,
  * never one of the last JUKE_RECENT songs drawn (fewer when there are fewer songs: no song twice in a game).
- * Until its next start the mode's body record is that song's, its lead-ins the silence (their own without
- * one) and its intro that song's clip (the mode's own when the song has none). A mode whose start site the
- * port does not have draws at its first ask (clip or record) in a game JUKE_GAP ms after its last. */
+ * Until its next start every record of the mode plays that song (the song whole, then again while the mode
+ * lasts) and its intro is that song's clip (the mode's own when the song has none). A mode whose start site
+ * the port does not have draws at its first ask (clip or record) in a game JUKE_GAP ms after its last.
+ * A mode's intro clips are comma-separated: Beatles has a short intro of each beside its own
+ * (Feature_Starts_Short.Spinner_Start_Short), and whichever the game asks for shows the song's. */
 #define JUKE_MODES      8
 #define JUKE_SONGS      128
-#define JUKE_KEYS       4                   /* a song mode's records: its body and up to 3 lead-ins */
+#define JUKE_KEYS       4                   /* a song mode's records: its opening, its body... */
+#define JUKE_CLIPS      4                   /* a song mode's intro clips: its own, its short one... */
 #define JUKE_GAP        180000              /* ms: no start site - a mode asked again after this is a new start */
 #define JUKE_RECENT     5                   /* never one of the last 5 songs drawn: none twice in a game */
 struct jmode {
-    unsigned char key[JUKE_KEYS][8];        /* [0] its body's record, then its lead-ins' */
-    unsigned char n_key, hooked;
-    const char *site, *clip;
+    unsigned char key[JUKE_KEYS][8];        /* the records its song plays, in parts */
+    unsigned char n_key, n_clip, hooked;
+    const char *site, *clip[JUKE_CLIPS];
     short pick;                             /* the song drawn, -1 none yet */
     unsigned long at;                       /* pm_ms() of its last ask (no start site) */
     unsigned draws;
@@ -12120,12 +12124,11 @@ struct jsong {
 };
 static struct jmode jmode[JUKE_MODES];
 static struct jsong jsong[JUKE_SONGS];
-static unsigned char juke_quiet[8];
-static unsigned n_jmode, n_jsong, juke_says, juke_has_quiet;
+static unsigned n_jmode, n_jsong, juke_says;
 static short juke_recent[JUKE_RECENT];
 static unsigned n_juke_recent;
 
-static void jmode_line(const char *site, const char *clip, const char *keys)
+static void jmode_line(const char *site, char *clips, const char *keys)
 {
     struct jmode *m;
     const char *p = keys;
@@ -12140,7 +12143,12 @@ static void jmode_line(const char *site, const char *clip, const char *keys)
     }
     if (!m->n_key) { sndm_bad++; return; }
     m->site = site && *site && !str_eq(site, "-") ? site : 0;
-    m->clip = clip && *clip && !str_eq(clip, "-") ? clip : 0;
+    m->n_clip = 0;
+    while (clips && *clips && !str_eq(clips, "-") && m->n_clip < JUKE_CLIPS) {
+        m->clip[m->n_clip++] = clips;
+        while (*clips && *clips != ',') clips++;
+        if (*clips) *clips++ = 0;
+    }
     m->pick = -1;
     n_jmode++;
 }
@@ -12225,11 +12233,7 @@ static int juke_lookup(unsigned *r)
         for (j = 0; j < jmode[m].n_key; j++)
             if (key_is(k, jmode[m].key[j])) {
                 if (!(g = juke_song(m))) return 0;
-                if (j) {                                    /* a lead-in: the silence, or its own */
-                    if (!juke_has_quiet) return 0;
-                    r[1] = (unsigned)(unsigned long)juke_quiet;
-                } else
-                    r[1] = (unsigned)(unsigned long)g->key;
+                r[1] = (unsigned)(unsigned long)g->key;
                 return 1;
             }
     return 0;
@@ -12241,10 +12245,13 @@ static void juke_set_video(unsigned *r)
     const char *name;
     struct jsong *g;
     void *bank;
-    unsigned m;
+    unsigned m, c;
     if (clipv_in || !s || !(name = (const char *)(unsigned long)s[0])) return;
-    for (m = 0; m < n_jmode; m++)
-        if (jmode[m].clip && str_eq(jmode[m].clip, name)) break;
+    for (m = 0; m < n_jmode; m++) {
+        for (c = 0; c < jmode[m].n_clip && !str_eq(jmode[m].clip[c], name); c++)
+            ;
+        if (c < jmode[m].n_clip) break;
+    }
     if (m == n_jmode) return;
     clipv_in = 1;
     bank = clip2_surface();
@@ -12267,7 +12274,7 @@ static void juke_arm(void)
         return;
     }
     for (m = 0; m < n_jmode; m++) {
-        clips += jmode[m].clip != 0;
+        clips += jmode[m].n_clip;
         if (jmode[m].site && fn(jmode[m].site) && hook(fn(jmode[m].site), juke_hooks[m])) {
             jmode[m].hooked = 1;
             sites++;
@@ -12282,8 +12289,8 @@ static void juke_arm(void)
         say("jukebox: the intro clips cannot be swapped on this build (no surface_set_video) - the songs still are");
     }
     juke_live = 1;
-    say("jukebox: %u song mode(s) (%u start(s) hooked), %u song(s)%s; sound_lookup 0x%08x%s", n_jmode, sites, n_jsong,
-        juke_has_quiet ? ", lead-ins silent" : "", fn("sound_lookup"), sv_juke ? ", the intros on surface_set_video" : "");
+    say("jukebox: %u song mode(s) (%u start(s) hooked), %u song(s); sound_lookup 0x%08x%s", n_jmode, sites, n_jsong,
+        fn("sound_lookup"), sv_juke ? ", the intros on surface_set_video" : "");
 }
 
 static void sndm_line(char *s)
@@ -12326,10 +12333,6 @@ static void sndm_line(char *s)
     }
     if (n >= 4 && str_eq(f[0], "jmode")) {    /* PAD-685 */
         jmode_line(f[1], f[2], f[3]);
-        return;
-    }
-    if (n >= 2 && str_eq(f[0], "jquiet")) {
-        if (key_hex(f[1], juke_quiet)) juke_has_quiet = 1; else sndm_bad++;
         return;
     }
     if (n >= 3 && str_eq(f[0], "jsong")) {

@@ -118,6 +118,7 @@ def test_the_audio_tab_shows_which_requests_play_each_sound(tmp_path):
         _open(w, proj)
         s = w.state("audio")
         assert s["req_cap"] is True and "sound requests" in s["req_tip"]
+        assert s["req_note"] == ""
         jackpot, plain, loop = (_row(w, r) for r in RELS)
         assert jackpot["rq"] == 2
         assert jackpot["rq_tip"] == ["Played by 2 of the game code's sound requests:",
@@ -146,6 +147,8 @@ def test_no_request_map_no_column(tmp_path):
         _open(w, proj)
         assert w.state("audio")["req_cap"] is False
         assert "rq" not in _row(w, RELS[1])
+        # it says why, and what to do (PAD-635: a tester saw no column and no word)
+        assert w.state("audio")["req_note"] == CS.WHY_EXTRACT_AGAIN
         # a sort on it left over falls back to the name
         w.call("audio.sort", "rq")
         w.call("audio.scan")
@@ -159,3 +162,25 @@ def test_other_makers_have_no_column(tmp_path):
     with web_app(tmp_path, mfr="ap") as w:
         _open(w, proj)
         assert w.state("audio")["req_cap"] is False
+        assert w.state("audio")["req_note"] == ""
+
+
+def test_why_there_is_no_column(tmp_path):
+    proj = _project(tmp_path)
+    # no map at all: an extract made before v1.217.0
+    assert CS.sound_uses_why(proj) == CS.WHY_EXTRACT_AGAIN
+    # a map without the later parts
+    CS.write_requests(os.path.join(proj, CS.REQUESTS_TSV), [[1]], {0: [1]}, {})
+    assert CS.sound_uses_why(proj) == CS.WHY_EXTRACT_AGAIN
+    # a map the resolver filled with nothing
+    CS.write_requests(os.path.join(proj, CS.REQUESTS_TSV), [[1]], {}, {}, also={})
+    assert CS.sound_uses_why(proj) == CS.WHY_NOT_READ
+    # a whole map: the column is there, nothing to say
+    CS.write_requests(os.path.join(proj, CS.REQUESTS_TSV), [[1]], {0: [1]}, {}, also={})
+    assert CS.sound_uses_why(proj) == ""
+    # a folder with no decoded sounds is not one the column is for
+    assert CS.sound_uses_why(str(tmp_path / "empty")) == ""
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        os.remove(os.path.join(proj, CS.REQUESTS_TSV))
+        _open(w, proj)
+        assert w.state("audio")["req_note"] == CS.WHY_EXTRACT_AGAIN

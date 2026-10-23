@@ -729,6 +729,7 @@ export default function AudioTab() {
         : html`<span class="muted ellip">${s.folder_note}</span>`}
     </div>
     ${s.ffmpeg_missing ? html`<${Note} kind="err">${s.ffmpeg_text}<//>` : null}
+    ${s.req_note && !s.scanning ? html`<${Note} kind="info">${s.req_note}<//>` : null}
     <${Card} cls="aud-card" bodyCls="flush aud-body" footer=${html`<div class="aud-panes">
         <${Pane} side="orig" pane=${panes.orig} onPlay=${playPane} />
         <span class="aud-vsep"></span>

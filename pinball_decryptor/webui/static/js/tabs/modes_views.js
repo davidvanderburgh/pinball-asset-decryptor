@@ -132,6 +132,7 @@ export function condWords(e) {
     case "stock": return "a game mode of its own runs";
     case "can_start": return "the mode could start now";
     case "lit": return "the mode is lit";
+    case "shields_away": return "the shield targets face away";
     default: return typeof e === "object" && e.k ? valWords(e) : "?";
   }
 }

@@ -10,7 +10,8 @@
  "title_alt": {
   "godzilla_pro": {
    "shots": {
-    "Shield target center": "Maser target"
+    "Shield target center": "Maser target",
+    "Shield ramp spinner": "Right spinner"
    },
    "words": {
     "HIT THE CENTER SHIELD": "HIT THE MASER TARGET",
@@ -1056,6 +1057,175 @@
         "else": null
        }
       ]
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "shot",
+     "shot": "Shield ramp spinner",
+     "when": "idle"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "and",
+       "a": {
+        "k": "shields_away"
+       },
+       "b": {
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "timer_left",
+         "timer": "swing"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
+       }
+      },
+      "then": [
+       {
+        "op": "timer_start",
+        "timer": "swing",
+        "ms": {
+         "k": "num",
+         "v": 1500
+        }
+       },
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "ready"
+         },
+         "b": {
+          "k": "num",
+          "v": 0
+         }
+        },
+        "then": [
+         {
+          "op": "change",
+          "var": "calls",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": ">=",
+           "a": {
+            "k": "var",
+            "name": "calls"
+           },
+           "b": {
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 8
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "joins"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "set",
+            "var": "ready",
+            "value": {
+             "k": "num",
+             "v": 1
+            }
+           },
+           {
+            "op": "start_mode"
+           }
+          ],
+          "else": [
+           {
+            "op": "hud_award",
+            "text": "SPINNER SHOTS",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 8
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "joins"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "calls"
+             }
+            },
+            "sub": "MORE TO CALL ANGUIRUS",
+            "seconds": 3
+           }
+          ]
+         }
+        ],
+        "else": [
+         {
+          "op": "if",
+          "cond": {
+           "k": "cmp",
+           "op": "=",
+           "a": {
+            "k": "var",
+            "name": "ready"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          },
+          "then": [
+           {
+            "op": "start_mode"
+           }
+          ],
+          "else": null
+         }
+        ]
+       }
+      ],
+      "else": null
      }
     ]
    },

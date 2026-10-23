@@ -53,7 +53,8 @@ EVERY_VALUE = [num(1000), {"k": "var", "name": "combo"}, {"k": "hits", "shot": "
                {"k": "player"}] + [{"k": "op", "op": o, "a": num(2), "b": {"k": "var", "name": "combo"}} for o in "+-*/"]
 EVERY_COND = [{"k": "cmp", "op": o, "a": {"k": "secs_left"}, "b": num(3)} for o in BM.CMPS] + [
     {"k": "and", "a": {"k": "running"}, "b": {"k": "lit"}}, {"k": "or", "a": {"k": "stock"}, "b": {"k": "can_start"}},
-    {"k": "not", "a": {"k": "running"}}, {"k": "running"}, {"k": "can_start"}, {"k": "lit"}, {"k": "stock"}]
+    {"k": "not", "a": {"k": "running"}}, {"k": "running"}, {"k": "can_start"}, {"k": "lit"}, {"k": "stock"},
+    {"k": "shields_away"}]
 EVERY_HAT = [{"kind": "mode_start"}, {"kind": "mode_end"}, {"kind": "shot", "shot": "Left ramp", "when": "running"},
              {"kind": "any_shot", "when": "idle"},
              {"kind": "switch", "when": "idle"}, {"kind": "every", "seconds": 5}, {"kind": "seconds_left", "seconds": 10},

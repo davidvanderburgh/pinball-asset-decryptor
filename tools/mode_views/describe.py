@@ -73,6 +73,8 @@ def cond(e):
         return "the mode could start now"
     if k == "lit":
         return "the mode is lit"
+    if k == "shields_away":
+        return "the shield targets face away"
     return val(e)
 
 

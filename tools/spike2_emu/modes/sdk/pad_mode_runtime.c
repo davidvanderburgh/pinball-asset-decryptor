@@ -6196,10 +6196,59 @@ static void building_let_go(const char *why)
     bld.putback_why = why;
 }
 
+/* PAD-684: the building's lock is CLOSED while one of our modes runs. The game parks the building on floor 1 while
+ * its lock is lit (0x7d24c: RuleBuildingLocks' "lock lit" query 0x12e7d8, then building_move) and on 0, where it
+ * rests, while it is not; on floor 1 a ball goes into the building. David's Premium (2026-10-22): a lock lit before
+ * one of ours began stayed open through it, balls locked, and the third lock's Godzilla Multiball - which our mode
+ * keeps from starting - never came: ball search. So while one of ours runs (and has not asked for a floor of its
+ * own), a building parked above 0 is sent to 0, within pm_building's limits, and put back where it was when the
+ * mode ends (building_tick), which reopens the lock. Not while one of the game's own modes has the stage (pm_aside):
+ * the building is its then. (tests lift building_close_why verbatim) */
+static const char *building_close_why(int running_mode, int in_game, int aside, int putting_back, int asked, int at,
+                                      int to, int busy, int off, unsigned long last, unsigned long now,
+                                      const unsigned long starts[MAGNET_PER_MIN])
+{
+    unsigned i, recent = 0;
+    if (!running_mode || !in_game || aside || putting_back) return "not ours to close now";
+    if (asked > 0) return "the mode has it on a floor of its own";
+    if (at == 0 && to == 0) return "closed already";
+    if (to != at || busy) return "moving";
+    if (off) return "the stepper is off or faulted";
+    if (last && now - last < MAGNET_COOL_MS) return "the last move started less than 3 s ago";
+    for (i = 0; i < MAGNET_PER_MIN; i++)
+        if (starts[i] && now - starts[i] < 60000ul) recent++;
+    if (recent >= MAGNET_PER_MIN) return "six moves in the last minute already";
+    return 0;
+}
+
+static void building_keep_closed(void)
+{
+    static unsigned said;
+    unsigned obj = building_obj();
+    unsigned long now = pm_ms();
+    int at, to;
+    if (!obj || !running) return;
+    at = building_field(obj, "building_at", 44);
+    to = building_field(obj, "building_target_at", 48);
+    if (building_close_why(running != 0, pm_in_game(), pm_aside() != 0, bld.putback_until != 0, bld.ours, at, to,
+                           building_busy(obj), ((coil_virtual(obj, 2) | coil_virtual(obj, 0)) & 0xffu) != 0,
+                           bld.last, now, bld.starts))
+        return;
+    if (bld.home < 0) bld.home = at;
+    bld.ours = 0;
+    bld.last = now;
+    bld.starts[bld.next++ % MAGNET_PER_MIN] = now;
+    building_send(obj, 0);
+    if (said++ < 3 || said % 10 == 0)
+        say("building: floor %d -> 0 - its lock closed while %s runs (a ball locked now would wait for a multiball "
+            "the mode keeps from starting); put back on %d when it ends", at, mode_name(running, "the mode"), bld.home);
+}
+
 static void building_tick(void)
 {
     unsigned obj;
     int to;
+    building_keep_closed();                     /* PAD-684 */
     if (bld.home < 0) return;
     if (!bld.putback_until) {
         if (!pm_in_game()) building_let_go("the game ended or tilted");

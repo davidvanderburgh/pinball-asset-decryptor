@@ -1873,8 +1873,18 @@ the adjustments (desk only: `pm_shield` says 0).
 ## The building (Godzilla Premium/LE, PAD-393)
 
 Godzilla Premium and LE have a building on a stepper motor. The game moves it by FLOOR: 0 is where it
-rests (beside its home switch, BUILDING UP), and 1, 2 and 3 are 2500, 5000 and 7500 steps further. A mode
-asks for a floor and nothing else:
+rests (beside its home switch, BUILDING UP), and 1, 2 and 3 are 2500, 5000 and 7500 steps further.
+
+**Its lock is closed while one of our modes runs (PAD-684).** The game parks the building on floor 1 while its
+lock is lit (0x7d24c asks RuleBuildingLocks' "lock lit" query, 0x12e7d8, and moves it there; floor 0 when it is
+not), and on floor 1 a ball goes into the building. A lock lit before one of our modes began stayed open through
+it: balls locked, and the third lock's Godzilla Multiball, which the mode keeps from starting, never came - the game
+went into ball search (David's Premium, 2026-10-22). So while one of ours runs and has not put the building on a
+floor of its own, the runtime sends a building parked above floor 0 to 0, within the limits below, and puts it back
+where it was when the mode ends, which reopens the lock (mode.log: `building: floor 1 -> 0 - its lock closed while
+<mode> runs`). Nothing to do in a mode for it.
+
+A mode asks for a floor and nothing else:
 
 ```c
 pm_building(3);                           /* the floor furthest from home, at the operator's speeds */

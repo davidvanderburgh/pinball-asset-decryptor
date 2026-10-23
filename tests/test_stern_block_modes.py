@@ -1375,6 +1375,32 @@ def test_the_progress_panel_number_follows_every_hit_with_no_note(tmp_path):
     assert "if (run.on || HUD_METER) return;" in BM.to_c(p, "blk")
 
 
+def test_a_ball_save_block_asks_the_runtime_for_one(tmp_path):
+    """PAD-690 (David: GODZILLA ANGRY's drain with locks "ended the game immediately"; the C kept a ball save of its own
+    from the first lock): a Ball save block asks pm_ball_save while the mode runs."""
+    p = maser_hud()
+    p["scripts"].append({"hat": {"kind": "mode_start"}, "do": [{"op": "ball_save", "seconds": 15}]})
+    assert BM.problems(p, SHOTS) == []
+    assert BM.problems(dict(p, scripts=p["scripts"] + [{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "ball_save", "seconds": 500}]}]), SHOTS) != []
+    out = play(tmp_path, p, "shot", "Maser target", "secs", 2)
+    start = out[out.index("START"):]
+    assert re.search(r"BALL ?SAVE 15", start, re.I), start[:600]
+
+
+def test_a_ball_in_the_trough_is_a_hat_of_its_own(tmp_path):
+    """PAD-690: When a ball goes into the trough - the port's Trough switch shot (PAD-416, code modes only until now),
+    the moment a ball drains even when a ball save serves it back; a card with no trough says so."""
+    p = maser_hud()
+    p["scripts"].append({"hat": {"kind": "drain", "when": "running"}, "do": [{"op": "log", "text": "IN THE TROUGH"}]})
+    le, pro = BM.card_checks(MP.profile("godzilla_le_1_16")), BM.card_checks(MP.profile("godzilla_pro_1_16"))
+    assert le["drain"] and not pro["drain"]
+    assert not [x for x in BM.problems(p, **le) if "trough" in x]
+    assert [x for x in BM.problems(p, **pro) if "trough" in x]
+    c = BM.to_c(p, "blk")
+    assert '"Trough"' in c and "IN THE TROUGH" in c
+
+
 def test_every_note_under_a_display_of_the_games_shows_at_once(tmp_path):
     """PAD-680 (emulator, the same shots on the 2026-10-07 code-mode card and on the blocks card: a note after 8 of 15
     shots against 4): each note shows at once over the game's shot screen, the second as the first."""

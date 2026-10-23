@@ -63,6 +63,7 @@ export function hatWords(h = {}, ch = {}) {
     case "mode_start": return "When the mode starts";
     case "mode_end": return "When the mode ends";
     case "ball_end": return "When the ball drains";
+    case "drain": return `When a ball goes into the trough${when}`;
     case "shot": return `When ${h.shot || "a shot"} is made${when}`;
     case "any_shot": return `When any shot is made${when}`;
     case "switch": return `When any playfield switch is hit${when}`;
@@ -86,7 +87,7 @@ export function countBlocks(sc) {
 // ------------------------------------------------------------------ a block in words (PAD-614)
 // The block's family, as the Blocks tab colors it: modes_blocks.js STMT_CLASS (a test keeps the two the same)
 export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode",
-  add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score", set: "var", change: "var",
+  add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", game_wizard: "mode", score: "score", set: "var", change: "var",
   if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show",
   log: "show", clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
@@ -152,6 +153,7 @@ export function stmtWords(b, ch = {}) {
     case "set_time": return b.at_least ? `Keep at least ${valWords(b.seconds)} seconds on the clock`   // PAD-658
       : `Set the clock to ${valWords(b.seconds)} seconds`;
     case "multiball": return `Multiball of ${b.balls} balls, ball save ${b.save || 0} s`;
+    case "ball_save": return `Ball save for ${b.seconds} s`;
     case "game_wizard": return `${b.how === "start" ? "Start" : "Light"} the game's ${b.name || "mini-wizard"}`;
     case "hold": return `Hold the ${b.what || "magnet"} for ${msWords(b.ms)}${b.clock === "wait" ? ", its clock waiting until it lets go" : ""}`;
     case "scoop_hold": return `Hold ${b.which === "every" ? "every ball" : "the next ball"} in the scoop for ${msWords(b.ms)}`;
@@ -213,7 +215,7 @@ export function ruleLines(stack, ch = {}, depth = 0) {
 
 // ------------------------------------------------------------------ Story: the mode's life (PAD-614)
 // A shot, any-shot or game-event rule has a "when" (not running / runs / any time): the Story moves it between boxes
-export const MOVABLE = new Set(["shot", "any_shot", "switch", "event"]);
+export const MOVABLE = new Set(["shot", "any_shot", "switch", "event", "drain"]);
 
 // Where each rule sits: waiting / running / any (a movable rule's when), start / end (on the arrows), drain (the
 // ball drains), and the clock's rules inside running
@@ -295,7 +297,7 @@ export function cellHat(row, when) {
 export const LANES = [["clock", "Mode and clock"], ["lights", "Lights"], ["shows", "Light shows"], ["sound", "Sound"],
   ["screen", "Screen and HUD"], ["score", "Score and variables"], ["other", "Mechanisms and the rest"]];
 const LANE_OF = { start_mode: "clock", end_mode: "clock", add_time: "clock", set_time: "clock", timer_start: "clock",
-  timer_stop: "clock", multiball: "clock", game_wizard: "clock", light_mode: "lights", unlight_mode: "lights",
+  timer_stop: "clock", multiball: "clock", ball_save: "clock", game_wizard: "clock", light_mode: "lights", unlight_mode: "lights",
   light_shot: "lights", lights_off: "lights", show: "shows", game_show: "shows", callout: "sound", sound: "sound",
   words: "screen", clip: "screen", hud_text: "screen", hud_counter: "screen", hud_gauge: "screen", hud_award: "screen", hud_progress: "screen",
   score: "score", set: "score", change: "score", set_hits: "score" };

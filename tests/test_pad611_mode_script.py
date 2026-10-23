@@ -28,7 +28,7 @@ EVERY_BLOCK = [
     {"op": "start_mode"}, {"op": "end_mode"},
     {"op": "light_mode", "shot": "Right ramp", "insert": "MR. HENDERSON", "color": "#ffd000", "pattern": "blink"},
     {"op": "unlight_mode", "mode": ""}, {"op": "add_time", "seconds": num(5)}, {"op": "set_time", "seconds": num(10)},
-    {"op": "multiball", "balls": 2, "save": 10}, {"op": "game_wizard", "name": "Spectre", "how": "light"},
+    {"op": "multiball", "balls": 2, "save": 10}, {"op": "ball_save", "seconds": 15}, {"op": "game_wizard", "name": "Spectre", "how": "light"},
     {"op": "hold", "what": "magnet", "ms": num(2000)}, {"op": "scoop_hold", "ms": num(3000), "which": "next"},
     {"op": "let_go", "what": "*"}, {"op": "shield", "where": "toward"}, {"op": "building", "floor": "3"},
     {"op": "shake", "ms": num(500), "strength": "hard"}, {"op": "shake_game", "shake": "jackpot"},
@@ -59,7 +59,8 @@ EVERY_COND = [{"k": "cmp", "op": o, "a": {"k": "secs_left"}, "b": num(3)} for o 
 EVERY_HAT = [{"kind": "mode_start"}, {"kind": "mode_end"}, {"kind": "shot", "shot": "Left ramp", "when": "running"},
              {"kind": "any_shot", "when": "idle"},
              {"kind": "switch", "when": "idle"}, {"kind": "every", "seconds": 5}, {"kind": "seconds_left", "seconds": 10},
-             {"kind": "ball_end"}, {"kind": "event", "event": "ball_saved", "when": "any"},
+             {"kind": "ball_end"}, {"kind": "drain", "when": "running"},
+             {"kind": "event", "event": "ball_saved", "when": "any"},
              {"kind": "timer_done", "timer": "window"},
              {"kind": "challenge", "challenge": "Ahoy Mr. Bond"}]                                  # PAD-615
 

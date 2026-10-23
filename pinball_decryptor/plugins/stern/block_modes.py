@@ -234,6 +234,7 @@ HATS = {
     "every": "Every few seconds while it runs",
     "seconds_left": "When seconds are left",
     "ball_end": "When the ball drains",
+    "drain": "When a ball goes into the trough",      # PAD-690: every ball, one a ball save serves back too
     "event": "When the game does something",
     "timer_done": "When a timer runs out",
     "challenge": "When the player picks a challenge",
@@ -261,12 +262,15 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
               "hud_progress",                                            # PAD-690: the panel's number, live
+              "ball_save",                                               # PAD-690: a ball save of its own
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
               "light_mode", "unlight_mode", "set_hits")
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
 HOLD_MIN_MS, HOLD_MAX_MS = MP.COIL_MIN_MS, MP.COIL_MAX_MS
+#: PAD-690: a Ball save block's seconds (pm_ball_save's own range)
+BALL_SAVE_MAX = 120
 #: PAD-621: a post the game keeps up itself is held up to its own longest (James Bond's right return up post: 14 s);
 #: the C clamps to this and the runtime to each mechanism's own limit
 HOLD_LONGEST_MS = MP.COIL_LONGEST_MS
@@ -1146,6 +1150,7 @@ def card_checks(p):
         "events": list(p.events or ()),
         "mechs": ({"magnet": "magnet"} if p.can("magnet") else {}) | (dict(p.held_coils) if p.can("coils") else {}),
         "scoop": p.can("scoop"),
+        "drain": bool(getattr(p, "drain_shot", "")),
         "shield": getattr(p, "shield_rule", "") if p.can("shield") else False,
         "game_shows": [n for n, _k, _s in getattr(p, "game_shows", ())],
         "shaker": {"shakes": [n for n, _l in p.shakes], "max": list(p.shake_max_ms)} if p.can("shaker") else False,
@@ -1160,7 +1165,8 @@ def card_checks(p):
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
-             game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None):
+             game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None,
+             drain=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -1222,6 +1228,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "mechs": dict(mechs) if mechs is not None else None, "scoop": scoop, "shield": shield,
            "hold_caps": dict(hold_caps or {}),        # PAD-621: {name: ms} a mechanism held longer than 5 s
            "building": building,
+           "drain": drain,                            # PAD-690: whether a ball in the trough is reported
            "game_shows": list(game_shows) if game_shows is not None else None,
            "shaker": shaker, "game_wizards": list(game_wizards) if game_wizards is not None else None,
            "inserts": list(inserts) if inserts is not None else None,
@@ -1344,7 +1351,7 @@ def notes(program):
         out.append("A When the player picks a challenge script with no Start the mode in it starts nothing: the "
                    "game's own challenge does not run either.")
     idle = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") in ("mode_end", "ball_end")
-            or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "switch", "event")
+            or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "switch", "event", "drain")
                 and (s.get("hat") or {}).get("when") == "idle")]
     if any(b.get("op") in ("hold", "scoop_hold", "shield", "building") for s in idle for b in _walk(s.get("do") or [])):
         out.append("A mechanism is held only while the mode runs: a hold in When the mode ends, When the "
@@ -1419,8 +1426,10 @@ def _check_hat(hat, n, ctx):
         return
     if kind in ("shot",):
         _check_shot(hat.get("shot"), where + "'s When", ctx)
-    if kind in ("shot", "any_shot", "switch", "event") and hat.get("when", "any") not in WHEN:
+    if kind in ("shot", "any_shot", "switch", "event", "drain") and hat.get("when", "any") not in WHEN:
         ctx["out"].append("%s's When has no while." % where)
+    if kind == "drain" and ctx.get("drain") is False:
+        ctx["out"].append("%s waits for a ball in the trough, which this card's game does not report." % where)
     if kind == "event":
         ev = hat.get("event")
         if not ev:
@@ -1533,6 +1542,9 @@ def _check_stack(stack, depth, where, ctx):
                 ctx["out"].append("%s asks for a multiball of 2 to 6 balls." % where)
             if not _int_ok(b.get("save", 0), 0, 60):
                 ctx["out"].append("%s has a ball save of 0 to 60 seconds." % where)
+        elif op == "ball_save":
+            if not _int_ok(b.get("seconds"), 1, BALL_SAVE_MAX):
+                ctx["out"].append("%s has a ball save of 1 to %d seconds." % (where, BALL_SAVE_MAX))
         elif op == "log":
             if len(str(b.get("text") or "")) > TEXT_MAX:
                 ctx["out"].append("%s logs more than %d letters." % (where, TEXT_MAX))
@@ -2148,6 +2160,12 @@ class _Gen:
                     balls, save = 2, 0
                 # PAD-373: its own multiball is not one of the game's modes beginning
                 out.append(pad + "if (run.on && pm_multiball_start(%du, %du)) run.own_mball = 1;" % (balls, save))
+            elif op == "ball_save":                # PAD-690: a drain while it is on is served back, the ball goes on
+                try:
+                    secs = max(1, min(BALL_SAVE_MAX, int(b.get("seconds"))))
+                except (TypeError, ValueError):
+                    secs = 10
+                out.append(pad + "if (run.on && !pm_ball_save(%du)) pm_log(\"ball save refused\");" % secs)
             elif op == "log":
                 out.append(pad + 'pm_log("%%s", %s);' % _c_str(str(b.get("text") or "")[:TEXT_MAX]))
             elif op == "hud_award" and not self.p["hud"]["on"] and self.p["screen"]:
@@ -2348,6 +2366,8 @@ def to_c(program, slug):
     bodies = {k: [] for k in HATS}
     for i, s in enumerate(program["scripts"]):
         hat = s.get("hat") or {}
+        if hat.get("kind") == "drain":      # PAD-690: the port's trough shot (no such shot: pm_shot 0, it never fires)
+            hat = {"kind": "shot", "shot": MP.DRAIN_SHOT, "when": hat.get("when", "any")}
         kind = hat.get("kind")
         if kind not in HATS:
             continue
@@ -4325,6 +4345,8 @@ def _hat_words(hat):
         return "when any shot is made, %s" % when
     if kind == "switch":
         return "when any playfield switch is hit, %s" % when
+    if kind == "drain":
+        return "when a ball goes into the trough, %s" % when
     if kind == "every":
         return "every %s seconds while it runs" % hat.get("seconds")
     if kind == "seconds_left":

@@ -109,7 +109,6 @@ RUNNING = {"k": "running"}
 STOCK = {"k": "stock"}
 CAN_START = {"k": "can_start"}
 LIT = {"k": "lit"}
-SHIELDS_AWAY = {"k": "shields_away"}      # PAD-690
 
 
 # ---- what sets a script off --------------------------------------------------------------------------------

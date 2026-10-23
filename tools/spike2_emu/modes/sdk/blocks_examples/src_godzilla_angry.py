@@ -5,8 +5,8 @@ Godzilla vs. Mechagodzilla II (1993): G-Force carries Baby Godzilla away as bait
 Rodan's nest, Mechagodzilla, the Garuda gunship and the reborn Fire Rodan, to Super Mechagodzilla at Makuhari.
 
 - THE RAGE: every playfield switch hit fills the meter while no mode runs (PAD-675, David: "we should have our
-  required switch counts in there still that we had before (something like 1000 switch hits)"; a multiball's
-  too, PAD-690): five stretches of 150, 175, 200, 225, 250 (1000) the first time, TWICE that (2000) the second, three
+  required switch counts in there still that we had before (something like 1000 switch hits)"; not in a multiball,
+  as the C): five stretches of 150, 175, 200, 225, 250 (1000) the first time, TWICE that (2000) the second, three
   times (3000) the third (pack.need's rule: each start costs more); a note every quarter of a stretch, RAGE n% at
   each stretch's end; full, GODZILLA IS ANGRY lights the Building.
 - THE CHASE, five stages, deeper and deeper: five places, each a set of red shots (any order) and then a lock
@@ -260,17 +260,17 @@ def lit_building():
 
 
 RAGE = on_switch(
-    if_(eq("ready", 0), [         # a multiball's hits too (PAD-690, David: "allow incrementing ... during multi-balls")
+    if_(AND(eq("ready", 0), lt(BALLS, 2)), [         # not in a multiball, as the C (David: "not counting switch hits")
         change("rage", 1),
         if_(ge("rage", NEED), [
             change("level", 1), set_("rage", 0),
             if_(ge("level", 5), [
                 set_("ready", 1), lit_building(),
                 if_(ge(BALLS, 2), [set_("owed", 1)], angry_now())],
-                [award("RAGE", value=div(mul(DONE, 100), TOTAL_RAGE), sub="PERCENT", seconds=pack.NOTE_S),
-                 sound("rage"), show("Rage level")])],
-            # a quarter of a stretch: how far it is
-            [if_(ne(div(mul(var("rage"), 4), NEED), div(mul(sub(var("rage"), 1), 4), NEED)), [
+                [if_(lt(BALLS, 2), [award("RAGE", value=div(mul(DONE, 100), TOTAL_RAGE), sub="PERCENT", seconds=pack.NOTE_S),
+                                    sound("rage"), show("Rage level")])])],
+            # a quarter of a stretch: how far it is (not in a multiball: it counts quietly)
+            [if_(AND(lt(BALLS, 2), ne(div(mul(var("rage"), 4), NEED), div(mul(sub(var("rage"), 1), 4), NEED))), [
                 award("GODZILLA RAGE", value=sub(TOTAL_RAGE, DONE), sub="MORE TO GODZILLA ANGRY", seconds=pack.NOTE_S)])]),
     ]), when="idle")
 #: full: lit at the Building again after a start or a new ball, and said once a multiball is over

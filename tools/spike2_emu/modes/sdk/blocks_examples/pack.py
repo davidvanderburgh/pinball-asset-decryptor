@@ -22,8 +22,8 @@
   - a stage's clock is STAGE_S, a window inside it (a follow-up shot, a hurry-up, a combo) WINDOW_S at least (David:
     "you can't really accomplish much in 10 seconds. 40 seconds is better").
 """
-from blk import (AND, NOT, LIT, add, award, change, eq, ge, hud_line, if_, light, light_insert, light_mode,
-                 mul, off, off_insert, on_any_shot, scoop_hold, set_, set_time, sub, var)
+from blk import (AND, BALLS, NOT, LIT, add, award, change, eq, ge, hud_line, if_, light, light_insert, light_mode,
+                 lt, mul, off, off_insert, on_any_shot, scoop_hold, set_, set_time, sub, var)
 
 CASH_SHOT = "Right scoop"
 CASH_INSERTS = ("SELECT CITY", "SCOOP BB-BATTLE", "SCOOP BB-GODZILLA PWR UP", "SCOOP BB-SUMMON ALLY")
@@ -32,6 +32,7 @@ CLOCK_FLOOR = 15                                     # David: every mode the sam
 NOTE_S = 3                                           # a note on the glass, at least
 STAGE_S = 40                                         # a stage's clock
 WINDOW_S = 20                                        # a window inside a stage, at least
+ONE_BALL = lt(BALLS, 2)                              # no multiball: the only time a start's count counts (PAD-669)
 
 #: the shots as the line says them: the playfield's (and the emulator's switch list's) names
 SHOT_WORDS = {
@@ -84,9 +85,9 @@ def relight(ready, start_shot, color, inserts=""):
 
 def count_up(count, by, need, ready, note_at, start_shot, color, inserts, lit_words, lit_sub, note_words, more_sub,
              step=5):
-    """One qualifying hit: ``by`` more toward ``need`` (a multiball's too, PAD-690; not once ready); at ``need`` the mode is
+    """One qualifying hit: ``by`` more toward ``need`` (not in a multiball, not once ready); at ``need`` the mode is
     lit at ``start_shot``; every ``step`` a note says how many are left."""
-    return [if_(eq(ready, 0), [
+    return [if_(AND(ONE_BALL, eq(ready, 0)), [
         change(count, by),
         if_(ge(count, need), [
             set_(ready, 1),

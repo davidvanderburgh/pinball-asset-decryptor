@@ -8,8 +8,8 @@ After Lyman Sheats: a meter that costs more each time (Metallica's Sparky), stag
 (EHoH's House stages), a pot you may cash out or put at risk to go deeper (Metallica's Crank It Up, Batman '66's
 cash the super or take +1x), and failing still pays (a quarter of the pot).
 
-- THE PRAYER: every Pop bumper sings 1, the Right return lane 2, the Mecha lane (Mecha exit bottom) 3; 40 lights
-  the Mecha lane (80 the second time he wakes, 120 the third). A multiball's count too. Every 5 a note: HIT THE
+- THE PRAYER: every Pop bumper sings 1, the Right return lane 2, the Mecha lane (Mecha exit bottom) 3; 25 lights
+  the Mecha lane (50 the second time he wakes, 75 the third). Nothing counts in a multiball. Every 5 a note: HIT THE
   POP BUMPERS, n TO WAKE KING CAESAR.
 - STAGE 1, AWAKENING: the Pop bumper, the Right ramp and the Mecha lane each crack the shrine once (3M to the pot
   each; 4.5M from the second time he wakes).
@@ -45,7 +45,7 @@ START_INSERTS = "MECHA LANE,POP BUMPER"
 BEAM = ("Left ramp", "Big loop", "Right ramp", "Building")
 KC_X, KC_Y = 262, 405
 #: the prayer it takes: 25, and 15 more each time he has woken
-NEED = pack.need(40, "woken")   # the prayer: 40, then 80, then 120 (PAD-690: was 50; PAD-675: was 25)
+NEED = pack.need(50, "woken")   # the prayer: 50, then 100, then 150 (PAD-675: was 25)
 #: each stage's clock and title
 STAGE_SECS = {1: pack.STAGE_S + 5, 2: pack.STAGE_S + 15, 3: pack.STAGE_S + 10, 4: pack.STAGE_S + 5}
 TITLES = {1: "KING CAESAR: AWAKENING", 2: "KING CAESAR: REFLECT", 3: "KING CAESAR: TAG TEAM",
@@ -358,10 +358,10 @@ _STAGE1 = ["shot", "Pop bumper", "ms", 400, "shot", "Right ramp", "ms", 400, "sh
 _STAGE2 = ["shot", "Left ramp", "ms", 300, "shot", "Mecha exit bottom", "ms", 300] * 3 + ["secs", 1]
 _STAGE3 = ["shot", "Godzilla target", "ms", 500, "shot", "Pop bumper", "ms", 500] * 3 + ["secs", 1]
 DESK = [
-    ("the prayer lights it", _shots("Pop bumper", 39) + ["secs", 1] + _shots("Pop bumper", 1) +
+    ("the prayer lights it", _shots("Pop bumper", 49) + ["secs", 1] + _shots("Pop bumper", 1) +
      ["shot", "Mecha exit bottom", "secs", 2],
      ["WORDS PadMode_king_caesar_Hud_Award: KING CAESAR IS LIT", "[KING CAESAR] START (its lit shot)",
-      "Hud_Award: HIT THE POP BUMPERS", "Hud_AwardSub: 39  -  TO WAKE KING CAESAR"]),
+      "Hud_Award: HIT THE POP BUMPERS", "Hud_AwardSub: 49  -  TO WAKE KING CAESAR"]),
     ("stage one then cash out", _START + _STAGE1 + ["shot", "Right scoop", "secs", 5],
      ["Hud_Title: KING CAESAR: AWAKENING", "Hud_Line: POP BUMPERS, RIGHT RAMP AND MECHA LANE",
       "Hud_Line: SHOOT THE RIGHT RAMP AND MECHA LANE", "Hud_AwardSub: NOW RIGHT RAMP AND MECHA LANE",

@@ -11,9 +11,7 @@ After Lyman Sheats: a call that costs more each time (Metallica's Sparky), stage
 slips when left alone (KING GHIDORAH's heads), a hurry-up finale, a pot you cash out or put at risk.
 
 - THE CALL: Shield target hits while no mode runs call him: 8 the first time, 16 the second, 24 the third (a note
-  on every hit says how many are left); the last one starts him. While the game keeps the shield targets turned
-  away (the spinner side to the flippers), a Shield ramp spinner shot counts as a hit instead (PAD-690, David), one
-  a shot: spins within SPIN_CALL_MS of the first are the same shot. Held off (one of the game's modes or multiballs),
+  on every hit says how many are left); the last one starts him. Held off (one of the game's modes or multiballs),
   the next shield hit once it is over starts him. 90 s on his clock.
 - STAGE 1, SPIKES: each Shield target (left, center, right) charges one spike: 500,000, and 1M to the pot. A spike
   to charge blinks orange; a charged one goes dark (it no longer counts) and the SPIKES gauge fills.
@@ -40,8 +38,8 @@ the award line between his awards, so:
 - what is lit counts: a charged spike goes dark, the ramp he has let go of goes dark after the last bite, the scoop
   stops chasing once he has won.
 """
-from blk import (AND, OR, NOT, SHIELDS_AWAY, RUNNING, STOCK, a_show, add, award, change, clip, clips, div, end, eq, every,
-                 ge, gt, hud, hud_line, hud_title, if_, le, light, light_insert, mul, off, on_any_shot, on_end,
+from blk import (AND, OR, BALLS, NOT, RUNNING, STOCK, a_show, add, award, change, clip, clips, div, end, eq, every,
+                 ge, gt, hud, hud_line, hud_title, if_, le, light, light_insert, lt, mul, off, on_any_shot, on_end,
                  on_shot, on_start, on_timer, score, set_, shake, shake_game, shield, show, sound, sounds, start, step,
                  sub,
                  timer_left, timer_start, timer_stop, var, beds, music)
@@ -58,9 +56,6 @@ AX, AY = 186, 439                     # the ANGUIRUS insert (the allies the scoo
 SX, SY = 199, 346                     # the SHIELD CENTER insert's place: the C's KIT_AT_SHIELDS
 BX, BY = 123, 202                     # the BUILDING
 TIMERS = ("enter", "roll", "charged", "next", "grip", "bite", "say", "swing")
-#: PAD-690 (David: "let the shield ramp spinner count too while the shields face away"): one call a spinner shot,
-#: timed on the "swing" timer (8 is a mode's most; swing acts only while he runs, and his start restarts it)
-SPIN_SHOT, SPIN_CALL_MS = "Shield ramp spinner", 1500
 #: PAD-684 (David: "the shield targets ... are not presented towards the player ... have the mech constantly move back
 #: and forth to make a moving target"): his shots are the shield targets, so the platform faces the player SWING_TOWARD
 #: ms, turns away SWING_AWAY ms, over and over while he runs (10 moves a minute: the runtime allows 12)
@@ -210,21 +205,14 @@ def say():
     ]
 
 
-def call(words):
-    """One call toward him (a multiball's too, PAD-690); ready, he starts - held off, the next call starts him."""
-    return if_(eq("ready", 0), [
-        change("calls", 1),
-        if_(ge("calls", NEED), [set_("ready", 1), start()], [
-            award(words, value=sub(NEED, var("calls")), sub="MORE TO CALL ANGUIRUS", seconds=pack.NOTE_S)])],
-        [if_(eq("ready", 1), [start()])])
-
-
 SCRIPTS = [
     # ---- the call: shield hits while he is away; ready, he joins the game's own mode ---------------------------------
-    *[on_shot(s, call("SHIELD HITS"), when="idle") for _v, s in SPIKES],
-    # PAD-690: the shield targets turned away, the Shield ramp spinner faces the flippers: a spinner shot is a call
-    on_shot(SPIN_SHOT, if_(AND(SHIELDS_AWAY, eq(timer_left("swing"), 0)), [
-        timer_start("swing", SPIN_CALL_MS), call("SPINNER SHOTS")]), when="idle"),
+    *[on_shot(s, if_(AND(lt(BALLS, 2), eq("ready", 0)), [
+        change("calls", 1),
+        if_(ge("calls", NEED), [set_("ready", 1), start()], [
+            award("SHIELD HITS", value=sub(NEED, var("calls")), sub="MORE TO CALL ANGUIRUS", seconds=pack.NOTE_S)])],
+        [if_(eq("ready", 1), [start()])]),                 # held off: the next shield hit starts him
+        when="idle") for _v, s in SPIKES],
 
     # ---- he joins ----------------------------------------------------------------------------------------------------------
     on_start(set_("ready", 0), set_("calls", 0), change("joins", 1),
@@ -334,7 +322,7 @@ PROGRAM = {
                                                 "bite at", "hurry", "won", "cashed", "swing")] + [
         {"name": v, "reset": "mode"} for v, _s in SPIKES],
     "timers": [{"name": n} for n in TIMERS],
-    "hud": hud(" ", counters=[], timer=("ANGUIRUS", "anguirus"),
+    "hud": hud(" ", counters=[], timer=("ANGUIRUS", "radiation"),
                gauge={"label": "SPIKES", "kind": "spike", "count": 3, "color": "#ff7800", "value": charged()}),
     "bar": {"on": False}, "info": {"on": False},
     "clips": clips("intro", "spike", "roll", "won", "lost", "bite", "allies", "cashout"),
@@ -376,8 +364,7 @@ EXAMPLE = {
     "based_on": "anguirus_assist.c",
     # the Pro has two shields (left, right): its Maser target is the third spike, so the call and the charge play the
     # same (three different targets to charge, all on the way up the left and right)
-    "title_alt": {"godzilla_pro": {"shots": {"Shield target center": "Maser target",
-                                             "Shield ramp spinner": "Right spinner"}, "words": _pro_words()}},
+    "title_alt": {"godzilla_pro": {"shots": {"Shield target center": "Maser target"}, "words": _pro_words()}},
     "about": ("The C example ANGUIRUS rebuilt in blocks and taken deeper: shield hits call him (8, then 16, then 24), a "
               "mode of his own for 90 s; four stages (charge the spikes at the shields, three rolling attacks "
               "at the Big loop, 20 s apart at most, three bites at the chasing ramp, the allies' hurry-up at the "
@@ -417,14 +404,6 @@ _CHARGE = ["shot", "Shield target left", "ms", 400, "shot", "Shield target cente
 _ROLLS = ["shot", "Big loop", "secs", 2] * 3 + ["secs", 2]
 _BITES = ["shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Left ramp", "secs", 2]
 DESK = [
-    # PAD-690: the shields turned away (the harness's start), a Shield ramp spinner shot is a call - its spins within
-    # SPIN_CALL_MS one call (7 to go after a burst of five), the eighth shot starts him
-    ("a spinner shot calls him while the shields face away",
-     ["shot", SPIN_SHOT, "ms", 60] * 5 + ["secs", 2] + (["shot", SPIN_SHOT, "ms", 1700] * 7) + ["secs", 3],
-     ["Hud_Award: SPINNER SHOTS", "Hud_AwardSub: 7  -  MORE TO CALL ANGUIRUS", "[ANGUIRUS] START"]),
-    ("with the shields toward the player the spinner calls nothing",
-     ["shield", "toward", "secs", 1] + ["shot", SPIN_SHOT, "ms", 1700] * 8 + ["secs", 3],
-     ["!Hud_Award: SPINNER SHOTS", "![ANGUIRUS] START"]),
     ("eight shield hits call him, sixteen the second time",
      _CALL3 + ["ball_end", "secs", 8] + _SH * 15 + ["secs", 1] + _SH + ["secs", 3],
      ["Hud_AwardSub: 1  -  MORE TO CALL ANGUIRUS", "[ANGUIRUS] START", "END (ball ended)",

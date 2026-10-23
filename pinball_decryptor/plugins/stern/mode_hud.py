@@ -296,7 +296,7 @@ def _done(im, size=44):
 
 def icon(kind):
     """A 44x44 silhouette (L array) for a badge disc: bolt, ghidorah, oxygen, maser, xilien, anguirus,
-    radiation, rage, crystal, snowflake, rose, claw, spider, mantis, jet, ring, robot, or a letter."""
+    radiation, rage, crystal, snowflake, rose, claw, or a letter. A card's own picture: :func:`icon_picture`."""
     im, d, n = _canvas()
     c = n / 2
     if kind == "radiation":
@@ -383,45 +383,36 @@ def icon(kind):
         d.pieslice((c - 110, c - 92, c + 70, c + 92), 158, 202, fill=0)   # its open jaws
         d.ellipse((c - 30, c - 12, c - 6, c + 12), fill=0)       # the hinge of the bite
         d.polygon([(c + 20, c - 26), (c + 86, c - 14), (c + 86, c + 14), (c + 20, c + 26)], fill=255)   # the arm
-    # PAD-690 (David: "make sure that each one has a unique icon too"): five more, so no two of a pack's badges match
-    elif kind == "spider":                                      # Kumonga
-        d.ellipse((c - 26, c - 2, c + 26, c + 58), fill=255)     # the abdomen
-        d.ellipse((c - 18, c - 34, c + 18, c + 2), fill=255)     # the head
-        for s in (-1, 1):
-            for k, (kx, ky, fx, fy) in enumerate(((44, -40, 70, -74), (54, -14, 84, -30),
-                                                  (54, 14, 84, 30), (44, 40, 70, 78))):
-                hx, hy = c + s * 12, c - 10 + k * 10            # the hip, the knee, the foot
-                d.line((hx, hy, c + s * kx, c + ky - 10, c + s * fx, c + fy - 10), fill=255, width=10, joint="curve")
-    elif kind == "mantis":                                      # Kamacuras: the raised scythes
-        d.polygon([(c - 10, c - 60), (c + 10, c - 60), (c + 16, c - 40), (c - 16, c - 40)], fill=255)   # the head
-        d.ellipse((c - 30, c - 76, c - 6, c - 56), fill=255)
-        d.ellipse((c + 6, c - 76, c + 30, c - 56), fill=255)     # the eyes
-        d.line((c, c - 40, c, n - 10), fill=255, width=22)       # the body
-        for s in (-1, 1):
-            d.line((c + s * 8, c - 26, c + s * 54, c - 2, c + s * 46, c - 66), fill=255, width=14, joint="curve")
-            d.polygon([(c + s * 46, c - 66), (c + s * 30, c - 40), (c + s * 40, c - 78)], fill=255)   # the scythe
-            d.line((c + s * 6, c + 30, c + s * 50, c + 70), fill=255, width=9)
-    elif kind == "jet":                                         # SUPER X2: the flying fortress, nose up
-        d.polygon([(c, 6), (c + 16, c - 30), (c + 16, c + 20), (c + 80, c + 50), (c + 80, c + 66), (c + 16, c + 50),
-                   (c + 26, n - 8), (c - 26, n - 8), (c - 16, c + 50), (c - 80, c + 66), (c - 80, c + 50),
-                   (c - 16, c + 20), (c - 16, c - 30)], fill=255)
-        d.ellipse((c - 9, c - 42, c + 9, c - 14), fill=0)        # the canopy
-    elif kind == "ring":                                        # Minilla's smoke ring
-        d.ellipse((c - 70, c - 54, c + 70, c + 54), fill=255)
-        d.ellipse((c - 38, c - 26, c + 38, c + 26), fill=0)
-        for bx, by, br in ((c + 66, c + 60, 12), (c + 44, c + 74, 8)):
-            d.ellipse((bx - br, by - br, bx + br, by + br), fill=255)
-    elif kind == "robot":                                       # Jet Jaguar's face: the crest and the visor eyes
-        d.rounded_rectangle((c - 50, c - 44, c + 50, c + 70), radius=30, fill=255)
-        d.polygon([(c - 12, c - 44), (c, c - 84), (c + 12, c - 44)], fill=255)   # the crest
-        d.polygon([(c - 40, c - 10), (c - 8, c - 2), (c - 8, c + 12), (c - 40, c + 4)], fill=0)
-        d.polygon([(c + 40, c - 10), (c + 8, c - 2), (c + 8, c + 12), (c + 40, c + 4)], fill=0)
-        d.rectangle((c - 22, c + 36, c + 22, c + 44), fill=0)    # the mouth grille
     else:
         from PIL import ImageFont
         d.rectangle((0, 0, 0, 0), fill=0)
         d.text((c - 30, c - 50), str(kind)[:1], fill=255, font=ImageFont.load_default())
     return _done(im)
+
+
+def icon_picture(path):
+    """A 44x44 silhouette (L array) from a mode's own picture (PAD-690: mode_assets.BADGE_ICON_FILE in its folder):
+    its alpha where it has one, else its brightness, fitted into the square on its longer side."""
+    from PIL import Image
+    im = Image.open(path)
+    im = im.getchannel("A") if "A" in im.getbands() else im.convert("L")
+    w, h = im.size
+    k = 44.0 / max(w, h)
+    im = im.resize((max(1, int(round(w * k))), max(1, int(round(h * k)))), Image.LANCZOS)
+    out = Image.new("L", (44, 44), 0)
+    out.paste(im, ((44 - im.width) // 2, (44 - im.height) // 2))
+    return np.asarray(out)
+
+
+def badge_icon(spec, timer):
+    """A badge's icon: the mode's own picture (``icon_file``), else the drawn icon unique_icons picked, else the
+    one its timer names."""
+    if spec.get("icon_file"):
+        try:
+            return icon_picture(spec["icon_file"])
+        except (OSError, ValueError) as e:
+            raise HudError("%s cannot be read as a badge icon: %s" % (spec["icon_file"], e))
+    return icon(spec.get("badge_icon") or timer.get("icon") or "xilien")
 
 
 def gauge_pips(kind, n, colours):
@@ -695,7 +686,7 @@ def hud_group(p, ids, slug, spec, fonts, art, textures):
     timer = spec.get("timer")
     if timer:
         panel = badge_panel(art["panel"], art["font"], timer.get("label") or title)
-        disc = badge_disc(art["disc"], icon(spec.get("badge_icon") or timer.get("icon") or "xilien"))
+        disc = badge_disc(art["disc"], badge_icon(spec, timer))
         tk = [_bitmap_node(p, ids, names["Timer"] + "_Panel", panel, -21.0, 267.0, textures),
               _bitmap_node(p, ids, names["Timer"] + "_Icon", disc, 0.0, 281.8, textures),
               _text_node(p, ids, names["Timer_Num"], "00", (p.font[0], p.font[1]), 68.6, 295.4,
@@ -795,7 +786,7 @@ def progress_group(p, ids, huds, art, textures):
         timer = spec.get("timer") or spec.get("badge") or {}          # PAD-690: a mode with no timer names its badge
         title = spec.get("title") or spec.get("name") or slug.upper()
         badges[slug] = (badge_panel(art["panel"], art["font"], timer.get("label") or title),
-                        badge_disc(art["disc"], icon(spec.get("badge_icon") or timer.get("icon") or "xilien")))
+                        badge_disc(art["disc"], badge_icon(spec, timer)))
     n = min(len(badges), PROGRESS_MAX)
     scale, x, ys = progress_layout(n, art["panel"].shape[1])
     slots = []
@@ -811,25 +802,26 @@ def progress_group(p, ids, huds, art, textures):
     return _group_node(p, ids, PROGRESS_GROUP, slots)
 
 
-#: PAD-690: the icons a badge may wear, in the order a mode with none (or one another mode of the pack took first)
-#: is given the next free one
+#: PAD-690: the drawn icons, in the order a mode with none (or one another mode of the card took first) is given
+#: the next free one
 ICONS = ("xilien", "radiation", "bolt", "ghidorah", "oxygen", "maser", "anguirus", "rage", "crystal", "snowflake",
-         "rose", "claw", "spider", "mantis", "jet", "ring", "robot")
+         "rose", "claw")
 
 
 def unique_icons(huds):
-    """``huds`` with every mode's badge icon its own (David, PAD-690: "make sure that each one has a unique icon
-    too"): a mode keeps the icon it names unless an earlier mode of the pack has it; one with none or a taken one
-    gets the next free icon of ICONS. The pick goes in the spec's ``badge_icon``, which the running timer's badge and
-    the progress panel's both wear."""
+    """``huds`` with no two modes' badges alike (David, PAD-690: "make sure that each one has a unique icon
+    too"): a mode with its own picture (``icon_file``) wears it; one naming a drawn icon keeps it unless an earlier
+    mode has it; one naming none, or a taken one, gets the next free drawn icon (when one is left). The pick goes in
+    the spec's ``badge_icon``, which the running timer's badge and the progress panel's both wear."""
     used, out = set(), []
     for slug, spec in huds:
         spec = dict(spec or {})
-        want = (spec.get("timer") or spec.get("badge") or {}).get("icon")
-        if not want or want in used:
-            want = next((k for k in ICONS if k not in used), want or "xilien")
-        used.add(want)
-        spec["badge_icon"] = want
+        if not spec.get("icon_file"):
+            want = (spec.get("timer") or spec.get("badge") or {}).get("icon")
+            if not want or want in used:
+                want = next((k for k in ICONS if k not in used), want or "xilien")
+            used.add(want)
+            spec["badge_icon"] = want
         out.append((slug, spec))
     return out
 

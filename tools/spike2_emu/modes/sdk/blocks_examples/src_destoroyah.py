@@ -6,7 +6,7 @@ Lyman Sheats' Horde in The Walking Dead (walkers advance on you, a kill is worth
 pays a super worth the wave), his stages with their own shots (EHoH's House), a pot to cash out or put at risk
 (Metallica's Crank It Up) and supers worth your history.
 
-- LIGHT IT: 50 spins of the Top spinner (a multiball's too, PAD-690) start it at once; 100 the second time, 150 the third. A note
+- LIGHT IT: 50 spins of the Top spinner (none in a multiball, PAD-669) start it at once; 100 the second time, 150 the third. A note
   every 5 spins says how many are left (SPIN THE TOP SPINNER / 20 - SPINS TO DESTOROYAH).
 - STAGE 1, THE SWARM: aggregates come over the top at the POWERLINES (far, x1) and advance every 10 s to the RAMPS,
   the BUILDING or the BIG LOOP (near, x2), to the MASER, the SHIELDS or the CAPTIVE BALL (close, x4), and then into
@@ -308,14 +308,14 @@ def next_stage():
 
 SCRIPTS = [
     # ---- light it: every spin of the Top spinner -----------------------------------------------------------------
-    # (PAD-690: a multiball's spins count too; one counted out but held off starts it on the next spin)
+    # (PAD-669: no spin counts in a multiball; one counted out but held off starts it on the next spin)
     on_shot(SPIN,
-            if_(ge("spins", SPINS_NEED), [start()], [
+            if_(ge("spins", SPINS_NEED), [start()], [if_(pack.ONE_BALL, [
                 change("spins", 1),
                 if_(ge("spins", SPINS_NEED), [start()],
                     [if_(eq(mod(var("spins"), SPIN_NOTE_EVERY), 0),
                          [award("SPIN THE TOP SPINNER", value=sub(SPINS_NEED, var("spins")),
-                                sub="SPINS TO DESTOROYAH", seconds=pack.NOTE_S)])])]),
+                                sub="SPINS TO DESTOROYAH", seconds=pack.NOTE_S)])])])]),
             when="idle"),
 
     # ---- the aggregates are coming --------------------------------------------------------------------------------
@@ -490,10 +490,10 @@ _WAVES = _START + ["secs", 4] + _SWEEP + ["secs", 1]
 #: the flying form starts over the Left ramp and moves on with every hit
 _FLY = _shots(["Left ramp", "Big loop", "Right ramp"] * 2, 300) + ["secs", 2]
 DESK = [
-    # PAD-690: a multiball's spins count: 49 in one, back to one ball, the 50th starts him. No note line asked: on
-    # a card with KAMACURAS too, her note has the glass
-    ("a multiball's spins count", ["balls", 2] + ["shot", SPIN, "ms", 60] * 49 + ["balls", 1, "secs", 1] + ["shot", SPIN, "ms", 60] + ["secs", 2],
-     ["[DESTOROYAH] START (a block)"]),
+    # PAD-669: a multiball's spins count for nothing: back to one ball, 49 more do not start him (one of the 50 in
+    # the multiball counted would). No note line asked: on a card with KAMACURAS too, her note has the glass
+    ("no spin counts in a multiball", ["balls", 2] + ["shot", SPIN, "ms", 60] * 50 + ["balls", 1, "secs", 1] + ["shot", SPIN, "ms", 60] * 49 + ["secs", 2],
+     ["![DESTOROYAH] START (a block)"]),
     ("fifty spins the first time, a hundred the second",
      ["shot", SPIN, "ms", 60] * 50 + ["secs", 4, "trigger", "destoroyah.stop", "secs", 4] +
      ["shot", SPIN, "ms", 60] * 95 + ["secs", 4] + ["shot", SPIN, "ms", 60] * 5 + ["secs", 4],

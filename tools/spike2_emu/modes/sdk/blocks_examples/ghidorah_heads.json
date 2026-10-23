@@ -746,62 +746,29 @@
            "k": "cmp",
            "op": "<",
            "a": {
-            "k": "var",
-            "name": "pl left"
+            "k": "balls"
            },
            "b": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 2
-            },
-            "b": {
-             "k": "op",
-             "op": "+",
-             "a": {
-              "k": "var",
-              "name": "starts"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
+            "k": "num",
+            "v": 2
            }
           },
           "then": [
            {
-            "op": "change",
-            "var": "pl left",
-            "by": {
-             "k": "num",
-             "v": 1
-            }
-           },
-           {
-            "op": "change",
-            "var": "pl hits",
-            "by": {
-             "k": "num",
-             "v": 1
-            }
-           },
-           {
             "op": "if",
             "cond": {
              "k": "cmp",
-             "op": ">=",
+             "op": "<",
              "a": {
               "k": "var",
-              "name": "pl hits"
+              "name": "pl left"
              },
              "b": {
               "k": "op",
               "op": "*",
               "a": {
                "k": "num",
-               "v": 6
+               "v": 2
               },
               "b": {
                "k": "op",
@@ -819,13 +786,98 @@
             },
             "then": [
              {
-              "op": "start_mode"
+              "op": "change",
+              "var": "pl left",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             {
+              "op": "change",
+              "var": "pl hits",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": ">=",
+               "a": {
+                "k": "var",
+                "name": "pl hits"
+               },
+               "b": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 6
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "starts"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               }
+              },
+              "then": [
+               {
+                "op": "start_mode"
+               }
+              ],
+              "else": [
+               {
+                "op": "hud_award",
+                "text": "POWERLINE HITS",
+                "value": {
+                 "k": "op",
+                 "op": "-",
+                 "a": {
+                  "k": "op",
+                  "op": "*",
+                  "a": {
+                   "k": "num",
+                   "v": 6
+                  },
+                  "b": {
+                   "k": "op",
+                   "op": "+",
+                   "a": {
+                    "k": "var",
+                    "name": "starts"
+                   },
+                   "b": {
+                    "k": "num",
+                    "v": 1
+                   }
+                  }
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "pl hits"
+                 }
+                },
+                "sub": "TO SUMMON GHIDORAH",
+                "seconds": 3
+               }
+              ]
              }
             ],
             "else": [
              {
               "op": "hud_award",
-              "text": "POWERLINE HITS",
+              "text": "ANOTHER POWERLINE",
               "value": {
                "k": "op",
                "op": "-",
@@ -860,42 +912,7 @@
             ]
            }
           ],
-          "else": [
-           {
-            "op": "hud_award",
-            "text": "ANOTHER POWERLINE",
-            "value": {
-             "k": "op",
-             "op": "-",
-             "a": {
-              "k": "op",
-              "op": "*",
-              "a": {
-               "k": "num",
-               "v": 6
-              },
-              "b": {
-               "k": "op",
-               "op": "+",
-               "a": {
-                "k": "var",
-                "name": "starts"
-               },
-               "b": {
-                "k": "num",
-                "v": 1
-               }
-              }
-             },
-             "b": {
-              "k": "var",
-              "name": "pl hits"
-             }
-            },
-            "sub": "TO SUMMON GHIDORAH",
-            "seconds": 3
-           }
-          ]
+          "else": null
          }
         ]
        }
@@ -968,62 +985,29 @@
            "k": "cmp",
            "op": "<",
            "a": {
-            "k": "var",
-            "name": "pl center"
+            "k": "balls"
            },
            "b": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 2
-            },
-            "b": {
-             "k": "op",
-             "op": "+",
-             "a": {
-              "k": "var",
-              "name": "starts"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
+            "k": "num",
+            "v": 2
            }
           },
           "then": [
            {
-            "op": "change",
-            "var": "pl center",
-            "by": {
-             "k": "num",
-             "v": 1
-            }
-           },
-           {
-            "op": "change",
-            "var": "pl hits",
-            "by": {
-             "k": "num",
-             "v": 1
-            }
-           },
-           {
             "op": "if",
             "cond": {
              "k": "cmp",
-             "op": ">=",
+             "op": "<",
              "a": {
               "k": "var",
-              "name": "pl hits"
+              "name": "pl center"
              },
              "b": {
               "k": "op",
               "op": "*",
               "a": {
                "k": "num",
-               "v": 6
+               "v": 2
               },
               "b": {
                "k": "op",
@@ -1041,13 +1025,98 @@
             },
             "then": [
              {
-              "op": "start_mode"
+              "op": "change",
+              "var": "pl center",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             {
+              "op": "change",
+              "var": "pl hits",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": ">=",
+               "a": {
+                "k": "var",
+                "name": "pl hits"
+               },
+               "b": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 6
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "starts"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               }
+              },
+              "then": [
+               {
+                "op": "start_mode"
+               }
+              ],
+              "else": [
+               {
+                "op": "hud_award",
+                "text": "POWERLINE HITS",
+                "value": {
+                 "k": "op",
+                 "op": "-",
+                 "a": {
+                  "k": "op",
+                  "op": "*",
+                  "a": {
+                   "k": "num",
+                   "v": 6
+                  },
+                  "b": {
+                   "k": "op",
+                   "op": "+",
+                   "a": {
+                    "k": "var",
+                    "name": "starts"
+                   },
+                   "b": {
+                    "k": "num",
+                    "v": 1
+                   }
+                  }
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "pl hits"
+                 }
+                },
+                "sub": "TO SUMMON GHIDORAH",
+                "seconds": 3
+               }
+              ]
              }
             ],
             "else": [
              {
               "op": "hud_award",
-              "text": "POWERLINE HITS",
+              "text": "ANOTHER POWERLINE",
               "value": {
                "k": "op",
                "op": "-",
@@ -1082,42 +1151,7 @@
             ]
            }
           ],
-          "else": [
-           {
-            "op": "hud_award",
-            "text": "ANOTHER POWERLINE",
-            "value": {
-             "k": "op",
-             "op": "-",
-             "a": {
-              "k": "op",
-              "op": "*",
-              "a": {
-               "k": "num",
-               "v": 6
-              },
-              "b": {
-               "k": "op",
-               "op": "+",
-               "a": {
-                "k": "var",
-                "name": "starts"
-               },
-               "b": {
-                "k": "num",
-                "v": 1
-               }
-              }
-             },
-             "b": {
-              "k": "var",
-              "name": "pl hits"
-             }
-            },
-            "sub": "TO SUMMON GHIDORAH",
-            "seconds": 3
-           }
-          ]
+          "else": null
          }
         ]
        }
@@ -1190,62 +1224,29 @@
            "k": "cmp",
            "op": "<",
            "a": {
-            "k": "var",
-            "name": "pl right"
+            "k": "balls"
            },
            "b": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 2
-            },
-            "b": {
-             "k": "op",
-             "op": "+",
-             "a": {
-              "k": "var",
-              "name": "starts"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
+            "k": "num",
+            "v": 2
            }
           },
           "then": [
            {
-            "op": "change",
-            "var": "pl right",
-            "by": {
-             "k": "num",
-             "v": 1
-            }
-           },
-           {
-            "op": "change",
-            "var": "pl hits",
-            "by": {
-             "k": "num",
-             "v": 1
-            }
-           },
-           {
             "op": "if",
             "cond": {
              "k": "cmp",
-             "op": ">=",
+             "op": "<",
              "a": {
               "k": "var",
-              "name": "pl hits"
+              "name": "pl right"
              },
              "b": {
               "k": "op",
               "op": "*",
               "a": {
                "k": "num",
-               "v": 6
+               "v": 2
               },
               "b": {
                "k": "op",
@@ -1263,13 +1264,98 @@
             },
             "then": [
              {
-              "op": "start_mode"
+              "op": "change",
+              "var": "pl right",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             {
+              "op": "change",
+              "var": "pl hits",
+              "by": {
+               "k": "num",
+               "v": 1
+              }
+             },
+             {
+              "op": "if",
+              "cond": {
+               "k": "cmp",
+               "op": ">=",
+               "a": {
+                "k": "var",
+                "name": "pl hits"
+               },
+               "b": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 6
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "starts"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               }
+              },
+              "then": [
+               {
+                "op": "start_mode"
+               }
+              ],
+              "else": [
+               {
+                "op": "hud_award",
+                "text": "POWERLINE HITS",
+                "value": {
+                 "k": "op",
+                 "op": "-",
+                 "a": {
+                  "k": "op",
+                  "op": "*",
+                  "a": {
+                   "k": "num",
+                   "v": 6
+                  },
+                  "b": {
+                   "k": "op",
+                   "op": "+",
+                   "a": {
+                    "k": "var",
+                    "name": "starts"
+                   },
+                   "b": {
+                    "k": "num",
+                    "v": 1
+                   }
+                  }
+                 },
+                 "b": {
+                  "k": "var",
+                  "name": "pl hits"
+                 }
+                },
+                "sub": "TO SUMMON GHIDORAH",
+                "seconds": 3
+               }
+              ]
              }
             ],
             "else": [
              {
               "op": "hud_award",
-              "text": "POWERLINE HITS",
+              "text": "ANOTHER POWERLINE",
               "value": {
                "k": "op",
                "op": "-",
@@ -1304,42 +1390,7 @@
             ]
            }
           ],
-          "else": [
-           {
-            "op": "hud_award",
-            "text": "ANOTHER POWERLINE",
-            "value": {
-             "k": "op",
-             "op": "-",
-             "a": {
-              "k": "op",
-              "op": "*",
-              "a": {
-               "k": "num",
-               "v": 6
-              },
-              "b": {
-               "k": "op",
-               "op": "+",
-               "a": {
-                "k": "var",
-                "name": "starts"
-               },
-               "b": {
-                "k": "num",
-                "v": 1
-               }
-              }
-             },
-             "b": {
-              "k": "var",
-              "name": "pl hits"
-             }
-            },
-            "sub": "TO SUMMON GHIDORAH",
-            "seconds": 3
-           }
-          ]
+          "else": null
          }
         ]
        }

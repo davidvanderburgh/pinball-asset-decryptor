@@ -685,126 +685,143 @@
       ],
       "else": [
        {
-        "op": "change",
-        "var": "spins",
-        "by": {
-         "k": "num",
-         "v": 1
-        }
-       },
-       {
         "op": "if",
         "cond": {
          "k": "cmp",
-         "op": ">=",
+         "op": "<",
          "a": {
-          "k": "var",
-          "name": "spins"
+          "k": "balls"
          },
          "b": {
-          "k": "op",
-          "op": "*",
-          "a": {
-           "k": "num",
-           "v": 50
-          },
-          "b": {
-           "k": "op",
-           "op": "+",
-           "a": {
-            "k": "var",
-            "name": "plays"
-           },
-           "b": {
-            "k": "num",
-            "v": 1
-           }
-          }
+          "k": "num",
+          "v": 2
          }
         },
         "then": [
          {
-          "op": "start_mode"
-         }
-        ],
-        "else": [
+          "op": "change",
+          "var": "spins",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
          {
           "op": "if",
           "cond": {
            "k": "cmp",
-           "op": "=",
+           "op": ">=",
            "a": {
+            "k": "var",
+            "name": "spins"
+           },
+           "b": {
             "k": "op",
-            "op": "-",
+            "op": "*",
             "a": {
-             "k": "var",
-             "name": "spins"
+             "k": "num",
+             "v": 50
             },
             "b": {
              "k": "op",
-             "op": "*",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "plays"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
+           }
+          },
+          "then": [
+           {
+            "op": "start_mode"
+           }
+          ],
+          "else": [
+           {
+            "op": "if",
+            "cond": {
+             "k": "cmp",
+             "op": "=",
              "a": {
               "k": "op",
-              "op": "/",
+              "op": "-",
               "a": {
                "k": "var",
                "name": "spins"
               },
               "b": {
-               "k": "num",
-               "v": 5
-              }
-             },
-             "b": {
-              "k": "num",
-              "v": 5
-             }
-            }
-           },
-           "b": {
-            "k": "num",
-            "v": 0
-           }
-          },
-          "then": [
-           {
-            "op": "hud_award",
-            "text": "SPIN THE TOP SPINNER",
-            "value": {
-             "k": "op",
-             "op": "-",
-             "a": {
-              "k": "op",
-              "op": "*",
-              "a": {
-               "k": "num",
-               "v": 50
-              },
-              "b": {
                "k": "op",
-               "op": "+",
+               "op": "*",
                "a": {
-                "k": "var",
-                "name": "plays"
+                "k": "op",
+                "op": "/",
+                "a": {
+                 "k": "var",
+                 "name": "spins"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 5
+                }
                },
                "b": {
                 "k": "num",
-                "v": 1
+                "v": 5
                }
               }
              },
              "b": {
-              "k": "var",
-              "name": "spins"
+              "k": "num",
+              "v": 0
              }
             },
-            "sub": "SPINS TO DESTOROYAH",
-            "seconds": 3
+            "then": [
+             {
+              "op": "hud_award",
+              "text": "SPIN THE TOP SPINNER",
+              "value": {
+               "k": "op",
+               "op": "-",
+               "a": {
+                "k": "op",
+                "op": "*",
+                "a": {
+                 "k": "num",
+                 "v": 50
+                },
+                "b": {
+                 "k": "op",
+                 "op": "+",
+                 "a": {
+                  "k": "var",
+                  "name": "plays"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                }
+               },
+               "b": {
+                "k": "var",
+                "name": "spins"
+               }
+              },
+              "sub": "SPINS TO DESTOROYAH",
+              "seconds": 3
+             }
+            ],
+            "else": null
            }
-          ],
-          "else": null
+          ]
          }
-        ]
+        ],
+        "else": null
        }
       ]
      }

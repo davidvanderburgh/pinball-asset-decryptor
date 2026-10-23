@@ -4875,9 +4875,10 @@ kerning, carried in from the Ebirah battle scene) and hidden until the mode show
 - an award line and a line under it in the middle (for a moment: a jackpot, a head severed);
 - `timer`: the stock BATTLE badge's panel with the mode's own green LED label and a glowing disc with its
   icon (`xilien`, `radiation`, `bolt`, `ghidorah`, `oxygen`, `maser`, `anguirus`, `rage`, `crystal`, `snowflake`,
-  `rose`, `claw`, `spider`, `mantis`, `jet`, `ring`, `robot`), in the BATTLE badge's slot (y 267), the seconds in
-  its window. No two modes of a card wear the same icon (PAD-690): the build gives a mode whose icon an earlier
-  mode took, or that names none, the next free one;
+  `rose`, `claw`), in the BATTLE badge's slot (y 267), the seconds in its window. A picture named `badge.png` in
+  the mode's folder is its icon instead (PAD-690: its alpha, or its brightness, fitted into the disc). No two modes
+  of a card wear the same drawn icon: the build gives a mode whose icon an earlier mode took, or that names none,
+  the next free one;
 - the progress panel (PAD-680, PAD-690): a column at the right edge, under the rage meter and over the player
   score panels, with a slot for every mode of the card, each badge scaled down to fit; a mode's latest progress
   note stands in it (its badge and the shots it still needs, newest on top) until the mode starts or the game

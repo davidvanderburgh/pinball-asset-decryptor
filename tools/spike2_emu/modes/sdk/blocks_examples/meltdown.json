@@ -723,15 +723,29 @@
      {
       "op": "if",
       "cond": {
-       "k": "cmp",
-       "op": "=",
+       "k": "and",
        "a": {
-        "k": "var",
-        "name": "ready"
+        "k": "cmp",
+        "op": "=",
+        "a": {
+         "k": "var",
+         "name": "ready"
+        },
+        "b": {
+         "k": "num",
+         "v": 0
+        }
        },
        "b": {
-        "k": "num",
-        "v": 0
+        "k": "cmp",
+        "op": "<",
+        "a": {
+         "k": "balls"
+        },
+        "b": {
+         "k": "num",
+         "v": 2
+        }
        }
       },
       "then": [

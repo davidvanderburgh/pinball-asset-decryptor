@@ -7,8 +7,8 @@ pays its kills again, a boss at the end), re-themed for Kamacuras, whose art is 
 David, PAD-658: "modify the Kamacuras mode to require more to start it and make its shots more obvious."
 
 - TO START IT (was: 30 Top spinner spins, 10 more each time, and it started at once): 50 spins of the Top spinner
-  (100 the second time, 150 the third) light the RIGHT SCOOP, its own corner; the scoop starts it. A multiball's spins
-  count too. A note every 10 spins says how many are left (SPIN THE TOP SPINNER / 40 - SPINS TO KAMACURAS).
+  (100 the second time, 150 the third) light the RIGHT SCOOP, its own corner; the scoop starts it. Nothing counts in
+  a multiball. A note every 10 spins says how many are left (SPIN THE TOP SPINNER / 40 - SPINS TO KAMACURAS).
 - THE MANTISES are far more obvious: a mantis's shot CHASES fast in its ring's colour (far green, near yellow, close
   red, the closer the faster), the HUD names where they are, and each one swoops in with its own clip, screech and
   a ripple light show. Everything else on the playfield of ours stays dark; a killed mantis's shot goes off at once.

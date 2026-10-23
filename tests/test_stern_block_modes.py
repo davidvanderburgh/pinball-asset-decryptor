@@ -1051,8 +1051,8 @@ def test_the_hud_is_the_examples_hud_in_the_assets_file(tmp_path):
                               "timer": {"label": "TEST MODE", "icon": "xilien"}}
     assert BM.hud_spec(prog([])) == {}
     # PAD-690: no timer, but the progress panel wears its badge: its label and icon go as "badge"
-    r = prog([], hud={"on": True, "timer": {"on": False, "label": "", "icon": "mantis"}})
-    assert BM.hud_spec(r)["badge"] == {"label": "TEST MODE", "icon": "mantis"} and "timer" not in BM.hud_spec(r)
+    r = prog([], hud={"on": True, "timer": {"on": False, "label": "", "icon": "rose"}})
+    assert BM.hud_spec(r)["badge"] == {"label": "TEST MODE", "icon": "rose"} and "timer" not in BM.hud_spec(r)
     # saved: the assets file carries it (the build draws it) and the kit sits beside the C
     project = _card(tmp_path)
     slug, path = BM.new_blocks_mode(project, "Maser", shots=SHOTS)

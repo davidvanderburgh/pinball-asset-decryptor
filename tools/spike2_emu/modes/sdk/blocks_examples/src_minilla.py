@@ -332,7 +332,7 @@ PROGRAM = {
     "timers": [{"name": n} for n in TIMERS],
     "hud": hud(say([s for _v, s in RINGS]),
                counters=[("STAGE", "OF 4", None), ("POT", "CASH AT SCOOP", None), ("RINGS", "OF 4", None)],
-               timer=("MINILLA", "ring")),
+               timer=("MINILLA", "radiation")),
     "bar": {"on": False}, "info": {"on": False},
     "clips": clips("intro", "loop", "ring", "puff", "stomp", "ray", "gabara", "gabara_hit", "mb", "won", "lost",
                    "cashout"),

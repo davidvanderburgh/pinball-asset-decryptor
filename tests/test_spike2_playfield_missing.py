@@ -68,6 +68,12 @@ def test_a_live_playfield_window_is_raised_and_brought_onto_a_screen(titled_wind
     u = ctypes.windll.user32
     u.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
     u.ShowWindow(h, 4)                              # SW_SHOWNOACTIVATE
+    # Answer like a live window: a thread that has not pumped its queue for
+    # 5 s is "hung" to IsHungAppWindow, and pytest's thread never pumps, so
+    # a slow (cold) run failed this test now and then (PAD-692).
+    msg = wintypes.MSG()
+    while u.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):   # PM_REMOVE
+        u.DispatchMessageW(ctypes.byref(msg))
     assert playfield._our_live_window(h)
     assert playfield.raise_existing() is True
     u.MonitorFromWindow.restype = wintypes.HANDLE

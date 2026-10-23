@@ -113,6 +113,31 @@ def test_convert_clip_keeps_a_video_longer_than_30_s(tmp_path):
     assert MA.MODE_CLIP_MAX_SECONDS == 300          # the longest a mode's clock runs (the Modes tab's seconds)
 
 
+def test_convert_clip_makes_an_animated_gif_a_moving_clip(tmp_path):
+    """PAD-693: DragonRR asked for animated GIFs. A mode's clip may be one: ffmpeg reads every frame,
+    so the clip moves (not the GIF's first picture held), at the bank's size, and a block or the form
+    offers .gif in its picker."""
+    from PIL import Image
+    from pinball_decryptor.plugins.stern import block_modes as BM
+    from pinball_decryptor.webui.tabs.modes import ModesTab
+    assert ".gif" in BM.VIDEO_EXTS and "*.gif" in ModesTab.VIDEO_TYPES[0][1]
+    ff = _ffmpeg()
+    src = str(tmp_path / "spin.gif")
+    frames = [Image.new("RGB", (80, 60), (40 * i, 255 - 40 * i, 90)) for i in range(6)]
+    frames[0].save(src, save_all=True, append_images=frames[1:], duration=200, loop=0)
+    out = str(tmp_path / "out.asset")
+    MA.convert_clip(src, out, 160, 90, ff)
+    streams = _probe(out)
+    assert [s["codec_type"] for s in streams] == ["video"]
+    assert (streams[0]["width"], streams[0]["height"]) == (160, 90)
+    raw = subprocess.run([ff, "-v", "error", "-i", out, "-vf", "crop=40:40:60:25", "-f", "rawvideo",
+                          "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    pics = [raw[i:i + 40 * 40 * 3] for i in range(0, len(raw), 40 * 40 * 3)]
+    assert len(pics) >= 30                       # 1.2 s at 30 fps
+    reds = sorted({round(np.frombuffer(p, np.uint8).reshape(-1, 3)[:, 0].mean() / 40) for p in pics})
+    assert reds == list(range(6))                # every one of the GIF's pictures plays, in turn
+
+
 def test_the_space_estimate_sizes_a_long_video_by_its_own_length():
     from pinball_decryptor.plugins.stern import engine
     assert engine._MODE_CLIP_MAX_S == MA.MODE_CLIP_MAX_SECONDS

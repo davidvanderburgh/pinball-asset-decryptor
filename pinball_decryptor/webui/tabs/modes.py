@@ -305,7 +305,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     SEQ_ROWS = MP.SEQUENCE_MAX
     PARAM_SECOND_CLIP = (("none", "None"), ("same", "The same clip"), ("title", "A title card"),
                          ("file", "My video…"))
-    VIDEO_TYPES = [("Videos", "*.mp4 *.mov *.m4v *.mkv *.avi *.webm"), ("All files", "*.*")]
+    #: PAD-693: an animated GIF is a clip too (ffmpeg makes it a video like any other; it plays once)
+    VIDEO_TYPES = [("Videos", "*.mp4 *.mov *.m4v *.mkv *.avi *.webm *.gif"), ("All files", "*.*")]
     #: the Tk tab's ttk.Spinbox bounds (from_, to[, step]), keyed by the form field; the
     #: page draws each as a number field with arrows. ``callout_secs`` is the four callout
     #: rows' seconds. (The film dialog's length is bounded by its own ``film.max``.)

@@ -5,11 +5,14 @@ look takes a few seconds and runs on a worker; after that each mode's words are 
 dialog shows the sheet as it prints, and lets the person put a mode's words of their own in place of the app's (one
 field at a time: what they write wins, an empty field gives the app's back), leave a mode off, move it up or down,
 and change the title, the line under it and the foot. Save as PDF... (Letter or A4, landscape) and Save as HTML...
-write the files, by default into the project folder.
+write the files, by default into the project folder. Print... (PAD-695) prints the preview page through the system's
+print dialog; where the window cannot print a page (macOS, Qt) :meth:`sheet_print` opens the sheet's PDF in the
+system's viewer to print from.
 """
 
 import os
 import re
+import tempfile
 import threading
 
 from ..plugins.stern import rules_sheet as RS
@@ -165,13 +168,39 @@ class RulesSheetMixin:
         self._sheet_rebuild()
 
     @rpc
+    def sheet_print(self):
+        """Print... where the window cannot print the preview itself: the sheet's PDF, written to a temporary
+        folder, opened in the system's PDF viewer to print from. Returns the path written, or None."""
+        sh = self._sheet
+        if sh is None:
+            return None
+        from ..core import desktop
+        folder = os.path.join(tempfile.gettempdir(), "pad-rules-sheet")
+        path = os.path.join(folder, _stem(sh) + ".pdf")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(RS.to_pdf(sh, sh["paper"]))
+        except OSError as e:
+            compat.messagebox.showinfo("Rules sheet", "Could not make the sheet to print: %s" % e)
+            return None
+
+        def show():                                         # an opener can take a few seconds to answer
+            ok, err = desktop.open_path(path)
+            self._post(self._say, "opened the rules sheet to print: %s" % path if ok else
+                       "could not open the rules sheet to print (%s); it is at %s" % (err, path))
+        path = os.path.normpath(path)
+        threading.Thread(target=show, daemon=True, name="modes-rules-sheet-print").start()
+        return path
+
+    @rpc
     def sheet_save(self, kind="pdf"):
         """Save as PDF... / Save as HTML...: the sheet as it is shown, by default into the project folder. Returns
         the path written, or None."""
         sh = self._sheet
         if sh is None or kind not in ("pdf", "html"):
             return None
-        stem = re.sub(r'[\\/:*?"<>|]+', "_", sh["title"]).strip() or "Rules sheet"
+        stem = _stem(sh)
         ext = "." + kind
         path = self.window.ask_save(
             "modes_rules_sheet", "Save the rules sheet as %s" % kind.upper(), initialfile=stem + ext,
@@ -193,3 +222,8 @@ class RulesSheetMixin:
         self._say("saved the rules sheet (%d mode%s) to %s"
                   % (len(sh["rows"]), "" if len(sh["rows"]) == 1 else "s", os.path.normpath(path)))
         return path
+
+
+def _stem(sheet):
+    """The sheet's file name: its title, with what a file name cannot hold made "_"."""
+    return re.sub(r'[\\/:*?"<>|]+', "_", sheet["title"]).strip() or "Rules sheet"

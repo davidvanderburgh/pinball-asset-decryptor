@@ -12,7 +12,11 @@ He asked for the sheet to be made from the Modes tab instead, so it is always cu
 - every mode with what the sheet says of it: tick to keep it on, arrows to reorder, the pencil to write the
   mode's own words (Start, Stages one a line, Cash out, a Tag); an empty field gives the app's words back;
 - the title, the line under it and the foot, each editable the same way;
-- **Save as PDF…** and **Save as HTML…**, by default into the project folder.
+- **Save as PDF…** and **Save as HTML…**, by default into the project folder;
+- **Print…** (PAD-695): the preview page itself prints through the system's print dialog (WebView2, a browser),
+  on the paper chosen, landscape; before it prints the page fits its type to one page (`padFitPage()`, as the PDF
+  does - Letter put the foot on a second page otherwise). Native windows that cannot print a page (macOS, Qt) open
+  the sheet's PDF in the system's viewer instead (`sheet_print`).
 
 Kept in the project: a mode's own words in `modes/<slug>/sheet.json` (they travel with the mode: Save/load, Copy
 to and Port copy the whole folder), the sheet's title/line/foot/paper/order/left-off in `modes/rules_sheet.json`.

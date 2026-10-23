@@ -2,6 +2,7 @@
 // (webui/modes_sheet.py; the words from plugins/stern/rules_sheet.py). On the left every mode with
 // what the sheet says of it; Edit words opens its fields, each showing the app's words until you
 // write your own (yours win; empty gives the app's back). On the right the sheet as it prints.
+// PAD-695: Print… prints that preview page through the system's print dialog.
 
 import { html, useEffect, useRef, useState, Button, Check, Note, Seg, Modal, Icon, tip, cx, call } from "../core/ui.js";
 
@@ -19,9 +20,26 @@ const T = {
   intro: "The line under the title. Empty says how many modes the card adds to which game and version.",
   foot: "The rules every mode shares, under the table. Empty uses what the app works out from the modes.",
   pdf: "Save the sheet as a PDF to print: one page when it fits.",
+  print: "Print the sheet: the system's print dialog, with the sheet laid out on the paper chosen here, landscape.",
   htmlSave: "Save the sheet as a web page.",
   paper: "The paper the PDF is laid out for, landscape.",
 };
+
+// PAD-695: the page in the preview prints itself (its @page rule sets the paper, landscape) where the window is
+// Chromium (WebView2, the browser) or a plain browser. Other native windows (macOS, Qt) do not answer print() from a
+// page, so there the sheet's PDF opens in the system's viewer to print from.
+function printsInPage() {
+  const ua = navigator.userAgent || "";
+  return !window.pywebview || (/Chrome\//.test(ua) && !/QtWebEngine/.test(ua));
+}
+
+function printSheet(frame) {
+  const w = frame && frame.contentWindow;
+  if (w && printsInPage()) {
+    try { if (w.padFitPage) w.padFitPage(); w.focus(); w.print(); return; } catch (e) { /* the PDF instead, below */ }
+  }
+  call("modes.sheet_print");
+}
 
 // A text box that keeps what is typed and hands it over when it is left (or Enter, on one line).
 function Words({ value, placeholder, onCommit, lines, title }) {
@@ -84,13 +102,15 @@ export function RulesSheetDialog({ s, onClose }) {
   const own = sh.own || {};
   const setting = (k) => (v) => call("modes.sheet_setting", k, v);
   const busy = !!sh.busy;
+  const frame = useRef(null);
   return html`<${Modal} title="Rules sheet" icon="file" xwide cls="rs-modal" onClose=${close}
     footer=${html`<span class="lbl" ...${tip(T.paper)}>Paper</span>
       <${Seg} value=${sh.paper || "letter"} options=${[{ value: "letter", label: "Letter" }, { value: "a4", label: "A4" }]}
         onChange=${setting("paper")} disabled=${busy} />
       <span class="grow"></span>
       <${Button} icon="download" disabled=${busy || !sh.n_on} title=${T.htmlSave} onClick=${() => call("modes.sheet_save", "html")}>Save as HTML…<//>
-      <${Button} kind="primary" icon="download" disabled=${busy || !sh.n_on} title=${T.pdf} onClick=${() => call("modes.sheet_save", "pdf")}>Save as PDF…<//>
+      <${Button} icon="download" disabled=${busy || !sh.n_on} title=${T.pdf} onClick=${() => call("modes.sheet_save", "pdf")}>Save as PDF…<//>
+      <${Button} kind="primary" icon="print" disabled=${busy || !sh.n_on} title=${T.print} onClick=${() => printSheet(frame.current)}>Print…<//>
       <${Button} onClick=${close}>Close<//>`}>
     <div class="small dim wrap rs-about">${T.dialog}</div>
     ${sh.error ? html`<${Note} kind="err">${sh.error}<//>` : null}
@@ -113,7 +133,7 @@ export function RulesSheetDialog({ s, onClose }) {
         </div>
       </div>
       <div class="rs-preview">
-        <div class="rs-page"><iframe title="The rules sheet" class=${cx("rs-frame", sh.paper === "a4" && "a4")} srcdoc=${sh.html || ""}></iframe></div>
+        <div class="rs-page"><iframe ref=${frame} title="The rules sheet" class=${cx("rs-frame", sh.paper === "a4" && "a4")} srcdoc=${sh.html || ""}></iframe></div>
         <div class="small muted rs-count"><${Icon} name="info" /> ${sh.n_on || 0} of ${rows.length} modes on the sheet.</div>
       </div>
     </div>`}

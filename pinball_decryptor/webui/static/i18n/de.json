@@ -12511,6 +12511,8 @@
 "Letter": "Letter",
 "Save as HTML…": "Als HTML speichern…",
 "Save as PDF…": "Als PDF speichern…",
+"Print…": "Drucken…",
+"Print the sheet: the system's print dialog, with the sheet laid out on the paper chosen here, landscape.": "Das Blatt drucken: der Druckdialog des Systems, mit dem Blatt im Querformat auf dem hier gewählten Papier.",
 "Playing each mode to word its rules…": "Jeder Modus wird durchgespielt, um seine Regeln zu formulieren…",
 "Under it": "Darunter",
 "Foot": "Fußzeile",

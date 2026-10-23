@@ -233,6 +233,8 @@ def test_each_fault_is_named(sh, remote, kind):
         rk.attach(sh, remote, "extract")
     assert e.value.kind == kind
     assert remote.busid in str(e.value) or remote.host in str(e.value)
+    # a failed attach leaves no lease folder behind
+    assert rk.release(sh, remote, "extract")[0] == "gone"
 
 
 def test_probe_faults(sh):

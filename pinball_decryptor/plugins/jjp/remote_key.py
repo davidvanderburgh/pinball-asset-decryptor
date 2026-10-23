@@ -187,6 +187,7 @@ attach)
     OUT=$("$U" --tcp-port "$PORT" attach -r "$HOST" -b "$BUSID" 2>&1); RC=$?
     printf '%s\n' "$OUT" | grep -v 'usb.ids' | sed 's/^/usbip: /'
     if [ $RC -ne 0 ]; then
+        rmdir "$L" 2>/dev/null
         case "$OUT" in
             *"Device busy"*|*"busy"*) echo "RESULT busy" ;;
             *"Device not found"*|*"not found"*|*"No such"*|*"unavailable"*) echo "RESULT notexported" ;;

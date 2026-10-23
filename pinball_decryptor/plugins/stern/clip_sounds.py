@@ -1016,6 +1016,28 @@ def sound_uses(project):
     return out
 
 
+#: Why the Audio tab shows no Requests column on a project with decoded sounds
+#: (:func:`sound_uses_why`)
+WHY_EXTRACT_AGAIN = ("No Requests column: this project's extract did not record which sounds "
+                     "the game's code asks for. Extract the card into it again to see it.")
+WHY_NOT_READ = ("No Requests column: the sounds the game's code asks for could not be read "
+                "from this card.")
+
+
+def sound_uses_why(project):
+    """Why :func:`sound_uses` gives ``None`` for *project*, for the Audio tab to say (PAD-635:
+    a tester saw no column on a project extracted before Extract wrote the full map). ``""``
+    when the column is there, or when the project has no decoded sounds to show it for."""
+    if not audio_files(project):
+        return ""
+    req = read_requests(project)
+    if not req or any(v["also"] is None for v in req.values()):
+        return WHY_EXTRACT_AGAIN
+    if not any(v["idx"] for v in req.values()):
+        return WHY_NOT_READ
+    return ""
+
+
 def audio_files(project):
     """``{idx: "audio/<file>"}`` for the project's decoded sounds, whatever names the extract
     and the renames gave them (``idx0123.wav``, ``idx0123 - SE FX ROAR.wav``,

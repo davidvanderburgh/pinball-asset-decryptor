@@ -2485,7 +2485,9 @@ static void ck_idle_tick(void);           /* PAD-530: the game's main-play video
  * and then holds "CLASSIFIED SKILL SHOT" and its hats over the clip's last frame until the surface is idle (3.4 s in
  * the emulator). The mode's clip went back the moment the hat toss ended; with the surface playing again the effect
  * never ended, and its picture sat over the mode's video for the rest of the mode. So the wait is for any clip of the
- * game's while a foreground effect has the screen, and the backdrop loop (bd2_tick) waits the same way. */
+ * game's while a foreground effect has the screen, and the backdrop loop (bd2_tick) waits the same way.
+ * Round 3 (below, ck_game_display): the effect must own the game's clip, the loop's play-at-once waits too, and so does
+ * a new clip of ours (ck_wait). */
 #define CK_END_MS 500                     /* this close to its end, a clip counts as over */
 #define CK_LOOP_MS 3000                   /* a loop of the game's is shown this long at most, then ours comes back */
 static struct {
@@ -2518,6 +2520,38 @@ static unsigned long ck_idle_due;
 static unsigned disp_foreground_effect(void);   /* PAD-639: the display priority section, below */
 static int sv_hook(void);
 static int have_sites(const char *const *names);
+
+/* PAD-639 round 3 (luvthatapex on v1.238.2: a skill shot made while the mode's START clip played, and combos, still
+ * left the game's picture over the mode's video for good). Two more of ours took the surface while the game's display
+ * held its clip's end: the mode's loop (bd2_tick) plays AT ONCE after a full-screen clip of ours - the start clip, which
+ * the hat toss took the surface from - and a mode can play a new clip (pm_clip) at any time. So one test for every
+ * place: is the game's own clip on the surface the one a display effect of the game shows (ck_game_display)? Not
+ * every foreground effect: the serve's (Bond 55, priority 96, up to 22 s while the ball waits to be launched) draws
+ * nothing over the TV, and a mode starting then must show its clip. The effect is the clip's when the game put the
+ * clip on the surface (not its main-play video) at most CK_FX_WINDOW_MS before the effect began, or while it ran -
+ * the spinner's effect 75 was seen 200 ms after its Diamond_EarthSpin, a skill shot's 392 200 ms before its toss. */
+#define CK_FX_WINDOW_MS 1000
+static unsigned long ck_game_clip_ms;     /* pm_ms() the game put a clip of its own on the surface (0: its main-play) */
+static unsigned ck_fx_now;                /* the foreground effect now, as ck_fx_track last saw it */
+static unsigned long ck_fx_since;         /* pm_ms() it began */
+
+/* every tick, from clip_tick: when the foreground effect now began */
+static void ck_fx_track(void)
+{
+    unsigned fx = disp_foreground_effect();
+    if (fx != ck_fx_now) {
+        ck_fx_now = fx;
+        ck_fx_since = pm_ms();
+    }
+}
+
+/* the game's display effect whose clip the bank's surface holds now (its clip playing, or its end held), else 0 */
+static unsigned ck_game_display(void)
+{
+    ck_fx_track();
+    if (!ck_fx_now || ck_last_ours || !ck_game_clip_ms) return 0;
+    return ck_game_clip_ms + CK_FX_WINDOW_MS >= ck_fx_since ? ck_fx_now : 0;
+}
 
 static long long ck_ms(const char *which, void *surf)
 {
@@ -2575,6 +2609,7 @@ static void ck_seen(unsigned *r)
         is_idle = !idle[i];
     }
     ck_last_ours = 0;                     /* round 4: the game has the surface now */
+    ck_game_clip_ms = is_idle ? 0 : pm_ms() | 1;   /* PAD-639 round 3: a clip of its own, for ck_game_display */
     if (is_idle) {
         for (i = 0; name[i] && i + 1 < sizeof ck_idle; i++) ck_idle[i] = name[i];
         ck_idle[i] = 0;
@@ -2640,7 +2675,7 @@ static void ck_tick(void)
     surf = clip2_surface();
     if (!surf) return;
     if (!ck.back) {                       /* PAD-639: a display of the game's over the TV: its clip stays till it ends */
-        unsigned fx = disp_foreground_effect();
+        unsigned fx = ck_game_display();
         if (fx) {
             if (!ck.fx) say("clip: the game's display effect %u is over its clip \"%.60s\" - \"%s\" waits for its end",
                             fx, ck.game, ck.name);
@@ -2694,10 +2729,56 @@ static void ck_arm(void)
     }
 }
 
+/* PAD-639 round 3: a clip of ours asked for while a display of the game's shows its clip on the surface (or holds its
+ * end) waits for that display's end, then plays from its start - put on the surface at once it kept the display, and
+ * its picture, over our clip for good. It is dropped if its mode ends or another of ours begins first. */
+static struct {
+    char name[96];
+    const struct pm_mode *owner, *running;
+    unsigned begun, fx;
+} ck_wait;
+static int ck_wait_in;
+
+static void ck_wait_tick(void)
+{
+    const struct pm_mode *was;
+    if (!ck_wait.name[0]) return;
+    if (running != ck_wait.running || begun != ck_wait.begun) {
+        say("clip: \"%s\" is not played - %s before the game's display effect %u was over", ck_wait.name,
+            running == ck_wait.running ? "another mode of ours began" : "its mode ended", ck_wait.fx);
+        ck_wait.name[0] = 0;
+        return;
+    }
+    if (ck_game_display()) return;
+    say("clip: the game's display effect %u is over - \"%s\" plays now", ck_wait.fx, ck_wait.name);
+    was = current;
+    current = ck_wait.owner;
+    ck_wait_in = 1;
+    pm_clip(ck_wait.name);
+    ck_wait_in = 0;
+    current = was;
+    ck_wait.name[0] = 0;
+}
+
 int pm_clip(const char *name)
 {
     unsigned i;
     if (!(can & PM_CAN_CLIPS) || !name || !*name) return 0;
+    if (clip_v2 && ck_can && !ck_wait_in) {
+        unsigned fx = ck_game_display();
+        ck_wait.name[0] = 0;              /* (a newer clip asked for replaces one that waits) */
+        if (fx) {
+            for (i = 0; name[i] && i + 1 < sizeof ck_wait.name; i++) ck_wait.name[i] = name[i];
+            ck_wait.name[i] = 0;
+            ck_wait.owner = current;
+            ck_wait.running = running;
+            ck_wait.begun = begun;
+            ck_wait.fx = fx;
+            ck_drop(0);                   /* an older clip of ours does not come back over it */
+            say("clip: \"%s\" waits - the game's display effect %u shows its own clip on the surface", name, fx);
+            return 1;
+        }
+    }
     if (clip_layer) {
         void *video = clip_layer_video();
         unsigned str;
@@ -2765,6 +2846,7 @@ static void clip_other_began(void)
 void pm_clip_stop(void)
 {
     if (!(can & PM_CAN_CLIPS)) return;
+    ck_wait.name[0] = 0;                  /* PAD-639: one that waits is not played either */
     if (clip_layer) {
         clip_layer_out();
     } else if (clip_v2) {
@@ -2795,8 +2877,10 @@ static void clip_tick(void)
     display_tick();                           /* item 154 display: the hold, the covered state */
     gw_tick();                                /* PAD-662: the game's own words up or gone, said as they change */
     block_tick();                             /* PAD-347: a block ends with its mode */
+    if (ck_can) ck_fx_track();                /* PAD-639: when the game's display effect now began */
     bd2_tick();                               /* PAD-521: the loop on the bank's surface */
     ck_tick();                                /* PAD-530: a mode's clip back after the game's */
+    ck_wait_tick();                           /* PAD-639: a clip of ours asked for under a display of the game's */
     ck_idle_tick();                           /* PAD-530: the game's main-play video back after ours ended */
     if (!clip.on && clip_v2 && !clip2_hidden && pm_ms() - clip2_tried > 1000) {
         clip2_tried = pm_ms();                /* a grafted surface out of sight, once its scene is up */
@@ -3344,10 +3428,10 @@ static void bd2_tick(void)
     }
     surf = clip2_surface();
     if (!surf) return;
+    if (ck_game_display()) return;        /* PAD-639: a display of the game's shows its clip there, or holds its end */
     if (bd.pending) { bd2_play(surf); return; }
     if (pm_ms() - bd.since < 500) return;  /* just played: the surface may not say "playing" yet */
     if (((int (*)(void *))(unsigned long)fn("surface_state"))(surf) == (int)pm_port_value("surface_playing", 2)) return;
-    if (!ck_last_ours && disp_foreground_effect()) return;   /* PAD-639: a display of the game's holds its clip's end */
     bd2_play(surf);                       /* its end, the one-shot's or the game's clip over: the loop (again) */
 }
 
@@ -3674,17 +3758,24 @@ static unsigned disp_level_now(unsigned char *m) { return *(m + pm_port_value("d
 
 /* PAD-639: the effect of the game's that has the screen now when it is a FOREGROUND one - its table record (data
  * award_screen_arg: {records, count}, a record {process, u16 flags, u8 priority}) lacks the background flag 1 - else 0.
- * Needs only the manager (data display_effects), so a port without the other display lines has it too. */
+ * Needs only the manager (data display_effects), so a port without the other display lines has it too.
+ * Round 3: and its priority is at least `value display_over_tv_min` (128). Bond's six foreground effects below it (LE
+ * 12, 24, 28, 37, 51 and 55) draw nothing over the TV: 55 is the serve's, up until the ball is launched while the
+ * game's ball-start film intro plays - a mode starting at the serve waited for the launch. Every award, combo, lock and
+ * jackpot display is 128 or more (176-195 most of them; the spinner's 132, a skill shot's 193). */
 static unsigned disp_foreground_effect(void)
 {
     unsigned char *m = disp_manager();
     const unsigned *t;
+    const unsigned char *rec;
     unsigned now;
     if (!m) return 0;
     now = disp_now(m);
     t = (const unsigned *)(unsigned long)data("award_screen_arg");
     if (!now || !t[0] || now >= t[1]) return 0;
-    return *(const unsigned short *)(unsigned long)(t[0] + 8u * now + 4) & 1 ? 0 : now;
+    rec = (const unsigned char *)(unsigned long)(t[0] + 8u * now);
+    if (*(const unsigned short *)(rec + 4) & 1) return 0;
+    return rec[6] >= (unsigned)pm_port_value("display_over_tv_min", 128) ? now : 0;
 }
 
 static void disp_release(const char *why)

@@ -181,6 +181,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
       { op: "music", bed: ((prog.beds || [])[0] || {}).name || "" }]],
     ["HUD", [{ op: "hud_text", which: "line", text: "SHOOT THE LIT SHOT", value: null },
       { op: "hud_counter", counter: 1, value: num(0), sub: null }, { op: "hud_gauge", value: num(1) },
+      { op: "hud_progress", value: num(0) },
       { op: "hud_award", text: "JACKPOT", value: null, sub: "", seconds: 2 }]],
   ];
 }
@@ -204,7 +205,7 @@ const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: 
 export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
-  hud_gauge: "hud", hud_award: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
+  hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
@@ -437,6 +438,7 @@ function StmtBody({ b, path, ed }) {
       <${Check} checked=${b.label != null} label="and its label to" onChange=${(on) => set("label", on ? "" : null)} />
       ${b.label != null ? html`<${Text} value=${b.label} max=${16} width=${110} onChange=${(v) => set("label", v)} placeholder="label" />` : null}`;
     case "hud_gauge": return html`<span class="bk-w">Fill the HUD's gauge to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">pips</span>`;
+    case "hud_progress": return html`<span class="bk-w">Show on the progress panel</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />`;
     case "hud_award": return html`<span class="bk-w" ...${tip(TIP.hudAward)}>Award</span><${Text} value=${b.text} max=${40} width=${120} onChange=${(v) => set("text", v)} placeholder="words" />
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} />
       <span class="bk-w">over</span><${Text} value=${b.sub} max=${40} width=${120} onChange=${(v) => set("sub", v)} placeholder="a smaller line" />
@@ -634,6 +636,7 @@ export function stmtLabel(b) {
     words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound", music: "Play the music",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
+    hud_progress: "Progress panel number",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", building: "Move the building to",
     shake: "Shake the cabinet for", shake_game: "Shake it the game's way", game_wizard: "The game's mini-wizard",

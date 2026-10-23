@@ -40,7 +40,8 @@ the award line between his awards, so:
 """
 from blk import (AND, OR, BALLS, NOT, RUNNING, STOCK, a_show, add, award, change, clip, clips, div, end, eq, every,
                  ge, gt, hud, hud_line, hud_title, if_, le, light, light_insert, lt, mul, off, on_any_shot, on_end,
-                 on_shot, on_start, on_timer, score, set_, shake, shake_game, show, sound, sounds, start, step, sub,
+                 on_shot, on_start, on_timer, score, set_, shake, shake_game, shield, show, sound, sounds, start, step,
+                 sub,
                  timer_left, timer_start, timer_stop, var, beds, music)
 import pack
 
@@ -54,7 +55,11 @@ ROLLS, BITES = 3, 3
 AX, AY = 186, 439                     # the ANGUIRUS insert (the allies the scoop summons): his place on the playfield
 SX, SY = 199, 346                     # the SHIELD CENTER insert's place: the C's KIT_AT_SHIELDS
 BX, BY = 123, 202                     # the BUILDING
-TIMERS = ("enter", "roll", "charged", "next", "grip", "bite", "say")
+TIMERS = ("enter", "roll", "charged", "next", "grip", "bite", "say", "swing")
+#: PAD-684 (David: "the shield targets ... are not presented towards the player ... have the mech constantly move back
+#: and forth to make a moving target"): his shots are the shield targets, so the platform faces the player SWING_TOWARD
+#: ms, turns away SWING_AWAY ms, over and over while he runs (10 moves a minute: the runtime allows 12)
+SWING_TOWARD, SWING_AWAY = 8000, 4000
 #: the call: 8 shield hits the first time, 16 the second, 24 the third
 NEED = pack.need(8, "joins")          # PAD-675: was 3
 #: a note's time on the glass: the next stage waits it out (a stage's last note is up a second longer, so his title and
@@ -215,7 +220,12 @@ SCRIPTS = [
              set_("bites", 0), set_("won", 0), set_("cashed", 0),
              *[set_(v, 0) for v, _s in SPIKES],
              *shield_lights(), light_insert("ANGUIRUS", AMBER, "pulse", 700),
-             timer_start("enter", 2000), timer_start("say", 1)),
+             timer_start("enter", 2000), timer_start("say", 1),
+             shield("toward"), set_("swing", 1), timer_start("swing", SWING_TOWARD)),
+    # PAD-684: the shield swings - a moving target
+    on_timer("swing", if_(RUNNING, [if_(eq("swing", 1),
+                                       [shield("away"), set_("swing", 0), timer_start("swing", SWING_AWAY)],
+                                       [shield("toward"), set_("swing", 1), timer_start("swing", SWING_TOWARD)])])),
     # his entrance, once the game's own start screen has had its moment
     on_timer("enter", if_(RUNNING, [
         set_("entered", 1), clip("intro", "full"), show("He enters"), shake(600, "strong"),
@@ -309,7 +319,7 @@ PROGRAM = {
     "wait_multiball": True, "priority": 180,
     "vars": [{"name": n, "reset": "game"} for n in ("ready", "calls", "joins")] + [
         {"name": n, "reset": "mode"} for n in ("stage", "pot", "rolling", "roll value", "rolls", "entered", "bites",
-                                                "bite at", "hurry", "won", "cashed")] + [
+                                                "bite at", "hurry", "won", "cashed", "swing")] + [
         {"name": v, "reset": "mode"} for v, _s in SPIKES],
     "timers": [{"name": n} for n in TIMERS],
     "hud": hud(" ", counters=[], timer=("ANGUIRUS", "radiation"),
@@ -428,6 +438,9 @@ DESK = [
     ("a battle holds his start off: he counts through it",
      _SH * 6 + ["battle", 1, "secs", 1] + _SH + ["secs", 1, "battle", 0, "secs", 1] + _SH + ["secs", 3],
      [">> battle 1", "Hud_AwardSub: 1  -  MORE TO CALL ANGUIRUS", ">> battle 0", "[ANGUIRUS] START"]),
+    # PAD-684: his shots are the shield targets - the platform faces the player as he joins, then swings
+    ("the shield faces the player and swings", _CALL3 + ["secs", 26],
+     ["[ANGUIRUS] START", "SHIELD toward the player", "SHIELD away", "SHIELD toward the player", "SHIELD away"]),
     ("a drain", _CALL3 + _JOIN + ["shot", "Shield target left", "secs", 1, "ball_end", "secs", 7,
                                              "shot", "Slingshot", "secs", 1],
      ["END (ball ended)", "own clip lost", "SCORE +250000", "lamps held 0"]),

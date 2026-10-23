@@ -275,7 +275,7 @@ def test_the_runtime_points_the_request_at_the_bank_s_id_at_the_play_worker():
     assert "(worker_hooked = hook(fn(\"sound_worker\"), on_sound_worker))" in c
     # armed before the music modes' resolver wrap, which a bank-only card does not need
     arm = c[c.index("static void sndm_arm(void)"):]
-    assert arm.index("blist_arm();") < arm.index("if (n_sndt || n_bsid || att.n) return;")   # PAD-641
+    assert arm.index("blist_arm();") < arm.index("if (n_sndt || n_bsid || att.n || n_jmode) return;")   # PAD-641
     # a pointer someone else put there (a mode's carrier, pm_sound_sid) is left alone
     play = c[c.index("static void blist_play(unsigned request)"):]
     assert "cur != e->orig && cur != (unsigned)(unsigned long)e->list[0]" in play

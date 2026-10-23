@@ -996,9 +996,15 @@ class SternManufacturer(Manufacturer):
         # PAD-565: and which can play files in turn (no menu setting, so more titles)
         twhy, tslots = offer_turns(assets_dir, rels, probe=True)
         # PAD-641: and whether the flipper buttons can play sounds in attract
-        return {"why": why, "slots": slots, "max": MAX_MODES,
-                "turns_why": twhy, "turn_slots": tslots,
-                "attract_why": offer_attract(assets_dir, probe=True)}
+        out = {"why": why, "slots": slots, "max": MAX_MODES,
+               "turns_why": twhy, "turn_slots": tslots,
+               "attract_why": offer_attract(assets_dir, probe=True)}
+        # PAD-685: a jukebox for the song modes, on a title that has them (no key elsewhere)
+        from .jukebox import offer as jukebox_offer
+        jw = jukebox_offer(assets_dir, probe=True)
+        if jw is not None:
+            out["jukebox_why"] = jw
+        return out
 
     def sound_request_uses(self, assets_dir, rels):
         # PAD-635: Extract's sound_requests.tsv, for the decoded idx sounds;

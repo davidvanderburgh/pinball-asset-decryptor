@@ -126,7 +126,7 @@ def test_the_runtime_reads_the_lines_and_hooks_the_drain_and_the_lookup_once():
     assert "if (att.plays && (long)(att.until - now) > 0) return;" in c
     assert 'pm_port_value("mode_mask_attract", 0x10)' in c
     # it works on a card with no modes (`only`): armed with the sounds.cfg it rides
-    assert "att_arm();" in c and "if (n_sndt || n_bsid || att.n) return;" in c
+    assert "att_arm();" in c and "if (n_sndt || n_bsid || att.n || n_jmode) return;" in c
 
 
 # ---- the build ------------------------------------------------------------------------------------

@@ -7829,6 +7829,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # records of their own in the bank and MUSIC MODE in the operator menu
     sound_modes, sound_modes_prof = _sound_modes_for_build(
         assets_dir, dest_is_device, log, **_mode_gate_kw)
+    # PAD-685: the jukebox's intro videos go into the video bank by the random clips' road
+    from . import clip_variants as _CVj
+    _juke_clips = bool(sound_modes is not None and sound_modes.juke_rel
+                       and _CVj.jukebox_clips(assets_dir, sound_modes_prof))
+    _clips_on = bool(variant_slots) or _juke_clips
     # PAD-495: EDITION in the operator menu, the setting a multi-boot card of
     # this game's editions boots by
     editions = _editions_for_build(assets_dir, log)
@@ -8264,7 +8269,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites,
                             [u for u in sound_mode_used
                              if not _SMo_is_attract(u["mode"])
-                             and not _SMo_is_mode_turn(u["mode"])],
+                             and not _SMo_is_mode_turn(u["mode"])
+                             and not _SMo_is_juke(u["mode"])],
                             list(mode_own_used or ()) + ([mode_sound_used]
                                                         if mode_sound_used else []),
                             _old_bank_map, log)
@@ -9135,14 +9141,16 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # PAD-446: a build of random clips and no mode says so in its own words
         _who = ("Modes" if _modes_on else "Random clips" if variant_slots
                 else "Music modes" if sound_modes_cfg and (sound_modes.count or sound_modes.turns)
+                else "Jukebox" if sound_modes_cfg and sound_modes.jukebox and not sound_modes.attract
                 else "Attract flipper sounds" if sound_modes_cfg  # PAD-641: theirs alone
                 else "Picture settings")
-        if _modes_on or variant_slots or sound_modes_cfg or picture_cfg:
+        if _modes_on or _clips_on or sound_modes_cfg or picture_cfg:
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
                          else "Adding the random clips to the video bank..."
-                         if variant_slots else "Adding the music modes..."
+                         if variant_slots else "Adding the jukebox to the video bank..."
+                         if _clips_on else "Adding the music modes..."
                          if sound_modes_cfg else "Adding the picture settings...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
@@ -9158,7 +9166,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
                     if not _rel or (not _modes_on and (
-                            not variant_slots or _rel != _MW.scene_rels(_mprof)[1])):
+                            not _clips_on or _rel != _MW.scene_rels(_mprof)[1])):
                         continue        # a part this title cannot do (item 148)
                     _mnodes[_rel] = _MW.lookup(reader, _rel)
                     if _mnodes[_rel] is None:
@@ -9171,7 +9179,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 _hud_rel, _bank_rel = _MW.scene_rels(_mprof)
                 if not _modes_on:
                     _hud_rel = ""        # PAD-446: random clips change the bank only
-                    if not variant_slots:
+                    if not _clips_on:
                         _bank_rel = ""   # PAD-494: music modes change neither
                 # item 164: the system scene whose full font a HUD with too few glyphs
                 # takes for its screens' words (absent: the words keep the HUD's font)
@@ -9195,8 +9203,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                 if _font_node is not None else b""),
                     hud_font=(bytes(reader.read_file_bytes(_hudfont_node))
                               if _hudfont_node is not None else b""),
-                    modes_on=_modes_on, variants=bool(variant_slots),
-                    variants_prof=variant_prof, cancel=cancel,
+                    modes_on=_modes_on, variants=_clips_on,
+                    variants_prof=variant_prof or sound_modes_prof, cancel=cancel,
                     sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof,
                     picture=picture_cfg, picture_prof=picture_prof)
                 if mode_plan is None:
@@ -10300,9 +10308,13 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     and the title of the card they are for; ``(None, None)`` when it has none or they are left
     out (one warning says why). The modes' gate without the mode maker's preview switch, as the
     random clips': an image file, a host that can add files to it, a title they were proven on."""
+    from . import jukebox as _JB
     from . import mode_write as _MW
     from . import sound_modes as _SMo
     modes = _SMo.load(assets_dir)
+    box = _JB.load(assets_dir)                 # PAD-685: the jukebox rides the same road
+    if box.any:
+        modes.jukebox = [s.audio for s in box.songs]
     if not modes.any:
         return None, None
     n = len(modes.files())
@@ -10323,6 +10335,22 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     prof = None
     if not why:
         prof = _SMo.project_title(assets_dir, probe=True)
+        if modes.jukebox:
+            j_why = (_JB.title_refusal(prof) if _JB.enabled()
+                     else "%s=0 leaves it out" % _JB.GATE_ENV)
+            j_rel = "" if j_why else _JB.host_slot(assets_dir, prof)
+            if not j_why and not j_rel:
+                j_why = ("the project has none of the song modes' sounds (extract the card "
+                         "again to bring them back)")
+            if j_why:
+                log("Jukebox: %d song(s) are left out of this build: %s."
+                    % (len(modes.jukebox), j_why.rstrip(".")), "warning")
+                modes.jukebox = []
+                if not modes.any:
+                    return None, None
+            else:
+                modes.juke_rel = j_rel
+                modes.juke_plan = {"box": box, "prof": prof}
         if modes.attract:
             # PAD-641: the flipper buttons' sounds in attract need the switch drain and a carrier,
             # not the resolver or the menu: they go on (or are left out) on their own
@@ -10331,7 +10359,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                 log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are "
                     "left out of this build: %s" % (len(modes.attract), a_why), "warning")
                 modes.attract = []
-                if not modes.count and not modes.turns:
+                if not modes.count and not modes.turns and not modes.jukebox:
                     return None, None
         why = _SMo.title_refusal(prof) if modes.count else ""
         if why and modes.attract and not modes.turns:
@@ -10352,7 +10380,10 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                 modes.slots, modes.names, modes.turns, why = {}, [], {}, ""
                 modes.mode_turns = {}
     if why:
-        if modes.attract and not modes.count and not modes.turns:
+        if modes.jukebox and not modes.count and not modes.turns and not modes.attract:
+            log("Jukebox: %d song(s) are left out of this build: %s."
+                % (len(modes.jukebox), why.rstrip(".")), "warning")
+        elif modes.attract and not modes.count and not modes.turns:
             log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are "
                 "left out of this build: %s." % (len(modes.attract), why.rstrip(".")), "warning")
         elif modes.count:
@@ -10381,6 +10412,10 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                 "info")
     if modes.attract:
         log("Found %d sound(s) for the flipper buttons in attract mode." % len(modes.attract), "info")
+    if modes.jukebox:
+        log("Found a jukebox of %d song(s) (%d with an intro video of its own) for the %d song "
+            "modes." % (len(modes.jukebox), sum(1 for s in box.songs if s.video),
+                        len(_JB.song_modes(prof))), "info")
     return modes, prof
 
 
@@ -10803,8 +10838,9 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
         # the other slots with a file of their own in this mode play their own part of a song
         own = {i for i in (_SMo.slot_idx(r) for r, f in modes.slots.items() if mode in f)
                if i is not None and i != slot} if not _SMo.is_turn(mode) else set()
-        song = _sound_mode_song(slot, plays, byidx, own)
-        bodies = _sound_mode_bodies(slot, song, plays, byidx)
+        # PAD-685: a jukebox song is a record of its own the runtime hands every part of a song mode
+        song = {} if _SMo.is_juke(mode) else _sound_mode_song(slot, plays, byidx, own)
+        bodies = {} if _SMo.is_juke(mode) else _sound_mode_bodies(slot, song, plays, byidx)
         room = emitted_length(int(p.get("length", 0) or 0))
         rest = sorted({i for parts in song.values() for i in parts})
         if song:
@@ -10851,9 +10887,10 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                 "too %s." % (
                     who, ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
                     when), "info")
-        if (not longer_ok or _SMo.is_turn(mode)) and want > room:
+        if (not longer_ok or _SMo.is_turn(mode)) and want > room and not _SMo.is_juke(mode):
             # as a replacement is with "Allow replacements longer than the original" off; a file
-            # in turn always (PAD-565: the game plays it for as long as its slot's descriptor says)
+            # in turn always (PAD-565: the game plays it for as long as its slot's descriptor says).
+            # Never a jukebox song (PAD-685): the game plays a record it is handed whole
             try:
                 wav = _SMo.cut(wav, room)
             except (OSError, EOFError) as e:
@@ -11216,11 +11253,13 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     from . import sound_modes as _SMo
     from .adjustments import AdjustmentTable
     who = ("Music modes" if modes.count else "Sounds in turn" if modes.turns
-           else "Attract flipper sounds")
+           else "Attract flipper sounds" if modes.attract else "Jukebox")
     live = 0
     banked = [u for u in used if u.get("bank") is not None]
     used = [u for u in used if u.get("bank") is None]
-    bsids, tsids = _bank_sid_lines(params, banked, list_ids or {}, log)
+    # PAD-685: a jukebox song in a sound bank has no key to swap in (:func:`_jukebox_lines`)
+    bsids, tsids = _bank_sid_lines(params, [u for u in banked if not _SMo.is_juke(u["mode"])],
+                                   list_ids or {}, log)
     attract = _attract_lines(params, [u for u in used if _SMo.is_attract(u["mode"])],
                              modes, log)
     # PAD-638: a music mode's own files in turn are turned at that mode file's record (one in
@@ -11231,8 +11270,11 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
         if _SMo.is_mode_turn(u["mode"]) or not _SMo.is_turn(u["mode"]):
             mode_hosts.pop((u["rel"], int(u["mode"])), None)
     turns = _turn_key_lines(params, [u for u in used if _SMo.is_turn(u["mode"])
-                                     and not _SMo.is_attract(u["mode"])], log,
+                                     and not _SMo.is_attract(u["mode"])
+                                     and not _SMo.is_juke(u["mode"])], log,
                             mode_hosts=mode_hosts)
+    jukebox = _jukebox_lines(params, [u for u in used + banked if _SMo.is_juke(u["mode"])],
+                             modes, log)
     used_modes = [u for u in used if not _SMo.is_turn(u["mode"])]
     try:
         sounds = (_sound_mode_descriptors(gr_path, staged, params, sites, used_modes, log)
@@ -11248,10 +11290,10 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     if modes.count and not sounds and not bsids:
         log("Music modes: none of the files for the other modes can be played on this card, so "
             "MUSIC MODE is not added.", "warning")
-        if not turns and not tsids:
+        if not turns and not tsids and not jukebox:
             return ""
         modes.slots, modes.names = {}, []
-    if not sounds and not turns and not bsids and not tsids and not attract:
+    if not sounds and not turns and not bsids and not tsids and not attract and not jukebox:
         log("%s: none of the files can be played on this card; every sound plays its "
             "own." % ("Sounds in turn" if modes.turns or not modes.attract
                       else "Attract flipper sounds"), "warning")
@@ -11273,8 +11315,56 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
         f.write(_SMo.cfg_text(live, modes.count if sounds or bsids else 0, sounds, only,
                               turns=turns, bsids=bsids, tsids=tsids, randoms=randoms, attract=attract,
-                              record=_SMo.card_record(modes, used + banked)))
+                              jukebox=jukebox, record=_SMo.card_record(modes, used + banked)))
     return path
+
+
+def _jukebox_lines(params, used, modes, log):
+    """PAD-685: the jukebox's ``sounds.cfg`` lines (:func:`.sound_modes.cfg_text` *jukebox*), or
+    ``None``: each song mode of the title (:data:`.jukebox.TITLES`) with its start, its intro clips'
+    names and its records' keys off the bank's params, and each song that landed (*used*, its entry:
+    a record of its own in image.bin) with its weight, its record's key and its intro clip's name
+    (``PadJukebox<k>``, added to the video bank by the random clips' road) when it has a video. A
+    song in a sound bank is left out: a bank's record is played by a bank sound id, never a key.
+    An entry that landed gets ``lines`` 1 (the card's record names it)."""
+    from . import jukebox as _JB
+    from . import sound_modes as _SMo
+    plan = modes.juke_plan or {}
+    box, prof = plan.get("box"), plan.get("prof")
+    if not used or box is None:
+        return None
+    byidx = {p["idx"]: p for p in params}
+    smodes = []
+    for m in _JB.song_modes(prof):
+        keys = [bytes(byidx[i]["findkey"]) for i in m.records if (byidx.get(i) or {}).get("findkey")]
+        if not keys:
+            log("Jukebox: the song mode %s keeps its own song: its sounds are not in this card's "
+                "sound bank." % m.name, "warning")
+            continue
+        smodes.append((m.site, list(m.clips), keys))
+    songs = []
+    for u in sorted(used, key=lambda u: _SMo.turn_of(u["mode"])):
+        k = _SMo.turn_of(u["mode"])
+        song = box.songs[k - 1] if 0 < k <= len(box.songs) else None
+        hp = byidx.get(int(u["host"]))
+        if song is None:
+            continue
+        if u.get("bank") is not None or not hp or not hp.get("grown") or not hp.get("findkey"):
+            log("Jukebox: song %d (%s) is left out: its record is not in the main sound bank."
+                % (k, os.path.basename(song.audio)), "warning")
+            continue
+        clip = _JB.clip_name(k) if song.video and os.path.isfile(song.video) else ""
+        songs.append((int(song.weight), bytes(hp["findkey"]), clip))
+        u["lines"] = 1
+    if not smodes or not songs:
+        log("Jukebox: not put on this card: %s." % (
+            "none of its songs landed" if smodes else "none of the song modes' sounds is in this "
+            "card's sound bank"), "warning")
+        return None
+    log("Jukebox: %d song(s) for %d song mode(s); each song mode's start draws one of them (a "
+        "Common song three times as often as a Rare one, never one of the last five) and plays its "
+        "intro video and its song." % (len(songs), len(smodes)), "info")
+    return {"modes": smodes, "songs": songs}
 
 
 def _bank_sid_lines(params, used, list_ids, log):
@@ -19254,6 +19344,12 @@ def _SMo_is_mode_turn(mode):
 def _SMo_is_attract(mode):
     from . import sound_modes as _SMo
     return _SMo.is_attract(mode)
+
+
+def _SMo_is_juke(mode):
+    """PAD-685: a jukebox song stays in image.bin: the runtime swaps its record's key in."""
+    from . import sound_modes as _SMo
+    return _SMo.is_juke(mode)
 
 
 def _sound_modes_for_banks(gr_path, img_path, params, sites, sm_used, used, old_map, log):

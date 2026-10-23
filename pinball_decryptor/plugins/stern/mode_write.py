@@ -952,9 +952,11 @@ def variants_plan(project, stock_bank, game_elf, scratch, prof, log=None, progre
     runtime and the title's port on p2 with a ``clips.cfg`` that says ``only``. ``None`` when
     the project has none that can go on *prof*'s card."""
     from . import clip_variants as CV
+    from . import jukebox as JB
     if prof is None:
         raise ModeWriteError(CV.NO_TITLE)
-    why = CV.title_refusal(prof)
+    # PAD-685: a project whose only clips are its jukebox's intro videos needs a jukebox title
+    why = CV.title_refusal(prof) if CV.load(project) else JB.title_refusal(prof)
     if why:
         raise ModeWriteError(why)
     try:

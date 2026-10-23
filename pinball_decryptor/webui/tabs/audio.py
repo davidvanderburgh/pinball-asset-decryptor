@@ -125,6 +125,13 @@ _AUDIO_FILETYPES = [("Audio files",
                     ("All files", "*.*")]
 _FOLDER_MATCH_EXTS = (".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac",
                       ".opus", ".wma", ".aiff", ".aif")
+#: PAD-685: a jukebox song's intro video
+_VIDEO_FILETYPES = [("Video files", "*.mp4 *.mov *.m4v *.mkv *.avi *.webm *.wmv *.mpg *.mpeg"),
+                    ("All files", "*.*")]
+_JUKE_TIP = ("A jukebox for the song modes: each time a song mode starts, the game plays one of these "
+             "songs, drawn at random, with its own intro video. A Common song comes up three times as "
+             "often as a Rare one, and a song never comes back within five song modes, so none plays "
+             "twice in a game. No setting, no choosing: every start throws the dice.")
 
 #: Click-header sort: (column id, heading, default descending).
 _SORT_CFG = (("#0", "Original Track", False), ("len", "Length", True),
@@ -267,6 +274,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         # PAD-641: the sounds the flipper buttons play in attract ([path, ...]), the same record
         self._attract = []
         self._attract_gap = 0            # PAD-641 round 2: seconds between two of them (0: any time)
+        # PAD-685: the jukebox's songs ([{"audio", "video", "weight"}]), its own sidecar key
+        self._juke = []
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -1429,7 +1438,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._sel = sel
         self.set(rows=rows, empty=hint, sel=list(self._sel),
                  sort={"key": col, "desc": desc},
-                 dup_scanning=self._dup_scanning, attract=self._attract_state())
+                 dup_scanning=self._dup_scanning, attract=self._attract_state(),
+                 jukebox=self._jukebox_state())
         self._publish_status()
         self._update_clear_all()
         self._level_sync()
@@ -2757,6 +2767,10 @@ class AudioTab(FindOriginalsMixin, TabService):
                          if isinstance(attract, (list, tuple)) else [])
         from ...plugins.stern.sound_modes import clean_gap
         self._attract_gap = clean_gap(raw.get("attract_gap")) if self._attract else 0
+        # PAD-685: the jukebox
+        from ...plugins.stern import jukebox as _JB
+        box = _JB.clean(staged.get(_JB.STAGED_KEY) if isinstance(staged, dict) else None)
+        self._juke = [{"audio": g.audio, "video": g.video, "weight": g.weight} for g in box.songs]
 
     def _modes_json(self):
         names = list(self._mode_names)
@@ -3431,6 +3445,138 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._save_staged_changes()
         self.set(modes_share=(self._sm_offer is not None or bool(self._modes)
                               or bool(self._turns) or bool(self._attract)))
+        self._refresh_list()
+
+    # ------------------------------------------------------------------
+    # PAD-685: the jukebox - the song modes play songs drawn at random
+    # ------------------------------------------------------------------
+    def _jukebox_why(self):
+        return (self._sm_offer or {}).get("jukebox_why")
+
+    def _jukebox_state(self):
+        """The page's Jukebox button: ``{"n", "why", "tip"}``, or None on a game with no song modes
+        and a project with no songs."""
+        why = self._jukebox_why()
+        if why is None and not self._juke:
+            return None
+        why = str(why or "")
+        tip = [_JUKE_TIP]
+        if self._juke:
+            tip.append("%d song(s), %d with an intro video." % (
+                len(self._juke), sum(1 for g in self._juke if g.get("video"))))
+        if why:
+            tip.append(why)
+        return {"n": len(self._juke), "why": why, "tip": tip}
+
+    def _jukebox_rows(self):
+        from ...plugins.stern import jukebox as _JB
+        words = dict(_JB.WEIGHTS)
+        return {"songs": [{"k": k, "audio": os.path.basename(g["audio"]),
+                           "video": os.path.basename(g["video"]) if g.get("video") else "",
+                           "gone": not os.path.isfile(g["audio"]) or bool(
+                               g.get("video") and not os.path.isfile(g["video"])),
+                           "weight": int(g.get("weight") or _JB.DEFAULT_WEIGHT),
+                           "weight_word": words.get(int(g.get("weight") or _JB.DEFAULT_WEIGHT), "")}
+                          for k, g in enumerate(self._juke, 1)],
+                "weights": [{"w": w, "label": n} for w, n in _JB.WEIGHTS],
+                "max": _JB.MAX_SONGS, "why": str(self._jukebox_why() or ""),
+                "tip": _JUKE_TIP, "running": self._running()}
+
+    @rpc
+    def jukebox_open(self):
+        """The Jukebox window's rows."""
+        return self._jukebox_rows()
+
+    @rpc
+    def jukebox_action(self, action):
+        """The Jukebox window: ``add`` (choose songs' audio files), ``video:k`` (song k's intro
+        video), ``novideo:k``, ``weight:k:w`` (1 Rare .. 3 Common), ``play:k`` (song k in the
+        Replacement pane), ``up:k`` / ``down:k`` and ``off:k``. Returns the window's rows."""
+        from ...plugins.stern import jukebox as _JB
+        kind, _c, rest = str(action or "").partition(":")
+        k_s, _c, val = rest.partition(":")
+        try:
+            k = int(k_s) if k_s else 0
+        except ValueError:
+            return self._jukebox_rows()
+        if kind == "why":
+            why = str(self._jukebox_why() or "")
+            if why:
+                compat.messagebox.showinfo("Jukebox", why)
+            return self._jukebox_rows()
+        if kind == "add":
+            if self._jukebox_why() or len(self._juke) >= _JB.MAX_SONGS or not self._scan_dir:
+                return self._jukebox_rows()
+            self._cancel_select_job()
+            self.stop_all_preview_playback()
+            start = self.window.last_browse_dir("audio_replacement")
+            paths = compat.filedialog.askopenfilenames(
+                title="Choose the jukebox's songs", initialdir=start if start and os.path.isdir(start) else "",
+                filetypes=_AUDIO_FILETYPES)
+            if isinstance(paths, str):
+                paths = [paths] if paths else []
+            paths = [os.path.normpath(p) for p in (paths or ()) if p][:_JB.MAX_SONGS - len(self._juke)]
+            if not paths:
+                return self._jukebox_rows()
+            self.window.remember_browse_dir("audio_replacement", os.path.dirname(paths[0]))
+            for path in paths:
+                self._juke.append({"audio": path, "video": "", "weight": _JB.DEFAULT_WEIGHT})
+            self.log("Replace Audio: the jukebox has %d more song(s) (%d in all)."
+                     % (len(paths), len(self._juke)), "info")
+            self._juke_changed()
+            return self._jukebox_rows()
+        if not 1 <= k <= len(self._juke):
+            return self._jukebox_rows()
+        g = self._juke[k - 1]
+        name = os.path.basename(g["audio"])
+        if kind == "video":
+            start = self.window.last_browse_dir("video_replacement")
+            path = compat.filedialog.askopenfilename(
+                title="Choose the intro video of %s" % name,
+                initialdir=start if start and os.path.isdir(start) else "", filetypes=_VIDEO_FILETYPES)
+            if isinstance(path, (list, tuple)):
+                path = path[0] if path else ""
+            if not path:
+                return self._jukebox_rows()
+            self.window.remember_browse_dir("video_replacement", os.path.dirname(path))
+            g["video"] = os.path.normpath(path)
+            self.log("Replace Audio: jukebox song %d (%s) opens with %s." % (k, name, os.path.basename(path)),
+                     "info")
+        elif kind == "novideo":
+            g["video"] = ""
+            self.log("Replace Audio: jukebox song %d (%s) opens with its song mode's own intro." % (k, name),
+                     "info")
+        elif kind == "weight":
+            w = _JB.clean_weight(val)
+            if w == g.get("weight"):
+                return self._jukebox_rows()
+            g["weight"] = w
+            self.log("Replace Audio: jukebox song %d (%s) is %s." % (k, name, dict(_JB.WEIGHTS)[w]), "info")
+        elif kind == "play":
+            self._pane_load("rep", g["audio"], autoplay=True, label="Jukebox song %d: %s" % (k, name))
+            return self._jukebox_rows()
+        elif kind in ("up", "down"):
+            j = k - 2 if kind == "up" else k
+            if not 0 <= j < len(self._juke):
+                return self._jukebox_rows()
+            self._juke[k - 1], self._juke[j] = self._juke[j], self._juke[k - 1]
+        elif kind == "off":
+            del self._juke[k - 1]
+            self.log("Replace Audio: %s is no longer in the jukebox." % name, "info")
+        else:
+            return self._jukebox_rows()
+        self._juke_changed()
+        return self._jukebox_rows()
+
+    def _juke_changed(self):
+        from ...plugins.stern import jukebox as _JB
+        assets_dir = self._assets()
+        if assets_dir and os.path.isdir(assets_dir) and self._scan_dir and \
+                self._norm(self._scan_dir) == self._norm(assets_dir):
+            _JB.save(assets_dir, _JB.clean({"songs": self._juke}))
+            cb = self.window.cb.get("on_folder_state_written")
+            if cb is not None:
+                cb(assets_dir)
         self._refresh_list()
 
     def _add_mode(self):

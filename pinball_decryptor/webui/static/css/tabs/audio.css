@@ -99,3 +99,8 @@ html.bp-1020 .aud-vsep { display: none; }
 html.bp-1020 .aud-card { min-height: 520px; }
 /* was @media (max-width: 760px) */
 html.bp-760 .aud-kv { grid-template-columns: minmax(0, 1fr); }
+/* PAD-685: the Jukebox window's song list */
+.aud-juke { max-height: 52vh; overflow: auto; }
+.aud-juke table { width: 100%; }
+.aud-juke td { vertical-align: middle; }
+.aud-juke tr.gone td { color: var(--warn, #c77); }

@@ -291,11 +291,12 @@ def _safe(rel):
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in rel.replace("/", "__"))
 
 
-def stage(project, rel, files, log=None, cancel=None):
+def stage(project, rel, files, log=None, cancel=None, tag="", first=2, what="random clip"):
     """Each of ``files`` made into slot ``rel``'s format, as the slot's own replacement would be
     (its length and conversion choices, the tab's options, the project's colour profile).
     Returns the converted files in order. Raises :class:`VariantError` naming the clip that
-    could not be made."""
+    could not be made. PAD-685: *tag* keeps another feature's clips made like the same slot apart
+    in the cache (the jukebox's ``"juke"``), numbered from *first* and called *what* in the log."""
     from ...core import staged_changes, staged_originals
     from ...core import video_slots as VS
     from ...core.video import detect_video_info
@@ -332,14 +333,14 @@ def stage(project, rel, files, log=None, cancel=None):
     cache = _Cache(project)
     made = []
     try:
-        for k, src in enumerate(files, 2):
+        for k, src in enumerate(files, first):
             if cancel is not None and cancel():
                 raise VariantError("cancelled")
             if not os.path.isfile(src):
-                raise VariantError("%s: random clip %d (%s) is not there any more"
-                                   % (rel, k, src))
-            out = os.path.join(out_dir, "%s__%d%s" % (_safe(rel), k, ext))
-            target = VS.VideoSlot(rel_path="%s#%d" % (rel, k), abs_path=out, ext=ext, info=info,
+                raise VariantError("%s: %s %d (%s) is not there any more"
+                                   % (rel, what, k, src))
+            out = os.path.join(out_dir, "%s__%s%d%s" % (_safe(rel), tag, k, ext))
+            target = VS.VideoSlot(rel_path="%s#%s%d" % (rel, tag, k), abs_path=out, ext=ext, info=info,
                                   size=os.path.getsize(pristine), probed=True)
             if seconds:
                 target = VS._with_length(target, seconds)
@@ -348,7 +349,7 @@ def stage(project, rel, files, log=None, cancel=None):
                                            colour=colour.key() if colour is not None else "")
             key = target.rel_path
             if cache.fresh(key, recipe, out):
-                log("  ✓ %s, random clip %d (already converted from this file - kept)" % (rel, k),
+                log("  ✓ %s, %s %d (already converted from this file - kept)" % (rel, what, k),
                     "success")
                 made.append(out)
                 continue
@@ -358,11 +359,11 @@ def stage(project, rel, files, log=None, cancel=None):
                 **({"colour": colour} if colour is not None else {}))
             if not ok:
                 cache.entries.pop(key, None)
-                raise VariantError("%s: random clip %d (%s) could not be made into this slot's "
-                                   "format: %s" % (rel, k, os.path.basename(src), detail))
+                raise VariantError("%s: %s %d (%s) could not be made into this slot's "
+                                   "format: %s" % (rel, what, k, os.path.basename(src), detail))
             cache.record(key, recipe, out)
-            log("  ✓ %s, random clip %d  ←  %s%s" % (rel, k, os.path.basename(src),
-                                                    ("  (%s)" % detail) if detail else ""),
+            log("  ✓ %s, %s %d  ←  %s%s" % (rel, what, k, os.path.basename(src),
+                                              ("  (%s)" % detail) if detail else ""),
                 "success")
             made.append(out)
     finally:
@@ -380,9 +381,10 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
     from . import video_bank as VB
     log = log or (lambda *a, **k: None)
     variants = load(project) if variants is None else clean(variants)
-    if not variants:
+    juke = jukebox_clips(project, prof)           # PAD-685: the jukebox's songs' intro videos
+    if not variants and not juke:
         return None
-    why = title_refusal(prof)
+    why = title_refusal(prof) if variants else ""
     if why:
         raise VariantError(why)
     cards = manifest(project)
@@ -412,12 +414,12 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
         slots.append(Slot(rel=rel, card=card, stock=names[card], files=files))
     for rel, why in left:
         log("Random clips: %s is left out: %s" % (rel, why), "warning")
-    if not slots:
+    if not slots and not juke:
         return None
     if len(slots) > MAX_SLOTS:
         raise VariantError("%d clips play at random; a card can carry %d" % (len(slots), MAX_SLOTS))
     stage_fn = stage_fn or stage
-    total = sum(len(s.files) for s in slots)
+    total = sum(len(s.files) for s in slots) + (len(juke[1]) if juke else 0)
     done = 0
     new = []
     taken = {c.name for c in parsed.library.entries}
@@ -444,16 +446,66 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
             s.paths.append(card)
             new.append((card, dst))
             done += 1
+    lines = ["%s plays one of %d clips at random (%s)"
+             % (s.rel, 1 + len(s.names), ", ".join(os.path.basename(f) for f in s.files))
+             for s in slots]
+    if juke:
+        # PAD-685: each song's intro video, made like the title's first song mode's intro and added
+        # under the name sounds.cfg's jsong line gives it; no clips.cfg line (the jukebox picks)
+        rel, songs = juke
+        if progress is not None:
+            progress(done, total, "Converting the jukebox's intro videos...")
+        made = list(stage_fn(project, rel, [f for _k, f in songs], log=log, cancel=cancel,
+                             tag="juke", first=1, what="jukebox song"))
+        for (k, src_file), src in zip(songs, made):
+            name = _jb_clip_name(k)
+            if name in taken:
+                raise VariantError("the card being written already has a jukebox from an earlier "
+                                   "build (its video bank has %s); write onto the card that build "
+                                   "was made from" % name)
+            try:
+                bank, info = VB.add_clip(bank, name, os.path.getsize(src))
+            except VB.VideoBankError as e:
+                raise VariantError("%s could not be added to the video bank (%s)" % (name, e)) from None
+            taken.add(name)
+            card = bank_assets(prof) + info["path"]
+            dst = os.path.join(out_dir, *card.split("/"))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+            new.append((card, dst))
+            done += 1
+        lines.append("the jukebox's %d intro video(s) are in the video bank (%s)"
+                     % (len(songs), ", ".join(_jb_clip_name(k) for k, _f in songs)))
     if progress is not None:
         progress(total, total, "")
     os.makedirs(out_dir, exist_ok=True)
     cfg = os.path.join(out_dir, CFG_NAME)
     with open(cfg, "w", encoding="utf-8", newline="\n") as f:
         f.write(cfg_text(slots, only))
-    lines = ["%s plays one of %d clips at random (%s)"
-             % (s.rel, 1 + len(s.names), ", ".join(os.path.basename(f) for f in s.files))
-             for s in slots]
     return VariantBuild(bank=bank, slots=slots, new=new, cfg=cfg, lines=lines)
+
+
+def _jb_clip_name(k):
+    from . import jukebox as JB
+    return JB.clip_name(k)
+
+
+def jukebox_clips(project, prof):
+    """PAD-685: ``(slot rel, [(song number, video file), ...])`` - the jukebox's songs with an intro
+    video on this PC, to be made like the title's first song mode's intro (:mod:`.jukebox`); ``None``
+    when there are none, the title has no song modes or the project lacks that intro."""
+    from . import jukebox as JB
+    if not JB.enabled() or JB.title_refusal(prof):
+        return None
+    songs = [(k, s.video) for k, s in enumerate(JB.load(project).songs, 1)
+             if s.video and os.path.isfile(s.video)]
+    modes = JB.song_modes(prof)
+    if not songs or not modes:
+        return None
+    rel = modes[0].intros[0]
+    if not os.path.isfile(os.path.join(project, *rel.split("/"))):
+        return None
+    return rel, songs
 
 
 #: what an added clip's file holds beyond its frames, at most (the container, a free box)

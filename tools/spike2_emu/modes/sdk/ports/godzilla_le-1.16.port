@@ -882,6 +882,21 @@ site  challenge_balls     0x00338820 0xe92d4030 0xe1a05000
 site  challenge_extra_ball 0x002b2cd8 0xe30a35c8 0xe340307c
 # the game's own challenges end the ball when they are over: so does a mode that took the pick
 site  challenge_end_ball  0x0038af58 0xe301216a 0xe340207d
+# PAD-686: the start menu (process 0x5f930) lists game-mode table indices on its stack - 1 STANDARD, (2), 3 COMPETITION,
+# 4 KING OF THE MONSTERS CHALLENGE, (5 TIME ATTACK, 8) - at sp+300, the count at sp+64, room for 9 (the next local at
+# sp+336). Its every-frame point: the buttons just read in r0 (bit 4 the left flipper: the cursor r6 back, bit 2 the
+# right: on, both wrapping; bit 0x80 leaves), before the cursor moves and the index under it is applied live. ONE MODE
+# CHALLENGE entry is appended there: King of the Monsters' own index again, its name message the mode's name, its
+# flippers stepping through the modes' own; picked, the game's KOTM challenge game, taken by the mode as the ball starts.
+site  challenge_menu_frame            0x000603b8 0xe2103080 0xe1a05000
+value challenge_menu_frame_list_at    300
+value challenge_menu_frame_count_at   64
+value challenge_menu_frame_cap        9
+value challenge_menu_frame_entry      4
+value challenge_menu_frame_cursor_reg 6
+value challenge_menu_frame_left       4
+value challenge_menu_frame_right      2
+value challenge_menu_slot             0
 
 # ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
 site  ball_launch         0x00386db4 0xe92d4010 0xe3034930

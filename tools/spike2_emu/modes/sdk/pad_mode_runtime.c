@@ -9315,7 +9315,7 @@ static unsigned long challenge_ours_ms;   /* PAD-619: when it was taken */
 static char challenge_title[N_CHALLENGE][40];   /* round 2: the name the start menu shows for a taken one ("" = its own) */
 /* round 2: challenges of a mode's own, added to the game's start menu: slot CHALLENGE_OWN + k */
 #define CHALLENGE_OWN 16
-#define N_OWN_CHALLENGE 4
+#define N_OWN_CHALLENGE 16       /* PAD-686: Godzilla's MODE CHALLENGE steps through every mode of a pack (13 and more) */
 static struct { int (*fn)(unsigned slot); const struct pm_mode *by; char name[40]; int launch; } own_challenge[N_OWN_CHALLENGE];
 static int challenge_launch[N_CHALLENGE];   /* PAD-643: pm_challenge_launch - 0 its start clip, -1 the player, ms */
 static volatile int own_pending = -1;    /* the own challenge picked on the start menu, until its ball starts */
@@ -9481,7 +9481,7 @@ int pm_challenge_title(unsigned slot, const char *words)
     long msg;
     if (slot >= (unsigned)pm_challenge_slots() || challenge_by[slot] != current || !challenge_fn[slot]) return 0;
     challenge_words(challenge_title[slot], words);                       /* the holder only */
-    if (pm_challenge_menu()) return 1;
+    if (pm_challenge_menu() && !site("challenge_menu_frame")) return 1;    /* PAD-686: Godzilla's draws messages */
     /* PAD-619: a menu drawn from message ids (Godzilla's game-mode table): the challenge's name message says ours */
     pm_snprintf(key, sizeof key, "challenge_name_msg_%u", slot);
     msg = pm_port_value(key, 0);
@@ -9527,7 +9527,7 @@ void pm_challenge_release(unsigned slot)
     if (slot < N_CHALLENGE && challenge_fn[slot] && challenge_by[slot] == current) {
         char key[28];
         pm_snprintf(key, sizeof key, "challenge_name_msg_%u", slot);
-        if (challenge_title[slot][0] && !pm_challenge_menu() && pm_port_value(key, 0) > 0)
+        if (challenge_title[slot][0] && (!pm_challenge_menu() || site("challenge_menu_frame")) && pm_port_value(key, 0) > 0)
             pm_message_restore((unsigned)pm_port_value(key, 0));     /* PAD-619: the game's own name again */
         challenge_title[slot][0] = 0;
         challenge_fn[slot] = 0; challenge_by[slot] = 0;
@@ -10436,6 +10436,102 @@ static void challenge_menu_picked(unsigned *r)
     }
 }
 
+/* ---- PAD-686: Godzilla's start menu, ONE "MODE CHALLENGE" entry for every challenge of the modes' own ----------------
+ * Godzilla Premium/LE 1.16's start menu (both flipper buttons in attract: CHOOSE YOUR MODE OF PLAY, process 0x5f930)
+ * lists GAME-MODE TABLE INDICES, not entries of its own: u32s on its stack (`value challenge_menu_frame_list_at`, the
+ * count at `..._count_at`, room for `..._cap`: 9, the next local right after it), STANDARD 1, COMPETITION 3, KING OF THE
+ * MONSTERS CHALLENGE 4 on a stock card. Every frame it reads the buttons (left flipper bit 4: the cursor - r6 - back,
+ * wrapping; right bit 2: on), applies the index under the cursor LIVE (GamePlayModes +8, then its flags), and draws the
+ * index's caption and name messages. David (2026-10-22): "One MODE CHALLENGE entry whose flippers step through all 13
+ * modes, then the menu moves on" - thirteen entries would not fit in nine. So at the frame point (`site
+ * challenge_menu_frame`, the buttons just read in r0: hook_full) the runtime appends the King of the Monsters
+ * challenge's own index (`value challenge_menu_frame_entry`) a second time: picked, the game makes its own real one-ball
+ * challenge game of it, and the ball's start hands it to the mode (challenge_ball_start, `value challenge_menu_slot 0`:
+ * its flag cleared, the game's own never starts). While the cursor is on that entry its name message (the challenge's
+ * `challenge_name_msg_0`) letters the mode's name, and a flipper press steps to the next or previous mode instead of
+ * moving the cursor - past the last (or before the first) it moves on as the game's own would. Off it, the game's words
+ * again. (tests lift challenge_frame_step verbatim) */
+static int frame_sub;                       /* the mode the entry shows: a position among the modes' own */
+static int frame_on;                        /* the cursor was on our entry last frame */
+static unsigned long frame_sp;              /* the menu's frame we appended to (a new menu: a new list) */
+
+/* A frame with the cursor on our entry, from the state alone: `n` the modes' own challenges, `sub` the one shown,
+ * `left` / `right` this frame's flipper presses. Returns the one shown after it; *eat 1 = take the left press out of
+ * the game's buttons (the cursor stays), 2 = the right; 0 = let the press move the cursor on, past the first or last. */
+static int challenge_frame_step(int n, int sub, int left, int right, unsigned *eat)
+{
+    *eat = 0;
+    if (n <= 0) return 0;
+    if (sub < 0 || sub >= n) sub = 0;
+    if (left && sub > 0) { sub--; *eat = 1; }
+    else if (right && sub < n - 1) { sub++; *eat = 2; }
+    return sub;
+}
+
+/* The mode shown as the cursor arrives: from the entry before ours (a right press) the first, from after it the last */
+static int challenge_frame_arrive(int n, int from_before)
+{
+    return n <= 0 ? 0 : from_before ? 0 : n - 1;
+}
+
+static void challenge_menu_frame(unsigned *r)
+{
+    unsigned char *sp = (unsigned char *)(r + 14);
+    unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_list_at", 300));
+    unsigned *count = (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_count_at", 64));
+    unsigned cap = (unsigned)pm_port_value("challenge_menu_frame_cap", 9);
+    unsigned entry = (unsigned)pm_port_value("challenge_menu_frame_entry", 4);
+    unsigned lbit = (unsigned)pm_port_value("challenge_menu_frame_left", 4);
+    unsigned rbit = (unsigned)pm_port_value("challenge_menu_frame_right", 2);
+    unsigned creg = (unsigned)pm_port_value("challenge_menu_frame_cursor_reg", 6);
+    long msg = pm_port_value("challenge_name_msg_0", 0);
+    static unsigned ours_at;                 /* the list position of our entry */
+    static int said_n, room_said;
+    int own[N_OWN_CHALLENGE], n = 0, k, on, prev_sub = frame_sub;
+    unsigned cursor, eat;
+    if (creg > 12) return;
+    cursor = r[creg];
+    for (k = 0; k < N_OWN_CHALLENGE; k++)
+        if (own_challenge[k].fn) own[n++] = k;
+    if (!n || *count > cap) return;
+    if ((unsigned long)sp != frame_sp || ours_at >= *count || list[ours_at] != entry) {   /* a new menu: append ours */
+        frame_sp = (unsigned long)sp;
+        frame_on = 0;
+        if (*count >= cap) {
+            if (!room_said++) say("challenge menu: no room for MODE CHALLENGE - the game's menu holds %u entries", cap);
+            return;
+        }
+        ours_at = *count;
+        list[ours_at] = entry;
+        *count = ours_at + 1;
+        if (n != said_n)
+            say("challenge menu: MODE CHALLENGE appended (entry %u of %u, the game-mode index %u) - its flippers step "
+                "through %d mode(s)", ours_at + 1, *count, entry, n);
+        said_n = n;
+    }
+    on = cursor == ours_at;
+    if (on) {
+        frame_sub = challenge_frame_step(n, frame_sub, (r[0] & lbit) != 0, (r[0] & rbit) != 0, &eat);
+        if (eat == 1) r[0] &= ~lbit;
+        if (eat == 2) r[0] &= ~rbit;
+        if (msg > 0) pm_message_set((unsigned)msg, own_challenge[own[frame_sub]].name);
+        if (!frame_on || frame_sub != prev_sub)
+            say("challenge menu: MODE CHALLENGE shows %s (%d of %d)", own_challenge[own[frame_sub]].name, frame_sub + 1, n);
+        own_pending = own[frame_sub];
+    } else {
+        if (frame_on) {
+            if (msg > 0) pm_message_restore((unsigned)msg);      /* the game's King of the Monsters again */
+            own_pending = -1;
+        }
+        /* this frame's press moves the cursor after this point: onto ours from before it, or from after it (a wrap) */
+        if ((r[0] & rbit) && (cursor + 1 == ours_at || (ours_at == 0 && cursor + 1 == *count)))
+            frame_sub = challenge_frame_arrive(n, 1);
+        else if ((r[0] & lbit) && (cursor == ours_at + 1 || (cursor == 0 && ours_at + 1 == *count)))
+            frame_sub = challenge_frame_arrive(n, 0);
+    }
+    frame_on = on;
+}
+
 static void game_flag_clear(unsigned id);
 
 /* PAD-619: challenge n's pick in this game - 1 / 0, -1 unknown: its flag, or the game-play mode's index */
@@ -10782,6 +10878,19 @@ static void challenges_arm(void)
                 pm_port_value("challenge_menu_cap", 0));
         } else {
             say("challenge menu: its sites could not be hooked - the menu stays the game's own");
+        }
+    }
+    /* PAD-686: Godzilla's menu of game-mode indices - one MODE CHALLENGE entry steps through the modes' own */
+    if (site("challenge_menu_frame") && challenges_n && pm_port_value("challenge_menu_slot", -1) == 0
+        && pm_port_value("challenge_menu_frame_cap", 0) > 0 && pm_port_value("challenge_menu_frame_list_at", 0) > 0
+        && pm_port_value("challenge_menu_frame_count_at", 0) > 0 && pm_port_value("challenge_name_msg_0", 0) > 0) {
+        if (fn("challenge_menu_frame") && hook_full(fn("challenge_menu_frame"), challenge_menu_frame)) {
+            can |= PM_CAN_CHALLENGE_MENU;
+            say("challenge menu: the start menu's frame at 0x%08x - one MODE CHALLENGE entry (as %s's game-mode index "
+                "%ld) steps through the modes' own challenges", fn("challenge_menu_frame"), pm_challenge_name(0),
+                pm_port_value("challenge_menu_frame_entry", 4));
+        } else {
+            say("challenge menu: its frame site could not be hooked - the menu stays the game's own");
         }
     }
 }

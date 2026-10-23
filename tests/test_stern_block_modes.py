@@ -1371,6 +1371,8 @@ def test_the_progress_panel_number_follows_every_hit_with_no_note(tmp_path):
     for n in (9, 8, 7):
         assert "WORDS PadMode_Progress_S1_Num: %d" % n in out
     assert "Hud_Award" not in out[out.index(">> shot Big loop"):]                   # no note
+    # a mode with its own corner meter stays off the panel (its meter says it)
+    assert "if (run.on || HUD_METER) return;" in BM.to_c(p, "blk")
 
 
 def test_every_note_under_a_display_of_the_games_shows_at_once(tmp_path):

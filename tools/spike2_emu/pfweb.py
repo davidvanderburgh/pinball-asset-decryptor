@@ -336,6 +336,11 @@ class WebHost:
     def _flush(self):
         """The window system is up: open whatever was asked for before it
         was (the villain vision screen can stamp during the first frames)."""
+        # PAD-629: the line watch.sh waits for. Until it is in the log a
+        # window that has not appeared yet and one that never will look the
+        # same from the WSL side.
+        print("pfweb: window up (%s)" % type(self.backend).__name__,
+              flush=True)
         with self._plock:
             self._ready = True
             pending, self._pending = self._pending, []

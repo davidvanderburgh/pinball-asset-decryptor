@@ -2074,6 +2074,15 @@ def raise_existing():
     run on that PC got a playfield again. EnumWindows does not list these;
     FindWindowW does. So walk every window with the title and count only a
     real one.
+
+    ...AND "REAL" IS DECIDED BY WHO OWNS IT, NOT BY A LIST OF IMPOSTORS
+    (PAD-629, the same symptom again on another PC). The class filter names
+    the one impostor seen on David's; any other program that copies window
+    titles (a second taskbar, a window manager, a newer shell) or a dead or
+    hung window from an earlier run was still "raised" in place of a new one,
+    and the run had no playfield with nothing on screen to say why. Ours is a
+    VISIBLE window, owned by a Python process, that answers: anything else is
+    not a reason to stay shut.
     """
     if sys.platform != "win32":
         return False
@@ -2091,13 +2100,67 @@ def raise_existing():
             if not h:
                 return False
             u.GetClassNameW(h, cls, 256)
-            if not cls.value.startswith("Windows.Internal.Shell."):
+            if cls.value.startswith("Windows.Internal.Shell."):
+                continue
+            if _our_live_window(h):
                 break
+            print("playfield: passed over a window called %r (class %s) that "
+                  "is not a live playfield window" % (WINDOW_TITLE, cls.value),
+                  flush=True)
         u.ShowWindow(h, 9)                  # SW_RESTORE
+        _onto_a_screen(h)
         u.SetForegroundWindow(h)
         return True
     except Exception:
         return False                        # never block on the guard failing
+
+
+def _our_live_window(h):
+    """True for a window an earlier playfield process is really showing:
+    visible, not hung, and owned by a python*.exe (PAD-629)."""
+    import ctypes
+    from ctypes import wintypes
+    u, k = ctypes.windll.user32, ctypes.windll.kernel32
+    u.IsWindowVisible.argtypes = [wintypes.HWND]
+    u.IsHungAppWindow.argtypes = [wintypes.HWND]
+    u.GetWindowThreadProcessId.argtypes = [wintypes.HWND,
+                                           ctypes.POINTER(wintypes.DWORD)]
+    if not u.IsWindowVisible(h) or u.IsHungAppWindow(h):
+        return False
+    pid = wintypes.DWORD()
+    u.GetWindowThreadProcessId(h, ctypes.byref(pid))
+    k.OpenProcess.restype = wintypes.HANDLE
+    k.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD)]
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    hp = k.OpenProcess(0x1000, False, pid.value)   # QUERY_LIMITED_INFORMATION
+    if not hp:
+        return False
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        n = wintypes.DWORD(1024)
+        if not k.QueryFullProcessImageNameW(hp, 0, buf, ctypes.byref(n)):
+            return False
+        return os.path.basename(buf.value).lower().startswith("python")
+    finally:
+        k.CloseHandle(hp)
+
+
+def _onto_a_screen(h):
+    """A raised window that sits off every monitor (one unplugged since) is
+    moved onto the main one: raising it there would show nothing."""
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    u.MonitorFromWindow.restype = wintypes.HANDLE
+    u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                               ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                               wintypes.UINT]
+    if u.MonitorFromWindow(h, 0):           # MONITOR_DEFAULTTONULL
+        return
+    u.SetWindowPos(h, None, 40, 40, 0, 0, 0x0001 | 0x0004)   # NOSIZE|NOZORDER
 
 
 

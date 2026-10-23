@@ -184,7 +184,13 @@ def _ck_struct(src):
     m = re.search(r"#define CK_END_MS.*?\n\} ck;\nstatic int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;\n"
                   r".*?static unsigned long ck_idle_due;\n", src, re.S)
     assert m
-    return m.group(0)
+    # PAD-639 round 3: the game's display that owns the surface's clip (ck_game_display), and a clip of ours that waits
+    fx = re.search(r"#define CK_FX_WINDOW_MS.*?\nstatic unsigned ck_game_display\(void\)\n\{.*?\n\}\n", src, re.S)
+    wait = re.search(r"static struct \{\n    char name\[96\];\n    const struct pm_mode \*owner, \*running;.*?\} ck_wait;\n"
+                     r"static int ck_wait_in;\n", src, re.S)
+    assert fx and wait
+    return (m.group(0) + fx.group(0) + wait.group(0) + "int pm_clip(const char *name);\n"
+            + _lift(src, "static void ck_wait_tick(void)\n{") + "\n")
 
 
 def test_a_modes_clip_comes_back_where_it_would_be_after_the_games(tmp_path):
@@ -354,7 +360,9 @@ static void tick(unsigned long ms)
 {
     now_ms += ms;
     if (clip.on && state != 2) clip.on = 0;
+    ck_fx_track();
     ck_tick();
+    ck_wait_tick();
     if (state == 2 && !looping && position(&surf_obj) >= length_of(video)) state = 0;
 }
 static void game_loop(const char *name)
@@ -389,6 +397,24 @@ int main(void)
     printf("idle %d waits %d\n", state != 2, ck.lost);
     fx_now = 0; tick(16);                          /* the effect ends: ours */
     printf("on %d\n", clip.on);
+    printf("-- round 3: a new clip of ours asked for under the skill shot's picture waits for its end\n");
+    tick(2000);
+    { unsigned str = std_string("SkillShot_Bond_BrownTrilby"); set_video(&surf_obj, &str); play(&surf_obj, 0, -1); }
+    fx_now = 392;
+    ticks(25, 100);
+    printf("asked %d\n", pm_clip("PadMode_short"));
+    ticks(10, 100);
+    printf("video %s\n", video);                  /* still the game's */
+    fx_now = 0; tick(16);
+    printf("video %s\n", video);
+    printf("-- an effect that began long after the game's clip owns none of it (Bond's serve and its film intro)\n");
+    { unsigned str = std_string("GLDFNGR_Intro1"); set_video(&surf_obj, &str); play(&surf_obj, 1, -1); }
+    ticks(20, 100);
+    fx_now = 55; tick(16);
+    printf("asked %d\n", pm_clip("PadMode_short"));
+    tick(16);
+    printf("video %s\n", video);                  /* ours at once */
+    fx_now = 0;
     printf("done\n");
     return 0;
 }
@@ -421,22 +447,32 @@ def test_a_clip_under_a_display_effect_of_the_games_stays_until_it_ends(tmp_path
         "PLAY PadMode_long_Clip", "SEEK", "on 1",
         "-- a skill shot: effect 392 plays its hat toss once and holds its picture over the last frame",
         "PLAY SkillShot_Bond_BrownTrilby", "idle 1 waits 1",    # not back at the toss's end: the picture is up
-        "PLAY PadMode_long_Clip", "SEEK", "on 1", "done"]
+        "PLAY PadMode_long_Clip", "SEEK", "on 1",
+        "-- round 3: a new clip of ours asked for under the skill shot's picture waits for its end",
+        "PLAY SkillShot_Bond_BrownTrilby", "asked 1",
+        "video SkillShot_Bond_BrownTrilby",
+        "PLAY PadMode_short", "video PadMode_short",            # the effect over: ours, from its start
+        "-- an effect that began long after the game's clip owns none of it (Bond's serve and its film intro)",
+        "PLAY GLDFNGR_Intro1 (looped)", "PLAY PadMode_short", "asked 1", "video PadMode_short",
+        "done"]
     assert 19000 <= seeks[0] <= 19200                           # 4 s in + 15 s under the game's: where it would be
     assert seeks[2] - seeks[1] >= 2000 + 3400                   # where it would be after the skill shot's 3.4 s
 
 
 def test_the_backdrop_loop_waits_for_a_display_of_the_games_too():
-    # the backdrop loop goes back on an idle surface: not while the game's effect holds its clip's last frame there
+    # the backdrop loop goes back on an idle surface: not while the game's effect holds its clip's last frame there -
+    # nor at once after a clip of ours (round 3: the start clip the skill shot's hat toss took the surface from)
     body = _lift(RUNTIME.read_text(encoding="utf-8"), "static void bd2_tick(void)\n{")
-    assert "if (!ck_last_ours && disp_foreground_effect()) return;" in body
-    assert body.index("disp_foreground_effect()") > body.index("if (bd.pending) { bd2_play(surf); return; }")
+    assert "if (ck_game_display()) return;" in body
+    assert body.index("ck_game_display()") < body.index("if (bd.pending) { bd2_play(surf); return; }")
+    tick = _lift(RUNTIME.read_text(encoding="utf-8"), "static void clip_tick(void)")
+    assert tick.index("ck_fx_track();") < tick.index("bd2_tick();") and "ck_wait_tick();" in tick
 
 
 FX_HEAD = r"""
 #include <stdio.h>
 #include <string.h>
-static unsigned recs[2 * 4] = { 0, 0,  0, 0x10001,  0, 0x840002,  0, 0x10001 };   /* {process, flags | prio << 16} */
+static unsigned recs[2 * 5] = { 0, 0,  0, 0x10001,  0, 0x840002,  0, 0x10001,  0, 0x600002 };   /* {process, flags | prio << 16} */
 static unsigned arg[2];
 static unsigned char mgr[0x20];
 static unsigned char *mgr_p;
@@ -454,9 +490,9 @@ FX_MAIN = r"""
 int main(void)
 {
     unsigned now;
-    arg[0] = (unsigned)(unsigned long)recs; arg[1] = 4;
+    arg[0] = (unsigned)(unsigned long)recs; arg[1] = 5;
     mgr_p = mgr; *(unsigned *)(mgr + 4) = (unsigned)(unsigned long)arg;
-    for (now = 0; now < 5; now++) {
+    for (now = 0; now < 6; now++) {
         *(unsigned short *)(mgr + 0xc) = (unsigned short)now;
         printf("%u:%u ", now, disp_foreground_effect());
     }
@@ -479,7 +515,7 @@ def test_only_a_foreground_effect_of_the_games_counts(tmp_path):
     out = _host_run(tmp_path, FX_HEAD + "\n".join(parts) + FX_MAIN, flags=("-no-pie", "-fno-pie")).strip()
     if not out:
         pytest.skip("this host links above 4 GB even with -no-pie")
-    assert out == "0:0 1:0 2:2 3:0 4:0 other:0 none:0"
+    assert out == "0:0 1:0 2:2 3:0 4:0 5:0 other:0 none:0"     # 4: the serve's, priority 96: nothing over the TV
 
 
 @pytest.mark.parametrize("port, manager", [
@@ -490,4 +526,4 @@ def test_both_bond_builds_name_the_display_effect_manager(port, manager):
     # read off each build's award_screen: its manager getter loads this pointer (emulator: the spinner = effect 75)
     text = (PORTS / port).read_text(encoding="utf-8")
     assert re.search(r"^data display_effects\s+%s$" % manager, text, re.M)
-    assert "disp_foreground_effect()" in _lift(RUNTIME.read_text(encoding="utf-8"), "static void ck_tick(void)\n{")
+    assert "ck_game_display()" in _lift(RUNTIME.read_text(encoding="utf-8"), "static void ck_tick(void)\n{")

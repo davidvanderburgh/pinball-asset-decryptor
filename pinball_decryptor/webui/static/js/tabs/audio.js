@@ -442,6 +442,53 @@ function AttractButton({ a, running }) {
     onClick=${(e) => openMenu(e.currentTarget, items, { align: "right" })}>${n ? `Attract flipper sounds (${n})` : "Attract flipper sounds"}<//></span>`;
 }
 
+// PAD-685: the jukebox - the song modes play one of these songs, drawn at random, each with its own
+// intro video: the header button opens its song list
+function JukeboxButton({ j, onOpen }) {
+  return html`<span ...${tip({ head: "Jukebox", lines: j.tip || [] })}><${Button} kind="ghost" icon="audio"
+    onClick=${() => (j.why ? call("audio.jukebox_action", "why") : onOpen())}>${j.n ? `Jukebox (${j.n})` : "Jukebox"}<//></span>`;
+}
+
+function JukeboxModal({ data, onClose }) {
+  const [d, setD] = useState(data);
+  const act = async (a) => { const got = await call("audio.jukebox_action", a); if (got) setD(got); };
+  const songs = d.songs || [];
+  const full = songs.length >= (d.max || 0);
+  const weights = (d.weights || []).map((w) => ({ value: String(w.w), label: w.label }));
+  return html`<${Modal} title="Jukebox" icon="audio" wide onClose=${onClose}
+    footer=${html`<${Button} icon="plus" disabled=${d.running || full || !!d.why}
+        title=${full ? `At most ${d.max} songs` : "Choose one or more songs' audio files"}
+        onClick=${() => act("add")}>Add songs…<//><span class="grow"></span>
+      <${Button} kind="primary" onClick=${onClose}>Close<//>`}>
+    <div class="stack" style="gap:10px">
+      <p class="aud-p">${d.tip}</p>
+      ${d.why ? html`<${Note} kind="warn">${d.why}<//>` : null}
+      ${songs.length ? html`<div class="aud-juke"><table>
+        <thead><tr><th>#</th><th>Song</th><th>Intro video</th><th>How often</th><th></th></tr></thead>
+        <tbody>${songs.map((g) => html`<tr class=${cx(g.gone && "gone")} title=${g.gone ? "A file of this song is not on this PC any more" : ""}>
+          <td class="muted">${g.k}</td>
+          <td><span class="nw">${g.audio}</span></td>
+          <td>${g.video ? html`<span class="nw">${g.video}</span>` : html`<span class="muted">its song mode's own</span>`}</td>
+          <td><${Select} sm value=${String(g.weight)} options=${weights} disabled=${d.running}
+            onChange=${(v) => act(`weight:${g.k}:${v}`)} width=${110} /></td>
+          <td class="nw">
+            <${Button} size="sm" kind="ghost" icon="play" title="Play this song" onClick=${() => act(`play:${g.k}`)} />
+            <${Button} size="sm" kind="ghost" icon="more" title="More for this song" onClick=${(e) => openMenu(e.currentTarget, [
+              { label: g.video ? "Change the intro video…" : "Choose an intro video…", icon: "video", disabled: d.running,
+                title: "The video the song mode opens with when this song is drawn, the song's name in it", onClick: () => act(`video:${g.k}`) },
+              g.video ? { label: "Use the song mode's own intro", icon: "undo", disabled: d.running, onClick: () => act(`novideo:${g.k}`) } : null,
+              { sep: true },
+              { label: "Move up", icon: "up", disabled: d.running || g.k === 1, onClick: () => act(`up:${g.k}`) },
+              { label: "Move down", icon: "down", disabled: d.running || g.k === songs.length, onClick: () => act(`down:${g.k}`) },
+              { sep: true },
+              { label: "Take out of the jukebox", icon: "x", disabled: d.running, onClick: () => act(`off:${g.k}`) },
+            ].filter(Boolean), { align: "right" })} />
+          </td></tr>`)}</tbody></table></div>`
+        : html`<div class="muted">No songs yet. Add the songs' audio files, then give each one its intro video.</div>`}
+    </div>
+  <//>`;
+}
+
 export default function AudioTab() {
   const s = useNs("audio");
   const shell = useNs("shell");
@@ -456,6 +503,7 @@ export default function AudioTab() {
   const wrapRef = useRef(null);
   const [props, setProps] = useState(null);
   const [adv, setAdv] = useState(null);
+  const [juke, setJuke] = useState(null);
   const selKey = JSON.stringify(s.sel || []);
   useEffect(() => {
     const next = s.sel || [];
@@ -594,6 +642,10 @@ export default function AudioTab() {
     const data = await call("audio.advanced_get");
     if (data) setAdv(data);
   };
+  const openJuke = async () => {
+    const data = await call("audio.jukebox_open");
+    if (data) setJuke(data);
+  };
   const onKey = (e) => {
     if (e.key === " " || e.code === "Space") {
       e.preventDefault();
@@ -698,6 +750,7 @@ export default function AudioTab() {
       <${Button} icon="folder" disabled=${s.running} title=${T.fromFolder} onClick=${() => call("audio.replace_from_folder")}>Replace from folder…<//>
       <${Button} icon="search" disabled=${s.running} title=${T.originals} onClick=${() => call("audio.originals_open")}>Find originals…<//>
       ${s.attract ? html`<${AttractButton} a=${s.attract} running=${s.running} />` : null}
+      ${s.jukebox ? html`<${JukeboxButton} j=${s.jukebox} onOpen=${openJuke} />` : null}
       ${s.adv_cap ? html`<${Button} kind="ghost" icon="gear" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>` : null}
       <${Button} kind="ghost" icon="more" label="More" busy=${s.profile_busy}
         title=${"More: Export CSV, Clear replacements…, Save / load settings" + (s.modes_share ? ", Save / load music modes" : "") + (s.adv_full ? ", Profile vs stock" : "")}
@@ -761,6 +814,7 @@ export default function AudioTab() {
     <//>
     ${props ? html`<${PropsModal} data=${props} onClose=${() => setProps(null)} />` : null}
     ${adv ? html`<${AdvancedModal} data=${adv} onClose=${() => setAdv(null)} />` : null}
+    ${juke ? html`<${JukeboxModal} data=${juke} onClose=${() => setJuke(null)} />` : null}
     ${s.originals && s.originals.open ? html`<${OriginalsWindow} ns="audio" o=${s.originals} />` : null}
   </div>`;
 }

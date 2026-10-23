@@ -144,6 +144,10 @@ TURN_BASE = 100
 #: PAD-638: music mode m's file k in turn is built under pseudo mode MODE_TURN_BASE + m * 20 + k
 #: (:func:`mode_turn`; above :data:`TURN_BASE`, so the build treats it as a file in turn)
 MODE_TURN_BASE = 1000
+#: PAD-685: the jukebox's song k (1..) is built under pseudo mode JUKE_BASE + k (:func:`juke_mode`;
+#: above :data:`TURN_BASE`, so the build treats it as a file in turn, matched to its slot's loudness -
+#: but never cut: the game plays a song whole, :mod:`.jukebox`)
+JUKE_BASE = 5000
 #: PAD-565: ``<game>-<version>`` of the builds where the sounds in turn were SEEN working: the
 #: LATEST build of every Stern Spike 2 game in the image library (David: "just the latest
 #: versions"), each swept in the emulator (an override set built by Write's own code, the slot's
@@ -219,12 +223,18 @@ class Modes:
     #: PAD-645: the silence the build adds for the game's own sound at a press (a build sets it;
     #: never saved)
     attract_quiet: str = ""
+    #: PAD-685: the jukebox's songs' audio files and the slot they are made like (a build sets them
+    #: from :mod:`.jukebox`; never saved here)
+    jukebox: list = field(default_factory=list)
+    juke_rel: str = ""
+    #: PAD-685: the build's jukebox: ``{"box": jukebox.Jukebox, "prof": profile}`` (never saved)
+    juke_plan: dict = field(default_factory=dict)
 
     @property
     def any(self):
         """Whether a build has anything of these to carry: a music mode, a sound in turn or a
         sound for the flipper buttons in attract."""
-        return bool(self.count or self.turns or self.attract)
+        return bool(self.count or self.turns or self.attract or self.jukebox)
 
     @property
     def count(self):
@@ -233,6 +243,8 @@ class Modes:
         return top if top >= 2 else 0
 
     def name(self, mode):
+        if is_juke(mode):
+            return "jukebox"
         if is_attract(mode):
             return "in attract"
         if is_mode_turn(mode):
@@ -259,12 +271,16 @@ class Modes:
                 + ([(self.attract_rel, attract_mode(k), f) for k, f in enumerate(self.attract, 1)]
                    if self.attract_rel else [])
                 + ([(self.attract_rel, attract_mode(ATTRACT_QUIET), self.attract_quiet)]
-                   if self.attract_rel and self.attract_quiet and self.attract else []))
+                   if self.attract_rel and self.attract_quiet and self.attract else [])
+                + ([(self.juke_rel, juke_mode(k), f) for k, f in enumerate(self.jukebox, 1)]
+                   if self.juke_rel else []))
 
     def level(self, rel, mode):
         """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
         sound), or ``None`` for a project saved before mode files had their own. A file in turn
         has a loudness of its own too (PAD-638: ``turn_levels``), 0 unless one was set."""
+        if is_juke(mode):
+            return 0
         if is_mode_turn(mode):
             m, k = mode_turn_of(mode)
             return int(((self.mode_turn_levels.get(rel) or {}).get(m) or {}).get(k, 0) or 0)
@@ -302,7 +318,16 @@ def mode_turn(m, k):
 
 
 def is_mode_turn(mode):
-    return int(mode) > MODE_TURN_BASE
+    return MODE_TURN_BASE < int(mode) < JUKE_BASE
+
+
+def juke_mode(k):
+    """PAD-685: the pseudo mode the jukebox's song *k* (1..) is built under."""
+    return JUKE_BASE + int(k)
+
+
+def is_juke(mode):
+    return int(mode) > JUKE_BASE
 
 
 def mode_turn_of(mode):
@@ -328,6 +353,8 @@ def is_turn(mode):
 
 def turn_of(mode):
     """File k of a slot's sounds in turn, from its pseudo mode (PAD-638: of a music mode's too)."""
+    if is_juke(mode):
+        return int(mode) - JUKE_BASE
     if is_mode_turn(mode):
         return mode_turn_of(mode)[1]
     return int(mode) - TURN_BASE
@@ -335,6 +362,8 @@ def turn_of(mode):
 
 def who(mode):
     """The log lines' heading for a file built under *mode*."""
+    if is_juke(mode):
+        return "Jukebox"
     if is_attract(mode):
         return "Attract flipper sounds"
     return "Sounds in turn" if is_turn(mode) else "Music modes"
@@ -343,6 +372,8 @@ def who(mode):
 def what(rel, mode, name=""):
     """A file built under *mode* for slot *rel*, as the log names it."""
     base = os.path.basename(str(rel).replace("\\", "/"))
+    if is_juke(mode):
+        return "song %d" % turn_of(mode)
     if is_attract(mode):
         if attract_of(mode) == ATTRACT_QUIET:
             return "the silence the game's own sound at a press plays"
@@ -358,6 +389,8 @@ def what(rel, mode, name=""):
 def tag(rel, mode):
     """The build record's words for a file built under *mode* for slot *rel*."""
     base = os.path.basename(str(rel).replace("\\", "/"))
+    if is_juke(mode):
+        return "jukebox song %d" % turn_of(mode)
     if is_attract(mode):
         if attract_of(mode) == ATTRACT_QUIET:
             return "the silence for the game's own sound at a flipper button press in attract"
@@ -371,6 +404,8 @@ def tag(rel, mode):
 
 def when(mode):
     """When the game plays a file built under *mode*: "while MUSIC MODE is 2", "every 2nd time"."""
+    if is_juke(mode):
+        return "when the jukebox draws it for a song mode"
     if is_attract(mode):
         if attract_of(mode) == ATTRACT_QUIET:
             return "in place of the game's own sound at a flipper button press in attract"
@@ -800,7 +835,7 @@ def cut(wav, frames):
 
 # ---- the runtime's table ------------------------------------------------------------------------
 def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(), randoms=(),
-             attract=None):
+             attract=None, jukebox=None):
     """``sounds.cfg``: *live* the setting's value address, *count* the modes (0: no MUSIC MODE,
     the card has sounds in turn only), *sounds* ``[(mode, sound id, descriptor bytes)]`` (a
     *only* when the card carries no modes, *turns* ``[(k, slot key, file k's key)]`` the sounds in
@@ -815,7 +850,10 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     flipper buttons' sounds in attract: an ``attract`` line (the carrier, its own record's key, the
     buttons' switch ids) and an ``afile`` line per file (its record's key, its length in ms);
     PAD-645: and with ``"quiet"`` (a silent record's key) an ``aquiet`` line: the game's own sound
-    at a press plays it instead."""
+    at a press plays it instead.
+    PAD-685: *jukebox* ``{"modes": [(start site, [intro clip names], [record keys])], "songs":
+    [(weight, record key, clip name or "")]}``, a ``jmode`` line per song mode and a ``jsong`` line per
+    song (pad_mode_runtime.c "the jukebox")."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
@@ -840,6 +878,12 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
             lines.append("aquiet\t%s" % bytes(attract["quiet"]).hex())
         if attract.get("gap_ms"):
             lines.append("agap\t%d" % int(attract["gap_ms"]))      # PAD-641 round 2
+    if jukebox and jukebox.get("modes") and jukebox.get("songs"):
+        for site, clips, keys in jukebox["modes"]:
+            lines.append("jmode\t%s\t%s\t%s" % (site or "-", ",".join(clips) or "-",
+                                                 ",".join(bytes(k).hex() for k in keys)))
+        for weight, key, clip in jukebox["songs"]:
+            lines.append("jsong\t%d\t%s\t%s" % (int(weight), bytes(key).hex(), clip or "-"))
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -863,6 +907,9 @@ REC_MTURN, REC_MRANDOM = "#mturn", "#mrandom"
 REC_ATTRACT = "#attract"
 #: PAD-641 round 2: the time between two of them: ``#agap <seconds>``
 REC_AGAP = "#agap"
+#: PAD-685: a jukebox song: ``#jsong <k> <slot idx> <record idx> <weight> <slot rel> <the file's own
+#: name>`` (its intro clip, when it has one, is in the video bank as ``jukebox.clip_name(k)``)
+REC_JSONG = "#jsong"
 #: PAD-608: a file in a sound bank names its record as ``<bank category>:<record idx>`` (an app
 #: before PAD-608 skips such a line: its record field is not a number)
 _BANK_HOST = re.compile(r"^(\d{1,2}):(\d+)$")
@@ -899,6 +946,15 @@ def card_record(modes, used):
         if not u.get("lines"):
             continue
         m = int(u["mode"])
+        if is_juke(m):
+            k = turn_of(m)
+            src = modes.jukebox[k - 1] if 0 < k <= len(modes.jukebox) else ""
+            box = (modes.juke_plan or {}).get("box")
+            weight = box.songs[k - 1].weight if box is not None and 0 < k <= len(box.songs) else 2
+            out.append("\t".join([REC_JSONG, str(k), str(int(u["slot"])), _rec_host(u), str(int(weight)),
+                                  _rec_word(u["rel"]),
+                                  _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
+            continue
         if is_attract(m):
             k = attract_of(m)
             if k == ATTRACT_QUIET:                  # the build's own silence: nothing to bring back
@@ -928,7 +984,7 @@ def card_record(modes, used):
                               "-" if db is None else str(int(db)), _rec_word(u["rel"]),
                               _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
     landed = {u["rel"]: int(u["slot"]) for u in used if u.get("lines") and is_turn(u["mode"])
-              and not is_mode_turn(u["mode"])}
+              and not is_mode_turn(u["mode"]) and not is_juke(u["mode"])}
     out += ["%s\t%d\t%s" % (REC_RANDOM, landed[rel], _rec_word(rel))
             for rel in sorted(modes.random) if rel in landed]
     mlanded = {(u["rel"], mode_turn_of(u["mode"])[0]): int(u["slot"]) for u in used
@@ -950,7 +1006,7 @@ def read_card_record(text):
     when it has no record (a card written before PAD-553). PAD-608: an entry whose file is in a
     sound bank has ``"bank"``, the bank's category, and ``"host"`` is the bank's record."""
     names, files, turns, rnd, attract, seen = {}, [], [], [], [], False
-    mturns, mrnd = [], []
+    mturns, mrnd, juke = [], [], []
     agap = 0
     for line in str(text or "").splitlines():
         f = line.split("\t")
@@ -1001,6 +1057,11 @@ def read_card_record(text):
                                         **({"bank": bank} if bank is not None else {})))
             elif f[0] == REC_AGAP and len(f) >= 2:
                 agap = clean_gap(f[1])
+            elif f[0] == REC_JSONG and len(f) >= 6:          # PAD-685
+                seen = True
+                juke.append({"k": int(f[1]), "slot": int(f[2]), "host": int(f[3]),
+                             "weight": int(f[4]) if f[4].isdigit() else 2, "rel": f[5],
+                             "name": f[6] if len(f) > 6 else ""})
         except ValueError:
             continue
     if not seen:
@@ -1019,6 +1080,8 @@ def read_card_record(text):
         out["mode_turns"] = mturns
         if mrnd:
             out["mode_random"] = mrnd
+    if juke:
+        out["jukebox"] = sorted(juke, key=lambda j: j["k"])
     return out
 
 

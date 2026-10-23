@@ -250,6 +250,24 @@ HELP_CONTENT = {
          "- The game's own sound at the press does not play over yours.\n"
          "- Not on TMNT 1.58 (Pro or LE) or Venom LE 1.06 yet; the menu says why.\n"
          "- Needs an image build, not a direct SD write."),
+        ("Jukebox",
+         "The Beatles 1.29. **Jukebox**, beside **Find originals…**, gives the five song "
+         "modes songs of your own: each time a song mode starts, the game plays one of them, "
+         "drawn at random, with its own intro video. No setting and no choosing: every start "
+         "throws the dice.\n\n"
+         "- **Add songs…** picks one or more audio files (up to 128).\n"
+         "- **…** on a song: **Choose an intro video…** gives it the video its song mode "
+         "opens with, the song's name in it. A song without one opens with its song mode's "
+         "own intro.\n"
+         "- **How often**: a Common song comes up three times as often as a Rare one, a "
+         "Normal one twice as often.\n"
+         "- A song never comes back within five song modes, so none plays twice in a game.\n"
+         "- Any song can come up in any of the five song modes. A song plays to its end, and "
+         "again from the start if the mode lasts longer; the mode's end stops it.\n"
+         "- The rest of a song mode's screens (its level clips, its Champion name) stay as "
+         "they are: make them the same for every song on the Video and Text tabs.\n"
+         "- An extract of a card built with a jukebox brings it back.\n"
+         "- Needs an image build, not a direct SD write."),
         ("Replace from folder",
          "**Replace from folder…**, beside the project folder, picks a whole folder "
          "of your files at once: each file goes to the slot with its name.\n\n"

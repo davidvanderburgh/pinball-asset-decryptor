@@ -2814,10 +2814,15 @@ loop that is the backdrop of one of the game's display effects (Bond's spinner s
 75, a see-through picture over `Diamond_EarthSpin`) stays for as long as that effect has the
 screen, and the mode's clip comes back when it ends: with `data display_effects` (the effect
 manager pointer) the runtime reads the effect now, and one whose table record lacks the
-background flag 1 is over the TV (PAD-639). The same wait holds for a clip the game plays once
-under such an effect: Bond's skill shot awards (effects 392-394 LE, 391-393 Pro) play a hat toss
-and keep their picture over its last frame until the surface is idle, so the mode's clip (or a
-backdrop loop) going back at the toss's end kept that picture up for good. A clip
+background flag 1 and whose priority is at least `value display_over_tv_min` (128) is over the
+TV (PAD-639; Bond's serve, effect 55 at 96, draws nothing there). The same wait holds for a clip
+the game plays once under such an effect: Bond's skill shot awards (effects 392-394 LE, 391-393
+Pro) play a hat toss and keep their picture over its last frame until the surface is idle, so the
+mode's clip (or a backdrop loop) going back at the toss's end kept that picture up for good. An
+effect owns the game's clip when the game put it on the surface (not its main-play video) at most
+1 s before the effect began, or while it ran. While it does, nothing of the mode's takes the
+surface: not the clip put back, not the backdrop loop (even the one due at once after the mode's
+start clip), and a new `pm_clip` waits for the effect's end and then plays from its start. A clip
 the game plays once (a lock, a start, an award) is waited out. It does not come back if
 the mode ended, another mode of ours began, or its time ran out under the game's clip. James
 Bond LE and Pro 1.06 name them (LE at `surface_play` - 0x36c, - 0x6b4 and - 0x510, Pro the

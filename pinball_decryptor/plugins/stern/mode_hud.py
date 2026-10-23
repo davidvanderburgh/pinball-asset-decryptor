@@ -756,12 +756,12 @@ def bar_gauge(p, ids, g, gauge, sec, textures):
 #: number (David: "make it an image like we do for when the mode timer is running and it just countdowns the shots
 #: needed, with a logo for King Kong or something on it ... that way we can show a handful of them at the same
 #: time"). Each slot holds every mode's badge, hidden; the kit shows one and writes the slot's number
-#: (intricate_kit.h, kit_prog_tick). PAD-690 (David: "too many indicators ... why can't we just make them smaller to
-#: fit them all vertically?"): a slot for every mode of the pack (up to PROGRESS_MAX), the badges scaled down so the
-#: column fits between PROGRESS_Y and PROGRESS_BOTTOM, right-aligned at the glass's edge; the panel is down during
-#: the game's battles, as before.
+#: (intricate_kit.h, kit_prog_tick). PAD-690: PROGRESS_SLOTS slots (fewer with fewer modes), the badges scaled so
+#: the column fills PROGRESS_Y to PROGRESS_BOTTOM, right-aligned at the glass's edge; the newest progress on top,
+#: the oldest dropping off (David, on 13 slots at a third of a badge: "way too tiny ... make them large so they are
+#: more legible" - one column of 7). The panel is down during the game's battles, as before.
 PROGRESS_GROUP = "PadMode_Progress"
-PROGRESS_MAX = 16                    # the kit's KIT_PROG_SLOTS: it looks for slots 1..16 and uses those there are
+PROGRESS_SLOTS = 7                   # the kit's KIT_PROG_SLOTS (16) is the most it looks for; it uses those there are
 PROGRESS_Y, PROGRESS_BOTTOM, PROGRESS_DY = 90.0, 596.0, TIMER2_DY     # under the rage meter, over PLAYER 1..
 PROGRESS_RIGHT = GLASS_W - 4.0
 
@@ -776,7 +776,7 @@ def progress_layout(n, panel_w):
 
 
 def progress_group(p, ids, huds, art, textures):
-    """The Sprite group ``PadMode_Progress`` (bytes): a slot group ``_S<k>`` per mode (PROGRESS_MAX at most), each
+    """The Sprite group ``PadMode_Progress`` (bytes): a slot group ``_S<k>`` per mode (PROGRESS_SLOTS at most), each
     with a badge group ``_S<k>_<slug>`` (panel + icon) a mode and the slot's number text ``_S<k>_Num``. A badge's
     geometry is the timer badge's (hud_group): the panel at (-21, 267), the icon at (0, 281.8), the number at
     (68.6, 295.4) in its group; the slot scales it (progress_layout)."""
@@ -787,7 +787,7 @@ def progress_group(p, ids, huds, art, textures):
         title = spec.get("title") or spec.get("name") or slug.upper()
         badges[slug] = (badge_panel(art["panel"], art["font"], timer.get("label") or title),
                         badge_disc(art["disc"], badge_icon(spec, timer)))
-    n = min(len(badges), PROGRESS_MAX)
+    n = min(len(badges), PROGRESS_SLOTS)
     scale, x, ys = progress_layout(n, art["panel"].shape[1])
     slots = []
     for k in range(n):

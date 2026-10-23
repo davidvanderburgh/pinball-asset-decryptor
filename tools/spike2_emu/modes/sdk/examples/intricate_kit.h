@@ -1105,9 +1105,9 @@ static KIT_UNUSED void kit_hud_gauge(struct kit_hud *h, int level, const char *l
  * LEFT RAMP" -> 4; a code mode's "5 RAMPS TO BIOLLANTE" -> 5; a note with none, READY, shows 0), for the player up, until that mode starts or the game
  * ends. Up through the game's screens and timed modes; down while one of ours runs or has its TOTAL up, and
  * during the game's own battles (their RIGHT spins sit where it is). Shared by every mode of the pack: weak, as
- * kit_hud_up. A card built before PAD-680 has no panel: nothing. PAD-690: a slot for every mode of the pack, the
- * badges scaled to fit (mode_hud.progress_layout); the kit uses the slots the panel has, up to KIT_PROG_SLOTS (a
- * PAD-680 card has 4). */
+ * kit_hud_up. A card built before PAD-680 has no panel: nothing. PAD-690: the panel has up to 7 slots, the badges
+ * scaled to fill the column (mode_hud.progress_layout); the kit uses the slots the panel has, up to KIT_PROG_SLOTS
+ * (a PAD-680 card has 4), the newest notes in them, older ones dropping off. */
 #define KIT_PROG_SLOTS 16
 struct kit_prog_row {
     char slug[32];                         /* the mode's folder: the key; "" = a free row */

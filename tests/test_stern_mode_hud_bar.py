@@ -88,13 +88,14 @@ def test_every_icon_a_badge_may_wear_is_drawn_and_none_alike():
 
 
 def test_the_panel_fits_every_mode_between_the_rage_meter_and_the_score_panels():
-    for n in (1, 4, 13, H.PROGRESS_MAX):
+    for n in (1, 4, H.PROGRESS_SLOTS):
         s, x, ys = H.progress_layout(n, 210)
         assert len(ys) == n and 0 < s <= 1.0
         assert abs(ys[0] + 267.0 * s - H.PROGRESS_Y) < 0.01                             # the first badge's top
         assert ys[-1] + 267.0 * s + H.PROGRESS_DY * s <= H.PROGRESS_BOTTOM + 0.01        # the last one's bottom
         assert x + s * (210 - 21.0) <= H.GLASS_W                                         # on the glass
-    assert H.progress_layout(13, 210)[0] < H.progress_layout(4, 210)[0]
+    assert H.progress_layout(H.PROGRESS_SLOTS, 210)[0] < H.progress_layout(4, 210)[0]
+    assert H.progress_layout(H.PROGRESS_SLOTS, 210)[0] >= 0.6                         # David: legible, not a third
 
 
 def test_the_build_hands_a_modes_badge_picture_to_its_hud(tmp_path):

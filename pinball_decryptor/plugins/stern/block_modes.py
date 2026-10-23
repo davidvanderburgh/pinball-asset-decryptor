@@ -260,6 +260,7 @@ SHARED_RESETS = ("ball", "game")
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
+              "hud_progress",                                            # PAD-690: the panel's number, live
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
               "light_mode", "unlight_mode", "set_hits")
@@ -1068,7 +1069,7 @@ def notes(program):
     if "words" in ops and not program["screen"]:
         out.append("Show words needs the mode's own screen: tick Its own screen.")
     hud = program["hud"]
-    if not hud["on"] and {"hud_text", "hud_counter", "hud_gauge"} & ops:
+    if not hud["on"] and {"hud_text", "hud_counter", "hud_gauge", "hud_progress"} & ops:
         out.append("The HUD blocks need the HUD: tick Its HUD.")
     if not hud["on"] and not program["screen"] and "hud_award" in ops:     # PAD-574: or on its own screen
         out.append("An Award shows on its HUD or its own screen: tick Its HUD or Its own screen.")
@@ -1300,6 +1301,8 @@ def _check_stack(stack, depth, where, ctx):
             if len(str(b.get("sub") or "")) > COUNTER_MAX or len(str(b.get("label") or "")) > COUNTER_MAX:
                 ctx["out"].append("%s has a counter's words of more than %d letters." % (where, COUNTER_MAX))
         elif op == "hud_gauge":
+            _check_num(b.get("value"), where, ctx)
+        elif op == "hud_progress":
             _check_num(b.get("value"), where, ctx)
         elif op == "hud_award":
             for key in ("text", "sub"):
@@ -1927,6 +1930,8 @@ class _Gen:
                     "0" if not label else _c_str(str(label)[:COUNTER_MAX])))
             elif op == "hud_gauge":
                 out.append(pad + "hud_level = %s;" % self.num(b.get("value")))
+            elif op == "hud_progress":
+                out.append(pad + "hud_progress(%s);" % self.num(b.get("value")))
             elif op == "hud_award":
                 value = b.get("value")
                 try:
@@ -2583,6 +2588,18 @@ def to_c(program, slug):
         L.append("    }")
         L.append("    if (run.on) kit_hud_award(&hud, ms, line, sub);")
         L.append("    else if (kit_hud_note(&hud, ms, line, sub)) note_loop();")
+        L.append("}")
+        L.append("")
+        L.append("/* PAD-690: the number on this mode's progress panel badge, at once and with no note (a count whose")
+        L.append(" * notes come only every few hits still shows every hit there); not while the mode runs, nor for a mode")
+        L.append(" * with its own meter in the corner (its notes stay off the panel too: David, \"Angry already has its own")
+        L.append(" * meter at the top so we don't need it on the side\") */")
+        L.append("UNUSED static void hud_progress(long long value)")
+        L.append("{")
+        L.append("    char n[24];")
+        L.append("    if (run.on || HUD_METER) return;")
+        L.append('    pm_snprintf(n, sizeof n, "%lld", value < 0 ? 0LL : value);')
+        L.append('    kit_prog_set(hud.slug, "#", n);')
         L.append("}")
         L.append("")
         L.append("/* PAD-658: the gauge at `v`: a bar's slices lit in proportion to a percent, the percent its label (its full")

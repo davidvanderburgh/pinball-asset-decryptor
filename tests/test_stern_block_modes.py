@@ -1358,6 +1358,23 @@ def test_a_progress_note_also_stands_on_the_progress_panel(tmp_path):
     assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in started and "WORDS PadMode_Progress_S1_Num:  " in started
 
 
+def test_the_progress_panel_number_follows_every_hit_with_no_note(tmp_path):
+    """PAD-690 (David: KING CAESAR's badge "only updating every 5 ... all values on the hud indicators need to update
+    live"): a Progress panel block puts the count on the mode's badge at once, with no note in the middle."""
+    p = maser_hud()
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Big loop", "when": "idle"}, "do": [
+        {"op": "change", "var": "loops", "by": num(1)},
+        {"op": "hud_progress", "value": {"k": "op", "op": "-", "a": num(10), "b": var("loops")}}]})
+    p["vars"].append({"name": "loops", "reset": "game"})
+    assert BM.problems(p, SHOTS) == []
+    out = play(tmp_path, p, "shot", "Big loop", "secs", 1, "shot", "Big loop", "secs", 1, "shot", "Big loop", "secs", 1)
+    for n in (9, 8, 7):
+        assert "WORDS PadMode_Progress_S1_Num: %d" % n in out
+    assert "Hud_Award" not in out[out.index(">> shot Big loop"):]                   # no note
+    # a mode with its own corner meter stays off the panel (its meter says it)
+    assert "if (run.on || HUD_METER) return;" in BM.to_c(p, "blk")
+
+
 def test_every_note_under_a_display_of_the_games_shows_at_once(tmp_path):
     """PAD-680 (emulator, the same shots on the 2026-10-07 code-mode card and on the blocks card: a note after 8 of 15
     shots against 4): each note shows at once over the game's shot screen, the second as the first."""

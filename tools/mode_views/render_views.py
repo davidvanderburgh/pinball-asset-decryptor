@@ -258,7 +258,7 @@ def track_of(b):
         return "Light shows"
     if op in ("callout", "sound", "music"):
         return "Sound"
-    if op in ("words", "hud_text", "hud_counter", "hud_gauge", "hud_award", "clip"):
+    if op in ("words", "hud_text", "hud_counter", "hud_gauge", "hud_award", "hud_progress", "clip"):
         return "Screen and HUD"
     if op in ("start_mode", "end_mode", "add_time", "set_time", "multiball"):
         return "Clock"

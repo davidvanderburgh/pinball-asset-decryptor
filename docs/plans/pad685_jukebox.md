@@ -1,57 +1,49 @@
-# PAD-685: Beatles jukebox (one image, a new set of songs every game)
+# PAD-685: Beatles jukebox (one image, a song drawn at every song mode's start)
 
 Ben (Beatles 1.29, 60+ late-era songs) answered the easy/medium/hard ask on 2026-10-23:
 
 - One image, no menu, no choice: "You boot it up and throw the dice". Stackable in a multi-boot later.
-- A new pick each power-up or each game is all he needs; "randomly choosing X songs at the start of
-  each game would be really interesting".
-- 95% of songs fit any of the five song modes (the game clips them at the mode's end). A few are
-  shorter than the longest mode; he will pad those himself.
-- Weighted: about 65% common songs, a few obscure ones now and then. Listing a common song 3x was his
-  workaround, but it could repeat a song in one game, which he does not want.
-- Each song is ONE audio file and ONE intro video with the song name in it. The mode screens, other
-  videos and the "... Champion" text he makes generic, so they are the same for every song.
+- A new pick each power-up or each game is all he needs.
+- 95% of songs fit any of the five song modes (the game clips them at the mode's end).
+- Weighted: about 65% common songs, a few obscure ones now and then, never the same song twice in a game.
+- Each song is ONE audio file and ONE intro video with the song name in it; the mode screens, other videos
+  and the "... Champion" text he makes generic.
 
-## What exists (checked on this branch)
+## What the emulator showed (Beatles 1.29, stock card, a trace build of the runtime)
 
-- Audio: sounds in turn / at random (PAD-565/638) swap a slot's record at `sound_lookup`;
-  `beatles-1.29` is in `sound_modes.TURN_PROVEN`. Each slot picks on its own (`sndt_next`), at most
-  `SNDT_MAX` 16 files, uniform, "any but the last". No link to anything else.
-- Video: clip variants (PAD-446) swap a bank clip by name; Beatles has no `clip_play`, but the port has
-  the clip v2 surface route (`surface_find`, `surface_set_video` 0x4250ec; a clip seen on the glass,
-  item 164). `clip_variants.PROVEN` is Godzilla only. Ben's album card differs in 82 clips of the video
-  bank `60ed7e50...` (and 172 pictures of Element_4x3 `08065a0c...`, which he is making generic), so
-  his song videos are bank clips the game plays by name.
-- Song modes: `cstarts/json/beatles-1.29.json`, five return-checked starts (All My Loving 0x4b220,
-  Drive My Car 0x4da44, Should Have Known Better 0x50558, Ticket to Ride 0x52cdc, It Won't Be Long
-  0x5567c) through song select 0x3ddc4 / descriptor table 0x4b60e0.
+- A song mode starts at its start function (the port's `block_start_0..4`, the song descriptor table
+  0x4b60e0, 0x38 a song, start at +0xc); song select 0x3ddc4 runs when the FAB (switches 52-54), FOUR
+  (78-81) and centre (85-88) drop banks are complete.
+- Its intro is a clip of the video bank asked for by name on the bank's surface, 0-3 s after the start
+  (before or after the music): `FeatureStarts.<Frenzy|Orbits|DropTarget|Spinner|POP>_Start`, with a short
+  version `Feature_Starts_Short.<...>_Start_Short` the game may ask for instead.
+- Its music is request 89/87/85/83/84 (the descriptor's +0x34): an opening record then a body record that
+  loops (All My Loving 419 + 848, Drive My Car 200 + 417, I Should Have Known Better 753 + 669, Ticket to
+  Ride 722 + 431, It Won't Be Long 42 + 667).
+- The game plays a record it is handed WHOLE: a 55 s record swapped into Drive My Car's 19.7 s opening
+  played to its end, and the body was looked up 55 s later. So a song is never cut; swapping every record
+  of the mode gives the song whole, then again while the mode lasts.
 
-## Design (the recommendation built on)
+## What was built
 
-A JUKEBOX in the project: a list of songs, each `{audio, intro clip, weight 1..3}`.
+- Runtime (pad_mode_runtime.c "the jukebox"): `jmode <start site> <intro clips> <record keys>` and
+  `jsong <weight> <record key> <clip>` lines in sounds.cfg; each start site hooked draws a song (weighted,
+  none of the last five), and until the next start every record of the mode and every intro clip of it
+  plays that song's.
+- `plugins/stern/jukebox.py`: the project's songs (`jukebox` sidecar key), the title table, the Audio
+  tab's offer.
+- Write: songs' audio built whole as records of their own (the sounds in turn's road, pseudo modes
+  `sound_modes.juke_mode`), intro videos added to the video bank as `PadJukebox<k>` (the random clips'
+  road), jmode/jsong lines, the pre-flight sizes the videos, the card record keeps each song (`#jsong`)
+  so an extract brings the jukebox back.
+- Audio tab: Jukebox button and window (add songs, intro video, Common / Normal / Rare, play, order,
+  take out). Help topic and de/es/fr words.
 
-1. At each GAME START the runtime deals one song to each of the five song modes: weighted draw
-   without replacement, so no song twice in a game, common songs more often. One setlist per game,
-   shared by its players (Ben's "each game"); a new game deals again.
-2. When a song mode's music is looked up, `sound_lookup` hands the game the dealt song's record (the
-   sndt road, but the index comes from the deal, not `sndt_next`).
-3. When that mode's intro clip is asked for by name, the clip v2 surface hook plays the dealt song's
-   clip (the clip variants road, the index from the same deal), so the video always matches the song.
-4. Records: one per song, whole (the game stops it at the mode's end); in a sound bank when image.bin
-   has no room (PAD-607/608 road). Clips: one bank clip per song (`__PadVar` naming).
-5. Text: none per song (Ben burns the name into the intro video and goes generic elsewhere).
+## Proof (work/artifacts/PAD-685)
 
-## Steps
-
-1. Emulator, Beatles 1.29: per song mode, which sound request / slot is its music and which bank clip
-   is its intro (start each mode, log `sound_lookup` keys and `surface_set_video` names).
-2. Prove clip v2 swaps on Beatles 1.29 (one bank clip, one variant, on the glass); add it to
-   `clip_variants.PROVEN` once seen.
-3. Runtime: `jukebox.cfg` (songs: per mode the stock music key + stock clip name; per song its record
-   key per mode and clip name, weight); deal at game start (the game-start hook the challenge list
-   uses); feed the deal to the sndt and clipv picks.
-4. Write: build the records and clips, write `jukebox.cfg`, lift the 16-file cap for jukebox songs.
-5. GUI: a Jukebox list (song audio, intro video, Common/Rare); before/after shots in
-   work/artifacts/PAD-685.
-6. Proof: two games in the emulator deal different setlists, no repeats, heard record and clip on the
-   glass match; targeted tests for cfg and the build.
+- Stock songs dealt among their modes (runtime only): Drive My Car drew It Won't Be Long, intro and audio
+  swapped (r 0.992 against the stock capture).
+- Write-built override set from the stock extract, three songs: starts drew 1, 3, 2; PadJukebox1 (the
+  Taxman clip) on the glass in place of "I Should Have Known Better"; each song heard (r 0.93-0.96 against
+  its file, others under 0.08); song 3 (81 s) looked up again 81 s in. Write's "only" cfg arms it too.
+- Before/after shots of the Audio tab.

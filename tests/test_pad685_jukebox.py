@@ -407,3 +407,17 @@ def test_an_extract_of_the_card_has_the_jukebox_back(tmp_path):
     JB.save(proj, JB.Jukebox(songs=[JB.Song("mine.wav")]))
     assert MS.jukebox_from_card(proj, cfg) == 0
     assert [s.audio for s in JB.load(proj).songs] == ["mine.wav"]
+
+
+def test_the_build_s_room_check_counts_the_intro_videos(tmp_path):
+    class _Info:
+        duration = 10.0
+    (tmp_path / "video").mkdir()
+    (tmp_path / "video" / "FeatureStarts_Frenzy_Start.mov").write_bytes(b"x")
+    a = tmp_path / "a.mp4"
+    a.write_bytes(b"a" * 1000)
+    JB.save(str(tmp_path), JB.Jukebox(songs=[JB.Song("1.wav", str(a)), JB.Song("2.wav", "")]))
+    got = CV.jukebox_size_bound(str(tmp_path), probe=lambda p: _Info(), rate=lambda p: 8e6)
+    assert got == 10 * 1000000 + CV.CONTAINER_BYTES          # its length at the intro's own rate
+    assert CV.jukebox_size_bound(str(tmp_path / "none")) == 0
+    assert E._unsized_bytes(str(tmp_path / "none"), [], [], ()) == 0

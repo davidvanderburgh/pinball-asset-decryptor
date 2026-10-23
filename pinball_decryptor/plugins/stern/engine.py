@@ -6950,9 +6950,9 @@ def _unsized_bytes(assets_dir, mode_list, code_list, radimg_edits, variants=None
     size (:func:`_kept_size_growth`), and (PAD-446) each clip a slot plays
     at random (:func:`.clip_variants.size_bound`).  Each is an upper bound,
     so a build that passes has room for them."""
-    total = 0
+    from . import clip_variants as _CV
+    total = _CV.jukebox_size_bound(assets_dir)     # PAD-685: the jukebox's intro videos
     if variants:
-        from . import clip_variants as _CV
         total += _CV.size_bound(assets_dir, variants)
     if mode_list or code_list:
         from . import mode_project as _MP

@@ -554,6 +554,33 @@ def size_bound(project, variants=None, probe=None, rate=None):
     return total
 
 
+def jukebox_size_bound(project, probe=None, rate=None):
+    """PAD-685: an upper bound of what the jukebox's intro videos add to the games partition, sized as
+    :func:`size_bound` sizes a random clip: each whole at the larger of its own size and its length at the
+    intro clip's stock bitrate (the first song mode's of a title the project has), plus its container."""
+    from . import jukebox as JB
+    from ...core import video_slots as VS
+    if probe is None:
+        from ...core.video import detect_video_info as probe
+    rate = rate or VS._clip_bitrate
+    files = [s.video for s in JB.load(project).songs if s.video and os.path.isfile(s.video)]
+    if not files:
+        return 0
+    bps = None
+    for modes in JB.TITLES.values():
+        intro = os.path.join(project, *modes[0].intros[0].split("/"))
+        if os.path.isfile(intro):
+            bps = rate(intro)
+            break
+    bps = float(bps or STOCK_RATE_FALLBACK)
+    total = 0
+    for src in files:
+        got = probe(src)
+        seconds = float(getattr(got, "duration", 0) or 0)
+        total += max(os.path.getsize(src), int(seconds * bps / 8)) + CONTAINER_BYTES
+    return total
+
+
 def describe(vb):
     """One sentence for the build's summary."""
     if vb is None or not vb.slots:

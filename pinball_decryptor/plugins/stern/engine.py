@@ -2614,15 +2614,21 @@ def _write_sound_requests(emu, game_real_path, image_path, params, output_dir,
                 also = {int(k): v[1] for k, v in got.items() if v[1]}
             except Exception:
                 idx_of, also = None, {}
+            # A map naming no sound is a failed resolve, never the card's answer: one that
+            # got cached was handed to every later extract of the card, so its Audio tab
+            # never had a Requests column (PAD-635: Star Wars, X-Men and Venom here).
+            if not idx_of:
+                idx_of, also = None, {}
         if idx_of is None:
             idx_of = _cs.resolve_requests(emu, params, lists, fw, also=also,
                                             ceiling=fragments)
-            try:
-                with open(cache, "w", encoding="utf-8") as f:
-                    json.dump({str(k): [idx_of.get(k, []), also.get(k, [])]
-                               for k in set(idx_of) | set(also)}, f)
-            except Exception:
-                pass
+            if idx_of:
+                try:
+                    with open(cache, "w", encoding="utf-8") as f:
+                        json.dump({str(k): [idx_of.get(k, []), also.get(k, [])]
+                                   for k in set(idx_of) | set(also)}, f)
+                except Exception:
+                    pass
         _cs.write_requests(os.path.join(output_dir, _cs.REQUESTS_TSV), lists,
                            idx_of, _cs.menu_names(fw, lists),
                            also=also if idx_of else None)

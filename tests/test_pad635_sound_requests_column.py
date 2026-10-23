@@ -184,3 +184,42 @@ def test_why_there_is_no_column(tmp_path):
         os.remove(os.path.join(proj, CS.REQUESTS_TSV))
         _open(w, proj)
         assert w.state("audio")["req_note"] == CS.WHY_EXTRACT_AGAIN
+
+
+def test_a_map_naming_nothing_is_never_cached(tmp_path, monkeypatch):
+    """Round 2: a resolve that named no sound was cached, and every later extract of the card
+    reused it, so its Audio tab never had a Requests column (Star Wars 1.31, X-Men 0.98 and
+    Venom 1.07 on this PC). Nothing named is not cached, and such a cache is resolved again."""
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern import info
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    monkeypatch.setattr(E, "_params_cache_dir", lambda: str(cache_dir))
+    monkeypatch.setattr(E, "_fingerprint", lambda g, i: "a" * 32)
+    monkeypatch.setattr(info, "container_counts", lambda head: (10, 10))
+    monkeypatch.setattr(CS, "request_table", lambda fw, frags: (2, [[1], [2]], None, None))
+    monkeypatch.setattr(CS, "menu_names", lambda fw, lists: {})
+    answers = [{}, {0: [5]}]
+    calls = []
+
+    def resolve(emu, params, lists, fw, also=None, ceiling=None):
+        calls.append(1)
+        return answers[len(calls) - 1]
+    monkeypatch.setattr(CS, "resolve_requests", resolve)
+    gr, img = tmp_path / "game", tmp_path / "image.bin"
+    gr.write_bytes(b"\0" * 64)
+    img.write_bytes(b"\0" * 256)
+    out = tmp_path / "proj"
+    out.mkdir()
+    cache = E._requests_cache_path("a" * 32)
+    assert E._write_sound_requests(None, str(gr), str(img), [], str(out), None) == 0
+    assert not os.path.exists(cache)
+    # an empty map cached by an earlier version is resolved again too
+    with open(cache, "w", encoding="utf-8") as f:
+        f.write("{}")
+    assert E._write_sound_requests(None, str(gr), str(img), [], str(out), None) == 1
+    assert len(calls) == 2
+    assert CS.sound_uses(str(out)) == {5: [(0, "")]}
+    # and the good map is the one kept
+    assert E._write_sound_requests(None, str(gr), str(img), [], str(out), None) == 1
+    assert len(calls) == 2

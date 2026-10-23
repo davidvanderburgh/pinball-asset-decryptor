@@ -463,7 +463,7 @@ function JukeboxModal({ data, onClose }) {
     <div class="stack" style="gap:10px">
       <p class="aud-p">${d.tip}</p>
       ${d.why ? html`<${Note} kind="warn">${d.why}<//>` : null}
-      ${songs.length ? html`<div class="aud-juke"><table class="tbl">
+      ${songs.length ? html`<div class="aud-juke"><table>
         <thead><tr><th>#</th><th>Song</th><th>Intro video</th><th>How often</th><th></th></tr></thead>
         <tbody>${songs.map((g) => html`<tr class=${cx(g.gone && "gone")} title=${g.gone ? "A file of this song is not on this PC any more" : ""}>
           <td class="muted">${g.k}</td>

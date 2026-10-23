@@ -960,7 +960,7 @@ CHALLENGE_NEW = 16                   #: ModeSpec.challenge for a challenge of th
 #: CHALLENGE entry whose flippers step through every challenge of the modes' own, one picked starting its mode as a
 #: one-ball challenge game
 CHALLENGE_MENU_FRAME_PROVEN = {
-    "godzilla_le-1.16": "PAD-686 (the emulator proof is in progress)",
+    "godzilla_le-1.16": "PAD-686, 2026-10-22: one MODE CHALLENGE entry stepped through 13 modes; JET JAGUAR, KING KONG and OXYGEN DESTROYER picked, each started as the ball did (one ball)",
 }
 #: the runtime's room for challenges of the modes' own (N_OWN_CHALLENGE): one MODE CHALLENGE entry holds them all
 CHALLENGE_FRAME_ROOM = 16

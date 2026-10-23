@@ -10493,13 +10493,17 @@ static void challenge_menu_picked(unsigned *r)
  * wrapping; right bit 2: on), applies the index under the cursor LIVE (GamePlayModes +8, then its flags), and draws the
  * index's caption and name messages. David (2026-10-22): "One MODE CHALLENGE entry whose flippers step through all 13
  * modes, then the menu moves on" - thirteen entries would not fit in nine. So at the frame point (`site
- * challenge_menu_frame`, the buttons just read in r0: hook_full) the runtime appends the King of the Monsters
+ * challenge_menu_frame`: inside the loop, which jumps back past where the buttons are first read - the buttons in
+ * `value challenge_menu_frame_buttons_reg`, the cursor in `..._cursor_reg`; hook_full) the runtime appends the King of the Monsters
  * challenge's own index (`value challenge_menu_frame_entry`) a second time: picked, the game makes its own real one-ball
  * challenge game of it, and the ball's start hands it to the mode (challenge_ball_start, `value challenge_menu_slot 0`:
  * its flag cleared, the game's own never starts). While the cursor is on that entry its name message (the challenge's
  * `challenge_name_msg_0`) letters the mode's name, and a flipper press steps to the next or previous mode instead of
  * moving the cursor - past the last (or before the first) it moves on as the game's own would. Off it, the game's words
  * again. (tests lift challenge_frame_step verbatim) */
+static void game_flag_clear(unsigned id);
+static void game_flag_set(unsigned id);
+
 static int frame_sub;                       /* the mode the entry shows: a position among the modes' own */
 static int frame_on;                        /* the cursor was on our entry last frame */
 static unsigned long frame_sp;              /* the menu's frame we appended to (a new menu: a new list) */
@@ -10533,12 +10537,21 @@ static void challenge_menu_frame(unsigned *r)
     unsigned lbit = (unsigned)pm_port_value("challenge_menu_frame_left", 4);
     unsigned rbit = (unsigned)pm_port_value("challenge_menu_frame_right", 2);
     unsigned creg = (unsigned)pm_port_value("challenge_menu_frame_cursor_reg", 6);
+    unsigned breg = (unsigned)pm_port_value("challenge_menu_frame_buttons_reg", 0);
     long msg = pm_port_value("challenge_name_msg_0", 0);
+    long slot = pm_port_value("challenge_menu_slot", -1), flag = 0;
+    unsigned *gpm = data("game_play_modes") && pm_port_value("challenge_mode_plain", -1) >= 0
+        ? (unsigned *)(unsigned long)(data("game_play_modes") + (unsigned)pm_port_value("game_play_mode_at", 8)) : 0;
     static unsigned ours_at;                 /* the list position of our entry */
     static int said_n, room_said;
     int own[N_OWN_CHALLENGE], n = 0, k, on, prev_sub = frame_sub;
     unsigned cursor, eat;
-    if (creg > 12) return;
+    if (creg > 12 || breg > 12) return;
+    if (slot >= 0) {
+        char key[24];
+        pm_snprintf(key, sizeof key, "challenge_flag_%ld", slot);
+        flag = pm_port_value(key, 0);
+    }
     cursor = r[creg];
     for (k = 0; k < N_OWN_CHALLENGE; k++)
         if (own_challenge[k].fn) own[n++] = k;
@@ -10560,28 +10573,37 @@ static void challenge_menu_frame(unsigned *r)
     }
     on = cursor == ours_at;
     if (on) {
-        frame_sub = challenge_frame_step(n, frame_sub, (r[0] & lbit) != 0, (r[0] & rbit) != 0, &eat);
-        if (eat == 1) r[0] &= ~lbit;
-        if (eat == 2) r[0] &= ~rbit;
+        frame_sub = challenge_frame_step(n, frame_sub, (r[breg] & lbit) != 0, (r[breg] & rbit) != 0, &eat);
+        if (eat == 1) r[breg] &= ~lbit;
+        if (eat == 2) r[breg] &= ~rbit;
         if (msg > 0) pm_message_set((unsigned)msg, own_challenge[own[frame_sub]].name);
         if (!frame_on || frame_sub != prev_sub)
             say("challenge menu: MODE CHALLENGE shows %s (%d of %d)", own_challenge[own[frame_sub]].name, frame_sub + 1, n);
         own_pending = own[frame_sub];
+        /* the menu applied the entry LIVE as the cursor came (the game-play mode's index, then its flags), and the
+         * game's start applies that index's flags again: left on King of the Monsters, the game starts its battle with
+         * the game, before any ball's start, and the picked mode is refused ("a battle is running"). So the pick is
+         * Standard's (`value challenge_mode_plain`) and the challenge's flag cleared: the game plays a plain game, the
+         * menu's pick makes it the mode's one-ball challenge game (`value challenge_menu_sets_on`) */
+        if (gpm) *gpm = (unsigned)pm_port_value("challenge_mode_plain", 1);
+        if (flag > 0) game_flag_clear((unsigned)flag);
     } else {
         if (frame_on) {
             if (msg > 0) pm_message_restore((unsigned)msg);      /* the game's King of the Monsters again */
             own_pending = -1;
+            if (cursor < *count && list[cursor] == entry) {     /* onto the game's own entry: its pick again */
+                if (gpm) *gpm = entry;
+                if (flag > 0) game_flag_set((unsigned)flag);
+            }
         }
         /* this frame's press moves the cursor after this point: onto ours from before it, or from after it (a wrap) */
-        if ((r[0] & rbit) && (cursor + 1 == ours_at || (ours_at == 0 && cursor + 1 == *count)))
+        if ((r[breg] & rbit) && (cursor + 1 == ours_at || (ours_at == 0 && cursor + 1 == *count)))
             frame_sub = challenge_frame_arrive(n, 1);
-        else if ((r[0] & lbit) && (cursor == ours_at + 1 || (cursor == 0 && ours_at + 1 == *count)))
+        else if ((r[breg] & lbit) && (cursor == ours_at + 1 || (cursor == 0 && ours_at + 1 == *count)))
             frame_sub = challenge_frame_arrive(n, 0);
     }
     frame_on = on;
 }
-
-static void game_flag_clear(unsigned id);
 
 /* PAD-619: challenge n's pick in this game - 1 / 0, -1 unknown: its flag, or the game-play mode's index */
 static int challenge_picked(unsigned n)

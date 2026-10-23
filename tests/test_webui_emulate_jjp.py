@@ -495,3 +495,128 @@ def test_fix_stuck_state_spins_its_own_button_and_only_greys_start(
         s = w.state(NS)
         assert s["fix_label"] == "Fix stuck state" and not s["fix_busy"]
         assert s["go_enabled"] and not s["go_busy"]
+
+
+# ------------------------------------- the key on another PC (PAD-529)
+def test_key_setting_is_saved_and_checked(tmp_path):
+    from pinball_decryptor.plugins.jjp import remote_key as rk
+    with web_app(tmp_path, mfr="jjp") as w:
+        s = w.state(NS)
+        assert s["key_where"] == "local" and s["key_msg"] == ""
+        w.call("ui.set", NS, "key_where", "usbip")
+        w.call("ui.set", NS, "key_server", "bad host")
+        w.drain()
+        s = w.state(NS)
+        assert s["key_bad"] and "not a computer name" in s["key_msg"]
+        assert rk.current() is None
+        w.call("ui.set", NS, "key_server", "192.168.1.20")
+        w.call("ui.set", NS, "key_busid", "1-4")
+        w.drain()
+        s = w.state(NS)
+        assert not s["key_bad"]
+        assert "bus 1-4 on 192.168.1.20" in s["key_msg"]
+        assert rk.current() == rk.Remote("192.168.1.20", 3240, "1-4")
+        assert w.app._settings[rk.SETTINGS_KEY] == {
+            "where": "usbip", "server": "192.168.1.20", "busid": "1-4"}
+        # the Extract tab says where its dongle decrypt takes the key from
+        w.call("ui.select_tab", "extract")
+        w.drain()
+        assert "bus 1-4 on 192.168.1.20" in w.state("extract")["dongle_where"]
+        w.call("ui.set", NS, "key_where", "local")
+        w.drain()
+        assert rk.current() is None
+
+
+def test_a_saved_key_server_is_restored(tmp_path):
+    from pinball_decryptor.plugins.jjp import remote_key as rk
+    entry = {"where": "usbip", "server": "keybox:3241", "busid": "2-1"}
+    with web_app(tmp_path, mfr="jjp",
+                 settings={rk.SETTINGS_KEY: entry}) as w:
+        s = w.state(NS)
+        assert (s["key_where"], s["key_server"], s["key_busid"]) == (
+            "usbip", "keybox:3241", "2-1")
+        assert rk.current() == rk.Remote("keybox", 3241, "2-1")
+    rk.configure({"where": "local"})
+
+
+def test_a_network_key_says_what_the_server_said_not_plug_it_in(rig,
+                                                                tmp_path):
+    with web_app(tmp_path, mfr="jjp") as w:
+        w.run(_svc(w)._apply, {"wsl": "1", "game_procs": "0",
+                               "dongle_present": "0",
+                               "key_remote": "unreachable",
+                               "key_remote_where": "bus 1-4 on keybox"})
+        s = w.state(NS)
+        assert s["state_label"] == "Key server not answering"
+        assert s["tone"] == "warn" and "bus 1-4 on keybox" in s["state_hint"]
+        assert s["note"] == ""
+        w.run(_svc(w)._apply, {"wsl": "1", "game_procs": "0",
+                               "dongle_present": "0",
+                               "key_remote": "offered",
+                               "key_remote_where": "bus 1-4 on keybox"})
+        s = w.state(NS)
+        assert s["state_label"] == "Key ready on the key server"
+        assert s["tone"] == ""
+
+
+def _remote_on(w, monkeypatch, calls, attach_result=("attached", "0")):
+    from pinball_decryptor.plugins.jjp import remote_key as rk
+    svc = _svc(w)
+    w.call("ui.set", NS, "key_where", "usbip")
+    w.call("ui.set", NS, "key_server", "keybox")
+    w.call("ui.set", NS, "key_busid", "1-4")
+    w.drain()
+
+    def attach(run, r, tag):
+        calls.append(("attach", r.busid, tag))
+        if isinstance(attach_result, Exception):
+            raise attach_result
+        return attach_result
+
+    monkeypatch.setattr(rk, "attach", attach)
+    monkeypatch.setattr(rk, "release", lambda run, r, tag: (
+        calls.append(("release", r.busid, tag)) or ("detached", "0")))
+    monkeypatch.setattr(svc, "_wait_for_key", lambda tries=12: True)
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
+    from pinball_decryptor.webui import emulate_jjp_core as jjp
+    monkeypatch.setattr(jjp, "attach_dongle_cmd", _boom)
+    return svc
+
+
+def test_start_attaches_from_the_server_and_stop_hands_it_back(
+        rig, tmp_path, monkeypatch):
+    with web_app(tmp_path, mfr="jjp") as w:
+        calls = []
+        svc = _remote_on(w, monkeypatch, calls)
+        assert svc._attach_dongle()
+        assert calls == [("attach", "1-4", "emulate")]
+        svc._release_remote()
+        svc._release_remote()           # nothing left to give back
+        assert calls[1:] == [("release", "1-4", "emulate")]
+
+
+def test_a_key_in_use_elsewhere_is_named_and_cleared_at_the_next_start(
+        rig, tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.jjp import remote_key as rk
+    with web_app(tmp_path, mfr="jjp") as w:
+        calls = []
+        err = rk.RemoteKeyError("busy", rk.message(
+            "busy", rk.Remote("keybox", 3240, "1-4")))
+        svc = _remote_on(w, monkeypatch, calls, attach_result=err)
+        assert not svc._attach_dongle()
+        w.drain()
+        assert svc._key_verdict[0] == "Key in use by another PC"
+        assert w.state(NS)["state_label"] == "Key in use by another PC"
+        assert svc._remote_lease is None
+        # the next Start clears it, so a wrong-key exit of THAT run is
+        # reported as one and not as this old fault
+        from pinball_decryptor.webui import emulate_jjp_common as common
+        monkeypatch.setattr(common, "rig_off", lambda: False)
+        seen = []
+        monkeypatch.setattr(svc, "_attach_dongle", lambda: (
+            seen.append((svc._wrong_key, svc._key_verdict[0])) or False))
+        w.window.jjp_emulate_iso_var.set(r"D:\x.iso")
+        w.call(NS + ".toggle")
+        assert _wait(lambda: seen and not svc._busy)
+        assert seen == [(False, "Wrong key for this game")]

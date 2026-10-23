@@ -310,6 +310,7 @@ class ExtractTab(TabService):
 
         if not getattr(caps, "dongle_extract", False):
             self.extract_dongle_var.set(False)
+        self._show_dongle_where()
 
         # the per-type categories, rebuilt default-on, then the saved state
         self._extract_category_vars = {}
@@ -923,8 +924,25 @@ class ExtractTab(TabService):
                 self._dmd_tick(rearm=False)
                 self._stop_dmd_pump()
 
+    def _show_dongle_where(self):
+        """Where a dongle decrypt takes the key from (PAD-529): the PC it is
+        plugged into, or a key server set on the Emulate tab."""
+        if not self.cap("dongle_extract"):
+            self.set(dongle_where="")
+            return
+        from ...plugins.jjp import remote_key
+        remote = remote_key.current()
+        self.set(dongle_where=(
+            "Key: plugged into this PC. A key in another PC can be used "
+            "over the network instead: set it under Security key on the "
+            "Emulate tab." if remote is None else
+            "Key: %s, attached over the network for the extract and handed "
+            "back after. Change it under Security key on the Emulate tab."
+            % remote_key.describe(remote)))
+
     def on_show(self):
         self._refresh_recents()
+        self._show_dongle_where()
         # the card may have been replaced on disk while away
         self._refresh_gate()
 

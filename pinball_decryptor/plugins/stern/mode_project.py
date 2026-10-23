@@ -956,10 +956,20 @@ CHALLENGE_MENU_PROVEN = {
 #: Bond's: Standard, Competition and the five challenges (Tournament and DJ Mixer when switched on take two more)
 CHALLENGE_MENU_GAMES_OWN = 7
 CHALLENGE_NEW = 16                   #: ModeSpec.challenge for a challenge of the mode's own (the runtime's first own slot)
+#: PAD-686: the builds whose start menu lists game-mode indices (Godzilla's), seen in the emulator showing ONE MODE
+#: CHALLENGE entry whose flippers step through every challenge of the modes' own, one picked starting its mode as a
+#: one-ball challenge game
+CHALLENGE_MENU_FRAME_PROVEN = {
+    "godzilla_le-1.16": "PAD-686, 2026-10-22: one MODE CHALLENGE entry stepped through 13 modes; JET JAGUAR, KING KONG and OXYGEN DESTROYER picked, each started as the ball did (one ball)",
+}
+#: the runtime's room for challenges of the modes' own (N_OWN_CHALLENGE): one MODE CHALLENGE entry holds them all
+CHALLENGE_FRAME_ROOM = 16
 
 
 def _challenge_menu(key, port):
     """PAD-615 round 2: how many challenges of the modes' own the build's start menu has room for (0 = none)."""
+    if port and key in CHALLENGE_MENU_FRAME_PROVEN and "challenge_menu_frame" in port["site"]:
+        return CHALLENGE_FRAME_ROOM                                  # PAD-686: one entry, every mode
     if not port or key not in CHALLENGE_MENU_PROVEN or not {"challenge_menu", "challenge_menu_pick"} <= set(port["site"]):
         return 0
     try:
@@ -988,7 +998,7 @@ def _challenge_cannot(key, label, port=None):
                                   "is not one the app can add a challenge to." % label),)
         return (("challenge", "%s's Player Challenge mode has no list of challenges a mode of yours can take a place "
                               "in, and no start menu the app can add one to." % label),)
-    if key in CHALLENGE_PROVEN or key in CHALLENGE_MENU_PROVEN:
+    if key in CHALLENGE_PROVEN or key in CHALLENGE_MENU_PROVEN or key in CHALLENGE_MENU_FRAME_PROVEN:
         return ()
     return (("challenge", "The app has found %s's challenges but has not yet seen a mode of yours start from one in "
                           "the emulator, so it cannot here yet." % label),)

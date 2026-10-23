@@ -315,11 +315,64 @@ int main(void)
     assert rows["first_now_old"] == "-"
 
 
+@needs_cc
+def test_the_lock_is_closed_while_one_of_ours_runs(tmp_path):
+    """PAD-684 (David's Premium: a building lock lit before a mode of ours stayed open through it, balls locked, and
+    the third lock's Godzilla Multiball - which our mode keeps from starting - never came: ball search). While one of
+    ours runs, a building parked above floor 0 (floor 1: the lock lit) goes to 0, within the moves' own limits."""
+    src = _rt()
+    code = "#include <stdio.h>\n" + "\n".join(re.findall(r"^#define MAGNET_\w+ .*$", src, re.M)) + "\n" + \
+        _lift(src, "static const char *building_close_why(") + r"""
+static unsigned long st[MAGNET_PER_MIN];
+static void t(const char *label, int run, int game, int aside, int back, int asked, int at, int to, int busy, int off,
+              unsigned long last, unsigned long now)
+{
+    const char *w = building_close_why(run, game, aside, back, asked, at, to, busy, off, last, now, st);
+    printf("%s|%s\n", label, w ? w : "-");
+}
+int main(void)
+{
+    unsigned i;
+    t("lit", 1, 1, 0, 0, -1, 1, 1, 0, 0, 0, 100000);
+    t("kept_closed", 1, 1, 0, 0, 0, 1, 1, 0, 0, 90000, 100000);
+    t("no_mode", 0, 1, 0, 0, -1, 1, 1, 0, 0, 0, 100000);
+    t("attract", 1, 0, 0, 0, -1, 1, 1, 0, 0, 0, 100000);
+    t("games_mode", 1, 1, 1, 0, -1, 1, 1, 0, 0, 0, 100000);
+    t("putting_back", 1, 1, 0, 1, -1, 1, 1, 0, 0, 0, 100000);
+    t("its_own_floor", 1, 1, 0, 0, 3, 3, 3, 0, 0, 0, 100000);
+    t("closed", 1, 1, 0, 0, -1, 0, 0, 0, 0, 0, 100000);
+    t("moving", 1, 1, 0, 0, -1, 0, 1, 0, 0, 0, 100000);
+    t("busy", 1, 1, 0, 0, -1, 1, 1, 1, 0, 0, 100000);
+    t("off", 1, 1, 0, 0, -1, 1, 1, 0, 1, 0, 100000);
+    t("cool", 1, 1, 0, 0, -1, 1, 1, 0, 0, 98000, 100000);
+    for (i = 0; i < MAGNET_PER_MIN; i++) st[i] = 50000 + i * 4000;
+    t("six", 1, 1, 0, 0, -1, 1, 1, 0, 0, 0, 100000);
+    return 0;
+}
+"""
+    (tmp_path / "t.c").write_text(code)
+    r = subprocess.run([CC, "-std=gnu17", "-Wall", "-o", str(tmp_path / "t"), str(tmp_path / "t.c")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    out = subprocess.run([str(tmp_path / "t")], capture_output=True, text=True, timeout=30).stdout
+    rows = dict(l.split("|", 1) for l in out.strip().splitlines())
+    assert rows["lit"] == rows["kept_closed"] == "-"
+    assert rows["no_mode"] == rows["attract"] == rows["games_mode"] == rows["putting_back"] == "not ours to close now"
+    assert rows["its_own_floor"] == "the mode has it on a floor of its own"
+    assert rows["closed"] == "closed already" and rows["moving"] == rows["busy"] == "moving"
+    assert rows["off"].startswith("the stepper is off") and rows["cool"].startswith("the last move started")
+    assert rows["six"].startswith("six moves")
+    keep = _lift(src, "static void building_keep_closed(")
+    assert "building_send(obj, 0);" in keep and "bld.home = at" in keep and "bld.ours = 0" in keep
+    assert "building_keep_closed();" in _lift(src, "static void building_tick(")
+
+
 def test_the_move_is_the_games_own_and_put_back_on_every_end():
     src = _rt()
     move = _lift(src, "int pm_building(")
     assert move.count("building_send(") == 1 and "coil_virtual(obj, 2)" in move and "coil_virtual(obj, 0)" in move
-    assert len(re.findall(r"\bbuilding_send\(", src)) == 3, "its definition, the move and the put-back - nothing else"
+    assert len(re.findall(r"\bbuilding_send\(", src)) == 4, \
+        "its definition, the move, the put-back and (PAD-684) the lock closed while ours runs - nothing else"
     assert 'building_let_go("the mode ended")' in _lift(src, "void pm_end(void)")
     assert 'building_let_go("the ball ended")' in _lift(src, "static void on_ball_end(")
     assert "building_tick();" in _lift(src, "static void on_tick(")

@@ -97,6 +97,10 @@
     "reset": "mode"
    },
    {
+    "name": "swing",
+    "reset": "mode"
+   },
+   {
     "name": "spike l",
     "reset": "mode"
    },
@@ -130,6 +134,9 @@
    },
    {
     "name": "say"
+   },
+   {
+    "name": "swing"
    }
   ],
   "hud": {
@@ -1335,6 +1342,102 @@
        "k": "num",
        "v": 1
       }
+     },
+     {
+      "op": "shield",
+      "where": "toward"
+     },
+     {
+      "op": "set",
+      "var": "swing",
+      "value": {
+       "k": "num",
+       "v": 1
+      }
+     },
+     {
+      "op": "timer_start",
+      "timer": "swing",
+      "ms": {
+       "k": "num",
+       "v": 8000
+      }
+     }
+    ]
+   },
+   {
+    "hat": {
+     "kind": "timer_done",
+     "timer": "swing"
+    },
+    "do": [
+     {
+      "op": "if",
+      "cond": {
+       "k": "running"
+      },
+      "then": [
+       {
+        "op": "if",
+        "cond": {
+         "k": "cmp",
+         "op": "=",
+         "a": {
+          "k": "var",
+          "name": "swing"
+         },
+         "b": {
+          "k": "num",
+          "v": 1
+         }
+        },
+        "then": [
+         {
+          "op": "shield",
+          "where": "away"
+         },
+         {
+          "op": "set",
+          "var": "swing",
+          "value": {
+           "k": "num",
+           "v": 0
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "swing",
+          "ms": {
+           "k": "num",
+           "v": 4000
+          }
+         }
+        ],
+        "else": [
+         {
+          "op": "shield",
+          "where": "toward"
+         },
+         {
+          "op": "set",
+          "var": "swing",
+          "value": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
+          "op": "timer_start",
+          "timer": "swing",
+          "ms": {
+           "k": "num",
+           "v": 8000
+          }
+         }
+        ]
+       }
+      ],
+      "else": null
      }
     ]
    },
@@ -4422,6 +4525,10 @@
      {
       "op": "timer_stop",
       "timer": "say"
+     },
+     {
+      "op": "timer_stop",
+      "timer": "swing"
      },
      {
       "op": "set",

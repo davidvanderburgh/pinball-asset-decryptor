@@ -1873,8 +1873,18 @@ the adjustments (desk only: `pm_shield` says 0).
 ## The building (Godzilla Premium/LE, PAD-393)
 
 Godzilla Premium and LE have a building on a stepper motor. The game moves it by FLOOR: 0 is where it
-rests (beside its home switch, BUILDING UP), and 1, 2 and 3 are 2500, 5000 and 7500 steps further. A mode
-asks for a floor and nothing else:
+rests (beside its home switch, BUILDING UP), and 1, 2 and 3 are 2500, 5000 and 7500 steps further.
+
+**Its lock is closed while one of our modes runs (PAD-684).** The game parks the building on floor 1 while its
+lock is lit (0x7d24c asks RuleBuildingLocks' "lock lit" query, 0x12e7d8, and moves it there; floor 0 when it is
+not), and on floor 1 a ball goes into the building. A lock lit before one of our modes began stayed open through
+it: balls locked, and the third lock's Godzilla Multiball, which the mode keeps from starting, never came - the game
+went into ball search (David's Premium, 2026-10-22). So while one of ours runs and has not put the building on a
+floor of its own, the runtime sends a building parked above floor 0 to 0, within the limits below, and puts it back
+where it was when the mode ends, which reopens the lock (mode.log: `building: floor 1 -> 0 - its lock closed while
+<mode> runs`). Nothing to do in a mode for it.
+
+A mode asks for a floor and nothing else:
 
 ```c
 pm_building(3);                           /* the floor furthest from home, at the operator's speeds */
@@ -3970,6 +3980,31 @@ the game's own (flags 29, 37). The start menu on every build of the generation: 
   the entry itself and known after by the name it points to, and the ball's start hands the game to the mode -
   one ball, as every mode's challenge game. Other layouts name their fields: `value challenge_menu_kind_at`,
   `challenge_menu_caption_at`, `challenge_menu_caption2_at`, `challenge_menu_name_at`.
+* **One entry for every mode (PAD-686)** - Godzilla Premium/LE 1.16's start menu lists game-mode table indices
+  (u32s on its stack, room for nine), not entries of its own, so thirteen modes would not fit. The runtime appends
+  ONE more entry, King of the Monsters' own index a second time, at a point inside the menu's loop:
+
+  ```
+  site  challenge_menu_frame             <inside the loop, past where it jumps back: the buttons in a register>
+  value challenge_menu_frame_buttons_reg 5      # left flipper bit 4, right bit 2
+  value challenge_menu_frame_cursor_reg  6
+  value challenge_menu_frame_list_at     300    # count at 64, cap 9
+  value challenge_menu_frame_entry       4      # the index the entry repeats
+  value challenge_menu_slot              0
+  data  game_play_modes                  0x007b2814
+  value challenge_mode_plain             1
+  value challenge_menu_sets_on           1
+  ```
+
+  With the cursor on it the name message (`challenge_name_msg_0`) letters the mode shown, and a flipper press steps
+  to the next or previous mode instead of moving the cursor; past the last (or before the first) it moves on as the
+  game's own would. The menu applies the entry under the cursor live and the game applies the picked index's flags
+  again as the game starts, so a pick left on King of the Monsters starts its battle with the game and the mode is
+  refused ("a battle is running"): on our entry the pick is Standard's and flag 40 cleared, and the menu's pick alone
+  makes it the mode's one-ball challenge game. Back onto the game's own entry, index 4 and flag 40 again.
+  Proven (emulator, 2026-10-22, David's Heisei card with 13 modes, hidden, muted): the entry stepped through all 13
+  names and on to STANDARD; JET JAGUAR, KING KONG and OXYGEN DESTROYER picked, each START as the ball started, one
+  ball; MODE CHALLENGE then left back onto KING OF THE MONSTERS played the game's own challenge (its battle, no mode).
 * **No challenge at all** - King Kong 0.97, X-Men 0.98 and D&D have none among their game modes; Bond 60th's only
   one is Challenge Mode, the whole game against the clock: their profiles say so.
 

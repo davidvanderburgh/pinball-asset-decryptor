@@ -741,37 +741,56 @@
         ],
         "else": [
          {
+          "op": "change",
+          "var": "masers",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
           "op": "if",
           "cond": {
            "k": "cmp",
-           "op": "<",
+           "op": ">=",
            "a": {
-            "k": "balls"
+            "k": "var",
+            "name": "masers"
            },
            "b": {
-            "k": "num",
-            "v": 2
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 5
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "fired"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
            }
           },
           "then": [
            {
-            "op": "change",
-            "var": "masers",
-            "by": {
-             "k": "num",
-             "v": 1
-            }
-           },
+            "op": "start_mode"
+           }
+          ],
+          "else": [
            {
-            "op": "if",
-            "cond": {
-             "k": "cmp",
-             "op": ">=",
+            "op": "hud_award",
+            "text": "MASER TARGET",
+            "value": {
+             "k": "op",
+             "op": "-",
              "a": {
-              "k": "var",
-              "name": "masers"
-             },
-             "b": {
               "k": "op",
               "op": "*",
               "a": {
@@ -790,52 +809,16 @@
                 "v": 1
                }
               }
+             },
+             "b": {
+              "k": "var",
+              "name": "masers"
              }
             },
-            "then": [
-             {
-              "op": "start_mode"
-             }
-            ],
-            "else": [
-             {
-              "op": "hud_award",
-              "text": "MASER TARGET",
-              "value": {
-               "k": "op",
-               "op": "-",
-               "a": {
-                "k": "op",
-                "op": "*",
-                "a": {
-                 "k": "num",
-                 "v": 5
-                },
-                "b": {
-                 "k": "op",
-                 "op": "+",
-                 "a": {
-                  "k": "var",
-                  "name": "fired"
-                 },
-                 "b": {
-                  "k": "num",
-                  "v": 1
-                 }
-                }
-               },
-               "b": {
-                "k": "var",
-                "name": "masers"
-               }
-              },
-              "sub": "MORE TO OPEN FIRE",
-              "seconds": 3
-             }
-            ]
+            "sub": "MORE TO OPEN FIRE",
+            "seconds": 3
            }
-          ],
-          "else": null
+          ]
          }
         ]
        }

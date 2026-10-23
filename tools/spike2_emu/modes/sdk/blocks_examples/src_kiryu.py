@@ -7,8 +7,8 @@ costs more each start), stages with their own shots (EHoH), a multiplier carried
 on, and failing still pays.
 
 - LIGHT IT: 60 spins of the Shield ramp spinner (the Mechagodzilla spinner) start it at once; 120 the next time, then
-  180 (a note every 10 spins says how many are left and SHOOT THE SPINNER). No spin counts in a multiball
-  (PAD-669). A start that has to wait (a multiball, one of the game's modes) waits for the next spin.
+  180 (a note every 10 spins says how many are left and SHOOT THE SPINNER). A multiball's spins count too
+  (PAD-690). A start that has to wait (a multiball, one of the game's modes) waits for the next spin.
 - STAGE 1, ABSOLUTE ZERO (the C's rule): the ramps, the Building and the Big loop charge 15%, the Maser 10%, each
   Shield target 8%, every spin 1% (all of them lit ice blue, the spinner's ATTACK MECHA insert too, PAD-669: CHARGE
   IT: SHOOT ANY LIT SHOT); each charging shot pays 750,000 (a spin 10,000) and puts a clock under 15 s back to 15. From 100% the Godzilla target (the captive ball) or
@@ -220,15 +220,15 @@ def announce():
 
 SCRIPTS = [
     # ---- light it: every spin of the Mechagodzilla spinner, a note every 10 ------------------------------------
-    # (PAD-669: no spin counts in a multiball; one counted out but held off starts it on the next spin)
+    # (PAD-690: a multiball's spins count too; one counted out but held off starts it on the next spin)
     on_shot(SPIN,
-            if_(ge("spins", NEED), [start()], [if_(pack.ONE_BALL, [
+            if_(ge("spins", NEED), [start()], [
                 change("spins", 1),
                 if_(ge("spins", NEED), [start()], [
                     if_(ge("spins", "note at"), [
                         award("SPINS TO KIRYU", value=sub(NEED, var("spins")), sub=pack.shoot(SPIN),
                               seconds=pack.NOTE_S),
-                        set_("note at", add(var("spins"), 10))])])])]),
+                        set_("note at", add(var("spins"), 10))])])]),
             when="idle"),
 
     # ---- Kiryu online --------------------------------------------------------------------------------------------
@@ -416,9 +416,9 @@ _FIRE = _SET + ["shot", "Left ramp", "secs", 1, "shot", "Godzilla target", "secs
 _ARSENAL = ["shot", "Maser target", "ms", 400, "shot", "Big loop", "ms", 400, "shot", "Building", "secs", 2]
 _GRAPPLE = ["shot", LANE, "ms", 500, "shot", "Big loop", "ms", 600] * 3 + ["secs", 1]
 DESK = [
-    # PAD-669: a multiball's spins count for nothing: back to one ball, 11 more say 49 to go, no start
-    ("no spin counts in a multiball", ["balls", 2] + _shots(SPIN, 60) + ["balls", 1, "secs", 1] + _shots(SPIN, 11) + ["secs", 2],
-     ["Hud_AwardSub: 49  -  SHOOT THE SPINNER", "![KIRYU] START (a block)"]),
+    # PAD-690: a multiball's spins count: 59 in one, back to one ball, the 60th starts it
+    ("a multiball's spins count", ["balls", 2] + _shots(SPIN, 59) + ["balls", 1, "secs", 1] + _shots(SPIN, 1) + ["secs", 2],
+     ["[KIRYU] START (a block)"]),
     ("sixty spins the first time, a hundred and twenty the second",
      _shots(SPIN, 60) + ["secs", 1, "trigger", "kiryu.stop", "secs", 4] + _shots(SPIN, 119) + ["secs", 2] +
      _shots(SPIN, 1) + ["secs", 2],

@@ -849,295 +849,278 @@
         ],
         "else": [
          {
+          "op": "change",
+          "var": "spins",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
           "op": "if",
           "cond": {
            "k": "cmp",
-           "op": "<",
+           "op": ">=",
            "a": {
-            "k": "balls"
+            "k": "var",
+            "name": "spins"
            },
            "b": {
-            "k": "num",
-            "v": 2
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 40
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "ran game"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
            }
           },
           "then": [
            {
-            "op": "change",
-            "var": "spins",
-            "by": {
-             "k": "num",
-             "v": 1
-            }
-           },
+            "op": "start_mode"
+           }
+          ],
+          "else": [
            {
             "op": "if",
             "cond": {
              "k": "cmp",
-             "op": ">=",
+             "op": "=",
              "a": {
-              "k": "var",
-              "name": "spins"
-             },
-             "b": {
               "k": "op",
-              "op": "*",
+              "op": "-",
               "a": {
-               "k": "num",
-               "v": 40
-              },
-              "b": {
                "k": "op",
-               "op": "+",
+               "op": "*",
                "a": {
-                "k": "var",
-                "name": "ran game"
+                "k": "num",
+                "v": 40
                },
                "b": {
-                "k": "num",
-                "v": 1
+                "k": "op",
+                "op": "+",
+                "a": {
+                 "k": "var",
+                 "name": "ran game"
+                },
+                "b": {
+                 "k": "num",
+                 "v": 1
+                }
                }
+              },
+              "b": {
+               "k": "var",
+               "name": "spins"
               }
+             },
+             "b": {
+              "k": "num",
+              "v": 1
              }
             },
             "then": [
              {
-              "op": "start_mode"
+              "op": "hud_award",
+              "text": "OXYGEN DESTROYER",
+              "value": null,
+              "sub": "1 MORE LEFT SPINNER SPIN",
+              "seconds": 3
              }
             ],
             "else": [
              {
               "op": "if",
               "cond": {
-               "k": "cmp",
-               "op": "=",
+               "k": "or",
                "a": {
-                "k": "op",
-                "op": "-",
+                "k": "or",
+                "a": {
+                 "k": "cmp",
+                 "op": "=",
+                 "a": {
+                  "k": "var",
+                  "name": "spins"
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 1
+                 }
+                },
+                "b": {
+                 "k": "cmp",
+                 "op": "<=",
+                 "a": {
+                  "k": "op",
+                  "op": "-",
+                  "a": {
+                   "k": "op",
+                   "op": "*",
+                   "a": {
+                    "k": "num",
+                    "v": 40
+                   },
+                   "b": {
+                    "k": "op",
+                    "op": "+",
+                    "a": {
+                     "k": "var",
+                     "name": "ran game"
+                    },
+                    "b": {
+                     "k": "num",
+                     "v": 1
+                    }
+                   }
+                  },
+                  "b": {
+                   "k": "var",
+                   "name": "spins"
+                  }
+                 },
+                 "b": {
+                  "k": "num",
+                  "v": 3
+                 }
+                }
+               },
+               "b": {
+                "k": "cmp",
+                "op": "=",
                 "a": {
                  "k": "op",
-                 "op": "*",
+                 "op": "-",
                  "a": {
-                  "k": "num",
-                  "v": 40
+                  "k": "op",
+                  "op": "-",
+                  "a": {
+                   "k": "op",
+                   "op": "*",
+                   "a": {
+                    "k": "num",
+                    "v": 40
+                   },
+                   "b": {
+                    "k": "op",
+                    "op": "+",
+                    "a": {
+                     "k": "var",
+                     "name": "ran game"
+                    },
+                    "b": {
+                     "k": "num",
+                     "v": 1
+                    }
+                   }
+                  },
+                  "b": {
+                   "k": "var",
+                   "name": "spins"
+                  }
                  },
                  "b": {
                   "k": "op",
-                  "op": "+",
+                  "op": "*",
                   "a": {
-                   "k": "var",
-                   "name": "ran game"
+                   "k": "op",
+                   "op": "/",
+                   "a": {
+                    "k": "op",
+                    "op": "-",
+                    "a": {
+                     "k": "op",
+                     "op": "*",
+                     "a": {
+                      "k": "num",
+                      "v": 40
+                     },
+                     "b": {
+                      "k": "op",
+                      "op": "+",
+                      "a": {
+                       "k": "var",
+                       "name": "ran game"
+                      },
+                      "b": {
+                       "k": "num",
+                       "v": 1
+                      }
+                     }
+                    },
+                    "b": {
+                     "k": "var",
+                     "name": "spins"
+                    }
+                   },
+                   "b": {
+                    "k": "num",
+                    "v": 5
+                   }
                   },
                   "b": {
                    "k": "num",
-                   "v": 1
+                   "v": 5
                   }
                  }
                 },
                 "b": {
-                 "k": "var",
-                 "name": "spins"
+                 "k": "num",
+                 "v": 0
                 }
-               },
-               "b": {
-                "k": "num",
-                "v": 1
                }
               },
               "then": [
                {
                 "op": "hud_award",
                 "text": "OXYGEN DESTROYER",
-                "value": null,
-                "sub": "1 MORE LEFT SPINNER SPIN",
-                "seconds": 3
-               }
-              ],
-              "else": [
-               {
-                "op": "if",
-                "cond": {
-                 "k": "or",
+                "value": {
+                 "k": "op",
+                 "op": "-",
                  "a": {
-                  "k": "or",
+                  "k": "op",
+                  "op": "*",
                   "a": {
-                   "k": "cmp",
-                   "op": "=",
+                   "k": "num",
+                   "v": 40
+                  },
+                  "b": {
+                   "k": "op",
+                   "op": "+",
                    "a": {
                     "k": "var",
-                    "name": "spins"
+                    "name": "ran game"
                    },
                    "b": {
                     "k": "num",
                     "v": 1
                    }
-                  },
-                  "b": {
-                   "k": "cmp",
-                   "op": "<=",
-                   "a": {
-                    "k": "op",
-                    "op": "-",
-                    "a": {
-                     "k": "op",
-                     "op": "*",
-                     "a": {
-                      "k": "num",
-                      "v": 40
-                     },
-                     "b": {
-                      "k": "op",
-                      "op": "+",
-                      "a": {
-                       "k": "var",
-                       "name": "ran game"
-                      },
-                      "b": {
-                       "k": "num",
-                       "v": 1
-                      }
-                     }
-                    },
-                    "b": {
-                     "k": "var",
-                     "name": "spins"
-                    }
-                   },
-                   "b": {
-                    "k": "num",
-                    "v": 3
-                   }
                   }
                  },
                  "b": {
-                  "k": "cmp",
-                  "op": "=",
-                  "a": {
-                   "k": "op",
-                   "op": "-",
-                   "a": {
-                    "k": "op",
-                    "op": "-",
-                    "a": {
-                     "k": "op",
-                     "op": "*",
-                     "a": {
-                      "k": "num",
-                      "v": 40
-                     },
-                     "b": {
-                      "k": "op",
-                      "op": "+",
-                      "a": {
-                       "k": "var",
-                       "name": "ran game"
-                      },
-                      "b": {
-                       "k": "num",
-                       "v": 1
-                      }
-                     }
-                    },
-                    "b": {
-                     "k": "var",
-                     "name": "spins"
-                    }
-                   },
-                   "b": {
-                    "k": "op",
-                    "op": "*",
-                    "a": {
-                     "k": "op",
-                     "op": "/",
-                     "a": {
-                      "k": "op",
-                      "op": "-",
-                      "a": {
-                       "k": "op",
-                       "op": "*",
-                       "a": {
-                        "k": "num",
-                        "v": 40
-                       },
-                       "b": {
-                        "k": "op",
-                        "op": "+",
-                        "a": {
-                         "k": "var",
-                         "name": "ran game"
-                        },
-                        "b": {
-                         "k": "num",
-                         "v": 1
-                        }
-                       }
-                      },
-                      "b": {
-                       "k": "var",
-                       "name": "spins"
-                      }
-                     },
-                     "b": {
-                      "k": "num",
-                      "v": 5
-                     }
-                    },
-                    "b": {
-                     "k": "num",
-                     "v": 5
-                    }
-                   }
-                  },
-                  "b": {
-                   "k": "num",
-                   "v": 0
-                  }
+                  "k": "var",
+                  "name": "spins"
                  }
                 },
-                "then": [
-                 {
-                  "op": "hud_award",
-                  "text": "OXYGEN DESTROYER",
-                  "value": {
-                   "k": "op",
-                   "op": "-",
-                   "a": {
-                    "k": "op",
-                    "op": "*",
-                    "a": {
-                     "k": "num",
-                     "v": 40
-                    },
-                    "b": {
-                     "k": "op",
-                     "op": "+",
-                     "a": {
-                      "k": "var",
-                      "name": "ran game"
-                     },
-                     "b": {
-                      "k": "num",
-                      "v": 1
-                     }
-                    }
-                   },
-                   "b": {
-                    "k": "var",
-                    "name": "spins"
-                   }
-                  },
-                  "sub": "LEFT SPINNER SPINS TO GO",
-                  "seconds": 3
-                 }
-                ],
-                "else": null
+                "sub": "LEFT SPINNER SPINS TO GO",
+                "seconds": 3
                }
-              ]
+              ],
+              "else": null
              }
             ]
            }
-          ],
-          "else": null
+          ]
          }
         ]
        }

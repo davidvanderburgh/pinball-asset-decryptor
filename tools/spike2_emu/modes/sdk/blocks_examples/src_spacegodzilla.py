@@ -6,7 +6,7 @@ M.O.G.U.E.R.A. tear them down, break the crystals on his shoulders and cut his p
 
 - PLANT A CRYSTAL at the Right ramp: two ramps a crystal the first time, four the second, six the third (6, 12, 18
   ramps for the three); every ramp a note names it and says how many more (RIGHT RAMP, 1  -  MORE TO PLANT A
-  CRYSTAL). Nothing plants in a multiball. PAD-658: the Right ramp alone, so no two modes share a start (the powerlines
+  CRYSTAL). A multiball's ramps count too (PAD-690). PAD-658: the Right ramp alone, so no two modes share a start (the powerlines
   are KING GHIDORAH's, the Big loop KUMONGA's).
 - CRYSTAL 1, 2, 3 (they wait across balls; THE RIGHT RAMP PLANTS THE NEXT). The third: SpaceGodzilla arrives NOTE_S
   (3 s) later, once its note is read, with a 3-ball multiball and a 15 s ball save; while the game's own mode runs it
@@ -114,8 +114,8 @@ SHOWS = [
 
 
 def ramp():
-    """A Right ramp while it is not running and no multiball: one more toward the next crystal (pack.need)."""
-    return [if_(AND(NOT(RUNNING), lt(BALLS, 2), lt(var("crystals"), 3)), [
+    """A Right ramp while it is not running (a multiball's too, PAD-690): one more toward the next crystal (pack.need)."""
+    return [if_(AND(NOT(RUNNING), lt(var("crystals"), 3)), [
         change("ramp hits", 1),
         if_(ge("ramp hits", NEED), [set_("ramp hits", 0)] + plant(),
             [award("RIGHT RAMP", value=sub(NEED, var("ramp hits")), sub="MORE TO PLANT A CRYSTAL",
@@ -250,7 +250,7 @@ def target(stage, i):
 
 SCRIPTS = [
     # ---- light the locks, plant the crystals -------------------------------------------------------------------
-    on_shot(LOCK_SHOT, if_(lt(BALLS, 2), [if_(eq("ready", 1), [start()], [timer_start("ramp", 1)])]), when="idle"),
+    on_shot(LOCK_SHOT, if_(eq("ready", 1), [if_(lt(BALLS, 2), [start()])], [timer_start("ramp", 1)]), when="idle"),   # PAD-690
     on_timer("ramp", *ramp()),
     on_timer("arrive", start()),
 
@@ -414,10 +414,10 @@ DESK = [
       "SCORE +1050000", "lamps held 0"]),
     ("a drain ends it", _START + _shots("Left ramp") + ["secs", 1, "ball_end", "secs", 8],
      ["END (ball ended)", "lamps held 0"]),
-    # PAD-675: nothing plants while the game's mode runs either: the full set is made just before it begins, and
+    # PAD-690: a multiball's ramps plant too; PAD-675: the full set made just before the game's mode begins, and
     # SpaceGodzilla, arriving NOTE_S after the third crystal, waits for it
-    ("nothing plants in a multiball, a full set waits for the game's mode",
-     ["balls", 2, "secs", 1] + _RAMP * 2 + ["balls", 1, "secs", 1] + _RAMP * 6 +
+    ("a multiball's ramps plant, a full set waits for the game's mode",
+     ["balls", 2, "secs", 1] + _RAMP * 2 + ["balls", 1, "secs", 1] + _RAMP * 4 +
      ["timed", 1, "secs", 5, "timed", 0, "secs", 1] + _RAMP + ["secs", 2],
      ["not started", "LAMP RIGHT RAMP be28ff chase", "[SPACEGODZILLA] START (its lit shot)",
       "MULTIBALL 3 balls, save 15 s"]),

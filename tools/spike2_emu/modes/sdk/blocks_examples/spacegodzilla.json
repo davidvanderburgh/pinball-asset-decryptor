@@ -817,13 +817,14 @@
       "op": "if",
       "cond": {
        "k": "cmp",
-       "op": "<",
+       "op": "=",
        "a": {
-        "k": "balls"
+        "k": "var",
+        "name": "ready"
        },
        "b": {
         "k": "num",
-        "v": 2
+        "v": 1
        }
       },
       "then": [
@@ -831,14 +832,13 @@
         "op": "if",
         "cond": {
          "k": "cmp",
-         "op": "=",
+         "op": "<",
          "a": {
-          "k": "var",
-          "name": "ready"
+          "k": "balls"
          },
          "b": {
           "k": "num",
-          "v": 1
+          "v": 2
          }
         },
         "then": [
@@ -846,19 +846,19 @@
           "op": "start_mode"
          }
         ],
-        "else": [
-         {
-          "op": "timer_start",
-          "timer": "ramp",
-          "ms": {
-           "k": "num",
-           "v": 1
-          }
-         }
-        ]
+        "else": null
        }
       ],
-      "else": null
+      "else": [
+       {
+        "op": "timer_start",
+        "timer": "ramp",
+        "ms": {
+         "k": "num",
+         "v": 1
+        }
+       }
+      ]
      }
     ]
    },
@@ -873,23 +873,9 @@
       "cond": {
        "k": "and",
        "a": {
-        "k": "and",
+        "k": "not",
         "a": {
-         "k": "not",
-         "a": {
-          "k": "running"
-         }
-        },
-        "b": {
-         "k": "cmp",
-         "op": "<",
-         "a": {
-          "k": "balls"
-         },
-         "b": {
-          "k": "num",
-          "v": 2
-         }
+         "k": "running"
         }
        },
        "b": {

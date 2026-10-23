@@ -778,27 +778,49 @@
       ],
       "else": [
        {
+        "op": "change",
+        "var": "spins",
+        "by": {
+         "k": "num",
+         "v": 1
+        }
+       },
+       {
         "op": "if",
         "cond": {
          "k": "cmp",
-         "op": "<",
+         "op": ">=",
          "a": {
-          "k": "balls"
+          "k": "var",
+          "name": "spins"
          },
          "b": {
-          "k": "num",
-          "v": 2
+          "k": "op",
+          "op": "*",
+          "a": {
+           "k": "num",
+           "v": 60
+          },
+          "b": {
+           "k": "op",
+           "op": "+",
+           "a": {
+            "k": "var",
+            "name": "plays"
+           },
+           "b": {
+            "k": "num",
+            "v": 1
+           }
+          }
          }
         },
         "then": [
          {
-          "op": "change",
-          "var": "spins",
-          "by": {
-           "k": "num",
-           "v": 1
-          }
-         },
+          "op": "start_mode"
+         }
+        ],
+        "else": [
          {
           "op": "if",
           "cond": {
@@ -809,104 +831,65 @@
             "name": "spins"
            },
            "b": {
-            "k": "op",
-            "op": "*",
-            "a": {
-             "k": "num",
-             "v": 60
-            },
-            "b": {
-             "k": "op",
-             "op": "+",
-             "a": {
-              "k": "var",
-              "name": "plays"
-             },
-             "b": {
-              "k": "num",
-              "v": 1
-             }
-            }
+            "k": "var",
+            "name": "note at"
            }
           },
           "then": [
            {
-            "op": "start_mode"
-           }
-          ],
-          "else": [
+            "op": "hud_award",
+            "text": "SPINS TO KIRYU",
+            "value": {
+             "k": "op",
+             "op": "-",
+             "a": {
+              "k": "op",
+              "op": "*",
+              "a": {
+               "k": "num",
+               "v": 60
+              },
+              "b": {
+               "k": "op",
+               "op": "+",
+               "a": {
+                "k": "var",
+                "name": "plays"
+               },
+               "b": {
+                "k": "num",
+                "v": 1
+               }
+              }
+             },
+             "b": {
+              "k": "var",
+              "name": "spins"
+             }
+            },
+            "sub": "SHOOT THE SPINNER",
+            "seconds": 3
+           },
            {
-            "op": "if",
-            "cond": {
-             "k": "cmp",
-             "op": ">=",
+            "op": "set",
+            "var": "note at",
+            "value": {
+             "k": "op",
+             "op": "+",
              "a": {
               "k": "var",
               "name": "spins"
              },
              "b": {
-              "k": "var",
-              "name": "note at"
+              "k": "num",
+              "v": 10
              }
-            },
-            "then": [
-             {
-              "op": "hud_award",
-              "text": "SPINS TO KIRYU",
-              "value": {
-               "k": "op",
-               "op": "-",
-               "a": {
-                "k": "op",
-                "op": "*",
-                "a": {
-                 "k": "num",
-                 "v": 60
-                },
-                "b": {
-                 "k": "op",
-                 "op": "+",
-                 "a": {
-                  "k": "var",
-                  "name": "plays"
-                 },
-                 "b": {
-                  "k": "num",
-                  "v": 1
-                 }
-                }
-               },
-               "b": {
-                "k": "var",
-                "name": "spins"
-               }
-              },
-              "sub": "SHOOT THE SPINNER",
-              "seconds": 3
-             },
-             {
-              "op": "set",
-              "var": "note at",
-              "value": {
-               "k": "op",
-               "op": "+",
-               "a": {
-                "k": "var",
-                "name": "spins"
-               },
-               "b": {
-                "k": "num",
-                "v": 10
-               }
-              }
-             }
-            ],
-            "else": null
+            }
            }
-          ]
+          ],
+          "else": null
          }
-        ],
-        "else": null
+        ]
        }
       ]
      }

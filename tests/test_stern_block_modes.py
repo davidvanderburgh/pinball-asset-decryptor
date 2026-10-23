@@ -1050,6 +1050,9 @@ def test_the_hud_is_the_examples_hud_in_the_assets_file(tmp_path):
     assert BM.hud_spec(q) == {"title": "TEST MODE", "line": " ", "counters": [[], ["B", "0", " "]],
                               "timer": {"label": "TEST MODE", "icon": "xilien"}}
     assert BM.hud_spec(prog([])) == {}
+    # PAD-690: no timer, but the progress panel wears its badge: its label and icon go as "badge"
+    r = prog([], hud={"on": True, "timer": {"on": False, "label": "", "icon": "mantis"}})
+    assert BM.hud_spec(r)["badge"] == {"label": "TEST MODE", "icon": "mantis"} and "timer" not in BM.hud_spec(r)
     # saved: the assets file carries it (the build draws it) and the kit sits beside the C
     project = _card(tmp_path)
     slug, path = BM.new_blocks_mode(project, "Maser", shots=SHOTS)
@@ -1341,7 +1344,7 @@ def test_a_progress_note_also_stands_on_the_progress_panel(tmp_path):
     while one of ours runs, and a game over clears it."""
     out = play(tmp_path, _noting_prog(), "shot", "Big loop", "secs", 4, "shot", "Big loop", "secs", 1,
                "battle", 1, "secs", 1, "battle", 0, "secs", 1, "shot", "Maser target", "secs", 1)
-    assert "progress panel found: 4 badge slot(s)" in out
+    assert "progress panel found: 16 badge slot(s)" in out
     assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in out[:out.index(">> shot Big loop")]     # its badges hidden at the find
     first = out[out.index(">> shot Big loop"):out.rindex(">> shot Big loop")]
     assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 1" in first and "WORDS PadMode_Progress_S1_Num: 1" in first

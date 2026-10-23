@@ -288,7 +288,9 @@ SHAKE_MIN_MS, SHAKE_MAX_MS = MP.SHAKE_MIN_MS, 5000
 #: PAD-375: the HUD's pieces (mode_hud.py draws them): the badge's icons, the gauge's pips
 HUD_ICONS = ("xilien", "bolt", "ghidorah", "oxygen", "maser", "radiation", "anguirus",
              # PAD-658: the badges PAD-379's modes drew (mode_hud.py), so their blocks keep them
-             "rage", "crystal", "snowflake", "rose", "claw")
+             "rage", "crystal", "snowflake", "rose", "claw",
+             # PAD-690: five more, so no two of a pack's badges need match (mode_hud.ICONS: the same, in pick order)
+             "spider", "mantis", "jet", "ring", "robot")
 GAUGE_KINDS = ("diamond", "segment", "spike",
                "bar")            # PAD-658: PAD-416's POWERUP-style meter at the top-right corner; its value a percent
 GAUGE_MAX = 12                   # a pip gauge's pips
@@ -649,6 +651,8 @@ def hud_spec(program, slug=""):
     out = {"title": title, "line": h["line"] or " ", "counters": counters}
     if h["timer"]["on"]:
         out["timer"] = {"label": h["timer"]["label"] or title[:BADGE_MAX], "icon": h["timer"]["icon"]}
+    else:                   # PAD-690: no running timer, but the progress panel wears its badge all the same
+        out["badge"] = {"label": h["timer"]["label"] or title[:BADGE_MAX], "icon": h["timer"]["icon"]}
     if h["gauge"]["on"] and h["gauge"]["kind"] == "bar":        # PAD-658: the corner meter, in the stock's fire
         gg = h["gauge"]
         out["gauge"] = {"label": " ", "kind": "bar", "count": gg["count"], "icon": gg["icon"],

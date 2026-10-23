@@ -202,7 +202,7 @@ def back_to_burn(core):
 SCRIPTS = [
     # ---- light it: captive ball hits (15, then 30, then 45) ----------------------------------------------------------
     # the note names the shot: every hit the first time (10), then at every 5 left and the last 5 (20, 30)
-    on_shot(LIGHT_SHOT, if_(AND(eq("ready", 0), lt(BALLS, 2)), [
+    on_shot(LIGHT_SHOT, if_(eq("ready", 0), [                  # a multiball's hits too (PAD-690)
         change("hits", 1),
         if_(ge("hits", NEED), [
             set_("ready", 1), light_mode(LIGHT_SHOT, RED, "pulse"), sound("lit"),

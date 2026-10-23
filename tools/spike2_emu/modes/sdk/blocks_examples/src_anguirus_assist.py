@@ -38,8 +38,8 @@ the award line between his awards, so:
 - what is lit counts: a charged spike goes dark, the ramp he has let go of goes dark after the last bite, the scoop
   stops chasing once he has won.
 """
-from blk import (AND, OR, BALLS, NOT, RUNNING, STOCK, a_show, add, award, change, clip, clips, div, end, eq, every,
-                 ge, gt, hud, hud_line, hud_title, if_, le, light, light_insert, lt, mul, off, on_any_shot, on_end,
+from blk import (AND, OR, NOT, RUNNING, STOCK, a_show, add, award, change, clip, clips, div, end, eq, every,
+                 ge, gt, hud, hud_line, hud_title, if_, le, light, light_insert, mul, off, on_any_shot, on_end,
                  on_shot, on_start, on_timer, score, set_, shake, shake_game, shield, show, sound, sounds, start, step,
                  sub,
                  timer_left, timer_start, timer_stop, var, beds, music)
@@ -207,7 +207,7 @@ def say():
 
 SCRIPTS = [
     # ---- the call: shield hits while he is away; ready, he joins the game's own mode ---------------------------------
-    *[on_shot(s, if_(AND(lt(BALLS, 2), eq("ready", 0)), [
+    *[on_shot(s, if_(eq("ready", 0), [                    # a multiball's hits too (PAD-690)
         change("calls", 1),
         if_(ge("calls", NEED), [set_("ready", 1), start()], [
             award("SHIELD HITS", value=sub(NEED, var("calls")), sub="MORE TO CALL ANGUIRUS", seconds=pack.NOTE_S)])],
@@ -322,7 +322,7 @@ PROGRAM = {
                                                 "bite at", "hurry", "won", "cashed", "swing")] + [
         {"name": v, "reset": "mode"} for v, _s in SPIKES],
     "timers": [{"name": n} for n in TIMERS],
-    "hud": hud(" ", counters=[], timer=("ANGUIRUS", "radiation"),
+    "hud": hud(" ", counters=[], timer=("ANGUIRUS", "anguirus"),
                gauge={"label": "SPIKES", "kind": "spike", "count": 3, "color": "#ff7800", "value": charged()}),
     "bar": {"on": False}, "info": {"on": False},
     "clips": clips("intro", "spike", "roll", "won", "lost", "bite", "allies", "cashout"),

@@ -831,37 +831,56 @@
         ],
         "else": [
          {
+          "op": "change",
+          "var": "ramps",
+          "by": {
+           "k": "num",
+           "v": 1
+          }
+         },
+         {
           "op": "if",
           "cond": {
            "k": "cmp",
-           "op": "<",
+           "op": ">=",
            "a": {
-            "k": "balls"
+            "k": "var",
+            "name": "ramps"
            },
            "b": {
-            "k": "num",
-            "v": 2
+            "k": "op",
+            "op": "*",
+            "a": {
+             "k": "num",
+             "v": 6
+            },
+            "b": {
+             "k": "op",
+             "op": "+",
+             "a": {
+              "k": "var",
+              "name": "plays"
+             },
+             "b": {
+              "k": "num",
+              "v": 1
+             }
+            }
            }
           },
           "then": [
            {
-            "op": "change",
-            "var": "ramps",
-            "by": {
-             "k": "num",
-             "v": 1
-            }
-           },
+            "op": "start_mode"
+           }
+          ],
+          "else": [
            {
-            "op": "if",
-            "cond": {
-             "k": "cmp",
-             "op": ">=",
+            "op": "hud_award",
+            "text": "RAMPS TO BIOLLANTE",
+            "value": {
+             "k": "op",
+             "op": "-",
              "a": {
-              "k": "var",
-              "name": "ramps"
-             },
-             "b": {
               "k": "op",
               "op": "*",
               "a": {
@@ -880,52 +899,16 @@
                 "v": 1
                }
               }
+             },
+             "b": {
+              "k": "var",
+              "name": "ramps"
              }
             },
-            "then": [
-             {
-              "op": "start_mode"
-             }
-            ],
-            "else": [
-             {
-              "op": "hud_award",
-              "text": "RAMPS TO BIOLLANTE",
-              "value": {
-               "k": "op",
-               "op": "-",
-               "a": {
-                "k": "op",
-                "op": "*",
-                "a": {
-                 "k": "num",
-                 "v": 6
-                },
-                "b": {
-                 "k": "op",
-                 "op": "+",
-                 "a": {
-                  "k": "var",
-                  "name": "plays"
-                 },
-                 "b": {
-                  "k": "num",
-                  "v": 1
-                 }
-                }
-               },
-               "b": {
-                "k": "var",
-                "name": "ramps"
-               }
-              },
-              "sub": "SHOOT THE LEFT RAMP",
-              "seconds": 3
-             }
-            ]
+            "sub": "SHOOT THE LEFT RAMP",
+            "seconds": 3
            }
-          ],
-          "else": null
+          ]
          }
         ]
        }

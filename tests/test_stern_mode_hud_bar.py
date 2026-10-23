@@ -49,3 +49,31 @@ def test_the_liquid_runs_through_its_colours_from_the_empty_end():
     mid = liquid.shape[0] // 2
     left, right = liquid[mid, 4, :3].astype(int), liquid[mid, -5, :3].astype(int)
     assert left[0] < right[0] and left[1] < right[1]               # dark red to orange
+
+
+# ---- PAD-690: the progress panel - a badge for every mode, each its own icon, scaled to fit -----------------------
+def test_every_mode_of_a_pack_wears_its_own_badge_icon():
+    huds = [("a", {"timer": {"label": "A", "icon": "claw"}}), ("b", {"timer": {"label": "B", "icon": "claw"}}),
+            ("c", {"badge": {"label": "C", "icon": "mantis"}}), ("d", {})]
+    got = {slug: spec["badge_icon"] for slug, spec in H.unique_icons(huds)}
+    assert got == {"a": "claw", "b": "xilien", "c": "mantis", "d": "radiation"}
+    assert len(set(got.values())) == len(got)
+
+
+def test_every_icon_a_badge_may_wear_is_drawn_and_none_alike():
+    seen = {}
+    for kind in H.ICONS:
+        a = H.icon(kind)
+        assert a.shape == (44, 44) and a.max() == 255, kind
+        assert a.tobytes() not in seen, (kind, seen.get(a.tobytes()))
+        seen[a.tobytes()] = kind
+
+
+def test_the_panel_fits_every_mode_between_the_rage_meter_and_the_score_panels():
+    for n in (1, 4, 13, H.PROGRESS_MAX):
+        s, x, ys = H.progress_layout(n, 210)
+        assert len(ys) == n and 0 < s <= 1.0
+        assert abs(ys[0] + 267.0 * s - H.PROGRESS_Y) < 0.01                             # the first badge's top
+        assert ys[-1] + 267.0 * s + H.PROGRESS_DY * s <= H.PROGRESS_BOTTOM + 0.01        # the last one's bottom
+        assert x + s * (210 - 21.0) <= H.GLASS_W                                         # on the glass
+    assert H.progress_layout(13, 210)[0] < H.progress_layout(4, 210)[0]

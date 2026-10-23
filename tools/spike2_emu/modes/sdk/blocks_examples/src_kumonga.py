@@ -303,7 +303,7 @@ PROGRAM = {
     "timers": [{"name": n} for n in TIMERS],
     "hud": hud("ANY LIT SHOT: 5 TO GO",
                counters=[("STAGE", "OF 4", None), ("POT", "CASH AT SCOOP", None), ("WEBS", "TO TEAR", None)],
-               timer=("KUMONGA", "claw")),
+               timer=("KUMONGA", "spider")),
     "bar": {"on": False}, "info": {"on": False},
     "clips": clips("intro", "loop", "web", "tear", "strand", "sting", "burn", "won", "lost", "cashout"),
     "sounds": sounds({"chitter": 4, "web": 3, "tear": 3, "sting": 4, "burn": 3, "won": 4, "lost": 4, "cashout": 4}),

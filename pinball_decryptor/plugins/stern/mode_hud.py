@@ -296,7 +296,7 @@ def _done(im, size=44):
 
 def icon(kind):
     """A 44x44 silhouette (L array) for a badge disc: bolt, ghidorah, oxygen, maser, xilien, anguirus,
-    radiation, or a letter."""
+    radiation, rage, crystal, snowflake, rose, claw, spider, mantis, jet, ring, robot, or a letter."""
     im, d, n = _canvas()
     c = n / 2
     if kind == "radiation":
@@ -383,6 +383,40 @@ def icon(kind):
         d.pieslice((c - 110, c - 92, c + 70, c + 92), 158, 202, fill=0)   # its open jaws
         d.ellipse((c - 30, c - 12, c - 6, c + 12), fill=0)       # the hinge of the bite
         d.polygon([(c + 20, c - 26), (c + 86, c - 14), (c + 86, c + 14), (c + 20, c + 26)], fill=255)   # the arm
+    # PAD-690 (David: "make sure that each one has a unique icon too"): five more, so no two of a pack's badges match
+    elif kind == "spider":                                      # Kumonga
+        d.ellipse((c - 26, c - 2, c + 26, c + 58), fill=255)     # the abdomen
+        d.ellipse((c - 18, c - 34, c + 18, c + 2), fill=255)     # the head
+        for s in (-1, 1):
+            for k, (kx, ky, fx, fy) in enumerate(((44, -40, 70, -74), (54, -14, 84, -30),
+                                                  (54, 14, 84, 30), (44, 40, 70, 78))):
+                hx, hy = c + s * 12, c - 10 + k * 10            # the hip, the knee, the foot
+                d.line((hx, hy, c + s * kx, c + ky - 10, c + s * fx, c + fy - 10), fill=255, width=10, joint="curve")
+    elif kind == "mantis":                                      # Kamacuras: the raised scythes
+        d.polygon([(c - 10, c - 60), (c + 10, c - 60), (c + 16, c - 40), (c - 16, c - 40)], fill=255)   # the head
+        d.ellipse((c - 30, c - 76, c - 6, c - 56), fill=255)
+        d.ellipse((c + 6, c - 76, c + 30, c - 56), fill=255)     # the eyes
+        d.line((c, c - 40, c, n - 10), fill=255, width=22)       # the body
+        for s in (-1, 1):
+            d.line((c + s * 8, c - 26, c + s * 54, c - 2, c + s * 46, c - 66), fill=255, width=14, joint="curve")
+            d.polygon([(c + s * 46, c - 66), (c + s * 30, c - 40), (c + s * 40, c - 78)], fill=255)   # the scythe
+            d.line((c + s * 6, c + 30, c + s * 50, c + 70), fill=255, width=9)
+    elif kind == "jet":                                         # SUPER X2: the flying fortress, nose up
+        d.polygon([(c, 6), (c + 16, c - 30), (c + 16, c + 20), (c + 80, c + 50), (c + 80, c + 66), (c + 16, c + 50),
+                   (c + 26, n - 8), (c - 26, n - 8), (c - 16, c + 50), (c - 80, c + 66), (c - 80, c + 50),
+                   (c - 16, c + 20), (c - 16, c - 30)], fill=255)
+        d.ellipse((c - 9, c - 42, c + 9, c - 14), fill=0)        # the canopy
+    elif kind == "ring":                                        # Minilla's smoke ring
+        d.ellipse((c - 70, c - 54, c + 70, c + 54), fill=255)
+        d.ellipse((c - 38, c - 26, c + 38, c + 26), fill=0)
+        for bx, by, br in ((c + 66, c + 60, 12), (c + 44, c + 74, 8)):
+            d.ellipse((bx - br, by - br, bx + br, by + br), fill=255)
+    elif kind == "robot":                                       # Jet Jaguar's face: the crest and the visor eyes
+        d.rounded_rectangle((c - 50, c - 44, c + 50, c + 70), radius=30, fill=255)
+        d.polygon([(c - 12, c - 44), (c, c - 84), (c + 12, c - 44)], fill=255)   # the crest
+        d.polygon([(c - 40, c - 10), (c - 8, c - 2), (c - 8, c + 12), (c - 40, c + 4)], fill=0)
+        d.polygon([(c + 40, c - 10), (c + 8, c - 2), (c + 8, c + 12), (c + 40, c + 4)], fill=0)
+        d.rectangle((c - 22, c + 36, c + 22, c + 44), fill=0)    # the mouth grille
     else:
         from PIL import ImageFont
         d.rectangle((0, 0, 0, 0), fill=0)
@@ -624,9 +658,9 @@ def _bitmap_node(p, ids, name, rgba, x, y, textures):
                    [(1, p.poly["bitmap"], SW.FLAG | po, SW.bitmap_body(p.symbol["bitmap"], w, h, tex))])
 
 
-def _group_node(p, ids, name, kids, x=0.0, y=0.0):
+def _group_node(p, ids, name, kids, x=0.0, y=0.0, scale=1.0):
     pn, po = ids.take(2)
-    return SW.node(SW.FLAG | pn, name, 1, [(1, 1)], [(1, SW.matrix(tx=x, ty=y))],
+    return SW.node(SW.FLAG | pn, name, 1, [(1, 1)], [(1, SW.matrix(sx=scale, sy=scale, tx=x, ty=y))],
                    [(1, p.poly["sprite"], SW.FLAG | po, SW.sprite_body(p.symbol["sprite"], kids))])
 
 
@@ -661,7 +695,7 @@ def hud_group(p, ids, slug, spec, fonts, art, textures):
     timer = spec.get("timer")
     if timer:
         panel = badge_panel(art["panel"], art["font"], timer.get("label") or title)
-        disc = badge_disc(art["disc"], icon(timer.get("icon") or "xilien"))
+        disc = badge_disc(art["disc"], icon(spec.get("badge_icon") or timer.get("icon") or "xilien"))
         tk = [_bitmap_node(p, ids, names["Timer"] + "_Panel", panel, -21.0, 267.0, textures),
               _bitmap_node(p, ids, names["Timer"] + "_Icon", disc, 0.0, 281.8, textures),
               _text_node(p, ids, names["Timer_Num"], "00", (p.font[0], p.font[1]), 68.6, 295.4,
@@ -731,26 +765,41 @@ def bar_gauge(p, ids, g, gauge, sec, textures):
 #: number (David: "make it an image like we do for when the mode timer is running and it just countdowns the shots
 #: needed, with a logo for King Kong or something on it ... that way we can show a handful of them at the same
 #: time"). Each slot holds every mode's badge, hidden; the kit shows one and writes the slot's number
-#: (intricate_kit.h, kit_prog_tick). Slots are a badge tall apart (TIMER2_DY); the right column is clear of the
-#: game's own words outside its battles, when the kit takes the panel down (slot 3 touches the live city's POWER
-#: label by a few pixels).
+#: (intricate_kit.h, kit_prog_tick). PAD-690 (David: "too many indicators ... why can't we just make them smaller to
+#: fit them all vertically?"): a slot for every mode of the pack (up to PROGRESS_MAX), the badges scaled down so the
+#: column fits between PROGRESS_Y and PROGRESS_BOTTOM, right-aligned at the glass's edge; the panel is down during
+#: the game's battles, as before.
 PROGRESS_GROUP = "PadMode_Progress"
-PROGRESS_SLOTS = 4
-PROGRESS_X, PROGRESS_Y, PROGRESS_DY = 1160.0, 100.0, TIMER2_DY
+PROGRESS_MAX = 16                    # the kit's KIT_PROG_SLOTS: it looks for slots 1..16 and uses those there are
+PROGRESS_Y, PROGRESS_BOTTOM, PROGRESS_DY = 90.0, 596.0, TIMER2_DY     # under the rage meter, over PLAYER 1..
+PROGRESS_RIGHT = GLASS_W - 4.0
+
+
+def progress_layout(n, panel_w):
+    """(scale, x, [y per slot]) of ``n`` slot groups: a badge PROGRESS_DY tall at scale 1 (its panel ``panel_w``
+    wide, at x -21 and y 267 in its group), as large as fits, never larger than the timer's own."""
+    n = max(1, n)
+    s = min(1.0, (PROGRESS_BOTTOM - PROGRESS_Y) / (n * PROGRESS_DY))
+    x = PROGRESS_RIGHT - s * (panel_w - 21.0)
+    return s, x, [PROGRESS_Y - 267.0 * s + PROGRESS_DY * s * k for k in range(n)]
 
 
 def progress_group(p, ids, huds, art, textures):
-    """The Sprite group ``PadMode_Progress`` (bytes): PROGRESS_SLOTS slot groups ``_S<k>``, each with a badge group
-    ``_S<k>_<slug>`` (panel + icon) a mode and the slot's number text ``_S<k>_Num``. A badge's geometry is the timer
-    badge's (hud_group): the panel at (-21, 267), the icon at (0, 281.8), the number at (68.6, 295.4) in its group."""
+    """The Sprite group ``PadMode_Progress`` (bytes): a slot group ``_S<k>`` per mode (PROGRESS_MAX at most), each
+    with a badge group ``_S<k>_<slug>`` (panel + icon) a mode and the slot's number text ``_S<k>_Num``. A badge's
+    geometry is the timer badge's (hud_group): the panel at (-21, 267), the icon at (0, 281.8), the number at
+    (68.6, 295.4) in its group; the slot scales it (progress_layout)."""
     badges = {}
     for slug, spec in huds:
-        spec, timer = spec or {}, (spec or {}).get("timer") or {}
+        spec = spec or {}
+        timer = spec.get("timer") or spec.get("badge") or {}          # PAD-690: a mode with no timer names its badge
         title = spec.get("title") or spec.get("name") or slug.upper()
         badges[slug] = (badge_panel(art["panel"], art["font"], timer.get("label") or title),
-                        badge_disc(art["disc"], icon(timer.get("icon") or "xilien")))
+                        badge_disc(art["disc"], icon(spec.get("badge_icon") or timer.get("icon") or "xilien")))
+    n = min(len(badges), PROGRESS_MAX)
+    scale, x, ys = progress_layout(n, art["panel"].shape[1])
     slots = []
-    for k in range(PROGRESS_SLOTS):
+    for k in range(n):
         sk = "%s_S%d" % (PROGRESS_GROUP, k + 1)
         kids = [_group_node(p, ids, "%s_%s" % (sk, slug), [
                     _bitmap_node(p, ids, "%s_%s_Panel" % (sk, slug), panel, -21.0, 267.0, textures),
@@ -758,8 +807,31 @@ def progress_group(p, ids, huds, art, textures):
                 for slug, (panel, disc) in badges.items()]
         kids.append(_text_node(p, ids, sk + "_Num", "00", (p.font[0], p.font[1]), 68.6, 295.4,
                                (18.0, -2.0, 98.0, 67.2), tail=tuple(p.text_tail)))
-        slots.append(_group_node(p, ids, sk, kids, PROGRESS_X + 21.0, PROGRESS_Y - 267.0 + PROGRESS_DY * k))
+        slots.append(_group_node(p, ids, sk, kids, x, ys[k], scale))
     return _group_node(p, ids, PROGRESS_GROUP, slots)
+
+
+#: PAD-690: the icons a badge may wear, in the order a mode with none (or one another mode of the pack took first)
+#: is given the next free one
+ICONS = ("xilien", "radiation", "bolt", "ghidorah", "oxygen", "maser", "anguirus", "rage", "crystal", "snowflake",
+         "rose", "claw", "spider", "mantis", "jet", "ring", "robot")
+
+
+def unique_icons(huds):
+    """``huds`` with every mode's badge icon its own (David, PAD-690: "make sure that each one has a unique icon
+    too"): a mode keeps the icon it names unless an earlier mode of the pack has it; one with none or a taken one
+    gets the next free icon of ICONS. The pick goes in the spec's ``badge_icon``, which the running timer's badge and
+    the progress panel's both wear."""
+    used, out = set(), []
+    for slug, spec in huds:
+        spec = dict(spec or {})
+        want = (spec.get("timer") or spec.get("badge") or {}).get("icon")
+        if not want or want in used:
+            want = next((k for k in ICONS if k not in used), want or "xilien")
+        used.add(want)
+        spec["badge_icon"] = want
+        out.append((slug, spec))
+    return out
 
 
 def build_huds(p, data, huds, font_scene):
@@ -779,6 +851,7 @@ def build_huds(p, data, huds, font_scene):
     art = {"panel": panel, "disc": disc, "font": GameFont(font_scene)}
     ids = _Ids(base + 0x800)
     textures, groups, names = {}, [], {}
+    huds = unique_icons(huds)
     for slug, spec in huds:
         name = hud_names(slug)["group"]
         if SW.string(name) in data:

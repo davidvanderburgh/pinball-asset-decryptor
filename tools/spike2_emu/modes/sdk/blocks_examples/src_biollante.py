@@ -6,7 +6,7 @@ frenzies (The Walking Dead's Blood Bath: every switch scores into a jackpot the 
 (a lit shot under 15 s puts it back to 15), his walkers that come back (TWD), stages with their own shots (EHoH's
 House) and a pot to cash out or put at risk (Metallica's Crank It Up).
 
-- LIGHT IT: 4 Left ramp shots in a game (none in a multiball, PAD-669) start it at once; 8 the second time, 12 the
+- LIGHT IT: 4 Left ramp shots in a game (a multiball's too, PAD-690) start it at once; 8 the second time, 12 the
   third (pack.need). PAD-658: the Left ramp alone, so no two modes share a start (the Right ramp lays ZILLA's eggs).
   Each ramp's note: RAMPS TO BIOLLANTE / 3 - SHOOT THE LEFT RAMP, 3 s.
 - EVERY SHOT feeds the SAP: it scores the switch value (100,000, +25,000 a bank cut) and adds it to the SAP JACKPOT.
@@ -233,12 +233,12 @@ def regrow():
 SCRIPTS = [
     # ---- light it: Left ramp shots (a note on every one: the count is small) --------------------------------------
     on_shot(START_RAMP, timer_start("ramp", 1), when="idle"),
-    # (PAD-669: no ramp counts in a multiball; one counted out but held off starts it on the next ramp)
+    # (PAD-690: a multiball's ramps count too; one counted out but held off starts it on the next ramp)
     on_timer("ramp", if_(NOT(RUNNING), [
-        if_(ge("ramps", NEED), [start()], [if_(pack.ONE_BALL, [
+        if_(ge("ramps", NEED), [start()], [
             change("ramps", 1),
             if_(ge("ramps", NEED), [start()],
-                [note("RAMPS TO BIOLLANTE", value=sub(NEED, var("ramps")), sub="SHOOT THE LEFT RAMP")])])])])),
+                [note("RAMPS TO BIOLLANTE", value=sub(NEED, var("ramps")), sub="SHOOT THE LEFT RAMP")])])])),
 
     # ---- the rose ---------------------------------------------------------------------------------------------------
     on_start(*pack.begin(SLUG),
@@ -432,9 +432,10 @@ _STAGE1 = _shots("Slingshot", 2) + _SHIELDS + _POWER + ["secs", 1]
 _STAGE2 = ["shot", "Left ramp", "ms", 500, "shot", "Big loop", "ms", 500, "shot", "Right ramp", "secs", 2]
 _STAGE3 = _SHIELDS + _POWER + ["secs", 2]
 DESK = [
-    # PAD-669: a multiball's Left ramps count for nothing: back to one ball, 1 more says 5 to go, no start
-    ("no ramp counts in a multiball", ["balls", 2] + _shots("Left ramp", 6) + ["balls", 1, "secs", 1] + _shots("Left ramp", 1) + ["secs", 2],
-     ["Hud_AwardSub: 5  -  SHOOT THE LEFT RAMP", "![BIOLLANTE] START (a block)"]),
+    # PAD-690: a multiball's Left ramps count (David: "allow incrementing towards our custom modes during
+    # multi-balls"): five in one, back to one ball, the sixth starts it
+    ("a multiball's ramps count", ["balls", 2] + _shots("Left ramp", 5) + ["balls", 1, "secs", 1] + _shots("Left ramp", 1) + ["secs", 2],
+     ["Hud_AwardSub: 1  -  SHOOT THE LEFT RAMP", "[BIOLLANTE] START (a block)"]),
     ("six Left ramps the first time, twelve the second",
      _shots("Left ramp", 6) + ["secs", 1, "trigger", "biollante.stop", "secs", 4] +
      _shots("Left ramp", 11) + ["secs", 2] + _shots("Left ramp", 1) + ["secs", 2],

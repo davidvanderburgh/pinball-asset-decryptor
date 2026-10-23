@@ -5,7 +5,7 @@ Godzilla (1954): the hurry-up is the C's own rule (stage 1); then the divers go 
 sonar, lower the device to the sea bed, and Serizawa makes his choice.
 
 - START: Left spinner spins in one ball: 40 the first time, 80 the second, 120 the third (pack.need); up to 3 times a
-  game per player, and not again for 15 s after it ends. No spin counts in a multiball (PAD-669); counted out
+  game per player, and not again for 15 s after it ends. A multiball's spins count too (PAD-690); counted out
   while one runs, the next spin after it starts it.
   The note OXYGEN DESTROYER / 20 - LEFT SPINNER SPINS TO GO comes on the first spin, every 5 to go and the last 3
   (1 MORE LEFT SPINNER SPIN), 3 s each (round 3: a note on every spin covered itself).
@@ -159,14 +159,14 @@ HURRYING = AND(eq("stage", 1), gt(timer_left("oxygen"), 0))
 
 SCRIPTS = [
     # ---- the start: 40 spins of the Left spinner (80, 120); a note on the first, every 5 to go and the last 3 --------
-    # (PAD-669: no spin counts in a multiball; one counted out but held off starts it on the next spin)
+    # (PAD-690: a multiball's spins count too; one counted out but held off starts it on the next spin)
     on_shot(SPIN, if_(AND(lt("ran game", 3), eq("cooling", 0)), [
-        if_(ge("spins", NEED), [start()], [if_(pack.ONE_BALL, [
+        if_(ge("spins", NEED), [start()], [
             change("spins", 1),
             if_(ge("spins", NEED), [start()], [
                 if_(eq(SPINS_LEFT, 1), [note(NAME, sub="1 MORE LEFT SPINNER SPIN")], [
                     if_(OR(eq("spins", 1), le(SPINS_LEFT, 3), eq(sub(SPINS_LEFT, mul(div(SPINS_LEFT, 5), 5)), 0)),
-                        [note(NAME, value=SPINS_LEFT, sub="LEFT SPINNER SPINS TO GO")])])])])]),
+                        [note(NAME, value=SPINS_LEFT, sub="LEFT SPINNER SPINS TO GO")])])])]),
     ]), when="idle"),
     on_start(*pack.begin(SLUG), set_("spins", 0), change("ran game", 1), set_("oxygen played", 1),
              set_("stage", 1), set_("pot", 0), set_("holds", 0), set_("won", 0), set_("gone", 0), set_("cashed", 0),
@@ -362,9 +362,9 @@ _S2 = ["shot", "Powerline left", "ms", 400, "shot", "Powerline center", "ms", 40
 _S3 = _spins(20) + ["secs", 2]
 #: the desk scenarios (make_examples.py --desk): what, the harness's commands, lines its output must hold
 DESK = [
-    # PAD-669: a multiball's spins count for nothing: back to one ball, 5 more say 35 to go, no start
-    ("no spin counts in a multiball", ["balls", 2] + _spins(40) + ["balls", 1, "secs", 1] + _spins(5) + ["secs", 2],
-     ["Hud_AwardSub: 35  -  LEFT SPINNER SPINS TO GO", "![OXYGEN DESTROYER] START (a block)"]),
+    # PAD-690: a multiball's spins count: 39 in one, back to one ball, the 40th starts it
+    ("a multiball's spins count", ["balls", 2] + _spins(39) + ["balls", 1, "secs", 1] + _spins(1) + ["secs", 2],
+     ["[OXYGEN DESTROYER] START (a block)"]),
     ("40 spins start it, 80 the second time",
      _GT * 3 + ["secs", 3] + _spins(39) + ["secs", 1] + _spins(1) + ["secs", 5, "trigger", "oxygen_destroyer.stop",
                                                                     "secs", 17] + _spins(40) + ["secs", 2],

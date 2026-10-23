@@ -1413,6 +1413,8 @@ static int key_is(const unsigned char *a, const unsigned char *b)
 
 static void sndt_lookup(unsigned *r);
 static volatile int sndt_live;              /* PAD-565: the lookup hook takes the sounds in turn */
+static int juke_lookup(unsigned *r);       /* PAD-685: the jukebox's songs */
+static volatile int juke_live;
 static int lookup_hooked;                   /* sound_lookup is hooked (on_sound_lookup), once */
 static int att_lookup(unsigned *r);         /* PAD-641: the flipper buttons' sounds in attract */
 static volatile int att_live;
@@ -1420,6 +1422,7 @@ static volatile int att_live;
 static void on_sound_lookup(unsigned *r)
 {
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
+    if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
     if (sndt_live && r[1]) sndt_lookup(r);   /* PAD-565: a sound's files in turn */
     if (swaps_live && r[1]) {
         const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
@@ -3024,12 +3027,15 @@ static void *clip2_surface(void);
 /* PAD-521: one hook on surface_set_video for everything that watches the bank's surface (PAD-446's clip variants, the
  * clip v2 backdrop's idle-video watch) - a site takes one hook */
 static int sv_clipv, sv_bd, sv_hooked, bd2_in;
+static int sv_juke;
+static void juke_set_video(unsigned *r);
 static void on_clipv_set_video(unsigned *r);
 static void bd2_seen(unsigned *r);
 static void on_surface_set_video(unsigned *r)
 {
     if (sv_ck) ck_seen(r);                /* PAD-530: first, before a variant swaps the name */
     if (sv_bd) bd2_seen(r);
+    if (sv_juke) juke_set_video(r);       /* PAD-685: a song mode's intro, before a variant */
     if (sv_clipv) on_clipv_set_video(r);
 }
 static int sv_hook(void)
@@ -12077,6 +12083,209 @@ static void att_arm(void)
     if (att.gap_ms) say("attract flipper sounds: at most one every %u ms (agap)", att.gap_ms);
 }
 
+/* ---- the jukebox (PAD-685) ------------------------------------------------------------------------
+ * An owner rebuilding The Beatles asked for "a weighted song selection": 60 and more songs, any of them in
+ * any of the five song modes, a surprise each time, the common ones more often than the rare ones, never the
+ * same song twice in a game, and each song's intro video (its name in it) with its own song. Beatles 1.29
+ * (emulator) starts a song mode at its start function (the port's block_start_<n>), asks for its intro clip
+ * by name on the bank's surface ("FeatureStarts.Spinner_Start" for Ticket to Ride; before or after the song,
+ * up to 3 s later) and looks its song's record up (request 83's); a song in parts its lead-in's record first
+ * and then its body's, again each time the body loops. sounds.cfg says:
+ *   jmode <start site> <its intro clip's name, or -> <body key>[,<lead-in key>...]   one per song mode
+ *   jsong <weight 1..9> <the song's record key> [<its intro clip's name>]            one per song
+ *   jquiet <a silent record's key>                                                   what a lead-in plays
+ * The mode's start DRAWS a song for it: at random, a song of weight w w times as likely as one of weight 1,
+ * never one of the last JUKE_RECENT songs drawn (fewer when there are fewer songs: no song twice in a game).
+ * Until its next start the mode's body record is that song's, its lead-ins the silence (their own without
+ * one) and its intro that song's clip (the mode's own when the song has none). A mode whose start site the
+ * port does not have draws at its first ask (clip or record) in a game JUKE_GAP ms after its last. */
+#define JUKE_MODES      8
+#define JUKE_SONGS      128
+#define JUKE_KEYS       4                   /* a song mode's records: its body and up to 3 lead-ins */
+#define JUKE_GAP        180000              /* ms: no start site - a mode asked again after this is a new start */
+#define JUKE_RECENT     5                   /* never one of the last 5 songs drawn: none twice in a game */
+struct jmode {
+    unsigned char key[JUKE_KEYS][8];        /* [0] its body's record, then its lead-ins' */
+    unsigned char n_key, hooked;
+    const char *site, *clip;
+    short pick;                             /* the song drawn, -1 none yet */
+    unsigned long at;                       /* pm_ms() of its last ask (no start site) */
+    unsigned draws;
+};
+struct jsong {
+    unsigned char key[8];
+    const char *clip;
+    unsigned str;                           /* the clip's name as a std::string, made at first use */
+    unsigned char weight;
+};
+static struct jmode jmode[JUKE_MODES];
+static struct jsong jsong[JUKE_SONGS];
+static unsigned char juke_quiet[8];
+static unsigned n_jmode, n_jsong, juke_says, juke_has_quiet;
+static short juke_recent[JUKE_RECENT];
+static unsigned n_juke_recent;
+
+static void jmode_line(const char *site, const char *clip, const char *keys)
+{
+    struct jmode *m;
+    const char *p = keys;
+    if (n_jmode >= JUKE_MODES) { sndm_dropped++; return; }
+    m = &jmode[n_jmode];
+    m->n_key = 0;
+    while (m->n_key < JUKE_KEYS && key_hex(p, m->key[m->n_key])) {
+        m->n_key++;
+        p += 16;
+        if (*p != ',') break;
+        p++;
+    }
+    if (!m->n_key) { sndm_bad++; return; }
+    m->site = site && *site && !str_eq(site, "-") ? site : 0;
+    m->clip = clip && *clip && !str_eq(clip, "-") ? clip : 0;
+    m->pick = -1;
+    n_jmode++;
+}
+
+static void jsong_line(const char *ws, const char *key, const char *clip)
+{
+    const char *p = ws;
+    struct jsong *s;
+    unsigned w;
+    int ok;
+    if (n_jsong >= JUKE_SONGS) { sndm_dropped++; return; }
+    s = &jsong[n_jsong];
+    w = (unsigned)number(&p, &ok);
+    if (!ok || !w || !key_hex(key, s->key)) { sndm_bad++; return; }
+    s->weight = (unsigned char)(w > 9 ? 9 : w);
+    s->clip = clip && *clip && !str_eq(clip, "-") ? clip : 0;
+    s->str = 0;
+    n_jsong++;
+}
+
+/* the song a new start draws: weighted, none of the last few drawn */
+static short juke_draw(void)
+{
+    unsigned i, j, total = 0, r, keep = n_jsong > 1 ? n_jsong - 1 : 0;
+    unsigned char skip[JUKE_SONGS] = {0};
+    if (keep > n_juke_recent) keep = n_juke_recent;
+    for (j = 0; j < keep; j++) skip[juke_recent[j]] = 1;
+    for (i = 0; i < n_jsong; i++) if (!skip[i]) total += jsong[i].weight;
+    if (!total) return 0;
+    r = clipv_rand() % total;
+    for (i = 0; i < n_jsong; i++) {
+        if (skip[i]) continue;
+        if (r < jsong[i].weight) break;
+        r -= jsong[i].weight;
+    }
+    if (i >= n_jsong) i = n_jsong - 1;
+    for (j = JUKE_RECENT - 1; j > 0; j--) juke_recent[j] = juke_recent[j - 1];
+    juke_recent[0] = (short)i;
+    if (n_juke_recent < JUKE_RECENT) n_juke_recent++;
+    return (short)i;
+}
+
+static void juke_start(unsigned m, const char *how)
+{
+    struct jmode *e = &jmode[m];
+    e->pick = juke_draw();
+    e->draws++;
+    if (juke_says < 200 || !(e->draws % 50)) {
+        juke_says++;
+        say("jukebox: song mode %u started (%s, %u time(s)) - song %d of %u plays%s%s", m + 1, how, e->draws,
+            e->pick + 1, n_jsong, jsong[e->pick].clip ? ", intro " : "", jsong[e->pick].clip ? jsong[e->pick].clip : "");
+    }
+}
+
+/* mode m asked for (its clip, or a record): its song, or 0 while it has none */
+static struct jsong *juke_song(unsigned m)
+{
+    struct jmode *e = &jmode[m];
+    unsigned long now = pm_ms();
+    if (!e->hooked && (e->pick < 0 || now - e->at > JUKE_GAP) && pm_in_game() == 1) juke_start(m, "asked for");
+    e->at = now;
+    return e->pick < 0 ? 0 : &jsong[e->pick];
+}
+
+static void on_juke_start(unsigned *r, unsigned m)
+{
+    if (m < n_jmode) juke_start(m, jmode[m].site);
+}
+#define JUKE_HOOK(n) static void on_juke_start_##n(unsigned *r) { on_juke_start(r, n); }
+JUKE_HOOK(0) JUKE_HOOK(1) JUKE_HOOK(2) JUKE_HOOK(3) JUKE_HOOK(4) JUKE_HOOK(5) JUKE_HOOK(6) JUKE_HOOK(7)
+static void (*const juke_hooks[JUKE_MODES])(unsigned *) = {
+    on_juke_start_0, on_juke_start_1, on_juke_start_2, on_juke_start_3,
+    on_juke_start_4, on_juke_start_5, on_juke_start_6, on_juke_start_7,
+};
+
+static int juke_lookup(unsigned *r)
+{
+    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    struct jsong *g;
+    unsigned m, j;
+    for (m = 0; m < n_jmode; m++)
+        for (j = 0; j < jmode[m].n_key; j++)
+            if (key_is(k, jmode[m].key[j])) {
+                if (!(g = juke_song(m))) return 0;
+                if (j) {                                    /* a lead-in: the silence, or its own */
+                    if (!juke_has_quiet) return 0;
+                    r[1] = (unsigned)(unsigned long)juke_quiet;
+                } else
+                    r[1] = (unsigned)(unsigned long)g->key;
+                return 1;
+            }
+    return 0;
+}
+
+static void juke_set_video(unsigned *r)
+{
+    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    const char *name;
+    struct jsong *g;
+    void *bank;
+    unsigned m;
+    if (clipv_in || !s || !(name = (const char *)(unsigned long)s[0])) return;
+    for (m = 0; m < n_jmode; m++)
+        if (jmode[m].clip && str_eq(jmode[m].clip, name)) break;
+    if (m == n_jmode) return;
+    clipv_in = 1;
+    bank = clip2_surface();
+    clipv_in = 0;
+    if (!bank || (unsigned)(unsigned long)bank != r[0]) return;
+    if (!(g = juke_song(m)) || !g->clip) return;
+    if (!g->str) g->str = std_string(g->clip);
+    if (g->str) r[1] = (unsigned)(unsigned long)&g->str;
+}
+
+/* from sndm_arm: hook each song mode's start, the record lookup and the bank's surface for the intros */
+static void juke_arm(void)
+{
+    unsigned m, clips = 0, sites = 0;
+    if (!n_jmode) return;
+    if (!n_jsong) { say("jukebox: %u song mode(s) but no song - nothing hooked", n_jmode); n_jmode = 0; return; }
+    if (!fn("sound_lookup") || (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup)))) {
+        say("jukebox: off - sound_lookup cannot be hooked on this build; every song mode plays its own song");
+        n_jmode = 0;
+        return;
+    }
+    for (m = 0; m < n_jmode; m++) {
+        clips += jmode[m].clip != 0;
+        if (jmode[m].site && fn(jmode[m].site) && hook(fn(jmode[m].site), juke_hooks[m])) {
+            jmode[m].hooked = 1;
+            sites++;
+        } else if (jmode[m].site)
+            say("jukebox: song mode %u's start %s is not on this build - it draws when it is first asked for",
+                m + 1, jmode[m].site);
+    }
+    if (clips && fn("surface_set_video") && (sv_juke = 1, sv_hook()))
+        ;
+    else if (clips) {
+        sv_juke = 0;
+        say("jukebox: the intro clips cannot be swapped on this build (no surface_set_video) - the songs still are");
+    }
+    juke_live = 1;
+    say("jukebox: %u song mode(s) (%u start(s) hooked), %u song(s)%s; sound_lookup 0x%08x%s", n_jmode, sites, n_jsong,
+        juke_has_quiet ? ", lead-ins silent" : "", fn("sound_lookup"), sv_juke ? ", the intros on surface_set_video" : "");
+}
+
 static void sndm_line(char *s)
 {
     const char *p;
@@ -12113,6 +12322,18 @@ static void sndm_line(char *s)
     }
     if (n >= 2 && str_eq(f[0], "random")) {
         sndt_random_line(f[1]);
+        return;
+    }
+    if (n >= 4 && str_eq(f[0], "jmode")) {    /* PAD-685 */
+        jmode_line(f[1], f[2], f[3]);
+        return;
+    }
+    if (n >= 2 && str_eq(f[0], "jquiet")) {
+        if (key_hex(f[1], juke_quiet)) juke_has_quiet = 1; else sndm_bad++;
+        return;
+    }
+    if (n >= 3 && str_eq(f[0], "jsong")) {
+        jsong_line(f[1], f[2], n >= 4 ? f[3] : 0);
         return;
     }
     if (n >= 4 && str_eq(f[0], "bsid")) {
@@ -12425,8 +12646,9 @@ static void sndm_arm(void)
     sndt_arm();                               /* PAD-565: the files in turn need no resolver */
     blist_arm();                              /* PAD-608: nor do the files in a sound bank */
     att_arm();                                /* PAD-641: nor the flipper buttons' sounds in attract */
+    juke_arm();                               /* PAD-685: nor the jukebox */
     if (!n_sndm) {
-        if (n_sndt || n_bsid || att.n) return;
+        if (n_sndt || n_bsid || att.n || n_jmode) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }

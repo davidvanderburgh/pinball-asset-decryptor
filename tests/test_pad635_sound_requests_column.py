@@ -118,6 +118,7 @@ def test_the_audio_tab_shows_which_requests_play_each_sound(tmp_path):
         _open(w, proj)
         s = w.state("audio")
         assert s["req_cap"] is True and "sound requests" in s["req_tip"]
+        assert s["req_note"] == ""
         jackpot, plain, loop = (_row(w, r) for r in RELS)
         assert jackpot["rq"] == 2
         assert jackpot["rq_tip"] == ["Played by 2 of the game code's sound requests:",
@@ -146,6 +147,8 @@ def test_no_request_map_no_column(tmp_path):
         _open(w, proj)
         assert w.state("audio")["req_cap"] is False
         assert "rq" not in _row(w, RELS[1])
+        # it says why, and what to do (PAD-635: a tester saw no column and no word)
+        assert w.state("audio")["req_note"] == CS.WHY_EXTRACT_AGAIN
         # a sort on it left over falls back to the name
         w.call("audio.sort", "rq")
         w.call("audio.scan")
@@ -159,3 +162,64 @@ def test_other_makers_have_no_column(tmp_path):
     with web_app(tmp_path, mfr="ap") as w:
         _open(w, proj)
         assert w.state("audio")["req_cap"] is False
+        assert w.state("audio")["req_note"] == ""
+
+
+def test_why_there_is_no_column(tmp_path):
+    proj = _project(tmp_path)
+    # no map at all: an extract made before v1.217.0
+    assert CS.sound_uses_why(proj) == CS.WHY_EXTRACT_AGAIN
+    # a map without the later parts
+    CS.write_requests(os.path.join(proj, CS.REQUESTS_TSV), [[1]], {0: [1]}, {})
+    assert CS.sound_uses_why(proj) == CS.WHY_EXTRACT_AGAIN
+    # a map the resolver filled with nothing
+    CS.write_requests(os.path.join(proj, CS.REQUESTS_TSV), [[1]], {}, {}, also={})
+    assert CS.sound_uses_why(proj) == CS.WHY_NOT_READ
+    # a whole map: the column is there, nothing to say
+    CS.write_requests(os.path.join(proj, CS.REQUESTS_TSV), [[1]], {0: [1]}, {}, also={})
+    assert CS.sound_uses_why(proj) == ""
+    # a folder with no decoded sounds is not one the column is for
+    assert CS.sound_uses_why(str(tmp_path / "empty")) == ""
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        os.remove(os.path.join(proj, CS.REQUESTS_TSV))
+        _open(w, proj)
+        assert w.state("audio")["req_note"] == CS.WHY_EXTRACT_AGAIN
+
+
+def test_a_map_naming_nothing_is_never_cached(tmp_path, monkeypatch):
+    """Round 2: a resolve that named no sound was cached, and every later extract of the card
+    reused it, so its Audio tab never had a Requests column (Star Wars 1.31, X-Men 0.98 and
+    Venom 1.07 on this PC). Nothing named is not cached, and such a cache is resolved again."""
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern import info
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    monkeypatch.setattr(E, "_params_cache_dir", lambda: str(cache_dir))
+    monkeypatch.setattr(E, "_fingerprint", lambda g, i: "a" * 32)
+    monkeypatch.setattr(info, "container_counts", lambda head: (10, 10))
+    monkeypatch.setattr(CS, "request_table", lambda fw, frags: (2, [[1], [2]], None, None))
+    monkeypatch.setattr(CS, "menu_names", lambda fw, lists: {})
+    answers = [{}, {0: [5]}]
+    calls = []
+
+    def resolve(emu, params, lists, fw, also=None, ceiling=None):
+        calls.append(1)
+        return answers[len(calls) - 1]
+    monkeypatch.setattr(CS, "resolve_requests", resolve)
+    gr, img = tmp_path / "game", tmp_path / "image.bin"
+    gr.write_bytes(b"\0" * 64)
+    img.write_bytes(b"\0" * 256)
+    out = tmp_path / "proj"
+    out.mkdir()
+    cache = E._requests_cache_path("a" * 32)
+    assert E._write_sound_requests(None, str(gr), str(img), [], str(out), None) == 0
+    assert not os.path.exists(cache)
+    # an empty map cached by an earlier version is resolved again too
+    with open(cache, "w", encoding="utf-8") as f:
+        f.write("{}")
+    assert E._write_sound_requests(None, str(gr), str(img), [], str(out), None) == 1
+    assert len(calls) == 2
+    assert CS.sound_uses(str(out)) == {5: [(0, "")]}
+    # and the good map is the one kept
+    assert E._write_sound_requests(None, str(gr), str(img), [], str(out), None) == 1
+    assert len(calls) == 2

@@ -1011,6 +1011,12 @@ class Manufacturer(ABC):
         tab shows no Requests column. Called off the UI thread."""
         return None
 
+    def sound_request_why(self, assets_dir):
+        """Why :meth:`sound_request_uses` has no map for a project that could
+        have one (PAD-635), for the Audio tab to say; ``""`` (the default)
+        when there is nothing to say. Called off the UI thread."""
+        return ""
+
     def sound_variant_counts(self, assets_dir, rels):
         """``{rel: n}`` for each Replace-Audio slot whose file is *n* variants of
         one sound one after another, the game playing one of them each time

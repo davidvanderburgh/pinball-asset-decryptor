@@ -12539,5 +12539,7 @@
 "At most one every {} minute.": "Como máximo uno cada {} minuto.",
 "At most one every {} minutes.": "Como máximo uno cada {} minutos.",
 "**Time between sounds** spaces them out: any time, or at most one every {} seconds up to one every {} minutes; a press before then plays nothing.": "**Tiempo entre sonidos** los espacia: en cualquier momento, o como máximo uno cada {} segundos hasta uno cada {} minutos; una pulsación antes de eso no reproduce nada.",
-"They do not play while the game takes the initials for a high score.": "No suenan mientras el juego pide las iniciales de una puntuación máxima."
+"They do not play while the game takes the initials for a high score.": "No suenan mientras el juego pide las iniciales de una puntuación máxima.",
+"No Requests column: this project's extract did not record which sounds the game's code asks for. Extract the card into it again to see it.": "No hay columna Peticiones: la extracción de este proyecto no guardó qué sonidos pide el código del juego. Vuelve a extraer la tarjeta en él para verla.",
+"No Requests column: the sounds the game's code asks for could not be read from this card.": "No hay columna Peticiones: no se pudieron leer de esta tarjeta los sonidos que pide el código del juego."
 }

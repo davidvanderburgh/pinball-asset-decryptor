@@ -72,7 +72,7 @@ mode itself at a shot, as the game lights one of its mini-wizards. Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
 far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
 compare two values, and / or / not, the mode is running, one of the game's own modes is running,
-the mode could start now, the mode is lit.
+the mode could start now, the mode is lit, the shield targets face away (PAD-690).
 
 LIT AT A SHOT (PAD-503). A Bond owner made modes of their own for the two films with no mini-wizard and
 wanted them as the game's four are: lit at the Right ramp with the film's villain, started by the ramp. Light
@@ -429,7 +429,8 @@ SHOWS = {
 CALLOUT_ROLES = {"ten_seconds": "Ten seconds left", "time_up": "Time is up"}
 NUM_KINDS = ("num", "var", "hits", "scored", "total", "secs_left", "balls", "player", "op",
              "timer_left")
-BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock", "can_start", "lit")
+BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock", "can_start", "lit",
+              "shields_away")   # PAD-690: Godzilla Premium/LE's shield targets face away (never on a Pro)
 OPS = {"+": "+", "-": "-", "*": "*", "/": "/"}
 CMPS = {"<": "<", "<=": "<=", "=": "==", "!=": "!=", ">=": ">=", ">": ">"}
 #: PAD-373: what the mode does about the game's own modes while it runs (the form's choice, PAD-363)
@@ -649,6 +650,8 @@ def hud_spec(program, slug=""):
     out = {"title": title, "line": h["line"] or " ", "counters": counters}
     if h["timer"]["on"]:
         out["timer"] = {"label": h["timer"]["label"] or title[:BADGE_MAX], "icon": h["timer"]["icon"]}
+    else:                   # PAD-690: no running timer, but the progress panel wears its badge all the same
+        out["badge"] = {"label": h["timer"]["label"] or title[:BADGE_MAX], "icon": h["timer"]["icon"]}
     if h["gauge"]["on"] and h["gauge"]["kind"] == "bar":        # PAD-658: the corner meter, in the stock's fire
         gg = h["gauge"]
         out["gauge"] = {"label": " ", "kind": "bar", "count": gg["count"], "icon": gg["icon"],
@@ -2052,6 +2055,8 @@ class _Gen:
         if k == "lit":
             self.lit_asked = True
             return "lit_now()"
+        if k == "shields_away":     # PAD-690: -1 on a game with no platform (a Pro's shields always face the player)
+            return "(pm_shield_position() == PM_SHIELD_AWAY)"
         return "0"
 
     # blocks

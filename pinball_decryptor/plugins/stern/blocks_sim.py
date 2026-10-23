@@ -327,6 +327,8 @@ class Sim:
             return self.can_start()
         if k == "lit":
             return self.lit is not None
+        if k == "shields_away":
+            return bool(getattr(self, "shields_away", False))
         return bool(self.val(e))
 
 

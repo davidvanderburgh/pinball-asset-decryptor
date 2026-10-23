@@ -4874,8 +4874,15 @@ kerning, carried in from the Ebirah battle scene) and hidden until the mode show
 - `counters`: up to three across the top (x 17.6 / 573.6 / 1123.6): a label, a big value, a sub-label;
 - an award line and a line under it in the middle (for a moment: a jackpot, a head severed);
 - `timer`: the stock BATTLE badge's panel with the mode's own green LED label and a glowing disc with its
-  icon (`bolt`, `oxygen`, `maser`, `xilien`, `anguirus`, `radiation`), in the BATTLE badge's slot (y 267),
-  the seconds in its window;
+  icon (`xilien`, `radiation`, `bolt`, `ghidorah`, `oxygen`, `maser`, `anguirus`, `rage`, `crystal`, `snowflake`,
+  `rose`, `claw`), in the BATTLE badge's slot (y 267), the seconds in its window. A picture named `badge.png` in
+  the mode's folder is its icon instead (PAD-690: its alpha, or its brightness, fitted into the disc). No two modes
+  of a card wear the same drawn icon: the build gives a mode whose icon an earlier mode took, or that names none,
+  the next free one;
+- the progress panel (PAD-680, PAD-690): a column at the right edge, under the rage meter and over the player
+  score panels, with a slot for every mode of the card, each badge scaled down to fit; a mode's latest progress
+  note stands in it (its badge and the shots it still needs, newest on top) until the mode starts or the game
+  ends. A mode with the timer off still has a badge there (its label and icon);
 - `gauge`: pips on the right edge (`spike`, `segment` - filled from the bottom - or `diamond`), each a lit
   and a dark picture; or (`"kind": "bar"`, PAD-416) ONE meter in the stock POWERUP meter's manner at the
   glass's top-right corner - a metal frame with the mode's `icon` in a diamond, a glass tube in five cells and

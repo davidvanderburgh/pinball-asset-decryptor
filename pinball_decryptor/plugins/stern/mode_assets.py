@@ -412,12 +412,26 @@ def _code_clip_jobs(project, code_clips, parsed):
 HUD_SCENE = "32e6ae280ddaec08e203a02289bb39a04968e7b0"
 
 
-def _code_huds(code, prof, hud_font):
+#: PAD-690: a picture of this name in a mode's folder is its badge's icon (any mode, any title with the HUD)
+BADGE_ICON_FILE = "badge.png"
+
+
+def _code_huds(project, code, prof, hud_font):
     """``[(slug, hud spec)]`` of the code modes with a HUD, when this title's HUD scene is Godzilla's
-    slide-outs and the card gave the game font's scene (hud-layers)."""
+    slide-outs and the card gave the game font's scene (hud-layers). A mode whose folder holds BADGE_ICON_FILE
+    wears that picture on its badge (``icon_file``) instead of a drawn icon."""
     if not hud_font or not prof.can("screen") or not (prof.lcd("hud") or "").endswith(HUD_SCENE):
         return []
-    return [(slug, dict(c.hud)) for slug, c in code or () if c.hud]
+    out = []
+    for slug, c in code or ():
+        if not c.hud:
+            continue
+        spec = dict(c.hud)
+        pic = os.path.join(MP.mode_folder(project, slug), BADGE_ICON_FILE) if project else ""
+        if pic and os.path.isfile(pic):
+            spec["icon_file"] = pic
+        out.append((slug, spec))
+    return out
 
 
 # ---- the whole build -----------------------------------------------------------------------
@@ -508,7 +522,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     screens = [with_layout(form_screen(project, slug, spec), spec.screen_layout)
                for slug, spec in own if spec.screen and prof.can("screen")]
     screens += _code_screens(project, code, prof)
-    huds = _code_huds(code, prof, hud_font)
+    huds = _code_huds(project, code, prof, hud_font)
 
     # the clips: made first (side by side, kept between builds), then one after another into
     # the stock bank

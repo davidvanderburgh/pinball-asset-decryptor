@@ -1105,8 +1105,10 @@ static KIT_UNUSED void kit_hud_gauge(struct kit_hud *h, int level, const char *l
  * LEFT RAMP" -> 4; a code mode's "5 RAMPS TO BIOLLANTE" -> 5; a note with none, READY, shows 0), for the player up, until that mode starts or the game
  * ends. Up through the game's screens and timed modes; down while one of ours runs or has its TOTAL up, and
  * during the game's own battles (their RIGHT spins sit where it is). Shared by every mode of the pack: weak, as
- * kit_hud_up. A card built before PAD-680 has no panel: nothing. */
-#define KIT_PROG_SLOTS 4
+ * kit_hud_up. A card built before PAD-680 has no panel: nothing. PAD-690: a slot for every mode of the pack, the
+ * badges scaled to fit (mode_hud.progress_layout); the kit uses the slots the panel has, up to KIT_PROG_SLOTS (a
+ * PAD-680 card has 4). */
+#define KIT_PROG_SLOTS 16
 struct kit_prog_row {
     char slug[32];                         /* the mode's folder: the key; "" = a free row */
     char num[8];                           /* the shots still needed, as its note said */
@@ -1122,6 +1124,7 @@ struct kit_prog {
     struct kit_prog_slot slot[KIT_PROG_SLOTS];
     void *group;
     int found, up;                         /* up: what the glass was last told (-1 = nothing yet) */
+    unsigned slots;                        /* the slots the panel has (PAD-690) */
     unsigned tries;
 };
 __attribute__((weak, visibility("hidden"))) struct kit_prog kit_prog;
@@ -1188,13 +1191,15 @@ static KIT_UNUSED void kit_prog_tick(const char *mine)
             kit_prog.slot[i].num = pm_text("hud", path);
             kit_prog.slot[i].badge = 0;
             kit_prog.slot[i].slug[0] = kit_prog.slot[i].written[0] = 0;
+            if (!kit_prog.slot[i].num) break;
         }
+        kit_prog.slots = i;
         kit_prog.found = 1;
         kit_prog.up = -1;
-        pm_log("progress panel found: %d badge slot(s) at the right edge", KIT_PROG_SLOTS);
+        pm_log("progress panel found: %u badge slot(s) at the right edge", kit_prog.slots);
     }
     if (!hid_mine && mine) {
-        for (i = 0; i < KIT_PROG_SLOTS; i++) {
+        for (i = 0; i < kit_prog.slots; i++) {
             void *b = kit_prog_badge(i, mine);
             if (b) pm_show(b, 0);
         }
@@ -1215,7 +1220,7 @@ static KIT_UNUSED void kit_prog_tick(const char *mine)
         if (kit_prog.up >= 0) pm_log("progress panel %s", up ? "up" : (n ? "down for now" : "empty"));
         kit_prog.up = up;
     }
-    for (i = 0; i < KIT_PROG_SLOTS; i++) {
+    for (i = 0; i < kit_prog.slots; i++) {
         struct kit_prog_slot *s = &kit_prog.slot[i];
         const char *slug = i < n ? kit_prog.row[order[i]].slug : "";
         if (!kit_same(s->slug, slug)) {         /* another mode's badge in this slot (or none) */

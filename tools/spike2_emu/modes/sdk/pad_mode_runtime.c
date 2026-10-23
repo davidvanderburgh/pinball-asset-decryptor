@@ -4445,6 +4445,33 @@ static int stock_objects(void)
     return 0;
 }
 
+/* PAD-687 (luvthatapex, Bond LE): a ball down an outlane is saved EARLY - the game serves the new ball while the
+ * drained one is still on its way to the trough, so the balls in play read 2 for a moment. Taken for one of the
+ * game's multiballs, it ended the mode (and, in a mode's challenge game, the ball: flippers dead). Two balls count
+ * as a multiball once they have stayed in play STOCK_MB_SETTLE_MS; the game's own multiballs last far longer.
+ * since: when two or more were first seen (0 = not now). 1 = a multiball (tests lift it verbatim). */
+#define STOCK_MB_SETTLE_MS 3000
+static int balls_multiball(unsigned n, unsigned long now, unsigned long *since)
+{
+    if (n < 2) {
+        *since = 0;
+        return 0;
+    }
+    if (!*since) *since = now ? now : 1;
+    return now - *since >= STOCK_MB_SETTLE_MS;
+}
+
+static unsigned long two_since;   /* PAD-687: kept up every tick (stock_balls_tick), not only when asked */
+
+static void stock_balls_tick(void)
+{
+    if (!fn("balls_in_play") || !pm_player()) {
+        two_since = 0;
+        return;
+    }
+    balls_multiball(((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu, pm_ms(), &two_since);
+}
+
 static int stock_balls(unsigned kinds)
 {
     unsigned n;
@@ -4462,7 +4489,8 @@ static int stock_balls(unsigned kinds)
     if (stock_objects_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_objects())
         return (int)PM_STOCK_BATTLE;
     n = ((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu;
-    return n >= 2 && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY)) ? (int)PM_STOCK_MULTIBALL : 0;
+    return balls_multiball(n, pm_ms(), &two_since) && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY))
+        ? (int)PM_STOCK_MULTIBALL : 0;
 }
 
 int pm_stock_mode_running(unsigned kinds)
@@ -9039,6 +9067,7 @@ static void on_tick(unsigned *r)
     events_deliver();
     event_census();                           /* PAD-420: `value event_census 1` */
     switches_deliver();
+    stock_balls_tick();                       /* PAD-687: how long two balls have been in play */
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */

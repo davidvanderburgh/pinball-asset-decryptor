@@ -2460,13 +2460,18 @@ def test_a_playfield_that_stops_leaves_something_to_read():
     # RUN launched: the one PAD opens has no process on that side to find,
     # and the app reports its own failures.
     assert body.count("PF_LAUNCHED=1") == 2, "one per launch, and only there"
-    assert '[ "${PF_LAUNCHED:-0}" = 1 ] && ! pf_up' in body
-    assert body.index('[ "${PF_LAUNCHED:-0}" = 1 ]') > body.index("PF_LAUNCHED=1"), (
+    check_at = body.index('if [ "${PF_LAUNCHED:-0}" = 1 ]; then')
+    assert check_at > body.index("PF_LAUNCHED=1"), (
         "the check has to come after the launch it is about")
+    check = body[check_at:]
+    # PAD-629: asked at once, and again by a watcher until the window says
+    # it is up; either way a stopped window is reported by pf_said_why.
+    assert check.index("if ! pf_up; then") < check.index("pf_said_why")
+    assert "^pfweb: window up" in check
     # An empty log is a different fault from a traceback - the interpreter
     # never ran the script at all - and is worth its own sentence.
-    check = body[body.index('[ "${PF_LAUNCHED:-0}" = 1 ]'):]
-    assert '-s "$PFLOG"' in check and "never ran it" in check
+    why = body[body.index("pf_said_why() {"):check_at]
+    assert '-s "$PFLOG"' in why and "never ran it" in why
 
 
 # ----------------------------------------------------------------------

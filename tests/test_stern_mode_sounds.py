@@ -7,6 +7,7 @@ from collections import namedtuple
 import pytest
 
 from pinball_decryptor.plugins.stern import mode_sounds as MS
+from tests.mode_examples import form as MX  # noqa: E402
 
 Site = namedtuple("Site", "sid payload")
 
@@ -119,7 +120,7 @@ def test_every_key_written_is_one_mode_file_c_reads():
 
 def test_own_sound_lines_follow_the_spec():
     from pinball_decryptor.plugins.stern import mode_project as MP
-    spec = MP.example("KAIJU RUSH")
+    spec = MX.example("KAIJU RUSH")
     assert MS.wants(spec) == ()
     spec.sound_start, spec.music, spec.end_sound = "a.wav", "m.wav", "e.wav"
     assert MS.wants(spec) == ("sound_start", "sound_end", "music")
@@ -188,7 +189,7 @@ def test_tile_wav_repeats_the_music_whole_past_the_carrier(tmp_path):
 
 def test_call_ms_measures_only_the_calls(tmp_path):
     from pinball_decryptor.plugins.stern import mode_project as MP
-    spec = MP.example("KAIJU RUSH")
+    spec = MX.example("KAIJU RUSH")
     spec.sound_start = os.path.basename(_tone_wav(str(tmp_path / "s.wav"), 1.0, channels=1))
     spec.end_sound = os.path.basename(_tone_wav(str(tmp_path / "e.wav"), 0.25, channels=1))
     spec.music = os.path.basename(_tone_wav(str(tmp_path / "m.wav"), 0.5))
@@ -573,7 +574,7 @@ def test_a_swapped_sound_writes_a_swap_line_for_its_carrier(tmp_path):
     record's (``swap <request> <stock> <ours>``, read by mode_file.c and pad_mode_assets.h), only
     for a sound the mode has."""
     from pinball_decryptor.plugins.stern import mode_project as MP
-    spec = MP.example("KAIJU RUSH")
+    spec = MX.example("KAIJU RUSH")
     spec.sound_start, spec.sound_shot, spec.end_sound, spec.music = "s.wav", "", "", ""
     carried = {"sound_start": 901, "music": 70,
                "swaps": [(901, "a20a51102c1c0020", "d1eaa8b4ae100000"), (70, "11" * 8, "22" * 8)]}
@@ -587,7 +588,7 @@ def test_a_sound_in_a_bank_of_the_modes_own_points_its_carrier_at_the_banks_sid(
     a bed in a bank is the ``music`` line's sid.  Only for a sound the mode has."""
     from pinball_decryptor.plugins.stern import mode_project as MP
     from pinball_decryptor.plugins.stern import mode_write as MW
-    spec = MP.example("KAIJU RUSH")
+    spec = MX.example("KAIJU RUSH")
     spec.sound_start, spec.sound_shot, spec.end_sound, spec.music = "s.wav", "", "", "m.wav"
     carried = {"sound_start": 901, "music": 125, "music_sid": 0x10000,
                "sids": [(901, 0x10001), (70, 0x10002)]}

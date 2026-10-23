@@ -19,6 +19,7 @@ import pytest
 
 from pinball_decryptor.plugins.stern import mode_assets as MA
 from pinball_decryptor.plugins.stern import mode_project as MP
+from tests.mode_examples import form as MX  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 SDK = REPO / "tools" / "spike2_emu" / "modes" / "sdk"
@@ -364,7 +365,7 @@ def test_godzilla_pro_1_15_is_unchanged_and_is_what_its_port_says():
         assert getattr(derived, f) == getattr(g, f), f
     # a blank mode on it is exactly the mode the tab made before item 148
     assert MP.blank_spec(g).to_json() == MP.ModeSpec().to_json()
-    assert [n for n, _ in MP.examples_for(g)] == [n for n, _ in MP.example_specs()]
+    assert [n for n, _ in MP.examples_for(g)] == ["TARGET RUSH"]        # PAD-691: no title has examples of its own
 
 
 def test_premium_1_16_offers_godzillas_names_with_three_shield_targets():
@@ -373,7 +374,7 @@ def test_premium_1_16_offers_godzillas_names_with_three_shield_targets():
     assert p.label == "Godzilla Premium/LE 1.16"
     assert {"Maser target", "Left ramp", "Shield target left", "Shield target center",
             "Shield target right"} <= set(names)
-    assert [n for n, _ in MP.examples_for(p)][0] == "KAIJU RUSH"
+    assert [n for n, _ in MP.examples_for(p)] == ["TARGET RUSH"]        # PAD-691: Godzilla's own examples are gone
     # the same shot NAME is another bit on LE: the masks are the LE port's own
     assert p.mask(["Shield target right"]) == 0x200000000 != MP.GODZILLA_PRO_1_15.mask(["Shield target right"])
 
@@ -392,7 +393,7 @@ def test_a_card_with_no_port_gets_none_and_the_help_names_making_a_port():
 
 def test_retarget_matches_shots_by_name():
     tmnt = MP.profile("turtles_pro_1_59")
-    kaiju = MP.example("KAIJU RUSH")
+    kaiju = MX.example("KAIJU RUSH")
     spec, dropped = MP.retarget(kaiju, tmnt)
     assert spec is not kaiju and kaiju.title == "godzilla_pro_1_15"
     assert spec.title == "turtles_pro_1_59"
@@ -581,7 +582,7 @@ def test_a_premium_card_builds_its_own_port_for_modes_saved_as_godzilla_pro_1_15
 
 def test_a_build_refuses_a_mode_naming_shots_the_cards_game_lacks(tmp_path):
     project = _card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0")
-    MP.new_mode(str(project), spec=MP.example("KAIJU RUSH"))
+    MP.new_mode(str(project), spec=MX.example("KAIJU RUSH"))
     with pytest.raises(MA.ModeAssetError) as e:
         MA.build(str(project), None, None, str(tmp_path / "out"))
     text = str(e.value)
@@ -676,7 +677,7 @@ def test_a_premium_build_of_a_pro_titled_mode_that_starts_on_an_event(tmp_path):
 def _advanced_kaiju():
     """KAIJU RUSH made on Godzilla Pro 1.15 with Advanced set: points on a Powerline and a
     ramp, a Powerline that ends it early, the two measured callouts and one typed by hand."""
-    spec = MP.example("KAIJU RUSH")
+    spec = MX.example("KAIJU RUSH")
     spec.shot_award = [["Powerline left", 750000], ["Left ramp", 500000]]
     spec.end_shot = "Powerline right"
     spec.callout_at = [[10, 1291], [5, 1295], [3, 1111]]

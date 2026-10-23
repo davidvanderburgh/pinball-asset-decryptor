@@ -15,9 +15,10 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..", ".."))
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, HERE)
 sys.path.insert(0, REPO)
+import examples as BX  # noqa: E402
 from pinball_decryptor.plugins.stern import block_modes as BM  # noqa: E402
 from pinball_decryptor.plugins.stern import mode_hud as MH  # noqa: E402
 
@@ -116,7 +117,7 @@ def main(argv):
     font = font_from_card(argv[0])
     only = argv[1:]
     n = 0
-    for ex in BM.EXAMPLES:
+    for ex in BX.EXAMPLES:
         if only and ex["slug"] not in only:
             continue
         bad = check(font, ex)

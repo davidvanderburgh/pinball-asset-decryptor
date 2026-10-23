@@ -18,9 +18,9 @@ from .rpc import rpc
 REWRITE_TIP = ("The game's own rules (a battle, a multiball) are compiled into the game. A rewrite is a "
                "code mode of this project whose C runs INSTEAD of one rule's shot handler: what a shot "
                "does is yours (which shots, in what order, what they pay), while the rule's start, "
-               "clock, screens and ending stay the game's own. It starts from the SDK's example for the "
-               "rule, builds and writes like every code mode, and with the folder gone the rule plays as "
-               "it always did.")
+               "clock, screens and ending stay the game's own. It starts from a template for the rule where "
+               "there is one, or is written against the SDK's pad_stock.h; it builds and writes like every "
+               "code mode, and with the folder gone the rule plays as it always did.")
 
 EMPTY = {"on": False, "msg": "", "rows": [], "sel": None, "note": ""}
 

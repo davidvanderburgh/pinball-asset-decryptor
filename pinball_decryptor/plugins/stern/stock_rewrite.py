@@ -9,9 +9,10 @@ as it carries every code mode: compiled with the mode-file interpreter into the 
 runtime attaches the record to the rule at boot; with the folder gone the game's rule plays as
 it always did.
 
-This module knows which rules of a card's port have a TEMPLATE (the SDK's examples: battle vs
-Ebirah's ``ebirah_rewrite.c``), which of the project's code modes rewrite which rule, and makes a
-new rewrite from a template (the Modes tab's "Rewrite in C..." action).
+This module knows which rules of a card's port have a TEMPLATE (:data:`TEMPLATES`; PAD-691: the app
+ships none - Godzilla's battle vs Ebirah, ``ebirah_rewrite.c``, was one title's demo and is test
+material now), which of the project's code modes rewrite which rule, and makes a new rewrite from a
+template (the Modes tab's "Rewrite in C..." action).
 """
 from __future__ import annotations
 
@@ -22,8 +23,11 @@ from . import code_modes as CM
 from . import mode_project as MP
 from . import mode_runtime as MR
 
-#: rule id -> the SDK example that rewrites it (tools/spike2_emu/modes/sdk/examples/)
-TEMPLATES = {12: "ebirah_rewrite.c"}
+#: rule id -> the C file in :data:`TEMPLATE_DIR` that rewrites it (PAD-691: none ship; a rule with no template is
+#: written against pad_stock.h)
+TEMPLATES = {}
+#: where the templates are; None: the SDK's examples folder
+TEMPLATE_DIR = None
 _HANDLER_RE = re.compile(r"PM_STOCK_HANDLER\s*\(\s*(\d+)\s*,")
 _RECORD_RE = re.compile(r"\.rule_id\s*=\s*(\d+)")
 _NAME_RE = re.compile(r'#define\s+MODE_NAME\s+"([^"]*)"')
@@ -56,11 +60,11 @@ def rewrites(project):
 
 
 def template_path(rule_id):
-    """The SDK example that rewrites *rule_id*, or None."""
+    """The template that rewrites *rule_id*, or None."""
     name = TEMPLATES.get(int(rule_id))
     if not name:
         return None
-    path = os.path.join(MR.sdk_dir(), "examples", name)
+    path = os.path.join(TEMPLATE_DIR or os.path.join(MR.sdk_dir(), "examples"), name)
     return path if os.path.isfile(path) else None
 
 

@@ -14,6 +14,7 @@ import pathlib
 import pytest
 
 from pinball_decryptor.plugins.stern import mode_project as MP
+from tests.mode_examples import form as MX  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 PROVEN = REPO / "tools" / "spike2_emu" / "modes" / "kaiju_rush_own_clip.mode"
@@ -64,23 +65,23 @@ def test_the_examples_build_as_they_are_and_the_first_is_the_proven_mode(tmp_pat
     accepts; KAIJU RUSH, the first, is the mode that ran on a real machine, so it must
     generate exactly what the proven mode file carries. new_mode copies an example
     rather than handing out the shared instance."""
-    names = [n for n, _ in MP.example_specs()]
+    names = [n for n, _ in MX.example_specs()]
     assert names[0] == "KAIJU RUSH" and len(names) == len(set(names))
-    for name, spec in MP.example_specs():
+    for name, spec in MX.example_specs():
         assert spec.name == name
         assert MP.validate(spec, None) == [], name
         text = MP.runtime_cfg(spec, MP.slugify(name))
         assert len(text.encode()) < 4096
-    kaiju, proven = _keys(MP.runtime_cfg(MP.example("KAIJU RUSH"), "kaiju_rush")), _keys(PROVEN.read_text(encoding="utf-8"))
+    kaiju, proven = _keys(MP.runtime_cfg(MX.example("KAIJU RUSH"), "kaiju_rush")), _keys(PROVEN.read_text(encoding="utf-8"))
     for key in ("name", "seconds", "award", "light_on", "light_off", "callout_at"):
         assert kaiju[key] == proven[key], key
     assert int(kaiju["shots"], 0) == int(proven["shots"], 0)
-    assert MP.example("no such mode") is None
+    assert MX.example("no such mode") is None
 
-    slug, spec = MP.new_mode(str(tmp_path), spec=MP.example("KAIJU RUSH"))
-    assert slug == "kaiju_rush" and spec is not MP.example("KAIJU RUSH")
+    slug, spec = MP.new_mode(str(tmp_path), spec=MX.example("KAIJU RUSH"))
+    assert slug == "kaiju_rush" and spec is not MX.example("KAIJU RUSH")
     spec.award = 5
-    assert MP.example("KAIJU RUSH").award == 1000000            # the example is untouched
+    assert MX.example("KAIJU RUSH").award == 1000000            # the example is untouched
     assert MP.load(os.path.join(MP.mode_folder(str(tmp_path), slug), MP.MODE_FILE)).name == "KAIJU RUSH"
 
 
@@ -345,7 +346,7 @@ def test_stack_no_is_written_only_when_asked_and_round_trips(tmp_path):
     after = MP.runtime_cfg(spec, "kaiju_rush")
     assert _keys(after)["stack"] == "no"
     assert after == before + "stack          no\n"
-    assert "stack" not in _keys(MP.runtime_cfg(MP.example("KAIJU RUSH"), "kaiju_rush"))
+    assert "stack" not in _keys(MP.runtime_cfg(MX.example("KAIJU RUSH"), "kaiju_rush"))
 
     project = str(tmp_path)
     slug, s = MP.new_mode(project, "Waits Its Turn")
@@ -370,7 +371,7 @@ def test_advanced_parameters_at_their_defaults_change_no_byte():
     for key in ("award_ladder", "shot_award", "end_shot", "clip_end"):
         assert key not in _keys(text)
     assert _keys(text)["restore_after"] == "6"
-    assert MP.runtime_cfg(MP.example("KAIJU RUSH"), "kaiju_rush") == text
+    assert MP.runtime_cfg(MX.example("KAIJU RUSH"), "kaiju_rush") == text
 
 
 def test_advanced_parameters_generate_the_runtime_lines():
@@ -558,13 +559,10 @@ def test_version_key_is_one_tuple_of_ints_for_every_spelling():
 @pytest.mark.usefixtures("preview_modes_on")
 def test_the_no_project_sentence_is_one_for_the_family():
     assert MP.NO_PROJECT_HELP.startswith("Open or extract a card project first (Extract tab).")
-    from pinball_decryptor.plugins.stern import code_modes as CM
     from pinball_decryptor.plugins.stern import mode_tryit as MT
     from pinball_decryptor.plugins.stern import mode_write as MW
     with pytest.raises(MT.TryItError, match="Extract tab"):
         MT.new_code_mode("", "Blitz")
-    with pytest.raises(CM.CodeModeError, match="Extract tab"):
-        CM.add_example("", CM.EXAMPLES[0]["name"])
     with pytest.raises(MW.ModeWriteError, match="Extract tab"):
         MW.build_tryit_set("", "card.raw", "base")
 

@@ -93,7 +93,7 @@ def test_every_port_with_shows_has_what_the_runtime_arms():
 
 @pytest.mark.parametrize("slug", EXAMPLES)
 def test_each_example_asks_for_a_flashy_start_and_a_subdued_end(slug):
-    src = (SDK / "examples" / (slug + ".c")).read_text(encoding="utf-8")
+    src = (pathlib.Path(__file__).resolve().parent / "mode_examples" / "c" / (slug + ".c")).read_text(encoding="utf-8")
     start = re.search(r'^#define GAME_SHOW_START "([^"]+)"', src, re.M).group(1)
     end = re.search(r'^#define GAME_SHOW_END\s+"([^"]+)"', src, re.M).group(1)
     shows = _shows()

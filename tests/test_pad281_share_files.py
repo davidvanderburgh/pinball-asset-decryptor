@@ -156,10 +156,10 @@ def test_modes_tab_saves_and_loads_a_file(tmp_path, monkeypatch):
     monkeypatch.setattr(preview, "enabled", lambda feature: feature == "modes")
     src = _card_project(tmp_path / "mine", "godzilla_le-1_16_0.raw")
     dest = _card_project(tmp_path / "friend", "godzilla_pro-1_16_0.raw")
-    zip_path = str(tmp_path / "KAIJU RUSH.zip")
+    zip_path = str(tmp_path / "TARGET RUSH.zip")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, src, card=None)
-        assert w.call("modes.example", "KAIJU RUSH") == "kaiju_rush"
+        assert w.call("modes.example", "TARGET RUSH") == "target_rush"
         w.answers.append(zip_path)
         assert w.call("modes.save_file", "this") == zip_path
         assert w.asked[-1]["title"] == "Save this mode to a file"
@@ -168,14 +168,14 @@ def test_modes_tab_saves_and_loads_a_file(tmp_path, monkeypatch):
         assert _modes_on_disk(dest) == []
         w.answers.append(zip_path)
         r = w.call("modes.load_file")
-        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "kaiju_rush")]
-        assert _modes_on_disk(dest) == ["kaiju_rush"]
+        assert [(m["state"], m["new_slug"]) for m in r["modes"]] == [("carried", "target_rush")]
+        assert _modes_on_disk(dest) == ["target_rush"]
         assert w.asked[-1]["title"] == "Load modes"
-        assert w.asked[-1]["message"].startswith("Loaded 1 mode from KAIJU RUSH.zip.")
+        assert w.asked[-1]["message"].startswith("Loaded 1 mode from TARGET RUSH.zip.")
         # cancelled: nothing
         w.answers.append("")
         assert w.call("modes.load_file") is None
-        assert _modes_on_disk(dest) == ["kaiju_rush"]
+        assert _modes_on_disk(dest) == ["target_rush"]
 
 
 def test_scenes_tab_saves_and_loads_a_file(tmp_path):

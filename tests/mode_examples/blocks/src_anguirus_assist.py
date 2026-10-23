@@ -335,7 +335,7 @@ PROGRAM = {
 
 def _pro_words():
     """The words that name the center shield, as a Pro (whose Maser target is the third spike) should letter them
-    (BM.adapt rewords whole strings with title_alt's "words")."""
+    (examples.adapt rewords whole strings with title_alt's "words")."""
     out = {}
 
     def pro(sides):

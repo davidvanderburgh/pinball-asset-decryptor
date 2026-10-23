@@ -18,6 +18,7 @@ from pinball_decryptor.plugins.stern import block_modes as BM
 from pinball_decryptor.plugins.stern import blocks_sim as BS
 from pinball_decryptor.plugins.stern import code_modes as CM
 from pinball_decryptor.plugins.stern import mode_project as MP
+from tests.mode_examples.blocks import examples as BX
 from pinball_decryptor.plugins.stern import rules_sheet as RS
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,7 +26,7 @@ TABS = os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs")
 
 
 def _program(slug):
-    for e in BM.EXAMPLES:
+    for e in BX.EXAMPLES:
         if e["slug"] == slug:
             return BM.normalize(e["program"])
     raise AssertionError("no blocks example " + slug)
@@ -83,9 +84,9 @@ def test_a_mode_of_its_own_and_one_the_other_modes_light():
     assert "2 balls" in w["stages"][3]
 
 
-@pytest.mark.parametrize("slug", [e["slug"] for e in BM.EXAMPLES])
+@pytest.mark.parametrize("slug", [e["slug"] for e in BX.EXAMPLES])
 def test_every_shipped_example_is_worded(slug):
-    w = _words(slug, others=[e["slug"] for e in BM.EXAMPLES if e["slug"] != slug])
+    w = _words(slug, others=[e["slug"] for e in BX.EXAMPLES if e["slug"] != slug])
     assert re.search(r"\d+ / \d+ / \d+", w["start"]), w["start"]
     assert len(w["stages"]) >= 3, w["stages"]
     assert all(s.strip() for s in w["stages"])
@@ -192,7 +193,7 @@ def _check_xref(data):
 
 
 def test_the_pdf_is_one_page_of_the_sheet(tmp_path):
-    project = _project(tmp_path, [e["slug"] for e in BM.EXAMPLES][:14])
+    project = _project(tmp_path, [e["slug"] for e in BX.EXAMPLES][:14])
     sheet = RS.build(project, None, "Godzilla Premium 1.16")
     for paper, box in (("letter", b"[0 0 792.00 612.00]"), ("a4", b"[0 0 841.89 595.28]")):
         data = RS.to_pdf(sheet, paper)

@@ -24,8 +24,8 @@ def _read(name):
 def test_every_call_the_wizard_makes_is_one_the_tab_answers():
     js = _read("modes_new.js")
     calls = set(re.findall(r'call\("modes\.([a-z_]+)"', js))
-    assert calls == {"new", "example", "new_blocks_mode", "new_code_mode", "code_example", "blocks_example",   # PAD-658
-                     "open_sdk_doc", "open_limits_doc"}, calls
+    assert calls == {"new", "example", "new_blocks_mode", "new_code_mode", "blocks_example",   # PAD-658
+                     "open_sdk_doc", "open_limits_doc"}, calls                              # PAD-691: no C examples
     for name in calls:
         fn = getattr(M.ModesTab, name, None)
         assert callable(fn), name

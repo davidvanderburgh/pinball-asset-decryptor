@@ -12541,5 +12541,10 @@
 "**Time between sounds** spaces them out: any time, or at most one every {} seconds up to one every {} minutes; a press before then plays nothing.": "**Zeit zwischen den Sounds** verteilt sie: jederzeit, oder höchstens einer alle {} Sekunden bis höchstens einer alle {} Minuten; ein Druck davor spielt nichts.",
 "They do not play while the game takes the initials for a high score.": "Sie spielen nicht, während das Spiel die Initialen für einen Highscore abfragt.",
 "No Requests column: this project's extract did not record which sounds the game's code asks for. Extract the card into it again to see it.": "Keine Spalte Anfragen: Die Extraktion dieses Projekts hat nicht festgehalten, welche Sounds der Code des Spiels anfordert. Extrahieren Sie die Karte erneut in dieses Projekt, um sie zu sehen.",
-"No Requests column: the sounds the game's code asks for could not be read from this card.": "Keine Spalte Anfragen: Welche Sounds der Code des Spiels anfordert, konnte von dieser Karte nicht gelesen werden."
+"No Requests column: the sounds the game's code asks for could not be read from this card.": "Keine Spalte Anfragen: Welche Sounds der Code des Spiels anfordert, konnte von dieser Karte nicht gelesen werden.",
+"The SDK's guide": "Die Anleitung des SDK",
+"Every call a mode can make, what each does on the machine, and how to build and try it.": "Jeder Aufruf, den ein Modus machen kann, was jeder auf dem Automaten tut, und wie man ihn baut und ausprobiert.",
+"No code modes in this project. New code mode… starts one from the SDK's template.": "Keine Code-Modi in diesem Projekt. Neuer Code-Modus… beginnt einen aus der Vorlage des SDK.",
+"{} is a code mode: its C is not on the card, so it cannot be loaded from it": "{} ist ein Code-Modus: sein C ist nicht auf der Karte und kann daher nicht davon geladen werden",
+"{} are code modes: their C is not on the card, so they cannot be loaded from it": "{} sind Code-Modi: ihr C ist nicht auf der Karte und sie können daher nicht davon geladen werden"
 }

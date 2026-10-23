@@ -138,54 +138,54 @@ def test_modes_ask_about_each_conflict_and_back_up_first(tmp_path, monkeypatch):
     zip_path = str(tmp_path / "sam modes.zip")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, friend, card=None)
-        assert w.call("modes.example", "KAIJU RUSH") == "kaiju_rush"
+        assert w.call("modes.example", "TARGET RUSH") == "target_rush"
         w.answers.append(zip_path)
         assert w.call("modes.save_file", "all") == zip_path
         _project(w, mine, card=None)
         w.answers.append(zip_path)
         w.call("modes.load_file")
-        assert _modes_on_disk(mine) == ["kaiju_rush"]
+        assert _modes_on_disk(mine) == ["target_rush"]
 
-        # the same mode again: already here, no question, no kaiju_rush_2
+        # the same mode again: already here, no question, no target_rush_2
         n = len(w.asked)
         w.answers.append(zip_path)
         assert w.call("modes.load_file") is None
         assert [s.get("kind") for s in w.asked[n:]] == ["file", "message"]
         assert "1 mode in the file is already here" in w.asked[-1]["message"]
-        assert _modes_on_disk(mine) == ["kaiju_rush"]
+        assert _modes_on_disk(mine) == ["target_rush"]
 
         # mine changed: a conflict
-        spec = _spec(mine, "kaiju_rush")
+        spec = _spec(mine, "target_rush")
         spec.seconds = 45
-        MP.save(mine, "kaiju_rush", spec)
+        MP.save(mine, "target_rush", spec)
         w.answers.extend([zip_path, "cancel"])
         assert w.call("modes.load_file") is None
         ask = w.asked[-1]
         assert ask["kind"] == "conflicts"
         assert [b["id"] for b in ask["buttons"]] == ["cancel", "copies", "skip", "replace", "pick"]
         (row,) = ask["items"]
-        assert row["id"] == "kaiju_rush" and row["mine"].startswith("KAIJU RUSH, changed ")
-        assert row["theirs"].startswith("KAIJU RUSH, saved ")
+        assert row["id"] == "target_rush" and row["mine"].startswith("TARGET RUSH, changed ")
+        assert row["theirs"].startswith("TARGET RUSH, saved ")
 
         w.answers.extend([zip_path, {"choice": "skip", "backup": True}])
         assert w.call("modes.load_file") is None
         assert "1 of yours was kept" in w.asked[-1]["message"]
-        assert _spec(mine, "kaiju_rush").seconds == 45 and _backups(mine) == []
+        assert _spec(mine, "target_rush").seconds == 45 and _backups(mine) == []
 
         w.answers.extend([zip_path, {"choice": "copies", "backup": True}])
         w.call("modes.load_file")
-        assert _modes_on_disk(mine) == ["kaiju_rush", "kaiju_rush_2"]
+        assert _modes_on_disk(mine) == ["target_rush", "target_rush_2"]
         assert _backups(mine) == []
-        MP.delete_mode(mine, "kaiju_rush_2")
+        MP.delete_mode(mine, "target_rush_2")
 
         w.answers.extend([zip_path, {"choice": "replace", "backup": True}])
         w.call("modes.load_file")
-        assert _modes_on_disk(mine) == ["kaiju_rush"]
-        assert _spec(mine, "kaiju_rush").seconds != 45
+        assert _modes_on_disk(mine) == ["target_rush"]
+        assert _spec(mine, "target_rush").seconds != 45
         (backup,) = _backups(mine)
         assert backup in w.asked[-1]["message"]
         with zipfile.ZipFile(os.path.join(str(mine), MP.BACKUP_DIR, backup)) as z:
-            assert json.loads(z.read("modes/kaiju_rush/mode.json"))["seconds"] == 45
+            assert json.loads(z.read("modes/target_rush/mode.json"))["seconds"] == 45
 
 
 def test_modes_import_replaces_and_skips_by_folder_name(tmp_path):

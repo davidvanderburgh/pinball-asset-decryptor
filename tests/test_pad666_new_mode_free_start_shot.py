@@ -9,6 +9,7 @@ import json
 
 from pinball_decryptor.plugins.stern import block_modes as BM
 from pinball_decryptor.plugins.stern import mode_project as MP
+from tests.mode_examples.blocks import examples as BX
 from tests.test_app_run_logic_modes import _modes_card_project, _project, _svc
 from tests.webui_harness import web_app
 
@@ -17,9 +18,9 @@ CARD = "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
 
 
 def _maser_barrage(project):
-    """MASER BARRAGE's own trigger: its idle Maser target hat (the blocks example, without its films)."""
-    ex = BM.example("MASER BARRAGE")
-    program = BM.without_media(ex["program"])
+    """MASER BARRAGE's own trigger: its idle Maser target hat (the Godzilla blocks program kept as test material, without its media)."""
+    ex = BX.example("MASER BARRAGE")
+    program = BX.without_media(ex["program"])
     BM.save(str(project), "maser_barrage", program)
     return program
 

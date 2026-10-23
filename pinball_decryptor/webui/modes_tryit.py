@@ -105,9 +105,6 @@ class TryItMixin:
     END_TIP = "End whichever of this project's modes is running."
     CODE_TIP = ("A mode written in C, for what the form cannot do: a copy of the Mode SDK's "
                 "template in this project's modes folder. Try it builds it in with the others.")
-    CUT_TIP = ("Cut the code-mode examples' clip, picture, music and calls from your own copy "
-               "of the Godzilla films, with the film cutter. Pick the folder that holds the "
-               "films.")
     LEAVE_OUT_TIP = ("Build this Try it without the modes' own sounds: the game's own calls "
                      "play, and the sound bank is not grown (the slow part of a build). A card "
                      "Written from the project still carries them.")

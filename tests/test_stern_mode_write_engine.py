@@ -21,6 +21,7 @@ pytest.importorskip("numpy")
 from pinball_decryptor.core import ext4_grow                                  # noqa: E402
 from pinball_decryptor.plugins.stern import engine, sidx, sidx_append, valpatch  # noqa: E402
 from pinball_decryptor.plugins.stern import mode_project as MP               # noqa: E402
+from tests.mode_examples import form as MX  # noqa: E402
 from pinball_decryptor.plugins.stern import mode_write as MW                 # noqa: E402
 from pinball_decryptor.plugins.stern.explorer import S_IFREG                 # noqa: E402
 from tests.test_stern_audio_grow import (                                     # noqa: E402
@@ -120,7 +121,7 @@ def _mode_card(monkeypatch, tmp_path, with_sound=True, audio_edit=False, sound_i
     monkeypatch.setattr(MW, "host_refusal", lambda platform=None: "")
 
     project = tmp_path / "project"
-    for name, spec in MP.example_specs()[:2]:
+    for name, spec in MX.example_specs()[:2]:
         slug, _s = MP.new_mode(str(project), spec=spec)
         if with_sound and name == "KAIJU RUSH":
             _wav(os.path.join(MP.mode_folder(str(project), slug), "end.wav"), 3.0)
@@ -798,7 +799,7 @@ def test_the_direct_sd_dialog_says_the_modes_were_left_out(monkeypatch, tmp_path
         return done
     # no modes: the dialog it always was
     assert run() == [(True, "Wrote 1 sound(s) directly to the SD card.")]
-    for _name, spec in MP.example_specs()[:2]:
+    for _name, spec in MX.example_specs()[:2]:
         MP.new_mode(str(project), spec=spec)
     [(ok, summary)] = run()
     assert ok and summary.startswith("Wrote 1 sound(s) directly to the SD card.\n\nModes: ")
@@ -812,7 +813,7 @@ def test_the_image_write_dialog_says_a_mac_left_the_modes_out(monkeypatch, tmp_p
     from pinball_decryptor.plugins.stern import pipeline as PL
     project = tmp_path / "project"
     project.mkdir()
-    for _name, spec in MP.example_specs()[:2]:
+    for _name, spec in MX.example_specs()[:2]:
         MP.new_mode(str(project), spec=spec)
     monkeypatch.delenv(MW.GATE_ENV, raising=False)
     monkeypatch.setattr(PL, "detect_game", lambda p: "godzilla_pro")

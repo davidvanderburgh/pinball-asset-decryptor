@@ -148,7 +148,7 @@ def test_the_build_writes_each_song_mode_and_each_song_that_landed(tmp_path):
     assert not [ln for ln in lines if ln.startswith(("turn", "tsid", "random"))]
     assert any("song 3" in t and "left out" in t for lvl, t in logs if lvl == "warning")
     # the card's record names the songs that landed
-    assert "#jsong\t1\t667\t900\t-\taudio/idx0667.wav\ts1.wav" in lines
+    assert "#jsong\t1\t667\t900\t3\taudio/idx0667.wav\ts1.wav" in lines          # its weight with it
     assert not any(ln.startswith("#jsong\t3\t") for ln in lines)
 
 
@@ -375,3 +375,35 @@ def test_the_page_has_the_jukebox_window():
     assert 'call("audio.jukebox_open")' in js and "function JukeboxModal" in js
     for a in ('"add"', "`video:${g.k}`", "`weight:${g.k}:${v}`", "`off:${g.k}`", "`play:${g.k}`"):
         assert a in js, a
+
+
+# ---- back out of a card ----------------------------------------------------------------------------
+def test_an_extract_of_the_card_has_the_jukebox_back(tmp_path):
+    from pinball_decryptor.plugins.stern import media_share as MS
+    from tests.test_webui_audio import _wav as wav
+    proj = str(tmp_path / "proj")
+    wav(os.path.join(proj, "audio", "idx0667.wav"), seconds=0.3)
+    wav(os.path.join(proj, "audio", "idx0900.wav"), seconds=0.5, amp=900)      # song 1's record
+    wav(os.path.join(proj, "audio", "idx0901.wav"), seconds=0.4, amp=700)      # song 2's
+    os.makedirs(os.path.join(proj, "video"))
+    with open(os.path.join(proj, "video", "PadJukebox1.mov"), "wb") as f:     # song 1's intro, decoded
+        f.write(b"intro")
+    m = _juke_modes(tmp_path, [JB.Song(r"C:\mine\Hey Jude.wav", r"C:\mine\Hey Jude.mp4", 3),
+                               JB.Song(r"C:\mine\Dig It.wav", "", 1)])
+    used = [{"rel": "audio/idx0667.wav", "slot": 667, "mode": SMo.juke_mode(k), "host": 899 + k, "db": 0,
+             "lines": 1} for k in (1, 2)]
+    cfg = SMo.cfg_text(0, 0, [], True, record=SMo.card_record(m, used))
+    rec = SMo.read_card_record(cfg)
+    assert [(j["k"], j["host"], j["weight"], j["name"]) for j in rec["jukebox"]] == [
+        (1, 900, 3, "Hey Jude.wav"), (2, 901, 1, "Dig It.wav")]
+    logs = []
+    assert MS.readback("card.raw", proj, log=lambda t, lvl="info": logs.append(t),
+                       padmode={"sounds.cfg": cfg.encode()})["music"] == 2
+    box = JB.load(proj)
+    assert [(os.path.basename(s.audio), os.path.basename(s.video), s.weight) for s in box.songs] == [
+        ("Hey Jude.wav", "Hey Jude intro.mov", 3), ("Dig It.wav", "", 1)]
+    assert all(os.path.isfile(s.audio) for s in box.songs) and os.path.isfile(box.songs[0].video)
+    # a project with a jukebox of its own keeps it
+    JB.save(proj, JB.Jukebox(songs=[JB.Song("mine.wav")]))
+    assert MS.jukebox_from_card(proj, cfg) == 0
+    assert [s.audio for s in JB.load(proj).songs] == ["mine.wav"]

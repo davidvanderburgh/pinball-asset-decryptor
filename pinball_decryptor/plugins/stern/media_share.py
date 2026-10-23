@@ -657,6 +657,45 @@ def music_from_card(project, cfg_text):
     return out, left
 
 
+def jukebox_from_card(project, cfg_text, log=None):
+    """PAD-685: the jukebox a card's ``sounds.cfg`` (*cfg_text*) records, back in *project* (an extract
+    of that card) unless the project has one of its own: each song's file copied from the record
+    holding it into :data:`MUSIC_DIR`, and its intro video from the clip the extract decoded out of the
+    video bank (``video/PadJukebox<k>``). Returns how many songs came back."""
+    from . import jukebox as JB
+    log = log or (lambda *a, **k: None)
+    rec = SMo.read_card_record(cfg_text) or {}
+    songs = rec.get("jukebox") or []
+    if not songs or JB.load(project).any:
+        return 0
+    idx = _card_idx(project)
+    folder = os.path.join(project, MUSIC_DIR)
+    vids = {}
+    try:
+        for n in os.listdir(os.path.join(project, "video")):
+            vids.setdefault(os.path.splitext(n)[0].lower(), os.path.join(project, "video", n))
+    except OSError:
+        pass
+    back = []
+    for f in songs:
+        host = idx.get(f["host"])
+        if host is None:
+            log("Jukebox: song %d (%s) is not back: this extract has no sound idx %d."
+                % (f["k"], f["name"] or "?", f["host"]), "warning")
+            continue
+        stem = os.path.splitext(_safe_name(f["name"], ""))[0] or "jukebox song %d" % f["k"]
+        audio = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
+        video = vids.get(JB.clip_name(f["k"]).lower(), "")
+        if video:
+            video = _put(folder, stem + " intro" + os.path.splitext(video)[1], src=video)
+        back.append(JB.Song(audio=audio, video=video, weight=JB.clean_weight(f["weight"])))
+    if back:
+        JB.save(project, JB.Jukebox(songs=back))
+        log("Jukebox: this card's jukebox has %d song(s); they are back in the Audio tab (their files "
+            "are in the \"%s\" folder)." % (len(back), MUSIC_DIR), "success")
+    return len(back)
+
+
 def _built_project_modes(card):
     """The music modes of the project the build record beside *card* names, while that folder
     and its files are still on this PC (a card written before cards carried them); else None."""
@@ -751,6 +790,9 @@ def readback(card, project, log=None, padmode=None):
                         len(record["slots"]), ", ".join(
                             "%d %s" % (m, names.name(m)) for m in range(1, names.count + 1)),
                         where), "success")
+    if cfg:                                       # PAD-685: the jukebox, songs and intro videos
+        n = jukebox_from_card(project, cfg.decode("utf-8", "replace"), log)
+        done["music"] += n
     variants = {rel: files[:CV.MAX_EXTRA]
                 for rel, files in mod_transfer.baked_variants(project).items()}
     if variants:

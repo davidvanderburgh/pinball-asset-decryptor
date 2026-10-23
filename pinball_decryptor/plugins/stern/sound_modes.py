@@ -907,7 +907,8 @@ REC_MTURN, REC_MRANDOM = "#mturn", "#mrandom"
 REC_ATTRACT = "#attract"
 #: PAD-641 round 2: the time between two of them: ``#agap <seconds>``
 REC_AGAP = "#agap"
-#: PAD-685: a jukebox song: ``#jsong <k> <slot idx> <record idx> - <slot rel> <the file's own name>``
+#: PAD-685: a jukebox song: ``#jsong <k> <slot idx> <record idx> <weight> <slot rel> <the file's own
+#: name>`` (its intro clip, when it has one, is in the video bank as ``jukebox.clip_name(k)``)
 REC_JSONG = "#jsong"
 #: PAD-608: a file in a sound bank names its record as ``<bank category>:<record idx>`` (an app
 #: before PAD-608 skips such a line: its record field is not a number)
@@ -948,7 +949,9 @@ def card_record(modes, used):
         if is_juke(m):
             k = turn_of(m)
             src = modes.jukebox[k - 1] if 0 < k <= len(modes.jukebox) else ""
-            out.append("\t".join([REC_JSONG, str(k), str(int(u["slot"])), _rec_host(u), "-",
+            box = (modes.juke_plan or {}).get("box")
+            weight = box.songs[k - 1].weight if box is not None and 0 < k <= len(box.songs) else 2
+            out.append("\t".join([REC_JSONG, str(k), str(int(u["slot"])), _rec_host(u), str(int(weight)),
                                   _rec_word(u["rel"]),
                                   _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
             continue
@@ -1003,7 +1006,7 @@ def read_card_record(text):
     when it has no record (a card written before PAD-553). PAD-608: an entry whose file is in a
     sound bank has ``"bank"``, the bank's category, and ``"host"`` is the bank's record."""
     names, files, turns, rnd, attract, seen = {}, [], [], [], [], False
-    mturns, mrnd = [], []
+    mturns, mrnd, juke = [], [], []
     agap = 0
     for line in str(text or "").splitlines():
         f = line.split("\t")
@@ -1054,6 +1057,11 @@ def read_card_record(text):
                                         **({"bank": bank} if bank is not None else {})))
             elif f[0] == REC_AGAP and len(f) >= 2:
                 agap = clean_gap(f[1])
+            elif f[0] == REC_JSONG and len(f) >= 6:          # PAD-685
+                seen = True
+                juke.append({"k": int(f[1]), "slot": int(f[2]), "host": int(f[3]),
+                             "weight": int(f[4]) if f[4].isdigit() else 2, "rel": f[5],
+                             "name": f[6] if len(f) > 6 else ""})
         except ValueError:
             continue
     if not seen:
@@ -1072,6 +1080,8 @@ def read_card_record(text):
         out["mode_turns"] = mturns
         if mrnd:
             out["mode_random"] = mrnd
+    if juke:
+        out["jukebox"] = sorted(juke, key=lambda j: j["k"])
     return out
 
 

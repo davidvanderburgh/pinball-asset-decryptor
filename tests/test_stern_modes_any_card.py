@@ -13,6 +13,7 @@ import pytest
 from pinball_decryptor.plugins.stern import code_modes as CM
 from pinball_decryptor.plugins.stern import engine
 from pinball_decryptor.plugins.stern import mode_project as MP
+from tests.mode_examples import form as MX  # noqa: E402
 from pinball_decryptor.plugins.stern import mode_tryit as MT
 from pinball_decryptor.plugins.stern import mode_write as MW
 
@@ -34,7 +35,7 @@ def _name_card(project, image_name):
 
 
 def _a_mode(project, name="KAIJU RUSH"):
-    spec = dict(MP.example_specs())[name]
+    spec = dict(MX.example_specs())[name]
     MP.new_mode(str(project), name, spec)
 
 

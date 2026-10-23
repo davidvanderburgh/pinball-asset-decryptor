@@ -367,12 +367,15 @@ def test_a_mode_whose_shots_carry_but_the_card_cannot_build_is_to_fix(tmp_path):
     assert m.state == MP.COPY_TO_FIX and "a build there refuses it until then" in m.words
 
 
-def test_an_old_cards_code_modes_that_are_the_apps_examples_come_back(tmp_path, monkeypatch):
+def test_an_old_cards_code_modes_cannot_come_back(tmp_path, monkeypatch):
+    """A card's code modes carry no C, so none is loaded from it. PAD-691: that takes in the C examples the app once
+    had (KING GHIDORAH ...), which it used to bring back from its own copy; it has none any more."""
     files = {"mode.so": b"\x7fELF", "game.port": open(_port115(), "rb").read(),
              "ghidorah_heads.assets": b"x", "my_own.assets": b"x"}
     monkeypatch.setattr(MFC, "read_padmode", lambda image: files)
-    path, _about, notes = MFC.card_modes_file(str(tmp_path / "old.raw"), str(tmp_path))
-    with zipfile.ZipFile(path) as z:
-        assert "modes/ghidorah_heads/ghidorah_heads.c" in z.namelist()
-    assert any("KING GHIDORAH is the app's own example" in n for n in notes)
-    assert any("MY_OWN is a code mode: its C is not on the card" in n for n in notes)
+    with pytest.raises(MFC.CardModesError) as e:
+        MFC.card_modes_file(str(tmp_path / "old.raw"), str(tmp_path))
+    assert "carries no modes the app can bring back" in str(e.value)
+    assert ("GHIDORAH_HEADS, MY_OWN are code modes: their C is not on the card, so they cannot be loaded from it"
+            in str(e.value))
+    assert "example" not in str(e.value)

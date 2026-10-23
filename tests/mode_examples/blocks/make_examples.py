@@ -8,7 +8,7 @@
     python make_examples.py --desk [slug]   also play each example's desk scenarios (needs Linux or WSL: gcc and the
                                             desk harness; on Windows it runs itself under WSL)
 
-Each ``src_<slug>.py`` has ``build()`` -> the example (``title_alt``: its Pro alternates, BM.adapt), optionally
+Each ``src_<slug>.py`` has ``build()`` -> the example (``title_alt``: its Pro alternates, examples.adapt), optionally
 ``DESK_PRO`` (scenarios played on the program as a Pro gets it), (blk.py's words; block_modes.py's "the blocks examples" says
 the shape) and, optionally, ``DESK``: [(what, [harness args], [lines the output must hold])] (a 4th item, a set of slugs: played only when those
 modes are built into the same harness). The film recipe of
@@ -27,10 +27,11 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SDK = os.path.dirname(HERE)
-REPO = os.path.abspath(os.path.join(SDK, "..", "..", "..", ".."))
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+SDK = os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk")
 sys.path.insert(0, HERE)
 sys.path.insert(0, REPO)
+import examples as BX  # noqa: E402
 from pinball_decryptor.plugins.stern import block_modes as BM  # noqa: E402
 from pinball_decryptor.plugins.stern import mode_project as MP  # noqa: E402
 
@@ -53,6 +54,12 @@ def build(slug):
     return ex
 
 
+def _films():
+    """The films the recipes were measured on (tests/mode_examples/c/film_recipes.json's "films")."""
+    with open(os.path.join(HERE, "..", "c", "film_recipes.json"), encoding="utf-8") as f:
+        return json.load(f).get("films") or {}
+
+
 def write(ex):
     path = os.path.join(HERE, ex["slug"] + ".json")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
@@ -71,7 +78,7 @@ def check(ex):
     out += BM.problems(p, **BM.card_checks(prof))
     if "godzilla_pro" in (ex.get("titles") or ()):          # PAD-658: the Pro's own rules where its layout differs
         pro = MP.profile(PRO_TITLE)
-        out += ["on Godzilla Pro 1.16: " + t for t in BM.problems(BM.adapt(ex, pro), **BM.card_checks(pro))]
+        out += ["on Godzilla Pro 1.16: " + t for t in BM.problems(BX.adapt(ex, pro), **BM.card_checks(pro))]
     r = ex.get("recipe") or {}
     clips = {c["name"] for c in p["clips"]}
     sounds = {c["name"] for c in p["sounds"]}
@@ -87,9 +94,9 @@ def check(ex):
         for c in p["beds"]:
             if c["file"] != "music_%s.wav" % c["name"]:
                 out.append("bed %s's file is not music_%s.wav" % (c["name"], c["name"]))
-        from pinball_decryptor.plugins.stern import code_modes as CM
-        for k in BM.example_films(ex):
-            if k not in CM.FILMS:
+        films = _films()
+        for k in BX.example_films(ex):
+            if k not in films:
                 out.append("film %s is not in film_recipes.json's films" % k)
     elif clips or sounds or p["music"] or p["beds"]:
         out.append("it has its own clips or sounds but no recipe to cut them from")
@@ -158,7 +165,7 @@ def desk(slugs, examples):
             bad += not ok
             print("%-12s %-40s %s%s" % (ex["slug"], what, "ok" if ok else "FAILED", "" if ok else
                                          " (missing: %s; rc %d) see %s" % (missing, r.returncode, log)))
-    # PAD-658: DESK_PRO - the same mode as a Pro gets it (BM.adapt to Godzilla Pro 1.16), in a harness of its own
+    # PAD-658: DESK_PRO - the same mode as a Pro gets it (examples.adapt to Godzilla Pro 1.16), in a harness of its own
     for ex in examples:
         if slugs and ex["slug"] not in slugs:
             continue
@@ -169,7 +176,7 @@ def desk(slugs, examples):
         os.makedirs(pdir, exist_ok=True)
         src = os.path.join(pdir, ex["slug"] + ".c")
         with open(src, "w") as f:
-            f.write(BM.to_c(BM.adapt(ex, MP.profile(PRO_TITLE)), ex["slug"]))
+            f.write(BM.to_c(BX.adapt(ex, MP.profile(PRO_TITLE)), ex["slug"]))
         shutil.copy(os.path.join(SDK, "examples", BM.KIT_FILE), pdir)
         pexe = os.path.join(pdir, "harness")
         r = subprocess.run(["gcc", "-std=gnu17", "-Wall", "-Wextra", "-Wno-unused-parameter", "-I", SDK, "-I", pdir,

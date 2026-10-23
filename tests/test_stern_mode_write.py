@@ -17,6 +17,7 @@ import pytest
 pytestmark = pytest.mark.usefixtures("preview_modes_on")
 
 from pinball_decryptor.plugins.stern import mode_project as MP
+from tests.mode_examples import form as MX  # noqa: E402
 from pinball_decryptor.plugins.stern import mode_runtime as MR
 from pinball_decryptor.plugins.stern import mode_write as MW
 from pinball_decryptor.plugins.stern import sidx, sidx_append
@@ -191,7 +192,7 @@ def test_a_params_cache_with_only_the_first_key_word_still_resolves(monkeypatch)
 # ---- the plan ----------------------------------------------------------------------------------------
 def _project(tmp_path, sound_for=()):
     project = str(tmp_path / "project")
-    for name, spec in MP.example_specs()[:2]:
+    for name, spec in MX.example_specs()[:2]:
         slug, _s = MP.new_mode(project, spec=spec)
         if name in sound_for:
             folder = MP.mode_folder(project, slug)
@@ -418,7 +419,7 @@ def test_a_code_mode_is_named_as_not_reaching_the_card(tmp_path):
 def _sounds_project(tmp_path, sounds):
     """The two example modes, each given the own sounds in *sounds* {mode name: {field: wav}}."""
     project = str(tmp_path / "project")
-    for name, spec in MP.example_specs()[:2]:
+    for name, spec in MX.example_specs()[:2]:
         slug, _s = MP.new_mode(project, spec=spec)
         folder = MP.mode_folder(project, slug)
         spec = MP.load(os.path.join(folder, MP.MODE_FILE))
@@ -552,7 +553,7 @@ def test_the_log_and_the_scan_never_promise_a_screen_or_a_clip_the_title_cannot_
     with open(os.path.join(project, ".extract_source.json"), "w", encoding="utf-8") as f:
         json.dump({"input_path": "D:\\cards\\" + card, "input_name": card,
                    "size": 1, "mtime": 1, "card_version": "1.58.0"}, f)
-    _name, spec = MP.example_specs()[0]
+    _name, spec = MX.example_specs()[0]
     assert (spec.title, spec.screen, spec.clip) == (GZ.key, True, "title")
     MP.new_mode(project, spec=spec)
     screen, clip = "its own screen in the game's HUD scene", "title-card clip"

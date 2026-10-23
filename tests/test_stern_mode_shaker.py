@@ -25,6 +25,7 @@ import pytest
 
 from pinball_decryptor.plugins.stern import block_modes as BM
 from pinball_decryptor.plugins.stern import mode_project as MP
+from tests.mode_examples import form as MX
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SDK = ROOT / "tools" / "spike2_emu" / "modes" / "sdk"
@@ -408,7 +409,7 @@ def test_a_new_mode_on_a_pro_has_it_off_and_the_field_round_trips(tmp_path):
     assert spec.shakes == []
     spec = MP.ModeSpec(name="QUAKE", shakes=[["shot", "jackpot", 0, "Left ramp"]])
     assert MP.ModeSpec.from_json(spec.to_json()).shakes == [["shot", "jackpot", 0, "Left ramp"]]
-    ex = dict(MP.examples_for(MP.profile("godzilla_le_1_16")))["MECHAGODZILLA"]
+    ex = dict(MX.godzilla_examples(MP.profile("godzilla_le_1_16")))["MECHAGODZILLA"]   # PAD-691: test material now
     assert ex.shakes == [["start", "multiball_start", 0, ""], ["shot", "jackpot", 0, "Godzilla target"]]
     assert MP.validate(ex) == []
 

@@ -1,7 +1,8 @@
 """A stock rule's shot logic rewritten in C (item 161): the desk-checkable parts. The header's
 calls are in the runtime, both Godzilla ports carry the lines the accessors read, the example
 registers Ebirah's rule, the project side finds a rewrite among the code modes and makes one from
-the template, and Write's words name what it replaces. Nothing here runs the game."""
+the template, and Write's words name what it replaces. Nothing here runs the game. PAD-691: the app
+ships no template; Ebirah's is test material (tests/mode_examples/c/), handed to the module here."""
 import os
 import re
 
@@ -17,8 +18,17 @@ from pinball_decryptor.plugins.stern import stock_rewrite as SW
 SDK = MR.sdk_dir()
 HEADER = os.path.join(SDK, "pad_stock.h")
 RUNTIME = os.path.join(SDK, "pad_mode_runtime.c")
-EXAMPLE = os.path.join(SDK, "examples", "ebirah_rewrite.c")
+EXAMPLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mode_examples", "c", "ebirah_rewrite.c")
 _CALL = re.compile(r"^(?:[A-Za-z_][\w \*]*?\s\*?)(pm_[a-z_0-9]+)\s*\(", re.M)
+
+
+@pytest.fixture
+def ebirah_template(monkeypatch):
+    """PAD-691: the app ships no template (Ebirah's was Godzilla's demo); the tests give it the one kept as test
+    material, so the template path is still proven."""
+    from pinball_decryptor.plugins.stern import stock_rewrite as SW
+    monkeypatch.setattr(SW, "TEMPLATES", {12: "ebirah_rewrite.c"})
+    monkeypatch.setattr(SW, "TEMPLATE_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "mode_examples", "c"))
 
 
 def _read(path):
@@ -90,7 +100,20 @@ def _project(tmp_path, image_name="godzilla_le-1_16_0.raw"):
     return str(proj)
 
 
-def test_rows_and_a_new_rewrite_from_the_template(tmp_path):
+def test_the_app_ships_no_template(tmp_path):
+    """PAD-691: no rule of any title has a template in the app: every row says to write one against pad_stock.h."""
+    proj = _project(tmp_path)
+    port = MP.port_path(MP.profile_for_card("godzilla_le", "1.16"))
+    assert SW.TEMPLATES == {} and SW.template_path(12) is None
+    rows = SW.rows(proj, port)
+    assert [(r["id"], r["template"]) for r in rows] == [(12, ""), (4, "")]
+    assert all("no template" in r["status"] for r in rows)
+    with pytest.raises(SW.StockRewriteError, match="no template"):
+        SW.new_rewrite(proj, 12, port)
+    assert not os.path.isfile(os.path.join(SDK, "examples", "ebirah_rewrite.c"))
+
+
+def test_rows_and_a_new_rewrite_from_the_template(tmp_path, ebirah_template):
     proj = _project(tmp_path)
     port = MP.port_path(MP.profile_for_card("godzilla_le", "1.16"))
     rows = SW.rows(proj, port)
@@ -118,7 +141,7 @@ def test_rows_and_a_new_rewrite_from_the_template(tmp_path):
     assert SW.describe_suffix(proj, slug) == " - replaces the shots of rule 12 (the game's own rule plays its shots through this code)"
 
 
-def test_write_carries_a_rewrite_as_a_code_mode_and_says_what_it_replaces(tmp_path):
+def test_write_carries_a_rewrite_as_a_code_mode_and_says_what_it_replaces(tmp_path, ebirah_template):
     proj = _project(tmp_path)
     port = MP.port_path(MP.profile_for_card("godzilla_le", "1.16"))
     slug, path = SW.new_rewrite(proj, 12, port)

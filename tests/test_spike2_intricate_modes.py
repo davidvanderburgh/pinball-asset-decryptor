@@ -1,5 +1,7 @@
-"""Item 152: the INTRICATE example modes (tools/spike2_emu/modes/sdk/examples/), MELTDOWN (hud-layers), and the
-five Lyman Sheats modes (PAD-379: GODZILLA ANGRY, SPACEGODZILLA, KIRYU, BIOLLANTE, DESTOROYAH).
+"""Item 152: the INTRICATE example modes, MELTDOWN (hud-layers), and the five Lyman Sheats modes (PAD-379: GODZILLA
+ANGRY, SPACEGODZILLA, KIRYU, BIOLLANTE, DESTOROYAH). PAD-691: written for Godzilla, so not in the SDK or the app any
+more; kept as test material in tests/mode_examples/c/ and built here beside the SDK's kit (examples/intricate_kit.h),
+as the app puts a code mode's kit beside its C, so they go on proving the kit, the runtime and the desk harness.
 
 Three layers, each skipping cleanly where its tools are missing:
 
@@ -24,7 +26,21 @@ import sys
 import pytest
 
 SDK = pathlib.Path(__file__).resolve().parents[1] / "tools" / "spike2_emu" / "modes" / "sdk"
-EX = SDK / "examples"
+KIT_DIR = SDK / "examples"                      # the kit, the desk harness and their README
+CSRC = pathlib.Path(__file__).resolve().parent / "mode_examples" / "c"
+
+
+def _stage():
+    """The modes' C and recipes with the SDK's kit beside them (their #include "intricate_kit.h"), in a folder of
+    this run's own."""
+    import tempfile
+    d = pathlib.Path(tempfile.mkdtemp(prefix="pad691-intricate-"))
+    for f in list(CSRC.glob("*.c")) + list(CSRC.glob("*.json")) + [KIT_DIR / "intricate_kit.h"]:
+        shutil.copyfile(str(f), str(d / f.name))
+    return d
+
+
+EX = _stage()
 MODES = ["ghidorah_heads", "oxygen_destroyer", "maser_barrage", "final_wars", "anguirus_assist", "meltdown",
          "godzilla_angry", "spacegodzilla", "kiryu", "biollante", "destoroyah"]
 NAMES = {"ghidorah_heads": "KING GHIDORAH", "oxygen_destroyer": "OXYGEN DESTROYER",
@@ -112,17 +128,8 @@ def test_no_em_or_en_dash_in_what_a_player_or_a_reader_sees():
     for f in MODES:
         for s in _strings(_src(f)):
             assert "\u2014" not in s and "\u2013" not in s, (f, s)
-    readme = (EX / "README.md").read_text(encoding="utf-8")
+    readme = (KIT_DIR / "README.md").read_text(encoding="utf-8")
     assert "\u2014" not in readme and "\u2013" not in readme
-
-
-def test_the_readme_has_a_rules_sheet_for_every_mode():
-    readme = (EX / "README.md").read_text(encoding="utf-8")
-    for slug in MODES:
-        assert "`%s.c`" % slug in readme, slug
-        assert NAMES[slug] in readme, slug
-    for word in ("How to start it", "How it ends", "How often"):
-        assert word in readme
 
 
 # ---- the ARM build ---------------------------------------------------------------------------------
@@ -177,7 +184,7 @@ def _harness_source():
     fake scene (one mode's HUD asks for about 42 nodes: the group, 4 texts, the badge, 9 counter texts, the
     gauge and 12 pips' two pictures) and the Premium port's Left spinner (0x200), which OXYGEN DESTROYER
     starts on. A harness without them shows up here rather than as a mode that silently shows nothing."""
-    src = (EX / "desk_harness.c").read_text(encoding="utf-8")
+    src = (KIT_DIR / "desk_harness.c").read_text(encoding="utf-8")
     cap = re.search(r"static struct fake_node nodes\[(\d+)\];", src)
     assert cap and int(cap.group(1)) >= len(MODES) * 42, "desk_harness.c: the fake scene cannot hold every HUD"
     assert '{ "Left spinner", 0x200ull }' in src

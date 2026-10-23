@@ -12,8 +12,7 @@ with the loop below. Everything you need is in these files.
 |---|---|
 | `pad_mode.h` | The API. Every call a mode can make, documented. |
 | `template_mode.c` | A complete mode (TARGET RUSH) that uses nearly every call. Start here. |
-| `examples/powerline_blitz.c` | A second mode: each target pays once, completing ends it, a shield ends it early, and a test trigger feeds shots by name. An AI agent given only this folder wrote it, and it ran correctly in the emulator the first time. |
-| `examples/README.md` | Five INTRICATE modes and their rules sheets (item 152): a boss battle with health, a hurry-up, a combo chain started by the skill shot event, a multi-phase wizard mode, and an ally that stacks with the game's own battle. They share `examples/intricate_kit.h` (a shot debounce, screen lines, lights, countdown, a pack ledger). `examples/desk_harness.c` plays any mode at the desk against a fake game. Each has its own clip, picture, music and calls cut from the films (`examples/film_recipes.json`). |
+| `examples/README.md` | The kit every code and blocks mode can build with, `examples/intricate_kit.h` (a shot debounce, the HUD at the glass's edges, the playfield's inserts, light shows, the display priority, a countdown, a pack ledger), and `examples/desk_harness.c`, which plays any mode at the desk against a fake game. No example modes: the app ships none written for one title (PAD-691). |
 | `pad_mode_assets.h` | A code mode's OWN clip, screen, music and calls, as the build carried them (see "A code mode's own clip, screen, music and calls"). |
 | `mode_file.c` | The mode that runs the Modes tab's mode files. It is an ordinary mode on this API. |
 | `MODE_PARAMETERS.md` | Every key a mode file takes, every field the Modes tab saves, every call above, and what is measured about each. |
@@ -27,7 +26,7 @@ with the loop below. Everything you need is in these files.
 
 ## The mode maker is a preview feature (in the app)
 
-In the app the mode maker ships DARK: the Modes tab, its Examples and film cutter, Try it,
+In the app the mode maker ships DARK: the Modes tab, its example (TARGET RUSH) and film cutter, Try it,
 the Write tab's "Pending (Modes)" rows, a Write carrying a project's modes and code modes,
 and the game's own modes' numbers (item 145) reaching a card all ride on one preview
 switch, and it is off in every copy until a personal code turns it on (Settings, the gear,
@@ -799,10 +798,7 @@ whenever that changes and a second after the end (`own sound: the music bus now 
 
 On the card the files sit beside `mode.so` in `/usr/local/padmode` (`mode_install.py --asset`); a
 card of code modes only carries no mode file at all. The emulator's card reader (`../cardmodes.sh`)
-and Try it's installer (`../tryit.sh install`) put them in `/dump`. The Modes tab's Examples offer
-the five intricate modes this way: each brings its code and a recipe of film times
-(`examples/film_recipes.json`) that the tab cuts with the film cutter from the person's own films.
-Emulator-proven on Godzilla Premium 1.16 (the showcase card, 2026-09-18).
+and Try it's installer (`../tryit.sh install`) put them in `/dump`. Emulator-proven on Godzilla Premium 1.16 (the showcase card, 2026-09-18).
 
 ### What is measured, and what is not
 
@@ -2000,8 +1996,7 @@ and the longer shake wins as in the game.
 whose port has no shaker lines (`pm_can(PM_CAN_SHAKER)`; a Pro's program has the call too, not yet ported).
 A mode file says the same with `shake start|shot|end <ms> <strength> [mask]` or `shake start|shot|end game
 <name> [mask]` (MODE_PARAMETERS.md); a blocks mode with *Shake the cabinet for N ms* and *Shake it the game's
-way*; the form with Mode > Shaker. `examples/final_wars.c` starts with the game's multiball start and ends its
-wizard jackpot with the game's jackpot shake; `examples/destoroyah.c` its super jackpot.
+way*; the form with Mode > Shaker.
 
 **How it works** (Premium/LE 1.16). `shake(ms, strength, force)` (`0x189a54`) is the one call every shake of
 the game's goes through (about 340 of them): it reads adjustment 335 (AD_SHAKER_MOTOR, 0..4; past 4 is error
@@ -3028,7 +3023,7 @@ pointing here. What each part of the tab needs from the port:
 | Tab section | Needs in the port | Also needs |
 |---|---|---|
 | Starts on, Shots that score | `shot` lines (and `shot_mask_bits` when the game sends 32 bits), and `switch` lines with a `switch_hit` site | a port not in `SWITCH_SHOTS_PROVEN` says its switch shots are not proven |
-| Examples | `text example_start_shot` | Godzilla's ready-made modes appear wherever every shot they name exists |
+| Examples | `text example_start_shot` | TARGET RUSH, the one example on every title, starts on it |
 | Sound: count down | the `callout` and `callout_nth` sites, and `callout countdown` | `callout ten_seconds` adds the call at 10 s; without it the count is 5..1 only. `value countdown_first <n>` when the request's list opens with something else: the clip "one" is in (Iron Maiden 1.16's 351 opens with a sting, so 1); `pm_callout_nth` adds it to any clip asked of the countdown role. `value countdown_step <n>` when every number is a request of its own: `callout countdown` names the "one" request and the others follow it by that step (Star Wars ELG 168, Munsters, Jurassic Park Pin, Batman 66 1061 count down the ids; Led Zeppelin, Sword of Rage count up; Bond 60th 542 steps by 2, each number in two voices). `value countdown_stride <n>` when one request holds every number in several voices, number by number: the clip for the count is `n * stride + countdown_first` (Deadpool LE 962 / Pro 967: five voices each, "ten" first, so first 5, stride 5) |
 | Sound: the game's own call | `callout time_up` | without it nothing plays when time is up |
 | Sound: my sound | the `sound_lookup` site and `callout time_up` (the call it replaces) | a time-up request with variants (Guardians' 254: "Time's up." / "Your time is up!" ...) gets the sound in place of every variant, so whichever the game picks plays it |
@@ -4560,8 +4555,8 @@ both; a card written by the app with both (the mode files reached the guest the 
 
 ## The showcase: five code modes that light their shots and hold a display priority (item 157)
 
-`examples/` holds five intricate modes (KING GHIDORAH, OXYGEN DESTROYER, MASER BARRAGE, FINAL WARS,
-ANGUIRUS; their rules sheets are `examples/README.md`) with their own clip, panel, music and calls. Item
+Five intricate modes written for Godzilla (KING GHIDORAH, OXYGEN DESTROYER, MASER BARRAGE, FINAL WARS,
+ANGUIRUS; since PAD-691 not in the SDK or the app, kept as test material in `tests/mode_examples/c/`). Item
 157 lit them the way a rules designer lights a Stern mode and put them in the game's display order, with
 two helpers in `examples/intricate_kit.h`:
 
@@ -5135,7 +5130,7 @@ dialog on the glass (its service is tested in-process).
 Designed at the desk on 2026-09-23 from item 158's reading of the game's own rules (above), built on
 item 160's per-rule wrap of the shot-handler vtable slot (the section above). The pieces in the repo:
 `pad_stock.h` (the header an author's C sees), its implementation in `pad_mode_runtime.c` ("STOCK
-RULES IN C"), `examples/ebirah_rewrite.c` (a worked example: battle vs Ebirah with three different
+RULES IN C"), `ebirah_rewrite.c` (a worked example: battle vs Ebirah with three different
 shots in order, then the Building), and the port lines the accessors read in both Godzilla ports. The
 readable pseudo-C of Ebirah's and tank attack's own code is reference material (Stern's logic) and is
 NOT in the repo. What is emulator-proven is at the end of this section.
@@ -5182,7 +5177,8 @@ WON, i.e. the battle's own ending plays. Replaying the game's handler with a cho
 rewrite keeps the game's ending without re-implementing it; item 158 proved (emulator) that those two
 paths do exactly this when the real switches drive them.
 
-**What the example does** (`examples/ebirah_rewrite.c`): after the battle's own START it puts the Left
+**What the example does** (`ebirah_rewrite.c`; since PAD-691 test material in `tests/mode_examples/c/`, not
+shipped, so the app offers no template for the rule): after the battle's own START it puts the Left
 ramp in the field and holds its insert (yellow blink, `pm_lamp_shot`); a Left ramp hit pays what a spin
 pays (200,000 x factor, `pm_stock_award`), takes the game's first stage award, and lights the Right ramp;
 then the Big loop; then the Building, whose hit is the game's final blow. Any other shot does nothing,

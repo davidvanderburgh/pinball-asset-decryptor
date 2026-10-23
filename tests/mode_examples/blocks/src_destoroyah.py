@@ -413,7 +413,7 @@ PROGRAM = {
 }
 
 #: the Pro's close ring takes the Mecha lane where the Premium/LE has its centre shield: the words that name that
-#: shot, as the Pro letters them (BM.adapt rewords whole strings with title_alt's "words")
+#: shot, as the Pro letters them (examples.adapt rewords whole strings with title_alt's "words")
 _PRO_SHOT = {"Shield target center": "Mecha exit bottom"}
 _PRO_WORDS = {}
 for _from, _to in _PRO_SHOT.items():

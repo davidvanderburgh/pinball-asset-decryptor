@@ -186,32 +186,11 @@ def recover(files, project):
         slugs.append(slug)
         if lost:
             notes.append("%s: %s did not come back" % (spec.name, lost))
-    from . import code_modes as CM
-    codes = sorted(n[:-len(".assets")] for n in files if n.endswith(".assets"))
-    known = {e["slug"]: e["name"] for e in CM.EXAMPLES}
-    examples, lost = [], []
-    for slug in codes:
-        if slug in known and slug not in taken:
-            try:
-                CM.add_example(project, known[slug])
-            except (CM.CodeModeError, OSError):
-                lost.append(slug.upper())
-                continue
-            taken.add(slug)
-            slugs.append(slug)
-            examples.append(known[slug])
-        else:
-            lost.append(slug.upper())
-    if examples:
-        notes.append("%s %s the app's own example%s: %s C came back as the app ships it (any edit "
-                     "made to it is not on the card), and Cut from films makes %s clips and sounds"
-                     % (", ".join(examples), "is" if len(examples) == 1 else "are",
-                        "" if len(examples) == 1 else "s", "its" if len(examples) == 1 else "their",
-                        "its" if len(examples) == 1 else "their"))
+    lost = sorted(n[:-len(".assets")].upper() for n in files if n.endswith(".assets"))
     if lost:
-        notes.append("%s %s a code mode: %s C is not on the card, so it cannot be loaded from it"
-                     % (", ".join(lost), "is" if len(lost) == 1 else "are",
-                        "its" if len(lost) == 1 else "their"))
+        notes.append(("%s is a code mode: its C is not on the card, so it cannot be loaded from it" if len(lost) == 1
+                      else "%s are code modes: their C is not on the card, so they cannot be loaded from it")
+                     % ", ".join(lost))
     return slugs, notes
 
 

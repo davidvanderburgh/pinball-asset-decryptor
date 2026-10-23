@@ -2,14 +2,12 @@
 own audio and video): plugins/stern/code_modes.py, the code half of Write (mode_write), and the SDK
 header the mode reads them with (tools/spike2_emu/modes/sdk/pad_mode_assets.h).
 
-Desk only: no card, no rig. The film cuts run on a SYNTHETIC film made with ``ffmpeg -f lavfi`` and
-named like a film of the collection (nothing of a real film is in the repo), and skip without ffmpeg.
-The compile of the code modes (build_mode.sh in the app's Linux) is stubbed where Write is planned.
+Desk only: no card, no rig. (PAD-691: the code examples and the film recipes they were cut by are out of the
+app, and their tests with them.) The compile of the code modes (build_mode.sh in the app's Linux) is stubbed where Write is planned.
 """
 import json
 import os
 import re
-import subprocess
 import wave
 
 import numpy as np
@@ -23,7 +21,6 @@ from pinball_decryptor.plugins.stern import mode_write as MW
 
 GZ = MP.GODZILLA_PRO_1_15
 SDK = MR.sdk_dir()
-EX = os.path.join(SDK, "examples")
 
 
 def _wav(path, seconds, ch=1, hz=440.0):
@@ -309,165 +306,6 @@ def test_the_rig_scripts_carry_the_assets_files():
 
 
 # ---- the examples ---------------------------------------------------------------------------------------
-def test_the_intricate_modes_are_the_code_examples_and_their_recipes_fit():
-    assert CM.example_names() == ["KING GHIDORAH", "OXYGEN DESTROYER", "MASER BARRAGE", "FINAL WARS", "ANGUIRUS",
-                                  "MELTDOWN", "GODZILLA ANGRY", "SPACEGODZILLA", "KIRYU", "BIOLLANTE", "DESTOROYAH"]
-    for ex in CM.EXAMPLES:
-        src = open(os.path.join(EX, ex["source"]), encoding="utf-8").read()
-        assert '#define FOLDER             "%s"' % ex["slug"] in src
-        for h in ex["headers"]:
-            assert os.path.isfile(os.path.join(EX, h))
-        r = ex["recipe"]
-        # hud-layers: a clip per cue - an intro (full screen), a loop behind the HUD unless the mode
-        # plays inside the game's own battle (ANGUIRUS), events, and the two endings
-        clips = r["clips"]
-        assert "intro" in clips and "won" in clips and "lost" in clips
-        assert "loop" in clips or ex["slug"] == "anguirus_assist"
-        for cue, c in clips.items():
-            assert CM.CUE_RE.match(cue) and c["crop"] in ("fill", "letterbox")
-            assert 0 < c["length"] <= (16.0 if cue.startswith("loop") else 6.0), (ex["name"], cue)
-            assert ('"%s"' % cue) in src or cue in ("intro", "start") or cue.startswith("loop"), (ex["name"], cue)
-        assert len(clips) <= CM.MAX_CLIPS
-        assert ex["hud"] and isinstance(ex["hud"], dict)
-        assert 10.0 <= r["music"]["length"] <= 30.0
-        assert abs(r["music"]["length"] * 100 - round(r["music"]["length"] * 100)) < 1e-6   # 10 ms steps
-        cues = set(re.findall(r'pa_call\(&own, (?:[^"]*\? )?"(\w+)"(?: : "(\w+)")?', src))
-        named = {c for pair in cues for c in pair if c}
-        assert set(r["calls"]) <= named, (ex["name"], set(r["calls"]) - named)
-        for cue, c in r["calls"].items():
-            assert 0 < c["length"] <= 4.0 and CM.CUE_RE.match(cue)
-        for part in [r["music"]] + list(r["calls"].values()) + list(clips.values()):
-            assert part["film"] in CM.FILMS and part["film"] in CM.FILM_TITLES
-            assert "—" not in part.get("what", "")
-    # hud-layers: the carriers are SHARED across modes, so what has to fit is one mode's calls (each
-    # takes another carrier within its mode); the six together carry more than there are carriers
-    for ex in CM.EXAMPLES:
-        assert len(ex["recipe"]["calls"]) <= len(MS._JP_CALLS), ex["name"]
-    assert sum(len(ex["recipe"]["calls"]) for ex in CM.EXAMPLES) > len(MS._JP_CALLS)
-    assert len(CM.EXAMPLES) <= len(MS._BEDS_LE116)     # and every music a bed of its own
-
-
-def test_an_example_without_its_films_is_added_with_its_code_and_says_which(tmp_path):
-    project = str(tmp_path / "p")
-    os.makedirs(project)
-    slug, missing = CM.add_example(project, "OXYGEN DESTROYER", dirs=[str(tmp_path)])
-    assert slug == "oxygen_destroyer" and missing == ["g54", "des95"]
-    folder = MP.mode_folder(project, slug)
-    assert sorted(os.listdir(folder)) == ["assets.json", "intricate_kit.h", "oxygen_destroyer.c"]
-    spec = CM.load(project, slug)
-    # hud-layers: its HUD at the glass's edges, no panel; nothing of a film without the films
-    assert not spec.screen and spec.hud["title"] == "OXYGEN DESTROYER"
-    assert not spec.clip and not spec.clips and not spec.music and not spec.calls
-    assert spec.film["recipe"]["music"]["film"] == "des95"
-    assert "Godzilla (1954)" in CM.missing_words(missing) and " and " in CM.missing_words(missing)
-    with pytest.raises(CM.CodeModeError, match="already in this project"):
-        CM.add_example(project, "OXYGEN DESTROYER")
-
-
-# ---- cutting from a film (a synthetic one) ---------------------------------------------------------------
-def _ffmpeg():
-    from pinball_decryptor.core import audio
-    ff = audio.find_ffmpeg()
-    if not ff:
-        pytest.skip("no ffmpeg")
-    return ff
-
-
-def _synthetic_film(folder, name, ffmpeg, seconds=14):
-    """A small film under a collection file name: a test pattern and a stereo chord."""
-    os.makedirs(folder, exist_ok=True)
-    out = os.path.join(folder, name)
-    r = subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
-                        "testsrc2=s=640x360:r=24:d=%d" % seconds, "-f", "lavfi", "-i",
-                        "aevalsrc=exprs='0.3*sin(2*PI*220*t)+0.2*sin(2*PI*330*t)|0.3*sin(2*PI*277*t)':s=48000:d=%d"
-                        % seconds, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", out],
-                       capture_output=True)
-    if r.returncode != 0 or not os.path.isfile(out):
-        pytest.skip("this ffmpeg cannot make the synthetic film: %s" % r.stderr[-200:])
-    return out
-
-
-def test_an_examples_recipe_is_cut_with_the_film_cutter(tmp_path):
-    ff = _ffmpeg()
-    films = str(tmp_path / "films")
-    _synthetic_film(films, CM.FILMS["fw04"], ff)
-    ex = {"name": "TEST WARS", "slug": "test_wars", "seconds": 40,
-          "recipe": {"clip": {"film": "fw04", "from": 1.0, "length": 3.0, "crop": "fill"},
-                     "art": {"film": "fw04", "at": 2.0, "crop": "letterbox", "band": 60, "band_below": True},
-                     "music": {"film": "fw04", "from": 2.0, "length": 10.0},
-                     "calls": {"won": {"film": "fw04", "from": 3.0, "length": 1.5},
-                               "spike": {"film": "fw04", "from": 4.0, "length": 1.0, "priority": 3}}}}
-    project = str(tmp_path / "p")
-    spec = CM.cut_example(project, "test_wars", ex, [films], ffmpeg=ff)
-    folder = MP.mode_folder(project, "test_wars")
-    assert spec.clip == "clip.mp4" and spec.screen_art == "screen.png" and spec.words_on_art
-    assert spec.music == "music.wav" and spec.calls == {"won": "won.wav", "spike": {"wav": "spike.wav", "priority": 3}}
-    assert spec.film["dir"] == films
-    from PIL import Image
-    art = Image.open(os.path.join(folder, "screen.png"))
-    assert art.width == 640 and art.height % 4 == 0
-    band = np.asarray(art.convert("RGB"))[-50:, :, :]
-    assert band.max() < 40                                 # the words' band under the frame is dark
-    with wave.open(os.path.join(folder, "music.wav")) as w:
-        assert (w.getnchannels(), w.getframerate(), w.getnframes()) == (2, 44100, 1000 * 441)
-        loop = np.frombuffer(w.readframes(w.getnframes()), "<i2").reshape(-1, 2).astype(float)
-    assert MS._seam_ok(loop / 32768.0)                     # it runs from its end into its start
-    for cue, ch in (("won", 1), ("spike", 1)):
-        with wave.open(os.path.join(folder, cue + ".wav")) as w:
-            assert w.getnchannels() == ch and w.getframerate() == 44100
-    assert CM.validate(spec, folder) == []
-
-
-def test_the_screen_words_sit_on_the_pictures_band(tmp_path):
-    from pinball_decryptor.plugins.stern import mode_assets as MA
-    project = _code_project(tmp_path)
-    folder = MP.mode_folder(project, "ghidorah_heads")
-    from PIL import Image
-    Image.new("RGB", (640, 360), (200, 50, 50)).save(os.path.join(folder, "frame.png"))
-    CM.compose_art(os.path.join(folder, "frame.png"), os.path.join(folder, "screen.png"))
-    spec = CM.load(project, "ghidorah_heads")
-    spec.screen_art, spec.words_on_art = "screen.png", True
-    CM.save(project, "ghidorah_heads", spec)
-    (screen,) = MA._code_screens(project, CM.list_code(project), GZ)
-    assert screen["name"] == "PadMode_ghidorah_heads_Screen" and screen["words"] == "KING GHIDORAH"
-    assert screen["words_at"] == (20.0, 346.0)
-    assert screen["words_name"] == "PadMode_ghidorah_heads_Screen_Words"
-    art = np.asarray(screen["art_rgba"])
-    assert art.shape[:2] == (360, 640) and art[-5:, :, :3].max() < 60 and art[10, 10, 0] == 200
-    spec.words_on_art = False
-    CM.save(project, "ghidorah_heads", spec)
-    (screen,) = MA._code_screens(project, CM.list_code(project), GZ)
-    assert screen["words_at"] is None                        # under the picture, as a form mode's
-
-
-def test_the_recipes_file_is_plain_json_with_the_films_named():
-    doc = json.load(open(os.path.join(EX, CM.RECIPES_FILE), encoding="utf-8"))
-    assert set(doc["films"]) == set(doc["titles"])
-    for name in doc["films"].values():
-        assert name.endswith(".mp4") and "\\" not in name and "/" not in name
-
-
-def test_a_film_recipe_reads_as_sentences_not_a_dict():
-    """The Assets pane shows a code example's film recipe as one sentence per part (the preview testers
-    saw the raw Python dict there): the film's title, the time into it, the length, the crop; the
-    recipe's own measurement notes are not shown."""
-    ex = next(e for e in CM.EXAMPLES if e["recipe"].get("clip") and e["recipe"].get("calls"))
-    lines = CM.recipe_lines(ex["recipe"])
-    assert lines[0].startswith("Clip: ") and lines[-1].startswith("Calls: ")
-    text = " ".join(lines)
-    for part in ("{", "}", "'film'", "what", "chroma", "match"):
-        assert part not in text
-    clip = ex["recipe"]["clip"]
-    assert CM.FILM_TITLES[clip["film"]] in lines[0]
-    assert "filling the frame" in lines[0]
-    assert CM.recipe_lines({"clip": {"film": "g54", "from": 65, "length": 2.5, "crop": "letterbox"}}) == [
-        "Clip: 2.5 s of %s from 1:05, keeping its letterbox" % CM.FILM_TITLES["g54"]]
-    assert CM.recipe_lines({"art": {"film": "g54", "at": 3725}}) == [
-        "Picture: the frame of %s at 1:02:05" % CM.FILM_TITLES["g54"]]
-    assert CM.recipe_lines(None) == [] and CM.recipe_lines({}) == []
-
-
-# ---- PAD-390: an example's kit copy brought up to the app's at a build -------------------------------------------
 def test_the_apps_current_kit_is_listed_as_shipped():
     """kit_shipped.txt lists the kit as it is now, so the next kit change can bring this one up to date"""
     with open(os.path.join(CM.examples_dir(), CM.KIT_FILE), "rb") as f:

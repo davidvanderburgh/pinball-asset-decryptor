@@ -4813,6 +4813,18 @@ before the TOTAL. A mode in C uses the two screens with `pm_node`, `pm_text` and
 stock Bond LE 1.06 card (rig 1, 2026-10-14) with the owner's own BON APPETIT blocks: SUPER JACKPOT for 2 s, then TOTAL
 14,000,000 under the bar for 3 s, then all gone. No abort.
 
+**A scored number under the bar (PAD-709).** A words-alone mode also gets `PadMode_<slug>_Points` (assets:
+`points_node` / `points_text`), a blank screen 110 px under the port's `info_line_at`, its number at 5x the HUD font (the
+game's own mini-wizards pop a scored shot up about 140 px high there). While the mode runs, a Words block with a value
+(or an Award block with one) writes the number into it instead of over the video, its words if any small over it on
+the TOTAL's word line, and hides the mode's info line meanwhile (3 s for Words, the Award's own seconds); it keeps out
+of the way of the game's screens. An Award's number holds the TOTAL back as PAD-574's did; a Words block's goes with
+the end. A card built before it has no such screen and the number goes over the video as before. The Scenes editor
+lays it out as a third part ("Place on the screen..." beside "as words over the video"), saved as assets.json
+`points_layout` (the keys of `screen_layout`). Emulator-proven on the stock Bond LE 1.06 card (rig 3, 2026-10-24) with a
+BOND VS SUMO like the reporter's: 1,000,000 large under the green bar (about 760 x 95 px), the SUPER JACKPOT line back
+3 s later, an Award's JACKPOT over its 2,500,000, the TV clear throughout; main's code drew both over the TV. No abort.
+
 ### A full-screen clip on a machine: drawn at the frame hand-over (PAD-301)
 
 On David's Premium 1.16 (2026-10-01, a traced card and a phone video) a mode's full-screen clip (`pm_clip`:

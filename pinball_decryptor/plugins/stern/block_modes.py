@@ -2265,6 +2265,10 @@ def to_c(program, slug):
         L.append('#define TOTAL_NAME_TEXT "PadMode_%s_TotalName.PadMode_%s_TotalName_Words"' % (slug, slug))
         L.append('#define TOTAL_NODE   "PadMode_%s_Total"' % slug)
         L.append('#define TOTAL_TEXT   "PadMode_%s_Total.PadMode_%s_Total_Words"' % (slug, slug))
+        L.append("/* PAD-709: a scored number while it runs, large under the bar as the game's own mini-wizards show a shot's,")
+        L.append(" * not over its video. Not there = over its video, on its own screen. */")
+        L.append('#define POINTS_NODE  "PadMode_%s_Points"' % slug)
+        L.append('#define POINTS_TEXT  "PadMode_%s_Points.PadMode_%s_Points_Words"' % (slug, slug))
     if has_info:
         L.append("/* PAD-547: its info line, a screen of its own the build put where the title's port says (James Bond: under")
         L.append(" * the status bar). Not there = no line. */")
@@ -2344,8 +2348,16 @@ def to_c(program, slug):
     if not has_hud:
         L.append("static char award_next[96];           /* PAD-574: an Award of When the mode ends, after the one showing */")
         L.append("static unsigned award_next_ticks;")
+        if words_only:
+            L.append("static char award_next_text[64];      /* PAD-709: ... its words and number apart, for under the bar */")
+            L.append("static long long award_next_value;")
+            L.append("static int award_next_wv;               /* ... 1 = it goes under the bar */")
     if words_only:
         L.append("static void *total, *total_words, *total_name, *total_name_words;   /* PAD-574: its TOTAL's two screens */")
+        L.append("static void *points, *points_words;   /* PAD-709: a scored number's screen under the bar */")
+        L.append("static unsigned points_ticks;         /* ... up this much longer */")
+        L.append("static int points_up, points_named;   /* shown now; its words on the TOTAL's word line */")
+        L.append("static int points_award;              /* ... an Award's: its TOTAL waits for it, as for one on its screen */")
     if has_bar:
         L.append("static unsigned bar_max, bar_hold;     /* PAD-521: the clock's most ticks; the bar kept through the total */")
     if watch:
@@ -2440,11 +2452,17 @@ def to_c(program, slug):
         L.append("    (void)p;")
         L.append("}")
         L.append("")
-    L.append("UNUSED static void words(const char *text, long long value, int with_value)")
+    if words_only:
+        L.extend((_POINTS_C % {"info": "    info_show(0);\n" if has_info else ""}).split("\n"))
+    L.append("/* a Words block: its line on its own screen (PAD-709: a number while a words-alone one runs goes under the")
+    L.append(" * bar instead: 1 then) */")
+    L.append("UNUSED static int words(const char *text, long long value, int with_value)")
     L.append("{")
     L.append("    char number[32], line[96];")
-    L.append("    if (!screen_words) return;")
+    L.append("    if (!screen_words) return 0;")
     L.append("    award_ticks = 0;")
+    if words_only:
+        L.append("    if (with_value && run.on && !ending && points_show(text, value, %d)) return 1;" % WORDS_SHOW_MS)
     L.append("    if (with_value) {")
     L.append("        pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);")
     L.append('        pm_snprintf(line, sizeof line, "%s%s%s", text, text[0] ? " " : "", number);')
@@ -2456,6 +2474,7 @@ def to_c(program, slug):
     L.append("        flash_ticks = %d * TICKS_PER_SECOND / 1000;" % WORDS_SHOW_MS)
     L.append("        if (!screen_away) pm_show(screen, 1);" if watch else "        pm_show(screen, 1);")
     L.append("    }")
+    L.append("    return 0;")
     L.append("}")
     L.append("")
     if not has_hud:
@@ -2464,7 +2483,8 @@ def to_c(program, slug):
         L.append("UNUSED static void award_words(const char *text, long long value, int with_value, unsigned ms)")
         L.append("{")
         L.append("    if (!screen_words || !run.on) return;")
-        L.append("    if (ending && award_ticks) {      /* in When the mode ends, after the Award it ended on: next */")
+        L.append("    if (ending && (award_ticks%s)) {   /* in When the mode ends, after the Award it ended on: next */"
+                 % (" || points_award" if words_only else ""))
         L.append("        char number[32];")
         L.append("        if (with_value) {")
         L.append("            pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);")
@@ -2473,8 +2493,18 @@ def to_c(program, slug):
         L.append('            pm_snprintf(award_next, sizeof award_next, "%s", text);')
         L.append("        }")
         L.append("        award_next_ticks = ms * TICKS_PER_SECOND / 1000;")
+        if words_only:
+            L.append('        pm_snprintf(award_next_text, sizeof award_next_text, "%s", text);')
+            L.append("        award_next_value = value;")
+            L.append("        award_next_wv = with_value && points_award;   /* PAD-709: under the bar, as the one showing */")
         L.append("        return;")
         L.append("    }")
+        if words_only:
+            L.append("    if (with_value && points_show(text, value, ms)) {   /* PAD-709: under the bar, for its moment */")
+            L.append("        points_award = 1;")
+            L.append("        award_ticks = 0;")
+            L.append("        return;")
+            L.append("    }")
         L.append("    words(text, value, with_value);")
         L.append("    award_ticks = ms * TICKS_PER_SECOND / 1000;")
         L.append("    if (WORDS_ONLY && screen) flash_ticks = award_ticks;")
@@ -2484,6 +2514,8 @@ def to_c(program, slug):
     L.append(" * own modes show theirs, when the build put the two screens there) */")
     L.append("static void total_show(void)")
     L.append("{")
+    if words_only:
+        L.append("    points_hide();                    /* PAD-709: a scored number goes: the TOTAL takes its place */")
     L.append("    if (!screen) return;")
     if words_only:
         L.append("    if (total && total_words) {")
@@ -2510,6 +2542,7 @@ def to_c(program, slug):
     L.append("    total_due = 0;")
     L.append("    if (screen) pm_show(screen, 0);")
     if words_only:
+        L.append("    points_hide();")
         L.append("    if (total) pm_show(total, 0);")
         L.append("    if (total_name) pm_show(total_name, 0);")
     L.append("}")
@@ -2844,8 +2877,10 @@ def to_c(program, slug):
     L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
     if has_info:
         L.append("    info_show(0);                     /* PAD-547: its line goes with it */")
+    if words_only:
+        L.append("    if (!points_award) points_hide();   /* PAD-709: a scored number goes; an Award's stays its moment */")
     L.append("    total_due = screen && screen_words ? award_ticks%s : 0;   /* PAD-574: an Award it ended on, then its TOTAL */"
-             % ("" if has_hud else " + award_next_ticks"))
+             % (("" if has_hud else " + award_next_ticks") + (" + (points_award ? points_ticks : 0)" if words_only else "")))
     L.append("    award_ticks = 0;")
     if has_bar:
         L.append("    bar_show(0);                      /* PAD-521: the bar full, kept through its total */")
@@ -2977,6 +3012,9 @@ def to_c(program, slug):
         L.append('    total = pm_node("hud", TOTAL_NODE);')
         L.append("    if (!total) return;")
         L.append('    total_words = pm_text("hud", TOTAL_TEXT);')
+        L.append('    points = pm_node("hud", POINTS_NODE);   /* PAD-709: a card built before it has none */')
+        L.append('    points_words = points ? pm_text("hud", POINTS_TEXT) : 0;')
+        L.append("    if (points) pm_show(points, 0);")
         L.append('    total_name = pm_node("hud", TOTAL_NAME_NODE);')
         L.append('    total_name_words = total_name ? pm_text("hud", TOTAL_NAME_TEXT) : 0;')
         L.append("    pm_show(total, 0);                /* built shown, as every screen is */")
@@ -3084,7 +3122,17 @@ def to_c(program, slug):
     if not has_hud:
         L.append("    if (award_next_ticks && (!total_due || run.on)) award_next_ticks = 0;")
         L.append("    if (award_next_ticks && total_due == award_next_ticks) {   /* PAD-574: the next Award's turn */")
-        L.append("        if (screen_words) pm_set_text(screen_words, award_next);")
+        if words_only:
+            L.append("        if (award_next_wv && points_show(award_next_text, award_next_value,")
+            L.append("                                                         award_next_ticks * 1000 / TICKS_PER_SECOND))")
+            L.append("            points_award = 1;             /* PAD-709: under the bar, as the one before it */")
+            L.append("        else if (screen_words) {")
+            L.append("            points_hide();")
+            L.append("            pm_set_text(screen_words, award_next);")
+            L.append("            pm_show(screen, 1);")
+            L.append("        }")
+        else:
+            L.append("        if (screen_words) pm_set_text(screen_words, award_next);")
         L.append("        award_next_ticks = 0;")
         L.append("    }")
     L.append("    if (total_due && !run.on && --total_due == 0) total_show();   /* PAD-574: the Award it ended on has shown */")
@@ -3142,6 +3190,9 @@ def to_c(program, slug):
     L.append("    (void)seconds;")
     L.append("    if (WORDS_ONLY && flash_ticks && --flash_ticks == 0 && screen) pm_show(screen, 0);   /* PAD-521 */")
     L.append("    if (award_ticks) award_ticks--;")
+    if words_only:
+        L.append("    if (points_ticks && --points_ticks == 0) points_hide();   /* PAD-709 */")
+        L.append("    else if (points_ticks) points_place();")
     if has_bar:
         L.append("    bar_show(1);                      /* PAD-521: the clock along the bar */")
     L.append("    lamps_tick();")
@@ -3161,7 +3212,8 @@ def to_c(program, slug):
     if has_hud:
         L.append("    if (run.on) hud_show();")
     if has_info:
-        L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside() && !pm_game_words());   /* PAD-547, PAD-662 */")
+        L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside() && !pm_game_words()%s);   /* PAD-547, PAD-662 */"
+                 % (" && !points_ticks" if words_only else ""))
     L.append("}")
     L.append("")
     L.append("/* PAD-622: a drain while it runs ends it as its clock would - an Award it ended on, then its TOTAL - and the")
@@ -3683,6 +3735,47 @@ static void bar_show(int clock)
         pct = bar_max ? (int)((run.ticks_left * 100u + bar_max - 1) / bar_max) : 0;
     }
     pm_status_bar(MODE_NAME, BAR_RGB, pct);
+}
+"""
+
+#: PAD-709: a words-alone mode's scored number under its bar; %(info)s = hides its info line, if it has one
+_POINTS_C = r"""/* PAD-709: a number a Words or Award block shows while it runs, as the game's own mini-wizards show a scored shot:
+ * large under the bar for its moment (its words, if any, small over it on the TOTAL's word line; the info line hidden
+ * meanwhile), so the video above stays clear; out of the way of the game's screens. A card built before it has no such
+ * screen: the line goes over the video as before (0). A Words block's number in When the mode ends stays over the
+ * video; an Award's goes under the bar there too, and its TOTAL waits for it. */
+static void points_place(void)
+{
+    int on = !pm_display_covered() && !pm_aside() && !pm_game_words();
+    if (on == points_up) return;
+    pm_show(points, on);
+    if (points_named) pm_show(total_name, on);
+    points_up = on;
+}
+
+static void points_hide(void)
+{
+    points_ticks = 0;
+    if (points && points_up) pm_show(points, 0);
+    if (points_named && points_up) pm_show(total_name, 0);
+    points_up = points_named = points_award = 0;
+}
+
+/* the number (and its words) under the bar for ms; 0 = no such screen on the card */
+static int points_show(const char *text, long long value, unsigned ms)
+{
+    char n[32];
+    if (!points || !points_words) return 0;
+    if (points_named && points_up) pm_show(total_name, 0);
+    pm_commas(n, sizeof n, value < 0 ? 0 : (uint64_t)value);
+    pm_set_text(points_words, n);
+    points_named = text[0] && total_name && total_name_words;
+    if (points_named) pm_set_text(total_name_words, text);
+    points_ticks = ms * TICKS_PER_SECOND / 1000;
+    points_award = 0;
+%(info)s    points_up = -1;                     /* placed now */
+    points_place();
+    return 1;
 }
 """
 

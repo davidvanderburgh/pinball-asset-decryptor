@@ -617,6 +617,8 @@ site  mode_player            0x0022c214 0xe30230bc 0xe340306c
 value mode_slot_stop         24
 value mode_stopped_at        0xc3
 value mode_starts_at         0xd8
+value mode_slot_stopped_get  32   # PAD-716: the mode's own "stopped?" (mode, player)
+value mode_slot_stopped_set  55   # PAD-716: its own "mark stopped" (mode, value, player)
 site  mode_started           0x00139978 0xe3510018 0xe92d4008
 data  mode_manager           0x0072516c
 value mode_id_at             4

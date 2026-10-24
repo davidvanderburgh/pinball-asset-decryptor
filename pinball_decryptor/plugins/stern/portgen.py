@@ -884,7 +884,7 @@ _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block
                         r"site challenge_page(?:_text|_yield)?|value challenge_page_(?:cat|title)|site challenge_pages_\d+|site challenge_list_page|"   # PAD-660
                         r"site ball_launch|value ball_launch_(?:wait_)?flag|site challenge_plain_\d+|"   # PAD-643
                         r"site mode_(?:player|started)|data mode_manager|"   # PAD-710
-                        r"value mode_(?:slot_stop|stopped_at|reason_at|starts_at|wins_at|id_at)|"
+                        r"value mode_(?:slot_stop|stopped_at|reason_at|starts_at|wins_at|id_at|slot_stopped_get|slot_stopped_set)|"   # PAD-716: JP
                         r"site audit_add|value place_(?:audit_started|audit_completed|flag_played|flag_completed)_\d+|"
                         r"value challenge_place_\d+)\b")
 

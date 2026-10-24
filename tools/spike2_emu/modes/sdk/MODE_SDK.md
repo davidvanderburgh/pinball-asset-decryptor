@@ -3950,6 +3950,8 @@ value mode_stopped_at        the per-player stopped byte (mode + this + player)
 value mode_reason_at         the per-player reason byte            (Godzilla's, Jaws' and King Kong's generations)
 value mode_starts_at         the per-player start count (mode + this + 4 * player)
 value mode_wins_at           the per-player completions the STOP counts (the crule generation, Star Wars)
+value mode_slot_stopped_get  the mode's own "stopped?" virtual (mode, player), and
+value mode_slot_stopped_set  ... its own "mark stopped" (mode, value, player)   (Jurassic Park, PAD-716)
 site  mode_started           the manager's "started" notice (STARTED audit), with
 data  mode_manager           ... the manager it is called on, and
 value mode_id_at             ... where the mode keeps its id       (the generations whose manager keeps audits)
@@ -3973,9 +3975,23 @@ is another, 0-based count) in the START slot's functions and what they call; the
 | crule | D&D, Foo Fighters, John Wick, Led Zeppelin, Mando, Munsters, Rush, Sword of Rage, TMNT, Venom | v[34]-v[53] | +0x37-+0x5f | - | stopped + 0x11 | starts + 0x1c (Venom + 0x2c) | none |
 
 John Wick's stop takes a third word (1 marks the mode stopped; the game always passes 1): the runtime calls every stop
-as `stop(mode, won, 1)`, which the two-word stops never read. A mode whose own stop does more than the framework's - a
-hurry-up that resets itself (Iron Maiden's Soul Shard), a chase that moves on to its next stage (Jurassic Park Pro's Trex
-Chase) - does that: it is the game's own outcome.
+as `stop(mode, won, 1)`, which the two-word stops never read.
+
+**Modes with their own stop logic (PAD-716).** The stop called is the mode object's own, so a mode whose stop does
+more than the framework's does that too - it is the game's own outcome:
+
+- **Jurassic Park** asks the mode's own "stopped?" virtual (v[32]: mode, player) before anything and marks it stopped
+  through its own setter (v[55]: mode, value, player); the framework's are the plain byte at +0xc3. JP's (LE and Pro) Trex Chase,
+  Trex Encounter, Trex Rampage and the Ctrl Room's System Boot, Virus Attack and Restore Power override both and keep
+  their own byte (Trex Chase +0x137, Virus Attack +0x11f, Restore Power +0x117, Trex Rampage +0x123; on a co-op game
+  one shared). Their START clears it through the setter, so the take does the same (`value mode_slot_stopped_get 32` /
+  `mode_slot_stopped_set 55`, read off the STOP by the finder): before it, the take cleared +0xc3, the byte those
+  classes never read, and a second take of one in a game found it stopped already - the game's stop wrote nothing
+  (rig, two takes in one game, JP Pro's four and JP LE's six: the COMPLETED audit 0 -> 1 before, 0 -> 2 now).
+- **Iron Maiden's Soul Shard Hurry Up** runs the framework stop (stopped, the END, the manager's notice), then tells the
+  song that started it how it went (the song's v[42] with the hurry-up's id: Fear of the Dark records a won hurry-up for
+  the player) and sets its stopped byte back to 0, so it can come round again. The runtime's log reads that as
+  "stopped 0 -> 0 (its own stop set it back)".
 
 **The plain-C titles** (Aerosmith, Batman 66, The Beatles, James Bond, Elvira, Guardians, JP The Pin, Metallica,
 Stranger Things, Star Wars ELG, X-Men) have no mode class: their modes are start functions and game flags, and the

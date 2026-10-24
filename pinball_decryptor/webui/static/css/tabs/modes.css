@@ -294,6 +294,7 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
   padding: 0; cursor: pointer; font-size: 13px; flex: 0 0 auto; }
 .bk-x:hover:not(:disabled) { background: rgba(0,0,0,.4); }
 .bk-x:disabled { opacity: .35; cursor: default; }
+.bk-x.bk-pic { width: auto; padding: 0 8px; font-size: 12px; }   /* PAD-707: a MORE KAIJU monster's picture */
 /* slots: a hole for a value (round) or a condition (pointed), filled by a reporter block */
 .bk-slot { border: 1.5px dashed rgba(255,255,255,.7); background: rgba(0,0,0,.22); color: rgba(255,255,255,.85);
   border-radius: 999px; padding: 2px 12px; font: italic 12px var(--sans); cursor: pointer; min-height: 24px; }

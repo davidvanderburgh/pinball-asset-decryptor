@@ -19,6 +19,7 @@
  *   battle <0|1>        the game's own kaiju battle is active or not
  *   pick <slot>         PAD-706: the player picks battle <slot> on the battle selection screen (a mode that claimed it
  *                       is called: "PICK <slot> -> 1" taken); a battle given back prints "ROSTER OVER WON|lost"
+ *   pickmore <name>     PAD-707: the player picks monster <name> on MORE KAIJU's own screen ("PICKMORE <name> -> 1")
  *   multiball <0|1>     the game's own multiball is active or not
  *   timed <0|1>         one of the game's other modes is active (Jet Fighter Attack: PAD-347)
  *   balls <n>           the balls in play
@@ -558,6 +559,25 @@ void pm_roster_release(unsigned slot) { if (slot < 16) roster_fn[slot] = 0; }
 void pm_roster_over(int won) { printf("%6lu ROSTER OVER %s\n", now_ms, won ? "WON" : "lost"); }
 void pm_roster_done(void) { pm_roster_over(0); }
 int pm_roster_callout(unsigned slot, unsigned id) { (void)id; return slot < 7 && roster_fn[slot]; }
+/* PAD-707: MORE KAIJU - the list of monsters behind one slot; `pickmore <name>` is the player picking that monster on
+ * the list's own screen (its on_pick called as the runtime's menu calls it) */
+static struct { int (*fn)(unsigned); const struct pm_mode *by; char name[40]; unsigned slot; } more_m[16];
+static int more_n;
+static const char *more_picked;
+int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned callout, int (*on_pick)(unsigned slot))
+{
+    if (slot >= 7 || !on_pick || !name || more_n >= 16) return -1;
+    more_m[more_n].fn = on_pick;
+    more_m[more_n].by = current;
+    more_m[more_n].slot = slot;
+    snprintf(more_m[more_n].name, sizeof more_m[more_n].name, "%s", name);
+    printf("ROSTER MORE %u %s page %s callout %u\n", slot, name, page ? page : "-", callout);
+    return more_n++;
+}
+void pm_roster_more_leave(const char *name) { (void)name; }
+int pm_roster_more_count(void) { return more_n; }
+const char *pm_roster_more_picked(void) { return more_picked; }
+long pm_roster_start_after(void) { return more_picked ? 300 : pm_port_value("roster_start_after_ms", 0); }
 int pm_trigger_text(const char *name, char *out, unsigned cap)
 {
     if (!trigger_file[0] || strcmp(name, trigger_file)) return 0;
@@ -1085,6 +1105,19 @@ int main(int argc, char **argv)
             printf("%6lu >> pick %u\n", now_ms, slot);
             if (slot < 16 && roster_fn[slot]) { current = roster_by[slot]; took = roster_fn[slot](slot); current = 0; }
             printf("%6lu PICK %u -> %d\n", now_ms, slot, took);
+            ticks_for_ms(50);
+        } else if (!strcmp(c, "pickmore")) {            /* PAD-707: the player picks a monster on MORE KAIJU */
+            const char *who = argv[++k];
+            int took = -1, j;
+            printf("%6lu >> pickmore %s\n", now_ms, who);
+            for (j = 0; j < more_n; j++)
+                if (!strcmp(more_m[j].name, who)) {
+                    current = more_m[j].by; more_picked = more_m[j].name;
+                    took = more_m[j].fn(more_m[j].slot);
+                    more_picked = 0; current = 0;
+                    break;
+                }
+            printf("%6lu PICKMORE %s -> %d\n", now_ms, who, took);
             ticks_for_ms(50);
         } else if (!strcmp(c, "battle")) { battle = atoi(argv[++k]); printf("%6lu >> battle %d\n", now_ms, battle); }
         else if (!strcmp(c, "multiball")) { multiball = atoi(argv[++k]); printf("%6lu >> multiball %d\n", now_ms, multiball); }

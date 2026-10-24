@@ -76,6 +76,8 @@ struct mode_cfg {
     char start_event_name[40], end_event_name[40];
     unsigned roster_slot_1;           /* item 146: `roster_slot <n>` + 1; 0 = no roster slot */
     unsigned roster_callout_1;        /* item 146: `roster_callout <id>` + 1; 0 = not given (the slot is silent) */
+    int roster_more;                  /* PAD-707: `roster_more [page]` - a monster on MORE KAIJU, the list behind roster_slot */
+    char roster_page[64];             /* PAD-707: its page on that list's selection screen ("" = none) */
     unsigned challenge_1;             /* PAD-615: `challenge <n>` + 1, CHALLENGE_NEW for `challenge new`; 0 = none */
     char challenge_name[40];          /* PAD-615: `challenge_name <words>`: its name on the start menu ("" = `name`) */
     int challenge_launch;             /* PAD-643: `challenge_launch clip|player|<seconds>`: 0 (clip), -1, ms */
@@ -589,6 +591,13 @@ static int roster_line(struct slot *M, const char *line)
         } else {
             cfg.roster_callout_1 = (unsigned)n + 1;
         }
+        return 1;
+    }
+    if (!a && (a = key_is(line, "roster_more")) != 0) {
+        /* PAD-707: `roster_more [page]` - the mode is one monster on MORE KAIJU, the list of monsters behind its
+         * roster_slot (the slot's pick opens the list's own selection screen; picking this monster starts it) */
+        cfg.roster_more = 1;
+        rest_of_line(cfg.roster_page, sizeof cfg.roster_page, a);
         return 1;
     }
     if (!a) return 0;
@@ -2555,13 +2564,17 @@ static void roster_ball_end(void)
     pm_roster_done();
 }
 
-static int roster_pick(unsigned roster)
+static unsigned roster_joined[MODES_MAX];   /* PAD-707: roster slot + 1 each mode file is a MORE KAIJU monster of */
+static char roster_joined_as[MODES_MAX][64];  /* ... under this name */
+
+static int roster_pick_as(unsigned roster, const char *more)
 {
     unsigned k;
-    long after = pm_port_value("roster_start_after_ms", 0);
+    long after = more ? pm_roster_start_after() : pm_port_value("roster_start_after_ms", 0);   /* PAD-707: almost none after MORE KAIJU's screen */
     for (k = 0; k < MODES_MAX; k++) {
         struct slot *M = &slots[k];
-        if (roster_held[k] != roster + 1) continue;
+        if (more ? roster_joined[k] != roster + 1 || !name_is(roster_joined_as[k], more) : roster_held[k] != roster + 1)
+            continue;
         if (running(M)) {
             roster_run = 1;           /* started by its trigger: its END must give the pick back too */
             pm_log("%s: roster slot %u picked while it runs - the pick is taken, nothing restarts", cfg.name, roster);
@@ -2580,6 +2593,15 @@ static int roster_pick(unsigned roster)
         return 1;
     }
     return 0;
+}
+
+static int roster_pick(unsigned roster) { return roster_pick_as(roster, 0); }
+
+/* PAD-707: a monster of MORE KAIJU picked on its list: which file is the runtime's to say */
+static int roster_pick_more(unsigned roster)
+{
+    const char *who = pm_roster_more_picked();
+    return who ? roster_pick_as(roster, who) : 0;
 }
 
 /* item 146 fix-1: the held slot's callout follows the file's `roster_callout` (no line = silent). The runtime
@@ -2613,6 +2635,29 @@ static void roster_sync(struct slot *M)
                cfg.name, cfg.roster_slot_1 - 1);
     }
     want = cfg.valid ? cfg.roster_slot_1 : 0;
+    if (roster_joined[M->index] && (!want || !cfg.roster_more || roster_joined[M->index] != want
+                                    || !name_is(roster_joined_as[M->index], cfg.name))) {
+        pm_roster_more_leave(roster_joined_as[M->index]);       /* PAD-707 */
+        pm_log("%s left MORE KAIJU (mode file slot %u)", roster_joined_as[M->index], M->index);
+        roster_joined[M->index] = 0;
+    }
+    if (want && cfg.roster_more) {                              /* PAD-707: a monster on the list behind the slot */
+        if (roster_held[M->index]) {
+            pm_roster_release(roster_held[M->index] - 1);
+            roster_held[M->index] = 0;
+            roster_callout_now[M->index] = 0;
+        }
+        if (pm_roster_more(want - 1, cfg.name, cfg.roster_page, cfg.roster_callout_1 ? cfg.roster_callout_1 - 1 : 0,
+                           roster_pick_more) >= 0) {
+            if (!roster_joined[M->index]) pm_log("%s joins MORE KAIJU behind roster slot %u", cfg.name, want - 1);
+            roster_joined[M->index] = want;
+            pm_snprintf(roster_joined_as[M->index], sizeof roster_joined_as[M->index], "%s", cfg.name);
+        } else {
+            pm_log("%s: NOT on MORE KAIJU behind roster slot %u (%s)", cfg.name, want - 1,
+                   pm_can(PM_CAN_ROSTER) ? "the slot is another mode's, or the list is full" : "this game's port has no roster");
+        }
+        return;
+    }
     if (roster_held[M->index] == want) { roster_callout_sync(M); return; }
     if (roster_held[M->index]) {
         pm_roster_release(roster_held[M->index] - 1);

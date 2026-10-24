@@ -97,6 +97,7 @@ class CodeAssets:
     info_line: bool = False                       # PAD-547: a line of words and a value under its name (PadMode_<slug>_Info)
     info_layout: dict = field(default_factory=dict)     # PAD-547: where the Scenes editor put that line (LAYOUT_KEYS)
     points_layout: dict = field(default_factory=dict)   # PAD-709: where it put a words-alone mode's scored number
+    more: dict = field(default_factory=dict)      # PAD-707: {"slot": n, "picture": file} - a monster on MORE KAIJU
     clip: str = ""
     music: str = ""
     beds: dict = field(default_factory=dict)      # PAD-658: {name: wav} more music beds it switches to

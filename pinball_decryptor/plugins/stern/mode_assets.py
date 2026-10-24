@@ -522,6 +522,7 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     screens = [with_layout(form_screen(project, slug, spec), spec.screen_layout)
                for slug, spec in own if spec.screen and prof.can("screen")]
     screens += _code_screens(project, code, prof)
+    screens += _more_screens(project, own, code, prof)     # PAD-707: MORE KAIJU's pages
     huds = _code_huds(project, code, prof, hud_font)
 
     # the clips: made first (side by side, kept between builds), then one after another into
@@ -907,6 +908,15 @@ def _code_screens(project, code, prof):
                   if spec.screen and getattr(spec, "screen_style", "") == "words" and prof.can("screen")
                   for s in total_screens(MP.asset_names(slug), prof)
                   + [with_layout(points_screen(MP.asset_names(slug), prof), getattr(spec, "points_layout", None))]]
+
+
+def _more_screens(project, forms, code, prof):
+    """PAD-707: a page each for the monsters on MORE KAIJU, the list behind a battle slot (form and code modes)."""
+    from . import more_kaiju as MK
+    try:
+        return MK.screens(project, code, prof, forms)
+    except MK.MoreKaijuError as e:
+        raise ModeAssetError(str(e))
 
 
 def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result, made=None,

@@ -3186,6 +3186,9 @@ class ModeSpec:
     # PAD-589: with starts_on "battle", the slot of the game's battle selection (the profile's roster) the mode takes:
     # picking it there starts the mode instead of that battle; -1 = none
     roster_slot: int = -1
+    # PAD-707: with it, the mode is a monster on MORE KAIJU, the list of monsters behind that slot (picking the slot
+    # opens the list's own selection screen; picking the mode there starts it), not the slot's battle itself
+    roster_more: bool = False
     # PAD-615: with starts_on "challenge", the game's challenge (the profile's challenges, menu order) the mode takes the
     # place of; CHALLENGE_NEW: a challenge of its own on the game's start menu, under its name (round 2)
     # place of: a Player Challenge game with that pick starts the mode at its ball's start instead; -1 = none
@@ -5060,7 +5063,15 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += display_light_lines(spec)
     lines += more_to_start_lines(spec, p)    # PAD-227: nothing unless the mode has them
     lines = _starts_ends_lines(spec, lines, p)
+    if starts_on_battle(spec) and p.can("roster") and getattr(spec, "roster_more", False):   # PAD-707
+        at = next((i for i, line in enumerate(lines) if line.startswith("roster_slot ")), len(lines) - 1)
+        lines.insert(at + 1, "roster_more    %s" % more_page(slug))
     return "\n".join(lines) + "\n"
+
+
+def more_page(slug):
+    """PAD-707: the page a monster on MORE KAIJU gets on the list's selection screen (the build draws it)."""
+    return "PadMode_" + re.sub(r"[^A-Za-z0-9]", "_", slug) + "_More"
 
 
 # ---- PAD-518: more than one shot counted toward its start --------------------------------

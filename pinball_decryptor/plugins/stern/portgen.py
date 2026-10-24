@@ -66,7 +66,9 @@ TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type", "magnet_shot", 
                 # cursor): a battle's bookkeeping, never a framework offset
                 "battle_stopped_at", "battle_reason_at", "battle_starts_at", "battle_clock_at", "battle_wins_at",
                 "battle_flags_at", "battle_no_city_flag", "battle_total_at", "battle_own_stop_slots",
-                "roster_city_battle_vec_at", "roster_cursor_at")
+                "roster_city_battle_vec_at", "roster_cursor_at",
+                # PAD-707: the selection screen's own sounds and timer, which MORE KAIJU's screen plays
+                "roster_left_sound", "roster_right_sound", "roster_pick_sound", "roster_select_ms")
 #: values that are a shot mask, not an address, however large: copied within a title
 SHOT_VALUES = ("magnet_shot",)
 MIN_N, MAX_N = 8, 48

@@ -208,6 +208,7 @@ import os
 import re
 
 from . import mode_project as MP
+from . import more_kaiju as MK
 
 BLOCKS_FILE = "blocks.json"
 FORMAT = 1
@@ -770,7 +771,8 @@ def _sync_assets(project, slug, program):
                or (spec.clips or {}) != clips or (spec.calls or {}) != calls
                or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud
                or (getattr(spec, "screen_style", "") or "panel") != program["screen_style"]
-               or bool(getattr(spec, "info_line", False)) != program["info"]["on"])
+               or bool(getattr(spec, "info_line", False)) != program["info"]["on"]
+               or dict(getattr(spec, "more", None) or {}) != more_of(program))
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
         spec.screen = program["screen"]
@@ -782,7 +784,21 @@ def _sync_assets(project, slug, program):
         spec.beds = beds
         spec.screen_style = "words" if program["screen_style"] == "words" else ""
         spec.info_line = program["info"]["on"]          # PAD-547: the build adds PadMode_<slug>_Info
+        spec.more = more_of(program)                    # PAD-707: the build draws its page on MORE KAIJU
         CM.save(project, slug, spec)
+
+
+def more_of(program):
+    """PAD-707: ``{"slot": n, "picture": file}`` when a script's When is a pick on MORE KAIJU (the list of monsters
+    behind battle slot n), else ``{}`` - what assets.json tells the build, which draws the mode's page on the list."""
+    for s in program.get("scripts") or []:
+        h = s.get("hat") or {}
+        if h.get("kind") == "battle" and h.get("more") and _int_ok(h.get("slot"), 0, ROSTER_MAX - 1):
+            out = {"slot": int(h["slot"])}
+            if h.get("picture"):
+                out["picture"] = str(h["picture"])
+            return out
+    return {}
 
 
 def media_assets(program):
@@ -2183,6 +2199,7 @@ def to_c(program, slug):
     challenge_names = []                    # PAD-615: the game's challenges its scripts take the place of
     challenge_launch = []                   # PAD-643: each one's launch (pm_challenge_launch)
     battle_slots = []                       # PAD-706: the battle selection's slots its scripts take the place of
+    battle_more = set()                     # PAD-707: of those, the ones it is a monster on MORE KAIJU behind
     for kind, items in bodies.items():
         for n, hat, body in items:
             head = "    /* script %d: %s */" % (n, _comment(_hat_words(hat)))
@@ -2221,6 +2238,8 @@ def to_c(program, slug):
                 slot = int(hat.get("slot")) if _int_ok(hat.get("slot"), 0, ROSTER_MAX - 1) else -1
                 if slot not in battle_slots:
                     battle_slots.append(slot)
+                if hat.get("more"):
+                    battle_more.add(slot)
                 test = "(picked & %du)" % (1 << battle_slots.index(slot))
             elif kind == "challenge":                    # PAD-615: picked on the game's thread, run on the tick
                 name = str(hat.get("challenge") or "")
@@ -3038,13 +3057,18 @@ def to_c(program, slug):
         L.append(" * own, won or lost, when the mode ends */")
         L.append("static const unsigned BATTLE_SLOTS[%d] = { %s };"
                  % (len(battle_slots), ", ".join(str(max(0, v)) for v in battle_slots)))
+        L.append("static const unsigned BATTLE_MORE[%d] = { %s };   /* PAD-707: 1 = a monster on MORE KAIJU behind it */"
+                 % (len(battle_slots), ", ".join("1" if v in battle_more else "0" for v in battle_slots)))
+        L.append('#define MORE_PAGE "%s"      /* PAD-707: its page on MORE KAIJU (the build draws it) */'
+                 % MK.page_names(slug)[0])
         L.append("static volatile unsigned battle_picked;    /* set on the game's thread, run on the tick */")
         L.append("static unsigned battle_player;             /* who picked */")
         L.append("static unsigned long battle_at;            /* its scripts run at this pm_ms(): the selection screen has closed */")
         L.append("")
         L.append("static int on_battle(unsigned slot)")
         L.append("{")
-        L.append("    long after = pm_port_value(\"roster_start_after_ms\", 0);")
+        L.append("    /* PAD-707: picked on MORE KAIJU's own screen, it starts almost at once; on the game's, once it has closed */")
+        L.append("    long after = pm_roster_more_picked() ? pm_roster_start_after() : pm_port_value(\"roster_start_after_ms\", 0);")
         L.append("    unsigned k;")
         L.append("    if (!pm_in_game()) return 0;")
         L.append("    for (k = 0; k < %d; k++)" % len(battle_slots))
@@ -3098,8 +3122,10 @@ def to_c(program, slug):
         L.append("    }")
     if battle_slots:                                # PAD-706
         L.append("    for (i = 0; i < %d; i++)" % len(battle_slots))
-        L.append("        if (!pm_roster_claim(BATTLE_SLOTS[i], on_battle))")
-        L.append('            pm_log("battle %u is not one this game lets a mode take the place of", BATTLE_SLOTS[i]);')
+        L.append("        if (BATTLE_MORE[i] ? pm_roster_more(BATTLE_SLOTS[i], MODE_NAME, MORE_PAGE, 0, on_battle) < 0   /* PAD-707 */")
+        L.append("                           : !pm_roster_claim(BATTLE_SLOTS[i], on_battle))")
+        L.append('            pm_log("battle %u is not one this game lets a mode take the place of%s", BATTLE_SLOTS[i],')
+        L.append('                   BATTLE_MORE[i] ? " (or put MORE KAIJU behind)" : "");')
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")
     L.append("")
@@ -4341,6 +4367,8 @@ def _hat_words(hat):
     if kind == "timer_done":
         return "when the timer %s runs out" % (hat.get("timer") or "(no timer)")
     if kind == "battle":                                                             # PAD-706
+        if hat.get("more"):                                                          # PAD-707
+            return "when the player picks it on MORE KAIJU, in %s's place" % battle_name(hat)
         return "when the player picks %s on the battle selection screen" % battle_name(hat)
     if kind == "challenge":
         ms = challenge_launch_ms(hat)                                               # PAD-643

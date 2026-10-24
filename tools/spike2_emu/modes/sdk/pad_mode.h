@@ -390,6 +390,23 @@ void pm_roster_over(int won);
  * (0 = silent), and releasing the slot puts the game's back. 1 = written; 0 when the caller does not
  * hold the slot or the port has no `data roster_screen_table`. */
 int pm_roster_callout(unsigned slot, unsigned id);
+/* PAD-707: MORE KAIJU. The roster cannot grow, but one slot can HOST A LIST of monsters of your own: every mode that
+ * joins the list of `slot` is one monster on it, and the runtime claims that slot for the list. A pick of the slot
+ * opens a selection screen of ours once the game's has closed: one page per monster (`page`, a screen the card build
+ * drew - the Modes tab draws `PadMore_<folder>`, its words the timer), the flipper buttons moving between them with
+ * the game's own cursor sounds and `callout` (0 = silent) as the cursor lands, the Action button or the timer picking.
+ * The ball waits in the scoop meanwhile. The monster picked gets `on_pick(slot)` exactly as a claimed slot's pick
+ * (return 1 = taken), and its pm_roster_over gives the slot's battle back, won or lost: the game counts it as the
+ * slot's battle. A monster lost is the one the game's city pick plays again (no menu then). One list per game (a slot
+ * held by a mode of its own cannot host one). Returns the monster's place on the list (0..), or -1.
+ * pm_roster_more_leave takes the calling mode's monster `name` off; the slot is the game's again when the list empties.
+ * pm_roster_start_after: how long to wait after on_pick before showing the mode's start - the game's screen closing
+ * (the port's roster_start_after_ms) for a pick on the game's screen, almost nothing for a pick on the list's. */
+int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned callout, int (*on_pick)(unsigned slot));
+void pm_roster_more_leave(const char *name);
+int pm_roster_more_count(void);
+const char *pm_roster_more_picked(void);   /* inside on_pick: the name of the monster picked on the list (0 = a pick on the game's screen) */
+long pm_roster_start_after(void);
 
 /* ---- display priority (item 154 display; MODE_SDK.md "Display priority") ------------------
  * The game decides what is on its screen with PRIORITIES, on two levels: its DISPLAY EFFECTS

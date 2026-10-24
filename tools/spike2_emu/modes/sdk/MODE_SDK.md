@@ -3741,7 +3741,9 @@ powerup level 2, then the city travel screen (TRAVEL TO: PARIS). Run6, David's H
 Gigan won the same way, and a mode file with no `end_shot` in Destoroyah's slot won by its clock (`completed 1`, the
 second city's 10,000,000 award in its score); the city map then read RAID - TIER 2 UNLOCKED. Run7, stock Pro 1.16:
 the same pick, drain (lost), city-pick restart (`the resume at 0x00195398`) and win, the battle's bytes as on
-Premium/LE. A matched pair on the stock Premium/LE card (glass_before on main's runtime, glass_after on this one): a
+Premium/LE. Run8, the Heisei card again, a real three-stage GIGAN STAGES (both ramps x4, the Big loop x3, the
+Building; its stage kept for the game): four ramps and a loop (6,500,000), a drain (lost), the next scoop restarted
+it at stage 2, three loops and the Building (17,500,000): won, `completed 1, wins 1`. A matched pair on the stock Premium/LE card (glass_before on main's runtime, glass_after on this one): a
 mode file in Ebirah's slot won by its `end_shot` - main: `battle over`, +1,000,000 (the mode's), the city untouched
 (RAID BATTLE 0/0); now: `the pick ends as a WON battle`, +6,000,000 (the mode's and the city's 5,000,000), RAID
 GODZILLA CONTROLS TOKYO. No segv in any run. Not run: a battle slot of tier 2 (4-6; read at the desk: King Ghidorah

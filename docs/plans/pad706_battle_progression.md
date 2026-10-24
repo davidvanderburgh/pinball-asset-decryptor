@@ -45,6 +45,8 @@ Like adding stages to them?" ... "We also want our changed modes to still accumu
 - run6 (David's Heisei 1.99D v20): the blocks Gigan won; a mode file with no end shot won by its clock; RAID TIER 2
   UNLOCKED.
 - run7 (stock Pro 1.16): pick, drain, city-pick restart (0x195398), win.
+- run8 (Heisei 1.99D): a real three-stage GIGAN STAGES (its stage kept for the game) - drained at stage 2, restarted
+  at stage 2 by the next scoop, won. Delivered to David's project as `PAD-706 notes/gigan_stages` (not in its modes).
 - glass pair (stock Premium/LE, main's runtime vs this one): the same mode-file win - main: city untouched,
   +1,000,000; now: GODZILLA CONTROLS TOKYO, +6,000,000.
 

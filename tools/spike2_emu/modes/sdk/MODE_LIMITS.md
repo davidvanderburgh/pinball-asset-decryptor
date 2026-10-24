@@ -56,7 +56,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Fire a flipper, slingshot, pop bumper, kickback, lock, the trough or any other coil | No |
 | Add a switch or a shot | No. A mode sees the shots the game reports. |
 | Change settings, audits or high scores from a mode | No. Settings are on the Defaults tab. |
-| Send scores to Insider Connected | No. Players can log in, but a card with modes sends no scores. |
+| Send scores to Insider Connected | No. Players can log in, but a card with modes sends no scores, and the game awards no Insider achievements. |
 | Write modes from a Mac, or straight to an SD card | No. Write an image file on Windows or Linux. |
 | Make modes for Spike 1, Spike 3 or another maker | No. Spike 2 only. |
 
@@ -276,7 +276,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 ## Before you flash a real machine
 
 - It's a preview. Treat a card with modes as a test card and keep your stock image.
-- A card with modes never sends scores to Insider Connected.
+- A card with modes never sends scores to Insider Connected, and the game awards no Insider achievements.
 - Modes are built for one game version. After a Stern update, Write the card again: until then the modes don't run and the game plays stock.
 
 ## Asking for more

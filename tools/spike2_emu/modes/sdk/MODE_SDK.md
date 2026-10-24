@@ -3164,10 +3164,22 @@ The runtime records the endpoint at `agent_header` and REFUSES `agent_begin` (a 
 (the high-score table) or `/ingest/v1/game/game_events` (the event stream achievements are earned
 from). The sender then logs `Failed to begin construction of GAME_SESSION_END message`, the
 outgoing queue drops the entry (a failed send is dequeued, never retried) and the game plays on.
+
+**Achievements (PAD-698).** The game decides Insider achievements itself, on the machine: it asks
+the agent for the list of them (`GAME_ACHIEVEMENT_QUERY`), watches the game for them and shows
+NEW INSIDER ACHIEVEMENT! - a machine with modes showed one while every score report was held
+back. The gate refuses that query too, so the game has no list and awards nothing (its lookup
+says `Achievement descriptors not loaded.`). The query has no endpoint path, so the gate knows it
+by its message type (`agent_begin`'s r2), read out of the game's code at boot (`achq_find`): the
+one sender that loads `Failed to begin construction of GAME_ACHIEVEMENT_QUERY message` right after
+`bl agent_begin`, with `mov r2, #type` before the call. It is 28 on every build measured (the 57
+newest builds, Godzilla Pro 1.15 and every Heisei build), and exactly one sender uses it. A game
+where it is not found arms nothing, like a port without the two sites.
 The login, the heartbeat and the message of the day are the agent's own; audits, alerts, the
 home team, player properties, the free-game code and the descriptor queries go out as before.
-`mode.log` says `insider: score reports stay on this machine ...` at boot and names each endpoint
-the first time it is held back.
+`mode.log` says `insider: score reports stay on this machine ... the achievement query, message
+type 28, loaded at 0x..., is held back ...` at boot and names each endpoint (and the achievement
+query) the first time it is held back.
 
 **The gate is required.** A port without both sites arms nothing (`insider: the port has no
 agent_header/agent_begin ... NOTHING IS HOOKED, the game runs stock`), and the app refuses to

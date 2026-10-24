@@ -13,19 +13,24 @@ no mode on such a card.
 - every shipped port names both sites, with the words every build measured shares, and the app's
   profile says so; portgen treats both as hooked (movability is checked when a port is drafted)
 - Write refuses a card whose port lacks the gate, for Try it and for a real card alike
+- PAD-698: the achievement query (the list the game awards Insider achievements from) is held back
+  by its message type, read out of the game's code at boot; the finder, lifted, on hand-made code and
+  (PAD_GAME_ELVES=<folder of game ELFs>) on real games: type 28 on every build
 Desk only: no card, no emulator.
 """
 import json
 import os
 import pathlib
 import re
+import struct
+import subprocess
 
 import pytest
 
 from pinball_decryptor.plugins.stern import mode_project as MP
 from pinball_decryptor.plugins.stern import mode_write as MW
 from pinball_decryptor.plugins.stern import portgen as PG
-from tests.test_spike2_mode_roster import _host_run, _lift
+from tests.test_spike2_mode_roster import _cc, _host_run, _lift
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 SDK = REPO / "tools" / "spike2_emu" / "modes" / "sdk"
@@ -148,6 +153,7 @@ def test_a_port_without_the_gate_is_refused_for_try_it_and_for_a_card(tmp_path):
 
 def test_the_words_the_page_and_a_write_show():
     assert "log in" in MP.INSIDER_NOTE and "no game, score, high-score or achievement" in MP.INSIDER_NOTE
+    assert "awards no Insider achievements" in MP.INSIDER_NOTE           # PAD-698
     assert "—" not in MP.INSIDER_NOTE and "—" not in MP.insider_gate_words("X")
 
 
@@ -156,3 +162,146 @@ def test_the_two_sites_are_pc_independent_on_every_build():
     for w in HEADER_WORDS + BEGIN_WORDS:
         assert PG.movable(w, 0xE1A00000) or True   # movable() takes the pair; check each word alone
         assert not PG.pc_dependent(w), "%08x" % w
+
+
+# ---- PAD-698: the achievement query ----------------------------------------------------------------
+# The game decides Insider achievements on the machine, from a list it asks the agent for
+# (GAME_ACHIEVEMENT_QUERY). The query has no endpoint path, so the gate knows it by agent_begin's r2,
+# read out of the game's code at boot: the one sender that loads "Failed to begin construction of
+# GAME_ACHIEVEMENT_QUERY message" right after `bl agent_begin`, with `mov r2, #type` before the call.
+
+ACHQ_WORDS = b"Failed to begin construction of GAME_ACHIEVEMENT_QUERY message"
+# the host side of the lift: the runtime reads the game's memory; here it is an array of words
+_ACHQ_HOST = """
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+static unsigned base, n_words, *mem;
+static unsigned code_word(unsigned at)
+{
+    return at >= base && at - base < n_words * 4 && !(at & 3) ? mem[(at - base) / 4] : 0;
+}
+"""
+
+
+def _achq_harness(tmp_path, main):
+    src = _src()
+    code = "\n".join([_ACHQ_HOST, _lift(src, "static unsigned arm_imm("), _lift(src, "static int achq_loads("),
+                      _lift(src, "static int achq_type_before("), main])
+    return _host_run(tmp_path, code)
+
+
+def _bl(at, target):
+    return 0xEB000000 | (((target - at - 8) // 4) & 0xFFFFFF)
+
+
+def _movw(rd, v):
+    return 0xE3000000 | ((v >> 12) & 0xF) << 16 | rd << 12 | (v & 0xFFF)
+
+
+def _movt(rd, v):
+    return 0xE3400000 | ((v >> 12) & 0xF) << 16 | rd << 12 | (v & 0xFFF)
+
+
+def test_arm_imm_decodes_the_rotated_immediates(tmp_path):
+    out = _achq_harness(tmp_path, "int main(void) { printf(\"%x %x %x %x\\n\", arm_imm(0xe3a0201c), "
+                                  "arm_imm(0xe3a00f43), arm_imm(0xe3a02102), arm_imm(0xe3a020ff)); return 0; }")
+    assert out.split() == ["1c", "10c", "80000000", "ff"]
+
+
+def test_the_achievement_query_type_is_read_from_the_sender(tmp_path):
+    """A sender in the shape every build has (movw/movt of the words after `bl agent_begin`), the same
+    with a literal load, a decoy sender that calls another function, and one with no `mov r2`."""
+    base, begin, other, words = 0x10000, 0x20000, 0x20100, 0x30000
+    code = [0xE1A00000] * 128
+    def at(i):
+        return base + 4 * i
+    # 0..: mov r2,#28; mov r3,#1; add r1,sp,#12; ldr r0,[r0]; bl begin; cmp r0,#0; ldr r0,[r4,#8]; beq; movw r3; movw r2; movt r3
+    code[0:11] = [0xE3A0201C, 0xE3A03001, 0xE28D100C, 0xE5900000, _bl(at(4), begin), 0xE3500000, 0xE5940008,
+                  0x0A000008, _movw(3, words & 0xFFFF), _movw(2, 0x5555), _movt(3, words >> 16)]
+    # 20..: the same with a literal: mov r2,#0x1c; bl begin; ldr r3,[pc,#8] -> code[33]
+    code[20:23] = [0xE3A0201C, _bl(at(21), begin), 0xE59F3008]
+    code[22 + 4] = words           # pc (+8) + 8 = the word 4 after the ldr
+    # 40..: a decoy: mov r2,#5; bl other; movw/movt of the words
+    code[40:44] = [0xE3A02005, _bl(at(41), other), _movw(3, words & 0xFFFF), _movt(3, words >> 16)]
+    # 60..: bl begin with no mov r2 before it
+    code[60:63] = [_bl(at(60), begin), _movw(3, words & 0xFFFF), _movt(3, words >> 16)]
+    # 80..: movw of the low half, movt of ANOTHER register
+    code[80:82] = [_movw(3, words & 0xFFFF), _movt(2, words >> 16)]
+    main = ("int main(void) {\n"
+            "    static unsigned c[] = {" + ",".join("0x%xu" % w for w in code) + "};\n"
+            "    unsigned i; base = 0x%xu; mem = c; n_words = sizeof c / 4;\n" % base +
+            "    for (i = 0; i < n_words; i++)\n"
+            "        if (achq_loads(base + 4 * i, 0x%xu))\n" % words +
+            "            printf(\"%%u %%d\\n\", i, achq_type_before(base + 4 * i, 0x%xu));\n" % begin +
+            "    return 0; }")
+    got = dict(l.split() for l in _achq_harness(tmp_path, main).splitlines())
+    assert got == {"8": "28", "22": "28", "42": "-1", "61": "-1"}
+
+
+def test_the_gate_holds_the_achievement_query_by_its_type():
+    src = _src()
+    arm = _lift(src, "static int insider_arm(")
+    # found before anything is hooked, and a game where it is not found arms nothing
+    assert arm.index('achq_find(fn("agent_begin"))') < arm.index('hook(fn("agent_header")')
+    assert re.search(r"if \(insider_achq < 0\) \{[^}]*NOTHING IS HOOKED[^}]*return 0;", arm)
+    veto = _lift(src, "static int on_agent_begin(")
+    assert "insider_achq >= 0 && r[2] == (unsigned)insider_achq" in veto
+    assert veto.index("insider_achq") < veto.index("insider_blocked(")
+    assert ('static const char INSIDER_ACHQ_WORDS[] = "%s";' % ACHQ_WORDS.decode()) in src
+
+
+def _elf_words(path):
+    """PT_LOAD segments of a 32-bit ELF as {vaddr: (bytes, flags)}."""
+    d = path.read_bytes()
+    phoff, = struct.unpack_from("<I", d, 0x1C)
+    phnum, = struct.unpack_from("<H", d, 0x2C)
+    segs = []
+    for i in range(phnum):
+        t, off, va, _pa, fsz, _msz, fl, _al = struct.unpack_from("<8I", d, phoff + i * 32)
+        if t == 1:
+            segs.append((va, d[off:off + fsz], fl))
+    return segs
+
+
+@pytest.mark.skipif(not os.environ.get("PAD_GAME_ELVES"), reason="PAD_GAME_ELVES: a folder of game ELFs")
+def test_every_game_elf_has_one_achievement_query(tmp_path):
+    """The lifted finder over real games (PAD_GAME_ELVES=<folder of *.elf>): the words are in the code
+    segment, exactly one load of them follows `bl agent_begin`, and its type is 28 on every build."""
+    elves = sorted(pathlib.Path(os.environ["PAD_GAME_ELVES"]).glob("*.elf"))
+    assert elves
+    main = r"""
+int main(int argc, char **argv) {
+    unsigned str = strtoul(argv[2], 0, 16), begin = strtoul(argv[3], 0, 16), i, hits = 0;
+    FILE *f = fopen(argv[1], "rb"); long n;
+    base = strtoul(argv[4], 0, 16);
+    fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET);
+    mem = malloc(n + 4); n_words = fread(mem, 1, n, f) / 4; fclose(f);
+    for (i = 0; i < n_words; i++)
+        if (achq_loads(base + 4 * i, str)) {
+            int t = achq_type_before(base + 4 * i, begin);
+            if (t >= 0) { printf("%x %d\n", base + 4 * i, t); hits++; }
+        }
+    return 0; }
+"""
+    src = _src()
+    code = "\n".join([_ACHQ_HOST, _lift(src, "static unsigned arm_imm("), _lift(src, "static int achq_loads("),
+                      _lift(src, "static int achq_type_before("), main])
+    cc = _cc()
+    (tmp_path / "t.c").write_text(code)
+    subprocess.run([cc, "-std=gnu17", "-O2", "-o", str(tmp_path / "t"), str(tmp_path / "t.c")], check=True)
+    for elf in elves:
+        segs = _elf_words(elf)
+        code_va, code_bytes, _fl = next(s for s in segs if s[2] & 1)
+        i = code_bytes.find(ACHQ_WORDS)
+        assert i >= 0, "%s: the words are not in the code segment" % elf.name
+        # agent_begin: the thunk's two words, `mov r1, ip` and a branch after them
+        begins = [code_va + k for k in range(0, len(code_bytes) - 15, 4)
+                  if struct.unpack_from("<4I", code_bytes, k)[:3] == BEGIN_WORDS + (0xE1A0100C,)
+                  and struct.unpack_from("<I", code_bytes, k + 12)[0] >> 24 == 0xEA]
+        assert len(begins) == 1, "%s: %d agent_begin thunks" % (elf.name, len(begins))
+        (tmp_path / "code.bin").write_bytes(code_bytes)
+        out = subprocess.run([str(tmp_path / "t"), str(tmp_path / "code.bin"), "%x" % (code_va + i),
+                              "%x" % begins[0], "%x" % code_va], capture_output=True, text=True,
+                             timeout=120).stdout.split()
+        assert len(out) == 2 and out[1] == "28", "%s: %s" % (elf.name, out)

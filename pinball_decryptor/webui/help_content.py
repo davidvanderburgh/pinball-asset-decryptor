@@ -3275,7 +3275,8 @@ PREVIEW_HELP = {
                 "to Insider Connected and see its message of the day, but the machine "
                 "sends it no game, no scores, no high scores and no achievements: the "
                 "mode runtime holds those reports back, and the game logs each as a "
-                "failed message and plays on.\n\n"
+                "failed message and plays on. The game is not given the list of "
+                "Insider achievements either, so it awards none on the machine.\n\n"
                 "The page says so under the title. A title whose port cannot do this "
                 "(one worked out before the gate existed) cannot carry modes until its "
                 "port is worked out again.",

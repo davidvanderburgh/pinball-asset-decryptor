@@ -1815,8 +1815,9 @@ RUNTIME_CORE = (("tick", "shot_dispatch", "ball_end", "score_add"), ("cur_player
 INSIDER_GATE_SITES = ("agent_header", "agent_begin")
 #: what the Modes page and a Write say about a card that carries modes
 INSIDER_NOTE = ("Insider Connected: players still log in on a card with modes, but the machine "
-                "sends no game, score, high-score or achievement report to Insider Connected. A "
-                "mode's points are not the game's stock scoring, so they stay on the machine.")
+                "sends no game, score, high-score or achievement report to Insider Connected, and the "
+                "game awards no Insider achievements. A mode's points are not the game's stock "
+                "scoring, so they stay on the machine.")
 
 
 def insider_gate_words(label):

@@ -32,6 +32,9 @@ The port lines (each build's own, never carried from a reference):
   value mode_reason_at       the per-player reason byte (only where the stop keeps one)
   value mode_starts_at       the per-player start count (obj + this + 4 * player)
   value mode_wins_at         the per-player count of completions the STOP keeps (only where it keeps one)
+  value mode_slot_stopped_get  the mode's own "stopped?" virtual (mode, player), and
+  value mode_slot_stopped_set  ... its own "mark stopped" (mode, value, player): where the STOP goes through them
+                             (Jurassic Park; PAD-716)
   site  mode_started         the manager's "started" (STARTED audit), with
   data  mode_manager         ... the manager it is called on      (only where the START calls one)
   value mode_id_at           where a mode keeps its id (r1 of the call)
@@ -159,7 +162,36 @@ def stop_shape(prog, f):
     if not sets_stopped or not end:
         return None
     wins = player_counts(ins)               # Star Wars, Venom...: a completed stop counts the player's wins
-    return {"player": player, "stopped": stopped, "reason": reason_at, "fn": f, "wins": wins[0] if wins else None}
+    get_slot, set_slot = stopped_virtuals(ins, obj, k, stopped)
+    return {"player": player, "stopped": stopped, "reason": reason_at, "fn": f, "wins": wins[0] if wins else None,
+            "stopped_get": get_slot, "stopped_set": set_slot}
+
+
+def stopped_virtuals(ins, obj, k, stopped):
+    """PAD-716: (getter slot, setter slot) of the stopped byte where the STOP reaches it through two of the mode's own
+    virtuals, else (None, None). Jurassic Park's stop reads it through v[32] (mode, player) and writes it through v[55]
+    (mode, value, player), each called only where a class overrides it (`ldr rA, [<vtable>, #off]; ...; cmp rA, <the
+    base's own>; bne <call it>`; the base's own is the plain byte), and JP Pro's chase, Ctrl Room and T-Rex classes do:
+    they keep their stopped byte elsewhere (Trex Chase +0x137, Virus Attack +0x11f). The getter is the last such load
+    before the stopped byte is read (*k*: the `bl` of its read), the setter the last one before it is written."""
+    vt = {"r0", obj}
+    regs = set()
+    guarded = []
+    for i, (_va, m, o, _w) in enumerate(ins):
+        mv = re.match(r"(r\d+|ip), \[(r\d+)\]$", o) if m == "ldr" else None
+        if mv and mv.group(2) in vt:
+            regs.add(mv.group(1))
+            continue
+        ml = re.match(r"(r\d+|ip), \[(r\d+|ip), #(%s)\]$" % _H, o) if m == "ldr" else None
+        if ml and ml.group(2) in regs and _num(ml.group(3)) % 4 == 0:
+            if any(c[1] == "cmp" and c[2].startswith(ml.group(1) + ", ") for c in ins[i + 1:i + 6]):
+                guarded.append((i, _num(ml.group(3)) // 4))
+        ms = re.match(r"r\d+, \[r\d+, #(%s)\]$" % _H, o) if m == "strb" else None
+        if ms and i > k and _num(ms.group(1)) == stopped:
+            before = [s for j, s in guarded if j < k]
+            after = [s for j, s in guarded if k < j < i]
+            return (before[-1], after[-1]) if before and after else (None, None)
+    return None, None
 
 
 def is_player_getter(prog, f):
@@ -268,6 +300,8 @@ def find(elf, start_slot=None):
         out["mode_reason_at"] = stop["reason"]
     if stop.get("wins") is not None:
         out["mode_wins_at"] = stop["wins"]
+    if stop.get("stopped_get") is not None:             # PAD-716: Jurassic Park's own-stopped virtuals
+        out.update(mode_slot_stopped_get=stop["stopped_get"], mode_slot_stopped_set=stop["stopped_set"])
     out.notes.append("stop: v[%d] in %d of %d mode classes (base 0x%x)" % (slot, n, len(classes), stop["fn"]))
     # the START: the title's start slot's functions and what they call; the port's slot first (a derived port's may be
     # its reference's), then the stock scanner's
@@ -347,6 +381,9 @@ def port_lines(found, prog=None):
         out.append("value mode_starts_at         0x%x" % found["mode_starts_at"])
     if "mode_wins_at" in found:
         out.append("value mode_wins_at           0x%x" % found["mode_wins_at"])
+    if "mode_slot_stopped_get" in found:
+        out.append("value mode_slot_stopped_get  %d" % found["mode_slot_stopped_get"])
+        out.append("value mode_slot_stopped_set  %d" % found["mode_slot_stopped_set"])
     if "mode_started" in found:
         out.append("site  mode_started           0x%08x%s" % (found["mode_started"], words(found["mode_started"])))
         out.append("data  mode_manager           0x%08x" % found["mode_manager"])
@@ -370,16 +407,20 @@ def missing_from(lines, port_text):
 
 
 def lines_for(elf, port_text):
-    """The framework lines *port_text* lacks, read from the build's own program (bytes); [] when it has them, or
+    """The framework lines *port_text* lacks, read from the build's own program (bytes) - a port with PAD-710's section
+    but not PAD-716's own-stopped virtuals is read again for those; [] when it has them, or
     the build has none (a plain-C title), or the program cannot be read. Never raises: a card build or a derive
     goes on without them (a mode in a game mode's place then counts only as ours)."""
-    if re.search(r"^value\s+mode_slot_stop\s", port_text or "", re.M):
+    had = re.search(r"^value\s+mode_slot_stop\s", port_text or "", re.M)
+    if had and re.search(r"^value\s+mode_slot_stopped_get\s", port_text or "", re.M):
         return []
     try:
         prog = S.Program(elf)
         m = re.search(r"^value\s+stock_slot_start\s+(\d+)", port_text or "", re.M)
         found = find(prog, int(m.group(1)) if m else None)
-        return missing_from(port_lines(found, prog), port_text or "")
+        lines = missing_from(port_lines(found, prog), port_text or "")
+        # PAD-716: a port with PAD-710's section gets only what it lacks (Jurassic Park's own-stopped virtuals)
+        return [x for x in lines if not x.startswith("#")] if had else lines
     except Exception:                                    # noqa: BLE001 - an odd build: without them
         return []
 

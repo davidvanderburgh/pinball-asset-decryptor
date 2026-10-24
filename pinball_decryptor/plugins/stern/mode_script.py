@@ -39,11 +39,12 @@ VALUE_FIELDS = {
     "hud_progress": {"value"},
     "hold": {"ms"}, "scoop_hold": {"ms"}, "shake": {"ms"},
 }
-NUM_KINDS = ("num", "var", "hits", "scored", "total", "secs_left", "balls", "player", "op", "timer_left")
+NUM_KINDS = ("num", "var", "hits", "scored", "total", "secs_left", "balls", "player", "op", "timer_left",
+             "combo_chain", "combo_steps")                                        # PAD-708
 BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock", "can_start", "lit", "shields_away")
 #: value kinds written as a call of their own name, with their fields as keywords: hits(shot="Left ramp")
 CALL_KINDS = {"hits", "scored", "total", "secs_left", "balls", "player", "timer_left", "running", "stock",
-              "can_start", "lit", "shields_away"}
+              "can_start", "lit", "shields_away", "combo_chain", "combo_steps"}
 BINOPS = {"+": ast.Add, "-": ast.Sub, "*": ast.Mult, "/": ast.Div}
 CMPOPS = {"<": ast.Lt, "<=": ast.LtE, "=": ast.Eq, "!=": ast.NotEq, ">=": ast.GtE, ">": ast.Gt}
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

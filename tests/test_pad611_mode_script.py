@@ -51,7 +51,8 @@ EVERY_BLOCK = [
 #: one of every value and condition (modes_blocks.js valueTemplates / condTemplates), with the operators
 EVERY_VALUE = [num(1000), {"k": "var", "name": "combo"}, {"k": "hits", "shot": "Left ramp"}, {"k": "scored"},
                {"k": "total"}, {"k": "secs_left"}, {"k": "timer_left", "timer": "window"}, {"k": "balls"},
-               {"k": "player"}] + [{"k": "op", "op": o, "a": num(2), "b": {"k": "var", "name": "combo"}} for o in "+-*/"]
+               {"k": "player"}, {"k": "combo_chain"}, {"k": "combo_steps", "combo": "RAMPS"}] + [   # PAD-708
+                {"k": "op", "op": o, "a": num(2), "b": {"k": "var", "name": "combo"}} for o in "+-*/"]
 EVERY_COND = [{"k": "cmp", "op": o, "a": {"k": "secs_left"}, "b": num(3)} for o in BM.CMPS] + [
     {"k": "and", "a": {"k": "running"}, "b": {"k": "lit"}}, {"k": "or", "a": {"k": "stock"}, "b": {"k": "can_start"}},
     {"k": "not", "a": {"k": "running"}}, {"k": "running"}, {"k": "can_start"}, {"k": "lit"}, {"k": "stock"},
@@ -63,6 +64,8 @@ EVERY_HAT = [{"kind": "mode_start"}, {"kind": "mode_end"}, {"kind": "shot", "sho
              {"kind": "event", "event": "ball_saved", "when": "any"},
              {"kind": "timer_done", "timer": "window"},
              {"kind": "challenge", "challenge": "Ahoy Mr. Bond"},                                  # PAD-615
+             {"kind": "combo", "shots": ["Left ramp", "lit", "*"], "seconds": 2.5, "when": "running",
+              "name": "RAMPS"},                                                                   # PAD-708
              {"kind": "battle", "slot": 2, "name": "Gigan"},                                          # PAD-706
              {"kind": "game_mode", "mode": 21, "name": "Jet Fighter Attack"}]                         # PAD-710
 

@@ -13,6 +13,8 @@ C's is (a division by 0 is 0).
 """
 from __future__ import annotations
 
+from . import block_modes as BM
+
 
 #: blocks run for one event at most (a program that loops through its timers is cut off, never hangs the app)
 STEP_LIMIT = 20000
@@ -48,6 +50,10 @@ class Sim:
         self.events = []                # (kind, detail) of everything the sheet's player looks at
         self._every = {}                # hat index -> next due ms
         self._steps = 0
+        self.combo_at = {}              # PAD-708: each combo's shots made so far, and when the last was
+        self.chain = 0                  # PAD-708: the combos in a row
+        self.chain_at = None            # ... when the last was made, and its window
+        self.chain_ms = 0
         self.new_game()
 
     # ---------------------------------------------------------------- the game around the mode
@@ -58,6 +64,7 @@ class Sim:
         for key in ("vars", "hits", "timers", "lit_shots", "hud", "_every"):
             setattr(out, key, dict(getattr(self, key)))
         out.events = list(self.events)
+        out.combo_at = dict(self.combo_at)
         return out
 
     def new_game(self):
@@ -66,7 +73,7 @@ class Sim:
         self.new_ball()
 
     def new_ball(self):
-        if self.running:
+        if self.running and self.p.get("ends_on_drain", True):    # PAD-708: as the C (a mode may run on)
             self.end("drain")
         for name, reset in self.var_reset.items():
             if reset == "ball":
@@ -74,6 +81,60 @@ class Sim:
         self.hits = {}
         self.timers = {}
         self.balls = 1
+        self.combo_clear()
+
+    # ---------------------------------------------------------------- PAD-708: combos, as the C judges them
+    def combo_clear(self):
+        self.combo_at = {}                      # script index -> (shots made so far, ms the last was made)
+        self.chain, self.chain_at = 0, None
+
+    @staticmethod
+    def _step_is(step, name, lit):
+        if isinstance(step, list):
+            return name in step[:BM.COMBO_ALTS_MAX]
+        return step == BM.COMBO_ANY or (step == BM.COMBO_LIT and name in lit) or step == name
+
+    def combo_steps(self, hat):
+        """A combo's shots made so far (combo_made_so_far in the C)."""
+        for i, s in enumerate(self.scripts):
+            if s.get("hat") is hat:
+                at, last = self.combo_at.get(i, (0, 0))
+                return at if at and self.now - last <= BM.combo_ms(hat) else 0
+        return 0
+
+    def in_row(self):
+        if self.chain_at is None or self.now - self.chain_at > self.chain_ms:
+            return 0
+        return self.chain
+
+    def _combo_shot(self, name, was):
+        """The combos this shot makes (their When holding), as the C's combo_shot."""
+        lit = set(self.lit_shots)
+        fired, win = set(), 0
+        for i, s in enumerate(self.scripts):
+            h = s.get("hat") or {}
+            steps = BM.combo_steps(h)[:BM.COMBO_STEPS_MAX]
+            if h.get("kind") != "combo" or not self._when(h, was) or len(steps) < 2:
+                continue
+            ms = BM.combo_ms(h)
+            at, last = self.combo_at.get(i, (0, 0))
+            if at and self.now - last > ms:
+                at = 0
+            first = self._step_is(steps[0], name, lit)
+            if self._step_is(steps[at], name, lit):
+                at, last = at + 1, self.now
+                if at == len(steps):
+                    fired.add(i)
+                    win = max(win, ms)
+                    at = 1 if first else 0
+            elif first:
+                at, last = 1, self.now
+            self.combo_at[i] = (at, last)
+        if fired:
+            self.chain = self.in_row() + 1
+            self.chain_at, self.chain_ms = self.now, win
+            self.events.append(("combo", self.chain))
+        return fired
 
     def shot(self, name):
         """The player makes ``name``. Returns True when the mode started on it."""
@@ -81,10 +142,15 @@ class Sim:
         was_lit = self.lit                      # a light this shot puts on waits for the next
         self._steps = 0
         self.hits[name] = self.hits.get(name, 0) + 1
-        for s in self.scripts:
+        was = self.running                      # PAD-708: judged by the mode's state before the shot, as the C
+        fired = self._combo_shot(name, was)     # ... and its combos before any script runs
+        for i, s in enumerate(self.scripts):
             h = s.get("hat") or {}
-            if h.get("kind") == "shot" and h.get("shot") == name and self._when(h) \
-                    or h.get("kind") in ("any_shot", "switch") and self._when(h):   # PAD-675: a shot's switch too
+            if h.get("kind") == "shot" and h.get("shot") == name and self._when(h, was) \
+                    or h.get("kind") in ("any_shot", "switch") and self._when(h, was):   # PAD-675: a shot's switch too
+                self.run(s.get("do"))
+            elif h.get("kind") == "combo" and i in fired:
+                self.events.append(("combo_made", i))
                 self.run(s.get("do"))
         if not self.running and was_lit == name and self.lit == name:
             self.start()
@@ -145,9 +211,9 @@ class Sim:
                         self.run(s.get("do"))
         self.now = at
 
-    def _when(self, hat):
+    def _when(self, hat, running=None):
         w = hat.get("when") or "any"
-        return w == "any" or (w == "running") == self.running
+        return w == "any" or (w == "running") == (self.running if running is None else running)
 
     # ---------------------------------------------------------------- the mode
     def can_start(self):
@@ -170,6 +236,7 @@ class Sim:
         self.scored = 0
         self.points = 0
         self.hud = {"title": "", "line": ""}
+        self.combo_clear()                      # PAD-708
         for name, reset in self.var_reset.items():
             if reset == "mode":
                 self.vars[name] = 0
@@ -190,6 +257,7 @@ class Sim:
         for s in self.scripts:
             if (s.get("hat") or {}).get("kind") == "mode_end":
                 self.run(s.get("do"))
+        self.combo_clear()                      # PAD-708
         self.lit_shots = {}
         self.balls = 1
 
@@ -293,6 +361,15 @@ class Sim:
         if k == "timer_left":
             at = self.timers.get(e.get("timer"))
             return max(0, at - self.now) if at is not None else 0
+        if k == "combo_chain":                  # PAD-708
+            return self.in_row()
+        if k == "combo_steps":
+            name = str(e.get("combo") or "").strip().lower()
+            for s in self.scripts:
+                h = s.get("hat") or {}
+                if h.get("kind") == "combo" and str(h.get("name") or "").strip().lower() == name:
+                    return self.combo_steps(h)
+            return 0
         if k == "op":
             a, b = self.val(e.get("a")), self.val(e.get("b"))
             op = e.get("op")

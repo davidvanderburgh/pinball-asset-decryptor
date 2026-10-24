@@ -9508,7 +9508,12 @@ static struct {
     unsigned game;                       /* the game_start count it belongs to */
     int state;                           /* 0 none, 1 picked, 2 its mode runs, 3 over: the ball ends */
     unsigned long ms;                    /* PAD-619: when it was picked */
-} chg;
+    /* PAD-696: the game's pick, for every player of it - Godzilla's MODE CHALLENGE in a game of 2-4 players played the
+     * mode for player 1 only; the others' balls started plain, the game's ordinary play */
+    int pick;                            /* the challenge the start menu picked (n, or CHALLENGE_OWN + k); -1 none */
+    unsigned pick_game;                  /* the game_start count it belongs to */
+    unsigned players;                    /* bit p: player p's turn at it has begun */
+} chg = { 0, 0, 0, 0, -1, 0, 0 };
 
 static unsigned chg_game_now(void)
 {
@@ -9532,8 +9537,9 @@ static void chg_scores_picked(unsigned slot, const char *name, const struct pm_m
 static void chg_scores_began(void);                                                          /* PAD-663, below */
 
 /* slot: the game's challenge the game thinks it plays (an own challenge plays as challenge 0's); name: the menu's */
-static void chg_picked(const struct pm_mode *by, unsigned slot, const char *name)
+static void chg_picked(const struct pm_mode *by, unsigned slot, const char *name, int pick)
 {
+    chg.pick = pick;
     chg.by = by;
     chg.game = chg_game_now();
     chg.state = 1;
@@ -9548,6 +9554,15 @@ static int chg_ends_ball(int state, int is_taker, int in_game, int at_ball_end)
     return state == 2 && is_taker && in_game && !at_ball_end;
 }
 
+/* PAD-696: what a ball's start is to a mode's challenge game, from the state alone (tests lift it verbatim): 1 = a
+ * player whose turn at the game's pick has not begun - the pick is played again, for them; 0 = nothing (no pick, another
+ * game's, or this player's turn began already: a re-served ball of theirs). The game itself ends each player's turn as
+ * it ends a one-player challenge game's: one ball (challenge_balls), the mode's end ends it (challenge_end_ball). */
+static int chg_turn_due(int pick, unsigned pick_game, unsigned game, unsigned players, unsigned player)
+{
+    return pick >= 0 && pick_game == game && player >= 1 && player <= 4 && !(players >> player & 1);
+}
+
 static int chg_refuses(void)
 {
     return chg_state() == 3 && pm_in_game();
@@ -9560,6 +9575,9 @@ static void chg_began(void)
     if (chg.state == 1 && current == chg.by && pm_player()) {
         chg.game = chg_game_now();
         chg.state = 2;
+        if (chg.pick_game != chg.game) chg.players = 0;    /* PAD-696: a new game's first turn */
+        chg.pick_game = chg.game;
+        if (pm_player() >= 1 && pm_player() <= 4) chg.players |= 1u << pm_player();
         chg_scores_began();          /* PAD-663: its high score belongs to this game too */
         launch_began();              /* PAD-643: its ball launched for the player */
     }
@@ -9741,7 +9759,7 @@ static int challenge_veto(unsigned *r, unsigned n)
             if (took) {
                 challenge_ours = 1; challenge_ours_ms = pm_ms();
                 launch_picked(CHALLENGE_OWN + (unsigned)k);
-                chg_picked(own_challenge[k].by, 0, own_challenge[k].name);
+                chg_picked(own_challenge[k].by, 0, own_challenge[k].name, CHALLENGE_OWN + k);
                 return 1;
             }
         }
@@ -9757,7 +9775,7 @@ static int challenge_veto(unsigned *r, unsigned n)
     current = was;
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
-    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n]); }
+    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n], (int)n); }
     return took != 0;
 }
 
@@ -10778,10 +10796,31 @@ static int challenge_ball_takes(int on, int own, int held, int picked)
     return held && picked == 1;
 }
 
+/* PAD-696: a later player's first ball in a mode's challenge game is their turn at it - the game's pick again, as the
+ * first player's ball had it: the challenge's state back to picked (the last turn's "over" is not theirs), a challenge
+ * of the modes' own pending again, a claimed one taken without its flag (the first turn cleared it). Returns the claimed
+ * challenge to take again, else -1. */
+static int chg_next_turn(void)
+{
+    unsigned p = pm_player();
+    if (!chg_turn_due(chg.pick, chg.pick_game, chg_game_now(), chg.players, p)) return -1;
+    chg.players |= 1u << p;
+    chg.state = 0;
+    chg.by = 0;
+    say("challenge: player %u's turn - the game's pick (%s) again, for this player's ball", p,
+        chg.pick >= CHALLENGE_OWN ? own_challenge[chg.pick - CHALLENGE_OWN].name : pm_challenge_name((unsigned)chg.pick));
+    if (chg.pick >= CHALLENGE_OWN) {
+        own_pending = chg.pick - CHALLENGE_OWN;
+        return -1;
+    }
+    return chg.pick;
+}
+
 static void challenge_ball_start(void)
 {
     const struct pm_mode *was = current;
     static int said;
+    int again = chg_next_turn();     /* PAD-696: before the pick is read - a later player's turn */
     int on = game_flag((unsigned)pm_port_value("challenge_on_flag", 0)), k = own_pending, took;
     long slot = pm_port_value("challenge_menu_slot", 0);
     unsigned n;
@@ -10806,14 +10845,15 @@ static void challenge_ball_start(void)
         if (took) {
             challenge_ours = 1; challenge_ours_ms = pm_ms();
             launch_picked(CHALLENGE_OWN + (unsigned)k);
-            chg_picked(own_challenge[k].by, how >= 0 ? (unsigned)how : ~0u, own_challenge[k].name);   /* ~0: no category */
+            chg_picked(own_challenge[k].by, how >= 0 ? (unsigned)how : ~0u, own_challenge[k].name,   /* ~0: no category */
+                       CHALLENGE_OWN + k);
         }
         return;
     }
     for (n = 0; n < (unsigned)challenges_n; n++) {
         int picked;
         if (challenge_site[n] || !challenge_fn[n]) continue;
-        picked = challenge_picked(n);
+        picked = (int)n == again ? 1 : challenge_picked(n);
         if (!challenge_ball_takes(on, -3, 1, picked)) continue;
         challenge_unpick(n);                                        /* the game's own sees no pick */
         note_thread("challenge pick", &said);
@@ -10822,7 +10862,7 @@ static void challenge_ball_start(void)
         current = was;
         say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
             took ? "the mode takes it - its pick cleared, the game's own does not start" : "the mode let it go");
-        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n]); }
+        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n], (int)n); }
         return;
     }
 }

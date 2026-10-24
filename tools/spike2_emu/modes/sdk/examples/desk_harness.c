@@ -17,6 +17,8 @@
  *   raw <mask>          one dispatch of a mask as given
  *   event <name>        the game fires a named event (skill_shot, ball_start ...)
  *   battle <0|1>        the game's own kaiju battle is active or not
+ *   pick <slot>         PAD-706: the player picks battle <slot> on the battle selection screen (a mode that claimed it
+ *                       is called: "PICK <slot> -> 1" taken); a battle given back prints "ROSTER OVER WON|lost"
  *   multiball <0|1>     the game's own multiball is active or not
  *   timed <0|1>         one of the game's other modes is active (Jet Fighter Attack: PAD-347)
  *   balls <n>           the balls in play
@@ -98,6 +100,8 @@ static int n_nodes;
 static void *fake(const char *path)
 {
     int i;
+    const char *gone = getenv("HARNESS_NO_NODE");     /* PAD-709: a card built without this node (a part of its name) */
+    if (gone && gone[0] && strstr(path, gone)) return 0;
     for (i = 0; i < n_nodes; i++)
         if (!strcmp(nodes[i].name, path)) return &nodes[i];
     if (n_nodes == 4096) return 0;
@@ -536,6 +540,24 @@ const char *pm_port_text(const char *name)
     return 0;
 }
 long pm_port_value(const char *name, long fallback) { (void)name; return fallback; }
+
+/* PAD-706: Godzilla's battle selection screen - seven slots a mode may claim; `pick <slot>` is the player picking one
+ * (or the game's city pick restarting a lost battle: the same call), pm_roster_over the battle given back */
+static int (*roster_fn[16])(unsigned);
+static const struct pm_mode *roster_by[16];
+int pm_roster_slots(void) { return 7; }
+int pm_roster_claim(unsigned slot, int (*on_pick)(unsigned slot))
+{
+    if (slot >= 7 || !on_pick) return 0;
+    roster_fn[slot] = on_pick;
+    roster_by[slot] = current;
+    printf("ROSTER CLAIM %u %s\n", slot, current ? current->name : "?");
+    return 1;
+}
+void pm_roster_release(unsigned slot) { if (slot < 16) roster_fn[slot] = 0; }
+void pm_roster_over(int won) { printf("%6lu ROSTER OVER %s\n", now_ms, won ? "WON" : "lost"); }
+void pm_roster_done(void) { pm_roster_over(0); }
+int pm_roster_callout(unsigned slot, unsigned id) { (void)id; return slot < 7 && roster_fn[slot]; }
 int pm_trigger_text(const char *name, char *out, unsigned cap)
 {
     if (!trigger_file[0] || strcmp(name, trigger_file)) return 0;
@@ -1057,6 +1079,13 @@ int main(int argc, char **argv)
             printf("%6lu >> event %s\n", now_ms, argv[k]);
             EACH_MODE(m) if (m->event && id >= 0) { current = m; m->event((unsigned)id); }
             current = 0;
+        } else if (!strcmp(c, "pick")) {                /* PAD-706: the player picks battle slot n */
+            unsigned slot = (unsigned)atoi(argv[++k]);
+            int took = -1;
+            printf("%6lu >> pick %u\n", now_ms, slot);
+            if (slot < 16 && roster_fn[slot]) { current = roster_by[slot]; took = roster_fn[slot](slot); current = 0; }
+            printf("%6lu PICK %u -> %d\n", now_ms, slot, took);
+            ticks_for_ms(50);
         } else if (!strcmp(c, "battle")) { battle = atoi(argv[++k]); printf("%6lu >> battle %d\n", now_ms, battle); }
         else if (!strcmp(c, "multiball")) { multiball = atoi(argv[++k]); printf("%6lu >> multiball %d\n", now_ms, multiball); }
         else if (!strcmp(c, "timed")) { timed = atoi(argv[++k]); printf("%6lu >> timed %d\n", now_ms, timed); }

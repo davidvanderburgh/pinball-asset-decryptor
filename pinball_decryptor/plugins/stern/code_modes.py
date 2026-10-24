@@ -16,6 +16,8 @@ code mode, or one of its Examples). What it plays of its own sits beside it, nam
                                      letters its own (James Bond: over the TV); "" = the panel
       "info_line": true,             PAD-547: a line of words and a value under its name (PadMode_<slug>_Info), where
                                      the title's port puts one (James Bond: under the status bar)
+      "points_layout": {"y": 600},   PAD-709: where a words-alone mode's scored number goes (PadMode_<slug>_Points;
+                                     {} = under the status bar, large, as the game's own mini-wizards show a shot's)
       "clip": "clip.mp4",            its start clip ("" = none)
       "music": "music.wav",          its own music bed ("" = none)
       "beds": {"swamp": "music_swamp.wav"},   PAD-658: more beds by name, which the mode switches to while it runs
@@ -94,6 +96,7 @@ class CodeAssets:
     screen_style: str = ""                        # PAD-521: "words" = no panel, its words large and white
     info_line: bool = False                       # PAD-547: a line of words and a value under its name (PadMode_<slug>_Info)
     info_layout: dict = field(default_factory=dict)     # PAD-547: where the Scenes editor put that line (LAYOUT_KEYS)
+    points_layout: dict = field(default_factory=dict)   # PAD-709: where it put a words-alone mode's scored number
     clip: str = ""
     music: str = ""
     beds: dict = field(default_factory=dict)      # PAD-658: {name: wav} more music beds it switches to

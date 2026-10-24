@@ -125,7 +125,8 @@ const TIP = {
   info: "A line under its name while it runs: its words and a value as it changes, \"SUPER JACKPOT = 53,200,000\", as the game's own modes show one (James Bond: under the status bar). Out of the way of the game's own displays; gone at its end.",
   infoPlace: "The Scenes editor on the game's screen with the line (and its own screen, if it has one) where they will show: drag or size it there, and it is saved into the mode. Untouched, it goes where the game shows its own (James Bond: under the status bar).",
   infoOff: "This card's game cannot take a mode's screens, so the line would not show: the mode runs the same without it.",
-  screenStyle: "As a panel: its name on a panel in the middle of the screen, there all the time it runs, its TOTAL on it at the end. As words over the video: no panel, its words alone, large and white over the game's video as the game letters its own - its name over its intro for 4 s, a Words block's line for 3 s, its TOTAL over its end for 3 s.",
+  screenStyle: "As a panel: its name on a panel in the middle of the screen, there all the time it runs, its TOTAL on it at the end. As words over the video: no panel, its words alone, large and white over the game's video as the game letters its own - its name over its intro for 4 s, a Words block's line for 3 s. A number a Words or Award block shows goes large under the status bar instead, as the game pops up a scored shot (the line under its name makes way meanwhile), and its TOTAL goes there at its end for 3 s.",
+  wordsPlace: "The Scenes editor on the game's screen with its words, its scored number (and the line under its name, if it has one) where they will show: drag or size any of them there, and it is saved into the mode. Untouched, the number goes where the game pops up its own (James Bond: large under the status bar).",
   gameWizard: "Hands the player one of the game's own mini-wizards, the game's mode itself with its own shots, lights, screens, sounds and award. Light it (where the game lights that one for a start shot): it waits for the game's own start shot, as when the game lights one. Start it: it begins at once, or the moment none of the game's own modes is in its way (nor this mode holding the game's modes off), that ball. On James Bond 007, until it starts it is the only one lit, so the game's own choosing cannot swap it for another, and the game no longer lights one named here by itself; on the other games the game's own rules still light and start their mini-wizards too. Works whether this mode runs or not: in When the game does an event it is a mini-wizard for that event. One the player has played this game plays again.",
   building: "Moves Godzilla Premium/LE's building to one of the game's own floors (floor 3 is the furthest it ever goes), at the speed the operator set; back where the game keeps it puts it on floor 0. When the mode ends, the ball drains or the game tilts, it goes back where it was, unless the game has moved it since. Only while the mode runs, never while the building is already moving or the game is using it, 3 s between moves, 6 a minute at most, and only while the game's modes cannot start and its own building locks do not keep counting.",
   shield: "Turns the platform the shield targets sit on (about a second) and keeps it there while the mode runs: the game's ball search swings it, and it is turned back after. Where they are: stop keeping them. Only while the mode runs, never while one of the game's own modes runs, 1.5 s between moves, 12 a minute at most; the mode ending, the ball draining or a tilt turns them back where they were. They stay turned only while the game's modes cannot start and its own shield feature does not keep counting.",
@@ -149,6 +150,8 @@ export function hatTemplates(ch, timers) {
     { kind: "combo", shots: ["lit", "lit"], seconds: 3, when: "running" },
     // PAD-615: only where the game names challenges a mode may take the place of
     ...((ch.challenges || []).length ? [{ kind: "challenge", challenge: ch.challenges[0] }] : []),
+    // PAD-706: only where the game has a battle selection a mode may take a place on (proven builds)
+    ...((ch.roster || []).length ? [{ kind: "battle", slot: 0, name: ch.roster[0] }] : []),
   ];
 }
 
@@ -366,7 +369,9 @@ function StmtBody({ b, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
   switch (b.op) {
     case "start_mode": return html`<span class="bk-w">Start the mode</span>`;
-    case "end_mode": return html`<span class="bk-w">End the mode</span>`;
+    case "end_mode": return (ed.ch.roster || []).length || b.won   // PAD-706: the battle it took the place of, won
+      ? html`<span class="bk-w">End the mode</span><${Pick} value=${b.won ? "won" : "-"} options=${END_OPTS} onChange=${(v) => set("won", v === "won")} title=${END_WON_TIP} />`
+      : html`<span class="bk-w">End the mode</span>`;
     case "light_mode": {
       // PAD-503: lit at a shot, with one more insert of the card's (a villain's), as the game's mini-wizards are
       // PAD-521: several inserts (a chase runs across them, as the game cycles its villains), and one more held solid
@@ -602,6 +607,11 @@ function addMenu(ed, path) {
 }
 
 // ------------------------------------------------------------------ scripts
+// PAD-706: what the battle hat does, and End the mode's "the battle won"
+const BATTLE_TIP = "On the game's BATTLE SELECTION screen (the scoop, once the ramps have lit a battle), picking this battle runs this script instead of the game's own battle: put Start the mode in it. It runs once the screen has closed (about 3 s). The game counts the battle as its own: when the mode ends, the battle is won if an End the mode, the battle won block ended it (a mode with no such block wins by its own end: its clock, or an End the mode block), and lost if the ball drains first - then the next lit scoop plays the mode again, as the game does with its own. Won, the battle shows Completed on the screen, counts in the city and the audits, and opens what winning it opens. One mode per battle. The screen keeps the battle's own picture and name (the Scenes tab changes them).";
+const END_WON_TIP = "For a mode the player picked on the battle selection screen: the battle won. The game then counts it as a battle won (Completed on the screen, the city, the audits). A drain before it ends loses it.";
+const END_OPTS = [["-", "(the battle lost)"], ["won", ", the battle won"]];
+
 // PAD-615: what the challenge hat does
 // PAD-643: who launches the challenge ball, and when (block_modes.CHALLENGE_LAUNCH; a number = seconds after it starts)
 const LAUNCH_OPTS = [["clip", "when its start clip is over"], ["2", "2 s after it starts"], ["4", "4 s after it starts"], ["6", "6 s after it starts"], ["10", "10 s after it starts"], ["player", "by the player"]];
@@ -655,6 +665,11 @@ export function HatBody({ h, path, ed }) {
     case "combo": return html`<span class="bk-w b" ...${tip(TIP.combo)}>When</span><${ComboSteps} h=${h} path=${path} ed=${ed} />
       <span class="bk-w b">${(h.shots || []).length > 2 ? "each within" : "within"}</span><${Secs} value=${h.seconds} title="Seconds from one shot to the next (0.5 to 60)" onChange=${(v) => set("seconds", v)} /><span class="bk-w b">s</span>${when}
       <span class="bk-w" ...${tip(TIP.comboName)}>called</span><${Text} value=${h.name} max=${24} width=${110} placeholder="(no name)" title=${TIP.comboName} onChange=${(v) => set("name", v)} />`;
+    case "battle": {                                 // PAD-706
+      const roster = ed.ch.roster || [];
+      const opts = roster.map((x, i) => [String(i), x]);
+      return html`<span class="bk-w b" ...${tip(BATTLE_TIP)}>When the player picks</span><${Pick} value=${h.slot == null ? "" : String(h.slot)} options=${opts} onChange=${(v) => ed.set(path, { ...h, slot: Number(v), name: roster[Number(v)] || "" })} /><span class="bk-w b" ...${tip(BATTLE_TIP)}>on the battle selection screen</span>`;
+    }
     case "challenge": return html`<span class="bk-w b" ...${tip(CHALLENGE_TIP)}>When the player picks the challenge</span><${Pick} value=${h.challenge} options=${(ed.ch.challenges || []).map((x) => [x, x])} onChange=${(v) => set("challenge", v)} /><span class="bk-w b" ...${tip(LAUNCH_TIP)}>, its ball launched</span><${Pick} value=${h.launch || "clip"} options=${LAUNCH_OPTS} onChange=${(v) => set("launch", v)} />`;
     default: return html`<span class="bk-w b">${h.kind}</span>`;
   }
@@ -678,7 +693,7 @@ export function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
     any_shot: "When any shot is made", switch: "When any playfield switch is hit", every: "Every N seconds", seconds_left: "When N seconds are left",
     ball_end: "When the ball drains", drain: "When a ball goes into the trough", event: "When the game does…", timer_done: "When a timer runs out",
-    challenge: "When the player picks a challenge",
+    challenge: "When the player picks a challenge", battle: "When the player picks a battle",
     combo: (h.shots || []).every((x) => x === "lit") ? "When a lit shot follows a lit shot" : "When a shot follows a shot (a combo)" }[h.kind] || h.kind;
 }
 
@@ -1125,6 +1140,8 @@ export function BlocksEditor({ s, c, pg }) {
         <${Check} checked=${!!prog.screen} label="its own screen" title=${TIP.screen} onChange=${(v) => ed.set(["screen"], v)} />
         ${prog.screen ? html`<${Select} sm value=${prog.screen_style || "panel"} title=${TIP.screenStyle} onChange=${(v) => ed.set(["screen_style"], v)}
           options=${[{ value: "panel", label: "as a panel" }, { value: "words", label: "as words over the video" }]} />` : null}
+        ${prog.screen && prog.screen_style === "words" && ed.ch.info_line !== false ? html`<${Button} size="xs" kind="ghost" title=${TIP.wordsPlace}
+          onClick=${() => call("modes.lay_out_screen", c.slug)}>Place on the screen…<//>` : null}
         <${Check} checked=${!!prog.wait_multiball} label="waits out a multiball" title=${TIP.wait} onChange=${(v) => ed.set(["wait_multiball"], v)} />
         <span class="lbl" ...${tip(TIP.displayPriority)}>Display priority</span>
         <${Select} sm value=${String(prog.priority || 0)} title=${TIP.displayPriority} onChange=${(v) => ed.set(["priority"], Number(v))}

@@ -1724,6 +1724,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "roster": list(getattr(p, "roster", ()) or ()),                   # PAD-589: the battle slots
                 # ... and whether the game has a battle selection at all (a game without one shows no such start)
                 "roster_found": bool(getattr(p, "roster", ())) or "has found" in p.why_not("roster"),
+                # PAD-706: ... and whether a pick counts as the battle it replaced (Completed, the city's win)
+                "roster_counts": bool(getattr(p, "roster_counts", False)),
                 # PAD-615: the game's challenges a mode may take the place of, and whether it names any at all
                 "challenges": list(getattr(p, "challenges", ()) or ()),
                 # PAD-619: a build whose start menu takes only challenges of the modes' own (Deadpool, Mando, Star Wars,
@@ -2903,6 +2905,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 # PAD-615: the game's challenges a script may take the place of ([] = none on this game)
                 "challenges": (list(getattr(p, "challenges", ()) or ())
                                + ([BM.CHALLENGE_NEW] if getattr(p, "challenge_menu", 0) else [])) if p is not None else [],
+                # PAD-706: the battle selection's slots a script may take the place of ([] = none on this game)
+                "roster": list(getattr(p, "roster", ()) or ()) if p is not None else [],
                 # PAD-521: the game's own status bar a mode's name, colour and clock can go in (Bond LE)
                 "status_bar": bool(getattr(p, "status_bar", False)) if p is not None else False,
                 # PAD-547: an info line is a screen of its own, so it goes on every title that takes screens
@@ -2953,7 +2957,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         problems = BM.problems(program, folder=folder, modes=modes, **BM.card_checks(p))             # PAD-658: one list
         if self._code_slug and self.project() and self._blocks_own_challenge(program):   # PAD-615 round 3
             problems += self._own_challenge_problems(blocks=(self._code_slug, program)).get(self._code_slug, [])
-        return problems, BM.notes(program)
+        notes = BM.notes(program)
+        if (p is not None and getattr(p, "roster", ()) and not getattr(p, "roster_counts", False)
+                and any((s.get("hat") or {}).get("kind") == "battle" for s in program.get("scripts") or [])):
+            notes.append("On %s the pick counts only toward the player's city: the game does not count the mode as "
+                         "its battle (no Completed, no city win), and its end lights the ramps again." % p.label)   # PAD-706
+        return problems, notes
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

@@ -39,7 +39,9 @@ import numpy as np
 #: 4: the Insider Connected score gate (agent_header + agent_begin), which every port must carry
 #: 5: the switch drain on every port that has one, shots or not: the flipper buttons' sounds in attract (PAD-645)
 #: 6: every mode's `rule` line from the build's own program, when the reference names its rules (PAD-699)
-REVISION = 6
+#: 7: a battle pick counts as the battle (battle_stop / battle_started / battle_clock / roster_resume /
+#: roster_cursor, PAD-706), and the battles' offsets are a title's values, left out of another title's draft
+REVISION = 7
 RECIPE_FORMAT = 1
 
 CORE_SITES = ("tick", "shot_dispatch", "ball_end", "score_add")
@@ -59,7 +61,12 @@ TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type", "magnet_shot", 
                 # Video grafted into its HUD, and Deadpool's video layer - the title's, never a framework
                 # offset (a derived port of another title had Deadpool's stride 5 and a grafted bank's hide)
                 "countdown_first", "countdown_step", "countdown_stride", "clip_surface_hide",
-                "clip_layer_priority", "layer_video_at")
+                "clip_layer_priority", "layer_video_at",
+                # PAD-706: Godzilla's battles (CBattle's fields, the cities rule's vector, the selection screen's
+                # cursor): a battle's bookkeeping, never a framework offset
+                "battle_stopped_at", "battle_reason_at", "battle_starts_at", "battle_clock_at", "battle_wins_at",
+                "battle_flags_at", "battle_no_city_flag", "battle_total_at", "battle_own_stop_slots",
+                "roster_city_battle_vec_at", "roster_cursor_at")
 #: values that are a shot mask, not an address, however large: copied within a title
 SHOT_VALUES = ("magnet_shot",)
 MIN_N, MAX_N = 8, 48
@@ -1640,7 +1647,7 @@ def draft(ref_elf, port_text, target, game=None, version=None, port_name=None, t
 
 # ---- checking a port against its program (port_words.py) ----------------------------------------
 #: sites the runtime hooks (it moves their first two instructions into a trampoline)
-HOOKED_SITES = frozenset(HOOKED) | {"roster_start", "clip_play", "display_effect_start", "display_priority_now",
+HOOKED_SITES = frozenset(HOOKED) | {"roster_start", "roster_resume", "roster_cursor", "clip_play", "display_effect_start", "display_priority_now",
                                      "layered_priority", "layered_waiter",
                                      "sound_resolve"}      # PAD-494: wrapped (music modes)
 

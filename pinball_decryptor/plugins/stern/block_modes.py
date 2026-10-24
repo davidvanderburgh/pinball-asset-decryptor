@@ -255,6 +255,7 @@ HATS = {
     "timer_done": "When a timer runs out",
     "challenge": "When the player picks a challenge",
     "combo": "When shots are made one after another",   # PAD-708: a combo, each shot within N seconds of the last
+    "battle": "When the player picks a battle",       # PAD-706: a slot of Godzilla's battle selection screen
 }
 #: PAD-615 round 2: the challenge hat's choice that adds the mode to the game's start menu as a challenge of its own
 CHALLENGE_NEW = "A new challenge of its own"
@@ -271,6 +272,19 @@ def challenge_launch_ms(hat):
     if v.isdigit():
         return max(1, min(60, int(v))) * 1000
     return 0
+#: PAD-706: the most battle slots a selection screen may have (the runtime's N_ROSTER)
+ROSTER_MAX = 16
+
+
+def battle_name(hat):
+    """PAD-706: a battle hat's battle, as the page named it when it was picked (``name``), else its slot."""
+    hat = hat or {}
+    name = str(hat.get("name") or "").strip()
+    if name:
+        return name
+    return "battle %s" % hat.get("slot") if _int_ok(hat.get("slot"), 0, ROSTER_MAX - 1) else "(no battle)"
+
+
 #: a shot / event hat's "when": the mode's state it runs in
 WHEN = {"any": "any time", "idle": "while the mode is not running", "running": "while the mode runs"}
 RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "each game"}
@@ -936,13 +950,14 @@ def card_checks(p):
         "challenges": list(getattr(p, "challenges", ()) or ()) + ([CHALLENGE_NEW] if getattr(p, "challenge_menu", 0)
                                                                    else []),
         "hold_caps": {n: ms for n, ms in getattr(p, "coil_caps", ()) or ()},
+        "roster": list(getattr(p, "roster", ()) or ()),     # PAD-706: the battle slots a mode may take ([] = none)
     }
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
              game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None,
-             drain=None):
+             drain=None, roster=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -956,7 +971,8 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     so is ``inserts`` (PAD-503): the names of the inserts a mode may light ([] = none on this game: a mode lit at a
     shot is lit without them); so is ``modes`` (PAD-600): the slugs of the project's blocks modes another mode's
     light may be put out in; so is ``challenges`` (PAD-615): the names of the game's challenges a mode may take the
-    place of ([] = none on this game).
+    place of ([] = none on this game); so is ``roster`` (PAD-706): the names of the battle selection's slots, in slot
+    order ([] = none a mode may take on this game).
     The C is written anyway (a missing shot is 0 to the game, which never matches),
     so a half-made program always saves."""
     program = normalize(program)
@@ -1011,6 +1027,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "modes": set(modes) if modes is not None else None,
            "challenges": list(challenges) if challenges is not None else None, "picked": set(),
            "combos": combo_names(program),            # PAD-708: the combos a value may name
+           "roster": list(roster) if roster is not None else None, "battles": set(),   # PAD-706
            "program": program}                        # PAD-646: a Light show block names one of its shows
     _check_shows(program, ctx)                        # PAD-646
     hud = program["hud"]
@@ -1133,6 +1150,19 @@ def notes(program):
            and not any(b.get("op") == "start_mode" for b in _walk(s.get("do") or [])) for s in program["scripts"]):
         out.append("A When the player picks a challenge script with no Start the mode in it starts nothing: the "
                    "game's own challenge does not run either.")
+    if any((s.get("hat") or {}).get("kind") == "battle"
+           and not any(b.get("op") == "start_mode" for b in _walk(s.get("do") or [])) for s in program["scripts"]):
+        out.append("A When the player picks a battle script with no Start the mode in it starts nothing: the pick "
+                   "counts as a battle lost.")                                       # PAD-706
+    battles = any((s.get("hat") or {}).get("kind") == "battle" for s in program["scripts"])
+    wins = any(b.get("op") == "end_mode" and b.get("won") for s in program["scripts"] for b in _walk(s.get("do") or []))
+    if battles and not wins:
+        out.append("No End the mode block says the battle won, so the battle counts as won when the mode ends by its "
+                   "clock or an End the mode block, and as lost when the ball drains first (then the next lit scoop "
+                   "plays it again, as the game does with its own).")               # PAD-706
+    if wins and not battles:
+        out.append("End the mode, the battle won, wins a battle only for a mode the player picked on the battle "
+                   "selection screen (When the player picks a battle): here it just ends the mode.")
     idle = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") in ("mode_end", "ball_end")
             or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "switch", "event", "drain", "combo")
                 and (s.get("hat") or {}).get("when") == "idle")]
@@ -1261,6 +1291,20 @@ def _check_hat(hat, n, ctx):
                               "seconds after it starts." % where)                       # PAD-643
         else:
             ctx["picked"].add(name)
+    if kind == "battle":                                                             # PAD-706
+        slot = hat.get("slot")
+        if ctx["roster"] is not None and not ctx["roster"]:
+            ctx["out"].append("%s waits for a battle to be picked, which a mode cannot take the place of on this "
+                              "card's game." % where)
+        elif not _int_ok(slot, 0, ROSTER_MAX - 1):
+            ctx["out"].append("%s's When has no battle chosen." % where)
+        elif ctx["roster"] is not None and int(slot) >= len(ctx["roster"]):
+            ctx["out"].append("%s waits for battle %d, which this card's battle selection does not have."
+                              % (where, int(slot)))
+        elif int(slot) in ctx["battles"]:
+            ctx["out"].append("%s waits for %s too: one script per battle." % (where, battle_name(hat)))
+        else:
+            ctx["battles"].add(int(slot))
 
 
 def combo_names(program):
@@ -1846,6 +1890,13 @@ class _Gen:
                 if name and name not in self.combo_at:
                     self.combo_at[name] = len(self.combos)
                 self.combos.append(h)
+        self.battle_won = False         # PAD-706: an End the mode block wins the battle the mode replaced
+        # PAD-706: it takes a battle's place, and no End the mode block says the battle won: then its own end (its
+        # clock, an End the mode block) wins it - it has no other way to, and a lost battle is the player's again at
+        # every lit scoop until it is won - and only a drain, a tilt or the game moving on loses it
+        self.battle_hat = any((sc.get("hat") or {}).get("kind") == "battle" for sc in program["scripts"])
+        self.wins_by_end = self.battle_hat and not any(
+            b.get("op") == "end_mode" and b.get("won") for sc in program["scripts"] for b in _walk(sc.get("do") or []))
 
     def var(self, i, p="P()"):
         """Variable ``i`` of player ``p``, as C: its own row, or the shared global."""
@@ -1972,6 +2023,9 @@ class _Gen:
             if op == "start_mode":
                 out.append(pad + 'start("a block", 1);')
             elif op == "end_mode":
+                if b.get("won") or self.wins_by_end:   # PAD-706: the battle it took the place of is won
+                    self.battle_won = True
+                    out.append(pad + "battle_won = 1;")
                 out.append(pad + 'end("a block");')
             elif op == "score":
                 out.append(pad + "score(%s);" % self.num(b.get("points")))
@@ -2264,6 +2318,7 @@ def to_c(program, slug):
     hat_code = {k: [] for k in HATS}
     challenge_names = []                    # PAD-615: the game's challenges its scripts take the place of
     challenge_launch = []                   # PAD-643: each one's launch (pm_challenge_launch)
+    battle_slots = []                       # PAD-706: the battle selection's slots its scripts take the place of
     for kind, items in bodies.items():
         for n, hat, body in items:
             head = "    /* script %d: %s */" % (n, _comment(_hat_words(hat)))
@@ -2304,6 +2359,11 @@ def to_c(program, slug):
                     for name in step_shots(x)[:COMBO_ALTS_MAX]:
                         g.shot_i(name)
                 test = "(combo_fired & %du)" % (1 << k) if k is not None else "(0)"
+            elif kind == "battle":                       # PAD-706: picked on the game's thread, run on the tick
+                slot = int(hat.get("slot")) if _int_ok(hat.get("slot"), 0, ROSTER_MAX - 1) else -1
+                if slot not in battle_slots:
+                    battle_slots.append(slot)
+                test = "(picked & %du)" % (1 << battle_slots.index(slot))
             elif kind == "challenge":                    # PAD-615: picked on the game's thread, run on the tick
                 name = str(hat.get("challenge") or "")
                 if name not in challenge_names:
@@ -2407,6 +2467,10 @@ def to_c(program, slug):
         L.append('#define TOTAL_NAME_TEXT "PadMode_%s_TotalName.PadMode_%s_TotalName_Words"' % (slug, slug))
         L.append('#define TOTAL_NODE   "PadMode_%s_Total"' % slug)
         L.append('#define TOTAL_TEXT   "PadMode_%s_Total.PadMode_%s_Total_Words"' % (slug, slug))
+        L.append("/* PAD-709: a scored number while it runs, large under the bar as the game's own mini-wizards show a shot's,")
+        L.append(" * not over its video. Not there = over its video, on its own screen. */")
+        L.append('#define POINTS_NODE  "PadMode_%s_Points"' % slug)
+        L.append('#define POINTS_TEXT  "PadMode_%s_Points.PadMode_%s_Points_Words"' % (slug, slug))
     if has_info:
         L.append("/* PAD-547: its info line, a screen of its own the build put where the title's port says (James Bond: under")
         L.append(" * the status bar). Not there = no line. */")
@@ -2483,11 +2547,23 @@ def to_c(program, slug):
     L.append("static unsigned total_due;            /* PAD-574: ticks until its TOTAL: an Award it ended on shows first */")
     L.append("static int drain_long;                 /* PAD-622: its TOTAL at a drain, as long as the game's own */")
     L.append("static int drain_hold;                 /* PAD-622: the game's end of ball waits on it (set once it does) */")
+    if battle_slots or g.battle_won:
+        L.append("static int battle_won;                 /* PAD-706: an End the mode block won the battle it replaced */")
+    if battle_slots:
+        L.append("static int battle_held;                /* PAD-706: it runs on a battle pick: its end gives the pick back */")
     if not has_hud:
         L.append("static char award_next[96];           /* PAD-574: an Award of When the mode ends, after the one showing */")
         L.append("static unsigned award_next_ticks;")
+        if words_only:
+            L.append("static char award_next_text[64];      /* PAD-709: ... its words and number apart, for under the bar */")
+            L.append("static long long award_next_value;")
+            L.append("static int award_next_wv;               /* ... 1 = it goes under the bar */")
     if words_only:
         L.append("static void *total, *total_words, *total_name, *total_name_words;   /* PAD-574: its TOTAL's two screens */")
+        L.append("static void *points, *points_words;   /* PAD-709: a scored number's screen under the bar */")
+        L.append("static unsigned points_ticks;         /* ... up this much longer */")
+        L.append("static int points_up, points_named;   /* shown now; its words on the TOTAL's word line */")
+        L.append("static int points_award;              /* ... an Award's: its TOTAL waits for it, as for one on its screen */")
     if has_bar:
         L.append("static unsigned bar_max, bar_hold;     /* PAD-521: the clock's most ticks; the bar kept through the total */")
     if watch:
@@ -2585,11 +2661,17 @@ def to_c(program, slug):
         L.append("    (void)p;")
         L.append("}")
         L.append("")
-    L.append("UNUSED static void words(const char *text, long long value, int with_value)")
+    if words_only:
+        L.extend((_POINTS_C % {"info": "    info_show(0);\n" if has_info else ""}).split("\n"))
+    L.append("/* a Words block: its line on its own screen (PAD-709: a number while a words-alone one runs goes under the")
+    L.append(" * bar instead: 1 then) */")
+    L.append("UNUSED static int words(const char *text, long long value, int with_value)")
     L.append("{")
     L.append("    char number[32], line[96];")
-    L.append("    if (!screen_words) return;")
+    L.append("    if (!screen_words) return 0;")
     L.append("    award_ticks = 0;")
+    if words_only:
+        L.append("    if (with_value && run.on && !ending && points_show(text, value, %d)) return 1;" % WORDS_SHOW_MS)
     L.append("    if (with_value) {")
     L.append("        pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);")
     L.append('        pm_snprintf(line, sizeof line, "%s%s%s", text, text[0] ? " " : "", number);')
@@ -2601,6 +2683,7 @@ def to_c(program, slug):
     L.append("        flash_ticks = %d * TICKS_PER_SECOND / 1000;" % WORDS_SHOW_MS)
     L.append("        if (!screen_away) pm_show(screen, 1);" if watch else "        pm_show(screen, 1);")
     L.append("    }")
+    L.append("    return 0;")
     L.append("}")
     L.append("")
     if not has_hud:
@@ -2609,7 +2692,8 @@ def to_c(program, slug):
         L.append("UNUSED static void award_words(const char *text, long long value, int with_value, unsigned ms)")
         L.append("{")
         L.append("    if (!screen_words || !run.on) return;")
-        L.append("    if (ending && award_ticks) {      /* in When the mode ends, after the Award it ended on: next */")
+        L.append("    if (ending && (award_ticks%s)) {   /* in When the mode ends, after the Award it ended on: next */"
+                 % (" || points_award" if words_only else ""))
         L.append("        char number[32];")
         L.append("        if (with_value) {")
         L.append("            pm_commas(number, sizeof number, value < 0 ? 0 : (uint64_t)value);")
@@ -2618,8 +2702,18 @@ def to_c(program, slug):
         L.append('            pm_snprintf(award_next, sizeof award_next, "%s", text);')
         L.append("        }")
         L.append("        award_next_ticks = ms * TICKS_PER_SECOND / 1000;")
+        if words_only:
+            L.append('        pm_snprintf(award_next_text, sizeof award_next_text, "%s", text);')
+            L.append("        award_next_value = value;")
+            L.append("        award_next_wv = with_value && points_award;   /* PAD-709: under the bar, as the one showing */")
         L.append("        return;")
         L.append("    }")
+        if words_only:
+            L.append("    if (with_value && points_show(text, value, ms)) {   /* PAD-709: under the bar, for its moment */")
+            L.append("        points_award = 1;")
+            L.append("        award_ticks = 0;")
+            L.append("        return;")
+            L.append("    }")
         L.append("    words(text, value, with_value);")
         L.append("    award_ticks = ms * TICKS_PER_SECOND / 1000;")
         L.append("    if (WORDS_ONLY && screen) flash_ticks = award_ticks;")
@@ -2629,6 +2723,8 @@ def to_c(program, slug):
     L.append(" * own modes show theirs, when the build put the two screens there) */")
     L.append("static void total_show(void)")
     L.append("{")
+    if words_only:
+        L.append("    points_hide();                    /* PAD-709: a scored number goes: the TOTAL takes its place */")
     L.append("    if (!screen) return;")
     if words_only:
         L.append("    if (total && total_words) {")
@@ -2655,6 +2751,7 @@ def to_c(program, slug):
     L.append("    total_due = 0;")
     L.append("    if (screen) pm_show(screen, 0);")
     if words_only:
+        L.append("    points_hide();")
         L.append("    if (total) pm_show(total, 0);")
         L.append("    if (total_name) pm_show(total_name, 0);")
     L.append("}")
@@ -2919,6 +3016,8 @@ def to_c(program, slug):
     L.append("        pm_log(\"isolated: gives way - one of the game's modes starting ends it\");")
     L.append("    }")
     L.append("    run.own_mball = 0;")
+    if battle_slots or g.battle_won:
+        L.append("    battle_won = 0;")
     L.append("    run.on = 1;")
     L.append("    run.player = pm_player();")
     if g.lit:
@@ -2978,6 +3077,8 @@ def to_c(program, slug):
     L.append("{")
     L.append("    if (!run.on || ending) return;    /* an End block in When the mode ends */")
     L.append("    ending = 1;")
+    if battle_slots:
+        L.append("    const int won = battle_won;       /* PAD-706: as it ended, before When the mode ends runs */")
     L.append("    on_mode_end();")
     L.append("    ending = 0;")
     L.append("    run.on = 0;")
@@ -2995,8 +3096,10 @@ def to_c(program, slug):
     L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
     if has_info:
         L.append("    info_show(0);                     /* PAD-547: its line goes with it */")
+    if words_only:
+        L.append("    if (!points_award) points_hide();   /* PAD-709: a scored number goes; an Award's stays its moment */")
     L.append("    total_due = screen && screen_words ? award_ticks%s : 0;   /* PAD-574: an Award it ended on, then its TOTAL */"
-             % ("" if has_hud else " + award_next_ticks"))
+             % (("" if has_hud else " + award_next_ticks") + (" + (points_award ? points_ticks : 0)" if words_only else "")))
     L.append("    award_ticks = 0;")
     if has_bar:
         L.append("    bar_show(0);                      /* PAD-521: the bar full, kept through its total */")
@@ -3031,6 +3134,12 @@ def to_c(program, slug):
     L.append("        pm_end();")
     L.append("    }")
     L.append('    pm_log("END (%s): %u scores, total %llu", why, run.shots, (unsigned long long)run.total);')
+    if battle_slots:
+        L.append("    if (battle_held) {                /* PAD-706: the battle it replaced, won or lost: the game counts it */")
+        L.append("        battle_held = 0;")
+        L.append('        pm_log("the battle it took the place of: %s", won ? "WON" : "lost");')
+        L.append("        pm_roster_over(won);")
+        L.append("    }")
     L.append("    end_clip = 0;")
     L.append("}")
     L.append("")
@@ -3074,6 +3183,37 @@ def to_c(program, slug):
         L.append("    return 0;")
         L.append("}")
         L.append("")
+    if battle_slots:                        # PAD-706
+        L.append("/* PAD-706: the battles this mode takes the place of on the game's battle selection screen (Godzilla), claimed")
+        L.append(" * as it loads: picking one runs its script instead of the game's battle, and the battle counts as the game's")
+        L.append(" * own, won or lost, when the mode ends */")
+        L.append("static const unsigned BATTLE_SLOTS[%d] = { %s };"
+                 % (len(battle_slots), ", ".join(str(max(0, v)) for v in battle_slots)))
+        L.append("static volatile unsigned battle_picked;    /* set on the game's thread, run on the tick */")
+        L.append("static unsigned battle_player;             /* who picked */")
+        L.append("static unsigned long battle_at;            /* its scripts run at this pm_ms(): the selection screen has closed */")
+        L.append("")
+        L.append("static int on_battle(unsigned slot)")
+        L.append("{")
+        L.append("    long after = pm_port_value(\"roster_start_after_ms\", 0);")
+        L.append("    unsigned k;")
+        L.append("    if (!pm_in_game()) return 0;")
+        L.append("    for (k = 0; k < %d; k++)" % len(battle_slots))
+        L.append("        if (BATTLE_SLOTS[k] == slot) {")
+        L.append("            if (run.on) {                 /* already running: the pick is taken, nothing restarts */")
+        L.append("                battle_held = 1;")
+        L.append('                pm_log("battle %u picked while it runs - its end gives the pick back", slot);')
+        L.append("                return 1;")
+        L.append("            }")
+        L.append("            battle_picked |= 1u << k;")
+        L.append("            battle_player = pm_player();")
+        L.append("            battle_at = pm_ms() + (after > 0 ? (unsigned long)after : 0UL);")
+        L.append('            pm_log("battle %u picked - its script runs in %ld ms, once the selection screen has closed", slot, after);')
+        L.append("            return 1;                     /* the game's battle does not start */")
+        L.append("        }")
+        L.append("    return 0;")
+        L.append("}")
+        L.append("")
     L.append("/* ---- the callbacks ---- */")
     L.append("static void on_init(void)")
     L.append("{")
@@ -3107,6 +3247,10 @@ def to_c(program, slug):
         L.append("            pm_challenge_launch((unsigned)CHALLENGE_AT[i], CHALLENGE_LAUNCH[i]);   /* PAD-643 */")
         L.append("        }")
         L.append("    }")
+    if battle_slots:                                # PAD-706
+        L.append("    for (i = 0; i < %d; i++)" % len(battle_slots))
+        L.append("        if (!pm_roster_claim(BATTLE_SLOTS[i], on_battle))")
+        L.append('            pm_log("battle %u is not one this game lets a mode take the place of", BATTLE_SLOTS[i]);')
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")
     L.append("")
@@ -3128,6 +3272,9 @@ def to_c(program, slug):
         L.append('    total = pm_node("hud", TOTAL_NODE);')
         L.append("    if (!total) return;")
         L.append('    total_words = pm_text("hud", TOTAL_TEXT);')
+        L.append('    points = pm_node("hud", POINTS_NODE);   /* PAD-709: a card built before it has none */')
+        L.append('    points_words = points ? pm_text("hud", POINTS_TEXT) : 0;')
+        L.append("    if (points) pm_show(points, 0);")
         L.append('    total_name = pm_node("hud", TOTAL_NAME_NODE);')
         L.append('    total_name_words = total_name ? pm_text("hud", TOTAL_NAME_TEXT) : 0;')
         L.append("    pm_show(total, 0);                /* built shown, as every screen is */")
@@ -3242,7 +3389,17 @@ def to_c(program, slug):
     if not has_hud:
         L.append("    if (award_next_ticks && (!total_due || run.on)) award_next_ticks = 0;")
         L.append("    if (award_next_ticks && total_due == award_next_ticks) {   /* PAD-574: the next Award's turn */")
-        L.append("        if (screen_words) pm_set_text(screen_words, award_next);")
+        if words_only:
+            L.append("        if (award_next_wv && points_show(award_next_text, award_next_value,")
+            L.append("                                                         award_next_ticks * 1000 / TICKS_PER_SECOND))")
+            L.append("            points_award = 1;             /* PAD-709: under the bar, as the one before it */")
+            L.append("        else if (screen_words) {")
+            L.append("            points_hide();")
+            L.append("            pm_set_text(screen_words, award_next);")
+            L.append("            pm_show(screen, 1);")
+            L.append("        }")
+        else:
+            L.append("        if (screen_words) pm_set_text(screen_words, award_next);")
         L.append("        award_next_ticks = 0;")
         L.append("    }")
     L.append("    if (total_due && !run.on && --total_due == 0) total_show();   /* PAD-574: the Award it ended on has shown */")
@@ -3257,6 +3414,26 @@ def to_c(program, slug):
         L.extend("        " + line if line else line for code in challenge_scripts for line in code.split("\n"))
         if g.mech:
             L.append("            ball_starting = 0;")
+        L.append("        }")
+        L.append("    }")
+    battle_scripts = scripts_of("battle")
+    if battle_slots:                                # PAD-706: a battle picked, once the selection screen has closed
+        L.append("    if (battle_picked && (long)(pm_ms() - battle_at) >= 0) {")
+        L.append("        unsigned picked = battle_picked;")
+        L.append("        battle_picked = 0;")
+        L.append("        if (!in_game || pm_player() != battle_player) {")
+        L.append('            pm_log("the battle pick lapsed - the player changed or the game ended");')
+        L.append("            pm_roster_done();             /* the runtime gives it back to that player, or drops it */")
+        L.append("        } else if (!run.on && pm_other_running()) {")
+        L.append("            battle_picked = picked;       /* another of ours runs: it starts when that one ends */")
+        L.append("            battle_at = pm_ms() + 500;")
+        L.append("        } else {")
+        L.extend("        " + line if line else line for code in battle_scripts for line in code.split("\n"))
+        L.append("            if (run.on) battle_held = 1;")
+        L.append("            else {")
+        L.append('                pm_log("the battle pick started nothing - given back, a battle lost");')
+        L.append("                pm_roster_done();")
+        L.append("            }")
         L.append("        }")
         L.append("    }")
     timer_scripts = scripts_of("timer_done")
@@ -3300,14 +3477,20 @@ def to_c(program, slug):
     L.append("    (void)seconds;")
     L.append("    if (WORDS_ONLY && flash_ticks && --flash_ticks == 0 && screen) pm_show(screen, 0);   /* PAD-521 */")
     L.append("    if (award_ticks) award_ticks--;")
+    if words_only:
+        L.append("    if (points_ticks && --points_ticks == 0) points_hide();   /* PAD-709 */")
+        L.append("    else if (points_ticks) points_place();")
     if has_bar:
         L.append("    bar_show(1);                      /* PAD-521: the clock along the bar */")
     L.append("    lamps_tick();")
     if g.mech:
         L.append("    scoop_tick();")
     L.extend(scripts_of("every", "seconds_left"))
-    L.append("    if (run.on && RUN_SECONDS && run.ticks_left == 0)")
+    L.append("    if (run.on && RUN_SECONDS && run.ticks_left == 0) {")
+    if g.wins_by_end:
+        L.append("        battle_won = 1;               /* PAD-706: no block wins the battle: its clock's end does */")
     L.append('        end("time ran out");')
+    L.append("    }")
     if watch:
         L.append("    if (run.on && screen) {           /* its screen out of the way of the game's (PAD-375) */")
         L.append("        int away = pm_display_covered() || pm_aside() || pm_game_words();   /* PAD-662: any screen of the game's */")
@@ -3319,7 +3502,8 @@ def to_c(program, slug):
     if has_hud:
         L.append("    if (run.on) hud_show();")
     if has_info:
-        L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside() && !pm_game_words());   /* PAD-547, PAD-662 */")
+        L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside() && !pm_game_words()%s);   /* PAD-547, PAD-662 */"
+                 % (" && !points_ticks" if words_only else ""))
     L.append("}")
     L.append("")
     L.append("/* PAD-622: a drain while it runs ends it as its clock would - an Award it ended on, then its TOTAL - and the")
@@ -3358,7 +3542,16 @@ def to_c(program, slug):
     if g.combos:
         L.append("    combo_clear();                    /* PAD-708: no combo runs on into the next ball */")
     L.extend(scripts_of("ball_end"))
-    L.append("    if (ENDS_ON_DRAIN) drain_end();")
+    if battle_slots:                                # PAD-706: a pick still waiting for the screen to close lapses
+        L.append("    if (battle_picked) {")
+        L.append("        battle_picked = 0;")
+        L.append('        pm_log("the ball ended before the battle pick started - given back");')
+        L.append("        pm_roster_done();")
+        L.append("    }")
+        L.append("    if (battle_held && run.on) drain_end();   /* PAD-706: a battle ends with its ball, as the game's do */")
+        L.append("    else if (ENDS_ON_DRAIN) drain_end();")
+    else:
+        L.append("    if (ENDS_ON_DRAIN) drain_end();")
     if media:
         L.append("    looping = 0;                      /* no backdrop outlives the ball */")
     if note_cue:
@@ -3970,6 +4163,47 @@ static void bar_show(int clock)
 }
 """
 
+#: PAD-709: a words-alone mode's scored number under its bar; %(info)s = hides its info line, if it has one
+_POINTS_C = r"""/* PAD-709: a number a Words or Award block shows while it runs, as the game's own mini-wizards show a scored shot:
+ * large under the bar for its moment (its words, if any, small over it on the TOTAL's word line; the info line hidden
+ * meanwhile), so the video above stays clear; out of the way of the game's screens. A card built before it has no such
+ * screen: the line goes over the video as before (0). A Words block's number in When the mode ends stays over the
+ * video; an Award's goes under the bar there too, and its TOTAL waits for it. */
+static void points_place(void)
+{
+    int on = !pm_display_covered() && !pm_aside() && !pm_game_words();
+    if (on == points_up) return;
+    pm_show(points, on);
+    if (points_named) pm_show(total_name, on);
+    points_up = on;
+}
+
+static void points_hide(void)
+{
+    points_ticks = 0;
+    if (points && points_up) pm_show(points, 0);
+    if (points_named && points_up) pm_show(total_name, 0);
+    points_up = points_named = points_award = 0;
+}
+
+/* the number (and its words) under the bar for ms; 0 = no such screen on the card */
+static int points_show(const char *text, long long value, unsigned ms)
+{
+    char n[32];
+    if (!points || !points_words) return 0;
+    if (points_named && points_up) pm_show(total_name, 0);
+    pm_commas(n, sizeof n, value < 0 ? 0 : (uint64_t)value);
+    pm_set_text(points_words, n);
+    points_named = text[0] && total_name && total_name_words;
+    if (points_named) pm_set_text(total_name_words, text);
+    points_ticks = ms * TICKS_PER_SECOND / 1000;
+    points_award = 0;
+%(info)s    points_up = -1;                     /* placed now */
+    points_place();
+    return 1;
+}
+"""
+
 #: PAD-547: the info line under its name; %(value)s = the C of the value it follows
 _INFO_C = r"""/* PAD-547: its info line under its name while it runs (James Bond: under the status bar, where the game's own
  * mini-wizards show their SUPER JACKPOT): its words and the value as it changes, written only when it changed. Hidden
@@ -4409,6 +4643,8 @@ def _hat_words(hat):
         return "when the timer %s runs out" % (hat.get("timer") or "(no timer)")
     if kind == "combo":                                                             # PAD-708
         return combo_words(hat)
+    if kind == "battle":                                                             # PAD-706
+        return "when the player picks %s on the battle selection screen" % battle_name(hat)
     if kind == "challenge":
         ms = challenge_launch_ms(hat)                                               # PAD-643
         return "when the player picks the challenge %s%s" % (

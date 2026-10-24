@@ -3643,7 +3643,57 @@ battle's start writes it; a pick leaves it 0), a per-city byte at +92 that the s
 of the battle's flags is set (probably "won"; not measured), what the stop does after setting the bit
 (Pro 1.15 `0x122d14` on: a branch for the first time the bit is set, and a per-player byte at +135; not
 read), the battle's audits and its champion. A pick that is given back without the mode running (it
-could not start, or the ball ended first) is counted too.
+could not start, or the ball ended first) is counted too. (PAD-706 does all of it, below, where the port can.)
+
+**It counts as the battle it replaced (PAD-706).** Everything the game keeps for a battle lives in the
+battle's own object and is written by the battle's own START and STOP, which a pick never ran. Read at the
+desk on Premium/LE 1.16 (Ghidra and objdump; Pro 1.16 is the same code at its own addresses):
+
+- `CBattle::start` (`0x7fa78`) clears the battle's stopped byte (`+0x13+p`) and stop reason (`+0x17+p`),
+  writes the battle's mode id as the battle the player's city holds (the cities rule's `+0x38` vector; not
+  for a battle whose flags `+8` carry `0x10`), then the cmode start counts the start (`+0x3c+4p`), calls the
+  manager's "started" (`0xd47fc`: the battle's STARTED audit) and keeps the player's clock at `+0x54`.
+- `CBattle::stop` (`0x7f998`, (battle, reason)) counts a win (`+0x64+4p`), runs the cmode stop (stopped
+  byte, reason, the battle's END, the manager's "stopped": the COMPLETED audit when the reason is 1), then the
+  battle rule's bookkeeping: for a win, the city's "won" byte (the cities rule's `+0x50` vector) and, the
+  first time in that city, the city award (show 0x106 and 5M to 40M by how many cities are won, then events
+  0x4f-0x51); for a loss the battle stays qualified when adjustment 174 is 1; then the ramps and fix-2's city
+  bit. Every roster battle's own STOP (v[11]) calls it, except Megalon & Gigan's multiball, whose stop always
+  counts a win; v[11] adds only the battle's victory screen.
+- The selection screen's "Completed" is the battle's stop reason (`0x1201d8` on Pro 1.15: non-zero =
+  completed); a battle lost has reason 0 and stays open.
+
+So at a pick a mode takes, the runtime writes what the START writes (the battle itself does not start: no
+shots, screens, timer, lights or music of its) and zeroes the battle's points this time (its award's
+`+0xf0+8p`, which its END reads: with none, its ending clip does not play); and when the mode gives the
+pick back it calls `CBattle::stop` with the mode's outcome, `pm_roster_over(won)`. The game then counts the
+battle exactly as one of its own: won, the slot shows Completed, the COMPLETED audit and the battle's wins go
+up, the city is won (and its award plays), and what follows from that (the tier-2 slots, King of the Monsters'
+qualification) follows; lost, it is a lost battle. `pm_roster_done()` is `pm_roster_over(0)`. A slot whose
+battle stops itself (`value battle_own_stop_slots`, Godzilla's `0x20`: the multiball) runs its v[11] for a win
+and fix-2's path for a loss. Logged as `[pad] roster: slot 2's battle (mode id 14) counts as started for player
+1 in city 0` at the pick and `the pick ends as a WON battle for player 1 (slot 2, mode id 14): the battle's own
+stop ran - completed 1, wins 1, city 0's mask 0 -> 2` at the end. A port without the lines (`site battle_stop`,
+`site battle_started`, `site battle_clock`, the `value battle_*` offsets, `value roster_city_battle_vec_at`)
+gives the pick back as before (fix-2).
+
+**Played again until it is won (PAD-706).** The game does not forget a battle the player lost (its clock, or
+a drain: the manager stops it with reason 0 at the ball's end): it stays qualified, and the next lit scoop
+does not open the selection screen - the game's city pick (`0x198f24` on Premium/LE, `0x195284` on Pro 1.16)
+sets the player's city and, when that city holds a tier-1 battle (ids 12-15) it has not won, STARTs that
+battle again, its progress kept (run2: Gigan drained at 6 hits restarted at the next scoop, `SP START 14 lr
+0x199310`, and was won). A pick now makes the city hold the battle, so that START would be the GAME's battle in
+the mode's place. `site roster_resume` is that START's load (the same two words as `roster_start`'s; r0 = the
+battle): a battle whose slot a mode holds is taken as a pick of that slot again - `on_pick` runs, logged `slot 2
+restarted by the city pick (its battle was lost; the game plays it again)` - and the mode plays again, until it
+is won, as the game's battle would. A mode keeps its progress across those plays in variables that reset each
+game or each ball, not each time the mode starts.
+
+**Won or lost.** A mode in C says so: `pm_roster_over(1)` / `pm_roster_over(0)`. The mode-file interpreter:
+its `end_shot` ending it wins; with no `end_shot`, its clock running out wins (it has no other way to win, and
+a lost battle comes back at every lit scoop); anything else (the ball, a tilt, the game's own mode beginning)
+loses. A blocks mode (below): an End the mode block set to "the battle won" wins; a mode with no such block
+wins by its own end (its clock or an End the mode block); a drain, a tilt or the game moving on loses.
 
 `pm_roster_done()` is guarded, because the rule's "battle over" acts on whichever player is up (and,
 outside a game, on fields that belong to player 4). It acts only on a pick a mode took and has not
@@ -3667,9 +3717,40 @@ What the mode-file interpreter does with a pick of its slot:
   light the ramps while it still ran. Started by its trigger and never picked, it runs on as usual.
   (Tested at the desk against the host-compiled interpreter; not run in the emulator.)
 
-What the game does with a battle that a drain interrupts is different: it remembers it, and the next
-lit scoop RESUMES that battle without opening the screen. A mode in a slot is not resumed; a drain
-ends it (`.ball_end`), and the next lit scoop opens the screen again.
+A drain while a mode runs on a pick ends it (`.ball_end`) and the battle is lost; since PAD-706 the next lit
+scoop plays the mode again, as the game does with its own battles (above).
+
+**In blocks (PAD-706).** A script whose When is *When the player picks <battle> on the battle selection
+screen* (the hat is offered where the build is proven, `ROSTER_PROVEN`) claims that slot as the mode loads; a
+pick runs the script once the screen has closed (`roster_start_after_ms`), and the script's Start the mode
+starts it. *End the mode* gets a choice there: *, the battle won*. A pick while the mode runs restarts
+nothing and its end gives the battle back; a pick while another mode of ours runs waits for it; a pick the
+script starts nothing for, or one that lapses (the game ended, another player up), is given back as a battle
+lost. A mode running on a pick ends with its ball, as the game's battles do. Emulator-proven on the stock
+Premium/LE 1.16 card (PAD-706 run4, rig 1, muted): a blocks GIGAN STAGES in Gigan's slot (two Buildings win),
+picked through the scoop's screen: `counts as started for player 1 in city 0`, the STARTED audit 1 -> 2, the
+city holding battle 14, no stock START; a drain after one Building: `the pick ends as a LOST battle` (the
+battle's stopped byte set, reason 0, the city's mask 0 -> 2, still qualified); the next scoop: `slot 2
+restarted by the city pick`, the mode START again 3 s later, the STARTED audit 2 -> 3, and still no stock START
+of Gigan; its clock ran out (the mode has a won block, so a loss) and it came back at each later scoop.
+Run5 (the same card): drained after one Building (lost), restarted by the city pick, then two Buildings: `the pick
+ends as a WON battle ... completed 1, wins 1` - the battle's stop reason 1, the COMPLETED audit 0 -> 1, the city's
+won byte set, the ramps lit again - exactly what the game's own Gigan won in run2 showed; and the game went on as it
+does for a won battle: GODZILLA CONTROLS TOKYO 5,000,000 (+1 permanent bonus X, the first city's perk), Godzilla
+powerup level 2, then the city travel screen (TRAVEL TO: PARIS). Run6, David's Heisei 1.99D card (v20): the blocks
+Gigan won the same way, and a mode file with no `end_shot` in Destoroyah's slot won by its clock (`completed 1`, the
+second city's 10,000,000 award in its score); the city map then read RAID - TIER 2 UNLOCKED. Run7, stock Pro 1.16:
+the same pick, drain (lost), city-pick restart (`the resume at 0x00195398`) and win, the battle's bytes as on
+Premium/LE. Run8, the Heisei card again, a real three-stage GIGAN STAGES (both ramps x4, the Big loop x3, the
+Building; its stage kept for the game): four ramps and a loop (6,500,000), a drain (lost), the next scoop restarted
+it at stage 2, three loops and the Building (17,500,000): won, `completed 1, wins 1`. A matched pair on the stock Premium/LE card (glass_before on main's runtime, glass_after on this one): a
+mode file in Ebirah's slot won by its `end_shot` - main: `battle over`, +1,000,000 (the mode's), the city untouched
+(RAID BATTLE 0/0); now: `the pick ends as a WON battle`, +6,000,000 (the mode's and the city's 5,000,000), RAID
+GODZILLA CONTROLS TOKYO. No segv in any run. Not run: a battle slot of tier 2 (4-6; read at the desk: King Ghidorah
+and Battra stop through CBattle::stop, the multiball through its own v[11]), and Pro 1.15 (its lines are placed off its own program: every site strict, the clock checked as the start's call
+after the manager's "started", the stop and the city pick the same code as Pro 1.16 - desk-read, its card is
+archival and is not booted here). Premium 1.15 (the program of the Heisei V1.0 card) drafts every line strictly too;
+Premium/LE 1.13 does not (its battle stop, "battle over" and city step have another shape) and has no roster.
 
 **Its name and picture.** The screen draws each monster from its scene (`auto_loaded/cac32730...`):
 a colour tile (when selected), a grey tile (when not; all seven grey tiles are ONE picture), a large
@@ -3794,22 +3875,17 @@ BLOW!"). They are program text, which `progtext.py` can rename within each strin
 
 **Known limits:**
 
-- A claimed slot keeps the replaced battle's progress text (0/4 for Ebirah) and never shows "Completed":
-  the game reads both from that battle, which never runs (seen on the glass).
-- The replaced battle never completes (read from the program, not measured), so whatever the game gates on completing it may be out of
-  reach: a slot's state comes from the battle's own mode (Completed when it has a stop reason) and
-  the cities rule at `0x79dae8` with adjustment 334 (Pro 1.15), which gate the tier-2 slots; the
-  wizard mode's qualification may depend on completions too. Once every other open slot is completed, the screen's
-  two-second single-slot timer picks the claimed slot every time.
-  Read further at the desk (Pro 1.15 `0x1201d8`, `0x136d30`): a slot's state reads only its own battle
-  (completed), adjustment 334, and the cities rule's per-player records (which battle each of its five
-  cities holds, and the player's city); it never reads another slot's completion. Since fix-2 the pick does
-  count toward the city (the mask bit, above; run7, run8); the city's battle stays 0 and its +92 byte
-  (probably "won") is never set. The city advance was read at the desk (`0x135bd0`, called only from `0x195288`,
-  which looks like a pick on a city screen); what opens that screen, and so the tier-2 slots, was not read.
+- A claimed slot keeps the replaced battle's progress text (0/4 for Ebirah): the game reads it from that
+  battle's own counters, which only its shots move. Since PAD-706 the slot does show "Completed" once the
+  mode has won it (the stop reason, above).
+- Where a port has a roster but no PAD-706 lines (none shipped; a derived port whose drafting could not place them),
+  the replaced battle never completes, so the tier-2 slots may stay out of reach; the blocks editor notes it there.
 - King of the Monsters starts the four tier-1 battles (Ebirah, Titanosaurus, Gigan, Megalon) itself,
   not through the screen (item 144, seen live), so inside it the replaced battle runs as stock.
-- A mode is not resumed after a drain the way the game resumes its own battles (above).
+- The battle's own points this time stay 0 (the runtime zeroes them at the pick, as the battle's START does), so
+  its END plays no ending clip of the old monster over the mode's ending, and whatever the game keeps from them
+  (read at the desk: the END posts them with event 0x1a; the battle's champion is probably fed from there, not
+  measured) does not get the mode's points.
 
 ## A mode in the game's Challenge list (PAD-615)
 
@@ -4812,6 +4888,18 @@ its own screen, and an End the mode right after an Award lets it show (and one A
 before the TOTAL. A mode in C uses the two screens with `pm_node`, `pm_text` and `pm_set_text`. Emulator-proven on the
 stock Bond LE 1.06 card (rig 1, 2026-10-14) with the owner's own BON APPETIT blocks: SUPER JACKPOT for 2 s, then TOTAL
 14,000,000 under the bar for 3 s, then all gone. No abort.
+
+**A scored number under the bar (PAD-709).** A words-alone mode also gets `PadMode_<slug>_Points` (assets:
+`points_node` / `points_text`), a blank screen 110 px under the port's `info_line_at`, its number at 5x the HUD font (the
+game's own mini-wizards pop a scored shot up about 140 px high there). While the mode runs, a Words block with a value
+(or an Award block with one) writes the number into it instead of over the video, its words if any small over it on
+the TOTAL's word line, and hides the mode's info line meanwhile (3 s for Words, the Award's own seconds); it keeps out
+of the way of the game's screens. An Award's number holds the TOTAL back as PAD-574's did; a Words block's goes with
+the end. A card built before it has no such screen and the number goes over the video as before. The Scenes editor
+lays it out as a third part ("Place on the screen..." beside "as words over the video"), saved as assets.json
+`points_layout` (the keys of `screen_layout`). Emulator-proven on the stock Bond LE 1.06 card (rig 3, 2026-10-24) with a
+BOND VS SUMO like the reporter's: 1,000,000 large under the green bar (about 760 x 95 px), the SUPER JACKPOT line back
+3 s later, an Award's JACKPOT over its 2,500,000, the TV clear throughout; main's code drew both over the TV. No abort.
 
 ### A full-screen clip on a machine: drawn at the frame hand-over (PAD-301)
 

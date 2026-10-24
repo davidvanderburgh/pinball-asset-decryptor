@@ -90,6 +90,8 @@ class TitleProfile:
     #                                  game_rules): it turns the platform back while it counts shots
     roster: tuple = ()               # PAD-589: the battle selection's slots a mode may take (their names, slot order);
     #                                  () where the title has no roster a mode can take
+    roster_counts: bool = False      # PAD-706: a pick counts as the battle it replaced (the port's `site battle_stop`):
+    #                                  won, Completed and the city's win; lost, played again. Else only the city's bit
     challenge_menu: int = 0          # PAD-615 round 2: how many challenges of the modes' own the game's start menu has
     challenge_by_default: bool = False   # PAD-619: the service menu's Default Game Mode can pick its challenges
     #                                  room for (0 = none: the build's menu is not the runtime's to change)
@@ -2372,6 +2374,7 @@ def profile_from_port(path):
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589
+        roster_counts=bool(port and "battle_stop" in port["site"]),          # PAD-706
         challenges=_challenges(port) if key in CHALLENGE_PROVEN and not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
         challenge_menu=_challenge_menu(key, port) if not any(c[0] == "challenge" for c in cannot) else 0,
         # PAD-619: not where a challenge is the game-play mode's index or a game-mode table's (Jaws, Godzilla, Venom:
@@ -2636,6 +2639,7 @@ try:
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),
         roster=_roster("godzilla_pro", _port_115) if not _roster_cannot(_key_115, _label_115, _port_115) else (),
+        roster_counts=bool(_port_115 and "battle_stop" in _port_115["site"]),   # PAD-706: not on Pro 1.15
         absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
                      if c[0] not in ("magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "roster",
@@ -4972,6 +4976,8 @@ def asset_names(slug):
         "total_name_text": stem + "_TotalName." + stem + "_TotalName_Words",
         "total_node": stem + "_Total",                   # ...and under it the number, large
         "total_text": stem + "_Total." + stem + "_Total_Words",
+        "points_node": stem + "_Points",                 # PAD-709: a scored shot's number, large under its bar
+        "points_text": stem + "_Points." + stem + "_Points_Words",
         "clip": stem + "_Clip",
     }
 

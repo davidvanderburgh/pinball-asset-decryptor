@@ -1956,9 +1956,14 @@ def _award(**kw):
 def test_an_award_ending_the_mode_shows_then_the_next_then_the_total(tmp_path):
     out = play(tmp_path, _award(screen_style="words"), "shot", "Left ramp", "secs", 2, "shot", "Right ramp", "secs", 10)
     end = _at_any(out, r"END \(a block\)")
-    assert abs(_at_any(out, r"WORDS PadMode_blk_Screen_Words: SUPER JACKPOT 3,500") - end) <= 40
-    assert 1900 <= _at_any(out, r"WORDS PadMode_blk_Screen_Words: TOTAL 700") - end <= 2100     # its own turn, 2 s on
+    # PAD-709: words alone: each Award's number large under the bar (its words small over it), not over the video
+    assert abs(_at_any(out, r"WORDS PadMode_blk_Points_Words: 3,500") - end) <= 40
+    assert abs(_at_any(out, r"WORDS PadMode_blk_TotalName_Words: SUPER JACKPOT") - end) <= 40
+    assert 1900 <= _at_any(out, r"WORDS PadMode_blk_Points_Words: 700") - end <= 2100          # its own turn, 2 s on
+    assert not re.search(r"WORDS PadMode_blk_Screen_Words: (SUPER JACKPOT|TOTAL)", out)
     assert 3900 <= _at_any(out, r"WORDS PadMode_blk_Total_Words: 700") - end <= 4100            # then the TOTAL
+    pts = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Points (\d)$", out, re.M)]
+    assert pts[-1][1] == 0 and 3900 <= pts[-1][0] - end <= 4100                              # gone for the TOTAL
     tot = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Total (\d)$", out, re.M)]
     assert any(3900 <= t - end <= 4100 for t, on in tot if on) and any(6900 <= t - end <= 7200 for t, on in tot if not on)
     assert "has no HUD" not in BM.to_c(_award(screen_style="words"), "blk")
@@ -1967,7 +1972,7 @@ def test_an_award_ending_the_mode_shows_then_the_next_then_the_total(tmp_path):
     out = play(tmp_path, _award(screen_style="words"), "shot", "Left ramp", "secs", 2, "shot", "Right ramp",
                "ball_end", "secs", 6)
     end, on = _at_any(out, r"END \(a block\)"), _at_any(out, "BALL END goes on")
-    assert 1900 <= _at_any(out, r"WORDS PadMode_blk_Screen_Words: TOTAL 700") - end <= 2100
+    assert 1900 <= _at_any(out, r"WORDS PadMode_blk_Points_Words: 700") - end <= 2100
     assert 3900 <= _at_any(out, r"WORDS PadMode_blk_Total_Words: 700") - end <= 4100
     assert 6900 <= on - end <= 7100
     tot = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Total (\d)$", out, re.M)]
@@ -1976,6 +1981,106 @@ def test_an_award_ending_the_mode_shows_then_the_next_then_the_total(tmp_path):
     out = play(tmp_path, _award(screen_style="words"), "shot", "Left ramp", "secs", 2, "shot", "Right ramp",
                "tilt", "ball_end", "secs", 6)
     assert not re.search(r"WORDS PadMode_blk_Total_Words", out)
+    pts = re.findall(r"^\s*(\d+) SHOW PadMode_blk_Points (\d)$", out, re.M)
+    assert pts[-1][1] == "0" and int(pts[-1][0]) - _at_any(out, ">> ball_end") <= 40
+    # PAD-709: a card built before the bar's number: the Awards over the video, as PAD-574 made them
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("HARNESS_NO_NODE", "_Points")
+        out = play(tmp_path, _award(screen_style="words"), "shot", "Left ramp", "secs", 2, "shot", "Right ramp", "secs", 10)
+    end = _at_any(out, r"END \(a block\)")
+    assert abs(_at_any(out, r"WORDS PadMode_blk_Screen_Words: SUPER JACKPOT 3,500") - end) <= 40
+    assert 1900 <= _at_any(out, r"WORDS PadMode_blk_Screen_Words: TOTAL 700") - end <= 2100
+    assert 3900 <= _at_any(out, r"WORDS PadMode_blk_Total_Words: 700") - end <= 4100
+
+
+# ---- PAD-709: a scored number under the bar, large, as the game's own mini-wizards show a shot's -------------------
+def _scored(**kw):
+    """The Bond owner's mini-wizard (PAD-709): each Right ramp scores 1,000,000 and a Words block shows it; the info line
+    shows the super jackpot under the bar."""
+    return prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+                 {"hat": {"kind": "mode_start"}, "do": [{"op": "set", "var": "superjackpot", "value": num(18000000)}]},
+                 {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"},
+                  "do": [{"op": "score", "points": num(1000000)}, {"op": "words", "text": "", "value": num(1000000)}]},
+                 {"hat": {"kind": "shot", "shot": "Building", "when": "running"},
+                  "do": [{"op": "words", "text": "JACKPOT", "value": num(2500000)}]}],
+                vars=[{"name": "superjackpot", "reset": "mode"}], seconds=10, screen=True,
+                info={"on": True, "text": "SUPER JACKPOT", "value": var("superjackpot")}, **dict({"screen_style": "words"}, **kw))
+
+
+def test_a_scored_number_goes_under_the_bar_not_over_the_video(tmp_path):
+    """The Bond owner (PAD-709): the game's own mini-wizards pop a scored shot's points up large under the bar; his own
+    put them over the movie. Now a Words block's number, while a words-alone mode runs, shows on its own screen under
+    the bar for 3 s with the info line (SUPER JACKPOT = ...) hidden meanwhile, then the line comes back; its words, if
+    any, go small over it on the TOTAL's word line. Nothing of it over the video; its name still is, at its start."""
+    out = play(tmp_path, _scored(), "shot", "Left ramp", "secs", 5, "shot", "Right ramp", "secs", 4,
+               "shot", "Building", "secs", 6)
+    start, shot = _at_any(out, r"START \(a block\)"), _at_any(out, r">> shot Right ramp")
+    assert abs(_at_any(out, r"WORDS PadMode_blk_Screen_Words: TEST MODE") - start) <= 40       # its name, as ever
+    assert abs(_at_any(out, r"WORDS PadMode_blk_Points_Words: 1,000,000") - shot) <= 40
+    assert not re.search(r"WORDS PadMode_blk_Screen_Words: .*\d", out)                       # no number over the video
+    pts = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Points (\d)$", out, re.M)]
+    info = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Info (\d)$", out, re.M)]
+    assert any(abs(t - shot) <= 40 for t, on in pts if on) and any(2900 <= t - shot <= 3100 for t, on in pts if not on)
+    assert any(abs(t - shot) <= 40 for t, on in info if not on)                              # the line makes way...
+    assert any(2900 <= t - shot <= 3200 for t, on in info if on)                             # ...and comes back
+    # its words small over the number, on the TOTAL's word line; gone with it
+    jp = _at_any(out, r">> shot Building")
+    assert abs(_at_any(out, r"WORDS PadMode_blk_Points_Words: 2,500,000") - jp) <= 40
+    assert abs(_at_any(out, r"WORDS PadMode_blk_TotalName_Words: JACKPOT") - jp) <= 40
+    names = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_TotalName (\d)$", out, re.M)]
+    end = _at_any(out, r"END \(time ran out\)")
+    assert any(abs(t - jp) <= 40 for t, on in names if on) and any(abs(t - end) <= 40 for t, on in names if not on)
+    # the mode's end takes a number still up with it: the TOTAL in its place
+    out = play(tmp_path, _scored(), "shot", "Left ramp", "secs", 9, "shot", "Right ramp", "secs", 4)
+    end = _at_any(out, r"END \(time ran out\)")
+    pts = [(int(t), int(on)) for t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Points (\d)$", out, re.M)]
+    assert pts[-1] == (end, 0) and abs(_at_any(out, r"WORDS PadMode_blk_Total_Words: 1,000,000") - end) <= 40
+    # under a display of the game's: out of its way, back after it
+    out = play(tmp_path, _scored(), "shot", "Left ramp", "secs", 5, "shot", "Right ramp", "covered", 1, "secs", 1,
+               "covered", 0, "secs", 3)
+    pts = [int(on) for _t, on in re.findall(r"^\s*(\d+) SHOW PadMode_blk_Points (\d)$", out, re.M)]
+    assert pts[-3:] == [0, 1, 0]
+    # a card built before it: over the video, as before
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("HARNESS_NO_NODE", "_Points")
+        out = play(tmp_path, _scored(), "shot", "Left ramp", "secs", 5, "shot", "Right ramp", "secs", 4)
+    assert re.search(r"WORDS PadMode_blk_Screen_Words: 1,000,000", out)
+    # a panel keeps its words on itself
+    out = play(tmp_path, _scored(screen_style="panel"), "shot", "Left ramp", "secs", 5, "shot", "Right ramp", "secs", 4)
+    assert re.search(r"WORDS PadMode_blk_Screen_Words: 1,000,000", out) and "PadMode_blk_Points" not in out
+    assert "POINTS_NODE" not in BM.to_c(_scored(screen_style="panel"), "blk")
+    src = BM.to_c(_scored(), "blk")
+    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", src))
+    assert used <= _header_calls(), used - _header_calls()
+
+
+def test_a_words_screen_builds_its_scored_number_under_the_bar(tmp_path):
+    project = str(tmp_path)
+    slug, _c = BM.new_blocks_mode(project, "BOND VS SUMO")
+    BM.save(project, slug, BM.normalize({"name": "BOND VS SUMO", "screen": True, "screen_style": "words", "scripts": []}))
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    prof = MP.profile("james_bond_le_1_06")
+    names = MP.asset_names(slug)
+    assert names["points_node"] == "PadMode_%s_Points" % slug
+    got = {s["name"]: s for s in MA._code_screens(project, [(slug, CM.load(project, slug))], prof)}
+    pts = got[names["points_node"]]
+    h, w = pts["art_rgba"].shape[:2]
+    cx, cy = prof.info_at
+    assert pts["words"] == " " and not pts["art_rgba"].any()                  # built blank: the mode writes it
+    assert (pts["x"] + w / 2.0, pts["y"] + h / 2.0) == (cx, cy + MA.POINTS_DY)
+    assert pts["words_scale"] == MA.POINTS_SCALE > got[names["total_node"]]["words_scale"]   # larger than the TOTAL
+    assert names["points_text"] == names["points_node"] + "." + pts["words_name"]
+    # laid out in the Scenes editor (its points_layout), as its screen and its info line are
+    spec = CM.load(project, slug)
+    spec.points_layout = {"y": 560.0, "words_scale": 5.0}
+    CM.save(project, slug, spec)
+    BM.save(project, slug, BM.normalize({"name": "BOND VS SUMO", "screen": True, "screen_style": "words", "scripts": []}))
+    spec = CM.load(project, slug)
+    assert spec.points_layout == {"y": 560.0, "words_scale": 5.0}             # a blocks save keeps it
+    pts = {s["name"]: s for s in MA._code_screens(project, [(slug, spec)], prof)}[names["points_node"]]
+    assert pts["y"] == 560.0 and pts["words_scale"] == 5.0 and pts["x"] == cx - w / 2.0
+    BM.save(project, slug, BM.normalize({"name": "BOND VS SUMO", "screen": True, "scripts": []}))      # a panel: none
+    assert names["points_node"] not in {s["name"] for s in MA._code_screens(project, [(slug, CM.load(project, slug))], prof)}
 
 
 def test_a_drain_while_it_runs_shows_its_total_and_the_end_of_ball_waits(tmp_path):

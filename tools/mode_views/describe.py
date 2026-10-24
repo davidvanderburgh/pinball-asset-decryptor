@@ -184,6 +184,8 @@ def hat(h):
         steps = [" or ".join(x) if isinstance(x, list) else {"lit": "a lit shot", "*": "any shot"}.get(x, x or "?")
                  for x in h.get("shots") or []]
         return "When %s within %s s%s" % (", then ".join(steps) or "?", h.get("seconds"), when)
+    if k == "battle":                                                       # PAD-706
+        return "When the player picks the battle %s" % BM.battle_name(h)
     return "(%s)" % k
 
 

@@ -1,4 +1,4 @@
-"""Lay out a mode's screen in the Scenes editor (PAD-323), and its info line (PAD-547).
+"""Lay out a mode's screen in the Scenes editor (PAD-323), its info line (PAD-547) and its scored number (PAD-709).
 
 A mode's screen (its picture or generated panel, and its words) is not in the stock HUD scene
 the editor shows: the Write splices it in (:func:`.mode_assets.build`).  "Lay out on the
@@ -14,9 +14,12 @@ where the title's port puts it, and is laid out the same way into the mode's ``i
 with the line and no screen lays out the line alone. Its picture is clear on the card; here it is a
 faint band, so it can be seen and taken hold of.
 
+PAD-709: a words-alone mode's scored number (``PadMode_<slug>_Points``: a shot's points, large under
+the status bar while it runs) is a third part, laid out the same way into its ``points_layout``.
+
 Those edits never go into ``scene_edits.json`` (keyed by node ids, which a mode's screen does
 not keep: they are handed out at build in slot order).  Each one is turned at once into the
-mode's ``screen_layout`` / ``info_layout`` (:data:`.mode_assets.LAYOUT_KEYS`) in its ``mode.json``
+mode's ``screen_layout`` / ``info_layout`` / ``points_layout`` (:data:`.mode_assets.LAYOUT_KEYS`) in its ``mode.json``
 - or a code mode's ``assets.json`` - keyed by the mode's folder, and the build reads it from
 there; a key left at its automatic value is not written, so an untouched mode builds as before.
 """
@@ -39,20 +42,30 @@ WORDS_ID = 0x7E000005
 INFO_GROUP_ID = 0x7E000007
 INFO_ART_ID = 0x7E000009
 INFO_WORDS_ID = 0x7E00000B
+#: PAD-709: the scored number's
+POINTS_GROUP_ID = 0x7E00000D
+POINTS_ART_ID = 0x7E00000F
+POINTS_WORDS_ID = 0x7E000011
 #: each part a mode lays out: (group, picture, words) ids and the mode file's key for its layout
-PART_IDS = {"screen": (GROUP_ID, ART_ID, WORDS_ID), "info": (INFO_GROUP_ID, INFO_ART_ID, INFO_WORDS_ID)}
-LAYOUT_KEY = {"screen": "screen_layout", "info": "info_layout"}
+PART_IDS = {"screen": (GROUP_ID, ART_ID, WORDS_ID), "info": (INFO_GROUP_ID, INFO_ART_ID, INFO_WORDS_ID),
+            "points": (POINTS_GROUP_ID, POINTS_ART_ID, POINTS_WORDS_ID)}
+LAYOUT_KEY = {"screen": "screen_layout", "info": "info_layout", "points": "points_layout"}
+#: what each part is called in the editor's note and its layers
+PART_WHAT = {"screen": "screen", "info": "info line", "points": "scored number"}
+#: PAD-709: what the scored number's stand-in says
+POINTS_SAMPLE = "1,000,000"
 VIRTUAL_IDS = tuple(i for ids in PART_IDS.values() for i in ids)
 #: the build's words colour (scene_write.screen)
 WORDS_RGBA = [1.0, 0.9, 0.0, 1.0]
-#: PAD-547: the info line's stand-in picture: its strip, faintly, so it can be seen and dragged
+#: PAD-547: the info line's (PAD-709: and the scored number's) stand-in picture: its strip, faintly, so it can be seen
+#: and dragged
 INFO_BAND_RGBA = (255, 255, 255, 40)
 _ONLY = ("This is %s's own screen: here it can be moved, sized and put over or under the "
          "HUD's pictures. Its picture, colors and words are on the Modes tab's Show page.")
 
 
 def part_of(nid):
-    """The part (``"screen"`` / ``"info"``) a virtual layer belongs to, or None."""
+    """The part (``"screen"`` / ``"info"`` / ``"points"``) a virtual layer belongs to, or None."""
     for key, ids in PART_IDS.items():
         if nid in ids:
             return key
@@ -94,7 +107,7 @@ def _parts(ml):
     """The parts of the session *ml* in the order they are drawn (the line over the screen). A session made before
     PAD-547 (tests build one by hand) is its screen alone."""
     if "parts" in ml:
-        return [(k, ml["parts"][k]) for k in ("screen", "info") if ml["parts"].get(k)]
+        return [(k, ml["parts"][k]) for k in ("screen", "info", "points") if ml["parts"].get(k)]
     return [("screen", ml)]
 
 
@@ -199,6 +212,11 @@ def layout_of(man, ml, prof, key="screen"):
     return out
 
 
+def _and(words):
+    """``a``, ``a and b``, ``a, b and c``."""
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1] if words else ""
+
+
 def info_words(assets, slug):
     """PAD-547: what the info line's stand-in says in the editor - the blocks program's words and a sample value
     ("SUPER JACKPOT = 1,234,567"), or a plain label for a mode in C."""
@@ -252,7 +270,7 @@ class ModeLayoutMixin:
         import numpy as np
         from PIL import Image
         art = np.asarray(screen["art_rgba"], dtype=np.uint8)
-        if key == "info":                             # clear on the card: a faint band here, to see and to take
+        if key in ("info", "points"):                 # clear on the card: a faint band here, to see and to take
             art = np.empty_like(art)
             art[:] = INFO_BAND_RGBA
         Image.fromarray(art, "RGBA").save(pic)
@@ -279,6 +297,8 @@ class ModeLayoutMixin:
             kind, spec = "code", CM.load(assets, slug)
             screen = MA.code_screen(assets, slug, spec) if spec.screen else None
         has_info = kind == "code" and bool(getattr(spec, "info_line", False))
+        # PAD-709: a words-alone screen's scored number, under the bar
+        has_points = kind == "code" and screen is not None and getattr(spec, "screen_style", "") == "words"
         if screen is None and not has_info:
             return "%s has no screen of its own: tick Show a screen first" % spec.name
         _card, prof = MP.project_profile(assets, probe=False)
@@ -302,6 +322,11 @@ class ModeLayoutMixin:
             parts["info"] = self._mlay_part("info", info, dict(MA.clean_layout(getattr(spec, "info_layout", None))),
                                             os.path.join(self._tmpdir(), "mode_info_%s.png" % slug),
                                             "padmode_layout/%s_info.png" % slug, info.get("words_scale", 1.0))
+        if has_points:
+            pts = dict(MA.points_screen(MP.asset_names(slug), prof), words=POINTS_SAMPLE)
+            parts["points"] = self._mlay_part("points", pts, dict(MA.clean_layout(getattr(spec, "points_layout", None))),
+                                              os.path.join(self._tmpdir(), "mode_points_%s.png" % slug),
+                                              "padmode_layout/%s_points.png" % slug, pts["words_scale"])
         return {"slug": slug, "kind": kind, "mode": spec.name, "assets": assets,
                 "scene_dir": "/%s/%s" % (prof.game_dir, prof.lcd("hud")),
                 "parts": parts, "undo": [], "redo": []}
@@ -337,7 +362,7 @@ class ModeLayoutMixin:
         self.set(mode_layout={
             "mode": ml["mode"], "slug": ml["slug"], "scene_dir": ml["scene_dir"],
             # PAD-547: what is being laid out, for the editor's note
-            "what": " and ".join(w for k, w in (("screen", "screen"), ("info", "info line")) if k in parts),
+            "what": _and([PART_WHAT[k] for k in ("screen", "info", "points") if k in parts]),
             "laid_out": any(pt["layout"] for pt in parts.values()),
             "under": bool(scr) and scr["layout"].get("order") is not None
                      and scr["layout"]["order"] < (scr["auto"]["order"] or 0)})
@@ -516,7 +541,7 @@ class ModeLayoutMixin:
         for layer in tv.get("layers") or ():
             key = part_of(layer["id"])
             if key in parts:
-                what = "the mode's info line" if key == "info" else "the mode's screen"
+                what = "the mode's " + PART_WHAT[key]
                 layer = dict(layer, mode=True, edits=("laid out by you" if parts[key]["layout"]
                                                       else what + ", placed automatically"))
             layers.append(layer)

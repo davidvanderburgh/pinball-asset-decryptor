@@ -2955,7 +2955,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         problems = BM.problems(program, folder=folder, modes=modes, **BM.card_checks(p))             # PAD-658: one list
         if self._code_slug and self.project() and self._blocks_own_challenge(program):   # PAD-615 round 3
             problems += self._own_challenge_problems(blocks=(self._code_slug, program)).get(self._code_slug, [])
-        return problems, BM.notes(program)
+        notes = BM.notes(program)
+        if (p is not None and getattr(p, "roster", ()) and not getattr(p, "roster_counts", False)
+                and any((s.get("hat") or {}).get("kind") == "battle" for s in program.get("scripts") or [])):
+            notes.append("On %s the pick counts only toward the player's city: the game does not count the mode as "
+                         "its battle (no Completed, no city win), and its end lights the ramps again." % p.label)   # PAD-706
+        return problems, notes
 
     def _add_blocks(self, data, project, slug):
         """A code mode made of blocks: its program, what is wrong with it, and the C it makes,

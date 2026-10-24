@@ -211,3 +211,10 @@ def test_a_pick_the_mode_cannot_start_is_given_back_lost(tmp_path):
     assert "the battle pick started nothing - given back, a battle lost" in out
     assert "ROSTER OVER lost" in out
 
+
+
+def test_the_profiles_say_where_a_pick_counts_as_the_battle():
+    keys = {p.key: p for p in (lambda ps: ps if isinstance(ps, (list, tuple)) else ps.values())(MP.profiles())}
+    assert keys["godzilla_le_1_16"].roster_counts and keys["godzilla_pro_1_16"].roster_counts
+    assert keys["godzilla_le_1_16"].roster and keys["godzilla_pro_1_15"].roster
+    assert not keys["godzilla_pro_1_15"].roster_counts          # no PAD-706 lines on the archival build

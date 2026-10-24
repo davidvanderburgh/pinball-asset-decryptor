@@ -136,7 +136,7 @@ export function hatTemplates(ch, timers) {
     { kind: "shot", shot, when: "running" }, { kind: "any_shot", when: "running" },
     { kind: "switch", when: "idle" },                // PAD-675: every playfield switch's hit
     { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 },
-    { kind: "ball_end" }, { kind: "event", event: ev, when: "any" },
+    { kind: "ball_end" }, { kind: "drain", when: "running" }, { kind: "event", event: ev, when: "any" },
     { kind: "timer_done", timer: (timers[0] || {}).name || "" },
     // PAD-615: only where the game names challenges a mode may take the place of
     ...((ch.challenges || []).length ? [{ kind: "challenge", challenge: ch.challenges[0] }] : []),
@@ -162,7 +162,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
     ["Mode", [{ op: "start_mode" }, { op: "light_mode", shot: litShot(ch), insert: "", color: "#ffd000", pattern: "blink" },
       { op: "unlight_mode", mode: "" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
       { op: "set_time", seconds: num(10) }, { op: "set_time", seconds: num(15), at_least: true },
-      { op: "multiball", balls: 2, save: 10 },
+      { op: "multiball", balls: 2, save: 10 }, { op: "ball_save", seconds: 15 },
       { op: "game_wizard", name: ((ch.game_wizards || [])[0] || {}).name || "", how: "light" }]],
     // PAD-395: the mechanisms the form's Magnet, Scoop and Other mechanisms hold (greyed where the game cannot)
     ["Mechanisms", [{ op: "hold", what: ((ch.mechs || [])[0] || {}).name || "magnet", ms: num(2000) },
@@ -202,7 +202,7 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
-export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", game_wizard: "mode", score: "score",
+export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
@@ -427,6 +427,7 @@ function StmtBody({ b, path, ed }) {
       : html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
       <span class="bk-w">balls, ball save</span><${Num} value=${b.save} width=${44} onChange=${(v) => set("save", v)} /><span class="bk-w">s</span>`;
+    case "ball_save": return html`<span class="bk-w">Ball save for</span><${Num} value=${b.seconds} width=${44} onChange=${(v) => set("seconds", v)} /><span class="bk-w">s</span>`;
     case "log": return html`<span class="bk-w">Write</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="a line" /><span class="bk-w">in the log</span>`;
     case "hud_text": return html`<span class="bk-w">Show</span><${Text} value=${b.text} max=${40} width=${220} onChange=${(v) => set("text", v)} placeholder="words" />
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} />
@@ -597,6 +598,7 @@ export function HatBody({ h, path, ed }) {
     case "mode_start": return html`<span class="bk-w b">When the mode starts</span>`;
     case "mode_end": return html`<span class="bk-w b">When the mode ends</span>`;
     case "ball_end": return html`<span class="bk-w b">When the ball drains</span>`;
+    case "drain": return html`<span class="bk-w b">When a ball goes into the trough</span>${when}`;
     case "shot": return html`<span class="bk-w b">When</span><${ShotPick} value=${h.shot} ed=${ed} onChange=${(v) => set("shot", v)} /><span class="bk-w b">is made</span>${when}`;
     case "any_shot": return html`<span class="bk-w b">When any shot is made</span>${when}`;
     case "switch": return html`<span class="bk-w b">When any playfield switch is hit</span>${when}`;
@@ -626,12 +628,12 @@ export function Script({ s, si, n, ed }) {
 export function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
     any_shot: "When any shot is made", switch: "When any playfield switch is hit", every: "Every N seconds", seconds_left: "When N seconds are left",
-    ball_end: "When the ball drains", event: "When the game does…", timer_done: "When a timer runs out",
+    ball_end: "When the ball drains", drain: "When a ball goes into the trough", event: "When the game does…", timer_done: "When a timer runs out",
     challenge: "When the player picks a challenge" }[h.kind] || h.kind;
 }
 
 export function stmtLabel(b) {
-  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball",
+  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball", ball_save: "Ball save",
     score: "Score points", set: "Set a variable", change: "Change a variable", set_hits: "Set the hits of a shot", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound", music: "Play the music",

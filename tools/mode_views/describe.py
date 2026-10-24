@@ -96,6 +96,7 @@ SAY = {
     "set_time": lambda b: ("Keep at least %s s on the clock" if b.get("at_least") else "Set the clock to %s s")
     % val(b.get("seconds")),
     "multiball": lambda b: "%s-ball multiball, ball save %s s" % (b.get("balls"), b.get("save", 0)),
+    "ball_save": lambda b: "Ball save %s s" % b.get("seconds"),
     "game_wizard": lambda b: "%s the game's %s" % ("Start" if b.get("how") == "start" else "Light", b.get("name") or "mini-wizard"),
     "hold": lambda b: "Hold the %s for %s" % (b.get("what") or "magnet", _ms(b.get("ms"))),
     "scoop_hold": lambda b: "Hold %s in the scoop for %s" % (BM.SCOOP_WHICH.get(b.get("which"), "the ball"), _ms(b.get("ms"))),
@@ -130,7 +131,7 @@ SAY = {
 }
 #: the block's family, as the page colours it (modes_blocks.js STMT_CLASS)
 FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "set_hits": "var", "end_mode": "mode",
-          "add_time": "mode", "set_time": "mode", "multiball": "mode", "game_wizard": "mode", "score": "score",
+          "add_time": "mode", "set_time": "mode", "multiball": "mode", "ball_save": "mode", "game_wizard": "mode", "score": "score",
           "set": "var", "change": "var", "if": "flow", "callout": "show", "words": "show", "light_shot": "show",
           "lights_off": "show", "show": "show", "game_show": "show", "log": "show", "clip": "own", "sound": "own", "music": "own",
           "timer_start": "timer", "timer_stop": "timer", "hud_text": "hud", "hud_counter": "hud", "hud_gauge": "hud", "hud_progress": "hud",
@@ -167,6 +168,8 @@ def hat(h):
         return "When %s s are left" % h.get("seconds")
     if k == "ball_end":
         return "When the ball drains"
+    if k == "drain":
+        return "When a ball goes into the trough%s" % when
     if k == "event":
         return "When the game: %s%s" % (h.get("event") or "?", when)
     if k == "timer_done":

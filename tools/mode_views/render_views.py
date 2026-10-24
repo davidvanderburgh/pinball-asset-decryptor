@@ -260,7 +260,7 @@ def track_of(b):
         return "Sound"
     if op in ("words", "hud_text", "hud_counter", "hud_gauge", "hud_award", "hud_progress", "clip"):
         return "Screen and HUD"
-    if op in ("start_mode", "end_mode", "add_time", "set_time", "multiball"):
+    if op in ("start_mode", "end_mode", "add_time", "set_time", "multiball", "ball_save"):
         return "Clock"
     return "Score and variables"
 

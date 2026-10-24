@@ -68,6 +68,7 @@ class TitleProfile:
     #                              keeps every score report off Insider Connected (a must for a card)
     switch_shots: tuple = ()     # names in ``shots`` that come from the port's `switch` lines
     switch_shots_note: str = ""  # why those are not proven yet; "" when they are (or there are none)
+    drain_shot: str = ""         # PAD-690: the port's code-only switch shot a drain closes ("Trough"), or ""
     stack_note: str = ""         # item 164: what ``stack no`` waits for when it is less than every mode
     game_modes: tuple = ()       # PAD-363: ((id, name, held off by default), ...) the game's own modes a
     #                              mode can keep from starting (the port's block_start_<id> lines)
@@ -2352,6 +2353,7 @@ def profile_from_port(path):
         score_bits=32 if RUNTIME_CORE_32[0] in sites else 64,
         switch_shots=switch_shots,
         switch_shots_note=switch_note,
+        drain_shot=DRAIN_SHOT if DRAIN_SHOT in _internal_shots(port) else "",
         stack_note=stack_note,
         limits=tuple(limits) + (("end_game",) if not callouts.get("time_up") and key in TIME_UP_NONE else ())
         + (("own_music",) if own_music_none(game, version) else ())
@@ -2584,6 +2586,18 @@ def _game_rules(port):
         if tail.isdigit() and int(tail) < 32:
             out.append((int(tail), text.get("block_rule_name_" + tail, "").strip() or "rule %s" % tail))
     return tuple(sorted(out))
+
+
+#: PAD-690: the internal switch shot a drain closes (Godzilla Premium/LE: the trough's six positions)
+DRAIN_SHOT = "Trough"
+
+
+def _internal_shots(port):
+    """The port's code-only switch shots (`text internal_shots`), armed only through a switch site."""
+    if not ("switch_edge" in port["site"] or any(s.startswith("switch_hit") for s in port["site"])):
+        return set()
+    names = {n for _sw, _m, n in port.get("switch", ())}
+    return {n.strip() for n in port.get("text", {}).get("internal_shots", "").split(",") if n.strip()} & names
 
 
 def _shots_with_switches(port):

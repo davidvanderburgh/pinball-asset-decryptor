@@ -242,6 +242,8 @@ class Sim:
                     ms = self.val(b.get("seconds")) * 1000
                     self.clock = max(self.clock, ms) if b.get("at_least") else ms
                     self.events.append(("clock", ms // 1000, bool(b.get("at_least"))))
+            elif op == "ball_save":
+                self.events.append(("ball_save", b.get("seconds")))
             elif op == "multiball":
                 try:
                     self.balls = max(self.balls, int(b.get("balls") or 1))

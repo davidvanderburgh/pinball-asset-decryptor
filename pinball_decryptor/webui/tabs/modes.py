@@ -1724,6 +1724,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 "roster": list(getattr(p, "roster", ()) or ()),                   # PAD-589: the battle slots
                 # ... and whether the game has a battle selection at all (a game without one shows no such start)
                 "roster_found": bool(getattr(p, "roster", ())) or "has found" in p.why_not("roster"),
+                # PAD-706: ... and whether a pick counts as the battle it replaced (Completed, the city's win)
+                "roster_counts": bool(getattr(p, "roster_counts", False)),
                 # PAD-615: the game's challenges a mode may take the place of, and whether it names any at all
                 "challenges": list(getattr(p, "challenges", ()) or ()),
                 # PAD-619: a build whose start menu takes only challenges of the modes' own (Deadpool, Mando, Star Wars,

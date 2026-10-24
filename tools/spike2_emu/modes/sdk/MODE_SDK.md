@@ -3989,17 +3989,28 @@ for "episodes 47-48") and writes what it finds:
 
 ```
 site  audit_add                     the framework's audit add
-value place_audit_started_<id>      the mode's STARTED (or STARTS) audit
+value place_audit_started_<id>      the mode's STARTED (or STARTS, START) audit
 value place_audit_completed_<id>    its COMPLETED (or COMPLETIONS) audit
 value place_flag_played_<id>        its PLAYED flag
 value place_flag_completed_<id>     its COMPLETED flag
+site  place_start_<id>              PAD-715: its own start, where the port's block_start is a check before it
 ```
 
 A mode in one's place then counts it the game's way: the STARTED audit counted and the PLAYED flag set at the take, the
-COMPLETED flag set and the COMPLETED audit counted when it completes (nothing on a loss). 167 of the 170 game modes the
-newest plain-C ports name have books (Bond's Bird One Multiball, JP The Pin's Restore Power and one more have none;
-the Modes tab does not offer those). A plain-C start's own arguments are its own, so `pm_game_mode_start` calls one only
-while a claim holds it - the claim refuses it before any of it runs.
+COMPLETED flag set and the COMPLETED audit counted when it completes (nothing on a loss). All 170 game modes the
+newest plain-C ports name have books (PAD-715 found the last three: JP The Pin counts Restore Power as
+`AUD_RESTORE_POWER_START`; Bond's Bird One Multiball is `ROCKET_MULTIBALL` in the program's names, so where neither the
+start's flags nor the name find books, the stem is the one the start's callers set). A plain-C start's own arguments
+are its own, so `pm_game_mode_start` calls one only while a claim holds it - the claim refuses it before any of it runs.
+
+**A check before the start (PAD-715).** Bond's Jetpack and Bird One Multiballs' `block_start` is not their start but
+the lock-open check (PAD-578: refusing it closes the lock, which is what a block wants). The lamps ask that check all
+the time and the lock handler asks it at every lock, so a place taken there started the mode at the first lamp
+refresh. Where the start's own flags are not the mode's but one of its callers' calls sets them, `plain_books` names
+that function `site place_start_<id>` (Bond LE 1.06: Jetpack `0xe650c`, Bird One `0x165f50` - called by the lock
+handler at the last lock only). The runtime hooks it on its own (refused with 0) and takes the place there; the check
+takes nothing, and a port naming a start it cannot hook offers no place for that mode. After the take the game's lock
+count stays where its own start would leave it (all locks made).
 
 **Proven** (emulator, 2026-10-24, the stock cards, hidden, muted; `C:\tmp\PAD-710\rig`, `place_job2.sh` over
 rigbatch): a mode file `in_place_of <id>` with an 8 s clock, the game's START of that mode called as its rules call it,
@@ -4014,6 +4025,13 @@ The plain-C titles (run plain2, `place_job4.sh`): all 16 newest builds - the STA
 one with an audit add, the COMPLETED audit 0 -> 1 at the end on Batman, Beatles, JP The Pin, Metallica and X-Men, the
 PLAYED and COMPLETED flags on Bond LE/Pro (Ahoy Mr Bond) and the PLAYED flag on Stranger Things; Star Wars ELG (no
 audit add) its COMPLETED flag 67 set and read back. The game played on after each.
+
+PAD-715 (`C:\tmp\PAD-715\rig`, `place715.sh` over rigbatch, Bond LE/Pro 1.06, both lock multiballs): a mode file in
+the multiball's place, 20 s of play with nothing taken, the lock lit two short and the game's lock handler called (a
+ball locked, nothing taken), then one short: the handler called the multiball's start, the mode took its place there
+(STARTED audit 0 -> 1, PLAYED flag set, balls 1: no multiball served), ran its clock out and the game played on. The
+v1.252.0 runtime took both places about 4 s into the ball, no lock made. JP The Pin Restore Power (`jp_job.sh`): its
+STARTED audit 189 0 -> 1 (v1.252.0: "counted only as ours").
 
 **A challenge that is one of the game's modes.** A challenge (below) whose words lead one of the port's game modes'
 names (`mode_framework.challenge_places`: Bond's Ahoy Mr. Bond = Ahoy Mr Bond Wizard Mode, Godzilla's King of the

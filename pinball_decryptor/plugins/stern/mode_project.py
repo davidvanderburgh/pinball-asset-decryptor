@@ -1057,9 +1057,9 @@ PLACE_PROVEN = frozenset({
     "elvira3-1.13",                  # PAD-710 run plain2: Houses (whichever House is selected) (0): its books, the game played on: STARTED audit 0 -> 1
     "guardians-1.15",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit +1
     "guardians_le-1.15",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
-    "james_bond_le-1.06",            # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. Challenge 1 (Ahoy Mr. Bond) taken by a mode file: STARTED audit 180, PLAYED flag 86, won: COMPLETED flag 89
-    "james_bond_pro-1.06",           # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set
-    "jurassic_park_the_pin-1.05",    # PAD-710 run plain2: Stegosaurus (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
+    "james_bond_le-1.06",            # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. Challenge 1 (Ahoy Mr. Bond) taken by a mode file: STARTED audit 180, PLAYED flag 86, won: COMPLETED flag 89. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs taken at their own starts on the last lock only (not at the lamps' lock check, not at an earlier lock): STARTED audit 0 -> 1, PLAYED flag set, no multiball served
+    "james_bond_pro-1.06",           # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs as on LE
+    "jurassic_park_the_pin-1.05",    # PAD-710 run plain2: Stegosaurus (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-715: Restore Power (5): STARTED audit 189 0 -> 1
     "metallica_spike-1.04",          # PAD-710 run plain2: Battery (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
     "star_wars_elg-1.10",            # PAD-710 run plain2: Orbits (1): no audit add, its flags only: COMPLETED flag 67 set, read back by the runtime
     "stranger_things-1.13",          # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set

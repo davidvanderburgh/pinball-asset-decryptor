@@ -4655,6 +4655,12 @@ static void block_defaults(unsigned *m)
 
 static void wizard_refused(unsigned start);   /* PAD-436: the game's mini-wizards, below */
 static int place_take(unsigned *r, unsigned id);   /* PAD-710: a mode in the place of one of the game's, below */
+/* PAD-715: a mode whose block_start is a check before its start (James Bond's lock multiballs: the lock-open check the
+ * lamps ask too, and the lock handler at every lock) names the start itself, `site place_start_<id>` (the function
+ * that sets its flags, mode_framework.plain_books): its place is taken there, hooked on its own, never at the check.
+ * place_check: the port names one (the check takes nothing); place_from: its start, 0 when it could not be hooked. */
+static unsigned place_from[BLOCK_IDS];
+static unsigned char place_check[BLOCK_IDS];
 
 /* ---- PAD-503: a mode lit at a shot claims it --------------------------------------------------------------------
  * A Bond owner's mini-wizards of their own, lit at the Right ramp, never got it: the game handles a switch before the
@@ -4722,7 +4728,7 @@ static int on_block_start(unsigned *r, unsigned hook_n)
     unsigned id;
     for (id = 0; id < BLOCK_IDS; id++)          /* this start's mode: its object, or the start is its own */
         if (block_hook_of[id] == hook_n + 1 && bm_has(block_named, id) && (!block_obj[id] || block_obj[id] == r[0])) break;
-    if (id < BLOCK_IDS && place_take(r, id)) return 1;   /* PAD-710: a mode of ours takes its place */
+    if (id < BLOCK_IDS && !place_check[id] && place_take(r, id)) return 1;   /* PAD-710: a mode of ours takes its place */
     if (lit_hold_until && id < BLOCK_IDS) {     /* PAD-503: a lit mode's shot, the game handling it now */
         if ((long)(lit_hold_until - pm_ms()) > 0 && !running && pm_in_game()) {
             char key[24];
@@ -4750,6 +4756,12 @@ static int on_block_start(unsigned *r, unsigned hook_n)
     }
     wizard_refused(block_hooked[hook_n]);      /* PAD-436: a mini-wizard's start stays lit */
     return 1;                                  /* refused: the mode's start never runs */
+}
+
+/* PAD-715: the start a port names for a mode whose block_start is a check: a claimed place is taken here */
+static int on_place_start(unsigned *r, unsigned id)
+{
+    return id < BLOCK_IDS && place_from[id] && place_take(r, id);
 }
 
 int pm_block_list(const unsigned char *ids, int n)
@@ -4962,6 +4974,12 @@ static void block_arm(void)
         block_obj[id] = data(name);
         block_hook_of[id] = (unsigned char)(i + 1);
         bm_set(block_named, id);
+        pm_snprintf(name, sizeof name, "place_start_%u", id);
+        if (site(name)) {                        /* PAD-715: its block_start is a check; the place is its start's */
+            place_check[id] = 1;
+            if ((a = fn(name)) != 0 && hook_veto_n(a, on_place_start, id, 0)) place_from[id] = a;
+            else say("block: the start of the game's mode %u (%s) could not be hooked - no mode takes its place", id, name);
+        }
     }
     if (fn("block_battle_shots") && (pm_port_value("block_battle_lo", 0) | pm_port_value("block_battle_hi", 0)))
         block_battles = hook(fn("block_battle_shots"), on_battle_shots);
@@ -10017,6 +10035,7 @@ static int place_take(unsigned *r, unsigned id)
 int pm_place_claim(unsigned id, int (*on_start)(unsigned id))
 {
     if (!(can & PM_CAN_PLACE) || !on_start || id >= PLACE_IDS || !bm_has(block_named, id)) return 0;
+    if (place_check[id] && !place_from[id]) return 0;                   /* PAD-715: its start is not hooked */
     if (place_fn[id] && place_by[id] != current) return 0;              /* another mode holds it */
     if (!place_fn[id])
         say("place: the game's %s (mode %u) is claimed - when the game starts it, %s runs in its place%s", place_name(id),
@@ -10072,7 +10091,7 @@ int pm_game_mode_start(unsigned id)
     if (!(can & PM_CAN_PLACE) || id >= PLACE_IDS || !bm_has(block_named, id) || !pm_in_game()) return 0;
     if (!block_obj[id] && !place_fn[id]) return 0;
     pm_snprintf(key, sizeof key, "block_start_%u", id);
-    if (!(f = fn(key))) return 0;
+    if (!(f = place_check[id] ? place_from[id] : fn(key))) return 0;   /* PAD-715: a check's mode, its own start */
     say("place: the game's %s (mode %u) started for a test (its START at 0x%08x, object 0x%08x)", place_name(id), id, f,
         block_obj[id]);
     ((void (*)(unsigned))(unsigned long)f)(block_obj[id]);

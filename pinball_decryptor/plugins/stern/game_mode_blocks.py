@@ -70,9 +70,10 @@ class GameMode:
         return not self.multiball and 0 <= self.id < MAX_ID and bool(self.start) and movable(self.words)
 
 
-def read_modes(elf):
+def read_modes(elf, start_slot=None):
     """[:class:`GameMode`] of a C++ rule title's program (bytes), in id order. Raises
-    :class:`.stock_scan.ScanError` when the program has no C++ mode manager."""
+    :class:`.stock_scan.ScanError` when the program has no C++ mode manager. *start_slot*: the title's START slot
+    where the scanner finds none (Jurassic Park LE, Rush: cstarts' reading, in the same title's port - PAD-714)."""
     from . import stock_scan as S
     from . import stock_scan_cpp as C
     prog = S.Program(elf)
@@ -81,6 +82,8 @@ def read_modes(elf):
         raise S.ScanError("no C++ rule manager in this game program")
     reading = C.read(prog, model)
     slot = reading.engine.get("start_slot")
+    if slot is None:
+        slot = start_slot
     if slot is None:
         raise S.ScanError("the scanner found no start slot in this game program")
     out = []

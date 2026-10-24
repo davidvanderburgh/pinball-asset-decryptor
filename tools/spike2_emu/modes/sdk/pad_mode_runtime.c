@@ -9815,8 +9815,8 @@ static void on_roster_resume(unsigned *r)
  * block_arm): when the game would start it - a rule of the game's calling its START, as it does when the mode is
  * earned - the start does not run and the claimant's on_start(id) runs instead, on the game's thread (1 = taken, 0 =
  * the game's own starts). Not while another mode of ours runs (the block, if any, decides then, as before).
- * Where the port names the game's MODE FRAMEWORK (mode_framework.py, every C++ title: `site mode_player`, `value
- * mode_slot_stop`, `value mode_stopped_at`, and on the generations that keep them `mode_reason_at`, `mode_starts_at`,
+ * Where the port names the game's MODE FRAMEWORK (mode_framework.py, every C++ title: `site mode_player` - or `data
+ * mode_player_at` on the older builds that read the player up inline, PAD-714 - `value mode_slot_stop`, `value mode_stopped_at`, and on the generations that keep them `mode_reason_at`, `mode_starts_at`,
  * `site mode_started` + `data mode_manager`), the mode COUNTS AS the game's: at the take the runtime writes what the
  * game's START writes for its bookkeeping - the player's stopped and reason bytes cleared, the player's start count
  * +1, the mode manager's "started" (the STARTED audit) - without starting it (no shots, lights, screens or music of
@@ -9841,12 +9841,14 @@ static const char *place_name(unsigned id)
     return nm ? nm : "?";
 }
 
-/* the game's own player index for its per-player fields (`site mode_player`), 1-4, or 0 */
+/* the game's own player index for its per-player fields (`site mode_player`), 1-4, or 0. PAD-714: the older builds
+ * have no getter (they read the player up inline): `data mode_player_at` is the byte itself */
 static unsigned place_player(void)
 {
-    unsigned f = fn("mode_player"), p;
-    if (!f) return 0;
-    p = ((unsigned (*)(void))(unsigned long)f)() & 0xffu;
+    unsigned f = fn("mode_player"), at = data("mode_player_at"), p;
+    if (f) p = ((unsigned (*)(void))(unsigned long)f)() & 0xffu;
+    else if (at && maps_has(at, 1, MAP_R)) p = *(const unsigned char *)(unsigned long)at;
+    else return 0;
     return p >= 1 && p <= 4 ? p : 0;
 }
 
@@ -10177,7 +10179,7 @@ static void place_arm(void)
     static const char *const fw_v[] = { "mode_slot_stop", "mode_stopped_at", 0 };
     if (!bm_count(block_named)) return;
     can |= PM_CAN_PLACE;
-    place_counts_on = have_sites(fw_s) && have_values(fw_v);
+    place_counts_on = (have_sites(fw_s) || data("mode_player_at")) && have_values(fw_v);   /* PAD-714: or the byte */
     if (place_counts_on)
         say("place: a mode may take the place of %d of the game's modes and counts as the one it replaces (the game's "
             "stop v[%ld], stopped +0x%lx%s%s%s)", bm_count(block_named), pm_port_value("mode_slot_stop", -1),

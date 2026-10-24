@@ -462,3 +462,43 @@ value ball_launch_wait_flag  12
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x003f63a8 0xe92d4ff0 0xe24dd0c4
+
+# PAD-710: the game's own books of its modes (mode_framework.py, from this build's audit and flag names): a
+# mode of ours in one's place counts its STARTED audit and PLAYED flag, and when completed its COMPLETED ones
+site  audit_add              0x003ad298 0xe92d43f0 0xe2505000
+value place_audit_started_0        188
+value place_flag_played_0          111
+value place_audit_started_1        189
+value place_audit_started_2        190
+value place_audit_started_3        191
+value place_audit_started_4        192
+value place_audit_started_5        196
+value place_audit_started_6        250
+value place_audit_started_7        252
+value place_audit_started_8        255
+value place_audit_started_9        255
+value place_audit_started_10       359
+value place_audit_started_11       285
+value place_audit_completed_11     287
+value place_audit_started_12       288
+value place_audit_completed_12     290
+value place_audit_started_13       291
+value place_audit_completed_13     293
+value place_audit_started_14       294
+value place_audit_completed_14     296
+value place_audit_started_15       297
+value place_audit_completed_15     299
+value place_audit_started_16       300
+value place_audit_completed_16     302
+value place_audit_started_17       303
+value place_audit_completed_17     305
+value place_audit_started_18       306
+value place_audit_completed_18     308
+value place_audit_started_19       309
+value place_audit_completed_19     311
+value place_audit_started_20       312
+value place_audit_completed_20     314
+value place_audit_started_21       315
+value place_audit_completed_21     317
+value place_audit_started_22       318
+value place_audit_completed_22     320

@@ -222,7 +222,7 @@ def test_a_plain_c_title_counts_through_its_own_books():
     assert places[29] == ("Bird One Multiball", True)    # PAD-715: the game's ROCKET_MULTIBALL books
     text = _port("james_bond_le-1.06")
     assert re.search(r"^site  audit_add\s+0x00245ea0 0xe92d43f0 0xe2505000$", text, re.M)
-    for line in ("value place_audit_started_6        180", "value place_flag_played_6          86",
+    for line in ("value place_audit_started_6        276", "value place_flag_played_6          86",   # PAD-714: the id its start counts
                  "value place_flag_completed_6       89"):
         assert line in text, line
     p = MP.profile("james_bond_le_1_06")
@@ -263,7 +263,12 @@ def test_every_newest_plain_c_port_names_its_modes_books(port):
 
 def test_the_proven_builds_are_ports_with_the_lines():
     for key in MP.PLACE_PROVEN:     # the C++ framework's stop, or a plain-C title's books
+        if not os.path.exists(os.path.join(PORTS, key + ".port")):
+            continue                # PAD-714: an older build whose port is derived on the card
         text = _port(key)
+        if key == "james_bond_60th_le-1.11":
+            assert re.search(r"^site\s+block_start_0\s", text, re.M)   # its Villain Mode keeps no books: only ours
+            continue
         assert "mode_slot_stop" in text or re.search(r"^value place_(audit|flag)_\w+\s", text, re.M), key
 
 

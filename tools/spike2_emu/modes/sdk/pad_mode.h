@@ -377,6 +377,13 @@ void pm_roster_release(unsigned slot);
  * ended it does nothing (a new game lights every player's ramps). A mode that never calls it gets it
  * called at the end of the ball its pick was taken in. */
 void pm_roster_done(void);
+/* PAD-706: the same, saying how the battle went. Where the port can (Godzilla: `site battle_stop`), a pick
+ * COUNTS AS THE BATTLE IT REPLACED: at the pick the battle's own start bookkeeping is done (its STARTED audit,
+ * the city holds it; the battle itself does not run), and here the battle's own stop runs with the outcome, so
+ * the game counts it as it counts its own: won (1) = the slot shows Completed, the COMPLETED audit, the city's
+ * win and its award, the wizard and tier-2 progress that follow; lost (0) = as a battle the player lost.
+ * pm_roster_done() is pm_roster_over(0). */
+void pm_roster_over(int won);
 /* The slot's spoken name. When the cursor lands on a slot the selection screen plays that slot's
  * callout (Godzilla: slot 0 says "Ebirah!"). A claimed slot is SILENT, so the old monster's name is
  * never heard over the new art; this sets a sound request id of the mode's own for the slot it holds

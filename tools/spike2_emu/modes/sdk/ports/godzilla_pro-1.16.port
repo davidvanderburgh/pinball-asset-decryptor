@@ -253,6 +253,29 @@ value roster_city_bit        1
 value roster_city_index_at   20
 value roster_city_vec_at     44
 value roster_city_record_size 16
+# PAD-706: a pick COUNTS AS THE BATTLE IT REPLACED (MODE_SDK.md "A monster in the roster"). The sites located by
+# port_tool.py from Premium/LE 1.16 (strict); CBattle::stop here (0x7e1c8) reads the same offsets (+0x64 wins, +8
+# flags & 0x10, the battle rule at 0x7a4638) and the six CBattle battles' v[11] call it (Megalon & Gigan's multiball's
+# does not), as on Premium/LE; the start's city write is the cities rule's +0x38 vector here too (0x7e318).
+site battle_stop       0x0007e1c8 0xe92d4038 0xe2515000
+site battle_started    0x000d246c 0xe351001a 0xe92d4008
+site battle_clock      0x002a4980 0xe92d4010 0xe1a04000
+site roster_cursor     0x0018d268 0xe92d4038 0xe1a05000
+# the city pick's restart of the city's lost tier-1 battle (0x195284: `ldr r3,[r0]` after its pop, the same
+# shape as Premium/LE's 0x199038)
+site roster_resume     0x00195398 0xe5903000 0xe5933020
+value roster_cursor_at       16
+value battle_stopped_at      0x13
+value battle_reason_at       0x17
+value battle_starts_at       0x3c
+value battle_clock_at        0x54
+value battle_wins_at         0x64
+value battle_flags_at        8
+value battle_no_city_flag    0x10
+value battle_total_at        0xf0
+# the slots whose battle stops itself, not through CBattle::stop: 5, Megalon & Gigan multiball (its v[11] always counts a win)
+value battle_own_stop_slots  0x20
+value roster_city_battle_vec_at 56
 value display_host           29
 value display_mode_level     184
 value display_now_at         0xc

@@ -232,6 +232,35 @@ value roster_city_bit        1
 value roster_city_index_at   20
 value roster_city_vec_at     44
 value roster_city_record_size 16
+# PAD-706: a pick COUNTS AS THE BATTLE IT REPLACED. Read at the desk off this build (Ghidra + objdump, C:\tmp\PAD-706):
+# CBattle::stop (battle, reason) is every roster battle's stop but the Megalon & Gigan multiball's (their v[11] calls it,
+# after the KOTM test, and adds only the victory screen): wins +0x64+4p, the cmode stop (stopped +0x13+p, reason
+# +0x17+p, the END, the manager's "stopped" = the COMPLETED audit), then the battle rule's and the cities rule's
+# bookkeeping. CBattle::start (0x7fa78) clears the two bytes and writes the city's battle (+0x38 vector of the cities
+# rule; not for flags (+8) & 0x10), the cmode start (0x11dbe8) counts the start (+0x3c+4p), calls the manager's
+# "started" (0xd47fc: the STARTED audit) and keeps the per-player clock (0x2865e0) at +0x54. The battle's points this
+# time are its award's (+0x50) +0xf0+8p, zeroed by its START. roster_cursor: the selection screen's "the cursor landed"
+# (r0 = the screen, its slot at +16), logged for rig runs.
+site battle_stop       0x0007f998 0xe92d4038 0xe2515000
+site battle_started    0x000d47fc 0xe351001a 0xe92d4008
+site battle_clock      0x002865e0 0xe92d4010 0xe1a04000
+site roster_cursor     0x00190f08 0xe92d4038 0xe1a05000
+# roster_resume: the city pick (0x198f24) STARTs the city's tier-1 battle (ids 12-15) not yet won there, through the
+# battle's vtable after `pop` (r0 = the battle): how the game plays a lost battle again at the next lit scoop (run2:
+# `SP START 14 lr 0x199310` after a drain). Hooked so that a battle whose slot a mode holds is the mode's again.
+site roster_resume     0x00199038 0xe5903000 0xe5933020
+value roster_cursor_at       16
+value battle_stopped_at      0x13
+value battle_reason_at       0x17
+value battle_starts_at       0x3c
+value battle_clock_at        0x54
+value battle_wins_at         0x64
+value battle_flags_at        8
+value battle_no_city_flag    0x10
+value battle_total_at        0xf0
+# the slots whose battle stops itself, not through CBattle::stop: 5, Megalon & Gigan multiball (its v[11] always counts a win)
+value battle_own_stop_slots  0x20
+value roster_city_battle_vec_at 56
 
 # ---- display priority (item 154 display; MODE_SDK.md "Display priority") --------------------------------------
 # Placed by signature from Pro 1.15 (strict); the effect and layered tables match Pro's record for record. Run here

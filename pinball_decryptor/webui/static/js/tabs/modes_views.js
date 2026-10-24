@@ -71,7 +71,9 @@ export function hatWords(h = {}, ch = {}) {
     case "seconds_left": return `When ${h.seconds} seconds are left`;
     case "event": return `When ${eventLabel(h.event, ch)}${when}`;
     case "timer_done": return `When timer ${h.timer} runs out`;
-    case "battle": return `When the player picks ${h.name || (h.slot == null ? "a battle" : `battle ${h.slot}`)} on the battle selection screen`;   // PAD-706
+    case "battle": return h.more   // PAD-707: a monster on MORE KAIJU, the list behind that battle's place
+      ? `When the player picks it on MORE KAIJU, in ${h.name || `battle ${h.slot}`}'s place`
+      : `When the player picks ${h.name || (h.slot == null ? "a battle" : `battle ${h.slot}`)} on the battle selection screen`;   // PAD-706
     case "challenge": return `When the player picks the challenge ${h.challenge || "?"}${h.launch === "player" ? ", the player launching its ball" : /^\d+$/.test(h.launch || "") ? `, its ball launched ${h.launch} s after it starts` : ""}`;   // PAD-615, PAD-643
     default: return h.kind || "";
   }

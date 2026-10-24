@@ -41,8 +41,11 @@ target, then Pop bumper or Mecha exit bottom within 20 s)"), and words a combo t
 - `tests/test_pad708_combos.py`: checks, words, the C, the script view, the desk player, the rules sheet, and the
   desk harness (in order and out, the window, the chain and its ends, ordered steps, lit and dark shots, one of
   several shots, shots between).
-- Rig sweep, every title's newest build in the card cache (30): a mode built from the title's port lights its shots
-  and has a lit-after-lit combo and an any-any-any ordered combo; the job presses the title's own playfield switches
-  until mode.log shows both, the steps counted and 2 in a row.
+- Rig sweep, every title's newest build (53): a mode built from the title's port lights its shots and has a
+  lit-after-lit combo and an any-any-any ordered combo; the job presses the title's own playfield switches (from the
+  live game's switch table) until mode.log shows both, the steps counted and 2 in a row. 52/53 pass: the 32 in the
+  card store, and 20 of the 21 booted from D: (PAD_CARD_CACHE=0; King Kong Pro segfaults off the hard disk and
+  passed from a cached copy). Dungeons & Dragons LE never starts a game on the rig with or without a mode (as in
+  PAD-473/474); its Pro passes. Kit: C:/tmp/PAD-708/rig (gen.py, combo_job3.sh, run3.sh).
 - Godzilla, David's Heisei 1.99D card: a ramp pair, ramp -> loop -> ramp (with its steps), a lapsed window, and TAG
   TEAM twice (2 in a row); then his converted King Caesar replayed through its stages to TAG TEAM's three combos.

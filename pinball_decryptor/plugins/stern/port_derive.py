@@ -572,6 +572,13 @@ def merge(drafts, refs, tgt, game, version, family):
             have.add(n)
     # the end of ball's bus id and the switch tables are read off THIS build (framework_core), never copied
     values = [(n, r) for n, r in values if not _read_here(n)]
+    if "stock_slot_start" not in have:
+        # PAD-714: the title's own START slot (a mode in a game mode's place counts its starts through it), read off
+        # this build where no reference of the same title gave it
+        slot = portgen.build_start_slot(tgt, game) if getattr(tgt, "b", None) else None
+        if slot is not None:
+            values.append(("stock_slot_start", "stock_slot_start      %d   # PAD-714: read off this build" % slot))
+            have.add("stock_slot_start")
     left_off -= have
     notes = []
     if not same:

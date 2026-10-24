@@ -68,7 +68,11 @@ TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type", "magnet_shot", 
                 # cursor): a battle's bookkeeping, never a framework offset
                 "battle_stopped_at", "battle_reason_at", "battle_starts_at", "battle_clock_at", "battle_wins_at",
                 "battle_flags_at", "battle_no_city_flag", "battle_total_at", "battle_own_stop_slots",
-                "roster_city_battle_vec_at", "roster_cursor_at")
+                "roster_city_battle_vec_at", "roster_cursor_at",
+                # PAD-714: the START and "active?" slots of the title's own mode classes' vtables (Godzilla's cmode
+                # 8 / 14, the crule titles' 33-41 / 39-49): another title's called another virtual (Foo Fighters 1.03
+                # was derived with 38 / 44, its own 41 / 49); a derived port reads its START slot off its own program
+                "stock_slot_start", "stock_slot_active")
 #: values that are a shot mask, not an address, however large: copied within a title
 SHOT_VALUES = ("magnet_shot",)
 MIN_N, MAX_N = 8, 48
@@ -1587,6 +1591,23 @@ def _stock_slots(out, tgt):
         for name, v in (("stock_slot_shot", slot), ("stock_slot_mask", slot + 3)):
             if re.match(r"value\s+%s\s" % name, line):
                 out[i] = "value %-21s %d   # PAD-699: read off this build's shot entry (v[15])" % (name, v)
+
+
+def build_start_slot(tgt, game):
+    """PAD-714: the build's own START slot: the scanner's, else :func:`own_start_slot`'s (a shipped port of the same
+    title's, where this build's starts count as the framework's START does); None on a plain-C title or when neither
+    holds."""
+    try:
+        from . import stock_scan as S
+        from . import stock_scan_cpp as C
+        prog = S.Program(tgt.b)
+        model = S.class_model(prog)
+        if not C.family(model):
+            return None
+        slot = C.read(prog, model).engine.get("start_slot")
+        return slot if slot is not None else own_start_slot(tgt, game)
+    except Exception:                                        # noqa: BLE001 - an odd build
+        return None
 
 
 def own_plain_starts(tgt, game, ref_text=None):

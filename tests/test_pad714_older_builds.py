@@ -61,7 +61,7 @@ def test_an_older_builds_inline_player_read_is_its_stop():
     got = MF._stop_shape_inline(None, ins, ins[0][0])
     # the newest build's own (Rush LE 1.19: stopped +0x37, wins +0x64): the 0-based index puts its offsets one up
     assert got == {"player_at": 0xb5baf20, "player": None, "stopped": 0x37, "reason": None, "fn": 0xf29dc,
-                   "wins": 0x64}
+                   "wins": 0x64, "stopped_get": None, "stopped_set": None}
 
 
 def test_a_function_that_is_not_the_stop_is_not_read_as_one():
@@ -213,3 +213,24 @@ def test_a_derived_plain_c_draft_takes_the_titles_starts(monkeypatch):
     portgen.own_plain_starts(types.SimpleNamespace(b=b""), "uncanny_xmen_le", None)
     assert [re.search(r"^version\s+(\S+)", t, re.M).group(1) for t in calls][:1] == ["0.98"]
     assert all(re.search(r"^game\s+uncanny_xmen", t, re.M) for t in calls)
+
+
+# ---- a derived port's START slot is the build's own ------------------------------------------------------------
+def test_the_start_and_active_slots_are_never_another_titles():
+    # Foo Fighters 1.03 was derived with 38 / 44 (another crule title's), its own 41 / 49
+    assert not D.framework_value("stock_slot_start") and not D.framework_value("stock_slot_active")
+    assert D.framework_value("stock_slot_end")                    # the base class's: every title's 10
+
+
+def test_an_older_build_reads_its_start_slot_off_its_program():
+    b = _elf("foo_fighters_le-1_03_")
+    assert portgen.build_start_slot(types.SimpleNamespace(b=b), "foo_fighters_le") == 41
+    # Jurassic Park LE: the scanner finds none; the same title's shipped port's 21 holds on 1.15 too
+    b = _elf("jurassic_park_le-1_15_")
+    assert portgen.build_start_slot(types.SimpleNamespace(b=b), "jurassic_park_le") == 21
+
+
+def test_jurassic_park_1_15_s_stop_asks_the_modes_own_stopped_virtuals():
+    found = MF.find(_elf("jurassic_park_le-1_15_"), 21)
+    assert found["mode_player_at"] == 0x63A73C and found["mode_starts_at"] == 0xD8
+    assert (found["mode_slot_stopped_get"], found["mode_slot_stopped_set"]) == (32, 55)     # as 1.16's (PAD-716)

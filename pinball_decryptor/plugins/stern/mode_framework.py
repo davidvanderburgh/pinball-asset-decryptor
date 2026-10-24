@@ -244,8 +244,12 @@ def _stop_shape_inline(prog, ins, f):
     if not sets_stopped or not end:
         return None
     wins = inline_counts(ins, st, byte)
+    # PAD-716 on an older build too: Jurassic Park LE 1.15's stop asks the same two virtuals (v[32], v[55]) around the
+    # stopped byte as 1.16's
+    obj = next((r for r in sorted(st[k][4]) if r != "r0"), "r0")
+    get_slot, set_slot = stopped_virtuals(ins, obj, k, _num(ml.group(3)))
     return {"player_at": byte, "player": None, "stopped": stopped, "reason": reason_at, "fn": f,
-            "wins": wins[0] if wins else None}
+            "wins": wins[0] if wins else None, "stopped_get": get_slot, "stopped_set": set_slot}
 
 
 def inline_counts(ins, st=None, byte=None):

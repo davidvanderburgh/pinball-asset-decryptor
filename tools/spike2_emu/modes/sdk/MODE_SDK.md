@@ -3973,7 +3973,13 @@ the newest build's +0x37), `add rY, <mode>, rX` - and the port names the byte it
 runtime reads where it would call the getter. Each mode's START there counts words of its own beside the framework's,
 so the start count is the one the START most of the mode classes reach keeps (the base class's where it reads). On all
 22 older C++ builds on hand every offset is its newest build's; a slot that is only a jump to the STOP (Godzilla 1.13's
-v[11]) is followed.
+v[11]) is followed, and Jurassic Park LE 1.15's stop asks the same own-stopped virtuals as 1.16's (v[32] / v[55],
+below). A port derived on a card writes the START slot the framework's start count is read through (`value
+stock_slot_start`) off its own program - the scanner's, else (Jurassic Park LE) the same title's shipped port's where
+this build's starts count as the START does - and takes `stock_slot_start` / `stock_slot_active` only from a reference
+of the same title: they are the title's own mode classes' vtable slots, and a derive from other titles of the
+generation copied theirs (Foo Fighters 1.03: 38 / 44, its own 41 / 49; Jurassic Park LE 1.15: 11, its own 21, so no
+start was counted).
 
 | generation | builds | stop | stopped | reason | starts | wins | STARTED audit |
 |---|---|---|---|---|---|---|---|

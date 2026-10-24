@@ -263,7 +263,12 @@ def test_every_newest_plain_c_port_names_its_modes_books(port):
 
 def test_the_proven_builds_are_ports_with_the_lines():
     for key in MP.PLACE_PROVEN:     # the C++ framework's stop, or a plain-C title's books
+        if not os.path.exists(os.path.join(PORTS, key + ".port")):
+            continue                # PAD-714: an older build whose port is derived on the card
         text = _port(key)
+        if key == "james_bond_60th_le-1.11":
+            assert re.search(r"^site\s+block_start_0\s", text, re.M)   # its Villain Mode keeps no books: only ours
+            continue
         assert "mode_slot_stop" in text or re.search(r"^value place_(audit|flag)_\w+\s", text, re.M), key
 
 

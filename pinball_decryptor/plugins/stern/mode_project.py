@@ -1050,22 +1050,48 @@ PLACE_PROVEN = frozenset({
     "venom_le-1.07",                 # PAD-710 run r3: Mini Mode 01 (19) - the game started it itself as the ball started and the mode took it; the test's start completed it by its clock: stopped 1, wins 0 -> 1
     "venom_pro-1.07",                # PAD-710 run r3: the same on the stock Pro card: stopped 1, wins 0 -> 1
     "jurassic_park_pro-1.16",        # PAD-710 run r3: Escape Nublar (127): starts 0 -> 1, completed by its clock: stopped 1. PAD-716: Trex Chase (119), Trex Rampage (120), Ctrl Room Virus Attack (121) and Restore Power (122) keep their own stopped byte (v[32] / v[55]): taken twice in a game, COMPLETED audit 0 -> 2
-    "aerosmith-1.16",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
-    "aerosmith_le-1.16",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
-    "batman-1.14",                   # PAD-710 run plain2: Catwoman (episodes 19-20) (1): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
-    "beatles-1.29",                  # PAD-710 run plain2: All My Loving (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
-    "elvira3-1.13",                  # PAD-710 run plain2: Houses (whichever House is selected) (0): its books, the game played on: STARTED audit 0 -> 1
-    "guardians-1.15",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit +1
-    "guardians_le-1.15",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
-    "james_bond_le-1.06",            # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. Challenge 1 (Ahoy Mr. Bond) taken by a mode file: STARTED audit 180, PLAYED flag 86, won: COMPLETED flag 89. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs taken at their own starts on the last lock only (not at the lamps' lock check, not at an earlier lock): STARTED audit 0 -> 1, PLAYED flag set, no multiball served
-    "james_bond_pro-1.06",           # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs as on LE
-    "jurassic_park_the_pin-1.05",    # PAD-710 run plain2: Stegosaurus (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-715: Restore Power (5): STARTED audit 189 0 -> 1
-    "metallica_spike-1.04",          # PAD-710 run plain2: Battery (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
+    "aerosmith-1.16",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1. PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "aerosmith_le-1.16",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1. PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "batman-1.14",                   # PAD-710 run plain2: Catwoman (episodes 19-20) (1): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: Catwoman (episodes 19-20) (1): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    "beatles-1.29",                  # PAD-710 run plain2: All My Loving (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: All My Loving (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    "elvira3-1.13",                  # PAD-710 run plain2: Houses (whichever House is selected) (0): its books, the game played on: STARTED audit 0 -> 1. PAD-714 run fplainall: Houses (whichever House is selected) (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "guardians-1.15",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit +1. PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "guardians_le-1.15",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1. PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "james_bond_le-1.06",            # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. Challenge 1 (Ahoy Mr. Bond) taken by a mode file: STARTED audit 180, PLAYED flag 86, won: COMPLETED flag 89. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs taken at their own starts on the last lock only (not at the lamps' lock check, not at an earlier lock): STARTED audit 0 -> 1, PLAYED flag set, no multiball served. PAD-714 run fplainall: Ahoy Mr Bond Wizard Mode (6): its books: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set; the game played on (the game's own audit ids)
+    "james_bond_pro-1.06",           # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs as on LE. PAD-714 run fplainall: Ahoy Mr Bond Wizard Mode (6): its books: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set; the game played on (the game's own audit ids)
+    "jurassic_park_the_pin-1.05",    # PAD-710 run plain2: Stegosaurus (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-715: Restore Power (5): STARTED audit 189 0 -> 1. PAD-714 run fplainall: Stegosaurus (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    "metallica_spike-1.04",          # PAD-710 run plain2: Battery (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: Battery (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
     "star_wars_elg-1.10",            # PAD-710 run plain2: Orbits (1): no audit add, its flags only: COMPLETED flag 67 set, read back by the runtime
-    "stranger_things-1.13",          # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set
-    "stranger_things_le-1.13",       # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set
-    "uncanny_xmen_le-0.98",          # PAD-710 run plain2: Fastball Special (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
-    "uncanny_xmen_pro-0.98",         # PAD-710 run plain2: Fastball Special (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
+    "stranger_things-1.13",          # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set. PAD-714 run fplainall: Bullshit Scoring (0): its books: STARTED audit 0 -> 1, PLAYED flag set; the game played on (the game's own audit ids)
+    "stranger_things_le-1.13",       # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set. PAD-714 run fplainall: Bullshit Scoring (0): its books: STARTED audit 0 -> 1, PLAYED flag set; the game played on (the game's own audit ids)
+    "uncanny_xmen_le-0.98",          # PAD-710 run plain2: Fastball Special (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: Fastball Special (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    "uncanny_xmen_pro-0.98",         # PAD-710 run plain2: Fastball Special (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: Fastball Special (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    # PAD-714: the older builds (and Bond 60th 1.11), each build's own port - shipped, or derived as on a card - with
+    # a mode file in the place of one of its game modes (C:\tmp\PAD-714\rig, place_job2c.sh / place_job4b.sh)
+    "aerosmith_le-1.15",             # PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on
+    "avengers_infinity_le-1.09",     # PAD-714 run fcpp: Super Reactor (19): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "batman-1.13",                   # PAD-714 run fplainall: Catwoman (episodes 19-20) (1): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
+    "deadpool_le-1.14",              # PAD-714 run fcpp: Disco Loops (19): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "foo_fighters_le-1.03",          # PAD-714 run f2cpp: Super Skill Shot (8): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "godzilla_le-1.13",              # PAD-714 run fcpp: Hedorah (25): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "godzilla_pro-1.15",             # PAD-714 run fcpp: Hedorah (25): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "guardians_le-1.14",             # PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on
+    "iron_maiden_le-1.16",           # PAD-714 run fcpp: Rime of the Ancient Mariner Hurry Up (5): won: stopped 0 -> 1; the game played on
+    "james_bond_60th_le-1.11",       # PAD-714 run take1: Villain Mode (0): taken, counting only as ours (the Villain Mode keeps no books), won; the game played on
+    "jaws_le-1.01",                  # PAD-714 run fcpp: Super Buoys (29): starts 0 -> 1, won: stopped 0 -> 1, STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
+    "john_wick_le-1.01",             # PAD-714 run f2cpp: Lights Out (0): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "jurassic_park_le-1.15",         # PAD-714 run f2cpp: Trex Chase (119): starts 0 -> 1, won: stopped 0 -> 1; the game played on
+    "king_kong_le-0.96",             # PAD-714 run fcpp: King Kombos (27): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "led_zeppelin_le-1.21",          # PAD-714 run fcpp: Black Dog (1): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "mando_le-1.44",                 # PAD-714 run fcpp: Super Skill Shot (10): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "metallica_spike-1.03",          # PAD-714 run fplainall: Battery (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
+    "munsters_le-1.27",              # PAD-714 run f2cpp: Lily Mode (3): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "rush_le-1.18",                  # PAD-714 run fcpp: La Villa Strangiato (2): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "star_wars_le-1.30",             # PAD-714 run fcpp: Hoth I (0): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "stranger_things_le-1.12",       # PAD-714 run fplainall: Where's Barb (11): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
+    "sword_of_rage_le-1.18",         # PAD-714 run fcpp: Sand Worm (0): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "turtles_pro-1.58",              # PAD-714 run fcpp: Training Level Two (0): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "uncanny_xmen_le-0.97",          # PAD-714 run f2plain: Fastball Special (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
 })
 #: PAD-710: what counting as the game's mode needs: the game's own mode framework (mode_framework.py)
 PLACE_COUNT_NEEDS = (("mode_player",), (), ("mode_slot_stop", "mode_stopped_at"))

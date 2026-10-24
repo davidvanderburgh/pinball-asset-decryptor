@@ -466,6 +466,7 @@ function StatusBar({ shell }) {
   const chip = shell.cancelling ? html`<${Chip} kind="warn" dot>Canceling<//>`
     : emuLive ? html`<${Chip} kind=${idx >= phases.length - 1 ? "ok" : "acc"} dot>${idx >= phases.length - 1 ? (f.status || "Running") : "Starting"}<//>`
     : running ? html`<${Chip} kind="acc" dot>${f.mode === "write" ? "Building" : f.mode === "extract" ? "Working" : "Running"}<//>`
+    : f.task ? html`<${Chip} kind="acc" dot>Working<//>`
     : html`<${Chip} kind="ok" dot>Ready<//>`;
   return html`<div class="statusbar" role="status">
     ${chip}
@@ -514,7 +515,7 @@ function ProgressStrip({ shell }) {
     <div class=${cx("pbar", busy && "busy", running && !busy && "live")}>
       <i style=${busy ? "" : `width:${pct || 0}%`}></i>
     </div>
-    <span class="pct mono">${busy ? (running ? "working…" : "") : pct != null && (running || pct > 0) ? pct + "%" : ""}</span>
+    <span class="pct mono">${busy ? (running || f.task ? "working…" : "") : pct != null && (running || pct > 0) ? pct + "%" : ""}</span>
     ${eta != null ? html`<span class="eta mono" title="About this long left in this step, from its pace so far">ETA ${fmtClock(eta)}</span>` : null}
     ${f.started ? html`<span class="elapsed" title="Time since this run started"><${Elapsed} started=${f.started} /> elapsed</span>` : null}
   </div>`;

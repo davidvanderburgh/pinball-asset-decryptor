@@ -3318,27 +3318,50 @@ class App:
                 source_dir, target_dir, log_cb=self._transfer_log_cb()),
             lambda plan: self._transfer_plan_ready(source_dir, target_dir,
                                                    plan),
-            "Transfer failed")
+            "Transfer failed",
+            status="Transfer mods: reading the old extract…")
 
     def _transfer_log_cb(self):
         """Worker-thread-safe logger for the transfer comparisons: lines land
-        in the main log via the message queue."""
-        return lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+        in the main log via the message queue, and each one is also the
+        status line under the busy bar, so the footer says which step the
+        comparison is on rather than only that something is running."""
+        def _log(t, l="info"):
+            self.msg_queue.put(LogMsg(t, l))
+            self.msg_queue.put(UiCallMsg(
+                lambda t=t: self._transfer_status(t)))
+        return _log
 
-    def _transfer_worker(self, work, done, fail_title):
+    def _transfer_status(self, text):
+        """Main thread: show *text* under the busy bar while a transfer step
+        runs (never over a real extract or build, which own the footer)."""
+        if (getattr(self, "_transfer_busy", False)
+                and not self.window.is_running()):
+            self.window.set_status(" ".join(str(text).split())[:200])
+
+    def _transfer_worker(self, work, done, fail_title, status=None):
         """Run *work()* on a worker thread — the extract comparisons are
         minutes of file I/O on big or cloud-synced folders, so the UI must
         stay live and the log must keep moving — then continue with
         *done(result)* on the main thread.  One at a time via
-        ``_transfer_busy``."""
+        ``_transfer_busy``.
+
+        While it runs the footer is busy (moving bar, "Working", the elapsed
+        clock) with *status* under it, and the Mod Pack tab's Transfer button
+        says it is working: it used to sit on the last job's 0% or 100%, so a
+        user who didn't read the log took it for idle and clicked Transfer
+        again (PAD-718)."""
         self._transfer_busy = True
+        self._transfer_task(True, status or "Transfer mods: working…")
 
         def _finish(result):
             self._transfer_busy = False
+            self._transfer_task(False)
             done(result)
 
         def _fail(e):
             self._transfer_busy = False
+            self._transfer_task(False, "Transfer mods failed")
             messagebox.showerror(fail_title, "Couldn't finish:\n%s" % e)
 
         def _work():
@@ -3352,6 +3375,16 @@ class App:
             self.root.after(0, _finish, result)
 
         threading.Thread(target=_work, daemon=True).start()
+
+    def _transfer_task(self, busy, status=None):
+        """Footer + Mod Pack tab state for a transfer step (main thread)."""
+        set_task = getattr(self.window, "set_task", None)
+        if set_task is not None:
+            set_task(busy, status)
+        service = getattr(self.window, "service", None)
+        tab = service("modpack") if service is not None else None
+        if tab is not None:
+            tab.set(transfer_busy=bool(busy))
 
     def _transfer_plan_ready(self, source_dir, target_dir, plan):
         """Main-thread continuation of _start_transfer_mods once the pending-
@@ -3669,15 +3702,22 @@ class App:
                 "Apply them anyway?  (No = skip just those; recommended.)"
                 % totals["flagged"])
 
-        try:
-            res = mod_transfer.apply_transfer(
+        # On the worker too: copying a few hundred clips into the new extract
+        # froze the window for as long as it took, with the footer still on
+        # the last job's number.  A failed apply stops the chain (see above).
+        self._transfer_worker(
+            lambda: mod_transfer.apply_transfer(
                 source_dir, target_dir, plan, include_flagged=include_flagged,
-                src_saved=src_saved, origin=origin)
-        except Exception as e:
-            messagebox.showerror("Transfer failed",
-                                 "Couldn't write the transferred mods:\n%s" % e)
-            return
+                src_saved=src_saved, origin=origin),
+            lambda res: self._transfer_applied(source_dir, target_dir, res,
+                                               source_label, then),
+            "Couldn't write the transferred mods",
+            status="Transfer mods: copying your mods into the new extract…")
 
+    def _transfer_applied(self, source_dir, target_dir, res, source_label,
+                          then):
+        """Main-thread tail of :meth:`_confirm_apply_transfer` once the
+        transferred mods are written."""
         tags_note = ("" if not res.get("group_tags")
                      else ", %d group name(s)" % res["group_tags"])
         if res.get("video_variants"):

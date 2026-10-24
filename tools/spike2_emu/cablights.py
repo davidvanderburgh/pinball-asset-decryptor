@@ -70,6 +70,8 @@ _UV = re.compile(r"^UV\b")
 #: one channel of an RGB pixel, however the title spells it: "SPEAKER 1-G",
 #: Venom's "TOPPER BIKE - R", Guardians' "RIGHT SCOOP RECTANGLE-RED"
 _CHANNEL = re.compile(r"^(.*?)\s*-\s*(R|G|B|RED|GRN|GREEN|BLU|BLUE)$", re.I)
+#: Rush's "LEFT POP BUMPER R": a space, no dash (see split_channel)
+_SPACED = re.compile(r"^(.*\S)\s+([RGB])$")
 #: "EXPRESSIVE LIGHTING L 12" -> side L, pixel 12
 _SIDE = re.compile(r"\b([LR])\s+\d+\s*$")
 
@@ -108,12 +110,44 @@ def role_of(row, group_node, board_map):
     return TOPPER if b and "TOPPER" in b["name"].upper() else None
 
 
-def split_channel(name):
-    """('TOPPER BIKE', 'R') for 'TOPPER BIKE - R'; (name, 'W') otherwise."""
+def split_channel(name, spaced=()):
+    """('TOPPER BIKE', 'R') for 'TOPPER BIKE - R'; (name, 'W') otherwise.
+
+    PAD-702: Rush's "LEFT POP BUMPER R" (a space, no dash) splits too, but
+    only for a stem in `spaced` (spaced_stems()): Foo Fighters' white "MOD B"
+    is one lamp."""
     m = _CHANNEL.match(name or "")
     if not m:
+        m = _SPACED.match(name or "")
+        if m and m.group(1) in spaced:
+            return m.group(1), m.group(2)
         return name, "W"
     return m.group(1).rstrip(), m.group(2)[0].upper()
+
+
+def spaced_stems(names):
+    """The stems a table spells "STEM R" with two or more of R, G, B - an RGB
+    light, where a lone "TARGET B" is not."""
+    seen = {}
+    for name in names:
+        m = _SPACED.match(name or "")
+        if m:
+            seen.setdefault(m.group(1), set()).add(m.group(2))
+    return frozenset(s for s, chans in seen.items() if len(chans) > 1)
+
+
+def repeated_channel(channels, chan, index, last):
+    """The channel a row that repeats `chan` in its fixture really is, or None.
+
+    PAD-702: Venom's "TOPPER RIGHT SPOTLIGHT 2" is G, R, G at 48-50 and
+    Mandalorian's "TOPPER 25" the same at 72-74 - a typo for B in Stern's
+    table. A third channel right after the other two that names one of them
+    again is the one missing; anything else is two lamps sharing a name."""
+    have = set(channels)
+    if (chan in have and len(have) == 2 and have < set("RGB")
+            and index == last + 1):
+        return (set("RGB") - have).pop()
+    return None
 
 
 def boards(nodedir_path):
@@ -274,11 +308,17 @@ def sections(dev_rows, group_node, board_map, expression=True,
                 "label": LABEL[which], "pixels": {}, "rows": []}
         S["rows"].append(r)
     out = []
+    spaced = spaced_stems(r["name"] for r in dev_rows or []
+                          if r.get("kind") == "led")
     for S in by_key.values():
         pix = S.pop("pixels")
         for r in S.pop("rows"):
-            stem, chan = split_channel(r["name"])
+            stem, chan = split_channel(r["name"], spaced)
             P = pix.get(stem)
+            if P is not None and chan in P["channels"]:
+                chan = repeated_channel(
+                    P["channels"], chan, r["index"],
+                    max(i for _n, i in P["channels"].values())) or chan
             if P is None or chan in P["channels"]:
                 if P is not None:
                     stem = "%s (%d)" % (stem, r["index"])

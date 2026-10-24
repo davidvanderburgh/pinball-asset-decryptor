@@ -176,6 +176,8 @@ def hat(h):
         return "When %s runs out" % (h.get("timer") or "a timer")
     if k == "challenge":
         return "When the player picks the challenge %s" % (h.get("challenge") or "?")
+    if k == "battle":                                                       # PAD-706
+        return "When the player picks the battle %s" % BM.battle_name(h)
     return "(%s)" % k
 
 

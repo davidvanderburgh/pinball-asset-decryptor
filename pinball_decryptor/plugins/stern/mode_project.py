@@ -1025,12 +1025,12 @@ PLACE_PROVEN = frozenset({
     "godzilla_le-1.16",              # PAD-710 run all2: Jet Fighter Attack (21): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1, STARTED audit 0 -> 1, COMPLETED 0 -> 1
     "godzilla_pro-1.16",             # PAD-710 run all2: Jet Fighter Attack (21): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1, STARTED audit 0 -> 1, COMPLETED 0 -> 1
     "iron_maiden_le-1.18",           # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
-    "iron_maiden_pro-1.18",          # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "iron_maiden_pro-1.18",          # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1. PAD-716: Soul Shard Hurry Up (0) under a running Fear of the Dark: the song records it won, it sets itself back
     "jaws_le-1.02",                  # PAD-710 run all2: Super Buoys (29): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
     "jaws_pro-1.02",                 # PAD-710 run all2: Super Buoys (29): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
     "john_wick_le-1.02",             # PAD-710 run all2: Lights Out (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
     "john_wick_pro-1.02",            # PAD-710 run all2: Lights Out (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
-    "jurassic_park_le-1.16",         # PAD-710 run all2: Chaos Hurry Up (4): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "jurassic_park_le-1.16",         # PAD-710 run all2: Chaos Hurry Up (4): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1. PAD-716: its six T-Rex and Ctrl Room modes (7-12), taken twice in a game: COMPLETED audit 0 -> 2
     "king_kong_le-0.97",             # PAD-710 run all2: King Kombos (27): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
     "king_kong_pro-0.97",            # PAD-710 run all2: King Kombos (27): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
     "led_zeppelin_le-1.22",          # PAD-710 run all2: Black Dog (1): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
@@ -1049,7 +1049,7 @@ PLACE_PROVEN = frozenset({
     "turtles_pro-1.59",              # PAD-710 run all2: Training Level Two (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
     "venom_le-1.07",                 # PAD-710 run r3: Mini Mode 01 (19) - the game started it itself as the ball started and the mode took it; the test's start completed it by its clock: stopped 1, wins 0 -> 1
     "venom_pro-1.07",                # PAD-710 run r3: the same on the stock Pro card: stopped 1, wins 0 -> 1
-    "jurassic_park_pro-1.16",        # PAD-710 run r3: Escape Nublar (127): starts 0 -> 1, completed by its clock: stopped 1. Ctrl Room Virus Attack (121), Restore Power (122) and Trex Chase (119) ask their own "stopped already?" first: the game's stop ran and wrote their own outcome (Trex Chase: its award)
+    "jurassic_park_pro-1.16",        # PAD-710 run r3: Escape Nublar (127): starts 0 -> 1, completed by its clock: stopped 1. PAD-716: Trex Chase (119), Trex Rampage (120), Ctrl Room Virus Attack (121) and Restore Power (122) keep their own stopped byte (v[32] / v[55]): taken twice in a game, COMPLETED audit 0 -> 2
     "aerosmith-1.16",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
     "aerosmith_le-1.16",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
     "batman-1.14",                   # PAD-710 run plain2: Catwoman (episodes 19-20) (1): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1

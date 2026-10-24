@@ -214,14 +214,57 @@ def test_the_places_leave_the_battles_to_the_battle_hat():
     assert all(c for _i, _n, c in MP._places(port))
 
 
-def test_a_plain_c_title_offers_no_place_yet():
+def test_a_plain_c_title_counts_through_its_own_books():
+    """Run 2: a plain-C title's game modes count through their audits and flags, named after the mode."""
+    port = MP.read_port(os.path.join(PORTS, "james_bond_le-1.06.port"))
+    places = {i: (n, c) for i, n, c in MP._places(port)}
+    assert places[6] == ("Ahoy Mr Bond Wizard Mode", True)
+    assert 29 not in places                               # Bird One Multiball: the game names no books for it
+    text = _port("james_bond_le-1.06")
+    assert re.search(r"^site  audit_add\s+0x00245ea0 0xe92d43f0 0xe2505000$", text, re.M)
+    for line in ("value place_audit_started_6        180", "value place_flag_played_6          86",
+                 "value place_flag_completed_6       89"):
+        assert line in text, line
     p = MP.profile("james_bond_le_1_06")
-    assert not p.can("place") and p.places == ()
+    assert p.can("place") == ("james_bond_le-1.06" in MP.PLACE_PROVEN)
+
+
+def test_the_plain_c_stems_are_the_games_spellings():
+    st = MF._stems("Egghead (episodes 47-48)")
+    assert "EGGHEAD_MODE_EP_47_48" in st and "EGGHEAD" in st
+    assert "UPSIDE_DOWN_HURRYUP" in MF._stems("Upside Down Hurry-Up")
+    assert "MODE_ALL_MY_LOVING" in MF._stems("All My Loving") and "BATTERY_MODE" in MF._stems("Battery")
+    assert "DR_NOS_LAIR" in MF._stems("Dr No's Lair") and "HOUSE" in MF._stems("Houses (whichever House is selected)")
+    for line in ("site audit_add 0x1 0x2 0x3", "value place_audit_started_6 180", "value place_audit_completed_6 3",
+                 "value place_flag_played_6 86", "value place_flag_completed_6 89"):
+        key, rest = line.split(" ", 1)
+        assert portgen.generated(key, rest), line
+    assert MF.plain_lines({}, None) == [] and MF.plain_lines_for(b"not an elf", "game x\n") == []
+
+
+PLAIN_READ = ("aerosmith-1.16", "aerosmith_le-1.16", "batman-1.14", "beatles-1.29", "elvira3-1.13", "guardians-1.15",
+              "guardians_le-1.15", "james_bond_le-1.06", "james_bond_pro-1.06", "jurassic_park_the_pin-1.05",
+              "metallica_spike-1.04", "star_wars_elg-1.10", "stranger_things-1.13", "stranger_things_le-1.13",
+              "uncanny_xmen_le-0.98", "uncanny_xmen_pro-0.98")
+
+
+@pytest.mark.parametrize("port", PLAIN_READ)
+def test_every_newest_plain_c_port_names_its_modes_books(port):
+    text = _port(port)
+    if port == "star_wars_elg-1.10":     # no standard audit add on it: its flags alone
+        assert not re.search(r"^site\s+audit_add\s", text, re.M)
+        assert re.search(r"^value place_flag_(played|completed)_\d+\s+\d+$", text, re.M)
+        assert not re.search(r"^value place_audit_", text, re.M)
+    else:
+        assert re.search(r"^site  audit_add\s+0x[0-9a-f]{8} 0xe92d43f0 0xe2505000$", text, re.M)
+    assert re.search(r"^value place_(audit_started|audit_completed|flag_played|flag_completed)_\d+\s+\d+$", text, re.M)
+    assert "mode_slot_stop" not in text
 
 
 def test_the_proven_builds_are_ports_with_the_lines():
-    for key in MP.PLACE_PROVEN:
-        assert "mode_slot_stop" in _port(key), key
+    for key in MP.PLACE_PROVEN:     # the C++ framework's stop, or a plain-C title's books
+        text = _port(key)
+        assert "mode_slot_stop" in text or re.search(r"^value place_(audit|flag)_\w+\s", text, re.M), key
 
 
 # ---- the runtime and mode_file.c -------------------------------------------------------------------
@@ -236,7 +279,8 @@ def test_the_runtime_takes_the_start_and_counts_it():
     hook = hook[:hook.index("\n}\n")]
     assert "if (id < BLOCK_IDS && place_take(r, id)) return 1;" in hook
     assert hook.index("place_take") < hook.index("lit_hold_until")   # before the lit hold and the block
-    for want in ("place_begin(block_obj[id] ? block_obj[id] : r[0], id, up);",
+    for want in ("place_begin(block_obj[id], id, up);", "place_audit(a);", "place_flag_set(fl)",
+                 'place_book("audit_completed", id)', "if (!block_obj[id] && !place_fn[id]) return 0;",
                  "((void (*)(unsigned, unsigned, unsigned))(unsigned long)f)(obj, won ? 1u : 0u, 1u);",
                  "place_arm();", "place_tick();", "place_ball_end();", 'can & PM_CAN_PLACE ? " place" : ""'):
         assert want in rt, want
@@ -314,3 +358,39 @@ def test_a_start_the_mode_does_not_take_is_not_completed(tmp_path):
     out = play(tmp_path, p, "gamestart", 21, "secs", 1)
     assert "the game started its mode and this started nothing - not completed" in out
     assert "PLACE OVER not completed" in out
+
+
+# ---- the challenges that are one of the game's own modes --------------------------------------------------------
+def test_a_challenge_that_is_a_game_mode_maps_by_its_words():
+    port = "\n".join(["text block_name_6       Ahoy Mr Bond Wizard Mode", "site block_start_6 0x1000",
+                      "text block_name_7       Ahoy Mr Bond Bonus", "text block_name_8       Fourth of July",
+                      "site block_start_8 0x2000", "text challenge_name_1   Ahoy Mr. Bond",
+                      "text challenge_name_2   4th of July", "text challenge_name_3   Spy Hunter", ""])
+    assert MF.challenge_places(port) == {1: 6, 2: 8}       # block 7 has no start; challenge 3 is no mode
+    lines = MF.challenge_place_lines(port)
+    assert "value challenge_place_1        6" in lines and "value challenge_place_2        8" in lines
+    assert MF.challenge_place_lines(port + "\n".join(lines[1:]) + "\n") == []
+
+
+@pytest.mark.parametrize("port, n, mode", [("james_bond_le-1.06", 1, 6), ("james_bond_pro-1.06", 1, 6),
+                                           ("godzilla_le-1.16", 0, 20), ("rush_le-1.19", 2, 35)])
+def test_the_ports_name_their_challenges_modes(port, n, mode):
+    assert re.search(r"^value challenge_place_%d\s+%d$" % (n, mode), _port(port), re.M)
+
+
+def test_a_challenge_mode_counts_as_the_game_mode_at_its_take_and_its_end():
+    rt = _src("pad_mode_runtime.c")
+    assert rt.count("chg_picked(challenge_by[n], n, challenge_title[n], (int)n); place_challenge(n); }") == 2
+    assert 'pm_snprintf(key, sizeof key, "challenge_place_%u", n);' in rt
+    mf = _src("mode_file.c")
+    assert "if (run.by_challenge)" in mf and "pm_place_over(" in mf
+
+
+def test_a_blocks_mode_a_challenge_started_counts_its_end():
+    prog = {"name": "YOLT", "seconds": 30, "game_modes": "block", "vars": [], "scripts": [
+        {"hat": {"kind": "challenge", "challenge": "Ahoy Mr. Bond"}, "do": [{"op": "start_mode"}]}]}
+    c = BM.to_c(prog, "yolt")
+    assert "static int challenge_run;" in c and "if (run.on) challenge_run = 1;" in c
+    end = c[c.index("if (challenge_run) {"):]
+    assert end.index("challenge_run = 0;") < end.index("pm_place_over(won);")
+    assert "challenge_run" not in BM.to_c({"name": "P", "scripts": [{"hat": {"kind": "mode_start"}, "do": []}]}, "p")

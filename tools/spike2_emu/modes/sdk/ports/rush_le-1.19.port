@@ -768,3 +768,6 @@ value mode_slot_stop         43
 value mode_stopped_at        0x37
 value mode_starts_at         0x48
 value mode_wins_at           0x64
+
+# PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
+value challenge_place_2        35

@@ -588,3 +588,9 @@ value challenge_page_title_max 18
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x00118494 0xe92d4ff0 0xe24dd0bc
+
+# PAD-710: the game's own books of its modes (mode_framework.py, from this build's audit and flag names): a
+# mode of ours in one's place counts its STARTED audit and PLAYED flag, and when completed its COMPLETED ones
+value place_flag_completed_0       69
+value place_flag_completed_1       67
+value place_flag_completed_2       68

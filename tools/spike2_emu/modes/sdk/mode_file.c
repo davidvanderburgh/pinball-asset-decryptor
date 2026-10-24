@@ -2516,6 +2516,8 @@ static void mode_end(const char *why)
     /* PAD-706: its end shot is the battle won; a mode with no end shot wins it by playing to its clock's end */
     roster_ended(name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")));
     place_ended(name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")));   /* PAD-710: the same rule */
+    if (run.by_challenge)                    /* PAD-710: a challenge that is one of the game's modes - the same rule */
+        pm_place_over(name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")));
     own_sounds_end(M);
     own_lights_end(M);                       /* item mode-leds: the game has its inserts back */
     if (cfg.light_off[0]) lights(M, cfg.light_off);

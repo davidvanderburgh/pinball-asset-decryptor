@@ -778,13 +778,16 @@ int pm_ball_end_holding(void);
  * game keeps one; the mode itself does not run), and at pm_place_over(won) the game's own STOP of it with the
  * outcome - won (1) = completed, as when the player completes the game's mode: its COMPLETED audit, its wins, and the
  * wizards and unlocks the game gates on it; lost (0) = as when the player loses it. A mode that never calls it at the
- * end of the ball it took the place in counts as lost. pm_place_counts(id): 1 when it counts as id here. */
+ * end of the ball it took the place in counts as lost. On a plain-C title (no mode class) it counts through the
+ * mode's own books the port names: its STARTED audit and PLAYED flag at the take, its COMPLETED flag and audit when
+ * completed. pm_place_counts(id): 1 when it counts as id here. */
 #define PM_CAN_PLACE        0x10000000u /* pm_place_claim */
 int pm_place_claim(unsigned id, int (*on_start)(unsigned id));   /* 1 = claimed */
 void pm_place_release(unsigned id);
 int pm_place_counts(unsigned id);                                /* 1 = it counts as the game's mode id */
 const char *pm_game_mode_name(unsigned id);                      /* "Hoth I" (the port's name), or 0 */
 void pm_place_over(int won);                                     /* the mode that took the place ends */
-int pm_game_mode_start(unsigned id);  /* for a test: the game's START of mode id, as its rules call it; 1 = called */
+int pm_game_mode_start(unsigned id);  /* for a test: the game's START of mode id, as its rules call it (a plain-C
+                                         start only while claimed: the claim refuses it); 1 = called */
 
 #endif

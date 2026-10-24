@@ -687,3 +687,6 @@ value mode_starts_at         0x5c
 site  mode_started           0x0014f5b0 0xe3510023 0xe92d4008
 data  mode_manager           0x00864294
 value mode_id_at             4
+
+# PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
+value challenge_place_0        32

@@ -382,3 +382,200 @@ def lines_for(elf, port_text):
         return missing_from(port_lines(found, prog), port_text or "")
     except Exception:                                    # noqa: BLE001 - an odd build: without them
         return []
+
+
+# ---- the plain-C titles ------------------------------------------------------------------------------------------
+# A title with no mode class keeps its books in the framework's audits and game flags, named after the mode: James Bond
+# LE 1.06's Ahoy Mr Bond Wizard Mode starts by setting FG_AHOY_MR_BOND_WIZARD_MODE_ACTIVE (and _PLAYED) and counts
+# AUD_AHOY_MR_BOND_WIZARD_MODE_STARTED; its completion is FG_..._COMPLETED. Both name tables are in the program (FG_INVALID
+# and AUD_INVALID at id 0: the index is the id), and every build counts an audit through the same framework function:
+#
+#     push {r4, r5, r6, r7, r8, r9, lr} ; subs r5, r0, #0 ; sub sp, sp, #0x14 ; ...   (id in r0, the amount in r1)
+#
+# So a game mode's stem comes from the ACTIVE / PLAYED flag its START sets (else from the port's name for it), and its
+# books from the names: STARTED (or STARTS) and COMPLETED (or COMPLETIONS) audits, PLAYED and COMPLETED flags, trying the
+# spellings the games use (a MODE_ prefix or _MODE suffix, HURRYUP for "Hurry-Up").
+AUDIT_ADD_HEAD = (0xE92D43F0, 0xE2505000, 0xE24DD014)
+
+
+def names_table(e, first, prefix):
+    """The program's ``prefix`` names by id (the pointer table whose first entry names ``first``), or []."""
+    import struct
+    m = re.search(re.escape(b"\0" + first.encode() + b"\0"), e.d)
+    if not m:
+        return []
+    want = struct.pack("<I", e.va(m.start() + 1))
+    i = 0
+    while True:
+        i = e.d.find(want, i)
+        if i < 0:
+            return []
+        if i % 4 == 0 and e.va(i) is not None:
+            names, at = [], e.va(i)
+            while e.off(at + 4 * len(names)) is not None:
+                s = e.cstr(e.word(at + 4 * len(names)))
+                if not s or not s.startswith(prefix):
+                    break
+                names.append(s)
+            if len(names) > 8:
+                return names
+        i += 1
+
+
+def audit_add(e):
+    """The framework's audit add (id in r0, amount in r1), or None: the head above, and within its first words the audit
+    table into r4 (`movw r4` / `movt r4`) and the record index `lsl r8, r5, #4` (16-byte records). Another function
+    opens with the same three words on every build (it takes stack arguments: Star Wars ELG has only that one)."""
+    w = e.words
+    for k in range(len(w) - 16):
+        if tuple(w[k:k + 3]) != AUDIT_ADD_HEAD:
+            continue
+        win = w[k:k + 16]
+        if 0xE1A08205 in win and any(x & 0xFFF0F000 == 0xE3004000 for x in win) \
+                and any(x & 0xFFF0F000 == 0xE3404000 for x in win):
+            return e.text_va + 4 * k
+    return None
+
+
+def _stems(name):
+    up = name.upper().replace("'", "")
+    base = re.sub(r"[^A-Z0-9]+", "_", up).strip("_")
+    bare = re.sub(r"[^A-Z0-9]+", "_", re.sub(r"\(.*?\)", "", up)).strip("_")          # "Houses (whichever ...)"
+    # Batman 66: "Egghead (episodes 47-48)" is AUD_EGGHEAD_MODE_EP_47_48_STARTS
+    ep = re.sub(r"_EPISODES?_", "_MODE_EP_", base)
+    out = []
+    for s in (base, bare, ep, base.replace("HURRY_UP", "HURRYUP"), bare[:-1] if bare.endswith("S") else bare):
+        out += [s, "MODE_" + s, s + "_MODE"]
+    return list(dict.fromkeys(x for x in out if x))
+
+
+def _start_flags(prog, f, flag_set, depth=1, seen=None):
+    """The flag ids `mov r0, #id; bl <flag set>` sets in the function at *f* and the ones it calls."""
+    seen = seen if seen is not None else set()
+    if f in seen or not f:
+        return []
+    seen.add(f)
+    ins = _ins(prog, f)
+    out = []
+    for i, (_va, m, o, _w) in enumerate(ins):
+        if m not in ("bl", "b") or not o.startswith("#"):
+            continue
+        t = _num(o[1:])
+        if t == flag_set:
+            for _v, m2, o2, _w2 in reversed(ins[max(0, i - 5):i]):
+                mm = re.match(r"r0, #(%s)$" % _H, o2)
+                if m2 in ("mov", "movw") and mm:
+                    out.append(_num(mm.group(1)))
+                    break
+                if o2.startswith("r0,"):
+                    break
+        elif depth > 0 and m == "bl":
+            out += _start_flags(prog, t, flag_set, depth - 1, seen)
+    return out
+
+
+def plain_books(elf, port_text):
+    """PAD-710: ``({id: {"started": audit, "completed": audit, "played": flag, "completed_flag": flag}}, audit add)``
+    (each where the program names it) for the game modes of a plain-C port (`site block_start_<id>`, `text
+    block_name_<id>`); ({}, None) on a C++ port or a program without the tables."""
+    from . import portchallenge as PC
+    if re.search(r"^data\s+block_obj_\d+", port_text or "", re.M):
+        return {}, None
+    e = PC.Elf(elf)
+    add = audit_add(e)
+    aud = names_table(e, "AUD_INVALID", "AUD_") if add else []   # no audit add: its flags alone (Star Wars ELG)
+    fg = names_table(e, "FG_INVALID", "FG_")
+    if not fg:
+        return {}, None
+    aid = {n: i for i, n in enumerate(aud)}
+    fid = {n: i for i, n in enumerate(fg)}
+    flags = PC.flag_functions(e)
+    prog = S.Program(elf)
+    out = {}
+    for m in re.finditer(r"^site\s+block_start_(\d+)\s+0x([0-9a-f]+)", port_text, re.M):
+        i, f = int(m.group(1)), int(m.group(2), 16)
+        nm = re.search(r"^text\s+block_name_%d\s+(.+)$" % i, port_text, re.M)
+        stems = []
+        if flags:                                    # the ACTIVE / PLAYED flags its START (or what it calls) sets
+            for fl in _start_flags(prog, f, flags["set"]):
+                if fl < len(fg) and re.search(r"_(ACTIVE|PLAYED|RUNNING)$", fg[fl]):
+                    stems.append(re.sub(r"^FG_|_(ACTIVE|PLAYED|RUNNING)$", "", fg[fl]))
+        stems += _stems(nm.group(1).strip()) if nm else []
+        for st in dict.fromkeys(stems):
+            books = {}
+            for key, names, table in (("started", ("AUD_%s_STARTED", "AUD_%s_STARTS"), aid),
+                                      ("completed", ("AUD_%s_COMPLETED", "AUD_%s_COMPLETIONS",
+                                                     "AUD_%s_STAGE_X_COMPLETIONS"), aid),
+                                      ("played", ("FG_%s_PLAYED",), fid),
+                                      ("completed_flag", ("FG_%s_COMPLETED",), fid)):
+                hit = next((table[n % st] for n in names if n % st in table), None)
+                if hit:
+                    books[key] = hit
+            if books:
+                out[i] = books
+                break
+    return out, add
+
+
+def plain_lines(books, add, prog=None):
+    """The port lines for :func:`plain_books`' result; [] when it found none."""
+    if not books:
+        return []
+    out = ["# PAD-710: the game's own books of its modes (mode_framework.py, from this build's audit and flag names): a",
+           "# mode of ours in one's place counts its STARTED audit and PLAYED flag, and when completed its COMPLETED ones"]
+    if add:
+        words = " 0x%08x 0x%08x" % (prog.word(add) or 0, prog.word(add + 4) or 0) if prog is not None else ""
+        out.append("site  audit_add              0x%08x%s" % (add, words))
+    for i in sorted(books):
+        for key, line in (("started", "place_audit_started"), ("completed", "place_audit_completed"),
+                          ("played", "place_flag_played"), ("completed_flag", "place_flag_completed")):
+            if key in books[i]:
+                out.append("value %-28s %d" % ("%s_%d" % (line, i), books[i][key]))
+    return out
+
+
+def plain_lines_for(elf, port_text):
+    """The plain-C books lines *port_text* lacks (as :func:`lines_for`); never raises."""
+    if re.search(r"^(site\s+audit_add|value\s+place_(audit|flag)_\w+)\s", port_text or "", re.M):
+        return []
+    try:
+        books, add = plain_books(elf, port_text)
+        return plain_lines(books, add, S.Program(elf))
+    except Exception:                                    # noqa: BLE001
+        return []
+
+
+# ---- the challenges ----------------------------------------------------------------------------------------------
+# A Player Challenge (PAD-615/619) that is one of the game's own modes - James Bond's Ahoy Mr. Bond (its mini-wizard,
+# started as a challenge), Godzilla's King of the Monsters, Metallica's songs - counts as that mode when a mode of ours
+# takes the challenge's place, as a mode in that mode's place does. Which mode a challenge is: its name and the
+# mode's, the challenge's words leading the mode's ("Ahoy Mr. Bond" / "Ahoy Mr Bond Wizard Mode").
+def _words(name):
+    s = re.sub(r"\b4th\b", "fourth", (name or "").lower())
+    return re.findall(r"[a-z0-9]+", s)
+
+
+def challenge_places(port_text):
+    """``{challenge n: game mode id}`` for the port's challenges (`text challenge_name_<n>`) that are one of its game
+    modes (`text block_name_<id>`, a start the port names): the one mode whose name begins with the challenge's words
+    (exactly one; none when two would)."""
+    text = port_text or ""
+    modes = {int(m.group(1)): _words(m.group(2)) for m in re.finditer(r"^text\s+block_name_(\d+)\s+(.+)$", text, re.M)
+             if re.search(r"^site\s+block_start_%s\s" % m.group(1), text, re.M)}
+    out = {}
+    for m in re.finditer(r"^text\s+challenge_name_(\d+)\s+(.+)$", text, re.M):
+        cw = _words(m.group(2))
+        hits = [i for i, mw in modes.items() if cw and mw[:len(cw)] == cw]
+        if len(hits) == 1:
+            out[int(m.group(1))] = hits[0]
+    return out
+
+
+def challenge_place_lines(port_text):
+    """The `value challenge_place_<n> <id>` lines the port lacks (as :func:`missing_from`)."""
+    places = challenge_places(port_text)
+    if not places:
+        return []
+    lines = ["# PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it"]
+    lines += ["value challenge_place_%-8d %d" % (n, i) for n, i in sorted(places.items())]
+    return missing_from(lines, port_text)

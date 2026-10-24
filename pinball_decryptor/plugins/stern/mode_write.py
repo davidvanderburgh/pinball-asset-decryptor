@@ -431,7 +431,8 @@ def with_framework(port, elf, scratch):
             text = f.read()
     except OSError:
         return port
-    lines = MF.lines_for(elf, text)
+    lines = (MF.lines_for(elf, text) + MF.plain_lines_for(elf, text)   # C++ titles' framework; plain-C titles' books
+             + MF.challenge_place_lines(text))                          # challenges that are one of its modes
     if not lines:
         return port
     os.makedirs(scratch, exist_ok=True)

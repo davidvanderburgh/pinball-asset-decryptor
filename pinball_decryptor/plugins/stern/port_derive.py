@@ -687,7 +687,9 @@ def merge(drafts, refs, tgt, game, version, family):
     # PAD-710: the game's own mode framework, read off this build's program (a mode in the place of one of the game's
     # modes counts as it)
     from . import mode_framework
-    framework = mode_framework.lines_for(b, "\n".join(body)) if b else []
+    framework = (mode_framework.lines_for(b, "\n".join(body))
+                 + mode_framework.plain_lines_for(b, "\n".join(body))) if b else []   # plain-C: the modes' books
+    framework += mode_framework.challenge_place_lines("\n".join(body + framework))     # challenges that are its modes
     if framework:
         body += [""] + framework
     return body, provenance, missing, notes

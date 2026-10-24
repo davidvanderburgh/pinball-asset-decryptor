@@ -9811,7 +9811,7 @@ static void on_roster_resume(unsigned *r)
 #define PLACE_IDS BLOCK_IDS
 static int (*place_fn[PLACE_IDS])(unsigned id);
 static const struct pm_mode *place_by[PLACE_IDS];
-static struct { unsigned obj, id; unsigned char on, owed; signed char won; } place_held[5];   /* per player 1-4 */
+static struct { unsigned obj, id; unsigned char on, owed, plain; signed char won; } place_held[5];   /* per player 1-4 */
 static int place_counts_on;                   /* the port names the game's mode framework */
 
 static const char *place_name(unsigned id)
@@ -9855,6 +9855,49 @@ static unsigned place_starts(unsigned obj, unsigned p)
     return at >= 0 ? rw(obj + (unsigned)at + 4 * p) : 0;
 }
 
+/* PAD-710: a plain-C title's books of its own modes (mode_framework.plain_books): no mode object, but the framework's
+ * audits and game flags named after the mode - `value place_audit_started_<id>` / `place_audit_completed_<id>` (an audit
+ * id, counted through `site audit_add`: id in r0, the amount in r1) and `value place_flag_played_<id>` /
+ * `place_flag_completed_<id>` (a game flag, set in the flag bitmap as the game's flag set does). */
+static long place_book(const char *what, unsigned id)
+{
+    char key[48];
+    pm_snprintf(key, sizeof key, "place_%s_%u", what, id);
+    return pm_port_value(key, -1);
+}
+
+static int place_plain(unsigned id)
+{
+    return (fn("audit_add") && (place_book("audit_started", id) > 0 || place_book("audit_completed", id) > 0))
+           || (data("game_flags") && (place_book("flag_played", id) > 0 || place_book("flag_completed", id) > 0));
+}
+
+static unsigned char *place_flag_byte(long n)
+{
+    unsigned char *bits;
+    unsigned count;
+    if (n <= 0 || !data("game_flags")) return 0;
+    count = data("game_flag_count") ? *(const unsigned *)(unsigned long)data("game_flag_count") : 0;
+    if (count && (unsigned long)n >= count) return 0;
+    bits = *(unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", 4));
+    return bits ? bits + (n >> 3) : 0;
+}
+
+/* the flag set, read back: 1 set, 0 not, -1 no such flag */
+static int place_flag_set(long n)
+{
+    unsigned char *b = place_flag_byte(n);
+    if (!b) return -1;
+    *b |= (unsigned char)(1u << (n & 7));
+    return (*b >> (n & 7)) & 1;
+}
+
+static void place_audit(long n)
+{
+    unsigned f = fn("audit_add");
+    if (f && n > 0) ((void (*)(unsigned, unsigned))(unsigned long)f)((unsigned)n, 1u);
+}
+
 /* What the game's START writes for its bookkeeping, for the player up (who is `up` to the runtime) */
 static void place_begin(unsigned obj, unsigned id, unsigned up)
 {
@@ -9866,6 +9909,17 @@ static void place_begin(unsigned obj, unsigned id, unsigned up)
     place_held[up].owed = 0;
     place_held[up].id = id;
     place_held[up].obj = 0;
+    place_held[up].plain = 0;
+    if (!obj && place_plain(id)) {                  /* a plain-C title: its STARTED audit and PLAYED flag */
+        long a = place_book("audit_started", id), fl = place_book("flag_played", id);
+        int set = fl > 0 ? place_flag_set(fl) : -1;
+        place_audit(a);
+        place_held[up].plain = 1;
+        say("place: the game's %s (mode %u) counts as started for player %u - its books, it does not run: STARTED "
+            "audit %ld %s, PLAYED flag %ld %s", place_name(id), id, up, a, a > 0 && fn("audit_add") ? "counted" : "(none)",
+            fl, set > 0 ? "set" : "(none)");
+        return;
+    }
     if (!place_counts_on || !obj) {
         say("place: the game's %s (mode %u) - the mode runs in its place for player %u, counting only as ours (%s)",
             place_name(id), id, up, place_counts_on ? "the game's start passes no mode object" : "the port names no mode framework");
@@ -9895,6 +9949,19 @@ static int place_end(unsigned p, int won)
     unsigned obj = place_held[p].obj, id = place_held[p].id, f;
     place_held[p].on = 0;
     place_held[p].owed = 0;
+    if (!obj && place_held[p].plain) {              /* a plain-C title: completed = its COMPLETED flag and audit */
+        long a = place_book("audit_completed", id), fl = place_book("flag_completed", id);
+        int set = -1;
+        place_held[p].plain = 0;
+        if (won) {
+            set = fl > 0 ? place_flag_set(fl) : -1;
+            place_audit(a);
+        }
+        say("place: the mode in the place of the game's %s ends %s for player %u: its books - COMPLETED flag %ld %s, "
+            "COMPLETED audit %ld %s", place_name(id), won ? "WON" : "lost", p, fl,
+            !won ? "left" : set > 0 ? "set" : "(none)", a, !won ? "left" : a > 0 && fn("audit_add") ? "counted" : "(none)");
+        return 1;
+    }
     if (!obj) {
         say("place: the mode in the place of the game's %s ends %s for player %u (it counted only as ours)",
             place_name(id), won ? "WON" : "lost", p);
@@ -9940,9 +10007,10 @@ static int place_take(unsigned *r, unsigned id)
         say("place: the game's %s (mode %u) started again while its mode holds it - it restarts nothing", place_name(id), id);
         return 1;
     }
-    if (up >= 1 && up <= 4 && place_held[up].on && place_held[up].obj)   /* another place still held: lost */
+    if (up >= 1 && up <= 4 && place_held[up].on && (place_held[up].obj || place_held[up].plain))   /* another place still held: lost */
         place_end(up, 0);
-    place_begin(block_obj[id] ? block_obj[id] : r[0], id, up);
+    (void)r;
+    place_begin(block_obj[id], id, up);   /* 0 on a plain-C title: r0 is its start's own argument */
     return 1;
 }
 
@@ -9965,7 +10033,8 @@ void pm_place_release(unsigned id)
 
 int pm_place_counts(unsigned id)
 {
-    return (can & PM_CAN_PLACE) && id < PLACE_IDS && bm_has(block_named, id) && place_counts_on && block_obj[id] != 0;
+    return (can & PM_CAN_PLACE) && id < PLACE_IDS && bm_has(block_named, id)
+           && ((place_counts_on && block_obj[id] != 0) || (!block_obj[id] && place_plain(id)));
 }
 
 const char *pm_game_mode_name(unsigned id)
@@ -9994,19 +10063,37 @@ void pm_place_over(int won)
 }
 
 /* PAD-710: a test's way to the claim - the game's START of one of its modes, called as the game's rules call it (its
- * object in r0), from a mode's tick, in a game. 1 = called. The C++ titles only (a plain-C start's arguments are its
- * own). */
+ * object in r0), from a mode's tick, in a game. 1 = called. A plain-C start (no object; its arguments are its own) only
+ * while a claim holds it, so the claim refuses it before any of it runs. */
 int pm_game_mode_start(unsigned id)
 {
     char key[24];
     unsigned f;
-    if (!(can & PM_CAN_PLACE) || id >= PLACE_IDS || !bm_has(block_named, id) || !block_obj[id] || !pm_in_game()) return 0;
+    if (!(can & PM_CAN_PLACE) || id >= PLACE_IDS || !bm_has(block_named, id) || !pm_in_game()) return 0;
+    if (!block_obj[id] && !place_fn[id]) return 0;
     pm_snprintf(key, sizeof key, "block_start_%u", id);
     if (!(f = fn(key))) return 0;
     say("place: the game's %s (mode %u) started for a test (its START at 0x%08x, object 0x%08x)", place_name(id), id, f,
         block_obj[id]);
     ((void (*)(unsigned))(unsigned long)f)(block_obj[id]);
     return 1;
+}
+
+/* PAD-710: a challenge that is one of the game's own modes (`value challenge_place_<n> <id>`, mode_framework.
+ * challenge_places: Bond's Ahoy Mr. Bond, Godzilla's King of the Monsters, Metallica's songs) counts as that mode when a
+ * mode of ours takes it: the take is the START's bookkeeping (its object's on a C++ title, its books on a plain-C one),
+ * and the mode's end (pm_place_over, from mode_file.c and the blocks' end) its stop with the outcome */
+static void place_challenge(unsigned n)
+{
+    char key[40];
+    long id;
+    unsigned up = pm_player();
+    pm_snprintf(key, sizeof key, "challenge_place_%u", n);
+    id = pm_port_value(key, -1);
+    if (id < 0 || id >= PLACE_IDS || !bm_has(block_named, (unsigned)id) || up < 1 || up > 4) return;
+    say("place: challenge %u is the game's %s (mode %ld) - the mode that takes it counts as it", n,
+        place_name((unsigned)id), id);
+    place_begin(block_obj[id], (unsigned)id, up);
 }
 
 /* every tick: an outcome owed to a player who was not up; a game that ended drops it */
@@ -10048,9 +10135,16 @@ static void place_arm(void)
             pm_port_value("mode_stopped_at", -1), pm_port_value("mode_reason_at", -1) >= 0 ? ", a reason byte" : "",
             pm_port_value("mode_starts_at", -1) >= 0 ? ", a start count" : "",
             fn("mode_started") && data("mode_manager") ? ", the STARTED audit" : "");
-    else
-        say("place: a mode may take the place of %d of the game's modes (it counts only as ours: the port names no mode "
-            "framework)", bm_count(block_named));
+    else {
+        unsigned id, n = 0;
+        for (id = 0; id < PLACE_IDS; id++) n += bm_has(block_named, id) && !block_obj[id] && place_plain(id);
+        if (n)
+            say("place: a mode may take the place of %d of the game's modes; %u count as the one they replace through "
+                "the game's own audits and flags (audit add 0x%08x)", bm_count(block_named), n, fn("audit_add"));
+        else
+            say("place: a mode may take the place of %d of the game's modes (it counts only as ours: the port names no "
+                "mode framework)", bm_count(block_named));
+    }
 }
 
 /* ---- the game's Challenge list (PAD-615, optional, title specific) ------------------------------
@@ -10379,7 +10473,7 @@ static int challenge_veto(unsigned *r, unsigned n)
     current = was;
     say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
         took ? "the mode takes it - the game's own does not start" : "the mode let it go - the game's own starts");
-    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n], (int)n); }
+    if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n], (int)n); place_challenge(n); }
     return took != 0;
 }
 
@@ -11466,7 +11560,7 @@ static void challenge_ball_start(void)
         current = was;
         say("challenge %u (%s) picked: %s", n, pm_challenge_name(n),
             took ? "the mode takes it - its pick cleared, the game's own does not start" : "the mode let it go");
-        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n], (int)n); }
+        if (took) { challenge_ours = 1; challenge_ours_ms = pm_ms(); launch_picked(n); chg_picked(challenge_by[n], n, challenge_title[n], (int)n); place_challenge(n); }
         return;
     }
 }

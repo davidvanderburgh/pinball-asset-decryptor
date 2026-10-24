@@ -3978,8 +3978,28 @@ hurry-up that resets itself (Iron Maiden's Soul Shard), a chase that moves on to
 Chase) - does that: it is the game's own outcome.
 
 **The plain-C titles** (Aerosmith, Batman 66, The Beatles, James Bond, Elvira, Guardians, JP The Pin, Metallica,
-Stranger Things, Star Wars ELG, X-Men) have no mode class: their modes are start functions and game flags. A mode can
-hold their starts off (PAD-363) but not yet take one's place and count as it; the Modes tab does not offer it there.
+Stranger Things, Star Wars ELG, X-Men) have no mode class: their modes are start functions and game flags, and the
+game keeps each mode's books in the framework's audits and flags, named after the mode (James Bond LE 1.06's Ahoy Mr
+Bond Wizard Mode: `AUD_AHOY_MR_BOND_WIZARD_MODE_STARTED`, `FG_AHOY_MR_BOND_WIZARD_MODE_PLAYED`, `..._COMPLETED`). Both
+name tables are in the program (`AUD_INVALID` / `FG_INVALID` at id 0: the index is the id), and every build counts an
+audit through the same framework function (`push {r4-r9, lr}; subs r5, r0, #0; sub sp, sp, #0x14`: id in r0, the amount
+in r1). `mode_framework.plain_books` takes each game mode's stem from the ACTIVE / PLAYED flag its start sets (else from
+the port's name, in the spellings the games use: a `MODE_` prefix or `_MODE` suffix, `HURRYUP`, Batman's `MODE_EP_47_48`
+for "episodes 47-48") and writes what it finds:
+
+```
+site  audit_add                     the framework's audit add
+value place_audit_started_<id>      the mode's STARTED (or STARTS) audit
+value place_audit_completed_<id>    its COMPLETED (or COMPLETIONS) audit
+value place_flag_played_<id>        its PLAYED flag
+value place_flag_completed_<id>     its COMPLETED flag
+```
+
+A mode in one's place then counts it the game's way: the STARTED audit counted and the PLAYED flag set at the take, the
+COMPLETED flag set and the COMPLETED audit counted when it completes (nothing on a loss). 167 of the 170 game modes the
+newest plain-C ports name have books (Bond's Bird One Multiball, JP The Pin's Restore Power and one more have none;
+the Modes tab does not offer those). A plain-C start's own arguments are its own, so `pm_game_mode_start` calls one only
+while a claim holds it - the claim refuses it before any of it runs.
 
 **Proven** (emulator, 2026-10-24, the stock cards, hidden, muted; `C:\tmp\PAD-710\rig`, `place_job2.sh` over
 rigbatch): a mode file `in_place_of <id>` with an 8 s clock, the game's START of that mode called as its rules call it,
@@ -3989,6 +4009,24 @@ Godzilla LE/Pro 1.16 Jet Fighter Attack and Jaws LE 1.02 Super Buoys: STARTED au
 0 -> 1 at the end, stopped 1, reason 1; Avengers, Deadpool and King Kong: the STARTED audit 0 -> 1 (those modes keep no
 COMPLETED audit), stopped 1; the crule generation and Star Wars: stopped 1, wins 0 -> 1. Venom starts its Mini Mode 01
 by itself as a ball starts: the claim took it there too.
+
+The plain-C titles (run plain2, `place_job4.sh`): all 16 newest builds - the STARTED audit 0 -> 1 at the take on every
+one with an audit add, the COMPLETED audit 0 -> 1 at the end on Batman, Beatles, JP The Pin, Metallica and X-Men, the
+PLAYED and COMPLETED flags on Bond LE/Pro (Ahoy Mr Bond) and the PLAYED flag on Stranger Things; Star Wars ELG (no
+audit add) its COMPLETED flag 67 set and read back. The game played on after each.
+
+**A challenge that is one of the game's modes.** A challenge (below) whose words lead one of the port's game modes'
+names (`mode_framework.challenge_places`: Bond's Ahoy Mr. Bond = Ahoy Mr Bond Wizard Mode, Godzilla's King of the
+Monsters, Jaws' 4th of July, Metallica's songs, Rush's 2112) has the line
+
+```
+value challenge_place_<n> <id>      challenge n is the game's mode id
+```
+
+and a mode of ours taking that challenge counts as the mode: its START's bookkeeping at the take, its stop (C++) or
+books (plain-C) with the outcome at the mode's end (`pm_place_over`, from mode_file.c and the blocks' end). Proven on
+Bond LE 1.06 (emulator, Default Game Mode = Ahoy Mr. Bond): STARTED audit 180 counted and PLAYED flag 86 set at the
+take, the mode's clock ran out (won) and COMPLETED flag 89 was set.
 
 ## A mode in the game's Challenge list (PAD-615)
 

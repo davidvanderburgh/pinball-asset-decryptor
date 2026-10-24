@@ -2595,8 +2595,10 @@ def to_c(program, slug):
     L.append("static unsigned total_due;            /* PAD-574: ticks until its TOTAL: an Award it ended on shows first */")
     L.append("static int drain_long;                 /* PAD-622: its TOTAL at a drain, as long as the game's own */")
     L.append("static int drain_hold;                 /* PAD-622: the game's end of ball waits on it (set once it does) */")
-    if battle_slots or place_ids or g.battle_won:
+    if battle_slots or place_ids or challenge_names or g.battle_won:
         L.append("static int battle_won;                 /* PAD-706: an End the mode block won the battle it replaced */")
+    if challenge_names:
+        L.append("static int challenge_run;              /* PAD-710: it runs on a challenge pick: its end counts the game's mode */")
     if battle_slots:
         L.append("static int battle_held;                /* PAD-706: it runs on a battle pick: its end gives the pick back */")
     if place_ids:
@@ -3066,7 +3068,7 @@ def to_c(program, slug):
     L.append("        pm_log(\"isolated: gives way - one of the game's modes starting ends it\");")
     L.append("    }")
     L.append("    run.own_mball = 0;")
-    if battle_slots or place_ids or g.battle_won:
+    if battle_slots or place_ids or challenge_names or g.battle_won:
         L.append("    battle_won = 0;")
     L.append("    run.on = 1;")
     L.append("    run.player = pm_player();")
@@ -3127,7 +3129,7 @@ def to_c(program, slug):
     L.append("{")
     L.append("    if (!run.on || ending) return;    /* an End block in When the mode ends */")
     L.append("    ending = 1;")
-    if battle_slots or place_ids:
+    if battle_slots or place_ids or challenge_names:
         L.append("    const int won = battle_won;       /* PAD-706: as it ended, before When the mode ends runs */")
     L.append("    on_mode_end();")
     L.append("    ending = 0;")
@@ -3189,6 +3191,11 @@ def to_c(program, slug):
         L.append("        battle_held = 0;")
         L.append('        pm_log("the battle it took the place of: %s", won ? "WON" : "lost");')
         L.append("        pm_roster_over(won);")
+        L.append("    }")
+    if challenge_names:
+        L.append("    if (challenge_run) {              /* PAD-710: a challenge that is one of the game's modes counts as it */")
+        L.append("        challenge_run = 0;")
+        L.append("        pm_place_over(won);")
         L.append("    }")
     if place_ids:
         L.append("    if (place_held) {                 /* PAD-710: the game's mode it ran in the place of: the game counts it */")
@@ -3500,6 +3507,7 @@ def to_c(program, slug):
         if g.mech:
             L.append("            ball_starting = 1;            /* PAD-621: no hold that waits for a ball at the post */")
         L.extend("        " + line if line else line for code in challenge_scripts for line in code.split("\n"))
+        L.append("            if (run.on) challenge_run = 1;   /* PAD-710 */")
         if g.mech:
             L.append("            ball_starting = 0;")
         L.append("        }")

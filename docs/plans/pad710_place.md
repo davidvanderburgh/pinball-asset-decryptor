@@ -44,14 +44,24 @@ notices), a mode file `in_place_of <id>` with an 8 s clock (so it completes by i
 then the game playing on 5 s. Pass = the game recorded the completion (stopped, wins up, or the COMPLETED audit up).
 Godzilla LE 1.16 Jet Fighter Attack: STARTED 0 -> 1 at the take, COMPLETED 0 -> 1 at the end, stopped 1, reason 1.
 
+## Run 2: the plain-C titles
+
+No mode class, so no framework stop: the game keeps a mode's books in its audits and flags, named after it
+(`mode_framework.plain_books`; MODE_SDK.md "The plain-C titles"). Reading audit ids out of the start functions' code
+was unreliable (they count through wrappers), the ACTIVE flag a start sets is clean: its stem names the mode's books.
+167 of 170 game modes of the 16 newest plain-C ports have them. The runtime counts them at the take (STARTED audit,
+PLAYED flag) and at a completed end (COMPLETED flag and audit); a test start on a plain-C title only while claimed.
+Proof: `place_job3.sh` (the instrument reads the audits through the audit add's table and the flags from the bitmap).
+Sweep plain2 (`place_job4.sh`, final runtime): 16/16 - the job reported Star Wars ELG a fail only because the
+instrument reads audits through the audit add ELG lacks; the runtime's own bit read-back showed its COMPLETED flag set.
+Star Wars ELG's first "audit add" was a lookalike (the same three head words, a function taking stack arguments): the
+signature now needs the table load and the 16-byte record index too, and ELG counts through its flags alone.
+
+Challenges: `value challenge_place_<n> <id>` (by the names' words) on Godzilla x3, Bond x2, Jaws x2, Metallica x2 and
+Rush x3; the take counts the START (`place_challenge`), the end `pm_place_over`. Proven on Bond LE (the PAD-696 kit,
+Default Game Mode 3): STARTED audit 180, PLAYED flag 86, then COMPLETED flag 89.
+
 ## Not done here
 
-- The plain-C titles (no mode class): their modes are start functions and flags. Next run: the names line up with
-  the game's own books (James Bond LE 1.06: block_name "Ahoy Mr Bond Wizard Mode" -> AUD_AHOY_MR_BOND_WIZARD_MODE_STARTED,
-  FG_AHOY_MR_BOND_WIZARD_MODE_PLAYED / _COMPLETED; "Bullshit Scoring" -> AUD_BULLSHIT_SCORING_STARTED,
-  FG_BULLSHIT_SCORING_PLAYED), so a mode in one's place can count there through the framework's audit add (the same
-  function on every build: `push {r4-r9, lr}; subs r5, r0, #0; ...; movw/movt r4 = the audit table`) and the game's flag
-  set, the ids read off the FG_ / audit name tables (memory plain-c-fg-flag-names); the route itself (the claim at the
-  start function) needs the plain-C start's arguments for a test start.
-- A challenge (PAD-615/619) whose challenge is one of the game's modes does not count as that mode yet.
+- (Done in run 2, below.)
 - D&D LE 1.10: no game starts on the rig (attract loop, known); its framework is D&D Pro's (proven).

@@ -1050,6 +1050,22 @@ PLACE_PROVEN = frozenset({
     "venom_le-1.07",                 # PAD-710 run r3: Mini Mode 01 (19) - the game started it itself as the ball started and the mode took it; the test's start completed it by its clock: stopped 1, wins 0 -> 1
     "venom_pro-1.07",                # PAD-710 run r3: the same on the stock Pro card: stopped 1, wins 0 -> 1
     "jurassic_park_pro-1.16",        # PAD-710 run r3: Escape Nublar (127): starts 0 -> 1, completed by its clock: stopped 1. Ctrl Room Virus Attack (121), Restore Power (122) and Trex Chase (119) ask their own "stopped already?" first: the game's stop ran and wrote their own outcome (Trex Chase: its award)
+    "aerosmith-1.16",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
+    "aerosmith_le-1.16",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
+    "batman-1.14",                   # PAD-710 run plain2: Catwoman (episodes 19-20) (1): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
+    "beatles-1.29",                  # PAD-710 run plain2: All My Loving (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
+    "elvira3-1.13",                  # PAD-710 run plain2: Houses (whichever House is selected) (0): its books, the game played on: STARTED audit 0 -> 1
+    "guardians-1.15",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit +1
+    "guardians_le-1.15",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
+    "james_bond_le-1.06",            # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. Challenge 1 (Ahoy Mr. Bond) taken by a mode file: STARTED audit 180, PLAYED flag 86, won: COMPLETED flag 89
+    "james_bond_pro-1.06",           # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set
+    "jurassic_park_the_pin-1.05",    # PAD-710 run plain2: Stegosaurus (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
+    "metallica_spike-1.04",          # PAD-710 run plain2: Battery (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
+    "star_wars_elg-1.10",            # PAD-710 run plain2: Orbits (1): no audit add, its flags only: COMPLETED flag 67 set, read back by the runtime
+    "stranger_things-1.13",          # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set
+    "stranger_things_le-1.13",       # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set
+    "uncanny_xmen_le-0.98",          # PAD-710 run plain2: Fastball Special (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
+    "uncanny_xmen_pro-0.98",         # PAD-710 run plain2: Fastball Special (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
 })
 #: PAD-710: what counting as the game's mode needs: the game's own mode framework (mode_framework.py)
 PLACE_COUNT_NEEDS = (("mode_player",), (), ("mode_slot_stop", "mode_stopped_at"))
@@ -1061,22 +1077,39 @@ def _place_counts(port):
     return bool(port) and all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
 
 
+def _plain_books(port, i):
+    """PAD-710: 1 when a plain-C port names the books of its mode ``i`` (its STARTED / COMPLETED audits, its PLAYED /
+    COMPLETED flags) and the framework's audit add: a mode in its place counts as it."""
+    if not port:
+        return False
+    audits = "audit_add" in port["site"] and any("place_%s_%d" % (k, i) in port["value"]
+                                                 for k in ("audit_started", "audit_completed"))
+    flags = bool(port["data"].get("game_flags")) and any("place_%s_%d" % (k, i) in port["value"]
+                                                         for k in ("flag_played", "flag_completed"))
+    return audits or flags
+
+
 def _places(port):
     """PAD-710: ``((id, name, counts), ...)``, in id order: the game's own modes a mode may run in the place of - the
-    ones whose START the port names with the mode's object (PAD-363's block lines on a C++ title), and not one of the
-    battle selection's battles where the build has one (those are the battle hat's, PAD-706). ``counts``: where the
-    port names the game's mode framework, the mode counts as the game's."""
+    ones whose START the port names (PAD-363's block lines: with the mode's object on a C++ title; on a plain-C title
+    the ones whose own books the port names), and not one of the battle selection's battles where the build has one
+    (those are the battle hat's, PAD-706). ``counts``: the mode counts as the game's (the C++ framework, or the plain-C
+    mode's books)."""
     if not port:
         return ()
     counts = _place_counts(port)
     roster = "roster_start" in port["site"]
     out = []
     for i, name, _on in _game_modes(port):
-        if not port["data"].get("block_obj_%d" % i):
+        if port["data"].get("block_obj_%d" % i):
+            c = counts
+        elif _plain_books(port, i):
+            c = True
+        else:
             continue
         if roster and name.startswith("Battle vs"):
             continue
-        out.append((i, name, counts))
+        out.append((i, name, c))
     return tuple(out)
 
 

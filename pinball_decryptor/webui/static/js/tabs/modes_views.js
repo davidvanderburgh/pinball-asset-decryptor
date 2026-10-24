@@ -46,14 +46,17 @@ export function names(sc, name, lamp = false) {
   let hit = false;
   eachPart(sc, (o) => {
     if (lamp) { if ((o.op && insertNames(o).includes(name)) || o.solid === name) hit = true; }
-    else if (o.shot === name) hit = true;
+    else if (o.shot === name || (Array.isArray(o.shots) && o.shots.flat().includes(name))) hit = true;   // PAD-708: a combo's
   });
   return hit;
 }
 
 export function usedShots(prog) {
   const out = new Set();
-  eachPart(prog.scripts || [], (o) => { if (typeof o.shot === "string" && o.shot && o.shot !== "*") out.add(o.shot); });
+  eachPart(prog.scripts || [], (o) => {
+    if (typeof o.shot === "string" && o.shot && o.shot !== "*") out.add(o.shot);
+    if (Array.isArray(o.shots)) o.shots.flat().forEach((x) => { if (typeof x === "string" && x && x !== "*" && x !== "lit") out.add(x); });   // PAD-708
+  });
   return out;
 }
 
@@ -71,10 +74,18 @@ export function hatWords(h = {}, ch = {}) {
     case "seconds_left": return `When ${h.seconds} seconds are left`;
     case "event": return `When ${eventLabel(h.event, ch)}${when}`;
     case "timer_done": return `When timer ${h.timer} runs out`;
+    case "combo": return `When ${comboWords(h)}${when}`;      // PAD-708
     case "battle": return `When the player picks ${h.name || (h.slot == null ? "a battle" : `battle ${h.slot}`)} on the battle selection screen`;   // PAD-706
     case "challenge": return `When the player picks the challenge ${h.challenge || "?"}${h.launch === "player" ? ", the player launching its ball" : /^\d+$/.test(h.launch || "") ? `, its ball launched ${h.launch} s after it starts` : ""}`;   // PAD-615, PAD-643
     default: return h.kind || "";
   }
+}
+
+// PAD-708: a combo's shots and window in words: block_modes.combo_words
+const COMBO_STEP = { lit: "a lit shot", "*": "any shot" };
+export function comboWords(h = {}) {
+  const steps = (Array.isArray(h.shots) ? h.shots : []).map((x) => (Array.isArray(x) ? x.join(" or ") : COMBO_STEP[x] || x) || "?");
+  return `${steps.join(", then ") || "?"}${steps.length > 2 ? ", each" : ""} within ${h.seconds ?? "?"} s${h.name ? ` (${h.name})` : ""}`;
 }
 
 const eventLabel = (name, ch = {}) => ((ch.events || []).find((x) => x.name === name) || {}).label || name;
@@ -117,6 +128,8 @@ export function valWords(e) {
     case "balls": return "balls in play";
     case "player": return "the player up";
     case "timer_left": return `ms left on ${e.timer || "?"}`;
+    case "combo_chain": return "combos in a row";                         // PAD-708
+    case "combo_steps": return `shots made of ${e.combo || "?"}`;
     case "op": return `(${valWords(e.a)} ${SYM[e.op] || e.op} ${valWords(e.b)})`;
     default: return condWords(e);
   }
@@ -216,7 +229,7 @@ export function ruleLines(stack, ch = {}, depth = 0) {
 
 // ------------------------------------------------------------------ Story: the mode's life (PAD-614)
 // A shot, any-shot or game-event rule has a "when" (not running / runs / any time): the Story moves it between boxes
-export const MOVABLE = new Set(["shot", "any_shot", "switch", "event", "drain"]);
+export const MOVABLE = new Set(["shot", "any_shot", "switch", "event", "drain", "combo"]);   // PAD-708: a combo too
 
 // Where each rule sits: waiting / running / any (a movable rule's when), start / end (on the arrows), drain (the
 // ball drains), and the clock's rules inside running

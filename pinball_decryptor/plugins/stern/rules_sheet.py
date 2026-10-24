@@ -118,6 +118,11 @@ def _idle_shots(program):
             out.append(ANY_SHOT)
         elif h.get("kind") == "switch" and SWITCH not in out:
             out.insert(0, SWITCH)               # first: a shot is its switch's hit too, so it counts there as well
+        elif h.get("kind") == "combo":          # PAD-708: its shots, in its order
+            for step in BM.combo_steps(h):
+                for x in [ANY_SHOT] if step == BM.COMBO_ANY else BM.step_shots(step):
+                    if x and x not in out:
+                        out.append(x)
     return out
 
 
@@ -127,7 +132,47 @@ def _running_shots(program):
         h = s.get("hat") or {}
         if (h.get("when") or "any") != "idle" and h.get("kind") == "shot" and h.get("shot") and h["shot"] not in out:
             out.append(h["shot"])
+        elif (h.get("when") or "any") != "idle" and h.get("kind") == "combo":     # PAD-708
+            for step in BM.combo_steps(h):
+                out.extend(x for x in BM.step_shots(step) if x and x not in out)
     return out
+
+
+def combo_words(hat):
+    """PAD-708: a combo as the sheet says it: ``Left ramp, then Right ramp within 3 s``."""
+    steps = [BM.combo_shot_words(x) for x in BM.combo_steps(hat)]
+    return "%s%s within %s" % (", then ".join(steps), ", each" if len(steps) > 2 else "", secs(BM.combo_ms(hat)))
+
+
+def _starts_it(stack):
+    return any(b.get("op") in ("start_mode", "light_mode") for b in BS.walk(stack))
+
+
+def _idle_combos(program):
+    """PAD-708: the combos a mode not running listens to that start it (or light it), with no lit shot in them."""
+    return [h for s in program.get("scripts") or [] for h in [s.get("hat") or {}]
+            if h.get("kind") == "combo" and (h.get("when") or "any") != "running" and _starts_it(s.get("do"))
+            and len(BM.combo_steps(h)) >= 2 and BM.COMBO_LIT not in BM.combo_steps(h)]
+
+
+def _combo_until(sim, hat, tries=START_TRIES // 4):
+    """Make the combo's shots in its order, inside its window, until the mode starts (or is lit, and then started).
+    ``(combos made, how)`` or None."""
+    steps = [ANY_SHOT if x == BM.COMBO_ANY else x[0] if isinstance(x, list) else x for x in BM.combo_steps(hat)]
+    gap = max(50, min(SHOT_GAP_MS, BM.combo_ms(hat) // 2))
+    for n in range(1, tries + 1):
+        for shot in steps:
+            sim.shot(shot)
+            sim.advance(gap)
+            if sim.running:
+                return n, "start"
+        if sim.lit is not None:
+            lit = sim.lit
+            sim.shot(lit)
+            sim.advance(SHOT_GAP_MS)
+            return (n, "lit:" + lit) if sim.running else None
+        sim.advance(BM.combo_ms(hat) + SHOT_GAP_MS)      # the next combo is one of its own, not a chain
+    return None
 
 
 def _shared_read(program):
@@ -207,6 +252,18 @@ def start_rule(program, others=()):
     idle = _idle_shots(program)
     base = BS.Sim(program)
     result = {"counts": [], "shots": [], "lit": "", "run": None, "words": ""}
+    for hat in _idle_combos(program):           # PAD-708: a combo starts it
+        sim = base.copy()
+        got = _combo_until(sim, hat)
+        if got:
+            counts, run = _starts(sim, got[0], lambda s, h=hat: _combo_until(s, h))
+            words = "Combo " + combo_words(hat)
+            if any(c != 1 for c in counts):
+                words += " (%s combos)" % counts_words(counts)
+            result.update(counts=counts, shots=[s for x in BM.combo_steps(hat) for s in BM.step_shots(x)], run=run,
+                          lit=got[1][4:] if got[1].startswith("lit:") else "")
+            result["words"] = words + _lit_tail(got[1], [])
+            return result
     firsts = {}                                 # shot -> (hits, how, sim at the start)
     for shot in idle:
         for probe in (None, _join_probe):
@@ -426,6 +483,15 @@ def play(program, sim, quick=False):
             if best is None or rank > best:
                 pick, best = shot, rank
         if pick is None or best[0] == 0 or best[0] == 1 and best[1] == 0:
+            n0 = len(sim.events)
+            made = _try_combo(program, sim, stage_of)   # PAD-708: no one shot does anything; a combo might
+            if made:
+                for shot in made:
+                    _note_shot(cur, shot, sim.events[n0:])
+                cur["made"] = cur.get("made", 0) + len(made)
+                if not sim.running or cur["made"] > STAGE_SHOTS and stage_of(sim) == cur["n"]:
+                    break
+                continue
             stall += 1                                  # nothing lit does anything yet: let the game go on
             if stall > STALL_SHOTS * 4:
                 break
@@ -451,6 +517,55 @@ def play(program, sim, quick=False):
     return record
 
 
+def _combo_shots(hat, sim):
+    """PAD-708: a running combo's shots as the player would make them now: a lit step a shot the mode lights."""
+    lit = list(sim.lit_shots)
+    out = []
+    for x in BM.combo_steps(hat):
+        if x == BM.COMBO_LIT:
+            if not lit:
+                return None
+            x = lit[len(out) % len(lit)]
+        elif x == BM.COMBO_ANY:
+            x = lit[0] if lit else ANY_SHOT
+        elif isinstance(x, list):               # one of several: a lit one if any is
+            x = next((y for y in x if y in lit), x[0] if x else "")
+        out.append(x)
+    return out if len(out) >= 2 else None
+
+
+def _make_combo(sim, hat, shots):
+    gap = max(50, min(SHOT_GAP_MS, BM.combo_ms(hat) // 2))
+    for shot in shots:
+        sim.shot(shot)
+        sim.advance(gap)
+        if not sim.running:
+            break
+
+
+def _try_combo(program, sim, stage_of):
+    """PAD-708: the first combo of the running mode that does something (moves the stage, changes a value or pays)
+    made for real; its shots, or None."""
+    for s in program.get("scripts") or []:
+        h = s.get("hat") or {}
+        if h.get("kind") != "combo" or (h.get("when") or "any") == "idle":
+            continue
+        shots = _combo_shots(h, sim)
+        if not shots:
+            continue
+        cp = sim.copy()
+        n0 = len(cp.events)
+        before = dict(cp.vars)
+        _make_combo(cp, h, shots)
+        evs = cp.events[n0:]
+        if not any(e[0] == "combo_made" for e in evs):
+            continue
+        if stage_of(cp) != stage_of(sim) or cp.vars != before or any(e[0] == "score" for e in evs):
+            _make_combo(sim, h, shots)
+            return shots
+    return None
+
+
 def _note_shot(st, shot, events):
     for i, (s, n) in enumerate(st["shots"]):
         if s == shot:
@@ -461,6 +576,8 @@ def _note_shot(st, shot, events):
     for e in events:
         if e[0] == "timer" and e[2] >= WINDOW_MIN_MS:
             st.setdefault("timers", []).append(e[2])
+        elif e[0] == "combo_made" and e[1] not in st.setdefault("combos", []):   # PAD-708: by its script, in the
+            st["combos"].append(e[1])                                         # stage whose shot made it
 
 
 def burst(shot):
@@ -582,6 +699,8 @@ def stage_line(st, mode_name, seconds=0):
     window = _window(st)
     if window:
         extra.append("%s for each shot" % secs(window))
+    for h in st.get("combo_hats") or []:          # PAD-708
+        extra.append("combo " + combo_words(h))
     if extra:
         line += " (%s)" % ", ".join(extra)
     return line
@@ -593,8 +712,10 @@ def blocks_rules(program, others=()):
     run = start.get("run") or {"stages": [], "cash": "", "balls": 1}
     name = program.get("name") or ""
     ending = end_titles(program)
+    scripts = program.get("scripts") or []
     for st in run["stages"]:
         st["ending"] = ending
+        st["combo_hats"] = [scripts[i].get("hat") for i in st.get("combos") or [] if i < len(scripts)]
     lines = [stage_line(st, name, int(program.get("seconds") or 0)) for st in run["stages"]]
     return {"name": name, "start": start["words"], "stages": lines, "cash": _cash_word(run["cash"]),
             "balls": run["balls"], "seconds": int(program.get("seconds") or 0), "counts": start["counts"]}

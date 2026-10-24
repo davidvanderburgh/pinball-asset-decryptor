@@ -213,6 +213,9 @@ Done in run 2 (all nine now):
   waits out that Award (and one Award of When the mode ends after it) before the TOTAL. The game's own TOTAL is a blocking end
   sequence that draws its own frames (Goldfinger 0xc0b50: the score display, the total scene 16d675aa, a frame, until
   done), which a mode cannot borrow.
+- PAD-709: a scored number (a Words or Award block with a value) while a words-alone mode runs goes large under the
+  bar (`PadMode_<slug>_Points`, info_line_at + 110 px, 5x), the info line hidden meanwhile, not over the TV; laid out
+  in the Scenes editor as `points_layout`.
 - The loop takes the TV at once when asked or after a full-screen clip of the mode's, and back from the game's
   main-play video (`text backdrop_idle MainPlayLoop`).
 - End to end in the emulator (runs e2-e6, and m1 with main's code for the before): the artifacts' emulator_yolt pair.

@@ -4976,6 +4976,8 @@ def asset_names(slug):
         "total_name_text": stem + "_TotalName." + stem + "_TotalName_Words",
         "total_node": stem + "_Total",                   # ...and under it the number, large
         "total_text": stem + "_Total." + stem + "_Total_Words",
+        "points_node": stem + "_Points",                 # PAD-709: a scored shot's number, large under its bar
+        "points_text": stem + "_Points." + stem + "_Points_Words",
         "clip": stem + "_Clip",
     }
 

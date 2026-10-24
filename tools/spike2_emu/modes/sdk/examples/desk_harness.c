@@ -100,6 +100,8 @@ static int n_nodes;
 static void *fake(const char *path)
 {
     int i;
+    const char *gone = getenv("HARNESS_NO_NODE");     /* PAD-709: a card built without this node (a part of its name) */
+    if (gone && gone[0] && strstr(path, gone)) return 0;
     for (i = 0; i < n_nodes; i++)
         if (!strcmp(nodes[i].name, path)) return &nodes[i];
     if (n_nodes == 4096) return 0;

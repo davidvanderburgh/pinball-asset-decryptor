@@ -764,6 +764,26 @@ def total_screens(names, prof):
     return out
 
 
+#: PAD-709: a words-alone mode's scored shot as the game's own mini-wizards show one (James Bond: the points, large and
+#: white, under the status bar - not over the TV): a clear strip centred this far under the title's info line place, the
+#: number at this size (the game's own at 1360x768: condensed digits about 140 px high, 1,000,000 about 700 px wide,
+#: about y 620, x 678; the HUD font is wider, so 5x: about 100 px high and 760 wide, emulator-measured)
+POINTS_ART = (920, 40)             # clear: only its middle matters (the number is drawn about it, larger)
+POINTS_DY, POINTS_SCALE = 110.0, 5.0
+
+
+def points_screen(names, prof):
+    """PAD-709: the screen of a words-alone mode's scored shot (``PadMode_<slug>_Points``), built blank: a Words or
+    Award block with a number, while the mode runs, writes the number into it and shows it for its moment (its info
+    line hidden meanwhile), so the game's video above stays clear."""
+    w, h = POINTS_ART
+    cx, cy = getattr(prof, "info_at", ()) or INFO_AT_DEFAULT
+    return dict(name=names["points_node"], art_rgba=np.zeros((h, w, 4), dtype=np.uint8), words=" ",
+                words_name=names["points_text"].split(".", 1)[1], x=cx - w / 2.0, y=cy + POINTS_DY - h / 2.0,
+                words_at=(w / 2.0 - w * POINTS_SCALE / 2.0, h / 2.0 + 16.0 * POINTS_SCALE), words_scale=POINTS_SCALE,
+                words_rgba=(1.0, 1.0, 1.0, 1.0))
+
+
 #: PAD-323: what a mode's ``screen_layout`` holds (MODE_PARAMETERS.md), all optional: the
 #: picture's top-left on the glass, the whole screen's size, the words' place on the picture and
 #: their own size, and the HUD scene's root child the screen is drawn under (0 = under all of it)
@@ -882,10 +902,11 @@ def _code_screens(project, code, prof):
     # PAD-547: a mode's info line, a screen of its own wherever the title's port puts one
     out += [with_layout(info_screen(MP.asset_names(slug), prof), getattr(spec, "info_layout", None))
             for slug, spec in code or () if getattr(spec, "info_line", False) and prof.can("screen")]
-    # PAD-574: a words-alone screen's TOTAL, where the game's own modes put theirs
+    # PAD-574: a words-alone screen's TOTAL, where the game's own modes put theirs; PAD-709: and its scored shots
     return out + [s for slug, spec in code or ()
                   if spec.screen and getattr(spec, "screen_style", "") == "words" and prof.can("screen")
-                  for s in total_screens(MP.asset_names(slug), prof)]
+                  for s in total_screens(MP.asset_names(slug), prof)
+                  + [with_layout(points_screen(MP.asset_names(slug), prof), getattr(spec, "points_layout", None))]]
 
 
 def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result, made=None,

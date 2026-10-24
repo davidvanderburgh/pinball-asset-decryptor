@@ -204,3 +204,59 @@ def test_a_blocks_modes_info_line_is_laid_out_into_its_assets(tmp_path):
         assert w.call("text_scenes.mode_layout_auto")
         assert info() == {} and CM.load(project, slug).screen_layout == {}
         assert w.call("text_scenes.mode_layout_done")
+
+
+def test_a_words_alone_modes_scored_number_is_laid_out_into_its_assets(tmp_path):
+    """PAD-709: a words-alone blocks mode's scored number (a shot's points, large under the bar) comes into the editor
+    as a part of its own beside its screen and its info line, where the build puts it; dragging or sizing it writes the
+    mode's points_layout alone, the build reads it, and Place automatically clears it."""
+    from pinball_decryptor.plugins.stern import block_modes as BM
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import scene_edit
+    from pinball_decryptor.webui import scene_mode_layout as ML
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    project = str(folder)
+    slug, _c = BM.new_blocks_mode(project, "BOND VS SUMO")
+    BM.save(project, slug, BM.normalize({
+        "name": "BOND VS SUMO", "screen": True, "screen_style": "words", "vars": [{"name": "superjackpot"}],
+        "info": {"on": True, "text": "SUPER JACKPOT", "value": {"k": "var", "name": "superjackpot"}}, "scripts": []}))
+    spec = CM.load(project, slug)
+    spec.extra["title"] = "godzilla_pro_1_15"
+    CM.save(project, slug, spec)
+    pts = lambda: CM.load(project, slug).points_layout                 # noqa: E731
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(lambda: w.window.write_assets_var.set(project))
+        text = w.window.service("text")
+        ok, why = w.run(text.scenes.open_mode_layout, project, slug)
+        assert ok, why
+        assert _wait(w, lambda: ML.POINTS_GROUP_ID in {l["id"] for l in (_tv(w) or {}).get("layers") or ()})
+        assert w.state("text_scenes")["mode_layout"]["what"] == "screen, info line and scored number"
+        layers = {l["id"]: l for l in _tv(w)["layers"]}
+        assert layers[ML.POINTS_GROUP_ID]["name"] == "PadMode_%s_Points" % slug and layers[ML.POINTS_ART_ID]["mode"]
+        assert layers[ML.POINTS_GROUP_ID]["edits"] == "the mode's scored number, placed automatically"
+        # where the build puts it: under the info line's place, by POINTS_DY
+        aw, ah = MA.POINTS_ART
+        x0, y0 = MA.INFO_AT_DEFAULT[0] - aw / 2, MA.INFO_AT_DEFAULT[1] + MA.POINTS_DY - ah / 2
+        box = w.run(text.scenes._tree_box, ML.POINTS_ART_ID)
+        assert (round(box[0]), round(box[1])) == (round(x0), round(y0))
+        part = text.scenes._mlay["parts"]["points"]
+        assert part["words"] == ML.POINTS_SAMPLE and part["words_scale0"] == MA.POINTS_SCALE
+        # a drag of its band moves the number alone, into points_layout; nothing in scene_edits.json
+        assert w.call("text_scenes.tree_move", ML.POINTS_ART_ID, 0, -40)
+        assert pts() == {"x": x0, "y": y0 - 40}
+        spec = CM.load(project, slug)
+        assert spec.screen_layout == {} and spec.info_layout == {}
+        assert scene_edit.ops_for(project, CARD) == []
+        scr = [s for s in MA._code_screens(project, [(slug, spec)], MP.GODZILLA_PRO_1_15)
+               if s["name"].endswith("_Points")][0]
+        assert (scr["x"], scr["y"]) == (x0, y0 - 40)                             # the build reads it
+        assert w.call("text_scenes.tree_undo")
+        assert pts() == {}
+        assert w.call("text_scenes.tree_redo")
+        assert w.call("text_scenes.mode_layout_auto")
+        assert pts() == {}
+        assert w.call("text_scenes.mode_layout_done")

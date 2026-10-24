@@ -3944,7 +3944,8 @@ command line; the card build adds them from the card's own program to a port tha
 them as it is derived):
 
 ```
-site  mode_player            the framework's player byte getter (the index its per-player fields are kept by)
+site  mode_player            the framework's player byte getter (the index its per-player fields are kept by), or
+data  mode_player_at         ... the player byte itself, on an older build that reads it inline (PAD-714)
 value mode_slot_stop         the STOP's virtual slot
 value mode_stopped_at        the per-player stopped byte (mode + this + player)
 value mode_reason_at         the per-player reason byte            (Godzilla's, Jaws' and King Kong's generations)
@@ -3961,6 +3962,16 @@ virtual called on the mode; the slot most mode classes hold such a function at i
 `ldr rX, [rB, #<starts>]; add rX, rX, #1; str` with rB = the mode + 4 * `sxth` of the player byte (a `sub #1; uxtb` index
 is another, 0-based count) in the START slot's functions and what they call; the wins the same in the STOP; the notice a
 `bl` with r0 = the manager constant and r1 = the mode's id (`ldr r1, [r4, #4]`), not a trace print.
+
+**Older builds** (PAD-714: Godzilla LE 1.13, Jaws LE 1.01, Rush LE 1.18, Star Wars LE 1.30, Venom LE 1.06, TMNT Pro 1.58,
+and the other older builds of Avengers, Deadpool, Foo Fighters, Iron Maiden, Jurassic Park, Led Zeppelin, Mando,
+Munsters and Sword of Rage) have no getter: the STOP reads the player up inline - `movw/movt rA, <the player byte>; ldrb
+rX, [rA]`, mostly `sub rX, rX, #1` (a 0-based index, so its offsets are one up: Rush 1.18's stopped byte `[r3, #0x38]` is
+the newest build's +0x37), `add rY, <mode>, rX` - and the port names the byte itself (`data mode_player_at`), which the
+runtime reads where it would call the getter. Each mode's START there counts words of its own beside the framework's,
+so the start count is the one the START most of the mode classes reach keeps (the base class's where it reads). On all
+22 older C++ builds on hand every offset is its newest build's; a slot that is only a jump to the STOP (Godzilla 1.13's
+v[11]) is followed.
 
 | generation | builds | stop | stopped | reason | starts | wins | STARTED audit |
 |---|---|---|---|---|---|---|---|

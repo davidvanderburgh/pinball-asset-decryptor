@@ -26,7 +26,8 @@ as "completed": that is what its wizards and unlocks are gated on.
 
 The port lines (each build's own, never carried from a reference):
 
-  site  mode_player          the player function the framework indexes its per-player fields by
+  site  mode_player          the player function the framework indexes its per-player fields by, or
+  data  mode_player_at       ... the player-up byte itself, on the older builds that read it inline (PAD-714)
   value mode_slot_stop       the STOP's virtual slot (called on the mode's object, so a title's own stop runs)
   value mode_stopped_at      the per-player stopped byte (obj + this + player)
   value mode_reason_at       the per-player reason byte (only where the stop keeps one)
@@ -94,11 +95,205 @@ def _num(s):
     return int(s, 0)
 
 
+#: PAD-714: what an instruction writes besides its first operand: a call the argument registers, a pop / ldm its list
+_CALL_CLOBBERS = ("r0", "r1", "r2", "r3", "ip", "lr")
+_COND = r"(?:eq|ne|cs|cc|hs|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)?"
+_REG = r"r\d+|ip|lr|sb|sl|fp"
+
+
+def _written(m, o):
+    """The registers the instruction (*m*nemonic, *o*perands) writes, as far as the trackers here need: a call the
+    argument registers, a pop / ldm its list, a store, compare or branch none, anything else its first operand."""
+    if re.match(r"blx?%s$" % _COND, m):
+        return set(_CALL_CLOBBERS)
+    if m.startswith(("pop", "ldm")):
+        if "pc" in o:      # a return: the code on is reached from a branch over it (popne: not taken), or not at all
+            return set()
+        return set(re.findall(_REG, o.split("{", 1)[-1]))
+    if re.match(r"(?:str|stm|push|cmp|cmn|tst|teq|nop|bx?%s$)" % _COND, m):
+        return set()
+    first = o.split(",", 1)[0].strip()
+    return {first} if re.match(r"(?:%s)$" % _REG, first) else set()
+
+
+def _inline_track(ins):
+    """PAD-714: the older builds read the player up INLINE where the later ones call a getter (Rush 1.18, Star Wars
+    1.30, Venom 1.06, Godzilla 1.13...): ``movw rA, #lo; movt rA, #hi`` (the player-up byte), ``ldrb rX, [rA]``, often
+    ``sub rX, rX, #1`` (a 0-based index), ``add rY, <mode>, rX`` (``, lsl #2`` for a per-player word). For each
+    instruction, the state before it: ``(consts, idx, ptr, ptr4, objs, reasons)`` - the constants movw/movt built, the
+    registers holding the player index (to the byte address and the amount taken off it), the mode + the index (the
+    same, by byte and by word), and the registers holding the mode (r0 on entry) and the stop's reason (r1). Code
+    after a return or a jump (:func:`_ins` goes on at the target of a branch over it) starts from the state at that
+    branch."""
+    state = ({}, {}, {}, {}, {"r0"}, {"r1"})
+    at_branch = {}
+    out = []
+    ended = False
+    for va, m, o, w in ins:
+        if ended and va in at_branch:
+            state = at_branch[va]
+        state = tuple(dict(x) if isinstance(x, dict) else set(x) for x in state)
+        out.append(tuple(dict(x) if isinstance(x, dict) else set(x) for x in state))
+        consts, idx, ptr, ptr4, objs, reasons = state
+        if (w & 0x0F000000) == 0x0A000000:               # a branch: what the code at its target starts from
+            at_branch.setdefault(S.branch_target(w, va), out[-1])
+        ended = (w >> 28) == 0xE and ((m == "bx") or (m in ("pop", "ldm") and "pc" in o) or m == "b"
+                                      or (m == "ldr" and o.startswith("pc,")))
+        new = {}
+        mm = re.match(r"(r\d+), #(%s)$" % _H, o)
+        if m == "movw" and mm:
+            new["c"] = (mm.group(1), _num(mm.group(2)))
+        elif m == "movt" and mm and mm.group(1) in consts:
+            new["c"] = (mm.group(1), (consts[mm.group(1)] & 0xFFFF) | _num(mm.group(2)) << 16)
+        ml = re.match(r"(r\d+), \[(r\d+)\]$", o)
+        if m == "ldrb" and ml and ml.group(2) in consts:
+            new["i"] = (ml.group(1), (consts[ml.group(2)], 0))
+        ms = re.match(r"(r\d+), (r\d+), #1$", o)
+        if m == "sub" and ms and ms.group(2) in idx:
+            a, c = idx[ms.group(2)]
+            new["i"] = (ms.group(1), (a, c + 1))
+        mv = re.match(r"(r\d+), (r\d+)$", o)
+        if m in ("mov", "uxtb", "sxth") and mv:
+            if mv.group(2) in idx:
+                new["i"] = (mv.group(1), idx[mv.group(2)])
+            if m == "mov" and mv.group(2) in objs:
+                new["o"] = mv.group(1)
+            if m == "mov" and mv.group(2) in reasons:
+                new["r"] = mv.group(1)
+            if m == "mov" and mv.group(2) in ptr:
+                new["p"] = (mv.group(1), ptr[mv.group(2)])
+        ma = re.match(r"(%s), (r\d+), (r\d+)(, lsl #2)?$" % _REG, o)
+        if m == "add" and ma:
+            a, b, sh = ma.group(2), ma.group(3), ma.group(4)
+            if b in objs and a in idx and not sh:
+                a, b = b, a
+            if a in objs and b in idx:
+                new["p4" if sh else "p"] = (ma.group(1), idx[b])
+        if m == "bl" and "r0" in idx:
+            # Jurassic Park 1.15: the index goes through a check of the player number (`mov r0, rX; bl <check>`) and
+            # comes back in r0
+            new.setdefault("i", ("r0", idx["r0"]))
+        for r in _written(m, o) - set(x[0] if isinstance(x, tuple) else x for x in new.values()):
+            consts.pop(r, None), idx.pop(r, None), ptr.pop(r, None), ptr4.pop(r, None)
+            objs.discard(r), reasons.discard(r)
+        for k, v in new.items():
+            reg = v[0] if isinstance(v, tuple) else v
+            for d in (consts, idx, ptr, ptr4):
+                d.pop(reg, None)
+            if k != "o":
+                objs.discard(reg)
+            if k != "r":
+                reasons.discard(reg)
+            if k in ("c", "i", "p", "p4"):
+                {"c": consts, "i": idx, "p": ptr, "p4": ptr4}[k][v[0]] = v[1]
+            elif k == "o":
+                objs.add(v)
+            else:
+                reasons.add(v)
+    return out
+
+
+def _stop_shape_inline(prog, ins, f):
+    """PAD-714: :func:`stop_shape` for a STOP that reads the player up inline (:func:`_inline_track`): the same early
+    return when the player's stopped byte is set, its store of 1 (or the reason) there and the mode's END. Offsets are
+    given as the later builds' are, by the 1-based player (an index taken one off has its offsets one up)."""
+    st = _inline_track(ins)
+    for k in range(min(24, len(ins) - 3)):
+        _va, m, o, _w = ins[k]
+        ml = re.match(r"(r\d+), \[(r\d+), #(%s)\]$" % _H, o) if m == "ldrb" else None
+        if not ml or ml.group(2) not in st[k][2]:
+            continue
+        if ins[k + 1][1] != "cmp" or ins[k + 1][2] != "%s, #0" % ml.group(1):
+            continue
+        if ins[k + 2][1] == "beq":
+            if not any(m2 in ("pop", "bx", "ldm") and (m2 == "bx" or "pc" in o2) for _v, m2, o2, _w2 in ins[k + 3:k + 6]):
+                continue
+        elif ins[k + 2][1] not in ("popne", "bxne", "ldmne", "bne"):
+            continue
+        break
+    else:
+        return None
+    byte, corr = st[k][2][ml.group(2)]
+    stopped = _num(ml.group(3)) - corr
+    ones = set()
+    sets_stopped = end = False
+    reason_at = None
+    for i in range(k + 3, len(ins)):
+        _va, m, o, _w = ins[i]
+        _c, _i, ptr, _p4, objs, reasons = st[i]
+        mm = re.match(r"(r\d+), #1$", o)
+        if m == "mov" and mm:
+            ones.add(mm.group(1))
+        # (Godzilla 1.13 keeps the reason only when it is a first stop: `strbeq`)
+        ms = re.match(r"(r\d+), \[(r\d+), #(%s)\]$" % _H, o) if re.match(r"strb%s$" % _COND, m) else None
+        if ms and ms.group(2) in ptr and ptr[ms.group(2)][0] == byte:
+            at = _num(ms.group(3)) - ptr[ms.group(2)][1]
+            if at == stopped and ms.group(1) in ones | reasons:
+                sets_stopped = True
+            elif ms.group(1) in reasons and at != stopped and reason_at is None:
+                reason_at = at
+        if m in ("blx", "bx") and re.match(r"(?:r\d+|ip)$", o):
+            back = ins[max(0, i - 6):i]
+            if any(b[1] == "mov" and b[2] in ("r0, %s" % x for x in st[i - len(back) + j][4])
+                   for j, b in enumerate(back)) and \
+                    any(b[1] == "ldr" and re.match(r"%s, \[r\d+, #(%s)\]$" % (o, _H), b[2]) for b in back):
+                end = True
+    if not sets_stopped or not end:
+        return None
+    wins = inline_counts(ins, st, byte)
+    return {"player_at": byte, "player": None, "stopped": stopped, "reason": reason_at, "fn": f,
+            "wins": wins[0] if wins else None}
+
+
+def inline_counts(ins, st=None, byte=None):
+    """PAD-714: :func:`player_counts` for code that reads the player up inline: the per-player words it adds one to
+    (``ldr rX, [rB, #off]``, ``add rY, rX, #1`` (or a register holding 1) a few instructions on, ``str rY, [rB,
+    #off]`` a few more on, rB = the mode + 4 * the index all along), as offsets by the 1-based player. *byte*: only an
+    index read from that player-up byte."""
+    st = st or _inline_track(ins)
+    ones = {mm.group(1) for _va, m, o, _w in ins for mm in [re.match(r"(r\d+), #1$", o)] if m == "mov" and mm}
+    out = []
+    for i in range(len(ins) - 2):
+        _va, m, o, _w = ins[i]
+        ml = re.match(r"(r\d+), \[(r\d+), #(%s)\]$" % _H, o) if m == "ldr" else None
+        if not ml or ml.group(2) not in st[i][3]:
+            continue
+        a, c = st[i][3][ml.group(2)]
+        if byte is not None and a != byte:
+            continue
+        for j in range(i + 1, min(i + 5, len(ins) - 1)):
+            ma = re.match(r"(r\d+), %s, (#1|r\d+)$" % ml.group(1), ins[j][2]) if ins[j][1] == "add" else None
+            if ma and (ma.group(2) == "#1" or ma.group(2) in ones):
+                break
+            if ml.group(1) in _written(ins[j][1], ins[j][2]):
+                ma = None
+                break
+        else:
+            ma = None
+        if not ma:
+            continue
+        for k in range(j + 1, min(j + 4, len(ins))):
+            if ins[k][1] == "str" and ins[k][2] == "%s, [%s, #%s]" % (ma.group(1), ml.group(2), ml.group(3))                     and ml.group(2) in st[k][3] and st[k][3][ml.group(2)] == (a, c):
+                out.append(_num(ml.group(3)) - 4 * c)
+                break
+    return out
+
+
 def stop_shape(prog, f):
-    """The framework STOP's facts for the function at *f*, or None when it is not of that shape."""
+    """The framework STOP's facts for the function at *f*, or None when it is not of that shape. PAD-714: a slot that
+    is only a jump to the STOP (Godzilla 1.13) is followed, and a STOP that reads the player up inline (the older
+    builds) is read by :func:`_stop_shape_inline` (``player_at``: the player-up byte, ``player`` None)."""
+    w = prog.word(f)
+    if w is not None and (w & 0xFF000000) == 0xEA000000:
+        f = S.branch_target(w, f)
     ins = _ins(prog, f)
     if len(ins) < 12:
         return None
+    return _stop_shape_call(prog, ins, f) or _stop_shape_inline(prog, ins, f)
+
+
+def _stop_shape_call(prog, ins, f):
+    """:func:`stop_shape` for a STOP that calls the framework's player getter (every newest build)."""
     obj = reason = None
     for _va, m, o, _w in ins[:12]:
         mm = re.match(r"(r\d+), (r\d+)$", o)
@@ -196,10 +391,11 @@ def player_counts(ins):
     return out
 
 
-def start_facts(prog, f, player):
-    """The START's per-player start count offset and the manager call (fn, manager) in the function at *f*."""
+def start_facts(prog, f, player, player_at=None):
+    """The START's per-player start count offset and the manager call (fn, manager) in the function at *f*.
+    *player_at*: the player-up byte, on a build that reads it inline (PAD-714)."""
     ins = _ins(prog, f)
-    starts = player_counts(ins)
+    starts = player_counts(ins) + (inline_counts(ins, byte=player_at) if player_at else [])
     calls = []
     for i in range(len(ins) - 2):
         _va, m, o, _w = ins[i]
@@ -252,18 +448,22 @@ def find(elf, start_slot=None):
             if f not in shapes:
                 shapes[f] = stop_shape(prog, f)
             if shapes[f]:
-                votes[(k, shapes[f]["stopped"], shapes[f]["player"])] += 1
+                votes[(k, shapes[f]["stopped"], shapes[f]["player"], shapes[f].get("player_at"))] += 1
     if not votes:
         out.notes.append("no function of the framework STOP's shape in the mode classes")
         return out
-    (slot, stopped, player), n = votes.most_common(1)[0]
+    (slot, stopped, player, player_at), n = votes.most_common(1)[0]
     base = collections.Counter()
     for c in classes:
         f = prog.word(model[c]["vtable"] + 8 + 4 * slot)
         if f and shapes.get(f) and shapes[f]["stopped"] == stopped:
             base[f] += 1
     stop = shapes[base.most_common(1)[0][0]]
-    out.update(mode_player=player, mode_slot_stop=slot, mode_stopped_at=stopped)
+    if player is not None:
+        out["mode_player"] = player
+    else:
+        out["mode_player_at"] = player_at            # PAD-714: no getter on this build: the player-up byte itself
+    out.update(mode_slot_stop=slot, mode_stopped_at=stopped)
     if stop["reason"] is not None:
         out["mode_reason_at"] = stop["reason"]
     if stop.get("wins") is not None:
@@ -283,7 +483,16 @@ def find(elf, start_slot=None):
         if slot_k is None or slot_k in tried:
             continue
         tried.append(slot_k)
-        starts, calls = _start_scan(prog, model, classes, int(slot_k), player)
+        starts, calls = _start_scan(prog, model, classes, int(slot_k), player, player_at)
+        if player_at is not None:
+            # PAD-714: an older build's mode STARTs count their own per-player words beside the framework's; the base
+            # class's START (cmode's, crule's) counts only the framework's
+            for root in ("cmode", "crule"):
+                g = prog.word(model[root]["vtable"] + 8 + 4 * int(slot_k)) if model.get(root, {}).get("vtable") else 0
+                own = inline_counts(_ins(prog, g), byte=player_at) if g and g >= 0x8000 else []
+                if own:
+                    starts = collections.Counter({own[0]: 1})
+                    break
         if starts:
             break
     if starts is None:
@@ -301,21 +510,25 @@ def find(elf, start_slot=None):
     return out
 
 
-def _start_scan(prog, model, classes, slot, player):
+def _start_scan(prog, model, classes, slot, player, player_at=None):
     """(start counts, manager calls) - Counters - of the functions at START slot *slot* of the mode classes and the
     functions they call (a derived START calls its base)."""
     starts, calls = collections.Counter(), collections.Counter()
-    seen = set()
+    seen = {}
     for c in classes:
         f = prog.word(model[c]["vtable"] + 8 + 4 * slot)
         todo = [f] if f else []
         for depth in range(2):
             nxt = []
             for g in todo:
+                if g in seen and player_at is not None and g >= 0x8000:
+                    # PAD-714: on an older build each mode's START counts words of its own beside the framework's: a
+                    # count in a START more of the classes reach is the framework's
+                    starts.update(seen[g])
                 if g in seen or g < 0x8000:
                     continue
-                seen.add(g)
-                s, cl = start_facts(prog, g, player)
+                s, cl = start_facts(prog, g, player, player_at)
+                seen[g] = s
                 starts.update(s)
                 calls.update(x for x in cl if not _is_log(prog, x[0]))
                 if depth == 0:
@@ -338,7 +551,10 @@ def port_lines(found, prog=None):
 
     out = ["# PAD-710: the game's own mode framework (mode_framework.py, from this build's program): what one of its",
            "# modes writes as it starts and stops, so a mode of ours in one's place counts as it"]
-    out.append("site  mode_player            0x%08x%s" % (found["mode_player"], words(found["mode_player"])))
+    if "mode_player" in found:
+        out.append("site  mode_player            0x%08x%s" % (found["mode_player"], words(found["mode_player"])))
+    else:                                            # PAD-714: an older build reads the player up inline
+        out.append("data  mode_player_at         0x%08x" % found["mode_player_at"])
     out.append("value mode_slot_stop         %d" % found["mode_slot_stop"])
     out.append("value mode_stopped_at        0x%x" % found["mode_stopped_at"])
     if "mode_reason_at" in found:

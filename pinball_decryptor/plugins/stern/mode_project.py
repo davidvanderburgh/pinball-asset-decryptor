@@ -1072,9 +1072,10 @@ PLACE_COUNT_NEEDS = (("mode_player",), (), ("mode_slot_stop", "mode_stopped_at")
 
 
 def _place_counts(port):
-    """PAD-710: 1 when the port names the game's own mode framework (a mode in one's place counts as it)."""
+    """PAD-710: 1 when the port names the game's own mode framework (a mode in one's place counts as it). PAD-714: the
+    player getter, or on an older build that reads the player up inline the byte itself (``data mode_player_at``)."""
     sites, _data, values = PLACE_COUNT_NEEDS
-    return bool(port) and all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
+    return bool(port) and (all(n in port["site"] for n in sites) or bool(port["data"].get("mode_player_at")))         and all(n in port["value"] for n in values)
 
 
 def _plain_books(port, i):

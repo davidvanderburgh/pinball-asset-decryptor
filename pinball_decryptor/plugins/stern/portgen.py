@@ -41,7 +41,9 @@ import numpy as np
 #: 6: every mode's `rule` line from the build's own program, when the reference names its rules (PAD-699)
 #: 7: a battle pick counts as the battle (battle_stop / battle_started / battle_clock / roster_resume /
 #: roster_cursor, PAD-706), and the battles' offsets are a title's values, left out of another title's draft
-REVISION = 7
+#: 8: the build's own game modes kept in a derived port (they were dropped as unplaced), and the game's mode framework
+#: read off an older build that reads the player up inline (data mode_player_at), PAD-714
+REVISION = 8
 RECIPE_FORMAT = 1
 
 CORE_SITES = ("tick", "shot_dispatch", "ball_end", "score_add")
@@ -883,7 +885,7 @@ _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block
                         r"value challenge_record_(?:check_at|score_at|score_size)|value challenge_page_title_max|"   # PAD-663: the records' layout
                         r"site challenge_page(?:_text|_yield)?|value challenge_page_(?:cat|title)|site challenge_pages_\d+|site challenge_list_page|"   # PAD-660
                         r"site ball_launch|value ball_launch_(?:wait_)?flag|site challenge_plain_\d+|"   # PAD-643
-                        r"site mode_(?:player|started)|data mode_manager|"   # PAD-710
+                        r"site mode_(?:player|started)|data mode_(?:manager|player_at)|"   # PAD-710, PAD-714
                         r"value mode_(?:slot_stop|stopped_at|reason_at|starts_at|wins_at|id_at)|"
                         r"site audit_add|value place_(?:audit_started|audit_completed|flag_played|flag_completed)_\d+|"
                         r"value challenge_place_\d+)\b")
@@ -1557,7 +1559,11 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
     stock_rules = any(k == "rule" for k, _r in entries)
     if stock_rules:
         _stock_slots(out, tgt)
-    out += block_section(tgt, stock_rules=stock_rules)
+    # PAD-714: a title whose scanner finds no START slot (Jurassic Park LE, Rush) names it in its own ports
+    slot = next((int(r.split()[1]) for k, r in entries if k == "value" and re.match(r"stock_slot_start\s+\d+\s*$",
+                                                                                    r.split("#", 1)[0])), None)
+    same = title_of(target_game or "") == title_of(ref_game or "")
+    out += block_section(tgt, stock_rules=stock_rules, start_slot=own_start_slot(tgt, target_game, slot if same else None))
     sites = {n for k, n in placed if k == "site"}
     data = {n for k, n in placed if k == "data"}
     return Draft(out, report, core_missing(sites, data), placed, hows)
@@ -1581,14 +1587,48 @@ def _stock_slots(out, tgt):
                 out[i] = "value %-21s %d   # PAD-699: read off this build's shot entry (v[15])" % (name, v)
 
 
-def block_section(tgt, stock_rules=False):
+def own_start_slot(tgt, game, hint=None):
+    """PAD-714: the START slot for a build whose scanner finds none (Jurassic Park LE, Rush): *hint* (the same title's
+    reference's), else one a shipped port of the same title names (`value stock_slot_start`) - taken only where this
+    build's mode STARTs at that slot count the player's starts as the framework's START does (mode_framework.find), so
+    a slot another version moved is never used. None when the scanner finds one (it is used) or no slot holds."""
+    cache = tgt.__dict__.setdefault("_own_start_slot", {})
+    key = (game, hint)
+    if key in cache:
+        return cache[key]
+    out = None
+    try:
+        import os
+        from . import mode_framework as MF
+        from . import stock_scan as S
+        from . import stock_scan_cpp as C
+        prog = S.Program(tgt.b)
+        model = S.class_model(prog)
+        if C.family(model) and C.read(prog, model).engine.get("start_slot") is None:
+            slots = [hint] if hint is not None else []
+            from .port_derive import shipped_ports_dir
+            for name in sorted(os.listdir(shipped_ports_dir()), reverse=True):
+                if name.endswith(".port") and game and title_of(name.rsplit("-", 1)[0]) == title_of(game):
+                    with open(os.path.join(shipped_ports_dir(), name), encoding="utf-8") as f:
+                        m = re.search(r"^value\s+stock_slot_start\s+(\d+)", f.read(), re.M)
+                    if m and int(m.group(1)) not in slots:
+                        slots.append(int(m.group(1)))
+            out = next((s for s in slots if "mode_starts_at" in MF.find(prog, s)), None)
+    except Exception:                                        # noqa: BLE001 - a plain-C title, an odd build
+        out = None
+    cache[key] = out
+    return out
+
+
+def block_section(tgt, stock_rules=False, start_slot=None):
     """PAD-363: the game's own modes a mode may keep from starting, read from THIS build's program
     (game_mode_blocks.py): [] when it has no C++ rule manager, or its modes cannot be read. PAD-699:
     *stock_rules* (the reference port names its game's rules: Godzilla) adds every mode's `rule` line
-    from THIS program, for the counts-as / instead-of rows (a reference's own vtables are never carried)."""
+    from THIS program, for the counts-as / instead-of rows (a reference's own vtables are never carried).
+    PAD-714: *start_slot*, the same title's reference's START slot, for a build whose scanner finds none."""
     try:
         from . import game_mode_blocks as B
-        modes = B.read_modes(tgt.b)
+        modes = B.read_modes(tgt.b, start_slot)
     except Exception:                                        # noqa: BLE001 - a plain-C title, an odd build
         return []
     if not any(m.blockable for m in modes):

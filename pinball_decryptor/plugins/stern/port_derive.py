@@ -474,6 +474,13 @@ def merge(drafts, refs, tgt, game, version, family):
         for k in parsed[d["ref"]][0]:
             if k not in order:
                 order.append(k)
+    # PAD-714: the lines every draft writes from THIS build's own program (portgen.generated: its game modes' starts,
+    # objects and names, PAD-363) are the build's, not a reference's placement to vote on: the first draft's go in as
+    # they are (they were left out as "no reference names it", so a derived port had none of the game's modes)
+    own = [line for line in ranked[0]["lines"] if not line.startswith("#") and len(line.split(None, 1)) == 2
+           and portgen.generated(*line.split(None, 1))]
+    own_keys = {(line.split()[0], line.split()[1]) for line in own}
+    order = [k for k in order if k not in own_keys]
     lines = {"site": [], "data": [], "scene": []}
     provenance, placed = {}, {}
     for k in order:
@@ -533,6 +540,8 @@ def merge(drafts, refs, tgt, game, version, family):
     same = _same_title(game, pref.game)
     values, shots, callouts, texts, lamps = [], [], [], [], []
     for key, rest in parsed[primary["ref"]][2]:
+        if portgen.generated(key, rest):
+            continue                                 # PAD-714: the build's own, in `own` above
         if key == "value":
             values.append((rest.split()[0], rest))
         elif key == "shot":
@@ -554,7 +563,7 @@ def merge(drafts, refs, tgt, game, version, family):
         mine = _same_title(game, by_ref[d["ref"]].game)
         for key, rest in parsed[d["ref"]][2]:
             n = rest.split()[0] if rest.split() else ""
-            if key != "value" or n in have or n.startswith("shot_mask"):
+            if key != "value" or n in have or n.startswith("shot_mask") or portgen.generated(key, rest):
                 continue
             if not mine and not framework_value(n):
                 left_off.add(n)
@@ -668,6 +677,9 @@ def merge(drafts, refs, tgt, game, version, family):
         body += events
     if lamps:
         body += [""] + lamps
+    if own:
+        body += ["", "# ---- the game's own modes and rules (PAD-363, game_mode_blocks.py): read off this build's "
+                     "program ----"] + own
     from . import portchallenge
     b = getattr(tgt, "b", None)
     challenges, _why = portchallenge.find(b) if b else ([], [])   # PAD-615: read off the build's own code

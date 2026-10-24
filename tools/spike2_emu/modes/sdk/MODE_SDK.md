@@ -3747,7 +3747,10 @@ it at stage 2, three loops and the Building (17,500,000): won, `completed 1, win
 mode file in Ebirah's slot won by its `end_shot` - main: `battle over`, +1,000,000 (the mode's), the city untouched
 (RAID BATTLE 0/0); now: `the pick ends as a WON battle`, +6,000,000 (the mode's and the city's 5,000,000), RAID
 GODZILLA CONTROLS TOKYO. No segv in any run. Not run: a battle slot of tier 2 (4-6; read at the desk: King Ghidorah
-and Battra stop through CBattle::stop, the multiball through its own v[11]), and Pro 1.15 (no PAD-706 lines).
+and Battra stop through CBattle::stop, the multiball through its own v[11]), and Pro 1.15 (its lines are placed off its own program: every site strict, the clock checked as the start's call
+after the manager's "started", the stop and the city pick the same code as Pro 1.16 - desk-read, its card is
+archival and is not booted here). Premium 1.15 (the program of the Heisei V1.0 card) drafts every line strictly too;
+Premium/LE 1.13 does not (its battle stop, "battle over" and city step have another shape) and has no roster.
 
 **Its name and picture.** The screen draws each monster from its scene (`auto_loaded/cac32730...`):
 a colour tile (when selected), a grey tile (when not; all seven grey tiles are ONE picture), a large
@@ -3875,9 +3878,8 @@ BLOW!"). They are program text, which `progtext.py` can rename within each strin
 - A claimed slot keeps the replaced battle's progress text (0/4 for Ebirah): the game reads it from that
   battle's own counters, which only its shots move. Since PAD-706 the slot does show "Completed" once the
   mode has won it (the stop reason, above).
-- Where the port has no PAD-706 lines (Pro 1.15, whose card is archival and is not booted here), the replaced
-  battle never completes: a slot's state comes from the battle's own mode (Completed when it has a stop reason)
-  and the cities rule with adjustment 334, which gate the tier-2 slots, so they may stay out of reach there.
+- Where a port has a roster but no PAD-706 lines (none shipped; a derived port whose drafting could not place them),
+  the replaced battle never completes, so the tier-2 slots may stay out of reach; the blocks editor notes it there.
 - King of the Monsters starts the four tier-1 battles (Ebirah, Titanosaurus, Gigan, Megalon) itself,
   not through the screen (item 144, seen live), so inside it the replaced battle runs as stock.
 - The battle's own points this time stay 0 (the runtime zeroes them at the pick, as the battle's START does), so

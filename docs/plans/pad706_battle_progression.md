@@ -21,8 +21,8 @@ Like adding stages to them?" ... "We also want our changed modes to still accumu
 - **Win rule**: blocks - a won End block wins; with none, the mode's own end (clock / End block) wins. Mode files -
   `end_shot` wins; with none, the clock wins. A drain, a tilt or the game moving on loses.
 - Ports: Premium/LE 1.16 and Pro 1.16 lines (`site battle_stop / battle_started / battle_clock / roster_resume /
-  roster_cursor`, `value battle_*`, `roster_city_battle_vec_at`); Pro 1.15 (archival, not booted) keeps the old
-  behaviour. portgen REVISION 7 (the battles' offsets are title values).
+  roster_cursor`, `value battle_*`, `roster_city_battle_vec_at`); Pro 1.15 the same, placed off its own program
+  (desk-read: its card is archival, not booted). portgen REVISION 7 (the battles' offsets are title values).
 - The Modes tab: the hat, its tips, End's choice, the form editor's battle note; de/es/fr words.
 
 ## The game's bookkeeping (read at the desk, Premium/LE 1.16; Ghidra + objdump, C:\tmp\PAD-706)
@@ -52,6 +52,7 @@ Like adding stages to them?" ... "We also want our changed modes to still accumu
 
 ## Not done here
 
-- Pro 1.15: no lines (its card is archival). Tier-2 slots (4-6) read at the desk, not run.
+- Pro 1.15 desk-read only (archival card). Premium/LE 1.13 has no roster and another battle-stop shape. Tier-2 slots
+  (4-6) read at the desk, not run.
 - King of the Monsters starts the four tier-1 battles itself (not through a pick): inside it the stock battle plays.
 - The battle's champion is not fed the mode's points (its points this time stay 0 so its ending clip stays off).

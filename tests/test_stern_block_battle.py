@@ -126,7 +126,7 @@ def test_the_c_only_calls_what_the_header_declares():
 
 
 # ---- the ports ------------------------------------------------------------------------------------
-@pytest.mark.parametrize("port", ["godzilla_le-1.16", "godzilla_pro-1.16"])
+@pytest.mark.parametrize("port", ["godzilla_le-1.16", "godzilla_pro-1.16", "godzilla_pro-1.15"])
 def test_the_godzilla_ports_name_the_battles_stop_start_and_resume(port):
     with open(os.path.join(SDK, "ports", port + ".port"), encoding="utf-8") as f:
         text = f.read()
@@ -215,6 +215,5 @@ def test_a_pick_the_mode_cannot_start_is_given_back_lost(tmp_path):
 
 def test_the_profiles_say_where_a_pick_counts_as_the_battle():
     keys = {p.key: p for p in (lambda ps: ps if isinstance(ps, (list, tuple)) else ps.values())(MP.profiles())}
-    assert keys["godzilla_le_1_16"].roster_counts and keys["godzilla_pro_1_16"].roster_counts
-    assert keys["godzilla_le_1_16"].roster and keys["godzilla_pro_1_15"].roster
-    assert not keys["godzilla_pro_1_15"].roster_counts          # no PAD-706 lines on the archival build
+    for key in ("godzilla_le_1_16", "godzilla_pro_1_16", "godzilla_pro_1_15"):
+        assert keys[key].roster and keys[key].roster_counts, key

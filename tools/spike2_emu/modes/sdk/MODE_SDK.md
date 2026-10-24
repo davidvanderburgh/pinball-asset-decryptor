@@ -3935,7 +3935,28 @@ own) until the Scenes tab changes them (Kaiju Battle Select) - to MORE KAIJU, sa
 holds it.
 
 **Measured (emulator, muted, hidden):**
-PROOF_LINES
+- **Stock Premium/LE 1.16, run1** (three blocks monsters behind Ebirah's place): the claim silenced the place (1888 ->
+  0), all three pages found; the scoop's pick `MORE KAIJU opens in 3000 ms`, the ball held (`the ball waits while MORE
+  KAIJU is up` ... `let go after 9000 ms`), the flipper buttons walked MOTHRA -> RODAN -> ANGUIRUS -> MOTHRA, the Action
+  button picked MOTHRA, its START 300 ms later, two Buildings: `the pick ends as a WON battle ... completed 1, wins 1,
+  city 0's mask 0 -> 2`.
+- **Stock Premium/LE 1.16, run2** (a mode file monster, `roster_more`): the timer picked RODAN after 13 s, its START
+  300 ms later; a drain lost it (`RODAN's battle lost ... the city pick plays it again`); the next lit scoop's city
+  pick replayed RODAN with no list (`restarted by the city pick - RODAN, the monster player 1 lost, plays again`), its
+  clock won it: completed 1, and the city's 5,000,000 in the score.
+- **Stock Pro 1.16, run3c** (the list behind Gigan's place, slot 2): the list opened, left presses wrapped ANGUIRUS ->
+  RODAN -> MOTHRA, the timer picked MOTHRA, its clock ran out with a won block in the mode: `a LOST battle (slot 2,
+  mode id 14)`.
+- **David's Heisei 1.99D**: run4 (the v20 card, the game's own screen showing BIOLLANTE in that place): ANGUIRUS picked
+  with Action, won by its clock. Run6 (the base card, the set built by Try it's own code - Write's - from a project of
+  three blocks monsters and one form mode): the list in its names' order ANGUIRUS, KUMONGA, MOTHRA, RODAN; KUMONGA (the
+  form mode) picked with Action, a drain lost it, the city pick replayed it with no list, its clock won it (completed
+  1, +5,000,000).
+- The main branch, the same three modes (control, run_before): the place's pick simply starts the first claimant,
+  MOTHRA; the other two never claim it.
+- No segv in any run of this branch's code (Pro's first runs crashed in the rig's PAD-706 probe, which reads
+  Premium/LE addresses; rerun with its Pro probe). Not run: Pro 1.15 (archival card; its sound ids read off its
+  program).
 
 **Known limits:**
 

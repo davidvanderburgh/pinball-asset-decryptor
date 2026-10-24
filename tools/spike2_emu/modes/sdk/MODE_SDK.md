@@ -3839,6 +3839,13 @@ past the ball save ended the ball and `GAME OVER` followed. A one-ball game whos
 challenge ball save (Ahoy's is its own 60 s, `AD_AHOY_MR_BOND_WIZARD_MODE_CHALLENGE_BALL_SAVE_TIMER`, set by its
 start): give the mode a ball save of its own if it wants one.
 
+**A challenge game of 2-4 players** (PAD-696): every player plays the pick in turn, one ball each. The runtime keeps the
+game's pick for the whole game, and each later player's first ball is handed to the mode as player 1's was (`challenge:
+player 2's turn - the game's pick (...) again, for this player's ball`): `on_pick` is called again and the mode starts
+for that player. Their mode's end ends their ball; GAME OVER follows the last player's. Before this only player 1 got
+the mode and the others played the game's ordinary play. Emulator-proven, the stock cards with a mode file's own
+challenge: Godzilla LE 1.16's MODE CHALLENGE with 4 players, Bond LE 1.06's start menu with 2.
+
 **In a mode file:** `challenge <n>` (0-7) in place of the trigger: the file needs `seconds` but no trigger, and only
 the pick starts it (on the tick after the pick; a pick while it runs is taken and restarts nothing, a pick while
 another of our modes runs starts it when that one ends, the ball ending first lets the pick lapse). A word, `-1` or

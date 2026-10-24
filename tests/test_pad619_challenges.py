@@ -243,7 +243,7 @@ def test_the_runtime_takes_a_pick_by_its_flag_or_its_game_play_mode():
     assert "game_flag_clear(" in unpick and 'pm_port_value("challenge_mode_plain", 1)' in unpick
     start = src[src.index("static void challenge_ball_start(void)"):]
     start = start[:start.index("\n}\n")]
-    assert "picked = challenge_picked(n);" in start and "challenge_unpick(n);" in start
+    assert "picked = (int)n == again ? 1 : challenge_picked(n);" in start and "challenge_unpick(n);" in start
 
 
 # ---- Star Wars' compare-chain start menu: no challenge kind, ours play as Standard ----------------------

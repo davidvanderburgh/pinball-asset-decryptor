@@ -206,8 +206,8 @@ def test_the_wrap_points_the_entry_at_the_modes_record_and_puts_it_back():
     # PAD-641 round 2: wrapped once, shared with the attract flipper sounds (scores_wrap hands the call on)
     assert "scores_wrap_arm()" in arm and "chg_scores_game = scores_orig" in arm
     assert "hook_wrap(at, (void *)scores_wrap)" in _host()._lift(src, "static int scores_wrap_arm(void)")
-    assert "chg_picked(own_challenge[k].by, 0, own_challenge[k].name);" in src      # an own one plays as challenge 0's
-    assert "chg_picked(challenge_by[n], n, challenge_title[n]);" in src
+    assert "chg_picked(own_challenge[k].by, 0, own_challenge[k].name, CHALLENGE_OWN + k);" in src      # an own one plays as challenge 0's
+    assert "chg_picked(challenge_by[n], n, challenge_title[n], (int)n);" in src
 
 
 def test_the_docs_say_how():

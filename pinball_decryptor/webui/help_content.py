@@ -1797,7 +1797,10 @@ HELP_CONTENT = {
             "- Without it the game stops at once with \"Sentinel key not found\", as a "
             "real machine does.\n"
             "- A key is per title: one game's key will not start another.\n"
-            "- Plug it into this PC before **Start**; the app hands it to the emulator.",
+            "- Plug it into this PC before **Start**; the app hands it to the emulator.\n"
+            "- Key on another PC? Pick **On another PC** in the Security key card, enter "
+            "the key server and bus ID, and **Test**: **Start** borrows it over the "
+            "network and **Stop** hands it back.",
         ]),
         ("Getting started", [
             {"flow": [

@@ -12591,5 +12591,20 @@
 "Play the row above in the list, as the sort, search and filters show it.": "Lit la ligne au-dessus dans la liste, telle que le tri, la recherche et les filtres l'affichent.",
 "Play the row below in the list, as the sort, search and filters show it.": "Lit la ligne en dessous dans la liste, telle que le tri, la recherche et les filtres l'affichent.",
 "Under Replacement, a row with a replacement plays the replacement; one without plays its original.": "Sous Remplacement, une ligne qui a un remplacement lit le remplacement ; une ligne sans remplacement lit son original.",
-"**Previous** and **Next**, either side of each Play, play the row above or below, following your sort, search and filters. Under Replacement they play a row's replacement where it has one, its original where not.": "**Précédent** et **Suivant**, de part et d'autre de chaque Lire, lisent la ligne au-dessus ou en dessous, en suivant votre tri, votre recherche et vos filtres. Sous Remplacement, ils lisent le remplacement d'une ligne quand elle en a un, sinon son original."
+"**Previous** and **Next**, either side of each Play, play the row above or below, following your sort, search and filters. Under Replacement they play a row's replacement where it has one, its original where not.": "**Précédent** et **Suivant**, de part et d'autre de chaque Lire, lisent la ligne au-dessus ou en dessous, en suivant votre tri, votre recherche et vos filtres. Sous Remplacement, ils lisent le remplacement d'une ligne quand elle en a un, sinon son original.",
+"When a shot follows a shot (a combo)": "Quand un tir suit un tir (un combo)",
+"When a lit shot follows a lit shot": "Quand un tir allumé suit un tir allumé",
+"combos in a row": "combos d'affilée",
+"shots made of a combo": "tirs réussis d'un combo",
+"shots made of": "tirs réussis de",
+"a lit shot": "un tir allumé",
+"any shot": "n'importe quel tir",
+", then": ", puis",
+"each within": "chacun en",
+"within": "en",
+"called": "nommé",
+"(no combo has that name)": "(aucun combo ne porte ce nom)",
+"A shot more, after the last: an ordered combo": "Un tir de plus, après le dernier : un combo ordonné",
+"Take this shot out of the combo": "Retirer ce tir du combo",
+"Seconds from one shot to the next (0.5 to 60)": "Secondes d'un tir au suivant (0,5 à 60)"
 }

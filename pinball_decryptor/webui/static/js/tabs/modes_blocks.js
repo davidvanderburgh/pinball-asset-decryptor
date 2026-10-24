@@ -79,6 +79,11 @@ const TIP = {
   timers: "A timer counts down in milliseconds, apart from the mode's clock: start it from a block (any value, so a window can get shorter), and a When it runs out script runs the moment it does. A ball ending stops every timer.",
   timerStart: "Starts the timer (again, if it runs) at this many milliseconds: 1000 = one second. Any value: a variable makes a window that shrinks.",
   timerLeft: "The milliseconds the timer has left; 0 when it is not running.",
+  combo: "A combo: these shots made one after another, in this order, each within this many seconds of the one before. Two shots: the second follows the first; more: an ordered combo (ramp, then loop, then ramp). A step may be any shot, or a lit shot: one this mode has lit as it is made (so a lit shot, then a lit shot, chains every lit shot made in time). A shot that breaks a combo can still begin the next. Judged on the shots the mode hears, the same on every game. Each shot that makes a combo is one more of the combos in a row; its name lets the shots made so far of it be counted.",
+  comboStep: "A step of the combo: a shot of the game's, any shot, or a lit shot (one this mode has lit as it is made, not held dark)",
+  comboName: "Its name, for the value \"shots made of a combo\" (a HUD counter's 2 of 3); none is needed otherwise",
+  combo_chain: "The combos in a row for the player up: one more for each shot that makes a combo, back to 0 when the window of the last one lapses with no other, when the ball ends, and as the mode starts and ends. The \"x combo\" to multiply a score by, or a COMBO counter on the HUD.",
+  comboSteps: "How many of a combo's shots the player has made so far, in its order and in its window (2 after the ramp and the loop of ramp, then loop, then ramp); 0 once its window lapses.",
   wait: "A Start the mode block while a multiball or one of the game's own modes runs does nothing, and the mode stays ready: the next one after it starts it, as the example modes do.",
   lit: "A Light the mode at block has lit it for the player up, and it has not started since.",
   canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
@@ -138,6 +143,9 @@ export function hatTemplates(ch, timers) {
     { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 },
     { kind: "ball_end" }, { kind: "drain", when: "running" }, { kind: "event", event: ev, when: "any" },
     { kind: "timer_done", timer: (timers[0] || {}).name || "" },
+    // PAD-708: a combo of two shots (an ordered one: add shots to it), and a chain of lit shots
+    { kind: "combo", shots: [shot, (ch.shots || [])[1] || shot], seconds: 3, when: "running" },
+    { kind: "combo", shots: ["lit", "lit"], seconds: 3, when: "running" },
     // PAD-615: only where the game names challenges a mode may take the place of
     ...((ch.challenges || []).length ? [{ kind: "challenge", challenge: ch.challenges[0] }] : []),
   ];
@@ -186,10 +194,17 @@ export function stmtTemplates(ch, vars, prog = {}) {
   ];
 }
 
-function valueTemplates(ch, vars, timers) {
+function valueTemplates(ch, vars, timers, prog = {}) {
   return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" },
     { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "timer_left", timer: ((timers || [])[0] || {}).name || "" },
+    { k: "combo_chain" }, { k: "combo_steps", combo: comboNames(prog)[0] || "" },          // PAD-708
     { k: "balls" }, { k: "player" }, { k: "op", op: "+", a: null, b: null }];
+}
+
+// PAD-708: the names of the program's combos (a When shots are made one after another's own name)
+function comboNames(prog) {
+  return [...new Set((prog.scripts || []).map((s) => s.hat || {}).filter((h) => h.kind === "combo" && (h.name || "").trim())
+    .map((h) => h.name.trim()))];
 }
 
 const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and", a: null, b: null },
@@ -198,7 +213,7 @@ const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and
 
 const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot this ball", scored: "times it has scored",
   total: "points so far", secs_left: "seconds left", timer_left: "ms left on a timer", balls: "balls in play",
-  player: "the player up", op: "a sum" };
+  player: "the player up", op: "a sum", combo_chain: "combos in a row", combo_steps: "shots made of a combo" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
@@ -293,14 +308,14 @@ function X({ onClick, title = "Take this block out" }) {
 function slotMenu(e, kind, ed, path) {
   const items = kind === "bool"
     ? condTemplates().map((t) => ({ label: COND_WORDS[t.k], onClick: () => ed.set(path, t) }))
-    : valueTemplates(ed.ch, ed.vars, ed.timers).map((t) => ({ label: VALUE_WORDS[t.k], onClick: () => ed.set(path, t) }));
+    : valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog).map((t) => ({ label: VALUE_WORDS[t.k], onClick: () => ed.set(path, t) }));
   openMenu(e.currentTarget, items);
 }
 
 function Slot({ kind, value, path, ed, optional, empty }) {
   const [over, setOver] = useState(false);
   const fits = () => dragging && dragging.tpl && (kind === "bool" ? dragging.tpl.k && condTemplates().some((t) => t.k === dragging.tpl.k)
-    : dragging.tpl.k && valueTemplates(ed.ch, ed.vars, ed.timers).some((t) => t.k === dragging.tpl.k));
+    : dragging.tpl.k && valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog).some((t) => t.k === dragging.tpl.k));
   const drop = {
     onDragOver: (e) => { if (fits()) { e.preventDefault(); e.stopPropagation(); setOver(true); } },
     onDragLeave: () => setOver(false),
@@ -325,6 +340,7 @@ function Val({ e, path, ed }) {
       onChange=${(v) => set("name", v)} />`;
     case "hits": return html`<span class="bk-w" ...${tip(TIP.hits)}>hits of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
     case "timer_left": return html`<span class="bk-w" ...${tip(TIP.timerLeft)}>ms left on</span><${TimerPick} value=${e.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
+    case "combo_steps": return html`<span class="bk-w" ...${tip(TIP.comboSteps)}>shots made of</span><${Pick} value=${e.combo} options=${comboNames(ed.prog)} missing="(no combo has that name)" onChange=${(v) => set("combo", v)} />`;
     case "op": return html`<span class="bk-w">(</span><${Slot} kind="num" value=${e.a} path=${[...path, "a"]} ed=${ed} />
       <${Pick} value=${e.op} options=${OPS} width=${54} onChange=${(v) => set("op", v)} />
       <${Slot} kind="num" value=${e.b} path=${[...path, "b"]} ed=${ed} /><span class="bk-w">)</span>`;
@@ -591,6 +607,24 @@ const LAUNCH_OPTS = [["clip", "when its start clip is over"], ["2", "2 s after i
 const LAUNCH_TIP = "The challenge's ball waits in the shooter lane as the mode starts. The game launches it for the player once the mode's start clip is over (or at once, with no start clip), a set time after the mode starts, or not at all: the player launches it. Otherwise the ball starts as any other ball does: on James Bond, the left flipper button held at the launch opens the loop.";
 const CHALLENGE_TIP = "In the game's own Player Challenge mode (a one-ball game picked on the game's start menu, both flipper buttons held in attract, as a game starts, or every game when the service menu's Default Game Mode is set to a challenge), this script runs as the ball starts when this challenge is picked, and the game's own challenge does not start: put Start the mode in it. The game ends when the ball ends. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge. The start menu shows this mode's name in that challenge's place; A new challenge of its own adds it after the game's own entries instead.";
 
+// PAD-708: a combo's steps - each a shot, any shot or a lit shot - with "then" between, a shot more, a shot less
+const COMBO_STEPS_MAX = 6;
+function Secs({ value, onChange, width = 48, title }) {
+  return html`<${Field} sm mono width=${width} value=${value == null ? "" : String(value)} title=${title}
+    onChange=${(t) => { const n = Number(String(t).trim()); onChange(String(t).trim() !== "" && Number.isFinite(n) ? n : t); }} />`;
+}
+
+function ComboSteps({ h, path, ed }) {
+  const steps = Array.isArray(h.shots) ? h.shots : [];
+  const opts = [["lit", "a lit shot"], ["*", "any shot"], ...(ed.ch.shots || []).map((n) => [n, n])];
+  const setSteps = (list) => ed.set([...path, "shots"], list);
+  return html`${steps.map((x, i) => html`${i ? html`<span class="bk-w b">, then</span>` : null}<${Pick} value=${x} options=${opts}
+      title=${TIP.comboStep} onChange=${(v) => setSteps(steps.map((y, j) => (j === i ? v : y)))} />${steps.length > 2
+      ? html`<${X} title="Take this shot out of the combo" onClick=${() => setSteps(steps.filter((_y, j) => j !== i))} />` : null}`)}
+    ${steps.length < COMBO_STEPS_MAX ? html`<button type="button" class="bk-x" aria-label="A shot more" ...${tip("A shot more, after the last: an ordered combo")}
+      onClick=${(e) => { e.stopPropagation(); setSteps([...steps, steps[steps.length - 1] || "lit"]); }}>+</button>` : null}`;
+}
+
 export function HatBody({ h, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
   const when = html`<${Pick} value=${h.when || "any"} options=${WHEN} onChange=${(v) => set("when", v)} />`;
@@ -606,6 +640,9 @@ export function HatBody({ h, path, ed }) {
     case "seconds_left": return html`<span class="bk-w b">When</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds are left</span>`;
     case "event": return html`<span class="bk-w b">When</span><${Pick} value=${h.event} options=${(ed.ch.events || []).map((x) => [x.name, x.label])} onChange=${(v) => set("event", v)} />${when}`;
     case "timer_done": return html`<span class="bk-w b">When timer</span><${TimerPick} value=${h.timer} ed=${ed} onChange=${(v) => set("timer", v)} /><span class="bk-w b">runs out</span>`;
+    case "combo": return html`<span class="bk-w b" ...${tip(TIP.combo)}>When</span><${ComboSteps} h=${h} path=${path} ed=${ed} />
+      <span class="bk-w b">${(h.shots || []).length > 2 ? "each within" : "within"}</span><${Secs} value=${h.seconds} title="Seconds from one shot to the next (0.5 to 60)" onChange=${(v) => set("seconds", v)} /><span class="bk-w b">s</span>${when}
+      <span class="bk-w" ...${tip(TIP.comboName)}>called</span><${Text} value=${h.name} max=${24} width=${110} placeholder="(no name)" title=${TIP.comboName} onChange=${(v) => set("name", v)} />`;
     case "challenge": return html`<span class="bk-w b" ...${tip(CHALLENGE_TIP)}>When the player picks the challenge</span><${Pick} value=${h.challenge} options=${(ed.ch.challenges || []).map((x) => [x, x])} onChange=${(v) => set("challenge", v)} /><span class="bk-w b" ...${tip(LAUNCH_TIP)}>, its ball launched</span><${Pick} value=${h.launch || "clip"} options=${LAUNCH_OPTS} onChange=${(v) => set("launch", v)} />`;
     default: return html`<span class="bk-w b">${h.kind}</span>`;
   }
@@ -629,7 +666,8 @@ export function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
     any_shot: "When any shot is made", switch: "When any playfield switch is hit", every: "Every N seconds", seconds_left: "When N seconds are left",
     ball_end: "When the ball drains", drain: "When a ball goes into the trough", event: "When the game does…", timer_done: "When a timer runs out",
-    challenge: "When the player picks a challenge" }[h.kind] || h.kind;
+    challenge: "When the player picks a challenge",
+    combo: (h.shots || []).every((x) => x === "lit") ? "When a lit shot follows a lit shot" : "When a shot follows a shot (a combo)" }[h.kind] || h.kind;
 }
 
 export function stmtLabel(b) {
@@ -678,14 +716,14 @@ function Palette({ ed }) {
     onDragStart=${(e) => { if (off) { e.preventDefault(); return; } dragging = { tpl: clone(tpl) }; e.dataTransfer.effectAllowed = "copy"; e.dataTransfer.setData("text/plain", "block"); }}
     onDragEnd=${() => { dragging = null; ed.setOver(null); }}
     onClick=${off ? null : onPress} ...${tip(off || title || TIP.palette)}>${label}</button>`;
-  const vals = valueTemplates(ed.ch, ed.vars, ed.timers);
+  const vals = valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog);
   return html`<div class="bk-palette" aria-label="Blocks">
     <div class="bk-pal-h">When</div>
     ${hatTemplates(ed.ch, ed.timers).map((h) => piece("bk-hat", hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
     ${stmtTemplates(ed.ch, ed.vars, ed.prog).filter(([_g, items]) => items.length).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
       ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t)), null, whyOff(t, ed.ch)))}`)}
     <div class="bk-pal-h">Values</div>
-    ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, "Drag into a value slot (the round holes)"))}
+    ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, t.k === "combo_chain" ? TIP.combo_chain : "Drag into a value slot (the round holes)"))}
     <div class="bk-pal-h">Conditions</div>
     ${condTemplates().map((t) => piece("bk-bool", COND_WORDS[t.k], t, null, "Drag into an If's condition slot"))}
   </div>`;

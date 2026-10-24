@@ -12591,5 +12591,20 @@
 "Play the row above in the list, as the sort, search and filters show it.": "Spielt die Zeile darüber in der Liste ab, so wie Sortierung, Suche und Filter sie zeigen.",
 "Play the row below in the list, as the sort, search and filters show it.": "Spielt die Zeile darunter in der Liste ab, so wie Sortierung, Suche und Filter sie zeigen.",
 "Under Replacement, a row with a replacement plays the replacement; one without plays its original.": "Unter Ersatz spielt eine Zeile mit Ersatz den Ersatz ab; eine ohne spielt ihr Original.",
-"**Previous** and **Next**, either side of each Play, play the row above or below, following your sort, search and filters. Under Replacement they play a row's replacement where it has one, its original where not.": "**Zurück** und **Weiter**, links und rechts von jedem Abspielen, spielen die Zeile darüber oder darunter ab, gemäß Ihrer Sortierung, Suche und Filter. Unter Ersatz spielen sie den Ersatz einer Zeile, wo sie einen hat, sonst ihr Original."
+"**Previous** and **Next**, either side of each Play, play the row above or below, following your sort, search and filters. Under Replacement they play a row's replacement where it has one, its original where not.": "**Zurück** und **Weiter**, links und rechts von jedem Abspielen, spielen die Zeile darüber oder darunter ab, gemäß Ihrer Sortierung, Suche und Filter. Unter Ersatz spielen sie den Ersatz einer Zeile, wo sie einen hat, sonst ihr Original.",
+"When a shot follows a shot (a combo)": "Wenn ein Schuss auf einen Schuss folgt (eine Kombo)",
+"When a lit shot follows a lit shot": "Wenn ein beleuchteter Schuss auf einen beleuchteten Schuss folgt",
+"combos in a row": "Kombos in Folge",
+"shots made of a combo": "getroffene Schüsse einer Kombo",
+"shots made of": "getroffene Schüsse von",
+"a lit shot": "ein beleuchteter Schuss",
+"any shot": "ein beliebiger Schuss",
+", then": ", dann",
+"each within": "jeweils innerhalb von",
+"within": "innerhalb von",
+"called": "namens",
+"(no combo has that name)": "(keine Kombo heißt so)",
+"A shot more, after the last: an ordered combo": "Ein Schuss mehr, nach dem letzten: eine geordnete Kombo",
+"Take this shot out of the combo": "Diesen Schuss aus der Kombo nehmen",
+"Seconds from one shot to the next (0.5 to 60)": "Sekunden von einem Schuss zum nächsten (0,5 bis 60)"
 }

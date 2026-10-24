@@ -74,6 +74,21 @@ far, the seconds left, the balls in play, the player up, and + - x / of two valu
 compare two values, and / or / not, the mode is running, one of the game's own modes is running,
 the mode could start now, the mode is lit, the shield targets face away (PAD-690).
 
+COMBOS (PAD-708). A combo was built by hand from a timer and a variable (King Caesar's TAG TEAM: the Godzilla
+target starts a 20 s timer, and a pop bumper or the Mecha lane made while it runs counts one), several blocks a
+pair. The hat ``{"kind": "combo", "shots": ["Left ramp", "Right ramp"], "seconds": 3, "when": "running",
+"name": "RAMPS"}`` runs when its shots are made in that order, each within ``seconds`` of the one before: two
+shots are "<shot> follows <shot> within N seconds", more an ordered combo (ramp -> loop -> ramp). A step may be
+any shot (``"*"``) or any shot the mode has lit as it is made (``"lit"``), so "any lit shot after any lit shot"
+chains. It is judged on the mode's own shot stream (every shot it hears, in order: the same on every title, LE
+or Pro), and the C keeps the last few shots with the time each was made (``combo_ring``), so a shot that breaks
+a combo can still begin the next. Two values go with it: the COMBOS IN A ROW for the player up (``{"k":
+"combo_chain"}``: each shot that makes one or more combos adds one; it goes back to 0 when the window of the last one
+lapses with no other, when the ball ends, and as the mode starts and ends - the "x combo" a score multiplies by,
+a COMBO counter on the HUD), and a combo's SHOTS MADE SO FAR (``{"k": "combo_steps", "combo": "RAMPS"}``, by
+its name: 2 after the ramp and the loop of ramp -> loop -> ramp, 0 once its window lapses). Not the game's own
+combos: the game's rules keep theirs.
+
 LIT AT A SHOT (PAD-503). A Bond owner made modes of their own for the two films with no mini-wizard and
 wanted them as the game's four are: lit at the Right ramp with the film's villain, started by the ramp. Light
 the mode at (``{"op": "light_mode", "shot": ..., "insert": "MR. HENDERSON", "color": ..., "pattern": "blink"}``) lights
@@ -238,6 +253,7 @@ HATS = {
     "event": "When the game does something",
     "timer_done": "When a timer runs out",
     "challenge": "When the player picks a challenge",
+    "combo": "When shots are made one after another",   # PAD-708: a combo, each shot within N seconds of the last
 }
 #: PAD-615 round 2: the challenge hat's choice that adds the mode to the game's start menu as a challenge of its own
 CHALLENGE_NEW = "A new challenge of its own"
@@ -433,7 +449,8 @@ SHOWS = {
 #: the game's own callouts a block can name by what they say (every port carries these roles)
 CALLOUT_ROLES = {"ten_seconds": "Ten seconds left", "time_up": "Time is up"}
 NUM_KINDS = ("num", "var", "hits", "scored", "total", "secs_left", "balls", "player", "op",
-             "timer_left")
+             "timer_left",
+             "combo_chain", "combo_steps")   # PAD-708: the combos in a row; a combo's shots made so far
 BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock", "can_start", "lit",
               "shields_away")   # PAD-690: Godzilla Premium/LE's shield targets face away (never on a Pro)
 OPS = {"+": "+", "-": "-", "*": "*", "/": "/"}
@@ -454,6 +471,12 @@ VAR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _]{0,23}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 HOLD_RE = re.compile(r"^[a-z][a-z0-9_]{0,23}$")   # a held coil's name in the port (`text held_coils`)
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")  # PAD-600: another mode a Put out the light of block names
+#: PAD-708: a combo hat's shots (a step is a shot of the card's, COMBO_ANY or COMBO_LIT), its window and how many
+COMBO_ANY = "*"                  # any shot
+COMBO_LIT = "lit"                # any shot the mode has lit (a Light block's, not dark) as it is made
+COMBO_STEPS_MAX = 6
+MAX_COMBOS = 8
+COMBO_SECONDS_MIN, COMBO_SECONDS_MAX = 0.5, 60
 
 
 class BlocksError(ValueError):
@@ -985,6 +1008,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "inserts": list(inserts) if inserts is not None else None,
            "modes": set(modes) if modes is not None else None,
            "challenges": list(challenges) if challenges is not None else None, "picked": set(),
+           "combos": combo_names(program),            # PAD-708: the combos a value may name
            "program": program}                        # PAD-646: a Light show block names one of its shows
     _check_shows(program, ctx)                        # PAD-646
     hud = program["hud"]
@@ -1002,6 +1026,12 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     for i, s in enumerate(program["scripts"]):
         _check_hat(s.get("hat") or {}, i + 1, ctx)
         _check_stack(s.get("do") or [], 1, "Script %d" % (i + 1), ctx)
+    combos = [s.get("hat") for s in program["scripts"] if (s.get("hat") or {}).get("kind") == "combo"]
+    if len(combos) > MAX_COMBOS:                      # PAD-708
+        out.append("%d combos: %d at most." % (len(combos), MAX_COMBOS))
+    named = [str(h.get("name") or "").strip().lower() for h in combos if str(h.get("name") or "").strip()]
+    for n in sorted({n for n in named if named.count(n) > 1}):
+        out.append("Two combos are called %s." % n.upper())
     if ctx["count"] > MAX_BLOCKS:
         out.append("%d blocks: %d at most." % (ctx["count"], MAX_BLOCKS))
     turns = [b for s in program["scripts"] for b in _walk(s.get("do") or [])
@@ -1102,7 +1132,7 @@ def notes(program):
         out.append("A When the player picks a challenge script with no Start the mode in it starts nothing: the "
                    "game's own challenge does not run either.")
     idle = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") in ("mode_end", "ball_end")
-            or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "switch", "event", "drain")
+            or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "switch", "event", "drain", "combo")
                 and (s.get("hat") or {}).get("when") == "idle")]
     if any(b.get("op") in ("hold", "scoop_hold", "shield", "building") for s in idle for b in _walk(s.get("do") or [])):
         out.append("A mechanism is held only while the mode runs: a hold in When the mode ends, When the "
@@ -1111,6 +1141,9 @@ def notes(program):
     if any(b.get("op") == "game_show" for s in idle_show for b in _walk(s.get("do") or [])):   # PAD-418
         out.append("The game's light show plays only while the mode runs or as it ends: one in When the ball "
                    "drains (the game stops its shows then) or a script for while it is not running does nothing.")
+    if "combo" not in kinds and any(e.get("k") == "combo_chain" for e in _program_values(program)):     # PAD-708
+        out.append("No When block makes a combo, so the combos in a row stay 0: start a script with When shots "
+                   "are made one after another.")
     if "timer_done" in kinds and "timer_start" not in ops:
         out.append("No block starts a timer, so When a timer runs out never runs.")
     # PAD-646: a show of the mode's own that no block runs, and one that runs until the mode ends started as it ends
@@ -1132,6 +1165,21 @@ def notes(program):
         out.append("A clip behind the HUD in When the mode ends plays full screen: the mode's loop ends with it, "   # PAD-658
                    "so there is nothing left to play behind. Its TOTAL shows after the clip.")
     return out
+
+
+def _program_values(program):
+    """PAD-708: every value and condition of the program (its blocks', its HUD's and its info line's)."""
+    def deep(o):
+        if isinstance(o, dict):
+            if "k" in o:
+                yield o
+            for v in o.values():
+                yield from deep(v)
+        elif isinstance(o, list):
+            for v in o:
+                yield from deep(v)
+    yield from deep([s.get("do") for s in program.get("scripts") or []])
+    yield from deep([program.get("hud"), program.get("info")])
 
 
 def _unique(items):
@@ -1177,7 +1225,9 @@ def _check_hat(hat, n, ctx):
         return
     if kind in ("shot",):
         _check_shot(hat.get("shot"), where + "'s When", ctx)
-    if kind in ("shot", "any_shot", "switch", "event", "drain") and hat.get("when", "any") not in WHEN:
+    if kind == "combo":                                                              # PAD-708
+        _check_combo(hat, where, ctx)
+    if kind in ("shot", "any_shot", "switch", "event", "drain", "combo") and hat.get("when", "any") not in WHEN:
         ctx["out"].append("%s's When has no while." % where)
     if kind == "drain" and ctx.get("drain") is False:
         ctx["out"].append("%s waits for a ball in the trough, which this card's game does not report." % where)
@@ -1209,6 +1259,51 @@ def _check_hat(hat, n, ctx):
                               "seconds after it starts." % where)                       # PAD-643
         else:
             ctx["picked"].add(name)
+
+
+def combo_names(program):
+    """PAD-708: the names of the program's combos (lower case), as a Shots made so far value names one."""
+    return {str((s.get("hat") or {}).get("name") or "").strip().lower()
+            for s in (program or {}).get("scripts") or [] if isinstance(s, dict)
+            and (s.get("hat") or {}).get("kind") == "combo" and str((s.get("hat") or {}).get("name") or "").strip()}
+
+
+def combo_ms(hat):
+    """PAD-708: a combo hat's window, in ms: its seconds (to a tenth), clamped."""
+    try:
+        secs = float((hat or {}).get("seconds"))
+    except (TypeError, ValueError):
+        secs = 3.0
+    return int(round(max(COMBO_SECONDS_MIN, min(COMBO_SECONDS_MAX, secs)) * 1000))
+
+
+def combo_steps(hat):
+    """PAD-708: a combo hat's shots, as saved (a list of names, COMBO_ANY or COMBO_LIT)."""
+    shots = (hat or {}).get("shots")
+    return [str(x or "") for x in shots] if isinstance(shots, list) else []
+
+
+def _check_combo(hat, where, ctx):
+    shots = hat.get("shots")
+    if not isinstance(shots, list) or len(shots) < 2:
+        ctx["out"].append("%s's combo needs two shots or more: one, then the next." % where)
+        shots = shots if isinstance(shots, list) else []
+    elif len(shots) > COMBO_STEPS_MAX:
+        ctx["out"].append("%s's combo has %d shots: %d at most." % (where, len(shots), COMBO_STEPS_MAX))
+    for k, shot in enumerate(shots):
+        if shot in (COMBO_ANY, COMBO_LIT):
+            continue
+        _check_shot(shot if isinstance(shot, str) else "", "%s's combo shot %d" % (where, k + 1), ctx)
+    try:
+        secs = float(hat.get("seconds"))
+    except (TypeError, ValueError):
+        secs = None
+    if secs is None or not COMBO_SECONDS_MIN <= secs <= COMBO_SECONDS_MAX:
+        ctx["out"].append("%s's combo window must be %g to %d seconds." % (where, COMBO_SECONDS_MIN, COMBO_SECONDS_MAX))
+    name = hat.get("name")
+    if name not in (None, "") and not VAR_RE.match(str(name)):
+        ctx["out"].append("%s's combo name %r is not one: start with a letter, then letters, digits, spaces or _ "
+                          "(24 at most)." % (where, name))
 
 
 def _check_timer(name, where, ctx):
@@ -1620,6 +1715,13 @@ def _check_num(e, where, ctx, depth=0):
         _check_shot(e.get("shot"), where + "'s hits", ctx)
     elif k == "timer_left":
         _check_timer(e.get("timer"), where + "'s time left", ctx)
+    elif k == "combo_steps":                                                        # PAD-708
+        name = str(e.get("combo") or "").strip().lower()
+        if not name:
+            ctx["out"].append("%s counts the shots of a combo with none chosen." % where)
+        elif name not in ctx.get("combos", ()):
+            ctx["out"].append("%s counts the shots of the combo %s, which no When block makes: give a combo that "
+                              "name." % (where, e.get("combo")))
     elif k == "op":
         if e.get("op") not in OPS:
             ctx["out"].append("%s has a sum with no + - x or /." % where)
@@ -1715,6 +1817,15 @@ class _Gen:
         self.lit_asked = False          # PAD-503: a condition asks whether the mode is lit
         self.unlit = []                 # PAD-600: the other modes whose light a block puts out, by slug
         self.unlight_own = False        # PAD-600: a block puts out this mode's own light
+        self.combos = []                # PAD-708: the combo hats, in the order of their scripts (COMBO[k])
+        self.combo_at = {}              # PAD-708: a combo's lower-case name -> k (the first of that name)
+        for s in program["scripts"]:
+            h = s.get("hat") or {}
+            if h.get("kind") == "combo" and len(self.combos) < MAX_COMBOS:
+                name = str(h.get("name") or "").strip().lower()
+                if name and name not in self.combo_at:
+                    self.combo_at[name] = len(self.combos)
+                self.combos.append(h)
 
     def var(self, i, p="P()"):
         """Variable ``i`` of player ``p``, as C: its own row, or the shared global."""
@@ -1780,6 +1891,11 @@ class _Gen:
         if k == "timer_left":
             i = self.timer(e.get("timer"))
             return "timer_left(%d)" % i if i is not None else "0LL"
+        if k == "combo_chain":          # PAD-708
+            return "combo_in_row()" if self.combos else "0LL"
+        if k == "combo_steps":
+            i = self.combo_at.get(str(e.get("combo") or "").strip().lower())
+            return "combo_made_so_far(%d)" % i if i is not None else "0LL"
         if k == "hits":
             return self.hits_of(e.get("shot"))
         if k == "scored":
@@ -2162,6 +2278,12 @@ def to_c(program, slug):
             elif kind == "timer_done":
                 t = g.timer(hat.get("timer"))
                 test = "(due[%d])" % t if t is not None else "(0)"
+            elif kind == "combo":                        # PAD-708: judged as the shot came (combo_shot), its gate too
+                k = next((i for i, h in enumerate(g.combos) if h is hat), None)
+                for x in combo_steps(hat)[:COMBO_STEPS_MAX]:   # its shots in the table before the table is written
+                    if x not in (COMBO_ANY, COMBO_LIT):
+                        g.shot_i(x)
+                test = "(combo_fired & %du)" % (1 << k) if k is not None else "(0)"
             elif kind == "challenge":                    # PAD-615: picked on the game's thread, run on the tick
                 name = str(hat.get("challenge") or "")
                 if name not in challenge_names:
@@ -2403,6 +2525,9 @@ def to_c(program, slug):
     L.append("    return b ? a / b : 0;")
     L.append("}")
     L.append("")
+    if g.combos:
+        L.extend(_combo_c(g).rstrip("\n").split("\n"))
+        L.append("")
     L.append("UNUSED static unsigned secs_left(void)")
     L.append("{")
     L.append("    return run.on && RUN_SECONDS ? (run.ticks_left + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND : 0;")
@@ -2672,6 +2797,8 @@ def to_c(program, slug):
                           "lamps": ", ".join(_c_str(n) for n in g.lamps) or "0"}).split("\n"))
     if g.shows:
         L.extend(_SHOW_C.split("\n"))
+    if g.combos:
+        L.extend(_COMBO_SHOT_C.split("\n"))
     if media:
         L.extend((_MEDIA_C % {"slug": slug}).split("\n"))
     if note_cue:
@@ -2790,6 +2917,8 @@ def to_c(program, slug):
         L.append("    clock_hold = 0;                   /* PAD-621 */")
     L.append("    hide_ticks = 0;")
     L.append('    reset_mode();')
+    if g.combos:
+        L.append("    combo_clear();                    /* PAD-708: no combo or chain from before it began */")
     if watch:
         L.append("    screen_away = 0;")
     L.append("    if (screen) {")
@@ -2832,6 +2961,8 @@ def to_c(program, slug):
     L.append("    on_mode_end();")
     L.append("    ending = 0;")
     L.append("    run.on = 0;")
+    if g.combos:
+        L.append("    combo_clear();                    /* PAD-708: its combos in a row end with it */")
     if media:
         L.append("    loop_waiting = 0;")
         if note_cue:
@@ -3015,10 +3146,12 @@ def to_c(program, slug):
     L.append("    for (i = 0; i < %d; i++)" % len(g.hits))
     L.append("        if (S[(int)HIT_OF[i]] & shot) H[i][p]++;")
     L.append("    (void)i; (void)was_on;")
+    if g.combos:
+        L.append("    combo_shot(shot, was_on, idle);   /* PAD-708: the combos this shot makes, before any script runs */")
     if g.lit:
         L.append("    lit_shot(shot);                   /* PAD-503: the shot it is lit at starts it */")
         L.append("    if (!was_on && run.on) return;    /* PAD-658: and is that alone, not a shot \"while it is not running\" too */")
-    L.extend(scripts_of("shot", "any_shot"))
+    L.extend(scripts_of("shot", "any_shot", "combo"))   # PAD-708: a combo's script in its place among them
     L.append("}")
     L.append("")
     L.append("static void on_event(unsigned id)")
@@ -3063,7 +3196,12 @@ def to_c(program, slug):
         L.append("            lit_as[p] = 0;            /* PAD-503: no one is lit at the start of a game */")
     L.append("        }")
     L.append("        for (v = 0; v < %d; v++) T[v] = 0;" % ntimers)
+    if g.combos:
+        L.append("        combo_clear();                /* PAD-708 */")
     L.append("    }")
+    if g.combos:
+        L.append("    if (combo_chain_at && pm_ms() - combo_chain_at > combo_chain_ms)   /* PAD-708: its window lapsed */")
+        L.append("        combo_chain_end();")
     if g.lit:
         L.append("    lit_tick();                       /* PAD-503: the player up's light while it is not running */")
     L.append("    if (++poll % 30 == 0) {            /* the tab's Start mode now / End mode */")
@@ -3197,6 +3335,8 @@ def to_c(program, slug):
     L.append("{")
     L.append("    unsigned t;")
     L.append("    for (t = 0; t < %d; t++) T[t] = 0;   /* a ball ending stops every timer */" % ntimers)
+    if g.combos:
+        L.append("    combo_clear();                    /* PAD-708: no combo runs on into the next ball */")
     L.extend(scripts_of("ball_end"))
     L.append("    if (ENDS_ON_DRAIN) drain_end();")
     if media:
@@ -3224,6 +3364,131 @@ def to_c(program, slug):
     L.append("};")
     L.append("PM_REGISTER(%s_mode);" % ident)
     return "\n".join(L) + "\n"
+
+
+def _combo_c(g):
+    """PAD-708: the combo hats' table, the last shots kept with their times, and the two values (the combos in a row,
+    a combo's shots made so far). Before the scripts and the HUD, which read the values."""
+    rows, words = [], []
+    gates = {"idle": 1, "running": 2}
+    for k, h in enumerate(g.combos):
+        steps = combo_steps(h)[:COMBO_STEPS_MAX]
+        codes = [-1 if x == COMBO_ANY else -2 if x == COMBO_LIT else g.shot_i(x) for x in steps]
+        n = len(codes) if len(codes) >= 2 else 0              # fewer than two shots: never made
+        codes += [0] * (COMBO_STEPS_MAX - len(codes))
+        rows.append("    { %d, %du, %d, { %s } }," % (n, combo_ms(h), gates.get(h.get("when"), 0),
+                                                     ", ".join(str(c) for c in codes)))
+        words.append(" * COMBO[%d]: %s" % (k, _comment(_hat_words(h))))
+    return _COMBO_C % {"n": len(g.combos), "ring": COMBO_STEPS_MAX, "rows": "\n".join(rows),
+                       "words": "\n".join(words)}
+
+
+_COMBO_C = """/* ---- PAD-708: the combos: shots made one after another, each within its window (ms) of the one before. Judged on
+ * the shots this mode hears, in order; the last few are kept with the time each was made, newest first, so a shot
+ * that breaks one combo may begin the next. A step: a shot (its index in S), -1 any shot, -2 a shot it has lit.
+%(words)s
+ */
+#define N_COMBOS     %(n)d
+#define COMBO_RING   %(ring)d
+static const struct { int n; unsigned ms; int gate; int step[COMBO_RING]; } COMBO[N_COMBOS] = {
+%(rows)s
+};
+static struct { uint64_t shot, lit; unsigned long at; } combo_ring[COMBO_RING];
+static unsigned combo_n;                         /* the shots kept, up to COMBO_RING */
+static unsigned combo_fired;                     /* the combos the last shot made, a bit each */
+static long long combo_chain[5];                 /* the combos in a row, per player */
+static unsigned long combo_chain_at, combo_chain_ms;   /* when the last one was made, and its window */
+
+static int combo_step_is(int step, uint64_t shot, uint64_t lit)
+{
+    if (step == -1) return (shot & named) != 0;
+    if (step == -2) return (shot & lit) != 0;
+    return step >= 0 && S[step] && (shot & S[step]) != 0;
+}
+
+/* the newest j shots, oldest first, are combo k's first j steps, each within its window of the one before */
+static int combo_made(int k, int j)
+{
+    int s;
+    if (j < 1 || j > (int)combo_n) return 0;
+    for (s = 0; s < j; s++) {
+        int e = j - 1 - s;
+        if (!combo_step_is(COMBO[k].step[s], combo_ring[e].shot, combo_ring[e].lit)) return 0;
+        if (s && combo_ring[e].at - combo_ring[e + 1].at > COMBO[k].ms) return 0;
+    }
+    return 1;
+}
+
+static void combo_chain_end(void)
+{
+    unsigned p;
+    for (p = 0; p < 5; p++) combo_chain[p] = 0;
+    combo_chain_at = 0;
+}
+
+static void combo_clear(void)                    /* the ball, the mode or the game begins or ends */
+{
+    combo_n = 0;
+    combo_fired = 0;
+    combo_chain_end();
+}
+
+/* "the combos in a row" for the player up: 0 once the window of the last one lapsed */
+UNUSED static long long combo_in_row(void)
+{
+    if (!combo_chain_at || pm_ms() - combo_chain_at > combo_chain_ms) return 0;
+    return combo_chain[P()];
+}
+
+/* "a combo's shots made so far": the most of its first steps the newest shots make, while the last is in its
+ * window (a combo just made counts what it leaves toward the next: ramp -> loop -> ramp made, its last ramp is 1) */
+UNUSED static long long combo_made_so_far(int k)
+{
+    int j;
+    if (!combo_n || !COMBO[k].n || pm_ms() - combo_ring[0].at > COMBO[k].ms) return 0;
+    for (j = COMBO[k].n - 1; j > 0; j--)
+        if (combo_made(k, j)) return j;
+    return 0;
+}
+"""
+
+_COMBO_SHOT_C = """/* PAD-708: a shot into the combos' ring, and the combos it makes (a combo's script runs for it while its When
+ * holds: any time, while the mode is not running (as an idle shot), while it runs). One more in a row for the
+ * player up when it makes any, the window of the longest it made then running for the next. */
+static uint64_t lit_mask(void)
+{
+    uint64_t m = 0;
+    int i;
+    for (i = 0; i < N_SHOTS; i++)
+        if (LIT[i].on && LIT[i].rgb && S[i]) m |= S[i];   /* lit, not held dark */
+    return m;
+}
+
+static void combo_shot(uint64_t shot, int was_on, int idle)
+{
+    unsigned long now = pm_ms();
+    unsigned long win = 0;
+    int k;
+    for (k = COMBO_RING - 1; k > 0; k--) combo_ring[k] = combo_ring[k - 1];
+    combo_ring[0].shot = shot;
+    combo_ring[0].lit = lit_mask();              /* as it was made: before this shot's scripts light or free any */
+    combo_ring[0].at = now;
+    if (combo_n < COMBO_RING) combo_n++;
+    combo_fired = 0;
+    for (k = 0; k < N_COMBOS; k++) {
+        int gate = COMBO[k].gate == 1 ? idle : COMBO[k].gate == 2 ? was_on : 1;
+        if (!gate || !COMBO[k].n || !combo_made(k, COMBO[k].n)) continue;
+        combo_fired |= 1u << k;
+        if (COMBO[k].ms > win) win = COMBO[k].ms;
+    }
+    if (!combo_fired) return;
+    if (combo_chain_at && now - combo_chain_at > combo_chain_ms) combo_chain_end();
+    combo_chain[P()]++;
+    combo_chain_at = now ? now : 1;
+    combo_chain_ms = win;
+    pm_log("combo (%u in a row)", (unsigned)combo_chain[P()]);
+}
+"""
 
 
 #: PAD-503: a new game as the SDK tells one (MODE_SDK.md "What marks a new game"; mode_file.c and the kit's
@@ -4087,6 +4352,21 @@ static void own_tick(void)
 """
 
 
+def combo_shot_words(shot):
+    """PAD-708: a combo's step in words."""
+    return {COMBO_ANY: "any shot", COMBO_LIT: "a lit shot"}.get(shot, shot or "(no shot)")
+
+
+def combo_words(hat, when=True):
+    """PAD-708: a combo hat in words: ``when Left ramp, then Right ramp within 3 s, while it runs``."""
+    steps = [combo_shot_words(x) for x in combo_steps(hat)] or ["(no shots)"]
+    out = "when %s%s within %g s" % (", then ".join(steps), ", each" if len(steps) > 2 else "",
+                                     combo_ms(hat) / 1000.0)
+    if hat.get("name"):
+        out += " (%s)" % hat["name"]
+    return out + (", %s" % WHEN.get(hat.get("when", "any"), "") if when else "")
+
+
 def _hat_words(hat):
     kind = hat.get("kind")
     when = WHEN.get(hat.get("when", "any"), "")
@@ -4106,6 +4386,8 @@ def _hat_words(hat):
         return "when %s, %s" % (MP.EVENT_LABELS.get(hat.get("event"), hat.get("event")), when)
     if kind == "timer_done":
         return "when the timer %s runs out" % (hat.get("timer") or "(no timer)")
+    if kind == "combo":                                                             # PAD-708
+        return combo_words(hat)
     if kind == "challenge":
         ms = challenge_launch_ms(hat)                                               # PAD-643
         return "when the player picks the challenge %s%s" % (

@@ -66,7 +66,8 @@ EVERY_HAT = [{"kind": "mode_start"}, {"kind": "mode_end"}, {"kind": "shot", "sho
              {"kind": "challenge", "challenge": "Ahoy Mr. Bond"},                                  # PAD-615
              {"kind": "combo", "shots": ["Left ramp", "lit", "*"], "seconds": 2.5, "when": "running",
               "name": "RAMPS"},                                                                   # PAD-708
-             {"kind": "battle", "slot": 2, "name": "Gigan"}]                                         # PAD-706
+             {"kind": "battle", "slot": 2, "name": "Gigan"},                                          # PAD-706
+             {"kind": "game_mode", "mode": 21, "name": "Jet Fighter Attack"}]                         # PAD-710
 
 
 def every_program():

@@ -256,6 +256,7 @@ HATS = {
     "challenge": "When the player picks a challenge",
     "combo": "When shots are made one after another",   # PAD-708: a combo, each shot within N seconds of the last
     "battle": "When the player picks a battle",       # PAD-706: a slot of Godzilla's battle selection screen
+    "game_mode": "When the game starts one of its modes",   # PAD-710: the mode runs in its place, counting as it
 }
 #: PAD-615 round 2: the challenge hat's choice that adds the mode to the game's start menu as a challenge of its own
 CHALLENGE_NEW = "A new challenge of its own"
@@ -283,6 +284,19 @@ def battle_name(hat):
     if name:
         return name
     return "battle %s" % hat.get("slot") if _int_ok(hat.get("slot"), 0, ROSTER_MAX - 1) else "(no battle)"
+
+
+def place_name(hat):
+    """PAD-710: a game-mode hat's mode, as the page named it when it was picked (``name``), else its number."""
+    hat = hat or {}
+    name = str(hat.get("name") or "").strip()
+    if name:
+        return name
+    return "mode %s" % hat.get("mode") if _int_ok(hat.get("mode"), 0, PLACE_MAX - 1) else "(no mode)"
+
+
+#: PAD-710: the game's mode numbers a mode may take the place of (pad_mode_runtime.c PLACE_IDS)
+PLACE_MAX = 128
 
 
 #: a shot / event hat's "when": the mode's state it runs in
@@ -951,13 +965,14 @@ def card_checks(p):
                                                                    else []),
         "hold_caps": {n: ms for n, ms in getattr(p, "coil_caps", ()) or ()},
         "roster": list(getattr(p, "roster", ()) or ()),     # PAD-706: the battle slots a mode may take ([] = none)
+        "places": [list(x) for x in getattr(p, "places", ()) or ()],   # PAD-710: [[id, name, counts]] ([] = none)
     }
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
              game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None,
-             drain=None, roster=None):
+             drain=None, roster=None, places=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -972,7 +987,8 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     shot is lit without them); so is ``modes`` (PAD-600): the slugs of the project's blocks modes another mode's
     light may be put out in; so is ``challenges`` (PAD-615): the names of the game's challenges a mode may take the
     place of ([] = none on this game); so is ``roster`` (PAD-706): the names of the battle selection's slots, in slot
-    order ([] = none a mode may take on this game).
+    order ([] = none a mode may take on this game); so is ``places`` (PAD-710): the game's own modes a mode may take
+    the place of, ``[[id, name, counts], ...]`` ([] = none on this game).
     The C is written anyway (a missing shot is 0 to the game, which never matches),
     so a half-made program always saves."""
     program = normalize(program)
@@ -1028,6 +1044,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "challenges": list(challenges) if challenges is not None else None, "picked": set(),
            "combos": combo_names(program),            # PAD-708: the combos a value may name
            "roster": list(roster) if roster is not None else None, "battles": set(),   # PAD-706
+           "places": {int(x[0]): x for x in places} if places is not None else None, "placed": set(),   # PAD-710
            "program": program}                        # PAD-646: a Light show block names one of its shows
     _check_shows(program, ctx)                        # PAD-646
     hud = program["hud"]
@@ -1160,9 +1177,19 @@ def notes(program):
         out.append("No End the mode block says the battle won, so the battle counts as won when the mode ends by its "
                    "clock or an End the mode block, and as lost when the ball drains first (then the next lit scoop "
                    "plays it again, as the game does with its own).")               # PAD-706
-    if wins and not battles:
+    places = any((s.get("hat") or {}).get("kind") == "game_mode" for s in program["scripts"])    # PAD-710
+    if any((s.get("hat") or {}).get("kind") == "game_mode"
+           and not any(b.get("op") == "start_mode" for b in _walk(s.get("do") or [])) for s in program["scripts"]):
+        out.append("A When the game starts one of its modes script with no Start the mode in it starts nothing: the "
+                   "game's mode does not run either, and counts as lost.")
+    if places and not wins:
+        out.append("No End the mode block says it was completed, so the game's mode it runs in the place of counts as "
+                   "completed when the mode ends by its clock or an End the mode block, and as not completed when the "
+                   "ball drains first.")
+    if wins and not battles and not places:
         out.append("End the mode, the battle won, wins a battle only for a mode the player picked on the battle "
-                   "selection screen (When the player picks a battle): here it just ends the mode.")
+                   "selection screen (When the player picks a battle), and completes the game's mode only for one that "
+                   "runs in its place (When the game starts one of its modes): here it just ends the mode.")
     idle = [s for s in program["scripts"] if (s.get("hat") or {}).get("kind") in ("mode_end", "ball_end")
             or ((s.get("hat") or {}).get("kind") in ("shot", "any_shot", "switch", "event", "drain", "combo")
                 and (s.get("hat") or {}).get("when") == "idle")]
@@ -1305,6 +1332,20 @@ def _check_hat(hat, n, ctx):
             ctx["out"].append("%s waits for %s too: one script per battle." % (where, battle_name(hat)))
         else:
             ctx["battles"].add(int(slot))
+    if kind == "game_mode":                                                          # PAD-710
+        mid = hat.get("mode")
+        if ctx["places"] is not None and not ctx["places"]:
+            ctx["out"].append("%s waits for the game to start one of its modes, which a mode cannot take the place of "
+                              "on this card's game." % where)
+        elif not _int_ok(mid, 0, PLACE_MAX - 1):
+            ctx["out"].append("%s's When has none of the game's modes chosen." % where)
+        elif ctx["places"] is not None and int(mid) not in ctx["places"]:
+            ctx["out"].append("%s waits for the game's %s, which this card's game does not let a mode take the place "
+                              "of." % (where, place_name(hat)))
+        elif int(mid) in ctx["placed"]:
+            ctx["out"].append("%s waits for the game's %s too: one script per game mode." % (where, place_name(hat)))
+        else:
+            ctx["placed"].add(int(mid))
 
 
 def combo_names(program):
@@ -1894,7 +1935,8 @@ class _Gen:
         # PAD-706: it takes a battle's place, and no End the mode block says the battle won: then its own end (its
         # clock, an End the mode block) wins it - it has no other way to, and a lost battle is the player's again at
         # every lit scoop until it is won - and only a drain, a tilt or the game moving on loses it
-        self.battle_hat = any((sc.get("hat") or {}).get("kind") == "battle" for sc in program["scripts"])
+        self.battle_hat = any((sc.get("hat") or {}).get("kind") in ("battle", "game_mode")   # PAD-710: the same rule
+                              for sc in program["scripts"])
         self.wins_by_end = self.battle_hat and not any(
             b.get("op") == "end_mode" and b.get("won") for sc in program["scripts"] for b in _walk(sc.get("do") or []))
 
@@ -2319,6 +2361,7 @@ def to_c(program, slug):
     challenge_names = []                    # PAD-615: the game's challenges its scripts take the place of
     challenge_launch = []                   # PAD-643: each one's launch (pm_challenge_launch)
     battle_slots = []                       # PAD-706: the battle selection's slots its scripts take the place of
+    place_ids = []                          # PAD-710: the game's own modes its scripts take the place of
     for kind, items in bodies.items():
         for n, hat, body in items:
             head = "    /* script %d: %s */" % (n, _comment(_hat_words(hat)))
@@ -2364,6 +2407,11 @@ def to_c(program, slug):
                 if slot not in battle_slots:
                     battle_slots.append(slot)
                 test = "(picked & %du)" % (1 << battle_slots.index(slot))
+            elif kind == "game_mode":                    # PAD-710: the game's start, taken on its thread, run on the tick
+                mid = int(hat.get("mode")) if _int_ok(hat.get("mode"), 0, PLACE_MAX - 1) else -1
+                if mid not in place_ids:
+                    place_ids.append(mid)
+                test = "(picked & %du)" % (1 << place_ids.index(mid))
             elif kind == "challenge":                    # PAD-615: picked on the game's thread, run on the tick
                 name = str(hat.get("challenge") or "")
                 if name not in challenge_names:
@@ -2547,10 +2595,14 @@ def to_c(program, slug):
     L.append("static unsigned total_due;            /* PAD-574: ticks until its TOTAL: an Award it ended on shows first */")
     L.append("static int drain_long;                 /* PAD-622: its TOTAL at a drain, as long as the game's own */")
     L.append("static int drain_hold;                 /* PAD-622: the game's end of ball waits on it (set once it does) */")
-    if battle_slots or g.battle_won:
+    if battle_slots or place_ids or challenge_names or g.battle_won:
         L.append("static int battle_won;                 /* PAD-706: an End the mode block won the battle it replaced */")
+    if challenge_names:
+        L.append("static int challenge_run;              /* PAD-710: it runs on a challenge pick: its end counts the game's mode */")
     if battle_slots:
         L.append("static int battle_held;                /* PAD-706: it runs on a battle pick: its end gives the pick back */")
+    if place_ids:
+        L.append("static int place_held;                 /* PAD-710: it runs in the place of one of the game's modes */")
     if not has_hud:
         L.append("static char award_next[96];           /* PAD-574: an Award of When the mode ends, after the one showing */")
         L.append("static unsigned award_next_ticks;")
@@ -3016,7 +3068,7 @@ def to_c(program, slug):
     L.append("        pm_log(\"isolated: gives way - one of the game's modes starting ends it\");")
     L.append("    }")
     L.append("    run.own_mball = 0;")
-    if battle_slots or g.battle_won:
+    if battle_slots or place_ids or challenge_names or g.battle_won:
         L.append("    battle_won = 0;")
     L.append("    run.on = 1;")
     L.append("    run.player = pm_player();")
@@ -3077,7 +3129,7 @@ def to_c(program, slug):
     L.append("{")
     L.append("    if (!run.on || ending) return;    /* an End block in When the mode ends */")
     L.append("    ending = 1;")
-    if battle_slots:
+    if battle_slots or place_ids or challenge_names:
         L.append("    const int won = battle_won;       /* PAD-706: as it ended, before When the mode ends runs */")
     L.append("    on_mode_end();")
     L.append("    ending = 0;")
@@ -3139,6 +3191,17 @@ def to_c(program, slug):
         L.append("        battle_held = 0;")
         L.append('        pm_log("the battle it took the place of: %s", won ? "WON" : "lost");')
         L.append("        pm_roster_over(won);")
+        L.append("    }")
+    if challenge_names:
+        L.append("    if (challenge_run) {              /* PAD-710: a challenge that is one of the game's modes counts as it */")
+        L.append("        challenge_run = 0;")
+        L.append("        pm_place_over(won);")
+        L.append("    }")
+    if place_ids:
+        L.append("    if (place_held) {                 /* PAD-710: the game's mode it ran in the place of: the game counts it */")
+        L.append("        place_held = 0;")
+        L.append('        pm_log("the game\'s mode it took the place of: %s", won ? "COMPLETED" : "not completed");')
+        L.append("        pm_place_over(won);")
         L.append("    }")
     L.append("    end_clip = 0;")
     L.append("}")
@@ -3214,6 +3277,34 @@ def to_c(program, slug):
         L.append("    return 0;")
         L.append("}")
         L.append("")
+    if place_ids:                           # PAD-710
+        L.append("/* PAD-710: the game's own modes this mode takes the place of, claimed as it loads: when the game starts one,")
+        L.append(" * its script runs instead and, where the game's framework is known, the mode counts as the game's, completed")
+        L.append(" * or not, when it ends */")
+        L.append("static const unsigned PLACE_IDS[%d] = { %s };"
+                 % (len(place_ids), ", ".join(str(max(0, v)) for v in place_ids)))
+        L.append("static volatile unsigned place_picked;     /* set on the game's thread, run on the tick */")
+        L.append("static unsigned place_player;              /* whose */")
+        L.append("")
+        L.append("static int on_place(unsigned id)")
+        L.append("{")
+        L.append("    unsigned k;")
+        L.append("    if (!pm_in_game()) return 0;")
+        L.append("    for (k = 0; k < %d; k++)" % len(place_ids))
+        L.append("        if (PLACE_IDS[k] == id) {")
+        L.append("            if (run.on) {                 /* already running: it takes it, nothing restarts */")
+        L.append("                place_held = 1;")
+        L.append('                pm_log("the game started its %s while this runs - nothing restarts", pm_game_mode_name(id));')
+        L.append("                return 1;")
+        L.append("            }")
+        L.append("            place_picked |= 1u << k;")
+        L.append("            place_player = pm_player();")
+        L.append('            pm_log("the game started its %s - this runs in its place", pm_game_mode_name(id));')
+        L.append("            return 1;                     /* the game's own does not start */")
+        L.append("        }")
+        L.append("    return 0;")
+        L.append("}")
+        L.append("")
     L.append("/* ---- the callbacks ---- */")
     L.append("static void on_init(void)")
     L.append("{")
@@ -3247,6 +3338,10 @@ def to_c(program, slug):
         L.append("            pm_challenge_launch((unsigned)CHALLENGE_AT[i], CHALLENGE_LAUNCH[i]);   /* PAD-643 */")
         L.append("        }")
         L.append("    }")
+    if place_ids:                                   # PAD-710
+        L.append("    for (i = 0; i < %d; i++)" % len(place_ids))
+        L.append("        if (!pm_place_claim(PLACE_IDS[i], on_place))")
+        L.append('            pm_log("the game\'s mode %u is not one this game lets a mode take the place of", PLACE_IDS[i]);')
     if battle_slots:                                # PAD-706
         L.append("    for (i = 0; i < %d; i++)" % len(battle_slots))
         L.append("        if (!pm_roster_claim(BATTLE_SLOTS[i], on_battle))")
@@ -3412,6 +3507,7 @@ def to_c(program, slug):
         if g.mech:
             L.append("            ball_starting = 1;            /* PAD-621: no hold that waits for a ball at the post */")
         L.extend("        " + line if line else line for code in challenge_scripts for line in code.split("\n"))
+        L.append("            if (run.on) challenge_run = 1;   /* PAD-710 */")
         if g.mech:
             L.append("            ball_starting = 0;")
         L.append("        }")
@@ -3433,6 +3529,23 @@ def to_c(program, slug):
         L.append("            else {")
         L.append('                pm_log("the battle pick started nothing - given back, a battle lost");')
         L.append("                pm_roster_done();")
+        L.append("            }")
+        L.append("        }")
+        L.append("    }")
+    place_scripts = scripts_of("game_mode")
+    if place_ids:                                   # PAD-710: the game started one of its modes this one holds
+        L.append("    if (place_picked) {")
+        L.append("        unsigned picked = place_picked;")
+        L.append("        place_picked = 0;")
+        L.append("        if (!in_game || pm_player() != place_player) {")
+        L.append('            pm_log("the game\'s start of its mode lapsed - the player changed or the game ended");')
+        L.append("            pm_place_over(0);")
+        L.append("        } else {")
+        L.extend("        " + line if line else line for code in place_scripts for line in code.split("\n"))
+        L.append("            if (run.on) place_held = 1;")
+        L.append("            else {")
+        L.append('                pm_log("the game started its mode and this started nothing - not completed");')
+        L.append("                pm_place_over(0);")
         L.append("            }")
         L.append("        }")
         L.append("    }")
@@ -3461,7 +3574,9 @@ def to_c(program, slug):
     L.append("        return;")
     L.append("    }")
     L.append("    if (run.own_mball && pm_balls_in_play() < 2) run.own_mball = 0;   /* its multiball is over */")
-    L.append("    if (GAME_MODES && pm_aside() && !(run.own_mball && pm_aside() == (int)PM_STOCK_MULTIBALL)) {")
+    # PAD-710: a mode in the place of one of the game's modes is that mode: the game's others beside it do not end it
+    L.append("    if (GAME_MODES && pm_aside() && !(run.own_mball && pm_aside() == (int)PM_STOCK_MULTIBALL)%s) {"
+             % (" && !place_held" if place_ids else ""))
     L.append("        end_now(\"the game's own mode began\");   /* its screen and HUD go at once, as a tilt's */")
     L.append("        return;")
     L.append("    }")
@@ -3548,7 +3663,15 @@ def to_c(program, slug):
         L.append('        pm_log("the ball ended before the battle pick started - given back");')
         L.append("        pm_roster_done();")
         L.append("    }")
-        L.append("    if (battle_held && run.on) drain_end();   /* PAD-706: a battle ends with its ball, as the game's do */")
+    if place_ids:                                   # PAD-710: a game's start not begun yet counts as not completed
+        L.append("    if (place_picked) {")
+        L.append("        place_picked = 0;")
+        L.append('        pm_log("the ball ended before it started in the place of the game\'s mode - not completed");')
+        L.append("        pm_place_over(0);")
+        L.append("    }")
+    if battle_slots or place_ids:
+        held = " || ".join(x for x, on in (("battle_held", battle_slots), ("place_held", place_ids)) if on)
+        L.append("    if ((%s) && run.on) drain_end();   /* PAD-706/710: it ends with its ball, as the game's do */" % held)
         L.append("    else if (ENDS_ON_DRAIN) drain_end();")
     else:
         L.append("    if (ENDS_ON_DRAIN) drain_end();")
@@ -4645,6 +4768,8 @@ def _hat_words(hat):
         return combo_words(hat)
     if kind == "battle":                                                             # PAD-706
         return "when the player picks %s on the battle selection screen" % battle_name(hat)
+    if kind == "game_mode":                                                          # PAD-710
+        return "when the game starts its %s" % place_name(hat)
     if kind == "challenge":
         ms = challenge_launch_ms(hat)                                               # PAD-643
         return "when the player picks the challenge %s%s" % (

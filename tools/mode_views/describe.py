@@ -186,6 +186,8 @@ def hat(h):
         return "When %s within %s s%s" % (", then ".join(steps) or "?", h.get("seconds"), when)
     if k == "battle":                                                       # PAD-706
         return "When the player picks the battle %s" % BM.battle_name(h)
+    if k == "game_mode":                                                    # PAD-710
+        return "When the game starts its %s" % BM.place_name(h)
     return "(%s)" % k
 
 

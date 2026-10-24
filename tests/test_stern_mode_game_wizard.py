@@ -646,6 +646,7 @@ def test_the_runtime_keeps_a_refused_start_lit_and_lights_a_start_while_a_mode_b
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
     veto = src[src.index("static int on_block_start("):]
     veto = veto[:veto.index("\n}\n")]
+    veto = veto[veto.index("lit_hold_until"):]          # PAD-710: past the place claim, which takes a start itself
     assert veto.index("wizard_refused(block_hooked[hook_n]);") < veto.index("return 1;")
     wiz = src[src.index("int pm_game_wizard(int n, int how)"):]
     wiz = wiz[:wiz.index("\n}\n")]

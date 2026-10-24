@@ -600,3 +600,6 @@ value ball_launch_wait_flag  12
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x0025cefc 0xe92d4ff0 0xe24dd0c4
+
+# PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
+value challenge_place_2        35

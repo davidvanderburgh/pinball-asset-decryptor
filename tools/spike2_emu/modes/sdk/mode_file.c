@@ -79,6 +79,7 @@ struct mode_cfg {
     unsigned challenge_1;             /* PAD-615: `challenge <n>` + 1, CHALLENGE_NEW for `challenge new`; 0 = none */
     char challenge_name[40];          /* PAD-615: `challenge_name <words>`: its name on the start menu ("" = `name`) */
     int challenge_launch;             /* PAD-643: `challenge_launch clip|player|<seconds>`: 0 (clip), -1, ms */
+    unsigned place_1;                 /* PAD-710: `in_place_of <id>` + 1 (one of the game's modes); 0 = none */
     unsigned display_priority;        /* item 154 display: `priority <n>`, 0 = none (the display as before) */
     /* item 167: `multiball <balls> [ball save s]` - the mode is a multiball of its own; `seconds 0` is then no
      * clock (it ends when one ball is left). `add_ball <mask> [times]`: a shot that adds a ball */
@@ -160,6 +161,7 @@ static struct {
     unsigned add_balls_left;
     int mball_wait;                   /* PAD-228: `multiball_on` - the balls are not served until its shot */
     int by_challenge;                 /* PAD-619: started by a challenge pick - the challenge game is the mode's */
+    int by_place;                     /* PAD-710: started in the place of one of the game's modes - it is that mode */
     unsigned long shield_due;         /* PAD-392: when the shield platform turns (0 = turned, or not asked) */
     unsigned long building_due;       /* PAD-589: when the building moves as it starts (0 = moved, or not asked) */
     unsigned clock_wait;              /* PAD-621: coil line + 1 whose hold the clock waits for; 0 = it runs */
@@ -654,6 +656,33 @@ static int challenge_line(struct slot *M, const char *line)
     return 1;
 }
 static void challenge_sync(struct slot *M);
+
+/* PAD-710: `in_place_of <id>` - the mode takes the place of the game's own mode <id> (the port's `block_name_<id>`, the
+ * ids `block_modes` takes): when the game starts that mode, this one starts instead and, where the port names the
+ * game's mode framework, counts as it. Parsed here; claimed in place_sync() after a (re)load. A mode with it needs no
+ * trigger: the game starting its mode starts it. */
+static int place_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "in_place_of");
+    uint64_t n;
+    (void)M;
+    if (!a) return 0;
+    if (a[0] < '0' || a[0] > '9') {                  /* `-1`, a word: num() would read 0 and claim mode 0 */
+        pm_log("in_place_of needs one of the game's mode numbers 0-127 - \"%.40s\" ignored", a);
+        cfg.place_1 = 0;
+        return 1;
+    }
+    n = num(&a);
+    if (n > 127) {
+        pm_log("in_place_of %llu is not one of the game's mode numbers 0-127 - ignored", (unsigned long long)n);
+        cfg.place_1 = 0;
+        return 1;
+    }
+    cfg.place_1 = (unsigned)n + 1;
+    return 1;
+}
+static void place_sync(struct slot *M);
+static void place_ended(int won);
 
 /* item 154 display: `priority <n>` (1-255, the game's display-effect scale; MODE_SDK.md "Display
  * priority"): while the mode runs, the game's displays that do not beat n wait, so its clip plays
@@ -2112,6 +2141,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
     if (challenge_line(M, line)) return;     /* PAD-615 */
+    if (place_line(M, line)) return;         /* PAD-710 */
     if (own_lights_key(M, line)) return;     /* item mode-leds */
     if (display_line(M, line)) return;
     if (more_line(M, line)) return;          /* PAD-227 */
@@ -2217,6 +2247,7 @@ static int cfg_reload(struct slot *M)
         pm_log("mode file gone: slot %u (\"%s\") is not armed", M->index, cfg.name);
         roster_sync(M);
         challenge_sync(M);
+        place_sync(M);
         return 1;
     }
     if (M->said_which != k) {
@@ -2232,6 +2263,7 @@ static int cfg_reload(struct slot *M)
     cfg_parse(M, M->raw, n);
     roster_sync(M);
     challenge_sync(M);
+    place_sync(M);
     M->node = M->text = 0;
     M->said[0] = 0;                          /* PAD-390: a new file's screen has said nothing yet */
     return 1;
@@ -2368,6 +2400,7 @@ static void hand_off(struct slot *M, const char *why)
 }
 
 static int challenge_force;                /* PAD-619: mode_start past the game's modes (the pick's grace ran out) */
+static int place_force;                    /* PAD-710: the game was starting its own mode: past its other modes too */
 
 static void mode_start(struct slot *M, const char *why)
 {
@@ -2383,7 +2416,7 @@ static void mode_start(struct slot *M, const char *why)
     }
     if (!starts_allowed(M, why)) return;     /* item 139: how often it can start */
     if (!stack_allows(M, why)) return;       /* item 140: the game's own modes */
-    if (cfg.game_modes != GM_STACK && !challenge_force && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) { /* PAD-363 */
+    if (cfg.game_modes != GM_STACK && !challenge_force && !place_force && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) { /* PAD-363 */
         pm_log("%s not started (%s): %s is running - its trigger count is kept", cfg.name, why,
                pm_stock_mode_what((unsigned)k));
         return;
@@ -2398,6 +2431,7 @@ static void mode_start(struct slot *M, const char *why)
     }
     run.mball_on = run.mball_wait = 0;
     run.by_challenge = why[0] == 'c' && why[1] == 'h' && why[2] == 'a' && why[3] == 'l';   /* "challenge pick" */
+    run.by_place = name_is(why, "in place of the game's mode");                          /* PAD-710 */
     if (cfg.mball_balls && cfg.mball_on_bits) {
         run.mball_wait = 1;                  /* PAD-228: served on its shot, while the mode runs */
     } else if (cfg.mball_balls) {            /* item 167: the game serves the balls, or the mode does not start */
@@ -2481,6 +2515,9 @@ static void mode_end(const char *why)
     pm_end();
     /* PAD-706: its end shot is the battle won; a mode with no end shot wins it by playing to its clock's end */
     roster_ended(name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")));
+    place_ended(name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")));   /* PAD-710: the same rule */
+    if (run.by_challenge)                    /* PAD-710: a challenge that is one of the game's modes - the same rule */
+        pm_place_over(name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")));
     own_sounds_end(M);
     own_lights_end(M);                       /* item mode-leds: the game has its inserts back */
     if (cfg.light_off[0]) lights(M, cfg.light_off);
@@ -2773,6 +2810,115 @@ static void challenge_sync(struct slot *M)
     }
 }
 
+/* ---- PAD-710: a mode in the place of one of the game's own modes --------------------------------
+ * The runtime calls place_start on the game's thread when the game starts the mode a file holds (`in_place_of <id>`);
+ * the game's own does not start. The mode starts on the next tick (never inside the game's call). Its end says how it
+ * went, as a roster pick's does: its end shot won it; a mode with no end shot wins by playing to its clock's end; any
+ * other end (the ball, a tilt) lost it. The runtime then runs the game's own stop of its mode with that outcome. */
+static unsigned place_held[MODES_MAX];      /* the game's mode id + 1 each mode file holds; 0 = none */
+static int place_run;                       /* the running mode took a place: its END says how it went */
+static unsigned place_wait;                 /* mode file slot + 1 taken but not started yet; 0 = none */
+static unsigned place_wait_player;
+
+static void place_ended(int won)
+{
+    if (!place_run) return;
+    place_run = 0;
+    pm_place_over(won);
+}
+
+static void place_tick(void)
+{
+    struct slot *M;
+    if (!place_wait || run.active) return;
+    M = &slots[place_wait - 1];
+    place_wait = 0;
+    if (!pm_in_game() || pm_player() != place_wait_player) {
+        pm_log("%s: the game's start of its mode lapsed - the player changed or the game ended", cfg.name);
+        pm_place_over(0);
+        return;
+    }
+    place_force = 1;
+    mode_start(M, "in place of the game's mode");
+    place_force = 0;
+    if (running(M)) {
+        place_run = 1;
+        return;
+    }
+    pm_log("%s: took the game's start of its mode but did not start (its starts, cooldown or the stack said no) - it "
+           "counts as lost", cfg.name);
+    pm_place_over(0);
+}
+
+static void place_ball_end(void)
+{
+    if (!place_wait) return;
+    pm_log("%s: the ball ended before it started in the place of the game's mode - it counts as lost",
+           slots[place_wait - 1].c.name);
+    place_wait = 0;
+    pm_place_over(0);
+}
+
+static int place_start(unsigned id)
+{
+    unsigned k;
+    for (k = 0; k < MODES_MAX; k++) {
+        struct slot *M = &slots[k];
+        if (place_held[k] != id + 1) continue;
+        if (running(M)) {
+            pm_log("%s: the game started its %s again while this runs - nothing restarts", cfg.name,
+                   pm_game_mode_name(id) ? pm_game_mode_name(id) : "mode");
+            return 1;
+        }
+        if (run.active) return 0;            /* another mode file runs: the game's own starts (or its block says no) */
+        place_wait = k + 1;
+        place_wait_player = pm_player();
+        pm_log("%s: the game started its %s (mode %u) - this starts now in its place%s", cfg.name,
+               pm_game_mode_name(id) ? pm_game_mode_name(id) : "mode", id, pm_place_counts(id) ? ", counting as it" : "");
+        return 1;
+    }
+    return 0;
+}
+
+static void place_sync(struct slot *M)
+{
+    unsigned want, k;
+    if (M->raw_len >= 0 && cfg.place_1 && cfg.seconds && !cfg.valid && cfg.trigger_bits && !cfg.trigger_count) {
+        /* `trigger <shots> 0` never starts a mode: keep that meaning */
+        pm_log("%s: trigger %08x_%08x with a count of 0 starts nothing - only the game starting its mode starts it",
+               cfg.name, (unsigned)(cfg.trigger_bits >> 32), (unsigned)cfg.trigger_bits);
+        cfg.trigger_bits = 0;
+    }
+    if (M->raw_len >= 0 && cfg.place_1 && cfg.seconds && !cfg.valid) {
+        cfg.valid = 1;
+        pm_log("%s: valid without a trigger (the NOT VALID above is the trigger modes' rule) - the game starting its "
+               "mode %u starts it", cfg.name, cfg.place_1 - 1);
+    }
+    want = cfg.valid ? cfg.place_1 : 0;
+    if (place_held[M->index] == want) return;
+    if (place_held[M->index]) {
+        pm_place_release(place_held[M->index] - 1);
+        pm_log("the game's mode %u released (mode file slot %u)", place_held[M->index] - 1, M->index);
+        place_held[M->index] = 0;
+    }
+    if (!want) return;
+    for (k = 0; k < MODES_MAX; k++)
+        if (k != M->index && place_held[k] == want) {
+            pm_log("%s: the game's mode %u NOT claimed - %s holds it", cfg.name, want - 1, slots[k].c.name);
+            return;
+        }
+    if (pm_place_claim(want - 1, place_start)) {
+        place_held[M->index] = want;
+        pm_log("%s takes the place of the game's %s (mode %u)%s", cfg.name,
+               pm_game_mode_name(want - 1) ? pm_game_mode_name(want - 1) : "mode", want - 1,
+               pm_place_counts(want - 1) ? " and counts as it" : "");
+    } else {
+        pm_log("%s: the game's mode %u NOT claimed (%s)", cfg.name, want - 1,
+               pm_can(PM_CAN_PLACE) ? "the port names no start of it, or a mode in C holds it"
+                                    : "this game's port names none of the game's modes' starts");
+    }
+}
+
 /* ---- item 167: the multiball, while it runs ------------------------------------------------
  * The game's own end of ball comes only when the LAST ball drains, so the mode watches the
  * framework's count: two or more balls means the multiball is on; one (or none) for MBALL_ONE_S,
@@ -3018,6 +3164,7 @@ static void on_ball_end(void)
     starts_ball_end();
     roster_ball_end();                       /* item 146: a pick not started yet is given back */
     challenge_ball_end();                    /* PAD-615: a challenge pick not started yet lapses */
+    place_ball_end();                        /* PAD-710: a taken start not begun yet counts as lost */
 }
 
 /* The files are numbered with no gaps (the app writes slot order), so a new one appears at
@@ -3067,6 +3214,7 @@ static void on_tick(void)
     events_tick();
     roster_tick();                           /* item 146: a taken roster pick starts when it may */
     challenge_tick();                        /* PAD-615: a taken challenge pick starts */
+    place_tick();                            /* PAD-710: a mode in the place of one of the game's starts */
     for (k = 0; k < MODES_MAX; k++) {
         M = &slots[k];
         if (ticks % POLL_TICKS == 0 && k < poll_n) {
@@ -3108,8 +3256,10 @@ static void on_tick(void)
         return;
     }
     /* PAD-363: one of the game's modes began anyway - PAD-619: not in a challenge game the mode was picked for (Avengers
-     * runs a mode of its own at every ball's start; the pick started past it, and the game's are blocked as they can be) */
-    if (cfg.game_modes != GM_STACK && !run.by_challenge && pm_aside()) {
+     * runs a mode of its own at every ball's start; the pick started past it, and the game's are blocked as they can be);
+     * PAD-710: nor in the place of one of the game's modes - the game started it as its own (Venom starts a mini mode as
+     * a ball starts, beside its other modes) */
+    if (cfg.game_modes != GM_STACK && !run.by_challenge && !run.by_place && pm_aside()) {
         mode_end("the game's own mode began");
         return;
     }

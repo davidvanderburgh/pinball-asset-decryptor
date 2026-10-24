@@ -866,7 +866,8 @@ def parse_port(text):
 
 #: PAD-363: the lines game_mode_blocks.py writes from a build's OWN program (each of its modes' start, object and
 #: name, the ones checked by default): never carried from a reference, and never part of what a recipe depends on.
-#: PAD-615: so are portchallenge.py's (the game's Challenge list), read off each build's own code
+#: PAD-615: so are portchallenge.py's (the game's Challenge list), read off each build's own code; PAD-710: and
+#: mode_framework.py's (the game's own mode framework)
 _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block_name_\d+|text block_default|"
                         r"rule \d+|"   # PAD-699: every mode's vtable pointer, from the build's own program
                         r"value block_default|value block_ret_\d+|"
@@ -881,7 +882,11 @@ _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block
                         r"value challenge_scores_gate_(?:id|cat_at|entry_at)|data challenge_scores_(?:table|count)|"
                         r"value challenge_record_(?:check_at|score_at|score_size)|value challenge_page_title_max|"   # PAD-663: the records' layout
                         r"site challenge_page(?:_text|_yield)?|value challenge_page_(?:cat|title)|site challenge_pages_\d+|site challenge_list_page|"   # PAD-660
-                        r"site ball_launch|value ball_launch_(?:wait_)?flag|site challenge_plain_\d+)\b")   # PAD-643
+                        r"site ball_launch|value ball_launch_(?:wait_)?flag|site challenge_plain_\d+|"   # PAD-643
+                        r"site mode_(?:player|started)|data mode_manager|"   # PAD-710
+                        r"value mode_(?:slot_stop|stopped_at|reason_at|starts_at|wins_at|id_at)|"
+                        r"site audit_add|value place_(?:audit_started|audit_completed|flag_played|flag_completed)_\d+|"
+                        r"value challenge_place_\d+)\b")
 
 
 def generated(key, rest):

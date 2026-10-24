@@ -97,6 +97,16 @@ NAME_OFF = 0x24 - STRIDE
 #: title, which is what the comment here used to claim - see layout_image().
 PLAYFIELD_IMAGE = "playfield"
 
+#: ★ IMAGE NAMES THAT ARE ONE BARE WORD, no folder. Every other image name is a
+#: path, which is what makes "/" the test; these two are the only bare words
+#: the library's device tables point at (PAD-705, 2026-10-24, all 60 newest
+#: cards). `backpanel` is the cabinet's back panel, on 16 builds: Avengers,
+#: Deadpool, Iron Maiden, Bond, Jaws, John Wick, Jurassic Park, Stranger Things
+#: and X-Men put their backpanel lamps on it, and Iron Maiden and Star Wars LE
+#: and Stranger Things LE some switches and coils too. Refused as "no slash",
+#: those devices were missing from every table this file feeds.
+BARE_IMAGES = (PLAYFIELD_IMAGE, "backpanel")
+
 #: ★ ARTWORK-LESS BUILDS SHIP THE SAME TABLE WITH THE DRAWING LEFT OUT, and
 #: until 2026-08-28 this file could not see one at all. led_zeppelin_le 1.22.0
 #: carries all 388 records - class, (group, index) and NAME, every field this
@@ -371,7 +381,7 @@ def _one(d, cstr, va):
         if not blank_str(d, imgva):
             return None
         img, blank = BLANK_IMAGE, True
-    elif "/" not in img and img != PLAYFIELD_IMAGE:
+    elif "/" not in img and img not in BARE_IMAGES:
         return None
     name = _name(d, cstr, struct.unpack_from("<I", d, o + NAME_OFF)[0])
     if not name:
@@ -466,7 +476,7 @@ def seeds(d):
     string) because this runs over every printable run in an 8 MB binary.
     """
     want = blank_seeds(d)
-    pf = PLAYFIELD_IMAGE.encode()
+    bare = [w.encode() for w in BARE_IMAGES]
     for m in _STRINGS.finditer(d):
         s, base = m.group(1), m.start(1) + VA_BIAS
         # Every suffix that still holds the LAST "/" passes "/ in s", so each
@@ -475,10 +485,12 @@ def seeds(d):
         cut = s.rfind(b"/")
         for i in range(cut + 1):
             want.add(base + i)
-        # ...and a tail that is exactly the bare playfield name passes too.
-        # This is the godzilla_le case, where the tail starts AFTER the slash.
-        if s.endswith(pf) and len(s) - len(pf) > cut:
-            want.add(base + len(s) - len(pf))
+        # ...and a tail that is exactly a bare image name passes too. This is
+        # the godzilla_le case, where the tail starts AFTER the slash; a
+        # whole string that is one (cut == -1) is the tail at 0.
+        for w in bare:
+            if s.endswith(w) and len(s) - len(w) > cut:
+                want.add(base + len(s) - len(w))
     if not want:
         return []
     out = []
@@ -711,7 +723,7 @@ def counts(keep):
 #: refuses a table recording another revision, or none, which re-derives it
 #: once through the same path a new build takes. BUMP THIS whenever a change to
 #: devicexy or swelf would alter a cached table for an unchanged binary.
-READER_REV = 4                  # 3: unplaced records (PAD-517); 4: curly-quote names, MOVED (PAD-703)
+READER_REV = 5                  # 3: unplaced records (PAD-517); 4: curly-quote names, MOVED (PAD-703); 5: backpanel image (PAD-705)
 READER_TAG = "# reader: "
 
 

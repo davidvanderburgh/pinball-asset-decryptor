@@ -243,15 +243,27 @@ def device_switches(game=None, elf_path=None, bits_by_node=None, names=None,
     connector, so fill()'s report can say what was overruled and why.
     """
     recs = devicexy.build(game=game, elf_path=elf_path)
-    named = collections.defaultdict(set)
+    named = collections.defaultdict(collections.Counter)
     conns = collections.defaultdict(set)
     for r in recs:
         m = CONN_NODE.match(r["conn"] or "")
         if m:
-            named[r["group"]].add(int(m.group(1)))
+            named[r["group"]][int(m.group(1))] += 1
             conns[r["group"]].add(r["conn"])
     gnode = {g: (next(iter(n)) if len(n) == 1 else None)
              for g, n in named.items()}
+    # ★ A NODE IS ONE GROUP'S (PAD-705). star_wars_le 1.31.0's backpanel
+    # accelerator - group 10, wired to node 11 - carries ONE connector, `9d`,
+    # on its fourth magnet, while group 8 names node 9 on 36 records. Read
+    # alone, `9d` filed the four ACCELERATOR OPTOs on node 9 at bits 4-7,
+    # which are FORC(E) DROP TARGET and the FORK RAMP switches, and their
+    # indices fit there, so the bits test below could not catch it. A group
+    # outnamed on its node by another group goes back to being placed by its
+    # bits, as King Kong's lone `9c` on its CPU group would have.
+    for g, node in list(gnode.items()):
+        if node is not None and any(
+                h != g and n[node] > named[g][node] for h, n in named.items()):
+            gnode[g] = None
     by_group = collections.defaultdict(list)
     for r in recs:
         if r["cls"] == 1:

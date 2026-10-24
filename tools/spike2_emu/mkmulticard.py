@@ -6718,11 +6718,28 @@ def tree_dir_inode(reader, root_ino, *names):
     return ino
 
 
+#: Where a .sidx records its OWN version: 'SIDX', a u32, the package name and the game's
+#: three-letter code in 32 bytes, then major, minor, patch (and 0x02).  Every newest build in
+#: the library (59 cards) carries the same three numbers here as in its file name.
+SIDX_MAGIC = b"SIDX"
+SIDX_VERSION_AT = 40
+
+
+def sidx_header_version(head):
+    """The version a .sidx's own header records ('1.16.0'), or None when `head` is not one."""
+    if len(head) < SIDX_VERSION_AT + 3 or head[:4] != SIDX_MAGIC:
+        return None
+    a, b, c = head[SIDX_VERSION_AT:SIDX_VERSION_AT + 3]
+    return "%d.%02d.%d" % (a, b, c)
+
+
 def tree_packages(reader, root_ino, title=None):
-    """[(file name, package, '1.59.0')] for every REGULAR /spk/index/<pkg>-<M_mm_p>.sidx in the
-    tree - Stern's own name for the build.  The bare '<pkg>.sidx' symlink beside it names no
-    version and is skipped, and so is anything that is not a .sidx.  A tree carrying more than
-    one puts the package named after the TITLE DIRECTORY first: that is the game's own."""
+    """[(file name, package, '1.59.0', header version or None)] for every REGULAR
+    /spk/index/<pkg>-<M_mm_p>.sidx in the tree - Stern's own name for the build, and the version
+    the file's own header records (:func:`sidx_header_version`).  The bare '<pkg>.sidx' symlink
+    beside it names no version and is skipped, and so is anything that is not a .sidx.  A tree
+    carrying more than one puts the package named after the TITLE DIRECTORY first: that is the
+    game's own."""
     _v, _s, ext4, _adj = _stern_plugins()
     ino = tree_dir_inode(reader, root_ino, "spk", "index")
     out = []
@@ -6735,7 +6752,12 @@ def tree_packages(reader, root_ino, title=None):
         except Exception:
             continue
         if (node["mode"] & ext4.S_IFMT) == ext4.S_IFREG:
-            out.append((name, m.group("pkg"), version_text(m.group("ver"))))
+            try:
+                head = reader.read_range(node, 0, SIDX_VERSION_AT + 4)
+            except Exception:
+                head = b""
+            out.append((name, m.group("pkg"), version_text(m.group("ver")),
+                        sidx_header_version(head)))
     return sorted(out, key=lambda r: r[1] != title)
 
 
@@ -6782,32 +6804,13 @@ def read_tree(card, part, subdir=None):
         fw, fwver = tree_node_firmware(r, root, title)
     ident = game_identity(elf, title)
     notes = []
-    sidx_name, package, sidx_ver = pkgs[0] if pkgs else (None, None, None)
+    sidx_name, package, sidx_ver, head_ver = pkgs[0] if pkgs else (None, None, None, None)
     if len(pkgs) > 1:
         notes.append("this tree carries %d .sidx packages (%s); %s is used, as the one named "
                      "after the title directory"
-                     % (len(pkgs), ", ".join(n for (n, _p, _v) in pkgs), sidx_name))
-    elf_ver = ident["version"] if ident else None
-    # compare the NUMBERS, not the text: the ELF holds major.minor as two bytes and the package
-    # name spells them however Stern spelled them ('1_00_0' would never prefix-match '0.01')
-    if ident and _version_pair(sidx_ver) not in (None, (ident["raw"] >> 8, ident["raw"] & 0xFF)):
-        notes.append("the package name says %s but the game ELF's own build record says %s - "
-                     "these two DISAGREE, and the package name is the one the machine installs by"
-                     % (sidx_ver, elf_ver))
-    if sidx_ver and elf_ver:
-        source = "spk index + game ELF"
-    elif sidx_ver:
-        source = "spk index"
-        notes.append("the game ELF carries no build-identity record this tool can locate; the "
-                     "version is the .sidx package name alone")
-    elif elf_ver:
-        source = "game ELF"
-        notes.append("this tree has no /spk/index/<pkg>-<M_mm_p>.sidx; the version is the game "
-                     "ELF's build record alone, which carries no third component")
-    else:
-        source = None
-        notes.append("neither a .sidx package name nor a game ELF build record could be read: "
-                     "this tree's game code version is UNKNOWN")
+                     % (len(pkgs), ", ".join(p[0] for p in pkgs), sidx_name))
+    version, source, more = pick_version(sidx_ver, head_ver, ident)
+    notes.extend(more)
     try:
         state = bypass_state(elf)
     except Exception as e:                                # a report never dies on one odd ELF
@@ -6822,12 +6825,53 @@ def read_tree(card, part, subdir=None):
                      % (gpath, type(e).__name__, e))
     return collections.OrderedDict([
         ("device", device_name(part.num, subdir)), ("title", title), ("game_path", gpath),
-        ("version", sidx_ver or elf_ver), ("version_source", source),
+        ("version", version), ("version_source", source),
         ("package", package), ("sidx", sidx_name), ("sidx_version", sidx_ver),
-        ("elf_version", elf_ver), ("elf_name", ident["name"] if ident else None),
+        ("elf_version", ident["version"] if ident else None),
+        ("elf_name", ident["name"] if ident else None),
         ("elf_date", ident["date"] if ident else None),
         ("node_fw", fw), ("node_fw_version", fwver), ("node_fw_digest", _fw_digest(fw)),
         ("bypass", state), ("colour", colour), ("notes", notes)])
+
+
+def pick_version(sidx_ver, head_ver, ident):
+    """(version, where it came from, notes) of one games tree, from the .sidx file NAME's
+    version, the version its header records, and the game ELF's build record (or None each).
+
+    The game ELF is the code that RUNS, so when the package name disagrees with it the ELF's
+    major.minor wins (PAD-697): a stock card updated on the machine (1.08 -> 1.16) kept its
+    old '-1_08_0.sidx' name while every game file became 1.16, and the gate refused to pair
+    it with another 1.16.  The third component comes from the .sidx (header first) when that
+    agrees with the ELF, else it is 0 - the ELF does not carry one."""
+    notes = []
+    elf_ver = ident["version"] if ident else None
+    elf_pair = (ident["raw"] >> 8, ident["raw"] & 0xFF) if ident else None
+    if sidx_ver and head_ver and head_ver != sidx_ver:
+        notes.append("the package file is named %s but its own header says %s" % (sidx_ver, head_ver))
+    # compare the NUMBERS, not the text: the ELF holds major.minor as two bytes and the package
+    # name spells them however Stern spelled them ('1_00_0' would never prefix-match '0.01')
+    pkg = [v for v in (head_ver, sidx_ver) if v]
+    if elf_pair and pkg and all(_version_pair(v) != elf_pair for v in pkg):
+        version = "%d.%02d.0" % elf_pair
+        notes.append("the package name says %s but the game ELF's own build record says %s; "
+                     "%s is used, as the game code this image actually runs (a card updated "
+                     "on the machine can keep its old package name)" % (sidx_ver, elf_ver, version))
+        return version, "game ELF", notes
+    agreed = [v for v in pkg if elf_pair is None or _version_pair(v) == elf_pair]
+    version = agreed[0] if agreed else None
+    if version and elf_ver:
+        return version, "spk index + game ELF", notes
+    if version:
+        notes.append("the game ELF carries no build-identity record this tool can locate; the "
+                     "version is the .sidx package alone")
+        return version, "spk index", notes
+    if elf_ver:
+        notes.append("this tree has no /spk/index/<pkg>-<M_mm_p>.sidx; the version is the game "
+                     "ELF's build record alone, which carries no third component")
+        return elf_ver, "game ELF", notes
+    notes.append("neither a .sidx package name nor a game ELF build record could be read: "
+                 "this tree's game code version is UNKNOWN")
+    return None, None, notes
 
 
 def _version_pair(text):

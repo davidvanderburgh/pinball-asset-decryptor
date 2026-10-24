@@ -2047,6 +2047,61 @@ def test_the_stock_card_reads_1_59_0_from_both_sources(mk):
     assert rec["notes"] == [] and rec["bypass"] == "armed"
 
 
+def _sidx_head(pkg, code, major, minor, patch):
+    return (b"SIDX" + b"\x64\x93\x05\x00" + (pkg.encode() + bytes(32))[:29] + code.encode()
+            + bytes([major, minor, patch, 2]) + bytes(8))
+
+
+def test_a_sidx_header_records_its_own_version(mk):
+    """The bytes the 59 library cards carry: name+code in 32 bytes, then major, minor, patch."""
+    assert mk.sidx_header_version(_sidx_head("godzilla_le", "ZIL", 1, 16, 0)) == "1.16.0"
+    assert mk.sidx_header_version(_sidx_head("king_kong_le", "SKK", 0, 97, 0)) == "0.97.0"
+    assert mk.sidx_header_version(b"not a manifest\n") is None       # the synthetic cards' stand-in
+    assert mk.sidx_header_version(b"SIDX") is None                    # too short to say
+
+
+def _ident(major, minor):
+    return {"version": "%d.%02d" % (major, minor), "raw": (major << 8) | minor}
+
+
+def test_an_updated_card_reads_as_the_game_code_it_runs(mk):
+    """PAD-697: a stock 1.08 card updated to 1.16 on the machine kept 'godzilla_le-1_08_0.sidx'
+    while its game became 1.16, and the gate refused to pair it with another 1.16 card.  The
+    game ELF is the code that runs: its major.minor wins, whatever the stale file says."""
+    for head in (None, "1.08.0"):
+        ver, src, notes = mk.pick_version("1.08.0", head, _ident(1, 16))
+        assert (ver, src) == ("1.16.0", "game ELF")
+        assert any("package name says 1.08.0" in n and "1.16.0 is used" in n for n in notes)
+    # the file's own header already says 1.16: that agrees with the ELF and gives the patch
+    ver, src, notes = mk.pick_version("1.08.0", "1.16.0", _ident(1, 16))
+    assert (ver, src) == ("1.16.0", "spk index + game ELF")
+    assert notes == ["the package file is named 1.08.0 but its own header says 1.16.0"]
+    # the stock shapes keep their answers
+    assert mk.pick_version("1.59.0", "1.59.0", _ident(1, 59)) == ("1.59.0", "spk index + game ELF", [])
+    assert mk.pick_version("1.59.0", None, None)[:2] == ("1.59.0", "spk index")
+    assert mk.pick_version(None, None, _ident(1, 59))[:2] == ("1.59", "game ELF")
+    assert mk.pick_version(None, None, None)[:2] == (None, None)
+    # and two such images pass the gate together
+    recs = [_vrec(mk, 0, version=mk.pick_version("1.08.0", None, _ident(1, 16))[0]),
+            _vrec(mk, 1, version="1.16.0")]
+    assert mk.version_findings(recs)["version_mismatch"] is None
+
+
+_GZ_LE = "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
+GZ_LE_CARD = next((p for p in (os.path.join("D:\\Pinball\\images\\Stern\\spike2", _GZ_LE),
+                               os.path.join("/mnt/d/Pinball/images/Stern/spike2", _GZ_LE))
+                   if os.path.isfile(p)), "")
+
+
+@pytest.mark.skipif(not GZ_LE_CARD, reason="the stock godzilla_le 1.16 card is not on this machine")
+def test_the_stock_godzilla_package_header_matches_its_name(mk):
+    """Read-only: the real .sidx carries the same three numbers in its header as in its name."""
+    f, r = mk.open_source(GZ_LE_CARD, mk.source_part(GZ_LE_CARD))
+    with f:
+        pkgs = mk.tree_packages(r, mk.tree_root_inode(r, None), "godzilla_le")
+    assert pkgs == [("godzilla_le-1_16_0.sidx", "godzilla_le", "1.16.0", "1.16.0")]
+
+
 def test_the_selftests_check_recorder_names_the_line_that_failed(mk, capsys):
     """`ok &= <expr>` used to fail silently: the run ended in FAIL and the
     only way to find the check was to swap older copies of the file in and

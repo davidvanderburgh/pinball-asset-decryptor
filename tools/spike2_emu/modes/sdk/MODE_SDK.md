@@ -5144,6 +5144,65 @@ desk-read from item 158's address pass), a card built by Write with `stock.cfg` 
 goes through the same `mode_install.py` path as the mode files; not booted), the Modes tab's
 dialog on the glass (its service is tested in-process).
 
+### Instead of: a stock rule's shot MOVES (PAD-699)
+
+David, 2026-10-23: "change the rules for the modes like gigan and biollante and space Godzilla ... Choose
+alternate shots and integrate into the modes." A `counts_as` row ADDS a shot; an `instead_of` row MOVES one:
+
+```
+instead_of 14 Big loop -> Left ramp      # battle vs Gigan: the Big loop is its Left ramp now
+```
+
+- **The new shot counts as the old one**, exactly as a counts-as row (while the old bit is lit in the rule's
+  per-player field). **The old shot alone no longer counts**: while its bit is lit, a dispatch of just that bit
+  is dropped and the game's handler is not run for it (as an item 161 handler's `PM_STOCK_DONE`). Rows are tried
+  remap first, then drop, so two rows that swap two shots of a rule work.
+- **The 0x1 "a switch was hit" bit rides along.** Godzilla's Big loop arrives as `0x1000000001`: the decision
+  looks at the shot's own bits, so the loop can stand in, and keeps the 0x1 when it becomes the target (the
+  handler saw it so in stock). A dispatch of 0x1 alone is never touched. This applies to counts-as rows too.
+- **The light moves with the shot.** Every tick, each insert of the new shot shows what the game is showing on
+  the old shot's first insert: the top layer of the game's (none of ours) holding each of its lights - its
+  colour, its blink, King Ghidorah's arrows going yellow, green, red. The old shot's inserts are held dark on the
+  runtime's layer. An old insert of one light (a powerline) gives its level in the row's colour (yellow unless a
+  `light` line says otherwise). `light` lines colour counts-as rows only.
+- **Every mode of the game's is named** (`rule` lines, game_mode_blocks.stock_rule_lines, written into the
+  Godzilla ports by `stock_rule_lines.py <program> <port>`; a derived port gets them from its own program when
+  its reference names rules, portgen REVISION 6). The runtime keeps 32 rules and 24 rows (`N_STOCK_RULES`,
+  `STOCK_ROWS`; stock_remap.MAX_ROWS).
+- **In the app:** the game mode's page, Shots: `<shot> instead of <shot>` (the default) or `counts as`. A row is
+  `{"rule", "from", "to", "instead": true}` in `modes/stock.json` (a row without `instead` is a counts-as row, as
+  every older project's).
+
+**What each Godzilla battle tests (the probe, stock Premium/LE 1.16 and the Heisei 1.99D card, which renames
+them):** every battle's handler gates a shot on its per-player field, so a moved shot works for all of these.
+
+| rule | stock name (Heisei 1.99D) | stock shots |
+|---|---|---|
+| 12 | Battle vs Ebirah (BIOLLANTE) | the three spinners' middle bits 15 / 40 / 15, then Pop bumper (or bit 42): final blow |
+| 13 | Battle vs Titanosaurus (DESTOROYAH) | Powerline left, center, right in turn (4M, 7M, 10M; shield targets 1M), Maser (15M), Godzilla target (final blow) |
+| 14 | Battle vs Gigan (GIGAN) | both ramps lit, 8 hits (alternating = a combo), the 8th wins |
+| 15 | Battle vs Megalon (SPACEGODZILLA) | one lit shot hopping (left spinner, Pop bumper, Building, ramps, center spinner), 7 hits, a shot timer multiplies |
+| 16 | Battle vs King Ghidorah | multiball: ramps, Building, Big loop, Top spinner all lit; each builds the jackpot; arrows change colour |
+| 6 | Megalon and Gigan Multiball (MEGAGUIRUS) | multiball: Building and the shield ramp spinner's first bit jackpots |
+| 17 | Ghidorah and Gigan (BATTRA) | its first phase pays ramps, loop and top spinner WITHOUT its field lit (field 0x1): a moved shot cannot land there |
+
+**Emulator-proven (2026-10-23, muted, rig 1; stock_probe.c beside the runtime):** on stock Premium/LE 1.16 and on
+David's "Heisei 1.99D + daveyvandy modes v20" card with the app-rendered stock.cfg: every old shot dropped
+(`no longer counts - it moved to`), every new one entering the handler as the old bit; Gigan won by 4 Big loops +
+4 Buildings (`STOP 14 reason 1 lr 0x909e0`), Destoroyah won through Left ramp / Big loop / Right ramp, Maser and
+the Godzilla target, Biollante's 25,000,000 final blow from the Godzilla target (`STOP 12 reason 1 lr 0x81f2c`)
+after two Pop bumpers did nothing, SpaceGodzilla's lit ramps taken by the shield targets, King Ghidorah's three
+shield targets paying exactly its ramps' and Building's jackpot builds, Megaguirus's Big loop its Building
+jackpot. LEDs (lamp_watch.py): Gigan's BIG LOOP and BUILDING in the ramps' own colours, LEFT/RIGHT RAMP 0,0,0;
+King Ghidorah's SHIELD inserts yellow, then green after a hit, then red, its ramps and BUILDING dark. No segv.
+
+**The shot slot is each build's own** (`game_mode_blocks.stock_shot_slot`: the first virtual call of the shot
+entry v[15], `ldr rX, [rY, #4 * slot]`): Premium/LE 1.16 and the Heisei cards 42, Pro 1.15 and Pro 1.16 41.
+Pro 1.16's port had been drafted with Premium/LE's 42 / 45: a wrap of its v[42] saw no shot at all (called once,
+at START, with other arguments); with 41 / 44 Gigan won through the Big loop and Building and Ebirah through the
+Godzilla target on the emulator. A derived port takes both numbers from its own program (portgen `_stock_slots`).
+Pro 1.15's lines are item 158's (its card is archival: not booted here).
+
 ## Rewriting a stock rule's shot logic (item 161)
 
 Designed at the desk on 2026-09-23 from item 158's reading of the game's own rules (above), built on

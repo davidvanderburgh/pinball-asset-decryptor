@@ -106,7 +106,7 @@ def test_the_app_ships_no_template(tmp_path):
     port = MP.port_path(MP.profile_for_card("godzilla_le", "1.16"))
     assert SW.TEMPLATES == {} and SW.template_path(12) is None
     rows = SW.rows(proj, port)
-    assert [(r["id"], r["template"]) for r in rows] == [(12, ""), (4, "")]
+    assert len(rows) == 26 and {r["id"]: r["template"] for r in rows}[12] == "" and {r["id"]: r["template"] for r in rows}[4] == ""
     assert all("no template" in r["status"] for r in rows)
     with pytest.raises(SW.StockRewriteError, match="no template"):
         SW.new_rewrite(proj, 12, port)
@@ -117,9 +117,10 @@ def test_rows_and_a_new_rewrite_from_the_template(tmp_path, ebirah_template):
     proj = _project(tmp_path)
     port = MP.port_path(MP.profile_for_card("godzilla_le", "1.16"))
     rows = SW.rows(proj, port)
-    assert [(r["id"], r["slug"], r["template"]) for r in rows] == [(12, "", "ebirah_rewrite.c"), (4, "", "")]
-    assert rows[0]["status"].startswith("the game's own (a template is ready")
-    assert "no template" in rows[1]["status"]
+    by = {r["id"]: r for r in rows}           # PAD-699: the port names all 26 of the game's own modes
+    assert (by[12]["slug"], by[12]["template"]) == ("", "ebirah_rewrite.c") and (by[4]["slug"], by[4]["template"]) == ("", "")
+    assert by[12]["status"].startswith("the game's own (a template is ready")
+    assert "no template" in by[4]["status"]
     with pytest.raises(SW.StockRewriteError, match="no template"):
         SW.new_rewrite(proj, 4, port)
     with pytest.raises(SW.StockRewriteError, match="names no rule 99"):
@@ -132,7 +133,8 @@ def test_rows_and_a_new_rewrite_from_the_template(tmp_path, ebirah_template):
     spec = CM.load(proj, slug)
     assert spec.name.startswith("EBIRAH") and not spec.has_assets()
     rows = SW.rows(proj, port)
-    assert rows[0]["slug"] == "ebirah_rewrite" and rows[0]["status"] == "rewritten by modes/ebirah_rewrite/ebirah_rewrite.c"
+    by = {r["id"]: r for r in rows}
+    assert by[12]["slug"] == "ebirah_rewrite" and by[12]["status"] == "rewritten by modes/ebirah_rewrite/ebirah_rewrite.c"
     with pytest.raises(SW.StockRewriteError, match="already rewritten"):
         SW.new_rewrite(proj, 12, port)
     # a second folder for the same rule is not what the tab makes, but the scan keeps the first

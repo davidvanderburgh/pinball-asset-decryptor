@@ -38,7 +38,8 @@ import numpy as np
 #: spot list) are carried like layered_displays
 #: 4: the Insider Connected score gate (agent_header + agent_begin), which every port must carry
 #: 5: the switch drain on every port that has one, shots or not: the flipper buttons' sounds in attract (PAD-645)
-REVISION = 5
+#: 6: every mode's `rule` line from the build's own program, when the reference names its rules (PAD-699)
+REVISION = 6
 RECIPE_FORMAT = 1
 
 CORE_SITES = ("tick", "shot_dispatch", "ball_end", "score_add")
@@ -860,6 +861,7 @@ def parse_port(text):
 #: name, the ones checked by default): never carried from a reference, and never part of what a recipe depends on.
 #: PAD-615: so are portchallenge.py's (the game's Challenge list), read off each build's own code
 _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block_name_\d+|text block_default|"
+                        r"rule \d+|"   # PAD-699: every mode's vtable pointer, from the build's own program
                         r"value block_default|value block_ret_\d+|"
                         r"site block_rule_\d+|text block_rule_name_\d+|value block_rule_(?:lo|hi)_\d+|"   # PAD-398
                         r"site challenge_go_\d+|value challenge_flag_\d+|text challenge_name_\d+|"   # PAD-615:
@@ -1540,15 +1542,38 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
         else:
             out.append("%s %s" % (key, rest))
     _score_pair(out, placed, tgt, hows)
-    out += block_section(tgt)
+    stock_rules = any(k == "rule" for k, _r in entries)
+    if stock_rules:
+        _stock_slots(out, tgt)
+    out += block_section(tgt, stock_rules=stock_rules)
     sites = {n for k, n in placed if k == "site"}
     data = {n for k, n in placed if k == "data"}
     return Draft(out, report, core_missing(sites, data), placed, hows)
 
 
-def block_section(tgt):
+def _stock_slots(out, tgt):
+    """PAD-699: the shot handler's slot (and the mask getter's, three on) are THIS build's, read off its code
+    (game_mode_blocks.stock_shot_slot), never the reference's: Godzilla Pro 1.16 was drafted from Premium/LE and
+    carried its 42 / 45 where its own vtables have 41 / 44. A build where the slot cannot be read keeps the
+    copied lines."""
+    try:
+        from . import game_mode_blocks as B
+        slot = B.stock_shot_slot(tgt.b)
+    except Exception:                                        # noqa: BLE001 - a plain-C title, an odd build
+        slot = None
+    if slot is None:
+        return
+    for i, line in enumerate(out):
+        for name, v in (("stock_slot_shot", slot), ("stock_slot_mask", slot + 3)):
+            if re.match(r"value\s+%s\s" % name, line):
+                out[i] = "value %-21s %d   # PAD-699: read off this build's shot entry (v[15])" % (name, v)
+
+
+def block_section(tgt, stock_rules=False):
     """PAD-363: the game's own modes a mode may keep from starting, read from THIS build's program
-    (game_mode_blocks.py): [] when it has no C++ rule manager, or its modes cannot be read."""
+    (game_mode_blocks.py): [] when it has no C++ rule manager, or its modes cannot be read. PAD-699:
+    *stock_rules* (the reference port names its game's rules: Godzilla) adds every mode's `rule` line
+    from THIS program, for the counts-as / instead-of rows (a reference's own vtables are never carried)."""
     try:
         from . import game_mode_blocks as B
         modes = B.read_modes(tgt.b)
@@ -1560,7 +1585,8 @@ def block_section(tgt):
         rules = B.read_rules(tgt.b)                          # PAD-398: the game's rules, from THIS program
     except Exception:                                        # noqa: BLE001
         rules = []
-    return [""] + B.port_lines(modes) + ([""] + B.rule_lines(rules) if rules else [])
+    return ([""] + B.port_lines(modes) + ([""] + B.rule_lines(rules) if rules else [])
+            + ([""] + B.stock_rule_lines(modes) if stock_rules else []))
 
 
 def _score_pair(out, placed, tgt, hows):

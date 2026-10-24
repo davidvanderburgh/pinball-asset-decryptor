@@ -374,8 +374,34 @@ value stock_slot_shot   41
 value stock_slot_active 14
 value stock_slot_lit    25
 value stock_field       0x18
-rule 12 0x006266d0 Battle vs Ebirah
-rule 4  0x00630100 Tank attack multiball
+# PAD-699: the game's own modes a counts-as / instead-of row may name (game_mode_blocks.stock_rule_lines,
+# from the game program): `rule <id> <the vtable pointer its object carries> <name>`
+rule 1   0x00629ba0 Godzilla Multiball
+rule 2   0x0062caf8 Mechagodzilla Multiball
+rule 3   0x006295e0 Bridge Attack Multiball
+rule 4   0x00630100 Tank Attack Multiball
+rule 5   0x0062f470 Saucer Attack Multiball
+rule 6   0x006286b0 Battle vs Megalon and Gigan Multiball
+rule 7   0x0062ebb8 Planet X Multiball
+rule 8   0x0062dda0 Monster Zero Victory Multiball
+rule 9   0x00631080 Terror of Mechagodzilla
+rule 10  0x0062ae58 King of the Monsters Multiball
+rule 11  0x0062d078 Monster Island Madness
+rule 12  0x006266d0 Battle vs Ebirah
+rule 13  0x00628f60 Battle vs Titanosaurus
+rule 14  0x00627418 Battle vs Gigan
+rule 15  0x00627fc0 Battle vs Megalon
+rule 16  0x00627970 Battle vs King Ghidorah
+rule 17  0x00626e58 Battle vs Ghidorah and Gigan
+rule 18  0x0062fba0 Super Train
+rule 19  0x0062e7b0 O2 Destroyer
+rule 20  0x0062ad58 King of the Monsters
+rule 21  0x0062a888 Jet Fighter Attack
+rule 22  0x0062edd0 Planet X Hurry Up
+rule 23  0x006307c0 Tesla Strike
+rule 24  0x0062d708 Monster Rampage
+rule 25  0x0062a438 Hedorah
+rule 26  0x0062dcc8 Monster Zero
 # ---- item 161: the game's own rules REWRITTEN in C (pad_stock.h; MODE_SDK.md "Rewriting a stock rule's shot logic") ----
 # addresses are item 158's Pro 1.15 twins where it read them ("158") and the LE address minus the
 # unit's offset where it did not (ebirah unit -0x17d0, tank unit -0x2838, cmode base -0x17c8: "delta",

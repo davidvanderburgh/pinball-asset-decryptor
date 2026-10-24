@@ -29,8 +29,8 @@ PRO = str(SDK / "ports" / "godzilla_pro-1.15.port")
 @pytest.mark.parametrize("port,slot,vt12,vt4", [(LE, 42, 0x636d78, 0x640820), (PRO, 41, 0x6266d0, 0x630100)])
 def test_both_godzilla_ports_name_the_rules_and_what_wraps_them(port, slot, vt12, vt4):
     rules = {rid: (label, vt) for rid, label, vt in SR.port_rules(port)}
-    assert set(rules) == {12, 4}
-    assert rules[12] == ("Battle vs Ebirah", vt12) and rules[4] == ("Tank attack multiball", vt4)
+    assert set(rules) == set(range(1, 27))           # PAD-699: every one of the game's own modes
+    assert rules[12] == ("Battle vs Ebirah", vt12) and rules[4] == ("Tank Attack Multiball", vt4)
     assert SR.port_can(port)
     p = MP.read_port(port)
     assert p["value"]["stock_slot_shot"] == slot and p["value"]["stock_slot_active"] == 14
@@ -84,7 +84,7 @@ def test_render_writes_the_ports_names_and_parse_reads_them_back():
     rows = [{"rule": 12, "from": "left ramp", "to": "LEFT SPINNER"}, {"rule": 4, "from": "0x100000", "to": "Godzilla target"}]
     text = SR.render(rows, _rules(), _shots(), port_name="godzilla_le-1.16.port")
     assert "# Battle vs Ebirah\ncounts_as 12 Left ramp -> Left spinner\n" in text
-    assert "# Tank attack multiball\ncounts_as 4 Left ramp -> Godzilla target\n" in text
+    assert "# Tank Attack Multiball\ncounts_as 4 Left ramp -> Godzilla target\n" in text
     # no row carries a trailing comment: a runtime before 2026-09-23 took it for part of the shot
     assert all("#" not in ln for ln in text.splitlines() if ln.startswith("counts_as"))
     assert text.endswith("\n") and "\r" not in text
@@ -92,13 +92,13 @@ def test_render_writes_the_ports_names_and_parse_reads_them_back():
     assert SR.render([], _rules(), _shots()) == ""
     with pytest.raises(SR.StockRemapError, match="Row 1: .*names no rule 99"):
         SR.render([{"rule": 99, "from": "Left ramp", "to": "Left spinner"}], _rules(), _shots())
-    assert SR.problems([{"rule": 12, "from": "Left ramp", "to": "Left spinner"}] * 17, _rules(), _shots())
+    assert SR.problems([{"rule": 12, "from": "Left ramp", "to": "Left spinner"}] * (SR.MAX_ROWS + 1), _rules(), _shots())
 
 
 def test_load_and_save_round_trip_and_an_empty_table_is_no_file(tmp_path):
     proj = tmp_path / "proj"
     assert SR.load(str(proj)) == []
-    rows = [{"rule": 12, "from": "Left ramp", "to": "Left spinner"}]
+    rows = [{"rule": 12, "from": "Left ramp", "to": "Left spinner", "instead": False}]
     SR.save(str(proj), rows)
     assert os.path.isfile(SR.project_file(str(proj)))
     assert SR.load(str(proj)) == rows
@@ -220,13 +220,15 @@ def test_the_runtime_reads_rule_lines_and_the_file_beside_the_modes():
 DECIDE_HARNESS = r"""
 #include <stdio.h>
 #include <stdint.h>
-struct stock_row { unsigned rule; uint64_t from, to; unsigned rgb, ms, on_ms; int pattern; int from_c; };
+struct stock_row { unsigned rule; uint64_t from, to; unsigned rgb, ms, on_ms; int pattern; int from_c; int instead; };
 struct stock_table { unsigned n; struct stock_row row[16]; };
 %s
 int main(void)
 {
-    struct stock_table t = { 2, { { 12, 0x100000ull, 0x200ull, 0, 0, 0, 0, 0 },
-                                   { 4, 0xc00000ull, 0x2000000000ull, 0, 0, 0, 0, 0 } } };
+    struct stock_table t = { 4, { { 12, 0x100000ull, 0x200ull, 0, 0, 0, 0, 0, 0 },
+                                   { 4, 0xc00000ull, 0x2000000000ull, 0, 0, 0, 0, 0, 0 },
+                                   { 14, 0x1000000000ull, 0x100000ull, 0, 0, 0, 0, 0, 1 },
+                                   { 14, 0x400000ull, 0x200000ull, 0, 0, 0, 0, 0, 1 } } };
     const struct stock_row *hit;
     uint64_t shot;
     #define TRY(rule, in, field) do { shot = (in); int r = stock_decide(&t, rule, &shot, field, &hit); \
@@ -235,12 +237,19 @@ int main(void)
     TRY(12, 0x100000ull, 0x22200ull);        /* lit: the ramp becomes 0x200 */
     TRY(12, 0x100000ull, 0x22000ull);        /* 0x200 cleared: passes through, the row still named */
     TRY(12, 0x1ull, 0x22200ull);             /* the switch-hit dispatch: no row */
-    TRY(12, 0x100001ull, 0x22200ull);        /* a bit outside from: untouched */
+    TRY(12, 0x100001ull, 0x22200ull);        /* PAD-699: the 0x1 rides along: remapped, keeping it */
+    TRY(12, 0x300000ull, 0x22200ull);        /* a shot's bit outside from: untouched */
     TRY(12, 0x200ull, 0x22200ull);           /* the spinner itself: no row */
     TRY(4, 0x100000ull, 0x22200ull);         /* another rule: no row for it */
     TRY(4, 0x400000ull, 0x2000000000ull);    /* one bit of a two-bit from, lit */
     TRY(4, 0xc00000ull, 0x2000000000ull);    /* both bits of from: still inside from */
     TRY(12, 0ull, 0x22200ull);               /* nothing */
+    TRY(14, 0x1000000001ull, 0x300000ull);   /* PAD-699: the Big loop (with its 0x1) instead of the Left ramp */
+    TRY(14, 0x100000ull, 0x300000ull);       /* the Left ramp itself: dropped while lit */
+    TRY(14, 0x200000ull, 0x300000ull);       /* the Right ramp itself: dropped */
+    TRY(14, 0x200000ull, 0x100000ull);       /* not lit: passes through */
+    TRY(14, 0x1ull, 0x300000ull);            /* the switch-hit dispatch alone: never touched */
+    TRY(14, 0x400000ull, 0x300000ull);       /* the Building instead of the Right ramp */
     return 0;
 }
 """
@@ -255,12 +264,19 @@ def test_the_decision_replaces_never_ors_and_stops_once_the_target_clears(tmp_pa
         ["12", "0x100000", "0x22200", "->", "1", "0x200", "0"],
         ["12", "0x100000", "0x22000", "->", "0", "0x100000", "0"],
         ["12", "0x1", "0x22200", "->", "0", "0x1", "-1"],
-        ["12", "0x100001", "0x22200", "->", "0", "0x100001", "-1"],
+        ["12", "0x100001", "0x22200", "->", "1", "0x201", "0"],
+        ["12", "0x300000", "0x22200", "->", "0", "0x300000", "-1"],
         ["12", "0x200", "0x22200", "->", "0", "0x200", "-1"],
         ["4", "0x100000", "0x22200", "->", "0", "0x100000", "-1"],
         ["4", "0x400000", "0x2000000000", "->", "1", "0x2000000000", "1"],
         ["4", "0xc00000", "0x2000000000", "->", "1", "0x2000000000", "1"],
         ["12", "0x0", "0x22200", "->", "0", "0x0", "-1"],
+        ["14", "0x1000000001", "0x300000", "->", "1", "0x100001", "2"],
+        ["14", "0x100000", "0x300000", "->", "2", "0x100000", "2"],
+        ["14", "0x200000", "0x300000", "->", "2", "0x200000", "3"],
+        ["14", "0x200000", "0x100000", "->", "0", "0x200000", "-1"],
+        ["14", "0x1", "0x300000", "->", "0", "0x1", "-1"],
+        ["14", "0x400000", "0x300000", "->", "1", "0x200000", "3"],
     ]
 
 
@@ -269,3 +285,106 @@ def test_the_ports_rule_lines_fit_the_runtimes_table():
     cap = int(re.search(r"#define N_STOCK_RULES\s+(\d+)", src).group(1))
     for port in (LE, PRO):
         assert 0 < len(SR.port_rules(port)) <= cap
+
+
+# ---- PAD-699: instead_of rows, every Godzilla mode named, the light moves with the shot -------------------
+GZ_PORTS = [str(SDK / "ports" / n) for n in ("godzilla_le-1.16.port", "godzilla_pro-1.16.port", "godzilla_pro-1.15.port")]
+
+
+@pytest.mark.parametrize("port", GZ_PORTS)
+def test_every_godzilla_build_names_its_battles(port):
+    rules = {rid: label for rid, label, _vt in SR.port_rules(port)}
+    for rid, label in ((6, "Battle vs Megalon and Gigan Multiball"), (12, "Battle vs Ebirah"),
+                       (13, "Battle vs Titanosaurus"), (14, "Battle vs Gigan"), (15, "Battle vs Megalon"),
+                       (16, "Battle vs King Ghidorah"), (17, "Battle vs Ghidorah and Gigan")):
+        assert rules.get(rid) == label, (port, rid)
+    assert SR.port_can(port)
+    vts = [vt for _r, _l, vt in SR.port_rules(port)]
+    assert len(vts) == len(set(vts))
+
+
+def test_the_ebirah_and_tank_vtables_did_not_move():
+    le = {rid: vt for rid, _l, vt in SR.port_rules(LE)}
+    pro = {rid: vt for rid, _l, vt in SR.port_rules(PRO)}
+    assert (le[12], le[4], le[14]) == (0x636d78, 0x640820, 0x637ac0)
+    assert (pro[12], pro[4]) == (0x6266d0, 0x630100)
+
+
+def test_an_instead_row_is_kept_rendered_and_described(tmp_path):
+    proj = str(tmp_path / "proj")
+    rows = [{"rule": 14, "from": "Big loop", "to": "Left ramp", "instead": True},
+            {"rule": 12, "from": "Left ramp", "to": "Left spinner"}]
+    SR.save(proj, rows)
+    raw = open(SR.project_file(proj), encoding="utf-8").read()
+    assert '"instead": true' in raw and raw.count('"instead"') == 1      # a counts-as row stays as it was
+    got = SR.load(proj)
+    assert got[0]["instead"] is True and got[1]["instead"] is False
+    rules, shots = SR.port_rules(LE), SR.port_shots(LE)
+    text = SR.render(got, rules, shots)
+    assert "# Battle vs Gigan\ninstead_of 14 Big loop -> Left ramp\n" in text
+    assert "counts_as 12 Left ramp -> Left spinner\n" in text
+    assert SR.parse(text, instead=True) == [(14, "Big loop", "Left ramp")]
+    assert SR.parse(text) == [(12, "Left ramp", "Left spinner")]
+    assert "Battle vs Gigan takes Big loop instead of Left ramp" in SR.describe(got, rules, shots)
+    assert SR.verb(got[0]) == "instead of" and SR.keyword(got[1]) == "counts_as"
+
+
+def test_an_old_shot_is_moved_once_per_rule():
+    rules, shots = SR.port_rules(LE), SR.port_shots(LE)
+    rows = [{"rule": 14, "from": "Big loop", "to": "Left ramp", "instead": True},
+            {"rule": 14, "from": "Building", "to": "Left ramp", "instead": True}]
+    assert SR.problems(rows, rules, shots) == ['Row 2: "Left ramp" is already moved for rule 14.']
+    rows[1]["instead"] = False                                # both counting is fine
+    assert SR.problems(rows, rules, shots) == []
+
+
+def test_the_runtime_parses_instead_of_and_moves_the_light():
+    src = RUNTIME.read_text(encoding="utf-8")
+    assert 'str_eq(key, "instead_of")' in src
+    assert int(re.search(r"#define STOCK_ROWS\s+(\d+)", src).group(1)) == SR.MAX_ROWS
+    assert int(re.search(r"#define N_STOCK_RULES\s+(\d+)", src).group(1)) >= 27
+    for name in ("static int stock_game_level(", "static unsigned stock_game_rgb(", "static void stock_mirror_tick("):
+        assert name in src, name
+    tick = src[src.index("static void stock_tick(void)"):]
+    tick = tick[:tick.index("\n}\n")]
+    assert tick.index("stock_lamps_poll();") < tick.index("stock_mirror_tick();")
+    w = src[src.index("static uint64_t stock_w_shot("):]
+    w = w[:w.index("\n}\n")]
+    assert "stock_remap_shot(x, &shot) == 2" in w and "return 0;" in w
+
+
+def test_a_derived_port_gets_its_own_rule_lines_from_its_program():
+    from pinball_decryptor.plugins.stern import game_mode_blocks as G, portgen
+    assert portgen.generated("rule", "14 0x00637ac0 Battle vs Gigan")
+    assert portgen.REVISION >= 6
+
+    class M:
+        def __init__(self, i, vt, obj, name):
+            self.id, self.vtable, self.obj, self.name = i, vt, obj, name
+    lines = G.stock_rule_lines([M(14, 0x637ab8, 0x7b5588, "Battle vs Gigan"), M(99, 0, 0, "no object")])
+    assert lines[-1] == "rule 14  0x00637ac0 Battle vs Gigan" and len(lines) == 3
+
+
+@pytest.mark.parametrize("name,slot", [("godzilla_le-1.16.port", 42), ("godzilla_pro-1.16.port", 41),
+                                       ("godzilla_pro-1.15.port", 41)])
+def test_each_godzilla_port_wraps_its_own_builds_shot_slot(name, slot):
+    """PAD-699: Pro 1.16 carried Premium/LE's 42 / 45 (drafted from it); its own vtables have the shot handler at
+    v[41] and the mask getter at v[44] (emulator: a wrap of v[42] saw no shot, of v[41] every shot)."""
+    v = MP.read_port(str(SDK / "ports" / name))["value"]
+    assert (v["stock_slot_shot"], v["stock_slot_mask"]) == (slot, slot + 3)
+
+
+def test_a_derived_port_takes_the_shot_slot_from_its_own_program(monkeypatch):
+    from pinball_decryptor.plugins.stern import game_mode_blocks as G, portgen
+    monkeypatch.setattr(G, "stock_shot_slot", lambda elf, modes=None: 41)
+    out = ["value stock_slot_shot   42", "value stock_slot_active 14", "value stock_slot_mask       45"]
+
+    class T:
+        b = b""
+    portgen._stock_slots(out, T())
+    assert out[0].split()[:3] == ["value", "stock_slot_shot", "41"] and out[1] == "value stock_slot_active 14"
+    assert out[2].split()[:3] == ["value", "stock_slot_mask", "44"]
+    monkeypatch.setattr(G, "stock_shot_slot", lambda elf, modes=None: None)
+    keep = ["value stock_slot_shot   42"]
+    portgen._stock_slots(keep, T())
+    assert keep == ["value stock_slot_shot   42"]

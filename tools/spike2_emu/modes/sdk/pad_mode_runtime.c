@@ -7934,6 +7934,15 @@ static void wizf_arm(void)
  *     would leave the battle unwinnable: item 158's check). `to` must be ONE bit (Ebirah tests
  *     0x200 exactly; the tank matches a position by 64-bit equality). An empty table, or a file
  *     that is gone, passes every shot through: the rule plays stock.
+ *   - PAD-699: an `instead_of` row is a counts_as row that MOVES the rule's shot: the new shot
+ *     counts as the old one, and the old shot ALONE no longer reaches the handler while its bit
+ *     is lit (the dispatch is dropped: the game's handler is not run for it, as an item 161
+ *     handler's PM_STOCK_DONE). The light MOVES WITH THE SHOT: every tick the new shot's inserts
+ *     show what the game is showing on the old shot's (the top layer of the game's that holds each
+ *     light: its colour, its blink, a battle's red arrow), and the old shot's inserts are held dark,
+ *     so the playfield shows the shot where it is now. An old insert of one light gives its level in
+ *     the row's colour (the game's own colour of a single-colour lens is not in the light). Rows are tried in order: a remap first, then a drop, so
+ *     two rows that swap two shots of a rule work (each arrives as the other's bit).
  *   - While the target bit is lit, the `from` shot's inserts are HELD with the lamp layer of
  *     this section's own (pm_lamp_*, priority 255) in the row's colour and blink (Ebirah's
  *     yellow, 300 ms on / 200 ms off by default), and handed back when the bit clears or the
@@ -7944,8 +7953,8 @@ static void wizf_arm(void)
  * row. The lit check reads the u64 field the rule itself writes.
  * One ramp = one spin: a ramp standing in for a spinner needs the spinner's count of hits
  * (Ebirah: 15 on the left spinner) unless the count word is lowered (item 159). */
-#define N_STOCK_RULES   8
-#define STOCK_ROWS      16
+#define N_STOCK_RULES   32              /* PAD-699: every battle of Godzilla's (ids 0..26) can be named */
+#define STOCK_ROWS      24
 #define STOCK_C_ROWS    8
 #define STOCK_FILE_MAX  4096
 #define STOCK_SAY_MAX   600
@@ -7962,15 +7971,20 @@ struct stock_rule {
     stock_vfn8 orig;                /* the slot's function before our wrap (a probe's wrap, maybe) */
     pm_stock_shot_fn fn;            /* item 161: a C hook that sees every shot first, or 0 */
     const struct pm_mode *fn_by;
-    int lit;                        /* the from-shot's inserts are held now */
-    uint64_t lit_from;
-    unsigned remaps, passes;        /* counted, for the log */
+    int lit;                        /* the from-shots' inserts are held now */
+    uint64_t lit_from;              /* PAD-699: the OR of every lit row's from (several rows of a rule at once) */
+    uint64_t dark_to;               /* PAD-699: the old shots of lit instead_of rows, held dark */
+    unsigned lit_rgb;
+    uint64_t mir_from;              /* PAD-699: the new shots of lit instead_of rows, showing the old ones' light */
+    int n_mir;                      /* PAD-699: pairs {new insert, old insert, the row's colour} painted every tick */
+    struct { short knew, kold; unsigned rgb; } mir[12];
+    unsigned remaps, passes, drops; /* counted, for the log */
     const struct pm_stock_handler *h161;   /* item 161: the record from the pm_stock section, or 0 */
     stock_vfn8 orig_start, orig_stop;      /* item 161: the START / STOP slots before our wraps */
     int wrapped_start, wrapped_stop, in_original;   /* in_original: a replay of the game's handler is running */
 };
 
-struct stock_row { unsigned rule; uint64_t from, to; unsigned rgb, ms, on_ms; int pattern; int from_c; };
+struct stock_row { unsigned rule; uint64_t from, to; unsigned rgb, ms, on_ms; int pattern; int from_c; int instead; };
 struct stock_table { unsigned n; struct stock_row row[STOCK_ROWS]; };
 
 static struct stock_rule stock_rules[N_STOCK_RULES];
@@ -8087,31 +8101,53 @@ static unsigned stock_object(struct stock_rule *x, int say_why)
  * holds every bit of `shot` decides. Its `to` bit lit in `field` = the shot becomes that one bit
  * (*hit = the row, 1 returned); not lit = the shot is left as it is (*hit = the row, 0 returned:
  * the rule has finished with that bit, or never lit it). No row = untouched, *hit = 0. A dispatch
- * carrying a bit outside `from` (the 0x1 "a switch was hit" dispatch, a mask of two shots) is never
- * remapped, so nothing is ever ORed into a shot and a multi-bit mask never reaches the handler as
- * the target. */
+ * carrying a bit outside `from` (a mask of two shots) is never remapped, so nothing is ever ORed
+ * into a shot and a multi-bit mask never reaches the handler as the target. PAD-699: the 0x1 "a
+ * switch was hit" bit is not a shot of its own here: the dispatch of 0x1 alone is never touched,
+ * but a shot that carries it with its own bit (Godzilla's Big loop arrives as 0x1000000001) is
+ * decided by its own bit, and keeps the 0x1 when it becomes the target (the handler saw it so in
+ * stock). An instead_of row's old shot, alone (with or without the 0x1), while its bit is lit, is
+ * DROPPED (2 returned): the handler is not run for it. */
 static int stock_decide(const struct stock_table *t, unsigned rule, uint64_t *shot, uint64_t field,
                         const struct stock_row **hit)
 {
     unsigned i;
     *hit = 0;
+    uint64_t bits = *shot & ~1ull;
     for (i = 0; i < t->n; i++) {
         const struct stock_row *r = &t->row[i];
-        if (r->rule != rule || !*shot || (*shot & ~r->from)) continue;
+        if (r->rule != rule || !bits || (bits & ~r->from)) continue;
         *hit = r;
         if (!(field & r->to)) return 0;
-        *shot = r->to;
+        *shot = r->to | (*shot & 1ull);
         return 1;
+    }
+    /* PAD-699: an instead_of row's OLD shot, alone, while its bit is lit: dropped (2). A dispatch with
+     * another shot's bit in it (two shots at once) is never dropped. */
+    for (i = 0; i < t->n && !*hit; i++) {
+        const struct stock_row *r = &t->row[i];
+        if (r->rule != rule || !r->instead || bits != r->to || !(field & r->to)) continue;
+        *hit = r;
+        return 2;
     }
     return 0;
 }
 
-static void stock_remap_shot(struct stock_rule *x, uint64_t *shot)
+static int stock_remap_shot(struct stock_rule *x, uint64_t *shot)
 {
     const struct stock_row *r;
     unsigned p = pm_player();
     uint64_t was = *shot, field = stock_field(x, p);
-    if (stock_decide(stock_live, x->id, shot, field, &r)) {
+    int d = stock_decide(stock_live, x->id, shot, field, &r);
+    if (d == 2) {
+        x->drops++;
+        if (x->drops <= 200 || x->drops % 100 == 0)
+            stock_say("stock: rule %u shot 0x%llx no longer counts - it moved to 0x%llx (%s) (p%u, field 0x%llx, #%u)", x->id,
+                      (unsigned long long)was, (unsigned long long)r->from, pm_shot_name(r->from) ? pm_shot_name(r->from) : "?",
+                      p, (unsigned long long)field, x->drops);
+        return 2;
+    }
+    if (d) {
         x->remaps++;
         if (x->remaps <= 200 || x->remaps % 100 == 0)
             stock_say("stock: rule %u shot 0x%llx counts as 0x%llx (p%u, field 0x%llx, #%u)", x->id,
@@ -8122,6 +8158,7 @@ static void stock_remap_shot(struct stock_rule *x, uint64_t *shot)
             stock_say("stock: rule %u shot 0x%llx passed through - 0x%llx is not lit (p%u, field 0x%llx)", x->id,
                       (unsigned long long)was, (unsigned long long)r->to, p, (unsigned long long)field);
     }
+    return d;
 }
 
 static uint64_t stock_w_shot(unsigned r0, unsigned r1, unsigned r2, unsigned r3,
@@ -8140,8 +8177,8 @@ static uint64_t stock_w_shot(unsigned r0, unsigned r1, unsigned r2, unsigned r3,
         keep = x->fn(x->id, &shot, (void *)(unsigned long)r0);
         current = was;
         if (!keep) return 0;                     /* item 161: the hook handled it; the game's handler does not run */
-    } else {
-        stock_remap_shot(x, &shot);
+    } else if (stock_remap_shot(x, &shot) == 2) {
+        return 0;                                /* PAD-699: an instead_of row's old shot: the handler does not see it */
     }
     return x->orig(r0, r1, (unsigned)shot, (unsigned)(shot >> 32), s0, s1, s2, s3);
 }
@@ -8245,6 +8282,7 @@ static int stock_colour(const char **p, unsigned *rgb)
 
 /* one line of stock.cfg:
  *   counts_as <rule id> <shot> -> <shot>            shots: the port's names, or 0x masks
+ *   instead_of <rule id> <shot> -> <shot>           PAD-699: the same, and the shot after -> no longer counts
  *   light <rule id> <colour> [pattern] [ms] [on ms]  the stand-in's inserts (yellow blink 500 300 when absent) */
 static void stock_line(const char *s)
 {
@@ -8253,10 +8291,11 @@ static void stock_line(const char *s)
     unsigned id;
     const char *a, *arrow;
     s = word(s, key, sizeof key);
-    if (str_eq(key, "counts_as")) {
+    if (str_eq(key, "counts_as") || str_eq(key, "instead_of")) {
         struct stock_row r;
         uint64_t from, to;
         unsigned i;
+        int instead = str_eq(key, "instead_of");
         id = (unsigned)number(&s, &ok);
         if (!ok) { stock_say("stock: counts_as needs a rule id - ignored"); return; }
         for (arrow = s; *arrow && !(arrow[0] == '-' && arrow[1] == '>'); arrow++) ;
@@ -8272,10 +8311,10 @@ static void stock_line(const char *s)
         if (!stock_one_bit(to)) { stock_say("stock: counts_as %u: the target 0x%llx must be ONE bit (a rule tests one bit) - ignored", id, (unsigned long long)to); return; }
         if (from & to) { stock_say("stock: counts_as %u: 0x%llx already carries 0x%llx - ignored", id, (unsigned long long)from, (unsigned long long)to); return; }
         if (n_stock_file_rows >= STOCK_ROWS) { stock_say("stock: more than %d counts_as rows - ignored", STOCK_ROWS); return; }
-        r.rule = id; r.from = from; r.to = to; r.from_c = 0;
+        r.rule = id; r.from = from; r.to = to; r.from_c = 0; r.instead = instead;
         r.rgb = 0xffff00; r.ms = 500; r.on_ms = 300; r.pattern = PM_LAMP_BLINK;
         stock_file_rows[n_stock_file_rows++] = r;
-        stock_say("stock: counts_as %u %s: 0x%llx (%s) -> 0x%llx (%s)", id, stock_rule(id)->label, (unsigned long long)from,
+        stock_say("stock: %s %u %s: 0x%llx (%s) -> 0x%llx (%s)", key, id, stock_rule(id)->label, (unsigned long long)from,
                   pm_shot_name(from) ? pm_shot_name(from) : "?", (unsigned long long)to, pm_shot_name(to) ? pm_shot_name(to) : "?");
         return;
     }
@@ -8371,10 +8410,65 @@ static void stock_file_poll(void)
     stock_raw_len = n;
     stock_parse(stock_raw, n);
     stock_publish();
-    stock_say("stock: %u counts_as row(s) live (%u from C); an empty table plays every rule stock", stock_live->n, n_stock_c_rows);
+    stock_say("stock: %u counts_as / instead_of row(s) live (%u from C); an empty table plays every rule stock", stock_live->n, n_stock_c_rows);
 }
 
-/* every 100 ms: the stand-in's inserts follow the target bit, while the rule is active */
+/* PAD-699: the game's own level of one light now: the top layer of the game's (none of ours) holding it */
+static int stock_game_level(unsigned light)
+{
+    unsigned char *g, *sl, *top = 0;
+    int guard = 64, k, ours;
+    long alpha = pm_port_value("lamp_slot_alpha", 3), level = pm_port_value("lamp_slot_level", 2);
+    for (g = lamp_first_layer(); g && guard-- > 0; g = lamp_next_layer(g)) {
+        for (ours = 0, k = 0; k < n_lamp_layers; k++) if (lamp_layer[k].group == g) ours = 1;
+        if (ours) continue;
+        sl = lamp_slot(g, light);
+        if (sl && sl[alpha]) top = sl;                 /* bottom to top: the last one holding it is on top */
+    }
+    return top ? top[level] : 0;
+}
+
+/* PAD-699: what the game shows on insert k now, as one rgb (a one-light insert: its level in `mono_rgb`) */
+static unsigned stock_game_rgb(int k, unsigned mono_rgb)
+{
+    const struct lamp *x = &lamps[k];
+    unsigned c[3] = { 0, 0, 0 }, i;
+    for (i = 0; i < 3; i++) if (x->light[i]) c[i] = (unsigned)stock_game_level(x->light[i]) & 255u;
+    if (x->mono || !x->light[1]) {
+        unsigned v = c[0];
+        return (((mono_rgb >> 16 & 255u) * v / 255u) << 16) | (((mono_rgb >> 8 & 255u) * v / 255u) << 8)
+               | ((mono_rgb & 255u) * v / 255u);
+    }
+    return c[0] << 16 | c[1] << 8 | c[2];
+}
+
+/* every tick: the new shots of a rule's lit instead_of rows show the old shots' light, the old ones dark */
+static void stock_mirror_tick(void)
+{
+    const struct pm_mode *was = current;
+    int i, j;
+    current = &stock_mode;
+    for (i = 0; i < n_stock_rules; i++) {
+        struct stock_rule *x = &stock_rules[i];
+        for (j = 0; j < x->n_mir; j++) {
+            pm_lamp_paint(x->mir[j].kold, 0);
+            pm_lamp_paint(x->mir[j].knew, stock_game_rgb(x->mir[j].kold, x->mir[j].rgb));
+        }
+    }
+    current = was;
+}
+
+/* the first insert of the port's that carries a shot bit, -1 for none */
+static int stock_insert_of(uint64_t bits)
+{
+    int k;
+    for (k = 0; k < n_lamps; k++) if (lamps[k].shot & bits) return k;
+    return -1;
+}
+
+/* every 100 ms: the stand-in's inserts follow the target bits, while the rule is active. PAD-699: every
+ * lit row of a rule at once (a battle with two lit shots and a row for each); an instead_of row's new
+ * shot takes the old one's light (stock_mirror_tick) and the old one goes dark */
 static void stock_lamps_poll(void)
 {
     struct stock_table *t = stock_live;
@@ -8383,39 +8477,74 @@ static void stock_lamps_poll(void)
     unsigned k;
     for (i = 0; i < n_stock_rules; i++) {
         struct stock_rule *x = &stock_rules[i];
-        const struct stock_row *want = 0;
-        int act;
+        const struct stock_row *first = 0;
+        uint64_t from = 0, mfrom = 0, dark = 0;
+        int act, n, m;
         if (!x->wrapped || !x->obj) continue;
         act = pm_in_game() ? stock_active(x) : 0;
         if (act > 0) {
             uint64_t field = stock_field(x, pm_player());
-            for (k = 0; k < t->n && !want; k++)
-                if (t->row[k].rule == x->id && (field & t->row[k].to)) want = &t->row[k];
+            for (k = 0; k < t->n; k++)
+                if (t->row[k].rule == x->id && (field & t->row[k].to)) {
+                    if (t->row[k].instead) {
+                        mfrom |= t->row[k].from;
+                        dark |= t->row[k].to;
+                    } else {
+                        if (!first) first = &t->row[k];
+                        from |= t->row[k].from;
+                    }
+                }
+            from &= ~mfrom;                      /* a shot that stands in by instead_of shows the moved light */
+            dark &= ~mfrom;                      /* a swap: that shot shows the other's light */
         }
-        if (want && (!x->lit || x->lit_from != want->from)) {
-            int n;
-            current = &stock_mode;
-            if (x->lit) pm_lamp_release_shot(x->lit_from);
-            lamp_hold_on_ms = want->on_ms;
-            n = pm_lamp_shot(want->from, want->rgb, want->pattern, want->ms);
+        if (from == x->lit_from && dark == x->dark_to && mfrom == x->mir_from
+            && (!first || first->rgb == x->lit_rgb)) continue;
+        current = &stock_mode;
+        if (x->lit_from) pm_lamp_release_shot(x->lit_from);
+        if (x->dark_to | x->mir_from) pm_lamp_release_shot(x->dark_to | x->mir_from);
+        x->n_mir = 0;
+        n = 0;
+        if (from) {
+            lamp_hold_on_ms = first->on_ms;
+            n = pm_lamp_shot(from, first->rgb, first->pattern, first->ms);
             lamp_hold_on_ms = 0;
-            current = was;
-            x->lit = 1;
-            x->lit_from = want->from;
-            stock_say("stock: rule %u %s: %d insert(s) of 0x%llx lit %06x while 0x%llx is lit (%s)", x->id, x->label, n,
-                      (unsigned long long)want->from, want->rgb, (unsigned long long)want->to,
+        }
+        if (mfrom) {                             /* each new insert paired with the first insert of its row's old shot */
+            for (k = 0; k < t->n; k++) {
+                const struct stock_row *r = &t->row[k];
+                int kold, kn;
+                if (r->rule != x->id || !r->instead || !(r->from & mfrom) || !(r->to & dark)) continue;
+                kold = stock_insert_of(r->to);
+                for (kn = 0; kn < n_lamps && kold >= 0; kn++)
+                    if ((lamps[kn].shot & r->from) && kn != kold && x->n_mir < (int)(sizeof x->mir / sizeof x->mir[0])) {
+                        x->mir[x->n_mir].knew = (short)kn;
+                        x->mir[x->n_mir].kold = (short)kold;
+                        x->mir[x->n_mir].rgb = r->rgb;
+                        x->n_mir++;
+                    }
+            }
+            for (k = 0; k < (unsigned)n_lamps; k++)        /* old inserts no pair names (none of the new shot's): dark too */
+                if (lamps[k].shot & dark) pm_lamp_paint((int)k, 0);
+        }
+        current = was;
+        if (from || mfrom) {
+            m = x->n_mir;
+            stock_say("stock: rule %u %s: %d insert(s) of 0x%llx lit %06x, %d of 0x%llx show the light of 0x%llx, which is dark (%s)",
+                      x->id, x->label, n, (unsigned long long)from, first ? first->rgb : 0u, m,
+                      (unsigned long long)mfrom, (unsigned long long)dark,
                       pm_can(PM_CAN_LAMPS) ? "our lamp layer" : "no lamp layer on this port: nothing lit");
-        } else if (!want && x->lit) {
-            int n, rows = 0;
+        } else {
+            int rows = 0;
             for (k = 0; k < t->n; k++) rows += t->row[k].rule == x->id;
-            current = &stock_mode;
-            n = pm_lamp_release_shot(x->lit_from);
-            current = was;
-            x->lit = 0;
-            stock_say("stock: rule %u %s: %d insert(s) of 0x%llx handed back (%s)", x->id, x->label, n,
-                      (unsigned long long)x->lit_from,
+            stock_say("stock: rule %u %s: the inserts of 0x%llx handed back (%s)", x->id, x->label,
+                      (unsigned long long)(x->lit_from | x->mir_from | x->dark_to),
                       act <= 0 ? "the rule is not active" : rows ? "the target bit cleared" : "no row names the rule now");
         }
+        x->lit = (from | mfrom) != 0;
+        x->lit_from = from;
+        x->mir_from = mfrom;
+        x->dark_to = dark;
+        x->lit_rgb = first ? first->rgb : 0;
     }
 }
 
@@ -8439,6 +8568,7 @@ static void stock_tick(void)
         }
     }
     if (ticks % 6 == 0) stock_lamps_poll();
+    stock_mirror_tick();                          /* PAD-699: before lamps_tick writes this tick's levels */
 }
 
 static void stock_arm(void)
@@ -8529,6 +8659,7 @@ int pm_stock_counts_as(unsigned id, uint64_t from, uint64_t to)
         n_stock_c_rows++;
     }
     stock_c_rows[i].rule = id; stock_c_rows[i].from = from; stock_c_rows[i].to = to; stock_c_rows[i].from_c = 1;
+    stock_c_rows[i].instead = 0;
     stock_c_rows[i].rgb = 0xffff00; stock_c_rows[i].ms = 500; stock_c_rows[i].on_ms = 300; stock_c_rows[i].pattern = PM_LAMP_BLINK;
     stock_publish();
     return 1;

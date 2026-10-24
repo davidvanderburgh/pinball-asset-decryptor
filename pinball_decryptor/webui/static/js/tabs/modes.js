@@ -82,7 +82,7 @@ const T = {
   codeMode: "A mode written in C, for what the form cannot do: a copy of the Mode SDK's template in this project's modes folder. Try it builds it in with the others.",
   challengeLaunch: "The challenge's ball waits in the shooter lane as the mode starts. The game launches it for the player once the mode's start clip is over (at once with no start clip), a set number of seconds after the mode starts, or not at all: the player launches it. Otherwise the ball starts as any other ball does: on James Bond, the left flipper button held at the launch opens the loop.",
   challenge: "The mode is played in the game's own Player Challenge mode: a one-ball game, picked on the game's start menu (both flipper buttons held in attract) as a game starts, or every game when the service menu's Default Game Mode is set to a challenge. Pick one of the game's own challenges and this mode starts as the ball starts in its place, the game's own never running, and the start menu shows the mode's name there; or pick A new challenge of its own and the start menu lists the mode after the game's own entries. The game ends when the ball ends. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge.",
-  countsAs: "A shot of your choosing counts as one of this mode's own while it runs: a Left ramp can reach the battle vs Ebirah as a left spin (its points, and the count down by one). One ramp is one spin, so a ramp standing in for a spinner needs the spinner's count of hits. Saved with this project and put on the card by Write with the modes; with no rows the mode plays as it always did.",
+  countsAs: "A shot of your choosing counts as one of this mode's own while it runs: a Left ramp can reach the battle vs Ebirah as a left spin (its points, and the count down by one). One ramp is one spin, so a ramp standing in for a spinner needs the spinner's count of hits. \"Instead of\" moves the mode's shot: yours counts, and the mode's own no longer does while it is lit (its insert stays dark, yours blinks): the battle vs Gigan can take the Big loop instead of the Left ramp. Saved with this project and put on the card by Write with the modes; with no rows the mode plays as it always did.",
   rewrite: "This mode is compiled into the game. A rewrite is a mode in C of this project whose code runs INSTEAD of this mode's shot handling: which shots, in what order and what they pay is yours, while its start, clock, screens and ending stay the game's own. It starts from the SDK's example for the mode; delete it and the mode plays as it always did.",
   leaveOut: "Build this Try it without the modes' own sounds: the game's own calls play, and the sound bank is not grown (the slow part of a build). A card Written from the project still carries them.",
   pointsFor: (n) => `What ${n} pays instead of the first shot's points. Blank = the usual points. A shot with its own points scores even when it is not ticked under Shots that score. A minus number takes that many points away each time ${n} is hit while the mode runs: a wrong shot costs the player, never below 0.`,
@@ -1046,6 +1046,7 @@ function CountsAsSec({ s, g }) {
   const mine = (st.rows || []).filter((r) => r.rule === g.id);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [how, setHow] = useState("instead of");
   useEffect(() => {
     if (!from && shots.length) setFrom(shots[0]);
     if (!to && shots.length > 1) setTo(shots[1]);
@@ -1053,9 +1054,9 @@ function CountsAsSec({ s, g }) {
   const note = st.note && (st.sel == null || mine.some((r) => r.i === st.sel)) ? st.note : "";
   return html`<${Sec} title="Shots" tipText=${T.countsAs}>
     ${!st.on ? html`<div class="small muted wrap">${st.msg}</div>` : html`
-      <div class="small muted wrap">A shot of your choosing can count as one of this mode's own while it runs.</div>
+      <div class="small muted wrap">A shot of your choosing can count as one of this mode's own while it runs, or take its place.</div>
       ${mine.length ? html`<div class="stack" style="gap:4px">${mine.map((r) => html`<div class="row modes-ca-row" key=${r.i}>
-          <span><b>${r.from}</b> <span class="dim">counts as</span> <b>${r.to}</b></span>
+          <span><b>${r.from}</b> <span class="dim">${r.verb || "counts as"}</span> <b>${r.to}</b></span>
           ${r.problem ? html`<${Chip} kind="warn" sm title=${r.problem}>cannot be written<//>` : null}
           <span class="grow"></span>
           <${Button} size="xs" kind="ghost" icon="trash" title="Take this row out."
@@ -1063,9 +1064,10 @@ function CountsAsSec({ s, g }) {
         </div>`)}</div>` : html`<div class="small dim">No shot counts as another here: the mode plays as it always did.</div>`}
       <div class="row wrap">
         <${Select} sm width=${160} value=${from} onChange=${setFrom} options=${shots} title="The shot the player makes." />
-        <span class="dim">counts as</span>
+        <${Select} sm width=${110} value=${how} onChange=${setHow} options=${["instead of", "counts as"]}
+          title="Instead of: the mode's own shot no longer counts while yours stands in for it. Counts as: both count." />
         <${Select} sm width=${160} value=${to} onChange=${setTo} options=${shots} title="The mode's own shot it stands in for." />
-        <${Button} size="sm" disabled=${!from || !to} onClick=${() => call("modes.remap_add", g.id, from, to)}>Add<//>
+        <${Button} size="sm" disabled=${!from || !to} onClick=${() => call("modes.remap_add", g.id, from, to, how === "instead of")}>Add<//>
       </div>
       ${note ? html`<div class="small muted wrap">${note}</div>` : null}`}
   <//>`;

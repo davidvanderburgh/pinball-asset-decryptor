@@ -15,6 +15,11 @@ the spinner's 15 hits unless the count word is lowered, item 159), the LEFT RAMP
 Ebirah's yellow, and once the count hits 0 the ramp passes through untouched. The table empty
 = every rule plays stock.
 
+PAD-699: a row may also MOVE the rule's shot - ``instead_of 14 Big loop -> Left ramp``: the Big loop
+counts as the battle vs Gigan's Left ramp, and the Left ramp itself no longer counts for it while
+that bit is lit (its insert is held dark, the Big loop's blinks). That is how a game's own battles
+get different shots.
+
 THIS MODULE is the app's side: the rows a project keeps (``<project>/modes/stock.json``), the
 rules and shots a card's PORT names (``rule`` lines; the spinners' middle bits are ``shot`` lines
 since this item), the rendering of ``stock.cfg`` that Write puts on the card's system partition
@@ -34,7 +39,7 @@ FILE_NAME = "stock.cfg"
 PROJECT_FILE = "stock.json"
 FORMAT = 1
 #: what the runtime keeps (pad_mode_runtime.c STOCK_ROWS)
-MAX_ROWS = 16
+MAX_ROWS = 24
 #: the stand-in's inserts when a row says nothing else: Ebirah's yellow, 300 ms on / 200 ms off
 DEFAULT_LIGHT = ("ffff00", "blink", 500, 300)
 
@@ -128,8 +133,9 @@ def project_file(project):
 
 
 def load(project):
-    """The project's rows: ``[{"rule": int, "from": str, "to": str}]`` (shots by NAME, as the
-    person picked them). A missing or unreadable file is no rows."""
+    """The project's rows: ``[{"rule": int, "from": str, "to": str, "instead": bool}]`` (shots by
+    NAME, as the person picked them; ``instead`` = the "to" shot no longer counts, PAD-699). A
+    missing or unreadable file is no rows."""
     path = project_file(project) if project else ""
     if not path or not os.path.isfile(path):
         return []
@@ -146,7 +152,7 @@ def load(project):
             continue
         try:
             rows.append({"rule": int(r.get("rule")), "from": str(r.get("from") or ""),
-                         "to": str(r.get("to") or "")})
+                         "to": str(r.get("to") or ""), "instead": bool(r.get("instead"))})
         except (TypeError, ValueError):
             continue
     return rows
@@ -162,10 +168,26 @@ def save(project, rows):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        json.dump({"format": FORMAT, "rows": [dict(rule=int(r["rule"]), **{"from": r["from"], "to": r["to"]})
-                                               for r in rows]}, f, indent=1)
+        json.dump({"format": FORMAT, "rows": [_saved(r) for r in rows]}, f, indent=1)
         f.write("\n")
     os.replace(tmp, path)
+
+
+def _saved(r):
+    out = dict(rule=int(r["rule"]), **{"from": r["from"], "to": r["to"]})
+    if r.get("instead"):
+        out["instead"] = True             # PAD-699; a row without it is a counts-as row, as before
+    return out
+
+
+def keyword(row):
+    """The row's stock.cfg key: ``instead_of`` (the old shot no longer counts) or ``counts_as``."""
+    return "instead_of" if row.get("instead") else "counts_as"
+
+
+def verb(row):
+    """How the Modes tab and the Write log say the row: "counts as" / "instead of"."""
+    return "instead of" if row.get("instead") else "counts as"
 
 
 # ---- the checks and the file -------------------------------------------------------------------------
@@ -196,6 +218,9 @@ def check_row(row, rules, shots, others=()):
             continue
         if int(o.get("rule", -1)) == rid and shot_mask(shots, o.get("from")) == src:
             return "\"%s\" already counts as something for rule %d." % (row.get("from"), rid)
+        if (row.get("instead") and o.get("instead") and int(o.get("rule", -1)) == rid
+                and shot_mask(shots, o.get("to")) == dst):
+            return "\"%s\" is already moved for rule %d." % (row.get("to"), rid)
     return ""
 
 
@@ -224,25 +249,28 @@ def render(rows, rules, shots, port_name=""):
     lines = ["# stock.cfg - the game's own rules take another shot for one of theirs (item 160)%s"
              % (", for %s" % port_name if port_name else ""),
              "# counts_as <rule id> <shot> -> <shot>   the runtime re-reads this file twice a second",
+             "# instead_of <rule id> <shot> -> <shot>  the same, and the shot after -> no longer counts (PAD-699)",
              "# light <rule id> <color> [pattern] [ms] [on ms]   the stand-in's inserts (yellow blink 500 300 when absent)"]
     for r in rows:
         src, dst = shot_mask(shots, r["from"]), shot_mask(shots, r["to"])
         # the rule's label on a line of its own: a runtime older than 2026-09-23 read a trailing
         # comment as part of the shot after `->` and refused the row
         lines.append("# %s" % labels.get(int(r["rule"]), "rule %d" % int(r["rule"])))
-        lines.append("counts_as %d %s -> %s" % (int(r["rule"]), shot_name(shots, src), shot_name(shots, dst)))
+        lines.append("%s %d %s -> %s" % (keyword(r), int(r["rule"]), shot_name(shots, src), shot_name(shots, dst)))
     return "\n".join(lines) + "\n"
 
 
-def parse(text):
+def parse(text, instead=False):
     """The ``counts_as`` rows of a ``stock.cfg`` text, as the runtime reads them:
-    ``[(rule, from, to)]`` with the shots as written (a name or a number)."""
+    ``[(rule, from, to)]`` with the shots as written (a name or a number). PAD-699: *instead* = the
+    ``instead_of`` rows instead."""
     out = []
+    key = "instead_of " if instead else "counts_as "
     for raw in (text or "").splitlines():
         s = raw.split("#", 1)[0].strip()
-        if not s.startswith("counts_as "):
+        if not s.startswith(key):
             continue
-        rest = s[len("counts_as "):].strip()
+        rest = s[len(key):].strip()
         rid, _, rest = rest.partition(" ")
         src, arrow, dst = rest.partition("->")
         if not arrow:
@@ -278,6 +306,6 @@ def describe(rows, rules, shots):
     labels = {rid: label for rid, label, _v in rules}
     parts = []
     for r in rows:
-        parts.append("%s takes %s as %s" % (labels.get(int(r["rule"]), "rule %s" % r["rule"]),
-                                            r["from"], r["to"]))
+        parts.append("%s takes %s %s" % (labels.get(int(r["rule"]), "rule %s" % r["rule"]), r["from"],
+                                         ("instead of " if r.get("instead") else "as ") + r["to"]))
     return "the game's own rules take another shot (stock.cfg): " + "; ".join(parts)

@@ -74,10 +74,11 @@ def test_a_code_row_per_rule_and_a_rewrite_made_from_the_template(tmp_path, prev
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
         st = w.state("modes")["rewrite"]
-        assert st["on"] is True and st["msg"].startswith("godzilla_le-1.16.port: 2 rule(s)")
+        assert st["on"] is True and st["msg"].startswith("godzilla_le-1.16.port: 26 rule(s)")
         assert "Every rule plays its own shot logic" in st["msg"]
-        assert [(r["id"], r["label"], r["slug"], r["template"]) for r in st["rows"]] == [
-            (12, "Battle vs Ebirah", "", "ebirah_rewrite.c"), (4, "Tank attack multiball", "", "")]
+        got = {r["id"]: (r["label"], r["slug"], r["template"]) for r in st["rows"]}
+        assert len(got) == 26      # PAD-699: the port names every one of the game's own modes
+        assert got[12] == ("Battle vs Ebirah", "", "ebirah_rewrite.c") and got[4] == ("Tank Attack Multiball", "", "")
         # the tank has no template: refused with a sentence, nothing made
         why = w.call("modes.rewrite_new", 4)
         assert "no template" in why and w.state("modes")["rewrite"]["note"] == why
@@ -87,7 +88,7 @@ def test_a_code_row_per_rule_and_a_rewrite_made_from_the_template(tmp_path, prev
         assert w.state("modes")["rewrite"]["sel"] == 12
         assert w.call("modes.rewrite_new") == ""
         st = w.state("modes")
-        assert st["rewrite"]["rows"][0]["slug"] == "ebirah_rewrite"
+        assert {r["id"]: r for r in st["rewrite"]["rows"]}[12]["slug"] == "ebirah_rewrite"
         assert "1 rewritten by this project's code" in st["rewrite"]["msg"]
         assert "Made modes/ebirah_rewrite/ebirah_rewrite.c" in st["rewrite"]["note"]
         assert SW.rewrites(str(proj)) == {12: "ebirah_rewrite"}

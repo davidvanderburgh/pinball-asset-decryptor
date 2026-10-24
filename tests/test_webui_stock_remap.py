@@ -70,15 +70,17 @@ def test_a_row_for_ebirah_is_kept_in_the_project_and_written_for_write(tmp_path,
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
         st = w.state("modes")["remap"]
-        assert st["on"] is True and st["msg"].startswith("godzilla_le-1.16.port: 2 rule(s)")
-        assert {r["id"]: r["label"] for r in st["rules"]} == {12: "Battle vs Ebirah", 4: "Tank attack multiball"}
+        assert st["on"] is True and st["msg"].startswith("godzilla_le-1.16.port: 26 rule(s)")
+        labels = {r["id"]: r["label"] for r in st["rules"]}
+        assert len(labels) == 26 and labels[12] == "Battle vs Ebirah" and labels[4] == "Tank Attack Multiball"
+        assert labels[14] == "Battle vs Gigan"
         assert "Left spinner" in st["shots"] and "Left ramp" in st["shots"] and st["rows"] == []
         assert w.call("modes.remap_add", 12, "Left ramp", "Left spinner") == ""
         st = w.state("modes")["remap"]
         assert [(r["rule"], r["from"], r["to"], r["problem"]) for r in st["rows"]] == [(12, "Left ramp", "Left spinner", "")]
         assert st["rows"][0]["label"] == "Battle vs Ebirah" and st["sel"] == 0
         assert "1 row(s) go on the card with the modes as stock.cfg" in st["msg"]
-        assert SR.load(str(proj)) == [{"rule": 12, "from": "Left ramp", "to": "Left spinner"}]
+        assert SR.load(str(proj)) == [{"rule": 12, "from": "Left ramp", "to": "Left spinner", "instead": False}]
         # what Write renders for the card
         from pinball_decryptor.plugins.stern import mode_project as MP
         port = MP.port_path(MP.profile_for_card("godzilla_le", "1.16"))
@@ -108,6 +110,7 @@ def test_a_rule_is_a_game_mode_in_the_list_and_its_page_carries_its_shots_and_it
     """The counts-as rows and the rewrite live on the page of the game mode they change, not in
     the page head: every rule the card's port names is in the list's game group, and its page
     says it is a rule (the Shots and Advanced sections render from modes.remap / modes.rewrite)."""
+    from pinball_decryptor.plugins.stern import stock_remap as SR
     proj = _card_project(tmp_path / "gz", "godzilla_le-1_16_0.raw")
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, proj)
@@ -120,6 +123,14 @@ def test_a_rule_is_a_game_mode_in_the_list_and_its_page_carries_its_shots_and_it
         assert w.call("modes.remap_add", 12, "Left ramp", "Left spinner") == ""
         st = w.state("modes")
         assert [(r["rule"], r["from"], r["to"]) for r in st["remap"]["rows"]] == [(12, "Left ramp", "Left spinner")]
-        assert [r["id"] for r in st["rewrite"]["rows"]] == [12, 4]
+        assert {12, 4, 14} <= {r["id"] for r in st["rewrite"]["rows"]} and len(st["rewrite"]["rows"]) == 26
         assert w.call("modes.remap_delete", 0) is True
         assert w.state("modes")["remap"]["rows"] == []
+        # PAD-699: Gigan's page, a row that MOVES its Left ramp to the Big loop
+        assert w.call("modes.select", "14", "game") is True
+        assert w.state("modes")["game_mode"]["rule"] is True
+        assert w.call("modes.remap_add", 14, "Big loop", "Left ramp", True) == ""
+        rows = w.state("modes")["remap"]["rows"]
+        assert [(r["rule"], r["from"], r["to"], r["instead"], r["verb"]) for r in rows] == [
+            (14, "Big loop", "Left ramp", True, "instead of")]
+        assert SR.load(str(proj))[0]["instead"] is True

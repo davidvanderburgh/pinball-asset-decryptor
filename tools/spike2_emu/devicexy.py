@@ -273,6 +273,44 @@ def load(path=None):
     return d, cstr
 
 
+#: Typographic characters a device NAME may carry, and the plain text each is
+#: written as - see _name().
+_NAME_ASCII = {"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+               "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-",
+               "\u2026": "...", "\u00a0": " "}
+
+
+def _name(d, cstr, va):
+    """The device NAME at `va`, in plain ASCII, or None.
+
+    ★ STERN TYPES SOME NAMES WITH CURLY QUOTES (PAD-703, 2026-10-24).
+    stranger_things_le 1.13.0 calls the centre-column insert at 6:36 `TRAP
+    ‘EM` and the left one at 7:48 `WHERE’S BARB?`, in UTF-8. cstr() is ASCII
+    only - right for an image path or a connector, which are never typed like
+    that - so both records failed, and the two inserts were empty holes on the
+    virtual playfield while every lamp round them lit. Each such name is mapped
+    to the plain character a reader would type (`TRAP 'EM`), because the name
+    is written into device_xy.txt, which the Windows side reads in its own
+    codepage, and is matched by people typing it. Anything else non-ASCII, or
+    any control character, still refuses the record, as it always did.
+    """
+    t = cstr(va)
+    if t is not None:
+        return t
+    o = va - VA_BIAS
+    if o < 0 or o >= len(d):
+        return None
+    e = d.find(b"\0", o, o + 71)
+    if e <= o:
+        return None
+    try:
+        t = d[o:e].decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    t = "".join(_NAME_ASCII.get(c, c) for c in t)
+    return t if all(32 <= ord(c) < 127 for c in t) else None
+
+
 def blank_str(d, va):
     """True if `va` points at an EMPTY C string inside this binary.
 
@@ -335,7 +373,7 @@ def _one(d, cstr, va):
         img, blank = BLANK_IMAGE, True
     elif "/" not in img and img != PLAYFIELD_IMAGE:
         return None
-    name = cstr(struct.unpack_from("<I", d, o + NAME_OFF)[0])
+    name = _name(d, cstr, struct.unpack_from("<I", d, o + NAME_OFF)[0])
     if not name:
         return None
     x, y = struct.unpack_from("<hh", d, o + 0x10)
@@ -517,7 +555,32 @@ def records(d, cstr):
     # be a marker at 0, 0 on the artwork: D&D's LEFT/RIGHT GI on its Rope
     # drawing. The layout is the placed records' vote, so these cannot move it.
     lay = layout_image(out)
-    return [r for r in out if not (_unplaced(r) and r["image"] == lay)]
+    return [_moved(r) for r in out
+            if not (_unplaced(r) and r["image"] == lay)]
+
+
+#: ★ PLACES STERN GOT WRONG ON ITS OWN DRAWING (PAD-703, 2026-10-24), as
+#: (image, name, group, index, x, y) -> the insert's real centre. Stranger
+#: Things 1.13.0, Pro and LE, puts RIGHT RAMP MODE START 2 11 px below its
+#: insert, half on the one under it, and DEMODO(G) 10 px right of its small
+#: insert, on the DEMODOG target; both inserts stayed dark on the virtual
+#: playfield. The centres are measured off the card's playfield drawing,
+#: where the same measure puts every lamp round them within a pixel of its
+#: table place. Keyed on the wrong place itself, so a build that corrects it,
+#: or any other title, is never touched.
+MOVED = {
+    ("playfield", "RIGHT RAMP MODE START 2", 6, 31, 225, 369): (225, 360),
+    ("playfield", "DEMODO(G)", 6, 21, 250, 399): (241, 399),
+}
+
+
+def _moved(r):
+    """`r` at the place MOVED says its insert really is, else as read."""
+    to = MOVED.get((r["image"], r["name"], r["group"], r["index"],
+                    r["x"], r["y"]))
+    if to:
+        r = dict(r, x=to[0], y=to[1])
+    return r
 
 
 def _unplaced(r):
@@ -648,7 +711,7 @@ def counts(keep):
 #: refuses a table recording another revision, or none, which re-derives it
 #: once through the same path a new build takes. BUMP THIS whenever a change to
 #: devicexy or swelf would alter a cached table for an unchanged binary.
-READER_REV = 3                  # 3: unplaced records (PAD-517)
+READER_REV = 4                  # 3: unplaced records (PAD-517); 4: curly-quote names, MOVED (PAD-703)
 READER_TAG = "# reader: "
 
 

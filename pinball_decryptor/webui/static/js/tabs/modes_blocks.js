@@ -79,8 +79,9 @@ const TIP = {
   timers: "A timer counts down in milliseconds, apart from the mode's clock: start it from a block (any value, so a window can get shorter), and a When it runs out script runs the moment it does. A ball ending stops every timer.",
   timerStart: "Starts the timer (again, if it runs) at this many milliseconds: 1000 = one second. Any value: a variable makes a window that shrinks.",
   timerLeft: "The milliseconds the timer has left; 0 when it is not running.",
-  combo: "A combo: these shots made one after another, in this order, each within this many seconds of the one before. Two shots: the second follows the first; more: an ordered combo (ramp, then loop, then ramp). A step may be any shot, or a lit shot: one this mode has lit as it is made (so a lit shot, then a lit shot, chains every lit shot made in time). A shot that breaks a combo can still begin the next. Judged on the shots the mode hears, the same on every game. Each shot that makes a combo is one more of the combos in a row; its name lets the shots made so far of it be counted.",
+  combo: "A combo: these shots made one after another, in this order, each within this many seconds of the one before. Two shots: the second follows the first; more: an ordered combo (ramp, then loop, then ramp). A step may be any shot, a lit shot (one this mode has lit as it is made, so a lit shot, then a lit shot, chains every lit shot made in time), or one of several shots (press or). Other shots made between do not break it (the ball passes spinners and lanes on its way), its first shot made again begins it again, and only the window running out ends it. Judged on the shots the mode hears, the same on every game. Each shot that makes a combo is one more of the combos in a row; its name lets the shots made so far of it be counted.",
   comboStep: "A step of the combo: a shot of the game's, any shot, or a lit shot (one this mode has lit as it is made, not held dark)",
+  comboOr: "Or another shot: this step is made by any one of them (a pop bumper or the Mecha lane), up to four",
   comboName: "Its name, for the value \"shots made of a combo\" (a HUD counter's 2 of 3); none is needed otherwise",
   combo_chain: "The combos in a row for the player up: one more for each shot that makes a combo, back to 0 when the window of the last one lapses with no other, when the ball ends, and as the mode starts and ends. The \"x combo\" to multiply a score by, or a COMBO counter on the HUD.",
   comboSteps: "How many of a combo's shots the player has made so far, in its order and in its window (2 after the ramp and the loop of ramp, then loop, then ramp); 0 once its window lapses.",
@@ -614,15 +615,26 @@ function Secs({ value, onChange, width = 48, title }) {
     onChange=${(t) => { const n = Number(String(t).trim()); onChange(String(t).trim() !== "" && Number.isFinite(n) ? n : t); }} />`;
 }
 
+const COMBO_ALTS_MAX = 4;
 function ComboSteps({ h, path, ed }) {
   const steps = Array.isArray(h.shots) ? h.shots : [];
-  const opts = [["lit", "a lit shot"], ["*", "any shot"], ...(ed.ch.shots || []).map((n) => [n, n])];
+  const shots = (ed.ch.shots || []).map((n) => [n, n]);
+  const opts = [["lit", "a lit shot"], ["*", "any shot"], ...shots];
   const setSteps = (list) => ed.set([...path, "shots"], list);
-  return html`${steps.map((x, i) => html`${i ? html`<span class="bk-w b">, then</span>` : null}<${Pick} value=${x} options=${opts}
-      title=${TIP.comboStep} onChange=${(v) => setSteps(steps.map((y, j) => (j === i ? v : y)))} />${steps.length > 2
+  const setStep = (i, v) => setSteps(steps.map((y, j) => (j === i ? v : y)));
+  const named = (x) => x !== "lit" && x !== "*";
+  // a step of one of several shots: each with "or" between, and a × while there are two or more
+  const alts = (x, i) => x.map((y, a) => html`${a ? html`<span class="bk-w b">or</span>` : null}<${Pick} value=${y} options=${shots}
+      title=${TIP.comboStep} onChange=${(v) => setStep(i, x.map((z, b) => (b === a ? v : z)))} />${x.length > 1
+      ? html`<${X} title="Take this shot out of the step" onClick=${() => setStep(i, x.length === 2 ? x[1 - a] : x.filter((_z, b) => b !== a))} />` : null}`);
+  const orButton = (x, i) => (named(x) && (!Array.isArray(x) || x.length < COMBO_ALTS_MAX)
+    ? html`<button type="button" class="bk-x" aria-label="Or another shot" ...${tip(TIP.comboOr)}
+        onClick=${(e) => { e.stopPropagation(); setStep(i, [...(Array.isArray(x) ? x : [x]), (ed.ch.shots || [])[0] || ""]); }}>or</button>` : null);
+  return html`${steps.map((x, i) => html`${i ? html`<span class="bk-w b">, then</span>` : null}${Array.isArray(x) ? alts(x, i)
+      : html`<${Pick} value=${x} options=${opts} title=${TIP.comboStep} onChange=${(v) => setStep(i, v)} />`}${orButton(x, i)}${steps.length > 2
       ? html`<${X} title="Take this shot out of the combo" onClick=${() => setSteps(steps.filter((_y, j) => j !== i))} />` : null}`)}
     ${steps.length < COMBO_STEPS_MAX ? html`<button type="button" class="bk-x" aria-label="A shot more" ...${tip("A shot more, after the last: an ordered combo")}
-      onClick=${(e) => { e.stopPropagation(); setSteps([...steps, steps[steps.length - 1] || "lit"]); }}>+</button>` : null}`;
+      onClick=${(e) => { e.stopPropagation(); const last = steps[steps.length - 1]; setSteps([...steps, Array.isArray(last) ? last[0] : last || "lit"]); }}>+</button>` : null}`;
 }
 
 export function HatBody({ h, path, ed }) {

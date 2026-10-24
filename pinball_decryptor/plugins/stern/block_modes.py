@@ -79,10 +79,11 @@ target starts a 20 s timer, and a pop bumper or the Mecha lane made while it run
 pair. The hat ``{"kind": "combo", "shots": ["Left ramp", "Right ramp"], "seconds": 3, "when": "running",
 "name": "RAMPS"}`` runs when its shots are made in that order, each within ``seconds`` of the one before: two
 shots are "<shot> follows <shot> within N seconds", more an ordered combo (ramp -> loop -> ramp). A step may be
-any shot (``"*"``) or any shot the mode has lit as it is made (``"lit"``), so "any lit shot after any lit shot"
-chains. It is judged on the mode's own shot stream (every shot it hears, in order: the same on every title, LE
-or Pro), and the C keeps the last few shots with the time each was made (``combo_ring``), so a shot that breaks
-a combo can still begin the next. Two values go with it: the COMBOS IN A ROW for the player up (``{"k":
+any shot (``"*"``), any shot the mode has lit as it is made (``"lit"``), so "any lit shot after any lit shot"
+chains, or one of several shots (a list: ``["Pop bumper", "Mecha exit bottom"]``, TAG TEAM's second shot). It is judged on the mode's own shot stream (every shot it hears, in order: the same on every title, LE
+or Pro). A shot that is not the next step leaves the combo as it is - the ball passes spinners, lanes and pops
+that are shots too on its way from one shot to the next, as TAG TEAM's hand-built window allowed - its first shot
+made again begins it again from there, and only the window lapsing ends it. Two values go with it: the COMBOS IN A ROW for the player up (``{"k":
 "combo_chain"}``: each shot that makes one or more combos adds one; it goes back to 0 when the window of the last one
 lapses with no other, when the ball ends, and as the mode starts and ends - the "x combo" a score multiplies by,
 a COMBO counter on the HUD), and a combo's SHOTS MADE SO FAR (``{"k": "combo_steps", "combo": "RAMPS"}``, by
@@ -475,6 +476,7 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")  # PAD-600: another mode a P
 COMBO_ANY = "*"                  # any shot
 COMBO_LIT = "lit"                # any shot the mode has lit (a Light block's, not dark) as it is made
 COMBO_STEPS_MAX = 6
+COMBO_ALTS_MAX = 4               # a step may be one of several shots (["Pop bumper", "Mecha exit bottom"])
 MAX_COMBOS = 8
 COMBO_SECONDS_MIN, COMBO_SECONDS_MAX = 0.5, 60
 
@@ -1278,9 +1280,18 @@ def combo_ms(hat):
 
 
 def combo_steps(hat):
-    """PAD-708: a combo hat's shots, as saved (a list of names, COMBO_ANY or COMBO_LIT)."""
+    """PAD-708: a combo hat's steps, as saved: each a name, COMBO_ANY, COMBO_LIT, or a list of names (one of them)."""
     shots = (hat or {}).get("shots")
-    return [str(x or "") for x in shots] if isinstance(shots, list) else []
+    if not isinstance(shots, list):
+        return []
+    return [[str(y or "") for y in x] if isinstance(x, list) else str(x or "") for x in shots]
+
+
+def step_shots(step):
+    """PAD-708: the card's shots a combo step names (none for any shot or a lit shot)."""
+    if isinstance(step, list):
+        return [x for x in step if x not in (COMBO_ANY, COMBO_LIT)]
+    return [] if step in (COMBO_ANY, COMBO_LIT) else [step]
 
 
 def _check_combo(hat, where, ctx):
@@ -1292,6 +1303,15 @@ def _check_combo(hat, where, ctx):
         ctx["out"].append("%s's combo has %d shots: %d at most." % (where, len(shots), COMBO_STEPS_MAX))
     for k, shot in enumerate(shots):
         if shot in (COMBO_ANY, COMBO_LIT):
+            continue
+        if isinstance(shot, list):                    # one of several shots
+            if not 1 <= len(shot) <= COMBO_ALTS_MAX or any(not isinstance(x, str) or x in (COMBO_ANY, COMBO_LIT)
+                                                         for x in shot):
+                ctx["out"].append("%s's combo shot %d is one of 1 to %d shots of the card's." % (where, k + 1,
+                                                                                               COMBO_ALTS_MAX))
+            for x in shot if isinstance(shot, list) else ():
+                if isinstance(x, str) and x not in (COMBO_ANY, COMBO_LIT):
+                    _check_shot(x, "%s's combo shot %d" % (where, k + 1), ctx)
             continue
         _check_shot(shot if isinstance(shot, str) else "", "%s's combo shot %d" % (where, k + 1), ctx)
     try:
@@ -2281,8 +2301,8 @@ def to_c(program, slug):
             elif kind == "combo":                        # PAD-708: judged as the shot came (combo_shot), its gate too
                 k = next((i for i, h in enumerate(g.combos) if h is hat), None)
                 for x in combo_steps(hat)[:COMBO_STEPS_MAX]:   # its shots in the table before the table is written
-                    if x not in (COMBO_ANY, COMBO_LIT):
-                        g.shot_i(x)
+                    for name in step_shots(x)[:COMBO_ALTS_MAX]:
+                        g.shot_i(name)
                 test = "(combo_fired & %du)" % (1 << k) if k is not None else "(0)"
             elif kind == "challenge":                    # PAD-615: picked on the game's thread, run on the tick
                 name = str(hat.get("challenge") or "")
@@ -3367,56 +3387,50 @@ def to_c(program, slug):
 
 
 def _combo_c(g):
-    """PAD-708: the combo hats' table, the last shots kept with their times, and the two values (the combos in a row,
-    a combo's shots made so far). Before the scripts and the HUD, which read the values."""
+    """PAD-708: the combo hats' table, each one's shots made so far, and the two values (the combos in a row, a
+    combo's shots made so far). Before the scripts and the HUD, which read the values."""
     rows, words = [], []
     gates = {"idle": 1, "running": 2}
     for k, h in enumerate(g.combos):
         steps = combo_steps(h)[:COMBO_STEPS_MAX]
-        codes = [-1 if x == COMBO_ANY else -2 if x == COMBO_LIT else g.shot_i(x) for x in steps]
-        n = len(codes) if len(codes) >= 2 else 0              # fewer than two shots: never made
-        codes += [0] * (COMBO_STEPS_MAX - len(codes))
-        rows.append("    { %d, %du, %d, { %s } }," % (n, combo_ms(h), gates.get(h.get("when"), 0),
-                                                     ", ".join(str(c) for c in codes)))
+        codes = [[-1] if x == COMBO_ANY else [-2] if x == COMBO_LIT else [g.shot_i(y) for y in step_shots(x)][:COMBO_ALTS_MAX]
+                 for x in steps]
+        n = len(codes) if len(codes) >= 2 and all(codes) else 0      # fewer than two shots, or an empty step: never
+        codes += [[]] * (COMBO_STEPS_MAX - len(codes))
+        rows.append("    { %d, %du, %d, { %s } }," % (n, combo_ms(h), gates.get(h.get("when"), 0), ", ".join(
+            "{ %s }" % ", ".join(str(c) for c in (step + [-3] * (COMBO_ALTS_MAX - len(step)))) for step in codes)))
         words.append(" * COMBO[%d]: %s" % (k, _comment(_hat_words(h))))
-    return _COMBO_C % {"n": len(g.combos), "ring": COMBO_STEPS_MAX, "rows": "\n".join(rows),
+    return _COMBO_C % {"n": len(g.combos), "steps": COMBO_STEPS_MAX, "alts": COMBO_ALTS_MAX, "rows": "\n".join(rows),
                        "words": "\n".join(words)}
 
 
-_COMBO_C = """/* ---- PAD-708: the combos: shots made one after another, each within its window (ms) of the one before. Judged on
- * the shots this mode hears, in order; the last few are kept with the time each was made, newest first, so a shot
- * that breaks one combo may begin the next. A step: a shot (its index in S), -1 any shot, -2 a shot it has lit.
+_COMBO_C = """/* ---- PAD-708: the combos: shots made in order, each within its window (ms) of the one before. Judged on the
+ * shots this mode hears; a shot that is not the next step leaves a combo as it is (a spinner or a lane the ball
+ * passes on the way does not break it), its first shot again begins it again, and only the window lapsing ends it.
+ * A step: one of up to COMBO_ALTS shots (their indices in S; -3 = no more), -1 any shot, -2 a shot it has lit as it
+ * is made.
 %(words)s
  */
 #define N_COMBOS     %(n)d
-#define COMBO_RING   %(ring)d
-static const struct { int n; unsigned ms; int gate; int step[COMBO_RING]; } COMBO[N_COMBOS] = {
+#define COMBO_STEPS  %(steps)d
+#define COMBO_ALTS   %(alts)d
+static const struct { int n; unsigned ms; int gate; int step[COMBO_STEPS][COMBO_ALTS]; } COMBO[N_COMBOS] = {
 %(rows)s
 };
-static struct { uint64_t shot, lit; unsigned long at; } combo_ring[COMBO_RING];
-static unsigned combo_n;                         /* the shots kept, up to COMBO_RING */
+static int combo_at[N_COMBOS];                   /* each combo's shots made so far */
+static unsigned long combo_last[N_COMBOS];       /* ... and when the last of them was made */
 static unsigned combo_fired;                     /* the combos the last shot made, a bit each */
 static long long combo_chain[5];                 /* the combos in a row, per player */
 static unsigned long combo_chain_at, combo_chain_ms;   /* when the last one was made, and its window */
 
-static int combo_step_is(int step, uint64_t shot, uint64_t lit)
+static int combo_step_is(const int *step, uint64_t shot, uint64_t lit)
 {
-    if (step == -1) return (shot & named) != 0;
-    if (step == -2) return (shot & lit) != 0;
-    return step >= 0 && S[step] && (shot & S[step]) != 0;
-}
-
-/* the newest j shots, oldest first, are combo k's first j steps, each within its window of the one before */
-static int combo_made(int k, int j)
-{
-    int s;
-    if (j < 1 || j > (int)combo_n) return 0;
-    for (s = 0; s < j; s++) {
-        int e = j - 1 - s;
-        if (!combo_step_is(COMBO[k].step[s], combo_ring[e].shot, combo_ring[e].lit)) return 0;
-        if (s && combo_ring[e].at - combo_ring[e + 1].at > COMBO[k].ms) return 0;
-    }
-    return 1;
+    int a;
+    if (step[0] == -1) return (shot & named) != 0;
+    if (step[0] == -2) return (shot & lit) != 0;
+    for (a = 0; a < COMBO_ALTS && step[a] >= 0; a++)
+        if (S[step[a]] && (shot & S[step[a]]) != 0) return 1;
+    return 0;
 }
 
 static void combo_chain_end(void)
@@ -3428,7 +3442,8 @@ static void combo_chain_end(void)
 
 static void combo_clear(void)                    /* the ball, the mode or the game begins or ends */
 {
-    combo_n = 0;
+    int k;
+    for (k = 0; k < N_COMBOS; k++) combo_at[k] = 0;
     combo_fired = 0;
     combo_chain_end();
 }
@@ -3440,21 +3455,18 @@ UNUSED static long long combo_in_row(void)
     return combo_chain[P()];
 }
 
-/* "a combo's shots made so far": the most of its first steps the newest shots make, while the last is in its
- * window (a combo just made counts what it leaves toward the next: ramp -> loop -> ramp made, its last ramp is 1) */
+/* "a combo's shots made so far", while the last is in its window (a combo just made: what it leaves toward the
+ * next - a lit shot then a lit shot made, its last lit shot is 1) */
 UNUSED static long long combo_made_so_far(int k)
 {
-    int j;
-    if (!combo_n || !COMBO[k].n || pm_ms() - combo_ring[0].at > COMBO[k].ms) return 0;
-    for (j = COMBO[k].n - 1; j > 0; j--)
-        if (combo_made(k, j)) return j;
-    return 0;
+    if (!combo_at[k] || pm_ms() - combo_last[k] > COMBO[k].ms) return 0;
+    return combo_at[k];
 }
 """
 
-_COMBO_SHOT_C = """/* PAD-708: a shot into the combos' ring, and the combos it makes (a combo's script runs for it while its When
- * holds: any time, while the mode is not running (as an idle shot), while it runs). One more in a row for the
- * player up when it makes any, the window of the longest it made then running for the next. */
+_COMBO_SHOT_C = """/* PAD-708: a shot into the combos, and the combos it makes (a combo's script runs for it). A combo moves on only
+ * while its When holds: any time, while the mode is not running (as an idle shot), while it runs. One more in a row
+ * for the player up when the shot makes any, the window of the longest it made then running for the next. */
 static uint64_t lit_mask(void)
 {
     uint64_t m = 0;
@@ -3468,18 +3480,25 @@ static void combo_shot(uint64_t shot, int was_on, int idle)
 {
     unsigned long now = pm_ms();
     unsigned long win = 0;
+    uint64_t lit = lit_mask();                   /* as it was made: before this shot's scripts light or free any */
     int k;
-    for (k = COMBO_RING - 1; k > 0; k--) combo_ring[k] = combo_ring[k - 1];
-    combo_ring[0].shot = shot;
-    combo_ring[0].lit = lit_mask();              /* as it was made: before this shot's scripts light or free any */
-    combo_ring[0].at = now;
-    if (combo_n < COMBO_RING) combo_n++;
     combo_fired = 0;
     for (k = 0; k < N_COMBOS; k++) {
         int gate = COMBO[k].gate == 1 ? idle : COMBO[k].gate == 2 ? was_on : 1;
-        if (!gate || !COMBO[k].n || !combo_made(k, COMBO[k].n)) continue;
-        combo_fired |= 1u << k;
-        if (COMBO[k].ms > win) win = COMBO[k].ms;
+        int first;
+        if (!gate || !COMBO[k].n) continue;
+        if (combo_at[k] && now - combo_last[k] > COMBO[k].ms) combo_at[k] = 0;   /* its window lapsed */
+        first = combo_step_is(COMBO[k].step[0], shot, lit);
+        if (combo_step_is(COMBO[k].step[combo_at[k]], shot, lit)) {
+            combo_last[k] = now;
+            if (++combo_at[k] < COMBO[k].n) continue;
+            combo_fired |= 1u << k;              /* made */
+            if (COMBO[k].ms > win) win = COMBO[k].ms;
+            combo_at[k] = first;                 /* its last shot may begin the next (a lit shot after a lit shot) */
+        } else if (first) {
+            combo_at[k] = 1;                     /* its first shot again: it begins again from here */
+            combo_last[k] = now;
+        }
     }
     if (!combo_fired) return;
     if (combo_chain_at && now - combo_chain_at > combo_chain_ms) combo_chain_end();
@@ -4354,6 +4373,8 @@ static void own_tick(void)
 
 def combo_shot_words(shot):
     """PAD-708: a combo's step in words."""
+    if isinstance(shot, list):
+        return " or ".join(x or "(no shot)" for x in shot) or "(no shot)"
     return {COMBO_ANY: "any shot", COMBO_LIT: "a lit shot"}.get(shot, shot or "(no shot)")
 
 

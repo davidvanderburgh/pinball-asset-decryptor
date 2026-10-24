@@ -126,7 +126,8 @@ def test_the_c_carries_combos_only_when_it_has_one_and_calls_only_the_header():
     assert "score(((10LL) * 0LL));" in plain   # no combo: the chain is 0
     c = BM.to_c(prog([START, {"hat": combo(["Left ramp", "lit", "*"], name="R"), "do": [
         {"op": "score", "points": {"k": "combo_steps", "combo": "r"}}]}]), "blk")
-    assert "{ 3, 3000u, 2, { 1, -2, -1, 0, 0, 0 } }," in c        # Left ramp is S[1], after the Building
+    # Left ramp is S[1], after the Building; a step is up to 4 shots (-3: no more), -2 a lit shot, -1 any shot
+    assert "{ 3, 3000u, 2, { { 1, -3, -3, -3 }, { -2, -3, -3, -3 }, { -1, -3, -3, -3 }, { -3, -3, -3, -3 }," in c
     assert "combo_made_so_far(0)" in c
     assert set(re.findall(r"\b(pm_[a-z_]+)\s*\(", c)) <= _header_calls()
 
@@ -145,7 +146,7 @@ def test_the_script_view_carries_a_combo_out_and_back():
 def test_the_desk_player_makes_combos_as_the_c_does():
     p = ramps_prog()
     # the start shot, then: a combo (x1), a chain (x2: Left again then Right in its window), the window lapsed
-    # (Left, 3.5 s, Right: none), out of order (Right then Left: none), and a new chain from 1
+    # (Left, 3.5 s, Right: none), out of order (Right then Left: none), and Left then Right a new chain from 1
     got = sim_scores(p, *RAMPS_RUN)
     assert got == RAMPS_SCORES
 
@@ -156,8 +157,8 @@ RAMPS_RUN = ("shot", "Building",
              "ms", 4000, "shot", "Left ramp", "ms", 3500, "shot", "Right ramp",
              "ms", 4000, "shot", "Right ramp", "ms", 500, "shot", "Left ramp",
              "ms", 500, "shot", "Right ramp")
-#: 1000 x 1, x 2; then 4 s pass: the chain lapsed; Left-(3.5 s)-Right is out of its window; Right-Left is out of
-#: order, and the Left then Right after it a combo again - the first of a new chain
+#: 1000 x 1, x 2; then 4 s pass: the chain lapsed; Left-(3.5 s)-Right is out of its window; a Right ramp alone
+#: begins nothing, and the Left then Right after it is a combo again - the first of a new chain
 RAMPS_SCORES = [1000, 2000, 1000]
 
 
@@ -204,7 +205,7 @@ def test_the_shot_that_starts_it_and_the_ones_before_are_not_its_combo(tmp_path)
     assert sim_scores(p, *run) == [7]
 
 
-def test_an_ordered_combo_counts_its_steps_and_a_broken_one_can_begin_the_next(tmp_path):
+def test_an_ordered_combo_counts_its_steps_and_its_first_shot_again_begins_it_again(tmp_path):
     # ramp -> loop -> ramp, each within 2 s: every shot scores 100 + 10 x its steps made so far (after the combo's
     # own script, which scores 5000)
     p = prog([START,
@@ -214,7 +215,7 @@ def test_an_ordered_combo_counts_its_steps_and_a_broken_one_can_begin_the_next(t
                   {"op": "score", "points": plus(num(100), times(num(10), {"k": "combo_steps", "combo": "RLR"}))}]}])
     run = ("shot", "Building", "ms", 500,
            "shot", "Left ramp", "ms", 500,                # 1
-           "shot", "Left ramp", "ms", 500,                # breaks it, and begins the next: 1
+           "shot", "Left ramp", "ms", 500,                # its first shot again: it begins again, 1
            "shot", "Big loop", "ms", 500,                 # 2
            "shot", "Left ramp", "ms", 500,                # made: 5000, and its last ramp is 1 toward the next
            "shot", "Big loop", "ms", 2500,                # 2; then 2.5 s
@@ -224,9 +225,10 @@ def test_an_ordered_combo_counts_its_steps_and_a_broken_one_can_begin_the_next(t
     assert scores(out) == want == sim_scores(p, *run)
 
 
-def test_a_lit_shot_after_another_and_a_dark_one_is_none(tmp_path):
+def test_a_lit_shot_after_another_shots_between_and_a_dark_one_is_none(tmp_path):
     # King Caesar's TAG TEAM as one block: the Godzilla target lights the Left ramp; a lit shot made within 5 s of
-    # the target is the combo. The Right ramp (never lit) is not; the Left ramp held dark is not either
+    # the target is the combo, whatever the ball hits between (the Right ramp, never lit, neither makes nor breaks
+    # it). The Left ramp held dark is not lit; nor is it once the combo has put its light out
     p = prog([START,
               {"hat": {"kind": "shot", "shot": "Godzilla target", "when": "running"}, "do": [
                   {"op": "light_shot", "shot": "Left ramp", "color": "#ffb000", "pattern": "chase"}]},
@@ -235,12 +237,52 @@ def test_a_lit_shot_after_another_and_a_dark_one_is_none(tmp_path):
               {"hat": combo(["Godzilla target", "lit"], 5), "do": [
                   {"op": "score", "points": num(2000000)}, {"op": "lights_off", "shot": "Left ramp"}]}])
     run = ("shot", "Building",
-           "shot", "Godzilla target", "ms", 1000, "shot", "Right ramp",       # not lit
-           "shot", "Godzilla target", "ms", 1000, "shot", "Left ramp",        # lit: the combo, its light out
-           "shot", "Godzilla target", "ms", 1000, "shot", "Maser target",     # (the Maser breaks it)
-           "shot", "Godzilla target", "shot", "Maser target", "shot", "Left ramp")   # dark: none
+           "shot", "Godzilla target", "ms", 1000, "shot", "Right ramp", "shot", "Left ramp",   # the combo, light out
+           "shot", "Left ramp",                                                              # not lit now: none
+           "shot", "Godzilla target", "ms", 1000, "shot", "Maser target", "shot", "Left ramp",   # dark: none
+           "ms", 6000, "shot", "Left ramp")                                                  # its window lapsed
     out = play(tmp_path, p, *run)
     assert scores(out) == [2000000] == sim_scores(p, *run)
+
+
+def test_a_spinner_between_does_not_break_an_ordered_combo_and_the_window_does(tmp_path):
+    p = prog([START, {"hat": combo(["Left ramp", "Big loop", "Right ramp"], 3), "do": [
+        {"op": "score", "points": num(500)}]}])
+    run = ("shot", "Building",
+           "shot", "Left ramp", "shot", "Top spinner", "shot", "Top spinner", "shot", "Big loop",
+           "shot", "Left spinner", "shot", "Right ramp",                     # made: the spinners do not matter
+           "shot", "Left ramp", "shot", "Big loop", "ms", 3500, "shot", "Right ramp")   # the window lapsed
+    out = play(tmp_path, p, *run)
+    assert scores(out) == [500] == sim_scores(p, *run)
+
+
+def test_a_step_of_one_of_several_shots():
+    p = prog([START, {"hat": combo(["Godzilla target", ["Maser target", "Big loop"]], 20, name="TAG TEAM"),
+                      "do": []}])
+    assert BM.problems(p, SHOTS) == []
+    assert BM.combo_words(p["scripts"][1]["hat"], when=False) ==         "when Godzilla target, then Maser target or Big loop within 20 s (TAG TEAM)"
+    c = BM.to_c(p, "blk")
+    assert "{ { 1, -3, -3, -3 }, { 2, 3, -3, -3 }," in c
+    bad = prog([START, {"hat": combo(["Left ramp", ["Big loop", "lit"]]), "do": []},
+                {"hat": combo(["Left ramp", ["Big loop", "Nowhere"]]), "do": []},
+                {"hat": combo(["Left ramp", ["Big loop"] * 5]), "do": []}])
+    out = BM.problems(bad, SHOTS)
+    assert "Script 2's combo shot 2 is one of 1 to 4 shots of the card's." in out
+    assert "Script 3's combo shot 2 names Nowhere, a shot this card does not have." in out
+    assert "Script 4's combo shot 2 is one of 1 to 4 shots of the card's." in out
+
+
+def test_one_of_several_shots_makes_the_step_and_no_other(tmp_path):
+    # TAG TEAM: the Godzilla target, then a pop or the Mecha lane (here the Maser target or the Big loop) within 20 s;
+    # the Godzilla target again only begins it again, and the Right ramp between is no step
+    p = prog([START, {"hat": combo(["Godzilla target", ["Maser target", "Big loop"]], 20), "do": [
+        {"op": "score", "points": times(num(1000), {"k": "combo_chain"})}]}])
+    run = ("shot", "Building",
+           "shot", "Godzilla target", "shot", "Godzilla target", "shot", "Right ramp", "shot", "Big loop",   # x1
+           "shot", "Godzilla target", "ms", 2000, "shot", "Maser target",                                  # x2
+           "shot", "Big loop")                                                                              # none
+    out = play(tmp_path, p, *run)
+    assert scores(out) == [1000, 2000] == sim_scores(p, *run)
 
 
 def test_the_chain_ends_with_the_ball_and_with_the_mode(tmp_path):

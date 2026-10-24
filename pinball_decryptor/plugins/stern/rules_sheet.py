@@ -119,10 +119,10 @@ def _idle_shots(program):
         elif h.get("kind") == "switch" and SWITCH not in out:
             out.insert(0, SWITCH)               # first: a shot is its switch's hit too, so it counts there as well
         elif h.get("kind") == "combo":          # PAD-708: its shots, in its order
-            for x in BM.combo_steps(h):
-                x = ANY_SHOT if x == BM.COMBO_ANY else x
-                if x != BM.COMBO_LIT and x and x not in out:
-                    out.append(x)
+            for step in BM.combo_steps(h):
+                for x in [ANY_SHOT] if step == BM.COMBO_ANY else BM.step_shots(step):
+                    if x and x not in out:
+                        out.append(x)
     return out
 
 
@@ -133,7 +133,8 @@ def _running_shots(program):
         if (h.get("when") or "any") != "idle" and h.get("kind") == "shot" and h.get("shot") and h["shot"] not in out:
             out.append(h["shot"])
         elif (h.get("when") or "any") != "idle" and h.get("kind") == "combo":     # PAD-708
-            out.extend(x for x in BM.combo_steps(h) if x not in (BM.COMBO_ANY, BM.COMBO_LIT, "") and x not in out)
+            for step in BM.combo_steps(h):
+                out.extend(x for x in BM.step_shots(step) if x and x not in out)
     return out
 
 
@@ -157,7 +158,7 @@ def _idle_combos(program):
 def _combo_until(sim, hat, tries=START_TRIES // 4):
     """Make the combo's shots in its order, inside its window, until the mode starts (or is lit, and then started).
     ``(combos made, how)`` or None."""
-    steps = [ANY_SHOT if x == BM.COMBO_ANY else x for x in BM.combo_steps(hat)]
+    steps = [ANY_SHOT if x == BM.COMBO_ANY else x[0] if isinstance(x, list) else x for x in BM.combo_steps(hat)]
     gap = max(50, min(SHOT_GAP_MS, BM.combo_ms(hat) // 2))
     for n in range(1, tries + 1):
         for shot in steps:
@@ -259,7 +260,7 @@ def start_rule(program, others=()):
             words = "Combo " + combo_words(hat)
             if any(c != 1 for c in counts):
                 words += " (%s combos)" % counts_words(counts)
-            result.update(counts=counts, shots=[x for x in BM.combo_steps(hat)], run=run,
+            result.update(counts=counts, shots=[s for x in BM.combo_steps(hat) for s in BM.step_shots(x)], run=run,
                           lit=got[1][4:] if got[1].startswith("lit:") else "")
             result["words"] = words + _lit_tail(got[1], [])
             return result
@@ -527,6 +528,8 @@ def _combo_shots(hat, sim):
             x = lit[len(out) % len(lit)]
         elif x == BM.COMBO_ANY:
             x = lit[0] if lit else ANY_SHOT
+        elif isinstance(x, list):               # one of several: a lit one if any is
+            x = next((y for y in x if y in lit), x[0] if x else "")
         out.append(x)
     return out if len(out) >= 2 else None
 
@@ -573,6 +576,8 @@ def _note_shot(st, shot, events):
     for e in events:
         if e[0] == "timer" and e[2] >= WINDOW_MIN_MS:
             st.setdefault("timers", []).append(e[2])
+        elif e[0] == "combo_made" and e[1] not in st.setdefault("combos", []):   # PAD-708: by its script, in the
+            st["combos"].append(e[1])                                         # stage whose shot made it
 
 
 def burst(shot):
@@ -605,8 +610,6 @@ def _note_events(st, events):
             st["clock"] = e[1]
         elif e[0] == "multiball" and not st.get("balls"):
             st["balls"] = e[1]
-        elif e[0] == "combo_made" and e[1] not in st.setdefault("combos", []):    # PAD-708: by its script
-            st["combos"].append(e[1])
 
 
 def _window(st):

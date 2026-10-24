@@ -50,7 +50,7 @@ class Sim:
         self.events = []                # (kind, detail) of everything the sheet's player looks at
         self._every = {}                # hat index -> next due ms
         self._steps = 0
-        self.combo_ring = []            # PAD-708: the last shots, newest first: (name, the shots lit then, ms)
+        self.combo_at = {}              # PAD-708: each combo's shots made so far, and when the last was
         self.chain = 0                  # PAD-708: the combos in a row
         self.chain_at = None            # ... when the last was made, and its window
         self.chain_ms = 0
@@ -64,7 +64,7 @@ class Sim:
         for key in ("vars", "hits", "timers", "lit_shots", "hud", "_every"):
             setattr(out, key, dict(getattr(self, key)))
         out.events = list(self.events)
-        out.combo_ring = list(self.combo_ring)
+        out.combo_at = dict(self.combo_at)
         return out
 
     def new_game(self):
@@ -85,32 +85,21 @@ class Sim:
 
     # ---------------------------------------------------------------- PAD-708: combos, as the C judges them
     def combo_clear(self):
-        self.combo_ring = []
+        self.combo_at = {}                      # script index -> (shots made so far, ms the last was made)
         self.chain, self.chain_at = 0, None
 
-    def _combo_made(self, hat, j):
-        steps = BM.combo_steps(hat)[:BM.COMBO_STEPS_MAX]
-        if j < 1 or j > len(self.combo_ring) or j > len(steps):
-            return False
-        ms = BM.combo_ms(hat)
-        for s in range(j):
-            e = j - 1 - s
-            name, lit, at = self.combo_ring[e]
-            step = steps[s]
-            if not (step == BM.COMBO_ANY or step == BM.COMBO_LIT and name in lit or step == name):
-                return False
-            if s and at - self.combo_ring[e + 1][2] > ms:
-                return False
-        return True
+    @staticmethod
+    def _step_is(step, name, lit):
+        if isinstance(step, list):
+            return name in step[:BM.COMBO_ALTS_MAX]
+        return step == BM.COMBO_ANY or (step == BM.COMBO_LIT and name in lit) or step == name
 
     def combo_steps(self, hat):
         """A combo's shots made so far (combo_made_so_far in the C)."""
-        n = len(BM.combo_steps(hat))
-        if not self.combo_ring or n < 2 or self.now - self.combo_ring[0][2] > BM.combo_ms(hat):
-            return 0
-        for j in range(n - 1, 0, -1):
-            if self._combo_made(hat, j):
-                return j
+        for i, s in enumerate(self.scripts):
+            if s.get("hat") is hat:
+                at, last = self.combo_at.get(i, (0, 0))
+                return at if at and self.now - last <= BM.combo_ms(hat) else 0
         return 0
 
     def in_row(self):
@@ -119,17 +108,28 @@ class Sim:
         return self.chain
 
     def _combo_shot(self, name, was):
-        """The shot into the ring; the scripts of the combos it makes (their When holding), as the C's combo_shot."""
-        self.combo_ring.insert(0, (name, set(self.lit_shots), self.now))
-        del self.combo_ring[BM.COMBO_STEPS_MAX:]
+        """The combos this shot makes (their When holding), as the C's combo_shot."""
+        lit = set(self.lit_shots)
         fired, win = set(), 0
-        for i, s in enumerate(self.scripts[:]):
+        for i, s in enumerate(self.scripts):
             h = s.get("hat") or {}
-            if h.get("kind") != "combo" or not self._when(h, was) or len(BM.combo_steps(h)) < 2:
+            steps = BM.combo_steps(h)[:BM.COMBO_STEPS_MAX]
+            if h.get("kind") != "combo" or not self._when(h, was) or len(steps) < 2:
                 continue
-            if self._combo_made(h, len(BM.combo_steps(h))):
-                fired.add(i)
-                win = max(win, BM.combo_ms(h))
+            ms = BM.combo_ms(h)
+            at, last = self.combo_at.get(i, (0, 0))
+            if at and self.now - last > ms:
+                at = 0
+            first = self._step_is(steps[0], name, lit)
+            if self._step_is(steps[at], name, lit):
+                at, last = at + 1, self.now
+                if at == len(steps):
+                    fired.add(i)
+                    win = max(win, ms)
+                    at = 1 if first else 0
+            elif first:
+                at, last = 1, self.now
+            self.combo_at[i] = (at, last)
         if fired:
             self.chain = self.in_row() + 1
             self.chain_at, self.chain_ms = self.now, win

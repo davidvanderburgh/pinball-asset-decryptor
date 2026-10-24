@@ -12606,5 +12606,6 @@
 "(no combo has that name)": "(aucun combo ne porte ce nom)",
 "A shot more, after the last: an ordered combo": "Un tir de plus, après le dernier : un combo ordonné",
 "Take this shot out of the combo": "Retirer ce tir du combo",
-"Seconds from one shot to the next (0.5 to 60)": "Secondes d'un tir au suivant (0,5 à 60)"
+"Seconds from one shot to the next (0.5 to 60)": "Secondes d'un tir au suivant (0,5 à 60)",
+"Take this shot out of the step": "Retirer ce tir de l'étape"
 }

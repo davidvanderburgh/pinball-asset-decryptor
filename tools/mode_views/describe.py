@@ -181,7 +181,8 @@ def hat(h):
     if k == "challenge":
         return "When the player picks the challenge %s" % (h.get("challenge") or "?")
     if k == "combo":                                                 # PAD-708
-        steps = [{"lit": "a lit shot", "*": "any shot"}.get(x, x or "?") for x in h.get("shots") or []]
+        steps = [" or ".join(x) if isinstance(x, list) else {"lit": "a lit shot", "*": "any shot"}.get(x, x or "?")
+                 for x in h.get("shots") or []]
         return "When %s within %s s%s" % (", then ".join(steps) or "?", h.get("seconds"), when)
     return "(%s)" % k
 

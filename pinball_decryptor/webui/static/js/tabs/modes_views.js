@@ -46,7 +46,7 @@ export function names(sc, name, lamp = false) {
   let hit = false;
   eachPart(sc, (o) => {
     if (lamp) { if ((o.op && insertNames(o).includes(name)) || o.solid === name) hit = true; }
-    else if (o.shot === name || (Array.isArray(o.shots) && o.shots.includes(name))) hit = true;   // PAD-708: a combo's
+    else if (o.shot === name || (Array.isArray(o.shots) && o.shots.flat().includes(name))) hit = true;   // PAD-708: a combo's
   });
   return hit;
 }
@@ -55,7 +55,7 @@ export function usedShots(prog) {
   const out = new Set();
   eachPart(prog.scripts || [], (o) => {
     if (typeof o.shot === "string" && o.shot && o.shot !== "*") out.add(o.shot);
-    if (Array.isArray(o.shots)) o.shots.forEach((x) => { if (typeof x === "string" && x && x !== "*" && x !== "lit") out.add(x); });   // PAD-708
+    if (Array.isArray(o.shots)) o.shots.flat().forEach((x) => { if (typeof x === "string" && x && x !== "*" && x !== "lit") out.add(x); });   // PAD-708
   });
   return out;
 }
@@ -83,7 +83,7 @@ export function hatWords(h = {}, ch = {}) {
 // PAD-708: a combo's shots and window in words: block_modes.combo_words
 const COMBO_STEP = { lit: "a lit shot", "*": "any shot" };
 export function comboWords(h = {}) {
-  const steps = (Array.isArray(h.shots) ? h.shots : []).map((x) => COMBO_STEP[x] || x || "?");
+  const steps = (Array.isArray(h.shots) ? h.shots : []).map((x) => (Array.isArray(x) ? x.join(" or ") : COMBO_STEP[x] || x) || "?");
   return `${steps.join(", then ") || "?"}${steps.length > 2 ? ", each" : ""} within ${h.seconds ?? "?"} s${h.name ? ` (${h.name})` : ""}`;
 }
 

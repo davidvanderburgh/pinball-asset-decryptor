@@ -60,12 +60,12 @@ def by_hand():
 
 
 def as_block():
-    """The same with the combo block: a lit shot within 20 s of the Godzilla target."""
+    """The same with the combo block: a pop or the Mecha lane within 20 s of the Godzilla target."""
     return {"name": "TAG TEAM", "seconds": 60, "game_modes": "stack", "hud": HUD, "vars": [], "timers": [],
             "scripts": [
                 START,
                 {"hat": {"kind": "shot", "shot": "Godzilla target", "when": "running"}, "do": LIGHTS},
-                {"hat": {"kind": "combo", "shots": ["Godzilla target", "lit"], "seconds": 20, "when": "running",
+                {"hat": {"kind": "combo", "shots": ["Godzilla target", ["Pop bumper", "Mecha exit bottom"]], "seconds": 20, "when": "running",
                          "name": "TAG TEAM"}, "do": [
                     {"op": "score", "points": {"k": "op", "op": "*", "a": num(2000000), "b": {"k": "combo_chain"}}},
                     {"op": "hud_award", "text": "TAG TEAM COMBO", "value": {"k": "combo_chain"}, "sub": "",

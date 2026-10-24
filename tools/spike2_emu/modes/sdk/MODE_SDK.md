@@ -3896,8 +3896,10 @@ static void on_init(void)
 
 - **The screen (the card build, `battle_select.py`).** The build edits the card's OWN selection scene
   (`auto_loaded/cac32730...`: a Heisei card's is DragonRR's, a stock card's Stern's - nothing of either is in the
-  app). The seven places are laid out again in two columns with the new tiles (four + new ones on the left until the
-  columns are even: three new monsters make 5 + 5 at about 80% size; at most 5 new ones), each place's lit tile,
+  app). The seven places are laid out again in GROUPS, each game place followed by the new monsters booked against
+  it (David: "pick A | B, C | D, E, F"; a gap between groups that hold new ones), the groups in their places' order
+  split into two columns where the taller is shortest (never inside a group), smaller when they must be (at most 5 new
+  ones; three make two columns of five at about 80% size), each place's lit tile,
   state box (padlock, claw, city) and "0/4" moved with its tile; the grey sheet (all seven grey tiles in one picture)
   is hidden and each grey tile cut out of it and placed on its own. Each new monster gets, in the scene: its grey tile
   (the place's grey with the monster's picture in the card's own grey, its light fitted to the card's), and groups
@@ -3911,8 +3913,8 @@ static void on_init(void)
   picture, else its badge, else a tile lettered with its name.
 - **The cursor (the runtime).** The screen's switch handler (`site roster_screen_keys`, LE 1.16 `0x191048`, Pro
   `0x18d3a8`: the flipper buttons 137 back / 139 on, `value roster_screen_left` / `_right`) is vetoed while the
-  screen has new monsters, and the runtime walks the screen's order itself (down the left column, then the right; the
-  new monsters after each column's own places, in their names' order), skipping a place the game would skip (its
+  screen has new monsters, and the runtime walks the screen's order itself (each game place 0-6, then the new
+  monsters booked against it, in their names' order), skipping a place the game would skip (its
   state, `site roster_slot_state`, not 0) and a new monster whose place is skipped. Each move does what the game's
   handler does: the screen's clock given 3 more (`site roster_screen_bump`), the sound 271 / 272, the game's cursor
   word (+`roster_cursor_at`) and its landing (`roster_cursor`, the callout - a new monster's own `callout`, swapped

@@ -9806,8 +9806,8 @@ static void on_roster_resume(unsigned *r)
  * While the screen is up the runtime moves the cursor ITSELF: the screen's switch handler (`site roster_screen_keys`,
  * Premium/LE 1.16 0x191048: the flipper buttons 137 and 139 move the cursor to the next open slot, 0x190f70, with the
  * sounds 271/272, then 0x190f08 lands it - the slot's callout) is vetoed for the two flippers, and the runtime walks
- * the places in the screen's order (battle_select.walk: down the left column, then the right, the new monsters after
- * each column's own): onto a game place it writes the game's cursor (the screen's word at +roster_cursor_at) and lands
+ * the places in the screen's order (battle_select.walk: each game place followed by the new monsters booked against
+ * it, grouped so on the screen): onto a game place it writes the game's cursor (the screen's word at +roster_cursor_at) and lands
  * it as the game does; onto a new monster it parks the game's cursor on the monster's place and shows the monster's
  * nodes (and hides the place's own portrait). Everything else stays the game's: its timer, its both-flippers and
  * Action pick (0x190c60: `site roster_screen_pick`, hooked to note which tile it picked), its intro and its fade, and
@@ -10052,17 +10052,18 @@ static void more_draw(void)
     }
 }
 
-/* the cursor's places in the screen's order (battle_select.walk): down the left column (slots 0-3, then the first
- * new monsters), then the right (4-6, then the rest). An entry >= 0 is a game slot, -1 - k is new monster k. */
+/* the cursor's places in the screen's order (battle_select.walk): the game's places 0-6, each followed by the new
+ * monsters booked against it, in the list's order (David: "pick A | B, C | D, E, F" - the tiles that book the same
+ * battle together). An entry >= 0 is a game slot, -1 - k is new monster k. */
 static int more_walk(int *out)
 {
-    int total = 7 + more_n, left = (total + 1) / 2, n = 0, k;
-    int news_left = left - 4 < 0 ? 0 : left - 4;
-    if (news_left > more_n) news_left = more_n;
-    for (k = 0; k < 4; k++) out[n++] = k;
-    for (k = 0; k < news_left; k++) out[n++] = -1 - k;
-    for (k = 4; k < 7; k++) out[n++] = k;
-    for (k = news_left; k < more_n; k++) out[n++] = -1 - k;
+    int n = 0, k;
+    unsigned s;
+    for (s = 0; s < 7; s++) {
+        out[n++] = (int)s;
+        for (k = 0; k < more_n; k++)
+            if (more_m[k].slot == s) out[n++] = -1 - k;
+    }
     return n;
 }
 

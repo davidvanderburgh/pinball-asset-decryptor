@@ -13,7 +13,9 @@ This is that: the card build adds tiles to the game's screen, and the runtime dr
 
 - **The scene** (`battle_select.py`, new; `more_kaiju.py` now its bookkeeping): the card's own selection scene
   (`auto_loaded/cac32730...`, Heisei's on a Heisei card) read with `scene_tree`, laid out again: two columns (left: the
-  four tier-1 places, then new ones until the columns are even), smaller when they must be (three new: 5 + 5 at ~0.8),
+  places in groups - each game place, then the new monsters booked against it, a gap between groups holding new
+  ones (David: "pick A | B, C | D, E, F") - split into two columns where the taller is shortest), smaller when they
+  must be (three new: two columns of five at ~0.8),
   each place's lit tile, state box and "n/m" moved with its tile, the grey sheet hidden and each place's grey tile cut
   out of it. Per new monster: its grey tile, and Sprite groups `PadSel_<slug>_Lit/_Lock/_Done/_Portrait` (the card's
   own tile and portrait frames with the picture, the card's padlock and claw, the name lettered in Heisei's orange

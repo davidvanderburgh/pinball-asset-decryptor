@@ -328,39 +328,40 @@ def test_each_monster_stands_in_its_own_place(tmp_path):
     assert "CALLOUT" not in first                                # the places keep their own callouts
 
 
-def test_the_cursor_walks_the_screen_down_each_column(tmp_path):
-    """Seven places and three new monsters: two columns of five - 0-3 and the first new one, then 4-6 and the other
-    two - in the monsters' names' order (battle_select.walk, the build's)."""
+def test_the_cursor_walks_each_place_then_the_monsters_booked_against_it(tmp_path):
+    """David: "pick A | B, C | D, E, F" - each game place, then the new monsters that book the same battle (in their
+    names' order), place by place (battle_select.walk, the build's)."""
     out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 10))
     landed = re.findall(r"KEY right vetoed 1 cursor (\d)", out)
-    assert landed == ["1", "2", "3", "1", "4", "5", "6", "2", "0", "0"]
+    assert landed == ["0", "1", "1", "2", "2", "3", "4", "5", "6", "0"]
     news = re.findall(r"the cursor is on (\w+) \(new monster (\d), in slot (\d)'s place\)", out)
-    assert news == [("KAMACURAS", "1", "1"), ("KIRYU", "2", "2"), ("KUMONGA", "3", "0")]
+    assert news == [("KUMONGA", "3", "0"), ("KAMACURAS", "1", "1"), ("KIRYU", "2", "2")]
     assert out.count("SOUND 272") == 10 and out.count("BUMP 3") == 10
-    assert BS.walk(3) == [0, 1, 2, 3, ("new", 0), 4, 5, 6, ("new", 1), ("new", 2)]
+    assert BS.walk([0, 1, 2]) == [0, ("new", 0), 1, ("new", 1), 2, ("new", 2), 3, 4, 5, 6]
+    assert BS.walk([1, 1, 0]) == [0, ("new", 2), 1, ("new", 0), ("new", 1), 2, 3, 4, 5, 6]
 
 
 def test_left_goes_back_and_wraps(tmp_path):
     out = menu(tmp_path, *THREE, "open", 0, "left", "left")
-    assert re.findall(r"KEY left vetoed 1 cursor (\d)", out) == ["0", "2"]   # KUMONGA (in 0's place), then KIRYU
+    assert re.findall(r"KEY left vetoed 1 cursor (\d)", out) == ["6", "5"]   # round to the right column's last
     assert "SOUND 271" in out
 
 
 def test_a_monster_lands_with_its_own_callout_through_the_games(tmp_path):
-    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 4))
-    seg = out.split("KEY right")[3]
-    assert "CALLOUT 1 901" in seg and "LAND slot 1" in seg and "CALLOUT 1 back" in seg
-    out = menu(tmp_path, *THREE, "nocallouts", "open", 0, *(["right"] * 4))
-    assert "SOUND 901" in out                                     # no table to swap: played straight
+    out = menu(tmp_path, *THREE, "open", 0, "right")
+    seg = out.split("KEY right")[0].split("selection screen opens")[1]
+    assert "CALLOUT 0 900" in seg and "LAND slot 0" in seg and "CALLOUT 0 back" in seg
+    out = menu(tmp_path, *THREE, "nocallouts", "open", 0, "right")
+    assert "SOUND 900" in out                                     # no table to swap: played straight
 
 
 def test_locked_places_and_their_monsters_are_skipped(tmp_path):
     out = menu(tmp_path, *THREE, "join", 4, "MOTHRA", "state", 4, 1, "state", 5, 1, "state", 6, 1,
-               "open", 0, *(["right"] * 6))
-    # the walk: 0 1 2 3 KAMACURAS KIRYU | 4 5 6 KUMONGA MOTHRA -> locked 4-6 and MOTHRA (in 4's place) skipped
+               "open", 0, *(["right"] * 7))
+    # the walk: 0 KUMONGA 1 KAMACURAS 2 KIRYU 3 4 5 6 MOTHRA -> locked 4-6 and MOTHRA (booked against 4) skipped
     names = re.findall(r"the cursor is on (\w+) \(new", out)
     assert "MOTHRA" not in names
-    assert re.findall(r"KEY right vetoed 1 cursor (\d)", out) == ["1", "2", "3", "1", "2", "0"]
+    assert re.findall(r"KEY right vetoed 1 cursor (\d)", out) == ["0", "1", "1", "2", "2", "3", "0"]
 
 
 def test_the_games_guards_and_chords_stay_the_games(tmp_path):
@@ -375,7 +376,7 @@ def test_the_games_guards_and_chords_stay_the_games(tmp_path):
 
 
 def test_its_nodes_show_and_the_places_portrait_hides(tmp_path):
-    out = menu(tmp_path, *THREE, "tick", "open", 0, *(["right"] * 4), "tick", "left", "tick")
+    out = menu(tmp_path, *THREE, "tick", "open", 0, *(["right"] * 3), "tick", "left", "tick")
     found = out.split("open")[0] if "open" in out else out
     assert "HIDE PadSel_KAMACURAS_Lit" in found and "HIDE PadSel_KAMACURAS_Portrait" in found
     on = out.split("KEY right vetoed 1 cursor 1")[-1].split("KEY left")[0]
@@ -393,7 +394,7 @@ def test_a_won_place_shows_the_claw_a_locked_one_the_lock(tmp_path):
 
 
 def test_the_games_pick_under_a_monster_is_the_monsters(tmp_path):
-    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 4), "gamepick")
+    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 3), "gamepick")
     assert "the selection screen picks KAMACURAS (in slot 1's place)" in out
     assert "PICKED KAMACURAS slot 1 after 3000" in out              # it starts once the game's screen has closed
     assert "TAKEN 1 (slot 1)" in out
@@ -401,19 +402,19 @@ def test_the_games_pick_under_a_monster_is_the_monsters(tmp_path):
 
 
 def test_the_places_own_tile_picks_the_places_own_battle(tmp_path):
-    out = menu(tmp_path, *THREE, "open", 0, "right", "gamepick")
+    out = menu(tmp_path, *THREE, "open", 0, "right", "right", "gamepick")
     assert "TAKEN 0 (slot 1)" in out and "PICKED" not in out        # Destoroyah's own battle runs
     out = menu(tmp_path, *THREE, "open", 3, "gamepick")
     assert "GAME BATTLE 3" in out                                    # a place no monster stands in: untouched
 
 
 def test_a_monster_that_will_not_start_lets_the_places_battle_run(tmp_path):
-    out = menu(tmp_path, *THREE, "nope", "open", 0, *(["right"] * 4), "gamepick")
+    out = menu(tmp_path, *THREE, "nope", "open", 0, *(["right"] * 3), "gamepick")
     assert "KAMACURAS did not take the pick - the place's own battle runs" in out and "TAKEN 0" in out
 
 
 def test_a_lost_monster_comes_back_at_the_city_pick(tmp_path):
-    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 4), "gamepick", "lost", "resume", 1, "resume", 0)
+    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 3), "gamepick", "lost", "resume", 1, "resume", 0)
     assert "KAMACURAS's battle lost for player 1 - the city pick plays it again" in out
     tail = out.split("battle lost")[1]
     assert "KAMACURAS plays again (the city pick: the battle player lost)" in tail
@@ -421,13 +422,13 @@ def test_a_lost_monster_comes_back_at_the_city_pick(tmp_path):
 
 
 def test_a_won_monster_does_not_come_back(tmp_path):
-    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 4), "gamepick", "won", "resume", 1)
+    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 3), "gamepick", "won", "resume", 1)
     assert "KAMACURAS's battle won for player 1" in out
     assert "RESUME 0" in out.split("battle won")[1]
 
 
 def test_outside_a_game_the_pick_is_the_games(tmp_path):
-    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 4), "gameover", "gamepick")
+    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 3), "gameover", "gamepick")
     assert "TAKEN 0" in out
 
 
@@ -552,8 +553,10 @@ def test_the_layout_fits_the_new_tiles_and_moves_the_state_boxes(stock):
     moved = [s for s in BS.SLOT_NODES if BS.rest(nodes[s + "_Selected_instance"]) != BS.rest(before[s + "_Selected_instance"])]
     assert moved                                                       # the places laid out again
     assert BS.rest(nodes["T1_2_Artbox"]) != BS.rest(before["T1_2_Artbox"])   # its state box with it
-    assert BS.columns(3) == ([0, 1, 2, 3, ("new", 0)], [4, 5, 6, ("new", 1), ("new", 2)])
-    assert BS.columns(1) == ([0, 1, 2, 3], [4, 5, 6, ("new", 0)])
+    # the groups split between the columns where the taller is shortest, never inside a group
+    assert BS.columns([0, 1, 2]) == ([[0, ("new", 0)], [1, ("new", 1)], [2, ("new", 2)]], [[3], [4], [5], [6]])
+    assert BS.columns([4]) == ([[0], [1], [2], [3]], [[4, ("new", 0)], [5], [6]])
+    assert BS.columns([]) == ([[0], [1], [2], [3]], [[4], [5], [6]])             # the game's own four and three
 
 
 def test_no_new_monsters_leaves_the_scene_as_it_was(stock):

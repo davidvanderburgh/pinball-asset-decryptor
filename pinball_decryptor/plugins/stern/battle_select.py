@@ -282,51 +282,76 @@ class Screen:
 
 
 # ---- the layout ------------------------------------------------------------------------------------------------
-def columns(n_new):
-    """The two columns' places, top to bottom: slots 0-6, then ``("new", i)``. The left column takes the first new
-    monsters until the two are even."""
-    total = 7 + n_new
-    left_n = (total + 1) // 2
-    news = [("new", i) for i in range(n_new)]
-    left = [0, 1, 2, 3] + news[:max(0, left_n - 4)]
-    right = [4, 5, 6] + news[max(0, left_n - 4):]
-    return left, right
+def groups(slots):
+    """The screen's places in GROUPS, one per game place: the place, then the new monsters booked against it (``slots``:
+    each new monster's place, in the list's order) - David: "pick A | B, C | D, E, F", the tiles that book the same
+    battle together. A group is ``[slot, ("new", i), ...]``."""
+    return [[s] + [("new", i) for i, h in enumerate(slots) if int(h) == s] for s in range(7)]
 
 
-def walk(n_new):
-    """The cursor's order over the places (the right flipper goes on, the left back): down the left column, then the
-    right - the game's own 0-6 with the new monsters after each column's last."""
-    left, right = columns(n_new)
-    return left + right
+def columns(slots):
+    """The two columns, each a list of groups top to bottom: the groups in their places' order, split between them where
+    the taller column is shortest (no group is split; a tie keeps the game's own four and three)."""
+    gs = groups(slots)
+    size = [len(g) for g in gs]
+
+    def tall(c):
+        return max(sum(size[:c]), sum(size[c:]))
+    best = min(range(1, 7), key=lambda c: (tall(c), abs(c - 4)))
+    return gs[:best], gs[best:]
 
 
-def layout(sc, n_new):
+def walk(slots):
+    """The cursor's order over the places (the right flipper goes on, the left back): every group in its place's order -
+    the game's own 0-6, each followed by the new monsters booked against it (the runtime's more_walk)."""
+    return [key for g in groups(slots) for key in g]
+
+
+#: the gap between two groups when either holds a new monster, in pitches
+GROUP_GAP = 0.3
+
+
+def _column(gs, pitch):
+    """``[(key, y)]`` down one column (y from its first tile, unscaled) and its height to the last tile's top."""
+    out, y, last = [], 0.0, None
+    for g in gs:
+        if last is not None and (len(g) > 1 or len(last) > 1):
+            y += GROUP_GAP * pitch
+        for key in g:
+            out.append((key, y))
+            y += pitch
+        last = g
+    return out, (y - pitch if out else 0.0)
+
+
+def layout(sc, slots):
     """Each place's tile origin in CharacterSelect space and the tiles' scale: ``({place: (x, y)}, k)``."""
     o = [sc.origin(s) for s in range(7)]
     th = float(sc.tile[0].shape[0])
     tw = float(sc.tile[0].shape[1])
+    if not slots:
+        return {s: o[s] for s in range(7)}, 1.0
     top = o[0][1]
-    bottom = (BOTTOM - sc.glass[5]) / sc.glass[3] - 0.0           # the glass line in CharacterSelect space
+    bottom = (BOTTOM - sc.glass[5]) / sc.glass[3]                 # the glass line in CharacterSelect space
     bottom = max(bottom, o[3][1] + th)
     p_left = (o[3][1] - o[0][1]) / 3.0
     p_right = (o[6][1] - o[4][1]) / 2.0
     stagger = o[4][1] - o[0][1]
-    left, right = columns(n_new)
-    if not n_new:
-        return {s: o[s] for s in range(7)}, 1.0
-    off = stagger if len(right) < len(left) else stagger * 0.55
-    need = max((len(left) - 1) * p_left + th, off + (len(right) - 1) * p_right + th)
+    left, right = columns(slots)
+    lcol, lh = _column(left, p_left)
+    rcol, rh = _column(right, p_right)
+    off = stagger if rh + p_right <= lh else stagger * 0.55      # the right column starts lower, as the game's does
+    need = max(lh + th, off + rh + th)
     k = min(1.0, (bottom - top) / need)
-    used = need * k
-    y0 = top + ((bottom - top) - used) / 2.0
+    y0 = top + ((bottom - top) - need * k) / 2.0
     block = (o[4][0] + tw) - o[0][0]
     x_left = o[0][0] + block * (1.0 - k) / 2.0
     x_right = x_left + (o[4][0] - o[0][0]) * k
     at = {}
-    for i, place in enumerate(left):
-        at[place] = (x_left, y0 + i * p_left * k)
-    for i, place in enumerate(right):
-        at[place] = (x_right, y0 + off * k + i * p_right * k)
+    for key, y in lcol:
+        at[key] = (x_left, y0 + y * k)
+    for key, y in rcol:
+        at[key] = (x_right, y0 + off * k + y * k)
     return at, k
 
 
@@ -536,7 +561,7 @@ def build(stock, monsters):
         scene.objects[obj.id] = obj
         return T.Node(alloc(), name, 1, [(1, 1)], [], [(1, track16(m))], [T.Component(1, cls_sprite, obj)])
 
-    at, k = layout(sc, len(monsters))
+    at, k = layout(sc, [int(m["slot"]) for m in monsters])
     place = lambda key: mul(move(*at[key]), scale(k))               # tile pixels -> CharacterSelect space
     greys = [sc.grey(s) for s in range(7)]
     # the seven places: lit tile, state box and words moved with the tile

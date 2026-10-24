@@ -739,6 +739,10 @@ value place_audit_started_27       368
 value place_audit_completed_27     370
 value place_audit_started_28       371
 value place_flag_played_28         106
+value place_audit_started_29       290
+value place_flag_played_29         73
+site  place_start_28               0x000e6058 0xe92d43f0 0xe24dd00c
+site  place_start_29               0x00164f2c 0xe92d40f0 0xe24dd00c
 
 # PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
 value challenge_place_1        6

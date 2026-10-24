@@ -731,8 +731,9 @@ def framework_value(name):
 
 def _read_here(name):
     """Values a port gets from its own build only: the end of ball's bus id (0x34 on generation B is
-    the tick's exit on A) and the switch tables (portswitch)."""
-    return name == "ball_end_event" or name.startswith("switch_")
+    the tick's exit on A), the switch tables (portswitch) and, PAD-715, a plain-C title's books of its modes (audit
+    and flag ids: each build's own name tables, mode_framework.plain_books)."""
+    return name == "ball_end_event" or name.startswith(("switch_", "place_audit_", "place_flag_"))
 
 
 def _numbers(values):

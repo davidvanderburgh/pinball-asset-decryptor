@@ -1025,12 +1025,12 @@ PLACE_PROVEN = frozenset({
     "godzilla_le-1.16",              # PAD-710 run all2: Jet Fighter Attack (21): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1, STARTED audit 0 -> 1, COMPLETED 0 -> 1
     "godzilla_pro-1.16",             # PAD-710 run all2: Jet Fighter Attack (21): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1, STARTED audit 0 -> 1, COMPLETED 0 -> 1
     "iron_maiden_le-1.18",           # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
-    "iron_maiden_pro-1.18",          # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "iron_maiden_pro-1.18",          # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1. PAD-716: Soul Shard Hurry Up (0) under a running Fear of the Dark: the song records it won, it sets itself back
     "jaws_le-1.02",                  # PAD-710 run all2: Super Buoys (29): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
     "jaws_pro-1.02",                 # PAD-710 run all2: Super Buoys (29): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
     "john_wick_le-1.02",             # PAD-710 run all2: Lights Out (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
     "john_wick_pro-1.02",            # PAD-710 run all2: Lights Out (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
-    "jurassic_park_le-1.16",         # PAD-710 run all2: Chaos Hurry Up (4): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "jurassic_park_le-1.16",         # PAD-710 run all2: Chaos Hurry Up (4): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1. PAD-716: its six T-Rex and Ctrl Room modes (7-12), taken twice in a game: COMPLETED audit 0 -> 2
     "king_kong_le-0.97",             # PAD-710 run all2: King Kombos (27): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
     "king_kong_pro-0.97",            # PAD-710 run all2: King Kombos (27): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
     "led_zeppelin_le-1.22",          # PAD-710 run all2: Black Dog (1): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
@@ -1049,7 +1049,7 @@ PLACE_PROVEN = frozenset({
     "turtles_pro-1.59",              # PAD-710 run all2: Training Level Two (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
     "venom_le-1.07",                 # PAD-710 run r3: Mini Mode 01 (19) - the game started it itself as the ball started and the mode took it; the test's start completed it by its clock: stopped 1, wins 0 -> 1
     "venom_pro-1.07",                # PAD-710 run r3: the same on the stock Pro card: stopped 1, wins 0 -> 1
-    "jurassic_park_pro-1.16",        # PAD-710 run r3: Escape Nublar (127): starts 0 -> 1, completed by its clock: stopped 1. Ctrl Room Virus Attack (121), Restore Power (122) and Trex Chase (119) ask their own "stopped already?" first: the game's stop ran and wrote their own outcome (Trex Chase: its award)
+    "jurassic_park_pro-1.16",        # PAD-710 run r3: Escape Nublar (127): starts 0 -> 1, completed by its clock: stopped 1. PAD-716: Trex Chase (119), Trex Rampage (120), Ctrl Room Virus Attack (121) and Restore Power (122) keep their own stopped byte (v[32] / v[55]): taken twice in a game, COMPLETED audit 0 -> 2
     "aerosmith-1.16",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
     "aerosmith_le-1.16",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
     "batman-1.14",                   # PAD-710 run plain2: Catwoman (episodes 19-20) (1): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
@@ -1057,9 +1057,9 @@ PLACE_PROVEN = frozenset({
     "elvira3-1.13",                  # PAD-710 run plain2: Houses (whichever House is selected) (0): its books, the game played on: STARTED audit 0 -> 1
     "guardians-1.15",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit +1
     "guardians_le-1.15",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1
-    "james_bond_le-1.06",            # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. Challenge 1 (Ahoy Mr. Bond) taken by a mode file: STARTED audit 180, PLAYED flag 86, won: COMPLETED flag 89
-    "james_bond_pro-1.06",           # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set
-    "jurassic_park_the_pin-1.05",    # PAD-710 run plain2: Stegosaurus (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
+    "james_bond_le-1.06",            # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. Challenge 1 (Ahoy Mr. Bond) taken by a mode file: STARTED audit 180, PLAYED flag 86, won: COMPLETED flag 89. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs taken at their own starts on the last lock only (not at the lamps' lock check, not at an earlier lock): STARTED audit 0 -> 1, PLAYED flag set, no multiball served
+    "james_bond_pro-1.06",           # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs as on LE
+    "jurassic_park_the_pin-1.05",    # PAD-710 run plain2: Stegosaurus (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-715: Restore Power (5): STARTED audit 189 0 -> 1
     "metallica_spike-1.04",          # PAD-710 run plain2: Battery (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1
     "star_wars_elg-1.10",            # PAD-710 run plain2: Orbits (1): no audit add, its flags only: COMPLETED flag 67 set, read back by the runtime
     "stranger_things-1.13",          # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set

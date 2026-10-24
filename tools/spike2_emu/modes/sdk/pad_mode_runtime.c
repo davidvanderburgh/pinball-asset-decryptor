@@ -4655,6 +4655,12 @@ static void block_defaults(unsigned *m)
 
 static void wizard_refused(unsigned start);   /* PAD-436: the game's mini-wizards, below */
 static int place_take(unsigned *r, unsigned id);   /* PAD-710: a mode in the place of one of the game's, below */
+/* PAD-715: a mode whose block_start is a check before its start (James Bond's lock multiballs: the lock-open check the
+ * lamps ask too, and the lock handler at every lock) names the start itself, `site place_start_<id>` (the function
+ * that sets its flags, mode_framework.plain_books): its place is taken there, hooked on its own, never at the check.
+ * place_check: the port names one (the check takes nothing); place_from: its start, 0 when it could not be hooked. */
+static unsigned place_from[BLOCK_IDS];
+static unsigned char place_check[BLOCK_IDS];
 
 /* ---- PAD-503: a mode lit at a shot claims it --------------------------------------------------------------------
  * A Bond owner's mini-wizards of their own, lit at the Right ramp, never got it: the game handles a switch before the
@@ -4722,7 +4728,7 @@ static int on_block_start(unsigned *r, unsigned hook_n)
     unsigned id;
     for (id = 0; id < BLOCK_IDS; id++)          /* this start's mode: its object, or the start is its own */
         if (block_hook_of[id] == hook_n + 1 && bm_has(block_named, id) && (!block_obj[id] || block_obj[id] == r[0])) break;
-    if (id < BLOCK_IDS && place_take(r, id)) return 1;   /* PAD-710: a mode of ours takes its place */
+    if (id < BLOCK_IDS && !place_check[id] && place_take(r, id)) return 1;   /* PAD-710: a mode of ours takes its place */
     if (lit_hold_until && id < BLOCK_IDS) {     /* PAD-503: a lit mode's shot, the game handling it now */
         if ((long)(lit_hold_until - pm_ms()) > 0 && !running && pm_in_game()) {
             char key[24];
@@ -4750,6 +4756,12 @@ static int on_block_start(unsigned *r, unsigned hook_n)
     }
     wizard_refused(block_hooked[hook_n]);      /* PAD-436: a mini-wizard's start stays lit */
     return 1;                                  /* refused: the mode's start never runs */
+}
+
+/* PAD-715: the start a port names for a mode whose block_start is a check: a claimed place is taken here */
+static int on_place_start(unsigned *r, unsigned id)
+{
+    return id < BLOCK_IDS && place_from[id] && place_take(r, id);
 }
 
 int pm_block_list(const unsigned char *ids, int n)
@@ -4962,6 +4974,12 @@ static void block_arm(void)
         block_obj[id] = data(name);
         block_hook_of[id] = (unsigned char)(i + 1);
         bm_set(block_named, id);
+        pm_snprintf(name, sizeof name, "place_start_%u", id);
+        if (site(name)) {                        /* PAD-715: its block_start is a check; the place is its start's */
+            place_check[id] = 1;
+            if ((a = fn(name)) != 0 && hook_veto_n(a, on_place_start, id, 0)) place_from[id] = a;
+            else say("block: the start of the game's mode %u (%s) could not be hooked - no mode takes its place", id, name);
+        }
     }
     if (fn("block_battle_shots") && (pm_port_value("block_battle_lo", 0) | pm_port_value("block_battle_hi", 0)))
         block_battles = hook(fn("block_battle_shots"), on_battle_shots);
@@ -9834,10 +9852,11 @@ static unsigned place_player(void)
     return p >= 1 && p <= 4 ? p : 0;
 }
 
-/* the object's STOP, checked: its vtable readable through the slot, the slot's function in the game's code */
-static unsigned place_stop_fn(unsigned obj)
+/* the object's virtual at the port's slot `slot_name`, checked: its vtable readable through the slot, the slot's
+ * function in the game's code; 0 when not */
+static unsigned place_vfn(unsigned obj, const char *slot_name)
 {
-    long slot = pm_port_value("mode_slot_stop", -1);
+    long slot = pm_port_value(slot_name, -1);
     unsigned vt;
     if (!obj || (obj & 3) || slot < 0 || slot > 255 || !maps_has(obj, 4, MAP_R)) return 0;
     vt = rw(obj);
@@ -9845,10 +9864,35 @@ static unsigned place_stop_fn(unsigned obj)
     return maps_has(rw(vt + 4u * (unsigned)slot), 8, MAP_R | MAP_X | MAP_GAME) ? rw(vt + 4u * (unsigned)slot) : 0;
 }
 
+/* the object's STOP */
+static unsigned place_stop_fn(unsigned obj)
+{
+    return place_vfn(obj, "mode_slot_stop");
+}
+
 static unsigned place_byte(unsigned obj, const char *at_name, unsigned p)
 {
     long at = pm_port_value(at_name, -1);
     return at >= 0 ? *(const unsigned char *)(unsigned long)(obj + (unsigned)at + p) : 0;
+}
+
+/* PAD-716: the mode's stopped state for player p. Jurassic Park's STOP asks the mode's own "stopped?" virtual (`value
+ * mode_slot_stopped_get`: (mode, player)) and marks it through its own "mark stopped" (`mode_slot_stopped_set`: (mode,
+ * value, player)), and JP Pro's chase, Ctrl Room and T-Rex classes keep that byte off the framework's (Trex Chase
+ * +0x137): their START clears it through the setter, so the take does the same, or a second take's STOP would find the
+ * mode stopped already and write nothing. Elsewhere the framework's byte. */
+static unsigned place_stopped(unsigned obj, unsigned p)
+{
+    unsigned f = place_vfn(obj, "mode_slot_stopped_get");
+    return f ? ((unsigned (*)(unsigned, unsigned))(unsigned long)f)(obj, p) & 0xffu : place_byte(obj, "mode_stopped_at", p);
+}
+
+static void place_set_stopped(unsigned obj, unsigned p, unsigned v)
+{
+    unsigned f = place_vfn(obj, "mode_slot_stopped_set");
+    long at = pm_port_value("mode_stopped_at", -1);
+    if (f) ((void (*)(unsigned, unsigned, unsigned))(unsigned long)f)(obj, v, p);
+    else if (at >= 0) *(unsigned char *)(unsigned long)(obj + (unsigned)at + p) = (unsigned char)v;
 }
 
 static unsigned place_starts(unsigned obj, unsigned p)
@@ -9903,7 +9947,7 @@ static void place_audit(long n)
 /* What the game's START writes for its bookkeeping, for the player up (who is `up` to the runtime) */
 static void place_begin(unsigned obj, unsigned id, unsigned up)
 {
-    long stopped = pm_port_value("mode_stopped_at", -1), reason = pm_port_value("mode_reason_at", -1);
+    long reason = pm_port_value("mode_reason_at", -1);
     long starts = pm_port_value("mode_starts_at", -1), id_at = pm_port_value("mode_id_at", 4);
     unsigned p, was, f_started = fn("mode_started"), mgr = data("mode_manager");
     if (up < 1 || up > 4) return;
@@ -9934,7 +9978,7 @@ static void place_begin(unsigned obj, unsigned id, unsigned up)
         return;
     }
     was = place_starts(obj, p);
-    *(unsigned char *)(unsigned long)(obj + (unsigned)stopped + p) = 0;
+    place_set_stopped(obj, p, 0);                   /* PAD-716: through the mode's own setter where it has one */
     if (reason >= 0) *(unsigned char *)(unsigned long)(obj + (unsigned)reason + p) = 0;
     if (starts >= 0) *(unsigned *)(unsigned long)(obj + (unsigned)starts + 4 * p) += 1;
     if (f_started && mgr && id_at >= 0)
@@ -9976,15 +10020,19 @@ static int place_end(unsigned p, int won)
     }
     {
         long wins_at = pm_port_value("mode_wins_at", -1);
-        unsigned wins_was = wins_at >= 0 ? rw(obj + (unsigned)wins_at + 4 * p) : 0;
+        unsigned wins_was = wins_at >= 0 ? rw(obj + (unsigned)wins_at + 4 * p) : 0, stopped_was = place_stopped(obj, p);
+        unsigned stopped_now;
         /* (mode, reason, 1): John Wick's stop takes a third word, which marks the mode stopped and which the game always
          * passes as 1 (`mov r2, #1`); every other generation's stop takes two and never reads it */
         ((void (*)(unsigned, unsigned, unsigned))(unsigned long)f)(obj, won ? 1u : 0u, 1u);
+        stopped_now = place_stopped(obj, p);
+        /* PAD-716: stopped 0 -> 0 is a mode whose own stop sets itself back so it can come round again (Iron Maiden's
+         * Soul Shard Hurry Up, after telling the song that started it how it went) */
         say("place: the mode in the place of the game's %s ends %s for player %u: the game's own stop ran (v[%ld] "
-            "0x%08x) - stopped %u, reason %u, starts %u, wins %u -> %u", place_name(id), won ? "WON" : "lost", p,
-            pm_port_value("mode_slot_stop", -1), f, place_byte(obj, "mode_stopped_at", p),
-            place_byte(obj, "mode_reason_at", p), place_starts(obj, p), wins_was,
-            wins_at >= 0 ? rw(obj + (unsigned)wins_at + 4 * p) : 0);
+            "0x%08x) - stopped %u -> %u%s, reason %u, starts %u, wins %u -> %u", place_name(id), won ? "WON" : "lost", p,
+            pm_port_value("mode_slot_stop", -1), f, stopped_was, stopped_now,
+            !stopped_was && !stopped_now ? " (its own stop set it back)" : "", place_byte(obj, "mode_reason_at", p),
+            place_starts(obj, p), wins_was, wins_at >= 0 ? rw(obj + (unsigned)wins_at + 4 * p) : 0);
     }
     return 1;
 }
@@ -10019,6 +10067,7 @@ static int place_take(unsigned *r, unsigned id)
 int pm_place_claim(unsigned id, int (*on_start)(unsigned id))
 {
     if (!(can & PM_CAN_PLACE) || !on_start || id >= PLACE_IDS || !bm_has(block_named, id)) return 0;
+    if (place_check[id] && !place_from[id]) return 0;                   /* PAD-715: its start is not hooked */
     if (place_fn[id] && place_by[id] != current) return 0;              /* another mode holds it */
     if (!place_fn[id])
         say("place: the game's %s (mode %u) is claimed - when the game starts it, %s runs in its place%s", place_name(id),
@@ -10074,7 +10123,7 @@ int pm_game_mode_start(unsigned id)
     if (!(can & PM_CAN_PLACE) || id >= PLACE_IDS || !bm_has(block_named, id) || !pm_in_game()) return 0;
     if (!block_obj[id] && !place_fn[id]) return 0;
     pm_snprintf(key, sizeof key, "block_start_%u", id);
-    if (!(f = fn(key))) return 0;
+    if (!(f = place_check[id] ? place_from[id] : fn(key))) return 0;   /* PAD-715: a check's mode, its own start */
     say("place: the game's %s (mode %u) started for a test (its START at 0x%08x, object 0x%08x)", place_name(id), id, f,
         block_obj[id]);
     ((void (*)(unsigned))(unsigned long)f)(block_obj[id]);

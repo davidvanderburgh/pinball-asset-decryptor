@@ -219,7 +219,7 @@ def test_a_plain_c_title_counts_through_its_own_books():
     port = MP.read_port(os.path.join(PORTS, "james_bond_le-1.06.port"))
     places = {i: (n, c) for i, n, c in MP._places(port)}
     assert places[6] == ("Ahoy Mr Bond Wizard Mode", True)
-    assert 29 not in places                               # Bird One Multiball: the game names no books for it
+    assert places[29] == ("Bird One Multiball", True)    # PAD-715: the game's ROCKET_MULTIBALL books
     text = _port("james_bond_le-1.06")
     assert re.search(r"^site  audit_add\s+0x00245ea0 0xe92d43f0 0xe2505000$", text, re.M)
     for line in ("value place_audit_started_6        180", "value place_flag_played_6          86",
@@ -277,7 +277,7 @@ def test_the_runtime_takes_the_start_and_counts_it():
     rt = _src("pad_mode_runtime.c")
     hook = rt[rt.index("static int on_block_start(unsigned *r, unsigned hook_n)"):]
     hook = hook[:hook.index("\n}\n")]
-    assert "if (id < BLOCK_IDS && place_take(r, id)) return 1;" in hook
+    assert "if (id < BLOCK_IDS && !place_check[id] && place_take(r, id)) return 1;" in hook
     assert hook.index("place_take") < hook.index("lit_hold_until")   # before the lit hold and the block
     for want in ("place_begin(block_obj[id], id, up);", "place_audit(a);", "place_flag_set(fl)",
                  'place_book("audit_completed", id)', "if (!block_obj[id] && !place_fn[id]) return 0;",

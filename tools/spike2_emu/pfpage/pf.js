@@ -141,8 +141,9 @@ function pfHit(view, fx, scale, px, py) {
 // ------------------------------------------------------- the cabinet column
 // PAD-500: where every one of the cabinet's own lights goes in a W x H column
 // beside the artwork. The sections come from playfield.py in column order
-// (topper, speakers, blades): a topper on its own drawing keeps that drawing's
-// shape in at most a third of the column, the speakers are a ring (they ring
+// (topper, speakers, back panel, blades): a topper or back panel on its own
+// drawing keeps that drawing's shape in at most a third of the column (lamps
+// with no place on it in a row beneath), the speakers are a ring (they ring
 // the backbox speakers; pixel 1 at the top, clockwise in chain order), any
 // other strip wraps in chain order, and the blades stand in whatever height is
 // left, one bar a side with pixel 1 at the BOTTOM - where King Kong's picture
@@ -154,7 +155,7 @@ function cabLayout(sections, W, H) {
   const marks = [], labels = [];
   let y = CAB_PAD;
   for (const s of sections) {
-    labels.push({ text: s.label, sub: "node " + s.node + (s.board ? " · " + s.board : ""), x: CAB_PAD, y });
+    labels.push({ text: s.label, sub: (s.where || "node " + s.node) + (s.board ? " · " + s.board : ""), x: CAB_PAD, y });
     y += CAB_LABEL;
     if (s.bars) {
       const n = Math.max(1, ...s.bars.map((b) => b.length));
@@ -187,7 +188,10 @@ function cabLayout(sections, W, H) {
         marks.push({ cid, x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), r });
       });
       y += 2 * (R + r) + 10;
-    } else {
+    }
+    // any other strip is a row in chain order; a positioned section's lamps
+    // with no place on its picture (PAD-705: the BACKPANEL GI) go under it
+    if (s.row && !s.bars && !s.ring) {
       const p = Math.max(6, Math.min(11, inner / 10));
       const per = Math.max(1, Math.floor(inner / p));
       s.row.forEach((cid, i) => marks.push({ cid, x: CAB_PAD + p / 2 + (i % per) * p, y: y + p / 2 + Math.floor(i / per) * p, r: p * 0.38 }));

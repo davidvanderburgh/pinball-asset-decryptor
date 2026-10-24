@@ -137,12 +137,13 @@ def test_a_path_suffix_is_seeded_too(tmp_path):
 def test_a_bare_word_tail_that_is_not_an_image_name_is_not_seeded(tmp_path):
     """The fix must not seed every suffix of every string.
 
-    `scaled_x_backpanel` ends in `backpanel`, which is neither "playfield" nor
-    a path, so its tail is not a candidate. That is the same refusal _one()
-    would make anyway; it is asserted here so the seed set cannot quietly grow
-    into "every offset in the binary".
+    `scaled_x_backglass` ends in `backglass`, which is not one of
+    devicexy.BARE_IMAGES and not a path, so its tail is not a candidate. That
+    is the same refusal _one() would make anyway; it is asserted here so the
+    seed set cannot quietly grow into "every offset in the binary". (This
+    test used `backpanel` until PAD-705 made that a real image name.)
     """
-    recs, d = _records(tmp_path, _blob(b"scaled_x_backpanel", len(b"scaled_x_")),
+    recs, d = _records(tmp_path, _blob(b"scaled_x_backglass", len(b"scaled_x_")),
                        "tail")
     assert TABLE + BIAS not in set(devicexy.seeds(d))
     assert recs == []

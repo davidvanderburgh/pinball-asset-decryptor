@@ -18,6 +18,12 @@ not inserts and that no playfield picture has a place for:
   SPEAKER      the backbox speaker lights, "SPEAKER n": 23 RGB pixels on node
                7, "Backbox Speaker Lights" (Foo Fighters, Led Zeppelin, Rush,
                Venom, Elvira).
+  BACKPANEL    the lamps on the playfield's back panel, which the game draws on
+               a picture of its own named `backpanel` (PAD-705): flashers,
+               Avengers' glove gems, Jurassic Park's MAP letters, the BACKPANEL
+               GI. Sixteen builds have them. They are on the playfield's own
+               boards, so the measured map places them; drawn in the panel's
+               shape, like a topper on its own drawing.
   UV           the UV lighting kit's own outputs, "UV CONTROL 1 (OPTIONAL)"
                and 2 on Stranger Things: two lamp channels on a playfield
                board, with no place on any picture (PAD-551, peanuts:
@@ -41,6 +47,10 @@ import os
 import re
 
 TOPPER, EXPRESSION, SPEAKER, UV = "topper", "expression", "speaker", "uv"
+BACKPANEL = "backpanel"
+
+#: The image name a back-panel lamp carries (devicexy.BARE_IMAGES).
+BACKPANEL_IMAGE = "backpanel"
 
 #: The roles the window's "Expression lights" tick box takes out: the blades
 #: and the speakers - "a toggle to disable expression lights (blades and
@@ -49,7 +59,8 @@ EXPRESSION_ROLES = (EXPRESSION, SPEAKER)
 
 #: How each role is labelled when its board has no name of its own.
 LABEL = {TOPPER: "Topper", EXPRESSION: "Expression lighting",
-         SPEAKER: "Speaker lighting", UV: "UV Lighting Kit"}
+         SPEAKER: "Speaker lighting", UV: "UV Lighting Kit",
+         BACKPANEL: "Backpanel"}
 
 #: Node 14 is the universal topper on every title, and every title names it
 #: "Topper Lights" - which John Wick also calls its own topper on node 12. It
@@ -60,8 +71,8 @@ EXPRESSION_TOPPER_NODE = 14
 EXPRESSION_TOPPER = "Topper Expression Light"
 
 #: The column's order, top to bottom: the topper sits above the backbox, the
-#: speakers in it, the blades down the cabinet below.
-ORDER = {TOPPER: 0, SPEAKER: 1, EXPRESSION: 2, UV: 3}
+#: speakers in it, the back panel below them, the blades down the cabinet.
+ORDER = {TOPPER: 0, SPEAKER: 1, BACKPANEL: 2, EXPRESSION: 3, UV: 4}
 
 _SPEAKER = re.compile(r"^SPEAKER\b")
 #: "UV CONTROL 1 (OPTIONAL)": the kit's outputs start with UV; an insert that
@@ -77,7 +88,7 @@ _SIDE = re.compile(r"\b([LR])\s+\d+\s*$")
 
 
 def role(row):
-    """TOPPER, EXPRESSION, SPEAKER or None for one device-table row."""
+    """TOPPER, EXPRESSION, SPEAKER, UV, BACKPANEL or None for one row."""
     if row.get("kind") != "led":
         return None
     name = (row.get("name") or "").upper()
@@ -89,6 +100,8 @@ def role(row):
         return UV
     if "TOPPER" in name or "topper" in (row.get("image") or "").lower():
         return TOPPER
+    if row.get("image") == BACKPANEL_IMAGE:
+        return BACKPANEL
     return None
 
 
@@ -226,9 +239,10 @@ def resolve(which, group, group_node, board_map):
     b = board_map[node]
     if which == TOPPER:
         ok = "TOPPER" in b["name"].upper()
-    elif which == UV:
-        # the kit's outputs are lamp channels on a playfield board, which only
-        # the measured map can name; a place alone proves nothing about them
+    elif which in (UV, BACKPANEL):
+        # the kit's outputs, and the back panel's lamps, are lamp channels on
+        # a playfield board, which only the measured map can name; a place
+        # alone proves nothing about them
         return None, "group %s is not one the title's tables place" % group
     else:
         ok = "ws2812" in b["type"]
@@ -237,6 +251,13 @@ def resolve(which, group, group_node, board_map):
                       % (group, node, b["type"], b["name"] or "unnamed",
                          "topper" if which == TOPPER else "strip"))
     return node, "directory"
+
+
+def where(S):
+    """"node 9", or "nodes 8, 9" for a section on more than one board."""
+    ns = S.get("nodes") or [S["node"]]
+    return ("node %d" % ns[0] if len(ns) == 1
+            else "nodes " + ", ".join(str(n) for n in ns))
 
 
 def _order(px):
@@ -298,21 +319,28 @@ def sections(dev_rows, group_node, board_map, expression=True,
             continue
         if node in gone_nodes:
             continue
-        key = "%s:%d" % (which, node)
+        # The back panel is ONE picture whichever boards drive it: Avengers
+        # puts its glove gems on node 8 and its flashers on node 9, and two
+        # sections would split one drawing in two. `node` is its lowest board.
+        key = which if which == BACKPANEL else "%s:%d" % (which, node)
         S = by_key.get(key)
         if S is None:
             b = (board_map or {}).get(node) or {}
             S = by_key[key] = {
-                "key": key, "role": which, "node": node,
+                "key": key, "role": which, "node": node, "nodes": set(),
                 "board": b.get("name") or "",
                 "label": LABEL[which], "pixels": {}, "rows": []}
-        S["rows"].append(r)
+        if node not in S["nodes"] and S["nodes"]:
+            S["board"] = ""             # more than one board: none names it
+        S["nodes"].add(node)
+        S["node"] = min(S["nodes"])
+        S["rows"].append((r, node))
     out = []
     spaced = spaced_stems(r["name"] for r in dev_rows or []
                           if r.get("kind") == "led")
     for S in by_key.values():
         pix = S.pop("pixels")
-        for r in S.pop("rows"):
+        for r, node in S.pop("rows"):
             stem, chan = split_channel(r["name"], spaced)
             P = pix.get(stem)
             if P is not None and chan in P["channels"]:
@@ -323,19 +351,28 @@ def sections(dev_rows, group_node, board_map, expression=True,
                 if P is not None:
                     stem = "%s (%d)" % (stem, r["index"])
                 P = pix[stem] = {"name": stem, "channels": {}, "xs": [], "ys": []}
-            P["channels"][chan] = (S["node"], r["index"])
+            P["channels"][chan] = (node, r["index"])
             P["xs"].append(r["x"])
             P["ys"].append(r["y"])
+            # A lamp with no place on its picture (devicexy._unplaced: the
+            # BACKPANEL GI) reads 0, 0, which is not a place.
+            P.setdefault("placed", False)
+            P["placed"] |= any(r.get(k) for k in ("x", "y", "w", "h"))
         pixels = sorted(pix.values(), key=_order)
         for P in pixels:
             xs, ys = P.pop("xs"), P.pop("ys")
             P["x"] = sum(xs) / float(len(xs))
             P["y"] = sum(ys) / float(len(ys))
         S["pixels"] = pixels
-        # A topper drawn on its own picture keeps its shape; anything else is
-        # a strip, laid out by the page in chain order.
-        S["positioned"] = (S["role"] == TOPPER and len(pixels) > 1 and
-                           len({(round(P["x"]), round(P["y"])) for P in pixels}) > 1)
+        S["nodes"] = sorted(S["nodes"])
+        # A topper or a back panel drawn on its own picture keeps its shape;
+        # anything else is a strip, laid out by the page in chain order. Only
+        # PLACED pixels say what the shape is; the page puts the rest of a
+        # positioned section in a row under it.
+        placed = [P for P in pixels if P["placed"]]
+        S["positioned"] = (S["role"] in (TOPPER, BACKPANEL) and len(placed) > 1
+                           and len({(round(P["x"]), round(P["y"]))
+                                    for P in placed}) > 1)
         S["bars"] = _bars(pixels) if S["role"] == EXPRESSION else None
         out.append(S)
     out.sort(key=lambda S: (ORDER[S["role"]], S["node"]))

@@ -2955,12 +2955,18 @@ class CabinetLights:
         for S in self.shown():
             px = S["pixels"]
             sec = {"key": S["key"], "label": S["label"], "node": S["node"],
+                   "where": cablights.where(S),
                    "board": S["board"], "role": S["role"], "n": len(px)}
             if S["bars"]:
                 sec["bars"] = [[px[k]["cid"] for k in bar] for bar in S["bars"]]
             elif S["positioned"]:
                 sec["pos"] = [[P["cid"], round(P["x"], 1), round(P["y"], 1)]
-                              for P in px]
+                              for P in px if P["placed"]]
+                # a lamp with no place (the BACKPANEL GI) goes in a row
+                # under the shape rather than at its corner
+                rest = [P["cid"] for P in px if not P["placed"]]
+                if rest:
+                    sec["row"] = rest
             elif S["role"] == cablights.SPEAKER:
                 # the speaker lights are rings round the backbox speakers
                 # (Sam, 2026-10-11: "in a circle instead of a grid")
@@ -3006,7 +3012,7 @@ class CabinetLights:
         lines = []
         for S in self.sections:
             n = len(S["pixels"])
-            lines.append([S["label"], "node %d" % S["node"], "%s%d light%s%s" % (
+            lines.append([S["label"], cablights.where(S), "%s%d light%s%s" % (
                 S["board"] + " · " if S["board"]
                 and S["board"].upper() != S["label"].upper() else "",
                 n, "" if n == 1 else "s",

@@ -390,22 +390,24 @@ void pm_roster_over(int won);
  * (0 = silent), and releasing the slot puts the game's back. 1 = written; 0 when the caller does not
  * hold the slot or the port has no `data roster_screen_table`. */
 int pm_roster_callout(unsigned slot, unsigned id);
-/* PAD-707: MORE KAIJU. The roster cannot grow, but one slot can HOST A LIST of monsters of your own: every mode that
- * joins the list of `slot` is one monster on it, and the runtime claims that slot for the list. A pick of the slot
- * opens a selection screen of ours once the game's has closed: one page per monster (`page`, a screen the card build
- * drew - the Modes tab draws `PadMore_<folder>`, its words the timer), the flipper buttons moving between them with
- * the game's own cursor sounds and `callout` (0 = silent) as the cursor lands, the Action button or the timer picking.
- * The ball waits in the scoop meanwhile. The monster picked gets `on_pick(slot)` exactly as a claimed slot's pick
- * (return 1 = taken), and its pm_roster_over gives the slot's battle back, won or lost: the game counts it as the
- * slot's battle. A monster lost is the one the game's city pick plays again (no menu then). One list per game (a slot
- * held by a mode of its own cannot host one). Returns the monster's place on the list (0..), or -1.
- * pm_roster_more_leave takes the calling mode's monster `name` off; the slot is the game's again when the list empties.
- * pm_roster_start_after: how long to wait after on_pick before showing the mode's start - the game's screen closing
- * (the port's roster_start_after_ms) for a pick on the game's screen, almost nothing for a pick on the list's. */
+/* PAD-707: new monsters on the battle selection screen (MORE KAIJU). The roster cannot grow, but its SCREEN can: the
+ * card build lays the screen out again with a tile of your own for each new monster (its scene is the card's own, so
+ * a Heisei card keeps its art), and the runtime walks the cursor over them. Each new monster stands in `slot`'s place
+ * (a place no mode holds itself): with the cursor on its tile the game's own cursor is parked on that place, so the
+ * game's timer, its pick and its battle bookkeeping stay the game's - and a pick there is the monster's: it gets
+ * `on_pick(slot)` exactly as a claimed slot's pick (return 1 = taken; 0 lets the place's own battle run), and its
+ * pm_roster_over gives the place's battle back, won or lost. A pick of the place's own tile is the place's own battle.
+ * A monster lost is the one the game's city pick plays again. `page` names its nodes in the selection scene
+ * (`PadSel_<folder>`: the Modes tab and the blocks write it, the card build adds `<page>_Lit`, `_Lock`, `_Done`,
+ * `_Portrait` and its grey tile); `callout` (0 = silent) is played, through the game's own callout, as the cursor
+ * lands on it. Several places may have new monsters; at most 5 fit the screen. Returns the monster's place in the
+ * list (its names' order, 0..), or -1. pm_roster_more_leave takes the calling mode's monster `name` off; a place is
+ * the game's alone again when no monster stands in it. pm_roster_start_after: how long to wait after on_pick before
+ * showing the mode's start - the game's screen closing (the port's roster_start_after_ms). */
 int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned callout, int (*on_pick)(unsigned slot));
 void pm_roster_more_leave(const char *name);
 int pm_roster_more_count(void);
-const char *pm_roster_more_picked(void);   /* inside on_pick: the name of the monster picked on the list (0 = a pick on the game's screen) */
+const char *pm_roster_more_picked(void);   /* inside on_pick: the name of the new monster picked (0 = a place's own pick) */
 long pm_roster_start_after(void);
 
 /* ---- display priority (item 154 display; MODE_SDK.md "Display priority") ------------------

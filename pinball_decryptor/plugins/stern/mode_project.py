@@ -5070,8 +5070,9 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
 
 
 def more_page(slug):
-    """PAD-707: the page a monster on MORE KAIJU gets on the list's selection screen (the build draws it)."""
-    return "PadMode_" + re.sub(r"[^A-Za-z0-9]", "_", slug) + "_More"
+    """PAD-707: the stem of a new monster's nodes on the battle selection screen (the card build adds them)."""
+    from . import battle_select
+    return battle_select.page_of(slug)
 
 
 # ---- PAD-518: more than one shot counted toward its start --------------------------------

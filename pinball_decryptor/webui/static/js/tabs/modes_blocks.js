@@ -594,9 +594,9 @@ function addMenu(ed, path) {
 const BATTLE_TIP = "On the game's BATTLE SELECTION screen (the scoop, once the ramps have lit a battle), picking this battle runs this script instead of the game's own battle: put Start the mode in it. It runs once the screen has closed (about 3 s). The game counts the battle as its own: when the mode ends, the battle is won if an End the mode, the battle won block ended it (a mode with no such block wins by its own end: its clock, or an End the mode block), and lost if the ball drains first - then the next lit scoop plays the mode again, as the game does with its own. Won, the battle shows Completed on the screen, counts in the city and the audits, and opens what winning it opens. One mode per battle. The screen keeps the battle's own picture and name (the Scenes tab changes them).";
 const END_WON_TIP = "For a mode the player picked on the battle selection screen: the battle won. The game then counts it as a battle won (Completed on the screen, the city, the audits). A drain before it ends loses it.";
 const END_OPTS = [["-", "(the battle lost)"], ["won", ", the battle won"]];
-// PAD-707: MORE KAIJU - a list of monsters of our own behind one battle's place on the selection screen
-const MORE_TIP = "MORE KAIJU: the battle selection screen has seven places, fixed in the game, so this puts a LIST of monsters of your own behind one of them. Every mode whose When is a pick on MORE KAIJU is one monster on the list (one list per card: pick the same battle for each). When the player picks that place, a selection screen of the list's own opens once the game's has closed: a page per monster with its picture and name and every monster's tile along the bottom, the flipper buttons to choose (with the game's own sounds), the Action button or its 13 seconds to pick, the ball waiting in the scoop. The monster picked runs this script, and its mode counts as that place's battle, won or lost, as a mode in the place itself would; a monster lost is played again at the next lit scoop. The place keeps the battle's own picture and name on the game's screen (the Scenes tab changes them: MORE KAIJU, say).";
-const MORE_PIC_TIP = "The monster's picture on the MORE KAIJU screen (a PNG: its portrait, and its tile along the bottom). With none, its badge's picture, else a tile lettered with its name.";
+// PAD-707: a new monster on the battle selection screen, in one battle's place
+const MORE_TIP = "A new monster on the battle selection screen: the game's seven battles are fixed in its program, but the card build adds tiles of your own to its screen, laid out with the game's seven in two columns (smaller when they must be) and drawn in the card's own style. This mode's tile stands in the place of the battle you pick here: the flippers walk the cursor onto it, the Action button (or the screen's timer) picks it, and it runs this script; its mode counts as that place's battle, won or lost, and a lost one plays again at the next lit scoop. The place's own battle stays on the screen. At most 5 new monsters on a card.";
+const MORE_PIC_TIP = "The monster's picture on the battle selection screen (a PNG: its tile and its portrait, in the card's own frames). With none, its badge's picture, else a tile lettered with its name.";
 
 // PAD-615: what the challenge hat does
 // PAD-643: who launches the challenge ball, and when (block_modes.CHALLENGE_LAUNCH; a number = seconds after it starts)
@@ -621,8 +621,8 @@ export function HatBody({ h, path, ed }) {
     case "timer_done": return html`<span class="bk-w b">When timer</span><${TimerPick} value=${h.timer} ed=${ed} onChange=${(v) => set("timer", v)} /><span class="bk-w b">runs out</span>`;
     case "battle": {                                 // PAD-706
       const roster = ed.ch.roster || [];
-      // PAD-707: "m<n>" = a monster on MORE KAIJU, the list behind battle n's place
-      const opts = [...roster.map((x, i) => [String(i), x]), ...roster.map((x, i) => ["m" + i, "MORE KAIJU, in " + x + "'s place"])];
+      // PAD-707: "m<n>" = a new monster on the screen, in battle n's place
+      const opts = [...roster.map((x, i) => [String(i), x]), ...roster.map((x, i) => ["m" + i, "A new monster, in " + x + "'s place"])];
       const value = h.slot == null ? "" : (h.more ? "m" : "") + String(h.slot);
       const pick = (v) => {
         const more = v.startsWith("m"), slot = Number(more ? v.slice(1) : v);

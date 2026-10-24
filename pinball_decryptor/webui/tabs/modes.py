@@ -327,8 +327,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "challenge_launch_s": [1, 60],                                          # PAD-643
     }
 
-    #: PAD-707: the battle list's "MORE KAIJU, in <battle>'s place" (modes.js MORE_PREFIX)
-    MORE_PREFIX = "MORE KAIJU, in "
+    #: PAD-707: the battle list's "A new monster, in <battle>'s place" (modes.js MORE_PREFIX)
+    MORE_PREFIX = "A new monster, in "
 
     def __init__(self, window):
         super().__init__(window)
@@ -1549,7 +1549,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             spec.starts_on = "shot"
         roster = list(getattr(self._shown or self._profile, "roster", ()) or ())     # PAD-589
         name = str(self.f["roster_slot"]).strip()
-        more = name.startswith(self.MORE_PREFIX) and name.endswith("'s place")      # PAD-707: a monster on MORE KAIJU
+        more = name.startswith(self.MORE_PREFIX) and name.endswith("'s place")      # PAD-707: a new monster on the screen
         if more:
             name = name[len(self.MORE_PREFIX):-len("'s place")]
         spec.roster_slot = roster.index(name) if spec.starts_on == "battle" and name in roster else -1
@@ -3166,7 +3166,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         project, slug = self.project(), self._code_slug
         if not project or not slug or not BM.is_blocks(project, slug):
             return None
-        if what == "monster":                       # PAD-707: its picture on MORE KAIJU, as monster.png
+        if what == "monster":                       # PAD-707: its picture on the selection screen, as monster.png
             return self._blocks_pick_monster(project, slug)
         ch = self._blocks_choices()
         why = {"clip": ch["why_clip"], "sound": ch["why_sound"], "music": ch["why_music"],
@@ -3211,7 +3211,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return {"name": name, "file": dest, "path": os.path.join(folder, dest)}
 
     def _blocks_pick_monster(self, project, slug):
-        """PAD-707: Picture… on a MORE KAIJU battle hat: a PNG copied into the mode's folder as ``monster.png`` (the
+        """PAD-707: Picture… on a new monster's battle hat: a PNG copied into the mode's folder as ``monster.png`` (the
         build draws its page and tile from it); ``{"file"}`` or None."""
         from pinball_decryptor.plugins.stern import more_kaiju as MK
         path = self.window.ask_open("modes_file", "Choose the monster's picture", [("PNG pictures", "*.png")])
@@ -3233,7 +3233,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         except OSError as e:
             self._say("%s could not be copied into the mode's folder: %s" % (os.path.basename(path), e))
             return None
-        self._say("modes/%s: copied %s in as %s (its picture on MORE KAIJU)" % (slug, os.path.basename(path),
+        self._say("modes/%s: copied %s in as %s (its picture on the battle selection screen)" % (slug, os.path.basename(path),
                                                                                 MK.PICTURE_FILE))
         return {"name": "monster", "file": MK.PICTURE_FILE, "path": dest}
 

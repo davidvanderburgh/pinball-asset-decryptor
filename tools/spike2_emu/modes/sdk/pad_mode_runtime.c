@@ -5825,7 +5825,6 @@ static struct {
     unsigned log, logged;                   /* PAD-420: `value scoop_log 1` - the handler's first 64 calls in mode.log */
 } scoop;
 
-static int more_holding(void);                /* PAD-707: MORE KAIJU's menu keeps the ball */
 static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
 {
     unsigned r, e;
@@ -5836,14 +5835,6 @@ static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
             running ? " (a mode runs)" : "");
     r = scoop.orig(ev, a1, a2, a3);
     e = scoop.event_arg == 1 ? a1 : scoop.event_arg == 2 ? a2 : scoop.event_arg == 3 ? a3 : ev;
-    if (e == scoop.event && pm_in_game() && more_holding()) {
-        /* PAD-707: the battle selection's pick ran inside the game's own hold (this event): MORE KAIJU's menu keeps
-         * the ball here until a monster is picked and its mode begins */
-        t0 = pm_ms();
-        say("scoop: the ball waits while MORE KAIJU is up");
-        while (more_holding()) ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
-        say("scoop: MORE KAIJU let go after %lu ms", pm_ms() - t0);
-    }
     if (e != scoop.event || !scoop.hold_ms || !running || !pm_in_game()) return r;
     t0 = pm_ms();
     scoop.until = t0 + scoop.hold_ms;
@@ -6355,16 +6346,13 @@ static const char *building_close_why(int running_mode, int in_game, int aside, 
     return 0;
 }
 
-static const struct pm_mode more_mode;        /* PAD-707: MORE KAIJU's selection screen, below */
 static void building_keep_closed(void)
 {
     static unsigned said;
     unsigned obj = building_obj();
     unsigned long now = pm_ms();
     int at, to;
-    /* PAD-707: not for MORE KAIJU's screen: the ball waits in the scoop the whole time, so no ball can reach the lock
-     * (emulator: the building went 3 -> 0 and back for nothing while the list was up) */
-    if (!obj || !running || running == &more_mode) return;
+    if (!obj || !running) return;
     at = building_field(obj, "building_at", 44);
     to = building_field(obj, "building_target_at", 48);
     if (building_close_why(running != 0, pm_in_game(), pm_aside() != 0, bld.putback_until != 0, bld.ours, at, to,
@@ -9231,7 +9219,7 @@ static void on_tick(unsigned *r)
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
-    more_tick();                              /* PAD-707: MORE KAIJU's menu */
+    more_tick();                              /* PAD-707: the new monsters on the selection screen */
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
     lamps_tick();                             /* named inserts: their patterns (lights section) */
@@ -9342,7 +9330,7 @@ static void on_ball_end(unsigned *r)
     beh.tilts = pm_event("tilt") >= 0 ? event_count(pm_event("tilt")) : 0;
     if (disp_linger_until) disp_release("the ball ended");
     bd_reset("the ball ended");
-    more_ball_end();                          /* PAD-707: a MORE KAIJU menu open gives its pick back */
+    more_ball_end();                          /* PAD-707: the selection screen is gone with the ball */
     roster_owed_ball_end();
 }
 
@@ -9700,7 +9688,7 @@ void pm_roster_over(int won)
     }
     won = roster_won[p];
     roster_won[p] = 0;
-    more_over(p, won);                                          /* PAD-707: a MORE KAIJU monster lost comes back */
+    more_over(p, won);                                          /* PAD-707: a new monster lost comes back */
     if (!(can & PM_CAN_ROSTER) || !x || !x->ok) return;
     if (roster_host_end(p, won)) return;                        /* PAD-706: the game counted it itself */
     ((void (*)(unsigned))(unsigned long)x->addr)(data("rule_battle"));
@@ -9806,52 +9794,54 @@ static void on_roster_resume(unsigned *r)
     roster_resuming = 0;
 }
 
-/* ---- PAD-707: MORE KAIJU - a list of monsters of our own behind one roster slot --------------------------------
- * David (2026-10-24): "people are going to want to add monsters to the selection menu". The game's roster is seven
- * compiled-in slots (above), so a slot cannot be added - but one slot can HOST a list. Every mode that joins the
- * list of slot s (pm_roster_more) is one monster on it; the runtime claims s itself, and a pick of s opens a
- * selection screen of OURS once the game's has closed (roster_start_after_ms): the pages the card build drew, one
- * per monster (its portrait and name, the row of tiles with it lit; `PadMore_<folder>`), the flipper buttons moving
- * between them with the game's own cursor sounds (Godzilla 271 left, 272 right: the selection screen's switch handler
- * 0x191048 on Premium/LE 1.16), the Action button (or the timer) picking with the game's pick sound (236), the
- * monster's own callout when the cursor lands on it. The ball waits in the scoop the whole time (the scoop's wrap,
- * PAD-381). The monster picked gets the pick as if its slot had been picked on the game's screen: its on_pick runs,
- * and its pm_roster_over gives the slot's battle back, won or lost, as any roster mode's (PAD-706): the game counts
- * it as the slot's battle. A monster lost is the one the game's city pick plays again (no menu then), as the game
- * does with a lost battle of its own. Nothing of the game's program changes beyond what the roster already hooks. */
+/* ---- PAD-707: new monsters on the battle selection screen (MORE KAIJU) ------------------------------------------
+ * David (2026-10-24): "add in a new monster to the existing menu but modify the menu to fit it elegantly". The game's
+ * roster is seven compiled-in slots (above) - its screen walks them, picks one and starts its battle - so a slot
+ * cannot be added to the GAME. The card build adds the new monsters to the screen's SCENE instead (battle_select.py,
+ * the card's own `auto_loaded/cac32730...`): the seven tiles laid out again with room for the new ones, and for each
+ * new monster nodes of its own, `PadSel_<slug>_Lit/_Lock/_Done/_Portrait` (and its grey tile, always drawn), with a
+ * `PadSel_Cover<n>` - place n's grey tile - over the lit tile of each place a new monster stands in. Each new monster
+ * stands in one place (pm_roster_more's slot: the hat's "in X's place"): its battle is that place's battle.
+ *
+ * While the screen is up the runtime moves the cursor ITSELF: the screen's switch handler (`site roster_screen_keys`,
+ * Premium/LE 1.16 0x191048: the flipper buttons 137 and 139 move the cursor to the next open slot, 0x190f70, with the
+ * sounds 271/272, then 0x190f08 lands it - the slot's callout) is vetoed for the two flippers, and the runtime walks
+ * the places in the screen's order (battle_select.walk: down the left column, then the right, the new monsters after
+ * each column's own): onto a game place it writes the game's cursor (the screen's word at +roster_cursor_at) and lands
+ * it as the game does; onto a new monster it parks the game's cursor on the monster's place and shows the monster's
+ * nodes (and hides the place's own portrait). Everything else stays the game's: its timer, its both-flippers and
+ * Action pick (0x190c60: `site roster_screen_pick`, hooked to note which tile it picked), its intro and its fade, and
+ * the battle's start, which roster_start sees as the place's: a new monster under the cursor takes it (its on_pick,
+ * as a claimed slot's), any other pick of that place is the game's own battle. A new monster's mode gets the place's
+ * bookkeeping (PAD-706: won or lost, the city's step); a lost one is the one the city pick plays again. */
 #define N_MORE 16
 #define MORE_PAGE 64
-#define MORE_SELECT_MS 13000u           /* the game's own selection timer: 13 s */
-#define MORE_HOLD_MAX_MS 40000u         /* the scoop is never held longer than this for the menu */
 static struct more_member {
     const struct pm_mode *by;
     int (*fn)(unsigned slot);
     char name[40];
-    char page[MORE_PAGE];               /* the page node the build drew for it ("" = none) */
-    unsigned callout;                   /* the request the menu plays when the cursor lands on it; 0 = silent */
-    void *node, *words;                 /* found in the hud scene */
+    char page[MORE_PAGE];               /* its nodes' stem in the selection scene ("PadSel_<slug>"; "" = none) */
+    unsigned callout;                   /* the request the cursor plays landing on it; 0 = silent */
+    unsigned slot;                      /* the place it stands in */
+    void *lit, *lock, *done, *portrait; /* found in the selection scene */
     unsigned tries;
 } more_m[N_MORE];
 static int more_n;
-static int more_slot = -1;                          /* the roster slot the list is behind; -1 = no list */
+static int more_hosts;                              /* bit n: place n has new monsters (its roster_fn is ours) */
 static const struct pm_mode more_mode = { "MORE KAIJU", 0, 0, 0, 0, 0 };
-#define MORE_IDLE    0
-#define MORE_WAIT    1      /* picked: the game's screen is closing */
-#define MORE_OPEN    2      /* our menu is on the glass */
-#define MORE_PICKED  3      /* a monster picked: its mode is starting; the ball still waits */
 static struct {
-    volatile int state;
-    unsigned player;
-    unsigned long at;                   /* WAIT: the menu opens; OPEN: the time runs out; PICKED: the ball goes */
-    unsigned long held_since;
-    int cursor, shown, secs;
-    int resume;                         /* WAIT: the city pick's restart - the lost monster again, no menu */
+    volatile int open;                  /* the screen is up (its open hook ran; its pick not yet) */
+    unsigned screen;                    /* the screen object the game passed */
+    volatile int cur;                   /* the new monster under the cursor; -1 = one of the game's places */
+    volatile int picked;                /* at the pick: the new monster picked; -1 = a place of the game's */
+    int shown;                          /* the member whose nodes are shown; -1 = none */
+    int states;                         /* 1 = the locks and claws are set for this opening */
+    unsigned hid;                       /* bit n: place n's own portrait hidden by us */
+    void *cover[7], *body[7];
+    unsigned cover_tries;
     signed char lost[5];                /* per player: the member whose battle was lost (the city pick plays it again) */
     signed char playing[5];             /* per player: the member whose mode has the pick now */
-    uint64_t left, right, action;       /* the cabinet buttons' shots */
-    int buttons;                        /* 1 = the port names all three */
-} more = { MORE_IDLE, 0, 0, 0, 0, -1, -1, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 }, 0, 0, 0, 0 };
-static int more_from_menu;              /* a member's on_pick runs from the menu (pm_roster_start_after) */
+} more = { 0, 0, -1, -1, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 } };
 static int more_on_pick(unsigned slot);
 
 static void more_copy(char *out, unsigned cap, const char *s)
@@ -9868,10 +9858,9 @@ static int more_same(const char *a, const char *b)
     return 1;
 }
 
-/* The list's ORDER is its monsters' names (case aside), then their pages: the card build draws each page's "n OF m" and
- * its row of tiles in that same order (more_kaiju.py), whatever order the modes join in - a mode file joins when it
- * is read, after the modes in C (emulator, PAD-707 run2: the cursor went MOTHRA, ANGUIRUS, RODAN past pages drawn
- * MOTHRA, RODAN, ANGUIRUS). 1 = (name, page) goes before member m. */
+/* The list's ORDER is its monsters' names (case aside), then their pages: the card build lays the new tiles out in
+ * that same order (battle_select.order), whatever order the modes join in - a mode file joins when it is read, after
+ * the modes in C. 1 = (name, page) goes before member m. */
 static int more_before(const char *name, const char *page, const struct more_member *m)
 {
     unsigned k;
@@ -9886,22 +9875,25 @@ static int more_before(const char *name, const char *page, const struct more_mem
     return 0;
 }
 
+static void more_forget_nodes(void)
+{
+    int k;
+    for (k = 0; k < more_n; k++) more_m[k].lit = more_m[k].lock = more_m[k].done = more_m[k].portrait = 0;
+    more.shown = -1;
+}
+
 int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned callout, int (*on_pick)(unsigned slot))
 {
     int k, j;
-    if (!on_pick || !name || !name[0] || slot >= (unsigned)pm_roster_slots() || slot >= N_ROSTER) return -1;
-    if (more_slot >= 0 && (unsigned)more_slot != slot) {
-        say("roster: MORE KAIJU is behind slot %d already - %s cannot join a list behind slot %u", more_slot, name, slot);
-        return -1;
-    }
+    if (!on_pick || !name || !name[0] || slot >= (unsigned)pm_roster_slots() || slot >= N_ROSTER || slot >= 7) return -1;
     if (roster_fn[slot] && roster_by[slot] != &more_mode) {
-        say("roster: slot %u is held by a mode of its own - %s cannot put MORE KAIJU there", slot, name);
+        say("roster: slot %u is held by a mode of its own - %s cannot stand in it on the selection screen", slot, name);
         return -1;
     }
     for (k = 0; k < more_n; k++)
         if (more_m[k].by == current && more_same(more_m[k].name, name)) break;
     if (k == more_n) {
-        if (more_n >= N_MORE) { say("roster: MORE KAIJU is full (%d monsters) - %s left out", N_MORE, name); return -1; }
+        if (more_n >= N_MORE) { say("roster: the selection screen's new monsters are full (%d) - %s left out", N_MORE, name); return -1; }
         for (k = 0; k < more_n && !more_before(name, page ? page : "", &more_m[k]); k++) ;
         for (j = more_n; j > k; j--) more_m[j] = more_m[j - 1];         /* its place in the list's order */
         for (j = 1; j <= 4; j++) {
@@ -9910,24 +9902,38 @@ int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned c
         }
         more_n++;
         more_m[k].page[0] = 0;
-        more_m[k].node = more_m[k].words = 0;
         more_m[k].tries = 0;
-        say("roster: %s joins MORE KAIJU behind slot %u (monster %d; page %s)", name, slot, k + 1,
+        say("roster: %s joins the selection screen in slot %u's place (new monster %d; nodes %s)", name, slot, k + 1,
             page && page[0] ? page : "none");
     }
+    more_forget_nodes();
     more_m[k].by = current;
     more_m[k].fn = on_pick;
     more_copy(more_m[k].name, sizeof more_m[k].name, name);
-    if (!more_same(more_m[k].page, page ? page : "")) more_m[k].node = more_m[k].words = 0, more_m[k].tries = 0;
     more_copy(more_m[k].page, sizeof more_m[k].page, page);
     more_m[k].callout = callout;
-    if (more_slot < 0) {
-        more_slot = (int)slot;
-        roster_fn[slot] = more_on_pick;
+    more_m[k].slot = slot;
+    more_m[k].tries = 0;
+    if (!(more_hosts & (1 << slot))) {
+        more_hosts |= 1 << slot;
+        roster_fn[slot] = more_on_pick;       /* the place's own battle still runs on a pick of the place */
         roster_by[slot] = &more_mode;
-        roster_callout_set(slot, 0, "MORE KAIJU: the list speaks for its monsters");
     }
     return k;
+}
+
+static void more_release_unused(void)
+{
+    unsigned s;
+    int k;
+    for (s = 0; s < 7; s++) {
+        if (!(more_hosts & (1 << s))) continue;
+        for (k = 0; k < more_n && more_m[k].slot != s; k++) ;
+        if (k < more_n) continue;
+        more_hosts &= ~(1 << s);
+        if (roster_by[s] == &more_mode) { roster_fn[s] = 0; roster_by[s] = 0; }
+        say("roster: no new monster stands in slot %u's place any more", s);
+    }
 }
 
 void pm_roster_more_leave(const char *name)
@@ -9936,21 +9942,18 @@ void pm_roster_more_leave(const char *name)
     for (k = 0; k < more_n; k++)
         if (more_m[k].by == current && name && more_same(more_m[k].name, name)) break;
     if (k >= more_n) return;
-    if (more_m[k].node) pm_show(more_m[k].node, 0);
-    say("roster: %s leaves MORE KAIJU", more_m[k].name);
+    if (more_m[k].lit) pm_show(more_m[k].lit, 0);
+    if (more_m[k].portrait) pm_show(more_m[k].portrait, 0);
+    say("roster: %s leaves the selection screen", more_m[k].name);
     for (j = k; j + 1 < more_n; j++) more_m[j] = more_m[j + 1];
     more_n--;
     for (j = 1; j <= 4; j++) {
         if (more.lost[j] == k) more.lost[j] = -1; else if (more.lost[j] > k) more.lost[j]--;
         if (more.playing[j] == k) more.playing[j] = -1; else if (more.playing[j] > k) more.playing[j]--;
     }
-    if (more.cursor >= more_n) more.cursor = 0;
-    if (!more_n && more_slot >= 0) {
-        unsigned s = (unsigned)more_slot;
-        if (roster_by[s] == &more_mode) { roster_callout_restore(s); roster_fn[s] = 0; roster_by[s] = 0; }
-        more_slot = -1;
-        say("roster: MORE KAIJU is empty - slot %u is the game's again", s);
-    }
+    if (more.cur == k) more.cur = -1; else if (more.cur > k) more.cur--;
+    more_forget_nodes();
+    more_release_unused();
 }
 
 int pm_roster_more_count(void) { return more_n; }
@@ -9958,213 +9961,236 @@ int pm_roster_more_count(void) { return more_n; }
 static const char *more_picked;          /* the member being handed the pick (pm_roster_more_picked) */
 const char *pm_roster_more_picked(void) { return more_picked; }
 
-/* the wait before a picked mode starts: the game's screen closing (the port's), or almost none after our menu */
+/* the wait before a picked mode starts: the game's screen closing (the port's) */
 long pm_roster_start_after(void)
 {
-    return more_from_menu ? 300 : pm_port_value("roster_start_after_ms", 0);
+    return pm_port_value("roster_start_after_ms", 0);
 }
 
-/* 1 while the menu wants the ball kept in the scoop (the scoop's wrap asks) */
-static int more_holding(void)
+/* the selection scene's node `<path><stem><suffix>` */
+static void *more_node(const char *stem, const char *suffix)
 {
-    if (more.state == MORE_IDLE || !pm_in_game()) return 0;
-    if (more.held_since && pm_ms() - more.held_since > MORE_HOLD_MAX_MS) return 0;
-    return 1;
+    char p[200];
+    const char *scene_id = pm_port_text("roster_screen_scene"), *path = pm_port_text("roster_screen_path");
+    if (!scene_id || !(can & PM_CAN_SCREENS)) return 0;
+    pm_snprintf(p, sizeof p, "%s%s%s", path ? path : "", stem, suffix);
+    return pm_node(scene_id, p);
 }
 
 static void more_find(void)
 {
     int k;
+    unsigned s;
+    if (!(can & PM_CAN_SCREENS) || !pm_port_text("roster_screen_scene")) return;
     for (k = 0; k < more_n; k++) {
         struct more_member *m = &more_m[k];
-        char words[MORE_PAGE * 2 + 8];
-        if (m->node || !m->page[0] || !(can & PM_CAN_SCREENS) || (m->tries++ % 30) != 0) continue;
-        m->node = pm_node("hud", m->page);
-        if (!m->node) continue;
-        pm_snprintf(words, sizeof words, "%s.%s_Words", m->page, m->page);
-        m->words = pm_text("hud", words);
-        pm_show(m->node, 0);          /* authored visible: hidden until the menu shows it */
-        say("roster: MORE KAIJU's page for %s found (%s)%s", m->name, m->page, m->words ? "" : " - no words on it");
+        if (m->lit || !m->page[0] || (m->tries++ % 30) != 0) continue;
+        m->lit = more_node(m->page, "_Lit");
+        if (!m->lit) {
+            if (m->tries == 1) say("roster: %s's tile (%s_Lit) is not on the selection screen yet", m->name, m->page);
+            continue;
+        }
+        m->lock = more_node(m->page, "_Lock");
+        m->done = more_node(m->page, "_Done");
+        m->portrait = more_node(m->page, "_Portrait");
+        pm_show(m->lit, 0);           /* authored visible: hidden until the cursor is on it */
+        if (m->lock) pm_show(m->lock, 0);
+        if (m->done) pm_show(m->done, 0);
+        if (m->portrait) pm_show(m->portrait, 0);
+        say("roster: %s's tile on the selection screen found (%s)%s", m->name, m->page, m->portrait ? "" : " - no portrait");
     }
+    if (more.cover_tries++ % 30) return;
+    for (s = 0; s < 7; s++) {
+        char t[40], b[64];
+        const char *tile;
+        if (!(more_hosts & (1 << s))) continue;
+        if (!more.cover[s]) {
+            pm_snprintf(t, sizeof t, "PadSel_Cover%u", s);
+            if ((more.cover[s] = more_node(t, ""))) pm_show(more.cover[s], 0);
+        }
+        pm_snprintf(t, sizeof t, "roster_tile_%u", s);
+        if (!more.body[s] && (tile = pm_port_text(t))) {
+            pm_snprintf(b, sizeof b, "%sFullBody_instance", tile);
+            more.body[s] = more_node(b, "");
+        }
+    }
+}
+
+/* the game's slot state (RuleBattle, Premium/LE 1.16 0x1244bc): 0 = open, 2 = won here, else locked */
+static unsigned more_state(unsigned slot)
+{
+    if (!fn("roster_slot_state")) return 0;
+    return ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("roster_slot_state"))(data("rule_battle"), slot);
 }
 
 static void more_draw(void)
 {
-    int k;
-    char t[16];
-    unsigned long left = more.at > pm_ms() ? more.at - pm_ms() : 0;
-    int secs = (int)((left + 999) / 1000);
-    for (k = 0; k < more_n; k++)
-        if (more_m[k].node && k != more.cursor) pm_show(more_m[k].node, 0);
-    if (more.cursor >= 0 && more.cursor < more_n && more_m[more.cursor].node) {
-        if (more.shown != more.cursor) pm_show(more_m[more.cursor].node, 1);
-        if (more_m[more.cursor].words && (secs != more.secs || more.shown != more.cursor)) {
-            pm_snprintf(t, sizeof t, "%d", secs);
-            pm_set_text(more_m[more.cursor].words, t);
+    int k, want = more.open ? more.cur : -1;
+    unsigned s, hide = 0;
+    if (want != more.shown) {
+        for (k = 0; k < more_n; k++) {
+            int on = k == want;
+            if (more_m[k].lit) pm_show(more_m[k].lit, on);
+            if (more_m[k].portrait) pm_show(more_m[k].portrait, on);
+        }
+        more.shown = want;
+    }
+    if (want >= 0 && want < more_n) hide = 1u << more_m[want].slot;
+    for (s = 0; s < 7; s++) {
+        unsigned bit = 1u << s;
+        if (more.cover[s] && ((hide ^ more.hid) & bit)) pm_show(more.cover[s], (hide & bit) != 0);
+        if (more.body[s] && ((hide ^ more.hid) & bit)) pm_show(more.body[s], !(hide & bit));
+    }
+    more.hid = hide;
+    if (more.open && !more.states) {
+        more.states = 1;
+        for (k = 0; k < more_n; k++) {
+            unsigned st = more_state(more_m[k].slot);
+            if (more_m[k].lock) pm_show(more_m[k].lock, st != 0 && st != 2);
+            if (more_m[k].done) pm_show(more_m[k].done, st == 2);
         }
     }
-    more.shown = more.cursor;
-    more.secs = secs;
 }
 
-static void more_hide(void)
+/* the cursor's places in the screen's order (battle_select.walk): down the left column (slots 0-3, then the first
+ * new monsters), then the right (4-6, then the rest). An entry >= 0 is a game slot, -1 - k is new monster k. */
+static int more_walk(int *out)
 {
-    int k;
-    for (k = 0; k < more_n; k++) if (more_m[k].node) pm_show(more_m[k].node, 0);
-    more.shown = -1;
+    int total = 7 + more_n, left = (total + 1) / 2, n = 0, k;
+    int news_left = left - 4 < 0 ? 0 : left - 4;
+    if (news_left > more_n) news_left = more_n;
+    for (k = 0; k < 4; k++) out[n++] = k;
+    for (k = 0; k < news_left; k++) out[n++] = -1 - k;
+    for (k = 4; k < 7; k++) out[n++] = k;
+    for (k = news_left; k < more_n; k++) out[n++] = -1 - k;
+    return n;
 }
 
-static void more_land(void)
+static void more_land(unsigned screen, int place)
 {
-    struct more_member *m = &more_m[more.cursor];
-    say("roster: MORE KAIJU's cursor is on %s (%d of %d)", m->name, more.cursor + 1, more_n);
-    if (m->callout) pm_sound(m->callout);
+    unsigned at = (unsigned)pm_port_value("roster_cursor_at", 16);
+    unsigned slot = place >= 0 ? (unsigned)place : more_m[-1 - place].slot;
+    if (fn("roster_screen_bump"))      /* what the game's handler does first: the screen's clock given its 3 again */
+        ((void (*)(unsigned, unsigned))(unsigned long)fn("roster_screen_bump"))(screen,
+            (unsigned)pm_port_value("roster_screen_bump_by", 3));
+    *(unsigned *)(unsigned long)(screen + at) = slot;
+    more.cur = place >= 0 ? -1 : -1 - place;
+    if (place < 0 && roster_callout_set(slot, more_m[-1 - place].callout, "the new monster's, while the cursor lands")) {
+        ((void (*)(unsigned))(unsigned long)fn("roster_cursor"))(screen);    /* the game plays it, the last one stopped */
+        roster_callout_restore(slot);
+    } else if (place < 0) {
+        if (more_m[-1 - place].callout) pm_sound(more_m[-1 - place].callout);
+    } else {
+        ((void (*)(unsigned))(unsigned long)fn("roster_cursor"))(screen);
+    }
+    if (place < 0) say("roster: the cursor is on %s (new monster %d, in slot %u's place)", more_m[-1 - place].name,
+                       -place, slot);
 }
 
-static void more_close(const char *why, int give_back)
+static int more_open_place(int place)
 {
-    const struct pm_mode *was = current;
-    int st = more.state;
-    more.state = MORE_IDLE;
-    more.held_since = 0;
-    more_hide();
-    current = &more_mode;
-    if (running == &more_mode) { pm_display_priority(0); pm_end(); }
-    current = was;
-    if (st != MORE_IDLE) say("roster: MORE KAIJU closed (%s)", why);
-    if (give_back) pm_roster_done();
+    unsigned slot = place >= 0 ? (unsigned)place : more_m[-1 - place].slot;
+    return more_state(slot) == 0;
 }
 
-/* the slot's pick (roster_take, current = &more_mode): the menu opens once the game's screen has closed */
-static int more_on_pick(unsigned slot)
+/* the screen's switch handler (r0 = the screen, r1 = the switch): 1 = the runtime moved the cursor (the game's
+ * handler does not run) */
+static int on_roster_keys(unsigned *r)
 {
-    unsigned p = pm_player();
-    long after = pm_port_value("roster_start_after_ms", 0);
-    if (!pm_in_game() || p < 1 || p > 4 || !more_n) return 0;
-    if (more.state != MORE_IDLE) { say("roster: MORE KAIJU picked again while it is open - the pick is taken"); return 1; }
-    more.player = p;
-    more.resume = roster_resuming && more.lost[p] >= 0 && more.lost[p] < more_n;
-    more.state = MORE_WAIT;
-    more.at = pm_ms() + (after > 0 ? (unsigned long)after : 0UL);
-    more.held_since = pm_ms();
-    if (more.resume)
-        say("roster: slot %u (MORE KAIJU) restarted by the city pick - %s, the monster player %u lost, plays again",
-            slot, more_m[more.lost[p]].name, p);
-    else
-        say("roster: slot %u picked - MORE KAIJU opens in %ld ms, once the selection screen has closed (%d monsters)",
-            slot, after, more_n);
+    unsigned screen = r[0], sw = r[1];
+    unsigned left = (unsigned)pm_port_value("roster_screen_left", 137), right = (unsigned)pm_port_value("roster_screen_right", 139);
+    unsigned at = (unsigned)pm_port_value("roster_cursor_at", 16);
+    int order[7 + N_MORE], n, i, here = -1, step;
+    if (!more_n || !screen || (sw != left && sw != right) || !fn("roster_cursor")) return 0;
+    if (fn("roster_timer_on")) {       /* the game's own guards: the screen's clock running, the busy one not */
+        unsigned (*on)(unsigned) = (unsigned (*)(unsigned))(unsigned long)fn("roster_timer_on");
+        if (!on((unsigned)pm_port_value("roster_screen_timer", 83)) || on((unsigned)pm_port_value("roster_screen_busy", 23)))
+            return 0;
+    }
+    if (fn("roster_switch_held")) {    /* the other flipper down too: both flippers pick - the game's */
+        unsigned (*held)(unsigned) = (unsigned (*)(unsigned))(unsigned long)fn("roster_switch_held");
+        if (held(sw)) return 0;
+    }
+    more.screen = screen;
+    if (!more.open) { more.open = 1; more.states = 0; }
+    n = more_walk(order);
+    for (i = 0; i < n; i++)
+        if (more.cur >= 0 ? order[i] == -1 - more.cur : order[i] == (int)*(unsigned *)(unsigned long)(screen + at)) here = i;
+    if (here < 0) here = 0;
+    step = sw == right ? 1 : n - 1;
+    for (i = 1; i <= n; i++) {
+        int next = order[(here + i * step) % n];
+        if (!more_open_place(next)) continue;
+        pm_sound((unsigned)pm_port_value(sw == right ? "roster_right_sound" : "roster_left_sound", 0));
+        more_land(screen, next);
+        break;
+    }
     return 1;
 }
 
-static void more_start(int k)
+/* the screen opens (r0 = the screen): the cursor starts on the game's place, our nodes as they were left */
+static void on_roster_open(unsigned *r)
+{
+    more.screen = r[0];
+    more.cur = -1;
+    more.picked = -1;
+    more.open = 1;
+    more.states = 0;
+    if (more_n) say("roster: the selection screen opens with %d new monster%s on it", more_n, more_n == 1 ? "" : "s");
+}
+
+/* the screen's pick (r0 = the screen): which tile it was */
+static void on_roster_pick(unsigned *r)
+{
+    (void)r;
+    more.picked = more.open ? more.cur : -1;
+    more.open = 0;
+    if (more.picked >= 0 && more.picked < more_n)
+        say("roster: the selection screen picks %s (in slot %u's place)", more_m[more.picked].name, more_m[more.picked].slot);
+}
+
+/* a pick of a place new monsters stand in (roster_take, current = &more_mode): the new monster under the cursor, or
+ * the city pick's replay of one lost, takes it; any other pick is the place's own battle */
+static int more_on_pick(unsigned slot)
 {
     const struct pm_mode *was = current;
-    unsigned p = more.player;
-    int took;
-    struct more_member *m = &more_m[k];
-    more_hide();
-    current = &more_mode;
-    if (running == &more_mode) { pm_display_priority(0); pm_end(); }
-    current = m->by;
-    more_from_menu = 1;
-    more_picked = m->name;
-    took = m->fn((unsigned)more_slot);
-    more_picked = 0;
-    more_from_menu = 0;
-    current = was;
-    if (!took) {
-        say("roster: MORE KAIJU: %s did not take the pick - given back as a lost battle", m->name);
-        more_close("its monster did not start", 1);
-        return;
+    unsigned p = pm_player();
+    int k = -1, took;
+    if (!pm_in_game() || p < 1 || p > 4 || !more_n) return 0;
+    if (roster_resuming) {
+        if (more.lost[p] >= 0 && more.lost[p] < more_n && more_m[(int)more.lost[p]].slot == slot) k = more.lost[p];
+    } else if (more.picked >= 0 && more.picked < more_n && more_m[more.picked].slot == slot) {
+        k = more.picked;
     }
-    more.playing[p] = (signed char)k;
-    more.state = MORE_PICKED;
-    more.at = pm_ms() + 6000;          /* the ball goes when its mode begins, or after this */
-    say("roster: MORE KAIJU: %s picked by player %u - its mode has the battle of slot %d", m->name, p, more_slot);
-}
-
-static void more_pick(const char *how)
-{
-    say("roster: MORE KAIJU: %s %s", more_m[more.cursor].name, how);
-    pm_sound((unsigned)pm_port_value("roster_pick_sound", 0));
-    more_start(more.cursor);
-}
-
-static void more_open(void)
-{
-    const struct pm_mode *was = current;
-    int ok;
-    current = &more_mode;
-    ok = pm_begin();
-    if (ok) pm_display_priority((unsigned)pm_port_value("roster_more_priority", 200));
+    more.picked = -1;
+    if (k < 0) return 0;
+    current = more_m[k].by;
+    more_picked = more_m[k].name;
+    took = more_m[k].fn(slot);
+    more_picked = 0;
     current = was;
-    if (!ok) { more_close("another mode of ours runs - the pick is given back", 1); return; }
-    if (more.cursor < 0 || more.cursor >= more_n) more.cursor = 0;
-    more.state = MORE_OPEN;
-    more.at = pm_ms() + (unsigned long)pm_port_value("roster_select_ms", MORE_SELECT_MS);
-    more.shown = more.secs = -1;
-    say("roster: MORE KAIJU open for player %u: %d monsters, %ld s to pick", more.player, more_n,
-        pm_port_value("roster_select_ms", MORE_SELECT_MS) / 1000);
-    more_draw();
-    more_land();
+    if (took) {
+        more.playing[p] = (signed char)k;
+        say("roster: %s %s for player %u - its mode has slot %u's battle", more_m[k].name,
+            roster_resuming ? "plays again (the city pick: the battle player lost)" : "picked", p, slot);
+    } else {
+        say("roster: %s did not take the pick - the place's own battle runs", more_m[k].name);
+    }
+    return took;
 }
 
 /* every tick */
 static void more_tick(void)
 {
-    unsigned p = pm_player();
-    if (more_slot < 0) return;
+    if (!more_n) return;
     more_find();
-    if (!more.buttons) {
-        more.left = pm_shot("Left flipper button");
-        more.right = pm_shot("Right flipper button");
-        more.action = pm_shot("Action button");
-        more.buttons = more.left && more.right && more.action ? 1 : -1;
-        if (more.buttons < 0) say("roster: MORE KAIJU has no cabinet buttons in this port - the timer picks");
-    }
     if (!pm_in_game()) {
         int q;
-        if (more.state != MORE_IDLE) more_close("the game ended", 0);
         for (q = 1; q <= 4; q++) more.lost[q] = more.playing[q] = -1;
-        more.cursor = 0;
-        return;
+        more.open = 0;
+        more.cur = -1;
     }
-    if (more.state != MORE_IDLE && p != more.player) { more_close("another player is up", 1); return; }
-    switch (more.state) {
-    case MORE_WAIT:
-        if (pm_ms() < more.at) break;
-        if (more.resume) { more.cursor = more.lost[more.player]; more_start(more.cursor); break; }
-        more_open();
-        break;
-    case MORE_OPEN:
-        if (pm_ms() >= more.at) { more_pick("picked when the time ran out"); break; }
-        more_draw();
-        break;
-    case MORE_PICKED:
-        if ((running && running != &more_mode) || pm_ms() >= more.at) {
-            more.state = MORE_IDLE;
-            more.held_since = 0;
-            say("roster: MORE KAIJU: the ball goes (%s)", running ? "the monster's mode began" : "its mode did not begin in 6 s");
-        }
-        break;
-    }
-}
-
-/* the cabinet buttons while the menu is open: 1 = the menu took them (the modes do not see them) */
-static int more_buttons(uint64_t mask)
-{
-    if (more.state != MORE_OPEN || more.buttons < 0) return more.state != MORE_IDLE && more.buttons > 0
-                                                             && (mask & (more.left | more.right | more.action));
-    if (mask & more.action) { more_pick("picked with the Action button"); return 1; }
-    if (mask & (more.left | more.right)) {
-        int left = (mask & more.left) != 0;
-        more.cursor = (more.cursor + (left ? more_n - 1 : 1)) % more_n;
-        pm_sound((unsigned)pm_port_value(left ? "roster_left_sound" : "roster_right_sound", 0));
-        more_draw();
-        more_land();
-        return 1;
-    }
-    return 0;
+    more_draw();
 }
 
 /* pm_roster_over: the monster whose mode had the pick is the one a lost battle brings back */
@@ -10173,14 +10199,14 @@ static void more_over(unsigned p, int won)
     if (p < 1 || p > 4 || more.playing[p] < 0) return;
     more.lost[p] = won ? -1 : more.playing[p];
     if (more.playing[p] < more_n)
-        say("roster: MORE KAIJU: %s's battle %s for player %u%s", more_m[(int)more.playing[p]].name, won ? "won" : "lost",
+        say("roster: %s's battle %s for player %u%s", more_m[(int)more.playing[p]].name, won ? "won" : "lost",
             p, won ? "" : " - the city pick plays it again at the next lit scoop");
     more.playing[p] = -1;
 }
 
 static void more_ball_end(void)
 {
-    if (more.state == MORE_WAIT || more.state == MORE_OPEN) more_close("the ball ended", 1);
+    if (more.open) { more.open = 0; more.cur = -1; }
 }
 
 /* ---- the game's Challenge list (PAD-615, optional, title specific) ------------------------------
@@ -12088,7 +12114,6 @@ static void events_arm(void)
  * .shot, so a mode's callbacks keep to the tick thread. Only a switch the game's flags broadcast can
  * be mapped (on The Beatles not the slingshots, whose descriptors ask for nothing). */
 static volatile unsigned switch_fired[N_SWITCH_IDS];
-static int more_buttons(uint64_t mask);       /* PAD-707 */
 static unsigned switch_delivered[N_SWITCH_IDS];
 static unsigned switch_at;                    /* the register holding the switch id */
 
@@ -12116,7 +12141,6 @@ static void switches_deliver(void)
         for (j = i; j < port.n_switch; j++)
             if (port.sw[j].id == id) mask |= port.sw[j].mask;
         if (n > 8) n = 8;                            /* a flood is not N separate hits */
-        if (more_buttons(mask)) continue;            /* PAD-707: MORE KAIJU's menu is up: the buttons are its */
         while (n--) EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); }
         current = 0;
     }
@@ -14549,6 +14573,13 @@ static void pad_mode_start(void)
             if (fn("roster_resume") && hook(fn("roster_resume"), on_roster_resume))      /* PAD-706 */
                 say("roster: a lost battle the city pick restarts is the mode's again (the resume at 0x%08x is hooked)",
                     fn("roster_resume"));
+            /* PAD-707: new monsters on the selection screen - its keys, its opening and its pick */
+            if (fn("roster_screen_keys") && fn("roster_screen_open") && fn("roster_screen_pick") && fn("roster_cursor")
+                && pm_port_text("roster_screen_scene")
+                && hook_veto(fn("roster_screen_keys"), on_roster_keys) && hook(fn("roster_screen_open"), on_roster_open)
+                && hook(fn("roster_screen_pick"), on_roster_pick))
+                say("roster: the selection screen takes new monsters (its keys at 0x%08x, its pick at 0x%08x)",
+                    fn("roster_screen_keys"), fn("roster_screen_pick"));
             if (fn("battle_stop"))
                 say("roster: a pick counts as the battle it replaced (its START's bookkeeping at the pick, its STOP at the mode's end)");
         }

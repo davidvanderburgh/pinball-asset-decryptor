@@ -90,9 +90,9 @@ const T = {
 };
 
 // PAD-323: the Show page's way into the Scenes editor with the mode's screen in it
-// PAD-707: MORE KAIJU - the list of monsters of the card's own behind one battle's place (modes.py MORE_PREFIX)
-const MORE_PREFIX = "MORE KAIJU, in ";
-const MORE_FORM_NOTE = "This mode is one monster on MORE KAIJU: the battle selection screen has seven places, fixed in the game, so a list of monsters of your own goes behind one of them (one list per card: every monster on it names the same battle). Picking that place opens the list's own selection screen once the game's has closed - a page per monster, the flipper buttons to choose, the Action button or its 13 seconds to pick, the ball waiting in the scoop - and picking this one starts this mode at once. It counts as that place's battle, won or lost, as a mode in the place itself would. Its page shows monster.png from the mode's folder (else its screen's picture, else a tile lettered with its name).";
+// PAD-707: a new monster on the battle selection screen, in one battle's place (modes.py MORE_PREFIX)
+const MORE_PREFIX = "A new monster, in ";
+const MORE_FORM_NOTE = "This mode is a new monster on the battle selection screen: the card build adds its tile and portrait to the game's screen beside the seven battles, and picking it there starts this mode. It stands in the place of the battle picked here and counts as that battle, won or lost. Its picture is monster.png in the mode's folder (else its screen's picture, else a tile lettered with its name).";
 
 const LAYOUT_TIP = "Opens the Scenes editor on the game's HUD with this screen in it: drag it, size it, move its words on their own, or send it to the back to put it under the HUD's own pictures. Saved into the mode as you go; without it the app places the screen itself.";
 const PAGES = [["mode", "Mode"], ["show", "Show"], ["lights", "Lights"], ["sounds", "Sounds"], ["scoring", "Scoring"]];
@@ -394,7 +394,7 @@ function ModePage({ s, f, off, dis, rs, lim }) {
   const battleOn = f.starts_kind === "battle";                                  // PAD-589
   const roster = prof.roster || [];
   const battleOff = off || dis.roster || !roster.length;
-  // PAD-707: "MORE KAIJU, in <battle>'s place" - a monster on the list behind that battle's place
+  // PAD-707: "A new monster, in <battle>'s place" - its own tile on the screen, in that battle's place
   const rosterOpts = withValue([{ value: "", label: "(choose a battle)", disabled: true }, ...roster.map((x) => ({ value: x, label: x })),
     ...roster.map((x) => ({ value: MORE_PREFIX + x + "'s place", label: MORE_PREFIX + x + "'s place" }))], f.roster_slot);
   const moreOn = String(f.roster_slot || "").startsWith(MORE_PREFIX);

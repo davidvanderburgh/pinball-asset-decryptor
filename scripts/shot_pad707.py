@@ -1,15 +1,15 @@
-"""PAD-707 proof shots: a blocks mode as a monster on MORE KAIJU, on the Modes tab.
+"""PAD-707 proof shots: a blocks mode as a new monster on the battle selection screen, on the Modes tab.
 
     python scripts/shot_pad707.py <repo> <out_dir> <prefix>
 
 <repo> is the source tree to serve (the ticket branch, or a ``git archive`` of main for the "before" shots). A
-project on the stock Godzilla Premium/LE 1.16 card holding one blocks mode, MOTHRA, whose When is a pick on MORE
-KAIJU in Ebirah's place (``{"kind": "battle", "slot": 0, "more": true, "picture": "monster.png"}``). Writes into
+project on the stock Godzilla Premium/LE 1.16 card holding one blocks mode, MOTHRA, whose When is a pick on the
+battle selection screen, a new monster in Ebirah's place (``{"kind": "battle", "slot": 0, "more": true, "picture": "monster.png"}``). Writes into
 <out_dir>:
 
 - <prefix>_hat.png       the mode's page: its scripts, the battle hat first
-- <prefix>_choices.png   the same, with the hat's battle list opened out (where MORE KAIJU is offered)
-- <prefix>_form.png      a form mode, KUMONGA, on MORE KAIJU: its Starts on's battle list opened out
+- <prefix>_choices.png   the same, with the hat's battle list opened out (where a new monster is offered)
+- <prefix>_form.png      a form mode, KUMONGA, a new monster on the screen: its Starts on's battle list opened out
 """
 
 import os

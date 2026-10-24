@@ -203,6 +203,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.mode_assets" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_hud" \
     --hidden-import "pinball_decryptor.plugins.stern.more_kaiju" \
+    --hidden-import "pinball_decryptor.plugins.stern.battle_select" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_project" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_runtime" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_sounds" \

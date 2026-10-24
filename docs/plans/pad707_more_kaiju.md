@@ -1,77 +1,70 @@
-# PAD-707: MORE KAIJU - more monsters on Godzilla's battle selection screen
+# PAD-707: new monsters on Godzilla's battle selection screen (MORE KAIJU)
 
-David, 2026-10-24: "we know that people are going to want to add monsters to the selection menu. How can we do that"
+David, 2026-10-24: "we know that people are going to want to add monsters to the selection menu. How can we do that",
+then: "redesign the new menu to look more like the original heisei ... add in a new monster to the existing menu but
+modify the menu to fit it elegantly", "use the heisei scene as a starting point", three new monsters, the monster
+artwork of the Heisei mod's kind.
 
-The screen's seven places are compiled into the game (MODE_SDK.md "A monster in the roster", item 146): a place can
-be taken, not added. Route 1 of the ticket, built: one place HOSTS A LIST of the card's own monsters, and a pick of it
-opens a selection screen of ours. Routes 2 (rotating a place) and 3 (a real 8th place) are not needed.
+The screen's seven places are compiled into the game (MODE_SDK.md "A monster in the roster", item 146). The first
+build put a LIST behind one place with a selection screen of our own; David asked for the game's own screen instead.
+This is that: the card build adds tiles to the game's screen, and the runtime drives the game's own cursor.
 
 ## What changed
 
-- **Runtime** (`pad_mode_runtime.c`, "PAD-707: MORE KAIJU"; `pad_mode.h`): `pm_roster_more(slot, name, page, callout,
-  on_pick)` joins the list behind a place (the runtime claims the place for it; one list per game; a place a mode
-  claimed itself cannot host one; 16 monsters), `pm_roster_more_leave`, `pm_roster_more_count`, `pm_roster_more_picked`,
-  `pm_roster_start_after`. The pick of the place (or the city pick's replay of a lost one) is taken by the list; once the
-  game's screen has closed (`roster_start_after_ms`) the list's screen opens as an internal mode (pm_begin as "MORE
-  KAIJU", display priority 200): the build's page per monster shown, its words the seconds left; the cabinet buttons'
-  switch shots are the list's (`more_buttons` in `switches_deliver`): flippers move the cursor with the game's own sounds
-  271/272 and the monster's callout, Action or 13 s pick with 236. The ball waits in the scoop throughout (the scoop
-  wrap holds it after the game's own event-2 hold returns, while `more_holding()`), until the monster's mode begins.
-  The monster gets `on_pick(slot)` like a claimed place's pick, and its `pm_roster_over` is PAD-706's (the place's
-  battle, won or lost). A lost monster is remembered per player: the city pick replays it with no list. The ball ending,
-  another player up, another of our modes running, or a monster refusing gives the pick back as a lost battle. The list
-  is kept in its monsters' names' order (the pages are drawn in that order); the building's lock is not closed for it.
-- **Mode files** (`mode_file.c`): `roster_more [page]` with `roster_slot <n>` joins the list instead of claiming the place
-  (`roster_callout` is the list's callout for it); a pick on the list starts it 300 ms later.
-- **Blocks** (`block_modes.py`, `modes_blocks.js`): the battle hat's list offers every place twice - the battle, and
-  "MORE KAIJU, in <battle>'s place" (`{"kind": "battle", "slot": n, "more": true, "picture": "monster.png"}`), with a
-  Picture… button (`modes.blocks_pick("monster")` copies a PNG in as `monster.png`); the C joins the list
-  (`BATTLE_MORE`, `MORE_PAGE`); assets.json carries `more`.
-- **Form modes** (`mode_project.py`, `modes.js`, `webui/tabs/modes.py`): Starts on: the player picking "MORE KAIJU, in
-  <battle>'s place" (`roster_more`), written as `roster_more PadMode_<slug>_More`.
-- **The pages** (`more_kaiju.py`, called from `mode_assets.build`): one full-glass page per monster in the HUD scene
-  (680x384 drawn, shown x2; title, portrait, name, "n OF m", the hint, the timer's box, the row of tiles with this one
-  lit, eight at a time). Picture: `monster.png`, else the mode's screen picture, else `badge.png`, else lettered.
-- **Ports**: Premium/LE 1.16, Pro 1.16 and Pro 1.15 `value roster_left_sound 271 / roster_right_sound 272 /
-  roster_pick_sound 236 / roster_select_ms 13000`, read from each program's selection-screen switch handler (LE
-  `0x191048`, Pro `0x18d3a8`; the Heisei 1.99D program the same as LE); `portgen.TITLE_VALUES` carries them.
-- de/es/fr words; MODE_SDK.md (the roster section), MODE_PARAMETERS.md (the key, the field, five calls).
+- **The scene** (`battle_select.py`, new; `more_kaiju.py` now its bookkeeping): the card's own selection scene
+  (`auto_loaded/cac32730...`, Heisei's on a Heisei card) read with `scene_tree`, laid out again: two columns (left: the
+  four tier-1 places, then new ones until the columns are even), smaller when they must be (three new: 5 + 5 at ~0.8),
+  each place's lit tile, state box and "n/m" moved with its tile, the grey sheet hidden and each place's grey tile cut
+  out of it. Per new monster: its grey tile, and Sprite groups `PadSel_<slug>_Lit/_Lock/_Done/_Portrait` (the card's
+  own tile and portrait frames with the picture, the card's padlock and claw, the name lettered in Heisei's orange
+  with katakana, fitted to the card's own name), and a `PadSel_Cover<n>` per place a new monster stands in. At most 5.
+  `preview()` draws a still of it (the Modes docs' and the tests' look).
+- **The runtime** (`pad_mode_runtime.c`, the section rewritten; `pad_mode.h`): `pm_roster_more(slot, name, page,
+  callout, on_pick)` - each monster in its OWN place now. The screen's switch handler is vetoed for the two flippers
+  (`site roster_screen_keys`) and the runtime walks the screen's order itself (the game's guards, sounds, clock bump
+  and callout kept; locked places skipped); on a new monster the game's cursor is parked on its place, its groups shown
+  and the place's portrait hidden. The game's own pick (`site roster_screen_pick` notes the tile) starts the place's
+  battle, which the monster under the cursor takes. The old screen of our own, its scoop hold and its button
+  routing are gone.
+- **The build**: the engine reads the card's selection scene when the project has new monsters (`more_kaiju.wanted`),
+  `mode_write.plan(stock_select=)` -> `mode_assets.build` writes it back with them on. `CodeAssets.has_assets` counts
+  a new monster (a blocks monster with nothing else was left out of Try it's set: "no modes to try").
+- **Ports**: LE 1.16, Pro 1.16, Pro 1.15 - seven sites, five values, the scene and node names (MODE_SDK.md); recipes
+  recompiled; `portgen.TITLE_VALUES` carries the values.
+- **Words**: "A new monster, in <battle>'s place" (blocks hat, form mode), the tips, de/es/fr.
+- **Art**: the Heisei portraits are Toho's official Godzilla.jp stills repainted by DragonRR (Yandex: Destoroyah
+  matched; SpaceGodzilla and Gigan pose for pose). The same stills for nine new monsters are in David's project folder
+  `HEISEI v1.99D + daveyvandy modes\PAD-707 monster art` (his card's, never the app's).
 
-## Proof (emulator, muted, hidden; C:\tmp\PAD-707\rig, out_run*)
+## Proof (emulator, muted, hidden; C:\tmp\PAD-707\rig run7-run10)
 
-- **Stock Premium/LE 1.16, run1** (three blocks monsters behind Ebirah's place): the claim silenced the place (1888 ->
-  0), all three pages found; the scoop's pick `MORE KAIJU opens in 3000 ms`, the ball held (`the ball waits while MORE
-  KAIJU is up` ... `let go after 9000 ms`), the flipper buttons walked MOTHRA -> RODAN -> ANGUIRUS -> MOTHRA, the Action
-  button picked MOTHRA, its START 300 ms later, two Buildings: `the pick ends as a WON battle ... completed 1, wins 1,
-  city 0's mask 0 -> 2`.
-- **Stock Premium/LE 1.16, run2** (a mode file monster, `roster_more`): the timer picked RODAN after 13 s, its START
-  300 ms later; a drain lost it (`RODAN's battle lost ... the city pick plays it again`); the next lit scoop's city
-  pick replayed RODAN with no list (`restarted by the city pick - RODAN, the monster player 1 lost, plays again`), its
-  clock won it: completed 1, and the city's 5,000,000 in the score.
-- **Stock Pro 1.16, run3c** (the list behind Gigan's place, slot 2): the list opened, left presses wrapped ANGUIRUS ->
-  RODAN -> MOTHRA, the timer picked MOTHRA, its clock ran out with a won block in the mode: `a LOST battle (slot 2,
-  mode id 14)`.
-- **David's Heisei 1.99D**: run4 (the v20 card, the game's own screen showing BIOLLANTE in that place): ANGUIRUS picked
-  with Action, won by its clock. Run6 (the base card, the set built by Try it's own code - Write's - from a project of
-  three blocks monsters and one form mode): the list in its names' order ANGUIRUS, KUMONGA, MOTHRA, RODAN; KUMONGA (the
-  form mode) picked with Action, a drain lost it, the city pick replayed it with no list, its clock won it (completed
-  1, +5,000,000).
-- The main branch, the same three modes (control, run_before): the place's pick simply starts the first claimant,
-  MOTHRA; the other two never claim it.
-- No segv in any run of this branch's code (Pro's first runs crashed in the rig's PAD-706 probe, which reads
-  Premium/LE addresses; rerun with its Pro probe). Not run: Pro 1.15 (archival card; its sound ids read off its
-  program).
+- **Heisei 1.99D base card, run8** (Try it's own set): the screen re-laid, the walk Biollante -> Destoroyah -> Gigan ->
+  SpaceGodzilla -> KAMACURAS -> KIRYU -> KUMONGA -> Biollante (tier 2 skipped), each new monster with its tile,
+  portrait and name and the place's own hidden; Action on KUMONGA took slot 0's battle, two Buildings won it
+  (`completed 1, wins 1, city 0's mask 0 -> 2`). Run7: the same mechanics, but the new pictures all on the glass -
+  the game's lookup finds Sprites only (fixed: each shown picture in a group).
+- **Stock Pro 1.16, run9 + run11** (the same three monsters as C, the stock card's scene built with them - the stock
+  scene is byte-identical on Premium/LE 1.16 and Pro, md5 fceccfeb): the screen re-laid with Stern's own art, the
+  cursor (which opens on the last place played there, Megalon) walked onto KAMACURAS, KIRYU and KUMONGA with their
+  tiles, portraits and names; a pick of Gigan's own tile: `slot 2 picked (mode id 14): claimed but not taken - the
+  game's battle runs`; run11: the screen's own 13 s timer picked KAMACURAS (`the selection screen picks KAMACURAS (in
+  slot 1's place)`), its START 3000 ms later, two Buildings: `completed 1, wins 1, city 0's mask 0 -> 2`.
+- **Stock Premium/LE 1.16, run10 + run13**: the same walk and look; run13: KUMONGA picked with Action (`the selection screen picks KUMONGA (in slot 0's
+  place)`), its START, two Buildings: `the pick ends as a WON battle ... completed 1, wins 1, city 0's mask 0 -> 2`.
+- No segv in any run. Runs from the D: card stalled at the game's start when two rigs read it at once (the known D:
+  stall); every run here booted a copy in the rigs' card cache. Not run: Pro 1.15 (archival card; its sites read off
+  its program, every one's words checked).
 
 ## Decisions
 
-- Which place: any (the hat says); one list per card (the build refuses two places, the runtime a second).
-- A monster won completes the place's battle (PAD-706's progression), so after a win the place is Completed like any
-  won battle; a lost monster replays through the city pick, no list.
-- The place's own tile/portrait/name on the game's screen stay the card's (Heisei carries its own art); the Scenes tab
-  changes them. Its callout is silent while the list holds it.
-- Order: the monsters' names (both the build's pages and the runtime's cursor), not the project's order.
+- Each new monster stands in one place, and its battle is that place's (won: the place is done in that city; lost:
+  the city pick replays the monster). The place's own battle stays on the screen.
+- The game draws, times and picks; the runtime only moves the cursor and shows our groups. Nothing in the program
+  changes but hooks.
+- Order: the monsters' names, both sides.
 
 ## Not done
 
-- King of the Monsters starts the tier-1 battles itself (PAD-706): inside it a MORE KAIJU place plays the stock battle.
+- King of the Monsters starts the tier-1 battles itself (PAD-706): inside it a place's own battle runs.
 - Premium/LE 1.13 has no roster. Pro 1.15 is desk-read (its card is archival).
+- The new pictures are the person's: the build does not repaint a still into a card's style.

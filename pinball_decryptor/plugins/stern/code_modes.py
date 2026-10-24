@@ -154,7 +154,8 @@ class CodeAssets:
         return out
 
     def has_assets(self):
-        return bool(self.screen or self.clip or self.clips or self.hud or self.music or self.calls)
+        return bool(self.screen or self.clip or self.clips or self.hud or self.music or self.calls
+                    or self.more)      # PAD-707: a new monster on the selection screen is drawn there
 
 
 # ---- the project -------------------------------------------------------------------------------

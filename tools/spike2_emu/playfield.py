@@ -892,6 +892,10 @@ def _rows(path, at_least):
 #: the literal "playfield" was never a safe filter.
 DEV_ROWS = devicexy.read_table(os.path.join(TDIR or "", "device_xy.txt"))
 LAYOUT_IMAGE = devicexy.layout_image(DEV_ROWS)
+#: PAD-702: the stems this title spells "LEFT POP BUMPER R" (Rush), which
+#: split_channel() takes as RGB lights
+SPACED_RGB = cablights.spaced_stems(r["name"] for r in DEV_ROWS
+                                    if r["kind"] == "led")
 
 #: THIS TITLE'S device-table group -> bus node map, derived (item 53), with
 #: godzilla's old constant as the last rung of coilmap.group_node()'s ladder.
@@ -1193,10 +1197,12 @@ SWITCH_POLL_S = 2.0
 
 
 def split_channel(name):
-    """('SHIELD LEFT', 'R') for 'SHIELD LEFT-R'; (name, 'W') for a plain insert."""
-    if len(name) > 2 and name[-2] == "-" and name[-1] in "RGB":
-        return name[:-2].rstrip(), name[-1]
-    return name, "W"
+    """('SHIELD LEFT', 'R') for 'SHIELD LEFT-R'; (name, 'W') for a plain insert.
+
+    PAD-702: the cabinet column's reading, so every spelling the tables use
+    joins - Venom's topper is "TOPPER BIKE - R", and read only as "-R" its 29
+    lights were 87 white cells. cablights.split_channel lists them."""
+    return cablights.split_channel(name, SPACED_RGB)
 
 
 def group_fixtures(leds):
@@ -1218,6 +1224,11 @@ def group_fixtures(leds):
             f = fixtures[stem] = dict(name=stem, channels={}, xs=[], ys=[],
                                       group=L.get("group"))
             order.append(f)
+        elif chan in f["channels"]:
+            # PAD-702: Stern's G, R, G typo for G, R, B
+            chan = cablights.repeated_channel(
+                f["channels"], chan, L["index"],
+                max(i for _n, i in f["channels"].values())) or chan
         f["channels"][chan] = (L["node"], L["index"])
         f["xs"].append(L["x"])
         f["ys"].append(L["y"])
@@ -2743,8 +2754,12 @@ class LedGrid(LedRing):
                 else:
                     stem, chan = "%d.%d" % (node, idx), "W"
                 # A stem that repeats a channel letter is two lamps sharing a
-                # name, not one lamp with two reds.
+                # name, not one lamp with two reds - unless it is Stern's
+                # G, R, G typo for G, R, B (PAD-702).
                 C = stems.get(stem)
+                if C is not None and chan in C["channels"]:
+                    chan = cablights.repeated_channel(
+                        C["channels"], chan, idx, max(C["idxs"])) or chan
                 if C is not None and chan in C["channels"]:
                     stem = "%s (%d.%d)" % (stem, node, idx)
                     C = stems.get(stem)

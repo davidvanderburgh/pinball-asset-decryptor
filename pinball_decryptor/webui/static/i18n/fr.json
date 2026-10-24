@@ -12584,5 +12584,9 @@
 "The rest of a song mode's screens (its level clips, its Champion name) stay as they are: make them the same for every song on the Video and Text tabs.": "Les autres écrans d'un mode chanson (ses clips de niveau, son nom de champion) restent tels quels : rendez-les identiques pour toutes les chansons dans les onglets Vidéo et Texte.",
 "An extract of a card built with a jukebox brings it back.": "Une extraction d'une carte construite avec un juke-box le récupère.",
 "its song mode's own": "celle du mode chanson",
-"{} song(s), {} with an intro video.": "{} chanson(s), dont {} avec une vidéo d'intro."
+"{} song(s), {} with an intro video.": "{} chanson(s), dont {} avec une vidéo d'intro.",
+"Play the row above in the list, as the sort, search and filters show it.": "Lit la ligne au-dessus dans la liste, telle que le tri, la recherche et les filtres l'affichent.",
+"Play the row below in the list, as the sort, search and filters show it.": "Lit la ligne en dessous dans la liste, telle que le tri, la recherche et les filtres l'affichent.",
+"Under Replacement, a row with a replacement plays the replacement; one without plays its original.": "Sous Remplacement, une ligne qui a un remplacement lit le remplacement ; une ligne sans remplacement lit son original.",
+"**Previous** and **Next**, either side of each Play, play the row above or below, following your sort, search and filters. Under Replacement they play a row's replacement where it has one, its original where not.": "**Précédent** et **Suivant**, de part et d'autre de chaque Lire, lisent la ligne au-dessus ou en dessous, en suivant votre tri, votre recherche et vos filtres. Sous Remplacement, ils lisent le remplacement d'une ligne quand elle en a un, sinon son original."
 }

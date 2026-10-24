@@ -1914,14 +1914,44 @@ class AudioTab(FindOriginalsMixin, TabService):
         for it (its replacement with "Play replacements" ticked)."""
         if rel not in self._by_rel:
             return False
+        side = ("rep" if self.audio_play_subst_var.get()
+                and self._rep_available(rel) else "orig")
+        self._play_selected(rel, side)
+        return True
+
+    def _play_selected(self, rel, side):
+        """Select *rel* alone and play its *side* pane."""
         self._sel = [rel]
         self.set(sel=[rel])
         self._cancel_select_job()
         self._level_sync()
         self._publish_cur()
-        side = ("rep" if self.audio_play_subst_var.get()
-                and self._rep_available(rel) else "orig")
         self._load_track(rel, autoplay=side)
+
+    @rpc
+    def step(self, side, delta):
+        """PAD-701: a pane's ⏮ / ⏭: play the row before / after the one
+        loaded (or selected), in the list as the sort, search and filters
+        show it.  The Replacement pane's buttons play the replacement where
+        the row has one; the Original pane's play what ▶ on the row would."""
+        rels = self._visible_rels
+        if not rels:
+            return False
+        base = next((r for r in (self._current_rel, self._selected_rel())
+                     if r in rels), None)
+        if base is None:
+            nxt = rels[0] if delta > 0 else rels[-1]
+        else:
+            i = rels.index(base) + (1 if delta > 0 else -1)
+            if not 0 <= i < len(rels):
+                return False
+            nxt = rels[i]
+        if side == "rep" or self.audio_play_subst_var.get():
+            side = "rep" if self._rep_available(nxt) else "orig"
+        else:
+            side = "orig"
+        self._cancel_advance()
+        self._play_selected(nxt, side)
         return True
 
     @rpc
@@ -1971,12 +2001,7 @@ class AudioTab(FindOriginalsMixin, TabService):
 
         def _advance():
             self._advance_job = None
-            self._sel = [nxt]
-            self.set(sel=[nxt])
-            self._cancel_select_job()
-            self._level_sync()
-            self._publish_cur()
-            self._load_track(nxt, autoplay=side)
+            self._play_selected(nxt, side)
 
         self._cancel_advance()
         self._advance_job = self._after(120, _advance)

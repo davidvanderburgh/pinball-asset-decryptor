@@ -30,6 +30,8 @@ const T = {
   loop: "Loop this replacement in-game.\n\nThese music stems normally play once — there's no built-in loop — so a replacement that's shorter than the original goes silent partway through its mode. Ticking Loop bakes a forward-loop flag into the rebuilt audio (the same loop_mode flag Godot's importer would set), so the engine repeats your clip to fill the mode; the game stops or fades it on the next song change.\n\nDefaults ON for tracks with \"LOOP\" in the name (the mode music). Leave it OFF for one-shot sound effects and callouts.",
   keep: "Keep this replacement's full length.\n\nBy default every track is trimmed (or padded) to its original slot length on Write. Tick Full to skip that for this one slot, so a longer replacement plays at its full length.\n\nThe file validates and boots at any length (the game's checksums are re-forged regardless of size). Whether it actually plays to the end is up to the game: best for a cue nothing plays over — e.g. the end-of-game track before attract — since the show may still cut it short. Test on the machine.",
   level: "How loud THIS replacement lands, in dB.\n\nEvery replacement is normally gained to the loudness of the sound it replaces, so it sits with its neighbours instead of jumping out — and that ignores the level you mixed your own file at, so exporting the same track louder changes nothing. This is the way to overrule it for one clip.\n\nIt stacks on the build-wide \"Replacement loudness\" offset in Advanced Audio Options: that one moves every replacement together, this one moves this clip relative to the rest. 0 dB = whatever the rest of the build does.\n\nHandy for music, which Stern mixes as a bed under the callouts. Boosts are soft-limited, never hard-clipped, and the build log lists every clip you leveled by hand.\n\nA music mode's sound has a loudness of its own: play it from the row's Music modes menu and this box becomes \"Mode N's loudness\", for that file only. A sound's own offset never reaches its mode files, and on a sound with no replacement it leaves the stock sound as it is.\n\nThe Replacement preview redraws and plays at this offset, so you can see and hear it. What the preview can't show is the automatic match to the stock sound's own level: that happens inside the encoder, against audio only the machine's own decoder can produce.",
+  prev: "Play the row above in the list, as the sort, search and filters show it.",
+  next: "Play the row below in the list, as the sort, search and filters show it.\n\nUnder Replacement, a row with a replacement plays the replacement; one without plays its original.",
   levelAllMode: "A music mode's sound is in the Replacement pane, so this box is that file's own loudness, one file at a time. Load a sound's own replacement to set the rows together.",
   levelAll: "Give every row the list is currently showing this same offset — the search box, the Type filter and Show: Changed/Unchanged all narrow what \"shown\" means.\n\nSo: set Type to Music, type this box to +4, and every song sits 4 dB above stock while the callouts stay where they are.\n\nSetting it back to 0 the same way clears them.",
 };
@@ -248,7 +250,7 @@ function NameCell({ r, prefix }) {
 }
 
 // ------------------------------------------------------------------ panes
-function Pane({ side, pane, actions, extra, onPlay }) {
+function Pane({ side, pane, actions, extra, onPlay, onStep }) {
   const p = usePlayer(side);
   const strip = useRef(null);
   const a = p.el;
@@ -300,10 +302,14 @@ function Pane({ side, pane, actions, extra, onPlay }) {
       ${loaded && dur > 0 ? html`<i class="aud-head" style=${`left:${pct(pos)}`}></i>` : null}
     </div>
     <div class="row aud-transport">
-      <${Button} size="sm" icon=${p.playing ? "pause" : "play"} label=${p.playing ? "Pause" : "Play"}
-        onClick=${() => { if (p.playing) stopPlayer(p); else onPlay(side); }}>${p.playing ? "Pause" : "Play"}<//>
-      <${Button} size="sm" kind="ghost" icon="stop" label="Stop" onClick=${() => {
-        stopAll(); seekTo(p, 0); call("audio.stop"); }} />
+      <span class="row aud-keys">
+        <${Button} size="sm" kind="ghost" icon="prev" label="Previous" title=${T.prev} onClick=${() => onStep(side, -1)} />
+        <${Button} size="sm" icon=${p.playing ? "pause" : "play"} label=${p.playing ? "Pause" : "Play"}
+          onClick=${() => { if (p.playing) stopPlayer(p); else onPlay(side); }}>${p.playing ? "Pause" : "Play"}<//>
+        <${Button} size="sm" kind="ghost" icon="next" label="Next" title=${T.next} onClick=${() => onStep(side, 1)} />
+        <${Button} size="sm" kind="ghost" icon="stop" label="Stop" onClick=${() => {
+          stopAll(); seekTo(p, 0); call("audio.stop"); }} />
+      </span>
       <span class="mono small muted nw aud-clock">${time}</span>
       ${extra ? html`<span class="grow"></span>${extra}` : null}
     </div>
@@ -660,6 +666,8 @@ export default function AudioTab() {
     syncPlayer(side, panes[side]);
     call("audio.play", side);
   };
+  // PAD-701: ⏮ / ⏭ play the row before / after (starting it silences the old one)
+  const stepPane = (side, delta) => call("audio.step", side, delta);
 
   // ---- the table
   const col = s.col;
@@ -784,9 +792,9 @@ export default function AudioTab() {
     ${s.ffmpeg_missing ? html`<${Note} kind="err">${s.ffmpeg_text}<//>` : null}
     ${s.req_note && !s.scanning ? html`<${Note} kind="info">${s.req_note}<//>` : null}
     <${Card} cls="aud-card" bodyCls="flush aud-body" footer=${html`<div class="aud-panes">
-        <${Pane} side="orig" pane=${panes.orig} onPlay=${playPane} />
+        <${Pane} side="orig" pane=${panes.orig} onPlay=${playPane} onStep=${stepPane} />
         <span class="aud-vsep"></span>
-        <${Pane} side="rep" pane=${panes.rep} onPlay=${playPane} actions=${repActions}
+        <${Pane} side="rep" pane=${panes.rep} onPlay=${playPane} onStep=${stepPane} actions=${repActions}
           extra=${s.level_cap ? html`<${Loudness} s=${s} selRel=${selRel} />` : null} />
       </div>`}>
       <div class="toolbar aud-tools">

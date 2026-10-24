@@ -12584,5 +12584,9 @@
 "The rest of a song mode's screens (its level clips, its Champion name) stay as they are: make them the same for every song on the Video and Text tabs.": "Die übrigen Bildschirme eines Song-Modus (seine Level-Clips, sein Champion-Name) bleiben, wie sie sind: Machen Sie sie auf den Tabs Video und Text für jeden Song gleich.",
 "An extract of a card built with a jukebox brings it back.": "Ein Extrahieren einer Karte, die mit einer Jukebox gebaut wurde, bringt sie zurück.",
 "its song mode's own": "das eigene des Song-Modus",
-"{} song(s), {} with an intro video.": "{} Song(s), {} mit einem Intro-Video."
+"{} song(s), {} with an intro video.": "{} Song(s), {} mit einem Intro-Video.",
+"Play the row above in the list, as the sort, search and filters show it.": "Spielt die Zeile darüber in der Liste ab, so wie Sortierung, Suche und Filter sie zeigen.",
+"Play the row below in the list, as the sort, search and filters show it.": "Spielt die Zeile darunter in der Liste ab, so wie Sortierung, Suche und Filter sie zeigen.",
+"Under Replacement, a row with a replacement plays the replacement; one without plays its original.": "Unter Ersatz spielt eine Zeile mit Ersatz den Ersatz ab; eine ohne spielt ihr Original.",
+"**Previous** and **Next**, either side of each Play, play the row above or below, following your sort, search and filters. Under Replacement they play a row's replacement where it has one, its original where not.": "**Zurück** und **Weiter**, links und rechts von jedem Abspielen, spielen die Zeile darüber oder darunter ab, gemäß Ihrer Sortierung, Suche und Filter. Unter Ersatz spielen sie den Ersatz einer Zeile, wo sie einen hat, sonst ihr Original."
 }

@@ -90,7 +90,7 @@ def state_of(h):
         return "drain"
     if k in ("every", "seconds_left", "timer_done"):
         return "running"
-    if k == "challenge":
+    if k in ("challenge", "battle"):           # PAD-706: a battle is picked, like a challenge, before the mode runs
         return "waiting"
     return {"idle": "waiting", "running": "running"}.get(w, "both")
 

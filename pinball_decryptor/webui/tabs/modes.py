@@ -2903,6 +2903,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 # PAD-615: the game's challenges a script may take the place of ([] = none on this game)
                 "challenges": (list(getattr(p, "challenges", ()) or ())
                                + ([BM.CHALLENGE_NEW] if getattr(p, "challenge_menu", 0) else [])) if p is not None else [],
+                # PAD-706: the battle selection's slots a script may take the place of ([] = none on this game)
+                "roster": list(getattr(p, "roster", ()) or ()) if p is not None else [],
                 # PAD-521: the game's own status bar a mode's name, colour and clock can go in (Bond LE)
                 "status_bar": bool(getattr(p, "status_bar", False)) if p is not None else False,
                 # PAD-547: an info line is a screen of its own, so it goes on every title that takes screens

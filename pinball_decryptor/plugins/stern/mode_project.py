@@ -325,8 +325,7 @@ HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "building", "shaker")
 #: name it like any coil, Godzilla and the older ones only in the test menu's record ("an optional accessory for
 #: Premium games, and is included in LE editions"), which the coil names missed. Every title but the Home Editions
 #: has it; it is listed where the latest build's own shake call is ported and proven (not James Bond 60th, whose
-#: newer framework has no such call, nor D&D LE, whose game the emulator does not start: its lines are ported,
-#: unproven).
+#: newer framework has no such call). D&D LE joined once the emulator started its game (PAD-713).
 MACHINE_HARDWARE = {
     "aerosmith": ("magnet", "scoop", "shaker"),
     "aerosmith_le": ("magnet", "scoop", "coils", "shaker"),
@@ -336,7 +335,7 @@ MACHINE_HARDWARE = {
     "beatles": ("magnet", "coils", "shaker"),
     "deadpool_le": ("scoop", "coils", "shaker"),
     "deadpool_pro": ("scoop", "coils", "shaker"),
-    "dungeons_and_dragons_le": ("magnet", "scoop", "coils"),
+    "dungeons_and_dragons_le": ("magnet", "scoop", "coils", "shaker"),
     "dungeons_and_dragons_pro": ("magnet", "scoop", "coils", "shaker"),
     "elvira3": ("scoop", "coils", "shaker"),
     "foo_fighters_le": ("magnet", "coils", "shaker"),
@@ -1019,6 +1018,7 @@ PLACE_PROVEN = frozenset({
     "avengers_infinity_pro-1.10",    # PAD-710 run all2: Super Reactor (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
     "deadpool_le-1.16",              # PAD-710 run all2: Disco Loops (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
     "deadpool_pro-1.16",             # PAD-710 run all2: Disco Loops (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "dungeons_and_dragons_le-1.10",  # PAD-713 (the rig starts its games since the dragon hold fills from HOLD 1): Mimic Hurry Up (12): the game's start taken, starts 0 -> 1, completed by its clock: stopped 0 -> 1, wins 0 -> 1, the game played on
     "dungeons_and_dragons_pro-1.10", # PAD-710 run all2: Map Choosen Ritual Singleball (53): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
     "foo_fighters_le-1.04",          # PAD-710 run all2: Super Skill Shot (8): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
     "foo_fighters_pro-1.04",         # PAD-710 run all2: Super Skill Shot (8): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
@@ -1208,6 +1208,7 @@ SHAKER_PROVEN = frozenset({
     "beatles-1.29",                    # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (523 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
     "deadpool_le-1.16",                # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (526 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
     "deadpool_pro-1.16",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (524 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "dungeons_and_dragons_le-1.10",    # PAD-713 2026-10-24 stock card, PAD_COIL_PROBE=1 (after PAD-658: a mode's end lets its shake run out): node 1 coil 0, setting 4: start 51/255 480 ms (on a hit, run out past a stop); end 51/255 480 ms ran out; the game's own 51/255 200 ms on the hits
     "dungeons_and_dragons_pro-1.10",   # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 480 ms, OFF at the stop (351 ms left); its short shake 51/255 200 ms on a hit; end 51/255 480 ms ran out
     "elvira3-1.13",                    # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 2: start 42/255 1020 ms, OFF at the stop (524 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
     "foo_fighters_le-1.04",            # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 330 ms, OFF at the stop (134 ms left); its short shake 23/255 200 ms on a hit; end 23/255 600 ms ran out
@@ -1381,6 +1382,7 @@ WIZARDS_PROVEN = frozenset({
     "avengers_infinity_pro-1.10",   # Soul Gem Quest started (ACTIVE 1); Black Order Multiball waited while it ran
     "deadpool_le-1.16",   # Megakrakolodonus Rex started (ACTIVE 1); Clone Multiball waited while it ran
     "deadpool_pro-1.16",   # Megakrakolodonus Rex started (ACTIVE 1); Clone Multiball waited while it ran
+    "dungeons_and_dragons_le-1.10",    # PAD-713: Tiny's Dice Game started (ACTIVE 1, the mode's own start); Tavern Brawl waited while it ran (ctinys_dice_game in its way)
     "dungeons_and_dragons_pro-1.10",   # Tiny's Dice Game started (ACTIVE 1); Tavern Brawl waited while it ran
     "godzilla_le-1.16",   # Monster Zero started (ACTIVE 1); Terror of Mechagodzilla waited while it ran
     "godzilla_pro-1.16",   # Monster Zero started (ACTIVE 1); Terror of Mechagodzilla waited while it ran

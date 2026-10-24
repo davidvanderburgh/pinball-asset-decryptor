@@ -201,6 +201,8 @@ plain-C builds, X-Men LE / Pro and Elvira on the function route) and 4 leave the
   auto-plunges a ball every ~8 s and never takes Start, fresh or seeded NVRAM): its lines (Tiny's Dice Game, Tavern
   Brawl - the Pro's, proven) stay "found, not yet seen" until a machine run proves them or a ticket of its own gets the
   rig to start it.
+  PAD-713 (2026-10-24): the rig starts its game now (the dragon hold fills from HOLD 1): Tiny's Dice Game started
+  (ACTIVE 1, the mode's own start), Tavern Brawl waited while it ran - in WIZARDS_PROVEN, 49 proven.
 - Guardians' Immolation Initiative: no FG_ flag of its own - its start and running query not found.
 - A mini-wizard named on the rulesheet whose class was not found: John Wick's Red Circle Reckoning (run by
   `crule_wizard_modes`), The Mandalorian's I Like Those Odds.

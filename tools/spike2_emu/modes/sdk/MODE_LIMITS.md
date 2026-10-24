@@ -178,7 +178,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all |  |
-| Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, light shows |
+| Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places |
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges, game mode places |

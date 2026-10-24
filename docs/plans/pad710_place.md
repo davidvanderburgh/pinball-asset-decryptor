@@ -64,4 +64,6 @@ Default Game Mode 3): STARTED audit 180, PLAYED flag 86, then COMPLETED flag 89.
 ## Not done here
 
 - (Done in run 2, below.)
-- D&D LE 1.10: no game starts on the rig (attract loop, known); its framework is D&D Pro's (proven).
+- D&D LE 1.10: no game started on the rig (attract loop). PAD-713: the rig's dragon hold now fills from HOLD 1, the
+  game starts, and place_job2.sh passes: Mimic Hurry Up (12) taken, starts 0 -> 1, stopped 0 -> 1, wins 0 -> 1, the
+  game played on. In PLACE_PROVEN.

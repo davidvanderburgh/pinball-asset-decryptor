@@ -3183,7 +3183,7 @@
 "Inner image": "Image interne",
 "Input": "Entrée",
 "Input files": "Fichiers d'entrée",
-"Insider Connected: players still log in on a card with modes, but the machine sends no game, score, high-score or achievement report to Insider Connected. A mode's points are not the game's stock scoring, so they stay on the machine.": "Insider Connected : les joueurs se connectent toujours avec une carte contenant des modes, mais la machine n'envoie à Insider Connected aucun rapport de partie, de score, de meilleur score ou de succès. Les points d'un mode ne sont pas le score d'origine du jeu : ils restent sur la machine.",
+"Insider Connected: players still log in on a card with modes, but the machine sends no game, score, high-score or achievement report to Insider Connected, and the game awards no Insider achievements. A mode's points are not the game's stock scoring, so they stay on the machine.": "Insider Connected : les joueurs se connectent toujours avec une carte contenant des modes, mais la machine n'envoie à Insider Connected aucun rapport de partie, de score, de meilleur score ou de succès, et le jeu n'accorde aucun succès Insider. Les points d'un mode ne sont pas le score d'origine du jeu : ils restent sur la machine.",
 "Insider Login Timer": "Minuteur de connexion Insider",
 "Insider Play Again Timer": "Minuteur « rejouer » Insider",
 "Inspect": "Inspecter",

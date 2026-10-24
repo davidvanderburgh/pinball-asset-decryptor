@@ -11666,11 +11666,20 @@ static int port_gate(void)
  *                 construction of GAME_SESSION_END message", the outgoing queue drops the entry
  *                 (a failed send is dequeued, never retried) and the game plays on.
  * What is refused: the game session (start, update, end: the players and their scores), the
- * high-score table report, and the game-event stream achievements are earned from. Everything
+ * high-score table report, the game-event stream, and (PAD-698) the achievement query. Everything
  * else the game sends (audits, alerts, home team, player properties, the free-game code, the
- * configuration and descriptor queries) goes out as before.
- * The gate is REQUIRED: a port without both sites arms nothing (insider_arm), and the app refuses
- * to put modes on a card whose port lacks them (mode_write.card_refusal). */
+ * configuration and the other descriptor queries) goes out as before.
+ * Achievements (PAD-698): the GAME decides them, on the machine. It asks the agent for the list
+ * of achievements (GAME_ACHIEVEMENT_QUERY, message type 28 on every build measured), watches the
+ * game for them and shows NEW INSIDER ACHIEVEMENT! itself - a machine with modes on it showed one
+ * with the score reports held back. Without the list the game has nothing to award: its lookup
+ * says "Achievement descriptors not loaded." and gives nothing. The query has no endpoint path
+ * (no agent_header), so the gate knows it by its message type, agent_begin's r2, read out of the
+ * game's own code at boot (achq_find): the one sender that logs "Failed to begin construction of
+ * GAME_ACHIEVEMENT_QUERY message" when agent_begin fails sets r2 just before it calls it.
+ * The gate is REQUIRED: a port without both sites, or a game whose achievement query is not
+ * found, arms nothing (insider_arm), and the app refuses to put modes on a card whose port lacks
+ * the sites (mode_write.card_refusal). */
 #define INSIDER_ENDPOINT_MAX 96
 static char insider_endpoint[INSIDER_ENDPOINT_MAX];
 static unsigned insider_dropped[4];
@@ -11698,6 +11707,105 @@ static int insider_blocked(const char *endpoint)
     return 0;
 }
 
+/* ---- PAD-698: the achievement query's message type, out of the game's own code ---------------- */
+static const char INSIDER_ACHQ_WORDS[] = "Failed to begin construction of GAME_ACHIEVEMENT_QUERY message";
+static int insider_achq = -1;             /* agent_begin's r2 for the achievement query; -1 = not found */
+static unsigned insider_achq_at;          /* where its sender loads those words */
+static unsigned insider_achq_held;
+
+/* a word of the game's code, 0 when it is not mapped readable */
+static unsigned code_word(unsigned at)
+{
+    return maps_has(at, 4, MAP_R) ? *(const unsigned *)(unsigned long)at : 0;
+}
+
+/* an ARM data-processing immediate: eight bits rotated right by twice the four above them
+ * (tests lift it verbatim) */
+static unsigned arm_imm(unsigned w)
+{
+    unsigned rot = ((w >> 8) & 15u) * 2u, v = w & 0xffu;
+    return rot ? (v >> rot) | (v << (32u - rot)) : v;
+}
+
+/* 1 when the instruction at `at` loads the address `str`: a movw with its low half and a movt of the
+ * same register with its high half within the next eight, or a literal load of it (tests lift it
+ * verbatim) */
+static int achq_loads(unsigned at, unsigned str)
+{
+    unsigned w = code_word(at), rd, j, w2, lit;
+    if ((w & 0x0ff00000u) == 0x03000000u && (((w >> 4) & 0xf000u) | (w & 0xfffu)) == (str & 0xffffu)) {
+        rd = (w >> 12) & 15u;
+        for (j = 1; j <= 8; j++) {
+            w2 = code_word(at + 4 * j);
+            if ((w2 & 0x0ff0f000u) == (0x03400000u | rd << 12))
+                return (((w2 >> 4) & 0xf000u) | (w2 & 0xfffu)) == str >> 16;
+        }
+        return 0;
+    }
+    if ((w & 0x0f7f0000u) == 0x051f0000u) {
+        lit = at + 8;
+        lit = (w & 0x00800000u) ? lit + (w & 0xfffu) : lit - (w & 0xfffu);
+        return code_word(lit) == str;
+    }
+    return 0;
+}
+
+/* The sender loads its failure words right after agent_begin answered: from `at`, back up to 16
+ * instructions to `bl agent_begin`, then up to 8 more to the `mov r2, #type` it was called with.
+ * The type, or -1 when the code before `at` is not that shape. (tests lift it verbatim) */
+static int achq_type_before(unsigned at, unsigned begin)
+{
+    unsigned b, m, w, off;
+    for (b = 1; b <= 16; b++) {
+        w = code_word(at - 4 * b);
+        if ((w & 0xff000000u) != 0xeb000000u) continue;              /* bl, unconditional */
+        off = ((w & 0xffffffu) ^ 0x800000u) - 0x800000u;             /* signed words */
+        if (at - 4 * b + 8 + off * 4 != begin) continue;
+        for (m = 1; m <= 8; m++) {
+            w = code_word(at - 4 * b - 4 * m);
+            if ((w & 0xfffff000u) == 0xe3a02000u) return (int)arm_imm(w);   /* mov r2, #imm */
+        }
+        return -1;
+    }
+    return -1;
+}
+
+/* the achievement query's type on this game: the words in the game's code mappings, then the one
+ * instruction that loads them with `bl agent_begin` and `mov r2, #type` before it. -1 = not found. */
+static int achq_find(unsigned begin)
+{
+    const unsigned how = MAP_R | MAP_X | MAP_GAME;
+    const unsigned n = sizeof INSIDER_ACHQ_WORDS - 1;
+    unsigned str = 0, at;
+    int i, t;
+    for (i = 0; i < n_maps && !str; i++) {
+        const char *p, *e;
+        if ((maps[i].how & how) != how || maps[i].hi - maps[i].lo < n) continue;
+        p = (const char *)maps[i].lo;
+        e = (const char *)maps[i].hi - n;
+        for (; p <= e; p++)
+            if (*p == 'F' && p[n - 1] == 'e') {
+                unsigned k;
+                for (k = 1; k < n && p[k] == INSIDER_ACHQ_WORDS[k]; k++) ;
+                if (k == n) { str = (unsigned)(unsigned long)p; break; }
+            }
+    }
+    if (!str) return -1;
+    for (i = 0; i < n_maps; i++) {
+        if ((maps[i].how & how) != how) continue;
+        for (at = (unsigned)maps[i].lo; at + 4 <= maps[i].hi; at += 4) {
+            unsigned w = *(const unsigned *)(unsigned long)at;      /* a cheap look before achq_loads */
+            if (!((w & 0x0ff00000u) == 0x03000000u && (w & 0xfffu) == (str & 0xfffu)) &&
+                (w & 0x0f7f0000u) != 0x051f0000u) continue;
+            if (achq_loads(at, str) && (t = achq_type_before(at, begin)) >= 0) {
+                insider_achq_at = at;
+                return t;
+            }
+        }
+    }
+    return -1;
+}
+
 static void on_agent_header(unsigned *r)
 {
     const char *s = (const char *)(unsigned long)r[1];
@@ -11707,9 +11815,18 @@ static void on_agent_header(unsigned *r)
 
 static int on_agent_begin(unsigned *r)
 {
-    int i = insider_blocked(insider_endpoint);
+    int i;
     unsigned n;
-    (void)r;
+    if (insider_achq >= 0 && r[2] == (unsigned)insider_achq) {      /* PAD-698: the achievement list */
+        n = ++insider_achq_held;
+        if (n == 1)
+            say("insider: the achievement query (message type %d) is not sent - the game has no "
+                "achievements to award and plays on", insider_achq);
+        else if ((n & 15) == 0)
+            say("insider: the achievement query not sent, %u times", n);
+        return 1;
+    }
+    i = insider_blocked(insider_endpoint);
     if (!i) return 0;
     n = ++insider_dropped[i - 1];
     if (n == 1)
@@ -11721,8 +11838,9 @@ static int on_agent_begin(unsigned *r)
     return 1;
 }
 
-/* 1 = the gate is up. 0 = this port cannot keep scores off Insider Connected: NOTHING is hooked
- * and the game runs stock, whatever else the port names. */
+/* 1 = the gate is up. 0 = this port cannot keep scores off Insider Connected, or (PAD-698) the
+ * game's achievement query was not found: NOTHING is hooked and the game runs stock, whatever else
+ * the port names. */
 static int insider_arm(void)
 {
     static const char *const s[] = { "agent_header", "agent_begin", 0 };
@@ -11731,13 +11849,22 @@ static int insider_arm(void)
             "Insider Connected as real scores - NOTHING IS HOOKED, the game runs stock");
         return 0;
     }
+    insider_achq = achq_find(fn("agent_begin"));
+    if (insider_achq < 0) {
+        say("insider: the game's achievement query was not found, so the game could award Insider "
+            "achievements on a card with modes - NOTHING IS HOOKED, the game runs stock");
+        return 0;
+    }
     if (!hook(fn("agent_header"), on_agent_header) || !hook_veto(fn("agent_begin"), on_agent_begin)) {
         say("insider: the gate could not be hooked - NOTHING IS HOOKED, the game runs stock");
+        insider_achq = -1;
         return 0;
     }
     say("insider: score reports stay on this machine (the game session, high scores and game "
-        "events; agent_header 0x%08x, agent_begin 0x%08x); the login and the rest of Insider "
-        "Connected are untouched", fn("agent_header"), fn("agent_begin"));
+        "events; agent_header 0x%08x, agent_begin 0x%08x), and the game gets no achievements to "
+        "award (the achievement query, message type %d, loaded at 0x%08x, is held back); the login "
+        "and the rest of Insider Connected are untouched", fn("agent_header"), fn("agent_begin"),
+        insider_achq, insider_achq_at);
     return 1;
 }
 

@@ -37,7 +37,7 @@ def _src(name):
                                                  ("james_bond_pro-1.06", 0xe6058, 0x164f2c)])
 def test_bond_names_bird_one_books_and_both_lock_multiballs_starts(key, start28, start29):
     text = _port(key)
-    for line in ("value place_audit_started_29       290", "value place_flag_played_29         73",
+    for line in ("value place_audit_started_29       263", "value place_flag_played_29         73",
                  "site  place_start_28               0x%08x 0xe92d43f0 0xe24dd00c" % start28,
                  "site  place_start_29               0x%08x 0xe92d40f0 0xe24dd00c" % start29):
         assert line in text, line
@@ -46,7 +46,7 @@ def test_bond_names_bird_one_books_and_both_lock_multiballs_starts(key, start28,
 
 
 def test_jurassic_park_the_pin_names_restore_power():
-    assert "value place_audit_started_5        189" in _port("jurassic_park_the_pin-1.05")
+    assert "value place_audit_started_5        184" in _port("jurassic_park_the_pin-1.05")
     places = {i: n for i, n, _c in MP._places(MP.read_port(os.path.join(PORTS, "jurassic_park_the_pin-1.05.port")))}
     assert places[5] == "Restore Power"
 
@@ -97,15 +97,15 @@ def _elf(stem):
 def test_bird_one_is_read_off_the_program():
     books, add = MF.plain_books(_elf("james_bond_le-1_06_0"), _port("james_bond_le-1.06"))
     assert add == 0x245ea0
-    assert books[29] == {"started": 290, "played": 73, "start": 0x165f50}      # ROCKET_MULTIBALL, its own start
-    assert books[28] == {"started": 371, "played": 106, "start": 0xe650c}     # Jetpack: its own start too
+    assert books[29] == {"started": 263, "played": 73, "start": 0x165f50}      # ROCKET_MULTIBALL, its own start
+    assert books[28] == {"started": 377, "played": 106, "start": 0xe650c}     # Jetpack: its own start too
     assert "start" not in books[6]                                            # a real start: no other
     assert len(books) == 30
 
 
 def test_restore_power_is_read_off_the_program():
     books, _add = MF.plain_books(_elf("jurassic_park_the_pin-1_05_0"), _port("jurassic_park_the_pin-1.05"))
-    assert books[5] == {"started": 189} and len(books) == 6
+    assert books[5] == {"started": 184} and len(books) == 6
 
 
 # ---- the runtime ---------------------------------------------------------------------------------

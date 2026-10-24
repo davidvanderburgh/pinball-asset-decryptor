@@ -687,13 +687,13 @@ site  game_scores            0x0019db34 0xe92d4ff0 0xe24dd0bc
 # PAD-710: the game's own books of its modes (mode_framework.py, from this build's audit and flag names): a
 # mode of ours in one's place counts its STARTED audit and PLAYED flag, and when completed its COMPLETED ones
 site  audit_add              0x000bee50 0xe92d43f0 0xe2505000
-value place_audit_started_0        188
-value place_audit_completed_0      189
-value place_audit_started_1        192
-value place_audit_completed_1      193
-value place_audit_started_2        196
-value place_audit_completed_2      197
-value place_audit_started_3        200
-value place_audit_completed_3      201
-value place_audit_started_4        204
-value place_audit_completed_4      205
+value place_audit_started_0        213
+value place_audit_completed_0      214
+value place_audit_started_1        217
+value place_audit_completed_1      218
+value place_audit_started_2        221
+value place_audit_completed_2      222
+value place_audit_started_3        229
+value place_audit_completed_3      230
+value place_audit_started_4        225
+value place_audit_completed_4      226

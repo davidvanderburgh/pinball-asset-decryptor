@@ -7,9 +7,12 @@
   the merge dropped them as "no reference names it", so a derived older build had no game mode to take the place of.
 - The older shipped ports carry the lines, read off their own programs.
 """
+import glob
 import os
 import re
 import types
+
+import pytest
 
 from pinball_decryptor.plugins.stern import mode_framework as MF
 from pinball_decryptor.plugins.stern import mode_project as MP
@@ -138,3 +141,75 @@ def test_a_derived_port_keeps_the_builds_own_game_modes(monkeypatch):
         assert line in body, line
     assert "NOT PLACED" not in text                     # (they were "no reference names it")
     assert text.count("block_name_8") == 1 and text.count("block_default") == 1
+
+
+# ---- a plain-C build's own modes, from the same title's port --------------------------------------------------------
+#: game programs (<game>-<major>_<minor>_<patch>*.elf): PAD_GAME_ELFS, several joined with os.pathsep
+ELFS = [d for d in (os.environ.get("PAD_GAME_ELFS") or r"C:\tmp\PAD-698\elf;C:\tmp\PAD-714\elf").split(os.pathsep) if d]
+
+
+def _elf(stem):
+    for d in ELFS:
+        found = glob.glob(os.path.join(d, stem + "*.elf"))
+        if found:
+            with open(found[0], "rb") as f:
+                return f.read()
+    pytest.skip("no %s game program on this machine (set PAD_GAME_ELFS)" % stem)
+
+
+def test_a_start_is_matched_by_its_head_not_its_immediates_or_registers():
+    # Batman 66: Joker (episodes 5-6) on 1.13 saves r4-r11 and counts audit 0x31, on 1.14 r4-r10 and 0x36
+    assert MF._shape(0xE92D4FF8, 0xE3A00031) == MF._shape(0xE92D47F0, 0xE3A00036)
+    assert MF._shape(0xE3001234, 0xE92D4010) == MF._shape(0xE30A1678, 0xE92D4010)      # movw r1 first, then the push
+    assert MF._shape(0xE92D4070, 0xE1A05000) != MF._shape(0xE92D4070, 0xE1A04000)      # another register moved
+    assert MF._shape(0xE92D4070, 0xE24DD014) != MF._shape(0xE92D4070, 0xE1A05000)
+
+
+def test_an_older_plain_c_build_gets_its_starts_from_the_same_titles_port():
+    got = MF.plain_starts(_elf("uncanny_xmen_le-0_97_0"), _port("uncanny_xmen_le-0.98"))
+    assert got[0] == (0xE3A7C, "Fastball Special") and got[3] == (0x5C86C, "A Fiery Assault")
+    assert 11 not in got and 13 not in got          # a tail-reached start, a wizard: no audit witness of their own
+    assert len(got) == 12
+    got = MF.plain_starts(_elf("elvira3-1_11_0"), _port("elvira3-1.13"))
+    assert got == {0: (0xDC31C, "Houses (whichever House is selected)")}
+
+
+def test_the_finder_agrees_with_the_shipped_starts_and_never_places_one_wrong():
+    for key in ("uncanny_xmen_le-0.98", "batman-1.13", "metallica_spike-1.03", "james_bond_le-1.06",
+                "stranger_things_le-1.12"):
+        title = {"batman-1.13": "batman-1.14", "metallica_spike-1.03": "metallica_spike-1.04",
+                 "stranger_things_le-1.12": "stranger_things_le-1.13"}.get(key, key)
+        got = MF.plain_starts(_elf(key.replace(".", "_") + "_"), _port(title))
+        have = {int(m.group(1)): int(m.group(2), 16)
+                for m in re.finditer(r"^site\s+block_start_(\d+)\s+0x([0-9a-f]+)", _port(key), re.M)}
+        assert got and all(have.get(i) == va for i, (va, _n) in got.items()), key
+    # James Bond's Jetpack Multiball (28) is the lock-open check (PAD-578), not the function that counts its audit
+    assert 28 not in MF.plain_starts(_elf("james_bond_le-1_06_"), _port("james_bond_le-1.06"))
+
+
+def test_a_plain_c_books_audit_is_the_id_its_start_counts():
+    # X-Men 0.98 counts AUD_FASTBALL_SPECIAL_STARTS as 165 (its name is the 209th); Bond's Ahoy wizard 276, not
+    # AUD_SPECTRE_TARGET_1's 180
+    books, _add = MF.plain_books(_elf("uncanny_xmen_le-0_98_"), _port("uncanny_xmen_le-0.98"))
+    assert books[0]["started"] == 165
+    books, _add = MF.plain_books(_elf("james_bond_le-1_06_"), _port("james_bond_le-1.06"))
+    assert books[6]["started"] == 276
+    assert "value place_audit_started_0        165" in _port("uncanny_xmen_le-0.98")
+
+
+def test_a_derived_plain_c_draft_takes_the_titles_starts(monkeypatch):
+    calls = []
+
+    def lines(b, text):
+        calls.append(text)
+        return ["site block_start_0 0x00001000 0xe92d4010 0xe1a04000", "text block_name_0 Houses"] if "ok" in text else []
+    monkeypatch.setattr(MF, "plain_start_lines", lines)
+    tgt = types.SimpleNamespace(b=b"")
+    out = portgen.own_plain_starts(tgt, "elvira3", "game elvira3\n# ok\n")
+    assert out[1:] == ["site block_start_0 0x00001000 0xe92d4010 0xe1a04000", "text block_name_0 Houses"]
+    assert calls == ["game elvira3\n# ok\n"]
+    # no same-title reference: the title's shipped ports, its own name first, newest first
+    calls.clear()
+    portgen.own_plain_starts(types.SimpleNamespace(b=b""), "uncanny_xmen_le", None)
+    assert [re.search(r"^version\s+(\S+)", t, re.M).group(1) for t in calls][:1] == ["0.98"]
+    assert all(re.search(r"^game\s+uncanny_xmen", t, re.M) for t in calls)

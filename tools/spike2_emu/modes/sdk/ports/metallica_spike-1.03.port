@@ -683,17 +683,17 @@ value challenge_place_4        1
 # PAD-710: the game's own books of its modes (mode_framework.py, from this build's audit and flag names): a
 # mode of ours in one's place counts its STARTED audit and PLAYED flag, and when completed its COMPLETED ones
 site  audit_add              0x002c1f50 0xe92d43f0 0xe2505000
-value place_audit_started_0        286
-value place_audit_completed_0      295
-value place_audit_started_1        296
-value place_audit_completed_1      305
-value place_audit_started_2        306
-value place_audit_completed_2      314
-value place_audit_started_3        315
-value place_audit_completed_3      324
-value place_audit_started_4        325
-value place_audit_started_5        328
-value place_audit_started_6        331
-value place_audit_started_7        332
-value place_audit_started_8        333
-value place_audit_started_9        361
+value place_audit_started_0        272
+value place_audit_completed_0      281
+value place_audit_started_1        282
+value place_audit_completed_1      291
+value place_audit_started_2        292
+value place_audit_completed_2      300
+value place_audit_started_3        301
+value place_audit_completed_3      310
+value place_audit_started_4        311
+value place_audit_started_5        314
+value place_audit_started_6        322
+value place_audit_started_7        323
+value place_audit_started_8        324
+value place_audit_started_9        352

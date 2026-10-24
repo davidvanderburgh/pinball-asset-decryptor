@@ -645,7 +645,8 @@ def lines_for(elf, port_text):
 # A title with no mode class keeps its books in the framework's audits and game flags, named after the mode: James Bond
 # LE 1.06's Ahoy Mr Bond Wizard Mode starts by setting FG_AHOY_MR_BOND_WIZARD_MODE_ACTIVE (and _PLAYED) and counts
 # AUD_AHOY_MR_BOND_WIZARD_MODE_STARTED; its completion is FG_..._COMPLETED. Both name tables are in the program (FG_INVALID
-# and AUD_INVALID at id 0: the index is the id), and every build counts an audit through the same framework function:
+# at id 0: a flag's index is its id; an audit's id is its descriptor's, stock_scan_c.audit_ids - PAD-714), and every
+# build counts an audit through the same framework function:
 #
 #     push {r4, r5, r6, r7, r8, r9, lr} ; subs r5, r0, #0 ; sub sp, sp, #0x14 ; ...   (id in r0, the amount in r1)
 #
@@ -743,14 +744,16 @@ def plain_books(elf, port_text):
         return {}, None
     e = PC.Elf(elf)
     add = audit_add(e)
-    aud = names_table(e, "AUD_INVALID", "AUD_") if add else []   # no audit add: its flags alone (Star Wars ELG)
     fg = names_table(e, "FG_INVALID", "FG_")
     if not fg:
         return {}, None
-    aid = {n: i for i, n in enumerate(aud)}
+    from . import stock_scan_c as SC
+    prog = S.Program(elf)
+    # PAD-714: an audit's id is its descriptor's (what the game's own code passes the audit add), not its name's place:
+    # X-Men 0.98 counts AUD_FASTBALL_SPECIAL_STARTS as 165, its name 209th. No audit add: its flags alone (Star Wars ELG)
+    aid = {n: i for i, n in SC.audit_ids(prog)[1].items()} if add else {}
     fid = {n: i for i, n in enumerate(fg)}
     flags = PC.flag_functions(e)
-    prog = S.Program(elf)
     out = {}
 
     def flag_stems(f, depth=1):                      # the ACTIVE / PLAYED flags *f* (or what it calls) sets
@@ -828,6 +831,115 @@ def plain_lines_for(elf, port_text):
     try:
         books, add = plain_books(elf, port_text)
         return missing_from(plain_lines(books, add, S.Program(elf)), port_text or "")
+    except Exception:                                    # noqa: BLE001
+        return []
+
+
+# ---- a plain-C build's own modes, from the same title's port ----------------------------------------------------
+# PAD-714: on a plain-C title the game modes' starts (`site block_start_<i>`, PAD-363) come from the start finder
+# (sdk/cstarts, with each title's hand-checked knowledge), run over the programs on hand when a port ships. An older
+# build derived on a card has none: no game mode to keep off, none to take the place of. The same title's port names
+# its modes; each one's start on THIS build is the one function that counts that mode's STARTED audit (the finder's
+# audit witness), as the reference's does - the same audit, by name, so a build that renumbered its audits still gets
+# its own - and whose first two words the veto can move.
+def _audit_counters(prog, add):
+    """{audit id: [function entry]} over every caller of the audit add, with the tracker's constants (a movw made far
+    ahead of the call counts)."""
+    out = collections.defaultdict(list)
+    for f in sorted({prog.func_start(c) for c in prog.callers(add)}):
+        for c in S.track(prog, f).calls:
+            v = c["args"].get("r0") if c["target"] == add else None
+            if isinstance(v, S.Val) and f not in out[v.v]:
+                out[v.v].append(f)
+    return out
+
+
+def plain_starts(elf, ref_text):
+    """{i: (start, name)} for the reference port's game modes (`site block_start_<i>`, `text block_name_<i>`, a
+    plain-C port: no `data block_obj_`) on the build *elf*: each where exactly one function counts the mode's STARTED
+    audit (by the reference start's own audit: its name names, at the function whose first two words are the reference start's) and its entry is movable; a mode
+    the witness cannot place is left out. {} on a C++ reference or a build without the tables."""
+    from . import game_mode_blocks as B
+    from . import portchallenge as PC
+    if not ref_text or re.search(r"^data\s+block_obj_\d+", ref_text, re.M):
+        return {}
+    from . import stock_scan_c as SC
+    prog = S.Program(elf)
+    _names, ids, _rec = SC.audit_ids(prog)               # the id the code passes, not the name's place (PAD-634)
+    add = audit_add(PC.Elf(elf)) or SC.find_audit_add(prog, ids)
+    if not ids or not add:
+        return {}
+    aid = {n: i for i, n in ids.items()}
+    counters = _audit_counters(prog, add)
+    out = {}
+    for m in re.finditer(r"^site\s+block_start_(\d+)\s+0x[0-9a-f]+\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)", ref_text, re.M):
+        i, words = int(m.group(1)), (int(m.group(2), 16), int(m.group(3), 16))
+        nm = re.search(r"^text\s+block_name_%d\s+(.+)$" % i, ref_text, re.M)
+        if not nm:
+            continue
+        name = nm.group(1).strip()
+        shape, fs = _shape(*words), []
+        for st in _stems(name):
+            ids = [aid[n % st] for n in ("AUD_%s_STARTED", "AUD_%s_STARTS", "AUD_%s_START") if n % st in aid]
+            heads = [f for a in ids for f in counters.get(a, ())]
+            ins = {e for f in heads for e in _entries(prog, f)}
+            same = sorted(e for e in ins if (prog.word(e), prog.word(e + 4)) == words)
+            fs = same if len(same) == 1 else sorted(e for e in ins if _shape(prog.word(e), prog.word(e + 4)) == shape)
+            if fs:
+                break
+        fs = sorted(set(fs))
+        if len(fs) == 1 and B.movable((prog.word(fs[0]), prog.word(fs[0] + 4)))                 and fs[0] not in [v[0] for v in out.values()]:
+            out[i] = (fs[0], name)
+    return out
+
+
+def _shape(*words):
+    """Two instruction words with what another build of the title changes left out - a push's register list (Batman
+    66 1.13 saves r4-r11 where 1.14 saves r4-r10), a `movw` / `movt` / `mov #`'s immediate (an audit id or a flag
+    renumbered): the same function's head on every build."""
+    out = []
+    for w in words:
+        if w is not None and w & 0xFFFF4000 == 0xE92D4000:
+            w = 0xE92D4000                               # push {..., lr}
+        elif w is not None and w & 0x0FF00000 in (0x03000000, 0x03400000):
+            w &= 0xFFF0F000                              # movw / movt rd, #imm16
+        elif w is not None and w & 0x0FEF0000 == 0x03A00000:
+            w &= 0xFFFFF000                              # mov rd, #imm
+        out.append(w)
+    return tuple(out)
+
+
+def _entries(prog, f):
+    """*f* (a push) and the words before it that flow into it (a movw the compiler put ahead of the push: the
+    function's true entry is up to six words earlier, PAD-363's cstart_lib.entry)."""
+    out = [f]
+    for k in range(1, 7):
+        e = f - 4 * k
+        w = prog.word(e)
+        if w is None:
+            break
+        d = S.decode(w, e)
+        if S.ends_flow(d) or d[0] in ("poppc", "bxlr") or prog.literal_loads(e):
+            break
+        out.append(e)
+    return out
+
+
+def plain_start_lines(elf, ref_text):
+    """The `site block_start_<i>` / `text block_name_<i>` lines of :func:`plain_starts` (the reference's ids and names,
+    this build's starts and words); [] when it found none. Never raises."""
+    try:
+        found = plain_starts(elf, ref_text)
+        if not found:
+            return []
+        prog = S.Program(elf)
+        out = ["# PAD-714: the game's own modes, the same title's port's, each found on this build by the function that "
+               "counts", "# its STARTED audit (mode_framework.plain_starts)"]
+        for i in sorted(found):
+            f, name = found[i]
+            out += ["site block_start_%-5d 0x%08x 0x%08x 0x%08x" % (i, f, prog.word(f) or 0, prog.word(f + 4) or 0),
+                    "text block_name_%-6d %s" % (i, name)]
+        return out
     except Exception:                                    # noqa: BLE001
         return []
 

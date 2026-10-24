@@ -222,7 +222,7 @@ def test_a_plain_c_title_counts_through_its_own_books():
     assert places[29] == ("Bird One Multiball", True)    # PAD-715: the game's ROCKET_MULTIBALL books
     text = _port("james_bond_le-1.06")
     assert re.search(r"^site  audit_add\s+0x00245ea0 0xe92d43f0 0xe2505000$", text, re.M)
-    for line in ("value place_audit_started_6        180", "value place_flag_played_6          86",
+    for line in ("value place_audit_started_6        276", "value place_flag_played_6          86",   # PAD-714: the id its start counts
                  "value place_flag_completed_6       89"):
         assert line in text, line
     p = MP.profile("james_bond_le_1_06")

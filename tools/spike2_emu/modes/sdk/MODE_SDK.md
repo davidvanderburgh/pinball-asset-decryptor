@@ -4008,7 +4008,10 @@ more than the framework's does that too - it is the game's own outcome:
 Stranger Things, Star Wars ELG, X-Men) have no mode class: their modes are start functions and game flags, and the
 game keeps each mode's books in the framework's audits and flags, named after the mode (James Bond LE 1.06's Ahoy Mr
 Bond Wizard Mode: `AUD_AHOY_MR_BOND_WIZARD_MODE_STARTED`, `FG_AHOY_MR_BOND_WIZARD_MODE_PLAYED`, `..._COMPLETED`). Both
-name tables are in the program (`AUD_INVALID` / `FG_INVALID` at id 0: the index is the id), and every build counts an
+name tables are in the program (`FG_INVALID` at id 0: a flag's index is its id; an audit's id is its DESCRIPTOR's,
+`stock_scan_c.audit_ids` - PAD-714: X-Men 0.98 counts `AUD_FASTBALL_SPECIAL_STARTS` as 165, its name 209th, and until
+PAD-714 the ports named the name's place, so a mode in one's place counted another audit: Bond's Ahoy wizard bumped
+`AUD_SPECTRE_TARGET_1`, 180, where its own start counts 276), and every build counts an
 audit through the same framework function (`push {r4-r9, lr}; subs r5, r0, #0; sub sp, sp, #0x14`: id in r0, the amount
 in r1). `mode_framework.plain_books` takes each game mode's stem from the ACTIVE / PLAYED flag its start sets (else from
 the port's name, in the spellings the games use: a `MODE_` prefix or `_MODE` suffix, `HURRYUP`, Batman's `MODE_EP_47_48`
@@ -4029,6 +4032,19 @@ newest plain-C ports name have books (PAD-715 found the last three: JP The Pin c
 `AUD_RESTORE_POWER_START`; Bond's Bird One Multiball is `ROCKET_MULTIBALL` in the program's names, so where neither the
 start's flags nor the name find books, the stem is the one the start's callers set). A plain-C start's own arguments
 are its own, so `pm_game_mode_start` calls one only while a claim holds it - the claim refuses it before any of it runs.
+
+**An older plain-C build (PAD-714).** The plain-C titles' game modes (`site block_start_<i>`) come from the start
+finder (sdk/cstarts, with each title's hand-checked knowledge), run over the programs on hand when a port ships; a port
+derived on a card from an older build had none. `mode_framework.plain_starts` takes the same title's port's modes (the
+reference's when it is the same title, else the title's shipped ports, its own model first, newest first) and finds
+each on the build by the finder's audit witness: the one function that counts the mode's STARTED audit (by name, at its
+id on this build), whose head is the reference start's - a push with lr and the same second instruction, the push's
+registers and a `mov`/`movw`'s number left out (Batman 66 1.13 saves r4-r11 and counts 0x31 where 1.14 saves r4-r10
+and counts 0x36), its true entry up to six words before the push (a `movw` scheduled first). A mode the witness cannot
+place is left out: never a wrong address. Checked against every shipped plain-C start whose program is on hand (175
+agree, 0 differ; the ones left out are counted from data - Beatles' songs, Bond's story chapters - or a check before
+the start, Bond's Jetpack). Elvira 3 1.11 gets its Houses, X-Men LE 0.97 12 of its 14 modes; James Bond 60th 1.10
+none (its one mode, the Villain Mode, keeps no audit).
 
 **A check before the start (PAD-715).** Bond's Jetpack and Bird One Multiballs' `block_start` is not their start but
 the lock-open check (PAD-578: refusing it closes the lock, which is what a block wants). The lamps ask that check all
@@ -4058,7 +4074,8 @@ the multiball's place, 20 s of play with nothing taken, the lock lit two short a
 ball locked, nothing taken), then one short: the handler called the multiball's start, the mode took its place there
 (STARTED audit 0 -> 1, PLAYED flag set, balls 1: no multiball served), ran its clock out and the game played on. The
 v1.252.0 runtime took both places about 4 s into the ball, no lock made. JP The Pin Restore Power (`jp_job.sh`): its
-STARTED audit 189 0 -> 1 (v1.252.0: "counted only as ours").
+STARTED audit 0 -> 1 (v1.252.0: "counted only as ours"; that was id 189, the name's place - its own start counts
+184, PAD-714).
 
 **A challenge that is one of the game's modes.** A challenge (below) whose words lead one of the port's game modes'
 names (`mode_framework.challenge_places`: Bond's Ahoy Mr. Bond = Ahoy Mr Bond Wizard Mode, Godzilla's King of the
@@ -4070,7 +4087,8 @@ value challenge_place_<n> <id>      challenge n is the game's mode id
 
 and a mode of ours taking that challenge counts as the mode: its START's bookkeeping at the take, its stop (C++) or
 books (plain-C) with the outcome at the mode's end (`pm_place_over`, from mode_file.c and the blocks' end). Proven on
-Bond LE 1.06 (emulator, Default Game Mode = Ahoy Mr. Bond): STARTED audit 180 counted and PLAYED flag 86 set at the
+Bond LE 1.06 (emulator, Default Game Mode = Ahoy Mr. Bond): STARTED audit 180 counted (the name's place: 276 since
+PAD-714) and PLAYED flag 86 set at the
 take, the mode's clock ran out (won) and COMPLETED flag 89 was set.
 
 ## A mode in the game's Challenge list (PAD-615)

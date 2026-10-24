@@ -1564,7 +1564,8 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
     slot = next((int(r.split()[1]) for k, r in entries if k == "value" and re.match(r"stock_slot_start\s+\d+\s*$",
                                                                                     r.split("#", 1)[0])), None)
     same = title_of(target_game or "") == title_of(ref_game or "")
-    out += block_section(tgt, stock_rules=stock_rules, start_slot=own_start_slot(tgt, target_game, slot if same else None))
+    blocks = block_section(tgt, stock_rules=stock_rules, start_slot=own_start_slot(tgt, target_game, slot if same else None))
+    out += blocks or own_plain_starts(tgt, target_game, port_text if same else None)
     sites = {n for k, n in placed if k == "site"}
     data = {n for k, n in placed if k == "data"}
     return Draft(out, report, core_missing(sites, data), placed, hows)
@@ -1586,6 +1587,44 @@ def _stock_slots(out, tgt):
         for name, v in (("stock_slot_shot", slot), ("stock_slot_mask", slot + 3)):
             if re.match(r"value\s+%s\s" % name, line):
                 out[i] = "value %-21s %d   # PAD-699: read off this build's shot entry (v[15])" % (name, v)
+
+
+def own_plain_starts(tgt, game, ref_text=None):
+    """PAD-714: a plain-C build's own game modes (`site block_start_<i>` / `text block_name_<i>`), which the start
+    finder (sdk/cstarts) wrote only into the shipped ports of the builds on hand: the same title's port's modes, each
+    found on this build by the function that counts its STARTED audit (mode_framework.plain_starts) - *ref_text* (the
+    reference, when it is the same title), else the same title's shipped ports, newest first; the first that places
+    any. [] on a C++ title (block_section reads its own) or when none does."""
+    cache = tgt.__dict__.setdefault("_own_plain_starts", {})
+    key = (game, ref_text)
+    if key in cache:
+        return cache[key]
+    out = []
+    try:
+        import os
+        from . import mode_framework as MF
+        texts = [ref_text] if ref_text else []
+        from .port_derive import shipped_ports_dir
+        names = [n for n in os.listdir(shipped_ports_dir()) if n.endswith(".port") and game
+                 and title_of(n.rsplit("-", 1)[0]) == title_of(game)]
+        for name in sorted(names, key=lambda n: (n.rsplit("-", 1)[0] != game, _version_key(n))):
+            with open(os.path.join(shipped_ports_dir(), name), encoding="utf-8") as f:
+                texts.append(f.read())
+        for text in texts:
+            out = MF.plain_start_lines(tgt.b, text)
+            if out:
+                out = [""] + out
+                break
+    except Exception:                                        # noqa: BLE001 - an odd build
+        out = []
+    cache[key] = out
+    return out
+
+
+def _version_key(name):
+    """A shipped port's file name, sorted newest first: (-major, -minor, ...)."""
+    v = name[:-len(".port")].rsplit("-", 1)[-1]
+    return tuple(-int(x) for x in re.findall(r"\d+", v))
 
 
 def own_start_slot(tgt, game, hint=None):

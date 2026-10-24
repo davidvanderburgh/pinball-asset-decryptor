@@ -12584,5 +12584,9 @@
 "The rest of a song mode's screens (its level clips, its Champion name) stay as they are: make them the same for every song on the Video and Text tabs.": "El resto de pantallas de un modo de canción (sus clips de nivel, su nombre de campeón) se quedan como están: hazlas iguales para todas las canciones en las pestañas Vídeo y Texto.",
 "An extract of a card built with a jukebox brings it back.": "Extraer una tarjeta construida con una jukebox la recupera.",
 "its song mode's own": "la propia del modo de canción",
-"{} song(s), {} with an intro video.": "{} canción(es), {} con vídeo de introducción."
+"{} song(s), {} with an intro video.": "{} canción(es), {} con vídeo de introducción.",
+"Play the row above in the list, as the sort, search and filters show it.": "Reproduce la fila de arriba en la lista, tal como la muestran el orden, la búsqueda y los filtros.",
+"Play the row below in the list, as the sort, search and filters show it.": "Reproduce la fila de abajo en la lista, tal como la muestran el orden, la búsqueda y los filtros.",
+"Under Replacement, a row with a replacement plays the replacement; one without plays its original.": "En Reemplazo, una fila con reemplazo reproduce el reemplazo; una sin él reproduce su original.",
+"**Previous** and **Next**, either side of each Play, play the row above or below, following your sort, search and filters. Under Replacement they play a row's replacement where it has one, its original where not.": "**Anterior** y **Siguiente**, a cada lado de cada Reproducir, reproducen la fila de arriba o de abajo, siguiendo tu orden, búsqueda y filtros. En Reemplazo reproducen el reemplazo de una fila donde lo tenga, y su original donde no."
 }

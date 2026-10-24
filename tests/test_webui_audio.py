@@ -476,6 +476,63 @@ def test_sequential_play_steps_down_the_list(tmp_path):
         assert w.window.service("audio").audio_play_through_var.get()
 
 
+def test_previous_next_step_through_the_shown_list(tmp_path):
+    """PAD-701: a pane's ⏮ / ⏭ play the row above / below, in the list as
+    the filters show it, and the Replacement pane's play replacements."""
+    folder = _project(tmp_path)
+    one, two, three = ("audio/idx0001 - Jackpot.wav", "audio/idx0002.wav",
+                       "audio/idx0003 - music loop.wav")
+    with web_app(tmp_path, mfr="ap") as w:
+        _open(w, folder)
+        played = []
+        svc = _svc(w)
+        real = svc._publish
+        w.run(lambda: setattr(svc, "_publish", lambda ev, **d: (
+            played.append((d.get("pane"), d.get("path"))) if ev == "audio_play"
+            else None, real(ev, **d))))
+        sel = lambda: w.state("audio")["sel"]                # noqa: E731
+        # opening the folder selects the top row: Next plays the one below it
+        assert sel() == [one]
+        assert w.call("audio.step", "orig", 1) is True
+        assert _wait(w, lambda: played) and sel() == [two]
+        assert played[-1] == ("orig", w.state("audio")["panes"]["orig"]["path"])
+        assert played[-1][1].endswith("idx0002.wav")
+        # a search that hides the loaded row: Next takes the top of what shows
+        w.call("ui.set", "audio", "search", "music")
+        assert w.call("audio.step", "orig", 1) is True and sel() == [three]
+        w.call("ui.set", "audio", "search", "")
+        assert w.call("audio.step", "orig", -1) is True and sel() == [two]
+        assert w.call("audio.step", "orig", -1) is True and sel() == [one]
+        # the top and the bottom of the list stay put
+        n = len(played)
+        assert w.call("audio.step", "orig", -1) is False and sel() == [one]
+        assert len(played) == n
+        # a filter: Show Changed leaves the two rows with a replacement
+        reps = []
+        for rel in (one, three):
+            rep = str(tmp_path / "mine" / (rel[6:14] + ".wav"))
+            _wav(rep, seconds=0.6)
+            reps.append(rep)
+            w.answers.append(rep)
+            assert w.call("audio.choose", rel) is True
+        w.call("audio.set_show", "Changed")
+        assert [r["k"] for r in w.state("audio")["rows"]] == [one, three]
+        w.call("audio.play_row", one)
+        played.clear()
+        # under Replacement, Next skips the hidden row and plays the replacement
+        assert w.call("audio.step", "rep", 1) is True and sel() == [three]
+        assert _wait(w, lambda: played)
+        assert played[-1] == ("rep", reps[1])
+        assert w.call("audio.step", "rep", 1) is False and sel() == [three]
+        # under Original, the original (no "Play replacements")
+        assert w.call("audio.step", "orig", -1) is True and sel() == [one]
+        assert played[-1][0] == "orig"
+        # a row without a replacement plays its original under Replacement too
+        w.call("audio.set_show", "All")
+        assert w.call("audio.step", "rep", 1) is True and sel() == [two]
+        assert played[-1][0] == "orig"
+
+
 def test_fan_out_calls(tmp_path):
     folder = _project(tmp_path)
     rep = str(tmp_path / "a.wav")

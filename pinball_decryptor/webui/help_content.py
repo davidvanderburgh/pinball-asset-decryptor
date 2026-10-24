@@ -335,6 +335,9 @@ HELP_CONTENT = {
         ("Listening",
          "Two players side by side: **Original (stock)** and **Replacement (your "
          "file)**. Starting one pauses the other; ■ on either silences both.\n\n"
+         "- **Previous** and **Next**, either side of each Play, play the row above "
+         "or below, following your sort, search and filters. Under Replacement "
+         "they play a row's replacement where it has one, its original where not.\n"
          "- **Play sequentially** plays down the list on its own, following your "
          "sort, search and Type filter. It stops at the end, on ■, on a click on "
          "another row, or when you open a replacement picker. The playing row is "

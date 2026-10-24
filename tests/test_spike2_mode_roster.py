@@ -90,6 +90,7 @@ int pm_can(unsigned w) { return 1; }
 int pm_roster_claim(unsigned slot, int (*f)(unsigned)) { if (slot >= 7) return 0; claimed[slot] = f; printf("CLAIM %u\n", slot); return 1; }
 void pm_roster_release(unsigned slot) { if (slot < 16) claimed[slot] = 0; printf("RELEASE %u\n", slot); }
 void pm_roster_done(void) { printf("ROSTER_DONE\n"); }
+void pm_roster_over(int won) { printf("ROSTER_DONE%s\n", won ? " WON" : ""); }   /* PAD-706 */
 int pm_roster_callout(unsigned slot, unsigned id) { printf("CALLOUT %u %u\n", slot, id); return slot < 7 && claimed[slot]; }
 
 int main(int argc, char **argv)
@@ -742,7 +743,7 @@ def test_the_runtime_counts_a_pick_in_the_players_city(tmp_path):
     city table (the game's function throws on a bad one). A port without the lines changes nothing."""
     src = RUNTIME.read_text(encoding="utf-8")
     lifted = _lift(src, "static int roster_city_step(unsigned p)")
-    assert "roster_city_step(pm_player());" in _lift(src, "void pm_roster_done(void)")
+    assert "roster_city_step(pm_player());" in _lift(src, "void pm_roster_over(int won)")
     out = _host_run(tmp_path, CITY_PRELUDE + lifted + CITY_MAIN, flags=("-no-pie",))
     if out.strip() == "HIGH":
         pytest.skip("this host links above 4 GB even with -no-pie")

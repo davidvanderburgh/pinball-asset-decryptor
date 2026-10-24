@@ -71,6 +71,7 @@ export function hatWords(h = {}, ch = {}) {
     case "seconds_left": return `When ${h.seconds} seconds are left`;
     case "event": return `When ${eventLabel(h.event, ch)}${when}`;
     case "timer_done": return `When timer ${h.timer} runs out`;
+    case "battle": return `When the player picks ${h.name || (h.slot == null ? "a battle" : `battle ${h.slot}`)} on the battle selection screen`;   // PAD-706
     case "challenge": return `When the player picks the challenge ${h.challenge || "?"}${h.launch === "player" ? ", the player launching its ball" : /^\d+$/.test(h.launch || "") ? `, its ball launched ${h.launch} s after it starts` : ""}`;   // PAD-615, PAD-643
     default: return h.kind || "";
   }
@@ -146,7 +147,7 @@ export function stmtWords(b, ch = {}) {
   const withValue = (t, v) => (v ? `${t} and ${valWords(v)}` : t);
   switch (b.op) {
     case "start_mode": return "Start the mode";
-    case "end_mode": return "End the mode";
+    case "end_mode": return b.won ? "End the mode, the battle won" : "End the mode";   // PAD-706
     case "light_mode": return `Light the mode at ${b.shot || "?"} (${colorWord(b.color)}, ${PATTERN_WORDS[b.pattern] || b.pattern || ""})`;
     case "unlight_mode": return `Put out the light of ${((ch.modes || []).find((m) => m.slug === b.mode) || {}).name || b.mode || "this mode"}`;
     case "add_time": return `Add ${valWords(b.seconds)} seconds`;
@@ -227,7 +228,7 @@ export function storyOf(prog) {
     else if (h.kind === "mode_start") out.start.push(si);
     else if (h.kind === "mode_end") out.end.push(si);
     else if (h.kind === "ball_end") out.drain.push(si);
-    else if (h.kind === "challenge") out.waiting.push(si);   // PAD-615: the pick comes before the mode starts
+    else if (h.kind === "challenge" || h.kind === "battle") out.waiting.push(si);   // PAD-615, PAD-706: the pick comes before the mode starts
     else out.running.push(si);                       // every, seconds left, a timer: they work while it runs
   });
   return out;

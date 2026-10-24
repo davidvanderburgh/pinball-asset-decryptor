@@ -607,7 +607,7 @@ static int roster_line(struct slot *M, const char *line)
     return 1;
 }
 static void roster_sync(struct slot *M);
-static void roster_ended(void);
+static void roster_ended(int won);
 
 /* PAD-615: `challenge <n>` - the mode takes the place of the game's challenge n (Player Challenge mode; the game's
  * menu order, pm_challenge_name: Bond's 1 is Ahoy Mr. Bond); `challenge new` - a challenge of its own, added to the
@@ -2479,7 +2479,8 @@ static void mode_end(const char *why)
     if (cfg.display_priority) pm_display_priority(0);   /* item 154 display: the game's display order again */
     if (shakes_at(M, SHAKE_AT_END, 0)) pm_shake_outlast();   /* PAD-414: before pm_end, which then leaves it to run */
     pm_end();
-    roster_ended();
+    /* PAD-706: its end shot is the battle won; a mode with no end shot wins it by playing to its clock's end */
+    roster_ended(name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")));
     own_sounds_end(M);
     own_lights_end(M);                       /* item mode-leds: the game has its inserts back */
     if (cfg.light_off[0]) lights(M, cfg.light_off);
@@ -2512,11 +2513,14 @@ static unsigned roster_wait;                /* mode file slot + 1 picked but not
 static unsigned roster_wait_player;
 static unsigned long roster_wait_ms;        /* not before this pm_ms() */
 
-static void roster_ended(void)
+/* PAD-706: the outcome goes with it - a mode ended by its end shot won the battle it replaced (one without an end
+ * shot, by running to its clock's end: it has no other way to win, and a lost battle is the player's again at every
+ * lit scoop until it is won); any other end (the ball, a tilt, the game's own mode) lost it */
+static void roster_ended(int won)
 {
     if (!roster_run) return;
     roster_run = 0;
-    pm_roster_done();
+    pm_roster_over(won);
 }
 
 /* A taken pick starts its mode HERE: at once when nothing else runs and the port has no

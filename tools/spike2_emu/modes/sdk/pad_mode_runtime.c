@@ -9520,28 +9520,196 @@ static int roster_city_step(unsigned p)
     return 1;
 }
 
-void pm_roster_done(void)
+/* ---- PAD-706: the pick counts as the battle it replaced ----
+ * fix-2 above counted a pick only in the city's mask. Everything else the game keeps for a battle lives in the
+ * battle's own object and is written by its own START and STOP, which a pick never ran: the slot's "Completed" on the
+ * selection screen (the battle's stop reason, +0x17 + player, which the screen reads: non-zero = completed), the
+ * city's battle (the cities rule's +0x38 vector), the city's "won" byte and its award (a first win in a city: show
+ * 0x106 and 5M-40M points, then the cities-won events), the battle's wins and starts this game, its STARTED and
+ * COMPLETED audits and the ramps' state after a loss (adjustment 174). Read at the desk on Premium/LE 1.16 (PAD-706):
+ *   CBattle::start  0x7fa78  clears the stopped (+0x13+p) and reason (+0x17+p) bytes, writes the city's battle (not
+ *                            for a battle whose flags (+8) carry 0x10), then the cmode start 0x11dbe8: running,
+ *                            starts +0x3c+4p += 1, the manager's "started" (STARTED audit), the clock base +0x54
+ *   CBattle::stop   0x7f998  (battle, reason): wins +0x64+4p += 1 when won; the cmode stop (stopped, reason, the
+ *                            battle's END, the manager's "stopped": COMPLETED audit when won); then the battle
+ *                            rule's bookkeeping, the city's bit (fix-2's call) and the ramps
+ * Every battle of the roster but Megalon & Gigan's multiball reaches CBattle::stop from its v[11] (ten words in); v[11]
+ * adds only the battle's victory screen, which a mode's own ending replaces. So at the pick the runtime writes what the
+ * START writes, without starting the battle (no shots, screens, timer, lights or music of its), and at the mode's end
+ * it calls CBattle::stop with the mode's outcome: the game itself then counts the battle won or lost. The battle's
+ * points this time (its award's +0xf0+8p, which its START zeroes) are zeroed too, so its END's ending clip (played
+ * only for a battle that scored) stays off. The slots whose battle is not a CBattle (`value battle_own_stop_slots`, a
+ * mask: Godzilla's 0x20, the multiball, whose own stop always counts a win) run their v[11] for a win and fix-2's
+ * path for a loss. (Read from the port, not from v[11]: an instrument that wraps v[11], as stock_probe.c does, hides
+ * what the game's own calls - run3.) Port lines: `site battle_stop`, `site battle_started`, `site battle_clock`, the
+ * `value battle_*` offsets and `value roster_city_battle_vec_at`; a port without them gives a pick back as before. */
+struct roster_host { unsigned obj, id, slot; int on; };
+static struct roster_host roster_hosts[5];
+static signed char roster_won[5];                   /* the outcome a give-back that waits for its player carries */
+
+static unsigned rw(unsigned a) { return *(const unsigned *)(unsigned long)a; }
+
+/* the battle's object through the manager, checked against the port's `rule` line for it when there is one */
+static unsigned roster_battle_obj(unsigned id)
+{
+    unsigned get = fn("stock_rule_get"), mgr = data("stock_mode_manager"), obj;
+    struct stock_rule *x = stock_rule(id);
+    if (!get || !mgr || !rw(mgr)) return 0;
+    obj = (unsigned)(unsigned long)((void *(*)(void *, unsigned))(unsigned long)get)((void *)(unsigned long)mgr, id);
+    if (!obj || (x && x->vt && rw(obj) != x->vt)) return 0;
+    return obj;
+}
+
+/* the cities rule's vector at +vec_at, records of `rec` bytes: the city's record for idx, or 0 when it is not there
+ * (the game's own accessors throw out of range, which would take the game down through our frame) */
+static unsigned roster_city_rec(unsigned idx, long vec_at, unsigned rec)
+{
+    unsigned rc = data("rule_cities"), begin, end;
+    if (!rc || vec_at < 0 || !rec || idx >= 64) return 0;
+    begin = rw(rc + (unsigned)vec_at);
+    end = rw(rc + (unsigned)vec_at + 4);
+    if (!begin || end <= begin || idx * rec + rec > end - begin) return 0;
+    return begin + idx * rec;
+}
+
+static unsigned roster_city_of(unsigned p)
+{
+    long at = pm_port_value("roster_city_index_at", -1);
+    unsigned rc = data("rule_cities");
+    return rc && at >= 0 && p >= 1 && p <= 4 ? rw(rc + (unsigned)at + 4 * p) : 64;
+}
+
+/* What the battle's START writes, at the pick that took its place (the player up picked) */
+static void roster_host_begin(unsigned p, unsigned slot, unsigned id)
+{
+    struct roster_host *h;
+    long stopped = pm_port_value("battle_stopped_at", -1), reason = pm_port_value("battle_reason_at", -1);
+    long starts = pm_port_value("battle_starts_at", -1), flags = pm_port_value("battle_flags_at", -1);
+    long noc = pm_port_value("battle_no_city_flag", 0), clock_at = pm_port_value("battle_clock_at", -1);
+    long award_at = pm_port_value("stock_award_at", -1), total_at = pm_port_value("battle_total_at", -1);
+    unsigned obj, city, rec, aw, f_clock = fn("battle_clock"), f_started = fn("battle_started");
+    if (p < 1 || p > 4) return;
+    h = &roster_hosts[p];
+    h->on = 0;
+    if (!fn("battle_stop")) return;                 /* no hosting on this port: the pick is given back as before */
+    if (stopped < 0 || reason < 0 || starts < 0 || flags < 0) {
+        say("roster: the port's battle lines are incomplete - the pick will not count as the battle's own");
+        return;
+    }
+    obj = roster_battle_obj(id);
+    if (!obj) {
+        say("roster: slot %u's battle (mode id %u) has no object of the port's - the pick will not count as it", slot, id);
+        return;
+    }
+    city = roster_city_of(p);
+    if (!roster_city_rec(city, pm_port_value("roster_city_vec_at", -1), 16)) {
+        say("roster: player %u's city %u is not in the city table - the pick will not count as the battle", p, city);
+        return;
+    }
+    *(unsigned char *)(unsigned long)(obj + (unsigned)stopped + p) = 0;
+    *(unsigned char *)(unsigned long)(obj + (unsigned)reason + p) = 0;
+    if (!(rw(obj + (unsigned)flags) & (unsigned)noc)
+        && (rec = roster_city_rec(city, pm_port_value("roster_city_battle_vec_at", -1), 16)) != 0)
+        *(unsigned *)(unsigned long)(rec + (p - 1) * 4) = id;       /* the city holds this battle */
+    *(unsigned *)(unsigned long)(obj + (unsigned)starts + 4 * p) += 1;
+    if (f_clock && clock_at >= 0)
+        *(unsigned *)(unsigned long)(obj + (unsigned)clock_at) = ((unsigned (*)(unsigned))(unsigned long)f_clock)(p);
+    if (award_at >= 0 && total_at >= 0 && (aw = rw(obj + (unsigned)award_at)) != 0) {
+        *(unsigned *)(unsigned long)(aw + (unsigned)total_at + 8 * p) = 0;
+        *(unsigned *)(unsigned long)(aw + (unsigned)total_at + 8 * p + 4) = 0;
+    }
+    if (f_started)
+        ((void (*)(unsigned, unsigned))(unsigned long)f_started)(data("stock_mode_manager"), id);   /* STARTED */
+    h->obj = obj;
+    h->id = id;
+    h->slot = slot;
+    h->on = 1;
+    say("roster: slot %u's battle (mode id %u) counts as started for player %u in city %u (its START's bookkeeping; "
+        "it does not run)", slot, id, p, city);
+}
+
+/* The battle's own STOP with the mode's outcome, for the player up; 1 when it ran (it gives the roster back itself) */
+static int roster_host_end(unsigned p, int won)
+{
+    struct roster_host *h;
+    unsigned stop = fn("battle_stop"), obj, v11, *mask, city, was;
+    long slot_stop = pm_port_value("stock_slot_stop", -1), reason = pm_port_value("battle_reason_at", -1);
+    long wins = pm_port_value("battle_wins_at", -1);
+    if (p < 1 || p > 4 || !roster_hosts[p].on) return 0;
+    h = &roster_hosts[p];
+    h->on = 0;
+    obj = roster_battle_obj(h->id);
+    if (!stop || !obj || obj != h->obj || slot_stop < 0) {
+        say("roster: the battle (mode id %u) is not the one the pick counted - given back as before", h->id);
+        return 0;
+    }
+    city = roster_city_of(p);
+    if (!roster_city_rec(city, pm_port_value("roster_city_vec_at", -1), 16)
+        || !roster_city_rec(city, pm_port_value("roster_city_battle_vec_at", -1), 16)) {
+        say("roster: player %u's city %u is not in the city table - given back as before", p, city);
+        return 0;
+    }
+    mask = (unsigned *)(unsigned long)(roster_city_rec(city, pm_port_value("roster_city_vec_at", -1), 16) + (p - 1) * 4);
+    was = *mask;
+    v11 = rw(rw(obj) + 4u * (unsigned)slot_stop);
+    if (!(((unsigned long)pm_port_value("battle_own_stop_slots", 0) >> h->slot) & 1u))
+        ((void (*)(unsigned, unsigned))(unsigned long)stop)(obj, won ? 1u : 0u);
+    else if (won)
+        ((void (*)(unsigned, unsigned))(unsigned long)v11)(obj, 1u);    /* its own stop: always a win */
+    else {
+        say("roster: slot %u's battle has a stop of its own that knows no loss - given back as before", h->slot);
+        return 0;
+    }
+    say("roster: the pick ends as a %s battle for player %u (slot %u, mode id %u): the battle's own stop ran - "
+        "completed %u, wins %u, city %u's mask %x -> %x", won ? "WON" : "LOST", p, h->slot, h->id,
+        reason >= 0 ? (unsigned)*(const unsigned char *)(unsigned long)(obj + (unsigned)reason + p) : 0,
+        wins >= 0 ? rw(obj + (unsigned)wins + 4 * p) : 0, city, was, *mask);
+    return 1;
+}
+
+void pm_roster_over(int won)
 {
     struct site *x = site("roster_done");
     const char *why = 0;
-    unsigned up = pm_player();
-    if (!roster_give_back(roster_owed, pm_in_game(), up, &why)) {
-        say("roster: pm_roster_done (player %u up): %s", up, why ? why : "-");
+    unsigned up = pm_player(), q, p;
+    for (q = 1; q <= 4; q++)
+        if (roster_owed[q] == 1) roster_won[q] = won ? 1 : 0;     /* a give-back that waits keeps the outcome */
+    p = roster_give_back(roster_owed, pm_in_game(), up, &why);
+    if (!p) {
+        say("roster: pm_roster_%s (player %u up): %s", won ? "over(won)" : "done", up, why ? why : "-");
+        if (!pm_in_game())
+            for (q = 1; q <= 4; q++) roster_hosts[q].on = 0;
         return;
     }
+    won = roster_won[p];
+    roster_won[p] = 0;
     if (!(can & PM_CAN_ROSTER) || !x || !x->ok) return;
+    if (roster_host_end(p, won)) return;                        /* PAD-706: the game counted it itself */
     ((void (*)(unsigned))(unsigned long)x->addr)(data("rule_battle"));
     say("roster: battle over for player %u (roster_done: qualified cleared, ramps lit)", pm_player());
     roster_city_step(pm_player());                              /* item 146 fix-2: and the city counts it */
 }
+
+void pm_roster_done(void)
+{
+    pm_roster_over(0);
+}
+
+/* PAD-706: the selection screen's "the cursor landed on a slot" (r0 = the screen, its slot at +roster_cursor_at):
+ * logged, so a rig run can walk the cursor to the slot it wants */
+static void on_roster_cursor(unsigned *r)
+{
+    long at = pm_port_value("roster_cursor_at", -1);
+    if (at >= 0 && r[0]) say("roster: the cursor is on slot %u", rw(r[0] + (unsigned)at));
+}
+
+static void roster_take(unsigned *r, unsigned slot, unsigned id, const char *how);
 
 static void on_roster_start(unsigned *r)
 {
     const unsigned *vec;
     unsigned slot, n = (unsigned)pm_roster_slots(), id = r[1];
     unsigned rec = (unsigned)pm_port_value("roster_record_size", 12), at = (unsigned)pm_port_value("roster_id_at", 4);
-    const struct pm_mode *was = current;
-    int took;
     static int said;
     for (slot = 0; slot < n && !roster_fn[slot]; slot++) ;
     if (slot >= n) return;          /* no mode holds a slot: read nothing, the game's battle runs untouched */
@@ -9550,6 +9718,15 @@ static void on_roster_start(unsigned *r)
     for (slot = 0; vec && slot < n && vec[(slot * rec + at) / 4] != id; slot++) ;
     if (!vec || slot >= n) { say("roster: a battle started (mode id %u) that is in no slot", id); return; }
     if (!roster_fn[slot]) { say("roster: slot %u picked (mode id %u): the game's battle", slot, id); return; }
+    roster_take(r, slot, id, "picked");
+}
+
+/* The pick of a claimed slot (or, PAD-706, the city pick's restart of its battle): the mode's on_pick decides, and a
+ * pick it takes swaps the battle the game is about to START (r0) for an object whose every virtual is a no-op */
+static void roster_take(unsigned *r, unsigned slot, unsigned id, const char *how)
+{
+    const struct pm_mode *was = current;
+    int took;
     current = roster_by[slot];
     {
         unsigned up = pm_player();
@@ -9570,14 +9747,42 @@ static void on_roster_start(unsigned *r)
          * so clear the byte now - the ramps were put out when the battle qualified - and leave the
          * re-lighting to pm_roster_done() when the mode ends. (Run2 on Pro 1.15 re-lit at the pick:
          * the mode's own ramp shots qualified a battle and the scoop re-opened the screen mid-mode.) */
+        if (p >= 1 && p <= 4 && roster_owed[p]) roster_host_begin(p, slot, id);   /* PAD-706: it counts as the battle */
         if (p >= 1 && p <= 4 && roster_owed[p] && pm_port_value("roster_qualified_at", 0)) {   /* not when it gave the pick back at once */
             unsigned char *q = (unsigned char *)(unsigned long)(data("rule_battle") + (unsigned)pm_port_value("roster_qualified_at", 0) + p);
             say("roster: player %u qualified byte %u cleared; the ramps stay dark until the mode calls pm_roster_done", p, *q);
             *q = 0;
         }
     }
-    say("roster: slot %u picked (mode id %u): %s", slot, id,
+    say("roster: slot %u %s (mode id %u): %s", slot, how, id,
         took ? "claimed - the game's battle does not start" : "claimed but not taken - the game's battle runs");
+}
+
+/* PAD-706: the game's other way into a battle. A battle the player lost (its clock, a drain) stays qualified, and the
+ * next lit scoop does not open the selection screen again: the game's city pick (Premium/LE 1.16 0x198f24) sets the
+ * player's city and, when that city holds a tier-1 battle (ids 12-15) not yet won there, STARTs it again, keeping
+ * its progress (emulator, run2: Gigan drained at 6 hits restarted by the next scoop, `SP START 14 lr 0x199310`, and
+ * won). A pick counts as its battle now - the city holds it - so that START would be the GAME's battle in the mode's
+ * place. `site roster_resume` is the START's load there (the same two words as roster_start's; r0 = the battle): a
+ * battle a mode holds the slot of is taken as a pick of that slot again - the mode runs once more, as the game's own
+ * battle would, until it is won. */
+static void on_roster_resume(unsigned *r)
+{
+    const unsigned *vec;
+    unsigned slot, n = (unsigned)pm_roster_slots(), id = 0;
+    unsigned rec = (unsigned)pm_port_value("roster_record_size", 12), at = (unsigned)pm_port_value("roster_id_at", 4);
+    static int said;
+    for (slot = 0; slot < n && !roster_fn[slot]; slot++) ;
+    if (slot >= n || !r[0]) return;     /* no mode holds a slot: the game's battle runs untouched */
+    note_thread("roster resume", &said);
+    vec = *(const unsigned **)(unsigned long)(data("rule_battle") + (unsigned)pm_port_value("roster_vec_at", 8));
+    for (slot = 0; vec && slot < n; slot++) {
+        if (!roster_fn[slot]) continue;
+        id = vec[(slot * rec + at) / 4];
+        if (roster_battle_obj(id) == r[0]) break;
+    }
+    if (!vec || slot >= n) return;      /* a battle no mode holds: the game's own restarts */
+    roster_take(r, slot, id, "restarted by the city pick (its battle was lost; the game plays it again)");
 }
 
 /* ---- the game's Challenge list (PAD-615, optional, title specific) ------------------------------
@@ -13939,6 +14144,13 @@ static void pad_mode_start(void)
         if (have_sites(roster_s) && have_data(roster_d) && have_values(roster_v) && hook(fn("roster_start"), on_roster_start)) {
             can |= PM_CAN_ROSTER;
             say("roster: %d slots, the battle start at 0x%08x is hooked", pm_roster_slots(), fn("roster_start"));
+            if (fn("roster_cursor") && hook(fn("roster_cursor"), on_roster_cursor))      /* PAD-706 */
+                say("roster: the selection screen's cursor is logged");
+            if (fn("roster_resume") && hook(fn("roster_resume"), on_roster_resume))      /* PAD-706 */
+                say("roster: a lost battle the city pick restarts is the mode's again (the resume at 0x%08x is hooked)",
+                    fn("roster_resume"));
+            if (fn("battle_stop"))
+                say("roster: a pick counts as the battle it replaced (its START's bookkeeping at the pick, its STOP at the mode's end)");
         }
     }
     lamps_arm();                                    /* the port's named inserts (lights section) */

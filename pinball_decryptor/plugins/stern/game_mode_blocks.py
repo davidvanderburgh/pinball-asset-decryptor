@@ -311,6 +311,44 @@ def read_rules(elf):
     return out[:MAX_RULES]
 
 
+def stock_rule_lines(modes):
+    """PAD-699: the port's `rule <id> <vptr> <name>` lines for *modes* (:func:`read_modes`): every one of the game's
+    own modes - its battles, its multiballs - that a counts-as or instead-of row (the Modes tab's Shots; the
+    runtime's stock.cfg) may name. The vptr is what the mode's object carries (the vtable + 8); the runtime wraps a
+    rule only when the object the manager returns holds exactly that word, so a line for another build wraps
+    nothing."""
+    out = ["# PAD-699: the game's own modes a counts-as / instead-of row may name (game_mode_blocks.stock_rule_lines,",
+           "# from the game program): `rule <id> <the vtable pointer its object carries> <name>`"]
+    for m in modes:
+        if m.vtable and m.obj:
+            out.append("rule %-3d 0x%08x %s" % (m.id, m.vtable + 8, m.name))
+    return out
+
+
+#: PAD-699: the shot entry every mode has (v[15]: the manager's dispatch calls it, it calls the shot handler)
+SHOT_ENTRY_SLOT = 15
+
+
+def stock_shot_slot(elf, modes=None):
+    """PAD-699: the vtable slot of a mode's SHOT HANDLER in this program (Godzilla Premium/LE 1.16: 42, Pro 1.15
+    and Pro 1.16: 41), read off the code: the first virtual call the shot entry (v[15]) makes, ``ldr rX, [rY,
+    #4 * slot]``. The same in every mode that has a vtable, else None. A port's `stock_slot_shot` (and
+    `stock_slot_mask`, three slots on) must be this build's: the runtime wraps that slot."""
+    from . import stock_scan as S
+    prog = S.Program(elf)
+    found = set()
+    for m in (modes if modes is not None else read_modes(elf)):
+        if not m.vtable:
+            continue
+        entry = _word(prog, m.vtable + 8 + 4 * SHOT_ENTRY_SLOT)
+        for i in range(120 if entry else 0):
+            w = _word(prog, entry + 4 * i)
+            if w is not None and (w & 0x0FF00000) == 0x05900000 and 0x80 <= (w & 0xFFF) <= 0xD0:
+                found.add((w & 0xFFF) // 4)
+                break
+    return found.pop() if len(found) == 1 else None
+
+
 def rule_lines(rules):
     """The port's rule lines for *rules*: `site block_rule_<n>` and `text block_rule_name_<n>` (no lo/hi mask
     lines: every bit is hidden)."""

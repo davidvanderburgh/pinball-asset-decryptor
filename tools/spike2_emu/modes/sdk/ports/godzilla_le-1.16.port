@@ -408,9 +408,35 @@ value stock_slot_lit    25
 value stock_field       0x18
 # 12 cmode_battle_vs_ebirah (obj 0x7b53f0, handler 0x816e8): counts 0x200 / 0x2000 / 0x20000 (the spinners'
 # middle bits, 15 / 40 / 15 spins), then 0x40 (Pop bumper) or bit 42 for the final blow
-rule 12 0x00636d78 Battle vs Ebirah
+# PAD-699: the game's own modes a counts-as / instead-of row may name (game_mode_blocks.stock_rule_lines,
+# from the game program): `rule <id> <the vtable pointer its object carries> <name>`
+rule 1   0x0063a250 Godzilla Multiball
+rule 2   0x0063d1f0 Mechagodzilla Multiball
+rule 3   0x00639c90 Bridge Attack Multiball
+rule 4   0x00640820 Tank Attack Multiball
+rule 5   0x0063fb90 Saucer Attack Multiball
+rule 6   0x00638d60 Battle vs Megalon and Gigan Multiball
+rule 7   0x0063f2c8 Planet X Multiball
+rule 8   0x0063e4a0 Monster Zero Victory Multiball
+rule 9   0x006417b0 Terror of Mechagodzilla
+rule 10  0x0063b528 King of the Monsters Multiball
+rule 11  0x0063d770 Monster Island Madness
+rule 12  0x00636d78 Battle vs Ebirah
+rule 13  0x00639610 Battle vs Titanosaurus
+rule 14  0x00637ac0 Battle vs Gigan
+rule 15  0x00638670 Battle vs Megalon
+rule 16  0x00638020 Battle vs King Ghidorah
+rule 17  0x00637500 Battle vs Ghidorah and Gigan
+rule 18  0x006402c0 Super Train
+rule 19  0x0063eeb8 O2 Destroyer
+rule 20  0x0063b420 King of the Monsters
+rule 21  0x0063af48 Jet Fighter Attack
+rule 22  0x0063f4e8 Planet X Hurry Up
+rule 23  0x00640ee0 Tesla Strike
+rule 24  0x0063de00 Monster Rampage
+rule 25  0x0063aae8 Hedorah
+rule 26  0x0063e3c8 Monster Zero
 # 4 cmode_tank_attack_multiball (obj 0x7b4f30, handler 0x10a040): a hit on a tank's exact position bit
-rule 4  0x00640820 Tank attack multiball
 # ---- item 161: the game's own rules REWRITTEN in C (pad_stock.h; MODE_SDK.md "Rewriting a stock rule's shot logic") ----
 # Every site word pair below was read from the ELF by port_words.py; every offset and id by item 158
 # (desk-proven, the marked ones emulator-proven) and checked against this item's decompile.

@@ -9,9 +9,12 @@ rules and the shots a row may name are the CARD'S port's (its ``rule`` and ``sho
 the table is empty, with a sentence, for a project whose card has no port or whose port names
 no rules.
 
+PAD-699: a row may MOVE the rule's shot instead ("instead of"): the shot of your choosing counts
+as the rule's own, and the rule's own no longer counts while it is lit (its insert dark).
+
 State (``modes.remap``): ``on`` (rows can be added), ``msg``, ``rows`` (``[{"i", "rule",
-"label", "from", "to", "problem"}]``), ``rules`` (``[{"id", "label"}]``), ``shots`` (names),
-``sel`` (a row index or None), ``note``.
+"label", "from", "to", "instead", "verb", "problem"}]``), ``rules`` (``[{"id", "label"}]``),
+``shots`` (names), ``sel`` (a row index or None), ``note``.
 """
 
 import os
@@ -50,6 +53,11 @@ class StockRemapMixin:
             return "", "Open or extract a card project first (Extract tab) - the table is saved in it."
         pb = SM.project_build(project)
         if not pb:
+            # PAD-699: a card whose file name says no game and version (David's "Godzilla Premium 1.16
+            # Heisei Custom V1.99D Kaiju Edition.raw"): the build the tab read off its game program
+            build = getattr(self, "_stock_build", None)
+            pb = (build.game, build.version) if build is not None else None
+        if not pb:
             return "", "This project names no card, so the game's own rules are not known."
         prof = MP.profile_for_card(pb[0], pb[1])
         if prof is None or not prof.port:
@@ -77,7 +85,7 @@ class StockRemapMixin:
         out = []
         for i, r in enumerate(rows):
             out.append({"i": i, "rule": int(r["rule"]), "label": labels.get(int(r["rule"]), "rule %s" % r["rule"]),
-                        "from": r["from"], "to": r["to"],
+                        "from": r["from"], "to": r["to"], "instead": bool(r.get("instead")), "verb": SR.verb(r),
                         "problem": SR.check_row(r, rules, shots, rows[:i])})
         n_bad = sum(1 for r in out if r["problem"])
         msg = "%s: %d rule(s) can take another shot. %s" % (
@@ -108,8 +116,9 @@ class StockRemapMixin:
         return True
 
     @rpc
-    def remap_add(self, rule, src, dst):
-        """Add a row {rule, from shot, to shot}; returns the note shown (empty = added)."""
+    def remap_add(self, rule, src, dst, instead=False):
+        """Add a row {rule, from shot, to shot}; *instead* = the rule's own shot (dst) no longer
+        counts (PAD-699). Returns the note shown (empty = added)."""
         from ..plugins.stern import stock_remap as SR
         project = self.project()
         port, why = self._remap_port()
@@ -117,7 +126,8 @@ class StockRemapMixin:
             self._remap_set(note=why)
             return why
         try:
-            row = {"rule": int(rule), "from": str(src or "").strip(), "to": str(dst or "").strip()}
+            row = {"rule": int(rule), "from": str(src or "").strip(), "to": str(dst or "").strip(),
+                   "instead": bool(instead)}
         except (TypeError, ValueError):
             self._remap_set(note="Pick one of the game's own rules.")
             return "Pick one of the game's own rules."
@@ -132,7 +142,7 @@ class StockRemapMixin:
             return why
         rows.append(row)
         SR.save(project, rows)
-        self._say("counts as: %s takes %s as %s" % (row["rule"], row["from"], row["to"]))
+        self._say("%s: %s takes %s %s %s" % (SR.verb(row), row["rule"], row["from"], SR.verb(row), row["to"]))
         self.refresh_stock_remap()
         self._remap_set(sel=len(rows) - 1, note="Added. Write puts it on the card with the modes.")
         return ""
@@ -154,7 +164,8 @@ class StockRemapMixin:
             return False
         gone = rows.pop(i)
         SR.save(project, rows)
-        self._say("counts as: row removed (%s took %s as %s)" % (gone["rule"], gone["from"], gone["to"]))
+        self._say("%s: row removed (%s took %s %s %s)" % (SR.verb(gone), gone["rule"], gone["from"], SR.verb(gone),
+                                                          gone["to"]))
         self.refresh_stock_remap()
         self._remap_set(sel=None, note="Removed." if rows else "No rows - the game's own rules play as they always did.")
         return True

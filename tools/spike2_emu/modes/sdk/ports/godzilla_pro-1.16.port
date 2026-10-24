@@ -295,7 +295,9 @@ value lamp_slot_used        36
 value lamp_group_prio       4
 value lamp_group_next       20
 value lamp_fade             3
-value stock_slot_shot   42
+# PAD-699: this build has Pro 1.15's vtable layout (one base slot fewer from 41 on: Gigan's handler is v[41]
+# 0x8f140, its mask getter v[44] 0x8b088); the LE numbers drafted here (42, 45) were never used (no rule lines)
+value stock_slot_shot   41
 value stock_slot_active 14
 value stock_slot_lit    25
 value stock_field       0x18
@@ -304,7 +306,7 @@ value stock_slot_end        10
 value stock_slot_stop       11
 value stock_slot_running    12
 value stock_slot_shot_entry 15
-value stock_slot_mask       45
+value stock_slot_mask       44
 value stock_running_at      0x1b      # + player: running byte
 value stock_level_at        0x3c      # + 4 * player: starts this game
 value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
@@ -815,3 +817,30 @@ site  challenge_pages_0     0x00023a20 0xe30dc15c 0xe340c07d
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x0041c020 0xe92d4ff0 0xe24dd0bc
+# PAD-699: the game's own modes a counts-as / instead-of row may name (game_mode_blocks.stock_rule_lines,
+# from the game program): `rule <id> <the vtable pointer its object carries> <name>`
+rule 1   0x0062fdc0 Godzilla Multiball
+rule 2   0x00632d18 Mechagodzilla Multiball
+rule 3   0x0062f800 Bridge Attack Multiball
+rule 4   0x00636320 Tank Attack Multiball
+rule 5   0x00635690 Saucer Attack Multiball
+rule 6   0x0062e8d0 Battle vs Megalon and Gigan Multiball
+rule 7   0x00634dd8 Planet X Multiball
+rule 8   0x00633fc0 Monster Zero Victory Multiball
+rule 9   0x006372a0 Terror of Mechagodzilla
+rule 10  0x00631078 King of the Monsters Multiball
+rule 11  0x00633298 Monster Island Madness
+rule 12  0x0062c8f0 Battle vs Ebirah
+rule 13  0x0062f180 Battle vs Titanosaurus
+rule 14  0x0062d638 Battle vs Gigan
+rule 15  0x0062e1e0 Battle vs Megalon
+rule 16  0x0062db90 Battle vs King Ghidorah
+rule 17  0x0062d078 Battle vs Ghidorah and Gigan
+rule 18  0x00635dc0 Super Train
+rule 19  0x006349d0 O2 Destroyer
+rule 20  0x00630f78 King of the Monsters
+rule 21  0x00630aa8 Jet Fighter Attack
+rule 22  0x00634ff0 Planet X Hurry Up
+rule 23  0x006369e0 Tesla Strike
+rule 24  0x00633928 Monster Rampage
+rule 26  0x00633ee8 Monster Zero

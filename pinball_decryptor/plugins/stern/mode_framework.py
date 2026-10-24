@@ -434,8 +434,11 @@ def lines_for(elf, port_text):
 #     push {r4, r5, r6, r7, r8, r9, lr} ; subs r5, r0, #0 ; sub sp, sp, #0x14 ; ...   (id in r0, the amount in r1)
 #
 # So a game mode's stem comes from the ACTIVE / PLAYED flag its START sets (else from the port's name for it), and its
-# books from the names: STARTED (or STARTS) and COMPLETED (or COMPLETIONS) audits, PLAYED and COMPLETED flags, trying the
-# spellings the games use (a MODE_ prefix or _MODE suffix, HURRYUP for "Hurry-Up").
+# books from the names: STARTED (or STARTS, START) and COMPLETED (or COMPLETIONS) audits, PLAYED and COMPLETED flags,
+# trying the spellings the games use (a MODE_ prefix or _MODE suffix, HURRYUP for "Hurry-Up"). PAD-715: where neither
+# names any books, the flags its callers set: a site that is not the mode's start but a check before it (James Bond's
+# Bird One Multiball is the lock-open check, PAD-578) is called by the start itself - the lock handler, which sets
+# FG_ROCKET_MULTIBALL_ACTIVE: the game's own name for that multiball. Jurassic Park counts AUD_RESTORE_POWER_START.
 AUDIT_ADD_HEAD = (0xE92D43F0, 0xE2505000, 0xE24DD014)
 
 
@@ -533,18 +536,18 @@ def plain_books(elf, port_text):
     flags = PC.flag_functions(e)
     prog = S.Program(elf)
     out = {}
-    for m in re.finditer(r"^site\s+block_start_(\d+)\s+0x([0-9a-f]+)", port_text, re.M):
-        i, f = int(m.group(1)), int(m.group(2), 16)
-        nm = re.search(r"^text\s+block_name_%d\s+(.+)$" % i, port_text, re.M)
+
+    def flag_stems(f, depth=1):                      # the ACTIVE / PLAYED flags *f* (or what it calls) sets
         stems = []
-        if flags:                                    # the ACTIVE / PLAYED flags its START (or what it calls) sets
-            for fl in _start_flags(prog, f, flags["set"]):
-                if fl < len(fg) and re.search(r"_(ACTIVE|PLAYED|RUNNING)$", fg[fl]):
-                    stems.append(re.sub(r"^FG_|_(ACTIVE|PLAYED|RUNNING)$", "", fg[fl]))
-        stems += _stems(nm.group(1).strip()) if nm else []
+        for fl in _start_flags(prog, f, flags["set"], depth) if flags else ():
+            if fl < len(fg) and re.search(r"_(ACTIVE|PLAYED|RUNNING)$", fg[fl]):
+                stems.append(re.sub(r"^FG_|_(ACTIVE|PLAYED|RUNNING)$", "", fg[fl]))
+        return stems
+
+    def books_of(stems):
         for st in dict.fromkeys(stems):
             books = {}
-            for key, names, table in (("started", ("AUD_%s_STARTED", "AUD_%s_STARTS"), aid),
+            for key, names, table in (("started", ("AUD_%s_STARTED", "AUD_%s_STARTS", "AUD_%s_START"), aid),
                                       ("completed", ("AUD_%s_COMPLETED", "AUD_%s_COMPLETIONS",
                                                      "AUD_%s_STAGE_X_COMPLETIONS"), aid),
                                       ("played", ("FG_%s_PLAYED",), fid),
@@ -553,8 +556,32 @@ def plain_books(elf, port_text):
                 if hit:
                     books[key] = hit
             if books:
-                out[i] = books
-                break
+                return st, books
+        return None, None
+
+    for m in re.finditer(r"^site\s+block_start_(\d+)\s+0x([0-9a-f]+)", port_text, re.M):
+        i, f = int(m.group(1)), int(m.group(2), 16)
+        nm = re.search(r"^text\s+block_name_%d\s+(.+)$" % i, port_text, re.M)
+        own = flag_stems(f)
+        st, books = books_of(own + (_stems(nm.group(1).strip()) if nm else []))
+        if st in own:                                # its START sets the mode's flags: the start itself
+            out[i] = books
+            continue
+        # PAD-715: a check before the start (James Bond's lock multiballs: the lock-open check, which the lamps ask
+        # too, and the lock handler at each lock) - the start is the one function that sets the mode's flags, there or
+        # in what a caller calls (Bird One: the lock handler calls it at the last lock): a mode in its place takes that
+        starts = {}
+        for c in prog.callers(f):
+            fs = prog.func_start(c)
+            for t in [fs] + [_num(o[1:]) for _v, m, o, _w in _ins(prog, fs) if m == "bl" and o.startswith("#")]:
+                for s in flag_stems(t, 0):
+                    starts.setdefault(s, set()).add(t)
+        if not books and len(starts) == 1:           # no books by its name: the one stem its callers set
+            st, books = books_of(list(starts))
+        if books and len(starts.get(st, ())) == 1:
+            books["start"] = next(iter(starts[st]))
+        if books:
+            out[i] = books
     return out, add
 
 
@@ -572,16 +599,19 @@ def plain_lines(books, add, prog=None):
                           ("played", "place_flag_played"), ("completed_flag", "place_flag_completed")):
             if key in books[i]:
                 out.append("value %-28s %d" % ("%s_%d" % (line, i), books[i][key]))
+        if "start" in books[i]:                      # PAD-715: its site is a check; the place is this start's
+            f = books[i]["start"]
+            words = " 0x%08x 0x%08x" % (prog.word(f) or 0, prog.word(f + 4) or 0) if prog is not None else ""
+            out.append("site  %-28s 0x%08x%s" % ("place_start_%d" % i, f, words))
     return out
 
 
 def plain_lines_for(elf, port_text):
-    """The plain-C books lines *port_text* lacks (as :func:`lines_for`); never raises."""
-    if re.search(r"^(site\s+audit_add|value\s+place_(audit|flag)_\w+)\s", port_text or "", re.M):
-        return []
+    """The plain-C books lines *port_text* lacks (as :func:`lines_for`), one by one - PAD-715: a port with some modes'
+    books gets the others' (a derived port with the base's audit add site); never raises."""
     try:
         books, add = plain_books(elf, port_text)
-        return plain_lines(books, add, S.Program(elf))
+        return missing_from(plain_lines(books, add, S.Program(elf)), port_text or "")
     except Exception:                                    # noqa: BLE001
         return []
 

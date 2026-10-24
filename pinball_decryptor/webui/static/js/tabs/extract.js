@@ -196,6 +196,7 @@ function Options({ s, shell }) {
       </div>` : null}
     ${s.dongle_cap ? html`<${Check} wrap ns="extract" k="dongle" checked=${s.dongle}
         label="Decrypt using the game's HASP dongle (advanced — for titles not yet supported dongle-free)" />` : null}
+    ${s.dongle_cap && s.dongle && s.dongle_where ? html`<span class="small muted">${s.dongle_where}</span>` : null}
     ${s.capture_cap ? html`<div class="stack x-sec">
         <span class="lbl">Extract</span>
         ${capturePrimary ? null : html`<${Check} wrap ns="extract" k="static" checked=${s.static}

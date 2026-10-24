@@ -254,6 +254,46 @@ def key_on_pc():
     return HASP_VID_PID in out.stdout.decode("utf-8", "replace").lower()
 
 
+def remote_run(cmd, timeout=90):
+    """Run a bash command as root in the app's WSL, as the extract does
+    (core/runtime.py's distro), and return what it printed.  The network
+    key's attachments are recorded per distro, so both use the same one."""
+    from ..core import runtime
+    out = subprocess.run(runtime.wsl_head(root=True) + ["--", "bash", "-c",
+                                                         cmd],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=timeout, creationflags=_rig.CREATE_FLAGS)
+    return out.stdout.decode("utf-8", "replace")
+
+
+#: (headline, hint) for what the key server said about a key this rig cannot
+#: see yet; %s is "bus 1-4 on 192.168.1.20".
+REMOTE_STATES = {
+    "offered": ("Key ready on the key server",
+                "The key (%s) is free. Start attaches it over the network "
+                "and Stop hands it back."),
+    "attached": ("Key attached from the key server",
+                 "The key (%s) is attached over the network."),
+    "unreachable": ("Key server not answering",
+                    "Nothing answers for %s. Check that the PC with the key "
+                    "is on, that usbipd runs there, and that its TCP port "
+                    "(3240 unless you gave another) is open to this PC."),
+    "notexported": ("Key not offered by the server",
+                    "The key server answers but does not offer %s: it is in "
+                    "use by another PC, not shared (usbipd bind), or on "
+                    "another bus ID."),
+    "noclient": ("No USB/IP client",
+                 "A key on another PC (%s) needs the usbip client that "
+                 "usbipd-win installs. Install usbipd-win on this PC."),
+}
+
+
+def remote_state(kind, where):
+    label, hint = REMOTE_STATES.get(kind, ("Key server: no answer",
+                                           "Could not ask about %s."))
+    return label, hint % (where or "the key")
+
+
 def key_failure(line):
     """(headline, hint) if this rig line is a key verdict, else None.
 
@@ -310,6 +350,11 @@ def state_text(info):
         if info.get("board_nodes", "0") == "0":
             bits.append("NO BOARDS — no switches or LEDs")
         return "Running", "  ·  ".join(bits)
+    if info.get("dongle_present") != "1" and info.get("key_remote"):
+        # The key lives in another PC (PAD-529): what the server says about
+        # it, not "plug it in" - there is nothing to plug in here.
+        return remote_state(info["key_remote"], info.get("key_remote_where",
+                                                          ""))
     if info.get("dongle_present") != "1":
         # The key can be IN the PC and still invisible to the rig: usbipd has
         # to hand it to WSL first.  Saying "no security key" to someone looking

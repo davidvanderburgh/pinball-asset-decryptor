@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from . import config, ecoredata, usbstick
+from . import config, ecoredata, remote_key, usbstick
 from .resources import DECRYPT_C_SOURCE, ENCRYPT_C_SOURCE, STUB_C_SOURCE
 from .executor import (CommandError, create_executor, find_usbipd,
                        _decode_output as _exec_decode_output,
@@ -1888,6 +1888,9 @@ class DecryptionPipeline:
         self.cancelled = False
         self._succeeded = False
         self._bind_mounted = []
+        # The key server this run took a lease on (PAD-529), so cleanup gives
+        # back exactly that and nothing else; None for the key in this PC.
+        self._remote_key = None
         self._iso_mount = None      # temp mount for ISO
         self._iso_mounted = False   # True if ISO was loop-mounted (vs xorriso)
         self._raw_img_path = None   # extracted raw ext4 (cached between runs)
@@ -2844,6 +2847,63 @@ class DecryptionPipeline:
 
     def _phase_dongle(self):
         self.log("Checking for HASP dongle...", "info")
+        remote = remote_key.current()
+        if remote is not None:
+            self._attach_remote_dongle(remote)
+        else:
+            self._attach_local_dongle()
+        self._await_dongle()
+
+    def _remote_run(self, cmd):
+        return self.executor.run(cmd, timeout=90)
+
+    def _attach_remote_dongle(self, remote):
+        """The key is in another PC (PAD-529): attach it over USB/IP from
+        inside WSL instead of usbipd-win's local bind/attach, under this run's
+        own lease (see remote_key), so cleanup can never pull a key out from
+        under an emulator run that is using it."""
+        self.log("Attaching the HASP dongle from the key server (%s)..."
+                 % remote_key.describe(remote), "info")
+        try:
+            how, port = remote_key.attach(self._remote_run, remote, "extract")
+        except remote_key.RemoteKeyError as e:
+            raise PipelineError("Dongle", str(e)) from e
+        self._remote_key = remote
+        self.log("Dongle %s over the network (USB/IP port %s)."
+                 % ("attached" if how == "attached"
+                    else "already attached here - sharing it", port),
+                 "success")
+
+    def _release_remote_dongle(self):
+        """Give back this run's lease on a network key: detached only when
+        nothing else (an emulator run, a key attached by hand) still holds
+        it."""
+        remote, self._remote_key = self._remote_key, None
+        if remote is None:
+            return
+        state, detail = remote_key.release(self._remote_run, remote,
+                                           "extract")
+        if state == "kept":
+            self.log("Network dongle left attached: still in use (%s)."
+                     % detail, "info")
+        elif state == "detached":
+            self.log("Network dongle handed back to the key server.", "info")
+
+    def _detach_dongle(self):
+        """Cleanup: the local key goes back to Windows; a network key only
+        loses this run's lease."""
+        if self._remote_key is not None:
+            self._release_remote_dongle()
+            return
+        if remote_key.current() is not None:
+            return      # never attached it: nothing of ours to detach
+        usbipd = find_usbipd()
+        self.executor.run_win(
+            [usbipd, "detach", "--hardware-id", config.HASP_VID_PID],
+            timeout=10,
+        )
+
+    def _attach_local_dongle(self):
         usbipd = find_usbipd()
 
         # Check dongle on Windows side via usbipd
@@ -2909,6 +2969,7 @@ class DecryptionPipeline:
                 raise PipelineError("Dongle",
                     f"Failed to attach dongle to WSL: {stderr}")
 
+    def _await_dongle(self):
         # Wait for USB device to appear in WSL (usbipd attach is async)
         self.log("Waiting for dongle to appear in WSL...", "info")
         # Total wait steps: USB settle + 3s interface settle + daemon ready
@@ -2972,6 +3033,16 @@ class DecryptionPipeline:
         bind (if needed) → detach → attach → wait for lsusb → restart daemon.
         """
         self.log("Re-attaching dongle to WSL...", "info")
+        remote = self._remote_key or remote_key.current()
+        if remote is not None:
+            # the same transport as the first attach: give back our lease
+            # (which detaches only if no one else holds it) and attach again
+            self._release_remote_dongle()
+            self._attach_remote_dongle(remote)
+            self._wait_dongle_visible()
+            time.sleep(2)
+            self._start_hasp_daemon()
+            return
         usbipd = find_usbipd()
 
         # Ensure bound (may have moved to a different port)
@@ -2992,6 +3063,15 @@ class DecryptionPipeline:
         if rc != 0 and "already" not in stderr.lower():
             self.log(f"Warning: usbipd attach returned: {stderr}", "error")
 
+        self._wait_dongle_visible()
+
+        # Extra settle time
+        time.sleep(2)
+
+        # Restart daemon
+        self._start_hasp_daemon()
+
+    def _wait_dongle_visible(self):
         # Wait for device to appear in WSL
         for i in range(config.USB_SETTLE_TIMEOUT):
             time.sleep(1)
@@ -3001,12 +3081,6 @@ class DecryptionPipeline:
         else:
             self.log("Warning: could not confirm the dongle inside WSL after "
                      "re-attach. Continuing to the daemon check.", "error")
-
-        # Extra settle time
-        time.sleep(2)
-
-        # Restart daemon
-        self._start_hasp_daemon()
 
     def _start_hasp_daemon(self, progress_step=0, progress_total=0):
         """Kill any existing HASP daemon and start a fresh one.
@@ -3704,11 +3778,7 @@ class DecryptionPipeline:
                 pass
 
             # Detach USB from WSL (non-critical)
-            usbipd = find_usbipd()
-            self.executor.run_win(
-                [usbipd, "detach", "--hardware-id", config.HASP_VID_PID],
-                timeout=10,
-            )
+            self._detach_dongle()
 
             # Unmount bind mounts in reverse order
             for target in reversed(self._bind_mounted):
@@ -5306,11 +5376,7 @@ class ModPipeline(DecryptionPipeline):
             except CommandError:
                 pass
 
-            usbipd = find_usbipd()
-            self.executor.run_win(
-                [usbipd, "detach", "--hardware-id", config.HASP_VID_PID],
-                timeout=10,
-            )
+            self._detach_dongle()
 
             for target in reversed(self._bind_mounted):
                 try:

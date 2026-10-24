@@ -21,6 +21,7 @@ import time
 
 from pinball_decryptor.webui import rig as _rig
 from ...core import rigslot
+from ...plugins.jjp import remote_key
 from .. import emulate_jjp_core as jjp
 from .. import compat
 from ..emulate_jjp_common import RigTabMixin, rig_off
@@ -28,8 +29,9 @@ from .base import TabService, rpc
 
 INTRO = ("Run a Jersey Jack game on this PC. The game is a native x86-64 "
          "Linux program, so it runs directly — no CPU emulation.\n"
-         "The purple JJP USB security key must be plugged in: the game's "
-         "code is encrypted with it, so this is not a check that can be "
+         "The purple JJP USB security key must be plugged in, here or in "
+         "another PC that shares it (Security key below): the game's code "
+         "is encrypted with it, so this is not a check that can be "
          "skipped.")
 
 ISO_TIP = ("A JJP release ISO (Clonezilla image). It is mounted READ ONLY and "
@@ -39,6 +41,20 @@ FIX_TIP = ("Force-restart WSL to clear a wedged emulator — a frozen window "
            "with no border, a game that will not stop, or orphaned board "
            "devices. Closes ALL WSL sessions and takes ~15s; your ISO and "
            "settings are untouched.")
+
+KEY_TIP = ("Where the purple key is. In this PC: usbipd-win hands it to WSL. "
+           "On another PC: that PC shares it over the network (USB/IP: "
+           "usbipd-win's 'usbipd bind', or Linux usbipd) and Start attaches "
+           "it here; Stop hands it back so the other PC can use it. The "
+           "Extract tab's dongle decrypt uses the same key.")
+
+SERVER_TIP = ("The PC the key is plugged into: its name or IP address, and "
+              ":port only if usbipd there does not use 3240.")
+
+BUSID_TIP = ("The key's bus ID as that PC lists it ('usbipd list' on Windows, "
+             "'usbip list -l' on Linux), like 1-4. Every JJP key has the same "
+             "hardware ID, so with several keys on a hub the bus ID is what "
+             "picks this game's.")
 
 VOLUME_TIP = ("This PC's volume for the emulated game and its boot menu - not "
               "the machine's own volume setting. It changes a running game at "
@@ -62,7 +78,20 @@ CELLS = (
 #: Headlines that mean "something is in the way" (drawn as a warning).
 _WARN_STATES = {"WSL not answering", "Key not passed through yet",
                 "No security key", "Key not accepted",
-                "Wrong key for this game"}
+                "Wrong key for this game", "Key server not answering",
+                "Key not offered by the server", "No USB/IP client",
+                "Key server: no answer", "Key in use by another PC"}
+
+#: The verdict for a game that exits on its key, until a rig line names a
+#: sharper one (cleared back to this at every Start).
+WRONG_KEY = ("Wrong key for this game",
+             "The plugged-in key runs a different JJP title.")
+
+#: remote_key's attach faults -> the panel's headline
+_REMOTE_FAULTS = {"unreachable": "Key server not answering",
+                  "busy": "Key in use by another PC",
+                  "notexported": "Key not offered by the server",
+                  "noclient": "No USB/IP client"}
 
 #: The footer ladder (Tk's MainWindow.EMULATE_PHASES_JJP, item 118).
 PHASES = ("Restore image", "Boot", "Game", "Ready")
@@ -95,8 +124,10 @@ class EmulateJJPTab(RigTabMixin, TabService):
         #: sticky key verdict (see _mark_key_failure)
         self._wrong_key = False
         self._auto_attached = False
-        self._key_verdict = ("Wrong key for this game",
-                             "The plugged-in key runs a different JJP title.")
+        self._key_verdict = WRONG_KEY
+        #: the key server this tab holds a lease on (PAD-529), else None
+        self._remote_lease = None
+        self._init_key_setting()
         ok = jjp.rig_available()
         self.set(intro=INTRO, iso_tip=ISO_TIP, fix_tip=FIX_TIP,
                  volume_tip=VOLUME_TIP, platform=sys.platform, rig_ok=ok,
@@ -123,6 +154,150 @@ class EmulateJJPTab(RigTabMixin, TabService):
             self._schedule_poll()
         else:
             self._restore_default_phases()
+
+    # ------------------------------------------------------------------
+    # where the key is (PAD-529)
+    # ------------------------------------------------------------------
+    def _init_key_setting(self):
+        entry = None
+        app = getattr(self.window, "app", None)
+        try:
+            entry = app._settings.get(remote_key.SETTINGS_KEY)
+        except Exception:                                  # noqa: BLE001
+            entry = None
+        if entry is None:
+            try:
+                import json
+                from ...core.config import SETTINGS_FILE
+                with open(SETTINGS_FILE, encoding="utf-8") as f:
+                    entry = json.load(f).get(remote_key.SETTINGS_KEY)
+            except (OSError, ValueError, AttributeError):
+                entry = None
+        entry = entry if isinstance(entry, dict) else {}
+        self._key_where_var = self.var(
+            "key_where", "str",
+            "usbip" if entry.get("where") == "usbip" else "local")
+        self._key_server_var = self.var("key_server", "str",
+                                        str(entry.get("server") or ""))
+        self._key_busid_var = self.var("key_busid", "str",
+                                       str(entry.get("busid") or ""))
+        self.set(key_tip=KEY_TIP, server_tip=SERVER_TIP, busid_tip=BUSID_TIP)
+        self._key_check(entry)
+        for v in (self._key_where_var, self._key_server_var,
+                  self._key_busid_var):
+            v.trace_add("write", self._on_key_setting)
+
+    def _key_entry(self):
+        return {"where": self._key_where_var.get(),
+                "server": self._key_server_var.get().strip(),
+                "busid": self._key_busid_var.get().strip()}
+
+    def _key_check(self, entry):
+        """Hand the setting to remote_key (the extract reads it there) and
+        say on the page what it means, or what is wrong with it."""
+        remote = remote_key.configure(entry)
+        msg, bad = "", False
+        if entry.get("where") == "usbip":
+            try:
+                remote_key.parse_server(entry.get("server"))
+                remote_key.parse_busid(entry.get("busid"))
+                msg = ("Start attaches the key (%s) over the network; Stop "
+                       "hands it back." % remote_key.describe(remote))
+            except ValueError as exc:
+                msg, bad = str(exc), True
+        self.set(key_msg=msg, key_bad=bad)
+        return remote
+
+    def _on_key_setting(self, *_args):
+        entry = self._key_entry()
+        self._key_check(entry)
+        app = getattr(self.window, "app", None)
+        if app is not None and hasattr(app, "_settings"):
+            app._settings[remote_key.SETTINGS_KEY] = entry
+            try:
+                app._save_settings()
+            except Exception:                              # noqa: BLE001
+                pass
+
+    def _remote(self):
+        return remote_key.current()
+
+    @rpc
+    def test_key(self):
+        """Ask the key server about the key, without taking it."""
+        remote = self._remote()
+        if remote is None:
+            self.set(key_msg="Type the key server and the key's bus ID "
+                             "first.", key_bad=True)
+            return False
+
+        def work():
+            kind = remote_key.probe(jjp.remote_run, remote)
+            label, hint = jjp.remote_state(kind, remote_key.describe(remote))
+            self._log("JJP: key server check: %s. %s" % (label, hint))
+            self._post(lambda: self.set(key_msg="%s. %s" % (label, hint),
+                                        key_bad=kind not in ("offered",
+                                                             "attached")))
+
+        self.set(key_msg="Asking %s…" % remote.host, key_bad=False)
+        threading.Thread(target=work, daemon=True,
+                         name="pad-jjp-keytest").start()
+        return True
+
+    def _attach_remote(self, remote):
+        """Attach the network key under this tab's lease and wait until WSL
+        sees it.  True when it is there."""
+        try:
+            subprocess.run(["wsl.exe", "-e", "true"], timeout=60,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=_rig.CREATE_FLAGS)
+        except Exception:                                  # noqa: BLE001
+            pass
+        where = remote_key.describe(remote)
+        self._log("JJP: attaching the security key from the key server "
+                  "(%s)…" % where)
+        try:
+            how, port = remote_key.attach(jjp.remote_run, remote, "emulate")
+        except remote_key.RemoteKeyError as exc:
+            self._log("JJP: " + str(exc))
+            self._mark_key_failure(
+                _REMOTE_FAULTS.get(exc.kind, "Key server: no answer"),
+                str(exc))
+            return False
+        except Exception as exc:                           # noqa: BLE001
+            self._log("JJP: could not reach WSL to attach the key: %s" % exc)
+            return False
+        self._remote_lease = remote
+        if self._wait_for_key():
+            self._log("JJP: security key %s over the network (USB/IP port "
+                      "%s) and visible in WSL." % (
+                          "attached" if how == "attached"
+                          else "already attached here, shared", port))
+            return True
+        self._log("JJP: the key server took the attach but the key did not "
+                  "appear in WSL.")
+        self._release_remote()
+        return False
+
+    def _release_remote(self):
+        """Give back this tab's lease on the network key (blocking): it is
+        detached only when nothing else - an extract, a key attached by hand
+        - still holds it."""
+        remote, self._remote_lease = self._remote_lease, None
+        if remote is None:
+            return
+        state, detail = remote_key.release(jjp.remote_run, remote, "emulate")
+        if state == "detached":
+            self._log("JJP: security key handed back to the key server.")
+        elif state == "kept":
+            self._log("JJP: security key left attached: still in use (%s)."
+                      % detail)
+
+    def _release_remote_async(self):
+        if self._remote_lease is None:
+            return
+        threading.Thread(target=self._release_remote, daemon=True,
+                         name="pad-jjp-keyback").start()
 
     def on_show(self):
         self._show_own_phases()
@@ -217,9 +392,11 @@ class EmulateJJPTab(RigTabMixin, TabService):
         self._go_busy = True
         self._started_here = True
         self._wrong_key = False       # a new attempt clears the last verdict
+        self._key_verdict = WRONG_KEY
         self._set_go("Starting…", False)
 
         def work():
+            up = False
             try:
                 if not self._attach_dongle():
                     # The key never became visible: stop here with the
@@ -237,6 +414,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
                              "PAD_AUDIO_CTL=" + self._audio_ctl_file()]
                         + rigslot.board_env() + rigslot.quiet_env()),
                     timeout=1800)
+                up = rc in (0, None) and not saw_wrong_key
                 if saw_wrong_key or rc == 7:
                     self._mark_wrong_key()
                 elif rc not in (0, None):
@@ -250,6 +428,8 @@ class EmulateJJPTab(RigTabMixin, TabService):
             except Exception as exc:                       # noqa: BLE001
                 self._log("JJP: start failed: %s" % exc)
             finally:
+                if not up:
+                    self._release_remote()
                 self._release()
 
         threading.Thread(target=work, daemon=True, name="pad-jjp-start").start()
@@ -328,6 +508,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
             except Exception as exc:                       # noqa: BLE001
                 self._log("JJP: stop failed: %s" % exc)
             finally:
+                self._release_remote()
                 self._release()
 
         threading.Thread(target=work, daemon=True, name="pad-jjp-stop").start()
@@ -371,6 +552,9 @@ class EmulateJJPTab(RigTabMixin, TabService):
         """Hand the key to WSL and WAIT until it is actually there (usbipd
         needs a running distro, and its attach is asynchronous).  True if
         the key ends up visible in WSL."""
+        remote = self._remote()
+        if remote is not None:
+            return self._attach_remote(remote)
         cmd = jjp.attach_dongle_cmd()
         if not cmd:
             self._log("JJP: usbipd-win not found — cannot pass the security "
@@ -511,6 +695,12 @@ class EmulateJJPTab(RigTabMixin, TabService):
         info = self._run_status(jjp.rig_cmd("status.sh"))
         # A key the rig cannot see may still be sitting in the PC.  Asked
         # ONLY when it matters, so the ordinary poll stays one WSL call.
+        remote = self._remote()
+        if info and remote is not None:
+            if info.get("dongle_present") != "1":
+                info["key_remote"] = remote_key.probe(jjp.remote_run, remote)
+                info["key_remote_where"] = remote_key.describe(remote)
+            return info
         if info and info.get("dongle_present") != "1":
             on_pc = jjp.key_on_pc()
             if on_pc is not None:
@@ -532,6 +722,9 @@ class EmulateJJPTab(RigTabMixin, TabService):
         self._last_up = int(info.get("game_procs") or 0) > 0
         if was_up and not self._last_up:
             self._started_here = False      # our run ended; the next is not
+            if not self._busy:
+                # the game ended by itself: the network key goes back too
+                self._release_remote_async()
         label, hint = jjp.state_text(info)
         if self._wrong_key and not self._last_up:
             label, hint = self._key_verdict
@@ -581,7 +774,8 @@ class EmulateJJPTab(RigTabMixin, TabService):
             note = ("The security key is in this PC but WSL cannot see it "
                     "yet. Handing it over — no need to do anything.")
             attach = True
-        elif not self._last_up and info.get("dongle_present") == "0":
+        elif (not self._last_up and info.get("dongle_present") == "0"
+              and not info.get("key_remote")):
             note = ("No security key detected. The game's code is "
                     "encrypted with the purple JJP USB key — plug it in "
                     "before starting.")
@@ -615,6 +809,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
         # only the run this app started (PAD-253): quitting must not end a
         # session's run it merely saw on the rig
         if not self._started_here:
+            self._release_remote()
             return
         if not (self._last_up or self._busy
                 or self._info.get("cuse_daemons", "0") != "0"):
@@ -625,6 +820,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
                            creationflags=_rig.CREATE_FLAGS)
         except Exception:                                  # noqa: BLE001
             pass
+        self._release_remote()
 
     shutdown_sync = emulate_shutdown
 

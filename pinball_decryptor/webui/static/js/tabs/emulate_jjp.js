@@ -1,7 +1,7 @@
 // Emulate (Jersey Jack): run a JJP game on this PC.  Python half:
 // webui/tabs/emulate_jjp.py (the Tk panel was gui/jjp_emulate_tab.py).
 
-import { html, PageHead, Card, Button, PathField, Chip, Note, call } from "../core/ui.js";
+import { html, PageHead, Card, Button, PathField, Field, Seg, Chip, Note, call, tip } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { VolumeControl, StateChip, introLines } from "./emulate_jjp_shared.js";
 
@@ -32,6 +32,24 @@ export default function EmulateJJP() {
           <${PathField} ns="emulate_jjp" k="iso" value=${s.iso} title=${s.iso_tip} history=${hist}
             placeholder="A JJP release ISO (Clonezilla image)" onBrowse=${() => call("emulate_jjp.browse")} />
           <span class="small muted">${s.iso_tip}</span>
+        <//>
+        <${Card} title="Security key" cls="emu-key">
+          <div class="stack" style="gap:10px">
+            <div class="row" ...${tip(s.key_tip)}>
+              <${Seg} ns="emulate_jjp" k="key_where" value=${s.key_where || "local"}
+                options=${[{ value: "local", label: "In this PC" },
+                           { value: "usbip", label: "On another PC (network)" }]} />
+            </div>
+            ${s.key_where === "usbip" ? html`<div class="row" style="gap:8px">
+              <${Field} ns="emulate_jjp" k="key_server" value=${s.key_server} mono cls="grow"
+                title=${s.server_tip} placeholder="Key server: name or IP address" />
+              <${Field} ns="emulate_jjp" k="key_busid" value=${s.key_busid} mono width=${110}
+                title=${s.busid_tip} placeholder="Bus ID" />
+              <${Button} onClick=${() => call("emulate_jjp.test_key")}>Test<//>
+            </div>` : null}
+            ${s.key_where === "usbip" && s.key_msg
+              ? html`<span class=${"small " + (s.key_bad ? "warn-ink" : "muted")}>${s.key_msg}</span>` : null}
+          </div>
         <//>
         ${s.note ? html`<${Note} kind="warn">${s.note}<//>` : null}
       </div>

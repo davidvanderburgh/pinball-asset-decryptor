@@ -80,6 +80,9 @@
 .aud-head { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px solid #ffffff; pointer-events: none; box-shadow: 0 0 4px rgba(0,0,0,.6); }
 .aud-transport { gap: 8px; flex-wrap: wrap; min-height: 30px; }
 .aud-transport .btn.sm .i { width: 13px; height: 13px; }
+/* PAD-701: Previous / Play / Next / Stop sit together, so the Replacement row keeps its Loudness on one line */
+.aud-keys { gap: 2px; flex-wrap: nowrap; }
+.aud-keys .btn.icon { padding: 0 6px; }
 .aud-clock { min-width: 84px; }
 .aud-loud { flex-wrap: wrap; }
 .aud-db { width: 84px; flex: 0 0 84px; gap: 4px; }

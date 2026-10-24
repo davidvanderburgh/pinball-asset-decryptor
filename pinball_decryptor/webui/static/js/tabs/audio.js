@@ -302,12 +302,14 @@ function Pane({ side, pane, actions, extra, onPlay, onStep }) {
       ${loaded && dur > 0 ? html`<i class="aud-head" style=${`left:${pct(pos)}`}></i>` : null}
     </div>
     <div class="row aud-transport">
-      <${Button} size="sm" kind="ghost" icon="prev" label="Previous" title=${T.prev} onClick=${() => onStep(side, -1)} />
-      <${Button} size="sm" icon=${p.playing ? "pause" : "play"} label=${p.playing ? "Pause" : "Play"}
-        onClick=${() => { if (p.playing) stopPlayer(p); else onPlay(side); }}>${p.playing ? "Pause" : "Play"}<//>
-      <${Button} size="sm" kind="ghost" icon="next" label="Next" title=${T.next} onClick=${() => onStep(side, 1)} />
-      <${Button} size="sm" kind="ghost" icon="stop" label="Stop" onClick=${() => {
-        stopAll(); seekTo(p, 0); call("audio.stop"); }} />
+      <span class="row aud-keys">
+        <${Button} size="sm" kind="ghost" icon="prev" label="Previous" title=${T.prev} onClick=${() => onStep(side, -1)} />
+        <${Button} size="sm" icon=${p.playing ? "pause" : "play"} label=${p.playing ? "Pause" : "Play"}
+          onClick=${() => { if (p.playing) stopPlayer(p); else onPlay(side); }}>${p.playing ? "Pause" : "Play"}<//>
+        <${Button} size="sm" kind="ghost" icon="next" label="Next" title=${T.next} onClick=${() => onStep(side, 1)} />
+        <${Button} size="sm" kind="ghost" icon="stop" label="Stop" onClick=${() => {
+          stopAll(); seekTo(p, 0); call("audio.stop"); }} />
+      </span>
       <span class="mono small muted nw aud-clock">${time}</span>
       ${extra ? html`<span class="grow"></span>${extra}` : null}
     </div>

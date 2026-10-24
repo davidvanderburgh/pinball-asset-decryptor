@@ -129,6 +129,9 @@ run out. The five that did not were the harness, each passed on a re-run (`shake
   is armed ("a mode may shake the cabinet through the game's own shake (one power) 0x001c74e0") but no mode was
   seen to shake it, so it is NOT in MACHINE_HARDWARE's shaker titles: the Modes tab shows no Shaker section on it,
   as before. D&D Pro 1.10 (the same wrapper) passed. The rig start wants a ticket of its own.
+  PAD-713 (2026-10-24): the rig starts it now (the dragon hold fills from HOLD 1); start and end 51/255 480 ms on
+  node 1 coil 0 (since PAD-658 a mode's end lets its shake run out, so no OFF at the stop) - in SHAKER_PROVEN and
+  MACHINE_HARDWARE.
 Godzilla LE 1.16 (PAD-414's) passed again on the final object too.
 
 So `SHAKER_PROVEN` holds 49 builds - Godzilla LE and 48 from this sweep (the 20's entries rewritten with the final

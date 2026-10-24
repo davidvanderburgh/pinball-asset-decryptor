@@ -2131,7 +2131,7 @@ Pro 1.16's routine is the LE's instruction for instruction, so it has the LE's l
 | Venom Pro 1.07 | `0x00192dec` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 484, long 1024 |
 
 **Measured (emulator, PAD-474: every build above but D&D LE on its stock card, hidden, muted, `PAD_COIL_PROBE=1`,
-the pinned runtime, through `rigbatch.sh`; D&D LE starts no game on the rig, so its lines are unproven).** A mode file with `shake start <its longest at 0> 0`, `shake shot game <its short
+the pinned runtime, through `rigbatch.sh`; D&D LE by PAD-713 once the rig started its game: start and end 51/255 480 ms on node 1 coil 0, as on the Pro).** A mode file with `shake start <its longest at 0> 0`, `shake shot game <its short
 shake> <every shot>` and `shake end <600 ms or its longest> <its softest used strength>`: every runtime `shaker:` line
 was followed on the board within ~20 ms by `[coildrive] node 1 coil 0` at the game's power for the time asked, cut
 to the stock setting's longest (setting 2 on Elvira, 3 on most `drive` titles, 4 elsewhere; Metallica at its operator's
@@ -4064,7 +4064,7 @@ count stays where its own start would leave it (all locks made).
 **Proven** (emulator, 2026-10-24, the stock cards, hidden, muted; `C:\tmp\PAD-710\rig`, `place_job2.sh` over
 rigbatch): a mode file `in_place_of <id>` with an 8 s clock, the game's START of that mode called as its rules call it,
 the mode started in its place, its clock ran out (completed), and the game's own STOP wrote the completion, the game
-playing on after it - 35 of the 36 newest C++ builds (`mode_project.PLACE_PROVEN`; D&D LE starts no game on the rig).
+playing on after it - every one of the 36 newest C++ builds (`mode_project.PLACE_PROVEN`; D&D LE 1.10 by PAD-713 once the rig started its game: Mimic Hurry Up, starts 0 -> 1, stopped 0 -> 1, wins 0 -> 1).
 Godzilla LE/Pro 1.16 Jet Fighter Attack and Jaws LE 1.02 Super Buoys: STARTED audit 0 -> 1 at the take, COMPLETED
 0 -> 1 at the end, stopped 1, reason 1; Avengers, Deadpool and King Kong: the STARTED audit 0 -> 1 (those modes keep no
 COMPLETED audit), stopped 1; the crule generation and Star Wars: stopped 1, wins 0 -> 1. Venom starts its Mini Mode 01

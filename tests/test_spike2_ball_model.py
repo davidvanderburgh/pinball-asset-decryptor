@@ -808,6 +808,13 @@ def test_game_waits_for_a_ball_that_stays_in_the_lane(tmp_path, monkeypatch):
     assert run({2.0: [(66, 0), (62, 1)], 2.6: [(62, 0)]}, 90) == "self"
     # an attract-style launch that came home is not a game
     assert run({2.0: [(66, 0), (62, 1)], 2.6: [(62, 0)], 7.6: [(66, 1)]}, 90) is None
+    # PAD-713: D&D LE's attract loading its dragon and kicking each ball back out until the trough ran dry - every
+    # ball off home and none locked, which read as "the game launched ball 1 itself"
+    drain = {}
+    for k, sw in enumerate(FULL):
+        drain[2.0 + 2 * k] = [(sw, 0), (62, 1)]
+        drain[2.5 + 2 * k] = [(62, 0)]
+    assert run(drain, 90) is None
 
 
 # --- the van (item 167, TMNT LE/Premium) ------------------------------------
@@ -1035,7 +1042,7 @@ DND_COILS = {"DRAGON VUK": (9, 3), "DIVERTER": (9, 0)}
 
 def test_only_a_title_with_every_hold_switch_and_both_coils_has_a_hold(ballmodel):
     h = ballmodel.Hold.from_names(DND_HOLD, DND_COILS.get)
-    assert h.stack == [83, 94, 93, 92, 91] and h.balls == 4     # the four Start fills it with, on top of the six
+    assert h.stack == [91, 92, 93, 94, 83] and h.balls == 4     # PAD-713: HOLD 1 is the release end, STACK last     # the four Start fills it with, on top of the six
     assert ballmodel.Hold.from_names(DND_HOLD, {"DRAGON VUK": (9, 3)}.get) is None
     half = dict(DND_HOLD)
     del half["DRAGON HOLD 1"]
@@ -1045,16 +1052,28 @@ def test_only_a_title_with_every_hold_switch_and_both_coils_has_a_hold(ballmodel
 def test_a_hold_fills_from_its_release_end_and_lets_out_the_ball_there(ballmodel, monkeypatch):
     monkeypatch.setattr(ballmodel, "VAN_DROP_S", 0.0)
     h = ballmodel.Hold.from_names(DND_HOLD, DND_COILS.get)
-    assert h.plan_load(mrg_with()).switches() == [(83, 1)]
-    assert h.plan_load(mrg_with(83)).switches() == [(94, 1)]
+    assert h.plan_load(mrg_with()).switches() == [(91, 1)]
+    assert h.plan_load(mrg_with(91)).switches() == [(92, 1)]
+    assert h.plan_load(mrg_with(91, 92, 93, 94)).switches() == [(83, 1)]     # STACK only as the fifth
     assert h.plan_load(mrg_with(83, 94, 93, 92, 91)).refused
     assert h.plan_release(mrg_with()).refused
-    assert h.plan_release(mrg_with(83)).switches() == [(83, 0)]
+    assert h.plan_release(mrg_with(91)).switches() == [(91, 0)]
     # two balls: the one at the release end leaves, the one behind it rolls down
-    out = mrg_with(83, 94)
+    out = mrg_with(91, 92)
     for sw, v in h.plan_release(out).switches():
         out[sw] = v
-    assert (out[83], out[94]) == (1, 0)
+    assert (out[91], out[92]) == (1, 0)
+
+
+def test_a_lone_ball_in_the_hold_never_sits_on_stack(ballmodel):
+    """PAD-713: the game reads DRAGON HOLD STACK made with the hold empty as a JAM (dragon_jam_event_handler kicks
+    it out at once, on every boot after the first) - attract loaded and kicked for ever and no game ever started."""
+    h = ballmodel.Hold.from_names(DND_HOLD, DND_COILS.get)
+    m = mrg_with()
+    for _ in range(4):
+        for sw, v in h.plan_load(m).switches():
+            m[sw] = v
+        assert m[83] == 0
 
 
 def _hold_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw):
@@ -1084,7 +1103,7 @@ def test_in_attract_a_diverted_launch_goes_into_the_hold(tmp_path, monkeypatch, 
     f.poll(m, d, 1.5)
     _fire(coilmap, d, 8, 4)                     # AUTO PLUNGER
     f.poll(m, d, 2.0)
-    assert m[padsw.OFF_MRG + 62] == 0 and m[padsw.OFF_MRG + 83] == 1
+    assert m[padsw.OFF_MRG + 62] == 0 and m[padsw.OFF_MRG + 91] == 1 and m[padsw.OFF_MRG + 83] == 0
     assert f.pending == []                      # not a ball on the playfield
 
 
@@ -1094,7 +1113,7 @@ def test_start_fills_the_hold_and_ball_1_with_no_diverter_goes_onto_the_playfiel
     fire. A rule keyed on Start sent the diverted ones onto the playfield and the game emptied its trough."""
     ballfeed, padsw = _sw(tmp_path, monkeypatch)
     f = _hold_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw)
-    m = _block(padsw, *FULL, 83)                # attract left one in the hold
+    m = _block(padsw, *FULL, 91)                # attract left one in the hold
     d = _led(coilmap)
     f.poll(m, d, 1.0)
     t = 1.0
@@ -1105,12 +1124,12 @@ def test_start_fills_the_hold_and_ball_1_with_no_diverter_goes_onto_the_playfiel
         _fire(coilmap, d, 8, 4)                 # AUTO PLUNGER
         f.poll(m, d, t + 0.6)
         t += 2.0
-    assert [m[padsw.OFF_MRG + i] for i in (83, 94, 93, 92, 91)] == [1, 1, 1, 1, 0]
+    assert [m[padsw.OFF_MRG + i] for i in (91, 92, 93, 94, 83)] == [1, 1, 1, 1, 0]
     assert f.pending == []
     m[padsw.OFF_MRG + 62] = m[padsw.OFF_SCR_HELD + 62] = 1       # ball 1, no diverter
     _fire(coilmap, d, 8, 4)
     f.poll(m, d, t + ballmodel.HOLD_FEED_S + 1)
-    assert m[padsw.OFF_MRG + 62] == 0 and m[padsw.OFF_MRG + 91] == 0 and len(f.pending) == 1
+    assert m[padsw.OFF_MRG + 62] == 0 and m[padsw.OFF_MRG + 83] == 0 and len(f.pending) == 1
 
 
 def test_a_launch_long_after_the_diverter_is_not_the_holds(tmp_path, monkeypatch, tr, ballmodel, coilmap):
@@ -1123,21 +1142,21 @@ def test_a_launch_long_after_the_diverter_is_not_the_holds(tmp_path, monkeypatch
     f.poll(m, d, 1.5)
     _fire(coilmap, d, 8, 4)
     f.poll(m, d, 1.5 + ballmodel.HOLD_FEED_S + 1)
-    assert m[padsw.OFF_MRG + 83] == 0 and len(f.pending) == 1
+    assert m[padsw.OFF_MRG + 91] == 0 and len(f.pending) == 1
 
 
 def test_the_holds_release_is_a_ball_on_the_playfield(tmp_path, monkeypatch, tr, ballmodel, coilmap):
     ballfeed, padsw = _sw(tmp_path, monkeypatch)
     f = _hold_feeder(ballfeed, ballmodel, tr, monkeypatch, padsw)
-    m = _block(padsw, *FULL[:4], 83, 94)
+    m = _block(padsw, *FULL[:4], 91, 92)
     d = _led(coilmap)
     f.poll(m, d, 1.0)
     _fire(coilmap, d, 9, 3)                     # DRAGON VUK
     f.poll(m, d, 2.0)
-    assert (m[padsw.OFF_MRG + 83], m[padsw.OFF_MRG + 94]) == (1, 0) and len(f.pending) == 1
+    assert (m[padsw.OFF_MRG + 91], m[padsw.OFF_MRG + 92]) == (1, 0) and len(f.pending) == 1
     _fire(coilmap, d, 9, 3)
     f.poll(m, d, 3.0)
-    assert m[padsw.OFF_MRG + 83] == 0 and len(f.pending) == 2
+    assert m[padsw.OFF_MRG + 91] == 0 and len(f.pending) == 2
     f.poll(m, d, 3.0 + ballfeed.HOME_S + 0.5)    # nobody playing: the way home takes one back
     assert len(f.pending) == 1 and m[padsw.OFF_MRG + FULL[4]] == 1
 

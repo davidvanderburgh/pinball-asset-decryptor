@@ -300,7 +300,8 @@ class Van:
 
 
 #: ★ PAD-654: A HOLD, a physical lock the game fills through a DIVERTER (D&D LE/Premium's dragon: DRAGON HOLD 1-4
-#: and DRAGON HOLD STACK, let out by DRAGON VUK). MEASURED in the rig (dungeons_and_dragons_le 1.10, 2026-10-20):
+#: and DRAGON HOLD STACK, let out by DRAGON VUK). MEASURED in the rig (dungeons_and_dragons_le 1.10, 2026-10-20 -
+#: with the stack in the wrong order, see PAD-713 below):
 #:   * attract fires TROUGH and DIVERTER together, then AUTO PLUNGER - the diverter sends the launch into the hold -
 #:     every ~8 s while the hold is empty. With nothing modelling it each ball came back to the trough, the loop never
 #:     ended and the game never took Start. One ball closing DRAGON HOLD STACK and attract went quiet for good.
@@ -312,11 +313,20 @@ class Van:
 #:     hold's balls on top of the trough's six it served ball 1 at once - the TMNT LE van's story (eight balls
 #:     installed, a six-ball trough). `balls` is that complement, queued behind the trough (PAD_BALL_EXTRA
 #:     overrides it).
+#: ★ PAD-713: HOLD 1 IS THE RELEASE END AND STACK THE LAST PLACE, like TROUGH 1 is the trough's eject end. PAD-654
+#: listed STACK first, so every diverted ball closed DRAGON HOLD STACK alone - and the game reads a ball there with
+#: the hold empty as a JAM, not a lock (its own debug ring, switched on: `dragon_jam_event_handler: kicking dragon
+#: for event 17`, where a ball on DRAGON HOLD 4 gets `dragon_lock_event_handler: MD_EVENT_ARRIVAL ... MD_EVENT_LOCK`).
+#: On a factory-fresh NVRAM the jam handler gave up after one kick and the next balls locked, so the first boot
+#: after a wipe played; from the second boot on it kicked every ball straight back out - attract loaded and kicked
+#: for ever, the trough ran dry and Start never took (PAD-474, PAD-483, PAD-710: "no game on the rig"). Filled from
+#: HOLD 1 the game locks each ball (ARRIVAL, LOCK), attract goes quiet with three, and Start serves ball 1 on any
+#: boot. HOLD 4, 3, 2, 1 first works the same in a game; 1 first is the trough's convention.
 #: The stack is listed from the release end: a ball rolls down to it first. MATCHED BY NAME like the van and the
 #: drop banks: a title with every switch and both coils has one.
 HOLDS = (
     # (the stack, release end first, release coil, feed coil, its balls)            title
-    (("DRAGON HOLD STACK", "DRAGON HOLD 4", "DRAGON HOLD 3", "DRAGON HOLD 2", "DRAGON HOLD 1"),
+    (("DRAGON HOLD 1", "DRAGON HOLD 2", "DRAGON HOLD 3", "DRAGON HOLD 4", "DRAGON HOLD STACK"),
      "DRAGON VUK", "DIVERTER", 4),                                                    # dungeons_and_dragons_le
 )
 

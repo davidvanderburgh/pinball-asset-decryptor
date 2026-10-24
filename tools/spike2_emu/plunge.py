@@ -347,7 +347,10 @@ def wait_serve(m, budget=None):
                 gone = (_model().count(_mrg(m)), _locked(m))
             since = None
             if last is not None and now - last >= QUIET_S:
-                if gone and _model().count(_mrg(m)) <= gone[0] and _locked(m) <= gone[1]:
+                # PAD-713: and ONE ball off home - the trough at most one short. D&D LE's attract loading and
+                # kicking its dragon emptied the trough onto the playfield (0/6), and that read as ball 1
+                n = _model().count(_mrg(m))
+                if gone and n <= gone[0] and _locked(m) <= gone[1] and n >= len(TROUGH) - 1:
                     return "self"
                 print("  the game launched its own balls and then served none - Start again")
                 return None

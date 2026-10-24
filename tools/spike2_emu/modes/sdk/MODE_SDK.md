@@ -3577,7 +3577,8 @@ code, not listed in data: the battle rule copies a table of exactly seven {slot,
 the screen and the rule check the slot number against 6 and 7 in more than a dozen places, and the
 screen's scene has exactly seven pictures, tiles and names (the evidence, with addresses, is in
 item 146's entry in `plans/TODO.md`, and `tests/test_spike2_mode_roster.py` reads it out of the
-program). Adding an eighth would mean moving that table and rewriting every one of those checks.
+program). Adding an eighth would mean moving that table and rewriting every one of those checks. One place can
+host a LIST of monsters of your own instead, with a selection screen of its own (MORE KAIJU, PAD-707, below).
 
 **Claiming a slot.** In C:
 
@@ -3873,6 +3874,69 @@ EBIRAH DEFAULT CHAMP SCORE"), its audits ("GODZILLA VS EBIRAH STARTED" / "COMPLE
 neither), the champion ("GODZILLA VS. EBIRAH CHAMPION") and the battle's own award lines ("EBIRAH FINAL
 BLOW!"). They are program text, which `progtext.py` can rename within each string's length.
 
+**MORE KAIJU: more monsters than the screen has places (PAD-707).** David (2026-10-24): "we know that people are
+going to want to add monsters to the selection menu." The seven places cannot grow, but one place can HOST A LIST.
+Every mode that joins the list behind place `s` is one monster on it; the runtime claims `s` for the list, and a pick
+of `s` opens a selection screen of OURS once the game's has closed:
+
+```c
+static int on_pick(unsigned slot)            /* the same on_pick as a claimed place's */
+{
+    if (!pm_begin()) return 0;
+    start_my_mode();                         /* pm_roster_start_after(): 300 ms after the list's screen */
+    return 1;
+}
+
+static void on_init(void)
+{
+    /* one monster on MORE KAIJU, the list behind Ebirah's place: its page the build drew, its callout (0 = silent) */
+    pm_roster_more(0, "MOTHRA", "PadMode_mothra_More", 0, on_pick);
+}
+```
+
+- **The pages.** The card build draws one page per monster (`more_kaiju.py`) and puts it in the HUD scene as
+  `PadMode_<folder>_More`, hidden until the runtime shows it: the whole glass (drawn at 680x384, shown at twice that),
+  the title MORE KAIJU, the monster's picture and name large, "n OF m", how to pick, and the row of every monster's
+  tile along the bottom with this one lit in gold (eight at a time, scrolling past eight). Moving the cursor is showing
+  another page; the page's words are the timer, written each second. The picture is `monster.png` in the mode's folder
+  (the blocks hat's Picture… puts it there), else its own screen's picture, else its HUD badge's `badge.png`, else a
+  tile lettered with its name in a colour of its own. Pictures are the person's own: the build draws nothing of a
+  manufacturer's.
+- **The buttons.** While the list is up the port's three cabinet-button shots (`switch` lines: Left / Right flipper
+  button, Action button) are the list's and reach no mode. The flipper buttons move the cursor (wrapping), with the
+  selection screen's own sounds - read from its switch handler (`0x191048` on Premium/LE 1.16, `0x18d3a8` on Pro
+  1.16/1.15): 271 back, 272 on (`value roster_left_sound` / `roster_right_sound`) - and the monster's callout as the
+  cursor lands. The Action button picks, with the game's pick sound 236 (`value roster_pick_sound`); so does the
+  timer, `value roster_select_ms` (13000, the game's own).
+- **The ball waits in the scoop.** The pick runs inside the game's own hold of the ball (the scoop's event 2), so the
+  scoop's wrap (PAD-381) keeps holding it once that returns, from the pick until the monster's mode begins (at most
+  40 s): the flippers flip nothing in play meanwhile, and the game's own kick follows.
+- **The pick.** The monster picked gets `on_pick(slot)` exactly as a claimed place's pick: 1 = taken, and the mode's
+  `pm_roster_over(won)` gives the place's battle back, won or lost - the game counts it as that place's battle
+  (PAD-706: Completed, the audits, the city). `pm_roster_more_picked()` names the monster inside `on_pick` (one mode
+  object running several monsters - mode_file.c - tells them apart by it); `pm_roster_start_after()` is how long to
+  wait before showing the mode's start (300 ms here, the port's `roster_start_after_ms` after the game's own screen).
+  A monster that will not start (0), another mode of ours running, the ball ending or another player coming up while
+  the list waits or is open gives the pick back as a battle lost; the game ending closes it quietly.
+- **Played again until it is won.** A monster's battle lost is the one the game's city pick plays again at the next
+  lit scoop (`site roster_resume`, PAD-706), with no list: the game replays its own lost battle the same way. A pick
+  after a win opens the list again.
+- **One list per card.** A place a mode claimed itself (`pm_roster_claim`) cannot host one, and a second place is
+  refused while the first has one. At most 16 monsters. `pm_roster_more_leave(name)` takes the calling mode's monster
+  off; the place is the game's again when the list is empty.
+
+In a mode file: `roster_slot 0` and `roster_more PadMode_<folder>_More` (`roster_callout` is then the list's callout for
+the monster). On the Modes tab: blocks, *When the player picks it on MORE KAIJU, in <battle>'s place* (the battle hat's
+list offers every place twice: the battle itself, and MORE KAIJU in its place) with *Picture…*; a form mode, *Starts on:
+the player picking MORE KAIJU, in <battle>'s place*. The build refuses monsters behind two different places.
+
+The place's own tile, portrait and name on the game's screen stay the battle's (the card's art: Heisei cards carry their
+own) until the Scenes tab changes them (Kaiju Battle Select) - to MORE KAIJU, say; its callout is silent while the list
+holds it.
+
+**Measured (emulator, muted, hidden):**
+PROOF_LINES
+
 **Known limits:**
 
 - A claimed slot keeps the replaced battle's progress text (0/4 for Ebirah): the game reads it from that
@@ -3881,7 +3945,8 @@ BLOW!"). They are program text, which `progtext.py` can rename within each strin
 - Where a port has a roster but no PAD-706 lines (none shipped; a derived port whose drafting could not place them),
   the replaced battle never completes, so the tier-2 slots may stay out of reach; the blocks editor notes it there.
 - King of the Monsters starts the four tier-1 battles (Ebirah, Titanosaurus, Gigan, Megalon) itself,
-  not through the screen (item 144, seen live), so inside it the replaced battle runs as stock.
+  not through the screen (item 144, seen live), so inside it the replaced battle runs as stock - a place MORE KAIJU
+  holds too.
 - The battle's own points this time stay 0 (the runtime zeroes them at the pick, as the battle's START does), so
   its END plays no ending clip of the old monster over the mode's ending, and whatever the game keeps from them
   (read at the desk: the END posts them with event 0x1a; the battle's champion is probably fed from there, not

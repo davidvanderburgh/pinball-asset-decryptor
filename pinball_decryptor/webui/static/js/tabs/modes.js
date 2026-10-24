@@ -463,7 +463,7 @@ function ModePage({ s, f, off, dis, rs, lim }) {
         </div>
         ${!prof.roster_found ? null : html`<div class="row wrap">
           <${Radio} name="m-starts" value="battle" label="the player picking" checked=${battleOn} disabled=${battleOff && !battleOn} title=${T.battle} onChange=${(v) => setF("starts_kind", v, true)} />
-          <${Select} value=${f.roster_slot || ""} options=${rosterOpts} ns="modes" k="f:roster_slot" disabled=${battleOff || !battleOn} width=${220} title=${T.battle} />
+          <${Select} value=${f.roster_slot || ""} options=${rosterOpts} ns="modes" k="f:roster_slot" disabled=${battleOff || !battleOn} width=${330} title=${T.battle} />
           <span class="dim nw">on the battle selection screen</span>
         </div>
         ${battleOn && !dis.roster && moreOn ? html`<div class="small muted wrap" style="padding-left:26px">${MORE_FORM_NOTE}</div>` : null}

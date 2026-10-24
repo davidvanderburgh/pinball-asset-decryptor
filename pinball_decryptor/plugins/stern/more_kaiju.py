@@ -236,6 +236,12 @@ def monsters(project, code, forms=()):
     return out
 
 
+def list_order(found):
+    """``found`` in the list's order: the monsters' names, then their pages - the runtime's (pm_roster_more keeps its
+    list so, whatever order the modes join in), so a page's "n OF m" and its row of tiles are the cursor's."""
+    return sorted(found, key=lambda m: (m["name"].upper(), page_names(m["slug"])[0]))
+
+
 def problems(found):
     """Why the list cannot be built (sentences; empty = fine)."""
     out = []
@@ -251,7 +257,7 @@ def problems(found):
 def screens(project, code, prof, forms=()):
     """Every page of the project's list, for the build's one pass over the HUD scene ([] when nothing is on it or the
     title cannot carry screens)."""
-    found = monsters(project, code, forms)
+    found = list_order(monsters(project, code, forms))
     if not found or not prof.can("screen"):
         return []
     why = problems(found)

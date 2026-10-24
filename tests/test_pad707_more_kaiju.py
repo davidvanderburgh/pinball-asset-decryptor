@@ -285,6 +285,15 @@ def test_the_list_holds_the_slot_while_it_has_monsters(tmp_path):
     assert "JOIN 0" in out.split("SLOT0 -")[1]                  # once empty, another place may host it
 
 
+def test_the_list_is_in_its_names_order_whatever_order_they_join_in(tmp_path):
+    """The build draws "n OF m" and the row of tiles in the names' order (more_kaiju.list_order); a mode file joins
+    after the modes in C (run2: the cursor went MOTHRA, ANGUIRUS, RODAN past pages drawn MOTHRA, RODAN, ANGUIRUS)."""
+    out = menu(tmp_path, "join", "rodan", "join", "MOTHRA", "join", "ANGUIRUS", "pick", "ms", 3100, "right", "right")
+    assert re.findall(r"cursor is on (\w+)", out) == ["ANGUIRUS", "MOTHRA", "rodan"]
+    found = [{"slug": s, "name": n, "slot": 0, "picture": ""} for s, n in (("r", "rodan"), ("m", "MOTHRA"), ("a", "ANGUIRUS"))]
+    assert [m["name"] for m in MK.list_order(found)] == ["ANGUIRUS", "MOTHRA", "rodan"]
+
+
 def test_one_list_per_game(tmp_path):
     out = menu(tmp_path, "join", "MOTHRA", "joinslot", 3, "GIGAN")
     assert "MORE KAIJU is behind slot 0 already - GIGAN cannot join" in out
@@ -301,22 +310,22 @@ def test_a_pick_opens_the_menu_once_the_games_screen_has_closed(tmp_path):
     assert "SHOW" not in head                                   # nothing of ours over the game's screen
     assert "PRIORITY 200" in head
     assert "SHOW page 0" in menu_on and "WORDS 13" in menu_on
-    assert "MORE KAIJU's cursor is on MOTHRA (1 of 3)" in menu_on
-    assert re.search(r"cursor is on MOTHRA \(1 of 3\)\nSOUND 90\d", menu_on)   # its callout as the cursor lands
+    assert "MORE KAIJU's cursor is on ANGUIRUS (1 of 3)" in menu_on          # the list is in its names' order
+    assert re.search(r"cursor is on ANGUIRUS \(1 of 3\)\nSOUND 90\d", menu_on)   # its callout as the cursor lands
 
 
 def test_the_flippers_move_with_the_games_sounds_and_action_picks(tmp_path):
     out = menu(tmp_path, "join", "MOTHRA", "join", "RODAN", "join", "ANGUIRUS", "pick", "ms", 3100,
                "right", "right", "right", "left", "slingshot", "action", "holding", "ms", 400, "holding")
     moves = re.findall(r"cursor is on (\w+)", out)
-    assert moves == ["MOTHRA", "RODAN", "ANGUIRUS", "MOTHRA", "ANGUIRUS"]      # it wraps both ways
+    assert moves == ["ANGUIRUS", "MOTHRA", "RODAN", "ANGUIRUS", "RODAN"]      # it wraps both ways
     assert out.count("SOUND 272") == 3 and out.count("SOUND 271") == 1
     assert "BUTTON slingshot taken 0" in out                     # anything else goes on to the modes
-    assert "ANGUIRUS picked with the Action button" in out
+    assert "RODAN picked with the Action button" in out
     assert "SOUND 236" in out
-    assert "PICKED ANGUIRUS slot 0 after 300" in out             # its mode starts almost at once
+    assert "PICKED RODAN slot 0 after 300" in out                # its mode starts almost at once
     assert "PRIORITY 0" in out
-    assert "ANGUIRUS picked by player 1 - its mode has the battle of slot 0" in out
+    assert "RODAN picked by player 1 - its mode has the battle of slot 0" in out
     assert re.search(r"HOLDING 1\s.*the ball goes \(the monster's mode began\).*HOLDING 0", out, re.S)
 
 
@@ -385,6 +394,8 @@ def test_the_runtime_wires_the_list_in():
     assert re.search(r"e == scoop\.event && pm_in_game\(\) && more_holding\(\)", src)   # the ball waits
     assert "    more_tick();" in src and "    more_ball_end();" in src
     assert "    more_over(p, won);" in src
+    # the building's lock is left alone while the list is up: the ball waits in the scoop (run2 moved it for nothing)
+    assert "if (!obj || !running || running == &more_mode) return;" in src
     assert "    roster_resuming = 1;\n    roster_take(" in src.replace("\r\n", "\n")
 
 
@@ -442,7 +453,7 @@ def test_the_project_has_one_list(tmp_path):
     found = MK.monsters(str(tmp_path), code)
     assert [m["name"] for m in found] == ["MOTHRA", "ANGUIRUS"]
     assert MK.problems(found) == []
-    assert [s["name"] for s in MK.screens(str(tmp_path), code, _Prof())] == ["PadMode_a_More", "PadMode_c_More"]
+    assert [s["name"] for s in MK.screens(str(tmp_path), code, _Prof())] == ["PadMode_c_More", "PadMode_a_More"]
     code.append(("d", _Spec("GIGAN", {"slot": 2})))
     with pytest.raises(MK.MoreKaijuError, match="more than one battle"):
         MK.screens(str(tmp_path), code, _Prof())

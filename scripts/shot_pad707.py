@@ -9,6 +9,7 @@ KAIJU in Ebirah's place (``{"kind": "battle", "slot": 0, "more": true, "picture"
 
 - <prefix>_hat.png       the mode's page: its scripts, the battle hat first
 - <prefix>_choices.png   the same, with the hat's battle list opened out (where MORE KAIJU is offered)
+- <prefix>_form.png      a form mode, KUMONGA, on MORE KAIJU: its Starts on's battle list opened out
 """
 
 import os
@@ -72,6 +73,10 @@ def main():
     slug, _c = BM.new_blocks_mode(project, "MOTHRA", ["Building", "Left ramp"])
     _picture(os.path.join(MP.mode_folder(project, slug), "monster.png"))
     BM.save(project, slug, PROGRAM)
+    form, spec = MP.new_mode(project, "KUMONGA")
+    spec.starts_on, spec.roster_slot, spec.seconds = "battle", 0, 25
+    spec.roster_more = True                    # (main has no such field: there it starts on Ebirah's place itself)
+    MP.save(project, form, spec)
     print("mode", slug, os.listdir(os.path.join(project, "modes")), flush=True)
     proc, url = S._serve(repo, scratch, project)
     try:
@@ -103,6 +108,20 @@ def main():
                 print("choices:", n, flush=True)
                 time.sleep(0.5)
                 shot(page, "choices")
+            # the form mode KUMONGA: its Starts on, the battle list opened out
+            row = page.locator(".modes-list .li", has_text=re.compile("KUMONGA"))
+            if row.count():
+                row.first.click()
+                time.sleep(3)
+                n = page.evaluate("""() => {
+                    const s = [...document.querySelectorAll('select')].find(e => [...e.options].some(o => o.text === 'Titanosaurus'));
+                    if (!s) return -1;
+                    s.size = s.options.length; s.style.height = 'auto'; s.scrollIntoView({block: 'center'});
+                    return s.options.length; }""")
+                print("form choices:", n, flush=True)
+                page.mouse.move(5, 1090)
+                time.sleep(1)
+                shot(page, "form")
         S._shoot(url, go, height=1100)
     finally:
         proc.terminate()

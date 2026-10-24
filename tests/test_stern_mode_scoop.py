@@ -68,9 +68,13 @@ def test_the_game_holds_first_and_the_mode_after():
     body = wrap[wrap.index("{"):]
     assert body.index("scoop.orig(ev, a1, a2, a3)") < body.index("e != scoop.event")
     assert "return r;" in body                              # the game's own answer, unchanged
-    loop = body[body.index("while ("):body.index('fn("proc_sleep"))(1);')]
+    # the mode's own hold: the last loop (PAD-707's MORE KAIJU hold, for its selection screen, comes before it)
+    loop = body[body.rindex("while ("):body.rindex('fn("proc_sleep"))(1);')]
     for cond in ("!scoop.release", "scoop.hold_ms", "running", "pm_in_game()", "pm_ms() < scoop.until"):
         assert cond in loop, cond
+    # PAD-707: after the game's own hold (its selection screen's pick ran inside it), the list's screen keeps the ball
+    assert body.index("scoop.orig(ev, a1, a2, a3)") < body.index("more_holding()") < body.rindex("while (")
+    assert "while (more_holding())" in body
 
 
 def test_the_handlers_calls_are_logged_only_when_the_port_asks():

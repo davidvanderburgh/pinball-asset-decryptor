@@ -6355,13 +6355,16 @@ static const char *building_close_why(int running_mode, int in_game, int aside, 
     return 0;
 }
 
+static const struct pm_mode more_mode;        /* PAD-707: MORE KAIJU's selection screen, below */
 static void building_keep_closed(void)
 {
     static unsigned said;
     unsigned obj = building_obj();
     unsigned long now = pm_ms();
     int at, to;
-    if (!obj || !running) return;
+    /* PAD-707: not for MORE KAIJU's screen: the ball waits in the scoop the whole time, so no ball can reach the lock
+     * (emulator: the building went 3 -> 0 and back for nothing while the list was up) */
+    if (!obj || !running || running == &more_mode) return;
     at = building_field(obj, "building_at", 44);
     to = building_field(obj, "building_target_at", 48);
     if (building_close_why(running != 0, pm_in_game(), pm_aside() != 0, bld.putback_until != 0, bld.ours, at, to,
@@ -9865,9 +9868,27 @@ static int more_same(const char *a, const char *b)
     return 1;
 }
 
+/* The list's ORDER is its monsters' names (case aside), then their pages: the card build draws each page's "n OF m" and
+ * its row of tiles in that same order (more_kaiju.py), whatever order the modes join in - a mode file joins when it
+ * is read, after the modes in C (emulator, PAD-707 run2: the cursor went MOTHRA, ANGUIRUS, RODAN past pages drawn
+ * MOTHRA, RODAN, ANGUIRUS). 1 = (name, page) goes before member m. */
+static int more_before(const char *name, const char *page, const struct more_member *m)
+{
+    unsigned k;
+    for (k = 0; name[k] || m->name[k]; k++) {
+        int a = (unsigned char)name[k], b = (unsigned char)m->name[k];
+        if (a >= 'a' && a <= 'z') a -= 32;
+        if (b >= 'a' && b <= 'z') b -= 32;
+        if (a != b) return a < b;
+    }
+    for (k = 0; page[k] || m->page[k]; k++)
+        if (page[k] != m->page[k]) return (unsigned char)page[k] < (unsigned char)m->page[k];
+    return 0;
+}
+
 int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned callout, int (*on_pick)(unsigned slot))
 {
-    int k;
+    int k, j;
     if (!on_pick || !name || !name[0] || slot >= (unsigned)pm_roster_slots() || slot >= N_ROSTER) return -1;
     if (more_slot >= 0 && (unsigned)more_slot != slot) {
         say("roster: MORE KAIJU is behind slot %d already - %s cannot join a list behind slot %u", more_slot, name, slot);
@@ -9881,7 +9902,14 @@ int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned c
         if (more_m[k].by == current && more_same(more_m[k].name, name)) break;
     if (k == more_n) {
         if (more_n >= N_MORE) { say("roster: MORE KAIJU is full (%d monsters) - %s left out", N_MORE, name); return -1; }
+        for (k = 0; k < more_n && !more_before(name, page ? page : "", &more_m[k]); k++) ;
+        for (j = more_n; j > k; j--) more_m[j] = more_m[j - 1];         /* its place in the list's order */
+        for (j = 1; j <= 4; j++) {
+            if (more.lost[j] >= k) more.lost[j]++;
+            if (more.playing[j] >= k) more.playing[j]++;
+        }
         more_n++;
+        more_m[k].page[0] = 0;
         more_m[k].node = more_m[k].words = 0;
         more_m[k].tries = 0;
         say("roster: %s joins MORE KAIJU behind slot %u (monster %d; page %s)", name, slot, k + 1,

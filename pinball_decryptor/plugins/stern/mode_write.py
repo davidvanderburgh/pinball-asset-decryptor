@@ -420,6 +420,27 @@ def find_port(prof, elf):
         % (prof.label, " (tried: " + "; ".join(tried) + ")" if tried else ""))
 
 
+def with_framework(port, elf, scratch):
+    """PAD-710: a port without the lines of the game's own mode framework (a shipped port of an older build, one
+    derived before them) gets them from THIS card's program, in a copy beside the build (the port itself is left as
+    it is): a mode in the place of one of the game's modes then counts as it on that build too. The port as it was
+    when the card's program has none (a plain-C title) or it has them already."""
+    from . import mode_framework as MF
+    try:
+        with open(port, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return port
+    lines = MF.lines_for(elf, text)
+    if not lines:
+        return port
+    os.makedirs(scratch, exist_ok=True)
+    out = os.path.join(scratch, "game.framework.port")
+    with open(out, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text.rstrip("\n") + "\n\n" + "\n".join(lines) + "\n")
+    return out
+
+
 def request_sids(game_elf, image_head, request):
     """The sid chain the game's request table gives *request* (what ``callout N`` plays)."""
     from .info import container_counts
@@ -830,7 +851,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                 raise ModeWriteError(CM.NO_TITLE)
     except MP.ModeProjectError as e:
         raise ModeWriteError(str(e)) from None
-    port = find_port(prof, game_elf)
+    port = with_framework(find_port(prof, game_elf), game_elf, scratch)
     if (any(spec.clip != "none" for _s, spec in modes) or any(c.clip_list() for _s, c in code)) and not ffmpeg:
         from ...core.audio import find_ffmpeg
         ffmpeg = find_ffmpeg()

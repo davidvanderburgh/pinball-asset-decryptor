@@ -3887,6 +3887,109 @@ BLOW!"). They are program text, which `progtext.py` can rename within each strin
   (read at the desk: the END posts them with event 0x1a; the battle's champion is probably fed from there, not
   measured) does not get the mode's points.
 
+## A mode in the place of one of the game's own modes (PAD-710)
+
+PAD-706 made a mode picked in one of Godzilla's battles count as that battle. Every C++ Spike 2 title builds its modes
+on the same framework - Stern's mode class (`cmode`; on the later titles a `crule` underneath), with a START and a STOP
+that keep the game's books for the mode - so a mode of yours can take the place of any of the game's modes the port
+names a start of (PAD-363's `block_start_<id>`, `block_name_<id>`: the ids `block_modes` takes) and the game counts it
+as its own:
+
+- **When the game starts that mode** (one of its rules calls the mode's START, as it does when the player earns it),
+  the start does not run, and your mode starts instead.
+- **At that moment the runtime does the START's bookkeeping**, without running the game's mode (none of its shots,
+  lights, screens or music): the player's stopped and reason bytes cleared, the player's start count + 1, and on the
+  generations whose mode manager keeps per-mode audits, the manager's "started" notice (its STARTED audit).
+- **When your mode ends, the game's own STOP of its mode runs** - the mode object's own stop virtual, so the title's own
+  stop logic runs where its class has one - with the outcome: won = completed (non-zero reason), lost = not. The stop
+  writes what it writes for the game's own mode: stopped, the reason, the mode's END, its wins, the manager's
+  COMPLETED audit, and whatever the title does with a completed mode. A game's rules read those as "completed": its
+  wizards and unlocks are gated on them.
+
+In C:
+
+```c
+static int on_start(unsigned id)     /* the game's thread, at the moment its mode would have started */
+{
+    want_start = 1;                  /* start your mode on the next tick (pm_begin there) */
+    return 1;                        /* 1: the game's mode does not start; 0: let it */
+}
+
+static void my_end(int won)          /* however your mode ends */
+{
+    pm_end();
+    pm_place_over(won);              /* the game's own stop of its mode, with the outcome */
+}
+
+static void on_init(void) { pm_place_claim(21, on_start); }   /* Godzilla's 21 is Jet Fighter Attack */
+```
+
+`pm_place_counts(id)` says whether it counts as the game's mode there (the port names the framework), and
+`pm_game_mode_name(id)` the port's name for it. A start the mode takes while another mode of yours runs is the block's
+to decide, as before (PAD-363); a start while the claiming mode runs restarts nothing (on_start is still asked). The
+outcome waits for the player who started it to be up again; a game that ends first drops it; a mode that never says by
+the end of its ball counts as lost. `pm_game_mode_start(id)` calls the game's START of mode `id` as its rules do - a test's
+way to the claim (the C++ titles only).
+
+**In a mode file:** `in_place_of <id>` in place of the trigger (the file needs `seconds` but no trigger): the game
+starting that mode starts it, on the next tick. Its end says how it went, as a battle pick's does: its end shot ending it
+completes it; with no end shot its clock running out does; any other end (the ball, a tilt) does not. **On the Modes
+tab:** Mode > Starts on > *the game starting its* <mode>. **In blocks:** the When block *When the game starts its*
+<mode> (put Start the mode in it); End the mode gets *, completed*. With no End the mode, completed block, the mode's own
+end (its clock, an End the mode block) completes it. The Modes tab offers the game's modes on the builds it was proven on
+(`mode_project.PLACE_PROVEN`), leaving Godzilla's battles to the battle hat (PAD-706).
+
+**The port lines** (`mode_framework.py` reads them off each build's own program; `framework_lines.py <game ELF>` is the
+command line; the card build adds them from the card's own program to a port that lacks them, and a derived port gets
+them as it is derived):
+
+```
+site  mode_player            the framework's player byte getter (the index its per-player fields are kept by)
+value mode_slot_stop         the STOP's virtual slot
+value mode_stopped_at        the per-player stopped byte (mode + this + player)
+value mode_reason_at         the per-player reason byte            (Godzilla's, Jaws' and King Kong's generations)
+value mode_starts_at         the per-player start count (mode + this + 4 * player)
+value mode_wins_at           the per-player completions the STOP counts (the crule generation, Star Wars)
+site  mode_started           the manager's "started" notice (STARTED audit), with
+data  mode_manager           ... the manager it is called on, and
+value mode_id_at             ... where the mode keeps its id       (the generations whose manager keeps audits)
+```
+
+The finder keys on the STOP's one shape, the same on every generation read: `mov r4, r0; mov rR, r1; bl <player>; add
+r0, r4, r0; ldrb rX, [r0, #<stopped>]; cmp rX, #0; <return when set>`, then `strb <1>, [.., #<stopped>]` and the mode's END
+virtual called on the mode; the slot most mode classes hold such a function at is the stop's. The start count is the
+`ldr rX, [rB, #<starts>]; add rX, rX, #1; str` with rB = the mode + 4 * `sxth` of the player byte (a `sub #1; uxtb` index
+is another, 0-based count) in the START slot's functions and what they call; the wins the same in the STOP; the notice a
+`bl` with r0 = the manager constant and r1 = the mode's id (`ldr r1, [r4, #4]`), not a trace print.
+
+| generation | builds | stop | stopped | reason | starts | wins | STARTED audit |
+|---|---|---|---|---|---|---|---|
+| Godzilla's cmode | Godzilla Premium/LE, Pro 1.15 / 1.16 | v[11] | +0x13 | +0x17 | +0x3c | - | the manager's notice |
+| Avengers, Deadpool | Avengers LE/Pro 1.10, Deadpool LE/Pro 1.16 | v[14], v[18] | +0x13, +0x17 | - | +0x3c | - | the notice |
+| Iron Maiden | LE/Pro 1.18 | v[12] | +0x17 | - | +0x28 | - | the notice |
+| Jaws, King Kong | Jaws LE/Pro 1.02, King Kong LE/Pro 0.97 | v[15], v[14] | +0x1b | +0x23 | +0x5c | - | the notice |
+| Jurassic Park | LE/Pro 1.16 | v[24] | +0xc3 | - | +0xd8 | - | the notice |
+| Star Wars | LE/Pro 1.31 | v[12] | +0x17 | - | +0x48 | +0x64 | none |
+| crule | D&D, Foo Fighters, John Wick, Led Zeppelin, Mando, Munsters, Rush, Sword of Rage, TMNT, Venom | v[34]-v[53] | +0x37-+0x5f | - | stopped + 0x11 | starts + 0x1c (Venom + 0x2c) | none |
+
+John Wick's stop takes a third word (1 marks the mode stopped; the game always passes 1): the runtime calls every stop
+as `stop(mode, won, 1)`, which the two-word stops never read. A mode whose own stop does more than the framework's - a
+hurry-up that resets itself (Iron Maiden's Soul Shard), a chase that moves on to its next stage (Jurassic Park Pro's Trex
+Chase) - does that: it is the game's own outcome.
+
+**The plain-C titles** (Aerosmith, Batman 66, The Beatles, James Bond, Elvira, Guardians, JP The Pin, Metallica,
+Stranger Things, Star Wars ELG, X-Men) have no mode class: their modes are start functions and game flags. A mode can
+hold their starts off (PAD-363) but not yet take one's place and count as it; the Modes tab does not offer it there.
+
+**Proven** (emulator, 2026-10-24, the stock cards, hidden, muted; `C:\tmp\PAD-710\rig`, `place_job2.sh` over
+rigbatch): a mode file `in_place_of <id>` with an 8 s clock, the game's START of that mode called as its rules call it,
+the mode started in its place, its clock ran out (completed), and the game's own STOP wrote the completion, the game
+playing on after it - 35 of the 36 newest C++ builds (`mode_project.PLACE_PROVEN`; D&D LE starts no game on the rig).
+Godzilla LE/Pro 1.16 Jet Fighter Attack and Jaws LE 1.02 Super Buoys: STARTED audit 0 -> 1 at the take, COMPLETED
+0 -> 1 at the end, stopped 1, reason 1; Avengers, Deadpool and King Kong: the STARTED audit 0 -> 1 (those modes keep no
+COMPLETED audit), stopped 1; the crule generation and Star Wars: stopped 1, wins 0 -> 1. Venom starts its Mini Mode 01
+by itself as a ball starts: the claim took it there too.
+
 ## A mode in the game's Challenge list (PAD-615)
 
 Stern's framework has a **Player Challenge** game on every Spike 2 title: the player picks it on the game's own

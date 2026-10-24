@@ -766,4 +766,25 @@ int pm_ball_end_hold(unsigned ms);
 void pm_ball_end_release(void);
 int pm_ball_end_holding(void);
 
+/* ---- a mode in the place of one of the game's own modes (PAD-710; MODE_SDK.md "A mode in the place of one of the
+ * game's") ----------------------------------------------------------------------------------------------------------
+ * The game's modes the port names a start of (`text block_name_<id>`, the ids pm_block_list takes) are the ones a mode
+ * can take the place of. A mode CLAIMS one: when the game starts it (a rule of the game's, as the player earns it),
+ * its start does not run and on_start(id) runs instead, on the game's thread, at that moment. on_start returns 1 when
+ * it took it (start your mode: pm_begin from the next tick) and 0 to let the game's own start. Not while another mode
+ * of ours runs (pm_block_game_modes decides then). A claim holds until released; one mode per game mode.
+ * Where the port names the game's mode framework (every C++ title), the mode COUNTS AS the game's mode it replaced:
+ * at the take, what the game's own START writes for its bookkeeping (its start count, its STARTED audit where the
+ * game keeps one; the mode itself does not run), and at pm_place_over(won) the game's own STOP of it with the
+ * outcome - won (1) = completed, as when the player completes the game's mode: its COMPLETED audit, its wins, and the
+ * wizards and unlocks the game gates on it; lost (0) = as when the player loses it. A mode that never calls it at the
+ * end of the ball it took the place in counts as lost. pm_place_counts(id): 1 when it counts as id here. */
+#define PM_CAN_PLACE        0x10000000u /* pm_place_claim */
+int pm_place_claim(unsigned id, int (*on_start)(unsigned id));   /* 1 = claimed */
+void pm_place_release(unsigned id);
+int pm_place_counts(unsigned id);                                /* 1 = it counts as the game's mode id */
+const char *pm_game_mode_name(unsigned id);                      /* "Hoth I" (the port's name), or 0 */
+void pm_place_over(int won);                                     /* the mode that took the place ends */
+int pm_game_mode_start(unsigned id);  /* for a test: the game's START of mode id, as its rules call it; 1 = called */
+
 #endif

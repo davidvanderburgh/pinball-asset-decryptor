@@ -684,6 +684,12 @@ def merge(drafts, refs, tgt, game, version, family):
     if scores:
         body += ["", "# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials "
                      "are in) ----"] + scores
+    # PAD-710: the game's own mode framework, read off this build's program (a mode in the place of one of the game's
+    # modes counts as it)
+    from . import mode_framework
+    framework = mode_framework.lines_for(b, "\n".join(body)) if b else []
+    if framework:
+        body += [""] + framework
     return body, provenance, missing, notes
 
 

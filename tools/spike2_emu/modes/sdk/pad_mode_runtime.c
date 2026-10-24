@@ -4654,6 +4654,7 @@ static void block_defaults(unsigned *m)
 }
 
 static void wizard_refused(unsigned start);   /* PAD-436: the game's mini-wizards, below */
+static int place_take(unsigned *r, unsigned id);   /* PAD-710: a mode in the place of one of the game's, below */
 
 /* ---- PAD-503: a mode lit at a shot claims it --------------------------------------------------------------------
  * A Bond owner's mini-wizards of their own, lit at the Right ramp, never got it: the game handles a switch before the
@@ -4721,6 +4722,7 @@ static int on_block_start(unsigned *r, unsigned hook_n)
     unsigned id;
     for (id = 0; id < BLOCK_IDS; id++)          /* this start's mode: its object, or the start is its own */
         if (block_hook_of[id] == hook_n + 1 && bm_has(block_named, id) && (!block_obj[id] || block_obj[id] == r[0])) break;
+    if (id < BLOCK_IDS && place_take(r, id)) return 1;   /* PAD-710: a mode of ours takes its place */
     if (lit_hold_until && id < BLOCK_IDS) {     /* PAD-503: a lit mode's shot, the game handling it now */
         if ((long)(lit_hold_until - pm_ms()) > 0 && !running && pm_in_game()) {
             char key[24];
@@ -9175,6 +9177,7 @@ static void events_deliver(void);             /* the events section below */
 static void event_census(void);
 static void switches_deliver(void);           /* the switches section below */
 static void roster_deferred_tick(void);   /* item 146 */
+static void place_tick(void);             /* PAD-710 */
 static void stock_tick(void);             /* item 160 */
 static void magnet_tick(void);            /* PAD-381 */
 static void scoop_tick(void);             /* PAD-381 */
@@ -9218,6 +9221,7 @@ static void on_tick(unsigned *r)
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
+    place_tick();                             /* PAD-710: an outcome owed to a player not up */
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
     lamps_tick();                             /* named inserts: their patterns (lights section) */
@@ -9304,6 +9308,7 @@ static void ball_end_hold_arm(void)
 }
 
 static void roster_owed_ball_end(void);   /* item 146 */
+static void place_ball_end(void);         /* PAD-710 */
 static void on_ball_end(unsigned *r)
 {
     static int said;
@@ -9328,6 +9333,7 @@ static void on_ball_end(unsigned *r)
     if (disp_linger_until) disp_release("the ball ended");
     bd_reset("the ball ended");
     roster_owed_ball_end();
+    place_ball_end();                         /* PAD-710 */
 }
 
 /* ---- the battle roster (item 146, optional, title specific) ------------------------------------
@@ -9783,6 +9789,268 @@ static void on_roster_resume(unsigned *r)
     }
     if (!vec || slot >= n) return;      /* a battle no mode holds: the game's own restarts */
     roster_take(r, slot, id, "restarted by the city pick (its battle was lost; the game plays it again)");
+}
+
+/* ---- PAD-710: a mode in the place of one of the game's own modes ------------------------------------------------
+ * David (2026-10-24, after PAD-706): "Can we apply anything here generically to other spike 2 games?" A mode of ours
+ * CLAIMS one of the game's modes the port names a start of (PAD-363's `site block_start_<id>`, already hooked by
+ * block_arm): when the game would start it - a rule of the game's calling its START, as it does when the mode is
+ * earned - the start does not run and the claimant's on_start(id) runs instead, on the game's thread (1 = taken, 0 =
+ * the game's own starts). Not while another mode of ours runs (the block, if any, decides then, as before).
+ * Where the port names the game's MODE FRAMEWORK (mode_framework.py, every C++ title: `site mode_player`, `value
+ * mode_slot_stop`, `value mode_stopped_at`, and on the generations that keep them `mode_reason_at`, `mode_starts_at`,
+ * `site mode_started` + `data mode_manager`), the mode COUNTS AS the game's: at the take the runtime writes what the
+ * game's START writes for its bookkeeping - the player's stopped and reason bytes cleared, the player's start count
+ * +1, the mode manager's "started" (the STARTED audit) - without starting it (no shots, lights, screens or music of
+ * its), and pm_place_over(won) calls the game's own STOP of it (`obj->v[mode_slot_stop](obj, won)`, so the title's own
+ * stop runs where its class has one) with the outcome: stopped, the reason (non-zero = completed), the END, the wins
+ * and the COMPLETED audit where the generation keeps them, and whatever the title's own stop does with a completed
+ * mode - its wizards and unlocks read that. The stop indexes the player up, so it runs only while the player who
+ * started it is up (otherwise when that player is up again; a game that ends first drops it). Without the lines (a
+ * plain-C title) the claim still takes the start, counting only as ours. */
+#define PLACE_IDS BLOCK_IDS
+static int (*place_fn[PLACE_IDS])(unsigned id);
+static const struct pm_mode *place_by[PLACE_IDS];
+static struct { unsigned obj, id; unsigned char on, owed; signed char won; } place_held[5];   /* per player 1-4 */
+static int place_counts_on;                   /* the port names the game's mode framework */
+
+static const char *place_name(unsigned id)
+{
+    char key[24];
+    const char *nm;
+    pm_snprintf(key, sizeof key, "block_name_%u", id);
+    nm = pm_port_text(key);
+    return nm ? nm : "?";
+}
+
+/* the game's own player index for its per-player fields (`site mode_player`), 1-4, or 0 */
+static unsigned place_player(void)
+{
+    unsigned f = fn("mode_player"), p;
+    if (!f) return 0;
+    p = ((unsigned (*)(void))(unsigned long)f)() & 0xffu;
+    return p >= 1 && p <= 4 ? p : 0;
+}
+
+/* the object's STOP, checked: its vtable readable through the slot, the slot's function in the game's code */
+static unsigned place_stop_fn(unsigned obj)
+{
+    long slot = pm_port_value("mode_slot_stop", -1);
+    unsigned vt;
+    if (!obj || (obj & 3) || slot < 0 || slot > 255 || !maps_has(obj, 4, MAP_R)) return 0;
+    vt = rw(obj);
+    if (!vt || (vt & 3) || !maps_has(vt, 4 * (unsigned long)(slot + 1), MAP_R)) return 0;
+    return maps_has(rw(vt + 4u * (unsigned)slot), 8, MAP_R | MAP_X | MAP_GAME) ? rw(vt + 4u * (unsigned)slot) : 0;
+}
+
+static unsigned place_byte(unsigned obj, const char *at_name, unsigned p)
+{
+    long at = pm_port_value(at_name, -1);
+    return at >= 0 ? *(const unsigned char *)(unsigned long)(obj + (unsigned)at + p) : 0;
+}
+
+static unsigned place_starts(unsigned obj, unsigned p)
+{
+    long at = pm_port_value("mode_starts_at", -1);
+    return at >= 0 ? rw(obj + (unsigned)at + 4 * p) : 0;
+}
+
+/* What the game's START writes for its bookkeeping, for the player up (who is `up` to the runtime) */
+static void place_begin(unsigned obj, unsigned id, unsigned up)
+{
+    long stopped = pm_port_value("mode_stopped_at", -1), reason = pm_port_value("mode_reason_at", -1);
+    long starts = pm_port_value("mode_starts_at", -1), id_at = pm_port_value("mode_id_at", 4);
+    unsigned p, was, f_started = fn("mode_started"), mgr = data("mode_manager");
+    if (up < 1 || up > 4) return;
+    place_held[up].on = 1;
+    place_held[up].owed = 0;
+    place_held[up].id = id;
+    place_held[up].obj = 0;
+    if (!place_counts_on || !obj) {
+        say("place: the game's %s (mode %u) - the mode runs in its place for player %u, counting only as ours (%s)",
+            place_name(id), id, up, place_counts_on ? "the game's start passes no mode object" : "the port names no mode framework");
+        return;
+    }
+    p = place_player();
+    if (p != up || !place_stop_fn(obj)) {
+        say("place: the game's %s (mode %u) - %s: it runs in its place, counting only as ours", place_name(id), id,
+            p != up ? "the game's player index is not the player up" : "its object's STOP is not in the game's code");
+        return;
+    }
+    was = place_starts(obj, p);
+    *(unsigned char *)(unsigned long)(obj + (unsigned)stopped + p) = 0;
+    if (reason >= 0) *(unsigned char *)(unsigned long)(obj + (unsigned)reason + p) = 0;
+    if (starts >= 0) *(unsigned *)(unsigned long)(obj + (unsigned)starts + 4 * p) += 1;
+    if (f_started && mgr && id_at >= 0)
+        ((void (*)(unsigned, unsigned))(unsigned long)f_started)(mgr, rw(obj + (unsigned)id_at));   /* STARTED */
+    place_held[up].obj = obj;
+    say("place: the game's %s (mode %u, object 0x%08x) counts as started for player %u - its START's bookkeeping, it "
+        "does not run: stopped/reason cleared, starts %u -> %u%s", place_name(id), id, obj, up, was, place_starts(obj, p),
+        f_started && mgr ? ", the manager's STARTED notice" : "");
+}
+
+/* The game's own STOP of it with the outcome, for the player up; 1 when it ran */
+static int place_end(unsigned p, int won)
+{
+    unsigned obj = place_held[p].obj, id = place_held[p].id, f;
+    place_held[p].on = 0;
+    place_held[p].owed = 0;
+    if (!obj) {
+        say("place: the mode in the place of the game's %s ends %s for player %u (it counted only as ours)",
+            place_name(id), won ? "WON" : "lost", p);
+        return 0;
+    }
+    if (place_player() != p || !(f = place_stop_fn(obj))) {
+        say("place: the game's %s (mode %u) - %s: its stop is not run", place_name(id), id,
+            place_player() != p ? "the player up is not the one it started for" : "its STOP is no longer in the game's code");
+        return 0;
+    }
+    {
+        long wins_at = pm_port_value("mode_wins_at", -1);
+        unsigned wins_was = wins_at >= 0 ? rw(obj + (unsigned)wins_at + 4 * p) : 0;
+        /* (mode, reason, 1): John Wick's stop takes a third word, which marks the mode stopped and which the game always
+         * passes as 1 (`mov r2, #1`); every other generation's stop takes two and never reads it */
+        ((void (*)(unsigned, unsigned, unsigned))(unsigned long)f)(obj, won ? 1u : 0u, 1u);
+        say("place: the mode in the place of the game's %s ends %s for player %u: the game's own stop ran (v[%ld] "
+            "0x%08x) - stopped %u, reason %u, starts %u, wins %u -> %u", place_name(id), won ? "WON" : "lost", p,
+            pm_port_value("mode_slot_stop", -1), f, place_byte(obj, "mode_stopped_at", p),
+            place_byte(obj, "mode_reason_at", p), place_starts(obj, p), wins_was,
+            wins_at >= 0 ? rw(obj + (unsigned)wins_at + 4 * p) : 0);
+    }
+    return 1;
+}
+
+/* from on_block_start (the game's START of mode id, r0 its object on the C++ titles): 1 = taken, the start refused */
+static int place_take(unsigned *r, unsigned id)
+{
+    const struct pm_mode *was = current;
+    unsigned up;
+    int took;
+    if (id >= PLACE_IDS || !place_fn[id] || !pm_in_game()) return 0;
+    if (running && running != place_by[id]) return 0;   /* another of ours runs: the block decides, as before */
+    up = pm_player();
+    current = place_by[id];
+    took = place_fn[id](id);
+    current = was;
+    if (!took) {
+        say("place: the game's %s (mode %u) is claimed but not taken - the game's own starts", place_name(id), id);
+        return 0;
+    }
+    if (up >= 1 && up <= 4 && place_held[up].on && place_held[up].id == id) {
+        say("place: the game's %s (mode %u) started again while its mode holds it - it restarts nothing", place_name(id), id);
+        return 1;
+    }
+    if (up >= 1 && up <= 4 && place_held[up].on && place_held[up].obj)   /* another place still held: lost */
+        place_end(up, 0);
+    place_begin(block_obj[id] ? block_obj[id] : r[0], id, up);
+    return 1;
+}
+
+int pm_place_claim(unsigned id, int (*on_start)(unsigned id))
+{
+    if (!(can & PM_CAN_PLACE) || !on_start || id >= PLACE_IDS || !bm_has(block_named, id)) return 0;
+    if (place_fn[id] && place_by[id] != current) return 0;              /* another mode holds it */
+    if (!place_fn[id])
+        say("place: the game's %s (mode %u) is claimed - when the game starts it, %s runs in its place%s", place_name(id),
+            id, mode_name(current, "a mode"), place_counts_on && block_obj[id] ? " and counts as it" : "");
+    place_fn[id] = on_start;
+    place_by[id] = current;
+    return 1;
+}
+
+void pm_place_release(unsigned id)
+{
+    if (id < PLACE_IDS && place_by[id] == current) place_fn[id] = 0, place_by[id] = 0;
+}
+
+int pm_place_counts(unsigned id)
+{
+    return (can & PM_CAN_PLACE) && id < PLACE_IDS && bm_has(block_named, id) && place_counts_on && block_obj[id] != 0;
+}
+
+const char *pm_game_mode_name(unsigned id)
+{
+    return id < PLACE_IDS && bm_has(block_named, id) ? place_name(id) : 0;
+}
+
+void pm_place_over(int won)
+{
+    unsigned up = pm_player(), q;
+    if (!pm_in_game()) {
+        for (q = 1; q <= 4; q++) place_held[q].on = place_held[q].owed = 0;
+        return;
+    }
+    if (up >= 1 && up <= 4 && place_held[up].on) {
+        place_end(up, won);
+        return;
+    }
+    for (q = 1; q <= 4; q++)
+        if (place_held[q].on && !place_held[q].owed) {
+            place_held[q].owed = 1;
+            place_held[q].won = (signed char)(won ? 1 : 0);
+            say("place: player %u is not up - the game's %s counts as %s when that player is up again", q,
+                place_name(place_held[q].id), won ? "won" : "lost");
+        }
+}
+
+/* PAD-710: a test's way to the claim - the game's START of one of its modes, called as the game's rules call it (its
+ * object in r0), from a mode's tick, in a game. 1 = called. The C++ titles only (a plain-C start's arguments are its
+ * own). */
+int pm_game_mode_start(unsigned id)
+{
+    char key[24];
+    unsigned f;
+    if (!(can & PM_CAN_PLACE) || id >= PLACE_IDS || !bm_has(block_named, id) || !block_obj[id] || !pm_in_game()) return 0;
+    pm_snprintf(key, sizeof key, "block_start_%u", id);
+    if (!(f = fn(key))) return 0;
+    say("place: the game's %s (mode %u) started for a test (its START at 0x%08x, object 0x%08x)", place_name(id), id, f,
+        block_obj[id]);
+    ((void (*)(unsigned))(unsigned long)f)(block_obj[id]);
+    return 1;
+}
+
+/* every tick: an outcome owed to a player who was not up; a game that ended drops it */
+static void place_tick(void)
+{
+    unsigned q, up;
+    for (q = 1; q <= 4 && !place_held[q].owed; q++) ;
+    if (q > 4) return;
+    if (!pm_in_game()) {
+        for (q = 1; q <= 4; q++) place_held[q].on = place_held[q].owed = 0;
+        return;
+    }
+    up = pm_player();
+    if (up >= 1 && up <= 4 && place_held[up].owed) place_end(up, place_held[up].won);
+}
+
+/* at a ball's end, after the modes' own: a place still held and not said how it went is lost */
+static void place_ball_end(void)
+{
+    unsigned up = pm_player();
+    if (up < 1 || up > 4 || !place_held[up].on || place_held[up].owed) return;
+    say("place: the ball ended and the mode in the place of the game's %s never said how it went - lost",
+        place_name(place_held[up].id));
+    place_end(up, 0);
+}
+
+/* from the constructor, after block_arm: the claim is there wherever a start is hooked; the counting where the port
+ * names the framework */
+static void place_arm(void)
+{
+    static const char *const fw_s[] = { "mode_player", 0 };
+    static const char *const fw_v[] = { "mode_slot_stop", "mode_stopped_at", 0 };
+    if (!bm_count(block_named)) return;
+    can |= PM_CAN_PLACE;
+    place_counts_on = have_sites(fw_s) && have_values(fw_v);
+    if (place_counts_on)
+        say("place: a mode may take the place of %d of the game's modes and counts as the one it replaces (the game's "
+            "stop v[%ld], stopped +0x%lx%s%s%s)", bm_count(block_named), pm_port_value("mode_slot_stop", -1),
+            pm_port_value("mode_stopped_at", -1), pm_port_value("mode_reason_at", -1) >= 0 ? ", a reason byte" : "",
+            pm_port_value("mode_starts_at", -1) >= 0 ? ", a start count" : "",
+            fn("mode_started") && data("mode_manager") ? ", the STARTED audit" : "");
+    else
+        say("place: a mode may take the place of %d of the game's modes (it counts only as ours: the port names no mode "
+            "framework)", bm_count(block_named));
 }
 
 /* ---- the game's Challenge list (PAD-615, optional, title specific) ------------------------------
@@ -14121,6 +14389,7 @@ static void pad_mode_start(void)
     }
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
     block_arm();                              /* PAD-347: a mode may keep the game's modes from starting */
+    place_arm();                              /* PAD-710: a mode in the place of one of the game's, counting as it */
     backdrop_arm();                           /* hud-layers: a clip behind the HUD */
     ck_arm();                                 /* PAD-530: a mode's clip comes back after the game's */
     status_bar_arm();                         /* PAD-521: the game's own status bar */
@@ -14179,7 +14448,7 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
@@ -14189,7 +14458,7 @@ static void pad_mode_start(void)
         can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
         can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "",
         can & PM_CAN_STATUS_BAR ? " status-bar" : "", can & PM_CAN_CHALLENGE ? " challenges" : "",
-        can & PM_CAN_BALL_END_HOLD ? " ball-end-hold" : "");
+        can & PM_CAN_BALL_END_HOLD ? " ball-end-hold" : "", can & PM_CAN_PLACE ? " place" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

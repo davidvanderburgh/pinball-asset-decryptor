@@ -97,6 +97,8 @@ class TitleProfile:
     #                                  room for (0 = none: the build's menu is not the runtime's to change)
     challenges: tuple = ()           # PAD-615: the game's Challenge list a mode may take a place in (the challenges'
     #                                  names, in the game's menu order); () where the title names none a mode can take
+    places: tuple = ()               # PAD-710: ((id, name, counts), ...) the game's own modes a mode may run in the
+    #                                  place of (when the game starts one); counts: it counts as that mode there
     building_rule: str = ""          # PAD-589: the game's own building locks (one of game_rules, BUILDING_RULES): a
     #                                  mode moves the building only while it sees no shots
     shakes: tuple = ()               # PAD-414: ((name, label), ...) the game's own shakes (`text shake_<name>`)
@@ -305,7 +307,8 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "wizard", "roster", "challenge")
+         "magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "wizard", "roster", "challenge",
+         "place")
 
 #: PAD-420: the parts that are a piece of the machine. A machine without one has no section for it on the tab.
 HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "building", "shaker")
@@ -1005,6 +1008,87 @@ def _challenge_cannot(key, label, port=None):
         return ()
     return (("challenge", "The app has found %s's challenges but has not yet seen a mode of yours start from one in "
                           "the emulator, so it cannot here yet." % label),)
+
+
+#: PAD-710: a mode in the place of one of the game's own modes (the mode file's ``in_place_of``, a blocks mode's When the
+#: game starts one of its modes; MODE_SDK.md "A mode in the place of one of the game's"). The builds where it was seen
+#: in the emulator: the game's START of its mode (called as its rules call it) taken, the mode run in its place, and
+#: at its end the game's own STOP run with the outcome (rig sweep, C:\tmp\PAD-710\rig, place_job.sh).
+PLACE_PROVEN = frozenset({
+    "avengers_infinity_le-1.10",     # PAD-710 run all2: Super Reactor (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "avengers_infinity_pro-1.10",    # PAD-710 run all2: Super Reactor (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "deadpool_le-1.16",              # PAD-710 run all2: Disco Loops (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "deadpool_pro-1.16",             # PAD-710 run all2: Disco Loops (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "dungeons_and_dragons_pro-1.10", # PAD-710 run all2: Map Choosen Ritual Singleball (53): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "foo_fighters_le-1.04",          # PAD-710 run all2: Super Skill Shot (8): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "foo_fighters_pro-1.04",         # PAD-710 run all2: Super Skill Shot (8): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "godzilla_le-1.16",              # PAD-710 run all2: Jet Fighter Attack (21): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1, STARTED audit 0 -> 1, COMPLETED 0 -> 1
+    "godzilla_pro-1.16",             # PAD-710 run all2: Jet Fighter Attack (21): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1, STARTED audit 0 -> 1, COMPLETED 0 -> 1
+    "iron_maiden_le-1.18",           # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "iron_maiden_pro-1.18",          # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "jaws_le-1.02",                  # PAD-710 run all2: Super Buoys (29): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
+    "jaws_pro-1.02",                 # PAD-710 run all2: Super Buoys (29): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
+    "john_wick_le-1.02",             # PAD-710 run all2: Lights Out (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "john_wick_pro-1.02",            # PAD-710 run all2: Lights Out (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "jurassic_park_le-1.16",         # PAD-710 run all2: Chaos Hurry Up (4): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "king_kong_le-0.97",             # PAD-710 run all2: King Kombos (27): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
+    "king_kong_pro-0.97",            # PAD-710 run all2: King Kombos (27): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
+    "led_zeppelin_le-1.22",          # PAD-710 run all2: Black Dog (1): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "led_zeppelin_pro-1.22",         # PAD-710 run all2: Black Dog (1): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "mando_le-1.45",                 # PAD-710 run all2: Super Skill Shot (10): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "mando_pro-1.45",                # PAD-710 run all2: Super Skill Shot (10): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "munsters_le-1.28",              # PAD-710 run all2: Lily Mode (3): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "munsters_pro-1.28",             # PAD-710 run all2: Lily Mode (3): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "rush_le-1.19",                  # PAD-710 run all2: La Villa Strangiato (2): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "rush_pro-1.19",                 # PAD-710 run all2: La Villa Strangiato (2): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "star_wars_le-1.31",             # PAD-710 run all2: Hoth I (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "star_wars_pro-1.31",            # PAD-710 run all2: Hoth I (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "sword_of_rage_le-1.19",         # PAD-710 run all2: Sand Worm (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "sword_of_rage_pro-1.19",        # PAD-710 run all2: Sand Worm (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "turtles_le-1.59",               # PAD-710 run all2: Training Level Two (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "turtles_pro-1.59",              # PAD-710 run all2: Training Level Two (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "venom_le-1.07",                 # PAD-710 run r3: Mini Mode 01 (19) - the game started it itself as the ball started and the mode took it; the test's start completed it by its clock: stopped 1, wins 0 -> 1
+    "venom_pro-1.07",                # PAD-710 run r3: the same on the stock Pro card: stopped 1, wins 0 -> 1
+    "jurassic_park_pro-1.16",        # PAD-710 run r3: Escape Nublar (127): starts 0 -> 1, completed by its clock: stopped 1. Ctrl Room Virus Attack (121), Restore Power (122) and Trex Chase (119) ask their own "stopped already?" first: the game's stop ran and wrote their own outcome (Trex Chase: its award)
+})
+#: PAD-710: what counting as the game's mode needs: the game's own mode framework (mode_framework.py)
+PLACE_COUNT_NEEDS = (("mode_player",), (), ("mode_slot_stop", "mode_stopped_at"))
+
+
+def _place_counts(port):
+    """PAD-710: 1 when the port names the game's own mode framework (a mode in one's place counts as it)."""
+    sites, _data, values = PLACE_COUNT_NEEDS
+    return bool(port) and all(n in port["site"] for n in sites) and all(n in port["value"] for n in values)
+
+
+def _places(port):
+    """PAD-710: ``((id, name, counts), ...)``, in id order: the game's own modes a mode may run in the place of - the
+    ones whose START the port names with the mode's object (PAD-363's block lines on a C++ title), and not one of the
+    battle selection's battles where the build has one (those are the battle hat's, PAD-706). ``counts``: where the
+    port names the game's mode framework, the mode counts as the game's."""
+    if not port:
+        return ()
+    counts = _place_counts(port)
+    roster = "roster_start" in port["site"]
+    out = []
+    for i, name, _on in _game_modes(port):
+        if not port["data"].get("block_obj_%d" % i):
+            continue
+        if roster and name.startswith("Battle vs"):
+            continue
+        out.append((i, name, counts))
+    return tuple(out)
+
+
+def _place_cannot(key, label, port=None):
+    """PAD-710: the ``cannot`` entry for a mode in the place of one of the game's own modes on build ``key``, or ()."""
+    if not _places(port):
+        return (("place", "%s names none of its own modes' starts with the mode they start, so a mode of yours cannot "
+                          "run in the place of one there yet." % label),)
+    if key in PLACE_PROVEN:
+        return ()
+    return (("place", "The app has found %s's own modes' starts but has not yet seen a mode of yours run in the place "
+                      "of one in the emulator, so it cannot here yet." % label),)
 
 
 def _challenges(port):
@@ -2308,6 +2392,7 @@ def profile_from_port(path):
     cannot += list(_building_cannot(key, label, port))       # PAD-589
     cannot += list(_roster_cannot(key, label, port))         # PAD-589
     cannot += list(_challenge_cannot(key, label, port))      # PAD-615
+    cannot += list(_place_cannot(key, label, port))          # PAD-710
     cannot += list(_shaker_cannot(key, label, port))         # PAD-414
     cannot += list(_shows_cannot(label, port))               # PAD-418
     cannot += list(_wizards_cannot(key, label, port))        # PAD-436
@@ -2377,6 +2462,7 @@ def profile_from_port(path):
         roster_counts=bool(port and "battle_stop" in port["site"]),          # PAD-706
         challenges=_challenges(port) if key in CHALLENGE_PROVEN and not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
         challenge_menu=_challenge_menu(key, port) if not any(c[0] == "challenge" for c in cannot) else 0,
+        places=_places(port) if not any(c[0] == "place" for c in cannot) else (),   # PAD-710
         # PAD-619: not where a challenge is the game-play mode's index or a game-mode table's (Jaws, Godzilla, Venom:
         # their Default Game Mode cannot select one) - only by its handler or its flag (Bond, Stranger Things, Rush)
         challenge_by_default=bool(port) and not any(k.startswith(("challenge_mode_", "challenge_name_msg_"))
@@ -2640,10 +2726,12 @@ try:
         game_shows=_game_shows(_port_115),
         roster=_roster("godzilla_pro", _port_115) if not _roster_cannot(_key_115, _label_115, _port_115) else (),
         roster_counts=bool(_port_115 and "battle_stop" in _port_115["site"]),   # PAD-706: not on Pro 1.15
+        places=_places(_port_115) if not _place_cannot(_key_115, _label_115, _port_115) else (),   # PAD-710
         absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
                      if c[0] not in ("magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "roster",
-                                     "challenge"))
+                                     "challenge", "place"))
+        + _place_cannot(_key_115, _label_115, _port_115)
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
         + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115)
         + _building_cannot(_key_115, _label_115, _port_115)
@@ -3193,6 +3281,10 @@ class ModeSpec:
     # PAD-643: with starts_on "challenge", who launches its ball and when: 0 the runtime, once the mode's start clip is
     # over; -1 the player; a number of ms after the mode starts
     challenge_launch: int = 0
+    # PAD-710: with starts_on "game_mode", the game's own mode (the profile's places: its id) the mode runs in the place
+    # of: when the game starts that mode, this one starts instead and, where the game's framework is known, counts as
+    # it; -1 = none
+    place_mode: int = -1
     # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
     # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
     # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
@@ -3347,6 +3439,8 @@ def _switch_off_what_it_cannot(spec, p):
     if starts_on_challenge(spec) and (not p.can("challenge")
                                       or (spec.challenge == CHALLENGE_NEW and not getattr(p, "challenge_menu", 0))):
         spec.starts_on, spec.challenge = "shot", -1
+    if starts_on_place(spec) and not p.can("place"):                 # PAD-710
+        spec.starts_on, spec.place_mode = "shot", -1
     if not p.can("shaker"):
         spec.shakes = []
     if not p.can("shows"):
@@ -3362,7 +3456,7 @@ def start_shots_taken(project):
     it is not running or lights itself at. A new mode starts on a shot of none of these when the game has one."""
     taken = set()
     for _slug, spec in list_modes(project)[0] if project else ():
-        if starts_on_event(spec) or starts_on_battle(spec) or starts_on_challenge(spec):
+        if starts_on_event(spec) or starts_on_battle(spec) or starts_on_challenge(spec) or starts_on_place(spec):
             continue
         shots = (spec.start_sequence if starts_on_sequence(spec) else start_shots(spec)) or []
         taken.update(s for s in shots if isinstance(s, str) and s)
@@ -4866,6 +4960,12 @@ def starts_on_challenge(spec):
     return bool(words) and words[0] == "challenge"
 
 
+def starts_on_place(spec):
+    """True when the game starting one of its own modes (``place_mode``) starts the mode in its place (PAD-710)."""
+    words = (spec.starts_on or "shot").split()
+    return bool(words) and words[0] == "game_mode"
+
+
 def starts_on_sequence(spec):
     """True when the mode starts on its ``start_sequence`` made in order (PAD-314)."""
     words = (spec.starts_on or "shot").split()
@@ -4911,9 +5011,16 @@ def _validate_starts_ends(spec, p, ends=True):
     out = []
     words = (spec.starts_on or "shot").split()
     events = tuple(getattr(p, "events", ()) or ())
-    if words[0] not in ("shot", "event", "sequence", "battle", "challenge"):
+    if words[0] not in ("shot", "event", "sequence", "battle", "challenge", "game_mode"):
         out.append("A mode starts on a shot, on shots made in order, on one of the game's events, on a battle "
-                   "picked on the game's selection screen, or as a challenge picked in the game's Challenge mode.")
+                   "picked on the game's selection screen, as a challenge picked in the game's Challenge mode, or "
+                   "in the place of one of the game's own modes.")
+    elif words[0] == "game_mode":                   # PAD-710
+        n = _int_or_none(spec.place_mode)
+        if not p.can("place"):
+            out.append("Starting in the place of one of the game's own modes is not on %s yet (Mode says why)." % p.label)
+        elif n is None or n not in {i for i, _nm, _c in p.places}:
+            out.append("Pick the game's mode this one runs in the place of.")
     elif words[0] == "challenge":                   # PAD-615
         n = _int_or_none(spec.challenge)
         if not p.can("challenge"):
@@ -5539,6 +5646,9 @@ def _starts_ends_lines(spec, lines, p, ends=True):
     elif starts_on_battle(spec) and p.can("roster"):   # PAD-589: only the pick starts it (no trigger line)
         out = [line for line in out if not line.startswith("trigger ")]
         out.insert(2, "roster_slot    %d" % int(spec.roster_slot))
+    elif starts_on_place(spec) and p.can("place"):   # PAD-710: only the game starting its mode starts it
+        out = [line for line in out if not line.startswith("trigger ")]
+        out.insert(2, "in_place_of    %d" % int(spec.place_mode))
     elif starts_on_challenge(spec) and p.can("challenge"):   # PAD-615: only the challenge game's pick starts it
         out = [line for line in out if not line.startswith("trigger ")]
         n = int(spec.challenge)

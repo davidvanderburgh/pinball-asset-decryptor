@@ -143,6 +143,8 @@ export function hatTemplates(ch, timers) {
     ...((ch.challenges || []).length ? [{ kind: "challenge", challenge: ch.challenges[0] }] : []),
     // PAD-706: only where the game has a battle selection a mode may take a place on (proven builds)
     ...((ch.roster || []).length ? [{ kind: "battle", slot: 0, name: ch.roster[0] }] : []),
+    // PAD-710: only where the game lets a mode run in the place of one of its own modes (proven builds)
+    ...((ch.places || []).length ? [{ kind: "game_mode", mode: ch.places[0].id, name: ch.places[0].name }] : []),
   ];
 }
 
@@ -352,9 +354,13 @@ function StmtBody({ b, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
   switch (b.op) {
     case "start_mode": return html`<span class="bk-w">Start the mode</span>`;
-    case "end_mode": return (ed.ch.roster || []).length || b.won   // PAD-706: the battle it took the place of, won
-      ? html`<span class="bk-w">End the mode</span><${Pick} value=${b.won ? "won" : "-"} options=${END_OPTS} onChange=${(v) => set("won", v === "won")} title=${END_WON_TIP} />`
-      : html`<span class="bk-w">End the mode</span>`;
+    case "end_mode": {   // PAD-706: the battle it took the place of, won; PAD-710: the game's mode, completed
+      const hats = ((ed.prog || {}).scripts || []).map((sc) => (sc.hat || {}).kind);
+      const place = hats.includes("game_mode") && !hats.includes("battle");
+      return (ed.ch.roster || []).length || (ed.ch.places || []).length || b.won
+        ? html`<span class="bk-w">End the mode</span><${Pick} value=${b.won ? "won" : "-"} options=${place ? END_PLACE_OPTS : END_OPTS} onChange=${(v) => set("won", v === "won")} title=${place ? END_PLACE_TIP : END_WON_TIP} />`
+        : html`<span class="bk-w">End the mode</span>`;
+    }
     case "light_mode": {
       // PAD-503: lit at a shot, with one more insert of the card's (a villain's), as the game's mini-wizards are
       // PAD-521: several inserts (a chase runs across them, as the game cycles its villains), and one more held solid
@@ -594,6 +600,10 @@ function addMenu(ed, path) {
 const BATTLE_TIP = "On the game's BATTLE SELECTION screen (the scoop, once the ramps have lit a battle), picking this battle runs this script instead of the game's own battle: put Start the mode in it. It runs once the screen has closed (about 3 s). The game counts the battle as its own: when the mode ends, the battle is won if an End the mode, the battle won block ended it (a mode with no such block wins by its own end: its clock, or an End the mode block), and lost if the ball drains first - then the next lit scoop plays the mode again, as the game does with its own. Won, the battle shows Completed on the screen, counts in the city and the audits, and opens what winning it opens. One mode per battle. The screen keeps the battle's own picture and name (the Scenes tab changes them).";
 const END_WON_TIP = "For a mode the player picked on the battle selection screen: the battle won. The game then counts it as a battle won (Completed on the screen, the city, the audits). A drain before it ends loses it.";
 const END_OPTS = [["-", "(the battle lost)"], ["won", ", the battle won"]];
+// PAD-710: what the game-mode hat does, and End the mode's "completed"
+const PLACE_TIP = "When the game starts this one of its own modes (the player earned it, as in any game), this script runs instead and the game's own mode never runs: put Start the mode in it. Where the app knows the game's mode framework, the game counts the mode as its own: its start as that mode starting (its start count and STARTED audit), and when the mode ends, an End the mode, completed block ending it (a mode with no such block: its own end, its clock or an End the mode block) as that mode completed - its COMPLETED audit, its wins and the wizards and unlocks the game opens for it - and the ball draining first as not completed. One mode per game mode.";
+const END_PLACE_TIP = "For a mode that runs in the place of one of the game's own modes: that mode completed. The game then counts it as completed (its audits, its wins, what it opens). A drain before it ends: not completed.";
+const END_PLACE_OPTS = [["-", "(not completed)"], ["won", ", completed"]];
 
 // PAD-615: what the challenge hat does
 // PAD-643: who launches the challenge ball, and when (block_modes.CHALLENGE_LAUNCH; a number = seconds after it starts)
@@ -621,6 +631,11 @@ export function HatBody({ h, path, ed }) {
       const opts = roster.map((x, i) => [String(i), x]);
       return html`<span class="bk-w b" ...${tip(BATTLE_TIP)}>When the player picks</span><${Pick} value=${h.slot == null ? "" : String(h.slot)} options=${opts} onChange=${(v) => ed.set(path, { ...h, slot: Number(v), name: roster[Number(v)] || "" })} /><span class="bk-w b" ...${tip(BATTLE_TIP)}>on the battle selection screen</span>`;
     }
+    case "game_mode": {                              // PAD-710
+      const places = ed.ch.places || [];
+      const opts = places.map((x) => [String(x.id), x.name]);
+      return html`<span class="bk-w b" ...${tip(PLACE_TIP)}>When the game starts its</span><${Pick} value=${h.mode == null ? "" : String(h.mode)} options=${opts} onChange=${(v) => ed.set(path, { ...h, mode: Number(v), name: (places.find((x) => String(x.id) === v) || {}).name || "" })} /><span class="bk-w b" ...${tip(PLACE_TIP)}>(in its place)</span>`;
+    }
     case "challenge": return html`<span class="bk-w b" ...${tip(CHALLENGE_TIP)}>When the player picks the challenge</span><${Pick} value=${h.challenge} options=${(ed.ch.challenges || []).map((x) => [x, x])} onChange=${(v) => set("challenge", v)} /><span class="bk-w b" ...${tip(LAUNCH_TIP)}>, its ball launched</span><${Pick} value=${h.launch || "clip"} options=${LAUNCH_OPTS} onChange=${(v) => set("launch", v)} />`;
     default: return html`<span class="bk-w b">${h.kind}</span>`;
   }
@@ -644,7 +659,8 @@ export function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
     any_shot: "When any shot is made", switch: "When any playfield switch is hit", every: "Every N seconds", seconds_left: "When N seconds are left",
     ball_end: "When the ball drains", drain: "When a ball goes into the trough", event: "When the game does…", timer_done: "When a timer runs out",
-    challenge: "When the player picks a challenge", battle: "When the player picks a battle" }[h.kind] || h.kind;
+    challenge: "When the player picks a challenge", battle: "When the player picks a battle",
+    game_mode: "When the game starts one of its modes" }[h.kind] || h.kind;
 }
 
 export function stmtLabel(b) {

@@ -932,9 +932,22 @@ static void shake_mode_ended(void);           /* PAD-414: the shaker section */
 static void shake_let_go(const char *why);
 static const struct pm_mode *show_ended_by;   /* PAD-411: a mode's ending may still start its show */
 static unsigned long show_ended_ms;
+/* PAD-707 (David, v21 in the emulator: "the videos (especially for finishing a mode) were not being held for their
+ * duration", "the scoop kick-out needs to time up with when they finish"): a mode's FINISH - the full-screen clip of
+ * its own it plays as it ends, asked for just before its end or in When the mode ends (a block mode's starts half a
+ * second after it is asked for) - plays out before the game hears that the battle the mode took is over and before a
+ * ball in the scoop is let go. KING CAESAR's cashout was cut a second in: the battle's own stop ran at the mode's end
+ * and the game's battle-over display took the one video surface, and the scoop kicked the ball out with it. A finish
+ * is the ended mode's clip while it plays, or FIN_GRACE_MS for one to start; at most FIN_MAX_MS; over when another
+ * mode begins or the game ends. */
+#define FIN_GRACE_MS 1200ul
+#define FIN_MAX_MS  12000ul
+static struct { const struct pm_mode *mode; unsigned long ended; int seen; } fin;
+static int finish_on(void);
 void pm_end(void)
 {
     int was_taker = running && running == current;
+    if (was_taker && pm_in_game()) fin.mode = current, fin.ended = pm_ms(), fin.seen = 0;   /* PAD-707 */
     if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
     if (running == current) running = 0, running_as[0] = 0, refused_forget();
     if (was_taker) chg_mode_ended(1);   /* PAD-630: a challenge game's mode ended - its ball ends */
@@ -2836,6 +2849,19 @@ int pm_clip(const char *name)
 }
 
 int pm_clip_playing(void) { return clip.on; }
+
+/* PAD-707: the last mode's finish is still on the glass (above, at pm_end) */
+static int finish_on(void)
+{
+    unsigned long t;
+    if (!fin.mode) return 0;
+    t = pm_ms() - fin.ended;
+    if (!pm_in_game() || running || t >= FIN_MAX_MS) { fin.mode = 0; return 0; }
+    if (clip.on && clip_owner == fin.mode) { fin.seen = 1; return 1; }
+    if (!fin.seen && t < FIN_GRACE_MS) return 1;
+    fin.mode = 0;
+    return 0;
+}
 
 /* PAD-413: a full-screen clip still playing when another of our modes begins is the last one's ENDING (KIRYU
  * WINS over BIOLLANTE's start): it stops, so the new mode has the glass from its first frame */
@@ -5835,15 +5861,20 @@ static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
             running ? " (a mode runs)" : "");
     r = scoop.orig(ev, a1, a2, a3);
     e = scoop.event_arg == 1 ? a1 : scoop.event_arg == 2 ? a2 : scoop.event_arg == 3 ? a3 : ev;
-    if (e != scoop.event || !scoop.hold_ms || !running || !pm_in_game()) return r;
+    if (e != scoop.event || !pm_in_game()) return r;
+    if (!(scoop.hold_ms && running) && !(!running && finish_on())) return r;   /* PAD-707: or the last one's finish */
     t0 = pm_ms();
-    scoop.until = t0 + scoop.hold_ms;
+    scoop.until = t0 + (running ? scoop.hold_ms : SCOOP_MAX_MS);
     scoop.release = 0;
-    say("scoop: a ball settled - holding it %u ms for the mode; then the game kicks it out", scoop.hold_ms);
-    while (!scoop.release && scoop.hold_ms && running && pm_in_game() && pm_ms() < scoop.until)
+    if (running) say("scoop: a ball settled - holding it %u ms for the mode; then the game kicks it out", scoop.hold_ms);
+    else say("scoop: a ball settled while %s's finish plays - held until it is over", fin.mode && fin.mode->name ? fin.mode->name : "a mode");
+    /* PAD-707: a mode that ends while it holds the ball keeps it through its finish, so the kick-out comes as it ends */
+    while (!scoop.release && pm_in_game() && pm_ms() - t0 < SCOOP_MAX_MS
+           && ((scoop.hold_ms && running && pm_ms() < scoop.until) || (!running && finish_on())))
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
-    why = scoop.release ? "the mode let go" : !scoop.hold_ms || !running ? "the mode ended"
-        : !pm_in_game() ? "the game ended or tilted" : "its time ran out";
+    why = scoop.release ? "the mode let go" : !pm_in_game() ? "the game ended or tilted"
+        : pm_ms() - t0 >= SCOOP_MAX_MS ? "the most a ball is held" : running ? "its time ran out"
+        : fin.seen ? "the mode's finish is over" : "the mode ended";
     say("scoop: let go after %lu ms (%s) - the game kicks it out", pm_ms() - t0, why);
     scoop.until = 0;
     scoop.release = 0;
@@ -9175,6 +9206,7 @@ static void events_deliver(void);             /* the events section below */
 static void event_census(void);
 static void switches_deliver(void);           /* the switches section below */
 static void roster_deferred_tick(void);   /* item 146 */
+static void roster_late_tick(void);       /* PAD-707 */
 static void more_tick(void);              /* PAD-707 */
 static void stock_tick(void);             /* item 160 */
 static void magnet_tick(void);            /* PAD-381 */
@@ -9219,6 +9251,7 @@ static void on_tick(unsigned *r)
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
     roster_deferred_tick();
+    roster_late_tick();                       /* PAD-707: a battle's end after its mode's finish */
     more_tick();                              /* PAD-707: the new monsters on the selection screen */
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
@@ -9307,6 +9340,7 @@ static void ball_end_hold_arm(void)
 
 static void roster_owed_ball_end(void);   /* item 146 */
 static void more_ball_end(void);          /* PAD-707 */
+static void roster_late_run(const char *why);
 static void on_ball_end(unsigned *r)
 {
     static int said;
@@ -9330,6 +9364,7 @@ static void on_ball_end(unsigned *r)
     beh.tilts = pm_event("tilt") >= 0 ? event_count(pm_event("tilt")) : 0;
     if (disp_linger_until) disp_release("the ball ended");
     bd_reset("the ball ended");
+    roster_late_run("the ball ended");       /* PAD-707: a battle's end waiting for a finish, for the ball's player */
     more_ball_end();                          /* PAD-707: the selection screen is gone with the ball */
     roster_owed_ball_end();
 }
@@ -9632,6 +9667,24 @@ static void roster_host_begin(unsigned p, unsigned slot, unsigned id)
         "it does not run)", slot, id, p, city);
 }
 
+/* PAD-707 (David, v21: after two monsters "it starts the animation for mode select then it cancels itself out"): what a
+ * tier-1 battle's own shot handler does at the monster's last hit, before its victory show and its stop (Premium/LE 1.16
+ * Ebirah 0x815d0, Titanosaurus 0x90b78, Gigan 0x9d1e8, Megalon 0xa5f08 - the same lines in each): `site battle_beaten`
+ * (0x121c28) on `data battle_beaten_rule` (0x7b2e28; only once its guard, `data battle_beaten_guard`, says it is built),
+ * then the cities rule's "beaten here" byte for the player (`value roster_city_beaten_vec_at`, 4 a city) set to 1.
+ * CBattle::stop alone left that byte 0: the city stayed unfinished, so the next scoop's city screen offered STAY IN
+ * TOKYO and, staying, the selection screen opened on the won battle and closed (emulator run16, v21; the stock win of
+ * PAD-706 run2 had it 1 five seconds before its stop and travelled on). For the slots of `value battle_beaten_slots`. */
+static void roster_beaten(unsigned p, unsigned city)
+{
+    unsigned f = fn("battle_beaten"), rule = data("battle_beaten_rule"), guard = data("battle_beaten_guard"), rec;
+    if (f && rule && (!guard || (rw(guard) & 1u)))
+        ((void (*)(unsigned))(unsigned long)f)(rule);
+    rec = roster_city_rec(city, pm_port_value("roster_city_beaten_vec_at", -1), 4);
+    if (rec) *(unsigned char *)(unsigned long)(rec + p - 1) = 1;
+    say("roster: the monster counts as beaten in city %u for player %u%s", city, p, rec ? "" : " (no such byte on this port)");
+}
+
 /* The battle's own STOP with the mode's outcome, for the player up; 1 when it ran (it gives the roster back itself) */
 static int roster_host_end(unsigned p, int won)
 {
@@ -9655,6 +9708,7 @@ static int roster_host_end(unsigned p, int won)
     }
     mask = (unsigned *)(unsigned long)(roster_city_rec(city, pm_port_value("roster_city_vec_at", -1), 16) + (p - 1) * 4);
     was = *mask;
+    if (won && (((unsigned long)pm_port_value("battle_beaten_slots", 0) >> h->slot) & 1u)) roster_beaten(p, city);
     v11 = rw(rw(obj) + 4u * (unsigned)slot_stop);
     if (!(((unsigned long)pm_port_value("battle_own_stop_slots", 0) >> h->slot) & 1u))
         ((void (*)(unsigned, unsigned))(unsigned long)stop)(obj, won ? 1u : 0u);
@@ -9672,11 +9726,40 @@ static int roster_host_end(unsigned p, int won)
 }
 
 static void more_over(unsigned p, int won);   /* PAD-707 */
+/* PAD-707: a battle's end that waits for its mode's finish (finish_on, at pm_end): the game's own stop shows its
+ * battle-over display on the one video surface, over the finish. Given at the finish's end, at the ball's end, or
+ * as the game ends. */
+static struct { int on, won; const char *name; } roster_late;
+static int roster_late_now;
+static void roster_late_run(const char *why)
+{
+    if (!roster_late.on) return;
+    roster_late.on = 0;
+    say("roster: %s's battle ends now (%s)", roster_late.name ? roster_late.name : "a mode", why);
+    roster_late_now = 1;
+    pm_roster_over(roster_late.won);
+    roster_late_now = 0;
+}
+
+static void roster_late_tick(void)
+{
+    if (roster_late.on && !finish_on()) roster_late_run(pm_in_game() ? "its finish is over" : "the game ended");
+}
+
 void pm_roster_over(int won)
 {
     struct site *x = site("roster_done");
     const char *why = 0;
     unsigned up = pm_player(), q, p;
+    if (!roster_late_now && pm_in_game() && finish_on() && fin.mode == current) {
+        roster_late_run("another battle ended");          /* (one waiting already goes first) */
+        roster_late.on = 1;
+        roster_late.won = won;
+        roster_late.name = current && current->name ? current->name : 0;
+        say("roster: the battle %s took ends once its finish has played (the game's battle-over display would take "
+            "its clip)", roster_late.name ? roster_late.name : "a mode");
+        return;
+    }
     for (q = 1; q <= 4; q++)
         if (roster_owed[q] == 1) roster_won[q] = won ? 1 : 0;     /* a give-back that waits keeps the outcome */
     p = roster_give_back(roster_owed, pm_in_game(), up, &why);
@@ -9841,7 +9924,21 @@ static struct {
     unsigned cover_tries;
     signed char lost[5];                /* per player: the member whose battle was lost (the city pick plays it again) */
     signed char playing[5];             /* per player: the member whose mode has the pick now */
-} more = { 0, 0, -1, -1, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 } };
+    signed char won[5][7];              /* per player and place: the member who won its battle; -1 = none of ours */
+    void *box[7];                       /* each place's own state box (its claw), hidden where one of ours won */
+    unsigned box_tries;
+} more = { 0, 0, -1, -1, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 },
+           { { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 },
+             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0 };
+static void more_won_shift(int k, int by)   /* member k joined (by 1) or left (by -1): the wins follow */
+{
+    int p, s;
+    for (p = 1; p <= 4; p++)
+        for (s = 0; s < 7; s++) {
+            if (by < 0 && more.won[p][s] == k) more.won[p][s] = -1;
+            else if (more.won[p][s] >= k + (by < 0)) more.won[p][s] = (signed char)(more.won[p][s] + by);
+        }
+}
 static int more_on_pick(unsigned slot);
 
 static void more_copy(char *out, unsigned cap, const char *s)
@@ -9900,6 +9997,7 @@ int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned c
             if (more.lost[j] >= k) more.lost[j]++;
             if (more.playing[j] >= k) more.playing[j]++;
         }
+        more_won_shift(k, 1);
         more_n++;
         more_m[k].page[0] = 0;
         more_m[k].tries = 0;
@@ -9952,6 +10050,7 @@ void pm_roster_more_leave(const char *name)
         if (more.playing[j] == k) more.playing[j] = -1; else if (more.playing[j] > k) more.playing[j]--;
     }
     if (more.cur == k) more.cur = -1; else if (more.cur > k) more.cur--;
+    more_won_shift(k, -1);
     more_forget_nodes();
     more_release_unused();
 }
@@ -10014,6 +10113,16 @@ static void more_find(void)
             more.body[s] = more_node(b, "");
         }
     }
+    for (s = 0; s < 7; s++) {             /* every place's state box: a new monster's win may be on any of them */
+        char t[40];
+        const char *box, *at = pm_port_text("roster_box_path"), *scene_id = pm_port_text("roster_screen_scene");
+        pm_snprintf(t, sizeof t, "roster_box_%u", s);
+        if (!more.box[s] && at && scene_id && (box = pm_port_text(t))) {
+            char p[120];
+            pm_snprintf(p, sizeof p, "%s%s", at, box);
+            more.box[s] = pm_node(scene_id, p);
+        }
+    }
 }
 
 /* the game's slot state (RuleBattle, Premium/LE 1.16 0x1244bc): 0 = open, 2 = won here, else locked */
@@ -10043,12 +10152,19 @@ static void more_draw(void)
     }
     more.hid = hide;
     if (more.open && !more.states) {
+        /* PAD-707 (David, v21: "the footprint icons over the beaten modes are off"): a place's battle won by one of
+         * ours puts the claw on THAT tile alone - not on the others booked against it, and not the game's own on the
+         * place's tile (its state box hidden), where it stood for a battle the game never played */
+        unsigned p = pm_player();
+        signed char *won = p >= 1 && p <= 4 ? more.won[p] : 0;
         more.states = 1;
         for (k = 0; k < more_n; k++) {
             unsigned st = more_state(more_m[k].slot);
             if (more_m[k].lock) pm_show(more_m[k].lock, st != 0 && st != 2);
-            if (more_m[k].done) pm_show(more_m[k].done, st == 2);
+            if (more_m[k].done) pm_show(more_m[k].done, st == 2 && won && won[more_m[k].slot] == k);
         }
+        for (s = 0; s < 7; s++)
+            if (more.box[s]) pm_show(more.box[s], !(won && won[s] >= 0 && more_state(s) == 2));
     }
 }
 
@@ -10186,8 +10302,11 @@ static void more_tick(void)
     if (!more_n) return;
     more_find();
     if (!pm_in_game()) {
-        int q;
-        for (q = 1; q <= 4; q++) more.lost[q] = more.playing[q] = -1;
+        int q, s;
+        for (q = 1; q <= 4; q++) {
+            more.lost[q] = more.playing[q] = -1;
+            for (s = 0; s < 7; s++) more.won[q][s] = -1;
+        }
         more.open = 0;
         more.cur = -1;
     }
@@ -10199,6 +10318,7 @@ static void more_over(unsigned p, int won)
 {
     if (p < 1 || p > 4 || more.playing[p] < 0) return;
     more.lost[p] = won ? -1 : more.playing[p];
+    if (won && more.playing[p] < more_n) more.won[p][more_m[(int)more.playing[p]].slot] = more.playing[p];
     if (more.playing[p] < more_n)
         say("roster: %s's battle %s for player %u%s", more_m[(int)more.playing[p]].name, won ? "won" : "lost",
             p, won ? "" : " - the city pick plays it again at the next lit scoop");

@@ -1761,6 +1761,14 @@ mode ended, 1832 ms; no abort.
 
 Not measured: a battle's select screen holding the ball first (the game's own hold, which the wrapper runs
 before its own); a tilt during a hold on a machine.
+
+**A mode's finish (PAD-707).** David, v21 in the emulator: "the scoop kick-out needs to time up with when they
+finish like after collecting the finish at the scoop". A mode that ends while it holds a ball keeps the ball
+through its FINISH - the full-screen clip of its own it plays as it ends (a blocks mode's starts half a second after
+it is asked for, so the runtime waits up to 1.2 s for one to start) - and a ball that settles while that finish plays
+is held too: the kick-out comes as the clip ends, at most 10 s from the ball settling. Without a clip the end lets
+go as before. Run20 (Heisei 1.99D v21, a KING CAESAR test mode cashing out with his 3.97 s cashout clip and ending at
+once): `scoop: let go after 4324 ms (the mode's finish is over)`, the clip 115 frames, none to the glass without it.
 ## The shield platform (Godzilla Premium/LE, PAD-379)
 
 Godzilla Premium and LE carry their three shield targets on a platform a motor turns. Most of the game
@@ -3690,6 +3698,23 @@ restarted by the city pick (its battle was lost; the game plays it again)` - and
 is won, as the game's battle would. A mode keeps its progress across those plays in variables that reset each
 game or each ball, not each time the mode starts.
 
+**After its finish (PAD-707).** The battle's own stop shows the game's battle-over display on the one video
+surface, so a pick's end that comes as its mode ends (`pm_roster_over`, after `pm_end`) waits for the mode's finish
+(the scoop's paragraph, above) and is given when the clip ends, at the ball's end, or as the game ends - logged `the
+battle KING CAESAR took ends once its finish has played` and `KING CAESAR's battle ends now (its finish is over)`.
+On v21 KING CAESAR's cashout was cut a second in by that display, and the scoop kicked with it.
+
+**Beaten in its city (PAD-707).** A tier-1 battle's own shot handler, at the monster's last hit and before its
+victory show and its stop, calls `site battle_beaten` on `data battle_beaten_rule` (Premium/LE 1.16 `0x121c28` on
+`0x7b2e28`, Pro 1.16 and 1.15 `0x11f318`; only once `data battle_beaten_guard` says the rule is built) and sets the
+cities rule's "beaten here" byte for the player (`value roster_city_beaten_vec_at` 68, a byte a player, 4 a city).
+CBattle::stop alone left it 0 - the city stayed unfinished: the next city screen offered STAY IN TOKYO, the ramps
+qualified a battle there again, and the selection screen opened on the won battle and closed at once (David: "it
+starts the animation for mode select then it cancels itself out"; run16 frame by frame). A won pick of a slot in
+`value battle_beaten_slots` (0x0f, the four tier-1 places) does the same now: run17's bytes after the win match the
+stock win of PAD-706 run2 (`b44=1`, the ramps dark until the player travels), and after a travel the next selection
+stays up (run18).
+
 **Won or lost.** A mode in C says so: `pm_roster_over(1)` / `pm_roster_over(0)`. The mode-file interpreter:
 its `end_shot` ending it wins; with no `end_shot`, its clock running out wins (it has no other way to win, and
 a lost battle comes back at every lit scoop); anything else (the ball, a tilt, the game's own mode beginning)
@@ -3923,8 +3948,11 @@ static void on_init(void)
   is the game's pick (`site roster_switch_held`). On a new monster the game's cursor is parked on its place, the
   monster's `_Lit` and `_Portrait` and the place's `PadSel_Cover<n>` are shown and the place's own portrait group
   (`<tile>FullBody_instance`, `text roster_tile_<n>`) hidden; the game draws everything else. Opening (`site
-  roster_screen_open`) starts every opening on the game's own place; the lock and claw of each new tile follow its
-  place's state (2 = won in this city: the claw).
+  roster_screen_open`) starts every opening on the game's own place; the lock of each new tile follows its
+  place's state, and the claw goes on the tile that WON alone (PAD-707, David's v21: "the footprint icons over the
+  beaten modes are off"): a place one of ours won shows that monster's `_Done`, none on the others booked against it,
+  and the place's own state box (`text roster_box_<n>` under `text roster_box_path`) is hidden - the game's claw for a
+  battle it never played; a place the game's own battle won keeps its box and puts no claw on a new tile.
 - **The pick.** The game picks as it always does (Action, both flippers, its 13 s): `site roster_screen_pick` notes
   which tile it was, and the battle start it makes for the place (roster_start) is the new monster's when that was
   under the cursor - `on_pick(slot)` exactly as a claimed place's, 1 = taken; the mode's `pm_roster_over(won)` gives
@@ -3932,7 +3960,8 @@ static void on_init(void)
   its own battle; a monster that will not start (0) lets the place's battle run. `pm_roster_more_picked()` names the
   monster inside `on_pick`; `pm_roster_start_after()` is the port's `roster_start_after_ms`.
 - **Played again until it is won.** A new monster's battle lost is the one the game's city pick plays again at the
-  next lit scoop (`site roster_resume`, PAD-706); won, its place shows the claw and is done in that city.
+  next lit scoop (`site roster_resume`, PAD-706); won, its tile shows the claw and its place is done: the place's other tiles
+  book the same battle, so they are not offered again that game.
 
 In a mode file: `roster_slot <n>` and `roster_more PadSel_<folder>` (`roster_callout` is the monster's callout). On the
 Modes tab: blocks, *When the player picks it on the battle selection screen, a new monster in <battle>'s place* (the

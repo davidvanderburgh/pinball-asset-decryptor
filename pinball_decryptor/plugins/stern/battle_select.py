@@ -564,6 +564,10 @@ def build(stock, monsters):
     at, k = layout(sc, [int(m["slot"]) for m in monsters])
     place = lambda key: mul(move(*at[key]), scale(k))               # tile pixels -> CharacterSelect space
     greys = [sc.grey(s) for s in range(7)]
+    # the padlock and the claw as they sit on place 4's tile - read BEFORE the places move: read after, the box had moved
+    # and the tile it was measured against had not, and each new tile's claw sat a tile lower (David, v21: "one was way
+    # too low")
+    lock_px, done_px, lock_m, done_m = _state_pictures(scene, sc)
     # the seven places: lit tile, state box and words moved with the tile
     for s in range(7):
         a = mul(place(s), inv(sc.tile_at[s]))                        # CharacterSelect space, old -> new
@@ -577,7 +581,6 @@ def build(stock, monsters):
     at_sheet = sc.kids.index(sc.sheet) + 1
     new_kids = [picture_node("%sGrey%d" % (PREFIX, s), greys[s], place(s)) for s in range(7)]
     # the new monsters' tiles
-    lock_px, done_px, lock_m, done_m = _state_pictures(scene, sc)
     lits, covers, portraits = [], [], []
     hosts = sorted({int(m["slot"]) for m in monsters})
     for i, m in enumerate(monsters):

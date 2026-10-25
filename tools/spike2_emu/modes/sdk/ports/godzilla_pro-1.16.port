@@ -300,6 +300,15 @@ text roster_tile_3        Megalon
 text roster_tile_4        Ghidorah
 text roster_tile_5        MegalonGigan
 text roster_tile_6        GhidorahGigan
+# each place's state box (its lock, its claw, its city), under the overlay: hidden where a new monster won it
+text roster_box_path      SelectOverlay_Textbox.
+text roster_box_0         T1_1_Artbox
+text roster_box_1         T1_2_Artbox
+text roster_box_2         T1_3_Artbox
+text roster_box_3         T1_4_Artbox
+text roster_box_4         T2_1_Artbox
+text roster_box_5         T2_2_Artbox
+text roster_box_6         T2_3_Artbox
 value battle_stopped_at      0x13
 value battle_reason_at       0x17
 value battle_starts_at       0x3c
@@ -311,6 +320,15 @@ value battle_total_at        0xf0
 # the slots whose battle stops itself, not through CBattle::stop: 5, Megalon & Gigan multiball (its v[11] always counts a win)
 value battle_own_stop_slots  0x20
 value roster_city_battle_vec_at 56
+# PAD-707: a tier-1 battle's last hit (0x7fe00, 0x8f3a8, 0x9ba18, 0xa4704): beaten(rule), once the rule's
+# guard says it is built, then the cities rule's "beaten here" byte for the player (+0x44 vector, 4 a city) = 1,
+# before the victory show and CBattle::stop. A pick a mode won does the same (the city is finished: the next city
+# screen travels on).
+site battle_beaten       0x0011f318 0xe92d47f0 0xe1a06000
+data battle_beaten_rule       0x007a6790
+data battle_beaten_guard      0x007a68f0
+value roster_city_beaten_vec_at 68
+value battle_beaten_slots   0x0f
 value display_host           29
 value display_mode_level     184
 value display_now_at         0xc

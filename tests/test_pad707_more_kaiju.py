@@ -234,7 +234,11 @@ const char *pm_port_text(const char *n)
     static const char *tiles[7] = { "Ebirah", "Titan", "Gigan", "Megalon", "Ghidorah", "MegalonGigan", "GhidorahGigan" };
     if (!strcmp(n, "roster_screen_scene")) return "cac32730";
     if (!strcmp(n, "roster_screen_path")) return "SelectOverlay_Textbox.CharacterSelect_Instance.";
+    static const char *boxes[7] = { "T1_1_Artbox", "T1_2_Artbox", "T1_3_Artbox", "T1_4_Artbox", "T2_1_Artbox",
+                                    "T2_2_Artbox", "T2_3_Artbox" };
     if (!strncmp(n, "roster_tile_", 12)) return tiles[atoi(n + 12)];
+    if (!strcmp(n, "roster_box_path")) return "SelectOverlay_Textbox.";
+    if (!strncmp(n, "roster_box_", 11)) return boxes[atoi(n + 11)];
     return 0;
 }
 int pm_sound(unsigned r) { printf("SOUND %u\n", r); return 1; }
@@ -387,10 +391,19 @@ def test_its_nodes_show_and_the_places_portrait_hides(tmp_path):
 
 
 def test_a_won_place_shows_the_claw_a_locked_one_the_lock(tmp_path):
-    out = menu(tmp_path, *THREE, "state", 0, 2, "state", 1, 1, "tick", "open", 3, "tick")
-    shown = out.split("selection screen opens")[1]
+    """David (v21): "the footprint icons over the beaten modes are off" - the claw goes on the tile that won alone: a
+    place KUMONGA won shows KUMONGA's claw and hides the place's own state box (the game's claw for a battle it never
+    played); a place the game's own battle won keeps its box and puts no claw on the new tile booked against it."""
+    out = menu(tmp_path, *THREE, "open", 0, "right", "gamepick", "won", "state", 0, 2, "state", 2, 2, "state", 1, 1,
+               "tick", "open", 3, "tick")
+    shown = out.split("selection screen opens")[2]
     assert "SHOW PadSel_KUMONGA_Done" in shown and "SHOW PadSel_KAMACURAS_Lock" in shown
-    assert "SHOW PadSel_KIRYU_Lock" not in shown and "SHOW PadSel_KIRYU_Done" not in shown
+    assert "HIDE PadSel_KIRYU_Done" in shown and "SHOW PadSel_KIRYU_Done" not in shown
+    assert "SHOW PadSel_KIRYU_Lock" not in shown
+    assert "HIDE T1_1_Artbox" in shown and "SHOW T1_3_Artbox" in shown and "SHOW T1_2_Artbox" in shown
+    out = menu(tmp_path, *THREE, "state", 0, 2, "tick", "open", 3, "tick")      # the game's own win of place 0
+    shown = out.split("selection screen opens")[1]
+    assert "HIDE PadSel_KUMONGA_Done" in shown and "SHOW T1_1_Artbox" in shown
 
 
 def test_the_games_pick_under_a_monster_is_the_monsters(tmp_path):
@@ -559,6 +572,29 @@ def test_the_layout_fits_the_new_tiles_and_moves_the_state_boxes(stock):
     assert BS.columns([]) == ([[0], [1], [2], [3]], [[4], [5], [6]])             # the game's own four and three
 
 
+def test_a_new_tiles_claw_sits_on_it_as_the_games_on_its_own(stock):
+    """David (v21): "one was way too low" - the claw of a new tile sat a tile lower, read off place 4's state box after
+    the box had moved and against its tile before it had. On its own tile, as the game's claw is on place 4's."""
+    out = BS.build(stock, _mons(3))
+    real, BS.PREFIX = BS.PREFIX, "ZZZ_"                         # read the built screen as the game's
+    try:
+        sc = BS.Screen(T.parse(out))
+    finally:
+        BS.PREFIX = real
+    box = sc.art[4]
+    claw = BS.sprite_of(box).body["kids"][1]
+    game = BS.apply(BS.mul(BS.inv(sc.glass), BS.mul(sc.os, BS.mul(BS.rest(box), BS.rest(claw)))), 0, 0)
+    tile4 = BS.apply(sc.tile_at[4], 0, 0)
+    want = (game[0] - tile4[0], game[1] - tile4[1])            # the game's claw from its tile's corner, in CS space
+    nodes = {n.name: n for n in sc.kids}
+    for i in range(3):
+        lit, done = nodes["PadSel_m%d_Lit" % i], nodes["PadSel_m%d_Done" % i]
+        corner = BS.apply(BS.mul(BS.rest(lit), BS.rest(BS.sprite_of(lit).body["kids"][0])), 0, 0)
+        at = BS.apply(BS.mul(BS.rest(done), BS.rest(BS.sprite_of(done).body["kids"][0])), 0, 0)
+        k = BS.rest(lit)[0] / BS.rest(sc.selected[4])[0] if BS.rest(sc.selected[4])[0] else 1.0
+        assert abs(at[0] - corner[0] - want[0] * k) < 1.5 and abs(at[1] - corner[1] - want[1] * k) < 1.5, i
+
+
 def test_no_new_monsters_leaves_the_scene_as_it_was(stock):
     assert BS.build(stock, []) == stock
 
@@ -647,6 +683,16 @@ def test_the_godzilla_ports_carry_the_selection_screen(port):
     for name in ("roster_left_sound", "roster_right_sound", "roster_pick_sound", "roster_select_ms",
                  "roster_screen_left", "roster_screen_right", "roster_screen_timer", "roster_screen_busy"):
         assert name in portgen.TITLE_VALUES
+    # a won pick counts as beaten in its city (the battles' last hit), and each place's state box by name
+    assert re.search(r"^site battle_beaten\s+0x[0-9a-f]{8} 0xe92d47f0 0xe1a06000$", text, re.M)
+    for d in ("battle_beaten_rule", "battle_beaten_guard"):
+        assert re.search(r"^data %s\s+0x[0-9a-f]{8}$" % d, text, re.M), d
+    assert re.search(r"^value roster_city_beaten_vec_at 68$", text, re.M)
+    assert re.search(r"^value battle_beaten_slots\s+0x0f$", text, re.M)
+    assert re.search(r"^text roster_box_path\s+SelectOverlay_Textbox\.$", text, re.M)
+    for s, b in enumerate(BS.ARTBOX):
+        assert re.search(r"^text roster_box_%d\s+%s_Artbox$" % (s, b), text, re.M)
+    assert "roster_city_beaten_vec_at" in portgen.TITLE_VALUES and "battle_beaten_slots" in portgen.TITLE_VALUES
 
 
 # ---- a form mode ------------------------------------------------------------------------------------------

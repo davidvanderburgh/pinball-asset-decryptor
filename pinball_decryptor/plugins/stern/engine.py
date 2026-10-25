@@ -9219,7 +9219,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     modes_on=_modes_on, variants=_clips_on,
                     variants_prof=variant_prof or sound_modes_prof, cancel=cancel,
                     sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof,
-                    picture=picture_cfg, picture_prof=picture_prof)
+                    picture=picture_cfg, picture_prof=picture_prof,
+                    # PAD-723: a random clip in another of the title's bank scenes
+                    read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
+                                            if _n is not None else None)(_MW.lookup(reader, _rel)),
+                    scan_card=lambda _names: _MW.CV_scene_counts(reader, _mprof.game_dir, _names))
                 if mode_plan is None:
                     raise _MW.ModeWriteError("none of the project's random clips can go on "
                                              "this card")
@@ -10454,9 +10458,9 @@ class _MusicModeMenu:
 
     def done(self):
         self.ok = True
-        self.log("Music modes: MUSIC MODE is in the operator menu (Adjustments > "
-                 "Machine Settings > Audio Content), values 1 to %d, its help "
-                 "line \"%s\"." % (self.count, self.setting.help), "info")
+        self.log("Music modes: MUSIC MODE is in the operator menu (%s), values 1 "
+                 "to %d, its help line \"%s\"." % (self.setting.where, self.count,
+                                                   self.setting.help), "info")
 
     def fail(self, why):
         if self.why or self.ok:
@@ -10475,10 +10479,11 @@ class _EditionMenu(_MusicModeMenu):
 
     def done(self):
         self.ok = True
-        self.log("Editions: EDITION is in the operator menu (Adjustments > Machine "
-                 "Settings > Attract Mode), values 1 to %d, its help line \"%s\". Put this card on a "
+        self.log("Editions: EDITION is in the operator menu (%s), values 1 to %d, "
+                 "its help line \"%s\". Put this card on a "
                  "Multi-boot card with the other editions, in that order, and the "
-                 "setting picks the one that boots." % (self.count, self.setting.help),
+                 "setting picks the one that boots." % (self.setting.where, self.count,
+                                                        self.setting.help),
                  "info")
 
     def fail(self, why):
@@ -10615,8 +10620,7 @@ class _MenuJobs:
         out, blob = list(writes.items()), b""
         if cat is not None:
             blob = _MSet.table_blob(cat, *settings)
-            out += list(_MSet.table_writes(
-                t, cat, va, _MSet.table_records(cat, *settings)).items())
+            out += list(_MSet.table_writes(t, cat, va, *settings).items())
         return out, blob
 
     def done(self):
@@ -18634,7 +18638,11 @@ def _desc_key_mask(params, sites, log=None):
     does, or nearly every stock record and three times what the best known one does
     (PAD-565: James Bond 007 Pro 1.06 measures 0x80005FFF, 2351 of 2351 records
     named, where 0xE0001FFF names 343 - and its sounds, each named by the wrong
-    key, could not be re-pointed)."""
+    key, could not be re-pointed). PAD-724: or nearly every stock record when the best
+    known one names under nine in ten - Avengers Infinity Quest Pro 1.10 measures
+    0xF80001FF, 1554 of 1554, where 0xFC0003FF names 799 by the bits the two share (and
+    Munsters LE 1.28 0xF80003FF, 3115 of 3115, where it names 1557), so half their sounds
+    could not be re-pointed or given a music mode."""
     stock = set()
     for p in params:
         k = p.get("stock_findkey") if p.get("grown") else p.get("findkey")
@@ -18649,7 +18657,8 @@ def _desc_key_mask(params, sites, log=None):
     measured = _measured_key_mask(stock, sites)
     if measured is not None:
         n = len({_play_key(s.payload, s.sid, measured) for s in sites} & stock)
-        if n and (best * 10 < n or (best * 3 <= n and n * 10 >= len(stock) * 9)):
+        if n and (best * 10 < n or (n * 10 >= len(stock) * 9 and best * 10 < len(stock) * 9
+                                    and best < n)):
             if log:
                 log("Play-table key layout 0x%08X, measured on this build: the "
                     "descriptors name %d of %d sound record(s) (the known layouts "

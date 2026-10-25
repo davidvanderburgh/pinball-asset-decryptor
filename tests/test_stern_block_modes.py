@@ -19,6 +19,7 @@ import sys
 import pytest
 
 from pinball_decryptor.plugins.stern import block_modes as BM
+from pinball_decryptor.plugins.stern import blocks_sim as BS
 from pinball_decryptor.plugins.stern import code_modes as CM
 from pinball_decryptor.plugins.stern import mode_project as MP
 from pinball_decryptor.plugins.stern import mode_tryit as MT
@@ -1918,6 +1919,31 @@ def test_the_bar_fills_as_shots_are_made_and_stays_through_the_total(tmp_path):
     p["timers"] = [{"name": "window"}]
     p["bar"]["value"] = {"k": "timer_left", "timer": "window"}
     play(tmp_path, p, "secs", 1)
+
+
+def test_the_bar_fills_with_its_progress_shot_alone(tmp_path):
+    """PAD-721 round 2: the owner's mini-wizards score on drops and other shots too, but only the Right ramp is
+    progress; "times it has scored" filled the bar on every one. Hits of a shot since it started counts that shot
+    alone, made while it runs (not the shot that started it), from none at each start."""
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+              {"hat": {"kind": "shot", "shot": "Right ramp", "when": "any"},
+               "do": [{"op": "score", "points": {"k": "num", "v": 1000}}]},
+              {"hat": {"kind": "shot", "shot": "Building", "when": "running"},
+               "do": [{"op": "score", "points": {"k": "num", "v": 500}}]}],
+             seconds=20, name="YOLT WIZARD",
+             bar={"on": True, "fill": "value", "value": {"k": "mode_hits", "shot": "Right ramp"},
+                  "of": {"k": "num", "v": 4}})
+    assert BM.problems(p, SHOTS, GZ.events) == []
+    out = play(tmp_path, p, "shot", "Right ramp", "shot", "Left ramp", "secs", 1, "shot", "Building", "secs", 1,
+               "shot", "Right ramp", "secs", 1, "shot", "Building", "shot", "Building", "secs", 1,
+               "shot", "Right ramp", "secs", 1)
+    pcts = [int(b) for b in re.findall(r"^\s*\d+ STATUSBAR (-?\d+) ", out, re.M)]
+    seen = [x for i, x in enumerate(pcts) if not i or x != pcts[i - 1]]
+    assert seen == [0, 25, 50], seen        # the Right ramp before it started and the Buildings move nothing
+    sim = BS.Sim(BM.normalize(p))
+    for s in ("Right ramp", "Left ramp", "Building", "Right ramp", "Right ramp"):
+        sim.shot(s)
+    assert sim.val({"k": "mode_hits", "shot": "Right ramp"}) == 2 and sim.val({"k": "hits", "shot": "Right ramp"}) == 3
 
 
 def test_only_a_title_whose_port_names_the_bar_offers_it():

@@ -67,13 +67,6 @@ def _fake_stage(calls=None):
     return stage
 
 
-@pytest.fixture
-def gz_proven(monkeypatch):
-    """Godzilla Pro 1.15 (the hand-written profile the engine harness builds for) taken as a
-    proven title for these tests; the real list is the 1.16 builds."""
-    monkeypatch.setattr(CV, "PROVEN", CV.PROVEN | {"godzilla_pro-1.15"})
-
-
 # ---- the module ----------------------------------------------------------------------------
 def test_the_sidecar_is_cleaned_and_cut_to_what_the_runtime_holds():
     raw = {"video/a.mov": ["x.mp4", "", None, "y.mp4"] + ["z%d.mp4" % i for i in range(20)],
@@ -101,20 +94,29 @@ def test_clips_cfg_is_one_tab_separated_line_per_slot():
     assert "only" not in CV.cfg_text(slots, only=False).splitlines()
 
 
-@pytest.mark.parametrize("key", sorted(CV.PROVEN))
-def test_every_proven_title_has_a_port_the_runtime_can_hook(key):
-    game, version = key.rsplit("-", 1)
-    prof = MP.profile_for_card(game, version)
-    assert prof is not None and CV.title_key(prof) == key
-    assert CV.hook_route(MP.port_path(prof)) == "clip_play"
-    assert CV.title_refusal(prof) == ""
+#: PAD-723: the shipped builds whose port gives the runtime no way to hook the game's ask for a clip
+NO_ROUTE = {"turtles_pro-1.58"}
 
 
-def test_a_title_not_proven_or_unknown_is_refused_in_words():
+def test_every_build_with_a_route_offers_random_clips():
+    """PAD-723: no per-build list - every shipped build whose port has the clip_play or the clip v2
+    route offers them (the PAD-723 sweep saw the swap on the glass on the newest builds)."""
+    seen = set()
+    for prof in MP.profiles().values():
+        key = CV.title_key(prof)
+        if key in NO_ROUTE:
+            assert CV.title_refusal(prof) == CV.NO_ROUTE % prof.label
+            seen.add(key)
+        else:
+            assert CV.route_of(prof) in ("clip_play", "surface", "layer"), key
+            assert CV.title_refusal(prof) == "", key
+    assert seen == NO_ROUTE
+    assert CV.route_of(MP.profile_for_card("godzilla_pro", "1.16")) == "clip_play"
+    assert CV.route_of(MP.profile_for_card("venom_pro", "1.07")) == "surface"
+
+
+def test_an_unknown_title_is_refused_in_words():
     assert CV.title_refusal(None) == CV.NO_TITLE
-    other = MP.profile_for_card("jaws_le", "1.02")
-    if other is not None:
-        assert "have not been tried on" in CV.title_refusal(other)
 
 
 def test_only_a_clip_in_the_bank_scene_can_vary():
@@ -127,7 +129,99 @@ def test_only_a_clip_in_the_bank_scene_can_vary():
     assert CV.slot_refusal(GZ, "") == CV.NO_MANIFEST
 
 
-def test_the_offer_says_why_per_slot(tmp_path, monkeypatch, gz_proven):
+VP = MP.profile_for_card("venom_pro", "1.07")
+#: Venom Pro 1.07: its port's video_bank is the HUD; the game plays its clips from 60ed7e50
+VP_BANK = "venom_pro/assets/lcd/auto_loaded/60ed7e5036b8ce09d35a3e101ea6fc1380b37d97/scene.radium"
+VP_DIR = VP_BANK[:-len("scene.radium")] + "scene.assets/"
+
+
+def test_a_clip_in_another_bank_scene_varies_on_a_clip_v2_build():
+    """PAD-723: a slot in a scene other than the port's video_bank varies when that scene walks as
+    a video bank and holds the clip (card_banks' answer), on a clip v2 build only."""
+    assert CV.scene_of(VP, VP_DIR + "2.asset/7.asset") == (
+        VP_BANK, "60ed7e5036b8ce09d35a3e101ea6fc1380b37d97")
+    assert CV.scene_of(VP, "venom_pro/assets/lcd/auto_loaded/a/b/scene.assets/1.asset") == (
+        "venom_pro/assets/lcd/auto_loaded/a/b/scene.radium", "a/b")
+    assert CV.scene_of(VP, "venom_pro/game") is None
+    assert CV.scene_of(VP, "other/assets/lcd/auto_loaded/a/scene.assets/1.asset") is None
+    clip = VP_DIR + "2.asset/7.asset"
+    banks = {VP_BANK: {clip: "AttractMode_BG"}}
+    assert CV.other_scenes(VP, [clip, "", CV.bank_assets(VP) + "x"]) == {VP_BANK}
+    assert CV.slot_refusal(VP, clip, banks) == ""
+    assert CV.slot_refusal(VP, "/" + clip, banks) == ""
+    assert CV.slot_refusal(VP, VP_DIR + "2.asset/8.asset", banks) == CV.NOT_BANK   # not its clip
+    assert CV.slot_refusal(VP, clip, {VP_BANK: {}}) == CV.NOT_BANK                 # not a bank
+    assert CV.slot_refusal(VP, clip, None) == CV.NO_CARD                           # card not read
+    # Godzilla plays through clip_play, on its one bank: another scene's clip never varies
+    other = "godzilla_pro/assets/lcd/auto_loaded/x/scene.assets/1.asset"
+    assert CV.other_scenes(GZ, [other]) == set()
+    assert CV.slot_refusal(GZ, other, {"godzilla_pro/assets/lcd/auto_loaded/x/scene.radium":
+                                       {other: "A"}}) == CV.NOT_BANK
+
+
+def test_the_offer_reads_the_other_banks_off_the_card(tmp_path, monkeypatch):
+    clip = VP_DIR + "2.asset/7.asset"
+    project = _project(tmp_path, {}, [("AttractMode_BG.mov", clip),
+                                      ("Bubbles.mov", "venom_pro/assets/lcd/auto_loaded/q/"
+                                                      "scene.assets/1.asset")])
+    monkeypatch.setattr(CV, "project_title", lambda p, probe=False: VP)
+    monkeypatch.setattr(MP, "project_card", lambda p: MP.ProjectCard("C:/v.raw", "venom_pro", "1.07", ""))
+    asked = []
+
+    def banks(image, scenes):
+        asked.append((image, sorted(scenes)))
+        return {sc: ({clip: "AttractMode_BG"} if sc == VP_BANK else {}) for sc in scenes}
+    monkeypatch.setattr(CV, "card_banks", banks)
+    why, per = CV.offer(project, ["video/AttractMode_BG.mov", "video/Bubbles.mov"])
+    assert why == "" and per == {"video/AttractMode_BG.mov": "", "video/Bubbles.mov": CV.NOT_BANK}
+    assert asked == [("C:/v.raw", sorted([VP_BANK, "venom_pro/assets/lcd/auto_loaded/q/scene.radium"]))]
+    # never opened on the UI thread: without the probe the card is not read
+    assert CV.offer(project, ["video/AttractMode_BG.mov"], probe=False)[1] == {
+        "video/AttractMode_BG.mov": CV.NO_CARD}
+
+
+def test_card_banks_reads_each_scene_once_and_says_none_for_no_card(tmp_path):
+    assert CV.card_banks(str(tmp_path / "gone.raw"), {VP_BANK}) is None
+
+
+def test_the_build_adds_a_clip_to_its_own_bank_scene(tmp_path):
+    """PAD-723: Venom Pro's clip goes into 60ed7e50, read off the card, and its clips.cfg line is an
+    sclip naming that scene; the port's video_bank (the HUD, no bank at all) is left as it was."""
+    hud = b"not a video bank"
+    other = synthetic(("AttractMode_BG", "Bubbles"))
+    mine = _clip_files(tmp_path, "b.mp4", "c.mp4")
+    project = _project(tmp_path, {"video/AttractMode_BG.mov": mine},
+                       [("AttractMode_BG.mov", VP_DIR + "2.asset/0.asset")])
+    read = []
+    vb = CV.build(project, VP, hud, str(tmp_path / "out"), only=True, stage_fn=_fake_stage(),
+                  read_card=lambda sc: (read.append(sc), other)[1])
+    assert read == [VP_BANK]
+    assert vb.bank == hud and list(vb.others) == [VP_BANK]
+    after = VB.parse(vb.others[VP_BANK])
+    names = {c.name: c.path for c in after.library.entries}
+    assert {"AttractMode_BG__PadVar2", "AttractMode_BG__PadVar3"} <= set(names)
+    assert sorted(c for c, _d in vb.new) == sorted(VP_DIR + names["AttractMode_BG__PadVar%d" % k]
+                                                   for k in (2, 3))
+    cfg = open(vb.cfg, encoding="utf-8").read().splitlines()
+    assert cfg[1:] == ["only", "sclip	60ed7e5036b8ce09d35a3e101ea6fc1380b37d97	AttractMode_BG	"
+                               "AttractMode_BG__PadVar2	AttractMode_BG__PadVar3"]
+
+
+def test_two_banks_clips_of_one_name_vary_once(tmp_path):
+    """The runtime finds a line by the game's name: the second slot of a name is left out."""
+    a = "venom_pro/assets/lcd/auto_loaded/a/scene.assets/2.asset/0.asset"
+    b = "venom_pro/assets/lcd/auto_loaded/b/scene.assets/2.asset/0.asset"
+    project = _project(tmp_path, {"video/A.mov": _clip_files(tmp_path, "x.mp4"),
+                                  "video/B.mov": _clip_files(tmp_path, "y.mp4")},
+                       [("A.mov", a), ("B.mov", b)])
+    msgs = []
+    vb = CV.build(project, VP, b"", str(tmp_path / "out"), only=True, stage_fn=_fake_stage(),
+                  log=lambda m, lvl="info": msgs.append(m), read_card=lambda sc: synthetic(("Same",)))
+    assert [s.rel for s in vb.slots] == ["video/A.mov"]
+    assert any("video/B.mov is left out: another clip the game calls Same" in m for m in msgs)
+
+
+def test_the_offer_says_why_per_slot(tmp_path, monkeypatch):
     bank = CV.bank_assets(GZ)
     project = _project(tmp_path, {}, [("Intro.mov", bank + "2.asset/0.asset"),
                                       ("Attract.mov", "godzilla_pro/assets/lcd/auto_loaded/x/"
@@ -143,7 +237,7 @@ def test_the_offer_says_why_per_slot(tmp_path, monkeypatch, gz_proven):
     assert CV.GATE_ENV in CV.offer(project, ["video/Intro.mov"])[0]
 
 
-def test_the_build_adds_each_clip_and_moves_no_stock_clip(tmp_path, gz_proven):
+def test_the_build_adds_each_clip_and_moves_no_stock_clip(tmp_path):
     bank_dir = CV.bank_assets(GZ)
     stock = synthetic(("Alpha", "Delta", "zeta"))
     mine = _clip_files(tmp_path, "b.mp4", "c.mp4", "d.mp4")
@@ -179,7 +273,7 @@ def test_the_build_adds_each_clip_and_moves_no_stock_clip(tmp_path, gz_proven):
     assert vb.lines[0].startswith("video/Delta.mov plays one of 3 clips at random (b.mp4, c.mp4)")
 
 
-def test_a_card_that_already_has_random_clips_is_refused(tmp_path, gz_proven):
+def test_a_card_that_already_has_random_clips_is_refused(tmp_path):
     bank_dir = CV.bank_assets(GZ)
     stock, _info = VB.add_clip(synthetic(("Alpha", "Delta")), "Delta__PadVar2", 10)
     project = _project(tmp_path, {"video/Delta.mov": _clip_files(tmp_path, "b.mp4")},
@@ -206,7 +300,7 @@ def test_relink_repoints_the_random_clips_too(tmp_path):
     assert (n_slots, n_files) == (2, 2)
 
 
-def test_a_random_clip_that_is_gone_is_left_out_not_the_build(tmp_path, gz_proven):
+def test_a_random_clip_that_is_gone_is_left_out_not_the_build(tmp_path):
     bank_dir = CV.bank_assets(GZ)
     here = _clip_files(tmp_path, "b.mp4")
     project = _project(tmp_path, {"video/Delta.mov": [str(tmp_path / "gone.mp4")] + here,
@@ -223,7 +317,7 @@ def test_a_random_clip_that_is_gone_is_left_out_not_the_build(tmp_path, gz_prove
                in m for lvl, m in msgs)
 
 
-def test_no_variants_builds_nothing(tmp_path, gz_proven):
+def test_no_variants_builds_nothing(tmp_path):
     project = _project(tmp_path, {}, [])
     assert CV.build(project, GZ, synthetic(), str(tmp_path / "out"), only=True) is None
 
@@ -371,8 +465,7 @@ def _compute(project, log, device=False):
                                    cancel=lambda: False, dest_is_device=device)
 
 
-def test_a_project_of_random_clips_only_builds_bank_clips_manifest_and_p2(monkeypatch, tmp_path,
-                                                                          gz_proven):
+def test_a_project_of_random_clips_only_builds_bank_clips_manifest_and_p2(monkeypatch, tmp_path):
     """No mode and the mode maker's switch OFF: the bank is rewritten, each random clip is a
     new file with a manifest record, and p2 gets the runtime, the port and clips.cfg - which
     says ``only`` - and no mode file."""
@@ -407,7 +500,7 @@ def test_a_project_of_random_clips_only_builds_bank_clips_manifest_and_p2(monkey
     engine._rmtree_grow_plan(plan)
 
 
-def test_modes_and_random_clips_share_one_bank_and_one_runtime(monkeypatch, tmp_path, gz_proven,
+def test_modes_and_random_clips_share_one_bank_and_one_runtime(monkeypatch, tmp_path,
                                                                preview_modes_on):
     from pinball_decryptor.plugins.stern import engine
     from pinball_decryptor.plugins.stern import mode_assets as MA
@@ -480,7 +573,7 @@ def _disk(card):
     return io.BytesIO(bytes(disk))
 
 
-def test_random_clips_go_on_beside_an_edit_of_the_hud_scene(monkeypatch, tmp_path, gz_proven):
+def test_random_clips_go_on_beside_an_edit_of_the_hud_scene(monkeypatch, tmp_path):
     """PAD-469: random clips rewrite the video bank only. A project that also edited the HUD
     scene was refused ("another edit in this project changes the HUD scene") though nothing of
     the clips goes in it; now both go on, the HUD patched in place with its manifest record
@@ -519,8 +612,7 @@ def test_modes_with_a_screen_still_refuse_an_edit_of_the_hud_scene(monkeypatch, 
         _compute(str(project), log)
 
 
-def test_random_clips_are_left_out_of_a_direct_sd_write_with_the_reason(monkeypatch, tmp_path,
-                                                                       gz_proven):
+def test_random_clips_are_left_out_of_a_direct_sd_write_with_the_reason(monkeypatch, tmp_path):
     from pinball_decryptor.plugins.stern import engine
     from tests.test_stern_audio_grow import _capture, _said
     _card, project = _variant_card(monkeypatch, tmp_path)
@@ -612,7 +704,8 @@ int main(int argc, char **argv)
     if (!clipv_read()) { printf("none\n"); return 0; }
     printf("only=%d slots=%u dropped=%d\n", clipv_only, n_clipv, clipv_dropped);
     for (i = 0; i < n_clipv; i++) {
-        printf("slot %s", clipv[i].name[0]);
+        printf("slot %s%s%s", clipv[i].scene ? clipv[i].scene : "", clipv[i].scene ? ": " : "",
+               clipv[i].name[0]);
         for (k = 1; k < clipv[i].n; k++) printf(" %s", clipv[i].name[k]);
         printf("\n");
     }
@@ -688,6 +781,12 @@ def test_the_runtime_reads_the_table_the_build_writes(clipv_reader):
     # CRLF, a comment, a line with no extra clip and a stray word are all harmless
     out = clipv_reader("# x\r\nclip\tLonely\r\nhello\r\nclip\tA\tA__PadVar2\r\n")
     assert out == ["only=0 slots=1 dropped=0", "slot A A__PadVar2"]
+    # PAD-723: an sclip line names its bank scene; one with no scene or no extra clip is skipped
+    slots[1].scene = "6fb39344/60ed7e50"
+    out = clipv_reader(CV.cfg_text(slots, only=False) + "sclip\t\tX\tX__PadVar2\nsclip\ts\tY\n")
+    assert out == ["only=0 slots=2 dropped=0",
+                   "slot Mothra_Intro Mothra_Intro__PadVar2 Mothra_Intro__PadVar3",
+                   "slot 6fb39344/60ed7e50: Gigan_Win Gigan_Win__PadVar2"]
 
 
 def test_the_runtime_never_plays_the_same_clip_twice_in_a_row(clipv_reader):

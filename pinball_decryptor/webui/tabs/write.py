@@ -109,7 +109,9 @@ EDITIONS_TIP = (
     "70th Anniversary look, say) and lets the operator pick one in the game's "
     "own menu. Name the editions here, the same names in the same order in "
     "every edition's project, and Write each one. Each card gets EDITION in "
-    "its operator menu (Adjustments > Machine Settings > Attract Mode). Then put the images on a "
+    "its operator menu (Adjustments > Machine Settings > Attract Mode, or the "
+    "last row of Standard Adjustments on a game whose menu has that page). "
+    "Then put the images on a "
     "Multi-boot card, edition 1 first, with \"Boot the edition the game's "
     "EDITION setting names\" ticked: the card shows no menu, and the edition "
     "the setting names boots at the next power-up.")
@@ -1710,13 +1712,14 @@ class WriteTab(TabService):
                 if _Ed.count(names) else EDITIONS_NONE)
         note, kind = "", ""
         if _Ed.count(names):
-            why = _Ed.title_refusal(_Ed.project_title(assets))
+            prof = _Ed.project_title(assets)
+            why = _Ed.title_refusal(prof)
             if why:
                 note, kind = why, "err"
             else:
                 note = ("The card this builds gets EDITION in its operator menu "
-                        "(Adjustments > Machine Settings > Attract Mode). Put every edition's card on "
-                        "one Multi-boot card in this order.")
+                        "(%s). Put every edition's card on one Multi-boot card in "
+                        "this order." % _Ed.menu_path(prof))
         self.set(editions_cap=True, editions_text=text, editions_note=note,
                  editions_note_kind=kind)
 

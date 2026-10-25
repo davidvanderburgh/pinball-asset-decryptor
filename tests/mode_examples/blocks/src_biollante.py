@@ -467,9 +467,9 @@ DESK = [
      ["SCORE +100000", "Hud_C3_Value: 100,000", "END (time ran out)", "Hud_Title: BIOLLANTE WITHERS",
       "lamps held 0"]),
     ("a vine puts a short clock back to fifteen", _START + ["secs", 30, "shot", "Shield target left", "secs", 12],
-     ["SCORE +100000", "END lamps held 6, display priority 180"]),           # still running at 43 s: the clock went back to 15
+     ["SCORE +100000", "END lamps held 21, display priority 180"]),          # still running at 43 s: the clock went back to 15 (PAD-707: every shot insert held, dark or its own)
     ("the pop bumper gives seconds back", _START + ["secs", 30] + _shots("Pop bumper", 5, 100) + ["secs", 12],
-     ["SCORE +100000", "END lamps held 7, display priority 180"]),           # 10 s left + 5 pops: still running at 43.5 s
+     ["SCORE +100000", "END lamps held 21, display priority 180"]),          # 10 s left + 5 pops: still running at 43.5 s
     ("a drain ends it", _START + _STAGE1 + ["ball_end", "secs", 8],
      ["END (ball ended)", "SCORE +312500", "BALL END HOLD", "lamps held 0"]),
 ]

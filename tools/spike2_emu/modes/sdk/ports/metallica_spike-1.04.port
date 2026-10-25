@@ -27,6 +27,8 @@ version        1.04
 site tick             0x00298654 0xe92d4038 0xe3a00037
 #   sound_lookup: located (strict)
 site sound_lookup     0x00395ea8 0xe92d4038 0xe1a05000
+# PAD-494/724 music modes: get_asset_descriptor, WRAPPED (sounds.cfg)
+site sound_resolve    0x002fc164 0xe92d41f0 0xe1a05820
 #   score_add: located (strict)
 site score_add        0x00150cd4 0xe3001012 0xe3401700
 #   callout: located (strict)

@@ -50,6 +50,7 @@ EVERY_BLOCK = [
 ]
 #: one of every value and condition (modes_blocks.js valueTemplates / condTemplates), with the operators
 EVERY_VALUE = [num(1000), {"k": "var", "name": "combo"}, {"k": "hits", "shot": "Left ramp"}, {"k": "scored"},
+               {"k": "mode_hits", "shot": "Left ramp"},                                                  # PAD-721
                {"k": "total"}, {"k": "secs_left"}, {"k": "timer_left", "timer": "window"}, {"k": "balls"},
                {"k": "player"}, {"k": "combo_chain"}, {"k": "combo_steps", "combo": "RAMPS"}] + [   # PAD-708
                 {"k": "op", "op": o, "a": num(2), "b": {"k": "var", "name": "combo"}} for o in "+-*/"]

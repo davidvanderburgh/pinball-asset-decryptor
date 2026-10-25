@@ -205,7 +205,7 @@ def test_the_intro_videos_go_into_the_bank_by_name_and_not_into_clips_cfg(tmp_pa
             entries = []
 
     monkeypatch.setattr(VB, "parse", lambda bank: _Parsed())
-    monkeypatch.setattr(VB, "add_clip", lambda bank, name, size: (added.append(name) or bank + b"+",
+    monkeypatch.setattr(VB, "add_clip", lambda bank, name, size, **kw: (added.append(name) or bank + b"+",
                                                                    {"path": "2.asset/%d.asset" % (200 + len(added))}))
     monkeypatch.setattr(CV, "jukebox_clips", lambda project, prof: ("video/x.mov", [(1, "a.mov"), (3, "b.mov")]))
     staged = tmp_path / "staged.mov"

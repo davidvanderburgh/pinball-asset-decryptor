@@ -31,6 +31,8 @@ site shot_dispatch    0x000bae04 0xe92d43f8 0xe1a09001
 site ball_end         0x002f3978 0xe92d4070 0xe1a06000
 #   sound_lookup: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, TMNT Pro 1.59, Deadpool Pro 1.16, Deadpool LE 1.14]
 site sound_lookup     0x001d7ae0 0xe92d4038 0xe1a05000
+# PAD-494/724 music modes: get_asset_descriptor, WRAPPED (sounds.cfg)
+site sound_resolve    0x0013d578 0xe92d41f0 0xe1a05820
 #   score_add: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, TMNT Pro 1.59, Deadpool Pro 1.16, Deadpool LE 1.14]
 site score_add        0x0020354c 0xe3081226 0xe3401425
 #   callout: through the handler of hook 0x95, as in the reference [The Beatles 1.29, Jaws LE 1.02, TMNT Pro 1.59, Deadpool Pro 1.16]

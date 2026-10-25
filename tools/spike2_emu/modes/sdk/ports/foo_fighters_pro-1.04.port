@@ -12,6 +12,8 @@ version        1.04
 site tick             0x0022c92c 0xe92d4038 0xe3a00037
 site ball_end         0x00212098 0xe92d4070 0xe1a06000
 site sound_lookup     0x00335790 0xe92d4038 0xe1a05000
+# PAD-494/724 music modes: get_asset_descriptor, WRAPPED (sounds.cfg)
+site sound_resolve    0x0029b240 0xe92d41f0 0xe1a05820
 site score_add        0x00169248 0xe30c1792 0xe34013ba
 site callout          0x0029c280 0xe92d4010 0xe307ea10
 site callout_nth      0x0029c434 0xe92d4010 0xe307ea10

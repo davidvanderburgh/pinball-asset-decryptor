@@ -1,4 +1,5 @@
 {
+"The card this project was extracted from is not on this PC, so the app cannot read which of the game's video banks this clip is in. Point the project at its card (Select card) to fix that.": "Die Karte, aus der dieses Projekt extrahiert wurde, ist nicht auf diesem PC, daher kann die App nicht lesen, in welcher Videobank des Spiels dieser Clip liegt. Verweisen Sie das Projekt auf seine Karte (Karte auswählen), um das zu beheben.",
 "\" in Scenes…": "\" in Szenen…",
 "\"Changed on disk\" is about the project folder only: your source card image is never touched.": "„Auf der Festplatte geändert“ bezieht sich nur auf den Projektordner: Ihr Quell-Kartenabbild wird nie angetastet.",
 "\"Force partition #\" must be a whole number (got: {}).": "„Force partition #“ muss eine ganze Zahl sein (erhalten: {}).",
@@ -5078,7 +5079,6 @@
 "Random clips": "Zufällige Clips",
 "Random clips (": "Zufällige Clips (",
 "Random clips ({} in turn)": "Zufällige Clips ({} der Reihe nach)",
-"Random clips have not been tried on {} yet, so they are not offered there. Godzilla Pro and Premium/LE {} have them.": "Zufällige Clips wurden auf {} noch nicht getestet und werden dort daher nicht angeboten. Godzilla Pro und Premium/LE {} haben sie.",
 "Random clips: {} slot(s) matched, {} dropped": "Zufällige Clips: {} Slot(s) zugeordnet, {} verworfen",
 "Random groups are not available for a JJP install: it holds exactly two images, root A and root B.": "Zufallsgruppen sind für eine JJP-Installation nicht verfügbar: Sie enthält genau zwei Abbilder, Root A und Root B.",
 "Range": "Bereich",
@@ -11018,6 +11018,7 @@
 "{} are copies off a card": "{} sind Kopien von einer Karte",
 "{} asks about the mains once at power-up and answers itself when its own power reading is not ready yet, which is how it boots here - so it starts normally on {} Hz. Older code (Stranger Things {}, say) keeps asking and does refuse.": "{} fragt beim Einschalten einmal nach dem Netz und antwortet selbst, wenn seine Stromablesung noch nicht bereit ist, so startet es hier. Es startet also normal bei {} Hz. Älterer Code (z. B. Stranger Things {}) fragt weiter und lehnt ab.",
 "{} asks for a multiball of {} to {} balls.": "{} verlangt einen Multiball mit {} bis {} Bällen.",
+"{} asks for its clips through a call the app cannot hook on this build, so random clips are not offered there.": "{} fragt seine Clips über einen Aufruf ab, den die App in diesem Build nicht abfangen kann, daher werden dort keine Zufallsclips angeboten.",
 "{} asset(s) hold text in the stock extract but aren't in the modded one,": "{} Asset(s) enthalten Text in der Original-Extraktion, fehlen aber in der geänderten,",
 "{} asset(s) the modded extract doesn't carry": "{} Asset(s), die die geänderte Extraktion nicht enthält",
 "{} assets extracted.": "{} Assets extrahiert.",
@@ -12644,5 +12645,8 @@
 "filling as shots are made": "füllt sich mit den Treffern",
 "The bar fills with": "Die Leiste füllt sich mit",
 "out of": "von",
-"What fills the bar: its clock draining along it, or a value out of another filling it, as the game's own mini-wizards fill theirs with the shots made. \"Times it has scored\" out of 12 fills a twelfth each time one of its Score blocks pays (one on each shot: full at the 12th shot); any value will do (a variable a block counts up). It stays as it was through its total.": "Was die Leiste füllt: ihre Uhr, die darin abläuft, oder ein Wert von einem anderen, der sie füllt, so wie die eigenen Mini-Wizards des Spiels ihre mit den erzielten Treffern füllen. „Wie oft er gewertet hat“ von 12 füllt sich um ein Zwölftel, jedes Mal wenn einer seiner Blöcke Punkte zahlt (einer auf jedem Treffer: voll beim 12. Treffer); jeder Wert geht (eine Variable, die ein Block hochzählt). Durch seine Summe bleibt sie, wie sie war."
+"hits of a shot since it started": "Treffer eines Schusses seit dem Start",
+"hits since it started of": "Treffer seit dem Start von",
+"How many times this shot has been made while the mode runs, since it started (the shot that starts it is not one). Its progress: a mini-wizard's ramp, the bar filling with it out of 12, when only that shot counts.": "Wie oft dieser Schuss getroffen wurde, während der Modus läuft, seit seinem Start (der Schuss, der ihn startet, zählt nicht). Sein Fortschritt: die Rampe eines Mini-Wizards, die Leiste füllt sich damit von 12, wenn nur dieser Schuss zählt.",
+"What fills the bar: its clock draining along it, or a value out of another filling it, as the game's own mini-wizards fill theirs with the shots made. \"Hits since it started\" of its progress shot out of 12 fills a twelfth each time that shot is made, and no other shot moves it; \"times it has scored\" counts every Score block that pays instead; any value will do (a variable a block counts up). It stays as it was through its total.": "Was die Leiste füllt: ihre Uhr, die darin abläuft, oder ein Wert von einem anderen, der sie füllt, so wie die eigenen Mini-Wizards des Spiels ihre mit den erzielten Treffern füllen. „Treffer seit dem Start“ seines Fortschrittsschusses von 12 füllt sich um ein Zwölftel, jedes Mal wenn dieser Schuss getroffen wird, und kein anderer Schuss bewegt sie; „wie oft er gewertet hat“ zählt stattdessen jeden Block, der Punkte zahlt; jeder Wert geht (eine Variable, die ein Block hochzählt). Durch seine Summe bleibt sie, wie sie war."
 }

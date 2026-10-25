@@ -70,6 +70,8 @@ value ball_end_event       0x34
 # EMU run B: 120+ calls, all during boot (before the Start), none in play - BOOT-ONLY as on Godzilla.
 #   Runs A and C hooked it (own-sound armed) with no fault. Placement proven; a mode's own sound not tried.
 site sound_lookup     0x002d84a8 0xe92d4038 0xe1a05000
+# PAD-494/724 music modes: get_asset_descriptor, WRAPPED (sounds.cfg)
+site sound_resolve    0x0023e6ac 0xe92d41f0 0xe1a05820
 # called
 #   score_add: 0x15ee3c(u8 player, u32 points) -> u32. Same framework body as Godzilla's 0x4b8cf4
 #   (mode_mask & 0x210 -> error 0x18; player check 0x159a80 -> error 0x19; points *= the byte

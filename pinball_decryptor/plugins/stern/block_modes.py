@@ -488,7 +488,7 @@ SHOWS = {
 }
 #: the game's own callouts a block can name by what they say (every port carries these roles)
 CALLOUT_ROLES = {"ten_seconds": "Ten seconds left", "time_up": "Time is up"}
-NUM_KINDS = ("num", "var", "hits", "scored", "total", "secs_left", "balls", "player", "op",
+NUM_KINDS = ("num", "var", "hits", "mode_hits", "scored", "total", "secs_left", "balls", "player", "op",
              "timer_left",
              "combo_chain", "combo_steps")   # PAD-708: the combos in a row; a combo's shots made so far
 BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock", "can_start", "lit",
@@ -1853,7 +1853,7 @@ def _check_num(e, where, ctx, depth=0):
     elif k == "var":
         if str(e.get("name") or "").lower() not in ctx["vars"]:
             ctx["out"].append("%s uses a variable that is not there: make it under Variables." % where)
-    elif k == "hits":
+    elif k in ("hits", "mode_hits"):                     # PAD-721: mode_hits = since the mode started
         _check_shot(e.get("shot"), where + "'s hits", ctx)
     elif k == "timer_left":
         _check_timer(e.get("timer"), where + "'s time left", ctx)
@@ -2048,6 +2048,9 @@ class _Gen:
             return "combo_made_so_far(%d)" % i if i is not None else "0LL"
         if k == "hits":
             return self.hits_of(e.get("shot"))
+        if k == "mode_hits":            # PAD-721: made while it runs, since it started (its progress shots)
+            h, _idx = self.hit(e.get("shot"))
+            return "(long long)MH[%d]" % self.hits.index(str(e.get("shot") or ""))
         if k == "scored":
             return "(long long)run.shots"
         if k == "total":
@@ -2594,6 +2597,8 @@ def to_c(program, slug):
     for i, n in enumerate(g.hits):
         L.append("/* H[%d] = hits of %s this ball */" % (i, _comment(n)))
     L.append("UNUSED static unsigned H[%d][5];             /* hits this ball, per player */" % nhits)
+    L.append("UNUSED static unsigned MH[%d];               /* PAD-721: hits made while it runs, since it started */"
+             % nhits)
     L.append("UNUSED static const char HIT_OF[%d] = {%s};" % (
         nhits, ", ".join(str(g.shots.index(n)) for n in g.hits) or "0"))
     hit_moves = []
@@ -3121,6 +3126,7 @@ def to_c(program, slug):
     L.append("    run.elapsed = 0;")
     L.append("    run.shots = 0;")
     L.append("    run.total = 0;")
+    L.append("    for (unsigned k = 0; k < %d; k++) MH[k] = 0;   /* PAD-721: its progress shots, from none */" % nhits)
     if has_bar:
         L.append("    bar_max = run.ticks_left;")
         L.append("    bar_hold = 0;")
@@ -3396,7 +3402,7 @@ def to_c(program, slug):
         L.append("                           : !pm_roster_claim(BATTLE_SLOTS[i], on_battle))")
         L.append('            pm_log("battle %u is not one this game lets a mode take the place of%s", BATTLE_SLOTS[i],')
         L.append('                   BATTLE_MORE[i] ? " (or stand a new monster in its place)" : "");')
-    L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
+    L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H; (void)MH;")
     L.append("}")
     L.append("")
     L.append("static void find_screen(void)")
@@ -3456,7 +3462,10 @@ def to_c(program, slug):
         L.append("    }")
     L.append("    if (!(shot & named)) return;      /* a switch's 0x1 dispatch, not a shot */")
     L.append("    for (i = 0; i < %d; i++)" % len(g.hits))
-    L.append("        if (S[(int)HIT_OF[i]] & shot) H[i][p]++;")
+    L.append("        if (S[(int)HIT_OF[i]] & shot) {")
+    L.append("            H[i][p]++;")
+    L.append("            if (was_on && run.on) MH[i]++;   /* PAD-721: the shot that starts it is not one */")
+    L.append("        }")
     L.append("    (void)i; (void)was_on;")
     if g.combos:
         L.append("    combo_shot(shot, was_on, idle);   /* PAD-708: the combos this shot makes, before any script runs */")

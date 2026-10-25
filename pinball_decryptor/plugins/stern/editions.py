@@ -11,8 +11,9 @@ same version (a whole image or a base card plus an edits folder, where only the 
 changes take room), in the order the setting numbers them. Two pieces make the setting pick:
 
 1. every edition's Write puts EDITION in the operator menu (:mod:`.menu_settings`: Adjustments >
-   Machine Settings > Attract Mode, beside the game's own BOOT SCREEN, values 1..n, the editions'
-   names in its help line). The project names the editions (``.staged_changes.json``
+   Machine Settings > Attract Mode, values 1..n, the editions' names in its help line; PAD-724: on
+   the 21 games whose Adjustments are Standard and Feature Adjustments, the last row of Standard
+   Adjustments). The project names the editions (``.staged_changes.json``
    ``editions``: ``{"names": [...]}``); every edition's project names the same ones, so every
    image's menu reads the same and the machine's stored settings never see a different table;
 2. the card's boot program (tools/spike2_emu/codeselect, ``edition=`` in images.conf) reads the
@@ -36,14 +37,18 @@ MAX_EDITIONS = _MS.MAX_VALUES
 #: the machine keys a stored setting by the SHA1 of its descriptor caption (codeselect nvm.h)
 CAPTION = _MS.SETTINGS[_MS.EDITION][1]
 NVM_KEY = hashlib.sha1(CAPTION.encode("ascii")).hexdigest()
-#: ``<game>-<version>`` of the builds whose menu takes the setting. Premium/LE 1.16 was seen
+#: ``<game>-<version>`` of the builds whose menu takes the setting. Godzilla Premium/LE 1.16 was seen
 #: working end to end in the emulator (EDITION set in the menu, the next power-up booting that
-#: edition); Pro 1.16 reads the same way, and PAD-494 saw its menu take MUSIC MODE beside it.
-PROVEN = frozenset({"godzilla_le-1.16", "godzilla_pro-1.16"})
+#: edition; the boot program reads the setting the same way whatever the game); PAD-724: the latest
+#: build of every Spike 2 game, each seen taking it in its menu and storing it (:data:`.menu_settings.PROVEN`)
+PROVEN = _MS.PROVEN
 
 NO_TITLE = "The app cannot tell which game this project is for, so it cannot give it an EDITION."
-NOT_PROVEN = ("Editions have not been tried on %s yet, so they are not offered there. "
-              "Godzilla Pro and Premium/LE 1.16 have them.")
+NOT_PROVEN = ("Editions are not offered on %s. They work on the latest version of each Stern "
+              "Spike 2 game: update the machine's code to use them.")
+#: PAD-724: the latest builds whose program cannot grow (:data:`.menu_settings.NO_ROOM`)
+NO_ROOM = ("Editions are not offered on %s: its game program has no room to grow, so its operator "
+           "menu cannot take EDITION.")
 
 
 def clean(raw):
@@ -82,12 +87,21 @@ def load(project):
 
 def title_refusal(prof):
     """Why ``prof``'s title cannot have editions, or ``""``."""
-    from .sound_modes import title_key
+    from .sound_modes import modes_any, title_key
     if prof is None:
         return NO_TITLE
-    if title_key(prof) not in PROVEN:
+    if title_key(prof) in _MS.NO_ROOM:
+        return NO_ROOM % prof.label
+    if title_key(prof) not in PROVEN and not modes_any():
         return NOT_PROVEN % prof.label
     return ""
+
+
+def menu_path(prof):
+    """Where the operator sets EDITION on ``prof``'s game (any game's, without a profile)."""
+    if prof is None:
+        return _MS.ANY_MENU_PATH[_MS.EDITION]
+    return _MS.menu_path(prof.game_dir, _MS.EDITION)
 
 
 def project_title(project, probe=False):
@@ -110,7 +124,7 @@ def in_program(elf_bytes):
         e = t.entry(i)
         desc = t._off(t.table_va + i * t.elem)
         help_text = t._cstr(struct.unpack_from("<I", t.data, desc + OFF_MENU_HELP)[0], 200)
-        cat = _MS.category_table(t)
+        cat = _MS.menu_table(t)
         if cat is None or not cat.has(category, i):
             return None
         if (e["min"], e["step"]) != (1, 1) or not 2 <= e["max"] <= MAX_EDITIONS:

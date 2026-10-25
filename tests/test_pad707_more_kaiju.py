@@ -218,7 +218,8 @@ void *pm_node(const char *scene, const char *path)
 void pm_show(void *node, int on) { const char *p = strrchr((const char *)node, '.'); printf("%s %s\n", on ? "SHOW" : "HIDE", p ? p + 1 : (const char *)node); }
 int pm_snprintf(char *o, unsigned long cap, const char *fmt, ...)
 { va_list ap; int n; va_start(ap, fmt); n = vsnprintf(o, cap, fmt, ap); va_end(ap); return n; }
-unsigned long pm_ms(void) { return 0; }
+static unsigned long now_ms;
+unsigned long pm_ms(void) { return now_ms; }
 int pm_in_game(void) { return in_game; }
 unsigned pm_player(void) { return up; }
 long pm_port_value(const char *n, long fb)
@@ -296,6 +297,8 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "resume")) { int s = atoi(argv[++k]); roster_resuming = 1; current = roster_by[s];
             printf("RESUME %d\n", roster_fn[s] ? roster_fn[s]((unsigned)s) : -1); current = 0; roster_resuming = 0; }
         else if (!strcmp(c, "tick")) more_tick();
+        else if (!strcmp(c, "ms")) now_ms = strtoul(argv[++k], 0, 10);
+        else if (!strcmp(c, "MARK")) puts("MARK");
         else if (!strcmp(c, "lost")) more_over(up, 0);
         else if (!strcmp(c, "won")) more_over(up, 1);
         else if (!strcmp(c, "state")) { int s = atoi(argv[++k]); states[s] = (unsigned)atoi(argv[++k]); }
@@ -409,6 +412,24 @@ def test_a_won_place_shows_the_claw_a_locked_one_the_lock(tmp_path):
     out = menu(tmp_path, *THREE, "open", 0, "right", "gamepick", "won", "state", 0, 2, "tick", "open", 3, "tick",
                "gameover", "tick", "tick")                              # the game over: our hide undone, once
     assert out.split("selection screen opens")[2].count("SHOW T1_1_Artbox") == 1
+
+
+def test_a_picked_monster_stays_on_the_screen_through_its_close(tmp_path):
+    """PAD-730 (David: "When selecting a bonus monster, the wrong monster is briefly shown before the screen
+    transition"): the game's screen fades out after its pick, so the picked monster's tile and portrait stay on and the
+    place's own portrait hidden until it has closed (roster_start_after_ms) - before, the place's own showed at once."""
+    out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 3), "tick", "ms", 100, "gamepick", "tick",
+               "ms", 3099, "tick", "MARK", "ms", 3100, "tick")
+    fade = out.split("TAKEN 1 (slot 1)")[1].split("MARK")[0]
+    assert "PadSel_KAMACURAS" not in fade and "TitanFullBody" not in fade and "PadSel_Cover1" not in fade
+    closed = out.split("TAKEN 1 (slot 1)")[1]
+    assert "HIDE PadSel_KAMACURAS_Portrait" in closed and "SHOW TitanFullBody_instance" in closed
+    assert "HIDE PadSel_Cover1" in closed
+    for end in (("ball_end",), ("open", 1)):                      # the ball's end or the next opening: put back at once
+        out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 3), "tick", "gamepick", "tick", *end, "tick")
+        assert "SHOW TitanFullBody_instance" in out.split("TAKEN 1 (slot 1)")[1]
+    out = menu(tmp_path, *THREE, "open", 0, "right", "right", "tick", "gamepick", "tick")   # the place's own battle
+    assert "TAKEN 0 (slot 1)" in out and "SHOW PadSel_" not in out.split("TAKEN 0")[1]
 
 
 def test_the_games_pick_under_a_monster_is_the_monsters(tmp_path):

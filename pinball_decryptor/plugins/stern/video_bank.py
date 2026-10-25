@@ -39,6 +39,7 @@ field is the clip file's byte count (all 598 stock entries match their files).
 from __future__ import annotations
 
 import hashlib
+import re
 import struct
 from dataclasses import dataclass, field
 
@@ -226,6 +227,57 @@ def parse(data):
     return Bank(vname, w, h, library, surface, surface_node, labels, max(ids))
 
 
+#: PAD-723: the highest object id a scene can have, for the scan below (Batman's 4x3 scene: 0x1112)
+_ID_CAP = 0x100000
+_FLAGGED = re.compile(b"(?=[\x00-\xff]{2}[\x00-\x0f]\x80)", re.S)
+
+
+def parse_scene(data):
+    """PAD-723: :func:`parse`, or - for a scene whose library OPENS with its bank's Video but goes on
+    with the scene's other parts (Batman 1.14's a59b98f2, ``video.in_game_videos4x3``: its 3139
+    by-name clips beside the Shapes, Fonts and Sprites of the screens it draws) - the same Bank read
+    without walking the rest. The library's Video is walked as :func:`parse` walks it; the
+    VideoSurface's map is the one other place the Video's name is written, walked from there and
+    taken only when it names exactly the library's clips in the library's order. Its ``max_id`` is
+    the highest id any flagged u32 of the file could be (every byte offset, ids below
+    :data:`_ID_CAP`): an over-count, never an under-count, so an added clip's id is new."""
+    try:
+        return parse(data)
+    except VideoBankError as e:
+        if "exactly one Video" not in str(e):
+            raise
+    r = _Reader(data)
+    ids, registered = [], {}
+    if r.u8() != 1 or r.u64() < 2:
+        raise VideoBankError("not a scene whose library opens with a Video")
+    r.u32()
+    name_id = r.u32()
+    if not name_id & FLAG or r.string() != "Video":
+        raise VideoBankError("the library's first entry is not a Video")
+    ids.append(r.u32() & ~FLAG)
+    vname, w, h, library = _video(r, registered, ids)
+    tag = struct.pack("<Q", len(vname)) + vname.encode("latin1")
+    found = []
+    at = data.find(tag, r.o)
+    while at >= 0:
+        s = _Reader(data)
+        s.o = at - 4
+        try:
+            _n, _w, _h, vm = _video(s, dict(registered), [])
+        except VideoBankError:
+            vm = None
+        if vm is not None and [c.clip_id for c in vm.entries] == [c.clip_id for c in library.entries] \
+                and all(c.path is None for c in vm.entries):
+            found.append(vm)
+        at = data.find(tag, at + 1)
+    if len(found) != 1:
+        raise VideoBankError("%d VideoSurface maps name %s's clips; a bank has one" % (len(found), vname))
+    top = max(ids)
+    for m in _FLAGGED.finditer(data):
+        top = max(top, struct.unpack_from("<I", data, m.start())[0] & ~FLAG)
+    return Bank(vname, w, h, library, found[0], "VideoSurface", [], top)
+
+
 #: PAD-562: banks whose own clips are not the shape their Video says, by the stock bank's md5:
 #: the size most of its clips are. The game draws every clip of a bank stretched over the same
 #: place on the glass, so a clip made at the Video's size is squeezed there. Bond LE and Pro 1.06
@@ -278,17 +330,20 @@ def next_path(bank):
     return "%s/%d.asset" % (d, max(used, default=-1) + 1)
 
 
-def add_clip(data, name, size, path=None):
+def add_clip(data, name, size, path=None, spaces=False):
     """Add a clip ``name`` whose file is ``size`` bytes at ``scene.assets/<path>``.
 
     Returns (new bytes, info). info names the clip id, the path to put the file at and
-    the new file's md5."""
-    bank = parse(data)
+    the new file's md5. PAD-723: a scene :func:`parse_scene` reads takes one too, and
+    ``spaces`` lets the name have spaces - a random clip's name is the game's own plus a
+    suffix, and Metallica 1.04 has "Metallica Moth into Flame v1"."""
+    bank = parse_scene(data)
     try:
         raw = name.encode("latin1")
     except UnicodeEncodeError:
         raise VideoBankError("a clip name is latin-1") from None
-    if not raw or any(b < 0x21 or b > 0x7E for b in raw):
+    low = 0x20 if spaces else 0x21
+    if not raw or raw[:1] == b" " or raw[-1:] == b" " or any(b < low or b > 0x7E for b in raw):
         raise VideoBankError("a clip name is printable ASCII with no spaces: %r" % name)
     if any(c.name == name for c in bank.library.entries):
         raise VideoBankError("the bank already has a clip called %r" % name)
@@ -310,7 +365,7 @@ def add_clip(data, name, size, path=None):
     new[lib_at:lib_at] = lib_entry
     struct.pack_into("<Q", new, bank.library.count_at, len(bank.library.entries) + 1)
     new = bytes(new)
-    check = parse(new)
+    check = parse_scene(new)
     if len(check.library.entries) != len(bank.library.entries) + 1:
         raise VideoBankError("the grown bank does not read back with one more clip")
     info = {"name": name, "clip_id": cid, "path": path, "size": size,

@@ -148,10 +148,14 @@ note to build onto a card that was never grown, such as the stock card.
 
 ### Music modes
 
-On Spike 2 Godzilla (Pro and Premium/LE 1.16) one card can carry more
-than one set of sounds, and the machine's service menu picks which set
-plays: **Music Mode** under Adjustments > Machine Settings > Audio
-Content. Right-click a sound and pick **Music modes** > **Mode 2 (Custom
+On Spike 2, the latest version of each game (not James Bond 007
+Premium/LE, James Bond 60th or Star Wars Premium/LE, whose game programs
+cannot grow), one card can carry more than one set of sounds, and the
+machine's service menu picks which set plays: **Music Mode** under
+Adjustments > Machine Settings > Audio Content (on a game whose
+Adjustments have Standard Adjustments: at the end of that list, where
+the machine's display shows the value but not the modes' names).
+Right-click a sound and pick **Music modes** > **Mode 2 (Custom
 A): choose a sound…** to give it a file for that mode; modes 2 to 4 are
 offered and **Add a music mode…** adds more, up to 8. Mode 1 is the
 sound as it plays now, and a sound with no file for the chosen mode
@@ -194,7 +198,8 @@ On the same games, one card can also hold several editions of the game
 (a Standard look and a 70th Anniversary look, say: other colour
 profiles, scenes, pictures, clips or sounds), and the service menu picks
 which one boots: **Edition** under Adjustments > Machine Settings >
-Attract Mode. Each edition is its own project from the same card. On the
+Attract Mode (on a game whose Adjustments have Standard Adjustments: the
+last row of that list). Each edition is its own project from the same card. On the
 Write tab, **Name the editions...** gives every project the same names
 in the same order, and its Write puts the setting in the game's menu.
 On the Multi-boot tab add the images edition 1 first, tick **Compact
@@ -302,7 +307,7 @@ a file in the folder by what it looks like — names and file types
 don't matter, a colour clip is told from its black-and-white twin,
 and where the folder holds the same video more than once the best
 copy wins. Tick what you want and *Use these files at best quality*.
-**Random clips (Stern Spike 2, Godzilla Pro and Premium/LE 1.16).**
+**Random clips (Stern Spike 2, the latest version of each game).**
 Right-click a row and pick *Random clips → Add clips to play at
 random…* to give that slot more clips than its own: each time the
 game plays the slot's clip it plays one of them instead, at random,

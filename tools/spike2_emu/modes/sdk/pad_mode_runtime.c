@@ -2172,7 +2172,12 @@ static int lamp_level(const struct lamp_held *h, unsigned long now)
         tri = (unsigned)(ph < p / 2 ? ph * 510 / p : (p - ph) * 510 / p);    /* 0..255..0 */
         if (tri > 255) tri = 255;
         return 40 + (int)(215u * tri * tri / (255u * 255u));                   /* eased, never quite dark */
-    case PM_LAMP_CHASE: return h->chase_n && (el / p) % h->chase_n == h->chase_i ? 255 : 0;
+    /* PAD-707 (David: "the shots for the mode should be flashing, not solid"): a chase over ONE insert - most of
+     * Godzilla's shots have one (Powerline center: lamp 362) - was lit at every step: solid. It blinks at the chase's
+     * step instead, on one step, off the next */
+    case PM_LAMP_CHASE:
+        if (h->chase_n <= 1) return (el / p) % 2 == 0 ? 255 : 0;
+        return (el / p) % h->chase_n == h->chase_i ? 255 : 0;
     default: return 255;
     }
 }
@@ -3331,6 +3336,7 @@ int pm_game_words(void)
 {
     return gw.on && pm_in_game();
 }
+
 
 static void scene_show_backdrop(unsigned *r);
 
@@ -5871,6 +5877,24 @@ static struct {
     unsigned log, logged;                   /* PAD-420: `value scoop_log 1` - the handler's first 64 calls in mode.log */
 } scoop;
 
+/* PAD-707 (David: "the intro videos to the modes should play completely while the ball is still in the scoop and only
+ * eject from the scoop once those videos are done (or skipped)"): the battle selection screen runs inside the scoop's
+ * "settled" event (the game's own hold); a pick a mode takes there (roster_take, pick_at) keeps the ball after the
+ * screen closes - while the mode is yet to start (the port's roster_start_after_ms, and a moment), then while its
+ * full-screen start clip plays (FIN_GRACE_MS for it to begin) - and it is kicked as the clip ends or is cut short.
+ * At most INTRO_MAX_MS from the screen's close. */
+#define INTRO_MAX_MS 15000ul
+static volatile unsigned long pick_at;      /* pm_ms() a mode of ours took a pick on the selection screen; 0 = none */
+static int intro_on(unsigned long t_close, unsigned long *started, int *seen)
+{
+    unsigned long now = pm_ms(), wait = (unsigned long)pm_port_value("roster_start_after_ms", 3000) + 2000ul;
+    if (!pick_at || now - t_close >= INTRO_MAX_MS) return 0;
+    if (!running) return !*started && now - pick_at < wait;          /* not begun yet (or it ended: done) */
+    if (!*started) *started = now;
+    if (clip.on && clip_owner == running) { *seen = 1; return 1; }
+    return !*seen && now - *started < FIN_GRACE_MS;
+}
+
 static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
 {
     unsigned r, e;
@@ -5879,9 +5903,22 @@ static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
     if (scoop.log && scoop.logged < 64)     /* for whoever finds a title's "settled" event: what the game hands it */
         say("scoop: the handler's call %u: event %u, args %u %u %u%s", ++scoop.logged, ev, a1, a2, a3,
             running ? " (a mode runs)" : "");
+    pick_at = 0;
     r = scoop.orig(ev, a1, a2, a3);
     e = scoop.event_arg == 1 ? a1 : scoop.event_arg == 2 ? a2 : scoop.event_arg == 3 ? a3 : ev;
     if (e != scoop.event || !pm_in_game()) return r;
+    if (pick_at) {                          /* PAD-707: a pick a mode took on the screen: its intro first */
+        unsigned long tc = pm_ms(), started = 0;
+        int seen = 0;
+        say("scoop: a mode took the selection screen's pick - the ball waits for its start clip");
+        while (pm_in_game() && intro_on(tc, &started, &seen))
+            ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+        say("scoop: let go after %lu ms (%s) - the game kicks it out", pm_ms() - tc,
+            !pm_in_game() ? "the game ended or tilted" : pm_ms() - tc >= INTRO_MAX_MS ? "the most a ball waits"
+            : seen ? "its start clip is over" : started ? "it started with no clip" : "it did not start");
+        pick_at = 0;
+        return r;
+    }
     if (!(scoop.hold_ms && running) && !(!running && finish_on())) return r;   /* PAD-707: or the last one's finish */
     t0 = pm_ms();
     scoop.until = t0 + (running ? scoop.hold_ms : SCOOP_MAX_MS);
@@ -9846,6 +9883,7 @@ static void roster_take(unsigned *r, unsigned slot, unsigned id, const char *how
         unsigned up = pm_player();
         if (up >= 1 && up <= 4) roster_owed[up] = 1;   /* before the call: a mode that gives the pick back at once clears it */
         took = roster_fn[slot](slot);
+        if (took) pick_at = pm_ms() | 1;    /* PAD-707: the scoop holds the ball through its start clip */
         if (!took && up >= 1 && up <= 4) roster_owed[up] = 0;
     }
     current = was;

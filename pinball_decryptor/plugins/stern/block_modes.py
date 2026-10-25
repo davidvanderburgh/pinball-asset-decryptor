@@ -3152,6 +3152,7 @@ def to_c(program, slug):
         L.append("        pa_music_begin(&own);")
         L.append("    }")
     L.append('    pm_log("START (%s): player %u", why, run.player);')
+    L.append("    quiet_shots();                    /* PAD-707: the shots it does not light, dark */")
     L.append("    on_mode_start();")
     if has_info:
         L.append("    if (run.on) info_show(1);          /* PAD-547: what the start's blocks set, on the first frame */")
@@ -3920,6 +3921,15 @@ UNUSED static unsigned hurry_ms(void)
     return 100;
 }
 
+/* PAD-707 (David: "whatever progresses the mode in general should be flashing ... and other targets should not be
+ * flashing"): while a mode that keeps the game's modes off runs, the inserts of every shot it does not light are held
+ * dark - the game's own shows of them are for features that cannot start - so what it lights is all that is lit */
+#define QUIET_SHOTS (GAME_MODES != 0)
+UNUSED static void quiet_shots(void)
+{
+    if (QUIET_SHOTS && run.on && named && !SHOWING) pm_lamp_shot(named, 0, PM_LAMP_SOLID, 0);
+}
+
 UNUSED static void lamp_send(int i)
 {
     unsigned ms;
@@ -3953,7 +3963,12 @@ UNUSED static void unlight(int i)
     if (i < 0 || i >= N_LIGHTS) return;
     LIT[i].on = 0;
     if (i >= N_SHOTS) pm_lamp_release(LAMP_NAMES[i - N_SHOTS]);
-    else if (S[i]) pm_lamp_release_shot(S[i]);
+    else if (S[i] && QUIET_SHOTS && run.on && !SHOWING) {   /* PAD-707: dark again, not the game's */
+        int j;
+        pm_lamp_shot(S[i], 0, PM_LAMP_SOLID, 0);
+        for (j = 0; j < N_SHOTS; j++)                  /* a shot sharing an insert with it keeps its light */
+            if (j != i && LIT[j].on && S[j] && (S[j] & S[i])) lamp_send(j);
+    } else if (S[i]) pm_lamp_release_shot(S[i]);
 %(forget)s}
 
 static void unlight_all(void)
@@ -3966,6 +3981,7 @@ static void unlight_all(void)
 UNUSED static void relight_all(void)                /* after a show: every light the blocks hold */
 {
     int i;
+    quiet_shots();                                  /* PAD-707: the others dark again first */
     for (i = 0; i < N_LIGHTS; i++) lamp_send(i);
 }
 

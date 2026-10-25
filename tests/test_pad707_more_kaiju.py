@@ -730,3 +730,36 @@ def test_form_modes_come_first(le, tmp_path):
     code = [("mothra", _Spec("MOTHRA", {"slot": 0}))]
     found = MK.monsters(str(tmp_path), code, forms)
     assert [(m["slug"], m["slot"]) for m in found] == [("rodan", 0), ("mothra", 0)]
+
+
+# ---- David's v22 notes (2026-10-25): what progresses a mode flashes, the rest is dark ---------------------------
+def test_a_chase_over_one_insert_blinks():
+    """"the shots for the mode should be flashing, not solid": most of Godzilla's shots have one insert (Powerline
+    center: lamp 362), and a chase over one was lit at every step"""
+    src = RUNTIME.read_text(encoding="utf-8")
+    level = src[src.index("static int lamp_level("):]
+    level = level[:level.index("\n}\n")]
+    chase = level[level.index("case PM_LAMP_CHASE:"):level.index("default:")]
+    assert "if (h->chase_n <= 1) return (el / p) % 2 == 0 ? 255 : 0;" in chase
+
+
+def test_a_mode_that_holds_the_games_modes_off_darkens_the_shots_it_does_not_light():
+    """"other targets should not be flashing": while a mode that keeps the game's modes off runs, every shot it does
+    not light is held dark (a block lighting one paints over it; putting one out puts it back to dark, not the
+    game's); a mode beside the game's modes leaves them be"""
+    p = monster()
+    p["game_modes"] = "block"
+    p["scripts"][1]["do"].insert(0, {"op": "light_shot", "shot": "Left ramp", "color": "#ffffff", "pattern": "blink",
+                                     "rate": num(200)})
+    p["scripts"][1]["do"].insert(1, {"op": "lights_off", "shot": "Left ramp"})
+    c = BM.to_c(p, "mothra")
+    assert "#define QUIET_SHOTS (GAME_MODES != 0)" in c
+    assert re.search(r"quiet_shots\(\);\s+/\* PAD-707[^\n]*\n\s+on_mode_start\(\);", c)    # dark, then its own lights
+    assert "pm_lamp_shot(named, 0, PM_LAMP_SOLID, 0)" in c
+    unlight = c[c.index("UNUSED static void unlight(int i)"):]
+    unlight = unlight[:unlight.index("\n}\n")]
+    assert "pm_lamp_shot(S[i], 0, PM_LAMP_SOLID, 0)" in unlight and "pm_lamp_release_shot(S[i])" in unlight
+    relight = c[c.index("UNUSED static void relight_all(void)"):]
+    assert relight.index("quiet_shots();") < relight.index("lamp_send(i)")       # after a show: dark first
+    assert re.search(r"#define GAME_MODES\s+2\b", c)
+    assert re.search(r"#define GAME_MODES\s+0\b", BM.to_c(monster(), "mothra"))   # "stack": QUIET_SHOTS is 0

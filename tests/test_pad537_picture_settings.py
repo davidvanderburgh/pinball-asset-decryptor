@@ -166,7 +166,7 @@ def test_the_rows_read_back_from_the_built_program_and_build_again(card, tmp_pat
     reloc, why = E._text_reloc_plan(raw)
     assert reloc, why
     va = reloc["base_va"] + reloc["used"]
-    fw = list(writes.items()) + list(MS.table_writes(t, cat, va, MS.table_records(cat, *settings)).items())
+    fw = list(writes.items()) + list(MS.table_writes(t, cat, va, *settings).items())
     grown = E._grow_program_text(raw, fw, MS.table_blob(cat, *settings), reloc, None, str(tmp_path), None,
                                  lambda *a, **k: None)
     with open(grown["path"], "rb") as f:

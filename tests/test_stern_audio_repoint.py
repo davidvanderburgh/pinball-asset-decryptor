@@ -369,8 +369,10 @@ def test_a_grown_row_counts_by_its_stock_key():
     assert engine._desc_key_mask(params, sites) == GZ
 
 
-def test_no_clear_winner_is_refused():
-    """Half a card named each way is not a measurement."""
+def test_no_clear_winner_is_refused(monkeypatch):
+    """Half a card named each way is not a measurement (when the build's own pairs measure no
+    mask either: PAD-724 lets one that names nearly every record win)."""
+    monkeypatch.setattr(engine, "_measured_key_mask", lambda stock, sites: None)
     p1, s1 = _named_card(GZ, 10)
     p2, s2 = _named_card(MASK, 10)
     for p in p2:
@@ -472,6 +474,28 @@ def test_a_measured_layout_naming_every_record_wins_over_a_known_one_naming_some
     assert _said(msgs, "measured on this build")
     known = len({engine._play_key(s.payload, s.sid, MASK) for s in sites} & stock)
     assert 0 < known * 10 >= len(stock)                    # the old rule would not have measured
+
+
+def test_a_measured_layout_naming_every_record_wins_over_a_known_one_naming_half():
+    """PAD-724: Avengers Infinity Quest Pro 1.10 measures 0xF80001FF (1554 of 1554 records named)
+    where Godzilla's 0xFC0003FF names 799 by the bits the two share - more than a third, so the
+    measured mask was passed over and half the game's sounds could take no music mode."""
+    avengers = 0xF80001FF
+    params, sites = [], []
+    for i in range(40):
+        w1 = 0x1000 + i
+        # half the records' second words read right under Godzilla's mask as well
+        w2 = 0x00000100 + i
+        junk = 0x00000200 if i >= 20 else 0                  # a bit Godzilla's mask keeps
+        params.append({"idx": i, "grown": False, "findkey": _key(w1, w2 & avengers)})
+        sites.append(_site(100 + i, 0x1000 + 0x20 * i, _key(w1, (w2 & avengers) | junk)))
+    stock = {p["findkey"] for p in params}
+    known = len({engine._play_key(s.payload, s.sid, GZ) for s in sites} & stock)
+    assert len(stock) * 3 < known * 10 < len(stock) * 9    # the old rule kept the known mask
+    msgs, log = _capture()
+    got = engine._desc_key_mask(params, sites, log)
+    assert {engine._play_key(s.payload, s.sid, got) for s in sites} == stock
+    assert _said(msgs, "measured on this build")
 
 
 # --------------------------------------------------------------------------

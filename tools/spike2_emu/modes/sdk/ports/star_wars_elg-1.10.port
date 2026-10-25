@@ -17,6 +17,8 @@ site tick             0x001e23ec 0xe92d4038 0xe3a00037
 site ball_end         0x00136a54 0xe92d4070 0xe1a06000
 #   sound_lookup: located (strict) [The Beatles 1.29, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
 site sound_lookup     0x002867c0 0xe92d4038 0xe1a05000
+# PAD-494/724 music modes: get_asset_descriptor, WRAPPED (sounds.cfg)
+site sound_resolve    0x001ec69c 0xe92d41f0 0xe1a05820
 #   score_add32: located (strict) [The Beatles 1.29]
 site score_add32      0x00287078 0xe30b376a 0xe3a02000
 #   callout: located (strict) [The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]

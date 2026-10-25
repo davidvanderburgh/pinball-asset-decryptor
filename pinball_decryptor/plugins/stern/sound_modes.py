@@ -25,13 +25,15 @@ more), the project names the modes (``.staged_changes.json`` ``sound_modes``: ``
    to that length unless the build may keep replacements whole ("Allow replacements longer than
    the original"), as a replacement is;
 2. the operator menu gets MUSIC MODE (:mod:`.menu_settings`: Audio Content, the modes' names in
-   its help line, values 1..n);
+   its help line, values 1..n; PAD-724: on the 21 games whose Adjustments are Standard and Feature
+   Adjustments, the last rows of Standard Adjustments, where the DMD shows no help line);
 3. ``sounds.cfg`` beside the mode runtime names, for every sound id of the game that plays a slot
    with a mode file, that mode's DESCRIPTOR - the game's own script for the sound, naming the
    mode's record and declaring the mode file's own length - and where the setting's value lives.
    The runtime (pad_mode_runtime.c "music modes") hands the game those bytes whenever the setting
    says that mode (emulator-proven on Godzilla Premium/LE 1.16: Music Mode set to 2 in the menu,
-   and the game's music request played the mode's record). A sound id plays one line per mode,
+   and the game's music request played the mode's record; PAD-724: on the latest build of every
+   Spike 2 game, each port naming its game's resolver as ``site sound_resolve``). A sound id plays one line per mode,
    every slot of that mode it plays swapped in it. A slot the game plays as the OPENING part of
    a song in parts (Godzilla's "SE GZ MX TUNE 16": idx 2241's 9.6 s, then the unnamed idx 799,
    looped; PAD-511, where the tester heard their file's first seconds and then the game's own
@@ -104,6 +106,8 @@ import shutil
 import struct
 from dataclasses import dataclass, field
 
+from . import menu_settings as _MS
+
 #: the project sidecar's key: ``{"names": [name, ...], "slots": {rel: {"2": file, "3": file}},
 #: "levels": {rel: {"2": dB}}}``
 STAGED_KEY = "sound_modes"
@@ -135,8 +139,10 @@ GATE_ENV = "PAD_STERN_SOUND_MODES"
 #: where the converted mode files are kept between builds, in the project
 CACHE_DIR = os.path.join(".write_cache", "sound_modes")
 #: ``<game>-<version>`` of the builds where the swap and the menu setting were SEEN working
-#: (emulator: the setting on Audio Content, set in the menu, the game playing the mode's record)
-PROVEN = frozenset({"godzilla_le-1.16", "godzilla_pro-1.16"})
+#: (emulator: the setting on Audio Content, set in the menu, the game playing the mode's record).
+#: PAD-724: the latest build of every Spike 2 game (:data:`.menu_settings.PROVEN`; each port names
+#: its game's ``sound_resolve``)
+PROVEN = _MS.PROVEN
 #: PAD-565: the most files one sound plays in turn, its own one included (pad_mode_runtime.c
 #: SNDT_MAX), and the pseudo mode file k of them is built under (:func:`turn_mode`)
 TURN_MAX = 16
@@ -175,8 +181,11 @@ TURN_PROVEN = frozenset({
 
 NO_TITLE = ("The app cannot tell which game this project is for, so it cannot give it a "
             "MUSIC MODE.")
-NOT_PROVEN = ("Music modes have not been tried on %s yet, so they are not offered there. "
-              "Godzilla Pro and Premium/LE 1.16 have them.")
+NOT_PROVEN = ("Music modes are not offered on %s. They work on the latest version of each Stern "
+              "Spike 2 game: update the machine's code to use them.")
+#: PAD-724: the latest builds whose program cannot grow (:data:`.menu_settings.NO_ROOM`)
+NO_ROOM = ("Music modes are not offered on %s: its game program has no room to grow, so its "
+           "operator menu cannot take MUSIC MODE.")
 NOT_PROVEN_TURNS = ("Sounds in turn are not offered on %s. They work on the latest version of each "
                     "Stern Spike 2 game: update the machine's code to use them.")
 NOT_SOUND = "Only a sound the game keeps in its sound bank (an idx file) can have a file for another mode."
@@ -631,6 +640,16 @@ def turns_any():
     return os.environ.get(TURNS_ANY_ENV) == "1"
 
 
+#: PAD-724: ``PAD_STERN_MODES_ANY=1`` offers the music modes (and :mod:`.editions` EDITION) on every
+#: build whose port names ``sound_resolve`` and whose menu takes the setting, proven or not: the proof
+#: sweep builds each one with it before it is listed in :data:`PROVEN`
+MODES_ANY_ENV = "PAD_STERN_MODES_ANY"
+
+
+def modes_any():
+    return os.environ.get(MODES_ANY_ENV) == "1"
+
+
 #: PAD-641: what the runtime needs of a build's port for the flipper buttons' sounds in attract: the
 #: framework's switch drain (the presses), the game's record lookup (the swap) and its sound play
 ATTRACT_SITES = ("switch_edge", "switch_drain", "sound_lookup", "sound_play")
@@ -705,7 +724,9 @@ def title_refusal(prof, turns=False):
     if prof is None:
         return NO_TITLE if not turns else NO_TITLE.replace("give it a MUSIC MODE",
                                                            "play its sounds in turn")
-    if title_key(prof) not in (TURN_PROVEN if turns else PROVEN) and not (turns and turns_any()):
+    if not turns and title_key(prof) in _MS.NO_ROOM:
+        return NO_ROOM % prof.label
+    if title_key(prof) not in (TURN_PROVEN if turns else PROVEN) and not (turns_any() if turns else modes_any()):
         return (NOT_PROVEN_TURNS if turns else NOT_PROVEN) % prof.label
     from . import mode_project as MP
     try:

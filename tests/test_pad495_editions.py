@@ -126,7 +126,7 @@ def test_one_setting_refused_never_stops_the_other():
         t, [(MS.MUSIC_MODE, 9, MODES), (MS.EDITION, 2, EDITIONS)])
     assert [s.key for s in settings] == [MS.EDITION]
     assert "2 to 8 values" in refused[MS.MUSIC_MODE]
-    assert MS.table_records(cat, *settings) == 108
+    assert cat.records_with(*settings) == 108
 
 
 # ---- the Multi-boot side: tools/spike2_emu/mkmulticard.py ------------------------------------

@@ -105,6 +105,7 @@ class MenuSetting:
     live: int               # the address of its value in the running game (.nonvol)
     category: int           # the page that lists it
     default: int = 1        # the value a fresh store starts at
+    where: str = ""         # PAD-724: where the operator finds it ("Adjustments > ...")
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,128 @@ class CategoryTable:
 
     def has(self, category, ident):
         return any(c == category and k == KIND_ADJUSTMENT and i == ident for c, k, i in self.records)
+
+    def lists(self, ident):
+        return any(k == KIND_ADJUSTMENT and i == ident for c, k, i in self.records)
+
+    def where(self, category):
+        return "Adjustments > Machine Settings > %s" % CATEGORY_NAMES.get(category, "?")
+
+    def blob(self, *settings):
+        recs = list(self.records) + [(s.category, KIND_ADJUSTMENT, s.id) for s in settings
+                                     if not self.has(s.category, s.id)]
+        return b"".join(struct.pack("<3I", *r) for r in recs)
+
+    def records_with(self, *settings):
+        return len(self.records) + sum(1 for s in settings if not self.has(s.category, s.id))
+
+    def writes(self, table, new_va, *settings):
+        return self.writes_for(table, new_va, self.records_with(*settings))
+
+    def writes_for(self, table, new_va, n_records):
+        size = n_records * REC
+        lo = size - self.end_hi
+        if not 0 <= lo <= 0xFF or size > 0xFFFF:
+            raise MenuSettingError("the menu's category table cannot grow to %d records" % n_records)
+        data = table.data
+        out = {self.literal_off: struct.pack("<I", new_va)}
+        for o in self.size_offs:
+            w = struct.unpack_from("<I", data, o)[0]
+            out[o] = struct.pack("<I", (w & ~0x000F0FFF) | ((size & 0xF000) << 4) | (size & 0xFFF))
+        w = struct.unpack_from("<I", data, self.end_off)[0]
+        out[self.end_off] = struct.pack("<I", (w & ~0xFFF) | lo)
+        return out
+
+
+@dataclass(frozen=True)
+class StandardList:
+    """PAD-724: the menu of the games without a category table (Aerosmith, Elvira 3, Foo
+    Fighters, Guardians, Led Zeppelin, Mandalorian, Munsters, Rush, Sword of Rage, TMNT, Venom:
+    22 of the 53 newest builds). Their Adjustments are two pages, Standard Adjustments and
+    Feature Adjustments (:mod:`.menu_visibility`); Standard Adjustments is a NUL-ended ``u16`` id
+    list in ``.rodata`` its page reaches through a getter of its own (``movw r0 / movt r0 /
+    bx lr``). A setting goes on that page by a list one id longer, in the extension segment, the
+    getter's two immediates pointed at it. The page lists its ids in order, so ours come last,
+    after the game's SERVICE MENU B.BOX BRIGHTNESS."""
+    va: int                 # where the list is
+    ids: tuple              # the game's ids, in page order
+    getter_off: int         # file offset of the getter's ``movw r0``
+
+    def has(self, category, ident):
+        return ident in self.ids
+
+    def lists(self, ident):
+        return ident in self.ids
+
+    def where(self, category):
+        return "Adjustments > Standard Adjustments, at the end"
+
+    def blob(self, *settings):
+        ids = list(self.ids) + [s.id for s in settings if s.id not in self.ids]
+        out = struct.pack("<%dH" % (len(ids) + 1), *(ids + [0]))
+        return out + b"\x00" * (-len(out) % 4)
+
+    def writes(self, table, new_va, *settings):
+        data = table.data
+        w0, w1 = struct.unpack_from("<2I", data, self.getter_off)
+        lo, hi = new_va & 0xFFFF, new_va >> 16
+        return {self.getter_off: struct.pack("<2I", (w0 & ~0x000F0FFF) | ((lo & 0xF000) << 4) | (lo & 0xFFF),
+                                             (w1 & ~0x000F0FFF) | ((hi & 0xF000) << 4) | (hi & 0xFFF))}
+
+
+#: the category names (the menu's 37-line text table) of the pages our settings go on
+CATEGORY_NAMES = {11: "LCD/Lamp", 13: "Audio Content", 16: "Attract Mode"}
+
+#: PAD-724: ``<game>-<version>`` of the builds where MUSIC MODE and EDITION were SEEN working: the
+#: latest build of every Stern Spike 2 game in the image library, each swept in the emulator (a set
+#: built by Write's own code with both settings; the slot's sound fired in attract, both rows found
+#: in the operator menu and set to 2 there, the sound fired again: mode 1's file before, mode 2's
+#: after, and both values in the machine's NVM mirror; docs/plans/pad-724-editions-music-modes-
+#: every-title.md). Not here: the three whose program cannot grow (:data:`NO_ROOM`) and every build
+#: older than its game's latest.
+PROVEN = frozenset({
+    "aerosmith-1.16", "aerosmith_le-1.16", "avengers_infinity_le-1.10", "avengers_infinity_pro-1.10",
+    "batman-1.14", "beatles-1.29", "deadpool_le-1.16", "deadpool_pro-1.16",
+    "dungeons_and_dragons_le-1.10", "dungeons_and_dragons_pro-1.10", "elvira3-1.13",
+    "foo_fighters_le-1.04", "foo_fighters_pro-1.04", "godzilla_le-1.16", "godzilla_pro-1.16",
+    "guardians-1.15", "guardians_le-1.15", "iron_maiden_le-1.18", "iron_maiden_pro-1.18",
+    "james_bond_pro-1.06", "jaws_le-1.02", "jaws_pro-1.02", "john_wick_le-1.02", "john_wick_pro-1.02",
+    "jurassic_park_le-1.16", "jurassic_park_pro-1.16", "jurassic_park_the_pin-1.05",
+    "king_kong_le-0.97", "king_kong_pro-0.97", "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22",
+    "mando_le-1.45", "mando_pro-1.45", "metallica_spike-1.04", "munsters_le-1.28", "munsters_pro-1.28",
+    "rush_le-1.19", "rush_pro-1.19", "star_wars_elg-1.10", "star_wars_pro-1.31",
+    "stranger_things-1.13", "stranger_things_le-1.13", "sword_of_rage_le-1.19",
+    "sword_of_rage_pro-1.19", "turtles_le-1.59", "turtles_pro-1.59", "uncanny_xmen_le-0.98",
+    "uncanny_xmen_pro-0.98", "venom_le-1.07", "venom_pro-1.07",
+})
+#: PAD-724: the latest builds whose game program has no address space free between its code and
+#: its data (the engine's program-text growth never maps above its .bss), so no menu table of ours
+#: can be placed: every other growth of their program text is refused the same way
+NO_ROOM = frozenset({"james_bond_le-1.06", "james_bond_60th_le-1.11", "star_wars_le-1.31"})
+#: PAD-724: the games whose Adjustments are Standard Adjustments and Feature Adjustments (no
+#: category table, :class:`StandardList`): our rows are the last of Standard Adjustments
+STANDARD_MENU = frozenset({
+    "aerosmith", "aerosmith_le", "elvira3", "foo_fighters_le", "foo_fighters_pro", "guardians",
+    "guardians_le", "led_zeppelin_le", "led_zeppelin_pro", "mando_le", "mando_pro", "munsters_le",
+    "munsters_pro", "rush_le", "rush_pro", "sword_of_rage_le", "sword_of_rage_pro", "turtles_le",
+    "turtles_pro", "venom_le", "venom_pro",
+})
+
+
+def menu_path(game_dir, key):
+    """Where the operator finds setting *key* on game *game_dir*'s menu (``"Adjustments > ..."``)."""
+    if game_dir in STANDARD_MENU:
+        return "Adjustments > Standard Adjustments, at the end"
+    return "Adjustments > Machine Settings > %s" % CATEGORY_NAMES[SETTINGS[key][3]]
+
+
+#: the same, for a text that names no game
+ANY_MENU_PATH = {
+    MUSIC_MODE: "Adjustments > Machine Settings > Audio Content, or at the end of Standard "
+                "Adjustments on a game whose Adjustments have that page",
+    EDITION: "Adjustments > Machine Settings > Attract Mode, or at the end of Standard "
+             "Adjustments on a game whose Adjustments have that page",
+}
 
 
 def _refs(data, va, consts=None):
@@ -197,6 +320,36 @@ def category_table(table):
                 found.append(CategoryTable(va, recs, table._off(lit), (base + 4 * k, base + 4 * j),
                                            lo_at, hi))
     return found[0] if len(found) == 1 else None
+
+
+def standard_list(table):
+    """The :class:`StandardList` of a program without a category table, or ``None``: exactly one
+    id-list page, its list reached through a ``movw r0 / movt r0 / bx lr`` getter that no other
+    code calls. The game's own list stays where it is, so anything else that names it (Led
+    Zeppelin LE 1.22 has a word of that value, in a pool of pc-relative offsets) reads it as
+    before."""
+    from . import menu_visibility as MV
+    reading = MV.MenuVisibility(table)
+    lists = [(ids, a) for kind, ids, _c, a in reading._pages_raw() if kind == "list"]
+    if len(lists) != 1:
+        return None
+    ids, args = lists[0]
+    r0 = args.get(0)
+    if r0 is None or r0.form != "getter":
+        return None
+    getter = reading._bl_target(r0.off)
+    go = table._off(getter) if getter is not None else None
+    if go is None or reading._trivial_getter(getter) != r0.value:
+        return None
+    if len(reading._bls.get(getter, ())) != 1:
+        return None
+    return StandardList(r0.value, tuple(ids), go)
+
+
+def menu_table(table):
+    """The menu this program lists its adjustments by: its :class:`CategoryTable`, else its
+    :class:`StandardList` (PAD-724), else ``None``."""
+    return category_table(table) or standard_list(table)
 
 
 def _row_caption_line(table, i):
@@ -318,10 +471,10 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None):
     live = struct.unpack_from("<I", data, desc)[0]
     if _refs(data, live, consts) != 1:
         raise MenuSettingError("the game's program reads %s's value directly" % ad)
-    cat = category_table(table)
+    cat = menu_table(table)
     if cat is None:
         raise MenuSettingError("the game's operator menu pages could not be read")
-    if not ours and any(r[2] == i for r in cat.records):
+    if not ours and cat.lists(i):
         raise MenuSettingError("the game's menu already lists %s" % ad)
     row = _row_caption_line(table, i)
     if row is None:
@@ -352,7 +505,7 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None):
     }
     for off, v in ((OFF_DEFAULT, int(default)), (OFF_MIN, 1), (OFF_MAX, values), (OFF_STEP, 1)):
         writes[desc + off] = struct.pack("<i", v)
-    setting = MenuSetting(key, i, row_caption, text, values, live, category, int(default))
+    setting = MenuSetting(key, i, row_caption, text, values, live, category, int(default), cat.where(category))
     return setting, writes, (None if cat.has(category, i) else cat)
 
 
@@ -405,34 +558,17 @@ def plan_many(table, wanted):
 
 
 def table_blob(cat, *settings):
-    """The category table with the settings' records added (those it does not list yet): the
-    bytes to place (4-byte aligned)."""
-    recs = list(cat.records) + [(s.category, KIND_ADJUSTMENT, s.id) for s in settings
-                                if not cat.has(s.category, s.id)]
-    return b"".join(struct.pack("<3I", *r) for r in recs)
+    """The menu's table (a :class:`CategoryTable` or a :class:`StandardList`) with the settings
+    added (those it does not list yet): the bytes to place (4-byte aligned)."""
+    return cat.blob(*settings)
 
 
-def table_records(cat, *settings):
-    """How many records :func:`table_blob` makes."""
-    return len(cat.records) + sum(1 for s in settings if not cat.has(s.category, s.id))
-
-
-def table_writes(table, cat, new_va, n_records):
-    """``{file offset: bytes}`` that point the menu manager at a table of *n_records* at
-    *new_va*: the literal, both sizes and the vector's end. Raises :class:`MenuSettingError` when
-    the new size cannot be encoded the way the old one was."""
-    size = n_records * REC
-    lo = size - cat.end_hi
-    if not 0 <= lo <= 0xFF or size > 0xFFFF:
-        raise MenuSettingError("the menu's category table cannot grow to %d records" % n_records)
-    data = table.data
-    out = {cat.literal_off: struct.pack("<I", new_va)}
-    for o in cat.size_offs:
-        w = struct.unpack_from("<I", data, o)[0]
-        out[o] = struct.pack("<I", (w & ~0x000F0FFF) | ((size & 0xF000) << 4) | (size & 0xFFF))
-    w = struct.unpack_from("<I", data, cat.end_off)[0]
-    out[cat.end_off] = struct.pack("<I", (w & ~0xFFF) | lo)
-    return out
+def table_writes(table, cat, new_va, *settings):
+    """``{file offset: bytes}`` that point the menu at its table grown by *settings*, placed at
+    *new_va*: a category table's literal, both sizes and the vector's end; a Standard
+    Adjustments list's getter. Raises :class:`MenuSettingError` when the new size cannot be
+    encoded the way the old one was."""
+    return cat.writes(table, new_va, *settings)
 
 
 def check(raw, setting):
@@ -446,7 +582,7 @@ def check(raw, setting):
         e = t.entry(setting.id)
         desc = t._off(t.table_va + setting.id * t.elem)
         got_help = t._cstr(struct.unpack_from("<I", raw, desc + OFF_MENU_HELP)[0], 200)
-        cat = category_table(t)
+        cat = menu_table(t)
         row = _row_caption_line(t, setting.id)
     except Exception as ex:                                   # noqa: BLE001
         return ["the program does not read back (%s)" % ex]

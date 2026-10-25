@@ -13,6 +13,8 @@ site tick             0x00467a8c 0xe92d4038 0xe3a00037
 site shot_dispatch    0x0013e77c 0xe92d41f0 0xe24dd008
 site ball_end         0x00143818 0xe92d40f8 0xe30e6854
 site sound_lookup     0x00541660 0xe92d4038 0xe1a05000
+# PAD-494/724 music modes: get_asset_descriptor, WRAPPED (sounds.cfg)
+site sound_resolve    0x004a773c 0xe92d41f0 0xe1a05820
 site score_add        0x0030eed8 0xe3041a1e 0xe340108b
 site callout          0x004a88f0 0xe92d4010 0xe304e150
 site callout_nth      0x004a8aa4 0xe92d4010 0xe304e150

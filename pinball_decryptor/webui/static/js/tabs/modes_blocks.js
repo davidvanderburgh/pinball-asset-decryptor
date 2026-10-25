@@ -58,6 +58,7 @@ const TIP = {
   redo: "Redo the change just undone (Ctrl+Y or Ctrl+Shift+Z)",
   asC: "One way: the mode becomes C for good, starting from the C its blocks made. C can't be turned back into blocks; press Duplicate first to keep a blocks copy.",
   hits: "How many times the player up has made this shot in this ball (while the mode runs or not).",
+  modeHits: "How many times this shot has been made while the mode runs, since it started (the shot that starts it is not one). Its progress: a mini-wizard's ramp, the bar filling with it out of 12, when only that shot counts.",
   scored: "How many times a Score block has paid since the mode started.",
   total: "The points the mode's Score blocks have paid since it started.",
   stock: "One of the game's own modes, battles or multiballs is running.",
@@ -121,7 +122,7 @@ const TIP = {
   litMore: "Another insert lit with it. With more than one, Chase runs the light across them in turn, as James Bond cycles its villains on the Right ramp while one of its mini-wizards is lit; the other patterns light them all at once.",
   litSolid: "One insert more, held solid in its own color while the mode is lit and handed back with the rest: the film's insert (Y.O.L.T., DIAMONDS ARE FOREVER) as the game holds it for one of its own mini-wizards. It shows even while one of the game's modes is in the way.",
   bar: "While it runs, its name goes in the game's own status bar under the screen, in this color, with its clock draining along it, as the game shows its own modes (James Bond: Goldfinger's Jackpot in gold). At the end the bar stays full through its total, then the game has it back; a drain gives it back at once.",
-  barFill: "What fills the bar: its clock draining along it, or a value out of another filling it, as the game's own mini-wizards fill theirs with the shots made. \"Times it has scored\" out of 12 fills a twelfth each time one of its Score blocks pays (one on each shot: full at the 12th shot); any value will do (a variable a block counts up). It stays as it was through its total.",
+  barFill: "What fills the bar: its clock draining along it, or a value out of another filling it, as the game's own mini-wizards fill theirs with the shots made. \"Hits since it started\" of its progress shot out of 12 fills a twelfth each time that shot is made, and no other shot moves it; \"times it has scored\" counts every Score block that pays instead; any value will do (a variable a block counts up). It stays as it was through its total.",
   barOff: "This card's game has no status bar a mode can use: the mode runs the same without it.",
   info: "A line under its name while it runs: its words and a value as it changes, \"SUPER JACKPOT = 53,200,000\", as the game's own modes show one (James Bond: under the status bar). Out of the way of the game's own displays; gone at its end.",
   infoPlace: "The Scenes editor on the game's screen with the line (and its own screen, if it has one) where they will show: drag or size it there, and it is saved into the mode. Untouched, it goes where the game shows its own (James Bond: under the status bar).",
@@ -202,7 +203,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
 }
 
 function valueTemplates(ch, vars, timers, prog = {}) {
-  return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" },
+  return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" }, { k: "mode_hits", shot: (ch.shots || [])[0] || "" },
     { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "timer_left", timer: ((timers || [])[0] || {}).name || "" },
     { k: "combo_chain" }, { k: "combo_steps", combo: comboNames(prog)[0] || "" },          // PAD-708
     { k: "balls" }, { k: "player" }, { k: "op", op: "+", a: null, b: null }];
@@ -218,7 +219,7 @@ const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and
   { k: "or", a: null, b: null }, { k: "not", a: null }, { k: "running" }, { k: "can_start" }, { k: "lit" }, { k: "stock" },
   { k: "shields_away" }];
 
-const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot this ball", scored: "times it has scored",
+const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot this ball", mode_hits: "hits of a shot since it started", scored: "times it has scored",
   total: "points so far", secs_left: "seconds left", timer_left: "ms left on a timer", balls: "balls in play",
   player: "the player up", op: "a sum", combo_chain: "combos in a row", combo_steps: "shots made of a combo" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
@@ -346,6 +347,7 @@ function Val({ e, path, ed }) {
     case "var": return html`<${Pick} value=${e.name} options=${ed.vars.map((v) => v.name)} missing="(no such variable)"
       onChange=${(v) => set("name", v)} />`;
     case "hits": return html`<span class="bk-w" ...${tip(TIP.hits)}>hits of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
+    case "mode_hits": return html`<span class="bk-w" ...${tip(TIP.modeHits)}>hits since it started of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
     case "timer_left": return html`<span class="bk-w" ...${tip(TIP.timerLeft)}>ms left on</span><${TimerPick} value=${e.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
     case "combo_steps": return html`<span class="bk-w" ...${tip(TIP.comboSteps)}>shots made of</span><${Pick} value=${e.combo} options=${comboNames(ed.prog)} missing="(no combo has that name)" onChange=${(v) => set("combo", v)} />`;
     case "op": return html`<span class="bk-w">(</span><${Slot} kind="num" value=${e.a} path=${[...path, "a"]} ed=${ed} />
@@ -847,13 +849,21 @@ function InfoLine({ prog, ed, slug }) {
 }
 
 // PAD-721: the game's bar filling with a value out of another (its shots made of 12), not with its clock
-function barFill(bar, fill) {
+// PAD-721: what it fills with at first: the hits since it started of the first shot it scores on while it runs
+// (a mini-wizard's progress shot), else the times it has scored
+function progressShot(scripts) {
+  const s = (scripts || []).find((x) => (x.hat || {}).kind === "shot" && x.hat.shot && x.hat.when === "running"
+    && JSON.stringify(x.do || []).includes('"op":"score"'));
+  return s ? { k: "mode_hits", shot: s.hat.shot } : { k: "scored" };
+}
+
+function barFill(bar, fill, scripts) {
   const b = { ...(bar || {}) };
   if (fill !== "value") {
     delete b.fill; delete b.value; delete b.of;
     return b;
   }
-  return { ...b, fill: "value", value: b.value || { k: "scored" }, of: b.of || { k: "num", v: 10 } };
+  return { ...b, fill: "value", value: b.value || progressShot(scripts), of: b.of || { k: "num", v: 10 } };
 }
 
 function BarFill({ prog, ed }) {
@@ -1212,7 +1222,7 @@ export function BlocksEditor({ s, c, pg }) {
           ${(prog.bar || {}).on ? html`<input type="color" class="bk-color" value=${(prog.bar || {}).color || "#00c040"}
             onInput=${(e) => ed.set(["bar", "color"], e.target.value)} ...${tip("The bar's color")} />
             <${Select} sm value=${(prog.bar || {}).fill === "value" ? "value" : "clock"} title=${TIP.barFill}
-              onChange=${(v) => ed.edit((d) => { d.bar = barFill(d.bar, v); })}
+              onChange=${(v) => ed.edit((d) => { d.bar = barFill(d.bar, v, d.scripts); })}
               options=${[{ value: "clock", label: "its clock along it" }, { value: "value", label: "filling as shots are made" }]} />` : null}` : null}
         <${Check} checked=${!!(prog.info || {}).on} label="a line under its name" title=${ed.ch.info_line === false ? TIP.infoOff : TIP.info}
           onChange=${(v) => ed.set(["info", "on"], v)} />

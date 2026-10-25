@@ -1,12 +1,15 @@
 """PAD-721 proof shots: a James Bond LE 1.06 blocks mode's status bar filling as shots are made.
 
-    python scripts/shot_pad721.py <out dir> <before|after> [<repo>]
+    python scripts/shot_pad721.py <out dir> <before|after> [<repo> [<screen>]]
 
 The server runs from <repo> (default: this tree) against a scratch settings folder. The project holds YOLT WIZARD, a
 blocks mode as the owner makes their mini-wizards: its name in the game's bar, a Right ramp scoring. It is seeded with
 the bar filling with the shots scored out of 12; the code before PAD-721 has no such setting (its blocks.json loses
 it), so its page shows the bar's clock alone. Shot:
   <before|after>_blocks_bar_fill.png the top of its blocks page: the bar's settings
+Round 2 (its Side ramp target scores too, but only the ramp is progress): <screen> blocks_progress_shot, run against
+main for "before" (the bar can only follow the times it has scored) and this tree for "after" (the ramp's hits since
+it started): `... before <main export> blocks_progress_shot`.
 """
 
 import json
@@ -38,11 +41,15 @@ import sys
 sys.path.insert(0, %(repo)r)
 from pinball_decryptor.plugins.stern import block_modes as BM
 slug, _c = BM.new_blocks_mode(%(project)r, "YOLT WIZARD")
+# PAD-721 round 2: its progress shot's hits since it started, where the code has them; else the times it has scored
+value = {"k": "mode_hits", "shot": "Right ramp exit opto"} if "mode_hits" in BM.NUM_KINDS else {"k": "scored"}
 BM.save(%(project)r, slug, BM.normalize({"name": "YOLT WIZARD", "seconds": 60, "vars": [],
-    "bar": {"on": True, "color": "#ff2020", "fill": "value", "value": {"k": "scored"}, "of": {"k": "num", "v": 12}},
+    "bar": {"on": True, "color": "#ff2020", "fill": "value", "value": value, "of": {"k": "num", "v": 12}},
     "scripts": [
     {"hat": {"kind": "shot", "shot": "Right ramp exit opto", "when": "running"},
-     "do": [{"op": "score", "points": {"k": "num", "v": 5000000}}]}]}))
+     "do": [{"op": "score", "points": {"k": "num", "v": 5000000}}]},
+    {"hat": {"kind": "shot", "shot": "Side ramp target", "when": "running"},
+     "do": [{"op": "score", "points": {"k": "num", "v": 250000}}]}]}))
 '''
 
 
@@ -50,6 +57,7 @@ def main():
     outdir = os.path.abspath(sys.argv[1])
     which = sys.argv[2]
     repo = os.path.abspath(sys.argv[3]) if len(sys.argv) > 3 else HERE
+    screen = sys.argv[4] if len(sys.argv) > 4 else "blocks_bar_fill"
     os.makedirs(outdir, exist_ok=True)
     webui_shot.REPO = repo
     scratch = tempfile.mkdtemp(prefix="pad721-")
@@ -100,7 +108,7 @@ def main():
             print("fill row", page.get_by_text("The bar fills with").count(), flush=True)
             with open(os.path.join(project, "modes", "yolt_wizard", "blocks.json"), encoding="utf-8") as f:
                 print("bar", json.load(f).get("bar"), flush=True)
-            page.screenshot(path=os.path.join(outdir, "%s_blocks_bar_fill.png" % which))
+            page.screenshot(path=os.path.join(outdir, "%s_%s.png" % (which, screen)))
             browser.close()
             if errors:
                 print("PAGE ERRORS:", errors, flush=True)

@@ -9979,6 +9979,8 @@ static struct {
     unsigned screen;                    /* the screen object the game passed */
     volatile int cur;                   /* the new monster under the cursor; -1 = one of the game's places */
     volatile int picked;                /* at the pick: the new monster picked; -1 = a place of the game's */
+    volatile int keep;                  /* PAD-730: the new monster picked, drawn on through the screen's close; -1 = none */
+    unsigned long keep_at;              /* when it was picked (pm_ms) */
     int shown;                          /* the member whose nodes are shown; -1 = none */
     int states;                         /* 1 = the locks and claws are set for this opening */
     unsigned hid;                       /* bit n: place n's own portrait hidden by us */
@@ -9990,7 +9992,7 @@ static struct {
     void *box[7];                       /* each place's own state box (its claw), hidden where one of ours won */
     unsigned box_hid;                   /* bit n: place n's box hidden by us (the game keeps an open place's hidden
                                          * itself: only our own hide is ever undone) */
-} more = { 0, 0, -1, -1, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 },
+} more = { 0, 0, -1, -1, -1, 0, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 },
            { { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 },
              { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u };
 static void more_won_shift(int k, int by)   /* member k joined (by 1) or left (by -1): the wins follow */
@@ -10113,6 +10115,7 @@ void pm_roster_more_leave(const char *name)
         if (more.playing[j] == k) more.playing[j] = -1; else if (more.playing[j] > k) more.playing[j]--;
     }
     if (more.cur == k) more.cur = -1; else if (more.cur > k) more.cur--;
+    if (more.keep == k) more.keep = -1; else if (more.keep > k) more.keep--;
     more_won_shift(k, -1);
     more_forget_nodes();
     more_release_unused();
@@ -10197,7 +10200,7 @@ static unsigned more_state(unsigned slot)
 
 static void more_draw(void)
 {
-    int k, want = more.open ? more.cur : -1;
+    int k, want = more.open ? more.cur : more.keep;
     unsigned s, hide = 0;
     if (want != more.shown) {
         for (k = 0; k < more_n; k++) {
@@ -10318,6 +10321,7 @@ static int on_roster_keys(unsigned *r)
 static void on_roster_open(unsigned *r)
 {
     more.screen = r[0];
+    more.keep = -1;
     more.cur = -1;
     more.picked = -1;
     more.open = 1;
@@ -10325,11 +10329,16 @@ static void on_roster_open(unsigned *r)
     if (more_n) say("roster: the selection screen opens with %d new monster%s on it", more_n, more_n == 1 ? "" : "s");
 }
 
-/* the screen's pick (r0 = the screen): which tile it was */
+/* the screen's pick (r0 = the screen): which tile it was. PAD-730 (David: "When selecting a bonus monster, the wrong
+ * monster is briefly shown before the screen transition"): the screen stays on the glass for its close after the pick,
+ * so a picked new monster stays drawn - its tile and portrait, the place's own portrait hidden - until it is gone (the
+ * port's roster_start_after_ms; the next opening, the ball's or the game's end, if sooner) */
 static void on_roster_pick(unsigned *r)
 {
     (void)r;
     more.picked = more.open ? more.cur : -1;
+    more.keep_at = pm_ms();
+    more.keep = more.picked;
     more.open = 0;
     if (more.picked >= 0 && more.picked < more_n)
         say("roster: the selection screen picks %s (in slot %u's place)", more_m[more.picked].name, more_m[more.picked].slot);
@@ -10380,7 +10389,10 @@ static void more_tick(void)
             if ((more.box_hid >> s) & 1u) { if (more.box[s]) pm_show(more.box[s], 1); more.box_hid &= ~(1u << s); }
         more.open = 0;
         more.cur = -1;
+        more.keep = -1;
     }
+    if (more.keep >= 0 && pm_ms() - more.keep_at >= (unsigned long)pm_port_value("roster_start_after_ms", 3000))
+        more.keep = -1;
     more_draw();
 }
 
@@ -10399,6 +10411,7 @@ static void more_over(unsigned p, int won)
 static void more_ball_end(void)
 {
     if (more.open) { more.open = 0; more.cur = -1; }
+    more.keep = -1;
 }
 
 /* ---- PAD-710: a mode in the place of one of the game's own modes ------------------------------------------------

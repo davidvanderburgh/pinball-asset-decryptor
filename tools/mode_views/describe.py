@@ -33,6 +33,8 @@ def val(e):
         return str(e.get("name") or "?")
     if k == "hits":
         return "hits of %s this ball" % (e.get("shot") or "?")
+    if k == "mode_hits":                                                     # PAD-721
+        return "hits of %s since it started" % (e.get("shot") or "?")
     if k == "scored":
         return "shots scored in the mode"
     if k == "total":

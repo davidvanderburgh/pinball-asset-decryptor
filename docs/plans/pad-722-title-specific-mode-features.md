@@ -53,7 +53,15 @@ Coverage is out of the 53 newest builds.
 | Music modes: MUSIC MODE picks a set of sounds (PAD-494, 511, 608, 638) | Godzilla 1.16 | `sound_modes.PROVEN` + `site sound_resolve`, only in Godzilla's ports | sounds in turn / at random (PAD-565/638, `sound_lookup`) already work on **53 / 53**; the menu reads on 31 | `sound_resolve` found per title (the descriptor resolver), then a sweep |
 | A mode's clip back where it would be after a game's clip (PAD-530) | Bond LE/Pro | `site surface_seek/duration/position`, only in Bond's ports | the same player code under every clip v2 surface (45) | the three sites placed per build (Bond's are at layout distances from surface_play), and a sweep |
 | Backdrop on the bank's surface (PAD-521) | Bond LE/Pro (now) | `value backdrop_surface 1`: opted in per port once seen | every clip v2 build has the surface (45); `text backdrop_idle` names each game's own main-play video | each title's main-play video named, and a sweep |
-| The game's own award screen for an Award block (item 154) | Godzilla 1.16 / Pro 1.15, Beatles | `award_screen_arg` + `award_*_at` values | `site award_screen` is in all **53** ports | the argument table and the three offsets read per build; elsewhere an Award shows on the mode's own screen (PAD-574) |
+| ~~The game's own award screen for an Award block (item 154)~~ | **not a feature: see PAD-726 below** | - | - | - |
+
+**PAD-726 (2026-10-25): the award-screen row above was wrong.** No Award block, and nothing else the Modes tab
+makes, calls the game's award screen, on Godzilla either. `pm_award_screen` is reached only from a hand-written
+mode file's `screen_type` / `title_msg` / `total_msg` keys (item 125, superseded by own screens in item 131; the tab
+never writes them) and from the Godzilla-only test `show_reel_mode.c`. An Award block shows on the mode's HUD, or
+without one on its own screen (PAD-574), and both work on all 53 titles. Every port already has the award screen's
+argument table (`data award_screen_arg`, which the display watch of PAD-639 needs), so the only per-build lines left
+are the three node offsets, which nothing a person can make would use. Nothing to port.
 
 ## Probably not worth it
 

@@ -121,6 +121,7 @@ const TIP = {
   litMore: "Another insert lit with it. With more than one, Chase runs the light across them in turn, as James Bond cycles its villains on the Right ramp while one of its mini-wizards is lit; the other patterns light them all at once.",
   litSolid: "One insert more, held solid in its own color while the mode is lit and handed back with the rest: the film's insert (Y.O.L.T., DIAMONDS ARE FOREVER) as the game holds it for one of its own mini-wizards. It shows even while one of the game's modes is in the way.",
   bar: "While it runs, its name goes in the game's own status bar under the screen, in this color, with its clock draining along it, as the game shows its own modes (James Bond: Goldfinger's Jackpot in gold). At the end the bar stays full through its total, then the game has it back; a drain gives it back at once.",
+  barFill: "What fills the bar: its clock draining along it, or a value out of another filling it, as the game's own mini-wizards fill theirs with the shots made. \"How many shots the mode has scored\" out of 12 is full once 12 shots have scored; any value will do (a variable a block counts up). It stays as it was through its total.",
   barOff: "This card's game has no status bar a mode can use: the mode runs the same without it.",
   info: "A line under its name while it runs: its words and a value as it changes, \"SUPER JACKPOT = 53,200,000\", as the game's own modes show one (James Bond: under the status bar). Out of the way of the game's own displays; gone at its end.",
   infoPlace: "The Scenes editor on the game's screen with the line (and its own screen, if it has one) where they will show: drag or size it there, and it is saved into the mode. Untouched, it goes where the game shows its own (James Bond: under the status bar).",
@@ -829,6 +830,25 @@ function InfoLine({ prog, ed, slug }) {
   </div>`;
 }
 
+// PAD-721: the game's bar filling with a value out of another (its shots made of 12), not with its clock
+function barFill(bar, fill) {
+  const b = { ...(bar || {}) };
+  if (fill !== "value") {
+    delete b.fill; delete b.value; delete b.of;
+    return b;
+  }
+  return { ...b, fill: "value", value: b.value || { k: "scored" }, of: b.of || { k: "num", v: 10 } };
+}
+
+function BarFill({ prog, ed }) {
+  const b = prog.bar || {};
+  return html`<div class="bk bk-hud bk-hudset">
+    <div class="bk-line"><span class="bk-w b" ...${tip(TIP.barFill)}>The bar fills with</span>
+      <${Slot} kind="num" value=${b.value} path=${["bar", "value"]} ed=${ed} />
+      <span class="bk-w">out of</span><${Slot} kind="num" value=${b.of} path=${["bar", "of"]} ed=${ed} /></div>
+  </div>`;
+}
+
 // ------------------------------------------------------------------ the whole editor
 function Variables({ prog, ed }) {
   const vars = prog.vars || [];
@@ -1087,6 +1107,8 @@ export function useEd(pg, ch) {
       };
       walk(d.scripts);
       walk(d.hud);                                                // PAD-375: what its counters and gauge follow
+      walk(d.info);                                               // PAD-547: what its info line follows
+      walk(d.bar);                                                // PAD-721: what its bar fills with
     }, "vars/" + i + "/name"),
     renameTimer: (i, name) => edit((d) => {
       const old = (d.timers[i] || {}).name;
@@ -1099,6 +1121,9 @@ export function useEd(pg, ch) {
         Object.values(o).forEach(walk);
       };
       walk(d.scripts);
+      walk(d.hud);
+      walk(d.info);
+      walk(d.bar);                                                // PAD-721
     }, "timers/" + i + "/name"),
     // a clip or sound renamed: every block playing it follows it
     renameMedia: (kind, i, name) => edit((d) => {
@@ -1169,10 +1194,14 @@ export function BlocksEditor({ s, c, pg }) {
         ${ed.ch.status_bar || (prog.bar || {}).on ? html`<${Check} checked=${!!(prog.bar || {}).on} label="its name in the game's bar"
           title=${ed.ch.status_bar ? TIP.bar : TIP.barOff} onChange=${(v) => ed.set(["bar", "on"], v)} />
           ${(prog.bar || {}).on ? html`<input type="color" class="bk-color" value=${(prog.bar || {}).color || "#00c040"}
-            onInput=${(e) => ed.set(["bar", "color"], e.target.value)} ...${tip("The bar's color")} />` : null}` : null}
+            onInput=${(e) => ed.set(["bar", "color"], e.target.value)} ...${tip("The bar's color")} />
+            <${Select} sm value=${(prog.bar || {}).fill === "value" ? "value" : "clock"} title=${TIP.barFill}
+              onChange=${(v) => ed.edit((d) => { d.bar = barFill(d.bar, v); })}
+              options=${[{ value: "clock", label: "its clock along it" }, { value: "value", label: "filling as shots are made" }]} />` : null}` : null}
         <${Check} checked=${!!(prog.info || {}).on} label="a line under its name" title=${ed.ch.info_line === false ? TIP.infoOff : TIP.info}
           onChange=${(v) => ed.set(["info", "on"], v)} />
       </div>
+      ${(prog.bar || {}).on && prog.bar.fill === "value" ? html`<${BarFill} prog=${prog} ed=${ed} />` : null}
       ${(prog.info || {}).on ? html`<${InfoLine} prog=${prog} ed=${ed} slug=${c.slug} />` : null}
       <${GameModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />

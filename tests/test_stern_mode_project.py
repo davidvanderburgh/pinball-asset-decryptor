@@ -615,6 +615,66 @@ def test_the_extract_record_wins_over_the_anchor_even_when_its_name_does_not_par
     assert card.source == "the card's file name"
 
 
+RENAMED_XMEN = "silentcorp_ANIMATED_SERIES_xmen_le-0_98_0.raw"
+
+
+def test_the_records_card_index_names_the_game_of_a_renamed_moved_card(tmp_path, monkeypatch):
+    """PAD-720: a modified X-Men LE 0.98 card saved as ``silentcorp_ANIMATED_SERIES_xmen_le-0_98_0.raw``
+    parses as a Stern name, of a game no card has, so a project made from it - its card no longer where
+    the record says - told "Modes of your own can't be made for Silentcorp Animated Series Xmen LE 0.98
+    yet". The extract recorded the card's own index name (``stock.sidx``): that names the game, without
+    opening anything, wherever the file is now."""
+    project = str(tmp_path)
+
+    def never(path):
+        raise AssertionError("project_card must not open an image")
+    monkeypatch.setattr(MP, "probe_card_title", never)
+    with open(os.path.join(project, ".extract_source.json"), "w", encoding="utf-8") as f:
+        json.dump({"input_path": "E:\\gone\\" + RENAMED_XMEN, "input_name": RENAMED_XMEN,
+                   "card_version": "0.98.0",
+                   "stock": {"status": "modified", "label": "Uncanny Xmen LE 0.98",
+                             "sidx": "uncanny_xmen_le-0_98_0.sidx", "text": "..."}}, f)
+    card = MP.project_card(project)
+    assert (card.game_dir, card.version, card.source) == ("uncanny_xmen_le", "0.98.0",
+                                                          MP.INDEX_SOURCE)
+    assert card.image.endswith(RENAMED_XMEN)
+    prof = MP.profile_for_card(card.game_dir, card.version)
+    assert prof is not None and prof.label == "Uncanny X-Men LE 0.98"
+    # a record without the index (an older extract) keeps the file name, as before
+    _record(project, RENAMED_XMEN, "0.98.0", input_path="E:\\gone\\" + RENAMED_XMEN)
+    assert MP.project_card(project).game_dir == "silentcorp_animated_series_xmen_le"
+
+
+def test_a_stern_formed_name_of_an_unknown_game_waits_for_the_cards_own_index(tmp_path, monkeypatch):
+    """PAD-720: when that renamed card IS on this computer and the record has no index, its name is not
+    taken: ``game_dir`` is "" until the probe has read the card's index (off the UI thread), which then
+    names the game. A real game's Stern name is still taken at once, and a card whose index names no
+    game keeps its file name."""
+    project = str(tmp_path)
+    renamed = str(tmp_path / RENAMED_XMEN)
+    with open(renamed, "wb") as f:
+        f.write(bytes(64))
+    _record(project, RENAMED_XMEN, "0.98.0", input_path=renamed)
+    assert not MP.known_game_dir("silentcorp_animated_series_xmen_le")
+    assert MP.known_game_dir("uncanny_xmen_le") and MP.known_game_dir("godzilla_pro")
+    monkeypatch.setattr(MP, "_PROBED", {})
+    card = MP.project_card(project)
+    assert (card.image, card.game_dir, card.version) == (renamed, "", "0.98.0")
+    monkeypatch.setitem(MP._PROBED, MP._probe_key(renamed), ("uncanny_xmen_le", "0.98.0"))
+    card = MP.project_card(project)
+    assert (card.game_dir, card.version, card.source) == ("uncanny_xmen_le", "0.98.0",
+                                                          "the card's own index")
+    monkeypatch.setitem(MP._PROBED, MP._probe_key(renamed), (None, None))
+    assert MP.project_card(project).game_dir == "silentcorp_animated_series_xmen_le"
+    # the "Try it on" card the same way
+    monkeypatch.setitem(MP._PROBED, MP._probe_key(renamed), ("uncanny_xmen_le", "0.98.0"))
+    assert MP.project_cards(project, renamed)[1].game_dir == "uncanny_xmen_le"
+    stern = str(tmp_path / "godzilla_pro-1_15_0_spike2.raw")
+    with open(stern, "wb") as f:
+        f.write(bytes(64))
+    assert MP.project_cards(project, stern)[1].game_dir == "godzilla_pro"
+
+
 def test_project_cards_names_the_two_roles_without_opening_an_image(tmp_path, monkeypatch):
     """made_for is the project's card; try_on is the image handed in - the live Emulate
     card, never the anchor's copy - known by its Stern name or an earlier probe, else ""."""

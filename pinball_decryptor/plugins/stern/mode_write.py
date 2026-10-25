@@ -797,7 +797,7 @@ def mode_file_text(project, slug, spec, own_sounds):
 
 
 def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
-         log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"",
+         log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"", stock_select=b"",
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
          sound_modes_prof=None, picture="", picture_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
@@ -863,6 +863,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
             kw["stock_font"] = stock_font
         if hud_font:
             kw["hud_font"] = hud_font
+        if stock_select:
+            kw["stock_select"] = stock_select     # PAD-707: the new monsters' screen
         if progress is not None:
             kw["progress"] = progress
         build = mode_assets.build(project, stock_hud, stock_bank, tree, ffmpeg=ffmpeg, **kw)

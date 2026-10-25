@@ -75,7 +75,9 @@ export function hatWords(h = {}, ch = {}) {
     case "event": return `When ${eventLabel(h.event, ch)}${when}`;
     case "timer_done": return `When timer ${h.timer} runs out`;
     case "combo": return `When ${comboWords(h)}${when}`;      // PAD-708
-    case "battle": return `When the player picks ${h.name || (h.slot == null ? "a battle" : `battle ${h.slot}`)} on the battle selection screen`;   // PAD-706
+    case "battle": return h.more   // PAD-707: a new monster on the screen, in that battle's place
+      ? `When the player picks it on the battle selection screen, a new monster in ${h.name || `battle ${h.slot}`}'s place`
+      : `When the player picks ${h.name || (h.slot == null ? "a battle" : `battle ${h.slot}`)} on the battle selection screen`;   // PAD-706
     case "challenge": return `When the player picks the challenge ${h.challenge || "?"}${h.launch === "player" ? ", the player launching its ball" : /^\d+$/.test(h.launch || "") ? `, its ball launched ${h.launch} s after it starts` : ""}`;   // PAD-615, PAD-643
     default: return h.kind || "";
   }

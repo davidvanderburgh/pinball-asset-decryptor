@@ -454,7 +454,7 @@ def mode_file_name(slot):
 
 
 def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=None, prof=None,
-          progress=None, stock_font=b"", hud_font=b""):
+          progress=None, stock_font=b"", hud_font=b"", stock_select=b""):
     """Build every mode in ``project`` (or the slugs in ``only``) from the stock scenes.
 
     ``stock_hud`` / ``stock_bank`` are the stock bytes of the title's HUD scene and video
@@ -472,7 +472,10 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
 
     ``hud_font`` (hud-layers) is the card's scene that holds the game's own font
     (``mode_hud.GAME_FONT_SCENE``): with it, each code mode's HUD goes into Godzilla's slide-outs scene
-    in the same pass as the screens."""
+    in the same pass as the screens.
+
+    ``stock_select`` (PAD-707) is the card's battle selection scene (``battle_select.REL``), the card's own (a Heisei
+    card's is Heisei's): with new monsters in the project it is written again with them on it."""
     found, broken = MP.list_modes(project)
     if broken:
         raise ModeAssetError("these modes could not be read: %s"
@@ -523,6 +526,10 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
                for slug, spec in own if spec.screen and prof.can("screen")]
     screens += _code_screens(project, code, prof)
     huds = _code_huds(project, code, prof, hud_font)
+    select = _more_scene(project, own, code, prof, stock_select)     # PAD-707: the new monsters' tiles
+    if select is not None:
+        from . import battle_select as BS
+        write(BS.REL, select)
 
     # the clips: made first (side by side, kept between builds), then one after another into
     # the stock bank
@@ -907,6 +914,16 @@ def _code_screens(project, code, prof):
                   if spec.screen and getattr(spec, "screen_style", "") == "words" and prof.can("screen")
                   for s in total_screens(MP.asset_names(slug), prof)
                   + [with_layout(points_screen(MP.asset_names(slug), prof), getattr(spec, "points_layout", None))]]
+
+
+def _more_scene(project, forms, code, prof, stock):
+    """PAD-707: the card's battle selection scene with the project's new monsters on it (form and code modes), or
+    None when it has none."""
+    from . import more_kaiju as MK
+    try:
+        return MK.scene(project, code, prof, forms, stock)
+    except MK.MoreKaijuError as e:
+        raise ModeAssetError(str(e))
 
 
 def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result, made=None,

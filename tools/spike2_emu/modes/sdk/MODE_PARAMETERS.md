@@ -275,7 +275,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 161 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 162 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -312,6 +312,7 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_clip(name)` | a bank clip, drawn every tick until it ends, or until the game plays a clip of its own (item 154 display) | T F | items 132, 134 (from the tick; on a Maser shot the game's own clip can take the surface); item 141 run 1 (played inside the Maser trigger shot: never on the glass) and run 2 (500 ms later from the tick: on the glass) |
 | `pm_clip_playing()` | a clip of ours is still drawing | F | item 141 run 2: 1 after 1 s for both waiting clips, which were on the glass. It stays 1 while the surface plays ANY clip, so it cannot tell ours from the game's |
 | `pm_clip_stop()` | stop it | none | not measured |
+| `pm_game_clip(name, loop)` | for a test: a bank clip set and played on the clip v2 surface as the game puts its own (not marked as the mode's), so the clip-back and the backdrop take it for the game's; 1 = the bank has it | the PAD-725 rig instrument (`ck725.c`) | PAD-725 sweep: SkillShot_Venom over a mode's JUKEBOX_RAVELOOP1 on Venom LE 1.07, which came back at 11933 ms and played at 12932 ms a second later |
 | `pm_message_set(id, words)` | borrowed message words | F | item 125 run 5 |
 | `pm_message_restore(id)` | give them back | F | item 125 run 5 |
 | `pm_award_screen(type, id, value)` | the game's award screen with a value | F | item 125 run 5 |

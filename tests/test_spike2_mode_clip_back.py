@@ -19,6 +19,7 @@ PORTS = RUNTIME.parent / "ports"
 PRELUDE = r"""
 #include <stdio.h>
 #include <string.h>
+static int pm_in_game(void);
 #define PM_CAN_CLIPS 0x4u
 struct pm_mode { const char *name; };
 static const struct pm_mode mode_a = { "A" }, mode_b = { "B" };
@@ -89,19 +90,21 @@ static int play(void *s, int a, int b)
 }
 static int seek(void *s, long long ms) { if (!seek_ok) return 0; printf("SEEK %lld\n", ms); offset = ms; played_at = now_ms; return 1; }
 static int get_state(void *s) { return state; }
+static int no_duration;                           /* PAD-725: a derived port without the length */
 static unsigned fn(const char *n)
 {
     if (!strcmp(n, "surface_set_video")) return (unsigned)(unsigned long)set_video;
     if (!strcmp(n, "surface_play")) return (unsigned)(unsigned long)play;
     if (!strcmp(n, "surface_state")) return (unsigned)(unsigned long)get_state;
     if (!strcmp(n, "surface_seek")) return (unsigned)(unsigned long)seek;
-    if (!strcmp(n, "surface_duration")) return (unsigned)(unsigned long)duration;
+    if (!strcmp(n, "surface_duration")) return no_duration ? 0 : (unsigned)(unsigned long)duration;
     if (!strcmp(n, "surface_position")) return (unsigned)(unsigned long)position;
     return 0;
 }
 """
 
 MAIN = r"""
+static int pm_in_game(void) { return 1; }
 static void tick(unsigned long ms)
 {
     now_ms += ms;
@@ -240,7 +243,7 @@ def test_a_modes_clip_comes_back_where_it_would_be_after_the_games(tmp_path):
 def test_the_runtime_hooks_it_on_clip_v2_with_the_ports_seek_only():
     src = RUNTIME.read_text(encoding="utf-8")
     arm = _lift(src, "static void ck_arm(void)")
-    assert '"surface_seek", "surface_duration", "surface_position"' in arm and "!clip_v2" in arm
+    assert '"surface_seek", "surface_position", 0' in arm and "!clip_v2" in arm   # PAD-725: the length is optional
     assert 'hook(fn("surface_play"), on_surface_play)' in arm and src.count('hook(fn("surface_play")') == 1
     assert "ck_arm();" in src and "ck_tick();" in _lift(src, "static void clip_tick(void)")
     one = _lift(src, "static void on_surface_set_video(unsigned *r)")
@@ -260,6 +263,90 @@ def test_both_bond_builds_name_the_surfaces_seek_and_the_main_play_video(port, s
     assert re.search(r"^site surface_duration\s+%s 0xe5d030d4 0xe92d40f0$" % length, text, re.M)
     assert re.search(r"^site surface_position\s+%s 0xe5d030d4 0xe92d40f0$" % where, text, re.M)
     assert re.search(r"^text backdrop_idle MainPlayLoop$", text, re.M)
+
+
+def _clip_v2_ports():
+    out = []
+    for p in sorted(PORTS.glob("*.port")):
+        text = p.read_text(encoding="utf-8")
+        if re.search(r"^site surface_set_video ", text, re.M):
+            out.append(p.name)
+    return out
+
+
+def _site(text, name):
+    m = re.search(r"^site %s\s+(0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+)$" % name, text, re.M)
+    return (int(m.group(1), 16), int(m.group(2), 16), int(m.group(3), 16)) if m else None
+
+
+@pytest.mark.parametrize("port", _clip_v2_ports())
+def test_every_clip_v2_port_names_the_surfaces_seek_length_and_position(port):
+    """PAD-725: Bond's PAD-530 sites on every clip v2 build, at the distances from surface_play its player's layout has
+    (the newer player calls the player functions, the older one the player's virtual seek / position / duration)"""
+    text = (PORTS / port).read_text(encoding="utf-8")
+    play, sv = _site(text, "surface_play")[0], _site(text, "surface_set_video")[0]
+    older = sv - play == 0x2860
+    assert older or sv - play == 0x21f4
+    want = {"surface_seek": 0x1bc, "surface_duration": -0x1274, "surface_position": -0x360} if older else \
+        {"surface_seek": -0x36c, "surface_duration": -0x6b4, "surface_position": -0x510}
+    for name, d in want.items():
+        va, w0, w1 = _site(text, name)
+        assert va == play + d, name
+        if name == "surface_seek":
+            assert (w0, w1) == (0xe92d43f0, 0xe1a07003)
+        else:                             # ldrb r3, [r0, #<its ready flag>]; push {r4-r7, lr}
+            assert w0 & 0xfffff000 == 0xe5d03000 and w1 == 0xe92d40f0, name
+    assert len(_clip_v2_ports()) >= 62
+
+
+def test_a_test_can_put_a_clip_on_the_surface_as_the_games_own():
+    """PAD-725: pm_game_clip sets and plays a bank clip NOT marked ours, so the hooks take it for the game's"""
+    src = RUNTIME.read_text(encoding="utf-8")
+    body = _lift(src, "int pm_game_clip(const char *name, int loop)")
+    assert "ck_ours" not in body and 'fn("surface_set_video")' in body and 'fn("surface_play")' in body
+    assert "int pm_game_clip(const char *name, int loop);" in (RUNTIME.parent / "pad_mode.h").read_text(encoding="utf-8")
+
+
+NODUR_MAIN = r"""
+static int pm_in_game(void) { return 1; }
+static void tick(unsigned long ms)
+{
+    now_ms += ms;
+    if (clip.on && state != 2) clip.on = 0;
+    ck_tick();
+    if (state == 2 && !looping && position(&surf_obj) >= length_of(video)) state = 0;
+}
+static void game(const char *name) { unsigned str = std_string(name); set_video(&surf_obj, &str); play(&surf_obj, 0, -1); }
+int main(void)
+{
+    ck_can = 1;
+    no_duration = 1;
+    current = running = &mode_a; begun++;
+    pm_clip("PadMode_long_Clip");
+    tick(16); tick(5000);
+    game("BallLock"); tick(1000); tick(1000); tick(1000);
+    game("MainPlayLoop_DrNo"); tick(16);
+    printf("on %d\n", clip.on);
+    return 0;
+}
+"""
+
+
+def test_a_port_without_the_length_still_puts_the_clip_back(tmp_path):
+    """PAD-725: a port derived for an older build may lack `site surface_duration` (its code is not unique in the
+    reference); the clip comes back all the same, its own end deciding when it is over"""
+    src = RUNTIME.read_text(encoding="utf-8")
+    parts = [_ck_struct(src)] + [_lift(src, s) for s in (
+        "static long long ck_ms(const char *which, void *surf)", "static int ck_mode_runs(void)",
+        "static void ck_drop(const char *why)", "static int clip2_start(void *surf, const char *name)",
+        "static void ck_seen(unsigned *r)", "static void ck_play_seen(unsigned *r)", "static void ck_tick(void)\n{",
+        "int pm_clip(const char *name)")]
+    out = _host_run(tmp_path, PRELUDE + "\n".join(parts) + NODUR_MAIN, flags=("-no-pie", "-fno-pie")).splitlines()
+    if not out:
+        pytest.skip("this host links above 4 GB even with -no-pie")
+    assert [x if not x.startswith("SEEK ") else "SEEK" for x in out] == [
+        "PLAY PadMode_long_Clip", "PLAY BallLock", "PLAY MainPlayLoop_DrNo", "PLAY PadMode_long_Clip", "SEEK", "on 1"]
+    assert 7900 <= int([x for x in out if x.startswith("SEEK ")][0].split()[1]) <= 8100
 
 
 IDLE_MAIN = r"""
@@ -356,6 +443,7 @@ def test_the_idle_watch_runs_from_the_tick_and_a_backdrop_counts_as_ours():
 
 
 SPIN_MAIN = r"""
+static int pm_in_game(void) { return 1; }
 static void tick(unsigned long ms)
 {
     now_ms += ms;
@@ -487,6 +575,7 @@ static long pm_port_value(const char *n, long fallback) { return fallback; }
 """
 
 FX_MAIN = r"""
+static int pm_in_game(void) { return 1; }
 int main(void)
 {
     unsigned now;
@@ -527,3 +616,58 @@ def test_both_bond_builds_name_the_display_effect_manager(port, manager):
     text = (PORTS / port).read_text(encoding="utf-8")
     assert re.search(r"^data display_effects\s+%s$" % manager, text, re.M)
     assert "ck_game_display()" in _lift(RUNTIME.read_text(encoding="utf-8"), "static void ck_tick(void)\n{")
+
+
+REEL_MAIN = r"""
+#include <stdio.h>
+static void say(const char *f, ...) {}
+static int ck_last_ours, ck_in;
+static unsigned bank_obj[4], other_obj[4];
+static void *clip2_surface(void) { return bank_obj; }
+static unsigned reel_idle[16];
+%s
+int main(void)
+{
+    static unsigned reel[16], other[16];
+    unsigned r[6];
+    reel[0x1c / 4] = (unsigned)(unsigned long)bank_obj;
+    other[0x1c / 4] = (unsigned)(unsigned long)other_obj;
+    r[0] = (unsigned)(unsigned long)reel; on_reel_tick(r);
+    printf("game's clip: %%s\n", r[0] == (unsigned)(unsigned long)reel ? "runs" : "waits");
+    ck_last_ours = 1;
+    r[0] = (unsigned)(unsigned long)reel; on_reel_tick(r);
+    printf("ours: %%s %%u\n", r[0] == (unsigned)(unsigned long)reel_idle ? "waits" : "runs", reel_idle[0x1c / 4]);
+    r[0] = (unsigned)(unsigned long)other; on_reel_tick(r);
+    printf("another surface: %%s\n", r[0] == (unsigned)(unsigned long)other ? "runs" : "waits");
+    return 0;
+}
+"""
+
+
+def test_the_games_reel_waits_while_a_clip_of_ours_has_the_surface(tmp_path):
+    """PAD-725: Aerosmith's and Guardians' reel (a clip kept in step with a song) paused a clip of ours 50-100 ms in and
+    restarted the backdrop loop every half second; its tick is handed a reel with no surface while ours has the surface"""
+    src = RUNTIME.read_text(encoding="utf-8")
+    out = _host_run(tmp_path, REEL_MAIN % _lift(src, "static void on_reel_tick(unsigned *r)"),
+                    flags=("-no-pie", "-fno-pie")).splitlines()
+    if not out:
+        pytest.skip("this host links above 4 GB even with -no-pie")
+    assert out == ["game's clip: runs", "ours: waits 0", "another surface: runs"]
+    arm = _lift(src, "static void ck_arm(void)")
+    assert 'hook(fn("reel_tick"), on_reel_tick)' in arm
+    assert arm.index("reel_tick") < arm.index("have_sites(s)")      # (not gated on the clip-back's sites)
+
+
+REELS = ("aerosmith-1.16", "aerosmith_le-1.15", "aerosmith_le-1.16", "guardians-1.15", "guardians_le-1.14",
+         "guardians_le-1.15", "james_bond_le-1.06", "james_bond_pro-1.06", "led_zeppelin_le-1.22",
+         "led_zeppelin_pro-1.22", "metallica_spike-1.03", "metallica_spike-1.04", "rush_le-1.18", "rush_le-1.19",
+         "rush_pro-1.19", "stranger_things-1.13", "stranger_things_le-1.12", "stranger_things_le-1.13")
+
+
+def test_every_port_whose_game_has_the_reel_names_its_tick():
+    """PAD-725: found on every clip v2 build by what it calls (surface_position, surface_seek, surface_play) and its
+    prologue (push {r4-r10, lr}; mov r4, r0); no other clip v2 build has one"""
+    on = sorted(p.name[:-5] for p in PORTS.glob("*.port")
+                if re.search(r"^site reel_tick\s+0x[0-9a-f]{8} 0xe92d47f0 0xe1a04000$", p.read_text(encoding="utf-8"), re.M))
+    assert on == sorted(REELS)
+    assert len([p for p in PORTS.glob("*.port") if "site reel_tick" in p.read_text(encoding="utf-8")]) == len(REELS)

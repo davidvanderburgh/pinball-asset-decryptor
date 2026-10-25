@@ -71,6 +71,13 @@ site surface_find     0x00630e38 0xe92d4070 0xe24dd008
 site surface_set_video 0x0062851c 0xe5d030d4 0xe92d4ff0
 site surface_play     0x00626328 0xe5d030d4 0xe92d43f0
 site surface_stop     0x00625ad8 0xe5d030d4 0xe92d40f0
+# PAD-725: the surface's own seek, length and position (PAD-530's, from Bond 1.06): a mode's clip the game's own
+# clip took the surface from comes back where it would be by then. Placed by the James Bond LE 1.06 recipe at
+# its distances from surface_play (-0x36c / -0x6b4 / -0x510), each proven by its call: the player function it
+# calls calls gst_element_seek / query_duration / query_position.
+site surface_seek     0x00625fbc 0xe92d43f0 0xe1a07003
+site surface_duration 0x00625c74 0xe5d030d4 0xe92d40f0
+site surface_position 0x00625e18 0xe5d030d4 0xe92d40f0
 site switch_edge      0x00397058 0xe308384c 0xe3403089
 site switch_drain     0x00397d38 0xe92d4ff0 0xe3089504
 site live_records     0x003f3c7c 0xe30d2ea8 0xe3402089

@@ -47,6 +47,17 @@ site surface_find     0x0057c5e0 0xe92d4070 0xe24dd008
 site surface_set_video 0x00573cc4 0xe5d030d4 0xe92d4ff0
 site surface_play     0x00571ad0 0xe5d030d4 0xe92d43f0
 site surface_stop     0x00571280 0xe5d030d4 0xe92d40f0
+# PAD-725: the surface's own seek, length and position (PAD-530's, from Bond 1.06): a mode's clip the game's own
+# clip took the surface from comes back where it would be by then. Placed by the James Bond LE 1.06 recipe at
+# its distances from surface_play (-0x36c / -0x6b4 / -0x510), each proven by its call: the player function it
+# calls calls gst_element_seek / query_duration / query_position.
+site surface_seek     0x00571764 0xe92d43f0 0xe1a07003
+site surface_duration 0x0057141c 0xe5d030d4 0xe92d40f0
+site surface_position 0x005715c0 0xe5d030d4 0xe92d40f0
+# PAD-725: the backdrop on the bank's surface, as Bond's (PAD-521): a mode's loop plays there again whenever it
+# is idle, and a clip the game loops there gets one pass before the loop takes it back. Emulator-proven on the
+# newest build of every title with a clip v2 bank, 2026-10-25.
+value backdrop_surface 1
 site find_text        0x0057bd88 0xe92d4070 0xe24dd008
 site agent_header     0x005dd590 0xe92d40f8 0xe2505000
 site agent_begin      0x005e7efc 0xe590c004 0xe1a00001

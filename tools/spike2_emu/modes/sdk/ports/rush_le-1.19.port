@@ -57,6 +57,10 @@ site surface_stop     0x00494818 0xe5d030d4 0xe92d40f0
 site surface_seek     0x00494cfc 0xe92d43f0 0xe1a07003
 site surface_duration 0x004949b4 0xe5d030d4 0xe92d40f0
 site surface_position 0x00494b58 0xe5d030d4 0xe92d40f0
+# PAD-725: the game's reel (a clip of its own kept in step with a song): its tick waits while a clip of
+# ours has the bank's surface. Found by what it calls (surface_position, surface_seek, surface_play) and
+# its prologue (push; mov r4, r0; ldr r0, [r0, #0x1c]; cmp r0, #0; popeq).
+site reel_tick       0x00292fbc 0xe92d47f0 0xe1a04000
 site agent_header     0x004ec8c8 0xe92d40f8 0xe2505000
 site agent_begin      0x004f7234 0xe590c004 0xe1a00001
 site balls_in_play    0x00160064 0xe92d4010 0xe3044e20

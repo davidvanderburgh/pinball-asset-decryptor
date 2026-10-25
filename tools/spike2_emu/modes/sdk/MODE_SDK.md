@@ -2853,6 +2853,24 @@ what it calls: on the newer player, the function that its call on the player (`[
 put back, the runtime reads where it plays a second later (`clip: "<clip>" plays at N ms, 1 s
 after it was put back at M ms`), so a log shows the seek took.
 
+**The game's reel (PAD-725).** Aerosmith, Guardians, the Bonds, Led Zeppelin, Metallica, Rush and Stranger Things
+keep a clip of their own in step with a timeline of theirs (a song): while its window is open, the reel's tick reads
+the surface's position every frame and pauses, seeks and plays the surface to where its timeline is, whatever clip is
+on it. In the emulator it paused a clip of ours 50-100 ms in on Aerosmith 1.16 and Guardians 1.15 (the surface read
+state 1, so the clip counted as over and was not put back), and it played the first half second of the backdrop loop
+over and over (the game's play from the reel every 133 ms, the loop asked for again every 500 ms). With
+
+```
+site reel_tick          0x...    # push {r4-r10, lr}; mov r4, r0; ldr r0, [r0, #0x1c]; cmp r0, #0; popeq
+```
+
+the runtime hooks the tick, and while the last clip put on the bank's surface is ours (a clip, the backdrop, or one of
+ours that ended there), a reel whose surface (`[reel + 0x1c]`) is the bank's is handed a reel with no surface, so its
+tick returns at once (`clip: the game's reel 0x... would keep the bank's surface in step - it waits while ours has
+it`). Once the game puts a clip of its own there, the reel takes it up again and seeks it to where its timeline is.
+The tick was found on every clip v2 build by what it calls (`surface_position`, `surface_seek`, `surface_play`) and that
+prologue: 18 ports carry it, and no other clip v2 build has one.
+
 For a test, `pm_game_clip(name, loop)` puts a bank clip on the surface the way the game puts
 its own (not marked as the mode's), so a rig can stand in for a title's Ball Lock; and
 `/dump/cliplog.on` at start-up logs every clip of the game's on the bank's surface (`clip log:
@@ -5180,6 +5198,18 @@ out); with `text backdrop_idle MainPlayLoop` the runtime watches the game's asks
 `surface_set_video`, shared with PAD-446's clip variants) and gives the loop the surface back on the next tick. Any
 other clip of the game's is waited out. Runs e4-e6 (the same sequence) kept the loop from the intro's end to the mode's;
 the game did not ask for its main-play video in them, so the take-back itself has not been seen yet.
+
+**PAD-725: every clip v2 title.** `value backdrop_surface 1` is in all 45 ports whose clips play on the game's own
+bank surface (not the 15 whose surface the app grafts into the HUD, which the game never puts a clip on, nor Jaws Pro
+1.02 and Godzilla Pro 1.16, which take the older `clip_play` route). Most titles have no name for their main-play
+video, and several LOOP a background of their own on the bank's surface in play (Dungeons & Dragons'
+`TownBackground_<town>` / `TravelBackground_<path>`, Foo Fighters' `BG_Loop_Van_34`, John Wick's `NY_Night`, Jurassic
+Park's `JawsMapProgressBGLooping`, from `/dump/cliplog.on`). Without a name the loop waited behind one of those for good.
+So a clip the game loops (`surface_play`'s loop flag, the hook the clip-back already has) is a background on every
+title: it gets one pass, its own length and at most 3 s, as it does under a mode's clip, and then the mode's loop takes
+the surface back (`backdrop: the game loops "<clip>" - one pass of it, then the loop takes the surface back`).
+`text backdrop_idle` still takes it back at once, and on a port without that line the last clip the game looped in a
+game is its main-play video, the one put back when a clip of the mode's ends and leaves the surface empty.
 
 ### The game's status bar (PAD-521)
 

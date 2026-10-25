@@ -58,6 +58,10 @@ site surface_stop     0x003fd348 0xe5d030d4 0xe92d40f0
 site surface_seek     0x003fd82c 0xe92d43f0 0xe1a07003
 site surface_duration 0x003fd4e4 0xe5d030d4 0xe92d40f0
 site surface_position 0x003fd688 0xe5d030d4 0xe92d40f0
+# PAD-725: the backdrop on the bank's surface, as Bond's (PAD-521): a mode's loop plays there again whenever it
+# is idle, and a clip the game loops there gets one pass before the loop takes it back. Emulator-proven on the
+# newest build of every title with a clip v2 bank, 2026-10-25.
+value backdrop_surface 1
 site agent_header     0x004553f8 0xe92d40f8 0xe2505000
 site agent_begin      0x0045fd64 0xe590c004 0xe1a00001
 site balls_in_play    0x003237c8 0xe92d4010 0xe30e4f2c

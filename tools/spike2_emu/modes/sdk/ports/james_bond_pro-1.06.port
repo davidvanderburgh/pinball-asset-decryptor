@@ -53,6 +53,10 @@ site surface_stop     0x00574878 0xe5d030d4 0xe92d40f0
 site surface_seek     0x00574d5c 0xe92d43f0 0xe1a07003
 site surface_duration 0x00574a14 0xe5d030d4 0xe92d40f0
 site surface_position 0x00574bb8 0xe5d030d4 0xe92d40f0
+# PAD-725: the game's reel (a clip of its own kept in step with a song): its tick waits while a clip of
+# ours has the bank's surface. Found by what it calls (surface_position, surface_seek, surface_play) and
+# its prologue (push; mov r4, r0; ldr r0, [r0, #0x1c]; cmp r0, #0; popeq).
+site reel_tick       0x0044fe00 0xe92d47f0 0xe1a04000
 text backdrop_idle MainPlayLoop
 # PAD-722: the backdrop on the bank's surface, as on LE 1.06 (PAD-521): a mode's loop is played there again whenever
 # it is idle. Seen on the glass in the emulator 2026-10-25 (stock card, hidden, muted): a blocks mode's own loop in the

@@ -54,6 +54,11 @@ static int disp_clip_ours;
 static int bd_v2 = 1;
 static int ck_ours, ck_last_ours;                                /* PAD-530: our own asks of the surface */
 static unsigned ck_game_display(void) { return 0; }              /* PAD-639: no display of the game's over the TV */
+#define CK_LOOP_MS 3000                                           /* PAD-725: a loop of the game's: one pass */
+static unsigned long ck_gl_ms;
+static long long ck_gl_len;
+static char ck_game_last[96];
+static long long ck_ms(const char *which, void *surf) { return 1000; }   /* the game's loop is 1 s long */
 struct pm_mode { const char *name; };
 static const struct pm_mode *running, *current;                 /* PAD-658: whose the backdrop is */
 """
@@ -116,12 +121,26 @@ def test_the_port_opts_in_and_the_runtime_needs_clip_v2_for_it():
     assert "if (!bd_v2 && bd.on && !clip.on" in _lift(src, "int pm_backdrop(const char *name)")
 
 
-def test_only_the_build_it_was_seen_on_opts_in():
-    """Seen on the glass in the emulator on James Bond LE 1.06 (2026-10-11) and Pro 1.06 (PAD-722, 2026-10-25)."""
+def test_every_port_whose_clips_play_on_the_games_own_bank_opts_in():
+    """Seen on the glass in the emulator on James Bond LE 1.06 (2026-10-11) and Pro 1.06 (PAD-722, 2026-10-25), and on
+    the newest build of every title with a clip v2 bank (PAD-725, 2026-10-25). Not on a port whose surface the app
+    grafts into the HUD (`value clip_surface_hide 1`: the game never puts a clip there), nor on one the runtime plays
+    clips on through `clip_play` (Jaws Pro 1.02, Godzilla Pro 1.16)."""
     ports = RUNTIME.parent / "ports"
-    on = sorted(p.name for p in ports.glob("*.port")
-                if re.search(r"^value\s+backdrop_surface\s+1\b", p.read_text(encoding="utf-8"), re.M))
-    assert on == ["james_bond_le-1.06.port", "james_bond_pro-1.06.port"]
+    v1 = ("clip_play", "clip_stop", "video_player", "video_surface", "surface_state", "player_advance", "display_draw")
+    want, on = [], []
+    for p in sorted(ports.glob("*.port")):
+        t = p.read_text(encoding="utf-8")
+        if re.search(r"^value\s+backdrop_surface\s+1$", t, re.M):
+            on.append(p.name)
+        if not re.search(r"^site surface_set_video ", t, re.M) or re.search(r"^value clip_surface_hide\s+1", t, re.M):
+            continue
+        if all(re.search(r"^site %s " % s, t, re.M) for s in v1) and re.search(r"^data display_holder ", t, re.M) \
+                and re.search(r"^value display_at ", t, re.M):     # the runtime's clip_play route (its clip_s/d/v)
+            continue
+        want.append(p.name)
+    assert on == want and len(on) == 45
+    assert "james_bond_le-1.06.port" in on and "jaws_pro-1.02.port" not in on and "rush_le-1.19.port" not in on
 
 
 def test_the_games_main_play_video_gives_the_loop_the_surface_back():
@@ -138,3 +157,38 @@ def test_the_games_main_play_video_gives_the_loop_the_surface_back():
     assert src.count('hook(fn("surface_set_video")') == 1                # a site takes one hook
     port = (RUNTIME.parent / "ports" / "james_bond_le-1.06.port").read_text(encoding="utf-8")
     assert re.search(r"^text backdrop_idle MainPlayLoop$", port, re.M)
+
+
+GLOOP_MAIN = r"""
+static void tick(unsigned long ms) { now_ms += ms; bd2_tick(); }
+int main(void)
+{
+    pm_backdrop("LOOP");
+    tick(16);                                       /* the loop plays */
+    tick(600);
+    strcpy(video, "TownBackground_Arabel");         /* the game LOOPS a background of its own over it (its play hook) */
+    strcpy(ck_game_last, video);
+    ck_gl_ms = now_ms | 1;
+    state = 2;
+    tick(16); tick(500);                            /* its one pass (1 s here) still runs: the loop waits */
+    printf("waited\n");
+    tick(600);                                      /* one pass over: the loop takes the surface back */
+    printf("back %lu\n", ck_gl_ms);
+    tick(600); tick(600);                           /* ours again: nothing more */
+    printf("done\n");
+    return 0;
+}
+"""
+
+
+def test_a_loop_of_the_games_gets_one_pass_then_the_backdrop_comes_back(tmp_path):
+    """PAD-725: a clip the game loops on the surface (D&D's TownBackground_<town>) is a background on every title -
+    before, the backdrop waited behind it for good unless the port named it in `text backdrop_idle`"""
+    src = RUNTIME.read_text(encoding="utf-8")
+    parts = [_bd_struct(src)] + [_lift(src, s) for s in (
+        "static void bd_release(const char *why)", "static void bd2_play(void *surf)", "static void bd2_tick(void)\n{",
+        "int pm_backdrop(const char *name)", "int pm_backdrop_once(const char *name)", "int pm_backdrop_showing(void)")]
+    out = _host_run(tmp_path, PRELUDE + "\n".join(parts) + GLOOP_MAIN, flags=("-no-pie", "-fno-pie")).splitlines()
+    if not out:
+        pytest.skip("this host links above 4 GB even with -no-pie")
+    assert out == ["PLAY LOOP", "waited", "PLAY LOOP", "back 0", "done"]

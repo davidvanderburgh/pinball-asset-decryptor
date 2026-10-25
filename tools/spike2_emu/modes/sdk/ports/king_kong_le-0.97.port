@@ -362,6 +362,10 @@ site surface_stop     0x0064c480 0xe5d030d4 0xe92d40f0
 site surface_seek     0x0064c964 0xe92d43f0 0xe1a07003
 site surface_duration 0x0064c61c 0xe5d030d4 0xe92d40f0
 site surface_position 0x0064c7c0 0xe5d030d4 0xe92d40f0
+# PAD-725: the backdrop on the bank's surface, as Bond's (PAD-521): a mode's loop plays there again whenever it
+# is idle, and a clip the game loops there gets one pass before the loop takes it back. Emulator-proven on the
+# newest build of every title with a clip v2 bank, 2026-10-25.
+value backdrop_surface 1
 # Insider Connected score gate (item 166): the request header constructor (the endpoint in r1) and the
 # message-begin thunk every sender calls next; the runtime refuses the score reports there
 # (MODE_SDK.md, "Insider Connected: no score leaves a machine that carries modes")

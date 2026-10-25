@@ -363,6 +363,10 @@ text backdrop_idle MainPlayLoop
 site surface_seek     0x00578404 0xe92d43f0 0xe1a07003
 site surface_duration 0x005780bc 0xe5d030d4 0xe92d40f0
 site surface_position 0x00578260 0xe5d030d4 0xe92d40f0
+# PAD-725: the game's reel (a clip of its own kept in step with a song): its tick waits while a clip of
+# ours has the bank's surface. Found by what it calls (surface_position, surface_seek, surface_play) and
+# its prologue (push; mov r4, r0; ldr r0, [r0, #0x1c]; cmp r0, #0; popeq).
+site reel_tick       0x003fc044 0xe92d47f0 0xe1a04000
 
 # PAD-521: the game's own status bar under the TV (scene hud 7de1c159): the score display's getter. Its object keeps
 # the bar's text node at +0x118, its bar_Color node at +0x114, the wipe's frame at +0x11c and four flags at +0x11e (bar,

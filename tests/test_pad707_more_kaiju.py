@@ -400,10 +400,15 @@ def test_a_won_place_shows_the_claw_a_locked_one_the_lock(tmp_path):
     assert "SHOW PadSel_KUMONGA_Done" in shown and "SHOW PadSel_KAMACURAS_Lock" in shown
     assert "HIDE PadSel_KIRYU_Done" in shown and "SHOW PadSel_KIRYU_Done" not in shown
     assert "SHOW PadSel_KIRYU_Lock" not in shown
-    assert "HIDE T1_1_Artbox" in shown and "SHOW T1_3_Artbox" in shown and "SHOW T1_2_Artbox" in shown
+    assert "HIDE T1_1_Artbox" in shown
+    assert "Artbox" not in shown.replace("HIDE T1_1_Artbox", "")   # the game's boxes are the game's to show (run22:
+    #                                                                shown, an open place's box drew its footprint)
     out = menu(tmp_path, *THREE, "state", 0, 2, "tick", "open", 3, "tick")      # the game's own win of place 0
     shown = out.split("selection screen opens")[1]
-    assert "HIDE PadSel_KUMONGA_Done" in shown and "SHOW T1_1_Artbox" in shown
+    assert "HIDE PadSel_KUMONGA_Done" in shown and "Artbox" not in shown
+    out = menu(tmp_path, *THREE, "open", 0, "right", "gamepick", "won", "state", 0, 2, "tick", "open", 3, "tick",
+               "gameover", "tick", "tick")                              # the game over: our hide undone, once
+    assert out.split("selection screen opens")[2].count("SHOW T1_1_Artbox") == 1
 
 
 def test_the_games_pick_under_a_monster_is_the_monsters(tmp_path):

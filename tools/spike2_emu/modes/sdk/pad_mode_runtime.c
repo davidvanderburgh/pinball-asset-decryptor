@@ -9926,10 +9926,11 @@ static struct {
     signed char playing[5];             /* per player: the member whose mode has the pick now */
     signed char won[5][7];              /* per player and place: the member who won its battle; -1 = none of ours */
     void *box[7];                       /* each place's own state box (its claw), hidden where one of ours won */
-    unsigned box_tries;
+    unsigned box_hid;                   /* bit n: place n's box hidden by us (the game keeps an open place's hidden
+                                         * itself: only our own hide is ever undone) */
 } more = { 0, 0, -1, -1, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 },
            { { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 },
-             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0 };
+             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u };
 static void more_won_shift(int k, int by)   /* member k joined (by 1) or left (by -1): the wins follow */
 {
     int p, s;
@@ -10163,8 +10164,14 @@ static void more_draw(void)
             if (more_m[k].lock) pm_show(more_m[k].lock, st != 0 && st != 2);
             if (more_m[k].done) pm_show(more_m[k].done, st == 2 && won && won[more_m[k].slot] == k);
         }
-        for (s = 0; s < 7; s++)
-            if (more.box[s]) pm_show(more.box[s], !(won && won[s] >= 0 && more_state(s) == 2));
+        for (s = 0; s < 7; s++) {
+            unsigned bit = 1u << s;
+            int hide = won && won[s] >= 0 && more_state(s) == 2;
+            if (!more.box[s]) continue;
+            if (hide) { pm_show(more.box[s], 0); more.box_hid |= bit; }
+            else if (more.box_hid & bit) { pm_show(more.box[s], 1); more.box_hid &= ~bit; }   /* (run22: shown, an
+                                         * open place's box put its footprint frame on every tile of a new game) */
+        }
     }
 }
 
@@ -10307,6 +10314,8 @@ static void more_tick(void)
             more.lost[q] = more.playing[q] = -1;
             for (s = 0; s < 7; s++) more.won[q][s] = -1;
         }
+        for (s = 0; s < 7; s++)             /* the game over: the boxes we hid are the game's again */
+            if ((more.box_hid >> s) & 1u) { if (more.box[s]) pm_show(more.box[s], 1); more.box_hid &= ~(1u << s); }
         more.open = 0;
         more.cur = -1;
     }

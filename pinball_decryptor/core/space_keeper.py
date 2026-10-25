@@ -411,9 +411,13 @@ def plan_host(entries, now):
 
 def plan_cards(rows, now):
     """Cards not booted for 30 days.  A card never booted (no ``.boot``) has
-    no date here and stays: the rig's own eviction takes those first."""
+    no date here and stays: the rig's own eviction takes those first.  The
+    library's newest builds (``pinned``, PAD-727) stay however long they go
+    unbooted: they are the cache's reason for being."""
     out = []
     for r in rows:
+        if r.get("pinned"):
+            continue
         boot = int(r.get("boot") or 0)
         if boot and now - boot >= UNUSED_SECS:
             out.append({"path": r["label"], "size": int(r["real_kb"]) * 1024,

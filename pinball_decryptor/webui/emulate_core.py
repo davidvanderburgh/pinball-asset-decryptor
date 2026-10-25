@@ -317,9 +317,11 @@ def parse_cache_list(text):
     dialog opens in.  ``disk``: ``(avail_kb, size_kb)`` or None.  Lines are
     tab-separated with the source LAST because labels and source paths may
     carry spaces.  Pure, like :func:`playfield_launch`, so the format is
-    testable without a WSL or a 7 GB card.
+    testable without a WSL or a 7 GB card.  ``pinned`` is True for the
+    library's newest builds (a ``pinned`` line names them, PAD-727): the rig
+    never evicts those, and neither does the automatic clean-up.
     """
-    entries, disk = [], None
+    entries, disk, pinned = [], None, set()
     for line in (text or "").splitlines():
         parts = line.split("\t")
         if parts[0] == "entry" and len(parts) >= 6:
@@ -333,11 +335,15 @@ def parse_cache_list(text):
                 })
             except ValueError:
                 continue
+        elif parts[0] == "pinned" and len(parts) >= 2:
+            pinned.add("\t".join(parts[1:]))
         elif parts[0] == "disk" and len(parts) >= 3:
             try:
                 disk = (int(parts[1]), int(parts[2]))
             except ValueError:
                 pass
+    for e in entries:
+        e["pinned"] = e["label"] in pinned
     entries.sort(key=lambda e: e["real_kb"], reverse=True)
     return entries, disk
 

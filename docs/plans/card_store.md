@@ -109,3 +109,44 @@ Nothing reads `older versions`: not a sweep list, not the cache, not the app's p
   evicted first, since the pre-cached newest builds are booted more recently.
 - A new image arriving in the spike2 folder: `precache.sh` again (seconds for everything already there), or the
   first run copies it.
+
+## Permanent: the library is never evicted (PAD-727)
+
+David, 2026-10-25, watching PAD-723's 53-build census copy cards off D: again: *"Why are we copying so many images
+over? They should be cached on c"*, and the ticket: *"Need a permanent spike 2 cache on c for dev"*.
+
+The store IS on C: (`pad-cards.vhdx` in `%LOCALAPPDATA%`), and on 2026-10-20 it held all 60 library cards. But its
+eviction was still plain least-recently-booted, and on 2026-10-24 tickets that booted older versions on purpose
+(PAD-714's older builds: Batman 1.13, D&D LE 1.00, Elvira 3 1.11, Foo Fighters LE 1.03, ...) and two 15 GB Heisei
+custom builds from the Desktop filled it: every new copy evicted the least recently booted newest builds. PAD-723's
+census (2026-10-25 08:58) then found 16 of its 53 cached and copied 37 off D:, 1-6 minutes each, evicting more
+(both Turtles, both Venoms, both King Kongs, Star Wars ELG) to make room.
+
+What changed:
+
+1. **cardmount.sh pins the library** (`cache_pinned`): an entry whose `.src` image is a file directly in the library
+   folder (`PAD_CARD_LIBRARY`, default `/mnt/d/Pinball/images/Stern/spike2`, the folder precache.sh fills; the repo's
+   `images/` junction spelling counts too) and still has the entry's stamp is never evicted. A newer build replacing
+   it, or the image moving to `older versions`, makes it an ordinary entry again. A machine without the folder pins
+   nothing: a user's cache works as before.
+2. **Dead entries go first**: an entry whose image is gone or changed can never be booted from again, so
+   `cache_make_room` takes those before any least-recently-booted one. When only the library is left, the card being
+   asked for boots where it lies ("nothing evictable (N library cards kept) - running off the original").
+3. **The store keeps a 2 GB margin, not 30**: the 30 GB cardstage.sh asks was the distro's own room on a distro disk;
+   the store holds nothing but the cache (`PAD_STORE_KEEP_FREE_GB`). With ~300 GB of library pinned in 393 GB, that
+   is ~90 GB for older versions and customs rather than ~60.
+4. **The app's 30-day clean-up leaves the library alone**: `--cache-list` adds a `pinned <label>` line after a pinned
+   entry (a line of its own, so the old row format is unchanged), `parse_cache_list` sets `pinned`, and
+   `space_keeper.plan_cards` skips it. Manage disk space can still delete one by hand.
+5. **Every attach at logon tops the library up**: `cardstore.ps1 mount` (the Startup entry) runs `cardstore.ps1 fill`
+   after a real attach - precache.sh, detached and hidden, as root, under the machine's one copy lock, logging to
+   `/mnt/wsl/cards/precache.log`. Seconds when nothing is new; a new image dropped into the library is copied without
+   anyone remembering to. `-NoFill` skips it. `status` says "library: N of M newest builds held, never evicted".
+
+Measured 2026-10-25: before, the worktree's `--cache-list` held 53 of the 60 library cards (the four Heisei customs,
+both Beatles i107 variants and Turtles Pro 1987-upscaled had been evicted). `cardstore.ps1 fill` copied those 7 in
+9 minutes and found the other 53 in seconds: "library: 60 of 60 newest builds held, never evicted", 75 entries,
+6.7 GB free. A dry run of `cache_make_room` over a shadow of the real store's entries (their real `.src` and `.boot`,
+empty sparse copies, `df` from the real sizes) asked for 60 GB evicted ten older versions by boot date; asked for
+200 GB it evicted the other five non-library entries (Led Zeppelin 1.20 x2, Venom LE 1.06, Heisei v21 and v22) and
+then answered "nothing evictable (60 library cards kept) - running off the original", the 60 library cards untouched.

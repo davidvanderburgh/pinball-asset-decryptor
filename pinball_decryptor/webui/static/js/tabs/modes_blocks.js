@@ -79,6 +79,12 @@ const TIP = {
   timers: "A timer counts down in milliseconds, apart from the mode's clock: start it from a block (any value, so a window can get shorter), and a When it runs out script runs the moment it does. A ball ending stops every timer.",
   timerStart: "Starts the timer (again, if it runs) at this many milliseconds: 1000 = one second. Any value: a variable makes a window that shrinks.",
   timerLeft: "The milliseconds the timer has left; 0 when it is not running.",
+  combo: "A combo: these shots made one after another, in this order, each within this many seconds of the one before. Two shots: the second follows the first; more: an ordered combo (ramp, then loop, then ramp). A step may be any shot, a lit shot (one this mode has lit as it is made, so a lit shot, then a lit shot, chains every lit shot made in time), or one of several shots (press or). Other shots made between do not break it (the ball passes spinners and lanes on its way), its first shot made again begins it again, and only the window running out ends it. Judged on the shots the mode hears, the same on every game. Each shot that makes a combo is one more of the combos in a row; its name lets the shots made so far of it be counted.",
+  comboStep: "A step of the combo: a shot of the game's, any shot, or a lit shot (one this mode has lit as it is made, not held dark)",
+  comboOr: "Or another shot: this step is made by any one of them (a pop bumper or the Mecha lane), up to four",
+  comboName: "Its name, for the value \"shots made of a combo\" (a HUD counter's 2 of 3); none is needed otherwise",
+  combo_chain: "The combos in a row for the player up: one more for each shot that makes a combo, back to 0 when the window of the last one lapses with no other, when the ball ends, and as the mode starts and ends. The \"x combo\" to multiply a score by, or a COMBO counter on the HUD.",
+  comboSteps: "How many of a combo's shots the player has made so far, in its order and in its window (2 after the ramp and the loop of ramp, then loop, then ramp); 0 once its window lapses.",
   wait: "A Start the mode block while a multiball or one of the game's own modes runs does nothing, and the mode stays ready: the next one after it starts it, as the example modes do.",
   lit: "A Light the mode at block has lit it for the player up, and it has not started since.",
   canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
@@ -115,6 +121,7 @@ const TIP = {
   litMore: "Another insert lit with it. With more than one, Chase runs the light across them in turn, as James Bond cycles its villains on the Right ramp while one of its mini-wizards is lit; the other patterns light them all at once.",
   litSolid: "One insert more, held solid in its own color while the mode is lit and handed back with the rest: the film's insert (Y.O.L.T., DIAMONDS ARE FOREVER) as the game holds it for one of its own mini-wizards. It shows even while one of the game's modes is in the way.",
   bar: "While it runs, its name goes in the game's own status bar under the screen, in this color, with its clock draining along it, as the game shows its own modes (James Bond: Goldfinger's Jackpot in gold). At the end the bar stays full through its total, then the game has it back; a drain gives it back at once.",
+  barFill: "What fills the bar: its clock draining along it, or a value out of another filling it, as the game's own mini-wizards fill theirs with the shots made. \"Times it has scored\" out of 12 fills a twelfth each time one of its Score blocks pays (one on each shot: full at the 12th shot); any value will do (a variable a block counts up). It stays as it was through its total.",
   barOff: "This card's game has no status bar a mode can use: the mode runs the same without it.",
   info: "A line under its name while it runs: its words and a value as it changes, \"SUPER JACKPOT = 53,200,000\", as the game's own modes show one (James Bond: under the status bar). Out of the way of the game's own displays; gone at its end.",
   infoPlace: "The Scenes editor on the game's screen with the line (and its own screen, if it has one) where they will show: drag or size it there, and it is saved into the mode. Untouched, it goes where the game shows its own (James Bond: under the status bar).",
@@ -139,10 +146,15 @@ export function hatTemplates(ch, timers) {
     { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 },
     { kind: "ball_end" }, { kind: "drain", when: "running" }, { kind: "event", event: ev, when: "any" },
     { kind: "timer_done", timer: (timers[0] || {}).name || "" },
+    // PAD-708: a combo of two shots (an ordered one: add shots to it), and a chain of lit shots
+    { kind: "combo", shots: [shot, (ch.shots || [])[1] || shot], seconds: 3, when: "running" },
+    { kind: "combo", shots: ["lit", "lit"], seconds: 3, when: "running" },
     // PAD-615: only where the game names challenges a mode may take the place of
     ...((ch.challenges || []).length ? [{ kind: "challenge", challenge: ch.challenges[0] }] : []),
     // PAD-706: only where the game has a battle selection a mode may take a place on (proven builds)
     ...((ch.roster || []).length ? [{ kind: "battle", slot: 0, name: ch.roster[0] }] : []),
+    // PAD-710: only where the game lets a mode run in the place of one of its own modes (proven builds)
+    ...((ch.places || []).length ? [{ kind: "game_mode", mode: ch.places[0].id, name: ch.places[0].name }] : []),
   ];
 }
 
@@ -189,10 +201,17 @@ export function stmtTemplates(ch, vars, prog = {}) {
   ];
 }
 
-function valueTemplates(ch, vars, timers) {
+function valueTemplates(ch, vars, timers, prog = {}) {
   return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" },
     { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "timer_left", timer: ((timers || [])[0] || {}).name || "" },
+    { k: "combo_chain" }, { k: "combo_steps", combo: comboNames(prog)[0] || "" },          // PAD-708
     { k: "balls" }, { k: "player" }, { k: "op", op: "+", a: null, b: null }];
+}
+
+// PAD-708: the names of the program's combos (a When shots are made one after another's own name)
+function comboNames(prog) {
+  return [...new Set((prog.scripts || []).map((s) => s.hat || {}).filter((h) => h.kind === "combo" && (h.name || "").trim())
+    .map((h) => h.name.trim()))];
 }
 
 const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and", a: null, b: null },
@@ -201,7 +220,7 @@ const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and
 
 const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot this ball", scored: "times it has scored",
   total: "points so far", secs_left: "seconds left", timer_left: "ms left on a timer", balls: "balls in play",
-  player: "the player up", op: "a sum" };
+  player: "the player up", op: "a sum", combo_chain: "combos in a row", combo_steps: "shots made of a combo" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
@@ -296,14 +315,14 @@ function X({ onClick, title = "Take this block out" }) {
 function slotMenu(e, kind, ed, path) {
   const items = kind === "bool"
     ? condTemplates().map((t) => ({ label: COND_WORDS[t.k], onClick: () => ed.set(path, t) }))
-    : valueTemplates(ed.ch, ed.vars, ed.timers).map((t) => ({ label: VALUE_WORDS[t.k], onClick: () => ed.set(path, t) }));
+    : valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog).map((t) => ({ label: VALUE_WORDS[t.k], onClick: () => ed.set(path, t) }));
   openMenu(e.currentTarget, items);
 }
 
 function Slot({ kind, value, path, ed, optional, empty }) {
   const [over, setOver] = useState(false);
   const fits = () => dragging && dragging.tpl && (kind === "bool" ? dragging.tpl.k && condTemplates().some((t) => t.k === dragging.tpl.k)
-    : dragging.tpl.k && valueTemplates(ed.ch, ed.vars, ed.timers).some((t) => t.k === dragging.tpl.k));
+    : dragging.tpl.k && valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog).some((t) => t.k === dragging.tpl.k));
   const drop = {
     onDragOver: (e) => { if (fits()) { e.preventDefault(); e.stopPropagation(); setOver(true); } },
     onDragLeave: () => setOver(false),
@@ -328,6 +347,7 @@ function Val({ e, path, ed }) {
       onChange=${(v) => set("name", v)} />`;
     case "hits": return html`<span class="bk-w" ...${tip(TIP.hits)}>hits of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
     case "timer_left": return html`<span class="bk-w" ...${tip(TIP.timerLeft)}>ms left on</span><${TimerPick} value=${e.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
+    case "combo_steps": return html`<span class="bk-w" ...${tip(TIP.comboSteps)}>shots made of</span><${Pick} value=${e.combo} options=${comboNames(ed.prog)} missing="(no combo has that name)" onChange=${(v) => set("combo", v)} />`;
     case "op": return html`<span class="bk-w">(</span><${Slot} kind="num" value=${e.a} path=${[...path, "a"]} ed=${ed} />
       <${Pick} value=${e.op} options=${OPS} width=${54} onChange=${(v) => set("op", v)} />
       <${Slot} kind="num" value=${e.b} path=${[...path, "b"]} ed=${ed} /><span class="bk-w">)</span>`;
@@ -352,9 +372,13 @@ function StmtBody({ b, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
   switch (b.op) {
     case "start_mode": return html`<span class="bk-w">Start the mode</span>`;
-    case "end_mode": return (ed.ch.roster || []).length || b.won   // PAD-706: the battle it took the place of, won
-      ? html`<span class="bk-w">End the mode</span><${Pick} value=${b.won ? "won" : "-"} options=${END_OPTS} onChange=${(v) => set("won", v === "won")} title=${END_WON_TIP} />`
-      : html`<span class="bk-w">End the mode</span>`;
+    case "end_mode": {   // PAD-706: the battle it took the place of, won; PAD-710: the game's mode, completed
+      const hats = ((ed.prog || {}).scripts || []).map((sc) => (sc.hat || {}).kind);
+      const place = hats.includes("game_mode") && !hats.includes("battle");
+      return (ed.ch.roster || []).length || (ed.ch.places || []).length || b.won
+        ? html`<span class="bk-w">End the mode</span><${Pick} value=${b.won ? "won" : "-"} options=${place ? END_PLACE_OPTS : END_OPTS} onChange=${(v) => set("won", v === "won")} title=${place ? END_PLACE_TIP : END_WON_TIP} />`
+        : html`<span class="bk-w">End the mode</span>`;
+    }
     case "light_mode": {
       // PAD-503: lit at a shot, with one more insert of the card's (a villain's), as the game's mini-wizards are
       // PAD-521: several inserts (a chase runs across them, as the game cycles its villains), and one more held solid
@@ -597,12 +621,45 @@ const END_OPTS = [["-", "(the battle lost)"], ["won", ", the battle won"]];
 // PAD-707: a new monster on the battle selection screen, in one battle's place
 const MORE_TIP = "A new monster on the battle selection screen: the game's seven battles are fixed in its program, but the card build adds tiles of your own to its screen, laid out with the game's seven in two columns (smaller when they must be) and drawn in the card's own style. This mode's tile stands in the place of the battle you pick here: the flippers walk the cursor onto it, the Action button (or the screen's timer) picks it, and it runs this script; its mode counts as that place's battle, won or lost, and a lost one plays again at the next lit scoop. The place's own battle stays on the screen. At most 5 new monsters on a card.";
 const MORE_PIC_TIP = "The monster's picture on the battle selection screen (a PNG: its tile and its portrait, in the card's own frames). With none, its badge's picture, else a tile lettered with its name.";
+// PAD-710: what the game-mode hat does, and End the mode's "completed"
+const PLACE_TIP = "When the game starts this one of its own modes (the player earned it, as in any game), this script runs instead and the game's own mode never runs: put Start the mode in it. Where the app knows the game's mode framework, the game counts the mode as its own: its start as that mode starting (its start count and STARTED audit), and when the mode ends, an End the mode, completed block ending it (a mode with no such block: its own end, its clock or an End the mode block) as that mode completed - its COMPLETED audit, its wins and the wizards and unlocks the game opens for it - and the ball draining first as not completed. One mode per game mode.";
+const END_PLACE_TIP = "For a mode that runs in the place of one of the game's own modes: that mode completed. The game then counts it as completed (its audits, its wins, what it opens). A drain before it ends: not completed.";
+const END_PLACE_OPTS = [["-", "(not completed)"], ["won", ", completed"]];
 
 // PAD-615: what the challenge hat does
 // PAD-643: who launches the challenge ball, and when (block_modes.CHALLENGE_LAUNCH; a number = seconds after it starts)
 const LAUNCH_OPTS = [["clip", "when its start clip is over"], ["2", "2 s after it starts"], ["4", "4 s after it starts"], ["6", "6 s after it starts"], ["10", "10 s after it starts"], ["player", "by the player"]];
 const LAUNCH_TIP = "The challenge's ball waits in the shooter lane as the mode starts. The game launches it for the player once the mode's start clip is over (or at once, with no start clip), a set time after the mode starts, or not at all: the player launches it. Otherwise the ball starts as any other ball does: on James Bond, the left flipper button held at the launch opens the loop.";
 const CHALLENGE_TIP = "In the game's own Player Challenge mode (a one-ball game picked on the game's start menu, both flipper buttons held in attract, as a game starts, or every game when the service menu's Default Game Mode is set to a challenge), this script runs as the ball starts when this challenge is picked, and the game's own challenge does not start: put Start the mode in it. The game ends when the ball ends. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge. The start menu shows this mode's name in that challenge's place; A new challenge of its own adds it after the game's own entries instead.";
+
+// PAD-708: a combo's steps - each a shot, any shot or a lit shot - with "then" between, a shot more, a shot less
+const COMBO_STEPS_MAX = 6;
+function Secs({ value, onChange, width = 48, title }) {
+  return html`<${Field} sm mono width=${width} value=${value == null ? "" : String(value)} title=${title}
+    onChange=${(t) => { const n = Number(String(t).trim()); onChange(String(t).trim() !== "" && Number.isFinite(n) ? n : t); }} />`;
+}
+
+const COMBO_ALTS_MAX = 4;
+function ComboSteps({ h, path, ed }) {
+  const steps = Array.isArray(h.shots) ? h.shots : [];
+  const shots = (ed.ch.shots || []).map((n) => [n, n]);
+  const opts = [["lit", "a lit shot"], ["*", "any shot"], ...shots];
+  const setSteps = (list) => ed.set([...path, "shots"], list);
+  const setStep = (i, v) => setSteps(steps.map((y, j) => (j === i ? v : y)));
+  const named = (x) => x !== "lit" && x !== "*";
+  // a step of one of several shots: each with "or" between, and a × while there are two or more
+  const alts = (x, i) => x.map((y, a) => html`${a ? html`<span class="bk-w b">or</span>` : null}<${Pick} value=${y} options=${shots}
+      title=${TIP.comboStep} onChange=${(v) => setStep(i, x.map((z, b) => (b === a ? v : z)))} />${x.length > 1
+      ? html`<${X} title="Take this shot out of the step" onClick=${() => setStep(i, x.length === 2 ? x[1 - a] : x.filter((_z, b) => b !== a))} />` : null}`);
+  const orButton = (x, i) => (named(x) && (!Array.isArray(x) || x.length < COMBO_ALTS_MAX)
+    ? html`<button type="button" class="bk-x" aria-label="Or another shot" ...${tip(TIP.comboOr)}
+        onClick=${(e) => { e.stopPropagation(); setStep(i, [...(Array.isArray(x) ? x : [x]), (ed.ch.shots || [])[0] || ""]); }}>or</button>` : null);
+  return html`${steps.map((x, i) => html`${i ? html`<span class="bk-w b">, then</span>` : null}${Array.isArray(x) ? alts(x, i)
+      : html`<${Pick} value=${x} options=${opts} title=${TIP.comboStep} onChange=${(v) => setStep(i, v)} />`}${orButton(x, i)}${steps.length > 2
+      ? html`<${X} title="Take this shot out of the combo" onClick=${() => setSteps(steps.filter((_y, j) => j !== i))} />` : null}`)}
+    ${steps.length < COMBO_STEPS_MAX ? html`<button type="button" class="bk-x" aria-label="A shot more" ...${tip("A shot more, after the last: an ordered combo")}
+      onClick=${(e) => { e.stopPropagation(); const last = steps[steps.length - 1]; setSteps([...steps, Array.isArray(last) ? last[0] : last || "lit"]); }}>+</button>` : null}`;
+}
 
 export function HatBody({ h, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
@@ -619,6 +676,9 @@ export function HatBody({ h, path, ed }) {
     case "seconds_left": return html`<span class="bk-w b">When</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds are left</span>`;
     case "event": return html`<span class="bk-w b">When</span><${Pick} value=${h.event} options=${(ed.ch.events || []).map((x) => [x.name, x.label])} onChange=${(v) => set("event", v)} />${when}`;
     case "timer_done": return html`<span class="bk-w b">When timer</span><${TimerPick} value=${h.timer} ed=${ed} onChange=${(v) => set("timer", v)} /><span class="bk-w b">runs out</span>`;
+    case "combo": return html`<span class="bk-w b" ...${tip(TIP.combo)}>When</span><${ComboSteps} h=${h} path=${path} ed=${ed} />
+      <span class="bk-w b">${(h.shots || []).length > 2 ? "each within" : "within"}</span><${Secs} value=${h.seconds} title="Seconds from one shot to the next (0.5 to 60)" onChange=${(v) => set("seconds", v)} /><span class="bk-w b">s</span>${when}
+      <span class="bk-w" ...${tip(TIP.comboName)}>called</span><${Text} value=${h.name} max=${24} width=${110} placeholder="(no name)" title=${TIP.comboName} onChange=${(v) => set("name", v)} />`;
     case "battle": {                                 // PAD-706
       const roster = ed.ch.roster || [];
       // PAD-707: "m<n>" = a new monster on the screen, in battle n's place
@@ -636,6 +696,11 @@ export function HatBody({ h, path, ed }) {
       };
       if (h.more) return html`<span class="bk-w b" ...${tip(MORE_TIP)}>When the player picks it on</span><${Pick} value=${value} options=${opts} onChange=${pick} /><button type="button" class="bk-x bk-pic" ...${tip(MORE_PIC_TIP)} onClick=${picture}>${h.picture ? "Picture: " + h.picture : "Picture…"}</button>`;
       return html`<span class="bk-w b" ...${tip(BATTLE_TIP)}>When the player picks</span><${Pick} value=${value} options=${opts} onChange=${pick} /><span class="bk-w b" ...${tip(BATTLE_TIP)}>on the battle selection screen</span>`;
+    }
+    case "game_mode": {                              // PAD-710
+      const places = ed.ch.places || [];
+      const opts = places.map((x) => [String(x.id), x.name]);
+      return html`<span class="bk-w b" ...${tip(PLACE_TIP)}>When the game starts its</span><${Pick} value=${h.mode == null ? "" : String(h.mode)} options=${opts} onChange=${(v) => ed.set(path, { ...h, mode: Number(v), name: (places.find((x) => String(x.id) === v) || {}).name || "" })} /><span class="bk-w b" ...${tip(PLACE_TIP)}>(in its place)</span>`;
     }
     case "challenge": return html`<span class="bk-w b" ...${tip(CHALLENGE_TIP)}>When the player picks the challenge</span><${Pick} value=${h.challenge} options=${(ed.ch.challenges || []).map((x) => [x, x])} onChange=${(v) => set("challenge", v)} /><span class="bk-w b" ...${tip(LAUNCH_TIP)}>, its ball launched</span><${Pick} value=${h.launch || "clip"} options=${LAUNCH_OPTS} onChange=${(v) => set("launch", v)} />`;
     default: return html`<span class="bk-w b">${h.kind}</span>`;
@@ -660,7 +725,9 @@ export function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
     any_shot: "When any shot is made", switch: "When any playfield switch is hit", every: "Every N seconds", seconds_left: "When N seconds are left",
     ball_end: "When the ball drains", drain: "When a ball goes into the trough", event: "When the game does…", timer_done: "When a timer runs out",
-    challenge: "When the player picks a challenge", battle: "When the player picks a battle" }[h.kind] || h.kind;
+    challenge: "When the player picks a challenge", battle: "When the player picks a battle",
+    game_mode: "When the game starts one of its modes",
+    combo: (h.shots || []).every((x) => x === "lit") ? "When a lit shot follows a lit shot" : "When a shot follows a shot (a combo)" }[h.kind] || h.kind;
 }
 
 export function stmtLabel(b) {
@@ -709,14 +776,14 @@ function Palette({ ed }) {
     onDragStart=${(e) => { if (off) { e.preventDefault(); return; } dragging = { tpl: clone(tpl) }; e.dataTransfer.effectAllowed = "copy"; e.dataTransfer.setData("text/plain", "block"); }}
     onDragEnd=${() => { dragging = null; ed.setOver(null); }}
     onClick=${off ? null : onPress} ...${tip(off || title || TIP.palette)}>${label}</button>`;
-  const vals = valueTemplates(ed.ch, ed.vars, ed.timers);
+  const vals = valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog);
   return html`<div class="bk-palette" aria-label="Blocks">
     <div class="bk-pal-h">When</div>
     ${hatTemplates(ed.ch, ed.timers).map((h) => piece("bk-hat", hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
     ${stmtTemplates(ed.ch, ed.vars, ed.prog).filter(([_g, items]) => items.length).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
       ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t)), null, whyOff(t, ed.ch)))}`)}
     <div class="bk-pal-h">Values</div>
-    ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, "Drag into a value slot (the round holes)"))}
+    ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, t.k === "combo_chain" ? TIP.combo_chain : "Drag into a value slot (the round holes)"))}
     <div class="bk-pal-h">Conditions</div>
     ${condTemplates().map((t) => piece("bk-bool", COND_WORDS[t.k], t, null, "Drag into an If's condition slot"))}
   </div>`;
@@ -776,6 +843,25 @@ function InfoLine({ prog, ed, slug }) {
       <span class="bk-w">=</span><${Slot} kind="num" value=${i.value} path=${["info", "value"]} ed=${ed} empty="(words alone)" />
       ${ed.ch.info_line === false ? html`<span class="bk-w small" ...${tip(TIP.infoOff)}>(not on this card's game)</span>`
         : html`<${Button} size="xs" kind="ghost" title=${TIP.infoPlace} onClick=${() => call("modes.lay_out_screen", slug)}>Place on the screen…<//>`}</div>
+  </div>`;
+}
+
+// PAD-721: the game's bar filling with a value out of another (its shots made of 12), not with its clock
+function barFill(bar, fill) {
+  const b = { ...(bar || {}) };
+  if (fill !== "value") {
+    delete b.fill; delete b.value; delete b.of;
+    return b;
+  }
+  return { ...b, fill: "value", value: b.value || { k: "scored" }, of: b.of || { k: "num", v: 10 } };
+}
+
+function BarFill({ prog, ed }) {
+  const b = prog.bar || {};
+  return html`<div class="bk bk-hud bk-hudset">
+    <div class="bk-line"><span class="bk-w b" ...${tip(TIP.barFill)}>The bar fills with</span>
+      <${Slot} kind="num" value=${b.value} path=${["bar", "value"]} ed=${ed} />
+      <span class="bk-w">out of</span><${Slot} kind="num" value=${b.of} path=${["bar", "of"]} ed=${ed} /></div>
   </div>`;
 }
 
@@ -1037,6 +1123,8 @@ export function useEd(pg, ch) {
       };
       walk(d.scripts);
       walk(d.hud);                                                // PAD-375: what its counters and gauge follow
+      walk(d.info);                                               // PAD-547: what its info line follows
+      walk(d.bar);                                                // PAD-721: what its bar fills with
     }, "vars/" + i + "/name"),
     renameTimer: (i, name) => edit((d) => {
       const old = (d.timers[i] || {}).name;
@@ -1049,6 +1137,9 @@ export function useEd(pg, ch) {
         Object.values(o).forEach(walk);
       };
       walk(d.scripts);
+      walk(d.hud);
+      walk(d.info);
+      walk(d.bar);                                                // PAD-721
     }, "timers/" + i + "/name"),
     // a clip or sound renamed: every block playing it follows it
     renameMedia: (kind, i, name) => edit((d) => {
@@ -1119,10 +1210,14 @@ export function BlocksEditor({ s, c, pg }) {
         ${ed.ch.status_bar || (prog.bar || {}).on ? html`<${Check} checked=${!!(prog.bar || {}).on} label="its name in the game's bar"
           title=${ed.ch.status_bar ? TIP.bar : TIP.barOff} onChange=${(v) => ed.set(["bar", "on"], v)} />
           ${(prog.bar || {}).on ? html`<input type="color" class="bk-color" value=${(prog.bar || {}).color || "#00c040"}
-            onInput=${(e) => ed.set(["bar", "color"], e.target.value)} ...${tip("The bar's color")} />` : null}` : null}
+            onInput=${(e) => ed.set(["bar", "color"], e.target.value)} ...${tip("The bar's color")} />
+            <${Select} sm value=${(prog.bar || {}).fill === "value" ? "value" : "clock"} title=${TIP.barFill}
+              onChange=${(v) => ed.edit((d) => { d.bar = barFill(d.bar, v); })}
+              options=${[{ value: "clock", label: "its clock along it" }, { value: "value", label: "filling as shots are made" }]} />` : null}` : null}
         <${Check} checked=${!!(prog.info || {}).on} label="a line under its name" title=${ed.ch.info_line === false ? TIP.infoOff : TIP.info}
           onChange=${(v) => ed.set(["info", "on"], v)} />
       </div>
+      ${(prog.bar || {}).on && prog.bar.fill === "value" ? html`<${BarFill} prog=${prog} ed=${ed} />` : null}
       ${(prog.info || {}).on ? html`<${InfoLine} prog=${prog} ed=${ed} slug=${c.slug} />` : null}
       <${GameModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />

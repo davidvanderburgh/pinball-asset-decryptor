@@ -752,3 +752,27 @@ site  challenge_pages_0     0x00020bf8 0xe92d4ff0 0xe3a01000
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x003ceb6c 0xe92d4ff0 0xe24dd0bc
+
+# PAD-710: the game's own books of its modes (mode_framework.py, from this build's audit and flag names): a
+# mode of ours in one's place counts its STARTED audit and PLAYED flag, and when completed its COMPLETED ones
+site  audit_add              0x002415ec 0xe92d43f0 0xe2505000
+value place_audit_started_0        274
+value place_audit_completed_0      283
+value place_audit_started_1        284
+value place_audit_completed_1      293
+value place_audit_started_2        294
+value place_audit_completed_2      302
+value place_audit_started_3        303
+value place_audit_completed_3      312
+value place_audit_started_4        313
+value place_audit_started_5        316
+value place_audit_started_6        324
+value place_audit_started_7        325
+value place_audit_started_8        326
+value place_audit_started_9        354
+
+# PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
+value challenge_place_1        3
+value challenge_place_2        2
+value challenge_place_3        0
+value challenge_place_4        1

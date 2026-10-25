@@ -578,6 +578,24 @@ void pm_roster_more_leave(const char *name) { (void)name; }
 int pm_roster_more_count(void) { return more_n; }
 const char *pm_roster_more_picked(void) { return more_picked; }
 long pm_roster_start_after(void) { return pm_port_value("roster_start_after_ms", 0); }
+
+/* PAD-710: the game's own modes 0-127 a mode may claim; `gamestart <id>` is the game starting one (a rule of its own,
+ * as the player earns it), pm_place_over the outcome the game's own stop is run with */
+static int (*place_fn[128])(unsigned);
+static const struct pm_mode *place_by[128];
+int pm_place_claim(unsigned id, int (*on_start)(unsigned id))
+{
+    if (id >= 128 || !on_start) return 0;
+    place_fn[id] = on_start;
+    place_by[id] = current;
+    printf("PLACE CLAIM %u %s\n", id, current ? current->name : "?");
+    return 1;
+}
+void pm_place_release(unsigned id) { if (id < 128) place_fn[id] = 0; }
+int pm_place_counts(unsigned id) { return id < 128; }
+const char *pm_game_mode_name(unsigned id) { return id < 128 ? "Desk Mode" : 0; }
+void pm_place_over(int won) { printf("%6lu PLACE OVER %s\n", now_ms, won ? "COMPLETED" : "not completed"); }
+int pm_game_mode_start(unsigned id) { (void)id; return 0; }
 int pm_trigger_text(const char *name, char *out, unsigned cap)
 {
     if (!trigger_file[0] || strcmp(name, trigger_file)) return 0;
@@ -1118,6 +1136,13 @@ int main(int argc, char **argv)
                     break;
                 }
             printf("%6lu PICKMORE %s -> %d\n", now_ms, who, took);
+            ticks_for_ms(50);
+        } else if (!strcmp(c, "gamestart")) {           /* PAD-710: the game starts its own mode n */
+            unsigned id = (unsigned)atoi(argv[++k]);
+            int took = -1;
+            printf("%6lu >> gamestart %u\n", now_ms, id);
+            if (id < 128 && place_fn[id]) { current = place_by[id]; took = place_fn[id](id); current = 0; }
+            printf("%6lu GAMESTART %u -> %d\n", now_ms, id, took);
             ticks_for_ms(50);
         } else if (!strcmp(c, "battle")) { battle = atoi(argv[++k]); printf("%6lu >> battle %d\n", now_ms, battle); }
         else if (!strcmp(c, "multiball")) { multiball = atoi(argv[++k]); printf("%6lu >> multiball %d\n", now_ms, multiball); }

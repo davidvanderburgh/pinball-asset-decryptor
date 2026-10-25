@@ -45,6 +45,10 @@ def val(e):
         return "the player up"
     if k == "timer_left":
         return "ms left on %s" % (e.get("timer") or "?")
+    if k == "combo_chain":                                           # PAD-708
+        return "combos in a row"
+    if k == "combo_steps":
+        return "shots made of the combo %s" % (e.get("combo") or "?")
     if k == "op":
         sym = {"*": "×", "/": "÷", "-": "−"}.get(e.get("op"), e.get("op"))
         return "%s %s %s" % (val(e.get("a")), sym, val(e.get("b")))
@@ -176,8 +180,14 @@ def hat(h):
         return "When %s runs out" % (h.get("timer") or "a timer")
     if k == "challenge":
         return "When the player picks the challenge %s" % (h.get("challenge") or "?")
+    if k == "combo":                                                 # PAD-708
+        steps = [" or ".join(x) if isinstance(x, list) else {"lit": "a lit shot", "*": "any shot"}.get(x, x or "?")
+                 for x in h.get("shots") or []]
+        return "When %s within %s s%s" % (", then ".join(steps) or "?", h.get("seconds"), when)
     if k == "battle":                                                       # PAD-706
         return "When the player picks the battle %s" % BM.battle_name(h)
+    if k == "game_mode":                                                    # PAD-710
+        return "When the game starts its %s" % BM.place_name(h)
     return "(%s)" % k
 
 

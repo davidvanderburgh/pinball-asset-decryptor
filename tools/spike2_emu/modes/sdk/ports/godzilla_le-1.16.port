@@ -1038,3 +1038,17 @@ site  challenge_pages_0     0x00023b70 0xe306c27c 0xe340c07d
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x00300d20 0xe92d4ff0 0xe24dd0bc
+
+# PAD-710: the game's own mode framework (mode_framework.py, from this build's program): what one of its
+# modes writes as it starts and stops, so a mode of ours in one's place counts as it
+site  mode_player            0x003387f0 0xe3033b94 0xe3403071
+value mode_slot_stop         11
+value mode_stopped_at        0x13
+value mode_reason_at         0x17
+value mode_starts_at         0x3c
+site  mode_started           0x000d47fc 0xe351001a 0xe92d4008
+data  mode_manager           0x007b0ce4
+value mode_id_at             4
+
+# PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
+value challenge_place_0        20

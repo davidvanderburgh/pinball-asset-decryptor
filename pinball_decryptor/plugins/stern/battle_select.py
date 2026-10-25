@@ -49,7 +49,7 @@ MAX_NEW = 5
 #: the glass line the tiles stay above (the screen's frame starts below it)
 BOTTOM = 690.0
 PREFIX = "PadSel_"
-PARTS = ("Grey", "Lit", "Lock", "Done", "Portrait")
+PARTS = ("Gray", "Lit", "Lock", "Done", "Portrait")
 #: a few names in katakana, lettered under a new monster's name as the game letters its own (any other: none)
 KATAKANA = {
     "MOTHRA": "モスラ", "RODAN": "ラドン", "ANGUIRUS": "アンギラス", "KUMONGA": "クモンガ",
@@ -243,7 +243,7 @@ class Screen:
         sheets = [n for n in self.kids if bitmap_of(n) is not None and not n.name.startswith("PAD_")
                   and not n.name.startswith(PREFIX)]
         if not sheets:
-            raise BattleSelectError("the card's selection screen has no grey tiles")
+            raise BattleSelectError("the card's selection screen has no gray tiles")
         self.sheet = max(sheets, key=lambda n: bitmap_of(n).body["w"] * bitmap_of(n).body["h"])
         if any(n.name.startswith(PREFIX) for n in self.kids):
             raise BattleSelectError("the card's selection screen already carries new monsters (a card built before: "
@@ -579,7 +579,7 @@ def build(stock, monsters):
     # the grey tiles, each on its own, where the sheet was (under the lit ones)
     sc.sheet.keyframes = [(f, 0) for f, _v in sc.sheet.keyframes]
     at_sheet = sc.kids.index(sc.sheet) + 1
-    new_kids = [picture_node("%sGrey%d" % (PREFIX, s), greys[s], place(s)) for s in range(7)]
+    new_kids = [picture_node("%sGray%d" % (PREFIX, s), greys[s], place(s)) for s in range(7)]
     # the new monsters' tiles
     lits, covers, portraits = [], [], []
     hosts = sorted({int(m["slot"]) for m in monsters})
@@ -588,7 +588,7 @@ def build(stock, monsters):
         names = node_names(m["slug"])
         pic = _picture(m.get("picture"), m["name"], 632, 828, _hue(i))
         colour = framed(sc.tile[0], pic, 5, 0.34)
-        new_kids.append(picture_node(names["Grey"], grey_like(sc, colour), place(key)))
+        new_kids.append(picture_node(names["Gray"], grey_like(sc, colour), place(key)))
         lits.append(shown_node(names["Lit"], colour, place(key)))
         # the padlock and the claw sit on a new tile as on place 4's (the right column's first): their pixels -> place
         # 4's tile pixels (lock_m, done_m) -> this tile's place

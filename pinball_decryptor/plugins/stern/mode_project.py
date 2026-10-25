@@ -97,6 +97,8 @@ class TitleProfile:
     #                                  room for (0 = none: the build's menu is not the runtime's to change)
     challenges: tuple = ()           # PAD-615: the game's Challenge list a mode may take a place in (the challenges'
     #                                  names, in the game's menu order); () where the title names none a mode can take
+    places: tuple = ()               # PAD-710: ((id, name, counts), ...) the game's own modes a mode may run in the
+    #                                  place of (when the game starts one); counts: it counts as that mode there
     building_rule: str = ""          # PAD-589: the game's own building locks (one of game_rules, BUILDING_RULES): a
     #                                  mode moves the building only while it sees no shots
     shakes: tuple = ()               # PAD-414: ((name, label), ...) the game's own shakes (`text shake_<name>`)
@@ -305,7 +307,8 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: The parts of a mode a title may be unable to do. The tab greys each one it cannot,
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
-         "magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "wizard", "roster", "challenge")
+         "magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "wizard", "roster", "challenge",
+         "place")
 
 #: PAD-420: the parts that are a piece of the machine. A machine without one has no section for it on the tab.
 HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "building", "shaker")
@@ -322,8 +325,7 @@ HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "building", "shaker")
 #: name it like any coil, Godzilla and the older ones only in the test menu's record ("an optional accessory for
 #: Premium games, and is included in LE editions"), which the coil names missed. Every title but the Home Editions
 #: has it; it is listed where the latest build's own shake call is ported and proven (not James Bond 60th, whose
-#: newer framework has no such call, nor D&D LE, whose game the emulator does not start: its lines are ported,
-#: unproven).
+#: newer framework has no such call). D&D LE joined once the emulator started its game (PAD-713).
 MACHINE_HARDWARE = {
     "aerosmith": ("magnet", "scoop", "shaker"),
     "aerosmith_le": ("magnet", "scoop", "coils", "shaker"),
@@ -333,7 +335,7 @@ MACHINE_HARDWARE = {
     "beatles": ("magnet", "coils", "shaker"),
     "deadpool_le": ("scoop", "coils", "shaker"),
     "deadpool_pro": ("scoop", "coils", "shaker"),
-    "dungeons_and_dragons_le": ("magnet", "scoop", "coils"),
+    "dungeons_and_dragons_le": ("magnet", "scoop", "coils", "shaker"),
     "dungeons_and_dragons_pro": ("magnet", "scoop", "coils", "shaker"),
     "elvira3": ("scoop", "coils", "shaker"),
     "foo_fighters_le": ("magnet", "coils", "shaker"),
@@ -1007,6 +1009,149 @@ def _challenge_cannot(key, label, port=None):
                           "the emulator, so it cannot here yet." % label),)
 
 
+#: PAD-710: a mode in the place of one of the game's own modes (the mode file's ``in_place_of``, a blocks mode's When the
+#: game starts one of its modes; MODE_SDK.md "A mode in the place of one of the game's"). The builds where it was seen
+#: in the emulator: the game's START of its mode (called as its rules call it) taken, the mode run in its place, and
+#: at its end the game's own STOP run with the outcome (rig sweep, C:\tmp\PAD-710\rig, place_job.sh).
+PLACE_PROVEN = frozenset({
+    "avengers_infinity_le-1.10",     # PAD-710 run all2: Super Reactor (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "avengers_infinity_pro-1.10",    # PAD-710 run all2: Super Reactor (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "deadpool_le-1.16",              # PAD-710 run all2: Disco Loops (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "deadpool_pro-1.16",             # PAD-710 run all2: Disco Loops (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "dungeons_and_dragons_le-1.10",  # PAD-713 (the rig starts its games since the dragon hold fills from HOLD 1): Mimic Hurry Up (12): the game's start taken, starts 0 -> 1, completed by its clock: stopped 0 -> 1, wins 0 -> 1, the game played on
+    "dungeons_and_dragons_pro-1.10", # PAD-710 run all2: Map Choosen Ritual Singleball (53): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "foo_fighters_le-1.04",          # PAD-710 run all2: Super Skill Shot (8): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "foo_fighters_pro-1.04",         # PAD-710 run all2: Super Skill Shot (8): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "godzilla_le-1.16",              # PAD-710 run all2: Jet Fighter Attack (21): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1, STARTED audit 0 -> 1, COMPLETED 0 -> 1
+    "godzilla_pro-1.16",             # PAD-710 run all2: Jet Fighter Attack (21): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1, STARTED audit 0 -> 1, COMPLETED 0 -> 1
+    "iron_maiden_le-1.18",           # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
+    "iron_maiden_pro-1.18",          # PAD-710 run all2: Rime of the Ancient Mariner Hurry Up (5): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1. PAD-716: Soul Shard Hurry Up (0) under a running Fear of the Dark: the song records it won, it sets itself back
+    "jaws_le-1.02",                  # PAD-710 run all2: Super Buoys (29): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
+    "jaws_pro-1.02",                 # PAD-710 run all2: Super Buoys (29): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
+    "john_wick_le-1.02",             # PAD-710 run all2: Lights Out (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "john_wick_pro-1.02",            # PAD-710 run all2: Lights Out (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "jurassic_park_le-1.16",         # PAD-710 run all2: Chaos Hurry Up (4): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1. PAD-716: its six T-Rex and Ctrl Room modes (7-12), taken twice in a game: COMPLETED audit 0 -> 2
+    "king_kong_le-0.97",             # PAD-710 run all2: King Kombos (27): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
+    "king_kong_pro-0.97",            # PAD-710 run all2: King Kombos (27): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, reason 1
+    "led_zeppelin_le-1.22",          # PAD-710 run all2: Black Dog (1): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "led_zeppelin_pro-1.22",         # PAD-710 run all2: Black Dog (1): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "mando_le-1.45",                 # PAD-710 run all2: Super Skill Shot (10): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "mando_pro-1.45",                # PAD-710 run all2: Super Skill Shot (10): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "munsters_le-1.28",              # PAD-710 run all2: Lily Mode (3): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "munsters_pro-1.28",             # PAD-710 run all2: Lily Mode (3): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "rush_le-1.19",                  # PAD-710 run all2: La Villa Strangiato (2): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "rush_pro-1.19",                 # PAD-710 run all2: La Villa Strangiato (2): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "star_wars_le-1.31",             # PAD-710 run all2: Hoth I (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "star_wars_pro-1.31",            # PAD-710 run all2: Hoth I (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "sword_of_rage_le-1.19",         # PAD-710 run all2: Sand Worm (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "sword_of_rage_pro-1.19",        # PAD-710 run all2: Sand Worm (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "turtles_le-1.59",               # PAD-710 run all2: Training Level Two (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "turtles_pro-1.59",              # PAD-710 run all2: Training Level Two (0): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1, wins 0 -> 1
+    "venom_le-1.07",                 # PAD-710 run r3: Mini Mode 01 (19) - the game started it itself as the ball started and the mode took it; the test's start completed it by its clock: stopped 1, wins 0 -> 1
+    "venom_pro-1.07",                # PAD-710 run r3: the same on the stock Pro card: stopped 1, wins 0 -> 1
+    "jurassic_park_pro-1.16",        # PAD-710 run r3: Escape Nublar (127): starts 0 -> 1, completed by its clock: stopped 1. PAD-716: Trex Chase (119), Trex Rampage (120), Ctrl Room Virus Attack (121) and Restore Power (122) keep their own stopped byte (v[32] / v[55]): taken twice in a game, COMPLETED audit 0 -> 2
+    "aerosmith-1.16",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1. PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "aerosmith_le-1.16",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1. PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "batman-1.14",                   # PAD-710 run plain2: Catwoman (episodes 19-20) (1): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: Catwoman (episodes 19-20) (1): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    "beatles-1.29",                  # PAD-710 run plain2: All My Loving (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: All My Loving (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    "elvira3-1.13",                  # PAD-710 run plain2: Houses (whichever House is selected) (0): its books, the game played on: STARTED audit 0 -> 1. PAD-714 run fplainall: Houses (whichever House is selected) (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "guardians-1.15",                # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit +1. PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "guardians_le-1.15",             # PAD-710 run plain2: Super Scoring (0): its books, the game played on: STARTED audit 0 -> 1. PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on (the game's own audit ids)
+    "james_bond_le-1.06",            # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. Challenge 1 (Ahoy Mr. Bond) taken by a mode file: STARTED audit 180, PLAYED flag 86, won: COMPLETED flag 89. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs taken at their own starts on the last lock only (not at the lamps' lock check, not at an earlier lock): STARTED audit 0 -> 1, PLAYED flag set, no multiball served. PAD-714 run fplainall: Ahoy Mr Bond Wizard Mode (6): its books: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set; the game played on (the game's own audit ids)
+    "james_bond_pro-1.06",           # PAD-710 run plain2: Ahoy Mr Bond Wizard Mode (6): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set. PAD-715 place715.sh: Jetpack (28) and Bird One (29) Multiballs as on LE. PAD-714 run fplainall: Ahoy Mr Bond Wizard Mode (6): its books: STARTED audit 0 -> 1, PLAYED flag set, COMPLETED flag set; the game played on (the game's own audit ids)
+    "jurassic_park_the_pin-1.05",    # PAD-710 run plain2: Stegosaurus (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-715: Restore Power (5): STARTED audit 189 0 -> 1. PAD-714 run fplainall: Stegosaurus (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    "metallica_spike-1.04",          # PAD-710 run plain2: Battery (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: Battery (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    "star_wars_elg-1.10",            # PAD-710 run plain2: Orbits (1): no audit add, its flags only: COMPLETED flag 67 set, read back by the runtime
+    "stranger_things-1.13",          # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set. PAD-714 run fplainall: Bullshit Scoring (0): its books: STARTED audit 0 -> 1, PLAYED flag set; the game played on (the game's own audit ids)
+    "stranger_things_le-1.13",       # PAD-710 run plain2: Bullshit Scoring (0): its books, the game played on: STARTED audit 0 -> 1, PLAYED flag set. PAD-714 run fplainall: Bullshit Scoring (0): its books: STARTED audit 0 -> 1, PLAYED flag set; the game played on (the game's own audit ids)
+    "uncanny_xmen_le-0.98",          # PAD-710 run plain2: Fastball Special (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: Fastball Special (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    "uncanny_xmen_pro-0.98",         # PAD-710 run plain2: Fastball Special (0): its books, the game played on: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1. PAD-714 run fplainall: Fastball Special (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on (the game's own audit ids)
+    # PAD-714: the older builds (and Bond 60th 1.11), each build's own port - shipped, or derived as on a card - with
+    # a mode file in the place of one of its game modes (C:\tmp\PAD-714\rig, place_job2c.sh / place_job4b.sh)
+    "aerosmith_le-1.15",             # PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on
+    "avengers_infinity_le-1.09",     # PAD-714 run fcpp: Super Reactor (19): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "batman-1.13",                   # PAD-714 run fplainall: Catwoman (episodes 19-20) (1): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
+    "deadpool_le-1.14",              # PAD-714 run fcpp: Disco Loops (19): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "foo_fighters_le-1.03",          # PAD-714 run f2cpp: Super Skill Shot (8): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "godzilla_le-1.13",              # PAD-714 run fcpp: Hedorah (25): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "godzilla_pro-1.15",             # PAD-714 run fcpp: Hedorah (25): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "guardians_le-1.14",             # PAD-714 run fplainall: Super Scoring (0): its books: STARTED audit 0 -> 1; the game played on
+    "iron_maiden_le-1.16",           # PAD-714 run fcpp: Rime of the Ancient Mariner Hurry Up (5): won: stopped 0 -> 1; the game played on
+    "james_bond_60th_le-1.11",       # PAD-714 run take1: Villain Mode (0): taken, counting only as ours (the Villain Mode keeps no books), won; the game played on
+    "jaws_le-1.01",                  # PAD-714 run fcpp: Super Buoys (29): starts 0 -> 1, won: stopped 0 -> 1, STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
+    "john_wick_le-1.01",             # PAD-714 run f2cpp: Lights Out (0): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "jurassic_park_le-1.15",         # PAD-714 run f2cpp: Trex Chase (119): starts 0 -> 1, won: stopped 0 -> 1; the game played on
+    "king_kong_le-0.96",             # PAD-714 run fcpp: King Kombos (27): won: stopped 0 -> 1, STARTED audit 0 -> 1; the game played on
+    "led_zeppelin_le-1.21",          # PAD-714 run fcpp: Black Dog (1): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "mando_le-1.44",                 # PAD-714 run fcpp: Super Skill Shot (10): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "metallica_spike-1.03",          # PAD-714 run fplainall: Battery (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
+    "munsters_le-1.27",              # PAD-714 run f2cpp: Lily Mode (3): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "rush_le-1.18",                  # PAD-714 run fcpp: La Villa Strangiato (2): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "star_wars_le-1.30",             # PAD-714 run fcpp: Hoth I (0): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "stranger_things_le-1.12",       # PAD-714 run fplainall: Where's Barb (11): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
+    "sword_of_rage_le-1.18",         # PAD-714 run fcpp: Sand Worm (0): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "turtles_pro-1.58",              # PAD-714 run fcpp: Training Level Two (0): starts 0 -> 1, won: stopped 0 -> 1, wins 0 -> 1; the game played on
+    "uncanny_xmen_le-0.97",          # PAD-714 run f2plain: Fastball Special (0): its books: STARTED audit 0 -> 1, COMPLETED audit 0 -> 1; the game played on
+})
+#: PAD-710: what counting as the game's mode needs: the game's own mode framework (mode_framework.py)
+PLACE_COUNT_NEEDS = (("mode_player",), (), ("mode_slot_stop", "mode_stopped_at"))
+
+
+def _place_counts(port):
+    """PAD-710: 1 when the port names the game's own mode framework (a mode in one's place counts as it). PAD-714: the
+    player getter, or on an older build that reads the player up inline the byte itself (``data mode_player_at``)."""
+    sites, _data, values = PLACE_COUNT_NEEDS
+    return (bool(port) and (all(n in port["site"] for n in sites) or bool(port["data"].get("mode_player_at")))
+            and all(n in port["value"] for n in values))
+
+
+def _plain_books(port, i):
+    """PAD-710: 1 when a plain-C port names the books of its mode ``i`` (its STARTED / COMPLETED audits, its PLAYED /
+    COMPLETED flags) and the framework's audit add: a mode in its place counts as it."""
+    if not port:
+        return False
+    audits = "audit_add" in port["site"] and any("place_%s_%d" % (k, i) in port["value"]
+                                                 for k in ("audit_started", "audit_completed"))
+    flags = bool(port["data"].get("game_flags")) and any("place_%s_%d" % (k, i) in port["value"]
+                                                         for k in ("flag_played", "flag_completed"))
+    return audits or flags
+
+
+def _places(port):
+    """PAD-710: ``((id, name, counts), ...)``, in id order: the game's own modes a mode may run in the place of - the
+    ones whose START the port names (PAD-363's block lines: with the mode's object on a C++ title; on a plain-C title
+    the ones whose own books the port names), and not one of the battle selection's battles where the build has one
+    (those are the battle hat's, PAD-706). ``counts``: the mode counts as the game's (the C++ framework, or the plain-C
+    mode's books)."""
+    if not port:
+        return ()
+    counts = _place_counts(port)
+    roster = "roster_start" in port["site"]
+    out = []
+    for i, name, _on in _game_modes(port):
+        if port["data"].get("block_obj_%d" % i):
+            c = counts
+        elif _plain_books(port, i):
+            c = True
+        else:
+            continue
+        if roster and name.startswith("Battle vs"):
+            continue
+        out.append((i, name, c))
+    return tuple(out)
+
+
+def _place_cannot(key, label, port=None):
+    """PAD-710: the ``cannot`` entry for a mode in the place of one of the game's own modes on build ``key``, or ()."""
+    if not _places(port):
+        return (("place", "%s names none of its own modes' starts with the mode they start, so a mode of yours cannot "
+                          "run in the place of one there yet." % label),)
+    if key in PLACE_PROVEN:
+        return ()
+    return (("place", "The app has found %s's own modes' starts but has not yet seen a mode of yours run in the place "
+                      "of one in the emulator, so it cannot here yet." % label),)
+
+
 def _challenges(port):
     """The names of the port's challenges, in the game's menu order, from 0 with no gap: each one's own start
     (``challenge_go_<n>``) or, PAD-619, its flag - or its game-play mode's index (``challenge_mode_<n>``, the
@@ -1091,6 +1236,7 @@ SHAKER_PROVEN = frozenset({
     "beatles-1.29",                    # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (523 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
     "deadpool_le-1.16",                # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (526 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
     "deadpool_pro-1.16",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 42/255 1020 ms, OFF at the stop (524 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
+    "dungeons_and_dragons_le-1.10",    # PAD-713 2026-10-24 stock card, PAD_COIL_PROBE=1 (after PAD-658: a mode's end lets its shake run out): node 1 coil 0, setting 4: start 51/255 480 ms (on a hit, run out past a stop); end 51/255 480 ms ran out; the game's own 51/255 200 ms on the hits
     "dungeons_and_dragons_pro-1.10",   # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 480 ms, OFF at the stop (351 ms left); its short shake 51/255 200 ms on a hit; end 51/255 480 ms ran out
     "elvira3-1.13",                    # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 2: start 42/255 1020 ms, OFF at the stop (524 ms left); its short shake 42/255 200 ms on a hit; end 42/255 600 ms ran out
     "foo_fighters_le-1.04",            # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 4: start 51/255 330 ms, OFF at the stop (134 ms left); its short shake 23/255 200 ms on a hit; end 23/255 600 ms ran out
@@ -1264,6 +1410,7 @@ WIZARDS_PROVEN = frozenset({
     "avengers_infinity_pro-1.10",   # Soul Gem Quest started (ACTIVE 1); Black Order Multiball waited while it ran
     "deadpool_le-1.16",   # Megakrakolodonus Rex started (ACTIVE 1); Clone Multiball waited while it ran
     "deadpool_pro-1.16",   # Megakrakolodonus Rex started (ACTIVE 1); Clone Multiball waited while it ran
+    "dungeons_and_dragons_le-1.10",    # PAD-713: Tiny's Dice Game started (ACTIVE 1, the mode's own start); Tavern Brawl waited while it ran (ctinys_dice_game in its way)
     "dungeons_and_dragons_pro-1.10",   # Tiny's Dice Game started (ACTIVE 1); Tavern Brawl waited while it ran
     "godzilla_le-1.16",   # Monster Zero started (ACTIVE 1); Terror of Mechagodzilla waited while it ran
     "godzilla_pro-1.16",   # Monster Zero started (ACTIVE 1); Terror of Mechagodzilla waited while it ran
@@ -2308,6 +2455,7 @@ def profile_from_port(path):
     cannot += list(_building_cannot(key, label, port))       # PAD-589
     cannot += list(_roster_cannot(key, label, port))         # PAD-589
     cannot += list(_challenge_cannot(key, label, port))      # PAD-615
+    cannot += list(_place_cannot(key, label, port))          # PAD-710
     cannot += list(_shaker_cannot(key, label, port))         # PAD-414
     cannot += list(_shows_cannot(label, port))               # PAD-418
     cannot += list(_wizards_cannot(key, label, port))        # PAD-436
@@ -2377,6 +2525,7 @@ def profile_from_port(path):
         roster_counts=bool(port and "battle_stop" in port["site"]),          # PAD-706
         challenges=_challenges(port) if key in CHALLENGE_PROVEN and not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
         challenge_menu=_challenge_menu(key, port) if not any(c[0] == "challenge" for c in cannot) else 0,
+        places=_places(port) if not any(c[0] == "place" for c in cannot) else (),   # PAD-710
         # PAD-619: not where a challenge is the game-play mode's index or a game-mode table's (Jaws, Godzilla, Venom:
         # their Default Game Mode cannot select one) - only by its handler or its flag (Bond, Stranger Things, Rush)
         challenge_by_default=bool(port) and not any(k.startswith(("challenge_mode_", "challenge_name_msg_"))
@@ -2640,10 +2789,12 @@ try:
         game_shows=_game_shows(_port_115),
         roster=_roster("godzilla_pro", _port_115) if not _roster_cannot(_key_115, _label_115, _port_115) else (),
         roster_counts=bool(_port_115 and "battle_stop" in _port_115["site"]),   # PAD-706: not on Pro 1.15
+        places=_places(_port_115) if not _place_cannot(_key_115, _label_115, _port_115) else (),   # PAD-710
         absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
                      if c[0] not in ("magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "roster",
-                                     "challenge"))
+                                     "challenge", "place"))
+        + _place_cannot(_key_115, _label_115, _port_115)
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
         + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115)
         + _building_cannot(_key_115, _label_115, _port_115)
@@ -2896,10 +3047,50 @@ def probe_card_title(image):
     return answer
 
 
+def known_game_dir(game):
+    """Is ``game`` (``uncanny_xmen_le``) a game directory the app knows: one a port is
+    shipped or was worked out for, or a Spike 2 title of :data:`.games.GAME_DB`? Reads
+    folder listings only."""
+    game = (game or "").lower()
+    if not game:
+        return False
+    from .games import GAME_DB
+    if any(game == k or game.startswith(k + "_") for k in GAME_DB):
+        return True
+    dirs = [PORTS_DIR]
+    try:
+        from . import mode_runtime
+        dirs += list(mode_runtime.port_dirs())
+    except Exception:                                       # noqa: BLE001 - the shipped list still answers
+        pass
+    for d in dirs:
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        if any(n.lower().startswith(game + "-") and n.lower().endswith(".port") for n in names):
+            return True
+    return any(p.game_dir == game for p in _REMEMBERED.values())
+
+
+def _name_game(image):
+    """PAD-720: ``card_from_name(image)``, unless the name is not to be trusted: a card file
+    renamed in Stern's form after its own build (``Silentcorp_Animated_Series_Xmen_LE-0_98_0
+    ...raw``) parses, but names a game no card has. When that file is on this computer, the
+    card's own index decides instead (:func:`probe_card_title`), so ``(None, None)``."""
+    game, version = card_from_name(image)
+    if game and not known_game_dir(game) and os.path.isfile(image):
+        probed = probed_card_title(image)
+        if probed is None or probed[0]:
+            return None, None          # not read yet, or the index names the real game
+    return game, version
+
+
 def _card_by_name_or_probe(image, exact="", source_from_record=False):
     """A :class:`ProjectCard` for *image* without opening it: its Stern name, else what
-    :func:`probe_card_title` has already read of it, else ``game_dir`` "" until a probe."""
-    game, version = card_from_name(image)
+    :func:`probe_card_title` has already read of it, else ``game_dir`` "" until a probe.
+    A Stern-formed name of a game the app does not know waits for the probe (PAD-720)."""
+    game, version = _name_game(image)
     if game:
         if exact and source_from_record:
             return ProjectCard(image, game, exact, "the extract's record of the card")
@@ -2940,6 +3131,8 @@ def project_card(project):
                        else MODES_TITLE_UNREAD)
 
 
+#: PAD-720: where :func:`project_card` found the game when the extract recorded the card's index
+INDEX_SOURCE = "the card's own index"
 #: PAD-623: where :func:`project_card` found the game when the card file is gone
 MODES_TITLE_SOURCE = "the game this project's modes were made for; the card file is not there"
 #: ... and when the card is there but its index names no game
@@ -2981,6 +3174,13 @@ def _project_card(project):
     rec = extract_source.read_extract_source(project) or {}
     exact = rec.get("card_version") or ""
     recorded = rec.get("input_path") or rec.get("input_name")
+    stock = rec.get("stock")
+    sidx = stock.get("sidx") if isinstance(stock, dict) else ""
+    game, version = card_from_name(sidx) if isinstance(sidx, str) and sidx else (None, None)
+    if recorded and game:
+        # PAD-720: the extract read the card's own index (its .sidx name), and that names the
+        # game whatever the file is called, and wherever the file is now
+        return ProjectCard(str(recorded), game, exact or version, INDEX_SOURCE)
     if recorded:
         return _card_by_name_or_probe(str(recorded), exact, source_from_record=True)
     images = []
@@ -2996,7 +3196,7 @@ def _project_card(project):
     if not images:
         return None
     for image in images:
-        game, version = card_from_name(image)
+        game, version = _name_game(image)
         if game:
             return ProjectCard(image, game, version, "the card's file name")
     return _card_by_name_or_probe(images[0])
@@ -3196,6 +3396,10 @@ class ModeSpec:
     # PAD-643: with starts_on "challenge", who launches its ball and when: 0 the runtime, once the mode's start clip is
     # over; -1 the player; a number of ms after the mode starts
     challenge_launch: int = 0
+    # PAD-710: with starts_on "game_mode", the game's own mode (the profile's places: its id) the mode runs in the place
+    # of: when the game starts that mode, this one starts instead and, where the game's framework is known, counts as
+    # it; -1 = none
+    place_mode: int = -1
     # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
     # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
     # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
@@ -3350,6 +3554,8 @@ def _switch_off_what_it_cannot(spec, p):
     if starts_on_challenge(spec) and (not p.can("challenge")
                                       or (spec.challenge == CHALLENGE_NEW and not getattr(p, "challenge_menu", 0))):
         spec.starts_on, spec.challenge = "shot", -1
+    if starts_on_place(spec) and not p.can("place"):                 # PAD-710
+        spec.starts_on, spec.place_mode = "shot", -1
     if not p.can("shaker"):
         spec.shakes = []
     if not p.can("shows"):
@@ -3365,7 +3571,7 @@ def start_shots_taken(project):
     it is not running or lights itself at. A new mode starts on a shot of none of these when the game has one."""
     taken = set()
     for _slug, spec in list_modes(project)[0] if project else ():
-        if starts_on_event(spec) or starts_on_battle(spec) or starts_on_challenge(spec):
+        if starts_on_event(spec) or starts_on_battle(spec) or starts_on_challenge(spec) or starts_on_place(spec):
             continue
         shots = (spec.start_sequence if starts_on_sequence(spec) else start_shots(spec)) or []
         taken.update(s for s in shots if isinstance(s, str) and s)
@@ -4869,6 +5075,12 @@ def starts_on_challenge(spec):
     return bool(words) and words[0] == "challenge"
 
 
+def starts_on_place(spec):
+    """True when the game starting one of its own modes (``place_mode``) starts the mode in its place (PAD-710)."""
+    words = (spec.starts_on or "shot").split()
+    return bool(words) and words[0] == "game_mode"
+
+
 def starts_on_sequence(spec):
     """True when the mode starts on its ``start_sequence`` made in order (PAD-314)."""
     words = (spec.starts_on or "shot").split()
@@ -4914,9 +5126,16 @@ def _validate_starts_ends(spec, p, ends=True):
     out = []
     words = (spec.starts_on or "shot").split()
     events = tuple(getattr(p, "events", ()) or ())
-    if words[0] not in ("shot", "event", "sequence", "battle", "challenge"):
+    if words[0] not in ("shot", "event", "sequence", "battle", "challenge", "game_mode"):
         out.append("A mode starts on a shot, on shots made in order, on one of the game's events, on a battle "
-                   "picked on the game's selection screen, or as a challenge picked in the game's Challenge mode.")
+                   "picked on the game's selection screen, as a challenge picked in the game's Challenge mode, or "
+                   "in the place of one of the game's own modes.")
+    elif words[0] == "game_mode":                   # PAD-710
+        n = _int_or_none(spec.place_mode)
+        if not p.can("place"):
+            out.append("Starting in the place of one of the game's own modes is not on %s yet (Mode says why)." % p.label)
+        elif n is None or n not in {i for i, _nm, _c in p.places}:
+            out.append("Pick the game's mode this one runs in the place of.")
     elif words[0] == "challenge":                   # PAD-615
         n = _int_or_none(spec.challenge)
         if not p.can("challenge"):
@@ -5551,6 +5770,9 @@ def _starts_ends_lines(spec, lines, p, ends=True):
     elif starts_on_battle(spec) and p.can("roster"):   # PAD-589: only the pick starts it (no trigger line)
         out = [line for line in out if not line.startswith("trigger ")]
         out.insert(2, "roster_slot    %d" % int(spec.roster_slot))
+    elif starts_on_place(spec) and p.can("place"):   # PAD-710: only the game starting its mode starts it
+        out = [line for line in out if not line.startswith("trigger ")]
+        out.insert(2, "in_place_of    %d" % int(spec.place_mode))
     elif starts_on_challenge(spec) and p.can("challenge"):   # PAD-615: only the challenge game's pick starts it
         out = [line for line in out if not line.startswith("trigger ")]
         n = int(spec.challenge)

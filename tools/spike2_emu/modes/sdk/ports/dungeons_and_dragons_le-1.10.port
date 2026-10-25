@@ -645,3 +645,11 @@ text  wizard_film_2   Dragon and Gelatinous Cube multiballs, a dungeon
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x004ee2e0 0xe92d4ff0 0xe24dd0bc
+
+# PAD-710: the game's own mode framework (mode_framework.py, from this build's program): what one of its
+# modes writes as it starts and stops, so a mode of ours in one's place counts as it
+site  mode_player            0x004cf46c 0xe3003968 0xe3403072
+value mode_slot_stop         53
+value mode_stopped_at        0x58
+value mode_starts_at         0x6c
+value mode_wins_at           0x88

@@ -690,3 +690,59 @@ value challenge_scores_cat   1
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x0025214c 0xe92d4ff0 0xe24dd0bc
+
+# PAD-710: the game's own books of its modes (mode_framework.py, from this build's audit and flag names): a
+# mode of ours in one's place counts its STARTED audit and PLAYED flag, and when completed its COMPLETED ones
+site  audit_add              0x00456ad0 0xe92d43f0 0xe2505000
+value place_audit_started_0        208
+value place_flag_played_0          141
+value place_audit_started_1        209
+value place_audit_started_2        210
+value place_audit_started_3        211
+value place_audit_started_4        212
+value place_audit_started_5        213
+value place_audit_started_6        276
+value place_flag_played_6          86
+value place_flag_completed_6       89
+value place_audit_started_7        290
+value place_audit_started_8        292
+value place_audit_started_9        294
+value place_audit_started_10       296
+value place_audit_started_11       298
+value place_audit_started_12       300
+value place_audit_started_13       302
+value place_audit_started_14       304
+value place_audit_started_15       310
+value place_audit_started_16       339
+value place_audit_completed_16     341
+value place_audit_started_17       342
+value place_audit_completed_17     344
+value place_audit_started_18       345
+value place_audit_completed_18     347
+value place_audit_started_19       348
+value place_audit_completed_19     350
+value place_audit_started_20       351
+value place_audit_completed_20     353
+value place_audit_started_21       354
+value place_audit_completed_21     356
+value place_audit_started_22       357
+value place_audit_completed_22     359
+value place_audit_started_23       360
+value place_audit_completed_23     362
+value place_audit_started_24       363
+value place_audit_completed_24     365
+value place_audit_started_25       366
+value place_audit_completed_25     368
+value place_audit_started_26       369
+value place_audit_completed_26     371
+value place_audit_started_27       372
+value place_audit_completed_27     374
+value place_audit_started_28       377
+value place_flag_played_28         106
+site  place_start_28               0x000e6058 0xe92d43f0 0xe24dd00c
+value place_audit_started_29       263
+value place_flag_played_29         73
+site  place_start_29               0x00164f2c 0xe92d40f0 0xe24dd00c
+
+# PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
+value challenge_place_1        6

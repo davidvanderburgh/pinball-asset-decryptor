@@ -74,7 +74,7 @@ class ModPackTab(TabService):
                   self.transfer_oldstock_var, self.transfer_newimg_var):
             v.trace_add("write", lambda *_a: self._transfer_refresh_meta())
         self.set(project="", transfer_cap=False, modpack_cap=False,
-                 running=False)
+                 running=False, transfer_busy=False)
 
     # -- the shared project folder (Tk: _project_path_display over
     #    write_assets_var) ------------------------------------------------

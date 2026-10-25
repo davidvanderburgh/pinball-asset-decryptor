@@ -673,3 +673,27 @@ value ball_launch_wait_flag  13
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x00361b48 0xe92d4ff0 0xe24dd0bc
+
+# PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
+value challenge_place_1        3
+value challenge_place_2        2
+value challenge_place_3        0
+value challenge_place_4        1
+
+# PAD-710: the game's own books of its modes (mode_framework.py, from this build's audit and flag names): a
+# mode of ours in one's place counts its STARTED audit and PLAYED flag, and when completed its COMPLETED ones
+site  audit_add              0x002c1f50 0xe92d43f0 0xe2505000
+value place_audit_started_0        272
+value place_audit_completed_0      281
+value place_audit_started_1        282
+value place_audit_completed_1      291
+value place_audit_started_2        292
+value place_audit_completed_2      300
+value place_audit_started_3        301
+value place_audit_completed_3      310
+value place_audit_started_4        311
+value place_audit_started_5        314
+value place_audit_started_6        322
+value place_audit_started_7        323
+value place_audit_started_8        324
+value place_audit_started_9        352

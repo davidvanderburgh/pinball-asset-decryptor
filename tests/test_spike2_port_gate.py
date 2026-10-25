@@ -388,7 +388,7 @@ def test_the_beatles_profile():
     # item 164: its screen was seen; with no time-up call known, a mode's own end sound rides a carrier
     # (heard at time-up in the emulator), so nothing is left out
     # item 167: a multiball of the mode's own is greyed until the build is emulator-proven
-    assert cannot == (set() if "beatles-1.29" in MP.MULTIBALL_PROVEN else {"multiball"}) |         (set() if "beatles-1.29" in MP.BALL_SAVE_PROVEN else {"ball_save"}) | {"scoop", "shield", "building", "roster"}     # PAD-589: no building, no battle selection; PAD-619: a challenge of a mode's own on its start menu (emulator-proven); PAD-225; PAD-381: no scoop in its port; PAD-392: no shield platform; PAD-474: its shaker shakes (emulator-proven); PAD-473: its own Beatlemania Multiball handed over (emulator-proven); PAD-420: its top magnet held (magnet, coils) and twelve light shows
+    assert cannot == (set() if "beatles-1.29" in MP.MULTIBALL_PROVEN else {"multiball"}) |         (set() if "beatles-1.29" in MP.BALL_SAVE_PROVEN else {"ball_save"}) | {"scoop", "shield", "building", "roster"} | (set() if "beatles-1.29" in MP.PLACE_PROVEN else {"place"})     # PAD-710: a game mode's place counts through its books (emulator-proven); PAD-589: no building, no battle selection; PAD-619: a challenge of a mode's own on its start menu (emulator-proven); PAD-225; PAD-381: no scoop in its port; PAD-392: no shield platform; PAD-474: its shaker shakes (emulator-proven); PAD-473: its own Beatlemania Multiball handed over (emulator-proven); PAD-420: its top magnet held (magnet, coils) and twelve light shows
     assert p.light_route == "inserts"
     assert "multiballs" in p.stack_note          # item 164: the framework's balls in play, multiballs only
     for part in cannot:

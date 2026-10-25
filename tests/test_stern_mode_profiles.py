@@ -164,7 +164,7 @@ def test_a_profile_per_port(name):
     assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
     assert p.shot_mask_bits == bits and p.proven is proven
     cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop", "coils", "shield", "shaker", "shows",
-                             "wizard", "building", "roster", "challenge"}) | _mb(name)
+                             "wizard", "building", "roster", "challenge", "place"}) | _mb(name)         | (set() if name in MP.PLACE_PROVEN else {"place"})          # PAD-710: a game mode's place where proven
     assert {part for part in MP.PARTS if not p.can(part)} == cannot
     for part in MP.PARTS:
         assert bool(p.why_not(part)) == (part in cannot)
@@ -355,6 +355,7 @@ def test_godzilla_pro_1_15_is_unchanged_and_is_what_its_port_says():
     assert g.hud_scene == "32e6ae280ddaec08e203a02289bb39a04968e7b0"
     assert g.bank_scene == "60ed7e5036b8ce09d35a3e101ea6fc1380b37d97"
     assert (g.version, g.port) == ("1.15", "godzilla_pro-1.15.port")
+    # PAD-710: a game mode's place is offered where proven in the emulator; PAD-714 proved Pro 1.15's (Hedorah)
     assert all(g.can(part) for part in MP.PARTS if part not in _mb("godzilla_pro-1.15"))
     assert not any(g.can(part) for part in _mb("godzilla_pro-1.15"))   # item 167: greyed until proven
     derived = MP.profile_from_port(MP.port_path(g))

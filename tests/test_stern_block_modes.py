@@ -1884,6 +1884,42 @@ def test_the_bar_shows_the_name_and_its_clock_then_the_total_then_goes(tmp_path)
     assert bars[-1][1] == "OFF" and int(bars[-1][0]) - _at_any(out, r"END \(ball ended\)") <= 40
 
 
+def test_the_bar_can_fill_with_a_value_out_of_another():
+    """PAD-721: the Bond owner wanted the bar to fill as shots are made, as the game's own mini-wizards fill theirs
+    (10-12 shots each), not drain with the clock. Ticked, it fills with the shots the mode has scored out of 10 unless
+    said; an emptied slot stays empty for problems to name; the clock is the bar's as ever without it."""
+    assert BM.normalize({"bar": {"on": 1, "fill": "value"}})["bar"] == {
+        "on": True, "color": "#00c040", "fill": "value", "value": {"k": "scored"}, "of": {"k": "num", "v": 10}}
+    assert "fill" not in BM.normalize({"bar": {"on": 1, "fill": "clock"}})["bar"]
+    p = prog([], bar={"on": True, "fill": "value", "value": None, "of": {"k": "num", "v": 12}})
+    assert any("The bar's value has an empty number slot" in t for t in BM.problems(p, SHOTS, GZ.events))
+    p = prog([], vars=[{"name": "hits", "reset": "mode"}], timers=[{"name": "window"}],
+             bar={"on": True, "fill": "value", "value": {"k": "var", "name": "nope"}, "of": {"k": "num", "v": 12}})
+    assert any("The bar's value uses a variable that is not there" in t for t in BM.problems(p, SHOTS, GZ.events))
+    assert "#define BAR_FILLS 0" in BM.to_c(prog([], bar={"on": True}), "blk")
+
+
+def test_the_bar_fills_as_shots_are_made_and_stays_through_the_total(tmp_path):
+    """PAD-721: 4 shots of 4: empty at the start, a quarter a shot, full at the last, and kept as it was (not the
+    clock's full bar) through its total. A value naming a timer builds too (the bar's C comes after timer_left)."""
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+              {"hat": {"kind": "shot", "shot": "Right ramp", "when": "running"},
+               "do": [{"op": "score", "points": {"k": "num", "v": 1000}}]}],
+             seconds=20, name="YOLT WIZARD",
+             bar={"on": True, "color": "#00c040", "fill": "value", "value": {"k": "scored"}, "of": {"k": "num", "v": 4}})
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Right ramp",
+               "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Right ramp",
+               "secs", 25)
+    pcts = [int(b) for b in re.findall(r"^\s*\d+ STATUSBAR (-?\d+) ", out, re.M)]
+    assert pcts[0] == 0 and 100 in pcts
+    seen = [x for i, x in enumerate(pcts) if not i or x != pcts[i - 1]]
+    assert seen == [0, 25, 50, 75, 100], seen                          # never past full, never the clock's -1
+    assert re.findall(r"^\s*\d+ STATUSBAR (\S+)", out, re.M)[-1] == "OFF"
+    p["timers"] = [{"name": "window"}]
+    p["bar"]["value"] = {"k": "timer_left", "timer": "window"}
+    play(tmp_path, p, "secs", 1)
+
+
 def test_only_a_title_whose_port_names_the_bar_offers_it():
     assert MP.profile("james_bond_le_1_06").status_bar is True
     assert MP.profile("godzilla_le_1_16").status_bar is False

@@ -565,3 +565,13 @@ value ball_launch_wait_flag  12
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x0023a890 0xe92d4ff0 0xe24dd0c4
+
+# PAD-710: the game's own mode framework (mode_framework.py, from this build's program): what one of its
+# modes writes as it starts and stops, so a mode of ours in one's place counts as it
+data  mode_player_at         0x00537278
+value mode_slot_stop         12
+value mode_stopped_at        0x17
+value mode_starts_at         0x28
+site  mode_started           0x0007ddc0 0xe351000e 0xe92d4008
+data  mode_manager           0x0057e4f4
+value mode_id_at             4

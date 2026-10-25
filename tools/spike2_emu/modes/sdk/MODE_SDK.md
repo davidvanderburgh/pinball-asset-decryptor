@@ -2139,7 +2139,7 @@ Pro 1.16's routine is the LE's instruction for instruction, so it has the LE's l
 | Venom Pro 1.07 | `0x00192dec` | ms force | 51 | 0/334/484/1536/2048 | 1536 | tap 80, short 200, medium 484, long 1024 |
 
 **Measured (emulator, PAD-474: every build above but D&D LE on its stock card, hidden, muted, `PAD_COIL_PROBE=1`,
-the pinned runtime, through `rigbatch.sh`; D&D LE starts no game on the rig, so its lines are unproven).** A mode file with `shake start <its longest at 0> 0`, `shake shot game <its short
+the pinned runtime, through `rigbatch.sh`; D&D LE by PAD-713 once the rig started its game: start and end 51/255 480 ms on node 1 coil 0, as on the Pro).** A mode file with `shake start <its longest at 0> 0`, `shake shot game <its short
 shake> <every shot>` and `shake end <600 ms or its longest> <its softest used strength>`: every runtime `shaker:` line
 was followed on the board within ~20 ms by `[coildrive] node 1 coil 0` at the game's power for the time asked, cut
 to the stock setting's longest (setting 2 on Elvira, 3 on most `drive` titles, 4 elsewhere; Metallica at its operator's
@@ -4020,6 +4020,216 @@ text roster_tile_0..6     Ebirah Titan Gigan Megalon Ghidorah MegalonGigan Ghido
   its END plays no ending clip of the old monster over the mode's ending, and whatever the game keeps from them
   (read at the desk: the END posts them with event 0x1a; the battle's champion is probably fed from there, not
   measured) does not get the mode's points.
+
+## A mode in the place of one of the game's own modes (PAD-710)
+
+PAD-706 made a mode picked in one of Godzilla's battles count as that battle. Every C++ Spike 2 title builds its modes
+on the same framework - Stern's mode class (`cmode`; on the later titles a `crule` underneath), with a START and a STOP
+that keep the game's books for the mode - so a mode of yours can take the place of any of the game's modes the port
+names a start of (PAD-363's `block_start_<id>`, `block_name_<id>`: the ids `block_modes` takes) and the game counts it
+as its own:
+
+- **When the game starts that mode** (one of its rules calls the mode's START, as it does when the player earns it),
+  the start does not run, and your mode starts instead.
+- **At that moment the runtime does the START's bookkeeping**, without running the game's mode (none of its shots,
+  lights, screens or music): the player's stopped and reason bytes cleared, the player's start count + 1, and on the
+  generations whose mode manager keeps per-mode audits, the manager's "started" notice (its STARTED audit).
+- **When your mode ends, the game's own STOP of its mode runs** - the mode object's own stop virtual, so the title's own
+  stop logic runs where its class has one - with the outcome: won = completed (non-zero reason), lost = not. The stop
+  writes what it writes for the game's own mode: stopped, the reason, the mode's END, its wins, the manager's
+  COMPLETED audit, and whatever the title does with a completed mode. A game's rules read those as "completed": its
+  wizards and unlocks are gated on them.
+
+In C:
+
+```c
+static int on_start(unsigned id)     /* the game's thread, at the moment its mode would have started */
+{
+    want_start = 1;                  /* start your mode on the next tick (pm_begin there) */
+    return 1;                        /* 1: the game's mode does not start; 0: let it */
+}
+
+static void my_end(int won)          /* however your mode ends */
+{
+    pm_end();
+    pm_place_over(won);              /* the game's own stop of its mode, with the outcome */
+}
+
+static void on_init(void) { pm_place_claim(21, on_start); }   /* Godzilla's 21 is Jet Fighter Attack */
+```
+
+`pm_place_counts(id)` says whether it counts as the game's mode there (the port names the framework), and
+`pm_game_mode_name(id)` the port's name for it. A start the mode takes while another mode of yours runs is the block's
+to decide, as before (PAD-363); a start while the claiming mode runs restarts nothing (on_start is still asked). The
+outcome waits for the player who started it to be up again; a game that ends first drops it; a mode that never says by
+the end of its ball counts as lost. `pm_game_mode_start(id)` calls the game's START of mode `id` as its rules do - a test's
+way to the claim (the C++ titles only).
+
+**In a mode file:** `in_place_of <id>` in place of the trigger (the file needs `seconds` but no trigger): the game
+starting that mode starts it, on the next tick. Its end says how it went, as a battle pick's does: its end shot ending it
+completes it; with no end shot its clock running out does; any other end (the ball, a tilt) does not. **On the Modes
+tab:** Mode > Starts on > *the game starting its* <mode>. **In blocks:** the When block *When the game starts its*
+<mode> (put Start the mode in it); End the mode gets *, completed*. With no End the mode, completed block, the mode's own
+end (its clock, an End the mode block) completes it. The Modes tab offers the game's modes on the builds it was proven on
+(`mode_project.PLACE_PROVEN`), leaving Godzilla's battles to the battle hat (PAD-706).
+
+**The port lines** (`mode_framework.py` reads them off each build's own program; `framework_lines.py <game ELF>` is the
+command line; the card build adds them from the card's own program to a port that lacks them, and a derived port gets
+them as it is derived):
+
+```
+site  mode_player            the framework's player byte getter (the index its per-player fields are kept by), or
+data  mode_player_at         ... the player byte itself, on an older build that reads it inline (PAD-714)
+value mode_slot_stop         the STOP's virtual slot
+value mode_stopped_at        the per-player stopped byte (mode + this + player)
+value mode_reason_at         the per-player reason byte            (Godzilla's, Jaws' and King Kong's generations)
+value mode_starts_at         the per-player start count (mode + this + 4 * player)
+value mode_wins_at           the per-player completions the STOP counts (the crule generation, Star Wars)
+value mode_slot_stopped_get  the mode's own "stopped?" virtual (mode, player), and
+value mode_slot_stopped_set  ... its own "mark stopped" (mode, value, player)   (Jurassic Park, PAD-716)
+site  mode_started           the manager's "started" notice (STARTED audit), with
+data  mode_manager           ... the manager it is called on, and
+value mode_id_at             ... where the mode keeps its id       (the generations whose manager keeps audits)
+```
+
+The finder keys on the STOP's one shape, the same on every generation read: `mov r4, r0; mov rR, r1; bl <player>; add
+r0, r4, r0; ldrb rX, [r0, #<stopped>]; cmp rX, #0; <return when set>`, then `strb <1>, [.., #<stopped>]` and the mode's END
+virtual called on the mode; the slot most mode classes hold such a function at is the stop's. The start count is the
+`ldr rX, [rB, #<starts>]; add rX, rX, #1; str` with rB = the mode + 4 * `sxth` of the player byte (a `sub #1; uxtb` index
+is another, 0-based count) in the START slot's functions and what they call; the wins the same in the STOP; the notice a
+`bl` with r0 = the manager constant and r1 = the mode's id (`ldr r1, [r4, #4]`), not a trace print.
+
+**Older builds** (PAD-714: Godzilla LE 1.13, Jaws LE 1.01, Rush LE 1.18, Star Wars LE 1.30, Venom LE 1.06, TMNT Pro 1.58,
+and the other older builds of Avengers, Deadpool, Foo Fighters, Iron Maiden, Jurassic Park, Led Zeppelin, Mando,
+Munsters and Sword of Rage) have no getter: the STOP reads the player up inline - `movw/movt rA, <the player byte>; ldrb
+rX, [rA]`, mostly `sub rX, rX, #1` (a 0-based index, so its offsets are one up: Rush 1.18's stopped byte `[r3, #0x38]` is
+the newest build's +0x37), `add rY, <mode>, rX` - and the port names the byte itself (`data mode_player_at`), which the
+runtime reads where it would call the getter. Each mode's START there counts words of its own beside the framework's,
+so the start count is the one the START most of the mode classes reach keeps (the base class's where it reads). On all
+22 older C++ builds on hand every offset is its newest build's; a slot that is only a jump to the STOP (Godzilla 1.13's
+v[11]) is followed, and Jurassic Park LE 1.15's stop asks the same own-stopped virtuals as 1.16's (v[32] / v[55],
+below). A port derived on a card writes the START slot the framework's start count is read through (`value
+stock_slot_start`) off its own program - the scanner's, else (Jurassic Park LE) the same title's shipped port's where
+this build's starts count as the START does - and takes `stock_slot_start` / `stock_slot_active` only from a reference
+of the same title: they are the title's own mode classes' vtable slots, and a derive from other titles of the
+generation copied theirs (Foo Fighters 1.03: 38 / 44, its own 41 / 49; Jurassic Park LE 1.15: 11, its own 21, so no
+start was counted).
+
+| generation | builds | stop | stopped | reason | starts | wins | STARTED audit |
+|---|---|---|---|---|---|---|---|
+| Godzilla's cmode | Godzilla Premium/LE, Pro 1.15 / 1.16 | v[11] | +0x13 | +0x17 | +0x3c | - | the manager's notice |
+| Avengers, Deadpool | Avengers LE/Pro 1.10, Deadpool LE/Pro 1.16 | v[14], v[18] | +0x13, +0x17 | - | +0x3c | - | the notice |
+| Iron Maiden | LE/Pro 1.18 | v[12] | +0x17 | - | +0x28 | - | the notice |
+| Jaws, King Kong | Jaws LE/Pro 1.02, King Kong LE/Pro 0.97 | v[15], v[14] | +0x1b | +0x23 | +0x5c | - | the notice |
+| Jurassic Park | LE/Pro 1.16 | v[24] | +0xc3 | - | +0xd8 | - | the notice |
+| Star Wars | LE/Pro 1.31 | v[12] | +0x17 | - | +0x48 | +0x64 | none |
+| crule | D&D, Foo Fighters, John Wick, Led Zeppelin, Mando, Munsters, Rush, Sword of Rage, TMNT, Venom | v[34]-v[53] | +0x37-+0x5f | - | stopped + 0x11 | starts + 0x1c (Venom + 0x2c) | none |
+
+John Wick's stop takes a third word (1 marks the mode stopped; the game always passes 1): the runtime calls every stop
+as `stop(mode, won, 1)`, which the two-word stops never read.
+
+**Modes with their own stop logic (PAD-716).** The stop called is the mode object's own, so a mode whose stop does
+more than the framework's does that too - it is the game's own outcome:
+
+- **Jurassic Park** asks the mode's own "stopped?" virtual (v[32]: mode, player) before anything and marks it stopped
+  through its own setter (v[55]: mode, value, player); the framework's are the plain byte at +0xc3. JP's (LE and Pro) Trex Chase,
+  Trex Encounter, Trex Rampage and the Ctrl Room's System Boot, Virus Attack and Restore Power override both and keep
+  their own byte (Trex Chase +0x137, Virus Attack +0x11f, Restore Power +0x117, Trex Rampage +0x123; on a co-op game
+  one shared). Their START clears it through the setter, so the take does the same (`value mode_slot_stopped_get 32` /
+  `mode_slot_stopped_set 55`, read off the STOP by the finder): before it, the take cleared +0xc3, the byte those
+  classes never read, and a second take of one in a game found it stopped already - the game's stop wrote nothing
+  (rig, two takes in one game, JP Pro's four and JP LE's six: the COMPLETED audit 0 -> 1 before, 0 -> 2 now).
+- **Iron Maiden's Soul Shard Hurry Up** runs the framework stop (stopped, the END, the manager's notice), then tells the
+  song that started it how it went (the song's v[42] with the hurry-up's id: Fear of the Dark records a won hurry-up for
+  the player) and sets its stopped byte back to 0, so it can come round again. The runtime's log reads that as
+  "stopped 0 -> 0 (its own stop set it back)".
+
+**The plain-C titles** (Aerosmith, Batman 66, The Beatles, James Bond, Elvira, Guardians, JP The Pin, Metallica,
+Stranger Things, Star Wars ELG, X-Men) have no mode class: their modes are start functions and game flags, and the
+game keeps each mode's books in the framework's audits and flags, named after the mode (James Bond LE 1.06's Ahoy Mr
+Bond Wizard Mode: `AUD_AHOY_MR_BOND_WIZARD_MODE_STARTED`, `FG_AHOY_MR_BOND_WIZARD_MODE_PLAYED`, `..._COMPLETED`). Both
+name tables are in the program (`FG_INVALID` at id 0: a flag's index is its id; an audit's id is its DESCRIPTOR's,
+`stock_scan_c.audit_ids` - PAD-714: X-Men 0.98 counts `AUD_FASTBALL_SPECIAL_STARTS` as 165, its name 209th, and until
+PAD-714 the ports named the name's place, so a mode in one's place counted another audit: Bond's Ahoy wizard bumped
+`AUD_SPECTRE_TARGET_1`, 180, where its own start counts 276), and every build counts an
+audit through the same framework function (`push {r4-r9, lr}; subs r5, r0, #0; sub sp, sp, #0x14`: id in r0, the amount
+in r1). `mode_framework.plain_books` takes each game mode's stem from the ACTIVE / PLAYED flag its start sets (else from
+the port's name, in the spellings the games use: a `MODE_` prefix or `_MODE` suffix, `HURRYUP`, Batman's `MODE_EP_47_48`
+for "episodes 47-48") and writes what it finds:
+
+```
+site  audit_add                     the framework's audit add
+value place_audit_started_<id>      the mode's STARTED (or STARTS, START) audit
+value place_audit_completed_<id>    its COMPLETED (or COMPLETIONS) audit
+value place_flag_played_<id>        its PLAYED flag
+value place_flag_completed_<id>     its COMPLETED flag
+site  place_start_<id>              PAD-715: its own start, where the port's block_start is a check before it
+```
+
+A mode in one's place then counts it the game's way: the STARTED audit counted and the PLAYED flag set at the take, the
+COMPLETED flag set and the COMPLETED audit counted when it completes (nothing on a loss). All 170 game modes the
+newest plain-C ports name have books (PAD-715 found the last three: JP The Pin counts Restore Power as
+`AUD_RESTORE_POWER_START`; Bond's Bird One Multiball is `ROCKET_MULTIBALL` in the program's names, so where neither the
+start's flags nor the name find books, the stem is the one the start's callers set). A plain-C start's own arguments
+are its own, so `pm_game_mode_start` calls one only while a claim holds it - the claim refuses it before any of it runs.
+
+**An older plain-C build (PAD-714).** The plain-C titles' game modes (`site block_start_<i>`) come from the start
+finder (sdk/cstarts, with each title's hand-checked knowledge), run over the programs on hand when a port ships; a port
+derived on a card from an older build had none. `mode_framework.plain_starts` takes the same title's port's modes (the
+reference's when it is the same title, else the title's shipped ports, its own model first, newest first) and finds
+each on the build by the finder's audit witness: the one function that counts the mode's STARTED audit (by name, at its
+id on this build), whose head is the reference start's - a push with lr and the same second instruction, the push's
+registers and a `mov`/`movw`'s number left out (Batman 66 1.13 saves r4-r11 and counts 0x31 where 1.14 saves r4-r10
+and counts 0x36), its true entry up to six words before the push (a `movw` scheduled first). A mode the witness cannot
+place is left out: never a wrong address. Checked against every shipped plain-C start whose program is on hand (175
+agree, 0 differ; the ones left out are counted from data - Beatles' songs, Bond's story chapters - or a check before
+the start, Bond's Jetpack). Elvira 3 1.11 gets its Houses, X-Men LE 0.97 12 of its 14 modes; James Bond 60th 1.10
+none (its one mode, the Villain Mode, keeps no audit).
+
+**A check before the start (PAD-715).** Bond's Jetpack and Bird One Multiballs' `block_start` is not their start but
+the lock-open check (PAD-578: refusing it closes the lock, which is what a block wants). The lamps ask that check all
+the time and the lock handler asks it at every lock, so a place taken there started the mode at the first lamp
+refresh. Where the start's own flags are not the mode's but one of its callers' calls sets them, `plain_books` names
+that function `site place_start_<id>` (Bond LE 1.06: Jetpack `0xe650c`, Bird One `0x165f50` - called by the lock
+handler at the last lock only). The runtime hooks it on its own (refused with 0) and takes the place there; the check
+takes nothing, and a port naming a start it cannot hook offers no place for that mode. After the take the game's lock
+count stays where its own start would leave it (all locks made).
+
+**Proven** (emulator, 2026-10-24, the stock cards, hidden, muted; `C:\tmp\PAD-710\rig`, `place_job2.sh` over
+rigbatch): a mode file `in_place_of <id>` with an 8 s clock, the game's START of that mode called as its rules call it,
+the mode started in its place, its clock ran out (completed), and the game's own STOP wrote the completion, the game
+playing on after it - every one of the 36 newest C++ builds (`mode_project.PLACE_PROVEN`; D&D LE 1.10 by PAD-713 once the rig started its game: Mimic Hurry Up, starts 0 -> 1, stopped 0 -> 1, wins 0 -> 1).
+Godzilla LE/Pro 1.16 Jet Fighter Attack and Jaws LE 1.02 Super Buoys: STARTED audit 0 -> 1 at the take, COMPLETED
+0 -> 1 at the end, stopped 1, reason 1; Avengers, Deadpool and King Kong: the STARTED audit 0 -> 1 (those modes keep no
+COMPLETED audit), stopped 1; the crule generation and Star Wars: stopped 1, wins 0 -> 1. Venom starts its Mini Mode 01
+by itself as a ball starts: the claim took it there too.
+
+The plain-C titles (run plain2, `place_job4.sh`): all 16 newest builds - the STARTED audit 0 -> 1 at the take on every
+one with an audit add, the COMPLETED audit 0 -> 1 at the end on Batman, Beatles, JP The Pin, Metallica and X-Men, the
+PLAYED and COMPLETED flags on Bond LE/Pro (Ahoy Mr Bond) and the PLAYED flag on Stranger Things; Star Wars ELG (no
+audit add) its COMPLETED flag 67 set and read back. The game played on after each.
+
+PAD-715 (`C:\tmp\PAD-715\rig`, `place715.sh` over rigbatch, Bond LE/Pro 1.06, both lock multiballs): a mode file in
+the multiball's place, 20 s of play with nothing taken, the lock lit two short and the game's lock handler called (a
+ball locked, nothing taken), then one short: the handler called the multiball's start, the mode took its place there
+(STARTED audit 0 -> 1, PLAYED flag set, balls 1: no multiball served), ran its clock out and the game played on. The
+v1.252.0 runtime took both places about 4 s into the ball, no lock made. JP The Pin Restore Power (`jp_job.sh`): its
+STARTED audit 0 -> 1 (v1.252.0: "counted only as ours"; that was id 189, the name's place - its own start counts
+184, PAD-714).
+
+**A challenge that is one of the game's modes.** A challenge (below) whose words lead one of the port's game modes'
+names (`mode_framework.challenge_places`: Bond's Ahoy Mr. Bond = Ahoy Mr Bond Wizard Mode, Godzilla's King of the
+Monsters, Jaws' 4th of July, Metallica's songs, Rush's 2112) has the line
+
+```
+value challenge_place_<n> <id>      challenge n is the game's mode id
+```
+
+and a mode of ours taking that challenge counts as the mode: its START's bookkeeping at the take, its stop (C++) or
+books (plain-C) with the outcome at the mode's end (`pm_place_over`, from mode_file.c and the blocks' end). Proven on
+Bond LE 1.06 (emulator, Default Game Mode = Ahoy Mr. Bond): STARTED audit 180 counted (the name's place: 276 since
+PAD-714) and PLAYED flag 86 set at the
+take, the mode's clock ran out (won) and COMPLETED flag 89 was set.
 
 ## A mode in the game's Challenge list (PAD-615)
 

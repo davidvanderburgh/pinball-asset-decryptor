@@ -689,3 +689,14 @@ value switch_edge_shots     0
 
 # ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
 site  game_scores            0x00478ac8 0xe92d4ff0 0xe24dd0bc
+
+# PAD-710: the game's own mode framework (mode_framework.py, from this build's program): what one of its
+# modes writes as it starts and stops, so a mode of ours in one's place counts as it
+site  mode_player            0x004772cc 0xe30d3c08 0xe3403080
+value mode_slot_stop         14
+value mode_stopped_at        0x1b
+value mode_reason_at         0x23
+value mode_starts_at         0x5c
+site  mode_started           0x0013f6bc 0xe3510021 0xe92d4008
+data  mode_manager           0x00897f18
+value mode_id_at             4

@@ -285,7 +285,7 @@ def test_a_mode_picked_as_the_challenge_does_not_give_way_to_the_games_modes():
     # Avengers 1.10 / Led Zeppelin: the pick started past the game's ball-start mode, which then ended ours at once
     src = (SDK / "mode_file.c").read_text(encoding="utf-8")
     assert "run.by_challenge = why[0] == 'c' && why[1] == 'h'" in src
-    assert "cfg.game_modes != GM_STACK && !run.by_challenge && pm_aside()" in src
+    assert "cfg.game_modes != GM_STACK && !run.by_challenge && !run.by_place && pm_aside()" in src
 
 
 OLDER = ("aerosmith_le-1.15", "avengers_infinity_le-1.09", "batman-1.13", "guardians_le-1.14", "iron_maiden_le-1.16",

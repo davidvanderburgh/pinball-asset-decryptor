@@ -654,6 +654,21 @@ class WebWindow:
     def set_status(self, text):
         self._set_footer(status=str(text))
 
+    def set_task(self, busy, status=None):
+        """A background step that is not a run (Transfer mods' comparisons
+        and copy): the footer shows it working, with its own elapsed clock,
+        but there is no Cancel and the tabs stay as they are.  A real run
+        owns the footer, so this leaves it alone while one is going."""
+        if self._running:
+            return
+        if busy:
+            self._set_footer(task=True, busy=True, pct=None,
+                             started=time.time(),
+                             status=str(status or "Working…"))
+        else:
+            self._set_footer(task=False, busy=False, pct=None, started=None,
+                             status=str(status or "Ready"))
+
     def set_cancelling(self):
         self.ctx.store.set("shell", cancelling=True)
         self.set_status("Canceling...")
@@ -667,13 +682,13 @@ class WebWindow:
             self.ctx.store.set("shell", running=True, run_mode=mode,
                                cancelling=False, back_enabled=False)
             self._set_footer(status="Starting…", busy=True, pct=None,
-                             started=self._start_time)
+                             started=self._start_time, task=False)
         else:
             self._start_time = None
             self._borrowed_row = None
             self.ctx.store.set("shell", running=False, run_mode=None,
                                cancelling=False, back_enabled=True)
-            self._set_footer(busy=False, started=None)
+            self._set_footer(busy=False, started=None, task=False)
             self._show_row_for_tab()
         for svc in self.tabs:
             try:

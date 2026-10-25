@@ -563,7 +563,7 @@ def test_every_latest_build_with_a_shaker_has_its_lines_and_is_proven():
         if game not in newest or tuple(map(int, ver.split("."))) > tuple(map(int, newest[game].split("."))):
             newest[game] = ver
     want = sorted("%s-%s" % (g, newest[g]) for g, parts in MP.MACHINE_HARDWARE.items() if "shaker" in parts)
-    assert len(want) == 49          # Godzilla LE (PAD-414), the twenty the ticket named and 28 more titles (PAD-474)
+    assert len(want) == 50          # Godzilla LE (PAD-414), the twenty the ticket named and 28 more titles (PAD-474), D&D LE (PAD-713)
     have = _ports_with_shaker()
     for key in want:
         assert key in have, key
@@ -672,6 +672,6 @@ def test_the_variants_of_the_other_titles():
     assert re.search(r"^text shake_call\s+ms force$", dnd, re.M)
     for title in ("james_bond_60th_le", "jurassic_park_the_pin", "star_wars_elg"):      # no shake call to read
         assert "shaker" not in MP.MACHINE_HARDWARE[title], title
-    # D&D LE: its lines are ported, but the emulator starts no game on it, so no mode was seen to shake it: hidden
-    assert "shaker" not in MP.MACHINE_HARDWARE["dungeons_and_dragons_le"]
-    assert "dungeons_and_dragons_le-1.10" not in MP.SHAKER_PROVEN
+    # D&D LE: PAD-713 - once the emulator started its game, a mode was seen to shake it: shown, like the Pro
+    assert "shaker" in MP.MACHINE_HARDWARE["dungeons_and_dragons_le"]
+    assert "dungeons_and_dragons_le-1.10" in MP.SHAKER_PROVEN

@@ -546,10 +546,10 @@ def test_the_build_adds_each_monsters_nodes_and_keeps_the_games(stock):
     sc = T.parse(out)
     names = [n.name for n, _p, _d in sc.walk()]
     for i in range(3):
-        for part in ("Grey", "Lit", "Lock", "Done", "Portrait"):
+        for part in ("Gray", "Lit", "Lock", "Done", "Portrait"):
             assert "PadSel_m%d_%s" % (i, part) in names
     assert [n for n in names if re.fullmatch(r"PadSel_Cover[0-9]", n)] == ["PadSel_Cover0", "PadSel_Cover1", "PadSel_Cover2"]
-    assert sum(n.startswith("PadSel_Grey") for n in names) == 7       # each place's grey cut out of the sheet
+    assert sum(n.startswith("PadSel_Gray") for n in names) == 7       # each place's grey cut out of the sheet
     for n in BS.SLOT_NODES:                                            # the game finds its own nodes by name still
         assert n + "_Selected_instance" in names and n + "FullBody_instance" in names
     for i in range(3):                     # what the runtime shows and hides is a Sprite: the game's lookup finds no other

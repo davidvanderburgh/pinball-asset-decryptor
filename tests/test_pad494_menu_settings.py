@@ -70,7 +70,7 @@ def _built(raw, tmp, values=3, names=NAMES):
     reloc, why = E._text_reloc_plan(raw)
     assert reloc, why
     va = reloc["base_va"] + reloc["used"]
-    fw = list(writes.items()) + list(MS.table_writes(t, cat, va, len(cat.records) + 1).items())
+    fw = list(writes.items()) + list(MS.table_writes(t, cat, va, setting).items())
     grown = E._grow_program_text(raw, fw, MS.table_blob(cat, setting), reloc, None, str(tmp), None,
                                  lambda *a, **k: None)
     with open(grown["path"], "rb") as f:
@@ -139,8 +139,8 @@ def test_the_table_cannot_grow_past_what_its_end_instruction_holds():
     t = AdjustmentTable(raw)
     _s, _w, cat = MS.plan(t, MS.MUSIC_MODE, 3, NAMES)
     with pytest.raises(MS.MenuSettingError, match="cannot grow"):
-        MS.table_writes(t, cat, 0x700000, 200)
-    writes = MS.table_writes(t, cat, 0x700000, 108)
+        cat.writes_for(t, 0x700000, 200)
+    writes = cat.writes_for(t, 0x700000, 108)
     assert struct.unpack_from("<I", writes[cat.literal_off])[0] == 0x700000
     for o in cat.size_offs:
         w = struct.unpack_from("<I", writes[o])[0]

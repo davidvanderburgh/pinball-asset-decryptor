@@ -23,6 +23,8 @@ site shot_dispatch    0x0014f938 0xe92d4ff0 0xe3045b18
 site ball_end         0x001521e8 0xe92d40f8 0xe30e6c04
 #   sound_lookup: located (strict)
 site sound_lookup     0x0055bab8 0xe92d4038 0xe1a05000
+# PAD-494/724 music modes: get_asset_descriptor, WRAPPED (sounds.cfg)
+site sound_resolve    0x004c1e2c 0xe92d41f0 0xe1a05820
 # called
 #   score_add: located (strict)
 site score_add        0x003d3260 0xe3041d0e 0xe3401087

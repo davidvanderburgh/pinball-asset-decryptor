@@ -11,6 +11,8 @@ version        1.31
 # ---- functions ----
 site tick             0x003cf10c 0xe92d4038 0xe3a00037
 site sound_lookup     0x0029e320 0xe92d4038 0xe1a05000
+# PAD-494/724 music modes: get_asset_descriptor, WRAPPED (sounds.cfg)
+site sound_resolve    0x0020478c 0xe92d41f0 0xe1a05820
 site score_add        0x002d43e0 0xe30b17fa 0xe340106b
 site callout          0x00205940 0xe92d4010 0xe30ce558
 site callout_nth      0x00205af4 0xe92d4010 0xe30ce558

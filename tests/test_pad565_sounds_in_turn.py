@@ -92,12 +92,14 @@ def test_the_card_record_brings_the_files_in_turn_back():
 
 
 # ---- which titles ---------------------------------------------------------------------------------
-def test_bond_plays_sounds_in_turn_but_has_no_music_mode():
+def test_bond_plays_sounds_in_turn_and_only_its_le_has_no_music_mode():
+    """PAD-724: music modes on every latest build whose program can grow; Bond LE 1.06's cannot."""
     from pinball_decryptor.plugins.stern import mode_project as MP
     for name in ("james_bond_le_1_06", "james_bond_pro_1_06"):
-        prof = MP.profile(name)
-        assert SMo.title_refusal(prof, turns=True) == ""
-        assert SMo.title_refusal(prof) == SMo.NOT_PROVEN % prof.label
+        assert SMo.title_refusal(MP.profile(name), turns=True) == ""
+    le = MP.profile("james_bond_le_1_06")
+    assert SMo.title_refusal(le) == SMo.NO_ROOM % le.label
+    assert SMo.title_refusal(MP.profile("james_bond_pro_1_06")) == ""
     gz = MP.profile("godzilla_le_1_16")
     assert SMo.title_refusal(gz, turns=True) == SMo.title_refusal(gz) == ""
     other = MP.profile("godzilla_pro_1_15")
@@ -115,7 +117,8 @@ def test_the_audio_tab_offers_turns_per_slot(monkeypatch):
     monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: MP.profile("james_bond_pro_1_06"))
     why, slots = SMo.offer_turns("proj", [TANK, "music_cat01_0003.wav"])
     assert why == "" and slots == {TANK: "", "music_cat01_0003.wav": SMo.NOT_SOUND_TURN}
-    assert SMo.offer("proj", [TANK])[0]                  # music modes are not offered on Bond
+    monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: MP.profile("james_bond_le_1_06"))
+    assert SMo.offer("proj", [TANK])[0]                  # music modes are not offered on Bond LE
 
 
 # ---- the build ------------------------------------------------------------------------------------

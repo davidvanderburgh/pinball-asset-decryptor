@@ -160,6 +160,7 @@ def _build():
         ("dead", "NO REFS HERE"),             # nothing points at it
         ("ctr", "COUNTER ROW TEXT"),          # group d0; a stride counter at +9
         ("ws", "GAME OVER MAN"),              # lone d4 at a space: dismissed
+        ("mid", "TROOPER MULTIBALL\nCHAMPION"),  # lone d16 mid-word: dismissed
     ]
     body = bytearray(b"\x00")
     offs = {}
@@ -193,6 +194,11 @@ def _build():
         word(k, va("ctr", d))
         body.extend(b"\x00" * 4)
     word("ws_lone", va("ws", 4))              # "GAME OVER MAN"[4] == ' '
+    body.extend(b"\x00" * 8)
+    group("mid_g0", va("mid"))
+    word("mid_in16", va("mid", 16))           # "L\nCHAMPION": a light pair
+    body.extend(b"\x00" * 8)
+    word("mid_in18", va("mid", 18))           # "CHAMPION": a real tail
     body.extend(b"\x00" * 8)
     # code: A32 movw r1 / nop / movt r1 = plain; T32 movw r2 / movt r2 = plain
     p = va("plain")
@@ -270,6 +276,48 @@ def test_counter_and_whitespace_lookalikes_are_not_references(synth):
     assert pr.is_counter_word(raw, offs["ctr_0"], VBASE + offs["ctr"] + 9)
     assert not pr.is_counter_word(raw, offs["cap_lone"], VBASE + offs["cap"])
     assert offs["ws"] not in c
+
+
+def test_a_lone_word_pointing_mid_word_is_not_a_reference(synth):
+    """PAD-718: on Iron Maiden LE 1.18 a pair of light numbers (0x52, 0x50)
+    reads as ``TROOPER MULTIBALL\\nCHAMPION`` + 16.  Taken for a tail, a
+    longer rename moved the line and rewrote the lights with it: FATAL error
+    53 at every boot.  A tail starting on a word is still one."""
+    raw, offs = synth
+    c = pr.reference_census(raw, _spans(raw))
+    assert [(r["kind"], r["delta"]) for r in c[offs["mid"]]] == [
+        ("group", 0), ("lone", 18)]
+    assert pr.is_mid_word("TROOPER MULTIBALL\nCHAMPION", 16)
+    assert not pr.is_mid_word("TROOPER MULTIBALL\nCHAMPION", 18)
+    assert not pr.is_mid_word("GODZILLA VS MEGALON", 12)
+    assert not pr.is_mid_word("GODZILLA VS MEGALON", 0)
+
+
+def test_a_word_in_a_table_of_small_number_pairs_is_not_a_reference():
+    """PAD-718's second look-alike: Iron Maiden LE 1.18's light table packs
+    two light numbers a word (``0x002e002d``...), and lights 0x48 and 0x52
+    read as an address 8 bytes into a caption, on a word boundary.  The same
+    word among real pointers stays a reference."""
+    text = b"TROOPER MULTIBALL\nCHAMPION"
+    body = bytearray(b"\x00")
+    s_off = BODY_OFF + len(body)
+    body += text + b"\x00"
+    while (BODY_OFF + len(body)) % 4:
+        body += b"\x00"
+    target = VBASE + s_off + 8
+    table = [0x001E001F, 0x00210020, 0x00230022, 0x001D0037, None,
+             0x00420017, 0x000C0005, 0x000E000D, 0x000A0009]
+    t_off = BODY_OFF + len(body)
+    for w in table:
+        body += struct.pack("<I", target if w is None else w)
+    body += b"\x00" * 8
+    p_off = BODY_OFF + len(body)
+    body += struct.pack("<3I", VBASE + s_off, target, VBASE + s_off)
+    raw = _elf(bytes(body))
+    c = pr.reference_census(raw, _spans(raw))
+    lone = [r["offs"][0] for r in c[s_off] if r["kind"] == "lone"]
+    assert t_off + 16 not in lone
+    assert p_off + 4 in lone and p_off in lone
 
 
 def test_reference_value_and_retarget_every_kind(synth):

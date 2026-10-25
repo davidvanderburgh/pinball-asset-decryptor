@@ -38,7 +38,9 @@ Three shapes are deliberately NOT references:
   bytes into the caption.  Likewise a lone word pointing INTO a string at a
   whitespace character is dismissed (a linker tail-merge never starts on a
   space; a coincidence there would force every edit of the caption to keep
-  a tail nobody displays);
+  a tail nobody displays), and so is one pointing INTO a word, between two
+  letters or digits (:func:`is_mid_word`, PAD-718: retargeting one rewrote
+  a pair of light numbers and the game stopped at boot);
 * the LAST BYTES OF A C STRING — the ELF's own symbol tables are full of
   C++ mangled names ending ``...EUlPvPKvE_\0`` or ``...S0_PS_\0``, and the
   three printable characters in front of that terminator read as a
@@ -329,6 +331,69 @@ def is_counter_word(raw, off, val):
     return False
 
 
+def is_mid_word(text, delta):
+    """True when *delta* points into *text* between two letters or digits:
+    ``"TROOPER MULTIBALL\\nCHAMPION" + 16`` = ``L\\nCHAMPION``.
+
+    A linker tail-merge shares a suffix that is a string of its own in the
+    game's code, and those start on a word (``MEGALON``, ``CHAMPION``,
+    ``GRAND CHAMPION``); nothing in a game reads ``mps Finish Count`` or
+    ``ayer Cash``.  A lone word that lands mid-word is data: these games'
+    string addresses are ``0x005xxxxx``, which is also how a pair of small
+    16-bit numbers reads (``0x00520050`` = lights 0x52 and 0x50), and every
+    Spike 2 ELF has hundreds of such hits (473 on Iron Maiden LE 1.18, 715 on
+    Godzilla Pro 1.16).  PAD-718 is the proving case: a longer
+    ``TROOPER MULTIBALL\\nCHAMPION`` moved to new space and that light pair,
+    in ``SarcophagusLockRamp``'s data, was "repointed" with it, so Iron
+    Maiden 1.18 stopped at every boot on ``FATAL: error 53 (Light number out
+    of range)``.  Dismissing a genuine mid-word tail costs only its old
+    wording: moved text leaves the original bytes where they were."""
+    return (0 < delta < len(text) and text[delta].isalnum()
+            and text[delta - 1].isalnum())
+
+
+#: a word whose halves are both 1..this is a pair of small 16-bit numbers
+SMALL_HALF = 0x400
+#: how many of the NUMBER_TABLE_SPAN words either side must be such pairs
+NUMBER_TABLE_MIN = 4
+NUMBER_TABLE_SPAN = 4
+
+
+def _small_pair(w):
+    hi, lo = w >> 16, w & 0xFFFF
+    return 0 < hi < SMALL_HALF and 0 < lo < SMALL_HALF
+
+
+def is_number_table_word(words, is_ref, k):
+    """True when word *k* of *words* (a segment's aligned dwords; *is_ref*
+    marks the ones that resolve to a display string) sits in a table of
+    packed 16-bit numbers: at least :data:`NUMBER_TABLE_MIN` of the
+    :data:`NUMBER_TABLE_SPAN` words either side hold two small halves
+    (``0x002e002d``, ``0x000c0005``) and point at no string.
+
+    Such a table is light, switch or coil numbers two to a word, and a pair
+    with a high half of 0x50-0x5c reads as a ``.rodata`` address on every
+    Spike 2 ELF.  PAD-718's second look-alike: lights 0x48 and 0x52 in Iron
+    Maiden LE 1.18's light table read as ``TROOPER MULTIBALL\\nCHAMPION`` + 8,
+    on a word boundary, so :func:`is_mid_word` let it through.  A real
+    pointer table's neighbours are pointers (they resolve, so they never
+    count) or zero / one-half fields, and the word itself has to read as
+    such a pair too: Godzilla Pro 1.16 names ``gigan_ghidorah_maserhit3``
+    with ``0x0063c2dc`` straight after a run of them."""
+    if not _small_pair(int(words[k])):
+        return False
+    n = len(words)
+    hits = 0
+    for j in range(k - NUMBER_TABLE_SPAN, k + NUMBER_TABLE_SPAN + 1):
+        if j == k or j < 0 or j >= n or is_ref[j]:
+            continue
+        if _small_pair(int(words[j])):
+            hits += 1
+            if hits >= NUMBER_TABLE_MIN:
+                return True
+    return False
+
+
 def is_string_tail_word(raw, off):
     """True when the aligned word at *off* is the last bytes of a
     NUL-terminated ASCII string — a C++ mangled name in one of the ELF's
@@ -434,6 +499,10 @@ def reference_census(raw, spans, segs=None):
             if is_string_tail_word(raw, fo):
                 continue
             if d > 0 and ordered[si][3][d].isspace():
+                continue
+            if d > 0 and is_mid_word(ordered[si][3], d):
+                continue
+            if is_number_table_word(a, hit, int(k)):
                 continue
             add(si, KIND_LONE, d, [fo], val)
 

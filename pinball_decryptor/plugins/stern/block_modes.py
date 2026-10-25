@@ -168,6 +168,14 @@ display of the game's (``pm_display_covered``) its words are blank and the edges
 the game's own modes runs (``pm_aside``) its lines go into the award line, the counters hide, and the
 badge moves one slot down for a battle. The mode's own screen, when it has one, is hidden then too.
 At the end the HUD shows the mode's TOTAL for three seconds (the game moving on takes it down at once).
+The corner meter (the top-right POWERUP-style bar, PAD-658) steps aside while one of the game's own modes or
+battles runs: the game letters its MODE CHAMPION (HIGH SCORE / YOUR SCORE) there then (PAD-707).
+
+WHAT IS LIT (PAD-707, David: "whatever progresses the mode in general should be flashing ... and other targets should
+not be flashing"). A mode that keeps the game's modes off (``game_modes`` block or give way) holds every shot insert it
+does not light dark while it runs (``quiet_shots``): its own Light blocks paint over that, a Lights off puts one back
+to dark rather than to the game's, a light show's end puts them dark again first. A mode beside the game's modes
+leaves the game's lights be.
 
 A DRAIN (PAD-622). The game's own mini-wizards (James Bond) show their TOTAL when the ball drains in one,
 and the bonus waits for it. A mode the ball's drain ends does the same: it ends as its clock would (an
@@ -226,6 +234,7 @@ import os
 import re
 
 from . import mode_project as MP
+from . import more_kaiju as MK
 
 BLOCKS_FILE = "blocks.json"
 FORMAT = 1
@@ -818,7 +827,8 @@ def _sync_assets(project, slug, program):
                or (spec.clips or {}) != clips or (spec.calls or {}) != calls
                or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud
                or (getattr(spec, "screen_style", "") or "panel") != program["screen_style"]
-               or bool(getattr(spec, "info_line", False)) != program["info"]["on"])
+               or bool(getattr(spec, "info_line", False)) != program["info"]["on"]
+               or dict(getattr(spec, "more", None) or {}) != more_of(program))
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
         spec.screen = program["screen"]
@@ -830,7 +840,21 @@ def _sync_assets(project, slug, program):
         spec.beds = beds
         spec.screen_style = "words" if program["screen_style"] == "words" else ""
         spec.info_line = program["info"]["on"]          # PAD-547: the build adds PadMode_<slug>_Info
+        spec.more = more_of(program)                    # PAD-707: the build puts its tile on the selection screen
         CM.save(project, slug, spec)
+
+
+def more_of(program):
+    """PAD-707: ``{"slot": n, "picture": file}`` when a script's When is a pick on MORE KAIJU (the list of monsters
+    behind battle slot n), else ``{}`` - what assets.json tells the build, which draws the mode's page on the list."""
+    for s in program.get("scripts") or []:
+        h = s.get("hat") or {}
+        if h.get("kind") == "battle" and h.get("more") and _int_ok(h.get("slot"), 0, ROSTER_MAX - 1):
+            out = {"slot": int(h["slot"])}
+            if h.get("picture"):
+                out["picture"] = str(h["picture"])
+            return out
+    return {}
 
 
 def media_assets(program):
@@ -2374,6 +2398,7 @@ def to_c(program, slug):
     challenge_names = []                    # PAD-615: the game's challenges its scripts take the place of
     challenge_launch = []                   # PAD-643: each one's launch (pm_challenge_launch)
     battle_slots = []                       # PAD-706: the battle selection's slots its scripts take the place of
+    battle_more = set()                     # PAD-707: of those, the ones it is a monster on MORE KAIJU behind
     place_ids = []                          # PAD-710: the game's own modes its scripts take the place of
     for kind, items in bodies.items():
         for n, hat, body in items:
@@ -2419,6 +2444,8 @@ def to_c(program, slug):
                 slot = int(hat.get("slot")) if _int_ok(hat.get("slot"), 0, ROSTER_MAX - 1) else -1
                 if slot not in battle_slots:
                     battle_slots.append(slot)
+                if hat.get("more"):
+                    battle_more.add(slot)
                 test = "(picked & %du)" % (1 << battle_slots.index(slot))
             elif kind == "game_mode":                    # PAD-710: the game's start, taken on its thread, run on the tick
                 mid = int(hat.get("mode")) if _int_ok(hat.get("mode"), 0, PLACE_MAX - 1) else -1
@@ -3133,6 +3160,7 @@ def to_c(program, slug):
         L.append("        pa_music_begin(&own);")
         L.append("    }")
     L.append('    pm_log("START (%s): player %u", why, run.player);')
+    L.append("    quiet_shots();                    /* PAD-707: the shots it does not light, dark */")
     L.append("    on_mode_start();")
     if has_info:
         L.append("    if (run.on) info_show(1);          /* PAD-547: what the start's blocks set, on the first frame */")
@@ -3267,13 +3295,18 @@ def to_c(program, slug):
         L.append(" * own, won or lost, when the mode ends */")
         L.append("static const unsigned BATTLE_SLOTS[%d] = { %s };"
                  % (len(battle_slots), ", ".join(str(max(0, v)) for v in battle_slots)))
+        L.append("static const unsigned BATTLE_MORE[%d] = { %s };   /* PAD-707: 1 = a new monster of its own on the screen, in its place */"
+                 % (len(battle_slots), ", ".join("1" if v in battle_more else "0" for v in battle_slots)))
+        L.append('#define MORE_PAGE "%s"      /* PAD-707: its tile nodes on the selection screen (the build adds them) */'
+                 % MK.page_names(slug)[0])
         L.append("static volatile unsigned battle_picked;    /* set on the game's thread, run on the tick */")
         L.append("static unsigned battle_player;             /* who picked */")
         L.append("static unsigned long battle_at;            /* its scripts run at this pm_ms(): the selection screen has closed */")
         L.append("")
         L.append("static int on_battle(unsigned slot)")
         L.append("{")
-        L.append("    long after = pm_port_value(\"roster_start_after_ms\", 0);")
+        L.append("    /* PAD-707: a new monster picked on the screen starts as a place picked there does, once it has closed */")
+        L.append("    long after = pm_roster_more_picked() ? pm_roster_start_after() : pm_port_value(\"roster_start_after_ms\", 0);")
         L.append("    unsigned k;")
         L.append("    if (!pm_in_game()) return 0;")
         L.append("    for (k = 0; k < %d; k++)" % len(battle_slots))
@@ -3359,8 +3392,10 @@ def to_c(program, slug):
         L.append('            pm_log("the game\'s mode %u is not one this game lets a mode take the place of", PLACE_IDS[i]);')
     if battle_slots:                                # PAD-706
         L.append("    for (i = 0; i < %d; i++)" % len(battle_slots))
-        L.append("        if (!pm_roster_claim(BATTLE_SLOTS[i], on_battle))")
-        L.append('            pm_log("battle %u is not one this game lets a mode take the place of", BATTLE_SLOTS[i]);')
+        L.append("        if (BATTLE_MORE[i] ? pm_roster_more(BATTLE_SLOTS[i], MODE_NAME, MORE_PAGE, 0, on_battle) < 0   /* PAD-707 */")
+        L.append("                           : !pm_roster_claim(BATTLE_SLOTS[i], on_battle))")
+        L.append('            pm_log("battle %u is not one this game lets a mode take the place of%s", BATTLE_SLOTS[i],')
+        L.append('                   BATTLE_MORE[i] ? " (or stand a new monster in its place)" : "");')
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H;")
     L.append("}")
     L.append("")
@@ -3894,6 +3929,15 @@ UNUSED static unsigned hurry_ms(void)
     return 100;
 }
 
+/* PAD-707 (David: "whatever progresses the mode in general should be flashing ... and other targets should not be
+ * flashing"): while a mode that keeps the game's modes off runs, the inserts of every shot it does not light are held
+ * dark - the game's own shows of them are for features that cannot start - so what it lights is all that is lit */
+#define QUIET_SHOTS (GAME_MODES != 0)
+UNUSED static void quiet_shots(void)
+{
+    if (QUIET_SHOTS && run.on && named && !SHOWING) pm_lamp_shot(named, 0, PM_LAMP_SOLID, 0);
+}
+
 UNUSED static void lamp_send(int i)
 {
     unsigned ms;
@@ -3927,7 +3971,12 @@ UNUSED static void unlight(int i)
     if (i < 0 || i >= N_LIGHTS) return;
     LIT[i].on = 0;
     if (i >= N_SHOTS) pm_lamp_release(LAMP_NAMES[i - N_SHOTS]);
-    else if (S[i]) pm_lamp_release_shot(S[i]);
+    else if (S[i] && QUIET_SHOTS && run.on && !SHOWING) {   /* PAD-707: dark again, not the game's */
+        int j;
+        pm_lamp_shot(S[i], 0, PM_LAMP_SOLID, 0);
+        for (j = 0; j < N_SHOTS; j++)                  /* a shot sharing an insert with it keeps its light */
+            if (j != i && LIT[j].on && S[j] && (S[j] & S[i])) lamp_send(j);
+    } else if (S[i]) pm_lamp_release_shot(S[i]);
 %(forget)s}
 
 static void unlight_all(void)
@@ -3940,6 +3989,7 @@ static void unlight_all(void)
 UNUSED static void relight_all(void)                /* after a show: every light the blocks hold */
 {
     int i;
+    quiet_shots();                                  /* PAD-707: the others dark again first */
     for (i = 0; i < N_LIGHTS; i++) lamp_send(i);
 }
 
@@ -4787,6 +4837,8 @@ def _hat_words(hat):
     if kind == "combo":                                                             # PAD-708
         return combo_words(hat)
     if kind == "battle":                                                             # PAD-706
+        if hat.get("more"):                                                          # PAD-707
+            return "when the player picks it on the battle selection screen, a new monster in %s's place" % battle_name(hat)
         return "when the player picks %s on the battle selection screen" % battle_name(hat)
     if kind == "game_mode":                                                          # PAD-710
         return "when the game starts its %s" % place_name(hat)

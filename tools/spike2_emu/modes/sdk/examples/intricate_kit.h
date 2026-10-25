@@ -1485,7 +1485,11 @@ static KIT_UNUSED void kit_hud_tick(struct kit_hud *h)
         }
     }
     if (h->gauge) {
-        int up = h->want_gauge >= 0;
+        /* PAD-707 (David: "our rage meter is taking up space that is used for showing high scores for modes"): the
+         * game letters its mode's MODE CHAMPION - HIGH SCORE / YOUR SCORE - top right, where a corner meter is, for as
+         * long as one of its own modes or battles runs (emulator run26: up through a battle, not in plain play) - the
+         * corner meter steps aside then */
+        int up = h->want_gauge >= 0 && !(h->beside && pm_aside());
         if (up != h->gauge_up) { pm_show(h->gauge, up); h->gauge_up = up; }
         if (up) {
             kit_hud_text(h->t_glabel, h->w_glabel, sizeof h->w_glabel, h->want_glabel);

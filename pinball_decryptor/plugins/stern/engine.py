@@ -9197,6 +9197,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 _hudfont_node = (_MW.lookup(reader, "%s/%s" % (_mprof.game_dir, _MHF.GAME_FONT_SCENE))
                                  if _hud_rel and any(getattr(_c, "hud", None) for _s, _c in (_MW.code_mode_list(assets_dir) or ()))
                                  else None)
+                # PAD-707: the battle selection screen, when the project puts new monsters on it (the card's own:
+                # a Heisei card's is Heisei's)
+                from . import battle_select as _BSF, more_kaiju as _MKF
+                _sel_node = (_MW.lookup(reader, "%s/%s" % (_mprof.game_dir, _BSF.REL))
+                             if _hud_rel and _mprof.can("roster") and _MKF.wanted(assets_dir) else None)
                 mode_plan = _MW.plan(
                     assets_dir,
                     reader.read_file_bytes(_mnodes[_hud_rel]) if _hud_rel else b"",
@@ -9209,6 +9214,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                 if _font_node is not None else b""),
                     hud_font=(bytes(reader.read_file_bytes(_hudfont_node))
                               if _hudfont_node is not None else b""),
+                    stock_select=(bytes(reader.read_file_bytes(_sel_node))
+                                  if _sel_node is not None else b""),
                     modes_on=_modes_on, variants=_clips_on,
                     variants_prof=variant_prof or sound_modes_prof, cancel=cancel,
                     sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof,

@@ -221,6 +221,50 @@ site roster_cursor     0x0018d268 0xe92d4038 0xe1a05000
 # shape as Premium/LE's 0x199038)
 site roster_resume     0x00195398 0xe5903000 0xe5933020
 value roster_cursor_at       16
+# PAD-707: new monsters on the selection screen (pm_roster_more) - the screen's own sounds, read from its switch
+# handler (0x18d3a8): the left flipper button moves the cursor back with 271, the right on with 272; a pick plays 236
+# (then show 177); the screen's timer is 13 s.
+value roster_left_sound     271
+value roster_right_sound    272
+value roster_pick_sound     236
+value roster_select_ms      13000
+# The screen's handler (r0 = the screen, r1 = the switch: 137 the left flipper button, 139 the right) moves the
+# cursor only while the screen's clock (83) runs and the busy one (23) does not, and not when the other flipper is
+# down too (both pick); each move first gives the clock 3 more (bump), then the next open slot (next 0x18d2d0), the
+# sound, the cursor's word (+roster_cursor_at) and its landing (roster_cursor, the callout). Opening (open) starts
+# the cursor on the last slot played; the pick (pick: Action, both flippers or the clock) plays 236 and starts the
+# battle of the slot under the cursor. A slot's state (state, RuleBattle): 0 open, 2 won in this city, else locked.
+site roster_screen_keys   0x0018d3a8 0xe92d4070 0xe1a05000
+site roster_screen_open   0x0018d53c 0xe92d4038 0xe1a04000
+site roster_screen_pick   0x0018cfc0 0xe3a01000 0xe92d4010
+site roster_screen_bump   0x0018d22c 0xe92d4038 0xe1a05000
+site roster_slot_state    0x00121bac 0xe3510006 0xda000001
+site roster_timer_on      0x00390eb0 0xe92d4008 0xe30b3ff4
+site roster_switch_held   0x0045fde8 0xe59f1000 0xeaffffe2
+value roster_screen_left   137
+value roster_screen_right  139
+value roster_screen_timer  83
+value roster_screen_busy   23
+value roster_screen_bump_by 3
+# the screen's scene, the path to its places' nodes, and each slot's node names (battle_select.py's)
+text roster_screen_scene  cac32730af42b9d26d26c4bb6e667b07da53113e
+text roster_screen_path   SelectOverlay_Textbox.CharacterSelect_Instance.
+text roster_tile_0        Ebirah
+text roster_tile_1        Titan
+text roster_tile_2        Gigan
+text roster_tile_3        Megalon
+text roster_tile_4        Ghidorah
+text roster_tile_5        MegalonGigan
+text roster_tile_6        GhidorahGigan
+# each place's state box (its lock, its claw, its city), under the overlay: hidden where a new monster won it
+text roster_box_path      SelectOverlay_Textbox.
+text roster_box_0         T1_1_Artbox
+text roster_box_1         T1_2_Artbox
+text roster_box_2         T1_3_Artbox
+text roster_box_3         T1_4_Artbox
+text roster_box_4         T2_1_Artbox
+text roster_box_5         T2_2_Artbox
+text roster_box_6         T2_3_Artbox
 value battle_stopped_at      0x13
 value battle_reason_at       0x17
 value battle_starts_at       0x3c
@@ -230,6 +274,15 @@ value battle_flags_at        8
 value battle_no_city_flag    0x10
 value battle_total_at        0xf0
 value roster_city_battle_vec_at 56
+# PAD-707: a tier-1 battle's last hit (0x7fe00, 0x8f3a8, 0x9ba18, 0xa4704): beaten(rule), once the rule's
+# guard says it is built, then the cities rule's "beaten here" byte for the player (+0x44 vector, 4 a city) = 1,
+# before the victory show and CBattle::stop. A pick a mode won does the same (the city is finished: the next city
+# screen travels on).
+site battle_beaten       0x0011f318 0xe92d47f0 0xe1a06000
+data battle_beaten_rule       0x0079fa38
+data battle_beaten_guard      0x0079fb98
+value roster_city_beaten_vec_at 68
+value battle_beaten_slots   0x0f
 # the slots whose battle stops itself, not through CBattle::stop: 5, Megalon & Gigan multiball
 value battle_own_stop_slots  0x20
 

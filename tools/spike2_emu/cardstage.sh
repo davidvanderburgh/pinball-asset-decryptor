@@ -39,8 +39,9 @@
 # copy. A card staged to C: still boots through 9p under fuse2fs, and that is
 # where a boot's time went: Godzilla Pro 1.16 reached attract in 23 s from the
 # cache against 79-130 s from C:. The cache keeps itself (least recently booted
-# goes first, never a mounted card or one being copied), with
-# PAD_CACHE_KEEP_FREE_GB (30 here) left free on the WSL disk.
+# goes first, never a mounted card, one being copied or the library's newest
+# build - PAD-727), with PAD_CACHE_KEEP_FREE_GB (30 here) left free on a
+# distro's own disk; the shared store keeps cardmount.sh's own 2 GB margin.
 set -u
 RIG=$(cd "$(dirname "$0")" && pwd)
 

@@ -48,6 +48,22 @@ elif [ -d /mnt/wsl/cards/cardcache ] && mountpoint -q /mnt/wsl/cards 2>/dev/null
 else
     CACHE=$PAD_HOME/cardcache
 fi
+# THE LIBRARY STAYS (PAD-727). The store was filled with the newest build of every title on 2026-10-20 and the
+# eviction below was plain least-recently-booted, so four days of older versions and custom builds booted on purpose
+# pushed 37 newest builds out of it - and the next 53-build sweep copied them off D: again (PAD-723). An entry whose
+# image sits directly in the library folder and still has the stamp it was copied with is now never evicted, not by
+# the copier making room and not by the app's 30-day clean-up (--cache-list says which). A newer build replacing
+# it, or the image moving to `older versions`, makes it an ordinary entry again. PAD_CARD_LIBRARY names another
+# folder; a machine without that folder pins nothing and the cache works as it always did.
+LIBRARY=${PAD_CARD_LIBRARY:-/mnt/d/Pinball/images/Stern/spike2}
+# The space the copier leaves free. On a distro's own disk that space is the distro's (cardstage.sh asks 30 GB);
+# the store holds nothing but the cache, so it keeps only a margin - with the library pinned in it, that margin is
+# the difference between an older version cached and one booted where it lies.
+if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then
+    CACHE_KEEP_GB=${PAD_STORE_KEEP_FREE_GB:-2}
+else
+    CACHE_KEEP_GB=${PAD_CACHE_KEEP_FREE_GB:-8}
+fi
 FUSE2FS="$PREFIX/usr/bin/fuse2fs"
 # Both library directories, because the packages unpacked into $PREFIX put
 # their libraries in /lib up to 24.04 and in /usr/lib from 26.04 (PAD-437).
@@ -131,6 +147,18 @@ copier_alive() {   # <pidf> <copy>
         && grep -qsa -- "$2" "/proc/$pid/cmdline"
 }
 
+# Is this cache entry the library's? Its .src names the image it was copied from; the entry is pinned when that
+# image is a file directly in $LIBRARY (by either spelling: the repo's images/ is a junction to the same folder) and
+# still has the entry's stamp.
+cache_pinned() {   # <label>
+    local s img lib
+    s=$(cat "$CACHE/$1.src" 2>/dev/null) || return 1
+    img=${s% * *}
+    lib=$(readlink -f "$LIBRARY" 2>/dev/null) && [ -n "$lib" ] && [ -d "$lib" ] || return 1
+    [ "$(readlink -f "$(dirname "$img")" 2>/dev/null)" = "$lib" ] || return 1
+    cache_valid "$img" "$CACHE/$1.raw" "$CACHE/$1.src"
+}
+
 # Any OTHER label's copier live right now? One copier at a time, MACHINE-WIDE:
 # the card images live on one spinning disk (repo images/ is a JUNCTION to
 # D:\Pinball\images - same files, two spellings), and two concurrent dd
@@ -167,7 +195,9 @@ label_mounted() {   # <label>
 # Frees space by evicting the least-recently-BOOTED entries first (the .boot
 # sidecar; a missing one falls back to the copy's own mtime, which makes
 # never-booted strays and pre-item-77 entries the first to go). Never evicts
-# the label being copied, a mounted label, or one whose copier is live.
+# the label being copied, a mounted label, one whose copier is live, or the
+# library's (cache_pinned, PAD-727); an entry whose image is gone or changed
+# can never be booted from again and goes before any other.
 # `need` is what the copy can really take: the image's ALLOCATED bytes when
 # its filesystem reports them (drvfs does, for NTFS), else its apparent size.
 # The copy is sparse (cardcopy.py, or `dd conv=sparse`), so it never lands bigger than what the
@@ -176,10 +206,10 @@ label_mounted() {   # <label>
 # more than the whole work disk, so merely PICKING it evicted every other
 # cached card and then ran off the original anyway. Returns 1 when even
 # eviction cannot make room; the boot then runs off the original and nothing
-# half-lands. PAD_CACHE_KEEP_FREE_GB (default 8) is the floor the rest of the
-# WSL disk keeps.
+# half-lands. CACHE_KEEP_GB is the floor the rest of the disk keeps
+# (PAD_CACHE_KEEP_FREE_GB, default 8, on a distro's disk; 2 on the store).
 cache_make_room() {   # <img> <own-copy-path>
-    local need keep free f vlabel vboot victim oldest size alloc
+    local need keep free f vlabel vboot victim oldest size alloc vsrc pinned
     size=$(stat -c %s "$1" 2>/dev/null || echo 0)
     alloc=$(( $(stat -c '%b * %B' "$1" 2>/dev/null || echo 0) ))
     if [ "$alloc" -gt 0 ] && [ "$alloc" -lt "$size" ]; then
@@ -187,29 +217,39 @@ cache_make_room() {   # <img> <own-copy-path>
     else
         need=$(( size / 1024 ))
     fi
-    keep=$(( ${PAD_CACHE_KEEP_FREE_GB:-8} * 1048576 ))
+    keep=$(( CACHE_KEEP_GB * 1048576 ))
     while :; do
         free=$(df -k --output=avail "$CACHE" 2>/dev/null | tail -1 | tr -d " ")
         [ -n "$free" ] || return 0             # df unreadable: do not guess
         [ $(( free - need )) -ge "$keep" ] && return 0
-        victim=""; oldest=0
+        victim=""; oldest=0; pinned=0
         for f in "$CACHE"/*.raw; do
             [ -e "$f" ] || break
             [ "$f" = "$2" ] && continue
             vlabel=$(basename "$f" .raw)
             label_mounted "$vlabel" && continue
             copier_alive "$CACHE/$vlabel.pid" "$f" && continue
-            vboot=$(stat -c %Y "$CACHE/$vlabel.boot" 2>/dev/null \
-                    || stat -c %Y "$f" 2>/dev/null) || continue
+            if cache_pinned "$vlabel"; then pinned=$((pinned + 1)); continue; fi
+            vsrc=$(cat "$CACHE/$vlabel.src" 2>/dev/null)
+            if ! cache_valid "${vsrc% * *}" "$f" "$CACHE/$vlabel.src"; then
+                vboot=0                        # its image is gone or changed: dead weight, first out
+            else
+                vboot=$(stat -c %Y "$CACHE/$vlabel.boot" 2>/dev/null \
+                        || stat -c %Y "$f" 2>/dev/null) || continue
+            fi
             if [ -z "$victim" ] || [ "$vboot" -lt "$oldest" ]; then
                 victim="$vlabel"; oldest="$vboot"
             fi
         done
         if [ -z "$victim" ]; then
-            echo "[card] disk too full to cache ($(( free / 1048576 )) GB free, want $(( (need + keep) / 1048576 )) GB) and nothing evictable - running off the original" >&2
+            echo "[card] disk too full to cache ($(( free / 1048576 )) GB free, want $(( (need + keep) / 1048576 )) GB) and nothing evictable ($pinned library cards kept) - running off the original" >&2
             return 1
         fi
-        echo "[card] evicting cached $victim (least recently booted) to make room" >&2
+        if [ "$oldest" = 0 ]; then
+            echo "[card] evicting cached $victim (its image is gone or changed) to make room" >&2
+        else
+            echo "[card] evicting cached $victim (least recently booted) to make room" >&2
+        fi
         rm -f "$CACHE/$victim.raw" "$CACHE/$victim.raw.partial" \
               "$CACHE/$victim.src" "$CACHE/$victim.log" \
               "$CACHE/$victim.boot" "$CACHE/$victim.pid"
@@ -599,6 +639,8 @@ if [ "${1:-}" = "--cache-dir" ]; then     # where the cache is (the shared store
 fi
 if [ "${1:-}" = "--cache-list" ]; then
     # entry <TAB> label <TAB> real_kb <TAB> apparent_kb <TAB> boot_epoch <TAB> source
+    # pinned <TAB> label   - after its entry when it is the library's (PAD-727): a line of its own, so a reader
+    #                        that knows only `entry` lines reads the same rows
     for f in "$CACHE"/*.raw; do
         [ -e "$f" ] || break
         l=$(basename "$f" .raw)
@@ -607,6 +649,7 @@ if [ "${1:-}" = "--cache-list" ]; then
         b=$(stat -c %Y "$CACHE/$l.boot" 2>/dev/null || echo 0)
         s=$(cat "$CACHE/$l.src" 2>/dev/null); s=${s% * *}
         printf 'entry\t%s\t%s\t%s\t%s\t%s\n' "$l" "${rk:-0}" "$ak" "$b" "$s"
+        cache_pinned "$l" && printf 'pinned\t%s\n' "$l"
     done
     df -k --output=avail,size "$CACHE" 2>/dev/null | tail -1 \
         | awk '{printf "disk\t%s\t%s\n", $1, $2}'

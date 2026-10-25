@@ -618,6 +618,9 @@ function addMenu(ed, path) {
 const BATTLE_TIP = "On the game's BATTLE SELECTION screen (the scoop, once the ramps have lit a battle), picking this battle runs this script instead of the game's own battle: put Start the mode in it. It runs once the screen has closed (about 3 s). The game counts the battle as its own: when the mode ends, the battle is won if an End the mode, the battle won block ended it (a mode with no such block wins by its own end: its clock, or an End the mode block), and lost if the ball drains first - then the next lit scoop plays the mode again, as the game does with its own. Won, the battle shows Completed on the screen, counts in the city and the audits, and opens what winning it opens. One mode per battle. The screen keeps the battle's own picture and name (the Scenes tab changes them).";
 const END_WON_TIP = "For a mode the player picked on the battle selection screen: the battle won. The game then counts it as a battle won (Completed on the screen, the city, the audits). A drain before it ends loses it.";
 const END_OPTS = [["-", "(the battle lost)"], ["won", ", the battle won"]];
+// PAD-707: a new monster on the battle selection screen, in one battle's place
+const MORE_TIP = "A new monster on the battle selection screen: the game's seven battles are fixed in its program, but the card build adds tiles of your own to its screen, laid out with the game's seven in two columns (smaller when they must be) and drawn in the card's own style. This mode's tile stands in the place of the battle you pick here: the flippers walk the cursor onto it, the Action button (or the screen's timer) picks it, and it runs this script; its mode counts as that place's battle, won or lost, and a lost one plays again at the next lit scoop. The place's own battle stays on the screen. At most 5 new monsters on a card.";
+const MORE_PIC_TIP = "The monster's picture on the battle selection screen (a PNG: its tile and its portrait, in the card's own frames). With none, its badge's picture, else a tile lettered with its name.";
 // PAD-710: what the game-mode hat does, and End the mode's "completed"
 const PLACE_TIP = "When the game starts this one of its own modes (the player earned it, as in any game), this script runs instead and the game's own mode never runs: put Start the mode in it. Where the app knows the game's mode framework, the game counts the mode as its own: its start as that mode starting (its start count and STARTED audit), and when the mode ends, an End the mode, completed block ending it (a mode with no such block: its own end, its clock or an End the mode block) as that mode completed - its COMPLETED audit, its wins and the wizards and unlocks the game opens for it - and the ball draining first as not completed. One mode per game mode.";
 const END_PLACE_TIP = "For a mode that runs in the place of one of the game's own modes: that mode completed. The game then counts it as completed (its audits, its wins, what it opens). A drain before it ends: not completed.";
@@ -678,8 +681,21 @@ export function HatBody({ h, path, ed }) {
       <span class="bk-w" ...${tip(TIP.comboName)}>called</span><${Text} value=${h.name} max=${24} width=${110} placeholder="(no name)" title=${TIP.comboName} onChange=${(v) => set("name", v)} />`;
     case "battle": {                                 // PAD-706
       const roster = ed.ch.roster || [];
-      const opts = roster.map((x, i) => [String(i), x]);
-      return html`<span class="bk-w b" ...${tip(BATTLE_TIP)}>When the player picks</span><${Pick} value=${h.slot == null ? "" : String(h.slot)} options=${opts} onChange=${(v) => ed.set(path, { ...h, slot: Number(v), name: roster[Number(v)] || "" })} /><span class="bk-w b" ...${tip(BATTLE_TIP)}>on the battle selection screen</span>`;
+      // PAD-707: "m<n>" = a new monster on the screen, in battle n's place
+      const opts = [...roster.map((x, i) => [String(i), x]), ...roster.map((x, i) => ["m" + i, "A new monster, in " + x + "'s place"])];
+      const value = h.slot == null ? "" : (h.more ? "m" : "") + String(h.slot);
+      const pick = (v) => {
+        const more = v.startsWith("m"), slot = Number(more ? v.slice(1) : v);
+        const next = { ...h, slot, name: roster[slot] || "" };
+        if (more) next.more = true; else { delete next.more; delete next.picture; }
+        ed.set(path, next);
+      };
+      const picture = async () => {
+        const got = await call("modes.blocks_pick", "monster", []);
+        if (got) ed.set(path, { ...h, picture: got.file });
+      };
+      if (h.more) return html`<span class="bk-w b" ...${tip(MORE_TIP)}>When the player picks it on</span><${Pick} value=${value} options=${opts} onChange=${pick} /><button type="button" class="bk-x bk-pic" ...${tip(MORE_PIC_TIP)} onClick=${picture}>${h.picture ? "Picture: " + h.picture : "Picture…"}</button>`;
+      return html`<span class="bk-w b" ...${tip(BATTLE_TIP)}>When the player picks</span><${Pick} value=${value} options=${opts} onChange=${pick} /><span class="bk-w b" ...${tip(BATTLE_TIP)}>on the battle selection screen</span>`;
     }
     case "game_mode": {                              // PAD-710
       const places = ed.ch.places || [];

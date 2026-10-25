@@ -302,7 +302,8 @@ static void stop(void) { pm_lamp_release_all(); pm_end(); }
 
 Patterns: `PM_LAMP_SOLID`; `PM_LAMP_BLINK` (on half the period, off half; 500 ms); `PM_LAMP_PULSE`
 (breathes between dim and full, never dark; 1600 ms); `PM_LAMP_CHASE` (one insert of the list
-lit at a time, in the order given, stepping every period; 150 ms). A period of 0 takes the
+lit at a time, in the order given, stepping every period; 150 ms; over ONE insert - most of Godzilla's shots have
+one - it blinks at that step instead, where it was lit at every step: solid, PAD-707). A period of 0 takes the
 pattern's own. A single-colour insert (`MASER`, `POWERLINE LEFT`) is lit at the colour's
 brightest part; an RGB one shows the colour. Names are the game's, any case. A mode that holds
 an insert another of ours holds takes it (`[pad] lamps: X takes LEFT RAMP from Y`); a mode
@@ -1761,6 +1762,21 @@ mode ended, 1832 ms; no abort.
 
 Not measured: a battle's select screen holding the ball first (the game's own hold, which the wrapper runs
 before its own); a tilt during a hold on a machine.
+
+**A mode's finish (PAD-707).** David, v21 in the emulator: "the scoop kick-out needs to time up with when they
+finish like after collecting the finish at the scoop". A mode that ends while it holds a ball keeps the ball
+through its FINISH - the full-screen clip of its own it plays as it ends (a blocks mode's starts half a second after
+it is asked for, so the runtime waits up to 1.2 s for one to start) - and a ball that settles while that finish plays
+is held too: the kick-out comes as the clip ends, at most 10 s from the ball settling. Without a clip the end lets
+go as before. Run20 (Heisei 1.99D v21, a KING CAESAR test mode cashing out with his 3.97 s cashout clip and ending at
+once): `scoop: let go after 4324 ms (the mode's finish is over)`, the clip 115 frames, none to the glass without it.
+
+**A picked mode's start (PAD-707).** David: "the intro videos to the modes should play completely while the ball is
+still in the scoop and only eject from the scoop once those videos are done (or skipped)". The battle selection
+screen runs inside the scoop's settled event (the game's own hold); a pick a mode takes there (`roster_take`) keeps
+the ball after the screen closes, through the port's `roster_start_after_ms` until the mode starts, then through its
+full-screen start clip (1.2 s for one to begin), at most 15 s - logged `scoop: a mode took the selection screen's pick
+- the ball waits for its start clip` and `let go after N ms (its start clip is over)`.
 ## The shield platform (Godzilla Premium/LE, PAD-379)
 
 Godzilla Premium and LE carry their three shield targets on a platform a motor turns. Most of the game
@@ -3577,7 +3593,8 @@ code, not listed in data: the battle rule copies a table of exactly seven {slot,
 the screen and the rule check the slot number against 6 and 7 in more than a dozen places, and the
 screen's scene has exactly seven pictures, tiles and names (the evidence, with addresses, is in
 item 146's entry in `plans/TODO.md`, and `tests/test_spike2_mode_roster.py` reads it out of the
-program). Adding an eighth would mean moving that table and rewriting every one of those checks.
+program). Adding an eighth would mean moving that table and rewriting every one of those checks. The SCREEN
+can take new monsters of your own instead, each standing in one place (MORE KAIJU, PAD-707, below).
 
 **Claiming a slot.** In C:
 
@@ -3688,6 +3705,23 @@ battle): a battle whose slot a mode holds is taken as a pick of that slot again 
 restarted by the city pick (its battle was lost; the game plays it again)` - and the mode plays again, until it
 is won, as the game's battle would. A mode keeps its progress across those plays in variables that reset each
 game or each ball, not each time the mode starts.
+
+**After its finish (PAD-707).** The battle's own stop shows the game's battle-over display on the one video
+surface, so a pick's end that comes as its mode ends (`pm_roster_over`, after `pm_end`) waits for the mode's finish
+(the scoop's paragraph, above) and is given when the clip ends, at the ball's end, or as the game ends - logged `the
+battle KING CAESAR took ends once its finish has played` and `KING CAESAR's battle ends now (its finish is over)`.
+On v21 KING CAESAR's cashout was cut a second in by that display, and the scoop kicked with it.
+
+**Beaten in its city (PAD-707).** A tier-1 battle's own shot handler, at the monster's last hit and before its
+victory show and its stop, calls `site battle_beaten` on `data battle_beaten_rule` (Premium/LE 1.16 `0x121c28` on
+`0x7b2e28`, Pro 1.16 and 1.15 `0x11f318`; only once `data battle_beaten_guard` says the rule is built) and sets the
+cities rule's "beaten here" byte for the player (`value roster_city_beaten_vec_at` 68, a byte a player, 4 a city).
+CBattle::stop alone left it 0 - the city stayed unfinished: the next city screen offered STAY IN TOKYO, the ramps
+qualified a battle there again, and the selection screen opened on the won battle and closed at once (David: "it
+starts the animation for mode select then it cancels itself out"; run16 frame by frame). A won pick of a slot in
+`value battle_beaten_slots` (0x0f, the four tier-1 places) does the same now: run17's bytes after the win match the
+stock win of PAD-706 run2 (`b44=1`, the ramps dark until the player travels), and after a travel the next selection
+stays up (run18).
 
 **Won or lost.** A mode in C says so: `pm_roster_over(1)` / `pm_roster_over(0)`. The mode-file interpreter:
 its `end_shot` ending it wins; with no `end_shot`, its clock running out wins (it has no other way to win, and
@@ -3873,6 +3907,113 @@ EBIRAH DEFAULT CHAMP SCORE"), its audits ("GODZILLA VS EBIRAH STARTED" / "COMPLE
 neither), the champion ("GODZILLA VS. EBIRAH CHAMPION") and the battle's own award lines ("EBIRAH FINAL
 BLOW!"). They are program text, which `progtext.py` can rename within each string's length.
 
+**New monsters on the selection screen (MORE KAIJU, PAD-707).** David (2026-10-24): "add in a new monster to the
+existing menu but modify the menu to fit it elegantly". The seven places cannot grow in the GAME, but its SCREEN can:
+the card build adds tiles of your own to it, and the runtime walks the cursor over them. Each new monster stands in
+one place (`slot`, any place no mode claimed for itself): its battle is that place's battle.
+
+```c
+static int on_pick(unsigned slot)            /* the same on_pick as a claimed place's */
+{
+    if (!pm_begin()) return 0;               /* 0: the place's own battle runs */
+    start_my_mode();                         /* after pm_roster_start_after(): the game's screen closing */
+    return 1;
+}
+
+static void on_init(void)
+{
+    /* KUMONGA, a new monster in Ebirah's place (Biollante's on a Heisei card): its nodes the build adds, its callout */
+    pm_roster_more(0, "KUMONGA", "PadSel_kumonga", 0, on_pick);
+}
+```
+
+- **The screen (the card build, `battle_select.py`).** The build edits the card's OWN selection scene
+  (`auto_loaded/cac32730...`: a Heisei card's is DragonRR's, a stock card's Stern's - nothing of either is in the
+  app). The seven places are laid out again in GROUPS, each game place followed by the new monsters booked against
+  it (David: "pick A | B, C | D, E, F"; a gap between groups that hold new ones), the groups in their places' order
+  split into two columns where the taller is shortest (never inside a group), smaller when they must be (at most 5 new
+  ones; three make two columns of five at about 80% size), each place's lit tile,
+  state box (padlock, claw, city) and "0/4" moved with its tile; the grey sheet (all seven grey tiles in one picture)
+  is hidden and each grey tile cut out of it and placed on its own. Each new monster gets, in the scene: its grey tile
+  (the place's grey with the monster's picture in the card's own grey, its light fitted to the card's), and groups
+  the runtime shows and hides - `PadSel_<folder>_Lit` (the lit tile: the card's tile frame, the picture slanted into
+  it), `_Lock`, `_Done` (the card's padlock and claw), `_Portrait` (the card's portrait frame with the picture, and
+  the name lettered in the Heisei card's style - orange to red, a dark edge, the katakana below for the names it
+  knows - fitted to where the card letters its own) - and each place a new monster stands in gets
+  `PadSel_Cover<n>`, its grey tile, to draw over its lit one. A picture the runtime shows must be a GROUP (a Sprite):
+  the game's node lookup finds no other (emulator run7: bare pictures were never found and all stayed on the glass).
+  The picture is `monster.png` in the mode's folder (the blocks hat's Picture… puts it there), else its own screen's
+  picture, else its badge, else a tile lettered with its name.
+- **The cursor (the runtime).** The screen's switch handler (`site roster_screen_keys`, LE 1.16 `0x191048`, Pro
+  `0x18d3a8`: the flipper buttons 137 back / 139 on, `value roster_screen_left` / `_right`) is vetoed while the
+  screen has new monsters, and the runtime walks the screen's order itself (each game place 0-6, then the new
+  monsters booked against it, in their names' order), skipping a place the game would skip (its
+  state, `site roster_slot_state`, not 0) and a new monster whose place is skipped. Each move does what the game's
+  handler does: the screen's clock given 3 more (`site roster_screen_bump`), the sound 271 / 272, the game's cursor
+  word (+`roster_cursor_at`) and its landing (`roster_cursor`, the callout - a new monster's own `callout`, swapped
+  into the place's entry of the slot table while it lands). The game's own guards hold: nothing moves unless the
+  screen's clock runs and the busy one does not (`site roster_timer_on`, timers 83 and 23), and both flippers down
+  is the game's pick (`site roster_switch_held`). On a new monster the game's cursor is parked on its place, the
+  monster's `_Lit` and `_Portrait` and the place's `PadSel_Cover<n>` are shown and the place's own portrait group
+  (`<tile>FullBody_instance`, `text roster_tile_<n>`) hidden; the game draws everything else. Opening (`site
+  roster_screen_open`) starts every opening on the game's own place; the lock of each new tile follows its
+  place's state, and the claw goes on the tile that WON alone (PAD-707, David's v21: "the footprint icons over the
+  beaten modes are off"): a place one of ours won shows that monster's `_Done`, none on the others booked against it,
+  and the place's own state box (`text roster_box_<n>` under `text roster_box_path`) is hidden - the game's claw for a
+  battle it never played; a place the game's own battle won keeps its box and puts no claw on a new tile.
+- **The pick.** The game picks as it always does (Action, both flippers, its 13 s): `site roster_screen_pick` notes
+  which tile it was, and the battle start it makes for the place (roster_start) is the new monster's when that was
+  under the cursor - `on_pick(slot)` exactly as a claimed place's, 1 = taken; the mode's `pm_roster_over(won)` gives
+  the place's battle back, won or lost (PAD-706: Completed, the audits, the city). A pick of the place's own tile is
+  its own battle; a monster that will not start (0) lets the place's battle run. `pm_roster_more_picked()` names the
+  monster inside `on_pick`; `pm_roster_start_after()` is the port's `roster_start_after_ms`.
+- **Played again until it is won.** A new monster's battle lost is the one the game's city pick plays again at the
+  next lit scoop (`site roster_resume`, PAD-706); won, its tile shows the claw and its place is done: the place's other tiles
+  book the same battle, so they are not offered again that game.
+
+In a mode file: `roster_slot <n>` and `roster_more PadSel_<folder>` (`roster_callout` is the monster's callout). On the
+Modes tab: blocks, *When the player picks it on the battle selection screen, a new monster in <battle>'s place* (the
+battle hat's list offers every place twice: the battle itself, and a new monster in its place) with *Picture…*; a form
+mode, *Starts on: the player picking A new monster, in <battle>'s place*. The port lines (Premium/LE 1.16, Pro 1.16,
+Pro 1.15, the Heisei 1.99D program the same as Premium/LE 1.16's):
+
+```
+site roster_screen_keys   0x00191048 0xe92d4070 0xe1a05000
+site roster_screen_open   0x001911dc 0xe92d4038 0xe1a04000
+site roster_screen_pick   0x00190c60 0xe3a01000 0xe92d4010
+site roster_screen_bump   0x00190ecc 0xe92d4038 0xe1a05000
+site roster_slot_state    0x001244bc 0xe3510006 0xda000001
+site roster_timer_on      0x0020bb1c 0xe92d4008 0xe30c3154
+site roster_switch_held   0x0029643c 0xe59f1000 0xeaffffe2
+value roster_screen_left 137 / roster_screen_right 139 / roster_screen_timer 83 / roster_screen_busy 23 / roster_screen_bump_by 3
+text roster_screen_scene  cac32730af42b9d26d26c4bb6e667b07da53113e
+text roster_screen_path   SelectOverlay_Textbox.CharacterSelect_Instance.
+text roster_tile_0..6     Ebirah Titan Gigan Megalon Ghidorah MegalonGigan GhidorahGigan
+```
+
+**Measured (emulator, muted, hidden):**
+- **David's Heisei 1.99D base card, run8** (the set built by Try it's own code - Write's - from a project of three
+  blocks monsters: KUMONGA in Biollante's place, KAMACURAS in Destoroyah's, KIRYU in Gigan's, the official Godzilla.jp
+  stills as their pictures): the screen opened re-laid in two columns of five, the locks and "0/n" with their tiles;
+  the right flipper walked Biollante, Destoroyah, Gigan, SpaceGodzilla, KAMACURAS, KIRYU, KUMONGA (the locked tier-2
+  places skipped) and back to Biollante, each new monster with its lit tile, portrait and lettered name and the
+  place's own portrait and name gone, the place's tile grey; back on Biollante the game's own screen. Action on
+  KUMONGA: `the selection screen picks KUMONGA (in slot 0's place)`, `slot 0 picked (mode id 12): claimed - the
+  game's battle does not start`, its START, two Buildings: `the pick ends as a WON battle ... completed 1, wins 1,
+  city 0's mask 0 -> 2`. Run7 (the same, before the groups): the same walk and win, every new picture on the glass at
+  once - the lookup finds Sprites only.
+- **Stock Pro 1.16, run9 + run11** (the same three monsters as C, the stock card's scene built with them - the stock
+  scene is byte-identical on Premium/LE 1.16 and Pro, md5 fceccfeb): the screen re-laid with Stern's own art, the
+  cursor (which opens on the last place played there, Megalon) walked onto KAMACURAS, KIRYU and KUMONGA with their
+  tiles, portraits and names; a pick of Gigan's own tile: `slot 2 picked (mode id 14): claimed but not taken - the
+  game's battle runs`; run11: the screen's own 13 s timer picked KAMACURAS (`the selection screen picks KAMACURAS (in
+  slot 1's place)`), its START 3000 ms later, two Buildings: `completed 1, wins 1, city 0's mask 0 -> 2`.
+- **Stock Premium/LE 1.16, run10 + run13**: the same walk and look; run13: KUMONGA picked with Action (`the selection screen picks KUMONGA (in slot 0's
+  place)`), its START, two Buildings: `the pick ends as a WON battle ... completed 1, wins 1, city 0's mask 0 -> 2`.
+- No segv in any run. Runs from the D: card stalled at the game's start when two rigs read it at once (the known D:
+  stall); every run here booted a copy in the rigs' card cache. Not run: Pro 1.15 (archival card; its sites read off
+  its program, every one's words checked).
+
 **Known limits:**
 
 - A claimed slot keeps the replaced battle's progress text (0/4 for Ebirah): the game reads it from that
@@ -3881,7 +4022,8 @@ BLOW!"). They are program text, which `progtext.py` can rename within each strin
 - Where a port has a roster but no PAD-706 lines (none shipped; a derived port whose drafting could not place them),
   the replaced battle never completes, so the tier-2 slots may stay out of reach; the blocks editor notes it there.
 - King of the Monsters starts the four tier-1 battles (Ebirah, Titanosaurus, Gigan, Megalon) itself,
-  not through the screen (item 144, seen live), so inside it the replaced battle runs as stock.
+  not through the screen (item 144, seen live), so inside it the replaced battle runs as stock - a place a new
+  monster stands in too.
 - The battle's own points this time stay 0 (the runtime zeroes them at the pick, as the battle's START does), so
   its END plays no ending clip of the old monster over the mode's ending, and whatever the game keeps from them
   (read at the desk: the END posts them with event 0x1a; the battle's champion is probably fed from there, not

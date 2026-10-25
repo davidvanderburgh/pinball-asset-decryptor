@@ -91,6 +91,10 @@ const T = {
 };
 
 // PAD-323: the Show page's way into the Scenes editor with the mode's screen in it
+// PAD-707: a new monster on the battle selection screen, in one battle's place (modes.py MORE_PREFIX)
+const MORE_PREFIX = "A new monster, in ";
+const MORE_FORM_NOTE = "This mode is a new monster on the battle selection screen: the card build adds its tile and portrait to the game's screen beside the seven battles, and picking it there starts this mode. It stands in the place of the battle picked here and counts as that battle, won or lost. Its picture is monster.png in the mode's folder (else its screen's picture, else a tile lettered with its name).";
+
 const LAYOUT_TIP = "Opens the Scenes editor on the game's HUD with this screen in it: drag it, size it, move its words on their own, or send it to the back to put it under the HUD's own pictures. Saved into the mode as you go; without it the app places the screen itself.";
 const PAGES = [["mode", "Mode"], ["show", "Show"], ["lights", "Lights"], ["sounds", "Sounds"], ["scoring", "Scoring"]];
 const PATTERNS = ["Solid", "Blink", "Pulse", "Chase"];
@@ -391,7 +395,10 @@ function ModePage({ s, f, off, dis, rs, lim }) {
   const battleOn = f.starts_kind === "battle";                                  // PAD-589
   const roster = prof.roster || [];
   const battleOff = off || dis.roster || !roster.length;
-  const rosterOpts = withValue([{ value: "", label: "(choose a battle)", disabled: true }, ...roster.map((x) => ({ value: x, label: x }))], f.roster_slot);
+  // PAD-707: "A new monster, in <battle>'s place" - its own tile on the screen, in that battle's place
+  const rosterOpts = withValue([{ value: "", label: "(choose a battle)", disabled: true }, ...roster.map((x) => ({ value: x, label: x })),
+    ...roster.map((x) => ({ value: MORE_PREFIX + x + "'s place", label: MORE_PREFIX + x + "'s place" }))], f.roster_slot);
+  const moreOn = String(f.roster_slot || "").startsWith(MORE_PREFIX);
   const challengeOn = f.starts_kind === "challenge";                            // PAD-615
   const challenges = prof.challenges || [];
   const challengeNew = prof.challenge_new || "";                                // round 2: one of its own
@@ -462,10 +469,11 @@ function ModePage({ s, f, off, dis, rs, lim }) {
         </div>
         ${!prof.roster_found ? null : html`<div class="row wrap">
           <${Radio} name="m-starts" value="battle" label="the player picking" checked=${battleOn} disabled=${battleOff && !battleOn} title=${T.battle} onChange=${(v) => setF("starts_kind", v, true)} />
-          <${Select} value=${f.roster_slot || ""} options=${rosterOpts} ns="modes" k="f:roster_slot" disabled=${battleOff || !battleOn} width=${220} title=${T.battle} />
+          <${Select} value=${f.roster_slot || ""} options=${rosterOpts} ns="modes" k="f:roster_slot" disabled=${battleOff || !battleOn} width=${330} title=${T.battle} />
           <span class="dim nw">on the battle selection screen</span>
         </div>
-        ${battleOn && !dis.roster ? html`<div class="small muted wrap" style="padding-left:26px">${prof.roster_counts ? "Picking it starts this mode instead of that battle, 3 seconds later once the screen has closed. The game counts it as that battle: its end shot ending it wins the battle (with no end shot, its clock running out does), and the battle shows Completed and counts for the city and its audits; anything else loses it, and the next lit scoop plays the mode again. The screen shows the battle's own picture and name until you change them on the Scenes tab." : "Picking it starts this mode instead of that battle, 3 seconds later once the screen has closed. It counts toward the player's city as the battle would, and when the mode ends the ramps light a battle again. The screen shows the battle's own picture and name until you change them on the Scenes tab."}</div>` : null}
+        ${battleOn && !dis.roster && moreOn ? html`<div class="small muted wrap" style="padding-left:26px">${MORE_FORM_NOTE}</div>` : null}
+        ${battleOn && !dis.roster && !moreOn ? html`<div class="small muted wrap" style="padding-left:26px">${prof.roster_counts ? "Picking it starts this mode instead of that battle, 3 seconds later once the screen has closed. The game counts it as that battle: its end shot ending it wins the battle (with no end shot, its clock running out does), and the battle shows Completed and counts for the city and its audits; anything else loses it, and the next lit scoop plays the mode again. The screen shows the battle's own picture and name until you change them on the Scenes tab." : "Picking it starts this mode instead of that battle, 3 seconds later once the screen has closed. It counts toward the player's city as the battle would, and when the mode ends the ramps light a battle again. The screen shows the battle's own picture and name until you change them on the Scenes tab."}</div>` : null}
         ${rs.roster ? html`<div class="small muted wrap" style="padding-left:26px">${rs.roster}</div>` : null}`}
         ${!prof.challenge_found ? null : html`<div class="row wrap">
           <${Radio} name="m-starts" value="challenge" label="a challenge game of" checked=${challengeOn} disabled=${challengeOff && !challengeOn} title=${T.challenge} onChange=${(v) => setF("starts_kind", v, true)} />

@@ -165,7 +165,7 @@ def hook_route(port_path):
 def route_of(prof):
     """:func:`hook_route` of ``prof``'s port."""
     from . import mode_project as MP
-    return hook_route(MP.port_path(prof)) if prof is not None and prof.port else ""
+    return hook_route(MP.port_path(prof)) if getattr(prof, "port", None) else ""
 
 
 def title_refusal(prof):
@@ -580,9 +580,11 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
     total = sum(len(s.files) for s in slots) + (len(juke[1]) if juke else 0)
     done = 0
     new = []
-    taken = {sc: {c.name for c in p.library.entries} for sc, (p, _n) in parsed.items() if p}
+    taken = {}                                    # {scene card path: the names its library has}
 
     def add(sc, name, src):
+        if sc not in taken:                       # read here: a jukebox-only build parses the bank late
+            taken[sc] = {c.name for c in bank_of(sc)[0].library.entries}
         if name in taken[sc]:
             return False
         try:

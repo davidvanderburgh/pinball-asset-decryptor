@@ -329,6 +329,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "challenge_launch_s": [1, 60],                                          # PAD-643
     }
 
+    #: PAD-707: the battle list's "A new monster, in <battle>'s place" (modes.js MORE_PREFIX)
+    MORE_PREFIX = "A new monster, in "
+
     def __init__(self, window):
         super().__init__(window)
         self.f = _blank_form()
@@ -1509,7 +1512,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                  else "game_mode" if MP.starts_on_place(spec) else "shot")
         roster = list(getattr(self._shown or self._profile, "roster", ()) or ())     # PAD-589: by its name
         slot = MP._int_or_none(getattr(spec, "roster_slot", -1))
-        self.f["roster_slot"] = roster[slot] if slot is not None and 0 <= slot < len(roster) else ""
+        self.f["roster_slot"] = ((self.MORE_PREFIX + roster[slot] + "'s place" if getattr(spec, "roster_more", False)
+                                  else roster[slot]) if slot is not None and 0 <= slot < len(roster) else "")   # PAD-707
         picks = list(getattr(self._shown or self._profile, "challenges", ()) or ())  # PAD-615: by its name
         n = MP._int_or_none(getattr(spec, "challenge", -1))
         self.f["challenge"] = (self.CHALLENGE_NEW if n == MP.CHALLENGE_NEW
@@ -1553,7 +1557,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             spec.starts_on = "shot"
         roster = list(getattr(self._shown or self._profile, "roster", ()) or ())     # PAD-589
         name = str(self.f["roster_slot"]).strip()
+        more = name.startswith(self.MORE_PREFIX) and name.endswith("'s place")      # PAD-707: a new monster on the screen
+        if more:
+            name = name[len(self.MORE_PREFIX):-len("'s place")]
         spec.roster_slot = roster.index(name) if spec.starts_on == "battle" and name in roster else -1
+        spec.roster_more = bool(more and spec.roster_slot >= 0)
         picks = list(getattr(self._shown or self._profile, "challenges", ()) or ())  # PAD-615
         name = str(self.f["challenge"]).strip()
         spec.challenge = (MP.CHALLENGE_NEW if spec.starts_on == "challenge" and name == self.CHALLENGE_NEW
@@ -3183,6 +3191,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         project, slug = self.project(), self._code_slug
         if not project or not slug or not BM.is_blocks(project, slug):
             return None
+        if what == "monster":                       # PAD-707: its picture on the selection screen, as monster.png
+            return self._blocks_pick_monster(project, slug)
         ch = self._blocks_choices()
         why = {"clip": ch["why_clip"], "sound": ch["why_sound"], "music": ch["why_music"],
                "bed": ch["why_music"]}.get(what)                                   # PAD-658: another music bed
@@ -3224,6 +3234,33 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return None
         self._say("modes/%s: copied %s in as %s" % (slug, os.path.basename(path), dest))
         return {"name": name, "file": dest, "path": os.path.join(folder, dest)}
+
+    def _blocks_pick_monster(self, project, slug):
+        """PAD-707: Picture… on a new monster's battle hat: a PNG copied into the mode's folder as ``monster.png`` (the
+        build draws its page and tile from it); ``{"file"}`` or None."""
+        from pinball_decryptor.plugins.stern import more_kaiju as MK
+        path = self.window.ask_open("modes_file", "Choose the monster's picture", [("PNG pictures", "*.png")])
+        if not path:
+            return None
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                im.verify()
+        except Exception:
+            self._say("%s is not a picture the build can read." % os.path.basename(path))
+            return None
+        folder = MP.mode_folder(project, slug)
+        dest = os.path.join(folder, MK.PICTURE_FILE)
+        try:
+            os.makedirs(folder, exist_ok=True)
+            if not _same_file(path, dest):
+                shutil.copyfile(path, dest)
+        except OSError as e:
+            self._say("%s could not be copied into the mode's folder: %s" % (os.path.basename(path), e))
+            return None
+        self._say("modes/%s: copied %s in as %s (its picture on the battle selection screen)" % (slug, os.path.basename(path),
+                                                                                MK.PICTURE_FILE))
+        return {"name": "monster", "file": MK.PICTURE_FILE, "path": dest}
 
     @rpc
     def blocks_to_code(self):

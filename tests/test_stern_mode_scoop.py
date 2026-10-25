@@ -68,9 +68,16 @@ def test_the_game_holds_first_and_the_mode_after():
     body = wrap[wrap.index("{"):]
     assert body.index("scoop.orig(ev, a1, a2, a3)") < body.index("e != scoop.event")
     assert "return r;" in body                              # the game's own answer, unchanged
-    loop = body[body.index("while ("):body.index('fn("proc_sleep"))(1);')]
-    for cond in ("!scoop.release", "scoop.hold_ms", "running", "pm_in_game()", "pm_ms() < scoop.until"):
+    at = body.index("while (!scoop.release")                # the mode's own hold
+    loop = body[at:body.index('fn("proc_sleep"))(1);', at)]
+    for cond in ("!scoop.release", "scoop.hold_ms", "running", "pm_in_game()", "pm_ms() < scoop.until", "finish_on()"):
         assert cond in loop, cond
+    # PAD-707: a pick a mode took on the selection screen (inside the game's own hold) keeps the ball through its
+    # start clip, after the game's handler, and lets the game kick it as ever
+    assert body.index("scoop.orig(ev, a1, a2, a3)") < body.index("if (pick_at)") < at
+    intro = body[body.index("if (pick_at)"):at]
+    assert "intro_on(" in intro and "return r;" in intro
+    assert "pick_at = pm_ms() | 1;" in src                  # roster_take, when the mode took the pick
 
 
 def test_the_handlers_calls_are_logged_only_when_the_port_asks():

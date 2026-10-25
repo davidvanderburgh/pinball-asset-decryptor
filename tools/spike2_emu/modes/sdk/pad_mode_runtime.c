@@ -12624,6 +12624,20 @@ static int insider_arm(void)
  *
  *     only                                     the card carries no modes: arm this and nothing else
  *     clip <TAB> <the game's name> <TAB> <name> [<TAB> <name> ...]
+ *     sclip <TAB> <scene id> <TAB> <the game's name> <TAB> <name> [<TAB> <name> ...]
+ *
+ * PAD-723: most titles keep their by-name clips in more than one bank scene (Venom Pro, Stranger Things Pro, The
+ * Munsters, Rush, Metallica and Iron Maiden play theirs from 60ed7e50 while the port's video_bank is the HUD the
+ * modes graft their clips into; The Beatles has three banks, John Wick two). An `sclip` line names the bank its clip
+ * is in (the id the resource manager knows it by, the path under assets/lcd/<tree>/), and swaps the name only on
+ * THAT scene's VideoSurface; a `clip` line is the port's video_bank's, as before. Only on a clip v2 build: clip_play
+ * plays on the one bank. A demand-loaded bank (Iron Maiden's 60ed7e50) is not found by id through the resource
+ * manager: when the build saw the clip's name in no other scene of the card it writes the id as `*<id>`, and while
+ * that scene cannot be looked up any surface asking for the name is that scene's (no other scene has the clip).
+ *
+ * PAD-723: Deadpool asks neither: its clips play on the full-screen video LAYER (item 164's clip layer), whose video
+ * object is asked by name - request(obj, &name, loop), `site layer_video`, a std::string in r1. That call is hooked on
+ * a port with neither clip_play nor the clip v2 lines, and the name swapped when obj is the layer's own video.
  *
  * Every time the game asks for the clip, one of the line's clips plays: its own (the game's, or the
  * replacement over it) or one of the names after it, at random and never the same one twice in a row.
@@ -12642,6 +12656,8 @@ static int insider_arm(void)
 #define CLIPV_SAY_MAX   200
 static const char *const CLIPV_FILES[] = { "/usr/local/padmode/clips.cfg", "/dump/clips.cfg" };
 struct clipv {
+    const char *scene;                      /* PAD-723: the bank scene of an sclip line, 0 = the port's video_bank */
+    int only;                               /* PAD-723: `*<id>`: the card's only scene with the name */
     const char *name[CLIPV_PICKS];          /* [0] the game's own name */
     unsigned str[CLIPV_PICKS];              /* clip v2: each name as a std::string, made at first use */
     unsigned n, last, plays;
@@ -12668,10 +12684,15 @@ static void clipv_line(char *s)
         *s++ = 0;
     }
     if (n == 1 && str_eq(f[0], "only")) { clipv_only = 1; return; }
-    if (!str_eq(f[0], "clip") || n < 3 || !*f[1]) return;
+    if (str_eq(f[0], "sclip") && n >= 4 && *f[1]) k = 2;                 /* PAD-723: f[1] names the bank scene */
+    else if (str_eq(f[0], "clip") && n >= 3) k = 1;
+    else return;
+    if (!*f[k]) return;
     if (n_clipv >= CLIPV_SLOTS) { clipv_dropped++; return; }
     v = &clipv[n_clipv];
-    for (k = 1; k < n && v->n < CLIPV_PICKS; k++)
+    v->scene = k == 2 ? f[1] : 0;
+    if (v->scene && *v->scene == '*') { v->scene++; v->only = 1; }
+    for (; k < n && v->n < CLIPV_PICKS; k++)
         if (*f[k]) v->name[v->n++] = f[k];
     if (v->n < 2) { v->n = 0; return; }
     v->last = CLIPV_PICKS;
@@ -12750,18 +12771,44 @@ static unsigned clipv_choose(struct clipv *v, void *surface)
     return k;
 }
 
+/* PAD-723: /dump/cliplog.on - every clip the game asks for by name, logged (at most CLIPV_CENSUS_MAX lines): which
+ * clips a title plays through the hooked call, and on which surface, for a proof run to pick a slot the game asks for */
+#define CLIPV_CENSUS_MAX 400
+static int clipv_census;
+static unsigned clipv_census_n;
+static void clipv_heard(const char *name, const char *where, unsigned surface)
+{
+    if (!clipv_census || clipv_census_n >= CLIPV_CENSUS_MAX || !name) return;
+    clipv_census_n++;
+    say("clip census: \"%.96s\" asked for (%s 0x%08x)", name, where, surface);
+}
+
 /* clip_play(name, loop, crop): the name in r0 */
 static void on_clipv_play(unsigned *r)
 {
     struct clipv *v = clipv_find((const char *)(unsigned long)r[0]);
     unsigned k;
+    clipv_heard((const char *)(unsigned long)r[0], "clip_play", 0);
+    if (v && v->scene) v = 0;                 /* an sclip line: clip_play plays on the one bank, not its scene */
     if (!v) { clipv_now = 0; return; }
     k = clipv_choose(v, ((void *(*)(void))(unsigned long)fn("video_surface"))());
     if (k) r[0] = (unsigned)(unsigned long)v->name[k];
 }
 
+/* PAD-723: the VideoSurface of a bank scene named by id (an sclip line's), or 0 while that scene is not loaded.
+ * Looked up at each ask, never kept: a demand-loaded bank's scene goes and comes back. */
+static void *clipv_scene_surface(const char *id)
+{
+    unsigned str, out[2] = { 0, 0 };
+    void *root = scene(id);
+    if (!root) return 0;
+    str = std_string("VideoSurface");
+    ((void (*)(unsigned *, void *, unsigned *))(unsigned long)fn("surface_find"))(out, root, &str);
+    return (void *)(unsigned long)out[0];
+}
+
 /* clip v2: surface_set_video(surface, &name), on the bank's surface only (a scene's own surface
- * may have a clip of the same name, and none of ours) */
+ * may have a clip of the same name, and none of ours) - the port's video_bank's, or an sclip line's scene's */
 static void on_clipv_set_video(unsigned *r)
 {
     const unsigned *s = (const unsigned *)(unsigned long)r[1];
@@ -12770,12 +12817,39 @@ static void on_clipv_set_video(unsigned *r)
     unsigned k;
     if (clipv_in || !s) return;
     v = clipv_find((const char *)(unsigned long)s[0]);
-    if (!v) return;
+    if (!v && !clipv_census) return;
     clipv_in = 1;
-    bank = clip2_surface();
+    bank = v && v->scene ? clipv_scene_surface(v->scene) : clip2_surface();
     clipv_in = 0;
-    if (!bank || (unsigned)(unsigned long)bank != r[0]) return;
+    if (v && v->scene && v->only && !bank) bank = (void *)(unsigned long)r[0];   /* not looked up: the name says it */
+    clipv_heard((const char *)(unsigned long)s[0], bank && (unsigned)(unsigned long)bank == r[0] ? "the bank's surface"
+                : "another surface", r[0]);
+    if (clipv_census && v && v->scene && (unsigned)(unsigned long)bank != r[0] && clipv_census_n < CLIPV_CENSUS_MAX) {
+        clipv_census_n++;
+        say("clip census: \"%.96s\" is %s's, whose VideoSurface is 0x%08x", v->name[0], v->scene, (unsigned)(unsigned long)bank);
+    }
+    if (!v || !bank || (unsigned)(unsigned long)bank != r[0]) return;
     k = clipv_choose(v, bank);
+    if (!k) return;
+    if (!v->str[k]) v->str[k] = std_string(v->name[k]);
+    if (v->str[k]) r[1] = (unsigned)(unsigned long)&v->str[k];
+}
+
+/* PAD-723: the clip layer (Deadpool): layer_video(obj, &name, loop), on the video layer's own video object only */
+static void on_clipv_layer(unsigned *r)
+{
+    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    struct clipv *v;
+    unsigned k;
+    if (!s) return;
+    v = clipv_find((const char *)(unsigned long)s[0]);
+    clipv_heard((const char *)(unsigned long)s[0], "the video layer", r[0]);
+    if (!v || v->scene || (unsigned)(unsigned long)clip_layer_video() != r[0]) return;
+    if (v == clipv_now && v->last < v->n && site("layer_playing")
+        && ((int (*)(void *))(unsigned long)fn("layer_playing"))((void *)(unsigned long)r[0]))
+        k = v->last;                          /* asked again while it plays: the same pick */
+    else
+        k = clipv_choose(v, 0);
     if (!k) return;
     if (!v->str[k]) v->str[k] = std_string(v->name[k]);
     if (v->str[k]) r[1] = (unsigned)(unsigned long)&v->str[k];
@@ -12789,10 +12863,12 @@ static void clipv_arm(void)
                                         "resource_get", "dynamic_cast", 0 };
     static const char *const v2_d[] = { "resource_manager", "typeinfo_resource", "typeinfo_scene_player", 0 };
     static const char *const v2_v[] = { "scene_player_scene", 0 };
-    if (!clipv_read()) return;
+    clipv_census = pm_trigger("cliplog.on");
+    if (!clipv_read() && !clipv_census) return;
     if (clipv_dropped)
         say("clip variants: %d line(s) not read - the table holds %d clips", clipv_dropped, CLIPV_SLOTS);
-    if (!n_clipv) {
+    if (clipv_census) say("clip census: every clip the game asks for by name is logged (cliplog.on)");
+    if (!n_clipv && !clipv_census) {
         say("clip variants: %s has no clip line - nothing hooked", "clips.cfg");
         return;
     }
@@ -12803,11 +12879,15 @@ static void clipv_arm(void)
                && (sv_clipv = 1, sv_hook())) {
         say("clip variants: %u clip(s) play one of several at random (surface_set_video 0x%08x, the bank's "
             "surface only)", n_clipv, fn("surface_set_video"));
+    } else if (site("layer_video") && data("video_layer") && site("string_new")
+               && hook(fn("layer_video"), on_clipv_layer)) {
+        say("clip variants: %u clip(s) play one of several at random (layer_video 0x%08x, the video layer only)",
+            n_clipv, fn("layer_video"));
     } else {
         n_clipv = 0;
         sv_clipv = 0;
-        say("clip variants: off - the port has no clip_play, and no clip v2 lines that match this build; "
-            "every clip plays the game's own");
+        say("clip variants: off - the port has no clip_play, no clip v2 lines that match this build and no clip "
+            "layer; every clip plays the game's own");
     }
 }
 

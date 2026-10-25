@@ -982,8 +982,8 @@ class SternManufacturer(Manufacturer):
             progress=progress, cancel=cancel)
 
     def video_variants_offer(self, assets_dir, rels):
-        # PAD-446: the in-game video bank's clips, on a title the swap was
-        # proven on (clip_variants.PROVEN)
+        # PAD-446: the in-game video banks' clips, on a build whose port gives
+        # the runtime a way to hook the game's ask (PAD-723: clip_variants.hook_route)
         from .clip_variants import MAX_EXTRA, offer
         why, slots = offer(assets_dir, rels, probe=True)
         return {"why": why, "slots": slots, "max": MAX_EXTRA}

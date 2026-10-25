@@ -9212,7 +9212,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     modes_on=_modes_on, variants=_clips_on,
                     variants_prof=variant_prof or sound_modes_prof, cancel=cancel,
                     sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof,
-                    picture=picture_cfg, picture_prof=picture_prof)
+                    picture=picture_cfg, picture_prof=picture_prof,
+                    # PAD-723: a random clip in another of the title's bank scenes
+                    read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
+                                            if _n is not None else None)(_MW.lookup(reader, _rel)),
+                    scan_card=lambda _names: _MW.CV_scene_counts(reader, _mprof.game_dir, _names))
                 if mode_plan is None:
                     raise _MW.ModeWriteError("none of the project's random clips can go on "
                                              "this card")

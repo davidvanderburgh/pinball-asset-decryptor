@@ -55,4 +55,13 @@ which surface), on the 53 newest builds, attract and a short game each:
 30 s magenta-with-a-white-box random clips each - written by `engine.write_overrides`, the app's own
 Try-it path), `prove723.sh` (rigbatch job: after attract, wait for a NEW swap, in attract or in a
 game with the playfield switches poked; eight pictures at once), `magenta.py` (the glass check).
-Result: see the ticket's report.
+`prove723d.sh` is the same job gated on the glass (a swap counts only when a picture taken
+right after it is >= 10% the magenta clip).
+
+Result (2026-10-25): **53 of 53 newest builds play a random clip, seen on the glass** (`glass_final.tsv`:
+every build has a picture 30-83% magenta: a full-screen clip ~83%, Bond's TV ~30%, Batman's episode
+window ~36%). 38 passed on the first sweep; 13 had swapped only during the boot and then drew the stock
+clip (one pick in four) in the job's window, and passed on a rerun with longer windows; Avengers LE/Pro
+had swapped in the log while the trailer covered it, and passed on the glass-gated job. By route:
+clip_play, surface (incl. other banks: Beatles, John Wick, Venom, Bond, the HUD-bank titles, Batman's
+library scene, Iron Maiden's demand-loaded bank) and layer (Deadpool LE/Pro, `LilDeadpool_Intro`).

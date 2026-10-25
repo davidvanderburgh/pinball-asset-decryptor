@@ -22,6 +22,7 @@ const T = {
   routeB: "Advanced — do each step myself (also the route for cards modded outside this app)",
   portTip: "Pick one or more stock card images (the new version, the other model, or both) and everything else is automatic: each card is extracted, this project's mods are transferred onto it, and its modded card is built — unattended, one after another.\n\nEach card's extract lands beside the builds and is reused next time, so re-shipping after a change is fast. Audio slots whose index now holds a different sound are skipped (the safe default); everything skipped is named in the log.",
   transferTip: "The same move as the one-click port, with you driving each stage: pick the two extract folders above, run the transfer, then build the card on the Write tab (the output-name preview on the left shows what it will build).\n\nThis is also the route for a card that was modded OUTSIDE this app: extract the modded card as field 1 and fill field 3 with a stock extract of that same version, so your mods can be told apart from the factory's own changes.",
+  busyTip: "Working: the bar above the log moves and its line names the step. The log has the detail.",
   verTip: "The build this item really is, read from the card's own update index (it survives renamed files). A ~ marks a filename guess — an older extract, or a card whose index can't be read. Fields 1 and 3 should show the SAME old version, and fields 2 and 4 the SAME new one; a card modded outside this app often reports no version at all, which is normal.",
 };
 
@@ -118,7 +119,8 @@ function TransferCard({ s }) {
       </div>
       <div class="mp-arow">
         <span class="mp-out">${s.output || ""}</span>
-        <${Button} kind="primary" title=${T.transferTip} onClick=${() => call("modpack.transfer")}>Transfer mods → new version…<//>
+        <${Button} kind="primary" title=${s.transfer_busy ? T.busyTip : T.transferTip} disabled=${!!s.transfer_busy}
+          onClick=${() => call("modpack.transfer")}>${s.transfer_busy ? "Transferring…" : "Transfer mods → new version…"}<//>
       </div>
       ${next ? html`<${Note} kind="ok">${next}<//>` : null}
     </section>

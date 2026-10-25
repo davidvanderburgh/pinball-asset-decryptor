@@ -1,4 +1,5 @@
 {
+"The card this project was extracted from is not on this PC, so the app cannot read which of the game's video banks this clip is in. Point the project at its card (Select card) to fix that.": "Die Karte, aus der dieses Projekt extrahiert wurde, ist nicht auf diesem PC, daher kann die App nicht lesen, in welcher Videobank des Spiels dieser Clip liegt. Verweisen Sie das Projekt auf seine Karte (Karte auswählen), um das zu beheben.",
 "\" in Scenes…": "\" in Szenen…",
 "\"Changed on disk\" is about the project folder only: your source card image is never touched.": "„Auf der Festplatte geändert“ bezieht sich nur auf den Projektordner: Ihr Quell-Kartenabbild wird nie angetastet.",
 "\"Force partition #\" must be a whole number (got: {}).": "„Force partition #“ muss eine ganze Zahl sein (erhalten: {}).",
@@ -5078,7 +5079,6 @@
 "Random clips": "Zufällige Clips",
 "Random clips (": "Zufällige Clips (",
 "Random clips ({} in turn)": "Zufällige Clips ({} der Reihe nach)",
-"Random clips have not been tried on {} yet, so they are not offered there. Godzilla Pro and Premium/LE {} have them.": "Zufällige Clips wurden auf {} noch nicht getestet und werden dort daher nicht angeboten. Godzilla Pro und Premium/LE {} haben sie.",
 "Random clips: {} slot(s) matched, {} dropped": "Zufällige Clips: {} Slot(s) zugeordnet, {} verworfen",
 "Random groups are not available for a JJP install: it holds exactly two images, root A and root B.": "Zufallsgruppen sind für eine JJP-Installation nicht verfügbar: Sie enthält genau zwei Abbilder, Root A und Root B.",
 "Range": "Bereich",
@@ -11018,6 +11018,7 @@
 "{} are copies off a card": "{} sind Kopien von einer Karte",
 "{} asks about the mains once at power-up and answers itself when its own power reading is not ready yet, which is how it boots here - so it starts normally on {} Hz. Older code (Stranger Things {}, say) keeps asking and does refuse.": "{} fragt beim Einschalten einmal nach dem Netz und antwortet selbst, wenn seine Stromablesung noch nicht bereit ist, so startet es hier. Es startet also normal bei {} Hz. Älterer Code (z. B. Stranger Things {}) fragt weiter und lehnt ab.",
 "{} asks for a multiball of {} to {} balls.": "{} verlangt einen Multiball mit {} bis {} Bällen.",
+"{} asks for its clips through a call the app cannot hook on this build, so random clips are not offered there.": "{} fragt seine Clips über einen Aufruf ab, den die App in diesem Build nicht abfangen kann, daher werden dort keine Zufallsclips angeboten.",
 "{} asset(s) hold text in the stock extract but aren't in the modded one,": "{} Asset(s) enthalten Text in der Original-Extraktion, fehlen aber in der geänderten,",
 "{} asset(s) the modded extract doesn't carry": "{} Asset(s), die die geänderte Extraktion nicht enthält",
 "{} assets extracted.": "{} Assets extrahiert.",

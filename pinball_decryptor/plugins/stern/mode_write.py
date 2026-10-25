@@ -799,7 +799,7 @@ def mode_file_text(project, slug, spec, own_sounds):
 def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
          log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"", stock_select=b"",
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
-         sound_modes_prof=None, picture="", picture_prof=None):
+         sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -811,7 +811,9 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     PAD-446: *variants* adds the project's clips that play one of several at random
     (:mod:`.clip_variants`) to the same bank, and ``clips.cfg`` beside the mode files. A
     project with variants and no modes (or *modes_on* False: the build carries none) is a plan
-    of its own, for *variants_prof*, the title of the card being written.
+    of its own, for *variants_prof*, the title of the card being written. PAD-723: *read_card*
+    ``(card path) -> bytes or None`` reads the other bank scenes a random clip may be in, and
+    *scan_card* ``(names) -> {name: scenes naming it}`` counts them across the card.
 
     PAD-494: *sound_modes* is the music modes' ``sounds.cfg`` the engine wrote (the bank already
     holds their files), put beside the mode files; with no mode and no random clip it is a plan of
@@ -826,7 +828,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     if not modes and not code:
         if variants:
             result = variants_plan(project, stock_bank, game_elf, scratch, variants_prof, log=log,
-                                   progress=progress, cancel=cancel)
+                                   progress=progress, cancel=cancel, read_card=read_card,
+                                   scan_card=scan_card)
             if result is not None:
                 result.sounds_file = sound_modes or ""
                 result.picture_file = picture or ""
@@ -911,7 +914,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     result.mode_names = [spec.name for _s, spec in modes] + [c.name for _s, c in code]
     if variants:
         variants_into(project, result, stock_bank, tree, only=False, log=log, progress=progress,
-                      cancel=cancel)
+                      cancel=cancel, read_card=read_card, scan_card=scan_card)
     result.sounds_file = sound_modes or ""
     result.picture_file = picture or ""
     return result
@@ -971,7 +974,14 @@ def picture_plan(project, game_elf, prof, cfg):
 
 
 # ---- PAD-446: clips that play one of several at random -----------------------------------------
-def variants_plan(project, stock_bank, game_elf, scratch, prof, log=None, progress=None, cancel=None):
+def CV_scene_counts(reader, game_dir, names):
+    """PAD-723: :func:`.clip_variants.scene_counts`, for the engine."""
+    from . import clip_variants as CV
+    return CV.scene_counts(reader, game_dir, names)
+
+
+def variants_plan(project, stock_bank, game_elf, scratch, prof, log=None, progress=None, cancel=None,
+                  read_card=None, scan_card=None):
     """A plan carrying only the project's random clips (:mod:`.clip_variants`): no mode; the
     runtime and the title's port on p2 with a ``clips.cfg`` that says ``only``. ``None`` when
     the project has none that can go on *prof*'s card."""
@@ -993,14 +1003,16 @@ def variants_plan(project, stock_bank, game_elf, scratch, prof, log=None, progre
     tree = os.path.join(scratch, "tree")
     os.makedirs(tree, exist_ok=True)
     variants_into(project, result, stock_bank, tree, only=True, log=log, progress=progress,
-                  cancel=cancel)
+                  cancel=cancel, read_card=read_card, scan_card=scan_card)
     return result if result.variants is not None else None
 
 
-def variants_into(project, result, stock_bank, tree, only, log=None, progress=None, cancel=None):
+def variants_into(project, result, stock_bank, tree, only, log=None, progress=None, cancel=None,
+                  read_card=None, scan_card=None):
     """Add the project's random clips to *result*: onto the bank scene the modes were built
     into (or the stock one), each added clip a new file, the bank a rewritten one, ``clips.cfg``
-    for p2. *only*: the card carries no mode."""
+    for p2. *only*: the card carries no mode. PAD-723: a clip in another of the title's bank
+    scenes goes into that one, read with *read_card*, and it is rewritten too."""
     from . import clip_variants as CV
     prof = result.profile
     bank_card = CV.bank_scene(prof)
@@ -1017,17 +1029,24 @@ def variants_into(project, result, stock_bank, tree, only, log=None, progress=No
         raise ModeWriteError("the card's video bank (%s) was not read" % bank_card)
     try:
         vb = CV.build(project, prof, bank, os.path.join(tree, "variants"), only, log=log,
-                      progress=progress, cancel=cancel)
+                      progress=progress, cancel=cancel, read_card=read_card, scan_card=scan_card)
     except CV.VariantError as e:
         raise ModeWriteError("random clips: %s" % e) from None
     if vb is None:
         return result
-    if not bank_src:
-        bank_src = os.path.join(tree, "variants", *bank_card.split("/"))
-        os.makedirs(os.path.dirname(bank_src), exist_ok=True)
-        result.replaced.append((bank_card, bank_src))
-    with open(bank_src, "wb") as f:
-        f.write(vb.bank)
+    if vb.bank != bank:
+        if not bank_src:
+            bank_src = os.path.join(tree, "variants", *bank_card.split("/"))
+            os.makedirs(os.path.dirname(bank_src), exist_ok=True)
+            result.replaced.append((bank_card, bank_src))
+        with open(bank_src, "wb") as f:
+            f.write(vb.bank)
+    for card, data in sorted(vb.others.items()):     # PAD-723: the title's other bank scenes
+        src = os.path.join(tree, "variants", *card.split("/"))
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+        with open(src, "wb") as f:
+            f.write(data)
+        result.replaced.append((card, src))
     result.new.extend(vb.new)
     result.variants = vb
     result.clips_file = vb.cfg

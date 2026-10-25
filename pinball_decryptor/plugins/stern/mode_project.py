@@ -3047,10 +3047,50 @@ def probe_card_title(image):
     return answer
 
 
+def known_game_dir(game):
+    """Is ``game`` (``uncanny_xmen_le``) a game directory the app knows: one a port is
+    shipped or was worked out for, or a Spike 2 title of :data:`.games.GAME_DB`? Reads
+    folder listings only."""
+    game = (game or "").lower()
+    if not game:
+        return False
+    from .games import GAME_DB
+    if any(game == k or game.startswith(k + "_") for k in GAME_DB):
+        return True
+    dirs = [PORTS_DIR]
+    try:
+        from . import mode_runtime
+        dirs += list(mode_runtime.port_dirs())
+    except Exception:                                       # noqa: BLE001 - the shipped list still answers
+        pass
+    for d in dirs:
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        if any(n.lower().startswith(game + "-") and n.lower().endswith(".port") for n in names):
+            return True
+    return any(p.game_dir == game for p in _REMEMBERED.values())
+
+
+def _name_game(image):
+    """PAD-720: ``card_from_name(image)``, unless the name is not to be trusted: a card file
+    renamed in Stern's form after its own build (``Silentcorp_Animated_Series_Xmen_LE-0_98_0
+    ...raw``) parses, but names a game no card has. When that file is on this computer, the
+    card's own index decides instead (:func:`probe_card_title`), so ``(None, None)``."""
+    game, version = card_from_name(image)
+    if game and not known_game_dir(game) and os.path.isfile(image):
+        probed = probed_card_title(image)
+        if probed is None or probed[0]:
+            return None, None          # not read yet, or the index names the real game
+    return game, version
+
+
 def _card_by_name_or_probe(image, exact="", source_from_record=False):
     """A :class:`ProjectCard` for *image* without opening it: its Stern name, else what
-    :func:`probe_card_title` has already read of it, else ``game_dir`` "" until a probe."""
-    game, version = card_from_name(image)
+    :func:`probe_card_title` has already read of it, else ``game_dir`` "" until a probe.
+    A Stern-formed name of a game the app does not know waits for the probe (PAD-720)."""
+    game, version = _name_game(image)
     if game:
         if exact and source_from_record:
             return ProjectCard(image, game, exact, "the extract's record of the card")
@@ -3091,6 +3131,8 @@ def project_card(project):
                        else MODES_TITLE_UNREAD)
 
 
+#: PAD-720: where :func:`project_card` found the game when the extract recorded the card's index
+INDEX_SOURCE = "the card's own index"
 #: PAD-623: where :func:`project_card` found the game when the card file is gone
 MODES_TITLE_SOURCE = "the game this project's modes were made for; the card file is not there"
 #: ... and when the card is there but its index names no game
@@ -3132,6 +3174,13 @@ def _project_card(project):
     rec = extract_source.read_extract_source(project) or {}
     exact = rec.get("card_version") or ""
     recorded = rec.get("input_path") or rec.get("input_name")
+    stock = rec.get("stock")
+    sidx = stock.get("sidx") if isinstance(stock, dict) else ""
+    game, version = card_from_name(sidx) if isinstance(sidx, str) and sidx else (None, None)
+    if recorded and game:
+        # PAD-720: the extract read the card's own index (its .sidx name), and that names the
+        # game whatever the file is called, and wherever the file is now
+        return ProjectCard(str(recorded), game, exact or version, INDEX_SOURCE)
     if recorded:
         return _card_by_name_or_probe(str(recorded), exact, source_from_record=True)
     images = []
@@ -3147,7 +3196,7 @@ def _project_card(project):
     if not images:
         return None
     for image in images:
-        game, version = card_from_name(image)
+        game, version = _name_game(image)
         if game:
             return ProjectCard(image, game, version, "the card's file name")
     return _card_by_name_or_probe(images[0])

@@ -55,4 +55,66 @@ Kit `C:/tmp/PAD-724/sweep` (job.py, run724.sh, menu724.sh, nvread.py, verdict.py
 The edition's own boot (codeselect reading EDITION and booting that image) is the boot program's, the same on every
 title; PAD-495 proved it on Godzilla, and the sweep proves each title's menu takes and stores the setting it reads.
 
-Results: see the table below (filled from `runs/*/VERDICT.txt`).
+Results: **50 of 50 pass** (each run's `VERDICT.txt` in `runs/<build>/`): on every build mode 1's two fires played the
+500 Hz tone, mode 2's two the 1000 Hz tone, and the store held MUSIC MODE = 2 and EDITION = 2. Where a build took more
+than one try, the earlier tries were the menu walker's (keys pressed before a page had drawn, or a row count that was
+wrong for that title, or a fresh store sitting in Guided Setup), fixed in `menu724*.sh` / `run724f.sh`; the set was the
+same.
+
+Afterwards every set was rebuilt from the committed code and compared file by file with the one the sweep ran: the
+game program, image.bin, the sound index, sounds.cfg and game.port were byte-identical on all 50 (only
+`overrides.delta`'s per-build generation id differs).
+
+| Build | Menu | Tries |
+|---|---|---|
+| aerosmith-1.16 | Standard list | 1 |
+| aerosmith_le-1.16 | Standard list | 1 |
+| avengers_infinity_le-1.10 | Category table | 1 |
+| avengers_infinity_pro-1.10 | Category table | 1 |
+| batman-1.14 | Category table | 1 |
+| beatles-1.29 | Category table | 1 |
+| deadpool_le-1.16 | Category table | 1 |
+| deadpool_pro-1.16 | Category table | 1 |
+| dungeons_and_dragons_le-1.10 | Category table | 1 |
+| dungeons_and_dragons_pro-1.10 | Category table | 1 |
+| elvira3-1.13 | Standard list | 1 |
+| foo_fighters_le-1.04 | Standard list | 1 |
+| foo_fighters_pro-1.04 | Standard list | 1 |
+| godzilla_le-1.16 | Category table | 1 |
+| godzilla_pro-1.16 | Category table | 1 |
+| guardians-1.15 | Standard list | 1 |
+| guardians_le-1.15 | Standard list | 1 |
+| iron_maiden_le-1.18 | Category table | 1 |
+| iron_maiden_pro-1.18 | Category table | 1 |
+| james_bond_pro-1.06 | Category table | 2 |
+| jaws_le-1.02 | Category table | 1 |
+| jaws_pro-1.02 | Category table | 1 |
+| john_wick_le-1.02 | Category table | 1 |
+| john_wick_pro-1.02 | Category table | 1 |
+| jurassic_park_le-1.16 | Category table | 1 |
+| jurassic_park_pro-1.16 | Category table | 1 |
+| jurassic_park_the_pin-1.05 | Category table | 2 |
+| king_kong_le-0.97 | Category table | 1 |
+| king_kong_pro-0.97 | Category table | 1 |
+| led_zeppelin_le-1.22 | Standard list | 1 |
+| led_zeppelin_pro-1.22 | Standard list | 1 |
+| mando_le-1.45 | Standard list | 1 |
+| mando_pro-1.45 | Standard list | 1 |
+| metallica_spike-1.04 | Category table | 3 |
+| munsters_le-1.28 | Standard list | 1 |
+| munsters_pro-1.28 | Standard list | 1 |
+| rush_le-1.19 | Standard list | 1 |
+| rush_pro-1.19 | Standard list | 1 |
+| star_wars_elg-1.10 | Category table | 2 |
+| star_wars_pro-1.31 | Category table | 1 |
+| stranger_things-1.13 | Category table | 1 |
+| stranger_things_le-1.13 | Category table | 1 |
+| sword_of_rage_le-1.19 | Standard list | 1 |
+| sword_of_rage_pro-1.19 | Standard list | 1 |
+| turtles_le-1.59 | Standard list | 1 |
+| turtles_pro-1.59 | Standard list | 1 |
+| uncanny_xmen_le-0.98 | Category table | 3 |
+| uncanny_xmen_pro-0.98 | Category table | 2 |
+| venom_le-1.07 | Standard list | 1 |
+| venom_pro-1.07 | Standard list | 1 |
+| james_bond_le-1.06, james_bond_60th_le-1.11, star_wars_le-1.31 | (no room to grow the program) | not run |

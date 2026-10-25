@@ -9,6 +9,7 @@ the copier making room, not by the app's 30-day clean-up - and an entry whose im
 import os
 import re
 import subprocess
+import sys
 
 import pytest
 
@@ -67,6 +68,8 @@ ls "$CACHE" | sed -n 's/\.raw$//p' | tr '\n' ' '; echo
 
 
 @pytest.mark.skipif(not HAS_BASH, reason="needs bash")
+@pytest.mark.skipif(sys.platform == "darwin",
+                    reason="cardmount.sh is the rig's (WSL/Linux) and speaks GNU stat/touch; macOS has BSD ones")
 def test_the_library_is_never_evicted_and_dead_entries_go_first():
     script = _funcs("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
                     "cache_make_room") + DRIVER

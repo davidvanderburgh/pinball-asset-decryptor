@@ -54,6 +54,18 @@ site surface_seek     0x00574d5c 0xe92d43f0 0xe1a07003
 site surface_duration 0x00574a14 0xe5d030d4 0xe92d40f0
 site surface_position 0x00574bb8 0xe5d030d4 0xe92d40f0
 text backdrop_idle MainPlayLoop
+# PAD-722: the backdrop on the bank's surface, as on LE 1.06 (PAD-521): a mode's loop is played there again whenever
+# it is idle. Seen on the glass in the emulator 2026-10-25 (stock card, hidden, muted): a blocks mode's own loop in the
+# TV frame, taken back each time the game asked for MainPlayLoop_DrNo.
+value backdrop_surface 1
+# PAD-722: the game's own status bar under the TV (scene hud 7de1c159, the LE's): the score display's getter, LE
+# 1.06's 0x1862dc on this build (the LE recipe places it strictly; the same 0x128-byte singleton). Its frame update
+# 0x185ac4 reads the LE's fields: the nodes at +0x104/+0x108/+0x10c/+0x114, the wipe's frame +0x11c, the four flags
+# +0x11e..+0x121 - the runtime's defaults. Seen on the glass in the emulator 2026-10-25: a blue bar named FRWL WIZARD,
+# its clock draining along it, held again when a display of the game's moved it.
+site status_bar       0x00184aec 0xe92d4038 0xe3004138
+# PAD-722: where a mode's info line goes, as on LE 1.06 (PAD-547): under the status bar.
+text info_line_at 679 510
 site balls_in_play    0x00264464 0xe92d4010 0xe3094860
 site find_text        0x0057f380 0xe92d4070 0xe24dd008
 site agent_header     0x005cc978 0xe92d40f8 0xe2505000
@@ -210,6 +222,20 @@ event bonus_end      0x28
 event tilt_warning   0xc8
 event tilt           0xc6
 event game_over      0x47
+
+# ---- PAD-722: a FILM completed, as on LE 1.06 (PAD-428). The collect 0x1cf08c(film, part) (the LE's 0x1d0918, the
+# same code) calls 0x1d3134(film) once, the moment the film's fourth part is in (0x1cefec(film) = all four). Films in
+# the game's order: 0 Dr. No, 1 From Russia With Love, 2 Goldfinger, 3 Thunderball, 4 You Only Live Twice,
+# 5 Diamonds Are Forever. Seen in the emulator 2026-10-25 (an instrument calling the collect for From Russia With
+# Love's four parts): a blocks mode on film_frwl started 119 ms after the fourth; on the port without these lines
+# nothing started.
+site film_complete   0x001d3134 0xe92d4038 0xe1a05000
+event film_dr_no        site film_complete arg 0
+event film_frwl         site film_complete arg 1
+event film_goldfinger   site film_complete arg 2
+event film_thunderball  site film_complete arg 3
+event film_yolt         site film_complete arg 4
+event film_daf          site film_complete arg 5
 
 # ---- lamps ----
 # shot ties (PAD-420): an insert's shot mask is every shot it stands in front of, read at the desk from the game's

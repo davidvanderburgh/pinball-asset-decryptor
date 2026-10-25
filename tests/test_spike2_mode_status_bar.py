@@ -124,3 +124,23 @@ def test_the_status_bar_is_armed_from_the_port_and_kept_every_tick():
     assert "status_bar_arm();" in src and "    sb_tick();" in _lift(src, "static void on_tick(unsigned *r)")
     port = (RUNTIME.parent / "ports" / "james_bond_le-1.06.port").read_text(encoding="utf-8")
     assert re.search(r"^site status_bar\s+0x001862dc 0xe92d4038 0xe30e48f8$", port, re.M)
+
+
+def test_bond_pro_has_what_bond_le_has():
+    """PAD-722: Bond Pro 1.06 gets the LE's status bar, info line, backdrop and film events (LE and Pro of a game get
+    the same support). The LE's recipe places each on the Pro strictly; seen in the emulator on the Pro 2026-10-25:
+    From Russia With Love's fourth part started a mode on film_frwl, its name in the blue bar and its loop on the TV."""
+    port = (RUNTIME.parent / "ports" / "james_bond_pro-1.06.port").read_text(encoding="utf-8")
+    assert re.search(r"^site status_bar\s+0x00184aec 0xe92d4038 0xe3004138$", port, re.M)
+    assert re.search(r"^text info_line_at 679 510$", port, re.M)
+    assert re.search(r"^value backdrop_surface 1$", port, re.M)
+    assert re.search(r"^site film_complete\s+0x001d3134 0xe92d4038 0xe1a05000$", port, re.M)
+    films = ("dr_no", "frwl", "goldfinger", "thunderball", "yolt", "daf")
+    for arg, film in enumerate(films):
+        assert re.search(r"^event film_%s\s+site film_complete arg %d$" % (film, arg), port, re.M)
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    le = MP.profile_from_port(str(RUNTIME.parent / "ports" / "james_bond_le-1.06.port"))
+    pro = MP.profile_from_port(str(RUNTIME.parent / "ports" / "james_bond_pro-1.06.port"))
+    assert pro.status_bar and le.status_bar and pro.info_at == le.info_at
+    assert {e for e in le.events if e.startswith("film_")} == {e for e in pro.events if e.startswith("film_")} \
+        == {"film_" + f for f in films}

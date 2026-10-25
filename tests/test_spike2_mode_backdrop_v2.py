@@ -117,11 +117,11 @@ def test_the_port_opts_in_and_the_runtime_needs_clip_v2_for_it():
 
 
 def test_only_the_build_it_was_seen_on_opts_in():
-    """Seen on the glass in the emulator on James Bond LE 1.06 (2026-10-11); Pro 1.06 not yet."""
+    """Seen on the glass in the emulator on James Bond LE 1.06 (2026-10-11) and Pro 1.06 (PAD-722, 2026-10-25)."""
     ports = RUNTIME.parent / "ports"
     on = sorted(p.name for p in ports.glob("*.port")
                 if re.search(r"^value\s+backdrop_surface\s+1\b", p.read_text(encoding="utf-8"), re.M))
-    assert on == ["james_bond_le-1.06.port"]
+    assert on == ["james_bond_le-1.06.port", "james_bond_pro-1.06.port"]
 
 
 def test_the_games_main_play_video_gives_the_loop_the_surface_back():

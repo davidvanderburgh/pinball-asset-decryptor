@@ -347,6 +347,13 @@ site surface_find     0x004e9480 0xe92d4070 0xe24dd008
 site surface_set_video 0x004e0b64 0xe5d030d4 0xe92d4ff0
 site surface_play     0x004de970 0xe5d030d4 0xe92d43f0
 site surface_stop     0x004de120 0xe5d030d4 0xe92d40f0
+# PAD-725: the surface's own seek, length and position (PAD-530's, from Bond 1.06): a mode's clip the game's own
+# clip took the surface from comes back where it would be by then. Placed by the James Bond LE 1.06 recipe at
+# its distances from surface_play (-0x36c / -0x6b4 / -0x510), each proven by its call: the player function it
+# calls calls gst_element_seek / query_duration / query_position.
+site surface_seek     0x004de604 0xe92d43f0 0xe1a07003
+site surface_duration 0x004de2bc 0xe5d030d4 0xe92d40f0
+site surface_position 0x004de460 0xe5d030d4 0xe92d40f0
 
 # ---- callouts and text: a start shot for a template mode ----
 text example_start_shot     Grave tgt-left

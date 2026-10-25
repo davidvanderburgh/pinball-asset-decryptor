@@ -2839,8 +2839,25 @@ surface: not the clip put back, not the backdrop loop (even the one due at once 
 start clip), and a new `pm_clip` waits for the effect's end and then plays from its start. A clip
 the game plays once (a lock, a start, an award) is waited out. It does not come back if
 the mode ended, another mode of ours began, or its time ran out under the game's clip. James
-Bond LE and Pro 1.06 name them (LE at `surface_play` - 0x36c, - 0x6b4 and - 0x510, Pro the
+Bond LE and Pro 1.06 named them first (LE at `surface_play` - 0x36c, - 0x6b4 and - 0x510, Pro the
 same distances). A port without them keeps the old way: the game's clip ends the mode's.
+
+PAD-725 put them in every clip v2 port (62). The newer player has them at Bond's distances; the
+older one (Aerosmith LE 1.15, Avengers 1.09, Batman 1.13, Guardians LE 1.14, Iron Maiden LE 1.16,
+Mandalorian LE 1.44, Rush LE 1.18, Stranger Things LE 1.12, Black Knight SoR LE 1.18) at
+`surface_play` + 0x1bc, - 0x1274 and - 0x360. Each was placed by Bond LE's recipe and checked by
+what it calls: on the newer player, the function that its call on the player (`[surface + 0x550]
++ 8`) reaches calls `gst_element_seek`, `gst_element_query_duration` or
+`gst_element_query_position` and no other; on the older one, its virtual call on the player
+(`[surface + 0x230]`, slots 0x20 / 0x28 / 0x24) reads a vtable entry that does. After a clip is
+put back, the runtime reads where it plays a second later (`clip: "<clip>" plays at N ms, 1 s
+after it was put back at M ms`), so a log shows the seek took.
+
+For a test, `pm_game_clip(name, loop)` puts a bank clip on the surface the way the game puts
+its own (not marked as the mode's), so a rig can stand in for a title's Ball Lock; and
+`/dump/cliplog.on` at start-up logs every clip of the game's on the bank's surface (`clip log:
+the game sets "<clip>" on the bank's surface (in a game)` and each play's loop flag), which is
+how a title's main-play video is found.
 
 The port lines:
 

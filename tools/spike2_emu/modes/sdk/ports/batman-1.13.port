@@ -177,6 +177,14 @@ site surface_find     0x004f1488 0xe92d4070 0xe24dd008
 site surface_set_video 0x004e8d1c 0xe5d03238 0xe92d4ff0
 site surface_play     0x004e64bc 0xe5d03238 0xe92d43f0
 site surface_stop     0x004e5fc0 0xe5d03238 0xe92d40f0
+# PAD-725: the surface's own seek, length and position (PAD-530's, from Bond 1.06): a mode's clip the game's own
+# clip took the surface from comes back where it would be by then. Placed by the James Bond LE 1.06 recipe at
+# its distances from surface_play (+0x1bc / -0x1274 / -0x360: the older player), each proven by its call: the
+# player's virtual seek (+0x20), duration (+0x28) and position (+0x24), whose entries call gst_element_seek /
+# query_duration / query_position.
+site surface_seek     0x004e6678 0xe92d43f0 0xe1a07003
+site surface_duration 0x004e5248 0xe5d03238 0xe92d40f0
+site surface_position 0x004e615c 0xe5d03238 0xe92d40f0
 value surface_playing       2
 # item 164: no bank this title draws in a game shows a clip, so a mode's clips go in the HUD, in a
 # Video the app grafts there (scene_write.py add_screens clips); hidden until a clip plays

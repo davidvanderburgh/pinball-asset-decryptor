@@ -270,6 +270,9 @@ void pm_set_text(void *text, const char *words);
 int pm_clip(const char *name);        /* 1 if the game started it */
 int pm_clip_playing(void);
 void pm_clip_stop(void);
+int pm_game_clip(const char *name, int loop);  /* for a test (PAD-725): a clip of the video bank put on its
+                                              surface as the GAME puts its own (clip v2), so the runtime's
+                                              clip-back and backdrop take it for the game's; 1 = played */
 
 /* ---- the backdrop: a clip BEHIND the HUD (hud-layers) ---------------------------------
  * The game's own battles play their clip in the main-play background's place, with the score

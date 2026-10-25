@@ -262,6 +262,48 @@ def test_both_bond_builds_name_the_surfaces_seek_and_the_main_play_video(port, s
     assert re.search(r"^text backdrop_idle MainPlayLoop$", text, re.M)
 
 
+def _clip_v2_ports():
+    out = []
+    for p in sorted(PORTS.glob("*.port")):
+        text = p.read_text(encoding="utf-8")
+        if re.search(r"^site surface_set_video ", text, re.M):
+            out.append(p.name)
+    return out
+
+
+def _site(text, name):
+    m = re.search(r"^site %s\s+(0x[0-9a-f]+) (0x[0-9a-f]+) (0x[0-9a-f]+)$" % name, text, re.M)
+    return (int(m.group(1), 16), int(m.group(2), 16), int(m.group(3), 16)) if m else None
+
+
+@pytest.mark.parametrize("port", _clip_v2_ports())
+def test_every_clip_v2_port_names_the_surfaces_seek_length_and_position(port):
+    """PAD-725: Bond's PAD-530 sites on every clip v2 build, at the distances from surface_play its player's layout has
+    (the newer player calls the player functions, the older one the player's virtual seek / position / duration)"""
+    text = (PORTS / port).read_text(encoding="utf-8")
+    play, sv = _site(text, "surface_play")[0], _site(text, "surface_set_video")[0]
+    older = sv - play == 0x2860
+    assert older or sv - play == 0x21f4
+    want = {"surface_seek": 0x1bc, "surface_duration": -0x1274, "surface_position": -0x360} if older else \
+        {"surface_seek": -0x36c, "surface_duration": -0x6b4, "surface_position": -0x510}
+    for name, d in want.items():
+        va, w0, w1 = _site(text, name)
+        assert va == play + d, name
+        if name == "surface_seek":
+            assert (w0, w1) == (0xe92d43f0, 0xe1a07003)
+        else:                             # ldrb r3, [r0, #<its ready flag>]; push {r4-r7, lr}
+            assert w0 & 0xfffff000 == 0xe5d03000 and w1 == 0xe92d40f0, name
+    assert len(_clip_v2_ports()) >= 62
+
+
+def test_a_test_can_put_a_clip_on_the_surface_as_the_games_own():
+    """PAD-725: pm_game_clip sets and plays a bank clip NOT marked ours, so the hooks take it for the game's"""
+    src = RUNTIME.read_text(encoding="utf-8")
+    body = _lift(src, "int pm_game_clip(const char *name, int loop)")
+    assert "ck_ours" not in body and 'fn("surface_set_video")' in body and 'fn("surface_play")' in body
+    assert "int pm_game_clip(const char *name, int loop);" in (RUNTIME.parent / "pad_mode.h").read_text(encoding="utf-8")
+
+
 IDLE_MAIN = r"""
 static int in_game = 1, bd_v2;
 static struct { int on; } bd;

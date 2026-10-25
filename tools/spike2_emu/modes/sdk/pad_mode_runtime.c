@@ -2526,8 +2526,15 @@ static struct {
     char game[64];                        /* the game's clip on the surface now (for the log) */
     unsigned asks;
     unsigned fx;                          /* PAD-639: the game's foreground display effect over its loop (0: none) */
+    unsigned long check_ms;               /* PAD-725: when to read where it plays after a seek (0: no check due) */
+    long long check_want;                 /* the seek it was put back with */
 } ck;
 static int ck_can, ck_ours, ck_in, sv_ck, ck_play_hooked;
+/* PAD-725: /dump/cliplog.on at start-up logs every clip of the game's on the bank's surface (its name, and a play's loop
+ * flag): what a title plays there in a game, its main-play video among them (`text backdrop_idle`) */
+static int ck_log;
+static unsigned ck_logged;
+#define CK_LOG_MAX 400
 /* PAD-530 round 4 (Jim-Beam on v1.184.3): when the mode's clip ran to its end, the bank's surface was left with its last
  * frame and the game's own main-play video did not come back until a clip of the game's played. The game puts its
  * main-play video back after ITS clips, not after ours (emulator, Bond Pro: EOS of ours, and no ask from the game).
@@ -2591,6 +2598,7 @@ static void ck_drop(const char *why)
     ck.name[0] = 0;
     ck.on = ck.lost = ck.back = ck.loop = 0;
     ck.fx = 0;
+    ck.check_ms = 0;
 }
 
 /* set and play `name` on the bank's surface: 0 when the bank has no such clip */
@@ -2629,6 +2637,9 @@ static void ck_seen(unsigned *r)
         for (i = 0; idle[i] && name[i] == idle[i]; i++) ;
         is_idle = !idle[i];
     }
+    if (ck_log && ck_logged++ < CK_LOG_MAX)
+        say("clip log: the game sets \"%.80s\" on the bank's surface%s%s", name, pm_in_game() ? " (in a game)" : "",
+            is_idle ? " - its main-play video" : "");
     ck_last_ours = 0;                     /* round 4: the game has the surface now */
     ck_game_clip_ms = is_idle ? 0 : pm_ms() | 1;   /* PAD-639 round 3: a clip of its own, for ck_game_display */
     if (is_idle) {
@@ -2679,6 +2690,14 @@ static void ck_play_seen(unsigned *r)
 }
 static void on_surface_play(unsigned *r)
 {
+    void *bank;
+    if (ck_log && !ck_ours && !ck_in && ck_logged < CK_LOG_MAX) {
+        ck_in = 1;
+        bank = clip2_surface();
+        ck_in = 0;
+        if (bank && (unsigned)(unsigned long)bank == r[0] && ck_logged++ < CK_LOG_MAX)
+            say("clip log: the game plays the bank's surface, loop %u", r[1]);
+    }
     ck_play_seen(r);
 }
 
@@ -2689,6 +2708,13 @@ static void ck_tick(void)
     long long want;
     if (!ck.name[0]) return;
     if (!ck_mode_runs()) { ck_drop(ck.lost ? "its mode is over" : 0); return; }
+    if (ck.check_ms && pm_ms() >= ck.check_ms) {   /* PAD-725: the seek took - where the clip plays a second on */
+        ck.check_ms = 0;
+        if (ck.on && (surf = clip2_surface()) && ((int (*)(void *))(unsigned long)fn("surface_state"))(surf)
+                                                  == (int)pm_port_value("surface_playing", 2))
+            say("clip: \"%s\" plays at %u ms, 1 s after it was put back at %u ms", ck.name,
+                (unsigned)ck_ms("surface_position", surf), (unsigned)ck.check_want);
+    }
     if (!ck.lost) {
         if (ck.on && !clip.on) ck_drop(0);   /* it played to its end (or was stopped) */
         return;
@@ -2730,9 +2756,12 @@ static void ck_tick(void)
     clip.on = 1;
     clip.seen = 0;
     clip.started = clip.last = pm_ms();
-    if (want && ck.backs++ < 20)
+    if (want && ck.backs++ < 20) {
         say("clip: \"%s\" is back on the surface at %u ms of %u, where it would be by now", ck.name, (unsigned)want,
             (unsigned)ck.len);
+        ck.check_ms = pm_ms() + 1000;
+        ck.check_want = want;
+    }
 }
 
 /* from the constructor, once clip v2 is on */
@@ -2743,6 +2772,10 @@ static void ck_arm(void)
     if ((sv_ck = 1, sv_hook())) {
         ck_can = 1;
         ck_play_hooked = hook(fn("surface_play"), on_surface_play);
+        if (pm_trigger("cliplog.on")) {
+            ck_log = 1;
+            say("clip log: every clip of the game's on the bank's surface (cliplog.on)");
+        }
         say("clip: a mode's clip comes back after a clip of the game's, where it would be by then (seek 0x%08x)%s",
             fn("surface_seek"), ck_play_hooked ? "; a loop of the game's is shown one pass" : "");
     } else {
@@ -2779,6 +2812,22 @@ static void ck_wait_tick(void)
     ck_wait_in = 0;
     current = was;
     ck_wait.name[0] = 0;
+}
+
+/* PAD-725, for a test: a clip of the bank on its surface as the game puts one there - set and play, NOT marked ours, so
+ * the surface_set_video / surface_play hooks take it for the game's (a sweep's stand-in for the game's own Ball Lock) */
+int pm_game_clip(const char *name, int loop)
+{
+    void *surf;
+    unsigned str;
+    int ok;
+    if (!(can & PM_CAN_CLIPS) || !clip_v2 || !name || !*name || !(surf = clip2_surface())) return 0;
+    str = std_string(name);
+    ok = ((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str);
+    if (ok) ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, loop ? 1 : 0, -1);
+    say("clip: \"%s\" put on the bank's surface as the game's own%s, for a test%s", name, loop ? ", looped" : "",
+        ok ? "" : " - the video bank has no such clip");
+    return ok;
 }
 
 int pm_clip(const char *name)
@@ -3418,7 +3467,9 @@ static void bd2_play(void *surf)
         if (!once) bd.on = 0;             /* no loop to play: not asked again every tick */
         return;
     }
+    ck_ours = 1;
     ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 0, -1);
+    ck_ours = 0;
     ck_last_ours = 1;                     /* PAD-530: ours on the surface (its end gives the game's video back) */
     bd.obj = 1;
     bd.playing_once = once;

@@ -124,6 +124,7 @@ export function valWords(e) {
     case "num": return big(e.v);
     case "var": return String(e.name || "?");
     case "hits": return `hits of ${e.shot || "?"}`;
+    case "mode_hits": return `hits of ${e.shot || "?"} since it started`;     // PAD-721
     case "scored": return "times it has scored";
     case "total": return "points so far";
     case "secs_left": return "seconds left";

@@ -32,6 +32,7 @@ class Sim:
                 self.var_reset[v["name"]] = v.get("reset") or "mode"
         self.vars = {}
         self.hits = {}
+        self.mode_hits = {}             # PAD-721: made while it runs, since it started
         self.timers = {}                # name -> due ms
         self.now = 0
         self.running = False
@@ -61,7 +62,7 @@ class Sim:
         """The game as it stands, to try a shot on (the program itself is shared, never copied)."""
         out = Sim.__new__(Sim)
         out.__dict__.update(self.__dict__)
-        for key in ("vars", "hits", "timers", "lit_shots", "hud", "_every"):
+        for key in ("vars", "hits", "mode_hits", "timers", "lit_shots", "hud", "_every"):
             setattr(out, key, dict(getattr(self, key)))
         out.events = list(self.events)
         out.combo_at = dict(self.combo_at)
@@ -142,6 +143,8 @@ class Sim:
         was_lit = self.lit                      # a light this shot puts on waits for the next
         self._steps = 0
         self.hits[name] = self.hits.get(name, 0) + 1
+        if self.running:                        # PAD-721: made while it runs, since it started
+            self.mode_hits[name] = self.mode_hits.get(name, 0) + 1
         was = self.running                      # PAD-708: judged by the mode's state before the shot, as the C
         fired = self._combo_shot(name, was)     # ... and its combos before any script runs
         for i, s in enumerate(self.scripts):
@@ -234,6 +237,7 @@ class Sim:
         self.clock = int(self.p.get("seconds") or 0) * 1000
         self.lit_shots = {}
         self.scored = 0
+        self.mode_hits = {}
         self.points = 0
         self.hud = {"title": "", "line": ""}
         self.combo_clear()                      # PAD-708
@@ -348,6 +352,8 @@ class Sim:
             return self.vars.get(e.get("name"), 0)
         if k == "hits":
             return self.hits.get(e.get("shot"), 0)
+        if k == "mode_hits":
+            return self.mode_hits.get(e.get("shot"), 0)
         if k == "scored":
             return self.scored
         if k == "total":

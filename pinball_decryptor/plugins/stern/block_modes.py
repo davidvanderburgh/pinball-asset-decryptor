@@ -168,6 +168,14 @@ display of the game's (``pm_display_covered``) its words are blank and the edges
 the game's own modes runs (``pm_aside``) its lines go into the award line, the counters hide, and the
 badge moves one slot down for a battle. The mode's own screen, when it has one, is hidden then too.
 At the end the HUD shows the mode's TOTAL for three seconds (the game moving on takes it down at once).
+The corner meter (the top-right POWERUP-style bar, PAD-658) steps aside while one of the game's own modes or
+battles runs: the game letters its MODE CHAMPION (HIGH SCORE / YOUR SCORE) there then (PAD-707).
+
+WHAT IS LIT (PAD-707, David: "whatever progresses the mode in general should be flashing ... and other targets should
+not be flashing"). A mode that keeps the game's modes off (``game_modes`` block or give way) holds every shot insert it
+does not light dark while it runs (``quiet_shots``): its own Light blocks paint over that, a Lights off puts one back
+to dark rather than to the game's, a light show's end puts them dark again first. A mode beside the game's modes
+leaves the game's lights be.
 
 A DRAIN (PAD-622). The game's own mini-wizards (James Bond) show their TOTAL when the ball drains in one,
 and the bonus waits for it. A mode the ball's drain ends does the same: it ends as its clock would (an

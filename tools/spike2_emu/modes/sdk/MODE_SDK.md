@@ -302,7 +302,8 @@ static void stop(void) { pm_lamp_release_all(); pm_end(); }
 
 Patterns: `PM_LAMP_SOLID`; `PM_LAMP_BLINK` (on half the period, off half; 500 ms); `PM_LAMP_PULSE`
 (breathes between dim and full, never dark; 1600 ms); `PM_LAMP_CHASE` (one insert of the list
-lit at a time, in the order given, stepping every period; 150 ms). A period of 0 takes the
+lit at a time, in the order given, stepping every period; 150 ms; over ONE insert - most of Godzilla's shots have
+one - it blinks at that step instead, where it was lit at every step: solid, PAD-707). A period of 0 takes the
 pattern's own. A single-colour insert (`MASER`, `POWERLINE LEFT`) is lit at the colour's
 brightest part; an RGB one shows the colour. Names are the game's, any case. A mode that holds
 an insert another of ours holds takes it (`[pad] lamps: X takes LEFT RAMP from Y`); a mode
@@ -1769,6 +1770,13 @@ it is asked for, so the runtime waits up to 1.2 s for one to start) - and a ball
 is held too: the kick-out comes as the clip ends, at most 10 s from the ball settling. Without a clip the end lets
 go as before. Run20 (Heisei 1.99D v21, a KING CAESAR test mode cashing out with his 3.97 s cashout clip and ending at
 once): `scoop: let go after 4324 ms (the mode's finish is over)`, the clip 115 frames, none to the glass without it.
+
+**A picked mode's start (PAD-707).** David: "the intro videos to the modes should play completely while the ball is
+still in the scoop and only eject from the scoop once those videos are done (or skipped)". The battle selection
+screen runs inside the scoop's settled event (the game's own hold); a pick a mode takes there (`roster_take`) keeps
+the ball after the screen closes, through the port's `roster_start_after_ms` until the mode starts, then through its
+full-screen start clip (1.2 s for one to begin), at most 15 s - logged `scoop: a mode took the selection screen's pick
+- the ball waits for its start clip` and `let go after N ms (its start clip is over)`.
 ## The shield platform (Godzilla Premium/LE, PAD-379)
 
 Godzilla Premium and LE carry their three shield targets on a platform a motor turns. Most of the game

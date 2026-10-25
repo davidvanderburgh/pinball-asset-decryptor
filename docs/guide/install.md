@@ -4,283 +4,137 @@
 
 ## Windows
 
-Download the latest `Pinball_Asset_Decryptor_v*_Windows.exe` from the
-[Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases)
-and run it. The installer bundles a Python runtime so nothing else is needed
-to launch the GUI.
+1. Download the latest `Pinball_Asset_Decryptor_v*_Windows.exe` from the
+   [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases)
+   and run it. It bundles its own Python, so nothing else is needed to
+   launch the app.
+2. Run **Install Prerequisites** from the Start Menu. It asks which
+   manufacturers you use and installs only what they need (see
+   [Per-manufacturer prerequisites](#per-manufacturer-prerequisites)).
+3. If it ends with **restart required**, WSL2 was just installed. Restart
+   Windows (use *Restart*: with Fast Startup on, *Shut down* doesn't
+   count), then run **Install Prerequisites** once more.
 
-The installed shortcuts start the app **as Administrator** (one standard
-UAC prompt per launch) — the SD-card and Direct-SSD write paths need
-elevation, and forgetting the old right-click → *Run as administrator*
-used to fail halfway through a run. Paths on mapped network drives
-(`W:\…`) keep working in the elevated session: Windows hides mapped
-letters from elevated processes, so the app translates them to their
-`\\server\share` form automatically. Network paths work in the
-WSL-backed pipelines too — the app mounts the share inside WSL on its
-own when an extract or write needs it.
+Re-running the installer is always safe: it skips anything already there.
 
-After install, run **Install Prerequisites** from the Start Menu — it asks
-which manufacturers you'll actually use and installs only the tools those
-plugins need (see [Per-manufacturer prerequisites](#per-manufacturer-prerequisites)
-below).
+- **Administrator:** the app's shortcuts start it as Administrator (one UAC
+  prompt), because writing SD cards and SSDs needs it.
+- **Network drives:** mapped letters (`W:\…`) keep working in the elevated
+  app, and in WSL too: the app translates and mounts them itself.
 
-If your machine didn't already have WSL2, that first run ends with a
-**restart required** banner: WSL2 only finishes installing after Windows
-restarts (use *Restart* — with Fast Startup enabled, *Shut down* doesn't
-count). After the restart, run **Install Prerequisites** from the Start
-Menu once more to pick up the remaining WSL-side packages — the script is
-safe to re-run and skips anything already installed.
+### If Install Prerequisites reports a problem
 
-If the summary reports **Ubuntu … Missing** even though WSL2 shows OK,
-your `wsl.exe` couldn't register the Ubuntu distro (the error it printed
-above the summary says why — a blocked Microsoft Store is a common
-cause). The installer already retries with a direct download where
-supported; if it still fails, run `wsl --install -d Ubuntu` in an admin
-PowerShell (create the username/password it asks for, then type `exit`),
-or install **Ubuntu** from the Microsoft Store app and launch it once —
-then run **Install Prerequisites** again.
+| What it says | What to do |
+|---|---|
+| **Ubuntu … Missing** (WSL2 OK) | `wsl.exe` couldn't register Ubuntu, often a blocked Microsoft Store. Run `wsl --install -d Ubuntu` in an admin PowerShell, or install Ubuntu from the Store and open it once. Then run Install Prerequisites again. |
+| A **WSL package** MISSING (often `qemu-user-static`) | The installer names it and offers its repair: refresh the package index, switch on `universe`, or fetch the one package from another release. It asks first. |
+| **Virtualization is disabled in BIOS/UEFI** | Turn on Intel **VT-x** or AMD **SVM** in firmware setup, boot Windows, and run Install Prerequisites again. |
+| **Default distro is WSL 1** | WSL 1 can't mount card images. The installer offers to convert it, or run `wsl --set-version <name> 2` yourself, then **Re-check** in the app. |
+| **The distro is not starting** | Try `wsl --shutdown`, wait ten seconds, then `wsl --update`. Still dead? Install a second distro beside it (below). |
+| `Invalid distribution name: 'Ubuntu-24.04'` | Your `wsl.exe` is older than that release. Run `wsl --update`, or `wsl --list --online` and pick an Ubuntu from that list. |
 
-If the summary instead reports one of the **WSL packages** as MISSING —
-the Spike 2 emulator's `qemu-user-static` is the usual one — apt saying
-no is no longer where the run stops. The installer names the packages apt
-refused, says in plain words what the app can try that apt cannot (refresh
-the package index and retry one at a time, switch on the `universe`
-component if this Ubuntu has it turned off, or fetch a single
-dependency-free package from a release that publishes it), and asks before
-doing any of it — the same repair the Emulate tab's **Set up
-emulator…** button runs. Every package it touched is then re-checked, so
-the summary reports what is really on the machine rather than what apt was
-asked for.
-
-If the installer instead stops with a red **virtualization is disabled
-in BIOS/UEFI** banner, WSL2 cannot run on your machine at all until you
-switch the CPU virtualization option back on in firmware setup (Intel
-**VT-x** / AMD **SVM**, usually under Advanced or CPU configuration) —
-no reinstall or restart helps until then. The app's prerequisite check
-reports the same condition in its tooltip. Enable the option, boot back
-into Windows, then run **Install Prerequisites** again.
-
-If the app keeps reporting **WSL2** as missing while **Install
-Prerequisites** reports everything as already installed, your default
-distro is registered as **WSL 1**. WSL 1 has no loop devices at all, so
-it can't mount a card or game image whatever packages are present, and
-reinstalling WSL doesn't change that — only converting the distro does.
-Both halves now say so: the installer reads `wsl -l -v`, names the distro
-and offers to convert it, and the app's prerequisite tooltip and log say
-"WSL is installed, but its default distro is WSL 1" instead of asking for
-another install. To do it by hand, run `wsl --set-version <name> 2` in an
-admin PowerShell (it runs for a few minutes; close anything using WSL
-first), then click **Re-check** in the app.
-
-If the distro itself has stopped starting — most often after upgrading it
-in place from inside WSL — nothing runs in it, and `wsl -l -v` still
-lists it as VERSION 2 because that answer comes from the registry rather
-than from the distro. The app now checks whether the distro can run
-anything at all before it explains a failed prerequisite, so it says
-"nothing can run inside it … the distro itself is not starting" instead
-of blaming a package or a loop device, and **Install Prerequisites** says
-which registered distro did not answer before it installs anything. Try
-`wsl --shutdown` (wait ten seconds) and then `wsl --update`; if it still
-won't start, install a second distro **alongside** it and make that the
-default, which is the one the app uses:
+Installing a second distro and making it the one the app uses:
 
 ```powershell
 wsl --install -d Ubuntu-24.04
 wsl --set-default Ubuntu-24.04
 ```
 
-The old distro is left exactly where it is, and `wsl --export <name>
-backup.tar` still gets its files out.
+The old distro stays where it is, and `wsl --export <name> backup.tar`
+still gets its files out.
 
-If that command answers `Invalid distribution name: 'Ubuntu-24.04'`, the
-machine's own `wsl.exe` is older than that release and its catalogue has no
-entry for it — nothing is installed, and restarting Windows changes nothing.
-Run `wsl --update` first, or `wsl --list --online` to see which names it does
-accept and install one of the Ubuntu entries from that list. **Install
-Prerequisites** now does all of this itself: it asks the machine which names
-it accepts, updates `wsl.exe` when the catalogue is out of date, installs the
-newest Ubuntu that machine offers if it still cannot have the pinned one, and
-— the thing it used to get wrong — reports a failed install as missing
-instead of green with a restart request.
+### Which Ubuntu
 
-**Which Ubuntu release is up to you.** PAD works on any current one —
-22.04, 24.04, and whatever comes next — and it is never refused on a
-version number: what decides whether a machine can do the work is the
-prerequisite checks, which ask what it can actually do. Every check that
-runs inside WSL now writes one line naming the distro and release it
-probed (`WSL: Ubuntu (Ubuntu 24.04.4 LTS, WSL 2)`), so a log pasted into
-a bug report carries it; a release older than 22.04 adds a second line
-saying it is older than anything this is tested against and is worth
-ruling out first. An app update never installs or switches a distro —
-a machine that works keeps working. PAD asks the machine rather than
-assuming a release: the ARM handler is registered the way *this* distro
-registers one, packages whose names changed between releases are tried
-under every spelling they have had, and criu is used from apt where a
-release publishes it and built from source where none does. The one
-release named out loud, in the installer and in the hints above, is
-24.04, and that is only "the one this is tested on": it is what a fresh
-install gets, not something an existing distro has to become. Two things
-follow an in-place upgrade to a new release automatically, because both
-are built against the release they run on — the emulator's own small
-binaries (rebuilt once on the next run) and criu (a criu that no longer
-starts is now reported as one that does not start, and rebuilt, instead
-of counting as present).
+Any current release works (22.04, 24.04 and later), and none is refused
+on its version number. The prerequisite checks decide, by asking what the
+machine can actually do.
 
-If your WSL **logs in as root** — a distro installed without its
-first-run account setup does — building a multi-boot card used to stop
-with *"cannot find your WSL home … check that WSL starts"*, on a WSL that
-had just built the menu program, drawn the preview and planned the card.
-The card is written as root, and the app was looking for an ordinary
-user's home to hand that step; there isn't one on such a machine, and
-there doesn't need to be — root's own home is where `~/spike2root` has
-been all along. The build now runs there. (The emulator is the one thing
-that still wants an ordinary account: a root run can't attach to the
-WSLg X server, so the game window opens black.)
+- **24.04** is the one it is tested on, and what a fresh install gets.
+- **The log names the distro** each check ran in, e.g. `WSL: Ubuntu
+  (Ubuntu 24.04.4 LTS, WSL 2)`. A release older than 22.04 gets a warning
+  line.
+- **An app update never installs or switches a distro.** After you upgrade
+  Ubuntu in place, the emulator's small programs and criu are rebuilt by
+  themselves.
+- **A WSL that logs in as root** builds multi-boot cards fine, but the
+  emulator's game window opens black. See [Emulate](emulate.md#when-something-goes-wrong).
 
-If a multi-boot **Build** stopped on its first step with *"install:
-cannot change permissions of '…/spike2root/usr/local/codeselect': No
-such file or directory"*, that line misleads: it is coreutils' account
-of a folder it was not allowed to create. Pressing **Start** on the
-Emulate tab unpacks the game's filesystem as root, and the step that
-installs the menu program ran as your own account, so on any PC that had
-run a game first the menu program had nowhere to go — while the menu
-preview, which only reads that filesystem, kept working. From v0.212.2
-that step runs as root on Windows, the way the card build itself does,
-and hands what it installs back to you. Run by hand as an account that
-cannot install there, it now names the folder in the way and who owns it.
+### Other Windows notes
 
-If a multi-boot **Build** or menu preview stops with **`make: command
-not found`**, that is the one build tool nobody had put on a
-prerequisite list. The menu a multi-game card starts up into is an ARM
-program built by a Makefile, and `make` is not a compiler, so a WSL
-that emulates every title perfectly can still be without it. Install
-Prerequisites installs it now, the Emulate tab's prerequisite strip
-asks for it under **Multi-boot cards need:**, and the tab's own refusal
-names the package to install rather than pointing at the lines above
-(`apt install make` on Debian/Ubuntu).
-
-If pressing ▶ on the Replace Audio tab says **Audio preview needs
-ffplay**, the ffmpeg it found is an "essentials" build or the copy
-bundled inside the app — neither carries `ffplay.exe`. Answer **Yes** to
-that dialog and it runs **Install Prerequisites** for you (the full
-ffmpeg build includes ffplay), or drop `ffplay.exe` from a full build
-into the exact folder the dialog names, then restart the app. Nothing
-else is affected: previewing is optional, and replacements still get
-staged, converted and written without it. The gear menu's **Install /
-repair prerequisites…** stays clickable even when every prerequisite
-shows green, precisely because ffplay is not one of the things they
-check.
+- **`make: command not found`** on a multi-boot build: `make` builds the
+  boot menu. Install Prerequisites installs it, or `apt install make` in
+  WSL.
+- **"Audio preview needs ffplay"** on Replace Audio: your ffmpeg has no
+  `ffplay.exe`. Answer **Yes** and the app installs the full ffmpeg build.
+  Only previewing needs it.
+- **⚙ > Install / repair prerequisites…** stays clickable even when every
+  check is green, for exactly this kind of case.
 
 ## macOS
 
-1. Download the DMG matching your Mac from the
+1. Download the DMG for your Mac from the
    [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases):
-   - `Pinball_Asset_Decryptor_v*_macOS_AppleSilicon.dmg` for Apple
-     Silicon Macs (M1 or newer).
-   - `Pinball_Asset_Decryptor_v*_macOS_Intel.dmg` for Intel Macs
-     (requires macOS 13 Ventura or newer).
+   - `…_macOS_AppleSilicon.dmg` for Apple Silicon (M1 or newer).
+   - `…_macOS_Intel.dmg` for Intel Macs (macOS 13 Ventura or newer).
 
-   Not sure which you have?  **Apple menu → About This Mac** — the
-   *Chip* line says "Apple M1/M2/…" on Apple Silicon; Intel Macs show a
-   *Processor* line with "Intel" in it.  Opening the wrong one fails
-   with *"…is not supported on this type of Mac"* (an architecture
-   error, not the security prompt described below — releases before
-   v0.39.0 shipped Apple Silicon only, which is why they refused to
-   open on Intel iMacs).
-2. Open the DMG and drag **Pinball Asset Decryptor** to your
-   `/Applications` folder.
-3. **First-launch security override** — required because the app is
-   ad-hoc signed (no Apple Developer ID).  Try to open the app once;
-   macOS will refuse with *"Apple could not verify Pinball Asset
-   Decryptor is free of malware…"*.  Then:
+   Not sure? **Apple menu → About This Mac**: a *Chip* line saying "Apple
+   M…" is Apple Silicon. The wrong one says *"…is not supported on this
+   type of Mac"*.
+2. Open the DMG and drag **Pinball Asset Decryptor** to `/Applications`.
+3. **Allow it once.** The app is ad-hoc signed (no Apple Developer ID), so
+   the first open is refused with *"Apple could not verify…"*. Then:
    - Open **System Settings → Privacy & Security**.
-   - Scroll down to the **Security** section.  You'll see a line that
-     says *"Pinball Asset Decryptor was blocked to protect your Mac."*
-   - Click **Open Anyway** next to it.  Confirm with your password /
-     Touch ID.
-   - macOS will pop one more dialog asking if you're sure — click
-     **Open**.
-4. The app now launches and remembers the override; subsequent launches
-   open without prompting.
+   - Under **Security**, click **Open Anyway** beside *"Pinball Asset
+     Decryptor was blocked…"*, and confirm.
+   - Click **Open** in the last dialog.
 
-**You only do this once, for the first install.**  From v0.115.0 the app
-updates itself: the update banner's **Install update** button downloads
-the disk image, replaces the app in place and restarts it, with no
-security prompt at any point.  That is not a bypass — the "could not
-verify" wall comes from `com.apple.quarantine`, which is set by whatever
-*downloads* a file.  A browser sets it; the app fetching its own update
-does not, so there is nothing to override.  Updating by downloading the
-DMG in a browser still goes through step 3 above.
+You only do this once. Later versions arrive through the app's own
+**Install update**, with no security prompt (see [Auto-update](#auto-update)).
 
-**If the app still bounces in the Dock and never appears** after the
-override, the quarantine attribute didn't get cleared — strip it
-manually in Terminal:
+**Still bouncing in the Dock and never opening?** Clear the quarantine flag
+in Terminal, then open the app again:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Pinball Asset Decryptor.app"
 ```
 
-Then double-click the app again.  (This is rare but happens on some
-Sonoma / Sequoia setups where Gatekeeper's "Allow Anyway" click doesn't
-fully drop the extended attribute.)
+**Docker** is needed on a Mac for two things:
 
-For **Spooky** and **JJP** Clonezilla extraction you'll also need
-[Docker Desktop](https://www.docker.com/products/docker-desktop/) —
-the app builds and uses an ephemeral container for partclone / debugfs
-on those flows.  The **Stern Emulate** tab needs it too on macOS, for a
-different reason: the game is a Linux program, and a container is how a
-Mac runs one.  You don't have to install it by hand there: the Emulate
-tab's **Set up emulator…** button installs a container engine with
-whichever of Homebrew or MacPorts you already have and starts it, in the
-app, with every line in the log pane — which is also the answer when
-Docker Desktop won't install on your version of macOS.  Any of Docker
-Desktop, OrbStack, Rancher Desktop or Colima will do, and the app looks
-for the `docker` command in each of their own locations as well as on
-PATH.  The other manufacturers (PB, BOF, CGC, Williams)
-run without Docker.  Docker is a macOS requirement only — emulation
-goes through WSL on Windows and runs natively on Linux.
+- **Spooky and JJP** Clonezilla extraction, which runs partclone and
+  debugfs in a container.
+- **The Stern Emulate tab**, because the game is a Linux program. Its **Set
+  up emulator…** button installs a container engine with Homebrew or
+  MacPorts for you.
+
+Docker Desktop, OrbStack, Rancher Desktop or Colima all work. Every other
+manufacturer runs without Docker, and Windows and Linux never need it.
 
 ## Linux
 
-Download the latest `Pinball_Asset_Decryptor_v*_Linux_x86_64.AppImage`
-from the [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases),
-mark it executable, and run it:
+1. Download the latest `Pinball_Asset_Decryptor_v*_Linux_x86_64.AppImage`
+   from the [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases),
+   mark it executable and run it:
 
-```bash
-chmod +x Pinball_Asset_Decryptor_v*_Linux_x86_64.AppImage
-./Pinball_Asset_Decryptor_v*_Linux_x86_64.AppImage
-```
+   ```bash
+   chmod +x Pinball_Asset_Decryptor_v*_Linux_x86_64.AppImage
+   ./Pinball_Asset_Decryptor_v*_Linux_x86_64.AppImage
+   ```
+2. Press **Install Missing** in the prerequisites row (or run
+   [installer/install_prerequisites_linux.sh](../../installer/install_prerequisites_linux.sh)).
+   It asks which manufacturers you use; **a** picks them all.
 
-After install, run **Install Missing** from the prereqs row (or run
-[installer/install_prerequisites_linux.sh](../../installer/install_prerequisites_linux.sh)
-directly) — it asks which manufacturers you'll actually use and installs
-only the apt packages those plugins need (see
-[Per-manufacturer prerequisites](#per-manufacturer-prerequisites) below).
+- **Package managers:** apt (Debian, Ubuntu) and pacman (Arch, Omarchy,
+  CachyOS, EndeavourOS, Manjaro). On Arch it runs `pacman -Syu --needed`,
+  a full update first.
+- **A package apt refuses** doesn't stop the rest: they go on one at a
+  time, and the refused one is named with an offer to try the app's repair.
+- **Another distro?** Install the packages by hand from the table below;
+  the script prints both spellings when it finds neither manager.
+- **Run the app as yourself**, not with `sudo`.
 
-From v0.184.2 the AppImage carries that script itself, so **Install
-Missing** works from a downloaded AppImage and not only from a source
-checkout. In the same pass: **'a' for all** really does install every
-manufacturer's packages, Stern's included (the picker used to stop at the
-five manufacturers the menu had when it was written, so the Spike 2
-emulator's `qemu-user-static` was skipped without a word, and an
-unrecognised number is now named instead of dropped); one package apt
-cannot get no longer takes the whole batch down with it, since the batch
-falls back to installing one at a time; running the script as root works
-instead of failing on every install; and anything apt still refuses is
-named, with the offer to try the app's own repair (index refresh, the
-`universe` component, or a single dependency-free package fetched from a
-release that publishes it).
+### Arch package names
 
-The installer speaks **apt** (Debian / Ubuntu) and, from v0.187.1,
-**pacman** (Arch and its spins: Omarchy, CachyOS, EndeavourOS, Manjaro).
-A user reported the app
-running without a fault on Omarchy from source, having translated the
-package names by hand; that translation is now the installer's job, so
-**Install Missing** works there too. On Arch the install is
-`pacman -Syu --needed`, a full system update first, because pacman does
-not install into a stale system. The apt names in the
-[per-manufacturer table](#per-manufacturer-prerequisites) map to Arch as
-follows; everything not listed is spelled the same:
+Everything not listed is spelled the same as on apt.
 
 | apt | Arch |
 |---|---|
@@ -288,22 +142,13 @@ follows; everything not listed is spelled the same:
 | xvfb | xorg-server-xvfb |
 | webp | libwebp |
 | xorriso | libisoburn |
-| xxd | tinyxxd, skipped when vim already provides `xxd` (the two conflict) |
-| gcc + libc6-dev | gcc (Arch's glibc ships its headers) |
+| xxd | tinyxxd (skipped when vim already provides `xxd`) |
+| gcc + libc6-dev | gcc |
 | python3-gi | python-gobject |
 | gir1.2-webkit2-4.1 | webkit2gtk-4.1 |
-| qemu-user-static | qemu-user-static + qemu-user-static-binfmt, which registers the ARM handler with the F flag the emulator needs, in the same transaction |
-| busybox-static | busybox (Arch's is static) |
-| gcc-arm-linux-gnueabihf | **not in the repositories.** AUR `arm-linux-gnueabihf-gcc` (or `arm-linux-gnueabihf-gcc-bin`, prebuilt). The installer names it rather than failing on it; only the Spike 2 emulator needs it |
-
-The prerequisite strip's hover hints and the Emulate tab's "run this"
-advice are spelled for pacman on such a machine as well, and the CGC
-transcribe step's pip install survives Arch's externally-managed Python by
-installing into your user site.
-
-On any other distro, install the equivalent packages by hand using the
-table in that section; the script prints both spellings when it finds
-neither package manager.
+| qemu-user-static | qemu-user-static + qemu-user-static-binfmt |
+| busybox-static | busybox |
+| gcc-arm-linux-gnueabihf | Not in the repositories: AUR `arm-linux-gnueabihf-gcc` (or `-bin`). Only the Spike 2 emulator needs it. |
 
 ## From source
 
@@ -311,100 +156,73 @@ See [Development](../development.md#running-from-source).
 
 ## Per-manufacturer prerequisites
 
-Different plugins need different runtime tools. The prerequisite installer
-lets you pick which manufacturers you care about and installs only what
-those plugins need.
+The prerequisite installer installs only what the manufacturers you pick
+need. On Linux both tool columns are plain packages, installed together.
 
-| Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt (Arch names: see [Linux](#linux)) | Other |
+| Manufacturer | Windows | WSL (Ubuntu) / Linux | Other |
 |---|---|---|---|
-| Barrels of Fun | – | gnupg, tar, curl, unzip, xvfb, webp | **GDRE Tools** — only required for a pack without a Godot 4 file directory (a Godot 3 pack); every current build (Labyrinth, Dune, Winchester) is unpacked and repacked by the bundled native extractor from the pack's own directory.  Install Prerequisites auto-downloads GDRE from [GDRETools/gdsdecomp](https://github.com/GDRETools/gdsdecomp/releases) regardless so older `.fun` files still work; on a Mac nothing installs it and nothing current needs it, and an old pack there stops with a message rather than an empty `pck/`.  **macOS** runs gpg and tar on the Mac itself, so both are probed there (they used to pass as "n/a", and a Mac without GnuPG only found out at "bash: gpg: command not found" under an Extract Failed box that blamed the `.fun` file); a missing gpg goes red on the prerequisites strip and **Install Missing** installs `gnupg` with Homebrew (or MacPorts) in the app's own log.  A MacPorts that was installed for an older macOS refuses every command with "OS platform mismatch"; Install Missing checks for that before asking for a password, and its consent dialog then runs `port migrate` first, in the same one-password run.  A failed install comes back in a box that quotes the package manager's own Error lines. |
-| Chicago Gaming Company | ffmpeg *(optional — Cactus Canyon display-art videos)* | e2fsprogs/debugfs, xxd | `faster-whisper` pip package — auto-installed by Install Prerequisites, drives the **Auto-transcribe samples to callouts.csv** checkbox on the Extract tab (tiny.en model by default, ~75 MB downloaded on first use, runs entirely on CPU; larger/more-accurate models selectable with the **Voice recognition quality** picker beside it). Cactus Canyon DCS audio repack uses the bundled DCSExplorer/DCSEncoder (BSD-3). |
-| Jersey Jack Pinball | **WSL2 itself** *(every JJP flow loop-mounts the ext4 filesystem it pulls out of the `.iso`, so a distro running under WSL 1 — which has no loop devices, ever — can't extract or write at all. It used to pass the prerequisite check and then fail with a bare "mount failed: No such file or directory" minutes into an extract, then re-extract the whole image on the corrupt-image theory and fail the same way. Both the prerequisites strip and the extract path now probe for a real loop device up front and name the fix: `wsl -l -v` to check, `wsl --set-version <name> 2` to convert)* | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard *(the loop-mount tools themselves ship in stock Ubuntu's util-linux/mount)*; the **Emulate** tab additionally needs `xserver-xephyr` (the nested display the game fullscreens into, which is what keeps it off a 4K desktop and out of software rendering) and `xdotool` (the only way to place the game and matrix windows — WSLg windows belong to its compositor, and a Win32 move is not seen by it) | **The purple JJP USB security key**, for the Emulate tab only. The game's code is encrypted with it, so this is not a check that can be skipped, and the keys are **per title**. Windows also needs [usbipd-win](https://github.com/dorssel/usbipd-win) to pass the key through to WSL; the panel attaches it for you once it is installed. The key can also stay in **another PC** that shares it over the network (USB/IP): pick *On another PC* under **Security key** on the Emulate tab and give that PC's name or IP and the key's bus ID ([details](../../tools/jjp_emu/README.md#the-key-on-another-pc-usbip-pad-529)). The emulator rig itself ships with the app in [`tools/jjp_emu`](../../tools/jjp_emu) — see that folder's README. No ROMs or game files are bundled: everything comes from the ISO you supply. |
-| Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* | – |
-| Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard | – |
-| Stern Pinball (Spike 1) | **WSL2 itself**, for the **Emulate** tab only *(a patched ARM `qemu-user` plus a CUSE hardware model, so the game runs unmodified under an emulated version of its own board set)* | **nothing** — the emulator and its device model are binaries *we* build, verify and pin ([`core/payloads.py`](../../pinball_decryptor/core/payloads.py)), and the app installs them for you. Build tools (`ninja-build`, `libglib2.0-dev`, `pkg-config`, `flex`, `bison`, `gcc`, `libfuse3-dev`, `python3-venv`, `wget`, `xz-utils`) are needed **only** if you choose to build from source instead | The rig ships with the app in [`tools/spike1_emu`](../../tools/spike1_emu). The first Start **downloads the exact binaries this app version was tested with** — a static `qemu-arm` and a static `s1hwshim`, each checked against a SHA-256 pinned in the app — so nothing is compiled on your machine and no distro package is needed. **Fix setup** on the Emulate tab does the same on demand, and offers a file picker if the download is blocked (same checksum, different delivery). If you'd rather build from source, install the tools listed here and the rig's preflight (`tools/spike1_emu/prereqs.sh`) names anything still missing all at once, in your own package manager's spelling. From v0.194.0 there is usually no distro to prepare either: **Fix setup** on the Emulate tab installs the app's own pinned Linux (`PAD-Runtime`, a one-time ~370 MB download) and every later run uses it, so WSL2 itself is the only thing you have to have. Start uses that runtime once it is there, but never installs it for you — and `PAD_RUNTIME=0` sends everything back to the machine's own distro. Note that once it is installed **everything** the app runs in Linux runs inside it, both emulator rigs included — what they generate (extractions, card caches, save states) is kept on a separate expandable disk under `LOCALAPPDATA`, attached by name so it is at the same path in every distro, which is what lets the runtime be replaced or removed without destroying a saved game. Right-clicking **Fix setup** deletes that data, the downloaded files, or the runtime itself, one at a time and never while a rig is running. Extract and Write need no WSL at all — `image.bin` is plaintext PCM, decoded and patched directly on the host. |
-| Stern Pinball (Spike 2) | ffmpeg *(Replace Audio/Video preview, spectrograms, video conversion, saving a scene preview as MP4)*; **WSL2 itself** *(full-size video replacement, the blip-free callouts, and different-size file swaps in the Partition Explorer — resizes files inside the card's ext4 partition; without it an oversized clip is crushed into its stock byte slot, a Partition Explorer replacement has to match the original's size exactly, and a build falls back from blip-free to the standard build with the brief original-sound scrap, which the prerequisites strip and Write Complete dialog now say. A distro running under WSL 1 has no loop devices and can't mount card images — it used to pass the prerequisite check and then fail mid-write; both the strip and the write path now probe for a real loop device up front and name the fix: `wsl -l -v` to check, `wsl --set-version <name> 2` to convert)* | – (the loop-mount tools ship in stock Ubuntu's util-linux/mount) | macOS uses e2fsprogs' `debugfs` for the same ext4 file-growth path (`brew install e2fsprogs`); native Linux mounts ext4 itself. The audio engine's pip packages (numpy, unicorn, capstone) are bundled by the installer, and from v0.173.3 so is `sounddevice`, which is the Emulate tab's speaker on Windows — the guest's PCM is played by the bundled Windows Python directly, rather than through WSLg's own audio hop; existing installs add it by re-running Install Prerequisites. The **Emulate** tab additionally needs WSL2; the emulator rig itself ships with the app in [`tools/spike2_emu`](../../tools/spike2_emu), and the prerequisites installer adds what it needs inside the distro (`qemu-user-static`, which Ubuntu 25.10 and 26.04 call `qemu-user-binfmt`, an ARM cross-compiler for the shim, `gcc` + `libc6-dev` for the native renderer, `make` for the boot menu a multi-boot card starts up into, `e2fsprogs`, `fuse3`, and `ffmpeg` — the distro's own, *not* the host ffmpeg in the first column, and a machine can have that one and still lack this one; the game decodes neither its video nor its sound itself, so both go through it and without it the emulator starts, boots and opens its window normally and plays black and silent, which the run now checks for up front and names). It has no setup step: the first run builds the guest rootfs out of the card image you picked (no root), compiles the hardware shim and the GL renderer, and every later run rebuilds any of them whose sources an update has moved on. All three were manual steps that `rootfs.sh` only printed as advice and nothing enforced, so a fresh install failed at whichever one you stopped at, naming a missing ring or binary rather than the step — `env: './padglhost': No such file or directory` (fixed v0.114.0) and `open ring: No such file or directory` (v0.116.0). Every run now also proves the guest can start a program before it starts one and repairs the causes that don't need root, so the last error of that family — `chroot: failed to run command '/bin/sh': No such file or directory` (v0.116.1) — is either fixed for you or explained with the one command that needs your password. A run also survives the machine's GPU driver refusing to load: on WSL the graphics libraries are injected from the Windows side, so a VM left running across a driver or WSL update can be handed a stale set that Linux's own loader then rejects outright — which used to end the run four lines after the window opened, with no guest, no sound and no playfield. The run now says what that loader line means (the cure is restarting WSL, because nothing inside Linux can re-lay those libraries), keeps the failed attempt's log beside the new one, and starts the renderer again on Mesa's software rasteriser, which this rig measures within a few percent of the GPU path anyway; a second death is reported as not being the GPU, and `PAD_GL_SOFTWARE=1` skips the GPU attempt from the start. See that folder's README. Everything else the rig needs is derived from the card at run time, including the virtual playfield's artwork and its switch, coil and insert positions, so no title needs anything added to the repository to work. The rig ships with the app from v0.109.0; before that it was a source-checkout feature, which left anyone who installed the app rather than cloning it with a tab that could only report the rig missing. |
-| Stern Pinball (SAM, Whitestar), Sega, Data East | ffmpeg | – (no WSL needed) | **libpinmame**: Extract runs the game under it (download from [vpinball/pinmame releases](https://github.com/vpinball/pinmame/releases)). SAM reads the code update `.bin` Stern ships for the USB stick, or its `.zip`; the others read MAME ROM zips. No ROMs or game files bundled. |
-| Williams (WPC) | ffmpeg; `faster-whisper` *(optional — Auto-transcribe)* | – (no WSL needed) | **libpinmame** (for the optional PinMAME capture path — download from [vpinball/pinmame releases](https://github.com/vpinball/pinmame/releases)). DCS audio decoding uses a bundled DCSExplorer build (BSD-3). User-supplied MAME ROM zips — no ROMs bundled. |
+| Barrels of Fun | – | gnupg, tar, curl, unzip, xvfb, webp | **GDRE Tools**, only for an old Godot 3 pack. On a Mac, gpg is installed with Homebrew or MacPorts. |
+| Chicago Gaming Company | ffmpeg *(optional: Cactus Canyon art videos)* | e2fsprogs/debugfs, xxd | `faster-whisper` (installed for you) names callouts. |
+| Jersey Jack Pinball | **WSL2** | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard; Emulate adds `xserver-xephyr`, `xdotool` | **The purple JJP USB key** (Emulate only), and [usbipd-win](https://github.com/dorssel/usbipd-win) to hand it to WSL. [Key on another PC](../../tools/jjp_emu/README.md#the-key-on-another-pc-usbip-pad-529). |
+| Pinball Brothers | – | e2fsprogs/debugfs *(only for `.iso` Clonezilla)* | – |
+| Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd, python3-zstandard | – |
+| Stern Spike 1 | **WSL2**, for Emulate only | nothing: the app downloads its own checked emulator | **Fix setup** on the Emulate tab can install the app's own Linux (PAD-Runtime, ~370 MB). |
+| Stern Spike 2 | ffmpeg; **WSL2** for full-size videos, blip-free callouts and resizing files on the card | Emulate: `qemu-user-static` (or `qemu-user-binfmt`), ARM cross-compiler, `gcc` + `libc6-dev`, `make`, `e2fsprogs`, `fuse3`, `ffmpeg` | On a Mac, `brew install e2fsprogs`. See [Emulate](emulate.md#getting-set-up). |
+| Stern SAM / Whitestar, Sega, Data East | ffmpeg | – | **libpinmame** ([vpinball/pinmame releases](https://github.com/vpinball/pinmame/releases)). No ROMs bundled. |
+| Williams (WPC) | ffmpeg; `faster-whisper` *(optional)* | – | **libpinmame**, for the optional capture path. No ROMs bundled. |
 
-On Linux, the Windows host-side tools (gpg, ffmpeg) are just additional
-apt packages alongside the rest — the Linux installer flattens both
-columns into one apt-install set.
+- **WSL 1 won't do.** It has no loop devices, so it can't mount card or
+  game images. The prerequisites strip checks for a real loop device and
+  names the fix (`wsl --set-version <name> 2`).
+- **Without WSL2 on Spike 2,** an oversized clip is squeezed into its slot,
+  a Partition Explorer swap must be the same size, and callouts keep a
+  tiny scrap of the original sound.
+- **Two ffmpegs on Spike 2:** the emulator needs the distro's own ffmpeg,
+  not the Windows one. Without it the game plays with black videos and no
+  sound, and the run says so.
 
-Run [installer/install_prerequisites.ps1](../../installer/install_prerequisites.ps1)
-as Administrator (the Start Menu shortcut does this for you) and pick from
-the manufacturer menu. Re-run any time — anything already installed gets
-skipped.
+### Disk space (Windows)
 
-On Linux, the equivalent script is
-[installer/install_prerequisites_linux.sh](../../installer/install_prerequisites_linux.sh)
-— same per-manufacturer picker, installs the apt packages directly (no
-WSL layer to set up).
+The WSL extracts and the emulators keep gigabytes inside WSL's virtual
+disk. **⚙ > Manage disk space** shows it all.
 
-On macOS, Spooky/JJP Clonezilla flows use Docker Desktop instead of WSL
-(the app builds the container automatically the first time it's needed).
-
-On Windows, the WSL extract paths stage gigabytes inside the WSL virtual
-disk. A **Manage disk space** dialog (⚙ settings menu) lets you see WSL disk usage and
-**resize the WSL disk** (grow or shrink, no admin needed) so a big
-Clonezilla extract doesn't wall on a too-small WSL volume.
-
-From v0.206.0 the same dialog also shows the **Spike 2 emulator's cached cards**, which are the largest thing the app keeps on disk — a cached card is several gigabytes and the emulator holds one per title it has booted. They sit on the emulator's own work disk, so they get their own usage bar beside the WSL and Windows temp ones, and any of them can be deleted from the same list. A deleted card is not lost: it re-copies the next time that card boots, which is why the dialog prices the cached cards separately from the leftover staging beside them.
-
-It also lists what the Emulate tabs keep inside WSL (under `/var/tmp/pad_<rig>`), grouped by maker: unpacked games, last-run folders, and each emulator's own Python and leftovers, each with its size. An emulator that is running right now has its files marked and they cannot be deleted until it stops; **Clean all** skips them. Saved emulator settings and high scores are never listed, so cleaning never loses them.
-
-You do not have to visit it to keep the disk tidy: the app **cleans up by itself**, shortly after it starts and then every half hour while WSL is running (it never starts WSL just to do this). Leftovers from crashed or canceled runs, in WSL and in the Windows temp folder, go once nothing has used them for a day. An emulator's unpacked game, a JJP emulator's restored machine and a cached Spike 2 card go after 30 days unplayed, and the least recently played go first whenever the app's Linux has under 15 GB of room left (counting the Windows drive its virtual disk grows on). Anything in use, saved settings, high scores and save states are never touched. The dialog's **Automatic clean-up** section says what the last run removed, and **Clean up now** runs it at once. It is on by default; untick **Clean up automatically** there to stop the scheduled runs on this PC (Clean up now still works).
+- **Resize the WSL disk** (grow or shrink, no admin needed).
+- **Cached cards** of the Spike 2 emulator, several GB each. Delete any:
+  it re-copies on its next boot.
+- **What each Emulate tab keeps** in WSL, by maker. A running emulator's
+  files can't be deleted until it stops.
+- **Automatic clean-up** (on by default) runs shortly after start and then
+  every half hour while WSL runs. Untick **Clean up automatically** to
+  stop it.
+  - Leftovers of crashed runs go after a day unused.
+  - Unpacked games and cached cards go after 30 days unplayed, oldest
+    first when the app's Linux has under 15 GB free.
+  - Saved settings, high scores and save states are never touched.
 
 ## Auto-update
 
-The app polls the GitHub releases API on launch, and then keeps checking
-while it runs — ⚙ → **Check automatically** picks the gap (only at
-startup, hourly, every 6 hours, or once a day; 6 hours by default), so a
-release published mid-session no longer goes unnoticed until you go
-looking. If a newer release exists it shows a banner at the top of the
-window, puts a ● notification on the ⚙ settings gear, and logs a
-clickable download link. Closing the banner sticks: the repeating check
-won't re-open it for a version you've already waved off (the gear's ●
-and its menu entry still carry the news, and a newer version banners
-normally). The check is non-blocking; the outcome ("update available" /
-"you're on the latest" / "check failed") is always mirrored into the
-log, and a manual check lives in the ⚙ menu.
+The app checks for a new release at launch and then as it runs (⚙ >
+**Check automatically**: at startup, hourly, every 6 hours or daily; 6
+hours by default). A new release shows a banner, a ● on the ⚙ gear and a
+line in the log.
 
-On Windows the banner offers a one-click **Install update**: the app
-downloads the release installer itself and runs it silently, then reopens
-updated. Because the app downloads the file (not a browser), Windows does
-not tag it with the Mark-of-the-Web, so the SmartScreen "Windows
-protected your PC" prompt never appears, and since the app already runs
-elevated there's no UAC prompt either. The whole update is one click with
-no security passes. Installing over the top keeps your `settings.json`,
-and the update never re-runs the prerequisites installer (the app checks
-for missing prerequisites at runtime and offers **Install Missing** if
-any actually are).
-The download is verified against the release asset's SHA-256 before it
-runs. Closing for the update also shuts WSL down, so the updated app starts
-a fresh one: a WSL left running across an update could bring the emulator's
-game window up with no picture until **Restart WSL…** was pressed. If
-anything other than the app's own Linux is running in WSL (Docker Desktop,
-say), WSL is left alone and the log says so.
+| | The banner offers | What happens |
+|---|---|---|
+| Windows | **Install update** | Downloads the installer, checks its SHA-256, installs silently and reopens. No SmartScreen or UAC prompt. |
+| macOS | **Install update** | Downloads the DMG, replaces the app in place and restarts it. No security prompt. |
+| Linux | **Download update** | Saves the new AppImage next to the old one (or in `~/Downloads`), makes it executable and offers to start it. The old one is kept. |
 
-On Linux the banner offers **Download update**, which fetches the new
-AppImage itself rather than handing the release page to a browser. From
-inside an AppImage a browser handoff is unreliable — the opener inherits
-the bundle's environment and can fail to start at all — so the *Download*
-button could look completely dead. Fetching the file needs no browser.
-The new AppImage lands next to the one you're running (or in
-`~/Downloads` if that folder is read-only), is marked executable, and the
-app offers to start it and close itself. Nothing is installed and nothing
-is overwritten: the version you were running stays exactly where it is,
-so you can delete it whenever you're happy with the new one.
+- **No security prompts,** because the app downloads the file itself:
+  only a browser download gets marked as "from the internet".
+- **Your settings are kept**, and the prerequisites installer is not run
+  again.
+- **Closing for an update shuts WSL down,** so the new version starts
+  fresh. If something else runs in WSL (Docker Desktop, say), WSL is left
+  alone.
+- **Closing the banner** keeps it closed for that version. A manual check
+  is in the ⚙ menu.
 
-macOS keeps the plain *Download* button that opens the release page —
-`open` isn't affected by the bundle environment, and a .dmg still has to
-be mounted and dragged by hand, so downloading it for you would save
-nothing.
-
-The release tag format is `vMAJOR.MINOR.PATCH`; see
-[core/updater.py](../../pinball_decryptor/core/updater.py) for the
-parser. The current shipped version is whatever
-[`pinball_decryptor/__init__.py`](../../pinball_decryptor/__init__.py)
-declares — `__version__` is the single source of truth.
+The release tag format is `vMAJOR.MINOR.PATCH`, parsed in
+[core/updater.py](../../pinball_decryptor/core/updater.py). The version is
+whatever [`pinball_decryptor/__init__.py`](../../pinball_decryptor/__init__.py)
+declares in `__version__`.

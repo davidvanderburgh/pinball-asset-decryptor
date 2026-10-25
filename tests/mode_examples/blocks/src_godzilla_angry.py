@@ -655,7 +655,7 @@ DESK = [
     ("with no lock the trail goes cold", _FILL + ["shot", BD, "secs", PLACE_S[0] + 2] + _shots(BD) + ["secs", 4],
      ["END (time ran out)", "Hud_Title: GODZILLA ANGRY TOTAL", "Hud_Line: LOCKS KEPT FOR THE TRAIL 0",
       # again: the lock lit
-      "show Trail cold", "Hud_Line: LOCK IS LIT: SHOOT THE GODZILLA TARGET", "END lamps held 1"]),
+      "show Trail cold", "Hud_Line: LOCK IS LIT: SHOOT THE GODZILLA TARGET", "END lamps held 21"]),     # PAD-707: still running, every shot insert held (dark or its own)
     # YOKKAICHI's 40 s has run to about 11 when the Left ramp is made
     ("a lit shot puts the clock back to fifteen", _START + _shots(GT) + ["secs", 30] + _shots(LR) + ["secs", 1],
      ["Hud_Award: YOKKAICHI", "Hud_AwardSub: 1,000,000", "Hud_Timer_Num: 11", "Hud_Timer_Num: 15"]),

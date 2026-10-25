@@ -2,408 +2,441 @@
 
 [← Back to the README](../../README.md)
 
-What the app can do for each manufacturer's machines, with the formats
-it reads. The short version is the table in the README; this page is
-the full detail.
+What the app can do for each manufacturer's machines, and the files it
+reads. The README has the short table; this page has the detail. How
+each tab works is in [Using the app](using-the-app.md), [Emulate](emulate.md)
+and [Multi-boot cards](multi-boot.md).
 
 ## American Pinball
 
 - **Games:** 6 (Houdini, Oktoberfest, Hot Wheels, Legends of Valhalla, Galactic Tank Force, Barry-O's BBQ)
 - **Reads:** `.pkg` (AES-256-CBC encrypted ZIP)
+- **Tabs:** Extract, Write, Replace Audio, Replace Video, Emulate
 
-Extract, Write, Replace Audio, Replace Video, **Emulate** (the **Emulate AP** tab plays a title from its `.pkg` on this PC, Legends of Valhalla first, with a virtual playfield of lights and switches) — the P-ROC / pyprocgame game tree ships as an AES-256-CBC ZIP behind an `[8B size][16B IV]` header (the `pkgprocess` container, shared lineage with Spooky). A single **static key** — recovered from `PACKAGE_SIGNING_KEY` in `/usr/bin/pkgprocess` on the Houdini / Oktoberfest / Hot Wheels Clonezilla images — decrypts every title across 2020-2024, so Write re-zips the modified tree and re-encrypts with the same key. Clonezilla `.iso` extraction (partclone ext4) is planned. See [docs/AP_PKG_RE.md](../../docs/AP_PKG_RE.md).
+- **One key opens every title.** The game tree is an encrypted ZIP behind
+  a small header, and a single static key decrypts every title from 2020
+  to 2024. Write re-zips the changed tree and encrypts it the same way.
+- **Emulate AP** plays a title from its `.pkg` on this PC (Legends of
+  Valhalla first), with a virtual playfield of lights and switches.
+- **Planned:** extracting from the Clonezilla `.iso`.
+- Format notes: [docs/AP_PKG_RE.md](../../docs/AP_PKG_RE.md).
 
 ## Barrels of Fun
 
 - **Games:** 4 (Labyrinth, Dune, Winchester, Bon Jovi)
 - **Reads:** `.fun`
+- **Tabs:** Extract, Write, Mod Pack, Replace Audio, Replace Video, Emulate, Multi-boot
 
-Extract, Write, Mod Pack, Replace Audio, Replace Video, **Emulate** (the **Emulate BoF** tab plays a Dune, Winchester or Labyrinth `.fun` on this PC, with the cabinet switches in their own window), **Multi-boot** (Labyrinth: the stock `.fun` and other builds become one update with a boot menu at power-up - see [Multi-boot](multi-boot.md)) — see the [Barrels of Fun plugin](#barrels-of-fun-plugin) section for the full workflow. **Bon Jovi** (from v1.63.0) is **extract-only** for now: its `.fun` is a signed systemd disk image rather than the GPG tarball the other three use, so the app unwraps the GPT + EROFS container to the game binary, reads its renamed Godot 4.7 PCK natively, and decodes the assets (audio, images, video, fonts) to view or reuse — but Write and Emulate are not available for it, because the image is vendor-signed and the emulator has no hardware profile yet; the Extract, Image Info, Write and Emulate surfaces say so, and Image Info explains how a Bon Jovi owner can help unlock both with a drive image from a machine. Native extractor for every current build: the pack's own **Godot 4 file directory** is read first (format v3 on Dune and Winchester, format v2 on Labyrinth's Godot 4.4 pack), and the **custom May 2026+ Godot PCK** variant (RSCC Zstd container + GBOF anti-tooling magic) is handled natively too, so no GDRE Tools is needed; only a Godot 3 pack would still go to GDRE, and an extract that could not unpack now fails and says why instead of reporting success over an empty `pck/`.  Imported binaries are auto-decoded into editable formats under `pck/_EDITABLE ASSETS/` — `audio/` (`.wav`), `images/` (`.webp`), `video/` (`.ogv`), `fonts/` (`.ttf`/`.otf`) — so you can preview / play / edit them in standard tools and the Write pipeline re-encodes your edits back into the Godot-format binaries automatically (`.wav` → `.sample`, `.webp`/`.png` → `.ctex`; editable `.ogg` and font edits don't round-trip yet and are reported as skipped rather than shipped).  Video is separate: BOF stores its ~300 mode clips as plain Ogg Theora entries at `pck/assets/videos/`, and the Replace Video tab edits those in place.  Extraction is driven by the PCK's **own file directory** (AES-decrypted first on Dune) rather than by guessing file boundaries from the layout, so every one of the 5,296 entries lands byte-exact and is verified against the MD5 the directory records — which is also what lets a replacement of *any* size repack correctly, since the directory's absolute offsets are rewritten to match.  The Replace Audio tab carries a per-track **Loop** toggle (defaulted on for `*LOOP*`-named mode-music tracks) that bakes a forward-loop flag into the rebuilt audio so a replacement loops to fill its mode in-game instead of going silent partway through.  The Write tab shows a **Modified Files Preview** tree (MD5-based, catches rename swaps that mtime would miss — and lists any staged Replace Audio / Video swaps as *Pending*) so you can see exactly what's about to ship before clicking *Build update*.  Write also stamps the package with an **update version date** one day past the installed code (shown in an editable *Update version* field — leave it on *Auto*, or override it to force-install, e.g. to put official code back over a higher-dated mod) so the machine accepts the update instead of logging "no new code".
+- **Needed for recent firmware.** From the April 2026 firmware (Winchester
+  4/29, Dune 5/13) BOF ships a custom Godot pack no public extractor reads,
+  GDRE Tools included. The app reads it natively.
+- **Emulate BoF** plays Dune, Winchester or Labyrinth on this PC, with the
+  cabinet switches in their own window.
+- **Multi-boot** (Labyrinth): the stock `.fun` and other builds become one
+  update with a boot menu. See [Multi-boot cards](multi-boot.md).
+- **Bon Jovi is extract-only for now.** Its `.fun` is a vendor-signed disk
+  image, so the app can read every asset but can't build an update or
+  emulate it yet. Image Info says how an owner could help; notes in
+  [docs/plans/bonjovi.md](../../docs/plans/bonjovi.md).
+
+### What Extract does
+
+- Decrypts the `.fun`, pulls out the Godot pack and reads its own file
+  directory, so every entry lands byte-exact and is checked against its
+  MD5.
+- Decodes the game's assets into normal files: QOA audio to WAV, textures
+  to WebP, fonts out of their Zstd container.
+- Lays the game's own tree out under `pck/`, plus friendly copies of the
+  imported assets under `pck/_EDITABLE ASSETS/` (`audio/`, `images/`,
+  `video/`, `fonts/`).
+- No GDRE Tools needed for any current build; only an old Godot 3 pack
+  still goes to GDRE.
+
+### Editing
+
+- **Audio, textures, fonts:** edit the copies under `pck/_EDITABLE
+  ASSETS/`. Keep each file's name: the 6-character hash in
+  `title_card-7787d7.webp` pairs it back to its Godot file.
+- **Video and other plain files** sit at their real path under `pck/`
+  (videos in `pck/assets/videos/<mode>/`). Replace them in place, keeping
+  the name.
+- **Replace Video** lists the ~300 Ogg Theora mode clips (Dune: 297 at
+  1280x720). A replacement is re-encoded to the slot's size and frame
+  rate, and may be any length: Write re-points the pack's offsets.
+- **Loop** on Replace Audio (on by default for `*LOOP*` tracks) makes a
+  replacement loop to fill its mode instead of going silent.
+- **Write** repacks a new `.fun` and dates it a day past the installed
+  code (the editable *Update version* field), so the machine accepts it.
+  **Modified Files** previews what will ship.
+- **Not round-tripped yet:** edited `.ogg` and `.ttf`/`.otf` files, and the
+  compiled scripts and scenes. The build log says so.
 
 ## Chicago Gaming Company
 
 - **Games:** 5 (Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction, Cactus Canyon)
-- **Reads:** `.img` (raw bootable installer disk image; Cactus Canyon ships on a physical microSD master — image the whole card to `.img`)
+- **Reads:** `.img` (the raw bootable installer image; Cactus Canyon ships on a microSD master, so image the whole card to `.img`)
+- **Tabs:** Extract, Write, Mod Pack, Replace Audio
 
-Extract, Write, Mod Pack, Replace Audio. WPC remakes: 1300+ DCS `.wav` samples + ROM. Pulp Fiction: 6 JPS sound banks auto-decoded into ~1,000 `.wav` files and repacked on Write. **Cactus Canyon** (CGC `pin`-engine remake of the 1998 Bally game) decodes and **repacks** three surfaces: the original Williams DCS audio (`s2-s7.rom` ↔ addressable streams via the bundled DCSExplorer/DCSEncoder), CGC's added audio (the encrypted `usb.so` bank ↔ WAVs), and the colour LCD art (the obfuscated `cgc.so` archive ↔ 2044 RGB565 PNGs, including RLE-compressed sprites) — plus an optional pass that renders the art animation sequences to MP4 with a colour dot-matrix shader. Optional **Generate callouts.csv** (Whisper) and **Decode DMD scenes** (WPC remakes) round it out. See [docs/CC_REVISITED_RE.md](../../docs/CC_REVISITED_RE.md).
+The installer `.img` nests three disk images inside each other, with no
+encryption. The app opens all three; you get the game's asset tree.
+
+| Game | What you get |
+|---|---|
+| MM / AFM / MB Remakes | A few hundred `.wav` callouts per game, plus the original WPC ROM and boot bitmaps |
+| Pulp Fiction | 6 sound banks decoded into ~1,000 `.wav` files, repacked on Write ([docs/CGC_BNK_RE.md](../../docs/CGC_BNK_RE.md)) |
+| Cactus Canyon | The Williams DCS sound ROMs, CGC's 756 added sounds and 2,044 colour display pictures, each repacked on Write ([docs/CC_REVISITED_RE.md](../../docs/CC_REVISITED_RE.md)) |
+
+### Options on the Extract and Replace tabs
+
+- **Auto-transcribe samples to callouts.csv** names CGC's numbered sounds
+  (`S0197_C6.wav`) by what they say, with `faster-whisper` on this PC. The
+  CSV is searchable in Excel.
+- **…and rename WAVs using transcripts** renames the files too
+  (`S0197_C6 - Get the troops ready.wav`). Write still puts each one back
+  at the path the game expects.
+- **Auto-name now** names the sounds in an existing project without
+  extracting again. A clip that failed for lack of memory shows as `error`
+  in the CSV, not `non-speech`.
+- **Group duplicates** (Pulp Fiction, Replace Audio) gathers every slot
+  with the same recording under one row. Right-click > **Apply to all
+  copies** replaces them all.
+- **Decode DMD scenes to PNG/MP4** (MM / AFM / MB, experimental) renders
+  the WPC ROM's stills, animations and fonts. They are for viewing only
+  and never written back. Cactus Canyon's art animations render through a
+  colour dot-matrix shader.
+
+### Building and flashing a card
+
+- **Write checks its own build:** it filesystem-checks the game partition
+  and verifies the repacked payload byte for byte before handing you an
+  image.
+- **Build / flash SD card** reads the whole card back after flashing and
+  compares it with the image. **Skip verify** leaves that out for one
+  flash.
+- **Administrator:** a flash asks for it when it starts (UAC on Windows,
+  your password on macOS). On macOS the first flash may also ask for
+  **Full Disk Access**; the message gives the steps.
+- **Card diagnostics…** (Write tab) reads a failed card's install log back
+  off it and checks the payload, read-only. It shows how far the machine's
+  install got, e.g. after a "SHELL ERROR".
+- **Old modded cards:** a card built by app version 0.35 or older can
+  carry the factory's unfinished ext4 journal, which undoes the mod on the
+  machine. The diagnostics flag it; rebuild the card.
 
 ## Data East (classic DMD)
 
 - **Games:** 16 (Lethal Weapon 3, Jurassic Park, Tales from the Crypt, Star Trek 25th Anniversary, Hook, Teenage Mutant Ninja Turtles, Batman, The Who's Tommy, Guns N' Roses, WWF Royal Rumble, etc.)
 - **Reads:** `.zip` (MAME ROM dumps)
+- **Tabs:** Capture (Extract)
 
-**Capture** (libpinmame) — these games store their DMD animations *compressed* in the DMD ROM, decodable only by the game's own firmware, so extraction runs the game in attract mode under PinMAME and records the decoded **4-shade DMD animations + synced audio** as per-scene MP4s (the method the DMD-colorization community uses). No static-decode path — raw ROM bytes hit the compressed regions and decode to noise (see [docs/DE_DMD_RE.md](../../docs/DE_DMD_RE.md)). User-supplied ROMs; none are bundled or redistributed. Requires libpinmame + ffmpeg.
+These games keep their DMD animations compressed in the ROM, readable only
+by the game's own code. So Extract runs the game in attract mode under
+PinMAME and records the 4-shade DMD animations with their sound as one MP4
+per scene.
+
+- Needs libpinmame and ffmpeg. You supply the ROMs; none are bundled.
+- Why there is no static decode: [docs/DE_DMD_RE.md](../../docs/DE_DMD_RE.md).
 
 ## Dutch Pinball
 
 - **Games:** 2 (The Big Lebowski, Alice's Adventures in Wonderland)
-- **Reads:** TBL: `.zip` (full + delta updates); AAIW: `.img` (Clonezilla auto-installer)
+- **Reads:** The Big Lebowski: `.zip` (full + delta updates); Alice: `.img` (Clonezilla auto-installer)
+- **Tabs:** Extract, Write, Apply Delta, Mod Pack, Replace Audio, Replace Video, Emulate
 
-Extract, Write, Apply Delta, Mod Pack, Replace Audio, Replace Video, **Emulate** (the **Emulate DP** tab plays The Big Lebowski or Alice's Adventures in Wonderland from its disk image on this PC) — **unencrypted**. **The Big Lebowski**: plain-zip extraction; the LCD's full-colour video ships as a custom `.cdmd` format the plugin decodes to MP4/PNG (audio auto-synced from the paired `.wav`), with an optional dot-matrix (DMD) display-effect shader. Supply a full image plus the delta(s) you need and Extract **auto-merges** them in version order (remapping onto the base version, validated against each delta's compatible-base list); Write rebuilds an installable update labelled one version newer than the merged version — with a fresh `delta` marker — so the machine's USB update accepts it. **Alice's Adventures in Wonderland**: reconstructs the game SSD from the Clonezilla partclone-v2 + zstd image with a pure-Python reader — fast local 7-Zip path (no WSL needed; WSL fallback). Assets are standard `.mp4` / `.mov` / `.wav` / `.png`; an optional toggle converts the game's ProRes `.mov` videos to playable H.264 MP4.
+- **Unencrypted.** Both games ship plain files.
+- **The Big Lebowski:** give Extract a full image plus the deltas you need
+  and it merges them in version order. Write builds an update one version
+  newer, so the machine's USB update accepts it.
+- **Its colour-DMD video** (`.cdmd`) decodes to MP4/PNG with its sound,
+  with an optional dot-matrix look, and re-encodes back into `.cdmd`.
+- **Alice:** the game disk is rebuilt from the Clonezilla image, with no
+  WSL needed. An option converts its ProRes `.mov` videos to H.264 MP4.
+- **Emulate DP** plays either game from its disk image: see
+  [Emulate](emulate.md#dutch-pinball).
 
 ## Jersey Jack Pinball
 
 - **Games:** 12 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, Sonic the Hedgehog, etc.)
 - **Reads:** `.iso` Clonezilla image, or **directly from the game SSD**
+- **Tabs:** Extract, Write, Mod Pack, Replace Audio, Replace Video, Emulate, Multi-boot
 
-Extract, Write, Mod Pack, Replace Audio, Replace Video, **Emulate** (run the real game on this PC — needs the purple USB security key, which is per title), **Direct-SSD** (read/write the game's physical SSD without an ISO intermediate — auto-discovers the right partition, content-verifies `/jjpe/gen1`, mirrors writes across A/B slots so the change survives the next firmware boot).  A **Build / make USB install stick** button turns a built ISO into a ready-to-use install stick — the stick is formatted FAT32/MBR and the ISO's files are copied onto it, which is the only stick layout a JJP machine can read (the machine boots the Clonezilla live system off the stick's FAT volume and runs JJP's own installer from it, so a raw balenaEtcher/dd-imaged stick fails with *Failed to mount USB stick*).  Tick both halves of its dialog to build the ISO and make the stick in one step; the finished stick goes in a front-cabinet USB slot and the installer starts by itself at power-on — leave the purple security key plugged in, because the installer checks for it before anything else and stops on *Security key not found* without it.  From v0.218.1 the ISO the app builds keeps its long file names (the Joliet tree Windows reads), so the stick maker takes the app's own output: an ISO built by an earlier version carries only shortened ones (`sda3.ext4-ptcl-img.gz.aa` reads as `SDA3_EXT4_PTCL_IMG_GZ.AA`), which the machine's installer never finds, and a stick made from one by hand stops in GRUB on *file '/live/vmlinuz' not found* — so build the ISO again with this version and make the stick from the new ISO.  Extract tab exposes per-category **Graphics / Sounds / File System** filters so you can skip categories you don't care about (and the slow full-filesystem dump is opt-in).  The engine's **shared asset trees** now decrypt as well, into their own top-level `ecoredata/` folder beside `graphics/` and `sound/` — these belong to the JJPE engine rather than to any one title (the sound-test music, the menu and service SFX, the enter-initials and PlayerMenu artwork), so they are identical across every JJP game and are *not* listed in a game's `fl.dat`.  Until now they came out only inside the filesystem dump and only as ciphertext, which is a worse failure than it sounds: an encrypted asset carries no container magic, so `ffprobe` calls it *"Invalid data found"* and every search, media scanner and audio-fingerprint pass skips straight past it — an asset that is plainly on the disc reads as a corrupt file rather than an encrypted one, which is exactly how a piece of music that plays in the machine's own sound test can stay unfindable through a full audit of its assets.  They come out with no dongle, on both the `.iso` and Direct-SSD paths, and they need no extra tick-box (the **File System** filter is unrelated — these are read from the image itself, and only the Graphics / Sounds filters apply).  They replace like any other asset through Replace Audio/Video with no new UI, and the two checksums the loader verifies are re-forged from the original file, so a swapped engine asset loads on the machine.  The Replace Audio tab carries a per-track **Full length** toggle — JJP trims every replacement to its original slot length by default, but ticking Full keeps a longer clip (best for a cue nothing plays over, e.g. the end-of-game track before attract); the file validates and boots at any length since `fl.dat` has no size field and CRCs are re-forged.  Decryption runs in parallel across all CPU cores (and checksums are computed during decrypt), so a full extract finishes several times faster.  Sonic-era images — JJP's rebuilt engine, which re-keyed the asset cipher, scrambled the first 128 bytes of every file and padded both ends of it — **extract and write back with no dongle at all**; the app recognises the scheme from the bytes on the image, so every older title takes exactly the path it always did. Replacements on these titles have to keep their original byte size: the game reads each asset's padding out of `fl.dat`, which this generation encrypts with the dongle, so the padding can't be rewritten. Every asset type is refitted to that size for you, each using a hole its own format already carries for the purpose, so hitting the byte count costs nothing: a PNG takes the slack in a metadata chunk (changing no pixel), a WAV is spliced into the original's own container, and a **video** clip takes it in an EBML `Void` (WebM/MKV) or a `free` box (MP4/MOV) — a clip at or under the slot's size is padded with **no re-encode at all**, so every frame is kept, and a larger one is encoded straight down to the slot's budget in a single pass (the budget is handed to the conversion the clip already goes through, so it is never encoded twice over) and then padded onto the exact figure. Only `.ogv` and `.avi` have no such element: a clip in one of those that isn't already the slot's exact byte count is refused, naming the count to hit, and the original is left on the card rather than written as a file the game can't load. Everything else is handled for you, including re-forging the checksum the game verifies on load. An advanced **"Decrypt using the game's HASP dongle"** checkbox remains the escape hatch for a brand-new title whose asset encryption isn't reverse-engineered yet: with the game's matching Sentinel/HASP dongle plugged in, it runs the game under a shim that drives the game's *own* decryption, so the assets come out regardless of how the cipher changed (Windows/WSL only — each title needs its own dongle).  When used, it also drops a small `crypto_capture` file in the output that a developer can use to add dongle-free support for everyone.  The shim no longer depends on the game exporting its crypto under the exact names older titles used: it resolves them across everything the game has loaded, so a rebuilt engine that merely renamed them still decrypts.  A title that exports no crypto at all (JJP's newest protection generation, where the routines stay internal to the licensing envelope) can't be driven that way — so rather than fail with a misleading "check your dongle", the run says the dongle *did* work and saves a `jjp_diagnostics` archive to the output folder: the symbol census, the module map and the game's own decrypted code pulled out of the live process, which is what a developer needs to add that title.  Sending that file is the whole ask; a dongle session is hard to arrange and it no longer ends empty-handed — that archive is exactly how Sonic's dongle-free support was worked out, from a single run on one owner's machine. From v0.216.1 the **Multi-boot tab** takes two JJP install ISOs of the same game code and builds one **multi-boot install stick** with a boot menu the machine draws itself (flippers choose, START boots; the machine's volume buttons and the Action button work); its stick dialog can also install straight onto the game's SSD in a dock, or, on a disk that already holds the install, replace only the boot menu or only one image, with the settings and scores kept.
+- **No dongle needed** to extract or write, on every title including the
+  Sonic-era engine. The app recognises each title's scheme from the image.
+- **Direct-SSD** reads and writes the game's own SSD with no ISO in
+  between. Writes go to both A/B slots, so the change survives the next
+  boot.
+- **Extract filters:** Graphics, Sounds and File System (the slow full
+  dump is opt-in). Extraction runs on every CPU core.
+- **Shared engine assets** (sound-test music, menu sounds, the initials
+  screen art) come out decrypted in their own `ecoredata/` folder, and
+  replace like any other asset.
+- **Emulate** runs the real game on this PC with the game's purple USB
+  key: see [Emulate](emulate.md#jersey-jack-pinball).
+- **Multi-boot:** two install ISOs of the same game code become one
+  install stick with a boot menu. See [Multi-boot cards](multi-boot.md).
+
+### Replacing assets
+
+- **Older titles:** a replacement may be any length. Replace Audio's
+  **Full length** keeps a longer clip whole; otherwise it is trimmed to
+  its slot.
+- **Sonic-era titles:** a replacement must keep its original byte size,
+  and the app fits it for you. A PNG or WAV takes the slack in its own
+  file; a video is padded with no re-encode, or encoded down to fit first.
+- **`.ogv` and `.avi`** clips can't be padded, so one that isn't the
+  slot's exact size is refused, naming the size to hit.
+- **Checksums** the game checks on load are re-made for you.
+
+### Getting it onto the machine
+
+- **Build / make USB install stick…** formats a stick FAT32 and copies the
+  ISO's files on: the only stick a JJP machine reads. An Etcher or `dd`
+  stick fails with *Failed to mount USB stick*.
+- **Leave the purple key in** while it installs, or the installer stops on
+  *Security key not found*.
+- **Onto the game's SSD:** the same dialog can write the install straight
+  onto the SSD in a dock on this PC.
+- **ISOs built by app version 0.218.0 or older** carry short file names
+  the installer can't find. Build the ISO again before making a stick.
+
+### A brand-new title
+
+The advanced **Decrypt using the game's HASP dongle** box runs the game's
+own decryption with its dongle plugged in (Windows/WSL only). It also saves
+a `crypto_capture` file a developer can use to add dongle-free support.
+
+If the game hides its crypto entirely, the run saves a `jjp_diagnostics`
+archive instead. Sending that file is how a new title gets added; it is how
+Sonic's support was worked out.
 
 ## Pinball Brothers
 
 - **Games:** 4 (ABBA, Alien, Queen, Predator)
 - **Reads:** `.upd`, `.iso` (Clonezilla)
+- **Tabs:** Extract, Write, Apply Delta, Mod Pack, Replace Audio, Replace Video, Emulate
 
-Extract, Write, Apply Delta, Mod Pack, Replace Audio, Replace Video, **Emulate** (the **Emulate PB** tab plays Predator, Alien and ABBA from their files on this PC, with a virtual switch window; Queen is not supported yet)
+**Emulate PB** plays Predator, Alien and ABBA from their files on this PC,
+with a virtual switch window. Queen is not supported yet.
 
 ## Sega (Whitestar DMD)
 
 - **Games:** 18 (Apollo 13, GoldenEye, Twister, Independence Day, Space Jam, The Lost World, The X-Files, Starship Troopers, Godzilla, South Park, Star Wars Trilogy, plus the Sega-on-Data-East-hardware titles Maverick, Frankenstein, Baywatch, Batman Forever)
 - **Reads:** `.zip` (MAME ROM dumps)
+- **Tabs:** Capture (Extract)
 
-**Capture** (libpinmame) — same as Data East. Sega's classic DMD games (1994–99, the Whitestar platform) store their animations compressed in the ROM, so extraction runs the game in attract mode under PinMAME and records the decoded DMD animations + synced audio as per-scene MP4s. User-supplied ROMs; none bundled or redistributed. Requires libpinmame + ffmpeg.
+The same as Data East: the 1994–99 games keep their animations compressed
+in the ROM, so Extract records them under PinMAME as per-scene MP4s with
+sound. Needs libpinmame and ffmpeg; you supply the ROMs.
 
 ## Spooky Pinball
 
 - **Games:** 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.)
 - **Reads:** `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip`
+- **Tabs:** Extract, Write, Mod Pack, Replace Audio, Replace Video, Emulate
 
-Extract, Write, Mod Pack, Replace Audio, Replace Video (every video the game ships loose in its own tree, whatever the container — Halloween alone carries 242 `.webm`; the engine derivatives Extract generates are scoped out, since nothing writes those back), **Emulate** (the **Emulate Spooky** tab boots a title from its package on this PC to attract mode (Beetlejuice, Scooby-Doo, Texas Chainsaw Massacre, Evil Dead, Looney Tunes, Halloween, Ultraman, and the P-ROC titles Rick and Morty and Alice Cooper's Nightmare Castle from their game-code `.pkg`) and plays it with a virtual playfield of switches, live Volume and Mute; the DMD titles Jetsons, Domino's Spectacular Pinball Adventure and Rob Zombie's Spookshow International run from their update zip in a window of their own - the dot-matrix display, every switch, the balls and the sound - on the app's own Python, without WSL. America's Most Haunted cannot run: its update carries the display card only, not the game program)
+- **Replace Video** lists every video the game ships in its own tree, in
+  any container (Halloween alone has 242 `.webm`).
+- **Emulate Spooky** boots a title from its package to attract, with a
+  virtual playfield, Volume and Mute: Beetlejuice, Scooby-Doo, Texas
+  Chainsaw Massacre, Evil Dead, Looney Tunes, Halloween, Ultraman, Rick and
+  Morty and Alice Cooper's Nightmare Castle.
+- **The DMD titles** (Jetsons, Domino's Spectacular Pinball Adventure, Rob
+  Zombie's Spookshow International) run from their update zip in a window
+  of their own, without WSL.
+- **America's Most Haunted** can't run: its update carries only the
+  display card, not the game program.
+- **Total Nuclear Annihilation** can't be decrypted: its key is unknown.
 
 ## Stern Pinball (Spike 2)
 
 - **Games:** 26 (Godzilla, Jurassic Park, Deadpool, Star Wars, Iron Maiden, Led Zeppelin, James Bond, etc.)
 - **Reads:** raw SD-card `.img` / `.bin` / `.raw`, or **directly from the SD card**
+- **Tabs:** every tab the app has
 
-Extract, Write (with **SD card size**: build a card for a 16 GB or 32 GB SD card, and the games partition where every replaced video and grown sound goes grows to fill it, where a stock 8 GB card can have only a few hundred MB free; the partition table comes out as Stern's own card of that size, and settings and logs move with it unchanged; a build whose assets won't fit is stopped before anything is encoded, and when a bigger SD card size would hold it the app asks whether to build for that size, in one click; **Smaller 16 GB card** builds a 14.82 GB image for the SD cards sold as 16 GB that hold a little less than Stern's 15.49 GB one; **Make the image as small as it can be** cuts the finished image's games partition down to what it holds plus 268 MB free, so the image file is often much smaller than the SD card size, though a card that small may not have room for an on-machine code update), Mod Pack, **One-click Port** (pick one or more STOCK card images — the new firmware version, the other model of the title (Pro ↔ Premium/LE), or both — and each is extracted, given this project's mods, and built into its own modded card, unattended and one after another; the per-card extracts land beside the builds and are reused on the next port, so re-shipping a mod for every variant collapses from four manual walks of Extract → Transfer → Write into one button), Replace Audio, Replace Video, Replace Images, **Color profile** (one correction of every channel's middle shades, color level, strength and shadow lift for the whole display, drawn by the game itself on Spike 2 so pictures, video and the game's own art all change; or a second profile for **individual files** only, baked into the replaced pictures and videos and the pictures and lines of text in Scenes you switch on, per file or all at once, with the game's own art left as Stern made it, and both can be on at once; the Scenes preview shows every picture as the machine's screen will, through a third, preview-only **Machine screen** profile you can adjust (bluer, black and white, and so on) that never reaches the card; starting points include a Black and white one for the black-and-white playfield editions; a drag-to-compare preview; see it in the emulator in one click), **Replace Text**, **Direct-SD**, **Save card as image**, **Partition Explorer** (browse with image/font previews, extract, replace any file at any size, and see which files you've already changed), **Default Settings**, **Compare** (two cards side by side: the game code, the scenes, the images and video, the operator settings and the factory high scores, read from the cards' own stored digests in seconds — and, from v0.162.0, once both cards have been extracted the report also lists the sounds one by one, matched on the audio itself — by content first, from v0.163.0 past the codec's lead-in frame as well, and from v0.164.0 across a whole frame of shift, so neither a single inserted sound, nor a rebuild that repacks the container, nor a build that decodes a sound a frame late reads as a thousand changed ones — with what changed, what merely moved to a new slot, what was added and what was removed, and a double-click to play any of them; every change list is complete, and a **Rows per list** choice (12 / 25 / 50 / 100 / All) sets how much of each you see at once), **Multi-boot** (from v0.184.0: ONE SD card carrying up to 16 complete game images — stock code beside a custom build, or a shelf of them — with a menu at power-up on the machine's own screen: the flippers move the highlight, START boots the choice, a countdown boots the remembered one, from five images up the menu scrolls three at a time with a counter under the cards, and every image runs as it would from its own card; the menu's titles, pictures, animations, music and sounds are yours to set and are previewed in the tab as the machine will draw them; from v0.204.0 one card in the menu can stand for SEVERAL games and boot one of them at random, a different one every power-up — truly random or shuffle (cycle through every game before any of them repeats, remembered across power-ups), with a tick, from v0.224.0, for never the one it booted last — with a picture drawn from the games it rolls between and sounds of its own; a card you already built is read back and edited, and a one-file change to one of its images is written into it in about a minute instead of a rebuild; an opt-in compact layout stores what the images share only once (three TMNT images that filled a 32 GB card fit a 16 GB one) — and from v0.209.0 the card size that layout needs is asked of the builder one size at a time rather than estimated, so a set of images the builder would refuse can no longer be picked, and a set that fits no Stern card says so in the tool's own words, naming the partition that does not fit and the card size the content wants; from v0.209.0 the menu's heading line — SELECT GAME CODE unless you say otherwise — is yours to write or to leave blank, and every sound in the tab (the move click, the confirm stinger, an image's music) has a Play button that plays the file the menu has ready for it, or any WAV you point it at; from v0.210.0 each of those four sound boxes also lists, under its own words, every sound file this menu already uses, by file name and only while the file is on this PC, so a WAV browsed in once anywhere is one click away everywhere; the menu can be loaded straight off the SD card in the reader and written back onto it; and every image on the card boots with its game validator bypassed and its saved validation grades ignored, so a GAME VALIDATION ERROR an earlier card left in the machine cannot latch — proven on a TMNT; and from v0.185.3 the card's menu program is built and installed by the app itself as the first step of every writing run — Build & verify, Apply to card and the in-place update all start there, unpacking the guest file system from the card being built when this machine has none and rebuilding the menu when the app ships newer sources, so a first build on a machine that has never made one no longer stops seconds in with a refusal about a directory nobody had been told to make; and when a step does refuse, the tab says which step and why in its own words instead of pointing at the tool output; and from v0.187.2 Build & verify holds the game and its index to what the validator bypass actually wrote, so a card whose games are still armed finishes clean instead of ending on a FAIL that named those two files on every image; and from v0.197.0 a card that holds more than one game says which one you are editing, before the work rather than after it: a confirmation you can back out of lists every game on the card and marks the one this app reads and writes, the run's log repeats the same list with the partition each game sits on, and Image Info carries it too, so a menu card no longer reads as an ordinary single-game card right up until an hour of replaced assets comes back from the wrong game; the other images and the menu are copied through untouched, so a build still gives you a working multi-boot card with the first image changed), **Emulate** (run any Spike 2 card on your PC: it boots straight to its own attract show with correct video (past the operator Tech Alerts screen, which a real machine only stops on for a technician; a boot with nothing pressed no longer parks there, and a Clear switch alerts button on the playfield window works every safe switch once when you want the machine's CHECK SWITCH audit rows gone), opens a second window for a title's second display when the game has one (a playfield LCD, topper or projector) — from v0.188.0 at the panel size that title's own binary asks for rather than the backbox's, so a topper comes up 1280x800 and a playfield LCD 480x272 instead of every one of them being a 1360x768 box, a topper mounted sideways on the real cabinet is shown turned the same way, a one-screen Home Edition gets its own 800x480 window, and a **Topper** tickbox runs the machine without one at all, keyboard flippers and a whole keyboard legend derived from that title's own switch table, a clickable virtual playfield with live inserts (and from v0.165.0 the older Stern titles light up too, the ones whose boards spoke a lamp dialect this app could not read - on Batman 66 that is six boards and 108 lamps where two boards and 25 dark ones used to be, and from v0.170.0 the titles whose boards are simply numbered differently light up as well, which on James Bond 60th is all 73 playfield inserts and all 16 coils where the artwork used to draw every one of them dark; the view does need a card whose game build ships Stern's own device table, and that is a property of the BUILD rather than of the title — Jaws 1.01 ships none and falls back to the switch list, while Jaws 1.02 ships 439 devices and draws the full playfield; and from v0.172.0 a third kind is handled — a build that ships the table with the DRAWING left out, names and wiring but no coordinates, like Led Zeppelin 1.22, which still draws the switch list but now gets its flippers, its shots and its real switch names from it instead of a matrix of question marks; and from v0.178.0 two more cases draw right: a build whose device table pins a CPU-board switch to a playfield connector no longer loses that board's whole switch list, which on King Kong was every ramp opto, spinner, drop and pit target, and a title's in-scene animations that repaint a compressed texture in place play, so King Kong's theatre curtain opens on the intro film instead of sitting closed for the whole overture; and from v0.179.0 a title whose game code reads its sound banks with a doubleword load that the real machine's kernel quietly fixes up - Led Zeppelin, on every game start - plays instead of dying on the start button, because the emulator now does that fixup itself, and a guest that does die ends the run with a crash report instead of freezing its window; and from v0.180.0 a card whose firmware hands the emulator its switch table by the second of the two routes - every Godzilla 1.16, stock image or retheme - boots and holds its attract show instead of dying about four seconds in, and the report a guest that crashes leaves behind describes the build that actually died rather than reading another title's layout over it), live switch state (left-hold holds a switch closed, right-hold rips a spinner for as long as you hold it) and a one-window control panel down its side (the keyboard reference with live row highlights, the coin-door service buttons drawn as on the real door and clickable, which open the game's own service menus and render them as the machine does, an open/close coin door button, and the ball trough showing each position closed or open in trough order) - the keyboard plays with either window focused - answers the game's own trough eject so the machine serves its own balls (multiball included) and lets you click a trough position to take a ball out or bring one home, and ten named save-state slots per game, and an opt-in that runs your own replaced assets on top of a stock card without building one - the files your edits live in are patched into copies and read over the read-only mount, so trying a sound costs seconds instead of two full-size copies of the card — nothing per-title is hard-coded, every table is derived from the card itself), Auto-name call-outs (Whisper) + Auto-name music (AcoustID). Spike 2 cards are **unencrypted ext4**: video (H.264 `.asset`) and UI images (`.png`) are loose files that extract and patch in place. From v1.33.0 the **Scenes** tab is a WYSIWYG scene editor: it draws each scene the way the machine does, and you can move, resize, tint, hide and re-layer what is in it, or add a picture or a line of text, then write the edits to the card. **In-scene art** also extracts and re-packs now — both the BC3/DXT5 *and* BC1/DXT1 textures Stern bakes into the scene graph: the font/sprite atlases and full-screen LCD background art in `scene.assets`, plus the rendered text banners (song titles like "ROCK AND ROLL", score lines, etc.) embedded directly inside the `.radium` scenes. Each decodes to an editable RGBA PNG (named by its scene-element id + dimensions) and re-encodes back size-neutral; identical glyphs are deduped and an edit is patched into **every** scene that draws it. From v0.217.0 a picture inside a scene (Source *Radium*, not a font atlas) can also **keep its own size**: assign a replacement of a different size and tick *Keep this picture's own size* under the Replace Images preview (both sizes are spelled out beside it) or its box in the list's *Keep size* column, and the build grows the scene to fit it, giving the picture and every sprite that draws it the new width and height. The game draws it at the new size from the same top-left corner, so a longer name banner reaches further right instead of coming out squeezed. That needs an image build rather than a Direct-SD write, and it has run only in the emulator, not yet on a machine. A picture that can't take a new size (a font atlas, a picture nothing in its scene draws by size such as a full-screen background, or any picture on a Direct-SD write) is fitted to its original size instead, exactly as with the box unticked, and the log names it; before v0.220.2 it was dropped from the build and the game kept its stock picture. Also from v0.220.2, unticking the box after a build kept a picture at its own size takes again: every pick is fitted to the pristine original's size, not to the size the earlier build left in the folder, and the note under the preview names that original size. From v0.217.3 a picture is only written where the card being built still holds it: on a card that an earlier build already gave a picture at its own size (or longer text), the records after it have moved, so a picture recorded at the old spot is skipped with one warning per scene rather than written over the scene's own structure, which the game could not read at startup. Growing one picture also no longer changes the recorded size of a different picture of the same size. A replacement scene picture or texture is also premultiplied by its own transparency when the stock art is, which is how the game blends these pictures, so a PNG saved from an ordinary image editor no longer draws bright fringes around soft edges or a solid white bar where its background was transparent. **Font atlases go a step further: Extract slices every character into its own PNG** (`images/scene_textures/glyphs/<atlas>/U+0041_A.png`, rectangles read from the scene's font glyph tables) so you edit single letters instead of hand-measuring a 512×512 atlas in an image editor; on Write each edited glyph is pasted back into its exact rectangle and **only the touched 4×4 texture blocks are re-encoded**, leaving every character you didn't edit bit-identical to stock. A **Fonts window** (the *Fonts…* button on the Replace Images toolbar) goes further still: pick any game font and type your own preview text to see it rendered live from the real glyphs, laid out with the game's own metrics (bearings, baselines, advances — read from the scene files' font tables, including glyphs the packer stored rotated), with pending edits showing immediately — and **import a normal desktop font (TTF/OTF) into a game font**: the app picks one auto-fitted size so every letter fits the space its character has in the atlas, baseline-aligns each letter into its slot, starts the ink color matched to the original (with optional outline), and applies the result as ordinary glyph edits — with a one-click **Revert font** that restores every character from the atlas. Since one typeface is baked at many sizes and each is its own font on the card (TMNT carries 94 entries of a single title face), an import can **fit the same font file into every size of that typeface** in one go instead of ninety-odd repeats by hand. Stern draws its titles TWICE — a black outline instance underneath, from a *separate* outline font — so restyling only the visible letters leaves the old typeface's border around your new ones; the window now names that outline companion and offers to **remove it** with the import, limited to the scenes your font is actually in so the same outline stays put everywhere else. A **Letter width** control draws each letter narrower inside its slot, which is what opens a gap between letters that would otherwise touch (the game's own letter spacing is fixed on the card and an import can't change it); fonts too small to carry a typeface are flagged, an import you fitted but never applied is flagged too, and **Undo** plus **Revert all fonts** step back a whole restyle without re-extracting the card. A companion **Scenes window** lists every scene on the card with the images (in play order), fonts and on-screen text it is built from, and double-click jumps to the matching row on the Images tab, in the Fonts window, or on Replace Text — and the Scenes window steps behind the main one as it does, so you can see where you landed instead of the jump happening on a tab hidden underneath. The same route runs the other way: **Show in Scenes…** on Replace Text opens the scene that draws the selected line with the line picked out and its Text layer selected (a game-program line opens the screen whose text box holds the same words, or the same words but for a closing ! . or ?), right-clicking a video slot opens the scene that plays the clip, and right-clicking a scene in the Fonts window's usage list goes and looks at it (right-click, because clicking that list is how you choose which scenes an import lands in). It also **shows you the scene**: the radium node graph is decoded to a layout — which image each instance draws, where it sits, what its text says, which font and colour, and which nodes are children of which — and composited into a preview from **your own project folder**, so a replaced image or an imported font appears in it. Text comes out at the size the scene draws it and in the font that scene's own line names, which matters more than it sounds: an atlas is master art that each table scales to its own size, Stern bakes one typeface at eight sizes over a single atlas, and most scenes hold several typefaces at once — so a preview that assumed one font at one size per scene rendered whole titles several times too big, with lines overlapping each other and running off the stage. One scene file also holds every screen a mode can put up — its intro, each award, the phase and victory screens — and the machine shows one at a time as the game runs, so a **Screen** picker draws them one at a time under the game's own names (with ◀ ▶ to step through) instead of compositing them into a pile. Scenes that animate play their frames at the frame rate written in the scene itself (it is authored per scene — 12, 24, 30 and 60 all turn up on one card), with a **Speed** control to slow a fast sequence down for a closer look; the scene list sorts on any column, a preview saves out as a PNG — or, for a scene that moves, as an **MP4** (or an animated GIF), which is the whole scene at its own frame rate rather than the first couple of seconds the preview loop holds in memory: the export re-renders the scene frame by frame in the background, with a progress count and a Cancel that removes the part-written file instead of leaving a silently short clip behind (MP4 needs ffmpeg) — and **Rebuild previews** re-reads the layouts off the card in a few seconds without re-extracting — which matters because a full re-extract would overwrite every atlas and glyph slice, and take your font work with it. **Save all previews…** does the whole list in one go — one PNG per scene into a folder you pick, following whatever the Search box is filtering on, so a card's screens can be flipped through in an image viewer instead of a scene at a time; the same button turns into a live Cancel while it runs, closing the window stops it, a name already in the folder is suffixed rather than overwritten, and the caption reports both how many were written and how many could not be drawn. A preview can be laid over a different **backdrop** — white, greys, a checkerboard — instead of the machine's black, which is the only way to look at a black outline or find the edge of a piece of art (the saved PNG/GIF/MP4 matches what you see; black stays the default because black is what the machine draws on). The **outline pass is drawn** too: a Stern title is really two instances — the black border font underneath, then the fill — and the preview keeps that under-pass and lays it beneath the letters (alpha art is composited over the frame, the way the machine must draw it for a black border to show at all), so an outline is finally something you can check in the preview over a light backdrop instead of only on the machine; an existing project picks this up with one **Rebuild previews**, no re-extract. A scene's font list also quotes its sizes in the **Fonts window's own numbers** (the measured ascent + descent of the size that scene draws) rather than the scene file's nominal size id, so the same font can no longer read "83px" in one window and "94px" in the other and send you hunting the font list for a font that was never missing. Right-click anything in a scene to act on it: **blank a font** out of the picture — how an outline or shadow font is removed, scoped to that one scene so the shared atlas keeps its border on the hundreds of screens you never opened — or **recolour a line of text**. Colour is worth spelling out, because it is not a font property at all: the atlases are white ink precisely so the *scene* can multiply them by an RGBA it carries per line, which is why painting an atlas green comes out olive over a gold line and stays invisible over a black one. The Fonts window now says what the scenes tint each font with, has a **Blank font** button of its own, and its **Color** picker works with no font file imported at all — a colour you pick is a setting that follows you down the font list, previewed on whatever font you select, and **Apply** repaints that font's existing letters in it (across every size of the typeface if you want), undoable and revertable like any other glyph edit. A recolour of the *text* is written where the game actually keeps it — a size-neutral patch of the RGBA floats inside the `scene.radium`, alpha left alone so a line that fades in still fades, and applied only to the keyframes still carrying the colour you picked from, since Stern draws every title twice (a black outline under a coloured fill) and repainting both would silently delete the border. The same right-click also **lays the line out**: move it by a pixel offset, change its alignment, or change its font size — per scene, in place and size-neutral, riding the same Write path as a colour. "Font size" is a percentage of the size *that scene* bakes the face at (every scene carries its own copy of the glyph metrics), so shrinking is lossless while enlarging past the master art blurs, and because those metrics are shared by every line the scene draws with the same font, a size change resizes those lines too — the log says which; "Back to the original layout" drops the edit. The **Spine** 2D skeletal-animation rigs Stern embeds in its scenes also export — each scene's original Spine 3.1 skeleton JSON plus an atlas/animation manifest and an `index.json` catalog, written verbatim under `spine/`. **Audio** is the hard part — every sound is packed into `image.bin` and encoded with a per-sample stream cipher whose keystream is produced by the game firmware, so there's **no static key**: the plugin boots the card's own `game_real` firmware in an ARM emulator (unicorn), uses it as an oracle to recover each sound's exact keystream, and inverts it analytically — decode **and** re-encode are bit-exact, mono + stereo, across all 32 codec "scale" variants, with nothing title-specific bundled (a new title works as soon as its card is recognised). Direct-SD reads/writes the physical card through a pure-Python ext4 reader + sector-aligned raw-device I/O. The same raw-device path also goes the other way: **Save card as image…** on the Extract tab's card row copies a whole card, sector for sector, into one `.raw` file — a backup of a stock card before you mod it, or two dumps of one card taken either side of a change made on the machine so the Compare tab can show you what moved. Replacements are **size-neutral** (audio trimmed/padded to the original length; images fit to the original byte size); an oversized **video** instead grows to full size on the card via the Linux filesystem driver (WSL2 on Windows; e2fsprogs' `debugfs` on macOS — `brew install e2fsprogs`), so a replaced attract clip keeps full quality instead of being crushed into its stock byte slot. That full-size copy puts your file on the card byte-for-byte, which is what you want right up until the file isn't something the machine can actually decode — a Matroska container, HEVC, a 10-bit clip, or a resolution the scene never sized a surface for gets far enough for the **sound to play over a black picture**, and nothing said so at build time. Write now checks each clip is a genuine drop-in for the one it replaces (same container, H.264, 8-bit 4:2:0, the slot's own resolution and frame rate) and converts the ones that aren't, saying which and why in the log — so the list's **Convert** column and what Write actually does can no longer disagree. Clips it does convert are encoded to the **stock clip's own H.264 profile and level** rather than to the encoder's default, since the video already on the card is the only proof of what that machine's decoder accepts. A census of 2,251 clips across five titles settles what that means: **every clip Stern ships is H.264, 8-bit 4:2:0** — so a ProRes or HEVC file plays its sound over a black picture no matter how good it looks on a PC — while the profile, the frame size and even whether the clip carries audio all vary *within* one title, and so are read per slot rather than assumed. Right-click any slot and pick **What this slot needs…** to see that slot's exact target — container, codec, profile and level, size, frame rate, audio — with a copyable ffmpeg command that pins only the parts that must match, for anyone who would rather encode their own clips than let the app do it. The **Convert** column tells the two failure modes apart before you build: `✗ needs .mov` for a pick Write would refuse outright, `✗ wrong format` for one it would copy on untouched but the machine can't decode. A slot whose *current* clip is already one of those — a ProRes that went on as-is before the check existed — carries a ⚠ in its Format cell, and selecting the row spells the problem out in a callout under the preview, which also says when an assigned replacement will fix it at the next build (the Format/Audio cells describe the clip in the slot until then). Audio is matched to the slot too — nearly every game clip is silent and the game supplies its own sound, so a replacement that keeps its source's soundtrack gets that soundtrack played over the top; converting now strips it for a silent slot, and a file copied in as-is that carries one is flagged. Preview panes say why a frame can't be shown instead of going black, and a poster still looks past a black frame before reporting that the clip really is black there. Only that sampling sweep can call a whole clip black: scrub onto a fade-in and the pane says just that one frame is dark, and stopping or replaying a clip brings back the representative still rather than the (often black) frame at 0:00. On Write, the card's `.sidx` validation manifest is **regenerated for every changed file** (the keyed HMAC-SHA1 + MD5 digests Stern checks) so a modded card passes the machine's on-boot SD validation instead of erroring out. Write also **neutralizes the game firmware's own self/asset validator**: Stern's `game` binary runs an inlined checksum over its own bytes *and* every protected asset and flags the machine on any change, so a modded card would otherwise raise a **GAME VALIDATION ERROR / UPDATE SD CARD** message plus technician tamper alerts — the Write patches that routine out (it works on any Stern title and edition, and it's noted in the Write log when applied). The routine is found two independent ways — by the inlined CRC32 constants Stern's compiler leaves in it, and, for a build that stopped inlining those, by the routine's measured shape — and the two agree on every card in the 37-card reference library that carries it. **A validator that's there but can't be reached is now a loud failure rather than a silent no-op**: the build log says so at error level and the Write Complete dialog warns that the machine will likely answer with GAME VALIDATION ERROR, so an unrecognised firmware can no longer quietly produce a card that fails on hardware. Absence is only ever reported from positive evidence — two markers that track the routine itself, either of which alone reports it present — which is what separates a title that genuinely ships without the validator (Jaws LE, in both 1.01.0 and 1.02.0, and the only such title of the 37 cards checked) from one the app merely failed to recognise. Re-encoding also preserves the firmware's **master-directory decode chain** — its audio loader folds a slice of each sound's body bytes into the codec parameters of every *later* sound, so a naive re-encode desyncs the chain and the machine locks up on the first sound. Those consumed bytes are reverted to stock, which leaves a ~6 ms scrap of the *original* sound audible at two points inside every replacement (the "blip"). A firmware patch removes it: the Write rebuilds the `game_real` firmware so its boot-time setup reads those bytes from a stashed stock copy, and your replacement then plays cleanly for its whole length. Where that patch *lives* is the whole story. Until v0.94.0 it was placed in the first run of zero bytes in the firmware's data segment carrying no relocation, on the reasoning that such a run must be spare. It isn't — a zero-initialised global has no relocations either, so live storage and dead padding look identical to that rule, and on Elvira's House of Horrors the run it picked was the **node bus board table**: cards built that way boot very slowly, report node board errors and won't start a game. Section headers account for every byte of the data segment on all 17 firmwares checked, so there was never any genuinely unclaimed space to find. The patch now stops looking for space and **makes** it: the cave is appended to `game_real` and mapped by a program header of its own, at an address no segment claims, so nothing can own those bytes because they didn't exist until we wrote them. The cost is that `game_real` is no longer size-neutral, so a blip-free build needs the Linux filesystem driver (same requirement as full-size video replacement) and refreshes the firmware's `.sidx` size as well as its digests. It is **off by default** (since v0.104.0), behind a **Blip-free callouts** checkbox in *Advanced Audio Options* that carries a technical description of exactly what gets patched — see the field record at the end of this paragraph for why. Left off, a build leaves the firmware alone apart from the long-standing 4-byte validator bypass below.  The seed level blip-free needs inside a near-silent slot is a floor, not a preference: the patch skips the master-directory restore, so a near-silent body stays near-silent everywhere, and under that level the codec stops round-tripping it and decodes it as loud garbage.  Ticking the *Anti-pop codec seed* at its default used to replace that floor with a level 20 dB below it, so turning one click mitigation on quietly switched a stronger one off — on the exact settings pair the app hands out by default.  From v0.119.4 the two combine as whichever is stronger: a seed you set louder than the floor is kept as you chose it, and a quieter one no longer lowers it. A Write self-check re-derives all 2000-plus sounds' parameters and aborts if any would drift, and any firmware or host it can't safely patch falls back to the stock-byte restore automatically — and the **Write Complete dialog says which build the card actually got**: blip-free, or standard with the reason why (a fallback used to be visible only as a mid-build log warning, so a Windows host without WSL2 produced scrap-remains cards that looked blip-free), so a card is never tested on hardware under the wrong assumption. And a blip-free build now actually ships the firmware it rebuilt: on hosts that *have* the Linux filesystem driver, the rebuilt `game_real` was being deleted along with the build's scratch space before the driver copied it onto the card, so the card went out with its validation record already rewritten for a firmware that was never written — and, because the blip-free path leaves the validator bypass to ride inside that rebuilt firmware, with no bypass either. The machine answered with GAME VALIDATION ERROR / UPDATE SD CARD. The rebuilt firmware now gets its own scratch directory that outlives the patch computation and is released only once the copy has happened (on every exit path, cancel included), and a prepared file that has gone missing when it's time to copy it is named and raised as an error instead of being dropped without a word. This affected every blip-free build from v0.94.0 through v0.102.2 on hosts with the driver; hosts without it fell back to the standard build and were never affected. Fixing that delivery made v0.102.3 the first release to actually put the rebuilt firmware in front of a machine, and doing so surfaced two faults in the cave's own runtime behaviour, both fixed in v0.102.5 after a field report of a machine rebooting partway through its startup screen: the cave worked out where the audio image sat in memory from the first 512-byte read it saw (on a real machine an unrelated read can arrive first, leaving it redirecting nothing at all), and it acted only on reads of exactly 512 bytes while the firmware computes each window run's length as it goes (so a shorter run passed through un-redirected) — either way the boot-time derive reads the re-encoded bytes the cave exists to hide from it, and that is what makes a machine reboot. The calibrating read is now identified by the card's own contents rather than by call order, redirecting is decided by the file offset alone, and both fixes are pinned by instruction-level tests that drive the emitted patch through the exact sequences that broke it, plus an end-to-end re-derive against a real card where all 2,351 sounds keep valid parameters. The same tester then retested on v0.102.6 and got the identical boot loop, so neither of those faults was the cause and **no card built this way has ever been confirmed to boot** — three deliveries, one machine, three boot loops. The cave is therefore **off by default from v0.104.0**, offered as an experiment rather than shipped as the standard build; the two v0.102.5 fixes are kept, since they are real defects with tests pinning them, but they are no longer evidence about hardware. The same report also shows how little the default gives up: with the patch off, that tester replaced a sound, listened for the blip it exists to remove, and could not hear it. An unbooted firmware patch is a poor trade for an artifact at the audible floor, so it stays off until someone's machine says otherwise. The experiment also turned out to be much smaller than it looked, which is a large part of why no answer ever came back. The cave carries a stock copy of every window it redirects — around a kilobyte per replaced sound — and it had to land within a single ARM branch of the firmware code that reads them; on Led Zeppelin the only free region in reach is a 28 KB gap, so the cave fits **about 27 sounds** and the next unclaimed space sits 64 MB further up. Any real build was therefore too big to place and quietly fell back to the standard build: a card replacing 201 callouts came back "NOT applied", with the brief original-sound scrap still on 179 of them. From v0.127.2 the cave goes out of branch reach when nothing in reach fits — jumping in and returning through absolute addresses rather than a branch — so a full-size blip-free build is buildable on these titles instead of silently downgrading, and a build that already fitted in reach is placed at the same address behind the same instruction as before. From v0.217.2 a blip-free build also works when the card you start from is one an earlier blip-free Write made: the Write recognises its own patch, puts the firmware back the way the game shipped it, and rebuilds the patch with the earlier build's replacements carried along (their stock bytes exist nowhere else on that card), instead of falling back to the standard build with a message blaming the firmware. Separately, a Write whose derive caches have gone cold (they live in the system temp folder, keyed to the card, so a temp clean or an app update clears them) no longer sits silent for the minutes a full re-derive takes: it says why in the log and drives the progress bar, so a cold-cache Write looks slow instead of frozen — it costs time, not correctness, and needs no matching of app versions. The Write itself now remembers its own work between builds too: the change scan keeps a size+mtime hash cache (shared with the mod-pack export) so re-checksumming a big mod costs seconds instead of minutes, and every re-encoded sound's bytes are kept per project and replayed on the next build while that sound's WAV — and everything its encode depends on — is unchanged, so iterating on one asset no longer re-encodes the other hundred (on a 527-video, 123-sound retheme the rebuild dropped from 9½ to 5 minutes, the whole audio stage served from cache; `PAD_STERN_AUDIO_CACHE=0` rebuilds everything fresh). The build log also times every stage of a write, so a slow build names where its minutes went instead of leaving it to guesswork. **Replace Text** pulls the on-screen LCD display strings out of the `.radium` scene files into an editable `text/strings.tsv` you edit in place, then patches each matching string back on Write (a replacement that fits is space-padded to its original byte length; a longer one has the scene rewritten at the new length — see below). Scenes are only half of the text, though, and the missing half is the half a retheme cares about: a scene's Text node is often a **placeholder the game code overwrites at runtime**, so mode titles, battle names and award lines live as strings in the game binary, not in any radium. Editing every scene copy of them changes nothing on the machine — which is exactly what a tester rethemeing Godzilla hit, having replaced all 488 videos and found the monster's name still reading EBIRAH when the battle started. Extract now reads those **game-program strings** too (~10,500 on Godzilla, listed under a `game program` scene) and Write patches them in place alongside the scene text, with the firmware's validation record refreshed to match. One rename the machine cannot take is two operator settings ending up with the SAME name: the firmware hashes every setting's caption at boot and a duplicate is a fatal that leaves a real machine flashing between the loading screen and initializing forever (a retheme's champ-score renames collided exactly this way, and the written card boot-looped the machine) — so Write now refuses it, skipping the colliding rename with a warning that names both settings and shipping every other edit, and holding the whole text patch back in the rare case a standalone-name rename causes the collision indirectly. One wrinkle is worth knowing because it has no equivalent in the scene text: some names are **the tail end of a longer line**. Godzilla has no standalone `EBIRAH` string at all — the battle screen draws the last six bytes of `GODZILLA VS EBIRAH`, through a pointer that skips the first twelve. So the standalone name is offered as its own row, budgeted by the length of the line it lives inside, and Write moves those pointers when the name's position shifts: retitle the line to `GZ VS BIOLLANTE` and set the name row to `BIOLLANTE`, and both the full line and the bare name come out right. Not every tail that a card seems to offer is a real one: the ELF's own symbol tables end their mangled C++ names in a few printable characters and a terminator, and those bytes read as a pointer into the display text — on stock Godzilla Pro one of them landed inside `MEGALON AWARD`, so the award was offered a tail nothing draws and then refused every rename of the line it lives in while the awards either side of it renamed cleanly. Those look-alikes are now dismissed, so a line only has to keep a tail the machine actually shows. Edits that can't be made safely — a name that no longer ends its line, a replacement past its budget, a `%s` placeholder dropped — are skipped individually with an explanation rather than partially applied. A game-program line no longer has to FIT, either: a replacement longer than the slot it came from is placed in a **new area of the game program** — a small read-only segment added in the spare space between the code and its data, the original bytes left where they were — and every reference to the old string (the pointer groups the display code reads, the settings caption, the champion-table entry) is pointed at the new copy, so the Max column reads `96 (grows)` for such a row instead of the old string's length. The game binary gets longer when that happens, so it needs the card built as an **image** (the same Linux filesystem path full-size video replacement uses): a **Direct-SD** write still patches in place and skips the over-long edits with a named reason while every same-length edit lands, and a line skipped that way says so as the WRITE's limit rather than the line's — it names what to change to make the same edit land, and how many bytes would fit on this write as it stands, instead of telling you to shorten text that the tool can in fact make longer. **No machine has yet booted a card built this way** — it has run only in the emulator — so it can be switched off (`PAD_STERN_TEXT_GROW=0`), whereupon every row keeps its original budget. Two things arrived with it: **Replace everywhere…** (Find / Replace over every row whose ORIGINAL contains the text — `EBIRAH` → `BIOLLANTE` reaches the battle title, its bare-name tail row and the settings caption in one Apply, and lists the rows that would no longer fit instead of touching them), and the Scenes window now **draws your pending text edits** into its preview, marked `(not built yet)`, whether you changed the scene's own line or the game-program line that overwrites its placeholder, so a rename can be looked at before anything is written. Scene text grows the same way: a scene line's Max also reads `96 (grows)`, a same-length or shorter replacement is still patched in place, and a longer one has its `scene.radium` re-serialised at the new length and written whole (the format carries no absolute offsets or total size, so everything after the string simply shifts — proven on every parser in this tool and in the PC emulator, not yet on a machine); the box a line draws in is the scene's fixed template, so check a longer line in the Scenes window preview. A card carries thousands of lines, so the tab narrows them: a search box, a **Show** filter (All / Changed / Unchanged — Unchanged is exactly the lines you haven't dealt with yet) and a **Scene** filter for the game program or any single scene file, each listed with the number of strings it holds. Both filters stay with the project folder, so a part-finished pass reopens on the view you left. Spike 2 names its scene folders with a hash, so a row can be right-clicked to **name that scene** yourself — the name shows in its own column and in the Scene dropdown, and it is the same name **Replace Images** shows for that scene, from either direction. The project folder each tab is working in is also a **clickable link** now, on Replace Audio / Video / Images / Text as well as Write and Mod Pack: click the path and the folder opens. The Extract tab exposes per-type **Audio / Video / Images / Text** checkboxes (default all on) so you can skip the slow audio decode — or the hundreds of in-scene textures — when you only want one category. **Sounds are named by the game itself.** Most titles carry a Sound Test menu listing their sounds, and Extract follows the firmware's own chain from a menu entry to the sound it plays — menu name to node id, node id to the sound-id list it indexes, sound id through the asset resolver to the container key, and that key to the extracted slot — so a decoded sound arrives as `idx0091 - SE FX MATCH.wav` instead of a bare number. What the menu names varies a lot by title: Led Zeppelin lists 244 sound effects, Godzilla 1314 and Jaws 1352, while TMNT names just ten and Elvira's House of Horrors names 8 voice lines and **53 music tracks** outright. The naming convention varies too (`SE FX ...`, `SPEECH: ...`, `VO: ...`, `MUSIC: ...`, or no prefix at all), so the menu is located by its **structure** — it is the one table in the binary that a node-id array points at — rather than by any string, and that array does not have to sit next to it. Several links in the chain are silently shiftable, and getting one wrong still produces real names on real files, just the wrong ones, which is exactly what shipped and had to be pulled twice. So the finished map is **checked against the audio before it is used**: Stern names a lit target's sound and its unlit twin, names each bank or series of targets together, and where it names music that music has to be the long recordings — so on a correct map the lit variant is the longer recording (20 of 21 pairs on Led Zeppelin) and the members of a series share one duration to three decimal places. Those collapse under any shift, and a map that doesn't clear them against a reshuffled null is discarded and the sounds keep their `idx` numbers. Spoken callouts are in some titles' menus and not others; anything the menu doesn't name stays with the Whisper transcriber, which skips already-named files so nothing gets labelled twice. The menu listing is also written to `sound_test_names.csv` so you can play a number on the machine and check what the extract called it. Replacement WAVs are read at **whatever bit depth your editor exported** — 8/16/24/32-bit integer or 32/64-bit float, at any sample rate. That sounds like a detail and wasn't: the loader used to read every file as 16-bit PCM, so a callout exported at an editor's default 24-bit played as **pure static** on the machine, and since a 16-bit export worked the difference looked like the sample rate rather than the bit depth (a tester, rethemeing Godzilla, concluded they had to re-record everything at exactly 24000 Hz — the rate was never the problem). Levels are matched to the sound being replaced rather than normalized to a fixed peak, because a peak says nothing about loudness: Stern's callouts are broadcast-compressed voice, and a home-recorded line normalized to the same peak lands audibly quieter — worse, one stray transient (a lip smack, a desk knock) sets the peak and holds the whole recording down. The stock slot is decoded, its active-speech RMS measured, and the replacement gained to match, with a soft-knee limiter folding any transient back under the ceiling; measured on a real card that recovers about **5 dB** on a transient-peaked recording while leaving material already at stock level untouched, and it works downward too, bringing a hot music clip dropped on a quiet callout slot back down to its neighbours. From v0.171.0 the match is no longer the only possibility: a **Replacement loudness** row in *Advanced Audio Options* offers either the match (still the default) or normalizing every replacement to full scale, plus a ±12 dB offset applied on top of whichever you pick and soft-limited so a boost folds instead of clipping. That matters because the match is scale-INVARIANT — it lands your file on the stock slot's energy however you mixed it, so exporting the same track louder and rebuilding produced an identical card, with nothing in the app to say why — and a music import in particular often wants to sit deliberately above or below the bed Stern mixes to play under the callouts. The build log now always states how replacements were levelled, including that the level the file was mixed at is not carried over. From v0.173.0 the offset also comes per clip: a **Loudness for this clip** box sits beside the Replacement preview on the Audio tab, a sortable **Level** column shows at a glance which clips you have hand-levelled, and **Apply to all shown** puts one offset on everything the current search / Type / Show filters are listing (set Type to Music first and only the songs move). The per-clip dB stacks on the build-wide one and the total is still clamped to ±12 dB; the spectrogram strip redraws at the level the clip will get and is badged with the number, pressing play previews at that level too, and the build log lists every hand-levelled clip. The choices live in the project folder's staged changes, so they survive a rescan, ride inside a mod pack and carry through a Pro-to-Premium transfer, and the audio CSV export gained a **Level dB** column. What the preview still cannot draw is the automatic match to the stock sound's own loudness — that happens inside the encoder, against audio only the machine's decoder can produce — and the box's tooltip says so. The Replace Audio tab picks the naming up with a **Type** filter (Music / Sound FX / Callouts / Other) and right-click **Properties…** (name + type) — a rename is remembered by the sound's content hash and reapplied on every future extract before Whisper runs, so a mis-heard callout stays fixed across re-extracts and firmware updates. An optional **Length-prefix names** checkbox names each extracted sound by its play length (`01m22s235 - idx0001.wav`) so a plain name sort lines the same sounds up across firmware versions, where the slot numbers shift but the play lengths rarely do. The Replace Images tab's **Source** column tells the image stores apart (loose files / scene textures / radium-embedded / font glyph slices / the boot screen), a **Source dropdown** filters the list to one store, and **Group by scene** nests every image under its scene/animation container in play order — with a sortable per-group image-count column, right-click bulk assign/blank/clear, and **renameable groups** (most factory scene names are generic; your names persist per extract, are restored automatically when you re-extract the same card, ride a Mod Pack transfer to a new version, and match in Search). A **Default Settings** tab presets the operator-adjustment defaults baked into a card image — free play, volume, **music and speech attenuation**, language, replay percentage, backbox / cabinet / GI / LED / flasher brightness, the **Insider Connected** behaviour the card can actually set (message of the day, Home Team, the login and play-again timers), the **factory high-score and champion thresholds**, and more, grouped under headings and shown next to the value currently on the card — every edit **stages itself automatically** like any other mod and is baked into the card you Build (validation record refreshed automatically) so your master image stays untouched (and from v0.214.0 a second Build onto the same file **updates it in place** — the card image is not copied again, only the replacements that changed since the last build are written, and an edit taken back gets its stock content back — so a mod with hundreds of replaced videos rebuilds in minutes rather than hours); they apply on a fresh flash or factory reset (a machine that's already set up keeps its board-stored settings), and saveable presets can be auto-applied to every card you build. **Master Volume** is the one that needed more than that: the volume a machine boots at is not the setting's compiled default at all. Every Stern card ships that default as 64, one past the 63 the firmware accepts, so the machine discards it and falls back to a built-in per-title number instead — 30 on Led Zeppelin, 10 on Godzilla, 24 on John Wick — which is why a card built with a chosen volume still came up at the factory one. That number is a byte of its own in the game binary, found generically by the shape of the code around it rather than by any per-title constant (located on all 39 cards in the reference library, and refused rather than guessed where the match is ambiguous). From v0.128.0 the Master Volume row shows *that* number as the value on the card, caps at 63, and setting it writes both bytes — including the one a factory reset reads — so a fresh card comes up at your volume instead of the title's stock one. A **High Scores** block on the same tab edits the whole factory board a fresh card boots with — the **initials and player name** of every slot as well as its score, for the Grand Champion, the four high scores and each mode champion (Stern ships them filled with the design team's initials). The names are not adjustments: they are their own table of strings in the game binary, found generically by its shape rather than by any per-title constant, and patched inside each slot's existing space so the card stays byte-for-byte the same size — which is why every field is capped at the room its own slot has (initials are always three characters). The same tab also lists **every** adjustment the firmware carries, with the caption the machine itself prints — and says which of them the machine can actually reach. Some settings read fine off the card but never appear in any menu on a real machine (Mandalorian's `ALLOW TOPPER CHEATS` and `THIS IS THE WAY DEBUG`, for instance), and nothing in the setting itself marks them: a hidden one and a visible one are byte-for-byte alike. Visibility is decided by the **menu**, which enumerates the adjustments it draws — so the app reads those pages out of the game binary and flags each setting as one the Adjustments menu shows, one the machine edits on another service screen (volume, speakers, software update, tournament, redemption), or a **Debug** one no menu shows at all: factory tuning values, mech timings and developer leftovers. A one-click filter leaves just the ones the Adjustments menu can't reach, the list sorts on any column — click again to reverse, a third time to put the firmware's own order back, with values sorted as numbers rather than as text — and a build whose menu can't be read says so rather than guessing. **Double-click any of them to set the default it ships with**, hidden ones included — a setting the machine never shows still uses its compiled default, so switching one on from here is how it gets switched on at all. And since being hidden is a property of the *menu*, the menu can be changed: **Show hidden settings in the machine's menu…** extends the Feature Adjustments page so the machine itself lists and edits them, which is one rewritten instruction in the game binary (so the card stays exactly the same size and its validation record refreshes as usual). You choose how far it opens — the page is a straight run, so everything up to your pick comes with it — and titles whose menu the app couldn't fully read are refused rather than guessed at. What that exposes is per title and often worth having: Venom's `REPLACE LICENSED TUNE`, Deadpool's `FREQ 4TH WALL` and `PHOTO SHOOT`, Iron Maiden's `MADNESS MODE` block, Mandalorian's topper cheats. The menu patch has been verified against 13 of 14 title firmwares (the pages read back correctly out of the patched binary) but **not yet on a real machine**, and the settings it reaches include factory test and bookkeeping entries the game never expected an operator to change — so it says so before you use it. An **ⓘ Image Info** button beside the image pickers reports everything the app can read from a card without extracting it — game, firmware version (read from the card's own update index, so a renamed or relabelled file cannot change it; a file name that claims a different version is reported alongside instead of silently winning), edition, partition layout, on-card asset counts — including how many **sound requests** the game code can make, mined from the request table inside the game binary rather than guessed from a header word — and how many **operator adjustments** and **high-score places** the firmware defines (read straight out of the game binary; what an operator has actually *set*, and the scores actually played, live in the machine's own memory rather than on the card) — with a Copy Report button for bug reports. A **Compare** tab takes two card images — two firmware releases, or a modded card against its stock base — and reports what changed without extracting either: file-level added / modified / deleted comes from the cards' own validation manifests (so diffing two multi-GB images takes seconds, not an extract each), changed files are bucketed into videos, images, scenes, per-song music banks and other files, sound counts plus an image.bin changed/unchanged row cover the audio container, and the operator-adjustment defaults and factory high-score board are decoded from both game binaries and diffed entry by entry — with its own Copy Report button for sharing the result. Every change list in the report is complete — a build that renumbers four thousand sounds produces four thousand rows — and how many of each you read on screen is a **Rows per list** choice on the tab (12 / 25 / 50 / 100 / All, remembered between sessions); the rest fold into one `… and N more` line you double-click to open that group in place, and Copy Report always writes every row. **Double-click any file the report lists and it opens**, pulled straight off the card it belongs to (image A for a deleted file, image B for an added or modified one) into a temp folder and handed to the desktop — a changed piece of art or a replaced clip is one click away instead of a whole extract away, and it stays quick on a multi-GB card because only that one file is read; Spike 2 stores its videos with no file extension, so the temp copy is named from the file's own first bytes (`.mp4` / `.png` / `.jpg` / `.wav` / `.ogg`) to give the desktop something to open with. An **Extract Both** button runs a full Extract on each card into one parent folder you pick once, one sub-folder per card, when you want both versions' assets side by side after seeing what moved. Individual sounds packed inside image.bin can't be diffed one by one without an extract, and the report says so rather than guessing. Once both cards HAVE been extracted, the Sounds section diffs them one at a time, matched on the audio rather than on the raw file: a Spike 2 sound's first decoded frame is read out of whatever the container packs in front of it, so a build that repacks changes that one frame on every sound at once and nothing after it. The report steps over it and prints a **Codec lead-in** row saying how many pairs it applied to, instead of reporting an untouched catalog as rewritten — and mod transfer to such a build pairs the same way, so your replacements still carry across a repacked version.  A build can also resolve that codec a second way and push every sound along one whole frame, so the two cards hold the same samples at offsets a frame apart and no hash of a whole file can match; those pair too, under a **Codec frame shift** row.  On a Venom LE 1.06-against-1.07 pair that is the difference between 484 sounds called changed, 889 added and 876 removed, and the truth: the catalog moved, 17 added, 4 removed. A **Partition Explorer** tab browses the card image's partitions and ext4 filesystem directly, so you can preview or extract any file or folder — a radium scene to carry into another version, a boot script, or a whole partition to diff against stock — without mounting the card. Right-click any file and **Replace with…** swaps it for one of your own, and it does **not** have to match the original's size: a same-size file is written straight into the blocks the original occupied (no filesystem structure changes at all, nothing to install), while a bigger or smaller one is resized on the card by the platform's own ext4 driver (WSL2 on Windows), which is how you swap a boot script or the `SternLogo.png` splash screen on the OS partition (that splash screen is also on the Replace Images tab as **Boot screen**, where a build writes it back to the card like any other image). The file keeps its name, location and permissions, and its Stern validation record — digests and stored size — is refreshed automatically. Every Replace tab links into it: right-click any sound, clip or image and **Find in Partition Explorer** opens the card image and expands the tree down to the file that asset came from — for an image that means the exact `.radium` container it lives inside, and for a sound (which isn't a standalone file on the card) the bank it's decoded out of. The Replace tabs also carry a **Show: All / Changed / Unchanged** filter and **Export CSV** on audio, video and images alike, so a large replacement project can be reviewed from either end — what you have already changed, or only what you have not touched yet — or tracked in a spreadsheet. Replace Video adds a **Convert** column saying, per slot, whether your replacement goes on the card *as-is* or gets re-encoded first — worked out in the background from the file you assigned, so a job that will spend minutes in ffmpeg is visible before you start the build rather than after.  Clip names now come out **as the game itself spells them**: each name is read from the length its scene records for it rather than guessed from the surrounding text, which used to append a stray letter to runs of clips (`…10c`, `…11d`, `…13e`) and cut any name short at its first punctuation (`Credits_ASTRO-MONSTER` arriving as `MONSTER`).  Checked against every title's own game binary, names that match the firmware go from 58% to 86%; on Godzilla alone 160 clips get their real name back.  Re-extracting a folder you already have picks up the corrected names and removes the copy saved under the old one, so you get one file per clip rather than two. The Replace Video tab's **Check card…** button reads the clips back off a finished card and lists the ones that look blocky, separating a clip the app squeezed into its slot (a rebuild fixes it) from one that was simply a small file to begin with. A header **era switcher** picks the hardware generation: Spike 2 (the full modding flow above), **Spike 1** (the 2015-2016 DMD generation — see the next row) or the classic **Whitestar** DMD games (1999–2006 — Monopoly, Elvis, LOTR, Sopranos, etc.), which capture-extract under PinMAME exactly like the Sega / Data East entries (user-supplied ROMs; none bundled). See [docs/architecture/stern.md](../../docs/architecture/stern.md).
+Spike 2 cards are unencrypted ext4: videos and pictures are loose files.
+The sounds are the hard part: each is scrambled with a keystream only the
+game's own code makes, so the app runs that code in an ARM emulator to
+decode and re-encode them bit-exact.
+
+### What you can change
+
+| Tab | What it does on Spike 2 |
+|---|---|
+| Replace Audio | Every sound, named by the game's own Sound Test menu where it has one. Longer sounds, music modes, play in turn, attract flipper sounds. |
+| Replace Video | Every clip, at full size on the card. Random clips, the modes that play each clip, its sounds. |
+| Replace Images | Loose pictures, scene textures, font glyphs (one PNG per letter) and the boot screen. A **Fonts** window imports a desktop font into a game font. |
+| Scenes | Draws each scene as the machine does; move, resize, tint, hide or add a picture or a line of text. |
+| Replace Text | The scenes' text and the game program's own text (mode names, award lines), which may grow longer than the original. |
+| Color profile | One colour correction for the whole screen, or a profile baked into chosen files only. |
+| Default Settings | The settings and factory high scores a fresh card boots with, including names, and settings the machine's menu hides. |
+
+### Building the card
+
+- **The card passes the machine's checks.** Write refreshes the card's
+  `.sidx` validation record for every changed file and switches off the
+  game's own self-check, so the machine shows no GAME VALIDATION ERROR.
+- **Blip-free callouts:** every replaced sound plays your audio all the
+  way through. On a direct SD write about 6 ms of the original plays
+  twice inside each replacement.
+- **Full-size files** (videos, longer sounds, longer text) need an image
+  build through the Linux filesystem driver: WSL2 on Windows, `debugfs` on
+  macOS (`brew install e2fsprogs`).
+- **SD card size** builds for a bigger card when the stock card's free
+  room runs out: see [SD card size](using-the-app.md#sd-card-size-stern-spike-2).
+- **Rebuilds are quick:** a second build onto the same image updates it in
+  place, and unchanged sounds come from a cache.
+- **Port + build** puts your mods onto other stock cards (a new version,
+  the other model) and builds each, in one click.
+
+### Reading cards
+
+- **Image Info** (ⓘ beside the pickers) reads a card without extracting
+  it: game, version, edition, partitions, asset counts, settings. **Copy
+  Report** is for bug reports.
+- **Compare** shows what changed between two cards in seconds, from their
+  own validation records. Once both are extracted it compares the sounds
+  one by one, by how they sound.
+- **Partition Explorer** browses any file on the card, and **Replace
+  with…** swaps one at any size.
+- **Direct-SD** and **Save card as image…** read and write the physical
+  card.
+- **Emulate** runs any Spike 2 card on this PC: see [Emulate](emulate.md#stern-spike-2).
+- **Multi-boot** puts up to 16 games on one card: see [Multi-boot cards](multi-boot.md).
+
+**Older Stern generations:** the era switcher in the Stern card's header
+picks Spike 2, Spike 1, SAM or Whitestar. Architecture notes:
+[docs/architecture/stern.md](../../docs/architecture/stern.md).
 
 ## Stern Pinball (Spike 1)
 
 - **Games:** 6 (WWE WrestleMania, KISS, Whoa Nellie!, Game of Thrones, Spider-Man VE, Ghostbusters)
 - **Reads:** Stern's update `.iso` (a raw MBR SD-card image), or a card dump (`.img`/`.bin`/`.raw`)
+- **Tabs:** Extract, Write, Replace Audio, Default Settings, Mod Pack, Emulate
 
-Extract + Write + Replace Audio for the DMD generation before Spike 2. The `image.bin` master directory is plaintext and every sound is raw 16-bit PCM, so a full card decodes in seconds with no emulator — one WAV per sound (`audio/idxNNNN.wav`; layered music tracks as `idxNNNN-t2.wav`, …), mono/stereo at 44.1 kHz or 22.05 kHz. Write fits each replacement to its slot's exact length, loudness-matches it to the original (soft-limited), patches the PCM in place, and refreshes the card's own `.sidx` validation record (same manifest scheme and key as Spike 2, verified on all four available titles). Auto-transcribe, Music ID, per-clip loudness offsets, Mod Pack, Flash and Save-card-as-image all work; an unlisted Spike 1 title still extracts generically. A **Default Settings** tab reads and edits every operator adjustment straight from the game binary — the same read/edit/stage/write flow as Spike 2 (up to 175 adjustments on Ghostbusters LE), applying on a fresh flash or factory reset. And an **Emulate** tab (Windows via WSL2) runs a card on this PC: a patched ARM emulator with a software model of the game's boards boots it to its real attract in its own window, alongside a switch/LED window in the Spike 2 idiom — every switch listed by name on every title (a card with no curated map now has its switch names read out of the running game itself, instead of dropping to a nameless grid whose switches did nothing), keyboard play (arrows for flippers, `1` to start, `5` for coin, a clickable coin door and service buttons), and a trough that answers the game's own ball-eject coil — so coining up and pressing Start serves a ball and plays a full game with sound, on every title tried so far: GOT, Ghostbusters LE, KISS, WWE, Whoa Nellie!, Primus and Can Crusher (the last three share one platform, mapped straight from the running game's own switch registry) — and, from v0.182.0, **Transformers The Pin**, Stern's 2012 home model and an earlier machine than any of those: no dot matrix, no coin door, no service buttons and no operator menu at all, so it gets a display window that draws its two 8-digit 16-segment alphanumeric displays side by side in red with a decoded text readout under each, its own responder for that era's node bus, sound at the rate the game's own DAC asks for (24 kHz rather than a hardcoded 44.1, which is the difference between hearing it and hearing nothing), and a line in the switch window saying how this machine opens test mode — both flippers, held three seconds. Starting a Spike 1 game no longer stops a Spike 2 game already emulating on the same PC. And **save states**: snapshot a running game mid-ball from the tab's slot manager, stop the emulator, come back later, and load the slot — the game resumes playing right where it was, with the display, switches and sound all live; slots are per title, survive emulator rebuilds, and are managed (save, load, rename, delete) from the tab.  The tab manages only its own game: if a Spike 2 card (or a second Spike 1 rig) is emulating on the same PC at the same time, this tab’s status, Stop and save-state controls identify their own emulator by the folder it runs out of, and leave the other running game alone. And from v0.194.0 the tab **brings its own Linux**: a 45 MB rootfs this project builds in CI, pins by SHA-256 and imports as a private WSL distro called `PAD-Runtime`, with the emulator binaries already baked in. Your own distro is not touched, not read and not required, so a Windows PC with WSL enabled but no distro installed at all can now run the emulator without a trip to the Microsoft Store first — and "which Linux is this?" has the same answer on every machine, which is what most field breaks here have turned on. **Fix setup** is what installs it (a one-time ~370 MB download) and every later Start uses it, but Start never installs it for you; a machine where it is absent, older than this app expects, or simply not wanted (`PAD_RUNTIME=0`) runs in the default distro exactly as before. Once it is there, EVERYTHING the app sends to Linux runs inside it, not only the two emulator rigs: the extract and write pipelines, the WSL disk tools, the ISO mount, the multi-boot card builder and the prerequisite check all go to the same place, so the strip finally reports on the machine the work actually happens on rather than on a distro nothing touches. From v0.198.0 the Stern Spike 2 Emulate tab can install and update it too, with an **Update emulator Linux…** button that appears only when the installed one is from an older version of the app — before that, the only route to it was the Spike 1 tab. The work the rigs generate — extractions, card caches and save states — now lives on an expandable disk of its own under `LOCALAPPDATA` rather than inside the distro, so replacing the runtime no longer takes a saved game with it (proven by unregistering and reinstalling the runtime under a booted game and finding the extraction still there). Giving the space back is a button too: right-click **Fix setup** for *Delete the emulator's data*, *Delete downloaded files* and *Remove the app's Linux* — each names what it destroys, refuses while a rig is running, and reports what it freed.
+- **Fast extract.** Every sound is plain 16-bit PCM, so a whole card
+  decodes in seconds, one WAV per sound. An unlisted title still extracts.
+- **Write** fits each replacement to its slot, matches its loudness and
+  refreshes the card's validation record.
+- **Default Settings** edits every operator adjustment (up to 175 on
+  Ghostbusters LE).
+- **Auto-transcribe, Music ID, per-clip loudness, Flash and Save card as
+  image** work as on Spike 2.
+
+### Emulate (Windows via WSL2)
+
+The game boots to its real attract in its own window, beside a switch and
+LED window.
+
+- **Play:** every switch is named; arrows are the flippers, `1` starts
+  and `5` adds a coin. The trough answers the game, so Start plays a
+  full game with sound.
+- **Titles tried:** Game of Thrones, Ghostbusters LE, KISS, WWE, Whoa
+  Nellie!, Primus, Can Crusher, and Transformers The Pin.
+- **Transformers The Pin** (2012 home model) gets its two 16-segment
+  displays drawn in red. Hold both flippers three seconds for test mode.
+- **Save states:** save a game mid-ball and load it later. Slots are per
+  title.
+- **Runs beside a Spike 2 game:** each tab manages only its own emulator.
+
+### The app's own Linux (PAD-Runtime)
+
+**Fix setup** can install a small Linux of the app's own as a private WSL
+distro (a one-time ~370 MB download). Your own distro isn't touched or
+needed, so a PC with WSL but no distro can emulate.
+
+- **Once it's there, everything** the app does in Linux runs inside it:
+  both emulators, extract and write, the multi-boot builder, the
+  prerequisite check.
+- **Your work is kept apart:** extractions, card caches and save states
+  live on their own disk under `LOCALAPPDATA`, so replacing the runtime
+  keeps them.
+- **Spike 2's Update emulator Linux…** appears when the installed one is
+  older than the app.
+- **Right-click Fix setup** to delete the emulator's data, the downloads
+  or the runtime itself. `PAD_RUNTIME=0` goes back to your own distro.
 
 ## Stern Pinball (SAM)
 
 - **Games:** 26 (Mustang, Metallica, AC/DC, TRON: Legacy, The Walking Dead, Star Trek, X-Men, The Avengers, Avatar, Iron Man, Spider-Man, Batman: The Dark Knight, Indiana Jones, CSI, Family Guy, Shrek, Pirates of the Caribbean, World Poker Tour, etc.), every version PinMAME has (375)
-- **Reads:** the game's code update as Stern ships it for the USB stick: the `.bin` (The Walking Dead 1.05: `.ebi`) on its own, or the `.zip` it comes in, or a MAME romset zip
-- **Writes:** a copy of that `.bin` with the replaced sounds, pictures and animation frames in, for the game's USB update
+- **Reads:** the code update as Stern ships it for the USB stick: the `.bin` (The Walking Dead 1.05: `.ebi`), the `.zip` it comes in, or a MAME romset zip
+- **Writes:** a copy of that `.bin` with your sounds, pictures and animation frames in, for the game's USB update
+- **Tabs:** Extract, Replace Audio, Replace Images, Write, Mod Pack, Capture
 
-**Extract + Replace Audio + Write** (from PAD-582): every sound is read straight out of the code update, no emulator needed — the game's own sound table and scripts lead to each sample, 4-bit IMA ADPCM at 24 kHz (12 or 8 kHz for most speech), decoded bit-exact to one WAV per sample (`audio/idxNNNN.wav`; TRON: 1,103 sounds, 46 minutes, in 8 seconds). Auto-name call-outs / music and Length-prefix names work. Write re-encodes each edited WAV into its own slot — resampled to the slot's rate, mono, fit to its exact length and loudness-matched to the original — and fixes the file's checksums, so the result is a `.bin` of the same size that goes on a USB stick and is picked from the game's update screen like Stern's own. Revert and Mod Pack work too. All four generations of the game's sound engine are handled (24 titles from World Poker Tour to The Walking Dead), and a replaced sound was heard playing in PinMAME on each generation. A replacement can't be longer than the sound it replaces. Details: [docs/plans/sam_compatibility.md](../plans/sam_compatibility.md).
+| Extracted | Count on TRON | Replace notes |
+|---|---|---|
+| Sounds (`audio/idxNNNN.wav`) | 1,103, in 8 seconds | Fitted to the slot's rate and length, loudness-matched. Can't be longer than the original. |
+| Still pictures and font glyphs (`images/`) | 2,392 pictures, 1,639 glyphs in 44 fonts | Scaled to the picture's size and the DMD's 16 shades. Glyphs are named by number. |
+| Animation frames (`animations/imgNNNN.png`) | 4,150 frames | Repacked in the game's own formats. A frame must fit the bytes its animation has; busier art may lose shades, and the log names it. |
 
-**Replace Images** (from PAD-583): Extract also writes every still picture and every font of the DMD as a PNG — service-menu icons, title cards, the frames stored whole, and each font's glyphs in its own folder (`images/pictures/imgNNNN.png`, `images/fonts/fontNN (H px)/imgNNNN.png`; `NNNN` is the game's own picture number; TRON: 2,392 pictures and 1,639 glyphs in 44 fonts). They are gray + transparency, one gray level per DMD shade. Replace Images lists them; Write scales each replacement to its picture's size, takes its grays to the nearest of the DMD's 16 shades (transparent stays transparent) and writes it over the picture in the same `.bin`, checksums fixed. All 24 titles read, World Poker Tour to The Walking Dead; a replaced picture and a replaced font (the attract mode's GAME OVER) were seen on the DMD in PinMAME. A picture keeps its size; the compressed animation frames are in `animations/` (below). Which character each glyph draws is up to the game's code, so glyphs are named by number, in the font's order.
-
-**DMD animations** (from PAD-584): Extract also decodes every animation frame of the game's DMD art to a PNG, `animations/imgNNNN.png` (NNNN = the frame's number in the game's picture table, so an animation's frames are consecutive numbers; TRON: 4,150 frames), 16 shades of grey with the clear pixels transparent. Edit them in Replace Images or any paint program and Write puts them back: each frame is packed again in the game's own frame formats (run-length and frame-to-frame changes), and the frames after an edited one are re-packed on top of it, so the machine shows exactly the new pictures. The game's picture area is full, so an edited frame has to fit in the bytes its animation already uses: busier pictures than the original may come out with fewer shades, or keep the original frame, and the Write log names each one. The 2006-2008 titles (World Poker Tour, Pirates, Family Guy, Wheel of Fortune) and Batman: The Dark Knight have no animation frames, only plain pictures. Edited animations were seen playing exactly as written in PinMAME on TRON, Indiana Jones and Mustang.
-
-**Capture** (libpinmame), the same as Whitestar: tick *Use PinMAME runtime capture* on the Extract tab (alone, or with the Basic box). A SAM code update is one file that is also the ROM PinMAME runs, so the app recognizes it by its checksum whatever it is called, and names the game and version on Select card. Capture runs the game in attract mode and records the DMD animations (all 16 shades) + its audio as MP4s. Most SAM games play no sound in attract mode, so most clips are silent. A version PinMAME has no copy of runs as the version of the same size, if there is one, and is refused if there isn't. Pick the **SAM** era on the Stern card. Capture requires libpinmame + ffmpeg.
+- **Write** keeps the `.bin` the same size and fixes its checksums, so it
+  installs from the game's update screen like Stern's own.
+- **All four sound-engine generations** work (24 titles, World Poker Tour
+  to The Walking Dead); each was proven playing in PinMAME.
+- **No animation frames** on the 2006-2008 titles (World Poker Tour,
+  Pirates, Family Guy, Wheel of Fortune) or Batman: The Dark Knight.
+- **Capture:** tick *Use PinMAME runtime capture* to record the DMD
+  animations and sound as MP4s. Needs libpinmame and ffmpeg; pick the
+  **SAM** era on the Stern card.
+- Details: [docs/plans/sam_compatibility.md](../plans/sam_compatibility.md).
 
 ## Stern Pinball (Whitestar)
 
 - **Games:** 17 (Monopoly, Elvis, The Lord of the Rings, The Sopranos, The Simpsons Pinball Party, Terminator 3, Ripley's Believe It or Not!, NASCAR, Austin Powers, Playboy, etc.)
 - **Reads:** `.zip` (MAME ROM dumps)
+- **Tabs:** Capture (Extract)
 
-**Capture** (libpinmame), the same as Sega's Whitestar games: PinMAME runs the game in attract mode and records the decoded DMD animations + synced audio as MP4s. Pick the **WHITESTAR** era on the Stern card. User-supplied ROMs; none bundled or redistributed. Requires libpinmame + ffmpeg.
+The same as Sega's Whitestar games: PinMAME records the DMD animations
+with their sound as MP4s. Pick the **WHITESTAR** era on the Stern card.
+Needs libpinmame and ffmpeg; you supply the ROMs.
 
 ## Williams (WPC-era)
 
 - **Games:** 41 WPC titles (Attack From Mars, Medieval Madness, Twilight Zone, Theatre of Magic, Fish Tales, etc.)
 - **Reads:** `.zip` (MAME ROM dumps)
+- **Tabs:** Extract (static and capture)
 
-**Static**: DMD scene PNGs, animation MP4s, font strips, and per-track DCS sound-ROM audio decoded from the ROM. **Capture**: per-scene gameplay MP4s with synced DCS audio via libpinmame (scripted playthrough — skill shots, mode starts, multiball, jackpots). Optional **Auto-transcribe** names the extracted audio by its spoken call-outs.
+Two extract paths, each with its own checkbox on the Extract tab.
 
-The full per-game lists with the format-specific quirks live in the plugin
-sources:
-[ap/games.py](../../pinball_decryptor/plugins/ap/games.py),
-[bof/games.py](../../pinball_decryptor/plugins/bof/games.py),
-[cgc/games.py](../../pinball_decryptor/plugins/cgc/games.py),
-[jjp/games.py](../../pinball_decryptor/plugins/jjp/games.py),
-[pb/games.py](../../pinball_decryptor/plugins/pb/games.py),
-[spooky/games.py](../../pinball_decryptor/plugins/spooky/games.py),
-[stern/games.py](../../pinball_decryptor/plugins/stern/games.py),
-[williams/games.py](../../pinball_decryptor/plugins/williams/games.py).
+### Static extract (decoded from the ROM)
 
-The Williams plugin has two complementary extract paths, independently
-togglable via checkboxes on the Extract tab:
+A Python port of [permartinson/wpcedit.js](https://github.com/permartinson/wpcedit.js)
+(after Garrett Lee's WPC Edit) reads the ROM's picture, animation and font
+tables.
 
-### Static extract (ROM-decoded assets)
+| Output | What it is |
+|---|---|
+| `dmd_scenes/scene_*.png` | Every full-frame DMD picture (~800–1,400 a game) |
+| `dmd_scenes/pairs/pair_*.png` | 4-shade composites of paired planes |
+| `dmd_scenes/browse.mp4` | Every scene at 2 fps, to skim |
+| `animations/anim_*.mp4` | The game's animations, one MP4 each |
+| `fonts/font_*.png` | Every DMD font as a sprite sheet |
+| `sounds/track_*.wav` | Every DCS music cue, voice line and effect (1993+ games only), via a bundled [DCSExplorer](https://github.com/mjrgh/DCSExplorer) |
 
-Python port of
-[permartinson/wpcedit.js](https://github.com/permartinson/wpcedit.js)
-(based on Garrett Lee's original 2004 WPC Edit) to walk the WPC ROM's
-font/graphics/animation master tables and decode the 11 compressed-frame
-encodings the game's 6809 code uses at runtime. Output per game:
+**Auto-transcribe samples to callouts.csv** (DCS games) names the sounds
+by their spoken callouts, as on CGC.
 
-- **`dmd_scenes/scene_*.png`** — one PNG per full-frame DMD bitmap
-  (jackpot splashes, mode-start announcements, title cards). Order
-  of magnitude: ~800–1400 scenes per game ROM.
-- **`dmd_scenes/pairs/pair_*.png`** — 4-shade composites that pair
-  consecutive low+high planes.
-- **`dmd_scenes/browse.mp4`** — every scene back-to-back at 2 fps so
-  you can skim hundreds in a minute.
-- **`animations/anim_*.mp4`** — true game animations decoded from
-  the WPC animation table (one MP4 per cinematic sequence — the
-  "fish growing toward you" attract animation in Fish Tales, the
-  motorcycle ride in No Fear, etc.).
-- **`fonts/font_*.png`** — sprite-sheet grids of every DMD glyph
-  atlas (full ASCII alphabets in multiple sizes).
-- **`sounds/track_*.wav`** — every music cue, voice line, and sound
-  effect from the game's DCS sound ROMs, one WAV per track, plus a
-  `manifest.json`. DCS-era games (1993+) only — pre-DCS titles like
-  Fish Tales use the older YM2151 sound board and have no statically
-  decodable audio. Decoded with a bundled
-  [DCSExplorer](https://github.com/mjrgh/DCSExplorer) build (BSD-3).
+### PinMAME runtime capture
 
-Tick **Auto-transcribe samples to callouts.csv** on the Extract tab
-(shown only for DCS-era games) to run `faster-whisper` over the
-extracted tracks and emit a CSV — or renamed WAVs — mapping each
-sound to its spoken call-out, the same mechanism the CGC plugin uses.
+[libpinmame](https://github.com/vpinball/pinmame) plays the game: it adds
+credits, presses Start and plays scripted shots. Each moment is saved as
+an MP4 with its sound (`skill_shot.mp4`, `multiball_start.mp4`…).
 
-### PinMAME runtime capture (composed cinematics + audio)
+- **16 titles** have hand-tuned scripts of 10–21 moments: AFM, MM, ToM,
+  FT, WW, TZ, AF, STTNG, IJ, JD, NGG, T2, DM, RS, SS, Dracula.
+- **The other 25** use a generic playthrough built from each game's switch
+  layout.
+- **While it runs,** a live DMD preview and a switch grid show; click a
+  switch to press it.
 
-Drives [libpinmame](https://github.com/vpinball/pinmame) under ctypes,
-auto-credits + presses Start + plays a per-game scripted shot sequence
-so the ROM walks through its named cinematics — skill shots, mode
-starts, multiball, jackpots, end-of-ball bonus, etc.  Emits one MP4 per
-scene named for the moment (e.g. `skill_shot.mp4`,
-`multiball_start.mp4`, `total_annihilation_setup.mp4`) with synced DCS
-audio.
+## Per-game lists
 
-16 popular titles have hand-tuned scripts of 10–21 named moments each:
-AFM, MM, ToM, FT, WW, TZ, AF, STTNG, IJ, JD, NGG, T2, DM, RS, SS,
-Dracula. The remaining 25 games use a smart-generic pattern matcher
-that builds an equivalent playthrough from the per-game PinMAME switch
-profile.
+The full game lists live in the plugin sources:
 
-While the capture is running, the GUI shows a live DMD preview pane
-and a labeled switch-matrix grid — click any switch to manually press
-it for diagnostics.
-
-## Chicago Gaming Company plugin (v0.5.0)
-
-CGC's installer `.img` files are raw bootable disk images with three
-nested layers — an MBR-partitioned installer rootfs containing an
-`emmc.img` blob that's itself an MBR-partitioned ext4 disk holding the
-actual game. **No encryption** anywhere in the chain; the difficulty
-is purely the nesting. The plugin handles all three layers
-transparently — you give it `.img`, you get back the playable game's
-asset tree.
-
-### Asset shape per game
-
-- **MM / AFM / MB Remakes** (CGC's `emumm` WPC emulator + original
-  Williams ROM): `appdata/samples/vol_25perc/S<NNNN>_C<N>.wav` — a few
-  hundred pre-attenuated `.wav` callouts per game, in standard 16-bit
-  stereo PCM. Plus the original WPC ROM in `rom/` and boot bitmaps.
-- **Pulp Fiction** (CGC original on a BeagleBone Black, audio engine
-  CGC's in-house "JPS" library): 6 `.bnk` sound banks the plugin
-  auto-decodes into ~1,000 individual `.wav` files (music + speech +
-  SFX + diagnostics + beeped-speech) plus a `manifest.json` mapping
-  every event to its underlying buffer. Repacks on Write so audio
-  swaps end up back in the `.img` byte-for-byte verified by software
-  round-trip. The full reverse-engineering journal lives in
-  [docs/CGC_BNK_RE.md](../../docs/CGC_BNK_RE.md).
-- **Cactus Canyon** (CGC's `pin`-engine remake of the 1998 Bally game;
-  ships only on a physical microSD master card — image the whole card
-  to a `.img`): three editable surfaces, each round-trippable. The
-  original Williams **DCS** sound ROMs (`rom/s2-s7.rom`) decode to
-  addressable audio streams under `dcs_audio/` and repack via the
-  bundled DCSExplorer/DCSEncoder. CGC's **added audio** lives in the
-  encrypted `usb.so` bank — decrypted to 756 WAVs under `new_audio/`
-  and re-encrypted on Write. The colour **display art** lives in the
-  obfuscated `cgc.so` archive — 2044 RGB565 images under `display_art/`
-  (both raw frames and RLE-compressed transparent sprites), re-encoded
-  on Write (raw frames; RLE sprites are view-only). Tick **Decode DMD
-  scenes** to also render the art animation sequences to `videos/*.mp4`
-  through the colour dot-matrix shader. Full reverse-engineering journal:
-  [docs/CC_REVISITED_RE.md](../../docs/CC_REVISITED_RE.md).
-
-### Auto-transcribe samples to `callouts.csv` (opt-in)
-
-CGC's audio filenames are sequential codes (`S0197_C6.wav`) with no
-human-readable names. Tick **Auto-transcribe samples to callouts.csv**
-on the Extract tab to run `faster-whisper` (tiny.en, CPU-int8) across
-every extracted WAV, with silence/non-speech filtered out via the
-built-in Silero VAD. Output is a CSV with one row per WAV — folder and
-filename in their own sortable columns, the play length in seconds,
-and the detected English text — so you can open Excel and search
-"Joust champion!" to find which sample to swap.
-
-Tick the companion **...and rename WAVs using transcripts** checkbox
-to also rename each speech WAV in place — `S0197_C6.wav` becomes
-`S0197_C6 - Get the troops ready.wav` so File Explorer shows the
-content inline. Write is rename-aware: edits to renamed files get
-written back to the original inner-ext4 path the game expects.
-
-The `faster-whisper` pip package is treated as a real prerequisite and
-auto-installed by **Install Prerequisites** (same flow as the WSL
-tools). The model itself (~75 MB) downloads on first transcribe-run
-and is cached in `%USERPROFILE%\.cache\huggingface\`.
-
-Transcribing runs several worker processes, each holding its own model,
-so a busy machine (a second copy of this app extracting at the same time
-will do it) can leave a clip with no memory to run in. From v0.189.2
-that is no longer recorded as a finding: an allocation failure is
-retried in place after a short wait, and anything still failing when the
-workers finish is re-run one clip at a time with the box to itself,
-which usually clears it. Whatever is left comes back as `error` in the
-CSV — not `non-speech` — keeps its original filename, and is counted on
-its own line in the finish summary, so a run that lost clips to memory
-pressure no longer reads exactly like a run that found that many more
-sound effects. **Auto-name now** on the Extract tab, with less else
-running, names them without extracting again (files that already have a
-name keep it).
-
-### Group duplicate sounds (Pulp Fiction)
-
-Pulp Fiction ships the same recording at several bank slots at once —
-the censored `pfspeechBEEPD` bank mirrors `pfspeech`, and some lines
-repeat again in the UI and SFX banks — so replacing just one copy can
-leave the machine playing a stock twin, which looks exactly like a
-build that didn't take. Tick **Group duplicates** on the Replace Audio
-tab to cluster every slot that carries byte-identical audio under one
-collapsible row (the first tick decodes and fingerprints all ~1,000
-sounds, about ten seconds). To mod a duplicated sound everywhere it
-plays, assign your replacement to one copy, then right-click it and
-choose **Apply to all copies** — the edit fans out to the rest of the
-group in one step.
-
-### Decode DMD scenes to PNG/MP4 (experimental, opt-in)
-
-CGC's MM / AFM / MB remakes bundle the original Williams WPC game ROM
-and run it under their `emumm` emulator. Tick **Decode DMD scenes to
-PNG/MP4 (experimental, extract-only)** on the Extract tab to also walk
-that ROM's master tables and emit:
-
-- `dmd/dmd_scenes/scene_*.png` — every still bitmap in the ROM
-  (jackpot splashes, mode-start screens, status panels), rendered at
-  1920×480 to match the LCD-backbox width.
-- `dmd/animations/anim_*.mp4` — the cinematics from the ROM's
-  animation table, one MP4 per sequence (attract-mode shorts,
-  feature-shot reactions, etc.).
-- `dmd/fonts/font_*.png` — DMD glyph sprite sheets.
-
-The decode adds a few minutes to Extract. Output is **extract-only**:
-the `dmd/` folder is excluded from the modding baseline and the Write
-pipeline so the derived renders are never pushed back into the
-installer. CGC's runtime LCD colorization is applied by the `emumm`
-binary's GPU code and isn't shipped as data, so these renders come out
-in the original amber-DMD look (the same look the Williams plugin
-produces). Same `wpc_decode` / `dmd_render` modules under the hood, so
-any decoder fix benefits both.
-
-### Card diagnostics (Write tab)
-
-If a rebuilt installer card fails on the machine — e.g. the classic
-"SHELL ERROR" on the displays after the countdown — the **Card
-diagnostics…** button on the Write tab reads the installer's own copy
-log (`procstat.txt`) back off the card and checks the install payload
-(`emmc.img`) is present and readable. It's read-only and needs no WSL or
-mounting (the app reads the card's ext4 partitions directly), which
-matters because Windows can't open those partitions and `wsl --mount`
-refuses most USB SD readers. The report shows how far the on-machine
-copy got and where it stopped, so a bad card, a truncated payload, or a
-failed flash can be told apart. To back this up, the Write pipeline now
-filesystem-checks the rebuilt game partition and verifies the re-packed
-`emmc.img` byte-for-byte before it will hand you an image to flash, so a
-silently-corrupt build is caught at build time instead of on the
-machine.
-
-The most important thing the diagnostics know about: CGC's factory
-images ship their data partition with an unfinished ext4 journal, and
-on any card built by a version older than v0.36.0 the machine's first
-mount would silently replay that stale factory journal over the
-build's modifications — reverting the payload and failing the install
-with SHELL ERROR even though the card verified perfectly after
-flashing. Builds made with v0.36.0+ retire the journal automatically;
-the diagnostics flag any older modded card that still carries the armed
-journal so you know to rebuild it rather than blame the card.
-
-Flashing a card is otherwise a blind raw write with no integrity check,
-so a single bad sector or a flaky reader can corrupt the card silently —
-and a partially-written installer can SHELL ERROR or leave the machine
-unbootable. The **Build / flash SD card** button now reads the whole
-card back after writing and compares it byte-for-byte to the image,
-aborting if anything doesn't match, so a bad flash is caught on your PC
-instead of at the machine. (This roughly doubles the flash time; the
-progress bar shows a separate "Verify card" phase.) The dialog's **Skip
-verify** tick leaves the read-back out for one flash. It is off every
-time the dialog opens, and ticking it shows what you give up: a bad write
-is then only found at the machine.
-
-Flashing writes raw disk sectors, which needs administrator access — but
-you no longer have to launch the whole app elevated for it. If the app
-isn't already running as an administrator, the flash asks for approval at
-the moment you start it and elevates just the write: a UAC prompt on
-Windows, your login password on macOS (the way Etcher does it). On
-Windows the Start Menu shortcut already elevates at launch, so you won't
-see a second prompt there.
-
-On macOS the first flash can additionally stop with a **Full Disk
-Access** message: recent macOS versions block raw SD-card access — even
-with your password — until the app is granted Full Disk Access under
-System Settings → Privacy & Security. It's a one-time setup; the error
-message in the app spells out the exact steps. Quit (⌘Q) and reopen the
-app after granting it, then flash again.
-
-## Barrels of Fun plugin
-
-### Why this app is needed for recent firmware
-
-Starting with the April 2026 firmware (Winchester 4/29, Dune 5/13), BOF
-ships its games in a custom Godot PCK format that no public extractor —
-including GDRE Tools — can read. Older `.fun` files use stock Godot and
-work with GDRE; this newer format needs the Pinball Asset Decryptor.
-
-Bon Jovi goes one step further: its `.fun` is a **signed systemd disk image** (a GPT with an EROFS payload, dm-verity and a vendor signature) rather than a passphrase-protected tarball, and its Godot 4.7 PCK carries a renamed directory magic and a new key. The app reads all of that natively (no GPG, no GDRE, no EROFS driver needed) and extracts the full asset set, but it cannot yet build an installable update or emulate the game, because the image is vendor-signed and nothing can be learned about the machine's boards without one in hand. The Image Info window explains what a volunteer owner could provide to change that; see [docs/plans/bonjovi.md](../../docs/plans/bonjovi.md) for the format notes.
-
-### What Extract does
-
-- Decrypts the `.fun` and pulls out the Godot binary
-- Patches BOF's custom PCK magic markers back to stock Godot
-- Reads the PCK's own file directory (decrypting it first on Dune) and
-  writes every entry at its exact recorded offset and size, checking each
-  one against the MD5 the directory carries
-- Decompresses fonts from BOF's Zstd "RSCC" container
-- Decodes QOA-compressed audio to standard WAV
-- Unwraps textures (GST2 + WebP) to standard WEBP
-- Lays the game's own `res://` tree out under `pck/`, and additionally
-  writes player-friendly copies of the *imported* assets to
-  `pck/_EDITABLE ASSETS/` (`audio/`, `images/`, `fonts/`)
-
-### Editing
-
-There are two places to edit, depending on the asset:
-
-**Imported assets — audio, textures, fonts.** These are Godot binaries
-(`.sample`, `.ctex`, `.fontdata`), so Extract decodes each into a normal
-file under `pck/_EDITABLE ASSETS/`. Edit those: every audio file is
-playable in VLC / Audacity, every texture opens in any image viewer.
-Keep each file's name as extracted — the 6-character hash in
-`title_card-7787d7.webp` is what pairs the edit back to its Godot binary,
-and renaming it means Write can't find what it belongs to. Moving a file
-between the `audio/` / `images/` / `fonts/` subfolders is fine.
-
-**Standalone files — video, and anything else the game stores plainly.**
-These sit at their real game path under `pck/` (video lives in
-`pck/assets/videos/<mode>/`). Edit or replace them in place, keeping the
-filename; Write picks them up by content hash.
-
-Either way, use the Write tab afterwards to repack into a new `.fun`.
-
-### Video slots
-
-BOF ships its mode videos as plain Ogg Theora files in the PCK — Dune
-carries 297 of them at 1280x720, about 1 GB, under
-`pck/assets/videos/`. The **Replace Video** tab lists them like any other
-game's clips: assign a replacement in any format and it's re-encoded to
-Theora at the slot's own resolution and frame rate. Replacements do not
-have to match the original's byte size — Write re-points the PCK's file
-offsets so a longer clip still loads.
-
-### What doesn't round-trip yet
-
-Editing an extracted `.ogg` (from `.oggvorbisstr`) or `.ttf`/`.otf` (from
-`.fontdata`) has no effect at Write — those inverse encoders aren't
-written yet, and the build log says so rather than failing silently. The
-compiled scripts and scenes (`.gdc` / `.scn` / `.res`) extract for
-reference but aren't substituted back.
+- [ap/games.py](../../pinball_decryptor/plugins/ap/games.py)
+- [bof/games.py](../../pinball_decryptor/plugins/bof/games.py)
+- [cgc/games.py](../../pinball_decryptor/plugins/cgc/games.py)
+- [jjp/games.py](../../pinball_decryptor/plugins/jjp/games.py)
+- [pb/games.py](../../pinball_decryptor/plugins/pb/games.py)
+- [spooky/games.py](../../pinball_decryptor/plugins/spooky/games.py)
+- [stern/games.py](../../pinball_decryptor/plugins/stern/games.py)
+- [williams/games.py](../../pinball_decryptor/plugins/williams/games.py)

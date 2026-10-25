@@ -141,9 +141,9 @@ on 16 GB. A song-set variant then costs only its changed songs.
 ### Changing a card later
 
 - **A card you built:** point the path box at it and every field fills in.
-  A changed title, picture or setting is written in seconds. A changed image
-  writes only its changed files, in about a minute. You don't need to
-  rebuild.
+  A changed title, picture or setting is written in seconds, and a changed
+  image writes only its changed files, in about a minute. You don't need
+  to rebuild.
 - **The card in the reader:** **From SD card…** reads just the boot menu
   (and writes your changes back onto that card), or reads the whole card
   into a `.raw` file.

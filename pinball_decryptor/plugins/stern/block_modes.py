@@ -40,6 +40,8 @@ THE PROGRAM (``blocks.json``)::
                                   game's own look: a name over its intro, the TOTAL over its end); "panel" = the panel
       "bar": {"on": true, "color": "#00c040"},   PAD-521: its name in the game's own status bar (James Bond: the
                                   coloured bar under the TV), in this colour, its clock draining along it
+             ("fill": "value", "value": {"k": "scored"}, "of": {"k": "num", "v": 12})   PAD-721: or filling with
+                                  a value out of another instead (its shots made of 12: full when all are made)
       "info": {"on": true, "text": "SUPER JACKPOT", "value": {"k": "var", "name": "superjackpot"}},   PAD-547: a line
                                   under its name while it runs, its words and the value as it changes ("SUPER
                                   JACKPOT = 53,200,000"), where the title's port puts one (James Bond: under the
@@ -622,6 +624,7 @@ def show_blocks(program):
 
 
 BAR_COLOR = "#00c040"            # PAD-521: the status bar's colour unless one is picked
+BAR_OF = 10                      # PAD-721: a bar that fills with a value: out of this unless said
 #: PAD-521: its own screen - the panel with its name, or its words alone over the game's video, as the game's own
 SCREEN_STYLES = {"panel": "a panel", "words": "words over the video"}
 WORDS_NAME_MS, WORDS_SHOW_MS = 4000, 3000   # words alone: its name at the start, a Words block's line, then gone
@@ -630,8 +633,14 @@ WORDS_NAME_MS, WORDS_SHOW_MS = 4000, 3000   # words alone: its name at the start
 def _norm_bar(b):
     """PAD-521: the game's own status bar - off unless ticked, in a colour of its own."""
     b = b if isinstance(b, dict) else {}
-    return {"on": bool(b.get("on", False)),
-            "color": b.get("color") if COLOR_RE.match(str(b.get("color") or "")) else BAR_COLOR}
+    out = {"on": bool(b.get("on", False)),
+           "color": b.get("color") if COLOR_RE.match(str(b.get("color") or "")) else BAR_COLOR}
+    if b.get("fill") == "value":        # PAD-721: a value out of another fills it, not the clock
+        out["fill"] = "value"
+        for key, dflt in (("value", {"k": "scored"}), ("of", {"k": "num", "v": BAR_OF})):
+            v = b.get(key, dflt)        # an emptied slot stays empty: problems names it
+            out[key] = v if isinstance(v, dict) else None
+    return out
 
 
 INFO_TEXT_MAX = 40               # PAD-547: the info line's words; its value follows them
@@ -1054,6 +1063,10 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
                 _check_num(c["value"], "The HUD's counter %d" % (k + 1), ctx)
         if hud["gauge"]["on"] and hud["gauge"]["value"] is not None:
             _check_num(hud["gauge"]["value"], "The HUD's gauge", ctx)
+    bar = program["bar"]
+    if bar["on"] and bar.get("fill") == "value":              # PAD-721
+        _check_num(bar["value"], "The bar's value", ctx)
+        _check_num(bar["of"], "The bar's \"out of\"", ctx)
     info = program["info"]
     if info["on"] and info["value"] is not None:              # PAD-547
         _check_num(info["value"], "The info line", ctx)
@@ -1227,7 +1240,7 @@ def notes(program):
 
 
 def _program_values(program):
-    """PAD-708: every value and condition of the program (its blocks', its HUD's and its info line's)."""
+    """PAD-708: every value and condition of the program (its blocks', its HUD's, its info line's and its bar's)."""
     def deep(o):
         if isinstance(o, dict):
             if "k" in o:
@@ -1238,7 +1251,7 @@ def _program_values(program):
             for v in o:
                 yield from deep(v)
     yield from deep([s.get("do") for s in program.get("scripts") or []])
-    yield from deep([program.get("hud"), program.get("info")])
+    yield from deep([program.get("hud"), program.get("info"), program.get("bar")])
 
 
 def _unique(items):
@@ -2439,6 +2452,7 @@ def to_c(program, slug):
     # kit_display): its words step aside under one, so it holds a display priority while it runs
     watch = has_hud or program["screen"]
     has_bar = program["bar"]["on"]          # PAD-521: its name, colour and clock in the game's own status bar
+    bar_fill = (g.num(program["bar"]["value"]), g.num(program["bar"]["of"]))         if has_bar and program["bar"].get("fill") == "value" else None   # PAD-721: or a value out of another
     info = program["info"]                  # PAD-547: a line of words and a value under its name
     has_info = info["on"]
     info_live = g.num(info["value"]) if has_info and info["value"] is not None else None
@@ -2681,10 +2695,6 @@ def to_c(program, slug):
     L.append("    return run.on && RUN_SECONDS ? (run.ticks_left + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND : 0;")
     L.append("}")
     L.append("")
-    if has_bar:
-        L.extend(_BAR_C.split("\n"))
-    if has_info:
-        L.extend((_INFO_C % {"value": info_live or "0"}).split("\n"))
     L.append("/* a timer: ms from now (0 or less stops it); the milliseconds it has left */")
     L.append("UNUSED static void timer_start(int i, long long ms)")
     L.append("{")
@@ -2703,6 +2713,11 @@ def to_c(program, slug):
     L.append("    return left > 0 ? left : 0;")
     L.append("}")
     L.append("")
+    if has_bar:                         # after timer_left: the bar's value or the info line's may name a timer
+        L.extend((_BAR_C % {"fills": 1 if bar_fill else 0, "value": bar_fill[0] if bar_fill else "0LL",
+                            "of": bar_fill[1] if bar_fill else "1LL"}).split("\n"))
+    if has_info:
+        L.extend((_INFO_C % {"value": info_live or "0"}).split("\n"))
     for when in ("ball", "mode"):
         L.append("static void reset_%s(void)          /* the variables reset %s */" % (when, RESETS[when]))
         L.append("{")
@@ -4274,11 +4289,16 @@ UNUSED static void game_wizard(const char *name, int start)
 #: PAD-521: the game's own status bar (MODE_SDK.md "The game's status bar")
 _BAR_C = r"""/* PAD-521: its name in the game's own status bar (James Bond: the colored bar under the TV), in BAR_RGB, the clock
  * draining along it as the game's own modes show theirs; full through its total, then given back. A game without
- * one shows nothing here. */
+ * one shows nothing here. PAD-721: or (BAR_FILLS) filling with a value out of another, as the game's own
+ * mini-wizards fill theirs with the shots made: full once all are, and kept as it was through its total. */
+#define BAR_FILLS %(fills)d
 static void bar_show(int clock)
 {
     int pct = -1;
-    if (clock && RUN_SECONDS) {
+    if (BAR_FILLS) {
+        long long v = %(value)s, of = %(of)s;
+        pct = of <= 0 || v >= of ? 100 : v <= 0 ? 0 : (int)(v * 100 / of);
+    } else if (clock && RUN_SECONDS) {
         if (run.ticks_left > bar_max) bar_max = run.ticks_left;    /* time added: the bar is full again */
         pct = bar_max ? (int)((run.ticks_left * 100u + bar_max - 1) / bar_max) : 0;
     }

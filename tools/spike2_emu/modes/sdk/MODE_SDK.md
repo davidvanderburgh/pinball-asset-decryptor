@@ -629,6 +629,15 @@ see below) and is never cut by an equal one; a shot call waits under the game's 
 it only on a request the game never plays itself. MODE_API.md, "Sound BUSES and priority", has
 the measurements.
 
+**A carrier playing yours is not the game's song (PAD-740).** Some games keep speech and light cues in step with
+a song of theirs: every tick their music sync asks the sound engine which of its synced songs plays (the engine's
+"which of these requests plays", `sound_active` + 0x40 on all 53 newest Spike 2 builds) and plays that song's cues at its
+position. Bond LE 1.06's music carrier 94 is Bird One Multiball's music, and its 31 speech cues (requests
+1019-1049, from 55 s in) played over a mode's own music on 94. While a music carrier carries a record of yours (a
+`pm_sound_swap` with priority -1 armed on it - the music's - or `pm_sound_sid` pointing it at a bed), the runtime hands the engine the list
+without it, so no game code takes your sound for the game's own. No port line: the runtime finds the function
+after `sound_active` by its six words and says so in mode.log ("does not count a carrier playing ours").
+
 #### A music bed of your own, and no clicks (item 150 follow-up)
 
 Godzilla has ONE music carrier (request 125), yet every mode can have music of its own. The

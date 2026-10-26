@@ -159,6 +159,28 @@ on 16 GB. A song-set variant then costs only its changed songs.
 Every game on the card boots with its game-validation check switched off,
 so a GAME VALIDATION ERROR from one game can't carry over to the next.
 
+### Settings, audits and high scores
+
+A Spike 2 machine keeps its settings, audits and high scores on the SD
+card, in the card's data partition, apart from the game program. A
+multi-boot card takes that partition from the **first image**, so which
+card you start from matters:
+
+- **To keep what your machine has now,** read your current SD card into a
+  `.raw` (**From SD card…**, whole card) and make it the first image.
+- **A fresh download from Stern** has none, so the machine starts from
+  factory settings and runs its Guided Setup.
+- **Every image of the same game shares them,** across code versions, the
+  way a Stern update keeps them.
+- **Keep its own high scores on the machine** (✎ on an image) gives that
+  image its own settings and audits too, not just scores. Its first boot
+  starts from a copy of the shared ones, so reset its high scores once in
+  the service menu.
+
+Flashing the whole card writes the image's copy over the machine's. When
+only the menu changed, flash **Only the boot menu**. For a changed image,
+read the SD card back into a `.raw` first, update that, and flash it.
+
 ## Jersey Jack
 
 The tab takes **two JJP install ISOs of the same game version** (for

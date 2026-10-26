@@ -1612,7 +1612,9 @@ HELP_CONTENT = {
             "The Card Image is the master image set on the Extract tab.",
             {"note": "**Fresh cards only.** A machine uses these on a fresh flash or "
                      "after a factory reset. A machine already set up keeps its own "
-                     "settings: Stern stores them on the board, not the card.",
+                     "settings: Stern keeps them in the card's data partition, "
+                     "apart from the game program, and a card made from Stern's "
+                     "download has none.",
              "kind": "warn"},
         ]),
         ("Edit and build", [
@@ -2557,7 +2559,8 @@ HELP_CONTENT = {
          "Both game programs are read the same way the Defaults tab reads them: "
          "settings added or removed, defaults that changed, and high-score places "
          "whose initials, name or score changed. These are the cards' built-in "
-         "defaults; a machine's live settings and scores are in its own memory."),
+         "defaults; a machine's live settings and scores are in the card's data "
+         "partition, apart from the game program."),
     ],
     "Multi-boot": [
         ("What it does", [
@@ -2732,6 +2735,29 @@ HELP_CONTENT = {
          "share one settings store.\n"
          "- No random card and no image with its own high scores on such a card.\n"
          "- Untick it to give the card its menu back."),
+        ("Settings, audits and high scores", [
+            "A Stern Spike 2 machine keeps its settings, audits and high scores on "
+            "the SD card, in the card's data partition, apart from the game "
+            "program. A multi-boot card takes that partition from the **first "
+            "image**.",
+            {"cards": [
+                {"icon": "sd", "tone": "ok", "title": "Keep what the machine has",
+                 "text": "Read your current SD card into a .raw (**From SD card…**, "
+                         "whole card) and make it the first image."},
+                {"icon": "download", "tone": "warn", "title": "A fresh download",
+                 "text": "Stern's image has none: the machine starts from factory "
+                         "settings and runs its Guided Setup."}]},
+            "- Every image of the same game shares them, across code versions, as a "
+            "Stern update keeps them.\n"
+            "- **Keep its own high scores on the machine** (✎ on an image) gives "
+            "that image its own settings and audits too. Its first boot starts "
+            "from a copy of the shared ones, so reset its high scores once in "
+            "the service menu.\n"
+            "- Flashing the whole card writes the image's copy over the machine's. "
+            "When only the menu changed, flash **Only the boot menu**. For a "
+            "changed image, read the SD card back into a .raw first and update "
+            "that.",
+        ]),
         ("Sounds",
          "Every sound row (the menu's move and confirm, an image's music and "
          "confirm) has a **▶ Play** beside **Browse…**, played through the "
@@ -2907,7 +2933,8 @@ _IMAGE_INFO_SECTIONS = [
     ("Adjustments and high scores",
      "**Adjustments** is how many operator settings the firmware has; **High scores** "
      "how many places its board keeps (top four, Grand Champion, every champion). The "
-     "machine's current settings and scores live in its own memory, not on the card; "
+     "machine's current settings and scores live in the card's data partition, not in "
+     "the game program; "
      "the Defaults tab sets what a freshly flashed machine starts from."),
 ]
 

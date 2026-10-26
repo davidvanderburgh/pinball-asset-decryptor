@@ -190,6 +190,8 @@ def hat(h):
         return "When the player picks the battle %s" % BM.battle_name(h)
     if k == "game_mode":                                                    # PAD-710
         return "When the game starts its %s" % BM.place_name(h)
+    if k == "completed":                                                    # PAD-747
+        return "When the player has completed %s of %d of the game's modes" % (h.get("count"), len(BM.done_hat_ids(h)))
     return "(%s)" % k
 
 

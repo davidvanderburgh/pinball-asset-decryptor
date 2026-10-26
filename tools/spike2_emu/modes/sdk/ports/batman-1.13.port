@@ -509,3 +509,10 @@ value place_audit_completed_19     409
 value place_audit_started_20       410
 value place_audit_completed_20     415
 value place_audit_started_21       437
+
+# PAD-747: the game's other modes it keeps books of (mode_framework.done_lines): a mode of ours may start once
+# some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag
+text  done_name_0                  Shame Mode Ep 59 60
+value done_audit_0                 419
+text  done_name_1                  Shame Mode Ep 115 116
+value done_audit_1                 424

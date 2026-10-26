@@ -3000,8 +3000,9 @@ def modes_games_rows(ports=None):
         also += [w for k, w in (("magnet", "magnet"), ("scoop", "scoop"), ("coils", "mechanisms"),
                                 ("shield", "shield"), ("building", "building"), ("shaker", "shaker"),
                                 ("shows", "light shows"), ("wizard", "mini-wizards"), ("roster", "battle slot"),
-                                ("challenge", "challenges"), ("place", "game mode places"))
-                 if p.can(k)]                     # PAD-381: what a mode may hold; PAD-392; PAD-615; PAD-710
+                                ("challenge", "challenges"), ("place", "game mode places"),
+                                ("done", "starts on game modes completed"))
+                 if p.can(k)]                     # PAD-381: what a mode may hold; PAD-392; PAD-615; PAD-710; PAD-747
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")
         if not p.can("stack"):
@@ -3123,7 +3124,9 @@ PREVIEW_HELP = {
                 "in order (any other shot starts the sequence over). *Only after* "
                 "holds it until another mode has run this ball or game. On Godzilla it can "
                 "instead start when the player picks one of the game's battles on the battle "
-                "selection screen: your mode runs in that battle's place.\n"
+                "selection screen: your mode runs in that battle's place. Or it can start once the player "
+                "has completed a number of the game's own modes in one game (tick which ones count): a "
+                "mini-wizard after four of them, a bigger wizard after all of them.\n"
                 "3. **Runs for:** how long it runs.\n"
                 "4. **Points per shot:** which shots score and what the first one "
                 "pays. A minus number takes that much away on each hit.\n"

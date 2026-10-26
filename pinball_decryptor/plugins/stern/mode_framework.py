@@ -831,12 +831,90 @@ def plain_lines(books, add, prog=None):
 
 def plain_lines_for(elf, port_text):
     """The plain-C books lines *port_text* lacks (as :func:`lines_for`), one by one - PAD-715: a port with some modes'
-    books gets the others' (a derived port with the base's audit add site); never raises."""
+    books gets the others' (a derived port with the base's audit add site); never raises. PAD-747: and the game's other
+    modes it keeps books of (:func:`done_lines`)."""
     try:
         books, add = plain_books(elf, port_text)
-        return missing_from(plain_lines(books, add, S.Program(elf)), port_text or "")
+        out = missing_from(plain_lines(books, add, S.Program(elf)), port_text or "")
     except Exception:                                    # noqa: BLE001
+        books, add, out = {}, None, []
+    try:
+        return out + done_lines(elf, (port_text or "") + "\n" + "\n".join(out))
+    except Exception:                                    # noqa: BLE001
+        return out
+
+
+# ---- PAD-747: the game's other modes a plain-C build keeps books of -------------------------------------------------
+#: how many such modes a port names at most (the runtime's ids DONE_EXTRA.. DONE_IDS - 1)
+DONE_EXTRA_MAX = 128
+
+
+def _done_title(stem):
+    """``WHERES_BARB`` -> ``Wheres Barb``; a short single word (Elvira's movie initials, ``ABOB``) kept as it is."""
+    words = stem.split("_")
+    if len(words) == 1 and len(stem) <= 5:
+        return stem
+    return " ".join(w if w.isdigit() else w.capitalize() for w in words)
+
+
+def done_books(elf, port_text):
+    """PAD-747: ``[(name, "audit" | "flag", id), ...]``: a plain-C build's modes the game counts COMPLETED but the port
+    names no start of (no `text block_name_<i>` books for them) - every stem with an ``AUD_<stem>_STARTED`` (or
+    _STARTS / _START) and an ``AUD_<stem>_COMPLETED`` (or _COMPLETIONS) audit, counted through the framework's audit
+    add; with no such audit, a ``FG_<stem>_COMPLETED`` flag where the port names the flag bitmap. In audit / flag id
+    order. [] on a C++ port, or a program without the tables."""
+    from . import portchallenge as PC
+    from . import stock_scan_c as SC
+    text = port_text or ""
+    if re.search(r"^data\s+block_obj_\d+", text, re.M):
         return []
+    e = PC.Elf(elf)
+    add = audit_add(e)
+    prog = S.Program(elf)
+    names = SC.audit_ids(prog)[1] if add else {}
+    aid = {n: i for i, n in names.items()}
+    fg = names_table(e, "FG_INVALID", "FG_") or []
+    have_a = {int(v) for v in re.findall(r"^value\s+place_audit_completed_\d+\s+(\d+)", text, re.M)}
+    have_f = {int(v) for v in re.findall(r"^value\s+place_flag_completed_\d+\s+(\d+)", text, re.M)}
+    out, stems = [], set()
+    for n in sorted(aid, key=lambda n: aid[n]):
+        m = re.match(r"AUD_(.+)_(COMPLETED|COMPLETIONS)$", n)
+        if not m or m.group(1) in stems:
+            continue
+        st = m.group(1)
+        if not any("AUD_%s_%s" % (st, w) in aid for w in ("STARTED", "STARTS", "START")):
+            continue
+        stems.add(st)
+        if aid[n] not in have_a:
+            out.append((_done_title(st), "audit", aid[n]))
+    if re.search(r"^data\s+game_flags\s", text, re.M):
+        for i, n in enumerate(fg):
+            m = re.match(r"FG_(.+)_COMPLETED$", n)
+            if m and m.group(1) not in stems and i not in have_f and not any(
+                    "AUD_%s_%s" % (m.group(1), w) in aid for w in ("COMPLETED", "COMPLETIONS")):   # its audit counts it
+                stems.add(m.group(1))
+                out.append((_done_title(m.group(1)), "flag", i))
+    return out[:DONE_EXTRA_MAX]
+
+
+def done_lines(elf, port_text):
+    """PAD-747: the port lines for :func:`done_books` - `text done_name_<n>` with `value done_audit_<n>` or `value
+    done_flag_<n>`, numbered from 0 - or [] when there are none or the port names some already (numbered as one set)."""
+    if re.search(r"^text\s+done_name_\d+", port_text or "", re.M):
+        return []
+    books = done_books(elf, port_text)
+    if not books:
+        return []
+    out = ["# PAD-747: the game's other modes it keeps books of (mode_framework.done_lines): a mode of ours may start once",
+           "# some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag"]
+    if any(k == "audit" for _n, k, _i in books) and not re.search(r"^site\s+audit_add\s", port_text or "", re.M):
+        from . import portchallenge as PC
+        add, prog = audit_add(PC.Elf(elf)), S.Program(elf)
+        out.append("site  audit_add              0x%08x 0x%08x 0x%08x" % (add, prog.word(add) or 0, prog.word(add + 4) or 0))
+    for n, (name, kind, i) in enumerate(books):
+        out.append("text  %-28s %s" % ("done_name_%d" % n, name))
+        out.append("value %-28s %d" % ("done_%s_%d" % (kind, n), i))
+    return out
 
 
 # ---- a plain-C build's own modes, from the same title's port ----------------------------------------------------

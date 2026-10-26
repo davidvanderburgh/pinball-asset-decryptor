@@ -164,7 +164,7 @@ def test_a_profile_per_port(name):
     assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
     assert p.shot_mask_bits == bits and p.proven is proven
     cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop", "coils", "shield", "shaker", "shows",
-                             "wizard", "building", "roster", "challenge", "place"}) | _mb(name)         | (set() if name in MP.PLACE_PROVEN else {"place"})          # PAD-710: a game mode's place where proven
+                             "wizard", "building", "roster", "challenge", "place", "done"}) | _mb(name)         | (set() if name in MP.PLACE_PROVEN else {"place"})          | (set() if name in MP.DONE_PROVEN else {"done"})            # PAD-710: a game mode's place where proven; PAD-747: the game's modes completed
     assert {part for part in MP.PARTS if not p.can(part)} == cannot
     for part in MP.PARTS:
         assert bool(p.why_not(part)) == (part in cannot)
@@ -211,7 +211,7 @@ def test_stack_needs_the_ports_own_mode_queries_as_the_runtime_asks_for_them(tmp
     p = MP.profile_from_port(str(tmp_path / "godzilla_le-1.16.port"))
     assert not p.can("stack") and "tells that one of its own modes is running" in p.why_not("stack")
     assert [part for part in MP.PARTS if not p.can(part)] == ["stack", "multiball", "ball_save"] + \
-        ([] if "godzilla_le-1.16" in MP.MAGNET_PROVEN else ["magnet"]) + ["wizard"]   # no count: no multiball, no ball save; PAD-436: no mini-wizards; PAD-619: its challenges need no mode query
+        ([] if "godzilla_le-1.16" in MP.MAGNET_PROVEN else ["magnet"]) + ["wizard"] +         ([] if "godzilla_le-1.16" in MP.DONE_PROVEN else ["done"])   # no count: no multiball, no ball save; PAD-436: no mini-wizards; PAD-619: its challenges need no mode query; PAD-747
     # with the count alone it is the balls route, greyed until seen (item 164's STACK_BALLS_PROVEN)
     only = "\n".join(line for line in text.splitlines() if "stock_" not in line)
     (tmp_path / "godzilla_le-1.16.port").write_text(only, encoding="utf-8")
@@ -356,7 +356,8 @@ def test_godzilla_pro_1_15_is_unchanged_and_is_what_its_port_says():
     assert g.bank_scene == "60ed7e5036b8ce09d35a3e101ea6fc1380b37d97"
     assert (g.version, g.port) == ("1.15", "godzilla_pro-1.15.port")
     # PAD-710: a game mode's place is offered where proven in the emulator; PAD-714 proved Pro 1.15's (Hedorah)
-    assert all(g.can(part) for part in MP.PARTS if part not in _mb("godzilla_pro-1.15"))
+    assert all(g.can(part) for part in MP.PARTS if part not in _mb("godzilla_pro-1.15")
+               and not (part == "done" and "godzilla_pro-1.15" not in MP.DONE_PROVEN))   # PAD-747: where proven
     assert not any(g.can(part) for part in _mb("godzilla_pro-1.15"))   # item 167: greyed until proven
     derived = MP.profile_from_port(MP.port_path(g))
     assert derived.why_not("multiball") == g.why_not("multiball")

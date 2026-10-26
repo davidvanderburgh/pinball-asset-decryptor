@@ -812,4 +812,16 @@ void pm_place_over(int won);                                     /* the mode tha
 int pm_game_mode_start(unsigned id);  /* for a test: the game's START of mode id, as its rules call it (a plain-C
                                          start only while claimed: the claim refuses it); 1 = called */
 
+/* ---- the game's own modes the player has completed (PAD-747; MODE_SDK.md "The game's modes completed") -------------
+ * The runtime keeps, for each player, which of the game's modes (the ids pm_block_list takes) the player has completed
+ * this game, as the game records it: a C++ title's mode STOP entered with "completed", a plain-C title's COMPLETED
+ * audit or flag. A new game forgets it. pm_game_mode_done(id): 1 completed by the player up, 0 not yet, -1 the runtime
+ * cannot see that one's completion here. pm_game_modes_done(ids, n): how many of those n ids (n = 0: every one it can
+ * see) the player up has completed this game; -1 when it can see none of them. A mode of yours in one's place that
+ * ends won (pm_place_over(1)) counts as that mode completed. */
+#define PM_CAN_GAME_DONE    0x20000000u /* pm_game_mode_done / pm_game_modes_done */
+int pm_game_mode_done(unsigned id);
+int pm_game_mode_done_seen(unsigned id);                         /* 1 = its completion is seen here */
+int pm_game_modes_done(const unsigned char *ids, unsigned n);
+
 #endif

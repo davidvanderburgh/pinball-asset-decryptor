@@ -81,6 +81,7 @@ const T = {
   endNow: "End whichever of this project's modes is running.",
   codeMode: "A mode written in C, for what the form cannot do: a copy of the Mode SDK's template in this project's modes folder. Try it builds it in with the others.",
   challengeLaunch: "The challenge's ball waits in the shooter lane as the mode starts. The game launches it for the player once the mode's start clip is over (at once with no start clip), a set number of seconds after the mode starts, or not at all: the player launches it. Otherwise the ball starts as any other ball does: on James Bond, the left flipper button held at the launch opens the loop.",
+  done: "The mode starts once the player has completed this many of the game's own modes in one game, counting only the ones ticked. A mode counts when the game itself records it completed (as its audits do), once a game, whichever ball it was. When the count is reached and something is in the way (another mode of yours, or one of the game's modes this one waits for), it starts as soon as nothing is, that game. A mode of yours running in a game mode's place counts as that mode when it ends completed. Use it for a mini-wizard after a few of the game's modes and a bigger wizard after all of them: two modes, each with its own count.",
   place: "The mode runs in the place of one of the game's own modes: when the game starts that mode (the player earned it, as in any game), this mode starts instead and the game's own never runs. Where the app knows the game's mode framework, the game counts the mode as its own: the mode's start counts as the game's mode starting (its start count, its STARTED audit), and when the mode ends, its end shot ending it (or, with no end shot, its clock running out) counts as the game's mode completed - its COMPLETED audit, its wins, and the wizards and unlocks the game opens for it - and anything else counts as not completed. One mode per game mode.",
   challenge: "The mode is played in the game's own Player Challenge mode: a one-ball game, picked on the game's start menu (both flipper buttons held in attract) as a game starts, or every game when the service menu's Default Game Mode is set to a challenge. Pick one of the game's own challenges and this mode starts as the ball starts in its place, the game's own never running, and the start menu shows the mode's name there; or pick A new challenge of its own and the start menu lists the mode after the game's own entries. The game ends when the ball ends. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge.",
   countsAs: "A shot of your choosing counts as one of this mode's own while it runs: a Left ramp can reach the battle vs Ebirah as a left spin (its points, and the count down by one). One ramp is one spin, so a ramp standing in for a spinner needs the spinner's count of hits. \"Instead of\" moves the mode's shot: yours counts, and the mode's own no longer does while it is lit (its insert stays dark, yours blinks): the battle vs Gigan can take the Big loop instead of the Left ramp. Saved with this project and put on the card by Write with the modes; with no rows the mode plays as it always did.",
@@ -411,6 +412,10 @@ function ModePage({ s, f, off, dis, rs, lim }) {
   const placeOff = off || dis.place || !places.length;
   const placeOpts = withValue([{ value: "", label: "(choose one of its modes)", disabled: true }, ...places.map((x) => ({ value: x.name, label: x.name }))], f.place_mode);
   const placeCounts = (places.find((x) => x.name === f.place_mode) || {}).counts;
+  const doneOn = f.starts_kind === "completed";                                  // PAD-747
+  const doneModes = prof.done_modes || [];
+  const doneOff = off || dis.done || !doneModes.length;
+  const doneSet = new Set(s.done_on || []);
   const END_PICK = "(these shots)";
   const endOpts = withValue((prof.end_shots || ["(no shot)"]).map((x) => ({ value: x, label: x })), f.end_shot);
   const endOn = new Set(s.end_shots_on || []);
@@ -445,7 +450,7 @@ function ModePage({ s, f, off, dis, rs, lim }) {
       <//>`;
   const startsSec = html`<${Sec} title="Starts on" reason=${rs.events}>
         <div class="row wrap">
-          <${Radio} name="m-starts" value="shot" label="its shot" checked=${f.starts_kind !== "event" && !seqOn && !battleOn && !challengeOn && !placeOn} disabled=${off} title=${T.itsShot} onChange=${(v) => setF("starts_kind", v, true)} />
+          <${Radio} name="m-starts" value="shot" label="its shot" checked=${f.starts_kind !== "event" && !seqOn && !battleOn && !challengeOn && !placeOn && !doneOn} disabled=${off} title=${T.itsShot} onChange=${(v) => setF("starts_kind", v, true)} />
           <${Select} value=${f.start_shot} options=${shotOpts} ns="modes" k="f:start_shot" disabled=${off || !shots.length} width=${180} title=${T.startShot} />
         </div>
         <div class="row wrap" style="padding-left:26px">
@@ -494,6 +499,17 @@ function ModePage({ s, f, off, dis, rs, lim }) {
         </div>
         ${placeOn && !dis.place && f.place_mode ? html`<div class="small muted wrap" style="padding-left:26px">${placeCounts ? "When the game starts that mode, this one starts instead. The game counts it as its own: its end shot ending it (with no end shot, its clock running out) counts as that mode completed - its audits, its wins, and what the game opens for it - and anything else as not completed." : "When the game starts that mode, this one starts instead. The app does not know this build's mode framework, so the game does not count it as its own mode: it is played, not completed."}</div>` : null}
         ${rs.place ? html`<div class="small muted wrap" style="padding-left:26px">${rs.place}</div>` : null}`}
+        ${!prof.done_found ? null : html`<div class="row wrap">
+          <${Radio} name="m-starts" value="completed" label="the player completing" checked=${doneOn} disabled=${doneOff && !doneOn} title=${T.done} onChange=${(v) => setF("starts_kind", v, true)} />
+          <span class="row nw" style="gap:8px"><${Num} k="done_count" value=${f.done_count} disabled=${doneOff || !doneOn} width=${64} title=${T.done} />
+          <span class="dim nw">of the game's modes ticked, in one game</span></span>
+        </div>
+        ${doneOn && !dis.done ? html`<div class="modes-shots" style="padding-left:26px;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr))">
+          ${doneModes.map((m) => html`<${Check} key=${"d" + m.id} label=${m.name} checked=${doneSet.has(m.id)} disabled=${off || (doneSet.size === 1 && doneSet.has(m.id))} title=${T.done}
+              onChange=${(v) => setField("modes", "done:" + m.id, v, { flush: true })} />`)}
+        </div>` : null}
+        ${doneOn && !dis.done ? html`<div class="small muted wrap" style="padding-left:26px">It starts the moment the player has completed ${f.done_count || "?"} of the ${doneSet.size} ticked in one game. Each counts once, when the game records it completed.</div>` : null}
+        ${rs.done ? html`<div class="small muted wrap" style="padding-left:26px">${rs.done}</div>` : null}`}
         ${[0, 1].map((i) => html`<div class="row wrap">
           <span class="dim nw">and also</span>
           <${Select} value=${f["also_shot_" + i]} options=${alsoOpts(f["also_shot_" + i])} ns="modes" k=${"f:also_shot_" + i} disabled=${off || !shots.length} width=${180} title=${T.alsoShot} />

@@ -266,6 +266,8 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
 .bk-grip:hover { opacity: 1; }
 .bk-hat { background: #c28a12; border-radius: 12px 12px 7px 7px; }
 .bk-hat .bk-line { padding-left: 10px; }
+.bk-done { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px 10px; padding: 0 0 2px 4px; }   /* PAD-747: the completed hat's ticks */
+.bk-done label { display: flex; align-items: center; gap: 5px; }
 .bk-mode { background: #8b5bd6; }
 .bk-score { background: #2f9a5b; }
 .bk.bk-var, .bk-pal.bk-var { background: #c8553a; color: #fff; }

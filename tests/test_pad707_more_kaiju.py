@@ -197,7 +197,7 @@ PRELUDE = r"""
 #include "pad_mode.h"
 #define N_ROSTER 16
 static const struct pm_mode *current;
-static unsigned can = PM_CAN_SCREENS;
+static unsigned can = PM_CAN_SCREENS | PM_CAN_MESSAGES;
 static int (*roster_fn[N_ROSTER])(unsigned slot);
 static const struct pm_mode *roster_by[N_ROSTER];
 static int roster_resuming;
@@ -219,6 +219,18 @@ void pm_show(void *node, int on) { const char *p = strrchr((const char *)node, '
 int pm_snprintf(char *o, unsigned long cap, const char *fmt, ...)
 { va_list ap; int n; va_start(ap, fmt); n = vsnprintf(o, cap, fmt, ap); va_end(ap); return n; }
 static unsigned long now_ms;
+/* PAD-733: the city screen's rematch line - the battle rule's seven slot records (12 bytes, the battle's id at +4: 12 +
+ * the slot), the city each player is in and the battle it holds for them, the table's line count */
+static long rematch_line = -1;
+static unsigned slot_recs[21] = { 0, 12, 0, 0, 13, 0, 0, 14, 0, 0, 15, 0, 0, 16, 0, 0, 6, 0, 0, 17, 0 };
+static unsigned battle_rule[4], held_ids[4], city_now, line_count = 3949;
+static unsigned rw(unsigned a) { return *(const unsigned *)(unsigned long)a; }
+static unsigned roster_city_of(unsigned p) { return city_now; }
+static unsigned roster_city_rec(unsigned idx, long vec_at, unsigned rec)
+{ return vec_at == 56 ? (unsigned)(unsigned long)held_ids : 0; }
+static int message_borrow(unsigned id, unsigned idx, const char *words)
+{ printf("BORROW %u '%s'\n", idx, words); return 1; }
+void pm_message_restore(unsigned id) { printf("RESTORE %u\n", id & 0x7fffffffu); }
 unsigned long pm_ms(void) { return now_ms; }
 int pm_in_game(void) { return in_game; }
 unsigned pm_player(void) { return up; }
@@ -228,6 +240,11 @@ long pm_port_value(const char *n, long fb)
     if (!strcmp(n, "roster_left_sound")) return 271;
     if (!strcmp(n, "roster_right_sound")) return 272;
     if (!strcmp(n, "roster_cursor_at")) return 16;
+    if (!strcmp(n, "roster_rematch_line")) return rematch_line;
+    if (!strcmp(n, "roster_city_battle_vec_at")) return 56;
+    if (!strcmp(n, "roster_vec_at")) return 8;
+    if (!strcmp(n, "roster_record_size")) return 12;
+    if (!strcmp(n, "roster_id_at")) return 4;
     return fb;
 }
 const char *pm_port_text(const char *n)
@@ -258,7 +275,12 @@ static unsigned fn(const char *n)
     if (!strcmp(n, "roster_switch_held")) return (unsigned)(unsigned long)g_held;
     return 0;
 }
-static unsigned data(const char *n) { return 0x1000; }
+static unsigned data(const char *n)
+{
+    if (!strcmp(n, "message_count")) return (unsigned)(unsigned long)&line_count;
+    if (!strcmp(n, "rule_battle")) { battle_rule[2] = (unsigned)(unsigned long)slot_recs; return (unsigned)(unsigned long)battle_rule; }
+    return 0x1000;
+}
 """
 
 DRIVER = r"""
@@ -307,6 +329,9 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "nocallouts")) no_callouts = 1;
         else if (!strcmp(c, "nope")) nope = 1;
         else if (!strcmp(c, "gameover")) in_game = 0;
+        else if (!strcmp(c, "rematch")) rematch_line = atol(argv[++k]);
+        else if (!strcmp(c, "city")) city_now = (unsigned)atoi(argv[++k]);
+        else if (!strcmp(c, "holds")) held_ids[up - 1] = (unsigned)atoi(argv[++k]);
         else if (!strcmp(c, "ball_end")) more_ball_end();
         else if (!strcmp(c, "slots")) { int s; for (s = 0; s < 7; s++) printf("SLOT%d %s\n", s, roster_by[s] ? roster_by[s]->name : "-"); }
     }
@@ -430,6 +455,35 @@ def test_a_picked_monster_stays_on_the_screen_through_its_close(tmp_path):
         assert "SHOW TitanFullBody_instance" in out.split("TAKEN 1 (slot 1)")[1]
     out = menu(tmp_path, *THREE, "open", 0, "right", "right", "tick", "gamepick", "tick")   # the place's own battle
     assert "TAKEN 0 (slot 1)" in out and "SHOW PadSel_" not in out.split("TAKEN 0")[1]
+
+
+def test_the_city_screens_rematch_names_the_monster_lost_there(tmp_path):
+    """PAD-733 (David: "if a mode is failed and you come back to start it again it still says fight biolante again
+    when it's supposed to be kumunga"): the city screen's TO REMATCH %s line (3750) names the new monster while the
+    player's city holds the battle it lost - and is the game's own again when it does not, or at the game's end."""
+    lost = ("rematch", 3750, *THREE, "open", 0, "right", "tick", "gamepick", "tick", "lost", "holds", 12)
+    out = menu(tmp_path, *lost, "tick", "MARK", "tick")
+    assert "TAKEN 1 (slot 0)" in out
+    assert out.count("BORROW 3750 'TO REMATCH KUMONGA'") == 1 and "RESTORE" not in out      # once, and held
+    out = menu(tmp_path, *lost, "tick", "MARK", "city", 1, "tick")      # travelled: that city's battle is the game's
+    assert "RESTORE 3750" in out.split("MARK")[1]
+    out = menu(tmp_path, *lost, "tick", "MARK", "holds", 13, "tick")    # the city holds another battle now
+    assert "RESTORE 3750" in out.split("MARK")[1]
+    out = menu(tmp_path, *lost, "tick", "MARK", "gameover", "tick")
+    assert "RESTORE 3750" in out.split("MARK")[1]
+    out = menu(tmp_path, "rematch", 3750, *THREE, "open", 0, "right", "tick", "gamepick", "tick", "won", "holds", 12,
+               "tick")                                                  # won: nothing to rematch
+    assert "BORROW" not in out
+    out = menu(tmp_path, *THREE, "open", 0, "right", "tick", "gamepick", "tick", "lost", "holds", 12, "tick")
+    assert "BORROW" not in out                                          # a port without the line: the game's
+
+
+def test_a_lost_monster_comes_back_only_in_the_city_that_holds_it(tmp_path):
+    """PAD-733: the city pick replays the lost monster in the city it was lost in; another city's replay of the same
+    place's battle is the game's own."""
+    base = (*THREE, "open", 0, "right", "tick", "gamepick", "tick", "lost")
+    assert "RESUME 1" in menu(tmp_path, *base, "resume", 0)
+    assert "RESUME 0" in menu(tmp_path, *base, "city", 2, "resume", 0)
 
 
 def test_the_games_pick_under_a_monster_is_the_monsters(tmp_path):
@@ -719,6 +773,10 @@ def test_the_godzilla_ports_carry_the_selection_screen(port):
     for s, b in enumerate(BS.ARTBOX):
         assert re.search(r"^text roster_box_%d\s+%s_Artbox$" % (s, b), text, re.M)
     assert "roster_city_beaten_vec_at" in portgen.TITLE_VALUES and "battle_beaten_slots" in portgen.TITLE_VALUES
+    # PAD-733: the city screen's TO REMATCH %s is line 3750 of every Godzilla build's text table (read off each
+    # program); a pick waits for the screen's close at most 2.5 s (the runtime starts it at the close itself)
+    assert re.search(r"^value roster_rematch_line\s+3750$", text, re.M) and "roster_rematch_line" in portgen.TITLE_VALUES
+    assert re.search(r"^value roster_start_after_ms 2500$", text, re.M)
 
 
 # ---- a form mode ------------------------------------------------------------------------------------------

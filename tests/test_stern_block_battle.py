@@ -98,7 +98,7 @@ def test_the_c_claims_the_slot_and_gives_the_battle_back_with_its_outcome():
     assert "pm_roster_claim(BATTLE_SLOTS[i], on_battle)" in c
     assert "pm_roster_over(won);" in c
     assert "battle_won = 1;" in c                                   # the End the mode, the battle won block
-    assert 'pm_port_value("roster_start_after_ms", 0)' in c        # it runs once the selection screen has closed
+    assert "!pm_roster_closing()" in c                              # PAD-733: it runs as the selection screen's close ends
     # an End block that does not say "won" in a mode that has one does not win it
     assert c.count("battle_won = 1;") == 1
 

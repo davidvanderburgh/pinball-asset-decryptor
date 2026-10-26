@@ -2405,6 +2405,12 @@ void pm_set_text(void *text, const char *words)
  * the display is immediate-mode, so the runtime advances and draws the video player every
  * tick while the surface plays, as the game's own clip loop does. Proven: item 132. */
 static struct { int on, seen; unsigned long started, last; } clip;
+/* PAD-733: when a pick's selection screen last closed (pm_ms | 1; 0 = none since boot), and whether the full-screen clip
+ * started since was played again once already - the game pauses its video player a moment after its close effect ends
+ * (Premium/LE 1.16: within ~45 ms), taking a picked mode's start clip with it (run g_kumonga: the intro "over" 44 ms in,
+ * the loop in its place behind the HUD) */
+static unsigned long roster_closed_ms;
+static int clip_close_replayed;
 static const struct pm_mode *clip_owner;  /* PAD-413: the mode that played it (0 = a trigger file's) */
 /* item 164: CLIP V2 - the newer builds have no clip_play / video_player / video_surface function
  * (the lookup is inlined at every call site: Venom 1.07 has 22), so the runtime does what their
@@ -2966,6 +2972,27 @@ int pm_clip(const char *name)
     clip.seen = 0;
     clip.started = clip.last = pm_ms();
     clip_owner = current;
+    clip_close_replayed = 0;
+    return 1;
+}
+
+/* PAD-733: our full-screen clip stopped in its first 300 ms, started within 300 ms of a pick's selection screen
+ * closing: the game's own pause of its player at the end of that close. Played again at once, once - it stays on
+ * (drawn over everything, the backdrop still waiting), so the glass goes from the close to the clip with no frame of
+ * the HUD between. 1 = played again. */
+static int clip_close_again(unsigned long now)
+{
+    if (clip_close_replayed || !roster_closed_ms || !disp_clip_name[0]) return 0;
+    if (clip.started - roster_closed_ms > 300 || now - clip.started > 300) return 0;
+    clip_close_replayed = 1;
+    disp_clip_ours = 1;
+    ((void (*)(const char *, int, const char *))(unsigned long)fn("clip_play"))(disp_clip_name, 0, 0);
+    disp_clip_ours = 0;
+    disp_clip_lost = 0;
+    say("clip: \"%s\" was paused %lu ms in by the game's close of its selection screen - played again", disp_clip_name,
+        now - clip.started);
+    clip.seen = 0;
+    clip.started = clip.last = now;
     return 1;
 }
 
@@ -3080,7 +3107,7 @@ static void clip_tick(void)
         }
         clip.seen = 1;
     } else if (clip.seen || now - clip.started > 3000) {
-        clip.on = 0;
+        if (!clip_close_again(now)) clip.on = 0;      /* PAD-733 */
     }
     clip.last = now;
 }
@@ -4109,15 +4136,11 @@ static void display_arm(void)
 #define N_BORROW 8
 static struct { unsigned id, idx; const char **old; const char *group[6]; char words[96]; int held; } borrow[N_BORROW];
 
-int pm_message_set(unsigned id, const char *words)
+/* the table's line idx shows `words` (every language) until restored by `id` */
+static int message_borrow(unsigned id, unsigned idx, const char *words)
 {
-    unsigned count, i, k;
-    unsigned short *remap;
+    unsigned i, k;
     const char ***slot;
-    if (!(can & PM_CAN_MESSAGES) || !words) return 0;
-    count = *(unsigned *)(unsigned long)data("message_count");
-    remap = *(unsigned short **)(unsigned long)data("message_remap");
-    if (!remap || id >= count || remap[id] >= count) return 0;
     for (i = 0; i < N_BORROW && borrow[i].held && borrow[i].id != id; i++) ;
     if (i == N_BORROW) return 0;
     str_copy(borrow[i].words, sizeof borrow[i].words, words, sizeof borrow[i].words);
@@ -4125,13 +4148,24 @@ int pm_message_set(unsigned id, const char *words)
     borrow[i].group[5] = 0;
     if (!borrow[i].held) {
         borrow[i].id = id;
-        borrow[i].idx = remap[id];
+        borrow[i].idx = idx;
         slot = (const char ***)(unsigned long)(data("message_table") + 4u * borrow[i].idx);
         borrow[i].old = *slot;
         *slot = borrow[i].group;
         borrow[i].held = 1;
     }
     return 1;
+}
+
+int pm_message_set(unsigned id, const char *words)
+{
+    unsigned count;
+    unsigned short *remap;
+    if (!(can & PM_CAN_MESSAGES) || !words) return 0;
+    count = *(unsigned *)(unsigned long)data("message_count");
+    remap = *(unsigned short **)(unsigned long)data("message_remap");
+    if (!remap || id >= count || remap[id] >= count) return 0;
+    return message_borrow(id, remap[id], words);
 }
 
 void pm_message_restore(unsigned id)
@@ -6015,6 +6049,66 @@ static struct {
  * At most INTRO_MAX_MS from the screen's close. */
 #define INTRO_MAX_MS 15000ul
 static volatile unsigned long pick_at;      /* pm_ms() a mode of ours took a pick on the selection screen; 0 = none */
+
+/* PAD-733 (David: "analyze frame by frame how regular monster modes are started and imitate them ... I seen it flashed
+ * to the hud before showing the video"): THE PICK STARTS AS THE SCREEN'S CLOSE ENDS. Filmed at 0.25x on Premium/LE
+ * 1.16, Pro 1.16 and the Heisei 1.99D card: after a pick the screen fades (gone by 0.44 s), the map zooms into the
+ * frame and holds, and 2.0 s on the city comes up - a battle of the game's is in its intro there. The close is one of
+ * the game's DISPLAY EFFECTS (Premium/LE 1.16: effect 132, priority 196, on from the pick to +1983 ms; the game pauses
+ * its video player as it ends). Anything of ours on the player before that end goes with it (rig runs a0, a1950: an
+ * intro started at the pick or at 1.95 s was over at 2.0 s), and a start much after it shows the city's HUD first
+ * (3 s: the city's, then the mode's, for 1.5 s). So after a pick a mode took, the runtime notes the effect that has
+ * the screen (the first above the idle priority) and the screen counts as closed on the first tick another has it;
+ * the port's roster_start_after_ms is the most it waits (a port without the display lines waits that long).
+ * pm_roster_closing() says it is still closing - checked BEFORE the modes' ticks, so a mode starts in the tick the
+ * close ends, its start clip over the city's first frame. */
+static struct { unsigned long at, closed; int seen, said; unsigned effect, last; } rclose;
+
+static void roster_close_begin(void)
+{
+    rclose.at = pm_ms() | 1;
+    rclose.closed = 0;
+    rclose.seen = 0;
+    rclose.said = 0;
+    rclose.effect = rclose.last = 0xffffu;
+}
+
+static void roster_close_tick(void)
+{
+    unsigned long now = pm_ms();
+    long most = pm_port_value("roster_start_after_ms", 0);
+    unsigned char *m;
+    unsigned e, level;
+    if (!rclose.at || rclose.closed) return;
+    m = disp_manager();
+    if (m) {
+        e = disp_now(m);
+        level = disp_level_now(m);
+        if (e != rclose.last && rclose.said++ < 8)          /* what the close looks like, in the log */
+            say("roster: after the pick the game's display effect %u (priority %u) has the screen (+%lu ms)", e, level,
+                now - rclose.at);
+        rclose.last = e;
+        if (!rclose.seen && level > 1) {
+            rclose.seen = 1;
+            rclose.effect = e;
+        } else if (rclose.seen && e != rclose.effect) {
+            rclose.closed = roster_closed_ms = now | 1;
+            say("roster: the selection screen has closed %lu ms after the pick (its display effect %u is over) - the "
+                "mode starts now", now - rclose.at, rclose.effect);
+            return;
+        }
+    }
+    if ((long)(now - rclose.at) >= most) {
+        rclose.closed = roster_closed_ms = now | 1;
+        say("roster: the selection screen counts as closed %lu ms after the pick (the port's roster_start_after_ms%s)",
+            now - rclose.at, !m ? "; this port has no display lines to watch" : "; its display effect was not seen to end");
+    }
+}
+
+int pm_roster_closing(void)
+{
+    return rclose.at && !rclose.closed;
+}
 static int intro_on(unsigned long t_close, unsigned long *started, int *seen)
 {
     unsigned long now = pm_ms(), wait = (unsigned long)pm_port_value("roster_start_after_ms", 3000) + 2000ul;
@@ -9418,6 +9512,7 @@ static void on_tick(unsigned *r)
         EACH_MODE(m) if (m->init) { current = m; m->init(); }
     }
     clip_tick();
+    roster_close_tick();                      /* PAD-733: a pick's screen closed - before the modes' ticks */
     sb_tick();                                /* PAD-521: the status bar held */
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
     sound_ducks_tick();                       /* PAD-678: a duck after the fades, which end it */
@@ -10012,8 +10107,10 @@ static void roster_take(unsigned *r, unsigned slot, unsigned id, const char *how
     {
         unsigned up = pm_player();
         if (up >= 1 && up <= 4) roster_owed[up] = 1;   /* before the call: a mode that gives the pick back at once clears it */
+        roster_close_begin();               /* PAD-733: before the call - a mode file asks pm_roster_closing() inside it */
         took = roster_fn[slot](slot);
         if (took) pick_at = pm_ms() | 1;    /* PAD-707: the scoop holds the ball through its start clip */
+        else rclose.at = 0;
         if (!took && up >= 1 && up <= 4) roster_owed[up] = 0;
     }
     current = was;
@@ -10122,9 +10219,10 @@ static struct {
     void *box[7];                       /* each place's own state box (its claw), hidden where one of ours won */
     unsigned box_hid;                   /* bit n: place n's box hidden by us (the game keeps an open place's hidden
                                          * itself: only our own hide is ever undone) */
+    unsigned lost_city[5];              /* PAD-733: per player, the city lost[] was lost in (the city that holds it) */
 } more = { 0, 0, -1, -1, -1, 0, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 },
            { { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 },
-             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u };
+             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u, { 0 } };
 static void more_won_shift(int k, int by)   /* member k joined (by 1) or left (by -1): the wins follow */
 {
     int p, s;
@@ -10482,8 +10580,9 @@ static int more_on_pick(unsigned slot)
     unsigned p = pm_player();
     int k = -1, took;
     if (!pm_in_game() || p < 1 || p > 4 || !more_n) return 0;
-    if (roster_resuming) {
-        if (more.lost[p] >= 0 && more.lost[p] < more_n && more_m[(int)more.lost[p]].slot == slot) k = more.lost[p];
+    if (roster_resuming) {          /* PAD-733: the city it was lost in - another city's held battle is the game's */
+        if (more.lost[p] >= 0 && more.lost[p] < more_n && more_m[(int)more.lost[p]].slot == slot
+            && roster_city_of(p) == more.lost_city[p]) k = more.lost[p];
     } else if (more.picked >= 0 && more.picked < more_n && more_m[more.picked].slot == slot) {
         k = more.picked;
     }
@@ -10502,6 +10601,50 @@ static int more_on_pick(unsigned slot)
         say("roster: %s did not take the pick - the place's own battle runs", more_m[k].name);
     }
     return took;
+}
+
+/* PAD-733 (David: "if a mode is failed and you come back to start it again it still says fight biolante again when it's
+ * supposed to be kumunga"): a lost battle stays the city's, and the city screen the next scoop opens offers it again -
+ * STAY IN: <city> / TO REMATCH %s, the game's numbered line `value roster_rematch_line` (3750 on every Godzilla 1.15 and
+ * 1.16 build) filled with the held battle's own name, the place's. While the player up's city holds the battle a new
+ * monster lost there, that line names the monster instead (every language; put back when it is not, and at the game's
+ * end). */
+static int more_rematch_shown = -1;     /* the member the line names now; -1 = the game's own line */
+static void more_rematch(void)
+{
+    long line = pm_port_value("roster_rematch_line", -1);
+    unsigned p = pm_player(), city, rec, held = 0;
+    unsigned n = (unsigned)pm_roster_slots(), at = (unsigned)pm_port_value("roster_id_at", 4);
+    unsigned size = (unsigned)pm_port_value("roster_record_size", 12);
+    const unsigned *vec;
+    int want = -1;
+    char words[64];
+    if (line < 0 || !(can & PM_CAN_MESSAGES) || !data("rule_battle")
+        || (unsigned long)line >= *(unsigned *)(unsigned long)data("message_count")) return;
+    if (pm_in_game() && p >= 1 && p <= 4 && more.lost[p] >= 0 && more.lost[p] < more_n
+        && (city = roster_city_of(p)) == more.lost_city[p]
+        && (rec = roster_city_rec(city, pm_port_value("roster_city_battle_vec_at", -1), 16)) != 0) {
+        vec = *(const unsigned **)(unsigned long)(data("rule_battle") + (unsigned)pm_port_value("roster_vec_at", 8));
+        held = rw(rec + (p - 1) * 4);
+        if (vec && more_m[(int)more.lost[p]].slot < n && held && vec[(more_m[(int)more.lost[p]].slot * size + at) / 4] == held)
+            want = more.lost[p];
+    }
+    if (want == more_rematch_shown) return;
+    if (want < 0) {
+        pm_message_restore(0x80000000u | (unsigned)line);
+        say("roster: the city screen's rematch line is the game's own again");
+    } else {
+        unsigned i, k = 0;
+        const char *pre = "TO REMATCH ", *name = more_m[want].name;
+        for (i = 0; pre[i] && k + 1 < sizeof words; i++) words[k++] = pre[i];
+        for (i = 0; name[i] && k + 1 < sizeof words; i++)
+            if (name[i] != '%') words[k++] = name[i];   /* the line is a format: no conversion of ours in it */
+        words[k] = 0;
+        if (!message_borrow(0x80000000u | (unsigned)line, (unsigned)line, words)) return;
+        say("roster: the city screen's rematch line names %s (player %u's city %u holds the battle it lost)",
+            more_m[want].name, p, more.lost_city[p]);
+    }
+    more_rematch_shown = want;
 }
 
 /* every tick */
@@ -10524,6 +10667,7 @@ static void more_tick(void)
     if (more.keep >= 0 && pm_ms() - more.keep_at >= (unsigned long)pm_port_value("roster_start_after_ms", 3000))
         more.keep = -1;
     more_draw();
+    more_rematch();
 }
 
 /* pm_roster_over: the monster whose mode had the pick is the one a lost battle brings back */
@@ -10531,6 +10675,7 @@ static void more_over(unsigned p, int won)
 {
     if (p < 1 || p > 4 || more.playing[p] < 0) return;
     more.lost[p] = won ? -1 : more.playing[p];
+    more.lost_city[p] = roster_city_of(p);
     if (won && more.playing[p] < more_n) more.won[p][more_m[(int)more.playing[p]].slot] = more.playing[p];
     if (more.playing[p] < more_n)
         say("roster: %s's battle %s for player %u%s", more_m[(int)more.playing[p]].name, won ? "won" : "lost",

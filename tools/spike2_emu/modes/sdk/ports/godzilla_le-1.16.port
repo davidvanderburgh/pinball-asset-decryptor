@@ -214,9 +214,12 @@ value roster_vec_at         8
 value roster_record_size    12
 value roster_id_at          4
 value roster_qualified_at   83
-# the start of a picked mode waits this long (mode_file.c): the selection screen fades and plays its intro clip,
-# gone by +2.4 s (run4, Pro 1.15); at +3.3 s the mode's start screen showed (run5, this build)
-value roster_start_after_ms 3000
+# PAD-733 (David: the scene transition "the same as what the normal modes do"): a picked mode starts as the
+# selection screen's close ends - filmed at 0.25x on Premium/LE 1.16, Pro 1.16 and the Heisei 1.99D card alike: the
+# fade is gone by 0.44 s, the map zooms into the frame and holds, and 2.0 s after the pick the close's display effect
+# (132 here) gives way and a battle of the game's is in its intro. The runtime starts the mode the tick it does
+# (pm_roster_closing); this is only the most it waits (it was the start itself, 3000: the city's HUD, then the mode's)
+value roster_start_after_ms 2500
 # the selection screen's slot table (derived by port_tool.py from 2 places; the same seven records and callout ids as
 # Pro 1.15, read from both programs): a claimed slot is made silent (pm_roster_callout; item 146 fix-1). Run on this build
 # in item 146 run7: slot 0's id read 1888 -> 0 at the claim, 207 by `roster_callout 207`, 1888 at release (PAD_PEEK)
@@ -313,6 +316,9 @@ site battle_beaten       0x00121c28 0xe92d47f0 0xe1a06000
 data battle_beaten_rule       0x007b2e28
 data battle_beaten_guard      0x007b2f88
 value roster_city_beaten_vec_at 68
+# PAD-733: the city screen's "TO REMATCH %s" (numbered line 3750 of the game's text table, read off this build's
+# program: 3748 STAY IN:, 3749 TRAVEL TO:), the held battle's name; it names a new monster lost in the city instead
+value roster_rematch_line  3750
 value battle_beaten_slots   0x0f
 
 # ---- display priority (item 154 display; MODE_SDK.md "Display priority") --------------------------------------

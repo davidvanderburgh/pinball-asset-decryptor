@@ -412,6 +412,10 @@ void pm_roster_more_leave(const char *name);
 int pm_roster_more_count(void);
 const char *pm_roster_more_picked(void);   /* inside on_pick: the name of the new monster picked (0 = a place's own pick) */
 long pm_roster_start_after(void);
+/* PAD-733: 1 while the selection screen a pick was taken on is still closing - start the picked mode on the first tick
+ * this is 0, its start clip at once: the game's own battle is in its intro there. (The runtime watches the game's
+ * display effects: the close is one, Premium/LE 1.16's 132; the port's roster_start_after_ms is the most it waits.) */
+int pm_roster_closing(void);
 
 /* ---- display priority (item 154 display; MODE_SDK.md "Display priority") ------------------
  * The game decides what is on its screen with PRIORITIES, on two levels: its DISPLAY EFFECTS

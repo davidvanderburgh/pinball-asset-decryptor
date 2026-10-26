@@ -3307,12 +3307,12 @@ def to_c(program, slug):
                  % MK.page_names(slug)[0])
         L.append("static volatile unsigned battle_picked;    /* set on the game's thread, run on the tick */")
         L.append("static unsigned battle_player;             /* who picked */")
-        L.append("static unsigned long battle_at;            /* its scripts run at this pm_ms(): the selection screen has closed */")
+        L.append("static unsigned long battle_at;            /* its scripts run from this pm_ms(), once the selection screen has closed */")
         L.append("")
         L.append("static int on_battle(unsigned slot)")
         L.append("{")
-        L.append("    /* PAD-707: a new monster picked on the screen starts as a place picked there does, once it has closed */")
-        L.append("    long after = pm_roster_more_picked() ? pm_roster_start_after() : pm_port_value(\"roster_start_after_ms\", 0);")
+        L.append("    /* PAD-733: a pick starts as the selection screen's close ends (pm_roster_closing), as the game's battle")
+        L.append("     * does: the tick it is over, its start clip at once */")
         L.append("    unsigned k;")
         L.append("    if (!pm_in_game()) return 0;")
         L.append("    for (k = 0; k < %d; k++)" % len(battle_slots))
@@ -3324,8 +3324,8 @@ def to_c(program, slug):
         L.append("            }")
         L.append("            battle_picked |= 1u << k;")
         L.append("            battle_player = pm_player();")
-        L.append("            battle_at = pm_ms() + (after > 0 ? (unsigned long)after : 0UL);")
-        L.append('            pm_log("battle %u picked - its script runs in %ld ms, once the selection screen has closed", slot, after);')
+        L.append("            battle_at = pm_ms();")
+        L.append('            pm_log("battle %u picked - its script runs once the selection screen has closed", slot);')
         L.append("            return 1;                     /* the game's battle does not start */")
         L.append("        }")
         L.append("    return 0;")
@@ -3573,7 +3573,7 @@ def to_c(program, slug):
         L.append("    }")
     battle_scripts = scripts_of("battle")
     if battle_slots:                                # PAD-706: a battle picked, once the selection screen has closed
-        L.append("    if (battle_picked && (long)(pm_ms() - battle_at) >= 0) {")
+        L.append("    if (battle_picked && (long)(pm_ms() - battle_at) >= 0 && !pm_roster_closing()) {")
         L.append("        unsigned picked = battle_picked;")
         L.append("        battle_picked = 0;")
         L.append("        if (!in_game || pm_player() != battle_player) {")
@@ -3583,7 +3583,12 @@ def to_c(program, slug):
         L.append("            battle_picked = picked;       /* another of ours runs: it starts when that one ends */")
         L.append("            battle_at = pm_ms() + 500;")
         L.append("        } else {")
+        if media:
+            L.append("            clip_after = 0;               /* PAD-733: its start clip with its start, as the game's battle */")
         L.extend("        " + line if line else line for code in battle_scripts for line in code.split("\n"))
+        if media:
+            L.append("            clip_after = PA_CLIP_AFTER_MS;")
+            L.append("            own_clip_due();               /* on the glass in this tick: no frame of the HUD before it */")
         L.append("            if (run.on) battle_held = 1;")
         L.append("            else {")
         L.append('                pm_log("the battle pick started nothing - given back, a battle lost");')
@@ -4727,6 +4732,10 @@ _MEDIA_C = """/* ---- its own clips and sounds (PAD-374): what Write carried, na
 static struct pa_assets own = { .folder = "%(slug)s" };
 static const char *clip_waiting, *loop_waiting;   /* MODE_SDK.md "Clips race the game's own" */
 static unsigned long clip_due;
+/* PAD-733: 0 while a battle pick starts the mode - no shot of the game's races its clip there, and the game's own battle
+ * is on the glass in its intro the moment the selection screen has closed (David: "the scene transition ... the same as
+ * what the normal modes do") */
+static unsigned long clip_after = PA_CLIP_AFTER_MS;
 static int looping;                     /* a clip of its own loops behind the HUD */
 
 static int own_clip(const char *cue)
@@ -4745,7 +4754,7 @@ UNUSED static void clip_full(const char *cue)
     if (clip_waiting && clip_waiting != cue)
         pm_log("own clip %%s dropped before it played: %%s was asked for after it", clip_waiting, cue);
     clip_waiting = cue;
-    clip_due = pm_ms() + PA_CLIP_AFTER_MS;
+    clip_due = pm_ms() + clip_after;
     if (ending) end_clip = 1;
 }
 
@@ -4791,9 +4800,9 @@ UNUSED static int sound(const char *cue)
     return 0;
 }
 
-static void own_tick(void)
+/* a full-screen clip whose time has come */
+static void own_clip_due(void)
 {
-    pa_tick(&own);
     if (!clip_waiting || pm_ms() < clip_due) return;
     pa_clip_full(&own, clip_waiting);
     clip_waiting = 0;
@@ -4802,6 +4811,12 @@ static void own_tick(void)
         loop_waiting = 0;
         clip_loop(cue);
     }
+}
+
+static void own_tick(void)
+{
+    pa_tick(&own);
+    own_clip_due();
 }
 
 """

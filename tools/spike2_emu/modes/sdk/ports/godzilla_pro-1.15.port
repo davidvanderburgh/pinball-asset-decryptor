@@ -188,10 +188,13 @@ value roster_vec_at         8
 value roster_record_size    12
 value roster_id_at          4
 value roster_qualified_at   83
-# the start of a picked mode waits this long (mode_file.c): the selection screen fades and plays its intro clip,
-# gone by +2.4 s; with 3000 the mode started 3001 ms after the pick (item 146 run4). With no wait no start screen
-# was seen (run2, run3: it came while the selector was closing); at +3.3 s it showed on Premium 1.16 (run5)
-value roster_start_after_ms 3000
+# PAD-733 (David: the scene transition "the same as what the normal modes do"): a picked mode starts as the
+# selection screen's close ends - filmed at 0.25x on Premium/LE 1.16, Pro 1.16 and the Heisei 1.99D card alike: the
+# fade is gone by 0.44 s, the map zooms into the frame and holds, and 2.0 s after the pick the close's display effect
+# (Premium/LE 1.16's 132) gives way and a battle of the game's is in its intro. The runtime starts the mode the tick it does
+# (pm_roster_closing); this is only the most it waits (it was the start itself, 3000: the city's HUD, then the mode's)
+# (this build's card is archival and was not run; its selector is the 1.16 builds' scene and code)
+value roster_start_after_ms 2500
 # the selection screen's slot table (.data, 32-byte records: the art node name at +20, the progress node at +24, a u16
 # callout id at +28 = 1888 1918 1894 1910 0 0 0; its code plays nothing for 0). A claimed slot is made silent, and its id
 # put back on release (pm_roster_callout, mode file `roster_callout`; item 146 fix-1)
@@ -282,6 +285,9 @@ site battle_beaten       0x0011f318 0xe92d47f0 0xe1a06000
 data battle_beaten_rule       0x0079fa38
 data battle_beaten_guard      0x0079fb98
 value roster_city_beaten_vec_at 68
+# PAD-733: the city screen's "TO REMATCH %s" (numbered line 3750 of the game's text table, read off this build's
+# program: 3748 STAY IN:, 3749 TRAVEL TO:), the held battle's name; it names a new monster lost in the city instead
+value roster_rematch_line  3750
 value battle_beaten_slots   0x0f
 # the slots whose battle stops itself, not through CBattle::stop: 5, Megalon & Gigan multiball
 value battle_own_stop_slots  0x20

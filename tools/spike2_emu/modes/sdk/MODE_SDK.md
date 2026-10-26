@@ -1777,7 +1777,23 @@ screen runs inside the scoop's settled event (the game's own hold); a pick a mod
 the ball after the screen closes, through the port's `roster_start_after_ms` until the mode starts, then through its
 full-screen start clip (1.2 s for one to begin), at most 15 s - logged `scoop: a mode took the selection screen's pick
 - the ball waits for its start clip` and `let go after N ms (its start clip is over)`.
-## The shield platform (Godzilla Premium/LE, PAD-379)
+
+**The pick's choreography is the game's (PAD-733).** David: "imitate them for our custom modes ... I seen it flashed
+to the hud before showing the video". Filmed at 0.25x on Premium/LE 1.16, Pro 1.16 and the Heisei 1.99D card: after
+a pick of the game's own battle the screen fades out (gone by 0.44 s), the map zooms into the frame and holds, and at
+2.0 s the battle is on the glass in its full-screen intro - no HUD before it. The close is one of the game's display
+effects (Premium/LE 1.16: 132, priority 196, from the pick to +1983 ms; the game pauses its video player as it ends,
+taking anything of ours on it along). So a picked mode now starts on the first tick that effect has given way
+(`pm_roster_closing()`; the port's `roster_start_after_ms 2500` is only the most it waits - it was the start itself,
+3000, and the city's HUD, then the mode's, showed for 1.5 s first), and a blocks mode's start clip plays in that same
+tick (a clip a shot asks for still waits half a second, "Clips race the game's own"; there is no shot at a pick). A
+full-screen clip draws over everything, so a start at the pick itself would hide the screen's close (rig run a0), and
+one before the close's end is gone with it (a1950). The game pauses its player a moment after the effect ends (within
+~45 ms, run g_kumonga), so a full-screen clip it stops in its first 300 ms, started within 300 ms of that close, is played
+again once at once (`clip: "..." was paused N ms in by the game's close of its selection screen - played again`); it
+stays on meanwhile, so neither the HUD nor the backdrop loop gets a frame. The city screen a lost battle brings (`STAY IN:` / `TRAVEL TO:` /
+`TO REMATCH %s`, numbered lines 3748-3750) names a new monster lost there instead of the place's battle
+(`value roster_rematch_line 3750`), and the city pick replays the monster only in the city it was lost in.
 
 Godzilla Premium and LE carry their three shield targets on a platform a motor turns. Most of the game
 it faces AWAY: the spinner side (the shield ramp spinner) faces the player and the shields cannot be hit
@@ -3857,7 +3873,7 @@ value roster_vec_at         8
 value roster_record_size    12
 value roster_id_at          4
 value roster_qualified_at   83
-value roster_start_after_ms 3000   # the picked mode starts this long after the pick (mode_file.c)
+value roster_start_after_ms 2500   # the most a pick waits for the screen's close (PAD-733: pm_roster_closing)
 data roster_screen_table     0x006fc8a4   # the screen's slot table (.data): 32-byte records, the callout id at +28
 value roster_screen_record_size 32
 value roster_callout_at      28

@@ -81,6 +81,9 @@ static unsigned long now_ms;
 unsigned long pm_ms(void) { return now_ms; }
 long pm_port_value(const char *name, long fallback)
 { const char *v = getenv("ROSTER_AFTER_MS"); return (!strcmp(name, "roster_start_after_ms") && v) ? atol(v) : fallback; }
+/* PAD-733: the selection screen closes ROSTER_CLOSE_MS after the harness's pick (the runtime watches the game's player) */
+static unsigned long picked_at;
+int pm_roster_closing(void) { const char *v = getenv("ROSTER_CLOSE_MS"); return v && now_ms < picked_at + (unsigned long)atol(v); }
 int pm_stock_mode_running(unsigned kinds) { return 0; }
 const char *pm_stock_mode_what(unsigned kind) { return "a stock mode"; }
 void pm_callout(unsigned id) {}
@@ -121,6 +124,7 @@ int main(int argc, char **argv)
             printf("SWAPPED\n");
         } else if (!strcmp(argv[k], "pick")) {
             unsigned s = (unsigned)atoi(argv[++k]);
+            picked_at = now_ms;
             printf("PICK %u -> %d\n", s, claimed[s] ? claimed[s](s) : -1);
         } else if (!strcmp(argv[k], "ball_end")) {
             m->ball_end();
@@ -205,8 +209,9 @@ def _run(harness, tmp_path, cfg, *args, mode1=None, after_ms=None):
         (tmp_path / "mode1.cfg").write_text(mode1)
     env = dict(os.environ, MODE_DIR=str(tmp_path))
     env.pop("ROSTER_AFTER_MS", None)
-    if after_ms is not None:
-        env["ROSTER_AFTER_MS"] = str(after_ms)
+    env.pop("ROSTER_CLOSE_MS", None)
+    if after_ms is not None:                    # PAD-733: the selection screen closes this long after the pick
+        env["ROSTER_AFTER_MS"] = env["ROSTER_CLOSE_MS"] = str(after_ms)
     r = subprocess.run([str(harness), *args], capture_output=True, text=True, env=env, timeout=30)
     assert r.returncode == 0, r.stderr
     return r.stdout
@@ -291,9 +296,10 @@ def test_a_pick_while_another_mode_runs_starts_when_that_one_ends(harness, tmp_p
     assert out.index("MOTHRA START (roster pick)") < out.index("ROSTER_DONE") < out.index("MOTHRA END (ball ended)")
 
 
-def test_the_start_waits_roster_start_after_ms(harness, tmp_path):
+def test_the_start_waits_for_the_screens_close(harness, tmp_path):
+    """PAD-733: a picked mode starts as the selection screen's close ends (pm_roster_closing), not on a clock."""
     out = _run(harness, tmp_path, ROSTER_ONLY, "pick", "0", "tick", "120", "tick", "80", after_ms=3000)
-    assert "PICK 0 -> 1" in out and "picked - it starts in 3000 ms, once the selection screen has closed" in out
+    assert "PICK 0 -> 1" in out and "picked - it starts once the selection screen has closed" in out
     first, second = out.index("TICKED 120"), out.index("TICKED 80")
     assert "START" not in out[:first]                              # 2.0 s: not yet
     assert out.index("MOTHRA START (roster pick)") < second         # by 3.4 s: started
@@ -361,7 +367,7 @@ def test_a_waiting_pick_lapses_when_another_player_is_up(harness, tmp_path):
     game). The mode must not start for the wrong player; the pick is given back (the runtime then waits for the
     player who picked - test_the_runtime_gives_a_pick_back_only_to_the_player_who_picked)."""
     out = _run(harness, tmp_path, ROSTER_ONLY, "pick", "0", "player", "2", "tick", "300", after_ms=3000)
-    assert "PICK 0 -> 1" in out and "picked - it starts in 3000 ms" in out
+    assert "PICK 0 -> 1" in out and "picked - it starts once the selection screen has closed" in out
     assert "the roster pick lapsed - the player changed or the game ended" in out
     assert out.count("ROSTER_DONE") == 1 and "START" not in out
 
@@ -628,7 +634,7 @@ def test_the_pro_port_names_the_roster():
     assert int(p[("value", "roster_vec_at")][0], 0) == 8
     assert int(p[("value", "roster_record_size")][0], 0) == 12
     assert int(p[("value", "roster_id_at")][0], 0) == 4
-    assert int(p[("value", "roster_start_after_ms")][0], 0) == 3000
+    assert int(p[("value", "roster_start_after_ms")][0], 0) == 2500   # PAD-733: the most a pick waits for the screen's close
 
 
 def test_the_premium_port_names_the_roster_and_it_is_on():
@@ -639,7 +645,7 @@ def test_the_premium_port_names_the_roster_and_it_is_on():
     assert p[("site", "roster_done")][:3] == ["0x00124924", "0xe92d4010", "0xe1a04000"]
     assert int(p[("data", "rule_battle")][0], 0) == 0x7B0C70
     for name, want in (("roster_slots", 7), ("roster_vec_at", 8), ("roster_record_size", 12), ("roster_id_at", 4),
-                       ("roster_qualified_at", 83), ("roster_start_after_ms", 3000)):
+                       ("roster_qualified_at", 83), ("roster_start_after_ms", 2500)):
         assert int(p[("value", name)][0], 0) == want, name
     assert "#off" not in (SDK / "ports" / "godzilla_le-1.16.port").read_text(encoding="utf-8")
 

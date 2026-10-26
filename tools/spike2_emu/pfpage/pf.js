@@ -362,6 +362,13 @@ function startMain() {
     // PAD-735: the app that launched the run has the game boot again; only a
     // run with an app. This window stays open (PAD-738), so the button follows
     // the run's `restarting` (PAD-744): back the moment the request is taken.
+    // PAD-744: how far the game has booted (bootprog.py), while it boots
+    const boot = el("span", "boot");
+    const bar = el("span", "bar"), fill = el("i"), bootN = el("span", "n mono"), bootW = el("span", "w");
+    bar.append(fill);
+    boot.append(bar, bootN, bootW);
+    boot.hidden = true;
+    box.append(boot);
     let restart = null;
     const showRestarting = (on) => {
       restart.textContent = on ? "Restarting…" : "Restart game";
@@ -401,6 +408,13 @@ function startMain() {
       pause.classList.toggle("primary", !!r.paused);
       box.classList.toggle("paused", !!r.paused);
       if (restart) showRestarting(r.restarting);
+      boot.hidden = !r.boot;
+      if (r.boot) {
+        fill.style.width = r.boot.pct + "%";
+        bootN.textContent = r.boot.pct + "%";
+        bootW.textContent = r.boot.words;
+        boot.title = r.boot.words;
+      }
       if (vol && r.audio) {
         if (!sliding) {
           vol.value = String(Math.round(r.audio.gain * 100));

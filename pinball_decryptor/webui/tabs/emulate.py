@@ -3530,10 +3530,14 @@ class EmulateTab(TabService):
             st = info.get("state")
             if st in ("attract", "running"):
                 self._footer("run", None, st_label)
-            elif st == "techalerts":
-                self._footer("techalerts", None, st_label)
             else:
-                self._footer("boot", None, st_label)
+                # PAD-744: the steps inside Boot and Node boards (bootprog.py)
+                try:
+                    pct = int(info.get("boot_pct", ""))
+                except ValueError:
+                    pct = None
+                self._footer("techalerts" if st == "techalerts" else "boot",
+                             pct, st_label)
         else:
             self._footer("idle")
 

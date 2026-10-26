@@ -158,7 +158,7 @@ def test_the_window_button_comes_back_once_the_run_takes_it(monkeypatch,
     dump.mkdir()
     monkeypatch.setattr(pf.padpath, "dump", lambda: str(dump))
     monkeypatch.setenv("PAD_SLOT", "0")
-    run = pf.RunCtl(str(tmp_path / "audio.json"))
+    run = pf.RunCtl(str(tmp_path / "audio.json"), logdir=None)  # no log: grace
     assert run.dyn()["restarting"] is False
     assert run.ask_restart() is True
     t0 = run._restart_t

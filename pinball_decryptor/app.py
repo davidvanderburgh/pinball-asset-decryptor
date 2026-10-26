@@ -6440,27 +6440,34 @@ class App:
         self._settings["default_settings_presets"] = blob
         self._save_settings()
 
-    def _apply_spike1_default_settings(self, out, vals, source):
+    def _apply_spike1_default_settings(self, out, vals, source, ranges=None):
         """Bake staged/preset Spike 1 adjustment defaults into the built card's
         game ELF.  *vals* is ``{AD_<id>: value}`` (the same store both eras
-        stage into); Spike 1 has no high-score board or menu widening, so only
-        the numeric defaults apply.  Returns True when *out* is a Spike 1 card
-        (handled here), False to fall through to the Spike 2 path."""
+        stage into) and *ranges* ``{AD_<id>: (min, max)}`` (PAD-750); Spike 1
+        has no high-score board or menu widening, so only the numeric
+        settings apply.  Returns True when *out* is a Spike 1 card (handled
+        here), False to fall through to the Spike 2 path."""
         from .plugins.stern.formats import detect_spike1_game
         if detect_spike1_game(out) is None:
             return False
         from .plugins.stern import spike1
-        overrides = {}
-        for name, v in (vals or {}).items():
-            if isinstance(name, str) and name.startswith("AD_"):
-                try:
-                    overrides[int(name[3:])] = int(v)
-                except ValueError:
-                    pass
-        if overrides:
+
+        def by_id(d, conv):
+            got = {}
+            for name, v in (d or {}).items():
+                if isinstance(name, str) and name.startswith("AD_"):
+                    try:
+                        got[int(name[3:])] = conv(v)
+                    except (TypeError, ValueError, IndexError):
+                        pass
+            return got
+        overrides = by_id(vals, int)
+        ranges = by_id(ranges, lambda p: (int(p[0]), int(p[1])))
+        if overrides or ranges:
             try:
                 n = spike1.write_game_elf_defaults(
-                    out, overrides, log=self.window.append_log)
+                    out, overrides, log=self.window.append_log,
+                    ranges_by_id=ranges)
                 self.window.append_log(
                     "Applied %s (%d setting(s)) to the built Spike 1 image."
                     % (source, n), "success")
@@ -6480,10 +6487,13 @@ class App:
         if mfr is None or not getattr(mfr.capabilities, "settings_editor",
                                       False):
             return
+        from .plugins.stern.adjustments import PRESET_RANGES_KEY
         blob = self._settings.get("default_settings_presets") or {}
         active = blob.get("active")
-        vals = (blob.get("presets") or {}).get(active)
-        if not vals:
+        vals = dict((blob.get("presets") or {}).get(active) or {})
+        # PAD-750: a preset's changed ranges ride in the same record
+        ranges = vals.pop(PRESET_RANGES_KEY, None) or {}
+        if not vals and not ranges:
             return
         try:
             out = self.window._target_write_path()
@@ -6492,21 +6502,21 @@ class App:
         if not out or not os.path.isfile(out):
             return
         if self._apply_spike1_default_settings(
-                out, vals, "Default Settings preset \"%s\"" % active):
+                out, vals, "Default Settings preset \"%s\"" % active,
+                ranges=ranges):
             return
         try:
+            from .plugins.stern.adjustments import resolve_overrides
             from .plugins.stern.explorer import CardImage
             with CardImage(out) as c:
                 table, part, path = c.adjustment_table()
-                overrides = {}
-                for name, v in vals.items():
-                    if name in table.by_name:
-                        e = table.get(name)
-                        overrides[name] = max(e["min"], min(e["max"], int(v)))
-                if overrides:
+                overrides, ranges = resolve_overrides(
+                    lambda n: table.get(n) if n in table.by_name else None,
+                    vals, ranges)
+                if overrides or ranges:
                     n, _ref = c.write_adjustment_defaults(
                         part, path, table, overrides,
-                        log=self.window.append_log)
+                        log=self.window.append_log, ranges=ranges)
                     self.window.append_log(
                         "Applied Default Settings preset \"%s\" (%d setting(s)) "
                         "to the built image." % (active, n), "success")
@@ -6531,9 +6541,10 @@ class App:
         if not assets_dir or not os.path.isdir(assets_dir):
             return
         vals = self.window.staged_default_settings(assets_dir)
+        ranges = self.window.staged_setting_ranges(assets_dir)
         names = self.window.staged_high_scores(assets_dir)
         expose = self.window.staged_menu_expose(assets_dir)
-        if not vals and not names and not expose:
+        if not vals and not ranges and not names and not expose:
             return
         try:
             out = self.window._target_write_path()
@@ -6542,17 +6553,18 @@ class App:
         if not out or not os.path.isfile(out):
             return
         if self._apply_spike1_default_settings(
-                out, vals, "staged default setting(s)"):
+                out, vals, "staged default setting(s)", ranges=ranges):
             return
         try:
+            from .plugins.stern.adjustments import resolve_overrides
             from .plugins.stern.explorer import CardImage
             with CardImage(out) as c:
                 table, part, path = c.adjustment_table()
-                overrides = {}
-                for name, v in vals.items():
-                    if name in table.by_name:
-                        e = table.get(name)
-                        overrides[name] = max(e["min"], min(e["max"], int(v)))
+                # PAD-750: a changed range is written with the defaults, and
+                # each value is pulled into the range it will have
+                overrides, ranges = resolve_overrides(
+                    lambda n: table.get(n) if n in table.by_name else None,
+                    vals, ranges)
                 # Item 145: a timer the Modes tab staged is in the build already
                 # (the Write puts it in the game program on every path).
                 # Writing it again would only change the file, so the next
@@ -6614,12 +6626,13 @@ class App:
                             "\"%s\" (it isn't one of this build's hidden "
                             "settings) — the rest of the staged defaults were "
                             "still applied." % expose, "warning")
-                if overrides or name_overrides or menu_last_id is not None:
+                if (overrides or ranges or name_overrides
+                        or menu_last_id is not None):
                     n, _ref = c.write_adjustment_defaults(
                         part, path, table, overrides,
                         high_scores=hstd, name_overrides=name_overrides,
                         menu_last_id=menu_last_id, menu_plan=menu_plan,
-                        log=self.window.append_log)
+                        log=self.window.append_log, ranges=ranges)
                     if n:
                         self.window.append_log(
                             "Applied %d staged default setting(s) to the built "

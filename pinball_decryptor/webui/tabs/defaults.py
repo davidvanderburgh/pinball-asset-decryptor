@@ -52,6 +52,16 @@ STATUS_TEXT = {"": "Adjustments", "service": "Service menu",
 SORT_CFG = (("setting", False), ("value", True), ("new", False),
             ("range", False), ("status", False))
 
+# The editor's Lowest / Highest fields (PAD-750).
+RANGE_TIP = ("The lowest and highest value the machine's own menu lets an "
+             "operator pick for this setting. The card carries them beside "
+             "the default, so they can be changed like it.")
+RANGE_WARN = ("Lowest and Highest are what the machine's menu offers. Go "
+              "past Stern's range only on a setting the machine shows as a "
+              "plain number: one it shows as named choices has only the names "
+              "the game has, and a game may not work past a limit it was "
+              "written for.")
+
 STAGE_DELAY_MS = 500
 LOG_DELAY_MS = 1400
 
@@ -68,10 +78,31 @@ def range_text(r):
     card's own default falls outside it (Stern ships those: Led Zeppelin
     1.22's ELECTRIC MAGIC FRENZY / MULTIBALL champions)."""
     rng = "%s - %s" % (fmt_num(r["min"]), fmt_num(r["max"]))
-    if not (r["min"] <= r["default"] <= r["max"]):
+    card = (r.get("card_min", r["min"]), r.get("card_max", r["max"]))
+    if card != (r["min"], r["max"]):
+        # PAD-750: a range changed here, with the card's own beside it
+        rng += "  (card %s - %s)" % (fmt_num(card[0]), fmt_num(card[1]))
+    elif not (r["min"] <= r["default"] <= r["max"]):
         rng += "  (card ships %s, outside its own range)" % (
             fmt_num(r["default"]))
     return rng
+
+
+def range_changed(r):
+    """True when *r*'s range was changed here (PAD-750)."""
+    return (r.get("card_min", r["min"]), r.get("card_max", r["max"])) != (
+        r["min"], r["max"])
+
+
+def row_range_editable(r):
+    """Can the editor change *r*'s range?  See
+    :func:`plugins.stern.adjustments.range_editable`; a scaled row (shown in
+    other units than it is stored) is left alone too."""
+    from ...plugins.stern.adjustments import range_editable
+    if r.get("scale", 1) != 1:
+        return False
+    return range_editable(r["name"], {"min": r.get("card_min", r["min"]),
+                                      "max": r.get("card_max", r["max"])})
 
 
 def fmt_value(r, v):
@@ -186,6 +217,7 @@ class DefaultsTab(TabService):
     icon = "defaults"
     exports = (
         "staged_default_settings", "staged_high_scores", "staged_menu_expose",
+        "staged_setting_ranges",
         "settings_image_var", "settings_preset_var", "settings_autoapply_var",
         "_modes_settings_staged",
     )
@@ -215,6 +247,8 @@ class DefaultsTab(TabService):
         # Field state as of the last log line - None until a card is loaded.
         self._logged = None
         self._rows = []               # the editable rows (form, scores, extra)
+        # PAD-750: {AD_name: (min, max)} changed from the card's own range
+        self._ranges = {}
         self._hstd = None             # plugins.stern.high_scores table
         self._hs = []                 # [{label, record, values}] per slot
         self._every = []
@@ -349,8 +383,14 @@ class DefaultsTab(TabService):
         vals = self._presets_blob()["presets"].get(name)
         if not vals or not self._rows:
             return
+        from ...plugins.stern.adjustments import PRESET_RANGES_KEY, clean_ranges
         self._begin()
         try:
+            # ranges first: a value beyond the card's range needs its own
+            self._reset_ranges()
+            for rname, rng in clean_ranges(
+                    vals.get(PRESET_RANGES_KEY)).items():
+                self._set_range(rname, rng)
             for r in self._rows:
                 if r["name"] in vals:
                     # Preset holds internal units; show them in display units.
@@ -394,11 +434,16 @@ class DefaultsTab(TabService):
             if v is None:
                 v = r["default"]
             vals[r["name"]] = v * r.get("scale", 1)
+        n = len(vals)
+        if self._ranges:
+            from ...plugins.stern.adjustments import PRESET_RANGES_KEY
+            vals[PRESET_RANGES_KEY] = {k: list(v)
+                                       for k, v in self._ranges.items()}
         self._presets_blob()["presets"][name] = vals
         self.settings_preset_var.set(name)
         self._persist_presets()
         self._refresh_presets()
-        self._status("Saved preset \"%s\" (%d settings)." % (name, len(vals)))
+        self._status("Saved preset \"%s\" (%d settings)." % (name, n))
         return {"ok": True, "name": name}
 
     @rpc
@@ -512,6 +557,7 @@ class DefaultsTab(TabService):
         # flush adopts them silently.
         self._logged = None
         self._rows = []
+        self._ranges = {}
         self._hs = []
         self._all_rows = []
         self._all_published = []
@@ -549,6 +595,9 @@ class DefaultsTab(TabService):
         # The reference list stands on its own: a build with no *editable*
         # settings still gets it.
         self._all_rows = list(self._every or [])
+        for a in self._all_rows:
+            a.setdefault("card_min", a["min"])
+            a.setdefault("card_max", a["max"])
         self.set(menu_enabled=bool(self._menu_plan),
                  spike1=bool(self._spike1), loaded=True,
                  all_total=len(self._all_rows))
@@ -600,10 +649,13 @@ class DefaultsTab(TabService):
             item = {"type": "row", "name": r["name"], "label": r["label"],
                     "help": help_text, "status": r.get("status"),
                     "on_card": fmt_value(r, r["default"]),
-                    "default": r["default"], "range": rng}
+                    "default": r["default"], "range": rng,
+                    "range_edit": self._range_edit(r),
+                    "range_chg": False}
             item.update(ed)
             form.append(item)
-            self._rows.append(dict(r, value=r["default"], where="form"))
+            self._rows.append(dict(r, value=r["default"], where="form",
+                                   card_min=r["min"], card_max=r["max"]))
         self.set(phase="ready", message="", form=form)
         self._build_hs(by_adj, extra_scores)
         self._apply_staged_overlay()
@@ -611,13 +663,27 @@ class DefaultsTab(TabService):
     def _score_item(self, score):
         """One slot's on-card score + editable default, registered as an
         ordinary settings row so staging, presets and Reset keep working."""
-        self._rows.append(dict(score, value=score["default"], where="hs"))
-        return {"name": score["name"], "on_card": fmt_num(score["default"]),
-                "default": score["default"], "range": range_text(score),
-                "lo": min(score["min"], score["default"]),
-                "hi": max(score["max"], score["default"]),
-                "step": score.get("step") or 1,
-                "chars": max(8, len("%d" % score["max"]) + 1)}
+        row = dict(score, value=score["default"], where="hs",
+                   card_min=score.get("card_min", score["min"]),
+                   card_max=score.get("card_max", score["max"]))
+        self._rows.append(row)
+        return self._score_cells(row)
+
+    def _range_edit(self, r):
+        """Does *r*'s Range cell open the editor on it?  (The editor works
+        off the all-settings list, so a row missing from it has none.)"""
+        return row_range_editable(r) and self._all_row(r["name"]) is not None
+
+    def _score_cells(self, row):
+        """A score row's page item, from its (possibly changed) range."""
+        return {"name": row["name"], "on_card": fmt_num(row["default"]),
+                "default": row["default"], "range": range_text(row),
+                "range_edit": self._range_edit(row),
+                "range_chg": range_changed(row),
+                "lo": min(row["min"], row["default"]),
+                "hi": max(row["max"], row["default"]),
+                "step": row.get("step") or 1,
+                "chars": max(8, len("%d" % row["max"]) + 1)}
 
     def _build_hs(self, by_adj, extra_scores=()):
         """The "High Scores" block: one row per slot on the machine's board -
@@ -755,14 +821,19 @@ class DefaultsTab(TabService):
         self.set(reset_enabled=True)
         self._refresh_presets()
         staged = self.staged_default_settings(self._staged_dir())
+        staged_ranges = self.staged_setting_ranges(self._staged_dir())
         expose = self.staged_menu_expose(self._staged_dir())
         high = self.staged_high_scores(self._staged_dir())
         self._loading = True
         self._begin()
         try:
+            self._reset_ranges()
             active = self._presets_blob().get("active")
             if active in self._presets_blob()["presets"]:
                 self._load_preset(active)
+            # PAD-750: the staged ranges, before the values that need them
+            for name, rng in staged_ranges.items():
+                self._set_range(name, rng)
             for r in self._rows:
                 if r["name"] in staged:
                     self._set_row(r, int(staged[r["name"]])
@@ -790,9 +861,9 @@ class DefaultsTab(TabService):
         self._publish_hs()
         self._fill_all()
         bits = []
-        if staged:
+        if staged or staged_ranges:
             bits.append("%d setting(s) staged for the next Build"
-                        % len(staged))
+                        % len(set(staged) | set(staged_ranges)))
         if expose:
             bits.append("the machine's menu will be opened up to \"%s\""
                         % self._expose_label(expose))
@@ -852,6 +923,7 @@ class DefaultsTab(TabService):
         self._loading = True
         self._begin()
         try:
+            self._reset_ranges()
             for r in self._rows:
                 self._set_row(r, r["default"])
             for row in self._hs:
@@ -867,12 +939,15 @@ class DefaultsTab(TabService):
         if assets_dir:
             from ...core import staged_changes
             data = staged_changes.load(assets_dir)
-            n = len(data.get("settings") or {}) + len(
+            n = len(set(data.get("settings") or {})
+                    | set(data.get("setting_ranges") or {})) + len(
                 data.get("high_scores") or {})
             menu = bool(data.get("menu_expose_through"))
             if ("settings" in data or "high_scores" in data
+                    or "setting_ranges" in data
                     or "menu_expose_through" in data):
                 data.pop("settings", None)
+                data.pop("setting_ranges", None)
                 data.pop("high_scores", None)
                 data.pop("menu_expose_through", None)
                 staged_changes.save(assets_dir, data)
@@ -907,6 +982,15 @@ class DefaultsTab(TabService):
             except (TypeError, ValueError):
                 continue
         return out
+
+    def staged_setting_ranges(self, assets_dir):
+        """``{AD_name: (min, max)}`` staged for *assets_dir* (PAD-750: the
+        menu's lowest and highest value, changed here), or ``{}``.  Read by
+        the app's Write flow after a successful build."""
+        from ...core import staged_changes
+        from ...plugins.stern.adjustments import clean_ranges
+        return clean_ranges(staged_changes.load(assets_dir).get(
+            "setting_ranges"))
 
     def staged_high_scores(self, assets_dir):
         """``{slot label: {initials, name}}`` staged for *assets_dir*, or
@@ -952,6 +1036,14 @@ class DefaultsTab(TabService):
                 continue
             state[("set", r["name"])] = (
                 r["label"], fmt_value(r, r["default"]), fmt_value(r, v))
+        for name, (lo, hi) in self._ranges.items():
+            a = self._row(name) or self._all_row(name)
+            if a is None:
+                continue
+            state[("rng", name)] = (
+                "%s range" % a["label"],
+                "%s - %s" % (fmt_num(a["card_min"]), fmt_num(a["card_max"])),
+                "%s - %s" % (fmt_num(lo), fmt_num(hi)))
         for row in self._hs:
             for key, val in row["values"].items():
                 old = row["record"][key]
@@ -1017,22 +1109,28 @@ class DefaultsTab(TabService):
         self._fill_all()
         changes = self._changes()
         hstd = self._hs_changes()
+        ranges = {k: [lo, hi] for k, (lo, hi) in sorted(self._ranges.items())}
         assets_dir = self._staged_dir()
         if not assets_dir:
-            if changes or hstd:
+            if changes or hstd or ranges:
                 self._status(NO_FOLDER_TEXT)
             return
         from ...core import history_log, staged_changes
         data = staged_changes.load(assets_dir)
         before = data.get("settings") or {}
         before_hs = data.get("high_scores") or {}
+        before_rng = data.get("setting_ranges") or {}
         new = {k: int(v) for k, v in changes.items()}
-        if new == before and hstd == before_hs:
+        if new == before and hstd == before_hs and ranges == before_rng:
             return
         if new:
             data["settings"] = new
         elif "settings" in data:
             del data["settings"]
+        if ranges:
+            data["setting_ranges"] = ranges
+        elif "setting_ranges" in data:
+            del data["setting_ranges"]
         if hstd:
             data["high_scores"] = hstd
         elif "high_scores" in data:
@@ -1053,6 +1151,19 @@ class DefaultsTab(TabService):
                 hist.append("defaults  %s  staged: %s  (was staged: %s)"
                             % (k, n, o))
 
+        for k in sorted(set(before_rng) | set(ranges)):
+            o, n = before_rng.get(k), ranges.get(k)
+            if o == n:
+                continue
+            if n is None:
+                hist.append("defaults  %s  range un-staged (back to the "
+                            "card's, was staged: %s - %s)" % (k, o[0], o[1]))
+            else:
+                hist.append("defaults  %s  range staged: %s - %s%s"
+                            % (k, n[0], n[1],
+                               ("  (was staged: %s - %s)" % (o[0], o[1]))
+                               if o else ""))
+
         def _hs(d):
             return ", ".join("%s=%s" % kv for kv in sorted(
                 (d or {}).items()))
@@ -1069,7 +1180,7 @@ class DefaultsTab(TabService):
                                ("  (was: %s)" % _hs(o)) if o else ""))
         history_log.record(assets_dir, hist)
         self._folder_written(assets_dir)
-        total = len(new) + len(hstd)
+        total = len(set(new) | set(ranges)) + len(hstd)
         self._status(("%d change(s) staged — baked into the next card you "
                       "Build." % total) if total else "Nothing staged.")
         self._schedule_log()
@@ -1126,6 +1237,7 @@ class DefaultsTab(TabService):
                 "new": "" if new is None else all_value_text(r, new),
                 "range": ("off / on" if r["min"] == 0 and r["max"] == 1
                           else range_text(r)),
+                "rchg": range_changed(r),
                 "menu": STATUS_TEXT.get(st, ""),
                 "status": st or "unknown"})
         names = [o["name"] for o in out]
@@ -1193,6 +1305,8 @@ class DefaultsTab(TabService):
                "group": None, "status": all_row.get("status"),
                "default": all_row["default"], "min": all_row["min"],
                "max": all_row["max"], "step": all_row.get("step") or 1,
+               "card_min": all_row.get("card_min", all_row["min"]),
+               "card_max": all_row.get("card_max", all_row["max"]),
                "value": all_row["default"], "where": "extra", "extra": True}
         self._rows.append(row)
         self._publish_values()
@@ -1200,6 +1314,62 @@ class DefaultsTab(TabService):
 
     def _all_row(self, name):
         return next((r for r in self._all_rows if r["name"] == name), None)
+
+    # ---- changed ranges (PAD-750) ---------------------------------------
+    def _rows_named(self, name):
+        return [r for r in list(self._rows) + list(self._all_rows)
+                if r["name"] == name]
+
+    def _set_range(self, name, rng):
+        """Give setting *name* the range *rng* ``(min, max)`` in internal
+        units, or its card's own with None.  Every row of that name takes it
+        (the form's, the list's); the caller sets the value that goes with it.
+        Returns True when the setting has a changed range now."""
+        rows = self._rows_named(name)
+        if not rows:
+            return False
+        card = (rows[0].get("card_min", rows[0]["min"]),
+                rows[0].get("card_max", rows[0]["max"]))
+        if rng is not None and not row_range_editable(rows[0]):
+            rng = None
+        if rng is None or tuple(rng) == card:
+            rng = card
+            self._ranges.pop(name, None)
+        else:
+            rng = (int(rng[0]), int(rng[1]))
+            self._ranges[name] = rng
+        for r in rows:
+            r["min"], r["max"] = rng
+        self._publish_ranges(name)
+        return name in self._ranges
+
+    def _reset_ranges(self):
+        """Every setting back to the card's own range."""
+        for name in list(self._ranges):
+            self._set_range(name, None)
+
+    def _publish_ranges(self, name):
+        """Re-send the cells that show *name*'s range: its form row, its
+        high-score score cell.  (The all-settings list is redrawn by
+        ``_fill_all``.)"""
+        r = self._row(name)
+        if r is None:
+            return
+        form = self.get("form") or []
+        for i, item in enumerate(form):
+            if item.get("type") == "row" and item.get("name") == name:
+                new = dict(item)
+                new.update(self._editor(r))
+                if new.get("ui") == "number":
+                    new["range"] = range_text(r)
+                new["range_chg"] = range_changed(r)
+                self.set_item("form", i, new)
+        hs = self.get("hs") or []
+        for i, item in enumerate(hs):
+            sc = item.get("score")
+            if sc and sc.get("name") == name:
+                new = dict(item, score=self._score_cells(r))
+                self.set_item("hs", i, new)
 
     @rpc
     def edit_info(self, name):
@@ -1224,6 +1394,10 @@ class DefaultsTab(TabService):
                          "machine that already has a value keeps it.",
                 "note": note, "cur": cur, "default": row["default"],
                 "min": row["min"], "max": row["max"],
+                # PAD-750: the range the machine's menu offers, editable
+                "range_edit": row_range_editable(row),
+                "card_min": row["card_min"], "card_max": row["card_max"],
+                "range_tip": RANGE_TIP, "range_warn": RANGE_WARN,
                 "lo": min(row["min"], row["default"]),
                 "hi": max(row["max"], row["default"]),
                 "step": row.get("step") or 1,
@@ -1240,22 +1414,45 @@ class DefaultsTab(TabService):
         return info
 
     @rpc
-    def edit_apply(self, name, value=None, card=False):
-        """The editor's OK (a new value) or "Back to card value"."""
+    def edit_apply(self, name, value=None, card=False, lo=None, hi=None):
+        """The editor's OK (a new value, and a new range when *lo* / *hi* are
+        given) or "Back to card value" (the card's value AND range).  Returns
+        True, False for a value that is no number, or ``"range"`` for a range
+        that is not one."""
         row = self._all_row(name)
         if row is None or not self._loaded():
             return False
+        rng = None
+        if not card and (lo is not None or hi is not None):
+            if not row_range_editable(row):
+                return "range"
+            from ...plugins.stern.adjustments import INT32_MAX, INT32_MIN
+            a = _as_int(row["min"] if lo is None else lo)
+            b = _as_int(row["max"] if hi is None else hi)
+            if a is None or b is None or not (
+                    INT32_MIN <= a <= b <= INT32_MAX):
+                return "range"
+            rng = (a, b)
         if card:
             value = row["default"]
         else:
             v = _as_int(value)
             if v is None:
                 return False
-            value = (max(row["min"], min(row["max"], v))
-                     if v != row["default"] else v)
         existing = self._row(row["name"])
         if existing is None:
             existing = self._add_extra_row(row)
+        self._begin()
+        try:
+            self._set_range(row["name"], None if card else (
+                rng or (row["min"], row["max"])))
+        finally:
+            self._end()
+        if not card:
+            # the card's own default goes in verbatim (Stern ships some
+            # outside their range) unless the range was changed to leave it out
+            value = (v if v == row["default"] and not range_changed(row)
+                     else max(row["min"], min(row["max"], v)))
         self._set_row(existing, int(value) // existing.get("scale", 1))
         self._fill_all()
         # There is no field to leave here, so report it now.

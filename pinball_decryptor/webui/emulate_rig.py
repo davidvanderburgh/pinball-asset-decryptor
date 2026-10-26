@@ -31,6 +31,7 @@ from .emulate_core import (  # noqa: F401  (re-exported)
     DOCKER_URL, assets_fingerprint, cache_boot_text, card_copy_progress,
     docker_cli, docker_engine, docker_state, engine_setup_plan, human_size,
     kill_cmd, load_cmd, multiboot_cmd, overrides_dir, overrides_reason,
+    restart_cmd,
     override_base_card, parse_cache_list, parse_multiboot, parse_spike3,
     parse_status,
     playfield_launch, preview_modes_reason, renderer_text, rig_available,

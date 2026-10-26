@@ -4550,8 +4550,8 @@ class RunCtl:
 
     def ask_restart(self):
         """PAD-735: Restart game - asked of the app that launched this run,
-        which stops it and starts it again (its Stop closes this window, so
-        the window cannot do it itself). False with no app to ask."""
+        which has the run boot the game again while this window stays open
+        (PAD-738). False with no app to ask."""
         path = restart_req_path(self.ctl_path)
         if not path:
             return False

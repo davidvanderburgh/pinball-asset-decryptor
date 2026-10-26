@@ -2300,96 +2300,103 @@ if [ "$PAUSE_KEEPER" = 1 ]; then
 fi
 
 echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
-# PAD_PIVOT=1 boots a checkpointable guest (item 13). run_game.sh does the work;
-# here it only means the guest's log arrives at $ROOT/dump/game.out instead of
-# on stdout, so clear any stale copy before the run and fold the fresh one into
-# $LOG below. Nothing else about the launch changes.
-[ -n "${PAD_PIVOT:-}" ] && rm -f "$ROOT/dump/game.out"
-# ★ ITEM 90 - "A SELECTION IS IN PROGRESS", as a flag file, for the three
-# things below that must not read the selector phase as a dead game: the
-# start wait, the poll loop and autoattract's launch. Raised HERE, before
-# the launch, so there is no instant in which the menu is up and the flag
-# is not; cleared by this script when `pgrep -x game` first answers (the
-# selector's comm is codeselect on both launch paths, the game's is game on
-# both), or when run_game.sh is gone, or after SEL_WAIT seconds. The same
-# shape as loadgame.sh's dump/reloading, with a longer, configurable bound:
-# a human choosing takes as long as the countdown lets them.
-# PAD_SELECT_TIMEOUT is the selector's countdown (30 s unless told; 0 =
-# wait for ever); SEL_WAIT gives the game a minute on top of it to appear.
-# Removed on a plain run, so a stale flag from an aborted selector run can
-# never leak into the next start.
-#
-# THE BOUND RIDES THE SELECTOR'S LIFE, NOT THE CLOCK. The selector restarts
-# its countdown on every key press, so a player reading the menu can hold it
-# up for longer than any wall-clock figure - and a bound of SEL_WAIT from the
-# flag's own timestamp then called the selector-exit gap "the game exited"
-# and tore the session down under a live menu. So: while `pgrep -x
-# codeselect` finds the selector the flag's mtime is refreshed (touch), and
-# the flag only goes stale once the selector has been GONE for SEL_GAP
-# seconds with no game in its place (the exec gap is tens of milliseconds).
-# SEL_WAIT still bounds the phase BEFORE the selector has ever been seen (a
-# run_game.sh that never reaches it), and 0 still means wait for ever there;
-# sel_flag_stale() below is the one place that says all this.
-if [ "${PAD_SELECT:-}" = 1 ]; then
-    SEL_TO=${PAD_SELECT_TIMEOUT:-30}
-    case "$SEL_TO" in ''|*[!0-9]*) SEL_TO=30 ;; esac
-    if [ "$SEL_TO" = 0 ]; then SEL_WAIT=0; else SEL_WAIT=$((SEL_TO + 60)); fi
-    SEL_GAP=30; SEL_SEEN=""
-    : > "$ROOT/dump/selecting"
-else
-    rm -f "$ROOT/dump/selecting" "$ROOT/dump/vidroot"
-fi
-# PAD-170: the last run's edits, until run_game.sh binds this run's (if any).
-rm -f "$ROOT/dump/vidoverride"
-# 0 = the flag has outlived the selector: stop waiting on it. 1 = keep
-# waiting (and the selector is alive, or was seen alive less than SEL_GAP s
-# ago, or has not appeared yet and SEL_WAIT has not run out). Only ever
-# called under PAD_SELECT.
-sel_flag_stale() {
-    local age bound
-    if [ -n "$(pad_pids -x codeselect)" ]; then
-        touch "$ROOT/dump/selecting" 2>/dev/null
-        SEL_SEEN=1
-        return 1
+# THE GUEST'S LAUNCH IS ONE FUNCTION (PAD-738) because there are two: the run's
+# start, here, and Restart game, which boots the guest again INSIDE this session
+# (reboot_game, below) so the game window and the virtual playfield stay open.
+# Everything a start resets before the guest exists is reset again on a reboot.
+launch_game() {
+    # PAD_PIVOT=1 boots a checkpointable guest (item 13). run_game.sh does the work;
+    # here it only means the guest's log arrives at $ROOT/dump/game.out instead of
+    # on stdout, so clear any stale copy before the run and fold the fresh one into
+    # $LOG below. Nothing else about the launch changes.
+    [ -n "${PAD_PIVOT:-}" ] && rm -f "$ROOT/dump/game.out"
+    # ★ ITEM 90 - "A SELECTION IS IN PROGRESS", as a flag file, for the three
+    # things below that must not read the selector phase as a dead game: the
+    # start wait, the poll loop and autoattract's launch. Raised HERE, before
+    # the launch, so there is no instant in which the menu is up and the flag
+    # is not; cleared by this script when `pgrep -x game` first answers (the
+    # selector's comm is codeselect on both launch paths, the game's is game on
+    # both), or when run_game.sh is gone, or after SEL_WAIT seconds. The same
+    # shape as loadgame.sh's dump/reloading, with a longer, configurable bound:
+    # a human choosing takes as long as the countdown lets them.
+    # PAD_SELECT_TIMEOUT is the selector's countdown (30 s unless told; 0 =
+    # wait for ever); SEL_WAIT gives the game a minute on top of it to appear.
+    # Removed on a plain run, so a stale flag from an aborted selector run can
+    # never leak into the next start.
+    #
+    # THE BOUND RIDES THE SELECTOR'S LIFE, NOT THE CLOCK. The selector restarts
+    # its countdown on every key press, so a player reading the menu can hold it
+    # up for longer than any wall-clock figure - and a bound of SEL_WAIT from the
+    # flag's own timestamp then called the selector-exit gap "the game exited"
+    # and tore the session down under a live menu. So: while `pgrep -x
+    # codeselect` finds the selector the flag's mtime is refreshed (touch), and
+    # the flag only goes stale once the selector has been GONE for SEL_GAP
+    # seconds with no game in its place (the exec gap is tens of milliseconds).
+    # SEL_WAIT still bounds the phase BEFORE the selector has ever been seen (a
+    # run_game.sh that never reaches it), and 0 still means wait for ever there;
+    # sel_flag_stale() below is the one place that says all this.
+    if [ "${PAD_SELECT:-}" = 1 ]; then
+        SEL_TO=${PAD_SELECT_TIMEOUT:-30}
+        case "$SEL_TO" in ''|*[!0-9]*) SEL_TO=30 ;; esac
+        if [ "$SEL_TO" = 0 ]; then SEL_WAIT=0; else SEL_WAIT=$((SEL_TO + 60)); fi
+        SEL_GAP=30; SEL_SEEN=""
+        : > "$ROOT/dump/selecting"
+    else
+        rm -f "$ROOT/dump/selecting" "$ROOT/dump/vidroot"
     fi
-    age=$(( $(date +%s) - $(stat -c %Y "$ROOT/dump/selecting" 2>/dev/null || echo 0) ))
-    if [ -n "$SEL_SEEN" ]; then bound=$SEL_GAP; else bound=$SEL_WAIT; fi
-    [ "$bound" != 0 ] && [ "$age" -ge "$bound" ]
+    # PAD-170: the last run's edits, until run_game.sh binds this run's (if any).
+    rm -f "$ROOT/dump/vidoverride"
+    # 0 = the flag has outlived the selector: stop waiting on it. 1 = keep
+    # waiting (and the selector is alive, or was seen alive less than SEL_GAP s
+    # ago, or has not appeared yet and SEL_WAIT has not run out). Only ever
+    # called under PAD_SELECT.
+    sel_flag_stale() {
+        local age bound
+        if [ -n "$(pad_pids -x codeselect)" ]; then
+            touch "$ROOT/dump/selecting" 2>/dev/null
+            SEL_SEEN=1
+            return 1
+        fi
+        age=$(( $(date +%s) - $(stat -c %Y "$ROOT/dump/selecting" 2>/dev/null || echo 0) ))
+        if [ -n "$SEL_SEEN" ]; then bound=$SEL_GAP; else bound=$SEL_WAIT; fi
+        [ "$bound" != 0 ] && [ "$age" -ge "$bound" ]
+    }
+    # THE GAME'S DEBUG LOG OUTLIVES THE RUN - one file per slot, appended by every
+    # boot - so the exit report below reads only what THIS run wrote past here.
+    # Without the mark it quoted a FATAL from a fortnight before and called a
+    # segfault the game's own watchdog (PAD-603: venom_le 0.95's report named an
+    # error 233 of 2026-10-16 and a DISPATCH TIMEOUT, on a run that crashed).
+    DBG_MARK=$(stat -c %s "$ROOT/dump/debug_log.txt" 2>/dev/null || echo 0)
+    run_debug_log() { tail -c +$((DBG_MARK + 1)) "$ROOT/dump/debug_log.txt" 2>/dev/null; }
+    # PAD_MODE_SO AND PAD_CARD_MODES ARE NAMED ON THIS LINE ALTHOUGH `env` WOULD INHERIT THEM.
+    # The first is how a launch brings a mode runtime of its own (the Emulate tab's override
+    # set, the Modes tab's Try it); the second is the opt-out from the card's own modes
+    # (modes/cardmodes.sh, called by run_game.sh). Both decide what gets preloaded into the
+    # game, and a launch line that carries them only by accident is one `env -i` away from a
+    # card that silently boots without its modes - tests/test_spike2_card_modes.py pins them.
+    # Empty means unset to everything that reads them.
+    setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
+               PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
+               PAD_LCD_SHM="$LCD_GUEST" PAD_LCD_NODE="${PAD_LCD_NODE:-$LCD_NODE}" \
+               PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
+               PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
+               PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
+               PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
+               PAD_PIVOT="${PAD_PIVOT:-}" PAD_OVERRIDE_DIR="${PAD_OVERRIDE_DIR:-}" \
+               PAD_PIVOT="${PAD_PIVOT:-}" PAD_SELECT="${PAD_SELECT:-0}" \
+               PAD_SELECT_AUTO="${PAD_SELECT_AUTO:-0}" \
+               PAD_MODE_SO="${PAD_MODE_SO:-}" PAD_CARD_MODES="${PAD_CARD_MODES:-}" \
+               bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
+    GAMEPG=$!
+    if [ -n "${PAD_PIVOT:-}" ] && { [ -z "$GAMEOUTTAIL" ] || ! kill -0 "$GAMEOUTTAIL" 2>/dev/null; }; then
+        # -F retries until the guest creates the file a few seconds into the boot.
+        # Direct (not a subshell) so $! is the tail itself and teardown's kill hits
+        # it - a wrapping subshell would leave the tail holding the file forever.
+        tail -F "$ROOT/dump/game.out" >> "$LOG" 2>/dev/null &
+        GAMEOUTTAIL=$!
+    fi
 }
-# THE GAME'S DEBUG LOG OUTLIVES THE RUN - one file per slot, appended by every
-# boot - so the exit report below reads only what THIS run wrote past here.
-# Without the mark it quoted a FATAL from a fortnight before and called a
-# segfault the game's own watchdog (PAD-603: venom_le 0.95's report named an
-# error 233 of 2026-10-16 and a DISPATCH TIMEOUT, on a run that crashed).
-DBG_MARK=$(stat -c %s "$ROOT/dump/debug_log.txt" 2>/dev/null || echo 0)
-run_debug_log() { tail -c +$((DBG_MARK + 1)) "$ROOT/dump/debug_log.txt" 2>/dev/null; }
-# PAD_MODE_SO AND PAD_CARD_MODES ARE NAMED ON THIS LINE ALTHOUGH `env` WOULD INHERIT THEM.
-# The first is how a launch brings a mode runtime of its own (the Emulate tab's override
-# set, the Modes tab's Try it); the second is the opt-out from the card's own modes
-# (modes/cardmodes.sh, called by run_game.sh). Both decide what gets preloaded into the
-# game, and a launch line that carries them only by accident is one `env -i` away from a
-# card that silently boots without its modes - tests/test_spike2_card_modes.py pins them.
-# Empty means unset to everything that reads them.
-setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
-           PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
-           PAD_LCD_SHM="$LCD_GUEST" PAD_LCD_NODE="${PAD_LCD_NODE:-$LCD_NODE}" \
-           PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
-           PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
-           PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
-           PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
-           PAD_PIVOT="${PAD_PIVOT:-}" PAD_OVERRIDE_DIR="${PAD_OVERRIDE_DIR:-}" \
-           PAD_PIVOT="${PAD_PIVOT:-}" PAD_SELECT="${PAD_SELECT:-0}" \
-           PAD_SELECT_AUTO="${PAD_SELECT_AUTO:-0}" \
-           PAD_MODE_SO="${PAD_MODE_SO:-}" PAD_CARD_MODES="${PAD_CARD_MODES:-}" \
-           bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
-GAMEPG=$!
-if [ -n "${PAD_PIVOT:-}" ]; then
-    # -F retries until the guest creates the file a few seconds into the boot.
-    # Direct (not a subshell) so $! is the tail itself and teardown's kill hits
-    # it - a wrapping subshell would leave the tail holding the file forever.
-    tail -F "$ROOT/dump/game.out" >> "$LOG" 2>/dev/null &
-    GAMEOUTTAIL=$!
-fi
+launch_game
 
 # The virtual playfield: clickable switches, inserts lit from the wire.
 #
@@ -2858,7 +2865,9 @@ fi
 # separate script and a separate process because it spends most of its life
 # asleep waiting on the boot, and this loop must stay responsive to the window
 # closing. It exits by itself when the game gets there, or when the game dies.
-if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
+# The launch is a function because Restart game (PAD-738) boots the game again
+# in this session, and a fresh boot meets Tech Alerts again just as this one.
+launch_autoattract() {
     if [ "${PAD_SELECT:-}" = 1 ]; then
         # ★ ITEM 90: HELD BACK until the boot selector has chosen. autoattract
         # reads "the bus has gone quiet" as "the game is ready" and presses
@@ -2878,12 +2887,17 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
             done
             exec bash "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
             "$S/autoattract.sh" "$LOG" > "$PAD_LOGDIR/padauto.log" 2>&1 &
-        AUTOPG=$!
+    else
+        setsid_as_seer bash "$S/autoattract.sh" "$LOG" > "$PAD_LOGDIR/padauto.log" 2>&1 &
+    fi
+    AUTOPG=$!
+}
+if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
+    launch_autoattract
+    if [ "${PAD_SELECT:-}" = 1 ]; then
         echo "[watch] auto-advance on, held back until the boot selector has"
         echo "[watch] chosen; then it presses Service Back past Tech Alerts."
     else
-        setsid_as_seer bash "$S/autoattract.sh" "$LOG" > "$PAD_LOGDIR/padauto.log" 2>&1 &
-        AUTOPG=$!
         echo "[watch] auto-advance on: it will press Service Back until the game"
         echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
     fi
@@ -3169,6 +3183,133 @@ else
 fi
 [ "$MINS" != 0 ] && echo "[watch] backstop: will stop by itself after $MINS min."
 
+# ★ RESTART GAME REBOOTS THE GUEST, NOT THE SESSION (PAD-738). The Emulate tab's
+# and the playfield bar's Restart game (PAD-735) used to be Stop and then Start,
+# and Stop is the end of the session: the game window AND the virtual playfield
+# closed, the card was prepared again, and both windows came back somewhere
+# new. David expected what a machine does when you switch it off and on: the
+# screen goes back to the boot. So restartgame.sh (as root) drops a request
+# here and this loop does it in place - the shape loadgame.sh's restore already
+# proved a session survives (dump/reloading): the guest goes, and a fresh one
+# is launched exactly as the start launched it, while the renderer, the
+# playfield, the sound player, the ball feeder and every ring they hold open
+# stay. What the old guest left in those rings is put back to a fresh run's
+# state first, each IN PLACE, because the windows have them mapped:
+#   the GL world   - the renderer is handed an EMPTY journal to replay
+#                    (glreplay.req), which deletes every texture, buffer and
+#                    shader the old guest made. The new guest numbers its GL
+#                    names from 1 again, and without the reset it would land on
+#                    the old game's objects (and leak them on the GPU).
+#   LED/LCD blocks - zeroed: a booting game has every light off, and the shim
+#                    stamps its magic again on the first frame. The playfield
+#                    reads "readable" as "the run is up", so it stays.
+#   the video ring - its host restarted on a zeroed ring: a clip in flight was
+#                    being served to a guest that is gone.
+#   boot.id        - new, so a later save-state load does not take this
+#                    renderer for one that still holds the save's GL world.
+# The switch block is NOT reset: the balls are where they are, as on a machine.
+# A paused game is resumed first (the renderer would otherwise think the NEW
+# game is the one it froze), and a sped-up one boots at 1x as every start does.
+REBOOT_REQ=$ROOT/dump/reboot.req
+rm -f "$REBOOT_REQ"
+reboot_game() {
+    local i
+    echo "[watch] Restart game: booting the game again (the game window and"
+    echo "[watch]   the playfield stay open)"
+    if [ -f "$SW_HOST" ]; then
+        python3 - "$S" "$SW_HOST" <<'PY' 2>&1 | sed 's/^/[watch]   /'
+import struct, sys, time
+sys.path.insert(0, sys.argv[1])
+import padsw
+m = padsw.open_block(sys.argv[2])
+if m is None:
+    sys.exit(0)
+if struct.unpack_from("<I", m, padsw.OFF_PAUSED)[0]:
+    padsw.request_pause(m)
+    for _ in range(60):
+        if not struct.unpack_from("<I", m, padsw.OFF_PAUSED)[0]:
+            break
+        time.sleep(0.05)
+    print("the game was paused; resumed it first")
+if struct.unpack_from("<I", m, padsw.OFF_SPEED_REQ)[0] not in (0, 1000):
+    padsw.request_speed(m, 1)
+PY
+    fi
+    [ -n "$AUTOPG" ] && kill -9 -"$AUTOPG" 2>/dev/null
+    pad_pkill -9 -f 'autoattract.sh'
+    [ -n "${SPEEDPG:-}" ] && kill -9 -"$SPEEDPG" 2>/dev/null
+    # the guest, as killgame.sh stops it: the pid namespace's init FIRST, or a
+    # boot selector killed under it is read as a choice and starts a game
+    pad_pkill -9 -f "^(setsid )?bash -s $ROOT "
+    [ -n "$GAMEPG" ] && kill -9 -"$GAMEPG" 2>/dev/null
+    pad_pkill -9 -x game
+    pad_pkill -9 -f 'arm-binfmt|qemu-arm'
+    pad_pkill -9 -x codeselect
+    pad_pkill -9 -f nodebus.py
+    for i in $(seq 1 40); do
+        pad_guest_up || break
+        sleep 0.25
+    done
+    if pad_guest_up; then
+        echo "[watch] Restart game: the game did not stop; it is left running" >&2
+        return 1
+    fi
+    # the GL world, emptied by the renderer itself (see restorestate.sh for the
+    # two-phase claim/ok handshake this waits on)
+    rm -f "$ROOT/dump/glreplay.ok"
+    printf 'PJL1\0\0\0\0\0\0\0\0\0\0\0\0' > "$ROOT/dump/glreplay.bin"
+    : > "$ROOT/dump/glreplay.req"
+    for i in $(seq 1 100); do
+        [ -e "$ROOT/dump/glreplay.req" ] || break
+        sleep 0.1
+    done
+    for i in $(seq 1 100); do
+        [ -e "$ROOT/dump/glreplay.ok" ] && break
+        [ -e "$ROOT/dump/glreplay.bin" ] || break
+        sleep 0.1
+    done
+    if [ -e "$ROOT/dump/glreplay.ok" ]; then
+        echo "[watch]   the renderer let go of the old game's pictures"
+    else
+        echo "[watch]   NOTE: the renderer did not reset its GL world; the new boot" \
+             "may draw over the old game's leftovers" >&2
+    fi
+    rm -f "$ROOT/dump/glreplay.req" "$ROOT/dump/glreplay.bin" "$ROOT/dump/glreplay.ok"
+    dd if=/dev/zero of="$LED_HOST" bs=16384 count=1 conv=notrunc status=none
+    dd if=/dev/zero of="$LCD_HOST" bs=4096 count=1 conv=notrunc status=none
+    if [ -n "$VIDPG" ] && [ -f "$VID_HOST" ]; then
+        kill -9 -"$VIDPG" 2>/dev/null
+        pad_pkill -9 -f 'padvidhost.py'
+        # never truncated: the renderer maps this file (restorestate.sh, the
+        # video ring, has the crash that taught it)
+        head -c "$(stat -c %s "$VID_HOST")" /dev/zero \
+            | dd of="$VID_HOST" bs=4M iflag=fullblock conv=notrunc status=none
+        setsid_as_user python3 "$S/padvidhost.py" "$VID_HOST" >> "$PAD_LOGDIR/padvid.log" 2>&1 &
+        VIDPG=$!
+        for i in $(seq 1 40); do
+            [ "$(head -c 4 "$VID_HOST" | od -An -tx1 | tr -d ' ')" != 00000000 ] && break
+            sleep 0.05
+        done
+    fi
+    cat /proc/sys/kernel/random/uuid > "$ROOT/dump/boot.id" 2>/dev/null || \
+        date +%s%N > "$ROOT/dump/boot.id"
+    launch_game
+    for i in $(seq 1 240); do
+        pad_guest_up && break
+        [ "${PAD_SELECT:-}" = 1 ] && [ -f "$ROOT/dump/selecting" ] && break
+        [ -n "$(pad_pids -x padglhost)" ] || break
+        sleep 0.25
+    done
+    if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
+        launch_autoattract
+    fi
+    if [ -n "${SPEEDPG:-}" ]; then
+        setsid_as_seer python3 -u "$S/padspeed.py" --when-up "$PAD_SPEED" >> "$PAD_LOGDIR/padspeed.log" 2>&1 &
+        SPEEDPG=$!
+    fi
+    echo "[watch] Restart game: the game is booting"
+}
+
 # Poll instead of `wait`: we must react to EITHER end dying, and to the wall
 # clock, and `wait` on a setsid'd child cannot do that. 0.25 s is responsive
 # without costing anything measurable.
@@ -3221,6 +3362,13 @@ while :; do
         fi
         echo "[watch] a save-state reload has been in progress for 2 min; giving up on it."
         rm -f "$ROOT/dump/reloading"
+    fi
+    # PAD-738: Restart game, asked by restartgame.sh. The request is taken
+    # (removed) first, which is that script's answer that a session has it.
+    if [ -f "$REBOOT_REQ" ]; then
+        rm -f "$REBOOT_REQ"
+        reboot_game
+        continue
     fi
     # A DEAD GUEST THAT IS STILL A PROCESS (led_zeppelin_le, item 80,
     # 2026-09-01). Under PAD_PIVOT the guest is pid 1 of its own pid namespace,

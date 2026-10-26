@@ -1318,6 +1318,18 @@ def kill_cmd():
     return rig_cmd("killgame.sh")
 
 
+def restart_cmd():
+    """restartgame.sh (PAD-738), as ROOT on Windows like kill_cmd: it writes
+    the request into the run's rootfs, which a root run owns, and padpath
+    must resolve the desktop user's rootfs."""
+    if sys.platform == "win32":
+        home = wsl_home()
+        if home:
+            return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
+                    "bash", "%s/restartgame.sh" % _wsl_path(rig_dir())]
+    return rig_cmd("restartgame.sh")
+
+
 def status_cmd():
     """status.sh, as ROOT on Windows, so each rig's poll sees ITS OWN run.
 

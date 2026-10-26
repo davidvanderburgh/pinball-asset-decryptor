@@ -195,6 +195,8 @@ class EmulateTab(TabService):
         # the Color profile tab's "Try it in the emulator": Start again once
         # the running game has stopped (a count of polls left to wait)
         self._restart_wait = 0
+        # PAD-738: Restart game asked of the running session (restartgame.sh)
+        self._rebooting = False
         self._launch_accepted = False
         self._launch_serial = 0
         self._loading = False
@@ -2696,8 +2698,9 @@ class EmulateTab(TabService):
             btn = ({"label": CANCELLING, "enabled": False, "mode": "busy"}
                    if self._cancel_prepare else
                    {"label": "Cancel", "enabled": True, "mode": "cancel"})
-        elif busy or self._restart_wait:
-            btn = {"label": ("Restarting…" if self._restart_wait else
+        elif busy or self._restart_wait or self._rebooting:
+            btn = {"label": ("Restarting…" if self._restart_wait
+                             or self._rebooting else
                              "Stopping…" if self._stopping else "Starting…"),
                    "enabled": False, "mode": "busy"}
         elif up:
@@ -2744,6 +2747,9 @@ class EmulateTab(TabService):
 
     def _kill_cmd(self):
         return self._cmd("killgame.sh") if no_rig() else rig.kill_cmd()
+
+    def _reboot_cmd(self):
+        return self._cmd("restartgame.sh") if no_rig() else rig.restart_cmd()
 
     def _load_cmd(self, slot):
         if no_rig():
@@ -3134,20 +3140,52 @@ class EmulateTab(TabService):
     @rpc
     def restart(self):
         """The Restart game button (here, and the playfield window's): the
-        same as pressing Stop and then Start - the whole game shut down and
-        booted again, as switching the machine off and on does. A boot is the
-        only restart there is: the game keeps no "start over" of its own that
-        a running emulator could be asked for."""
+        game booted again, as switching the machine off and on does - and
+        ONLY the game (PAD-738). The run that is up does it itself
+        (restartgame.sh asks watch.sh), so the game window goes back to the
+        boot screen and the virtual playfield stays open. A run that does not
+        take the request in time is restarted the old way, Stop and then
+        Start."""
         if self._starting or self._stopping or self._preparing is not None \
-                or self._restart_wait:
+                or self._restart_wait or self._rebooting:
             return False
         if not (self._last_up or self._launched()):
             return False
-        self.log("[emulate] restarting the game: stopping it, then starting "
-                 "it again.")
-        self._restart_wait = 40
-        self.stop()
+        self.log("[emulate] restarting the game: it boots again; the game "
+                 "window and the playfield stay open.")
+        self._rebooting = True
+        self._paint_run_btn()
+
+        def run():
+            fallback = False
+            try:
+                out = self._run(self._reboot_cmd(), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=60)
+                for line in (out.stdout or b"").decode(
+                        "utf-8", "replace").splitlines():
+                    if line.strip():
+                        self._log("[emulate] " + line)
+                fallback = out.returncode == 3
+            except Exception as exc:                     # noqa: BLE001
+                self._log("[emulate] restart failed: %s" % exc)
+                fallback = True
+            self._post(self._rebooted, fallback)
+
+        self._thread(run)
         return True
+
+    def _rebooted(self, fallback):
+        """After restartgame.sh: the button back, or - when the run did not
+        take the request - the old Restart, Stop and then Start."""
+        self._rebooting = False
+        if fallback and not (self._starting or self._stopping) \
+                and (self._last_up or self._launched()):
+            self.log("[emulate] the run did not take the restart; stopping "
+                     "it and starting it again.")
+            self._restart_wait = 40
+            self.stop()
+            return
+        self._paint_run_btn()
 
     def _follow_restart_req(self):
         """The playfield window's Restart game (PAD-735): it cannot stop and

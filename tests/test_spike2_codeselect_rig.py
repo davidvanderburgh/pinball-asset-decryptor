@@ -1094,13 +1094,15 @@ def test_autoattract_is_held_back_until_the_menu_has_chosen():
     plain = ('setsid_as_seer bash "$S/autoattract.sh" "$LOG" > '
              '"$PAD_LOGDIR/padauto.log" 2>&1 &')
     assert plain in code
-    block = code[code.index('if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then'):]
+    # the launch is launch_autoattract() since PAD-738 (Restart game runs it too)
+    block = code[code.index('launch_autoattract() {'):]
     block = block[:block.index("PAD_SW_EXERCISE")]
     assert SEL_GUARD in block
     held = block[:block.index("else")]
     assert 'while [ -f "$f" ]' in held and 'exec bash "$@"' in held
     assert '"$ROOT/dump/selecting" "$SEL_WAIT"' in held
-    assert "AUTOPG=$!" in held, "teardown kills what $! names"
+    assert "AUTOPG=$!" in block[:block.index("\n}\n")], \
+        "teardown kills what $! names"
 
 
 def test_select_lines_reach_the_event_pane():

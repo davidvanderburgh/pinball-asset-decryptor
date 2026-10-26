@@ -2366,7 +2366,9 @@ HELP_CONTENT = {
          "- **What it costs:** about 15% of one CPU core waiting, about a third of a "
          "core running, plus 1–2 GB of memory, shown live in the status line.\n"
          "- **No time limit:** it runs until you press Stop emulator or close its "
-         "window."),
+         "window.\n"
+         "- **Restart game**, beside Stop emulator, stops the game and starts it "
+         "again: the whole machine switched off and on."),
         ("Sound and video",
          "- **Volume** and **Mute** set the emulator's own sound, live, and are "
          "remembered. They are not the game's volume (the coin door's -/+), which "
@@ -2419,7 +2421,8 @@ HELP_CONTENT = {
             "switches appear a minute or so into a run, once the game lists them.\n"
             "- **Pause** (or F9), in either window or on the bottom bar, freezes the "
             "whole game, video and sound too. **Resume** carries on from that frame. "
-            "The bar also has Volume and Mute.",
+            "The bar also has **Restart game** (as on the Emulate tab), Volume and "
+            "Mute.",
         ]),
         ("Save states", [
             "**Save state** on the playfield window (Windows) checkpoints the whole "

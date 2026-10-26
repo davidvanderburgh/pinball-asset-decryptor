@@ -102,8 +102,13 @@ function RunButton({ s }) {
   const b = s.run_btn || { label: "Start emulator", enabled: false, mode: "start" };
   const kind = b.mode === "stop" ? "danger" : b.mode === "cancel" ? "" : "primary";
   const icon = b.mode === "stop" ? "stop" : b.mode === "cancel" ? "x" : b.mode === "start" ? "play" : null;
-  return html`<${Button} kind=${kind} size="big" cls="emu-run" icon=${icon} busy=${b.mode === "busy"}
+  const run = html`<${Button} kind=${kind} size="big" cls="emu-run" icon=${icon} busy=${b.mode === "busy"}
     disabled=${!b.enabled} onClick=${() => call("emulate.toggle")}>${b.label}<//>`;
+  // PAD-735: Stop and Start in one press - the whole game booted again
+  if (b.mode !== "stop") return run;
+  return html`${run}<${Button} size="big" cls="emu-restart" icon="refresh"
+    title="Stop the game and start it again, as switching the machine off and on does"
+    onClick=${() => call("emulate.restart")}>Restart game<//>`;
 }
 
 function Volume({ s }) {

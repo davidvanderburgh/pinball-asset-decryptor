@@ -66,6 +66,18 @@ def audio_ctl_file():
                         "audio_ctl.json")
 
 
+#: PAD-735: the playfield window's Restart game asks through this file, one
+#: per rig, beside the volume file (playfield.py's RESTART_REQ names it the
+#: same way). The status poll acts on it and removes it.
+RESTART_REQ_S = 30
+
+
+def restart_req_file():
+    from ...core import rigslot
+    return os.path.join(os.path.dirname(config.SETTINGS_FILE),
+                        "restart_game_%d.req" % rigslot.slot())
+
+
 def load_audio_ctl():
     try:
         with open(audio_ctl_file(), "r", encoding="utf-8") as f:
@@ -2512,8 +2524,9 @@ class EmulateTab(TabService):
             btn = ({"label": CANCELLING, "enabled": False, "mode": "busy"}
                    if self._cancel_prepare else
                    {"label": "Cancel", "enabled": True, "mode": "cancel"})
-        elif busy:
-            btn = {"label": "Stopping…" if self._stopping else "Starting…",
+        elif busy or self._restart_wait:
+            btn = {"label": ("Restarting…" if self._restart_wait else
+                             "Stopping…" if self._stopping else "Starting…"),
                    "enabled": False, "mode": "busy"}
         elif up:
             btn = {"label": "Stop emulator", "enabled": True, "mode": "stop"}
@@ -2945,14 +2958,57 @@ class EmulateTab(TabService):
         self.start()
         return "Starting the game with your color profile..."
 
+    # -- PAD-735: Restart game ----------------------------------------------
+    @rpc
+    def restart(self):
+        """The Restart game button (here, and the playfield window's): the
+        same as pressing Stop and then Start - the whole game shut down and
+        booted again, as switching the machine off and on does. A boot is the
+        only restart there is: the game keeps no "start over" of its own that
+        a running emulator could be asked for."""
+        if self._starting or self._stopping or self._preparing is not None \
+                or self._restart_wait:
+            return False
+        if not (self._last_up or self._launched()):
+            return False
+        self.log("[emulate] restarting the game: stopping it, then starting "
+                 "it again.")
+        self._restart_wait = 40
+        self.stop()
+        return True
+
+    def _follow_restart_req(self):
+        """The playfield window's Restart game (PAD-735): it cannot stop and
+        start the run itself (Stop closes it), so it leaves a request beside
+        the volume file, one per rig, and this poll acts on it. A request
+        older than RESTART_REQ_S is from a run that is gone and is dropped."""
+        path = restart_req_file()
+        try:
+            age = time.time() - os.stat(path).st_mtime
+        except OSError:
+            return
+        try:
+            os.remove(path)
+        except OSError:
+            return
+        if age > RESTART_REQ_S:
+            return
+        if self.restart():
+            self.log("[emulate] (asked for by the playfield window)")
+
     def _restart_when_down(self):
-        """After a Try-it Stop: Start once the rig says nothing is up."""
+        """After a Try-it or Restart game Stop: Start once the rig says
+        nothing is up."""
         if not self._restart_wait:
             return
         if self._stopping or self._last_up or self._launched():
             self._restart_wait -= 1
             if self._restart_wait > 0:
                 self._after(500, self._restart_when_down)
+            else:
+                self.log("[emulate] the game did not stop in time to start "
+                         "it again; press Start emulator when it has.")
+                self._paint_run_btn()
             return
         self._restart_wait = 0
         self.start()
@@ -3230,6 +3286,7 @@ class EmulateTab(TabService):
                 self._runtime_apply(rt)
                 self._apply(info)
                 self._follow_audio_ctl()
+                self._follow_restart_req()
                 self.set(rigs=rigs)
             self._post(apply_and_release)
 

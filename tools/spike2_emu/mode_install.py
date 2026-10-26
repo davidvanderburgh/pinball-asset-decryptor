@@ -113,7 +113,7 @@ def _ref(card):
     return mk.fs_ref(card, off), off
 
 
-def _restore_monitor_attrs(st):
+def _restore_monitor_attrs(st, path=GAME_MONITOR):
     """The debugfs commands that put game_monitor's owner, mode and clocks back.
 
     THE FILE-TYPE BITS ARE THE TRAP. debugfs prints `Mode:  0755` - permission
@@ -133,7 +133,7 @@ def _restore_monitor_attrs(st):
     timestamp, so a card whose game_monitor carries new clocks is not "stock" in
     the only sense that can actually be checked.
     """
-    c = mk.dq(GAME_MONITOR)
+    c = mk.dq(path)
     mode = st.get("mode", 0o755) & 0o7777          # keep permission bits only...
     cmds = ["set_inode_field %s mode 0%o" % (c, stat.S_IFREG | mode),   # ...then say it is a FILE
             "set_inode_field %s uid %d" % (c, st.get("uid", 0)),
@@ -167,7 +167,7 @@ def inspect(card):
         for e in mk.debugfs_ls(ref, MODE_DIR):
             if e[4] not in (".", ".."):
                 out["files"][e[4]] = e[5]
-    mon = mk.debugfs_cat(ref, GAME_MONITOR)
+    mon = mk.debugfs_cat(ref, mk.p2_file(ref, GAME_MONITOR))
     out["hooked"] = modehook.has_hook(mon)
     return out
 
@@ -229,8 +229,9 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
 
     # The script we are about to edit, and the hook, BEFORE anything is written:
     # a refusal here must cost nothing.
-    mon_before = mk.debugfs_cat(ref, GAME_MONITOR)
-    st = mk.debugfs_stat(ref, GAME_MONITOR)
+    mon_path = mk.p2_file(ref, GAME_MONITOR)          # past a link (PAD-742)
+    mon_before = mk.debugfs_cat(ref, mon_path)
+    st = mk.debugfs_stat(ref, mon_path)
     mon_after = modehook.hook_game_monitor(mon_before).encode("utf-8")
 
     txt = _clean(ref, card, "before the write")
@@ -283,9 +284,9 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
         # outlive the object it was measured for.
         cmds += ["rm " + mk.dq(MODE_DIR + "/" + n) for (n, _m) in ALL_FILES if n in present]
         cmds += ["rm " + mk.dq(MODE_DIR + "/" + n) for n in sorted(present) if n.endswith(ASSET_SUFFIX)]
-        cmds.append("rm " + mk.dq(GAME_MONITOR))
+        cmds.append("rm " + mk.dq(mon_path))
         cmds += ["write %s %s" % (mk.dq(p), mk.dq(MODE_DIR + "/" + n)) for (p, n, _m) in staged]
-        cmds.append("write %s %s" % (mk.dq(p_mon), mk.dq(GAME_MONITOR)))
+        cmds.append("write %s %s" % (mk.dq(p_mon), mk.dq(mon_path)))
         cmds += ["set_inode_field %s mode 040755" % mk.dq(MODE_DIR),
                  "set_inode_field %s uid 0" % mk.dq(MODE_DIR),
                  "set_inode_field %s gid 0" % mk.dq(MODE_DIR)]
@@ -293,7 +294,7 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
             c = mk.dq(MODE_DIR + "/" + n)
             cmds += ["set_inode_field %s mode 0%o" % (c, mode),
                      "set_inode_field %s uid 0" % c, "set_inode_field %s gid 0" % c]
-        cmds += _restore_monitor_attrs(st)
+        cmds += _restore_monitor_attrs(st, mon_path)
         mk.debugfs_write_script(ref, cmds)
     finally:
         import shutil
@@ -305,8 +306,8 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
     for name, _mode in files:
         if mk.debugfs_cat(ref, MODE_DIR + "/" + name) != payload[name]:
             raise mk.Refused("%s read back from p2 differs from what was written" % name)
-    if mk.debugfs_cat(ref, GAME_MONITOR) != mon_after:
-        raise mk.Refused("%s read back from p2 differs from what was written" % GAME_MONITOR)
+    if mk.debugfs_cat(ref, mon_path) != mon_after:
+        raise mk.Refused("%s read back from p2 differs from what was written" % mon_path)
     mk.write_p2_sidecar(card)
     return sorted(payload)
 
@@ -315,8 +316,9 @@ def remove(card, workdir=None):
     """Take the mode off and restore game_monitor - the exact inverse of install."""
     mk.need_tools("debugfs", "e2fsck")
     ref, _off = _ref(card)
-    mon_before = mk.debugfs_cat(ref, GAME_MONITOR)
-    st = mk.debugfs_stat(ref, GAME_MONITOR)
+    mon_path = mk.p2_file(ref, GAME_MONITOR)          # past a link (PAD-742)
+    mon_before = mk.debugfs_cat(ref, mon_path)
+    st = mk.debugfs_stat(ref, mon_path)
     mon_after = modehook.strip_hook(mon_before).encode("utf-8")
     _clean(ref, card, "before the removal")
 
@@ -332,13 +334,13 @@ def remove(card, workdir=None):
             p_mon = os.path.join(stage, "game_monitor")
             with open(p_mon, "wb") as f:
                 f.write(mon_after)
-            cmds.append("rm " + mk.dq(GAME_MONITOR))
-            cmds.append("write %s %s" % (mk.dq(p_mon), mk.dq(GAME_MONITOR)))
+            cmds.append("rm " + mk.dq(mon_path))
+            cmds.append("write %s %s" % (mk.dq(p_mon), mk.dq(mon_path)))
             # The SAME helper install uses - owner, mode with the S_IFREG bits put
             # back, and the clocks. Two copies of this drifted apart once already:
             # install was fixed and remove was not, which would have corrupted the
             # inode on the way out while the install half looked healthy.
-            cmds += _restore_monitor_attrs(st)
+            cmds += _restore_monitor_attrs(st, mon_path)
         if not cmds:
             return []
         mk.debugfs_write_script(ref, cmds)
@@ -349,9 +351,9 @@ def remove(card, workdir=None):
     _clean(ref, card, "after the removal")
     if mk.debugfs_exists(ref, MODE_DIR):
         raise mk.Refused("%s is still on p2 after the removal" % MODE_DIR)
-    back = mk.debugfs_cat(ref, GAME_MONITOR)
+    back = mk.debugfs_cat(ref, mon_path)
     if modehook.has_hook(back):
-        raise mk.Refused("%s still carries the mode hook after the removal" % GAME_MONITOR)
+        raise mk.Refused("%s still carries the mode hook after the removal" % mon_path)
     mk.write_p2_sidecar(card)
     return sorted(n for n in present if n in dict(ALL_FILES) or n.endswith(ASSET_SUFFIX))
 

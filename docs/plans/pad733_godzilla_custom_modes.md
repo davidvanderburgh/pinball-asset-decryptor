@@ -141,6 +141,14 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   Attack), lit lime; KING CAESAR's clock back up to 15 s on any lit shot or pop; its multiplier on the right counter's
   label, NEXT SHOT 1X/2X/3X, the middle cleared; the three battles keep their hits for the game (KUMONGA's torn webs
   stay torn, KING CAESAR resumes at its next shot) - runs out_fb_kamacuras2, out_fb_caesar3, out_fb_rematch_*.
+- **v26 (his project): "hitting any shot of the mode (including spinners) when below 15 seconds should bring it back
+  up to 15 seconds"** - KUMONGA (a web still up, every spin) and MINILLA (its lit shot), as KING CAESAR's (KAMACURAS
+  has no clock, it ends on a drain): runs fb9_clk_ku (10 -> spin -> 15; 10 -> web -> 15) and fb9_clk_mi (10 -> 15).
+  **"i just resumed kumonga with 4/5 shots already done, but only the spinners were lit"**: his log has the web left
+  lit (`1 insert(s) held (shots 00000000_20000000): b040ff chase`) - Powerline center, a ONE-lamp white insert (lamp
+  362), a small blinking light that cannot show purple; the other webs are three-lamp colour inserts. That web is on
+  the Big loop now (lamps 386-388), and with one web left the line names it (TEAR THE LAST WEB: BIG LOOP); desk:
+  resumed at 4/5, the Big loop lit purple when the start show ends, made: 5/5, won. Card v27.
 - **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
   game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
   screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the

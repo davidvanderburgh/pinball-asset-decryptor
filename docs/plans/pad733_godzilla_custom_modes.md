@@ -157,6 +157,13 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   Left spinner, lane 2's far ring the Top spinner; desk: the mantis over them, a kill on the Left ramp); SUPER X2
   names its Shield ramp spinner (CHARGE: SHIELDS OR SHIELD RAMP SPINNER); the rest light colour shots or name the
   white ones (SHOOT THE CENTER POWERLINE, FIRE: SHOOT THE MASER TARGET). Card v28.
+- **v28 (his project): KING CAESAR "the final blow video ... it's showing mecha godzilla. also, the intro video audio
+  screech seems like it's being cut short"; "there is only one Pop Bumper in the game (not plural)".** The final
+  blow's award says BEAM REFLECTED, but its full-screen clip (won.mp4) was Godzilla tearing Mechagodzilla's head off
+  with no King Caesar in it: reflect.mp4 (King Caesar bouncing the beam back) plays there now. The start's only
+  sound was roar.wav, 1.35 s against a 6.0 s intro: rise.wav, four roars built from it (0, 1.25, 2.75, 4.25 s, the
+  later ones lower), an echo, a fade to 6.0 s, its peak matched to roar.wav (-9.6 dB). POP BUMPERS / POPS -> one
+  pop bumper (KING CAESAR, SHIN GODZILLA). Card v29.
 - **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
   game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
   screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the

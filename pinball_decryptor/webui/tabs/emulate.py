@@ -216,6 +216,7 @@ class EmulateTab(TabService):
         self._precached = None
         self._cache_open = False
         self._cache_entries = {}
+        self._cache_meta = None
         self._cache_sel = []
         self._pf_proc = None
         self._last_up = False
@@ -1920,6 +1921,7 @@ class EmulateTab(TabService):
         (entries, disk), meta = result
         now = time.time()
         self._cache_entries = {e["label"]: e for e in entries}
+        self._cache_meta = meta
         rows = [self._cache_row(e, now) for e in entries]
         total = sum(e["real_kb"] for e in entries)
         unused = [e for e in entries if rig.cache_unused(e, now)]
@@ -2105,6 +2107,13 @@ class EmulateTab(TabService):
                 hint = ("Deleted %d cached card%s, about %s freed inside WSL."
                         % (len(labels), "" if len(labels) == 1 else "s",
                            rig.human_size(freed)))
+                # PAD-739: a user deleted 120 GB this way and saw nothing
+                # change on his drive - the disk file has to be compacted
+                from ..emu_cache import on_distro_disk
+                if on_distro_disk(self._cache_meta):
+                    hint += (" Windows gets the space back when you use "
+                             "Reclaim space to Windows in Settings ▸ Manage "
+                             "disk space.")
             self._post(self.cache_refresh, hint)
 
         self._thread(run)

@@ -807,6 +807,55 @@ def test_disk_space_lists_the_emulators_files_in_wsl(tmp_path, monkeypatch):
         assert w.asked[-1]["title"] == "In use"
 
 
+def test_freed_cards_say_windows_gets_them_back_by_reclaim(tmp_path, monkeypatch):
+    """PAD-739: a user deleted 120 GB of cached cards here, read "Freed", and
+    saw nothing change on his drive - the WSL disk file only shrinks when it
+    is compacted.  The status says so, and the cards on the distro's own disk
+    count towards what Reclaim gives back; a cache on a disk of its own
+    (/mnt/wsl/...) does not."""
+    from pinball_decryptor.core import host_temp
+    from pinball_decryptor.webui import emu_cache
+    monkeypatch.setattr(host_temp, "usage", lambda: None)
+    monkeypatch.setattr(host_temp, "scan", lambda: [])
+    gb = 2 ** 30
+    monkeypatch.setattr(emu_cache, "drop_emu_cache",
+                        lambda labels, sizes: sum(sizes[l] for l in labels))
+    cards = [{"path": "gz_v1", "size": 11 * gb, "manufacturer": "Stern Spike 2",
+              "detail": "gz_v1   last booted 2026-10-17 15:59"},
+             {"path": "gz_v2", "size": 8 * gb, "manufacturer": "Stern Spike 2",
+              "detail": "gz_v2   last booted 2026-10-14 12:57"}]
+    for where, counts in (("/home/simon/cardcache", True),
+                          ("/mnt/wsl/cards/cardcache", False)):
+        with web_app(tmp_path, mfr="stern") as w:
+            svc = w.window.service("shellx")
+            w.call("shellx.disk_open")
+            assert until(w, lambda: not w.state("shellx")["disk"]["busy"])
+            svc._disk_scan_id += 1
+            svc._disk_apply_scan(svc._disk_scan_id, {
+                "wsl_ok": True, "wsl_entries": [], "rig_entries": [],
+                "host_entries": [], "emu_entries": cards,
+                "emu_usage": {"total": 1000 * gb, "used": 200 * gb,
+                              "free": 800 * gb, "pct": 20, "dir": where},
+                "vhdx": {"distro": "Ubuntu", "path": "C:/x/ext4.vhdx",
+                         "size": 226 * gb, "reclaimable": 2 * gb}})
+            w.answers.append("yes")
+            assert w.call("shellx.disk_clean", None, "all") is True
+            assert until(w, lambda: w.state("shellx")["disk"]["status"]
+                         .startswith("Freed"))
+            status = w.state("shellx")["disk"]["status"]
+            reclaimable = svc._disk["vhdx"]["reclaimable"]
+            if counts:
+                assert status == ("Freed 19.00 GiB inside WSL: Windows gets it "
+                                  "back with Reclaim space to Windows below.")
+                assert reclaimable == 21 * gb
+            else:
+                assert status == "Freed 19.00 GiB."
+                assert reclaimable == 2 * gb
+    assert emu_cache.on_distro_disk({"dir": "/home/pad/cardcache"})
+    assert not emu_cache.on_distro_disk({"dir": "/mnt/wsl/paddata/spike2/cardcache"})
+    assert not emu_cache.on_distro_disk({"dir": ""}) and not emu_cache.on_distro_disk(None)
+
+
 def test_every_form_field_belongs_to_its_project(tmp_path):
     """David, 2026-09-26: "all the form entries on any of the tabs should be
     saved per project".  Every PROJECT_FIELDS field, the Write file name and

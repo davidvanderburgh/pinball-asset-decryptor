@@ -98,7 +98,25 @@ def scan_emu_cache():
         used = max(0, total - free)
         usage = {"total": total, "free": free, "used": used,
                  "pct": int(round(used * 100.0 / total)) if total else 0}
+        # Where the cache lives (PAD-739): on the distro's own disk, what is
+        # deleted only reaches Windows when Reclaim compacts that disk; on a
+        # disk of its own (/mnt/wsl/...: the card store) Reclaim does not
+        # touch it.  "" from an older rig that does not say.
+        try:
+            from .emulate_core import parse_cache_meta
+            meta = parse_cache_meta(text) or {}
+        except Exception:                                    # noqa: BLE001
+            meta = {}
+        usage["dir"] = meta.get("dir", "")
     return entries, usage
+
+
+def on_distro_disk(usage):
+    """The card cache sits on the app's distro disk - the one Reclaim space
+    to Windows compacts - rather than on a disk of its own under /mnt/wsl
+    (the card store, the rigs' data disk).  False when unknown."""
+    d = (usage or {}).get("dir") or ""
+    return d.startswith("/") and not d.startswith("/mnt/")
 
 
 def list_cards():

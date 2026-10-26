@@ -359,18 +359,18 @@ function startMain() {
     const pause = btn("Pause", () => { pause.blur(); api("pause"); }, "sm");
     pause.title = "Freeze the game where it is, and carry on from there (Pause or F9)";
     box.append(pause);
-    // PAD-735: the app that launched the run stops it and starts it again
-    // (this window closes and opens again with it); only a run with an app
+    // PAD-735: the app that launched the run has the game boot again; only a
+    // run with an app. This window stays open (PAD-738), so the button follows
+    // the run's `restarting` (PAD-744): back the moment the request is taken.
+    let restart = null;
+    const showRestarting = (on) => {
+      restart.textContent = on ? "Restarting…" : "Restart game";
+      restart.disabled = !!on;
+    };
     if (R && R.restart) {
-      const restart = btn("Restart game", () => {
+      restart = btn("Restart game", () => {
         restart.blur();
-        api("restart").then((ok) => {
-          restart.textContent = ok ? "Restarting…" : "Restart game";
-          restart.disabled = !!ok;
-          // the window normally closes long before this; if the app was busy
-          // and said no, the button comes back
-          if (ok) setTimeout(() => { restart.textContent = "Restart game"; restart.disabled = false; }, 45000);
-        });
+        api("restart").then((ok) => showRestarting(ok));
       }, "sm");
       restart.title = "Stop the game and start it again, as switching the machine off and on does";
       box.append(restart);
@@ -400,6 +400,7 @@ function startMain() {
       pause.textContent = r.paused ? "Resume" : "Pause";
       pause.classList.toggle("primary", !!r.paused);
       box.classList.toggle("paused", !!r.paused);
+      if (restart) showRestarting(r.restarting);
       if (vol && r.audio) {
         if (!sliding) {
           vol.value = String(Math.round(r.audio.gain * 100));

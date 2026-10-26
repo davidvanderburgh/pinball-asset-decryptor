@@ -149,6 +149,39 @@ def test_the_playfield_window_asks_through_the_request_file(tmp_path, monkeypatc
 
 
 @needs_pf
+def test_the_window_button_comes_back_once_the_run_takes_it(monkeypatch,
+                                                           tmp_path):
+    """PAD-744: the window stays open on a restart (PAD-738), so its button
+    says Restarting… only while the request is in flight - not the old 45 s."""
+    monkeypatch.setattr(pf, "SW_PATH", str(tmp_path / "gone"))
+    dump = tmp_path / "dump"
+    dump.mkdir()
+    monkeypatch.setattr(pf.padpath, "dump", lambda: str(dump))
+    monkeypatch.setenv("PAD_SLOT", "0")
+    run = pf.RunCtl(str(tmp_path / "audio.json"))
+    assert run.dyn()["restarting"] is False
+    assert run.ask_restart() is True
+    t0 = run._restart_t
+    req = pf.restart_req_path(run.ctl_path)
+    assert run.dyn()["restarting"] is True
+    # the app's poll has it, then the run (dump/reboot.req) has it
+    assert run._restart_pending(t0 + 10) is True
+    os.remove(req)
+    (dump / "reboot.req").write_text("")
+    assert run._restart_pending(t0 + 12) is True
+    os.remove(dump / "reboot.req")
+    assert run._restart_pending(t0 + 12 + pf.RESTART_GRACE_S - 1) is True
+    assert run._restart_pending(t0 + 12 + pf.RESTART_GRACE_S + 1) is False
+    # and through poll(), which publishes the change to the page
+    run._restart_t = run._taken_t = time.time() - pf.RESTART_GRACE_S - 1
+    run.restarting = True
+    assert run.poll(time.time()) is True and run.dyn()["restarting"] is False
+    # a request nobody takes still gives the button back
+    assert run.ask_restart() is True
+    assert run._restart_pending(run._restart_t + pf.RESTART_CAP_S + 1) is False
+
+
+@needs_pf
 def test_a_window_with_no_app_has_no_restart(monkeypatch, tmp_path):
     monkeypatch.setattr(pf, "SW_PATH", str(tmp_path / "gone"))
     run = pf.RunCtl(None)
@@ -173,6 +206,7 @@ def test_the_pages_draw_the_buttons():
     body = pf_js[pf_js.index("function runCluster(R)"):]
     body = body[:body.index("\n  }\n") + 4]
     assert 'api("restart")' in body and "R.restart" in body
+    assert "r.restarting" in body and "45000" not in body       # PAD-744
 
 
 # ---- PAD-738: the reboot inside the run --------------------------------------

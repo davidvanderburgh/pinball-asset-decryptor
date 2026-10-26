@@ -4451,6 +4451,13 @@ TABLES_EVERY_S = 2.0
 #: so writing it here moves the sound live, and the tab's own slider follows.
 AUDIO_CTL = os.environ.get("PAD_AUDIO_CTL") or None
 RUN_POLL_S = 0.3
+#: Restart game in flight (PAD-744): the button says Restarting… while the app
+#: has not taken the request (its poll) or the run has not taken dump/reboot.req
+#: (watch.sh), and RESTART_GRACE_S over the gap between the two (the app's
+#: wsl.exe call); never longer than RESTART_CAP_S. The window stays open on a
+#: restart since PAD-738, so nothing else puts the button back.
+RESTART_GRACE_S = 4.0
+RESTART_CAP_S = 30.0
 
 
 def read_paused():
@@ -4512,6 +4519,9 @@ class RunCtl:
         self.audio = load_audio_ctl(ctl_path) if ctl_path else None
         self._mtime = self._stat()
         self._next = 0.0
+        self.restarting = False
+        self._restart_t = None     # when Restart game was asked
+        self._taken_t = None       # when that request was last seen in flight
 
     def _stat(self):
         try:
@@ -4535,7 +4545,27 @@ class RunCtl:
                 audio = load_audio_ctl(self.ctl_path)
                 if audio != self.audio:
                     self.audio, changed = audio, True
+        if self.restarting != self._restart_pending(time.time()):
+            self.restarting, changed = not self.restarting, True
         return changed
+
+    def _restart_pending(self, now):
+        """Restart game still on its way (RESTART_GRACE_S)."""
+        if self._restart_t is None:
+            return False
+        if now - self._restart_t > RESTART_CAP_S:
+            self._restart_t = None
+            return False
+        dump = padpath.dump()
+        for p in (restart_req_path(self.ctl_path),
+                  dump and os.path.join(dump, "reboot.req")):
+            if p and os.path.exists(p):
+                self._taken_t = now
+                return True
+        if now - (self._taken_t or self._restart_t) < RESTART_GRACE_S:
+            return True
+        self._restart_t = None
+        return False
 
     def set_audio(self, gain=None, muted=None):
         if not self.ctl_path:
@@ -4558,13 +4588,16 @@ class RunCtl:
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write("%d\n" % padpath.slot())
-            return True
         except OSError:
             return False
+        self._restart_t = self._taken_t = time.time()
+        self.restarting = True
+        return True
 
     def dyn(self):
         return {"paused": self.paused,
                 "restart": bool(self.ctl_path),
+                "restarting": self.restarting,
                 "audio": ({"gain": self.audio[0], "muted": self.audio[1]}
                           if self.audio is not None else None)}
 

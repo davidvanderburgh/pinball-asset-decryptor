@@ -754,6 +754,41 @@ def test_own_clips_and_sounds_play_where_the_blocks_say(tmp_path, monkeypatch):
     assert 500 <= _at(out, "CLIP PadMode_blk_Won") - end <= 600
 
 
+def test_a_clip_asked_as_it_ends_keeps_its_total_after_it(tmp_path, monkeypatch):
+    """PAD-733 (David, v29: "when the final mode video plays the scene text plays after that but only for a very
+    brief portion of a second"): KING CAESAR's final blow asked its clip and then ended - its TOTAL's 3 s ran out under
+    the clip. And at a drain the end of ball waited 6 s, 5.7 of them the lost clip. Either way the clip now comes
+    first and the TOTAL has its 3 s after it, as at a clock's end with a clip in When the mode ends."""
+    _cc()
+
+    def prog_(**kw):        # no start clip: the harness's clips play until stopped, so one would count here
+        q = _media_prog(priority=180, **kw)
+        q["scripts"][1]["do"] = q["scripts"][1]["do"][1:]
+        return q
+
+    p = prog_()
+    p["scripts"][2]["do"] = [{"op": "clip", "clip": "sever", "where": "full"}, {"op": "end_mode"}]
+    p["scripts"][3]["do"] = p["scripts"][3]["do"][:1]                      # When the mode ends plays no clip
+    dump = _assets(tmp_path, "blk", p, [])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Building", "secs", 1, "shot", "Left ramp", "secs", 12)
+    end = _at(out, r"\[TEST MODE\] END \(a block\)")
+    assert _at(out, "DISPLAY lingers TEST MODE 10000 ms") == end          # 3000 + the clip's 7000
+    assert 500 <= _at(out, "CLIP PadMode_blk_Sever") - end <= 600
+    # at a drain: the end of ball waits for the clip and then the TOTAL's 3 s
+    hud = dict(BM.normalize({})["hud"], on=True)
+    out = play(tmp_path, prog_(hud=hud), "shot", "Building", "secs", 2, "ball_end", "secs", 12)
+    drain = _at(out, ">> ball_end")
+    assert _at(out, "BALL END HOLD 10000 TEST MODE") == drain
+    assert 500 <= _at(out, "CLIP PadMode_blk_Won") - drain <= 600
+    assert 9900 <= _at(out, "BALL END goes on") - drain <= 10100
+    # without a clip at its end, the drain's 6 s as before
+    q = prog_(hud=hud)
+    q["scripts"][3]["do"] = q["scripts"][3]["do"][:1]
+    out = play(tmp_path, q, "shot", "Building", "secs", 2, "ball_end", "secs", 8)
+    assert _at(out, "BALL END HOLD 6000 TEST MODE") == _at(out, ">> ball_end")
+
+
 def test_without_its_file_the_blocks_still_play_the_games_own(tmp_path, monkeypatch):
     _cc()
     dump = tmp_path / "empty"

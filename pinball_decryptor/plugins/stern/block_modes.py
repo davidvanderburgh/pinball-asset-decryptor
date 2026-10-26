@@ -883,12 +883,32 @@ def white_shot_notes(program, white_shots):
     lit = []
     for s in program["scripts"]:
         for b in _walk(s.get("do") or []):
-            if b.get("op") in ("light_shot", "light_mode") and b.get("shot") in white                     and str(b.get("color") or "").lower() not in ("#000000", "000000") and b["shot"] not in lit:
+            if (b.get("op") in ("light_shot", "light_mode") and b.get("shot") in white
+                    and str(b.get("color") or "").lower() not in ("#000000", "000000") and b["shot"] not in lit):
                 lit.append(b["shot"])
     lines = _screen_words(program)
     return ["%s is lit, and its insert is a single white light: the mode's colour does not show there. Light a shot "
             "whose insert shows colour, or name %s on the screen (a HUD line or award)." % (n, n)
             for n in lit if not _named_on_screen(n, lines)]
+
+
+def preview_shots(program):
+    """PAD-733 (David, v29: "During the monster selection screen when I overlay the selected monster the respective
+    indicators need to be blinking on the play field"): the shots a mode lights while it runs - every Light a shot
+    block with a colour, outside the scripts that run only while it is not running - in the order first lit. Its tile
+    on the selection screen blinks them (pm_roster_more_shots), as the game's own battles blink theirs."""
+    out = []
+    for s in program.get("scripts") or []:
+        hat = s.get("hat") or {}
+        if hat.get("when") == "idle" or hat.get("kind") == "mode_end":
+            continue
+        for b in _walk(s.get("do") or []):
+            shot = b.get("shot")
+            if (b.get("op") == "light_shot" and shot and shot != "*" and not b.get("insert")
+                    and b.get("pattern") != "off" and str(b.get("color") or "#ffffff").lower() not in ("#000000", "000000")
+                    and shot not in out):
+                out.append(shot)
+    return out
 
 
 def more_of(program):
@@ -2452,6 +2472,7 @@ def to_c(program, slug):
             continue
         body = g.stack(s.get("do") or [], 2)
         bodies[kind].append((i + 1, hat, body))
+    preview = [g.shot_i(n) for n in preview_shots(program)]   # PAD-733: blinked on its selection-screen tile
     # the hats' own shots and events
     hat_code = {k: [] for k in HATS}
     challenge_names = []                    # PAD-615: the game's challenges its scripts take the place of
@@ -3238,6 +3259,9 @@ def to_c(program, slug):
         L.append("    const int won = battle_won;       /* PAD-706: as it ended, before When the mode ends runs */")
     L.append("    on_mode_end();")
     L.append("    ending = 0;")
+    if media:   # PAD-733: KING CAESAR's final blow asks its clip, then End - the TOTAL was hidden under it
+        L.append("    if (clip_waiting || pm_clip_playing()) end_clip = 1;   /* PAD-733: a full-screen clip asked as it "
+                 "ended (a final blow's) is its ending's too: the TOTAL after it */")
     L.append("    run.on = 0;")
     if g.combos:
         L.append("    combo_clear();                    /* PAD-708: its combos in a row end with it */")
@@ -3361,6 +3385,9 @@ def to_c(program, slug):
                  % (len(battle_slots), ", ".join("1" if v in battle_more else "0" for v in battle_slots)))
         L.append('#define MORE_PAGE "%s"      /* PAD-707: its tile nodes on the selection screen (the build adds them) */'
                  % MK.page_names(slug)[0])
+        if battle_more and preview:
+            L.append("static const unsigned char MORE_SHOTS[%d] = { %s };   /* PAD-733: the shots it lights (SHOT_NAMES) */"
+                     % (len(preview), ", ".join(str(i) for i in preview)))
         L.append("static volatile unsigned battle_picked;    /* set on the game's thread, run on the tick */")
         L.append("static unsigned battle_player;             /* who picked */")
         L.append("static unsigned long battle_at;            /* its scripts run from this pm_ms(), once the selection screen has closed */")
@@ -3458,6 +3485,13 @@ def to_c(program, slug):
         L.append("                           : !pm_roster_claim(BATTLE_SLOTS[i], on_battle))")
         L.append('            pm_log("battle %u is not one this game lets a mode take the place of%s", BATTLE_SLOTS[i],')
         L.append('                   BATTLE_MORE[i] ? " (or stand a new monster in its place)" : "");')
+        if battle_more and preview:
+            L.append("        else if (BATTLE_MORE[i]) {      /* PAD-733: the shots it lights, blinking while the cursor is on its tile */")
+            L.append("            uint64_t m = 0;")
+            L.append("            unsigned j;")
+            L.append("            for (j = 0; j < %d; j++) m |= S[MORE_SHOTS[j]];" % len(preview))
+            L.append("            pm_roster_more_shots(m);")
+            L.append("        }")
     L.append("    (void)E; (void)EVENT_NAMES; (void)HIT_OF; (void)H; (void)MH;")
     L.append("}")
     L.append("")
@@ -3761,6 +3795,9 @@ def to_c(program, slug):
     L.append("        unsigned t = total_due ? total_due + ENDING_NOW_MS / 1000 * TICKS_PER_SECOND : hide_ticks;")
     L.append("        if (t * 1000 / TICKS_PER_SECOND > ms) ms = t * 1000 / TICKS_PER_SECOND;")
     L.append("    }")
+    if media:   # PAD-733: v29's drains - the 5 s lost clip took 5.7 of the 6 s, its TOTAL showed a quarter second
+        L.append("    if (ms && (clip_waiting || pm_clip_playing()) && ms < ENDING_MS + END_CLIP_MS)")
+        L.append("        ms = ENDING_MS + END_CLIP_MS;   /* PAD-733: its ending's clip, then its TOTAL, as at its clock's end */")
     L.append("    if (ms && pm_ball_end_hold(ms)) {")
     L.append("        drain_hold = 1;                 /* after the ask: a tick between sees the hold, not its end */")
     L.append('        pm_log("its TOTAL at the drain: the end of ball waits %u ms", ms);')

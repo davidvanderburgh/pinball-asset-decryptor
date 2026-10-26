@@ -764,6 +764,51 @@ def test_the_runtime_counts_a_pick_in_the_players_city(tmp_path):
     assert rows["no_vector"] == "0 0" and "city 3 is not in the city table (0 bytes)" in out
 
 
+def test_a_battles_end_waits_for_its_modes_total_after_the_finish(tmp_path):
+    """PAD-733 (David, v29: "the scene text plays after that but only for a very brief portion of a second"): the
+    battle's own stop shows the game's battle-over display at once, so the end that waited for the mode's finish (its
+    clip) waits out the rest of the mode's ending hold too (pm_end_holding: its TOTAL after the clip) - and not past
+    the hold, another mode beginning, or the game's end."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    lifted = "\n".join(_lift(src, sig) for sig in ("static int roster_ending_on(void)\n{",
+                                                    "static void roster_late_tick(void)\n{"))
+    out = _host_run(tmp_path, r"""#include <stdio.h>
+struct pm_mode { const char *name; };
+static const struct pm_mode kc = { "KING CAESAR" }, other = { "OTHER" };
+static const struct pm_mode *running, *disp_owner;
+static unsigned disp_prio;
+static unsigned long disp_linger_until, now;
+static int fin, in_game = 1;
+static struct { int on, won; const char *name; const struct pm_mode *mode; } roster_late;
+static unsigned long pm_ms(void) { return now; }
+static int pm_in_game(void) { return in_game; }
+static int finish_on(void) { return fin; }
+static void roster_late_run(const char *why) { roster_late.on = 0; printf("RAN %lu %s\n", now, why); }
+""" + lifted + r"""
+static void arm(void)
+{
+    roster_late.on = 1, roster_late.mode = &kc;
+    disp_prio = 180, disp_owner = &kc, disp_linger_until = 10000, running = 0;
+}
+int main(void)
+{
+    arm();
+    fin = 1; now = 6400; roster_late_tick();             /* the clip plays: no end */
+    fin = 0; now = 6420; roster_late_tick();             /* the clip is over, its TOTAL shows: still none */
+    now = 9990; roster_late_tick();
+    now = 10000; roster_late_tick();                     /* the hold is over: the battle ends */
+    arm(); now = 7000; disp_prio = 0, disp_owner = 0, disp_linger_until = 0; roster_late_tick();   /* no hold left */
+    arm(); now = 7000; running = &other; roster_late_tick();   /* another mode began */
+    arm(); now = 7000; disp_owner = &other; roster_late_tick();   /* the hold is another's */
+    arm(); now = 7000; in_game = 0; roster_late_tick();   /* the game ended */
+    return 0;
+}
+""")
+    assert out.splitlines() == ["RAN 10000 its finish and its total are over", "RAN 7000 its finish and its total are over",
+                                "RAN 7000 its finish and its total are over", "RAN 7000 its finish and its total are over",
+                                "RAN 7000 the game ended"]
+
+
 def test_both_godzilla_ports_count_the_pick_in_the_city():
     for port, site, rc in (("godzilla_pro-1.15.port", "0x00135394", 0x79DAE8), ("godzilla_le-1.16.port", "0x001387ac", 0x7B0E78)):
         p = _port_lines(SDK / "ports" / port)

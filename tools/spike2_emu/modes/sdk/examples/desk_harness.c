@@ -584,6 +584,11 @@ int pm_roster_more_progress(long done, long of)   /* PAD-733: the count on its t
     printf("%6lu   ROSTER COUNT %ld/%ld\n", now_ms, done, of);
     return more_n > 0;
 }
+int pm_roster_more_shots(uint64_t shots)   /* PAD-733: what its tile blinks on the playfield */
+{
+    printf("%6lu   ROSTER SHOTS %08x_%08x\n", now_ms, (unsigned)(shots >> 32), (unsigned)shots);
+    return more_n > 0;
+}
 
 /* PAD-710: the game's own modes 0-127 a mode may claim; `gamestart <id>` is the game starting one (a rule of its own,
  * as the player earns it), pm_place_over the outcome the game's own stop is run with */

@@ -674,6 +674,11 @@ text bridge_label          bridge
 site scoop_handler         0x0007d8e4 0xe301316a 0xe2401002
 data scoop_slot            0x007570a4
 value scoop_event          2
+# PAD-733: the game's ball search put off while a mode holds the ball (pad_mode_runtime.c "the scoop"): its own holds
+# call ball_search_delay(ball search time) every tick (event 2's waits 0x7da38, the selection screen 0x191cc8); the
+# countdown 0x7d36a4 (62 a second), the time a byte (10 s) nothing writes. Rig runs bs_long / bs_long_fix, bs_hits(_fix).
+site ball_search_delay     0x00379f0c 0xe30336a4 0xe0600280
+data ball_search_time      0x007144f8
 # EMU 2026-09-26 (mb_e2e.sh): served 3 on a mode file's start, add-a-ball to 4, drains to 1, END (one ball left). PROVEN.
 
 # ---- PAD-379: the shield platform (Premium/LE only; a Pro's shield targets are fixed) ---------------------------

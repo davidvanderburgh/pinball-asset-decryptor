@@ -417,6 +417,10 @@ long pm_roster_start_after(void);
  * card build's `<page>_Prog`; a card without it shows nothing). of <= 0 shows none. 1 = kept; 0 when the calling mode
  * has no new monster on the screen. */
 int pm_roster_more_progress(long done, long of);
+/* PAD-733: the shots the calling mode's new monster blinks on the playfield while the selection screen's cursor is on
+ * its tile, as the game's own battles blink theirs (yellow; every other shot's insert dark, the cabinet's left alone);
+ * 0 = none, the game's lights as they are. 1 = kept; 0 when the calling mode has no new monster on the screen. */
+int pm_roster_more_shots(uint64_t shots);
 /* PAD-733: 1 while the selection screen a pick was taken on is still closing - start the picked mode on the first tick
  * this is 0, its start clip at once: the game's own battle is in its intro there. (The runtime watches the game's
  * display effects: the close is one, Premium/LE 1.16's 132; the port's roster_start_after_ms is the most it waits.) */

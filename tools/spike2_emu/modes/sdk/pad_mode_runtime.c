@@ -6022,8 +6022,19 @@ static void coils_arm(void)
  * unwinds through this frame, which build_mode.sh's -funwind-tables makes safe.
  *
  * The limits, not the mode's to change: 100 ms to SCOOP_MAX_MS a hold; only the running mode, only in
- * a game; the hold ends with the mode. Holding a ball powers nothing; the cap keeps a ball from waiting
- * in the scoop long enough for the game to start looking for it. */
+ * a game; the hold ends with the mode. Holding a ball powers nothing.
+ *
+ * PAD-733 (David: "The game also randomly went into ball search mode when I restarted King Caesar"): THE GAME'S BALL
+ * SEARCH. Its countdown (Premium/LE 1.16: 0x7d36a4, 62 a second) runs down every tick while a ball is in play, and it
+ * searches when it is out (0x379f68, from the main loop; again every 12 s). Nothing a switch does resets it: the game's
+ * own code puts it off - a score, a shot's handler, and every tick of its own holds in the scoop (event 2's waits, the
+ * battle selection screen's) - with ball_search_delay(the ball search time) (`site ball_search_delay`, 0x379f0c: the
+ * countdown at least that many seconds; the time a byte, `data ball_search_time`, 10 s). A hold of ours comes after the
+ * game's own has returned, so the countdown ran on through it: a pick's 6 s start clip left 4 s at the kick-out (a
+ * ball caught on a flipper then brought the search), and a 16 s hold searched with the ball still in the scoop (rig,
+ * run bs_long: BALL SEARCH STARTED counted 10.35 s after the handler returned). So each tick of a hold of ours does as
+ * the game's own holds do, and the ball comes out with the search's whole time ahead of it (run bs_long_fix: 10.0 s
+ * through 16 s, 10.0 s at the kick-out). A port without the two lines holds as before. */
 #define SCOOP_MAX_MS 10000u
 #define SCOOP_MIN_MS   100u
 
@@ -6117,6 +6128,14 @@ static int intro_on(unsigned long t_close, unsigned long *started, int *seen)
     return !*seen && now - *started < FIN_GRACE_MS;
 }
 
+/* PAD-733: the game's ball search put off for a tick of a hold of ours, as its own holds do (above) */
+static void scoop_search_off(void)
+{
+    unsigned at = data("ball_search_time");
+    if (fn("ball_search_delay") && at && maps_has(at, 1, MAP_R | MAP_GAME))
+        ((void (*)(unsigned))(unsigned long)fn("ball_search_delay"))(*(volatile unsigned char *)(unsigned long)at);
+}
+
 static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
 {
     unsigned r, e;
@@ -6133,8 +6152,10 @@ static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
         unsigned long tc = pm_ms(), started = 0;
         int seen = 0;
         say("scoop: a mode took the selection screen's pick - the ball waits for its start clip");
-        while (pm_in_game() && intro_on(tc, &started, &seen))
+        while (pm_in_game() && intro_on(tc, &started, &seen)) {
+            scoop_search_off();
             ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+        }
         say("scoop: let go after %lu ms (%s) - the game kicks it out", pm_ms() - tc,
             !pm_in_game() ? "the game ended or tilted" : pm_ms() - tc >= INTRO_MAX_MS ? "the most a ball waits"
             : seen ? "its start clip is over" : started ? "it started with no clip" : "it did not start");
@@ -6149,8 +6170,10 @@ static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
     else say("scoop: a ball settled while %s's finish plays - held until it is over", fin.mode && fin.mode->name ? fin.mode->name : "a mode");
     /* PAD-707: a mode that ends while it holds the ball keeps it through its finish, so the kick-out comes as it ends */
     while (!scoop.release && pm_in_game() && pm_ms() - t0 < SCOOP_MAX_MS
-           && ((scoop.hold_ms && running && pm_ms() < scoop.until) || (!running && finish_on())))
+           && ((scoop.hold_ms && running && pm_ms() < scoop.until) || (!running && finish_on()))) {
+        scoop_search_off();
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    }
     why = scoop.release ? "the mode let go" : !pm_in_game() ? "the game ended or tilted"
         : pm_ms() - t0 >= SCOOP_MAX_MS ? "the most a ball is held" : running ? "its time ran out"
         : fin.seen ? "the mode's finish is over" : "the mode ended";
@@ -6219,7 +6242,8 @@ static void scoop_arm(void)
     scoop.log = pm_port_value("scoop_log", 0) != 0;
     if (scoop.event_arg > 3) return;                /* the game's handler takes four arguments at most */
     can |= PM_CAN_SCOOP;
-    say("scoop: a mode may hold a ball there, up to %u ms; the kick-out stays the game's", SCOOP_MAX_MS);
+    say("scoop: a mode may hold a ball there, up to %u ms; the kick-out stays the game's%s", SCOOP_MAX_MS,
+        fn("ball_search_delay") && data("ball_search_time") ? "; its ball search is put off while one is held" : "");
 }
 
 /* ---- the shield platform (PAD-379) --------------------------------------------------------------
@@ -10013,8 +10037,18 @@ static void more_over(unsigned p, int won);   /* PAD-707 */
 /* PAD-707: a battle's end that waits for its mode's finish (finish_on, at pm_end): the game's own stop shows its
  * battle-over display on the one video surface, over the finish. Given at the finish's end, at the ball's end, or
  * as the game ends. */
-static struct { int on, won; const char *name; } roster_late;
+static struct { int on, won; const char *name; const struct pm_mode *mode; } roster_late;
 static int roster_late_now;
+
+/* PAD-733 (David, v29: "when the final mode video plays the scene text plays after that but only for a very brief
+ * portion of a second"): the battle's end waits for the mode's whole ending - its finish, then its TOTAL for the rest
+ * of the hold pm_end_holding asked (block modes: 3 s after the clip) - as a mode's ending does without a battle. The
+ * game's battle-over display came within 15 ms of the clip's end (emulator run fb2_caesar) */
+static int roster_ending_on(void)
+{
+    return roster_late.mode && disp_prio && disp_owner == roster_late.mode && disp_linger_until && !running
+           && pm_ms() < disp_linger_until;
+}
 static void roster_late_run(const char *why)
 {
     if (!roster_late.on) return;
@@ -10027,7 +10061,8 @@ static void roster_late_run(const char *why)
 
 static void roster_late_tick(void)
 {
-    if (roster_late.on && !finish_on()) roster_late_run(pm_in_game() ? "its finish is over" : "the game ended");
+    if (roster_late.on && !finish_on() && !(pm_in_game() && roster_ending_on()))
+        roster_late_run(pm_in_game() ? "its finish and its total are over" : "the game ended");
 }
 
 void pm_roster_over(int won)
@@ -10040,8 +10075,9 @@ void pm_roster_over(int won)
         roster_late.on = 1;
         roster_late.won = won;
         roster_late.name = current && current->name ? current->name : 0;
-        say("roster: the battle %s took ends once its finish has played (the game's battle-over display would take "
-            "its clip)", roster_late.name ? roster_late.name : "a mode");
+        roster_late.mode = current;
+        say("roster: the battle %s took ends once its finish and its total have played (the game's battle-over "
+            "display would take the screen)", roster_late.name ? roster_late.name : "a mode");
         return;
     }
     for (q = 1; q <= 4; q++)
@@ -10198,6 +10234,7 @@ static struct more_member {
     void *city[4];                      /* PAD-733: its city stamps (`<page>_City<c>`, groups), for a battle of its held there */
     long hits[5], of[5];                /* PAD-733: per player, the count its mode reported (pm_roster_more_progress) */
     unsigned tries;
+    uint64_t shots;                     /* PAD-733: the shots its tile blinks on the playfield (pm_roster_more_shots) */
 } more_m[N_MORE];
 static int more_n;
 static int more_hosts;                              /* bit n: place n has new monsters (its roster_fn is ours) */
@@ -10227,9 +10264,11 @@ static struct {
                                          * came from has gone out; 0 = none */
     unsigned long going_at;             /* when the cursor last moved (pm_ms) */
     void *place_lock[7], *place_prog[7];    /* PAD-733: each host place's own padlock (`PadSel_Lock<n>`) and "0/4" */
+    int shots_for;                      /* PAD-733: 1 + the new monster whose shots blink on the playfield; 0 = none */
 } more = { 0, 0, -1, -1, -1, 0, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 },
            { { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 },
-             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u, { 0 }, 0, 0, 0ul, { 0 }, { 0 } };
+             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u, { 0 }, 0, 0, 0ul, { 0 }, { 0 },
+           0 };
 static void more_won_shift(int k, int by)   /* member k joined (by 1) or left (by -1): the wins follow */
 {
     int p, s;
@@ -10305,6 +10344,7 @@ int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned c
         more_m[k].page[0] = 0;
         more_m[k].tries = 0;
         for (j = 0; j < 5; j++) more_m[k].hits[j] = more_m[k].of[j] = 0;
+        more_m[k].shots = 0;
         say("roster: %s joins the selection screen in slot %u's place (new monster %d; nodes %s)", name, slot, k + 1,
             page && page[0] ? page : "none");
     }
@@ -10338,12 +10378,14 @@ static void more_release_unused(void)
     }
 }
 
+static void more_shots_show(int k);     /* PAD-733 */
 void pm_roster_more_leave(const char *name)
 {
     int k, j;
     for (k = 0; k < more_n; k++)
         if (more_m[k].by == current && name && more_same(more_m[k].name, name)) break;
     if (k >= more_n) return;
+    if (more.shots_for) more_shots_show(-1);    /* PAD-733: the game has its lights back */
     if (more_m[k].lit) pm_show(more_m[k].lit, 0);
     if (more_m[k].portrait) pm_show(more_m[k].portrait, 0);
     say("roster: %s leaves the selection screen", more_m[k].name);
@@ -10375,6 +10417,19 @@ int pm_roster_more_progress(long done, long of)
     more_m[k].hits[p] = done;
     more_m[k].of[p] = of;
     more.states = 0;                    /* written again at the next opening's draw */
+    return 1;
+}
+
+int pm_roster_more_shots(uint64_t shots)
+{
+    int k;
+    for (k = 0; k < more_n && more_m[k].by != current; k++) ;
+    if (k >= more_n) return 0;
+    if (more_m[k].shots != shots)
+        say("roster: %s's tile blinks shots %08x_%08x on the playfield while the cursor is on it", more_m[k].name,
+            (unsigned)(shots >> 32), (unsigned)shots);
+    more_m[k].shots = shots;
+    if (more.shots_for == k + 1) more.shots_for = -1;   /* lit again at the next draw */
     return 1;
 }
 
@@ -10527,10 +10582,45 @@ static int more_held(void)
     return k;
 }
 
+/* PAD-733 (David, v29: "During the monster selection screen when I overlay the selected monster the respective
+ * indicators need to be blinking on the play field"): the game blinks the shots of the battle under its cursor (the
+ * emulator's lamp probe: slot 0's Left spinner, Attack Mecha and Top spinner, slot 1's three powerlines, ffff00), and on
+ * a new monster it blinked its place's battle's - or nothing. While the cursor is on a new monster its mode's shots
+ * (pm_roster_more_shots) blink as the game's, every other shot's insert on the playfield is held dark, and the game has
+ * them all back as the cursor leaves it, at the pick and as the screen goes. The cabinet's own (the Action button: not
+ * placed on the playfield) stay the game's. A monster whose mode names no shots leaves the game's lights as they were. */
+#define MORE_SHOT_RGB 0xffff00u
+#define MORE_SHOT_MS  250u
+static void more_shots_show(int k)
+{
+    const struct pm_mode *was = current;
+    int on[N_LAMPS], off[N_LAMPS], n_on = 0, n_off = 0, j;
+    uint64_t shots = k >= 0 && k < more_n ? more_m[k].shots : 0;
+    int had = more.shots_for != 0;
+    more.shots_for = shots ? k + 1 : 0;
+    if (!(can & PM_CAN_LAMPS) || (!shots && !had)) return;
+    current = &more_mode;
+    if (!shots) pm_lamp_release_all();
+    else {
+        for (j = 0; j < n_lamps; j++) {
+            if (!lamps[j].shot || lamps[j].x < 0) continue;
+            if (lamps[j].shot & shots) on[n_on++] = j;
+            else off[n_off++] = j;
+        }
+        lamp_hold(off, n_off, 0, PM_LAMP_SOLID, 0, "the selection screen: the other shots");
+        lamp_hold(on, n_on, MORE_SHOT_RGB, PM_LAMP_BLINK, MORE_SHOT_MS, more_m[k].name);
+    }
+    current = was;
+}
+
 static void more_draw(void)
 {
     int k, want = more.open ? more.cur : more.keep;
     unsigned s, hide = 0;
+    {
+        int lit = more.open && more.cur >= 0 && more.cur < more_n && more_m[more.cur].shots ? more.cur + 1 : 0;
+        if (lit != more.shots_for) more_shots_show(lit - 1);
+    }
     if (more.open) want = more_held();
     if (want != more.shown) {
         for (k = 0; k < more_n; k++) {

@@ -640,6 +640,10 @@ text held_coils            magnet
 site scoop_handler         0x0007cd94 0xe30538ea 0xe2401002
 data scoop_slot            0x0074b480
 value scoop_event          2
+# PAD-733: the game's ball search put off while a mode holds the ball (as LE 1.16's; the countdown 0x7e1df8, its scoop
+# handler and selection screen call the delay the same way)
+site ball_search_delay     0x0041b188 0xe3013df8 0xe0600280
+data ball_search_time      0x0070e904
 # EMU 2026-09-26 (mb_batch.sh): served 3 on a mode file's start, both jackpot shots paid, add-a-ball to 4, drains 4-3-2-1, END (one ball left). PROVEN.
 
 # ---- PAD-228: the cabinet buttons as shots, and the Action button's light ----------------------------

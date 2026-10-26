@@ -3760,8 +3760,11 @@ game or each ball, not each time the mode starts.
 **After its finish (PAD-707).** The battle's own stop shows the game's battle-over display on the one video
 surface, so a pick's end that comes as its mode ends (`pm_roster_over`, after `pm_end`) waits for the mode's finish
 (the scoop's paragraph, above) and is given when the clip ends, at the ball's end, or as the game ends - logged `the
-battle KING CAESAR took ends once its finish has played` and `KING CAESAR's battle ends now (its finish is over)`.
-On v21 KING CAESAR's cashout was cut a second in by that display, and the scoop kicked with it.
+battle KING CAESAR took ends once its finish and its total have played` and `KING CAESAR's battle ends now (its
+finish and its total are over)`. On v21 KING CAESAR's cashout was cut a second in by that display, and the scoop
+kicked with it. PAD-733: it also waits out the rest of the mode's ending hold (`pm_end_holding`: a block mode's TOTAL,
+3 s after its clip): on v29 the game's battle-over display came within 15 ms of the final blow's clip, so the TOTAL
+after it was never seen.
 
 **Beaten in its city (PAD-707).** A tier-1 battle's own shot handler, at the monster's last hit and before its
 victory show and its stop, calls `site battle_beaten` on `data battle_beaten_rule` (Premium/LE 1.16 `0x121c28` on
@@ -4041,6 +4044,14 @@ static void on_init(void)
   of place 4's box's stamp, its words never rewritten: a stamp's font holds its letters alone - a space written into
   one stopped the game, emulator run fb5) and its count instead of a padlock, and the place's own tile its
   padlock (`PadSel_Lock<n>`, its box hidden and its words blank); the others booked against it keep theirs.
+- **Its shots blink while the cursor is on it** (PAD-733, David: "when I overlay the selected monster the respective
+  indicators need to be blinking on the play field"). The game blinks the shots of the battle under its cursor
+  (yellow; the emulator's lamp probe: slot 1's three powerlines), and on a new monster it blinked its place's battle's
+  or nothing. `pm_roster_more_shots(shots)` names the calling mode's: while the cursor is on its tile those inserts
+  blink `ffff00` (250 ms), every other shot's insert on the playfield is held dark (the cabinet's, as the Action
+  button, and the inserts of no shot stay the game's), and the game has them back as the cursor leaves it, at the pick
+  and at the ball's end. A block mode names the shots its Light a shot blocks light while it runs
+  (`block_modes.preview_shots`: none dark, none only lit while it is not running).
 - **Played again until it is won.** A new monster's battle lost is the one the game's city pick plays again at the
   next lit scoop (`site roster_resume`, PAD-706); won, its tile shows the claw and its place is done: the place's other tiles
   book the same battle, so they are not offered again that game.

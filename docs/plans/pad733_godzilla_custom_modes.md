@@ -164,6 +164,32 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   sound was roar.wav, 1.35 s against a 6.0 s intro: rise.wav, four roars built from it (0, 1.25, 2.75, 4.25 s, the
   later ones lower), an echo, a fade to 6.0 s, its peak matched to roar.wav (-9.6 dB). POP BUMPERS / POPS -> one
   pop bumper (KING CAESAR, SHIN GODZILLA). Card v29.
+- **v29 (on his machine, the card's own /dump read back):**
+  - **"During the monster selection screen when I overlay the selected monster the respective indicators need to be
+    blinking on the play field"**: the game blinks the shots of the battle under its cursor (the lamp probe: slot 0's
+    Left spinner, Attack Mecha and Top spinner; slot 1's three powerlines; ffff00); on a new monster it blinked its
+    place's battle's (KUMONGA, in slot 0's place) or nothing. A mode now names its monster's shots
+    (`pm_roster_more_shots`; a block mode: every shot its Light a shot blocks light while it runs), and while the
+    cursor is on its tile those inserts blink ffff00, every other shot insert on the playfield is dark (the Action
+    button and the inserts of no shot stay the game's), and the game has them back as the cursor leaves, at the pick
+    and at the ball's end. KING CAESAR: Pop bumper, Right ramp, Mecha lane, Left ramp, Building; KUMONGA: its five
+    webs and both spinners; MINILLA: its four roving shots.
+  - **"when the final mode video plays the scene text plays after that but only for a very brief portion of a
+    second"**: two cuts. At a drain (three of his four KING CAESAR ends) the end of ball waited the TOTAL's 6 s and
+    the lost clip took 5.7 of them: the TOTAL showed 0.25 s (card log: clip 262577-267773, ball end 268023). Now a
+    drain whose ending plays a clip waits for the clip and then the TOTAL's 3 s, as the clock's end does (10 s, the
+    runtime's most). And the final blow asked its clip and then ended, so its 3 s TOTAL ran out under the clip, and
+    the battle's hand-back after the clip brought the game's battle-over display within 15 ms (run fb2_caesar): a clip
+    asked as a mode ends counts as its ending's now (the TOTAL 3 s after it), and the battle is handed back once the
+    mode's ending hold is over, not at the clip's end.
+  - **"The game also randomly went into ball search mode when I restarted King Caesar for the second time"**: the
+    game's ball-search countdown (Premium/LE 1.16 0x7d36a4, 10 s) runs on while a ball sits in the scoop; its own
+    holds put it off every tick (`ball_search_delay`, 0x379f0c), ours did not. A pick's 6 s start clip left about 4 s
+    at the kick-out, so a ball that scored nothing in the next 4 s set the search off (his third start held 6067 ms;
+    the building's floor moves after it fit search steps). Both of our holds now put it off every tick
+    (`site ball_search_delay`, `data ball_search_time`; LE 1.16 and Pro 1.16): rig runs bs_long (a 16 s hold searched
+    with the ball still in the scoop) / bs_long_fix (10.0 s left at the kick-out), bs_hits (search 3.4 s after the
+    kick-out) / bs_hits_fix (none).
 - **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
   game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
   screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the

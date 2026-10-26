@@ -77,10 +77,41 @@ def test_the_c_joins_the_screen_instead_of_claiming_the_slot():
     assert "BATTLE_MORE[1] = { 0 };" in BM.to_c(plain, "mothra")
 
 
+def lit_monster():
+    """monster() with lights: the webs at its start, a Building lit by its timer, one lit only while idle, one dark"""
+    p = monster()
+    p["scripts"][0]["do"] += [{"op": "light_shot", "shot": "Left ramp", "color": "#b040ff", "pattern": "chase"},
+                              {"op": "light_shot", "shot": "Right ramp", "color": "#000000", "pattern": "solid"}]
+    p["scripts"].append({"hat": {"kind": "every", "seconds": 5}, "do": [
+        {"op": "light_shot", "shot": "Building", "color": "#ffb000", "pattern": "blink"},
+        {"op": "light_shot", "shot": "Left ramp", "color": "#ffffff", "pattern": "blink"}]})
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Right ramp", "when": "idle"}, "do": [
+        {"op": "light_shot", "shot": "Right ramp", "color": "#ffd000", "pattern": "blink"}]})
+    return p
+
+
+def test_its_tile_names_the_shots_it_lights(tmp_path):
+    """PAD-733 (David, v29: "the respective indicators need to be blinking on the play field"): the shots its blocks
+    light while it runs - not a dark one, not one an idle script lights - are what its tile blinks on the playfield"""
+    p = lit_monster()
+    assert BM.preview_shots(BM.normalize(p)) == ["Left ramp", "Building"]
+    c = BM.to_c(p, "mothra")
+    names = re.search(r"SHOT_NAMES\[\d+\] = \{(.*?)\};", c).group(1)
+    idx = re.search(r"MORE_SHOTS\[2\] = \{ (\d+), (\d+) \};", c).groups()
+    shots = [s.strip().strip('"') for s in names.split(",")]
+    assert [shots[int(i)] for i in idx] == ["Left ramp", "Building"]
+    assert "pm_roster_more_shots(m);" in c
+    assert "pm_roster_more_shots" not in BM.to_c(monster(), "mothra")        # it lights none: the game's lights
+    from tests.test_stern_block_battle import play
+    out = play(tmp_path, p, "secs", 1, slug="mothra")
+    assert "ROSTER SHOTS 00000000_" in out and "ROSTER SHOTS 00000000_00000000" not in out
+
+
 def test_the_c_only_calls_what_the_header_declares():
     declared = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", (SDK / "pad_mode.h").read_text(encoding="utf-8")))
-    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", BM.to_c(monster(), "mothra")))
-    assert used <= declared, used - declared
+    for p in (monster(), lit_monster()):
+        used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", BM.to_c(p, "mothra")))
+        assert used <= declared, used - declared
 
 
 def test_a_picked_monster_plays_and_gives_the_battle_back(tmp_path):
@@ -197,7 +228,24 @@ PRELUDE = r"""
 #include "pad_mode.h"
 #define N_ROSTER 16
 static const struct pm_mode *current;
-static unsigned can = PM_CAN_SCREENS | PM_CAN_MESSAGES;
+static unsigned can = PM_CAN_SCREENS | PM_CAN_MESSAGES | PM_CAN_LAMPS;
+/* PAD-733: the port's inserts (a shot each, the Action button not on the playfield, a name insert of no shot) and
+ * the runtime's hold of them, said */
+#define N_LAMPS 8
+struct lamp { char name[40]; unsigned long long shot; int x, y; };
+static struct lamp lamps[N_LAMPS] = { { "LEFT RAMP", 0x1, 69, 272 }, { "RIGHT RAMP", 0x2, 199, 189 },
+                                      { "BUILDING", 0x4, 123, 202 }, { "ACTION BUTTON", 0x8, -1, -1 },
+                                      { "RODAN", 0, 178, 421 } };
+static int n_lamps = 5;
+static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned ms, const char *what)
+{
+    int j;
+    printf("LAMPS %s (%s):", what, current ? current->name : "-");
+    for (j = 0; j < n; j++) printf(" %s", lamps[list[j]].name);
+    printf(" %06x %d %u\n", rgb, pattern, ms);
+    return n;
+}
+int pm_lamp_release_all(void) { printf("LAMPS RELEASED (%s)\n", current ? current->name : "-"); return 1; }
 static int (*roster_fn[N_ROSTER])(unsigned slot);
 static const struct pm_mode *roster_by[N_ROSTER];
 static int roster_resuming;
@@ -348,6 +396,10 @@ int main(int argc, char **argv)
             const char *w = argv[++k]; long d = atol(argv[++k]), o = atol(argv[++k]);
             current = mode_of(w);
             printf("COUNT %d\n", pm_roster_more_progress(d, o)); current = &A; }
+        else if (!strcmp(c, "shots")) {                  /* shots <monster> <mask>: its mode's shots (PAD-733) */
+            const char *w = argv[++k]; unsigned long long m = strtoull(argv[++k], 0, 0);
+            current = mode_of(w);
+            printf("SHOTS %d\n", pm_roster_more_shots(m)); current = &A; }
         else if (!strcmp(c, "player")) up = (unsigned)atoi(argv[++k]);
         else if (!strcmp(c, "gameopen")) {               /* gameopen <slot>: the game's open, its cursor on <slot> */
             game_pick = (unsigned)atoi(argv[++k]); more_open_orig = g_open;
@@ -497,6 +549,31 @@ def test_a_monsters_tile_shows_its_modes_count_like_the_games_own(tmp_path):
     assert "WORDS PadSel_KAMACURAS_Prog:  " in locked             # its place locked: no count, as the game's own
     assert "WORDS PadSel_KAMACURAS_Prog: 2/5" not in over        # the game over cleared it
     assert "Prog" not in menu(tmp_path, *THREE, "noprog", "tick", "count", "KAMACURAS", 2, 5, "open", 0, "tick")
+
+
+def test_a_monster_under_the_cursor_blinks_its_shots_on_the_playfield(tmp_path):
+    """PAD-733 (David, v29: "During the monster selection screen when I overlay the selected monster the respective
+    indicators need to be blinking on the play field"): the game blinks the shots of the battle under its cursor; on a
+    new monster it blinked its place's. Now the monster's own mode's shots blink (yellow, as the game's) and every
+    other shot's insert on the playfield is dark - the Action button and the inserts of no shot left alone - until the
+    cursor leaves it, the pick, or the ball's end; a monster whose mode names none leaves the game's lights be."""
+    steps = [*THREE, "shots", "KUMONGA", "0x3", "shots", "NOBODY", "0x4", "tick", "open", 0, "tick", "MARK",
+             "right", "tick", "MARK", "right", "tick", "MARK", "right", "tick", "MARK", "left", "left", "tick",
+             "MARK", "gamepick", "tick"]
+    out = menu(tmp_path, *steps)
+    before, kumonga, place1, kamacuras, back, picked = out.split("MARK")
+    assert "SHOTS 1" in before and "SHOTS 0" in before            # a mode with no monster on the screen: nothing kept
+    assert "KUMONGA's tile blinks shots 00000000_00000003" in before
+    assert "LAMPS" not in before                                   # on a place of the game's: the game's own
+    assert "LAMPS the selection screen: the other shots (MORE KAIJU): BUILDING 000000 0" in kumonga
+    assert "LAMPS KUMONGA (MORE KAIJU): LEFT RAMP RIGHT RAMP ffff00 1 250" in kumonga
+    assert "ACTION BUTTON" not in out and "RODAN" not in out
+    assert "LAMPS RELEASED (MORE KAIJU)" in place1                  # off it: the game has them back
+    assert "LAMPS" not in kamacuras                                 # its mode named none: the game's
+    assert "LAMPS KUMONGA" in back
+    assert "LAMPS RELEASED (MORE KAIJU)" in picked                  # the pick: the game's (and then the mode's)
+    out = menu(tmp_path, *THREE, "shots", "KUMONGA", "0x3", "tick", "open", 0, "right", "tick", "MARK", "ball_end", "tick")
+    assert "LAMPS KUMONGA" in out.split("MARK")[0] and "LAMPS RELEASED (MORE KAIJU)" in out.split("MARK")[1]
 
 
 def test_a_lost_monsters_tile_wears_its_city_and_count_and_its_place_a_padlock(tmp_path):

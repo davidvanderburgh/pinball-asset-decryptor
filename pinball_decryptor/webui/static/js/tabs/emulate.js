@@ -340,9 +340,12 @@ function WindowsCard({ s }) {
 // ------------------------------------------------------------- modals
 const CACHE_COLS = [
   { key: "label", label: "Card", width: "minmax(160px,1.2fr)", cls: "mono", titleOf: (r) => r.label },
-  { key: "size", label: "On disk", width: "90px", num: true },
-  { key: "booted", label: "Last booted", width: "140px", titleOf: (r) => r.booted || undefined },
-  { key: "src", label: "Source image", width: "minmax(0,1.6fr)", cls: "mono dim", titleOf: (r) => r.src || undefined },
+  { key: "size", label: "On disk", width: "80px", num: true },
+  { key: "booted", label: "Last used", width: "150px",
+    titleOf: (r) => (/^copied /.test(r.booted || "") ? "Never booted: this is when it was copied, not when it was last used" : r.booted || undefined) },
+  { key: "source", label: "Image", width: "190px", titleOf: (r) => r.why ? r.source + " (" + r.why + ")" : r.source || undefined },
+  { key: "use", label: "In use", width: "70px", titleOf: (r) => r.use ? "A running emulator reads this card, or it is being copied: it cannot be deleted now" : undefined },
+  { key: "src", label: "Source image", width: "minmax(0,1.4fr)", cls: "mono dim", titleOf: (r) => r.src || undefined },
 ];
 
 function CacheModal({ c }) {
@@ -404,16 +407,25 @@ function CacheModal({ c }) {
   const rowsKey = rows.map((x) => x.label).join("\n");
   useEffect(() => { anchor.current = null; cursor.current = null; }, [rowsKey]);
   const close = () => call("emulate.cache_close");
+  const limits = (c.limits || []).map((o) => ({ value: String(o.gb), label: o.text }));
   return html`<${Modal} title="Card cache — Spike 2 emulator" icon="disk" xwide onClose=${close} cls="emu-cache"
-    footer=${html`<span class="small muted grow emu-cache-hint">${c.hint}</span>
-      <${Button} kind="danger" disabled=${c.busy || !sel.size} onClick=${() => call("emulate.cache_delete")}>Delete selected<//>
+    footer=${html`<span class="small muted grow emu-cache-hint">${c.sel_text || c.hint}</span>
+      <${Button} disabled=${c.busy || !c.unused} onClick=${() => call("emulate.cache_select_unused")}
+        title="Selects every card that will not be missed: a copy that never finished, one whose image was rebuilt, deleted or renamed since, or one not used for 30 days. Never one in use or the library's.">Select unused<//>
+      <${Button} kind="danger" disabled=${c.busy || !sel.size} onClick=${() => call("emulate.cache_delete")}>Delete selected…<//>
       <${Button} disabled=${c.busy} onClick=${() => call("emulate.cache_refresh")}>Refresh<//>
       <${Button} onClick=${close}>Close<//>`}>
-    <div class="row">${c.busy ? html`<span class="spin"></span>` : null}<span>${c.head}</span></div>
+    <div class="row">${c.busy ? html`<span class="spin"></span>` : null}<span class="grow">${c.head}</span>
+      ${limits.length ? html`<label class="lbl small" for="emu-cache-limit">Keep the cache under</label>
+        <${Select} id="emu-cache-limit" sm width=${110} value=${String(c.limit)} options=${limits} disabled=${c.busy}
+          onChange=${(v) => call("emulate.cache_set_limit", Number(v))}
+          title="When a new card is copied and the cache would grow past this, the least recently booted cards are deleted first (cards whose image changed go before any). Cards in use and the library's are kept." />` : null}</div>
     <div class="emu-cache-tbl" ref=${wrap}>
       <${Table} columns=${CACHE_COLS} rows=${rows} rowKey=${(r) => r.label} selected=${sel}
-        onSelect=${pick} style="height:300px" resizable widths=${widths} onResize=${setWidths} />
+        onSelect=${pick} style="height:300px" resizable widths=${widths} onResize=${setWidths}
+        rowClass=${(r) => (r.locked ? "dim" : undefined)} />
     </div>
+    ${c.note ? html`<div class="small muted emu-cache-note">${c.note}</div>` : null}
   <//>`;
 }
 

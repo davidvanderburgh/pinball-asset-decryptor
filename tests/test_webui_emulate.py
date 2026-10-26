@@ -1157,13 +1157,89 @@ def test_card_cache_manager(tmp_path, monkeypatch):
         w.answers.append("no")
         assert w.call(NS + ".cache_delete") is False
         assert w.asked[-1]["message"].startswith(
-            "Delete 1 cached card, freeing about 6.3 GB?")
+            "Delete 1 cached card, freeing about 6.3 GB inside WSL?")
         w.answers.append("yes")
         assert w.call(NS + ".cache_delete") is True
         _wait(w, lambda: any("--cache-drop" in c for c in rec.calls))
         _wait(w, lambda: (w.state(NS)["cache"] or {}).get("busy") is False)
         w.call(NS + ".cache_close")
         assert w.state(NS)["cache"] is None
+
+
+# PAD-739: the Cache window shows each card's image and use, selects what will
+# not be missed, keeps the cache under a limit, never deletes a card in use and
+# says which deletes failed.
+def _cache_739(now):
+    d = 86400
+    return ("entry\tgz_v1\t9437184\t15000000\t%d\t/mnt/c/Users/u/Desktop/gz v1.raw\n"
+            "state\tgz_v1\tchanged\t-\t%d\n"
+            "entry\tgz_v2\t9437184\t15000000\t0\t/mnt/c/Users/u/Desktop/gz v2.raw\n"
+            "state\tgz_v2\tok\t-\t%d\n"
+            "entry\tgz_v3\t8000000\t15000000\t%d\t/mnt/c/Users/u/Desktop/gz v3.raw\n"
+            "state\tgz_v3\tok\tmounted\t%d\n"
+            "entry\tgz_v4\t7000000\t15000000\t%d\t/mnt/c/Users/u/Desktop/gz v4.raw\n"
+            "state\tgz_v4\tgone\t-\t%d\n"
+            "leftover\thalf\t600000\t%d\t-\n"
+            "limit\t64\t34474368\t/home/u/cardcache\tdistro\n"
+            "disk\t900000000\t1000000000\n"
+            % (now - 2 * d, now - 9 * d, now - 40 * d, now - 60 * d,
+               now - 60 * d, now - d, now - 5 * d, now - 3 * d)).encode()
+
+
+def test_card_cache_window_pad739(tmp_path, monkeypatch):
+    now = int(time.time())
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        rec = _patch(svc, monkeypatch, answers={
+            "--cache-list": _Done(_cache_739(now)),
+            "--cache-limit": _Done(b"[card] cache limit 32 GB (0 = none)\n"),
+            "--cache-drop gz_v4": _Done(b"[card] could not delete gz_v4.boot "
+                                        b"(permission denied?)\n", rc=1),
+            "--cache-drop": _Done(b"[card] dropped cached x\n")})
+        assert w.call(NS + ".open_cache") is True
+        _wait(w, lambda: (w.state(NS)["cache"] or {}).get("busy") is False)
+        c = w.state(NS)["cache"]
+        rows = {r["label"]: r for r in c["rows"]}
+        assert rows["gz_v1"]["source"] == "Image rebuilt since: copy never used again"
+        assert rows["gz_v2"]["booted"].startswith("copied ")      # never booted
+        assert rows["gz_v3"]["use"] == "In use" and rows["gz_v3"]["locked"]
+        assert rows["gz_v4"]["source"] == "Image deleted or renamed"
+        assert rows["half"]["source"] == "Unfinished copy"
+        assert c["limit"] == 64 and [o["gb"] for o in c["limits"]] == [32, 64, 128, 256, 0]
+        assert "kept under 64 GB" in c["head"] and "4 unused" in c["head"]
+        assert "Reclaim space to Windows" in c["note"]
+        # Select unused: the rebuilt one, the never-booted 40-day one, the
+        # deleted image's and the unfinished copy - not the one in use
+        assert w.call(NS + ".cache_select_unused") == 4
+        c = w.state(NS)["cache"]
+        assert sorted(c["sel"]) == ["gz_v1", "gz_v2", "gz_v4", "half"]
+        assert c["sel_text"] == "4 selected — frees about 25.2 GB"
+        # a selection holding the card in use: it is left out and said so
+        w.call(NS + ".cache_select", ["gz_v3", "gz_v4"])
+        w.answers.append("yes")
+        assert w.call(NS + ".cache_delete") is True
+        msg = w.asked[-1]["message"]
+        assert msg.startswith("Delete 1 cached card, freeing about 6.7 GB inside WSL?")
+        assert "cannot boot again until its image is back" in msg
+        assert "1 selected card is in use and will be kept." in msg
+        _wait(w, lambda: any("--cache-drop" in " ".join(x) for x in rec.calls))
+        assert not any("gz_v3" in " ".join(x) for x in rec.calls)
+        _wait(w, lambda: "Not deleted" in ((w.state(NS)["cache"] or {}).get("hint") or ""))
+        assert w.state(NS)["cache"]["hint"] == (
+            "Deleted 0 of 1. Not deleted: gz_v4 (could not delete gz_v4.boot "
+            "(permission denied?))")
+        # only the card in use: nothing to ask, nothing run
+        _wait(w, lambda: (w.state(NS)["cache"] or {}).get("busy") is False)
+        w.call(NS + ".cache_select", ["gz_v3"])
+        n = len(rec.calls)
+        assert w.call(NS + ".cache_delete") is False
+        assert len(rec.calls) == n
+        # a lower limit than the cache holds asks first, then runs the rig's trim
+        w.answers.append("yes")
+        assert w.call(NS + ".cache_set_limit", 32) is True
+        assert w.asked[-1]["title"] == "Card cache limit"
+        _wait(w, lambda: any("--cache-limit" in x for x in rec.calls))
+        assert [x for x in rec.calls if "--cache-limit" in x][-1][-1] == "32"
 
 
 # ------------------------------------------------- setup, runtime, Docker

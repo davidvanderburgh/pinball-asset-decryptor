@@ -1817,6 +1817,16 @@ class EmulateTab(TabService):
     # ------------------------------------------------------------------
     # the card cache manager (item 77)
     # ------------------------------------------------------------------
+    #: What deleting means, under the table (PAD-739: the window must say
+    #: what goes, what it costs and what never goes).
+    _CACHE_HINT = ("Only the copy goes: a deleted card is copied again from "
+                   "its image the next time it boots (a minute or two a "
+                   "card, longer off a slow drive). Your images, projects, "
+                   "edits, overrides, settings and high scores are never in "
+                   "the cache.")
+    #: The limit choices, GB (0 = none).
+    _CACHE_LIMITS = (32, 64, 128, 256, 0)
+
     @rpc
     def open_cache(self):
         if not rig.rig_available():
@@ -1828,9 +1838,9 @@ class EmulateTab(TabService):
         self._cache_open = True
         self._cache_sel = []
         self.set(cache={"head": "Reading the cache…", "rows": [],
-                        "sel": [], "busy": True,
-                        "hint": "Deleting frees the space now; the card "
-                                "re-copies on its next boot."})
+                        "sel": [], "busy": True, "hint": self._CACHE_HINT,
+                        "note": "", "limit": None, "limits": [],
+                        "sel_text": "", "unused": 0})
         self.cache_refresh()
         return True
 
@@ -1849,89 +1859,247 @@ class EmulateTab(TabService):
         return True
 
     @rpc
-    def cache_refresh(self):
+    def cache_refresh(self, hint=None):
         if not self._cache_open:
             return False
-        self._cache_patch(head="Reading the cache…", busy=True, sel=[])
+        self._cache_patch(head="Reading the cache…", busy=True, sel=[],
+                          sel_text="")
         self._cache_sel = []
 
         def run():
             try:
                 out = self._run(self._cmd("cardmount.sh", "--cache-list"),
                                 stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, timeout=30)
+                                stderr=subprocess.DEVNULL, timeout=60)
                 text = out.stdout.decode("utf-8", "replace")
             except Exception:                            # noqa: BLE001
                 text = ""
-            result = rig.parse_cache_list(text)
-            self._post(self._cache_show, result)
+            result = (rig.parse_cache_list(text), rig.parse_cache_meta(text))
+            self._post(self._cache_show, result, hint)
 
         self._thread(run)
         return True
 
-    def _cache_show(self, result):
+    #: The Source column, by cardmount.sh's source state.
+    _CACHE_SOURCE = {
+        "ok": "Image found",
+        "changed": "Image rebuilt since: copy never used again",
+        "gone": "Image deleted or renamed",
+        "unreachable": "Image's drive not attached",
+        "": "",
+    }
+
+    def _cache_row(self, e, now):
+        why = rig.cache_unused(e, now)
+        if e.get("leftover"):
+            source, booted = "Unfinished copy", "—"
+        else:
+            source = self._CACHE_SOURCE.get(e.get("source") or "", "")
+            if e.get("pinned"):
+                source = "Library: always kept"
+            if e.get("boot"):
+                booted = rig.cache_boot_text(e["boot"])
+            elif e.get("copied"):
+                # no boot recorded: the copy's own date, which is when it was
+                # copied, not when it was used - said so, not passed off
+                booted = "copied " + rig.cache_boot_text(e["copied"])
+            else:
+                booted = "never"
+        use = {"mounted": "In use", "copying": "Copying"}.get(
+            e.get("use") or "", "")
+        return {"label": e["label"], "size": rig.human_size(e["real_kb"]),
+                "booted": booted, "source": source, "use": use,
+                "src": e.get("src") or "", "why": why,
+                "locked": bool(use)}
+
+    def _cache_show(self, result, hint=None):
         if not self._cache_open:
             return
-        entries, disk = result
+        (entries, disk), meta = result
+        now = time.time()
         self._cache_entries = {e["label"]: e for e in entries}
-        rows = [{"label": e["label"], "size": rig.human_size(e["real_kb"]),
-                 "booted": rig.cache_boot_text(e["boot"]), "src": e["src"]}
-                for e in entries]
+        rows = [self._cache_row(e, now) for e in entries]
         total = sum(e["real_kb"] for e in entries)
-        if disk:
-            head = ("%d cached cards — %s on disk · %s free of %s (WSL disk)"
-                    % (len(entries), rig.human_size(total),
-                       rig.human_size(disk[0]), rig.human_size(disk[1])))
-        elif entries:
-            head = "%d cached cards — %s on disk" % (
-                len(entries), rig.human_size(total))
+        unused = [e for e in entries if rig.cache_unused(e, now)]
+        bits = []
+        if entries:
+            bits.append("%d cached card%s — %s on disk" % (
+                len(entries), "" if len(entries) == 1 else "s",
+                rig.human_size(total)))
         else:
-            head = ("The card cache is empty — cards land here on their "
-                    "first boot.")
-        self._cache_patch(head=head, rows=rows, busy=False, sel=[])
+            bits.append("The card cache is empty — cards land here on their "
+                        "first boot.")
+        if meta and meta.get("limit_gb"):
+            bits.append("kept under %d GB" % meta["limit_gb"])
+        elif meta:
+            bits.append("no size limit")
+        if disk:
+            bits.append("%s free of %s (WSL disk)" % (
+                rig.human_size(disk[0]), rig.human_size(disk[1])))
+        if unused:
+            bits.append("%d unused (%s)" % (
+                len(unused), rig.human_size(sum(e["real_kb"]
+                                                for e in unused))))
+        note = ("Deleting frees the space inside WSL at once. The disk file "
+                "that holds it on Windows does not shrink by itself: "
+                "Settings ▸ Manage disk space ▸ Reclaim space to Windows… "
+                "hands it back (it shuts WSL down and needs Administrator), "
+                "and the next cards copied reuse the space either way.")
+        limit = None
+        limits = []
+        if meta:
+            limit = meta["limit_gb"]
+            opts = list(self._CACHE_LIMITS)
+            if limit not in opts:
+                opts.insert(0, limit)
+            limits = [{"gb": g, "text": ("No limit" if not g else
+                                         "%d GB" % g)} for g in opts]
+        self._cache_patch(head=" · ".join(bits), rows=rows, busy=False,
+                          sel=[], sel_text="", note=note, limit=limit,
+                          limits=limits, store=bool(meta and meta["store"]),
+                          unused=len(unused),
+                          hint=hint or self._CACHE_HINT)
+
+    def _cache_sel_text(self):
+        es = [self._cache_entries[l] for l in self._cache_sel
+              if l in self._cache_entries]
+        if not es:
+            return ""
+        return "%d selected — frees about %s" % (
+            len(es), rig.human_size(sum(e["real_kb"] for e in es)))
 
     @rpc
     def cache_select(self, labels):
         self._cache_sel = [l for l in (labels or [])
                            if l in self._cache_entries]
-        self._cache_patch(sel=list(self._cache_sel))
+        self._cache_patch(sel=list(self._cache_sel),
+                          sel_text=self._cache_sel_text())
         return len(self._cache_sel)
+
+    @rpc
+    def cache_select_unused(self):
+        """Select every entry that is safe to delete without being missed:
+        an unfinished copy, an image rebuilt, deleted or renamed since, or
+        not used for 30 days - never one in use or the library's."""
+        now = time.time()
+        return self.cache_select([l for l, e in self._cache_entries.items()
+                                  if rig.cache_unused(e, now)])
+
+    @rpc
+    def cache_set_limit(self, gb):
+        """Keep the cache under *gb* GB (0 = no limit).  The rig saves it
+        beside the cache - every run, sweep and copier reads it there - and
+        evicts down to it now by its own rule: dead entries first, then the
+        least recently booted; never one in use, being copied or the
+        library's."""
+        try:
+            gb = max(0, int(gb))
+        except (TypeError, ValueError):
+            return False
+        if not self._cache_open:
+            return False
+        cur = self.get("cache") or {}
+        if gb and cur.get("limit") is not None and (
+                not cur.get("limit") or gb < cur["limit"]):
+            used = sum(e["real_kb"] for e in self._cache_entries.values())
+            if used > gb * 1048576 and not compat.messagebox.askyesno(
+                    "Card cache limit",
+                    "The cache holds %s. Keeping it under %d GB deletes the "
+                    "least recently booted cards now (cards whose image "
+                    "changed go first; cards in use and the library's are "
+                    "kept).\n\nEach re-copies on its next boot. Go ahead?"
+                    % (rig.human_size(used), gb)):
+                self._cache_patch(limit=cur.get("limit"))
+                return False
+        self._cache_patch(busy=True, hint="Setting the limit…")
+
+        def run():
+            try:
+                out = self._run(self._cmd("cardmount.sh", "--cache-limit",
+                                          str(gb)),
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=600)
+                for line in out.stdout.decode("utf-8",
+                                              "replace").splitlines():
+                    self._log("[emulate] " + line)
+            except Exception as exc:                     # noqa: BLE001
+                self._log("[emulate] cache limit failed: %s" % exc)
+            self._post(self.cache_refresh)
+
+        self._thread(run)
+        return True
 
     @rpc
     def cache_delete(self):
         labels = list(self._cache_sel)
         if not self._cache_open or not labels:
             return False
-        freed = sum(self._cache_entries.get(l, {}).get("real_kb", 0)
-                    for l in labels)
-        if not compat.messagebox.askyesno(
+        # a card a running emulator reads, or one being copied, is never
+        # deleted from here (the rig refuses as well)
+        locked = [l for l in labels
+                  if self._cache_entries.get(l, {}).get("use")]
+        labels = [l for l in labels if l not in locked]
+        if not labels:
+            compat.messagebox.showinfo(
                 "Delete cached cards",
-                "Delete %d cached card%s, freeing about %s?\n\n"
-                "Each re-copies on its next boot — nothing is lost."
-                % (len(labels), "" if len(labels) == 1 else "s",
-                   rig.human_size(freed))):
+                "The selected card%s in use by a running emulator or being "
+                "copied, so %s kept. Stop the emulator first."
+                % (" is" if len(locked) == 1 else "s are",
+                   "it is" if len(locked) == 1 else "they are"))
+            return False
+        es = [self._cache_entries.get(l, {}) for l in labels]
+        freed = sum(e.get("real_kb", 0) for e in es)
+        msg = ("Delete %d cached card%s, freeing about %s inside WSL?\n\n"
+               "Each is copied again from its image the next time it boots "
+               "(a minute or two a card). The images themselves, your "
+               "projects, edits and overrides are not touched."
+               % (len(labels), "" if len(labels) == 1 else "s",
+                  rig.human_size(freed)))
+        gone = [e for e in es if e.get("source") in ("gone", "unreachable")]
+        if gone:
+            msg += ("\n\n%d of them %s an image that is not on this PC now "
+                    "(deleted, renamed, or on a drive not attached): that "
+                    "card cannot boot again until its image is back."
+                    % (len(gone), "is a copy of" if len(gone) == 1
+                       else "are copies of"))
+        if locked:
+            msg += ("\n\n%d selected card%s in use and will be kept."
+                    % (len(locked), " is" if len(locked) == 1 else "s are"))
+        if not compat.messagebox.askyesno("Delete cached cards", msg):
             return False
         self._cache_patch(busy=True, hint="Deleting…")
 
         def run():
+            failed = []
             for label in labels:
                 try:
                     out = self._run(
                         self._cmd("cardmount.sh", "--cache-drop", label),
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        timeout=30)
-                    for line in out.stdout.decode(
-                            "utf-8", "replace").splitlines():
+                        timeout=60)
+                    text = out.stdout.decode("utf-8", "replace")
+                    for line in text.splitlines():
                         self._log("[emulate] " + line)
+                    if out.returncode:
+                        lines = [x for x in text.splitlines() if x.strip()]
+                        failed.append((label, (lines[-1] if lines else
+                                               "exit %d" % out.returncode)
+                                       .replace("[card] ", "")))
                 except Exception as exc:                 # noqa: BLE001
                     self._log("[emulate] cache drop %s failed: %s"
                               % (label, exc))
-
-            def done():
-                self._cache_patch(hint="Deleting frees the space now; the "
-                                       "card re-copies on its next boot.")
-                self.cache_refresh()
-            self._post(done)
+                    failed.append((label, str(exc)))
+            if failed:
+                hint = ("Deleted %d of %d. Not deleted: %s"
+                        % (len(labels) - len(failed), len(labels),
+                           "; ".join("%s (%s)" % f for f in failed[:3])
+                           + (" and %d more" % (len(failed) - 3)
+                              if len(failed) > 3 else "")))
+            else:
+                hint = ("Deleted %d cached card%s, about %s freed inside WSL."
+                        % (len(labels), "" if len(labels) == 1 else "s",
+                           rig.human_size(freed)))
+            self._post(self.cache_refresh, hint)
 
         self._thread(run)
         return True

@@ -190,6 +190,63 @@ label_mounted() {   # <label>
     return 1
 }
 
+# Is the cached copy in use ANYWHERE (PAD-739)? label_mounted sees only THIS rig slot's mounts ($CARDS is per slot),
+# so a card booted in rig 2 read as free to a delete from the Emulate tab (slot 0). Every reader of a copy - the
+# fuse2fs that mounts it, a live copier - has the copy's path as one whole argument, so /proc answers for every slot.
+# Read in-shell (read -d ''), never by a grep whose own argv would carry the path and match itself. One pass lists
+# every argument naming a file in the cache; --cache-list takes it once (CACHE_READERS) rather than once a card.
+cache_readers() {
+    local f a
+    for f in /proc/[0-9]*/cmdline; do
+        while IFS= read -r -d '' a; do
+            case $a in "$CACHE"/*) printf '%s\n' "$a" ;; esac
+        done < "$f" 2>/dev/null
+    done
+}
+cache_in_use() {   # <label>
+    local c="$CACHE/$1.raw" r
+    label_mounted "$1" && return 0
+    r=${CACHE_READERS-$(cache_readers)}
+    case $'\n'"$r"$'\n' in *$'\n'"$c"$'\n'*|*$'\n'"$c.partial"$'\n'*) return 0 ;; esac
+    return 1
+}
+
+# Where the entry's image stands (PAD-739), for the Cache window and the clean-ups:
+#   ok           the image is there with the entry's stamp - the copy is what a boot of it uses
+#   changed      the image is there but rebuilt or replaced since (or the entry has no stamp): never used again
+#   gone         its folder is there but the file is not (deleted or renamed): never used again unless it comes back
+#   unreachable  its folder is not there either (a drive not attached, a share offline): may be used again
+cache_source_state() {   # <label>
+    local s img
+    s=$(cat "$CACHE/$1.src" 2>/dev/null) || { echo changed; return; }
+    img=${s% * *}
+    if [ -f "$img" ]; then
+        cache_valid "$img" "$CACHE/$1.raw" "$CACHE/$1.src" && echo ok || echo changed
+    elif [ -d "$(dirname "$img")" ]; then
+        echo gone
+    else
+        echo unreachable
+    fi
+}
+
+# THE CACHE'S OWN SIZE LIMIT (PAD-739). cache_make_room evicted only when `df` said the disk was nearly full - and on
+# a distro's own disk `df` reports the VIRTUAL size of its ext4.vhdx (1 TB by default), not the Windows drive behind
+# it. So on a machine without the store nothing was ever evicted: a user's ~/cardcache reached 150 GB over a month of
+# custom Godzilla builds, the distro disk 226 GB on C:. A limit on what the cache itself holds is the bound df cannot
+# give. `cardmount.sh --cache-limit N` saves it beside the cache (.limit_gb, 0 = none); without one it is 64 GB on a
+# distro disk (PAD_CACHE_MAX_GB) and none on the store, which is its own sized disk holding nothing else.
+cache_limit_gb() {
+    local v
+    v=$(tr -dc 0-9 2>/dev/null < "$CACHE/.limit_gb")
+    if [ -n "$v" ]; then echo $((10#$v)); return; fi
+    if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then echo 0; else echo "${PAD_CACHE_MAX_GB:-64}"; fi
+}
+cache_used_kb() {
+    local u
+    u=$(du -ck "$CACHE"/*.raw "$CACHE"/*.raw.partial 2>/dev/null | tail -1 | cut -f1)
+    echo "${u:-0}"
+}
+
 # ITEM 77: never start a copy the disk cannot hold - the cache was measured
 # at 125 GB real (half the WSL disk) with 29 GB free and NOTHING pruning it.
 # Frees space by evicting the least-recently-BOOTED entries first (the .boot
@@ -208,8 +265,10 @@ label_mounted() {   # <label>
 # eviction cannot make room; the boot then runs off the original and nothing
 # half-lands. CACHE_KEEP_GB is the floor the rest of the disk keeps
 # (PAD_CACHE_KEEP_FREE_GB, default 8, on a distro's disk; 2 on the store).
+# PAD-739: it also keeps the cache under its own size limit (cache_limit_gb), because on a distro's disk df is the
+# virtual disk's and never ran short; and a copy that never finished goes first of all.
 cache_make_room() {   # <img> <own-copy-path>
-    local need keep free f vlabel vboot victim oldest size alloc vsrc pinned
+    local need keep free f vlabel vboot victim oldest size alloc pinned limit used over why
     size=$(stat -c %s "$1" 2>/dev/null || echo 0)
     alloc=$(( $(stat -c '%b * %B' "$1" 2>/dev/null || echo 0) ))
     if [ "$alloc" -gt 0 ] && [ "$alloc" -lt "$size" ]; then
@@ -218,38 +277,70 @@ cache_make_room() {   # <img> <own-copy-path>
         need=$(( size / 1024 ))
     fi
     keep=$(( CACHE_KEEP_GB * 1048576 ))
+    limit=$(( $(cache_limit_gb) * 1048576 ))
     while :; do
         free=$(df -k --output=avail "$CACHE" 2>/dev/null | tail -1 | tr -d " ")
         [ -n "$free" ] || return 0             # df unreadable: do not guess
-        [ $(( free - need )) -ge "$keep" ] && return 0
+        over=0
+        if [ "$limit" -gt 0 ]; then
+            used=$(cache_used_kb)
+            [ $(( used + need )) -gt "$limit" ] && over=1
+        fi
+        [ $(( free - need )) -ge "$keep" ] && [ "$over" = 0 ] && return 0
         victim=""; oldest=0; pinned=0
-        for f in "$CACHE"/*.raw; do
+        # A copy that never finished (WSL shut down or the copier killed mid-copy) is a .partial with no .raw and no
+        # live copier: --cache-list never showed it and nothing took it, up to 15 GB each (PAD-739). First out.
+        for f in "$CACHE"/*.raw.partial; do
+            [ -e "$f" ] || break
+            vlabel=$(basename "$f" .raw.partial)
+            [ "$CACHE/$vlabel.raw" = "$2" ] && continue
+            [ -e "$CACHE/$vlabel.raw" ] && continue
+            cache_in_use "$vlabel" && continue
+            copier_alive "$CACHE/$vlabel.pid" "$CACHE/$vlabel.raw" && continue
+            victim="$vlabel"; oldest=0; why="a copy that never finished"
+            break
+        done
+        [ -n "$victim" ] || for f in "$CACHE"/*.raw; do
             [ -e "$f" ] || break
             [ "$f" = "$2" ] && continue
             vlabel=$(basename "$f" .raw)
-            label_mounted "$vlabel" && continue
+            cache_in_use "$vlabel" && continue
             copier_alive "$CACHE/$vlabel.pid" "$f" && continue
             if cache_pinned "$vlabel"; then pinned=$((pinned + 1)); continue; fi
-            vsrc=$(cat "$CACHE/$vlabel.src" 2>/dev/null)
-            if ! cache_valid "${vsrc% * *}" "$f" "$CACHE/$vlabel.src"; then
-                vboot=0                        # its image is gone or changed: dead weight, first out
-            else
-                vboot=$(stat -c %Y "$CACHE/$vlabel.boot" 2>/dev/null \
-                        || stat -c %Y "$f" 2>/dev/null) || continue
-            fi
+            case $(cache_source_state "$vlabel") in
+                changed|gone) vboot=0 ;;       # its image is gone or changed: dead weight, first out
+                # ok, or unreachable (a drive not attached: it may boot again once it is) - by its last boot
+                *) vboot=$(stat -c %Y "$CACHE/$vlabel.boot" 2>/dev/null \
+                           || stat -c %Y "$f" 2>/dev/null) || continue ;;
+            esac
             if [ -z "$victim" ] || [ "$vboot" -lt "$oldest" ]; then
                 victim="$vlabel"; oldest="$vboot"
             fi
         done
         if [ -z "$victim" ]; then
+            if [ $(( free - need )) -ge "$keep" ]; then
+                # only the limit is unmet, by cards in use or the library's: the disk has the room, so cache anyway
+                if [ "$over" = 1 ]; then
+                    echo "[card] the cache is over its $(( limit / 1048576 )) GB limit and nothing else can go - in use, or the library's ($pinned)${1:+ - caching anyway}" >&2
+                fi
+                return 0
+            fi
             echo "[card] disk too full to cache ($(( free / 1048576 )) GB free, want $(( (need + keep) / 1048576 )) GB) and nothing evictable ($pinned library cards kept) - running off the original" >&2
             return 1
         fi
-        if [ "$oldest" = 0 ]; then
-            echo "[card] evicting cached $victim (its image is gone or changed) to make room" >&2
+        if [ -n "${why:-}" ]; then
+            :
+        elif [ "$oldest" = 0 ]; then
+            why="its image is gone or changed"
         else
-            echo "[card] evicting cached $victim (least recently booted) to make room" >&2
+            why="least recently booted"
         fi
+        if [ "$over" = 1 ] && [ $(( free - need )) -ge "$keep" ]; then
+            echo "[card] evicting cached $victim ($why) to keep the cache under its $(( limit / 1048576 )) GB limit" >&2
+        else
+            echo "[card] evicting cached $victim ($why) to make room" >&2
+        fi
+        why=""
         rm -f "$CACHE/$victim.raw" "$CACHE/$victim.raw.partial" \
               "$CACHE/$victim.src" "$CACHE/$victim.log" \
               "$CACHE/$victim.boot" "$CACHE/$victim.pid"
@@ -641,6 +732,13 @@ if [ "${1:-}" = "--cache-list" ]; then
     # entry <TAB> label <TAB> real_kb <TAB> apparent_kb <TAB> boot_epoch <TAB> source
     # pinned <TAB> label   - after its entry when it is the library's (PAD-727): a line of its own, so a reader
     #                        that knows only `entry` lines reads the same rows
+    # state <TAB> label <TAB> source-state <TAB> use <TAB> copied_epoch     (PAD-739, after its entry)
+    #                        source-state: cache_source_state; use: mounted|copying|- ; copied_epoch: the copy's
+    #                        own mtime, the last-used stand-in for a card never booted
+    # leftover <TAB> label <TAB> real_kb <TAB> mtime <TAB> use   (PAD-739) a copy that never finished, or sidecars
+    #                        whose card is gone: no .raw. use: copying|-
+    # limit <TAB> limit_gb <TAB> used_kb <TAB> dir <TAB> store|distro   (PAD-739)
+    CACHE_READERS=$(cache_readers)
     for f in "$CACHE"/*.raw; do
         [ -e "$f" ] || break
         l=$(basename "$f" .raw)
@@ -650,24 +748,67 @@ if [ "${1:-}" = "--cache-list" ]; then
         s=$(cat "$CACHE/$l.src" 2>/dev/null); s=${s% * *}
         printf 'entry\t%s\t%s\t%s\t%s\t%s\n' "$l" "${rk:-0}" "$ak" "$b" "$s"
         cache_pinned "$l" && printf 'pinned\t%s\n' "$l"
+        if copier_alive "$CACHE/$l.pid" "$f"; then u=copying
+        elif cache_in_use "$l"; then u=mounted
+        else u=-; fi
+        printf 'state\t%s\t%s\t%s\t%s\n' "$l" "$(cache_source_state "$l")" "$u" "$(stat -c %Y "$f" 2>/dev/null || echo 0)"
     done
+    for f in "$CACHE"/*.raw.partial "$CACHE"/*.src "$CACHE"/*.log "$CACHE"/*.boot "$CACHE"/*.pid; do
+        [ -e "$f" ] || continue
+        case $f in *.raw.partial) l=$(basename "$f" .raw.partial) ;; *) l=$(basename "${f%.*}") ;; esac
+        [ -e "$CACHE/$l.raw" ] && continue
+        case " ${seen:-} " in *" $l "*) continue ;; esac
+        seen="${seen:-} $l"
+        rk=$(du -ck "$CACHE/$l.raw.partial" "$CACHE/$l.src" "$CACHE/$l.log" "$CACHE/$l.boot" "$CACHE/$l.pid" \
+             2>/dev/null | tail -1 | cut -f1)
+        m=$(stat -c %Y "$CACHE/$l.raw.partial" "$CACHE/$l.log" "$CACHE/$l.src" "$CACHE/$l.boot" 2>/dev/null \
+            | sort -rn | head -1)
+        if copier_alive "$CACHE/$l.pid" "$CACHE/$l.raw" || cache_in_use "$l"; then u=copying; else u=-; fi
+        printf 'leftover\t%s\t%s\t%s\t%s\n' "$l" "${rk:-0}" "${m:-0}" "$u"
+    done
+    if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then k=store; else k=distro; fi
+    printf 'limit\t%s\t%s\t%s\t%s\n' "$(cache_limit_gb)" "$(cache_used_kb)" "$CACHE" "$k"
     df -k --output=avail,size "$CACHE" 2>/dev/null | tail -1 \
         | awk '{printf "disk\t%s\t%s\n", $1, $2}'
     exit 0
 fi
 if [ "${1:-}" = "--cache-drop" ]; then
     l="${2:-}"; [ -n "$l" ] || die "usage: cardmount.sh --cache-drop <label>"
+    case $l in */*|.|..) die "not a cache label: $l" ;; esac
     c="$CACHE/$l.raw"
-    label_mounted "$l" && die "$l is mounted - not dropping"
+    # cache_in_use and not label_mounted alone: a card mounted by another rig slot is in use too (PAD-739)
+    cache_in_use "$l" && die "$l is in use by a running emulator - not dropping"
     copier_alive "$CACHE/$l.pid" "$c" && die "$l is being copied - not dropping"
     rm -f "$c" "$c.partial" "$CACHE/$l.src" "$CACHE/$l.log" \
-          "$CACHE/$l.boot" "$CACHE/$l.pid"
+          "$CACHE/$l.boot" "$CACHE/$l.pid" 2>/dev/null
+    # Say so when a file stayed (a root-owned one in a sticky folder, a read-only disk): the window reports it
+    # rather than counting the space as freed (PAD-739).
+    for f in "$c" "$c.partial" "$CACHE/$l.src" "$CACHE/$l.log" "$CACHE/$l.boot" "$CACHE/$l.pid"; do
+        [ -e "$f" ] && die "could not delete $(basename "$f") (permission denied?)"
+    done
     echo "[card] dropped cached $l"
+    exit 0
+fi
+if [ "${1:-}" = "--cache-limit" ]; then
+    # --cache-limit            prints the limit in GB (0 = none)
+    # --cache-limit N|default  saves it (default: back to 64 GB on a distro disk, none on the store) and evicts
+    #                          to it now, by the copier's own rule: never a card in use, being copied or the library's
+    v="${2:-}"
+    if [ -z "$v" ]; then cache_limit_gb; exit 0; fi
+    mkdir -p "$CACHE" || die "no cache folder $CACHE"
+    case $v in
+        default) rm -f "$CACHE/.limit_gb" ;;
+        *[!0-9]*) die "usage: cardmount.sh --cache-limit [GB|default]" ;;
+        *) echo "$((10#$v))" > "$CACHE/.limit_gb" || die "could not save the limit in $CACHE" ;;
+    esac
+    give_back "$CACHE/.limit_gb" 2>/dev/null
+    echo "[card] cache limit $(cache_limit_gb) GB (0 = none)"
+    cache_make_room "" "" || true
     exit 0
 fi
 
 IMG=${1:-}
-[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache|--cache-now] | --cache-list | --cache-drop <label>"
+[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache|--cache-now] | --cache-list | --cache-drop <label> | --cache-limit [GB|default]"
 [ -f "$IMG" ] || die "no image at $IMG"
 
 # ★ A STERN SPIKE 3 CARD CANNOT BE MOUNTED - REFUSE IT BEFORE THE COPY (PAD-367).

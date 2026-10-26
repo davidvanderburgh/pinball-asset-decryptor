@@ -1636,6 +1636,10 @@ HELP_CONTENT = {
             "two ELECTRIC MAGIC champions default to 2,000,000 under a stated minimum of "
             "5,000,000. The row counts as unchanged until you edit it, and an edit is "
             "pulled into the range (the game rejects anything else).\n"
+            "- Click a row's **Range** to change its **Lowest** and **Highest** value; "
+            "a changed range shows as 'a - b (card c - d)' and is built in beside the "
+            "default. A default outside a narrowed range moves into it. Not offered for "
+            "on/off settings, PAD's own choice lists or Master Volume.\n"
             "- Hover a setting's name to see if the machine edits it outside Adjustments.",
         ]),
         ("Presets",

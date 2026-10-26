@@ -52,7 +52,9 @@ def test_wsl_is_held_off_for_everyone_but_the_working_thread(fake_popen):
         # another thread - a status poll - may not start WSL again
         r = _from_thread(lambda: subprocess.Popen(["wsl.exe", "-d", "Ubuntu", "--", "true"]))
         assert isinstance(r.get("error"), OSError)
-        r = _from_thread(lambda: subprocess.run(["C:\\Windows\\System32\\wsl.exe", "-l"]))
+        # a full path to wsl.exe, in this OS's own separators (WSL is only ever started on Windows)
+        wsl_exe = os.path.join(os.sep, "Windows", "System32", "wsl.exe")
+        r = _from_thread(lambda: subprocess.run([wsl_exe, "-l"]))
         assert isinstance(r.get("error"), OSError)
         # anything that is not wsl.exe still runs
         r = _from_thread(lambda: subprocess.Popen(["diskpart", "/s", "x.txt"]))

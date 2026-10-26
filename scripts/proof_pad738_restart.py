@@ -80,13 +80,13 @@ release)
     sudo -u david -H bash "$R/riglock.sh" release "$SLOT" PAD-738 ;;
 count)
     echo "game=$(pad_pids -x game | head -1) host=$(pad_pids -x padglhost | head -1)" \
-         "watch=$(pad_pids -f '^bash .*watch\.sh' | head -1) led=$([ -e "$ROOT/dump/padled" ] && echo yes || echo no)" ;;
+         "watch=$(pad_pids -f '^bash .*watch\.sh' | head -1) ball=$(pad_pids -f 'ballfeed[.]py' | head -1) led=$([ -e "$ROOT/dump/padled" ] && echo yes || echo no)" ;;
 shot)
     bash "$R/glshot.sh" "$3" >/dev/null 2>&1 && echo ok || echo none ;;
 root)
     echo "$ROOT" ;;
 log)
-    grep -a 'Restart game\|renderer let go\|restarting\|\[restartgame\]' "$PAD_LOGDIR/padwatch.log" 2>/dev/null | tail -20 ;;
+    tail -6 "$PAD_LOGDIR/padball.log" 2>/dev/null ;;
 esac
 """
 
@@ -263,8 +263,20 @@ def main():
             say("RESULT %s: game %s -> %s, renderer %s -> %s, watch.sh %s -> %s, playfield %s"
                 % (tag, c0.get("game"), c1.get("game"), c0.get("host"), c1.get("host"),
                    c0.get("watch"), c1.get("watch"), "STILL OPEN" if alive else "CLOSED"))
-            say("watch.sh said:\n" + helper(rig, "log"))
-            ok = bool(back)
+            ok = bool(back) and alive
+            # a game on the restarted boot, from the playfield page's own
+            # Start: the switches reach the new game and the ball feeder
+            # (started again with it) serves the ball
+            if alive:
+                page.get_by_role("button", name="Start", exact=True).click()
+                say("START clicked on the playfield page")
+                time.sleep(30)
+                shot("game_started")
+                say("ball feeder (padball.log):\n" + helper(rig, "log"))
+                say("rig now:", counts(rig))
+                page.screenshot(path=os.path.join(out, "%s_playfield_game.png" % tag))
+            else:
+                say("no playfield left to press Start on")
             browser.close()
         if tab()[0] == "Stop emulator":
             say("pressing Stop to end it")

@@ -188,6 +188,10 @@ def test_watch_reboots_the_guest_inside_the_session():
     assert "\nlaunch_game\n" in src
     reboot = _fn(src, "reboot_game")
     assert "launch_game" in reboot and "launch_autoattract" in reboot
+    # the ball feeder reads the zeroed LED block as "the run is over" and
+    # counts coils from the boot: it is started again with the game
+    assert reboot.index("ballfeed[.]py") < reboot.index("launch_game")
+    assert "launch_ballfeed" in reboot
     # the namespace init before the selector (killgame.sh's order)
     assert reboot.index('bash -s $ROOT') < reboot.index("codeselect")
     # the renderer and the playfield are NOT touched; their rings are reset

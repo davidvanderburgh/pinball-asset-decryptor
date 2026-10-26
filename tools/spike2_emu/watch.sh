@@ -2958,9 +2958,16 @@ fi
 # gamestate.sh); item 38's second finding is a stray writer landing inside
 # alive.sh's output and eating a label off its first line, which is the same
 # class of thing. `[ball]` lines go to ~/padball.log and stay legible.
-if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
-    setsid_as_user python3 "$S/ballfeed.py" > "$PAD_LOGDIR/padball.log" 2>&1 &
+# A function because Restart game (PAD-738) starts it again: it reads the LED
+# block's magic as "the run is up" and the coil counter as counting from this
+# boot, and a reboot zeroes the one and starts the other over.
+launch_ballfeed() {
+    setsid_as_user python3 "$S/ballfeed.py" >> "$PAD_LOGDIR/padball.log" 2>&1 &
     BALLPG=$!
+}
+if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
+    : > "$PAD_LOGDIR/padball.log" 2>/dev/null
+    launch_ballfeed
     echo "[watch] ball feed on: the game's own trough eject will be answered"
     echo "[watch] (PAD_BALL_FEED=0 to move balls by hand with plunge.py)."
 fi
@@ -3238,6 +3245,8 @@ PY
     [ -n "$AUTOPG" ] && kill -9 -"$AUTOPG" 2>/dev/null
     pad_pkill -9 -f 'autoattract.sh'
     [ -n "${SPEEDPG:-}" ] && kill -9 -"$SPEEDPG" 2>/dev/null
+    [ -n "$BALLPG" ] && kill -9 -"$BALLPG" 2>/dev/null
+    pad_pkill -9 -f 'ballfeed[.]py'
     # the guest, as killgame.sh stops it: the pid namespace's init FIRST, or a
     # boot selector killed under it is read as a choice and starts a game
     pad_pkill -9 -f "^(setsid )?bash -s $ROOT "
@@ -3302,6 +3311,9 @@ PY
     done
     if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
         launch_autoattract
+    fi
+    if [ -n "$BALLPG" ]; then
+        launch_ballfeed
     fi
     if [ -n "${SPEEDPG:-}" ]; then
         setsid_as_seer python3 -u "$S/padspeed.py" --when-up "$PAD_SPEED" >> "$PAD_LOGDIR/padspeed.log" 2>&1 &

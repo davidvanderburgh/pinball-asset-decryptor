@@ -686,7 +686,7 @@ class SternFlashImagePipeline(BasePipeline):
 
     def __init__(self, image_path, device_path,
                  log_cb, phase_cb, progress_cb, done_cb, menu_only=False,
-                 verify=True):
+                 verify=True, keep_data=False):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image_path = image_path
         self.device_path = device_path
@@ -697,6 +697,10 @@ class SternFlashImagePipeline(BasePipeline):
         #: machine's own /data and /dump.  See rawdevice.flash_menu_to_device,
         #: which refuses outright if the card is not that card.
         self.menu_only = bool(menu_only)
+        #: Write the whole image but keep the card's own /data - the
+        #: machine's settings, audits and high scores (PAD-736).  See
+        #: rawdevice.card_data_overlay, which refuses a card with none.
+        self.keep_data = bool(keep_data) and not self.menu_only
 
     def _run(self):
         self._set_phase(0)  # Check card
@@ -721,7 +725,8 @@ class SternFlashImagePipeline(BasePipeline):
                 log=self._log, progress=self._progress,
                 cancel=lambda: self._cancelled, verify=self.verify,
                 on_verify_start=lambda: self._set_phase(2),  # Verify card
-                menu_only=self.menu_only)
+                menu_only=self.menu_only,
+                **({"keep_data": True} if self.keep_data else {}))
         except FlashCancelled:
             # The card is now partially written — surface it as a cancel, but
             # make clear the card is no longer usable until re-flashed.  A
@@ -744,6 +749,9 @@ class SternFlashImagePipeline(BasePipeline):
                           "the games and the machine's own settings and "
                           "scores were left alone."
                           if self.menu_only else
+                          "Flashed %s onto the SD card (%s), keeping the "
+                          "machine's settings, audits and high scores."
+                          if self.keep_data else
                           "Flashed %s onto the SD card (%s).")
                    % (format_size(written), self.device_path))
 

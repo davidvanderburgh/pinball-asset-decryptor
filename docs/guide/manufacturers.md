@@ -113,6 +113,9 @@ encryption. The app opens all three; you get the game's asset tree.
 - **Build / flash SD card** reads the whole card back after flashing and
   compares it with the image. **Skip verify** leaves that out for one
   flash.
+- **Keep the SD card's settings, audits and high scores** (Spike 2) reads
+  the card's data partition first and puts it back after the image. A
+  card with none (a new one) is refused before anything is written.
 - **Administrator:** a flash asks for it when it starts (UAC on Windows,
   your password on macOS). On macOS the first flash may also ask for
   **Full Disk Access**; the message gives the steps.

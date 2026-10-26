@@ -342,7 +342,8 @@ def test_start_records_the_pair_and_cancel_does_not(monkeypatch):
     dlg = _make_dialog(monkeypatch, on_choices=seen.append)
     dlg.set("write", False)
     assert dlg.start() is True
-    assert seen == [{"write": False, "build": True}]
+    # PAD-736: Stern's "Keep the SD card's settings..." is remembered too
+    assert seen == [{"write": False, "build": True, "keep_data": False}]
 
 
 def test_a_disabled_build_box_is_not_a_choice(monkeypatch):
@@ -351,7 +352,7 @@ def test_a_disabled_build_box_is_not_a_choice(monkeypatch):
     seen = []
     dlg = _make_dialog(monkeypatch, can_build=False, on_choices=seen.append)
     dlg._remember_choices()
-    assert seen == [{"write": True}]
+    assert seen == [{"write": True, "keep_data": False}]
 
 
 def test_a_remembered_pair_beats_the_no_changes_default(monkeypatch):

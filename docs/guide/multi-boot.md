@@ -177,9 +177,11 @@ card you start from matters:
   starts from a copy of the shared ones, so reset its high scores once in
   the service menu.
 
-Flashing the whole card writes the image's copy over the machine's. When
-only the menu changed, flash **Only the boot menu**. For a changed image,
-read the SD card back into a `.raw` first, update that, and flash it.
+Flashing the whole card writes the image's copy over the machine's,
+unless you tick **Keep the SD card's settings, audits and high scores**
+in the flash dialog: it reads them off the card first and puts them back.
+When only the menu changed, **Only the boot menu** is quicker and keeps
+them too.
 
 ## Jersey Jack
 

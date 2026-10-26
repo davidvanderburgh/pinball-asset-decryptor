@@ -1465,6 +1465,9 @@ HELP_CONTENT = {
                  "text": "it, or any saved image, onto an SD card"},
                 {"icon": "play", "title": "Test", "text": "on the machine"}]},
             "- Flashing needs Administrator, and refuses an image too big for the card.\n"
+            "- **Keep the SD card's settings, audits and high scores** (Stern Spike "
+            "2) reads the card's data partition first and puts it back after the "
+            "image, so the machine starts where it left off.\n"
             "- The dialog remembers your last ticks per manufacturer.",
             {"note": "Flashing **erases the whole card**.", "kind": "warn"},
         ]),
@@ -2756,10 +2759,10 @@ HELP_CONTENT = {
             "that image its own settings and audits too. Its first boot starts "
             "from a copy of the shared ones, so reset its high scores once in "
             "the service menu.\n"
-            "- Flashing the whole card writes the image's copy over the machine's. "
-            "When only the menu changed, flash **Only the boot menu**. For a "
-            "changed image, read the SD card back into a .raw first and update "
-            "that.",
+            "- Flashing the whole card writes the image's copy over the machine's, "
+            "unless you tick **Keep the SD card's settings, audits and high "
+            "scores** in the flash dialog. When only the menu changed, **Only the "
+            "boot menu** is quicker and keeps them too.",
         ]),
         ("Sounds",
          "Every sound row (the menu's move and confirm, an image's music and "
@@ -2817,6 +2820,8 @@ HELP_CONTENT = {
             "already flashed. Otherwise the whole card is written, which a new SD "
             "card needs. Tick it yourself if your SD card already holds that "
             "image; it checks first.\n"
+            "- **Keep the SD card's settings, audits and high scores** writes the "
+            "whole card but puts the machine's own back on it.\n"
             "- Every run first makes sure the menu program is built, before any "
             "media. If a step refuses, the tab shows the Log line, naming the step.",
             {"note": "Nothing is written to an SD card until you pick it in the "

@@ -384,9 +384,10 @@ def test_flash_dialog_flash_only(tmp_path, monkeypatch):
         assert flashes == [((str(image), r"\\.\PhysicalDrive9"),
                             {"menu_only": False})]
         assert w.state("write")["flash_dlg"] is None
-        # the pair that was RUN is remembered for next time
+        # the ticks that were RUN are remembered for next time (PAD-736:
+        # with "Keep the SD card's settings, audits and high scores")
         assert w.window.service("write")._saved_flash_choices["stern"] == \
-            {"write": True, "build": False}
+            {"write": True, "build": False, "keep_data": False}
 
 
 def test_flash_dialog_build_and_flash(tmp_path, monkeypatch):

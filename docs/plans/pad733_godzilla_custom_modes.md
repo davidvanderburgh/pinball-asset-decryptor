@@ -149,6 +149,14 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   362), a small blinking light that cannot show purple; the other webs are three-lamp colour inserts. That web is on
   the Big loop now (lamps 386-388), and with one web left the line names it (TEAR THE LAST WEB: BIG LOOP); desk:
   resumed at 4/5, the Big loop lit purple when the start show ends, made: 5/5, won. Card v27.
+- **v27: "For custom mode shots then, we should use shots that can be colored. Exceptions are for shots that are
+  named on the screen."** The title profile carries `white_shots` (every insert of the shot one light: on Godzilla
+  the Powerlines, Maser and Godzilla targets, Skill shot, return lanes, Shield ramp spinner) and the Modes tab notes
+  each one a mode lights in a colour without a screen line naming it (`block_modes.white_shot_notes`). His 13 modes
+  against it: KAMACURAS's mantis map moved off its four white spots (lane 1 Left ramp / Shield target center /
+  Left spinner, lane 2's far ring the Top spinner; desk: the mantis over them, a kill on the Left ramp); SUPER X2
+  names its Shield ramp spinner (CHARGE: SHIELDS OR SHIELD RAMP SPINNER); the rest light colour shots or name the
+  white ones (SHOOT THE CENTER POWERLINE, FIRE: SHOOT THE MASER TARGET). Card v28.
 - **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
   game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
   screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the

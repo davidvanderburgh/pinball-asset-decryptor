@@ -97,6 +97,19 @@ class FlashDialog:
                        "SD card needs the first time this image goes onto "
                        "it. The machine's settings and scores are replaced "
                        "too.")
+    #: ...and with "Keep the SD card's settings..." ticked, which keeps them.
+    MENU_NOTE_WHOLE_KEPT = ("The whole image is written, games and all - "
+                            "what an SD card needs the first time this image "
+                            "goes onto it.")
+
+    #: "Keep the SD card's settings, audits and high scores" (PAD-736): a
+    #: whole-image flash that puts the card's own data partition back.
+    KEEP_LABEL = "Keep the SD card's settings, audits and high scores"
+    KEEP_NOTE = ("The machine keeps them in the SD card's data partition. It "
+                 "is read off the card first and goes back on in place of "
+                 "the image's, so the machine starts where it left off. A "
+                 "card with none (a new one) is refused before anything is "
+                 "written.")
     MENU_NOTE_BUILD = ("A freshly built image has never been on this card, "
                        "so the whole of it has to be written.")
     MENU_NOTE_FRESH = ("This card was only just built or updated, so no SD "
@@ -180,6 +193,14 @@ class FlashDialog:
         self.menu = False
         self.menu_enabled = False
         self.menu_note = ""
+        # "Keep the SD card's settings, audits and high scores" (PAD-736):
+        # remembered, like Build and Write - who keeps them once wants to
+        # every time
+        self.keep_offered = bool(getattr(manufacturer, "flash_keep_data",
+                                         False))
+        self.keep_data = bool(self.keep_offered
+                              and isinstance(initial_choices, dict)
+                              and initial_choices.get("keep_data"))
         # "Skip verify" (PAD-217): off every time the dialog opens, never
         # remembered - the read-back is what catches a bad write
         self.verify_offered = bool(getattr(manufacturer, "flash_skip_verify",
@@ -216,6 +237,8 @@ class FlashDialog:
         choices = {"write": bool(self.write)}
         if self._can_build:
             choices["build"] = bool(self.build)
+        if self.keep_offered:
+            choices["keep_data"] = bool(self.keep_data)
         try:
             self._on_choices(choices)
         except Exception:                               # noqa: BLE001
@@ -274,6 +297,13 @@ class FlashDialog:
         if publish:
             self.publish()
 
+    def keeping_data(self):
+        """True when the write about to start keeps the card's own
+        settings, audits and high scores (a whole-image flash only: the
+        menu-only write keeps them anyway)."""
+        return bool(self.keep_offered and self.keep_data and self.write
+                    and not self.menu and not self.to_disk())
+
     def skipping_verify(self):
         """True when the write about to start will not be read back."""
         return bool(self.verify_offered and self.skip_verify and self.write
@@ -316,7 +346,8 @@ class FlashDialog:
         self._menu_seen = self.image_path
         if can:
             why = (self.MENU_NOTE_OK if self.menu
-                   else self.MENU_NOTE_WHOLE if flashed
+                   else (self.MENU_NOTE_WHOLE_KEPT if self.keeping_data()
+                         else self.MENU_NOTE_WHOLE) if flashed
                    else self.MENU_NOTE_UNFLASHED)
         self.menu_note = why
 
@@ -471,6 +502,11 @@ class FlashDialog:
             "menu_offered": self.menu_offered, "menu": bool(self.menu),
             "menu_enabled": bool(self.menu_enabled),
             "menu_note": self.menu_note,
+            "keep_offered": bool(self.keep_offered and not self.to_disk()),
+            "keep_label": self.KEEP_LABEL,
+            "keep_data": bool(self.keep_data and not self.menu),
+            "keep_enabled": bool(writing and not self.menu),
+            "keep_note": self.KEEP_NOTE if self.keeping_data() else "",
             "verify_offered": bool(self.verify_offered
                                    and not self.to_disk()),
             "skip_verify": bool(self.skip_verify),
@@ -500,6 +536,11 @@ class FlashDialog:
             if self.verify_offered:
                 self.skip_verify = bool(value)
                 self.publish()
+            return
+        if key == "keep_data":
+            if self.keep_offered and not self.menu:
+                self.keep_data = bool(value)
+                self._sync_sections()
             return
         if key in ("build", "write", "menu"):
             if key == "build" and not self._can_build:
@@ -752,6 +793,11 @@ class FlashDialog:
                           "read back afterwards, so a bad write is not "
                           "caught here." % noun
                           if self.skipping_verify() else "")
+            kept = ("\n\nThe machine's settings, audits and high scores on "
+                    "it are kept: they are read off the %s first and put "
+                    "back. A %s with none is refused before anything is "
+                    "written." % (noun, noun)
+                    if self.keeping_data() else "")
             if self.menu and not building:
                 if not mb.askyesno(
                         "Write the boot menu?",
@@ -826,10 +872,10 @@ class FlashDialog:
                 if not mb.askyesno(
                         "Erase the %s and continue?" % noun,
                         "%s There is no undo.\n\n  Target: %s\n  On it now: "
-                        "%s\n  Image:  %s%s\n\nMake sure you have a backup "
+                        "%s\n  Image:  %s%s%s\n\nMake sure you have a backup "
                         "of anything on the %s.%s Proceed?"
                         % (lead, card.display, on_it or "(could not tell)",
-                           flash_what, alarm, noun, unverified),
+                           flash_what, alarm, kept, noun, unverified),
                         icon="warning"):
                     return False
 
@@ -837,6 +883,8 @@ class FlashDialog:
         device_path = card.device_path if (writing and card) else None
         extra = {}
         skip = {"verify": False} if self.skipping_verify() else {}
+        if self.keeping_data():
+            skip["keep_data"] = True
         if self.to_disk():
             extra["target"] = self._target()[0]
             mode = self.current_disk_mode()

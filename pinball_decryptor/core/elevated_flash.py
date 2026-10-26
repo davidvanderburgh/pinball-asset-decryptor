@@ -80,7 +80,8 @@ def can_self_elevate():
 
 def flash_image_with_privileges(image_path, device_path, *, log=None,
                                 progress=None, cancel=None, verify=True,
-                                on_verify_start=None, menu_only=False):
+                                on_verify_start=None, menu_only=False,
+                                keep_data=False):
     """Flash *image_path* onto *device_path*, elevating only the write.
 
     Drop-in for :func:`core.rawdevice.flash_image_to_device` with the same
@@ -88,16 +89,23 @@ def flash_image_with_privileges(image_path, device_path, *, log=None,
     :class:`FlashCancelled`).  When the app is already Administrator/root the
     flash runs in-process; otherwise it runs in an elevated child and this
     relays its progress/log/result.
+
+    *keep_data* (PAD-736, whole-image flash only) keeps the card's own
+    settings, audits and high scores: see
+    :func:`core.rawdevice.card_data_overlay`.
     """
     # Elevation is only needed to write a *raw physical device*.  If we're
     # already Administrator/root, or the target is a plain file (backing-file
     # tests, or any non-device path), write in-process — spawning an elevated
     # child there would be pointless (and would pop a UAC/password prompt).
     write = flash_menu_to_device if menu_only else flash_image_to_device
+    # only ever handed to the whole-image write, and only when asked for
+    keep = {"keep_data": True} if keep_data and not menu_only else {}
     if is_admin() or not is_device_path(device_path):
         return write(
             image_path, device_path, log=log, progress=progress,
-            cancel=cancel, verify=verify, on_verify_start=on_verify_start)
+            cancel=cancel, verify=verify, on_verify_start=on_verify_start,
+            **keep)
 
     if log is not None:
         log("This flash needs administrator access — approve the prompt to "
@@ -108,7 +116,8 @@ def flash_image_with_privileges(image_path, device_path, *, log=None,
         with open(os.path.join(ipc, _JOB), "w", encoding="utf-8") as f:
             json.dump({"image": image_path, "device": device_path,
                        "verify": bool(verify),
-                       "menu_only": bool(menu_only)}, f)
+                       "menu_only": bool(menu_only),
+                       "keep_data": bool(keep)}, f)
 
         run = _spawn_elevated_helper(ipc)
         if run is None:
@@ -614,6 +623,8 @@ def run_helper_main(argv):
     reading = mode in ("read", "read_menu")
     verify = bool(job.get("verify", True))
     menu_only = bool(job.get("menu_only"))
+    keep = ({"keep_data": True} if job.get("keep_data") and not menu_only
+            else {})
     cancel_path = os.path.join(ipc, _CANCEL)
     log_path = os.path.join(ipc, _LOG)
     prog_path = os.path.join(ipc, _PROGRESS)
@@ -658,7 +669,7 @@ def run_helper_main(argv):
             write = flash_menu_to_device if menu_only else flash_image_to_device
             written = write(
                 image, device, log=_log, progress=_progress, cancel=_cancel,
-                verify=verify, on_verify_start=_on_verify_start)
+                verify=verify, on_verify_start=_on_verify_start, **keep)
         _write_json_atomic(result_path, {"ok": True, "written": written})
     except FlashCancelled as e:
         _write_json_atomic(result_path,

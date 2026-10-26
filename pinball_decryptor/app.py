@@ -2168,7 +2168,7 @@ class App:
     # ------------------------------------------------------------------
 
     def _start_write(self, chain_flash_device=None, again=False,
-                     chain_flash_verify=True):
+                     chain_flash_verify=True, chain_flash_keep_data=False):
         """Dispatch a Build.  ``chain_flash_device`` (the Build / flash
         dialog with both sections ticked) makes a successful build chain
         straight into flashing its output onto that device — armed only at
@@ -2410,6 +2410,7 @@ class App:
             write_kwargs["update"] = update
         self._chain_flash_after_build = (
             (chain_flash_device, output_path, bool(chain_flash_verify))
+            + ((True,) if chain_flash_keep_data else ())
             if chain_flash_device else None)
         # what _offer_bigger_card needs if this build is refused for room
         self._last_build_output = output_path
@@ -2554,11 +2555,13 @@ class App:
             target=self._run_pipeline_with_audio, args=(assets_dir,),
             daemon=True).start()
 
-    def _on_build_flash_request(self, build_path, device_path, verify=True):
+    def _on_build_flash_request(self, build_path, device_path, verify=True,
+                                keep_data=False):
         """The Build / flash dialog's build section was ticked: build to
         *build_path*, then (when *device_path* is set) chain a flash of the
         fresh build onto that card - read back afterwards unless *verify* is
-        False (the dialog's "Skip verify", PAD-217).
+        False (the dialog's "Skip verify", PAD-217), keeping the card's own
+        settings, audits and high scores with *keep_data* (PAD-736).
 
         The dialog's Build-to box may have been edited — push it back into
         the Write tab's Output Folder + File Name so ``_start_write`` (and
@@ -2568,12 +2571,13 @@ class App:
             self.window.write_output_var.set(folder)
         if name and getattr(self.window, "write_filename_var", None):
             self.window.write_filename_var.set(name)
+        keep = {"chain_flash_keep_data": True} if keep_data else {}
         self._start_write(chain_flash_device=device_path,
-                          chain_flash_verify=verify)
+                          chain_flash_verify=verify, **keep)
 
     def _start_flash_image(self, image_path, device_path, menu_only=False,
                            target=None, disk_mode=None, image=None,
-                           from_iso=None, verify=True):
+                           from_iso=None, verify=True, keep_data=False):
         """Flash a pre-built image onto a card (dd-style whole-image write).
 
         ``menu_only`` writes ONLY the boot menu partition onto a card this
@@ -2581,6 +2585,10 @@ class App:
         and the machine's own settings and scores survive it.  The core
         refuses outright if the card is not that card
         (:func:`core.rawdevice.flash_menu_to_device`).
+
+        ``keep_data`` writes the whole image but keeps the card's own
+        settings, audits and high scores (PAD-736,
+        :func:`core.rawdevice.card_data_overlay`).
 
         The image + target card were collected and confirmed by the flash
         dialog (``webui/write_dialogs.py``); this just runs the
@@ -2648,6 +2656,10 @@ class App:
         # (``flash_skip_verify``) takes it, and only when it was ticked.
         if not verify and getattr(mfr, "flash_skip_verify", False):
             extra["verify"] = False
+        # ``keep_data`` likewise: only a plugin that offers it, only ticked
+        if (keep_data and not menu_only
+                and getattr(mfr, "flash_keep_data", False)):
+            extra["keep_data"] = True
         try:
             if to_disk:
                 # ``disk_mode`` (item 124): "menu" = only the boot menu,
@@ -5172,12 +5184,15 @@ class App:
                     # completion) — the log carries the hand-off.  after(0,…)
                     # lets this _on_done fully unwind (set_running state,
                     # queue drain) before the flash re-arms the run state.
-                    device_path, image_path, verify = chain_flash
+                    device_path, image_path, verify = chain_flash[:3]
+                    # a 4th: keep the card's settings and scores (PAD-736)
+                    keep = ({"keep_data": True} if chain_flash[3:4] == (True,)
+                            else {})
                     self.window.append_log(
                         "Build complete — writing the fresh image onto the "
                         "card...", "info")
                     self.root.after(0, lambda: self._start_flash_image(
-                        image_path, device_path, verify=verify))
+                        image_path, device_path, verify=verify, **keep))
         else:
             self.window.set_status("Failed")
             title = "Extract Failed" if is_extract else "Write Failed"
@@ -5227,9 +5242,11 @@ class App:
             "SD card size is now %s; building again." % said, "info")
         device = chain_flash[0] if chain_flash else None
         verify = chain_flash[2] if chain_flash else True
+        keep = ({"chain_flash_keep_data": True}
+                if chain_flash and chain_flash[3:4] == (True,) else {})
         self.root.after(0, lambda: self._start_write(
             chain_flash_device=device, again=True,
-            chain_flash_verify=verify))
+            chain_flash_verify=verify, **keep))
         return True
 
     # ------------------------------------------------------------------

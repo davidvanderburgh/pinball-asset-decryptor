@@ -2810,7 +2810,80 @@ def debugfs_stat(ref, path):
     m = re.search(r'Fast link dest: "([^"]*)"', txt)
     if m:
         info["link"] = m.group(1)
+    m = re.search(r"Type:\s+(\w+)", txt)
+    if m:
+        info["type"] = m.group(1)
     return info
+
+
+# ---- links on p2 (PAD-742) ---------------------------------------------------------------------
+# Stern's own images carry /etc/init.d/game and game_monitor as plain files, but a card that has
+# been on a machine can carry either as a LINK to the real script.  debugfs's cat and stat do not
+# follow the last link of a path: cat reads the link's target text as block numbers and fails
+# with "short read", and rm + write would replace the link with a file.  So every read and write
+# of those scripts goes to the file the link leads to, and the link stays as the card had it.
+#: How many links one path may pass through before it is called a loop (the kernel's own cap).
+LINK_HOPS = 40
+
+
+def resolve_link_path(path, readlink):
+    """`path` (absolute) with every link along it followed, the way the machine's kernel would.
+    `readlink(p)` -> the link's target, or None when p is not a link (or not there).  Pure.
+    Refused when the links go round more than LINK_HOPS times."""
+    parts = [c for c in path.split("/") if c]
+    done, hops = [], 0
+    while parts:
+        c = parts.pop(0)
+        if c == ".":
+            continue
+        if c == "..":
+            if done:
+                done.pop()
+            continue
+        target = readlink("/" + "/".join(done + [c]))
+        if target is None:
+            done.append(c)
+            continue
+        hops += 1
+        if hops > LINK_HOPS:
+            raise Refused("%s: more than %d links on the way (a loop)" % (path, LINK_HOPS))
+        if target.startswith("/"):
+            done = []
+        parts = [x for x in target.split("/") if x] + parts
+    return "/" + "/".join(done)
+
+
+def _debugfs_stat_text(ref, path):
+    """debugfs's stat of `path`, or "" when it is not there (no exception: a missing path is an
+    answer here, not an error)."""
+    r = subprocess.run(["debugfs", "-R", "stat " + dq(path), ref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    txt = r.stdout.decode("utf-8", "replace")
+    return txt if r.returncode == 0 and "Inode:" in txt else ""
+
+
+def debugfs_readlink(ref, path):
+    """The target of the link at `path`, or None when `path` is no link (or is not there).  A
+    fast link's target is in its inode; a longer one's is its data, which cat reads."""
+    txt = _debugfs_stat_text(ref, path)
+    if not re.search(r"Type:\s+symlink", txt):
+        return None
+    m = re.search(r'Fast link dest: "([^"]*)"', txt)
+    if m:
+        return m.group(1)
+    return debugfs_cat(ref, path).decode("utf-8", "replace")
+
+
+def p2_file(ref, path):
+    """The regular file on the rootfs that `path` IS: `path` itself on a stock card, or the file
+    its link leads to (PAD-742) - the one to read and rewrite.  Refused, naming the link, when
+    it leads to no file on p2 (into another partition's mount point, or nowhere)."""
+    real = resolve_link_path(path, lambda p: debugfs_readlink(ref, p))
+    if re.search(r"Type:\s+regular", _debugfs_stat_text(ref, real)):
+        return real
+    if real == path:
+        raise Refused("%s is missing from the rootfs (p2), or is not a file" % path)
+    raise Refused("%s on this card is a link to %s, which is not a file on the rootfs (p2) - the "
+                  "boot menu can only change a script that is on p2" % (path, real))
 
 
 def dq(path):
@@ -2848,7 +2921,12 @@ def debugfs_write_script(image, commands):
 def e2fsck(ref):
     """-> (rc, output); rc 0 is clean."""
     r = subprocess.run(["e2fsck", "-fn", ref], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    return r.returncode, r.stdout.decode("utf-8", "replace")
+    txt = r.stdout.decode("utf-8", "replace")
+    if "The physical size of the device is" in txt:
+        # -n answers "Abort? no" and can go on to call the filesystem clean (rc 0); every block
+        # past the partition's end then fails to read later as a bare "short read" (PAD-742)
+        return max(r.returncode, 4), "the filesystem is bigger than its partition:\n" + txt
+    return r.returncode, txt
 
 
 def e2fsck_blocks(txt):
@@ -2944,7 +3022,8 @@ def check_selector_reads_conf(binary, conf_text):
                          ".".join(str(x) for x in ver), os.path.join(HERE, "buildselect.sh")))
 
 
-def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None, manifests=None):
+def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None, manifests=None,
+                   game_path=GAME_SCRIPT):
     """Copy the selector files into `stage` with their FINAL modes (debugfs write copies the source
     mode).  `media_files` ({name: source path}, from plan_media) go to stage/media/<name> and
     MEDIA_DIR/<name> on the card, 0644.  `manifests` ({name: text or bytes}, from
@@ -3003,11 +3082,11 @@ def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None
     with open(game, "wb") as f:
         f.write(hooked_game.encode("utf-8"))
     os.chmod(game, 0o755)
-    items.append((game, GAME_SCRIPT, 0o755))
+    items.append((game, game_path, 0o755))           # the script itself, past any link (PAD-742)
     return items
 
 
-def inject_commands(items, existing, times, existing_media=None):
+def inject_commands(items, existing, times, existing_media=None, game_path=GAME_SCRIPT):
     """The debugfs -w script for one injection (pure, so it is testable without debugfs).
 
     items           [(staged native path, card path, mode)] from stage_selector
@@ -3017,6 +3096,7 @@ def inject_commands(items, existing, times, existing_media=None):
     existing_media  the names inside MEDIA_DIR when that directory is to be REPLACED (each is
                     rm'd, then the directory rmdir'd - debugfs's rm cannot take a directory);
                     None leaves an existing media directory alone
+    game_path       where the game script really is (p2_file: past a link, PAD-742)
     MEDIA_DIR is mkdir'd (+ 040755 root:root) exactly when an item lands in it.
     Every path is double-quoted (dq): the staged path is a NATIVE path and may hold a space."""
     cmds = []
@@ -3029,7 +3109,7 @@ def inject_commands(items, existing, times, existing_media=None):
         for name in existing_media:
             cmds.append("rm " + dq(MEDIA_DIR + "/" + name))
         cmds.append("rmdir " + dq(MEDIA_DIR))
-    cmds.append("rm " + dq(GAME_SCRIPT))
+    cmds.append("rm " + dq(game_path))
     media_items = [it for it in items if it[1].startswith(MEDIA_DIR + "/")]
     if media_items:
         cmds.append("mkdir " + dq(MEDIA_DIR))
@@ -3048,7 +3128,7 @@ def inject_commands(items, existing, times, existing_media=None):
         cmds.append("set_inode_field %s gid 0" % dq(card))
     for k in ("atime", "ctime", "mtime"):
         if k in times:
-            cmds.append("set_inode_field %s %s @%d" % (dq(GAME_SCRIPT), k, times[k]))
+            cmds.append("set_inode_field %s %s @%d" % (dq(game_path), k, times[k]))
     return cmds
 
 
@@ -3128,8 +3208,9 @@ def mode_set_commands(items, existing, need_padmode_dir, monitor=None):
     under MODES_DIR, or None when there is none; every one is removed first, so the card holds
     exactly the sets asked for.  MODES_DIR/none is always made (the empty set an image with no
     modes of its own is given).  `need_padmode_dir` mkdirs PADMODE_DIR (the mountpoint the bind
-    needs on a card whose primary carries no modes); `monitor` = (staged path, times) rewrites
-    GAME_MONITOR with the preload hook, its clocks put back."""
+    needs on a card whose primary carries no modes); `monitor` = (staged path, times[, path])
+    rewrites GAME_MONITOR - or `path`, the file it links to (PAD-742) - with the preload hook,
+    its clocks put back."""
     cmds = []
     for sub, names in sorted((existing or {}).items()):
         for n in names:
@@ -3152,13 +3233,14 @@ def mode_set_commands(items, existing, need_padmode_dir, monitor=None):
         cmds += ["set_inode_field %s mode 0%o" % (dq(card), statmod.S_IFREG | mode),
                  "set_inode_field %s uid 0" % dq(card), "set_inode_field %s gid 0" % dq(card)]
     if monitor is not None:
-        staged, times = monitor
-        cmds += ["rm " + dq(GAME_MONITOR), "write %s %s" % (dq(staged), dq(GAME_MONITOR)),
-                 "set_inode_field %s mode 0100755" % dq(GAME_MONITOR),
-                 "set_inode_field %s uid 0" % dq(GAME_MONITOR), "set_inode_field %s gid 0" % dq(GAME_MONITOR)]
+        staged, times = monitor[:2]
+        mon = dq(monitor[2] if len(monitor) > 2 else GAME_MONITOR)
+        cmds += ["rm " + mon, "write %s %s" % (dq(staged), mon),
+                 "set_inode_field %s mode 0100755" % mon,
+                 "set_inode_field %s uid 0" % mon, "set_inode_field %s gid 0" % mon]
         for k in ("atime", "ctime", "mtime"):
             if k in times:
-                cmds.append("set_inode_field %s %s @%d" % (dq(GAME_MONITOR), k, times[k]))
+                cmds.append("set_inode_field %s %s @%d" % (mon, k, times[k]))
     return cmds
 
 
@@ -3202,7 +3284,11 @@ def inject_mode_sets(p2_image, mode_sets, stage_dir):
     need_dir = bool(items) and not debugfs_exists(p2_image, PADMODE_DIR)
     monitor = None
     if items:
-        mon = debugfs_cat(p2_image, GAME_MONITOR)
+        try:
+            mpath = p2_file(p2_image, GAME_MONITOR)        # past a link (PAD-742)
+        except Refused:
+            mpath = None
+        mon = debugfs_cat(p2_image, mpath) if mpath else b""
         if not mon:
             raise Refused("an extra image carries custom modes but p2 has no %s to preload them from"
                           % GAME_MONITOR)
@@ -3214,7 +3300,7 @@ def inject_mode_sets(p2_image, mode_sets, stage_dir):
             p = os.path.join(stage_dir, "game_monitor")
             with open(p, "wb") as f:
                 f.write(hooked.encode("utf-8"))
-            monitor = (p, debugfs_stat(p2_image, GAME_MONITOR))
+            monitor = (p, debugfs_stat(p2_image, mpath), mpath)
     debugfs_write_script(p2_image, mode_set_commands(items, existing, need_dir, monitor))
     for staged, card, _mode in items:
         with open(staged, "rb") as f:
@@ -3246,12 +3332,13 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
     bs = ext_block_size(p2_image)
     free = (total - used) * bs
     margin = min(P2_FREE_MARGIN, total * bs // 20)          # 8 MiB, or 5% of a small (synthetic) p2
-    orig = debugfs_cat(p2_image, GAME_SCRIPT)
+    game = p2_file(p2_image, GAME_SCRIPT)
+    orig = debugfs_cat(p2_image, game)
     if not orig:
-        raise Refused("%s is empty or missing in p2" % GAME_SCRIPT)
-    times = debugfs_stat(p2_image, GAME_SCRIPT)
+        raise Refused("%s is empty or missing in p2" % game)
+    times = debugfs_stat(p2_image, game)
     hooked = hook_game_script(orig)
-    items = stage_selector(selector_dir, stage_dir, conf_text, hooked, media_files, manifests)
+    items = stage_selector(selector_dir, stage_dir, conf_text, hooked, media_files, manifests, game_path=game)
     existing = existing_media = None
     reclaim = len(orig)                                    # the game script is rm'd and rewritten
     if debugfs_exists(p2_image, SELECT_DIR):
@@ -3270,7 +3357,7 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
     if staged_bytes > free + reclaim - margin:
         raise Refused("p2 has %d KB free (+ %d KB the re-injection frees) and the injection needs %d KB (+ %d KB margin)"
                       % (free >> 10, reclaim >> 10, staged_bytes >> 10, margin >> 10))
-    debugfs_write_script(p2_image, inject_commands(items, existing, times, existing_media))
+    debugfs_write_script(p2_image, inject_commands(items, existing, times, existing_media, game_path=game))
     if mode_sets is not None:
         # PAD-226: None leaves what the card holds (a menu-only inject); a list is the whole answer
         mdir = os.path.join(stage_dir, "modesets")
@@ -3286,10 +3373,10 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
         st = debugfs_stat(p2_image, card)
         if st.get("mode") != mode or st.get("uid") != 0 or st.get("gid") != 0:
             raise Refused("%s has mode %o uid %s gid %s after injection" % (card, st.get("mode", 0), st.get("uid"), st.get("gid")))
-    after = debugfs_stat(p2_image, GAME_SCRIPT)
+    after = debugfs_stat(p2_image, game)
     nmedia = len([1 for (_s, c, _m) in items if c.startswith(MEDIA_DIR + "/")])
     say("injected %d files (%d media, %d KB); %s hook %s; game script times %s; p2 had %d KB free" %
-        (len(items), nmedia, staged_bytes >> 10, GAME_SCRIPT, "present" if has_hook(hooked) else "MISSING",
+        (len(items), nmedia, staged_bytes >> 10, game, "present" if has_hook(hooked) else "MISSING",
          "kept" if all(after.get(k) == times.get(k) for k in ("atime", "ctime", "mtime") if k in times) else "changed",
          free >> 10))
     return [card for (_s, card, _m) in items]
@@ -4478,8 +4565,11 @@ def p2_digest(path, cache_dir=None):
     if t != 0x83:
         raise Refused("%s: p2 is type 0x%02x, not Linux" % (path, t))
     man, _how = ts.source_manifest(path, st * SECTOR, cnt * SECTOR, root_ino=2, sub="p2", cache_dir=cache_dir)
+    # the hooked script is the file a linked game script leads to (PAD-742); the link stays
+    game = resolve_link_path("/" + P2_SKIP[1],
+                             lambda p: getattr(man.tree.symlinks.get(p.lstrip("/")), "target", None)).lstrip("/")
     keep = ts.TreeManifest(
-        {k: v for k, v in man.tree.files.items() if not k.startswith(P2_SKIP[0]) and k != P2_SKIP[1]},
+        {k: v for k, v in man.tree.files.items() if not k.startswith(P2_SKIP[0]) and k not in (P2_SKIP[1], game)},
         {k: v for k, v in man.tree.symlinks.items() if not k.startswith(P2_SKIP[0])},
         {k: v for k, v in man.tree.dirs.items() if not k.startswith(P2_SKIP[0])})
     return hashlib.sha256(json.dumps(keep.to_dict(), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -4506,9 +4596,11 @@ def primary_gate(card, source, recorded=None, cache_dir=None):
     if src["p2_tree"] != got["p2_tree"]:
         why.append("the rootfs (p2) differs beyond the boot menu's own files")
     try:
-        cur = debugfs_cat(select_ref(card), GAME_SCRIPT).decode("utf-8", "replace")
+        cref = select_ref(card)
+        cur = debugfs_cat(cref, p2_file(cref, GAME_SCRIPT)).decode("utf-8", "replace")
         t2, s2, c2 = Geometry.from_file(source).part(2)
-        orig = debugfs_cat(fs_ref(source, s2 * SECTOR), GAME_SCRIPT).decode("utf-8", "replace")
+        sref = fs_ref(source, s2 * SECTOR)
+        orig = debugfs_cat(sref, p2_file(sref, GAME_SCRIPT)).decode("utf-8", "replace")
         if strip_hook(cur) != orig:
             why.append("%s differs beyond the hook" % GAME_SCRIPT)
     except Refused as e:
@@ -6106,10 +6198,11 @@ def clean_p2(p2_image):
     rc, txt = e2fsck(p2_image)
     if rc != 0:
         raise Refused("p2 is not clean before the menu is taken out (e2fsck rc=%d):\n%s" % (rc, txt))
-    orig = debugfs_cat(p2_image, GAME_SCRIPT)
+    game = p2_file(p2_image, GAME_SCRIPT)             # past a link (PAD-742)
+    orig = debugfs_cat(p2_image, game)
     if not orig:
-        raise Refused("%s is empty or missing in p2" % GAME_SCRIPT)
-    st = debugfs_stat(p2_image, GAME_SCRIPT)
+        raise Refused("%s is empty or missing in p2" % game)
+    st = debugfs_stat(p2_image, game)
     text = orig.decode("utf-8", "replace")
     stripped = strip_hook(text)
     cmds, nfiles = [], 0
@@ -6130,14 +6223,14 @@ def clean_p2(p2_image):
         staged.write(stripped.encode("utf-8"))
         staged.close()
         mode = (st.get("mode") or 0o755) & 0o7777
-        cmds.append("rm " + dq(GAME_SCRIPT))
-        cmds.append("write %s %s" % (dq(staged.name), dq(GAME_SCRIPT)))
-        cmds.append("set_inode_field %s mode 0%o" % (dq(GAME_SCRIPT), statmod.S_IFREG | mode))
-        cmds.append("set_inode_field %s uid %d" % (dq(GAME_SCRIPT), st.get("uid", 0)))
-        cmds.append("set_inode_field %s gid %d" % (dq(GAME_SCRIPT), st.get("gid", 0)))
+        cmds.append("rm " + dq(game))
+        cmds.append("write %s %s" % (dq(staged.name), dq(game)))
+        cmds.append("set_inode_field %s mode 0%o" % (dq(game), statmod.S_IFREG | mode))
+        cmds.append("set_inode_field %s uid %d" % (dq(game), st.get("uid", 0)))
+        cmds.append("set_inode_field %s gid %d" % (dq(game), st.get("gid", 0)))
         for k in ("atime", "ctime", "mtime"):
             if k in st:
-                cmds.append("set_inode_field %s %s @%d" % (dq(GAME_SCRIPT), k, st[k]))
+                cmds.append("set_inode_field %s %s @%d" % (dq(game), k, st[k]))
     try:
         if cmds:
             debugfs_write_script(p2_image, cmds)
@@ -6147,9 +6240,9 @@ def clean_p2(p2_image):
     rc, txt = e2fsck(p2_image)
     if rc != 0:
         raise Refused("p2 is not clean after the menu was taken out (e2fsck rc=%d):\n%s" % (rc, txt))
-    back = debugfs_cat(p2_image, GAME_SCRIPT).decode("utf-8", "replace")
+    back = debugfs_cat(p2_image, game).decode("utf-8", "replace")
     if back != stripped or has_hook(back):
-        raise Refused("%s read back with the hook still in it" % GAME_SCRIPT)
+        raise Refused("%s read back with the hook still in it" % game)
     if debugfs_exists(p2_image, SELECT_DIR):
         raise Refused("%s is still in p2 after its removal" % SELECT_DIR)
     return stripped != text, nfiles
@@ -7391,13 +7484,14 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
     pref = fs_ref(plan.primary, p2.src_start * SECTOR)
     print("p2 (rootfs): patched - selector files and the hooked %s:" % GAME_SCRIPT)
     try:
-        cur = debugfs_cat(ref, GAME_SCRIPT).decode("utf-8", "replace")
-        orig = debugfs_cat(pref, GAME_SCRIPT).decode("utf-8", "replace")
+        game, pgame = p2_file(ref, GAME_SCRIPT), p2_file(pref, GAME_SCRIPT)   # past a link (PAD-742)
+        cur = debugfs_cat(ref, game).decode("utf-8", "replace")
+        orig = debugfs_cat(pref, pgame).decode("utf-8", "replace")
         diff = list(difflib.unified_diff(orig.splitlines(), cur.splitlines(), "primary:" + GAME_SCRIPT, "card:" + GAME_SCRIPT, lineterm="", n=1))
         print("\n".join("    " + l for l in diff) if diff else "    (identical - NOT hooked)")
         check("%s = primary's + the hook block only" % GAME_SCRIPT, has_hook(cur) and strip_hook(cur) == orig)
-        st = debugfs_stat(ref, GAME_SCRIPT)
-        ost = debugfs_stat(pref, GAME_SCRIPT)
+        st = debugfs_stat(ref, game)
+        ost = debugfs_stat(pref, pgame)
         check("%s mode/uid/gid/mtime kept" % GAME_SCRIPT,
               all(st.get(k) == ost.get(k) for k in ("mode", "uid", "gid", "mtime")),
               "card %r primary %r" % ({k: st.get(k) for k in ("mode", "uid", "gid", "mtime")},

@@ -100,10 +100,11 @@ def test_a_stale_game_out_is_not_quoted_as_this_runs_crash():
 @pytest.mark.skipif(not sys.platform.startswith("linux") or not BASH,
                     reason="needs Linux bash and GNU stat")
 def test_run_debug_log_returns_only_lines_written_after_the_mark(tmp_path):
-    watch = _src("watch.sh")
-    mark = next(ln for ln in watch.split("\n") if ln.startswith("DBG_MARK="))
-    func = next(ln for ln in watch.split("\n")
-                if ln.startswith("run_debug_log()"))
+    # PAD-738 put the launch in a loop (Restart game boots again), so both
+    # lines are indented now.
+    lines = [ln.strip() for ln in _src("watch.sh").split("\n")]
+    mark = next(ln for ln in lines if ln.startswith("DBG_MARK="))
+    func = next(ln for ln in lines if ln.startswith("run_debug_log()"))
     dump = tmp_path / "dump"
     dump.mkdir()
     log = dump / "debug_log.txt"

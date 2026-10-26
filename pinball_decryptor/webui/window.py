@@ -736,6 +736,9 @@ class WebWindow:
             index, value = _EMULATE_KINDS[kind]
             if kind == "copy":
                 value = int((pct or 0) * 0.4)
+            elif pct is not None:
+                # PAD-744: how far through the boot, from status.sh's boot_pct
+                value = max(value, min(99, int(pct)))
             self._phase_index["emulate"] = index
             self._set_footer(mode="emulate",
                              phases=list(self._phases["emulate"]),

@@ -137,6 +137,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ballmodel
+import bootprog
 import cablights
 import coilact
 import coilmap
@@ -4451,6 +4452,17 @@ TABLES_EVERY_S = 2.0
 #: so writing it here moves the sound live, and the tab's own slider follows.
 AUDIO_CTL = os.environ.get("PAD_AUDIO_CTL") or None
 RUN_POLL_S = 0.3
+#: Restart game in flight (PAD-744): the button says Restarting… while the app
+#: has not taken the request (its poll) or the run has not taken dump/reboot.req
+#: (watch.sh), then until the old boot's log is gone (the new launch truncates
+#: it; bootprog.py) - or, with no log to read, RESTART_GRACE_S over the gap -
+#: and never longer than RESTART_CAP_S. The window stays open on a restart
+#: since PAD-738, so nothing else puts the button back.
+RESTART_GRACE_S = 4.0
+RESTART_CAP_S = 30.0
+#: How far the game has booted (PAD-744), read off its log this often while it
+#: boots: the bar beside Pause, in the app footer's steps.
+BOOT_POLL_S = 1.0
 
 
 def read_paused():
@@ -4506,12 +4518,21 @@ class RunCtl:
     the switch block, so the button says Resume however the game was frozen -
     this button, Pause or F9 in either window. The volume is the tab's file."""
 
-    def __init__(self, ctl_path=None):
+    def __init__(self, ctl_path=None, logdir=False):
         self.ctl_path = ctl_path
         self.paused = False
         self.audio = load_audio_ctl(ctl_path) if ctl_path else None
         self._mtime = self._stat()
         self._next = 0.0
+        self.restarting = False
+        self._restart_t = None     # when Restart game was asked
+        self._taken_t = None       # when that request was last seen in flight
+        self._booted_again = False  # the old boot's log is gone since then
+        # the boot's progress (PAD-744); logdir False = the rig's own
+        self._logdir = logdir
+        self._boot_log = None
+        self._boot_next = 0.0
+        self.boot = None           # {"pct", "words"} while booting, else None
 
     def _stat(self):
         try:
@@ -4525,7 +4546,8 @@ class RunCtl:
             return False
         self._next = now + RUN_POLL_S
         changed = False
-        paused = bool(read_paused())
+        raw = read_paused()
+        paused = bool(raw)
         if paused != self.paused:
             self.paused, changed = paused, True
         if self.ctl_path:
@@ -4535,7 +4557,53 @@ class RunCtl:
                 audio = load_audio_ctl(self.ctl_path)
                 if audio != self.audio:
                     self.audio, changed = audio, True
+        if now >= self._boot_next:
+            self._boot_next = now + BOOT_POLL_S
+            boot = self._poll_boot(raw is not None)
+            if boot != self.boot:
+                self.boot, changed = boot, True
+        if self.restarting != self._restart_pending(time.time()):
+            self.restarting, changed = not self.restarting, True
         return changed
+
+    def _poll_boot(self, live):
+        """{"pct", "words"} while the game boots, None once it is up (or with
+        no run or no log to read)."""
+        if self._boot_log is None:
+            d = padpath.logdir() if self._logdir is False else self._logdir
+            if not d:
+                return None
+            self._boot_log = bootprog.BootLog(d)
+        got = self._boot_log.poll()
+        if got is None:
+            return None
+        state, pct, words = got
+        if state != "attract":
+            self._booted_again = True
+        if state == "attract" or not live:
+            return None
+        return {"pct": pct, "words": words}
+
+    def _restart_pending(self, now):
+        """Restart game still on its way (RESTART_GRACE_S)."""
+        if self._restart_t is None:
+            return False
+        if now - self._restart_t > RESTART_CAP_S:
+            self._restart_t = None
+            return False
+        dump = padpath.dump()
+        for p in (restart_req_path(self.ctl_path),
+                  dump and os.path.join(dump, "reboot.req")):
+            if p and os.path.exists(p):
+                self._taken_t = now
+                return True
+        if self._boot_log is not None:
+            if not self._booted_again:
+                return True
+        elif now - (self._taken_t or self._restart_t) < RESTART_GRACE_S:
+            return True
+        self._restart_t = None
+        return False
 
     def set_audio(self, gain=None, muted=None):
         if not self.ctl_path:
@@ -4558,13 +4626,18 @@ class RunCtl:
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write("%d\n" % padpath.slot())
-            return True
         except OSError:
             return False
+        self._restart_t = self._taken_t = time.time()
+        self._booted_again = False
+        self.restarting = True
+        return True
 
     def dyn(self):
         return {"paused": self.paused,
                 "restart": bool(self.ctl_path),
+                "restarting": self.restarting,
+                "boot": self.boot,
                 "audio": ({"gain": self.audio[0], "muted": self.audio[1]}
                           if self.audio is not None else None)}
 

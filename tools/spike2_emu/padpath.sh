@@ -1603,7 +1603,7 @@ pad_display_repair() {
 pad_export_win() {
     PAD_ROOT_WSL=$ROOT
     export PAD_ROOT_WSL
-    WSLENV="${WSLENV:+$WSLENV:}PAD_ROOT/p:PAD_TABLES/p:PAD_WSL_DISTRO:PAD_ROOT_WSL"
+    WSLENV="${WSLENV:+$WSLENV:}PAD_ROOT/p:PAD_TABLES/p:PAD_LOGDIR/p:PAD_WSL_DISTRO:PAD_ROOT_WSL"
     # The slot and the label cross too: the playfield window titles itself
     # with them, keys its saved position by slot, and hands PAD_SLOT back to
     # every helper it runs in WSL so a switch press lands in ITS slot's rings.

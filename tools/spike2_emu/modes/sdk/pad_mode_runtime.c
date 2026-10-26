@@ -10194,6 +10194,8 @@ static struct more_member {
     unsigned callout;                   /* the request the cursor plays landing on it; 0 = silent */
     unsigned slot;                      /* the place it stands in */
     void *lit, *lock, *done, *portrait; /* found in the selection scene */
+    void *prog;                         /* PAD-733: its tile's count (`<page>_Prog`, a text in the overlay) */
+    long hits[5], of[5];                /* PAD-733: per player, the count its mode reported (pm_roster_more_progress) */
     unsigned tries;
 } more_m[N_MORE];
 static int more_n;
@@ -10271,7 +10273,7 @@ static int more_before(const char *name, const char *page, const struct more_mem
 static void more_forget_nodes(void)
 {
     int k;
-    for (k = 0; k < more_n; k++) more_m[k].lit = more_m[k].lock = more_m[k].done = more_m[k].portrait = 0;
+    for (k = 0; k < more_n; k++) more_m[k].lit = more_m[k].lock = more_m[k].done = more_m[k].portrait = more_m[k].prog = 0;
     more.shown = -1;
 }
 
@@ -10297,6 +10299,7 @@ int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned c
         more_n++;
         more_m[k].page[0] = 0;
         more_m[k].tries = 0;
+        for (j = 0; j < 5; j++) more_m[k].hits[j] = more_m[k].of[j] = 0;
         say("roster: %s joins the selection screen in slot %u's place (new monster %d; nodes %s)", name, slot, k + 1,
             page && page[0] ? page : "none");
     }
@@ -10354,6 +10357,22 @@ void pm_roster_more_leave(const char *name)
 
 int pm_roster_more_count(void) { return more_n; }
 
+int pm_roster_more_progress(long done, long of)
+{
+    unsigned p = pm_player();
+    int k;
+    for (k = 0; k < more_n && more_m[k].by != current; k++) ;
+    if (k >= more_n || p < 1 || p > 4) return 0;
+    if (done < 0) done = 0;
+    if (of > 0 && done > of) done = of;
+    if (more_m[k].hits[p] != done || more_m[k].of[p] != of)
+        say("roster: %s's tile counts %ld/%ld for player %u", more_m[k].name, done, of, p);
+    more_m[k].hits[p] = done;
+    more_m[k].of[p] = of;
+    more.states = 0;                    /* written again at the next opening's draw */
+    return 1;
+}
+
 static const char *more_picked;          /* the member being handed the pick (pm_roster_more_picked) */
 const char *pm_roster_more_picked(void) { return more_picked; }
 
@@ -10389,6 +10408,13 @@ static void more_find(void)
         m->lock = more_node(m->page, "_Lock");
         m->done = more_node(m->page, "_Done");
         m->portrait = more_node(m->page, "_Portrait");
+        {   /* PAD-733: its count, a text beside the places' own "0/4" in the overlay */
+            char p[160];
+            const char *at = pm_port_text("roster_box_path"), *scene_id = pm_port_text("roster_screen_scene");
+            pm_snprintf(p, sizeof p, "%s%s_Prog", at ? at : "", m->page);
+            m->prog = at && scene_id ? pm_text(scene_id, p) : 0;
+            more.states = 0;          /* written at the next draw */
+        }
         pm_show(m->lit, 0);           /* authored visible: hidden until the cursor is on it */
         if (m->lock) pm_show(m->lock, 0);
         if (m->done) pm_show(m->done, 0);
@@ -10502,6 +10528,14 @@ static void more_draw(void)
             unsigned st = more_state(more_m[k].slot);
             if (more_m[k].lock) pm_show(more_m[k].lock, st != 0 && st != 2);
             if (more_m[k].done) pm_show(more_m[k].done, st == 2 && won && won[more_m[k].slot] == k);
+            if (more_m[k].prog) {   /* PAD-733 (David: "this count also needs to show on the monster select screen
+                                     * like the other monsters"): its mode's count, none on a locked place */
+                char w[32];
+                long h = p >= 1 && p <= 4 ? more_m[k].hits[p] : 0, of = p >= 1 && p <= 4 ? more_m[k].of[p] : 0;
+                if (of > 0 && (st == 0 || st == 2)) pm_snprintf(w, sizeof w, "%ld/%ld", h, of);
+                else pm_snprintf(w, sizeof w, " ");
+                pm_set_text(more_m[k].prog, w);
+            }
         }
         for (s = 0; s < 7; s++) {
             unsigned bit = 1u << s;
@@ -10717,6 +10751,7 @@ static void more_tick(void)
         for (q = 1; q <= 4; q++) {
             more.lost[q] = more.playing[q] = -1;
             for (s = 0; s < 7; s++) more.won[q][s] = -1;
+            for (s = 0; s < more_n; s++) more_m[s].hits[q] = more_m[s].of[q] = 0;   /* PAD-733: the tiles' counts */
         }
         for (s = 0; s < 7; s++)             /* the game over: the boxes we hid are the game's again */
             if ((more.box_hid >> s) & 1u) { if (more.box[s]) pm_show(more.box[s], 1); more.box_hid &= ~(1u << s); }

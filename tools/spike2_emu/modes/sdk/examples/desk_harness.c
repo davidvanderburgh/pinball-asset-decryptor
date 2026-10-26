@@ -579,6 +579,11 @@ int pm_roster_more_count(void) { return more_n; }
 const char *pm_roster_more_picked(void) { return more_picked; }
 long pm_roster_start_after(void) { return pm_port_value("roster_start_after_ms", 0); }
 int pm_roster_closing(void) { return 0; }   /* PAD-733: the desk has no selection screen to close */
+int pm_roster_more_progress(long done, long of)   /* PAD-733: the count on its tile */
+{
+    printf("%6lu   ROSTER COUNT %ld/%ld\n", now_ms, done, of);
+    return more_n > 0;
+}
 
 /* PAD-710: the game's own modes 0-127 a mode may claim; `gamestart <id>` is the game starting one (a rule of its own,
  * as the player earns it), pm_place_over the outcome the game's own stop is run with */

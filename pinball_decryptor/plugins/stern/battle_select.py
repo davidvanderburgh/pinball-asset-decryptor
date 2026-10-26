@@ -90,6 +90,12 @@ def cover_name(slot):
     return "%sCover%d" % (PREFIX, slot)
 
 
+def prog_name(slug):
+    """PAD-733: a new monster's count on its tile ("2/5"), a text in the overlay beside the places' own "0/4" - the
+    runtime writes the count its mode reports (``pm_roster_more_progress``)."""
+    return page_of(slug) + "_Prog"
+
+
 def katakana(name):
     return KATAKANA.get(" ".join(str(name or "").upper().split()), "")
 
@@ -568,6 +574,7 @@ def build(stock, monsters):
     # and the tile it was measured against had not, and each new tile's claw sat a tile lower (David, v21: "one was way
     # too low")
     lock_px, done_px, lock_m, done_m = _state_pictures(scene, sc)
+    prog_t, prog_m = _prog_template(sc)                              # PAD-733: the places' "0/4", read before they move
     # the seven places: lit tile, state box and words moved with the tile
     for s in range(7):
         a = mul(place(s), inv(sc.tile_at[s]))                        # CharacterSelect space, old -> new
@@ -581,7 +588,7 @@ def build(stock, monsters):
     at_sheet = sc.kids.index(sc.sheet) + 1
     new_kids = [picture_node("%sGray%d" % (PREFIX, s), greys[s], place(s)) for s in range(7)]
     # the new monsters' tiles
-    lits, covers, portraits = [], [], []
+    lits, covers, portraits, progs = [], [], [], []
     hosts = sorted({int(m["slot"]) for m in monsters})
     for i, m in enumerate(monsters):
         key = ("new", i)
@@ -597,6 +604,15 @@ def build(stock, monsters):
         if done_px is not None:
             lits.append(shown_node(names["Done"], done_px, mul(place(key), done_m)))
         portraits.append(_portrait_group(sc, scene, m, pic, picture_node, group_node, names["Portrait"]))
+        if prog_t is not None:
+            # PAD-733: its count, a copy of place 0's words placed on this tile as place 0's sits on its own; blank
+            # until the runtime writes the mode's count (pm_roster_more_progress)
+            body = dict(prog_t.components[0].obj.body, text=b" ")
+            obj = T.Obj(alloc(), "Text", body)
+            scene.objects[obj.id] = obj
+            progs.append(T.Node(alloc(), prog_name(m["slug"]), prog_t.flag, [(1, 1)], [],
+                                [(1, track16(mul(sc.cs, mul(place(key), prog_m))))],
+                                [T.Component(prog_t.components[0].start, prog_t.components[0].cls, obj)]))
     for s in hosts:
         covers.append(shown_node(cover_name(s), greys[s], place(s)))
     sc.kids[at_sheet:at_sheet] = new_kids
@@ -604,7 +620,20 @@ def build(stock, monsters):
     sc.kids[last_body + 1:last_body + 1] = portraits
     last_sel = max(sc.kids.index(n) for n in sc.selected)
     sc.kids[last_sel + 1:last_sel + 1] = covers + lits
+    if progs:                                                        # beside the places' own, in the overlay
+        at_prog = sc.overlay_kids.index(prog_t)
+        sc.overlay_kids[at_prog:at_prog] = progs
     return T.serialize(scene)
+
+
+def _prog_template(sc):
+    """PAD-733: place 0's count words (``T1_1Prog_Instance``, a text in the overlay the program writes "0/4" into) and
+    where it sits in place 0's TILE pixels: ``(node, m)``, or ``(None, None)`` on a card without it (a text node)."""
+    for s, node in enumerate(sc.prog):
+        if node is not None and node.components and node.components[0].obj.kind == "Text":
+            # the overlay's space -> CharacterSelect -> the tile's pixels
+            return node, mul(inv(sc.tile_at[s]), mul(inv(sc.cs), rest(node)))
+    return None, None
 
 
 def _state_pictures(scene, sc):

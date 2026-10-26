@@ -46,6 +46,7 @@ EVERY_BLOCK = [
     {"op": "hud_text", "which": "line", "text": "SHOOT THE LIT SHOT", "value": None},
     {"op": "hud_counter", "counter": 1, "value": num(0), "sub": None}, {"op": "hud_gauge", "value": num(1)},
     {"op": "hud_progress", "value": num(7)},
+    {"op": "roster_progress", "done": num(2), "of": num(5)},                       # PAD-733
     {"op": "hud_award", "text": "JACKPOT", "value": None, "sub": "", "seconds": 2},
 ]
 #: one of every value and condition (modes_blocks.js valueTemplates / condTemplates), with the operators

@@ -318,6 +318,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
               "hud_progress",                                            # PAD-690: the panel's number, live
+              "roster_progress",                                         # PAD-733: a new monster's count on its tile
               "ball_save",                                               # PAD-690: a ball save of its own
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
@@ -1208,6 +1209,9 @@ def notes(program):
            and not any(b.get("op") == "start_mode" for b in _walk(s.get("do") or [])) for s in program["scripts"]):
         out.append("A When the player picks a battle script with no Start the mode in it starts nothing: the pick "
                    "counts as a battle lost.")                                       # PAD-706
+    if any(b.get("op") == "roster_progress" for s in program["scripts"] for b in _walk(s.get("do") or []))             and not more_of(program):                                                # PAD-733
+        out.append("A Selection screen count block shows on a new monster's tile, and this mode has none (a When the "
+                   "player picks a battle hat, a new monster in its place): it shows nothing.")
     battles = any((s.get("hat") or {}).get("kind") == "battle" for s in program["scripts"])
     wins = any(b.get("op") == "end_mode" and b.get("won") for s in program["scripts"] for b in _walk(s.get("do") or []))
     if battles and not wins:
@@ -1553,6 +1557,9 @@ def _check_stack(stack, depth, where, ctx):
             _check_num(b.get("value"), where, ctx)
         elif op == "hud_progress":
             _check_num(b.get("value"), where, ctx)
+        elif op == "roster_progress":                                               # PAD-733
+            _check_num(b.get("done"), where, ctx)
+            _check_num(b.get("of"), where, ctx)
         elif op == "hud_award":
             for key in ("text", "sub"):
                 if len(str(b.get(key) or "")) > HUD_TEXT_MAX:
@@ -2222,6 +2229,9 @@ class _Gen:
                 out.append(pad + "hud_level = %s;" % self.num(b.get("value")))
             elif op == "hud_progress":
                 out.append(pad + "hud_progress(%s);" % self.num(b.get("value")))
+            elif op == "roster_progress":                # PAD-733: its new monster's tile on the selection screen
+                out.append(pad + "pm_roster_more_progress((long)(%s), (long)(%s));"
+                           % (self.num(b.get("done")), self.num(b.get("of"))))
             elif op == "hud_award":
                 value = b.get("value")
                 try:

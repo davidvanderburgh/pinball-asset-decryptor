@@ -133,6 +133,7 @@ SAY = {
     "hud_counter": lambda b: "HUD counter %s = %s" % (b.get("counter"), val(b.get("value"))),
     "hud_gauge": lambda b: "HUD gauge = %s" % val(b.get("value")),
     "hud_progress": lambda b: "Progress panel shows %s" % val(b.get("value")),
+    "roster_progress": lambda b: "Its selection screen tile shows %s of %s" % (val(b.get("done")), val(b.get("of"))),
     "hud_award": lambda b: "Award on the HUD: “%s”" % (b.get("text") or ""),
 }
 #: the block's family, as the page colours it (modes_blocks.js STMT_CLASS)
@@ -140,7 +141,7 @@ FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "s
           "add_time": "mode", "set_time": "mode", "multiball": "mode", "ball_save": "mode", "game_wizard": "mode", "score": "score",
           "set": "var", "change": "var", "if": "flow", "callout": "show", "words": "show", "light_shot": "show",
           "lights_off": "show", "show": "show", "game_show": "show", "log": "show", "clip": "own", "sound": "own", "music": "own",
-          "timer_start": "timer", "timer_stop": "timer", "hud_text": "hud", "hud_counter": "hud", "hud_gauge": "hud", "hud_progress": "hud",
+          "timer_start": "timer", "timer_stop": "timer", "hud_text": "hud", "hud_counter": "hud", "hud_gauge": "hud", "hud_progress": "hud", "roster_progress": "hud",
           "hud_award": "hud", "hold": "mech", "scoop_hold": "mech", "let_go": "mech", "shield": "mech",
           "building": "mech", "shake": "mech", "shake_game": "mech"}
 FAMILY_COLOUR = {"hat": "#c28a12", "mode": "#8b5bd6", "score": "#2f9a5b", "var": "#c8553a", "timer": "#b0457e",

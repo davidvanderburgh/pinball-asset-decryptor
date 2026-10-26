@@ -216,6 +216,9 @@ void *pm_node(const char *scene, const char *path)
   for (i = 0; i < n_nodes; i++) if (!strcmp(node_names[i], path)) return node_names[i];
   snprintf(node_names[n_nodes], 120, "%s", path); return node_names[n_nodes++]; }
 void pm_show(void *node, int on) { const char *p = strrchr((const char *)node, '.'); printf("%s %s\n", on ? "SHOW" : "HIDE", p ? p + 1 : (const char *)node); }
+static int no_prog;                                  /* a card built before the tiles' counts */
+void *pm_text(const char *scene, const char *path) { return no_prog && strstr(path, "_Prog") ? 0 : pm_node(scene, path); }
+void pm_set_text(void *t, const char *w) { const char *p = strrchr((const char *)t, '.'); printf("WORDS %s: %s\n", p ? p + 1 : (const char *)t, w); }
 int pm_snprintf(char *o, unsigned long cap, const char *fmt, ...)
 { va_list ap; int n; va_start(ap, fmt); n = vsnprintf(o, cap, fmt, ap); va_end(ap); return n; }
 static unsigned long now_ms;
@@ -290,6 +293,17 @@ static unsigned data(const char *n)
 
 DRIVER = r"""
 static const struct pm_mode A = { "A", 0, 0, 0, 0, 0 };
+/* each monster's own mode (PAD-733: a mode reports the count of ITS monster), by name */
+static struct pm_mode own_modes[16];
+static int n_own;
+static const struct pm_mode *mode_of(const char *name)
+{
+    int j;
+    for (j = 0; j < n_own; j++) if (!strcmp(own_modes[j].name, name)) return &own_modes[j];
+    if (n_own >= 16) return &A;
+    own_modes[n_own].name = name;
+    return &own_modes[n_own++];
+}
 static int nope;
 static int pick(unsigned slot)
 {
@@ -306,9 +320,9 @@ int main(int argc, char **argv)
         const char *c = argv[k];
         regs[0] = (unsigned)(unsigned long)screen_obj;
         if (!strcmp(c, "join")) { int s = atoi(argv[++k]); const char *n = argv[++k]; char page[64];
-            snprintf(page, sizeof page, "PadSel_%s", n); current = &A;
-            printf("JOIN %d\n", pm_roster_more((unsigned)s, n, page, 900 + s, pick)); }
-        else if (!strcmp(c, "leave")) { current = &A; pm_roster_more_leave(argv[++k]); }
+            snprintf(page, sizeof page, "PadSel_%s", n); current = mode_of(n);
+            printf("JOIN %d\n", pm_roster_more((unsigned)s, n, page, 900 + s, pick)); current = &A; }
+        else if (!strcmp(c, "leave")) { current = mode_of(argv[k + 1]); pm_roster_more_leave(argv[++k]); current = &A; }
         else if (!strcmp(c, "open")) { screen_obj[4] = (unsigned)atoi(argv[++k]); on_roster_open(regs); }
         else if (!strcmp(c, "right") || !strcmp(c, "left") || !strcmp(c, "action")) {
             regs[1] = c[0] == 'r' ? 139 : c[0] == 'l' ? 137 : 34;
@@ -325,6 +339,12 @@ int main(int argc, char **argv)
             printf("RESUME %d\n", roster_fn[s] ? roster_fn[s]((unsigned)s) : -1); current = 0; roster_resuming = 0; }
         else if (!strcmp(c, "tick")) more_tick();
         else if (!strcmp(c, "portrait")) { portrait_on = 1; more_portrait_orig = g_step; }
+        else if (!strcmp(c, "count")) {                  /* count <monster> <done> <of>: its mode reports its tile */
+            const char *w = argv[++k]; long d = atol(argv[++k]), o = atol(argv[++k]);
+            current = mode_of(w);
+            printf("COUNT %d\n", pm_roster_more_progress(d, o)); current = &A; }
+        else if (!strcmp(c, "player")) up = (unsigned)atoi(argv[++k]);
+        else if (!strcmp(c, "noprog")) no_prog = 1;
         else if (!strcmp(c, "pstate")) { portrait[0] = (unsigned)atoi(argv[++k]); portrait[1] = (unsigned)atoi(argv[++k]); }
         else if (!strcmp(c, "step")) more_portrait_step(regs[0], screen_obj[4], 0, 0);   /* the game's portrait step */
         else if (!strcmp(c, "ms")) now_ms = strtoul(argv[++k], 0, 10);
@@ -452,6 +472,23 @@ def test_a_monster_arriving_from_another_place_waits_for_its_portrait_out(tmp_pa
     # from its own place (KAMACURAS stands in slot 1's): no out, drawn at once
     out = menu(tmp_path, *THREE, "portrait", "pstate", 4, 1, "tick", "open", 1, "right", "tick")
     assert "SHOW PadSel_KAMACURAS_Portrait" in out.split("KEY right")[-1]
+
+
+def test_a_monsters_tile_shows_its_modes_count_like_the_games_own(tmp_path):
+    """PAD-733 (David: "this count also needs to show on the monster select screen like the other monsters"): the count
+    a mode reports (pm_roster_more_progress, its own monster) goes on its tile's `<page>_Prog` when the screen opens -
+    per player, none before a report, none on a locked place - and a game over clears it."""
+    out = menu(tmp_path, *THREE, "tick", "count", "KAMACURAS", 2, 5, "count", "NOBODY", 1, 5, "open", 0, "tick",
+               "MARK", "player", 2, "open", 0, "tick", "MARK", "player", 1, "state", 1, 1, "open", 0, "tick", "MARK",
+               "state", 1, 0, "gameover", "tick", "open", 0, "tick")
+    first, p2, locked, over = out.split("MARK")
+    assert "KAMACURAS's tile counts 2/5 for player 1" in first
+    assert "COUNT 0" in first                                    # a mode with no monster on the screen: nothing kept
+    assert "WORDS PadSel_KAMACURAS_Prog: 2/5" in first and "WORDS PadSel_KUMONGA_Prog:  " in first
+    assert "WORDS PadSel_KAMACURAS_Prog:  " in p2                # player 2 has made none
+    assert "WORDS PadSel_KAMACURAS_Prog:  " in locked             # its place locked: no count, as the game's own
+    assert "WORDS PadSel_KAMACURAS_Prog: 2/5" not in over        # the game over cleared it
+    assert "Prog" not in menu(tmp_path, *THREE, "noprog", "tick", "count", "KAMACURAS", 2, 5, "open", 0, "tick")
 
 
 def test_its_nodes_show_and_the_places_portrait_hides(tmp_path):
@@ -638,6 +675,14 @@ def _scene_bytes():
         lock[...] = (250, 250, 250, 255)
         ov_kids.append(group(a + "_Artbox", [bitmap("lock", 8, 10, lock, 0, 0), bitmap("claw", 8, 10, lock, 0, 0)],
                              -280 + (s >= 4) * 70, -280 + (s % 4) * 60))
+        if s < 4:                       # the left column's "0/4", a text the program writes (PAD-733: a new tile's count)
+            o = T.Obj(nid(), "Text", dict(sym=64, name="", rect=[-2.0, -2.0, 63.0, 31.65], rgba=[1.0, 1.0, 1.0, 1.0],
+                                          flags=(0, 0), align=1, spacing=[2.0, 0.0], text=b"0/4", font=6,
+                                          fonts=[("GameFont_Primary", 6)], used=[6], tail=(0, 0)))
+            sc.objects[o.id] = o
+            ov_kids.append(T.Node(nid(), a + "Prog_Instance", 1, [(1, 1)], [],
+                                  [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -275, -255 + s * 60, 0, 1])],
+                                  [T.Component(1, 3, o)]))
     overlay = group(BS.OVERLAY, ov_kids, 400, 400)
     shape = T.Obj(nid(), "Shape", dict(sym=20, name="", rect=[0.0, 0.0, 800.0, 480.0], fill=1,
                                          bitmap=T.Obj(nid(), "Bitmap", dict(sym=16, name="", w=4, h=4,
@@ -683,6 +728,37 @@ def test_the_build_adds_each_monsters_nodes_and_keeps_the_games(stock):
     assert all(v == 0 for _f, v in sheet.keyframes)                    # the sheet itself hidden
     order = [n for n in names if n.startswith("PadSel_") or n.endswith("_Selected_instance")]
     assert order.index("PadSel_Cover0") > order.index("GhidorahGigan_Selected_instance")   # over the lit tiles
+
+
+def test_each_new_tile_has_its_count_where_the_games_own_sit(stock):
+    """PAD-733: a new monster's count (`PadSel_<slug>_Prog`) is a copy of place 0's "0/4" text, blank until the runtime
+    writes it, in the overlay beside the places' own (the runtime finds it under `roster_box_path`), placed on its
+    tile as place 0's sits on place 0's tile."""
+    out = BS.build(stock, _mons(3))
+    real, BS.PREFIX = BS.PREFIX, "ZZZ_"                         # read the built screen as the game's
+    try:
+        sc = BS.Screen(T.parse(out))
+    finally:
+        BS.PREFIX = real
+    ov = {n.name: n for n in sc.overlay_kids}
+    nodes = {n.name: n for n in sc.kids}
+    prog0 = sc.prog[0]
+    to_glass = lambda n: BS.apply(BS.mul(sc.os, BS.rest(n)), 0, 0)
+    tile_corner = lambda n: BS.apply(BS.mul(sc.glass, BS.mul(BS.rest(n), BS.rest(BS.sprite_of(n).body["kids"][0]))), 0, 0)
+    g = to_glass(prog0)
+    t = tile_corner(sc.selected[0])
+    k0 = BS.rest(sc.selected[0])[0]
+    for i in range(3):
+        name = BS.prog_name("m%d" % i)
+        assert name in ov, name
+        node = ov[name]
+        text = node.components[0].obj
+        assert text.kind == "Text" and text.body["text"] == b" " and text.id != prog0.components[0].obj.id
+        assert text.body["fonts"] == prog0.components[0].obj.body["fonts"]
+        p, c = to_glass(node), tile_corner(nodes["PadSel_m%d_Lit" % i])
+        k = BS.rest(nodes["PadSel_m%d_Lit" % i])[0] / k0 if k0 else 1.0
+        assert abs((p[0] - c[0]) - (g[0] - t[0]) * k) < 1.5 and abs((p[1] - c[1]) - (g[1] - t[1]) * k) < 1.5, i
+    assert [n.name for n in sc.overlay_kids].index(BS.prog_name("m0")) < [n.name for n in sc.overlay_kids].index("T1_1Prog_Instance")
 
 
 def test_the_layout_fits_the_new_tiles_and_moves_the_state_boxes(stock):

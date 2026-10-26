@@ -412,6 +412,11 @@ void pm_roster_more_leave(const char *name);
 int pm_roster_more_count(void);
 const char *pm_roster_more_picked(void);   /* inside on_pick: the name of the new monster picked (0 = a place's own pick) */
 long pm_roster_start_after(void);
+/* PAD-733: the count on the calling mode's new monster's tile, as the game's own places show theirs ("2/5": the hits
+ * made of the hits needed), for the player up, until the game ends; written each time the selection screen opens (the
+ * card build's `<page>_Prog`; a card without it shows nothing). of <= 0 shows none. 1 = kept; 0 when the calling mode
+ * has no new monster on the screen. */
+int pm_roster_more_progress(long done, long of);
 /* PAD-733: 1 while the selection screen a pick was taken on is still closing - start the picked mode on the first tick
  * this is 0, its start clip at once: the game's own battle is in its intro there. (The runtime watches the game's
  * display effects: the close is one, Premium/LE 1.16's 132; the port's roster_start_after_ms is the most it waits.) */

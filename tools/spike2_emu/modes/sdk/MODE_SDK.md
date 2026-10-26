@@ -4025,6 +4025,14 @@ static void on_init(void)
   the place's battle back, won or lost (PAD-706: Completed, the audits, the city). A pick of the place's own tile is
   its own battle; a monster that will not start (0) lets the place's battle run. `pm_roster_more_picked()` names the
   monster inside `on_pick`; `pm_roster_start_after()` is the port's `roster_start_after_ms`.
+- **Its count on its tile** (PAD-733, David: "this count also needs to show on the monster select screen like the
+  other monsters"). The game letters each place's "0/4" into a text in the overlay (`T1_1Prog_Instance`...); the card
+  build gives each new monster a copy of place 0's, `<page>_Prog` (blank), placed on its tile as place 0's sits on
+  its own. `pm_roster_more_progress(done, of)` keeps the calling mode's count for the player up until the game ends,
+  and each opening of the screen writes "done/of" there (none before a report, none on a locked place, none on a
+  card built before PAD-733). On the Modes tab: the *Selection screen count* block (`roster_progress`, its `done`
+  and `of` values). A mode that keeps its hits for the game (a variable reset each game) and shows them so resumes a
+  lost battle where it was, as the game's own do.
 - **Played again until it is won.** A new monster's battle lost is the one the game's city pick plays again at the
   next lit scoop (`site roster_resume`, PAD-706); won, its tile shows the claw and its place is done: the place's other tiles
   book the same battle, so they are not offered again that game.

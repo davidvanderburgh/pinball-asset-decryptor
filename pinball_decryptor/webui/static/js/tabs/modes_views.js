@@ -104,7 +104,7 @@ export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "m
   add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", game_wizard: "mode", score: "score", set: "var", change: "var",
   if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show",
   log: "show", clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
-  hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
+  hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech" };
 const COLOR_NAMES = { "#ffd000": "yellow", "#00a0ff": "blue", "#ff0000": "red", "#00c040": "green", "#ffffff": "white",
   "#ff7800": "orange", "#a040ff": "purple", "#00ff00": "green" };
@@ -208,6 +208,7 @@ export function stmtWords(b, ch = {}) {
     case "hud_counter": return `HUD counter ${b.counter} to ${valWords(b.value)}`;
     case "hud_gauge": return `Fill the HUD's gauge to ${valWords(b.value)} pips`;
     case "hud_progress": return `Show ${valWords(b.value)} on the progress panel`;
+    case "roster_progress": return `Show ${valWords(b.done)} of ${valWords(b.of)} on its selection screen tile`;
     case "hud_award": return withValue(`Award ${quote(b.text)}`, b.value);
     case "if": return `If ${condWords(b.cond)}`;
     default: return `(${b.op})`;
@@ -316,7 +317,7 @@ export const LANES = [["clock", "Mode and clock"], ["lights", "Lights"], ["shows
 const LANE_OF = { start_mode: "clock", end_mode: "clock", add_time: "clock", set_time: "clock", timer_start: "clock",
   timer_stop: "clock", multiball: "clock", ball_save: "clock", game_wizard: "clock", light_mode: "lights", unlight_mode: "lights",
   light_shot: "lights", lights_off: "lights", show: "shows", game_show: "shows", callout: "sound", sound: "sound",
-  words: "screen", clip: "screen", hud_text: "screen", hud_counter: "screen", hud_gauge: "screen", hud_award: "screen", hud_progress: "screen",
+  words: "screen", clip: "screen", hud_text: "screen", hud_counter: "screen", hud_gauge: "screen", hud_award: "screen", hud_progress: "screen", roster_progress: "screen",
   score: "score", set: "score", change: "score", set_hits: "score" };
 export const laneOf = (op) => LANE_OF[op] || "other";
 const TRACK_PX = 640;           // about how wide the Timeline's track is drawn, to keep its clips apart

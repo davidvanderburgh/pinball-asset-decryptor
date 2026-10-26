@@ -2370,8 +2370,9 @@ HELP_CONTENT = {
          "core running, plus 1–2 GB of memory, shown live in the status line.\n"
          "- **No time limit:** it runs until you press Stop emulator or close its "
          "window.\n"
-         "- **Restart game**, beside Stop emulator, stops the game and starts it "
-         "again: the whole machine switched off and on."),
+         "- **Restart game**, beside Stop emulator, boots the game again, as "
+         "switching the machine off and on does: the game window goes back to the "
+         "boot screen and the virtual playfield stays open."),
         ("Sound and video",
          "- **Volume** and **Mute** set the emulator's own sound, live, and are "
          "remembered. They are not the game's volume (the coin door's -/+), which "

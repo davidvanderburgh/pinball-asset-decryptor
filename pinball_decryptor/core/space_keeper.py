@@ -24,7 +24,9 @@ have clearly stopped being used:
     days).  Its next Start unpacks it again; nothing is lost - settings and
     high scores are not in the cache.
   * A SPIKE 2 CACHED CARD not booted for 30 days, through the rig's own
-    ``cardmount.sh --cache-drop`` (which refuses a mounted or copying one).
+    ``cardmount.sh --cache-drop`` (which refuses a mounted or copying one);
+    one whose image has changed since at once, and an unfinished copy after
+    a day (PAD-739, :func:`plan_cards`).
   * And when the room left for the app's Linux falls under
     :data:`FLOOR_BYTES`, emulator games are removed least recently played
     first until it is back over - before an extract runs out halfway.
@@ -410,19 +412,41 @@ def plan_host(entries, now):
 # ---------------------------------------------------------------------------
 
 def plan_cards(rows, now):
-    """Cards not booted for 30 days.  A card never booted (no ``.boot``) has
-    no date here and stays: the rig's own eviction takes those first.  The
-    library's newest builds (``pinned``, PAD-727) stay however long they go
-    unbooted: they are the cache's reason for being."""
+    """Cards not used for 30 days.  The library's newest builds (``pinned``,
+    PAD-727) stay however long they go unbooted: they are the cache's reason
+    for being.  Never one in use or being copied (``use``, PAD-739).
+
+    PAD-739 (a user's ~/cardcache at 150 GB, 25 custom Godzilla builds):
+      * a card whose image was rebuilt or replaced since (``source`` changed)
+        goes at once - its copy can never be booted again, and the next boot
+        of the new image copies that afresh;
+      * a copy that never finished (``leftover``) goes after a day untouched;
+      * a card never booted - copied ahead of time - is dated by the copy
+        itself (``copied``) rather than staying for ever.  That is when it was
+        copied, not used: but nothing has used it since either.
+    An image deleted or on a drive not attached (gone / unreachable) is left
+    to the 30-day rule: the cached copy may be the only one left."""
     out = []
+
+    def take(r, why, what):
+        out.append({"path": r["label"], "size": int(r["real_kb"]) * 1024,
+                    "why": why, "what": "Stern Spike 2: " + what, "extra": []})
+
     for r in rows:
-        if r.get("pinned"):
+        if r.get("pinned") or r.get("use"):
             continue
-        boot = int(r.get("boot") or 0)
-        if boot and now - boot >= UNUSED_SECS:
-            out.append({"path": r["label"], "size": int(r["real_kb"]) * 1024,
-                        "why": "unused", "what": "Stern Spike 2: cached card "
-                        + r["label"], "extra": []})
+        if r.get("leftover"):
+            last = int(r.get("copied") or 0)
+            if last and now - last >= STALE_SECS:
+                take(r, "leftover", "unfinished card copy " + r["label"])
+            continue
+        if r.get("source") == "changed":
+            take(r, "dead", "cached card %s (its image was rebuilt or "
+                 "replaced)" % r["label"])
+            continue
+        last = int(r.get("boot") or 0) or int(r.get("copied") or 0)
+        if last and now - last >= UNUSED_SECS:
+            take(r, "unused", "cached card " + r["label"])
     return out
 
 
@@ -432,6 +456,7 @@ def plan_cards(rows, now):
 
 _WHY = {"leftover": "left behind by a run that ended without cleaning up",
         "unused": "not used for 30 days",
+        "dead": "its image changed, so it can never be used again",
         "room": "the oldest-played, to keep room free"}
 
 

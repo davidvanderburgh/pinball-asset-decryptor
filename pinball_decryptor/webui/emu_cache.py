@@ -63,7 +63,7 @@ def scan_emu_cache():
         out = subprocess.run(rig_cmd("cardmount.sh", "--cache-list"),
                              stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL,
-                             timeout=30, creationflags=_CREATE_FLAGS)
+                             timeout=60, creationflags=_CREATE_FLAGS)
         text = out.stdout.decode("utf-8", "replace")
     except Exception:                                        # noqa: BLE001
         return [], None
@@ -72,11 +72,19 @@ def scan_emu_cache():
     entries = []
     for r in rows:
         detail = r["label"]
-        if r.get("boot"):
+        if r.get("leftover"):
+            detail += "   unfinished copy"
+        elif r.get("boot"):
             detail += "   last booted %s" % time.strftime(
                 "%Y-%m-%d %H:%M", time.localtime(r["boot"]))
         else:
             detail += "   never booted"
+        if r.get("source") == "changed":       # PAD-739
+            detail += "   (image rebuilt since: never used again)"
+        elif r.get("source") == "gone":
+            detail += "   (image deleted or renamed)"
+        if r.get("use"):
+            detail += "   IN USE"
         entries.append({"path": r["label"],
                         "size": r["real_kb"] * 1024,
                         "manufacturer": "Stern Spike 2",
@@ -102,7 +110,7 @@ def list_cards():
     rig_cmd, parse_cache_list = rig
     out = subprocess.run(rig_cmd("cardmount.sh", "--cache-list"),
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                         timeout=30, creationflags=_CREATE_FLAGS)
+                         timeout=60, creationflags=_CREATE_FLAGS)
     return parse_cache_list(out.stdout.decode("utf-8", "replace"))[0]
 
 

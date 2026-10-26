@@ -1930,7 +1930,11 @@ class EmulateTab(TabService):
             bits.append("The card cache is empty — cards land here on their "
                         "first boot.")
         if meta and meta.get("limit_gb"):
-            bits.append("kept under %d GB" % meta["limit_gb"])
+            if meta["used_kb"] > meta["limit_gb"] * 1048576:
+                bits.append("over its %d GB limit: the next card copied "
+                            "trims it" % meta["limit_gb"])
+            else:
+                bits.append("kept under %d GB" % meta["limit_gb"])
         elif meta:
             bits.append("no size limit")
         if disk:

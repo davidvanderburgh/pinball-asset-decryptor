@@ -96,6 +96,24 @@ def prog_name(slug):
     return page_of(slug) + "_Prog"
 
 
+#: PAD-733: the cities a place's state box stamps on a battle held there, in the game's city order (its state box's
+#: labels, frames 3-6; GODZILLA CONTROLS TOKYO, then TRAVEL TO PARIS)
+CITY_LABELS = ("Tokyo", "Paris", "London", "NewYork")
+
+
+def city_name(slug, c):
+    """PAD-733: a new monster's stamp for city ``c`` (:data:`CITY_LABELS`): a group in the overlay with the stamp's
+    word lettered in it (:func:`stamp_art`), which the runtime shows while a battle of its, lost there, is held by that
+    city (as a place's own box stamps it)."""
+    return "%s_City%d" % (page_of(slug), c)
+
+
+def place_lock_name(slot):
+    """PAD-733: place ``slot``'s own padlock, shown while a new monster's battle lost there holds the place (the
+    place's own box, its city stamp, is the monster's then)."""
+    return "%sLock%d" % (PREFIX, slot)
+
+
 def katakana(name):
     return KATAKANA.get(" ".join(str(name or "").upper().split()), "")
 
@@ -459,6 +477,23 @@ def grey_like(sc, colour, slot=0):
     return (out + 0.5).clip(0, 255).astype(np.uint8)
 
 
+def stamp_art(word, w, h):
+    """PAD-733: a city stamp lettered as the card's box stamps it (white, a dark edge, centred in its box): ``w`` x ``h``
+    premultiplied RGBA. A picture, not the box's text: a copy of that text drawn outside its box stopped the game
+    (emulator runs fb5, fb6)."""
+    img = Image.new("RGBA", (max(1, int(w)), max(1, int(h))), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    f = _font(NAME_FONTS, h * 0.92)
+    while f.size > 8 and (d.textlength(word, font=f) > w * 0.94):
+        f = _font(NAME_FONTS, f.size - 2)
+    edge = max(2, f.size // 12)
+    bb = d.textbbox((0, 0), word, font=f, stroke_width=edge)
+    x = (w - (bb[2] - bb[0])) / 2.0 - bb[0]
+    y = (h - (bb[3] - bb[1])) / 2.0 - bb[1]
+    d.text((x, y), word, font=f, fill=(255, 255, 255, 255), stroke_width=edge, stroke_fill=(16, 16, 16, 255))
+    return premultiply(img)
+
+
 def name_art(name, kana, w=2048, h=683):
     """A new monster's name lettered as the Heisei card letters its monsters (orange to red, a dark edge, the
     katakana below in cream): ``w`` x ``h`` premultiplied RGBA."""
@@ -567,6 +602,18 @@ def build(stock, monsters):
         scene.objects[obj.id] = obj
         return T.Node(alloc(), name, 1, [(1, 1)], [], [(1, track16(m))], [T.Component(1, cls_sprite, obj)])
 
+    def copy_text(name, template, m, words=None):
+        """PAD-733: a copy of a text of the card's (its font, size and box), its own words or ``words``, at ``m``"""
+        comp = template.components[0]
+        body = dict(comp.obj.body) if words is None else dict(comp.obj.body, text=words)
+        obj = T.Obj(alloc(), "Text", body)
+        scene.objects[obj.id] = obj
+        return T.Node(alloc(), name, template.flag, [(1, 1)], [], [(1, track16(m))], [T.Component(comp.start, comp.cls, obj)])
+
+    def blank_text(name, template, m):
+        """PAD-733: a copy of a text of the card's, blank (its font must hold a space: the "0/4"'s does)"""
+        return copy_text(name, template, m, b" ")
+
     at, k = layout(sc, [int(m["slot"]) for m in monsters])
     place = lambda key: mul(move(*at[key]), scale(k))               # tile pixels -> CharacterSelect space
     greys = [sc.grey(s) for s in range(7)]
@@ -575,6 +622,7 @@ def build(stock, monsters):
     # too low")
     lock_px, done_px, lock_m, done_m = _state_pictures(scene, sc)
     prog_t, prog_m = _prog_template(sc)                              # PAD-733: the places' "0/4", read before they move
+    cities = _city_templates(sc)                                     # PAD-733: place 4's box's city stamps, the same
     # the seven places: lit tile, state box and words moved with the tile
     for s in range(7):
         a = mul(place(s), inv(sc.tile_at[s]))                        # CharacterSelect space, old -> new
@@ -607,23 +655,52 @@ def build(stock, monsters):
         if prog_t is not None:
             # PAD-733: its count, a copy of place 0's words placed on this tile as place 0's sits on its own; blank
             # until the runtime writes the mode's count (pm_roster_more_progress)
-            body = dict(prog_t.components[0].obj.body, text=b" ")
-            obj = T.Obj(alloc(), "Text", body)
-            scene.objects[obj.id] = obj
-            progs.append(T.Node(alloc(), prog_name(m["slug"]), prog_t.flag, [(1, 1)], [],
-                                [(1, track16(mul(sc.cs, mul(place(key), prog_m))))],
-                                [T.Component(prog_t.components[0].start, prog_t.components[0].cls, obj)]))
+            progs.append(blank_text(prog_name(m["slug"]), prog_t, mul(sc.cs, mul(place(key), prog_m))))
+        # PAD-733: its city stamps (place 4's box's, as its padlock and claw), for a battle of its lost and held there:
+        # each a group the runtime shows and hides, the stamp's word lettered as a picture over the stamp's own box (a
+        # copy of the box's TEXT drawn outside the box stopped the game - emulator runs fb5, fb6)
+        for c, (node, cm) in enumerate(cities):
+            if node is not None:
+                body = node.components[0].obj.body
+                l, t, r, b = body["rect"]
+                word = bytes(body.get("text") or b"").decode("latin-1").strip() or CITY_LABELS[c].upper()
+                px = stamp_art(word, (r - l) * 4, (b - t) * 4)
+                progs.append(group_node(city_name(m["slug"], c),
+                                        [picture_node(city_name(m["slug"], c) + "_Art", px, (0.25, 0.0, 0.0, 0.25, l, t))],
+                                        mul(sc.cs, mul(place(key), cm))))
     for s in hosts:
         covers.append(shown_node(cover_name(s), greys[s], place(s)))
+        if lock_px is not None:          # PAD-733: the place's own padlock, while a lost new monster holds its battle
+            covers.append(shown_node(place_lock_name(s), lock_px, mul(place(s), lock_m)))
     sc.kids[at_sheet:at_sheet] = new_kids
     last_body = max(sc.kids.index(b) for b in sc.body)
     sc.kids[last_body + 1:last_body + 1] = portraits
     last_sel = max(sc.kids.index(n) for n in sc.selected)
     sc.kids[last_sel + 1:last_sel + 1] = covers + lits
     if progs:                                                        # beside the places' own, in the overlay
-        at_prog = sc.overlay_kids.index(prog_t)
+        at_prog = sc.overlay_kids.index(prog_t if prog_t is not None else sc.art[4])
         sc.overlay_kids[at_prog:at_prog] = progs
     return T.serialize(scene)
+
+
+def _city_templates(sc):
+    """PAD-733: place 4's state box's city stamps - the texts its labels :data:`CITY_LABELS` show - and where each sits
+    in place 4's TILE pixels: ``[(node, m)]`` in the cities' order (``(None, None)`` for one the box does not have)."""
+    box = sc.art[4]
+    sp = sprite_of(box)
+    out = []
+    to_tile = mul(inv(sc.tile_at[4]), mul(inv(sc.cs), rest(box)))
+    frames = dict(sp.body.get("labels") or [])
+    for label in CITY_LABELS:
+        f = frames.get(label)
+        kid = None
+        for k in sp.body["kids"]:
+            shown = [v for kf, v in k.keyframes if kf <= f] if f is not None else []
+            if shown and shown[-1] and k.components and k.components[0].obj.kind == "Text":
+                kid = k
+                break
+        out.append((kid, mul(to_tile, rest(kid)) if kid is not None else None))
+    return out
 
 
 def _prog_template(sc):
@@ -751,7 +828,7 @@ def preview(data, cursor=0, monsters=(), size=(1360, 768)):
                 own = isinstance(cursor, str) and name.startswith(PREFIX + cursor + "_")
                 if part in ("Lit", "Portrait") and not own:
                     continue
-                if part in ("Lock", "Done"):
+                if part in ("Lock", "Done") or re.fullmatch(r"Lock\d+", part):   # PAD-733: a place's own padlock too
                     continue
                 if name.startswith(PREFIX + "Cover") and not (isinstance(cursor, str) and name.startswith(cover_name(host))):
                     continue

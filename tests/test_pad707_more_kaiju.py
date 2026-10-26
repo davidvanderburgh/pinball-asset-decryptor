@@ -216,6 +216,7 @@ void *pm_node(const char *scene, const char *path)
   for (i = 0; i < n_nodes; i++) if (!strcmp(node_names[i], path)) return node_names[i];
   snprintf(node_names[n_nodes], 120, "%s", path); return node_names[n_nodes++]; }
 void pm_show(void *node, int on) { const char *p = strrchr((const char *)node, '.'); printf("%s %s\n", on ? "SHOW" : "HIDE", p ? p + 1 : (const char *)node); }
+static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
 static int no_prog;                                  /* a card built before the tiles' counts */
 void *pm_text(const char *scene, const char *path) { return no_prog && strstr(path, "_Prog") ? 0 : pm_node(scene, path); }
 void pm_set_text(void *t, const char *w) { const char *p = strrchr((const char *)t, '.'); printf("WORDS %s: %s\n", p ? p + 1 : (const char *)t, w); }
@@ -259,6 +260,8 @@ const char *pm_port_text(const char *n)
                                     "T2_2_Artbox", "T2_3_Artbox" };
     if (!strncmp(n, "roster_tile_", 12)) return tiles[atoi(n + 12)];
     if (!strcmp(n, "roster_box_path")) return "SelectOverlay_Textbox.";
+    static const char *cities[4] = { "TOKYO", "PARIS", "LONDON", "N.Y." };   /* PAD-733 */
+    if (!strncmp(n, "roster_city_word_", 17)) return cities[atoi(n + 17) & 3];
     if (!strncmp(n, "roster_box_", 11)) return boxes[atoi(n + 11)];
     return 0;
 }
@@ -496,6 +499,28 @@ def test_a_monsters_tile_shows_its_modes_count_like_the_games_own(tmp_path):
     assert "Prog" not in menu(tmp_path, *THREE, "noprog", "tick", "count", "KAMACURAS", 2, 5, "open", 0, "tick")
 
 
+def test_a_lost_monsters_tile_wears_its_city_and_count_and_its_place_a_padlock(tmp_path):
+    """PAD-733 (the helper's run: after KING CAESAR was lost in Tokyo, New York's screen stamped TOKYO and the game's
+    "0/5" on slot 1's own tile and padlocks on KING CAESAR's and MINILLA's): the held battle is the monster's - its tile
+    wears the city's stamp and its count, as the game's own held battles do; the place's own tile its padlock (its box
+    and its words off); the others booked against it keep theirs."""
+    steps = [*THREE, "join", 1, "MINILLA", "city", 0, "tick", "count", "KAMACURAS", 2, 5, "open", 1, "right"]
+    out = menu(tmp_path, *steps, "gamepick", "lost", "state", 1, 3, "city", 3, "MARK", "open", 0, "tick")
+    held = out.split("MARK")[1]
+    assert "the selection screen is up in city 3 for player 1 - a lost new monster's battle holds its place" in held
+    assert "SHOW PadSel_KAMACURAS_City0" in held                                     # lost in city 0: TOKYO
+    assert all("HIDE PadSel_KAMACURAS_City%d" % c in held for c in (1, 2, 3))
+    assert "WORDS PadSel_KAMACURAS_City" not in out                                  # a stamp's words never rewritten
+    assert "WORDS PadSel_KAMACURAS_Prog: 2/5" in held and "HIDE PadSel_KAMACURAS_Lock" in held
+    assert "SHOW PadSel_MINILLA_Lock" in held and "HIDE PadSel_MINILLA_City0" in held   # booked there too: locked
+    assert "SHOW PadSel_Lock1" in held and "HIDE T1_2_Artbox" in held and "WORDS T1_2Prog_Instance:  " in held
+    assert "SHOW PadSel_Lock0" not in held and "HIDE T1_1_Artbox" not in held                # KUMONGA's place: its own
+    # its battle won again (the place open) or never lost: no stamp, the place's own box back
+    out = menu(tmp_path, *steps, "gamepick", "lost", "state", 1, 0, "MARK", "open", 0, "tick")
+    after = out.split("MARK")[1]
+    assert "HIDE PadSel_KAMACURAS_City0" in after and "SHOW PadSel_Lock1" not in after
+
+
 def test_the_screen_opens_on_its_top_left_open_entry(tmp_path):
     """PAD-733 (David, v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most
     mode"): with new monsters on the screen the game's open runs, then its cursor goes on the first open entry in the
@@ -693,8 +718,19 @@ def _scene_bytes():
     for s, a in enumerate(BS.ARTBOX):
         lock = np.zeros((10, 8, 4), np.uint8)
         lock[...] = (250, 250, 250, 255)
-        ov_kids.append(group(a + "_Artbox", [bitmap("lock", 8, 10, lock, 0, 0), bitmap("claw", 8, 10, lock, 0, 0)],
-                             -280 + (s >= 4) * 70, -280 + (s % 4) * 60))
+        box_kids = [bitmap("lock", 8, 10, lock, 0, 0), bitmap("claw", 8, 10, lock, 0, 0)]
+        box_kids[0].keyframes, box_kids[1].keyframes = [(1, 1), (2, 0)], [(1, 0), (2, 1), (3, 0)]
+        for c, word in enumerate((b"TOKYO", b"PARIS", b"LONDON", b"N.Y.")):   # PAD-733: the box's city stamps
+            o = T.Obj(nid(), "Text", dict(sym=64, name="", rect=[-40.0, -10.0, 40.0, 10.0], rgba=[1.0, 1.0, 1.0, 1.0],
+                                          flags=(0, 0), align=1, spacing=[2.0, 0.0], text=word, font=205,
+                                          fonts=[("GameFont_Primary", 205)], used=[205], tail=(0, 0)))
+            sc.objects[o.id] = o
+            box_kids.append(T.Node(nid(), "unnamed_instance_%d" % (c + 2), 1, [(1, 0), (3 + c, 1), (4 + c, 0)], [],
+                                   [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 4 + c, 6, 0, 1])], [T.Component(1, 3, o)]))
+        box = group(a + "_Artbox", box_kids, -280 + (s >= 4) * 70, -280 + (s % 4) * 60)
+        BS.sprite_of(box).body.update(frames=6, labels=[("Completed", 2), ("Locked", 1), ("London", 5), ("NewYork", 6),
+                                                        ("Paris", 4), ("Tokyo", 3)])
+        ov_kids.append(box)
         if s < 4:                       # the left column's "0/4", a text the program writes (PAD-733: a new tile's count)
             o = T.Obj(nid(), "Text", dict(sym=64, name="", rect=[-2.0, -2.0, 63.0, 31.65], rgba=[1.0, 1.0, 1.0, 1.0],
                                           flags=(0, 0), align=1, spacing=[2.0, 0.0], text=b"0/4", font=6,
@@ -779,6 +815,42 @@ def test_each_new_tile_has_its_count_where_the_games_own_sit(stock):
         k = BS.rest(nodes["PadSel_m%d_Lit" % i])[0] / k0 if k0 else 1.0
         assert abs((p[0] - c[0]) - (g[0] - t[0]) * k) < 1.5 and abs((p[1] - c[1]) - (g[1] - t[1]) * k) < 1.5, i
     assert [n.name for n in sc.overlay_kids].index(BS.prog_name("m0")) < [n.name for n in sc.overlay_kids].index("T1_1Prog_Instance")
+
+
+def test_each_new_tile_has_the_city_stamps_and_each_place_a_padlock_of_its_own(stock):
+    """PAD-733: a new monster's tile carries place 4's box's four city stamps, lettered as pictures over each stamp's own
+    box (a copy of the box's text drawn outside it stopped the game), each in a group (in the game's city order,
+    the box's labels Tokyo, Paris, London, NewYork), placed as they sit on place 4's tile; each place a monster stands
+    in gets a padlock of its own (shown while a lost monster's battle holds it)."""
+    out = BS.build(stock, _mons(3))
+    real, BS.PREFIX = BS.PREFIX, "ZZZ_"
+    try:
+        sc = BS.Screen(T.parse(out))
+    finally:
+        BS.PREFIX = real
+    ov = {n.name: n for n in sc.overlay_kids}
+    nodes = {n.name: n for n in sc.kids}
+    box = sc.art[4]
+    kids = BS.sprite_of(box).body["kids"]
+    tile4 = BS.apply(BS.mul(sc.glass, BS.mul(BS.rest(sc.selected[4]), BS.rest(BS.sprite_of(sc.selected[4]).body["kids"][0]))), 0, 0)
+    k4 = BS.rest(sc.selected[4])[0]
+    for i in range(3):
+        lit = nodes["PadSel_m%d_Lit" % i]
+        corner = BS.apply(BS.mul(sc.glass, BS.mul(BS.rest(lit), BS.rest(BS.sprite_of(lit).body["kids"][0]))), 0, 0)
+        k = BS.rest(lit)[0] / k4 if k4 else 1.0
+        for c, word in enumerate((b"TOKYO", b"PARIS", b"LONDON", b"N.Y.")):
+            node = ov[BS.city_name("m%d" % i, c)]
+            assert BS.sprite_of(node) is not None                      # a group the runtime shows and hides
+            art = BS.sprite_of(node).body["kids"][0]
+            assert BS.bitmap_of(art) is not None                       # lettered as a picture, never the box's text
+            assert (BS.bitmap_of(art).body["w"], BS.bitmap_of(art).body["h"]) == (320, 80)   # its box (80 x 20), 4x
+            game = BS.apply(BS.mul(sc.os, BS.mul(BS.rest(box), BS.rest(kids[2 + c]))), 0, 0)
+            mine = BS.apply(BS.mul(sc.os, BS.rest(node)), 0, 0)
+            assert abs((mine[0] - corner[0]) - (game[0] - tile4[0]) * k) < 1.5, (i, c)
+            assert abs((mine[1] - corner[1]) - (game[1] - tile4[1]) * k) < 1.5, (i, c)
+    for s in (0, 1, 2):                                            # the places the monsters stand in
+        assert BS.sprite_of(nodes[BS.place_lock_name(s)]) is not None
+    assert BS.place_lock_name(3) not in nodes
 
 
 def test_the_layout_fits_the_new_tiles_and_moves_the_state_boxes(stock):

@@ -10195,6 +10195,7 @@ static struct more_member {
     unsigned slot;                      /* the place it stands in */
     void *lit, *lock, *done, *portrait; /* found in the selection scene */
     void *prog;                         /* PAD-733: its tile's count (`<page>_Prog`, a text in the overlay) */
+    void *city[4];                      /* PAD-733: its city stamps (`<page>_City<c>`, groups), for a battle of its held there */
     long hits[5], of[5];                /* PAD-733: per player, the count its mode reported (pm_roster_more_progress) */
     unsigned tries;
 } more_m[N_MORE];
@@ -10225,9 +10226,10 @@ static struct {
     int coming;                         /* PAD-733: 1 + the new monster the cursor came to, drawn once the place it
                                          * came from has gone out; 0 = none */
     unsigned long going_at;             /* when the cursor last moved (pm_ms) */
+    void *place_lock[7], *place_prog[7];    /* PAD-733: each host place's own padlock (`PadSel_Lock<n>`) and "0/4" */
 } more = { 0, 0, -1, -1, -1, 0, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 },
            { { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 },
-             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u, { 0 }, 0, 0, 0ul };
+             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u, { 0 }, 0, 0, 0ul, { 0 }, { 0 } };
 static void more_won_shift(int k, int by)   /* member k joined (by 1) or left (by -1): the wins follow */
 {
     int p, s;
@@ -10273,7 +10275,10 @@ static int more_before(const char *name, const char *page, const struct more_mem
 static void more_forget_nodes(void)
 {
     int k;
-    for (k = 0; k < more_n; k++) more_m[k].lit = more_m[k].lock = more_m[k].done = more_m[k].portrait = more_m[k].prog = 0;
+    for (k = 0; k < more_n; k++) {
+        more_m[k].lit = more_m[k].lock = more_m[k].done = more_m[k].portrait = more_m[k].prog = 0;
+        more_m[k].city[0] = more_m[k].city[1] = more_m[k].city[2] = more_m[k].city[3] = 0;
+    }
     more.shown = -1;
 }
 
@@ -10411,8 +10416,14 @@ static void more_find(void)
         {   /* PAD-733: its count, a text beside the places' own "0/4" in the overlay */
             char p[160];
             const char *at = pm_port_text("roster_box_path"), *scene_id = pm_port_text("roster_screen_scene");
+            int c;
             pm_snprintf(p, sizeof p, "%s%s_Prog", at ? at : "", m->page);
             m->prog = at && scene_id ? pm_text(scene_id, p) : 0;
+            for (c = 0; c < 4; c++) {     /* its city stamps beside it: groups, authored visible - hidden until held */
+                pm_snprintf(p, sizeof p, "%s%s_City%d", at ? at : "", m->page, c);
+                m->city[c] = at && scene_id ? pm_node(scene_id, p) : 0;
+                if (m->city[c]) pm_show(m->city[c], 0);
+            }
             more.states = 0;          /* written at the next draw */
         }
         pm_show(m->lit, 0);           /* authored visible: hidden until the cursor is on it */
@@ -10429,6 +10440,25 @@ static void more_find(void)
         if (!more.cover[s]) {
             pm_snprintf(t, sizeof t, "PadSel_Cover%u", s);
             if ((more.cover[s] = more_node(t, ""))) pm_show(more.cover[s], 0);
+        }
+        if (!more.place_lock[s]) {        /* PAD-733: its own padlock, hidden until a lost new monster holds it */
+            pm_snprintf(t, sizeof t, "PadSel_Lock%u", s);
+            if ((more.place_lock[s] = more_node(t, ""))) {
+                pm_show(more.place_lock[s], 0);
+                more.states = 0;
+            }
+        }
+        if (!more.place_prog[s]) {        /* PAD-733: its own "0/4" (the box `T1_2_Artbox`'s words `T1_2Prog_Instance`) */
+            const char *box = 0, *at = pm_port_text("roster_box_path"), *scene_id = pm_port_text("roster_screen_scene");
+            unsigned n;
+            pm_snprintf(t, sizeof t, "roster_box_%u", s);
+            box = pm_port_text(t);
+            for (n = 0; box && box[n]; n++) ;
+            if (box && at && scene_id && n > 7 && str_eq(box + n - 7, "_Artbox")) {
+                char p[120];
+                pm_snprintf(p, sizeof p, "%s%.*sProg_Instance", at, (int)(n - 7), box);
+                more.place_prog[s] = pm_text(scene_id, p);
+            }
         }
         pm_snprintf(t, sizeof t, "roster_tile_%u", s);
         if (!more.body[s] && (tile = pm_port_text(t))) {
@@ -10523,23 +10553,36 @@ static void more_draw(void)
          * place's tile (its state box hidden), where it stood for a battle the game never played */
         unsigned p = pm_player();
         signed char *won = p >= 1 && p <= 4 ? more.won[p] : 0;
+        /* PAD-733: a new monster's battle lost is HELD by the city it was lost in, the game's slot state 3 there; the
+         * game stamps that city on the place's own box (and its own "0/5"). The battle is the monster's: its tile
+         * shows the stamp and its count, as the game's own held battles do, and the place's tile a padlock */
+        int lost = p >= 1 && p <= 4 ? more.lost[p] : -1, held = -1, c;
+        if (lost >= 0 && lost < more_n && more_state(more_m[lost].slot) == 3) held = (int)more_m[lost].slot;
         more.states = 1;
+        say("roster: the selection screen is up in city %u for player %u%s", roster_city_of(p), p,
+            held >= 0 ? " - a lost new monster's battle holds its place" : "");
         for (k = 0; k < more_n; k++) {
             unsigned st = more_state(more_m[k].slot);
-            if (more_m[k].lock) pm_show(more_m[k].lock, st != 0 && st != 2);
+            int mine = k == lost && held >= 0;
+            if (more_m[k].lock) pm_show(more_m[k].lock, st != 0 && st != 2 && !mine);
             if (more_m[k].done) pm_show(more_m[k].done, st == 2 && won && won[more_m[k].slot] == k);
             if (more_m[k].prog) {   /* PAD-733 (David: "this count also needs to show on the monster select screen
                                      * like the other monsters"): its mode's count, none on a locked place */
                 char w[32];
                 long h = p >= 1 && p <= 4 ? more_m[k].hits[p] : 0, of = p >= 1 && p <= 4 ? more_m[k].of[p] : 0;
-                if (of > 0 && (st == 0 || st == 2)) pm_snprintf(w, sizeof w, "%ld/%ld", h, of);
+                if (of > 0 && (st == 0 || st == 2 || mine)) pm_snprintf(w, sizeof w, "%ld/%ld", h, of);
                 else pm_snprintf(w, sizeof w, " ");
                 pm_set_text(more_m[k].prog, w);
             }
+            for (c = 0; c < 4; c++)       /* the stamp of the city that holds it (the card's own words, never rewritten:
+                                           * a stamp's font holds its letters alone - run fb5, a space stopped the game) */
+                if (more_m[k].city[c]) pm_show(more_m[k].city[c], mine && (unsigned)c == more.lost_city[p]);
         }
         for (s = 0; s < 7; s++) {
             unsigned bit = 1u << s;
-            int hide = won && won[s] >= 0 && more_state(s) == 2;
+            int hide = (won && won[s] >= 0 && more_state(s) == 2) || (int)s == held;
+            if (more.place_lock[s]) pm_show(more.place_lock[s], (int)s == held);
+            if ((int)s == held && more.place_prog[s]) pm_set_text(more.place_prog[s], " ");   /* the game writes its own at its open */
             if (!more.box[s]) continue;
             if (hide) { pm_show(more.box[s], 0); more.box_hid |= bit; }
             else if (more.box_hid & bit) { pm_show(more.box[s], 1); more.box_hid &= ~bit; }   /* (run22: shown, an

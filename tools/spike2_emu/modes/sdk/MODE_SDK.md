@@ -4035,7 +4035,12 @@ static void on_init(void)
   and each opening of the screen writes "done/of" there (none before a report, none on a locked place, none on a
   card built before PAD-733). On the Modes tab: the *Selection screen count* block (`roster_progress`, its `done`
   and `of` values). A mode that keeps its hits for the game (a variable reset each game) and shows them so resumes a
-  lost battle where it was, as the game's own do.
+  lost battle where it was, as the game's own do. A battle LOST is held by the city it was lost in (the game's slot
+  state 3; its box stamps that city on the place's own tile - Tokyo, Paris, London, N.Y., labels 3-6 of the box, the
+  game's city order): the battle is the monster's, so its tile wears the stamp (`<page>_City<c>`, a group with a copy
+  of place 4's box's stamp, its words never rewritten: a stamp's font holds its letters alone - a space written into
+  one stopped the game, emulator run fb5) and its count instead of a padlock, and the place's own tile its
+  padlock (`PadSel_Lock<n>`, its box hidden and its words blank); the others booked against it keep theirs.
 - **Played again until it is won.** A new monster's battle lost is the one the game's city pick plays again at the
   next lit scoop (`site roster_resume`, PAD-706); won, its tile shows the claw and its place is done: the place's other tiles
   book the same battle, so they are not offered again that game.

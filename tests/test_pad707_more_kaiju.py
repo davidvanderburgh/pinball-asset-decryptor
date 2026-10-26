@@ -282,6 +282,8 @@ static unsigned fn(const char *n)
 static unsigned portrait[2] = { 4, 0 };
 static int portrait_on;
 static unsigned g_step(unsigned a, unsigned b, unsigned c, unsigned d) { printf("STEP state %u\n", portrait[0]); return 0; }
+static unsigned game_pick;                           /* PAD-733: where the game's own open puts its cursor */
+static unsigned g_open(unsigned a, unsigned b, unsigned c, unsigned d) { screen_obj[4] = game_pick; return 0; }
 static unsigned data(const char *n)
 {
     if (!strcmp(n, "roster_portrait_state")) return portrait_on ? (unsigned)(unsigned long)portrait : 0;
@@ -344,6 +346,9 @@ int main(int argc, char **argv)
             current = mode_of(w);
             printf("COUNT %d\n", pm_roster_more_progress(d, o)); current = &A; }
         else if (!strcmp(c, "player")) up = (unsigned)atoi(argv[++k]);
+        else if (!strcmp(c, "gameopen")) {               /* gameopen <slot>: the game's open, its cursor on <slot> */
+            game_pick = (unsigned)atoi(argv[++k]); more_open_orig = g_open;
+            more_open_wrap(regs[0], 0, 0, 0); printf("OPENED cursor %u\n", screen_obj[4]); }
         else if (!strcmp(c, "noprog")) no_prog = 1;
         else if (!strcmp(c, "pstate")) { portrait[0] = (unsigned)atoi(argv[++k]); portrait[1] = (unsigned)atoi(argv[++k]); }
         else if (!strcmp(c, "step")) more_portrait_step(regs[0], screen_obj[4], 0, 0);   /* the game's portrait step */
@@ -491,6 +496,20 @@ def test_a_monsters_tile_shows_its_modes_count_like_the_games_own(tmp_path):
     assert "Prog" not in menu(tmp_path, *THREE, "noprog", "tick", "count", "KAMACURAS", 2, 5, "open", 0, "tick")
 
 
+def test_the_screen_opens_on_its_top_left_open_entry(tmp_path):
+    """PAD-733 (David, v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most
+    mode"): with new monsters on the screen the game's open runs, then its cursor goes on the first open entry in the
+    screen's order - place 0, else the first after it a pick can take (a new monster too)."""
+    out = menu(tmp_path, *THREE, "tick", "gameopen", 4)
+    assert "OPENED cursor 0" in out and "starts on its top-left place, slot 0 (the game's own pick: slot 4)" in out
+    out = menu(tmp_path, *THREE, "state", 0, 1, "tick", "gameopen", 5)
+    assert "OPENED cursor 1" in out                               # place 0 locked, KUMONGA booked against it too
+    out = menu(tmp_path, "join", 0, "KUMONGA", "state", 0, 2, "tick", "gameopen", 5, "tick")
+    assert "OPENED cursor 1" in out                               # place 0 won: its monster's battle is done as well
+    out = menu(tmp_path, "tick", "gameopen", 4)
+    assert "OPENED cursor 4" in out and "top-left" not in out     # no new monsters: the game's own
+
+
 def test_its_nodes_show_and_the_places_portrait_hides(tmp_path):
     out = menu(tmp_path, *THREE, "tick", "open", 0, *(["right"] * 3), "tick", "left", "tick")
     found = out.split("open")[0] if "open" in out else out
@@ -612,7 +631,8 @@ def test_outside_a_game_the_pick_is_the_games(tmp_path):
 def test_the_runtime_wires_the_screen_in():
     src = RUNTIME.read_text(encoding="utf-8").replace("\r\n", "\n")
     assert 'hook_veto(fn("roster_screen_keys"), on_roster_keys)' in src
-    assert 'hook(fn("roster_screen_open"), on_roster_open)' in src and 'hook(fn("roster_screen_pick"), on_roster_pick)' in src
+    assert 'fn("roster_screen_open"), (void *)more_open_wrap))' in src           # PAD-733: wrapped, then the top-left
+    assert 'hook(fn("roster_screen_pick"), on_roster_pick)' in src
     assert "    more_tick();" in src and "    more_ball_end();" in src and "    more_over(p, won);" in src
     assert "more_holding" not in src and "more_buttons" not in src     # the old screen of its own is gone
     assert "    roster_resuming = 1;\n    roster_take(" in src

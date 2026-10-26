@@ -10651,6 +10651,40 @@ static void on_roster_open(unsigned *r)
     if (more_n) say("roster: the selection screen opens with %d new monster%s on it", more_n, more_n == 1 ? "" : "s");
 }
 
+/* PAD-733 (David, v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most
+ * mode. it's jarring and confusing to figure out the direction to go from there"): the game's open (Premium/LE 1.16
+ * 0x1911dc) puts its cursor on the next open place after the one last played, with no callout, and the screen's
+ * portrait steps from there. With new monsters on the screen the open is wrapped: the game's open runs as it was,
+ * then the cursor is put on the first open entry in the screen's order (more_walk) - the top-left tile, or the first
+ * after it a pick can take - before the screen's first step, so the game's own choice is never drawn. */
+static unsigned (*more_open_orig)(unsigned, unsigned, unsigned, unsigned);
+
+static void more_open_first(unsigned screen)
+{
+    unsigned at = (unsigned)pm_port_value("roster_cursor_at", 16), was, slot;
+    int order[7 + N_MORE], n, i;
+    if (!more_n || !screen) return;
+    n = more_walk(order);
+    for (i = 0; i < n && !more_open_place(order[i]); i++) ;
+    if (i >= n) return;                               /* nothing open: the game's own */
+    was = *(unsigned *)(unsigned long)(screen + at);
+    slot = order[i] >= 0 ? (unsigned)order[i] : more_m[-1 - order[i]].slot;
+    *(unsigned *)(unsigned long)(screen + at) = slot;
+    more.cur = order[i] >= 0 ? -1 : -1 - order[i];
+    if (order[i] >= 0) say("roster: the selection screen starts on its top-left place, slot %u (the game's own pick: slot %u)", slot, was);
+    else say("roster: the selection screen starts on its top-left place, %s in slot %u's (the game's own pick: slot %u)",
+             more_m[-1 - order[i]].name, slot, was);
+}
+
+static unsigned more_open_wrap(unsigned screen, unsigned a1, unsigned a2, unsigned a3)
+{
+    unsigned regs[4] = { screen, a1, a2, a3 }, r;
+    on_roster_open(regs);
+    r = more_open_orig(screen, a1, a2, a3);
+    more_open_first(screen);
+    return r;
+}
+
 /* the screen's pick (r0 = the screen): which tile it was. PAD-730 (David: "When selecting a bonus monster, the wrong
  * monster is briefly shown before the screen transition"): the screen stays on the glass for its close after the pick,
  * so a picked new monster stays drawn - its tile and portrait, the place's own portrait hidden - until it is gone (the
@@ -15621,7 +15655,9 @@ static void pad_mode_start(void)
             /* PAD-707: new monsters on the selection screen - its keys, its opening and its pick */
             if (fn("roster_screen_keys") && fn("roster_screen_open") && fn("roster_screen_pick") && fn("roster_cursor")
                 && pm_port_text("roster_screen_scene")
-                && hook_veto(fn("roster_screen_keys"), on_roster_keys) && hook(fn("roster_screen_open"), on_roster_open)
+                && hook_veto(fn("roster_screen_keys"), on_roster_keys)
+                && (more_open_orig = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(
+                        fn("roster_screen_open"), (void *)more_open_wrap))  /* PAD-733: then the top-left place */
                 && hook(fn("roster_screen_pick"), on_roster_pick))
                 say("roster: the selection screen takes new monsters (its keys at 0x%08x, its pick at 0x%08x)",
                     fn("roster_screen_keys"), fn("roster_screen_pick"));

@@ -120,6 +120,17 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   His Emulate log had `aside: a stock mode is running` for the whole of SUPER TRAIN LOOPS (95 s) with the panel up
   under its TIME LEFT. The panel is down now while any mode of the game's runs (`pm_aside`: a battle, a multiball,
   a timed mode), still up through the game's shot screens.
+- **v25: "a failed mode (like king caesar) needs to track its shots that were successful so when we start the next
+  time it resumes from where we were. this count also needs to show on the monster select screen like the other
+  monsters"**: the card build gives each new tile a copy of place 0's "0/4" text (`PadSel_<slug>_Prog`, in the
+  overlay, placed as the game's sits on its tile); `pm_roster_more_progress(done, of)` keeps the calling mode's count
+  per player until the game ends and writes it at each opening (none before a report, none on a locked place); the
+  blocks' *Selection screen count* (`roster_progress`). A variable reset each game keeps a battle's hits across its
+  attempts (desk: lost at 1/2, picked again, resumed at 1/2).
+- **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
+  game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
+  screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the
+  top-left tile, or the first after it a pick can take), before the screen's first step.
 - **His project's modes** (the v24 versions in its `PAD-733 notes\modes before v24 feedback`), saved through
   `block_modes.save`, checked with `problems()` and the card's checks, emulator-proven (out_fb_kumonga,
   out_fb_kamacuras, out_fb2_caesar, the stock Heisei 1.99D card, no aborts):

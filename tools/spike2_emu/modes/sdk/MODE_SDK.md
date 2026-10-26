@@ -4014,7 +4014,10 @@ static void on_init(void)
   frames between KUMONGA and DESTROYAH); one arriving from another place is drawn in the step that starts its
   place's in, after the place it came from has gone out (GIGAN's name going out showed round MINILLA's). A port
   without the two changes at once. Opening (`site
-  roster_screen_open`) starts every opening on the game's own place; the lock of each new tile follows its
+  roster_screen_open`, wrapped) runs the game's open - its cursor on the next open place after the one last played -
+  then puts the cursor on the screen's FIRST open entry in its order, the top-left tile (PAD-733, David: "it's in the
+  top-right most mode. it's jarring and confusing to figure out the direction to go from there"); a place no pick can
+  take is passed over, as the game's walk does; the lock of each new tile follows its
   place's state, and the claw goes on the tile that WON alone (PAD-707, David's v21: "the footprint icons over the
   beaten modes are off"): a place one of ours won shows that monster's `_Done`, none on the others booked against it,
   and the place's own state box (`text roster_box_<n>` under `text roster_box_path`) is hidden - the game's claw for a

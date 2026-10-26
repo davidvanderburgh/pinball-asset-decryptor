@@ -518,3 +518,8 @@ value place_audit_started_0        190
 value place_audit_started_1        226
 value place_audit_started_2        228
 value place_audit_started_3        228
+
+# PAD-747: the game's other modes it keeps books of (mode_framework.done_lines): a mode of ours may start once
+# some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag
+text  done_name_0                  Cherry Bomb Multiball
+value done_flag_0                  56

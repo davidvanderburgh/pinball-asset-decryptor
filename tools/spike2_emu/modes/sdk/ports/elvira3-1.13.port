@@ -772,3 +772,44 @@ site  game_scores            0x003f10d0 0xe92d4ff0 0xe24dd0bc
 # mode of ours in one's place counts its STARTED audit and PLAYED flag, and when completed its COMPLETED ones
 site  audit_add              0x002c3898 0xe92d43f0 0xe2505000
 value place_audit_started_0        283
+
+# PAD-747: the game's other modes it keeps books of (mode_framework.done_lines): a mode of ours may start once
+# some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag
+text  done_name_0                  ABOB
+value done_audit_0                 288
+text  done_name_1                  AOTGL
+value done_audit_1                 293
+text  done_name_2                  EEGAH
+value done_audit_2                 301
+text  done_name_3                  MTHOF
+value done_audit_3                 308
+text  done_name_4                  NOTLD
+value done_audit_4                 315
+text  done_name_5                  SCCTM
+value done_audit_5                 320
+text  done_name_6                  TBTWD
+value done_audit_6                 327
+text  done_name_7                  TFOS
+value done_audit_7                 333
+text  done_name_8                  TGGM
+value done_audit_8                 338
+text  done_name_9                  TKS
+value done_audit_9                 343
+text  done_name_10                 TM
+value done_audit_10                348
+text  done_name_11                 TSROD
+value done_audit_11                354
+text  done_name_12                 TWOW
+value done_audit_12                360
+text  done_name_13                 TWW
+value done_audit_13                365
+text  done_name_14                 They Came From Space
+value done_audit_14                384
+text  done_name_15                 Trailer Trash
+value done_audit_15                388
+text  done_name_16                 Directors Cut
+value done_audit_16                398
+text  done_name_17                 Gappa Angry
+value done_audit_17                410
+text  done_name_18                 Wild Market Value
+value done_audit_18                429

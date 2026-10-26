@@ -121,6 +121,10 @@ struct mode_cfg {
     int start_on_seq;
     uint64_t seq_bits[SEQ_MAX], seq_reset_bits;
     unsigned n_seq;
+    /* PAD-747: `starts_on completed <N> [id ...]` - N of the game's own modes (these ids; none = any) completed */
+    int start_on_done;
+    unsigned done_need, done_n;
+    unsigned char done_ids[BLOCK_LIST_MAX];
 };
 
 struct slot {
@@ -140,6 +144,9 @@ struct slot {
     unsigned also[ALSO_MAX][5];           /* PAD-227: each trigger_also line's count, per player */
     int after_said;                       /* PAD-227: its `after` mode is missing, said once */
     unsigned seq_at[5], seq_done[5];      /* PAD-314: how far along the sequence each player is; it is complete */
+    unsigned done_last[5];                /* PAD-747: the game's modes each player had completed, last looked */
+    unsigned char done_pend[5];           /* ... the count was met: it starts the moment nothing is in its way */
+    int done_said, done_wait_said;        /* ... it can never start here / what it waits on, said once */
 };
 static struct slot slots[MODES_MAX];
 static unsigned poll_n = 1;         /* slots re-read each poll: up to one past the last file */
@@ -1363,6 +1370,8 @@ static void starts_clear_game(const char *witness)
             starts_n[k].game[p] = starts_n[k].ball[p] = starts_n[k].ended[p] = 0;
             starts_n[k].ended_ms[p] = 0;
         }
+    for (k = 0; k < MODES_MAX; k++)                  /* PAD-747: a met completions count belongs to its game */
+        for (p = 0; p < 5; p++) slots[k].done_pend[p] = 0, slots[k].done_last[p] = 0;
     pm_log("new game (%s): how-often counts cleared%s", witness, any ? "" : " (there were none)");
 }
 
@@ -2006,8 +2015,20 @@ static int trigger_on_line(struct slot *M, const char *line)
             cfg.start_on_event = 1;
         } else if (key_is(how, "sequence")) {
             cfg.start_on_seq = 1;                /* PAD-314: the trigger_seq shots, in order */
+        } else if (key_is(how, "completed")) {   /* PAD-747: N of the game's modes completed, these ids or any */
+            unsigned v;
+            cfg.start_on_done = 1;
+            cfg.done_need = (unsigned)num(&a);
+            cfg.done_n = 0;
+            while (*a) {
+                while (*a == ' ' || *a == '\t' || *a == ',') a++;
+                if (*a < '0' || *a > '9') break;
+                for (v = 0; *a >= '0' && *a <= '9' && v < 100000; a++) v = v * 10 + (unsigned)(*a - '0');
+                if (v > 255) pm_log("starts_on completed: %u is not one of the game's mode ids (0-255) - skipped", v);
+                else if (cfg.done_n < BLOCK_LIST_MAX) cfg.done_ids[cfg.done_n++] = (unsigned char)v;
+            }
         } else if (!key_is(how, "shot")) {
-            pm_log("starts_on \"%.40s\" is not shot, sequence or event - the mode starts on its shots", how);
+            pm_log("starts_on \"%.40s\" is not shot, sequence, event or completed - the mode starts on its shots", how);
         }
         return 1;
     }
@@ -2056,6 +2077,26 @@ static void trigger_on_validate(struct slot *M)
         cfg.valid = runs(M) && cfg.n_seq > 0;
         pm_log("starts on %u shots in order%s", cfg.n_seq, cfg.valid ? "" : "  - NOT VALID, it needs seconds and a trigger_seq line");
         seq_loaded(M);
+        return;
+    }
+    if (cfg.start_on_done) {                 /* PAD-747: the game's modes completed stand in for the trigger count */
+        unsigned i;
+        char ids[160];
+        int at = 0;
+        cfg.start_on_event = 0;
+        if (cfg.trigger_bits) {
+            pm_log("starts_on completed: the trigger shots are ignored");
+            cfg.trigger_bits = 0;
+        }
+        ids[0] = 0;
+        for (i = 0; i < cfg.done_n && at < (int)sizeof ids - 8; i++)
+            at += pm_snprintf(ids + at, sizeof ids - (unsigned)at, "%s%u", i ? " " : "", cfg.done_ids[i]);
+        cfg.valid = runs(M) && cfg.done_need > 0 && pm_can(PM_CAN_GAME_DONE);
+        pm_log("starts once %u of the game's modes (%s%s) are completed in a game%s", cfg.done_need,
+               cfg.done_n ? "ids " : "any of them", ids,
+               cfg.valid ? "" : !pm_can(PM_CAN_GAME_DONE) ? "  - NOT VALID, this game's port names no completions the "
+               "runtime can see" : "  - NOT VALID, it needs seconds and a count of at least 1");
+        M->done_said = M->done_wait_said = 0;
         return;
     }
     if (!cfg.start_on_event) return;
@@ -3182,6 +3223,69 @@ static void events_tick(void)
     }
 }
 
+/* ---- PAD-747: `starts_on completed <N> [id ...]` -----------------------------------------------------------------
+ * The mode starts once the player up has completed N of the game's own modes this game (those ids; none listed = any
+ * the runtime sees completed: pm_game_modes_done). The count is met at the completion that makes it N; when something
+ * is in the way then - another mode of ours, or one of the game's own modes it gives way to or holds off (the mode
+ * just completed is often still finishing) - it waits, earned, and starts the moment nothing is, that game, for that
+ * player (a drain does not take it away). `after` and `trigger_also` gate it as they gate a shot start. How often it
+ * can start still holds: refused for that, it is dropped. */
+static const char *done_in_way(struct slot *M)
+{
+    int k;
+    if (run.active) return run.slot ? run.slot->c.name : "another mode";
+    if (cfg.wizard[0]) return 0;                     /* PAD-436: the game's mini-wizard waits its own way */
+    if (cfg.game_modes != GM_STACK && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) return pm_stock_mode_what((unsigned)k);
+    if (cfg.stack_no && (k = pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL)) > 0)
+        return pm_stock_mode_what((unsigned)k);
+    return 0;
+}
+
+static void done_tick(void)
+{
+    unsigned k, p = pm_player();
+    if (!pm_in_game() || p < 1 || p > 4) return;
+    for (k = 0; k < poll_n; k++) {
+        struct slot *M = &slots[k];
+        const char *way;
+        char why[64];
+        int n;
+        if (!cfg.valid || !cfg.start_on_done) continue;
+        if ((n = pm_game_modes_done(cfg.done_ids, cfg.done_n)) < 0) {
+            if (!M->done_said)
+                pm_log("%s: the runtime sees none of those game modes completed on this game - it does not start", cfg.name);
+            M->done_said = 1;
+            continue;
+        }
+        if ((unsigned)n != M->done_last[p]) {
+            if ((unsigned)n > M->done_last[p])
+                pm_log("%s: %d of the game's modes completed, %u wanted (player %u)", cfg.name, n, cfg.done_need, p);
+            if ((unsigned)n >= cfg.done_need && M->done_last[p] < cfg.done_need) {
+                M->done_pend[p] = 1;
+                M->done_wait_said = 0;
+            }
+            M->done_last[p] = (unsigned)n;
+        }
+        if (!M->done_pend[p] || running(M)) continue;
+        if (!after_met(M, p) || !also_met(M, p)) {
+            if (!M->done_wait_said) pm_log("%s: %u completed - waiting for %s (player %u)", cfg.name, cfg.done_need,
+                                           !after_met(M, p) ? cfg.after_name : "its other shots", p);
+            M->done_wait_said = 1;
+            continue;
+        }
+        if ((way = done_in_way(M)) != 0) {
+            if (!M->done_wait_said) pm_log("%s: %u completed - it starts once %s is over (player %u)", cfg.name,
+                                           cfg.done_need, way, p);
+            M->done_wait_said = 1;
+            continue;
+        }
+        M->done_pend[p] = 0;
+        M->done_wait_said = 0;
+        pm_snprintf(why, sizeof why, "%u of the game's modes completed", cfg.done_need);
+        mode_start(M, why);
+    }
+}
+
 /* `ends_on clock`: the running mode goes on through the end of a ball. 1 = keep it running. */
 static int keeps_through_ball_end(void)
 {
@@ -3260,6 +3364,7 @@ static void on_tick(void)
     roster_tick();                           /* item 146: a taken roster pick starts when it may */
     challenge_tick();                        /* PAD-615: a taken challenge pick starts */
     place_tick();                            /* PAD-710: a mode in the place of one of the game's starts */
+    done_tick();                             /* PAD-747: the game's modes completed */
     for (k = 0; k < MODES_MAX; k++) {
         M = &slots[k];
         if (ticks % POLL_TICKS == 0 && k < poll_n) {

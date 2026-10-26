@@ -80,7 +80,8 @@ _STR_FIELDS = (
     "building_floor", "building_shot", "roster_slot",                                 # PAD-589
     "challenge",                                                                      # PAD-615
     "challenge_launch", "challenge_launch_s",                                         # PAD-643
-    "place_mode")                                                                     # PAD-710
+    "place_mode",                                                                     # PAD-710
+    "done_count")                                                                     # PAD-747
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -101,6 +102,7 @@ _DEFAULTS = {
     "challenge": "",                                                                # PAD-615: by its name
     "challenge_launch": "clip", "challenge_launch_s": "4",                          # PAD-643: clip, time or player
     "place_mode": "",                                                               # PAD-710: by its name
+    "done_count": "4",                                                              # PAD-747
     # PAD-414: the shaker - as it starts, on a shot, as it ends; a shake of the mode's own (strength + seconds) or
     # one of the game's ("game:<name>")
     "shake_on_start": False, "shake_on_shot": False, "shake_on_end": False,
@@ -276,7 +278,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     _LIGHT_PATTERN_WORDS = (("solid", "Solid"), ("blink", "Blink"), ("pulse", "Pulse"),
                             ("chase", "Chase"))
     _PART_SECTIONS = ("lights", "screen", "clip", "multiball", "ball_save", "magnet", "scoop", "coils", "shield",
-                      "building", "shaker", "shows", "wizard", "roster", "challenge", "place")
+                      "building", "shaker", "shows", "wizard", "roster", "challenge", "place", "done")
     _TWO_COLUMN_SHOTS = 18
     CHALLENGE_NEW = "A new challenge of its own"       # PAD-615 round 2: the Starts on choice that adds one
     _PROBE_TRIES = 240
@@ -326,6 +328,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "coil_s": [MP.COIL_MIN_MS / 1000, MP.COIL_LONGEST_MS / 1000, "any"],    # PAD-381: coil_s_0..2 (PAD-621: a
                                                                                 # coil's own longest, checked per coil)
         "also_count": [1, MP.START_COUNT_MAX],                                  # PAD-227; PAD-518
+        "done_count": [1, MP.DONE_EXTRA + MP.DONE_EXTRA_MAX],                   # PAD-747: checked against the ticks
         "challenge_launch_s": [1, 60],                                          # PAD-643
     }
 
@@ -341,6 +344,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._block_on = set()             # PAD-363: the game's modes ticked under "hold these off" (ids)
         self._block_touched = False        # ... and whether a tick changed since the mode opened
         self._keep_on = set()              # PAD-398: the game's features ticked to keep counting (names)
+        self._done_on = set()              # PAD-747: the game's modes ticked to count toward starting it (ids)
         self._shot_awards = {n: "" for n in self._shot_names}
         self._slugs = []
         self._found = {}
@@ -583,6 +587,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._edit_block(key[6:], bool(value))
         elif key.startswith("keep:"):                    # PAD-398
             self._edit_keep(key[5:], bool(value))
+        elif key.startswith("done:"):                    # PAD-747
+            self._edit_done(key[5:], bool(value))
         elif key.startswith("award:"):
             self._edit_award(key[6:], "" if value is None else str(value))
         elif key == "try_on":
@@ -835,6 +841,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  end_shots_on=[n for n in self._shot_names if n in self._end_shots],   # PAD-314
                  block_on=sorted(self._block_on),                                       # PAD-363
                  keep_on=sorted(self._keep_on),                                         # PAD-398
+                 done_on=sorted(self._done_on),                                         # PAD-747
                  awards=dict(self._shot_awards))
 
     def _open(self, slug, spec):
@@ -1021,6 +1028,32 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._keep_on.add(name)
         else:
             self._keep_on.discard(name)
+        self._publish_form()
+        self._changed()
+        return True
+
+    def _done_defaults(self, p):
+        """PAD-747: the ticks a mode starting on the game's modes completed opens with: the game's modes the app names a
+        start of (its main modes), else every one whose completion it sees."""
+        have = [i for i, _n in getattr(p, "done_modes", ()) or ()] if p is not None else []
+        main = [i for i in have if i < MP.DONE_EXTRA]
+        return set(main or have)
+
+    def _edit_done(self, key, on):
+        """PAD-747: a tick under Starts on > the player completing: one of the title's modes, by id. The last one stays."""
+        p = self._title()
+        try:
+            i = int(key)
+        except ValueError:
+            return False
+        if p is None or i not in {j for j, _n in getattr(p, "done_modes", ()) or ()} or (i in self._done_on) == bool(on):
+            return False
+        if not on and self._done_on == {i}:
+            return False
+        if on:
+            self._done_on.add(i)
+        else:
+            self._done_on.discard(i)
         self._publish_form()
         self._changed()
         return True
@@ -1509,7 +1542,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.f["starts_kind"] = ("event" if start else "sequence" if MP.starts_on_sequence(spec)
                                  else "battle" if MP.starts_on_battle(spec)
                                  else "challenge" if MP.starts_on_challenge(spec)
-                                 else "game_mode" if MP.starts_on_place(spec) else "shot")
+                                 else "game_mode" if MP.starts_on_place(spec)
+                                 else "completed" if MP.starts_on_done(spec) else "shot")
         roster = list(getattr(self._shown or self._profile, "roster", ()) or ())     # PAD-589: by its name
         slot = MP._int_or_none(getattr(spec, "roster_slot", -1))
         self.f["roster_slot"] = ((self.MORE_PREFIX + roster[slot] + "'s place" if getattr(spec, "roster_more", False)
@@ -1521,6 +1555,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         places = {i: nm for i, nm, _c in getattr(self._shown or self._profile, "places", ()) or ()}   # PAD-710
         n = MP._int_or_none(getattr(spec, "place_mode", -1))
         self.f["place_mode"] = places.get(n, "") if n is not None else ""
+        p = self._shown or self._profile                                                # PAD-747
+        n = MP._int_or_none(getattr(spec, "done_count", 4))
+        self.f["done_count"] = str(n if n is not None and n > 0 else 4)
+        picked = getattr(spec, "done_modes", None)
+        self._done_on = (set(MP.done_ids(spec, p)) if MP.starts_on_done(spec) and isinstance(picked, list) and picked
+                         and p is not None else self._done_defaults(p))
         launch = MP._int_or_none(getattr(spec, "challenge_launch", 0)) or 0                # PAD-643
         self.f["challenge_launch"] = "player" if launch < 0 else "time" if launch > 0 else "clip"
         self.f["challenge_launch_s"] = str(max(1, min(60, launch // 1000))) if launch > 0 else "4"
@@ -1553,6 +1593,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             spec.starts_on = "challenge"
         elif self.f["starts_kind"] == "game_mode":       # PAD-710
             spec.starts_on = "game_mode"
+        elif self.f["starts_kind"] == "completed":       # PAD-747
+            spec.starts_on = "completed"
         else:
             spec.starts_on = "shot"
         roster = list(getattr(self._shown or self._profile, "roster", ()) or ())     # PAD-589
@@ -1569,6 +1611,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         by_name = {nm: i for i, nm, _c in getattr(self._shown or self._profile, "places", ()) or ()}   # PAD-710
         name = str(self.f["place_mode"]).strip()
         spec.place_mode = by_name.get(name, -1) if spec.starts_on == "game_mode" else -1
+        n = MP._int_or_none(self.f["done_count"])                                        # PAD-747
+        spec.done_count = n if n is not None else 4
+        spec.done_modes = sorted(self._done_on) if spec.starts_on == "completed" else []
         how = self.f["challenge_launch"]                                                    # PAD-643
         secs = MP._int_or_none(self.f["challenge_launch_s"])
         spec.challenge_launch = (-1 if how == "player" else max(1, min(60, secs or 4)) * 1000 if how == "time"
@@ -1690,6 +1735,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._end_shots = set()
         self._block_on = set()                                                    # PAD-363
         self._keep_on = set()                                                     # PAD-398
+        self._done_on = set()                                                     # PAD-747
         self._shot_awards = {n: "" for n in self._shot_names}
         self._clip2_file = ""
         self._publish_form()
@@ -1717,7 +1763,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                     "end_shots": [self.PARAM_NEVER], "ball_shots": [self.BALL_NONE],
                     "mb_on_shots": [self.MB_ON_START], "game_modes": [], "magnet_shot": "",
                     "held_coils": [], "shield_rule": "", "building_floors": [], "building_rule": "", "roster": [], "challenges": [],
-                    "places": [], "place_found": False,
+                    "places": [], "place_found": False, "done_modes": [], "done_found": False,
                     "game_shows": [], "shakes": [], "shake_max": [],
                     "game_wizards": [], "wizard_shot": "", "wizard_lights": [], "wizard_claims": False}
         names = [n for n, _m in p.shots]
@@ -1760,6 +1806,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 # and whether the game names any at all
                 "places": [{"id": i, "name": nm, "counts": bool(c)} for i, nm, c in getattr(p, "places", ()) or ()],
                 "place_found": bool(getattr(p, "places", ())) or "has found" in p.why_not("place"),
+                # PAD-747: the game's own modes whose completion the app sees (a mode may start once some are completed;
+                # main: one the app names a start of, else one the game only keeps books of), and whether there are any
+                "done_modes": [{"id": i, "name": nm, "main": i < MP.DONE_EXTRA} for i, nm in getattr(p, "done_modes", ()) or ()],
+                "done_found": bool(getattr(p, "done_modes", ())) or "has found" in p.why_not("done"),
                 # PAD-414: what a shake can be - one of the mode's own at a strength, or one of the game's
                 # (PAD-474: only the strengths the game itself shakes at; a one-power shaker has hard alone)
                 "shakes": ([{"value": w, "label": "a %s shake" % w} for k, w in MP.SHAKE_STRENGTHS.items()
@@ -2001,6 +2051,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._end_shots = {n for n in self._end_shots if n in names}             # PAD-314
         self._block_on = {i for i in self._block_on if i in {j for j, _n, _on in p.game_modes}}   # PAD-363
         self._keep_on = {r for r in self._keep_on if r in {n for _i, n in getattr(p, "game_rules", ())}}   # PAD-398
+        self._done_on = {i for i in self._done_on if i in {j for j, _n in getattr(p, "done_modes", ()) or ()}}   # PAD-747
         self._shot_awards = {n: self._shot_awards.get(n, "") for n in names}
         self._applied_key = p.key
         self._say(said or "modes here are for %s: %d shots, from %s" % (p.label, len(names), p.port))
@@ -2048,7 +2099,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                      "film_still", "film_sound", "own_extra", "lit_shots",
                                      "show_order", "multiball", "ball_save", "give_way", "block",
                                      "magnet", "scoop", "coils", "shield", "building", "shaker", "shows",
-                                     "wizard", "roster", "challenge", "place")}
+                                     "wizard", "roster", "challenge", "place", "done")}
             self.set(reasons={}, limits={}, dis=dis, hide={}, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return
@@ -2934,6 +2985,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 # PAD-710: the game's own modes a script may run in the place of ([] = none on this game)
                 "places": ([{"id": i, "name": nm, "counts": bool(c)} for i, nm, c in getattr(p, "places", ()) or ()]
                            if p is not None else []),
+                # PAD-747: the game's own modes a When the player has completed script may count ([] = none on this game)
+                "done": ([{"id": i, "name": nm, "main": i < MP.DONE_EXTRA} for i, nm in getattr(p, "done_modes", ()) or ()]
+                         if p is not None and p.can("done") else []),
                 # PAD-521: the game's own status bar a mode's name, colour and clock can go in (Bond LE)
                 "status_bar": bool(getattr(p, "status_bar", False)) if p is not None else False,
                 # PAD-547: an info line is a screen of its own, so it goes on every title that takes screens

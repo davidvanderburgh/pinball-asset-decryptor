@@ -1342,9 +1342,11 @@ def test_a_progress_note_also_stands_on_the_progress_panel(tmp_path):
     """PAD-680 (David's Premium: the game's timed modes held the middle 39% of a game and every note waited or
     went): a mode's latest note stands on the pack's progress panel (PadMode_Progress, built into the HUD scene)
     as one line, its number after it, until the mode starts; the panel is down during the game's battles and
-    while one of ours runs, and a game over clears it."""
+    while one of ours runs, and a game over clears it. PAD-733 (David: "these HUD indicators need to duck when in
+    super train loops"): down while any mode of the game's runs, a timed one as a battle."""
     out = play(tmp_path, _noting_prog(), "shot", "Big loop", "secs", 4, "shot", "Big loop", "secs", 1,
-               "battle", 1, "secs", 1, "battle", 0, "secs", 1, "shot", "Maser target", "secs", 1)
+               "battle", 1, "secs", 1, "battle", 0, "secs", 1, "timed", 1, "secs", 1, "timed", 0, "secs", 1,
+               "shot", "Maser target", "secs", 1)
     assert "progress panel found: 16 badge slot(s)" in out
     assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in out[:out.index(">> shot Big loop")]     # its badges hidden at the find
     first = out[out.index(">> shot Big loop"):out.rindex(">> shot Big loop")]
@@ -1353,7 +1355,10 @@ def test_a_progress_note_also_stands_on_the_progress_panel(tmp_path):
     assert "WORDS PadMode_Progress_S1_Num: 2" in out[out.rindex(">> shot Big loop"):]   # its badge, its newest note
     battle = out[out.index(">> battle 1"):out.index(">> battle 0")]
     assert "SHOW PadMode_Progress 0" in battle and "progress panel down for now" in battle
-    assert "SHOW PadMode_Progress 1" in out[out.index(">> battle 0"):out.index(">> shot Maser target")]
+    assert "SHOW PadMode_Progress 1" in out[out.index(">> battle 0"):out.index(">> timed 1")]
+    timed = out[out.index(">> timed 1"):out.index(">> timed 0")]
+    assert "SHOW PadMode_Progress 0" in timed and "progress panel down for now" in timed
+    assert "SHOW PadMode_Progress 1" in out[out.index(">> timed 0"):out.index(">> shot Maser target")]
     started = out[out.index(">> shot Maser target"):]
     assert "START (a block)" in started and "SHOW PadMode_Progress 0" in started
     assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in started and "WORDS PadMode_Progress_S1_Num:  " in started

@@ -1763,7 +1763,8 @@ def draft(ref_elf, port_text, target, game=None, version=None, port_name=None, t
 #: sites the runtime hooks (it moves their first two instructions into a trampoline)
 HOOKED_SITES = frozenset(HOOKED) | {"roster_start", "roster_resume", "roster_cursor", "clip_play", "display_effect_start", "display_priority_now",
                                      "layered_priority", "layered_waiter",
-                                     "sound_resolve"}      # PAD-494: wrapped (music modes)
+                                     "sound_resolve",      # PAD-494: wrapped (music modes)
+                                     "roster_portrait_step"}   # PAD-733: wrapped (the selection screen's portrait)
 
 
 def is_hooked_site(name):

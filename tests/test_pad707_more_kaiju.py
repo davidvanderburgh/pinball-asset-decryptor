@@ -275,8 +275,13 @@ static unsigned fn(const char *n)
     if (!strcmp(n, "roster_switch_held")) return (unsigned)(unsigned long)g_held;
     return 0;
 }
+/* PAD-733: the screen's portrait state word and the place shown (`pstate`), when the port has it (`portrait`) */
+static unsigned portrait[2] = { 4, 0 };
+static int portrait_on;
+static unsigned g_step(unsigned a, unsigned b, unsigned c, unsigned d) { printf("STEP state %u\n", portrait[0]); return 0; }
 static unsigned data(const char *n)
 {
+    if (!strcmp(n, "roster_portrait_state")) return portrait_on ? (unsigned)(unsigned long)portrait : 0;
     if (!strcmp(n, "message_count")) return (unsigned)(unsigned long)&line_count;
     if (!strcmp(n, "rule_battle")) { battle_rule[2] = (unsigned)(unsigned long)slot_recs; return (unsigned)(unsigned long)battle_rule; }
     return 0x1000;
@@ -319,6 +324,9 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "resume")) { int s = atoi(argv[++k]); roster_resuming = 1; current = roster_by[s];
             printf("RESUME %d\n", roster_fn[s] ? roster_fn[s]((unsigned)s) : -1); current = 0; roster_resuming = 0; }
         else if (!strcmp(c, "tick")) more_tick();
+        else if (!strcmp(c, "portrait")) { portrait_on = 1; more_portrait_orig = g_step; }
+        else if (!strcmp(c, "pstate")) { portrait[0] = (unsigned)atoi(argv[++k]); portrait[1] = (unsigned)atoi(argv[++k]); }
+        else if (!strcmp(c, "step")) more_portrait_step(regs[0], screen_obj[4], 0, 0);   /* the game's portrait step */
         else if (!strcmp(c, "ms")) now_ms = strtoul(argv[++k], 0, 10);
         else if (!strcmp(c, "MARK")) puts("MARK");
         else if (!strcmp(c, "lost")) more_over(up, 0);
@@ -405,6 +413,45 @@ def test_the_games_guards_and_chords_stay_the_games(tmp_path):
     assert "KEY action vetoed 0" in out
     out = menu(tmp_path, "open", 0, "right")
     assert "KEY right vetoed 0" in out                             # no new monsters: the game's own walk
+
+
+def test_a_monster_left_for_another_place_stays_through_the_games_portrait_out(tmp_path):
+    """PAD-733 (David, v24: "briefly showing the wrong character when transitioning with the right flipper"): the game's
+    portrait goes out (state 5) before the next place's comes in (3), and the out plays on the place a new monster
+    stands on - BIOLLANTE's under KUMONGA. The monster stays, its place's portrait hidden, until the step that starts
+    the in; at most 1 s."""
+    out = menu(tmp_path, *THREE, "portrait", "pstate", 4, 0, "tick", "open", 0, "right", "tick", "MARK",
+               "right", "tick", "pstate", 5, 0, "tick", "MARK", "pstate", 3, 0, "step")
+    on, going, came = out.split("MARK")
+    assert "SHOW PadSel_KUMONGA_Portrait" in on.split("KEY right vetoed 1 cursor 0")[-1]   # no out: drawn at once
+    assert "KEY right vetoed 1 cursor 1" in going
+    assert "HIDE PadSel_KUMONGA_Portrait" not in going and "SHOW EbirahFullBody_instance" not in going
+    assert "HIDE PadSel_KUMONGA_Portrait" in came and "SHOW EbirahFullBody_instance" in came
+    assert "the game's portrait of slot 0 is out" in came
+    # the game's step never comes: let go after a second
+    out = menu(tmp_path, *THREE, "portrait", "pstate", 4, 0, "tick", "open", 0, "right", "tick", "right", "ms", 500,
+               "tick", "MARK", "ms", 1500, "tick")
+    held, late = out.split("MARK")
+    assert "HIDE PadSel_KUMONGA_Portrait" not in held.split("KEY right vetoed 1 cursor 1")[-1]
+    assert "HIDE PadSel_KUMONGA_Portrait" in late
+    # a port without the state word: at once, as before
+    out = menu(tmp_path, *THREE, "tick", "open", 0, "right", "tick", "right", "tick")
+    assert "HIDE PadSel_KUMONGA_Portrait" in out.split("KEY right vetoed 1 cursor 1")[-1]
+
+
+def test_a_monster_arriving_from_another_place_waits_for_its_portrait_out(tmp_path):
+    """PAD-733 (his recording, GIGAN -> MINILLA on the left flipper: GIGAN's name going out showed round MINILLA's): a
+    monster arriving from another place is drawn in the step that starts its own place's in."""
+    out = menu(tmp_path, *THREE, "portrait", "pstate", 4, 1, "tick", "open", 1, "left", "tick", "pstate", 5, 1, "tick",
+               "MARK", "pstate", 3, 1, "step")
+    waiting, came = out.split("MARK")
+    assert "the cursor is on KUMONGA" in waiting and "KEY left vetoed 1 cursor 0" in waiting
+    assert "SHOW PadSel_KUMONGA_Portrait" not in waiting and "HIDE EbirahFullBody_instance" not in waiting
+    assert "SHOW PadSel_KUMONGA_Portrait" in came and "HIDE EbirahFullBody_instance" in came
+    assert "KUMONGA is drawn as its place's portrait comes in" in came
+    # from its own place (KAMACURAS stands in slot 1's): no out, drawn at once
+    out = menu(tmp_path, *THREE, "portrait", "pstate", 4, 1, "tick", "open", 1, "right", "tick")
+    assert "SHOW PadSel_KAMACURAS_Portrait" in out.split("KEY right")[-1]
 
 
 def test_its_nodes_show_and_the_places_portrait_hides(tmp_path):

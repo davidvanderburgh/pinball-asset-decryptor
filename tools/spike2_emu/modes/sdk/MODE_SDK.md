@@ -4006,7 +4006,14 @@ static void on_init(void)
   screen's clock runs and the busy one does not (`site roster_timer_on`, timers 83 and 23), and both flippers down
   is the game's pick (`site roster_switch_held`). On a new monster the game's cursor is parked on its place, the
   monster's `_Lit` and `_Portrait` and the place's `PadSel_Cover<n>` are shown and the place's own portrait group
-  (`<tile>FullBody_instance`, `text roster_tile_<n>`) hidden; the game draws everything else. Opening (`site
+  (`<tile>FullBody_instance`, `text roster_tile_<n>`) hidden; the game draws everything else. The game changes its
+  portrait in two steps, the shown place's out and then the new place's in (`site roster_portrait_step`, LE 1.16
+  `0x190acc`, its state word `data roster_portrait_state`: 4 shown, 5 going out, 3 coming in, then the place
+  shown), so a new monster left for ANOTHER place stays drawn, its place's portrait hidden, until that out is over,
+  and goes in the step that starts the in (PAD-733: the out played on the place's own portrait - BIOLLANTE for 6
+  frames between KUMONGA and DESTROYAH); one arriving from another place is drawn in the step that starts its
+  place's in, after the place it came from has gone out (GIGAN's name going out showed round MINILLA's). A port
+  without the two changes at once. Opening (`site
   roster_screen_open`) starts every opening on the game's own place; the lock of each new tile follows its
   place's state, and the claw goes on the tile that WON alone (PAD-707, David's v21: "the footprint icons over the
   beaten modes are off"): a place one of ours won shows that monster's `_Done`, none on the others booked against it,
@@ -4036,6 +4043,8 @@ site roster_screen_bump   0x00190ecc 0xe92d4038 0xe1a05000
 site roster_slot_state    0x001244bc 0xe3510006 0xda000001
 site roster_timer_on      0x0020bb1c 0xe92d4008 0xe30c3154
 site roster_switch_held   0x0029643c 0xe59f1000 0xeaffffe2
+site roster_portrait_step 0x00190acc 0xe92d4030 0xe30b4480      (Pro 1.16 0x0018ce2c; not on Pro 1.15's port)
+data roster_portrait_state 0x007bb480                            (Pro 1.16 0x007aedc0)
 value roster_screen_left 137 / roster_screen_right 139 / roster_screen_timer 83 / roster_screen_busy 23 / roster_screen_bump_by 3
 text roster_screen_scene  cac32730af42b9d26d26c4bb6e667b07da53113e
 text roster_screen_path   SelectOverlay_Textbox.CharacterSelect_Instance.
@@ -5399,7 +5408,9 @@ kerning, carried in from the Ebirah battle scene) and hidden until the mode show
 - the progress panel (PAD-680, PAD-690): a column at the right edge, under the rage meter and over the player
   score panels: up to 7 slots, the badges scaled to fill it; the modes' latest progress notes stand in it (each
   mode's badge and the shots it still needs, newest on top, the oldest dropping off) until a mode starts or the
-  game ends. A mode with the timer off still has a badge there (its label and icon);
+  game ends. It steps down while one of ours runs and while any mode of the game's runs (`pm_aside`: PAD-733, a
+  timed mode's TIME LEFT sits there - SUPER TRAIN LOOPS - as a battle's RIGHT spins do). A mode with the timer off
+  still has a badge there (its label and icon);
 - `gauge`: pips on the right edge (`spike`, `segment` - filled from the bottom - or `diamond`), each a lit
   and a dark picture; or (`"kind": "bar"`, PAD-416) ONE meter in the stock POWERUP meter's manner at the
   glass's top-right corner - a metal frame with the mode's `icon` in a diamond, a glass tube in five cells and

@@ -98,3 +98,25 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
 - h_clock: `MINILLA END (time ran out)` -> `battle lost` -> TO REMATCH MINILLA -> it plays again.
 - x_caesar (after3): the five shots in order, won, then the game's own GODZILLA CONTROLS TOKYO.
 - hudb / huda: the old start shots' HUD on main / nothing after.
+
+## David's v24 feedback (2026-10-26, Emulate on the v24 set)
+
+- **"the character select is going wonky for a frame or two briefly showing the wrong character when transitioning
+  with the right flipper"**. His recording, frame by frame: right off KUMONGA showed BIOLLANTE for 6 frames (30 fps)
+  before DESTROYAH; right off MINILLA showed DESTROYAH before GIGAN. The game changes its portrait in two steps
+  (Premium/LE 1.16 0x190acc, every frame with the cursor; its state word 0x7bb480: 4 shown, 5 going out, 3 coming
+  in, the next word the place shown): the shown place's OUT, then the new place's IN, from the slot table's labels.
+  A new monster stands on its place's portrait, so the game's out played on the PLACE's portrait (BIOLLANTE's under
+  KUMONGA) while the runtime had already taken the new monster down. Now the monster left for another place stays
+  drawn, its place's portrait hidden, until the game's out is over (`data roster_portrait_state`), and goes in the
+  very step that starts the next place's in (`site roster_portrait_step`, wrapped; from the tick alone it went a tick
+  late, its name over the incoming one for a frame). The other way round had its own (his recording too, GIGAN ->
+  MINILLA on the left flipper: GIGAN's name going out showed round MINILLA's for 4 frames): a monster arriving from
+  another place is drawn when that place's out is over, in the step that starts its own place's in - the game's
+  own rhythm, the old one out, then the new one. LE 1.16 and Pro 1.16 read off their programs (Pro 0x18ce2c,
+  0x7aedc0); Pro 1.15's program is not on this PC, so that port changes the portrait at once, as before.
+- **"these HUD indicators need to duck when in super train loops (or whenever another mode has indication that is
+  here)"**: the progress panel (PAD-680, the badges at the right edge) stepped down only for the game's battles.
+  His Emulate log had `aside: a stock mode is running` for the whole of SUPER TRAIN LOOPS (95 s) with the panel up
+  under its TIME LEFT. The panel is down now while any mode of the game's runs (`pm_aside`: a battle, a multiball,
+  a timed mode), still up through the game's shot screens.

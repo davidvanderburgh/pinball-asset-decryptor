@@ -10218,9 +10218,14 @@ static struct {
     unsigned box_hid;                   /* bit n: place n's box hidden by us (the game keeps an open place's hidden
                                          * itself: only our own hide is ever undone) */
     unsigned lost_city[5];              /* PAD-733: per player, the city lost[] was lost in (the city that holds it) */
+    int going;                          /* PAD-733: 1 + the new monster the cursor left for another place, drawn on
+                                         * while the game's portrait goes out (more_held); 0 = none */
+    int coming;                         /* PAD-733: 1 + the new monster the cursor came to, drawn once the place it
+                                         * came from has gone out; 0 = none */
+    unsigned long going_at;             /* when the cursor last moved (pm_ms) */
 } more = { 0, 0, -1, -1, -1, 0, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 },
            { { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 },
-             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u, { 0 } };
+             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u, { 0 }, 0, 0, 0ul };
 static void more_won_shift(int k, int by)   /* member k joined (by 1) or left (by -1): the wins follow */
 {
     int p, s;
@@ -10424,10 +10429,53 @@ static unsigned more_state(unsigned slot)
     return ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("roster_slot_state"))(data("rule_battle"), slot);
 }
 
+/* PAD-733 (David, v24: "the character select is going wonky for a frame or two briefly showing the wrong character
+ * when transitioning with the right flipper"): the game changes its portrait in two steps - the shown place's out,
+ * then the new place's in (`data roster_portrait_state`: its state word and the place shown). A new monster stands
+ * on its place's portrait, so leaving it for another place, the game's out played on that place's own portrait -
+ * BIOLLANTE's for 6 frames on the way from KUMONGA to DESTROYAH. The monster left stays drawn, its place's portrait
+ * hidden, until that out is over, as a portrait of the game's own stays up through its out (1 s at most). A port
+ * without the word changes at once, as before. The step is wrapped (`site roster_portrait_step`, more_portrait_step)
+ * so the monster goes in the very step that starts the next place's in - from the tick alone it went a tick late,
+ * its name over the incoming one for a frame (run fl_after k_10). The same the other way (his recording, GIGAN ->
+ * MINILLA, and run fl_after2 g_07-g_10: GIGAN's name going out showed round MINILLA's for 4 frames): a monster
+ * arriving from another place is drawn when that place's out is over, in the step that starts its own place's in.
+ * The member to draw while the screen is open (-1 = none of ours). */
+static int more_held(void)
+{
+    unsigned at = data("roster_portrait_state"), st, shown, cur;
+    int k = more.cur, was = more.going - 1, out;
+    if (!more.going && !more.coming) return k;
+    if (!at || !more.screen || pm_ms() - more.going_at > 1000) {
+        more.going = more.coming = 0;
+        return k;
+    }
+    st = ((volatile unsigned *)(unsigned long)at)[0];
+    shown = ((volatile unsigned *)(unsigned long)at)[1];
+    cur = *(volatile unsigned *)(unsigned long)(more.screen + (unsigned)pm_port_value("roster_cursor_at", 16));
+    out = st == 5 || (st == 4 && cur != shown);          /* the portrait of `shown` going out (or about to) */
+    if (k >= 0 && k < more_n) {                          /* on a new monster: drawn once the place it came from is out */
+        if (more.coming == k + 1 && out && shown != more_m[k].slot)   /* the one it left stays while its place goes */
+            return was >= 0 && was < more_n && shown == more_m[was].slot ? was : -1;
+        if (more.coming == k + 1 && st == 3)
+            say("roster: %s is drawn as its place's portrait comes in, %lu ms after the cursor came", more_m[k].name,
+                pm_ms() - more.going_at);
+        more.going = more.coming = 0;
+        return k;
+    }
+    if (was >= 0 && was < more_n && out && shown == more_m[was].slot) return was;   /* left for another place */
+    if (was >= 0 && was < more_n)
+        say("roster: the game's portrait of slot %u is out %lu ms after the cursor left %s", more_m[was].slot,
+            pm_ms() - more.going_at, more_m[was].name);
+    more.going = more.coming = 0;
+    return k;
+}
+
 static void more_draw(void)
 {
     int k, want = more.open ? more.cur : more.keep;
     unsigned s, hide = 0;
+    if (more.open) want = more_held();
     if (want != more.shown) {
         for (k = 0; k < more_n; k++) {
             int on = k == want;
@@ -10466,6 +10514,16 @@ static void more_draw(void)
     }
 }
 
+/* the game's portrait step, wrapped (the display processes' thread, the tick's): a new monster still drawn while the
+ * game's out played goes in the step that ended it */
+static unsigned (*more_portrait_orig)(unsigned, unsigned, unsigned, unsigned);
+static unsigned more_portrait_step(unsigned scene_obj, unsigned cur, unsigned a2, unsigned a3)
+{
+    unsigned r = more_portrait_orig(scene_obj, cur, a2, a3);
+    if (more_n && (more.going || more.coming)) more_draw();
+    return r;
+}
+
 /* the cursor's places in the screen's order (battle_select.walk): the game's places 0-6, each followed by the new
  * monsters booked against it, in the list's order (David: "pick A | B, C | D, E, F" - the tiles that book the same
  * battle together). An entry >= 0 is a game slot, -1 - k is new monster k. */
@@ -10489,6 +10547,9 @@ static void more_land(unsigned screen, int place)
         ((void (*)(unsigned, unsigned))(unsigned long)fn("roster_screen_bump"))(screen,
             (unsigned)pm_port_value("roster_screen_bump_by", 3));
     *(unsigned *)(unsigned long)(screen + at) = slot;
+    more.going = more.cur >= 0 && more.cur < more_n && more_m[more.cur].slot != slot ? more.cur + 1 : 0;
+    more.coming = place < 0 ? -place : 0;
+    more.going_at = pm_ms();
     more.cur = place >= 0 ? -1 : -1 - place;
     if (place < 0 && roster_callout_set(slot, more_m[-1 - place].callout, "the new monster's, while the cursor lands")) {
         ((void (*)(unsigned))(unsigned long)fn("roster_cursor"))(screen);    /* the game plays it, the last one stopped */
@@ -10550,6 +10611,7 @@ static void on_roster_open(unsigned *r)
     more.keep = -1;
     more.cur = -1;
     more.picked = -1;
+    more.going = more.coming = 0;
     more.open = 1;
     more.states = 0;
     if (more_n) say("roster: the selection screen opens with %d new monster%s on it", more_n, more_n == 1 ? "" : "s");
@@ -15528,6 +15590,11 @@ static void pad_mode_start(void)
                 && hook(fn("roster_screen_pick"), on_roster_pick))
                 say("roster: the selection screen takes new monsters (its keys at 0x%08x, its pick at 0x%08x)",
                     fn("roster_screen_keys"), fn("roster_screen_pick"));
+            if (fn("roster_screen_keys") && fn("roster_portrait_step") && data("roster_portrait_state")    /* PAD-733 */
+                && (more_portrait_orig = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(
+                        fn("roster_portrait_step"), (void *)more_portrait_step)))
+                say("roster: a new monster left for another place stays drawn through the game's portrait out (its step "
+                    "at 0x%08x is wrapped)", fn("roster_portrait_step"));
             if (fn("battle_stop"))
                 say("roster: a pick counts as the battle it replaced (its START's bookkeeping at the pick, its STOP at the mode's end)");
         }

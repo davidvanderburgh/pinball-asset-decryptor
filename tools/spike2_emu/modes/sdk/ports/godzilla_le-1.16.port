@@ -278,6 +278,12 @@ value roster_screen_right  139
 value roster_screen_timer  83
 value roster_screen_busy   23
 value roster_screen_bump_by 3
+# PAD-733: the screen's portrait changes in two steps (0x190acc, each frame with the cursor): the shown place's out,
+# then the new place's in, from the slot table's labels. Its state word: 4 shown, 5 going out, 3 coming in, 1 none;
+# the next word the place shown (it changes when the in is over). The step itself (r0 the screen's scene, r1 the
+# cursor) is wrapped: a new monster goes in the step that starts the next place's in.
+site roster_portrait_step 0x00190acc 0xe92d4030 0xe30b4480
+data roster_portrait_state 0x007bb480
 # the screen's scene, the path to its places' nodes, and each slot's node names (battle_select.py's)
 text roster_screen_scene  cac32730af42b9d26d26c4bb6e667b07da53113e
 text roster_screen_path   SelectOverlay_Textbox.CharacterSelect_Instance.

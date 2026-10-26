@@ -1103,8 +1103,10 @@ static KIT_UNUSED void kit_hud_gauge(struct kit_hud *h, int level, const char *l
  * hidden; the kit shows the badge of the mode whose note is newest in slot 1, the next in slot 2, and writes the
  * slot's number: the shots the mode still needs, the number its note's sub line starts with ("4  -  SHOOT THE
  * LEFT RAMP" -> 4; a code mode's "5 RAMPS TO BIOLLANTE" -> 5; a note with none, READY, shows 0), for the player up, until that mode starts or the game
- * ends. Up through the game's screens and timed modes; down while one of ours runs or has its TOTAL up, and
- * during the game's own battles (their RIGHT spins sit where it is). Shared by every mode of the pack: weak, as
+ * ends. Up through the game's shot screens; down while one of ours runs or has its TOTAL up, and while any mode of
+ * the game's runs (pm_aside: a battle's RIGHT spins, a timed mode's TIME LEFT sit where it is - PAD-733, David's
+ * v24 Emulate: "these HUD indicators need to duck when in super train loops (or whenever another mode has
+ * indication that is here)"; a battle alone stepped it down before). Shared by every mode of the pack: weak, as
  * kit_hud_up. A card built before PAD-680 has no panel: nothing. PAD-690: the panel has up to 7 slots, the badges
  * scaled to fill the column (mode_hud.progress_layout); the kit uses the slots the panel has, up to KIT_PROG_SLOTS
  * (a PAD-680 card has 4), the newest notes in them, older ones dropping off. */
@@ -1172,7 +1174,7 @@ static KIT_UNUSED void *kit_prog_badge(unsigned k, const char *slug)
 
 /* every tick, from every mode of the pack (the same answer from each; `mine` is the caller's folder, whose badges
  * it hides once when the panel is found - a built badge is visible until a mode hides it): find the panel, keep
- * its slots the player up's newest first, and show it when nothing of ours and no battle of the game's has the
+ * its slots the player up's newest first, and show it when nothing of ours and no mode of the game's has the
  * glass */
 static KIT_UNUSED void kit_prog_tick(const char *mine)
 {
@@ -1214,7 +1216,7 @@ static KIT_UNUSED void kit_prog_tick(const char *mine)
     }
     up = n > 0 && pm_in_game() && !pm_running() && !pm_other_running()
          && !(kit_hud_up && !kit_hud_up->noting && !kit_hud_up->metering)
-         && pm_stock_mode_running(PM_STOCK_BATTLE) <= 0;
+         && !pm_aside();
     if (up != kit_prog.up) {
         pm_show(kit_prog.group, up);
         if (kit_prog.up >= 0) pm_log("progress panel %s", up ? "up" : (n ? "down for now" : "empty"));

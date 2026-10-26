@@ -1228,6 +1228,16 @@ def test_card_cache_window_pad739(tmp_path, monkeypatch):
         assert w.state(NS)["cache"]["hint"] == (
             "Deleted 0 of 1. Not deleted: gz_v4 (could not delete gz_v4.boot "
             "(permission denied?))")
+        # a delete that went through points at Reclaim: the cache is on the
+        # distro's own disk (/home/u/cardcache), whose file only shrinks then
+        w.call(NS + ".cache_select", ["gz_v1"])
+        w.answers.append("yes")
+        assert w.call(NS + ".cache_delete") is True
+        _wait(w, lambda: "Deleted 1 cached card" in ((w.state(NS)["cache"] or {}).get("hint") or ""))
+        assert w.state(NS)["cache"]["hint"] == (
+            "Deleted 1 cached card, about 9.0 GB freed inside WSL. Windows "
+            "gets the space back when you use Reclaim space to Windows in "
+            "Settings ▸ Manage disk space.")
         # only the card in use: nothing to ask, nothing run
         _wait(w, lambda: (w.state(NS)["cache"] or {}).get("busy") is False)
         w.call(NS + ".cache_select", ["gz_v3"])

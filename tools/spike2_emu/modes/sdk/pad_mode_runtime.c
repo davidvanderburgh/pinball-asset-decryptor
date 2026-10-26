@@ -1353,7 +1353,7 @@ static void on_sound_worker(unsigned *r)
  * key, not on "the next lookup", holds when the worker thread looks it up later, and holds for a
  * looping descriptor that looks its key up again at every loop. */
 #define SWAPS_MAX 8
-static struct { unsigned request; int old; unsigned long until; unsigned char stock[8], ours[8]; volatile int looked; } swaps[SWAPS_MAX];
+static struct { unsigned request; int old; unsigned long until; unsigned char stock[8], ours[8]; volatile int looked; int music; } swaps[SWAPS_MAX];
 static volatile int swaps_live;
 
 int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms)
@@ -1373,6 +1373,7 @@ int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned
         swaps[free_i].ours[i] = ours[i];
     }
     swaps[free_i].until = pm_ms() + (ms ? ms + ms / 8 + 1000 : 10000);
+    swaps[free_i].music = priority < 0;      /* PAD-740: a music carrier's (it keeps its own priority) */
     swaps[free_i].request = request;          /* last: the lookup hook reads it */
     swaps_live = 1;
     return 1;
@@ -1415,6 +1416,60 @@ int pm_sound_priority_stock(unsigned request)
         return pm_sound_priority(request, pair >> 8, pair & 0xff);
     }
     return pm_sound_priority(request, -1, -1);   /* never changed: it has its own */
+}
+
+/* ---- PAD-740: a carrier playing a sound of ours is not the game's song --------------------------------------
+ * The sound engine's "which of these requests plays" (`sound_active` + 0x40 on all 53 newest builds: ldr ip, [pc,
+ * #x]; str lr, [sp, #-4]!; add lr, ip, #n; mov r2, r0; ldrh r3, [r2], #2; cmp r3, #0 - it takes a zero-ended u16
+ * list and returns the first request in it a channel plays, 0 for none). Bond LE 1.06's music sync (0x19c5cc, its
+ * only caller there) asks it every tick which of its synced songs plays, and runs that song's cue lists against the
+ * song's position: Bird One Multiball's music (request 94, the modes' music carrier) has 31 speech cues from 55 s on
+ * (requests 1019-1049, "Base calling Bird One", "8 minutes to interception"...), and they played over a mode's own
+ * music on 94 (emulator: 1019 at 55 s, 1020 at 64.7 s, 1021 at 66.7 s, then 1022-1038). While a music carrier
+ * carries a record of ours - a music swap armed on it (item 163; the swaps that keep the request's own priority, -1,
+ * are the music's in mode_file.c and pad_mode_assets.h) or pointed at a bed of ours (pm_sound_sid) - the engine is
+ * handed the list without it, so no caller takes it for the game's own song. A call's swap is left out: the game's
+ * speech carriers are asked about by other code too (Foo Fighters' eight callers), proven only for the music. */
+static unsigned short own_on_list[256];
+static int own_on(unsigned request)
+{
+    int i;
+    for (i = 0; i < SWAPS_MAX; i++) if (swaps_live && swaps[i].music && swaps[i].request == request) return 1;
+    for (i = 0; i < SID_SLOTS; i++) if (sid_slot[i].request == request) return 1;
+    return 0;
+}
+
+static void on_sound_first_active(unsigned *r)
+{
+    const unsigned short *l = (const unsigned short *)(unsigned long)r[0];
+    static unsigned said;
+    unsigned i, n = 0, cut = 0;
+    if (!l) return;
+    for (i = 0; l[i]; i++) {
+        if (n + 1 >= sizeof own_on_list / sizeof own_on_list[0]) return;   /* longer than ours: as it was */
+        if (own_on(l[i])) { cut = l[i]; continue; }
+        own_on_list[n++] = l[i];
+    }
+    if (!cut) return;
+    own_on_list[n] = 0;
+    r[0] = (unsigned)(unsigned long)own_on_list;
+    if (said++ < 5) say("sound: request %u plays ours - the game's ask at 0x%08x does not take it for its own sound",
+                        cut, r[5] - 4);
+}
+
+static void own_on_arm(void)
+{
+    unsigned a = fn("sound_active"), *w;
+    if (!a || !(can & PM_CAN_OWN_SOUND)) return;
+    w = (unsigned *)(unsigned long)(a + 0x40);
+    if ((w[0] & 0xFFFFF000u) != 0xE59FC000u || w[1] != 0xE52DE004u || (w[2] & 0xFFFFF000u) != 0xE28CE000u
+        || w[3] != 0xE1A02000u || w[4] != 0xE0D230B2u || w[5] != 0xE3530000u) {
+        say("sound: no 'which of these plays' after sound_active on this build - a carrier of ours may still be taken "
+            "for the game's own sound");
+        return;
+    }
+    if (hook(a + 0x40, on_sound_first_active))
+        say("sound: the engine's 'which of these plays' at 0x%08x does not count a carrier playing ours", a + 0x40);
 }
 
 static int key_is(const unsigned char *a, const unsigned char *b)
@@ -15356,6 +15411,7 @@ static void pad_mode_start(void)
     frame_arm();                              /* PAD-301: a full-screen clip drawn at the frame hand-over */
     if ((can & PM_CAN_OWN_SOUND) && !lookup_hooked && hook(fn("sound_lookup"), on_sound_lookup))
         lookup_hooked = 1;
+    own_on_arm();                             /* PAD-740: a carrier playing ours is not the game's song */
     /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
      * takes is logged ("[pad] sound <request> <n>"), so a check game is also the sound census that
      * says which stock requests a build never plays (the carriers a mode's own sounds ride on) */

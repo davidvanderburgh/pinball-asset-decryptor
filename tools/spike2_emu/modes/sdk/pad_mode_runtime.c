@@ -4803,6 +4803,8 @@ int pm_aside(void)
 #define BLOCK_WORDS (BLOCK_IDS / 32)
 #define BLOCK_HOOKS 128
 static const struct pm_mode *block_owner;
+static int block_live(void);              /* PAD-733: its owner runs, or drains to one ball (the drain section) */
+static int dto_for(const struct pm_mode *m);   /* PAD-733: m's drain to one ball is going on */
 static unsigned block_mask[BLOCK_WORDS];      /* the ids the running block refuses */
 static unsigned block_list[BLOCK_WORDS];      /* the asking mode's own list, set before it blocks (none = the defaults) */
 static const struct pm_mode *block_list_by;
@@ -4938,7 +4940,7 @@ static int on_block_start(unsigned *r, unsigned hook_n)
         }
         lit_hold_until = 0;
     }
-    if (!block_owner || running != block_owner || !pm_in_game()) return 0;
+    if (!block_live() || !pm_in_game()) return 0;
     if (id >= BLOCK_IDS || !bm_has(block_mask, id)) return 0;   /* not one this mode holds off */
     if (!bm_has(block_said, id)) {
         char key[24];
@@ -5035,6 +5037,11 @@ int pm_block_game_modes(int on)
     if (!(can & PM_CAN_BLOCK_GAME)) return 0;
     if (!on) {
         if (block_owner && (!current || block_owner == current)) {
+            if (dto_for(block_owner)) {     /* PAD-733: block_tick lifts it once its drain to one ball is over */
+                say("block: %s keeps the game's modes off until its extra balls have drained (the flippers are dead)",
+                    block_who);
+                return 1;
+            }
             say("block: %s lets the game's modes start again", block_who);
             block_owner = 0;
         }
@@ -5070,7 +5077,7 @@ int pm_block_game_modes(int on)
 static void on_battle_shots(unsigned *r)
 {
     unsigned lo = (unsigned)pm_port_value("block_battle_lo", 0), hi = (unsigned)pm_port_value("block_battle_hi", 0);
-    if (!block_owner || running != block_owner || !pm_in_game()) return;
+    if (!block_live() || !pm_in_game()) return;
     if (!(r[2] & lo) && !(r[3] & hi)) return;
     if (block_battle_said++ < 20)
         say("block: the battle rule did not see shot 0x%08x_%08x - %s is running (no battle lit, no select screen)",
@@ -5094,7 +5101,7 @@ static void on_rule_shots(unsigned *r, unsigned n)
     char key[28];
     unsigned lo, hi;
     const char *nm;
-    if (n >= BLOCK_RULES || !block_owner || running != block_owner || !pm_in_game()) return;
+    if (n >= BLOCK_RULES || !block_live() || !pm_in_game()) return;
     if (block_rules_keep & (1u << n)) return;    /* PAD-398: the mode keeps this one counting */
     pm_snprintf(key, sizeof key, "block_rule_lo_%u", n);
     lo = (unsigned)pm_port_value(key, 0xffffffffL);  /* PAD-398: no mask lines = every bit */
@@ -5127,7 +5134,7 @@ static int hook_n(unsigned addr, hook_n_fn logger, unsigned n)
 /* every tick, from clip_tick: a block ends with the mode that asked for it */
 static void block_tick(void)
 {
-    if (!block_owner || running == block_owner) return;
+    if (!block_owner || block_live()) return;
     say("block: %s ended - the game's modes may start again", block_who);
     block_owner = 0;
 }
@@ -6388,7 +6395,7 @@ static int shield_rule_counts(void)
     const char *want = pm_port_text("shield_rule"), *t;
     char key[28];
     int i, k;
-    if (!want || !block_owner || running != block_owner) return 1;
+    if (!want || !block_live()) return 1;
     for (i = 0; i < BLOCK_RULES; i++) {
         pm_snprintf(key, sizeof key, "block_rule_name_%d", i);
         t = pm_port_text(key);
@@ -7566,7 +7573,7 @@ static void wizard_due_start(unsigned p)
         return;
     }
     if (p != pm_player() || !pm_in_game() || wiz_hold.n) return;
-    if (block_owner && running == block_owner) return;      /* a mode of ours holds the game's modes off */
+    if (block_live()) return;                               /* a mode of ours holds the game's modes off */
     if (pm_ms() - wiz_due[p - 1].tried < 250) return;
     wiz_due[p - 1].tried = pm_ms();
     if (!((int (*)(void))(unsigned long)fn("wizard_start"))()) return;   /* one of its modes is still in the way */
@@ -7658,7 +7665,7 @@ int pm_game_wizard(int n, int how)
     }
     wiz_due[p - 1].ball = stock_ball_ends;
     wizard_pin(p);
-    if (how == PM_WIZARD_START && block_owner && running == block_owner) {
+    if (how == PM_WIZARD_START && block_live()) {
         say("game wizard %d (%s): %s holds the game's modes off, so it is lit, not started - started once that mode "
             "ends, this ball", n, name, block_who);
         how = PM_WIZARD_LIGHT;
@@ -7985,7 +7992,7 @@ static const char *wizm_way(void)
     const unsigned *tab;
     long n, slot, i;
     int c, k, r;
-    if (block_owner && running == block_owner) {
+    if (block_live()) {
         pm_snprintf(what, sizeof what, "%s (a mode of yours holding the game's modes off)", block_who);
         return what;
     }
@@ -9510,6 +9517,8 @@ static void event_census(void);
 static void switches_deliver(void);           /* the switches section below */
 static void roster_deferred_tick(void);   /* item 146 */
 static void roster_late_tick(void);       /* PAD-707 */
+static void dto_tick(void);               /* PAD-733 */
+static void dto_ball_end(void);           /* PAD-733 */
 static void more_tick(void);              /* PAD-707 */
 static void place_tick(void);             /* PAD-710 */
 static void stock_tick(void);             /* item 160 */
@@ -9543,6 +9552,7 @@ static void on_tick(unsigned *r)
     event_census();                           /* PAD-420: `value event_census 1` */
     switches_deliver();
     stock_balls_tick();                       /* PAD-687: how long two balls have been in play */
+    dto_tick();                               /* PAD-733: dead flippers until the balls drain to one */
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
@@ -9666,6 +9676,7 @@ static void on_ball_end(unsigned *r)
     building_let_go("the ball ended");        /* PAD-393 */
     shield_let_go("the ball ended");          /* PAD-392 */
     shake_let_go("the ball ended");           /* PAD-414 */
+    dto_ball_end();                           /* PAD-733 */
     ball_end_hold_run();                      /* PAD-622: a mode's total first, as the game's own mini-wizards */
     beh.holding = 0;
     beh.tilts = pm_event("tilt") >= 0 ? event_count(pm_event("tilt")) : 0;
@@ -13284,6 +13295,161 @@ static int is_switch_hit(const char *name)
     for (k = 0; k + 1 < sizeof want; k++)
         if (name[k] != want[k]) return 0;
     return 1;
+}
+
+/* ---- PAD-733: drain to one ball (pm_drain_to_one) ---------------------------------------------------------------
+ * David (MINILLA's 2-ball multiball ending with both balls up): "just kill the flippers and show that the mode is
+ * ended, then instead of ending the ball, give a ball back in the plunger lane". The framework's all-flippers off and
+ * on (`site flippers_off` / `site flippers_on`, Premium/LE 1.16 0x3f1898 / 0x3f196c: each flipper record's enable bit,
+ * which the node boards' rules follow) are what the game's own dead-flipper feature calls (0xc19a4 / 0xc19cc: there
+ * with the kickbacks, pops and slings off too - here the flippers alone, so the pops and slings keep the balls moving
+ * and none sits still). While they are dead the balls drain; once one is left the game's own ball save is armed for
+ * it (pm_ball_save: the framework's serve-back), so when it drains too the game serves it back to the shooter lane
+ * instead of ending the ball - the same ball goes on, no bonus. The flippers come back as that last ball comes home
+ * (the trough; a ball still rolling down the trough after the one before it is not the last: DTO_SETTLE_MS) or the
+ * served ball lands in the shooter lane (`value shooter_lane_switch`: two balls draining together come home inside
+ * that settle), at the latest after DTO_MAX_MS; at the ball's end, the game's end or a tilt the game's own next ball
+ * brings them back. The game's ball search is put off while
+ * they are dead, as its own feature does. */
+#define DTO_MAX_MS    30000ul
+#define DTO_SETTLE_MS  1500ul
+#define DTO_SAVE_S       20u
+static struct {
+    int state;                          /* 0 none, 1 dead flippers with two or more balls up, 2 the last one's save armed */
+    unsigned long t0, armed_at;
+    unsigned trough;                    /* the trough switches' hits counted when it last settled */
+    unsigned shooter;                   /* the shooter lane switch's hits when the save was armed */
+    int balls;
+    char by[40];
+    const struct pm_mode *mode;         /* PAD-733: the mode that asked (its block of the game's modes lasts through it) */
+} dto;
+
+/* PAD-733: the game's modes a mode holds off stay held off through the drain to one ball it asked for as it ended -
+ * the flippers are dead (emulator, run mi_dadwin2: the game's BUILDING ATTACK began 13 ms after MINILLA's end, over
+ * its TOTAL, while both balls drained); they may start once the flippers are back */
+static int dto_for(const struct pm_mode *m)
+{
+    return m && dto.state && dto.mode == m;
+}
+
+static int block_live(void)
+{
+    return block_owner && (running == block_owner || dto_for(block_owner));
+}
+
+static unsigned dto_trough_hits(void)
+{
+    uint64_t t = pm_shot("Trough");
+    unsigned n = 0;
+    int i;
+    for (i = 0; t && i < port.n_switch; i++)
+        if (port.sw[i].mask & t) n += switch_fired[port.sw[i].id];
+    return n;
+}
+
+static unsigned dto_shooter_hits(void)
+{
+    long sw = pm_port_value("shooter_lane_switch", -1);
+    return sw > 0 && sw < N_SWITCH_IDS ? switch_fired[sw] : 0;
+}
+
+static void dto_flippers(int on)
+{
+    unsigned f = fn(on ? "flippers_on" : "flippers_off");
+    if (f) ((void (*)(void))(unsigned long)f)();
+}
+
+/* the multiball's own ball save ends with the mode: with dead flippers every drain inside it was served back and
+ * launched again (emulator, run dto_insave: 26 s of that before one ball was left). The framework's multiball record
+ * (`data multiball_record`, Premium/LE 1.16 0x7d3930, Pro 1.16 0x7d74e4: the serve's own r5) keeps the save as a
+ * countdown at +0 (ticks; the serve only ever raises it) and a grace span after it at +4 (0xbb); both 0 = no save */
+static void dto_save_off(void)
+{
+    unsigned at = data("multiball_record");
+    volatile unsigned *r;
+    if (!at || !maps_has(at, 8, MAP_R)) return;      /* the game's .bss: no file of its own (not MAP_GAME) */
+    r = (volatile unsigned *)(unsigned long)at;
+    if (r[0] || r[1])
+        say("drain to one: the multiball's own ball save ends with it (%u ticks of it left, %u of its grace)", r[0], r[1]);
+    r[0] = 0;
+    r[1] = 0;
+}
+
+/* back = the ball goes on: the flippers on now; else (the ball or the game ended) the game's own next ball start
+ * brings them back from its status, as after any ball end - turning them on here would arm them through its bonus */
+static void dto_done(const char *why, int back)
+{
+    if (!dto.state) return;
+    dto.state = 0;
+    if (back) dto_flippers(1);
+    say("drain to one: over after %lu ms (%s)%s", pm_ms() - dto.t0, why, back ? " - the flippers are back" : "");
+}
+
+int pm_drain_to_one(void)
+{
+    int n;
+    if (!fn("flippers_off") || !fn("flippers_on") || !multiball_ok()) {
+        say("drain to one: %s asked - this game's port has no flippers off/on or no serve: the balls play on",
+            current && current->name ? current->name : "a mode");
+        return 0;
+    }
+    if (!pm_in_game() || ball_tilted()) return 0;
+    if (dto.state) return 1;
+    n = pm_balls_in_play();
+    if (n < 2) {
+        say("drain to one: %d ball(s) in play - nothing to drain", n);
+        return 0;
+    }
+    pm_snprintf(dto.by, sizeof dto.by, "%s", current && current->name ? current->name : "a mode");
+    dto.mode = current;
+    dto.state = 1;
+    dto.t0 = pm_ms();
+    dto.balls = n;
+    dto.trough = dto_trough_hits();
+    dto_flippers(0);
+    dto_save_off();
+    if (fn("ball_search_delay"))
+        ((void (*)(unsigned))(unsigned long)fn("ball_search_delay"))(45u);   /* as the game's own feature: 45 s */
+    say("drain to one: %s - the flippers are dead with %d balls in play; when the last drains, one comes back to the "
+        "shooter lane (the same ball)", dto.by, n);
+    return 1;
+}
+
+static void dto_tick(void)
+{
+    unsigned long now = pm_ms();
+    int n;
+    if (!dto.state) return;
+    if (!pm_in_game()) { dto_done("the game ended", 0); return; }
+    if (now - dto.t0 >= DTO_MAX_MS) { dto_done("its 30 s are up - the ball plays on as it is", 1); return; }
+    dto_flippers(0);                    /* the game's own flipper update (a status change) does not bring them back */
+    n = pm_balls_in_play();
+    if (dto.state == 1) {
+        if (n > 1) return;
+        dto.state = 2;
+        dto.armed_at = now;
+        dto.trough = dto_trough_hits();
+        dto.shooter = dto_shooter_hits();
+        say("drain to one: down to %d ball(s) after %lu ms - its save armed: when it drains it comes back to the "
+            "shooter lane", n, now - dto.t0);
+        if (!pm_ball_save(DTO_SAVE_S)) dto_done("the game would not arm the save - the last ball plays on", 1);
+        return;
+    }
+    if (dto_shooter_hits() != dto.shooter) {       /* the served ball (the two may come home together) */
+        dto_done("the served ball is in the shooter lane", 1);
+        return;
+    }
+    if (now - dto.armed_at < DTO_SETTLE_MS) {
+        dto.trough = dto_trough_hits();             /* the ball before it still rolling down the trough */
+        return;
+    }
+    if (dto_trough_hits() != dto.trough || n == 0)
+        dto_done("the last ball is home - the game serves it back to the shooter lane", 1);
+}
+
+static void dto_ball_end(void)
+{
+    dto_done("the ball ended", 0);
 }
 
 /* ---- shots from the switch drain (optional; any build) ----------------------------------------------

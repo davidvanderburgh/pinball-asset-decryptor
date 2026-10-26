@@ -322,6 +322,11 @@ int pm_ball_save(unsigned seconds)
     printf("%6lu BALL SAVE %u s\n", now_ms, seconds);
     return 1;
 }
+int pm_drain_to_one(void)   /* PAD-733: the runtime's dead flippers until one ball is left */
+{
+    printf("%6lu DRAIN TO ONE (%d in play) %s\n", now_ms, balls_in_play, current && current->name ? current->name : "?");
+    return balls_in_play >= 2;
+}
 /* PAD-379: the shield platform, AWAY until a mode turns it; it takes SHIELD_TURN_MS to get there.
  * HARNESS_SHIELD=none is a Pro (fixed shields: no platform), =off an operator who switched the motor off. */
 #define SHIELD_TURN_MS 1000

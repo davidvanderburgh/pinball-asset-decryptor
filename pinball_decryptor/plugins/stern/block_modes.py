@@ -58,7 +58,8 @@ seconds while it runs, N seconds left, the ball drains, one of the game's events
 or end the mode, score, set or change a variable, if / else, a callout, words on the mode's
 screen, light or free a shot's inserts, add time or set the clock (to any value: a variable,
 the seconds left, a sum), a multiball, a line in the log, and (PAD-374) play one of the mode's
-own clips (full screen, behind the HUD once, or behind the HUD over and over while it runs) or
+own clips (full screen, behind the HUD once, or behind the HUD over and over while it runs - in When the mode
+ends, behind its TOTAL in the loop's place, PAD-733) or
 one of its own sounds (with a callout of the game's when the card could not carry it), and
 (PAD-376) run a light show (a ready-made one, or its own steps: the examples' kit_show) and light
 a shot at a pace of its own (any value, in ms) or blinking faster as the clock runs down, and (PAD-395)
@@ -320,6 +321,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "hud_progress",                                            # PAD-690: the panel's number, live
               "roster_progress",                                         # PAD-733: a new monster's count on its tile
               "ball_save",                                               # PAD-690: a ball save of its own
+              "drain_to_one",                                            # PAD-733: the extra balls taken away
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
               "light_mode", "unlight_mode", "set_hits")
@@ -2262,6 +2264,9 @@ class _Gen:
                 except (TypeError, ValueError):
                     secs = 10
                 out.append(pad + "if (run.on && !pm_ball_save(%du)) pm_log(\"ball save refused\");" % secs)
+            elif op == "drain_to_one":             # PAD-733: the flippers off until the extra balls drain, one back
+                out.append(pad + "if (run.on && pm_balls_in_play() > 1 && !pm_drain_to_one()) "
+                           "pm_log(\"the extra balls stay: this game cannot take them away\");")
             elif op == "log":
                 out.append(pad + 'pm_log("%%s", %s);' % _c_str(str(b.get("text") or "")[:TEXT_MAX]))
             elif op == "hud_award" and not self.p["hud"]["on"] and self.p["screen"]:
@@ -3267,8 +3272,14 @@ def to_c(program, slug):
         L.append("    combo_clear();                    /* PAD-708: its combos in a row end with it */")
     if media:
         L.append("    loop_waiting = 0;")
+        L.append("    if (end_cover) {                  /* PAD-733: When the mode ends looped a clip: behind its TOTAL, in the loop's place */")
+        L.append("        const char *n = pa_clip_name(&own, end_cover);")
+        L.append("        if (n && pm_backdrop(n)) pm_log(\"own clip %s (%s) behind its TOTAL\", end_cover, n);")
+        L.append("        end_cover = 0;")
         if note_cue:
-            L.append("    if (!looping) cover_total();       /* PAD-658: nothing loops: its cover clip behind the TOTAL */")
+            L.append("    } else if (!looping) cover_total();   /* PAD-658: nothing loops: its cover clip behind the TOTAL */")
+        else:
+            L.append("    }")
         L.append("    looping = 0;                      /* PAD-658: the runtime keeps the loop behind the TOTAL it holds, then")
         L.append("                                       * the city again (at once for an end that holds nothing) */")
         L.append("    pa_end(&own);                     /* its music fades, the game's comes back */")
@@ -4824,6 +4835,7 @@ static void note_loop_tick(void)
 _MEDIA_C = """/* ---- its own clips and sounds (PAD-374): what Write carried, named in %(slug)s.assets ---- */
 static struct pa_assets own = { .folder = "%(slug)s" };
 static const char *clip_waiting, *loop_waiting;   /* MODE_SDK.md "Clips race the game's own" */
+static const char *end_cover;                     /* PAD-733: the clip When the mode ends loops behind its TOTAL */
 static unsigned long clip_due;
 /* PAD-733: 0 while a battle pick starts the mode - no shot of the game's races its clip there, and the game's own battle
  * is on the glass in its intro the moment the selection screen has closed (David: "the scene transition ... the same as
@@ -4856,8 +4868,12 @@ UNUSED static void clip_loop(const char *cue)
 {
     const char *n;
     if (!own_clip(cue)) return;
-    if (!run.on || ending) {
-        pm_log("own clip %%s: not looped behind the HUD - the mode is %%s", cue, ending ? "ending" : "not running");
+    if (ending) {                     /* PAD-733: When the mode ends: behind its TOTAL (MINILLA's snow after he falls) */
+        end_cover = cue;
+        return;
+    }
+    if (!run.on) {
+        pm_log("own clip %%s: not looped behind the HUD - the mode is not running", cue);
         return;
     }
     if (clip_waiting) {

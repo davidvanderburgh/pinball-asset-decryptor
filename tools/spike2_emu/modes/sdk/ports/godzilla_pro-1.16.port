@@ -601,6 +601,14 @@ site balls_in_play         0x0037101c 0xe92d4010 0xe30744e4
 # ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00371198 0xe92d41f0 0xe305e8ea
+# PAD-733: drain to one ball (pm_drain_to_one): the framework's all-flippers off and on (each flipper record's
+# enable bit at +6, the node boards' rules follow; found from Premium/LE 1.16 by code, movw/movt and branches
+# masked) - the pair the game's own dead-flipper feature calls (0xbffa8 / 0xbffd0, as LE's 0xc19a4 / 0xc19cc),
+# there with the kickbacks, pops and slings off too; the runtime kills the flippers alone
+site flippers_off         0x00479894 0xe92d4070 0xe3045f98
+site flippers_on          0x00479968 0xe92d4070 0xe3045f98
+value shooter_lane_switch 62  # the served ball lands here (plunge.py: SHOOTER LANE); the flippers are back then
+data multiball_record      0x007d74e4  # the framework's multiball record (the serve's r5): +0 its ball save's ticks, +4 the grace after it - drain to one ends the save
 
 # ---- the magnet: a grab of the mode's own (PAD-381; pad_mode_runtime.c "the magnet") - Pro 1.16.
 # coil_fire = ControlCoil's fire (device, pulse power, pulse ms, hold power, hold ms, x ms): one command

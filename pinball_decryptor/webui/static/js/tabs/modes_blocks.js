@@ -178,7 +178,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
     ["Mode", [{ op: "start_mode" }, { op: "light_mode", shot: litShot(ch), insert: "", color: "#ffd000", pattern: "blink" },
       { op: "unlight_mode", mode: "" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
       { op: "set_time", seconds: num(10) }, { op: "set_time", seconds: num(15), at_least: true },
-      { op: "multiball", balls: 2, save: 10 }, { op: "ball_save", seconds: 15 },
+      { op: "multiball", balls: 2, save: 10 }, { op: "ball_save", seconds: 15 }, { op: "drain_to_one" },
       { op: "game_wizard", name: ((ch.game_wizards || [])[0] || {}).name || "", how: "light" }]],
     // PAD-395: the mechanisms the form's Magnet, Scoop and Other mechanisms hold (greyed where the game cannot)
     ["Mechanisms", [{ op: "hold", what: ((ch.mechs || [])[0] || {}).name || "magnet", ms: num(2000) },
@@ -225,7 +225,7 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
-export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", game_wizard: "mode", score: "score",
+export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", drain_to_one: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
@@ -458,6 +458,7 @@ function StmtBody({ b, path, ed }) {
       : html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
       <span class="bk-w">balls, ball save</span><${Num} value=${b.save} width=${44} onChange=${(v) => set("save", v)} /><span class="bk-w">s</span>`;
+    case "drain_to_one": return html`<span class="bk-w">Take the extra balls away (the flippers off until they drain, one ball back to the plunger)</span>`;
     case "ball_save": return html`<span class="bk-w">Ball save for</span><${Num} value=${b.seconds} width=${44} onChange=${(v) => set("seconds", v)} /><span class="bk-w">s</span>`;
     case "log": return html`<span class="bk-w">Write</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="a line" /><span class="bk-w">in the log</span>`;
     case "hud_text": return html`<span class="bk-w">Show</span><${Text} value=${b.text} max=${40} width=${220} onChange=${(v) => set("text", v)} placeholder="words" />
@@ -734,7 +735,7 @@ export function hatLabel(h) {
 }
 
 export function stmtLabel(b) {
-  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball", ball_save: "Ball save",
+  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball", ball_save: "Ball save", drain_to_one: "Take the extra balls away",
     score: "Score points", set: "Set a variable", change: "Change a variable", set_hits: "Set the hits of a shot", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound", music: "Play the music",

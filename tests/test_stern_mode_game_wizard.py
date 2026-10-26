@@ -363,6 +363,7 @@ static unsigned player = 1, stock_ball_ends, games;
 typedef int (*veto_fn)(unsigned *regs);
 static unsigned long now = 10000;
 static const struct pm_mode ours = { 1 }, *block_owner, *running;
+static int block_live(void) { return block_owner && running == block_owner; }   /* PAD-733: the runtime's, without a drain */
 static char block_who[40] = "RUSH";
 static int game_start(void) { starts++; return 1; }
 static int run0(void) { return run[0]; }
@@ -650,7 +651,7 @@ def test_the_runtime_keeps_a_refused_start_lit_and_lights_a_start_while_a_mode_b
     assert veto.index("wizard_refused(block_hooked[hook_n]);") < veto.index("return 1;")
     wiz = src[src.index("int pm_game_wizard(int n, int how)"):]
     wiz = wiz[:wiz.index("\n}\n")]
-    assert wiz.index("block_owner && running == block_owner") < wiz.index('fn("wizard_start")')
+    assert wiz.index("block_live()") < wiz.index('fn("wizard_start")')   # PAD-733: its hold, or its drain to one ball
     assert "wizards_tick();" in src[src.index("static void on_tick(unsigned *r)"):]
     arm = src[src.index("static void wizards_arm(void)"):]
     arm = arm[:arm.index("\n}\n")]
@@ -690,6 +691,7 @@ static int in_game = 1, wiz_route = 2, wizards_n = 3, table_route = 1, stock_tab
 static unsigned player = 1, stock_ball_ends, games;
 static unsigned long now = 10000;
 static const struct pm_mode ours = { 1 }, *block_owner, *running;
+static int block_live(void) { return block_owner && running == block_owner; }   /* PAD-733: the runtime's, without a drain */
 static char block_who[40] = "RUSH";
 struct obj { unsigned vt; int on, k, en; };
 static int need_enable, enable_slot = -1;       /* Foo Fighters: START does nothing unless the mode was enabled */

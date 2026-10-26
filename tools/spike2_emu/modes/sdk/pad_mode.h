@@ -527,6 +527,15 @@ int pm_balls_in_play(void);
  * 0 = the game refused (no game in play, a tilt) or the port lacks the call. During the game's
  * own multiball it only lengthens that multiball's save (the framework keeps the longer). */
 int pm_ball_save(unsigned seconds);
+/* PAD-733: drain to one ball - a multiball that ends with two or more balls still up (MODE_SDK.md "Drain to one
+ * ball"). The game's flippers go dead (the flippers alone: pops, slings and the ball devices keep working) until the
+ * balls drain; the last one's drain is a ball save's - the game serves it back to the shooter lane and the SAME ball
+ * goes on (no bonus, no next ball). The flippers come back as that ball comes home, and in any case at the ball's
+ * end, a tilt or the game's end (the game's own next ball brings them back then), and after 30 s. Call it as your
+ * mode ends (in its end, before or after pm_end). 1 = started (or already draining); 0 = fewer than two balls are
+ * in play, no game in play, a tilt, or the port names no flippers off/on (`site flippers_off` / `flippers_on`) or no
+ * multiball serve. */
+int pm_drain_to_one(void);
 
 /* ---- the magnet (PAD-381; MODE_SDK.md "The magnet") ------------------------------------------
  * A grab with the playfield magnet, for `ms` milliseconds. You ask for a time and nothing else:

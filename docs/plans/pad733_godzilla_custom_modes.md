@@ -189,7 +189,24 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
     the building's floor moves after it fit search steps). Both of our holds now put it off every tick
     (`site ball_search_delay`, `data ball_search_time`; LE 1.16 and Pro 1.16): rig runs bs_long (a 16 s hold searched
     with the ball still in the scoop) / bs_long_fix (10.0 s left at the kick-out), bs_hits (search 3.4 s after the
-    kick-out) / bs_hits_fix (none).
+    kick-out) / bs_hits_fix (none). Card v30, flashed at his request.
+- **v30 (his project): MINILLA "far too difficult and uninteresting. it's BABY godzilla ... a two-ball multi-ball to
+  start with "dad and baby", then when we're down to one ball the mode doesn't end, but instead you have to finish it on
+  your own"; "make sure the clips of baby godzilla weather makes sense ... it doesn't make sense to go from summer to
+  winter and back during the mode"; then "there are ways to drain the balls. just kill the flippers and show that the
+  mode is ended, then instead of ending the ball, give a ball back in the plunger lane".** DAD AND BABY: a 2-ball
+  multiball at the pick (20 s save); while both balls are up the clock waits at 30 and the four big shots (Left ramp,
+  Big loop, Right ramp, Building) are lessons - PLAYTIME with dad, 2X. Down to one ball after the save: ON HIS OWN,
+  the clock runs (any lit shot tops it to 15), the lessons left are smoke rings. All four learned, with dad or alone:
+  any of the four is his FIRST RAY, the final blow. A drain or the clock: lost, the lessons kept. Won with both balls
+  up: the new block Take the extra balls away (pm_drain_to_one) - the flippers dead until both drain, one ball back
+  to the plunger lane, the same ball played on. Clips: the sunny island all through - dad and son side by side
+  (ama69 0:52:09), the beach walk, smoke rings, a tumble in the sand at dad's feet (son67 0:45:33) for playtime,
+  alone with his fists up (ama69 0:48:56), the first ray, and the win is the two
+  walking off together after Gabara (ama69 0:54:08), not the snow hug. Winter only for the loss: he falls in the
+  snow, and the snow stays behind his TOTAL (the two asleep under it) - a clip looped in When the mode ends now goes
+  behind the TOTAL in the loop's place (block_modes), where the sunny loop came back before. rig\edit10_minilla.py,
+  backup "modes before the dad and baby MINILLA"; desk runs desk_minilla_{win,lost,jack}.
 - **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
   game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
   screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the

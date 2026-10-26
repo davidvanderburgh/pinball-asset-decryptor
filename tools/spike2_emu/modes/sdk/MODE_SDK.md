@@ -1480,6 +1480,41 @@ own multiball; two players.
 
 `mode_project.BALL_SAVE_PROVEN` lists the proven builds, and the tab greys Ball save on any other build.
 
+## Drain to one ball (PAD-733)
+
+A multiball of the mode's own that ends with two or more balls still up (MINILLA's dad-and-baby multiball won with
+both balls in play) leaves the player a multiball the mode no longer runs. David: "just kill the flippers and show
+that the mode is ended, then instead of ending the ball, give a ball back in the plunger lane". `pm_drain_to_one()`
+does that, from the mode's end (before or after `pm_end`):
+
+1. The game's flippers go dead - the framework's all-flippers off (`site flippers_off`, Premium/LE 1.16 `0x3f1898`,
+   Pro 1.16 `0x479894`): each flipper record's enable bit (+6, bit 2; bit 4 marks it changed), which the node boards'
+   flipper rules follow. The game's own dead-flipper feature calls exactly this pair (LE `0xc19a4` / `0xc19cc`, Pro
+   `0xbffa8` / `0xbffd0`), there with its kickbacks, pops and slings off as well (`0x3f04cc`); the runtime kills the
+   flippers alone, so the pops and slings keep the balls moving. Every tick it asks again (the game's own flipper
+   update on a status change must not bring them back early), and the game's ball search is put off 45 s, as its own
+   feature does. The multiball's own ball save, if it still runs, ends there (`data multiball_record`, LE `0x7d3930`,
+   Pro `0x7d74e4`: the framework's multiball record, its save a countdown in ticks at +0 and a grace span at +4, both
+   zeroed): inside it every drain was served back and launched again into dead flippers (emulator, run dto_insave:
+   26 s of that before one ball was left).
+2. Once one ball is left (the framework's balls in play), that ball's ball save is armed (`pm_ball_save`, 20 s): when
+   it drains too the game serves it back to the shooter lane and the SAME ball goes on - no bonus, no next ball.
+3. The flippers come back (`site flippers_on`, LE `0x3f196c`, Pro `0x479968`) when the served ball lands in the
+   shooter lane (`value shooter_lane_switch`, 62 on both) or the last ball is seen home in the trough (a trough hit
+   more than 1.5 s after the one before it: that one still rolling down is not the last), and at the latest after
+   30 s. At the ball's end, a tilt or the game's end it lets go without turning them on: the game's own next ball
+   brings them back from its status, as after any ball end.
+4. The game's modes a mode held off (`pm_block_game_modes`) stay held off until the flippers are back: its end's
+   `pm_block_game_modes(0)` waits for the drain (`block: MINILLA keeps the game's modes off until its extra balls
+   have drained`). Run mi_dadwin2 without it: the game's BUILDING ATTACK began 13 ms after MINILLA's end, over its
+   TOTAL, with the flippers dead.
+
+`drain to one: MINILLA - the flippers are dead with 2 balls in play ...`, `down to 1 ball(s) after N ms - its save
+armed ...` and `over after N ms (the served ball is in the shooter lane) - the flippers are back` say what happened.
+It answers 0 (and the balls play on) with fewer than two balls in play, no game in play, a tilted ball, or a port
+without the two sites or the multiball serve. Pro 1.15 has no game program here: its two sites are the same code
+(found by it, movw/movt and branches masked) once one is read.
+
 ## The magnet (PAD-381)
 
 David (2026-10-04): modes need access to the coils, "However, we need guardrails on this since these are

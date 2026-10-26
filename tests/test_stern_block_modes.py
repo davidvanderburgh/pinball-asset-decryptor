@@ -789,6 +789,42 @@ def test_a_clip_asked_as_it_ends_keeps_its_total_after_it(tmp_path, monkeypatch)
     assert _at(out, "BALL END HOLD 6000 TEST MODE") == _at(out, ">> ball_end")
 
 
+def test_take_the_extra_balls_away_only_while_more_than_one_is_up(tmp_path):
+    """PAD-733 (David, MINILLA: "just kill the flippers and show that the mode is ended, then instead of ending the ball,
+    give a ball back in the plunger lane"): the block asks the runtime to drain to one ball (pm_drain_to_one) when its
+    multiball still has more than one ball up as the mode ends; with one ball nothing is asked."""
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+              {"hat": {"kind": "mode_start"}, "do": [{"op": "multiball", "balls": 2, "save": 0}]},
+              {"hat": {"kind": "shot", "shot": "Building", "when": "running"}, "do": [{"op": "end_mode", "won": True}]},
+              {"hat": {"kind": "mode_end"}, "do": [{"op": "drain_to_one"}]}], seconds=30)
+    assert BM.problems(p, SHOTS) == []
+    assert "if (run.on && pm_balls_in_play() > 1 && !pm_drain_to_one())" in BM.to_c(p, "blk")
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 2, "shot", "Building", "secs", 1)
+    assert _at_any(out, "DRAIN TO ONE") == _at_any(out, r"END \(a block\)")
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 2, "balls", 1, "shot", "Building", "secs", 1)
+    assert "DRAIN TO ONE" not in out and "END (a block)" in out
+
+
+def test_a_loop_asked_as_it_ends_goes_behind_its_total(tmp_path, monkeypatch):
+    """PAD-733 (David: MINILLA "it doesn't make sense to go from summer to winter and back during the mode"): his
+    winter fall played full screen, then the TOTAL showed over the mode's sunny loop again. A clip looped in When the
+    mode ends now goes behind its TOTAL in the loop's place (after the full-screen clip); without one, the loop as
+    before."""
+    _cc()
+    p = _media_prog(priority=180, hud=dict(BM.normalize({})["hud"], on=True))
+    p["scripts"][3]["do"].append({"op": "clip", "clip": "sever", "where": "loop"})
+    dump = _assets(tmp_path, "blk", p, [])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Building", "secs", 12)
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert _at(out, "BACKDROP PadMode_blk_Sever") == end
+    assert "own clip sever (PadMode_blk_Sever) behind its TOTAL" in out and "not looped" not in out
+    assert 500 <= _at(out, "CLIP PadMode_blk_Won") - end <= 600              # the full-screen clip first, as ever
+    q = _media_prog(priority=180, hud=dict(BM.normalize({})["hud"], on=True))
+    out = play(tmp_path, q, "shot", "Building", "secs", 12)
+    assert "BACKDROP PadMode_blk_Sever" not in out and "behind its TOTAL" not in out
+
+
 def test_without_its_file_the_blocks_still_play_the_games_own(tmp_path, monkeypatch):
     _cc()
     dump = tmp_path / "empty"

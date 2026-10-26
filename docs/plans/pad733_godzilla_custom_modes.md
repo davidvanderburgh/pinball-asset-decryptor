@@ -54,7 +54,7 @@ transition. Stock Premium/LE 1.16 and Pro 1.16 were filmed for the game's own pi
   first pick - the rig's saved machine state (NVRAM: the last place played) is not his, so the cursor started
   elsewhere. An exact replay needs the NVRAM as the session started, which nothing records yet (follow-up).
 - **The machine's own SD card** (read once elevated, read only: its /dump, /data and system partitions copied to
-  C:	mp\PAD-733\sd): its mode runtime is byte for byte the v23 card's (md5 625ed5d3...), so the machine ran the
+  C:\tmp\PAD-733\sd): its mode runtime is byte for byte the v23 card's (md5 625ed5d3...), so the machine ran the
   pre-PAD-730 code. Its mode.log (2026-10-25 19:37-20:00, three games) shows the same faults: every pick started 3.0 s
   after it (MINILLA 244427 -> START 247456, KUMONGA 504160 -> 507175, MINILLA 813611 -> 816627); in the third game
   MINILLA ended `time ran out` and the game logged `MINILLA's battle won ... counts as beaten in city 0 ... completed 1`

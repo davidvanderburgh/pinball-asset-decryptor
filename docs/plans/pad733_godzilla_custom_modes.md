@@ -80,8 +80,14 @@ transition. Stock Premium/LE 1.16 and Pro 1.16 were filmed for the game's own pi
 
 ## Proof (after, this branch's set)
 
-See the PAD-733 artifacts (before/after strips). Runs x_caesar (pick, then 49-81-51-73-77: `KING CAESAR's battle won`,
-the won clip, then the game's own GODZILLA CONTROLS TOKYO and its jackpot/power-up screens), x_minilla (`the city
-screen's rematch line names MINILLA`, STAY, five roving hits, won), dev4 (`the selection screen has closed 1981 ms
-after the pick (its display effect 132 is over)`, START and intro in that tick; STAY: effect 133, 1517 ms), f_* (the
-final set).
+The PAD-733 artifacts hold the before/after strips (pick_transition, stay_transition, rematch_line, clock_out,
+old_start_hud, battle_shape; reference_stock_pick_transition is the game's own pick). Final set (tryit_after5):
+- h_kumonga: `the selection screen has closed 1983 ms after the pick (its display effect 132 is over)`, START and its
+  intro in that tick, `"PadMode_kumonga_Intro" was paused 27 ms in by the game's close ... played again`, the whole
+  intro on the glass (276 frames, none without it), then the five webs: `KUMONGA's battle won`.
+- h_minilla: the same at the pick (1998 ms, replayed 27 ms in); lost by a drain in a beaten city: `the city screen's
+  rematch line names MINILLA`; STAY: effect 133 over at 1517 ms, replayed 29 ms in; five roving hits:
+  `MINILLA's battle won`, `the rematch line is the game's own again`.
+- h_clock: `MINILLA END (time ran out)` -> `battle lost` -> TO REMATCH MINILLA -> it plays again.
+- x_caesar (after3): the five shots in order, won, then the game's own GODZILLA CONTROLS TOKYO.
+- hudb / huda: the old start shots' HUD on main / nothing after.

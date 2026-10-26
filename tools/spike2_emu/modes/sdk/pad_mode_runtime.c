@@ -2405,12 +2405,11 @@ void pm_set_text(void *text, const char *words)
  * the display is immediate-mode, so the runtime advances and draws the video player every
  * tick while the surface plays, as the game's own clip loop does. Proven: item 132. */
 static struct { int on, seen; unsigned long started, last; } clip;
-/* PAD-733: when a pick's selection screen last closed (pm_ms | 1; 0 = none since boot), and whether the full-screen clip
- * started since was played again once already - the game pauses its video player a moment after its close effect ends
- * (Premium/LE 1.16: within ~45 ms), taking a picked mode's start clip with it (run g_kumonga: the intro "over" 44 ms in,
- * the loop in its place behind the HUD) */
-static unsigned long roster_closed_ms;
-static int clip_close_replayed;
+/* PAD-733: when a pick's selection screen last closed (pm_ms | 1; 0 = none since boot), and the close a full-screen clip
+ * was last played again for - the game pauses its video player a moment after its close effect ends (Premium/LE 1.16:
+ * within ~45 ms), taking a picked mode's start clip with it (run g_kumonga: the intro "over" 44 ms in, the loop in its
+ * place behind the HUD) */
+static unsigned long roster_closed_ms, clip_close_done;
 static const struct pm_mode *clip_owner;  /* PAD-413: the mode that played it (0 = a trigger file's) */
 /* item 164: CLIP V2 - the newer builds have no clip_play / video_player / video_surface function
  * (the lookup is inlined at every call site: Venom 1.07 has 22), so the runtime does what their
@@ -2972,19 +2971,18 @@ int pm_clip(const char *name)
     clip.seen = 0;
     clip.started = clip.last = pm_ms();
     clip_owner = current;
-    clip_close_replayed = 0;
     return 1;
 }
 
 /* PAD-733: our full-screen clip stopped in its first 300 ms, started within 300 ms of a pick's selection screen
- * closing: the game's own pause of its player at the end of that close. Played again at once, once - it stays on
+ * closing: the game's own pause of its player at the end of that close. Played again at once, once a close - it stays on
  * (drawn over everything, the backdrop still waiting), so the glass goes from the close to the clip with no frame of
  * the HUD between. 1 = played again. */
 static int clip_close_again(unsigned long now)
 {
-    if (clip_close_replayed || !roster_closed_ms || !disp_clip_name[0]) return 0;
+    if (!roster_closed_ms || clip_close_done == roster_closed_ms || !disp_clip_name[0]) return 0;
     if (clip.started - roster_closed_ms > 300 || now - clip.started > 300) return 0;
-    clip_close_replayed = 1;
+    clip_close_done = roster_closed_ms;               /* once a close */
     disp_clip_ours = 1;
     ((void (*)(const char *, int, const char *))(unsigned long)fn("clip_play"))(disp_clip_name, 0, 0);
     disp_clip_ours = 0;

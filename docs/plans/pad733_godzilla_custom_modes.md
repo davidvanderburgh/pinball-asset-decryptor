@@ -195,7 +195,7 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   your own"; "make sure the clips of baby godzilla weather makes sense ... it doesn't make sense to go from summer to
   winter and back during the mode"; then "there are ways to drain the balls. just kill the flippers and show that the
   mode is ended, then instead of ending the ball, give a ball back in the plunger lane".** DAD AND BABY: a 2-ball
-  multiball at the pick (20 s save); while both balls are up the clock waits at 30 and the four big shots (Left ramp,
+  multiball at the pick (20 s save); while both balls are up the clock waits at 30 (v31: it runs) and the four big shots (Left ramp,
   Big loop, Right ramp, Building) are lessons - PLAYTIME with dad, 2X. Down to one ball after the save: ON HIS OWN,
   the clock runs (any lit shot tops it to 15), the lessons left are smoke rings. All four learned, with dad or alone:
   any of the four is his FIRST RAY, the final blow. A drain or the clock: lost, the lessons kept. Won with both balls
@@ -207,6 +207,12 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   snow, and the snow stays behind his TOTAL (the two asleep under it) - a clip looped in When the mode ends now goes
   behind the TOTAL in the loop's place (block_modes), where the sunny loop came back before. rig\edit10_minilla.py,
   backup "modes before the dad and baby MINILLA"; desk runs desk_minilla_{win,lost,jack}.
+- **v31 (Emulate on the v31 card): "the timer is not decrementing in minilla" ... "it eventually started
+  decrementing, but it was at 30 seconds for a long time"** - it waited at 30 while both balls were up. Now the clock
+  runs from 45 all through; any lesson, with dad or alone, tops it up to 15; ON HIS OWN tops it up to 20 (a fair go
+  alone). The clock out with both balls up ends it as lost and takes the extra ball away as a won ending does. Backup
+  "modes before the MINILLA clock runs"; desk runs desk_minilla_clock (45 -> 0, the drain to one at the end) and
+  desk_minilla_lost (17 left when alone -> 20). Card v32.
 - **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
   game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
   screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the

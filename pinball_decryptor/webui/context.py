@@ -24,11 +24,15 @@ class Context:
         self._clients = 0
         self._clients_lock = threading.Lock()
         self.on_clients_changed = None
+        # set once a page has asked for its state: the native window's page
+        # reached the app (the host's blank-window watch, PAD-748)
+        self.page_seen = threading.Event()
 
     # -- read by the HTTP server ----------------------------------------
     def state_snapshot(self):
         """The page's starting point: the event number and the state as of
         that number (events after it are replayed on top)."""
+        self.page_seen.set()
         window = self.window
         seq = self.bus.last_seq
         state = self.store.snapshot()

@@ -472,19 +472,24 @@ def _refresh_sidx_record(disk, reader, fmap, key, sidx_path, sidx_node, log,
     return True
 
 
-def write_game_elf_defaults(card_path, overrides_by_id, log=None, cancel=None):
+def write_game_elf_defaults(card_path, overrides_by_id, log=None, cancel=None,
+                            ranges_by_id=None):
     """Patch operator-adjustment DEFAULTS into a Spike 1 card's game ELF,
     in place, and refresh the ELF's ``.sidx`` record.
 
     *overrides_by_id* is ``{adjustment_id: value}`` — each value is clamped to
-    the adjustment's own min/max.  Mirrors the Spike 2
+    the adjustment's own min/max, or to its new one: *ranges_by_id*
+    ``{adjustment_id: (min, max)}`` changes the lowest and highest value the
+    machine's menu offers (PAD-750), patched beside the default.
+    Mirrors the Spike 2
     :meth:`explorer.CardImage.write_adjustment_defaults` contract (patch the
     firmware's compiled defaults in place, then refresh the card's validation
     manifest), so the same Build hook can apply staged settings on either era.
-    Returns the number of defaults applied.
+    Returns the number of settings changed.
     """
+    from .adjustments import resolve_overrides
     from .formats import spike1_linux_partitions
-    from .spike1_adjustments import Spike1Adjustments
+    from .spike1_adjustments import Spike1AdjustmentError, Spike1Adjustments
 
     log = log or (lambda *a, **k: None)
     check = cancel or (lambda: False)
@@ -493,8 +498,7 @@ def write_game_elf_defaults(card_path, overrides_by_id, log=None, cancel=None):
         raise Spike1Error("no ext partitions found in the card image")
 
     with open(_lp(card_path), "r+b") as disk:
-        reader, game_dir, _img, sidx_path, sidx_node = \
-            locate_assets(disk, parts)
+        reader, game_dir, _img, sidx_path, sidx_node =             locate_assets(disk, parts)
         node = _find_game_elf_node(reader, game_dir)
         if node is None:
             raise Spike1Error("no game ELF found on the card")
@@ -502,21 +506,33 @@ def write_game_elf_defaults(card_path, overrides_by_id, log=None, cancel=None):
         elf_bytes = emap.read(disk, 0, emap.size)
         adj = Spike1Adjustments(elf_bytes)
 
-        clean = {}
-        for idx, val in overrides_by_id.items():
-            e = adj.entry(int(idx))
-            clean[int(idx)] = max(e["min"], min(e["max"], int(val)))
-        if not clean:
+        def entry_of(idx):
+            try:
+                return adj.entry(int(idx))
+            except (Spike1AdjustmentError, ValueError):
+                return None
+        # resolve_overrides keys by name; a Spike 1 id has no AD_ name to
+        # gate on, so ``range_editable`` sees it by its numbers alone
+        clean, ranges = resolve_overrides(
+            entry_of, {int(k): v for k, v in overrides_by_id.items()},
+            {int(k): v for k, v in (ranges_by_id or {}).items()})
+        if not clean and not ranges:
             return 0
 
-        # write only the changed 4-byte default fields at their file offsets
-        for idx, val in clean.items():
+        def put(file_off, val):
             payload = struct.pack("<i", val)
-            file_off = adj.default_file_offset(idx)
             for disk_off, n in emap.ranges(file_off, 4):
                 disk.seek(disk_off)
                 disk.write(payload[:n])
                 payload = payload[n:]
+
+        # write only the changed 4-byte fields at their file offsets
+        for idx, (lo, hi) in ranges.items():
+            put(adj.field_file_offset(idx, "min"), lo)
+            put(adj.field_file_offset(idx, "max"), hi)
+            log("  adjustment 0x%02X range <- %d - %d" % (idx, lo, hi))
+        for idx, val in clean.items():
+            put(adj.default_file_offset(idx), val)
             log("  adjustment 0x%02X default <- %d" % (idx, val))
         disk.flush()
 
@@ -526,7 +542,7 @@ def write_game_elf_defaults(card_path, overrides_by_id, log=None, cancel=None):
         else:
             log("  ! no /spk/index/*.sidx manifest found — the card's own "
                 "validation may reject the modified firmware")
-    return len(clean)
+    return len(set(clean) | set(ranges))
 
 
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,

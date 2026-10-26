@@ -39,6 +39,8 @@ MANIFEST_NAME = ".modpack.json"
 # slot, so it survives a re-extract of the same card the way the other maps do.
 _EXTRA_MAPS = ("settings", "high_scores", "image_group_tags",
                "replacement_names",
+               # PAD-750: the menu ranges changed on the Defaults tab
+               "setting_ranges",
                # Per-clip loudness: an encode instruction attached to the WAVs
                # the pack carries, so a pack built without it would come out
                # at a different balance than the author's own card.
@@ -835,6 +837,7 @@ def apply_extras(assets_folder, extras, log_cb=None):
             pass
     if log_cb:
         words = {"settings": "%d default setting(s)",
+                 "setting_ranges": "%d setting range(s)",
                  "high_scores": "%d high-score default(s)",
                  "image_group_tags": "%d image/scene name(s)",
                  "replacement_names": "the name(s) of %d replacement file(s)",

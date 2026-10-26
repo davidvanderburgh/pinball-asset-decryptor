@@ -214,19 +214,42 @@ class Spike1Adjustments:
             })
         return out
 
-    def patched_bytes(self, overrides):
+    def field_file_offset(self, idx, field):
+        """File offset of adjustment *idx*'s ``default`` / ``min`` / ``max``
+        i32 (PAD-750: a range is patched beside the default)."""
+        rel = {"default": _E_DEFAULT, "min": _E_MIN, "max": _E_MAX}[field]
+        va = self.table_va + idx * _E_STRIDE + rel
+        off = self.elf._file_off(va, 4)
+        if off is None:
+            raise Spike1AdjustmentError("%s for id %d not in file"
+                                        % (field, idx))
+        return off
+
+    def patched_bytes(self, overrides, ranges=None):
         """Return the ELF bytes with the given ``{id: new_default}`` applied.
 
         Each new default is validated against the adjustment's own min/max and
         written as a size-neutral i32 in place, so any downstream card refresh
-        (checksum/sidx) still applies unchanged."""
+        (checksum/sidx) still applies unchanged.  *ranges* ``{id: (min, max)}``
+        changes those min/max too (PAD-750), and a default is checked against
+        the range it will have."""
         data = bytearray(self.elf.data)
+        ranges = ranges or {}
+        for idx, (lo, hi) in ranges.items():
+            if not lo <= hi:
+                raise Spike1AdjustmentError(
+                    "range [%d, %d] for id %d is not a range" % (lo, hi, idx))
+            struct.pack_into("<i", data, self.field_file_offset(idx, "min"),
+                             int(lo))
+            struct.pack_into("<i", data, self.field_file_offset(idx, "max"),
+                             int(hi))
         for idx, value in overrides.items():
             e = self.entry(idx)
-            if not (e["min"] <= value <= e["max"]):
+            lo, hi = ranges.get(idx, (e["min"], e["max"]))
+            if not (lo <= value <= hi):
                 raise Spike1AdjustmentError(
                     "value %d for id %d is outside [%d, %d]"
-                    % (value, idx, e["min"], e["max"]))
+                    % (value, idx, lo, hi))
             off = self.default_file_offset(idx)
             struct.pack_into("<i", data, off, value)
         return bytes(data)

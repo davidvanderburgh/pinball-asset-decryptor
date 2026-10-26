@@ -592,7 +592,7 @@ class CardImage:
     def write_adjustment_defaults(self, part_index, path, table, overrides,
                                   high_scores=None, name_overrides=None,
                                   menu_last_id=None, menu_plan=None,
-                                  log=None):
+                                  log=None, ranges=None):
         """Patch the game ELF's compiled defaults and write it back in place
         (exact-size, extent-mapped) with the ``.sidx`` record refreshed.
 
@@ -608,12 +608,15 @@ class CardImage:
         refreshed — once.  *log* is an optional ``log(text, level)`` for the
         notes only this layer can write.
 
+        *ranges* is ``{AD_name: (min, max)}``: the menu's lowest and highest
+        value for those settings (PAD-750), patched beside their defaults.
+
         Returns ``(n_settings, sidx_refreshed)``, where n_settings counts every
         adjustment and high-score slot changed (the menu page is one edit to
         the firmware's code, not a setting, and isn't counted).
         """
-        new = table.patched_bytes(overrides)
-        n = len(overrides)
+        new = table.patched_bytes(overrides, ranges=ranges)
+        n = len(set(overrides) | set(ranges or {}))
         new = self._with_master_volume(table, new, overrides, log)
         if name_overrides and high_scores is not None:
             # Re-bind to the already-patched bytes: the adjustment patch only

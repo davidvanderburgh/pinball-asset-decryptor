@@ -111,7 +111,9 @@ _TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion",
 # apply already skips a name the target image doesn't carry and pulls every
 # value into that image's own range.  Merged per key so an edit already made
 # on the target wins.
-_MERGE_KEYS = ("settings", "high_scores")
+# ``setting_ranges`` (PAD-750) is keyed the same way and pulled into the
+# target the same way: a name it doesn't carry is skipped at build time.
+_MERGE_KEYS = ("settings", "high_scores", "setting_ranges")
 
 _HEAD = 256 * 1024
 _TAIL = 64 * 1024

@@ -501,8 +501,8 @@ function ModePage({ s, f, off, dis, rs, lim }) {
         ${rs.place ? html`<div class="small muted wrap" style="padding-left:26px">${rs.place}</div>` : null}`}
         ${!prof.done_found ? null : html`<div class="row wrap">
           <${Radio} name="m-starts" value="completed" label="the player completing" checked=${doneOn} disabled=${doneOff && !doneOn} title=${T.done} onChange=${(v) => setF("starts_kind", v, true)} />
-          <${Num} k="done_count" value=${f.done_count} disabled=${doneOff || !doneOn} width=${64} title=${T.done} />
-          <span class="dim nw">of the game's modes ticked, in one game</span>
+          <span class="row nw" style="gap:8px"><${Num} k="done_count" value=${f.done_count} disabled=${doneOff || !doneOn} width=${64} title=${T.done} />
+          <span class="dim nw">of the game's modes ticked, in one game</span></span>
         </div>
         ${doneOn && !dis.done ? html`<div class="modes-shots" style="padding-left:26px;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr))">
           ${doneModes.map((m) => html`<${Check} key=${"d" + m.id} label=${m.name} checked=${doneSet.has(m.id)} disabled=${off || (doneSet.size === 1 && doneSet.has(m.id))} title=${T.done}

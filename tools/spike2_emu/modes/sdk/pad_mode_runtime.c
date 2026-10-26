@@ -11076,7 +11076,7 @@ static void done_mark(unsigned id, unsigned p, const char *how)
 }
 
 /* a game mode's STOP entered: (mode, reason) */
-static void on_done_stop(unsigned *r)
+static void done_stop_seen(unsigned *r, const char *how)
 {
     unsigned obj = r[0], id, p;
     if (!r[1] || !obj || !pm_in_game()) return;
@@ -11084,8 +11084,11 @@ static void on_done_stop(unsigned *r)
     if (id >= BLOCK_IDS) return;
     if (!(p = place_player())) p = pm_player();
     if (place_stopped(obj, p)) return;              /* stopped already: the STOP returns at once */
-    done_mark(id, p, "its stop, completed");
+    done_mark(id, p, how);
 }
+
+static void on_done_stop(unsigned *r) { done_stop_seen(r, "its stop, completed"); }
+static void on_done_slot(unsigned *r) { done_stop_seen(r, "its stop through its vtable, completed"); }
 
 /* the framework's audit add: (audit, amount) */
 static void on_done_audit(unsigned *r)
@@ -11134,7 +11137,7 @@ static unsigned done_thunk(unsigned f)
     t[4] = 0xe8bd500fu;   /* pop {r0,r1,r2,r3,ip,lr} */
     t[5] = 0xe51ff004u;   /* ldr pc, [pc, #-4] -> t[6] */
     t[6] = f;
-    t[9] = (unsigned)(unsigned long)on_done_stop;
+    t[9] = (unsigned)(unsigned long)on_done_slot;
     mprotect(tramp, sizeof tramp, 7);
     __builtin___clear_cache((char *)t, (char *)(t + 16));
     return (unsigned)(unsigned long)t;

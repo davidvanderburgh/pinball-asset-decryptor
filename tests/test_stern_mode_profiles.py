@@ -164,7 +164,7 @@ def test_a_profile_per_port(name):
     assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
     assert p.shot_mask_bits == bits and p.proven is proven
     cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop", "coils", "shield", "shaker", "shows",
-                             "wizard", "building", "roster", "challenge", "place"}) | _mb(name)         | (set() if name in MP.PLACE_PROVEN else {"place"})          | (set() if name in MP.DONE_PROVEN else {"done"})            # PAD-710: a game mode's place where proven; PAD-747: the game's modes completed
+                             "wizard", "building", "roster", "challenge", "place", "done"}) | _mb(name)         | (set() if name in MP.PLACE_PROVEN else {"place"})          | (set() if name in MP.DONE_PROVEN else {"done"})            # PAD-710: a game mode's place where proven; PAD-747: the game's modes completed
     assert {part for part in MP.PARTS if not p.can(part)} == cannot
     for part in MP.PARTS:
         assert bool(p.why_not(part)) == (part in cannot)

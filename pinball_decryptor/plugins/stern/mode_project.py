@@ -1159,7 +1159,84 @@ def _place_cannot(key, label, port=None):
 #: game's modes completed"). The builds where it was seen in the emulator: one of the game's modes completed - the
 #: game's own STOP of it entered with "completed" on a C++ title, its COMPLETED audit or flag on a plain-C one - and a
 #: mode file waiting for that one started (rig sweep, C:\tmp\PAD-747\rig).
-DONE_PROVEN = frozenset()
+DONE_PROVEN = frozenset({
+    "aerosmith-1.16",               # PAD-747 sweep: Medley Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "aerosmith_le-1.15",            # PAD-747 sweep: Medley Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "aerosmith_le-1.16",            # PAD-747 sweep: Medley Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "avengers_infinity_le-1.09",    # PAD-747 sweep: Super Reactor (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "avengers_infinity_le-1.10",    # PAD-747 sweep: Super Reactor (19) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "avengers_infinity_pro-1.10",   # PAD-747 sweep: Super Reactor (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "batman-1.13",                  # PAD-747 sweep: Catwoman (episodes 19-20) (1) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "batman-1.14",                  # PAD-747 sweep: Catwoman (episodes 19-20) (1) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "beatles-1.29",                 # PAD-747 sweep: All My Loving (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "deadpool_le-1.14",             # PAD-747 sweep: Disco Loops (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "deadpool_le-1.16",             # PAD-747 sweep: Disco Loops (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "deadpool_pro-1.16",            # PAD-747 sweep: Disco Loops (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "dungeons_and_dragons_le-1.00", # PAD-747 sweep: Mimic Hurry Up (12) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "dungeons_and_dragons_le-1.10", # PAD-747 sweep: Mimic Hurry Up (12) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "dungeons_and_dragons_pro-1.10", # PAD-747 sweep: Map Choosen Ritual Singleball (53) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "elvira3-1.13",                 # PAD-747 sweep: ABOB (128) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "foo_fighters_le-1.03",         # PAD-747 sweep: Super Skill Shot (8) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "foo_fighters_le-1.04",         # PAD-747 sweep: Super Skill Shot (8) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "foo_fighters_pro-1.04",        # PAD-747 sweep: Super Skill Shot (8) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "godzilla_le-1.13",             # PAD-747 sweep: Hedorah (25) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "godzilla_le-1.16",             # PAD-747 sweep: Super Train (18) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "godzilla_pro-1.15",            # PAD-747 sweep: Hedorah (25) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "godzilla_pro-1.16",            # PAD-747 sweep: Jet Fighter Attack (21) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "guardians-1.15",               # PAD-747 sweep: Cherry Bomb Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "guardians_le-1.14",            # PAD-747 sweep: Cherry Bomb Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "guardians_le-1.15",            # PAD-747 sweep: Cherry Bomb Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "iron_maiden_le-1.16",          # PAD-747 sweep: Rime of the Ancient Mariner Hurry Up (5) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "iron_maiden_le-1.18",          # PAD-747 sweep: Rime of the Ancient Mariner Hurry Up (5) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "iron_maiden_pro-1.18",         # PAD-747 sweep: Rime of the Ancient Mariner Hurry Up (5) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "james_bond_le-1.06",           # PAD-747 sweep: Ahoy Mr Bond Wizard Mode (6) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "james_bond_pro-1.06",          # PAD-747 sweep: Ahoy Mr Bond Wizard Mode (6) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "jaws_le-1.01",                 # PAD-747 sweep: Super Buoys (29) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "jaws_le-1.02",                 # PAD-747 sweep: Super Buoys (29) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "jaws_pro-1.02",                # PAD-747 sweep: Cast N Catch 1 (12) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "john_wick_le-1.01",            # PAD-747 sweep: Lights Out (0) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "john_wick_le-1.02",            # PAD-747 sweep: Lights Out (0) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "john_wick_pro-1.02",           # PAD-747 sweep: Lights Out (0) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "jurassic_park_le-1.15",        # PAD-747 sweep: Trex Chase (119) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "jurassic_park_le-1.16",        # PAD-747 sweep: Chaos Hurry Up (4) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "jurassic_park_pro-1.16",       # PAD-747 sweep: Escape Nublar (127) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "jurassic_park_the_pin-1.05",   # PAD-747 sweep: Stegosaurus (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "king_kong_le-0.96",            # PAD-747 sweep: King Kombos (27) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "king_kong_le-0.97",            # PAD-747 sweep: King Kombos (27) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "king_kong_pro-0.97",           # PAD-747 sweep: King Kombos (27) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "led_zeppelin_le-1.21",         # PAD-747 sweep: Black Dog (1) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "led_zeppelin_le-1.22",         # PAD-747 sweep: Black Dog (1) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "led_zeppelin_pro-1.22",        # PAD-747 sweep: Black Dog (1) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "mando_le-1.44",                # PAD-747 sweep: Super Skill Shot (10) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "mando_le-1.45",                # PAD-747 sweep: Super Skill Shot (10) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "mando_pro-1.45",               # PAD-747 sweep: Super Skill Shot (10) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "metallica_spike-1.03",         # PAD-747 sweep: Battery (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "metallica_spike-1.04",         # PAD-747 sweep: Battery (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "munsters_le-1.27",             # PAD-747 sweep: Lily Mode (3) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "munsters_le-1.28",             # PAD-747 sweep: Lily Mode (3) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "munsters_pro-1.28",            # PAD-747 sweep: Lily Mode (3) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "rush_le-1.18",                 # PAD-747 sweep: La Villa Strangiato (2) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "rush_le-1.19",                 # PAD-747 sweep: La Villa Strangiato (2) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "rush_pro-1.19",                # PAD-747 sweep: La Villa Strangiato (2) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "star_wars_elg-1.10",           # PAD-747 sweep: Orbits (1) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "star_wars_le-1.30",            # PAD-747 sweep: Hoth I (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "star_wars_le-1.31",            # PAD-747 sweep: Hoth I (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "star_wars_pro-1.31",           # PAD-747 sweep: Hoth I (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "stranger_things-1.13",         # PAD-747 sweep: Wheres Barb (128) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "stranger_things_le-1.12",      # PAD-747 sweep: Where's Barb (11) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "stranger_things_le-1.13",      # PAD-747 sweep: Wheres Barb (128) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "sword_of_rage_le-1.18",        # PAD-747 sweep: Sand Worm (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "sword_of_rage_le-1.19",        # PAD-747 sweep: Sand Worm (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "sword_of_rage_pro-1.19",       # PAD-747 sweep: Sand Worm (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "turtles_le-1.59",              # PAD-747 sweep: Training Level Two (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "turtles_pro-1.58",             # PAD-747 sweep: Training Level Two (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "turtles_pro-1.59",             # PAD-747 sweep: Training Level Two (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "uncanny_xmen_le-0.97",         # PAD-747 sweep: Fastball Special (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "uncanny_xmen_le-0.98",         # PAD-747 run x1: A Fiery Assault (3), a mission, completed in its place - its COMPLETED audit - and MINI WIZ (starts_on completed 1 of the eight missions) started 16 ms later; sweep: Fastball Special (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "uncanny_xmen_pro-0.98",        # PAD-747 sweep: Fastball Special (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "venom_le-1.07",                # PAD-747 sweep: Riot Mode (12) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "venom_pro-1.07",               # PAD-747 sweep: Riot Mode (12) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+})
 #: PAD-747: the ids of a plain-C build's modes with books and no start (pad_mode_runtime.c's DONE_EXTRA + n), at most
 DONE_EXTRA, DONE_EXTRA_MAX = 128, 128
 

@@ -4283,6 +4283,60 @@ Bond LE 1.06 (emulator, Default Game Mode = Ahoy Mr. Bond): STARTED audit 180 co
 PAD-714) and PLAYED flag 86 set at the
 take, the mode's clock ran out (won) and COMPLETED flag 89 was set.
 
+## The game's modes completed (PAD-747)
+
+A tester on Uncanny X-Men asked for "a mini-wizard mode after finishing 4 of the stock modes, then my bigger wizard
+mode after the completion of the final 4". The runtime keeps, for each player and for the game in play (a new
+`game_start` forgets it), which of the game's own modes the player has completed - read the way the game itself
+records a completion, so a mode completed by the game's rules, or by a mode of yours in its place (PAD-710), counts:
+
+- **A C++ title** (the mode framework PAD-710 reads: `value mode_slot_stop`, `mode_stopped_at`, the player): each game
+  mode object's STOP is hooked once its vtable is set (the first ticks): the function itself where its first two words
+  can move, else the object's vtable slot is pointed at a thunk of the runtime's on its way to the STOP (a class's own
+  stop that opens `push {.., lr}; bl ...`). The STOP is entered with the mode in r0 and the reason in r1 - non-zero =
+  completed - and one that finds the mode already stopped for the player returns at once, so neither counts.
+- **A plain-C title**: the mode's COMPLETED audit (`value place_audit_completed_<id>`, PAD-710's books) counted through
+  the framework's audit add (`site audit_add`: the audit id in r0), or with no audit its COMPLETED game flag
+  (`value place_flag_completed_<id>`), seen rising for the player up. X-Men 0.98's missions are virtuals of their
+  own objects whose completion handler calls the audit add with the mission's COMPLETED audit (A Fiery Assault
+  `0x5c160`, audit 173).
+- **A plain-C title's other modes**: the ones the game keeps books of but the port names no start of (Stranger Things
+  1.13's story modes, Elvira's movies, Bond's Story Mode) are ids 128 and up - `text done_name_<n>` with `value
+  done_audit_<n>` (an `AUD_<stem>_COMPLETED` / `_COMPLETIONS` beside an `AUD_<stem>_STARTED`) or `value done_flag_<n>`
+  (an `FG_<stem>_COMPLETED`). `mode_framework.done_lines` writes them from the build's own audit and flag names, into
+  the shipped ports and at card build for any other.
+
+```c
+static const unsigned char MISSIONS[] = { 3, 4, 5, 6, 7, 8, 9, 10 };   /* X-Men 0.98: A Fiery Assault .. Juggernaut */
+
+static void on_tick(void)
+{
+    int n = pm_game_modes_done(MISSIONS, sizeof MISSIONS);   /* -1: none of them is seen completed here */
+    if (n >= 4 && !started_this_game) { ... pm_begin() ... }
+}
+```
+
+`pm_game_mode_done(id)` says whether the player up has completed one (1, 0, -1 not seen here), and
+`pm_can(PM_CAN_GAME_DONE)` whether the port names any completion the runtime can see.
+
+A mode file starts on it with `starts_on completed <N> [id ...]` (no ids: every mode the runtime sees completed): the
+mode starts at the completion that makes it N; when something is in its way then - another mode of yours, or one of
+the game's modes it gives way to or holds off (the mode just completed is often still finishing) - it waits and starts
+the moment nothing is, that game, for that player. `after`, `trigger_also` and `starts` hold as for a shot start.
+Blocks have **When the player has completed some of the game's modes** (a count and the modes ticked); the form has
+Starts on > the player completing N of the game's modes ticked.
+
+Proven in the emulator (PAD-747, the stock cards, hidden, muted): X-Men LE 0.98 - a mode file in A Fiery Assault's
+place ended by its clock, `done: player 1 completed the game's A Fiery Assault (mode 3, its COMPLETED audit) - 1 of the
+game's modes this game`, and a second file's `MINI WIZ START (1 of the game's modes completed)` 16 ms later; the rig
+sweep of every build with a card (`mode_project.DONE_PROVEN`, `C:\tmp\PAD-747\rig\job747.sh`): on a C++ title a mode
+in a game mode's place completed through the game's own STOP, on a plain-C one that or the instrument counting a
+mode's COMPLETED book through the game's own audit add or flag bitmap - 76 of the 80 builds; Elvira 1.11, Led
+Zeppelin LE/Pro 1.20 and Venom LE 1.06 never start a game on the rig, and stay unoffered. A blocks mode (BIG WIZ,
+When the player has completed 2 of the eight missions) on X-Men LE 0.98 did not start on A Fiery Assault twice and
+started on Mayhem in Midtown, the second mission (`C:\tmp\PAD-747\rig\run_bw.sh`). James Bond 60th keeps no books of its Villain
+Mode (nothing to count there).
+
 ## A mode in the game's Challenge list (PAD-615)
 
 Stern's framework has a **Player Challenge** game on every Spike 2 title: the player picks it on the game's own

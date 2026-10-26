@@ -59,8 +59,10 @@ nothing; one that isn't gets an amber notice naming each missing piece.
 - **Boot selector** ticks itself on a multi-boot card: pick the game with
   the flipper buttons, as on the machine.
 - **Card cache:** the first boot copies the card to a local cache, so later
-  boots are quick. **Cache…** lists and deletes cached cards; deleting is
-  always safe.
+  boots are quick. The cache keeps under a size limit (64 GB by default on a
+  distro disk), dropping the least recently used cards first. **Cache…**
+  shows each card's image and whether a rig is using it, sets the limit, and
+  deletes cards; deleting is always safe.
 - **Use the extracted card** and **Use the last build** switch back to the
   project's own cards.
 

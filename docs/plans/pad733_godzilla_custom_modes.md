@@ -127,6 +127,20 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   per player until the game ends and writes it at each opening (none before a report, none on a locked place); the
   blocks' *Selection screen count* (`roster_progress`). A variable reset each game keeps a battle's hits across its
   attempts (desk: lost at 1/2, picked again, resumed at 1/2).
+- **A lost battle's count on its tile.** A battle lost is HELD by the city it was lost in (the game's slot state 3:
+  0 open, 1 locked, 2 completed), and the game stamps that city - with its own "0/5" - on the PLACE's tile, the
+  monsters booked against it padlocked: run fb3 (KING CAESAR lost with 2 hits in Tokyo, the screen in New York)
+  showed TOKYO 0/5 on DESTROYAH's tile. Now the monster's tile wears the stamp and its count, the place's own tile a
+  padlock of its own (`PadSel_Lock<n>`, its box hidden, its words blank). The stamps are lettered as PICTURES by the
+  card build over place 4's box's stamp boxes: a copy of the box's text drawn outside the box stopped the game (run
+  fb5 with blank copies, fb6 with their own words; fb7 with pictures ran on: TOKYO 2/5). His three battles report
+  their count at every ball start too (a `ball_start` event script), so a tile shows 0/5 from the first ball, as the
+  game's own do (run fb8).
+- **His v25 asks for the modes** (the v25 versions in `PAD-733 notes\modes before v25 feedback`): KAMACURAS starts at
+  the Right ramp (none of the game's 24 shot rules reads it; the Big loop is Super Train Loops, the Mecha lane Saucer
+  Attack), lit lime; KING CAESAR's clock back up to 15 s on any lit shot or pop; its multiplier on the right counter's
+  label, NEXT SHOT 1X/2X/3X, the middle cleared; the three battles keep their hits for the game (KUMONGA's torn webs
+  stay torn, KING CAESAR resumes at its next shot) - runs out_fb_kamacuras2, out_fb_caesar3, out_fb_rematch_*.
 - **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
   game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
   screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the

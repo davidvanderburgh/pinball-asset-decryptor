@@ -33,6 +33,8 @@ wsl_disk.vhdx_info = lambda: {"distro": "Ubuntu", "path": r"C:\Users\simon\AppDa
                               "size": 226 * GB, "reclaimable": 30 * GB}
 from pinball_decryptor.webui import shellx_disk, emu_cache
 shellx_disk._probes_allowed = lambda: True
+from pinball_decryptor.core import admin
+admin.is_admin = lambda: True        # the confirm only shows to an Administrator
 CARDS = [("Godzilla Premium 1.16 Heisei Custom V1.96 Standard Edition", 10.66, "last booted 2026-10-17 15:59"),
          ("Godzilla Premium 1.16 Heisei Custom V1.96 TEST", 10.66, "last booted 2026-10-14 12:57"),
          ("Godzilla Premium 1.16 Heisei Custom V2 Kaiju Edition", 7.99, "last booted 2026-10-26 13:40")]
@@ -51,6 +53,7 @@ sys.exit(host.main())
 
 def main():
     tree, out = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
+    confirm = "--reclaim-confirm" in sys.argv[3:]     # shoot Reclaim's confirm instead (answered No)
     scratch = tempfile.mkdtemp(prefix="pad739d-")
     launcher = os.path.join(scratch, "launch739d.py")
     with open(launcher, "w", encoding="utf-8") as f:
@@ -76,8 +79,17 @@ def main():
                 if d and not d.get("busy") and d.get("rows"):
                     break
                 time.sleep(0.5)
-            # Clean all, and answer its confirm on the page as a person would
             import threading
+            if confirm:
+                threading.Thread(target=webui_shot.api, args=(url, "shellx.disk_reclaim"), daemon=True).start()
+                page.get_by_role("button", name="No", exact=True).wait_for(timeout=20000)
+                time.sleep(1)
+                page.locator(".modal").last.screenshot(path=out)
+                print("shot", out)
+                page.get_by_role("button", name="No", exact=True).click()
+                browser.close()
+                return
+            # Clean all, and answer its confirm on the page as a person would
             threading.Thread(target=webui_shot.api, args=(url, "shellx.disk_clean", None, "all"),
                              daemon=True).start()
             page.get_by_role("button", name="Yes").click(timeout=20000)

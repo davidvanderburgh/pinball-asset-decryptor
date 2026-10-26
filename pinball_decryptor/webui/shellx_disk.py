@@ -613,8 +613,11 @@ class DiskMixin:
                 "Reclaim space to Windows",
                 "This will shut down WSL and compact its virtual disk so freed "
                 "space is returned to Windows.\n\n• Any other WSL work will be "
-                "stopped.\n• It can take a few minutes.\n\nMake sure no "
-                "extract or build is running, then continue?"):
+                "stopped, and the app holds WSL off until it is done.\n• It "
+                "can take a few minutes.\n• Close Docker Desktop and any "
+                "Linux terminal windows first: they start WSL again and keep "
+                "its disk in use.\n\nMake sure no extract or build is "
+                "running, then continue?"):
             return False
         self._disk_busy(True, "Reclaiming…")
 

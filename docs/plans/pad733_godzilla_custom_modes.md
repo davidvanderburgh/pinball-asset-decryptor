@@ -120,3 +120,19 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   His Emulate log had `aside: a stock mode is running` for the whole of SUPER TRAIN LOOPS (95 s) with the panel up
   under its TIME LEFT. The panel is down now while any mode of the game's runs (`pm_aside`: a battle, a multiball,
   a timed mode), still up through the game's shot screens.
+- **His project's modes** (the v24 versions in its `PAD-733 notes\modes before v24 feedback`), saved through
+  `block_modes.save`, checked with `problems()` and the card's checks, emulator-proven (out_fb_kumonga,
+  out_fb_kamacuras, out_fb2_caesar, the stock Heisei 1.99D card, no aborts):
+  - KUMONGA ("i miss the 'shoot the spinner to tear the web'"): the Left and Top spinners blink white as an optional
+    shot; each spin adds 100,000 to the next web torn (the final blow too), shown as NEXT WEB +, then back to 0; a cue
+    every 10 spins. Not the Shield ramp spinner: KUMONGA turns the shield toward the player, its spinner side away.
+    Run: 12 spins -> SPINNER BONUS 1,200,000 on the next web; total 19,000,000 as designed.
+  - KAMACURAS ("should not start at the scoop ... screechy ... two-ball multi-ball and end the mode if a ball
+    drains"): the Top spinner lights the Big loop (the scoop is the game's battle selection; no other mode starts at
+    the loop), a 2-ball multiball with a 10 s ball save, and after the save a ball down to one ends it as lost (two
+    checks a second apart; the blocks have no "save over" hat and its 8 timers are used). The screech was
+    swoop.wav, 95% of its energy over 2 kHz, on every ring a mantis came closer: now only on a landing, an octave
+    lower and low-passed. Waves of 2/3/4 kills (were 3/4/5) so the boss is in reach of one multiball.
+  - KING CAESAR ("hitting the pop bumpers at any time increases the value of the next shot (up to 3x ...)"): a pop
+    makes the next lit shot 2X, a second 3X (the most); used by the next lit shot, the final blow too, then 1X. Run:
+    three rapid pops raised it once to the cap; total 42,000,000 as designed.

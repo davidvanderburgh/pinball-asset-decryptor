@@ -1261,10 +1261,13 @@ def test_cardmount_part_mounts_beside_the_default_and_leaves_it_alone():
     assert 'if [ "$MODE" = "--part" ]; then' in code
     assert 'parts.py" --part "$PART" "$SRC"' in code
     # The eviction guard sees a live .pN mount, or the cache is pulled from
-    # under it.
+    # under it. Since PAD-739 it asks cache_in_use, which asks label_mounted
+    # first and then the other rig slots' readers.
     assert "label_mounted()" in code
+    in_use = code[code.index("cache_in_use() {"):]
+    assert 'label_mounted "$1" && return 0' in in_use[:in_use.index("\n}")]
     room = code[code.index("cache_make_room() {"):code.index("cache_wait() {")]
-    assert 'label_mounted "$vlabel" && continue' in room
+    assert 'cache_in_use "$vlabel" && continue' in room
     assert 'mountpoint -q "$CARDS/$vlabel"' not in room
     assert '"$CARDS/$1".p*' in code
     # --umount and --precache still work in their old positions.

@@ -2985,6 +2985,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if self._code_slug and self.project() and self._blocks_own_challenge(program):   # PAD-615 round 3
             problems += self._own_challenge_problems(blocks=(self._code_slug, program)).get(self._code_slug, [])
         notes = BM.notes(program)
+        notes += BM.white_shot_notes(program, getattr(p, "white_shots", ()) if p is not None else ())   # PAD-733
         if (p is not None and getattr(p, "roster", ()) and not getattr(p, "roster_counts", False)
                 and any((s.get("hat") or {}).get("kind") == "battle" for s in program.get("scripts") or [])):
             notes.append("On %s the pick counts only toward the player's city: the game does not count the mode as "

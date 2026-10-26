@@ -258,3 +258,31 @@ def test_the_profiles_say_where_a_pick_counts_as_the_battle():
     keys = {p.key: p for p in (lambda ps: ps if isinstance(ps, (list, tuple)) else ps.values())(MP.profiles())}
     for key in ("godzilla_le_1_16", "godzilla_pro_1_16", "godzilla_pro_1_15"):
         assert keys[key].roster and keys[key].roster_counts, key
+
+
+# ---- PAD-733: a lit shot's colour shows only on a colour insert ------------------------------------------------------
+def test_the_godzilla_profile_names_its_white_only_shots():
+    """David: "For custom mode shots then, we should use shots that can be colored" - the shots whose inserts are one
+    white light each (KUMONGA's last web on Powerline center was lit, a small white blink he could not see)."""
+    p = MP.profile_for_card("godzilla_le", "1.16")
+    assert {"Powerline left", "Powerline center", "Powerline right", "Maser target", "Godzilla target",
+            "Shield ramp spinner"} <= set(p.white_shots)
+    assert not {"Left ramp", "Right ramp", "Big loop", "Building", "Shield target left", "Top spinner"} & set(p.white_shots)
+
+
+def test_a_white_only_shot_lit_and_not_named_on_the_screen_gets_a_note():
+    """"Exceptions are for shots that are named on the screen": named in a line (or as a group, POWERLINES), no note;
+    lit in black (held dark), no note; a colour shot, no note."""
+    white = ("Powerline center", "Powerline left", "Maser target")
+    lit = lambda shot, color="#b040ff": {"op": "light_shot", "shot": shot, "color": color, "pattern": "chase", "rate": num(110)}
+    def prog(blocks, line=""):
+        return {"name": "WEBS", "seconds": 30, "game_modes": "stack", "hud": {"on": True, "line": line},
+                "scripts": [{"hat": {"kind": "mode_start"}, "do": blocks}]}
+    notes = BM.white_shot_notes(prog([lit("Powerline center"), lit("Left ramp")]), white)
+    assert len(notes) == 1 and notes[0].startswith("Powerline center is lit, and its insert is a single white light")
+    assert BM.white_shot_notes(prog([lit("Powerline center")], "SHOOT THE CENTER POWERLINE"), white) == []
+    assert BM.white_shot_notes(prog([lit("Powerline left")], "HIT THE POWERLINES"), white) == []
+    named = prog([lit("Maser target"), {"op": "hud_award", "text": "FIRE", "sub": "SHOOT THE MASER", "seconds": 2}])
+    assert BM.white_shot_notes(named, white) == []
+    assert BM.white_shot_notes(prog([lit("Maser target", "#000000")]), white) == []
+    assert BM.white_shot_notes(prog([lit("Powerline center")]), ()) == []          # a card that names none

@@ -845,6 +845,52 @@ def _sync_assets(project, slug, program):
         CM.save(project, slug, spec)
 
 
+#: PAD-733: words of a shot's name that do not tell it apart on the screen
+_SHOT_FILLER = ("TARGET", "SHOT", "THE", "OF")
+
+
+def _screen_words(program):
+    """every line the mode puts on the screen (HUD lines, awards, counters, words), upper case"""
+    out = []
+    for s in program.get("scripts") or []:
+        for b in _walk(s.get("do") or []):
+            if b.get("op") in ("hud_text", "hud_award", "hud_counter", "words"):
+                out.extend(str(b.get(k) or "").upper() for k in ("text", "sub", "label"))
+    hud = program.get("hud") or {}
+    out.append(str(hud.get("line") or "").upper())
+    out.extend(str(c.get(k) or "").upper() for c in hud.get("counters") or [] for k in ("label", "sub"))
+    return [t for t in out if t.strip()]
+
+
+def _named_on_screen(shot, lines):
+    """the screen names this shot: a line holds every word of its name that tells it apart ("SHOOT THE CENTER
+    POWERLINE" names Powerline center), or its first word as a group ("HIT THE POWERLINES")"""
+    words = [w for w in re.findall(r"[A-Z]+", str(shot).upper()) if w not in _SHOT_FILLER]
+    if not words:
+        return True
+    return any(all(w in t for w in words) or (words[0] + "S") in t for t in lines)
+
+
+def white_shot_notes(program, white_shots):
+    """PAD-733 (David: "For custom mode shots then, we should use shots that can be colored. Exceptions are for shots
+    that are named on the screen"): a shot lit in a colour whose inserts are one white light each (the card's
+    ``white_shots``, mode_project) shows no colour - a small white light the player cannot tell is the mode's - unless
+    the mode's screen names it. One note per such shot."""
+    white = set(white_shots or ())
+    if not white:
+        return []
+    program = normalize(program)
+    lit = []
+    for s in program["scripts"]:
+        for b in _walk(s.get("do") or []):
+            if b.get("op") in ("light_shot", "light_mode") and b.get("shot") in white                     and str(b.get("color") or "").lower() not in ("#000000", "000000") and b["shot"] not in lit:
+                lit.append(b["shot"])
+    lines = _screen_words(program)
+    return ["%s is lit, and its insert is a single white light: the mode's colour does not show there. Light a shot "
+            "whose insert shows colour, or name %s on the screen (a HUD line or award)." % (n, n)
+            for n in lit if not _named_on_screen(n, lines)]
+
+
 def more_of(program):
     """PAD-707: ``{"slot": n, "picture": file}`` when a script's When is a pick on MORE KAIJU (the list of monsters
     behind battle slot n), else ``{}`` - what assets.json tells the build, which draws the mode's page on the list."""

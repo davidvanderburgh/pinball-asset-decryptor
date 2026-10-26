@@ -87,6 +87,8 @@ root)
     echo "$ROOT" ;;
 log)
     tail -6 "$PAD_LOGDIR/padball.log" 2>/dev/null ;;
+start)
+    python3 "$R/plunge.py" start 2>&1 ;;
 esac
 """
 
@@ -264,12 +266,11 @@ def main():
                 % (tag, c0.get("game"), c1.get("game"), c0.get("host"), c1.get("host"),
                    c0.get("watch"), c1.get("watch"), "STILL OPEN" if alive else "CLOSED"))
             ok = bool(back) and alive
-            # a game on the restarted boot, from the playfield page's own
-            # Start: the switches reach the new game and the ball feeder
-            # (started again with it) serves the ball
+            # a game on the restarted boot, through plunge.py start (what the
+            # playfield's Start runs): the switches reach the new game and the
+            # ball feeder (started again with it) serves the ball
             if alive:
-                page.get_by_role("button", name="Start", exact=True).click()
-                say("START clicked on the playfield page")
+                say("START (plunge.py start):", helper(rig, "start"))
                 time.sleep(30)
                 shot("game_started")
                 say("ball feeder (padball.log):\n" + helper(rig, "log"))

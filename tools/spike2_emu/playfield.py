@@ -4491,6 +4491,15 @@ def write_audio_ctl(path, gain, muted):
         return False
 
 
+def restart_req_path(ctl_path):
+    """The Restart game request file (PAD-735), beside the app's volume file
+    and one per rig: the Emulate tab's restart_req_file() names the same."""
+    if not ctl_path:
+        return None
+    return os.path.join(os.path.dirname(ctl_path),
+                        "restart_game_%d.req" % padpath.slot())
+
+
 class RunCtl:
     """The status bar's Pause button and volume (PAD-204): what the page shows
     for them, polled every RUN_POLL_S. The pause flag is padglhost's, read off
@@ -4539,8 +4548,23 @@ class RunCtl:
         self.audio, self._mtime = (g, m), self._stat()
         return True
 
+    def ask_restart(self):
+        """PAD-735: Restart game - asked of the app that launched this run,
+        which stops it and starts it again (its Stop closes this window, so
+        the window cannot do it itself). False with no app to ask."""
+        path = restart_req_path(self.ctl_path)
+        if not path:
+            return False
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("%d\n" % padpath.slot())
+            return True
+        except OSError:
+            return False
+
     def dyn(self):
         return {"paused": self.paused,
+                "restart": bool(self.ctl_path),
                 "audio": ({"gain": self.audio[0], "muted": self.audio[1]}
                           if self.audio is not None else None)}
 
@@ -5104,6 +5128,10 @@ class Playfield:
         if self.keys is None:
             return False
         return self.keys.pipe.pause()
+
+    def api_restart(self):
+        """The status bar's Restart game (PAD-735)."""
+        return self.run.ask_restart()
 
     def api_volume(self, pct):
         ok = self.run.set_audio(gain=float(pct) / 100.0)

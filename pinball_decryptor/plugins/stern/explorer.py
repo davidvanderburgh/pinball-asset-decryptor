@@ -111,9 +111,16 @@ class CardImage:
     itself in a reader — opened sector-aligned through ``RawDeviceFile``, see
     :func:`formats.open_card`), or an already-open, seekable binary object; an
     object is not closed by :meth:`close`.  Use as a context manager.
+
+    *logical* (PAD-749) also lists the partitions inside an extended one,
+    numbered on from 5 as Linux numbers them: a Spike 2 machine keeps its own
+    logs (the game's ``/log``, the mode runtime's ``mode.log``) on sda6, its
+    ``/dump``.  Off by default: the callers that scan every partition of a
+    card (Compare, Image Info, the firmware finders) look at the game's files.
     """
 
-    def __init__(self, source):
+    def __init__(self, source, logical=False):
+        self._logical = logical
         if hasattr(source, "read") and hasattr(source, "seek"):
             self._f = source
             self._owns = False
@@ -147,7 +154,10 @@ class CardImage:
         self._f.seek(0)
         mbr = self._f.read(512)
         parts = []
-        for index, ptype, lba, sectors in formats.parse_mbr_partitions_bytes(mbr):
+        entries = list(formats.parse_mbr_partitions_bytes(mbr))
+        if self._logical and any(t in _EXTENDED_TYPES for _i, t, _l, _s in entries):
+            entries += [e for e in formats.parse_all_partitions_file(self._f) if e[0] >= 4]
+        for index, ptype, lba, sectors in entries:
             offset, size = lba * 512, sectors * 512
             if ptype == _EXT_TYPE:
                 # Confirm it really is ext (and cache the reader) so the tab can
@@ -168,9 +178,9 @@ class CardImage:
         return parts
 
     def partitions(self):
-        """The card's primary partitions (logical partitions inside an extended
-        one aren't enumerated — the Spike 2 rootfs and data partitions are both
-        primary)."""
+        """The card's primary partitions, and with ``logical`` the ones inside
+        an extended partition after them (the Spike 2 rootfs and data
+        partitions are both primary)."""
         return list(self._parts)
 
     def _reader(self, part_index):

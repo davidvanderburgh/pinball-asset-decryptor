@@ -833,6 +833,14 @@ const char *pm_game_mode_name(unsigned id);                      /* "Hoth I" (th
 void pm_place_over(int won);                                     /* the mode that took the place ends */
 int pm_game_mode_start(unsigned id);  /* for a test: the game's START of mode id, as its rules call it (a plain-C
                                          start only while claimed: the claim refuses it); 1 = called */
+/* PAD-768: a battle picked on the game's selection screen wins over the game's own modes running then (David: "Anything
+ * from the Kaiju Battle select screen should override the mini modes"): each of them running for the player up that
+ * ours would give way to (Godzilla's Jet Fighter Attack) is ended through its own STOP, lost, as its clock running out
+ * would, its TOTAL screen skipped (its points are in the score already; the port's `stock_award_at` /
+ * `battle_total_at`) - never a multiball, a battle, or one the port names beside ours (`text stock_any_beside`). Called by the
+ * blocks and mode files as a pick's mode starts. `why` is for the log. The number ended; -1 = the port cannot (no mode
+ * framework STOP, or its "a mode is active" query is not the known shape). */
+int pm_game_modes_end(const char *why);
 
 /* ---- the game's own modes the player has completed (PAD-747; MODE_SDK.md "The game's modes completed") -------------
  * The runtime keeps, for each player, which of the game's modes (the ids pm_block_list takes) the player has completed

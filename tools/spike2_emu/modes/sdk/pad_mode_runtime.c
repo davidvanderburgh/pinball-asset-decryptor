@@ -11164,9 +11164,8 @@ static unsigned place_player(void)
 
 /* the object's virtual at the port's slot `slot_name`, checked: its vtable readable through the slot, the slot's
  * function in the game's code; 0 when not */
-static unsigned place_vfn(unsigned obj, const char *slot_name)
+static unsigned place_vfn_at(unsigned obj, long slot)
 {
-    long slot = pm_port_value(slot_name, -1);
     unsigned vt;
     if (!obj || (obj & 3) || slot < 0 || slot > 255 || !maps_has(obj, 4, MAP_R)) return 0;
     vt = rw(obj);
@@ -11175,6 +11174,11 @@ static unsigned place_vfn(unsigned obj, const char *slot_name)
         && rw(vt + 4u * (unsigned)slot) < (unsigned)(unsigned long)(tramp + TRAMP_WORDS))
         return rw(vt + 4u * (unsigned)slot);        /* PAD-747: a thunk of ours in the slot, on its way to the STOP */
     return maps_has(rw(vt + 4u * (unsigned)slot), 8, MAP_R | MAP_X | MAP_GAME) ? rw(vt + 4u * (unsigned)slot) : 0;
+}
+
+static unsigned place_vfn(unsigned obj, const char *slot_name)
+{
+    return place_vfn_at(obj, pm_port_value(slot_name, -1));
 }
 
 /* the object's STOP */
@@ -11424,6 +11428,91 @@ void pm_place_over(int won)
             say("place: player %u is not up - the game's %s counts as %s when that player is up again", q,
                 place_name(place_held[q].id), won ? "won" : "lost");
         }
+}
+
+/* PAD-768 (David's Premium, Heisei 1.99D: "I went to start King Caesar but jet fighters was going and then as soon as
+ * the King Caesar started it canceled out and just did jet fighters instead. Anything from the Kaiju Battle select
+ * screen should override the mini modes"). The game opens its selection screen while one of its own timed modes runs
+ * (Jet Fighter Attack); a mode of ours picked there started, and its next tick saw "one of the game's modes running"
+ * and ended it, the battle lost. A pick is the player choosing that battle, so ours wins: pm_game_modes_end ends each
+ * of the game's modes running for the player up that ours would give way to, through the mode's own STOP as lost (as
+ * its clock running out ends it - its lights, words and music go the game's own way, and it can be earned again).
+ * Never a multiball (its balls stay in play), a battle, a mode flagged beside everything (the kind's 0x20, which the
+ * game's own "a mode is active" query skips too) or one the port names beside ours (`text stock_any_beside`).
+ * Which modes: the ones the port names a start of (`text block_name_<id>` + `data block_obj_<id>`, C++ titles). Their
+ * ACTIVE and KIND virtuals are the slots the game's own query calls (`site stock_any_running`: `ldr r3,[r3,#A]; blx r3`,
+ * then `ldr r3,[r3,#K]; cmp r3,r6` - Godzilla v[14] / v[17]), read off that code, or `value mode_slot_active` /
+ * `mode_slot_kind`. Needs the framework's STOP (`value mode_slot_stop`). The number ended; -1 = this port cannot.
+ * Its TOTAL screen is not shown: run 768 a1/a2 - Jet Fighter's own stop queued JET FIGHTER ATTACK TOTAL (its clip
+ * "fighter_total" on the one video surface), which waited out the selection screen's close and then covered the picked
+ * mode's start clip for 4.5 s. Its END shows that screen only when the mode's points this time are not 0 - the award
+ * object's per-player total (`value stock_award_at` / `battle_total_at`, the same field a picked battle's START
+ * zeroes); those points are in the player's score already, so they are zeroed before its stop, where the port names
+ * the field. */
+static long mode_query_slot(int kind_slot)
+{
+    unsigned f = fn("stock_any_running"), i;
+    const unsigned *w;
+    if (!f || !maps_has(f, 4 * 32, MAP_R | MAP_GAME)) return -1;
+    w = (const unsigned *)(unsigned long)f;
+    for (i = 0; i + 1 < 32; i++) {
+        if ((w[i] & 0xfffff000u) != 0xe5933000u || (w[i] & 3u)) continue;   /* ldr r3, [r3, #imm] */
+        if (!kind_slot && w[i + 1] == 0xe12fff33u) return (long)(w[i] & 0xfffu) / 4;   /* blx r3: the ACTIVE ask */
+        if (kind_slot && w[i + 1] == 0xe1530006u) return (long)(w[i] & 0xfffu) / 4;    /* cmp r3, r6: the KIND getter */
+    }
+    return -1;
+}
+
+int pm_game_modes_end(const char *why)
+{
+    static int said;
+    long a_slot = pm_port_value("mode_slot_active", -1), k_slot = pm_port_value("mode_slot_kind", -1);
+    const char *beside = pm_port_text("stock_any_beside");
+    unsigned id, p, up = pm_player(), obj, act, kfn, stop;
+    int n = 0;
+    if (a_slot < 0) a_slot = mode_query_slot(0);
+    if (k_slot < 0) k_slot = mode_query_slot(1);
+    if (!pm_in_game() || up < 1 || up > 4) return 0;
+    if (a_slot < 0 || k_slot < 0 || pm_port_value("mode_slot_stop", -1) < 0 || !(p = place_player()) || p != up) {
+        if (!said)
+            say("game modes: this port cannot end the game's own modes for a pick (%s) - ours gives way to them as before",
+                a_slot < 0 || k_slot < 0 ? "no active/kind slots: `site stock_any_running` is not the known shape"
+                : pm_port_value("mode_slot_stop", -1) < 0 ? "no `value mode_slot_stop`" : "the game's player index is not the player up");
+        said = 1;
+        return -1;
+    }
+    for (id = 0; id < BLOCK_IDS; id++) {
+        unsigned kind;
+        if (!bm_has(block_named, id) || !(obj = block_obj[id])) continue;
+        if (place_held[up].on && place_held[up].id == id) continue;          /* ours in its place: it does not run */
+        if (stock_beside(beside, place_name(id))) continue;                   /* PAD-733: Tesla Strike runs beside ours */
+        act = place_vfn_at(obj, a_slot);
+        kfn = place_vfn_at(obj, k_slot);
+        stop = place_stop_fn(obj);
+        if (!act || !kfn || !stop) continue;
+        if (!(((unsigned (*)(unsigned))(unsigned long)act)(obj) & 0xffu)) continue;   /* not active */
+        kind = ((unsigned (*)(unsigned))(unsigned long)kfn)(obj);
+        if ((kind & 0x20u) || (kind & 0x8u) || (kind & 0x21u) == 1u) continue;      /* beside all / a battle / a multiball */
+        {
+            long award_at = pm_port_value("stock_award_at", -1), total_at = pm_port_value("battle_total_at", -1);
+            unsigned aw = award_at >= 0 && total_at >= 0 ? rw(obj + (unsigned)award_at) : 0;   /* as roster_host_begin */
+            uint64_t pts = 0;
+            if (aw && !(aw & 3)) {
+                pts = (uint64_t)rw(aw + (unsigned)total_at + 8 * p) | (uint64_t)rw(aw + (unsigned)total_at + 8 * p + 4) << 32;
+                *(unsigned *)(unsigned long)(aw + (unsigned)total_at + 8 * p) = 0;     /* no TOTAL screen over ours */
+                *(unsigned *)(unsigned long)(aw + (unsigned)total_at + 8 * p + 4) = 0;
+            }
+            ((void (*)(unsigned, unsigned, unsigned))(unsigned long)stop)(obj, 0u, 1u);  /* its own STOP, lost */
+            n++;
+            say("game modes: the game's %s (mode %u) was running - %s wins over it: its own stop ran (v[%ld], lost), "
+                "active now %u; %s", place_name(id), id, why && why[0] ? why : "a pick", pm_port_value("mode_slot_stop", -1),
+                ((unsigned (*)(unsigned))(unsigned long)act)(obj) & 0xffu,
+                aw ? (pts ? "its TOTAL screen skipped (its points are in the score)" : "it had no points this time")
+                   : "(the port names no points field: its own ending shows)");
+        }
+    }
+    if (n) aside.at = 0;                     /* asked afresh: not the answer from before the stop */
+    return n;
 }
 
 /* PAD-710: a test's way to the claim - the game's START of one of its modes, called as the game's rules call it (its

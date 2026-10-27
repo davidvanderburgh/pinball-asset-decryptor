@@ -2827,6 +2827,7 @@ def to_c(program, slug):
     L.append("static struct {")
     L.append("    int on;")
     L.append("    int own_mball;                    /* a Multiball block served balls: not the game's multiball */")
+    L.append("    int pick_mball;                   /* PAD-768: a battle picked in the game's multiball: it runs through it */")
     L.append("    unsigned player, ticks_left, seconds_shown, elapsed, shots;")
     L.append("    uint64_t total;")
     L.append("} run;")
@@ -3303,7 +3304,9 @@ def to_c(program, slug):
     L.append("")
     L.append("/* PAD-733: 1 while a battle picked on the game's selection screen (or a mode of the game's this one takes the")
     L.append(" * place of) starts it: the game let its own start now, so there is nothing to wait out (David's Premium, v32:")
-    L.append(" * two KUMONGA picks were refused and given back as lost battles) */")
+    L.append(" * two KUMONGA picks were refused and given back as lost battles). PAD-768: 2 for a battle pick, which wins over")
+    L.append(" * the game's own modes running then (David: \"Anything from the Kaiju Battle select screen should override the")
+    L.append(" * mini modes\" - Jet Fighter Attack carried on and the picked KING CAESAR ended at once) */")
     L.append("static int pick_go;")
     L.append("")
     L.append("/* counted: a block asked (the tab's Start mode now does not wait for the game's modes) */")
@@ -3338,7 +3341,12 @@ def to_c(program, slug):
     L.append("    } else if (GAME_MODES == 1) {")
     L.append("        pm_log(\"isolated: gives way - one of the game's modes starting ends it\");")
     L.append("    }")
-    L.append("    run.own_mball = 0;")
+    L.append("    run.own_mball = run.pick_mball = 0;")
+    L.append("    if (pick_go == 2 && GAME_MODES) {   /* PAD-768: the pick ends the game's mini modes; a multiball plays on */")
+    L.append("        pm_game_modes_end(\"a battle picked on the selection screen\");")
+    L.append("        run.pick_mball = pm_aside() == (int)PM_STOCK_MULTIBALL;")
+    L.append("        if (run.pick_mball) pm_log(\"picked in the game's multiball: it runs through it\");")
+    L.append("    }")
     if battle_slots or place_ids or challenge_names or g.battle_won:
         L.append("    battle_won = 0;")
     L.append("    run.on = 1;")
@@ -3548,6 +3556,7 @@ def to_c(program, slug):
         L.append("static volatile unsigned battle_picked;    /* set on the game's thread, run on the tick */")
         L.append("static unsigned battle_player;             /* who picked */")
         L.append("static unsigned long battle_at;            /* its scripts run from this pm_ms(), once the selection screen has closed */")
+        L.append("static int battle_cleared;                 /* PAD-768: the game's mini modes ended for this pick */")
         L.append("")
         L.append("static int on_battle(unsigned slot)")
         L.append("{")
@@ -3563,6 +3572,7 @@ def to_c(program, slug):
         L.append("                return 1;")
         L.append("            }")
         L.append("            battle_picked |= 1u << k;")
+        L.append("            battle_cleared = 0;")
         L.append("            battle_player = pm_player();")
         L.append("            battle_at = pm_ms();")
         L.append('            pm_log("battle %u picked - its script runs once the selection screen has closed", slot);')
@@ -3847,6 +3857,12 @@ def to_c(program, slug):
         L.append("    }")
     battle_scripts = scripts_of("battle")
     if battle_slots:                                # PAD-706: a battle picked, once the selection screen has closed
+        # PAD-768: the game's mini modes end at the pick, on the next tick: their own ending (Jet Fighter Attack's TOTAL
+        # clip) then plays under the selection screen's close, whose end stops the game's player, not over the start clip
+        L.append("    if (battle_picked && !battle_cleared && GAME_MODES && in_game && pm_player() == battle_player) {")
+        L.append("        battle_cleared = 1;")
+        L.append("        pm_game_modes_end(\"a battle picked on the selection screen\");")
+        L.append("    }")
         L.append("    if (battle_picked && (long)(pm_ms() - battle_at) >= 0 && !pm_roster_closing()) {")
         L.append("        unsigned picked = battle_picked;")
         L.append("        battle_picked = 0;")
@@ -3859,7 +3875,8 @@ def to_c(program, slug):
         L.append("        } else {")
         if media:
             L.append("            clip_after = 0;               /* PAD-733: its start clip with its start, as the game's battle */")
-        L.append("            pick_go = 1;                  /* PAD-733: the game let its battle start: nothing to wait out */")
+        L.append("            pick_go = 2;                  /* PAD-733: the game let its battle start: nothing to wait out;")
+        L.append("                                           * PAD-768: and it wins over the game's mini modes */")
         L.extend("        " + line if line else line for code in battle_scripts for line in code.split("\n"))
         L.append("            pick_go = 0;")
         if media:
@@ -3938,8 +3955,9 @@ def to_c(program, slug):
     L.append("        return;")
     L.append("    }")
     L.append("    if (run.own_mball && pm_balls_in_play() < 2) run.own_mball = 0;   /* its multiball is over */")
+    L.append("    if (run.pick_mball && pm_balls_in_play() < 2) run.pick_mball = 0;   /* PAD-768: the game's is over */")
     # PAD-710: a mode in the place of one of the game's modes is that mode: the game's others beside it do not end it
-    L.append("    if (GAME_MODES && pm_aside() && !(run.own_mball && pm_aside() == (int)PM_STOCK_MULTIBALL)%s) {"
+    L.append("    if (GAME_MODES && pm_aside() && !((run.own_mball || run.pick_mball) && pm_aside() == (int)PM_STOCK_MULTIBALL)%s) {"
              % (" && !place_held" if place_ids else ""))
     L.append("        end_now(\"the game's own mode began\");   /* its screen and HUD go at once, as a tilt's */")
     L.append("        return;")

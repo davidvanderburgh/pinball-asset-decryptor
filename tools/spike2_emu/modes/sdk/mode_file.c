@@ -171,6 +171,7 @@ static struct {
     int mball_wait;                   /* PAD-228: `multiball_on` - the balls are not served until its shot */
     int by_challenge;                 /* PAD-619: started by a challenge pick - the challenge game is the mode's */
     int by_place;                     /* PAD-710: started in the place of one of the game's modes - it is that mode */
+    int pick_mball;                   /* PAD-768: a roster pick in the game's multiball: it runs through it */
     unsigned long shield_due;         /* PAD-392: when the shield platform turns (0 = turned, or not asked) */
     unsigned long building_due;       /* PAD-589: when the building moves as it starts (0 = moved, or not asked) */
     unsigned clock_wait;              /* PAD-621: coil line + 1 whose hold the clock waits for; 0 = it runs */
@@ -2451,6 +2452,7 @@ static void hand_off(struct slot *M, const char *why)
 
 static int challenge_force;                /* PAD-619: mode_start past the game's modes (the pick's grace ran out) */
 static int place_force;                    /* PAD-710: the game was starting its own mode: past its other modes too */
+static int roster_force;                   /* PAD-768: a battle picked on the selection screen: it wins over the game's */
 
 static void mode_start(struct slot *M, const char *why)
 {
@@ -2465,8 +2467,9 @@ static void mode_start(struct slot *M, const char *why)
         return;
     }
     if (!starts_allowed(M, why)) return;     /* item 139: how often it can start */
-    if (!stack_allows(M, why)) return;       /* item 140: the game's own modes */
-    if (cfg.game_modes != GM_STACK && !challenge_force && !place_force && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) { /* PAD-363 */
+    if (!roster_force && !stack_allows(M, why)) return;   /* item 140: the game's own modes (PAD-768: not for a pick) */
+    if (cfg.game_modes != GM_STACK && !challenge_force && !place_force && !roster_force
+        && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) { /* PAD-363 */
         pm_log("%s not started (%s): %s is running - its trigger count is kept", cfg.name, why,
                pm_stock_mode_what((unsigned)k));
         return;
@@ -2482,6 +2485,12 @@ static void mode_start(struct slot *M, const char *why)
     run.mball_on = run.mball_wait = 0;
     run.by_challenge = why[0] == 'c' && why[1] == 'h' && why[2] == 'a' && why[3] == 'l';   /* "challenge pick" */
     run.by_place = name_is(why, "in place of the game's mode");                          /* PAD-710 */
+    run.pick_mball = 0;
+    if (roster_force && cfg.game_modes != GM_STACK) {   /* PAD-768: the pick ends the game's mini modes */
+        pm_game_modes_end("a battle picked on the selection screen");
+        run.pick_mball = pm_aside() == (int)PM_STOCK_MULTIBALL;
+        if (run.pick_mball) pm_log("%s: picked in the game's multiball - it runs through it", cfg.name);
+    }
     if (cfg.mball_balls && cfg.mball_on_bits) {
         run.mball_wait = 1;                  /* PAD-228: served on its shot, while the mode runs */
     } else if (cfg.mball_balls) {            /* item 167: the game serves the balls, or the mode does not start */
@@ -2616,9 +2625,18 @@ static void roster_ended(int won)
  * starts when that one ends). A pick the mode cannot start (item 139's starts/cooldown, item 140's
  * stack no, a mode in C running, the player changed) is GIVEN BACK: pm_roster_done() lights the
  * ramps again. The game's battle for the slot never runs - the slot shows our name and art. */
+static int roster_cleared;                  /* PAD-768: the game's mini modes ended for the waiting pick */
+
 static void roster_tick(void)
 {
     struct slot *M;
+    /* PAD-768: the game's mini modes end at the pick: their own ending (Jet Fighter Attack's TOTAL clip) plays under the
+     * selection screen's close, whose end stops the game's player, not over the mode's start */
+    if (roster_wait && !roster_cleared && !run.active && pm_in_game() && pm_player() == roster_wait_player
+        && slots[roster_wait - 1].c.game_modes != GM_STACK) {
+        roster_cleared = 1;
+        pm_game_modes_end("a battle picked on the selection screen");
+    }
     if (!roster_wait || run.active || pm_ms() < roster_wait_ms || pm_roster_closing()) return;   /* PAD-733: the close */
     M = &slots[roster_wait - 1];
     roster_wait = 0;
@@ -2627,7 +2645,9 @@ static void roster_tick(void)
         pm_roster_done();                    /* the runtime gives it back to that player, or drops it at game over */
         return;
     }
+    roster_force = 1;                        /* PAD-768: a pick wins over the game's mini modes */
     mode_start(M, "roster pick");
+    roster_force = 0;
     if (running(M)) { roster_run = 1; return; }
     pm_log("%s: picked but not started - the pick is given back (the ramps light again)", cfg.name);
     pm_roster_done();
@@ -2658,6 +2678,7 @@ static int roster_pick_as(unsigned roster, const char *more)
             return 1;
         }
         roster_wait = k + 1;
+        roster_cleared = 0;
         roster_wait_player = pm_player();
         roster_wait_ms = pm_ms();       /* PAD-733: no clock - roster_tick starts it as the screen's close ends */
         if (run.active)
@@ -3407,7 +3428,9 @@ static void on_tick(void)
      * runs a mode of its own at every ball's start; the pick started past it, and the game's are blocked as they can be);
      * PAD-710: nor in the place of one of the game's modes - the game started it as its own (Venom starts a mini mode as
      * a ball starts, beside its other modes) */
-    if (cfg.game_modes != GM_STACK && !run.by_challenge && !run.by_place && pm_aside()) {
+    if (run.pick_mball && pm_balls_in_play() < 2) run.pick_mball = 0;   /* PAD-768: the game's multiball is over */
+    if (cfg.game_modes != GM_STACK && !run.by_challenge && !run.by_place && pm_aside()
+        && !(run.pick_mball && pm_aside() == (int)PM_STOCK_MULTIBALL)) {
         mode_end("the game's own mode began");
         return;
     }

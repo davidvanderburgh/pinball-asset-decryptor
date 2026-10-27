@@ -763,6 +763,14 @@ int pm_stock_mode_running(unsigned kinds)
     if ((kinds & PM_STOCK_ANY) && (battle || multiball || timed)) return PM_STOCK_ANY;
     return 0;
 }
+/* PAD-768: a pick ends the game's timed mode (`timed 1`), as the runtime runs its own STOP; never a battle or multiball */
+int pm_game_modes_end(const char *why)
+{
+    if (!in_game || !timed) return 0;
+    timed = 0;
+    printf("%6lu GAME MODES END 1 (%s)\n", now_ms, why ? why : "");
+    return 1;
+}
 int pm_aside(void)
 {
     return in_game ? pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL | PM_STOCK_ANY) : 0;

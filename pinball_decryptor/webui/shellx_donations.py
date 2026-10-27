@@ -60,7 +60,8 @@ class DonationsMixin:
             name=self._don_settings.get("name") or "",
             offline=self._don_offline,
             country=self._don_settings.get("country") or "",
-            region=self._don_settings.get("region") or ""))
+            region=self._don_settings.get("region") or "",
+            mine=self._don_cache.get("mine") or ()))
 
     def _save_donations_settings(self, **changes):
         self._don_settings.update(changes)
@@ -151,18 +152,85 @@ class DonationsMixin:
                 log.info("donation kept for later: %s", e)
                 self.ctx.loop.post(self._donations_keep, entry, None)
                 return
-            self.ctx.loop.post(self._donations_sent, summary)
+            self.ctx.loop.post(self._donations_sent, summary, entry)
         threading.Thread(target=_run, daemon=True,
                          name="pad-donation-send").start()
         return {"sent": True}
 
-    def _donations_sent(self, summary):
+    def _donations_sent(self, summary, entry=None):
         self._don_offline = False
         self._don_cache["summary"] = summary
         self._don_cache["fetched_at"] = time.time()
+        if entry is not None and summary.get("id"):
+            # remember it as ours, with the token that lets us take it back
+            mine = [m for m in self._don_cache.get("mine") or ()
+                    if isinstance(m, dict)]
+            mine.append({"id": summary["id"], "token": summary.get("token", ""),
+                         "held": bool(summary.get("held")),
+                         "at": time.time(), "entry": entry})
+            self._don_cache["mine"] = mine[-10:]
         donations.save_cache(self._don_path, self._don_cache)
         self._publish_donations()
-        self.toast("Added to the total. Thank you.", "success")
+        if summary.get("held"):
+            self.toast("Thank you. An entry that size is checked by hand "
+                       "before it counts, so the total moves later.", "info")
+        else:
+            self.toast("Added to the total. Thank you.", "success")
+
+    @rpc
+    def donations_remove(self, key):
+        """Take back one of this install's entries (the window's Yours list):
+        a pending one is dropped here; a sent one is hidden by the service
+        with the token it answered.  Returns the entry's fields so the form
+        can be filled with them for a corrected go."""
+        if str(key).startswith("pending:"):
+            try:
+                i = int(str(key).split(":", 1)[1])
+                entry = self._don_cache["pending"].pop(i)
+            except (ValueError, IndexError, KeyError):
+                raise RpcError("That entry is already gone.")
+            donations.save_cache(self._don_path, self._don_cache)
+            self._publish_donations()
+            return entry
+        mine = [m for m in self._don_cache.get("mine") or ()
+                if isinstance(m, dict)]
+        hit = next((m for m in mine if m.get("id") == key), None)
+        if hit is None:
+            raise RpcError("That entry is already gone.")
+        url = self._donations_url()
+        key_app = config.DONATIONS_APP_KEY
+
+        def _run():
+            try:
+                summary = donations.remove(url, key_app, hit["id"],
+                                           hit.get("token", ""))
+            except donations.DonationsError as e:
+                # already hidden (David, or an earlier try): drop it here too
+                log.info("donation %s not removable: %s", hit["id"], e)
+                self.ctx.loop.post(self._donations_removed, hit, None)
+                return
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                log.info("donation %s could not be removed: %s", hit["id"], e)
+                self.ctx.loop.post(
+                    self.toast, "Couldn't reach the total just now. Try "
+                    "Remove again in a moment.", "warning")
+                return
+            self.ctx.loop.post(self._donations_removed, hit, summary)
+        threading.Thread(target=_run, daemon=True,
+                         name="pad-donation-remove").start()
+        return hit.get("entry") or {}
+
+    def _donations_removed(self, hit, summary):
+        self._don_cache["mine"] = [
+            m for m in self._don_cache.get("mine") or ()
+            if isinstance(m, dict) and m.get("id") != hit.get("id")]
+        if summary is not None:
+            self._don_offline = False
+            self._don_cache["summary"] = summary
+            self._don_cache["fetched_at"] = time.time()
+        donations.save_cache(self._don_path, self._don_cache)
+        self._publish_donations()
+        self.toast("Taken back. Fix it and add it again.", "info")
 
     def _donations_refused(self, message):
         self.toast(message, "warning")

@@ -143,9 +143,25 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-don-therm .bulb-shine { fill: #fff; opacity: .35; }
 .sx-don-therm .shine { fill: #fff; opacity: .18; }
 .sx-don-therm .tick { stroke: var(--ink-3); stroke-width: 1.5; }
-/* the hero */
-.sx-don-hero { position: relative; display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-radius: 12px; background: var(--accent-soft); border: 1px solid var(--accent-line); overflow: hidden; }
-.sx-don-total { font-size: 38px; font-weight: 700; color: var(--accent); line-height: 1; letter-spacing: -.02em; }
+/* the hero: marquee lamps along its top and bottom edges, the total on
+   slot reels, a jackpot flash when an entry lands */
+.sx-don-hero { position: relative; display: flex; align-items: center; gap: 14px; padding: 16px 16px; border-radius: 12px; background: var(--accent-soft); border: 1px solid var(--accent-line); overflow: hidden; }
+.sx-don-hero::before, .sx-don-hero::after { content: ""; position: absolute; left: 10px; right: 10px; height: 6px; pointer-events: none;
+  background-image: radial-gradient(circle, var(--accent) 0 2px, transparent 2.6px), radial-gradient(circle, var(--accent-line) 0 2px, transparent 2.6px);
+  background-size: 16px 6px, 16px 6px; background-position: 0 0, 8px 0; background-repeat: repeat-x;
+  animation: sx-don-lamps .8s steps(1, end) infinite; }
+.sx-don-hero::before { top: 4px; } .sx-don-hero::after { bottom: 4px; }
+@keyframes sx-don-lamps { 0% { background-position: 0 0, 8px 0; } 50% { background-position: 8px 0, 16px 0; } 100% { background-position: 0 0, 8px 0; } }
+.sx-don-hero.hit { animation: sx-don-jackpot 2.2s ease-out; }
+.sx-don-hero.hit::before, .sx-don-hero.hit::after { animation-duration: .16s; }
+@keyframes sx-don-jackpot { 0% { box-shadow: 0 0 0 0 var(--accent-line); background: var(--accent-soft); } 12% { box-shadow: 0 0 28px 6px var(--accent-line); background: var(--sel); } 100% { box-shadow: 0 0 0 0 transparent; background: var(--accent-soft); } }
+.sx-don-plus { position: absolute; right: 56px; top: 50%; color: var(--accent); font-size: 20px; font-weight: 700; animation: sx-don-plus 2.2s ease-out forwards; }
+@keyframes sx-don-plus { 0% { opacity: 0; transform: translateY(16px); } 15% { opacity: 1; transform: translateY(-50%); } 70% { opacity: 1; transform: translateY(-50%); } 100% { opacity: 0; transform: translateY(-50%) translateX(-40px) scale(.6); } }
+.sx-don-total { font-size: 38px; font-weight: 700; color: var(--accent); line-height: 1; letter-spacing: -.02em; display: inline-flex; align-items: flex-end; }
+.sx-don-reel { display: inline-block; height: 1em; overflow: hidden; line-height: 1; }
+.sx-don-reel .strip { display: flex; flex-direction: column; line-height: 1; will-change: transform; }
+.sx-don-reel .strip span { display: block; height: 1em; }
+.sx-don-reel .strip.go { transition: transform 1.4s cubic-bezier(.15, .85, .25, 1.06); }
 .sx-don-paw { position: absolute; right: -10px; top: -16px; color: var(--accent); opacity: .14; pointer-events: none; }
 .sx-don-paw svg { width: 96px; height: 96px; }
 /* the ladder */
@@ -174,6 +190,9 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-don-step .amt { font-size: 12px; color: var(--ink-2); }
 .sx-don-step .blk { width: 100%; border-radius: 8px 8px 0 0; background: var(--panel-3); color: var(--ink-2); display: flex; align-items: flex-start; justify-content: center; padding-top: 6px; font-size: 14px; }
 .sx-don-step.p1 .blk { height: 56px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.sx-don-step .blk { transform-origin: bottom; animation: sx-don-rise .7s cubic-bezier(.2, .8, .2, 1) both; }
+.sx-don-step.p2 .blk { animation-delay: .1s; } .sx-don-step.p1 .blk { animation-delay: .3s; } .sx-don-step.p3 .blk { animation-delay: .5s; }
+@keyframes sx-don-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 .sx-don-step.p2 .blk { height: 40px; }
 .sx-don-step.p3 .blk { height: 28px; }
 .sx-don-step.empty .blk { opacity: .4; }
@@ -183,12 +202,21 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-don-place .mono:last-child { text-align: right; }
 /* the form, and the paw prints that float off its button */
 .sx-don-form { padding: 12px 14px; position: relative; overflow: hidden; }
+.sx-don-cta { position: relative; overflow: hidden; }
+.sx-don-cta::after { content: ""; position: absolute; top: -60%; bottom: -60%; left: -70%; width: 36%; transform: skewX(-22deg); pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.5), transparent); animation: sx-don-gloss 3.4s ease-in-out infinite; }
+@keyframes sx-don-gloss { 0%, 72% { left: -70%; } 100% { left: 140%; } }
+.sx-don-confirm { background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 10px; padding: 10px 12px; }
+.sx-don-confirm-amt { font-size: 26px; font-weight: 700; color: var(--accent); line-height: 1.1; }
+.sx-don-mine { display: flex; flex-direction: column; gap: 2px; }
+.sx-don-mine-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 12.5px; padding: 2px 0 2px 4px; border-top: 1px solid var(--line); }
 .sx-don-form .sx-don-country { width: 100%; }
 .sx-don-burst { position: absolute; inset: 0; pointer-events: none; }
 .sx-don-burst i { position: absolute; bottom: 36%; color: var(--accent); opacity: 0; animation: sx-don-float 1.4s ease-out forwards; }
 .sx-don-burst i svg { width: 18px; height: 18px; }
 @keyframes sx-don-float { 0% { opacity: 0; transform: translateY(0) scale(.5) rotate(var(--r)); } 15% { opacity: .9; } 100% { opacity: 0; transform: translateY(-150px) scale(1.1) rotate(var(--r)); } }
 @media (max-width: 760px) { .sx-don-layout { grid-template-columns: minmax(0, 1fr); } .sx-don-therm-col { display: none; } }
+@media (prefers-reduced-motion: reduce) { .sx-don *, .sx-don *::before, .sx-don *::after { animation: none !important; transition: none !important; } }
 
 /* ---------------------------------------------------------- top bar */
 .sx-gear { position: relative; display: inline-flex; }

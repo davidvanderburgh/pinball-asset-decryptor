@@ -774,11 +774,15 @@ export function ShellxOverlays() {
 // once-only opening after a user's first card write.  Where the shelter is
 // (country, state or province, both optional) feeds the Top places board.
 //
-// The page: a drawn thermometer that fills toward the next milestone, the
-// total counting up as the window opens, the ladder of milestones as lit
-// badges, a podium for the top three places, initials for the people in
-// the list, and a few paw prints floating off the button when an entry
-// lands.  Colours are the app's tokens, so both themes carry it.
+// The page, with a little casino in it: the total spins in on slot reels,
+// marquee lamps chase around the hero band, a drawn thermometer fills
+// toward the next milestone, the ladder's milestones are lit badges, the
+// top three places stand on a podium that rises in, and an entry landing
+// is a jackpot: the band flashes, the lamps race, paw prints float off the
+// button.  An entry is confirmed before it goes ("Is that right?"), and
+// the Yours list takes one back (the service keeps a token per entry for
+// the app that added it) and refills the form with it.  Colours are the
+// app's tokens, so both themes carry it; prefers-reduced-motion stills it.
 
 // a name's hue for its initials circle: the same name, the same colour
 function nameHue(name) {
@@ -790,6 +794,42 @@ function initials(name) {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return "";
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+const SYMBOL = { USD: "$", EUR: "€", GBP: "£", JPY: "¥", CAD: "CA$", AUD: "A$", NZD: "NZ$", BRL: "R$", MXN: "MX$" };
+function money(amount, currency) {
+  const n = Number(amount);
+  const text = Number.isInteger(n) ? n.toLocaleString("en-US") : n.toFixed(2);
+  return (SYMBOL[currency] || currency + " ") + text;
+}
+
+// one slot reel: a strip of digits that always spins forward at least a
+// full turn to land on its digit
+const REEL_LEN = 40;
+const REEL_DIGITS = Array.from({ length: REEL_LEN }, (_, i) => i % 10);
+function Reel({ digit, delay }) {
+  const ref = useRef({ pos: 0 });
+  const [pos, setPos] = useState(0);
+  const [go, setGo] = useState(false);
+  useEffect(() => {
+    const cur = ref.current.pos;
+    let step = ((digit - (cur % 10)) + 10) % 10;
+    if (step === 0) step = 10;
+    if (cur + step < REEL_LEN) {
+      ref.current.pos = cur + step; setGo(true); setPos(cur + step);
+    } else {                                 // wrap unseen, then spin
+      ref.current.pos = cur % 10; setGo(false); setPos(cur % 10);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        ref.current.pos = (cur % 10) + step; setGo(true); setPos((cur % 10) + step);
+      }));
+    }
+  }, [digit]);
+  return html`<span class="sx-don-reel"><span class=${"strip" + (go ? " go" : "")}
+      style=${"transform:translateY(" + (-pos) + "em);transition-delay:" + delay + "ms"}>${REEL_DIGITS.map((n) => html`<span>${n}</span>`)}</span></span>`;
+}
+function Odometer({ text }) {
+  let n = 0;
+  return html`<span class="sx-don-total mono notr" aria-label=${text}>${[...String(text)].map((ch) =>
+    /[0-9]/.test(ch) ? html`<${Reel} digit=${Number(ch)} delay=${90 * n++} />` : html`<span>${ch}</span>`)}</span>`;
 }
 
 function Thermometer({ pct }) {
@@ -842,40 +882,48 @@ function DonationsDialog({ close, auto = false }) {
   const [showName, setShowName] = useState(true);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState("form");    // form | confirm
   const [added, setAdded] = useState(0);
-  const [shown, setShown] = useState(0);         // the total, counting up
+  const [hit, setHit] = useState(null);          // the jackpot: "+$30"
   useEffect(() => { call("shellx.donations_open", auto); }, []);
   useEffect(() => {
-    const target = d.total_usd || 0;
-    const from = shown;
-    if (!d.known || from === target) return undefined;
-    const t0 = performance.now();
-    const dur = 900;
-    let raf = 0;
-    const step = (t) => {
-      const k = Math.min(1, (t - t0) / dur);
-      const e = 1 - Math.pow(1 - k, 3);
-      setShown(from + (target - from) * e);
-      if (k < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [d.total_usd]);
-  const submit = async () => {
+    if (!hit) return undefined;
+    const id = setTimeout(() => setHit(null), 2200);
+    return () => clearTimeout(id);
+  }, [hit]);
+  const review = () => {
     setErr(null);
-    if (!String(amount).trim()) { setErr("Enter the amount you gave."); return; }
+    const n = Number(String(amount).replace(/[^0-9.]/g, ""));
+    if (!String(amount).trim() || !isFinite(n) || n <= 0) { setErr("Enter the amount you gave."); return; }
+    setStage("confirm");
+  };
+  const submit = async () => {
     setBusy(true);
     const r = await call("shellx.donations_submit", amount, currency, shelter, name, showName, country, region);
     setBusy(false);
+    setStage("form");
     if (!r) return;                       // the toast said what was wrong
-    setAdded((n) => n + 1); setAmount(""); setShelter("");
+    const n = Number(String(amount).replace(/[^0-9.]/g, ""));
+    setHit("+" + money(n, currency));
+    setAdded((k) => k + 1); setAmount(""); setShelter("");
+  };
+  const takeBack = async (row) => {
+    const e = await call("shellx.donations_remove", row.key);
+    if (!e) return;
+    setAmount(String(e.amount || "")); setCurrency(e.currency || "USD");
+    setShelter(e.shelter || ""); setCountry(e.country || ""); setRegion(e.region || "");
+    setName(e.name || ""); setShowName(e.show_name !== false);
+    setStage("form"); setErr(null);
   };
   const recent = d.recent || [];
   const places = d.places || [];
+  const mine = d.mine || [];
   const rest = places.slice(3);
   const top = places.length ? places[0].usd : 0;
-  const totalText = d.known && Math.round(shown) !== Math.round(d.total_usd || 0)
-    ? "$" + Math.round(shown).toLocaleString("en-US") : (d.total_text || "—");
+  const n = Number(String(amount).replace(/[^0-9.]/g, ""));
+  const big = n * ((d.rates || {})[currency] || 1) > (d.hold_over || 299);   // checked by hand first
+  const countryName = ((d.countries || []).find((c) => c.value === country) || {}).label || "";
+  const where = country ? (region ? region + ", " + (country === "US" ? "US" : countryName) : countryName) : "";
   return html`<${Modal} title="Animal shelters" icon="paw" wide onClose=${onClose} cls=${"sx-don " + uid}
     footer=${html`<span class="grow small dim wrap">${d.offline ? "The total can't be reached right now; this is the last it answered." : ""}</span>
       <${Button} onClick=${() => call("shellx.donations_refresh")}>Refresh<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
@@ -887,12 +935,13 @@ function DonationsDialog({ close, auto = false }) {
         <span class="small muted notr">${d.known ? d.last_text : ""}</span>
       </div>
       <div class="sx-don-main stack" style="gap:10px">
-        <div class="sx-don-hero">
-          <span class="sx-don-total mono notr">${totalText}</span>
+        <div class=${"sx-don-hero" + (hit ? " hit" : "")}>
+          <${Odometer} text=${d.known ? d.total_text : "—"} />
           <span class="stack" style="gap:2px">
             <span class="small muted">${d.known ? "raised by PAD users" : "No total yet."}</span>
             ${d.known ? html`<span class="chip acc sm notr" style="align-self:flex-start">${d.count_text}</span>` : null}
           </span>
+          ${hit ? html`<span class="sx-don-plus mono notr" key=${added}>${hit}</span>` : null}
           <span class="sx-don-paw" aria-hidden="true"><${Icon} name="paw" /></span>
         </div>
         <div class="sx-don-ladder" role="list" aria-label="Milestones">
@@ -920,26 +969,47 @@ function DonationsDialog({ close, auto = false }) {
               <span class="mono notr">${p.amount}</span>
             </div>`)}
           </div>` : null}` : null}
-        ${d.pending ? html`<span class="small warn-ink">${d.pending} of yours waiting to be sent.</span>` : null}
       </div>
-      <div class="card sx-don-form stack" style="gap:8px">
-        <span class="h2">I donated</span>
-        <div class="row" style="gap:6px">
-          <${Select} value=${currency} options=${d.currencies || ["USD"]} onChange=${setCurrency} width=${84} />
-          <${Field} value=${amount} onChange=${setAmount} placeholder="25" mono width=${96} autoFocus bad=${!!err} />
-        </div>
-        <${Field} value=${shelter} onChange=${setShelter} placeholder="Shelter (optional)" maxLength=${80} />
-        <${Select} value=${country} options=${d.countries || [{ value: "", label: "Country (optional)" }]} onChange=${setCountry} cls="sx-don-country" />
-        <${Field} value=${region} onChange=${setRegion} placeholder="State or province (optional)" maxLength=${40} disabled=${!country} />
-        <${Field} value=${name} onChange=${setName} placeholder="Your name (optional)" maxLength=${40} />
-        <${Check} checked=${showName} onChange=${setShowName} label="Show my name in the list" />
-        ${err ? html`<span class="small err-ink">${err}</span>` : null}
-        <${Button} kind="primary" onClick=${submit} disabled=${busy}>Add to the total<//>
-        ${added ? html`<span class="small ok-ink">Thank you.</span>
-          <div class="sx-don-burst" key=${added} aria-hidden="true">
+      <div class="stack" style="gap:10px;min-width:0">
+        <div class="card sx-don-form stack" style="gap:8px">
+          ${stage === "confirm" ? html`
+            <span class="h2">Is that right?</span>
+            <div class="sx-don-confirm stack" style="gap:4px">
+              <span class="sx-don-confirm-amt mono notr">${money(n, currency)}</span>
+              <span class="small">${shelter.trim() ? html`to <b class="notr">${shelter.trim()}</b>` : "to an animal shelter"}${where ? html` in <span class="notr">${where}</span>` : null}</span>
+              <span class="small muted">${name.trim() && showName ? html`listed as <span class="notr">${name.trim()}</span>` : "listed as Anonymous"}</span>
+            </div>
+            ${big ? html`<span class="small warn-ink wrap">An entry over $${(d.hold_over || 299).toLocaleString("en-US")} is checked by hand before it counts, so the total moves later.</span>` : null}
+            <span class="small muted wrap">It goes on the total everyone sees. You can take it back from the Yours list below.</span>
+            <${Button} kind="primary" cls="sx-don-cta" onClick=${submit} disabled=${busy}>Yes, add it<//>
+            <${Button} kind="ghost" onClick=${() => setStage("form")} disabled=${busy}>Edit<//>`
+          : html`
+            <span class="h2">I donated</span>
+            <div class="row" style="gap:6px">
+              <${Select} value=${currency} options=${d.currencies || ["USD"]} onChange=${setCurrency} width=${84} />
+              <${Field} value=${amount} onChange=${setAmount} placeholder="25" mono width=${96} autoFocus bad=${!!err} />
+            </div>
+            <${Field} value=${shelter} onChange=${setShelter} placeholder="Shelter (optional)" maxLength=${80} />
+            <${Select} value=${country} options=${d.countries || [{ value: "", label: "Country (optional)" }]} onChange=${setCountry} cls="sx-don-country" />
+            <${Field} value=${region} onChange=${setRegion} placeholder="State or province (optional)" maxLength=${40} disabled=${!country} />
+            <${Field} value=${name} onChange=${setName} placeholder="Your name (optional)" maxLength=${40} />
+            <${Check} checked=${showName} onChange=${setShowName} label="Show my name in the list" />
+            ${err ? html`<span class="small err-ink">${err}</span>` : null}
+            <${Button} kind="primary" cls="sx-don-cta" onClick=${review} disabled=${busy}>Add to the total<//>
+            ${added ? html`<span class="small ok-ink">Thank you.</span>` : null}
+            <span class="small muted wrap">Honor system. Nothing else about you is sent.</span>`}
+          ${added ? html`<div class="sx-don-burst" key=${added} aria-hidden="true">
             ${[0, 1, 2, 3, 4, 5, 6].map((i) => html`<i style=${"left:" + (8 + i * 13) + "%;animation-delay:" + (i * 70) + "ms;--r:" + ((i % 2 ? 1 : -1) * (10 + i * 7)) + "deg"}><${Icon} name="paw" /></i>`)}
           </div>` : null}
-        <span class="small muted wrap">Honor system. Nothing else about you is sent.</span>
+        </div>
+        ${mine.length ? html`<span class="small muted sx-don-h">Yours</span>
+          <div class="sx-don-mine">
+            ${mine.map((m) => html`<div class="sx-don-mine-row" key=${m.key}>
+              <span class="mono notr">${m.amount}</span>
+              <span class="small muted ellip notr" title=${m.shelter + (m.where ? " (" + m.where + ")" : "")}>${m.shelter || "an animal shelter"}${m.where ? " · " + m.where : ""}${m.pending ? html` <span class="chip warn sm">waiting</span>` : m.held ? html` <span class="chip info sm" title="Checked by hand before it counts">in review</span>` : null}</span>
+              <${Button} kind="ghost" size="sm" icon="x" title="Take it back and fix it" onClick=${() => takeBack(m)} />
+            </div>`)}
+          </div>` : null}
       </div>
     </div>
   <//>`;

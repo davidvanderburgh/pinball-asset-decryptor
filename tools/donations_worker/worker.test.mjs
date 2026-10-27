@@ -2,11 +2,11 @@
 // answers the exact statements worker.js prepares.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import worker, { MILESTONES, RATES } from "./worker.js";
+import worker, { MILESTONES, RATES, HOLD_OVER_USD } from "./worker.js";
 
 function fakeDb() {
   const rows = [];
-  const live = () => rows.filter((r) => !r.removed);
+  const live = () => rows.filter((r) => !r.removed && !r.held);
   const stmt = (sql) => {
     let args = [];
     const s = {
@@ -45,9 +45,19 @@ function fakeDb() {
       },
       async run() {
         if (sql.startsWith("INSERT")) {
-          const [id, at, amount, currency, usd, shelter, country, region, name, show_name, app_version, ip_hash] = args;
-          rows.push({ id, at, amount, currency, usd, shelter, country, region, name, show_name, app_version, ip_hash, removed: 0 });
+          const [id, at, amount, currency, usd, shelter, country, region, name, show_name, app_version, ip_hash, edit_token, held] = args;
+          rows.push({ id, at, amount, currency, usd, shelter, country, region, name, show_name, app_version, ip_hash, edit_token, held, removed: 0 });
           return { meta: { changes: 1 } };
+        }
+        if (sql.startsWith("UPDATE donations SET held = 0")) {
+          const r = rows.find((x) => x.id === args[0] && x.held && !x.removed);
+          if (r) r.held = 0;
+          return { meta: { changes: r ? 1 : 0 } };
+        }
+        if (sql.startsWith("UPDATE donations SET removed = 1 WHERE id = ? AND edit_token")) {
+          const r = rows.find((x) => x.id === args[0] && x.edit_token === args[1] && !x.removed);
+          if (r) r.removed = 1;
+          return { meta: { changes: r ? 1 : 0 } };
         }
         if (sql.startsWith("UPDATE donations SET removed")) {
           const r = rows.find((x) => x.id === args[0] && !x.removed);
@@ -129,7 +139,7 @@ test("milestones fall in order with the moment they fell", async () => {
   e.DB.rows.forEach((r, i) => { r.at = 1000 + i; });
   const [, s] = await get(e, "/v1/summary");
   assert.equal(s.total_usd, 1200);
-  assert.deepEqual(s.milestones, [{ usd: MILESTONES[0], at: 1004 }, { usd: MILESTONES[1], at: 1009 }]);
+  assert.deepEqual(s.milestones, [{ usd: 100, at: 1000 }, { usd: 200, at: 1001 }, { usd: 500, at: 1004 }, { usd: 1000, at: 1009 }]);
 });
 
 test("places add up by country and state; no place, no row on the board", async () => {
@@ -138,7 +148,7 @@ test("places add up by country and state; no place, no row on the board", async 
   await post(e, { amount: 50, country: "us", region: "Texas" }, ip(1));
   await post(e, { amount: 25, country: "US", region: "Texas" }, ip(2));
   await post(e, { amount: 40, currency: "GBP", country: "GB", region: "" }, ip(3));
-  await post(e, { amount: 500, country: "", region: "Nowhere" }, ip(4));
+  await post(e, { amount: 50, country: "", region: "Nowhere" }, ip(4));
   e.DB.rows.forEach((r, i) => { r.at = 1000 + i; });   // one a second, in order
   const [, s] = await get(e, "/v1/summary");
   assert.deepEqual(s.places.map((p) => [p.country, p.region, p.usd, p.count]),
@@ -158,6 +168,48 @@ test("an admin hides a row; anyone else cannot", async () => {
   assert.deepEqual([after.total_usd, after.count], [0, 0]);
   const r3 = await worker.fetch(new Request(BASE + "/v1/donate/" + s.id, { method: "DELETE", headers: { "X-PAD-Admin": "adm" } }), e);
   assert.equal(r3.status, 404);
+});
+
+test("the app that added a row can take it back with its token", async () => {
+  const e = env();
+  const [, s] = await post(e, { amount: 300, shelter: "typo" });
+  assert.match(s.token, /^[0-9a-f]{32}$/);
+  const del = (headers) => worker.fetch(new Request(BASE + "/v1/donate/" + s.id, { method: "DELETE", headers }), e);
+  assert.equal((await del({ "X-PAD-Key": "k", "X-PAD-Edit": "0".repeat(32) })).status, 404);
+  assert.equal((await del({ "X-PAD-Edit": s.token })).status, 403);            // no app key
+  assert.equal((await del({ "X-PAD-Key": "k", "X-PAD-Edit": "nope" })).status, 403);
+  const ok = await del({ "X-PAD-Key": "k", "X-PAD-Edit": s.token });
+  assert.equal(ok.status, 200);
+  const body = await ok.json();
+  assert.deepEqual([body.ok, body.id, body.total_usd, body.count], [true, s.id, 0, 0]);
+  assert.equal((await del({ "X-PAD-Key": "k", "X-PAD-Edit": s.token })).status, 404);
+  const [, a] = await get(e, "/v1/admin/list", { "X-PAD-Admin": "adm" });
+  assert.equal(a.rows[0].removed, 1);                                          // kept, hidden
+});
+
+test("a big entry is held until David says so", async () => {
+  const e = env();
+  const [st, s] = await post(e, { amount: HOLD_OVER_USD + 1, shelter: "big" });
+  assert.equal(st, 201);
+  assert.equal(s.held, true);
+  assert.deepEqual([s.total_usd, s.count, s.recent], [0, 0, []]);      // not counted yet
+  const [, small] = await post(e, { amount: HOLD_OVER_USD }, { "X-PAD-Key": "k", "CF-Connecting-IP": "2.2.2.2" });
+  assert.equal(small.held, false);
+  assert.equal(small.count, 1);
+  const [, a] = await get(e, "/v1/admin/list", { "X-PAD-Admin": "adm" });
+  assert.equal(a.hold_over_usd, HOLD_OVER_USD);
+  assert.equal(a.rows.find((r) => r.id === s.id).held, 1);
+  const rev = (id, approve, headers = { "X-PAD-Admin": "adm" }) => worker.fetch(new Request(BASE + "/v1/admin/review/" + id, {
+    method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ approve }) }), e);
+  assert.equal((await rev(s.id, true, {})).status, 403);
+  assert.equal((await rev(s.id, true)).status, 200);
+  const [, after] = await get(e, "/v1/summary");
+  assert.deepEqual([after.total_usd, after.count], [HOLD_OVER_USD * 2 + 1, 2]);
+  assert.equal((await rev(s.id, true)).status, 404);                   // no longer held
+  const [, big2] = await post(e, { amount: 5000 }, { "X-PAD-Key": "k", "CF-Connecting-IP": "3.3.3.3" });
+  assert.equal((await rev(big2.id, false)).status, 200);                // hidden
+  const [, last] = await get(e, "/v1/summary");
+  assert.equal(last.count, 2);
 });
 
 test("anything else is not found", async () => {

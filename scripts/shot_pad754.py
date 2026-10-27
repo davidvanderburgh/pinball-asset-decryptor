@@ -58,9 +58,12 @@ class Fake:
         places = sorted(places.values(), key=lambda p: -p["usd"])
         places[0]["usd"] += 1800                       # Texas is winning
         return {"ok": True, "total_usd": total, "count": 56 + len(self.rows),
-                "milestones": [{"usd": 500, "at": NOW - 86400 * 200},
+                "milestones": [{"usd": 100, "at": NOW - 86400 * 260},
+                               {"usd": 200, "at": NOW - 86400 * 240},
+                               {"usd": 500, "at": NOW - 86400 * 200},
                                {"usd": 1000, "at": NOW - 86400 * 150},
                                {"usd": 2500, "at": NOW - 86400 * 53}],
+                "rates": {"USD": 1, "GBP": 1.27, "CAD": 0.73, "EUR": 1.08},
                 "recent": list(reversed(self.rows))[:12], "places": places,
                 "updated": NOW}
 
@@ -85,12 +88,18 @@ class Fake:
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}")
-                fake.rows.append({"at": NOW, "amount": body["amount"], "currency": body["currency"],
-                                  "shelter": body.get("shelter", ""), "country": body.get("country", ""),
-                                  "region": body.get("region", ""),
-                                  "name": body.get("name", "") if body.get("show_name") else "",
-                                  "usd": body["amount"]})
-                self._send(201, fake.summary())
+                held = body["amount"] > 299              # the Worker's HOLD_OVER_USD
+                if not held:
+                    fake.rows.append({"at": NOW, "amount": body["amount"], "currency": body["currency"],
+                                      "shelter": body.get("shelter", ""), "country": body.get("country", ""),
+                                      "region": body.get("region", ""),
+                                      "name": body.get("name", "") if body.get("show_name") else "",
+                                      "usd": body["amount"]})
+                out = fake.summary()
+                out["id"] = "%032x" % (NOW * 7919 + len(fake.rows))
+                out["token"] = "f" * 32
+                out["held"] = held
+                self._send(201, out)
 
         srv = HTTPServer(("127.0.0.1", 0), H)
         self.url = "http://127.0.0.1:%d" % srv.server_port
@@ -150,6 +159,10 @@ def main():
                 page.fill(".sx-don-form input[placeholder='State or province (optional)']", "New York")
                 page.fill(".sx-don-form input[placeholder='Your name (optional)']", "David")
                 page.click(".sx-don-form button:has-text('Add to the total')")
+                page.wait_for_selector(".sx-don-confirm", timeout=15000)
+                time.sleep(0.6)
+                shoot("confirm")
+                page.click(".sx-don-form button:has-text('Yes, add it')")
                 for _ in range(40):
                     d = webui_shot.state(url)["shellx"]["donations"]
                     if d["recent"] and d["recent"][0]["name"] == "David":
@@ -157,6 +170,23 @@ def main():
                     time.sleep(0.25)
                 time.sleep(0.5)                       # the paw prints mid-flight
                 shoot("added")
+                page.wait_for_selector(".sx-don-mine-row", timeout=15000)
+                time.sleep(2.5)                       # the jackpot has settled
+                shoot("yours")
+                # a big one: the confirm step says it is checked by hand first
+                page.fill(".sx-don-form input[placeholder='25']", "500")
+                page.click(".sx-don-form button:has-text('Add to the total')")
+                page.wait_for_selector(".sx-don-confirm", timeout=15000)
+                time.sleep(0.6)
+                shoot("confirm_big")
+                page.click(".sx-don-form button:has-text('Yes, add it')")
+                for _ in range(40):
+                    d = webui_shot.state(url)["shellx"]["donations"]
+                    if d["mine"] and d["mine"][0]["held"]:
+                        break
+                    time.sleep(0.25)
+                time.sleep(2.5)
+                shoot("held")
                 webui_shot.api(url, "ui.set_theme", "light")
                 time.sleep(1.5)
                 shoot("light")

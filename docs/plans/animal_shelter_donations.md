@@ -11,8 +11,8 @@ total of what PAD users report giving, so everyone can see it grow.
   and the window opens. The gear menu has the same entry.
 - **The window**: a one-line pitch (no donations here, give to a shelter,
   then tell us so it counts); a thermometer toward the next milestone on a
-  ladder (500, 1k, 2.5k, 5k, 10k, 25k, 50k, 100k, 250k, 500k, 1M) with the
-  date the last one fell; the last twelve donations (name or Anonymous,
+  ladder (100, 200, 500, 1k, 2.5k, 5k, 10k, 25k, 50k, 100k, 250k, 500k, 1M;
+  David: start mild, few will give much) with the date the last one fell; the last twelve donations (name or Anonymous,
   shelter, the amount in its own currency); a small form: currency, amount,
   shelter and name both optional, where the shelter is (a country from a
   list, a state or province typed), a "show my name" tick, Add to the total.
@@ -50,11 +50,28 @@ with no network and a failed entry goes the next time the app can.
 `settings.json` `donations` remembers that the prompt was shown and the
 form's last currency and name.
 
+## Confirm, take back, and the casino
+
+An entry is confirmed before it goes ("Is that right?": the amount, the
+shelter, the place, the name it is listed as). The Yours list under the
+form shows this install's entries; Remove takes one back (the service keeps
+a per-entry token only the app that added it knows) and refills the form
+with it for a corrected go. A pending entry is dropped locally the same way.
+
+The window has a little casino in it (David: draw people in): the total
+spins in on slot reels, marquee lamps chase around the hero band, the
+podium rises in, the button has a gloss sweep, and an entry landing is a
+jackpot (the band flashes, the lamps race, "+$30" floats, paw prints float
+off the button). `prefers-reduced-motion` stills all of it.
+
 ## Guards
 
-Self-reported, and the window says so. A single entry is capped at 10,000
-in its currency, one address may add five an hour, and David can hide any
-row with the admin key (README). Currency is converted to USD when the
+Self-reported, and the window says so. An entry worth more than $299 is
+HELD by the Worker: not in the total, the list or the board until David
+approves it from the admin list (README, `/v1/admin/review/<id>`); the
+confirm step warns the person and their Yours list says "in review". A
+single entry is capped at 10,000 in its currency, one address may add five
+an hour, and David can hide any row with the admin key. Currency is converted to USD when the
 entry is reported with a fixed table in the Worker; the stored figure never
 moves after, and the list shows the original currency.
 

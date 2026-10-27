@@ -46,13 +46,29 @@ once it can).
 |---|---|
 | `GET /v1/summary` | total in USD, count, the milestones passed and when, the last twelve |
 | `POST /v1/donate` | header `X-PAD-Key`; JSON `amount, currency, shelter, name, show_name, app_version` |
-| `GET /v1/admin/list` | header `X-PAD-Admin`; the last 200 rows with ids |
-| `DELETE /v1/donate/<id>` | header `X-PAD-Admin`; hides that row |
+| `GET /v1/admin/list` | header `X-PAD-Admin`; the last 200 rows with ids; `held` = 1 is one waiting for your review |
+| `POST /v1/admin/review/<id>` | header `X-PAD-Admin`; JSON `{"approve": true}` counts a held row from then on, `false` hides it |
+| `DELETE /v1/donate/<id>` | header `X-PAD-Admin` hides any row; `X-PAD-Key` plus `X-PAD-Edit` (the token the POST answered) lets the app that added a row take it back |
 
 Remove a junk entry:
 
 ```bash
 curl -X DELETE -H "X-PAD-Admin: $ADMIN_KEY" https://pad-donations.<account>.workers.dev/v1/donate/<id>
+```
+
+## Big entries wait for you
+
+An entry worth more than `HOLD_OVER_USD` (299) in `worker.js` is stored
+held: it is not in the total, the list or the board until you approve it.
+The app tells the person so before they send it and marks it "in review"
+in their Yours list. See what is waiting and decide:
+
+```bash
+curl -s -H "X-PAD-Admin: $ADMIN_KEY" https://pad-donations.<account>.workers.dev/v1/admin/list | python -m json.tool | grep -B8 '"held": 1'
+```
+
+```bash
+curl -X POST -H "X-PAD-Admin: $ADMIN_KEY" -H 'content-type: application/json' -d '{"approve": true}' https://pad-donations.<account>.workers.dev/v1/admin/review/<id>
 ```
 
 ## Rates

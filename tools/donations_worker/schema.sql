@@ -1,5 +1,6 @@
 -- The donations table (PAD-754).  One row per donation a user reported.
 -- `usd` is the amount converted when it was reported and never changes;
+-- `held` keeps a big entry out of the total until David approves it;
 -- `removed` hides a row from the total without losing it.
 CREATE TABLE IF NOT EXISTS donations (
   id          TEXT PRIMARY KEY,
@@ -14,6 +15,8 @@ CREATE TABLE IF NOT EXISTS donations (
   show_name   INTEGER NOT NULL DEFAULT 0,
   app_version TEXT    NOT NULL DEFAULT '',
   ip_hash     TEXT    NOT NULL DEFAULT '',
+  edit_token  TEXT    NOT NULL DEFAULT '',
+  held        INTEGER NOT NULL DEFAULT 0,
   removed     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS donations_at ON donations (at);

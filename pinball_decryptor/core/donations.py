@@ -29,8 +29,11 @@ from .net import urlopen
 
 #: the ladder the thermometer climbs (tools/donations_worker/worker.js
 #: MILESTONES is the same list; change both)
-MILESTONES = (500, 1000, 2500, 5000, 10000, 25000, 50000, 100000,
-              250000, 500000, 1000000)
+MILESTONES = (100, 200, 500, 1000, 2500, 5000, 10000, 25000, 50000,
+              100000, 250000, 500000, 1000000)
+#: an entry worth more than this (USD) is held by the service until David
+#: approves it (the Worker's HOLD_OVER_USD; change both)
+HOLD_OVER_USD = 299
 
 #: code -> what goes before the amount in the list
 CURRENCIES = (
@@ -174,11 +177,27 @@ def fmt_date(ts):
     return "%s %d" % (_MONTHS[t.tm_mon - 1], t.tm_mday)
 
 
+def mine_row(entry, key, pending=False, held=False):
+    """One of this install's own entries as the window lists it: the sent
+    ones (``key`` is the service's id) and the ones still waiting to go
+    (``key`` names the pending slot)."""
+    return {"key": key, "pending": bool(pending), "held": bool(held),
+            "amount": fmt_amount(entry.get("amount"), entry.get("currency")),
+            "shelter": _clean(entry.get("shelter"), MAX_SHELTER),
+            "where": fmt_place(entry.get("country"), entry.get("region")),
+            "name": _clean(entry.get("name"), MAX_NAME),
+            "entry": {k: entry.get(k, "") for k in (
+                "amount", "currency", "shelter", "country", "region",
+                "name", "show_name")}}
+
+
 def view(summary, pending=(), currency="USD", name="", offline=False,
-         country="", region=""):
-    """What the page renders: the chip, the thermometer, the list and the
-    form's remembered choices.  ``summary`` is the service's answer (or the
-    cached one), ``None`` when nothing has ever been fetched."""
+         country="", region="", mine=()):
+    """What the page renders: the chip, the thermometer, the list, this
+    install's own entries and the form's remembered choices.  ``summary``
+    is the service's answer (or the cached one), ``None`` when nothing has
+    ever been fetched; ``mine`` the sent entries with their ids and tokens
+    (newest last)."""
     known = bool(summary) and summary.get("total_usd") is not None
     total = float(summary.get("total_usd") or 0) if known else 0.0
     count = int(summary.get("count") or 0) if known else 0
@@ -242,6 +261,11 @@ def view(summary, pending=(), currency="USD", name="", offline=False,
     pending = [p for p in pending if isinstance(p, dict)]
     pending_usd = sum(float(p.get("amount") or 0) for p in pending
                       if p.get("currency") == "USD")
+    own = [mine_row(m.get("entry") or {}, m.get("id"), held=m.get("held"))
+           for m in reversed(list(mine))
+           if isinstance(m, dict) and m.get("id")]
+    own = [mine_row(p, "pending:%d" % i, pending=True)
+           for i, p in reversed(list(enumerate(pending)))] + own
     chip = ("%s to shelters" % fmt_usd(total)) if known else "Animal shelters"
     if known:
         tip = ("PAD users have given %s to animal shelters, %d donation%s. "
@@ -266,6 +290,10 @@ def view(summary, pending=(), currency="USD", name="", offline=False,
         "places": places,
         "pending": len(pending),
         "pending_usd": pending_usd,
+        "mine": own[:10],
+        "hold_over": HOLD_OVER_USD,
+        "rates": {k: v for k, v in ((summary or {}).get("rates") or {}).items()
+                  if isinstance(v, (int, float))} if known else {},
         "offline": bool(offline),
         "chip": chip,
         "tip": tip,
@@ -333,6 +361,33 @@ def submit(url, key, entry, timeout=TIMEOUT):
     return out
 
 
+def remove(url, key, entry_id, token, timeout=TIMEOUT):
+    """Take back an entry this app added: its id and the token the service
+    answered when it was sent.  Returns the fresh summary.  An entry the
+    service no longer has (hidden already) is :class:`DonationsError`; a
+    network failure is the urllib error."""
+    if not url:
+        raise DonationsError("No donations service is configured.")
+    req = urllib.request.Request(
+        "%s/v1/donate/%s" % (url.rstrip("/"), entry_id), method="DELETE",
+        headers={"Accept": "application/json", "X-PAD-Key": key or "",
+                 "X-PAD-Edit": token or ""})
+    try:
+        with urlopen(req, timeout) as resp:
+            out = _read_json(resp)
+    except urllib.error.HTTPError as e:
+        if 400 <= e.code < 500:
+            try:
+                msg = _read_json(e).get("error")
+            except Exception:                           # noqa: BLE001
+                msg = None
+            raise DonationsError(msg or "That entry is already gone.")
+        raise
+    if not out.get("ok"):
+        raise DonationsError(out.get("error") or "That entry is already gone.")
+    return out
+
+
 # ----------------------------------------------------------------- cache
 def cache_path(settings_file):
     return os.path.join(os.path.dirname(settings_file), "donations_cache.json")
@@ -341,7 +396,7 @@ def cache_path(settings_file):
 def load_cache(path):
     """``{"summary": dict|None, "fetched_at": float, "pending": [entries]}``;
     a missing or broken file is an empty cache."""
-    out = {"summary": None, "fetched_at": 0.0, "pending": []}
+    out = {"summary": None, "fetched_at": 0.0, "pending": [], "mine": []}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -357,6 +412,9 @@ def load_cache(path):
         pass
     if isinstance(data.get("pending"), list):
         out["pending"] = [p for p in data["pending"] if isinstance(p, dict)]
+    if isinstance(data.get("mine"), list):
+        out["mine"] = [m for m in data["mine"]
+                       if isinstance(m, dict) and m.get("id")]
     return out
 
 

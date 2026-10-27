@@ -26,6 +26,7 @@ class FakeWorker:
     def __init__(self):
         self.rows = []
         self.posts = []
+        self.deletes = []
         self.refuse = None
         self.key = None
         self._srv = None
@@ -62,6 +63,19 @@ class FakeWorker:
                 else:
                     self._send(404, {"ok": False, "error": "Not found."})
 
+            def do_DELETE(self):
+                fake.deletes.append((self.path,
+                                     {k.lower(): v for k, v in self.headers.items()}))
+                rid = self.path.rsplit("/", 1)[-1]
+                row = next((r for r in fake.rows if r.get("id") == rid), None)
+                if row is None or self.headers.get("X-PAD-Edit") != row["token"]:
+                    self._send(404, {"ok": False, "error": "No such donation."})
+                    return
+                fake.rows.remove(row)
+                out = fake.summary()
+                out["id"] = rid
+                self._send(200, out)
+
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}")
@@ -74,7 +88,9 @@ class FakeWorker:
                     self._send(429, {"ok": False, "error": fake.refuse})
                     return
                 usd = body["amount"] * {"USD": 1, "GBP": 1.27}.get(body["currency"], 1)
-                fake.rows.append({"at": int(time.time()), "amount": body["amount"],
+                rid = "x%d" % (len(fake.posts))
+                fake.rows.append({"id": rid, "token": "t" * 31 + rid[-1],
+                                  "at": int(time.time()), "amount": body["amount"],
                                   "currency": body["currency"],
                                   "shelter": body.get("shelter", ""),
                                   "country": body.get("country", ""),
@@ -82,7 +98,8 @@ class FakeWorker:
                                   "name": body.get("name", "") if body.get("show_name") else "",
                                   "usd": usd})
                 out = fake.summary()
-                out["id"] = "x%d" % len(fake.rows)
+                out["id"] = rid
+                out["token"] = fake.rows[-1]["token"]
                 self._send(201, out)
 
         self._srv = HTTPServer(("127.0.0.1", 0), H)
@@ -133,7 +150,8 @@ def test_a_bad_entry_says_why(amount, currency, words):
 
 # ---------------------------------------------------------------- figures
 def test_the_ladder_and_the_money_words():
-    assert D.next_milestone(0) == 500
+    assert D.next_milestone(0) == 100
+    assert D.next_milestone(100) == 200
     assert D.next_milestone(500) == 1000
     assert D.next_milestone(4320) == 5000
     assert D.next_milestone(2_000_000) is None
@@ -159,7 +177,7 @@ def test_the_view_before_any_total():
     assert v["known"] is False
     assert v["chip"] == "Animal shelters"
     assert v["total_text"] == "—"
-    assert v["pct"] == 0 and v["next_text"] == "$500"
+    assert v["pct"] == 0 and v["next_text"] == "$100"
     assert v["recent"] == [] and v["places"] == [] and v["reached_text"] is None
     assert v["currency"] == "USD" and v["country"] == ""
     assert v["countries"][0] == {"value": "", "label": "Country (optional)"}
@@ -177,6 +195,7 @@ def test_the_view_of_a_total():
         ],
         "places": [{"country": "US", "region": "Texas", "usd": 1200.5, "count": 9},
                    {"country": "", "region": "x", "usd": 5, "count": 1}],
+        "rates": {"USD": 1, "GBP": 1.27, "XX": "junk"},
     }
     v = D.view(summary, pending=[{"amount": 20, "currency": "USD"}],
                currency="GBP", name="pinhead77", country="US", region="Texas")
@@ -193,7 +212,8 @@ def test_the_view_of_a_total():
     assert v["ladder"][2]["date"] == ""
     assert D.fmt_short(500) == "$500" and D.fmt_short(2500) == "$2.5k"
     assert D.fmt_short(100000) == "$100k" and D.fmt_short(1000000) == "$1M"
-    assert [c["state"] for c in D.view(None)["ladder"]] == ["next", "ahead", "ahead"]
+    assert [(c["text"], c["state"]) for c in D.view(None)["ladder"]] == [("$100", "next"), ("$200", "ahead"), ("$500", "ahead")]
+    assert D.view(None)["hold_over"] == 299 and D.view(None)["rates"] == {}
     assert [c["text"] for c in D.view({"total_usd": 5_000_000, "count": 1})["ladder"]] == ["$500k", "$1M"]
     assert v["reached_text"].startswith("$2,500 reached ")
     assert v["recent"] == [
@@ -204,6 +224,7 @@ def test_the_view_of_a_total():
     assert v["places"] == [{"where": "Texas, US", "usd": 1200.5, "count": 9,
                             "amount": "$1,200"}]
     assert v["pending"] == 1 and v["pending_usd"] == 20
+    assert v["rates"] == {"USD": 1, "GBP": 1.27}
     assert v["chip"] == "$4,320 to shelters"
     assert "61 donations" in v["tip"]
     assert (v["currency"], v["name"], v["country"], v["region"]) == \
@@ -217,7 +238,8 @@ def test_the_view_of_a_total():
 def test_the_cache_round_trips_and_shrugs_at_junk(tmp_path):
     path = D.cache_path(str(tmp_path / "cfg" / "settings.json"))
     assert path == str(tmp_path / "cfg" / "donations_cache.json")
-    assert D.load_cache(path) == {"summary": None, "fetched_at": 0.0, "pending": []}
+    assert D.load_cache(path) == {"summary": None, "fetched_at": 0.0, "pending": [],
+                                  "mine": []}
     cache = {"summary": {"total_usd": 5, "count": 1}, "fetched_at": 12.5,
              "pending": [{"amount": 1, "currency": "USD"}, "junk"]}
     D.save_cache(path, cache)
@@ -244,6 +266,32 @@ def test_fetch_and_submit_talk_to_the_worker(worker):
     assert headers["x-pad-key"] == "k"
     assert body == entry
     assert D.fetch_summary(worker.url)["recent"][0]["name"] == "pinhead77"
+
+
+def test_an_entry_can_be_taken_back_with_its_token(worker):
+    out = D.submit(worker.url, "k", D.validate_entry("300", shelter="typo"))
+    assert out["id"] and out["token"]
+    with pytest.raises(D.DonationsError, match="No such donation"):
+        D.remove(worker.url, "k", out["id"], "wrong")
+    back = D.remove(worker.url, "k", out["id"], out["token"])
+    assert back["ok"] and back["count"] == 0 and back["id"] == out["id"]
+    assert worker.deletes[-1][1]["x-pad-edit"] == out["token"]
+    assert worker.deletes[-1][1]["x-pad-key"] == "k"
+    with pytest.raises(D.DonationsError):
+        D.remove(worker.url, "k", out["id"], out["token"])      # already gone
+
+
+def test_own_entries_are_listed_newest_first_with_the_pending_ones_on_top():
+    sent = [{"id": "a", "token": "ta", "entry": D.validate_entry("5", country="US", region="Ohio")},
+            {"id": "b", "token": "tb", "entry": D.validate_entry("7", "GBP", "Dogs Trust", "Pat")}]
+    pend = [D.validate_entry("9", shelter="later")]
+    rows = D.view({"total_usd": 0, "count": 0}, pending=pend, mine=sent)["mine"]
+    assert [(r["key"], r["pending"], r["amount"]) for r in rows] == [
+        ("pending:0", True, "$9"), ("b", False, "£7"), ("a", False, "$5")]
+    assert rows[2]["where"] == "Ohio, US" and rows[1]["name"] == "Pat"
+    assert rows[0]["entry"]["shelter"] == "later"
+    assert set(rows[1]["entry"]) == {"amount", "currency", "shelter", "country",
+                                      "region", "name", "show_name"}
 
 
 def test_the_wire_tells_a_refusal_from_a_dead_line(worker):
@@ -355,6 +403,36 @@ def test_an_unreachable_total_keeps_the_entry_and_sends_it_later(app_with_worker
     assert until(w, lambda: w.state("shellx")["donations"]["pending"] == 0)
     assert len(worker.posts) == 1 and worker.posts[0][1]["amount"] == 20
     assert w.state("shellx")["donations"]["count"] == 1
+    assert D.load_cache(path)["pending"] == []
+
+
+def test_a_sent_entry_is_yours_and_can_be_taken_back(app_with_worker, tmp_path):
+    w, worker = app_with_worker
+    assert until(w, lambda: w.state("shellx")["donations"]["known"])
+    w.call("shellx.donations_submit", "300", "USD", "Lollypop Farm", "David", True,
+           "US", "New York")
+    assert until(w, lambda: w.state("shellx")["donations"]["mine"])
+    mine = w.state("shellx")["donations"]["mine"]
+    assert len(mine) == 1 and mine[0]["amount"] == "$300" and not mine[0]["pending"]
+    path = D.cache_path(str(tmp_path / "cfg" / "settings.json"))
+    cached = D.load_cache(path)["mine"]
+    assert cached[0]["id"] == mine[0]["key"] and cached[0]["token"]
+    from pinball_decryptor.webui.rpc import RpcError
+    with pytest.raises(RpcError, match="already gone"):
+        w.call("shellx.donations_remove", "nope")
+    entry = w.call("shellx.donations_remove", mine[0]["key"])
+    assert entry["amount"] == 300 and entry["shelter"] == "Lollypop Farm"
+    assert until(w, lambda: not w.state("shellx")["donations"]["mine"])
+    assert w.state("shellx")["donations"]["count"] == 0
+    assert worker.deletes and D.load_cache(path)["mine"] == []
+    # a pending one is dropped here, with its fields handed back the same way
+    worker.stop()
+    w.call("shellx.donations_submit", "20", "USD", "later")
+    assert until(w, lambda: w.state("shellx")["donations"]["pending"] == 1)
+    assert w.state("shellx")["donations"]["mine"][0]["key"] == "pending:0"
+    assert w.call("shellx.donations_remove", "pending:0")["shelter"] == "later"
+    w.drain()
+    assert w.state("shellx")["donations"]["pending"] == 0
     assert D.load_cache(path)["pending"] == []
 
 

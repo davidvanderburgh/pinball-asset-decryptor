@@ -927,7 +927,7 @@ function DonationsDialog({ close, auto = false }) {
   return html`<${Modal} title="Animal shelters" icon="paw" wide onClose=${onClose} cls=${"sx-don " + uid}
     footer=${html`<span class="grow small dim wrap">${d.offline ? "The total can't be reached right now; this is the last it answered." : ""}</span>
       <${Button} onClick=${() => call("shellx.donations_refresh")}>Refresh<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
-    <p class="sx-p">${auto ? "Your card is written. " : ""}This app doesn't take donations. If it saved you money or time, give some of it to an animal shelter near you, then tell us here so it counts toward the total.</p>
+    <p class="sx-p">${auto ? "Your card is written. " : ""}This app doesn't take donations. If it saved you money or time, give some of it to an animal shelter near you, then tell me here so it counts toward the total.</p>
     <div class="sx-don-layout">
       <div class="sx-don-therm-col">
         <span class="small muted notr">${d.next_short || ""}</span>
@@ -1006,7 +1006,8 @@ function DonationsDialog({ close, auto = false }) {
           <div class="sx-don-mine">
             ${mine.map((m) => html`<div class="sx-don-mine-row" key=${m.key}>
               <span class="mono notr">${m.amount}</span>
-              <span class="small muted ellip notr" title=${m.shelter + (m.where ? " (" + m.where + ")" : "")}>${m.shelter || "an animal shelter"}${m.where ? " · " + m.where : ""}${m.pending ? html` <span class="chip warn sm">waiting</span>` : m.held ? html` <span class="chip info sm" title="Checked by hand before it counts">in review</span>` : null}</span>
+              <span class="small muted ellip notr" title=${m.shelter + (m.where ? " (" + m.where + ")" : "")}>${m.shelter || "an animal shelter"}${m.where ? " · " + m.where : ""}</span>
+              ${m.pending ? html`<span class="chip warn sm">waiting</span>` : m.held ? html`<span class="chip info sm" title="Checked by hand before it counts">in review</span>` : html`<span></span>`}
               <${Button} kind="ghost" size="sm" icon="x" title="Take it back and fix it" onClick=${() => takeBack(m)} />
             </div>`)}
           </div>` : null}

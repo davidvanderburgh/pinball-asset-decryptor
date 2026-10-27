@@ -209,7 +209,7 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-don-confirm { background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 10px; padding: 10px 12px; }
 .sx-don-confirm-amt { font-size: 26px; font-weight: 700; color: var(--accent); line-height: 1.1; }
 .sx-don-mine { display: flex; flex-direction: column; gap: 2px; }
-.sx-don-mine-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 12.5px; padding: 2px 0 2px 4px; border-top: 1px solid var(--line); }
+.sx-don-mine-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 6px; align-items: center; font-size: 12.5px; padding: 2px 0 2px 4px; border-top: 1px solid var(--line); }
 .sx-don-form .sx-don-country { width: 100%; }
 .sx-don-burst { position: absolute; inset: 0; pointer-events: none; }
 .sx-don-burst i { position: absolute; bottom: 36%; color: var(--accent); opacity: 0; animation: sx-don-float 1.4s ease-out forwards; }

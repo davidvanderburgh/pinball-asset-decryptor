@@ -10,7 +10,7 @@ total of what PAD users report giving, so everyone can see it grow.
   shelters" (or "Animal shelters" before the first total arrives). Click it
   and the window opens. The gear menu has the same entry.
 - **The window**: a one-line pitch (no donations here, give to a shelter,
-  then tell us so it counts); a thermometer toward the next milestone on a
+  then tell me so it counts; David is the sole dev, so "me"); a thermometer toward the next milestone on a
   ladder (100, 200, 500, 1k, 2.5k, 5k, 10k, 25k, 50k, 100k, 250k, 500k, 1M;
   David: start mild, few will give much) with the date the last one fell; the last twelve donations (name or Anonymous,
   shelter, the amount in its own currency); a small form: currency, amount,

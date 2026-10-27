@@ -25,7 +25,8 @@ import os
 from ..core import runtime
 from pinball_decryptor.webui import runtime_prompt as _runtime_ui  # noqa: F401  (re-exported)
 from .emulate_core import (  # noqa: F401  (re-exported)
-    MULTI_IMAGE_NOTE, _ADVANCING_HINT, _CARD_COPY_RE, _COPY_EXPLAIN,
+    MULTI_IMAGE_NOTE, _ADVANCING_HINT, _BOX_EXPLAIN, _CARD_COPY_RE, _COPY_EXPLAIN,
+    box_build_line,
     _CREATE_FLAGS as CREATE_FLAGS, _MODES_EXPLAIN, _MULTIBOOT_PROBE_S,
     _NEEDS_WSL_RESTART, _OVERRIDE_EXPLAIN, _WSL_BOOT_TEXT, _WSL_BOOT_TICKS,
     DOCKER_URL, assets_fingerprint, cache_boot_text, card_copy_progress,

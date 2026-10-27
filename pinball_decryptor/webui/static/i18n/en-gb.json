@@ -592,6 +592,7 @@
 "{} holds an insert solid in no color.": "{} holds an insert solid in no colour.",
 "{} holds no text color": "{} holds no text colour",
 "{} in a font with colors of its own {} left as {}: its font's pictures have a color profile attached on the Images tab, so {} corrected with every line in that font already.": "{} in a font with colours of its own {} left as {}: its font's pictures have a colour profile attached on the Images tab, so {} corrected with every line in that font already.",
+"{} is lit, and its insert is a single white light: the mode's color does not show there. Light a shot whose insert shows color, or name {} on the screen (a HUD line or award).": "{} is lit, and its insert is a single white light: the mode's colour does not show there. Light a shot whose insert shows colour, or name {} on the screen (a HUD line or award).",
 "{} is not a color the menu has.": "{} is not a colour the menu has.",
 "{} is not a recognized AAIW installer image.": "{} is not a recognised AAIW installer image.",
 "{} is not a recognized Big Lebowski update zip.": "{} is not a recognised Big Lebowski update zip.",

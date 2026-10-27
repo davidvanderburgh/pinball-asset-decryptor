@@ -196,3 +196,19 @@ def test_the_badge_carries_its_ready_words_only_when_the_spec_names_them():
     assert a.shape[1] >= MH.READY_W and a.shape[0] >= MH.READY_H and a[..., 3].any()
     one = MH.badge_ready(Font(), "Building")
     assert one[..., 3].any()
+
+
+def test_an_any_shot_trickle_says_nothing_but_a_shot_of_its_own_still_does(tmp_path, monkeypatch):
+    """PAD-767 (David, KING KONG: "every single switch hit was playing a sound effect"): a score for every switch
+    (When any shot is made) is no shot that counts - only a shot's own script that scores gets the hit sound"""
+    monkeypatch.setenv("HARNESS_HITS", "1")
+    p = prog([
+        {"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "any_shot", "when": "running"}, "do": [{"op": "score", "points": num(1000)}]},
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [{"op": "score", "points": num(750000)}]},
+    ], seconds=30)
+    out = play(tmp_path, p, "shot", "Building", "secs", 1,
+               "shot", "Right ramp", "secs", 1, "shot", "Right ramp", "secs", 1, "shot", "Left ramp", "secs", 1)
+    assert re.findall(r"HIT SOUND (\d+)", out) == ["1"]          # the Left ramp's own score; the Right ramps none
+    only_any = prog(p["scripts"][:2], seconds=30)
+    assert "#define fb_paid() ((void)0)" in BM.to_c(only_any, "kk")

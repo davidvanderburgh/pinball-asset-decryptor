@@ -309,6 +309,59 @@ def card_copy_progress(line):
     return "Copying card: %s / %s MB (%s%%)" % (done, total, pct)
 
 
+#: PAD-769: macOS builds its container on the first Start, and padbox.sh
+#: narrates it - ``[box] building <image>``, docker's own ``#5 [2/6] RUN ...``
+#: step lines, and ``[box] still building the emulator container: 3 min so
+#: far`` once a minute.  Until this was read the state label said "Not
+#: running" for the whole build, and a Mac user waited twenty minutes on it
+#: with no way to tell a slow download from a stall.
+_BOX_STEP_RE = re.compile(r"^#\d+ \[(\d+)/(\d+)\] ")
+_BOX_MIN_RE = re.compile(
+    r"^\[box\] still building the emulator container: (\d+) min")
+_BOX_OVER = ("[box] starting", "[box] the emulator container did not build",
+             "[box] docker has printed nothing")
+
+_BOX_EXPLAIN = (
+    "First Start on this Mac: the emulator's Linux container is being built "
+    "(Docker downloads Ubuntu and the emulator's tools into it). It takes a "
+    "few minutes, more on a slow connection, and happens once: later Starts "
+    "use the built container. The log shows each step as Docker runs it.")
+
+
+def box_build_line(line, state):
+    """The state-label text for one line of a container build, or None.
+
+    *state* is the caller's dict, carried from line to line (empty before the
+    first).  Returns the new label while a build is under way, ``""`` on the
+    line that ends it (the run starting, or the build failing), and None for
+    anything that changes nothing.  Pure, like :func:`card_copy_progress`.
+    """
+    if line.startswith("[box] building "):
+        state.clear()
+        state.update(active=True, mins=0, step=None)
+    elif not state.get("active"):
+        return None
+    elif line.startswith(_BOX_OVER):
+        state["active"] = False
+        return ""
+    else:
+        m = _BOX_MIN_RE.match(line)
+        s = _BOX_STEP_RE.match(line)
+        if m:
+            state["mins"] = int(m.group(1))
+        elif s:
+            state["step"] = (int(s.group(1)), int(s.group(2)))
+        else:
+            return None
+    parts = []
+    if state.get("step"):
+        parts.append("step %d of %d" % state["step"])
+    if state.get("mins"):
+        parts.append("%d min" % state["mins"])
+    return "Building the emulator container" + (
+        " (%s)" % ", ".join(parts) if parts else "…")
+
+
 def parse_cache_list(text):
     """Parse ``cardmount.sh --cache-list`` into ``(entries, disk)`` (item 77).
 

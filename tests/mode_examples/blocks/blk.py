@@ -281,6 +281,11 @@ def shake(ms, strength="hard"):
     return {"op": "shake", "ms": _v(ms), "strength": strength}
 
 
+def gi(how="dark"):
+    """PAD-767: the playfield's GI dark until the mode ends (``"dark"``), or the game's again (``"game"``)."""
+    return {"op": "gi", "gi": how}
+
+
 def shake_game(name):
     return {"op": "shake_game", "shake": name}
 

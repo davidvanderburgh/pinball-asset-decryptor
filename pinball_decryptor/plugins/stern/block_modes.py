@@ -269,6 +269,7 @@ HATS = {
     "combo": "When shots are made one after another",   # PAD-708: a combo, each shot within N seconds of the last
     "battle": "When the player picks a battle",       # PAD-706: a slot of Godzilla's battle selection screen
     "game_mode": "When the game starts one of its modes",   # PAD-710: the mode runs in its place, counting as it
+    "completed": "When the player has completed some of the game's modes",   # PAD-747: N of them, in one game
 }
 #: PAD-615 round 2: the challenge hat's choice that adds the mode to the game's start menu as a challenge of its own
 CHALLENGE_NEW = "A new challenge of its own"
@@ -309,6 +310,18 @@ def place_name(hat):
 
 #: PAD-710: the game's mode numbers a mode may take the place of (pad_mode_runtime.c PLACE_IDS)
 PLACE_MAX = 128
+#: PAD-747: the game's mode numbers a completed hat may count (pad_mode_runtime.c DONE_IDS: 128 and up are a plain-C
+#: build's modes with books and no start), and how many completed hats a mode may have
+DONE_MAX, DONE_HATS_MAX = 256, 8
+
+
+def done_hat_ids(hat):
+    """PAD-747: a completed hat's mode numbers, in order, without repeats or anything not a number 0-255."""
+    out = []
+    for i in (hat or {}).get("modes") or ():
+        if _int_ok(i, 0, DONE_MAX - 1) and int(i) not in out:
+            out.append(int(i))
+    return out
 
 
 #: a shot / event hat's "when": the mode's state it runs in
@@ -1136,13 +1149,14 @@ def card_checks(p):
         "hold_caps": {n: ms for n, ms in getattr(p, "coil_caps", ()) or ()},
         "roster": list(getattr(p, "roster", ()) or ()),     # PAD-706: the battle slots a mode may take ([] = none)
         "places": [list(x) for x in getattr(p, "places", ()) or ()],   # PAD-710: [[id, name, counts]] ([] = none)
+        "done": [list(x) for x in getattr(p, "done_modes", ()) or ()] if p.can("done") else [],   # PAD-747: [[id, name]]
     }
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
              game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None,
-             drain=None, roster=None, places=None):
+             drain=None, roster=None, places=None, done=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -1215,6 +1229,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "combos": combo_names(program),            # PAD-708: the combos a value may name
            "roster": list(roster) if roster is not None else None, "battles": set(),   # PAD-706
            "places": {int(x[0]): x for x in places} if places is not None else None, "placed": set(),   # PAD-710
+           "done": {int(x[0]): x for x in done} if done is not None else None, "done_hats": 0,   # PAD-747
            "program": program}                        # PAD-646: a Light show block names one of its shows
     _check_shows(program, ctx)                        # PAD-646
     hud = program["hud"]
@@ -1509,6 +1524,21 @@ def _check_hat(hat, n, ctx):
             ctx["out"].append("%s waits for %s too: one script per battle." % (where, battle_name(hat)))
         else:
             ctx["battles"].add(int(slot))
+    if kind == "completed":                                                          # PAD-747
+        ids = done_hat_ids(hat)
+        ctx["done_hats"] += 1
+        if ctx["done"] is not None and not ctx["done"]:
+            ctx["out"].append("%s waits for the game's modes to be completed, which the app cannot tell on this card's "
+                              "game." % where)
+        elif not ids:
+            ctx["out"].append("%s's When has none of the game's modes ticked." % where)
+        elif ctx["done"] is not None and [i for i in ids if i not in ctx["done"]]:
+            ctx["out"].append("%s counts mode %s, which this card's game does not say it completed." % (
+                where, ", ".join(str(i) for i in ids if i not in ctx["done"])))
+        elif not _int_ok(hat.get("count"), 1, len(ids)):
+            ctx["out"].append("%s's When needs 1 to %d of the game's modes ticked completed." % (where, len(ids)))
+        elif ctx["done_hats"] == DONE_HATS_MAX + 1:
+            ctx["out"].append("A mode has up to %d When the player has completed scripts." % DONE_HATS_MAX)
     if kind == "game_mode":                                                          # PAD-710
         mid = hat.get("mode")
         if ctx["places"] is not None and not ctx["places"]:
@@ -2569,6 +2599,7 @@ def to_c(program, slug):
     battle_slots = []                       # PAD-706: the battle selection's slots its scripts take the place of
     battle_more = set()                     # PAD-707: of those, the ones it is a monster on MORE KAIJU behind
     place_ids = []                          # PAD-710: the game's own modes its scripts take the place of
+    done_hats = []                          # PAD-747: (count, ids) of each When the player has completed
     for kind, items in bodies.items():
         for n, hat, body in items:
             head = "    /* script %d: %s */" % (n, _comment(_hat_words(hat)))
@@ -2621,6 +2652,11 @@ def to_c(program, slug):
                 if mid not in place_ids:
                     place_ids.append(mid)
                 test = "(picked & %du)" % (1 << place_ids.index(mid))
+            elif kind == "completed":                    # PAD-747: the count met, run when nothing is in the way
+                k = len(done_hats)
+                done_hats.append((max(1, int(hat.get("count"))) if _int_ok(hat.get("count"), 1, DONE_MAX) else 1,
+                                  done_hat_ids(hat)))
+                test = "(done_fired & %du)" % (1 << k) if k < DONE_HATS_MAX else "(0)"
             elif kind == "challenge":                    # PAD-615: picked on the game's thread, run on the tick
                 name = str(hat.get("challenge") or "")
                 if name not in challenge_names:
@@ -3535,6 +3571,20 @@ def to_c(program, slug):
         L.append("    return 0;")
         L.append("}")
         L.append("")
+    if done_hats:                           # PAD-747
+        done_hats = done_hats[:DONE_HATS_MAX]
+        L.append("/* PAD-747: When the player has completed some of the game's modes: each script's count and the game's modes it")
+        L.append(" * counts (pm_game_modes_done), what each player had last looked, and a count met waiting for nothing in its way */")
+        for k, (_c, ids) in enumerate(done_hats):
+            L.append("static const unsigned char DONE_IDS_%d[%d] = { %s };" % (k, max(1, len(ids)),
+                                                                        ", ".join(str(i) for i in ids) or "0"))
+        L.append("static const unsigned char *const DONE_IDS[%d] = { %s };"
+                 % (len(done_hats), ", ".join("DONE_IDS_%d" % k for k in range(len(done_hats)))))
+        L.append("static const unsigned DONE_N[%d] = { %s };" % (len(done_hats), ", ".join(str(len(i)) for _c, i in done_hats)))
+        L.append("static const unsigned DONE_NEED[%d] = { %s };" % (len(done_hats), ", ".join(str(c) for c, _i in done_hats)))
+        L.append("static unsigned done_last[%d][5];" % len(done_hats))
+        L.append("static unsigned char done_pend[%d][5];" % len(done_hats))
+        L.append("")
     if place_ids:                           # PAD-710
         L.append("/* PAD-710: the game's own modes this mode takes the place of, claimed as it loads: when the game starts one,")
         L.append(" * its script runs instead and, where the game's framework is known, the mode counts as the game's, completed")
@@ -3736,6 +3786,9 @@ def to_c(program, slug):
     L.append("        for (v = 0; v < %d; v++) T[v] = 0;" % ntimers)
     if g.combos:
         L.append("        combo_clear();                /* PAD-708 */")
+    if done_hats:                                   # PAD-747: a met count belongs to its game
+        L.append("        for (v = 0; v < %d; v++)" % len(done_hats))
+        L.append("            for (p = 0; p < 5; p++) done_last[v][p] = 0, done_pend[v][p] = 0;")
     L.append("    }")
     if g.combos:
         L.append("    if (combo_chain_at && pm_ms() - combo_chain_at > combo_chain_ms)   /* PAD-708: its window lapsed */")
@@ -3818,6 +3871,28 @@ def to_c(program, slug):
         L.append("                pm_roster_done();")
         L.append("            }")
         L.append("        }")
+        L.append("    }")
+    done_scripts = scripts_of("completed")
+    if done_hats:                                   # PAD-747: the game's modes completed - each script's count, met
+        L.append("    if (in_game && pm_player() >= 1 && pm_player() <= 4) {")
+        L.append("        unsigned p = pm_player(), done_fired = 0, k;")
+        L.append("        for (k = 0; k < %du; k++) {" % len(done_hats))
+        L.append("            int n = pm_game_modes_done(DONE_IDS[k], DONE_N[k]);")
+        L.append("            if (n < 0) continue;              /* the runtime sees none of them here */")
+        L.append("            if ((unsigned)n != done_last[k][p]) {")
+        L.append("                if ((unsigned)n > done_last[k][p])")
+        L.append('                    pm_log("%d of the game\'s modes completed, %u wanted (player %u)", n, DONE_NEED[k], p);')
+        L.append("                if ((unsigned)n >= DONE_NEED[k] && done_last[k][p] < DONE_NEED[k]) done_pend[k][p] = 1;")
+        L.append("                done_last[k][p] = (unsigned)n;")
+        L.append("            }")
+        L.append("            /* met: it runs the moment nothing is in its way (the mode just completed is often still")
+        L.append("             * finishing) - another mode of ours, or one of the game's it gives way to */")
+        L.append("            if (done_pend[k][p] && !run.on && !pm_other_running() && !(GAME_MODES && pm_aside())) {")
+        L.append("                done_pend[k][p] = 0;")
+        L.append("                done_fired |= 1u << k;")
+        L.append("            }")
+        L.append("        }")
+        L.extend("    " + line if line else line for code in done_scripts for line in code.split("\n"))
         L.append("    }")
     place_scripts = scripts_of("game_mode")
     if place_ids:                                   # PAD-710: the game started one of its modes this one holds
@@ -5198,6 +5273,9 @@ def _hat_words(hat):
         return "when the player picks %s on the battle selection screen" % battle_name(hat)
     if kind == "game_mode":                                                          # PAD-710
         return "when the game starts its %s" % place_name(hat)
+    if kind == "completed":                                                          # PAD-747
+        return "when the player has completed %s of %d of the game's modes in a game" % (
+            hat.get("count"), len(done_hat_ids(hat)))
     if kind == "challenge":
         ms = challenge_launch_ms(hat)                                               # PAD-643
         return "when the player picks the challenge %s%s" % (

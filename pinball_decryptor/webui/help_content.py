@@ -1465,6 +1465,9 @@ HELP_CONTENT = {
                  "text": "it, or any saved image, onto an SD card"},
                 {"icon": "play", "title": "Test", "text": "on the machine"}]},
             "- Flashing needs Administrator, and refuses an image too big for the card.\n"
+            "- **Keep the SD card's settings, audits and high scores** (Stern Spike "
+            "2) reads the card's data partition first and puts it back after the "
+            "image, so the machine starts where it left off.\n"
             "- The dialog remembers your last ticks per manufacturer.",
             {"note": "Flashing **erases the whole card**.", "kind": "warn"},
         ]),
@@ -1612,7 +1615,9 @@ HELP_CONTENT = {
             "The Card Image is the master image set on the Extract tab.",
             {"note": "**Fresh cards only.** A machine uses these on a fresh flash or "
                      "after a factory reset. A machine already set up keeps its own "
-                     "settings: Stern stores them on the board, not the card.",
+                     "settings: Stern keeps them in the card's data partition, "
+                     "apart from the game program, and a card made from Stern's "
+                     "download has none.",
              "kind": "warn"},
         ]),
         ("Edit and build", [
@@ -1631,6 +1636,10 @@ HELP_CONTENT = {
             "two ELECTRIC MAGIC champions default to 2,000,000 under a stated minimum of "
             "5,000,000. The row counts as unchanged until you edit it, and an edit is "
             "pulled into the range (the game rejects anything else).\n"
+            "- Click a row's **Range** to change its **Lowest** and **Highest** value; "
+            "a changed range shows as 'a - b (card c - d)' and is built in beside the "
+            "default. A default outside a narrowed range moves into it. Not offered for "
+            "on/off settings, PAD's own choice lists or Master Volume.\n"
             "- Hover a setting's name to see if the machine edits it outside Adjustments.",
         ]),
         ("Presets",
@@ -1681,6 +1690,20 @@ HELP_CONTENT = {
             {"note": "A row set this way has no help text or safety checks. A factory "
                      "value set to something the game never expected is on you.",
              "kind": "warn"},
+        ]),
+        ("Coin door (Home Editions)", [
+            "Jurassic Park The Pin and Star Wars Home Edition ship without a coin door. "
+            "Their game ignores the door's interlock switch, though the cabinet board "
+            "still has its input. The **Coin door** box appears on those cards only.",
+            "- Tick **This machine has a coin door fitted** and the next Build makes the "
+            "game use the door as a Pro does: opening it puts up **48V DISABLED / CLOSE "
+            "COIN DOOR** until it is shut.\n"
+            "- The service buttons work with the door open or shut, as before.\n"
+            "- Staged with the project and carried by mod packs. A card that has its "
+            "coin door already is left as it is.",
+            {"note": "Only with a door and its interlock switch fitted. With nothing on "
+                     "that input the game reads the door as open all the time and keeps "
+                     "the message up.", "kind": "warn"},
         ]),
         ("Show hidden settings on the machine", [
             "**Show hidden settings in the machine's menu…** moves where the Feature "
@@ -2364,7 +2387,10 @@ HELP_CONTENT = {
          "- **What it costs:** about 15% of one CPU core waiting, about a third of a "
          "core running, plus 1–2 GB of memory, shown live in the status line.\n"
          "- **No time limit:** it runs until you press Stop emulator or close its "
-         "window."),
+         "window.\n"
+         "- **Restart game**, beside Stop emulator, boots the game again, as "
+         "switching the machine off and on does: the game window goes back to the "
+         "boot screen and the virtual playfield stays open."),
         ("Sound and video",
          "- **Volume** and **Mute** set the emulator's own sound, live, and are "
          "remembered. They are not the game's volume (the coin door's -/+), which "
@@ -2417,7 +2443,8 @@ HELP_CONTENT = {
             "switches appear a minute or so into a run, once the game lists them.\n"
             "- **Pause** (or F9), in either window or on the bottom bar, freezes the "
             "whole game, video and sound too. **Resume** carries on from that frame. "
-            "The bar also has Volume and Mute.",
+            "The bar also has **Restart game** (as on the Emulate tab), Volume and "
+            "Mute.",
         ]),
         ("Save states", [
             "**Save state** on the playfield window (Windows) checkpoints the whole "
@@ -2557,7 +2584,8 @@ HELP_CONTENT = {
          "Both game programs are read the same way the Defaults tab reads them: "
          "settings added or removed, defaults that changed, and high-score places "
          "whose initials, name or score changed. These are the cards' built-in "
-         "defaults; a machine's live settings and scores are in its own memory."),
+         "defaults; a machine's live settings and scores are in the card's data "
+         "partition, apart from the game program."),
     ],
     "Multi-boot": [
         ("What it does", [
@@ -2732,6 +2760,29 @@ HELP_CONTENT = {
          "share one settings store.\n"
          "- No random card and no image with its own high scores on such a card.\n"
          "- Untick it to give the card its menu back."),
+        ("Settings, audits and high scores", [
+            "A Stern Spike 2 machine keeps its settings, audits and high scores on "
+            "the SD card, in the card's data partition, apart from the game "
+            "program. A multi-boot card takes that partition from the **first "
+            "image**.",
+            {"cards": [
+                {"icon": "sd", "tone": "ok", "title": "Keep what the machine has",
+                 "text": "Read your current SD card into a .raw (**From SD card…**, "
+                         "whole card) and make it the first image."},
+                {"icon": "download", "tone": "warn", "title": "A fresh download",
+                 "text": "Stern's image has none: the machine starts from factory "
+                         "settings and runs its Guided Setup."}]},
+            "- Every image of the same game shares them, across code versions, as a "
+            "Stern update keeps them.\n"
+            "- **Keep its own high scores on the machine** (✎ on an image) gives "
+            "that image its own settings and audits too. Its first boot starts "
+            "from a copy of the shared ones, so reset its high scores once in "
+            "the service menu.\n"
+            "- Flashing the whole card writes the image's copy over the machine's, "
+            "unless you tick **Keep the SD card's settings, audits and high "
+            "scores** in the flash dialog. When only the menu changed, **Only the "
+            "boot menu** is quicker and keeps them too.",
+        ]),
         ("Sounds",
          "Every sound row (the menu's move and confirm, an image's music and "
          "confirm) has a **▶ Play** beside **Browse…**, played through the "
@@ -2788,6 +2839,8 @@ HELP_CONTENT = {
             "already flashed. Otherwise the whole card is written, which a new SD "
             "card needs. Tick it yourself if your SD card already holds that "
             "image; it checks first.\n"
+            "- **Keep the SD card's settings, audits and high scores** writes the "
+            "whole card but puts the machine's own back on it.\n"
             "- Every run first makes sure the menu program is built, before any "
             "media. If a step refuses, the tab shows the Log line, naming the step.",
             {"note": "Nothing is written to an SD card until you pick it in the "
@@ -2907,7 +2960,8 @@ _IMAGE_INFO_SECTIONS = [
     ("Adjustments and high scores",
      "**Adjustments** is how many operator settings the firmware has; **High scores** "
      "how many places its board keeps (top four, Grand Champion, every champion). The "
-     "machine's current settings and scores live in its own memory, not on the card; "
+     "machine's current settings and scores live in the card's data partition, not in "
+     "the game program; "
      "the Defaults tab sets what a freshly flashed machine starts from."),
 ]
 
@@ -2964,8 +3018,9 @@ def modes_games_rows(ports=None):
         also += [w for k, w in (("magnet", "magnet"), ("scoop", "scoop"), ("coils", "mechanisms"),
                                 ("shield", "shield"), ("building", "building"), ("shaker", "shaker"),
                                 ("shows", "light shows"), ("wizard", "mini-wizards"), ("roster", "battle slot"),
-                                ("challenge", "challenges"), ("place", "game mode places"))
-                 if p.can(k)]                     # PAD-381: what a mode may hold; PAD-392; PAD-615; PAD-710
+                                ("challenge", "challenges"), ("place", "game mode places"),
+                                ("done", "starts on game modes completed"))
+                 if p.can(k)]                     # PAD-381: what a mode may hold; PAD-392; PAD-615; PAD-710; PAD-747
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")
         if not p.can("stack"):
@@ -3087,7 +3142,9 @@ PREVIEW_HELP = {
                 "in order (any other shot starts the sequence over). *Only after* "
                 "holds it until another mode has run this ball or game. On Godzilla it can "
                 "instead start when the player picks one of the game's battles on the battle "
-                "selection screen: your mode runs in that battle's place.\n"
+                "selection screen: your mode runs in that battle's place. Or it can start once the player "
+                "has completed a number of the game's own modes in one game (tick which ones count): a "
+                "mini-wizard after four of them, a bigger wizard after all of them.\n"
                 "3. **Runs for:** how long it runs.\n"
                 "4. **Points per shot:** which shots score and what the first one "
                 "pays. A minus number takes that much away on each hit.\n"

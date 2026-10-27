@@ -70,3 +70,15 @@ html.bp-1020 .dflt .dflt-hs .dflt-tr { min-width: 0; row-gap: 2px; }
 html.bp-1020 .dflt .dflt-hs .dflt-rng { grid-column: 4 / -1; padding-bottom: 2px; }
 html.bp-1020 .dflt .dflt-hs .dflt-rng:empty,
 html.bp-1020 .dflt .dflt-hs .dflt-h-rng { display: none; }
+
+/* PAD-750: a Range cell that opens the editor, and the editor's Lowest / Highest */
+.dflt .dflt-rng-btn { all: unset; cursor: pointer; color: inherit; overflow-wrap: anywhere;
+  text-decoration: underline dotted var(--ink-3); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.dflt .dflt-rng-btn:hover { color: var(--ink); }
+.dflt .dflt-rng-btn.acc-ink { color: var(--accent); }
+.dflt .dflt-rng-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+.dflt-edit .dflt-range { gap: 14px; }
+
+/* PAD-755: a Home Edition's coin door */
+.dflt .dflt-card-coin .dflt-coin-text { margin: 0 0 10px; color: var(--ink-2); max-width: 80ch; }
+.dflt .dflt-card-coin .chk { margin-bottom: 10px; }

@@ -150,3 +150,35 @@ both Beatles i107 variants and Turtles Pro 1987-upscaled had been evicted). `car
 empty sparse copies, `df` from the real sizes) asked for 60 GB evicted ten older versions by boot date; asked for
 200 GB it evicted the other five non-library entries (Led Zeppelin 1.20 x2, Venom LE 1.06, Heisei v21 and v22) and
 then answered "nothing evictable (60 library cards kept) - running off the original", the 60 library cards untouched.
+
+## A cache on a distro disk keeps under a limit of its own (PAD-739)
+
+A user without the store (the cache in Ubuntu's `~/cardcache`) reached 150 GB over a month of custom Godzilla builds,
+the distro's ext4.vhdx 226 GB on C:. `cache_make_room` evicted only when `df` said the cache's disk was short, and on a
+distro disk `df` is the VIRTUAL disk's (up to 1 TB): it never ran short, so nothing was ever evicted. The app's 30-day
+clean-up kept everything booted that month, every card never booted, every unfinished copy (`--cache-list` did not
+list a `.raw.partial`) and every copy of an image rebuilt since (never usable again).
+
+1. **A limit on what the cache holds** (`cache_limit_gb`): `cardmount.sh --cache-limit N|default` saves it beside the
+   cache (`.limit_gb`, 0 = none) and evicts to it at once; without one it is 64 GB on a distro disk
+   (`PAD_CACHE_MAX_GB`) and none on the store. The copier keeps the cache under it. Only cards in use or the
+   library's over it: cached anyway, when the disk has room.
+2. **Eviction order**: an unfinished copy with no live copier first, then entries whose image changed or is gone from a
+   folder that is there, then least recently booted (a card never booted by its copy's date). An image on a drive not
+   attached is no longer "dead first": it boots again once the drive is back.
+3. **In use means any rig slot** (`cache_in_use`): `label_mounted` sees only the calling slot's `$CARDS`, so a card
+   booted in rig 2 read as free to a delete from slot 0. Every reader of a copy (fuse2fs, a copier) has its path as a
+   whole argument, so one in-shell pass over `/proc/*/cmdline` answers for every slot. `--cache-drop` refuses it, a
+   label with a slash, and says so when a file stayed (a root-owned `.boot` in the store's sticky folder).
+4. **`--cache-list`** adds `state` (image ok / changed / gone / unreachable, mounted / copying, the copy's date),
+   `leftover` and `limit` lines; older readers read the same `entry` rows.
+5. **The Cache window** (Emulate tab) shows Image and In use columns, "Select unused" (unfinished, image rebuilt,
+   deleted or renamed, or 30 days unused; never in use or the library's), the space a selection frees, a "Keep the
+   cache under" choice, a confirm that names cards whose image is not on the PC, which deletes failed, and that the
+   distro disk file only shrinks with Manage disk space's Reclaim. The automatic clean-up also takes a card whose image
+   changed (at once) and an unfinished copy (after a day).
+
+Proven 2026-10-26 in Ubuntu with the real script on a scratch cache (five 1 GiB cards, a 3 GB limit, one copy mounted
+by the rig's own fuse2fs): the mounted card was refused and never evicted though booted longest ago; the limit took
+the unfinished copy, the rebuilt custom build, then the oldest boot; a new copy under the limit evicted the next
+oldest; a root-owned side file in a sticky folder was reported, not counted as freed.

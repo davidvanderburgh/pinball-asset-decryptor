@@ -252,21 +252,117 @@ class AdjustmentTable:
         return ok >= int(self.count * 0.95)
 
     # --- patch ---
-    def patched_bytes(self, overrides):
+    def patched_bytes(self, overrides, ranges=None):
         """Return a copy of the ELF with each ``{name: value}`` default set,
         validated against that adjustment's own min/max.  Raises ValueError on
-        an unknown name or out-of-range value."""
+        an unknown name or out-of-range value.
+
+        *ranges* is ``{name: (min, max)}`` (PAD-750): the lowest and highest
+        value the machine's menu lets an operator pick, written into the
+        same descriptor as the default (two more 4-byte fields, so still
+        size-neutral).  A default is checked against the range it will have.
+        """
         buf = bytearray(self.data)
+        ranges = ranges or {}
+        for name, (lo, hi) in ranges.items():
+            if name not in self.by_name:
+                raise ValueError("unknown adjustment %r" % name)
+            lo, hi = int(lo), int(hi)
+            if not (INT32_MIN <= lo <= hi <= INT32_MAX):
+                raise ValueError("%s range [%d, %d] is not a range"
+                                 % (name, lo, hi))
+            base = self.default_file_offset(name) - OFF_DEFAULT
+            struct.pack_into("<i", buf, base + OFF_MIN, lo)
+            struct.pack_into("<i", buf, base + OFF_MAX, hi)
         for name, value in overrides.items():
             if name not in self.by_name:
                 raise ValueError("unknown adjustment %r" % name)
             e = self.get(name)
+            lo, hi = ranges.get(name, (e["min"], e["max"]))
             value = int(value)
-            if not (e["min"] <= value <= e["max"]):
+            if not (lo <= value <= hi):
                 raise ValueError("%s = %d out of range [%d, %d]"
-                                 % (name, value, e["min"], e["max"]))
+                                 % (name, value, lo, hi))
             struct.pack_into("<i", buf, self.default_file_offset(name), value)
         return bytes(buf)
+
+
+# ---------------------------------------------------------------------------
+# Changed ranges (PAD-750).  The menu's lowest and highest value for a setting
+# sit in its descriptor beside the default, so a card can carry a wider (or
+# narrower) range than Stern shipped: the machine's own menu then steps through
+# it.  Staged as ``{AD_name: [min, max]}`` in internal units, in the project's
+# ``setting_ranges`` (and a preset's ``__ranges__``).
+# ---------------------------------------------------------------------------
+INT32_MIN, INT32_MAX = -2 ** 31, 2 ** 31 - 1
+PRESET_RANGES_KEY = "__ranges__"
+
+
+def clean_ranges(raw):
+    """``{name: (min, max)}`` of whole numbers out of a staged record, or
+    ``{}``.  Anything that is not a two-number range, low to high, inside a
+    32-bit field, is dropped rather than trusted."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for name, pair in raw.items():
+        try:
+            lo, hi = (int(pair[0]), int(pair[1]))
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+        # a Spike 1 caller keys by adjustment id
+        if (isinstance(name, (str, int)) and not isinstance(name, bool)
+                and INT32_MIN <= lo <= hi <= INT32_MAX):
+            out[name] = (lo, hi)
+    return out
+
+
+def range_editable(name, e):
+    """Can *name*'s range be changed?  Not an on/off setting (a third value
+    means nothing to it), not one the app shows as named choices (the game
+    only has the names it was written with), and not the master volume (the
+    firmware refuses anything over 63 whatever the range says)."""
+    if e["min"] == 0 and e["max"] == 1:
+        return False
+    if _ENUM_LABELS.get(name):
+        return False
+    return name != MASTER_VOLUME
+
+
+def resolve_overrides(entry_of, vals, ranges=None):
+    """What a Build writes: ``(overrides, ranges)`` for the image whose
+    adjustment ``name -> entry`` lookup is *entry_of* (None for a setting the
+    image doesn't carry, which is skipped).
+
+    Each staged value is pulled into the range it will have (the changed one
+    if there is one); a changed range that leaves out the image's own default
+    takes the nearest end of it as the new default, so the menu never starts
+    outside what it offers.  A range back at the image's own is dropped."""
+    ranges = clean_ranges(ranges or {})
+    out_r = {}
+    for name, (lo, hi) in ranges.items():
+        e = entry_of(name)
+        if e is None or not range_editable(name, e):
+            continue
+        if (lo, hi) != (e["min"], e["max"]):
+            out_r[name] = (lo, hi)
+    out_v = {}
+    for name, v in (vals or {}).items():
+        e = entry_of(name)
+        if e is None:
+            continue
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            continue
+        lo, hi = out_r.get(name, (e["min"], e["max"]))
+        out_v[name] = max(lo, min(hi, v))
+    for name, (lo, hi) in out_r.items():
+        if name not in out_v:
+            d = entry_of(name)["default"]
+            if not lo <= d <= hi:
+                out_v[name] = max(lo, min(hi, d))
+    return out_v, out_r
 
 
 # ---------------------------------------------------------------------------

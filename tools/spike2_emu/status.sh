@@ -9,6 +9,8 @@
 #   rss=<mb>           guest resident memory
 #   host_cpu=<pct>     renderer CPU
 #   state=<word>       off | booting | techalerts | running
+#   boot_pct=<n>       0-100 through the boot, while booting (bootprog.py)
+#   boot_words=<text>  what that step is, in words
 #   fps=<n>            renderer frames per second, blank if not reported yet
 #   gl_fallback=<why>  the renderer lost the GPU and draws in SOFTWARE; why is
 #                      watch.sh's verdict (gpulost, loader, surface, unknown...)
@@ -82,7 +84,14 @@ fi
 # wanted more than ten; that count only ever exceeded ten because the video bug
 # was rebuilding the pipeline 25 times a second, and a whole run now makes
 # eight. See gamestate.sh for the full story - do not reinvent the count here.
-echo "state=$(gs_state "$LOG")"
+ST=$(gs_state "$LOG")
+echo "state=$ST"
+# HOW FAR THROUGH THE BOOT (PAD-744): the steps inside Boot and Node boards,
+# from bootprog.py - the playfield window reads the same module, so the two
+# say the same thing. Only while booting: it reads the whole log.
+if [ "$ST" != attract ]; then
+    python3 "$S/bootprog.py" "$(dirname "$LOG")" 2>/dev/null
+fi
 
 # Whether the auto-advance helper is still working on it. The tab uses this to
 # say "advancing on its own" rather than "press a switch yourself", which is

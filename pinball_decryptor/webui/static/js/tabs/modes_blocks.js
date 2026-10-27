@@ -156,7 +156,18 @@ export function hatTemplates(ch, timers) {
     ...((ch.roster || []).length ? [{ kind: "battle", slot: 0, name: ch.roster[0] }] : []),
     // PAD-710: only where the game lets a mode run in the place of one of its own modes (proven builds)
     ...((ch.places || []).length ? [{ kind: "game_mode", mode: ch.places[0].id, name: ch.places[0].name }] : []),
+    // PAD-747: only where the app sees the game's own modes completed (proven builds): its main modes ticked, 4 of them
+    ...((ch.done || []).length ? [doneHat(ch)] : []),
   ];
+}
+
+// PAD-747: a When the player has completed hat as the palette offers it - the game's main modes (the ones the app names
+// a start of; else every one it sees completed) ticked, and a count of 4 (or all of them, when there are fewer)
+function doneHat(ch) {
+  const all = ch.done || [];
+  const main = all.filter((x) => x.main);
+  const ids = (main.length ? main : all).map((x) => x.id);
+  return { kind: "completed", count: Math.min(4, ids.length), modes: ids };
 }
 
 // PAD-503: where a mode is lit at first - the shot the game starts its own mini-wizards from (Bond's Right ramp: the
@@ -629,6 +640,8 @@ const MORE_PIC_TIP = "The monster's picture on the battle selection screen (a PN
 const PLACE_TIP = "When the game starts this one of its own modes (the player earned it, as in any game), this script runs instead and the game's own mode never runs: put Start the mode in it. Where the app knows the game's mode framework, the game counts the mode as its own: its start as that mode starting (its start count and STARTED audit), and when the mode ends, an End the mode, completed block ending it (a mode with no such block: its own end, its clock or an End the mode block) as that mode completed - its COMPLETED audit, its wins and the wizards and unlocks the game opens for it - and the ball draining first as not completed. One mode per game mode.";
 const END_PLACE_TIP = "For a mode that runs in the place of one of the game's own modes: that mode completed. The game then counts it as completed (its audits, its wins, what it opens). A drain before it ends: not completed.";
 const END_PLACE_OPTS = [["-", "(not completed)"], ["won", ", completed"]];
+// PAD-747: what the completed hat does
+const DONE_TIP = "This script runs once the player has completed this many of the game's own modes ticked here, in one game: put Start the mode in it. A mode counts when the game itself records it completed (as its audits do), once a game, whichever ball it was. When the count is reached and something is in the way (another mode of yours, or one of the game's modes this one gives way to), it runs as soon as nothing is, that game. A mode of yours running in a game mode's place counts as that mode when it ends completed. Two scripts with two counts make a mini-wizard after a few of the game's modes and a bigger wizard after all of them (one per blocks mode).";
 
 // PAD-615: what the challenge hat does
 // PAD-643: who launches the challenge ball, and when (block_modes.CHALLENGE_LAUNCH; a number = seconds after it starts)
@@ -706,6 +719,16 @@ export function HatBody({ h, path, ed }) {
       const opts = places.map((x) => [String(x.id), x.name]);
       return html`<span class="bk-w b" ...${tip(PLACE_TIP)}>When the game starts its</span><${Pick} value=${h.mode == null ? "" : String(h.mode)} options=${opts} onChange=${(v) => ed.set(path, { ...h, mode: Number(v), name: (places.find((x) => String(x.id) === v) || {}).name || "" })} /><span class="bk-w b" ...${tip(PLACE_TIP)}>(in its place)</span>`;
     }
+    case "completed": {                              // PAD-747
+      const all = ed.ch.done || [];
+      const on = new Set((h.modes || []).map(Number));
+      const flip = (id, v) => {
+        const next = all.map((x) => x.id).filter((i) => (i === id ? v : on.has(i)));
+        if (next.length) ed.set(path, { ...h, modes: next, count: Math.min(Math.max(1, Number(h.count) || 1), next.length) });
+      };
+      return html`<span class="bk-w b" ...${tip(DONE_TIP)}>When the player has completed</span><${Num} value=${h.count} width=${48} onChange=${(v) => set("count", v)} /><span class="bk-w b" ...${tip(DONE_TIP)}>of these ${on.size} of the game's modes in one game:</span>
+        <div class="bk-done">${all.map((x) => html`<label key=${"d" + x.id} class="bk-w nw"><input type="checkbox" checked=${on.has(x.id)} disabled=${on.size === 1 && on.has(x.id)} onChange=${(e) => flip(x.id, e.target.checked)} /> ${x.name}</label>`)}</div>`;
+    }
     case "challenge": return html`<span class="bk-w b" ...${tip(CHALLENGE_TIP)}>When the player picks the challenge</span><${Pick} value=${h.challenge} options=${(ed.ch.challenges || []).map((x) => [x, x])} onChange=${(v) => set("challenge", v)} /><span class="bk-w b" ...${tip(LAUNCH_TIP)}>, its ball launched</span><${Pick} value=${h.launch || "clip"} options=${LAUNCH_OPTS} onChange=${(v) => set("launch", v)} />`;
     default: return html`<span class="bk-w b">${h.kind}</span>`;
   }
@@ -731,6 +754,7 @@ export function hatLabel(h) {
     ball_end: "When the ball drains", drain: "When a ball goes into the trough", event: "When the game does…", timer_done: "When a timer runs out",
     challenge: "When the player picks a challenge", battle: "When the player picks a battle",
     game_mode: "When the game starts one of its modes",
+    completed: "When the player has completed some of the game's modes",
     combo: (h.shots || []).every((x) => x === "lit") ? "When a lit shot follows a lit shot" : "When a shot follows a shot (a combo)" }[h.kind] || h.kind;
 }
 

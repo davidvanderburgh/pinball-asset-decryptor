@@ -71,6 +71,12 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .pf-run .pct { width: 34px; font-size: 11px; color: var(--ink-2); text-align: right; }
 .pf-run .mute { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-2); cursor: pointer; }
 .pf-run .mute input { accent-color: var(--accent); margin: 0; }
+/* PAD-744: how far the game has booted, in the app footer's steps */
+.pf-run .boot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); white-space: nowrap; max-width: 64ch; overflow: hidden; text-overflow: ellipsis; }
+.pf-run .boot[hidden] { display: none; }
+.pf-run .boot .bar { flex: 0 0 auto; width: 90px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.pf-run .boot .bar i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+.pf-run .boot .n { width: 30px; text-align: right; font: 11px var(--mono); }
 
 /* ---------------------------------------------------------------- artwork */
 .pf-stagewrap { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 8px; }

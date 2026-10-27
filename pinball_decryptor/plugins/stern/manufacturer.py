@@ -478,6 +478,10 @@ class SternManufacturer(Manufacturer):
     #: do there: the check is "is this the card this image was flashed from",
     #: and the write is one partition, not the image.
     menu_flash_phases = ("Check the card", "Write the menu", "Verify", "Flush")
+    #: The flash dialog's "Keep the SD card's settings, audits and high
+    #: scores" (PAD-736): a whole-image flash that puts the card's own /data
+    #: back.  make_flash_pipeline takes ``keep_data=``; no other brand does.
+    flash_keep_data = True
     # "Revert all changes" fallback: re-derive originals with no .orig snapshot
     # straight from the source card.
     revert_phases = ("Read source", "Restore")
@@ -1353,10 +1357,10 @@ class SternManufacturer(Manufacturer):
 
     def make_flash_pipeline(self, image_path, device_path,
                             log_cb, phase_cb, progress_cb, done_cb,
-                            menu_only=False, verify=True):
+                            menu_only=False, verify=True, keep_data=False):
         return SternFlashImagePipeline(
             image_path, device_path, log_cb, phase_cb, progress_cb, done_cb,
-            menu_only=menu_only, verify=verify)
+            menu_only=menu_only, verify=verify, keep_data=keep_data)
 
     def make_revert_pipeline(self, source, assets_dir, rels,
                              log_cb, phase_cb, progress_cb, done_cb,

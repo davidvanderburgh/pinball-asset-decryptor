@@ -124,6 +124,11 @@ export function FlashDialog({ f }) {
             onChange=${(v) => set("menu", v)} />
           ${f.menu_note ? html`<div class="small muted wr-ind">${f.menu_note}</div>` : null}
         </div>` : null}
+        ${f.keep_offered ? html`<div class="stack" style="gap:2px">
+          <${Check} checked=${f.keep_data} disabled=${!f.keep_enabled}
+            label=${f.keep_label} onChange=${(v) => set("keep_data", v)} />
+          ${f.keep_note ? html`<div class="small muted wr-ind">${f.keep_note}</div>` : null}
+        </div>` : null}
         ${f.verify_offered ? html`<div class="stack" style="gap:2px">
           <${Check} checked=${f.skip_verify} disabled=${!f.skip_verify_enabled}
             label="Skip verify — about twice as fast, but the card is not checked after writing"

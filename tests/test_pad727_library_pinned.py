@@ -72,6 +72,7 @@ ls "$CACHE" | sed -n 's/\.raw$//p' | tr '\n' ' '; echo
                     reason="cardmount.sh is the rig's (WSL/Linux) and speaks GNU stat/touch; macOS has BSD ones")
 def test_the_library_is_never_evicted_and_dead_entries_go_first():
     script = _funcs("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
+                    "cache_readers", "cache_in_use", "cache_source_state", "cache_limit_gb", "cache_used_kb",
                     "cache_make_room") + DRIVER
     out = subprocess.run(["bash", "-s"], input=script.encode(), stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, timeout=60).stdout.decode("utf-8", "replace")

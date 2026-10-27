@@ -27,7 +27,9 @@
  *   tilt                the ball in play tilted: its ball_end holds nothing
  *   player <n>          the player up
  *   game_over           pm_in_game() falls
- *   new_game            a new game: player 1, every score 0, pm_in_game() 1
+ *   new_game            a new game: player 1, every score 0, pm_in_game() 1 (and no game mode completed)
+ *   done <id>           PAD-747: the player up completes the game's own mode <id> (pm_game_modes_done counts it);
+ *                       ids 100 and up are ones the runtime cannot see completed
  *   trigger <file>      /dump/<file> appears (a mode's test trigger), with optional text: trigger f=text
  *   covered <0|1>       a display of the game's has the screen (a mode's words, or a note, wait for it)
  *   words <0|1>         a screen of the game's own has its words up (PAD-662: pm_game_words, a mode's step aside)
@@ -612,6 +614,22 @@ int pm_place_counts(unsigned id) { return id < 128; }
 const char *pm_game_mode_name(unsigned id) { return id < 128 ? "Desk Mode" : 0; }
 void pm_place_over(int won) { printf("%6lu PLACE OVER %s\n", now_ms, won ? "COMPLETED" : "not completed"); }
 int pm_game_mode_start(unsigned id) { (void)id; return 0; }
+
+/* PAD-747: the game's modes each player completed this game (the `done <id>` command); 100 and up are not seen */
+static unsigned char desk_done[5][128];
+int pm_game_mode_done_seen(unsigned id) { return id < 100; }
+int pm_game_mode_done(unsigned id) { return id < 100 ? desk_done[player <= 4 ? player : 0][id] : -1; }
+int pm_game_modes_done(const unsigned char *ids, unsigned n)
+{
+    unsigned k, seen = 0, done = 0;
+    for (k = 0; k < (n ? n : 100); k++) {
+        unsigned id = n ? ids[k] : k;
+        if (id >= 100) continue;
+        seen++;
+        done += in_game && desk_done[player <= 4 ? player : 0][id];
+    }
+    return seen ? (int)done : -1;
+}
 int pm_trigger_text(const char *name, char *out, unsigned cap)
 {
     if (!trigger_file[0] || strcmp(name, trigger_file)) return 0;
@@ -1203,10 +1221,17 @@ int main(int argc, char **argv)
             in_game = 1;
             printf("%6lu >> hold over\n", now_ms);
         } else if (!strcmp(c, "player")) player = (unsigned)atoi(argv[++k]);
+        else if (!strcmp(c, "done")) {               /* PAD-747: the player up completes one of the game's modes */
+            unsigned id = (unsigned)atoi(argv[++k]);
+            if (id < 128) desk_done[player <= 4 ? player : 0][id] = 1;
+            printf("%6lu >> done %u (player %u)\n", now_ms, id, player);
+            ticks_for_ms(50);
+        }
         else if (!strcmp(c, "game_over")) in_game = 0;
         else if (!strcmp(c, "new_game")) {
             int p;
             for (p = 0; p < 5; p++) score[p] = 0;
+            memset(desk_done, 0, sizeof desk_done);
             in_game = 1;
             player = 1;
             printf("%6lu >> new_game\n", now_ms);

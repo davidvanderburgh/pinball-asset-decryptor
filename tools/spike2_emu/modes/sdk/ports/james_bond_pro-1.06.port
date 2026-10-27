@@ -778,3 +778,30 @@ site  place_start_29               0x00164f2c 0xe92d40f0 0xe24dd00c
 
 # PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
 value challenge_place_1        6
+
+# PAD-747: the game's other modes it keeps books of (mode_framework.done_lines): a mode of ours may start once
+# some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag
+text  done_name_0                  Story Mode
+value done_audit_0                 376
+text  done_name_1                  Rocket Multiball Cranked Up
+value done_flag_1                  77
+text  done_name_2                  Dr No Multiball
+value done_flag_2                  83
+text  done_name_3                  Goldfinger Wizard Mode
+value done_flag_3                  94
+text  done_name_4                  Disco Volante Multiball
+value done_flag_4                  100
+text  done_name_5                  Little Nellie Multiball
+value done_flag_5                  113
+text  done_name_6                  Hunted By Helicopter Multiball
+value done_flag_6                  117
+text  done_name_7                  Powerpack Multiball
+value done_flag_7                  121
+text  done_name_8                  Aston Martin Multiball
+value done_flag_8                  125
+text  done_name_9                  James Bond Multiball
+value done_flag_9                  131
+text  done_name_10                 Wizard Mode Multiball
+value done_flag_10                 136
+text  done_name_11                 Wizard Mode Level 2
+value done_flag_11                 174

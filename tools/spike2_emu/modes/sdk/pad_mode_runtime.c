@@ -1353,7 +1353,7 @@ static void on_sound_worker(unsigned *r)
  * key, not on "the next lookup", holds when the worker thread looks it up later, and holds for a
  * looping descriptor that looks its key up again at every loop. */
 #define SWAPS_MAX 8
-static struct { unsigned request; int old; unsigned long until; unsigned char stock[8], ours[8]; volatile int looked; } swaps[SWAPS_MAX];
+static struct { unsigned request; int old; unsigned long until; unsigned char stock[8], ours[8]; volatile int looked; int music; } swaps[SWAPS_MAX];
 static volatile int swaps_live;
 
 int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned char ours[8], int priority, unsigned ms)
@@ -1373,6 +1373,7 @@ int pm_sound_swap(unsigned request, const unsigned char stock[8], const unsigned
         swaps[free_i].ours[i] = ours[i];
     }
     swaps[free_i].until = pm_ms() + (ms ? ms + ms / 8 + 1000 : 10000);
+    swaps[free_i].music = priority < 0;      /* PAD-740: a music carrier's (it keeps its own priority) */
     swaps[free_i].request = request;          /* last: the lookup hook reads it */
     swaps_live = 1;
     return 1;
@@ -1415,6 +1416,60 @@ int pm_sound_priority_stock(unsigned request)
         return pm_sound_priority(request, pair >> 8, pair & 0xff);
     }
     return pm_sound_priority(request, -1, -1);   /* never changed: it has its own */
+}
+
+/* ---- PAD-740: a carrier playing a sound of ours is not the game's song --------------------------------------
+ * The sound engine's "which of these requests plays" (`sound_active` + 0x40 on all 53 newest builds: ldr ip, [pc,
+ * #x]; str lr, [sp, #-4]!; add lr, ip, #n; mov r2, r0; ldrh r3, [r2], #2; cmp r3, #0 - it takes a zero-ended u16
+ * list and returns the first request in it a channel plays, 0 for none). Bond LE 1.06's music sync (0x19c5cc, its
+ * only caller there) asks it every tick which of its synced songs plays, and runs that song's cue lists against the
+ * song's position: Bird One Multiball's music (request 94, the modes' music carrier) has 31 speech cues from 55 s on
+ * (requests 1019-1049, "Base calling Bird One", "8 minutes to interception"...), and they played over a mode's own
+ * music on 94 (emulator: 1019 at 55 s, 1020 at 64.7 s, 1021 at 66.7 s, then 1022-1038). While a music carrier
+ * carries a record of ours - a music swap armed on it (item 163; the swaps that keep the request's own priority, -1,
+ * are the music's in mode_file.c and pad_mode_assets.h) or pointed at a bed of ours (pm_sound_sid) - the engine is
+ * handed the list without it, so no caller takes it for the game's own song. A call's swap is left out: the game's
+ * speech carriers are asked about by other code too (Foo Fighters' eight callers), proven only for the music. */
+static unsigned short own_on_list[256];
+static int own_on(unsigned request)
+{
+    int i;
+    for (i = 0; i < SWAPS_MAX; i++) if (swaps_live && swaps[i].music && swaps[i].request == request) return 1;
+    for (i = 0; i < SID_SLOTS; i++) if (sid_slot[i].request == request) return 1;
+    return 0;
+}
+
+static void on_sound_first_active(unsigned *r)
+{
+    const unsigned short *l = (const unsigned short *)(unsigned long)r[0];
+    static unsigned said;
+    unsigned i, n = 0, cut = 0;
+    if (!l) return;
+    for (i = 0; l[i]; i++) {
+        if (n + 1 >= sizeof own_on_list / sizeof own_on_list[0]) return;   /* longer than ours: as it was */
+        if (own_on(l[i])) { cut = l[i]; continue; }
+        own_on_list[n++] = l[i];
+    }
+    if (!cut) return;
+    own_on_list[n] = 0;
+    r[0] = (unsigned)(unsigned long)own_on_list;
+    if (said++ < 5) say("sound: request %u plays ours - the game's ask at 0x%08x does not take it for its own sound",
+                        cut, r[5] - 4);
+}
+
+static void own_on_arm(void)
+{
+    unsigned a = fn("sound_active"), *w;
+    if (!a || !(can & PM_CAN_OWN_SOUND)) return;
+    w = (unsigned *)(unsigned long)(a + 0x40);
+    if ((w[0] & 0xFFFFF000u) != 0xE59FC000u || w[1] != 0xE52DE004u || (w[2] & 0xFFFFF000u) != 0xE28CE000u
+        || w[3] != 0xE1A02000u || w[4] != 0xE0D230B2u || w[5] != 0xE3530000u) {
+        say("sound: no 'which of these plays' after sound_active on this build - a carrier of ours may still be taken "
+            "for the game's own sound");
+        return;
+    }
+    if (hook(a + 0x40, on_sound_first_active))
+        say("sound: the engine's 'which of these plays' at 0x%08x does not count a carrier playing ours", a + 0x40);
 }
 
 static int key_is(const unsigned char *a, const unsigned char *b)
@@ -9621,6 +9676,7 @@ static void dto_tick(void);               /* PAD-733 */
 static void dto_ball_end(void);           /* PAD-733 */
 static void more_tick(void);              /* PAD-707 */
 static void place_tick(void);             /* PAD-710 */
+static void done_tick(void);              /* PAD-747 */
 static void stock_tick(void);             /* item 160 */
 static void magnet_tick(void);            /* PAD-381 */
 static void scoop_tick(void);             /* PAD-381 */
@@ -9669,6 +9725,7 @@ static void on_tick(unsigned *r)
     roster_late_tick();                       /* PAD-707: a battle's end after its mode's finish */
     more_tick();                              /* PAD-707: the new monsters on the selection screen */
     place_tick();                             /* PAD-710: an outcome owed to a player not up */
+    done_tick();                              /* PAD-747: the game's modes completed: STOPs hooked, flags watched */
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
     lamps_tick();                             /* named inserts: their patterns (lights section) */
@@ -11114,6 +11171,9 @@ static unsigned place_vfn(unsigned obj, const char *slot_name)
     if (!obj || (obj & 3) || slot < 0 || slot > 255 || !maps_has(obj, 4, MAP_R)) return 0;
     vt = rw(obj);
     if (!vt || (vt & 3) || !maps_has(vt, 4 * (unsigned long)(slot + 1), MAP_R)) return 0;
+    if (rw(vt + 4u * (unsigned)slot) >= (unsigned)(unsigned long)tramp
+        && rw(vt + 4u * (unsigned)slot) < (unsigned)(unsigned long)(tramp + TRAMP_WORDS))
+        return rw(vt + 4u * (unsigned)slot);        /* PAD-747: a thunk of ours in the slot, on its way to the STOP */
     return maps_has(rw(vt + 4u * (unsigned)slot), 8, MAP_R | MAP_X | MAP_GAME) ? rw(vt + 4u * (unsigned)slot) : 0;
 }
 
@@ -11449,6 +11509,294 @@ static void place_arm(void)
             say("place: a mode may take the place of %d of the game's modes (it counts only as ours: the port names no "
                 "mode framework)", bm_count(block_named));
     }
+}
+
+/* ---- PAD-747: the game's own modes each player has completed ------------------------------------------------------
+ * A tester (Uncanny X-Men): "is there a way to trigger my mode to happen based on X number of the stock modes being
+ * completed? ... a mini-wizard mode after finishing 4 of the stock modes, then my bigger wizard mode after the final
+ * 4." The runtime keeps, per player and per game (a new game_start forgets it), the set of the game's modes (the
+ * port's `text block_name_<id>`, the ids pm_block_list takes) the player has COMPLETED, read the way the game records
+ * it - the same lines PAD-710's place counting writes through:
+ *   - a C++ title (the mode framework, `value mode_slot_stop`): each game mode object's STOP (its v[mode_slot_stop], one
+ *     hook per distinct function, placed on the first tick the objects have their vtables) is entered with the reason
+ *     in r1, non-zero = completed (mode_framework.py); a STOP that finds the mode stopped already for the player
+ *     returns at once and records nothing, so neither does this
+ *   - a plain-C title: the mode's COMPLETED audit (`value place_audit_completed_<id>`), counted through the
+ *     framework's audit add (`site audit_add`: the id in r0), or where it has none its COMPLETED game flag (`value
+ *     place_flag_completed_<id>`), seen rising for the player up
+ * A mode of ours in one's place (PAD-710) that ends won goes through the same STOP / audit / flag, so it counts too.
+ * A plain-C title's other modes the game keeps books of but the port names no start of (Elvira's movies, Stranger
+ * Things 1.13's story modes: mode_framework.done_lines) are ids DONE_EXTRA + n - `text done_name_<n>` with `value
+ * done_audit_<n>` (a COMPLETED audit) or `value done_flag_<n>` (a COMPLETED flag).
+ * pm_game_mode_done / pm_game_modes_done read it (mode_file.c's `starts_on completed`, the blocks' completed hat). */
+#define DONE_STOPS 32
+#define DONE_AUDITS 128
+#define DONE_EXTRA 128                             /* the first id of the modes with books and no start */
+#define DONE_IDS 256
+#define DONE_WORDS (DONE_IDS / 32)
+static unsigned done_bits[5][DONE_WORDS];          /* per player 1-4: the ids completed this game */
+static unsigned done_game[5];                      /* the game (chg_game_now() + 1) each player's bits belong to */
+static unsigned done_seen[DONE_WORDS];             /* the ids whose completion the runtime can see */
+static struct { unsigned audit; unsigned char id; } done_audit[DONE_AUDITS];
+static int done_audits;
+static unsigned done_stop_fn[DONE_STOPS];
+static int done_stops, done_stops_tried, done_tries;
+static unsigned done_flag_was[DONE_WORDS], done_flag_player, done_flag_game;
+static int done_has(const unsigned *m, unsigned id) { return id < DONE_IDS && (m[id >> 5] >> (id & 31) & 1u); }
+
+/* PAD-747: an id's book line: a block mode's place_<what>_<id>, an extra one's done_<what>_<n> */
+static long done_book(int flag, unsigned id)
+{
+    char key[48];
+    if (id < DONE_EXTRA) return place_book(flag ? "flag_completed" : "audit_completed", id);
+    pm_snprintf(key, sizeof key, "done_%s_%u", flag ? "flag" : "audit", id - DONE_EXTRA);
+    return pm_port_value(key, -1);
+}
+
+static const char *done_name(unsigned id)
+{
+    char key[32];
+    const char *nm;
+    if (id < DONE_EXTRA) return place_name(id);
+    pm_snprintf(key, sizeof key, "done_name_%u", id - DONE_EXTRA);
+    nm = pm_port_text(key);
+    return nm ? nm : "?";
+}
+
+static unsigned chg_game_now(void);
+
+static unsigned done_count_of(unsigned p)
+{
+    unsigned w, n = 0;
+    for (w = 0; w < DONE_WORDS; w++) n += (unsigned)__builtin_popcount(done_bits[p][w]);
+    return n;
+}
+
+/* player p's bits for THIS game (a new game forgets the last one's) */
+static unsigned *done_of(unsigned p)
+{
+    unsigned g = chg_game_now() + 1, w;
+    if (p < 1 || p > 4) return 0;
+    if (done_game[p] != g) {
+        for (w = 0; w < DONE_WORDS; w++) done_bits[p][w] = 0;
+        done_game[p] = g;
+    }
+    return done_bits[p];
+}
+
+static void done_mark(unsigned id, unsigned p, const char *how)
+{
+    unsigned *b = done_of(p);
+    if (!b || id >= DONE_IDS || !pm_in_game() || done_has(b, id)) return;
+    b[id >> 5] |= 1u << (id & 31);
+    say("done: player %u completed the game's %s (mode %u, %s) - %u of the game's modes this game", p, done_name(id),
+        id, how, done_count_of(p));
+}
+
+/* a game mode's STOP entered: (mode, reason) */
+static void done_stop_seen(unsigned *r, const char *how)
+{
+    unsigned obj = r[0], id, p;
+    if (!r[1] || !obj || !pm_in_game()) return;
+    for (id = 0; id < BLOCK_IDS && !(block_obj[id] == obj && bm_has(block_named, id)); id++) ;
+    if (id >= BLOCK_IDS) return;
+    if (!(p = place_player())) p = pm_player();
+    if (place_stopped(obj, p)) return;              /* stopped already: the STOP returns at once */
+    done_mark(id, p, how);
+}
+
+static void on_done_stop(unsigned *r) { done_stop_seen(r, "its stop, completed"); }
+static void on_done_slot(unsigned *r) { done_stop_seen(r, "its stop through its vtable, completed"); }
+
+/* the framework's audit add: (audit, amount) */
+static void on_done_audit(unsigned *r)
+{
+    int k;
+    if (!r[1] || !pm_in_game()) return;
+    for (k = 0; k < done_audits; k++)
+        if (done_audit[k].audit == r[0]) {
+            done_mark(done_audit[k].id, pm_player(), "its COMPLETED audit");
+            return;
+        }
+}
+
+/* 1 = a function start a two-word hook may move: no branch and no pc in either word but a literal load (hook()
+ * relocates that), or another object's hook jump as a whole */
+static int done_movable(unsigned f)
+{
+    const unsigned *p = (const unsigned *)(unsigned long)f;
+    int i;
+    if (p[0] == 0xe51ff004u) return 1;               /* a hook of another's: its jump and literal move as they are */
+    for (i = 0; i < 2; i++) {
+        unsigned w = p[i];
+        if ((w & 0xF0000000u) != 0xE0000000u) return 0;            /* conditional or special */
+        if ((w & 0x0E000000u) == 0x0A000000u) return 0;            /* b / bl */
+        if ((w & 0x0FFF0000u) == 0x092D0000u) continue;            /* push */
+        if ((w & 0x0F7F0000u) == 0x051F0000u && ((w >> 12) & 15) != 15) continue;   /* ldr rd, [pc, #imm] */
+        if ((w & 0x0C000000u) != 0x00000000u && (w & 0x0C000000u) != 0x04000000u) return 0;
+        if (((w >> 16) & 15) == 15 || ((w >> 12) & 15) == 15 || (w & 15) == 15) return 0;
+    }
+    return 1;
+}
+
+/* A STOP whose first words cannot move (it opens `push {.., lr}; bl ...`, a class's own stop calling the shared one
+ * first): its object's vtable slot is pointed at a thunk instead - push {r0-r3,ip,lr}; mov r0,sp; blx <logger>; pop;
+ * ldr pc,<the STOP> - so every call through the vtable (the framework's, the runtime's pm_place_over) is seen; a
+ * direct `bl` to that class's stop is not. One thunk per function; each vtable patched once. */
+static unsigned done_thunk(unsigned f)
+{
+    unsigned *t;
+    if ((tramp_used + 1) * 16 > TRAMP_WORDS) return 0;
+    t = tramp + tramp_used++ * 16;
+    t[0] = 0xe92d500fu;   /* push {r0,r1,r2,r3,ip,lr} */
+    t[1] = 0xe1a0000du;   /* mov r0, sp */
+    t[2] = 0xe59fc014u;   /* ldr ip, [pc, #20] -> t[9] */
+    t[3] = 0xe12fff3cu;   /* blx ip */
+    t[4] = 0xe8bd500fu;   /* pop {r0,r1,r2,r3,ip,lr} */
+    t[5] = 0xe51ff004u;   /* ldr pc, [pc, #-4] -> t[6] */
+    t[6] = f;
+    t[9] = (unsigned)(unsigned long)on_done_slot;
+    mprotect(tramp, sizeof tramp, 7);
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
+    return (unsigned)(unsigned long)t;
+}
+
+static const char *done_slots_said(unsigned n)
+{
+    return n ? " and their vtables' slots" : "";
+}
+
+static int done_slot(unsigned obj, unsigned f)
+{
+    static unsigned vts[DONE_STOPS * 2], thunks[DONE_STOPS], thunk_of[DONE_STOPS];
+    static int nvt, nth;
+    long slot = pm_port_value("mode_slot_stop", -1);
+    unsigned vt = rw(obj), t = 0, *at;
+    int k;
+    for (k = 0; k < nvt; k++) if (vts[k] == vt) return 1;          /* this class's vtable is patched already */
+    for (k = 0; k < nth; k++) if (thunk_of[k] == f) t = thunks[k];
+    if (!t && nth < DONE_STOPS && (t = done_thunk(f)) != 0) thunk_of[nth] = f, thunks[nth++] = t;
+    if (!t || nvt >= DONE_STOPS * 2 || slot < 0) return 0;
+    at = (unsigned *)(unsigned long)(vt + 4u * (unsigned)slot);
+    mprotect((void *)((unsigned long)at & ~0xffful), 0x2000, 7);
+    *at = t;
+    vts[nvt++] = vt;
+    return 1;
+}
+
+/* every tick: the C++ objects' STOPs until hooked, once they have their vtables (the game's own constructors run after
+ * the runtime's); the plain-C flags, watched for the player up */
+static void done_tick(void)
+{
+    unsigned id, p, g;
+    if (!done_stops_tried && place_counts_on) {
+        static unsigned slots;
+        unsigned have = 0, want = 0, k;
+        for (id = 0; id < BLOCK_IDS; id++) {
+            unsigned f;
+            if (!bm_has(block_named, id) || !block_obj[id]) continue;
+            want++;
+            if (done_has(done_seen, id) || !(f = place_stop_fn(block_obj[id]))) {
+                have += done_has(done_seen, id);
+                continue;
+            }
+            have++;
+            for (k = 0; k < (unsigned)done_stops && done_stop_fn[k] != f; k++) ;
+            if (k == (unsigned)done_stops && done_stops < DONE_STOPS && done_movable(f) && hook(f, on_done_stop))
+                done_stop_fn[done_stops++] = f;
+            for (k = 0; k < (unsigned)done_stops && done_stop_fn[k] != f; k++) ;
+            if (k < (unsigned)done_stops || done_slot(block_obj[id], f)) {
+                done_seen[id >> 5] |= 1u << (id & 31);
+                slots += k == (unsigned)done_stops;
+            } else {
+                const unsigned *w = (const unsigned *)(unsigned long)f;
+                say("done: the game's %s (mode %u): its STOP 0x%08x (%08x %08x) could not be hooked", place_name(id), id,
+                    f, w[0], w[1]);
+            }
+        }
+        if (want && (have == want || ++done_tries > 1800)) {   /* every object, or 30 s of them not all there */
+            done_stops_tried = 1;
+            say("done: the runtime sees %d of the game's %u modes completed, through %d STOP function(s)%s",
+                bm_count(done_seen), want, done_stops, done_slots_said(slots));
+        }
+    }
+    if (!data("game_flags") || !pm_in_game()) return;
+    p = pm_player();
+    g = chg_game_now() + 1;
+    for (id = 0; id < DONE_IDS; id++) {
+        long fl;
+        int on, was;
+        if (!done_has(done_seen, id) || (id < DONE_EXTRA && (block_obj[id] || !bm_has(block_named, id)))
+            || (fl = done_book(1, id)) <= 0 || (fn("audit_add") && done_book(0, id) > 0)) continue;
+        if ((on = game_flag((unsigned)fl)) < 0) continue;
+        was = (int)(done_flag_was[id >> 5] >> (id & 31) & 1u);
+        if (on) done_flag_was[id >> 5] |= 1u << (id & 31);
+        else done_flag_was[id >> 5] &= ~(1u << (id & 31));
+        /* a new player up or a new game: what the flags say now is where they start, not a completion */
+        if (on && !was && p == done_flag_player && g == done_flag_game) done_mark(id, p, "its COMPLETED flag");
+    }
+    done_flag_player = p;
+    done_flag_game = g;
+}
+
+/* from the constructor, after place_arm */
+static void done_arm(void)
+{
+    unsigned id;
+    int k, named;
+    char key[32];
+    for (id = 0; id < DONE_IDS; id++) {
+        long a, fl;
+        if (id < DONE_EXTRA ? !bm_has(block_named, id) || block_obj[id] : 0) continue;
+        if (id >= DONE_EXTRA) {
+            pm_snprintf(key, sizeof key, "done_name_%u", id - DONE_EXTRA);
+            if (!pm_port_text(key)) break;               /* numbered from 0 with no gaps */
+        }
+        a = done_book(0, id);
+        fl = done_book(1, id);
+        if (a > 0 && fn("audit_add") && done_audits < DONE_AUDITS) {
+            done_audit[done_audits].audit = (unsigned)a;
+            done_audit[done_audits++].id = (unsigned char)id;
+            done_seen[id >> 5] |= 1u << (id & 31);
+        } else if (fl > 0 && data("game_flags")) {
+            done_seen[id >> 5] |= 1u << (id & 31);
+        }
+    }
+    if (done_audits && !hook(fn("audit_add"), on_done_audit)) {
+        for (k = 0; k < done_audits; k++) done_seen[done_audit[k].id >> 5] &= ~(1u << (done_audit[k].id & 31));
+        done_audits = 0;
+        say("done: the audit add could not be hooked - the game's COMPLETED audits are not watched");
+    }
+    for (named = 0, k = 0; k < DONE_WORDS; k++) named += __builtin_popcount(done_seen[k]);
+    if (named || place_counts_on) can |= PM_CAN_GAME_DONE;
+    if (named)
+        say("done: the runtime sees %d of the game's modes completed (%d of the %d it names a start of; %d through "
+            "their COMPLETED audit)", named, bm_count(done_seen), bm_count(block_named), done_audits);
+}
+
+int pm_game_mode_done_seen(unsigned id)
+{
+    return done_has(done_seen, id);
+}
+
+int pm_game_mode_done(unsigned id)
+{
+    unsigned *b;
+    if (!pm_game_mode_done_seen(id)) return -1;
+    b = done_of(pm_player());
+    return b && pm_in_game() ? done_has(b, id) : 0;
+}
+
+int pm_game_modes_done(const unsigned char *ids, unsigned n)
+{
+    unsigned k, seen = 0, done = 0, *b = done_of(pm_player());
+    for (k = 0; k < (n ? n : DONE_IDS); k++) {
+        unsigned id = n ? ids[k] : k;
+        if (!pm_game_mode_done_seen(id)) continue;
+        seen++;
+        if (b && pm_in_game() && done_has(b, id)) done++;
+    }
+    return seen ? (int)done : -1;
 }
 
 /* ---- the game's Challenge list (PAD-615, optional, title specific) ------------------------------
@@ -16023,12 +16371,14 @@ static void pad_mode_start(void)
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
     block_arm();                              /* PAD-347: a mode may keep the game's modes from starting */
     place_arm();                              /* PAD-710: a mode in the place of one of the game's, counting as it */
+    done_arm();                               /* PAD-747: the game's modes each player has completed */
     backdrop_arm();                           /* hud-layers: a clip behind the HUD */
     ck_arm();                                 /* PAD-530: a mode's clip comes back after the game's */
     status_bar_arm();                         /* PAD-521: the game's own status bar */
     frame_arm();                              /* PAD-301: a full-screen clip drawn at the frame hand-over */
     if ((can & PM_CAN_OWN_SOUND) && !lookup_hooked && hook(fn("sound_lookup"), on_sound_lookup))
         lookup_hooked = 1;
+    own_on_arm();                             /* PAD-740: a carrier playing ours is not the game's song */
     /* item 163: with /dump/soundlog.on there at the start, every request the game's sound worker
      * takes is logged ("[pad] sound <request> <n>"), so a check game is also the sound census that
      * says which stock requests a build never plays (the carriers a mode's own sounds ride on) */
@@ -16095,7 +16445,7 @@ static void pad_mode_start(void)
         say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
-    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
+    say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,
         can & PM_CAN_CALLOUT ? " callout" : "", can & PM_CAN_LIGHTS ? " lights" : "",
         can & PM_CAN_SCREENS ? " screens" : "", can & PM_CAN_CLIPS ? " clips" : "",
         can & PM_CAN_OWN_SOUND ? " own-sound" : "", can & PM_CAN_MESSAGES ? " messages" : "",
@@ -16105,7 +16455,8 @@ static void pad_mode_start(void)
         can & PM_CAN_BUILDING ? " building" : "", can & PM_CAN_GAME_SHOWS ? " game-shows" : "",
         can & PM_CAN_SHAKER ? " shaker" : "", can & PM_CAN_GAME_WIZARDS ? " game-wizards" : "",
         can & PM_CAN_STATUS_BAR ? " status-bar" : "", can & PM_CAN_CHALLENGE ? " challenges" : "",
-        can & PM_CAN_BALL_END_HOLD ? " ball-end-hold" : "", can & PM_CAN_PLACE ? " place" : "");
+        can & PM_CAN_BALL_END_HOLD ? " ball-end-hold" : "", can & PM_CAN_PLACE ? " place" : "",
+        can & PM_CAN_GAME_DONE ? " modes-completed" : "");
     /* The modes' init waits for the first tick (on_tick): nothing of the game may be
      * called from here, before its main() has run. */
 }

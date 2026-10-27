@@ -569,12 +569,28 @@ class DiskMixin:
         self._adjust_usage(d["usage"][LOC_WSL], wsl_freed)
         self._adjust_usage(d["usage"][LOC_HOST], host_freed)
         self._adjust_usage(d["usage"][LOC_EMU], emu_freed)
+        # PAD-739: space freed inside WSL stays inside the WSL disk file on
+        # Windows until that file is compacted - a user who deleted 120 GB of
+        # cached cards saw "Freed" and no change on his drive.  Cards cached
+        # on the distro's own disk count towards what Reclaim gives back.
+        from .emu_cache import on_distro_disk
+        inside = wsl_freed + (emu_freed if on_distro_disk(
+            d["usage"][LOC_EMU]) else 0)
         if d["vhdx"] and d["vhdx"].get("reclaimable") is not None:
-            d["vhdx"]["reclaimable"] += wsl_freed
+            d["vhdx"]["reclaimable"] += inside
         self._disk_view(bars=self._bar_texts(), rows=self._disk_rows(),
                         reclaim_note=self._reclaim_text())
-        self._disk_busy(False, "Freed %s."
-                        % _fmt(wsl_freed + host_freed + emu_freed))
+        total = wsl_freed + host_freed + emu_freed
+        if inside and inside >= total:
+            msg = ("Freed %s inside WSL: Windows gets it back with Reclaim "
+                   "space to Windows below." % _fmt(total))
+        elif inside:
+            msg = ("Freed %s (%s inside WSL: Windows gets that back with "
+                   "Reclaim space to Windows below)." % (_fmt(total),
+                                                         _fmt(inside)))
+        else:
+            msg = "Freed %s." % _fmt(total)
+        self._disk_busy(False, msg)
 
     # ------------------------------------------------------------------
     # reclaim (compact the .vhdx)
@@ -597,8 +613,11 @@ class DiskMixin:
                 "Reclaim space to Windows",
                 "This will shut down WSL and compact its virtual disk so freed "
                 "space is returned to Windows.\n\n• Any other WSL work will be "
-                "stopped.\n• It can take a few minutes.\n\nMake sure no "
-                "extract or build is running, then continue?"):
+                "stopped, and the app holds WSL off until it is done.\n• It "
+                "can take a few minutes.\n• Close Docker Desktop and any "
+                "Linux terminal windows first: they start WSL again and keep "
+                "its disk in use.\n\nMake sure no extract or build is "
+                "running, then continue?"):
             return False
         self._disk_busy(True, "Reclaiming…")
 

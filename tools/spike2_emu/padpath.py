@@ -224,6 +224,19 @@ def dump():
     return os.path.join(r, "dump") if r else None
 
 
+def logdir():
+    """Where the run logs live (padpath.sh PAD_LOGDIR: the slot's directory,
+    or the home on slot 0), in the form this side can open."""
+    p = _env("PAD_LOGDIR")
+    if p:
+        return to_win(p) if _WIN and not is_windows_path(p) else p
+    home = wsl_home()
+    if not home:
+        return None
+    p = home.rstrip("/") + ("/padslots/%d" % slot() if slot() else "")
+    return to_win(p) if _WIN else p
+
+
 # ---- RIG SLOTS (padpath.sh, "RIG SLOTS"; padslot.sh) ---------------------
 
 def slot():

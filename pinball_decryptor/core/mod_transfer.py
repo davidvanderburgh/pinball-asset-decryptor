@@ -103,7 +103,10 @@ _AUDIO_FLAG_KEYS = ("audio_loop", "audio_keep", "audio_levels")
 # Toggle values copied verbatim (not per-slot).
 _TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion",
                 "video_best_quality",
-                "menu_expose_through")
+                "menu_expose_through",
+                # PAD-755: a Home Edition's coin door; a target that has one
+                # already, or can't be read, is left alone at build time
+                "coin_door")
 # Staged Defaults-tab edits.  These need no reconciliation at all: they are
 # keyed by the firmware's own ``AD_`` names and high-score slot labels, which
 # are the same words on a new version and on the other model of the same title
@@ -111,7 +114,9 @@ _TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion",
 # apply already skips a name the target image doesn't carry and pulls every
 # value into that image's own range.  Merged per key so an edit already made
 # on the target wins.
-_MERGE_KEYS = ("settings", "high_scores")
+# ``setting_ranges`` (PAD-750) is keyed the same way and pulled into the
+# target the same way: a name it doesn't carry is skipped at build time.
+_MERGE_KEYS = ("settings", "high_scores", "setting_ranges")
 
 _HEAD = 256 * 1024
 _TAIL = 64 * 1024

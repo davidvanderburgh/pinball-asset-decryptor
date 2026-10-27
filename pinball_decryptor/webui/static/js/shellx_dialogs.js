@@ -767,4 +767,395 @@ export function ShellxOverlays() {
     </div></div>` : null}`;
 }
 
+// ------------------------------------------------------- Animal shelters
+// PAD-754: the paw chip's window.  The app takes no money; people report
+// what they gave to an animal shelter near them and the total everyone sees
+// grows (webui/shellx_donations.py, core/donations.py).  `auto` is the
+// once-only opening after a user's first card write.  Where the shelter is
+// (country, state or province, both optional) feeds the Top places board.
+//
+// The page, with a little casino in it: the total spins in on slot reels,
+// marquee lamps chase around the hero band, a drawn thermometer fills
+// toward the next milestone, the ladder's milestones are lit badges, the
+// top three places stand on a podium that rises in, and an entry landing
+// is a jackpot: the band flashes, the lamps race, paw prints float off the
+// button.  An entry is confirmed before it goes ("Is that right?"), and
+// the Yours list takes one back (the service keeps a token per entry for
+// the app that added it) and refills the form with it.  Colours are the
+// app's tokens, so both themes carry it; prefers-reduced-motion stills it.
+
+// a name's hue for its initials circle: the same name, the same colour
+function nameHue(name) {
+  let h = 0;
+  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+function initials(name) {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+const SYMBOL = { USD: "$", EUR: "€", GBP: "£", JPY: "¥", CAD: "CA$", AUD: "A$", NZD: "NZ$", BRL: "R$", MXN: "MX$" };
+function money(amount, currency) {
+  const n = Number(amount);
+  const text = Number.isInteger(n) ? n.toLocaleString("en-US") : n.toFixed(2);
+  return (SYMBOL[currency] || currency + " ") + text;
+}
+
+// one slot reel: a strip of digits that always spins forward at least a
+// full turn to land on its digit
+const REEL_LEN = 40;
+const REEL_DIGITS = Array.from({ length: REEL_LEN }, (_, i) => i % 10);
+function Reel({ digit, delay }) {
+  const ref = useRef({ pos: 0 });
+  const [pos, setPos] = useState(0);
+  const [go, setGo] = useState(false);
+  useEffect(() => {
+    const cur = ref.current.pos;
+    let step = ((digit - (cur % 10)) + 10) % 10;
+    if (step === 0) step = 10;
+    if (cur + step < REEL_LEN) {
+      ref.current.pos = cur + step; setGo(true); setPos(cur + step);
+    } else {                                 // wrap unseen, then spin
+      ref.current.pos = cur % 10; setGo(false); setPos(cur % 10);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        ref.current.pos = (cur % 10) + step; setGo(true); setPos((cur % 10) + step);
+      }));
+    }
+  }, [digit]);
+  return html`<span class="sx-don-reel"><span class=${"strip" + (go ? " go" : "")}
+      style=${"transform:translateY(" + (-pos) + "em);transition-delay:" + delay + "ms"}>${REEL_DIGITS.map((n) => html`<span>${n}</span>`)}</span></span>`;
+}
+function Odometer({ text }) {
+  let n = 0;
+  return html`<span class="sx-don-total mono notr" aria-label=${text}>${[...String(text)].map((ch) =>
+    /[0-9]/.test(ch) ? html`<${Reel} digit=${Number(ch)} delay=${90 * n++} />` : html`<span>${ch}</span>`)}</span>`;
+}
+
+function Thermometer({ pct }) {
+  // the tube: x 31..49, y 14..234; the bulb sits on its foot
+  const T = 14, H = 220, X = 31, W = 18;
+  const inner = H - 8;
+  const fill = Math.max(0, Math.min(100, pct || 0)) / 100;
+  const mercH = inner * fill;
+  const mercY = T + 4 + inner - mercH;
+  return html`<svg class="sx-don-therm" viewBox="0 0 80 300" aria-hidden="true">
+    ${[0.25, 0.5, 0.75].map((k) => html`<line class="tick" x1=${X + W + 4} x2=${X + W + 11} y1=${T + 4 + inner * (1 - k)} y2=${T + 4 + inner * (1 - k)} />`)}
+    <rect class="tube" x=${X} y=${T} width=${W} height=${H} rx="9" />
+    <rect class="merc" x=${X + 4} width=${W - 8} rx="5" style=${"y:" + mercY + "px;height:" + (mercH + 40) + "px"} />
+    <circle class="bulb" cx=${X + W / 2} cy=${T + H + 20} r="24" />
+    <circle class="bulb-shine" cx=${X + W / 2 - 8} cy=${T + H + 12} r="5" />
+    <rect class="shine" x=${X + 3} y=${T + 8} width="3" height=${H - 30} rx="1.5" />
+  </svg>`;
+}
+
+// the tile maps: a square per country (the list core/donations.py knows)
+// and per US state, placed roughly where it sits, lit by what was given
+// there.  [column, row].
+const WORLD_TILES = {
+  CA: [2, 1], US: [2, 2], MX: [2, 3], BR: [4, 5], AR: [4, 6],
+  IE: [6, 1], GB: [7, 1], NL: [8, 1], DK: [9, 1], NO: [9, 0], SE: [10, 0], FI: [11, 0],
+  FR: [7, 2], BE: [8, 2], DE: [9, 2], PL: [10, 2], CZ: [10, 3],
+  PT: [6, 3], ES: [7, 3], CH: [8, 3], AT: [9, 3], HU: [11, 3], IT: [9, 4], GR: [11, 4],
+  IL: [12, 4], AE: [13, 4], IN: [14, 4], ZA: [10, 7], KR: [15, 2], JP: [16, 2],
+  SG: [15, 5], AU: [16, 6], NZ: [17, 7],
+};
+const WORLD_COLS = 18, WORLD_ROWS = 8;
+const US_TILES = {
+  AK: [0, 0], ME: [11, 0], WI: [6, 1], VT: [10, 1], NH: [11, 1],
+  WA: [1, 2], ID: [2, 2], MT: [3, 2], ND: [4, 2], MN: [5, 2], IL: [6, 2], MI: [7, 2], NY: [9, 2], MA: [10, 2], RI: [11, 2],
+  OR: [1, 3], NV: [2, 3], WY: [3, 3], SD: [4, 3], IA: [5, 3], IN: [6, 3], OH: [7, 3], PA: [8, 3], NJ: [9, 3], CT: [10, 3],
+  CA: [1, 4], UT: [2, 4], CO: [3, 4], NE: [4, 4], MO: [5, 4], KY: [6, 4], WV: [7, 4], VA: [8, 4], MD: [9, 4], DE: [10, 4],
+  AZ: [2, 5], NM: [3, 5], KS: [4, 5], AR: [5, 5], TN: [6, 5], NC: [7, 5], SC: [8, 5], DC: [9, 5],
+  OK: [4, 6], LA: [5, 6], MS: [6, 6], AL: [7, 6], GA: [8, 6],
+  HI: [0, 7], TX: [4, 7], FL: [8, 7],
+};
+const US_COLS = 12, US_ROWS = 8;
+function TileMap({ tiles, cols, rows, data }) {
+  const by = new Map((data || []).map((d) => [d.code, d]));
+  const top = data && data.length ? data[0].usd : 0;
+  return html`<div class="sx-don-map" style=${"grid-template-columns:repeat(" + cols + ",1fr);grid-template-rows:repeat(" + rows + ",1fr)"}>
+    ${Object.keys(tiles).map((code) => {
+      const d = by.get(code);
+      const k = d && top ? Math.max(0.18, Math.sqrt(d.usd / top)) : 0;
+      return html`<div class=${"sx-don-tile" + (d ? " lit" : "") + (k > 0.7 ? " hot" : "")} key=${code}
+          style=${"grid-column:" + (tiles[code][0] + 1) + ";grid-row:" + (tiles[code][1] + 1) + ";--k:" + k.toFixed(2)}
+          title=${d ? d.label + " · " + d.amount + " · " + d.count + (d.count === 1 ? " donation" : " donations") : ""}>
+        <i></i><span class="notr">${code}</span></div>`;
+    })}
+  </div>`;
+}
+
+// the playground: a dog chasing a ball past a cat, in ASCII, because a
+// window about animal shelters should have animals in it.  A tick every
+// 170 ms; still under prefers-reduced-motion.
+const PLAY_W = 62, PLAY_H = 3;
+const DOG = [
+  ["      ,_  ", " /\\__/ o\\ ", " \\_/\\_|\\_|"],
+  ["      ,_  ", " /\\__/ o\\ ", " \\_//__// "],
+];
+const CAT = [
+  [" /\\_/\\  ", "( o.o ) ", " > ^ <~ "],
+  [" /\\_/\\  ", "( o.o ) ", " > ^ < ~"],
+  [" /\\_/\\  ", "( O.O ) ", " > ^ <  "],
+];
+const BIRD = ["~v~", "-v-"];
+function putSprite(grid, x, y, lines) {
+  lines.forEach((ln, dy) => {
+    const row = y + dy;
+    if (row < 0 || row >= PLAY_H) return;
+    for (let i = 0; i < ln.length; i++) {
+      const col = x + i;
+      if (col < 0 || col >= PLAY_W || ln[i] === " ") continue;
+      grid[row][col] = ln[i];
+    }
+  });
+}
+function playFrame(t) {
+  const grid = Array.from({ length: PLAY_H }, () => Array(PLAY_W).fill(" "));
+  const lap = 70;                                     // ticks per run across
+  const dogX = -12 + (t % lap);
+  const catX = PLAY_W - 9;
+  const near = dogX + 10 >= catX - 2 && dogX < catX + 4;
+  const ballX = dogX + 13 + ((t >> 1) % 2);
+  const ballY = [0, 1, 2, 1][t % 4];
+  const birdX = PLAY_W - ((t * 2) % (PLAY_W + 30)) + 20;
+  putSprite(grid, birdX, 0, [BIRD[(t >> 2) % 2]]);
+  if (ballX < catX - 1) putSprite(grid, ballX, ballY, ["o"]);
+  putSprite(grid, catX, 0, CAT[near ? 2 : (t >> 3) % 2]);
+  putSprite(grid, dogX, 0, DOG[t % 2]);
+  return grid.map((r) => r.join("")).join("\n");
+}
+function Playground() {
+  const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [t, setT] = useState(8);
+  useEffect(() => {
+    if (still) return undefined;
+    const id = setInterval(() => setT((n) => n + 1), 170);
+    return () => clearInterval(id);
+  }, []);
+  return html`<pre class="sx-don-play notr" aria-hidden="true">${playFrame(t)}</pre>`;
+}
+
+function Avatar({ name }) {
+  if (!name || name === "Anonymous") {
+    return html`<span class="sx-don-av anon"><${Icon} name="paw" /></span>`;
+  }
+  return html`<span class="sx-don-av notr" style=${"--h:" + nameHue(name)}>${initials(name)}</span>`;
+}
+
+function Podium({ places }) {
+  const slots = [places[1], places[0], places[2]];
+  const cls = ["p2", "p1", "p3"];
+  const rank = [2, 1, 3];
+  return html`<div class="sx-don-podium">
+    ${slots.map((p, i) => html`<div class=${"sx-don-step " + cls[i] + (p ? "" : " empty")}>
+      ${p ? html`<span class="who notr ellip" title=${p.where}>${p.where}</span>
+        <span class="amt mono notr">${p.amount}</span>` : html`<span class="who dim">—</span>`}
+      <div class="blk"><span class="mono">${rank[i]}</span></div>
+    </div>`)}
+  </div>`;
+}
+
+function DonationsDialog({ close, auto = false }) {
+  const sx = useNs("shellx");
+  const d = sx.donations || {};
+  const [uid, onClose] = useWin(close);
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState(d.currency || "USD");
+  const [shelter, setShelter] = useState("");
+  const [country, setCountry] = useState(d.country || "");
+  const [region, setRegion] = useState(d.region || "");
+  const [name, setName] = useState(d.name || "");
+  const [showName, setShowName] = useState(true);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState("form");    // form | confirm
+  const [added, setAdded] = useState(0);
+  const [hit, setHit] = useState(null);          // the jackpot: "+$30"
+  const [mapOf, setMapOf] = useState("world");   // world | us
+  const [hist, setHist] = useState(null);        // null, or {rows, total, next, busy, err}
+  const loadHistory = async (offset) => {
+    setHist((h) => ({ ...(h || { rows: [], total: 0, next: null }), busy: true, err: null }));
+    const r = await call("shellx.donations_history", offset || 0);
+    if (!r) { setHist((h) => ({ ...h, busy: false, err: "Couldn't reach the list just now." })); return; }
+    setHist((h) => ({ rows: offset ? [...(h ? h.rows : []), ...r.rows] : r.rows, total: r.total, next: r.next, busy: false, err: null }));
+  };
+  useEffect(() => { call("shellx.donations_open", auto); }, []);
+  useEffect(() => {
+    if (!hit) return undefined;
+    const id = setTimeout(() => setHit(null), 2200);
+    return () => clearTimeout(id);
+  }, [hit]);
+  const review = () => {
+    setErr(null);
+    const n = Number(String(amount).replace(/[^0-9.]/g, ""));
+    if (!String(amount).trim() || !isFinite(n) || n <= 0) { setErr("Enter the amount you gave."); return; }
+    setStage("confirm");
+  };
+  const submit = async () => {
+    setBusy(true);
+    const r = await call("shellx.donations_submit", amount, currency, shelter, name, showName, country, region);
+    setBusy(false);
+    setStage("form");
+    if (!r) return;                       // the toast said what was wrong
+    const n = Number(String(amount).replace(/[^0-9.]/g, ""));
+    setHit("+" + money(n, currency));
+    setAdded((k) => k + 1); setAmount(""); setShelter("");
+  };
+  const takeBack = async (row) => {
+    const e = await call("shellx.donations_remove", row.key);
+    if (!e) return;
+    setAmount(String(e.amount || "")); setCurrency(e.currency || "USD");
+    setShelter(e.shelter || ""); setCountry(e.country || ""); setRegion(e.region || "");
+    setName(e.name || ""); setShowName(e.show_name !== false);
+    setStage("form"); setErr(null);
+  };
+  const recent = d.recent || [];
+  const places = d.places || [];
+  const mine = d.mine || [];
+  const map = d.map || { world: [], us: [], elsewhere: null };
+  const rest = places.slice(3, 10);
+  const top = places.length ? places[0].usd : 0;
+  const n = Number(String(amount).replace(/[^0-9.]/g, ""));
+  const big = n * ((d.rates || {})[currency] || 1) > (d.hold_over || 299);   // checked by hand first
+  const countryName = ((d.countries || []).find((c) => c.value === country) || {}).label || "";
+  const where = country ? (region ? region + ", " + (country === "US" ? "US" : countryName) : countryName) : "";
+  if (hist) {
+    // every donation, newest first, a page at a time
+    return html`<${Modal} title="All donations" icon="paw" wide onClose=${onClose} cls=${"sx-don " + uid}
+      footer=${html`<span class="grow small dim notr">${hist.total ? hist.rows.length + " of " + hist.total : ""}</span>
+        <${Button} onClick=${() => setHist(null)}>Back<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
+      <div class="sx-don-hist">
+        <table class="sx-don-list sx-don-hist-table"><thead><tr><th>When</th><th>Who</th><th>Shelter</th><th></th></tr></thead><tbody>
+          ${hist.rows.map((r, i) => html`<tr key=${i}>
+            <td class="muted notr">${r.date}</td>
+            <td><${Avatar} name=${r.name} /><span class="notr ellip">${r.name}</span></td>
+            <td class="muted notr ellip" title=${r.where ? r.shelter + " (" + r.where + ")" : r.shelter}>${r.shelter}${r.where ? html` <span class="dim">· ${r.where}</span>` : null}</td>
+            <td class="mono notr">${r.amount}</td></tr>`)}
+          ${!hist.rows.length && !hist.busy ? html`<tr><td class="muted" colspan="4">${hist.err || "Nothing reported yet."}</td></tr>` : null}
+        </tbody></table>
+        ${hist.err && hist.rows.length ? html`<span class="small err-ink">${hist.err}</span>` : null}
+        ${hist.busy ? html`<span class="small muted">Loading…</span>`
+          : hist.next != null ? html`<div><${Button} onClick=${() => loadHistory(hist.next)}>Load more<//></div>` : null}
+      </div>
+    <//>`;
+  }
+  return html`<${Modal} title="Donate to an animal shelter" icon="paw" wide onClose=${onClose} cls=${"sx-don " + uid}
+    footer=${html`<${Button} kind="ghost" onClick=${() => loadHistory(0)} disabled=${!d.known}>All donations<//>
+      <span class="grow small dim wrap">${d.offline ? "The total can't be reached right now; this is the last it answered." : ""}</span>
+      <${Button} onClick=${() => call("shellx.donations_refresh")}>Refresh<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
+    <div class="sx-don-nomoney" role="note">
+      <${Icon} name="info" />
+      <div><b>No money changes hands here.</b> PAD doesn't take donations, and nothing is charged or processed. You give directly to any animal shelter you choose, on your own terms. This window only keeps a running tally of what people say they gave.</div>
+    </div>
+    <p class="sx-p">${auto ? "Your card is written. " : ""}If PAD saved you money or time, give some of it to an animal shelter near you, then tell me here so it counts toward the tally.</p>
+    <div class="sx-don-layout">
+      <div class="sx-don-therm-col">
+        <span class="small muted notr">${d.next_short || ""}</span>
+        <${Thermometer} pct=${d.pct || 0} />
+        <span class="small muted notr">${d.known ? d.last_text : ""}</span>
+      </div>
+      <div class="sx-don-main stack" style="gap:10px">
+        <${Playground} />
+        <div class=${"sx-don-hero" + (hit ? " hit" : "")}>
+          <${Odometer} text=${d.known ? d.total_text : "—"} />
+          <span class="stack" style="gap:2px">
+            <span class="small muted">${d.known ? "raised by PAD users" : "No total yet."}</span>
+            ${d.known ? html`<span class="chip acc sm notr" style="align-self:flex-start">${d.count_text}</span>` : null}
+          </span>
+          ${hit ? html`<span class="sx-don-plus mono notr" key=${added}>${hit}</span>` : null}
+          <span class="sx-don-paw" aria-hidden="true"><${Icon} name="paw" /></span>
+        </div>
+        <span class="small muted sx-don-h">Milestones for the tally</span>
+        <div class="sx-don-steps" role="list" aria-label="Milestones">
+          ${(d.ladder || []).map((c, i) => html`<div class=${"sx-don-step-m " + c.state} role="listitem">
+            ${i ? html`<i class="ln"></i>` : null}
+            <span class="sx-don-dot">${c.state === "reached" ? html`<${Icon} name="check" />` : c.state === "next" ? html`<${Icon} name="paw" />` : html`<b></b>`}</span>
+            <span class="lbl mono notr">${c.text}</span>
+            <span class="sub">${c.state === "reached" ? (c.date ? html`reached <span class="notr">${c.date}</span>` : "reached") : c.state === "next" ? "next up" : "later"}</span>
+          </div>`)}
+        </div>
+        <span class="small muted sx-don-h">Recent</span>
+        <table class="sx-don-list"><tbody>
+          ${recent.length ? recent.map((r) => html`<tr>
+              <td><${Avatar} name=${r.name} /><span class="notr ellip">${r.name}</span></td>
+              <td class="muted notr ellip" title=${r.where ? r.shelter + " (" + r.where + ")" : r.shelter}>${r.shelter}${r.where ? html` <span class="dim">· ${r.where}</span>` : null}</td>
+              <td class="mono notr">${r.amount}</td></tr>`)
+            : html`<tr><td class="muted" colspan="3">${d.known ? "Nothing reported yet. Be the first." : "No entries yet."}</td></tr>`}
+        </tbody></table>
+      </div>
+      <div class="sx-don-side stack" style="gap:10px">
+        ${places.length ? html`<span class="small muted sx-don-h">Top places</span>
+          <${Podium} places=${places} />
+          ${rest.length ? html`<div class="sx-don-places">
+            ${rest.map((p, i) => html`<div class="sx-don-place">
+              <span class="mono dim">${i + 4}</span>
+              <span class="notr ellip" title=${p.where}>${p.where}</span>
+              <div class="sx-bar"><i style=${"width:" + (top ? Math.max(4, Math.round(100 * p.usd / top)) : 0) + "%"}></i></div>
+              <span class="mono notr">${p.amount}</span>
+            </div>`)}
+          </div>` : null}` : null}
+        ${map.world.length ? html`<div class="row sx-don-map-head">
+            <span class="small muted sx-don-h">Map</span>
+            <span class="grow"></span>
+            ${map.us.length ? html`<span class="sx-don-map-pick">
+              <${Button} size="sm" kind=${mapOf === "world" ? "primary" : ""} onClick=${() => setMapOf("world")}>World<//>
+              <${Button} size="sm" kind=${mapOf === "us" ? "primary" : ""} onClick=${() => setMapOf("us")}>United States<//>
+            </span>` : null}
+          </div>
+          ${mapOf === "us" && map.us.length
+            ? html`<${TileMap} tiles=${US_TILES} cols=${US_COLS} rows=${US_ROWS} data=${map.us} />`
+            : html`<${TileMap} tiles=${WORLD_TILES} cols=${WORLD_COLS} rows=${WORLD_ROWS} data=${map.world} />`}
+          <span class="small muted">${mapOf === "us" && map.us.length
+            ? (map.us.length + (map.us.length === 1 ? " state" : " states") + " so far. Brighter is more.")
+            : (map.world.length + (map.world.length === 1 ? " country" : " countries") + " so far. Brighter is more.")}${map.elsewhere ? html` <span class="notr">${map.elsewhere.amount}</span> from somewhere else.` : null}</span>` : null}
+      </div>
+      <div class="stack" style="gap:10px;min-width:0">
+        <div class="card sx-don-form stack" style="gap:8px">
+          ${stage === "confirm" ? html`
+            <span class="h2">Is that right?</span>
+            <div class="sx-don-confirm stack" style="gap:4px">
+              <span class="sx-don-confirm-amt mono notr">${money(n, currency)}</span>
+              <span class="small">${shelter.trim() ? html`to <b class="notr">${shelter.trim()}</b>` : "to an animal shelter"}${where ? html` in <span class="notr">${where}</span>` : null}</span>
+              <span class="small muted">${name.trim() && showName ? html`listed as <span class="notr">${name.trim()}</span>` : "listed as Anonymous"}</span>
+            </div>
+            ${big ? html`<span class="small warn-ink wrap">An entry over $${(d.hold_over || 299).toLocaleString("en-US")} is checked by hand before it counts, so the total moves later.</span>` : null}
+            <span class="small muted wrap">Nothing is charged. This only adds what you already gave to the tally everyone sees. You can take it back from the Yours list below.</span>
+            <${Button} kind="primary" cls="sx-don-cta" onClick=${submit} disabled=${busy}>Yes, add it<//>
+            <${Button} kind="ghost" onClick=${() => setStage("form")} disabled=${busy}>Edit<//>`
+          : html`
+            <span class="h2">I gave, on my own</span>
+            <div class="row" style="gap:6px">
+              <${Select} value=${currency} options=${d.currencies || ["USD"]} onChange=${setCurrency} width=${84} />
+              <${Field} value=${amount} onChange=${setAmount} placeholder="25" mono width=${96} autoFocus bad=${!!err} />
+            </div>
+            <${Field} value=${shelter} onChange=${setShelter} placeholder="Shelter (optional)" maxLength=${80} />
+            <${Select} value=${country} options=${d.countries || [{ value: "", label: "Country (optional)" }]} onChange=${setCountry} cls="sx-don-country" />
+            <${Field} value=${region} onChange=${setRegion} placeholder="State or province (optional)" maxLength=${40} disabled=${!country} />
+            <${Field} value=${name} onChange=${setName} placeholder="Your name (optional)" maxLength=${40} />
+            <${Check} checked=${showName} onChange=${setShowName} label="Show my name in the list" />
+            ${err ? html`<span class="small err-ink">${err}</span>` : null}
+            <${Button} kind="primary" cls="sx-don-cta" onClick=${review} disabled=${busy}>Add to the tally<//>
+            ${added ? html`<span class="small ok-ink">Thank you.</span>` : null}
+            <span class="small muted wrap">Honor system. No payment here, and nothing else about you is sent.</span>`}
+          ${added ? html`<div class="sx-don-burst" key=${added} aria-hidden="true">
+            ${[0, 1, 2, 3, 4, 5, 6].map((i) => html`<i style=${"left:" + (8 + i * 13) + "%;animation-delay:" + (i * 70) + "ms;--r:" + ((i % 2 ? 1 : -1) * (10 + i * 7)) + "deg"}><${Icon} name="paw" /></i>`)}
+          </div>` : null}
+        </div>
+        ${mine.length ? html`<span class="small muted sx-don-h">Yours</span>
+          <div class="sx-don-mine">
+            ${mine.map((m) => html`<div class="sx-don-mine-row" key=${m.key}>
+              <span class="mono notr">${m.amount}</span>
+              <span class="small muted ellip notr" title=${m.shelter + (m.where ? " (" + m.where + ")" : "")}>${m.shelter || "an animal shelter"}${m.where ? " · " + m.where : ""}</span>
+              ${m.pending ? html`<span class="chip warn sm">waiting</span>` : m.held ? html`<span class="chip info sm" title="Checked by hand before it counts">in review</span>` : html`<span></span>`}
+              <${Button} kind="ghost" size="sm" icon="x" title="Take it back and fix it" onClick=${() => takeBack(m)} />
+            </div>`)}
+          </div>` : null}
+      </div>
+    </div>
+  <//>`;
+}
+registerDialog("donations", DonationsDialog);
+
 export { TipsPanel };

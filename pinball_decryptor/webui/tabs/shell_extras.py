@@ -31,6 +31,7 @@ from ...core import session_log
 from .. import compat
 from ..picker_data import MFR_VISUALS, peek_text, tooltip_text
 from ..shellx_disk import DiskMixin
+from ..shellx_donations import DonationsMixin
 from ..shellx_projects import ProjectsMixin
 from ..shellx_reset import ResetMixin
 from ..update_interval import (UPDATE_INTERVAL_CHOICES,
@@ -78,7 +79,8 @@ def _visuals():
     return dict(MFR_VISUALS)
 
 
-class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
+class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, DonationsMixin,
+                  TabService):
     ns = "shellx"
     key = ""
     label = ""
@@ -91,6 +93,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
         "set_update_check_running", "show_update_banner",
         "show_up_to_date_toast", "open_update_download_dialog",
         "apply_preview_features",
+        "note_card_written",
     )
 
     def __init__(self, window):
@@ -145,6 +148,9 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
         # installs them with Homebrew or MacPorts (core.mac_install).
         self.ctx.store.set("shell", prereq_buttons=True, help_items=[])
         self.publish_settings_items()
+        # PAD-754: the paw chip's total, from the cache at once and the
+        # service in the background
+        self._donations_init()
         if sys.platform == "win32":
             try:
                 # the badge, after the automatic clean-up's first look
@@ -187,6 +193,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
             "recheck_prereqs": self._recheck_prereqs,
             "install_prereqs": self.install_prereqs,
             "preview_features": lambda: self._open_dialog("preview_features"),
+            "donations": lambda: self._open_dialog("donations"),
             "view_disclaimer": lambda: self._open_dialog("disclaimer"),
             "tips": lambda: self._open_dialog("tips"),
             "change_history": self.change_history,
@@ -362,6 +369,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, TabService):
         items.append({"sep": True})
         items.append({"id": "preview_features",
                       "label": "Preview features…"})
+        items.append({"id": "donations", "label": "Animal shelters…"})
         items.append({"id": "view_disclaimer", "label": "View disclaimer…"})
         self.ctx.store.set("shell", settings_items=items,
                            gear_dots={"update": bool(self._update_available),

@@ -457,6 +457,12 @@ def dev_pick_checkout():
     or the chooser was cancelled)."""
     if os.environ.get(ENV_PICKED):
         return True
+    # PAD-754: pad-triage launches a ticket's app from that ticket's own
+    # worktree with PAD_TICKET set, so there is nothing to choose; and with
+    # a few hundred ticket worktrees registered, asking git status in every
+    # one took 20 s before the chooser could even appear.
+    if os.environ.get("PAD_TICKET"):
+        return True
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     others = discover_other_checkouts(root)
     if not others:

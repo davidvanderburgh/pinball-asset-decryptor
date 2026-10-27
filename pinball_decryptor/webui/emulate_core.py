@@ -320,10 +320,18 @@ def parse_cache_list(text):
     testable without a WSL or a 7 GB card.  ``pinned`` is True for the
     library's newest builds (a ``pinned`` line names them, PAD-727): the rig
     never evicts those, and neither does the automatic clean-up.
-    """
-    entries, disk, pinned = [], None, set()
+
+    PAD-739 adds, from a ``state`` line: ``source`` (``ok`` / ``changed`` /
+    ``gone`` / ``unreachable``, "" from an older rig), ``use`` (``mounted`` /
+    ``copying`` / "") and ``copied`` (the copy's own date, the last-used
+    stand-in for a card never booted).  A ``leftover`` line - a copy that
+    never finished, or the side files of a card that is gone - is an entry
+    with ``leftover`` True, ``src`` "" and its newest file's date in
+    ``copied``.  The cache's own limit (``limit`` line) is in
+    :func:`parse_cache_meta`."""
+    entries, disk, pinned, state = [], None, set(), {}
     for line in (text or "").splitlines():
-        parts = line.split("\t")
+        parts = line.rstrip("\r").split("\t")
         if parts[0] == "entry" and len(parts) >= 6:
             try:
                 entries.append({
@@ -337,6 +345,21 @@ def parse_cache_list(text):
                 continue
         elif parts[0] == "pinned" and len(parts) >= 2:
             pinned.add("\t".join(parts[1:]))
+        elif parts[0] == "state" and len(parts) >= 5:
+            try:
+                state[parts[1]] = (parts[2], parts[3], int(parts[4] or 0))
+            except ValueError:
+                continue
+        elif parts[0] == "leftover" and len(parts) >= 5:
+            try:
+                entries.append({
+                    "label": parts[1], "real_kb": int(parts[2]),
+                    "apparent_kb": int(parts[2]), "boot": 0, "src": "",
+                    "leftover": True, "copied": int(parts[3] or 0),
+                    "use": "copying" if parts[4] == "copying" else "",
+                })
+            except ValueError:
+                continue
         elif parts[0] == "disk" and len(parts) >= 3:
             try:
                 disk = (int(parts[1]), int(parts[2]))
@@ -344,8 +367,61 @@ def parse_cache_list(text):
                 pass
     for e in entries:
         e["pinned"] = e["label"] in pinned
+        if e.get("leftover"):
+            e["source"] = ""
+            continue
+        e["leftover"] = False
+        src, use, copied = state.get(e["label"], ("", "-", 0))
+        e["source"] = src if src in ("ok", "changed", "gone",
+                                     "unreachable") else ""
+        e["use"] = use if use in ("mounted", "copying") else ""
+        e["copied"] = copied
     entries.sort(key=lambda e: e["real_kb"], reverse=True)
     return entries, disk
+
+
+def parse_cache_meta(text):
+    """The ``limit`` line of ``--cache-list`` (PAD-739): ``{limit_gb,
+    used_kb, dir, store}``, or None from an older rig without one."""
+    for line in (text or "").splitlines():
+        parts = line.rstrip("\r").split("\t")
+        if parts[0] == "limit" and len(parts) >= 5:
+            try:
+                return {"limit_gb": int(parts[1]), "used_kb": int(parts[2]),
+                        "dir": "\t".join(parts[3:-1]),
+                        "store": parts[-1] == "store"}
+            except ValueError:
+                return None
+    return None
+
+
+#: Days without a boot after which the Cache window's "Select unused" offers a
+#: card - the automatic clean-up's own 30 (core/space_keeper.UNUSED_SECS).
+CACHE_UNUSED_DAYS = 30
+
+
+def cache_last_used(e):
+    """When the entry was last used: its last boot, or for one never booted
+    (copied ahead of time, or by an older rig) the copy's own date.  The
+    second is when it was COPIED, not used - the window says so."""
+    return int(e.get("boot") or 0) or int(e.get("copied") or 0)
+
+
+def cache_unused(e, now, days=CACHE_UNUSED_DAYS):
+    """Why the entry is safe to delete without being missed, or "".  Never one
+    in use, being copied, or the library's (PAD-727)."""
+    if e.get("use") or e.get("pinned"):
+        return ""
+    if e.get("leftover"):
+        return "a copy that never finished"
+    if e.get("source") == "changed":
+        return "its image was rebuilt or replaced: this copy is never used again"
+    if e.get("source") == "gone":
+        return "its image was deleted or renamed"
+    last = cache_last_used(e)
+    if last and now - last >= days * 86400:
+        return "not used for %d days" % days
+    return ""
 
 
 def human_size(kb):
@@ -1316,6 +1392,18 @@ def kill_cmd():
             return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
                     "bash", "%s/killgame.sh" % _wsl_path(rig_dir())]
     return rig_cmd("killgame.sh")
+
+
+def restart_cmd():
+    """restartgame.sh (PAD-738), as ROOT on Windows like kill_cmd: it writes
+    the request into the run's rootfs, which a root run owns, and padpath
+    must resolve the desktop user's rootfs."""
+    if sys.platform == "win32":
+        home = wsl_home()
+        if home:
+            return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
+                    "bash", "%s/restartgame.sh" % _wsl_path(rig_dir())]
+    return rig_cmd("restartgame.sh")
 
 
 def status_cmd():

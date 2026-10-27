@@ -537,3 +537,46 @@ value place_audit_started_7        257
 value place_audit_started_8        260
 value place_audit_started_9        260
 value place_audit_started_10       364
+
+# PAD-747: the game's other modes it keeps books of (mode_framework.done_lines): a mode of ours may start once
+# some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag
+text  done_name_0                  Wheres Barb
+value done_audit_0                 292
+text  done_name_1                  Monster Hunting
+value done_audit_1                 295
+text  done_name_2                  Bullies
+value done_audit_2                 298
+text  done_name_3                  Get Me Out
+value done_audit_3                 301
+text  done_name_4                  Operation Mirkwood
+value done_audit_4                 304
+text  done_name_5                  Follow The Compass
+value done_audit_5                 307
+text  done_name_6                  Quarter Hunt
+value done_audit_6                 310
+text  done_name_7                  Save Will
+value done_audit_7                 313
+text  done_name_8                  What Mama Says
+value done_audit_8                 316
+text  done_name_9                  Morse Code
+value done_audit_9                 319
+text  done_name_10                 Lure Dart
+value done_audit_10                322
+text  done_name_11                 Turn Up The Heat
+value done_audit_11                325
+text  done_name_12                 Story Mode
+value done_audit_12                327
+text  done_name_13                 Total Isolation Multiball
+value done_flag_13                 64
+text  done_name_14                 Total Isolation 2 Multiball
+value done_flag_14                 70
+text  done_name_15                 Season One Wizard Mode Multiball
+value done_flag_15                 76
+text  done_name_16                 Season Two Wizard Mode Multiball
+value done_flag_16                 82
+text  done_name_17                 Cant Stop This Multiball
+value done_flag_17                 103
+text  done_name_18                 Demogorgon Challenge
+value done_flag_18                 110
+text  done_name_19                 Wizard Mode Multiball
+value done_flag_19                 113

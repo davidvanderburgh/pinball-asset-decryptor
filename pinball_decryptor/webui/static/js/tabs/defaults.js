@@ -30,6 +30,9 @@ const HIDDEN_TIP = "Leaves the settings the machine's Adjustments menu can't rea
   + "service screen, and the factory/debug ones it never shows at all.";
 const MENU_TIP = "Extends the machine's Feature Adjustments page so the settings below can be found and changed "
   + "on the machine itself, instead of only being preset from here.";
+const COIN_TEXT = "This is a Home Edition: it ships without a coin door, and its game ignores the door's interlock switch, though the cabinet board still has the input for it. Tick this if you have fitted a coin door with its interlock switch, and the next Build makes the game use it as a Pro does: opening the door puts up 48V DISABLED / CLOSE COIN DOOR until it is shut.";
+const COIN_WARN = "Only with a door and its interlock switch fitted. With nothing on that input the game reads the door as open all the time and keeps the 48V DISABLED message up.";
+const RANGE_CELL_TIP = "Change the lowest and highest value the machine's own menu offers for this setting.";
 const FRESH_TIP = "A machine uses these defaults on a fresh flash or after a factory reset. A machine that has "
   + "already been set up keeps its own settings — Stern stores those on the board, not on the card, so the app "
   + "cannot change a machine that's already configured.";
@@ -70,6 +73,14 @@ function Editor({ row, value }) {
 }
 
 // ---------------------------------------------------------- form
+// The Range cell: plain text, or (for a setting whose range can change) a
+// link that opens the editor on it.
+function RangeCell({ it, onEdit }) {
+  if (!it.range_edit || !onEdit) return html`<span class="dflt-rng">${it.range}</span>`;
+  return html`<span class="dflt-rng"><button type="button" class=${cx("dflt-rng-btn", it.range_chg && "acc-ink")}
+    onClick=${() => onEdit(it.name)} ...${tip(RANGE_CELL_TIP)}>${it.range}</button></span>`;
+}
+
 function Dot({ on }) {
   return html`<span class=${cx("dflt-dot", on && "on")} aria-label=${on ? "changed" : undefined}>${on ? "●" : ""}</span>`;
 }
@@ -79,7 +90,7 @@ function changed(values, name, dflt) {
   return v != null && v !== dflt;
 }
 
-function SettingsForm({ s }) {
+function SettingsForm({ s, onEdit }) {
   const values = s.values || {};
   return html`<div class="dflt-grid dflt-form" role="table" aria-label="Settings">
     <div class="dflt-tr dflt-th" role="row">
@@ -97,18 +108,19 @@ function SettingsForm({ s }) {
       const lbl = it.ui === "toggle"
         ? html`<span class=${cx("dflt-lbl", it.help && "has-tip")} ...${tip(it.help)}>${it.label}${st}</span>`
         : html`<label for=${fieldId(it.name)} class=${cx("dflt-lbl", it.help && "has-tip")} ...${tip(it.help)}>${it.label}${st}</label>`;
-      return html`<div key=${it.name} class=${cx("dflt-tr", changed(values, it.name, it.default) && "chg")} role="row">
+      const chg = changed(values, it.name, it.default) || !!it.range_chg;
+      return html`<div key=${it.name} class=${cx("dflt-tr", chg && "chg")} role="row">
           ${lbl}
           <span class="dflt-card">${it.on_card}</span>
           <span class="dflt-ed"><${Editor} row=${it} value=${values[it.name]} /></span>
-          <${Dot} on=${changed(values, it.name, it.default)} />
-          <span class="dflt-rng">${it.range}</span>
+          <${Dot} on=${chg} />
+          <${RangeCell} it=${it} onEdit=${onEdit} />
         </div>`;
     })}
   </div>`;
 }
 
-function HighScores({ s }) {
+function HighScores({ s, onEdit }) {
   const values = s.values || {};
   const hv = s.hs_values || [];
   // the cells a slot without a score keeps empty (the Range one hides in a narrow window)
@@ -119,8 +131,8 @@ function HighScores({ s }) {
     html`<label class="dflt-ed"><span class="sr">${display} default score</span>
       <${Field} ns=${NS} k=${"val:" + sc.name} type="number" mono sm cls="dflt-in" value=${values[sc.name]}
         min=${sc.lo} max=${sc.hi} step=${sc.step} width=${spinWidth(sc.chars)} delay=${200} onCommit=${commit} /></label>`,
-    html`<${Dot} on=${changed(values, sc.name, sc.default)} />`,
-    html`<span class="dflt-rng">${sc.range}</span>`,
+    html`<${Dot} on=${changed(values, sc.name, sc.default) || !!sc.range_chg} />`,
+    html`<${RangeCell} it=${sc} onEdit=${onEdit} />`,
   ] : noScore;
   const text = (it, field, cur, cls, width) => {
     const cap = it[field + "_max"];
@@ -185,7 +197,7 @@ function AllSettings({ s, onEdit, blocked }) {
     selected=${sel} onSelect=${(r) => { if (!blocked) setSel(r.name); }}
     onActivate=${(r) => { if (!blocked) { setSel(r.name); onEdit(r.name); } }}
     sort=${s.sort && s.sort.key ? s.sort : null} onSort=${(k) => call(NS + ".sort_all", k)}
-    rowClass=${(r) => r.new ? "dflt-staged" : ""}
+    rowClass=${(r) => r.new || r.rchg ? "dflt-staged" : ""}
     resizable widths=${widths} onResize=${(w) => { allWidths = w; setWidths(w); }}
     empty=${null} />`;
 }
@@ -238,13 +250,24 @@ function useDialogKeys(box, first, onEnter) {
 function EditModal({ info, onClose }) {
   const [v, setV] = useState(info.cur);
   const [bad, setBad] = useState(false);
+  const [lo, setLo] = useState(info.min);
+  const [hi, setHi] = useState(info.max);
+  const [badRange, setBadRange] = useState(false);
   const cur = useRef(info.cur);
+  const rng = useRef([info.min, info.max]);
   const box = useRef(null);
   const put = (x) => { cur.current = x; setV(x); setBad(false); };
+  const putLo = (x) => { rng.current = [x, rng.current[1]]; setLo(x); setBadRange(false); };
+  const putHi = (x) => { rng.current = [rng.current[0], x]; setHi(x); setBadRange(false); };
   const ok = async () => {
-    const r = await call(NS + ".edit_apply", info.name, cur.current, false);
+    const [a, b] = rng.current;
+    const moved = info.range_edit && (String(a) !== String(info.min) || String(b) !== String(info.max));
+    const r = moved
+      ? await call(NS + ".edit_apply", info.name, cur.current, false, a, b)
+      : await call(NS + ".edit_apply", info.name, cur.current, false);
     // Tk's OK did nothing on a value that is no number at all; the box says so
-    if (r) onClose(); else setBad(true);
+    if (r === "range") setBadRange(true);
+    else if (r) onClose(); else setBad(true);
   };
   const back = async () => { await call(NS + ".edit_apply", info.name, null, true); onClose(); };
   useDialogKeys(box, "input:not(:disabled), select:not(:disabled)", ok);
@@ -258,9 +281,21 @@ function EditModal({ info, onClose }) {
       options=${inRange ? opts : [{ value: "", label: "", disabled: true }, ...opts]}
       onChange=${(x) => { if (x !== "") put(Number(x)); }} />`;
   } else {
-    editor = html`<${Field} type="number" mono value=${v} min=${info.lo} max=${info.hi} step=${info.step}
+    // the spinner's travel follows the range being typed (PAD-750)
+    const n = (x, d) => (x === "" || x == null || isNaN(Number(x)) ? d : Number(x));
+    editor = html`<${Field} id="dflt-new" type="number" mono value=${v}
+      min=${Math.min(n(lo, info.lo), info.default)} max=${Math.max(n(hi, info.hi), info.default)} step=${info.step}
       width=${spinWidth(info.chars)} bad=${bad} onChange=${put} />`;
   }
+  const rangeRow = info.range_edit ? html`<div class="row wrap dflt-range" style="margin-top:6px" ...${tip(info.range_tip)}>
+      <label class="row"><span>Lowest:</span><${Field} id="dflt-lo" type="number" mono value=${lo} step=${info.step}
+        width=${spinWidth(info.chars)} bad=${badRange} onChange=${putLo} /></label>
+      <label class="row"><span>Highest:</span><${Field} id="dflt-hi" type="number" mono value=${hi} step=${info.step}
+        width=${spinWidth(info.chars)} bad=${badRange} onChange=${putHi} /></label>
+    </div>
+    <div class=${cx("small", badRange ? "err-ink" : "muted")}>${badRange
+      ? "The lowest value must be a whole number no bigger than the highest."
+      : info.range_warn}</div>` : null;
   return html`<${Modal} title="Default setting" onClose=${onClose}
     footer=${html`<${Button} onClick=${back}>Back to card value<//><span class="grow"></span>
       <${Button} onClick=${onClose}>Cancel<//><${Button} kind="primary" onClick=${ok}>OK<//>`}>
@@ -273,6 +308,7 @@ function EditModal({ info, onClose }) {
       ${info.ui === "toggle"
         ? html`<div class="row" style="margin-top:6px"><span>New default:</span>${editor}</div>`
         : html`<label class="row" style="margin-top:6px"><span>New default:</span>${editor}</label>`}
+      ${rangeRow}
     </div>
   <//>`;
 }
@@ -324,7 +360,7 @@ function PresetPicker({ presets, value }) {
 }
 
 // --------------------------------------------------------------- page
-function StateBody({ s }) {
+function StateBody({ s, onEdit }) {
   if (s.phase === "loading") {
     return html`<div class="empty dflt-loading"><${Spinner} /><div class="h2">${s.message}</div></div>`;
   }
@@ -337,7 +373,7 @@ function StateBody({ s }) {
   if (s.phase !== "ready") {
     return html`<${Empty} icon="defaults">${s.message}<//>`;
   }
-  return html`<${SettingsForm} s=${s} />`;
+  return html`<${SettingsForm} s=${s} onEdit=${onEdit} />`;
 }
 
 export default function DefaultsTab() {
@@ -380,13 +416,20 @@ export default function DefaultsTab() {
       ${s.status ? html`<div class="dflt-status" role="status"><${Icon} name="info" /><span>${s.status}</span></div>` : null}
     <//>
 
+    ${s.coin_offer ? html`<${Card} title="Coin door" cls="dflt-card-coin">
+      <p class="dflt-coin-text">${COIN_TEXT}</p>
+      <${Check} checked=${!!s.coin_fitted} wrap label="This machine has a coin door fitted"
+        onChange=${(v) => call(NS + ".coin_door_set", v)} />
+      <${Note} kind="warn">${COIN_WARN}<//>
+    <//>` : null}
+
     <${Card} title="Settings" cls="dflt-card-form">
-      <${StateBody} s=${s} />
+      <${StateBody} s=${s} onEdit=${openEdit} />
     <//>
 
     ${showHs ? html`<${Card} cls="dflt-card-hs" head=${html`<span class="h2" ...${tip(HS_TIP)}>High Scores</span>
         <${InfoBadge} text=${HS_TIP} />`}>
-      <${HighScores} s=${s} />
+      <${HighScores} s=${s} onEdit=${openEdit} />
     <//>` : null}
 
     ${showAll ? html`<${Card} cls="dflt-card-all" bodyCls="flush"

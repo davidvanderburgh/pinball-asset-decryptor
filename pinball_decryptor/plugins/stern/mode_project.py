@@ -99,6 +99,8 @@ class TitleProfile:
     #                                  names, in the game's menu order); () where the title names none a mode can take
     places: tuple = ()               # PAD-710: ((id, name, counts), ...) the game's own modes a mode may run in the
     #                                  place of (when the game starts one); counts: it counts as that mode there
+    done_modes: tuple = ()           # PAD-747: ((id, name), ...) the game's own modes whose completion the runtime
+    #                                  sees, for a mode that starts once the player has completed some of them
     building_rule: str = ""          # PAD-589: the game's own building locks (one of game_rules, BUILDING_RULES): a
     #                                  mode moves the building only while it sees no shots
     shakes: tuple = ()               # PAD-414: ((name, label), ...) the game's own shakes (`text shake_<name>`)
@@ -309,7 +311,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
          "magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "wizard", "roster", "challenge",
-         "place")
+         "place", "done")
 
 #: PAD-420: the parts that are a piece of the machine. A machine without one has no section for it on the tab.
 HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "building", "shaker")
@@ -1151,6 +1153,130 @@ def _place_cannot(key, label, port=None):
         return ()
     return (("place", "The app has found %s's own modes' starts but has not yet seen a mode of yours run in the place "
                       "of one in the emulator, so it cannot here yet." % label),)
+
+
+#: PAD-747: a mode that starts once the player has completed some of the game's own modes (the mode file's
+#: ``starts_on completed``, a blocks mode's When the player has completed some of the game's modes; MODE_SDK.md "The
+#: game's modes completed"). The builds where it was seen in the emulator: one of the game's modes completed - the
+#: game's own STOP of it entered with "completed" on a C++ title, its COMPLETED audit or flag on a plain-C one - and a
+#: mode file waiting for that one started (rig sweep, C:\tmp\PAD-747\rig).
+DONE_PROVEN = frozenset({
+    "aerosmith-1.16",               # PAD-747 sweep: Medley Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "aerosmith_le-1.15",            # PAD-747 sweep: Medley Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "aerosmith_le-1.16",            # PAD-747 sweep: Medley Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "avengers_infinity_le-1.09",    # PAD-747 sweep: Super Reactor (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "avengers_infinity_le-1.10",    # PAD-747 sweep: Super Reactor (19) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "avengers_infinity_pro-1.10",   # PAD-747 sweep: Super Reactor (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "batman-1.13",                  # PAD-747 sweep: Catwoman (episodes 19-20) (1) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "batman-1.14",                  # PAD-747 sweep: Catwoman (episodes 19-20) (1) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "beatles-1.29",                 # PAD-747 sweep: All My Loving (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "deadpool_le-1.14",             # PAD-747 sweep: Disco Loops (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "deadpool_le-1.16",             # PAD-747 sweep: Disco Loops (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "deadpool_pro-1.16",            # PAD-747 sweep: Disco Loops (19) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "dungeons_and_dragons_le-1.00", # PAD-747 sweep: Mimic Hurry Up (12) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "dungeons_and_dragons_le-1.10", # PAD-747 sweep: Mimic Hurry Up (12) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "dungeons_and_dragons_pro-1.10", # PAD-747 sweep: Map Choosen Ritual Singleball (53) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "elvira3-1.13",                 # PAD-747 sweep: ABOB (128) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "foo_fighters_le-1.03",         # PAD-747 sweep: Super Skill Shot (8) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "foo_fighters_le-1.04",         # PAD-747 sweep: Super Skill Shot (8) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "foo_fighters_pro-1.04",        # PAD-747 sweep: Super Skill Shot (8) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "godzilla_le-1.13",             # PAD-747 sweep: Hedorah (25) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "godzilla_le-1.16",             # PAD-747 sweep: Super Train (18) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "godzilla_pro-1.15",            # PAD-747 sweep: Hedorah (25) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "godzilla_pro-1.16",            # PAD-747 sweep: Jet Fighter Attack (21) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "guardians-1.15",               # PAD-747 sweep: Cherry Bomb Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "guardians_le-1.14",            # PAD-747 sweep: Cherry Bomb Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "guardians_le-1.15",            # PAD-747 sweep: Cherry Bomb Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "iron_maiden_le-1.16",          # PAD-747 sweep: Rime of the Ancient Mariner Hurry Up (5) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "iron_maiden_le-1.18",          # PAD-747 sweep: Rime of the Ancient Mariner Hurry Up (5) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "iron_maiden_pro-1.18",         # PAD-747 sweep: Rime of the Ancient Mariner Hurry Up (5) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "james_bond_le-1.06",           # PAD-747 sweep: Ahoy Mr Bond Wizard Mode (6) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "james_bond_pro-1.06",          # PAD-747 sweep: Ahoy Mr Bond Wizard Mode (6) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "jaws_le-1.01",                 # PAD-747 sweep: Super Buoys (29) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "jaws_le-1.02",                 # PAD-747 sweep: Super Buoys (29) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "jaws_pro-1.02",                # PAD-747 sweep: Cast N Catch 1 (12) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "john_wick_le-1.01",            # PAD-747 sweep: Lights Out (0) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "john_wick_le-1.02",            # PAD-747 sweep: Lights Out (0) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "john_wick_pro-1.02",           # PAD-747 sweep: Lights Out (0) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "jurassic_park_le-1.15",        # PAD-747 sweep: Trex Chase (119) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "jurassic_park_le-1.16",        # PAD-747 sweep: Chaos Hurry Up (4) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "jurassic_park_pro-1.16",       # PAD-747 sweep: Escape Nublar (127) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "jurassic_park_the_pin-1.05",   # PAD-747 sweep: Stegosaurus (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "king_kong_le-0.96",            # PAD-747 sweep: King Kombos (27) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "king_kong_le-0.97",            # PAD-747 sweep: King Kombos (27) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "king_kong_pro-0.97",           # PAD-747 sweep: King Kombos (27) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "led_zeppelin_le-1.21",         # PAD-747 sweep: Black Dog (1) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "led_zeppelin_le-1.22",         # PAD-747 sweep: Black Dog (1) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "led_zeppelin_pro-1.22",        # PAD-747 sweep: Black Dog (1) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "mando_le-1.44",                # PAD-747 sweep: Super Skill Shot (10) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "mando_le-1.45",                # PAD-747 sweep: Super Skill Shot (10) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "mando_pro-1.45",               # PAD-747 sweep: Super Skill Shot (10) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "metallica_spike-1.03",         # PAD-747 sweep: Battery (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "metallica_spike-1.04",         # PAD-747 sweep: Battery (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "munsters_le-1.27",             # PAD-747 sweep: Lily Mode (3) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "munsters_le-1.28",             # PAD-747 sweep: Lily Mode (3) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "munsters_pro-1.28",            # PAD-747 sweep: Lily Mode (3) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "rush_le-1.18",                 # PAD-747 sweep: La Villa Strangiato (2) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "rush_le-1.19",                 # PAD-747 sweep: La Villa Strangiato (2) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "rush_pro-1.19",                # PAD-747 sweep: La Villa Strangiato (2) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "star_wars_elg-1.10",           # PAD-747 sweep: Orbits (1) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
+    "star_wars_le-1.30",            # PAD-747 sweep: Hoth I (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "star_wars_le-1.31",            # PAD-747 sweep: Hoth I (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "star_wars_pro-1.31",           # PAD-747 sweep: Hoth I (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "stranger_things-1.13",         # PAD-747 sweep: Wheres Barb (128) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "stranger_things_le-1.12",      # PAD-747 sweep: Where's Barb (11) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "stranger_things_le-1.13",      # PAD-747 sweep: Wheres Barb (128) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "sword_of_rage_le-1.18",        # PAD-747 sweep: Sand Worm (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "sword_of_rage_le-1.19",        # PAD-747 sweep: Sand Worm (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "sword_of_rage_pro-1.19",       # PAD-747 sweep: Sand Worm (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "turtles_le-1.59",              # PAD-747 sweep: Training Level Two (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "turtles_pro-1.58",             # PAD-747 sweep: Training Level Two (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "turtles_pro-1.59",             # PAD-747 sweep: Training Level Two (0) completed - its stop, completed - and a mode file waiting for 1 started on it
+    "uncanny_xmen_le-0.97",         # PAD-747 sweep: Fastball Special (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "uncanny_xmen_le-0.98",         # PAD-747 run x1: A Fiery Assault (3), a mission, completed in its place - its COMPLETED audit - and MINI WIZ (starts_on completed 1 of the eight missions) started 16 ms later; sweep: Fastball Special (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "uncanny_xmen_pro-0.98",        # PAD-747 sweep: Fastball Special (0) completed - its COMPLETED audit - and a mode file waiting for 1 started on it
+    "venom_le-1.07",                # PAD-747 sweep: Riot Mode (12) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+    "venom_pro-1.07",               # PAD-747 sweep: Riot Mode (12) completed - its stop through its vtable, completed - and a mode file waiting for 1 started on it
+})
+#: PAD-747: the ids of a plain-C build's modes with books and no start (pad_mode_runtime.c's DONE_EXTRA + n), at most
+DONE_EXTRA, DONE_EXTRA_MAX = 128, 128
+
+
+def _done_modes(port):
+    """PAD-747: ``((id, name), ...)``, in id order: the game's own modes whose completion the runtime sees - on a C++
+    title each mode object's (the framework's STOP, PAD-710's lines), on a plain-C title the ones whose COMPLETED audit
+    (with the framework's audit add) or COMPLETED flag (with the flag bitmap) the port names, and after them (ids
+    DONE_EXTRA + n) the modes the game keeps such books of that the port names no start of (`text done_name_<n>`)."""
+    if not port:
+        return ()
+    counts = _place_counts(port)
+    audits = "audit_add" in port["site"]
+    flags = bool(port["data"].get("game_flags"))
+    out = []
+    for i, name, _on in _game_modes(port):
+        if port["data"].get("block_obj_%d" % i):
+            if counts:
+                out.append((i, name))
+        elif (audits and "place_audit_completed_%d" % i in port["value"]) or (
+                flags and "place_flag_completed_%d" % i in port["value"]):
+            out.append((i, name))
+    n = 0                                            # the modes with books and no start (mode_framework.done_lines)
+    while port["text"].get("done_name_%d" % n, "").strip() and n < DONE_EXTRA_MAX:
+        if (audits and "done_audit_%d" % n in port["value"]) or (flags and "done_flag_%d" % n in port["value"]):
+            out.append((DONE_EXTRA + n, port["text"]["done_name_%d" % n].strip()))
+        n += 1
+    return tuple(out)
+
+
+def _done_cannot(key, label, port=None):
+    """PAD-747: the ``cannot`` entry for a mode started by the game's own modes completed on build ``key``, or ()."""
+    if not _done_modes(port):
+        return (("done", "The app cannot tell when %s's own modes are completed, so a mode of yours cannot start on "
+                         "them there yet." % label),)
+    if key in DONE_PROVEN:
+        return ()
+    return (("done", "The app has found how %s records its own modes completed but has not yet seen a mode of yours "
+                     "start on them in the emulator, so it cannot here yet." % label),)
 
 
 def _challenges(port):
@@ -2457,6 +2583,7 @@ def profile_from_port(path):
     cannot += list(_roster_cannot(key, label, port))         # PAD-589
     cannot += list(_challenge_cannot(key, label, port))      # PAD-615
     cannot += list(_place_cannot(key, label, port))          # PAD-710
+    cannot += list(_done_cannot(key, label, port))           # PAD-747
     cannot += list(_shaker_cannot(key, label, port))         # PAD-414
     cannot += list(_shows_cannot(label, port))               # PAD-418
     cannot += list(_wizards_cannot(key, label, port))        # PAD-436
@@ -2528,6 +2655,7 @@ def profile_from_port(path):
         challenges=_challenges(port) if key in CHALLENGE_PROVEN and not any(c[0] == "challenge" for c in cannot) else (),   # PAD-615
         challenge_menu=_challenge_menu(key, port) if not any(c[0] == "challenge" for c in cannot) else 0,
         places=_places(port) if not any(c[0] == "place" for c in cannot) else (),   # PAD-710
+        done_modes=_done_modes(port) if not any(c[0] == "done" for c in cannot) else (),   # PAD-747
         # PAD-619: not where a challenge is the game-play mode's index or a game-mode table's (Jaws, Godzilla, Venom:
         # their Default Game Mode cannot select one) - only by its handler or its flag (Bond, Stranger Things, Rush)
         challenge_by_default=bool(port) and not any(k.startswith(("challenge_mode_", "challenge_name_msg_"))
@@ -2805,11 +2933,12 @@ try:
         roster=_roster("godzilla_pro", _port_115) if not _roster_cannot(_key_115, _label_115, _port_115) else (),
         roster_counts=bool(_port_115 and "battle_stop" in _port_115["site"]),   # PAD-706: not on Pro 1.15
         places=_places(_port_115) if not _place_cannot(_key_115, _label_115, _port_115) else (),   # PAD-710
+        done_modes=_done_modes(_port_115) if not _done_cannot(_key_115, _label_115, _port_115) else (),   # PAD-747
         absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
                      if c[0] not in ("magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "roster",
-                                     "challenge", "place"))
-        + _place_cannot(_key_115, _label_115, _port_115)
+                                     "challenge", "place", "done"))
+        + _place_cannot(_key_115, _label_115, _port_115) + _done_cannot(_key_115, _label_115, _port_115)
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
         + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115)
         + _building_cannot(_key_115, _label_115, _port_115)
@@ -3415,6 +3544,10 @@ class ModeSpec:
     # of: when the game starts that mode, this one starts instead and, where the game's framework is known, counts as
     # it; -1 = none
     place_mode: int = -1
+    # PAD-747: with starts_on "completed", the mode starts once the player has completed done_count of the game's own
+    # modes in a game - the ones in done_modes (the profile's done_modes: their ids), [] = any of them
+    done_count: int = 4
+    done_modes: list = field(default_factory=list)
     # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
     # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
     # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
@@ -3571,6 +3704,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.starts_on, spec.challenge = "shot", -1
     if starts_on_place(spec) and not p.can("place"):                 # PAD-710
         spec.starts_on, spec.place_mode = "shot", -1
+    if starts_on_done(spec) and not p.can("done"):                   # PAD-747
+        spec.starts_on = "shot"
     if not p.can("shaker"):
         spec.shakes = []
     if not p.can("shows"):
@@ -3586,7 +3721,8 @@ def start_shots_taken(project):
     it is not running or lights itself at. A new mode starts on a shot of none of these when the game has one."""
     taken = set()
     for _slug, spec in list_modes(project)[0] if project else ():
-        if starts_on_event(spec) or starts_on_battle(spec) or starts_on_challenge(spec) or starts_on_place(spec):
+        if (starts_on_event(spec) or starts_on_battle(spec) or starts_on_challenge(spec) or starts_on_place(spec)
+                or starts_on_done(spec)):
             continue
         shots = (spec.start_sequence if starts_on_sequence(spec) else start_shots(spec)) or []
         taken.update(s for s in shots if isinstance(s, str) and s)
@@ -3963,6 +4099,27 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         for i, name, _on in getattr(p, "game_modes", ()):
             now.setdefault(name, []).append(i)
         out.block_modes = sorted({j for i in out.block_modes if isinstance(i, int) for j in now.get(was.get(i), ())})
+    if old_key != p.key and ((isinstance(out.done_modes, list) and out.done_modes) or starts_on_place(out)):
+        # PAD-747: the game's modes completed, and PAD-710's place, are numbers in THAT game's table: matched by name
+        try:
+            was_p = profile(old_key)
+        except ModeProjectError:
+            was_p = None
+        was_names = {i: name for i, name, _on in getattr(was_p, "game_modes", ())} if was_p is not None else {}
+        now_ids = {}
+        for i, name, _on in getattr(p, "game_modes", ()):
+            now_ids.setdefault(name, []).append(i)
+        if isinstance(out.done_modes, list) and out.done_modes:
+            was_done = {i: name for i, name in getattr(was_p, "done_modes", ())} if was_p is not None else {}
+            now_done = {}
+            for i, name in getattr(p, "done_modes", ()):
+                now_done.setdefault(name, []).append(i)
+            mapped = sorted({j for i in out.done_modes if isinstance(i, int) for j in now_done.get(was_done.get(i), ())})
+            if mapped:                               # none there: kept, and the checks say so (never "any of them")
+                out.done_modes = mapped
+        n = _int_or_none(out.place_mode)
+        if starts_on_place(out) and n is not None and was_names.get(n) in now_ids:
+            out.place_mode = now_ids[was_names[n]][0]
     if old_key != p.key and isinstance(out.keep_rules, list) and out.keep_rules:
         # PAD-398: kept by name; a feature the other game does not have is dropped
         have = {name for _n, name in getattr(p, "game_rules", ())}
@@ -5096,6 +5253,21 @@ def starts_on_place(spec):
     return bool(words) and words[0] == "game_mode"
 
 
+def starts_on_done(spec):
+    """True when the mode starts once the player has completed ``done_count`` of the game's own modes (PAD-747)."""
+    words = (spec.starts_on or "shot").split()
+    return bool(words) and words[0] == "completed"
+
+
+def done_ids(spec, p):
+    """PAD-747: the ids of *p*'s modes whose completion counts toward starting *spec*, in id order: its own list (the
+    ones *p* sees), else every one *p* sees."""
+    have = [i for i, _nm in getattr(p, "done_modes", ()) or ()]
+    picked = [i for i in spec.done_modes if isinstance(i, int) and not isinstance(i, bool)] \
+        if isinstance(spec.done_modes, list) else []
+    return sorted(set(picked) & set(have)) if picked else have
+
+
 def starts_on_sequence(spec):
     """True when the mode starts on its ``start_sequence`` made in order (PAD-314)."""
     words = (spec.starts_on or "shot").split()
@@ -5141,10 +5313,24 @@ def _validate_starts_ends(spec, p, ends=True):
     out = []
     words = (spec.starts_on or "shot").split()
     events = tuple(getattr(p, "events", ()) or ())
-    if words[0] not in ("shot", "event", "sequence", "battle", "challenge", "game_mode"):
+    if words[0] not in ("shot", "event", "sequence", "battle", "challenge", "game_mode", "completed"):
         out.append("A mode starts on a shot, on shots made in order, on one of the game's events, on a battle "
-                   "picked on the game's selection screen, as a challenge picked in the game's Challenge mode, or "
-                   "in the place of one of the game's own modes.")
+                   "picked on the game's selection screen, as a challenge picked in the game's Challenge mode, "
+                   "in the place of one of the game's own modes, or once some of the game's modes are completed.")
+    elif words[0] == "completed":                   # PAD-747
+        have = {i for i, _nm in getattr(p, "done_modes", ()) or ()}
+        picked = spec.done_modes if isinstance(spec.done_modes, list) else None
+        n = _int_or_none(spec.done_count)
+        if not p.can("done"):
+            out.append("Starting once some of the game's own modes are completed is not on %s yet (Mode says why)."
+                       % p.label)
+        elif picked is None or not all(isinstance(i, int) and not isinstance(i, bool) for i in picked):
+            out.append("The game's modes that count toward starting it are a list of their numbers.")
+        elif [i for i in picked if i not in have]:
+            out.append("%s has no mode the app sees completed numbered %s." % (
+                p.label, ", ".join(str(i) for i in picked if i not in have)))
+        elif n is None or not 1 <= n <= len(done_ids(spec, p)):
+            out.append("It starts once 1 to %d of the game's modes ticked are completed." % len(done_ids(spec, p)))
     elif words[0] == "game_mode":                   # PAD-710
         n = _int_or_none(spec.place_mode)
         if not p.can("place"):
@@ -5788,6 +5974,12 @@ def _starts_ends_lines(spec, lines, p, ends=True):
     elif starts_on_place(spec) and p.can("place"):   # PAD-710: only the game starting its mode starts it
         out = [line for line in out if not line.startswith("trigger ")]
         out.insert(2, "in_place_of    %d" % int(spec.place_mode))
+    elif starts_on_done(spec) and p.can("done"):     # PAD-747: the game's modes completed (no trigger line)
+        out = [line for line in out if not line.startswith("trigger ")]
+        ids = done_ids(spec, p)
+        everyone = len(ids) == len(getattr(p, "done_modes", ()) or ())
+        out.insert(2, ("starts_on      completed %d" % int(spec.done_count))
+                   + ("" if everyone else " " + " ".join(str(i) for i in ids)))
     elif starts_on_challenge(spec) and p.can("challenge"):   # PAD-615: only the challenge game's pick starts it
         out = [line for line in out if not line.startswith("trigger ")]
         n = int(spec.challenge)

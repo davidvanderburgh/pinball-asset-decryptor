@@ -1094,13 +1094,15 @@ def test_autoattract_is_held_back_until_the_menu_has_chosen():
     plain = ('setsid_as_seer bash "$S/autoattract.sh" "$LOG" > '
              '"$PAD_LOGDIR/padauto.log" 2>&1 &')
     assert plain in code
-    block = code[code.index('if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then'):]
+    # the launch is launch_autoattract() since PAD-738 (Restart game runs it too)
+    block = code[code.index('launch_autoattract() {'):]
     block = block[:block.index("PAD_SW_EXERCISE")]
     assert SEL_GUARD in block
     held = block[:block.index("else")]
     assert 'while [ -f "$f" ]' in held and 'exec bash "$@"' in held
     assert '"$ROOT/dump/selecting" "$SEL_WAIT"' in held
-    assert "AUTOPG=$!" in held, "teardown kills what $! names"
+    assert "AUTOPG=$!" in block[:block.index("\n}\n")], \
+        "teardown kills what $! names"
 
 
 def test_select_lines_reach_the_event_pane():
@@ -1259,10 +1261,13 @@ def test_cardmount_part_mounts_beside_the_default_and_leaves_it_alone():
     assert 'if [ "$MODE" = "--part" ]; then' in code
     assert 'parts.py" --part "$PART" "$SRC"' in code
     # The eviction guard sees a live .pN mount, or the cache is pulled from
-    # under it.
+    # under it. Since PAD-739 it asks cache_in_use, which asks label_mounted
+    # first and then the other rig slots' readers.
     assert "label_mounted()" in code
+    in_use = code[code.index("cache_in_use() {"):]
+    assert 'label_mounted "$1" && return 0' in in_use[:in_use.index("\n}")]
     room = code[code.index("cache_make_room() {"):code.index("cache_wait() {")]
-    assert 'label_mounted "$vlabel" && continue' in room
+    assert 'cache_in_use "$vlabel" && continue' in room
     assert 'mountpoint -q "$CARDS/$vlabel"' not in room
     assert '"$CARDS/$1".p*' in code
     # --umount and --precache still work in their old positions.

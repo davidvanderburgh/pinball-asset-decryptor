@@ -295,7 +295,15 @@ def _cat(path, offset, name):
     Split out of rootfs_file() so multiboot() can read a second file out of a
     rootfs it has ALREADY identified - identify() is two or three debugfs
     listings, and asking it once per file is how a "few hundred milliseconds"
-    probe turns into a second."""
+    probe turns into a second.
+
+    A file the card carries as a LINK (/etc/init.d/game_monitor on a card that has been on a
+    machine, PAD-742) is read where the link leads: debugfs's cat does not follow it."""
+    try:
+        from mkmulticard import resolve_link_path
+        name = resolve_link_path(name, lambda p: _readlink(path, offset, p))
+    except Exception:       # noqa: BLE001 - a loop, no debugfs: read the name as given
+        pass
     try:
         r = subprocess.run(["debugfs", "-R", "cat %s" % name,
                             "%s?offset=%d" % (path, offset)],
@@ -306,6 +314,22 @@ def _cat(path, offset, name):
     if r.returncode != 0 or not r.stdout:
         return None
     return r.stdout.decode("utf-8", "replace")
+
+
+def _readlink(path, offset, name):
+    """The target of the link `name` in the ext4 at `offset`, or None when it is no link."""
+    ref = "%s?offset=%d" % (path, offset)
+    r = subprocess.run(["debugfs", "-R", 'stat "%s"' % name, ref], stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL, timeout=60)
+    txt = r.stdout.decode("utf-8", "replace")
+    if not re.search(r"Type:\s+symlink", txt):
+        return None
+    m = re.search(r'Fast link dest: "([^"]*)"', txt)
+    if m:
+        return m.group(1)
+    r = subprocess.run(["debugfs", "-R", 'cat "%s"' % name, ref], stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL, timeout=60)
+    return r.stdout.decode("utf-8", "replace") or None
 
 
 def rootfs_file(path, name):

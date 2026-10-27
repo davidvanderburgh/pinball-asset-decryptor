@@ -1399,9 +1399,12 @@ def test_watch_clears_the_last_runs_edits_before_every_run():
     body = (RIG / "watch.sh").read_text(encoding="utf-8", errors="replace")
     clear = body.index('rm -f "$ROOT/dump/vidoverride"')
     assert clear < body.index('bash "$RIG/run_game.sh" > "$LOG" 2>&1 &')
-    # Not inside the boot selector's if/else: every run clears it.
+    # Not inside the boot selector's if/else: every run clears it - at the
+    # top level of launch_game (PAD-738), which the start and Restart game
+    # both call.
     line = body[body.rindex("\n", 0, clear) + 1:clear]
-    assert line == ""
+    assert line == "    "
+    assert body.rindex("\nlaunch_game() {", 0, clear) > body.rindex("\n}\n", 0, clear)
 
 
 def test_a_clip_only_the_set_has_is_served_from_it(vidhost):

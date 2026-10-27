@@ -39,11 +39,15 @@ MANIFEST_NAME = ".modpack.json"
 # slot, so it survives a re-extract of the same card the way the other maps do.
 _EXTRA_MAPS = ("settings", "high_scores", "image_group_tags",
                "replacement_names",
+               # PAD-750: the menu ranges changed on the Defaults tab
+               "setting_ranges",
                # Per-clip loudness: an encode instruction attached to the WAVs
                # the pack carries, so a pack built without it would come out
                # at a different balance than the author's own card.
                "audio_levels")
-_EXTRA_SCALARS = ("menu_expose_through",)
+_EXTRA_SCALARS = ("menu_expose_through",
+                  # PAD-755: a Home Edition's coin door ("fitted")
+                  "coin_door")
 # The game's own modes (item 145): the Modes tab's record of a stock mode's staged timers and
 # awards, ``{"build", "values": {row key: value}, "touched": [row key]}``.  Not a flat map: its
 # row keys only mean something for the build they were staged against, so it is merged by
@@ -835,10 +839,12 @@ def apply_extras(assets_folder, extras, log_cb=None):
             pass
     if log_cb:
         words = {"settings": "%d default setting(s)",
+                 "setting_ranges": "%d setting range(s)",
                  "high_scores": "%d high-score default(s)",
                  "image_group_tags": "%d image/scene name(s)",
                  "replacement_names": "the name(s) of %d replacement file(s)",
                  "menu_expose_through": "the Adjustments-menu reveal",
+                 "coin_door": "the coin door",
                  _EXTRA_STOCK_MODES: "%d " + _stock_modes_words(),
                  _EXTRA_SOUND_MODES: "music mode files for %d sound(s)",
                  _EXTRA_VARIANTS: "random clips for %d clip(s)"}

@@ -81,8 +81,8 @@ def test_its_refusals():
         "Starting on a battle picked on the selection screen is not on The Beatles 1.29 yet (Mode says why)."]
     assert MP.validate(_spec(PRO, starts_on="nope")) == [
         "A mode starts on a shot, on shots made in order, on one of the game's events, on a battle picked on the "
-        "game's selection screen, as a challenge picked in the game's Challenge mode, or in the place of one of the "
-        "game's own modes."]
+        "game's selection screen, as a challenge picked in the game's Challenge mode, in the place of one of the "
+        "game's own modes, or once some of the game's modes are completed."]                 # PAD-747
 
 
 def test_it_round_trips_and_a_game_without_a_roster_starts_on_its_shot(tmp_path):

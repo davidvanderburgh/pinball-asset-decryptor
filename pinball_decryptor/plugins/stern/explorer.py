@@ -111,9 +111,16 @@ class CardImage:
     itself in a reader — opened sector-aligned through ``RawDeviceFile``, see
     :func:`formats.open_card`), or an already-open, seekable binary object; an
     object is not closed by :meth:`close`.  Use as a context manager.
+
+    *logical* (PAD-749) also lists the partitions inside an extended one,
+    numbered on from 5 as Linux numbers them: a Spike 2 machine keeps its own
+    logs (the game's ``/log``, the mode runtime's ``mode.log``) on sda6, its
+    ``/dump``.  Off by default: the callers that scan every partition of a
+    card (Compare, Image Info, the firmware finders) look at the game's files.
     """
 
-    def __init__(self, source):
+    def __init__(self, source, logical=False):
+        self._logical = logical
         if hasattr(source, "read") and hasattr(source, "seek"):
             self._f = source
             self._owns = False
@@ -147,7 +154,10 @@ class CardImage:
         self._f.seek(0)
         mbr = self._f.read(512)
         parts = []
-        for index, ptype, lba, sectors in formats.parse_mbr_partitions_bytes(mbr):
+        entries = list(formats.parse_mbr_partitions_bytes(mbr))
+        if self._logical and any(t in _EXTENDED_TYPES for _i, t, _l, _s in entries):
+            entries += [e for e in formats.parse_all_partitions_file(self._f) if e[0] >= 4]
+        for index, ptype, lba, sectors in entries:
             offset, size = lba * 512, sectors * 512
             if ptype == _EXT_TYPE:
                 # Confirm it really is ext (and cache the reader) so the tab can
@@ -168,9 +178,9 @@ class CardImage:
         return parts
 
     def partitions(self):
-        """The card's primary partitions (logical partitions inside an extended
-        one aren't enumerated — the Spike 2 rootfs and data partitions are both
-        primary)."""
+        """The card's primary partitions, and with ``logical`` the ones inside
+        an extended partition after them (the Spike 2 rootfs and data
+        partitions are both primary)."""
         return list(self._parts)
 
     def _reader(self, part_index):
@@ -582,7 +592,7 @@ class CardImage:
     def write_adjustment_defaults(self, part_index, path, table, overrides,
                                   high_scores=None, name_overrides=None,
                                   menu_last_id=None, menu_plan=None,
-                                  log=None):
+                                  log=None, ranges=None, coin_door=False):
         """Patch the game ELF's compiled defaults and write it back in place
         (exact-size, extent-mapped) with the ``.sidx`` record refreshed.
 
@@ -598,12 +608,20 @@ class CardImage:
         refreshed — once.  *log* is an optional ``log(text, level)`` for the
         notes only this layer can write.
 
+        *ranges* is ``{AD_name: (min, max)}``: the menu's lowest and highest
+        value for those settings (PAD-750), patched beside their defaults.
+
+        *coin_door* gives a Home Edition its coin door (PAD-755,
+        :mod:`.coin_door`): the interlock switch linked to its handler.  A
+        build that has one already, or can't be read, is left alone and said
+        so through *log*.
+
         Returns ``(n_settings, sidx_refreshed)``, where n_settings counts every
         adjustment and high-score slot changed (the menu page is one edit to
         the firmware's code, not a setting, and isn't counted).
         """
-        new = table.patched_bytes(overrides)
-        n = len(overrides)
+        new = table.patched_bytes(overrides, ranges=ranges)
+        n = len(set(overrides) | set(ranges or {}))
         new = self._with_master_volume(table, new, overrides, log)
         if name_overrides and high_scores is not None:
             # Re-bind to the already-patched bytes: the adjustment patch only
@@ -619,8 +637,34 @@ class CardImage:
             # re-reading the page out of the result.
             from .menu_visibility import widened_bytes
             new = widened_bytes(table, new, int(menu_last_id), plan=menu_plan)
+        if coin_door:
+            new = self._with_coin_door(table, new, log)
         _n, refreshed = self.replace_file_bytes(part_index, path, new)
         return n, refreshed
+
+    @staticmethod
+    def _with_coin_door(table, elf, log=None):
+        """*elf* with its coin door's interlock linked (see :mod:`.coin_door`),
+        or unchanged with a note when this build has nothing to fit."""
+        from . import coin_door
+        p = coin_door.plan(elf, table)
+        if p and p["state"] == coin_door.MISSING:
+            out = coin_door.patched_bytes(elf, p)
+            if log:
+                log("Coin door: the game now uses the coin door's interlock "
+                    "switch. Opening the door puts up the game's 48V "
+                    "DISABLED / CLOSE COIN DOOR message, as on a Pro.",
+                    "info")
+            return out
+        if log:
+            if p and p["state"] == coin_door.FITTED:
+                log("Coin door: this game already uses its coin door; "
+                    "nothing to change.", "info")
+            else:
+                log("Coin door: this build's switch tables couldn't be read "
+                    "with certainty, so its coin door was left as it ships.",
+                    "warning")
+        return elf
 
     @staticmethod
     def _with_master_volume(table, elf, overrides, log=None):

@@ -486,6 +486,8 @@ class App:
             on_flash_choices_change=self._on_flash_choices_change,
             initial_flashed_images=s.get("flashed_images", []),
             on_flashed_images_change=self._on_flashed_images_change,
+            initial_donations=s.get("donations") or {},
+            on_donations_change=self._on_donations_change,
             on_ui_zoom_change=self._on_ui_zoom_change,
             initial_language=s.get("ui_language"),
             on_language_change=self._on_language_change,
@@ -2168,7 +2170,7 @@ class App:
     # ------------------------------------------------------------------
 
     def _start_write(self, chain_flash_device=None, again=False,
-                     chain_flash_verify=True):
+                     chain_flash_verify=True, chain_flash_keep_data=False):
         """Dispatch a Build.  ``chain_flash_device`` (the Build / flash
         dialog with both sections ticked) makes a successful build chain
         straight into flashing its output onto that device — armed only at
@@ -2410,6 +2412,7 @@ class App:
             write_kwargs["update"] = update
         self._chain_flash_after_build = (
             (chain_flash_device, output_path, bool(chain_flash_verify))
+            + ((True,) if chain_flash_keep_data else ())
             if chain_flash_device else None)
         # what _offer_bigger_card needs if this build is refused for room
         self._last_build_output = output_path
@@ -2554,11 +2557,13 @@ class App:
             target=self._run_pipeline_with_audio, args=(assets_dir,),
             daemon=True).start()
 
-    def _on_build_flash_request(self, build_path, device_path, verify=True):
+    def _on_build_flash_request(self, build_path, device_path, verify=True,
+                                keep_data=False):
         """The Build / flash dialog's build section was ticked: build to
         *build_path*, then (when *device_path* is set) chain a flash of the
         fresh build onto that card - read back afterwards unless *verify* is
-        False (the dialog's "Skip verify", PAD-217).
+        False (the dialog's "Skip verify", PAD-217), keeping the card's own
+        settings, audits and high scores with *keep_data* (PAD-736).
 
         The dialog's Build-to box may have been edited — push it back into
         the Write tab's Output Folder + File Name so ``_start_write`` (and
@@ -2568,12 +2573,13 @@ class App:
             self.window.write_output_var.set(folder)
         if name and getattr(self.window, "write_filename_var", None):
             self.window.write_filename_var.set(name)
+        keep = {"chain_flash_keep_data": True} if keep_data else {}
         self._start_write(chain_flash_device=device_path,
-                          chain_flash_verify=verify)
+                          chain_flash_verify=verify, **keep)
 
     def _start_flash_image(self, image_path, device_path, menu_only=False,
                            target=None, disk_mode=None, image=None,
-                           from_iso=None, verify=True):
+                           from_iso=None, verify=True, keep_data=False):
         """Flash a pre-built image onto a card (dd-style whole-image write).
 
         ``menu_only`` writes ONLY the boot menu partition onto a card this
@@ -2581,6 +2587,10 @@ class App:
         and the machine's own settings and scores survive it.  The core
         refuses outright if the card is not that card
         (:func:`core.rawdevice.flash_menu_to_device`).
+
+        ``keep_data`` writes the whole image but keeps the card's own
+        settings, audits and high scores (PAD-736,
+        :func:`core.rawdevice.card_data_overlay`).
 
         The image + target card were collected and confirmed by the flash
         dialog (``webui/write_dialogs.py``); this just runs the
@@ -2648,6 +2658,10 @@ class App:
         # (``flash_skip_verify``) takes it, and only when it was ticked.
         if not verify and getattr(mfr, "flash_skip_verify", False):
             extra["verify"] = False
+        # ``keep_data`` likewise: only a plugin that offers it, only ticked
+        if (keep_data and not menu_only
+                and getattr(mfr, "flash_keep_data", False)):
+            extra["keep_data"] = True
         try:
             if to_disk:
                 # ``disk_mode`` (item 124): "menu" = only the boot menu,
@@ -4979,6 +4993,13 @@ class App:
                       else self._current_mfr.write_phases)
             if phases:
                 self.window.set_phase(len(phases), mode=self._active_mode)
+        # PAD-754: the first card written on this install opens the Animal
+        # shelters window once - the moment the app has just paid off is
+        # the one time to ask people to give some of that to a shelter.
+        if success and self._active_mode == "write":
+            note = getattr(self.window, "note_card_written", None)
+            if note is not None:
+                note()
         # Empirical FDA proof: if a Direct-SSD run just completed
         # successfully on macOS, Full Disk Access must be in order
         # for every helper involved.  Auto-dismiss the banner so the
@@ -5172,12 +5193,15 @@ class App:
                     # completion) — the log carries the hand-off.  after(0,…)
                     # lets this _on_done fully unwind (set_running state,
                     # queue drain) before the flash re-arms the run state.
-                    device_path, image_path, verify = chain_flash
+                    device_path, image_path, verify = chain_flash[:3]
+                    # a 4th: keep the card's settings and scores (PAD-736)
+                    keep = ({"keep_data": True} if chain_flash[3:4] == (True,)
+                            else {})
                     self.window.append_log(
                         "Build complete — writing the fresh image onto the "
                         "card...", "info")
                     self.root.after(0, lambda: self._start_flash_image(
-                        image_path, device_path, verify=verify))
+                        image_path, device_path, verify=verify, **keep))
         else:
             self.window.set_status("Failed")
             title = "Extract Failed" if is_extract else "Write Failed"
@@ -5227,9 +5251,11 @@ class App:
             "SD card size is now %s; building again." % said, "info")
         device = chain_flash[0] if chain_flash else None
         verify = chain_flash[2] if chain_flash else True
+        keep = ({"chain_flash_keep_data": True}
+                if chain_flash and chain_flash[3:4] == (True,) else {})
         self.root.after(0, lambda: self._start_write(
             chain_flash_device=device, again=True,
-            chain_flash_verify=verify))
+            chain_flash_verify=verify, **keep))
         return True
 
     # ------------------------------------------------------------------
@@ -6417,33 +6443,47 @@ class App:
         self._settings["flashed_images"] = digests
         self._save_settings()
 
+    def _on_donations_change(self, blob):
+        """Persist the Animal shelters window's memory (PAD-754): that its
+        once-only prompt has been shown, and the currency and name the form
+        last used."""
+        self._settings["donations"] = dict(blob or {})
+        self._save_settings()
+
     def _on_default_presets_change(self, blob):
         """Persist the Default Settings presets + which one auto-applies.
         *blob* = ``{"presets": {name: {AD_name: value}}, "active": name}``."""
         self._settings["default_settings_presets"] = blob
         self._save_settings()
 
-    def _apply_spike1_default_settings(self, out, vals, source):
+    def _apply_spike1_default_settings(self, out, vals, source, ranges=None):
         """Bake staged/preset Spike 1 adjustment defaults into the built card's
         game ELF.  *vals* is ``{AD_<id>: value}`` (the same store both eras
-        stage into); Spike 1 has no high-score board or menu widening, so only
-        the numeric defaults apply.  Returns True when *out* is a Spike 1 card
-        (handled here), False to fall through to the Spike 2 path."""
+        stage into) and *ranges* ``{AD_<id>: (min, max)}`` (PAD-750); Spike 1
+        has no high-score board or menu widening, so only the numeric
+        settings apply.  Returns True when *out* is a Spike 1 card (handled
+        here), False to fall through to the Spike 2 path."""
         from .plugins.stern.formats import detect_spike1_game
         if detect_spike1_game(out) is None:
             return False
         from .plugins.stern import spike1
-        overrides = {}
-        for name, v in (vals or {}).items():
-            if isinstance(name, str) and name.startswith("AD_"):
-                try:
-                    overrides[int(name[3:])] = int(v)
-                except ValueError:
-                    pass
-        if overrides:
+
+        def by_id(d, conv):
+            got = {}
+            for name, v in (d or {}).items():
+                if isinstance(name, str) and name.startswith("AD_"):
+                    try:
+                        got[int(name[3:])] = conv(v)
+                    except (TypeError, ValueError, IndexError):
+                        pass
+            return got
+        overrides = by_id(vals, int)
+        ranges = by_id(ranges, lambda p: (int(p[0]), int(p[1])))
+        if overrides or ranges:
             try:
                 n = spike1.write_game_elf_defaults(
-                    out, overrides, log=self.window.append_log)
+                    out, overrides, log=self.window.append_log,
+                    ranges_by_id=ranges)
                 self.window.append_log(
                     "Applied %s (%d setting(s)) to the built Spike 1 image."
                     % (source, n), "success")
@@ -6463,10 +6503,13 @@ class App:
         if mfr is None or not getattr(mfr.capabilities, "settings_editor",
                                       False):
             return
+        from .plugins.stern.adjustments import PRESET_RANGES_KEY
         blob = self._settings.get("default_settings_presets") or {}
         active = blob.get("active")
-        vals = (blob.get("presets") or {}).get(active)
-        if not vals:
+        vals = dict((blob.get("presets") or {}).get(active) or {})
+        # PAD-750: a preset's changed ranges ride in the same record
+        ranges = vals.pop(PRESET_RANGES_KEY, None) or {}
+        if not vals and not ranges:
             return
         try:
             out = self.window._target_write_path()
@@ -6475,21 +6518,21 @@ class App:
         if not out or not os.path.isfile(out):
             return
         if self._apply_spike1_default_settings(
-                out, vals, "Default Settings preset \"%s\"" % active):
+                out, vals, "Default Settings preset \"%s\"" % active,
+                ranges=ranges):
             return
         try:
+            from .plugins.stern.adjustments import resolve_overrides
             from .plugins.stern.explorer import CardImage
             with CardImage(out) as c:
                 table, part, path = c.adjustment_table()
-                overrides = {}
-                for name, v in vals.items():
-                    if name in table.by_name:
-                        e = table.get(name)
-                        overrides[name] = max(e["min"], min(e["max"], int(v)))
-                if overrides:
+                overrides, ranges = resolve_overrides(
+                    lambda n: table.get(n) if n in table.by_name else None,
+                    vals, ranges)
+                if overrides or ranges:
                     n, _ref = c.write_adjustment_defaults(
                         part, path, table, overrides,
-                        log=self.window.append_log)
+                        log=self.window.append_log, ranges=ranges)
                     self.window.append_log(
                         "Applied Default Settings preset \"%s\" (%d setting(s)) "
                         "to the built image." % (active, n), "success")
@@ -6514,9 +6557,15 @@ class App:
         if not assets_dir or not os.path.isdir(assets_dir):
             return
         vals = self.window.staged_default_settings(assets_dir)
+        ranges = self.window.staged_setting_ranges(assets_dir)
         names = self.window.staged_high_scores(assets_dir)
         expose = self.window.staged_menu_expose(assets_dir)
-        if not vals and not names and not expose:
+        # PAD-755: give a Home Edition its coin door
+        try:
+            coin = bool(self.window.staged_coin_door(assets_dir))
+        except AttributeError:
+            coin = False
+        if not vals and not ranges and not names and not expose and not coin:
             return
         try:
             out = self.window._target_write_path()
@@ -6525,17 +6574,18 @@ class App:
         if not out or not os.path.isfile(out):
             return
         if self._apply_spike1_default_settings(
-                out, vals, "staged default setting(s)"):
+                out, vals, "staged default setting(s)", ranges=ranges):
             return
         try:
+            from .plugins.stern.adjustments import resolve_overrides
             from .plugins.stern.explorer import CardImage
             with CardImage(out) as c:
                 table, part, path = c.adjustment_table()
-                overrides = {}
-                for name, v in vals.items():
-                    if name in table.by_name:
-                        e = table.get(name)
-                        overrides[name] = max(e["min"], min(e["max"], int(v)))
+                # PAD-750: a changed range is written with the defaults, and
+                # each value is pulled into the range it will have
+                overrides, ranges = resolve_overrides(
+                    lambda n: table.get(n) if n in table.by_name else None,
+                    vals, ranges)
                 # Item 145: a timer the Modes tab staged is in the build already
                 # (the Write puts it in the game program on every path).
                 # Writing it again would only change the file, so the next
@@ -6597,12 +6647,14 @@ class App:
                             "\"%s\" (it isn't one of this build's hidden "
                             "settings) — the rest of the staged defaults were "
                             "still applied." % expose, "warning")
-                if overrides or name_overrides or menu_last_id is not None:
+                if (overrides or ranges or name_overrides
+                        or menu_last_id is not None or coin):
                     n, _ref = c.write_adjustment_defaults(
                         part, path, table, overrides,
                         high_scores=hstd, name_overrides=name_overrides,
                         menu_last_id=menu_last_id, menu_plan=menu_plan,
-                        log=self.window.append_log)
+                        log=self.window.append_log, ranges=ranges,
+                        coin_door=coin)
                     if n:
                         self.window.append_log(
                             "Applied %d staged default setting(s) to the built "

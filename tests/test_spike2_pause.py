@@ -360,9 +360,10 @@ def test_the_button_says_resume_however_the_game_was_frozen(monkeypatch, tmp_pat
     either window - the bar shows the one truth."""
     pf = pytest.importorskip("playfield")
     monkeypatch.setattr(pf, "SW_PATH", str(_pf_block(tmp_path, 1)))
-    run = pf.RunCtl(None)
+    run = pf.RunCtl(None, logdir=None)
     assert run.poll(10.0) is True
-    assert run.dyn() == {"paused": True, "audio": None}     # no file: no volume row
+    assert run.dyn() == {"paused": True, "restart": False,  # no file: no volume row
+                         "restarting": False, "boot": None, "audio": None}
     assert run.poll(10.1) is False                          # paced, and unchanged
     monkeypatch.setattr(pf, "SW_PATH", str(_pf_block(tmp_path, 0)))
     assert run.poll(11.0) is True and run.dyn()["paused"] is False

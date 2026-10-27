@@ -710,3 +710,16 @@ value place_audit_started_3        229
 value place_audit_completed_3      230
 value place_audit_started_4        225
 value place_audit_completed_4      226
+
+# PAD-747: the game's other modes it keeps books of (mode_framework.done_lines): a mode of ours may start once
+# some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag
+text  done_name_0                  Drop Bank 1
+value done_flag_0                  51
+text  done_name_1                  Drop Bank 2
+value done_flag_1                  52
+text  done_name_2                  Drop Bank 3
+value done_flag_2                  53
+text  done_name_3                  Drop Bank Fab
+value done_flag_3                  54
+text  done_name_4                  Drop Bank Four
+value done_flag_4                  55

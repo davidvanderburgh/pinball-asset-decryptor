@@ -518,3 +518,22 @@ value place_audit_started_21       315
 value place_audit_completed_21     317
 value place_audit_started_22       318
 value place_audit_completed_22     320
+
+# PAD-747: the game's other modes it keeps books of (mode_framework.done_lines): a mode of ours may start once
+# some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag
+text  done_name_0                  Story Mode
+value done_audit_0                 322
+text  done_name_1                  Total Isolation Multiball
+value done_flag_1                  59
+text  done_name_2                  Total Isolation 2 Multiball
+value done_flag_2                  65
+text  done_name_3                  Season One Wizard Mode Multiball
+value done_flag_3                  71
+text  done_name_4                  Season Two Wizard Mode Multiball
+value done_flag_4                  77
+text  done_name_5                  Cant Stop This Multiball
+value done_flag_5                  98
+text  done_name_6                  Demogorgon Challenge
+value done_flag_6                  105
+text  done_name_7                  Wizard Mode Multiball
+value done_flag_7                  108

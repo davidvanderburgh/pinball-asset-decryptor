@@ -8,7 +8,10 @@ server, and a native window (pywebview) showing the page.
 The native window is Edge WebView2 on Windows, WKWebView on macOS and Qt
 WebEngine on Linux (all shipped with the app).  If it cannot start, the app
 opens the page in the system browser instead and says why in the log, so a
-missing web view never leaves the app unusable.
+missing web view never leaves the app unusable.  That includes a window that
+opens but stays blank (PAD-748): pywebview on a Windows PC without WebView2
+falls back to Internet Explorer's engine, and a WebView2 that fails to start
+only logs to a console the installed app does not have.
 """
 
 import argparse
@@ -217,8 +220,78 @@ def _close_app(ctx):
         log.exception("closing the app")
 
 
+#: how long the window's page may take to reach the app before the app gives
+#: up on the window and shows itself in the browser instead (PAD-748).  A
+#: healthy window connects in a second or two, a cold first start of the web
+#: engine on a slow PC in well under this
+PAGE_WAIT = 45
+
+#: what the log says when the window cannot be used, and how to get it back
+WEBVIEW2_HELP = ("The app needs the Microsoft Edge WebView2 Runtime for its "
+                 "window; installing it (free, from Microsoft) or repairing "
+                 "it in Windows Settings > Apps brings the window back.")
+
+
+class WindowUnusable(Exception):
+    """The native window cannot show the app; the message says why."""
+
+
+def engine_problem(webview):
+    """Why the native window would come up blank, before it is opened, or
+    None.  Windows only: without the Edge WebView2 runtime (or with a .NET
+    older than 4.6.2) pywebview quietly falls back to Internet Explorer's
+    engine, which cannot run the page, and the window stays empty (PAD-748).
+    A web engine picked on purpose (PAD_UI_GUI) is left alone."""
+    if sys.platform != "win32" or os.environ.get("PAD_UI_GUI"):
+        return None
+    try:
+        renderer = getattr(webview, "renderer", None)
+        if renderer is None:
+            webview.screens                             # loads the backend
+            renderer = getattr(webview, "renderer", None)
+    except Exception:                                   # noqa: BLE001
+        return None
+    if renderer and renderer != "edgechromium":
+        return ("this PC has no Microsoft Edge WebView2 Runtime, so the "
+                "window would stay blank")
+    return None
+
+
+class _EngineErrors(logging.Handler):
+    """pywebview's own errors (the web engine failing to start) go to its
+    logger, which an installed app shows nowhere: hand them to the app's
+    log, and say when one means the window will stay blank."""
+
+    def __init__(self, ctx, on_fatal):
+        super().__init__(logging.ERROR)
+        self.ctx = ctx
+        self.on_fatal = on_fatal
+
+    def emit(self, record):
+        try:
+            text = " ".join(str(record.getMessage()).split())
+        except Exception:                               # noqa: BLE001
+            return
+        # the .NET stack trace under the engine's own words says nothing
+        # more to the user or to us
+        text = text.split(" --- End of inner exception")[0]
+        try:
+            self.ctx.loop.post(self.ctx.window.append_log,
+                               "App window: %s" % text[:600], "warning")
+        except Exception:                               # noqa: BLE001
+            pass
+        if "initialization failed" in text.lower():
+            self.on_fatal("its web engine (Edge WebView2) did not start")
+
+
 def run_native(ctx, server, host):
+    """Show the app in its own window until it is closed.  Raises
+    WindowUnusable when the window cannot show the page (the caller then
+    shows it in the browser), without closing the app."""
     import webview
+    problem = engine_problem(webview)
+    if problem:
+        raise WindowUnusable(problem)
     geo = getattr(ctx, "start_geometry", None)
     width, height, x, y, maximized = geo or (1280, 860, None, None, False)
     width = max(MIN_SIZE[0], width)
@@ -282,6 +355,44 @@ def run_native(ctx, server, host):
             log.warning("drag and drop of files is not available",
                         exc_info=True)
 
+    # A window whose page never reaches the app is a blank window: give up
+    # on it and show the app in the browser instead (PAD-748).  The engine
+    # saying it failed does that at once; otherwise PAGE_WAIT does.
+    page_seen = ctx.page_seen          # set when the page asks for its state
+    gave_up = {}
+    watch_done = threading.Event()
+
+    def _give_up(why):
+        if page_seen.is_set() or gave_up:
+            return
+        gave_up["why"] = why
+        closing_done.set()              # the app stays open, in the browser
+        watch_done.set()
+
+        # off the caller's thread: the engine reports its failure on the
+        # window's own UI thread, and destroy() waits for that thread to
+        # show the window first
+        def _close():
+            try:
+                win.destroy()
+            except Exception:                           # noqa: BLE001
+                log.warning("could not close the blank window", exc_info=True)
+        threading.Thread(target=_close, name="window-close",
+                         daemon=True).start()
+
+    def _watch():
+        deadline = time.monotonic() + PAGE_WAIT
+        while not watch_done.wait(0.25):
+            if page_seen.is_set() or host.quitting:
+                return
+            if time.monotonic() >= deadline:
+                _give_up("its page did not load in %d seconds" % PAGE_WAIT)
+                return
+    engine_log = logging.getLogger("pywebview")
+    engine_errors = _EngineErrors(ctx, _give_up)
+    engine_log.addHandler(engine_errors)
+    threading.Thread(target=_watch, name="window-watch", daemon=True).start()
+
     win.events.loaded += _on_loaded
     win.events.shown += host._on_shown
     win.events.closing += _on_closing
@@ -305,9 +416,17 @@ def run_native(ctx, server, host):
     icon = os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))),
         "icon.ico" if sys.platform == "win32" else "icon.png")
-    webview.start(gui=gui, debug=debug, private_mode=False,
-                  storage_path=storage,
-                  icon=icon if os.path.isfile(icon) else None)
+    try:
+        webview.start(gui=gui, debug=debug, private_mode=False,
+                      storage_path=storage,
+                      icon=icon if os.path.isfile(icon) else None)
+    finally:
+        watch_done.set()                # the watch has nothing left to do
+        engine_log.removeHandler(engine_errors)
+    if gave_up:
+        host.window = None
+        ctx.dialogs.native_file_dialog = None
+        raise WindowUnusable(gave_up["why"])
     if not closing_done.is_set():
         _close_app(ctx)
     host._quit.set()
@@ -474,13 +593,17 @@ def main(argv=None):
             try:
                 run_native(ctx, server, host)
             except Exception as e:                      # noqa: BLE001
-                log.exception("native window failed")
                 if host.quitting:
                     return 0
-                ctx.loop.post(ctx.window.append_log,
-                              "The app window could not start (%s); showing "
-                              "the app in your browser instead." % e,
-                              "warning")
+                text = ("The app window could not start (%s); showing the "
+                        "app in your browser instead." % e)
+                if isinstance(e, WindowUnusable):
+                    log.warning("native window unusable: %s", e)
+                    if sys.platform == "win32":
+                        text += " " + WEBVIEW2_HELP
+                else:
+                    log.exception("native window failed")
+                ctx.loop.post(ctx.window.append_log, text, "warning")
                 run_browser(ctx, server, host)
         else:
             run_browser(ctx, server, host, open_browser=(mode == "browser"))

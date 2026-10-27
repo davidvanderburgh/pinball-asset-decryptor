@@ -47,7 +47,8 @@ def admin(url, method, path, key, body=None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url.rstrip("/") + path, data=data, method=method,
                                  headers={"X-PAD-Admin": key, "Content-Type": "application/json",
-                                          "Accept": "application/json"})
+                                          "Accept": "application/json",
+                                          "User-Agent": donations.USER_AGENT})
     with urlopen(req, 15) as r:
         return json.loads(r.read().decode("utf-8"))
 

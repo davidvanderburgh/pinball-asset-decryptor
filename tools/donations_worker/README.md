@@ -156,4 +156,10 @@ front (HTTPS with a certificate the app trusts through certifi, the
 visitor's real address for the rate limit, the `max-age=60` on the summary,
 which only a browser would honour and the app does not), D1 on
 Cloudflare's storage instead of a local SQLite file, and the secrets you
-put in with `wrangler secret put`. The code path is the same.
+put in with `wrangler secret put`. The code path is the same, but the edge
+is not transparent: Cloudflare's browser integrity check refuses Python's
+default user agent with a 403 (error 1010), which the local run could not
+show. Every request the app and the smoke script make therefore names the
+app (`User-Agent: Pinball-Asset-Decryptor-Donations`); keep that on any new
+call. Deployed 2026-10-27; the smoke script passed against the live Worker
+the same day, including the review route.

@@ -26,6 +26,7 @@ class FakeWorker:
     def __init__(self):
         self.rows = []
         self.posts = []
+        self.gets = []
         self.deletes = []
         self.refuse = None
         self.key = None
@@ -58,6 +59,8 @@ class FakeWorker:
                 self.wfile.write(data)
 
             def do_GET(self):
+                fake.gets.append((self.path,
+                                  {k.lower(): v for k, v in self.headers.items()}))
                 if self.path == "/v1/summary":
                     self._send(200, fake.summary())
                 elif self.path.startswith("/v1/all"):
@@ -545,3 +548,17 @@ def test_no_service_configured_means_no_network_and_a_kept_entry(tmp_path, monke
         w.drain()
         assert w.state("shellx")["donations"]["pending"] == 1
         assert w.call("shellx.donations_refresh") is False
+
+
+def test_every_request_names_the_app_not_python(worker):
+    """Cloudflare's browser integrity check answers Python's default agent
+    with 403 (error 1010); the deployed Worker proved it on 2026-10-27."""
+    url = worker.url
+    D.fetch_summary(url)
+    D.fetch_all(url, 0, 5)
+    out = D.submit(url, "k", D.validate_entry("3"))
+    D.remove(url, "k", out["id"], out["token"])
+    seen = [h for _, h in worker.gets] + [h for h, _ in worker.posts]         + [h for _, h in worker.deletes]
+    assert len(seen) >= 4
+    for h in seen:
+        assert h.get("user-agent") == D.USER_AGENT, h.get("user-agent")

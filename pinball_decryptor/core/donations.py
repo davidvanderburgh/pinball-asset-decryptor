@@ -87,6 +87,16 @@ MAX_SHELTER = 80
 MAX_NAME = 40
 MAX_REGION = 40
 TIMEOUT = 8                 # seconds per request
+# Every request names the app: Cloudflare's browser integrity check in
+# front of the Worker refuses Python's default agent (403, error 1010),
+# which the local wrangler proof could never show.
+USER_AGENT = "Pinball-Asset-Decryptor-Donations"
+
+
+def _headers(**extra):
+    h = {"Accept": "application/json", "User-Agent": USER_AGENT}
+    h.update(extra)
+    return h
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
            "Oct", "Nov", "Dec")
 
@@ -418,7 +428,7 @@ def fetch_summary(url, timeout=TIMEOUT):
     if not url:
         raise DonationsError("No donations service is configured.")
     req = urllib.request.Request(url.rstrip("/") + "/v1/summary",
-                                 headers={"Accept": "application/json"})
+                                 headers=_headers())
     with urlopen(req, timeout) as resp:
         out = _read_json(resp)
     if not out.get("ok"):
@@ -433,7 +443,7 @@ def fetch_all(url, offset=0, limit=100, timeout=TIMEOUT):
     req = urllib.request.Request(
         "%s/v1/all?offset=%d&limit=%d" % (url.rstrip("/"), max(0, int(offset)),
                                           max(1, int(limit))),
-        headers={"Accept": "application/json"})
+        headers=_headers())
     with urlopen(req, timeout) as resp:
         out = _read_json(resp)
     if not out.get("ok"):
@@ -451,8 +461,8 @@ def submit(url, key, entry, timeout=TIMEOUT):
     body = json.dumps(entry).encode("utf-8")
     req = urllib.request.Request(
         url.rstrip("/") + "/v1/donate", data=body, method="POST",
-        headers={"Content-Type": "application/json",
-                 "Accept": "application/json", "X-PAD-Key": key or ""})
+        headers=_headers(**{"Content-Type": "application/json",
+                            "X-PAD-Key": key or ""}))
     try:
         with urlopen(req, timeout) as resp:
             out = _read_json(resp)
@@ -478,8 +488,7 @@ def remove(url, key, entry_id, token, timeout=TIMEOUT):
         raise DonationsError("No donations service is configured.")
     req = urllib.request.Request(
         "%s/v1/donate/%s" % (url.rstrip("/"), entry_id), method="DELETE",
-        headers={"Accept": "application/json", "X-PAD-Key": key or "",
-                 "X-PAD-Edit": token or ""})
+        headers=_headers(**{"X-PAD-Key": key or "", "X-PAD-Edit": token or ""}))
     try:
         with urlopen(req, timeout) as resp:
             out = _read_json(resp)

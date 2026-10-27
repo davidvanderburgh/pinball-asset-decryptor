@@ -90,8 +90,17 @@ TROUGH 1..6 + JAM.
   `v`; the flipper coil (1133) once padled v7 was in.
 * `tests/test_vpx_bridge.py`: the digest rule, the CODE record, cloning, the
   v7 offsets against padled.h, the map's consistency, the patcher's rewrites.
-* Visual Pinball itself: not installed on David's PC at the time of writing;
-  the patched table and `PADSPIKE2.vbs` are staged beside the original pack.
+* Visual Pinball 10.8.0 (the GitHub release zip, unpacked to
+  `C:\Visual Pinball`, David's say-so): the patched table loads (its MAC
+  accepted), the script creates PAD.Controller, Start serves a ball through
+  the table's trough, the game auto-launches it, the table's switches reach
+  the game, both flipper buttons press AND release with their coils
+  following, and the emulator's LCD shows BALL 1 of a game started from VPX
+  (the picture on the ticket). Keys were fed through the table's
+  `PadTestTimer` (`vpxkeys.py`), since VPX polls its keyboard itself.
+  Six things VPX turned up on the way are in the README's last section:
+  the truncated clones, core.vbs's load order, its `Dim`s, the key
+  handlers, `SolCallback(68)`, and the pywin32 by-reference Null.
 
 ## Next tables
 

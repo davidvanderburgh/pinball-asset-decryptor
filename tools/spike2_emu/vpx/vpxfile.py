@@ -231,6 +231,33 @@ def with_item_count(gamedata, n):
     return replace_field(gamedata, "SEDT", struct.pack("<i", n))
 
 
+def item_records(data, start=4):
+    """Every record of a GameItem stream, NESTED OBJECTS INCLUDED. A light's
+    or trigger's shape is a run of drag points, each written as a DPNT tag
+    followed by its own records and its own ENDB; only the ENDB at depth zero
+    ends the item. biff_records() stops at the first ENDB it meets, which for
+    such an item is the first drag point's - a clone built from it carried one
+    point and no closing ENDB, and VPX sat in "Loading" for ever on it."""
+    depth = 0
+    for tag, payload, off in _records_no_stop(data, start):
+        yield tag, payload, off
+        if tag == "DPNT":
+            depth += 1
+        elif tag == "ENDB":
+            if depth == 0:
+                return
+            depth -= 1
+
+
+def _records_no_stop(data, start):
+    i, n = start, len(data)
+    while i + 8 <= n:
+        size = struct.unpack_from("<I", data, i)[0]
+        tag = data[i + 4:i + 8].decode("latin1")
+        yield tag, data[i + 8:i + 4 + size], i
+        i += 4 + size
+
+
 def clone_item(data, name, x, y):
     """A copy of a GameItem stream renamed and moved: every VCEN in it (the
     centre and each drag point) shifts by the same delta, so a light's shape
@@ -238,7 +265,7 @@ def clone_item(data, name, x, y):
     t = struct.unpack_from("<i", data, 0)[0]
     out = bytearray(struct.pack("<i", t))
     dx = dy = None
-    for tag, payload, _ in biff_records(data, 4):
+    for tag, payload, _ in item_records(data, 4):
         if tag == "VCEN" and len(payload) >= 8:
             ox, oy = struct.unpack_from("<ff", payload, 0)
             if dx is None:                      # the first VCEN is the centre
@@ -247,6 +274,26 @@ def clone_item(data, name, x, y):
         elif tag == "NAME":
             payload = wide(name)
         out += biff_record(tag, payload)
+    return bytes(out)
+
+
+def set_fields(data, fields):
+    """A GameItem stream with the first top-level record of each tag in
+    `fields` given a new payload (a timer's TMON/TMIN, say)."""
+    t = struct.unpack_from("<i", data, 0)[0]
+    out = bytearray(struct.pack("<i", t))
+    todo = dict(fields)
+    depth = 0
+    for tag, payload, _ in item_records(data, 4):
+        if depth == 0 and tag in todo:
+            payload = todo.pop(tag)
+        out += biff_record(tag, payload)
+        if tag == "DPNT":
+            depth += 1
+        elif tag == "ENDB" and depth:
+            depth -= 1
+    if todo:
+        raise KeyError("no %s record in the item" % ",".join(todo))
     return bytes(out)
 
 

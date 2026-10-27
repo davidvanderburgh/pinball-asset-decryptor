@@ -85,15 +85,22 @@ def test_replace_script_keeps_other_records(vpxfile):
 
 
 def test_clone_item_shifts_every_vcen_and_renames(vpxfile):
+    # a light with TWO drag points, each its own nested object with its own
+    # ENDB, then the light's ENDB - exactly the shape that truncated the
+    # first clones (VPX never finished loading them)
     item = struct.pack("<i", 7) + _rec("VCEN", struct.pack("<ff", 100, 200)) + \
-        _rec("NAME", vpxfile.wide("L21")) + _rec("DPNT", b"") + \
-        _rec("VCEN", struct.pack("<ff", 110, 205)) + _rec("ENDB", b"")
+        _rec("NAME", vpxfile.wide("L21")) + \
+        _rec("DPNT", b"") + _rec("VCEN", struct.pack("<ff", 110, 205)) + _rec("ENDB", b"") + \
+        _rec("DPNT", b"") + _rec("VCEN", struct.pack("<ff", 90, 195)) + _rec("ENDB", b"") + \
+        _rec("ENDB", b"")
     out = vpxfile.clone_item(item, "PL_NEW", 300, 400)
     assert struct.unpack_from("<i", out, 0)[0] == 7
-    recs = [(t, p) for t, p, _ in vpxfile.biff_records(out, 4)]
+    recs = [(t, p) for t, p, _ in vpxfile.item_records(out, 4)]
     vcens = [struct.unpack("<ff", p) for t, p in recs if t == "VCEN"]
-    assert vcens == [(300.0, 400.0), (310.0, 405.0)]
-    assert vpxfile.unwide(dict(recs)["NAME"]) == "PL_NEW"
+    assert vcens == [(300.0, 400.0), (310.0, 405.0), (290.0, 395.0)]
+    assert [t for t, _ in recs].count("ENDB") == 3, "both points and the item close"
+    assert len(out) == len(item) + (len(vpxfile.wide("PL_NEW")) - len(vpxfile.wide("L21")))
+    assert vpxfile.unwide([p for t, p in recs if t == "NAME"][0]) == "PL_NEW"
 
 
 # ---------------------------------------------------------------- padled v7 -
@@ -141,17 +148,21 @@ def test_map_numbers_are_unique_and_in_range(gzmap):
             assert 0 <= node < 16 and 0 <= idx < 480, name
             lamp_nums.append(1000 + node * 100 + idx)
     assert len(lamp_nums) == len(set(lamp_nums)), "two lights on one LED number"
+    coils = []
     for num, s in gzmap["solenoids"].items():
         if num == "_":
             continue
         node, idx = s["coil"]
-        assert int(num) == 1000 + node * 16 + idx, num
+        assert 1 <= int(num) <= gzmap["solenoid_max"] <= 68, "core.vbs's SolCallback(68)"
         assert 0 <= idx < 16
+        coils.append((node, idx))
+    assert len(coils) == len(set(coils)), "one small number per coil"
+    assert {"46", "48", "36"} <= set(gzmap["solenoids"]), "core.vbs's flipper Consts"
+    assert 1 <= gzmap["game_on"]["number"] <= gzmap["solenoid_max"]
     ids = {int(v) for k, v in gzmap["switch_rewrite"].items() if k != "_"}
     ids |= {int(v) for k, v in gzmap["switch_by_object"].items() if k != "_"}
     ids |= set(gzmap["switch_holds"]["trough"])
     assert all(0 <= i <= 97 for i in ids), "godzilla_le has switch ids 1..97"
-    assert 1999 == gzmap["game_on"]["number"]
 
 
 def test_patcher_rewrites_a_miniature(gzmap):
@@ -184,6 +195,7 @@ def test_patcher_rewrites_a_miniature(gzmap):
         '\tTimer009.enabled=0',
         'end Sub',
         'Dim LampState(200), FadingLevel(200)',
+        'Dim FlashSpeedUp(200), FlashSpeedDown(200), FlashMin(200), FlashMax(200), FlashLevel(200)',
         'Sub UpdateLamps',
         ' NFadeL 1, l1',
         'End Sub',
@@ -191,6 +203,9 @@ def test_patcher_rewrites_a_miniature(gzmap):
         '\t\tbsTrough.Balls = 4',
         '\t\tbsTrough.InitExitSnd SoundFX("ballrelease",DOFContactors), SoundFX("Solenoid",DOFContactors)',
         '\t\tmTopMagnet.Solenoid = 3',
+        'Set mMagnaSave2 = New cvpmMagnet : With mMagnaSave2',
+        '\t.InitMagnet Magna2, 15',
+        'End With',
         'Sub Table1_KeyDown(ByVal KeyCode)',
         '\tIf KeyCode=PlungerKey Then Controller.Switch(53)=1',
         'End Sub',
@@ -199,7 +214,8 @@ def test_patcher_rewrites_a_miniature(gzmap):
     assert 'GetTextFile("PADSPIKE2.vbs")' in out and "SEGA.VBS" not in out
     assert 'cGameName="godzilla_le",UseSolenoids=2' in out
     assert out.count("PAD: Spike 2 coils") == 1
-    assert 'SolCallback(1129) = "SolRelease"' in out and "solTopMagnet" not in out
+    assert 'SolCallback(1) = "SolRelease"' in out and "solTopMagnet" not in out
+    assert 'SolCallback(sLLFlipper) = "SolLFlipper"' in out
     assert "PulseSw 15" not in out                       # the trough switches say it
     assert "pulseSw 1078" in out                         # sw17 -> PWRLINE LEFT TGT
     assert "Controller.Switch(0)=1" in out               # sw41: no Stern switch
@@ -214,6 +230,8 @@ def test_patcher_rewrites_a_miniature(gzmap):
     assert "mTopMagnet.Solenoid = 0" in out
     assert "NFadeL 1939, L1    ' TANKS" in out and " NFadeL 1, l1" not in out
     assert "Dim LampState(3000), FadingLevel(3000)" in out
-    assert "mMechaMagnet.Solenoid = 1151" in out
+    assert "FlashSpeedUp(3000), FlashSpeedDown(3000), FlashMin(3000), FlashMax(3000), FlashLevel(3000)" in out
+    assert "(200)" not in out
+    assert "mMechaMagnet.Solenoid = 6" in out and ".Solenoid = 5   ' GODZILLA MAGNET" in out
     assert out.count("End Sub") + out.count("end Sub") == \
         len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out)), "every Sub closes once"

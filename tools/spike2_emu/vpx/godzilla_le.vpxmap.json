@@ -3,14 +3,15 @@
     "godzilla_le on marty02's 'Godzilla Limited Edition' v2.6 (VPUniverse 8449):",
     "a Stern-layout playfield whose rules were Sega's 1998 ROM. This map is what",
     "patch_godzilla.py applies to its script, and what padcontroller.py serves.",
-    "Numbers: switch 1000+id (switch_list.txt), solenoid 1000+node*16+index,",
-    "lamp 1000+node*100+index (led_io.txt). Positions: VP units, 952 x 2362,",
+    "Numbers: switch 1000+id (switch_list.txt), lamp 1000+node*100+index (led_io.txt),",
+    "solenoid: the small number under `solenoids` (core.vbs's arrays stop at 68).",
+    "Positions: VP units, 952 x 2362,",
     "from the drawing's 313 x 710 by vp_x = 3.121*x - 18.9, vp_y = 3.474*y + 5.3."
   ],
   "title": "godzilla_le",
   "game_on": {
     "_": "a synthetic solenoid for core.vbs's GameOnSolenoid (UseSolenoids=2, fast flips): ON while the flipper coils' board rules are armed",
-    "number": 1999, "coils": [[8, 5], [8, 0]]
+    "number": 40, "coils": [[8, 5], [8, 0]]
   },
   "cabinet": {
     "start": 1036, "launch": 1034, "tilt": 1038, "slam": 1045,
@@ -43,22 +44,29 @@
     "shield_motor": {"coil": [9, 2], "open": 86, "closed": 87, "travel_ms": 400}
   },
 
+  "solenoid_max": 68,
   "solenoids": {
-    "_": "Spike 2 coil [node, index] -> what the table script does; the number is 1000+node*16+index",
-    "1128": {"coil": [8, 0], "name": "RIGHT FLIPPER", "callback": "SolRFlipper"},
-    "1129": {"coil": [8, 1], "name": "TROUGH", "callback": "SolRelease"},
-    "1130": {"coil": [8, 2], "name": "RIGHT SLINGSHOT", "callback": null},
-    "1131": {"coil": [8, 3], "name": "LEFT SLINGSHOT", "callback": null},
-    "1132": {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "Auto_Plunger"},
-    "1133": {"coil": [8, 5], "name": "LEFT FLIPPER", "callback": "SolLFlipper"},
-    "1134": {"coil": [8, 6], "name": "UP LEFT FLIP", "callback": "SolULFlipper"},
-    "1135": {"coil": [8, 7], "name": "POP BUMPER", "callback": null},
-    "1136": {"coil": [8, 8], "name": "RIGHT SCOOP", "callback": "bsScoop.ExitSol_On"},
-    "1145": {"coil": [9, 1], "name": "VUK", "callback": null},
-    "1146": {"coil": [9, 2], "name": "SHIELD MOTOR", "callback": null},
-    "1147": {"coil": [9, 3], "name": "BRIDGE", "callback": "SolRampDiverter"},
-    "1150": {"coil": [9, 6], "name": "GODZILLA MAGNET", "magnet": "mMagnaSave2"},
-    "1151": {"coil": [9, 7], "name": "MECHAGODZILLA MAGNET", "magnet": "mMechaMagnet"}
+    "_": [
+      "Spike 2 coil [node, index] -> the SMALL number the table script sees it as. core.vbs",
+      "indexes SolCallback(68), SolPrevState(68) and friends by solenoid number, so a coil",
+      "needs a number in 1..68 here; the flippers keep core.vbs's own Consts (sLRFlipper 46,",
+      "sLLFlipper 48, sULFlipper 36). The controller reports a coil under this number; its",
+      "1000+node*16+index name answers Controller.Solenoid(n) only."
+    ],
+    "1":  {"coil": [8, 1], "name": "TROUGH", "callback": "SolRelease"},
+    "2":  {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "Auto_Plunger"},
+    "3":  {"coil": [8, 8], "name": "RIGHT SCOOP", "callback": "bsScoop.ExitSol_On"},
+    "4":  {"coil": [9, 3], "name": "BRIDGE", "callback": "SolRampDiverter"},
+    "5":  {"coil": [9, 6], "name": "GODZILLA MAGNET", "magnet": "mMagnaSave2"},
+    "6":  {"coil": [9, 7], "name": "MECHAGODZILLA MAGNET", "magnet": "mMechaMagnet"},
+    "7":  {"coil": [9, 1], "name": "VUK", "callback": null},
+    "8":  {"coil": [9, 2], "name": "SHIELD MOTOR", "callback": null},
+    "9":  {"coil": [8, 7], "name": "POP BUMPER", "callback": null},
+    "10": {"coil": [8, 2], "name": "RIGHT SLINGSHOT", "callback": null},
+    "11": {"coil": [8, 3], "name": "LEFT SLINGSHOT", "callback": null},
+    "46": {"coil": [8, 0], "name": "RIGHT FLIPPER", "callback": "SolRFlipper"},
+    "48": {"coil": [8, 5], "name": "LEFT FLIPPER", "callback": "SolLFlipper"},
+    "36": {"coil": [8, 6], "name": "UP LEFT FLIP", "callback": "SolULFlipper"}
   },
 
   "lamps": {
@@ -166,7 +174,11 @@
 
   "retrofit_triggers": {
     "_": "mechs the table lacks: a Trigger cloned from `clone`, placed at [x, y]",
-    "MechaMagnet": {"clone": "BottomMagnet", "at": [792, 912], "use": "cvpmMagnet mMechaMagnet, solenoid 1151"}
+    "MechaMagnet": {"clone": "BottomMagnet", "at": [792, 912], "use": "cvpmMagnet mMechaMagnet, solenoid 6"}
+  },
+  "retrofit_timers": {
+    "_": "PadTestTimer feeds %TEMP%\\padvpx_keys.txt to the table's key handlers: scripted keys for a test run",
+    "PadTestTimer": {"clone": "Timer009", "interval_ms": 100}
   },
 
   "unmapped": {

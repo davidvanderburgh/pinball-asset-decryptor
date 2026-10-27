@@ -122,6 +122,10 @@ class VpxMap:
         self.lamp_groups = {}               # number -> [(node, index), ...]
         self.fakes = {}                     # name -> dict (switch_fakes)
         self.game_on = None                 # (number, [coils]) "flippers armed"
+        # core.vbs indexes SolCallback(68) and friends by the number it is
+        # handed, so ChangedSolenoids may only carry numbers up to this; a
+        # coil's 1000+ name still answers Controller.Solenoid(n).
+        self.sol_max = 68
         path = os.path.join(HERE, "%s.vpxmap.json" % title) if title else None
         if path and os.path.exists(path):
             self.load(path)
@@ -133,6 +137,7 @@ class VpxMap:
         for k, v in m.get("switch_rewrite", {}).items():
             if k != "_":
                 self.switch_rewrite[int(k)] = int(v)
+        self.sol_max = int(m.get("solenoid_max", 68))
         for k, v in m.get("solenoids", {}).items():
             if k != "_":
                 self.solenoids[int(k)] = tuple(v["coil"])
@@ -145,15 +150,17 @@ class VpxMap:
                 self.lamp_groups[lamp_number(*leds[0])] = leds
         self.fakes = {k: v for k, v in m.get("switch_fakes", {}).items() if k != "_"}
 
-    # -- resolution
+    # -- resolution. A VBScript Empty arrives as None: VPinMAME reads that as
+    # switch 0 and ignores it (core.vbs's classes hand one over for a slot
+    # they never configured), so this does the same rather than raise.
     def switch_id(self, n):
-        n = int(n)
+        n = int(n or 0)
         if n >= 1000:
             return n - 1000
         return self.switch_rewrite.get(n, 0)
 
     def coil(self, n):
-        n = int(n)
+        n = int(n or 0)
         if n in self.solenoids:
             return self.solenoids[n]
         if n >= 1000:
@@ -161,7 +168,7 @@ class VpxMap:
         return None
 
     def leds(self, n):
-        n = int(n)
+        n = int(n or 0)
         if n in self.lamp_groups:
             return self.lamp_groups[n]
         if n >= 1000:
@@ -431,15 +438,27 @@ class Bridge:
         log("stop after %d polls (%d failed)" % (self.polls, self.poll_fail))
 
     def set_pause(self, want):
-        want = bool(want)
-        if want != self.paused and self.pipe:
-            self.paused = want
+        """VPX pauses when its window loses focus and says so through
+        Controller.Pause, a LEVEL; the rig's pause is a TRUE freeze of the
+        game (PAD-204) that one `pause` line TOGGLES. So read the rig's own
+        `paused` flag (padsw) and toggle only when it differs from what VPX
+        wants: two Pause=True in a row must not un-freeze the game."""
+        want = 1 if want else 0
+        self.paused = bool(want)
+        if not self.pipe or not self.rig:
+            return
+        sw = read_block(self.rig.sw_path(), padsw.OFF_PAUSED + 4)
+        now = struct.unpack_from("<I", sw, padsw.OFF_PAUSED)[0] if sw and len(sw) > padsw.OFF_PAUSED else -1
+        log("pause -> %d (rig says %d)" % (want, now))
+        if now != want:
             self.pipe.pause()
 
     # -- switches
     def set_switch(self, n, level):
         sid = self.map.switch_id(n)
         if 0 < sid < padsw.MAX_ID and self.pipe:
+            if self.pipe.held.get(sid) != (1 if level else 0):
+                log("sw %s -> id %d = %d" % (n, sid, 1 if level else 0))
             self.pipe.set(sid, level)
 
     def get_switch(self, n):
@@ -538,7 +557,7 @@ class Bridge:
                             on = 1
                         elif self._coil_off_at.get(key, 0) <= now:
                             on = 0
-                self._sol_set(self._sol_num(key), on)
+                self._coil_set(key, on)
         if self.map.game_on:
             num, coils = self.map.game_on
             armed = 0
@@ -550,17 +569,29 @@ class Bridge:
         self._fakes_tick(now)
         self._fires = fires
 
-    def _sol_num(self, key):
+    def _sol_nums(self, key):
+        """Every number a coil is reported under: its 1000+ number and any
+        the map gives it (core.vbs's flipper Consts, a table's own number)."""
         node, idx = key
+        nums = [sol_number(node, idx)]
         for n, coil in self.map.solenoids.items():
-            if coil == key:
-                return n
-        return sol_number(node, idx)
+            if coil == key and n not in nums:
+                nums.append(n)
+        return nums
+
+    def _sol_num(self, key):
+        return self._sol_nums(key)[0]
 
     def _sol_set(self, n, on):
         if self.sol_state.get(n) != on:
             self.sol_state[n] = on
             self.sol_pending.add(n)
+            if n <= self.map.sol_max:
+                log("sol %d -> %d" % (n, on))
+
+    def _coil_set(self, key, on):
+        for n in self._sol_nums(key):
+            self._sol_set(n, on)
 
     def _fakes_tick(self, now):
         """A motor the table has no object for: when its coil fires, the end
@@ -590,17 +621,18 @@ class Bridge:
         with self.lock:
             if not self.sol_pending:
                 return None
-            out = [[n, self.sol_state[n]] for n in sorted(self.sol_pending)]
+            out = [[n, self.sol_state[n]] for n in sorted(self.sol_pending)
+                   if n <= self.map.sol_max]
             self.sol_pending.clear()
-        return out
+        return out or None
 
     def lamp(self, n):
         with self.lock:
-            return bool(self.lamp_state.get(int(n), 0))
+            return bool(self.lamp_state.get(int(n or 0), 0))
 
     def solenoid(self, n):
         with self.lock:
-            return bool(self.sol_state.get(int(n), 0))
+            return bool(self.sol_state.get(int(n or 0), 0))
 
     def status(self):
         return {"title": self.title, "running": self.running, "polls": self.polls,
@@ -645,12 +677,23 @@ class PadController:
         self.props = {}
         log("PAD.Controller created")
 
+    TRACE = os.path.exists(os.path.join(os.path.dirname(LOG), "padvpx_trace"))
+
     def _dynamic_(self, name, lcid, wFlags, args):
         b = self.bridge
         key = name.lower()
+        if self.TRACE and key not in ("changedlamps", "changedsolenoids", "lamp", "solenoid"):
+            log("call %s flags=%d args=%r" % (name, wFlags, tuple(args)))
         try:
             if wFlags & DISPATCH_PROPERTYPUT:
-                return self._put(key, args)
+                self._put(key, args)
+                # VBScript passes VARIABLES by reference: `Controller.Switch(sw) =
+                # True` hands `sw` over VT_BYREF, and a put that returns nothing
+                # writes Null back into it - the caller's `sw` is gone after the
+                # call (PADSPIKE2.vbs's swStartButton was, on the first real key).
+                # Returning the arguments is pywin32's way of handing byrefs back
+                # unchanged (a put has no return slot, so no leading None).
+                return tuple(args)
             return self._get(key, args)
         except Exception as exc:                            # noqa: BLE001
             log("%s%r failed: %s" % (name, tuple(args), exc))

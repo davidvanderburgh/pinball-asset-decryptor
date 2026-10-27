@@ -28,12 +28,15 @@ A Spike 2 machine has no Whitestar matrix, so a table script talks in one
 convention (PADSPIKE2.vbs has the constants):
 
     switch   1000 + <Spike 2 switch id>          switch_list.txt `id`
-    solenoid 1000 + <node> * 16 + <coil index>   device_xy.txt coil (group->node)
     lamp     1000 + <node> * 100 + <LED index>   led_io.txt
+    solenoid the SMALL number the title's map gives the coil (1..68)
 
-Numbers below 1000 go through the title's map (`switch_rewrite`,
-`solenoids`, `lamps`), so a table can run on its original numbering while
-its map is being built.
+Solenoids cannot be 1000+: core.vbs indexes `SolCallback(68)`,
+`SolPrevState(68)` and friends by the number, so a coil needs one in that
+range (`solenoids` in the map; the flippers keep core.vbs's own Consts
+`sLRFlipper` 46, `sLLFlipper` 48, `sULFlipper` 36). A switch or lamp number
+below 1000 goes through the map (`switch_rewrite`, `lamps`), so a table can
+run on its original numbering while its map is being built.
 
 ## Running a table
 
@@ -42,10 +45,49 @@ its map is being built.
    title the table names, or through `PAD_WSL_DISTRO` / `PAD_ROOT_WSL` /
    `PAD_SLOT` when VPX is started from a shell that has them.
 2. `python padcontroller.py --register` (once).
-3. Put `PADSPIKE2.vbs` beside the patched table and open it in VPX.
+3. Put `PADSPIKE2.vbs` beside the patched table and open it in VPX
+   (`VPinballX64.exe -Play "<table>.vpx"`).
 
 While a table is attached, `dump/ballfeed.off` tells the rig's `ballfeed.py`
 to leave the trough alone: the table's own `cvpmBallStack` owns the balls.
+Keys are VPX's usual ones: 1 Start, Enter launch, the Shift keys flip, Esc
+leaves. `%TEMP%\padcontroller.log` says what the controller did;
+`%TEMP%\padspike2.log` what the system script's load did.
+
+## Testing without hands
+
+Visual Pinball polls its keyboard itself, so a test cannot hand it a key from
+outside reliably. The patched table carries a `PadTestTimer` that reads
+`%TEMP%\padvpx_keys.txt` (one `down <code>` / `up <code>` per line, DirectInput
+codes) every 100 ms and feeds the table's own key handlers; `vpxkeys.py start
+launch lflip 400 rflip 400` writes those lines with the holds between them.
+A whole play test is then a script: `cscript test_controller.vbs run` for the
+controller alone, `vpxkeys.py` for the table in VPX, with the controller log
+and the guest's `[sw]` log as the record.
+
+The player window renders through DirectX and is not capturable by GDI,
+`PrintWindow` or Desktop Duplication from a tool on this machine; the proof
+picture of a run is the emulator's own LCD (`glshot.sh`) while VPX plays it.
+
+## What Visual Pinball itself turned up (2026-10-27)
+
+* **Every GameItem must close.** A light's shape is a run of DPNT drag points
+  each with its own ENDB; a cloner that stops at the first ENDB writes a
+  truncated item and VPX sits in "Loading" for ever. `vpxfile.item_records`
+  walks the nesting.
+* **core.vbs must load AFTER the table's Consts** (from `LoadVPM`, as
+  controller.vbs + SEGA.VBS do): its load-time `IsEmpty(Eval("BallSize"))`
+  brings an undefined `BallSize` into being, and the table's own
+  `Const BallSize = 50` then dies of "Name redefined".
+* **`Dim`s that core.vbs owns** (`Controller`, `vpmShowDips`) are set in
+  `LoadVPM` after the load, never at the top of PADSPIKE2.vbs.
+* **The system script owns `vpmKeyDown` / `vpmKeyUp`**; core.vbs's
+  `KeyDownHandler` only calls them.
+* **A VBScript variable handed to an indexed property put comes back Null**
+  from a pywin32 server unless the put returns its arguments: `Controller.
+  Switch(sw) = True` emptied `sw`, so every switch held through a variable
+  died after its first use (the flipper stayed up, Start never released).
+  `PadController._dynamic_` returns `tuple(args)` for every put.
 
 ## What the machine does that a ROM would not
 

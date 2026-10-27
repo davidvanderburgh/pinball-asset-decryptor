@@ -27,6 +27,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -114,8 +115,10 @@ def patch_script(src, m):
             continue
         if in_update_lamps:
             continue
-        if "lampstate(200)" in low.replace(" ", ""):
-            out.append(line.replace("200", str(LAMP_ARRAY)))
+        if low.startswith("dim ") and "(200)" in low and ("lampstate" in low or "flash" in low):
+            # LampState/FadingLevel AND the five Flash* arrays beside them:
+            # InitLamps walks every one of them to the same bound
+            out.append(line.replace("(200)", "(%d)" % LAMP_ARRAY))
             continue
         if re.match(r"^for x = 0 to 200$", low):
             out.append(line.replace("200", str(LAMP_ARRAY)))
@@ -138,7 +141,7 @@ def patch_script(src, m):
             continue
         if low.startswith(".initmagnet magna2"):
             out.append(line)
-            out.append("\t.Solenoid = 1150   ' GODZILLA MAGNET, node 9 coil 6")
+            out.append("\t.Solenoid = %d   ' GODZILLA MAGNET, node 9 coil 6" % sol_for_magnet(m, "mMagnaSave2"))
             continue
         if cur_sub and cur_sub.lower() == "tr12_hit" and ("magnet" in low) and not low.startswith("playsound"):
             continue                       # the Sega game's own magnet timer
@@ -200,13 +203,37 @@ def patch_script(src, m):
             out.append("")
             out.append("\tSet mMechaMagnet = New cvpmMagnet")
             out.append("\t\tmMechaMagnet.InitMagnet MechaMagnet, 60")
-            out.append("\t\tmMechaMagnet.Solenoid = 1151            ' MECHAGODZILLA MAGNET, node 9 coil 7")
+            out.append("\t\tmMechaMagnet.Solenoid = %d            ' MECHAGODZILLA MAGNET, node 9 coil 7"
+                       % sol_for_magnet(m, "mMechaMagnet"))
             out.append("\t\tmMechaMagnet.GrabCenter = True")
             out.append("\t\tmMechaMagnet.CreateEvents \"mMechaMagnet\"")
 
     text = "\n".join(out)
     text += "\n".join([
         "", "",
+        "'---- PAD: scripted keys for a test run. Visual Pinball polls its keyboard",
+        "'---- itself, so a test cannot hand it a key from outside; this timer reads",
+        "'---- %TEMP%\\padvpx_keys.txt (one `down <code>` / `up <code>` per line,",
+        "'---- DirectInput codes: 2 = Start, 42 = left flipper, 54 = right, 28 = launch)",
+        "'---- and feeds the table's own key handlers, then deletes the file.",
+        "Sub PadTestTimer_Timer",
+        "\tOn Error Resume Next",
+        "\tDim fso, p, f, parts",
+        "\tSet fso = CreateObject(\"Scripting.FileSystemObject\")",
+        "\tp = fso.GetSpecialFolder(2) & \"\\padvpx_keys.txt\"",
+        "\tIf Not fso.FileExists(p) Then Exit Sub",
+        "\tSet f = fso.OpenTextFile(p, 1)",
+        "\tDo While Not f.AtEndOfStream",
+        "\t\tparts = Split(Trim(f.ReadLine), \" \")",
+        "\t\tIf UBound(parts) = 1 Then",
+        "\t\t\tIf parts(0) = \"down\" Then Table1_KeyDown CInt(parts(1))",
+        "\t\t\tIf parts(0) = \"up\" Then Table1_KeyUp CInt(parts(1))",
+        "\t\tEnd If",
+        "\tLoop",
+        "\tf.Close",
+        "\tfso.DeleteFile p",
+        "End Sub",
+        "",
         "'---- PAD: edges the Sega script never sent ----",
         "Sub Gate4_Hit : vpmTimer.PulseSw 1051 : End Sub          ' MECHA EXIT BOTTOM",
         "Sub SolULFlipper(Enabled)",
@@ -221,8 +248,15 @@ def patch_script(src, m):
     return text, rep
 
 
+def sol_for_magnet(m, magnet):
+    for num, s in m["solenoids"].items():
+        if num != "_" and s.get("magnet") == magnet:
+            return int(num)
+    raise KeyError(magnet)
+
+
 def gen_sol_callbacks(m):
-    out = ["'---- PAD: Spike 2 coils (1000 + node * 16 + index), see godzilla_le.vpxmap.json"]
+    out = ["'---- PAD: Spike 2 coils, numbered as godzilla_le.vpxmap.json `solenoids` says"]
     for num, s in m["solenoids"].items():
         if num == "_" or not s.get("callback"):
             continue
@@ -267,6 +301,14 @@ def retrofit_items(table, m):
         kind, src = by_name[v["clone"]]
         assert kind == "Trigger", v["clone"]
         items.append(vpxfile.clone_item(src, name, *v["at"]))
+    for name, v in m.get("retrofit_timers", {}).items():
+        if name == "_":
+            continue
+        kind, src = by_name[v["clone"]]
+        assert kind == "Timer", v["clone"]
+        item = vpxfile.clone_item(src, name, 0, 0)
+        items.append(vpxfile.set_fields(item, {"TMON": struct.pack("<i", 1),
+                                               "TMIN": struct.pack("<i", int(v["interval_ms"]))}))
     return items
 
 

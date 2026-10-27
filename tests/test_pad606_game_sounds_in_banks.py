@@ -226,10 +226,12 @@ def test_plan_sound_banks_moves_the_users_longer_game_sounds_into_a_bank(monkeyp
     assert plan is None and e3 == audio_edits and g3 == grows
 
 
-def test_a_game_sound_too_long_for_a_bank_beside_image_bin_stays_in_it(monkeypatch, tmp_path):
+def test_a_game_sound_too_long_for_a_slice_gets_a_bank_of_its_own(monkeypatch, tmp_path):
     """Every bank with a sound playing stays mapped beside image.bin (Godzilla LE 1.16:
     0x43cdcc takes a reference at a sound's start, 0x43c254 drops it, 0x3b57d8 unmaps only
-    the idle ones), so a bank is cut at an eighth of what image.bin leaves."""
+    the idle ones), so a bank is cut at an eighth of what image.bin leaves; a game sound
+    longer than that gets a bank to itself as a mode's song does (PAD-777), and only one
+    too long for even that stays in image.bin."""
     img = _image(tmp_path)
     params = [{"idx": i, "chan": 2, "length": 100, "findkey": bytes([i]) * 8} for i in (1, 2)]
     grows = {1: (100, 4_000_000), 2: (100, 1000)}          # a 16 MB body and a small one
@@ -238,13 +240,52 @@ def test_a_game_sound_too_long_for_a_bank_beside_image_bin_stays_in_it(monkeypat
     monkeypatch.setattr(SB, "MAPPED_MAX", 8 * 10_000_000)  # 10 MB a bank
     monkeypatch.setattr(E, "_read_stock_directory",
                         lambda gr, im: MD.Directory(b"".join(_rec(i) for i in range(3)), 3, 0x9000, 0))
-    lines = []
-    plan, edits2, grows2 = E._plan_sound_banks(
-        "game", str(img), params, audio_edits, grows, dict(grows), [], _Reader(), None, None,
-        lambda m, *a: lines.append(m), game_sids={1: 501, 2: 502})
-    assert plan.game == {2: 502} and sorted(grows2) == [1] and sorted(edits2) == [1]
+
+    def plan():
+        lines = []
+        got = E._plan_sound_banks(
+            "game", str(img), params, audio_edits, grows, dict(grows), [], _Reader(), None,
+            None, lambda m, *a: lines.append(m), game_sids={1: 501, 2: 502})
+        return got, lines
+
+    (p, edits2, grows2), lines = plan()
+    assert p.game == {1: 501, 2: 502} and grows2 == {} and edits2 == {}
+    assert sorted(len(g) for _c, g in p.banks) == [1, 1]
+    assert any("get a bank of their own" in m for m in lines)
+    # past the biggest bank Stern ships it stays in image.bin
+    monkeypatch.setattr(SB, "BANK_MAX_SEEN", 12_000_000)
+    (p, edits2, grows2), lines = plan()
+    assert p.game == {2: 502} and sorted(grows2) == [1] and sorted(edits2) == [1]
     assert any("idx 1 stays in image.bin rather than a sound bank: at 16.0 MB" in m
                for m in lines)
+
+
+def test_longer_game_songs_leave_a_music_mode_file_room(monkeypatch, tmp_path):
+    """PAD-777: game songs a little past a slice used to stay in image.bin, which grew it,
+    which shrank the slice so more stayed, until a music mode's file had 0 MB (Iron Maiden
+    LE 1.18: image.bin 2,428 MB).  They go into banks of their own, image.bin keeps its
+    size and the file gets its bank."""
+    img = _image(tmp_path)
+    mb = 1_000_000
+    frames = lambda n: (n * mb - 4096) // 4 - 2000          # a stereo body of about n MB
+    # 100 MB of memory, 10 MB slices: six game songs from 10.5 to 13 MB, a 30 MB mode song
+    grows = {i: (100, frames(10 + i / 2.0)) for i in range(1, 7)}
+    grows[8] = (100, frames(30))
+    params = [{"idx": i, "chan": 2, "length": 100, "findkey": bytes([i]) * 8} for i in grows]
+    used = [{"idx": 8, "music": True, "sid": 618, "key": "music", "name": "SONG"}]
+    monkeypatch.setenv(BB.BANK_CAP_ENV, "1000")
+    monkeypatch.setattr(SB, "MAPPED_MAX", 160 * mb)
+    monkeypatch.setattr(SB, "BANK_SLICE", 10 * mb)
+    monkeypatch.setattr(E, "_read_stock_directory",
+                        lambda gr, im: MD.Directory(b"".join(_rec(i) for i in range(9)), 9, 0x9000, 0))
+    lines = []
+    p, edits2, grows2 = E._plan_sound_banks(
+        "game", str(img), params, {i: "s.wav" for i in grows}, grows, {}, used, _Reader(),
+        None, None, lambda m, *a: lines.append(m), game_sids={i: 500 + i for i in range(1, 7)})
+    assert grows2 == {} and edits2 == {}
+    assert sorted(p.game) == [1, 2, 3, 4, 5, 6]
+    assert sorted(e.idx for _c, g in p.banks for e in g) == [1, 2, 3, 4, 5, 6, 8]
+    assert not any("stays in image.bin" in m for m in lines)
 
 
 def test_build_sound_banks_plays_a_game_sound_by_its_own_descriptor_and_maps_its_sid(

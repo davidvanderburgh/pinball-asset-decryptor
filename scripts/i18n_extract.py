@@ -482,6 +482,7 @@ US_TO_GB = {
     "analyze": "analyse", "analyzed": "analysed", "analyzes": "analyses", "analyzing": "analysing",
     "catalog": "catalogue", "catalogs": "catalogues",
     "defense": "defence", "offense": "offence", "judgment": "judgement",
+    "honor": "honour", "honors": "honours", "honored": "honoured",
 }
 #: -ize words: the British form ends -ise ("recognize" -> "recognise")
 IZE_STEMS = ("recogniz organiz realiz normaliz summariz prioritiz customiz finaliz initializ "

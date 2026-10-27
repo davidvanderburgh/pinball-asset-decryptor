@@ -767,4 +767,90 @@ export function ShellxOverlays() {
     </div></div>` : null}`;
 }
 
+// ------------------------------------------------------- Animal shelters
+// PAD-754: the paw chip's window.  The app takes no money; people report
+// what they gave to an animal shelter near them and the total everyone sees
+// grows (webui/shellx_donations.py, core/donations.py).  `auto` is the
+// once-only opening after a user's first card write.  Where the shelter is
+// (country, state or province, both optional) feeds the Top places board.
+function DonationsDialog({ close, auto = false }) {
+  const sx = useNs("shellx");
+  const d = sx.donations || {};
+  const [uid, onClose] = useWin(close);
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState(d.currency || "USD");
+  const [shelter, setShelter] = useState("");
+  const [country, setCountry] = useState(d.country || "");
+  const [region, setRegion] = useState(d.region || "");
+  const [name, setName] = useState(d.name || "");
+  const [showName, setShowName] = useState(true);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [added, setAdded] = useState(false);
+  useEffect(() => { call("shellx.donations_open", auto); }, []);
+  const submit = async () => {
+    setErr(null);
+    if (!String(amount).trim()) { setErr("Enter the amount you gave."); return; }
+    setBusy(true);
+    const r = await call("shellx.donations_submit", amount, currency, shelter, name, showName, country, region);
+    setBusy(false);
+    if (!r) return;                       // the toast said what was wrong
+    setAdded(true); setAmount(""); setShelter("");
+  };
+  const recent = d.recent || [];
+  const places = d.places || [];
+  const top = places.length ? places[0].usd : 0;
+  return html`<${Modal} title="Animal shelters" icon="paw" wide onClose=${onClose} cls=${"sx-don " + uid}
+    footer=${html`<span class="grow small dim wrap">${d.offline ? "The total can't be reached right now; this is the last it answered." : ""}</span>
+      <${Button} onClick=${() => call("shellx.donations_refresh")}>Refresh<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
+    <p class="sx-p">${auto ? "Your card is written. " : ""}This app doesn't take donations. If it saved you money or time, give some of it to an animal shelter near you, then tell us here so it counts toward the total.</p>
+    <div class="sx-don-grid">
+      <div class="stack" style="gap:6px">
+        <div class="row" style="align-items:baseline;gap:8px">
+          <span class="sx-don-total mono notr">${d.total_text || "—"}</span>
+          ${d.known ? html`<span class="small muted">raised by PAD users, <span class="notr">${d.count_text}</span></span>`
+            : html`<span class="small muted">No total yet.</span>`}
+        </div>
+        <div class="sx-bar sx-don-bar" role="progressbar" aria-valuenow=${d.pct || 0} aria-valuemin="0" aria-valuemax="100"><i style=${"width:" + (d.pct || 0) + "%"}></i></div>
+        <div class="row small muted" style="justify-content:space-between">
+          <span class="notr">${d.reached_text || ""}</span>
+          ${d.next_text ? html`<span>next: <span class="mono notr">${d.next_text}</span></span>` : null}
+        </div>
+        <span class="small muted" style="margin-top:8px">Recent</span>
+        <table class="sx-don-list"><tbody>
+          ${recent.length ? recent.map((r) => html`<tr><td class="notr ellip">${r.name}</td><td class="muted notr ellip" title=${r.where ? r.shelter + " (" + r.where + ")" : r.shelter}>${r.shelter}${r.where ? html` <span class="dim">· ${r.where}</span>` : null}</td><td class="mono notr">${r.amount}</td></tr>`)
+            : html`<tr><td class="muted" colspan="3">${d.known ? "Nothing reported yet. Be the first." : "—"}</td></tr>`}
+        </tbody></table>
+        ${places.length ? html`<span class="small muted" style="margin-top:8px">Top places</span>
+          <div class="sx-don-places">
+            ${places.map((p, i) => html`<div class="sx-don-place">
+              <span class="mono dim">${i + 1}</span>
+              <span class="notr ellip" title=${p.where}>${p.where}</span>
+              <div class="sx-bar"><i style=${"width:" + (top ? Math.max(4, Math.round(100 * p.usd / top)) : 0) + "%"}></i></div>
+              <span class="mono notr">${p.amount}</span>
+            </div>`)}
+          </div>` : null}
+        ${d.pending ? html`<span class="small warn-ink">${d.pending} of yours waiting to be sent.</span>` : null}
+      </div>
+      <div class="card sx-don-form stack" style="gap:8px">
+        <span class="h2">I donated</span>
+        <div class="row" style="gap:6px">
+          <${Select} value=${currency} options=${d.currencies || ["USD"]} onChange=${setCurrency} width=${84} />
+          <${Field} value=${amount} onChange=${setAmount} placeholder="25" mono width=${96} autoFocus bad=${!!err} />
+        </div>
+        <${Field} value=${shelter} onChange=${setShelter} placeholder="Shelter (optional)" maxLength=${80} />
+        <${Select} value=${country} options=${d.countries || [{ value: "", label: "Country (optional)" }]} onChange=${setCountry} cls="sx-don-country" />
+        <${Field} value=${region} onChange=${setRegion} placeholder="State or province (optional)" maxLength=${40} disabled=${!country} />
+        <${Field} value=${name} onChange=${setName} placeholder="Your name (optional)" maxLength=${40} />
+        <${Check} checked=${showName} onChange=${setShowName} label="Show my name in the list" />
+        ${err ? html`<span class="small err-ink">${err}</span>` : null}
+        <${Button} kind="primary" onClick=${submit} disabled=${busy}>Add to the total<//>
+        ${added ? html`<span class="small ok-ink">Thank you.</span>` : null}
+        <span class="small muted wrap">Honor system. Nothing else about you is sent.</span>
+      </div>
+    </div>
+  <//>`;
+}
+registerDialog("donations", DonationsDialog);
+
 export { TipsPanel };

@@ -486,6 +486,8 @@ class App:
             on_flash_choices_change=self._on_flash_choices_change,
             initial_flashed_images=s.get("flashed_images", []),
             on_flashed_images_change=self._on_flashed_images_change,
+            initial_donations=s.get("donations") or {},
+            on_donations_change=self._on_donations_change,
             on_ui_zoom_change=self._on_ui_zoom_change,
             initial_language=s.get("ui_language"),
             on_language_change=self._on_language_change,
@@ -4991,6 +4993,13 @@ class App:
                       else self._current_mfr.write_phases)
             if phases:
                 self.window.set_phase(len(phases), mode=self._active_mode)
+        # PAD-754: the first card written on this install opens the Animal
+        # shelters window once - the moment the app has just paid off is
+        # the one time to ask people to give some of that to a shelter.
+        if success and self._active_mode == "write":
+            note = getattr(self.window, "note_card_written", None)
+            if note is not None:
+                note()
         # Empirical FDA proof: if a Direct-SSD run just completed
         # successfully on macOS, Full Disk Access must be in order
         # for every helper involved.  Auto-dismiss the banner so the
@@ -6432,6 +6441,13 @@ class App:
         after a restart too - an hour-long flash is usually the last thing
         done before the app is closed."""
         self._settings["flashed_images"] = digests
+        self._save_settings()
+
+    def _on_donations_change(self, blob):
+        """Persist the Animal shelters window's memory (PAD-754): that its
+        once-only prompt has been shown, and the currency and name the form
+        last used."""
+        self._settings["donations"] = dict(blob or {})
         self._save_settings()
 
     def _on_default_presets_change(self, blob):

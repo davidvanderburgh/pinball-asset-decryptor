@@ -388,6 +388,8 @@ function TopBar({ shell }) {
     ${upd && upd.available ? html`<${Chip} kind="info" dot onClick=${() => call("ui.settings_action", "install_update")}
         title=${"Pinball Asset Decryptor v" + upd.version + " is available — you're on v" + (shell.version || "") + "."}>${upd.label || ("v" + upd.version + " available")}<//>`
       : html`<span class="hide-narrow"><${Chip} kind="ok" dot title=${sx.update_state === "latest" ? "You're on the latest version." : "This version"}>v${shell.version || ""}${sx.update_state === "latest" ? ", latest" : ""}<//></span>`}
+    ${sx.donations ? html`<${Chip} kind="acc" title=${sx.donations.tip} onClick=${() => openDialog("donations")}><${Icon} name="paw" />
+        ${sx.donations.known ? html`<span class="mono notr">${sx.donations.total_text}</span> to shelters` : "Animal shelters"}<//>` : null}
     <${LangBtn} shell=${shell} />
     ${working ? html`<${IconBtn} icon="help" label="Tips for this tab" cls="sx-help" onClick=${() => openDialog("tips")} />` : null}
     <span class="sx-gear">

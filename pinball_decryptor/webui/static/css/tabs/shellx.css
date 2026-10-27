@@ -132,6 +132,10 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 @keyframes sx-slide { 0% { left: -30%; } 100% { left: 100%; } }
 
 /* ------------------------------- PAD-754: the Animal shelters window */
+/* the top bar's Donate button */
+.sx-don-btn { gap: 7px; color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); font-weight: 600; }
+.sx-don-btn svg { width: 19px; height: 19px; flex: 0 0 19px; }
+.sx-don-btn-sum { color: var(--ink-2); font-weight: 500; }
 .topbar .chip svg { width: 14px; height: 14px; }
 /* nearly the whole screen (David): four columns, the thermometer, the
    total and the list, the places and the map, the form */
@@ -170,21 +174,26 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-don-reel .strip.go { transition: transform 1.4s cubic-bezier(.15, .85, .25, 1.06); }
 .sx-don-paw { position: absolute; right: -10px; top: -16px; color: var(--accent); opacity: .14; pointer-events: none; }
 .sx-don-paw svg { width: 96px; height: 96px; }
-/* the milestones: a stepper, so they never read as amounts to give */
-.sx-don-steps { display: flex; align-items: flex-start; padding: 2px 0; }
-.sx-don-step-m { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; text-align: center; }
-.sx-don-step-m .ln { position: absolute; top: 10px; right: 50%; width: 100%; height: 2px; background: var(--line-2); }
+/* the milestones: a track with a node per milestone, so they never read as
+   amounts to give.  (Its own class names: the app's .dot is a chip's 6px
+   status dot.) */
+.sx-don-steps { display: flex; align-items: flex-start; padding: 6px 0 2px; }
+.sx-don-step-m { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12.5px; text-align: center; }
+.sx-don-step-m .ln { position: absolute; top: 13px; right: 50%; width: 100%; height: 4px; border-radius: 2px; background: var(--line-2); }
 .sx-don-step-m.reached .ln { background: var(--ok); }
 .sx-don-step-m.next .ln { background: linear-gradient(90deg, var(--ok), var(--accent)); }
-.sx-don-step-m .dot { position: relative; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--panel); color: var(--ink-3); display: flex; align-items: center; justify-content: center; }
-.sx-don-step-m .dot svg { width: 12px; height: 12px; }
-.sx-don-step-m.reached .dot { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); }
-.sx-don-step-m.next .dot { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); animation: sx-don-pulse 2.4s ease-in-out infinite; }
-.sx-don-step-m .lbl { font-weight: 600; color: var(--ink); }
+.sx-don-dot { position: relative; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--panel); color: var(--ink-3); display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+.sx-don-dot svg { width: 15px; height: 15px; }
+.sx-don-dot b { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.sx-don-step-m.reached .sx-don-dot { border-color: var(--ok); background: var(--ok); color: var(--accent-ink); }
+.sx-don-step-m.next .sx-don-dot { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); animation: sx-don-pulse 2.4s ease-in-out infinite; }
+.sx-don-step-m .lbl { font-weight: 700; color: var(--ink); font-size: 14px; margin-top: 2px; }
 .sx-don-step-m.next .lbl { color: var(--accent); }
 .sx-don-step-m.ahead .lbl { color: var(--ink-3); font-weight: 500; }
 .sx-don-step-m .sub { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
-@keyframes sx-don-pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); } 50% { box-shadow: 0 0 0 5px var(--accent-soft); } }
+.sx-don-step-m.reached .sub { color: var(--ok); }
+.sx-don-step-m.next .sub { color: var(--accent); font-weight: 600; }
+@keyframes sx-don-pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); } 50% { box-shadow: 0 0 0 7px var(--accent-soft); } }
 /* no money changes hands: the notice at the top */
 .sx-don-nomoney { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--info); background: var(--info-soft); color: var(--ink); font-size: 13px; line-height: 1.45; }
 .sx-don-nomoney svg { color: var(--info); flex: 0 0 18px; width: 18px; height: 18px; margin-top: 1px; }

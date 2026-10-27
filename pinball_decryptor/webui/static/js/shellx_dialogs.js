@@ -1041,7 +1041,7 @@ function DonationsDialog({ close, auto = false }) {
       </div>
     <//>`;
   }
-  return html`<${Modal} title="Animal shelters" icon="paw" wide onClose=${onClose} cls=${"sx-don " + uid}
+  return html`<${Modal} title="Donate to an animal shelter" icon="paw" wide onClose=${onClose} cls=${"sx-don " + uid}
     footer=${html`<${Button} kind="ghost" onClick=${() => loadHistory(0)} disabled=${!d.known}>All donations<//>
       <span class="grow small dim wrap">${d.offline ? "The total can't be reached right now; this is the last it answered." : ""}</span>
       <${Button} onClick=${() => call("shellx.donations_refresh")}>Refresh<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
@@ -1071,7 +1071,7 @@ function DonationsDialog({ close, auto = false }) {
         <div class="sx-don-steps" role="list" aria-label="Milestones">
           ${(d.ladder || []).map((c, i) => html`<div class=${"sx-don-step-m " + c.state} role="listitem">
             ${i ? html`<i class="ln"></i>` : null}
-            <span class="dot">${c.state === "reached" ? html`<${Icon} name="check" />` : c.state === "next" ? html`<${Icon} name="paw" />` : null}</span>
+            <span class="sx-don-dot">${c.state === "reached" ? html`<${Icon} name="check" />` : c.state === "next" ? html`<${Icon} name="paw" />` : html`<b></b>`}</span>
             <span class="lbl mono notr">${c.text}</span>
             <span class="sub">${c.state === "reached" ? (c.date ? html`reached <span class="notr">${c.date}</span>` : "reached") : c.state === "next" ? "next up" : "later"}</span>
           </div>`)}

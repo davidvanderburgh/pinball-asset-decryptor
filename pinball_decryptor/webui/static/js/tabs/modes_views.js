@@ -102,7 +102,7 @@ export function countBlocks(sc) {
 // The block's family, as the Blocks tab colors it: modes_blocks.js STMT_CLASS (a test keeps the two the same)
 export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode",
   add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", drain_to_one: "mode", game_wizard: "mode", score: "score", set: "var", change: "var",
-  if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show",
+  if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show",
   log: "show", clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech" };
@@ -193,6 +193,7 @@ export function stmtWords(b, ch = {}) {
     case "words": return withValue(`Show ${quote(b.text)}`, b.value);
     case "light_shot": return b.pattern === "off" ? `Hold ${lightName(b)} dark`
       : `Light ${lightName(b)} ${colorWord(b.color)}, ${PATTERN_WORDS[b.pattern] || b.pattern || ""}`;
+    case "gi": return b.gi === "game" ? "Turn the GI back to the game's" : "Turn the GI dark until the mode ends";   // PAD-767
     case "lights_off": return `Hand back the lights of ${lightName(b)}`;
     case "show": {
       if (b.show === "own") return `Run its own light show (${(b.steps || []).length} steps)`;
@@ -317,7 +318,7 @@ export const LANES = [["clock", "Mode and clock"], ["lights", "Lights"], ["shows
   ["screen", "Screen and HUD"], ["score", "Score and variables"], ["other", "Mechanisms and the rest"]];
 const LANE_OF = { start_mode: "clock", end_mode: "clock", add_time: "clock", set_time: "clock", timer_start: "clock",
   timer_stop: "clock", multiball: "clock", ball_save: "clock", drain_to_one: "clock", game_wizard: "clock", light_mode: "lights", unlight_mode: "lights",
-  light_shot: "lights", lights_off: "lights", show: "shows", game_show: "shows", callout: "sound", sound: "sound",
+  light_shot: "lights", lights_off: "lights", gi: "lights", show: "shows", game_show: "shows", callout: "sound", sound: "sound",
   words: "screen", clip: "screen", hud_text: "screen", hud_counter: "screen", hud_gauge: "screen", hud_award: "screen", hud_progress: "screen", roster_progress: "screen",
   score: "score", set: "score", change: "score", set_hits: "score" };
 export const laneOf = (op) => LANE_OF[op] || "other";

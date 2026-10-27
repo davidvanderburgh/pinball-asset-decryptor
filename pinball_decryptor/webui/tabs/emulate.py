@@ -203,6 +203,9 @@ class EmulateTab(TabService):
         self._proc = None
         self._copying = None
         self._copying_pct = None
+        # what the ⓘ says while _copying shows: the card copy's words, or
+        # the Mac container build's (PAD-769)
+        self._copying_tip = rig._COPY_EXPLAIN
         self._preparing = None
         self._preparing_pct = None
         self._preparing_kind = None
@@ -2980,13 +2983,25 @@ class EmulateTab(TabService):
             # cadence (10 s) - an enabled Start there was a second launcher.
             self._post(lambda: (self._run_label(False, True),
                                 self._poll_soon()))
+            box = {}
             try:
                 for raw in self._proc.stdout:
                     line = raw.decode("utf-8", "replace").rstrip()
                     self._log("[emulate] " + line)
                     prog = rig.card_copy_progress(line)
-                    if prog is not None and not self._stopping:
+                    building = rig.box_build_line(line, box)
+                    if building is not None and prog is None:
+                        # PAD-769: the Mac's first Start builds a container,
+                        # and the label says so instead of "Not running"
+                        self._copying = None if self._stopping \
+                            else (building or None)
+                        self._copying_pct = None
+                        self._copying_tip = rig._BOX_EXPLAIN
+                        if self._copying:
+                            self._post(self._push_copy, self._copying, None)
+                    elif prog is not None and not self._stopping:
                         self._copying = prog
+                        self._copying_tip = rig._COPY_EXPLAIN
                         m = rig._CARD_COPY_RE.match(line)
                         self._copying_pct = int(m.group(4)) if m else None
                         self._post(self._push_copy, prog, self._copying_pct)
@@ -3514,7 +3529,7 @@ class EmulateTab(TabService):
 
     def _push_copy(self, text, pct):
         self._set("state", text)
-        self.set(state_tip=rig._COPY_EXPLAIN)
+        self.set(state_tip=self._copying_tip)
         self._footer("copy", pct, text)
 
     def _paint_footer(self, info=None):
@@ -3565,7 +3580,7 @@ class EmulateTab(TabService):
         elif copying:
             label = self._copying
         self.set(state_tip=(self._preparing_explain() if preparing else
-                            (rig._COPY_EXPLAIN if copying else hint)) or "")
+                            (self._copying_tip if copying else hint)) or "")
         self._set("state", label)
         self._hint("")
         self._paint_footer(info)

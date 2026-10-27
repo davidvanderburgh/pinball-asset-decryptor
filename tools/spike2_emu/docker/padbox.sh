@@ -149,9 +149,60 @@ if [ -z "$IMAGE" ]; then
     IMAGE=pad-spike2-emu:c$DKSUM
 fi
 
+# THE BUILD IS WATCHED, NOT JUST RUN (PAD-769). A Mac user's first Start sat
+# on the "building" line for twenty minutes with the tab saying "Not running",
+# and nothing in the log could tell a slow download from a docker that had
+# stopped answering. So:
+#   - BUILDKIT_PROGRESS=plain: one line per step and per apt message, whatever
+#     docker decides about the pipe it is writing to. (An env var, not
+#     --progress, which a legacy builder would refuse.)
+#   - a "[box] still building" line every minute, which the Emulate tab turns
+#     into its state label - the run is not "Not running", it is building;
+#   - and a build that prints NOTHING for PAD_BOX_SILENT_S (10 min; the longest
+#     quiet step measured is the ~40 s image export) is stopped with a message
+#     that says where to look, instead of waiting for ever.
 build() {
     echo "[box] building $IMAGE (first time takes a few minutes)"
-    docker build -t "$IMAGE" "$SELF"
+    local beat pidf rc
+    beat=$(mktemp -t padbox-beat.XXXXXX) || beat=/tmp/padbox-beat.$$
+    pidf=$beat.pid
+    printf '%s' "$SECONDS" > "$beat"
+    # Short sleeps, so the watcher is gone within seconds of the build: a
+    # 60 s sleep left behind would hold the app's output pipe open that long.
+    (
+        start=$SECONDS; said=0; tick=${PAD_BOX_TICK_S:-60}
+        while sleep 2; do
+            last=""; read -r last < "$beat" 2>/dev/null
+            [ "$last" = done ] && exit 0
+            case "$last" in ''|*[!0-9]*) last=$SECONDS ;; esac
+            mins=$(( (SECONDS - start) / tick ))
+            [ "$mins" -gt "$said" ] || continue
+            said=$mins
+            echo "[box] still building the emulator container: $mins min so far"
+            if [ $(( SECONDS - last )) -ge "${PAD_BOX_SILENT_S:-600}" ]; then
+                echo "[box] docker has printed nothing for $(( (SECONDS - last) / 60 )) min, so the build is stopped." >&2
+                echo "[box] Open Docker Desktop: it may be waiting for you (an update, a sign-in, an agreement) or out of disk space. Then press Start again." >&2
+                read -r pid < "$pidf" 2>/dev/null && kill "$pid" 2>/dev/null
+                exit 0
+            fi
+        done
+    ) &
+    local watcher=$!
+    (
+        BUILDKIT_PROGRESS=plain docker build -t "$IMAGE" "$SELF" 2>&1 &
+        echo $! > "$pidf"
+        wait $!
+    ) | while IFS= read -r line; do
+        printf '%s\n' "$line"
+        printf '%s' "$SECONDS" > "$beat"
+    done
+    rc=${PIPESTATUS[0]}
+    printf done > "$beat"
+    kill "$watcher" 2>/dev/null
+    wait "$watcher" 2>/dev/null
+    rm -f "$beat" "$pidf"
+    [ "$rc" = 0 ] || echo "[box] the emulator container did not build (docker exit $rc); the lines above say why." >&2
+    return "$rc"
 }
 
 case "${1:-}" in

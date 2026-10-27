@@ -64,6 +64,20 @@ podium rises in, the button has a gloss sweep, and an entry landing is a
 jackpot (the band flashes, the lamps race, "+$30" floats, paw prints float
 off the button). `prefers-reduced-motion` stills all of it.
 
+## Every donation, and the map
+
+"All donations" in the window's footer pages through every live entry,
+newest first, a hundred at a time (`GET /v1/all?offset=`), with the date,
+who, the shelter and place, and the amount.
+
+The map (David, mid-ticket) is a pair of tile-grid maps, the squares-by-
+position kind, so no geographic asset ships: a world grid of the countries
+on the list and a United States grid of the fifty states and DC, each tile
+lit by what was given there (brighter is more) with a World / United States
+toggle. A typed state ("Texas", "TX", "new york") is matched to its tile by
+`core/donations.py` `state_code`; anything else stays on the country.
+"Somewhere else" entries are counted under the map.
+
 ## Guards
 
 Self-reported, and the window says so. An entry worth more than $299 is

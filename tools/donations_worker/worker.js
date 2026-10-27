@@ -7,6 +7,7 @@
 //
 // Routes
 //   GET    /v1/summary              the total, count, milestones, recent list
+//   GET    /v1/all?offset=0         every donation, newest first, 100 a page
 //   POST   /v1/donate               add one (header X-PAD-Key = APP_KEY)
 //   GET    /v1/admin/list           the last 200 rows with ids (X-PAD-Admin);
 //                                   held = 1 marks one waiting for review
@@ -44,7 +45,8 @@ const MAX_SHELTER = 80;
 const MAX_NAME = 40;
 const MAX_REGION = 40;
 const RECENT = 12;
-const PLACES = 10;                 // the Top places board
+const PLACES = 500;                // every place, for the board and the map
+const PAGE = 100;                  // /v1/all rows per page
 const PER_HOUR = 5;                // donations one address may add per hour
 
 const json = (body, status = 200, extra = {}) =>
@@ -133,6 +135,24 @@ function validate(body) {
     show_name: body.show_name ? 1 : 0,
     app_version: clean(body.app_version, 24),
   }, null];
+}
+
+// every live donation, newest first, a page at a time (the window's
+// All donations list)
+async function all(env, url) {
+  const offset = Math.max(0, parseInt(url.searchParams.get("offset") || "0", 10) || 0);
+  const limit = Math.min(PAGE * 2, Math.max(1, parseInt(url.searchParams.get("limit") || String(PAGE), 10) || PAGE));
+  const tot = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM donations WHERE removed = 0 AND held = 0").first();
+  const { results } = await env.DB.prepare(
+    "SELECT at, amount, currency, shelter, country, region, name, show_name " +
+    "FROM donations WHERE removed = 0 AND held = 0 ORDER BY at DESC, id DESC LIMIT ? OFFSET ?")
+    .bind(limit, offset).all();
+  const rows = results.map((r) => ({
+    at: r.at, amount: r.amount, currency: r.currency, shelter: r.shelter,
+    country: r.country, region: r.region, name: r.show_name ? r.name : "",
+  }));
+  return { ok: true, rows, total: tot.n, offset, limit };
 }
 
 async function donate(request, env) {
@@ -231,6 +251,9 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "");
     try {
+      if (request.method === "GET" && path === "/v1/all") {
+        return json(await all(env, url), 200, { "cache-control": "public, max-age=60" });
+      }
       if (request.method === "GET" && path === "/v1/summary") {
         return json(await summary(env), 200, { "cache-control": "public, max-age=60" });
       }

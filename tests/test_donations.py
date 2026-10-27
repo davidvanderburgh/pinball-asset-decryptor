@@ -60,6 +60,14 @@ class FakeWorker:
             def do_GET(self):
                 if self.path == "/v1/summary":
                     self._send(200, fake.summary())
+                elif self.path.startswith("/v1/all"):
+                    from urllib.parse import parse_qs, urlsplit
+                    q = parse_qs(urlsplit(self.path).query)
+                    off = int(q.get("offset", ["0"])[0])
+                    lim = int(q.get("limit", ["100"])[0])
+                    rows = list(reversed(fake.rows))
+                    self._send(200, {"ok": True, "rows": rows[off:off + lim],
+                                     "total": len(rows), "offset": off, "limit": lim})
                 else:
                     self._send(404, {"ok": False, "error": "Not found."})
 
@@ -170,6 +178,49 @@ def test_the_ladder_and_the_money_words():
     assert D.fmt_place("ZZ", "x") == ""
     assert D.fmt_date(0)                         # some day, never raises
     assert D.fmt_date("junk") == ""
+
+
+def test_states_are_matched_by_code_or_name():
+    assert D.state_code("Texas") == "TX"
+    assert D.state_code(" tx. ") == "TX"
+    assert D.state_code("new york") == "NY"
+    assert D.state_code("Washington, D.C.") == "DC"
+    assert D.state_code("Ontario") == ""
+    assert D.state_code("") == ""
+    assert len(D.US_STATES) == 51
+
+
+def test_the_map_lights_countries_states_and_elsewhere():
+    places = [{"country": "US", "region": "Texas", "usd": 1200, "count": 9},
+              {"country": "US", "region": "tx", "usd": 100, "count": 1},
+              {"country": "US", "region": "", "usd": 50, "count": 2},
+              {"country": "US", "region": "Mars", "usd": 5, "count": 1},
+              {"country": "GB", "region": "", "usd": 51, "count": 1},
+              {"country": "XX", "region": "Orbit", "usd": 9, "count": 1},
+              {"country": "ZZ", "region": "", "usd": 999, "count": 1},
+              "junk"]
+    m = D.map_data(places)
+    assert [(w["code"], w["usd"], w["count"], w["amount"]) for w in m["world"]] == [
+        ("US", 1355, 13, "$1,355"), ("GB", 51, 1, "$51")]
+    assert m["world"][0]["label"] == "United States"
+    assert [(s["code"], s["label"], s["usd"], s["count"]) for s in m["us"]] == [
+        ("TX", "Texas", 1300, 10)]
+    assert m["elsewhere"] == {"usd": 9, "count": 1, "amount": "$9"}
+    assert D.map_data([])["elsewhere"] is None
+    assert D.view(None)["map"] == {"world": [], "us": [], "elsewhere": None}
+
+
+def test_history_rows_read_like_the_list():
+    rows = D.history_rows([
+        {"at": 1725000000, "amount": 40, "currency": "GBP", "shelter": "Dogs Trust",
+         "country": "GB", "region": "", "name": "pinhead77"},
+        {"at": "junk", "amount": 5, "currency": "USD", "name": ""},
+        "junk"])
+    assert rows[0]["date"] == D.fmt_date_full(1725000000)
+    assert rows[0]["date"].endswith(", 2024")
+    assert (rows[0]["name"], rows[0]["where"], rows[0]["amount"]) == ("pinhead77", "United Kingdom", "£40")
+    assert (rows[1]["date"], rows[1]["name"], rows[1]["where"]) == ("", "Anonymous", "")
+    assert len(rows) == 2
 
 
 def test_the_view_before_any_total():
@@ -292,6 +343,17 @@ def test_own_entries_are_listed_newest_first_with_the_pending_ones_on_top():
     assert rows[0]["entry"]["shelter"] == "later"
     assert set(rows[1]["entry"]) == {"amount", "currency", "shelter", "country",
                                       "region", "name", "show_name"}
+
+
+def test_every_donation_can_be_paged(worker):
+    for i in range(5):
+        D.submit(worker.url, "k", D.validate_entry(str(10 + i), name="n%d" % i))
+    page = D.fetch_all(worker.url, 0, 2)
+    assert page["total"] == 5 and [r["amount"] for r in page["rows"]] == [14, 13]
+    page = D.fetch_all(worker.url, 4, 2)
+    assert [r["amount"] for r in page["rows"]] == [10]
+    with pytest.raises(D.DonationsError, match="configured"):
+        D.fetch_all("")
 
 
 def test_the_wire_tells_a_refusal_from_a_dead_line(worker):
@@ -434,6 +496,23 @@ def test_a_sent_entry_is_yours_and_can_be_taken_back(app_with_worker, tmp_path):
     w.drain()
     assert w.state("shellx")["donations"]["pending"] == 0
     assert D.load_cache(path)["pending"] == []
+
+
+def test_the_window_pages_through_every_donation(app_with_worker):
+    w, worker = app_with_worker
+    assert until(w, lambda: w.state("shellx")["donations"]["known"])
+    for i in range(3):
+        D.submit(worker.url, "k", D.validate_entry(str(10 + i), name="n%d" % i,
+                                                   country="US", region="Ohio"))
+    page = w.call("shellx.donations_history", 0)
+    assert page["total"] == 3 and page["next"] is None
+    assert [r["amount"] for r in page["rows"]] == ["$12", "$11", "$10"]
+    assert page["rows"][0]["where"] == "Ohio, US" and page["rows"][0]["date"]
+    url = worker.url
+    worker.stop()
+    from pinball_decryptor.webui.rpc import RpcError
+    with pytest.raises(RpcError, match="Couldn't reach the list"):
+        w.call("shellx.donations_history", 0)
 
 
 def test_a_refused_entry_is_not_kept(app_with_worker):

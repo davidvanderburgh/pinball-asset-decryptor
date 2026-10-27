@@ -45,6 +45,7 @@ once it can).
 | | |
 |---|---|
 | `GET /v1/summary` | total in USD, count, the milestones passed and when, the last twelve |
+| `GET /v1/all?offset=0&limit=100` | every live donation, newest first, a page at a time |
 | `POST /v1/donate` | header `X-PAD-Key`; JSON `amount, currency, shelter, name, show_name, app_version` |
 | `GET /v1/admin/list` | header `X-PAD-Admin`; the last 200 rows with ids; `held` = 1 is one waiting for your review |
 | `POST /v1/admin/review/<id>` | header `X-PAD-Admin`; JSON `{"approve": true}` counts a held row from then on, `false` hides it |

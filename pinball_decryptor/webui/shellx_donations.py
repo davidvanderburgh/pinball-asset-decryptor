@@ -248,6 +248,27 @@ class DonationsMixin:
         """The window's Refresh."""
         return self._donations_refresh(flush=True)
 
+    @rpc(loop=False)
+    def donations_history(self, offset=0):
+        """A page of every donation for the window's All donations list.
+        Off the UI loop: the page awaits it, and the app stays usable."""
+        url = self._donations_url()
+        if not url:
+            raise RpcError("No donations service is configured.")
+        try:
+            offset = max(0, int(offset or 0))
+            out = donations.fetch_all(url, offset)
+        except (urllib.error.URLError, OSError, ValueError,
+                donations.DonationsError) as e:
+            log.info("donations list not reachable: %s", e)
+            raise RpcError("Couldn't reach the list just now. Try again in "
+                           "a moment.")
+        rows = donations.history_rows(out.get("rows") or ())
+        total = int(out.get("total") or 0)
+        after = offset + len(rows)
+        return {"rows": rows, "total": total, "offset": offset,
+                "next": after if (rows and after < total) else None}
+
     # ------------------------------------------------------- the prompt
     def note_card_written(self):
         """A card write finished well (app.py ``_on_done``).  The first time

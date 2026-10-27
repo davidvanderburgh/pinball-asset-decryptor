@@ -215,6 +215,23 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-don-burst i { position: absolute; bottom: 36%; color: var(--accent); opacity: 0; animation: sx-don-float 1.4s ease-out forwards; }
 .sx-don-burst i svg { width: 18px; height: 18px; }
 @keyframes sx-don-float { 0% { opacity: 0; transform: translateY(0) scale(.5) rotate(var(--r)); } 15% { opacity: .9; } 100% { opacity: 0; transform: translateY(-150px) scale(1.1) rotate(var(--r)); } }
+/* the tile maps and the All donations list */
+.sx-don-map-head { align-items: center; margin-top: 4px; }
+.sx-don-map-head .sx-don-h { margin-top: 0; }
+.sx-don-map-pick { display: inline-flex; gap: 4px; }
+.sx-don-map { display: grid; gap: 3px; width: 100%; max-width: 400px; }
+.sx-don-tile { position: relative; aspect-ratio: 1; min-width: 0; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font: 600 9.5px var(--cond); color: var(--ink-3); overflow: hidden; transition: transform .15s ease; }
+.sx-don-tile i { position: absolute; inset: 0; background: var(--accent); opacity: var(--k, 0); }
+.sx-don-tile span { position: relative; }
+.sx-don-tile.lit { color: var(--ink); border-color: var(--accent-line); }
+.sx-don-tile.lit.hot { color: var(--accent-ink); }
+.sx-don-tile.lit:hover { transform: scale(1.18); z-index: 1; }
+.sx-don-hist { max-height: calc(100vh - 220px); overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.sx-don-hist-table th { text-align: left; font-weight: 500; color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 0 0 6px; }
+.sx-don-hist-table td:nth-child(1) { width: 96px; }
+.sx-don-hist-table td:nth-child(2) { width: 26%; }
+.sx-don-hist-table td:nth-child(3) { padding-left: 8px; text-align: left; width: auto; }
+.sx-don-hist-table td:nth-child(4) { text-align: right; width: 72px; }
 @media (max-width: 760px) { .sx-don-layout { grid-template-columns: minmax(0, 1fr); } .sx-don-therm-col { display: none; } }
 @media (prefers-reduced-motion: reduce) { .sx-don *, .sx-don *::before, .sx-don *::after { animation: none !important; transition: none !important; } }
 

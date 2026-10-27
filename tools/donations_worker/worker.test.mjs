@@ -17,7 +17,8 @@ function fakeDb() {
             .map((r) => ({ at: r.at, usd: r.usd })) };
         }
         if (sql.startsWith("SELECT at, amount")) {
-          return { results: live().sort((a, b) => b.at - a.at).slice(0, args[0]) };
+          const off = args[1] || 0;
+          return { results: live().sort((a, b) => b.at - a.at).slice(off, off + args[0]) };
         }
         if (sql.startsWith("SELECT id, at")) {
           return { results: rows.slice().sort((a, b) => b.at - a.at).slice(0, 200) };
@@ -35,6 +36,9 @@ function fakeDb() {
         throw new Error("unexpected all(): " + sql);
       },
       async first() {
+        if (sql.startsWith("SELECT COUNT(*) AS n FROM donations WHERE removed")) {
+          return { n: live().length };
+        }
         if (sql.startsWith("SELECT COALESCE")) {
           return { total: live().reduce((n, r) => n + r.usd, 0), n: live().length };
         }
@@ -210,6 +214,22 @@ test("a big entry is held until David says so", async () => {
   assert.equal((await rev(big2.id, false)).status, 200);                // hidden
   const [, last] = await get(e, "/v1/summary");
   assert.equal(last.count, 2);
+});
+
+test("every donation can be read a page at a time, newest first", async () => {
+  const e = env();
+  const ip = (n) => ({ "X-PAD-Key": "k", "CF-Connecting-IP": "10.0.2." + n });
+  for (let i = 0; i < 7; i++) await post(e, { amount: 10 + i, name: "n" + i, show_name: i % 2 === 0 }, ip(i));
+  e.DB.rows.forEach((r, i) => { r.at = 2000 + i; });
+  const [st, p1] = await get(e, "/v1/all?limit=3");
+  assert.equal(st, 200);
+  assert.deepEqual([p1.total, p1.offset, p1.rows.length], [7, 0, 3]);
+  assert.deepEqual(p1.rows.map((r) => r.amount), [16, 15, 14]);
+  assert.deepEqual(p1.rows.map((r) => r.name), ["n6", "", "n4"]);
+  const [, p3] = await get(e, "/v1/all?limit=3&offset=6");
+  assert.deepEqual(p3.rows.map((r) => r.amount), [10]);
+  const [, bad] = await get(e, "/v1/all?limit=junk&offset=-4");
+  assert.deepEqual([bad.offset, bad.limit], [0, 100]);
 });
 
 test("anything else is not found", async () => {

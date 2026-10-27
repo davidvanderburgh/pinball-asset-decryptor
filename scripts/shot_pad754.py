@@ -37,6 +37,12 @@ ROWS = [
     {"at": NOW - 600, "amount": 75, "currency": "CAD", "shelter": "Toronto Humane Society",
      "country": "CA", "region": "Ontario", "name": "Dana", "usd": 54.75},
 ]
+# older entries the list no longer shows, for the map and the board
+OLDER = [("US", "California", 410), ("US", "Washington", 120), ("US", "Ohio", 260),
+         ("US", "Illinois", 90), ("US", "Michigan", 150), ("US", "Pennsylvania", 70),
+         ("US", "Colorado", 45), ("US", "Georgia", 30), ("US", "Arizona", 25),
+         ("GB", "", 180), ("DE", "", 140), ("AU", "", 95), ("NL", "", 40),
+         ("SE", "", 35), ("CA", "British Columbia", 60), ("XX", "", 20)]
 BASE = 4320 - sum(r["usd"] for r in ROWS)     # older entries the list no longer shows
 
 
@@ -55,8 +61,14 @@ class Fake:
                                   {"country": r["country"], "region": r["region"], "usd": 0, "count": 0})
             p["usd"] += r["usd"]
             p["count"] += 1
+        for c, reg, usd in OLDER:
+            p = places.setdefault((c, reg), {"country": c, "region": reg, "usd": 0, "count": 0})
+            p["usd"] += usd
+            p["count"] += 1 + usd // 60
         places = sorted(places.values(), key=lambda p: -p["usd"])
-        places[0]["usd"] += 1800                       # Texas is winning
+        tx = next(p for p in places if p["region"] == "Texas")
+        tx["usd"] += 1800                               # Texas is winning
+        places.sort(key=lambda p: -p["usd"])
         return {"ok": True, "total_usd": total, "count": 56 + len(self.rows),
                 "milestones": [{"usd": 100, "at": NOW - 86400 * 260},
                                {"usd": 200, "at": NOW - 86400 * 240},
@@ -83,6 +95,11 @@ class Fake:
                 self.wfile.write(data)
 
             def do_GET(self):
+                if self.path.startswith("/v1/all"):
+                    rows = list(reversed(fake.rows))
+                    self._send(200, {"ok": True, "rows": rows, "total": 56 + len(fake.rows),
+                                     "offset": 0, "limit": 100})
+                    return
                 self._send(200, fake.summary())
 
             def do_POST(self):
@@ -122,7 +139,7 @@ def main():
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            page = browser.new_page(viewport={"width": 1440, "height": 1100})
             page.on("pageerror", lambda e: errors.append("pageerror: %s" % e))
             page.on("console", lambda m: errors.append("console.error: %s" % m.text)
                     if m.type == "error" else None)
@@ -173,6 +190,16 @@ def main():
                 page.wait_for_selector(".sx-don-mine-row", timeout=15000)
                 time.sleep(2.5)                       # the jackpot has settled
                 shoot("yours")
+                page.click(".sx-don-map-pick button:has-text('United States')")
+                time.sleep(0.8)
+                shoot("map_us")
+                page.click(".sx-don-map-pick button:has-text('World')")
+                page.click(".modal .ft button:has-text('All donations')")
+                page.wait_for_selector(".sx-don-hist", timeout=15000)
+                time.sleep(1.0)
+                shoot("history")
+                page.click(".modal .ft button:has-text('Back')")
+                time.sleep(0.5)
                 # a big one: the confirm step says it is checked by hand first
                 page.fill(".sx-don-form input[placeholder='25']", "500")
                 page.click(".sx-don-form button:has-text('Add to the total')")

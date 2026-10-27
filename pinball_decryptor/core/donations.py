@@ -60,6 +60,28 @@ COUNTRIES = (
     ("XX", "Somewhere else"),
 )
 COUNTRY_NAMES = dict(COUNTRIES)
+#: the US states (and DC) the window's United States tile map draws: a
+#: typed state or province is matched here by code or name
+US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut",
+    "DE": "Delaware", "DC": "District of Columbia", "FL": "Florida",
+    "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois",
+    "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky",
+    "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota",
+    "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska",
+    "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey",
+    "NM": "New Mexico", "NY": "New York", "NC": "North Carolina",
+    "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon",
+    "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington",
+    "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
+}
+_STATE_BY_NAME = {v.lower(): k for k, v in US_STATES.items()}
+_STATE_BY_NAME.update({"washington dc": "DC", "washington d c": "DC",
+                       "d c": "DC"})
 MAX_AMOUNT = 10000          # one entry, in its own currency (the Worker agrees)
 MAX_SHELTER = 80
 MAX_NAME = 40
@@ -108,6 +130,17 @@ def validate_entry(amount, currency="USD", shelter="", name="",
             "region": _clean(region, MAX_REGION) if where else "",
             "name": _clean(name, MAX_NAME), "show_name": bool(show_name),
             "app_version": _clean(app_version, 24)}
+
+
+def state_code(region):
+    """"TX" for "Texas", "tx", "TX." or "texas "; "" when the typed state
+    is not one of the fifty (or DC)."""
+    r = " ".join(str(region or "").replace(".", " ").replace(",", " ").split())
+    if not r:
+        return ""
+    if r.upper() in US_STATES:
+        return r.upper()
+    return _STATE_BY_NAME.get(r.lower(), "")
 
 
 def fmt_place(country, region=""):
@@ -166,6 +199,65 @@ def fmt_amount(amount, currency):
     text = format(int(amount), ",") if amount == int(amount) \
         else format(amount, ",.2f")
     return "%s%s" % (SYMBOLS.get(currency, currency + " "), text)
+
+
+def fmt_date_full(ts):
+    """"Sep 3, 2026": a row of the All donations list."""
+    try:
+        t = time.localtime(float(ts))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+    return "%s %d, %d" % (_MONTHS[t.tm_mon - 1], t.tm_mday, t.tm_year)
+
+
+def history_rows(rows):
+    """The All donations list's rows, from the service's ``/v1/all`` rows."""
+    out = []
+    for r in rows or ():
+        if not isinstance(r, dict):
+            continue
+        out.append({"date": fmt_date_full(r.get("at")),
+                    "name": _clean(r.get("name"), MAX_NAME) or "Anonymous",
+                    "shelter": _clean(r.get("shelter"), MAX_SHELTER),
+                    "where": fmt_place(r.get("country"), r.get("region")),
+                    "amount": fmt_amount(r.get("amount"), r.get("currency"))})
+    return out
+
+
+def map_data(places):
+    """What the tile maps light: every country, every US state a typed
+    region matched, and what fell outside both."""
+    world, states = {}, {}
+    elsewhere = {"usd": 0.0, "count": 0}
+    for p in places or ():
+        if not isinstance(p, dict):
+            continue
+        code = str(p.get("country") or "").upper()
+        usd = float(p.get("usd") or 0)
+        n = int(p.get("count") or 0)
+        if code not in COUNTRY_NAMES or not code:
+            continue
+        if code == "XX":
+            elsewhere["usd"] += usd
+            elsewhere["count"] += n
+            continue
+        w = world.setdefault(code, {"code": code, "label": COUNTRY_NAMES[code],
+                                    "usd": 0.0, "count": 0})
+        w["usd"] += usd
+        w["count"] += n
+        if code == "US":
+            st = state_code(p.get("region"))
+            if st:
+                s = states.setdefault(st, {"code": st, "label": US_STATES[st],
+                                           "usd": 0.0, "count": 0})
+                s["usd"] += usd
+                s["count"] += n
+    for d in list(world.values()) + list(states.values()):
+        d["amount"] = fmt_usd(d["usd"])
+    return {"world": sorted(world.values(), key=lambda d: -d["usd"]),
+            "us": sorted(states.values(), key=lambda d: -d["usd"]),
+            "elsewhere": (dict(elsewhere, amount=fmt_usd(elsewhere["usd"]))
+                          if elsewhere["count"] else None)}
 
 
 def fmt_date(ts):
@@ -288,6 +380,7 @@ def view(summary, pending=(), currency="USD", name="", offline=False,
         "reached_text": reached,
         "recent": recent,
         "places": places,
+        "map": map_data(summary.get("places") if known else ()),
         "pending": len(pending),
         "pending_usd": pending_usd,
         "mine": own[:10],
@@ -330,6 +423,21 @@ def fetch_summary(url, timeout=TIMEOUT):
         out = _read_json(resp)
     if not out.get("ok"):
         raise DonationsError(out.get("error") or "The total did not answer.")
+    return out
+
+
+def fetch_all(url, offset=0, limit=100, timeout=TIMEOUT):
+    """A page of every donation, newest first (``/v1/all``)."""
+    if not url:
+        raise DonationsError("No donations service is configured.")
+    req = urllib.request.Request(
+        "%s/v1/all?offset=%d&limit=%d" % (url.rstrip("/"), max(0, int(offset)),
+                                          max(1, int(limit))),
+        headers={"Accept": "application/json"})
+    with urlopen(req, timeout) as resp:
+        out = _read_json(resp)
+    if not out.get("ok"):
+        raise DonationsError(out.get("error") or "The list did not answer.")
     return out
 
 

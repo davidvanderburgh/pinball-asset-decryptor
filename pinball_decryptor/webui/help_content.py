@@ -1699,6 +1699,10 @@ HELP_CONTENT = {
             "game use the door as a Pro does: opening it puts up **48V DISABLED / CLOSE "
             "COIN DOOR** until it is shut.\n"
             "- The service buttons work with the door open or shut, as before.\n"
+            "- The game's own **COIN DOOR BALL SAVER** setting works then too (off as "
+            "shipped, as on a Pro): with it on, opening the door during a ball saves "
+            "that ball. **COIN DOOR DISABLE TILT** has nothing to act on, as these "
+            "machines have no tilt switch.\n"
             "- Staged with the project and carried by mod packs. A card that has its "
             "coin door already is left as it is.",
             {"note": "Only with a door and its interlock switch fitted. With nothing on "

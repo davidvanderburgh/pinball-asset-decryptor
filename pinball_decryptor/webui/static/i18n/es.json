@@ -12683,6 +12683,7 @@
 "Coin door": "Puerta de monedas",
 "This machine has a coin door fitted": "Esta máquina tiene una puerta de monedas instalada",
 "The service buttons work with the door open or shut, as before.": "Los botones de servicio funcionan con la puerta abierta o cerrada, como antes.",
+"The game's own **COIN DOOR BALL SAVER** setting works then too (off as shipped, as on a Pro): with it on, opening the door during a ball saves that ball. **COIN DOOR DISABLE TILT** has nothing to act on, as these machines have no tilt switch.": "El ajuste propio del juego **COIN DOOR BALL SAVER** también funciona entonces (desactivado de fábrica, como en una Pro): si está activado, abrir la puerta durante una bola salva esa bola. **COIN DOOR DISABLE TILT** no tiene sobre qué actuar, ya que estas máquinas no tienen interruptor de tilt.",
 "Building the emulator container…": "Construyendo el contenedor del emulador…",
 "Building the emulator container (step {} of {})": "Construyendo el contenedor del emulador (paso {} de {})",
 "Building the emulator container (step {} of {}, {} min)": "Construyendo el contenedor del emulador (paso {} de {}, {} min)",

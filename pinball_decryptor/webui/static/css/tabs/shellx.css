@@ -138,7 +138,6 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
    value too (an amber button beside the amber language button was loud) */
 .sx-don-btn { gap: 7px; font-weight: 600; }
 .sx-don-btn svg { width: 19px; height: 19px; flex: 0 0 19px; color: var(--info); }
-.sx-don-btn-sum { color: var(--ink-2); font-weight: 500; }
 .topbar .chip svg { width: 14px; height: 14px; }
 /* nearly the whole screen (David): four columns, the thermometer, the
    total and the list, the places and the map, the form */

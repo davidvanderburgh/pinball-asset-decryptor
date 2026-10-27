@@ -240,6 +240,14 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
     2029 of 2030 requests) after every jackpot of SHIN GODZILLA, GODZILLA ANGRY, KAMACURAS and MELTDOWN, by the mode's
     own multiplier (MELTDOWN: its heat, doubled for a heart jackpot). rig\edit11_callouts.py, backup "modes before the
     jackpot calls". Card v33.
+- **v33 on the machine: "those sound effects during superx2 when you make a shot are poor choices - they sound all the
+  same pitch and they are already used in other modes ... and the superx2 mode is way too long and difficult. it needs
+  to be cut down to 10 total shots max".** SUPER X2 (his project's kiryu) now: 3 charges (a third of the fire mirror a
+  shot, each with its own sound from Godzilla vs. Biollante - absorb1 0:49:25.9, Godzilla's ray into the fire mirror;
+  absorb2 0:49:35.5 pitched up 5 semitones - then the mirror READY), the fire at the Godzilla target, the arsenal's 3,
+  the hunt's lock-on, one strike and POINT BLANK: 10 shots. No overheat; overcharge (X2, X3) optional; the Shield ramp
+  spinner charges no more. None of its shots falls back on the game's hit sounds. rig\edit12_kiryu.py, backup "modes
+  before the 10-shot SUPER X2", desk desk_x2_10 (10 shots, won, 130,250,000). Card v34.
 - **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
   game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
   screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the

@@ -217,6 +217,9 @@ def main():
                 webui_shot.api(url, "ui.set_theme", "light")
                 time.sleep(1.5)
                 shoot("light")
+                page.click(".modal .ft button:has-text('Close')")
+                time.sleep(0.8)
+                shoot("topbar_light", clip={"x": 0, "y": 0, "width": 1440, "height": 56})
             browser.close()
     finally:
         proc.terminate()

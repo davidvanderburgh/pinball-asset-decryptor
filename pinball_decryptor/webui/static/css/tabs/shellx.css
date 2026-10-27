@@ -133,8 +133,11 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 
 /* ------------------------------- PAD-754: the Animal shelters window */
 /* the top bar's Donate button */
-.sx-don-btn { gap: 7px; color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); font-weight: 600; }
-.sx-don-btn svg { width: 19px; height: 19px; flex: 0 0 19px; }
+/* the same quiet button as the bar's manufacturer and project buttons;
+   only the paw carries colour, the app's blue, which has a light-theme
+   value too (an amber button beside the amber language button was loud) */
+.sx-don-btn { gap: 7px; font-weight: 600; }
+.sx-don-btn svg { width: 19px; height: 19px; flex: 0 0 19px; color: var(--info); }
 .sx-don-btn-sum { color: var(--ink-2); font-weight: 500; }
 .topbar .chip svg { width: 14px; height: 14px; }
 /* nearly the whole screen (David): four columns, the thermometer, the
@@ -179,10 +182,11 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
    status dot.) */
 .sx-don-steps { display: flex; align-items: flex-start; padding: 6px 0 2px; }
 .sx-don-step-m { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12.5px; text-align: center; }
-.sx-don-step-m .ln { position: absolute; top: 13px; right: 50%; width: 100%; height: 4px; border-radius: 2px; background: var(--line-2); }
+/* the line runs rim to rim between this node and the one before, under both */
+.sx-don-step-m .ln { position: absolute; top: 13px; right: calc(50% + 15px); width: calc(100% - 30px); height: 4px; border-radius: 2px; background: var(--line-2); z-index: 0; }
 .sx-don-step-m.reached .ln { background: var(--ok); }
 .sx-don-step-m.next .ln { background: linear-gradient(90deg, var(--ok), var(--accent)); }
-.sx-don-dot { position: relative; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--panel); color: var(--ink-3); display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+.sx-don-dot { position: relative; z-index: 1; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--panel); color: var(--ink-3); display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
 .sx-don-dot svg { width: 15px; height: 15px; }
 .sx-don-dot b { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
 .sx-don-step-m.reached .sx-don-dot { border-color: var(--ok); background: var(--ok); color: var(--accent-ink); }

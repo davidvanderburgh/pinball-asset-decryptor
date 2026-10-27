@@ -64,6 +64,18 @@ podium rises in, the button has a gloss sweep, and an entry landing is a
 jackpot (the band flashes, the lamps race, "+$30" floats, paw prints float
 off the button). `prefers-reduced-motion` stills all of it.
 
+## No middle man, said up top
+
+David (2026-10-26): make it extremely clear no money is taken. A notice at
+the top of the window: no money changes hands here, PAD takes no donations,
+nothing is charged or processed, people give directly to a shelter of their
+choice and the window only tallies what they say they gave. The form says
+"I gave, on my own" and "Add to the tally"; the confirm step repeats that
+nothing is charged. The milestones are a stepper ("reached May 29", "next
+up", "later") because chips of "$100 $200 $500" read as amounts to give.
+A strip of ASCII animals (a dog chasing a ball past a cat, a bird) plays
+above the total, and the window takes nearly the whole screen.
+
 ## Every donation, and the map
 
 "All donations" in the window's footer pages through every live entry,

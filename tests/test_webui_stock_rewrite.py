@@ -43,6 +43,7 @@ def _card_project(path, image_name):
     return path
 
 
+@pytest.mark.usefixtures("preview_modes_off")
 def test_the_tab_is_hidden_without_the_preview_switch_so_the_rows_are_too(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}

@@ -24,6 +24,9 @@ import pytest
 from pinball_decryptor.core import ed25519 as E
 from pinball_decryptor.core import preview as P
 
+#: the switch as it was while the mode maker was a preview (it is released since PAD-763)
+pytestmark = pytest.mark.usefixtures("preview_modes_off")
+
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
 #: A made-up signing key for these tests (never the shipped one).

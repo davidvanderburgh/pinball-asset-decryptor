@@ -138,7 +138,7 @@ The catches:
 
 - **A multiball of the game's is never stopped once it starts.** Balls may be sitting in a lock or on a magnet. With "cannot start" none can be lit or locked while yours runs, so it doesn't happen. If one was already on its way (a lock lit before yours began, a ball save), theirs starts and yours ends.
 - **One screen, one voice.** A clip of yours and one of the game's on the same shot replace each other. Your full-screen clips start half a second late so the game's doesn't win.
-- Some games can't tell which of their modes are running. There the option is greyed out, or your mode just gives way.
+- Some games can't tell which of their modes are running. There the option is grayed out, or your mode just gives way.
 - On some games a held-off start uses up whatever lit it.
 
 ## Why your mode always gives way

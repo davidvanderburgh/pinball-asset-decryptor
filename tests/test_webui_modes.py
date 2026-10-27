@@ -103,6 +103,7 @@ def test_visible_only_for_spike2_with_the_preview_switch(tmp_path, preview_on, m
             assert st["about"].startswith("Make a game mode of your own")
 
 
+@pytest.mark.usefixtures("preview_modes_off")
 def test_hidden_without_the_preview_switch(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}

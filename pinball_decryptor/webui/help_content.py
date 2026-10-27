@@ -1339,9 +1339,9 @@ HELP_CONTENT = {
          "- Drag the bar's left edge to resize it (double-click puts it back). Each "
          "tab remembers whether its bar was open."),
     ],
-    # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
-    # preview code shows none of them (sections_for).  The key stays so every
-    # notebook tab has an entry.
+    # The Modes tab's own tips are in PREVIEW_HELP, read through sections_for;
+    # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
+    # The key stays so every notebook tab has an entry.
     "Modes": [],
     "Write": [
         ("What a build does",
@@ -3346,27 +3346,9 @@ PREVIEW_HELP = {
                 "(one worked out before the gate existed) cannot carry modes until its "
                 "port is worked out again.",
             ]),
-            ("A preview feature", [
-                "The mode maker is a preview: it is in every copy of the app, switched "
-                "off, and a personal code from the app's author switches it on.",
-                {"flow": [
-                    {"icon": "gear", "title": "Settings", "text": "the gear, top right"},
-                    {"icon": "star", "title": "Preview features…", "text": "paste your code"},
-                    {"icon": "check", "title": "Unlock", "text": "the Modes tab appears"}]},
-                "- The window says whose code it is and the last day it works. After "
-                "that day the Modes tab is gone again at the next start.\n"
-                "- Your modes stay in the project's modes folder either way.\n\n"
-                "### Asking for more",
+            ("Asking for more", [
                 _limits("Asking for more"),
             ]),
-        ],
-        "Write": [
-            ("Preview features",
-             "A project can hold modes made with the mode maker, a preview feature "
-             "(Settings > Preview features). A copy of the app where it is not "
-             "switched on builds everything else in the project exactly as usual, "
-             "leaves the modes and any changes to the game's own modes off the "
-             "card, and says so in the log."),
         ],
     },
 }

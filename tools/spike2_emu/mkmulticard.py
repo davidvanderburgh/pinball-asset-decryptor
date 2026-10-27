@@ -2551,6 +2551,41 @@ def check_output_path(path, inputs, force=False, must_exist=False):
     return path
 
 
+def card_write_blocker(card):
+    """A sentence when the card exists but cannot be opened for writing, else None (PAD-776).
+    Asked before an in-place write does any work: otherwise the first open for writing comes
+    minutes in, as a bare PermissionError.  On a Windows drive under WSL both causes are
+    EACCES, and the mode bits tell them apart: the Windows Read-only attribute clears every
+    write bit; a file another Windows program holds open without sharing writes keeps them."""
+    try:
+        with open(card, "r+b"):
+            return None
+    except FileNotFoundError:
+        return None                     # check_output_path names that
+    except OSError as e:
+        name = os.path.basename(card)
+        try:
+            no_write = not (os.stat(card).st_mode & 0o222)
+        except OSError:
+            no_write = False
+        if no_write:
+            return ("%s is marked read-only, so it cannot be written in place; untick Read-only "
+                    "in the file's Properties and try again" % name)
+        if isinstance(e, PermissionError):
+            return ("%s is open in another program (an SD card writer, a disk image tool, "
+                    "an emulator?), which stops it being written; close that program and try "
+                    "again" % name)
+        return "%s cannot be opened for writing (%s)" % (name, e.strerror or e)
+
+
+def check_card_writable(card):
+    """Refused with :func:`card_write_blocker`'s sentence when the card cannot be written."""
+    why = card_write_blocker(card)
+    if why:
+        raise Refused(why)
+    return card
+
+
 # ============================================================================= copying
 ZERO = bytes(CHUNK)
 
@@ -5290,6 +5325,7 @@ def update_card(a):
     if a.bypass_validation and getattr(a, "restore_validation", False):
         raise Refused("--bypass-validation and --restore-validation ask for opposite things")
     if not dry:
+        check_card_writable(card)
         ok, why = loop_available()
         if not ok:
             raise Refused("update writes the card in place through a loop mount and cannot here: %s" % why)
@@ -9616,6 +9652,7 @@ def main(argv=None):
             return 0 if check_stock(a.image) else 1
         elif a.cmd == "build":
             check_output_path(a.out, [a.primary] + a.extra + [a.conf, a.selector_dir, a.media_dir], force=a.force)
+            check_card_writable(a.out)          # a --force over a read-only or held-open card
             if not a.no_inject and not a.selector_dir:
                 raise Refused("build needs --selector-dir (or --no-inject)")
             # THE GROUPS REACH THE PLANNER, not only the conf: --layout auto picks the
@@ -9726,6 +9763,7 @@ def main(argv=None):
                 print(conf.rstrip())
         elif a.cmd == "inject":
             check_output_path(a.card, [a.conf, a.selector_dir, a.media_dir, a.primary] + list(a.extra), must_exist=True)
+            check_card_writable(a.card)
             if not a.selector_dir:
                 raise Refused("inject needs --selector-dir")
             plan = plan_from_card(a.card)
@@ -9779,6 +9817,8 @@ def main(argv=None):
                          workdir=a.workdir, force=a.force)
         elif a.cmd == "bypass":
             check_output_path(a.card, [], must_exist=True)
+            if not a.dry_run:
+                check_card_writable(a.card)
             plan = plan_from_card(a.card)
             print("layout: %s; trees: %s" % (plan.layout, ", ".join(plan.devices())))
             if plan.layout == "store":

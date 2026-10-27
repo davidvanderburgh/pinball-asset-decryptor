@@ -4060,6 +4060,50 @@ def parse_inspect(text):
 _REFUSAL_PREFIXES = ("[card] error:", SELECTOR_ERROR, "refused:")
 
 
+#: How a write blocker reads (PAD-776), here and in mkmulticard's own
+#: card_write_blocker: the file is fine, only it cannot be written right now.
+_WRITE_BLOCKED = ("is marked read-only, so it cannot be written",
+                  "is open in another program")
+
+
+def card_write_blocker(path):
+    """A sentence when the card at *path* exists but cannot be opened for
+    writing, else ''.  Asked before an in-place update runs anything: the
+    tool's first write otherwise comes after the media prepare and the p2
+    extract, as a bare ``PermissionError: [Errno 13]`` (PAD-776).  Opening
+    for ``r+b`` writes nothing and leaves the file's time alone."""
+    try:
+        with open(path, "r+b"):
+            return ""
+    except FileNotFoundError:
+        return ""                   # 'The card is gone' says that
+    except OSError as e:
+        name = os.path.basename(path)
+        try:
+            st = os.stat(path)
+            read_only = (bool(getattr(st, "st_file_attributes", 0)
+                              & getattr(stat, "FILE_ATTRIBUTE_READONLY", 0))
+                         or not st.st_mode & 0o222)
+        except OSError:
+            read_only = False
+        if read_only:
+            return ("%s %s in place; untick Read-only in the file's "
+                    "Properties and try again" % (name, _WRITE_BLOCKED[0]))
+        if (getattr(e, "winerror", None) == 32
+                or isinstance(e, PermissionError)):
+            return ("%s %s (an SD card writer, a disk image tool, an "
+                    "emulator?), which stops it being written; close that "
+                    "program and try again" % (name, _WRITE_BLOCKED[1]))
+        return "%s cannot be opened for writing (%s)" % (
+            name, e.strerror or e)
+
+
+def is_write_blocked(why):
+    """Whether a refusal is :func:`card_write_blocker`'s (or the tool's
+    own): nothing wrong with the card, so no 'build a fresh card'."""
+    return any(m in (why or "") for m in _WRITE_BLOCKED)
+
+
 def parse_refusal(text, about=""):
     """The tool's own refusal line, without its prefix, or ''.  What a failed
     load says on the tab instead of an exit code.
@@ -10750,6 +10794,10 @@ class MultibootPanel:
         errs = []
         if not os.path.isfile(self._loaded_card):
             errs.append("The card is gone: %s" % self._loaded_card)
+        else:
+            blocked = card_write_blocker(self._loaded_card)
+            if blocked:
+                errs.append("Cannot update the card: %s." % blocked)
         for i, row in enumerate(form.images):
             for what, text in (("title", row.title),
                                ("subtitle", row.subtitle)):
@@ -10983,10 +11031,12 @@ class MultibootPanel:
                 else:
                     why = parse_refusal(texts.get(failed or "update", ""),
                                         self._loaded_card)
-                    if why and failed == "selector":
+                    if why and (failed == "selector"
+                                or is_write_blocked(why)):
                         # THE MENU PROGRAM, NOT THE CARD.  A fresh card
                         # would need the very same one, so this refusal
-                        # must not send anybody off to build one.
+                        # must not send anybody off to build one.  Nor a
+                        # card that is only read-only or held open now.
                         self._error("Cannot update %s: %s" % (name, why))
                     elif why:
                         self._update_info = {"refused": why}

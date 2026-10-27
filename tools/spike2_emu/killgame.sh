@@ -180,6 +180,13 @@ pad_pkill -9 -f '^unshare (-r )?-m -p -f'
 # 'longplay.sh' matches any shell with the name on its command line, and this
 # one KILLS.
 pad_pkill -9 -f '^bash [^ ]*longplay\.sh'
+# PAD-764: THE RUN'S RECORDING GETS ITS SWITCH LOG HERE, for the same reason
+# the LCD block is kept below: Stop and app-quit come through this script, and
+# the kills above take watch.sh down before its teardown could write it. The
+# guest is gone, so the log is whole (runrec.py; once only, so a teardown that
+# did run first leaves nothing to do).
+[ "${PAD_RECORD:-1}" != 0 ] && command -v python3 >/dev/null 2>&1 \
+    && python3 "$(dirname "$0")/runrec.py" finish "$PAD_LOGDIR" 2>&1
 # The LED block doubles as the virtual playfield's liveness signal; removing
 # it lets that window close itself instead of surviving the kill.
 rm -f "$ROOT/dump/padled"

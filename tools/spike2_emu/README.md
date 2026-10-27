@@ -1015,6 +1015,7 @@ list of confident conclusions that turned out to be wrong — lives there.
 | Build | `build.sh`, `buildgl.sh`, `buildbridge.sh` |
 | Run | `watch.sh`, `runbridge.sh`, `nbrun.sh`, `verify2.sh`, `verify3.sh` |
 | Safety | `alive.sh`, `killgame.sh`, `runlim.sh` |
+| Record and replay a run (PAD-764) | `runrec.py` (every boot: the title's NVRAM + its switch log in `<logdir>/runs/`), `replayrun.sh` (boots one back on a free rig, exactly), `swreplay.py` |
 
 Everything else is an instrument. They were written one at a time against a
 specific wrong answer, and the handoff says which.

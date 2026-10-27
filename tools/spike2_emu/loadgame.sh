@@ -116,6 +116,12 @@ fi
 # for the video host's resume restart (restorestate falls back to the restored
 # guest's environ if the slot predates this field).
 SGAME=$(sed -n 's/^game=//p' "$DIR/slot.meta")
+# PAD-764: THE RUN'S RECORDING ENDS HERE. A restored guest is the save's game,
+# with the save's clock, and its NVRAM is not the one the recording began from,
+# so what it does is no replay of this boot: the recording keeps its switches up
+# to the load, and says so. Before the restore, which truncates the guest log.
+[ "${PAD_RECORD:-1}" != 0 ] && python3 "$RIG/runrec.py" finish "$(. "$RIG/padpath.sh"; echo "$PAD_LOGDIR")" \
+    "ended where save state '$SLOT' was loaded" 2>&1 | sed 's/^\[watch\]/[loadgame]/'
 PAD_ROOT="$ROOT" PAD_GAME="$SGAME" PAD_RESTORE_KILL=1 CRIU="$CRIU" \
     bash "$RIG/restorestate.sh" "$DDIR" \
     || { echo "[loadgame] FAILED"; exit 1; }

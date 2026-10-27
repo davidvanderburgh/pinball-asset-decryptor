@@ -12682,5 +12682,10 @@
 "Only with a door and its interlock switch fitted. With nothing on that input the game reads the door as open all the time and keeps the {}V DISABLED message up.": "Nur mit eingebauter Tür und ihrem Verriegelungsschalter. Ist an diesem Eingang nichts angeschlossen, hält das Spiel die Tür ständig für offen und zeigt {}V DISABLED dauerhaft.",
 "Coin door": "Münztür",
 "This machine has a coin door fitted": "In diesem Automaten ist eine Münztür eingebaut",
-"The service buttons work with the door open or shut, as before.": "Die Servicetasten funktionieren bei offener wie geschlossener Tür, wie bisher."
+"The service buttons work with the door open or shut, as before.": "Die Servicetasten funktionieren bei offener wie geschlossener Tür, wie bisher.",
+"Building the emulator container…": "Der Emulator-Container wird gebaut…",
+"Building the emulator container (step {} of {})": "Der Emulator-Container wird gebaut (Schritt {} von {})",
+"Building the emulator container (step {} of {}, {} min)": "Der Emulator-Container wird gebaut (Schritt {} von {}, {} Min.)",
+"Building the emulator container ({} min)": "Der Emulator-Container wird gebaut ({} Min.)",
+"First Start on this Mac: the emulator's Linux container is being built (Docker downloads Ubuntu and the emulator's tools into it). It takes a few minutes, more on a slow connection, and happens once: later Starts use the built container. The log shows each step as Docker runs it.": "Erster Start auf diesem Mac: Der Linux-Container des Emulators wird gebaut (Docker lädt Ubuntu und die Werkzeuge des Emulators hinein). Das dauert ein paar Minuten, bei langsamer Verbindung länger, und passiert nur einmal: spätere Starts verwenden den gebauten Container. Das Protokoll zeigt jeden Schritt, während Docker ihn ausführt."
 }

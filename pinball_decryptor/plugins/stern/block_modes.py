@@ -908,8 +908,8 @@ def white_shot_notes(program, white_shots):
                     and str(b.get("color") or "").lower() not in ("#000000", "000000") and b["shot"] not in lit):
                 lit.append(b["shot"])
     lines = _screen_words(program)
-    return ["%s is lit, and its insert is a single white light: the mode's colour does not show there. Light a shot "
-            "whose insert shows colour, or name %s on the screen (a HUD line or award)." % (n, n)
+    return ["%s is lit, and its insert is a single white light: the mode's color does not show there. Light a shot "
+            "whose insert shows color, or name %s on the screen (a HUD line or award)." % (n, n)
             for n in lit if not _named_on_screen(n, lines)]
 
 

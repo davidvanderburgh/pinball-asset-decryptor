@@ -2,7 +2,8 @@
 // answers the exact statements worker.js prepares.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import worker, { MILESTONES, RATES, HOLD_OVER_USD } from "./worker.js";
+import worker, { meta } from "./worker.js";
+const { MILESTONES, RATES, HOLD_OVER_USD } = meta();
 
 function fakeDb() {
   const rows = [];
@@ -36,6 +37,9 @@ function fakeDb() {
         throw new Error("unexpected all(): " + sql);
       },
       async first() {
+        if (sql.startsWith("SELECT amount, currency, shelter")) {
+          return rows.find((x) => x.id === args[0] && x.edit_token === args[1] && !x.removed) || null;
+        }
         if (sql.startsWith("SELECT COUNT(*) AS n FROM donations WHERE removed")) {
           return { n: live().length };
         }
@@ -230,6 +234,41 @@ test("every donation can be read a page at a time, newest first", async () => {
   assert.deepEqual(p3.rows.map((r) => r.amount), [10]);
   const [, bad] = await get(e, "/v1/all?limit=junk&offset=-4");
   assert.deepEqual([bad.offset, bad.limit], [0, 100]);
+});
+
+test("David hears on Discord about an entry, a hold and a take-back", async () => {
+  const e = { ...env(), DISCORD_WEBHOOK: "https://discord.example/api/webhooks/1/x" };
+  const posts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { posts.push([url, JSON.parse(init.body)]); return new Response("ok"); };
+  const waited = [];
+  const ctx = { waitUntil: (p) => waited.push(p) };
+  const hdr = (ip) => ({ "content-type": "application/json", "X-PAD-Key": "k", "CF-Connecting-IP": ip });
+  try {
+    const r1 = await worker.fetch(new Request(BASE + "/v1/donate", { method: "POST", headers: hdr("5.5.5.5"),
+      body: JSON.stringify({ amount: 30, shelter: "Lollypop Farm", country: "US", region: "New York", name: "David", show_name: true, app_version: "1.266.0" }) }), e, ctx);
+    const s1 = await r1.json();
+    await Promise.all(waited);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0][0], e.DISCORD_WEBHOOK);
+    assert.equal(posts[0][1].content, "🐾 New donation: $30 to Lollypop Farm in New York, US as David · app 1.266.0\ntally now $30 from 1 donations");
+    assert.deepEqual(posts[0][1].allowed_mentions, { parse: [] });
+    const r2 = await worker.fetch(new Request(BASE + "/v1/donate", { method: "POST", headers: hdr("6.6.6.6"),
+      body: JSON.stringify({ amount: 5000, name: "Shy", show_name: false }) }), e, ctx);
+    const s2 = await r2.json();
+    await Promise.all(waited);
+    assert.ok(posts[1][1].content.startsWith("⏸ HELD for your review: $5,000 anonymous (Shy)\napprove: curl "));
+    assert.ok(posts[1][1].content.endsWith("/v1/admin/review/" + s2.id));
+    await worker.fetch(new Request(BASE + "/v1/donate/" + s1.id, { method: "DELETE", headers: { "X-PAD-Key": "k", "X-PAD-Edit": s1.token } }), e, ctx);
+    await Promise.all(waited);
+    assert.equal(posts[2][1].content, "↩ Taken back by the app that added it: $30 to Lollypop Farm in New York, US as David · app 1.266.0\ntally now $0 from 0 donations");
+    const quiet = env();                                   // no webhook: nothing posted
+    const before = posts.length;
+    await worker.fetch(new Request(BASE + "/v1/donate", { method: "POST", headers: hdr("7.7.7.7"), body: JSON.stringify({ amount: 2 }) }), quiet, ctx);
+    assert.equal(posts.length, before);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 test("anything else is not found", async () => {

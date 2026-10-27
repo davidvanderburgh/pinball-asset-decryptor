@@ -17,7 +17,9 @@
 //                                   the token the POST answered (X-PAD-Edit),
 //                                   or David (X-PAD-Admin = ADMIN_KEY)
 //
-// Bindings (wrangler.toml / secrets): DB (D1), APP_KEY, ADMIN_KEY, IP_SALT.
+// Bindings (wrangler.toml / secrets): DB (D1), APP_KEY, ADMIN_KEY, IP_SALT,
+// and DISCORD_WEBHOOK (optional): every entry, hold and take-back is posted
+// there so David hears about it as it happens.
 // APP_KEY ships inside the public app, so it only keeps casual scripts
 // out; the per-address rate limit and the single-entry cap do the real
 // work.  ADMIN_KEY and IP_SALT are real secrets (`wrangler secret put`).
@@ -155,7 +157,41 @@ async function all(env, url) {
   return { ok: true, rows, total: tot.n, offset, limit };
 }
 
-async function donate(request, env) {
+// Tell David on Discord (a webhook URL in DISCORD_WEBHOOK).  Runs after
+// the answer has gone out (ctx.waitUntil), never delays or fails a request,
+// and does nothing without the secret.
+function money(amount, currency) {
+  const sym = { USD: "$", EUR: "€", GBP: "£", JPY: "¥", CAD: "CA$", AUD: "A$", NZD: "NZ$", BRL: "R$", MXN: "MX$" };
+  const n = Number(amount);
+  return (sym[currency] || currency + " ") + (Number.isInteger(n) ? n.toLocaleString("en-US") : n.toFixed(2));
+}
+function place(country, region) {
+  if (!country) return "";
+  return region ? region + ", " + country : country;
+}
+function notify(env, ctx, text) {
+  if (!env.DISCORD_WEBHOOK) return;
+  const p = fetch(env.DISCORD_WEBHOOK, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content: text.slice(0, 1900), allowed_mentions: { parse: [] } }),
+  }).catch(() => null);
+  if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+}
+function describe(e) {
+  const bits = [money(e.amount, e.currency)];
+  if (e.shelter) bits.push("to " + e.shelter);
+  const where = place(e.country, e.region);
+  if (where) bits.push("in " + where);
+  bits.push(e.show_name && e.name ? "as " + e.name : "anonymous" + (e.name ? " (" + e.name + ")" : ""));
+  if (e.app_version) bits.push("· app " + e.app_version);
+  return bits.join(" ");
+}
+function tallyLine(s) {
+  return "\ntally now $" + s.total_usd.toLocaleString("en-US") + " from " + s.count + " donations";
+}
+
+async function donate(request, env, ctx) {
   if (env.APP_KEY && request.headers.get("X-PAD-Key") !== env.APP_KEY) {
     return fail("Not from the app.", 403);
   }
@@ -189,23 +225,31 @@ async function donate(request, env) {
   s.id = id;
   s.token = token;
   s.held = !!held;
+  notify(env, ctx, held
+    ? "⏸ HELD for your review: " + describe(entry) + "\napprove: curl -X POST -H \"X-PAD-Admin: $ADMIN_KEY\" "
+      + "-H 'content-type: application/json' -d '{\"approve\": true}' " + new URL(request.url).origin + "/v1/admin/review/" + id
+    : "🐾 New donation: " + describe(entry) + tallyLine(s));
   return json(s, 201);
 }
 
 // the app taking back its own row: the id and the token the POST answered
-async function removeOwn(request, env, id) {
+async function removeOwn(request, env, ctx, id) {
   if (env.APP_KEY && request.headers.get("X-PAD-Key") !== env.APP_KEY) {
     return fail("Not from the app.", 403);
   }
   const token = request.headers.get("X-PAD-Edit") || "";
   if (!/^[0-9a-f]{32}$/.test(token)) return fail("Not allowed.", 403);
-  const r = await env.DB.prepare(
+  const row = await env.DB.prepare(
+    "SELECT amount, currency, shelter, country, region, name, show_name, app_version, held " +
+    "FROM donations WHERE id = ? AND edit_token = ? AND removed = 0").bind(id, token).first();
+  if (!row) return fail("No such donation.", 404);
+  await env.DB.prepare(
     "UPDATE donations SET removed = 1 WHERE id = ? AND edit_token = ? AND removed = 0")
     .bind(id, token).run();
-  const changed = r.meta ? r.meta.changes : 0;
-  if (!changed) return fail("No such donation.", 404);
   const s = await summary(env);
   s.id = id;
+  notify(env, ctx, "↩ Taken back by the app that added it: " + describe(row)
+    + (row.held ? " (was held)" : "") + tallyLine(s));
   return json(s);
 }
 
@@ -247,7 +291,7 @@ async function remove(env, id) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "");
     try {
@@ -258,7 +302,7 @@ export default {
         return json(await summary(env), 200, { "cache-control": "public, max-age=60" });
       }
       if (request.method === "POST" && path === "/v1/donate") {
-        return donate(request, env);
+        return donate(request, env, ctx);
       }
       if (path === "/v1/admin/list") {
         if (!isAdmin(request, env)) return fail("Not allowed.", 403);
@@ -272,7 +316,7 @@ export default {
       const m = path.match(/^\/v1\/donate\/([0-9a-f-]{8,40})$/);
       if (request.method === "DELETE" && m) {
         if (isAdmin(request, env)) return remove(env, m[1]);
-        if (request.headers.get("X-PAD-Edit")) return removeOwn(request, env, m[1]);
+        if (request.headers.get("X-PAD-Edit")) return removeOwn(request, env, ctx, m[1]);
         return fail("Not allowed.", 403);
       }
       return fail("Not found.", 404);
@@ -282,4 +326,10 @@ export default {
   },
 };
 
-export { MILESTONES, RATES, HOLD_OVER_USD, validate };
+// For the tests.  A module worker may export only handlers and functions
+// (workerd refuses a constant: "not of type 'function or ExportedHandler'"),
+// so the tables come out through a function.
+export function meta() {
+  return { MILESTONES, RATES, HOLD_OVER_USD };
+}
+export { validate };

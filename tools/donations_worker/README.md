@@ -40,6 +40,23 @@ Until then the app shows the chip with no total and says the total cannot
 be reached when someone tries to add to it (their entry is kept and sent
 once it can).
 
+## Hear about every entry on Discord
+
+In your Discord server: Server Settings, Integrations, Webhooks, New
+Webhook, pick the channel, Copy Webhook URL. Then
+
+```bash
+npx wrangler secret put DISCORD_WEBHOOK
+```
+
+and paste it. From then on the Worker posts a line for every entry ("🐾
+New donation: $30 to Lollypop Farm in New York, US as David · app 1.266.0,
+tally now $4,350 from 62 donations"), for every held one ("⏸ HELD for your
+review: ..." with the curl that approves it), and for every take-back. It
+posts after the app's request has been answered, so a slow or dead webhook
+never slows or fails an entry; without the secret it posts nothing. Names
+and shelters are posted as typed; mentions in them are disarmed.
+
 ## Routes
 
 | | |
@@ -85,10 +102,52 @@ donation in its own currency.
 (500, 1k, 2.5k, 5k, 10k ...). `core/donations.py` holds the same list;
 change both.
 
-## Check it without deploying
+## Prove it, before and after deploying
+
+Three layers, cheapest first:
 
 ```bash
 node --test worker.test.mjs
 ```
 
-runs the handler against an in-memory stand-in for D1.
+runs the handler against an in-memory stand-in for D1 (logic only).
+
+```bash
+npx wrangler d1 execute pad-donations --local --file schema.sql
+npx wrangler dev --local --port 8787
+```
+
+runs the REAL worker.js on a SQLite-backed D1 on this PC, no account
+needed (secrets for it go in `.dev.vars`: `APP_KEY=...`, `ADMIN_KEY=...`,
+`IP_SALT=...`; the file is git-ignored). Then, from the repo root:
+
+```bash
+python scripts/donations_smoke.py http://127.0.0.1:8787 --admin <ADMIN_KEY>
+```
+
+drives the app's own client (core/donations.py) through every call: summary,
+add, take back, the hold on big entries, the review route, the paged list;
+it leaves nothing behind. And
+
+```bash
+python scripts/shot_pad754.py --out C:\tmp\PAD-754_shots --tag live --url http://127.0.0.1:8787
+```
+
+runs the real app against it and adds an entry through the window.
+
+**After `wrangler deploy`**, run the smoke script once against production:
+
+```bash
+python scripts/donations_smoke.py https://pad-donations.<account>.workers.dev --admin <ADMIN_KEY>
+```
+
+(The app key it sends is `DONATIONS_APP_KEY` from core/config.py; if the
+service answers "Not from the app", the `APP_KEY` secret does not match.)
+Then start the app, open Donate, add $1 and take it back from Yours.
+
+What differs in production from the local run: the real Cloudflare edge in
+front (HTTPS with a certificate the app trusts through certifi, the
+visitor's real address for the rate limit, the `max-age=60` on the summary,
+which only a browser would honour and the app does not), D1 on
+Cloudflare's storage instead of a local SQLite file, and the secrets you
+put in with `wrangler secret put`. The code path is the same.

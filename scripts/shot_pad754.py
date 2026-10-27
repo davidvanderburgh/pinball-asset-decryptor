@@ -128,12 +128,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--tag", required=True)
+    ap.add_argument("--url", default="",
+                    help="drive the app against THIS donations service (the real "
+                         "worker.js under `wrangler dev --local`, or production) "
+                         "instead of the seeded stand-in")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
-    fake = Fake().start()
+    service = args.url.rstrip("/") if args.url else Fake().start().url
     scratch = tempfile.mkdtemp(prefix="pad754-")
     proc, url = webui_shot.start_server("", scratch,
-                                        extra_env={"PAD_DONATIONS_URL": fake.url})
+                                        extra_env={"PAD_DONATIONS_URL": service})
     errors = []
     from playwright.sync_api import sync_playwright
     try:
@@ -190,10 +194,11 @@ def main():
                 page.wait_for_selector(".sx-don-mine-row", timeout=15000)
                 time.sleep(2.5)                       # the jackpot has settled
                 shoot("yours")
-                page.click(".sx-don-map-pick button:has-text('United States')")
-                time.sleep(0.8)
-                shoot("map_us")
-                page.click(".sx-don-map-pick button:has-text('World')")
+                if page.query_selector(".sx-don-map-pick"):     # a real service may have no US places yet
+                    page.click(".sx-don-map-pick button:has-text('United States')")
+                    time.sleep(0.8)
+                    shoot("map_us")
+                    page.click(".sx-don-map-pick button:has-text('World')")
                 page.click(".modal .ft button:has-text('All donations')")
                 page.wait_for_selector(".sx-don-hist", timeout=15000)
                 time.sleep(1.0)

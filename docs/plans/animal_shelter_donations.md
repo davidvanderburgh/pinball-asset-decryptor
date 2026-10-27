@@ -101,6 +101,21 @@ an hour, and David can hide any row with the admin key. Currency is converted to
 entry is reported with a fixed table in the Worker; the stored figure never
 moves after, and the list shows the original currency.
 
+## Proven end to end, and told on Discord
+
+Three layers (README): the handler against a fake D1 under node; the REAL
+worker.js on a SQLite-backed D1 under `wrangler dev --local`, driven by
+`scripts/donations_smoke.py` through the app's own client (summary, add,
+take back, the hold and the review route, the paged list, leaving nothing
+behind) and by `scripts/shot_pad754.py --url` through the real window; and
+the same smoke script against production once deployed. The local run
+caught a real production bug: a module worker may export only handlers and
+functions, so the tables the tests read now come out through `meta()`.
+
+The Worker posts to a Discord webhook (`DISCORD_WEBHOOK` secret) on every
+entry, hold (with the approve command) and take-back, after the request is
+answered, so a dead webhook never slows or fails an entry.
+
 ## Deploying
 
 `tools/donations_worker/README.md`. Until the Worker is deployed and its

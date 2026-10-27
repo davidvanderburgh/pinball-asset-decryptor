@@ -9213,7 +9213,7 @@ static unsigned char sw_spin_phase[256]; /* the level the NEXT scan reports    *
 static unsigned sw_spin_scans[256];      /* scans of its node while ripping    */
 static unsigned sw_spin_made[256];       /* how many of them reported MADE     */
 static unsigned long sw_spin_t0[256];    /* pad_ms() when the rip began        */
-static int sw_spin_budget = 200;         /* [swspin] lines; saturates          */
+static int sw_spin_budget = 20000;       /* [swspin] lines; saturates (PAD-764: a replay reads them) */
 
 static int sw_latch_on(void)
 {
@@ -10214,7 +10214,12 @@ static void sw_shm_edges(void)
 {
     static unsigned char prev[256];
     static int primed;
-    static int budget = 2000;
+    /* PAD-764: a recording (runrec.py) is this log, so it has to last a whole
+     * session: David's ten minutes of Godzilla were 315 lines, and 2000 was an
+     * hour's play. Still a bound for a writer bumping gen forever. */
+    static int budget = 200000;
+    static int pause_primed;
+    static unsigned pause_seen;
     static int on = -1;
     char line[160];
     int n, len, count = 0;
@@ -10226,6 +10231,22 @@ static void sw_shm_edges(void)
      * REQUIRE it. pad_ms() first, because the base is armed lazily. */
     (void)pad_ms();
     sw_shm->guest_t0_ms = (unsigned)pad_ms_base;
+    /* PAD-764: THE TIME THE GAME SPENT FROZEN, beside the edges. Every [sw]
+     * stamp is the raw CLOCK_MONOTONIC, but a Pause (padglhost, PAD-204) takes
+     * its length off every clock the game reads, so a replay that times a
+     * paused session's edges on the raw stamps hands every edge after the
+     * pause late by the pause. The total as this boot first finds it (a
+     * Restart game keeps the block, and the total, of the boot before) and
+     * every change after: swreplay.py takes it off the stamps. The guest is
+     * stopped while frozen, so a change is seen when it resumes. */
+    if (!pause_primed || sw_shm->paused_ms != pause_seen) {
+        char pl[96];
+        pause_seen = sw_shm->paused_ms;
+        snprintf(pl, sizeof pl, "[pause] %lu ms frozen %u ms in all%s\n",
+                 pad_ms(), pause_seen, pause_primed ? "" : " (at boot)");
+        pause_primed = 1;
+        logmsg(pl);
+    }
     if (!on || budget <= 0) return;
     sw_shm_merge();
     if (!primed) {

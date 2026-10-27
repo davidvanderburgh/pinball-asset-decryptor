@@ -1601,6 +1601,10 @@ teardown() {
         fi
     fi
 
+    # PAD-764: this boot's switch log, beside the NVRAM its start recorded
+    # (runrec.py). The guest is gone, so the log is whole.
+    [ "${PAD_RECORD:-1}" != 0 ] && python3 "$S/runrec.py" finish "$PAD_LOGDIR" 2>&1
+
     # The card mount, IF THIS RUN MADE IT. cardmount.sh setsid's fuse2fs on
     # purpose - a process-group kill used to take the mount out from under the
     # game it had just started, which the game reports as sitting at "Startup
@@ -2305,6 +2309,19 @@ echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
 # (reboot_game, below) so the game window and the virtual playfield stay open.
 # Everything a start resets before the guest exists is reset again on a reboot.
 launch_game() {
+    # ★ PAD-764: EVERY BOOT IS RECORDED, SO IT CAN BE REPLAYED EXACTLY. The
+    # switch log alone replayed David's session to the millisecond until the
+    # game read what the machine remembered (the last place played, the
+    # audits) and the rig remembered something else. So the title's NVRAM is
+    # copied as the game is about to read it, into a folder of its own under
+    # $PAD_LOGDIR/runs, and the boot's [sw] edges join it when it ends
+    # (teardown, the next Restart game, or the next run's start as a backstop).
+    # FIRST, before game.out goes below: the last boot's log is read from it.
+    # replayrun.sh plays one back; PAD_RECORD=0 records nothing.
+    if [ "${PAD_RECORD:-1}" != 0 ]; then
+        PAD_CARD="${PAD_CARD:-}" python3 "$S/runrec.py" start "$PAD_LOGDIR" "$ROOT" "$GAME" "$LOG" \
+            "${BOOT_KIND:-start}" 2>&1
+    fi
     # PAD_PIVOT=1 boots a checkpointable guest (item 13). run_game.sh does the work;
     # here it only means the guest's log arrives at $ROOT/dump/game.out instead of
     # on stdout, so clear any stale copy before the run and fold the fresh one into
@@ -3302,7 +3319,7 @@ PY
     fi
     cat /proc/sys/kernel/random/uuid > "$ROOT/dump/boot.id" 2>/dev/null || \
         date +%s%N > "$ROOT/dump/boot.id"
-    launch_game
+    BOOT_KIND=restart launch_game
     for i in $(seq 1 240); do
         pad_guest_up && break
         [ "${PAD_SELECT:-}" = 1 ] && [ -f "$ROOT/dump/selecting" ] && break

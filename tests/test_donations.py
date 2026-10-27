@@ -237,6 +237,15 @@ def test_the_view_before_any_total():
     assert v["countries"][0] == {"value": "", "label": "Country (optional)"}
 
 
+
+def test_the_country_list_is_united_states_first_then_a_to_z():
+    labels = [n for _, n in D.COUNTRIES]
+    assert labels[:2] == ["Country (optional)", "United States"]
+    assert labels[-1] == "Somewhere else"
+    rest = labels[2:-1]
+    assert rest == sorted(rest, key=str.casefold) and "United States" not in rest
+    assert len(D.COUNTRY_NAMES) == len(D.COUNTRIES) == 35
+
 def test_the_view_of_a_total():
     summary = {
         "total_usd": 4320, "count": 61,

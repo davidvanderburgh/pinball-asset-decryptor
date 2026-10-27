@@ -3093,7 +3093,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
         "Several modes", "Modes made of blocks", "Modes written in C", "The game's own modes",
         "Cut from a video", "Copy and share", "The rules sheet", "Five things people ask for",
         "Why your mode always gives way", "Sizes", "Before you flash a real machine",
-        "A preview feature"]
+        "Asking for more"]
     bodies = {t: TR.plain(TR.render(b)) for t, b in sections}
     assert all(bodies.values()), [t for t, b in bodies.items() if not b]
     # PAD-380: a table, one row per port, what differs from build to build
@@ -3124,6 +3124,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     assert "MODE_LIMITS.md" not in json.dumps(bodies)          # nothing sends anyone to the file
     assert "seven slots" in bodies["Five things people ask for"]
     assert "Insider Connected" in bodies["Before you flash a real machine"]
+    assert not re.search(r"preview (feature|code|switch)", json.dumps(bodies), re.I)   # PAD-763
     assert "Examples" not in bodies["Making a mode"] and "under Examples" not in json.dumps(bodies)
     assert "as many modes as you make" in bodies["Several modes"] and "counted apart" in bodies["Several modes"]
     for title, body in sections:
@@ -3140,6 +3141,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
     assert "Modes written in C" in shown and "Ball save" in shown and "Godzilla Pro 1.15" in shown
 
 
+@pytest.mark.usefixtures("preview_modes_off")
 def test_modes_help_stays_behind_the_switch_and_its_which_games_never_raises(monkeypatch):
     from pinball_decryptor.core import preview
     from pinball_decryptor.plugins.stern import mode_project as MP

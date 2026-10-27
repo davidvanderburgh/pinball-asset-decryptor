@@ -178,6 +178,7 @@ def test_the_plan_refuses_a_grown_sound_nothing_names_or_without_a_key():
         engine._plan_descriptor_repoint(params, sites)
 
 
+@pytest.mark.usefixtures("preview_modes_off")
 def test_two_grown_sounds_in_one_descriptor_are_both_expected_switch_off():
     """The preview switch off: both keys re-pointed, and the declared duration
     moves by BOTH growths, rounded as a build without the family rounds."""

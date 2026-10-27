@@ -246,6 +246,7 @@ def _dt_days(n):
     return datetime.timedelta(days=n)
 
 
+@pytest.mark.usefixtures("preview_modes_off")
 def test_the_mode_maker_is_hidden_until_a_preview_code_unlocks_it(tmp_path,
                                                                   monkeypatch):
     """The mode maker ships dark (core/preview.py): no Modes tab for Stern
@@ -296,6 +297,7 @@ def test_the_mode_maker_is_hidden_until_a_preview_code_unlocks_it(tmp_path,
         assert not _modes_visible()
 
 
+@pytest.mark.usefixtures("preview_modes_off")
 def test_an_expired_code_turns_the_mode_maker_off_at_the_next_start(
         tmp_path, monkeypatch):
     """Verification happens at start-up (App._load_preview_codes, cached for
@@ -319,6 +321,7 @@ def test_an_expired_code_turns_the_mode_maker_off_at_the_next_start(
         assert preview.enabled("modes") and tabs["modes"]["visible"]
 
 
+@pytest.mark.usefixtures("preview_modes_off")
 def test_the_write_scan_lists_no_mode_rows_with_the_switch_off(
         manufacturers_by_key, tmp_path, monkeypatch):
     """With the switch off a tester's project lists no "Pending (Modes)" or
@@ -396,6 +399,7 @@ def _everything_readable(w):
     return out
 
 
+@pytest.mark.usefixtures("preview_modes_off")
 def test_the_app_without_a_preview_code_names_nothing_of_the_mode_maker(
         tmp_path, monkeypatch):
     """THE CLEAN SURFACE (David, 2026-09-18): a copy of the app with no

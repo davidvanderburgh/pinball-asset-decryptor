@@ -92,7 +92,7 @@ def test_stern_eras_keep_the_menu(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         for era in ("spike1", "whitestar", "spike2"):
             w.call("ui.set_era", era)
-            assert item(w, "preview_features") is not None
+            assert item(w, "check_updates") is not None
             hints = w.state("shellx")["prereq_hints"]
             names = [p.name for p in w.window.current_mfr.prerequisites]
             assert set(hints) == set(names)
@@ -117,6 +117,18 @@ def test_menu_choices():
 
 
 # ---------------------------------------------------------- gear menu
+def test_preview_features_is_offered_only_while_there_is_a_preview(tmp_path, monkeypatch):
+    """PAD-763 released the mode maker, the one preview: the gear menu no longer offers
+    Preview features... with nothing to unlock, and offers it again for a new preview."""
+    from pinball_decryptor.core import preview
+    assert preview.FEATURES == {} and "modes" in preview.RELEASED
+    with web_app(tmp_path, mfr="stern") as w:
+        assert item(w, "preview_features") is None
+    monkeypatch.setattr(preview, "FEATURES", {"next": "Next thing"})
+    with web_app(tmp_path / "again", mfr="stern") as w:
+        assert item(w, "preview_features") is not None
+
+
 def test_gear_menu_keeps_the_tk_cascades(tmp_path):
     """_build_settings_menu's order and cascades: Check automatically ▸,
     Logs ▸ and the prerequisites summary ▸; the plain entries stay
@@ -133,7 +145,7 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
             want.append("disk_space")
         want += ["Logs ▸", "Save automatically ▸", "toggle_scenes_own_colours", "sep",
                  "clear_voice_models", "sep",
-                 "Prerequisites ▸", "sep", "preview_features",
+                 "Prerequisites ▸", "sep",
                  "donations", "view_disclaimer"]
         assert shape == want
         assert not any(it.get("header") for it in items(w))

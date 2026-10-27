@@ -367,8 +367,11 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, DonationsMixin,
         items.append({"label": "Prerequisites", "prereq_summary": True,
                       "submenu": prereq})
         items.append({"sep": True})
-        items.append({"id": "preview_features",
-                      "label": "Preview features…"})
+        from ...core import preview
+        if preview.FEATURES:
+            # only while a version has a preview to unlock (none since PAD-763)
+            items.append({"id": "preview_features",
+                          "label": "Preview features…"})
         items.append({"id": "donations", "label": "Animal shelters…"})
         items.append({"id": "view_disclaimer", "label": "View disclaimer…"})
         self.ctx.store.set("shell", settings_items=items,

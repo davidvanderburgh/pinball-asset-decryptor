@@ -22,9 +22,10 @@ This module is the planning half, testable without a card: the gates, the card c
 asset build, which request the end sound rides on, the manifest, the p2 payload and what the
 log and the change scan say. :mod:`.engine` runs it.
 
-GATES. THE PREVIEW SWITCH comes first: the mode maker ships dark, and a copy of the app
-carries modes only while Settings > Preview features holds a signed code for it
-(:mod:`...core.preview`, :func:`preview_on`). Off, a Write never reads the project's modes
+GATES. THE PREVIEW SWITCH comes first (:mod:`...core.preview`, :func:`preview_on`). The
+mode maker shipped dark behind a signed code until PAD-763, and is in every copy since
+(``preview.RELEASED``), so the switch is always on; the off path stays for a feature that
+is a preview again. Off, a Write never reads the project's modes
 at all - it says in one sentence that they are left out - and takes the path a build
 without the family takes. ``PAD_STERN_MODES=0`` leaves modes out of every build. A mode build needs an image
 file and a host that can write files into ext4 (a direct-SD write cannot add a file). A

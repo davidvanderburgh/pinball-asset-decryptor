@@ -16,6 +16,9 @@ import pytest
 from tests.webui_harness import web_app
 from tests.mode_examples import form as MX  # noqa: E402
 
+#: the switch as it was while the mode maker was a preview (it is released since PAD-763)
+pytestmark = pytest.mark.usefixtures("preview_modes_off")
+
 #: the preview feature's words, as the browser sweep searched them
 WORDS = re.compile(r"\b(modes?|mode maker|mode editor|try it|code modes?|film cutter|"
                    r"stock modes?)\b", re.I)

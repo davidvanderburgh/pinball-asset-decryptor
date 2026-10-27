@@ -146,6 +146,16 @@ def preview_modes_on(monkeypatch):
 
 
 @pytest.fixture
+def preview_modes_off(monkeypatch):
+    """The mode maker back as a PREVIEW, switched off: how every copy without a code ran
+    it until PAD-763 released it (``preview.RELEASED``). The tests of the switch's off
+    path - which a feature that is a preview again takes - run under this."""
+    from pinball_decryptor.core import preview
+    monkeypatch.setattr(preview, "RELEASED", {})
+    monkeypatch.setattr(preview, "FEATURES", {"modes": "Mode maker"})
+
+
+@pytest.fixture
 def not_macos(monkeypatch):
     """A test of what Windows and Linux do (the SD card size option, the
     games-partition room measured through the kernel's driver, the texts

@@ -7,6 +7,6 @@ compatibility_date = "2026-10-01"
 binding = "DB"
 database_name = "pad-donations"
 # `wrangler d1 create pad-donations` prints the id; paste it here.
-database_id = "PASTE-THE-DATABASE-ID-HERE"
+database_id = "650cca0f-6809-4d1d-8b83-ef80427e2f99"
 
 # Secrets (never in this file): wrangler secret put APP_KEY / ADMIN_KEY / IP_SALT

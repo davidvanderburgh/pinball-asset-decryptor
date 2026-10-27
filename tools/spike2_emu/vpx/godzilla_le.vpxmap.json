@@ -55,7 +55,7 @@
     ],
     "1":  {"coil": [8, 1], "name": "TROUGH", "callback": "SolRelease"},
     "2":  {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "Auto_Plunger"},
-    "3":  {"coil": [8, 8], "name": "RIGHT SCOOP", "callback": "bsScoop.ExitSol_On"},
+    "3":  {"coil": [8, 8], "name": "RIGHT SCOOP", "callback": "bsScoop.SolOut"},
     "4":  {"coil": [9, 3], "name": "BRIDGE", "callback": "SolRampDiverter"},
     "5":  {"coil": [9, 6], "name": "GODZILLA MAGNET", "magnet": "mMagnaSave2"},
     "6":  {"coil": [9, 7], "name": "MECHAGODZILLA MAGNET", "magnet": "mMechaMagnet"},

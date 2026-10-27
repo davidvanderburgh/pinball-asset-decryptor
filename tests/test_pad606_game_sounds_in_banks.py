@@ -404,3 +404,49 @@ def test_a_long_mode_song_gets_the_room_left_beside_the_other_banks(monkeypatch,
     assert any("get a bank of their own" in m for m in lines)
     with pytest.raises(RuntimeError, match=r"SONG's .* beside the 2 other bank\(s\)"):
         plan(70)
+
+
+def test_longer_sounds_no_bank_can_take_are_trimmed_beside_the_banks_not_refused(
+        monkeypatch, tmp_path):
+    """PAD-777 (1.273.4): Iron Maiden's songs are intro/song/outro sequences no bank sid
+    can play, so the user's longer songs stay in image.bin, trimmed to the 2 GB after the
+    banks are planned.  Counted whole there (2,428 MB) they left a music mode's file 0 MB
+    and the Write was refused; now the banks are planned beside the rest and the longer
+    songs are trimmed to what memory leaves beside them (plan.image_room)."""
+    img = _image(tmp_path)
+    mb = 1_000_000
+    frames = lambda n: (n * mb - 4096) // 4 - 2000          # a stereo body of about n MB
+    songs = {i: (100, frames(30)) for i in (1, 2, 3)}       # 90 MB of longer songs
+    grows = dict(songs)
+    grows[8] = (100, frames(20))                             # a 20 MB music mode file
+    params = [{"idx": i, "chan": 2, "length": 100, "findkey": bytes([i]) * 8} for i in grows]
+    byidx = {p["idx"]: p for p in params}
+    used = [{"idx": 8, "music": True, "sid": 618, "key": "music", "name": "OPTION B"}]
+    why = {i: "sound id %d plays it as one of 2 parts" % (900 + i) for i in songs}
+    monkeypatch.setenv(BB.BANK_CAP_ENV, "1000")
+    monkeypatch.setattr(SB, "MAPPED_MAX", 100 * mb)
+    monkeypatch.setattr(SB, "BANK_SLICE", 10 * mb)
+    monkeypatch.setattr(E, "_read_stock_directory",
+                        lambda gr, im: MD.Directory(b"".join(_rec(i) for i in range(9)), 9, 0x9000, 0))
+    lines = []
+    p, edits2, grows2 = E._plan_sound_banks(
+        "game", str(img), params, {i: "s.wav" for i in grows}, grows, dict(songs), used,
+        _Reader(), None, None, lambda m, *a: lines.append(m), game_sids={}, game_why=why)
+    assert [e.idx for _c, g in p.banks for e in g] == [8] and sorted(grows2) == [1, 2, 3]
+    bank = SB.bank_bytes([e.body_bytes for _c, g in p.banks for e in g])
+    assert p.image_room == 100 * mb - bank
+    # the trim keeps two of the songs whole beside the bank, and says why
+    kept = E._grows_within_bank_limit(grows2, byidx, str(img), lambda m, *a: lines.append(m),
+                                      bank_why=why, mem_room=p.image_room)
+    assert sorted(kept) == [1, 2]
+    assert any("beside the sound banks this build adds it can come to only" in m for m in lines)
+    assert any("a sound bank could not take them instead (idx 3: sound id 903" in m
+               for m in lines)
+    # a music mode file that stays in image.bin takes what is left of that room
+    sm = {5: (100, frames(30))}
+    byidx[5] = {"idx": 5, "chan": 2, "length": 100, "findkey": b"\x05" * 8}
+    u = [{"host": 5, "mode": 2, "rel": "audio/Idx0005.wav", "name": "x"}]
+    g3, _e3, u3 = E._sound_modes_fit({**kept, **sm}, sm, {5: "s.wav"}, u, byidx, str(img),
+                                     lambda m, *a: lines.append(m), mem_room=p.image_room)
+    assert 5 not in g3 and u3 == []
+    assert any("it may come to beside the sound banks" in m for m in lines)

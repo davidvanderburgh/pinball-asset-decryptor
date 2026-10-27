@@ -8325,10 +8325,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                 kept_at=lambda limit: set(_grows_kept_at(
                                     _user_grows, _byidx, img_path, limit,
                                     priority=_prio, reserved=_forced)))
+                        # PAD-777: and beside the sound banks the game can
+                        # play from at once (bank_plan.image_room)
                         grows = dict(_grows_within_bank_limit(
                             _user_grows, _byidx, img_path, log,
                             priority=_prio, room=_room, reserved=_forced,
-                            bank_why=_game_why))
+                            bank_why=_game_why,
+                            mem_room=getattr(bank_plan, "image_room", None)))
                         grows.update(_forced)
                         grows.update(_sm_grows)
                     if _sm_grows:
@@ -8336,7 +8339,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         # left after the sounds the game plays in every mode
                         grows, audio_edits, sound_mode_used = _sound_modes_fit(
                             grows, _sm_grows, audio_edits, sound_mode_used,
-                            {p["idx"]: p for p in params}, img_path, log)
+                            {p["idx"]: p for p in params}, img_path, log,
+                            mem_room=getattr(bank_plan, "image_room", None))
                     # PAD-176: every grow is settled (the modes' own sounds
                     # included), so the bank's exact length is known: the
                     # whole budget is checked HERE, before the bank is staged,
@@ -10937,18 +10941,20 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
     return audio_edits, grows, used
 
 
-def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
+def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log, mem_room=None):
     """PAD-494: the music modes' files take what the sound bank has left (the game's 2 GB) after
     every sound the game plays in each mode; one that does not fit is left out, and that slot
-    plays its own sound in that mode. Returns ``(grows, audio_edits, used)``."""
+    plays its own sound in that mode. Returns ``(grows, audio_edits, used)``.  PAD-777:
+    *mem_room*, the most image.bin may come to beside the build's sound banks, when less."""
     from . import sound_modes as _SMo
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
     # PAD-593: past an earlier build's bodies, as the grow lays it out
     md_off, count = MD.image_grow_geometry(_lp(img_path))
     start = [_grown_body_bytes(byidx[i], g[1]) for i, g in sorted(grows.items()) if i not in sm_grows]
+    limit = MAX_IMAGE_BYTES if mem_room is None else min(MAX_IMAGE_BYTES, int(mem_room))
     kept, cut, _bodies = _fit_grows(sorted(sm_grows), sm_grows, byidx, md_off, count,
-                                    MAX_IMAGE_BYTES, start)
+                                    limit, start)
     if not cut:
         return grows, audio_edits, used
     grows = {i: g for i, g in grows.items() if i not in cut}
@@ -10956,10 +10962,12 @@ def _sound_modes_fit(grows, sm_grows, audio_edits, used, byidx, img_path, log):
     out = []
     for u in used:
         if int(u["host"]) in cut:
-            log("%s: %s is left out: the sound bank would pass the %d MB the game can open. That "
+            log("%s: %s is left out: the sound bank would pass the %d MB %s. That "
                 "slot plays its own sound %s." % (
                     _SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u["name"]),
-                    MAX_IMAGE_BYTES // 10**6, _SMo.when(u["mode"]).replace("at its turn", "in its turn")
+                    limit // 10**6, "the game can open" if limit == MAX_IMAGE_BYTES else
+                    "it may come to beside the sound banks the game can play from at once",
+                    _SMo.when(u["mode"]).replace("at its turn", "in its turn")
                     ), "warning")
             continue
         out.append(u)
@@ -18052,7 +18060,7 @@ def _grows_kept_at(grows, byidx, img_path, limit, priority=None,
 
 
 def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
-                             room=None, reserved=None, bank_why=None):
+                             room=None, reserved=None, bank_why=None, mem_room=None):
     """*grows* less every sound whose longer copy would take the sound bank
     past :data:`~.spike2.emulator.MAX_IMAGE_BYTES`, the largest file the game
     can open; those are trimmed to fit and named in one log line.  A budget
@@ -18086,7 +18094,11 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
 
     *bank_why* ``{idx: reason}`` says why a sound the 2 GB trims could not go
     into an extra sound bank instead (PAD-606: the ones that could are no
-    longer in *grows* by now)."""
+    longer in *grows* by now).
+
+    *mem_room* (PAD-777, the build's sound bank plan ``image_room``): the most
+    image.bin may come to beside the sound banks the game can play from at
+    once, when that is less than the 2 GB."""
     if not grows:
         return grows
     from . import card_size as _cs
@@ -18099,9 +18111,13 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
     start = [_grown_body_bytes(byidx[i], reserved[i][1])
              for i in sorted(reserved)]
     limit = MAX_IMAGE_BYTES
-    card_binds = room is not None and room.limit < MAX_IMAGE_BYTES
+    mem_binds = mem_room is not None and int(mem_room) < limit
+    if mem_binds:
+        limit = int(mem_room)
+    card_binds = room is not None and room.limit < limit
     if card_binds:
         limit = room.limit
+        mem_binds = False
     kept, cut, bodies = _fit_grows(order, grows, byidx, md_off, count, limit,
                                    start)
     now = _grown_bank_bytes(md_off, count, bodies)
@@ -18121,7 +18137,13 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
            % (len(kept), " beside %d other sound(s) this build adds whole"
               % len(reserved) if reserved else "", now // 10**6,
               MAX_IMAGE_BYTES // 10**6))
-    if card_binds:
+    if mem_binds:
+        msg += (", but beside the sound banks this build adds it can come to only "
+                "%d MB: the game holds image.bin and every sound bank it is playing "
+                "a sound from in memory at once, %d MB at most, which leaves room "
+                "for about %.1f more minute(s) of stereo sound (or twice that in "
+                "mono)." % (limit // 10**6, _SB_MAPPED_MAX() // 10**6, left_min))
+    elif card_binds:
         msg += (", but the card's games partition has room for it to come to "
                 "only %d MB (%s), which leaves room for about %.1f more "
                 "minute(s) of stereo sound (or twice that in mono)."
@@ -18152,6 +18174,22 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
                       % (_cs.words(bigger),
                          _cs.bigger_card(bigger, fixed=room.fixed))
                       if bigger else ""))
+        elif mem_binds:
+            why = ("the game holds image.bin and every sound bank it is playing a "
+                   "sound from in memory at once, %d MB at most, so beside the "
+                   "banks this build adds (the music modes' files, the modes' own "
+                   "sounds and the longer sounds a bank can take) image.bin can "
+                   "come to only %d MB, and keeping them whole as well would pass "
+                   "that (it comes to %d MB%s, room for about %.1f more minute(s) "
+                   "of stereo sound or twice that in mono)"
+                   % (_SB_MAPPED_MAX() // 10**6, limit // 10**6, now // 10**6,
+                      " with the %d other longer sound(s) kept whole" % len(kept)
+                      if kept else "", left_min))
+            nob = ["idx %d: %s" % (i, (bank_why or {})[i]) for i in sorted(cut)
+                   if i in (bank_why or {})]
+            if nob:
+                why += ("; a sound bank could not take them instead (%s)"
+                        % "; ".join(nob))
         else:
             why = ("the game can't open a sound bank bigger than %d MB, and "
                    "keeping them whole as well would pass that (the bank comes "
@@ -18168,6 +18206,11 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
                         "it takes the rest (%s)" % "; ".join(nob))
         log(*_trimmed_notice(cut, why))
     return kept
+
+
+def _SB_MAPPED_MAX():
+    from .spike2 import soundbank as SB
+    return SB.MAPPED_MAX
 
 
 def _chain_order(grows):
@@ -19305,6 +19348,9 @@ class _BankPlan(object):
         # ``{host idx: game sid}``, and once built ``{game sid: bank sid}``
         self.game = {}
         self.banked = {}
+        # PAD-777: the most image.bin may come to beside the banks the game can play
+        # from at once (soundbank.MAPPED_MAX less the biggest of them)
+        self.image_room = None
         # the card's banks' sid maps, {bank sid: game sid} (an earlier Write's)
         self.old_map = {}
         # PAD-608: the music modes' files and the sounds in turn in the banks,
@@ -19496,6 +19542,13 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         return None, audio_edits, grows
     fixed = {i: g for i, g in grows.items() if i not in bankable}
     start = [_grown_body_bytes(byidx[i], g[1]) for i, g in sorted(fixed.items())]
+    # PAD-777: the user's longer sounds that stay in image.bin are trimmed to fit after
+    # this (_grows_within_bank_limit, to plan.image_room), so the banks are planned beside
+    # the rest alone: counted whole, an Iron Maiden card's longer songs (its songs are
+    # intro, song and outro sequences no bank sid can play) made image.bin 2,428 MB, past
+    # the 2,147 MB the trim brings it to anyway, and left a music mode's file 0 MB.
+    hard = [_grown_body_bytes(byidx[i], g[1]) for i, g in sorted(fixed.items())
+            if i not in user_grows]
     kept, spilled = BB.plan_spill({i: grows[i] for i in bankable}, bankable, byidx,
                                   img_path, start=start)
     if not spilled:
@@ -19544,7 +19597,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     while True:
         # a bank the emulator can serve beside the staged image.bin (its window
         # follows image.bin's in the game's 32-bit address space)
-        staged = _grown_bank_bytes(md_off, count, start + [
+        staged = _grown_bank_bytes(md_off, count, hard + [
             _grown_body_bytes(byidx[i], g[1]) for i, g in sorted(kept.items())])
         slice_max = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged), SB.BANK_SLICE)
         limit = min(slice_max, max(0, SB.MAPPED_MAX - staged) // SB.SOUND_CHANNELS)
@@ -19612,8 +19665,8 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             "The game holds image.bin and every sound bank it is playing a sound from in "
             "memory at once (up to one for each of its %d sound channels), and here they could "
             "come to %d MB (image.bin %d MB with the card's own sounds, the banks %d MB), past "
-            "the %d MB a machine has been seen to hold (Stern's own largest). Fewer or shorter "
-            "sounds of the modes' own have to stay in image.bin."
+            "the %d MB a machine has been seen to hold (Stern's own largest). The modes' own "
+            "sounds or the music modes' files have to be fewer or shorter."
             % (SB.SOUND_CHANNELS, (staged + live) // 10**6, staged // 10**6, live // 10**6,
                SB.MAPPED_MAX // 10**6))
     kinds = [w for w, on in (
@@ -19660,6 +19713,9 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
                ", ".join(_named(e.idx) for e in group)), "info")
     plan = _BankPlan(banks, wavs, spilled, dir_rel)
     plan.game = {i: game_sids[i] for i in spilled if i in game_sids}
+    # PAD-777: the most image.bin may come to beside the banks: the user's longer sounds
+    # that stay in it are trimmed to this
+    plan.image_room = SB.MAPPED_MAX - live
     plan.sm_frags = {i: sm_frags[i] for i in spilled if i in sm_frags}
     return plan, audio_edits, grows
 

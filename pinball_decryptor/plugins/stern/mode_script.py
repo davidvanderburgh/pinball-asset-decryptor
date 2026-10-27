@@ -36,7 +36,7 @@ VALUE_FIELDS = {
     "score": {"points"}, "set": {"value"}, "change": {"by"}, "set_hits": {"value"}, "timer_start": {"ms"},
     "words": {"value"}, "light_shot": {"rate"}, "add_time": {"seconds"}, "set_time": {"seconds"},
     "hud_text": {"value"}, "hud_counter": {"value"}, "hud_gauge": {"value"}, "hud_award": {"value"},
-    "hud_progress": {"value"},
+    "hud_progress": {"value"}, "roster_progress": {"done", "of"},
     "hold": {"ms"}, "scoop_hold": {"ms"}, "shake": {"ms"},
 }
 NUM_KINDS = ("num", "var", "hits", "mode_hits", "scored", "total", "secs_left", "balls", "player", "op", "timer_left",

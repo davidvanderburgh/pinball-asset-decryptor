@@ -77,10 +77,41 @@ def test_the_c_joins_the_screen_instead_of_claiming_the_slot():
     assert "BATTLE_MORE[1] = { 0 };" in BM.to_c(plain, "mothra")
 
 
+def lit_monster():
+    """monster() with lights: the webs at its start, a Building lit by its timer, one lit only while idle, one dark"""
+    p = monster()
+    p["scripts"][0]["do"] += [{"op": "light_shot", "shot": "Left ramp", "color": "#b040ff", "pattern": "chase"},
+                              {"op": "light_shot", "shot": "Right ramp", "color": "#000000", "pattern": "solid"}]
+    p["scripts"].append({"hat": {"kind": "every", "seconds": 5}, "do": [
+        {"op": "light_shot", "shot": "Building", "color": "#ffb000", "pattern": "blink"},
+        {"op": "light_shot", "shot": "Left ramp", "color": "#ffffff", "pattern": "blink"}]})
+    p["scripts"].append({"hat": {"kind": "shot", "shot": "Right ramp", "when": "idle"}, "do": [
+        {"op": "light_shot", "shot": "Right ramp", "color": "#ffd000", "pattern": "blink"}]})
+    return p
+
+
+def test_its_tile_names_the_shots_it_lights(tmp_path):
+    """PAD-733 (David, v29: "the respective indicators need to be blinking on the play field"): the shots its blocks
+    light while it runs - not a dark one, not one an idle script lights - are what its tile blinks on the playfield"""
+    p = lit_monster()
+    assert BM.preview_shots(BM.normalize(p)) == ["Left ramp", "Building"]
+    c = BM.to_c(p, "mothra")
+    names = re.search(r"SHOT_NAMES\[\d+\] = \{(.*?)\};", c).group(1)
+    idx = re.search(r"MORE_SHOTS\[2\] = \{ (\d+), (\d+) \};", c).groups()
+    shots = [s.strip().strip('"') for s in names.split(",")]
+    assert [shots[int(i)] for i in idx] == ["Left ramp", "Building"]
+    assert "pm_roster_more_shots(m);" in c
+    assert "pm_roster_more_shots" not in BM.to_c(monster(), "mothra")        # it lights none: the game's lights
+    from tests.test_stern_block_battle import play
+    out = play(tmp_path, p, "secs", 1, slug="mothra")
+    assert "ROSTER SHOTS 00000000_" in out and "ROSTER SHOTS 00000000_00000000" not in out
+
+
 def test_the_c_only_calls_what_the_header_declares():
     declared = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", (SDK / "pad_mode.h").read_text(encoding="utf-8")))
-    used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", BM.to_c(monster(), "mothra")))
-    assert used <= declared, used - declared
+    for p in (monster(), lit_monster()):
+        used = set(re.findall(r"\b(pm_[a-z_]+)\s*\(", BM.to_c(p, "mothra")))
+        assert used <= declared, used - declared
 
 
 def test_a_picked_monster_plays_and_gives_the_battle_back(tmp_path):
@@ -197,7 +228,24 @@ PRELUDE = r"""
 #include "pad_mode.h"
 #define N_ROSTER 16
 static const struct pm_mode *current;
-static unsigned can = PM_CAN_SCREENS;
+static unsigned can = PM_CAN_SCREENS | PM_CAN_MESSAGES | PM_CAN_LAMPS;
+/* PAD-733: the port's inserts (a shot each, the Action button not on the playfield, a name insert of no shot) and
+ * the runtime's hold of them, said */
+#define N_LAMPS 8
+struct lamp { char name[40]; unsigned long long shot; int x, y; };
+static struct lamp lamps[N_LAMPS] = { { "LEFT RAMP", 0x1, 69, 272 }, { "RIGHT RAMP", 0x2, 199, 189 },
+                                      { "BUILDING", 0x4, 123, 202 }, { "ACTION BUTTON", 0x8, -1, -1 },
+                                      { "RODAN", 0, 178, 421 } };
+static int n_lamps = 5;
+static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned ms, const char *what)
+{
+    int j;
+    printf("LAMPS %s (%s):", what, current ? current->name : "-");
+    for (j = 0; j < n; j++) printf(" %s", lamps[list[j]].name);
+    printf(" %06x %d %u\n", rgb, pattern, ms);
+    return n;
+}
+int pm_lamp_release_all(void) { printf("LAMPS RELEASED (%s)\n", current ? current->name : "-"); return 1; }
 static int (*roster_fn[N_ROSTER])(unsigned slot);
 static const struct pm_mode *roster_by[N_ROSTER];
 static int roster_resuming;
@@ -216,9 +264,25 @@ void *pm_node(const char *scene, const char *path)
   for (i = 0; i < n_nodes; i++) if (!strcmp(node_names[i], path)) return node_names[i];
   snprintf(node_names[n_nodes], 120, "%s", path); return node_names[n_nodes++]; }
 void pm_show(void *node, int on) { const char *p = strrchr((const char *)node, '.'); printf("%s %s\n", on ? "SHOW" : "HIDE", p ? p + 1 : (const char *)node); }
+static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
+static int no_prog;                                  /* a card built before the tiles' counts */
+void *pm_text(const char *scene, const char *path) { return no_prog && strstr(path, "_Prog") ? 0 : pm_node(scene, path); }
+void pm_set_text(void *t, const char *w) { const char *p = strrchr((const char *)t, '.'); printf("WORDS %s: %s\n", p ? p + 1 : (const char *)t, w); }
 int pm_snprintf(char *o, unsigned long cap, const char *fmt, ...)
 { va_list ap; int n; va_start(ap, fmt); n = vsnprintf(o, cap, fmt, ap); va_end(ap); return n; }
 static unsigned long now_ms;
+/* PAD-733: the city screen's rematch line - the battle rule's seven slot records (12 bytes, the battle's id at +4: 12 +
+ * the slot), the city each player is in and the battle it holds for them, the table's line count */
+static long rematch_line = -1;
+static unsigned slot_recs[21] = { 0, 12, 0, 0, 13, 0, 0, 14, 0, 0, 15, 0, 0, 16, 0, 0, 6, 0, 0, 17, 0 };
+static unsigned battle_rule[4], held_ids[4], city_now, line_count = 3949;
+static unsigned rw(unsigned a) { return *(const unsigned *)(unsigned long)a; }
+static unsigned roster_city_of(unsigned p) { return city_now; }
+static unsigned roster_city_rec(unsigned idx, long vec_at, unsigned rec)
+{ return vec_at == 56 ? (unsigned)(unsigned long)held_ids : 0; }
+static int message_borrow(unsigned id, unsigned idx, const char *words)
+{ printf("BORROW %u '%s'\n", idx, words); return 1; }
+void pm_message_restore(unsigned id) { printf("RESTORE %u\n", id & 0x7fffffffu); }
 unsigned long pm_ms(void) { return now_ms; }
 int pm_in_game(void) { return in_game; }
 unsigned pm_player(void) { return up; }
@@ -228,6 +292,11 @@ long pm_port_value(const char *n, long fb)
     if (!strcmp(n, "roster_left_sound")) return 271;
     if (!strcmp(n, "roster_right_sound")) return 272;
     if (!strcmp(n, "roster_cursor_at")) return 16;
+    if (!strcmp(n, "roster_rematch_line")) return rematch_line;
+    if (!strcmp(n, "roster_city_battle_vec_at")) return 56;
+    if (!strcmp(n, "roster_vec_at")) return 8;
+    if (!strcmp(n, "roster_record_size")) return 12;
+    if (!strcmp(n, "roster_id_at")) return 4;
     return fb;
 }
 const char *pm_port_text(const char *n)
@@ -239,6 +308,8 @@ const char *pm_port_text(const char *n)
                                     "T2_2_Artbox", "T2_3_Artbox" };
     if (!strncmp(n, "roster_tile_", 12)) return tiles[atoi(n + 12)];
     if (!strcmp(n, "roster_box_path")) return "SelectOverlay_Textbox.";
+    static const char *cities[4] = { "TOKYO", "PARIS", "LONDON", "N.Y." };   /* PAD-733 */
+    if (!strncmp(n, "roster_city_word_", 17)) return cities[atoi(n + 17) & 3];
     if (!strncmp(n, "roster_box_", 11)) return boxes[atoi(n + 11)];
     return 0;
 }
@@ -258,11 +329,34 @@ static unsigned fn(const char *n)
     if (!strcmp(n, "roster_switch_held")) return (unsigned)(unsigned long)g_held;
     return 0;
 }
-static unsigned data(const char *n) { return 0x1000; }
+/* PAD-733: the screen's portrait state word and the place shown (`pstate`), when the port has it (`portrait`) */
+static unsigned portrait[2] = { 4, 0 };
+static int portrait_on;
+static unsigned g_step(unsigned a, unsigned b, unsigned c, unsigned d) { printf("STEP state %u\n", portrait[0]); return 0; }
+static unsigned game_pick;                           /* PAD-733: where the game's own open puts its cursor */
+static unsigned g_open(unsigned a, unsigned b, unsigned c, unsigned d) { screen_obj[4] = game_pick; return 0; }
+static unsigned data(const char *n)
+{
+    if (!strcmp(n, "roster_portrait_state")) return portrait_on ? (unsigned)(unsigned long)portrait : 0;
+    if (!strcmp(n, "message_count")) return (unsigned)(unsigned long)&line_count;
+    if (!strcmp(n, "rule_battle")) { battle_rule[2] = (unsigned)(unsigned long)slot_recs; return (unsigned)(unsigned long)battle_rule; }
+    return 0x1000;
+}
 """
 
 DRIVER = r"""
 static const struct pm_mode A = { "A", 0, 0, 0, 0, 0 };
+/* each monster's own mode (PAD-733: a mode reports the count of ITS monster), by name */
+static struct pm_mode own_modes[16];
+static int n_own;
+static const struct pm_mode *mode_of(const char *name)
+{
+    int j;
+    for (j = 0; j < n_own; j++) if (!strcmp(own_modes[j].name, name)) return &own_modes[j];
+    if (n_own >= 16) return &A;
+    own_modes[n_own].name = name;
+    return &own_modes[n_own++];
+}
 static int nope;
 static int pick(unsigned slot)
 {
@@ -279,9 +373,9 @@ int main(int argc, char **argv)
         const char *c = argv[k];
         regs[0] = (unsigned)(unsigned long)screen_obj;
         if (!strcmp(c, "join")) { int s = atoi(argv[++k]); const char *n = argv[++k]; char page[64];
-            snprintf(page, sizeof page, "PadSel_%s", n); current = &A;
-            printf("JOIN %d\n", pm_roster_more((unsigned)s, n, page, 900 + s, pick)); }
-        else if (!strcmp(c, "leave")) { current = &A; pm_roster_more_leave(argv[++k]); }
+            snprintf(page, sizeof page, "PadSel_%s", n); current = mode_of(n);
+            printf("JOIN %d\n", pm_roster_more((unsigned)s, n, page, 900 + s, pick)); current = &A; }
+        else if (!strcmp(c, "leave")) { current = mode_of(argv[k + 1]); pm_roster_more_leave(argv[++k]); current = &A; }
         else if (!strcmp(c, "open")) { screen_obj[4] = (unsigned)atoi(argv[++k]); on_roster_open(regs); }
         else if (!strcmp(c, "right") || !strcmp(c, "left") || !strcmp(c, "action")) {
             regs[1] = c[0] == 'r' ? 139 : c[0] == 'l' ? 137 : 34;
@@ -297,6 +391,22 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "resume")) { int s = atoi(argv[++k]); roster_resuming = 1; current = roster_by[s];
             printf("RESUME %d\n", roster_fn[s] ? roster_fn[s]((unsigned)s) : -1); current = 0; roster_resuming = 0; }
         else if (!strcmp(c, "tick")) more_tick();
+        else if (!strcmp(c, "portrait")) { portrait_on = 1; more_portrait_orig = g_step; }
+        else if (!strcmp(c, "count")) {                  /* count <monster> <done> <of>: its mode reports its tile */
+            const char *w = argv[++k]; long d = atol(argv[++k]), o = atol(argv[++k]);
+            current = mode_of(w);
+            printf("COUNT %d\n", pm_roster_more_progress(d, o)); current = &A; }
+        else if (!strcmp(c, "shots")) {                  /* shots <monster> <mask>: its mode's shots (PAD-733) */
+            const char *w = argv[++k]; unsigned long long m = strtoull(argv[++k], 0, 0);
+            current = mode_of(w);
+            printf("SHOTS %d\n", pm_roster_more_shots(m)); current = &A; }
+        else if (!strcmp(c, "player")) up = (unsigned)atoi(argv[++k]);
+        else if (!strcmp(c, "gameopen")) {               /* gameopen <slot>: the game's open, its cursor on <slot> */
+            game_pick = (unsigned)atoi(argv[++k]); more_open_orig = g_open;
+            more_open_wrap(regs[0], 0, 0, 0); printf("OPENED cursor %u\n", screen_obj[4]); }
+        else if (!strcmp(c, "noprog")) no_prog = 1;
+        else if (!strcmp(c, "pstate")) { portrait[0] = (unsigned)atoi(argv[++k]); portrait[1] = (unsigned)atoi(argv[++k]); }
+        else if (!strcmp(c, "step")) more_portrait_step(regs[0], screen_obj[4], 0, 0);   /* the game's portrait step */
         else if (!strcmp(c, "ms")) now_ms = strtoul(argv[++k], 0, 10);
         else if (!strcmp(c, "MARK")) puts("MARK");
         else if (!strcmp(c, "lost")) more_over(up, 0);
@@ -307,6 +417,9 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "nocallouts")) no_callouts = 1;
         else if (!strcmp(c, "nope")) nope = 1;
         else if (!strcmp(c, "gameover")) in_game = 0;
+        else if (!strcmp(c, "rematch")) rematch_line = atol(argv[++k]);
+        else if (!strcmp(c, "city")) city_now = (unsigned)atoi(argv[++k]);
+        else if (!strcmp(c, "holds")) held_ids[up - 1] = (unsigned)atoi(argv[++k]);
         else if (!strcmp(c, "ball_end")) more_ball_end();
         else if (!strcmp(c, "slots")) { int s; for (s = 0; s < 7; s++) printf("SLOT%d %s\n", s, roster_by[s] ? roster_by[s]->name : "-"); }
     }
@@ -382,6 +495,123 @@ def test_the_games_guards_and_chords_stay_the_games(tmp_path):
     assert "KEY right vetoed 0" in out                             # no new monsters: the game's own walk
 
 
+def test_a_monster_left_for_another_place_stays_through_the_games_portrait_out(tmp_path):
+    """PAD-733 (David, v24: "briefly showing the wrong character when transitioning with the right flipper"): the game's
+    portrait goes out (state 5) before the next place's comes in (3), and the out plays on the place a new monster
+    stands on - BIOLLANTE's under KUMONGA. The monster stays, its place's portrait hidden, until the step that starts
+    the in; at most 1 s."""
+    out = menu(tmp_path, *THREE, "portrait", "pstate", 4, 0, "tick", "open", 0, "right", "tick", "MARK",
+               "right", "tick", "pstate", 5, 0, "tick", "MARK", "pstate", 3, 0, "step")
+    on, going, came = out.split("MARK")
+    assert "SHOW PadSel_KUMONGA_Portrait" in on.split("KEY right vetoed 1 cursor 0")[-1]   # no out: drawn at once
+    assert "KEY right vetoed 1 cursor 1" in going
+    assert "HIDE PadSel_KUMONGA_Portrait" not in going and "SHOW EbirahFullBody_instance" not in going
+    assert "HIDE PadSel_KUMONGA_Portrait" in came and "SHOW EbirahFullBody_instance" in came
+    assert "the game's portrait of slot 0 is out" in came
+    # the game's step never comes: let go after a second
+    out = menu(tmp_path, *THREE, "portrait", "pstate", 4, 0, "tick", "open", 0, "right", "tick", "right", "ms", 500,
+               "tick", "MARK", "ms", 1500, "tick")
+    held, late = out.split("MARK")
+    assert "HIDE PadSel_KUMONGA_Portrait" not in held.split("KEY right vetoed 1 cursor 1")[-1]
+    assert "HIDE PadSel_KUMONGA_Portrait" in late
+    # a port without the state word: at once, as before
+    out = menu(tmp_path, *THREE, "tick", "open", 0, "right", "tick", "right", "tick")
+    assert "HIDE PadSel_KUMONGA_Portrait" in out.split("KEY right vetoed 1 cursor 1")[-1]
+
+
+def test_a_monster_arriving_from_another_place_waits_for_its_portrait_out(tmp_path):
+    """PAD-733 (his recording, GIGAN -> MINILLA on the left flipper: GIGAN's name going out showed round MINILLA's): a
+    monster arriving from another place is drawn in the step that starts its own place's in."""
+    out = menu(tmp_path, *THREE, "portrait", "pstate", 4, 1, "tick", "open", 1, "left", "tick", "pstate", 5, 1, "tick",
+               "MARK", "pstate", 3, 1, "step")
+    waiting, came = out.split("MARK")
+    assert "the cursor is on KUMONGA" in waiting and "KEY left vetoed 1 cursor 0" in waiting
+    assert "SHOW PadSel_KUMONGA_Portrait" not in waiting and "HIDE EbirahFullBody_instance" not in waiting
+    assert "SHOW PadSel_KUMONGA_Portrait" in came and "HIDE EbirahFullBody_instance" in came
+    assert "KUMONGA is drawn as its place's portrait comes in" in came
+    # from its own place (KAMACURAS stands in slot 1's): no out, drawn at once
+    out = menu(tmp_path, *THREE, "portrait", "pstate", 4, 1, "tick", "open", 1, "right", "tick")
+    assert "SHOW PadSel_KAMACURAS_Portrait" in out.split("KEY right")[-1]
+
+
+def test_a_monsters_tile_shows_its_modes_count_like_the_games_own(tmp_path):
+    """PAD-733 (David: "this count also needs to show on the monster select screen like the other monsters"): the count
+    a mode reports (pm_roster_more_progress, its own monster) goes on its tile's `<page>_Prog` when the screen opens -
+    per player, none before a report, none on a locked place - and a game over clears it."""
+    out = menu(tmp_path, *THREE, "tick", "count", "KAMACURAS", 2, 5, "count", "NOBODY", 1, 5, "open", 0, "tick",
+               "MARK", "player", 2, "open", 0, "tick", "MARK", "player", 1, "state", 1, 1, "open", 0, "tick", "MARK",
+               "state", 1, 0, "gameover", "tick", "open", 0, "tick")
+    first, p2, locked, over = out.split("MARK")
+    assert "KAMACURAS's tile counts 2/5 for player 1" in first
+    assert "COUNT 0" in first                                    # a mode with no monster on the screen: nothing kept
+    assert "WORDS PadSel_KAMACURAS_Prog: 2/5" in first and "WORDS PadSel_KUMONGA_Prog:  " in first
+    assert "WORDS PadSel_KAMACURAS_Prog:  " in p2                # player 2 has made none
+    assert "WORDS PadSel_KAMACURAS_Prog:  " in locked             # its place locked: no count, as the game's own
+    assert "WORDS PadSel_KAMACURAS_Prog: 2/5" not in over        # the game over cleared it
+    assert "Prog" not in menu(tmp_path, *THREE, "noprog", "tick", "count", "KAMACURAS", 2, 5, "open", 0, "tick")
+
+
+def test_a_monster_under_the_cursor_blinks_its_shots_on_the_playfield(tmp_path):
+    """PAD-733 (David, v29: "During the monster selection screen when I overlay the selected monster the respective
+    indicators need to be blinking on the play field"): the game blinks the shots of the battle under its cursor; on a
+    new monster it blinked its place's. Now the monster's own mode's shots blink (yellow, as the game's) and every
+    other shot's insert on the playfield is dark - the Action button and the inserts of no shot left alone - until the
+    cursor leaves it, the pick, or the ball's end; a monster whose mode names none leaves the game's lights be."""
+    steps = [*THREE, "shots", "KUMONGA", "0x3", "shots", "NOBODY", "0x4", "tick", "open", 0, "tick", "MARK",
+             "right", "tick", "MARK", "right", "tick", "MARK", "right", "tick", "MARK", "left", "left", "tick",
+             "MARK", "gamepick", "tick"]
+    out = menu(tmp_path, *steps)
+    before, kumonga, place1, kamacuras, back, picked = out.split("MARK")
+    assert "SHOTS 1" in before and "SHOTS 0" in before            # a mode with no monster on the screen: nothing kept
+    assert "KUMONGA's tile blinks shots 00000000_00000003" in before
+    assert "LAMPS" not in before                                   # on a place of the game's: the game's own
+    assert "LAMPS the selection screen: the other shots (MORE KAIJU): BUILDING 000000 0" in kumonga
+    assert "LAMPS KUMONGA (MORE KAIJU): LEFT RAMP RIGHT RAMP ffff00 1 250" in kumonga
+    assert "ACTION BUTTON" not in out and "RODAN" not in out
+    assert "LAMPS RELEASED (MORE KAIJU)" in place1                  # off it: the game has them back
+    assert "LAMPS" not in kamacuras                                 # its mode named none: the game's
+    assert "LAMPS KUMONGA" in back
+    assert "LAMPS RELEASED (MORE KAIJU)" in picked                  # the pick: the game's (and then the mode's)
+    out = menu(tmp_path, *THREE, "shots", "KUMONGA", "0x3", "tick", "open", 0, "right", "tick", "MARK", "ball_end", "tick")
+    assert "LAMPS KUMONGA" in out.split("MARK")[0] and "LAMPS RELEASED (MORE KAIJU)" in out.split("MARK")[1]
+
+
+def test_a_lost_monsters_tile_wears_its_city_and_count_and_its_place_a_padlock(tmp_path):
+    """PAD-733 (the helper's run: after KING CAESAR was lost in Tokyo, New York's screen stamped TOKYO and the game's
+    "0/5" on slot 1's own tile and padlocks on KING CAESAR's and MINILLA's): the held battle is the monster's - its tile
+    wears the city's stamp and its count, as the game's own held battles do; the place's own tile its padlock (its box
+    and its words off); the others booked against it keep theirs."""
+    steps = [*THREE, "join", 1, "MINILLA", "city", 0, "tick", "count", "KAMACURAS", 2, 5, "open", 1, "right"]
+    out = menu(tmp_path, *steps, "gamepick", "lost", "state", 1, 3, "city", 3, "MARK", "open", 0, "tick")
+    held = out.split("MARK")[1]
+    assert "the selection screen is up in city 3 for player 1 - a lost new monster's battle holds its place" in held
+    assert "SHOW PadSel_KAMACURAS_City0" in held                                     # lost in city 0: TOKYO
+    assert all("HIDE PadSel_KAMACURAS_City%d" % c in held for c in (1, 2, 3))
+    assert "WORDS PadSel_KAMACURAS_City" not in out                                  # a stamp's words never rewritten
+    assert "WORDS PadSel_KAMACURAS_Prog: 2/5" in held and "HIDE PadSel_KAMACURAS_Lock" in held
+    assert "SHOW PadSel_MINILLA_Lock" in held and "HIDE PadSel_MINILLA_City0" in held   # booked there too: locked
+    assert "SHOW PadSel_Lock1" in held and "HIDE T1_2_Artbox" in held and "WORDS T1_2Prog_Instance:  " in held
+    assert "SHOW PadSel_Lock0" not in held and "HIDE T1_1_Artbox" not in held                # KUMONGA's place: its own
+    # its battle won again (the place open) or never lost: no stamp, the place's own box back
+    out = menu(tmp_path, *steps, "gamepick", "lost", "state", 1, 0, "MARK", "open", 0, "tick")
+    after = out.split("MARK")[1]
+    assert "HIDE PadSel_KAMACURAS_City0" in after and "SHOW PadSel_Lock1" not in after
+
+
+def test_the_screen_opens_on_its_top_left_open_entry(tmp_path):
+    """PAD-733 (David, v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most
+    mode"): with new monsters on the screen the game's open runs, then its cursor goes on the first open entry in the
+    screen's order - place 0, else the first after it a pick can take (a new monster too)."""
+    out = menu(tmp_path, *THREE, "tick", "gameopen", 4)
+    assert "OPENED cursor 0" in out and "starts on its top-left place, slot 0 (the game's own pick: slot 4)" in out
+    out = menu(tmp_path, *THREE, "state", 0, 1, "tick", "gameopen", 5)
+    assert "OPENED cursor 1" in out                               # place 0 locked, KUMONGA booked against it too
+    out = menu(tmp_path, "join", 0, "KUMONGA", "state", 0, 2, "tick", "gameopen", 5, "tick")
+    assert "OPENED cursor 1" in out                               # place 0 won: its monster's battle is done as well
+    out = menu(tmp_path, "tick", "gameopen", 4)
+    assert "OPENED cursor 4" in out and "top-left" not in out     # no new monsters: the game's own
+
+
 def test_its_nodes_show_and_the_places_portrait_hides(tmp_path):
     out = menu(tmp_path, *THREE, "tick", "open", 0, *(["right"] * 3), "tick", "left", "tick")
     found = out.split("open")[0] if "open" in out else out
@@ -432,6 +662,35 @@ def test_a_picked_monster_stays_on_the_screen_through_its_close(tmp_path):
     assert "TAKEN 0 (slot 1)" in out and "SHOW PadSel_" not in out.split("TAKEN 0")[1]
 
 
+def test_the_city_screens_rematch_names_the_monster_lost_there(tmp_path):
+    """PAD-733 (David: "if a mode is failed and you come back to start it again it still says fight biolante again
+    when it's supposed to be kumunga"): the city screen's TO REMATCH %s line (3750) names the new monster while the
+    player's city holds the battle it lost - and is the game's own again when it does not, or at the game's end."""
+    lost = ("rematch", 3750, *THREE, "open", 0, "right", "tick", "gamepick", "tick", "lost", "holds", 12)
+    out = menu(tmp_path, *lost, "tick", "MARK", "tick")
+    assert "TAKEN 1 (slot 0)" in out
+    assert out.count("BORROW 3750 'TO REMATCH KUMONGA'") == 1 and "RESTORE" not in out      # once, and held
+    out = menu(tmp_path, *lost, "tick", "MARK", "city", 1, "tick")      # travelled: that city's battle is the game's
+    assert "RESTORE 3750" in out.split("MARK")[1]
+    out = menu(tmp_path, *lost, "tick", "MARK", "holds", 13, "tick")    # the city holds another battle now
+    assert "RESTORE 3750" in out.split("MARK")[1]
+    out = menu(tmp_path, *lost, "tick", "MARK", "gameover", "tick")
+    assert "RESTORE 3750" in out.split("MARK")[1]
+    out = menu(tmp_path, "rematch", 3750, *THREE, "open", 0, "right", "tick", "gamepick", "tick", "won", "holds", 12,
+               "tick")                                                  # won: nothing to rematch
+    assert "BORROW" not in out
+    out = menu(tmp_path, *THREE, "open", 0, "right", "tick", "gamepick", "tick", "lost", "holds", 12, "tick")
+    assert "BORROW" not in out                                          # a port without the line: the game's
+
+
+def test_a_lost_monster_comes_back_only_in_the_city_that_holds_it(tmp_path):
+    """PAD-733: the city pick replays the lost monster in the city it was lost in; another city's replay of the same
+    place's battle is the game's own."""
+    base = (*THREE, "open", 0, "right", "tick", "gamepick", "tick", "lost")
+    assert "RESUME 1" in menu(tmp_path, *base, "resume", 0)
+    assert "RESUME 0" in menu(tmp_path, *base, "city", 2, "resume", 0)
+
+
 def test_the_games_pick_under_a_monster_is_the_monsters(tmp_path):
     out = menu(tmp_path, *THREE, "open", 0, *(["right"] * 3), "gamepick")
     assert "the selection screen picks KAMACURAS (in slot 1's place)" in out
@@ -474,7 +733,8 @@ def test_outside_a_game_the_pick_is_the_games(tmp_path):
 def test_the_runtime_wires_the_screen_in():
     src = RUNTIME.read_text(encoding="utf-8").replace("\r\n", "\n")
     assert 'hook_veto(fn("roster_screen_keys"), on_roster_keys)' in src
-    assert 'hook(fn("roster_screen_open"), on_roster_open)' in src and 'hook(fn("roster_screen_pick"), on_roster_pick)' in src
+    assert 'fn("roster_screen_open"), (void *)more_open_wrap))' in src           # PAD-733: wrapped, then the top-left
+    assert 'hook(fn("roster_screen_pick"), on_roster_pick)' in src
     assert "    more_tick();" in src and "    more_ball_end();" in src and "    more_over(p, won);" in src
     assert "more_holding" not in src and "more_buttons" not in src     # the old screen of its own is gone
     assert "    roster_resuming = 1;\n    roster_take(" in src
@@ -535,8 +795,27 @@ def _scene_bytes():
     for s, a in enumerate(BS.ARTBOX):
         lock = np.zeros((10, 8, 4), np.uint8)
         lock[...] = (250, 250, 250, 255)
-        ov_kids.append(group(a + "_Artbox", [bitmap("lock", 8, 10, lock, 0, 0), bitmap("claw", 8, 10, lock, 0, 0)],
-                             -280 + (s >= 4) * 70, -280 + (s % 4) * 60))
+        box_kids = [bitmap("lock", 8, 10, lock, 0, 0), bitmap("claw", 8, 10, lock, 0, 0)]
+        box_kids[0].keyframes, box_kids[1].keyframes = [(1, 1), (2, 0)], [(1, 0), (2, 1), (3, 0)]
+        for c, word in enumerate((b"TOKYO", b"PARIS", b"LONDON", b"N.Y.")):   # PAD-733: the box's city stamps
+            o = T.Obj(nid(), "Text", dict(sym=64, name="", rect=[-40.0, -10.0, 40.0, 10.0], rgba=[1.0, 1.0, 1.0, 1.0],
+                                          flags=(0, 0), align=1, spacing=[2.0, 0.0], text=word, font=205,
+                                          fonts=[("GameFont_Primary", 205)], used=[205], tail=(0, 0)))
+            sc.objects[o.id] = o
+            box_kids.append(T.Node(nid(), "unnamed_instance_%d" % (c + 2), 1, [(1, 0), (3 + c, 1), (4 + c, 0)], [],
+                                   [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 4 + c, 6, 0, 1])], [T.Component(1, 3, o)]))
+        box = group(a + "_Artbox", box_kids, -280 + (s >= 4) * 70, -280 + (s % 4) * 60)
+        BS.sprite_of(box).body.update(frames=6, labels=[("Completed", 2), ("Locked", 1), ("London", 5), ("NewYork", 6),
+                                                        ("Paris", 4), ("Tokyo", 3)])
+        ov_kids.append(box)
+        if s < 4:                       # the left column's "0/4", a text the program writes (PAD-733: a new tile's count)
+            o = T.Obj(nid(), "Text", dict(sym=64, name="", rect=[-2.0, -2.0, 63.0, 31.65], rgba=[1.0, 1.0, 1.0, 1.0],
+                                          flags=(0, 0), align=1, spacing=[2.0, 0.0], text=b"0/4", font=6,
+                                          fonts=[("GameFont_Primary", 6)], used=[6], tail=(0, 0)))
+            sc.objects[o.id] = o
+            ov_kids.append(T.Node(nid(), a + "Prog_Instance", 1, [(1, 1)], [],
+                                  [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -275, -255 + s * 60, 0, 1])],
+                                  [T.Component(1, 3, o)]))
     overlay = group(BS.OVERLAY, ov_kids, 400, 400)
     shape = T.Obj(nid(), "Shape", dict(sym=20, name="", rect=[0.0, 0.0, 800.0, 480.0], fill=1,
                                          bitmap=T.Obj(nid(), "Bitmap", dict(sym=16, name="", w=4, h=4,
@@ -582,6 +861,73 @@ def test_the_build_adds_each_monsters_nodes_and_keeps_the_games(stock):
     assert all(v == 0 for _f, v in sheet.keyframes)                    # the sheet itself hidden
     order = [n for n in names if n.startswith("PadSel_") or n.endswith("_Selected_instance")]
     assert order.index("PadSel_Cover0") > order.index("GhidorahGigan_Selected_instance")   # over the lit tiles
+
+
+def test_each_new_tile_has_its_count_where_the_games_own_sit(stock):
+    """PAD-733: a new monster's count (`PadSel_<slug>_Prog`) is a copy of place 0's "0/4" text, blank until the runtime
+    writes it, in the overlay beside the places' own (the runtime finds it under `roster_box_path`), placed on its
+    tile as place 0's sits on place 0's tile."""
+    out = BS.build(stock, _mons(3))
+    real, BS.PREFIX = BS.PREFIX, "ZZZ_"                         # read the built screen as the game's
+    try:
+        sc = BS.Screen(T.parse(out))
+    finally:
+        BS.PREFIX = real
+    ov = {n.name: n for n in sc.overlay_kids}
+    nodes = {n.name: n for n in sc.kids}
+    prog0 = sc.prog[0]
+    to_glass = lambda n: BS.apply(BS.mul(sc.os, BS.rest(n)), 0, 0)
+    tile_corner = lambda n: BS.apply(BS.mul(sc.glass, BS.mul(BS.rest(n), BS.rest(BS.sprite_of(n).body["kids"][0]))), 0, 0)
+    g = to_glass(prog0)
+    t = tile_corner(sc.selected[0])
+    k0 = BS.rest(sc.selected[0])[0]
+    for i in range(3):
+        name = BS.prog_name("m%d" % i)
+        assert name in ov, name
+        node = ov[name]
+        text = node.components[0].obj
+        assert text.kind == "Text" and text.body["text"] == b" " and text.id != prog0.components[0].obj.id
+        assert text.body["fonts"] == prog0.components[0].obj.body["fonts"]
+        p, c = to_glass(node), tile_corner(nodes["PadSel_m%d_Lit" % i])
+        k = BS.rest(nodes["PadSel_m%d_Lit" % i])[0] / k0 if k0 else 1.0
+        assert abs((p[0] - c[0]) - (g[0] - t[0]) * k) < 1.5 and abs((p[1] - c[1]) - (g[1] - t[1]) * k) < 1.5, i
+    assert [n.name for n in sc.overlay_kids].index(BS.prog_name("m0")) < [n.name for n in sc.overlay_kids].index("T1_1Prog_Instance")
+
+
+def test_each_new_tile_has_the_city_stamps_and_each_place_a_padlock_of_its_own(stock):
+    """PAD-733: a new monster's tile carries place 4's box's four city stamps, lettered as pictures over each stamp's own
+    box (a copy of the box's text drawn outside it stopped the game), each in a group (in the game's city order,
+    the box's labels Tokyo, Paris, London, NewYork), placed as they sit on place 4's tile; each place a monster stands
+    in gets a padlock of its own (shown while a lost monster's battle holds it)."""
+    out = BS.build(stock, _mons(3))
+    real, BS.PREFIX = BS.PREFIX, "ZZZ_"
+    try:
+        sc = BS.Screen(T.parse(out))
+    finally:
+        BS.PREFIX = real
+    ov = {n.name: n for n in sc.overlay_kids}
+    nodes = {n.name: n for n in sc.kids}
+    box = sc.art[4]
+    kids = BS.sprite_of(box).body["kids"]
+    tile4 = BS.apply(BS.mul(sc.glass, BS.mul(BS.rest(sc.selected[4]), BS.rest(BS.sprite_of(sc.selected[4]).body["kids"][0]))), 0, 0)
+    k4 = BS.rest(sc.selected[4])[0]
+    for i in range(3):
+        lit = nodes["PadSel_m%d_Lit" % i]
+        corner = BS.apply(BS.mul(sc.glass, BS.mul(BS.rest(lit), BS.rest(BS.sprite_of(lit).body["kids"][0]))), 0, 0)
+        k = BS.rest(lit)[0] / k4 if k4 else 1.0
+        for c, word in enumerate((b"TOKYO", b"PARIS", b"LONDON", b"N.Y.")):
+            node = ov[BS.city_name("m%d" % i, c)]
+            assert BS.sprite_of(node) is not None                      # a group the runtime shows and hides
+            art = BS.sprite_of(node).body["kids"][0]
+            assert BS.bitmap_of(art) is not None                       # lettered as a picture, never the box's text
+            assert (BS.bitmap_of(art).body["w"], BS.bitmap_of(art).body["h"]) == (320, 80)   # its box (80 x 20), 4x
+            game = BS.apply(BS.mul(sc.os, BS.mul(BS.rest(box), BS.rest(kids[2 + c]))), 0, 0)
+            mine = BS.apply(BS.mul(sc.os, BS.rest(node)), 0, 0)
+            assert abs((mine[0] - corner[0]) - (game[0] - tile4[0]) * k) < 1.5, (i, c)
+            assert abs((mine[1] - corner[1]) - (game[1] - tile4[1]) * k) < 1.5, (i, c)
+    for s in (0, 1, 2):                                            # the places the monsters stand in
+        assert BS.sprite_of(nodes[BS.place_lock_name(s)]) is not None
+    assert BS.place_lock_name(3) not in nodes
 
 
 def test_the_layout_fits_the_new_tiles_and_moves_the_state_boxes(stock):
@@ -719,6 +1065,10 @@ def test_the_godzilla_ports_carry_the_selection_screen(port):
     for s, b in enumerate(BS.ARTBOX):
         assert re.search(r"^text roster_box_%d\s+%s_Artbox$" % (s, b), text, re.M)
     assert "roster_city_beaten_vec_at" in portgen.TITLE_VALUES and "battle_beaten_slots" in portgen.TITLE_VALUES
+    # PAD-733: the city screen's TO REMATCH %s is line 3750 of every Godzilla build's text table (read off each
+    # program); a pick waits for the screen's close at most 2.5 s (the runtime starts it at the close itself)
+    assert re.search(r"^value roster_rematch_line\s+3750$", text, re.M) and "roster_rematch_line" in portgen.TITLE_VALUES
+    assert re.search(r"^value roster_start_after_ms 2500$", text, re.M)
 
 
 # ---- a form mode ------------------------------------------------------------------------------------------

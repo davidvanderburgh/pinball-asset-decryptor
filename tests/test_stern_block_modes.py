@@ -754,6 +754,77 @@ def test_own_clips_and_sounds_play_where_the_blocks_say(tmp_path, monkeypatch):
     assert 500 <= _at(out, "CLIP PadMode_blk_Won") - end <= 600
 
 
+def test_a_clip_asked_as_it_ends_keeps_its_total_after_it(tmp_path, monkeypatch):
+    """PAD-733 (David, v29: "when the final mode video plays the scene text plays after that but only for a very
+    brief portion of a second"): KING CAESAR's final blow asked its clip and then ended - its TOTAL's 3 s ran out under
+    the clip. And at a drain the end of ball waited 6 s, 5.7 of them the lost clip. Either way the clip now comes
+    first and the TOTAL has its 3 s after it, as at a clock's end with a clip in When the mode ends."""
+    _cc()
+
+    def prog_(**kw):        # no start clip: the harness's clips play until stopped, so one would count here
+        q = _media_prog(priority=180, **kw)
+        q["scripts"][1]["do"] = q["scripts"][1]["do"][1:]
+        return q
+
+    p = prog_()
+    p["scripts"][2]["do"] = [{"op": "clip", "clip": "sever", "where": "full"}, {"op": "end_mode"}]
+    p["scripts"][3]["do"] = p["scripts"][3]["do"][:1]                      # When the mode ends plays no clip
+    dump = _assets(tmp_path, "blk", p, [])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Building", "secs", 1, "shot", "Left ramp", "secs", 12)
+    end = _at(out, r"\[TEST MODE\] END \(a block\)")
+    assert _at(out, "DISPLAY lingers TEST MODE 10000 ms") == end          # 3000 + the clip's 7000
+    assert 500 <= _at(out, "CLIP PadMode_blk_Sever") - end <= 600
+    # at a drain: the end of ball waits for the clip and then the TOTAL's 3 s
+    hud = dict(BM.normalize({})["hud"], on=True)
+    out = play(tmp_path, prog_(hud=hud), "shot", "Building", "secs", 2, "ball_end", "secs", 12)
+    drain = _at(out, ">> ball_end")
+    assert _at(out, "BALL END HOLD 10000 TEST MODE") == drain
+    assert 500 <= _at(out, "CLIP PadMode_blk_Won") - drain <= 600
+    assert 9900 <= _at(out, "BALL END goes on") - drain <= 10100
+    # without a clip at its end, the drain's 6 s as before
+    q = prog_(hud=hud)
+    q["scripts"][3]["do"] = q["scripts"][3]["do"][:1]
+    out = play(tmp_path, q, "shot", "Building", "secs", 2, "ball_end", "secs", 8)
+    assert _at(out, "BALL END HOLD 6000 TEST MODE") == _at(out, ">> ball_end")
+
+
+def test_take_the_extra_balls_away_only_while_more_than_one_is_up(tmp_path):
+    """PAD-733 (David, MINILLA: "just kill the flippers and show that the mode is ended, then instead of ending the ball,
+    give a ball back in the plunger lane"): the block asks the runtime to drain to one ball (pm_drain_to_one) when its
+    multiball still has more than one ball up as the mode ends; with one ball nothing is asked."""
+    p = prog([{"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"}, "do": [{"op": "start_mode"}]},
+              {"hat": {"kind": "mode_start"}, "do": [{"op": "multiball", "balls": 2, "save": 0}]},
+              {"hat": {"kind": "shot", "shot": "Building", "when": "running"}, "do": [{"op": "end_mode", "won": True}]},
+              {"hat": {"kind": "mode_end"}, "do": [{"op": "drain_to_one"}]}], seconds=30)
+    assert BM.problems(p, SHOTS) == []
+    assert "if (run.on && pm_balls_in_play() > 1 && !pm_drain_to_one())" in BM.to_c(p, "blk")
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 2, "shot", "Building", "secs", 1)
+    assert _at_any(out, "DRAIN TO ONE") == _at_any(out, r"END \(a block\)")
+    out = play(tmp_path, p, "shot", "Left ramp", "secs", 2, "balls", 1, "shot", "Building", "secs", 1)
+    assert "DRAIN TO ONE" not in out and "END (a block)" in out
+
+
+def test_a_loop_asked_as_it_ends_goes_behind_its_total(tmp_path, monkeypatch):
+    """PAD-733 (David: MINILLA "it doesn't make sense to go from summer to winter and back during the mode"): his
+    winter fall played full screen, then the TOTAL showed over the mode's sunny loop again. A clip looped in When the
+    mode ends now goes behind its TOTAL in the loop's place (after the full-screen clip); without one, the loop as
+    before."""
+    _cc()
+    p = _media_prog(priority=180, hud=dict(BM.normalize({})["hud"], on=True))
+    p["scripts"][3]["do"].append({"op": "clip", "clip": "sever", "where": "loop"})
+    dump = _assets(tmp_path, "blk", p, [])
+    monkeypatch.setenv("HARNESS_DUMP", dump)
+    out = play(tmp_path, p, "shot", "Building", "secs", 12)
+    end = _at(out, r"\[TEST MODE\] END \(time ran out\)")
+    assert _at(out, "BACKDROP PadMode_blk_Sever") == end
+    assert "own clip sever (PadMode_blk_Sever) behind its TOTAL" in out and "not looped" not in out
+    assert 500 <= _at(out, "CLIP PadMode_blk_Won") - end <= 600              # the full-screen clip first, as ever
+    q = _media_prog(priority=180, hud=dict(BM.normalize({})["hud"], on=True))
+    out = play(tmp_path, q, "shot", "Building", "secs", 12)
+    assert "BACKDROP PadMode_blk_Sever" not in out and "behind its TOTAL" not in out
+
+
 def test_without_its_file_the_blocks_still_play_the_games_own(tmp_path, monkeypatch):
     _cc()
     dump = tmp_path / "empty"
@@ -1342,9 +1413,11 @@ def test_a_progress_note_also_stands_on_the_progress_panel(tmp_path):
     """PAD-680 (David's Premium: the game's timed modes held the middle 39% of a game and every note waited or
     went): a mode's latest note stands on the pack's progress panel (PadMode_Progress, built into the HUD scene)
     as one line, its number after it, until the mode starts; the panel is down during the game's battles and
-    while one of ours runs, and a game over clears it."""
+    while one of ours runs, and a game over clears it. PAD-733 (David: "these HUD indicators need to duck when in
+    super train loops"): down while any mode of the game's runs, a timed one as a battle."""
     out = play(tmp_path, _noting_prog(), "shot", "Big loop", "secs", 4, "shot", "Big loop", "secs", 1,
-               "battle", 1, "secs", 1, "battle", 0, "secs", 1, "shot", "Maser target", "secs", 1)
+               "battle", 1, "secs", 1, "battle", 0, "secs", 1, "timed", 1, "secs", 1, "timed", 0, "secs", 1,
+               "shot", "Maser target", "secs", 1)
     assert "progress panel found: 16 badge slot(s)" in out
     assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in out[:out.index(">> shot Big loop")]     # its badges hidden at the find
     first = out[out.index(">> shot Big loop"):out.rindex(">> shot Big loop")]
@@ -1353,7 +1426,10 @@ def test_a_progress_note_also_stands_on_the_progress_panel(tmp_path):
     assert "WORDS PadMode_Progress_S1_Num: 2" in out[out.rindex(">> shot Big loop"):]   # its badge, its newest note
     battle = out[out.index(">> battle 1"):out.index(">> battle 0")]
     assert "SHOW PadMode_Progress 0" in battle and "progress panel down for now" in battle
-    assert "SHOW PadMode_Progress 1" in out[out.index(">> battle 0"):out.index(">> shot Maser target")]
+    assert "SHOW PadMode_Progress 1" in out[out.index(">> battle 0"):out.index(">> timed 1")]
+    timed = out[out.index(">> timed 1"):out.index(">> timed 0")]
+    assert "SHOW PadMode_Progress 0" in timed and "progress panel down for now" in timed
+    assert "SHOW PadMode_Progress 1" in out[out.index(">> timed 0"):out.index(">> shot Maser target")]
     started = out[out.index(">> shot Maser target"):]
     assert "START (a block)" in started and "SHOW PadMode_Progress 0" in started
     assert "SHOW PadMode_Progress.PadMode_Progress_S1.PadMode_Progress_S1_blk 0" in started and "WORDS PadMode_Progress_S1_Num:  " in started
@@ -1372,8 +1448,13 @@ def test_the_progress_panel_number_follows_every_hit_with_no_note(tmp_path):
     for n in (9, 8, 7):
         assert "WORDS PadMode_Progress_S1_Num: %d" % n in out
     assert "Hud_Award" not in out[out.index(">> shot Big loop"):]                   # no note
-    # a mode with its own corner meter stays off the panel (its meter says it)
-    assert "if (run.on || HUD_METER) return;" in BM.to_c(p, "blk")
+    # a mode with its own corner meter stays off the panel (its meter says it); PAD-733: the count done still blinks
+    # the shots that start it (this one's Maser target)
+    src = BM.to_c(p, "blk")
+    prog_fn = src[src.index("static void hud_progress(long long value)"):]
+    prog_fn = prog_fn[:prog_fn.index("\n}\n")]
+    assert "if (run.on) return;" in prog_fn and "ready_set(value <= 0);" in prog_fn
+    assert prog_fn.index("ready_set(") < prog_fn.index("if (HUD_METER) return;") < prog_fn.index("kit_prog_set(")
 
 
 def test_a_ball_save_block_asks_the_runtime_for_one(tmp_path):

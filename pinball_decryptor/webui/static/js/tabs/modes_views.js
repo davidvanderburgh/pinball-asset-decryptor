@@ -101,10 +101,10 @@ export function countBlocks(sc) {
 // ------------------------------------------------------------------ a block in words (PAD-614)
 // The block's family, as the Blocks tab colors it: modes_blocks.js STMT_CLASS (a test keeps the two the same)
 export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode",
-  add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", game_wizard: "mode", score: "score", set: "var", change: "var",
+  add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", drain_to_one: "mode", game_wizard: "mode", score: "score", set: "var", change: "var",
   if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show",
   log: "show", clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
-  hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
+  hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech" };
 const COLOR_NAMES = { "#ffd000": "yellow", "#00a0ff": "blue", "#ff0000": "red", "#00c040": "green", "#ffffff": "white",
   "#ff7800": "orange", "#a040ff": "purple", "#00ff00": "green" };
@@ -171,6 +171,7 @@ export function stmtWords(b, ch = {}) {
       : `Set the clock to ${valWords(b.seconds)} seconds`;
     case "multiball": return `Multiball of ${b.balls} balls, ball save ${b.save || 0} s`;
     case "ball_save": return `Ball save for ${b.seconds} s`;
+    case "drain_to_one": return "Take the extra balls away: the flippers off until they drain, one ball back to the plunger";
     case "game_wizard": return `${b.how === "start" ? "Start" : "Light"} the game's ${b.name || "mini-wizard"}`;
     case "hold": return `Hold the ${b.what || "magnet"} for ${msWords(b.ms)}${b.clock === "wait" ? ", its clock waiting until it lets go" : ""}`;
     case "scoop_hold": return `Hold ${b.which === "every" ? "every ball" : "the next ball"} in the scoop for ${msWords(b.ms)}`;
@@ -208,6 +209,7 @@ export function stmtWords(b, ch = {}) {
     case "hud_counter": return `HUD counter ${b.counter} to ${valWords(b.value)}`;
     case "hud_gauge": return `Fill the HUD's gauge to ${valWords(b.value)} pips`;
     case "hud_progress": return `Show ${valWords(b.value)} on the progress panel`;
+    case "roster_progress": return `Show ${valWords(b.done)} of ${valWords(b.of)} on its selection screen tile`;
     case "hud_award": return withValue(`Award ${quote(b.text)}`, b.value);
     case "if": return `If ${condWords(b.cond)}`;
     default: return `(${b.op})`;
@@ -314,9 +316,9 @@ export function cellHat(row, when) {
 export const LANES = [["clock", "Mode and clock"], ["lights", "Lights"], ["shows", "Light shows"], ["sound", "Sound"],
   ["screen", "Screen and HUD"], ["score", "Score and variables"], ["other", "Mechanisms and the rest"]];
 const LANE_OF = { start_mode: "clock", end_mode: "clock", add_time: "clock", set_time: "clock", timer_start: "clock",
-  timer_stop: "clock", multiball: "clock", ball_save: "clock", game_wizard: "clock", light_mode: "lights", unlight_mode: "lights",
+  timer_stop: "clock", multiball: "clock", ball_save: "clock", drain_to_one: "clock", game_wizard: "clock", light_mode: "lights", unlight_mode: "lights",
   light_shot: "lights", lights_off: "lights", show: "shows", game_show: "shows", callout: "sound", sound: "sound",
-  words: "screen", clip: "screen", hud_text: "screen", hud_counter: "screen", hud_gauge: "screen", hud_award: "screen", hud_progress: "screen",
+  words: "screen", clip: "screen", hud_text: "screen", hud_counter: "screen", hud_gauge: "screen", hud_award: "screen", hud_progress: "screen", roster_progress: "screen",
   score: "score", set: "score", change: "score", set_hits: "score" };
 export const laneOf = (op) => LANE_OF[op] || "other";
 const TRACK_PX = 640;           // about how wide the Timeline's track is drawn, to keep its clips apart

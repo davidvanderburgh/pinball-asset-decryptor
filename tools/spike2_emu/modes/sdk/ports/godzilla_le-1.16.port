@@ -164,6 +164,11 @@ site stock_battle_running 0x000d43d0 0xe92d4070 0xe30f66a0
 # v[22]: an active mode with (kind & 0x21) == 1 (every multiball)
 site stock_multiball_running 0x000d45a8 0xe92d40f8 0xe30f66a0
 data stock_mode_manager       0x007b0ce4
+# PAD-733 (David's Premium, v32: every mode of ours waited from 208 s into a ball to its drain, KUMONGA's picks refused):
+# Tesla Strike (rule 23, started by the powerlines, over when its lit arrows are made or the ball ends) runs beside the
+# game's own battles and multiballs, so it is not "one of the game's modes running" for ours (the rule lines below name
+# it; MODE_SDK.md "The game's own modes")
+text stock_any_beside        Tesla Strike
 
 # ---- events (item 147): MODE_SDK.md, Events ----------------------------------------------------
 # The ids are Pro 1.15's, and every function that dispatches them has the same shape here
@@ -214,9 +219,12 @@ value roster_vec_at         8
 value roster_record_size    12
 value roster_id_at          4
 value roster_qualified_at   83
-# the start of a picked mode waits this long (mode_file.c): the selection screen fades and plays its intro clip,
-# gone by +2.4 s (run4, Pro 1.15); at +3.3 s the mode's start screen showed (run5, this build)
-value roster_start_after_ms 3000
+# PAD-733 (David: the scene transition "the same as what the normal modes do"): a picked mode starts as the
+# selection screen's close ends - filmed at 0.25x on Premium/LE 1.16, Pro 1.16 and the Heisei 1.99D card alike: the
+# fade is gone by 0.44 s, the map zooms into the frame and holds, and 2.0 s after the pick the close's display effect
+# (132 here) gives way and a battle of the game's is in its intro. The runtime starts the mode the tick it does
+# (pm_roster_closing); this is only the most it waits (it was the start itself, 3000: the city's HUD, then the mode's)
+value roster_start_after_ms 2500
 # the selection screen's slot table (derived by port_tool.py from 2 places; the same seven records and callout ids as
 # Pro 1.15, read from both programs): a claimed slot is made silent (pm_roster_callout; item 146 fix-1). Run on this build
 # in item 146 run7: slot 0's id read 1888 -> 0 at the claim, 207 by `roster_callout 207`, 1888 at release (PAD_PEEK)
@@ -275,6 +283,12 @@ value roster_screen_right  139
 value roster_screen_timer  83
 value roster_screen_busy   23
 value roster_screen_bump_by 3
+# PAD-733: the screen's portrait changes in two steps (0x190acc, each frame with the cursor): the shown place's out,
+# then the new place's in, from the slot table's labels. Its state word: 4 shown, 5 going out, 3 coming in, 1 none;
+# the next word the place shown (it changes when the in is over). The step itself (r0 the screen's scene, r1 the
+# cursor) is wrapped: a new monster goes in the step that starts the next place's in.
+site roster_portrait_step 0x00190acc 0xe92d4030 0xe30b4480
+data roster_portrait_state 0x007bb480
 # the screen's scene, the path to its places' nodes, and each slot's node names (battle_select.py's)
 text roster_screen_scene  cac32730af42b9d26d26c4bb6e667b07da53113e
 text roster_screen_path   SelectOverlay_Textbox.CharacterSelect_Instance.
@@ -313,6 +327,9 @@ site battle_beaten       0x00121c28 0xe92d47f0 0xe1a06000
 data battle_beaten_rule       0x007b2e28
 data battle_beaten_guard      0x007b2f88
 value roster_city_beaten_vec_at 68
+# PAD-733: the city screen's "TO REMATCH %s" (numbered line 3750 of the game's text table, read off this build's
+# program: 3748 STAY IN:, 3749 TRAVEL TO:), the held battle's name; it names a new monster lost in the city instead
+value roster_rematch_line  3750
 value battle_beaten_slots   0x0f
 
 # ---- display priority (item 154 display; MODE_SDK.md "Display priority") --------------------------------------
@@ -613,6 +630,14 @@ site balls_in_play         0x00388e0c 0xe92d4010 0xe3034930
 # ball save in ticks (62 a second), r3 0xbb as this build's own multiballs pass it, two zero words on the
 # stack. pm_multiball_start / pm_multiball_add; a mode file's `multiball` line; the tab's Multiball.
 site multiball_serve       0x00388f88 0xe92d41f0 0xe301e16a
+# PAD-733: drain to one ball (pm_drain_to_one): the framework's all-flippers off and on (each flipper record's
+# enable bit at +6, the node boards' rules follow; found from Premium/LE 1.16 by code, movw/movt and branches
+# masked) - the pair the game's own dead-flipper feature calls (0xc19a4 / 0xc19cc), there with the kickbacks, pops
+# and slings off too; the runtime kills the flippers alone
+site flippers_off         0x003f1898 0xe92d4070 0xe3065244
+site flippers_on          0x003f196c 0xe92d4070 0xe3065244
+value shooter_lane_switch 62  # the served ball lands here (plunge.py: SHOOTER LANE); the flippers are back then
+data multiball_record      0x007d3930  # the framework's multiball record (the serve's r5): +0 its ball save's ticks, +4 the grace after it - drain to one ends the save
 
 # ---- the magnet: a grab of the mode's own (PAD-381; pad_mode_runtime.c "the magnet") - LE 1.16 (found from Pro 1.16 by code, movw/movt and branch fields masked).
 # coil_fire = ControlCoil's fire (device, pulse power, pulse ms, hold power, hold ms, x ms): one command
@@ -662,6 +687,11 @@ text bridge_label          bridge
 site scoop_handler         0x0007d8e4 0xe301316a 0xe2401002
 data scoop_slot            0x007570a4
 value scoop_event          2
+# PAD-733: the game's ball search put off while a mode holds the ball (pad_mode_runtime.c "the scoop"): its own holds
+# call ball_search_delay(ball search time) every tick (event 2's waits 0x7da38, the selection screen 0x191cc8); the
+# countdown 0x7d36a4 (62 a second), the time a byte (10 s) nothing writes. Rig runs bs_long / bs_long_fix, bs_hits(_fix).
+site ball_search_delay     0x00379f0c 0xe30336a4 0xe0600280
+data ball_search_time      0x007144f8
 # EMU 2026-09-26 (mb_e2e.sh): served 3 on a mode file's start, add-a-ball to 4, drains to 1, END (one ball left). PROVEN.
 
 # ---- PAD-379: the shield platform (Premium/LE only; a Pro's shield targets are fixed) ---------------------------

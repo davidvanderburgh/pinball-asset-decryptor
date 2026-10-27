@@ -2460,6 +2460,11 @@ void pm_set_text(void *text, const char *words)
  * the display is immediate-mode, so the runtime advances and draws the video player every
  * tick while the surface plays, as the game's own clip loop does. Proven: item 132. */
 static struct { int on, seen; unsigned long started, last; } clip;
+/* PAD-733: when a pick's selection screen last closed (pm_ms | 1; 0 = none since boot), and the close a full-screen clip
+ * was last played again for - the game pauses its video player a moment after its close effect ends (Premium/LE 1.16:
+ * within ~45 ms), taking a picked mode's start clip with it (run g_kumonga: the intro "over" 44 ms in, the loop in its
+ * place behind the HUD) */
+static unsigned long roster_closed_ms, clip_close_done;
 static const struct pm_mode *clip_owner;  /* PAD-413: the mode that played it (0 = a trigger file's) */
 /* item 164: CLIP V2 - the newer builds have no clip_play / video_player / video_surface function
  * (the lookup is inlined at every call site: Venom 1.07 has 22), so the runtime does what their
@@ -3024,6 +3029,26 @@ int pm_clip(const char *name)
     return 1;
 }
 
+/* PAD-733: our full-screen clip stopped in its first 300 ms, started within 300 ms of a pick's selection screen
+ * closing: the game's own pause of its player at the end of that close. Played again at once, once a close - it stays on
+ * (drawn over everything, the backdrop still waiting), so the glass goes from the close to the clip with no frame of
+ * the HUD between. 1 = played again. */
+static int clip_close_again(unsigned long now)
+{
+    if (!roster_closed_ms || clip_close_done == roster_closed_ms || !disp_clip_name[0]) return 0;
+    if (clip.started - roster_closed_ms > 300 || now - clip.started > 300) return 0;
+    clip_close_done = roster_closed_ms;               /* once a close */
+    disp_clip_ours = 1;
+    ((void (*)(const char *, int, const char *))(unsigned long)fn("clip_play"))(disp_clip_name, 0, 0);
+    disp_clip_ours = 0;
+    disp_clip_lost = 0;
+    say("clip: \"%s\" was paused %lu ms in by the game's close of its selection screen - played again", disp_clip_name,
+        now - clip.started);
+    clip.seen = 0;
+    clip.started = clip.last = now;
+    return 1;
+}
+
 int pm_clip_playing(void) { return clip.on; }
 
 /* PAD-707: the last mode's finish is still on the glass (above, at pm_end) */
@@ -3135,7 +3160,7 @@ static void clip_tick(void)
         }
         clip.seen = 1;
     } else if (clip.seen || now - clip.started > 3000) {
-        clip.on = 0;
+        if (!clip_close_again(now)) clip.on = 0;      /* PAD-733 */
     }
     clip.last = now;
 }
@@ -4164,15 +4189,11 @@ static void display_arm(void)
 #define N_BORROW 8
 static struct { unsigned id, idx; const char **old; const char *group[6]; char words[96]; int held; } borrow[N_BORROW];
 
-int pm_message_set(unsigned id, const char *words)
+/* the table's line idx shows `words` (every language) until restored by `id` */
+static int message_borrow(unsigned id, unsigned idx, const char *words)
 {
-    unsigned count, i, k;
-    unsigned short *remap;
+    unsigned i, k;
     const char ***slot;
-    if (!(can & PM_CAN_MESSAGES) || !words) return 0;
-    count = *(unsigned *)(unsigned long)data("message_count");
-    remap = *(unsigned short **)(unsigned long)data("message_remap");
-    if (!remap || id >= count || remap[id] >= count) return 0;
     for (i = 0; i < N_BORROW && borrow[i].held && borrow[i].id != id; i++) ;
     if (i == N_BORROW) return 0;
     str_copy(borrow[i].words, sizeof borrow[i].words, words, sizeof borrow[i].words);
@@ -4180,13 +4201,24 @@ int pm_message_set(unsigned id, const char *words)
     borrow[i].group[5] = 0;
     if (!borrow[i].held) {
         borrow[i].id = id;
-        borrow[i].idx = remap[id];
+        borrow[i].idx = idx;
         slot = (const char ***)(unsigned long)(data("message_table") + 4u * borrow[i].idx);
         borrow[i].old = *slot;
         *slot = borrow[i].group;
         borrow[i].held = 1;
     }
     return 1;
+}
+
+int pm_message_set(unsigned id, const char *words)
+{
+    unsigned count;
+    unsigned short *remap;
+    if (!(can & PM_CAN_MESSAGES) || !words) return 0;
+    count = *(unsigned *)(unsigned long)data("message_count");
+    remap = *(unsigned short **)(unsigned long)data("message_remap");
+    if (!remap || id >= count || remap[id] >= count) return 0;
+    return message_borrow(id, remap[id], words);
 }
 
 void pm_message_restore(unsigned id)
@@ -4716,6 +4748,9 @@ static int stock_balls(unsigned kinds)
         ? (int)PM_STOCK_MULTIBALL : 0;
 }
 
+static int stock_any_weighed(void);      /* PAD-733: the stock rules section, below */
+static char stock_any_what[48];
+
 int pm_stock_mode_running(unsigned kinds)
 {
     static const struct { unsigned kind; const char *site; } Q[] = {
@@ -4756,6 +4791,7 @@ int pm_stock_mode_running(unsigned kinds)
     for (i = 0; i < sizeof Q / sizeof Q[0]; i++) {
         if (!(kinds & Q[i].kind)) continue;
         r = stock_query(Q[i].site);
+        if (r > 0 && Q[i].kind == PM_STOCK_ANY && stock_any_weighed() == 0) r = 0;   /* PAD-733: only one beside ours */
         if (r > 0) return (int)Q[i].kind;
         if (r < 0) unknown = 1;
     }
@@ -4772,6 +4808,7 @@ const char *pm_stock_mode_what(unsigned kind)
     if ((kind & PM_STOCK_BATTLE) && stock_generic_on) return "one of the game's modes";
     if (kind & PM_STOCK_BATTLE) return "a battle";
     if (kind & PM_STOCK_MULTIBALL) return "a multiball";
+    if ((kind & PM_STOCK_ANY) && stock_any_what[0]) return stock_any_what;   /* PAD-733: its name, by the rules */
     return kind ? "a stock mode" : "nothing";
 }
 
@@ -4826,6 +4863,8 @@ int pm_aside(void)
 #define BLOCK_WORDS (BLOCK_IDS / 32)
 #define BLOCK_HOOKS 128
 static const struct pm_mode *block_owner;
+static int block_live(void);              /* PAD-733: its owner runs, or drains to one ball (the drain section) */
+static int dto_for(const struct pm_mode *m);   /* PAD-733: m's drain to one ball is going on */
 static unsigned block_mask[BLOCK_WORDS];      /* the ids the running block refuses */
 static unsigned block_list[BLOCK_WORDS];      /* the asking mode's own list, set before it blocks (none = the defaults) */
 static const struct pm_mode *block_list_by;
@@ -4961,7 +5000,7 @@ static int on_block_start(unsigned *r, unsigned hook_n)
         }
         lit_hold_until = 0;
     }
-    if (!block_owner || running != block_owner || !pm_in_game()) return 0;
+    if (!block_live() || !pm_in_game()) return 0;
     if (id >= BLOCK_IDS || !bm_has(block_mask, id)) return 0;   /* not one this mode holds off */
     if (!bm_has(block_said, id)) {
         char key[24];
@@ -5058,6 +5097,11 @@ int pm_block_game_modes(int on)
     if (!(can & PM_CAN_BLOCK_GAME)) return 0;
     if (!on) {
         if (block_owner && (!current || block_owner == current)) {
+            if (dto_for(block_owner)) {     /* PAD-733: block_tick lifts it once its drain to one ball is over */
+                say("block: %s keeps the game's modes off until its extra balls have drained (the flippers are dead)",
+                    block_who);
+                return 1;
+            }
             say("block: %s lets the game's modes start again", block_who);
             block_owner = 0;
         }
@@ -5093,7 +5137,7 @@ int pm_block_game_modes(int on)
 static void on_battle_shots(unsigned *r)
 {
     unsigned lo = (unsigned)pm_port_value("block_battle_lo", 0), hi = (unsigned)pm_port_value("block_battle_hi", 0);
-    if (!block_owner || running != block_owner || !pm_in_game()) return;
+    if (!block_live() || !pm_in_game()) return;
     if (!(r[2] & lo) && !(r[3] & hi)) return;
     if (block_battle_said++ < 20)
         say("block: the battle rule did not see shot 0x%08x_%08x - %s is running (no battle lit, no select screen)",
@@ -5117,7 +5161,7 @@ static void on_rule_shots(unsigned *r, unsigned n)
     char key[28];
     unsigned lo, hi;
     const char *nm;
-    if (n >= BLOCK_RULES || !block_owner || running != block_owner || !pm_in_game()) return;
+    if (n >= BLOCK_RULES || !block_live() || !pm_in_game()) return;
     if (block_rules_keep & (1u << n)) return;    /* PAD-398: the mode keeps this one counting */
     pm_snprintf(key, sizeof key, "block_rule_lo_%u", n);
     lo = (unsigned)pm_port_value(key, 0xffffffffL);  /* PAD-398: no mask lines = every bit */
@@ -5150,7 +5194,7 @@ static int hook_n(unsigned addr, hook_n_fn logger, unsigned n)
 /* every tick, from clip_tick: a block ends with the mode that asked for it */
 static void block_tick(void)
 {
-    if (!block_owner || running == block_owner) return;
+    if (!block_owner || block_live()) return;
     say("block: %s ended - the game's modes may start again", block_who);
     block_owner = 0;
 }
@@ -6045,8 +6089,19 @@ static void coils_arm(void)
  * unwinds through this frame, which build_mode.sh's -funwind-tables makes safe.
  *
  * The limits, not the mode's to change: 100 ms to SCOOP_MAX_MS a hold; only the running mode, only in
- * a game; the hold ends with the mode. Holding a ball powers nothing; the cap keeps a ball from waiting
- * in the scoop long enough for the game to start looking for it. */
+ * a game; the hold ends with the mode. Holding a ball powers nothing.
+ *
+ * PAD-733 (David: "The game also randomly went into ball search mode when I restarted King Caesar"): THE GAME'S BALL
+ * SEARCH. Its countdown (Premium/LE 1.16: 0x7d36a4, 62 a second) runs down every tick while a ball is in play, and it
+ * searches when it is out (0x379f68, from the main loop; again every 12 s). Nothing a switch does resets it: the game's
+ * own code puts it off - a score, a shot's handler, and every tick of its own holds in the scoop (event 2's waits, the
+ * battle selection screen's) - with ball_search_delay(the ball search time) (`site ball_search_delay`, 0x379f0c: the
+ * countdown at least that many seconds; the time a byte, `data ball_search_time`, 10 s). A hold of ours comes after the
+ * game's own has returned, so the countdown ran on through it: a pick's 6 s start clip left 4 s at the kick-out (a
+ * ball caught on a flipper then brought the search), and a 16 s hold searched with the ball still in the scoop (rig,
+ * run bs_long: BALL SEARCH STARTED counted 10.35 s after the handler returned). So each tick of a hold of ours does as
+ * the game's own holds do, and the ball comes out with the search's whole time ahead of it (run bs_long_fix: 10.0 s
+ * through 16 s, 10.0 s at the kick-out). A port without the two lines holds as before. */
 #define SCOOP_MAX_MS 10000u
 #define SCOOP_MIN_MS   100u
 
@@ -6070,6 +6125,66 @@ static struct {
  * At most INTRO_MAX_MS from the screen's close. */
 #define INTRO_MAX_MS 15000ul
 static volatile unsigned long pick_at;      /* pm_ms() a mode of ours took a pick on the selection screen; 0 = none */
+
+/* PAD-733 (David: "analyze frame by frame how regular monster modes are started and imitate them ... I seen it flashed
+ * to the hud before showing the video"): THE PICK STARTS AS THE SCREEN'S CLOSE ENDS. Filmed at 0.25x on Premium/LE
+ * 1.16, Pro 1.16 and the Heisei 1.99D card: after a pick the screen fades (gone by 0.44 s), the map zooms into the
+ * frame and holds, and 2.0 s on the city comes up - a battle of the game's is in its intro there. The close is one of
+ * the game's DISPLAY EFFECTS (Premium/LE 1.16: effect 132, priority 196, on from the pick to +1983 ms; the game pauses
+ * its video player as it ends). Anything of ours on the player before that end goes with it (rig runs a0, a1950: an
+ * intro started at the pick or at 1.95 s was over at 2.0 s), and a start much after it shows the city's HUD first
+ * (3 s: the city's, then the mode's, for 1.5 s). So after a pick a mode took, the runtime notes the effect that has
+ * the screen (the first above the idle priority) and the screen counts as closed on the first tick another has it;
+ * the port's roster_start_after_ms is the most it waits (a port without the display lines waits that long).
+ * pm_roster_closing() says it is still closing - checked BEFORE the modes' ticks, so a mode starts in the tick the
+ * close ends, its start clip over the city's first frame. */
+static struct { unsigned long at, closed; int seen, said; unsigned effect, last; } rclose;
+
+static void roster_close_begin(void)
+{
+    rclose.at = pm_ms() | 1;
+    rclose.closed = 0;
+    rclose.seen = 0;
+    rclose.said = 0;
+    rclose.effect = rclose.last = 0xffffu;
+}
+
+static void roster_close_tick(void)
+{
+    unsigned long now = pm_ms();
+    long most = pm_port_value("roster_start_after_ms", 0);
+    unsigned char *m;
+    unsigned e, level;
+    if (!rclose.at || rclose.closed) return;
+    m = disp_manager();
+    if (m) {
+        e = disp_now(m);
+        level = disp_level_now(m);
+        if (e != rclose.last && rclose.said++ < 8)          /* what the close looks like, in the log */
+            say("roster: after the pick the game's display effect %u (priority %u) has the screen (+%lu ms)", e, level,
+                now - rclose.at);
+        rclose.last = e;
+        if (!rclose.seen && level > 1) {
+            rclose.seen = 1;
+            rclose.effect = e;
+        } else if (rclose.seen && e != rclose.effect) {
+            rclose.closed = roster_closed_ms = now | 1;
+            say("roster: the selection screen has closed %lu ms after the pick (its display effect %u is over) - the "
+                "mode starts now", now - rclose.at, rclose.effect);
+            return;
+        }
+    }
+    if ((long)(now - rclose.at) >= most) {
+        rclose.closed = roster_closed_ms = now | 1;
+        say("roster: the selection screen counts as closed %lu ms after the pick (the port's roster_start_after_ms%s)",
+            now - rclose.at, !m ? "; this port has no display lines to watch" : "; its display effect was not seen to end");
+    }
+}
+
+int pm_roster_closing(void)
+{
+    return rclose.at && !rclose.closed;
+}
 static int intro_on(unsigned long t_close, unsigned long *started, int *seen)
 {
     unsigned long now = pm_ms(), wait = (unsigned long)pm_port_value("roster_start_after_ms", 3000) + 2000ul;
@@ -6078,6 +6193,14 @@ static int intro_on(unsigned long t_close, unsigned long *started, int *seen)
     if (!*started) *started = now;
     if (clip.on && clip_owner == running) { *seen = 1; return 1; }
     return !*seen && now - *started < FIN_GRACE_MS;
+}
+
+/* PAD-733: the game's ball search put off for a tick of a hold of ours, as its own holds do (above) */
+static void scoop_search_off(void)
+{
+    unsigned at = data("ball_search_time");
+    if (fn("ball_search_delay") && at && maps_has(at, 1, MAP_R | MAP_GAME))
+        ((void (*)(unsigned))(unsigned long)fn("ball_search_delay"))(*(volatile unsigned char *)(unsigned long)at);
 }
 
 static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
@@ -6096,8 +6219,10 @@ static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
         unsigned long tc = pm_ms(), started = 0;
         int seen = 0;
         say("scoop: a mode took the selection screen's pick - the ball waits for its start clip");
-        while (pm_in_game() && intro_on(tc, &started, &seen))
+        while (pm_in_game() && intro_on(tc, &started, &seen)) {
+            scoop_search_off();
             ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+        }
         say("scoop: let go after %lu ms (%s) - the game kicks it out", pm_ms() - tc,
             !pm_in_game() ? "the game ended or tilted" : pm_ms() - tc >= INTRO_MAX_MS ? "the most a ball waits"
             : seen ? "its start clip is over" : started ? "it started with no clip" : "it did not start");
@@ -6112,8 +6237,10 @@ static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
     else say("scoop: a ball settled while %s's finish plays - held until it is over", fin.mode && fin.mode->name ? fin.mode->name : "a mode");
     /* PAD-707: a mode that ends while it holds the ball keeps it through its finish, so the kick-out comes as it ends */
     while (!scoop.release && pm_in_game() && pm_ms() - t0 < SCOOP_MAX_MS
-           && ((scoop.hold_ms && running && pm_ms() < scoop.until) || (!running && finish_on())))
+           && ((scoop.hold_ms && running && pm_ms() < scoop.until) || (!running && finish_on()))) {
+        scoop_search_off();
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    }
     why = scoop.release ? "the mode let go" : !pm_in_game() ? "the game ended or tilted"
         : pm_ms() - t0 >= SCOOP_MAX_MS ? "the most a ball is held" : running ? "its time ran out"
         : fin.seen ? "the mode's finish is over" : "the mode ended";
@@ -6182,7 +6309,8 @@ static void scoop_arm(void)
     scoop.log = pm_port_value("scoop_log", 0) != 0;
     if (scoop.event_arg > 3) return;                /* the game's handler takes four arguments at most */
     can |= PM_CAN_SCOOP;
-    say("scoop: a mode may hold a ball there, up to %u ms; the kick-out stays the game's", SCOOP_MAX_MS);
+    say("scoop: a mode may hold a ball there, up to %u ms; the kick-out stays the game's%s", SCOOP_MAX_MS,
+        fn("ball_search_delay") && data("ball_search_time") ? "; its ball search is put off while one is held" : "");
 }
 
 /* ---- the shield platform (PAD-379) --------------------------------------------------------------
@@ -6327,7 +6455,7 @@ static int shield_rule_counts(void)
     const char *want = pm_port_text("shield_rule"), *t;
     char key[28];
     int i, k;
-    if (!want || !block_owner || running != block_owner) return 1;
+    if (!want || !block_live()) return 1;
     for (i = 0; i < BLOCK_RULES; i++) {
         pm_snprintf(key, sizeof key, "block_rule_name_%d", i);
         t = pm_port_text(key);
@@ -6526,9 +6654,13 @@ static int building_busy(unsigned obj)
     return (((unsigned (*)(unsigned))(unsigned long)fn("building_busy"))(obj) & 0xffu) != 0;
 }
 
+static volatile int bld_sending;            /* PAD-733: 1 while a move of ours is under way (the veto lets it by) */
+
 static void building_send(unsigned obj, int floor)
 {
+    bld_sending = 1;
     ((void (*)(unsigned, unsigned))(unsigned long)fn("building_move"))(obj, (unsigned)floor);
+    bld_sending = 0;
 }
 
 /* Why a move to `floor` may not start now, or 0. (tests lift it verbatim) */
@@ -6640,6 +6772,33 @@ static void building_keep_closed(void)
     if (said++ < 3 || said % 10 == 0)
         say("building: floor %d -> 0 - its lock closed while %s runs (a ball locked now would wait for a multiball "
             "the mode keeps from starting); put back on %d when it ends", at, mode_name(running, "the mode"), bld.home);
+}
+
+/* PAD-733 (David's Premium, MELTDOWN on v32: "we shouldn't have the building be going up and down over and over again
+ * that is dangerous because the ball can damage the building"): with the lock lit the game sends the building back up
+ * to its floor (0x7d24c, again and again), and the close above sent it down again - up to six times a minute. So
+ * while one of ours keeps the lock closed, the game's own moves above floor 0 are refused (`site building_move`, a
+ * veto): the building stays down until the mode ends and is put back. Not ours (bld_sending), not while one of the
+ * game's own modes has the stage, nor once the put-back is owed. 1 = refuse it. (tests lift it verbatim) */
+static int building_raise_refused(int sending, int running_mode, int in_game, int aside, int closed_by_us,
+                                  int putting_back, int floor)
+{
+    return !sending && running_mode && in_game && !aside && closed_by_us && !putting_back && floor > 0;
+}
+
+static int building_move_veto(unsigned *r)
+{
+    static unsigned said;
+    unsigned obj = building_obj();
+    if (!obj || r[0] != obj)
+        return 0;
+    if (!building_raise_refused(bld_sending, running != 0, pm_in_game(), aside.kind != 0, bld.home >= 0 && bld.ours == 0,
+                                bld.putback_until != 0, (int)r[1]))
+        return 0;
+    if (said++ < 3 || said % 20 == 0)
+        say("building: the game's move to floor %u refused - its lock stays closed while %s runs (no up and down "
+            "under the ball); put back on %d when it ends", r[1], mode_name(running, "the mode"), bld.home);
+    return 1;
 }
 
 static void building_tick(void)
@@ -6900,6 +7059,9 @@ static void building_arm(void)
         return;
     }
     can |= PM_CAN_BUILDING;
+    if (!hook_veto(fn("building_move"), building_move_veto))      /* PAD-733 */
+        say("building: the game's own moves could not be hooked - while a mode of ours keeps its lock closed, the "
+            "game may send it up again");
     say("building: a mode may move it by floor (stepper 0x%08x, move 0x%08x, floors 0..%ld); %u s between "
         "moves, %u a minute, put back when the mode ends", data("building_stepper"), fn("building_move"),
         pm_port_value("building_floors", 4) - 1, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
@@ -7505,7 +7667,7 @@ static void wizard_due_start(unsigned p)
         return;
     }
     if (p != pm_player() || !pm_in_game() || wiz_hold.n) return;
-    if (block_owner && running == block_owner) return;      /* a mode of ours holds the game's modes off */
+    if (block_live()) return;                               /* a mode of ours holds the game's modes off */
     if (pm_ms() - wiz_due[p - 1].tried < 250) return;
     wiz_due[p - 1].tried = pm_ms();
     if (!((int (*)(void))(unsigned long)fn("wizard_start"))()) return;   /* one of its modes is still in the way */
@@ -7597,7 +7759,7 @@ int pm_game_wizard(int n, int how)
     }
     wiz_due[p - 1].ball = stock_ball_ends;
     wizard_pin(p);
-    if (how == PM_WIZARD_START && block_owner && running == block_owner) {
+    if (how == PM_WIZARD_START && block_live()) {
         say("game wizard %d (%s): %s holds the game's modes off, so it is lit, not started - started once that mode "
             "ends, this ball", n, name, block_who);
         how = PM_WIZARD_LIGHT;
@@ -7924,7 +8086,7 @@ static const char *wizm_way(void)
     const unsigned *tab;
     long n, slot, i;
     int c, k, r;
-    if (block_owner && running == block_owner) {
+    if (block_live()) {
         pm_snprintf(what, sizeof what, "%s (a mode of yours holding the game's modes off)", block_who);
         return what;
     }
@@ -8314,6 +8476,37 @@ static void rule_line(const char *s)
     n_stock_rules++;
 }
 
+/* PAD-733 (David's Premium, v32: two KUMONGA picks refused - "a stock mode is running" - the progress panel down and
+ * every mode of ours waiting from 208 s into a ball to its drain at 854 s, through a multiball and a battle of the
+ * game's): the game's "a mode of mine is active" query (`site stock_any_running`) counts modes that run BESIDE
+ * everything for most of a ball - Tesla Strike, started by the powerlines and over only when its lit arrows are made
+ * or the ball ends, runs under the game's own battles and multiballs. The ones the port names (`text
+ * stock_any_beside`, rule labels, comma-separated) are not "one of the game's modes running" for ours: when the query
+ * says one runs, the named rules are asked one by one (their ACTIVE slot), at most every STOCK_WEIGH_MS. 1 = another
+ * one runs, 0 = only those, -1 = cannot tell (the query's answer stands). The label of the one found is kept for the
+ * log (stock_any_what). (tests lift stock_beside verbatim) */
+#define STOCK_WEIGH_MS 100ul
+static char stock_any_what[48];
+
+static int stock_beside(const char *list, const char *label)
+{
+    const char *p = list, *q, *e;
+    unsigned long n, k;
+    if (!p || !label || !label[0]) return 0;
+    for (n = 0; label[n]; n++) ;
+    while (*p) {
+        while (*p == ' ' || *p == ',') p++;
+        for (q = p; *q && *q != ','; q++) ;
+        for (e = q; e > p && e[-1] == ' '; e--) ;
+        if ((unsigned long)(e - p) == n) {
+            for (k = 0; k < n && (p[k] | 0x20) == (label[k] | 0x20); k++) ;
+            if (k == n) return 1;
+        }
+        p = q;
+    }
+    return 0;
+}
+
 static struct stock_rule *stock_rule(unsigned id)
 {
     int i;
@@ -8367,6 +8560,36 @@ static unsigned stock_object(struct stock_rule *x, int say_why)
     }
     x->obj = obj;
     return obj;
+}
+
+/* PAD-733: the weighing above stock_beside, once the rules' objects can be fetched */
+static int stock_any_weighed(void)
+{
+    static unsigned long at;
+    static int last = -1;
+    static char said[48];
+    const char *list = pm_port_text("stock_any_beside"), *other = 0, *beside = 0;
+    int i, known = 0;
+    if (!list || !n_stock_rules) return -1;
+    if (at && pm_ms() - at < STOCK_WEIGH_MS) return last;
+    at = pm_ms() ? pm_ms() : 1;
+    for (i = 0; i < n_stock_rules; i++) {
+        struct stock_rule *x = &stock_rules[i];
+        int a;
+        if (!stock_object(x, 0) || (a = stock_active(x)) < 0) continue;
+        known++;
+        if (!a) continue;
+        if (stock_beside(list, x->label)) { if (!beside) beside = x->label; }
+        else if (!other) other = x->label;
+    }
+    if (!known) return last = -1;
+    pm_snprintf(stock_any_what, sizeof stock_any_what, "%s", other ? other : beside ? beside : "");
+    if (!other && beside && !stock_beside(said, beside)) {
+        say("stock modes: %s runs - beside ours, as it runs beside the game's own battles and multiballs (the port's "
+            "stock_any_beside): ours do not wait for it", beside);
+        pm_snprintf(said, sizeof said, "%s", beside);
+    } else if (other) said[0] = 0;
+    return last = other ? 1 : 0;
 }
 
 /* ---- the wrap: what the game's handler receives ------------------------------------------------- */
@@ -9449,6 +9672,8 @@ static void event_census(void);
 static void switches_deliver(void);           /* the switches section below */
 static void roster_deferred_tick(void);   /* item 146 */
 static void roster_late_tick(void);       /* PAD-707 */
+static void dto_tick(void);               /* PAD-733 */
+static void dto_ball_end(void);           /* PAD-733 */
 static void more_tick(void);              /* PAD-707 */
 static void place_tick(void);             /* PAD-710 */
 static void done_tick(void);              /* PAD-747 */
@@ -9474,6 +9699,7 @@ static void on_tick(unsigned *r)
         EACH_MODE(m) if (m->init) { current = m; m->init(); }
     }
     clip_tick();
+    roster_close_tick();                      /* PAD-733: a pick's screen closed - before the modes' ticks */
     sb_tick();                                /* PAD-521: the status bar held */
     sound_fades_tick();                       /* item 150 follow-up: fades end in silence */
     sound_ducks_tick();                       /* PAD-678: a duck after the fades, which end it */
@@ -9482,6 +9708,7 @@ static void on_tick(unsigned *r)
     event_census();                           /* PAD-420: `value event_census 1` */
     switches_deliver();
     stock_balls_tick();                       /* PAD-687: how long two balls have been in play */
+    dto_tick();                               /* PAD-733: dead flippers until the balls drain to one */
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
@@ -9606,6 +9833,7 @@ static void on_ball_end(unsigned *r)
     building_let_go("the ball ended");        /* PAD-393 */
     shield_let_go("the ball ended");          /* PAD-392 */
     shake_let_go("the ball ended");           /* PAD-414 */
+    dto_ball_end();                           /* PAD-733 */
     ball_end_hold_run();                      /* PAD-622: a mode's total first, as the game's own mini-wizards */
     beh.holding = 0;
     beh.tilts = pm_event("tilt") >= 0 ? event_count(pm_event("tilt")) : 0;
@@ -9977,8 +10205,18 @@ static void more_over(unsigned p, int won);   /* PAD-707 */
 /* PAD-707: a battle's end that waits for its mode's finish (finish_on, at pm_end): the game's own stop shows its
  * battle-over display on the one video surface, over the finish. Given at the finish's end, at the ball's end, or
  * as the game ends. */
-static struct { int on, won; const char *name; } roster_late;
+static struct { int on, won; const char *name; const struct pm_mode *mode; } roster_late;
 static int roster_late_now;
+
+/* PAD-733 (David, v29: "when the final mode video plays the scene text plays after that but only for a very brief
+ * portion of a second"): the battle's end waits for the mode's whole ending - its finish, then its TOTAL for the rest
+ * of the hold pm_end_holding asked (block modes: 3 s after the clip) - as a mode's ending does without a battle. The
+ * game's battle-over display came within 15 ms of the clip's end (emulator run fb2_caesar) */
+static int roster_ending_on(void)
+{
+    return roster_late.mode && disp_prio && disp_owner == roster_late.mode && disp_linger_until && !running
+           && pm_ms() < disp_linger_until;
+}
 static void roster_late_run(const char *why)
 {
     if (!roster_late.on) return;
@@ -9991,7 +10229,8 @@ static void roster_late_run(const char *why)
 
 static void roster_late_tick(void)
 {
-    if (roster_late.on && !finish_on()) roster_late_run(pm_in_game() ? "its finish is over" : "the game ended");
+    if (roster_late.on && !finish_on() && !(pm_in_game() && roster_ending_on()))
+        roster_late_run(pm_in_game() ? "its finish and its total are over" : "the game ended");
 }
 
 void pm_roster_over(int won)
@@ -10004,8 +10243,9 @@ void pm_roster_over(int won)
         roster_late.on = 1;
         roster_late.won = won;
         roster_late.name = current && current->name ? current->name : 0;
-        say("roster: the battle %s took ends once its finish has played (the game's battle-over display would take "
-            "its clip)", roster_late.name ? roster_late.name : "a mode");
+        roster_late.mode = current;
+        say("roster: the battle %s took ends once its finish and its total have played (the game's battle-over "
+            "display would take the screen)", roster_late.name ? roster_late.name : "a mode");
         return;
     }
     for (q = 1; q <= 4; q++)
@@ -10069,8 +10309,10 @@ static void roster_take(unsigned *r, unsigned slot, unsigned id, const char *how
     {
         unsigned up = pm_player();
         if (up >= 1 && up <= 4) roster_owed[up] = 1;   /* before the call: a mode that gives the pick back at once clears it */
+        roster_close_begin();               /* PAD-733: before the call - a mode file asks pm_roster_closing() inside it */
         took = roster_fn[slot](slot);
         if (took) pick_at = pm_ms() | 1;    /* PAD-707: the scoop holds the ball through its start clip */
+        else rclose.at = 0;
         if (!took && up >= 1 && up <= 4) roster_owed[up] = 0;
     }
     current = was;
@@ -10156,7 +10398,11 @@ static struct more_member {
     unsigned callout;                   /* the request the cursor plays landing on it; 0 = silent */
     unsigned slot;                      /* the place it stands in */
     void *lit, *lock, *done, *portrait; /* found in the selection scene */
+    void *prog;                         /* PAD-733: its tile's count (`<page>_Prog`, a text in the overlay) */
+    void *city[4];                      /* PAD-733: its city stamps (`<page>_City<c>`, groups), for a battle of its held there */
+    long hits[5], of[5];                /* PAD-733: per player, the count its mode reported (pm_roster_more_progress) */
     unsigned tries;
+    uint64_t shots;                     /* PAD-733: the shots its tile blinks on the playfield (pm_roster_more_shots) */
 } more_m[N_MORE];
 static int more_n;
 static int more_hosts;                              /* bit n: place n has new monsters (its roster_fn is ours) */
@@ -10179,9 +10425,18 @@ static struct {
     void *box[7];                       /* each place's own state box (its claw), hidden where one of ours won */
     unsigned box_hid;                   /* bit n: place n's box hidden by us (the game keeps an open place's hidden
                                          * itself: only our own hide is ever undone) */
+    unsigned lost_city[5];              /* PAD-733: per player, the city lost[] was lost in (the city that holds it) */
+    int going;                          /* PAD-733: 1 + the new monster the cursor left for another place, drawn on
+                                         * while the game's portrait goes out (more_held); 0 = none */
+    int coming;                         /* PAD-733: 1 + the new monster the cursor came to, drawn once the place it
+                                         * came from has gone out; 0 = none */
+    unsigned long going_at;             /* when the cursor last moved (pm_ms) */
+    void *place_lock[7], *place_prog[7];    /* PAD-733: each host place's own padlock (`PadSel_Lock<n>`) and "0/4" */
+    int shots_for;                      /* PAD-733: 1 + the new monster whose shots blink on the playfield; 0 = none */
 } more = { 0, 0, -1, -1, -1, 0, -1, 0, 0, { 0 }, { 0 }, 0, { -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1 },
            { { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 },
-             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u };
+             { -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1 } }, { 0 }, 0u, { 0 }, 0, 0, 0ul, { 0 }, { 0 },
+           0 };
 static void more_won_shift(int k, int by)   /* member k joined (by 1) or left (by -1): the wins follow */
 {
     int p, s;
@@ -10227,7 +10482,10 @@ static int more_before(const char *name, const char *page, const struct more_mem
 static void more_forget_nodes(void)
 {
     int k;
-    for (k = 0; k < more_n; k++) more_m[k].lit = more_m[k].lock = more_m[k].done = more_m[k].portrait = 0;
+    for (k = 0; k < more_n; k++) {
+        more_m[k].lit = more_m[k].lock = more_m[k].done = more_m[k].portrait = more_m[k].prog = 0;
+        more_m[k].city[0] = more_m[k].city[1] = more_m[k].city[2] = more_m[k].city[3] = 0;
+    }
     more.shown = -1;
 }
 
@@ -10253,6 +10511,8 @@ int pm_roster_more(unsigned slot, const char *name, const char *page, unsigned c
         more_n++;
         more_m[k].page[0] = 0;
         more_m[k].tries = 0;
+        for (j = 0; j < 5; j++) more_m[k].hits[j] = more_m[k].of[j] = 0;
+        more_m[k].shots = 0;
         say("roster: %s joins the selection screen in slot %u's place (new monster %d; nodes %s)", name, slot, k + 1,
             page && page[0] ? page : "none");
     }
@@ -10286,12 +10546,14 @@ static void more_release_unused(void)
     }
 }
 
+static void more_shots_show(int k);     /* PAD-733 */
 void pm_roster_more_leave(const char *name)
 {
     int k, j;
     for (k = 0; k < more_n; k++)
         if (more_m[k].by == current && name && more_same(more_m[k].name, name)) break;
     if (k >= more_n) return;
+    if (more.shots_for) more_shots_show(-1);    /* PAD-733: the game has its lights back */
     if (more_m[k].lit) pm_show(more_m[k].lit, 0);
     if (more_m[k].portrait) pm_show(more_m[k].portrait, 0);
     say("roster: %s leaves the selection screen", more_m[k].name);
@@ -10309,6 +10571,35 @@ void pm_roster_more_leave(const char *name)
 }
 
 int pm_roster_more_count(void) { return more_n; }
+
+int pm_roster_more_progress(long done, long of)
+{
+    unsigned p = pm_player();
+    int k;
+    for (k = 0; k < more_n && more_m[k].by != current; k++) ;
+    if (k >= more_n || p < 1 || p > 4) return 0;
+    if (done < 0) done = 0;
+    if (of > 0 && done > of) done = of;
+    if (more_m[k].hits[p] != done || more_m[k].of[p] != of)
+        say("roster: %s's tile counts %ld/%ld for player %u", more_m[k].name, done, of, p);
+    more_m[k].hits[p] = done;
+    more_m[k].of[p] = of;
+    more.states = 0;                    /* written again at the next opening's draw */
+    return 1;
+}
+
+int pm_roster_more_shots(uint64_t shots)
+{
+    int k;
+    for (k = 0; k < more_n && more_m[k].by != current; k++) ;
+    if (k >= more_n) return 0;
+    if (more_m[k].shots != shots)
+        say("roster: %s's tile blinks shots %08x_%08x on the playfield while the cursor is on it", more_m[k].name,
+            (unsigned)(shots >> 32), (unsigned)shots);
+    more_m[k].shots = shots;
+    if (more.shots_for == k + 1) more.shots_for = -1;   /* lit again at the next draw */
+    return 1;
+}
 
 static const char *more_picked;          /* the member being handed the pick (pm_roster_more_picked) */
 const char *pm_roster_more_picked(void) { return more_picked; }
@@ -10345,6 +10636,19 @@ static void more_find(void)
         m->lock = more_node(m->page, "_Lock");
         m->done = more_node(m->page, "_Done");
         m->portrait = more_node(m->page, "_Portrait");
+        {   /* PAD-733: its count, a text beside the places' own "0/4" in the overlay */
+            char p[160];
+            const char *at = pm_port_text("roster_box_path"), *scene_id = pm_port_text("roster_screen_scene");
+            int c;
+            pm_snprintf(p, sizeof p, "%s%s_Prog", at ? at : "", m->page);
+            m->prog = at && scene_id ? pm_text(scene_id, p) : 0;
+            for (c = 0; c < 4; c++) {     /* its city stamps beside it: groups, authored visible - hidden until held */
+                pm_snprintf(p, sizeof p, "%s%s_City%d", at ? at : "", m->page, c);
+                m->city[c] = at && scene_id ? pm_node(scene_id, p) : 0;
+                if (m->city[c]) pm_show(m->city[c], 0);
+            }
+            more.states = 0;          /* written at the next draw */
+        }
         pm_show(m->lit, 0);           /* authored visible: hidden until the cursor is on it */
         if (m->lock) pm_show(m->lock, 0);
         if (m->done) pm_show(m->done, 0);
@@ -10359,6 +10663,25 @@ static void more_find(void)
         if (!more.cover[s]) {
             pm_snprintf(t, sizeof t, "PadSel_Cover%u", s);
             if ((more.cover[s] = more_node(t, ""))) pm_show(more.cover[s], 0);
+        }
+        if (!more.place_lock[s]) {        /* PAD-733: its own padlock, hidden until a lost new monster holds it */
+            pm_snprintf(t, sizeof t, "PadSel_Lock%u", s);
+            if ((more.place_lock[s] = more_node(t, ""))) {
+                pm_show(more.place_lock[s], 0);
+                more.states = 0;
+            }
+        }
+        if (!more.place_prog[s]) {        /* PAD-733: its own "0/4" (the box `T1_2_Artbox`'s words `T1_2Prog_Instance`) */
+            const char *box = 0, *at = pm_port_text("roster_box_path"), *scene_id = pm_port_text("roster_screen_scene");
+            unsigned n;
+            pm_snprintf(t, sizeof t, "roster_box_%u", s);
+            box = pm_port_text(t);
+            for (n = 0; box && box[n]; n++) ;
+            if (box && at && scene_id && n > 7 && str_eq(box + n - 7, "_Artbox")) {
+                char p[120];
+                pm_snprintf(p, sizeof p, "%s%.*sProg_Instance", at, (int)(n - 7), box);
+                more.place_prog[s] = pm_text(scene_id, p);
+            }
         }
         pm_snprintf(t, sizeof t, "roster_tile_%u", s);
         if (!more.body[s] && (tile = pm_port_text(t))) {
@@ -10385,10 +10708,88 @@ static unsigned more_state(unsigned slot)
     return ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("roster_slot_state"))(data("rule_battle"), slot);
 }
 
+/* PAD-733 (David, v24: "the character select is going wonky for a frame or two briefly showing the wrong character
+ * when transitioning with the right flipper"): the game changes its portrait in two steps - the shown place's out,
+ * then the new place's in (`data roster_portrait_state`: its state word and the place shown). A new monster stands
+ * on its place's portrait, so leaving it for another place, the game's out played on that place's own portrait -
+ * BIOLLANTE's for 6 frames on the way from KUMONGA to DESTROYAH. The monster left stays drawn, its place's portrait
+ * hidden, until that out is over, as a portrait of the game's own stays up through its out (1 s at most). A port
+ * without the word changes at once, as before. The step is wrapped (`site roster_portrait_step`, more_portrait_step)
+ * so the monster goes in the very step that starts the next place's in - from the tick alone it went a tick late,
+ * its name over the incoming one for a frame (run fl_after k_10). The same the other way (his recording, GIGAN ->
+ * MINILLA, and run fl_after2 g_07-g_10: GIGAN's name going out showed round MINILLA's for 4 frames): a monster
+ * arriving from another place is drawn when that place's out is over, in the step that starts its own place's in.
+ * The member to draw while the screen is open (-1 = none of ours). */
+static int more_held(void)
+{
+    unsigned at = data("roster_portrait_state"), st, shown, cur;
+    int k = more.cur, was = more.going - 1, out;
+    if (!more.going && !more.coming) return k;
+    if (!at || !more.screen || pm_ms() - more.going_at > 1000) {
+        more.going = more.coming = 0;
+        return k;
+    }
+    st = ((volatile unsigned *)(unsigned long)at)[0];
+    shown = ((volatile unsigned *)(unsigned long)at)[1];
+    cur = *(volatile unsigned *)(unsigned long)(more.screen + (unsigned)pm_port_value("roster_cursor_at", 16));
+    out = st == 5 || (st == 4 && cur != shown);          /* the portrait of `shown` going out (or about to) */
+    if (k >= 0 && k < more_n) {                          /* on a new monster: drawn once the place it came from is out */
+        if (more.coming == k + 1 && out && shown != more_m[k].slot)   /* the one it left stays while its place goes */
+            return was >= 0 && was < more_n && shown == more_m[was].slot ? was : -1;
+        if (more.coming == k + 1 && st == 3)
+            say("roster: %s is drawn as its place's portrait comes in, %lu ms after the cursor came", more_m[k].name,
+                pm_ms() - more.going_at);
+        more.going = more.coming = 0;
+        return k;
+    }
+    if (was >= 0 && was < more_n && out && shown == more_m[was].slot) return was;   /* left for another place */
+    if (was >= 0 && was < more_n)
+        say("roster: the game's portrait of slot %u is out %lu ms after the cursor left %s", more_m[was].slot,
+            pm_ms() - more.going_at, more_m[was].name);
+    more.going = more.coming = 0;
+    return k;
+}
+
+/* PAD-733 (David, v29: "During the monster selection screen when I overlay the selected monster the respective
+ * indicators need to be blinking on the play field"): the game blinks the shots of the battle under its cursor (the
+ * emulator's lamp probe: slot 0's Left spinner, Attack Mecha and Top spinner, slot 1's three powerlines, ffff00), and on
+ * a new monster it blinked its place's battle's - or nothing. While the cursor is on a new monster its mode's shots
+ * (pm_roster_more_shots) blink as the game's, every other shot's insert on the playfield is held dark, and the game has
+ * them all back as the cursor leaves it, at the pick and as the screen goes. The cabinet's own (the Action button: not
+ * placed on the playfield) stay the game's. A monster whose mode names no shots leaves the game's lights as they were. */
+#define MORE_SHOT_RGB 0xffff00u
+#define MORE_SHOT_MS  250u
+static void more_shots_show(int k)
+{
+    const struct pm_mode *was = current;
+    int on[N_LAMPS], off[N_LAMPS], n_on = 0, n_off = 0, j;
+    uint64_t shots = k >= 0 && k < more_n ? more_m[k].shots : 0;
+    int had = more.shots_for != 0;
+    more.shots_for = shots ? k + 1 : 0;
+    if (!(can & PM_CAN_LAMPS) || (!shots && !had)) return;
+    current = &more_mode;
+    if (!shots) pm_lamp_release_all();
+    else {
+        for (j = 0; j < n_lamps; j++) {
+            if (!lamps[j].shot || lamps[j].x < 0) continue;
+            if (lamps[j].shot & shots) on[n_on++] = j;
+            else off[n_off++] = j;
+        }
+        lamp_hold(off, n_off, 0, PM_LAMP_SOLID, 0, "the selection screen: the other shots");
+        lamp_hold(on, n_on, MORE_SHOT_RGB, PM_LAMP_BLINK, MORE_SHOT_MS, more_m[k].name);
+    }
+    current = was;
+}
+
 static void more_draw(void)
 {
     int k, want = more.open ? more.cur : more.keep;
     unsigned s, hide = 0;
+    {
+        int lit = more.open && more.cur >= 0 && more.cur < more_n && more_m[more.cur].shots ? more.cur + 1 : 0;
+        if (lit != more.shots_for) more_shots_show(lit - 1);
+    }
+    if (more.open) want = more_held();
     if (want != more.shown) {
         for (k = 0; k < more_n; k++) {
             int on = k == want;
@@ -10410,21 +10811,52 @@ static void more_draw(void)
          * place's tile (its state box hidden), where it stood for a battle the game never played */
         unsigned p = pm_player();
         signed char *won = p >= 1 && p <= 4 ? more.won[p] : 0;
+        /* PAD-733: a new monster's battle lost is HELD by the city it was lost in, the game's slot state 3 there; the
+         * game stamps that city on the place's own box (and its own "0/5"). The battle is the monster's: its tile
+         * shows the stamp and its count, as the game's own held battles do, and the place's tile a padlock */
+        int lost = p >= 1 && p <= 4 ? more.lost[p] : -1, held = -1, c;
+        if (lost >= 0 && lost < more_n && more_state(more_m[lost].slot) == 3) held = (int)more_m[lost].slot;
         more.states = 1;
+        say("roster: the selection screen is up in city %u for player %u%s", roster_city_of(p), p,
+            held >= 0 ? " - a lost new monster's battle holds its place" : "");
         for (k = 0; k < more_n; k++) {
             unsigned st = more_state(more_m[k].slot);
-            if (more_m[k].lock) pm_show(more_m[k].lock, st != 0 && st != 2);
+            int mine = k == lost && held >= 0;
+            if (more_m[k].lock) pm_show(more_m[k].lock, st != 0 && st != 2 && !mine);
             if (more_m[k].done) pm_show(more_m[k].done, st == 2 && won && won[more_m[k].slot] == k);
+            if (more_m[k].prog) {   /* PAD-733 (David: "this count also needs to show on the monster select screen
+                                     * like the other monsters"): its mode's count, none on a locked place */
+                char w[32];
+                long h = p >= 1 && p <= 4 ? more_m[k].hits[p] : 0, of = p >= 1 && p <= 4 ? more_m[k].of[p] : 0;
+                if (of > 0 && (st == 0 || st == 2 || mine)) pm_snprintf(w, sizeof w, "%ld/%ld", h, of);
+                else pm_snprintf(w, sizeof w, " ");
+                pm_set_text(more_m[k].prog, w);
+            }
+            for (c = 0; c < 4; c++)       /* the stamp of the city that holds it (the card's own words, never rewritten:
+                                           * a stamp's font holds its letters alone - run fb5, a space stopped the game) */
+                if (more_m[k].city[c]) pm_show(more_m[k].city[c], mine && (unsigned)c == more.lost_city[p]);
         }
         for (s = 0; s < 7; s++) {
             unsigned bit = 1u << s;
-            int hide = won && won[s] >= 0 && more_state(s) == 2;
+            int hide = (won && won[s] >= 0 && more_state(s) == 2) || (int)s == held;
+            if (more.place_lock[s]) pm_show(more.place_lock[s], (int)s == held);
+            if ((int)s == held && more.place_prog[s]) pm_set_text(more.place_prog[s], " ");   /* the game writes its own at its open */
             if (!more.box[s]) continue;
             if (hide) { pm_show(more.box[s], 0); more.box_hid |= bit; }
             else if (more.box_hid & bit) { pm_show(more.box[s], 1); more.box_hid &= ~bit; }   /* (run22: shown, an
                                          * open place's box put its footprint frame on every tile of a new game) */
         }
     }
+}
+
+/* the game's portrait step, wrapped (the display processes' thread, the tick's): a new monster still drawn while the
+ * game's out played goes in the step that ended it */
+static unsigned (*more_portrait_orig)(unsigned, unsigned, unsigned, unsigned);
+static unsigned more_portrait_step(unsigned scene_obj, unsigned cur, unsigned a2, unsigned a3)
+{
+    unsigned r = more_portrait_orig(scene_obj, cur, a2, a3);
+    if (more_n && (more.going || more.coming)) more_draw();
+    return r;
 }
 
 /* the cursor's places in the screen's order (battle_select.walk): the game's places 0-6, each followed by the new
@@ -10450,6 +10882,9 @@ static void more_land(unsigned screen, int place)
         ((void (*)(unsigned, unsigned))(unsigned long)fn("roster_screen_bump"))(screen,
             (unsigned)pm_port_value("roster_screen_bump_by", 3));
     *(unsigned *)(unsigned long)(screen + at) = slot;
+    more.going = more.cur >= 0 && more.cur < more_n && more_m[more.cur].slot != slot ? more.cur + 1 : 0;
+    more.coming = place < 0 ? -place : 0;
+    more.going_at = pm_ms();
     more.cur = place >= 0 ? -1 : -1 - place;
     if (place < 0 && roster_callout_set(slot, more_m[-1 - place].callout, "the new monster's, while the cursor lands")) {
         ((void (*)(unsigned))(unsigned long)fn("roster_cursor"))(screen);    /* the game plays it, the last one stopped */
@@ -10511,9 +10946,44 @@ static void on_roster_open(unsigned *r)
     more.keep = -1;
     more.cur = -1;
     more.picked = -1;
+    more.going = more.coming = 0;
     more.open = 1;
     more.states = 0;
     if (more_n) say("roster: the selection screen opens with %d new monster%s on it", more_n, more_n == 1 ? "" : "s");
+}
+
+/* PAD-733 (David, v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most
+ * mode. it's jarring and confusing to figure out the direction to go from there"): the game's open (Premium/LE 1.16
+ * 0x1911dc) puts its cursor on the next open place after the one last played, with no callout, and the screen's
+ * portrait steps from there. With new monsters on the screen the open is wrapped: the game's open runs as it was,
+ * then the cursor is put on the first open entry in the screen's order (more_walk) - the top-left tile, or the first
+ * after it a pick can take - before the screen's first step, so the game's own choice is never drawn. */
+static unsigned (*more_open_orig)(unsigned, unsigned, unsigned, unsigned);
+
+static void more_open_first(unsigned screen)
+{
+    unsigned at = (unsigned)pm_port_value("roster_cursor_at", 16), was, slot;
+    int order[7 + N_MORE], n, i;
+    if (!more_n || !screen) return;
+    n = more_walk(order);
+    for (i = 0; i < n && !more_open_place(order[i]); i++) ;
+    if (i >= n) return;                               /* nothing open: the game's own */
+    was = *(unsigned *)(unsigned long)(screen + at);
+    slot = order[i] >= 0 ? (unsigned)order[i] : more_m[-1 - order[i]].slot;
+    *(unsigned *)(unsigned long)(screen + at) = slot;
+    more.cur = order[i] >= 0 ? -1 : -1 - order[i];
+    if (order[i] >= 0) say("roster: the selection screen starts on its top-left place, slot %u (the game's own pick: slot %u)", slot, was);
+    else say("roster: the selection screen starts on its top-left place, %s in slot %u's (the game's own pick: slot %u)",
+             more_m[-1 - order[i]].name, slot, was);
+}
+
+static unsigned more_open_wrap(unsigned screen, unsigned a1, unsigned a2, unsigned a3)
+{
+    unsigned regs[4] = { screen, a1, a2, a3 }, r;
+    on_roster_open(regs);
+    r = more_open_orig(screen, a1, a2, a3);
+    more_open_first(screen);
+    return r;
 }
 
 /* the screen's pick (r0 = the screen): which tile it was. PAD-730 (David: "When selecting a bonus monster, the wrong
@@ -10539,8 +11009,9 @@ static int more_on_pick(unsigned slot)
     unsigned p = pm_player();
     int k = -1, took;
     if (!pm_in_game() || p < 1 || p > 4 || !more_n) return 0;
-    if (roster_resuming) {
-        if (more.lost[p] >= 0 && more.lost[p] < more_n && more_m[(int)more.lost[p]].slot == slot) k = more.lost[p];
+    if (roster_resuming) {          /* PAD-733: the city it was lost in - another city's held battle is the game's */
+        if (more.lost[p] >= 0 && more.lost[p] < more_n && more_m[(int)more.lost[p]].slot == slot
+            && roster_city_of(p) == more.lost_city[p]) k = more.lost[p];
     } else if (more.picked >= 0 && more.picked < more_n && more_m[more.picked].slot == slot) {
         k = more.picked;
     }
@@ -10561,6 +11032,50 @@ static int more_on_pick(unsigned slot)
     return took;
 }
 
+/* PAD-733 (David: "if a mode is failed and you come back to start it again it still says fight biolante again when it's
+ * supposed to be kumunga"): a lost battle stays the city's, and the city screen the next scoop opens offers it again -
+ * STAY IN: <city> / TO REMATCH %s, the game's numbered line `value roster_rematch_line` (3750 on every Godzilla 1.15 and
+ * 1.16 build) filled with the held battle's own name, the place's. While the player up's city holds the battle a new
+ * monster lost there, that line names the monster instead (every language; put back when it is not, and at the game's
+ * end). */
+static int more_rematch_shown = -1;     /* the member the line names now; -1 = the game's own line */
+static void more_rematch(void)
+{
+    long line = pm_port_value("roster_rematch_line", -1);
+    unsigned p = pm_player(), city, rec, held = 0;
+    unsigned n = (unsigned)pm_roster_slots(), at = (unsigned)pm_port_value("roster_id_at", 4);
+    unsigned size = (unsigned)pm_port_value("roster_record_size", 12);
+    const unsigned *vec;
+    int want = -1;
+    char words[64];
+    if (line < 0 || !(can & PM_CAN_MESSAGES) || !data("rule_battle")
+        || (unsigned long)line >= *(unsigned *)(unsigned long)data("message_count")) return;
+    if (pm_in_game() && p >= 1 && p <= 4 && more.lost[p] >= 0 && more.lost[p] < more_n
+        && (city = roster_city_of(p)) == more.lost_city[p]
+        && (rec = roster_city_rec(city, pm_port_value("roster_city_battle_vec_at", -1), 16)) != 0) {
+        vec = *(const unsigned **)(unsigned long)(data("rule_battle") + (unsigned)pm_port_value("roster_vec_at", 8));
+        held = rw(rec + (p - 1) * 4);
+        if (vec && more_m[(int)more.lost[p]].slot < n && held && vec[(more_m[(int)more.lost[p]].slot * size + at) / 4] == held)
+            want = more.lost[p];
+    }
+    if (want == more_rematch_shown) return;
+    if (want < 0) {
+        pm_message_restore(0x80000000u | (unsigned)line);
+        say("roster: the city screen's rematch line is the game's own again");
+    } else {
+        unsigned i, k = 0;
+        const char *pre = "TO REMATCH ", *name = more_m[want].name;
+        for (i = 0; pre[i] && k + 1 < sizeof words; i++) words[k++] = pre[i];
+        for (i = 0; name[i] && k + 1 < sizeof words; i++)
+            if (name[i] != '%') words[k++] = name[i];   /* the line is a format: no conversion of ours in it */
+        words[k] = 0;
+        if (!message_borrow(0x80000000u | (unsigned)line, (unsigned)line, words)) return;
+        say("roster: the city screen's rematch line names %s (player %u's city %u holds the battle it lost)",
+            more_m[want].name, p, more.lost_city[p]);
+    }
+    more_rematch_shown = want;
+}
+
 /* every tick */
 static void more_tick(void)
 {
@@ -10571,6 +11086,7 @@ static void more_tick(void)
         for (q = 1; q <= 4; q++) {
             more.lost[q] = more.playing[q] = -1;
             for (s = 0; s < 7; s++) more.won[q][s] = -1;
+            for (s = 0; s < more_n; s++) more_m[s].hits[q] = more_m[s].of[q] = 0;   /* PAD-733: the tiles' counts */
         }
         for (s = 0; s < 7; s++)             /* the game over: the boxes we hid are the game's again */
             if ((more.box_hid >> s) & 1u) { if (more.box[s]) pm_show(more.box[s], 1); more.box_hid &= ~(1u << s); }
@@ -10581,6 +11097,7 @@ static void more_tick(void)
     if (more.keep >= 0 && pm_ms() - more.keep_at >= (unsigned long)pm_port_value("roster_start_after_ms", 3000))
         more.keep = -1;
     more_draw();
+    more_rematch();
 }
 
 /* pm_roster_over: the monster whose mode had the pick is the one a lost battle brings back */
@@ -10588,6 +11105,7 @@ static void more_over(unsigned p, int won)
 {
     if (p < 1 || p > 4 || more.playing[p] < 0) return;
     more.lost[p] = won ? -1 : more.playing[p];
+    more.lost_city[p] = roster_city_of(p);
     if (won && more.playing[p] < more_n) more.won[p][more_m[(int)more.playing[p]].slot] = more.playing[p];
     if (more.playing[p] < more_n)
         say("roster: %s's battle %s for player %u%s", more_m[(int)more.playing[p]].name, won ? "won" : "lost",
@@ -13227,6 +13745,161 @@ static int is_switch_hit(const char *name)
     return 1;
 }
 
+/* ---- PAD-733: drain to one ball (pm_drain_to_one) ---------------------------------------------------------------
+ * David (MINILLA's 2-ball multiball ending with both balls up): "just kill the flippers and show that the mode is
+ * ended, then instead of ending the ball, give a ball back in the plunger lane". The framework's all-flippers off and
+ * on (`site flippers_off` / `site flippers_on`, Premium/LE 1.16 0x3f1898 / 0x3f196c: each flipper record's enable bit,
+ * which the node boards' rules follow) are what the game's own dead-flipper feature calls (0xc19a4 / 0xc19cc: there
+ * with the kickbacks, pops and slings off too - here the flippers alone, so the pops and slings keep the balls moving
+ * and none sits still). While they are dead the balls drain; once one is left the game's own ball save is armed for
+ * it (pm_ball_save: the framework's serve-back), so when it drains too the game serves it back to the shooter lane
+ * instead of ending the ball - the same ball goes on, no bonus. The flippers come back as that last ball comes home
+ * (the trough; a ball still rolling down the trough after the one before it is not the last: DTO_SETTLE_MS) or the
+ * served ball lands in the shooter lane (`value shooter_lane_switch`: two balls draining together come home inside
+ * that settle), at the latest after DTO_MAX_MS; at the ball's end, the game's end or a tilt the game's own next ball
+ * brings them back. The game's ball search is put off while
+ * they are dead, as its own feature does. */
+#define DTO_MAX_MS    30000ul
+#define DTO_SETTLE_MS  1500ul
+#define DTO_SAVE_S       20u
+static struct {
+    int state;                          /* 0 none, 1 dead flippers with two or more balls up, 2 the last one's save armed */
+    unsigned long t0, armed_at;
+    unsigned trough;                    /* the trough switches' hits counted when it last settled */
+    unsigned shooter;                   /* the shooter lane switch's hits when the save was armed */
+    int balls;
+    char by[40];
+    const struct pm_mode *mode;         /* PAD-733: the mode that asked (its block of the game's modes lasts through it) */
+} dto;
+
+/* PAD-733: the game's modes a mode holds off stay held off through the drain to one ball it asked for as it ended -
+ * the flippers are dead (emulator, run mi_dadwin2: the game's BUILDING ATTACK began 13 ms after MINILLA's end, over
+ * its TOTAL, while both balls drained); they may start once the flippers are back */
+static int dto_for(const struct pm_mode *m)
+{
+    return m && dto.state && dto.mode == m;
+}
+
+static int block_live(void)
+{
+    return block_owner && (running == block_owner || dto_for(block_owner));
+}
+
+static unsigned dto_trough_hits(void)
+{
+    uint64_t t = pm_shot("Trough");
+    unsigned n = 0;
+    int i;
+    for (i = 0; t && i < port.n_switch; i++)
+        if (port.sw[i].mask & t) n += switch_fired[port.sw[i].id];
+    return n;
+}
+
+static unsigned dto_shooter_hits(void)
+{
+    long sw = pm_port_value("shooter_lane_switch", -1);
+    return sw > 0 && sw < N_SWITCH_IDS ? switch_fired[sw] : 0;
+}
+
+static void dto_flippers(int on)
+{
+    unsigned f = fn(on ? "flippers_on" : "flippers_off");
+    if (f) ((void (*)(void))(unsigned long)f)();
+}
+
+/* the multiball's own ball save ends with the mode: with dead flippers every drain inside it was served back and
+ * launched again (emulator, run dto_insave: 26 s of that before one ball was left). The framework's multiball record
+ * (`data multiball_record`, Premium/LE 1.16 0x7d3930, Pro 1.16 0x7d74e4: the serve's own r5) keeps the save as a
+ * countdown at +0 (ticks; the serve only ever raises it) and a grace span after it at +4 (0xbb); both 0 = no save */
+static void dto_save_off(void)
+{
+    unsigned at = data("multiball_record");
+    volatile unsigned *r;
+    if (!at || !maps_has(at, 8, MAP_R)) return;      /* the game's .bss: no file of its own (not MAP_GAME) */
+    r = (volatile unsigned *)(unsigned long)at;
+    if (r[0] || r[1])
+        say("drain to one: the multiball's own ball save ends with it (%u ticks of it left, %u of its grace)", r[0], r[1]);
+    r[0] = 0;
+    r[1] = 0;
+}
+
+/* back = the ball goes on: the flippers on now; else (the ball or the game ended) the game's own next ball start
+ * brings them back from its status, as after any ball end - turning them on here would arm them through its bonus */
+static void dto_done(const char *why, int back)
+{
+    if (!dto.state) return;
+    dto.state = 0;
+    if (back) dto_flippers(1);
+    say("drain to one: over after %lu ms (%s)%s", pm_ms() - dto.t0, why, back ? " - the flippers are back" : "");
+}
+
+int pm_drain_to_one(void)
+{
+    int n;
+    if (!fn("flippers_off") || !fn("flippers_on") || !multiball_ok()) {
+        say("drain to one: %s asked - this game's port has no flippers off/on or no serve: the balls play on",
+            current && current->name ? current->name : "a mode");
+        return 0;
+    }
+    if (!pm_in_game() || ball_tilted()) return 0;
+    if (dto.state) return 1;
+    n = pm_balls_in_play();
+    if (n < 2) {
+        say("drain to one: %d ball(s) in play - nothing to drain", n);
+        return 0;
+    }
+    pm_snprintf(dto.by, sizeof dto.by, "%s", current && current->name ? current->name : "a mode");
+    dto.mode = current;
+    dto.state = 1;
+    dto.t0 = pm_ms();
+    dto.balls = n;
+    dto.trough = dto_trough_hits();
+    dto_flippers(0);
+    dto_save_off();
+    if (fn("ball_search_delay"))
+        ((void (*)(unsigned))(unsigned long)fn("ball_search_delay"))(45u);   /* as the game's own feature: 45 s */
+    say("drain to one: %s - the flippers are dead with %d balls in play; when the last drains, one comes back to the "
+        "shooter lane (the same ball)", dto.by, n);
+    return 1;
+}
+
+static void dto_tick(void)
+{
+    unsigned long now = pm_ms();
+    int n;
+    if (!dto.state) return;
+    if (!pm_in_game()) { dto_done("the game ended", 0); return; }
+    if (now - dto.t0 >= DTO_MAX_MS) { dto_done("its 30 s are up - the ball plays on as it is", 1); return; }
+    dto_flippers(0);                    /* the game's own flipper update (a status change) does not bring them back */
+    n = pm_balls_in_play();
+    if (dto.state == 1) {
+        if (n > 1) return;
+        dto.state = 2;
+        dto.armed_at = now;
+        dto.trough = dto_trough_hits();
+        dto.shooter = dto_shooter_hits();
+        say("drain to one: down to %d ball(s) after %lu ms - its save armed: when it drains it comes back to the "
+            "shooter lane", n, now - dto.t0);
+        if (!pm_ball_save(DTO_SAVE_S)) dto_done("the game would not arm the save - the last ball plays on", 1);
+        return;
+    }
+    if (dto_shooter_hits() != dto.shooter) {       /* the served ball (the two may come home together) */
+        dto_done("the served ball is in the shooter lane", 1);
+        return;
+    }
+    if (now - dto.armed_at < DTO_SETTLE_MS) {
+        dto.trough = dto_trough_hits();             /* the ball before it still rolling down the trough */
+        return;
+    }
+    if (dto_trough_hits() != dto.trough || n == 0)
+        dto_done("the last ball is home - the game serves it back to the shooter lane", 1);
+}
+
+static void dto_ball_end(void)
+{
+    dto_done("the ball ended", 0);
+}
+
 /* ---- shots from the switch drain (optional; any build) ----------------------------------------------
  * Every Spike 2 build's framework runs one switch drain per tick, which hands the game each switch edge
  * the node boards reported. For every edge it calls one small per-switch function with r0 = the switch
@@ -15731,10 +16404,17 @@ static void pad_mode_start(void)
             /* PAD-707: new monsters on the selection screen - its keys, its opening and its pick */
             if (fn("roster_screen_keys") && fn("roster_screen_open") && fn("roster_screen_pick") && fn("roster_cursor")
                 && pm_port_text("roster_screen_scene")
-                && hook_veto(fn("roster_screen_keys"), on_roster_keys) && hook(fn("roster_screen_open"), on_roster_open)
+                && hook_veto(fn("roster_screen_keys"), on_roster_keys)
+                && (more_open_orig = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(
+                        fn("roster_screen_open"), (void *)more_open_wrap))  /* PAD-733: then the top-left place */
                 && hook(fn("roster_screen_pick"), on_roster_pick))
                 say("roster: the selection screen takes new monsters (its keys at 0x%08x, its pick at 0x%08x)",
                     fn("roster_screen_keys"), fn("roster_screen_pick"));
+            if (fn("roster_screen_keys") && fn("roster_portrait_step") && data("roster_portrait_state")    /* PAD-733 */
+                && (more_portrait_orig = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(
+                        fn("roster_portrait_step"), (void *)more_portrait_step)))
+                say("roster: a new monster left for another place stays drawn through the game's portrait out (its step "
+                    "at 0x%08x is wrapped)", fn("roster_portrait_step"));
             if (fn("battle_stop"))
                 say("roster: a pick counts as the battle it replaced (its START's bookkeeping at the pick, its STOP at the mode's end)");
         }

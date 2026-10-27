@@ -189,7 +189,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
     ["Mode", [{ op: "start_mode" }, { op: "light_mode", shot: litShot(ch), insert: "", color: "#ffd000", pattern: "blink" },
       { op: "unlight_mode", mode: "" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) },
       { op: "set_time", seconds: num(10) }, { op: "set_time", seconds: num(15), at_least: true },
-      { op: "multiball", balls: 2, save: 10 }, { op: "ball_save", seconds: 15 },
+      { op: "multiball", balls: 2, save: 10 }, { op: "ball_save", seconds: 15 }, { op: "drain_to_one" },
       { op: "game_wizard", name: ((ch.game_wizards || [])[0] || {}).name || "", how: "light" }]],
     // PAD-395: the mechanisms the form's Magnet, Scoop and Other mechanisms hold (greyed where the game cannot)
     ["Mechanisms", [{ op: "hold", what: ((ch.mechs || [])[0] || {}).name || "magnet", ms: num(2000) },
@@ -208,7 +208,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
       { op: "music", bed: ((prog.beds || [])[0] || {}).name || "" }]],
     ["HUD", [{ op: "hud_text", which: "line", text: "SHOOT THE LIT SHOT", value: null },
       { op: "hud_counter", counter: 1, value: num(0), sub: null }, { op: "hud_gauge", value: num(1) },
-      { op: "hud_progress", value: num(0) },
+      { op: "hud_progress", value: num(0) }, { op: "roster_progress", done: num(0), of: num(5) },
       { op: "hud_award", text: "JACKPOT", value: null, sub: "", seconds: 2 }]],
   ];
 }
@@ -236,10 +236,10 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
-export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", game_wizard: "mode", score: "score",
+export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", drain_to_one: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
-  hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
+  hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
@@ -469,6 +469,7 @@ function StmtBody({ b, path, ed }) {
       : html`<span class="bk-w" ...${tip(TIP.setTime)}>Set the clock to</span><${Slot} kind="num" value=${b.seconds} path=${[...path, "seconds"]} ed=${ed} /><span class="bk-w">seconds</span>`;
     case "multiball": return html`<span class="bk-w">Multiball of</span><${Num} value=${b.balls} width=${44} onChange=${(v) => set("balls", v)} />
       <span class="bk-w">balls, ball save</span><${Num} value=${b.save} width=${44} onChange=${(v) => set("save", v)} /><span class="bk-w">s</span>`;
+    case "drain_to_one": return html`<span class="bk-w">Take the extra balls away (the flippers off until they drain, one ball back to the plunger)</span>`;
     case "ball_save": return html`<span class="bk-w">Ball save for</span><${Num} value=${b.seconds} width=${44} onChange=${(v) => set("seconds", v)} /><span class="bk-w">s</span>`;
     case "log": return html`<span class="bk-w">Write</span><${Text} value=${b.text} onChange=${(v) => set("text", v)} placeholder="a line" /><span class="bk-w">in the log</span>`;
     case "hud_text": return html`<span class="bk-w">Show</span><${Text} value=${b.text} max=${40} width=${220} onChange=${(v) => set("text", v)} placeholder="words" />
@@ -482,6 +483,7 @@ function StmtBody({ b, path, ed }) {
       ${b.label != null ? html`<${Text} value=${b.label} max=${16} width=${110} onChange=${(v) => set("label", v)} placeholder="label" />` : null}`;
     case "hud_gauge": return html`<span class="bk-w">Fill the HUD's gauge to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">pips</span>`;
     case "hud_progress": return html`<span class="bk-w">Show on the progress panel</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />`;
+    case "roster_progress": return html`<span class="bk-w">Show on its selection screen tile</span><${Slot} kind="num" value=${b.done} path=${[...path, "done"]} ed=${ed} /><span class="bk-w">of</span><${Slot} kind="num" value=${b.of} path=${[...path, "of"]} ed=${ed} />`;
     case "hud_award": return html`<span class="bk-w" ...${tip(TIP.hudAward)}>Award</span><${Text} value=${b.text} max=${40} width=${120} onChange=${(v) => set("text", v)} placeholder="words" />
       <span class="bk-w">and</span><${Slot} kind="num" optional value=${b.value} path=${[...path, "value"]} ed=${ed} />
       <span class="bk-w">over</span><${Text} value=${b.sub} max=${40} width=${120} onChange=${(v) => set("sub", v)} placeholder="a smaller line" />
@@ -757,12 +759,12 @@ export function hatLabel(h) {
 }
 
 export function stmtLabel(b) {
-  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball", ball_save: "Ball save",
+  return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball", ball_save: "Ball save", drain_to_one: "Take the extra balls away",
     score: "Score points", set: "Set a variable", change: "Change a variable", set_hits: "Set the hits of a shot", callout: "Say a callout",
     words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound", music: "Play the music",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
-    hud_progress: "Progress panel number",
+    hud_progress: "Progress panel number", roster_progress: "Selection screen count",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", building: "Move the building to",
     shake: "Shake the cabinet for", shake_game: "Shake it the game's way", game_wizard: "The game's mini-wizard",

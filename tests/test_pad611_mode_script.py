@@ -28,7 +28,8 @@ EVERY_BLOCK = [
     {"op": "start_mode"}, {"op": "end_mode"},
     {"op": "light_mode", "shot": "Right ramp", "insert": "MR. HENDERSON", "color": "#ffd000", "pattern": "blink"},
     {"op": "unlight_mode", "mode": ""}, {"op": "add_time", "seconds": num(5)}, {"op": "set_time", "seconds": num(10)},
-    {"op": "multiball", "balls": 2, "save": 10}, {"op": "ball_save", "seconds": 15}, {"op": "game_wizard", "name": "Spectre", "how": "light"},
+    {"op": "multiball", "balls": 2, "save": 10}, {"op": "ball_save", "seconds": 15}, {"op": "drain_to_one"},
+    {"op": "game_wizard", "name": "Spectre", "how": "light"},
     {"op": "hold", "what": "magnet", "ms": num(2000)}, {"op": "scoop_hold", "ms": num(3000), "which": "next"},
     {"op": "let_go", "what": "*"}, {"op": "shield", "where": "toward"}, {"op": "building", "floor": "3"},
     {"op": "shake", "ms": num(500), "strength": "hard"}, {"op": "shake_game", "shake": "jackpot"},
@@ -46,6 +47,7 @@ EVERY_BLOCK = [
     {"op": "hud_text", "which": "line", "text": "SHOOT THE LIT SHOT", "value": None},
     {"op": "hud_counter", "counter": 1, "value": num(0), "sub": None}, {"op": "hud_gauge", "value": num(1)},
     {"op": "hud_progress", "value": num(7)},
+    {"op": "roster_progress", "done": num(2), "of": num(5)},                       # PAD-733
     {"op": "hud_award", "text": "JACKPOT", "value": None, "sub": "", "seconds": 2},
 ]
 #: one of every value and condition (modes_blocks.js valueTemplates / condTemplates), with the operators

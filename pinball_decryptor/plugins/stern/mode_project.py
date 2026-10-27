@@ -114,6 +114,7 @@ class TitleProfile:
     wizard_shot: str = ""            # PAD-436: the game's shot that starts a lit mini-wizard (`text wizard_shot`)
     wizard_lights: tuple = ()        # PAD-473: the names of those a mode can light for it (the rest are started)
     wizard_claims: bool = False      # PAD-457: one a mode hands out is its mode's: the game's own lighting leaves it
+    white_shots: tuple = ()          # PAD-733: the shots whose inserts are all one light (white only: no colour shows)
     inserts: tuple = ()              # PAD-503: the names of every insert the port names a mode can light (a villain's
     #                                  on Bond's Right ramp, shot or not); () = none it can light on this title
     status_bar: bool = False         # PAD-521: the port names the game's own status bar (`site status_bar`): a mode's
@@ -2640,6 +2641,7 @@ def profile_from_port(path):
         game_rules=_game_rules(port),                        # PAD-398
         lamps=_lit_inserts(port) if key in LAMPS_PROVEN else 0,
         inserts=_named_inserts(port) if key in LAMPS_PROVEN else (),       # PAD-503
+        white_shots=_white_shots(port) if key in LAMPS_PROVEN else (),     # PAD-733
         light_route=light_route,
         bank_tree=measured.get("bank_tree", "auto_loaded"),
         hud_tree=measured.get("hud_tree", "auto_loaded"),
@@ -2835,6 +2837,19 @@ def _named_inserts(port):
     out = []
     for name, _ids, _mask in port.get("lamp", ()):
         if name and "," not in name and name not in out:
+            out.append(name)
+    return tuple(out)
+
+
+def _white_shots(port):
+    """PAD-733 (David: "For custom mode shots then, we should use shots that can be colored. Exceptions are for shots
+    that are named on the screen"): the port's shots whose inserts are all ONE light (a `lamp` line with one id) - a
+    mode's colour does not show on them, only a white light (Godzilla's Powerlines, Maser, Magna Grab). A shot no
+    insert names is not one of them (nothing of it is lit)."""
+    out = []
+    for name, mask in port.get("shot", ()):
+        lit = [ids for _n, ids, m in port.get("lamp", ()) if m & mask]
+        if lit and all(sum(1 for i in ids if i) < 2 for ids in lit) and name not in out:
             out.append(name)
     return tuple(out)
 

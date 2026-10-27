@@ -2610,16 +2610,16 @@ static void roster_ended(int won)
     pm_roster_over(won);
 }
 
-/* A taken pick starts its mode HERE: at once when nothing else runs and the port has no
- * `value roster_start_after_ms`; otherwise on the tick after that many ms (the selection screen's
- * closing animation covers a start screen shown at the pick), and not while another mode runs (it
+/* A taken pick starts its mode HERE: on the first tick the selection screen's close is over
+ * (PAD-733: pm_roster_closing() - the game's own battle is in its intro there; the port's
+ * `value roster_start_after_ms` is the most it waits), and not while another mode runs (it
  * starts when that one ends). A pick the mode cannot start (item 139's starts/cooldown, item 140's
  * stack no, a mode in C running, the player changed) is GIVEN BACK: pm_roster_done() lights the
  * ramps again. The game's battle for the slot never runs - the slot shows our name and art. */
 static void roster_tick(void)
 {
     struct slot *M;
-    if (!roster_wait || run.active || pm_ms() < roster_wait_ms) return;
+    if (!roster_wait || run.active || pm_ms() < roster_wait_ms || pm_roster_closing()) return;   /* PAD-733: the close */
     M = &slots[roster_wait - 1];
     roster_wait = 0;
     if (!pm_in_game() || pm_player() != roster_wait_player) {
@@ -2648,7 +2648,6 @@ static char roster_joined_as[MODES_MAX][64];  /* ... under this name */
 static int roster_pick_as(unsigned roster, const char *more)
 {
     unsigned k;
-    long after = more ? pm_roster_start_after() : pm_port_value("roster_start_after_ms", 0);   /* PAD-707: the screen closing, either way */
     for (k = 0; k < MODES_MAX; k++) {
         struct slot *M = &slots[k];
         if (more ? roster_joined[k] != roster + 1 || !name_is(roster_joined_as[k], more) : roster_held[k] != roster + 1)
@@ -2660,13 +2659,12 @@ static int roster_pick_as(unsigned roster, const char *more)
         }
         roster_wait = k + 1;
         roster_wait_player = pm_player();
-        roster_wait_ms = pm_ms() + (after > 0 ? (unsigned long)after : 0UL);
+        roster_wait_ms = pm_ms();       /* PAD-733: no clock - roster_tick starts it as the screen's close ends */
         if (run.active)
             pm_log("%s: roster slot %u picked while %s runs - it starts when that one ends", cfg.name, roster,
                    run.slot->c.name);
-        else if (after > 0)
-            pm_log("%s: roster slot %u picked - it starts in %ld ms, once the selection screen has closed", cfg.name,
-                   roster, after);
+        else if (pm_roster_closing())
+            pm_log("%s: roster slot %u picked - it starts once the selection screen has closed", cfg.name, roster);
         roster_tick();
         return 1;
     }

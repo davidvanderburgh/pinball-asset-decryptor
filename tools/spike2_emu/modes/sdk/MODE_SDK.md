@@ -978,6 +978,21 @@ Pro 1.15's instruction for instruction). On another title, find `cmode_manager` 
 `rtti_tree.py` and compare its virtuals 10, 15 and 22 with Godzilla's; a title without a
 `cmode_manager` (TMNT Pro's `crule_manager`) has no port lines, and the call returns -1.
 
+**Modes that run beside everything (PAD-733).** "Any" counts every active mode of the game's, and some run for most
+of a ball under the game's own battles and multiballs: Godzilla's Tesla Strike starts from the powerlines and is over
+only when its lit arrows are made or the ball ends. On David's Premium every mode of ours waited from 208 s into a ball
+to its drain at 854 s (two KUMONGA picks refused, the progress panel down). A port names such modes by their `rule`
+labels:
+
+```
+text stock_any_beside        Tesla Strike    # comma-separated rule labels
+```
+
+When "any" says a mode runs, the runtime asks the port's rules one by one (their ACTIVE slot, at most every 100 ms):
+if only those named run, the answer is 0 (mode.log: `stock modes: Tesla Strike runs - beside ours ...`); otherwise
+the label of the one found names it (`not started (a block): Super Train is running`). A battle picked on the game's own
+selection screen (or a mode that takes the place of one of the game's) never waits at all: the game let its own start.
+
 **What is proven.** In the emulator on Godzilla Pro 1.15 and Premium 1.16 (`godzilla_le`),
 with a mode file set to `stack no` beside one with no stack key: both started in plain
 play; during a battle the game started itself (Titanosaurus on Pro, Ebirah on Premium:
@@ -1489,6 +1504,41 @@ own multiball; two players.
 
 `mode_project.BALL_SAVE_PROVEN` lists the proven builds, and the tab greys Ball save on any other build.
 
+## Drain to one ball (PAD-733)
+
+A multiball of the mode's own that ends with two or more balls still up (MINILLA's dad-and-baby multiball won with
+both balls in play) leaves the player a multiball the mode no longer runs. David: "just kill the flippers and show
+that the mode is ended, then instead of ending the ball, give a ball back in the plunger lane". `pm_drain_to_one()`
+does that, from the mode's end (before or after `pm_end`):
+
+1. The game's flippers go dead - the framework's all-flippers off (`site flippers_off`, Premium/LE 1.16 `0x3f1898`,
+   Pro 1.16 `0x479894`): each flipper record's enable bit (+6, bit 2; bit 4 marks it changed), which the node boards'
+   flipper rules follow. The game's own dead-flipper feature calls exactly this pair (LE `0xc19a4` / `0xc19cc`, Pro
+   `0xbffa8` / `0xbffd0`), there with its kickbacks, pops and slings off as well (`0x3f04cc`); the runtime kills the
+   flippers alone, so the pops and slings keep the balls moving. Every tick it asks again (the game's own flipper
+   update on a status change must not bring them back early), and the game's ball search is put off 45 s, as its own
+   feature does. The multiball's own ball save, if it still runs, ends there (`data multiball_record`, LE `0x7d3930`,
+   Pro `0x7d74e4`: the framework's multiball record, its save a countdown in ticks at +0 and a grace span at +4, both
+   zeroed): inside it every drain was served back and launched again into dead flippers (emulator, run dto_insave:
+   26 s of that before one ball was left).
+2. Once one ball is left (the framework's balls in play), that ball's ball save is armed (`pm_ball_save`, 20 s): when
+   it drains too the game serves it back to the shooter lane and the SAME ball goes on - no bonus, no next ball.
+3. The flippers come back (`site flippers_on`, LE `0x3f196c`, Pro `0x479968`) when the served ball lands in the
+   shooter lane (`value shooter_lane_switch`, 62 on both) or the last ball is seen home in the trough (a trough hit
+   more than 1.5 s after the one before it: that one still rolling down is not the last), and at the latest after
+   30 s. At the ball's end, a tilt or the game's end it lets go without turning them on: the game's own next ball
+   brings them back from its status, as after any ball end.
+4. The game's modes a mode held off (`pm_block_game_modes`) stay held off until the flippers are back: its end's
+   `pm_block_game_modes(0)` waits for the drain (`block: MINILLA keeps the game's modes off until its extra balls
+   have drained`). Run mi_dadwin2 without it: the game's BUILDING ATTACK began 13 ms after MINILLA's end, over its
+   TOTAL, with the flippers dead.
+
+`drain to one: MINILLA - the flippers are dead with 2 balls in play ...`, `down to 1 ball(s) after N ms - its save
+armed ...` and `over after N ms (the served ball is in the shooter lane) - the flippers are back` say what happened.
+It answers 0 (and the balls play on) with fewer than two balls in play, no game in play, a tilted ball, or a port
+without the two sites or the multiball serve. Pro 1.15 has no game program here: its two sites are the same code
+(found by it, movw/movt and branches masked) once one is read.
+
 ## The magnet (PAD-381)
 
 David (2026-10-04): modes need access to the coils, "However, we need guardrails on this since these are
@@ -1786,7 +1836,23 @@ screen runs inside the scoop's settled event (the game's own hold); a pick a mod
 the ball after the screen closes, through the port's `roster_start_after_ms` until the mode starts, then through its
 full-screen start clip (1.2 s for one to begin), at most 15 s - logged `scoop: a mode took the selection screen's pick
 - the ball waits for its start clip` and `let go after N ms (its start clip is over)`.
-## The shield platform (Godzilla Premium/LE, PAD-379)
+
+**The pick's choreography is the game's (PAD-733).** David: "imitate them for our custom modes ... I seen it flashed
+to the hud before showing the video". Filmed at 0.25x on Premium/LE 1.16, Pro 1.16 and the Heisei 1.99D card: after
+a pick of the game's own battle the screen fades out (gone by 0.44 s), the map zooms into the frame and holds, and at
+2.0 s the battle is on the glass in its full-screen intro - no HUD before it. The close is one of the game's display
+effects (Premium/LE 1.16: 132, priority 196, from the pick to +1983 ms; the game pauses its video player as it ends,
+taking anything of ours on it along). So a picked mode now starts on the first tick that effect has given way
+(`pm_roster_closing()`; the port's `roster_start_after_ms 2500` is only the most it waits - it was the start itself,
+3000, and the city's HUD, then the mode's, showed for 1.5 s first), and a blocks mode's start clip plays in that same
+tick (a clip a shot asks for still waits half a second, "Clips race the game's own"; there is no shot at a pick). A
+full-screen clip draws over everything, so a start at the pick itself would hide the screen's close (rig run a0), and
+one before the close's end is gone with it (a1950). The game pauses its player a moment after the effect ends (within
+~45 ms, run g_kumonga), so a full-screen clip it stops in its first 300 ms, started within 300 ms of that close, is played
+again once at once (`clip: "..." was paused N ms in by the game's close of its selection screen - played again`); it
+stays on meanwhile, so neither the HUD nor the backdrop loop gets a frame. The city screen a lost battle brings (`STAY IN:` / `TRAVEL TO:` /
+`TO REMATCH %s`, numbered lines 3748-3750) names a new monster lost there instead of the place's battle
+(`value roster_rematch_line 3750`), and the city pick replays the monster only in the city it was lost in.
 
 Godzilla Premium and LE carry their three shield targets on a platform a motor turns. Most of the game
 it faces AWAY: the spinner side (the shield ramp spinner) faces the player and the shields cannot be hit
@@ -1906,7 +1972,10 @@ it: balls locked, and the third lock's Godzilla Multiball, which the mode keeps 
 went into ball search (David's Premium, 2026-10-22). So while one of ours runs and has not put the building on a
 floor of its own, the runtime sends a building parked above floor 0 to 0, within the limits below, and puts it back
 where it was when the mode ends, which reopens the lock (mode.log: `building: floor 1 -> 0 - its lock closed while
-<mode> runs`). Nothing to do in a mode for it.
+<mode> runs`). Nothing to do in a mode for it. The game would send it back up while the lock stays lit, and the
+building went up and down over and over under the ball (PAD-733, David's Premium in MELTDOWN), so while the lock is
+kept closed the game's own moves above floor 0 are refused (a veto on `site building_move`; mode.log: `building:
+the game's move to floor 1 refused - its lock stays closed while <mode> runs`): it stays down until the mode ends.
 
 A mode asks for a floor and nothing else:
 
@@ -3753,8 +3822,11 @@ game or each ball, not each time the mode starts.
 **After its finish (PAD-707).** The battle's own stop shows the game's battle-over display on the one video
 surface, so a pick's end that comes as its mode ends (`pm_roster_over`, after `pm_end`) waits for the mode's finish
 (the scoop's paragraph, above) and is given when the clip ends, at the ball's end, or as the game ends - logged `the
-battle KING CAESAR took ends once its finish has played` and `KING CAESAR's battle ends now (its finish is over)`.
-On v21 KING CAESAR's cashout was cut a second in by that display, and the scoop kicked with it.
+battle KING CAESAR took ends once its finish and its total have played` and `KING CAESAR's battle ends now (its
+finish and its total are over)`. On v21 KING CAESAR's cashout was cut a second in by that display, and the scoop
+kicked with it. PAD-733: it also waits out the rest of the mode's ending hold (`pm_end_holding`: a block mode's TOTAL,
+3 s after its clip): on v29 the game's battle-over display came within 15 ms of the final blow's clip, so the TOTAL
+after it was never seen.
 
 **Beaten in its city (PAD-707).** A tier-1 battle's own shot handler, at the monster's last hit and before its
 victory show and its stop, calls `site battle_beaten` on `data battle_beaten_rule` (Premium/LE 1.16 `0x121c28` on
@@ -3866,7 +3938,7 @@ value roster_vec_at         8
 value roster_record_size    12
 value roster_id_at          4
 value roster_qualified_at   83
-value roster_start_after_ms 3000   # the picked mode starts this long after the pick (mode_file.c)
+value roster_start_after_ms 2500   # the most a pick waits for the screen's close (PAD-733: pm_roster_closing)
 data roster_screen_table     0x006fc8a4   # the screen's slot table (.data): 32-byte records, the callout id at +28
 value roster_screen_record_size 32
 value roster_callout_at      28
@@ -3999,8 +4071,18 @@ static void on_init(void)
   screen's clock runs and the busy one does not (`site roster_timer_on`, timers 83 and 23), and both flippers down
   is the game's pick (`site roster_switch_held`). On a new monster the game's cursor is parked on its place, the
   monster's `_Lit` and `_Portrait` and the place's `PadSel_Cover<n>` are shown and the place's own portrait group
-  (`<tile>FullBody_instance`, `text roster_tile_<n>`) hidden; the game draws everything else. Opening (`site
-  roster_screen_open`) starts every opening on the game's own place; the lock of each new tile follows its
+  (`<tile>FullBody_instance`, `text roster_tile_<n>`) hidden; the game draws everything else. The game changes its
+  portrait in two steps, the shown place's out and then the new place's in (`site roster_portrait_step`, LE 1.16
+  `0x190acc`, its state word `data roster_portrait_state`: 4 shown, 5 going out, 3 coming in, then the place
+  shown), so a new monster left for ANOTHER place stays drawn, its place's portrait hidden, until that out is over,
+  and goes in the step that starts the in (PAD-733: the out played on the place's own portrait - BIOLLANTE for 6
+  frames between KUMONGA and DESTROYAH); one arriving from another place is drawn in the step that starts its
+  place's in, after the place it came from has gone out (GIGAN's name going out showed round MINILLA's). A port
+  without the two changes at once. Opening (`site
+  roster_screen_open`, wrapped) runs the game's open - its cursor on the next open place after the one last played -
+  then puts the cursor on the screen's FIRST open entry in its order, the top-left tile (PAD-733, David: "it's in the
+  top-right most mode. it's jarring and confusing to figure out the direction to go from there"); a place no pick can
+  take is passed over, as the game's walk does; the lock of each new tile follows its
   place's state, and the claw goes on the tile that WON alone (PAD-707, David's v21: "the footprint icons over the
   beaten modes are off"): a place one of ours won shows that monster's `_Done`, none on the others booked against it,
   and the place's own state box (`text roster_box_<n>` under `text roster_box_path`) is hidden - the game's claw for a
@@ -4011,6 +4093,27 @@ static void on_init(void)
   the place's battle back, won or lost (PAD-706: Completed, the audits, the city). A pick of the place's own tile is
   its own battle; a monster that will not start (0) lets the place's battle run. `pm_roster_more_picked()` names the
   monster inside `on_pick`; `pm_roster_start_after()` is the port's `roster_start_after_ms`.
+- **Its count on its tile** (PAD-733, David: "this count also needs to show on the monster select screen like the
+  other monsters"). The game letters each place's "0/4" into a text in the overlay (`T1_1Prog_Instance`...); the card
+  build gives each new monster a copy of place 0's, `<page>_Prog` (blank), placed on its tile as place 0's sits on
+  its own. `pm_roster_more_progress(done, of)` keeps the calling mode's count for the player up until the game ends,
+  and each opening of the screen writes "done/of" there (none before a report, none on a locked place, none on a
+  card built before PAD-733). On the Modes tab: the *Selection screen count* block (`roster_progress`, its `done`
+  and `of` values). A mode that keeps its hits for the game (a variable reset each game) and shows them so resumes a
+  lost battle where it was, as the game's own do. A battle LOST is held by the city it was lost in (the game's slot
+  state 3; its box stamps that city on the place's own tile - Tokyo, Paris, London, N.Y., labels 3-6 of the box, the
+  game's city order): the battle is the monster's, so its tile wears the stamp (`<page>_City<c>`, a group with a copy
+  of place 4's box's stamp, its words never rewritten: a stamp's font holds its letters alone - a space written into
+  one stopped the game, emulator run fb5) and its count instead of a padlock, and the place's own tile its
+  padlock (`PadSel_Lock<n>`, its box hidden and its words blank); the others booked against it keep theirs.
+- **Its shots blink while the cursor is on it** (PAD-733, David: "when I overlay the selected monster the respective
+  indicators need to be blinking on the play field"). The game blinks the shots of the battle under its cursor
+  (yellow; the emulator's lamp probe: slot 1's three powerlines), and on a new monster it blinked its place's battle's
+  or nothing. `pm_roster_more_shots(shots)` names the calling mode's: while the cursor is on its tile those inserts
+  blink `ffff00` (250 ms), every other shot's insert on the playfield is held dark (the cabinet's, as the Action
+  button, and the inserts of no shot stay the game's), and the game has them back as the cursor leaves it, at the pick
+  and at the ball's end. A block mode names the shots its Light a shot blocks light while it runs
+  (`block_modes.preview_shots`: none dark, none only lit while it is not running).
 - **Played again until it is won.** A new monster's battle lost is the one the game's city pick plays again at the
   next lit scoop (`site roster_resume`, PAD-706); won, its tile shows the claw and its place is done: the place's other tiles
   book the same battle, so they are not offered again that game.
@@ -4029,6 +4132,8 @@ site roster_screen_bump   0x00190ecc 0xe92d4038 0xe1a05000
 site roster_slot_state    0x001244bc 0xe3510006 0xda000001
 site roster_timer_on      0x0020bb1c 0xe92d4008 0xe30c3154
 site roster_switch_held   0x0029643c 0xe59f1000 0xeaffffe2
+site roster_portrait_step 0x00190acc 0xe92d4030 0xe30b4480      (Pro 1.16 0x0018ce2c; not on Pro 1.15's port)
+data roster_portrait_state 0x007bb480                            (Pro 1.16 0x007aedc0)
 value roster_screen_left 137 / roster_screen_right 139 / roster_screen_timer 83 / roster_screen_busy 23 / roster_screen_bump_by 3
 text roster_screen_scene  cac32730af42b9d26d26c4bb6e667b07da53113e
 text roster_screen_path   SelectOverlay_Textbox.CharacterSelect_Instance.
@@ -5446,7 +5551,9 @@ kerning, carried in from the Ebirah battle scene) and hidden until the mode show
 - the progress panel (PAD-680, PAD-690): a column at the right edge, under the rage meter and over the player
   score panels: up to 7 slots, the badges scaled to fill it; the modes' latest progress notes stand in it (each
   mode's badge and the shots it still needs, newest on top, the oldest dropping off) until a mode starts or the
-  game ends. A mode with the timer off still has a badge there (its label and icon);
+  game ends. It steps down while one of ours runs and while any mode of the game's runs (`pm_aside`: PAD-733, a
+  timed mode's TIME LEFT sits there - SUPER TRAIN LOOPS - as a battle's RIGHT spins do). A mode with the timer off
+  still has a badge there (its label and icon);
 - `gauge`: pips on the right edge (`spike`, `segment` - filled from the bottom - or `diamond`), each a lit
   and a dark picture; or (`"kind": "bar"`, PAD-416) ONE meter in the stock POWERUP meter's manner at the
   glass's top-right corner - a metal frame with the mode's `icon` in a diamond, a glass tube in five cells and

@@ -412,6 +412,19 @@ void pm_roster_more_leave(const char *name);
 int pm_roster_more_count(void);
 const char *pm_roster_more_picked(void);   /* inside on_pick: the name of the new monster picked (0 = a place's own pick) */
 long pm_roster_start_after(void);
+/* PAD-733: the count on the calling mode's new monster's tile, as the game's own places show theirs ("2/5": the hits
+ * made of the hits needed), for the player up, until the game ends; written each time the selection screen opens (the
+ * card build's `<page>_Prog`; a card without it shows nothing). of <= 0 shows none. 1 = kept; 0 when the calling mode
+ * has no new monster on the screen. */
+int pm_roster_more_progress(long done, long of);
+/* PAD-733: the shots the calling mode's new monster blinks on the playfield while the selection screen's cursor is on
+ * its tile, as the game's own battles blink theirs (yellow; every other shot's insert dark, the cabinet's left alone);
+ * 0 = none, the game's lights as they are. 1 = kept; 0 when the calling mode has no new monster on the screen. */
+int pm_roster_more_shots(uint64_t shots);
+/* PAD-733: 1 while the selection screen a pick was taken on is still closing - start the picked mode on the first tick
+ * this is 0, its start clip at once: the game's own battle is in its intro there. (The runtime watches the game's
+ * display effects: the close is one, Premium/LE 1.16's 132; the port's roster_start_after_ms is the most it waits.) */
+int pm_roster_closing(void);
 
 /* ---- display priority (item 154 display; MODE_SDK.md "Display priority") ------------------
  * The game decides what is on its screen with PRIORITIES, on two levels: its DISPLAY EFFECTS
@@ -514,6 +527,15 @@ int pm_balls_in_play(void);
  * 0 = the game refused (no game in play, a tilt) or the port lacks the call. During the game's
  * own multiball it only lengthens that multiball's save (the framework keeps the longer). */
 int pm_ball_save(unsigned seconds);
+/* PAD-733: drain to one ball - a multiball that ends with two or more balls still up (MODE_SDK.md "Drain to one
+ * ball"). The game's flippers go dead (the flippers alone: pops, slings and the ball devices keep working) until the
+ * balls drain; the last one's drain is a ball save's - the game serves it back to the shooter lane and the SAME ball
+ * goes on (no bonus, no next ball). The flippers come back as that ball comes home, and in any case at the ball's
+ * end, a tilt or the game's end (the game's own next ball brings them back then), and after 30 s. Call it as your
+ * mode ends (in its end, before or after pm_end). 1 = started (or already draining); 0 = fewer than two balls are
+ * in play, no game in play, a tilt, or the port names no flippers off/on (`site flippers_off` / `flippers_on`) or no
+ * multiball serve. */
+int pm_drain_to_one(void);
 
 /* ---- the magnet (PAD-381; MODE_SDK.md "The magnet") ------------------------------------------
  * A grab with the playfield magnet, for `ms` milliseconds. You ask for a time and nothing else:

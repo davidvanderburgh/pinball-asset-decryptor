@@ -109,7 +109,7 @@ def test_the_move_is_the_games_own_and_put_back_on_every_end():
 def test_it_is_kept_only_while_the_games_shield_feature_sees_no_shots():
     src = _rt()
     counts = _lift(src, "static int shield_rule_counts(")
-    assert 'pm_port_text("shield_rule")' in counts and "block_rules_keep" in counts and "block_owner" in counts
+    assert 'pm_port_text("shield_rule")' in counts and "block_rules_keep" in counts and "block_live()" in counts
     tick = _lift(src, "static void shield_tick(")
     assert tick.index("shield_rule_counts()") < tick.index("shield_go(obj, shd.keep)")
     assert "SHIELD_BACK_MS" in tick

@@ -98,7 +98,7 @@ def test_the_c_claims_the_slot_and_gives_the_battle_back_with_its_outcome():
     assert "pm_roster_claim(BATTLE_SLOTS[i], on_battle)" in c
     assert "pm_roster_over(won);" in c
     assert "battle_won = 1;" in c                                   # the End the mode, the battle won block
-    assert 'pm_port_value("roster_start_after_ms", 0)' in c        # it runs once the selection screen has closed
+    assert "!pm_roster_closing()" in c                              # PAD-733: it runs as the selection screen's close ends
     # an End block that does not say "won" in a mode that has one does not win it
     assert c.count("battle_won = 1;") == 1
 
@@ -179,6 +179,47 @@ def test_a_pick_plays_the_mode_and_its_win_gives_the_battle_back_won(tmp_path):
     assert out.count("ROSTER OVER") == 1 and "ROSTER OVER WON" in out
 
 
+def kept_battle():
+    """PAD-733: a new monster in Gigan's place whose hits are kept for the game (a lost battle resumes where it was)
+    and shown on its selection screen tile"""
+    count = {"op": "roster_progress", "done": {"k": "var", "name": "hits"}, "of": num(2)}
+    return {"name": "GIGAN STAGES", "seconds": 30, "game_modes": "stack",
+            "vars": [{"name": "hits", "reset": "game"}],
+            "scripts": [
+                {"hat": {"kind": "battle", "slot": 2, "name": "Gigan", "more": True}, "do": [{"op": "start_mode"}]},
+                {"hat": {"kind": "mode_start"}, "do": [count]},
+                {"hat": {"kind": "shot", "shot": "Building", "when": "running"}, "do": [
+                    {"op": "change", "var": "hits", "by": num(1)}, count,
+                    {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "var", "name": "hits"}, "b": num(2)},
+                     "then": [{"op": "end_mode", "won": True}]}]}]}
+
+
+def test_a_selection_screen_count_block_needs_a_new_monster_and_both_numbers():
+    """PAD-733 (David: "this count also needs to show on the monster select screen like the other monsters")"""
+    assert problems(kept_battle()) == []
+    assert not any("Selection screen count" in n for n in BM.notes(BM.normalize(kept_battle())))
+    plain = kept_battle()
+    plain["scripts"][0]["hat"] = {"kind": "battle", "slot": 2, "name": "Gigan"}
+    assert any("Selection screen count block shows on a new monster's tile" in n for n in BM.notes(BM.normalize(plain)))
+    broken = kept_battle()
+    del broken["scripts"][1]["do"][0]["of"]
+    assert problems(broken)
+    assert "pm_roster_more_progress((long)(" in BM.to_c(kept_battle(), "gigan_stages")
+
+
+def test_a_lost_new_monster_resumes_its_hits_and_its_tile_says_so(tmp_path):
+    """PAD-733 (David: "a failed mode (like king caesar) needs to track its shots that were successful so when we start
+    the next time it resumes from where we were"): hits kept for the game, the tile's count with them."""
+    out = play(tmp_path, kept_battle(), "pickmore", "GIGAN STAGES", "secs", 1, "shot", "Building", "secs", 1,
+               "ball_end", "secs", 12, "pickmore", "GIGAN STAGES", "secs", 1, "shot", "Building", "secs", 2)
+    starts = [m.start() for m in re.finditer(r"\[GIGAN STAGES\] START", out)]
+    assert len(starts) == 2
+    first, second = out[starts[0]:starts[1]], out[starts[1]:]
+    assert "ROSTER COUNT 0/2" in first and "ROSTER COUNT 1/2" in first and "ROSTER OVER lost" in first
+    assert "ROSTER COUNT 1/2" in second.split(">> shot Building")[0]           # resumed where it was
+    assert "ROSTER COUNT 2/2" in second and "ROSTER OVER WON" in second         # one more Building wins it
+
+
 def test_a_drain_loses_the_battle(tmp_path):
     out = play(tmp_path, gigan(), "pick", 2, "secs", 1, "shot", "Building", "ball_end", "secs", 12)
     assert "END (ball ended)" in out
@@ -217,3 +258,31 @@ def test_the_profiles_say_where_a_pick_counts_as_the_battle():
     keys = {p.key: p for p in (lambda ps: ps if isinstance(ps, (list, tuple)) else ps.values())(MP.profiles())}
     for key in ("godzilla_le_1_16", "godzilla_pro_1_16", "godzilla_pro_1_15"):
         assert keys[key].roster and keys[key].roster_counts, key
+
+
+# ---- PAD-733: a lit shot's colour shows only on a colour insert ------------------------------------------------------
+def test_the_godzilla_profile_names_its_white_only_shots():
+    """David: "For custom mode shots then, we should use shots that can be colored" - the shots whose inserts are one
+    white light each (KUMONGA's last web on Powerline center was lit, a small white blink he could not see)."""
+    p = MP.profile_for_card("godzilla_le", "1.16")
+    assert {"Powerline left", "Powerline center", "Powerline right", "Maser target", "Godzilla target",
+            "Shield ramp spinner"} <= set(p.white_shots)
+    assert not {"Left ramp", "Right ramp", "Big loop", "Building", "Shield target left", "Top spinner"} & set(p.white_shots)
+
+
+def test_a_white_only_shot_lit_and_not_named_on_the_screen_gets_a_note():
+    """"Exceptions are for shots that are named on the screen": named in a line (or as a group, POWERLINES), no note;
+    lit in black (held dark), no note; a colour shot, no note."""
+    white = ("Powerline center", "Powerline left", "Maser target")
+    lit = lambda shot, color="#b040ff": {"op": "light_shot", "shot": shot, "color": color, "pattern": "chase", "rate": num(110)}
+    def prog(blocks, line=""):
+        return {"name": "WEBS", "seconds": 30, "game_modes": "stack", "hud": {"on": True, "line": line},
+                "scripts": [{"hat": {"kind": "mode_start"}, "do": blocks}]}
+    notes = BM.white_shot_notes(prog([lit("Powerline center"), lit("Left ramp")]), white)
+    assert len(notes) == 1 and notes[0].startswith("Powerline center is lit, and its insert is a single white light")
+    assert BM.white_shot_notes(prog([lit("Powerline center")], "SHOOT THE CENTER POWERLINE"), white) == []
+    assert BM.white_shot_notes(prog([lit("Powerline left")], "HIT THE POWERLINES"), white) == []
+    named = prog([lit("Maser target"), {"op": "hud_award", "text": "FIRE", "sub": "SHOOT THE MASER", "seconds": 2}])
+    assert BM.white_shot_notes(named, white) == []
+    assert BM.white_shot_notes(prog([lit("Maser target", "#000000")]), white) == []
+    assert BM.white_shot_notes(prog([lit("Powerline center")]), ()) == []          # a card that names none

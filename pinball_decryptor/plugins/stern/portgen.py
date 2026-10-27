@@ -74,6 +74,9 @@ TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type", "magnet_shot", 
                 "roster_left_sound", "roster_right_sound", "roster_pick_sound", "roster_select_ms",
                 "roster_screen_left", "roster_screen_right", "roster_screen_timer", "roster_screen_busy",
                 "roster_screen_bump_by",
+                # PAD-733: the city screen's rematch line, a numbered line of the title's own text table (another
+                # title's table has another line there)
+                "roster_rematch_line",
                 # PAD-714: the START and "active?" slots of the title's own mode classes' vtables (Godzilla's cmode
                 # 8 / 14, the crule titles' 33-41 / 39-49): another title's called another virtual (Foo Fighters 1.03
                 # was derived with 38 / 44, its own 41 / 49); a derived port reads its START slot off its own program
@@ -1760,7 +1763,8 @@ def draft(ref_elf, port_text, target, game=None, version=None, port_name=None, t
 #: sites the runtime hooks (it moves their first two instructions into a trampoline)
 HOOKED_SITES = frozenset(HOOKED) | {"roster_start", "roster_resume", "roster_cursor", "clip_play", "display_effect_start", "display_priority_now",
                                      "layered_priority", "layered_waiter",
-                                     "sound_resolve"}      # PAD-494: wrapped (music modes)
+                                     "sound_resolve",      # PAD-494: wrapped (music modes)
+                                     "roster_portrait_step"}   # PAD-733: wrapped (the selection screen's portrait)
 
 
 def is_hooked_site(name):

@@ -19535,7 +19535,12 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # PAD-606: a sound's start holds its bank mapped and mapping another bank unmaps only
     # the idle ones, so up to one bank a channel (soundbank.SOUND_CHANNELS) can be mapped
     # beside image.bin: banks are cut so that many of them still fit beside it.  A game
-    # sound too long for such a bank stays in image.bin (trimmed there if it has to be).
+    # sound too long for such a bank gets a bank of its own as a mode's song does (PAD-607
+    # below); only one too long for even that stays in image.bin (trimmed there if it has
+    # to be).  PAD-777: keeping every game song past a slice in image.bin grew it, which
+    # shrank the slice, which kept more: an Iron Maiden card with a few longer songs ended
+    # at image.bin 2,428 MB and 0 MB for a music mode's file.  In a bank such a song is in
+    # memory only while it plays, and in image.bin always.
     while True:
         # a bank the emulator can serve beside the staged image.bin (its window
         # follows image.bin's in the game's 32-bit address space)
@@ -19543,17 +19548,17 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             _grown_body_bytes(byidx[i], g[1]) for i, g in sorted(kept.items())])
         slice_max = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged), SB.BANK_SLICE)
         limit = min(slice_max, max(0, SB.MAPPED_MAX - staged) // SB.SOUND_CHANNELS)
+        alone = SB.alone_bank_room(staged)
         big = [i for i in sorted(spilled) if i in game_sids and SB.bank_bytes(
-            [_grown_body_bytes(byidx[i], spilled[i][1])], stride) > limit]
+            [_grown_body_bytes(byidx[i], spilled[i][1])], stride) > alone]
         if not big:
             break
         for i in big:
             kept[i] = spilled.pop(i)
             log("idx %d stays in image.bin rather than a sound bank: at %.1f MB it is longer "
-                "than a bank can be here (%.1f MB, so that one bank for each of the game's %d "
-                "sound channels still fits in memory beside image.bin)."
-                % (i, _grown_body_bytes(byidx[i], kept[i][1]) / 1e6, limit / 1e6,
-                   SB.SOUND_CHANNELS), "info")
+                "than a bank can be here (%.1f MB, the most memory has room for beside "
+                "image.bin)." % (i, _grown_body_bytes(byidx[i], kept[i][1]) / 1e6,
+                                 alone / 1e6), "info")
     if not spilled:
         return None, audio_edits, grows
     edits = BB.bank_edits(spilled, byidx, _read_stock_directory(gr_path, img_path))
@@ -19589,12 +19594,11 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         if one_of[e.idx] > room:
             stereo = byidx[e.idx].get("chan") == 2
             raise RuntimeError(
-                "%s is too long for this card: the modes' own sounds go into sound banks, and "
-                "the game holds image.bin (%d MB) and every bank it is playing a sound from in "
-                "memory at once, so beside the %d other bank(s) that can play with it (%d MB) "
-                "this sound's bank can be at most %d MB here, about %.1f minutes of %s sound "
-                "(this one needs %d MB). Shorten it, or lengthen fewer of the card's own "
-                "sounds: those stay in image.bin."
+                "%s is too long for this card: it goes into a sound bank, and the game holds "
+                "image.bin (%d MB) and every bank it is playing a sound from in memory at once, "
+                "so beside the %d other bank(s) that can play with it (%d MB) this sound's bank "
+                "can be at most %d MB here, about %.1f minutes of %s sound (this one needs %d "
+                "MB). Shorten it, or make fewer of the card's other sounds longer."
                 % (_named(e.idx)[0].upper() + _named(e.idx)[1:], staged // 10**6, len(others),
                    sum(others) // 10**6, room // 10**6,
                    room / float(_STEREO_BYTES_PER_MIN // (1 if stereo else 2)),
@@ -19624,7 +19628,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
                         staged // 10**6, SB.SOUND_CHANNELS, (staged + live) // 10**6,
                         SB.MAPPED_MAX // 10**6), "info")
     if longs:
-        log("Modes: %d sound(s) too long for a %d MB bank get a bank of their own, as big as "
+        log("%d sound(s) too long for a %d MB bank get a bank of their own, as big as "
             "the room left beside image.bin and the other banks that can play with them "
             "allows (the biggest %.1f MB, about %.1f minutes of stereo sound)."
             % (len(longs), limit // 10**6, one_of[longs[0].idx] / 1e6,

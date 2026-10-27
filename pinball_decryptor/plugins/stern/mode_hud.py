@@ -822,7 +822,10 @@ def progress_group(p, ids, huds, art, textures):
         kids = [_group_node(p, ids, "%s_%s" % (sk, slug), [
                     _bitmap_node(p, ids, "%s_%s_Panel" % (sk, slug), panel, -21.0, 267.0, textures),
                     _bitmap_node(p, ids, "%s_%s_Icon" % (sk, slug), disc, 0.0, 281.8, textures)]
-                    + ([_bitmap_node(p, ids, "%s_%s_Ready" % (sk, slug), ready, READY_X, READY_Y, textures)]
+                    # a group around the picture, as a gauge's pips are: the game finds a group by its path, not a
+                    # Bitmap (v33 on the rig: a bare picture was never found, never hidden, and showed at 7)
+                    + ([_group_node(p, ids, "%s_%s_Ready" % (sk, slug), [
+                        _bitmap_node(p, ids, "%s_%s_ReadyArt" % (sk, slug), ready, READY_X, READY_Y, textures)])]
                        if ready is not None else []))
                 for slug, (panel, disc, ready) in badges.items()]
         kids.append(_text_node(p, ids, sk + "_Num", "00", (p.font[0], p.font[1]), 68.6, 295.4,

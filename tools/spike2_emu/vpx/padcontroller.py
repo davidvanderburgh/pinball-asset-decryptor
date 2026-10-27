@@ -76,7 +76,9 @@ import padsw      # noqa: E402  offsets into padsw
 
 try:
     import pythoncom
+    import winerror
     from win32com.server import policy as _policy, register as _reg, util as _util
+    from win32com.server.exception import COMException
 except ImportError:            # a Linux test run; the COM half is Windows only
     pythoncom = None
 
@@ -406,7 +408,10 @@ class Bridge:
         log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         data = read_block(self.rig.led_path(), READ_N)
         if not data or not coilmap.has_magic(data):
-            raise RuntimeError("no Spike 2 run is up (no %s)" % self.rig.led_path())
+            raise RuntimeError(
+                "no Spike 2 run is up for %s. Start the game first (the app's "
+                "Emulate tab, or watch.sh), then open the table. Looked at %s (%s)."
+                % (self.title or "this title", self.rig.led_path(), self.rig.how))
         self.sw_ids = self.rig.switch_ids(self.title)
         log("switch table: %d ids; padled version %d"
             % (len(self.sw_ids), struct.unpack_from("<I", data, 4)[0]))
@@ -696,7 +701,13 @@ class PadController:
                 return tuple(args)
             return self._get(key, args)
         except Exception as exc:                            # noqa: BLE001
+            # One line for the table's MsgBox ("Can't start Game ... " &
+            # Err.Description); the traceback stays in the log. A bare Python
+            # exception reaches VBScript as the whole traceback in a dialog.
             log("%s%r failed: %s" % (name, tuple(args), exc))
+            if pythoncom:
+                raise COMException(desc="PAD.Controller: %s" % exc,
+                                   scode=winerror.E_FAIL)
             raise
 
     def _put(self, key, args):

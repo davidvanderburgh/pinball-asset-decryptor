@@ -131,6 +131,140 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .prog.busy i { position: absolute; width: 30% !important; animation: sx-slide 1.1s ease-in-out infinite; }
 @keyframes sx-slide { 0% { left: -30%; } 100% { left: 100%; } }
 
+/* ------------------------------- PAD-754: the Animal shelters window */
+/* the top bar's Donate button */
+/* the same quiet button as the bar's manufacturer and project buttons;
+   only the paw carries colour, the app's blue, which has a light-theme
+   value too (an amber button beside the amber language button was loud) */
+.sx-don-btn { gap: 7px; font-weight: 600; }
+.sx-don-btn svg { width: 19px; height: 19px; flex: 0 0 19px; color: var(--info); }
+.sx-don-btn-sum { color: var(--ink-2); font-weight: 500; }
+.topbar .chip svg { width: 14px; height: 14px; }
+/* nearly the whole screen (David): four columns, the thermometer, the
+   total and the list, the places and the map, the form */
+.modal.sx-don { width: min(1480px, calc(100vw - 40px)); max-height: calc(100vh - 32px); }
+.sx-don-layout { display: grid; grid-template-columns: 76px minmax(0, 1.15fr) minmax(0, 1fr) 250px; gap: 18px; align-items: start; }
+.sx-don-side { min-width: 0; }
+.sx-don-side .sx-don-h:first-child { margin-top: 0; }
+@media (max-width: 1180px) { .sx-don-layout { grid-template-columns: 76px minmax(0, 1fr) 250px; } .sx-don-side { grid-column: 2; } }
+/* the thermometer */
+.sx-don-therm-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.sx-don-therm { width: 76px; height: 290px; display: block; }
+.sx-don-therm .tube { fill: var(--panel-2); stroke: var(--line-2); stroke-width: 1.5; }
+.sx-don-therm .merc { fill: var(--accent); transition: y .9s cubic-bezier(.2,.8,.2,1), height .9s cubic-bezier(.2,.8,.2,1); }
+.sx-don-therm .bulb { fill: var(--accent); stroke: var(--accent-line); stroke-width: 1.5; }
+.sx-don-therm .bulb-shine { fill: #fff; opacity: .35; }
+.sx-don-therm .shine { fill: #fff; opacity: .18; }
+.sx-don-therm .tick { stroke: var(--ink-3); stroke-width: 1.5; }
+/* the hero: marquee lamps along its top and bottom edges, the total on
+   slot reels, a jackpot flash when an entry lands */
+.sx-don-hero { position: relative; display: flex; align-items: center; gap: 14px; padding: 16px 16px; border-radius: 12px; background: var(--accent-soft); border: 1px solid var(--accent-line); overflow: hidden; }
+.sx-don-hero::before, .sx-don-hero::after { content: ""; position: absolute; left: 10px; right: 10px; height: 6px; pointer-events: none;
+  background-image: radial-gradient(circle, var(--accent) 0 2px, transparent 2.6px), radial-gradient(circle, var(--accent-line) 0 2px, transparent 2.6px);
+  background-size: 16px 6px, 16px 6px; background-position: 0 0, 8px 0; background-repeat: repeat-x;
+  animation: sx-don-lamps .8s steps(1, end) infinite; }
+.sx-don-hero::before { top: 4px; } .sx-don-hero::after { bottom: 4px; }
+@keyframes sx-don-lamps { 0% { background-position: 0 0, 8px 0; } 50% { background-position: 8px 0, 16px 0; } 100% { background-position: 0 0, 8px 0; } }
+.sx-don-hero.hit { animation: sx-don-jackpot 2.2s ease-out; }
+.sx-don-hero.hit::before, .sx-don-hero.hit::after { animation-duration: .16s; }
+@keyframes sx-don-jackpot { 0% { box-shadow: 0 0 0 0 var(--accent-line); background: var(--accent-soft); } 12% { box-shadow: 0 0 28px 6px var(--accent-line); background: var(--sel); } 100% { box-shadow: 0 0 0 0 transparent; background: var(--accent-soft); } }
+.sx-don-plus { position: absolute; right: 56px; top: 50%; color: var(--accent); font-size: 20px; font-weight: 700; animation: sx-don-plus 2.2s ease-out forwards; }
+@keyframes sx-don-plus { 0% { opacity: 0; transform: translateY(16px); } 15% { opacity: 1; transform: translateY(-50%); } 70% { opacity: 1; transform: translateY(-50%); } 100% { opacity: 0; transform: translateY(-50%) translateX(-40px) scale(.6); } }
+.sx-don-total { font-size: 38px; font-weight: 700; color: var(--accent); line-height: 1; letter-spacing: -.02em; display: inline-flex; align-items: flex-end; }
+.sx-don-reel { display: inline-block; height: 1em; overflow: hidden; line-height: 1; }
+.sx-don-reel .strip { display: flex; flex-direction: column; line-height: 1; will-change: transform; }
+.sx-don-reel .strip span { display: block; height: 1em; }
+.sx-don-reel .strip.go { transition: transform 1.4s cubic-bezier(.15, .85, .25, 1.06); }
+.sx-don-paw { position: absolute; right: -10px; top: -16px; color: var(--accent); opacity: .14; pointer-events: none; }
+.sx-don-paw svg { width: 96px; height: 96px; }
+/* the milestones: a track with a node per milestone, so they never read as
+   amounts to give.  (Its own class names: the app's .dot is a chip's 6px
+   status dot.) */
+.sx-don-steps { display: flex; align-items: flex-start; padding: 6px 0 2px; }
+.sx-don-step-m { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12.5px; text-align: center; }
+/* the line runs rim to rim between this node and the one before, under both */
+.sx-don-step-m .ln { position: absolute; top: 13px; right: calc(50% + 15px); width: calc(100% - 30px); height: 4px; border-radius: 2px; background: var(--line-2); z-index: 0; }
+.sx-don-step-m.reached .ln { background: var(--ok); }
+.sx-don-step-m.next .ln { background: linear-gradient(90deg, var(--ok), var(--accent)); }
+.sx-don-dot { position: relative; z-index: 1; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--panel); color: var(--ink-3); display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+.sx-don-dot svg { width: 15px; height: 15px; }
+.sx-don-dot b { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.sx-don-step-m.reached .sx-don-dot { border-color: var(--ok); background: var(--ok); color: var(--accent-ink); }
+.sx-don-step-m.next .sx-don-dot { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); animation: sx-don-pulse 2.4s ease-in-out infinite; }
+.sx-don-step-m .lbl { font-weight: 700; color: var(--ink); font-size: 14px; margin-top: 2px; }
+.sx-don-step-m.next .lbl { color: var(--accent); }
+.sx-don-step-m.ahead .lbl { color: var(--ink-3); font-weight: 500; }
+.sx-don-step-m .sub { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.sx-don-step-m.reached .sub { color: var(--ok); }
+.sx-don-step-m.next .sub { color: var(--accent); font-weight: 600; }
+@keyframes sx-don-pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); } 50% { box-shadow: 0 0 0 7px var(--accent-soft); } }
+/* no money changes hands: the notice at the top */
+.sx-don-nomoney { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--info); background: var(--info-soft); color: var(--ink); font-size: 13px; line-height: 1.45; }
+.sx-don-nomoney svg { color: var(--info); flex: 0 0 18px; width: 18px; height: 18px; margin-top: 1px; }
+/* the ASCII playground */
+.sx-don-play { margin: 0; font: 12px/1.2 var(--mono); color: var(--accent); background: var(--log-bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; overflow: hidden; white-space: pre; }
+.sx-don-h { margin-top: 4px; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+/* the list */
+.sx-don-list { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.sx-don-list td { padding: 4px 0; border-top: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-don-list td:nth-child(1) { width: 31%; }
+.sx-don-list td:nth-child(2) { padding-left: 8px; }
+.sx-don-list td:nth-child(3) { text-align: right; width: 64px; }
+.sx-don-av { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; margin-right: 8px; vertical-align: middle; font: 600 10.5px var(--cond); color: #fff; background: hsl(var(--h) 45% 38%); flex: 0 0 24px; }
+.sx-don-av.anon { background: var(--panel-3); color: var(--ink-3); }
+.sx-don-av svg { width: 13px; height: 13px; }
+/* the podium */
+.sx-don-podium { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: end; }
+.sx-don-step { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; font-size: 12.5px; }
+.sx-don-step .who { max-width: 100%; }
+.sx-don-step .amt { font-size: 12px; color: var(--ink-2); }
+.sx-don-step .blk { width: 100%; border-radius: 8px 8px 0 0; background: var(--panel-3); color: var(--ink-2); display: flex; align-items: flex-start; justify-content: center; padding-top: 6px; font-size: 14px; }
+.sx-don-step.p1 .blk { height: 56px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.sx-don-step .blk { transform-origin: bottom; animation: sx-don-rise .7s cubic-bezier(.2, .8, .2, 1) both; }
+.sx-don-step.p2 .blk { animation-delay: .1s; } .sx-don-step.p1 .blk { animation-delay: .3s; } .sx-don-step.p3 .blk { animation-delay: .5s; }
+@keyframes sx-don-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.sx-don-step.p2 .blk { height: 40px; }
+.sx-don-step.p3 .blk { height: 28px; }
+.sx-don-step.empty .blk { opacity: .4; }
+.sx-don-places { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.sx-don-place { display: grid; grid-template-columns: 18px minmax(0, 1fr) 120px 64px; gap: 8px; align-items: center; }
+.sx-don-place .sx-bar i { background: var(--accent); }
+.sx-don-place .mono:last-child { text-align: right; }
+/* the form, and the paw prints that float off its button */
+.sx-don-form { padding: 12px 14px; position: relative; overflow: hidden; }
+.sx-don-cta { position: relative; overflow: hidden; }
+.sx-don-cta::after { content: ""; position: absolute; top: -60%; bottom: -60%; left: -70%; width: 36%; transform: skewX(-22deg); pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.5), transparent); animation: sx-don-gloss 3.4s ease-in-out infinite; }
+@keyframes sx-don-gloss { 0%, 72% { left: -70%; } 100% { left: 140%; } }
+.sx-don-confirm { background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 10px; padding: 10px 12px; }
+.sx-don-confirm-amt { font-size: 26px; font-weight: 700; color: var(--accent); line-height: 1.1; }
+.sx-don-mine { display: flex; flex-direction: column; gap: 2px; }
+.sx-don-mine-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 6px; align-items: center; font-size: 12.5px; padding: 2px 0 2px 4px; border-top: 1px solid var(--line); }
+.sx-don-form .sx-don-country { width: 100%; }
+.sx-don-burst { position: absolute; inset: 0; pointer-events: none; }
+.sx-don-burst i { position: absolute; bottom: 36%; color: var(--accent); opacity: 0; animation: sx-don-float 1.4s ease-out forwards; }
+.sx-don-burst i svg { width: 18px; height: 18px; }
+@keyframes sx-don-float { 0% { opacity: 0; transform: translateY(0) scale(.5) rotate(var(--r)); } 15% { opacity: .9; } 100% { opacity: 0; transform: translateY(-150px) scale(1.1) rotate(var(--r)); } }
+/* the tile maps and the All donations list */
+.sx-don-map-head { align-items: center; margin-top: 4px; }
+.sx-don-map-head .sx-don-h { margin-top: 0; }
+.sx-don-map-pick { display: inline-flex; gap: 4px; }
+.sx-don-map { display: grid; gap: 3px; width: 100%; max-width: 460px; }
+.sx-don-tile { position: relative; aspect-ratio: 1; min-width: 0; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font: 600 9.5px var(--cond); color: var(--ink-3); overflow: hidden; transition: transform .15s ease; }
+.sx-don-tile i { position: absolute; inset: 0; background: var(--accent); opacity: var(--k, 0); }
+.sx-don-tile span { position: relative; }
+.sx-don-tile.lit { color: var(--ink); border-color: var(--accent-line); }
+.sx-don-tile.lit.hot { color: var(--accent-ink); }
+.sx-don-tile.lit:hover { transform: scale(1.18); z-index: 1; }
+.sx-don-hist { max-height: calc(100vh - 220px); overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.sx-don-hist-table th { text-align: left; font-weight: 500; color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 0 0 6px; }
+.sx-don-hist-table td:nth-child(1) { width: 96px; }
+.sx-don-hist-table td:nth-child(2) { width: 26%; }
+.sx-don-hist-table td:nth-child(3) { padding-left: 8px; text-align: left; width: auto; }
+.sx-don-hist-table td:nth-child(4) { text-align: right; width: 72px; }
+@media (max-width: 760px) { .sx-don-layout { grid-template-columns: minmax(0, 1fr); } .sx-don-side { grid-column: 1; } .sx-don-therm-col { display: none; } }
+@media (prefers-reduced-motion: reduce) { .sx-don *, .sx-don *::before, .sx-don *::after { animation: none !important; transition: none !important; } }
+
 /* ---------------------------------------------------------- top bar */
 .sx-gear { position: relative; display: inline-flex; }
 .sx-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--bg-2); pointer-events: none; }

@@ -41,13 +41,37 @@ export function applyZoom(z) {
   applyBreakpoints();
 }
 const ZOOMS = [0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+// The step asked for last: the wheel can ask again before Python's answer
+// has come back into state.shell, and a step from the stale zoom would
+// repeat the one just taken.
+let asked = null;
 export function stepZoom(dir) {
-  const cur = Number((state.shell && state.shell.zoom) || 1);
+  const fresh = asked && Date.now() - asked.at < 1500;
+  const cur = fresh ? asked.zoom : Number((state.shell && state.shell.zoom) || 1);
   let next = cur;
   if (dir === 0) next = 1;
   else if (dir > 0) next = ZOOMS.find((z) => z > cur + 0.001) || cur;
   else next = [...ZOOMS].reverse().find((z) => z < cur - 0.001) || cur;
-  call("shell.zoom", next);
+  asked = { zoom: next, at: Date.now() };
+  if (Math.abs(next - cur) > 0.001 || dir === 0) call("shell.zoom", next);
+}
+// Ctrl (or Cmd) + the mouse wheel steps the zoom like Ctrl +/- (PAD-766).
+// A wheel notch is one step; a touchpad's small pinch deltas add up to one.
+// A view with a zoom of its own (the Scenes picture) takes the wheel first
+// and calls preventDefault, so the page stays as it is there.
+let wheelSum = 0, wheelAt = 0;
+export function onZoomWheel(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.defaultPrevented) return;
+  e.preventDefault();
+  const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
+  if (!d) return;
+  const now = Date.now();
+  if (now - wheelAt > 400 || Math.sign(d) !== Math.sign(wheelSum)) wheelSum = 0;
+  wheelAt = now;
+  wheelSum += d;
+  if (Math.abs(wheelSum) < 50) return;
+  stepZoom(wheelSum < 0 ? 1 : -1);
+  wheelSum = 0;
 }
 
 // ---------------------------------------------------------------- theme
@@ -303,8 +327,8 @@ export function settingsMenuItems(shell) {
     ] },
     { label: "Language", submenu: languageItems(shell) },
     { label: "Zoom (" + Math.round(zoom * 100) + "%)", submenu: [
-      { label: "Zoom in", kbd: MOD + " +", onClick: () => stepZoom(1) },
-      { label: "Zoom out", kbd: MOD + " −", onClick: () => stepZoom(-1) },
+      { label: "Zoom in", kbd: MOD + " + / " + MOD + " wheel up", onClick: () => stepZoom(1) },
+      { label: "Zoom out", kbd: MOD + " − / " + MOD + " wheel down", onClick: () => stepZoom(-1) },
       { label: "Actual size", kbd: MOD + " 0", onClick: () => stepZoom(0) },
     ] },
     { sep: true },
@@ -925,7 +949,11 @@ export function Shell() {
       else if (e.key === "0") { e.preventDefault(); stepZoom(0); }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("wheel", onZoomWheel, { passive: false });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("wheel", onZoomWheel);
+    };
   }, []);
   // the first-launch disclaimer is a gate: nothing else until it is answered
   // (Python's own questions can still show, above it)

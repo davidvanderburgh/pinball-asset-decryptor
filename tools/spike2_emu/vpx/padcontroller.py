@@ -124,6 +124,7 @@ class VpxMap:
         self.lamp_groups = {}               # number -> [(node, index), ...]
         self.fakes = {}                     # name -> dict (switch_fakes)
         self.game_on = None                 # (number, [coils]) "flippers armed"
+        self.cabinet = {}                   # cabinet switch names -> 1000+id
         # core.vbs indexes SolCallback(68) and friends by the number it is
         # handed, so ChangedSolenoids may only carry numbers up to this; a
         # coil's 1000+ name still answers Controller.Solenoid(n).
@@ -136,6 +137,7 @@ class VpxMap:
         m = json.load(open(path, encoding="utf-8"))
         g = m.get("game_on") or {}
         self.game_on = (int(g["number"]), [tuple(c) for c in g["coils"]]) if g else None
+        self.cabinet = {k: int(v) for k, v in m.get("cabinet", {}).items() if k != "_"}
         for k, v in m.get("switch_rewrite", {}).items():
             if k != "_":
                 self.switch_rewrite[int(k)] = int(v)
@@ -388,6 +390,7 @@ class Bridge:
         self._coil_seen = {}               # (node, idx) -> (fires, until)
         self._coil_off_at = {}             # (node, idx) -> monotonic s
         self.sw_ids = {}                   # (node, input bit) -> switch id
+        self._button_coils = {}            # (node, idx) -> button input bit
         self.mrg = bytes(padsw.MAX_ID)     # the guest's merged switch truth
         self.polls = 0
         self.poll_fail = 0
@@ -413,8 +416,21 @@ class Bridge:
                 "Emulate tab, or watch.sh), then open the table. Looked at %s (%s)."
                 % (self.title or "this title", self.rig.led_path(), self.rig.how))
         self.sw_ids = self.rig.switch_ids(self.title)
-        log("switch table: %d ids; padled version %d"
-            % (len(self.sw_ids), struct.unpack_from("<I", data, 4)[0]))
+        ver = struct.unpack_from("<I", data, 4)[0]
+        log("switch table: %d ids; padled version %d%s"
+            % (len(self.sw_ids), ver, "" if ver >= 7 else
+               " (no coil-rule plane: button coils assumed live)"))
+        # the flipper buttons' coils, for a run without the rule plane:
+        # {coil: the board input of its button}, from the map's cabinet ids
+        self._button_coils = {}
+        cab = self.map.cabinet
+        by_id = {v: k for k, v in self.sw_ids.items()}       # id -> (node, bit)
+        for coil, key in ((self.map.coil(48), "left_flipper"),
+                          (self.map.coil(46), "right_flipper"),
+                          (self.map.coil(36), "up_left_flipper")):
+            sid = cab.get(key, 0) - 1000
+            if coil and sid in by_id:
+                self._button_coils[coil] = by_id[sid][1]
         for name, f in self.map.fakes.items():
             self._fake[name] = {"open": 0}
             self.pipe.set(f["closed"], 1)
@@ -553,6 +569,11 @@ class Bridge:
                 # per flip, so the coil is ON exactly while that switch is made
                 # and the rule is live; the switch is one this bridge wrote.
                 r = coilmap.rule(data, node, idx)
+                if r is None and key in self._button_coils:
+                    # A run on a shim without the rule plane (padled < 7, the
+                    # app's bundled rig until PAD-775 ships): the flippers are
+                    # assumed live, so a held button is a held coil.
+                    r = {"power": 1, "input": self._button_coils[key]}
                 if r and r["power"] and r["input"] is not None:
                     sid = self.sw_ids.get((node, r["input"]))
                     if sid:
@@ -568,7 +589,7 @@ class Bridge:
             armed = 0
             for node, idx in coils:
                 r = coilmap.rule(data, node, idx)
-                if r and r["power"]:
+                if r is None or r["power"]:        # no rule plane = assume live
                     armed = 1
             self._sol_set(num, armed)
         self._fakes_tick(now)

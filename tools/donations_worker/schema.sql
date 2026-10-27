@@ -1,7 +1,9 @@
 -- The donations table (PAD-754).  One row per donation a user reported.
 -- `usd` is the amount converted when it was reported and never changes;
 -- `held` keeps a big entry out of the total until David approves it;
--- `removed` hides a row from the total without losing it.
+-- `removed` hides a row from the total without losing it; `ip_hash` (a
+-- salted hash of the sender's address, for the five-an-hour limit) is
+-- blanked once the row is an hour old.
 CREATE TABLE IF NOT EXISTS donations (
   id          TEXT PRIMARY KEY,
   at          INTEGER NOT NULL,

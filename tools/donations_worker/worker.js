@@ -159,7 +159,8 @@ async function all(env, url) {
 
 // Tell David on Discord (a webhook URL in DISCORD_WEBHOOK).  Runs after
 // the answer has gone out (ctx.waitUntil), never delays or fails a request,
-// and does nothing without the secret.
+// and does nothing without the secret.  A name the user chose not to show
+// is not posted: it leaves the database only through the admin list.
 function money(amount, currency) {
   const sym = { USD: "$", EUR: "€", GBP: "£", JPY: "¥", CAD: "CA$", AUD: "A$", NZD: "NZ$", BRL: "R$", MXN: "MX$" };
   const n = Number(amount);
@@ -183,7 +184,7 @@ function describe(e) {
   if (e.shelter) bits.push("to " + e.shelter);
   const where = place(e.country, e.region);
   if (where) bits.push("in " + where);
-  bits.push(e.show_name && e.name ? "as " + e.name : "anonymous" + (e.name ? " (" + e.name + ")" : ""));
+  bits.push(e.show_name && e.name ? "as " + e.name : "anonymous");
   if (e.app_version) bits.push("· app " + e.app_version);
   return bits.join(" ");
 }
@@ -209,6 +210,12 @@ async function donate(request, env, ctx) {
     "SELECT COUNT(*) AS n FROM donations WHERE ip_hash = ? AND at > ?")
     .bind(who, now - 3600).first();
   if (recent.n >= PER_HOUR) return fail("Too many in one hour. Try again later.", 429);
+  // the hash exists for that count alone, which never looks back further
+  // than an hour: older rows lose theirs now, so nothing in the database
+  // can be matched to an address once the hour is up
+  await env.DB.prepare(
+    "UPDATE donations SET ip_hash = '' WHERE ip_hash != '' AND at <= ?")
+    .bind(now - 3600).run();
   const id = crypto.randomUUID();
   const held = entry.usd > HOLD_OVER_USD ? 1 : 0;
   // the token lets the app that added the row take it back (a typo, the
@@ -260,7 +267,7 @@ function isAdmin(request, env) {
 async function adminList(env) {
   const { results } = await env.DB.prepare(
     "SELECT id, at, amount, currency, usd, shelter, country, region, name, " +
-    "show_name, app_version, ip_hash, held, removed FROM donations " +
+    "show_name, app_version, held, removed FROM donations " +
     "ORDER BY at DESC LIMIT 200").all();
   return json({ ok: true, rows: results, hold_over_usd: HOLD_OVER_USD });
 }

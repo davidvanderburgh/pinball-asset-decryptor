@@ -57,6 +57,11 @@ function fakeDb() {
           rows.push({ id, at, amount, currency, usd, shelter, country, region, name, show_name, app_version, ip_hash, edit_token, held, removed: 0 });
           return { meta: { changes: 1 } };
         }
+        if (sql.startsWith("UPDATE donations SET ip_hash = ''")) {
+          let n = 0;
+          for (const r of rows) if (r.ip_hash && r.at <= args[0]) { r.ip_hash = ""; n++; }
+          return { meta: { changes: n } };
+        }
         if (sql.startsWith("UPDATE donations SET held = 0")) {
           const r = rows.find((x) => x.id === args[0] && x.held && !x.removed);
           if (r) r.held = 0;
@@ -257,7 +262,8 @@ test("David hears on Discord about an entry, a hold and a take-back", async () =
       body: JSON.stringify({ amount: 5000, name: "Shy", show_name: false }) }), e, ctx);
     const s2 = await r2.json();
     await Promise.all(waited);
-    assert.ok(posts[1][1].content.startsWith("⏸ HELD for your review: $5,000 anonymous (Shy)\napprove: curl "));
+    assert.ok(posts[1][1].content.startsWith("⏸ HELD for your review: $5,000 anonymous\napprove: curl "),
+      posts[1][1].content);                                // the hidden name stays off Discord
     assert.ok(posts[1][1].content.endsWith("/v1/admin/review/" + s2.id));
     await worker.fetch(new Request(BASE + "/v1/donate/" + s1.id, { method: "DELETE", headers: { "X-PAD-Key": "k", "X-PAD-Edit": s1.token } }), e, ctx);
     await Promise.all(waited);
@@ -269,6 +275,20 @@ test("David hears on Discord about an entry, a hold and a take-back", async () =
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test("an address hash is blanked once its row is an hour old", async () => {
+  const e = env();
+  const post = (ip, amount) => worker.fetch(new Request(BASE + "/v1/donate", { method: "POST",
+    headers: { "content-type": "application/json", "X-PAD-Key": "k", "CF-Connecting-IP": ip },
+    body: JSON.stringify({ amount }) }), e, {});
+  assert.equal((await post("8.8.8.8", 1)).status, 201);
+  assert.equal(e.DB.rows[0].ip_hash.length, 16);
+  e.DB.rows[0].at -= 3601;                               // an hour and a second ago
+  assert.equal((await post("9.9.9.9", 2)).status, 201);
+  assert.equal(e.DB.rows[0].ip_hash, "", "the old row's hash is gone");
+  assert.equal(e.DB.rows[1].ip_hash.length, 16, "the fresh row keeps its hash for the limit");
+  assert.equal((await get(e, "/v1/admin/list", { "X-PAD-Admin": "adm" }))[0], 200);
 });
 
 test("anything else is not found", async () => {

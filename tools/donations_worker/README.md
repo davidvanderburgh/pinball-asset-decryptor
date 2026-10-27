@@ -31,8 +31,12 @@ npx wrangler deploy
   scripts; the per-address limit (five an hour) and the single-entry cap
   (10,000) are the real guards.
 - `ADMIN_KEY` is yours alone: it lists rows with their ids and hides one.
-- `IP_SALT` is any long random string. Addresses are stored only as a salted
-  hash, for the rate limit.
+- `IP_SALT` is any long random string. Addresses are never stored: a row
+  carries a salted hash of its sender's address for the five-an-hour limit,
+  and that hash is blanked once the row is an hour old, so nothing in the
+  database can be matched to an address after that. Nothing is logged.
+  What a row keeps for good is what the user typed: amount, shelter, place,
+  and a name if they gave one, with their choice of whether it shows.
 
 `wrangler deploy` prints the URL (`https://pad-donations.<account>.workers.dev`).
 Put it in `DONATIONS_URL` in `pinball_decryptor/core/config.py` and release.
@@ -54,8 +58,10 @@ New donation: $30 to Lollypop Farm in New York, US as David · app 1.266.0,
 tally now $4,350 from 62 donations"), for every held one ("⏸ HELD for your
 review: ..." with the curl that approves it), and for every take-back. It
 posts after the app's request has been answered, so a slow or dead webhook
-never slows or fails an entry; without the secret it posts nothing. Names
-and shelters are posted as typed; mentions in them are disarmed.
+never slows or fails an entry; without the secret it posts nothing. A name
+the user chose not to show is not posted (the entry reads "anonymous"; the
+name is in the admin list); shelters and shown names are posted as typed,
+with mentions disarmed.
 
 ## Routes
 

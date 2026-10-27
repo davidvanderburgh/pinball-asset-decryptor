@@ -31,7 +31,9 @@ total of what PAD users report giving, so everyone can see it grow.
 
 Amount, currency, shelter text, display name, whether to show the name, and
 the app version. No machine id, no email, no paths. The service stores a
-salted hash of the address for its rate limit, nothing more.
+salted hash of the address for its rate limit, nothing more, and that
+hash is blanked once the row is an hour old. A name the user chose not
+to show never leaves the database except through the admin list.
 
 ## Pieces
 

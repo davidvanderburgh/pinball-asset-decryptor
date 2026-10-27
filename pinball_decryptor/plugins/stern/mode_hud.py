@@ -260,6 +260,30 @@ def badge_panel(panel, font, label):
     return _pad4(np.asarray(im))
 
 
+#: PAD-733: the badge's number box (the timer badge's ``_Num`` text at (68.6, 295.4), its box 18..98 x -2..67.2), where
+#: the READY picture goes
+READY_X, READY_Y, READY_W, READY_H = 86.6, 293.4, 80, 69
+
+
+def badge_ready(font, words):
+    """PAD-733 (David: "Ideally the HUD indicator would show which shot to hit in small text where the number was"):
+    ``words`` (the shot that starts the mode) in white in the game's lettering, one or two lines fitted to the badge's
+    number box, on clear - the progress panel shows it in place of the 0."""
+    from PIL import Image
+    w = words.upper().split()
+    lines = [" ".join(w)] if len(w) == 1 else [" ".join(w[:len(w) // 2 + len(w) % 2]), " ".join(w[len(w) // 2 + len(w) % 2:])]
+    rows = [_pil(font.render(ln, "GameFont_Primary", 41)) for ln in lines]
+    total_h = sum(r.height for r in rows) + 4 * (len(rows) - 1)
+    s = min(1.0, (READY_W - 4) / max(r.width for r in rows), (READY_H - 6) / total_h)
+    im = Image.new("RGBA", (READY_W, READY_H), (0, 0, 0, 0))
+    y = (READY_H - total_h * s) / 2
+    for r in rows:
+        rr = r.resize((max(1, int(r.width * s)), max(1, int(r.height * s))), Image.LANCZOS)
+        im.alpha_composite(rr, (int((READY_W - rr.width) / 2), int(y)))
+        y += rr.height + 4 * s
+    return _pad4(np.asarray(im))
+
+
 def badge_disc(disc, icon):
     """The stock glowing disc with its silhouette replaced by ``icon`` (an L array, 255 = ink)."""
     a = disc.astype(np.float32).copy()
@@ -777,7 +801,8 @@ def progress_layout(n, panel_w):
 
 def progress_group(p, ids, huds, art, textures):
     """The Sprite group ``PadMode_Progress`` (bytes): a slot group ``_S<k>`` per mode (PROGRESS_SLOTS at most), each
-    with a badge group ``_S<k>_<slug>`` (panel + icon) a mode and the slot's number text ``_S<k>_Num``. A badge's
+    with a badge group ``_S<k>_<slug>`` (panel + icon, and PAD-733 ``_Ready``: the shot that starts it, when the
+    spec names one - shown at 0 in the number's place) a mode and the slot's number text ``_S<k>_Num``. A badge's
     geometry is the timer badge's (hud_group): the panel at (-21, 267), the icon at (0, 281.8), the number at
     (68.6, 295.4) in its group; the slot scales it (progress_layout)."""
     badges = {}
@@ -785,8 +810,10 @@ def progress_group(p, ids, huds, art, textures):
         spec = spec or {}
         timer = spec.get("timer") or spec.get("badge") or {}          # PAD-690: a mode with no timer names its badge
         title = spec.get("title") or spec.get("name") or slug.upper()
+        ready = spec.get("ready")                                     # PAD-733: the shot that starts it, at 0
         badges[slug] = (badge_panel(art["panel"], art["font"], timer.get("label") or title),
-                        badge_disc(art["disc"], badge_icon(spec, timer)))
+                        badge_disc(art["disc"], badge_icon(spec, timer)),
+                        badge_ready(art["font"], ready) if ready else None)
     n = min(len(badges), PROGRESS_SLOTS)
     scale, x, ys = progress_layout(n, art["panel"].shape[1])
     slots = []
@@ -794,8 +821,10 @@ def progress_group(p, ids, huds, art, textures):
         sk = "%s_S%d" % (PROGRESS_GROUP, k + 1)
         kids = [_group_node(p, ids, "%s_%s" % (sk, slug), [
                     _bitmap_node(p, ids, "%s_%s_Panel" % (sk, slug), panel, -21.0, 267.0, textures),
-                    _bitmap_node(p, ids, "%s_%s_Icon" % (sk, slug), disc, 0.0, 281.8, textures)])
-                for slug, (panel, disc) in badges.items()]
+                    _bitmap_node(p, ids, "%s_%s_Icon" % (sk, slug), disc, 0.0, 281.8, textures)]
+                    + ([_bitmap_node(p, ids, "%s_%s_Ready" % (sk, slug), ready, READY_X, READY_Y, textures)]
+                       if ready is not None else []))
+                for slug, (panel, disc, ready) in badges.items()]
         kids.append(_text_node(p, ids, sk + "_Num", "00", (p.font[0], p.font[1]), 68.6, 295.4,
                                (18.0, -2.0, 98.0, 67.2), tail=tuple(p.text_tail)))
         slots.append(_group_node(p, ids, sk, kids, x, ys[k], scale))

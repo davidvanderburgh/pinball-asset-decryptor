@@ -184,6 +184,11 @@ data sound_requests         0x00778288
 data sound_request_count    0x00611f54
 #   stock_mode_manager: derived from 2 places, e.g. 0x47220+0x2c [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 data stock_mode_manager     0x007a46ac
+# PAD-733 (David's Premium, v32: every mode of ours waited from 208 s into a ball to its drain, KUMONGA's picks refused):
+# Tesla Strike (rule 23, started by the powerlines, over when its lit arrows are made or the ball ends) runs beside the
+# game's own battles and multiballs, so it is not "one of the game's modes running" for ours (the rule lines below name
+# it; MODE_SDK.md "The game's own modes")
+text stock_any_beside        Tesla Strike
 #   rule_battle: derived from 2 places, e.g. 0x7f998+0x64 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 data rule_battle            0x007a4638
 #   roster_screen_table: derived from 2 places, e.g. 0x190acc+0x5c [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]

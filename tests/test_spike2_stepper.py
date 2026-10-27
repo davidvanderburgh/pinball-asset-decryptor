@@ -367,6 +367,47 @@ int main(void)
     assert "building_keep_closed();" in _lift(src, "static void building_tick(")
 
 
+@needs_cc
+def test_the_game_does_not_raise_it_again_while_ours_keeps_it_closed(tmp_path):
+    """PAD-733 (David's Premium, MELTDOWN: "we shouldn't have the building be going up and down over and over again
+    that is dangerous because the ball can damage the building"): the lock lit, the game sent the building back up
+    and the close sent it down again. While one of ours keeps it closed, the game's own moves above 0 are refused."""
+    src = _rt()
+    code = "#include <stdio.h>\n" + _lift(src, "static int building_raise_refused(") + r"""
+static void t(const char *label, int sending, int run, int game, int aside, int closed, int back, int floor)
+{
+    printf("%s|%d\n", label, building_raise_refused(sending, run, game, aside, closed, back, floor));
+}
+int main(void)
+{
+    t("raise", 0, 1, 1, 0, 1, 0, 1);
+    t("raise_3", 0, 1, 1, 0, 1, 0, 3);
+    t("to_0", 0, 1, 1, 0, 1, 0, 0);
+    t("ours", 1, 1, 1, 0, 1, 0, 1);
+    t("no_mode", 0, 0, 1, 0, 1, 0, 1);
+    t("attract", 0, 1, 0, 0, 1, 0, 1);
+    t("games_mode", 0, 1, 1, 1, 1, 0, 1);
+    t("not_closed", 0, 1, 1, 0, 0, 0, 1);
+    t("putting_back", 0, 1, 1, 0, 1, 1, 1);
+    return 0;
+}
+"""
+    (tmp_path / "t.c").write_text(code)
+    r = subprocess.run([CC, "-std=gnu17", "-Wall", "-o", str(tmp_path / "t"), str(tmp_path / "t.c")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    out = subprocess.run([str(tmp_path / "t")], capture_output=True, text=True, timeout=30).stdout
+    rows = dict(l.split("|", 1) for l in out.strip().splitlines())
+    assert rows["raise"] == rows["raise_3"] == "1"
+    for k in ("to_0", "ours", "no_mode", "attract", "games_mode", "not_closed", "putting_back"):
+        assert rows[k] == "0", k
+    veto = _lift(src, "static int building_move_veto(")
+    assert "bld.home >= 0 && bld.ours == 0" in veto and "r[0] != obj" in veto and "aside.kind" in veto
+    send = _lift(src, "static void building_send(")
+    assert send.index("bld_sending = 1") < send.index("fn(\"building_move\")") < send.index("bld_sending = 0")
+    assert "hook_veto(fn(\"building_move\"), building_move_veto)" in _lift(src, "static void building_arm(")
+
+
 def test_the_move_is_the_games_own_and_put_back_on_every_end():
     src = _rt()
     move = _lift(src, "int pm_building(")

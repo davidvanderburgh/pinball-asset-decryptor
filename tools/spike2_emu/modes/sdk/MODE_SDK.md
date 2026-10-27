@@ -969,6 +969,21 @@ Pro 1.15's instruction for instruction). On another title, find `cmode_manager` 
 `rtti_tree.py` and compare its virtuals 10, 15 and 22 with Godzilla's; a title without a
 `cmode_manager` (TMNT Pro's `crule_manager`) has no port lines, and the call returns -1.
 
+**Modes that run beside everything (PAD-733).** "Any" counts every active mode of the game's, and some run for most
+of a ball under the game's own battles and multiballs: Godzilla's Tesla Strike starts from the powerlines and is over
+only when its lit arrows are made or the ball ends. On David's Premium every mode of ours waited from 208 s into a ball
+to its drain at 854 s (two KUMONGA picks refused, the progress panel down). A port names such modes by their `rule`
+labels:
+
+```
+text stock_any_beside        Tesla Strike    # comma-separated rule labels
+```
+
+When "any" says a mode runs, the runtime asks the port's rules one by one (their ACTIVE slot, at most every 100 ms):
+if only those named run, the answer is 0 (mode.log: `stock modes: Tesla Strike runs - beside ours ...`); otherwise
+the label of the one found names it (`not started (a block): Super Train is running`). A battle picked on the game's own
+selection screen (or a mode that takes the place of one of the game's) never waits at all: the game let its own start.
+
 **What is proven.** In the emulator on Godzilla Pro 1.15 and Premium 1.16 (`godzilla_le`),
 with a mode file set to `stack no` beside one with no stack key: both started in plain
 play; during a battle the game started itself (Titanosaurus on Pro, Ebirah on Premium:
@@ -1948,7 +1963,10 @@ it: balls locked, and the third lock's Godzilla Multiball, which the mode keeps 
 went into ball search (David's Premium, 2026-10-22). So while one of ours runs and has not put the building on a
 floor of its own, the runtime sends a building parked above floor 0 to 0, within the limits below, and puts it back
 where it was when the mode ends, which reopens the lock (mode.log: `building: floor 1 -> 0 - its lock closed while
-<mode> runs`). Nothing to do in a mode for it.
+<mode> runs`). Nothing to do in a mode for it. The game would send it back up while the lock stays lit, and the
+building went up and down over and over under the ball (PAD-733, David's Premium in MELTDOWN), so while the lock is
+kept closed the game's own moves above floor 0 are refused (a veto on `site building_move`; mode.log: `building:
+the game's move to floor 1 refused - its lock stays closed while <mode> runs`): it stays down until the mode ends.
 
 A mode asks for a floor and nothing else:
 

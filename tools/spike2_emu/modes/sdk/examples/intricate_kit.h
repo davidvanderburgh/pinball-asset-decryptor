@@ -1109,7 +1109,9 @@ static KIT_UNUSED void kit_hud_gauge(struct kit_hud *h, int level, const char *l
  * indication that is here)"; a battle alone stepped it down before). Shared by every mode of the pack: weak, as
  * kit_hud_up. A card built before PAD-680 has no panel: nothing. PAD-690: the panel has up to 7 slots, the badges
  * scaled to fill the column (mode_hud.progress_layout); the kit uses the slots the panel has, up to KIT_PROG_SLOTS
- * (a PAD-680 card has 4), the newest notes in them, older ones dropping off. */
+ * (a PAD-680 card has 4), the newest notes in them, older ones dropping off. PAD-733 (David: "Ideally the HUD
+ * indicator would show which shot to hit in small text where the number was"): at 0 a badge built with a READY
+ * picture (the shot that starts the mode, kit_prog_ready) shows it in the number's place. */
 #define KIT_PROG_SLOTS 16
 struct kit_prog_row {
     char slug[32];                         /* the mode's folder: the key; "" = a free row */
@@ -1128,6 +1130,9 @@ struct kit_prog {
     int found, up;                         /* up: what the glass was last told (-1 = nothing yet) */
     unsigned slots;                        /* the slots the panel has (PAD-690) */
     unsigned tries;
+    void *ready[KIT_PROG_SLOTS];           /* PAD-733: each slot's badge's READY picture (0 = none); after the rest, so a
+                                            * mode built with an older kit shares the fields before it */
+    signed char ready_on[KIT_PROG_SLOTS];  /* shown now: 1, 0, -1 = not said yet */
 };
 __attribute__((weak, visibility("hidden"))) struct kit_prog kit_prog;
 
@@ -1169,6 +1174,16 @@ static KIT_UNUSED void *kit_prog_badge(unsigned k, const char *slug)
 {
     char path[160];
     pm_snprintf(path, sizeof path, "PadMode_Progress.PadMode_Progress_S%u.PadMode_Progress_S%u_%s", k + 1, k + 1, slug);
+    return pm_node("hud", path);
+}
+
+/* PAD-733: the badge's READY picture - the shot that starts the mode, in small letters where the number is, shown
+ * at 0 in the number's place (mode_hud.progress_group: a mode whose start shot the build knows); 0 = none */
+static KIT_UNUSED void *kit_prog_ready(unsigned k, const char *slug)
+{
+    char path[200];
+    pm_snprintf(path, sizeof path, "PadMode_Progress.PadMode_Progress_S%u.PadMode_Progress_S%u_%s.PadMode_Progress_S%u_%s_Ready",
+                k + 1, k + 1, slug, k + 1, slug);
     return pm_node("hud", path);
 }
 
@@ -1225,13 +1240,22 @@ static KIT_UNUSED void kit_prog_tick(const char *mine)
     for (i = 0; i < kit_prog.slots; i++) {
         struct kit_prog_slot *s = &kit_prog.slot[i];
         const char *slug = i < n ? kit_prog.row[order[i]].slug : "";
+        const char *num = i < n ? kit_prog.row[order[i]].num : " ";
+        int ready;
         if (!kit_same(s->slug, slug)) {         /* another mode's badge in this slot (or none) */
             if (s->badge) pm_show(s->badge, 0);
             s->badge = slug[0] ? kit_prog_badge(i, slug) : 0;
             if (s->badge) pm_show(s->badge, 1);
+            kit_prog.ready[i] = slug[0] ? kit_prog_ready(i, slug) : 0;
+            kit_prog.ready_on[i] = -1;          /* built visible: said once either way */
             kit_copy(s->slug, sizeof s->slug, slug);
         }
-        kit_hud_text(s->num, s->written, sizeof s->written, i < n ? kit_prog.row[order[i]].num : " ");
+        ready = kit_prog.ready[i] && kit_same(num, "0");
+        if (kit_prog.ready[i] && ready != kit_prog.ready_on[i]) {
+            pm_show(kit_prog.ready[i], ready);
+            kit_prog.ready_on[i] = (signed char)ready;
+        }
+        kit_hud_text(s->num, s->written, sizeof s->written, ready ? " " : num);
     }
 }
 

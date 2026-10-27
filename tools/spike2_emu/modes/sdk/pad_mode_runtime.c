@@ -4693,6 +4693,9 @@ static int stock_balls(unsigned kinds)
         ? (int)PM_STOCK_MULTIBALL : 0;
 }
 
+static int stock_any_weighed(void);      /* PAD-733: the stock rules section, below */
+static char stock_any_what[48];
+
 int pm_stock_mode_running(unsigned kinds)
 {
     static const struct { unsigned kind; const char *site; } Q[] = {
@@ -4733,6 +4736,7 @@ int pm_stock_mode_running(unsigned kinds)
     for (i = 0; i < sizeof Q / sizeof Q[0]; i++) {
         if (!(kinds & Q[i].kind)) continue;
         r = stock_query(Q[i].site);
+        if (r > 0 && Q[i].kind == PM_STOCK_ANY && stock_any_weighed() == 0) r = 0;   /* PAD-733: only one beside ours */
         if (r > 0) return (int)Q[i].kind;
         if (r < 0) unknown = 1;
     }
@@ -4749,6 +4753,7 @@ const char *pm_stock_mode_what(unsigned kind)
     if ((kind & PM_STOCK_BATTLE) && stock_generic_on) return "one of the game's modes";
     if (kind & PM_STOCK_BATTLE) return "a battle";
     if (kind & PM_STOCK_MULTIBALL) return "a multiball";
+    if ((kind & PM_STOCK_ANY) && stock_any_what[0]) return stock_any_what;   /* PAD-733: its name, by the rules */
     return kind ? "a stock mode" : "nothing";
 }
 
@@ -6594,9 +6599,13 @@ static int building_busy(unsigned obj)
     return (((unsigned (*)(unsigned))(unsigned long)fn("building_busy"))(obj) & 0xffu) != 0;
 }
 
+static volatile int bld_sending;            /* PAD-733: 1 while a move of ours is under way (the veto lets it by) */
+
 static void building_send(unsigned obj, int floor)
 {
+    bld_sending = 1;
     ((void (*)(unsigned, unsigned))(unsigned long)fn("building_move"))(obj, (unsigned)floor);
+    bld_sending = 0;
 }
 
 /* Why a move to `floor` may not start now, or 0. (tests lift it verbatim) */
@@ -6708,6 +6717,33 @@ static void building_keep_closed(void)
     if (said++ < 3 || said % 10 == 0)
         say("building: floor %d -> 0 - its lock closed while %s runs (a ball locked now would wait for a multiball "
             "the mode keeps from starting); put back on %d when it ends", at, mode_name(running, "the mode"), bld.home);
+}
+
+/* PAD-733 (David's Premium, MELTDOWN on v32: "we shouldn't have the building be going up and down over and over again
+ * that is dangerous because the ball can damage the building"): with the lock lit the game sends the building back up
+ * to its floor (0x7d24c, again and again), and the close above sent it down again - up to six times a minute. So
+ * while one of ours keeps the lock closed, the game's own moves above floor 0 are refused (`site building_move`, a
+ * veto): the building stays down until the mode ends and is put back. Not ours (bld_sending), not while one of the
+ * game's own modes has the stage, nor once the put-back is owed. 1 = refuse it. (tests lift it verbatim) */
+static int building_raise_refused(int sending, int running_mode, int in_game, int aside, int closed_by_us,
+                                  int putting_back, int floor)
+{
+    return !sending && running_mode && in_game && !aside && closed_by_us && !putting_back && floor > 0;
+}
+
+static int building_move_veto(unsigned *r)
+{
+    static unsigned said;
+    unsigned obj = building_obj();
+    if (!obj || r[0] != obj)
+        return 0;
+    if (!building_raise_refused(bld_sending, running != 0, pm_in_game(), aside.kind != 0, bld.home >= 0 && bld.ours == 0,
+                                bld.putback_until != 0, (int)r[1]))
+        return 0;
+    if (said++ < 3 || said % 20 == 0)
+        say("building: the game's move to floor %u refused - its lock stays closed while %s runs (no up and down "
+            "under the ball); put back on %d when it ends", r[1], mode_name(running, "the mode"), bld.home);
+    return 1;
 }
 
 static void building_tick(void)
@@ -6968,6 +7004,9 @@ static void building_arm(void)
         return;
     }
     can |= PM_CAN_BUILDING;
+    if (!hook_veto(fn("building_move"), building_move_veto))      /* PAD-733 */
+        say("building: the game's own moves could not be hooked - while a mode of ours keeps its lock closed, the "
+            "game may send it up again");
     say("building: a mode may move it by floor (stepper 0x%08x, move 0x%08x, floors 0..%ld); %u s between "
         "moves, %u a minute, put back when the mode ends", data("building_stepper"), fn("building_move"),
         pm_port_value("building_floors", 4) - 1, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
@@ -8382,6 +8421,37 @@ static void rule_line(const char *s)
     n_stock_rules++;
 }
 
+/* PAD-733 (David's Premium, v32: two KUMONGA picks refused - "a stock mode is running" - the progress panel down and
+ * every mode of ours waiting from 208 s into a ball to its drain at 854 s, through a multiball and a battle of the
+ * game's): the game's "a mode of mine is active" query (`site stock_any_running`) counts modes that run BESIDE
+ * everything for most of a ball - Tesla Strike, started by the powerlines and over only when its lit arrows are made
+ * or the ball ends, runs under the game's own battles and multiballs. The ones the port names (`text
+ * stock_any_beside`, rule labels, comma-separated) are not "one of the game's modes running" for ours: when the query
+ * says one runs, the named rules are asked one by one (their ACTIVE slot), at most every STOCK_WEIGH_MS. 1 = another
+ * one runs, 0 = only those, -1 = cannot tell (the query's answer stands). The label of the one found is kept for the
+ * log (stock_any_what). (tests lift stock_beside verbatim) */
+#define STOCK_WEIGH_MS 100ul
+static char stock_any_what[48];
+
+static int stock_beside(const char *list, const char *label)
+{
+    const char *p = list, *q, *e;
+    unsigned long n, k;
+    if (!p || !label || !label[0]) return 0;
+    for (n = 0; label[n]; n++) ;
+    while (*p) {
+        while (*p == ' ' || *p == ',') p++;
+        for (q = p; *q && *q != ','; q++) ;
+        for (e = q; e > p && e[-1] == ' '; e--) ;
+        if ((unsigned long)(e - p) == n) {
+            for (k = 0; k < n && (p[k] | 0x20) == (label[k] | 0x20); k++) ;
+            if (k == n) return 1;
+        }
+        p = q;
+    }
+    return 0;
+}
+
 static struct stock_rule *stock_rule(unsigned id)
 {
     int i;
@@ -8435,6 +8505,36 @@ static unsigned stock_object(struct stock_rule *x, int say_why)
     }
     x->obj = obj;
     return obj;
+}
+
+/* PAD-733: the weighing above stock_beside, once the rules' objects can be fetched */
+static int stock_any_weighed(void)
+{
+    static unsigned long at;
+    static int last = -1;
+    static char said[48];
+    const char *list = pm_port_text("stock_any_beside"), *other = 0, *beside = 0;
+    int i, known = 0;
+    if (!list || !n_stock_rules) return -1;
+    if (at && pm_ms() - at < STOCK_WEIGH_MS) return last;
+    at = pm_ms() ? pm_ms() : 1;
+    for (i = 0; i < n_stock_rules; i++) {
+        struct stock_rule *x = &stock_rules[i];
+        int a;
+        if (!stock_object(x, 0) || (a = stock_active(x)) < 0) continue;
+        known++;
+        if (!a) continue;
+        if (stock_beside(list, x->label)) { if (!beside) beside = x->label; }
+        else if (!other) other = x->label;
+    }
+    if (!known) return last = -1;
+    pm_snprintf(stock_any_what, sizeof stock_any_what, "%s", other ? other : beside ? beside : "");
+    if (!other && beside && !stock_beside(said, beside)) {
+        say("stock modes: %s runs - beside ours, as it runs beside the game's own battles and multiballs (the port's "
+            "stock_any_beside): ours do not wait for it", beside);
+        pm_snprintf(said, sizeof said, "%s", beside);
+    } else if (other) said[0] = 0;
+    return last = other ? 1 : 0;
 }
 
 /* ---- the wrap: what the game's handler receives ------------------------------------------------- */

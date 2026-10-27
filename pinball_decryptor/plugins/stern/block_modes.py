@@ -369,6 +369,9 @@ DRAIN_TOTAL_MS = 6000            # PAD-622: at a drain, held as the game's own m
 #: a lit shot's pattern: the SDK's, and its pace (ms) when the block gives none. "hurry" is a
 #: blink that quickens as the clock runs down (PAD-376, the kit's kit_hurry_ms); "off" holds it dark (PAD-601: the
 #: game's own light there does not show through, as it does when the light is handed back)
+#: PAD-733: what a shot's script may do that the player hears, sees on the playfield or feels - without one of them
+#: a shot that scores while the mode runs gets the game's rising hit sound and a flash of its inserts (fb_tick)
+FEEDBACK_OPS = ("sound", "callout", "show", "shake", "shake_game", "clip", "game_show")
 PATTERNS = {"solid": ("PM_LAMP_SOLID", 0), "blink": ("PM_LAMP_BLINK", 500),
             "pulse": ("PM_LAMP_PULSE", 1600), "chase": ("PM_LAMP_CHASE", 150),
             "hurry": ("PM_LAMP_BLINK", 0), "off": ("PM_LAMP_SOLID", 0)}
@@ -731,6 +734,9 @@ def hud_spec(program, slug=""):
         out["timer"] = {"label": h["timer"]["label"] or title[:BADGE_MAX], "icon": h["timer"]["icon"]}
     else:                   # PAD-690: no running timer, but the progress panel wears its badge all the same
         out["badge"] = {"label": h["timer"]["label"] or title[:BADGE_MAX], "icon": h["timer"]["icon"]}
+    ready = ready_label(ready_shots(program))
+    if ready:               # PAD-733: the shot that starts it, on its badge at 0
+        out["ready"] = ready
     if h["gauge"]["on"] and h["gauge"]["kind"] == "bar":        # PAD-658: the corner meter, in the stock's fire
         gg = h["gauge"]
         out["gauge"] = {"label": " ", "kind": "bar", "count": gg["count"], "icon": gg["icon"],
@@ -911,6 +917,68 @@ def preview_shots(program):
                     and shot not in out):
                 out.append(shot)
     return out
+
+
+READY_MAX = 24                   # PAD-733: the words of a progress badge's READY picture
+
+
+def ready_shots(program):
+    """PAD-733 (David: "anytime a HUD mode gets to zero it's shot on the playfield needs to blink to let you know
+    that that shot is ready to be starting a mode"): the shots that start the mode once its count is done (its
+    progress panel number at 0) - a mode lit at a shot (Light the mode at) its shots, which that block lights itself;
+    else each shot whose "while it is not running" script starts it, or starts the timer whose script does. None for
+    a mode with no number on the panel (no Set the progress number block)."""
+    scripts = program.get("scripts") or []
+    blocks = [b for s in scripts for b in _walk(s.get("do") or [])]
+    if not any(b.get("op") == "hud_progress" for b in blocks):
+        return []
+    lit = [b.get("shot") or (lit_inserts(b.get("insert")) or [""])[0] for b in blocks if b.get("op") == "light_mode"]
+    if any(lit):
+        return list(dict.fromkeys(s for s in lit if s))
+    timers = {(s.get("hat") or {}).get("timer") for s in scripts if (s.get("hat") or {}).get("kind") == "timer_done"
+              and any(b.get("op") == "start_mode" for b in _walk(s.get("do") or []))}
+    out = []
+    for s in scripts:
+        h = s.get("hat") or {}
+        if h.get("kind") != "shot" or h.get("when") != "idle" or not h.get("shot"):
+            continue
+        if any(b.get("op") == "start_mode" or (b.get("op") == "timer_start" and b.get("timer") in timers)
+               for b in _walk(s.get("do") or [])):
+            out.append(h["shot"])
+    return list(dict.fromkeys(out))
+
+
+def ready_recount(program, g):
+    """PAD-733: the C of the mode's first Set the progress number value when it counts a value kept each ball (its
+    count starts again with the ball: the panel's number and the blink are put right then), else ""."""
+    ball = {v.get("name") for v in program.get("vars") or [] if v.get("reset") == "ball"}
+
+    def names(e):
+        if isinstance(e, dict):
+            if e.get("k") == "var":
+                yield e.get("name")
+            for v in e.values():
+                yield from names(v)
+
+    for s in program.get("scripts") or []:
+        for b in _walk(s.get("do") or []):
+            if b.get("op") == "hud_progress":
+                return g.num(b.get("value")) if ball & set(names(b.get("value"))) else ""
+    return ""
+
+
+def ready_label(shots):
+    """PAD-733: the words a progress badge shows in its number's place at 0 - the one shot's name, or the words
+    several share at the front ("Shield target left" ... "Shield ramp spinner" -> SHIELD), else the first one's."""
+    words = [str(s).upper().split() for s in shots or [] if s]
+    if not words:
+        return ""
+    common = []
+    for col in zip(*words):
+        if len(set(col)) != 1:
+            break
+        common.append(col[0])
+    return " ".join(common or words[0])[:READY_MAX].strip()
 
 
 def more_of(program):
@@ -2032,6 +2100,8 @@ class _Gen:
         self.lit = []                   # PAD-503: each Light the mode at's (shot index, inserts, rgb, pattern, ms,
                                         # PAD-521: the insert held solid and its rgb)
         self.lit_asked = False          # PAD-503: a condition asks whether the mode is lit
+        self.fb_ctx = False             # PAD-733: the script being read is a shot's while the mode runs
+        self.fb_used = False            # PAD-733: one of those scores (fb_owe)
         self.unlit = []                 # PAD-600: the other modes whose light a block puts out, by slug
         self.unlight_own = False        # PAD-600: a block puts out this mode's own light
         self.combos = []                # PAD-708: the combo hats, in the order of their scripts (COMBO[k])
@@ -2177,6 +2247,17 @@ class _Gen:
             if not isinstance(b, dict):
                 continue
             op = b.get("op")
+            n = len(out)
+            self._op(b, op, out, pad, ind)
+            if len(out) > n and op in FEEDBACK_OPS:              # PAD-733: the shot said so itself
+                out.append(pad + "fb_paid();")
+            elif len(out) > n and op == "score" and self.fb_ctx:  # PAD-733: a shot that counts is owed a word
+                self.fb_used = True
+                out.append(pad + "fb_owe();")
+        return out
+
+    def _op(self, b, op, out, pad, ind):
+        if True:
             if op == "start_mode":
                 out.append(pad + 'start("a block", 1);')
             elif op == "end_mode":
@@ -2409,7 +2490,7 @@ class _Gen:
             elif op == "unlight_mode":                                                # PAD-600
                 mode = b.get("mode") or ""
                 if not isinstance(mode, str) or (mode and not SLUG_RE.match(mode)):
-                    continue
+                    return
                 if not mode or lit_ident(mode) == lit_ident(self.slug):
                     self.unlight_own = True
                     out.append(pad + "unlight_mode();")
@@ -2418,7 +2499,6 @@ class _Gen:
                         self.unlit.append(mode)
                     out.append(pad + "unlight_other(%s, %s);   /* the mode %s's light out */"
                                % (lit_ident(mode), _c_str(mode), _comment(mode)))
-        return out
 
     @staticmethod
     def callout(v):
@@ -2475,9 +2555,13 @@ def to_c(program, slug):
         kind = hat.get("kind")
         if kind not in HATS:
             continue
+        g.fb_ctx = kind in ("shot", "any_shot", "combo") and hat.get("when", "any") != "idle"   # PAD-733
         body = g.stack(s.get("do") or [], 2)
+        g.fb_ctx = False
         bodies[kind].append((i + 1, hat, body))
     preview = [g.shot_i(n) for n in preview_shots(program)]   # PAD-733: blinked on its selection-screen tile
+    # PAD-733: the shots that start it, blinked once its count is done (a mode lit at a shot lights its own)
+    ready = [g.shot_i(n) for n in ready_shots(program)] if program["hud"]["on"] and not g.lit else []
     # the hats' own shots and events
     hat_code = {k: [] for k in HATS}
     challenge_names = []                    # PAD-615: the game's challenges its scripts take the place of
@@ -3037,10 +3121,17 @@ def to_c(program, slug):
         L.append(" * notes come only every few hits still shows every hit there); not while the mode runs, nor for a mode")
         L.append(" * with its own meter in the corner (its notes stay off the panel too: David, \"Angry already has its own")
         L.append(" * meter at the top so we don't need it on the side\") */")
+        if ready:
+            L.append("static void ready_set(int on);")
         L.append("UNUSED static void hud_progress(long long value)")
         L.append("{")
         L.append("    char n[24];")
-        L.append("    if (run.on || HUD_METER) return;")
+        if ready:
+            L.append("    if (run.on) return;")
+            L.append("    ready_set(value <= 0);            /* PAD-733: its count done, the shot that starts it blinks */")
+            L.append("    if (HUD_METER) return;")
+        else:
+            L.append("    if (run.on || HUD_METER) return;")
         L.append('    pm_snprintf(n, sizeof n, "%lld", value < 0 ? 0LL : value);')
         L.append('    kit_prog_set(hud.slug, "#", n);')
         L.append("}")
@@ -3088,11 +3179,18 @@ def to_c(program, slug):
         L.append("#define SHOWING 0                         /* no Light show block */")
         L.append("")
     forget = "    lit_shown = 0;                    /* PAD-503: the mode's light is held again next tick */\n" if g.lit else ""
+    if ready:
+        forget += "    ready_shown = 0;                  /* PAD-733: and its blink once its count is done */\n"
+        L.append("static int ready_shown;               /* PAD-733: 1 = its blink once its count is done is on the playfield */")
     if g.lit:
         L.append("static int lit_shown;                 /* PAD-503: 1 + the LIT_AT held on the playfield now; 0 = none */")
     L.extend((_LAMPS_C % {"n": len(g.shots), "size": nshots + len(g.lamps), "lo": RATE_MIN, "hi": RATE_MAX,
                           "forget": forget, "nl": len(g.lamps), "lsize": max(1, len(g.lamps)),
                           "lamps": ", ".join(_c_str(n) for n in g.lamps) or "0"}).split("\n"))
+    if g.fb_used:                                   # PAD-733: every shot it counts says so
+        L.extend(_FEEDBACK_C.split("\n"))
+    else:
+        L.append("#define fb_paid() ((void)0)              /* PAD-733: no shot of its own scores while it runs */")
     if g.shows:
         L.extend(_SHOW_C.split("\n"))
     if g.combos:
@@ -3151,6 +3249,9 @@ def to_c(program, slug):
         L.extend(_lit_c(g).rstrip("\n").split("\n"))
     elif g.lit_asked:
         L.append("UNUSED static int lit_now(void) { return 0; }   /* no Light the mode at block: never lit */")
+    if ready:
+        L.append("")
+        L.extend(_ready_c(g, ready).rstrip("\n").split("\n"))
     if g.unlight_own and not g.lit:
         L.append("UNUSED static void unlight_mode(void) { }   /* no Light the mode at block: never lit */")
     L.append("")
@@ -3164,6 +3265,11 @@ def to_c(program, slug):
     L.extend(scripts_of("mode_end") or ["    /* no script */"])
     L.append("}")
     L.append("")
+    L.append("/* PAD-733: 1 while a battle picked on the game's selection screen (or a mode of the game's this one takes the")
+    L.append(" * place of) starts it: the game let its own start now, so there is nothing to wait out (David's Premium, v32:")
+    L.append(" * two KUMONGA picks were refused and given back as lost battles) */")
+    L.append("static int pick_go;")
+    L.append("")
     L.append("/* counted: a block asked (the tab's Start mode now does not wait for the game's modes) */")
     L.append("static void start(const char *why, int counted)")
     L.append("{")
@@ -3172,7 +3278,7 @@ def to_c(program, slug):
     L.append("        drain_hold = drain_long = 0;")
     L.append("        end_now(\"ball ended\");")
     L.append("    }")
-    L.append("    if ((WAITS_OUT_MULTIBALL || GAME_MODES) && counted) {   /* it waits: the next Start the mode starts it */")
+    L.append("    if ((WAITS_OUT_MULTIBALL || GAME_MODES) && counted && !pick_go) {   /* it waits: the next Start starts it */")
     L.append("        static unsigned long said_at;")
     L.append("        const char *what = game_busy();")
     L.append("        if (what) {")
@@ -3203,9 +3309,13 @@ def to_c(program, slug):
     L.append("    run.player = pm_player();")
     if g.lit:
         L.append("    lit_started(run.player);          /* PAD-503: begun, however it began: its light is out */")
+    if ready:
+        L.append("    if (run.player <= 4) ready_as[run.player] = 0;   /* PAD-733: begun: no more blink */")
     L.append("    run.ticks_left = RUN_SECONDS * TICKS_PER_SECOND;")
     L.append("    run.seconds_shown = RUN_SECONDS;")
     L.append("    run.elapsed = 0;")
+    if g.fb_used:
+        L.append("    fb_n = 0;                         /* PAD-733: its hit sounds rise from the first again */")
     L.append("    run.shots = 0;")
     L.append("    run.total = 0;")
     L.append("    for (unsigned k = 0; k < %d; k++) MH[k] = 0;   /* PAD-721: its progress shots, from none */" % nhits)
@@ -3573,7 +3683,11 @@ def to_c(program, slug):
     if g.lit:
         L.append("    lit_shot(shot);                   /* PAD-503: the shot it is lit at starts it */")
         L.append("    if (!was_on && run.on) return;    /* PAD-658: and is that alone, not a shot \"while it is not running\" too */")
+    if g.fb_used:
+        L.append("    fb_now = shot;                    /* PAD-733: the shot a score below is owed a word for */")
     L.extend(scripts_of("shot", "any_shot", "combo"))   # PAD-708: a combo's script in its place among them
+    if g.fb_used:
+        L.append("    fb_now = 0;")
     L.append("}")
     L.append("")
     L.append("static void on_event(unsigned id)")
@@ -3616,6 +3730,8 @@ def to_c(program, slug):
     if g.lit:
         L.append("            if (lit_as[p]) pm_log(\"a new game: player %u's light is out\", p);")
         L.append("            lit_as[p] = 0;            /* PAD-503: no one is lit at the start of a game */")
+    if ready:
+        L.append("            ready_as[p] = 0;          /* PAD-733: nor ready */")
     L.append("        }")
     L.append("        for (v = 0; v < %d; v++) T[v] = 0;" % ntimers)
     if g.combos:
@@ -3626,6 +3742,10 @@ def to_c(program, slug):
         L.append("        combo_chain_end();")
     if g.lit:
         L.append("    lit_tick();                       /* PAD-503: the player up's light while it is not running */")
+    if g.fb_used:
+        L.append("    fb_tick();                        /* PAD-733: a shot that scored and said nothing */")
+    if ready:
+        L.append("    ready_tick();                     /* PAD-733: its count done, the shots that start it blink */")
     L.append("    if (++poll % 30 == 0) {            /* the tab's Start mode now / End mode */")
     L.append('        if (pm_trigger("%s.start")) start("trigger file", 0);' % slug)
     L.append('        if (pm_trigger("%s.stop")) end("trigger file");' % slug)
@@ -3686,7 +3806,9 @@ def to_c(program, slug):
         L.append("        } else {")
         if media:
             L.append("            clip_after = 0;               /* PAD-733: its start clip with its start, as the game's battle */")
+        L.append("            pick_go = 1;                  /* PAD-733: the game let its battle start: nothing to wait out */")
         L.extend("        " + line if line else line for code in battle_scripts for line in code.split("\n"))
+        L.append("            pick_go = 0;")
         if media:
             L.append("            clip_after = PA_CLIP_AFTER_MS;")
             L.append("            own_clip_due();               /* on the glass in this tick: no frame of the HUD before it */")
@@ -3706,7 +3828,9 @@ def to_c(program, slug):
         L.append('            pm_log("the game\'s start of its mode lapsed - the player changed or the game ended");')
         L.append("            pm_place_over(0);")
         L.append("        } else {")
+        L.append("            pick_go = 1;                  /* PAD-733: the game began its own: nothing to wait out */")
         L.extend("        " + line if line else line for code in place_scripts for line in code.split("\n"))
+        L.append("            pick_go = 0;")
         L.append("            if (run.on) place_held = 1;")
         L.append("            else {")
         L.append('                pm_log("the game started its mode and this started nothing - not completed");')
@@ -3855,6 +3979,12 @@ def to_c(program, slug):
     L.append('        reset_ball();')
     if g.lit:
         L.append("        lit_player = 0;               /* PAD-503: the next ball holds its light again */")
+    if ready:
+        L.append("        ready_player = 0;             /* PAD-733: and its blink */")
+        again = ready_recount(program, g)
+        if again:
+            L.append("        if (ready_as[p] && !run.on) hud_progress(%s);   /* PAD-733: its count starts again with the ball */"
+                     % again)
     L.append("    }")
     L.append("}")
     L.append("")
@@ -4658,6 +4788,99 @@ static void lit_started(unsigned p)
     lit_off();
 }
 """
+
+
+_FEEDBACK_C = r"""/* ---- PAD-733: every shot it counts says so (David, SUPER X2: "though the shots were lit I wasn't getting any
+ * feedback either visual or audio or Shaker when I was hitting the shots so the mode felt broken. Every single shot on
+ * our custom modes needs to have feedback when you do it"): a shot that scores while the mode runs and brings no
+ * sound, show, shake or clip of the mode's own within FB_MS (a 1 ms timer's script answers on the next tick) gets the
+ * game's rising hit sound and a strobe of its inserts (pm_lamp_flash: over its own light, which comes back) ---- */
+#define FB_MS       80u
+#define FB_FLASH_MS 360u
+static uint64_t fb_now;                 /* the shot being handled (on_shot) */
+static uint64_t fb_shot;                /* the shot owed its word; 0 = none owed */
+static unsigned long fb_at;
+static unsigned fb_n;                   /* the rising run's step, from the mode's start */
+
+UNUSED static void fb_owe(void)
+{
+    if (run.on && fb_now && !fb_shot) {
+        fb_shot = fb_now;
+        fb_at = pm_ms();
+    }
+}
+
+UNUSED static void fb_paid(void)
+{
+    fb_shot = 0;
+}
+
+static void fb_tick(void)
+{
+    uint64_t m = fb_shot & named;
+    if (!fb_shot || pm_ms() - fb_at < FB_MS) return;
+    fb_shot = 0;
+    if (!run.on) return;
+    pm_hit_sound((int)++fb_n);
+    if (m && !SHOWING) pm_lamp_flash(m, 0xffffffu, FB_FLASH_MS);
+}
+"""
+
+
+_READY_C = r"""/* ---- PAD-733: its count done, the shots that start it blink (David: "anytime a HUD mode gets to zero it's shot on
+ * the playfield needs to blink to let you know that that shot is ready to be starting a mode"): set at the progress
+ * panel's 0 (hud_progress), for the player up, while the mode is not running and nothing is in its way, until it
+ * starts or its count goes up again; the blocks' own lights of those shots come back after it ---- */
+#define N_READY %(n)d
+static const int READY_AT[N_READY] = { %(at)s };   /* %(names)s */
+#define READY_RGB 0xffffffu
+#define READY_MS  250u
+static unsigned char ready_as[5];       /* per player: 1 = its count is done and it has not started */
+static unsigned ready_player;           /* whose blink ready_shown is; 0 = put it on again */
+
+static void ready_set(int on)
+{
+    unsigned p = P();
+    if (!p || p > 4 || !pm_in_game() || ready_as[p] == (on ? 1 : 0)) return;
+    pm_log(on ? "ready for player %%u: its count is done - %(names)s blink until it starts"
+              : "ready no more for player %%u: its count went up", p);
+    ready_as[p] = on ? 1 : 0;
+}
+
+static void ready_off(void)
+{
+    int k;
+    if (!ready_shown) return;
+    for (k = 0; k < N_READY; k++)
+        if (S[READY_AT[k]] && !LIT[READY_AT[k]].on) pm_lamp_release_shot(S[READY_AT[k]]);
+    ready_shown = 0;
+    for (k = 0; k < N_READY; k++) lamp_send(READY_AT[k]);   /* one the blocks light themselves is theirs again */
+}
+
+static void ready_tick(void)
+{
+    unsigned p = pm_player();
+    int want, k;
+    if (SHOWING) {                      /* a show paints every insert, and hands them all back at its end */
+        ready_shown = 0;
+        return;
+    }
+    want = pm_in_game() && p >= 1 && p <= 4 && !run.on && ready_as[p] && pm_game_wizard_way() != 0 && !out_of_play();
+    if (want == ready_shown && (!want || p == ready_player)) return;
+    ready_off();
+    if (!want) return;
+    for (k = 0; k < N_READY; k++)
+        if (S[READY_AT[k]]) pm_lamp_shot(S[READY_AT[k]], READY_RGB, PM_LAMP_BLINK, READY_MS);
+    ready_shown = 1;
+    ready_player = p;
+}
+"""
+
+
+def _ready_c(g, ready):
+    """PAD-733: the C of the blink once its count is done, for the shots ``ready`` (indexes into ``g.shots``)."""
+    return _READY_C % {"n": len(ready), "at": ", ".join(str(k) for k in ready),
+                       "names": _comment(", ".join(g.shots[k] for k in ready))}
 
 
 def _lit_c(g):

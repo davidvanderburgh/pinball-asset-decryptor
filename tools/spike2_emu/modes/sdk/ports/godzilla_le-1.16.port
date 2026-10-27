@@ -164,6 +164,11 @@ site stock_battle_running 0x000d43d0 0xe92d4070 0xe30f66a0
 # v[22]: an active mode with (kind & 0x21) == 1 (every multiball)
 site stock_multiball_running 0x000d45a8 0xe92d40f8 0xe30f66a0
 data stock_mode_manager       0x007b0ce4
+# PAD-733 (David's Premium, v32: every mode of ours waited from 208 s into a ball to its drain, KUMONGA's picks refused):
+# Tesla Strike (rule 23, started by the powerlines, over when its lit arrows are made or the ball ends) runs beside the
+# game's own battles and multiballs, so it is not "one of the game's modes running" for ours (the rule lines below name
+# it; MODE_SDK.md "The game's own modes")
+text stock_any_beside        Tesla Strike
 
 # ---- events (item 147): MODE_SDK.md, Events ----------------------------------------------------
 # The ids are Pro 1.15's, and every function that dispatches them has the same shape here

@@ -184,6 +184,17 @@ def test_the_view_of_a_total():
     assert v["count_text"] == "61 donations"
     assert v["pct"] == 73                        # (4320-2500)/(5000-2500)
     assert v["next_text"] == "$5,000"
+    assert v["total_usd"] == 4320 and v["last_text"] == "$2.5k"
+    assert [(c["text"], c["state"]) for c in v["ladder"]] == [
+        ("$1k", "reached"), ("$2.5k", "reached"), ("$5k", "next"),
+        ("$10k", "ahead"), ("$25k", "ahead")]
+    assert v["ladder"][1]["date"] == D.fmt_date(1725000000)
+    assert v["ladder"][0]["date"] == ""          # fell, but the service didn't say when
+    assert v["ladder"][2]["date"] == ""
+    assert D.fmt_short(500) == "$500" and D.fmt_short(2500) == "$2.5k"
+    assert D.fmt_short(100000) == "$100k" and D.fmt_short(1000000) == "$1M"
+    assert [c["state"] for c in D.view(None)["ladder"]] == ["next", "ahead", "ahead"]
+    assert [c["text"] for c in D.view({"total_usd": 5_000_000, "count": 1})["ladder"]] == ["$500k", "$1M"]
     assert v["reached_text"].startswith("$2,500 reached ")
     assert v["recent"] == [
         {"name": "Mike R.", "shelter": "Humane Society of Tampa Bay",

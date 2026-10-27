@@ -162,8 +162,7 @@ class DonationsMixin:
         self._don_cache["fetched_at"] = time.time()
         donations.save_cache(self._don_path, self._don_cache)
         self._publish_donations()
-        self.toast("Added to the total. Thank you, and thank the shelter.",
-                   "success")
+        self.toast("Added to the total. Thank you.", "success")
 
     def _donations_refused(self, message):
         self.toast(message, "warning")

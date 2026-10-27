@@ -155,8 +155,11 @@ def main():
                     if d["recent"] and d["recent"][0]["name"] == "David":
                         break
                     time.sleep(0.25)
-                time.sleep(1.2)
+                time.sleep(0.5)                       # the paw prints mid-flight
                 shoot("added")
+                webui_shot.api(url, "ui.set_theme", "light")
+                time.sleep(1.5)
+                shoot("light")
             browser.close()
     finally:
         proc.terminate()

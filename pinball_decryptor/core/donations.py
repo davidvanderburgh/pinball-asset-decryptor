@@ -142,6 +142,21 @@ def fmt_usd(n):
     return "$%s" % format(int(round(float(n or 0))), ",")
 
 
+def fmt_short(n):
+    """"$500", "$2.5k", "$10k", "$1M": a milestone on the ladder."""
+    n = float(n or 0)
+    if n >= 1_000_000:
+        v = n / 1_000_000
+        unit = "M"
+    elif n >= 1000:
+        v = n / 1000
+        unit = "k"
+    else:
+        return "$%d" % n
+    text = ("%d" % v) if v == int(v) else ("%.1f" % v)
+    return "$%s%s" % (text, unit)
+
+
 def fmt_amount(amount, currency):
     """"$50", "£40", "CA$25", "€12.50": the donation in its own money."""
     amount = float(amount or 0)
@@ -175,6 +190,7 @@ def view(summary, pending=(), currency="USD", name="", offline=False,
         pct = int(round(100.0 * (total - last) / (nxt - last)))
         pct = max(0, min(100, pct))
     reached = None
+    fell = []
     if known:
         fell = [m for m in summary.get("milestones") or ()
                 if isinstance(m, dict) and m.get("usd") is not None]
@@ -182,6 +198,24 @@ def view(summary, pending=(), currency="USD", name="", offline=False,
             top = fell[-1]
             reached = "%s reached %s" % (fmt_usd(top["usd"]),
                                          fmt_date(top.get("at")))
+    # the ladder the window draws: every milestone with its state, and the
+    # day the reached ones fell.  The window shows a few around "next".
+    when = {}
+    for m in fell:
+        try:
+            when[float(m["usd"])] = fmt_date(m.get("at"))
+        except (TypeError, ValueError):
+            pass
+    ladder = []
+    for m in MILESTONES:
+        state = ("reached" if known and total >= m
+                 else "next" if m == nxt else "ahead")
+        ladder.append({"usd": m, "text": fmt_short(m), "state": state,
+                       "date": when.get(float(m), "") if state == "reached"
+                       else ""})
+    i_next = next((i for i, c in enumerate(ladder) if c["state"] == "next"),
+                  len(ladder))
+    ladder = ladder[max(0, i_next - 2):i_next + 3]
     recent = []
     if known:
         for r in summary.get("recent") or ():
@@ -217,12 +251,16 @@ def view(summary, pending=(), currency="USD", name="", offline=False,
         tip = "What PAD users have given to animal shelters. Click to add yours."
     return {
         "known": known,
+        "total_usd": total,
         "total_text": fmt_usd(total) if known else "—",
+        "last_text": fmt_short(last) if last else "$0",
+        "ladder": ladder,
         "count": count,
         "count_text": ("%d donation%s" % (count, "" if count == 1 else "s"))
         if known else "",
         "pct": pct,
         "next_text": fmt_usd(nxt) if nxt else "",
+        "next_short": fmt_short(nxt) if nxt else "",
         "reached_text": reached,
         "recent": recent,
         "places": places,

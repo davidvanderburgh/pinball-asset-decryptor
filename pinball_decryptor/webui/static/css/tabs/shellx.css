@@ -133,22 +133,62 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 
 /* ------------------------------- PAD-754: the Animal shelters window */
 .topbar .chip svg { width: 14px; height: 14px; }
-.sx-don-grid { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 18px; align-items: start; }
-.sx-don-total { font-size: 28px; font-weight: 600; color: var(--ink); line-height: 1.1; }
-.sx-don-bar { height: 14px; border-radius: 7px; }
-.sx-don-bar i { background: var(--accent); transition: width .6s ease; }
+.sx-don-layout { display: grid; grid-template-columns: 76px minmax(0, 1fr) 244px; gap: 16px; align-items: start; }
+/* the thermometer */
+.sx-don-therm-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.sx-don-therm { width: 76px; height: 290px; display: block; }
+.sx-don-therm .tube { fill: var(--panel-2); stroke: var(--line-2); stroke-width: 1.5; }
+.sx-don-therm .merc { fill: var(--accent); transition: y .9s cubic-bezier(.2,.8,.2,1), height .9s cubic-bezier(.2,.8,.2,1); }
+.sx-don-therm .bulb { fill: var(--accent); stroke: var(--accent-line); stroke-width: 1.5; }
+.sx-don-therm .bulb-shine { fill: #fff; opacity: .35; }
+.sx-don-therm .shine { fill: #fff; opacity: .18; }
+.sx-don-therm .tick { stroke: var(--ink-3); stroke-width: 1.5; }
+/* the hero */
+.sx-don-hero { position: relative; display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-radius: 12px; background: var(--accent-soft); border: 1px solid var(--accent-line); overflow: hidden; }
+.sx-don-total { font-size: 38px; font-weight: 700; color: var(--accent); line-height: 1; letter-spacing: -.02em; }
+.sx-don-paw { position: absolute; right: -10px; top: -16px; color: var(--accent); opacity: .14; pointer-events: none; }
+.sx-don-paw svg { width: 96px; height: 96px; }
+/* the ladder */
+.sx-don-ladder { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.sx-don-rung { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--ink-3); font-size: 12.5px; font-family: var(--cond); white-space: nowrap; }
+.sx-don-rung svg { width: 13px; height: 13px; }
+.sx-don-rung .when { color: var(--ink-3); font-size: 11px; }
+.sx-don-rung.reached { color: var(--ok); border-color: transparent; background: var(--ok-soft); }
+.sx-don-rung.next { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); font-weight: 600; animation: sx-don-pulse 2.4s ease-in-out infinite; }
+.sx-don-rung.ahead { opacity: .7; }
+@keyframes sx-don-pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); } 50% { box-shadow: 0 0 0 5px var(--accent-soft); } }
+.sx-don-h { margin-top: 4px; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+/* the list */
 .sx-don-list { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
-.sx-don-list td { padding: 5px 0; border-top: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sx-don-list td:nth-child(1) { width: 34%; }
+.sx-don-list td { padding: 4px 0; border-top: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-don-list td:nth-child(1) { width: 31%; }
 .sx-don-list td:nth-child(2) { padding-left: 8px; }
-.sx-don-list td:nth-child(3) { text-align: right; width: 76px; }
-.sx-don-form { padding: 12px 14px; }
-.sx-don-form .sx-don-country { width: 100%; }
+.sx-don-list td:nth-child(3) { text-align: right; width: 64px; }
+.sx-don-av { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; margin-right: 8px; vertical-align: middle; font: 600 10.5px var(--cond); color: #fff; background: hsl(var(--h) 45% 38%); flex: 0 0 24px; }
+.sx-don-av.anon { background: var(--panel-3); color: var(--ink-3); }
+.sx-don-av svg { width: 13px; height: 13px; }
+/* the podium */
+.sx-don-podium { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: end; }
+.sx-don-step { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; font-size: 12.5px; }
+.sx-don-step .who { max-width: 100%; }
+.sx-don-step .amt { font-size: 12px; color: var(--ink-2); }
+.sx-don-step .blk { width: 100%; border-radius: 8px 8px 0 0; background: var(--panel-3); color: var(--ink-2); display: flex; align-items: flex-start; justify-content: center; padding-top: 6px; font-size: 14px; }
+.sx-don-step.p1 .blk { height: 56px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.sx-don-step.p2 .blk { height: 40px; }
+.sx-don-step.p3 .blk { height: 28px; }
+.sx-don-step.empty .blk { opacity: .4; }
 .sx-don-places { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .sx-don-place { display: grid; grid-template-columns: 18px minmax(0, 1fr) 120px 64px; gap: 8px; align-items: center; }
 .sx-don-place .sx-bar i { background: var(--accent); }
 .sx-don-place .mono:last-child { text-align: right; }
-@media (max-width: 760px) { .sx-don-grid { grid-template-columns: minmax(0, 1fr); } }
+/* the form, and the paw prints that float off its button */
+.sx-don-form { padding: 12px 14px; position: relative; overflow: hidden; }
+.sx-don-form .sx-don-country { width: 100%; }
+.sx-don-burst { position: absolute; inset: 0; pointer-events: none; }
+.sx-don-burst i { position: absolute; bottom: 36%; color: var(--accent); opacity: 0; animation: sx-don-float 1.4s ease-out forwards; }
+.sx-don-burst i svg { width: 18px; height: 18px; }
+@keyframes sx-don-float { 0% { opacity: 0; transform: translateY(0) scale(.5) rotate(var(--r)); } 15% { opacity: .9; } 100% { opacity: 0; transform: translateY(-150px) scale(1.1) rotate(var(--r)); } }
+@media (max-width: 760px) { .sx-don-layout { grid-template-columns: minmax(0, 1fr); } .sx-don-therm-col { display: none; } }
 
 /* ---------------------------------------------------------- top bar */
 .sx-gear { position: relative; display: inline-flex; }

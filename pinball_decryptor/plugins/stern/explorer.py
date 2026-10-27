@@ -592,7 +592,7 @@ class CardImage:
     def write_adjustment_defaults(self, part_index, path, table, overrides,
                                   high_scores=None, name_overrides=None,
                                   menu_last_id=None, menu_plan=None,
-                                  log=None, ranges=None):
+                                  log=None, ranges=None, coin_door=False):
         """Patch the game ELF's compiled defaults and write it back in place
         (exact-size, extent-mapped) with the ``.sidx`` record refreshed.
 
@@ -610,6 +610,11 @@ class CardImage:
 
         *ranges* is ``{AD_name: (min, max)}``: the menu's lowest and highest
         value for those settings (PAD-750), patched beside their defaults.
+
+        *coin_door* gives a Home Edition its coin door (PAD-755,
+        :mod:`.coin_door`): the interlock switch linked to its handler.  A
+        build that has one already, or can't be read, is left alone and said
+        so through *log*.
 
         Returns ``(n_settings, sidx_refreshed)``, where n_settings counts every
         adjustment and high-score slot changed (the menu page is one edit to
@@ -632,8 +637,34 @@ class CardImage:
             # re-reading the page out of the result.
             from .menu_visibility import widened_bytes
             new = widened_bytes(table, new, int(menu_last_id), plan=menu_plan)
+        if coin_door:
+            new = self._with_coin_door(table, new, log)
         _n, refreshed = self.replace_file_bytes(part_index, path, new)
         return n, refreshed
+
+    @staticmethod
+    def _with_coin_door(table, elf, log=None):
+        """*elf* with its coin door's interlock linked (see :mod:`.coin_door`),
+        or unchanged with a note when this build has nothing to fit."""
+        from . import coin_door
+        p = coin_door.plan(elf, table)
+        if p and p["state"] == coin_door.MISSING:
+            out = coin_door.patched_bytes(elf, p)
+            if log:
+                log("Coin door: the game now uses the coin door's interlock "
+                    "switch. Opening the door puts up the game's 48V "
+                    "DISABLED / CLOSE COIN DOOR message, as on a Pro.",
+                    "info")
+            return out
+        if log:
+            if p and p["state"] == coin_door.FITTED:
+                log("Coin door: this game already uses its coin door; "
+                    "nothing to change.", "info")
+            else:
+                log("Coin door: this build's switch tables couldn't be read "
+                    "with certainty, so its coin door was left as it ships.",
+                    "warning")
+        return elf
 
     @staticmethod
     def _with_master_volume(table, elf, overrides, log=None):

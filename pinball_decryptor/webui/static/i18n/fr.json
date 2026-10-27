@@ -12669,5 +12669,18 @@
 "A mode has up to {} When the player has completed scripts.": "Un mode a jusqu'à {} scripts Quand le joueur a terminé.",
 "The app cannot tell when {}'s own modes are completed, so a mode of yours cannot start on them there yet.": "L'app ne peut pas savoir quand les modes de {} sont terminés, donc un mode à vous ne peut pas encore démarrer dessus là.",
 "The app has found how {} records its own modes completed but has not yet seen a mode of yours start on them in the emulator, so it cannot here yet.": "L'app a trouvé comment {} enregistre ses modes terminés mais n'a pas encore vu un mode à vous démarrer dessus dans l'émulateur, donc pas encore ici.",
-"starts on game modes completed": "démarre sur des modes du jeu terminés"
+"starts on game modes completed": "démarre sur des modes du jeu terminés",
+"Coin door (Home Editions)": "Porte monnayeur (Home Editions)",
+"Jurassic Park The Pin and Star Wars Home Edition ship without a coin door. Their game ignores the door's interlock switch, though the cabinet board still has its input. The **Coin door** box appears on those cards only.": "Jurassic Park The Pin et Star Wars Home Edition sont livrés sans porte monnayeur. Leur jeu ignore l'interrupteur de sécurité de la porte, bien que la carte du meuble en ait encore l'entrée. La case **Porte monnayeur** n'apparaît que sur ces cartes.",
+"Tick **This machine has a coin door fitted** and the next Build makes the game use the door as a Pro does: opening it puts up **{}V DISABLED / CLOSE COIN DOOR** until it is shut.": "Cochez **Cette machine a une porte monnayeur installée** et le prochain Build fait utiliser la porte au jeu comme sur une Pro : l'ouvrir affiche **{}V DISABLED / CLOSE COIN DOOR** jusqu'à ce qu'elle soit fermée.",
+"Staged with the project and carried by mod packs. A card that has its coin door already is left as it is.": "Enregistré avec le projet et emporté par les mod packs. Une carte qui a déjà sa porte monnayeur reste telle quelle.",
+"Only with a door and its interlock switch fitted. With nothing on that input the game reads the door as open all the time and keeps the message up.": "Seulement avec une porte et son interrupteur de sécurité installés. Sans rien sur cette entrée, le jeu croit la porte toujours ouverte et garde le message affiché.",
+"the coin door": "la porte monnayeur",
+"The next Build makes the game use the coin door.": "Le prochain Build fait utiliser la porte monnayeur au jeu.",
+"The game will be left without its coin door, as it ships.": "Le jeu restera sans sa porte monnayeur, comme livré.",
+"This is a Home Edition: it ships without a coin door, and its game ignores the door's interlock switch, though the cabinet board still has the input for it. Tick this if you have fitted a coin door with its interlock switch, and the next Build makes the game use it as a Pro does: opening the door puts up {}V DISABLED / CLOSE COIN DOOR until it is shut.": "C'est une Home Edition : elle est livrée sans porte monnayeur, et son jeu ignore l'interrupteur de sécurité de la porte, bien que la carte du meuble en ait encore l'entrée. Cochez ceci si vous avez installé une porte monnayeur avec son interrupteur de sécurité, et le prochain Build la fera utiliser par le jeu comme sur une Pro : ouvrir la porte affiche {}V DISABLED / CLOSE COIN DOOR jusqu'à ce qu'elle soit fermée.",
+"Only with a door and its interlock switch fitted. With nothing on that input the game reads the door as open all the time and keeps the {}V DISABLED message up.": "Seulement avec une porte et son interrupteur de sécurité installés. Sans rien sur cette entrée, le jeu croit la porte toujours ouverte et garde {}V DISABLED affiché.",
+"Coin door": "Porte monnayeur",
+"This machine has a coin door fitted": "Cette machine a une porte monnayeur installée",
+"The service buttons work with the door open or shut, as before.": "Les boutons de service fonctionnent porte ouverte ou fermée, comme avant."
 }

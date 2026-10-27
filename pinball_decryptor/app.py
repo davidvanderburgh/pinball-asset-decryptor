@@ -6544,7 +6544,12 @@ class App:
         ranges = self.window.staged_setting_ranges(assets_dir)
         names = self.window.staged_high_scores(assets_dir)
         expose = self.window.staged_menu_expose(assets_dir)
-        if not vals and not ranges and not names and not expose:
+        # PAD-755: give a Home Edition its coin door
+        try:
+            coin = bool(self.window.staged_coin_door(assets_dir))
+        except AttributeError:
+            coin = False
+        if not vals and not ranges and not names and not expose and not coin:
             return
         try:
             out = self.window._target_write_path()
@@ -6627,12 +6632,13 @@ class App:
                             "settings) — the rest of the staged defaults were "
                             "still applied." % expose, "warning")
                 if (overrides or ranges or name_overrides
-                        or menu_last_id is not None):
+                        or menu_last_id is not None or coin):
                     n, _ref = c.write_adjustment_defaults(
                         part, path, table, overrides,
                         high_scores=hstd, name_overrides=name_overrides,
                         menu_last_id=menu_last_id, menu_plan=menu_plan,
-                        log=self.window.append_log, ranges=ranges)
+                        log=self.window.append_log, ranges=ranges,
+                        coin_door=coin)
                     if n:
                         self.window.append_log(
                             "Applied %d staged default setting(s) to the built "

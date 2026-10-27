@@ -78,3 +78,7 @@ html.bp-1020 .dflt .dflt-hs .dflt-h-rng { display: none; }
 .dflt .dflt-rng-btn.acc-ink { color: var(--accent); }
 .dflt .dflt-rng-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
 .dflt-edit .dflt-range { gap: 14px; }
+
+/* PAD-755: a Home Edition's coin door */
+.dflt .dflt-card-coin .dflt-coin-text { margin: 0 0 10px; color: var(--ink-2); max-width: 80ch; }
+.dflt .dflt-card-coin .chk { margin-bottom: 10px; }

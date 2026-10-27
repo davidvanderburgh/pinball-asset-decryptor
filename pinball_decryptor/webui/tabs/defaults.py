@@ -7,11 +7,12 @@ carries (editable one at a time), widening the machine's own Adjustments menu,
 and saved presets (one of which can be baked into every card you build).
 
 Every edit auto-stages into the project's ``.staged_changes.json`` (keys
-``settings``, ``high_scores``, ``menu_expose_through``) and the run logic
-bakes it into the OUTPUT image after a successful build
+``settings``, ``high_scores``, ``menu_expose_through``, ``coin_door``) and the
+run logic bakes it into the OUTPUT image after a successful build
 (``app.App._apply_staged_settings_to_build`` reads ``staged_default_settings``,
-``staged_high_scores`` and ``staged_menu_expose`` off the window;
-``_apply_active_preset_to_build`` reads the presets straight from settings).
+``staged_high_scores``, ``staged_menu_expose`` and ``staged_coin_door`` off the
+window; ``_apply_active_preset_to_build`` reads the presets straight from
+settings).
 The master image is only ever read.
 
 Ported from ``gui/main_window.py`` ``_build_settings_tab`` and the
@@ -61,6 +62,11 @@ RANGE_WARN = ("Lowest and Highest are what the machine's menu offers. Go "
               "plain number: one it shows as named choices has only the names "
               "the game has, and a game may not work past a limit it was "
               "written for.")
+
+# PAD-755: the staged-changes key (a string, so mod packs and transfers carry
+# it as they carry the menu widening) and its one value.
+COIN_KEY = "coin_door"
+COIN_FITTED = "fitted"
 
 STAGE_DELAY_MS = 500
 LOG_DELAY_MS = 1400
@@ -187,6 +193,13 @@ def read_image(path):
             plan = widen_plan(table)
         except Exception:                               # noqa: BLE001
             plan = None
+        # PAD-755: a Home Edition's coin door (None on a build that has one
+        # wired, or whose tables can't be read with certainty)
+        try:
+            from ...plugins.stern import coin_door
+            coin = coin_door.plan(elf, table)
+        except Exception:                               # noqa: BLE001
+            coin = None
         # The volume a machine actually starts at is a byte of its own, not
         # the (inert) compiled default - see plugins.stern.factory_volume.
         try:
@@ -204,7 +217,7 @@ def read_image(path):
             hstd = HighScoreDefaults(elf, table)
         except Exception:                               # noqa: BLE001
             hstd = None
-        return ("ok", table, part, fw, rows, path, hstd, every, plan)
+        return ("ok", table, part, fw, rows, path, hstd, every, plan, coin)
     except Exception as e:                              # noqa: BLE001
         return ("err", e)
 
@@ -217,6 +230,7 @@ class DefaultsTab(TabService):
     icon = "defaults"
     exports = (
         "staged_default_settings", "staged_high_scores", "staged_menu_expose",
+        "staged_coin_door",
         "staged_setting_ranges",
         "settings_image_var", "settings_preset_var", "settings_autoapply_var",
         "_modes_settings_staged",
@@ -256,10 +270,12 @@ class DefaultsTab(TabService):
         self._all_sort = (None, False)
         self._all_published = []      # names of the list as last published
         self._menu_plan = None
+        self._coin = None             # PAD-755: plugins.stern.coin_door plan
         self._batch = 0
         self.set(phase="empty", message=EMPTY_TEXT, form=[], hs=[],
                  values={}, hs_values=[], all=[], all_legend="",
                  all_total=0, menu_enabled=False, reset_enabled=False,
+                 coin_offer=False, coin_fitted=False,
                  status="", presets=[], auto_enabled=False,
                  sort={"key": None, "desc": False}, spike1=False,
                  loaded=False, era="")
@@ -494,6 +510,7 @@ class DefaultsTab(TabService):
             return
         self._busy = True
         self._menu_plan = None
+        self._coin = None
         self._clear_form()
         self.set(phase="loading", message=LOADING_TEXT, status="",
                  reset_enabled=False)
@@ -537,10 +554,12 @@ class DefaultsTab(TabService):
             self._hstd = None
             self._every = every
             self._menu_plan = None
+            self._coin = None
             self._build_form([])
             return
         self._spike1 = False
-        _ok, table, part, fw, rows, ipath, hstd, every, plan = res
+        _ok, table, part, fw, rows, ipath, hstd, every, plan = res[:9]
+        self._coin = res[9] if len(res) > 9 else None
         self._table = table
         self._part = part
         self._fw = fw
@@ -565,6 +584,7 @@ class DefaultsTab(TabService):
         # the form, and the form is what reads it.
         self.set(form=[], hs=[], values={}, hs_values=[], all=[],
                  all_legend="", all_total=0, menu_enabled=False,
+                 coin_offer=False, coin_fitted=False,
                  loaded=False, spike1=False)
 
     # ------------------------------------------------------------------
@@ -601,6 +621,7 @@ class DefaultsTab(TabService):
         self.set(menu_enabled=bool(self._menu_plan),
                  spike1=bool(self._spike1), loaded=True,
                  all_total=len(self._all_rows))
+        self._publish_coin()
         if self._all_rows:
             self._fill_all()
         if not rows:
@@ -820,6 +841,7 @@ class DefaultsTab(TabService):
         (the auto-apply preset first, then the staged values on top)."""
         self.set(reset_enabled=True)
         self._refresh_presets()
+        self._publish_coin()
         staged = self.staged_default_settings(self._staged_dir())
         staged_ranges = self.staged_setting_ranges(self._staged_dir())
         expose = self.staged_menu_expose(self._staged_dir())
@@ -934,7 +956,7 @@ class DefaultsTab(TabService):
             self._loading = False
         self._publish_hs()
         n = 0
-        menu = False
+        menu = coin = False
         assets_dir = self._staged_dir()
         if assets_dir:
             from ...core import staged_changes
@@ -943,13 +965,15 @@ class DefaultsTab(TabService):
                     | set(data.get("setting_ranges") or {})) + len(
                 data.get("high_scores") or {})
             menu = bool(data.get("menu_expose_through"))
+            coin = bool(data.get(COIN_KEY))
             if ("settings" in data or "high_scores" in data
                     or "setting_ranges" in data
-                    or "menu_expose_through" in data):
+                    or "menu_expose_through" in data or COIN_KEY in data):
                 data.pop("settings", None)
                 data.pop("setting_ranges", None)
                 data.pop("high_scores", None)
                 data.pop("menu_expose_through", None)
+                data.pop(COIN_KEY, None)
                 staged_changes.save(assets_dir, data)
                 self._folder_written(assets_dir)
         self._fill_all()
@@ -958,6 +982,9 @@ class DefaultsTab(TabService):
             cleared.append("%d staged setting(s)" % n)
         if menu:
             cleared.append("the menu widening")
+        if coin:
+            cleared.append("the coin door")
+        self._publish_coin()
         self._status("Fields reset to the image's current defaults%s."
                      % (" — cleared " + " and ".join(cleared)
                         if cleared else ""))
@@ -1007,6 +1034,12 @@ class DefaultsTab(TabService):
                 if clean:
                     out[str(label)] = clean
         return out
+
+    def staged_coin_door(self, assets_dir):
+        """True when the project is staged to give a Home Edition its coin
+        door (PAD-755).  Read by the app's Write flow after a build."""
+        from ...core import staged_changes
+        return staged_changes.load(assets_dir).get(COIN_KEY) == COIN_FITTED
 
     def staged_menu_expose(self, assets_dir):
         """The ``AD_`` name the machine's Adjustments menu is staged to be
@@ -1554,6 +1587,48 @@ class DefaultsTab(TabService):
                          "game ships it.", "info")
             self._status("The machine's menu will be left as the game ships "
                          "it.")
+        return True
+
+    # ---- a Home Edition's coin door (PAD-755) ---------------------------
+    def _publish_coin(self):
+        offer = bool(self._coin and self._coin.get("state") == "missing")
+        assets_dir = self._staged_dir()
+        fitted = offer and bool(assets_dir) and self.staged_coin_door(
+            assets_dir)
+        self.set(coin_offer=offer, coin_fitted=bool(fitted))
+
+    @rpc
+    def coin_door_set(self, on):
+        """The Coin door box: stage (or clear) fitting the door at the next
+        Build.  Offered only on a build plugins.stern.coin_door can fit."""
+        if not (self._coin and self._coin.get("state") == "missing"):
+            return False
+        assets_dir = self._staged_dir()
+        if not assets_dir:
+            self._status(NO_FOLDER_TEXT)
+            self._publish_coin()
+            return False
+        from ...core import staged_changes
+        data = staged_changes.load(assets_dir)
+        if bool(on) == (data.get(COIN_KEY) == COIN_FITTED):
+            self._publish_coin()
+            return True
+        if on:
+            data[COIN_KEY] = COIN_FITTED
+        else:
+            data.pop(COIN_KEY, None)
+        staged_changes.save(assets_dir, data)
+        self._folder_written(assets_dir)
+        if on:
+            self.log("Defaults: the next Build makes the game use a fitted "
+                     "coin door.", "info")
+            self._status("The next Build makes the game use the coin door.")
+        else:
+            self.log("Defaults: the game will be left without its coin door, "
+                     "as it ships.", "info")
+            self._status("The game will be left without its coin door, as "
+                         "it ships.")
+        self._publish_coin()
         return True
 
     # ------------------------------------------------------------------

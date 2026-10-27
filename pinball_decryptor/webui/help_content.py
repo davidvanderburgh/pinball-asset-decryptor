@@ -1691,6 +1691,20 @@ HELP_CONTENT = {
                      "value set to something the game never expected is on you.",
              "kind": "warn"},
         ]),
+        ("Coin door (Home Editions)", [
+            "Jurassic Park The Pin and Star Wars Home Edition ship without a coin door. "
+            "Their game ignores the door's interlock switch, though the cabinet board "
+            "still has its input. The **Coin door** box appears on those cards only.",
+            "- Tick **This machine has a coin door fitted** and the next Build makes the "
+            "game use the door as a Pro does: opening it puts up **48V DISABLED / CLOSE "
+            "COIN DOOR** until it is shut.\n"
+            "- The service buttons work with the door open or shut, as before.\n"
+            "- Staged with the project and carried by mod packs. A card that has its "
+            "coin door already is left as it is.",
+            {"note": "Only with a door and its interlock switch fitted. With nothing on "
+                     "that input the game reads the door as open all the time and keeps "
+                     "the message up.", "kind": "warn"},
+        ]),
         ("Show hidden settings on the machine", [
             "**Show hidden settings in the machine's menu…** moves where the Feature "
             "Adjustments page stops, so the machine lists and edits the Debug settings "

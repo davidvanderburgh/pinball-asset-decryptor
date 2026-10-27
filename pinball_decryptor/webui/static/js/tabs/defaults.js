@@ -30,6 +30,8 @@ const HIDDEN_TIP = "Leaves the settings the machine's Adjustments menu can't rea
   + "service screen, and the factory/debug ones it never shows at all.";
 const MENU_TIP = "Extends the machine's Feature Adjustments page so the settings below can be found and changed "
   + "on the machine itself, instead of only being preset from here.";
+const COIN_TEXT = "This is a Home Edition: it ships without a coin door, and its game ignores the door's interlock switch, though the cabinet board still has the input for it. Tick this if you have fitted a coin door with its interlock switch, and the next Build makes the game use it as a Pro does: opening the door puts up 48V DISABLED / CLOSE COIN DOOR until it is shut.";
+const COIN_WARN = "Only with a door and its interlock switch fitted. With nothing on that input the game reads the door as open all the time and keeps the 48V DISABLED message up.";
 const RANGE_CELL_TIP = "Change the lowest and highest value the machine's own menu offers for this setting.";
 const FRESH_TIP = "A machine uses these defaults on a fresh flash or after a factory reset. A machine that has "
   + "already been set up keeps its own settings — Stern stores those on the board, not on the card, so the app "
@@ -413,6 +415,13 @@ export default function DefaultsTab() {
       </div>
       ${s.status ? html`<div class="dflt-status" role="status"><${Icon} name="info" /><span>${s.status}</span></div>` : null}
     <//>
+
+    ${s.coin_offer ? html`<${Card} title="Coin door" cls="dflt-card-coin">
+      <p class="dflt-coin-text">${COIN_TEXT}</p>
+      <${Check} checked=${!!s.coin_fitted} wrap label="This machine has a coin door fitted"
+        onChange=${(v) => call(NS + ".coin_door_set", v)} />
+      <${Note} kind="warn">${COIN_WARN}<//>
+    <//>` : null}
 
     <${Card} title="Settings" cls="dflt-card-form">
       <${StateBody} s=${s} onEdit=${openEdit} />

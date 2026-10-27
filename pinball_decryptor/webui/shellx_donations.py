@@ -173,9 +173,9 @@ class DonationsMixin:
         self._publish_donations()
         if summary.get("held"):
             self.toast("Thank you. An entry that size is checked by hand "
-                       "before it counts, so the total moves later.", "info")
+                       "before it counts, so the tally moves later.", "info")
         else:
-            self.toast("Added to the total. Thank you.", "success")
+            self.toast("Added to the tally. Thank you.", "success")
 
     @rpc
     def donations_remove(self, key):

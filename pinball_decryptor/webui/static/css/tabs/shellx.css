@@ -133,7 +133,13 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 
 /* ------------------------------- PAD-754: the Animal shelters window */
 .topbar .chip svg { width: 14px; height: 14px; }
-.sx-don-layout { display: grid; grid-template-columns: 76px minmax(0, 1fr) 244px; gap: 16px; align-items: start; }
+/* nearly the whole screen (David): four columns, the thermometer, the
+   total and the list, the places and the map, the form */
+.modal.sx-don { width: min(1480px, calc(100vw - 40px)); max-height: calc(100vh - 32px); }
+.sx-don-layout { display: grid; grid-template-columns: 76px minmax(0, 1.15fr) minmax(0, 1fr) 250px; gap: 18px; align-items: start; }
+.sx-don-side { min-width: 0; }
+.sx-don-side .sx-don-h:first-child { margin-top: 0; }
+@media (max-width: 1180px) { .sx-don-layout { grid-template-columns: 76px minmax(0, 1fr) 250px; } .sx-don-side { grid-column: 2; } }
 /* the thermometer */
 .sx-don-therm-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .sx-don-therm { width: 76px; height: 290px; display: block; }
@@ -164,15 +170,26 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-don-reel .strip.go { transition: transform 1.4s cubic-bezier(.15, .85, .25, 1.06); }
 .sx-don-paw { position: absolute; right: -10px; top: -16px; color: var(--accent); opacity: .14; pointer-events: none; }
 .sx-don-paw svg { width: 96px; height: 96px; }
-/* the ladder */
-.sx-don-ladder { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.sx-don-rung { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--ink-3); font-size: 12.5px; font-family: var(--cond); white-space: nowrap; }
-.sx-don-rung svg { width: 13px; height: 13px; }
-.sx-don-rung .when { color: var(--ink-3); font-size: 11px; }
-.sx-don-rung.reached { color: var(--ok); border-color: transparent; background: var(--ok-soft); }
-.sx-don-rung.next { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); font-weight: 600; animation: sx-don-pulse 2.4s ease-in-out infinite; }
-.sx-don-rung.ahead { opacity: .7; }
+/* the milestones: a stepper, so they never read as amounts to give */
+.sx-don-steps { display: flex; align-items: flex-start; padding: 2px 0; }
+.sx-don-step-m { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; text-align: center; }
+.sx-don-step-m .ln { position: absolute; top: 10px; right: 50%; width: 100%; height: 2px; background: var(--line-2); }
+.sx-don-step-m.reached .ln { background: var(--ok); }
+.sx-don-step-m.next .ln { background: linear-gradient(90deg, var(--ok), var(--accent)); }
+.sx-don-step-m .dot { position: relative; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--panel); color: var(--ink-3); display: flex; align-items: center; justify-content: center; }
+.sx-don-step-m .dot svg { width: 12px; height: 12px; }
+.sx-don-step-m.reached .dot { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); }
+.sx-don-step-m.next .dot { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); animation: sx-don-pulse 2.4s ease-in-out infinite; }
+.sx-don-step-m .lbl { font-weight: 600; color: var(--ink); }
+.sx-don-step-m.next .lbl { color: var(--accent); }
+.sx-don-step-m.ahead .lbl { color: var(--ink-3); font-weight: 500; }
+.sx-don-step-m .sub { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 @keyframes sx-don-pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); } 50% { box-shadow: 0 0 0 5px var(--accent-soft); } }
+/* no money changes hands: the notice at the top */
+.sx-don-nomoney { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--info); background: var(--info-soft); color: var(--ink); font-size: 13px; line-height: 1.45; }
+.sx-don-nomoney svg { color: var(--info); flex: 0 0 18px; width: 18px; height: 18px; margin-top: 1px; }
+/* the ASCII playground */
+.sx-don-play { margin: 0; font: 12px/1.2 var(--mono); color: var(--accent); background: var(--log-bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; overflow: hidden; white-space: pre; }
 .sx-don-h { margin-top: 4px; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
 /* the list */
 .sx-don-list { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
@@ -219,7 +236,7 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-don-map-head { align-items: center; margin-top: 4px; }
 .sx-don-map-head .sx-don-h { margin-top: 0; }
 .sx-don-map-pick { display: inline-flex; gap: 4px; }
-.sx-don-map { display: grid; gap: 3px; width: 100%; max-width: 400px; }
+.sx-don-map { display: grid; gap: 3px; width: 100%; max-width: 460px; }
 .sx-don-tile { position: relative; aspect-ratio: 1; min-width: 0; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font: 600 9.5px var(--cond); color: var(--ink-3); overflow: hidden; transition: transform .15s ease; }
 .sx-don-tile i { position: absolute; inset: 0; background: var(--accent); opacity: var(--k, 0); }
 .sx-don-tile span { position: relative; }
@@ -232,7 +249,7 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-don-hist-table td:nth-child(2) { width: 26%; }
 .sx-don-hist-table td:nth-child(3) { padding-left: 8px; text-align: left; width: auto; }
 .sx-don-hist-table td:nth-child(4) { text-align: right; width: 72px; }
-@media (max-width: 760px) { .sx-don-layout { grid-template-columns: minmax(0, 1fr); } .sx-don-therm-col { display: none; } }
+@media (max-width: 760px) { .sx-don-layout { grid-template-columns: minmax(0, 1fr); } .sx-don-side { grid-column: 1; } .sx-don-therm-col { display: none; } }
 @media (prefers-reduced-motion: reduce) { .sx-don *, .sx-don *::before, .sx-don *::after { animation: none !important; transition: none !important; } }
 
 /* ---------------------------------------------------------- top bar */

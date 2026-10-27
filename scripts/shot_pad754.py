@@ -175,7 +175,7 @@ def main():
                 page.select_option(".sx-don-form .sx-don-country select", "US")
                 page.fill(".sx-don-form input[placeholder='State or province (optional)']", "New York")
                 page.fill(".sx-don-form input[placeholder='Your name (optional)']", "David")
-                page.click(".sx-don-form button:has-text('Add to the total')")
+                page.click(".sx-don-form button:has-text('Add to the tally')")
                 page.wait_for_selector(".sx-don-confirm", timeout=15000)
                 time.sleep(0.6)
                 shoot("confirm")
@@ -202,7 +202,7 @@ def main():
                 time.sleep(0.5)
                 # a big one: the confirm step says it is checked by hand first
                 page.fill(".sx-don-form input[placeholder='25']", "500")
-                page.click(".sx-don-form button:has-text('Add to the total')")
+                page.click(".sx-don-form button:has-text('Add to the tally')")
                 page.wait_for_selector(".sx-don-confirm", timeout=15000)
                 time.sleep(0.6)
                 shoot("confirm_big")

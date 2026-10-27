@@ -886,6 +886,57 @@ function TileMap({ tiles, cols, rows, data }) {
   </div>`;
 }
 
+// the playground: a dog chasing a ball past a cat, in ASCII, because a
+// window about animal shelters should have animals in it.  A tick every
+// 170 ms; still under prefers-reduced-motion.
+const PLAY_W = 62, PLAY_H = 3;
+const DOG = [
+  ["      ,_  ", " /\\__/ o\\ ", " \\_/\\_|\\_|"],
+  ["      ,_  ", " /\\__/ o\\ ", " \\_//__// "],
+];
+const CAT = [
+  [" /\\_/\\  ", "( o.o ) ", " > ^ <~ "],
+  [" /\\_/\\  ", "( o.o ) ", " > ^ < ~"],
+  [" /\\_/\\  ", "( O.O ) ", " > ^ <  "],
+];
+const BIRD = ["~v~", "-v-"];
+function putSprite(grid, x, y, lines) {
+  lines.forEach((ln, dy) => {
+    const row = y + dy;
+    if (row < 0 || row >= PLAY_H) return;
+    for (let i = 0; i < ln.length; i++) {
+      const col = x + i;
+      if (col < 0 || col >= PLAY_W || ln[i] === " ") continue;
+      grid[row][col] = ln[i];
+    }
+  });
+}
+function playFrame(t) {
+  const grid = Array.from({ length: PLAY_H }, () => Array(PLAY_W).fill(" "));
+  const lap = 70;                                     // ticks per run across
+  const dogX = -12 + (t % lap);
+  const catX = PLAY_W - 9;
+  const near = dogX + 10 >= catX - 2 && dogX < catX + 4;
+  const ballX = dogX + 13 + ((t >> 1) % 2);
+  const ballY = [0, 1, 2, 1][t % 4];
+  const birdX = PLAY_W - ((t * 2) % (PLAY_W + 30)) + 20;
+  putSprite(grid, birdX, 0, [BIRD[(t >> 2) % 2]]);
+  if (ballX < catX - 1) putSprite(grid, ballX, ballY, ["o"]);
+  putSprite(grid, catX, 0, CAT[near ? 2 : (t >> 3) % 2]);
+  putSprite(grid, dogX, 0, DOG[t % 2]);
+  return grid.map((r) => r.join("")).join("\n");
+}
+function Playground() {
+  const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [t, setT] = useState(8);
+  useEffect(() => {
+    if (still) return undefined;
+    const id = setInterval(() => setT((n) => n + 1), 170);
+    return () => clearInterval(id);
+  }, []);
+  return html`<pre class="sx-don-play notr" aria-hidden="true">${playFrame(t)}</pre>`;
+}
+
 function Avatar({ name }) {
   if (!name || name === "Anonymous") {
     return html`<span class="sx-don-av anon"><${Icon} name="paw" /></span>`;
@@ -994,7 +1045,11 @@ function DonationsDialog({ close, auto = false }) {
     footer=${html`<${Button} kind="ghost" onClick=${() => loadHistory(0)} disabled=${!d.known}>All donations<//>
       <span class="grow small dim wrap">${d.offline ? "The total can't be reached right now; this is the last it answered." : ""}</span>
       <${Button} onClick=${() => call("shellx.donations_refresh")}>Refresh<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
-    <p class="sx-p">${auto ? "Your card is written. " : ""}This app doesn't take donations. If it saved you money or time, give some of it to an animal shelter near you, then tell me here so it counts toward the total.</p>
+    <div class="sx-don-nomoney" role="note">
+      <${Icon} name="info" />
+      <div><b>No money changes hands here.</b> PAD doesn't take donations, and nothing is charged or processed. You give directly to any animal shelter you choose, on your own terms. This window only keeps a running tally of what people say they gave.</div>
+    </div>
+    <p class="sx-p">${auto ? "Your card is written. " : ""}If PAD saved you money or time, give some of it to an animal shelter near you, then tell me here so it counts toward the tally.</p>
     <div class="sx-don-layout">
       <div class="sx-don-therm-col">
         <span class="small muted notr">${d.next_short || ""}</span>
@@ -1002,6 +1057,7 @@ function DonationsDialog({ close, auto = false }) {
         <span class="small muted notr">${d.known ? d.last_text : ""}</span>
       </div>
       <div class="sx-don-main stack" style="gap:10px">
+        <${Playground} />
         <div class=${"sx-don-hero" + (hit ? " hit" : "")}>
           <${Odometer} text=${d.known ? d.total_text : "—"} />
           <span class="stack" style="gap:2px">
@@ -1011,12 +1067,14 @@ function DonationsDialog({ close, auto = false }) {
           ${hit ? html`<span class="sx-don-plus mono notr" key=${added}>${hit}</span>` : null}
           <span class="sx-don-paw" aria-hidden="true"><${Icon} name="paw" /></span>
         </div>
-        <div class="sx-don-ladder" role="list" aria-label="Milestones">
-          ${(d.ladder || []).map((c) => html`<span class=${"sx-don-rung " + c.state} role="listitem" title=${c.state === "reached" ? (c.date ? "Reached " + c.date : "Reached") : c.state === "next" ? "Next" : ""}>
-            ${c.state === "reached" ? html`<${Icon} name="check" />` : c.state === "next" ? html`<${Icon} name="paw" />` : null}
-            <span class="mono notr">${c.text}</span>
-            ${c.date ? html`<span class="when notr">${c.date}</span>` : null}
-          </span>`)}
+        <span class="small muted sx-don-h">Milestones for the tally</span>
+        <div class="sx-don-steps" role="list" aria-label="Milestones">
+          ${(d.ladder || []).map((c, i) => html`<div class=${"sx-don-step-m " + c.state} role="listitem">
+            ${i ? html`<i class="ln"></i>` : null}
+            <span class="dot">${c.state === "reached" ? html`<${Icon} name="check" />` : c.state === "next" ? html`<${Icon} name="paw" />` : null}</span>
+            <span class="lbl mono notr">${c.text}</span>
+            <span class="sub">${c.state === "reached" ? (c.date ? html`reached <span class="notr">${c.date}</span>` : "reached") : c.state === "next" ? "next up" : "later"}</span>
+          </div>`)}
         </div>
         <span class="small muted sx-don-h">Recent</span>
         <table class="sx-don-list"><tbody>
@@ -1024,8 +1082,10 @@ function DonationsDialog({ close, auto = false }) {
               <td><${Avatar} name=${r.name} /><span class="notr ellip">${r.name}</span></td>
               <td class="muted notr ellip" title=${r.where ? r.shelter + " (" + r.where + ")" : r.shelter}>${r.shelter}${r.where ? html` <span class="dim">· ${r.where}</span>` : null}</td>
               <td class="mono notr">${r.amount}</td></tr>`)
-            : html`<tr><td class="muted" colspan="3">${d.known ? "Nothing reported yet. Be the first." : "—"}</td></tr>`}
+            : html`<tr><td class="muted" colspan="3">${d.known ? "Nothing reported yet. Be the first." : "No entries yet."}</td></tr>`}
         </tbody></table>
+      </div>
+      <div class="sx-don-side stack" style="gap:10px">
         ${places.length ? html`<span class="small muted sx-don-h">Top places</span>
           <${Podium} places=${places} />
           ${rest.length ? html`<div class="sx-don-places">
@@ -1061,11 +1121,11 @@ function DonationsDialog({ close, auto = false }) {
               <span class="small muted">${name.trim() && showName ? html`listed as <span class="notr">${name.trim()}</span>` : "listed as Anonymous"}</span>
             </div>
             ${big ? html`<span class="small warn-ink wrap">An entry over $${(d.hold_over || 299).toLocaleString("en-US")} is checked by hand before it counts, so the total moves later.</span>` : null}
-            <span class="small muted wrap">It goes on the total everyone sees. You can take it back from the Yours list below.</span>
+            <span class="small muted wrap">Nothing is charged. This only adds what you already gave to the tally everyone sees. You can take it back from the Yours list below.</span>
             <${Button} kind="primary" cls="sx-don-cta" onClick=${submit} disabled=${busy}>Yes, add it<//>
             <${Button} kind="ghost" onClick=${() => setStage("form")} disabled=${busy}>Edit<//>`
           : html`
-            <span class="h2">I donated</span>
+            <span class="h2">I gave, on my own</span>
             <div class="row" style="gap:6px">
               <${Select} value=${currency} options=${d.currencies || ["USD"]} onChange=${setCurrency} width=${84} />
               <${Field} value=${amount} onChange=${setAmount} placeholder="25" mono width=${96} autoFocus bad=${!!err} />
@@ -1076,9 +1136,9 @@ function DonationsDialog({ close, auto = false }) {
             <${Field} value=${name} onChange=${setName} placeholder="Your name (optional)" maxLength=${40} />
             <${Check} checked=${showName} onChange=${setShowName} label="Show my name in the list" />
             ${err ? html`<span class="small err-ink">${err}</span>` : null}
-            <${Button} kind="primary" cls="sx-don-cta" onClick=${review} disabled=${busy}>Add to the total<//>
+            <${Button} kind="primary" cls="sx-don-cta" onClick=${review} disabled=${busy}>Add to the tally<//>
             ${added ? html`<span class="small ok-ink">Thank you.</span>` : null}
-            <span class="small muted wrap">Honor system. Nothing else about you is sent.</span>`}
+            <span class="small muted wrap">Honor system. No payment here, and nothing else about you is sent.</span>`}
           ${added ? html`<div class="sx-don-burst" key=${added} aria-hidden="true">
             ${[0, 1, 2, 3, 4, 5, 6].map((i) => html`<i style=${"left:" + (8 + i * 13) + "%;animation-delay:" + (i * 70) + "ms;--r:" + ((i % 2 ? 1 : -1) * (10 + i * 7)) + "deg"}><${Icon} name="paw" /></i>`)}
           </div>` : null}

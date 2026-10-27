@@ -4,6 +4,8 @@ guarantees that keep it invisible outside a dev tree with worktrees."""
 import json
 import os
 
+import pytest
+
 from pinball_decryptor import worktree_picker as wp
 
 
@@ -240,6 +242,24 @@ def test_shorten():
     long = "x" * 100
     assert len(wp._shorten(long)) == 64
     assert wp._shorten(long).endswith("…")
+
+
+@pytest.fixture(autouse=True)
+def _not_a_ticket_launch(monkeypatch):
+    """pad-triage launches a ticket's app with PAD_TICKET set, and the
+    chooser then skips itself (PAD-754); a test session may carry that
+    variable too, so every test here starts without it."""
+    monkeypatch.delenv("PAD_TICKET", raising=False)
+
+
+def test_pick_noop_when_launched_for_a_ticket(monkeypatch):
+    """pad-triage's launch (PAD_TICKET=PAD-n, cwd the ticket's worktree):
+    nothing to choose, and no 20 s of git status over every worktree."""
+    monkeypatch.delenv(wp.ENV_PICKED, raising=False)
+    monkeypatch.setenv("PAD_TICKET", "PAD-754")
+    monkeypatch.setattr(wp, "discover_other_checkouts",
+                        lambda root: (_ for _ in ()).throw(AssertionError))
+    assert wp.dev_pick_checkout() is True
 
 
 def test_pick_noop_when_child(monkeypatch):

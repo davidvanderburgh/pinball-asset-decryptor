@@ -135,7 +135,7 @@ def test_a_battle_picked_on_the_selection_screen_does_not_wait_for_the_games_mod
     p = prog([{"hat": {"kind": "battle", "slot": 0}, "do": [{"op": "start_mode"}]}], wait_multiball=True)
     src = BM.to_c(p, "kum")
     assert "&& counted && !pick_go)" in src
-    run = src[src.index("pick_go = 1;"):]
+    run = src[src.index("pick_go = 2;"):]          # PAD-768: 2 = a battle pick, which wins over the game's mini modes
     assert run.index('start("a block", 1);') < run.index("pick_go = 0;")
 
 

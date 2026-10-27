@@ -36,6 +36,7 @@ const OPS = [["+", "+"], ["-", "−"], ["*", "×"], ["/", "÷"]];
 const CMPS = [["<", "<"], ["<=", "≤"], ["=", "="], ["!=", "≠"], [">=", "≥"], [">", ">"]];
 const SCOOP_WHICH = [["next", "the next ball"], ["every", "every ball"]];   // PAD-395
 const HOLD_CLOCK = [["", "its clock runs"], ["wait", "its clock waits until it lets go"]];   // PAD-621 (block_modes.HOLD_CLOCK)
+const GI_HOLD = [["dark", "dark until the mode ends"], ["game", "the game's again"]];   // PAD-767
 const SHIELD_WHERE = [["toward", "toward the player"], ["away", "away"], ["leave", "where they are"]];   // PAD-392
 const BUILDING_FLOOR = [["1", "floor 1"], ["2", "floor 2"], ["3", "floor 3"], ["0", "back where the game keeps it"]];   // PAD-589
 const SHAKE_STRENGTH = [["hard", "a hard"], ["strong", "a strong"], ["medium", "a medium"], ["soft", "a soft"]];   // PAD-414
@@ -131,6 +132,7 @@ const TIP = {
   wordsPlace: "The Scenes editor on the game's screen with its words, its scored number (and the line under its name, if it has one) where they will show: drag or size any of them there, and it is saved into the mode. Untouched, the number goes where the game pops up its own (James Bond: large under the status bar).",
   gameWizard: "Hands the player one of the game's own mini-wizards, the game's mode itself with its own shots, lights, screens, sounds and award. Light it (where the game lights that one for a start shot): it waits for the game's own start shot, as when the game lights one. Start it: it begins at once, or the moment none of the game's own modes is in its way (nor this mode holding the game's modes off), that ball. On James Bond 007, until it starts it is the only one lit, so the game's own choosing cannot swap it for another, and the game no longer lights one named here by itself; on the other games the game's own rules still light and start their mini-wizards too. Works whether this mode runs or not: in When the game does an event it is a mini-wizard for that event. One the player has played this game plays again.",
   building: "Moves Godzilla Premium/LE's building to one of the game's own floors (floor 3 is the furthest it ever goes), at the speed the operator set; back where the game keeps it puts it on floor 0. When the mode ends, the ball drains or the game tilts, it goes back where it was, unless the game has moved it since. Only while the mode runs, never while the building is already moving or the game is using it, 3 s between moves, 6 a minute at most, and only while the game's modes cannot start and its own building locks do not keep counting.",
+  gi: "Puts the playfield's general illumination out and keeps it out while the mode runs, so only the mode's own lights and light shows light the playfield; a light show's own GI steps still play. The game's again: back on now. It comes back by itself when the mode ends.",   // PAD-767
   shield: "Turns the platform the shield targets sit on (about a second) and keeps it there while the mode runs: the game's ball search swings it, and it is turned back after. Where they are: stop keeping them. Only while the mode runs, never while one of the game's own modes runs, 1.5 s between moves, 12 a minute at most; the mode ending, the ball draining or a tilt turns them back where they were. They stay turned only while the game's modes cannot start and its own shield feature does not keep counting.",
 };
 
@@ -201,7 +203,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
     ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
     ["Control", [{ op: "if", cond: null, then: [], else: null }, { op: "if", cond: null, then: [], else: [] }]],
     ["Show and sound", [{ op: "callout", role: "ten_seconds" }, { op: "words", text: "JACKPOT", value: null },
-      { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" },
+      { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" }, { op: "gi", gi: "dark" },
       { op: "show", show: "burst" }, { op: "game_show", name: (ch.game_shows || []).find((x) => x.kind === "flashy")?.name || ((ch.game_shows || [])[0] || {}).name || "" },
       { op: "log", text: "" }]],
     ["Its own clips and sounds", [{ op: "clip", clip, where: "full" }, { op: "sound", sound, fallback: null },
@@ -237,7 +239,7 @@ const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: 
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
 export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", drain_to_one: "mode", game_wizard: "mode", score: "score",
-  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", show: "show", game_show: "show", log: "show",
+  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech" };
@@ -532,6 +534,7 @@ function StmtBody({ b, path, ed }) {
         onChange=${(v) => set("name", v)} />${how === "light" ? html`<span class="bk-w">: ${shotWord}</span>` : null}`;
     }
     case "building": return html`<span class="bk-w" ...${tip(TIP.building)}>Move the building to</span><${Pick} value=${String(b.floor ?? "3")} options=${BUILDING_FLOOR} onChange=${(v) => set("floor", v)} />`;
+    case "gi": return html`<span class="bk-w" ...${tip(TIP.gi)}>Turn the GI</span><${Pick} value=${b.gi || "dark"} options=${GI_HOLD} onChange=${(v) => set("gi", v)} />`;   // PAD-767
     case "shield": return html`<span class="bk-w" ...${tip(TIP.shield)}>Turn the shield targets</span><${Pick} value=${b.where || "toward"} options=${SHIELD_WHERE} onChange=${(v) => set("where", v)} />`;
     case "shake": return html`<span class="bk-w" ...${tip(TIP.shake)}>Shake the cabinet:</span><${Pick} value=${b.strength || "hard"} options=${shakeStrengths(ed.ch)} missing="(not on this game)" onChange=${(v) => set("strength", v)} />
       <span class="bk-w">shake for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
@@ -761,7 +764,7 @@ export function hatLabel(h) {
 export function stmtLabel(b) {
   return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball", ball_save: "Ball save", drain_to_one: "Take the extra balls away",
     score: "Score points", set: "Set a variable", change: "Change a variable", set_hits: "Set the hits of a shot", callout: "Say a callout",
-    words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
+    words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", gi: "Turn the GI dark", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound", music: "Play the music",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     hud_progress: "Progress panel number", roster_progress: "Selection screen count",

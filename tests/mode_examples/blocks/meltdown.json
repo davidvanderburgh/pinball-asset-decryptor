@@ -1264,6 +1264,10 @@
       "name": "Reactor"
      },
      {
+      "op": "gi",
+      "gi": "dark"
+     },
+     {
       "op": "shake_game",
       "shake": "multiball_start"
      },

@@ -33,7 +33,7 @@ quarter of what it held).
 - ENDS: one ball left after the ball save and 3 s more (for 2 s), the last drain, a tilt.
 """
 from blk import (AND, BALLS, LIT, NOT, OR, a_show, add, award, beds, change, clip, clips, div, end, eq, every,
-                 game_show, ge, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, light_mode, lt, mul,
+                 game_show, ge, gi, gt, hud, hud_counter, hud_line, hud_title, if_, le, light, light_insert, light_mode, lt, mul,
                  multiball, music, off, off_insert, on_any_shot, on_end, on_shot, on_start, on_timer, score, set_, shake,
                  shake_game, shield, show, sound, sounds, step, sub, timer_left, timer_start, timer_stop, var)
 import pack
@@ -221,6 +221,7 @@ SCRIPTS = [
              set_("base", 2000000), set_("heart", 1), set_("heart secs", 0), set_("jackpots", 0), set_("paid", 0),
              set_("meltdowns", 0), set_("add used", 0), set_("secs", 0), set_("one ball", 0), set_("ray at", 1),
              game_show("Strobe storm"), clip("intro", "full"), clip("loop", "loop"), show("Reactor"),
+             gi("dark"),                     # PAD-767: the playfield dark for the whole mode, not only its shows
              shake_game("multiball_start"),
              hud_title("BURNING GODZILLA"), hud_counter(3, 0, "JACKPOTS", STAGE_NAME[0]),
              award("MELTDOWN MULTIBALL", sub="HIS HEART IS A NUCLEAR REACTOR", seconds=3),

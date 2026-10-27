@@ -31,7 +31,7 @@ EVERY_BLOCK = [
     {"op": "multiball", "balls": 2, "save": 10}, {"op": "ball_save", "seconds": 15}, {"op": "drain_to_one"},
     {"op": "game_wizard", "name": "Spectre", "how": "light"},
     {"op": "hold", "what": "magnet", "ms": num(2000)}, {"op": "scoop_hold", "ms": num(3000), "which": "next"},
-    {"op": "let_go", "what": "*"}, {"op": "shield", "where": "toward"}, {"op": "building", "floor": "3"},
+    {"op": "let_go", "what": "*"}, {"op": "shield", "where": "toward"}, {"op": "gi", "gi": "dark"}, {"op": "building", "floor": "3"},
     {"op": "shake", "ms": num(500), "strength": "hard"}, {"op": "shake_game", "shake": "jackpot"},
     {"op": "score", "points": num(1000000)}, {"op": "set", "var": "combo", "value": num(0)},
     {"op": "change", "var": "combo", "by": num(1)}, {"op": "set_hits", "shot": "Left ramp", "value": num(0)},

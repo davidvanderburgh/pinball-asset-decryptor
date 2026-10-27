@@ -269,3 +269,42 @@ def test_the_tab_the_block_and_the_words_know_the_modes_own_shows():
         sys.path.pop(0)
     assert D.SAY["show"]({"op": "show", "show": "mine", "name": "Kaiju roar"}) == "Light show: the mode's Kaiju roar"
     assert D.SAY["show"]({"op": "show", "show": "burst"}) == "Light show: A burst of gold"
+
+
+# ---- PAD-767: the GI dark until the mode ends -----------------------------------------------------------------
+def _gi_prog(with_show):
+    start = [{"op": "gi", "gi": "dark"}] + ([{"op": "show", "show": "mine", "name": "Kaiju roar"}] if with_show else [])
+    p = T.prog([
+        {"hat": {"kind": "shot", "shot": "Building", "when": "idle"}, "do": [{"op": "start_mode"}]},
+        {"hat": {"kind": "mode_start"}, "do": start},
+        {"hat": {"kind": "shot", "shot": "Left ramp", "when": "running"}, "do": [{"op": "gi", "gi": "game"}]},
+    ], seconds=8)
+    if with_show:
+        p["shows"] = [{"name": "Kaiju roar", "steps": ROAR, "repeat": 1}]
+    return p
+
+
+def test_a_gi_block_is_checked_and_says_what_it_does():
+    p = _gi_prog(False)
+    assert not BM.problems(p)
+    p["scripts"][1]["do"][0]["gi"] = "dim"
+    assert any("sets the GI" in m for m in BM.problems(p))
+
+
+def test_the_gi_stays_dark_until_the_mode_ends_with_or_without_a_show(tmp_path, monkeypatch):
+    """David, MELTDOWN: "it would be cooler if the lights stayed off for the whole mode instead of just the first
+    10 seconds" - the shows' GI steps were the only dark; a GI block holds it to the end and gives it back"""
+    T._cc()
+    monkeypatch.setenv("HARNESS_PLACES", "1")
+    for with_show in (False, True):
+        out = T.play(tmp_path, _gi_prog(with_show), "shot", "Building", "secs", 12)
+        start = T._at(out, r"\[TEST MODE\] START")
+        assert T._at(out, r"\[TEST MODE\] GI: 2 string\(s\) dark until the mode ends") - start <= 20
+        end = T._at(out, r"\[TEST MODE\] END \(time ran out\)")
+        assert 0 <= T._at(out, r"\[TEST MODE\] GI: the mode is over - the game's again") - end <= 40
+        paints = int(re.search(r"END paints (\d+)", out).group(1))           # only changes count
+        assert paints == 2 if not with_show else paints > 200     # both strings held dark once; or a show over them
+        assert "END lamps held 0" in out
+    # a GI block that gives it back
+    out = T.play(tmp_path, _gi_prog(False), "shot", "Building", "secs", 1, "shot", "Left ramp", "secs", 1)
+    assert "GI: the game's again" in out and "GI: the mode is over" not in out

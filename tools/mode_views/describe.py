@@ -123,6 +123,7 @@ SAY = {
     "light_shot": lambda b: "Light %s %s %s" % (b.get("shot") or b.get("insert"), colour(b.get("color")),
                                                   PATTERN_WORDS.get(b.get("pattern"), "")),
     "lights_off": lambda b: "Hand back %s" % ("every light" if b.get("shot") == "*" else "the %s lights" % (b.get("shot") or b.get("insert"))),
+    "gi": lambda b: "Turn the GI %s" % BM.GI_HOLD.get(b.get("gi"), "?"),           # PAD-767
     "show": lambda b: "Light show: %s" % (("the mode's %s" % (b.get("name") or "?")) if b.get("show") == "mine"
                                           else BM.SHOWS.get(b.get("show"), ("its own steps",))[0]),
     "game_show": lambda b: "The game's show %s" % (b.get("name") or "?"),
@@ -141,7 +142,7 @@ SAY = {
 FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "set_hits": "var", "end_mode": "mode",
           "add_time": "mode", "set_time": "mode", "multiball": "mode", "ball_save": "mode", "drain_to_one": "mode", "game_wizard": "mode", "score": "score",
           "set": "var", "change": "var", "if": "flow", "callout": "show", "words": "show", "light_shot": "show",
-          "lights_off": "show", "show": "show", "game_show": "show", "log": "show", "clip": "own", "sound": "own", "music": "own",
+          "lights_off": "show", "gi": "show", "show": "show", "game_show": "show", "log": "show", "clip": "own", "sound": "own", "music": "own",
           "timer_start": "timer", "timer_stop": "timer", "hud_text": "hud", "hud_counter": "hud", "hud_gauge": "hud", "hud_progress": "hud", "roster_progress": "hud",
           "hud_award": "hud", "hold": "mech", "scoop_hold": "mech", "let_go": "mech", "shield": "mech",
           "building": "mech", "shake": "mech", "shake_game": "mech"}

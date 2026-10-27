@@ -337,6 +337,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "drain_to_one",                                            # PAD-733: the extra balls taken away
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
+              "gi",                                                      # PAD-767: the GI dark for the rest of the mode
               "light_mode", "unlight_mode", "set_hits")
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
@@ -421,6 +422,9 @@ PLACES = {"center": ("the middle", 150, 330), "top": ("the top", 150, 120),
 XY_MAX = 2000                    # a point of a step's own: within the picture's pixels
 #: what the general illumination does during a step (the kit's KIT_GI_*)
 GI = {"keep": "GI: the game's", "dark": "GI: dark", "flash": "GI: flashing"}
+#: PAD-767: a GI block: the playfield's GI held dark until the mode ends (a show's GI steps still play over it), or the
+#: game's again (David, MELTDOWN: "it would be cooler if the lights stayed off for the whole mode")
+GI_HOLD = {"dark": "dark until the mode ends", "game": "the game's again"}
 SHOW_STEPS = 32                  # PAD-646: was the kit's KIT_SHOW_STEPS (10); the blocks' engine reads a table
 STEP_MS_MIN, STEP_MS_MAX = 50, 10000
 FX_RATE_MAX = 2000
@@ -1796,6 +1800,9 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["shield"] is False:
                 ctx["out"].append("%s turns the shield targets, which a mode cannot do on this card's game."
                                   % where)
+        elif op == "gi":                                                             # PAD-767
+            if b.get("gi") not in GI_HOLD:
+                ctx["out"].append("%s sets the GI: dark until the mode ends, or the game's again." % where)
         elif op == "building":                                                       # PAD-589
             if str(b.get("floor")) not in BUILDING_FLOOR:
                 ctx["out"].append("%s moves the building: to floor 1, 2 or 3, or back where the game keeps it."
@@ -2125,6 +2132,7 @@ class _Gen:
         self.holds = []                 # PAD-395: the mechanisms its blocks hold or let go, by the port's name
         self.mech = False               # PAD-395: a block holds or lets go of something (the helpers go in)
         self.game_show = False          # PAD-418: a block plays one of the game's own light shows
+        self.gi = False                 # PAD-767: a block holds the GI dark until the mode ends
         self.game_wizard = False        # PAD-436: a block hands the player one of the game's own mini-wizards
         self.wizard_names = []          # PAD-457: ... which ones: the mode claims them as it loads
         self.lit = []                   # PAD-503: each Light the mode at's (shot index, inserts, rgb, pattern, ms,
@@ -2340,6 +2348,10 @@ class _Gen:
                 pace = self.num(rate) if rate is not None and pattern not in ("solid", "hurry", "off") else "%dLL" % ms
                 out.append(pad + "light(%s, 0x%06xu, %s, %s, %d);"
                            % (self.light_i(b), rgb, pat, pace, 1 if pattern == "hurry" else 0))
+            elif op == "gi":                                                          # PAD-767
+                if b.get("gi") in GI_HOLD:
+                    self.gi = True
+                    out.append(pad + "gi_hold(%d);" % (b["gi"] == "dark"))
             elif op == "lights_off":
                 if b.get("shot") == "*" and not b.get("insert"):
                     out.append(pad + "unlight_all();")
@@ -2585,7 +2597,9 @@ def to_c(program, slug):
         kind = hat.get("kind")
         if kind not in HATS:
             continue
-        g.fb_ctx = kind in ("shot", "any_shot", "combo") and hat.get("when", "any") != "idle"   # PAD-733
+        # PAD-733; PAD-767: not an any-shot script's - a score for every switch is a trickle, not a shot that counts
+        # (David, KING KONG: "every single switch hit was playing a sound effect"); the shot's own script says so
+        g.fb_ctx = kind in ("shot", "combo") and hat.get("when", "any") != "idle"
         body = g.stack(s.get("do") or [], 2)
         g.fb_ctx = False
         bodies[kind].append((i + 1, hat, body))
@@ -3227,6 +3241,12 @@ def to_c(program, slug):
         L.extend(_FEEDBACK_C.split("\n"))
     else:
         L.append("#define fb_paid() ((void)0)              /* PAD-733: no shot of its own scores while it runs */")
+    if g.shows or g.gi:
+        L.extend(_IS_GI_C.split("\n"))
+    if g.gi:
+        L.extend(_GI_HOLD_C.split("\n"))
+    elif g.shows:
+        L.append("#define GI_HELD 0                         /* PAD-767: no GI block */")
     if g.shows:
         L.extend(_SHOW_C.split("\n"))
     if g.combos:
@@ -3769,6 +3789,8 @@ def to_c(program, slug):
         L.append("    own_tick();                       /* every tick: an end call outlives the mode */")
     if g.shows:
         L.append("    show_tick();                      /* every tick: an end show outlives the mode */")
+    if g.gi:
+        L.append("    gi_tick();                        /* PAD-767: the GI held dark, or given back as the mode ends */")
     L.append("    if (new_game()) {                 /* every player's \"each game\" values, and no timer runs on */")
     L.append("        unsigned p, v;")
     L.append("        for (p = 0; p < 5; p++) {")
@@ -4445,16 +4467,6 @@ static int fx_angle(int dx, int dy)        /* atan2 in 1/1536 turns (the hue whe
     return a % 1536;
 }
 
-static int is_gi(const char *s)            /* a GI string: "GI" a word of its own in the name */
-{
-    int i;
-    for (i = 0; s && s[i] && s[i + 1]; i++)
-        if (s[i] == 'G' && s[i + 1] == 'I' && (i == 0 || s[i - 1] < 'A' || s[i - 1] > 'Z')
-            && (s[i + 2] < 'A' || s[i + 2] > 'Z'))
-            return 1;
-    return 0;
-}
-
 /* PAD-646: repeat = how many times it runs; 0 = over and over until the mode ends (the pass it is in finishes) */
 static void show_start(const struct fx_step *steps, int n, const char *name, int repeat)
 {
@@ -4625,8 +4637,64 @@ static void show_tick(void)
     for (k = 0; k < show.n_gi; k++) {
         if (st->gi == GI_DARK) pm_lamp_paint(show.gi[k], 0);
         else if (st->gi == GI_FLASH) pm_lamp_paint(show.gi[k], ((t / (st->rate ? st->rate : 100)) % 2) ? 0 : 0xffffffu);
+        else if (GI_HELD) pm_lamp_paint(show.gi[k], 0);              /* PAD-767: a GI block's dark under it */
         else pm_lamp_release(pm_lamp_at(show.gi[k], 0));
     }
+}
+"""
+
+#: a GI string by its name (a light show's GI steps, PAD-767's GI block)
+_IS_GI_C = r"""static int is_gi(const char *s)            /* a GI string: "GI" a word of its own in the name */
+{
+    int i;
+    for (i = 0; s && s[i] && s[i + 1]; i++)
+        if (s[i] == 'G' && s[i + 1] == 'I' && (i == 0 || s[i - 1] < 'A' || s[i - 1] > 'Z')
+            && (s[i + 2] < 'A' || s[i + 2] > 'Z'))
+            return 1;
+    return 0;
+}
+"""
+
+#: PAD-767: the GI block (David, MELTDOWN: "it would be cooler if the lights stayed off for the whole mode")
+_GI_HOLD_C = r"""/* PAD-767: a GI block: the playfield's GI strings painted dark every tick while the mode runs (a light show's own
+ * GI steps play over it; its "the game's" steps stay dark), given back as the mode ends or a GI block says so */
+static int gi_dark;                         /* 1 = held dark */
+static int gi_lamp[8], gi_n;
+#define GI_HELD (gi_dark && run.on)
+
+static void gi_give_back(void)
+{
+    int k;
+    for (k = 0; k < gi_n; k++) pm_lamp_release(pm_lamp_at(gi_lamp[k], 0));
+    gi_n = 0;
+}
+
+UNUSED static void gi_hold(int dark)
+{
+    int k, cnt = pm_lamp_count();
+    if (dark && (!run.on || !pm_can(PM_CAN_LAMPS))) return;
+    if (gi_dark && !dark) gi_give_back();
+    gi_dark = dark;
+    if (!dark) {
+        pm_log("GI: the game's again");
+        return;
+    }
+    gi_n = 0;
+    for (k = 0; k < cnt && gi_n < 8; k++)
+        if (is_gi(pm_lamp_at(k, 0))) gi_lamp[gi_n++] = k;
+    pm_log("GI: %d string(s) dark until the mode ends", gi_n);
+}
+
+static void gi_tick(void)
+{
+    int k;
+    if (gi_dark && !run.on) {               /* the mode is over: the GI goes back to the game */
+        gi_dark = 0;
+        gi_give_back();
+        pm_log("GI: the mode is over - the game's again");
+    }
+    if (!gi_dark || SHOWING) return;
+    for (k = 0; k < gi_n; k++) pm_lamp_paint(gi_lamp[k], 0);
 }
 """
 

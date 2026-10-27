@@ -59,6 +59,9 @@ padsw.set_source('b')   # who the [sw] log says moved a switch; see padsw.h.
 #: feeder without an emulator. The rig never sets either.
 LED_PATH = os.environ.get("PAD_LED_FILE",
                           os.path.join(padpath.dump() or "", "padled"))
+#: PAD-775: present while a Visual Pinball table's own trough owns the balls
+#: (vpx/padcontroller.py writes it on Run, removes it on Stop).
+OFF_PATH = os.path.join(os.path.dirname(LED_PATH), "ballfeed.off")
 
 
 def _num(name, default):
@@ -764,6 +767,7 @@ def main():
 
     period, gone_since, ever = 1.0 / max(1.0, HZ), None, False
     looked = time.monotonic()
+    off_said = False
     # PAD-484: THE GAME'S CLOCK, not the wall's. Every time this models - the
     # lane flight, the retry gap, the way home, the room's minute - is a time
     # on the machine, so with the game running k times the wall's they all
@@ -795,6 +799,21 @@ def main():
             ever = True
             say("padled block is up - watching")
         gone_since = None
+        # PAD-775: A TABLE OWNS THE BALLS. While a Visual Pinball table is
+        # attached (vpx/padcontroller.py) its own trough answers the eject,
+        # and two feeders on one trough is a ball served twice. The
+        # controller puts dump/ballfeed.off beside padled for as long as it
+        # runs and removes it on Stop; this feeder stands aside, polling, and
+        # carries on when it is gone.
+        if os.path.exists(OFF_PATH):
+            if not off_said:
+                off_said = True
+                say("standing aside: %s says a table's trough owns the balls" % OFF_PATH)
+            time.sleep(0.5)
+            continue
+        if off_said:
+            off_said = False
+            say("%s gone - answering the trough again" % OFF_PATH)
         # PAD-619: A LIST READ OUT OF THE BINARY IS REPLACED BY THE RUN'S OWN DUMP a minute in (mktables), and on a
         # build whose static numbering is not the game's (Aerosmith 1.16: 93 of 93 ids moved) the feeder had latched
         # the binary's trough ids at boot - "the trough is empty", no ball ever served on the title's first run

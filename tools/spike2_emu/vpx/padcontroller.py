@@ -1,0 +1,774 @@
+#!/usr/bin/env python3
+"""padcontroller.py - PAD.Controller: the Spike 2 emulator as a Visual Pinball
+controller, in the shape of VPinMAME.Controller.
+
+    python padcontroller.py --register      once, as the user (HKCU; no admin)
+    python padcontroller.py --unregister
+    python padcontroller.py --status        is a run up, what the map says
+    python padcontroller.py --selftest      drive it through COM from Python
+
+A VPX table script does `Set Controller = CreateObject("PAD.Controller")`
+(PADSPIKE2.vbs does it inside LoadVPM) and core.vbs then talks to it exactly
+as it talks to VPinMAME: `Controller.Switch(n) = 1` when a ball closes a
+switch, `Controller.ChangedSolenoids` and `Controller.ChangedLamps` every
+timer tick for what the game did, `Controller.Solenoid(n)` from cvpmMagnet,
+`Run`/`Stop`/`Pause` around the session.
+
+BEHIND IT IS THE RIG, NOT A ROM. The game is the real Spike 2 binary running
+under tools/spike2_emu (watch.sh, or the app's Emulate tab) in WSL. This
+server attaches to that run through the two shared blocks every other host
+tool uses:
+
+  switches IN   padsw   (padsw.h) - written from INSIDE WSL by swkeys.py,
+                one helper for the session, fed "<id> <level>" lines down a
+                pipe, because a Windows write to the guest's mmap races it
+                across the 9p boundary (playfield.py, the same rule).
+  lamps, coils  padled  (padled.h) - re-opened and read over \\wsl.localhost
+  OUT           by a poll thread (never mapped, never held open: a held
+                handle reads a frozen cache over 9p).
+
+The LCD is the game's own window: nothing to bridge. Sound is the rig's.
+
+NUMBERING, shared with PADSPIKE2.vbs and the .vpxmap.json files:
+
+    switch   1000 + <Spike 2 switch id>          switch_list.txt `id`
+    solenoid 1000 + <node> * 16 + <coil index>   device_xy coil (group->node)
+    lamp     1000 + <node> * 100 + <LED index>   led_io.txt
+
+A number below 1000 is a table's ORIGINAL number and goes through the map
+(`switch_rewrite`, `solenoids`, `lamps`), so a table can be driven with its
+script left on its old numbering while the map is being built.
+
+WHICH MAP: `Controller.GameName` names the title (`godzilla_le`), and
+`<title>.vpxmap.json` beside this file is loaded on `Run`. No map = the
+1000+ convention alone, which is enough to start.
+
+WHICH RIG: the one padpath finds - `PAD_WSL_DISTRO`, `PAD_ROOT_WSL`,
+`PAD_SLOT` when the environment carries them (the app sets them for the
+tools it launches), else the default distro's ~/spike2root, like every
+helper run by hand. Visual Pinball is started by the user, so this process
+sees the user's environment: set those three in the shell that starts VPX
+to aim at another rig.
+
+COM. One out-of-process server (pythonw.exe, LocalServer32 under HKCU):
+Visual Pinball is 64-bit and this Python need not be; the calls are
+~50 us round trips, and core.vbs makes a few hundred a second. DynamicPolicy
+answers every name, so a VPinMAME member this does not model (DIP, NVRAM,
+the DMD) is a no-op rather than a script error - the table scripts wrap
+those in On Error Resume Next anyway.
+"""
+import json
+import os
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+RIG = os.path.dirname(HERE)
+if RIG not in sys.path:
+    sys.path.insert(0, RIG)
+
+import coilmap    # noqa: E402  offsets into padled, the drive decoder
+import padpath    # noqa: E402  where the rig is
+import padsw      # noqa: E402  offsets into padsw
+
+try:
+    import pythoncom
+    from win32com.server import policy as _policy, register as _reg, util as _util
+except ImportError:            # a Linux test run; the COM half is Windows only
+    pythoncom = None
+
+
+def _anything():
+    """A COM object that takes any property (Games(...).Settings.Value(...))."""
+    return _util.wrap(_Anything(), usePolicy=_policy.DynamicPolicy)
+
+CLSID = "{7D5B2A1E-6C3F-4B8A-9E21-5A2F0C7D9B11}"
+PROGID = "PAD.Controller"
+VERSION = "03060000"            # what core.vbs compares; modulated solenoids off
+
+SW_SRC = "v"                    # padsw.h's writer tag for Visual Pinball
+POLL_S = 0.008                  # padled poll; a 9p read is ~1-3 ms
+READ_N = max(coilmap.HI_READ, coilmap.RULE_READ)   # one read takes every plane
+LAMP_ON = int(os.environ.get("PAD_VPX_LAMP_ON", "1"))   # LED level that is "lit"
+MIN_PULSE_MS = 40               # a coil pulse shorter than a poll still shows
+_CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+
+DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT = 1, 2, 4
+
+LOG = os.path.join(os.environ.get("TEMP") or os.environ.get("TMPDIR") or "/tmp",
+                   "padcontroller.log")
+
+
+def log(msg):
+    try:
+        with open(LOG, "a", encoding="utf-8") as f:
+            f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------- the map --
+
+class VpxMap:
+    """A title's .vpxmap.json, reduced to the three lookups the server makes."""
+
+    def __init__(self, title=None):
+        self.title = title
+        self.switch_rewrite = {}            # old table number -> Spike 2 id
+        self.solenoids = {}                 # number -> (node, index)
+        self.lamp_groups = {}               # number -> [(node, index), ...]
+        self.fakes = {}                     # name -> dict (switch_fakes)
+        self.game_on = None                 # (number, [coils]) "flippers armed"
+        path = os.path.join(HERE, "%s.vpxmap.json" % title) if title else None
+        if path and os.path.exists(path):
+            self.load(path)
+
+    def load(self, path):
+        m = json.load(open(path, encoding="utf-8"))
+        g = m.get("game_on") or {}
+        self.game_on = (int(g["number"]), [tuple(c) for c in g["coils"]]) if g else None
+        for k, v in m.get("switch_rewrite", {}).items():
+            if k != "_":
+                self.switch_rewrite[int(k)] = int(v)
+        for k, v in m.get("solenoids", {}).items():
+            if k != "_":
+                self.solenoids[int(k)] = tuple(v["coil"])
+        for sect in ("lamps", m.get("retrofit_lights", {}).get("lights", {})):
+            table = m.get(sect, {}) if isinstance(sect, str) else sect
+            for name, v in table.items():
+                if name == "_" or not isinstance(v, dict):
+                    continue
+                leds = [tuple(x) for x in v["leds"]]
+                self.lamp_groups[lamp_number(*leds[0])] = leds
+        self.fakes = {k: v for k, v in m.get("switch_fakes", {}).items() if k != "_"}
+
+    # -- resolution
+    def switch_id(self, n):
+        n = int(n)
+        if n >= 1000:
+            return n - 1000
+        return self.switch_rewrite.get(n, 0)
+
+    def coil(self, n):
+        n = int(n)
+        if n in self.solenoids:
+            return self.solenoids[n]
+        if n >= 1000:
+            return ((n - 1000) // 16, (n - 1000) % 16)
+        return None
+
+    def leds(self, n):
+        n = int(n)
+        if n in self.lamp_groups:
+            return self.lamp_groups[n]
+        if n >= 1000:
+            return [((n - 1000) // 100, (n - 1000) % 100)]
+        return []
+
+
+def lamp_number(node, index):
+    return 1000 + node * 100 + index
+
+
+def sol_number(node, index):
+    return 1000 + node * 16 + index
+
+
+# ---------------------------------------------------------------- the rig --
+
+BOARD = os.path.join(os.path.expanduser("~"), ".pad-rig")
+
+
+class Rig:
+    """WHERE the run is: its dump directory as Windows sees it, and how to
+    call back into its WSL.
+
+    Three answers, first one wins:
+      1. the environment (PAD_WSL_DISTRO / PAD_ROOT_WSL / PAD_SLOT), which the
+         app sets for every tool it launches;
+      2. the rig board (~/.pad-rig/slot-N.run, written by watch.sh for every
+         run): the run whose `game` is the title the table named, else the
+         only Spike 2 run up. This is how a Visual Pinball started from the
+         Start menu, with no PAD environment at all, finds the app's run;
+      3. padpath's default: the default distro's ~/spike2root.
+    """
+
+    def __init__(self, title=None):
+        self.distro = os.environ.get("PAD_WSL_DISTRO")
+        self.root = os.environ.get("PAD_ROOT_WSL")        # posix
+        self.slot = padpath.slot()
+        self.how = "environment"
+        if not self.root:
+            rec = self.board_run(title)
+            if rec:
+                self.distro = rec.get("distro") or self.distro
+                self.root = rec.get("root")
+                self.slot = rec.get("slot", 0)
+                self.how = "rig board slot %s (%s)" % (self.slot, rec.get("game"))
+        if self.root and self.distro:
+            self.dump = r"\\wsl.localhost\%s%s\dump" % (self.distro, self.root.replace("/", "\\"))
+        elif self.root:
+            self.dump = os.path.join(padpath.to_win(self.root), "dump")   # the default distro
+        else:
+            self.dump = padpath.dump() or ""
+            self.how = "padpath default"
+
+    @staticmethod
+    def board_run(title):
+        runs = []
+        try:
+            names = sorted(os.listdir(BOARD))
+        except OSError:
+            return None
+        for n in names:
+            if not (n.startswith("slot-") and n.endswith(".run")):
+                continue
+            try:
+                rec = json.load(open(os.path.join(BOARD, n), encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if rec.get("emu", "spike2") == "spike2":
+                runs.append(rec)
+        for rec in runs:
+            if title and rec.get("game") == title:
+                return rec
+        return runs[0] if len(runs) == 1 else None
+
+    def wsl_head(self):
+        head = ["wsl.exe"]
+        if self.distro:
+            head += ["-d", self.distro]
+        return head
+
+    def wsl_env(self):
+        env = ["PAD_SW_SRC=%s" % SW_SRC]
+        if self.root:
+            env.append("PAD_ROOT=%s" % self.root)
+        if self.slot:
+            env.append("PAD_SLOT=%d" % int(self.slot))
+        if os.environ.get("PAD_SW_FILE"):
+            env.append("PAD_SW_FILE=%s" % os.environ["PAD_SW_FILE"])
+        return env
+
+    def led_path(self):
+        return os.path.join(self.dump, "padled")
+
+    def sw_path(self):
+        return os.environ.get("PAD_SW_FILE") or os.path.join(self.dump, "padsw")
+
+    def ballfeed_off_path(self):
+        """ballfeed.py answers the game's trough eject on a rig run; while a
+        table's own trough does, this file (in the run's dump dir) stops it."""
+        return os.path.join(self.dump, "ballfeed.off")
+
+    def switch_ids(self, title):
+        """{(node, bit): id} from the title's switch_list.txt, the rig's own
+        reading of the game's switch table (empty when the run has none)."""
+        out = {}
+        path = os.path.join(self.dump, "tables", title or "", "switch_list.txt")
+        try:
+            for line in open(path, encoding="utf-8", errors="replace"):
+                p = line.split()
+                if len(p) >= 5 and p[0].isdigit():
+                    out[(int(p[2]), int(p[3]))] = int(p[0])
+        except OSError:
+            pass
+        return out
+
+
+def read_block(path, n):
+    """One fresh read of `n` bytes, or None (no run, or a 9p hiccup)."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(n)
+    except OSError:
+        return None
+
+
+class SwitchPipe:
+    """The session's swkeys.py, fed "<id> <level>" lines (playfield.py's
+    KeyWriter, minus the per-action fallback: VPX has no mouse to wait on)."""
+
+    def __init__(self, rig):
+        self.rig = rig
+        self._p = None
+        self._failed = 0
+        self.held = {}
+
+    def _ensure(self):
+        if self._p is not None and self._p.poll() is None:
+            return True
+        if self._failed >= 2:
+            return False
+        try:
+            if sys.platform == "win32":
+                cmd = (self.rig.wsl_head() + ["-e", "env"] + self.rig.wsl_env()
+                       + ["python3", "%s/swkeys.py" % padpath.to_wsl(RIG)])
+            else:
+                cmd = ["python3", os.path.join(RIG, "swkeys.py")]
+            self._p = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                       stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL,
+                                       creationflags=_CREATE_NO_WINDOW)
+            log("swkeys up: %s" % " ".join(cmd))
+            return True
+        except Exception as exc:                            # noqa: BLE001
+            self._failed += 1
+            self._p = None
+            log("swkeys spawn failed: %s" % exc)
+            return False
+
+    def set(self, sw, level):
+        level = 1 if level else 0
+        if self.held.get(sw) == level:
+            return True
+        self.held[sw] = level
+        return self._send(b"%d %d\n" % (sw, level))
+
+    def pause(self):
+        return self._send(b"pause\n")
+
+    def _send(self, line):
+        if not self._ensure():
+            return False
+        try:
+            self._p.stdin.write(line)
+            self._p.stdin.flush()
+            return True
+        except Exception as exc:                            # noqa: BLE001
+            self._failed += 1
+            self._p = None
+            log("swkeys write failed: %s" % exc)
+            return False
+
+    def close(self):
+        try:
+            if self._p is not None and self._p.poll() is None:
+                self._p.stdin.close()          # EOF: the helper releases all
+                self._p.wait(timeout=3)
+        except Exception:                                   # noqa: BLE001
+            pass
+        self._p = None
+        self.held.clear()
+
+
+# ---------------------------------------------------------------- the bridge
+
+class Bridge:
+    """Everything that is not COM: the poll thread, the state, the pipe.
+    Testable on its own (see --selftest and tests/test_vpx_bridge.py)."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.map = VpxMap()
+        self.title = ""
+        self.rig = None
+        self.pipe = None
+        self.running = False
+        self.paused = False
+        self._thread = None
+        # lamps: number -> 0/1, as last published; pending: numbers changed
+        self.lamp_state = {}
+        self.lamp_pending = set()
+        # solenoids: number -> 0/1; pending likewise
+        self.sol_state = {}
+        self.sol_pending = set()
+        self._coil_seen = {}               # (node, idx) -> (fires, until)
+        self._coil_off_at = {}             # (node, idx) -> monotonic s
+        self.sw_ids = {}                   # (node, input bit) -> switch id
+        self.mrg = bytes(padsw.MAX_ID)     # the guest's merged switch truth
+        self.polls = 0
+        self.poll_fail = 0
+        self.last_poll_ms = 0.0
+        self._fake = {}                    # name -> state for switch_fakes
+
+    # -- lifecycle
+    def set_game(self, title):
+        self.title = title
+        self.map = VpxMap(title)
+        log("game %s: map switches=%d solenoids=%d lamp groups=%d"
+            % (title, len(self.map.switch_rewrite), len(self.map.solenoids),
+               len(self.map.lamp_groups)))
+
+    def run(self):
+        self.rig = Rig(self.title)
+        self.pipe = SwitchPipe(self.rig)
+        log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
+        data = read_block(self.rig.led_path(), READ_N)
+        if not data or not coilmap.has_magic(data):
+            raise RuntimeError("no Spike 2 run is up (no %s)" % self.rig.led_path())
+        self.sw_ids = self.rig.switch_ids(self.title)
+        log("switch table: %d ids; padled version %d"
+            % (len(self.sw_ids), struct.unpack_from("<I", data, 4)[0]))
+        for name, f in self.map.fakes.items():
+            self._fake[name] = {"open": 0}
+            self.pipe.set(f["closed"], 1)
+            self.pipe.set(f["open"], 0)
+        try:
+            open(self.rig.ballfeed_off_path(), "w").write("PAD.Controller\n")
+        except OSError as exc:
+            log("ballfeed.off not written: %s" % exc)
+        self.running = True
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._thread.start()
+        log("run")
+
+    def stop(self):
+        self.running = False
+        if self._thread:
+            self._thread.join(timeout=2)
+            self._thread = None
+        if self.pipe:
+            self.pipe.close()
+        if self.rig:
+            try:
+                os.remove(self.rig.ballfeed_off_path())
+            except OSError:
+                pass
+        log("stop after %d polls (%d failed)" % (self.polls, self.poll_fail))
+
+    def set_pause(self, want):
+        want = bool(want)
+        if want != self.paused and self.pipe:
+            self.paused = want
+            self.pipe.pause()
+
+    # -- switches
+    def set_switch(self, n, level):
+        sid = self.map.switch_id(n)
+        if 0 < sid < padsw.MAX_ID and self.pipe:
+            self.pipe.set(sid, level)
+
+    def get_switch(self, n):
+        sid = self.map.switch_id(n)
+        if sid <= 0:
+            return False
+        if self.pipe and sid in self.pipe.held:
+            return bool(self.pipe.held[sid])
+        return bool(self.mrg[sid]) if sid < len(self.mrg) else False
+
+    # -- the poll
+    def _poll_loop(self):
+        while self.running:
+            t0 = time.monotonic()
+            self._poll_once()
+            self.last_poll_ms = (time.monotonic() - t0) * 1000.0
+            time.sleep(POLL_S)
+
+    def _poll_once(self):
+        data = read_block(self.rig.led_path(), READ_N)
+        if not data or len(data) < coilmap.DRIVE_READ or not coilmap.has_magic(data):
+            self.poll_fail += 1
+            return
+        self.polls += 1
+        sw = read_block(self.rig.sw_path(), padsw.OFF_MRG + padsw.MAX_ID)
+        now = time.monotonic()
+        with self.lock:
+            if sw and len(sw) >= padsw.OFF_MRG + padsw.MAX_ID:
+                self.mrg = sw[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+            self._poll_lamps(data)
+            self._poll_coils(data, now)
+
+    @staticmethod
+    def _led_level(data, node, idx):
+        """One LED's level: val[] for channels 0..95, the hi plane past that
+        (coilmap.hi_level is the same arithmetic; inlined for the poll)."""
+        if idx < 96:
+            return data[20 + node * 96 + idx]
+        if idx < 96 + coilmap.HI_IDX and len(data) >= coilmap.HI_READ:
+            return data[coilmap.HI_OFF + node * coilmap.HI_IDX + idx - 96]
+        return 0
+
+    def _poll_lamps(self, data):
+        # mapped groups first, then every LED any table might name directly
+        for n, leds in self.map.lamp_groups.items():
+            level = max(self._led_level(data, nd, ix) for nd, ix in leds)
+            self._lamp_set(n, 1 if level >= LAMP_ON else 0)
+        for node in range(16):
+            base = 20 + node * 96
+            for idx in range(96):
+                n = lamp_number(node, idx)
+                if n in self.map.lamp_groups:
+                    continue
+                self._lamp_set(n, 1 if data[base + idx] >= LAMP_ON else 0)
+
+    def _lamp_set(self, n, on):
+        if self.lamp_state.get(n) != on:
+            self.lamp_state[n] = on
+            self.lamp_pending.add(n)
+
+    def _poll_coils(self, data, now):
+        fires = struct.unpack_from("<I", data, coilmap.DRIVE_FIRES_OFF)[0]
+        for node in range(16):
+            for idx in range(16):
+                key = (node, idx)
+                count = data[coilmap.COIL_OFF + node * 16 + idx]
+                d = coilmap.drive(data, node, idx)
+                until = d["until"] if d else 0
+                seen = self._coil_seen.get(key)
+                on = self.sol_state.get(self._sol_num(key), 0)
+                if seen is None:
+                    self._coil_seen[key] = (count, until)
+                    continue
+                if count != seen[0] or (until and until != seen[1]):
+                    # a fire landed: on for the command's pulse + hold
+                    length = (d["pulse_ms"] + d["hold_ms"]) if d else 0
+                    self._coil_off_at[key] = now + max(length, MIN_PULSE_MS) / 1000.0
+                    on = 1
+                elif until == 0 and seen[1] != 0:
+                    on = 0                           # an OFF (cmd 4d) landed
+                elif on and now >= self._coil_off_at.get(key, 0):
+                    on = 0
+                self._coil_seen[key] = (count, until)
+                # A BOARD-FIRED COIL (padled v7): the game installed a rule
+                # naming the input that fires it, and the board does the rest
+                # - flippers, slingshots, pop bumpers. Nothing crosses the bus
+                # per flip, so the coil is ON exactly while that switch is made
+                # and the rule is live; the switch is one this bridge wrote.
+                r = coilmap.rule(data, node, idx)
+                if r and r["power"] and r["input"] is not None:
+                    sid = self.sw_ids.get((node, r["input"]))
+                    if sid:
+                        made = (self.pipe.held.get(sid) if self.pipe and sid in self.pipe.held
+                                else (self.mrg[sid] if sid < len(self.mrg) else 0))
+                        if made:
+                            on = 1
+                        elif self._coil_off_at.get(key, 0) <= now:
+                            on = 0
+                self._sol_set(self._sol_num(key), on)
+        if self.map.game_on:
+            num, coils = self.map.game_on
+            armed = 0
+            for node, idx in coils:
+                r = coilmap.rule(data, node, idx)
+                if r and r["power"]:
+                    armed = 1
+            self._sol_set(num, armed)
+        self._fakes_tick(now)
+        self._fires = fires
+
+    def _sol_num(self, key):
+        node, idx = key
+        for n, coil in self.map.solenoids.items():
+            if coil == key:
+                return n
+        return sol_number(node, idx)
+
+    def _sol_set(self, n, on):
+        if self.sol_state.get(n) != on:
+            self.sol_state[n] = on
+            self.sol_pending.add(n)
+
+    def _fakes_tick(self, now):
+        """A motor the table has no object for: when its coil fires, the end
+        stop it leaves opens at once and the other closes `travel_ms` later
+        (the same answer hwshim gives a node-board motor, PAD-237)."""
+        for name, f in self.map.fakes.items():
+            st = self._fake.setdefault(name, {"open": 0})
+            n = self._sol_num(tuple(f["coil"]))
+            if self.sol_state.get(n) and not st.get("moving"):
+                st["moving"] = now + f.get("travel_ms", 400) / 1000.0
+                self.pipe.set(f["open" if st["open"] else "closed"], 0)
+            if st.get("moving") and now >= st["moving"]:
+                st["moving"] = None
+                st["open"] = 0 if st["open"] else 1
+                self.pipe.set(f["open" if st["open"] else "closed"], 1)
+
+    # -- what core.vbs asks
+    def changed_lamps(self):
+        with self.lock:
+            if not self.lamp_pending:
+                return None
+            out = [[n, self.lamp_state[n]] for n in sorted(self.lamp_pending)]
+            self.lamp_pending.clear()
+        return out
+
+    def changed_solenoids(self):
+        with self.lock:
+            if not self.sol_pending:
+                return None
+            out = [[n, self.sol_state[n]] for n in sorted(self.sol_pending)]
+            self.sol_pending.clear()
+        return out
+
+    def lamp(self, n):
+        with self.lock:
+            return bool(self.lamp_state.get(int(n), 0))
+
+    def solenoid(self, n):
+        with self.lock:
+            return bool(self.sol_state.get(int(n), 0))
+
+    def status(self):
+        return {"title": self.title, "running": self.running, "polls": self.polls,
+                "poll_fail": self.poll_fail, "last_poll_ms": round(self.last_poll_ms, 2),
+                "rig": self.rig.how if self.rig else None,
+                "held": dict(self.pipe.held) if self.pipe else {},
+                "lamps_on": sum(self.lamp_state.values()),
+                "sols_on": [n for n, v in self.sol_state.items() if v]}
+
+
+# ---------------------------------------------------------------- COM ------
+
+class _Anything:
+    """Controller.Games(name).Settings.Value("volume") and friends: a thing
+    that accepts any property and answers 0."""
+
+    _public_methods_ = []
+    _reg_policy_spec_ = "DynamicPolicy"
+
+    def _dynamic_(self, name, lcid, wFlags, args):
+        if wFlags & DISPATCH_PROPERTYPUT:
+            return None
+        if name.lower() in ("settings", "games"):
+            return _anything()
+        return 0
+
+
+class PadController:
+    _reg_clsid_ = CLSID
+    _reg_progid_ = PROGID
+    _reg_desc_ = "PAD Spike 2 emulator controller for Visual Pinball"
+    _reg_policy_spec_ = "DynamicPolicy"
+    # no _reg_class_spec_: with it set, pywin32 writes no PythonCOMPath and
+    # the COM-launched pythonw.exe cannot import this module ("Unspecified
+    # error" at CreateObject); without it, it derives both from this file.
+    _public_methods_ = []
+    if pythoncom:
+        _reg_clsctx_ = pythoncom.CLSCTX_LOCAL_SERVER
+
+    def __init__(self):
+        self.bridge = Bridge()
+        self.props = {}
+        log("PAD.Controller created")
+
+    def _dynamic_(self, name, lcid, wFlags, args):
+        b = self.bridge
+        key = name.lower()
+        try:
+            if wFlags & DISPATCH_PROPERTYPUT:
+                return self._put(key, args)
+            return self._get(key, args)
+        except Exception as exc:                            # noqa: BLE001
+            log("%s%r failed: %s" % (name, tuple(args), exc))
+            raise
+
+    def _put(self, key, args):
+        b = self.bridge
+        if key == "switch":
+            b.set_switch(args[0], args[1])
+        elif key == "gamename":
+            b.set_game(str(args[0]))
+        elif key == "pause":
+            b.set_pause(args[0])
+        elif key == "lamp" or key == "solenoid" or key == "solmask":
+            pass
+        else:
+            self.props[key] = args[-1]
+        return None
+
+    def _get(self, key, args):
+        b = self.bridge
+        # "nothing changed" is VBScript's Empty (IsEmpty), which pywin32 maps
+        # from pythoncom.Empty; a bare None would arrive as Null and fail
+        # core.vbs's IsEmpty() test.
+        empty = pythoncom.Empty if pythoncom else None
+        if key == "switch":
+            return b.get_switch(args[0])
+        if key == "changedlamps":
+            chg = b.changed_lamps()
+            return empty if chg is None else chg
+        if key == "changedsolenoids":
+            chg = b.changed_solenoids()
+            return empty if chg is None else chg
+        if key in ("changedgistrings", "changedleds", "changedpdleds", "changednvram",
+                   "rawdmdpixels", "rawdmdcoloredpixels", "nvram"):
+            return empty
+        if key == "lamp":
+            return b.lamp(args[0])
+        if key == "solenoid":
+            return b.solenoid(args[0])
+        if key == "run":
+            b.run()
+            return None
+        if key == "stop":
+            b.stop()
+            return None
+        if key == "pause":
+            return b.paused
+        if key == "running":
+            return b.running
+        if key == "version":
+            return VERSION
+        if key == "gamename":
+            return b.title
+        if key in ("romname",):
+            return b.title
+        if key in ("games", "settings"):
+            return _anything()
+        if key in ("getmech", "mech", "dip", "solmask", "rawdmdwidth", "rawdmdheight",
+                   "timefence"):
+            return 0
+        if key == "padstatus":
+            return json.dumps(b.status())
+        return self.props.get(key, 0)
+
+
+# ---------------------------------------------------------------- CLI ------
+
+def status():
+    rig = Rig()
+    print("rig: %s -> %s" % (rig.how, rig.dump))
+    data = read_block(rig.led_path(), coilmap.HI_READ)
+    print("padled:", "up (version %d)" % struct.unpack_from("<I", data, 4)[0]
+          if data and coilmap.has_magic(data) else "no run")
+    for f in sorted(os.listdir(HERE)):
+        if f.endswith(".vpxmap.json"):
+            m = VpxMap(f[:-len(".vpxmap.json")])
+            print("map %s: %d switch rewrites, %d solenoids, %d lamp groups, fakes %s"
+                  % (m.title, len(m.switch_rewrite), len(m.solenoids),
+                     len(m.lamp_groups), sorted(m.fakes)))
+    print("log:", LOG)
+
+
+def selftest():
+    import win32com.client
+    c = win32com.client.Dispatch(PROGID)
+    c.GameName = "godzilla_le"
+    print("Version", c.Version, "GameName", c.GameName)
+    c.Run(0)
+    time.sleep(0.5)
+    print("status", c.PadStatus)
+    c.Switch(1060, 1)              # left flipper button
+    time.sleep(0.3)
+    c.Switch(1060, 0)
+    chg = c.ChangedSolenoids
+    print("ChangedSolenoids", chg if chg is None else [list(r) for r in chg][:8])
+    chg = c.ChangedLamps
+    print("ChangedLamps", "none" if chg is None else "%d entries" % len(chg))
+    print("status", c.PadStatus)
+    c.Stop()
+
+
+def main(argv):
+    if "--status" in argv:
+        status()
+        return 0
+    if "--selftest" in argv:
+        selftest()
+        return 0
+    if "--register" in argv or "--unregister" in argv:
+        # UseCommandLine reads --register / --unregister off sys.argv itself;
+        # addnPath lands in the registry as PythonCOMPath, which is how the
+        # COM-launched pythonw.exe finds this module.
+        _reg.UseCommandLine(PadController, addnPath=HERE)
+        return 0
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

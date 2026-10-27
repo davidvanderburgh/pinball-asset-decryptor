@@ -11886,6 +11886,15 @@ struct padled_shm {
     /* Version 6 (PAD-500), a strip board's channels past its first 96 - the
      * twin of padled.h, which carries the meaning; keep the two in step. */
     unsigned char hi[16][4 * 96];
+    /* PAD-658's paint plane is the MODE RUNTIME's (pad_mode_runtime.c), never
+     * this shim's; it sits here only so the version-7 fields below land where
+     * padled.h says they do (paint_magic 13500). */
+    unsigned paint_magic, paint_gen;
+    unsigned char paint[256][8];
+    /* Version 7 (PAD-775), each coil's firing rule (cmd 41: power, and the
+     * input the board fires it from) - the twin of padled.h; keep in step. */
+    unsigned char rule_pwr[16][16], rule_in[16][16];
+    unsigned rule_sets;
 };
 #define PADLED_MAGIC 0x44454c50u
 
@@ -11970,10 +11979,11 @@ static void led_map(void)
     led_shm = (struct padled_shm *)m;
     led_shm->magic = PADLED_MAGIC;
     /* 4 adds the addressed plane, 5 the coil drive block (PAD-381), 6 the
-     * strip boards' banks past the first (PAD-500); see padled.h. A reader
-     * tells them apart by this number, so it must not claim one over a
-     * mapping too small to hold it: 4 and 5 fit in two pages, 6 needs four. */
-    led_shm->version = (led_shm_len >= 16384) ? 6 : (led_shm_len >= 8192) ? 5 : 3;
+     * strip boards' banks past the first (PAD-500), 7 each coil's firing rule
+     * (PAD-775); see padled.h. A reader tells them apart by this number, so
+     * it must not claim one over a mapping too small to hold it: 4 and 5 fit
+     * in two pages, 6 and 7 need four. */
+    led_shm->version = (led_shm_len >= 16384) ? 7 : (led_shm_len >= 8192) ? 5 : 3;
 }
 
 /* ★ A BANKED STRIP FRAME'S LEVELS, INTO VERSION 6's `hi` PLANE (PAD-500).
@@ -14015,6 +14025,34 @@ static void coil_drive_note(const unsigned char *p, int n)
     logmsg(line);
 }
 
+/* ---- PAD-775: A COIL'S RULE, PUBLISHED (padled v7) ----
+ *
+ * cmd 41 hands a board the rule a coil fires by - byte 4 its power, byte 26
+ * the INPUT whose closing fires it (0x40 | input; coil_motor_note() reads
+ * byte 30, the input that STOPS a motor, from the same frame). Flippers,
+ * slingshots and pop bumpers are fired by the BOARD from their own switch
+ * under such a rule, and the game sends nothing per flip - so a reader that
+ * plays a board for a playfield the rig does not draw (vpx/padcontroller.py)
+ * learns here that the coil is live and which switch drives it. A cleared
+ * rule carries power 0. Same frame check as coil_drive_decode(): shape and
+ * checksum, so a stray frame never arms a coil. */
+static void coil_rule_note(const unsigned char *p, int n)
+{
+    unsigned s = 0, node, idx;
+    int i;
+    if (n < 31 || !(p[0] & 0x80) || p[2] != 0x41 || n != (int)p[1] + 3) return;
+    for (i = 0; i < n - 1; i++) s += p[i];
+    if (s & 0xff) return;
+    node = (unsigned)p[0] & 0x3f;
+    idx = p[3];
+    if (node >= 16 || idx >= 16) return;
+    led_map();
+    if (!led_shm || led_shm_len < 16384) return;
+    led_shm->rule_pwr[node][idx] = p[4];
+    led_shm->rule_in[node][idx] = p[26];
+    led_shm->rule_sets++;
+}
+
 static void nb_log(const char *dir, const unsigned char *p, int n, unsigned long want)
 {
     char line[HEXBUF + 128], h[HEXBUF];
@@ -15160,6 +15198,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         led_publish(nb_req, nb_req_len);
         coil_publish(nb_req, nb_req_len);
         coil_drive_note(nb_req, nb_req_len);    /* PAD-381 */
+        coil_rule_note(nb_req, nb_req_len);     /* PAD-775 */
         motor_note(nb_req, nb_req_len);
         coil_motor_note(nb_req, nb_req_len);    /* PAD-256 */
         stepper_note(nb_req, nb_req_len);       /* PAD-393 */

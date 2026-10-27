@@ -45,7 +45,7 @@
 #define PADLED_H
 
 #define PADLED_MAGIC   0x44454c50u      /* 'PLED' */
-#define PADLED_VERSION 6
+#define PADLED_VERSION 7
 
 /* Node ids run to 14 and index to 95, so a flat [16][96] covers every board
  * with room to spare and needs no per-node base to get wrong. */
@@ -178,6 +178,22 @@ struct padled_shm {
     unsigned paint_magic;
     unsigned paint_gen;
     unsigned char paint[256][8];
+    /* VERSION 7 (PAD-775): A COIL'S RULE. The game hands a board each coil's
+     * firing rule once (cmd 41: power, times, and in byte 26 the INPUT whose
+     * closing fires it, 0x40 | input) and from then on the BOARD fires the
+     * flippers, slingshots and pop bumpers from their own switches - the game
+     * sends nothing per flip (the short cmd 40 is a one-off "run it now",
+     * drive_rule_fires above). So a reader that plays the board for a
+     * playfield of its own - vpx/padcontroller.py, for a Visual Pinball
+     * table - needs the rule: `rule_pwr` non-zero says the coil is live (a
+     * cleared rule is `41 <coil> 00 ...`), `rule_in` says which input drives
+     * it. Written by coil_rule_note() on every cmd 41, so the game arming its
+     * flippers at ball start and disarming them at game over is visible.
+     * Offsets for a Python reader: rule_pwr 15556, rule_in 15812,
+     * rule_sets 16068 (coilmap.RULE_*). */
+    unsigned char rule_pwr[PADLED_NODES][PADLED_COILS];
+    unsigned char rule_in[PADLED_NODES][PADLED_COILS];
+    unsigned rule_sets;           /* cmd 41 frames published, ever         */
 };
 
 #endif

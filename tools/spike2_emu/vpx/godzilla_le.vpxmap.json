@@ -1,0 +1,183 @@
+{
+  "_": [
+    "godzilla_le on marty02's 'Godzilla Limited Edition' v2.6 (VPUniverse 8449):",
+    "a Stern-layout playfield whose rules were Sega's 1998 ROM. This map is what",
+    "patch_godzilla.py applies to its script, and what padcontroller.py serves.",
+    "Numbers: switch 1000+id (switch_list.txt), solenoid 1000+node*16+index,",
+    "lamp 1000+node*100+index (led_io.txt). Positions: VP units, 952 x 2362,",
+    "from the drawing's 313 x 710 by vp_x = 3.121*x - 18.9, vp_y = 3.474*y + 5.3."
+  ],
+  "title": "godzilla_le",
+  "game_on": {
+    "_": "a synthetic solenoid for core.vbs's GameOnSolenoid (UseSolenoids=2, fast flips): ON while the flipper coils' board rules are armed",
+    "number": 1999, "coils": [[8, 5], [8, 0]]
+  },
+  "cabinet": {
+    "start": 1036, "launch": 1034, "tilt": 1038, "slam": 1045,
+    "left_flipper": 1060, "right_flipper": 1059, "up_left_flipper": 1061,
+    "coin_door_interlock": 1033
+  },
+
+  "switch_rewrite": {
+    "_": "the table's old Sega number -> Spike 2 switch id (0 = no Stern switch: the edge is dropped)",
+    "16": 62, "53": 34, "17": 78, "18": 79, "19": 80, "20": 48, "21": 88, "22": 50,
+    "23": 0, "24": 0, "26": 0, "28": 82, "29": 89, "30": 89, "31": 90, "32": 91,
+    "33": 76, "41": 0, "42": 75, "43": 77, "44": 83, "45": 0, "46": 46, "47": 73,
+    "48": 84, "57": 55, "58": 56, "60": 58, "61": 57
+  },
+  "switch_by_object": {
+    "_": "edges the table script pulses by object, where the old number was shared or wrong",
+    "LeftSlingShot_Slingshot": 64, "RightSlingShot_Slingshot": 63,
+    "sw62_Spin": 85, "sw63_Spin": 47, "Bumper2_Hit": 49,
+    "Gate4_Hit": 51, "Tflash_hit": 74, "K2_hit": 81
+  },
+  "switch_holds": {
+    "_": "switches held while a ball sits somewhere (cvpmBallStack serves them)",
+    "trough": [71, 70, 69, 68, 67, 66, 72],
+    "right_scoop": 53,
+    "building_hit": 77,
+    "building_exit": 75
+  },
+  "switch_fakes": {
+    "_": "mechs the table has no object for: the controller answers them itself",
+    "shield_motor": {"coil": [9, 2], "open": 86, "closed": 87, "travel_ms": 400}
+  },
+
+  "solenoids": {
+    "_": "Spike 2 coil [node, index] -> what the table script does; the number is 1000+node*16+index",
+    "1128": {"coil": [8, 0], "name": "RIGHT FLIPPER", "callback": "SolRFlipper"},
+    "1129": {"coil": [8, 1], "name": "TROUGH", "callback": "SolRelease"},
+    "1130": {"coil": [8, 2], "name": "RIGHT SLINGSHOT", "callback": null},
+    "1131": {"coil": [8, 3], "name": "LEFT SLINGSHOT", "callback": null},
+    "1132": {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "Auto_Plunger"},
+    "1133": {"coil": [8, 5], "name": "LEFT FLIPPER", "callback": "SolLFlipper"},
+    "1134": {"coil": [8, 6], "name": "UP LEFT FLIP", "callback": "SolULFlipper"},
+    "1135": {"coil": [8, 7], "name": "POP BUMPER", "callback": null},
+    "1136": {"coil": [8, 8], "name": "RIGHT SCOOP", "callback": "bsScoop.ExitSol_On"},
+    "1145": {"coil": [9, 1], "name": "VUK", "callback": null},
+    "1146": {"coil": [9, 2], "name": "SHIELD MOTOR", "callback": null},
+    "1147": {"coil": [9, 3], "name": "BRIDGE", "callback": "SolRampDiverter"},
+    "1150": {"coil": [9, 6], "name": "GODZILLA MAGNET", "magnet": "mMagnaSave2"},
+    "1151": {"coil": [9, 7], "name": "MECHAGODZILLA MAGNET", "magnet": "mMechaMagnet"}
+  },
+
+  "lamps": {
+    "_": "table light -> Spike 2 LEDs [node, index] (several = an RGB insert: lit when any is)",
+    "L1":   {"leds": [[9, 39]], "name": "TANKS"},
+    "L2":   {"leds": [[9, 8]],  "name": "KAIJU"},
+    "L3":   {"leds": [[9, 48], [9, 49], [9, 50]], "name": "LEFT RAMP"},
+    "L4":   {"leds": [[9, 9]],  "name": "BRIDGE"},
+    "L5":   {"leds": [[9, 10]], "name": "POWER"},
+    "L6":   {"leds": [[8, 47]], "name": "ANGUIRUS"},
+    "L9":   {"leds": [[9, 30]], "name": "NY"},
+    "L10":  {"leds": [[9, 38]], "name": "LONDON"},
+    "L11":  {"leds": [[9, 15]], "name": "PARIS"},
+    "L12":  {"leds": [[9, 16]], "name": "TOKYO"},
+    "L14":  {"leds": [[9, 71]], "name": "LITE DESTRUCTION JACKPOT"},
+    "L15":  {"leds": [[9, 43]], "name": "TANK 3"},
+    "L16":  {"leds": [[9, 27]], "name": "MECHA WIZ"},
+    "L17":  {"leds": [[9, 42]], "name": "ATTACK BRIDGE"},
+    "L18":  {"leds": [[8, 63]], "name": "MASER READY"},
+    "L19":  {"leds": [[9, 41]], "name": "ADV TRAIN"},
+    "L20":  {"leds": [[9, 20]], "name": "TANK 5"},
+    "L21":  {"leds": [[8, 27]], "name": "MOTHRA"},
+    "L22":  {"leds": [[8, 55]], "name": "TANK 1"},
+    "L23":  {"leds": [[9, 47]], "name": "SKILL SHOT"},
+    "L24":  {"leds": [[9, 66]], "name": "TANK 4"},
+    "L25":  {"leds": [[9, 79]], "name": "POWERLINE LEFT"},
+    "L26":  {"leds": [[9, 70]], "name": "POWERLINE CENTER"},
+    "L27":  {"leds": [[9, 21]], "name": "POWERLINE RIGHT"},
+    "L28a": {"leds": [[8, 62]], "name": "MASER"},
+    "L29":  {"leds": [[8, 37], [8, 38], [8, 39]], "name": "SHIELD RIGHT"},
+    "L30":  {"leds": [[8, 24], [8, 25], [8, 26]], "name": "MECHA LANE"},
+    "L31":  {"leds": [[8, 56], [8, 57], [8, 58]], "name": "LEFT SPINNER"},
+    "L32":  {"leds": [[8, 21]], "name": "SELECT CITY"},
+    "L32a": {"leds": [[8, 22]], "name": "TANK 6"},
+    "L33":  {"leds": [[9, 86], [9, 87]], "name": "BUILDING FIRE LEFT 1"},
+    "L34":  {"leds": [[9, 72], [9, 73]], "name": "BUILDING FIRE LEFT 2"},
+    "L35":  {"leds": [[9, 74], [9, 75]], "name": "BUILDING FIRE LEFT 3"},
+    "L36":  {"leds": [[9, 84], [9, 85]], "name": "BUILDING FIRE RIGHT 1"},
+    "L37":  {"leds": [[9, 82], [9, 83]], "name": "BUILDING FIRE RIGHT 2"},
+    "L38":  {"leds": [[9, 80], [9, 81]], "name": "BUILDING FIRE RIGHT 3"},
+    "L39":  {"leds": [[9, 26]], "name": "PLANET X"},
+    "L44":  {"leds": [[8, 31], [8, 32], [8, 33]], "name": "SHIELD LEFT"},
+    "L45a": {"leds": [[8, 17], [8, 18], [8, 19]], "name": "BOTTOM SAUCER"},
+    "L46a": {"leds": [[8, 28], [8, 29], [8, 30]], "name": "TOP SAUCER"},
+    "L49":  {"leds": [[8, 7]],  "name": "LEFT OUTLANE"},
+    "L50":  {"leds": [[8, 6]],  "name": "LEFT RETURN LANE"},
+    "L51":  {"leds": [[8, 4]],  "name": "RIGHT RETURN LANE"},
+    "L52":  {"leds": [[8, 5]],  "name": "RIGHT OUTLANE"},
+    "L53":  {"leds": [[9, 28]], "name": "KING OF THE MONSTERS WIZ"},
+    "L54":  {"leds": [[8, 41]], "name": "RODAN"},
+    "L55":  {"leds": [[9, 31], [9, 32], [9, 33]], "name": "BIG LOOP"},
+    "L56":  {"leds": [[9, 29]], "name": "MONSTER ZERO WIZ"},
+    "S107": {"leds": [[9, 40]], "name": "TANK 2"},
+    "S125b": {"leds": [[9, 22]], "name": "HEAT RAY L1"},
+    "S125a": {"leds": [[9, 23]], "name": "HEAT RAY L2"},
+    "S125":  {"leds": [[9, 24]], "name": "HEAT RAY L3"},
+    "S125c": {"leds": [[9, 25]], "name": "HEAT RAY"},
+    "S129": {"leds": [[9, 62]], "name": "TESLA STRIKE"},
+    "S126": {"leds": [[9, 54], [9, 63]], "name": "BACKPANEL LEFT FLASH + L CENT"},
+    "S132": {"leds": [[9, 14], [9, 64], [9, 59]], "name": "BACKPANEL RIGHT FLASH + R CENT + MOTHRA FLASH"}
+  },
+
+  "retrofit_lights": {
+    "_": "Stern inserts with no table light: a new Light cloned from `clone`, placed at [x, y]",
+    "clone": "L21",
+    "lights": {
+      "PL_SAUCER":        {"leds": [[8, 8]],  "at": [683, 1568]},
+      "PL_FIGHTER_R1":    {"leds": [[8, 9]],  "at": [727, 1912]},
+      "PL_FIGHTER_R2":    {"leds": [[8, 10]], "at": [690, 1944]},
+      "PL_FIGHTER_R3":    {"leds": [[8, 11]], "at": [652, 1971]},
+      "PL_ADV_FIGHTER_R": {"leds": [[8, 12]], "at": [683, 1871]},
+      "PL_SCOOP_MECHA":   {"leds": [[8, 13]], "at": [790, 1176]},
+      "PL_SCOOP_BB":      {"leds": [[8, 14], [8, 15], [8, 16]], "at": [774, 1207]},
+      "PL_ATTACK_MECHA":  {"leds": [[8, 23]], "at": [605, 1329]},
+      "PL_SHIELD_CENTER": {"leds": [[8, 34], [8, 35], [8, 36]], "at": [602, 1207]},
+      "PL_POP_BUMPER":    {"leds": [[8, 42], [8, 43], [8, 44]], "at": [765, 1440]},
+      "PL_MASER_FIRE":    {"leds": [[8, 48]], "at": [265, 1527]},
+      "PL_FIGHTER_L1":    {"leds": [[8, 49]], "at": [159, 1912]},
+      "PL_FIGHTER_L2":    {"leds": [[8, 50]], "at": [196, 1944]},
+      "PL_FIGHTER_L3":    {"leds": [[8, 51]], "at": [231, 1971]},
+      "PL_ADV_FIGHTER_L": {"leds": [[8, 52]], "at": [196, 1871]},
+      "PL_ADV_RAMPAGE":   {"leds": [[8, 54]], "at": [221, 1412]},
+      "PL_MASER_FLASH":   {"leds": [[8, 59]], "at": [75, 1353]},
+      "PL_BUILDING_SPOT": {"leds": [[8, 60]], "at": [159, 1332]},
+      "PL_RIGHT_RAMP":    {"leds": [[9, 17], [9, 18], [9, 19]], "at": [602, 662]},
+      "PL_DESTRUCTION_JP": {"leds": [[9, 34]], "at": [512, 954]},
+      "PL_TAIL_WHIP":     {"leds": [[9, 35]], "at": [530, 1037]},
+      "PL_GLOBE_FLASH":   {"leds": [[9, 36]], "at": [877, 721]},
+      "PL_MAGNA_GRAB":    {"leds": [[9, 44]], "at": [259, 908]},
+      "PL_GODZILLA_SPOT": {"leds": [[9, 55]], "at": [84, 717]},
+      "PL_TOP_SPINNER_FLASH": {"leds": [[9, 60]], "at": [518, 353]},
+      "PL_TOP_SPINNER":   {"leds": [[9, 67], [9, 68], [9, 69]], "at": [496, 724]},
+      "PL_BUILDING":      {"leds": [[9, 76], [9, 77], [9, 78]], "at": [365, 707]},
+      "PL_BB_L_BASH":     {"leds": [[9, 51]], "at": [150, 40]},
+      "PL_BB_L_BATTLE":   {"leds": [[9, 52]], "at": [200, 40]},
+      "PL_BB_L_BRIDGE":   {"leds": [[9, 53]], "at": [250, 40]},
+      "PL_BB_C_LOCK1":    {"leds": [[9, 56]], "at": [420, 40]},
+      "PL_BB_C_LOCK2":    {"leds": [[9, 57]], "at": [470, 40]},
+      "PL_BB_C_MB_READY": {"leds": [[9, 58]], "at": [520, 40]},
+      "PL_BB_R_BASH":     {"leds": [[9, 11]], "at": [700, 40]},
+      "PL_BB_R_BATTLE":   {"leds": [[9, 12]], "at": [750, 40]},
+      "PL_BB_R_BRIDGE":   {"leds": [[9, 13]], "at": [800, 40]}
+    }
+  },
+
+  "retrofit_triggers": {
+    "_": "mechs the table lacks: a Trigger cloned from `clone`, placed at [x, y]",
+    "MechaMagnet": {"clone": "BottomMagnet", "at": [792, 912], "use": "cvpmMagnet mMechaMagnet, solenoid 1151"}
+  },
+
+  "unmapped": {
+    "_": "table objects with no Spike 2 counterpart, left as they were but never driven",
+    "magnets": ["TopMagnet", "MiddleMagnet", "BottomMagnet", "OrbitMagnet"],
+    "lights": ["L7", "L13", "L41", "L42", "L43", "L45", "L46", "L47", "L28", "L32", "S118", "S119", "S120", "S127", "S128", "S130", "S131"],
+    "stern_switches_without_object": {
+      "52": "UP LEFT FLIPPER EOS", "54": "LEFT FLIPPER EOS", "65": "RIGHT FLIPPER EOS",
+      "86": "SHIELD MOTOR OPEN (faked)", "87": "SHIELD MOTOR CLOSED (faked)",
+      "92": "BUILDING UP (the shim's motor)", "93": "BUILDING DOWN (the shim's motor)",
+      "74": "BIG LOOP EXIT (Tflash)", "81": "R RAMP MADE OPTO (K2)"
+    }
+  }
+}

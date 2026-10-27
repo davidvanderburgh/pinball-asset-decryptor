@@ -44,9 +44,9 @@ CURRENCIES = (
 )
 SYMBOLS = dict(CURRENCIES)
 #: where the shelter is (optional): ISO code -> name, for the Top places
-#: board.  The first entry is "not saying".
-COUNTRIES = (
-    ("", "Country (optional)"),
+#: board.  The window lists them "not saying" first, then the United
+#: States, the rest A-Z and "Somewhere else" last (PAD-765).
+_COUNTRY_LIST = (
     ("US", "United States"), ("CA", "Canada"), ("GB", "United Kingdom"),
     ("AU", "Australia"), ("NZ", "New Zealand"), ("IE", "Ireland"),
     ("DE", "Germany"), ("FR", "France"), ("NL", "Netherlands"),
@@ -57,8 +57,11 @@ COUNTRIES = (
     ("KR", "South Korea"), ("SG", "Singapore"), ("BR", "Brazil"),
     ("MX", "Mexico"), ("AR", "Argentina"), ("ZA", "South Africa"),
     ("IL", "Israel"), ("AE", "United Arab Emirates"), ("IN", "India"),
-    ("XX", "Somewhere else"),
 )
+COUNTRIES = ((("", "Country (optional)"), ("US", "United States"))
+             + tuple(sorted((c for c in _COUNTRY_LIST if c[0] != "US"),
+                            key=lambda c: c[1].casefold()))
+             + (("XX", "Somewhere else"),))
 COUNTRY_NAMES = dict(COUNTRIES)
 #: the US states (and DC) the window's United States tile map draws: a
 #: typed state or province is matched here by code or name

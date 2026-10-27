@@ -213,6 +213,33 @@ old_start_hud, battle_shape; reference_stock_pick_transition is the game's own p
   alone). The clock out with both balls up ends it as lost and takes the extra ball away as a won ending does. Backup
   "modes before the MINILLA clock runs"; desk runs desk_minilla_clock (45 -> 0, the drain to one at the end) and
   desk_minilla_lost (17 left when alone -> 20). Card v32.
+- **v32 on the machine (its own SD card log, mode_v32.log):**
+  - "I went to start [KUMONGA] but after I selected it ... it wouldn't start the mode" and "I'm also not seeing any of
+    the HUD indicators ... now I just drained a ball and they're all there": from 208 s into a ball to its drain at
+    854 s the game's "a mode of mine is active" query said yes (through a multiball and a battle of the game's), so
+    every mode of ours waited (`not started (a block): a stock mode is running`, the pick given back as a lost battle)
+    and the progress panel stayed down. Tesla Strike (rule 23) starts from the powerlines and runs until its arrows are
+    made or the ball ends, beside the game's own battles and multiballs: `text stock_any_beside Tesla Strike` on the
+    three Godzilla ports, the rules asked one by one when the query says yes (stock_any_weighed), and the log names the
+    mode found. A battle picked on the selection screen (or a mode taking the place of one of the game's) never waits
+    for the game's modes (pick_go): the game let its own start.
+  - "On the meltdown mode we shouldn't have the building be going up and down over and over again": PAD-684's close
+    of the building's lock sent it down, and the game, its lock still lit, sent it back up - six times a minute. Now
+    the game's own moves above floor 0 are refused while ours keeps the lock closed (a veto on `site building_move`).
+  - "anytime a HUD mode gets to zero it's shot on the playfield needs to blink ... Ideally the HUD indicator would show
+    which shot to hit in small text where the number was": the progress number at 0 blinks the shots that start the
+    mode (ready_shots: the idle shot scripts that start it, or the shot a timer they start starts it from), white 250
+    ms, while nothing is in its way; a mode lit at a shot blinks its own light (his four now `blink`). The badge
+    carries a READY picture (mode_hud.badge_ready, the shot's name in the game's lettering) the kit shows at 0.
+  - (SUPER X2) "Every single shot on our custom modes needs to have feedback": a shot that scores while a mode runs and
+    brings no sound, callout, show, shake or clip within 80 ms gets the game's rising hit sound and a strobe of its
+    inserts (fb_owe / fb_tick). SUPER X2's charging shots: hit 1 .. 7 with a strobe each, the 8th its own charge.
+  - "when we are in any of our custom multi balls except for [MINILLA] we should be shouting out jackpot or double
+    jackpot": the Godzilla Multiball calls (requests 955 JACKPOT, 957 DOUBLE, 959 TRIPLE, 961 QUADRUPLE, 963
+    QUINTUPLE, 965 SUPER JACKPOT - the request table of LE 1.16 has the same take counts as Pro 1.16's named one for
+    2029 of 2030 requests) after every jackpot of SHIN GODZILLA, GODZILLA ANGRY, KAMACURAS and MELTDOWN, by the mode's
+    own multiplier (MELTDOWN: its heat, doubled for a heart jackpot). rig\edit11_callouts.py, backup "modes before the
+    jackpot calls". Card v33.
 - **v25: "the cursor needs to start in the top-left most mode. right now, it's in the top-right most mode"**: the
   game's open (0x1911dc) puts the cursor on the next open place after the one last played. With new monsters on the
   screen it is wrapped: the game's open runs, then the cursor goes on the first open entry in the screen's order (the

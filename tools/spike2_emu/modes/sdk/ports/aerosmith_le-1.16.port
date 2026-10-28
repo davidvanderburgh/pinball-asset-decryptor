@@ -503,3 +503,10 @@ text  done_name_0                  Medley Multiball
 value done_flag_0                  61
 text  done_name_1                  Wizard Mode Multiball
 value done_flag_1                  67
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x005cd7b0
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       23
+site  attract_sleep       0x0034b888 0xe30f3b50 0xe3403064

@@ -511,3 +511,10 @@ value place_audit_started_12       198
 value place_audit_completed_12     199
 value place_audit_started_13       200
 value place_audit_completed_13     201
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x005ea474
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       49
+site  attract_sleep       0x00363018 0xe3033e70 0xe3403067

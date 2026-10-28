@@ -523,3 +523,10 @@ value place_audit_started_3        228
 # some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag
 text  done_name_0                  Cherry Bomb Multiball
 value done_flag_0                  56
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x005a1338
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       24
+site  attract_sleep       0x003e1124 0xe3013788 0xe3403067

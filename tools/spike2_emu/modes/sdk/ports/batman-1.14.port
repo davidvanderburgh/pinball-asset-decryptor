@@ -542,3 +542,10 @@ text  done_name_0                  Shame Mode Ep 59 60
 value done_audit_0                 424
 text  done_name_1                  Shame Mode Ep 115 116
 value done_audit_1                 429
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x0077eb18
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       66
+site  attract_sleep       0x0046737c 0xe30033b8 0xe3403087

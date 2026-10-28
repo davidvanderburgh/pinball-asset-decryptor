@@ -63,3 +63,37 @@ settings QUALIFY/LIGHT/START <wizard>).
 3. A card option (Defaults tab, beside Coin door), offered only on builds where the site is found: "A final wizard
    does not end the game" - the game plays on to the remaining balls. Patch generically by shape, as coin_door.py.
 4. Prove on the emulator per build: the wizard ends, ball 2 follows; stock still ends the game.
+
+## Run 3 (2026-10-28): the mechanism found and proven on Godzilla LE 1.16
+
+- A rig instrument mode (scratch `C:	mp\PAD-786\calltest_mode.c`, built with build_mode.sh, loaded as PAD_MODE_SO
+  with the title's port) calls a game function from a tick (`/dump/call.go`) and logs bytes and bus handler chains
+  as they change. `call_job.sh` (rigbatch) boots the stock card, or a patched game program by overlay (`ELFDIR`).
+- The final wizard is started directly: Godzilla LE's King of the Monsters is mode 20, object 0x7b5a68, START
+  0xc5fac (game_mode_blocks.read_modes; its START also forfeits every extra ball). 30 rounds of target hits
+  (48,76,78,79,80,85,86) finish it; the next drain then ends ball 1 and **balls 2 and 3 end within one tick each,
+  GAME OVER** (stock, reproduced three times).
+- Why: an event 0x26 handler (runs as each ball starts; Godzilla LE 0x56228) reads a per-player word of a rule
+  singleton (0x7b0cfc + 0x34 + 4*player) and, when it is set, starts a process (id 0x175) whose body is a one-word
+  stub `b <end of ball>` (0x55660 -> 0x2a7cc8): the ball ends as it starts. Its 0x25 sibling (0x5612c) reads the
+  same word and refuses the ball's start. The game-over vote (0x90) is not used.
+- Patch proven: both reads `ldr rN, [r0, #0x34]` (0x56158, 0x56250) -> `mov rN, #0`: after King of the Monsters
+  ball 2 played 50 s and ball 3 45 s (score kept, normal playfield), then the ordinary GAME OVER. Patching the 0x25
+  handler alone changed nothing.
+- The same stub shape (finder.py: the ball advance -> its end-of-ball -> a one-word `b` stub -> the one handler that
+  starts it) is on 21 newest builds. Joe's six titles, with the condition each checks:
+  Godzilla LE/Pro and Jurassic Park LE/Pro: the per-player word (+0x34) of a rule singleton;
+  Bond LE/Pro 1.06: FG_WIZARD_MODE_MULTIBALL_PLAYED (0x86); Elvira 1.13: FG_WILD_MARKET_VALUE_PLAYED (0x45);
+  John Wick LE/Pro 1.02: FG_SPECIAL_ASSIGNMENT_MODE_PLAYED (0x7e) with a game-state test; Jaws LE/Pro 1.02: not read yet.
+  Also found, conditions not yet identified (may not be wizards): Avengers LE/Pro 1.10, Bond 60th 1.11 (its
+  whole-game challenge?), Led Zeppelin LE/Pro 1.22 (team play flag in it), Metallica 1.04 (game-mode index 6), Rush
+  LE/Pro 1.19, Sword of Rage LE/Pro 1.19.
+
+## Left
+
+1. Classify every guard (Jaws and the extra titles); find each title's 0x25-style ball-start refusal on the same
+   condition.
+2. `pinball_decryptor/plugins/stern/final_wizard.py` (shape-found, like coin_door.py) + a Defaults-tab option where a
+   build's guard is a proven final wizard; mod packs / transfers carry it; help + de/es/fr.
+3. Emulator proof per title family (the wizard START called by calltest, played out, balls after it play), stock
+   control still ends the game; unit tests on the finder against the real ELFs where present.

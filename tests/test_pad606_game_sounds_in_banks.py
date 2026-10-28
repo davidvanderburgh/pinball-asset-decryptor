@@ -163,11 +163,21 @@ def test_game_sound_sids_take_a_sound_one_listed_sid_plays_and_say_why_not_the_r
     grows = {i: (100, 1000) for i in (1, 2, 3, 4, 5, 7, 8)}
     ok, why = BB.game_sound_sids(grows, byidx, sites, mask, slots, exclude={15})
     assert ok == {1: 5, 2: 7}
-    assert "other than through its sound requests" in why[3]
+    # PAD-784: a sid no request names is one the game never plays
+    assert why[3] == "the game never plays it: no sound request of the game's names sound id 9"
     assert why[4].startswith("2 of the game's sound ids")
     assert "one of 2 parts" in why[5]
     assert "a mode of this card plays" in why[7]
     assert why[8] == "no sound id of the game's plays it"
+    # PAD-784: ... so it does not count: idx 9, played by listed sid 7 and by sid 9 in no
+    # request, is sid 7's
+    ok2, _w = BB.game_sound_sids({9: (100, 1000)}, byidx, [_site(7, key[9]), _site(9, key[9])],
+                                 mask, slots)
+    assert ok2 == {9: 7}
+    # with no request table read, nothing is taken for never played
+    assert BB.never_played({9, 13}, {}) == set()
+    assert BB.never_played({9, 13, 0x10003}, slots) == {9}
+    assert BB.never_played({9, 13}, slots, exclude={9}) == set()
 
 
 # --------------------------------------------------------------------------

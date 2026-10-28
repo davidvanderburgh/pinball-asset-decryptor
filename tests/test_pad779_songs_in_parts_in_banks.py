@@ -107,12 +107,35 @@ def test_game_sound_groups_take_every_sound_id_that_plays_a_song_and_every_part(
     assert g.grown == [2, 3] and sorted(g.sids) == [10, 11, 12, 13] and g.parts == [1, 2, 3]
     assert g.descs[12] == wide[12][0]
     assert 4 not in why                                  # game_sound_sids' case
-    assert "other than through its sound requests" in why[5]
+    assert why[5] == "the game never plays it: no sound request of the game's names sound id 20"
     assert "sound idx 8, one of its parts, plays another sound" in why[7]
     assert "longer than a sound bank's can be" in why[9]
     # a sound id a mode of the card plays keeps the whole song where it is
     _g, why2 = BB.game_sound_groups({2: (100, 5000)}, byidx, wide, slots, exclude={11})
     assert _g == [] and "a mode of this card plays" in why2[2]
+
+
+def test_a_sound_id_the_game_never_plays_does_not_hold_a_song_back():
+    """PAD-784: Iron Maiden LE 1.18's 954 plays idx 205 alone, 949 / 956 with an intro; 978
+    is a medley of 786 and 895, which 962 plays with 426.  No request names 954 or 978, and
+    the game starts a sound only through its requests: the songs move with 949, 956 and
+    962, 954 and 978 keep naming image.bin, and 786, which only 978 plays, stays."""
+    byidx = {i: {"idx": i, "findkey": _key(i), "length": 1000} for i in range(1, 12)}
+    wide = _wide({949: ([1, 2], 0), 956: ([1, 2, 3], 0), 954: ([2], 0),
+                  978: ([4, 5], 0), 962: ([6, 5], 0)})
+    slots = {s: [0x100] for s in (949, 956, 962)}
+    grows = {i: (100, 5000) for i in (2, 4, 5, 6)}
+    groups, why = BB.game_sound_groups(grows, byidx, wide, slots)
+    assert [(g.grown, sorted(g.sids), g.parts) for g in groups] == [
+        ([2], [949, 956], [1, 2, 3]), ([5, 6], [962], [6, 5])]
+    assert why == {4: "the game never plays it: no sound request of the game's names sound "
+                      "id 978"}
+    # a mode of the Write that plays 954 makes it one the song moves with
+    groups, why = BB.game_sound_groups({2: (100, 5000)}, byidx, wide, slots, exclude={954})
+    assert groups == [] and "sound id 954 is one a mode of this card plays" in why[2]
+    # no request table read: as before, nothing moves
+    groups, why = BB.game_sound_groups(grows, byidx, wide, {})
+    assert groups == [] and set(why) == {2, 4, 5, 6}
 
 
 def test_seq_fragments_give_each_record_an_opening_sound_id_and_the_rest_aliases():

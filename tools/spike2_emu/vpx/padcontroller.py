@@ -115,6 +115,10 @@ def log(msg):
 
 # ---------------------------------------------------------------- the map --
 
+#: where the user's own maps go (vpxgen.py writes a generated table's there)
+USER_MAPS = os.path.join(os.path.expanduser("~"), ".pad-vpx", "maps")
+
+
 class VpxMap:
     """A title's .vpxmap.json, reduced to the three lookups the server makes."""
 
@@ -132,11 +136,18 @@ class VpxMap:
         self.sol_max = 68
         # a rebuilt table's map (<title>.vpxmap.json) or a shadow-patched
         # tribute's (<title>.shadow.json, vpxshadow.py): same keys where
-        # they overlap - solenoids, game_on, cabinet, solenoid_max
-        for suffix in (".vpxmap.json", ".shadow.json"):
-            path = os.path.join(HERE, "%s%s" % (title, suffix)) if title else None
-            if path and os.path.exists(path):
-                self.load(path)
+        # they overlap - solenoids, game_on, cabinet, solenoid_max. The
+        # user's own maps (a generated table's, vpxgen.py) live in
+        # ~/.pad-vpx/maps, since an installed kit's folder is not writable.
+        self.path = None
+        for d in (USER_MAPS, HERE):
+            for suffix in (".vpxmap.json", ".shadow.json"):
+                path = os.path.join(d, "%s%s" % (title, suffix)) if title else None
+                if path and os.path.exists(path):
+                    self.load(path)
+                    self.path = path
+                    break
+            if self.path:
                 break
 
     def load(self, path):
@@ -430,9 +441,9 @@ class Bridge:
     def set_game(self, title):
         self.title = title
         self.map = VpxMap(title)
-        log("game %s: map switches=%d solenoids=%d lamp groups=%d"
-            % (title, len(self.map.switch_rewrite), len(self.map.solenoids),
-               len(self.map.lamp_groups)))
+        log("game %s: map %s: switches=%d solenoids=%d lamp groups=%d"
+            % (title, self.map.path or "NONE", len(self.map.switch_rewrite),
+               len(self.map.solenoids), len(self.map.lamp_groups)))
 
     def run(self):
         """Attach to the title's run, or START one (padlaunch) when none is

@@ -71,13 +71,32 @@ def read_switch_list(d):
     return out
 
 
+def read_group_node(d):
+    """{device-table group: bus node} from the rig's group_node.txt (coilmap's
+    per-title derivation): a coil's `grp` column is its board's place in the
+    title's node directory, NOT its node - James Bond's group 7 is node 8."""
+    out = {}
+    try:
+        for ln in open(os.path.join(d, "group_node.txt"), encoding="utf-8", errors="replace"):
+            f = ln.split()
+            if len(f) >= 2 and f[0].isdigit() and f[1].isdigit():
+                out[int(f[0])] = int(f[1])
+    except OSError:
+        pass
+    return out
+
+
 def read_coils(d):
+    gn = read_group_node(d)
     out = []
     for ln in open(os.path.join(d, "device_xy.txt"), encoding="utf-8", errors="replace"):
         f = ln.split()
         if len(f) >= 10 and f[0] == "coil":
+            grp = int(f[-4])
+            if grp not in gn:
+                continue                      # a board the title never named: no address
             out.append({"name": " ".join(f[1:-8]), "x": float(f[-8]), "y": float(f[-7]),
-                        "node": int(f[-4]), "idx": int(f[-3])})
+                        "node": gn[grp], "idx": int(f[-3])})
     return out
 
 
@@ -375,6 +394,17 @@ class Gen:
                 continue
             base = re.sub(r"[- ]?[RGB]$", "", led["name"]).strip()
             groups.setdefault(base, []).append(led)
+        # an RGB insert is three LEDs whose names end in R, G and B; anything
+        # else keeps its whole name (BATH-O-SUB is one lamp, not a B channel)
+        split = {}
+        for base, leds in groups.items():
+            ends = sorted(l["name"][-1] for l in leds)
+            if len(leds) == 3 and ends == ["B", "G", "R"]:
+                split[base] = leds
+            else:
+                for l in leds:
+                    split[l["name"]] = [l]
+        groups = split
         for base, leds in groups.items():
             x, y = self.pt(leds[0]["x"], leds[0]["y"])
             name = "L" + ident(base)
@@ -386,8 +416,12 @@ class Gen:
                 "COL2": i32(0x00FFFFFF), "BULT": i32(0), "SHBM": i32(0), "VSBL": i32(1)})
             self.add(set_points(data, circle(x, y, r)))
             self.map["lamps"][name] = {"leds": [[l["node"], l["idx"]] for l in leds], "name": base}
-        # timers
+        # timers: core.vbs's PinMAMETimer (coils and lamps every tick), its
+        # PulseTimer (`PulseTimer_Init` hands it to vpmTimer, which PulseSw
+        # and every delayed switch depend on - without it no hit reaches
+        # the game), and the test hook
         self.add(self.clone("timer", "PinMAMETimer", -200, 100, {"TMON": i32(1), "TMIN": i32(1)}))
+        self.add(self.clone("timer", "PulseTimer", -200, 150, {"TMON": i32(1), "TMIN": i32(100)}))
         self.add(self.clone("timer", "PadTestTimer", -200, 200, {"TMON": i32(1), "TMIN": i32(100)}))
 
     def saucer_coil(self, sw):
@@ -517,7 +551,13 @@ def main(argv):
     t.ole.close()
     mac = write_table(base, dst, "%s (PAD, generated)" % title, gd, g.items, "playfield",
                       os.path.join(tables, "playfield.png"), int(TABLE_W), int(g.table_h))
+    # the map goes beside the table AND where the controller looks for the
+    # user's own maps (~/.pad-vpx/maps/<title>.shadow.json)
     json.dump(g.map, open(os.path.join(outdir, "%s.generated.shadow.json" % title), "w", encoding="utf-8"), indent=2)
+    import padcontroller
+    os.makedirs(padcontroller.USER_MAPS, exist_ok=True)
+    json.dump(g.map, open(os.path.join(padcontroller.USER_MAPS, "%s.shadow.json" % title), "w", encoding="utf-8"), indent=2)
+    print("map -> %s" % os.path.join(padcontroller.USER_MAPS, "%s.shadow.json" % title))
     open(os.path.join(outdir, g.map["output"][:-4] + ".script.vbs"), "w", encoding="utf-8", newline="").write(script)
     ok = vpxfile.VpxTable(dst).verify()
     kinds = {}

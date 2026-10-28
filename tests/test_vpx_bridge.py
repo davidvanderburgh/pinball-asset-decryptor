@@ -410,6 +410,17 @@ def test_board_run_takes_the_newest_run_of_a_title(tmp_path, monkeypatch):
     assert pc.Rig.board_run("godzilla_le") is None                    # several runs, none of it
 
 
+def test_the_users_own_map_is_found_first(tmp_path, monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(pc, "USER_MAPS", str(tmp_path))
+    assert pc.VpxMap("nosuchtitle").path is None
+    (tmp_path / "nosuchtitle.shadow.json").write_text(json.dumps(
+        {"solenoids": {"1": {"coil": [8, 1]}}, "cabinet": {"start": 1036}}), encoding="utf-8")
+    m = pc.VpxMap("nosuchtitle")
+    assert m.path and m.solenoids[1] == (8, 1) and m.cabinet["start"] == 1036
+    assert pc.VpxMap("rush_le").path.endswith("rush_le.shadow.json")       # the kit's own still answer
+
+
 def test_board_slot_reads_one_record(tmp_path, monkeypatch):
     pc = pytest.importorskip("padcontroller")
     monkeypatch.setattr(pc, "BOARD", str(tmp_path))
@@ -524,6 +535,9 @@ MINI_TABLES = {
         "coil      RIGHT VUK                            389   550   20   20    8     1  -      playfield",
         "coil      CENTER 3 BANK DROP TARGET            147   258   20   20    8     4  -      playfield",
         "led       SHOOT AGAIN                          210   863   20   20    8     8  -      playfield", ""]),
+    "group_node.txt": "\n".join([
+        "# group node devices", "4     0    led=1 switch=12", "5     1    led=9 switch=6",
+        "7     8    coil=9 led=60 switch=30", "8     9    coil=8 led=55 switch=32", ""]),
     "led_io.txt": "\n".join([
         "# node index name                                   x     y  conn  image",
         "0      0     BACKBOX GI                             0     0  -     ",
@@ -531,6 +545,7 @@ MINI_TABLES = {
         "8      4     LEFT LANE ARROW-G                    117   356  -     playfield",
         "8      5     LEFT LANE ARROW-B                    117   356  -     playfield",
         "8      8     SHOOT AGAIN                          210   863  -     playfield",
+        "8      37    BATH-O-SUB                           207   465  -     playfield",
         "9      45    BACKPANEL FLASH                      620   116  -     playfield",
         "12     0     TOPPER 1-G                            69    77  -     topper", ""]),
 }
@@ -556,9 +571,11 @@ def test_generator_puts_the_titles_devices_on_a_table(mini_tables):
         kind, name, pos = vg.vpxfile.VpxTable.item_info(d)
         kinds[kind] = kinds.get(kind, 0) + 1
         names[name] = (kind, pos)
-    assert kinds["Flipper"] == 2 and kinds["Plunger"] == 1 and kinds["Timer"] == 2
+    assert kinds["Flipper"] == 2 and kinds["Plunger"] == 1
+    assert kinds["Timer"] == 3 and "PulseTimer" in names, "vpmTimer runs on PulseTimer: no PulseSw without it"
     assert kinds["Bumper"] == 1 and kinds["Spinner"] == 1 and kinds["HitTarget"] == 2
-    assert kinds["Light"] == 2, "an RGB triple is one light, the backpanel and topper none"
+    assert kinds["Light"] == 3, "an RGB triple is one light, the backpanel and topper none"
+    assert "LBathOSub" in names, "a name ending in B is not a blue channel"
     assert kinds["Kicker"] == 3                                   # drain, ball release, the VUK
     assert "JetpackHomeOpto" not in names, "a mechanism's sensor is no object"
     sx = vg.TABLE_W / 459.0
@@ -573,9 +590,10 @@ def test_generator_puts_the_titles_devices_on_a_table(mini_tables):
     assert m["switches"]["LeftSlingshot"]["event"] == "slingshot"
     assert m["saucers"]["RightVukOpto"]["switch"] == 84
     sols = {v["callback"]: v["coil"] for v in m["solenoids"].values() if v["callback"]}
-    assert sols["bsTrough.SolOut"] == [7, 1] and sols["PadAutoPlunge"] == [7, 4]
-    assert sols["bsRightVukOpto.SolOut"] == [8, 1] and sols["PadResetDrops"] == [8, 4]
-    assert m["game_on"]["coils"] == [[7, 5], [7, 0]]
+    # the coil table's group is a place in the node directory: 7 -> node 8, 8 -> node 9
+    assert sols["bsTrough.SolOut"] == [8, 1] and sols["PadAutoPlunge"] == [8, 4]
+    assert sols["bsRightVukOpto.SolOut"] == [9, 1] and sols["PadResetDrops"] == [9, 4]
+    assert m["game_on"]["coils"] == [[8, 5], [8, 0]]
     assert m["lamps"]["LLeftLaneArrow"]["leds"] == [[8, 3], [8, 4], [8, 5]]
     assert "Center3BankDropLeftOpto.IsDropped = 0" in m["extra_vbs"]
     script = g.script()

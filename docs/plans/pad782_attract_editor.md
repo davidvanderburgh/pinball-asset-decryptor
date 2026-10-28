@@ -122,3 +122,35 @@ adds our clips to THAT scene's library on such titles (VB.add_clip, the scene re
 an item as the game's page does - play, then update/draw/yield until its time is up or the clip ends - instead of
 pm_clip + sleep. Godzilla keeps the pm_clip route (proven). Then prove Bond LE with job5.sh and sweep which builds take
 which route.
+
+## Run 3 (2026-10-27)
+
+Done and committed: the clip v2 ELEMENT route (portattract.element / element_lines, Bond LE/Pro; items in the element's
+own scene; the runtime plays them as the game's pages do) - Bond LE emulator-proven (3 photos + text card after the last
+challenge champion, Start yields). The Attract page (webui/tabs/attract.py, static/js/tabs/attract.js): screens in order
+(named off the program, runs folded, "at times"), Add after/before, seconds, arrows + drag, take off, Run in emulator,
+the Insider note; flipper sounds moved here from the Audio page; champions switch only with the mode-maker preview on
+(concealment). A card whose clip scene the app cannot add to says so up front (attract_items.project_refusal:
+Batman 66, Iron Maiden, Metallica, Munsters, Rush, Stranger Things Pro). Mod packs (.modpack_attract, "Attract files")
+and Move Your Mods carry the items. Before/after shots in work/artifacts/PAD-782.
+
+### Library sweep (C:/tmp/PAD-782/sweep: sweep_prep.py, job.sh; one magenta marker item before screen 2, the shot
+taken on the item's SECOND showing - the game restarts its attract once soon after it first comes up)
+
+- The item RUNS (the cycle holds for it, segv 0) on every build tried; on the glass (magenta measured) only on Godzilla
+  LE/Pro (clip_play route), James Bond LE/Pro (element route), Foo Fighters LE and one more. On the other clip v2 titles
+  (Aerosmith, Avengers, Beatles, Deadpool, Guardians, Jaws, John Wick, JP x3, King Kong, Mando, Star Wars, TMNT,
+  X-Men...) the glass holds the previous screen: the clip plays on the bank's surface, which nothing draws in attract.
+- Mando LE/Pro, TMNT LE/Pro, Stranger Things LE, Foo Fighters Pro: no second showing within the job's wait (their cycle
+  is long, or the first showing was the only one before the cap) - re-run with a longer wait.
+
+### NEXT RUN
+
+1. Find, per family, how the attract pages of those titles put a clip on the glass (their tutorial / logo pages, as
+   Bond's element was found: disassemble a page that names a clip of theirs, e.g. Aerosmith 1.16, Deadpool 1.16, Jaws
+   1.02, Star Wars 1.31), and generalise portattract.element (or add a route) so each family plays items its own way.
+   Re-run the sweep (job.sh) until the marker is on the glass on every build the page offers; titles that cannot be
+   done get a refusal sentence (like NO_BANK) so the page never offers what the card cannot show.
+2. Boot the real card (D:/tmp/PAD-782/gz_attract.raw, engine.write_image of proj_gz) on the rig through cardmodes.sh
+   (PAD_CARD_MODES=1) and picture the items - "a built card does the same".
+3. Merge main (moved to v1.274.0); rebuild prebuilt + recipes if the SDK changed; targeted tests; final shots.

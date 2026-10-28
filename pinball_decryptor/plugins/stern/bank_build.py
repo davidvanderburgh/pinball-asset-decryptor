@@ -30,6 +30,7 @@ Everything here is driven through :class:`.spike2.category.CatEmu`, the
 emulator that serves a bank at a second window exactly as the game's loader
 maps it.
 """
+import collections
 import os
 import struct
 from dataclasses import dataclass
@@ -107,17 +108,19 @@ def bank_edits(spilled, byidx, directory):
 # staging
 # --------------------------------------------------------------------------
 def stage_bank(gr_path, img_path, work, byidx, edits, cat, log, emu=None, stride=None,
-               aliases=()):
+               aliases=(), desc_slot=SB.DESC_SLOT, mapped=0):
     """Write the bank for category *cat* holding *edits* into *work* and return
     ``(path, places)``.  Each body starts as the host's stock audio repeated
     to fill; *emu* is a booted emulator on the card's program (one is made
     when None).  PAD-608: *aliases* (:func:`.soundbank.plan_bank`) are the
-    fragments past the records that play one of them."""
+    fragments past the records that play one of them.  PAD-779: *desc_slot* and
+    *mapped* as :func:`.soundbank.plan_bank` takes them (a song in parts)."""
     from .spike2.emulator import Spike2Emu
     if stride is None:
         with open(_lp(img_path), "rb") as f:
             stride = SB.fragment_stride(f.read(0x100))
-    directory, places = SB.plan_bank(edits, stride, aliases=aliases)
+    directory, places = SB.plan_bank(edits, stride, aliases=aliases, desc_slot=desc_slot,
+                                     mapped=mapped)
     scaffold = {}
     with open(_lp(img_path), "rb") as f:
         for pl in SB.records(places):
@@ -643,7 +646,7 @@ def compose_descriptor(template, key8, duration, music):
 
 
 def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers, durations,
-                      music_idx, log, stride=None, given=None):
+                      music_idx, log, stride=None, given=None, desc_slot=SB.DESC_SLOT):
     """Write the fragment table and the descriptors into the staged bank for
     the records *rows* (the chain's, with ``host`` and ``findkey``):
     placement *n*'s descriptor is a copy of its carrier's (*carriers*
@@ -652,7 +655,8 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
     *music_idx* are looping beds.  PAD-608: *given* ``{new_idx: plain
     descriptor}`` are fragments whose descriptor the caller wrote (a music
     mode's file: the game sound id's own, naming the bank record), every
-    fragment past the records among them.  Returns ``{new_idx: (sid, plain,
+    fragment past the records among them.  PAD-779: *desc_slot* the bank's room a
+    descriptor (:func:`.soundbank.plan_bank`).  Returns ``{new_idx: (sid, plain,
     ks)}`` for :func:`verify_tables`."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
@@ -668,7 +672,8 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
             raise RuntimeError("the game's descriptor resolver could not be located, so the sound "
                                "bank's play tables cannot be written")
         mask, xor = resolver_rule(emu, resolver, out, img_path)
-        vf2 = bytes(emu.mu.mem_read(emu.VF2_VA, SB.VF2_WINDOW + SB.DESC_SLOT))
+        vf2 = bytes(emu.mu.mem_read(emu.VF2_VA, SB.VF2_WINDOW + max(SB.DESC_SLOT,
+                                                                    int(desc_slot))))
         descs = {n: bytes(d) for n, d in (given or {}).items()}
         for pl in places:
             if pl.new_idx in descs:
@@ -684,7 +689,7 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
     finally:
         emu.close()
     ks_by = SB.write_tables(_lp(bank_path), places, descs, vf2,
-                            lambda off: (off ^ xor) & mask, stride)
+                            lambda off: (off ^ xor) & mask, stride, desc_slot=desc_slot)
     log("Sound bank %s: %d fragment(s) and descriptor(s) written (keystream rule mask %#x xor "
         "%#x, %d slot(s) a fragment)." % (SB.bank_name(cat), len(places), mask, xor, stride), "info")
     out_map = {pl.new_idx: (SB.bank_sid(cat, pl.new_idx), descs[pl.new_idx], ks_by[pl.new_idx])
@@ -860,6 +865,125 @@ def game_sound_sids(grows, byidx, sites, mask, slots, exclude=()):
         else:
             ok[idx] = sid
     return ok, why
+
+
+#: PAD-779: a song in parts a bank can hold: the user's longer replacements *grown* (idxs) of
+#: its records, every sound id of the game's that plays one of them, *sids* ``{sid: [idx, ...]}``
+#: in its descriptor's order, *descs* ``{sid: plain descriptor}`` (the resolver's, through its
+#: own end), and *parts* every record those name, in order (the stock ones are copied).
+SeqGroup = collections.namedtuple("SeqGroup", "grown sids descs parts")
+
+
+def game_sound_groups(grows, byidx, wide, slots, exclude=(), busy=()):
+    """PAD-779: ``(groups, why)`` - the user's longer replacements *grows* (``{idx: (room,
+    want)}``) that the game plays in parts, as :class:`SeqGroup` s a bank can hold, and ``why``
+    ``{idx: reason}`` for the ones it cannot.  Iron Maiden plays its songs as intro, song and
+    outro sequences and medleys, each a sound id whose descriptor names several records: such
+    a song moves only with every sound id that plays it, and every record those name goes into
+    the same bank (a bank sound id's descriptor can only name records of its own bank).  Songs
+    that share a sound id (a medley) are one group.  *wide* ``{sid: (descriptor, [idx or
+    None, ...])}`` is every sound id's descriptor through its own end and the records it plays
+    (:func:`.engine._wide_descriptors`); *slots*, *exclude* as :func:`game_sound_sids`;
+    *busy* the idxs this Write gives other sounds (a mode's, a music mode's file), which can't
+    be copied as a part.  A sound one sound id plays alone is :func:`game_sound_sids`'s, not
+    a group."""
+    from .spike2.emulator import bands_of
+    exclude = {int(x) for x in exclude or ()}
+    busy = {int(x) for x in busy or ()}
+    plays_of = {}
+    for sid, (_d, idxs) in wide.items():
+        for i in idxs:
+            if i is not None:
+                plays_of.setdefault(i, set()).add(sid)
+    groups, why, seen = [], {}, set()
+    for x in sorted(grows):
+        if x in seen:
+            continue
+        grown, sids, todo = {x}, set(), [x]
+        while todo:
+            for sid in sorted(plays_of.get(todo.pop(), ())):
+                if sid in sids:
+                    continue
+                sids.add(sid)
+                for j in wide[sid][1]:
+                    if j in grows and j not in grown:
+                        grown.add(j)
+                        todo.append(j)
+        seen |= grown
+        if len(sids) == 1 and wide[next(iter(sids))][1] == [x]:
+            continue
+        parts = []
+        for sid in sorted(sids):
+            parts.extend(j for j in wide[sid][1] if j not in parts)
+        bad = None if sids else "no sound id of the game's plays it"
+        for sid in sorted(sids):
+            desc, idxs = wide[sid]
+            if sid >> 16:
+                bad = "sound id %d is already in a sound bank of the game's" % sid
+            elif sid in exclude:
+                bad = "sound id %d is one a mode of this card plays" % sid
+            elif not slots.get(sid):
+                bad = "the game plays sound id %d other than through its sound requests" % sid
+            elif None in idxs:
+                bad = "sound id %d plays a record the card's directory does not name" % sid
+            elif len(desc) > SB.DESC_SLOT_MAX:
+                bad = ("sound id %d's script is %d bytes, longer than a sound bank's can be (%d)"
+                       % (sid, len(desc), SB.DESC_SLOT_MAX))
+            if bad:
+                break
+        for j in parts:
+            if bad:
+                break
+            if j not in grown and j in busy:
+                bad = "sound idx %d, one of its parts, plays another sound in this Write" % j
+            elif j not in byidx or bands_of(byidx[j]) > 1:
+                bad = "sound idx %d, one of its parts, is a record of several variants" % j
+        if bad:
+            for j in grown:
+                why[j] = bad
+            continue
+        groups.append(SeqGroup(sorted(grown), {s: list(wide[s][1]) for s in sorted(sids)},
+                               {s: bytes(wide[s][0]) for s in sorted(sids)}, parts))
+    return groups, why
+
+
+def seq_fragments(group):
+    """PAD-779: ``(own, aliases)`` for *group*'s fragments: ``own`` ``{record idx: sid}`` the
+    sound id whose descriptor a record's own fragment takes (one that opens with it, the one
+    that plays it alone first), ``aliases`` ``[(sid, record idx)]`` the rest, each a fragment
+    past the records playing from its first record.  A record no sound id opens with gets a
+    descriptor nothing plays (its fragment has to resolve)."""
+    own, aliases = {}, []
+    for sid, idxs in sorted(group.sids.items(), key=lambda kv: (len(kv[1]) > 1, kv[0])):
+        if idxs[0] not in own:
+            own[idxs[0]] = sid
+        else:
+            aliases.append((sid, idxs[0]))
+    return own, aliases
+
+
+def seq_descriptor(desc, sid, keys, moves, mask):
+    """PAD-779: sound id *sid*'s descriptor *desc* (through its own end) as a bank's: every
+    op11 payload naming one of *keys* ``{play key: bank record key}`` names the bank record's
+    key verbatim (:func:`compose_descriptor`), and its declared duration moves by *moves*
+    ``{play key: 1/4000 s}`` for each payload of that record.  Raises when a payload names a
+    record not in *keys*: a bank sound id's descriptor can only name its own bank's."""
+    from . import engine as E
+    d = bytearray(desc)
+    moved = 0
+    pls = E._op11_payloads(bytes(d))
+    if not pls:
+        raise RuntimeError("sound id %d's descriptor names no record" % sid)
+    for off, pl in pls:
+        k = E._play_key(pl, sid, mask)
+        if k not in keys:
+            raise RuntimeError("sound id %d's descriptor names a record outside its sound bank"
+                               % sid)
+        d[off:off + 8] = bytes(keys[k])
+        moved += int(moves.get(k, 0))
+    dur = struct.unpack_from("<I", d, E._DESC_DUR_OFF)[0]
+    struct.pack_into("<I", d, E._DESC_DUR_OFF, max(1, dur + moved) & 0xFFFFFFFF)
+    return bytes(d)
 
 
 def list_writes(slots, old_map, new_map):

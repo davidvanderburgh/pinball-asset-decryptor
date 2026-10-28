@@ -8,6 +8,11 @@ entry, the footer deep-copied a flat dict on every progress message, and
 worker messages waited on a 100 ms poll.
 """
 
+import queue
+import threading
+import time
+import types
+
 import pytest
 
 from tests.webui_harness import web_app
@@ -106,3 +111,94 @@ def test_an_in_place_line_is_found_after_many_appends(tmp_path):
             win._clear_log("stern")
             assert "stern" not in win._log_index and "stern" not in win._log
         w.run(_work)
+
+
+# --------------------------------------------------------- worker queue
+def _fake_app(after, turn_s=0.05):
+    from pinball_decryptor.app import App, UiQueue
+    stub = types.SimpleNamespace(
+        POLL_TURN_S=turn_s, _active_mode=None, _current_mfr=None,
+        window=types.SimpleNamespace(append_log=lambda t, l: None),
+        root=types.SimpleNamespace(after=lambda ms, fn: after.append((ms, fn))))
+    stub._poll_queue = lambda: App._poll_queue(stub)
+    stub.msg_queue = UiQueue(lambda: stub.root.after(0, stub._poll_queue))
+    return stub
+
+
+def test_a_put_from_a_worker_wakes_the_loop_without_a_timer():
+    from pinball_decryptor.app import LogMsg
+    after = []
+    stub = _fake_app(after)
+    seen = []
+    stub.window.append_log = lambda t, l: seen.append(t)
+    assert after == []                       # idle: nothing pending
+    t = threading.Thread(target=lambda: stub.msg_queue.put(LogMsg("hi", "info")))
+    t.start()
+    t.join()
+    assert [ms for ms, _ in after] == [0]    # one drain, straight away
+    # a second put before the drain runs does not schedule another
+    stub.msg_queue.put(LogMsg("there", "info"))
+    assert [ms for ms, _ in after] == [0]
+    ms, fn = after.pop()
+    fn()
+    assert seen == ["hi", "there"]
+    assert after == []                       # idle again: no 100 ms poll
+    # and the next put schedules again
+    stub.msg_queue.put(LogMsg("again", "info"))
+    assert [ms for ms, _ in after] == [0]
+
+
+def test_a_put_during_a_drain_is_not_lost():
+    from pinball_decryptor.app import LogMsg
+    after = []
+    stub = _fake_app(after)
+    seen = []
+
+    def append(text, level):
+        seen.append(text)
+        if text == "first":
+            stub.msg_queue.put(LogMsg("during", "info"))
+    stub.window.append_log = append
+    stub.msg_queue.put(LogMsg("first", "info"))
+    ms, fn = after.pop()
+    fn()
+    # the running drain took it; the put, landing after the flag was
+    # cleared, scheduled one more turn, which finds nothing (and no more)
+    assert seen == ["first", "during"]
+    assert [ms for ms, _ in after] == [0]
+    after.pop()[1]()
+    assert seen == ["first", "during"] and after == []
+
+
+def test_a_turn_out_of_time_comes_straight_back_once():
+    from pinball_decryptor.app import LogMsg
+    after = []
+    stub = _fake_app(after, turn_s=0.001)
+    stub.window.append_log = lambda t, l: time.sleep(0.003)   # one a turn
+    for i in range(3):
+        stub.msg_queue.put(LogMsg("l%d" % i, "info"))
+    assert len(after) == 1
+    ms, fn = after.pop()
+    fn()
+    assert [ms for ms, _ in after] == [0]    # the follow-up turn, once
+    for _ in range(10):
+        if not after:
+            break
+        assert [ms for ms, _ in after] == [0]
+        after.pop()[1]()
+    assert stub.msg_queue.empty() and after == []
+
+
+def test_the_app_queue_is_the_waking_kind(tmp_path):
+    from pinball_decryptor.app import UiQueue
+    with web_app(tmp_path, mfr="stern") as w:
+        assert isinstance(w.app.msg_queue, UiQueue)
+        assert isinstance(w.app.msg_queue, queue.Queue)
+
+
+def test_a_waking_queue_still_drains_by_hand():
+    from pinball_decryptor.app import UiQueue
+    q = UiQueue(lambda: None)
+    q.put(1)
+    q.put_nowait(2)
+    assert q.get_nowait() == 1 and q.get() == 2 and q.empty()

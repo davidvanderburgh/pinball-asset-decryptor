@@ -385,12 +385,13 @@ def test_a_turn_ends_while_the_queue_is_still_being_filled():
     assert not stub.msg_queue.empty()
 
 
-def test_a_turn_that_empties_the_queue_waits_as_before():
+def test_a_turn_that_empties_the_queue_waits_for_the_next_put():
+    # PAD-797: no 100 ms poll any more; the next put wakes the loop itself
     App, stub, after = _stub(lambda text, level: None, 0.05)
     for i in range(20):
         stub.msg_queue.put(LogMsg("line %d" % i, "info"))
     App._poll_queue(stub)
-    assert stub.msg_queue.empty() and after == [100]
+    assert stub.msg_queue.empty() and after == []
 
 
 def test_a_turns_log_lines_reach_the_files_in_one_write(monkeypatch):

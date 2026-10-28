@@ -361,6 +361,8 @@ def gen(m, had, quiet=None):
                 "'     table light (or several) per insert; core.vbs calls LampCallback",
                 "'     every tick with UseLamps = 0, and this reads ChangedLamps itself",
                 "Dim PadLamps : Set PadLamps = CreateObject(\"Scripting.Dictionary\")",
+                "Dim PadLampState : Set PadLampState = CreateObject(\"Scripting.Dictionary\")",
+                "Dim PadTick : PadTick = 0",
                 "Sub PadLampsInit"]
         for num in sorted(lamps):
             out.append("\tPadLamps.Add \"%d\", Array(%s)" % (num, ", ".join(lamps[num])))
@@ -372,8 +374,17 @@ def gen(m, had, quiet=None):
                 "\tFor ii = 0 To UBound(chg)",
                 "\t\tk = CStr(chg(ii, 0))",
                 "\t\tIf PadLamps.Exists(k) Then",
+                "\t\t\tPadLampState(k) = chg(ii, 1)",
                 "\t\t\tFor Each o In PadLamps(k) : o.State = chg(ii, 1) : Next",
                 "\t\tEnd If",
+                "\tNext",
+                "End Sub",
+                "Sub PadReassertLamps   ' the machine's last word on every mapped light, again",
+                "\tDim k, o",
+                "\tFor Each k In PadLampState.Keys",
+                "\t\tFor Each o In PadLamps(k)",
+                "\t\t\tIf o.State <> PadLampState(k) Then o.State = PadLampState(k)",
+                "\t\tNext",
                 "\tNext",
                 "End Sub",
                 "Sub PadDumpLamps(path)   ' vpxkeys.py lamps <file>: every mapped light's state",
@@ -402,8 +413,13 @@ def gen(m, had, quiet=None):
         out.append("SolCallback(%s) = %s          ' the machine's flipper coil" % (const, vb(sub)))
     # ---- test hook
     out += ["", "Sub PadTestTimer_Timer",
-            "\tOn Error Resume Next",
-            "\tDim fso, p, f, parts",
+            "\tOn Error Resume Next"]
+    if lamps:
+        # a light show the shadow game still runs (a LightSeq, a GI timer, a
+        # tilt) can overwrite the machine's states; every half second they
+        # are put back, so the machine always wins within that
+        out.append("\tPadTick = PadTick + 1 : If PadTick Mod 5 = 0 Then PadReassertLamps")
+    out += ["\tDim fso, p, f, parts",
             "\tSet fso = CreateObject(\"Scripting.FileSystemObject\")",
             "\tp = fso.GetSpecialFolder(2) & \"\\padvpx_keys.txt\"",
             "\tIf Not fso.FileExists(p) Then Exit Sub",

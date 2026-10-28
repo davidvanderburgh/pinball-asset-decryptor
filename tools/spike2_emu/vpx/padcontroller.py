@@ -249,9 +249,19 @@ class Rig:
                 continue
             if rec.get("emu", "spike2") == "spike2":
                 runs.append(rec)
-        for rec in runs:
-            if title and rec.get("game") == title:
-                return rec
+        mine = [r for r in runs if title and r.get("game") == title]
+        if len(mine) > 1:
+            # several runs of the title (a library sweep had foo_fighters_le
+            # up on another slot while the table's own run came up on this
+            # one): the newest - the one started for this table - wins. Not
+            # "the visible one": a sweep's board record carries no hidden
+            # flag and read as visible.
+            mine.sort(key=lambda r: -(r.get("started") or 0))
+            log("rig board: %d runs of %s, taking the newest, slot %s, over %s" % (
+                len(mine), title, mine[0].get("slot"),
+                ", ".join("slot %s" % r.get("slot") for r in mine[1:])))
+        if mine:
+            return mine[0]
         return runs[0] if len(runs) == 1 else None
 
     def wsl_head(self):

@@ -391,7 +391,23 @@ def test_shadow_lamps_drive_the_tables_lights():
     assert "Sub sw001_Hit : vpmTimer.PulseSw 1053 : End Sub" in out               # no _orig: its rules are quiet
     assert "Sub LeftSlingShot_Slingshot : vpmTimer.PulseSw 1069 : LeftSlingShot_Slingshot_orig : End Sub" in out
     assert "Sub PadDumpLamps(path)" in out and 'If parts(0) = "lamps" Then PadDumpLamps parts(1)' in out
+    assert "PadLampState(k) = chg(ii, 1)" in out and "If PadTick Mod 5 = 0 Then PadReassertLamps" in out
     assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+
+
+def test_board_run_takes_the_newest_run_of_a_title(tmp_path, monkeypatch):
+    # a library sweep had foo_fighters_le up on another slot while the
+    # table's own run came up: the title alone named the wrong rig
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(pc, "BOARD", str(tmp_path))
+    runs = [{"emu": "spike2", "slot": 2, "game": "foo_fighters_le", "started": 100},     # a sweep's: no hidden flag
+            {"emu": "spike2", "slot": 4, "game": "foo_fighters_le", "hidden": True, "started": 200},
+            {"emu": "spike2", "slot": 5, "game": "rush_le", "hidden": False, "started": 300}]
+    for r in runs:
+        (tmp_path / ("slot-%d.run" % r["slot"])).write_text(json.dumps(r), encoding="utf-8")
+    assert pc.Rig.board_run("foo_fighters_le")["slot"] == 4          # the newest, hidden or not
+    assert pc.Rig.board_run("rush_le")["slot"] == 5
+    assert pc.Rig.board_run("godzilla_le") is None                    # several runs, none of it
 
 
 @pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le"])

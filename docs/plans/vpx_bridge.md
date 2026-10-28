@@ -161,16 +161,21 @@ out of it. The tribute's own light shows are quieted (`quiet_subs`, every
 (`orig_hits: false`, slingshots kept for their rubber animation): the real
 game's LCD and sound say what a hit was worth.
 
-Proof so far (Rush, 2026-10-27 evening): with a game on, a dump of every
-mapped light (`vpxkeys.py lamps`) against a `padled` snapshot taken the same
-moment agreed on 88 of 102 lights, the other 14 being inserts the machine
-was pulsing (table on, LED mid-fade); in attract all 102 agreed. A later
-sample found the table's lights all off while the machine had 22 inserts
-lit, which turned up Rush's `GIUpdateTimer_Timer` (it turns GI off by the
-number of balls on the table) - quieted since - and is otherwise not yet
-explained: the sampling needed Visual Pinball in the foreground (its timers
-pause unfocused) and David's game had it, so the check stops there. Foo
-Fighters' lamps are built the same way and not yet watched in play.
+Proof (2026-10-27): six times through a game on each table, the machine's
+`padled` plane was sampled just before and just after a dump of every
+mapped light (`vpxkeys.py lamps`); an insert reading the same in both
+samples is steady and must agree. Rush: every steady insert agreed in all
+six samples (89, 56, 88, 98, 87, 98 lights, the rest pulsing). Foo
+Fighters: 112, 112, 107, 106, 107 and 116 agreed, the handful that did not
+(an overlord target, a rock-o-meter step, the lockdown button) were inserts
+the machine had just lit, caught before the next poll. Two things the
+check turned up: Rush's `GIUpdateTimer_Timer` turns GI off by the number
+of balls on the table (quieted); and with another ticket's library sweep
+running foo_fighters_le on a second slot, the controller's title match
+took the sweep's rig - `board_run` now takes the newest run of a title.
+The generated script also puts the machine's last state back on every
+mapped light twice a second, so a light show the shadow game still runs
+cannot keep a light wrong for longer than that.
 
 Ryguy417's Foo Fighters v2.0 (VPU 14455) is a second Foo Fighters table and
 would take a map of its own.

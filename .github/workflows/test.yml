@@ -80,7 +80,7 @@ jobs:
           # are listed by the "Flaky tests" step below: delete them.
           # pyyaml: the P-ROC and American Pinball rigs read their machine
           # yaml (tools/proc_emu, tools/ap_emu), and their tests with them.
-          pip install pytest pytest-xdist pytest-rerunfailures pycryptodome pyyaml
+          pip install pytest pytest-xdist pytest-rerunfailures pycryptodome pyyaml olefile
           # Pillow is in requirements.txt — Williams' DMD render
           # path (dmd_render.py, capture_pipeline.py) imports it at
           # module load, so missing it causes the Williams plugin

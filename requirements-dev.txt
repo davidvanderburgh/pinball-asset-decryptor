@@ -9,3 +9,6 @@ pytest>=8
 # without xdist installed that addopts line is an unrecognized-argument error.
 pytest-xdist>=3
 pycryptodome>=3
+# olefile reads a Visual Pinball table (tools/spike2_emu/vpx, PAD-775);
+# without it the bridge tests skip.
+olefile>=0.46

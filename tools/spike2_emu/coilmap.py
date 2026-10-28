@@ -794,6 +794,31 @@ PAINT_MAGIC = 0x544E4950
 PAINT_N = 256
 PAINT_READ = PAINT_OFF + 8 + 8 * PAINT_N
 
+#: padled VERSION 7 (PAD-775): each coil's firing RULE (cmd 41) - power, and
+#: the input whose closing makes the BOARD fire it (flippers, slingshots, pop
+#: bumpers: the game sends nothing per flip). padled.h carries the meaning;
+#: tests/test_vpx_bridge.py pins these to the header.
+RULE_PWR_OFF = PAINT_READ
+RULE_IN_OFF = RULE_PWR_OFF + NODES * COIL_N
+RULE_SETS_OFF = RULE_IN_OFF + NODES * COIL_N
+RULE_READ = RULE_SETS_OFF + 4
+
+
+def rule(data, node, index):
+    """{power, input} for one coil's rule from a version-7 block, or None.
+    `input` is the board input (0..63) whose closing fires the coil, or None
+    when the rule names none; power 0 is a cleared rule (the coil is dead)."""
+    if data is None or len(data) < RULE_READ or not has_magic(data):
+        return None
+    if struct.unpack_from("<I", data, 4)[0] < 7:
+        return None
+    if not (0 <= node < NODES and 0 <= index < COIL_N):
+        return None
+    o = node * COIL_N + index
+    raw = data[RULE_IN_OFF + o]
+    return {"power": data[RULE_PWR_OFF + o],
+            "input": (raw & 0x3F) if raw & 0x40 else None}
+
 
 def paint_tints(data, group_node):
     """{(node, index): (r, g, b)} - the one-colour inserts a mode holds now, in the colour it painted them; empty

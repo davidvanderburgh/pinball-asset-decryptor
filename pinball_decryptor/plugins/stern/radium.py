@@ -38,9 +38,15 @@ Ported verbatim (logic-identical) from the format reverse-engineering prototype
 ``radium_text.py``; see the Spike 2 assets memory notes for the wider context.
 """
 
+import re
 import struct
 
 MAXLEN = 8192          # ignore absurd "lengths" (false 8-byte hits)
+_PRINTABLE = re.compile(rb"[\t\n\r\x20-\x7e]+")      # 32 <= b < 127 or tab/LF/CR
+# bytes 2..7 of any length prefix in 1..MAXLEN are zero, and the body's first
+# byte must be printable: a six-zero literal (searched at C speed) with that
+# byte looked ahead, so a run of zeros is never walked
+_ANCHOR = re.compile(rb"\x00\x00\x00\x00\x00\x00(?=[\t\n\r\x20-\x7e])")
 _FONT_HINT = ("Glyphs", "Impact", "Vera", "Helvetica", "Neue", "Arial",
               "_Regular", "Bitstream")
 _ELEM_TYPES = {"Text", "Sprite", "Font", "Bitmap", "Pattern", "VideoSurface",
@@ -50,19 +56,32 @@ _ELEM_TYPES = {"Text", "Sprite", "Font", "Bitmap", "Pattern", "VideoSurface",
 def find_strings(data):
     """Yield ``(prefix_off, body_off, length, body_bytes)`` for every 8-byte-LE
     length-prefixed printable-ascii string.  ``prefix_off`` points at the length
-    field; ``body_off = prefix_off + 8`` points at the first text byte."""
+    field; ``body_off = prefix_off + 8`` points at the first text byte.
+
+    Same list, same order, as the byte-at-a-time scan this replaced (PAD-795):
+    every offset is a candidate, a hit is taken and the scan resumes after its
+    body, a miss moves on one byte.  A length in ``1..MAXLEN`` stored as 8-byte
+    LE has bytes 2..7 zero and a hit's first body byte is printable, so the
+    candidates are the matches of :data:`_ANCHOR` (a C-speed literal search, the
+    trick :func:`_find_char_arrays` uses with ``find``); every other offset was a
+    miss.  The length comes from the two bytes before the zeros and the body is
+    checked in place with one regex."""
     n = len(data)
     out = []
-    i = 0
-    while i + 8 <= n:
-        ln = struct.unpack_from("<Q", data, i)[0]
+    search = _ANCHOR.search
+    m = search(data, 2)                 # prefix offset i = m.start() - 2
+    while m is not None:
+        p = m.start()
+        i = p - 2
+        ln = struct.unpack_from("<H", data, i)[0]
         if 1 <= ln <= MAXLEN and i + 8 + ln <= n:
-            body = data[i + 8:i + 8 + ln]
-            if all(32 <= b < 127 or b in (9, 10, 13) for b in body):
-                out.append((i, i + 8, ln, body))
-                i += 8 + ln
+            # matched in place: no slice of a body that fails part way
+            b = _PRINTABLE.match(data, i + 8, i + 8 + ln)
+            if b is not None and b.end() == i + 8 + ln:
+                out.append((i, i + 8, ln, data[i + 8:i + 8 + ln]))
+                m = search(data, i + 8 + ln + 2)
                 continue
-        i += 1
+        m = search(data, p + 1)
     return out
 
 

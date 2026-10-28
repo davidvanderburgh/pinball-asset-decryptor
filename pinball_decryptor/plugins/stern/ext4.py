@@ -38,6 +38,11 @@ class Ext4Reader:
         self.f = fileobj
         self.base = part_offset
         self.size = part_size
+        # group -> inode table block.  Group descriptors never change under this
+        # reader (it has no write path, and every writer in the app opens a fresh
+        # reader afterwards), so each is read from the card once, not once per
+        # inode: a tree walk reads thousands of inodes (PAD-795).
+        self._inode_tables = {}
         self._read_super()
         self._read_group_desc_layout()
 
@@ -92,11 +97,16 @@ class Ext4Reader:
         return (compat, incompat, ro, jc, ji, jr)
 
     def _group_desc_inode_table(self, group):
+        it = self._inode_tables.get(group)
+        if it is not None:
+            return it
         off = self.gdt_block * self.block_size + group * self.desc_size
         gd = self._read(off, self.desc_size)
         it_lo = struct.unpack_from("<I", gd, 8)[0]
         it_hi = struct.unpack_from("<I", gd, 0x28)[0] if self.desc_size >= 0x2c else 0
-        return it_lo | (it_hi << 32)
+        it = it_lo | (it_hi << 32)
+        self._inode_tables[group] = it
+        return it
 
     # ---- inodes -------------------------------------------------------------
     def read_inode(self, ino):
@@ -375,16 +385,26 @@ class Ext4Reader:
         return bytes(out)
 
     # ---- file content -------------------------------------------------------
-    def read_file_bytes(self, inode):
-        buf = bytearray(inode["size"])
+    def read_file_bytes(self, inode, chunk=1 << 20):
+        """The whole of a regular file in memory.  Each extent run is read in as few
+        calls as possible (pieces of at most ``chunk`` bytes, 1 MiB by default: the
+        read size that is fast on every path, see :meth:`read_file_chunks`) rather
+        than one block at a time; a 50 MB radium was 12,800 reads (PAD-795).  The
+        tail is cut at the inode's size and a run beyond it is skipped, as before."""
+        size = inode["size"]
+        buf = bytearray(size)
         bs = self.block_size
         for log, phys, cnt in self._runs(inode):
-            for j in range(cnt):
-                fo = (log + j) * bs
-                if fo >= inode["size"]:
-                    break
-                n = min(bs, inode["size"] - fo)
-                buf[fo:fo + n] = self._read((phys + j) * bs, n)
+            fo = log * bs
+            if fo >= size:
+                continue
+            n = min(cnt * bs, size - fo)
+            disk = phys * bs
+            done = 0
+            while done < n:
+                take = min(chunk, n - done)
+                buf[fo + done:fo + done + take] = self._read(disk + done, take)
+                done += take
         return bytes(buf)
 
     def extract_file(self, inode, out_path, chunk_blocks=2048, progress=None):

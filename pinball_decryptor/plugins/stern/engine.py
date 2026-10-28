@@ -14681,17 +14681,20 @@ def _apply_slot_seed(samples, np, rng, dbfs):
     return np.clip(out, -rng, rng)
 
 
-def _lowpass(samples, cutoff_hz, np, fs=44100.0):
-    """Zero-phase 2nd-order Butterworth low-pass (applied forward + reverse, so
-    4th-order effective with no phase shift and, being IIR, no pre-echo that an
-    FFT brick-wall would smear backward into a transient).  Dependency-free
-    (numpy only -- the plugin never pulls scipy).  Returns int64 samples.
+_BIQUAD_IMPULSES = {}       # (cutoff_hz, fs) -> the biquad's impulse response (PAD-795)
+_IMPULSE_CAP = 1 << 22      # samples; a cutoff of a few Hz would otherwise run on
 
-    Used to band-limit an audio replacement to the stock callout's spectral
-    envelope; see :data:`_DECLICK_LOWPASS_HZ` for why."""
-    x = np.asarray(samples, np.float64)
-    if cutoff_hz is None or len(x) < 12 or cutoff_hz >= fs * 0.5:
-        return np.asarray(samples, np.int64)
+
+def _biquad_impulse(cutoff_hz, fs, np):
+    """Impulse response of the 2nd-order Butterworth low-pass :func:`_lowpass`
+    applies, from the same recurrence the per-sample loop ran, run on a unit
+    impulse until it has decayed below ``1e-12 * max|h|`` for 64 samples in a
+    row (a 5 kHz cutoff takes about 120 samples, 500 Hz about 700).  Cached per
+    ``(cutoff_hz, fs)``."""
+    key = (float(cutoff_hz), float(fs))
+    h = _BIQUAD_IMPULSES.get(key)
+    if h is not None:
+        return h
     import math
     w0 = 2.0 * math.pi * cutoff_hz / fs
     cw, sw = math.cos(w0), math.sin(w0)
@@ -14702,21 +14705,72 @@ def _lowpass(samples, cutoff_hz, np, fs=44100.0):
     b2 = b0
     a1 = (-2.0 * cw) / a0
     a2 = (1.0 - alpha) / a0
+    out = []
+    x1 = x2 = y1 = y2 = 0.0
+    peak = 0.0
+    quiet = 0
+    for i in range(_IMPULSE_CAP):
+        xi = 1.0 if i == 0 else 0.0
+        yi = b0 * xi + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        x2, x1 = x1, xi
+        y2, y1 = y1, yi
+        out.append(yi)
+        peak = max(peak, abs(yi))
+        quiet = quiet + 1 if abs(yi) < 1e-12 * peak else 0
+        if quiet >= 64:
+            break
+    h = np.asarray(out, np.float64)
+    _BIQUAD_IMPULSES[key] = h
+    return h
 
-    def _iir(sig):
-        y = np.empty_like(sig)
-        x1 = x2 = y1 = y2 = 0.0
-        for i in range(len(sig)):
-            xi = sig[i]
-            yi = b0 * xi + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
-            x2, x1 = x1, xi
-            y2, y1 = y1, yi
-            y[i] = yi
-        return y
 
-    y = _iir(x)                              # forward
-    y = _iir(y[::-1])[::-1]                   # reverse -> zero phase
-    return np.round(y).astype(np.int64)
+def _causal_convolve(x, h, np, block=1 << 20):
+    """``y[k] = sum(h[j] * x[k - j] for j <= k)`` for ``k < len(x)``: the causal
+    convolution of *x* with *h* cut to the length of *x*, by FFT (rfft/irfft at
+    a power-of-two size).  A sound longer than *block* samples goes through in
+    overlap-added blocks of that size, so the FFTs of a three-minute music bed
+    stay a few MB instead of hundreds."""
+    nx, nh = len(x), len(h)
+    if nx <= block:
+        size = 1 << max(nx + nh - 2, 0).bit_length()          # >= nx + nh - 1
+        return np.fft.irfft(np.fft.rfft(x, size) * np.fft.rfft(h, size), size)[:nx]
+    while block < nh:
+        block <<= 1
+    size = 1 << (block + nh - 2).bit_length()
+    H = np.fft.rfft(h, size)
+    y = np.zeros(nx + size, np.float64)
+    for s in range(0, nx, block):
+        y[s:s + size] += np.fft.irfft(np.fft.rfft(x[s:s + block], size) * H, size)
+    return y[:nx]
+
+
+def _lowpass_f64(x, cutoff_hz, np, fs):
+    """:func:`_lowpass` before the rounding: forward pass, then the reverse pass
+    over the flipped result, flipped back."""
+    h = _biquad_impulse(cutoff_hz, fs, np)
+    y = _causal_convolve(x, h, np)                           # forward
+    return _causal_convolve(y[::-1], h, np)[::-1]            # reverse -> zero phase
+
+
+def _lowpass(samples, cutoff_hz, np, fs=44100.0):
+    """Zero-phase 2nd-order Butterworth low-pass (applied forward + reverse, so
+    4th-order effective with no phase shift and, being IIR, no pre-echo that an
+    FFT brick-wall would smear backward into a transient).  Dependency-free
+    (numpy only -- the plugin never pulls scipy).  Returns int64 samples.
+
+    The filter is linear, time-invariant and starts from rest, so each pass is
+    the causal convolution of the signal with the biquad's impulse response
+    (:func:`_biquad_impulse`, the recurrence run once on a unit impulse and
+    cached), done by FFT in :func:`_causal_convolve` instead of a Python loop
+    per sample (PAD-795: six seconds per 8M-sample channel, nine times what it
+    is now).  Within 1e-6 of the per-sample recurrence before rounding.
+
+    Used to band-limit an audio replacement to the stock callout's spectral
+    envelope; see :data:`_DECLICK_LOWPASS_HZ` for why."""
+    x = np.asarray(samples, np.float64)
+    if cutoff_hz is None or len(x) < 12 or cutoff_hz >= fs * 0.5:
+        return np.asarray(samples, np.int64)
+    return np.round(_lowpass_f64(x, cutoff_hz, np, fs)).astype(np.int64)
 
 
 # ---- stock-vs-replacement audio profiling (Audio tab: "Profile vs stock") --

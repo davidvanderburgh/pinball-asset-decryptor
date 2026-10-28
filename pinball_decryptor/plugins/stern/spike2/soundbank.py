@@ -99,6 +99,11 @@ FRAG_SLOT = 8
 DEFAULT_STRIDE = 5
 #: Room a bank descriptor gets: the window the resolver's callers read.
 DESC_SLOT = 0x50
+#: PAD-779: the most room a bank's descriptors may get, for a bank that holds a song's whole
+#: sequence (intro, song, outro: Iron Maiden LE 1.18's sound id 974 plays four records in 87
+#: bytes).  The game's own descriptors run to 108 bytes there, at keystream offsets from the
+#: same rule (:func:`.bank_build.resolver_rule`), so its keystream covers this far.
+DESC_SLOT_MAX = 0x60
 #: The vf2 keystream window the resolver can point into.
 VF2_WINDOW = 0x3F00
 #: The bank's sid map (PAD-606), between the descriptor block and the directory: which of
@@ -107,6 +112,10 @@ VF2_WINDOW = 0x3F00
 #: reads it: the descriptors are reached through the fragment table and the directory
 #: through ``hdr[0x40]``.
 SID_MAP_MAGIC = b"PADS"
+#: PAD-779: the sid map's extension, just before it, for the fragments past the records that
+#: stand in for one of the game's sids (a song's sequence: each sound id that plays it is a
+#: fragment): ``(fragment, game sid)`` u32 pairs, then the pair count and this magic.
+SID_MAP_EXT_MAGIC = b"PADX"
 #: Sound channels the game plays at once (the voice loop at Godzilla LE 1.16's 0x43c210).
 #: A sound's start takes a reference on its sid's bank (0x43cdcc), its stop drops it
 #: (0x43c254), and mapping a bank unmaps only the OTHER banks with no sound playing
@@ -262,25 +271,32 @@ def _bodies_start(nfrag, stride):
     return MD.align16(HDR_LEN + _tables_len(MD.grow_slots(nfrag), stride)) + MD.BODY_PAD
 
 
-def bank_bytes(bodies, stride=DEFAULT_STRIDE, aliases=0):
+def bank_bytes(bodies, stride=DEFAULT_STRIDE, aliases=0, desc_slot=DESC_SLOT, mapped=0):
     """What a bank with the appended *bodies* (byte sizes) measures: the
     header, the fragment table, each body behind its zero pad, the
     descriptor block, then the directory and its trailer.  *aliases*: the
     fragments past the records that play one of them (PAD-608), each a slot
-    in the fragment table and the descriptor block."""
+    in the fragment table and the descriptor block.  PAD-779: *desc_slot* the
+    room each descriptor gets, *mapped* how many of the aliases the sid map's
+    extension names (:func:`sid_map_ext_len`)."""
     bodies = list(bodies)
     n = len(bodies)
     nfrag = n + int(aliases)
     body_end = (_bodies_start(nfrag, stride)
                 + sum(MD.BODY_PAD + b for b in bodies) - MD.BODY_PAD)
-    return (MD.align16(MD.align16(body_end + MD.BODY_PAD) + nfrag * DESC_SLOT)
-            + sid_map_len(n) + MD.tail_len(n))
+    return (MD.align16(MD.align16(body_end + MD.BODY_PAD) + nfrag * int(desc_slot))
+            + sid_map_ext_len(mapped) + sid_map_len(n) + MD.tail_len(n))
 
 
 def sid_map_len(n):
     """Bytes the sid map of a bank of *n* sounds takes: :data:`SID_MAP_MAGIC`, the
     count, one u32 a fragment, rounded up to 16."""
     return MD.align16(8 + 4 * int(n))
+
+
+def sid_map_ext_len(m):
+    """PAD-779: bytes the sid map's extension of *m* fragments takes (none for 0)."""
+    return MD.align16(8 * int(m) + 8) if m else 0
 
 
 def sid_map_block(orig, n):
@@ -297,10 +313,23 @@ def sid_map_block(orig, n):
 
 def write_sid_map(path, md_off, n, orig):
     """Write the sid map of a staged bank whose directory of *n* records is at
-    *md_off* (it sits just before the directory)."""
+    *md_off* (it sits just before the directory).  PAD-779: the fragments of
+    *orig* past the records go into the extension before it, which the bank
+    has room for when it was planned with them (:func:`plan_bank` *mapped*)."""
+    orig = {int(k): int(v) for k, v in (orig or {}).items()}
+    more = sorted((k, v) for k, v in orig.items() if k >= n)
+    at = int(md_off) - sid_map_len(n)
     with open(path, "r+b") as f:
-        f.seek(int(md_off) - sid_map_len(n))
-        f.write(sid_map_block(orig, n))
+        f.seek(at)
+        f.write(sid_map_block({k: v for k, v in orig.items() if k < n}, n))
+        if more:
+            ext = bytearray(sid_map_ext_len(len(more)))
+            for j, (k, v) in enumerate(more):
+                struct.pack_into("<II", ext, 8 * j, k, v & 0xffffffff)
+            struct.pack_into("<I", ext, len(ext) - 8, len(more))
+            ext[len(ext) - 4:] = SID_MAP_EXT_MAGIC
+            f.seek(at - len(ext))
+            f.write(bytes(ext))
 
 
 def read_sid_map(data):
@@ -334,6 +363,16 @@ def read_sid_map_at(read, size):
             sid = struct.unpack_from("<I", block, 8 + 4 * k)[0]
             if sid:
                 out[k] = sid
+        # PAD-779: the fragments past the records, in the extension before it
+        foot = bytes(read(at - 8, 8)) if at - 8 >= HDR_LEN else b""
+        if len(foot) == 8 and foot[4:] == SID_MAP_EXT_MAGIC:
+            m = struct.unpack_from("<I", foot, 0)[0]
+            if 0 < m <= MD.MAX_RECORDS and at - sid_map_ext_len(m) >= HDR_LEN:
+                ext = bytes(read(at - sid_map_ext_len(m), 8 * m))
+                for j in range(m):
+                    k, sid = struct.unpack_from("<II", ext, 8 * j)
+                    if k >= count and sid:
+                        out[k] = sid
         return out
     except (ValueError, struct.error, MD.MasterDirError):
         return {}
@@ -370,7 +409,42 @@ def split_banks(edits, limit=MAX_BANK_BYTES, stride=DEFAULT_STRIDE, alone=None):
     return banks
 
 
-def plan_bank(edits, stride=DEFAULT_STRIDE, aliases=()):
+#: PAD-779: sounds that go into one bank together - one sound, or a song's whole sequence
+#: (every record the sound ids that play it name, each of those sound ids a fragment) -
+#: *edits* the records, *aliases* its fragments past them, *desc_slot* the room its
+#: descriptors need and *mapped* the aliases the sid map's extension names.
+BankUnit = collections.namedtuple("BankUnit", "edits aliases desc_slot mapped",
+                                  defaults=(0, DESC_SLOT, 0))
+
+
+def unit_bytes(units, stride=DEFAULT_STRIDE):
+    """What one bank holding every :class:`BankUnit` of *units* measures."""
+    units = list(units)
+    return bank_bytes([e.body_bytes for u in units for e in u.edits], stride,
+                      aliases=sum(int(u.aliases) for u in units),
+                      desc_slot=max([DESC_SLOT] + [int(u.desc_slot) for u in units]),
+                      mapped=sum(int(u.mapped) for u in units))
+
+
+def split_units(units, limit=MAX_BANK_BYTES, stride=DEFAULT_STRIDE):
+    """PAD-779: :func:`split_banks` for :class:`BankUnit` s: *units* split into banks
+    in order, each as full as *limit* allows, a unit never split; ``[[unit, ...]]``.
+    A unit bigger than *limit* is a bank of its own (the caller checks it fits)."""
+    banks, cur = [], []
+    for u in units:
+        if unit_bytes([u], stride) > limit:
+            banks.append([u])
+            continue
+        if cur and unit_bytes(cur + [u], stride) > limit:
+            banks.append(cur)
+            cur = []
+        cur.append(u)
+    if cur:
+        banks.append(cur)
+    return banks
+
+
+def plan_bank(edits, stride=DEFAULT_STRIDE, aliases=(), desc_slot=DESC_SLOT, mapped=0):
     """``(directory, placements)`` for a bank holding *edits*: record *n* is a
     copy of edit *n*'s host record with only its body offset and length word
     replaced (as :func:`masterdir.plan_grow_records` appends to ``image.bin``).
@@ -384,8 +458,15 @@ def plan_bank(edits, stride=DEFAULT_STRIDE, aliases=()):
     PAD-608: *aliases* ``[host idx, ...]``: one more fragment each, past the
     records, that plays that host's record (a placement with ``record``
     set), for a sound several of the game's sound ids play, each through a
-    descriptor of its own."""
+    descriptor of its own.
+
+    PAD-779: *desc_slot* the room each descriptor gets (up to :data:`DESC_SLOT_MAX`, for a
+    song's whole sequence), and room for the sid map's extension of *mapped* aliases (each a
+    sound id of the game's that plays a song in parts)."""
     edits = [BankEdit(*e) for e in edits]
+    desc_slot = int(desc_slot)
+    if not DESC_SLOT <= desc_slot <= DESC_SLOT_MAX or desc_slot % 16:
+        raise SoundBankError("a descriptor slot of %d bytes" % desc_slot)
     if not edits:
         raise SoundBankError("plan_bank called with no sounds")
     xors = set()
@@ -409,16 +490,18 @@ def plan_bank(edits, stride=DEFAULT_STRIDE, aliases=()):
         places.append([e.idx, n, off, e.new_length, e.body_bytes])
         off += e.body_bytes + MD.BODY_PAD
     desc0 = MD.align16(off)
-    places = [BankPlacement(*pl, desc_off=desc0 + DESC_SLOT * pl[1]) for pl in places]
+    places = [BankPlacement(*pl, desc_off=desc0 + desc_slot * pl[1]) for pl in places]
     by_idx = {pl.idx: pl for pl in places}
     for j, idx in enumerate(aliases):
         pl = by_idx.get(idx)
         if pl is None:
             raise SoundBankError("a fragment for idx %d, which is not in the bank" % idx)
         n = len(edits) + j
-        places.append(pl._replace(new_idx=n, desc_off=desc0 + DESC_SLOT * n, record=pl.new_idx))
-    # the sid map (PAD-606) between the descriptors and the directory
-    md_off = MD.align16(desc0 + DESC_SLOT * nfrag) + sid_map_len(len(edits))
+        places.append(pl._replace(new_idx=n, desc_off=desc0 + desc_slot * n, record=pl.new_idx))
+    # the sid map (PAD-606) between the descriptors and the directory, its extension
+    # (PAD-779) before it
+    md_off = (MD.align16(desc0 + desc_slot * nfrag) + sid_map_ext_len(mapped)
+              + sid_map_len(len(edits)))
     directory = MD.Directory(b"".join(records), len(records), md_off, 0,
                              trailer=PAD_TRAILER)
     return directory, places
@@ -463,22 +546,23 @@ def write_bank(path, directory, places, scaffold, emu, stride=DEFAULT_STRIDE):
     return size
 
 
-def write_tables(path, places, descs, vf2, ks_of, stride=DEFAULT_STRIDE):
+def write_tables(path, places, descs, vf2, ks_of, stride=DEFAULT_STRIDE, desc_slot=DESC_SLOT):
     """Put the play tables into a staged bank: for placement *n*, *stride*
     fragment slots each naming its descriptor's offset (whitened with four
     bytes of *vf2*, the firmware's keystream window, at
     :func:`slot_vf2_offset`), and the descriptor *descs[new_idx]* (plain
     bytes, at most :data:`DESC_SLOT`) at ``desc_off`` whitened with *vf2* at
     ``ks_of(desc_off)``, the offset the resolver will derive.  Returns
-    ``{new_idx: keystream offset}``."""
+    ``{new_idx: keystream offset}``.  PAD-779: *desc_slot* is the bank's room
+    a descriptor (:func:`plan_bank`)."""
     vf2 = bytes(vf2)
     out = {}
     with open(path, "r+b") as f:
         for pl in places:
             plain = bytes(descs[pl.new_idx])
-            if not 0 < len(plain) <= DESC_SLOT:
+            if not 0 < len(plain) <= int(desc_slot):
                 raise SoundBankError("record %d: a descriptor of %d bytes does not fit its "
-                                     "%d-byte slot" % (pl.new_idx, len(plain), DESC_SLOT))
+                                     "%d-byte slot" % (pl.new_idx, len(plain), int(desc_slot)))
             for k in range(stride):
                 slot = pl.new_idx * stride + k
                 o = slot_vf2_offset(slot)

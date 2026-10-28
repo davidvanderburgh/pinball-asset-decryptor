@@ -19553,6 +19553,7 @@ def _sound_modes_for_banks(gr_path, img_path, params, sites, sm_used, used, old_
     by_host, every = {}, set()
     for u in sm_used or ():
         by_host.setdefault(int(u["host"]), []).append(u)
+    idle = BB.never_played(plays, slots, exclude)   # PAD-784: ids the game never plays
     frags, why = {}, {}
     for host, us in sorted(by_host.items()):
         got, bad = [], None
@@ -19563,8 +19564,11 @@ def _sound_modes_for_banks(gr_path, img_path, params, sites, sm_used, used, old_
             sids = sorted({sid for sid, idxs in plays.items() if slot in idxs}
                           | {sid for sid in bodies if sid in plays})
             every.update(sids)
-            if not sids:
+            if sids and all(sid in idle for sid in sids):
+                bad = BB._unplayed_why(sids)
+            elif not sids:
                 bad = "no sound id of the game plays sound idx %d" % slot
+            sids = [sid for sid in sids if sid not in idle]
             for sid in sids:
                 if bad:
                     break
@@ -19575,8 +19579,7 @@ def _sound_modes_for_banks(gr_path, img_path, params, sites, sm_used, used, old_
                 elif sid in exclude:
                     bad = "sound id %d is one a mode of this card plays" % sid
                 elif not slots.get(sid):
-                    bad = ("the game plays sound id %d other than through its sound requests"
-                           % sid)
+                    bad = "the game's sound request table could not be read"
                 else:
                     got.append((u, sid))
             if bad:

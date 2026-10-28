@@ -359,7 +359,7 @@ bypass refreshing the `.sidx` record over them (`engine._sound_list_writes`).
 plays the record, that sid's descriptor names nothing else, a request list
 names the sid, and no mode of the same Write uses that request. Stock Godzilla
 LE 1.16: 2438 of 2534 (96%); the rest are 62 records two sids play, 29 sids the
-game plays other than through its lists, and 5 multi-part sids. No fragment on
+game never plays (no list names them: PAD-784), and 5 multi-part sids. No fragment on
 that card has variants that differ (all five slots name one descriptor), so a
 bank fragment's five equal slots lose nothing. A sound that cannot move stays in
 `image.bin`, trimmed there when it is full, and the log says why.
@@ -557,3 +557,30 @@ request 555 played the game's intro (idx 222, NCC 0.81 against its stock decode)
 700 Hz file 7-78 s, the 1100 Hz file 78-223 s, the game's outro (idx 919, NCC 0.81) from 223 s;
 554 the 700 Hz file for 70 s, then the 1100 Hz one; 552 the intro, then the 700 Hz file. Both
 files whole, past their stock lengths. 0 segv, 0 fatal. (The capture is 44.1 kHz.)
+
+## Sound ids no request names (PAD-784)
+
+PAD-779 kept 7 of Iron Maiden LE 1.18's 20 longer songs in `image.bin` because a sound id
+that plays them (954, 978, 267, 969) is in none of the game's request lists, taken for one
+the game starts some other way. It starts none that way. The game's descriptor resolver
+(`site sound_resolve`, 0x1403a4) has five callers on Iron Maiden LE 1.18 and five at the same
+places of the shared sound code on Godzilla LE 1.16 (0x43c104), no pointer to it anywhere: the
+play worker (`site sound_worker`), which resolves the sound id it picks from the request's
+list; a query that walks a request's list; one that reads a request record's list; a query of
+one sound id's descriptor flags (its caller stores a flag, plays nothing); and the bank
+loader, which walks a category's ids at load. Only the resolver and the loader read the
+descriptor keystream (0x5d759c). The request table's lists are static data (all 572 point
+into the file) and nothing writes the table; the four ids appear nowhere in the program, and
+no descriptor names a sound id. So 954, 978, 267 and 969, like the other 127 of the card's 983
+ids no list names, never play.
+
+`bank_build.never_played` names such ids (plain `image.bin` ids no list names and no mode of
+the Write plays; none when the request table cannot be read), and `game_sound_sids`,
+`game_sound_groups` and `engine._sound_modes_for_banks` leave them out: a song moves with the
+ids that do play it, and the idle id keeps naming `image.bin`'s record. A song only idle ids
+play stays where it is, and the log says the game never plays it.
+
+**Iron Maiden LE 1.18**, PAD-777's shape again: 17 of the 20 songs plan into banks (12
+groups), where 13 did; idx 205 moves with 949 and 956 (954 left), idx 895 with 962 (978
+left; 281 and 426 join it as a medley through 979). The 3 left, idx 612, 786 and 930, are
+played only by 267, 978 and 969: the game never plays them.

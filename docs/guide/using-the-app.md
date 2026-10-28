@@ -21,10 +21,12 @@ Every tab has a **?** button in the top bar with tips for that tab.
   struck-through game can't be decrypted yet (Spooky's Total Nuclear
   Annihilation: its key is unknown). Click a card to open that
   manufacturer.
-- **My machines** sits above the picker: one row per machine, with its card,
-  its projects and the build it runs. Once a day the app checks Stern's
-  game-code page and says when a newer build is out. Each row can open the
-  project, extract, transfer mods, write, or change and rename the machine.
+- **My machines** sits above the picker: one row per Stern, JJP or BoF
+  machine, with its card or file, its projects and the build it runs. Tick
+  "Check for new game code once a day" and the app reads each of your
+  makers' code pages and says when a newer build is out (off by default).
+  Each row can open the project, extract, write, or change and rename the
+  machine; Stern rows can also transfer mods.
 - **Prerequisites** sit in a row at the top: green ✓ or red ✗ per tool, with
   an install hint on hover. Once all are green the row tucks itself away.
 - **The ⚙ settings menu** (top right) keeps the prerequisites, the theme,

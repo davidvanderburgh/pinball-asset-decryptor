@@ -831,6 +831,24 @@ def stock_slots(slots, old_map):
     return out
 
 
+def never_played(sids, slots, exclude=()):
+    """PAD-784: the sound ids of *sids* the game never plays: plain ``image.bin`` ids no
+    request list names (*slots*, :func:`stock_slots`) and no mode of this Write plays
+    (*exclude*).  The game starts a sound only through its request table: the play
+    worker (``site sound_worker``) resolves the sound id it picks from the request's
+    list, and every other call of the game's descriptor resolver (``site
+    sound_resolve``) takes a request's list too, or is the bank loader or a query of a
+    descriptor's flags (Iron Maiden LE 1.18: its 131 sound ids no list names, 954, 978,
+    267 and 969 among them, appear nowhere in its program).  So such an id cannot hold a
+    sound in ``image.bin``: a sound it plays moves with the ids that do play it, and it
+    keeps naming ``image.bin``.  Empty when *slots* is (no request table read)."""
+    if not slots:
+        return set()
+    exclude = {int(s) for s in exclude or ()}
+    return {int(s) for s in sids if not int(s) >> 16 and not slots.get(int(s))
+            and int(s) not in exclude}
+
+
 def game_sound_sids(grows, byidx, sites, mask, slots, exclude=()):
     """``(ok, why)``: of the user's longer replacements *grows* (``{idx: (room,
     want)}``), ``ok`` ``{idx: sid}`` the ones a bank can hold, each with the game sid that
@@ -838,19 +856,23 @@ def game_sound_sids(grows, byidx, sites, mask, slots, exclude=()):
     one sid of the game's plays it (*sites*, the card's descriptor sites; *mask* its key
     mask), that sid's descriptor names nothing else, a request list names the sid
     (*slots*, :func:`stock_slots`), and it is not one a mode of this Write uses
-    (*exclude*)."""
+    (*exclude*).  PAD-784: a sid the game never plays (:func:`never_played`) does not
+    count."""
     from . import engine as E
     exclude = {int(s) for s in exclude or ()}
     by_key, sid_sites = {}, {}
     for s in sites:
         sid_sites.setdefault(s.sid, []).append(s)
         by_key.setdefault(E._play_key(s.payload, s.sid, mask), set()).add(s.sid)
+    idle = never_played(sid_sites, slots, exclude)
     ok, why = {}, {}
     for idx in sorted(grows):
         key = (byidx.get(idx) or {}).get("findkey")
-        sids = sorted(by_key.get(bytes(key), ())) if key else []
+        named = sorted(by_key.get(bytes(key), ())) if key else []
+        sids = [s for s in named if s not in idle]
         if len(sids) != 1:
             why[idx] = ("%d of the game's sound ids play it" % len(sids) if sids
+                        else _unplayed_why(named) if named
                         else "no sound id of the game's plays it")
             continue
         sid = sids[0]
@@ -861,10 +883,16 @@ def game_sound_sids(grows, byidx, sites, mask, slots, exclude=()):
         elif sid in exclude:
             why[idx] = "sound id %d is one a mode of this card plays" % sid
         elif not slots.get(sid):
-            why[idx] = "the game plays sound id %d other than through its sound requests" % sid
+            why[idx] = "the game's sound request table could not be read"
         else:
             ok[idx] = sid
     return ok, why
+
+
+def _unplayed_why(sids):
+    """PAD-784: why a sound only sound ids the game never plays name stays in image.bin."""
+    return ("the game never plays it: no sound request of the game's names sound id%s %s"
+            % ("" if len(sids) == 1 else "s", ", ".join(str(s) for s in sorted(sids))))
 
 
 #: PAD-779: a song in parts a bank can hold: the user's longer replacements *grown* (idxs) of
@@ -886,15 +914,17 @@ def game_sound_groups(grows, byidx, wide, slots, exclude=(), busy=()):
     (:func:`.engine._wide_descriptors`); *slots*, *exclude* as :func:`game_sound_sids`;
     *busy* the idxs this Write gives other sounds (a mode's, a music mode's file), which can't
     be copied as a part.  A sound one sound id plays alone is :func:`game_sound_sids`'s, not
-    a group."""
+    a group.  PAD-784: a sound id the game never plays (:func:`never_played`: Iron Maiden LE
+    1.18's 954, 978, 267, 969) is not one of a group's: it keeps naming ``image.bin``."""
     from .spike2.emulator import bands_of
     exclude = {int(x) for x in exclude or ()}
     busy = {int(x) for x in busy or ()}
-    plays_of = {}
+    idle = never_played(wide, slots, exclude)
+    plays_of, idle_of = {}, {}
     for sid, (_d, idxs) in wide.items():
         for i in idxs:
             if i is not None:
-                plays_of.setdefault(i, set()).add(sid)
+                (idle_of if sid in idle else plays_of).setdefault(i, set()).add(sid)
     groups, why, seen = [], {}, set()
     for x in sorted(grows):
         if x in seen:
@@ -915,7 +945,10 @@ def game_sound_groups(grows, byidx, wide, slots, exclude=(), busy=()):
         parts = []
         for sid in sorted(sids):
             parts.extend(j for j in wide[sid][1] if j not in parts)
-        bad = None if sids else "no sound id of the game's plays it"
+        bad = None
+        if not sids:
+            named = set().union(*(idle_of.get(j, set()) for j in grown))
+            bad = _unplayed_why(named) if named else "no sound id of the game's plays it"
         for sid in sorted(sids):
             desc, idxs = wide[sid]
             if sid >> 16:
@@ -923,7 +956,7 @@ def game_sound_groups(grows, byidx, wide, slots, exclude=(), busy=()):
             elif sid in exclude:
                 bad = "sound id %d is one a mode of this card plays" % sid
             elif not slots.get(sid):
-                bad = "the game plays sound id %d other than through its sound requests" % sid
+                bad = "the game's sound request table could not be read"
             elif None in idxs:
                 bad = "sound id %d plays a record the card's directory does not name" % sid
             elif len(desc) > SB.DESC_SLOT_MAX:

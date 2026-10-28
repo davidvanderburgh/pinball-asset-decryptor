@@ -117,6 +117,12 @@ from ...core import lineage as _lineage  # noqa: E402
 _lineage.register_printer(_spike2_print)
 _lineage.register_off_stock(_spike2_off_stock)
 
+# My machines' daily game-code check (PAD-783): Stern's public page
+from ...core import code_watch as _code_watch  # noqa: E402
+from .machine_info import GAME_CODE_PAGE as _GAME_CODE_PAGE  # noqa: E402
+from .machine_info import parse_game_code_page as _parse_game_code_page  # noqa: E402
+_code_watch.register_source("stern", _GAME_CODE_PAGE, _parse_game_code_page)
+
 _SPIKE2_GAMES = tuple(
     Game(key=k, display=info["display"], manufacturer_key="stern",
          era="spike2")

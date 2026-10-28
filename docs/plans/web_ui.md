@@ -52,7 +52,7 @@ The settings menu and Ctrl + / Ctrl - / Ctrl 0 set a global zoom (67% to 200%), 
 ### The frame (David, 2026-09-23)
 
 - Top bar reads broad to specific, left to right: manufacturer (and era), then the project. No logo, name or branch chip: the window title already carries the name, version, branch and project.
-- No Home button. The manufacturer menu switches manufacturer directly and ends with "Browse manufacturers and their games…", the picker page. The picker is otherwise only the first launch's landing page (no saved `last_manufacturer`); reached from the menu it has a "Back to <manufacturer>" button.
+- No Home button. The manufacturer menu switches manufacturer directly and ends with "My machines and manufacturers…", the picker page (My machines on top, PAD-783). The picker is otherwise only the first launch's landing page (no saved `last_manufacturer`); reached from the menu it has a "Back to <manufacturer>" button.
 - The log: a dotted border above the status row is dragged to give the log room (up to the window height less 200 px), dragged to the bottom to hide it, or double-clicked. Under the status row, the progress row stays visible with the log hidden: Tk's full-width bar (striped and moving while a run is live, a marquee while the total is unknown), the percent, an ETA for the current step from its pace so far, the elapsed time, and Hide log / Show log.
 
 ### The virtual playfield (the rig's window), on the web too

@@ -216,7 +216,8 @@ def test_a_file_whose_every_sound_id_a_request_names_can_go_into_a_bank(monkeypa
     assert sids == {20, 21, 22, 23, 24, 25}
     text = "\n".join(lines)
     assert "sound id 22 plays sound idx 3 together with other sounds" in text
-    assert "the game plays sound id 23 other than through its sound requests" in text
+    # PAD-784: sid 23 is in no request: the game never plays it
+    assert "the game never plays it: no sound request of the game's names sound id 23" in text
     assert "sound id 24 is one a mode of this card plays" in text
 
 

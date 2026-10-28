@@ -39,6 +39,13 @@ FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash coreutils procps psmisc util-linux \
         qemu-user-static gcc-arm-linux-gnueabihf libc6-dev \
+        `# ...AND THE ARM C HEADERS. -nostdlib governs the LINK, not the` \
+        `# includes: hwshim.c includes setjmp.h, and the cross compiler only` \
+        `# RECOMMENDS libc6-dev-armhf-cross, which --no-install-recommends` \
+        `# drops. Without it the shim fails at "bits/wordsize.h: No such file` \
+        `# or directory" (PAD-785, the first Mac to build it; the runtime` \
+        `# image learned the same lesson, tools/runtime/Dockerfile).` \
+        libc6-dev-armhf-cross \
         `# BOTH compilers, and the native one is easy to forget. The shim is` \
         `# cross-compiled for the ARM guest (gcc-arm-linux-gnueabihf), but` \
         `# padglhost is a NATIVE binary - the whole GL bridge exists to get the` \

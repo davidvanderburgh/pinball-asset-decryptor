@@ -27,7 +27,8 @@ import threading
 from unicorn import (UC_ARCH_ARM, UC_HOOK_BLOCK, UC_HOOK_CODE,
                      UC_HOOK_MEM_FETCH_UNMAPPED, UC_HOOK_MEM_READ,
                      UC_HOOK_MEM_READ_UNMAPPED, UC_HOOK_MEM_WRITE_UNMAPPED,
-                     UC_MODE_ARM, UC_PROT_ALL, Uc, UcError)
+                     UC_MODE_ARM, UC_PROT_EXEC, UC_PROT_READ,
+                     UcError)
 from unicorn.arm_const import (UC_ARM_REG_C1_C0_2, UC_ARM_REG_FPEXC,
                                UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_R0,
                                UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
@@ -37,6 +38,7 @@ from unicorn.arm_const import (UC_ARM_REG_C1_C0_2, UC_ARM_REG_FPEXC,
                                UC_ARM_REG_SP)
 
 from . import rbtree as RB
+from .window import WindowUc
 from .elf import parse_elf
 from .netbridge import BoardFirmwareError  # noqa: F401  (the engine's)
 
@@ -68,6 +70,8 @@ def _rotimm(w):
 
 
 PAGE = 0x1000
+#: How much heap is mapped at a time as alloc() hands it out (PAD-777).
+HEAP_STEP = 16 << 20
 
 
 def _algn(x, a=PAGE):
@@ -621,7 +625,11 @@ class Spike2Emu:
     ACC_VA = 0x19000000                             # decode scratch (fixed; see setup_decode)
     BB = 0x50000000                                 # body buffer (grown lazily)
 
-    def __init__(self, game_real_path, image_path):
+    def __init__(self, game_real_path, image_path, card_copy=False):
+        # PAD-777: *card_copy* for an emulator that will write the card (the
+        # Write's integrity check lays the re-encoded sounds over it): its window
+        # is a copy-on-write view from the start, as every emulator's was
+        self._card_copy = bool(card_copy)
         raw = open(game_real_path, "rb").read()
         self._gr_path = game_real_path   # re-read on demand for SFX-name mining
         segs, relocs = parse_elf(raw)
@@ -634,7 +642,9 @@ class Spike2Emu:
         self._generic = st.generic
         self.audio_supported = st.audio_supported
         self._set_addrs(copy.deepcopy(st.addrs) if st.addrs is not None else None)
-        mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+        # PAD-777: the card windows are read-only views that take writes in pages
+        # of their own (spike2.window), so mapping image.bin commits nothing
+        mu = WindowUc(UC_ARCH_ARM, UC_MODE_ARM)
         self.mu = mu
         # every LDREX/STREX, so the global hook can emulate them inline, and
         # the ELF PLT thunk entries -> their GOT slots (see _static_analysis)
@@ -646,7 +656,10 @@ class Spike2Emu:
             mu.mem_map(b, e - b)
             mu.mem_write(vaddr, raw[off:off + filesz])
         mu.mem_map(self.STK, self.STKSZ)
-        mu.mem_map(self.HEAP, self.HEAPSZ)
+        # PAD-777: the heap is mapped as alloc() hands it out (HEAP_STEP at a
+        # time), not 512 MB up front: Unicorn commits a region's whole size
+        self._heap_mapped = self.HEAP
+        self._map_heap(self.HEAP + 0x100000 + HEAP_STEP)
         mu.mem_map(self.IMPORT & ~0xfff, 0x4000)
         mu.mem_map(self.LAND & ~0xfff, PAGE)
         self.heap = self.HEAP + 0x100000
@@ -770,10 +783,14 @@ class Spike2Emu:
         to 54.5 ms by record 3000, and 18.8 min for the full derive -- against a
         flat 11.0 ms/record and ~1.5 min mapping the window in one piece.
 
-        ``ACCESS_COPY`` makes it a private copy-on-write view, so a guest write
-        to the card lands in a private page and never reaches image.bin -- the
-        same isolation the copying path gave, without the copy.  Pages only
-        materialise when touched (peak RSS 81 MB on the Deadpool derive).
+        PAD-777: a READ-ONLY view, which commits nothing, until something writes
+        the card (the game never does; the Write's integrity check does): then
+        the whole window becomes a private copy-on-write view, so a write never
+        reaches image.bin (:class:`.window.WindowUc`).  The copy-on-write view
+        every emulator used to map committed image.bin's whole size on Windows
+        (1.3 GB of Iron Maiden's 1.9 GB emulator), and three bank encoders side
+        by side ran a user's PC out of memory.  Pages only materialise when
+        touched (peak RSS 81 MB on the Deadpool derive).
 
         Best effort: any build/platform where this doesn't take keeps the paging
         path, which is still correct, just slower on big catalogs."""
@@ -781,20 +798,10 @@ class Spike2Emu:
         if span <= 0 or DESC_BASE + span > 0x1_0000_0000:
             return                            # would leave the 32-bit guest space
         try:
-            import ctypes
-            self._cardf = mmap.mmap(self._imgf.fileno(), 0, access=mmap.ACCESS_COPY)
-            self._cardbuf = (ctypes.c_char * span).from_buffer(self._cardf)
-            self.mu.mem_map_ptr(DESC_BASE, span, UC_PROT_ALL,
-                                ctypes.addressof(self._cardbuf))
+            self.mu.map_window(DESC_BASE, span, self._imgf, UC_PROT_READ | UC_PROT_EXEC,
+                               copy=self._card_copy)
         except Exception as e:
             self.log.append(("card_map_ptr", str(e)))
-            self._cardbuf = None
-            if self._cardf is not None:
-                try:
-                    self._cardf.close()
-                except Exception:
-                    pass
-                self._cardf = None
             return
         self._card_lo, self._card_hi = DESC_BASE, DESC_BASE + span
 
@@ -1232,7 +1239,23 @@ class Spike2Emu:
     def alloc(self, n):
         p = self.heap
         self.heap = p + _algn(max(16, n), 16) + 64
+        if self.heap > self._heap_mapped:
+            self._map_heap(self.heap)
         return p
+
+    def _map_heap(self, top):
+        """Map the heap up to *top* (in HEAP_STEP pieces, never past the HEAP
+        window: a boot that asks for more, as Led Zeppelin 1.21's does, runs on
+        into pages mapped on demand as it always has)."""
+        end = min(self.HEAP + self.HEAPSZ, _algn(top, HEAP_STEP))
+        if end <= self._heap_mapped:
+            return
+        try:
+            self.mu.mem_map(self._heap_mapped, end - self._heap_mapped)
+        except UcError:
+            # a page the guest already faulted in there: page by page
+            self._ensure_range(self._heap_mapped, end - self._heap_mapped)
+        self._heap_mapped = end
 
     def add_hook(self, addr, fn):
         self.extra[addr] = fn
@@ -1263,6 +1286,12 @@ class Spike2Emu:
             return
         self._ensure_range(DESC_BASE + off, n)
         self.mu.mem_write(DESC_BASE + off, bytes(data))
+
+    def patch_cards(self, patches):
+        """:meth:`patch_card` for every ``{off: data}`` of *patches*, in order (the
+        first makes the card window a copy-on-write view of its own: PAD-777)."""
+        for off in sorted(patches):
+            self.patch_card(off, patches[off])
 
     def add_read_hook(self, fn, begin, end):
         """A ``UC_HOOK_MEM_READ`` hook over ``[begin, end]`` calling
@@ -2299,21 +2328,16 @@ class Spike2Emu:
 
     def close(self):
         # Tear the card window down first and in order: unicorn is pointing
-        # straight at the COW view, and the ctypes buffer holds an exported
-        # pointer that makes mmap.close() raise until it is dropped.
+        # straight at the view, and its exported pointer makes the view's
+        # close raise until it is dropped.
         if self._card_hi > self._card_lo:
             try:
-                self.mu.mem_unmap(self._card_lo, self._card_hi - self._card_lo)
+                self.mu.unmap_window(self._card_lo)
             except Exception:
                 pass
             self._card_lo = self._card_hi = 0
         self._cardbuf = None
-        if self._cardf is not None:
-            try:
-                self._cardf.close()
-            except Exception:
-                pass
-            self._cardf = None
+        self._cardf = None
         try:
             self.mm.close()
         except Exception:

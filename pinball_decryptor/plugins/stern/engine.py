@@ -20615,8 +20615,8 @@ def _integrity_rows(gr_path, img_path, patches, work_dir, progress=None):
     """The rows the firmware derives from ``image.bin`` with *patches* laid
     over it, for :func:`_assert_param_integrity`.
 
-    The patches go into the emulator's private copy-on-write view of the card
-    (:meth:`~.spike2.emulator.Spike2Emu.patch_card`) before it boots, which is
+    The patches go into the emulator's own pages of the card's view
+    (:meth:`~.spike2.emulator.Spike2Emu.patch_cards`) before it boots, which is
     what the firmware would read from a patched copy of the file; the copy it
     replaces was 1.65 GB on Godzilla and most of the check's time once the
     derive got fast.  A patch past the end of the file (a file a copy would
@@ -20627,10 +20627,9 @@ def _integrity_rows(gr_path, img_path, patches, work_dir, progress=None):
                and all(0 <= off and off + len(body) <= size
                        for off, body in patches.items()))
     if in_view:
-        emu = Spike2Emu(gr_path, img_path)
+        emu = Spike2Emu(gr_path, img_path, card_copy=True)
         try:
-            for off in sorted(patches):
-                emu.patch_card(off, patches[off])
+            emu.patch_cards(patches)
             emu.boot()
             return emu.derive_params(progress=progress)
         finally:

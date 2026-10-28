@@ -48,7 +48,8 @@ from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
 from . import locate as L
 from .elf import parse_elf
 from .emulator import DESC_BASE, MAX_RECORDS, PAGE, Spike2Emu, _R, _algn, _u32
-from unicorn import UC_PROT_ALL
+from unicorn import UC_PROT_EXEC, UC_PROT_READ
+
 
 # Fallback 2nd offset-identity window.  The real one is computed per card in
 # :class:`CatEmu.__init__` so it always sits clear of the image.bin window —
@@ -306,37 +307,26 @@ class CatEmu(Spike2Emu):
         d2 = self.DESC2
         if span <= 0 or d2 + span > 0x1_0000_0000:
             return
+        # PAD-777 (spike2.window): a bank's encode writes its bodies into this
+        # window, so it is a copy-on-write view from the start as it always was
+        # (a bank is 218 MB at most; image.bin's window is the one that weighed)
         try:
-            import ctypes
-            self._catcow = mmap.mmap(self._catf.fileno(), 0, access=mmap.ACCESS_COPY)
-            self._catbuf = (ctypes.c_char * span).from_buffer(self._catcow)
-            self.mu.mem_map_ptr(d2, span, UC_PROT_ALL, ctypes.addressof(self._catbuf))
+            self.mu.map_window(d2, span, self._catf, UC_PROT_READ | UC_PROT_EXEC,
+                               copy=True)
         except Exception as e:                                       # noqa: BLE001
             self.log.append(("cat_map_ptr", str(e)))
-            self._catbuf = None
-            if self._catcow is not None:
-                try:
-                    self._catcow.close()
-                except Exception:
-                    pass
-                self._catcow = None
             return
         self._cat_lo, self._cat_hi = d2, d2 + span
 
     def _unmap_cat_region(self):
         if self._cat_hi > self._cat_lo:
             try:
-                self.mu.mem_unmap(self._cat_lo, self._cat_hi - self._cat_lo)
+                self.mu.unmap_window(self._cat_lo)
             except UcError:
                 pass
         self._cat_lo = self._cat_hi = 0
         self._catbuf = None
-        if self._catcow is not None:
-            try:
-                self._catcow.close()
-            except Exception:
-                pass
-            self._catcow = None
+        self._catcow = None
 
     def close(self):
         try:

@@ -438,9 +438,9 @@ def _out_of_memory(text):
 
 
 def _out_of_memory_words(run, img_path):
-    """``run()``, its out-of-memory failure said in words a user can act on: each sound
-    encoder holds image.bin whole in memory (PAD-777: Iron Maiden's at 2.1 GB on a PC
-    whose page file did not grow, three encoders at once died with ``UC_ERR_NOMEM``)."""
+    """``run()``, its out-of-memory failure said in words a user can act on (PAD-777:
+    three Iron Maiden bank encoders at once died with ``UC_ERR_NOMEM`` on a PC whose
+    page file did not grow)."""
     from .spike2.parallel import emulator_commit
     try:
         return run()
@@ -451,10 +451,9 @@ def _out_of_memory_words(run, img_path):
             raise
         why = e
     raise RuntimeError(
-        "This computer ran out of memory encoding the sound banks, even one at a time: "
-        "each sound encoder holds the game's sound file (image.bin) whole, about %.1f GB "
-        "here. Close other programs, and check the C: drive has a few GB free so Windows "
-        "can grow its page file, then Write again. (%s)"
+        "This computer ran out of memory encoding the sound banks, even one at a time "
+        "(a sound encoder needs about %.1f GB). Close other programs, and check the C: "
+        "drive has a few GB free so Windows can grow its page file, then Write again. (%s)"
         % (emulator_commit(img_path) / 1e9, why))
 
 

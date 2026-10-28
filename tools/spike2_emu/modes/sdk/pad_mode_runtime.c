@@ -2402,6 +2402,23 @@ static void *scene(const char *which)
     return player ? *(void **)((char *)player + at) : 0;
 }
 
+/* PAD-782: the scene PLAYER of a scene (what scene() reads the scene out of), or 0 */
+static void *scene_player_of(const char *which)
+{
+    const char *id = pm_scene_id(which);
+    unsigned str;
+    void *res, *manager;
+    if (!id) id = which;
+    if (!id || !*id) return 0;
+    manager = *(void **)(unsigned long)data("resource_manager");
+    if (!manager) return 0;
+    str = std_string(id);
+    res = ((void *(*)(void *, unsigned *, unsigned))(unsigned long)fn("resource_get"))(manager, &str, 0u);
+    if (!res) return 0;
+    return ((void *(*)(void *, unsigned, unsigned, int))(unsigned long)fn("dynamic_cast"))
+           (res, data("typeinfo_resource"), data("typeinfo_scene_player"), 0);
+}
+
 static void *find_with(unsigned finder, const char *where, const char *path)
 {
     unsigned str, out[2] = { 0, 0 };
@@ -12989,6 +13006,12 @@ static int ait_on = -1;                     /* the item whose clip the tick put 
  * in that element's scene (the card build put it there). 0: the pm_clip route. */
 static void *(*ait_video_ptr);
 static int ait_video;
+/* clip v2 without that element (Aerosmith 1.16 and the other titles whose clips play on the video bank's surface): the
+ * attract mode never draws the bank's scene - the game's own clip pages put it on the glass themselves, every frame
+ * advancing its player and showing it (Aerosmith's OilProjectorLoop page 0x286a4: player_advance, scene_show(player, 3),
+ * the frame yield). An item does the same from its page while its clip plays on the bank's surface. */
+static int ait_show;
+static unsigned ait_show_fn;                /* `site attract_show` (portattract.show_lines), else the port's scene_show */
 
 static void ait_line(char *s)
 {
@@ -13049,8 +13072,19 @@ static void ait_play(unsigned i)
     if (ait_video) {
         ait_play_video(it);
     } else {
+        unsigned long last = pm_ms();
+        long layer = pm_port_value("attract_show_layer", 3);
         while (pm_ms() - ait_began < it->ms && !pm_in_game()) {
             ait_beat = pm_ms();
+            if (ait_show && ait_on == (int)i) {           /* the tick has put the clip on the bank's surface */
+                void *pl = scene_player_of("video_bank");
+                unsigned long now = pm_ms();
+                if (pl) {
+                    ((void (*)(void *, float))(unsigned long)fn("player_advance"))(pl, (float)(now - last));
+                    ((void (*)(void *, int))(unsigned long)ait_show_fn)(pl, (int)layer);
+                }
+                last = now;
+            }
             ait_sleep(1);
         }
     }
@@ -13172,6 +13206,11 @@ static void attract_arm(void)
             }
         }
     }
+    /* the scene show: clip v2 titles, and the clip call's titles whose full-screen clip is not drawn at the frame
+     * hand-over (Godzilla's is, and needs nothing more) */
+    ait_show_fn = fn("attract_show") ? fn("attract_show") : fn("scene_show");
+    if (!ait_video && !clip_layer && !frame_hooked && ait_show_fn && fn("player_advance") && pm_scene_id("video_bank"))
+        ait_show = 1;
     if (!ait_video && !(can & PM_CAN_CLIPS)) {
         say("attract items: off - this build has no full-screen clip route");
         ait_n = 0;
@@ -13224,6 +13263,7 @@ static void attract_arm(void)
     say("attract items: %u item(s) between the game's attract pages (table 0x%08x, %u entries of %u bytes, %u page(s) "
         "taking items; the process sleep 0x%08x); played %s", ait_n, table, count, size, ait_anchors,
         (unsigned)(unsigned long)ait_sleep, ait_video ? "through the attract video element (its pages' own way)"
+        : ait_show ? "on the video bank's surface, its scene shown by the page as the game's own clip pages do"
         : "full screen (the clip route)");
 }
 

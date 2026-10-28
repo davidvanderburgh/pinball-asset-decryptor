@@ -820,3 +820,5 @@ site  attract_video_update  0x001ccefc 0xe5900000 0xea07e5f2
 site  attract_video_draw    0x001ccf04 0xe5900000 0xe3a01003
 site  attract_video_yield   0x00207560 0xe30636a8 0xe3403082
 text  attract_video_clip  Attract_BondIntro_LogoOnly
+# PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with
+site  attract_show        0x003c66fc 0xe92d4070 0xe30646ac

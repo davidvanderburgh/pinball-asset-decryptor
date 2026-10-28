@@ -637,3 +637,5 @@ value attract_entry_size  16
 value attract_page_at     4
 value attract_count       71
 site  attract_sleep       0x003f3734 0xe30d3ea8 0xe3403089
+# PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with
+site  attract_show        0x00367220 0xe92d4070 0xe30d4eac

@@ -258,3 +258,26 @@ def test_items_are_offered_only_where_a_route_puts_them_on_the_glass(key, offere
     from pinball_decryptor.plugins.stern import mode_project as MP
     why = AI.title_refusal(MP.profile(key))
     assert (why == "") is offered, (key, why)
+
+
+# ---- the scene show (clip v2 titles without the attract video element) -------------------------------------------
+@pytest.mark.parametrize("name", [n[:-len(".port")] for n, _v in _attract_ports()])
+def test_the_scene_show_finder_agrees_with_the_ports(name):
+    e = _elf(name)
+    with open(os.path.join(PORTS, name + ".port"), encoding="utf-8") as f:
+        text = f.read()
+    found = PA.scene_show(e)
+    known = re.search(r"^site\s+scene_show\s+(0x[0-9a-f]+)", text, re.M)
+    if known:                                                    # the port's own (derived and checked) scene_show
+        assert found == int(known.group(1), 16), name
+    shown = re.search(r"^site\s+attract_show\s+(0x[0-9a-f]+)", text, re.M)
+    assert shown and int(shown.group(1), 16) == found, name
+
+
+def test_the_runtime_shows_the_bank_scene_from_the_page():
+    with open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8") as f:
+        src = f.read()
+    play = src[src.index("static void ait_play(unsigned i)"):]
+    play = play[:play.index("\n}\n")]
+    assert 'fn("player_advance")' in play and "ait_show_fn" in play and "ait_sleep(1)" in play
+    assert 'fn("attract_show") ? fn("attract_show") : fn("scene_show")' in src

@@ -315,3 +315,47 @@ def element_lines(e, s=None):
         out.append("site  %-21s 0x%08x 0x%08x 0x%08x" % (name, va, e.word(va), e.word(va + 4)))
     out.append("text  attract_video_clip  %s" % el.clip)
     return out
+
+
+# ---- the scene show (clip v2 titles without the attract video element) ---------------------------------------------
+#: Aerosmith 1.16's OilProjectorLoop attract page puts the video bank's scene on the glass itself, every frame:
+#: player_advance(player, ms) ; scene_show(player, 3) ; the frame yield - the attract mode never draws that scene
+#: otherwise. An item plays the same way. scene_show's opening words with its movw/movt immediates and its branch
+#: offsets masked (push {r4-r6,lr} ; movw/movt r4 <the display> ; mov r6,r0 ; ldr r3,[r4] ; mov r5,r1 ; cmp r3,#0 ;
+#: beq ; ldrh r2,[r3,#2] ; movw r3 ; and r3,r3,r2 ; cmp r3,#0): two functions of every build have them - scene_show
+#: first, its sibling 0xb8 on - and the first is the port's scene_show on all 29 ports that name it.
+_SHOW_SIG = (0xE92D4070, 0xE3004000, 0xE3404000, 0xE1A06000, 0xE5943000, 0xE1A05001, 0xE3530000, 0x0A000000,
+             0xE1D320B2, 0xE3003000, 0xE0033002, 0xE3530000)
+
+
+def _mask(x):
+    if x & 0x0FF00000 in (0x03000000, 0x03400000):
+        return x & 0xFFF0F000
+    if x & 0x0E000000 == 0x0A000000:
+        return x & 0xFF000000
+    if x & 0x0F7F0000 == 0x051F0000:
+        return x & 0xFFFFF000
+    return x
+
+
+def scene_show(e):
+    """The build's scene show (``scene_show(player, layer)``), or None."""
+    if not isinstance(e, Elf):
+        e = Elf(e)
+    w, n = e.words, len(_SHOW_SIG)
+    first = _SHOW_SIG[0]
+    for i in range(len(w) - n):
+        if w[i] == first and all(_mask(w[i + k]) == _SHOW_SIG[k] for k in range(1, n)):
+            return e.text_va + 4 * i
+    return None
+
+
+def show_lines(e):
+    """``site attract_show`` (the scene show an item's page calls on a clip v2 title), or []."""
+    if not isinstance(e, Elf):
+        e = Elf(e)
+    va = scene_show(e)
+    if va is None:
+        return []
+    return ["# PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with",
+            "site  attract_show        0x%08x 0x%08x 0x%08x" % (va, e.word(va), e.word(va + 4))]

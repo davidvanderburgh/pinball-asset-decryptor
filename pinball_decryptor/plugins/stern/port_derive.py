@@ -705,7 +705,8 @@ def merge(drafts, refs, tgt, game, version, family):
                      "are in) ----"] + scores
     # PAD-782: the attract mode's page table (an owner's attract items play between its pages)
     from . import portattract
-    attract = [line for line in (portattract.lines(b) + portattract.element_lines(b)) if not line.startswith("#")
+    attract = [line for line in (portattract.lines(b) + portattract.element_lines(b) + portattract.show_lines(b))
+               if not line.startswith("#")
                and line.split()[:2] not in [l.split()[:2] for l in body if l.strip()]] if b else []
     if attract:
         body += ["", "# ---- PAD-782: the attract mode's page table (portattract.py) ----"] + attract

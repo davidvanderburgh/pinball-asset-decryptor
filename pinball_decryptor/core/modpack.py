@@ -12,7 +12,7 @@ import zipfile
 from . import hashcache
 from . import staged_changes
 from . import staged_originals
-from .checksums import (CHECKSUMS_FILE, MUSIC_MODE_FILES_DIR, RANDOM_CLIP_FILES_DIR,
+from .checksums import (ATTRACT_FILES_DIR, CHECKSUMS_FILE, MUSIC_MODE_FILES_DIR, RANDOM_CLIP_FILES_DIR,
                         TRACKING_SIDECARS, read_baseline_any)
 from . import lineage as lineage_mod
 from .extract_source import read_extract_source, version_hint_from_name
@@ -47,7 +47,9 @@ _EXTRA_MAPS = ("settings", "high_scores", "image_group_tags",
                "audio_levels")
 _EXTRA_SCALARS = ("menu_expose_through",
                   # PAD-755: a Home Edition's coin door ("fitted")
-                  "coin_door")
+                  "coin_door",
+                  # PAD-786: a final wizard that does not end the game ("plays_on")
+                  "final_wizard")
 # The game's own modes (item 145): the Modes tab's record of a stock mode's staged timers and
 # awards, ``{"build", "values": {row key: value}, "touched": [row key]}``.  Not a flat map: its
 # row keys only mean something for the build they were staged against, so it is merged by
@@ -83,6 +85,12 @@ _EXTRA_SOUND_MODES = "sound_modes"
 # an import puts them in RANDOM_CLIP_FILES_DIR and points the record there.
 CLIPS_DIR = ".modpack_clips"
 _EXTRA_VARIANTS = "video_variants"
+# PAD-782: a Stern project's ATTRACT ITEMS (``attract_items``: photos, clips and
+# text cards between the game's attract screens).  Their photos and clips are
+# the user's own files too: their bytes under this zip folder, and an import
+# puts them in ATTRACT_FILES_DIR and points the record there.
+ATTRACT_DIR = ".modpack_attract"
+_EXTRA_ATTRACT = "attract_items"
 
 
 def _is_packable(rel):
@@ -175,7 +183,88 @@ def project_extras(assets_folder):
     vv = _variant_map(data.get(_EXTRA_VARIANTS))
     if vv:
         extras[_EXTRA_VARIANTS] = vv
+    at = data.get(_EXTRA_ATTRACT)
+    if isinstance(at, dict) and (at.get("items") or at.get("champions") is False):
+        extras[_EXTRA_ATTRACT] = json.loads(json.dumps(at))
     return extras
+
+
+def pack_attract(rec):
+    """Split an attract items record into what a pack carries: ``(record,
+    [(file, member)], [file] gone)``, its photos' and clips' files zip members
+    under :data:`ATTRACT_DIR` (one per file however many items use it); an item
+    whose file is gone is left out."""
+    members, files, gone, items = {}, [], [], []
+    for it in (rec.get("items") or []) if isinstance(rec, dict) else ():
+        if not isinstance(it, dict):
+            continue
+        it = dict(it)
+        if it.get("kind") in ("photo", "clip"):
+            path = it.get("file") or ""
+            if not os.path.isfile(path):
+                gone.append(path)
+                continue
+            key = os.path.normcase(os.path.abspath(path))
+            if key not in members:
+                members[key] = "%s/%d/%s" % (ATTRACT_DIR, len(members),
+                                             os.path.basename(path) or "item")
+                files.append((path, members[key]))
+            it["file"] = members[key]
+        items.append(it)
+    out = dict(rec, items=items) if isinstance(rec, dict) else None
+    keep = out is not None and (items or out.get("champions") is False)
+    return (out if keep else None), files, gone
+
+
+def _attract_words(rec):
+    n = len(rec.get("items") or [])
+    return "%d attract item(s)" % n if n else "the attract settings"
+
+
+def _unpack_attract(zip_path, assets_folder, rec, log_cb=None):
+    """Write a pack's attract photos and clips into the project's
+    :data:`checksums.ATTRACT_FILES_DIR` and return its record pointing at them
+    (an item whose member is not in the pack is left out)."""
+    items, written = [], {}
+    base = os.path.join(assets_folder, ATTRACT_FILES_DIR)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        names = set(zf.namelist())
+        for it in rec.get("items") or []:
+            if not isinstance(it, dict):
+                continue
+            it = dict(it)
+            if it.get("kind") in ("photo", "clip"):
+                member = str(it.get("file") or "")
+                parts = member.split("/")
+                if (len(parts) != 3 or parts[0] != ATTRACT_DIR or ":" in member
+                        or any(q in ("", ".", "..") for q in parts)
+                        or member not in names):
+                    continue
+                if member not in written:
+                    os.makedirs(base, exist_ok=True)
+                    stem, ext = os.path.splitext(parts[2])
+                    dest, k = os.path.join(base, parts[2]), 2
+                    info = zf.getinfo(member)
+                    while os.path.isfile(dest):
+                        if os.path.getsize(dest) == info.file_size:
+                            with open(dest, "rb") as f, zf.open(member) as g:
+                                if f.read() == g.read():
+                                    break
+                        dest = os.path.join(base, "%s (%d)%s" % (stem, k, ext))
+                        k += 1
+                    else:
+                        with zf.open(member) as g, open(dest, "wb") as f:
+                            shutil.copyfileobj(g, f)
+                    written[member] = dest
+                it["file"] = written[member]
+            items.append(it)
+    out = dict(rec, items=items)
+    if not items and out.get("champions") is not False:
+        return None
+    if written and log_cb:
+        log_cb("The pack's attract photos and clips (%d) are in this project's "
+               "\"%s\" folder." % (len(written), ATTRACT_FILES_DIR), "info")
+    return out
 
 
 def _variant_map(raw):
@@ -430,7 +519,8 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
 
     _staged = staged_changes.load(assets_folder)
     if not changed and not staged_changes.sound_modes_of(_staged) \
-            and not _variant_map(_staged.get(_EXTRA_VARIANTS)):
+            and not _variant_map(_staged.get(_EXTRA_VARIANTS)) \
+            and not (_staged.get(_EXTRA_ATTRACT) or {}).get("items"):
         # a project of music modes (PAD-494) or random clips (PAD-553) alone
         # changes no file of the extract, and is still something to pack
         raise ValueError("No modified files found. Modify some files first.")
@@ -500,6 +590,19 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                    % (len(gone), ", ".join(
                        "%s of %s" % (os.path.basename(f), os.path.basename(r))
                        for r, f in gone[:4])), "warning")
+    attract_files = []
+    if extras.get(_EXTRA_ATTRACT):                   # PAD-782
+        rec, attract_files, gone = pack_attract(extras[_EXTRA_ATTRACT])
+        if rec:
+            extras[_EXTRA_ATTRACT] = rec
+        else:
+            extras.pop(_EXTRA_ATTRACT)
+        if gone and log_cb:
+            log_cb("NOT in the pack: %d attract item(s) whose file is no longer "
+                   "at the path it was picked from (%s). Add them again on the "
+                   "Attract page before packing to carry them."
+                   % (len(gone), ", ".join(os.path.basename(f) for f in gone[:4])),
+                   "warning")
     carried_card, named_card = pack_card_files(
         card_replacements(assets_folder))
     manifest = {
@@ -536,6 +639,8 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
             rode.append(_sound_modes_words(extras[_EXTRA_SOUND_MODES]))
         if extras.get(_EXTRA_VARIANTS):
             rode.append(_variants_words(extras[_EXTRA_VARIANTS]))
+        if extras.get(_EXTRA_ATTRACT):
+            rode.append(_attract_words(extras[_EXTRA_ATTRACT]))
         if rode:
             log_cb("Also packing " + ", ".join(rode)
                    + " — they are project settings, not files.", "info")
@@ -589,6 +694,13 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                 if log_cb:
                     log_cb("Could not pack %s (a random clip) — %s."
                            % (path, err), "warning")
+        for path, member in attract_files:
+            try:
+                zf.write(path, member, compress_type=zipfile.ZIP_STORED)
+            except OSError as err:
+                if log_cb:
+                    log_cb("Could not pack %s (an attract item) — %s."
+                           % (path, err), "warning")
 
     return len(changed), zip_path
 
@@ -626,7 +738,7 @@ def inspect_mod_pack(zip_path, assets_folder):
         names = [n for n in zf.namelist()
                  if n != MANIFEST_NAME and not n.endswith(("/", "\\"))
                  and not n.startswith((CARD_DIR + "/", MODES_DIR + "/",
-                                       CLIPS_DIR + "/"))]
+                                       CLIPS_DIR + "/", ATTRACT_DIR + "/"))]
         try:
             manifest = json.loads(zf.read(MANIFEST_NAME).decode("utf-8"))
         except (KeyError, ValueError, UnicodeDecodeError):
@@ -824,6 +936,11 @@ def apply_extras(assets_folder, extras, log_cb=None):
         merged.update(vv)
         data[_EXTRA_VARIANTS] = merged
         applied[_EXTRA_VARIANTS] = len(vv)
+    at = extras.get(_EXTRA_ATTRACT)
+    if isinstance(at, dict) and (at.get("items") or at.get("champions") is False):
+        # PAD-782: the pack's attract items take the project's place (one attract mode)
+        data[_EXTRA_ATTRACT] = at
+        applied[_EXTRA_ATTRACT] = len(at.get("items") or []) or 1
     if not applied:
         return {}
     staged_changes.save(assets_folder, data)
@@ -845,9 +962,11 @@ def apply_extras(assets_folder, extras, log_cb=None):
                  "replacement_names": "the name(s) of %d replacement file(s)",
                  "menu_expose_through": "the Adjustments-menu reveal",
                  "coin_door": "the coin door",
+                 "final_wizard": "the final wizard choice",
                  _EXTRA_STOCK_MODES: "%d " + _stock_modes_words(),
                  _EXTRA_SOUND_MODES: "music mode files for %d sound(s)",
-                 _EXTRA_VARIANTS: "random clips for %d clip(s)"}
+                 _EXTRA_VARIANTS: "random clips for %d clip(s)",
+                 _EXTRA_ATTRACT: "%d attract item(s)"}
         parts = []
         for key, n in applied.items():
             if key == _EXTRA_STOCK_MODES and not n:
@@ -878,7 +997,7 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
     applicable = plan["applicable"]
     modes_only = (not plan["names"]
                   and any(isinstance((manifest.get("extras") or {}).get(k), dict)
-                          for k in (_EXTRA_SOUND_MODES, _EXTRA_VARIANTS)))
+                          for k in (_EXTRA_SOUND_MODES, _EXTRA_VARIANTS, _EXTRA_ATTRACT)))
     if log_cb:
         for level, text in mismatch_lines(plan):
             log_cb(text, level)
@@ -945,6 +1064,13 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
             extras_in[_EXTRA_VARIANTS] = rec
         else:
             extras_in.pop(_EXTRA_VARIANTS)
+    if isinstance(extras_in.get(_EXTRA_ATTRACT), dict):
+        rec = _unpack_attract(zip_path, assets_folder,
+                              extras_in[_EXTRA_ATTRACT], log_cb=log_cb)
+        if rec:
+            extras_in[_EXTRA_ATTRACT] = rec
+        else:
+            extras_in.pop(_EXTRA_ATTRACT)
     extras = apply_extras(assets_folder, extras_in, log_cb=log_cb)
     _note_imported(assets_folder, plan.get("pack_lineage"), zip_path)
     card_files = manifest.get("card_files") or []

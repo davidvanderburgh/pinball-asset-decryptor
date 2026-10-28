@@ -239,14 +239,14 @@ _pad_build fake.sh
 """
 
 
-def _drive(tmp_path, script_body):
+def _drive(tmp_path, script_body, driver=_DRIVER):
     """Run _pad_build against a synthetic build script and return what a user
     would have seen.  ensurebuild.sh is SOURCED, exactly as watch.sh sources
     it, so this is the real function and not a copy of it."""
     rig = tmp_path / "rig"
-    rig.mkdir()
+    rig.mkdir(exist_ok=True)
     shutil.copy(os.path.join(RIG, "ensurebuild.sh"), str(rig / "ensurebuild.sh"))
-    for name, body in (("fake.sh", script_body), ("driver.sh", _DRIVER)):
+    for name, body in (("fake.sh", script_body), ("driver.sh", driver)):
         with open(str(rig / name), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(body)
     out = subprocess.run([BASH, "driver.sh"], cwd=str(rig),
@@ -397,3 +397,80 @@ def test_the_whole_output_is_written_where_it_says_it_is(tmp_path):
         full = fh.read()
     assert "implicit declaration of function 'open'" in full
     assert "noise 20" in full
+
+
+# --------------------------------------------------------------------------
+# ...and a cross compiler with no headers to give it (PAD-785).
+#
+# The first Mac to build the shim, in the emulator's own container, got
+#
+#     /usr/include/features-time64.h:20:10: fatal error: bits/wordsize.h:
+#     No such file or directory
+#
+# gcc-arm-linux-gnueabihf only RECOMMENDS libc6-dev-armhf-cross, and the
+# container installs with --no-install-recommends - the lesson the PAD Runtime
+# image had already learned and recorded, and the Mac's image had not.
+# --------------------------------------------------------------------------
+
+_FAKE_NO_HEADERS = """#!/bin/bash
+echo "In file included from /usr/include/features.h:394,"
+echo "/usr/include/features-time64.h:20:10: fatal error: bits/wordsize.h: No such file or directory"
+echo "compilation terminated."
+exit 1
+"""
+
+#: WHERE THE ARM HEADERS ARE LOOKED FOR, pointed into the synthetic rig: in
+#: the driver file rather than the environment, because on Windows `bash` may
+#: be WSL's, and an environment set here does not cross into it.
+_HEADERS_DRIVER = """#!/bin/bash
+RIG=$(pwd); export RIG
+TMPDIR=$RIG; export TMPDIR
+PAD_ARM_INCLUDE=$RIG/armincl; export PAD_ARM_INCLUDE
+. "$RIG/ensurebuild.sh"
+_pad_build fake.sh
+"""
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_missing_arm_headers_are_named_as_a_package(tmp_path):
+    """The error names bits/wordsize.h; what the user needs is a package."""
+    seen = _drive(tmp_path, _FAKE_NO_HEADERS, _HEADERS_DRIVER)
+    assert "bits/wordsize.h" in seen, "the error itself is still shown"
+    assert "libc6-dev-armhf-cross" in seen, seen
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_the_header_hint_stays_quiet_when_the_headers_are_there(tmp_path):
+    """With the ARM headers installed a missing header is the rig's own fault,
+    and sending the user to apt for it would be wrong advice."""
+    inc = tmp_path / "rig" / "armincl"
+    inc.mkdir(parents=True)
+    (inc / "stdio.h").write_text("", encoding="utf-8")
+    seen = _drive(tmp_path, _FAKE_NO_HEADERS, _HEADERS_DRIVER)
+    assert "bits/wordsize.h" in seen
+    assert "libc6-dev-armhf-cross" not in seen, seen
+
+
+#: EVERY IMAGE THAT CROSS COMPILES THE RIG, and what it must install beside
+#: the compiler. Both install with --no-install-recommends, which is exactly
+#: what drops the headers.
+_CROSS_IMAGES = ("tools/spike2_emu/docker/Dockerfile", "tools/runtime/Dockerfile")
+
+
+@pytest.mark.parametrize("image", _CROSS_IMAGES)
+def test_an_image_with_the_cross_compiler_has_its_headers(image):
+    path = os.path.join(os.path.dirname(os.path.dirname(RIG)), *image.split("/"))
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    # Comments removed: both files explain the package in prose, and a comment
+    # that names it is not an install.
+    code = re.sub(r"`#[^`]*`", " ", text)
+    code = "\n".join(l for l in code.splitlines()
+                     if not l.lstrip().startswith("#"))
+    words = set(code.replace("\\", " ").split())
+    assert "gcc-arm-linux-gnueabihf" in words, image
+    assert "--no-install-recommends" in words, image
+    assert "libc6-dev-armhf-cross" in words, (
+        "%s installs the ARM cross compiler with --no-install-recommends but "
+        "not libc6-dev-armhf-cross, so the shim fails at bits/wordsize.h "
+        "(PAD-785)" % image)

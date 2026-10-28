@@ -152,6 +152,23 @@ _pad_build() {           # <script> [args...]
     [ -n "$errs" ] || errs=$(printf '%s\n' "$out" | tail -8)
     printf '%s\n' "$errs" | sed 's/^/[build]   /' >&2
     [ -s "$log" ] && echo "[build]   full build output: $log" >&2
+    # A MISSING HEADER WITH THE CROSS COMPILER PRESENT IS A MISSING PACKAGE,
+    # not a bug in the rig (PAD-785, the first Mac to build the shim):
+    #
+    #     /usr/include/features-time64.h:20:10: fatal error: bits/wordsize.h:
+    #     No such file or directory
+    #
+    # gcc-arm-linux-gnueabihf only RECOMMENDS the ARM libc headers, so any apt
+    # that skips recommends (a Dockerfile's --no-install-recommends, a distro
+    # configured that way) has a cross compiler on PATH and nothing for it to
+    # include. -nostdlib governs the link, not the includes. Named here
+    # because the error itself names a header nobody has heard of.
+    if printf '%s\n' "$out" | grep -qE 'fatal error: [^ ]+\.h: No such file' \
+        && [ ! -e "${PAD_ARM_INCLUDE:-/usr/arm-linux-gnueabihf/include}/stdio.h" ]
+    then
+        echo "[build]   the ARM C headers are not installed (Debian/Ubuntu:" >&2
+        echo "[build]   apt install libc6-dev-armhf-cross)." >&2
+    fi
     return $rc
 }
 

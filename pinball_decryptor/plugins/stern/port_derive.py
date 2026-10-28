@@ -703,6 +703,13 @@ def merge(drafts, refs, tgt, game, version, family):
     if scores:
         body += ["", "# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials "
                      "are in) ----"] + scores
+    # PAD-782: the attract mode's page table (an owner's attract items play between its pages)
+    from . import portattract
+    attract = [line for line in (portattract.lines(b) + portattract.element_lines(b) + portattract.show_lines(b))
+               if not line.startswith("#")
+               and line.split()[:2] not in [l.split()[:2] for l in body if l.strip()]] if b else []
+    if attract:
+        body += ["", "# ---- PAD-782: the attract mode's page table (portattract.py) ----"] + attract
     # PAD-710: the game's own mode framework, read off this build's program (a mode in the place of one of the game's
     # modes counts as it)
     from . import mode_framework

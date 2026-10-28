@@ -623,3 +623,12 @@ value place_audit_completed_3      181
 value place_audit_started_4        182
 value place_audit_completed_4      183
 value place_audit_started_5        184
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x00557a18
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       22
+site  attract_sleep       0x00186a74 0xe30735d8 0xe3403059
+# PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with
+site  attract_show        0x002ead48 0xe92d4070 0xe30745dc

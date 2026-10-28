@@ -21,14 +21,28 @@ OUT="${1:?usage: build_mac_e2fsprogs.sh <out dir>}"
 VER=1.47.3
 # From kernel.org's signed sha256sums.asc for v1.47.3.
 SHA256=7d4612f4e4f7ca6c2f669679028bcb02763e3b6280c9c19b2cf168eaf65e88af
-URL="https://mirrors.edge.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v$VER/e2fsprogs-$VER.tar.gz"
+# The same tarball on kernel.org's three hosts, tried in turn: one host
+# resetting the connection failed the macOS CI run (PAD-792).
+SRC="pub/linux/kernel/people/tytso/e2fsprogs/v$VER/e2fsprogs-$VER.tar.gz"
+MIRRORS="https://mirrors.edge.kernel.org https://cdn.kernel.org https://www.kernel.org"
 TOOLS="debugfs/debugfs e2fsck/e2fsck misc/dumpe2fs misc/mke2fs"
 
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-curl -fsSL --retry 3 -o "$WORK/src.tar.gz" "$URL"
+# --retry alone skips a reset connection (curl exit 35); --retry-all-errors
+# retries those too.
+URL=""
+for m in $MIRRORS; do
+    if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+            -o "$WORK/src.tar.gz" "$m/$SRC"; then
+        URL="$m/$SRC"
+        break
+    fi
+    echo "download from $m failed, trying the next mirror" >&2
+done
+[ -n "$URL" ] || { echo "ERROR: e2fsprogs $VER download failed" >&2; exit 1; }
 echo "$SHA256  $WORK/src.tar.gz" | shasum -a 256 -c -
 tar -xzf "$WORK/src.tar.gz" -C "$WORK"
 cd "$WORK/e2fsprogs-$VER"

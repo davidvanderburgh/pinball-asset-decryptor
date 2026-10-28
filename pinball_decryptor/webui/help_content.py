@@ -202,9 +202,10 @@ HELP_CONTENT = {
          "- Needs an image build, not a direct SD write. Every file takes room in the "
          "sound bank; past its 2 GB the files go into extra sound banks of their own "
          "beside it (image-sc01.bin and on), so they are not left out for it. A file "
-         "for a sound the game plays in a way an extra bank can't serve (one it plays "
-         "together with other sounds, or not through the game's sound list) stays in "
-         "the main bank and is left out when that is full; the log names it."),
+         "for a sound the game plays together with other sounds (a song with an intro, "
+         "or a medley) takes a copy of those sounds into its extra bank. A file for a "
+         "sound the game does not play through its sound list stays in the main bank "
+         "and is left out when that is full; the log names it."),
         ("Play in turn",
          "Stern Spike 2, the latest version of each game. A "
          "sound can play more than one file: each time the game plays it, the next one "
@@ -232,25 +233,6 @@ HELP_CONTENT = {
          "- Needs an image build, not a direct SD write. Each file takes room in the "
          "sound bank, and in extra sound banks beside it once that is full, as a music "
          "mode's files do."),
-        ("Attract flipper sounds",
-         "Stern Spike 2, every game and version. Most games play a sound or a callout when "
-         "a flipper button is pressed in attract mode, with no game being played; James "
-         "Bond 007 plays none. "
-         "**Attract flipper sounds**, beside **Find originals…**, gives the flipper "
-         "buttons sounds of your own there.\n\n"
-         "- **Add a sound…** (up to 16). Each press of either flipper button plays the "
-         "next one, and after the last it starts again.\n"
-         "- **Play sound 2 (…)** previews one; **Take off sound 2 (…)** drops it.\n"
-         "- A press while one is still playing does not start another.\n"
-         "- **Time between sounds** spaces them out: any time, or at most one every 10 "
-         "seconds up to one every 5 minutes; a press before then plays nothing.\n"
-         "- They do not play while the game takes the initials for a high score.\n"
-         "- They ride one of the game's own sounds, so each plays for at most that "
-         "sound's length (about 2 seconds on Star Wars, almost 15 on James Bond 007 LE, "
-         "45 on Jaws); a longer file is cut to it, and the log says so.\n"
-         "- The game's own sound at the press does not play over yours.\n"
-         "- Not on TMNT 1.58 (Pro or LE) or Venom LE 1.06 yet; the menu says why.\n"
-         "- Needs an image build, not a direct SD write."),
         ("Jukebox",
          "The Beatles 1.29. **Jukebox**, beside **Find originals…**, gives the five song "
          "modes songs of your own: each time a song mode starts, the game plays one of them, "
@@ -403,10 +385,11 @@ HELP_CONTENT = {
          "Godzilla 1.16, room for about 45 minutes of stereo). Past that, the "
          "lengthened sounds go into **extra sound banks** of their own beside it "
          "(image-sc01.bin and on, the way Stern's music titles keep their songs), "
-         "so the 2 GB does not trim them. A few sounds the game plays in a way an "
-         "extra bank can't serve (one played by two of the game's sound ids, or not "
-         "through its sound list) stay in the main bank and are trimmed there when "
-         "it is full; the log names them.\n"
+         "so the 2 GB does not trim them, songs the game plays in parts (an intro, "
+         "the song, an outro) included. A few sounds stay in the main bank and are "
+         "trimmed there when it is full (for example one the game never plays through "
+         "its sound list, or one that shares its sound ids with a music mode's file "
+         "kept in the main bank); the log names them.\n"
          "2. **The games partition.** Lengthened sounds share it with full-size "
          "videos, and a stock 8 GB card may have only a few hundred MB free. When "
          "room runs short, longer sounds are trimmed to fit it; songs marked "
@@ -1343,6 +1326,52 @@ HELP_CONTENT = {
     # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
     # The key stays so every notebook tab has an entry.
     "Modes": [],
+    "Attract": [
+        ("What it's for",
+         "Stern Spike 2. Put your own photos, clips and text cards between the screens the game shows in "
+         "attract mode, each for as long as you like. The page lists the game's own attract screens in "
+         "order (the last scores, PRESS START, the high scores and champions, the tutorial clips, the logos), "
+         "read off the game's program, with yours between them.\n\n"
+         "- **Add** on a game screen: photos (several at once make a slideshow), a clip or a text card, "
+         "after or before it.\n"
+         "- Drag an item, or use its arrows, to move it between the game's screens.\n"
+         "- **seconds**: how long it stays up. A clip at 0 plays to its end.\n"
+         "- A screen marked **at times** shows only now and then (after a game, or with one of the game's "
+         "settings on); your items next to it show every time round.\n"
+         "- Photos and clips are made into the game's clip format when the card is built, with your color "
+         "profile, and carried in mod packs and Move Your Mods like your other files.\n"
+         "- Your item gives way to the game: a flipper button moves on to the next screen and Start begins "
+         "a game at once.\n"
+         "- **Run in emulator** starts the emulator with this project's changes.\n"
+         "- Needs an image build, not a direct SD write."),
+        ("Insider Connected",
+         "A card with attract items of your own keeps its scores off Insider Connected: they stay on the "
+         "machine. The page and the Write log say so."),
+        ("Which games",
+         "Aerosmith, The Beatles, Foo Fighters, Godzilla, Guardians of the Galaxy, James Bond 007, Jaws, "
+         "John Wick, Jurassic Park (Home Edition), King Kong, Led Zeppelin, The Mandalorian, Star Wars, "
+         "Stranger Things (LE), Teenage Mutant Ninja Turtles and Uncanny X-Men. On the other Spike 2 games "
+         "the page says why not yet."),
+        ("Attract flipper sounds",
+         "Stern Spike 2, every game and version. Most games play a sound or a callout when "
+         "a flipper button is pressed in attract mode, with no game being played; James "
+         "Bond 007 plays none. "
+         "**Flipper sounds** on the **Attract** page gives the flipper "
+         "buttons sounds of your own there.\n\n"
+         "- **Add a sound…** (up to 16). Each press of either flipper button plays the "
+         "next one, and after the last it starts again.\n"
+         "- **Play sound 2 (…)** previews one; **Take off sound 2 (…)** drops it.\n"
+         "- A press while one is still playing does not start another.\n"
+         "- **Time between sounds** spaces them out: any time, or at most one every 10 "
+         "seconds up to one every 5 minutes; a press before then plays nothing.\n"
+         "- They do not play while the game takes the initials for a high score.\n"
+         "- They ride one of the game's own sounds, so each plays for at most that "
+         "sound's length (about 2 seconds on Star Wars, almost 15 on James Bond 007 LE, "
+         "45 on Jaws); a longer file is cut to it, and the log says so.\n"
+         "- The game's own sound at the press does not play over yours.\n"
+         "- Not on TMNT 1.58 (Pro or LE) or Venom LE 1.06 yet; the menu says why.\n"
+         "- Needs an image build, not a direct SD write."),
+    ],
     "Write": [
         ("What a build does",
          "**Build** copies the untouched original and puts in every file that differs "
@@ -1708,6 +1737,20 @@ HELP_CONTENT = {
             {"note": "Only with a door and its interlock switch fitted. With nothing on "
                      "that input the game reads the door as open all the time and keeps "
                      "the message up.", "kind": "warn"},
+        ]),
+        ("Final wizard (ends the game)", [
+            "On Godzilla, James Bond 007, Jaws, John Wick, Jurassic Park and Elvira's House "
+            "of Horrors, playing the final wizard ends the player's game: every ball they "
+            "have left ends the moment it starts. No setting of the game's changes that. "
+            "The **Final wizard** box appears on those cards only.",
+            "- Tick **The final wizard does not end the game** and the next Build changes "
+            "the game so the player goes on to their remaining balls after it.\n"
+            "- It changes the game itself (same card size), so it works on a machine that "
+            "is already set up.\n"
+            "- The other Player Challenge games end as they always have.\n"
+            "- Staged with the project and carried by mod packs.",
+            {"note": "A Player Challenge game that is the final wizard itself plays on after "
+                     "it as well."},
         ]),
         ("Show hidden settings on the machine", [
             "**Show hidden settings in the machine's menu…** moves where the Feature "

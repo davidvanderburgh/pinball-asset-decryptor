@@ -80,7 +80,12 @@ with that game id's descriptor naming the bank's record, and ``sounds.cfg`` says
 for a mode's file, ``tsid`` for a file in turn): the runtime points the game's sound requests at
 the bank's ids when the setting (or the turn) wants that file (pad_mode_runtime.c "IN A SOUND
 BANK"). The card's record names such a file's record as ``<bank>:<record>``, and an extract of the
-card decodes that bank to bring it back.
+card decodes that bank to bring it back. PAD-791: a slot the game plays in parts (Iron Maiden's
+intro, song and outro sequences and medleys: a sound id that plays the slot with other records) can
+go too: a bank sound id's descriptor names only records of its own bank, so the file's bank gets a
+copy of every other record those sound ids play (the game's own, or the user's replacement), and
+files one sound id plays together in one mode (a medley's two songs) share a bank; each (mode, sound
+id) gets its own bank sound id there, on the same ``bsid`` lines.
 
 ATTRACT FLIPPER SOUNDS (PAD-641): an owner noticed every other Spike 2 game plays a sound or a
 callout when a flipper button is pressed in attract mode, and James Bond plays none (measured in the

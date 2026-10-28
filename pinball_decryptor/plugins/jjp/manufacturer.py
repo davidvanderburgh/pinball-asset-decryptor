@@ -117,6 +117,14 @@ class _WriteWrapper(StandaloneModPipeline):
             self._user_done_cb(False, summary)
             return
         new_summary = self._move_output(summary)
+        # the ISO built is a revision of the project (PAD-787, My machines)
+        target = self._target_output_path
+        built = target if target and os.path.isfile(target) else \
+            getattr(self, "_output_iso_path", None)
+        if built and os.path.isfile(built):
+            from ...core import lineage
+            lineage.note_built(self.image_path, self.assets_folder, built,
+                               self._user_log_cb)
         self._user_done_cb(True, new_summary)
 
     def _move_output(self, original_summary):
@@ -485,3 +493,20 @@ class JJPManufacturer(Manufacturer):
                 "(The cabinet's front USB slot works too, but on some machines "
                 "it is 30x slower: a minute on the Restore menu, hours to "
                 "install.)")
+
+
+# My machines (PAD-787): a JJP machine is the full-install ISO it was
+# installed from, fingerprinted for project lineage, and JJP's per-title
+# support pages say when a newer ISO is out.
+from ...core import code_watch as _code_watch  # noqa: E402
+from ...core import lineage as _lineage  # noqa: E402
+from ...core import machines as _machines  # noqa: E402
+from . import machine_info as _machine_info  # noqa: E402
+_lineage.register_printer(_machine_info.iso_print)
+_machines.register_kind(
+    "jjp", "JJP", _machine_info.release_info, _machine_info.version_words,
+    "install ISO", [("JJP full-install ISOs", "*.iso")],
+    "a Jersey Jack full-install ISO")
+_code_watch.register_source(
+    "jjp", _machine_info.SUPPORT_PAGE, _machine_info.parse_support_page,
+    pages=_machine_info.PAGES, page_words="JJP's support pages")

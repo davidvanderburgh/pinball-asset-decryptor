@@ -30,6 +30,7 @@ Everything here is driven through :class:`.spike2.category.CatEmu`, the
 emulator that serves a bank at a second window exactly as the game's loader
 maps it.
 """
+import collections
 import os
 import struct
 from dataclasses import dataclass
@@ -107,17 +108,19 @@ def bank_edits(spilled, byidx, directory):
 # staging
 # --------------------------------------------------------------------------
 def stage_bank(gr_path, img_path, work, byidx, edits, cat, log, emu=None, stride=None,
-               aliases=()):
+               aliases=(), desc_slot=SB.DESC_SLOT, mapped=0):
     """Write the bank for category *cat* holding *edits* into *work* and return
     ``(path, places)``.  Each body starts as the host's stock audio repeated
     to fill; *emu* is a booted emulator on the card's program (one is made
     when None).  PAD-608: *aliases* (:func:`.soundbank.plan_bank`) are the
-    fragments past the records that play one of them."""
+    fragments past the records that play one of them.  PAD-779: *desc_slot* and
+    *mapped* as :func:`.soundbank.plan_bank` takes them (a song in parts)."""
     from .spike2.emulator import Spike2Emu
     if stride is None:
         with open(_lp(img_path), "rb") as f:
             stride = SB.fragment_stride(f.read(0x100))
-    directory, places = SB.plan_bank(edits, stride, aliases=aliases)
+    directory, places = SB.plan_bank(edits, stride, aliases=aliases, desc_slot=desc_slot,
+                                     mapped=mapped)
     scaffold = {}
     with open(_lp(img_path), "rb") as f:
         for pl in SB.records(places):
@@ -389,15 +392,23 @@ def encode_banks(gr_path, img_path, jobs, params, np, log, loops=(), gains=None,
         return out
     w = bank_workers(n, first_too=True)
     rev = known_revalidate(gr_path, img_path) if w > 1 else None
+    def again(got, first=0):
+        # PAD-777: a bank whose worker ran out of memory is encoded here, alone
+        for i, r in enumerate(got):
+            if r is _NO_MEMORY:
+                got[i] = _encode_alone(gr_path, img_path, jobs[first + i], params, np, log,
+                                       loops, gains, level_refs, cancel, rev, body_cache)
+        return got
     if rev is not None:
         got = _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains,
                                      level_refs, progress, cancel, body_cache, rev, w, n,
                                      done0=0)
         if got is not None:
-            return got
-    rows, rev = encode_and_verify(gr_path, img_path, jobs[0], params, np, log, loops=loops,
-                                  gains=gains, level_refs=level_refs, progress=span(0),
-                                  cancel=cancel, body_cache=body_cache)
+            return again(got)
+    rows, rev = _out_of_memory_words(lambda: encode_and_verify(
+        gr_path, img_path, jobs[0], params, np, log, loops=loops, gains=gains,
+        level_refs=level_refs, progress=span(0), cancel=cancel, body_cache=body_cache),
+        img_path)
     out.append((rows, rev))
     rest = jobs[1:]
     w = bank_workers(n)
@@ -406,12 +417,56 @@ def encode_banks(gr_path, img_path, jobs, params, np, log, loops=(), gains=None,
         got = _encode_banks_parallel(gr_path, img_path, rest, params, log, loops, gains,
                                      level_refs, progress, cancel, body_cache, rev, w, n)
     if got is not None:
-        return out + got
+        return out + again(got, 1)
     for i, job in enumerate(rest, 1):
-        out.append(encode_and_verify(gr_path, img_path, job, params, np, log, loops=loops,
-                                     gains=gains, level_refs=level_refs, progress=span(i),
-                                     cancel=cancel, revalidate=rev, body_cache=body_cache))
+        out.append(_out_of_memory_words(lambda job=job, i=i: encode_and_verify(
+            gr_path, img_path, job, params, np, log, loops=loops, gains=gains,
+            level_refs=level_refs, progress=span(i), cancel=cancel, revalidate=rev,
+            body_cache=body_cache), img_path))
     return out
+
+
+#: A bank :func:`_encode_banks_parallel`'s worker ran out of memory for (PAD-777).
+_NO_MEMORY = object()
+
+
+def _out_of_memory(text):
+    """Whether *text* (an exception's words) is an emulator or Python running out of
+    memory: Unicorn's ``UC_ERR_NOMEM``, a ``MemoryError``."""
+    t = str(text or "")
+    return "UC_ERR_NOMEM" in t or "MemoryError" in t
+
+
+def _out_of_memory_words(run, img_path):
+    """``run()``, its out-of-memory failure said in words a user can act on (PAD-777:
+    three Iron Maiden bank encoders at once died with ``UC_ERR_NOMEM`` on a PC whose
+    page file did not grow)."""
+    from .spike2.parallel import emulator_commit
+    try:
+        return run()
+    except MemoryError as e:
+        why = e
+    except Exception as e:                              # noqa: BLE001
+        if not _out_of_memory(e):
+            raise
+        why = e
+    raise RuntimeError(
+        "This computer ran out of memory encoding the sound banks, even one at a time "
+        "(a sound encoder needs about %.1f GB). Close other programs, and check the C: "
+        "drive has a few GB free so Windows can grow its page file, then Write again. (%s)"
+        % (emulator_commit(img_path) / 1e9, why))
+
+
+def _encode_alone(gr_path, img_path, job, params, np, log, loops, gains, level_refs, cancel,
+                  rev, body_cache):
+    """PAD-777: :func:`encode_and_verify` for a bank whose worker ran out of memory,
+    here in the Write's own process once the workers have gone."""
+    log("Sound bank %s: encoded again on its own, as its worker ran out of memory beside "
+        "the others." % SB.bank_name(job.cat), "info")
+    return _out_of_memory_words(lambda: encode_and_verify(
+        gr_path, img_path, job, params, np, log, loops=loops, gains=gains,
+        level_refs=level_refs, cancel=cancel, revalidate=rev, body_cache=body_cache),
+        img_path)
 
 
 def _job_bytes(job):
@@ -445,7 +500,8 @@ def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, l
                            progress, cancel, body_cache, rev, workers, n_all, done0=1):
     """:func:`encode_banks`' workers; None when the pool could not start (the
     caller encodes the banks itself).  *done0*: the banks already encoded
-    before these (the first, here)."""
+    before these (the first, here).  PAD-777: a bank whose worker ran out of
+    memory comes back as :data:`_NO_MEMORY`, for the caller to encode alone."""
     import multiprocessing as mp
     import tempfile
     from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -503,6 +559,15 @@ def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, l
                 tag, val, lines, used = results[said]
                 for m, lv in lines:
                     log(m, lv)
+                if tag != "ok" and _out_of_memory("%s %s" % tuple(val)):
+                    # (the commit room counts on a page file that can grow; this
+                    # computer's did not: PAD-777)
+                    log("Sound bank %s: its worker ran out of memory (%s); it is encoded "
+                        "again on its own once the others are done."
+                        % (SB.bank_name(jobs[said].cat), val[1]), "info")
+                    results[said] = ("again", None, [], None)
+                    said += 1
+                    continue
                 if tag != "ok":
                     open(flag, "w").close()
                     raise RuntimeError(val[1])
@@ -514,7 +579,7 @@ def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, l
                     progress(int(100 * (said + done0) / n_all), 100,
                              "Encoding the modes' sound banks (%d of %d)..."
                              % (said + done0, n_all))
-        return [r[1] for r in results]
+        return [_NO_MEMORY if r[0] == "again" else r[1] for r in results]
     finally:
         if pool is not None:
             pool.shutdown(wait=True, cancel_futures=True)
@@ -643,7 +708,7 @@ def compose_descriptor(template, key8, duration, music):
 
 
 def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers, durations,
-                      music_idx, log, stride=None, given=None):
+                      music_idx, log, stride=None, given=None, desc_slot=SB.DESC_SLOT):
     """Write the fragment table and the descriptors into the staged bank for
     the records *rows* (the chain's, with ``host`` and ``findkey``):
     placement *n*'s descriptor is a copy of its carrier's (*carriers*
@@ -652,7 +717,8 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
     *music_idx* are looping beds.  PAD-608: *given* ``{new_idx: plain
     descriptor}`` are fragments whose descriptor the caller wrote (a music
     mode's file: the game sound id's own, naming the bank record), every
-    fragment past the records among them.  Returns ``{new_idx: (sid, plain,
+    fragment past the records among them.  PAD-779: *desc_slot* the bank's room a
+    descriptor (:func:`.soundbank.plan_bank`).  Returns ``{new_idx: (sid, plain,
     ks)}`` for :func:`verify_tables`."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
@@ -668,7 +734,8 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
             raise RuntimeError("the game's descriptor resolver could not be located, so the sound "
                                "bank's play tables cannot be written")
         mask, xor = resolver_rule(emu, resolver, out, img_path)
-        vf2 = bytes(emu.mu.mem_read(emu.VF2_VA, SB.VF2_WINDOW + SB.DESC_SLOT))
+        vf2 = bytes(emu.mu.mem_read(emu.VF2_VA, SB.VF2_WINDOW + max(SB.DESC_SLOT,
+                                                                    int(desc_slot))))
         descs = {n: bytes(d) for n, d in (given or {}).items()}
         for pl in places:
             if pl.new_idx in descs:
@@ -684,7 +751,7 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
     finally:
         emu.close()
     ks_by = SB.write_tables(_lp(bank_path), places, descs, vf2,
-                            lambda off: (off ^ xor) & mask, stride)
+                            lambda off: (off ^ xor) & mask, stride, desc_slot=desc_slot)
     log("Sound bank %s: %d fragment(s) and descriptor(s) written (keystream rule mask %#x xor "
         "%#x, %d slot(s) a fragment)." % (SB.bank_name(cat), len(places), mask, xor, stride), "info")
     out_map = {pl.new_idx: (SB.bank_sid(cat, pl.new_idx), descs[pl.new_idx], ks_by[pl.new_idx])
@@ -826,6 +893,24 @@ def stock_slots(slots, old_map):
     return out
 
 
+def never_played(sids, slots, exclude=()):
+    """PAD-784: the sound ids of *sids* the game never plays: plain ``image.bin`` ids no
+    request list names (*slots*, :func:`stock_slots`) and no mode of this Write plays
+    (*exclude*).  The game starts a sound only through its request table: the play
+    worker (``site sound_worker``) resolves the sound id it picks from the request's
+    list, and every other call of the game's descriptor resolver (``site
+    sound_resolve``) takes a request's list too, or is the bank loader or a query of a
+    descriptor's flags (Iron Maiden LE 1.18: its 131 sound ids no list names, 954, 978,
+    267 and 969 among them, appear nowhere in its program).  So such an id cannot hold a
+    sound in ``image.bin``: a sound it plays moves with the ids that do play it, and it
+    keeps naming ``image.bin``.  Empty when *slots* is (no request table read)."""
+    if not slots:
+        return set()
+    exclude = {int(s) for s in exclude or ()}
+    return {int(s) for s in sids if not int(s) >> 16 and not slots.get(int(s))
+            and int(s) not in exclude}
+
+
 def game_sound_sids(grows, byidx, sites, mask, slots, exclude=()):
     """``(ok, why)``: of the user's longer replacements *grows* (``{idx: (room,
     want)}``), ``ok`` ``{idx: sid}`` the ones a bank can hold, each with the game sid that
@@ -833,19 +918,23 @@ def game_sound_sids(grows, byidx, sites, mask, slots, exclude=()):
     one sid of the game's plays it (*sites*, the card's descriptor sites; *mask* its key
     mask), that sid's descriptor names nothing else, a request list names the sid
     (*slots*, :func:`stock_slots`), and it is not one a mode of this Write uses
-    (*exclude*)."""
+    (*exclude*).  PAD-784: a sid the game never plays (:func:`never_played`) does not
+    count."""
     from . import engine as E
     exclude = {int(s) for s in exclude or ()}
     by_key, sid_sites = {}, {}
     for s in sites:
         sid_sites.setdefault(s.sid, []).append(s)
         by_key.setdefault(E._play_key(s.payload, s.sid, mask), set()).add(s.sid)
+    idle = never_played(sid_sites, slots, exclude)
     ok, why = {}, {}
     for idx in sorted(grows):
         key = (byidx.get(idx) or {}).get("findkey")
-        sids = sorted(by_key.get(bytes(key), ())) if key else []
+        named = sorted(by_key.get(bytes(key), ())) if key else []
+        sids = [s for s in named if s not in idle]
         if len(sids) != 1:
             why[idx] = ("%d of the game's sound ids play it" % len(sids) if sids
+                        else _unplayed_why(named) if named
                         else "no sound id of the game's plays it")
             continue
         sid = sids[0]
@@ -856,10 +945,268 @@ def game_sound_sids(grows, byidx, sites, mask, slots, exclude=()):
         elif sid in exclude:
             why[idx] = "sound id %d is one a mode of this card plays" % sid
         elif not slots.get(sid):
-            why[idx] = "the game plays sound id %d other than through its sound requests" % sid
+            why[idx] = "the game's sound request table could not be read"
         else:
             ok[idx] = sid
     return ok, why
+
+
+def _unplayed_why(sids):
+    """PAD-784: why a sound only sound ids the game never plays name stays in image.bin."""
+    return ("the game never plays it: no sound request of the game's names sound id%s %s"
+            % ("" if len(sids) == 1 else "s", ", ".join(str(s) for s in sorted(sids))))
+
+
+#: PAD-779: a song in parts a bank can hold: the user's longer replacements *grown* (idxs) of
+#: its records, every sound id of the game's that plays one of them, *sids* ``{sid: [idx, ...]}``
+#: in its descriptor's order, *descs* ``{sid: plain descriptor}`` (the resolver's, through its
+#: own end), and *parts* every record those name, in order (the stock ones are copied).
+SeqGroup = collections.namedtuple("SeqGroup", "grown sids descs parts")
+
+
+def game_sound_groups(grows, byidx, wide, slots, exclude=(), busy=()):
+    """PAD-779: ``(groups, why)`` - the user's longer replacements *grows* (``{idx: (room,
+    want)}``) that the game plays in parts, as :class:`SeqGroup` s a bank can hold, and ``why``
+    ``{idx: reason}`` for the ones it cannot.  Iron Maiden plays its songs as intro, song and
+    outro sequences and medleys, each a sound id whose descriptor names several records: such
+    a song moves only with every sound id that plays it, and every record those name goes into
+    the same bank (a bank sound id's descriptor can only name records of its own bank).  Songs
+    that share a sound id (a medley) are one group.  *wide* ``{sid: (descriptor, [idx or
+    None, ...])}`` is every sound id's descriptor through its own end and the records it plays
+    (:func:`.engine._wide_descriptors`); *slots*, *exclude* as :func:`game_sound_sids`;
+    *busy* the idxs this Write gives other sounds (a mode's, a music mode's file), which can't
+    be copied as a part.  A sound one sound id plays alone is :func:`game_sound_sids`'s, not
+    a group.  PAD-784: a sound id the game never plays (:func:`never_played`: Iron Maiden LE
+    1.18's 954, 978, 267, 969) is not one of a group's: it keeps naming ``image.bin``."""
+    from .spike2.emulator import bands_of
+    exclude = {int(x) for x in exclude or ()}
+    busy = {int(x) for x in busy or ()}
+    idle = never_played(wide, slots, exclude)
+    plays_of, idle_of = {}, {}
+    for sid, (_d, idxs) in wide.items():
+        for i in idxs:
+            if i is not None:
+                (idle_of if sid in idle else plays_of).setdefault(i, set()).add(sid)
+    groups, why, seen = [], {}, set()
+    for x in sorted(grows):
+        if x in seen:
+            continue
+        grown, sids, todo = {x}, set(), [x]
+        while todo:
+            for sid in sorted(plays_of.get(todo.pop(), ())):
+                if sid in sids:
+                    continue
+                sids.add(sid)
+                for j in wide[sid][1]:
+                    if j in grows and j not in grown:
+                        grown.add(j)
+                        todo.append(j)
+        seen |= grown
+        if len(sids) == 1 and wide[next(iter(sids))][1] == [x]:
+            continue
+        parts = []
+        for sid in sorted(sids):
+            parts.extend(j for j in wide[sid][1] if j not in parts)
+        bad = None
+        if not sids:
+            named = set().union(*(idle_of.get(j, set()) for j in grown))
+            bad = _unplayed_why(named) if named else "no sound id of the game's plays it"
+        for sid in sorted(sids):
+            desc, idxs = wide[sid]
+            if sid >> 16:
+                bad = "sound id %d is already in a sound bank of the game's" % sid
+            elif sid in exclude:
+                bad = "sound id %d is one a mode of this card plays" % sid
+            elif not slots.get(sid):
+                bad = "the game's sound request table could not be read"
+            elif None in idxs:
+                bad = "sound id %d plays a record the card's directory does not name" % sid
+            elif len(desc) > SB.DESC_SLOT_MAX:
+                bad = ("sound id %d's script is %d bytes, longer than a sound bank's can be (%d)"
+                       % (sid, len(desc), SB.DESC_SLOT_MAX))
+            if bad:
+                break
+        for j in parts:
+            if bad:
+                break
+            if j not in grown and j in busy:
+                bad = "sound idx %d, one of its parts, plays another sound in this Write" % j
+            elif j not in byidx or bands_of(byidx[j]) > 1:
+                bad = "sound idx %d, one of its parts, is a record of several variants" % j
+        if bad:
+            for j in grown:
+                why[j] = bad
+            continue
+        groups.append(SeqGroup(sorted(grown), {s: list(wide[s][1]) for s in sorted(sids)},
+                               {s: bytes(wide[s][0]) for s in sorted(sids)}, parts))
+    return groups, why
+
+
+def seq_fragments(group):
+    """PAD-779: ``(own, aliases)`` for *group*'s fragments: ``own`` ``{record idx: sid}`` the
+    sound id whose descriptor a record's own fragment takes (one that opens with it, the one
+    that plays it alone first), ``aliases`` ``[(sid, record idx)]`` the rest, each a fragment
+    past the records playing from its first record.  A record no sound id opens with gets a
+    descriptor nothing plays (its fragment has to resolve)."""
+    own, aliases = {}, []
+    for sid, idxs in sorted(group.sids.items(), key=lambda kv: (len(kv[1]) > 1, kv[0])):
+        if idxs[0] not in own:
+            own[idxs[0]] = sid
+        else:
+            aliases.append((sid, idxs[0]))
+    return own, aliases
+
+
+def seq_descriptor(desc, sid, keys, moves, mask):
+    """PAD-779: sound id *sid*'s descriptor *desc* (through its own end) as a bank's: every
+    op11 payload naming one of *keys* ``{play key: bank record key}`` names the bank record's
+    key verbatim (:func:`compose_descriptor`), and its declared duration moves by *moves*
+    ``{play key: 1/4000 s}`` for each payload of that record.  Raises when a payload names a
+    record not in *keys*: a bank sound id's descriptor can only name its own bank's."""
+    from . import engine as E
+    d = bytearray(desc)
+    moved = 0
+    pls = E._op11_payloads(bytes(d))
+    if not pls:
+        raise RuntimeError("sound id %d's descriptor names no record" % sid)
+    for off, pl in pls:
+        k = E._play_key(pl, sid, mask)
+        if k not in keys:
+            raise RuntimeError("sound id %d's descriptor names a record outside its sound bank"
+                               % sid)
+        d[off:off + 8] = bytes(keys[k])
+        moved += int(moves.get(k, 0))
+    dur = struct.unpack_from("<I", d, E._DESC_DUR_OFF)[0]
+    struct.pack_into("<I", d, E._DESC_DUR_OFF, max(1, dur + moved) & 0xFFFFFFFF)
+    return bytes(d)
+
+
+#: PAD-791: music modes' files (or files in turn) a bank can hold whose slots the game plays in
+#: parts: *hosts* their records (idxs), *lines* ``[(mode, sid, first, [entry, ...])]`` one bank
+#: sound id each for every (mode, game sound id) that plays one of them (*first* the record its
+#: descriptor opens with: a host, or a part's copy; the entries the ones it plays), *descs*
+#: ``{sid: plain descriptor}`` (the game's own, through its own end), *parts* the records the
+#: lines play beside the files, copied into the bank, and *grown* ``{part: (room, want)}`` the
+#: parts the user made longer (copied at that length).
+ModeSeq = collections.namedtuple("ModeSeq", "hosts lines descs parts grown")
+
+
+def mode_seq_groups(cands, wide, slots, exclude=(), byidx=None, hosts=(), grows=None,
+                    user_grows=None):
+    """PAD-791: ``(groups, why)`` - the hosts *cands* ``{host: [entry, ...]}`` (music modes'
+    files, :func:`.engine._sound_modes_grow`'s entries, whose sound ids play the slot together
+    with other records) as :class:`ModeSeq` s a bank can hold, and ``why`` ``{host: reason}``
+    for the rest.  Iron Maiden plays its songs as intro, song and outro sequences and medleys:
+    a mode's file for such a song plays from a bank only under a bank sound id whose descriptor
+    names every record that sequence plays, and a bank's descriptor can only name records of
+    its own bank, so the records it plays beside the file are copied into the same bank, and
+    files one (mode, sound id) plays together (a medley's two songs in one mode) go into one
+    bank.  *wide* as :func:`game_sound_groups` takes it; *slots*, *exclude* as
+    :func:`game_sound_sids`; *hosts* every record this Write gives a music mode's file;
+    *grows* / *user_grows* the Write's longer records and the user's longer replacements among
+    them (a part the user made longer is copied at that length; one a mode's own sound grew
+    cannot be copied)."""
+    from .spike2.emulator import bands_of
+    exclude = {int(x) for x in exclude or ()}
+    hosts = {int(x) for x in hosts or ()}
+    grows, user_grows = dict(grows or {}), dict(user_grows or {})
+    byidx = byidx or {}
+    idle = never_played(wide, slots, exclude)
+    line_us, host_lines = {}, {}
+    for host, us in sorted(cands.items()):
+        for u in us:
+            slot = int(u["slot"])
+            sids = ({sid for sid, (_d, idxs) in wide.items() if slot in idxs}
+                    | {int(s) for s in (u.get("bodies") or {}) if int(s) in wide}) - idle
+            for sid in sids:
+                line_us.setdefault((int(u["mode"]), sid), []).append(u)
+                host_lines.setdefault(int(host), set()).add((int(u["mode"]), sid))
+    # hosts one (mode, sound id) plays together go into one bank
+    root = {int(h): int(h) for h in cands}
+
+    def find(h):
+        while root[h] != h:
+            h = root[h]
+        return h
+    owner = {}
+    for h in sorted(root):
+        for ln in sorted(host_lines.get(h, ())):
+            if ln in owner:
+                root[find(h)] = find(owner[ln])
+            else:
+                owner[ln] = h
+    clusters = {}
+    for h in sorted(root):
+        clusters.setdefault(find(h), []).append(h)
+    groups, why = [], {}
+    for _r, hs in sorted(clusters.items()):
+        lines, parts, bad = [], [], None
+        lns = sorted({ln for h in hs for ln in host_lines.get(h, ())})
+        if not lns:
+            bad = "no sound id of the game's plays it"
+        for mode, sid in lns:
+            desc, idxs = wide[sid]
+            if sid >> 16:
+                bad = "sound id %d is in a sound bank of the game's" % sid
+            elif sid in exclude:
+                bad = "sound id %d is one a mode of this card plays" % sid
+            elif not slots.get(sid):
+                bad = "the game's sound request table could not be read"
+            elif not idxs or None in idxs:
+                bad = "sound id %d plays a record the card's directory does not name" % sid
+            elif len(desc) > SB.DESC_SLOT_MAX:
+                bad = ("sound id %d's script is %d bytes, longer than a sound bank's can be (%d)"
+                       % (sid, len(desc), SB.DESC_SLOT_MAX))
+            if bad:
+                break
+            us = line_us[(mode, sid)]
+            swapped = {int(u["slot"]): int(u["host"]) for u in us}
+            # (a file that plays in place of a whole song names nothing else: PAD-511)
+            whole = [u for u in us if sid in {int(s) for s in (u.get("song") or {})}
+                     | {int(s) for s in (u.get("bodies") or {})}]
+            if whole:
+                first, need = int(whole[0]["host"]), []
+            else:
+                first = swapped.get(idxs[0], idxs[0])
+                need = [j for j in idxs if j not in swapped]
+            parts.extend(j for j in need if j not in parts)
+            lines.append((mode, sid, int(first), list(us)))
+        for j in parts:
+            if bad:
+                break
+            if j in hosts:
+                bad = "sound idx %d, a part its song plays, holds another file of this Write" % j
+            elif j not in byidx or bands_of(byidx[j]) > 1:
+                bad = "sound idx %d, a part its song plays, is a record of several variants" % j
+            elif j in grows and j not in user_grows:
+                bad = "sound idx %d, a part its song plays, plays another sound in this Write" % j
+        if bad:
+            for h in hs:
+                why[h] = bad
+            continue
+        groups.append(ModeSeq(sorted(hs), lines,
+                              {sid: bytes(wide[sid][0]) for _m, sid, _f, _u in lines}, parts,
+                              {j: tuple(grows[j]) for j in parts if j in user_grows
+                               and j in grows}))
+    return groups, why
+
+
+def mode_seq_fragments(group):
+    """PAD-791: ``(own, aliases)`` for :class:`ModeSeq` *group*'s fragments: ``own`` ``{host
+    idx: line}`` the line (an index into ``group.lines``) whose descriptor a file's record's own
+    fragment takes (the first that opens with it), ``aliases`` ``[(line, record idx)]`` the
+    rest, each a fragment past the records playing from the record it opens with.  A part's
+    copy never gives a line its own fragment (a song in parts in the same bank may share the
+    copy, and give that fragment a descriptor of its own); a record no line opens with gets a
+    descriptor nothing plays."""
+    own, aliases = {}, []
+    hosts = {int(h) for h in group.hosts}
+    for n, (_m, _sid, first, _us) in enumerate(group.lines):
+        if first in hosts and first not in own:
+            own[first] = n
+        else:
+            aliases.append((n, first))
+    return own, aliases
 
 
 def list_writes(slots, old_map, new_map):

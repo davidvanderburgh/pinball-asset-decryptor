@@ -359,7 +359,7 @@ bypass refreshing the `.sidx` record over them (`engine._sound_list_writes`).
 plays the record, that sid's descriptor names nothing else, a request list
 names the sid, and no mode of the same Write uses that request. Stock Godzilla
 LE 1.16: 2438 of 2534 (96%); the rest are 62 records two sids play, 29 sids the
-game plays other than through its lists, and 5 multi-part sids. No fragment on
+game never plays (no list names them: PAD-784), and 5 multi-part sids. No fragment on
 that card has variants that differ (all five slots name one descriptor), so a
 bank fragment's five equal slots lose nothing. A sound that cannot move stays in
 `image.bin`, trimmed there when it is full, and the log says why.
@@ -508,3 +508,155 @@ request 12 six times sounded 500, 1000, 2000, 500, 1000, 2000 Hz, and requests 9
 152, 153 each played the 880 Hz file for their whole 12 s; Music Mode 1 -- the same turns,
 and TUNE 16's opening (request 94) and its NO INTRO body (95) are the game's own (NCC
 0.97 / 0.98; 0.02 in mode 2). 0 segv, 0 fatal in all three runs.
+
+## Songs in parts in a bank (PAD-779)
+
+Iron Maiden plays its songs as sequences: a sound id's descriptor names an intro, the song
+and an outro (15 of its 22 songs), or chains songs (medleys). PAD-606 moved a longer game
+sound only when one sound id played it alone, so a longer Iron Maiden song stayed in
+`image.bin` and, with a card full of them, was trimmed (PAD-777).
+
+**Which songs move** (`bank_build.game_sound_groups`): every sound id whose descriptor plays
+a longer song, and every record those name, go into ONE bank (a bank sound id's descriptor
+can only name records of its own bank). Songs that share a sound id (a medley) are one
+group. A group moves only when every one of its sound ids is a plain `image.bin` id a request
+list names, none is a mode's of the same Write, every part is a record of the card's
+directory that nothing else of this Write uses, and no script is longer than
+`soundbank.DESC_SLOT_MAX`; otherwise the whole group stays in `image.bin`, and the log says
+why. The descriptors are read through their own end (`engine._wide_descriptors`: the play
+tables read 80 bytes, and sound id 974 plays its fourth record, idx 919, at byte 76).
+
+**In the bank** the group's longer songs are their user files, the game's own parts copies
+of the stock sounds (decoded off `image.bin` at build time and encoded along the bank's
+chain; a part the user replaced at its own length keeps the user's file, in `image.bin`
+too). Each record gets a fragment; a sound id that opens with a record takes that record's
+fragment, every other sound id a fragment past the records (`bank_build.seq_fragments`,
+`plan_bank(aliases=...)`), and a record no sound id opens with a descriptor nothing plays.
+Each sound id's descriptor is its own, every payload naming the bank copy's key verbatim
+and the declared duration moved by the longer parts' growth (`bank_build.seq_descriptor`).
+A bank with such a script gets descriptor slots up to 0x60 bytes (`plan_bank(desc_slot=)`;
+the game's own descriptors run to 108 bytes, at keystream offsets from the same rule).
+The request lists name the bank sound ids as PAD-606's do, and the sid map's extension
+(`SID_MAP_EXT_MAGIC`, before the map) names the game sid of every fragment past the
+records, so a later Write can put the lists back. A group is placed whole
+(`soundbank.split_units`); one too big for a bank stays in `image.bin` whole.
+
+**Iron Maiden LE 1.18** (PAD-777's shape: 20 longer songs of 55 MB, four 38 MB Option B
+files): 13 of the 20 now go into banks (10 groups, 16 of the game's own parts copied),
+where none did; image.bin 1,531 MB beside them. The other 7 are played by sound ids the
+game starts other than through its request lists (954, 978, 267, 969), which PAD-606's
+route cannot reach.
+
+**Proof** (2026-10-27, `artifacts/PAD-779/emulator`): the real Iron Maiden LE 1.18 card, idx 150
+(63 s) replaced by a 70 s 700 Hz tone and idx 618 (138 s) by a 145 s 1100 Hz one, image.bin's
+ceiling lowered to the stock file (`PAD_STERN_BANK_CAP`), an override set (`write_overrides`):
+`image-sc01.bin` (43.3 MB) holds 618, 150 and the game's own 919 and 222; its 5 fragments
+resolve through the game's resolver, and requests 555 / 554 / 552 name 0x10003 / 0x10001 /
+0x10004 for sound ids 974 / 960 / 976. Rig 3, hidden and muted, the sound_fire instrument:
+request 555 played the game's intro (idx 222, NCC 0.81 against its stock decode) 0-7 s, the
+700 Hz file 7-78 s, the 1100 Hz file 78-223 s, the game's outro (idx 919, NCC 0.81) from 223 s;
+554 the 700 Hz file for 70 s, then the 1100 Hz one; 552 the intro, then the 700 Hz file. Both
+files whole, past their stock lengths. 0 segv, 0 fatal. (The capture is 44.1 kHz.)
+
+## Sound ids no request names (PAD-784)
+
+PAD-779 kept 7 of Iron Maiden LE 1.18's 20 longer songs in `image.bin` because a sound id
+that plays them (954, 978, 267, 969) is in none of the game's request lists, taken for one
+the game starts some other way. It starts none that way. The game's descriptor resolver
+(`site sound_resolve`, 0x1403a4) has five callers on Iron Maiden LE 1.18 and five at the same
+places of the shared sound code on Godzilla LE 1.16 (0x43c104), no pointer to it anywhere: the
+play worker (`site sound_worker`), which resolves the sound id it picks from the request's
+list; a query that walks a request's list; one that reads a request record's list; a query of
+one sound id's descriptor flags (its caller stores a flag, plays nothing); and the bank
+loader, which walks a category's ids at load. Only the resolver and the loader read the
+descriptor keystream (0x5d759c). The request table's lists are static data (all 572 point
+into the file) and nothing writes the table; the four ids appear nowhere in the program, and
+no descriptor names a sound id. So 954, 978, 267 and 969, like the other 127 of the card's 983
+ids no list names, never play.
+
+`bank_build.never_played` names such ids (plain `image.bin` ids no list names and no mode of
+the Write plays; none when the request table cannot be read), and `game_sound_sids`,
+`game_sound_groups` and `engine._sound_modes_for_banks` leave them out: a song moves with the
+ids that do play it, and the idle id keeps naming `image.bin`'s record. A song only idle ids
+play stays where it is, and the log says the game never plays it.
+
+**Iron Maiden LE 1.18**, PAD-777's shape again: 17 of the 20 songs plan into banks (12
+groups), where 13 did; idx 205 moves with 949 and 956 (954 left), idx 895 with 962 (978
+left; 281 and 426 join it as a medley through 979). The 3 left, idx 612, 786 and 930, are
+played only by 267, 978 and 969: the game never plays them.
+
+## A music mode's file for a song in parts in a bank (PAD-791)
+
+PAD-608 banked a music mode's file only when every sound id that plays its slot plays it
+alone (or as the song it opens, PAD-511). Iron Maiden plays most songs as intro, song and
+outro sequences and medleys, so 7 of the PAD-777 reporter's 8 "Swapped Songs Version" files
+(slots 150, 178, 492, 575, 618, 623, 880) stayed in `image.bin` and were left out when it
+filled.
+
+**Which files move** (`engine._sound_modes_for_banks`, `bank_build.mode_seq_groups`): a host
+whose sound ids play its slot together with other records is no longer refused for that; its
+sound ids are read through their own end (`engine._wide_descriptors_once`, the same read
+PAD-779's songs use, done once a Write). Each (mode, sound id) is a LINE; hosts one line
+plays (a medley's two songs with files in the same mode: 150 and 618 under 960, 974, 976)
+are one group, placed whole (`soundbank.split_units`). The group's bank gets a COPY of every
+other record its lines play: the game's own decoded off `image.bin`, the user's same-length
+file, or the user's longer replacement at its length (`ModeSeq.grown`; 492's intro 307). A
+line for a file that plays in place of a whole song (PAD-511 `song` / `bodies`) needs none.
+A group moves only when every line's sound id is a plain listed `image.bin` id no mode of the
+Write plays, its script fits `DESC_SLOT_MAX`, and no part is another file's host, a mode's
+own grown sound or a record of several variants; otherwise its files stay in `image.bin`, and
+the log says why.
+
+**In the bank** each file's record and each copy is a record; a line takes its host's own
+fragment when it is the first to open with it, and every other line a fragment past the
+records (`bank_build.mode_seq_fragments`; a copy never gives a line its own fragment, since a
+PAD-779 song in the same bank may share the copy). Each line's descriptor is
+`_mode_descriptor_table`'s for that mode, off the game's own descriptor through its own end
+(`ends=`), every slot of that mode it plays swapped for its file, then every payload pointed
+at the bank's records (`bank_build.seq_descriptor`; a longer copy moves the declared
+duration). A line whose descriptor would name a record outside the bank plays the game's own
+(logged); a fragment no line plays gets a descriptor naming its record. The runtime is
+unchanged: `bsid <mode> <list id> <bank sid>`, one line per (mode, sound id) (`_bank_sid_lines`
+drops the medley's duplicate).
+
+**The game's longer song on the same slot** (the reporter lengthened those songs too): the
+sound ids of a music mode's file used to be kept out of PAD-606/779's banks altogether
+(`exclude_sids`), so those songs stayed in `image.bin`; with the files' banks taking memory
+beside it, a first run of this ticket cut 8 of them (PAD-777 cut 2). Now only the sound ids of a file that stays in
+`image.bin` (and of the files the runtime swaps by key: files in turn of a mode's file, the
+attract flipper sounds, the jukebox) are kept out; a game song on a banked file's sound ids
+goes into a bank of its own, its request lists name its bank id, and the file's `bsid` line
+names that id (`_list_ids`), which the runtime swaps from in the file's mode. If the planner
+then keeps such a file in `image.bin` after all (too big), the song stays with it
+(`_sm_kept_sids`): the runtime plays that file under the game's own id.
+
+**The file's host record** (`_sound_mode_host`, `parts=`) is a record the game plays in a
+sequence only when nothing else fits: such a host cannot be a part's copy as well, and on the
+reporter's card 5 of the 8 hosts were parts (919 kept the 150/618 medley's files out; 91 kept
+idx 70's song out). The sequences are read off the descriptors whole before the hosts are
+picked (Iron Maiden's 974 plays idx 919 past the play tables' 80 bytes); `_wide_descriptors_once`
+keeps that read for the planner (5.8 s on Iron Maiden).
+
+**A record in two banks**: a part's copy can sit in a music mode's bank and, as the user's
+longer song, in PAD-779's bank of the game's (307, 492's intro). Banks know their groups by
+the units placed in them, not by record idx (an idx match put 307's song in the file's bank
+too, whose descriptors then failed: KeyError 492).
+
+**Iron Maiden LE 1.18**, the reporter's shape (17 longer songs, 8 Option B files, 16 GB card,
+`his777.py` through the app's Write): all 8 files go into banks where 1 did (0 left out,
+PAD-777 left out 7), and his longer songs on those slots into banks of the game's beside
+them: 17 banks, all verified and every bank sound id resolving through the game's resolver,
+together at most 2,172 MB with image.bin (Stern's largest 2,181 MB); 1 song trimmed, idx 930,
+which the game never plays (PAD-777 trimmed 2).
+
+**Proof** (2026-10-28, `artifacts/PAD-791/emulator/RESULTS.txt`): stock Iron Maiden LE 1.18,
+music mode 2 files of pure tones on the 7 slots (30 s each), the user's longer intro 307
+(300 Hz, 19 s) and longer 150 (450 Hz, 70 s), image.bin capped a little past stock, an
+override set: 4 banks verified, every sound id resolving. Rigs 1 and 2, hidden and muted, the
+sound_fire instrument, `force 2` then `force 1` in sounds.cfg. Mode 2: request 554 (960)
+played the 500 Hz file then the 700 Hz one; 555 (974) the game's intro 222, both files, the
+outro 919; 571 (945) 900 Hz then 94; 568 (975) 900 Hz; 535 (935) the longer 307 then 1100 Hz
+then 212; 543 (940) 1300 then 1500 Hz then 935; 539 (958) 818, 1700 Hz, 758. Every copied part
+matched its stock decode (NCC 0.89-0.96; noise 0.02, the wrong part at most 0.44). Mode 1:
+554 played the longer 150 whole (70 s) from the game's bank, then 618 (NCC 0.95); 555 222,
+the longer 150, 618; 535 the longer 307, then 492 (NCC 0.95). 0 segv, 0 fatal.

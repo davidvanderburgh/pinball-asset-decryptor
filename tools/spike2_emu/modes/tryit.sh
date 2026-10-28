@@ -8,7 +8,7 @@
 #   tryit.sh install <stage dir>   before the run: <stage>/pad_mode.so -> $ROOT/lib/pad_mode.so
 #                                  (PAD_MODE_SO=/lib/pad_mode.so), <stage>/game.port ->
 #                                  $ROOT/dump/game.port, <stage>/gamecheck.on (Check this game,
-#                                  gamecheck.sh) -> $ROOT/dump, <stage>/mode*.cfg and each code mode's
+#                                  gamecheck.sh) -> $ROOT/dump, <stage>/mode*.cfg (and stock/clips/sounds/picture/attract.cfg) and each code mode's
 #                                  <stage>/<slug>.assets (sdk/pad_mode_assets.h) -> $ROOT/dump,
 #                                  after clearing the mode files, triggers and mode.log a
 #                                  previous run left there. cardmodes.sh calls this too, for
@@ -123,7 +123,7 @@ case "$cmd" in
         # have a later stock run take THOSE out.
         rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/mode.start "$DUMP"/mode[1-7].start \
               "$DUMP"/mode.stop "$DUMP"/mode.clip "$DUMP"/mode.log "$DUMP"/cardmodes.from \
-              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/gamecheck.on \
+              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/gamecheck.on \
               "$DUMP"/census.mark
         put "$S/pad_mode.so" "$LIB/pad_mode.so" || die "could not copy the mode object into $LIB"
         put "$S/game.port" "$DUMP/game.port" || die "could not copy the port into $DUMP"
@@ -153,6 +153,10 @@ case "$cmd" in
         if [ -f "$S/picture.cfg" ]; then
             put "$S/picture.cfg" "$DUMP/picture.cfg" || die "could not copy picture.cfg"
         fi
+        # PAD-782: the owner's attract items, read beside the mode files
+        if [ -f "$S/attract.cfg" ]; then
+            put "$S/attract.cfg" "$DUMP/attract.cfg" || die "could not copy attract.cfg"
+        fi
         a=0
         for f in "$S"/*.assets; do       # a code mode's own assets (the build's carriers)
             [ -f "$f" ] || continue
@@ -168,7 +172,7 @@ case "$cmd" in
         # game reads them as root), so it is said, not fatal.
         if [ "$(id -u)" = 0 ]; then
             given=("$LIB/pad_mode.so" "$DUMP/game.port")
-            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/gamecheck.on; do
+            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/gamecheck.on; do
                 [ -f "$f" ] && given+=("$f")
             done
             pad_give_back "${given[@]}"

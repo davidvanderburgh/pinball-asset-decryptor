@@ -7,10 +7,12 @@ carries (editable one at a time), widening the machine's own Adjustments menu,
 and saved presets (one of which can be baked into every card you build).
 
 Every edit auto-stages into the project's ``.staged_changes.json`` (keys
-``settings``, ``high_scores``, ``menu_expose_through``, ``coin_door``) and the
+``settings``, ``high_scores``, ``menu_expose_through``, ``coin_door``,
+``final_wizard``) and the
 run logic bakes it into the OUTPUT image after a successful build
 (``app.App._apply_staged_settings_to_build`` reads ``staged_default_settings``,
-``staged_high_scores``, ``staged_menu_expose`` and ``staged_coin_door`` off the
+``staged_high_scores``, ``staged_menu_expose``, ``staged_coin_door`` and
+``staged_final_wizard`` off the
 window; ``_apply_active_preset_to_build`` reads the presets straight from
 settings).
 The master image is only ever read.
@@ -67,6 +69,9 @@ RANGE_WARN = ("Lowest and Highest are what the machine's menu offers. Go "
 # it as they carry the menu widening) and its one value.
 COIN_KEY = "coin_door"
 COIN_FITTED = "fitted"
+# PAD-786: the same for a final wizard that does not end the game
+WIZARD_KEY = "final_wizard"
+WIZARD_ON = "plays_on"
 
 STAGE_DELAY_MS = 500
 LOG_DELAY_MS = 1400
@@ -200,6 +205,12 @@ def read_image(path):
             coin = coin_door.plan(elf, table)
         except Exception:                               # noqa: BLE001
             coin = None
+        # PAD-786: a final wizard that ends the game (None on a build whose final wizard is not one the app knows)
+        try:
+            from ...plugins.stern import final_wizard
+            wizard = final_wizard.plan(elf)
+        except Exception:                               # noqa: BLE001
+            wizard = None
         # The volume a machine actually starts at is a byte of its own, not
         # the (inert) compiled default - see plugins.stern.factory_volume.
         try:
@@ -217,7 +228,7 @@ def read_image(path):
             hstd = HighScoreDefaults(elf, table)
         except Exception:                               # noqa: BLE001
             hstd = None
-        return ("ok", table, part, fw, rows, path, hstd, every, plan, coin)
+        return ("ok", table, part, fw, rows, path, hstd, every, plan, coin, wizard)
     except Exception as e:                              # noqa: BLE001
         return ("err", e)
 
@@ -230,7 +241,7 @@ class DefaultsTab(TabService):
     icon = "defaults"
     exports = (
         "staged_default_settings", "staged_high_scores", "staged_menu_expose",
-        "staged_coin_door",
+        "staged_coin_door", "staged_final_wizard",
         "staged_setting_ranges",
         "settings_image_var", "settings_preset_var", "settings_autoapply_var",
         "_modes_settings_staged",
@@ -271,11 +282,13 @@ class DefaultsTab(TabService):
         self._all_published = []      # names of the list as last published
         self._menu_plan = None
         self._coin = None             # PAD-755: plugins.stern.coin_door plan
+        self._wizard = None           # PAD-786: plugins.stern.final_wizard plan
         self._batch = 0
         self.set(phase="empty", message=EMPTY_TEXT, form=[], hs=[],
                  values={}, hs_values=[], all=[], all_legend="",
                  all_total=0, menu_enabled=False, reset_enabled=False,
                  coin_offer=False, coin_fitted=False,
+                 wizard_offer=False, wizard_on=False,
                  status="", presets=[], auto_enabled=False,
                  sort={"key": None, "desc": False}, spike1=False,
                  loaded=False, era="")
@@ -511,6 +524,7 @@ class DefaultsTab(TabService):
         self._busy = True
         self._menu_plan = None
         self._coin = None
+        self._wizard = None
         self._clear_form()
         self.set(phase="loading", message=LOADING_TEXT, status="",
                  reset_enabled=False)
@@ -555,11 +569,13 @@ class DefaultsTab(TabService):
             self._every = every
             self._menu_plan = None
             self._coin = None
+            self._wizard = None
             self._build_form([])
             return
         self._spike1 = False
         _ok, table, part, fw, rows, ipath, hstd, every, plan = res[:9]
         self._coin = res[9] if len(res) > 9 else None
+        self._wizard = res[10] if len(res) > 10 else None
         self._table = table
         self._part = part
         self._fw = fw
@@ -585,6 +601,7 @@ class DefaultsTab(TabService):
         self.set(form=[], hs=[], values={}, hs_values=[], all=[],
                  all_legend="", all_total=0, menu_enabled=False,
                  coin_offer=False, coin_fitted=False,
+                 wizard_offer=False, wizard_on=False,
                  loaded=False, spike1=False)
 
     # ------------------------------------------------------------------
@@ -622,6 +639,7 @@ class DefaultsTab(TabService):
                  spike1=bool(self._spike1), loaded=True,
                  all_total=len(self._all_rows))
         self._publish_coin()
+        self._publish_wizard()
         if self._all_rows:
             self._fill_all()
         if not rows:
@@ -842,6 +860,7 @@ class DefaultsTab(TabService):
         self.set(reset_enabled=True)
         self._refresh_presets()
         self._publish_coin()
+        self._publish_wizard()
         staged = self.staged_default_settings(self._staged_dir())
         staged_ranges = self.staged_setting_ranges(self._staged_dir())
         expose = self.staged_menu_expose(self._staged_dir())
@@ -956,7 +975,7 @@ class DefaultsTab(TabService):
             self._loading = False
         self._publish_hs()
         n = 0
-        menu = coin = False
+        menu = coin = wizard = False
         assets_dir = self._staged_dir()
         if assets_dir:
             from ...core import staged_changes
@@ -966,14 +985,17 @@ class DefaultsTab(TabService):
                 data.get("high_scores") or {})
             menu = bool(data.get("menu_expose_through"))
             coin = bool(data.get(COIN_KEY))
+            wizard = bool(data.get(WIZARD_KEY))
             if ("settings" in data or "high_scores" in data
                     or "setting_ranges" in data
-                    or "menu_expose_through" in data or COIN_KEY in data):
+                    or "menu_expose_through" in data or COIN_KEY in data
+                    or WIZARD_KEY in data):
                 data.pop("settings", None)
                 data.pop("setting_ranges", None)
                 data.pop("high_scores", None)
                 data.pop("menu_expose_through", None)
                 data.pop(COIN_KEY, None)
+                data.pop(WIZARD_KEY, None)
                 staged_changes.save(assets_dir, data)
                 self._folder_written(assets_dir)
         self._fill_all()
@@ -984,7 +1006,10 @@ class DefaultsTab(TabService):
             cleared.append("the menu widening")
         if coin:
             cleared.append("the coin door")
+        if wizard:
+            cleared.append("the final wizard choice")
         self._publish_coin()
+        self._publish_wizard()
         self._status("Fields reset to the image's current defaults%s."
                      % (" — cleared " + " and ".join(cleared)
                         if cleared else ""))
@@ -1040,6 +1065,13 @@ class DefaultsTab(TabService):
         door (PAD-755).  Read by the app's Write flow after a build."""
         from ...core import staged_changes
         return staged_changes.load(assets_dir).get(COIN_KEY) == COIN_FITTED
+
+    def staged_final_wizard(self, assets_dir):
+        """True when the project is staged to keep the final wizard from
+        ending the game (PAD-786).  Read by the app's Write flow after a
+        build."""
+        from ...core import staged_changes
+        return staged_changes.load(assets_dir).get(WIZARD_KEY) == WIZARD_ON
 
     def staged_menu_expose(self, assets_dir):
         """The ``AD_`` name the machine's Adjustments menu is staged to be
@@ -1629,6 +1661,48 @@ class DefaultsTab(TabService):
             self._status("The game will be left without its coin door, as "
                          "it ships.")
         self._publish_coin()
+        return True
+
+    # ---- a final wizard that does not end the game (PAD-786) -------------
+    def _publish_wizard(self):
+        offer = bool(self._wizard)
+        assets_dir = self._staged_dir()
+        on = offer and bool(assets_dir) and self.staged_final_wizard(assets_dir)
+        self.set(wizard_offer=offer, wizard_on=bool(on))
+
+    @rpc
+    def final_wizard_set(self, on):
+        """The Final wizard box: stage (or clear) keeping the final wizard from
+        ending the game at the next Build.  Offered only on a build
+        plugins.stern.final_wizard knows."""
+        if not self._wizard:
+            return False
+        assets_dir = self._staged_dir()
+        if not assets_dir:
+            self._status(NO_FOLDER_TEXT)
+            self._publish_wizard()
+            return False
+        from ...core import staged_changes
+        data = staged_changes.load(assets_dir)
+        if bool(on) == (data.get(WIZARD_KEY) == WIZARD_ON):
+            self._publish_wizard()
+            return True
+        if on:
+            data[WIZARD_KEY] = WIZARD_ON
+        else:
+            data.pop(WIZARD_KEY, None)
+        staged_changes.save(assets_dir, data)
+        self._folder_written(assets_dir)
+        if on:
+            self.log("Defaults: after the next Build, the final wizard no "
+                     "longer ends the game.", "info")
+            self._status("After the next Build, the final wizard no longer "
+                         "ends the game.")
+        else:
+            self.log("Defaults: the final wizard will end the game, as it "
+                     "ships.", "info")
+            self._status("The final wizard will end the game, as it ships.")
+        self._publish_wizard()
         return True
 
     # ------------------------------------------------------------------

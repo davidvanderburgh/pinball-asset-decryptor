@@ -28,8 +28,13 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from ...core.lazy_import import lazy_module
+
+# numpy and PIL load on first use, not with this module (PAD-797)
+np = lazy_module("numpy")
+Image = lazy_module("PIL.Image")
+ImageDraw = lazy_module("PIL.ImageDraw")
+ImageFont = lazy_module("PIL.ImageFont")
 
 from . import mode_project as MP
 from . import scene_write as SW

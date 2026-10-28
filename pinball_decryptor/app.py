@@ -211,6 +211,44 @@ def replacement_mismatch_message(assets_dir, mismatches, recorded,
             f"{'Build' if is_build else 'Export'} anyway?")
 
 
+class UiQueue(queue.Queue):
+    """The worker to UI-loop message queue: a ``put`` wakes the loop.
+
+    The loop used to poll this queue every 100 ms (PAD-797): a worker's
+    line, progress or Done waited up to that long, and the idle loop woke
+    ten times a second for nothing.  Now ``put`` schedules one drain
+    (:meth:`App._poll_queue`) through *schedule* when none is pending; the
+    drain clears the flag as it starts, so a put that lands while it runs
+    schedules the next one and nothing is ever left waiting.  A put from
+    the loop thread itself works the same way (the drain runs after the
+    current job).  ``get_nowait`` and friends are the plain queue's, so a
+    test can drain it by hand.
+    """
+
+    def __init__(self, schedule):
+        super().__init__()
+        self._schedule = schedule
+        self._pending = False
+        self._flag = threading.Lock()
+
+    def put(self, item, block=True, timeout=None):
+        super().put(item, block, timeout)
+        self.wake()
+
+    def wake(self):
+        """Schedule a drain unless one is already on its way."""
+        with self._flag:
+            if self._pending:
+                return
+            self._pending = True
+        self._schedule()
+
+    def drain_started(self):
+        """The drain is running: the next put must schedule again."""
+        with self._flag:
+            self._pending = False
+
+
 class App:
     """The run logic behind the web window.  Constructed ON the UI loop
     (``webui.host.build``) with the web UI's context: ``ctx.loop`` is the
@@ -240,7 +278,8 @@ class App:
         # wsl.exe (core.runtime answers from its cache there).
         from .core import runtime as _runtime
         _runtime.ui_thread_check = ctx.loop.in_loop
-        self.msg_queue = queue.Queue()
+        self.msg_queue = UiQueue(
+            lambda: self.root.after(0, self._poll_queue))
         self.pipeline = None
         self._active_mode = "extract"
         # Set when the user clicks Cancel; checked by the post-job chain
@@ -637,7 +676,15 @@ class App:
         # Send log.  Now a turn stops after POLL_TURN_S and the next comes
         # straight after whatever else is waiting, and the turn's log lines
         # reach the log files in one write, not two file opens a line.
+        #
+        # A turn starts when a worker's put wakes the loop (UiQueue,
+        # PAD-797), not on a 100 ms poll: the flag is cleared here, first,
+        # so a put that lands during this turn schedules the next one.
         from .core import session_log
+        q = self.msg_queue
+        started = getattr(q, "drain_started", None)
+        if started is not None:
+            started()
         deadline = time.monotonic() + self.POLL_TURN_S
         more = False
         with session_log.batched():
@@ -677,7 +724,14 @@ class App:
                                 msg.result.message, msg.result.install_hint)
             except queue.Empty:
                 pass
-        self.root.after(0 if more else 100, self._poll_queue)
+        if more:
+            # straight back after the others' turn (once: a put that already
+            # scheduled the next turn is not doubled)
+            wake = getattr(q, "wake", None)
+            if wake is not None:
+                wake()
+            else:
+                self.root.after(0, self._poll_queue)
 
     # ------------------------------------------------------------------
     # Manufacturer switching

@@ -41,7 +41,11 @@ import subprocess
 import wave
 from dataclasses import dataclass
 
-import numpy as np
+from ...core.lazy_import import lazy_module
+
+# numpy loads on first use, not with this module (PAD-797): the Modes tab
+# imports it at startup, on the UI loop.
+np = lazy_module("numpy")
 
 from ...core import audio as _audio
 from . import mode_assets as MA

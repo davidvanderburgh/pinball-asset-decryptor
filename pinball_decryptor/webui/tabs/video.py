@@ -929,23 +929,47 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
     # ---- metadata probe (MainWindow._run_probe_pass) -------------------
     def _probe_metadata_async(self, scan_id):
         """MainWindow._probe_video_metadata_async: ffprobe each slot on a
-        worker pool; a loop timer drains results in bounded batches."""
+        worker pool; a loop timer drains results in bounded batches.
+
+        The project's probe cache (core.video.PROBE_CACHE_FILE, PAD-797)
+        answers first: the slots it still answers for go straight to the
+        page, only the misses reach ffprobe, and the cache is written
+        back once at the end when a probe filled it (never in a capture
+        run).  The cache is read, looked up and saved on the coordinator
+        thread, so the loop never waits on a stat or a file."""
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
+        from ...core import video as video_mod
         from ...core.video import backend_for, detect_video_info
         pending = [s for s in self._slots
                    if s.info is None and backend_for(s.abs_path) is None]
         if not pending:
             return
+        folder = self._scan_dir
         q = queue_mod.SimpleQueue()
         done = threading.Event()
 
         def _coordinator():
+            cache, changed = {}, False
             try:
+                cache = video_mod.load_probe_cache(folder) if folder else {}
+                misses = []
+                for s in pending:
+                    if self._scan_id != scan_id:
+                        return
+                    hit = (video_mod.probe_cache_lookup(cache, s.rel_path,
+                                                        s.abs_path)
+                           if cache else None)
+                    if hit is not None:
+                        q.put((s.rel_path, hit))
+                    else:
+                        misses.append(s)
+                if not misses:
+                    return
                 workers = min(8, (os.cpu_count() or 4))
                 with ThreadPoolExecutor(max_workers=workers) as ex:
                     futs = {ex.submit(detect_video_info, s.abs_path): s
-                            for s in pending}
+                            for s in misses}
                     for fut in as_completed(futs):
                         if self._scan_id != scan_id:
                             for f in futs:
@@ -955,10 +979,16 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                             info = fut.result()
                         except Exception:                   # noqa: BLE001
                             info = None
-                        q.put((futs[fut].rel_path, info))
+                        slot = futs[fut]
+                        if video_mod.probe_cache_store(
+                                cache, slot.rel_path, slot.abs_path, info):
+                            changed = True
+                        q.put((slot.rel_path, info))
             except Exception:                               # noqa: BLE001
                 pass
             finally:
+                if changed and folder:
+                    video_mod.save_probe_cache(folder, cache)
                 done.set()
 
         def _drain():

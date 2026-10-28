@@ -226,11 +226,14 @@ JJP_WORKDIR = "/var/tmp/pad_jjpmulti_work"
 # Pillow reads the preview's frames and the pictures the owner picks.  It
 # is a hard dependency of the app, but the guard keeps the module importable
 # if it is ever missing (the clips then stay still).
-try:
-    from PIL import Image
-    _HAVE_PIL = True
-except ImportError:                                     # pragma: no cover
-    _HAVE_PIL = False
+# PAD-797: Pillow loads on first use, not with this module (the
+# Multi-boot tab imports it at startup, on the UI loop).
+from importlib.util import find_spec as _find_spec
+
+from ..core.lazy_import import lazy_module
+
+_HAVE_PIL = _find_spec("PIL") is not None
+Image = lazy_module("PIL.Image")
 
 
 class TclError(Exception):

@@ -50,7 +50,10 @@ import hashlib
 import struct
 from dataclasses import dataclass
 
-import numpy as np
+from ...core.lazy_import import lazy_module
+
+# numpy loads on first use, not with this module (PAD-797)
+np = lazy_module("numpy")
 
 from . import dds as _dds
 

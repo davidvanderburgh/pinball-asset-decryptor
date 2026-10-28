@@ -28,8 +28,15 @@ import colorsys
 import os
 import re
 
-import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from ...core.lazy_import import lazy_module
+
+# numpy and PIL load on first use, not with this module (PAD-797): the
+# Modes tab imports this chain at startup, on the UI loop.
+np = lazy_module("numpy")
+Image = lazy_module("PIL.Image")
+ImageDraw = lazy_module("PIL.ImageDraw")
+ImageFilter = lazy_module("PIL.ImageFilter")
+ImageFont = lazy_module("PIL.ImageFont")
 
 from . import dds as _dds
 from . import scene_tree as T

@@ -538,6 +538,7 @@ class Bridge:
         self.attached = False              # the run is up and its tables read
         self.front_done = False            # the started run's LCD window was handed back once
         self.lcd_placed = False            # ... and put where the kit says, on top, once
+        self.player_placed = False         # Visual Pinball's own window moved where the kit says, once
         self.start_t = 0.0
         self.running = False
         self.paused = False
@@ -580,6 +581,7 @@ class Bridge:
         self.lcd_placed = False
         self.lcd_tries = 0
         self.lcd_stable = 0
+        self.player_placed = False
         log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         data = read_block(self.rig.led_path(), READ_N)
         if data and coilmap.has_magic(data):
@@ -749,6 +751,8 @@ class Bridge:
                     self._place_lcd()
                 if not self.front_done:
                     self._keep_player_front()
+            if not self.player_placed and now - self.start_t < FRONT_WATCH_S:
+                self._place_player()
             if not self.attached:
                 self._poll_starting()
                 time.sleep(1.0)
@@ -820,6 +824,34 @@ class Bridge:
         except Exception as exc:                            # noqa: BLE001
             log("window placement failed: %s" % exc)
             self.lcd_placed = True
+
+    def _place_player(self):
+        """Visual Pinball's own playfield window, where the kit's `player`
+        says (padvpx player): borderless in windowed mode, so the user
+        cannot drag it, and 10.8 ignores WindowPosX/Y in its ini. Moved
+        once per Run, for any run (not only one this bridge started); its
+        size stays Visual Pinball's own unless the kit gives one."""
+        hwnd = getattr(self, "player_hwnd", 0)
+        setting = padlaunch.kit_load().get("player")
+        if sys.platform != "win32" or not setting:
+            self.player_placed = True
+            return
+        if not hwnd:
+            return
+        try:
+            dpi_aware()
+            cur = window_rect(hwnd)
+            if "monitor" in setting:
+                x, y, w, h = lcd_rect(setting, monitors())
+            else:
+                x, y = int(setting["x"]), int(setting["y"])
+                w, h = int(setting.get("w", cur[2])), int(setting.get("h", cur[3]))
+            place_window(hwnd, (x, y, w, h), False)
+            self.player_placed = True
+            log("player window placed at %s (was %s)" % ((x, y, w, h), cur))
+        except Exception as exc:                            # noqa: BLE001
+            log("player window not placed: %s" % exc)
+            self.player_placed = True
 
     def _keep_player_front(self):
         """A run this bridge started opens the game's LCD window, and that

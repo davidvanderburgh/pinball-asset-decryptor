@@ -79,11 +79,17 @@ then on it is the user's to drag anywhere (the first version re-placed it
 whenever it had moved, which read as a window stuck under the mouse). A
 pause Visual Pinball sends while one of these windows is in front (the
 user clicked it) leaves the game running; only a pause with Visual Pinball
-itself in front freezes the rig. `padvpx playfield on | monitor 2 | x y w h
-| off` asks for the rig's virtual playfield window as well, placed the same
-way, under the LCD by default. A full-screen Visual Pinball must be the
+itself in front freezes the rig. A full-screen Visual Pinball must be the
 windowed kind for anything to show over it: its "Force exclusive
 fullscreen" option stays off.
+
+**Visual Pinball's own playfield window.** In windowed mode it is borderless,
+so it cannot be dragged, and 10.8 ignores the `WindowPosX/Y` its ini
+carries; `padvpx player 100 0` (or `player 100 0 900 1350`, or `player
+monitor 2`) has the controller move it there once when a table opens, for
+any run, its size Visual Pinball's own unless given. `padvpx playfield on`
+asks for the rig's own virtual playfield window as well (off by default;
+nobody needs it beside Visual Pinball), placed like the LCD, under it.
 
 **Sharing a table with somebody else.** The kit never ships a table or a
 card. What the other person needs: the PAD installer (the emulator, its

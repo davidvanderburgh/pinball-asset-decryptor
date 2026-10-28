@@ -16,9 +16,14 @@ name the card a title boots, start or stop a run by hand.
         on top of a full-screen Visual Pinball in the upper middle of the
         main screen (the default), filling screen n, or at a rectangle.
         Placed once; drag it anywhere after that.
+    padvpx player <x> <y> [<w> <h>] | monitor <n> | off
+        Where Visual Pinball's own playfield window goes: it is borderless
+        in windowed mode and cannot be dragged, and 10.8 ignores the
+        position in its ini, so the controller moves it there once when a
+        table opens (Visual Pinball's own size unless w h are given).
     padvpx playfield on | monitor <n> | <x> <y> <w> <h> | off
-        The rig's virtual playfield window too (off unless asked), placed
-        the same way.
+        The rig's own virtual playfield window as well (off unless asked),
+        placed like the LCD.
     padvpx card <title> <image.raw>      record a title's card (or `padvpx card`: list)
     padvpx library <dir>                  a directory of cards: the newest build of a title is its card
     padvpx register | unregister          PAD.Controller in the registry (this Python, this folder)
@@ -96,6 +101,49 @@ def patch(table_path, outdir=None, card=None):
         print("open \"%s\" in Visual Pinball; the game starts with it when its card is known"
               % os.path.join(outdir, info["output"] or "<name> (PAD).vpx"))
     return r.returncode
+
+
+def vpx_ini_path():
+    return os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "VPinballX", "VPinballX.ini")
+
+
+def vpx_ini_set(keys, section="Player", path=None):
+    """Set `keys` in a section of Visual Pinball's ini (`Key = Value` lines
+    under `[Section]`), keeping everything else as it is."""
+    path = path or vpx_ini_path()
+    try:
+        lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
+    except OSError:
+        lines = []
+    out, in_sect, seen, done = [], False, set(), False
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("[") and s.endswith("]"):
+            if in_sect and not done:
+                for k, v in keys.items():
+                    if k not in seen:
+                        out.append("%s = %s" % (k, v))
+                done = True
+            in_sect = s[1:-1].lower() == section.lower()
+            out.append(ln)
+            continue
+        if in_sect and "=" in s:
+            k = s.split("=", 1)[0].strip()
+            for want in keys:
+                if k.lower() == want.lower():
+                    ln = "%s = %s" % (want, keys[want])
+                    seen.add(want)
+        out.append(ln)
+    if not any(ln.strip().lower() == "[%s]" % section.lower() for ln in out):
+        out += ["[%s]" % section]
+        in_sect = True
+    if in_sect and not done:
+        for k, v in keys.items():
+            if k not in seen:
+                out.append("%s = %s" % (k, v))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "w", encoding="utf-8", newline="\n").write("\n".join(out))
+    return path
 
 
 # ------------------------------------------------------------- the runs ---
@@ -212,6 +260,27 @@ def main(argv):
             import padcontroller
             padcontroller.main(["--register"])
         return patch(rest[0], None, rest[1])
+    if cmd == "player":
+        # Visual Pinball's own playfield window: borderless in windowed
+        # mode, so it cannot be dragged, and 10.8 ignores WindowPosX/Y in
+        # its ini - the controller moves it once when a table starts
+        d = padlaunch.kit_load()
+        if len(rest) in (2, 4):
+            vals = [int(v) for v in rest]
+            d["player"] = {"x": vals[0], "y": vals[1]}
+            if len(vals) == 4:
+                d["player"].update(w=vals[2], h=vals[3])
+        elif rest and rest[0] == "monitor" and len(rest) == 2:
+            d["player"] = {"monitor": int(rest[1])}
+        elif rest and rest[0] == "off":
+            d.pop("player", None)
+        else:
+            print(json.dumps(d.get("player", {}), indent=1) or "off")
+            return 0
+        padlaunch.kit_save(d)
+        print("player window: %s (applied when a table is next opened; its size stays Visual Pinball's own unless w h are given)"
+              % json.dumps(d.get("player", "off")))
+        return 0
     if cmd == "playfield":
         # the rig's own virtual playfield window beside Visual Pinball:
         # `padvpx playfield on` (upper middle), `monitor 2`, `x y w h`, `off`

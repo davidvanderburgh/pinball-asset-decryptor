@@ -15,6 +15,7 @@ to stay correct when it isn't.
 import mmap
 
 import pytest
+from unicorn import UC_PROT_WRITE
 
 from pinball_decryptor.plugins.stern.spike2 import emulator as E
 
@@ -25,14 +26,19 @@ class _FakeMu:
         self.unmaps = []
         self.fail = fail
 
-    def mem_map_ptr(self, addr, size, perms, ptr):
+    # PAD-777: the emulator maps the card through WindowUc (spike2.window)
+    def map_window(self, lo, size, fileobj, perms, copy=False):
         if self.fail:
             raise RuntimeError("mem_map_ptr unsupported")
-        assert ptr, "null pointer handed to unicorn"
-        self.maps.append((addr, size, perms))
+        assert not fileobj.closed, "the window needs the open card file"
+        self.maps.append((lo, size, perms))
+        self.copy = copy
 
-    def mem_unmap(self, addr, size):
-        self.unmaps.append((addr, size))
+    def unmap_window(self, lo):
+        self.unmaps.append(lo)
+
+    def mem_map(self, addr, size):
+        raise AssertionError("paged %#x inside the card window" % addr)
 
 
 class _Emu:
@@ -41,7 +47,7 @@ class _Emu:
     _map_card_window = E.Spike2Emu._map_card_window
     close = E.Spike2Emu.close
 
-    def __init__(self, path, imgsize, fail=False):
+    def __init__(self, path, imgsize, fail=False, card_copy=False):
         self._imgf = open(path, "rb")
         self.mm = mmap.mmap(self._imgf.fileno(), 0, access=mmap.ACCESS_READ)
         self.imgsize = imgsize
@@ -49,6 +55,7 @@ class _Emu:
         self.log = []
         self.mapped_pages = set()
         self._cardf = self._cardbuf = None
+        self._card_copy = card_copy
         self._card_lo = self._card_hi = 0
 
 
@@ -87,17 +94,18 @@ def test_partial_tail_page_is_left_to_the_pager(tmp_path):
         emu.close()
 
 
-def test_window_is_a_private_copy_on_write_view(card):
-    """A guest write to the card must never reach image.bin.  The copying path
-    gave that for free; the mapping has to get it from ACCESS_COPY."""
+@pytest.mark.parametrize("card_copy", [False, True])
+def test_window_is_read_only_unless_the_emulator_writes_the_card(card, card_copy):
+    """PAD-777: a read-only view commits nothing; only an emulator that will write
+    the card (the Write's integrity check) asks for a copy-on-write one.  That a
+    write never reaches image.bin either way is test_pad777_emulator_commit's."""
     path, size = card
-    emu = _Emu(path, size)
+    emu = _Emu(path, size, card_copy=card_copy)
     emu._map_card_window()
     try:
-        emu._cardbuf[0] = b"\xff"
-        assert emu._cardf[0:1] == b"\xff"          # visible in the guest view
-        with open(path, "rb") as f:
-            assert f.read(1) != b"\xff"            # NOT in the card file
+        _addr, _span, perms = emu.mu.maps[0]
+        assert not perms & UC_PROT_WRITE
+        assert emu.mu.copy is card_copy
     finally:
         emu.close()
 
@@ -145,14 +153,15 @@ def test_failure_falls_back_cleanly_and_releases_the_view(card):
 
 def test_close_unmaps_before_dropping_the_buffer(card):
     """Ordering matters twice over: unicorn is pointing straight at the view, and
-    the ctypes buffer keeps an exported pointer that makes mmap.close() raise
-    until it is dropped.  A wrong order here is a hard crash or a leak."""
+    the exported pointer makes the view's close raise until it is dropped
+    (WindowUc.unmap_window does both, in that order).  A wrong order here is a
+    hard crash or a leak."""
     path, size = card
     emu = _Emu(path, size)
     emu._map_card_window()
-    span = emu.mu.maps[0][1]
+    assert emu.mu.maps
     emu.close()
-    assert emu.mu.unmaps == [(E.DESC_BASE, span)]
+    assert emu.mu.unmaps == [E.DESC_BASE]
     assert emu._cardbuf is None and emu._cardf is None
     assert emu._card_lo == emu._card_hi == 0
 

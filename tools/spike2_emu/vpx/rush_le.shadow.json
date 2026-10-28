@@ -18,6 +18,7 @@
     "DrHotWing"
   ],
   "output": "Rush LE 2.0.2 (PAD).vpx",
+  "table": {"name": "Rush LE Tribute 2.0.2", "by": "drhotwing", "where": "VPUniverse"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
   "cabinet": {"start": 1036, "launch": 1034, "launch_key": "LockBarKey", "tilt": 1038, "slam": 1045, "left_flipper": 1065, "right_flipper": 1064, "up_right_flipper": 1066, "coin": 1039, "coin_door_interlock": 1033},

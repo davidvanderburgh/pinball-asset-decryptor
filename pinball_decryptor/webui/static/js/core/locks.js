@@ -32,6 +32,7 @@ export const WHAT = {
   emulate_spooky: "Run the game on this computer from its update file.",
   emulate_pb: "Run the game on this computer from its update file (Predator so far).",
   emulate_spike1: "Run the game on this computer.",
+  vpx: "Play a Visual Pinball table with this game behind it.",
   multiboot: "Put it on one card with other games behind a boot menu.",
   defaults: "Change the game's factory settings.",
   modes: "Make your own modes.",

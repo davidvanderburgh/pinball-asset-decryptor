@@ -360,3 +360,31 @@ where the windows appear; a clean, easy handoff.
   with the kit redirected, and five tests on the pure parts (cards folder,
   table titles, one listing per shipped table, the presets, the kit and ini
   the layout writes, Visual Pinball found from the kit first).
+
+## In the app, as a preview feature (PAD-802)
+
+David (2026-10-28), after a tester's updates fought the beta installer (it
+carried an old app stamped v1.273.1, so every update replaced it): put the
+kit IN the app as a beta feature behind a preview code, with the mechanisms
+to patch the known tables, and never distribute the tables themselves.
+
+* `core/preview.py` FEATURES `vpx` ("Visual Pinball"); `tools/preview_code.py
+  issue --name ... --feature vpx` makes a code. The rail shows the Visual
+  Pinball tab (Play group, after Emulate) with a code, on Windows, for a
+  manufacturer the Spike 2 emulator runs; unlocking or removing a code shows
+  or hides it at once.
+* The tab (`webui/tabs/vpx.py`, `static/js/tabs/vpx.js`) replaces the setup
+  window: padwizard.py is gone, its pure parts are `vpxsetup.py`. WSL 2 and
+  the runtime are the Emulate tab's job, so the tab only reports them.
+* Each map names the download it fits: `table` {name, by, where}; the
+  godzilla map gained the `output` name the patcher writes.
+* The installer ships no table (`installer/vpx_tables` is gone from the
+  script), has no Start-menu wizard and no postinstall wizard, and an update
+  deletes the two Start-menu shortcuts v1.279.x made. It still registers
+  the controller on every install.
+* Proven: the tab's state on this PC (Visual Pinball, controller, runtime,
+  card folder of 53 titles, the three tables with their cards), Patch through
+  the tab's own code on drhotwing's Rush LE 2.0.2 and JP's Foo Fighters beta
+  downloads (both "(PAD)" copies written), unlock and remove at run time,
+  hidden without a code; tests/test_vpx_tab.py and the setup tests in
+  tests/test_vpx_bridge.py.

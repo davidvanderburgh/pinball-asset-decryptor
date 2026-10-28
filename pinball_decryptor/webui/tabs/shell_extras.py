@@ -875,18 +875,21 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         self.apply_preview_features()
 
     def apply_preview_features(self):
-        """Show or hide what the preview switch gates (the Modes tab) for
-        the manufacturer on screen."""
+        """Show or hide what the preview switches gate (the Modes tab, the
+        Visual Pinball tab) for the manufacturer on screen."""
         win = self.window
         mfr = win.current_mfr
         if mfr is None:
             return
         on = win.modes_preview_on(mfr)
+        gates = win._gate(mfr)
         panel = None
         for svc in win.tabs:
             if svc.key == "Modes":
                 svc._visible = bool(on)
                 panel = svc
+            elif svc.key == "Visual Pinball":
+                svc._visible = bool(gates.get(svc.key, False))
         win.refresh_rail()
         win._ensure_visible_selection()
         if on and panel is not None:

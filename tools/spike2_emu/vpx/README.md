@@ -24,6 +24,7 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `rush_le.shadow.json`, `foo_fighters_le.shadow.json` | the maps for drhotwing's "Rush LE Tribute" 2.0.2 and JP's "Foo Fighters" beta. |
 | `vpxkeys.py` | presses keys in a running patched table through its `PadTestTimer` (a test does not depend on VPX having the keyboard); `lamps <file>` dumps every mapped light's state. |
 | `padvpx.py` | the kit's command: patch a table (recognised by its map's `detect` words), register the controller, record cards, run and stop by hand, status. |
+| `vpxsetup.py` | the app's Visual Pinball tab's half here: what is set up (Visual Pinball, the controller, the cards, each known table and whether it is patched), the card folder, the window layout, the Visual Pinball download, Play; one JSON line back. |
 | `padlaunch.py` | starts a run for a title when Visual Pinball opens its table and none is up, and stops what it started. |
 | `vpxgen.py`, `vpxgen_protos.json` | a table GENERATED from a title's own device tables (switch, coil and LED positions over the game's playfield drawing), for a title with no tribute; the prototypes are Visual Pinball's example table's objects with their strings blanked. |
 | `test_controller.vbs` | `cscript //nologo test_controller.vbs [run]` - the controller from VPX's own script engine, with no VPX installed; `run` presses Start and a flipper through a live rig and expects the coils back. |
@@ -63,27 +64,24 @@ on an installed app; the venv's in a checkout):
     padvpx run <title> | stop <title>      a run by hand, the way the controller starts one
     padvpx status | tables                 what is registered, recorded, up, and patchable
 
-On an installed app the command is `padvpx.cmd` in the app folder (a Start
-menu entry opens a prompt on it), and the installer registers the
-controller itself.
+On an installed app the command is `padvpx.cmd` in the app folder, and the
+installer registers the controller itself.
 
-**The setup window: `padvpx wizard`.** Everything above, as one window
-with six pages, for somebody who is not going to type any of it (the
-installer offers it on its last page, and the Start menu has it as "Visual
-Pinball setup"): the machine (WSL 2 installed from here if missing, the PAD
-runtime downloaded and imported, the controller registered), Visual Pinball
-(found, chosen, or the 10.8.0 release downloaded and unpacked), the card
-folder (which titles it covers), the tables (the ones a build ships, copied
-into Visual Pinball's tables folder, or the user's own tribute patched), the
-windows (a layout for the screens found, drawn, or numbers), and a Play page
-that opens a table. It writes only what the commands write: `~/.pad-vpx.json`
-and Visual Pinball's ini. A build ships tables only when
-`installer/vpx_tables/*.vpx` exists at build time (a beta for a tester; a
-release ships none, and the wizard then offers the patch button alone). The
-page is pywebview, and one trap cost an afternoon: pywebview walks EVERY
-public attribute of the js_api object into the page, so the window handle
-kept on the api is `_window`; as `window` it walked the WinForms tree
-forever (a 17 GB process that never answered).
+**The app's Visual Pinball tab** (a preview feature since PAD-802, the
+preview code's feature `vpx`) is everything above with buttons, for somebody
+who is not going to type any of it: the PAD runtime (the Emulate tab sets it
+up), Visual Pinball (found, chosen, or the 10.8.0 release downloaded and
+unpacked), the controller (registered by the installer; a Register button
+repairs it), the card folder (which of the kit's titles it has a card for),
+the tables the kit knows (each one named with its author and where it is
+downloaded, and a Patch button that writes the "(PAD)" copy of the user's
+own download into Visual Pinball's tables folder), a window layout for the
+screens found, and Play. The tab runs `vpxsetup.py` (state and settings,
+one JSON line back) and `padvpx.py` (patch, register) with the app's Windows
+Python, so the kit's pywin32 and DPI awareness stay out of the app; it
+writes only what the commands write: `~/.pad-vpx.json` and Visual Pinball's
+ini. NO BUILD SHIPS A TABLE: the separate setup window (`padvpx wizard`)
+and the beta installer that carried two patched tables are gone.
 
 **The LCD window.** Visual Pinball comes up full screen and would cover the
 game's LCD window, so when the controller starts a run it puts that window

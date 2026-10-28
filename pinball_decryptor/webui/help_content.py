@@ -3398,6 +3398,52 @@ PREVIEW_HELP = {
             ]),
         ],
     },
+    # PAD-802: the Visual Pinball tab
+    "vpx": {
+        "Visual Pinball": [
+            ("What it's for",
+             "Play a Visual Pinball table with the real Stern game behind it. The game "
+             "from your own card image runs in the emulator; the table is its playfield. "
+             "The game serves the balls, fires the flippers, slings and pops, lights the "
+             "table, keeps score, plays its sounds and shows its own screen in a window "
+             "of its own."),
+            ("Getting started", [
+                {"flow": [
+                    {"icon": "check", "title": "Setup",
+                     "text": "the PAD runtime (Emulate tab), Visual Pinball, the controller"},
+                    {"icon": "sd", "title": "Cards",
+                     "text": "the folder with your SD card images"},
+                    {"icon": "upload", "title": "Patch",
+                     "text": "the table you downloaded from its author"},
+                    {"icon": "play", "title": "Play",
+                     "text": "the game boots by itself, within a minute"}]},
+                "- The app ships no tables. The Tables list names each one it knows and "
+                "who made it; download it from there.\n"
+                "- **Patch a table...** writes a copy named \"(PAD)\" into Visual "
+                "Pinball's tables folder. Your download stays as it was.\n"
+                "- A title plays the newest build of its card in the card folder.\n"
+                "- **Windows** sets where Visual Pinball's playfield and the game's screen "
+                "go when a table opens. You can drag the game's screen anywhere after that.",
+            ]),
+            ("Playing",
+             "| Key | Does |\n"
+             "|---|---|\n"
+             "| 1 | Start |\n"
+             "| 5 | coin (add coins until the game's screen shows a credit) |\n"
+             "| Left and right Shift | flippers |\n"
+             "| Left Alt | launch on Rush and Foo Fighters (Visual Pinball's lockbar key) |\n"
+             "| Enter | launch on Godzilla |\n"
+             "| Esc | leave; the game stops with the table |\n\n"
+             "The first time, the game's screen may take the keyboard: click the "
+             "playfield once and play on."),
+            ("If it does not start",
+             "- **Check again** says what is missing.\n"
+             "- \"no rig slot free\": a game is already running, on the Emulate tab or "
+             "from a table closed without Esc. Stop it on the Emulate tab.\n"
+             "- The table loads and nothing happens: `%TEMP%\\padcontroller.log` says what "
+             "the controller did, and `%TEMP%\\padvpx-<title>.log` is the game's boot log."),
+        ],
+    },
 }
 
 

@@ -9,7 +9,7 @@
         Refuses to overwrite a key that is already there, and refuses any path inside a
         git checkout.
 
-    python tools/preview_code.py issue --name "Test Person" --days 90 [--feature modes]
+    python tools/preview_code.py issue --name "Test Person" --days 90 [--feature vpx]
         Print a code for that person, good through today (UTC) + DAYS. Signed with the
         key file; refused when that key is not one the app ships (a code the app would
         reject is worse than none).
@@ -188,7 +188,10 @@ def cmd_issue(args):
         raise SystemExit("--name is empty.")
     if args.days < 1:
         raise SystemExit("--days must be at least 1.")
-    feats = args.feature or ["modes"]
+    feats = args.feature or sorted(preview.FEATURES)[:1]
+    if not args.feature and len(preview.FEATURES) != 1:
+        raise SystemExit("Name the feature with --feature; this app has %s."
+                         % (", ".join(sorted(preview.FEATURES)) or "none"))
     unknown = [f for f in feats if f not in preview.FEATURES]
     if unknown:
         raise SystemExit("Unknown feature(s) %s; this app has %s."
@@ -249,7 +252,7 @@ def main(argv=None):
     p = sub.add_parser("issue", help="print a code for one person")
     p.add_argument("--name", required=True)
     p.add_argument("--days", type=int, default=90)
-    p.add_argument("--feature", action="append", help="a feature id (default: modes)")
+    p.add_argument("--feature", action="append", help="a feature id (default: the one preview this app has)")
     p.add_argument("--key", default=default_key_path(), help="the private key file")
     p.set_defaults(fn=cmd_issue)
     p = sub.add_parser("show", help="decode and check a code")

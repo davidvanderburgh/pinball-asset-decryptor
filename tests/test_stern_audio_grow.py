@@ -87,7 +87,7 @@ def test_gate_is_off_unless_asked_for(monkeypatch):
     monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
     ok, why = engine._audio_grow_gate(False)
     assert not ok
-    assert "longer replacements are off" in why
+    assert "longer and shorter replacements are off" in why
 
 
 def test_the_off_reason_names_the_option_the_dialog_really_has(monkeypatch):
@@ -99,7 +99,7 @@ def test_the_off_reason_names_the_option_the_dialog_really_has(monkeypatch):
 
     monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
     _ok, why = engine._audio_grow_gate(False)
-    label = "Allow replacements longer than the original"
+    label = "Allow replacements longer or shorter than the original"
     assert '"%s"' % label in why and "Advanced" in why
     js = os.path.join(os.path.dirname(webui_pkg.__file__),
                       "static", "js", "tabs", "audio.js")
@@ -128,7 +128,7 @@ def test_longer_sound_texts_name_both_limits():
                       "static", "js", "tabs", "audio.js")
     with open(js, encoding="utf-8") as f:
         src = f.read()
-    start = src.index('label="Allow replacements longer than the original')
+    start = src.index('label="Allow replacements longer or shorter than the original')
     advanced = src[start:src.index("</p>", start)]
     help_ = dict(HELP_CONTENT["Replace Audio"])[
         "Longer replacements (Advanced Audio Options)"]
@@ -531,6 +531,11 @@ def test_the_bank_is_queued_before_the_firmware(monkeypatch, tmp_path,
     fw.write_bytes(b"\x7fELF" + b"\x00" * 0x2000)
     monkeypatch.setattr(engine, "_build_derive_redirect_cave",
                         lambda *a, **k: (str(fw), 0x2004))
+    # a patch the cave redirects (a sound replaced in place beside the grown
+    # one): with every patch an appended body there is no cave and no
+    # firmware job at all (PAD-800)
+    monkeypatch.setattr(engine, "_appended_body_offsets",
+                        lambda *a, **k: set())
     assets, _w = _edits(tmp_path, 2.0)
     _msgs, log = _capture()
     _writes, _c, plan, _m, _v = _run(monkeypatch, assets, params, 0x40000, log)
@@ -539,9 +544,37 @@ def test_the_bank_is_queued_before_the_firmware(monkeypatch, tmp_path,
     assert plan["audio_job"] == rels.index(IMG_PATH.lstrip("/"))
 
 
+def test_a_build_of_appended_records_only_needs_no_redirect(monkeypatch, tmp_path,
+                                                            _grow_on):
+    """PAD-800: every replaced sound a record of its own, encoded along the chain,
+    holds its own audio in every window.  The cave used to be tried anyway, found
+    "no master-directory windows" and the card was reported as one with the
+    original's scrap; now it is not tried and the card is blip-free."""
+    params = _params(4)
+    grown = [dict(p) for p in params]
+    grown[0].update(body_off=0x40000, length=2 * 44100 + BLOCK, grown=True,
+                    shadows=4)
+    _reader, staged = _grow_card(monkeypatch, tmp_path, params,
+                                 grown_rows=grown)
+    monkeypatch.setenv("PAD_STERN_BLIP_FREE", "1")
+    monkeypatch.delenv("PAD_STERN_SKIP_KEYPATCH", raising=False)
+    monkeypatch.setattr(engine, "_pathA_preflight", lambda d: None)
+    monkeypatch.setattr(engine, "_mode_family_on", lambda: True)
+
+    def _no_cave(*a, **k):
+        raise AssertionError("the cave was built for appended records only")
+    monkeypatch.setattr(engine, "_build_derive_redirect_cave", _no_cave)
+    assets, _w = _edits(tmp_path, 2.0)
+    msgs, log = _capture()
+    _writes, _c, plan, mode, _v = _run(monkeypatch, assets, params, 0x40000, log)
+    assert mode == ("blip-free", "")
+    assert _said(msgs, "no scrap of the original plays")
+    assert not _said(msgs, "Blip-free callouts not applied")
+
+
 @pytest.mark.parametrize("device,flag,needle", [
     (True, "1", "direct-SD"),
-    (False, None, "longer replacements are off"),
+    (False, None, "longer and shorter replacements are off"),
 ])
 def test_a_closed_gate_trims_and_says_why(monkeypatch, tmp_path, device, flag,
                                           needle):

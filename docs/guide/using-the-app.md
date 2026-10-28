@@ -122,14 +122,19 @@ build.
 - **Play replacements** plays your replacement wherever a row has one, so
   the list sounds like the built card.
 
-### Longer sounds (Stern Spike 2)
+### Longer and shorter sounds (Stern Spike 2)
 
-A longer replacement is normally trimmed to the sound it replaces. Tick
-**Allow replacements longer than the original** (Advanced Audio Options)
-and it plays whole instead.
+A longer replacement is normally trimmed to the sound it replaces, and a
+shorter one is padded with silence to its length (the game plays it for
+that long). Tick **Allow replacements longer or shorter than the original**
+(Advanced Audio Options) and each plays at its own length instead.
 
 - Your clip is added at the end of the sound bank; every other sound is
   untouched. It needs an image build, not a direct SD write.
+- **Shorter:** a clip at least 0.1 s shorter than the original ends where
+  your audio ends, so the next callout comes sooner and a song loops or
+  moves on sooner. A sound with files to play in turn keeps the original's
+  length.
 - **Room:** one sound bank holds about 2 GB; past that, longer sounds go
   into extra banks beside it. They also share the games partition with
   videos (see [SD card size](#sd-card-size-stern-spike-2)).
@@ -153,7 +158,7 @@ Audio Content.
   chosen mode plays its mode 1 sound.
 - **Name the music modes…** puts the names in the setting's help line on
   the machine.
-- **Length** follows *Allow replacements longer than the original*, as a
+- **Length** follows *Allow replacements longer or shorter than the original*, as a
   replacement does. **Loudness** is set per mode file (**Music modes** >
   **Loudness of mode 2's sound…**).
 - **Songs in parts:** where a song is a short opening plus a longer

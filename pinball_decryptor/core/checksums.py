@@ -109,18 +109,20 @@ def _stat_and_md5(abs_path):
     return st.st_size, st.st_mtime_ns, md5_file(abs_path)
 
 
-def hash_files(abs_paths, cancel=None, threads=HASH_THREADS):
+def hash_files(abs_paths, cancel=None, threads=None):
     """Yield ``(size, mtime_ns, md5)`` for each of *abs_paths*, IN ORDER, or
-    the ``OSError`` that reading it raised, hashing on a few threads.
+    the ``OSError`` that reading it raised, hashing on *threads* threads
+    (:data:`HASH_THREADS` when not given; 1 hashes inline, no pool).
 
     Stops yielding promptly once *cancel()* goes true: the files not started
     yet are dropped, and the ones in flight finish on their own threads.
     """
-    from concurrent.futures import ThreadPoolExecutor
     cancel = cancel or (lambda: False)
     paths = list(abs_paths)
     if not paths:
         return
+    if threads is None:
+        threads = HASH_THREADS
 
     def _one(abs_path):
         if cancel():
@@ -130,7 +132,15 @@ def hash_files(abs_paths, cancel=None, threads=HASH_THREADS):
         except OSError as e:
             return e
 
-    pool = ThreadPoolExecutor(max_workers=max(1, min(threads, len(paths))))
+    if threads <= 1 or len(paths) == 1:
+        for abs_path in paths:
+            result = _one(abs_path)
+            if result is None:
+                return
+            yield result
+        return
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=min(threads, len(paths)))
     try:
         for result in pool.map(_one, paths):
             if cancel() or result is None:

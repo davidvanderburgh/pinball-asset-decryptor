@@ -69,12 +69,21 @@ controller itself.
 
 **The LCD window.** Visual Pinball comes up full screen and would cover the
 game's LCD window, so when the controller starts a run it puts that window
-where the kit says and ON TOP, once (from then on it is the user's to move):
-by default the upper middle of the main screen, 40% of its width in the
-LCD's 16:9; `padvpx lcd monitor 2` fills a second screen (a backglass
-monitor); `padvpx lcd 100 0 960 540` is a rectangle. A full-screen Visual
-Pinball must be the windowed kind for anything to show over it: its
-"Force exclusive fullscreen" option stays off.
+where the kit says and ON TOP: by default the upper middle of the main
+screen, 40% of its width in the LCD's 16:9; `padvpx lcd monitor 2` fills
+a second screen (a backglass monitor); `padvpx lcd 100 0 960 540` is a
+rectangle; `padvpx lcd off` leaves it alone. ONCE: a WSLg window puts
+itself back at the screen's top-left a few seconds after it opens, so for
+its first fifteen seconds a window found there is placed again, and from
+then on it is the user's to drag anywhere (the first version re-placed it
+whenever it had moved, which read as a window stuck under the mouse). A
+pause Visual Pinball sends while one of these windows is in front (the
+user clicked it) leaves the game running; only a pause with Visual Pinball
+itself in front freezes the rig. `padvpx playfield on | monitor 2 | x y w h
+| off` asks for the rig's virtual playfield window as well, placed the same
+way, under the LCD by default. A full-screen Visual Pinball must be the
+windowed kind for anything to show over it: its "Force exclusive
+fullscreen" option stays off.
 
 **Sharing a table with somebody else.** The kit never ships a table or a
 card. What the other person needs: the PAD installer (the emulator, its

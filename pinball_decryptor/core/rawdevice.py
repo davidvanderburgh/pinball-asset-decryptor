@@ -525,15 +525,26 @@ class RawDeviceFile:
         if a_end <= a_start:
             return b""
         self._io.seek(a_start)
-        buf = bytearray()
+        chunks = []
         want = a_end - a_start
-        while len(buf) < want:
-            chunk = self._io.read(min(_IO_CHUNK, want - len(buf)))
+        got = 0
+        while got < want:
+            chunk = self._io.read(min(_IO_CHUNK, want - got))
             if not chunk:
                 break
-            buf += chunk
+            chunks.append(chunk)
+            got += len(chunk)
+        if not chunks:
+            return b""
+        # One buffer, handed back as it came off the device when the request
+        # was aligned (the card-to-image read, the flash verify and the menu
+        # read/verify all are): the old bytearray += / slice / bytes() dance
+        # copied every 8-16 MiB chunk three times over.
+        data = chunks[0] if len(chunks) == 1 else b"".join(chunks)
         lo = start - a_start
-        return bytes(buf[lo:lo + length])
+        if lo == 0 and length >= len(data):
+            return data
+        return data[lo:lo + length]
 
     def read(self, n=-1):
         if n is None or n < 0:
@@ -545,9 +556,15 @@ class RawDeviceFile:
         return data
 
     def write(self, data):
-        """Write *data* at the current position via read-modify-write of the
-        sectors it touches (so an arbitrary-offset, arbitrary-length patch lands
-        without violating the device's sector alignment)."""
+        """Write *data* at the current position.
+
+        Whole sectors go straight to the device; only a partial first or last
+        sector is read-modify-written (so an arbitrary-offset, arbitrary-length
+        patch still lands without violating the device's sector alignment).
+        The menu-only card write streams 16 MiB sector-aligned chunks through
+        here, and used to read every one of them back off the SD card first:
+        double the I/O on the slow side (PAD-796).
+        """
         if not self.writable:
             raise OSError("device opened read-only")
         if not data:
@@ -555,9 +572,38 @@ class RawDeviceFile:
         sec = self.sector
         start = self._pos
         length = len(data)
+        first_full = -(-start // sec) * sec          # first whole sector inside
+        last_full = ((start + length) // sec) * sec  # end of the last whole one
+        if last_full - first_full < sec:
+            # No whole sector inside: one or two partial sectors, read-modify-write.
+            self._rmw_write(start, data)
+        else:
+            mv = memoryview(data)
+            if first_full > start:
+                self._rmw_write(start, mv[:first_full - start])
+            self._write_aligned(first_full, mv[first_full - start:last_full - start])
+            if start + length > last_full:
+                self._rmw_write(last_full, mv[last_full - start:])
+        self._pos += length
+        return length
+
+    def _write_aligned(self, start, data):
+        """Write sector-aligned *data* at sector-aligned *start* straight
+        through the backend, capped per write syscall."""
+        self._io.seek(start)
+        mv = memoryview(data)
+        off = 0
+        n = mv.nbytes
+        while off < n:
+            off += self._io.write(mv[off:off + min(_IO_CHUNK, n - off)])
+
+    def _rmw_write(self, start, data):
+        """Read-modify-write the sectors ``[start, start + len(data))`` touch."""
+        sec = self.sector
+        length = len(data)
         a_start = (start // sec) * sec
         a_end = ((start + length + sec - 1) // sec) * sec
-        # Never write past the device end: a block device's length is a sector
+        # Never read past the device end: a block device's length is a sector
         # multiple, so clamping keeps the region sector-aligned; for a backing
         # file it just avoids extending it past its original size.
         if self._size is not None:
@@ -567,13 +613,7 @@ class RawDeviceFile:
             region += bytes((a_end - a_start) - len(region))
         lo = start - a_start
         region[lo:lo + length] = data
-        self._io.seek(a_start)
-        mv = memoryview(region)
-        off = 0
-        while off < len(region):
-            off += self._io.write(mv[off:off + min(_IO_CHUNK, len(region) - off)])
-        self._pos += length
-        return length
+        self._write_aligned(a_start, region)
 
     def copy_image_onto(self, src, total, *, progress=None, cancel=None,
                         chunk=None, overlay=None):

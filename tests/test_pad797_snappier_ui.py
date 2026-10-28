@@ -296,6 +296,11 @@ def _fake_dist(tmp_path, name, version, body="__version__ = '0.0'\n"):
     info.mkdir()
     (info / "METADATA").write_text("Metadata-Version: 2.1\nName: %s\nVersion: %s\n"
                                    % (name.replace("_", "-"), version))
+    # a package made in a folder already on sys.path: the path finder's
+    # listing of that folder is stale until told (Linux saw the first
+    # package of the test, not the second)
+    import importlib
+    importlib.invalidate_caches()
     return pkg
 
 

@@ -176,3 +176,62 @@ def test_legacy_readers_are_unchanged(reader):
     assert reader.read_file_bytes(node) == tiny.a_bytes()
     rng = reader.disk_ranges(node, 0, 16)
     assert rng and rng[0][1] == 16
+
+
+def _read_file_bytes_per_block(reader, inode):
+    """read_file_bytes as it was before PAD-795: one read per block.  The reference
+    the run-at-a-time reader must match byte for byte."""
+    buf = bytearray(inode["size"])
+    bs = reader.block_size
+    for log, phys, cnt in reader._runs(inode):
+        for j in range(cnt):
+            fo = (log + j) * bs
+            if fo >= inode["size"]:
+                break
+            n = min(bs, inode["size"] - fo)
+            buf[fo:fo + n] = reader._read((phys + j) * bs, n)
+    return bytes(buf)
+
+
+@pytest.mark.parametrize("chunk", [1 << 20, 4096 + 1])
+def test_read_file_bytes_per_run_equals_the_per_block_read(reader, chunk):
+    """PAD-795: read_file_bytes reads each extent run in one go (in pieces of at
+    most ``chunk``) instead of block by block.  Every regular file of the fixture
+    reads the same: the multi-run file, the one whose last block is partial, the
+    hole and the unwritten extent (read as the raw runs, as before)."""
+    got = _tree(reader)
+    files = {rel: got[rel][2] for rel, (kind, _s, _sha, _t) in tiny.expected().items()
+             if kind == "file"}
+    assert len(files) >= 5
+    multi = files["d/multi.bin"]
+    assert len(reader._runs(multi)) >= 3, "the fixture's multi-run file"
+    assert any(n["size"] % reader.block_size for n in files.values()), "a partial last block"
+    for rel, node in files.items():
+        assert reader.read_file_bytes(node, chunk=chunk) == _read_file_bytes_per_block(reader, node), rel
+    # the default chunk is the one path the app uses
+    assert reader.read_file_bytes(multi) == _read_file_bytes_per_block(reader, multi)
+
+
+def test_read_inode_reads_a_group_descriptor_once(reader):
+    """PAD-795: the group's inode table block is cached on the reader, so a tree
+    walk does not re-read the group descriptor for every inode."""
+    reads = []
+    orig = reader._read
+
+    def counting(off, n):
+        reads.append((off, n))
+        return orig(off, n)
+
+    reader._inode_tables.clear()
+    reader._read = counting
+    try:
+        a = reader.read_inode(2)
+        gd_reads = [r for r in reads if r[1] == reader.desc_size]
+        assert len(gd_reads) == 1
+        b = reader.read_inode(2)
+        c = reader.read_inode(11)                      # same group, another inode
+        assert len([r for r in reads if r[1] == reader.desc_size]) == 1
+    finally:
+        reader._read = orig
+    assert a == b and c["mode"]
+    assert reader._inode_tables == {0: reader._inode_tables[0]}

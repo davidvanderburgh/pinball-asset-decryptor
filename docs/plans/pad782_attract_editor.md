@@ -102,3 +102,23 @@ Rush, Star Wars x3, Sword of Rage, Venom) start their pages another way: the fin
    Elvira, Bond 60th, SW ELG, Sword of Rage, Venom).
 6. Proof: Try it on Godzilla LE 1.16 (done at the engine level, run 5) and Bond LE 1.06 (after the clip v2 fix) from
    the app; a built card on the rig; before/after shots of the page and of the attract cycle; tests.
+
+## Next run: clip v2 in attract (found 2026-10-27, Bond LE 1.06)
+
+Bond's intro attract page (entry 15, 0x3677c) shows its clip through an ATTRACT VIDEO ELEMENT, not the bank:
+
+    r4 = *(0x818c80)                       the element (its own VideoSurface: 0xb54e7508 in run 1's census)
+    std::string(&s, "Attract_BondIntro_LogoOnly")
+    0x1ce69c(r4, &s, 0, 1)                 play the clip by name (loop 0, show 1)
+    while (0x1ce680(r4)) {                 still playing
+        0x1ce788(r4); 0x1ce790(r4);        update, draw
+        0x2fd144();                        the frame yield (= Bond's challenge_page_yield)
+    }
+
+The tutorials (entries 30-35, 0x37268...) use the same element. Plan: (1) a finder over the attract table's pages
+for that shape (`data attract_video`, `site attract_video_play / _playing / _update / _draw`, `site attract_yield`)
+and the scene whose library holds the clip that page names (CV.scene_of on the clip's card path); (2) attract_items
+adds our clips to THAT scene's library on such titles (VB.add_clip, the scene rewritten); (3) the runtime's page plays
+an item as the game's page does - play, then update/draw/yield until its time is up or the clip ends - instead of
+pm_clip + sleep. Godzilla keeps the pm_clip route (proven). Then prove Bond LE with job5.sh and sweep which builds take
+which route.

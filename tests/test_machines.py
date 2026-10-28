@@ -170,6 +170,8 @@ def test_add_rebind_rename_remove(tmp_path):
     assert machines.rename(s, e["id"], "Den")
     assert not machines.rename(s, e["id"], "  ")
     assert machines.get(s, e["id"])["name"] == "Den"
+    assert not machines.watch_on(s)            # opt-in: off until ticked
+    machines.set_watch(s, True)
     assert machines.watch_on(s)
     machines.set_watch(s, False)
     assert not machines.watch_on(s)
@@ -265,7 +267,7 @@ def test_picker_calls_add_and_transfer(tmp_path, monkeypatch):
     monkeypatch.setenv(code_watch.ENV_URL, "http://127.0.0.1:%d/game-code/"
                        % srv.server_address[1])
     try:
-        with web_app(tmp_path, settings={"projects": [
+        with web_app(tmp_path, settings={machines.WATCH_KEY: True, "projects": [
                 {"folder": proj, "manufacturer": "stern", "last_opened": ""}]}) as w:
             # nothing to show, nothing read
             assert _rows(w) == []

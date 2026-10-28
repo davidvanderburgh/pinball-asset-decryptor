@@ -24,7 +24,9 @@ import uuid
 from . import lineage
 
 SECTION = "machines"
-#: settings key: the daily game-code check (on unless switched off)
+#: settings key: the daily game-code check.  OFF until the owner ticks it
+#: (David, PAD-787: a maker could take an unasked-for daily read of its site
+#: amiss), so nothing reaches a maker's site on PAD's own initiative.
 WATCH_KEY = "machine_code_watch"
 #: settings key: ``"<machine id>:<build>"`` of every newer build already told
 TOLD_KEY = "machine_code_told"
@@ -152,7 +154,7 @@ def remove(settings, mid):
 
 
 def watch_on(settings):
-    return bool(settings.get(WATCH_KEY, True))
+    return bool(settings.get(WATCH_KEY, False))
 
 
 def set_watch(settings, on):

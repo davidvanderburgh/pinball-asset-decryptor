@@ -62,7 +62,7 @@ class MachinesMixin:
     def _machines_init(self):
         self._mach_token = 0
         self._mach_checking = False
-        self.set(machines={"rows": [], "watch": True, "watch_text": "",
+        self.set(machines={"rows": [], "watch": False, "watch_text": "",
                            "checking": False})
         self.ctx.loop.after(0, self._machines_refresh)
         self.ctx.loop.after(WATCH_FIRST_MS, self._machines_tick)
@@ -185,12 +185,14 @@ class MachinesMixin:
         """One line under the list: when each maker's page was read, and
         any that couldn't be."""
         from ..core import code_watch
-        if not on:
-            return "The daily check for new game code is off."
         mfrs = sorted({r["mfr"] for r in rows if code_watch.has_source(r["mfr"])})
         if not mfrs:
             return ""
         pages = _and([code_watch.page_words(k) for k in mfrs])
+        if not on:
+            return ("The check for new game code is off: PAD reads no "
+                    "maker's site. Tick it to have %s read once a day."
+                    % pages)
         if self._mach_checking:
             return "Checking %s…" % pages
         states = {k: code_watch.state(k) for k in mfrs}

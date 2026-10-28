@@ -855,7 +855,7 @@ function Toasts({ shell }) {
 const MACH = {
   intro: "Add the file each of your machines runs: a Stern SD card image, a Jersey Jack install ISO or a Barrels of Fun .fun update. Its title, build and project show here, and PAD tells you when the maker puts out newer game code for it.",
   add: "Pick the file a machine runs: the .raw or .img of a Stern SD card, a Jersey Jack full-install .iso or a Barrels of Fun .fun update. PAD reads which game and build it is; nothing in the file changes.",
-  watch: { head: "Check for new game code", lines: ["Once a day PAD reads the makers' public game-code pages (Stern's, and the pages of your Jersey Jack and Barrels of Fun titles) and shows here when a machine's game has a newer build, with a link to that page.", "Nothing is ever downloaded: you click through to the maker yourself.", "Only the makers you have a machine of here."] },
+  watch: { head: "Check for new game code", lines: ["Off until you tick it. Ticked, PAD reads the makers' public game-code pages once a day (Stern's, and the pages of your Jersey Jack and Barrels of Fun titles) and shows here when a machine's game has a newer build, with a link to that page.", "Nothing is ever downloaded: you click through to the maker yourself.", "Only the makers you have a machine of here."] },
   newer: (r) => ({ head: r.maker + " has " + r.title + " " + r.build_next + " out", lines: ["This machine's " + r.noun + " is " + r.build + ". Click to open " + r.page_words.replace(/pages$/, "page") + "; nothing is downloaded.",
     r.transfer ? "Once you have the new card image: Transfer Mods carries this project's changes onto it." : "Once you have the new " + r.noun + ": export this project's Mod Pack, extract the new one and import the pack into it."] }),
   transfer: { head: "Transfer Mods", lines: ["Opens this machine's project and the Mod Pack tab's transfer, with this project as the one whose mods move.", "Pick the new code's card image there."] },
@@ -908,7 +908,7 @@ function MyMachines({ running }) {
   return html`<section class="mach">
     <div class="row wrap" style="align-items:center;gap:8px 16px">
       <h2 class="h1 grow" style="margin:0;font-size:24px">My machines</h2>
-      ${rows.length ? html`<${Check} checked=${m.watch !== false} title=${MACH.watch} label="Check for new game code once a day"
+      ${rows.length ? html`<${Check} checked=${m.watch === true} title=${MACH.watch} label="Check for new game code once a day"
         onChange=${(v) => call("shellx.machines_set_watch", v)} />` : null}
       <${Button} icon="plus" disabled=${running} title=${MACH.add} onClick=${() => call("shellx.machines_add")}>Add machine…<//>
     </div>

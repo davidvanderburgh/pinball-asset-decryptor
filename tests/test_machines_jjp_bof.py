@@ -349,6 +349,17 @@ def test_jjp_and_bof_machines_on_the_picker(tmp_path, monkeypatch, print_cache):
             assert w.asked[-1]["initial"] == "Sonic the Hedgehog"
             wmh = w.call("shellx.machines_add", fun, "Winchester")
             assert sonic and wmh
+            # opt-in: with the box never ticked no maker's site is read
+            assert _until(w, lambda: len(_rows(w)) == 2)
+            _until(w, lambda: False, timeout=1.5)
+            m = w.state("shellx")["machines"]
+            assert got == [] and m["watch"] is False
+            assert not any(r["newer"] for r in _rows(w))
+            assert "off: PAD reads no maker's site" in m["watch_text"]
+            assert not w.call("shellx.machines_check_now")
+            assert got == []
+            # ticked: the pages are read
+            assert w.call("shellx.machines_set_watch", True)
             ok = _until(w, lambda: len(_rows(w)) == 2
                         and all(r["newer"] for r in _rows(w)))
             assert ok, (json.dumps(_rows(w), indent=1), got,

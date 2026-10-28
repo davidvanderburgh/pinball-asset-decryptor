@@ -88,13 +88,18 @@ def main():
     ap.add_argument("--prefix", default="")
     ap.add_argument("--width", type=int, default=1360)
     ap.add_argument("--height", type=int, default=980)
+    ap.add_argument("--no-tick", action="store_true",
+                    help="leave the daily check as a new install has it")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     print("REPO", REPO)
     scratch = tempfile.mkdtemp(prefix="padshot787-")
     settings = os.path.join(scratch, "seed.json")
     with open(settings, "w", encoding="utf-8") as f:
-        json.dump({"disclaimer_accepted": True}, f)
+        seed = {"disclaimer_accepted": True}
+        if not a.no_tick:
+            seed["machine_code_watch"] = True     # the owner ticked it
+        json.dump(seed, f)
     stub = _stub_server()
     env = {"PAD_CODE_WATCH_URL": "http://127.0.0.1:%d/support/"
            % stub.server_address[1]}
@@ -122,7 +127,7 @@ def main():
                 if _add(url, card, name) is None:
                     refused = True
                     break
-            if not refused:
+            if not refused and not a.no_tick:
                 for _ in range(90):
                     rows = (ws.state(url)["shellx"].get("machines") or {}).get("rows") or []
                     if sum(1 for r in rows if r.get("newer")) >= 3:

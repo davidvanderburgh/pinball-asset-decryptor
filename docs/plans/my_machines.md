@@ -40,7 +40,9 @@ Stern's own spelling (1.16).
   build the library holds.
 - One GET with `Pinball-Asset-Decryptor/<version> (game-code check, once a day)` as User-Agent, at most once a day
   (three hours after a failed read), 20 s after start and then hourly looks at whether it is due; only while there is a
-  Stern machine on the list and the "Check for new game code once a day" box is ticked. The answer is kept in
+  Stern machine on the list and the "Check for new game code once a day" box is ticked. The box is OFF until the
+  owner ticks it (PAD-787, David: a maker could take an unasked-for daily read of its site amiss); off, no maker's site
+  is ever read and the line under the list says so. The answer is kept in
   `code_watch.json` beside settings.json. A failed read keeps the last answer.
 - **Link only**: the row's "1.17 is out" opens Stern's page in the browser. The app downloads nothing from it.
 - A newer build is told once per machine and build, wherever the owner is (the app opens into their last manufacturer,

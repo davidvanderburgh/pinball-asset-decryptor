@@ -286,3 +286,63 @@ def test_importing_the_host_leaves_mimetypes_uninitialised():
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-2000:]
     assert r.stdout.strip() == "False", r.stdout
+
+
+# ------------------------------------------------------- python probes
+def _fake_dist(tmp_path, name, version, body="__version__ = '0.0'\n"):
+    pkg = tmp_path / name
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text(body)
+    info = tmp_path / ("%s-%s.dist-info" % (name, version))
+    info.mkdir()
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: %s\nVersion: %s\n"
+                                   % (name.replace("_", "-"), version))
+    return pkg
+
+
+def test_a_python_probe_answers_without_importing_the_module(tmp_path, monkeypatch):
+    """faster_whisper took 150 ms warm (a second or more cold) to import
+    just to see whether it exists; find_spec and the dist metadata answer."""
+    import sys
+    from pinball_decryptor.core import prereqs
+    name = "pad797_probe_pkg"
+    _fake_dist(tmp_path, name, "3.1.4",
+               body="raise RuntimeError('imported after all')\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    sys.modules.pop(name, None)
+    assert prereqs._probe_python_import(name) == (True, name + " 3.1.4")
+    assert name not in sys.modules
+    ok, msg = prereqs._probe_python_import("pad797_missing_pkg")
+    assert ok is False and "pad797_missing_pkg" in msg
+    # a dotted name, a module without a distribution, a module imported
+    assert prereqs._probe_python_import("json.decoder") == (True, "json.decoder available")
+    assert prereqs._probe_python_import("pytest") == (True, "pytest " + pytest.__version__)
+    # the Prerequisite path still reads it
+    p = prereqs.Prerequisite(name="x", where="host", probe="python:" + name,
+                             reason="r", install_hint="pip install x")
+    r = prereqs.check_prerequisite(p)
+    assert r.ok and r.message == name + " 3.1.4"
+    assert name not in sys.modules
+
+
+def test_a_native_extension_probe_still_really_imports(tmp_path, monkeypatch):
+    """unicorn and capstone load a library at import: installed is not yet
+    loads, so those two keep the real import (prereqs.IMPORT_PROBES)."""
+    import sys
+    from pinball_decryptor.core import prereqs
+    assert {"unicorn", "capstone"} <= set(prereqs.IMPORT_PROBES)
+    name = "pad797_broken_ext"
+    _fake_dist(tmp_path, name, "9.9",
+               body="raise ImportError('DLL load failed')\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    sys.modules.pop(name, None)
+    assert prereqs._probe_python_import(name)[0] is True
+    ok, msg = prereqs._probe_python_import(name, really_import=True)
+    assert ok is False and "DLL load failed" in msg
+    monkeypatch.setattr(prereqs, "IMPORT_PROBES", frozenset({name}))
+    assert prereqs._probe_python_import(name)[0] is False
+    good = "pad797_good_ext"
+    _fake_dist(tmp_path, good, "1.0", body="__version__ = '1.0.1'\n")
+    sys.modules.pop(good, None)
+    assert prereqs._probe_python_import(good, really_import=True) == (True, good + " 1.0.1")
+    sys.modules.pop(good, None)

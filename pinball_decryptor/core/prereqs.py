@@ -157,19 +157,63 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
     )
 
 
-def _probe_python_import(module_name: str) -> Tuple[bool, str]:
-    """Try to ``import`` *module_name* in the current process.
+#: Modules a ``python:`` probe really imports: native extensions that load
+#: a library at import, where "installed" is not yet "loads" (a wheel for
+#: another CPU, a missing runtime).  Everything else is answered from the
+#: file system (PAD-797).
+IMPORT_PROBES = frozenset({"unicorn", "capstone"})
+
+
+def _probe_python_import(module_name: str, really_import=None) -> Tuple[bool, str]:
+    """Is *module_name* installed for the current process?
 
     No subprocess (and no PATH lookup) -- always uses ``sys.executable``'s
     site-packages, which is exactly what the app will use at runtime.
+
+    The module is NOT imported unless it is in :data:`IMPORT_PROBES`
+    (PAD-797): the probes run for every manufacturer switch, and importing
+    faster_whisper to see whether it exists cost 150 ms warm, a second or
+    more cold.  ``find_spec`` answers from the file system, and the version
+    comes from the distribution's metadata, or from a module already
+    imported, or reads "available".
     """
-    import importlib
+    if really_import is None:
+        really_import = module_name in IMPORT_PROBES
+    if really_import:
+        import importlib
+        try:
+            mod = importlib.import_module(module_name)
+        except ImportError as e:
+            return False, str(e)
+        version = getattr(mod, "__version__", None) or _module_version(module_name)
+        return True, f"{module_name} {version}"
+    import importlib.util
     try:
-        mod = importlib.import_module(module_name)
-    except ImportError as e:
+        spec = importlib.util.find_spec(module_name)
+    except (ImportError, ValueError) as e:
         return False, str(e)
-    version = getattr(mod, "__version__", "available")
-    return True, f"{module_name} {version}"
+    if spec is None:
+        return False, f"No module named '{module_name}'"
+    return True, f"{module_name} {_module_version(module_name)}"
+
+
+def _module_version(module_name: str) -> str:
+    """A module's version without importing it: the distribution's
+    metadata (the top-level package's name, dashes and underscores alike),
+    else ``__version__`` of a module that is already imported, else
+    "available"."""
+    from importlib import metadata
+    top = module_name.split(".", 1)[0]
+    for dist in (top, top.replace("_", "-")):
+        try:
+            return metadata.version(dist)
+        except metadata.PackageNotFoundError:
+            continue
+        except Exception:                                 # noqa: BLE001
+            break
+    mod = sys.modules.get(module_name)
+    version = getattr(mod, "__version__", None) if mod is not None else None
+    return str(version) if version else "available"
 
 
 def check_prerequisites(prereqs) -> List[PrerequisiteResult]:

@@ -7,6 +7,7 @@ const { MILESTONES, RATES, HOLD_OVER_USD } = meta();
 
 function fakeDb() {
   const rows = [];
+  const reports = [];
   const live = () => rows.filter((r) => !r.removed && !r.held);
   const stmt = (sql) => {
     let args = [];
@@ -20,6 +21,10 @@ function fakeDb() {
         if (sql.startsWith("SELECT at, amount")) {
           const off = args[1] || 0;
           return { results: live().sort((a, b) => b.at - a.at).slice(off, off + args[0]) };
+        }
+        if (sql.startsWith("SELECT id, at, app_version")) {
+          return { results: reports.filter((r) => r.state === "received").sort((a, b) => a.at - b.at).slice(0, 20)
+            .map(({ ip_hash, state, version, message, answered_at, ...r }) => r) };
         }
         if (sql.startsWith("SELECT id, at")) {
           return { results: rows.slice().sort((a, b) => b.at - a.at).slice(0, 200) };
@@ -49,9 +54,44 @@ function fakeDb() {
         if (sql.startsWith("SELECT COUNT(*) AS n FROM donations WHERE ip_hash")) {
           return { n: rows.filter((r) => r.ip_hash === args[0] && r.at > args[1]).length };
         }
+        if (sql.startsWith("SELECT COUNT(*) AS n FROM reports WHERE ip_hash")) {
+          return { n: reports.filter((r) => r.ip_hash === args[0] && r.at > args[1]).length };
+        }
+        if (sql.startsWith("SELECT id, state, version, message, answered_at FROM reports")) {
+          const r = reports.find((x) => x.id === args[0]);
+          return r ? { id: r.id, state: r.state, version: r.version, message: r.message, answered_at: r.answered_at } : null;
+        }
         throw new Error("unexpected first(): " + sql);
       },
       async run() {
+        if (sql.startsWith("INSERT INTO reports")) {
+          const [id, at, app_version, platform, title, body, name, picture_type, picture, ip_hash] = args;
+          reports.push({ id, at, app_version, platform, title, body, name, picture_type, picture, ip_hash,
+            state: "received", version: "", message: "", answered_at: 0 });
+          return { meta: { changes: 1 } };
+        }
+        if (sql.startsWith("UPDATE reports SET state = 'filed'")) {
+          const r = reports.find((x) => x.id === args[0] && x.state === "received");
+          if (r) Object.assign(r, { state: "filed", title: "", body: "", name: "", picture_type: "", picture: "", ip_hash: "" });
+          return { meta: { changes: r ? 1 : 0 } };
+        }
+        if (sql.startsWith("UPDATE reports SET state = ?")) {
+          const r = reports.find((x) => x.id === args[4]);
+          if (r) Object.assign(r, { state: args[0], version: args[1], message: args[2], answered_at: args[3] });
+          return { meta: { changes: r ? 1 : 0 } };
+        }
+        if (sql.startsWith("DELETE FROM reports WHERE answered_at")) {
+          let n = 0;
+          for (let i = reports.length - 1; i >= 0; i--) {
+            if (reports[i].answered_at > 0 && reports[i].answered_at < args[0]) { reports.splice(i, 1); n++; }
+          }
+          return { meta: { changes: n } };
+        }
+        if (sql.startsWith("UPDATE reports SET ip_hash = ''")) {
+          let n = 0;
+          for (const r of reports) if (r.ip_hash && r.at <= args[0]) { r.ip_hash = ""; n++; }
+          return { meta: { changes: n } };
+        }
         if (sql.startsWith("INSERT")) {
           const [id, at, amount, currency, usd, shelter, country, region, name, show_name, app_version, ip_hash, edit_token, held] = args;
           rows.push({ id, at, amount, currency, usd, shelter, country, region, name, show_name, app_version, ip_hash, edit_token, held, removed: 0 });
@@ -82,7 +122,7 @@ function fakeDb() {
     };
     return s;
   };
-  return { prepare: stmt, rows };
+  return { prepare: stmt, rows, reports };
 }
 
 const env = () => ({ DB: fakeDb(), APP_KEY: "k", ADMIN_KEY: "adm", IP_SALT: "s" });
@@ -289,6 +329,107 @@ test("an address hash is blanked once its row is an hour old", async () => {
   assert.equal(e.DB.rows[0].ip_hash, "", "the old row's hash is gone");
   assert.equal(e.DB.rows[1].ip_hash.length, 16, "the fresh row keeps its hash for the limit");
   assert.equal((await get(e, "/v1/admin/list", { "X-PAD-Admin": "adm" }))[0], 200);
+});
+
+// ---- problem reports (PAD-780) -------------------------------------------
+async function postReport(e, body, headers = { "X-PAD-Key": "k", "CF-Connecting-IP": "9.9.9.9" }, ctx) {
+  const r = await worker.fetch(new Request(BASE + "/v1/report", {
+    method: "POST", headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body) }), e, ctx);
+  return [r.status, await r.json()];
+}
+const RECORD = "Pinball Asset Decryptor problem report\n=====\nApp: v1.274.0\n\nWhat happened\n-------------\nWrite stopped at 40%\n\nLog (last 2 lines)\n---\n[12:00] one\n[12:01] two\n";
+
+test("a report needs the app key and some words", async () => {
+  const e = env();
+  assert.equal((await postReport(e, { body: RECORD }, {}))[0], 403);
+  assert.equal((await postReport(e, { body: "   " }))[0], 400);
+  assert.equal((await postReport(e, { body: "x".repeat(400001) }))[0], 400);
+  assert.equal((await postReport(e, { body: RECORD, picture_b64: "not base 64!" }))[0], 400);
+  assert.equal(e.DB.reports.length, 0);
+});
+
+const admin = (e, path, body) => worker.fetch(new Request(BASE + path,
+  { method: "POST", headers: { "X-PAD-Admin": "adm", "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body) }), e);
+
+test("a report is stored whole, listed for the tracker, and blanked once taken", async () => {
+  const e = env();
+  const [st, out] = await postReport(e, { title: "Write stopped at 40%", body: RECORD, name: "Joe",
+    email: "joe@example.com", app_version: "1.274.0", platform: "win32",
+    picture_type: "image/jpeg", picture_b64: "/9j/4AAQ" });
+  assert.equal(st, 201);
+  assert.equal(out.ok, true);
+  assert.equal((await get(env(), "/v1/admin/reports"))[0], 403);
+  const [, list] = await get(e, "/v1/admin/reports", { "X-PAD-Admin": "adm" });
+  assert.equal(list.rows.length, 1);
+  const row = list.rows[0];
+  assert.deepEqual([row.id, row.title, row.name, row.app_version, row.platform, row.picture_type, row.picture],
+    [out.id, "Write stopped at 40%", "Joe", "1.274.0", "win32", "image/jpeg", "/9j/4AAQ"]);
+  assert.equal(row.body, RECORD);
+  assert.equal("email" in row, false);          // never asked for, never stored
+  assert.equal("ip_hash" in row, false);
+  const r = await admin(e, "/v1/admin/reports/" + out.id + "/taken");
+  assert.equal(r.status, 200);
+  const kept = e.DB.reports[0];
+  assert.deepEqual([kept.state, kept.title, kept.body, kept.name, kept.picture, kept.ip_hash],
+    ["filed", "", "", "", "", ""]);
+  assert.equal((await get(e, "/v1/admin/reports", { "X-PAD-Admin": "adm" }))[1].rows.length, 0);
+  const again = await admin(e, "/v1/admin/reports/" + out.id + "/taken");
+  assert.equal(again.status, 404);
+});
+
+test("the app asks after its reports and hears when a release addresses one", async () => {
+  const e = env();
+  const [, a] = await postReport(e, { body: RECORD });
+  const [, b] = await postReport(e, { body: RECORD });
+  assert.equal((await get(e, "/v1/report/status?ids=" + a.id))[0], 403);
+  const hdr = { "X-PAD-Key": "k" };
+  let [st, out] = await get(e, "/v1/report/status?ids=" + a.id + "," + b.id + ",nope", hdr);
+  assert.equal(st, 200);
+  assert.deepEqual(out.rows.map((r) => [r.id, r.state]), [[a.id, "received"], [b.id, "received"]]);
+  await admin(e, "/v1/admin/reports/" + a.id + "/taken");
+  assert.equal((await admin(e, "/v1/admin/reports/" + a.id + "/answer", { state: "fixed" })).status, 400);
+  assert.equal((await admin(e, "/v1/admin/reports/" + "0".repeat(32) + "/answer", { state: "released" })).status, 404);
+  const ans = await admin(e, "/v1/admin/reports/" + a.id + "/answer",
+    { state: "released", version: "1.275.0", message: "Fixed: the write no longer stops at 40%." });
+  assert.equal(ans.status, 200);
+  [st, out] = await get(e, "/v1/report/status?ids=" + a.id + "," + b.id, hdr);
+  assert.deepEqual([out.rows[0].state, out.rows[0].version, out.rows[0].message, out.rows[1].state],
+    ["released", "1.275.0", "Fixed: the write no longer stops at 40%.", "received"]);
+  assert.ok(out.rows[0].answered_at > 0);
+  // an answered row is dropped once it is old, and the app then hears "unknown"
+  e.DB.reports[0].answered_at = 1;
+  [st, out] = await get(e, "/v1/report/status?ids=" + a.id, hdr);
+  assert.deepEqual([out.rows[0].state, e.DB.reports.length], ["unknown", 1]);
+});
+
+test("a report without a title is named by its first line, and one address gets five an hour", async () => {
+  const e = env();
+  const [, out] = await postReport(e, { body: "Write stopped\nmore" });
+  assert.equal(e.DB.reports.find((r) => r.id === out.id).title, "Write stopped");
+  for (let i = 0; i < 4; i++) assert.equal((await postReport(e, { body: RECORD }))[0], 201);
+  assert.equal((await postReport(e, { body: RECORD }))[0], 429);
+  assert.equal((await postReport(e, { body: RECORD }, { "X-PAD-Key": "k", "CF-Connecting-IP": "8.8.8.8" }))[0], 201);
+});
+
+test("David hears on Discord that a report came, never who sent it", async () => {
+  const e = { ...env(), DISCORD_WEBHOOK: "https://discord.example/api/webhooks/1/x" };
+  const posts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { posts.push([url, JSON.parse(init.body)]); return new Response("ok"); };
+  const waited = [];
+  const ctx = { waitUntil: (p) => waited.push(p) };
+  try {
+    await postReport(e, { title: "Write stopped at 40%", body: RECORD, name: "Joe",
+      app_version: "1.274.0", platform: "darwin", picture_b64: "/9j/" }, undefined, ctx);
+    await Promise.all(waited);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0][1].content, "🐞 Problem report from the app: Write stopped at 40% · app 1.274.0 on darwin · with a picture");
+    assert.equal(posts[0][1].content.includes("Joe"), false);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 test("anything else is not found", async () => {

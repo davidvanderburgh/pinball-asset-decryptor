@@ -1158,4 +1158,133 @@ function DonationsDialog({ close, auto = false }) {
 }
 registerDialog("donations", DonationsDialog);
 
+// ------------------------------------------------------------ report a problem
+// PAD-780: what happened in the user's words, the facts the developer
+// always asks for next, an optional picture, the whole record to read
+// before it goes, then Send (the app's service) or Save as a file
+// (webui/shellx_report.py, core/problem_report.py).  `prefill` is the
+// error box's words when its own link opened this.
+function ReportDialog({ close, prefill = "" }) {
+  const sx = useNs("shellx");
+  const r = sx.report || {};
+  const [uid, onClose] = useWin(close);
+  const [info, setInfo] = useState(null);           // facts, log size, memory
+  const [text, setText] = useState(prefill || "");
+  const [name, setName] = useState("");
+  const [hidePaths, setHidePaths] = useState(true);
+  const [preview, setPreview] = useState(null);     // null, or the record's text
+  const [showPreview, setShowPreview] = useState(false);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false);      // while the window is being shot
+  const [sentId, setSentId] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const i = await call("shellx.report_open", prefill || "");
+      if (!i) return;
+      setInfo(i);
+      setName(i.name || ""); setHidePaths(i.hide_paths !== false);
+      if (i.prefill && !text) setText(i.prefill);
+    })();
+  }, []);
+  useEffect(() => {
+    if (!showPreview) return undefined;
+    const id = setTimeout(async () => {
+      const p = await call("shellx.report_preview", text, name, hidePaths);
+      if (p) setPreview(p.text);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [showPreview, text, name, hidePaths]);
+  useEffect(() => {
+    // the send finished off the loop: the service's answer, or why not
+    if (!r.last || busy === false) return;
+    setBusy(false);
+    if (r.last.ok) setSentId(r.last.id || "sent");
+    else setErr(r.last.error || "The report could not be sent.");
+  }, [r.last, r.busy]);
+  const picture = r.picture;
+  const act = async (fn) => {
+    setErr(null);
+    try { return await fn(); } catch (e) { setErr(e && e.message ? e.message : String(e)); return null; }
+  };
+  const pick = () => act(() => call("shellx.report_picture", "pick"));
+  const clearPic = () => act(() => call("shellx.report_picture", "clear"));
+  const shoot = async () => {
+    setHidden(true);
+    await act(() => call("shellx.report_capture"));
+    setHidden(false);
+  };
+  const send = async () => {
+    setErr(null); setBusy(true);
+    const ok = await act(() => call("shellx.report_send", text, name, hidePaths));
+    if (!ok) setBusy(false);
+  };
+  const save = () => act(() => call("shellx.report_save", text, name, hidePaths));
+  // the reports this app sent, newest first, with how each is doing; the
+  // list starts open when one has news, and showing it marks the news seen
+  const mine = (r.mine || []).slice().reverse();
+  const hasNews = !!mine.find((m) => m.seen === false);
+  const [mineOpen, setMineOpen] = useState(hasNews);
+  useEffect(() => { if (mineOpen && hasNews) call("shellx.report_mine_seen"); }, [mineOpen, hasNews]);
+  const Mine = () => mine.length ? html`<details class="sx-rep-facts" open=${mineOpen}
+      onToggle=${(e) => setMineOpen(e.target.open)}>
+    <summary class="small">Your reports (${mine.length})</summary>
+    <table class="sx-rep-mine small"><tbody>
+      ${mine.map((m) => html`<tr class=${m.seen === false ? "new" : ""}>
+        <td class="muted notr">${m.when}</td>
+        <td class="notr ellip" title=${m.title}>${m.title}</td>
+        <td class=${"notr " + (m.state === "released" ? "ok" : "muted")}>${m.words}</td>
+      </tr>${m.message ? html`<tr class="msg"><td></td><td colspan="2" class="notr">${m.message}</td></tr>` : null}`)}
+    </tbody></table>
+  </details>` : null;
+  if (hidden) return null;
+  if (sentId) {
+    return html`<${Modal} title="Report a problem" icon="flag" onClose=${onClose} cls=${"sx-report " + uid}
+      footer=${html`<${Button} kind="primary" onClick=${close}>Close<//>`}>
+      <${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached. When a release addresses it, this app tells you with a notice at the top, and under Your reports in this window.<//>
+      <${Mine} />
+    <//>`;
+  }
+  const facts = (info && info.facts) || [];
+  return html`<${Modal} title="Report a problem" icon="flag" wide onClose=${onClose} cls=${"sx-report " + uid}
+    footer=${html`<${Button} kind="ghost" onClick=${save} disabled=${busy}>Save as a file…<//>
+      <span class="grow"></span>
+      <${Button} onClick=${close} disabled=${busy}>Cancel<//>
+      <${Button} kind="primary" onClick=${send} busy=${busy} disabled=${busy || !r.available}>${busy ? "Sending…" : "Send"}<//>`}>
+    <div class="stack" style="gap:10px">
+      <p class="sx-p">Say what went wrong and what you expected. The app adds its version, your system, the card and project it has open, and the last ${(info && info.log_lines) || 0} lines of its log, so you don't have to.</p>
+      <label class="lbl" for="sx-rep-text">What happened</label>
+      <textarea id="sx-rep-text" class="area" rows="5" value=${text} autoFocus
+        placeholder="I pressed Write on the Godzilla card and it stopped at 40% with…"
+        onInput=${(e) => setText(e.target.value)}></textarea>
+      <div class="row wrap" style="gap:14px">
+        <span class="stack" style="gap:4px"><span class="lbl">Your name (optional)</span>
+          <${Field} value=${name} onChange=${setName} width=${200} /></span>
+        <span class="small muted" style="align-self:flex-end">No email needed: when a release addresses your report, this app tells you.</span>
+      </div>
+      <div class="row wrap" style="gap:10px">
+        <span class="lbl">Picture</span>
+        ${picture ? html`<span class="chip acc sm notr" title=${picture.name}>${picture.name} · ${picture.kb} KB</span>
+            <${Button} size="sm" kind="ghost" onClick=${clearPic}>Remove<//>`
+          : html`<${Button} size="sm" onClick=${pick}>Add a picture…<//>
+            ${r.capture ? html`<${Button} size="sm" onClick=${shoot} title="Hides this window for a moment and takes a picture of the app">Take a picture of the app<//>` : null}`}
+      </div>
+      <${Check} checked=${hidePaths} onChange=${setHidePaths} label="Leave file paths and my account name out of the report" />
+      <details class="sx-rep-facts" open=${showPreview} onToggle=${(e) => setShowPreview(e.target.open)}>
+        <summary class="small">What will be sent</summary>
+        ${preview === null ? html`<span class="small muted">Reading…</span>`
+          : html`<pre class="sx-rep-pre mono small">${preview}</pre>`}
+      </details>
+      ${!showPreview && facts.length ? html`<table class="sx-rep-tab small"><tbody>
+        ${facts.filter((f) => f[0] !== "History").map((f) => html`<tr><td class="muted">${f[0]}</td><td class="notr ellip" title=${f[1]}>${f[1]}</td></tr>`)}
+      </tbody></table>` : null}
+      ${!r.available ? html`<${Note} kind="warn">This copy of the app has no report service configured. Save the report as a file and attach it to a message instead.<//>` : null}
+      <${ErrorNote} text=${err} />
+      ${err && r.last && r.last.offline ? html`<${Note} kind="info">Save as a file writes the same report as a .zip you can attach to a Discord post or a mail.<//>` : null}
+      <${Mine} />
+    </div>
+  <//>`;
+}
+registerDialog("report", ReportDialog);
+
 export { TipsPanel };

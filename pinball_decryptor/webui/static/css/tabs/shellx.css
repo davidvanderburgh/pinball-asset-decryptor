@@ -327,3 +327,18 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-reset-list { padding: 2px 0; }
 .sx-reset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; }
 .sx-reset-detail { grid-column: 1 / -1; padding-left: 26px; line-height: 1.4; }
+
+/* ---- Report a problem (PAD-780) ---- */
+.sx-rep-pre { max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line-2); color: var(--ink-2); }
+.sx-rep-facts summary { cursor: pointer; color: var(--ink-3); }
+.sx-rep-tab { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.sx-rep-tab td { padding: 2px 8px 2px 0; vertical-align: top; }
+.sx-rep-tab td:first-child { width: 96px; white-space: nowrap; }
+.dlg-report { margin-right: auto; }
+.sx-rep-mine { border-collapse: collapse; width: 100%; table-layout: fixed; margin-top: 6px; }
+.sx-rep-mine td { padding: 3px 8px 3px 0; vertical-align: top; }
+.sx-rep-mine td:first-child { width: 86px; white-space: nowrap; }
+.sx-rep-mine td:last-child { width: 200px; }
+.sx-rep-mine td.ok { color: var(--ok); font-weight: 600; }
+.sx-rep-mine tr.new td { background: var(--info-soft); }
+.sx-rep-mine tr.msg td { padding-top: 0; color: var(--ink-2); white-space: pre-line; }

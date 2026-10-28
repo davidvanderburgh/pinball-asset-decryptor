@@ -469,3 +469,23 @@ session.
 
 **Language:** English (US and UK), Spanish, German and French. Switch with
 the globe button in the top bar or ⚙ > **Language**.
+
+## Report a problem
+
+**Report a problem** in the top bar (also ⚙ > **Report a problem…**, and a
+link on every error box) sends what happened straight to the developer.
+Write what you did and what you expected; the app fills in the rest.
+
+- **What goes with it:** the app's version, your system, the manufacturer
+  and tab, the card and project it has open with their build history, and
+  the last 300 lines of its log.
+- **A picture** is optional: a file, or **Take a picture of the app**.
+- **What will be sent** shows the whole record before anything leaves
+  your PC. Tick **Leave file paths and my account name out** to have
+  those blanked.
+- **No email is asked for.** The app remembers the reports it sent and
+  asks after them now and then; when a release addresses one, a notice
+  at the top says so, with the developer's note if there is one, and
+  **Your reports** in the window lists each report's state.
+- **Save as a file…** writes the same report as a .zip to attach to a
+  Discord post or a mail when the service cannot be reached.

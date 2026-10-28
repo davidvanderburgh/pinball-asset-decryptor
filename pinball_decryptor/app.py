@@ -488,6 +488,8 @@ class App:
             on_flashed_images_change=self._on_flashed_images_change,
             initial_donations=s.get("donations") or {},
             on_donations_change=self._on_donations_change,
+            initial_report=s.get("report") or {},
+            on_report_change=self._on_report_change,
             on_ui_zoom_change=self._on_ui_zoom_change,
             initial_language=s.get("ui_language"),
             on_language_change=self._on_language_change,
@@ -6448,6 +6450,12 @@ class App:
         once-only prompt has been shown, and the currency and name the form
         last used."""
         self._settings["donations"] = dict(blob or {})
+        self._save_settings()
+
+    def _on_report_change(self, blob):
+        """Persist the Report a problem window's memory (PAD-780): the name
+        and address the form last used, and the paths choice."""
+        self._settings["report"] = dict(blob or {})
         self._save_settings()
 
     def _on_default_presets_change(self, blob):

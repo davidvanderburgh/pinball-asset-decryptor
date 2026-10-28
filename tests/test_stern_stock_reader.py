@@ -859,6 +859,35 @@ def _linear_reads(prog, cs, va_def, limit=400):
     return sorted(set(reads))
 
 
+def _callee_ignores(prog, cs, call_va, va_def):
+    """PAD-798, independently: the ``bl`` at *call_va* hands the register *va_def* writes to a callee that writes it
+    (or returns) before ever reading it - the player getter, the award record's level check - so the call is not a
+    read. A ``push`` saving it is not a read."""
+    w = prog.word(call_va)
+    if w is None or (w & 0x0F000000) != 0x0B000000:
+        return False
+    target = SS.branch_target(w, call_va)
+
+    def ins(va):
+        return next(cs.disasm(struct.pack("<I", prog.word(va)), va), None)
+    i = ins(va_def)
+    regs = {cs.reg_name(x) for x in i.regs_access()[1]} - {"pc"}
+    for va in range(target, target + 4 * 40, 4):
+        j = ins(va)
+        if j is None:
+            return False
+        if j.mnemonic in ("push", "stmdb"):
+            continue
+        r, wr = ({cs.reg_name(x) for x in s} for s in j.regs_access())
+        if r & regs:
+            return False
+        if wr & regs:
+            return True
+        if j.mnemonic.startswith(("b", "pop")) or "pc" in wr:
+            return True
+    return False
+
+
 @pytest.mark.parametrize("name", ["avengers_infinity_le-1.09.0", "dungeons_and_dragons_le-1.00.0",
                                   "led_zeppelin_le-1.22.0", "john_wick_le-1.01.0",
                                   "turtles_pro-1.59.0", "star_wars_le-1.30.0",
@@ -885,8 +914,14 @@ def test_every_editable_word_is_that_numbers_own(name, need_capstone):
             fn, call = over[n.mode_id][int(m.group(1))], int(m.group(2), 16)
             assert fn <= call and prog.func_start(call) <= fn, n.row_key
         if n.kind in ("imm", "movw", "movwt"):
-            for d in ([n.vas[1]] if n.kind == "movwt" else n.vas):
-                assert len(_linear_reads(prog, cs, d)) <= 1, (n.row_key, hex(d))
+            # PAD-798: an award record's number is read by the stores its row names (a level's value seeds the
+            # record's own copies too), and a call that never reads the register is no read of it
+            own = {int(x, 16) for x in re.findall(r"0x([0-9a-f]+)",
+                                                  (re.search(r"strd at ([0-9a-fx,]+)", n.comment) or ["", ""])[1])}
+            for d in (n.vas[1::2] if n.kind == "movwt" else n.vas):
+                reads = [r for r in _linear_reads(prog, cs, d)
+                         if r not in own and not _callee_ignores(prog, cs, r, d)]
+                assert len(reads) <= (0 if own else 1), (n.row_key, hex(d), [hex(r) for r in reads])
     by = collections.defaultdict(list)
     for n in b.numbers:
         if n.is_word and n.klass in ("word", "uncertain"):

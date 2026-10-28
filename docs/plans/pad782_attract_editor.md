@@ -67,8 +67,14 @@ Rush, Star Wars x3, Sword of Rage, Venom) start their pages another way: the fin
 1. [done] runtime `attract items` section (pad_mode_runtime.c), test wrap, champions off; portattract.py finder;
    16 shipped ports. Rig: C:/tmp/PAD-782/rig (job3.sh/run3.sh: rt.so = runtime + mode_file.c, attract_<key>.cfg).
 2. [done, run 4: Godzilla before entry 0 (its last-score page, not shown before a game), Bond after entry 3; every cycle; segv 0] the test wrap. Left: a flipper/Start during an item (the clip comes down, the game takes over); the 1 testpick failure (test_spike2_savestate_edits load-credit timing) to be checked against main.
-3. Widen the finder to the other 33 builds (look at Deadpool / Jaws / Mando sequencers), add to port_derive.py so
-   derived ports get the lines, re-run sweep_find.py.
+3. [done, run 2] The finder reads the table off the data (the page 4 bytes after the test; the stride 8/12/16 the
+   one under which the longest run of entries hold code; the count the index's `cmp rI, #imm` + 1, else the run to
+   the first entry with no page): 45 of the 53 newest builds (new: Deadpool 12-byte, Jaws/JP/KK/LZ/Avengers 16-byte,
+   Mando, Metallica, Rush, Star Wars, Iron Maiden 12-byte, Foo Fighters, John Wick, Beatles, Munsters). 44 shipped
+   ports carry the lines, recipes rebuilt; port_derive writes them on derived ports (portgen REVISION 9; the Heisei
+   Godzilla derives them). Left out (refused up front by the app): D&D LE/Pro, Elvira, Bond 60th, SW ELG, Sword of
+   Rage LE/Pro, Venom LE/Pro - their attract starts its pages from straight-line code (Sword of Rage 0x41138: `movw
+   r0, #page; bl create` one after another), no table to put items into. tests/test_pad782_attract_items.py.
 4. `attract_items.py` (plugin): the project record (staged key `attract_items`: items with kind photo/clip/text/
    champions, anchor entry + before/after, dwell), naming the game's pages for the page (entry -> what it shows:
    champion pages via the challenge page sites, clip names the page plays, message text), making each item a clip

@@ -12798,7 +12798,8 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
     }
     /* a category's first entry only (the GRAND CHAMPION's page, not HIGH SCORE #1's: Avengers calls one page per entry),
      * never while the end-of-game high scores run (a page function the game's end calls: the attract mode's only) */
-    if (pm_in_game() || chg_scores_running || ait_champions_off || (k != CHG_LIST_PAGE && chg_pages_n != 0)
+    if (ait_champions_off) return ret;                           /* PAD-782: the owner switched them off */
+    if (pm_in_game() || chg_scores_running || (k != CHG_LIST_PAGE && chg_pages_n != 0)
         || !chg_pages_follow(cat, chg_pages_count, &chg_pages_first)) return ret;
     n = pm_read_file(CHG_SCORES, b, sizeof b);
     if (n <= 0) return ret;
@@ -13122,7 +13123,7 @@ static void attract_arm(void)
     at = (unsigned)pm_port_value("attract_page_at", 4);
     count = (unsigned)pm_port_value("attract_count", 0);
     ait_sleep = (void (*)(unsigned))(unsigned long)fn("attract_sleep");
-    if (!table || (size != 8 && size != 16) || at + 4 > size || !count || count > 256 || !ait_sleep
+    if (!table || (size != 8 && size != 12 && size != 16) || at + 4 > size || !count || count > 256 || !ait_sleep
         || !maps_has(table, size * count, MAP_R)) {
         say("attract items: off - the port has no attract page table this runtime can use");
         ait_n = 0;

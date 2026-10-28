@@ -789,3 +789,10 @@ value challenge_place_1        3
 value challenge_place_2        2
 value challenge_place_3        0
 value challenge_place_4        1
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x0063e568
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       123
+site  attract_sleep       0x001fd6ec 0xe3063ca0 0xe34036ff

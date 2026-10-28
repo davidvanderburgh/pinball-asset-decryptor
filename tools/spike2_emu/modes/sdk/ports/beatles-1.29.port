@@ -723,3 +723,10 @@ text  done_name_3                  Drop Bank Fab
 value done_flag_3                  54
 text  done_name_4                  Drop Bank Four
 value done_flag_4                  55
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x00540940
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       10
+site  attract_sleep       0x001abb98 0xe3053d00 0xe340305b

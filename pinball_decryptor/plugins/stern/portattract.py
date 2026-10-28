@@ -69,7 +69,7 @@ class Sequencer:
                 break
             test, page = e.word(va), e.word(va + self.page_at)
             secs = None
-            if self.size == 16:
+            if self.size > 8:
                 secs = struct.unpack("<f", struct.pack("<I", e.word(va + 8)))[0]
             out.append((test, page, secs))
         return out
@@ -89,6 +89,27 @@ def _base_reg_value(w, lo, hi, reg):
     return val
 
 
+def _is_code(e, va):
+    o = e.off(va) if va else None
+    return o is not None and not va & 3 and e.text_va <= va < e.text_va + 4 * len(e.words)
+
+
+def _stride(e, entry, cap=MAX_ENTRIES):
+    """``(stride, run)``: the entry size (8, 12 or 16) under which the most entries in a row starting at *entry*
+    hold a page that is code and a test that is 0 or code, and that run."""
+    best = (0, 0)
+    for s in (8, 12, 16):
+        k = 0
+        while k < cap and e.off(entry + s * k + 7) is not None:
+            test, page = e.word(entry + s * k), e.word(entry + s * k + 4)
+            if not _is_code(e, page) or (test and not _is_code(e, test)):
+                break
+            k += 1
+        if k > best[1]:
+            best = (s, k)
+    return best
+
+
 def find(e):
     """The build's :class:`Sequencer`, or None when the program has not exactly one."""
     if not isinstance(e, Elf):
@@ -99,16 +120,17 @@ def find(e):
     for i in range(8, n - 16):
         if w[i] & _STAMP_MASK != _STAMP or w[i] >> 28 not in (0x1, 0xE):
             continue
-        # bl <create> two or three words before (cmp r0, #0 ; [beq])
-        k = next((k for k in (i - 2, i - 3) if bl_target(base + 4 * k, w[k]) is not None), None)
-        if k is None or w[k - 1] != 0xE3A01000:            # mov r1, #0
+        # bl <create> at most eight words before (cmp r0, #0 ; [beq] ; the process's other fields)
+        k = next((k for k in range(i - 2, i - 9, -1)
+                  if bl_target(base + 4 * k, w[k]) is not None and 0xE3A01000 in w[k - 3:k]), None)   # mov r1, #0
+        if k is None:
             continue
         create = bl_target(base + 4 * k, w[k])
-        # the page: `ldr r0, [rE, #q]` (or ldr r3 ... mov r0, r3) just before
+        # the page: `ldr rP, [rE, #q]` just before (q: the page's offset from the table register's address)
         page = None
-        for j in range(k - 2, max(k - 9, 0), -1):
+        for j in range(k - 1, max(k - 9, 0), -1):
             got = _ldr_imm(w[j])
-            if got and got[2] in (4, 8, 0xC, 0x10):
+            if got and 4 <= got[2] <= 0x1000 and not got[2] & 3 and got[0] in (0, 3):
                 page = got
                 break
         if page is None:
@@ -121,64 +143,42 @@ def find(e):
                 break
         if sleep is None:
             continue
-        # the function: back to its push, at most 160 words
-        start = next((j for j in range(k, max(k - 160, 0), -1) if w[j] & 0xFFFF4000 == 0xE92D4000), None)
+        # the function: back to its push, at most 1000 words
+        start = next((j for j in range(k, max(k - 1000, -1), -1) if w[j] & 0xFFFF4000 == 0xE92D4000), None)
         if start is None:
             continue
         body = w[start:min(n, i + 200)]
         if not any(x & 0xFFFFFFF0 == 0xE12FFF30 for x in body):          # blx rN: the entry's test
             continue
-        size = None
-        if any(x & 0xFFFF0FF0 == 0xE1A00200 for x in w[start:i]):         # lsl rX, rY, #4: 16-byte entries
-            size = 16
-        elif any(x & 0xFFF00FF0 == 0xE7900180 for x in w[start:i]):       # ldr rX, [rB, rI, lsl #3]
-            size = 8
-        if size is None:
-            continue
-        # the table register: the base of the test's load (16: `add r7, rB, r5`; 8: `ldr r3, [rB, r4, lsl #3]`)
-        reg = None
-        pred_at = 0
-        for x in w[start:i]:
-            if size == 8 and x & 0xFFF00FF0 == 0xE7900180:
-                reg = x >> 16 & 15
-                break
-            got = _ldr_imm(x)
-            if size == 16 and got and got[0] == 3 and got[2] in (0, 4, 8):
-                pred_at = got[2]
-        if size == 16:
-            # `add rE, rB, rO` before the test's load: rB is the table's register
-            for x in w[start:i]:
-                if x & 0xFFF00FF0 == 0xE0800000 and (x & 15) != (x >> 16 & 15):
-                    cand = x >> 16 & 15
-                    if _base_reg_value(w, start, i, cand) is not None:
-                        reg = cand
-                        break
-        if reg is None:
-            continue
-        tbl = _base_reg_value(w, start, i, reg)
-        if tbl is None or e.off(tbl) is None:
-            continue
-        page_at = page[2] - pred_at
-        if size == 8:
-            entry, count = tbl, 0
-            while count < MAX_ENTRIES and e.off(entry + 8 * count + 7) is not None \
-                    and e.word(entry + 8 * count + 4):
-                count += 1
-        else:
-            entry = tbl + pred_at
-            cmps = [x & 0xFF for x in body if x & 0xFFFFFF00 == 0xE3540000]   # cmp r4, #imm
-            if not cmps:
+        # the table: an address a movw/movt pair of the function loads, whose entries (test at q - 4, page at q,
+        # 8, 12 or 16 bytes apart) hold the longest run of pages
+        best = None
+        for reg in range(13):
+            tbl = _base_reg_value(w, start, i, reg)
+            if tbl is None or e.off(tbl) is None:
                 continue
-            count = max(cmps) + 1
-        if not 2 <= count <= MAX_ENTRIES or page_at not in (4,):
+            entry = tbl + page[2] - 4
+            size, run = _stride(e, entry)
+            if run >= 4 and (best is None or run > best[2]):
+                best = (tbl, entry, run, size)
+        if best is None:
             continue
-        found.append(Sequencer(tbl, entry, size, 0, page_at, count, create, sleep, base + 4 * start))
+        tbl, entry, run, size = best
+        # a fixed count: the index's `cmp rI, #imm` (91 on Godzilla, 55 on Deadpool), else the run to the first
+        # entry with no page (Bond)
+        cmps = [x & 0xFF for x in body if x & 0xFFF0FF00 == 0xE3500000 and 8 <= x & 0xFF < 255]
+        count = max(cmps) + 1 if cmps and max(cmps) + 1 <= run else run
+        if not 2 <= count <= MAX_ENTRIES:
+            continue
+        found.append(Sequencer(tbl, entry, size, 0, 4, count, create, sleep, base + 4 * start))
     uniq = {(s.entry, s.size, s.count): s for s in found}
     return next(iter(uniq.values())) if len(uniq) == 1 else None
 
 
 def lines(e):
     """The port lines for the build's attract table (empty when it has none the runtime can use)."""
+    if not isinstance(e, Elf):
+        e = Elf(e)
     s = find(e)
     if s is None:
         return []

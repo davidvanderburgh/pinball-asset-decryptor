@@ -43,7 +43,8 @@ import numpy as np
 #: roster_cursor, PAD-706), and the battles' offsets are a title's values, left out of another title's draft
 #: 8: the build's own game modes kept in a derived port (they were dropped as unplaced), and the game's mode framework
 #: read off an older build that reads the player up inline (data mode_player_at), PAD-714
-REVISION = 8
+#: 9: the attract mode's page table (PAD-782, portattract.py)
+REVISION = 9
 RECIPE_FORMAT = 1
 
 CORE_SITES = ("tick", "shot_dispatch", "ball_end", "score_add")
@@ -901,7 +902,8 @@ _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block
                         r"value mode_(?:slot_stop|stopped_at|reason_at|starts_at|wins_at|id_at|slot_stopped_get|slot_stopped_set)|"   # PAD-716: JP
                         r"site audit_add|value place_(?:audit_started|audit_completed|flag_played|flag_completed)_\d+|"
                         r"site place_start_\d+|"   # PAD-715
-                        r"value challenge_place_\d+)\b")
+                        r"value challenge_place_\d+|"
+                        r"data attract_table|value attract_(?:entry_size|page_at|count)|site attract_sleep)\b")   # PAD-782
 
 
 def generated(key, rest):

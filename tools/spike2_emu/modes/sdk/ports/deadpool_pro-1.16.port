@@ -572,3 +572,10 @@ value mode_starts_at         0x3c
 site  mode_started           0x000fce1c 0xe3510019 0x812fff1e
 data  mode_manager           0x006ac88c
 value mode_id_at             4
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x00639a90
+value attract_entry_size  12
+value attract_page_at     4
+value attract_count       54
+site  attract_sleep       0x00368e4c 0xe30e3a60 0xe340306e

@@ -700,3 +700,10 @@ value mode_slot_stop         50
 value mode_stopped_at        0x57
 value mode_starts_at         0x68
 value mode_wins_at           0x84
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x00628020
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       62
+site  attract_sleep       0x002f3008 0xe3053300 0xe3403071

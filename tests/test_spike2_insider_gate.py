@@ -68,7 +68,7 @@ def test_which_endpoints_are_refused(tmp_path):
     code = "\n".join([
         "#include <stdio.h>",
         _lift(src, "static const char *const INSIDER_BLOCKED[]") + ";",   # the lift stops at the brace
-        _lift(src, "static int str_starts("),
+        _lift(src, "static int str_starts(const char *s, const char *prefix)\n{"),   # the definition, not PAD-782's forward declaration
         _lift(src, "static int insider_blocked("),
         "int main(int argc, char **argv) { int i; for (i = 1; i < argc; i++)",
         '    printf("%s %d\\n", argv[i], insider_blocked(argv[i])); return 0; }',

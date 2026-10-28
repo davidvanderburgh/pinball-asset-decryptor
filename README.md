@@ -19,6 +19,8 @@ macOS and Linux.
 - **Share** your changes as a small mod pack, or apply someone else's.
 - **Emulate** the game on your PC to see and hear your changes before they
   go near the machine.
+- **Play in Visual Pinball**: the Stern Spike 2 emulator can drive a Visual
+  Pinball X table (Start menu **Visual Pinball setup** walks you through it).
 - **Multi-boot**: put several complete games on one Stern Spike 2 SD card
   (or Jersey Jack install stick, or Barrels of Fun update) and pick one from a
   menu at power-up.

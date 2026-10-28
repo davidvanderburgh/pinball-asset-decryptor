@@ -17,7 +17,7 @@ import sys
 import time
 
 KEYS = {"start": 2, "launch": 28, "plunger": 28, "lflip": 42, "rflip": 54,
-        "coin": 6, "esc": 1}
+        "coin": 6, "esc": 1, "lockbar": 56}   # VPX: Lockbar = Left Alt by default
 PATH = os.path.join(os.environ.get("TEMP", "."), "padvpx_keys.txt")
 
 

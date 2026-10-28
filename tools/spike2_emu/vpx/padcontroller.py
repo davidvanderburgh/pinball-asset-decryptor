@@ -129,15 +129,21 @@ class VpxMap:
         # handed, so ChangedSolenoids may only carry numbers up to this; a
         # coil's 1000+ name still answers Controller.Solenoid(n).
         self.sol_max = 68
-        path = os.path.join(HERE, "%s.vpxmap.json" % title) if title else None
-        if path and os.path.exists(path):
-            self.load(path)
+        # a rebuilt table's map (<title>.vpxmap.json) or a shadow-patched
+        # tribute's (<title>.shadow.json, vpxshadow.py): same keys where
+        # they overlap - solenoids, game_on, cabinet, solenoid_max
+        for suffix in (".vpxmap.json", ".shadow.json"):
+            path = os.path.join(HERE, "%s%s" % (title, suffix)) if title else None
+            if path and os.path.exists(path):
+                self.load(path)
+                break
 
     def load(self, path):
         m = json.load(open(path, encoding="utf-8"))
         g = m.get("game_on") or {}
         self.game_on = (int(g["number"]), [tuple(c) for c in g["coils"]]) if g else None
-        self.cabinet = {k: int(v) for k, v in m.get("cabinet", {}).items() if k != "_"}
+        self.cabinet = {k: int(v) for k, v in m.get("cabinet", {}).items()
+                        if k != "_" and isinstance(v, int)}
         for k, v in m.get("switch_rewrite", {}).items():
             if k != "_":
                 self.switch_rewrite[int(k)] = int(v)
@@ -468,11 +474,24 @@ class Bridge:
         self.paused = bool(want)
         if not self.pipe or not self.rig:
             return
-        sw = read_block(self.rig.sw_path(), padsw.OFF_PAUSED + 4)
-        now = struct.unpack_from("<I", sw, padsw.OFF_PAUSED)[0] if sw and len(sw) > padsw.OFF_PAUSED else -1
-        log("pause -> %d (rig says %d)" % (want, now))
+
+        def rig_flag():
+            sw = read_block(self.rig.sw_path(), padsw.OFF_PAUSED + 4)
+            return struct.unpack_from("<I", sw, padsw.OFF_PAUSED)[0] if sw and len(sw) > padsw.OFF_PAUSED else -1
+
+        now = rig_flag()
         if now != want:
             self.pipe.pause()
+            # VPX flips Pause twice within a few ms as its player starts; the
+            # rig takes ~10 ms to act on a toggle, so wait for the flag to
+            # follow before the next call reads it - or the second call sees
+            # the old value, sends nothing, and the game stays frozen.
+            for _ in range(30):
+                time.sleep(0.01)
+                now = rig_flag()
+                if now == want:
+                    break
+        log("pause -> %d (rig now %d)" % (want, now))
 
     # -- switches
     def set_switch(self, n, level):

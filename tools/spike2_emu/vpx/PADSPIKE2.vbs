@@ -87,7 +87,7 @@ Sub DOF(DOFevent, State) : End Sub
 ' controller's synthetic "flippers armed" solenoid (the .vpxmap.json's
 ' game_on): with UseSolenoids=2 core.vbs flips from the key the moment it is
 ' on, as on the machine, where the board fires the flipper from its button.
-Const GameOnSolenoid = 1999
+Const GameOnSolenoid = 40
 Sub LoadVPM(VPMver, VBSfile, VBSver)
 	LoadCore
 	Set vpmShowDips = GetRef("padNoDips")

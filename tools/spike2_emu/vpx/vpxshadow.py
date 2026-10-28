@@ -20,10 +20,12 @@ the smaller thing that makes the real game playable on it:
     drop-target resets follow their coils;
   * the original's own ball creation and auto-launch lines are commented out
     (`neuter`), so the shadow game cannot add balls;
-  * keys: Start, launch, coins and the flipper BUTTONS go to the machine; the
-    flippers themselves still flip through the original key handler (its
-    tricks are better than a coil report would be), so Table1_KeyDown passes
-    everything but the game keys on to the original.
+  * keys: Start, launch, coins and the flipper BUTTONS go to the machine, and
+    Table1_KeyDown passes everything else on to the original handler;
+  * the flippers are the MACHINE's coils: core.vbs's sLLFlipper/sLRFlipper
+    callbacks go to the table's own SolLFlipper/SolRFlipper (their tricks and
+    sounds stay), since a tribute flips from the key only while ITS game is
+    in play, which it never is. The map's `flippers` can name other subs.
 
 Lamps are left to the shadow game until the title's LED identities are known
 (these builds carry no lamp positions or names in their device table).
@@ -63,17 +65,49 @@ def rename_sub(lines, name, rep):
     return False
 
 
+def _statements(line):
+    """A line's `:`-joined statements, quotes respected; the first comment
+    ends the split. Returns [(start, end)] spans."""
+    spans, start, inq = [], 0, False
+    for i, ch in enumerate(line):
+        if ch == '"':
+            inq = not inq
+        elif not inq and ch == "'":
+            break
+        elif not inq and ch == ":" and not line[max(0, i - 1):i + 1].startswith("::"):
+            spans.append((start, i))
+            start = i + 1
+    spans.append((start, len(line)))
+    return spans
+
+
 def neuter(lines, patterns, rep):
+    """Comment out every line that creates or launches a ball. A statement
+    sharing its line with others (`Sub Drain_Hit : PlungerIM.AutoFire : End
+    Sub`) cannot be commented without taking the rest, so it is guarded with
+    `If False Then` instead."""
     n = 0
     for i, line in enumerate(lines):
         s = line.strip()
         if s.startswith("'"):
             continue
         for p in patterns:
-            if p.lower() in s.lower():
+            if p.lower() not in s.lower():
+                continue
+            spans = _statements(line)
+            if len(spans) == 1:
                 lines[i] = re.sub(r"^(\s*)", r"\1'PAD neutered: ", line, count=1)
-                n += 1
-                break
+            else:
+                parts = []
+                for a, b in spans:
+                    seg = line[a:b]
+                    if p.lower() in seg.lower() and not seg.strip().lower().startswith("if "):
+                        lead = len(seg) - len(seg.lstrip())
+                        seg = seg[:lead] + "If False Then " + seg[lead:]   # PAD neutered
+                    parts.append(seg)
+                lines[i] = ":".join(parts) + line[spans[-1][1]:]
+            n += 1
+            break
     rep.append("neutered %d line(s) that created or launched balls" % n)
 
 
@@ -106,7 +140,7 @@ def pup_stub(lines, rep):
     object optional: when CreateObject fails, PuPlayer becomes a class with
     every method the script calls, each taking the argument count the script
     uses, doing nothing. Returns the class text."""
-    counts = {}
+    counts, spelling = {}, {}
     for line in lines:
         s = line.strip()
         if s.startswith("'"):
@@ -122,6 +156,7 @@ def pup_stub(lines, rep):
                 n = _argcount(rest)
             counts.setdefault(meth.lower(), {}).setdefault(n, 0)
             counts[meth.lower()][n] += 1
+            spelling.setdefault(meth.lower(), meth)
     for i, line in enumerate(lines):
         if re.search(r'Set\s+PuPlayer\s*=\s*CreateObject\("PinUpPlayer\.PinDisplay"\)', line, re.I):
             ind = re.match(r"^\s*", line).group(0)
@@ -138,7 +173,7 @@ def pup_stub(lines, rep):
         if len(cs) > 1:
             rep.append("WARNING: PuPlayer.%s is called with %s arguments; the stub takes %d" % (meth, sorted(cs), n))
         args = ", ".join("a%d" % k for k in range(n))
-        out.append("\tPublic Sub %s(%s) : End Sub" % (meth, args))
+        out.append("\tPublic Sub %s(%s) : End Sub" % (spelling[meth], args))
     out += ["End Class", ""]
     return "\n".join(out)
 
@@ -184,9 +219,20 @@ def gen(m, had):
             "Sub Table1_Paused : Controller.Pause = 1 : End Sub",
             "Sub Table1_UnPaused : Controller.Pause = 0 : End Sub", ""]
     # ---- keys
-    skip = m.get("keys_skip_orig", [])
+    skip = list(m.get("keys_skip_orig", []))
+    flips = flipper_subs(m, had)
+    if flips:
+        # the machine flips: its coils call the table's own flipper subs below,
+        # so the shadow game's keyboard flippers must not (double flips, or none
+        # at all - an EM-style tribute gates them on ITS game being in play)
+        skip += [k for k in ("LeftFlipperKey", "RightFlipperKey") if k not in skip]
     keymap = [("StartGameKey", cab["start"]), ("LeftFlipperKey", cab["left_flipper"]),
               ("RightFlipperKey", cab["right_flipper"])]
+    if cab.get("up_right_flipper"):
+        # Stern's right button closes the upper flipper's switch too
+        keymap.append(("RightFlipperKey", cab["up_right_flipper"]))
+    if cab.get("up_left_flipper"):
+        keymap.append(("LeftFlipperKey", cab["up_left_flipper"]))
     if cab.get("launch_key") and cab.get("launch"):
         keymap.append((cab["launch_key"], cab["launch"]))
     out += ["Sub Table1_KeyDown(ByVal KeyCode)"]
@@ -272,6 +318,8 @@ def gen(m, had):
         if num == "_" or not s.get("callback"):
             continue
         out.append("SolCallback(%s) = %s          ' %s" % (num, vb(s["callback"]), s["name"]))
+    for const, sub in flips.items():
+        out.append("SolCallback(%s) = %s          ' the machine's flipper coil" % (const, vb(sub)))
     # ---- test hook
     out += ["", "Sub PadTestTimer_Timer",
             "\tOn Error Resume Next",
@@ -294,6 +342,26 @@ def gen(m, had):
     return "\n".join(out) + "\n"
 
 
+def flipper_subs(m, had):
+    """core.vbs flipper constant -> the table's own flipper sub, for the
+    machine's flipper coils to call. The map's `flippers` names them
+    (`{"sLLFlipper": "SolLFlipper", ...}`); without it, a table's SolLFlipper /
+    SolRFlipper / SolULFlipper / SolURFlipper are taken when it has them."""
+    flips = dict(m.get("flippers", {}))
+    flips.pop("_", None)
+    if not flips:
+        for const, sub in (("sLLFlipper", "SolLFlipper"), ("sLRFlipper", "SolRFlipper"),
+                           ("sULFlipper", "SolULFlipper"), ("sURFlipper", "SolURFlipper")):
+            if had.get(sub):
+                flips[const] = sub
+    return flips
+
+
+def has_sub(lines, name):
+    pat = re.compile(r"^\s*(?:Public\s+|Private\s+)?(?:Sub|Function)\s+%s\b" % re.escape(name), re.I)
+    return any(pat.match(ln) for ln in lines)
+
+
 def patch(script, m):
     rep = []
     lines = script.split("\n")
@@ -314,6 +382,8 @@ def patch(script, m):
             had[name + ev] = rename_sub(lines, name + ev, rep)
     for k in saucers(m):
         rename_sub(lines, k + "_Hit", rep)
+    for sub in ("SolLFlipper", "SolRFlipper", "SolULFlipper", "SolURFlipper"):
+        had[sub] = has_sub(lines, sub)
     neuter(lines, m.get("neuter", []), rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
     text = "\n".join(lines) + gen(m, had) + stub

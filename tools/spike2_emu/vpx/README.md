@@ -20,6 +20,9 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `vpxfile.py` | read, patch and RE-SIGN a .vpx: VPX refuses a file whose MD2 MAC does not match, and this reproduces the digest (proven bit-for-bit on the stock table). Writes through pywin32's structured storage. |
 | `<title>.vpxmap.json` | the table-to-machine map: switch numbers, solenoid callbacks, every light's LED, the retrofit lights and triggers the table lacked. |
 | `patch_godzilla.py` | applies `godzilla_le.vpxmap.json` to marty02's "Godzilla Limited Edition" v2.6: rewires the script, adds 36 lights and the Mechagodzilla magnet, re-signs. |
+| `vpxshadow.py` | the patcher for a SCRIPTED tribute (no ROM): keeps its script as a shadow game, generates the bridge from `<title>.shadow.json`, neuters its own balls, makes PinUP Player optional, re-signs. |
+| `rush_le.shadow.json`, `foo_fighters_le.shadow.json` | the maps for drhotwing's "Rush LE Tribute" 2.0.2 and JP's "Foo Fighters" beta. |
+| `vpxkeys.py` | presses keys in a running patched table through its `PadTestTimer` (a test does not depend on VPX having the keyboard). |
 | `test_controller.vbs` | `cscript //nologo test_controller.vbs [run]` - the controller from VPX's own script engine, with no VPX installed; `run` presses Start and a flipper through a live rig and expects the coils back. |
 
 ## Numbering
@@ -50,9 +53,17 @@ run on its original numbering while its map is being built.
 
 While a table is attached, `dump/ballfeed.off` tells the rig's `ballfeed.py`
 to leave the trough alone: the table's own `cvpmBallStack` owns the balls.
-Keys are VPX's usual ones: 1 Start, Enter launch, the Shift keys flip, Esc
-leaves. `%TEMP%\padcontroller.log` says what the controller did;
+Keys are VPX's usual ones: 1 Start, 5 coin, the Shift keys flip, Esc
+leaves. The launch button is Enter on Godzilla (marty02 wired it to the
+plunger key) and the lockbar key, Left Alt by VPX's default, on Rush and Foo
+Fighters (their scripts wired the Action button to `LockBarKey`).
+`%TEMP%\padcontroller.log` says what the controller did;
 `%TEMP%\padspike2.log` what the system script's load did.
+
+A scripted tribute (Rush, Foo Fighters) is patched by `vpxshadow.py
+<title>.shadow.json "<table.vpx>" <out dir>`; it needs no PADSPIKE2.vbs
+beside it (its own script already loads core.vbs). The patched table is
+`<output>` from the map, in the out dir.
 
 ## Testing without hands
 
@@ -95,20 +106,54 @@ picture of a run is the emulator's own LCD (`glshot.sh`) while VPX plays it.
   installs a rule per coil once (cmd 41: power, and the input whose closing
   fires it) and sends nothing per flip. `padled` version 7 publishes the rule
   (`hwshim.c coil_rule_note`, `coilmap.rule`), the controller reports such a
-  coil ON while its switch is made, and synthesises solenoid 1999 "flippers
-  armed" for core.vbs's `GameOnSolenoid` so VPX flips from the key
-  (`UseSolenoids=2`).
+  coil ON while its switch is made, and synthesises solenoid 40 "flippers
+  armed" (the map's `game_on`) for core.vbs's `GameOnSolenoid` so VPX flips
+  from the key (`UseSolenoids=2`).
 * **Motors the table has no object for** (`switch_fakes`): the controller
   answers their end stops itself, the way hwshim does for node-board motors.
 * **The LCD and the sound are the rig's.** Nothing to bridge; put the game
   window on the backglass monitor.
 
-## Mapping another table (Foo Fighters, Rush, ...)
+## Scripted tributes (Rush, Foo Fighters)
+
+A tribute has no ROM: its rules are its script. `vpxshadow.py` keeps that
+script whole as a SHADOW GAME that never gets a Start (its lights, sounds and
+shows stay lively), renames every event sub the map names to `_orig`,
+generates a bridge that hands each edge to the controller and then calls the
+original, and lets the real game own the balls: Drain feeds a `cvpmBallStack`
+on the trough switches, each scoop is a saucer stack whose coil the game
+fires, the auto plunger fires on the game's coil, posts and drop resets
+follow theirs (`extra_vbs` in the map), and the tribute's own ball creation
+and auto-launch lines are commented out (`neuter`). Three lessons:
+
+* **The flippers are the machine's coils.** JP's table flips from the key
+  only while HIS game is in play, which it never is: the bridge sets
+  `SolCallback(sLLFlipper / sLRFlipper)` to the table's own `SolLFlipper` /
+  `SolRFlipper` (their tricks and sounds stay) and the flipper keys stop
+  reaching the shadow game. Stern's right button closes the upper flipper's
+  switch too, so the key goes to both.
+* **PinUP Player is optional** (`pup_stub`): Rush dies at
+  `CreateObject("PinUpPlayer.PinDisplay")` on a machine without it, so the
+  patcher scans every `PuPlayer.` call, writes a `PadNoPuP` class with those
+  methods and argument counts, and wraps the CreateObject so the class
+  stands in.
+* **Use the RIG's switch table.** The first Rush map came from an older
+  reading of the title that numbered every switch one higher: the table
+  pressed Tournament Start for Start and filled the jam opto, and the game
+  sat in attract. `dump/tables/<title>/switch_list.txt` from the run the
+  table will attach to is the numbering that counts.
+
+Lamps on both tributes stay the tables' own until the titles' LED identities
+are known (these builds carry no lamp positions or names in their device
+tables).
+
+## Mapping another table
 
 `vpxfile.py items <table.vpx>` lists every object with its position; the
-rig's `dump/tables/<title>/switch_xy.txt` and `led_io.txt` give the machine's.
-Fit the two (the Godzilla map's header has the transform), match by position,
-decide the rest by hand, write `<title>.vpxmap.json`, and a patcher like
-`patch_godzilla.py` for the script's own conventions. A scripted tribute
-(no ROM) has its rules in the script: those go, the hit subs stay and get
-their Spike 2 numbers.
+rig's `dump/tables/<title>/switch_list.txt` (and `switch_xy.txt`, `led_io.txt`
+where the build ships positions) give the machine's. Fit the two (the
+Godzilla map's header has the transform), match by position or by the
+table's own comments, decide the rest by hand. A ROM mash-up (Godzilla on
+Sega's ROM) gets a `<title>.vpxmap.json` and a patcher like
+`patch_godzilla.py` for the script's conventions; a scripted tribute gets a
+`<title>.shadow.json` and `vpxshadow.py` as it is.

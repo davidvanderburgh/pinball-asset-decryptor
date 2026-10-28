@@ -68,9 +68,9 @@ byte 26 the input whose closing fires it) and the BOARD fires flippers,
 slingshots and pop bumpers from their own switches - nothing crosses the bus
 per flip. So `padled` grew a version 7 (`rule_pwr`, `rule_in`, published by
 `hwshim.c coil_rule_note`), the controller reports such a coil ON while its
-switch is made and the rule is live, and synthesises solenoid 1999 "flippers
-armed" for core.vbs's `GameOnSolenoid` so the table flips from the key
-(`UseSolenoids=2`), exactly as the board would.
+switch is made and the rule is live, and synthesises solenoid 40 "flippers
+armed" (the map's `game_on`) for core.vbs's `GameOnSolenoid` so the table
+flips from the key (`UseSolenoids=2`), exactly as the board would.
 
 Motors with no table object (Mechagodzilla's shield) get their end stops
 answered by the controller (`switch_fakes`), as hwshim answers node-board
@@ -102,10 +102,47 @@ TROUGH 1..6 + JAM.
   the truncated clones, core.vbs's load order, its `Dim`s, the key
   handlers, `SolCallback(68)`, and the pywin32 by-reference Null.
 
-## Next tables
+## The scripted tributes: Rush and Foo Fighters
 
-Foo Fighters (Ryguy417 v2.0, VPU 14455; JP's 0.5.0, VPForums 19519) and Rush
-(Rush LE Tribute 2.0.2, VPU 32514) are scripted tributes: their rules live in
-the script and go, their hit subs stay and take Spike 2 numbers; each gets a
-`.vpxmap.json` against `foo_fighters_le` / `rush_le`'s device tables and a
-patcher for its own conventions. Same controller, same signer.
+drhotwing's "Rush LE Tribute" 2.0.2 (VPU 32514) and JP's "Foo Fighters" beta
+(VPForums 19519) have no ROM: their rules are their script, wound through
+every hit sub, timer and light. Rewriting that is a table of its own, so
+`vpxshadow.py` does the smaller thing: the whole script stays and runs as a
+SHADOW GAME that never gets a Start (its lights, sounds and ramp shows stay
+lively), every switch object the map names gets a new event sub that hands
+the edge to the controller and then calls the original (renamed `_orig`),
+the ball goes where the REAL game says (Drain feeds a `cvpmBallStack` on the
+trough switches, each scoop is a saucer stack whose coil the game fires, the
+auto plunger fires on the game's coil, posts and drop resets follow theirs),
+and the tribute's own ball creation and auto-launch lines are commented out.
+The map is `<title>.shadow.json`; both are in this directory.
+
+Three things these two turned up:
+
+* **The flippers are the machine's coils, not the keyboard's.** JP's table
+  flips from the key only while HIS game is in play, which it never is; the
+  generated script sets `SolCallback(sLLFlipper/sLRFlipper)` to the table's
+  own `SolLFlipper` / `SolRFlipper` (their flipper tricks and sounds stay),
+  and the flipper keys stop reaching the shadow game. Stern's right button
+  closes the upper flipper's switch too.
+* **PinUP Player is optional.** Rush dies at `CreateObject("PinUpPlayer.
+  PinDisplay")` on a machine without it; the patcher scans every `PuPlayer.`
+  call, writes a `PadNoPuP` class with those methods and argument counts,
+  and wraps the CreateObject so the class stands in.
+* **Use the RIG's switch table.** The first Rush map was built from an older
+  reading of the title that numbered every switch one higher: the table
+  pressed Tournament Start for Start and filled the jam opto for TROUGH 1,
+  and the game sat in attract. `dump/tables/<title>/switch_list.txt` from
+  the run the table will attach to is the only numbering that counts.
+
+Proven in VPX against hidden runs (2026-10-27): on both, Start (after a coin
+on Foo Fighters, whose card had none) serves a ball through the trough, the
+lockbar key (Left Alt, VPX's default) fires the auto plunger, both flippers
+flip from their coils, the pops fire from the board, a drain feeds the next
+ball (Foo Fighters' ball save re-served it), and the LCD shows the game
+played: Rush at 430,160 on ball 1 charging the time machine, Foo Fighters at
+109,760 on ball 2 picking a song. Lamps on both stay the tables' own until
+the titles' LED identities are known (these builds carry no lamp positions).
+
+Ryguy417's Foo Fighters v2.0 (VPU 14455) is a second Foo Fighters table and
+would take a map of its own.

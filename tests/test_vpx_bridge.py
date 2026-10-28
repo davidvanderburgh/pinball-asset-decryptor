@@ -235,3 +235,176 @@ def test_patcher_rewrites_a_miniature(gzmap):
     assert "mMechaMagnet.Solenoid = 6" in out and ".Solenoid = 5   ' GODZILLA MAGNET" in out
     assert out.count("End Sub") + out.count("end Sub") == \
         len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out)), "every Sub closes once"
+
+
+# ----------------------------------------------- the shadow patcher -----
+#
+# A scripted tribute (Rush, Foo Fighters) keeps its whole script as a shadow
+# game; vpxshadow.py renames its event subs, generates the bridge, neuters its
+# ball creation and makes PinUP Player optional. What matters is pinned on a
+# miniature of such a script.
+
+MINI_TRIBUTE = """Option Explicit
+Dim PuPlayer, bBallInPlungerLane
+Sub Table1_Init
+    Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay")
+    PuPlayer.B2SInit "", "rush"
+    PuPlayer.LabelSet 1, "Title", "x", 1, ""
+    BallRelease.CreateBall
+    BallRelease.Kick 90, 4
+End Sub
+Sub Table1_KeyDown(ByVal keycode)
+    If keycode = LeftFlipperKey And bGameInPlay Then SolLFlipper 1
+End Sub
+Sub Table1_KeyUp(ByVal keycode) : End Sub
+Sub SolLFlipper(Enabled) : LeftFlipper.RotateToEnd : End Sub
+Sub SolRFlipper(Enabled) : RightFlipper.RotateToEnd : End Sub
+Sub Drain_Hit : PlungerIM.AutoFire : End Sub
+Sub Trigger1_Hit : bBallInPlungerLane = True : End Sub
+Sub sw001_Hit : AddScore 100 : End Sub
+Sub LeftSlingShot_Slingshot : AddScore 10 : End Sub
+Sub Kicker1_Hit : AddScore 500 : End Sub
+"""
+
+MINI_SHADOW = {
+    "title": "rush_le",
+    "cabinet": {"start": 1036, "launch": 1034, "launch_key": "LockBarKey",
+                "left_flipper": 1065, "right_flipper": 1064, "up_right_flipper": 1066, "coin": 1039},
+    "keys_skip_orig": ["StartGameKey", "AddCreditKey", "LockBarKey"],
+    "switches": {"sw001": {"id": 53, "event": "hit"},
+                 "LeftSlingShot": {"id": 69, "event": "slingshot"},
+                 "Spinner": {"id": 83, "event": "spin"},
+                 "Opto1": {"id": 85, "event": "hold"}},
+    "plunger": {"lane_trigger": "Trigger1", "lane_switch": 67, "autoplunge": "plungerIM"},
+    "trough": {"release": "BallRelease", "drain": "Drain",
+               "switches": [76, 75, 74, 73, 72, 71, 77], "balls": 6, "kick": [90, 4]},
+    "saucers": {"Kicker1": {"switch": 78, "dir": 190, "power": 15, "kickz": 1.4}},
+    "solenoids": {"1": {"coil": [8, 1], "name": "TROUGH", "callback": "bsTrough.SolOut"},
+                  "2": {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "PadAutoPlunge"},
+                  "3": {"coil": [9, 1], "name": "SIDE SCOOP", "callback": "bsKicker1.SolOut"},
+                  "7": {"coil": [8, 6], "name": "UP POST", "callback": None}},
+    "pup_stub": True,
+    "neuter": ["BallRelease.CreateBall", "BallRelease.Kick", "PlungerIM.AutoFire"],
+}
+
+
+@pytest.fixture(scope="module")
+def shadow():
+    vs = pytest.importorskip("vpxshadow")
+    text, rep = vs.patch(MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    return text, rep
+
+
+def test_shadow_keeps_the_original_subs_behind_the_bridge(shadow):
+    out, rep = shadow
+    assert "Sub Table1_Init_orig" in out and "\tTable1_Init_orig" in out
+    assert "Sub sw001_Hit_orig" in out
+    assert "Sub sw001_Hit : vpmTimer.PulseSw 1053 : sw001_Hit_orig : End Sub" in out
+    assert "Sub LeftSlingShot_Slingshot : vpmTimer.PulseSw 1069 : LeftSlingShot_Slingshot_orig : End Sub" in out
+    assert "Sub Spinner_Spin : vpmTimer.PulseSw 1083 : End Sub" in out      # no original to call
+    assert "Sub Opto1_Hit : Controller.Switch(1085) = True : End Sub" in out
+    assert "Sub Opto1_UnHit : Controller.Switch(1085) = False : End Sub" in out
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out)), \
+        "every Sub closes once"
+
+
+def test_shadow_neuters_the_tributes_own_balls(shadow):
+    out, rep = shadow
+    assert "'PAD neutered: BallRelease.CreateBall" in out
+    assert "'PAD neutered: BallRelease.Kick 90, 4" in out
+    assert "Sub Drain_Hit_orig : If False Then PlungerIM.AutoFire : End Sub" in out   # one-liner kept whole
+    assert "Sub PadAutoPlunge(e) : If e Then plungerIM.AutoFire : End If : End Sub" in out
+    assert "neutered 3 line(s)" in " ".join(rep)
+    assert "Sub Drain_Hit\n\tbsTrough.AddBall Me" in out
+    assert "bsTrough.InitSw 0,1076,1075,1074,1073,1072,1071,1077" in out
+    assert "bsTrough.InitKick BallRelease, 90, 4" in out
+    assert "bsKicker1.InitSaucer Kicker1, 1078, 190, 15" in out and "bsKicker1.KickZ = 1.4" in out
+    assert "Sub Kicker1_Hit : bsKicker1.AddBall Me" in out and "Sub Kicker1_Hit_orig" in out
+    assert "Sub Trigger1_Hit : Controller.Switch(1067) = True : Trigger1_Hit_orig : End Sub" in out
+    assert "Sub Trigger1_UnHit : Controller.Switch(1067) = False : End Sub" in out
+
+
+def test_shadow_flippers_are_the_machines_coils(shadow):
+    # JP's and drhotwing's tables flip from the keyboard only while THEIR game
+    # is in play, which it never is: the machine's flipper coils call the
+    # table's own flipper subs, and the keys stop reaching the shadow game.
+    out, rep = shadow
+    assert 'SolCallback(sLLFlipper) = "SolLFlipper"' in out
+    assert 'SolCallback(sLRFlipper) = "SolRFlipper"' in out
+    assert "sURFlipper" not in out                          # the table has no such sub
+    assert "Case StartGameKey, AddCreditKey, LockBarKey, LeftFlipperKey, RightFlipperKey" in out
+    assert "If KeyCode = RightFlipperKey Then Controller.Switch(1064) = True" in out
+    assert "If KeyCode = RightFlipperKey Then Controller.Switch(1066) = True" in out
+    assert "If KeyCode = LockBarKey Then Controller.Switch(1034) = True" in out
+    assert "If KeyCode = LockBarKey Then Controller.Switch(1034) = False" in out
+    assert "If KeyCode = AddCreditKey Then vpmTimer.PulseSw 1039" in out
+    assert "Sub Table1_Init_orig" in out and "Table1_KeyDown_orig KeyCode" in out
+    assert 'SolCallback(1) = "bsTrough.SolOut"' in out and "SolCallback(7)" not in out
+    assert "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0" in out
+
+
+def test_shadow_makes_pinup_player_optional(shadow):
+    out, rep = shadow
+    assert "Class PadNoPuP" in out
+    assert "Public Sub B2SInit(a0, a1) : End Sub" in out
+    assert "Public Sub LabelSet(a0, a1, a2, a3, a4) : End Sub" in out
+    i = out.index('CreateObject("PinUpPlayer.PinDisplay")')
+    assert "On Error Resume Next" in out[i - 60:i]
+    assert "Set PuPlayer = New PadNoPuP" in out[i:i + 200]
+
+
+def test_shadow_flipper_subs_are_found_whole_word_only():
+    vs = pytest.importorskip("vpxshadow")
+    lines = ["Sub SolLFlipperX(e)", "  Private Sub SolRFlipper (Enabled) ' x", "Function SolURFlipper()"]
+    assert not vs.has_sub(lines, "SolLFlipper")
+    assert vs.has_sub(lines, "SolRFlipper") and vs.has_sub(lines, "SolURFlipper")
+    had = {"SolRFlipper": True, "SolURFlipper": True}
+    assert vs.flipper_subs({}, had) == {"sLRFlipper": "SolRFlipper", "sURFlipper": "SolURFlipper"}
+    assert vs.flipper_subs({"flippers": {"_": "x", "sLLFlipper": "MyFlipL"}}, had) == {"sLLFlipper": "MyFlipL"}
+
+
+@pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le"])
+def test_shadow_maps_are_consistent(title):
+    vs = pytest.importorskip("vpxshadow")
+    path = os.path.join(VPX, title + ".shadow.json")
+    if not os.path.exists(path):
+        pytest.skip("no map")
+    m = json.load(open(path, encoding="utf-8"))
+    assert m["title"] == title and m["output"].endswith(".vpx")
+    cab = m["cabinet"]
+    ids = [v - 1000 for k, v in cab.items() if isinstance(v, int)]
+    assert all(1 <= i < 1000 for i in ids) and len(set(ids)) == len(ids), "cabinet switches"
+    sw = [s["id"] for k, s in m["switches"].items() if k != "_"]
+    sw += m["trough"]["switches"] + [s["switch"] for k, s in m["saucers"].items() if k != "_"]
+    if m.get("plunger"):
+        sw.append(m["plunger"]["lane_switch"])
+    sw += ids
+    assert len(set(sw)) == len(sw), "a switch id named twice: %s" % sorted(i for i in sw if sw.count(i) > 1)
+    assert all(1 <= i < 1000 for i in sw)
+    assert len(m["trough"]["switches"]) == 7, "TROUGH 1..6 + JAM"
+    nums = [int(n) for n in m["solenoids"] if n != "_"]
+    assert len(set(nums)) == len(nums) and max(nums) <= m.get("solenoid_max", 68)
+    coils = [tuple(s["coil"]) for n, s in m["solenoids"].items() if n != "_"]
+    assert len(set(coils)) == len(coils), "a coil named twice"
+    assert all(8 <= n <= 15 and 0 <= i <= 15 for n, i in coils)
+    g = m["game_on"]
+    assert g["number"] not in nums and g["number"] <= m.get("solenoid_max", 68)
+    assert all(tuple(c) in coils for c in g["coils"]), "game_on names the flipper coils"
+    for ev in (s.get("event", "hit") for k, s in m["switches"].items() if k != "_"):
+        assert ev in ("hit", "hold", "spin", "slingshot")
+    # every coil callback is something the generated script defines
+    extra = m.get("extra_vbs", "")
+    saucers = {k for k in m["saucers"] if k != "_"}
+    for n, s in m["solenoids"].items():
+        cb = s.get("callback") if n != "_" else None
+        if not cb:
+            continue
+        if cb == "bsTrough.SolOut" or cb == "PadAutoPlunge":
+            continue
+        if cb.startswith("bs") and cb.endswith(".SolOut"):
+            assert cb[2:-7] in saucers, cb
+        else:
+            assert re.search(r"(?i)\bSub\s+%s\b" % re.escape(cb), extra), "%s has no Sub" % cb
+    had = {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")}
+    out = vs.gen(m, had)
+    assert "None" not in out and "Sub Table1_Init\n" in out

@@ -1,0 +1,65 @@
+# PAD-786: an option so a final wizard does not end the game
+
+## The ask
+
+Joe_Blasi on Pinside (post #383, then #385): "the wizard modes that END THE GAME, way to turn that off". Asked which
+ones, he pointed at pinballrulesheets.com/other/games-with-lock-point-stealing.html, section "Features That Can End
+Game". Its Spike 2 entries:
+
+| title | what ends the game |
+|---|---|
+| Godzilla (Premium/LE) | King of the Monsters, Monster Island Mayhem (the card's own name: MONSTER ISLAND MADNESS) |
+| James Bond 007 (Premium/LE) | Her Majesty's Secret Service, MI6 Multiball |
+| Jaws | Super Celebration Multiball |
+| John Wick (Premium/LE) | Special Assignment |
+| Jurassic Park (Premium/LE) | Escape Nublar, When Dinosaurs Ruled the Earth |
+| Elvira's House of Horrors | Wild Market Value |
+
+The first answer on this ticket (challenge games are one ball) was the wrong reading: these end a NORMAL game, for
+every player, before their balls are played. None of these cards has an operator adjustment for it (all six
+newest builds' adjustment names checked: only ball save / timer settings, and Godzilla / JP's service-menu test
+settings QUALIFY/LIGHT/START <wizard>).
+
+## The framework, read off Godzilla LE 1.16 (addresses are that build's)
+
+- Bus dispatch `0x3fcdf8(id, arg)`: walks the handler list `*(0x7d671c + 4*id)`, nodes `{fn, u8 prio @+4, next @+8}`;
+  a handler returning 0 stops the walk and the dispatch returns 0. Registration `0x3fcd4c(r0, id, fn, prio)`.
+- End of ball `0x2a7cc8`: dispatch 0x35 (end-of-ball handlers), 0x34 (ball_end), bonus..., then the advance
+  `0x338950`; it returns 0 = game over (`0x2a7bb8`: dispatch 0x47 game_over, status `0x7d116a |= 0x18`), else the
+  next ball (`0x2a76f0`).
+- Advance `0x338950`: a byte flag = 1, dispatch 0x90(&flag) (a handler can clear it), the extra-ball test
+  (`challenge_extra_ball` site `0x2b2cd8`), then next player (`0x713b94` player, `0x713b95` ball, `0x7d116c` player
+  count) or next ball against the balls-per-game getter `0x338820` (AD_BALLS_PER_GAME, id 80); flag 0 or ball past
+  the last = game over; dispatch 0x91 at the end.
+- Other ends: "end this ball now" `0x38af58(a, b)` (`challenge_end_ball` site: status `|= 0x202`), the LEFT+START force
+  end `0x2a80b0` (AD_ALLOW_FORCE_ENDGAME id 91; status = 0x18), called only from the two LEFT+START handlers.
+- Live, on the rig (stock + defaults patched, a game on, ball 1): the handler lists read from guest memory matched the
+  static ones exactly - 0x35: 0x55ba0 0x1aa884 0x3c2084; 0x34: 0xd623c/128 0x3c2024; 0x47: 0x7cd04 0x1d9968 0x3c2144;
+  0x8e: 0x5513c 0x5244f4; **0x90 and 0x91 empty** in normal play. So a wizard that ends the game either registers on
+  0x90 while it runs (read the list again WITH the wizard running), or ends it another way (set the ball past the last,
+  call the game-over path). That is the next thing to find.
+- Rules are C++ objects: `RuleKingOfTheMonsters` vtable 0x645c28 (methods around 0x159d74-0x15a578 and 0x2a1xx stubs).
+
+## Rig recipe (scratch: C:\tmp\PAD-786)
+
+- `dump.py`: each title's game ELF out of its card into `elf/` (AdjustmentTable via explorer.adjustment_table()).
+- A patched ELF (`AdjustmentTable.patched_bytes({...})`, e.g. START_KING_OF_THE_MONSTERS 1, FREE_PLAY 1) booted through
+  `kotm_job.sh`: the card mounted with cardmount.sh, an overlayfs (lower = the card's title dir, upper = our `game`)
+  as `PAD_GAME_DIR` (PAD_CARD unset after job_begin), the slot's `data/nv/<title>` wiped; run through rigbatch as root
+  (`list_gz.txt`). Free play showed, so the patched defaults are read.
+- `gmem.py <slot> handlers <ev..>` / `poll`: guest memory via /proc/<pid>/mem, base from /proc/<pid>/maps (the game
+  file's offset-0 mapping minus 0x8000).
+- Open problems of the rig run: START KING OF THE MONSTERS = On did not start KOTM at the game's start; the ball was
+  never served/launched by `plunge.py plunge` (score 00, BALL 1 to the end, drains drained nothing), and status.sh
+  read "attract" all game long. Next: `plunge.py serve` (or the trough coil) after the start, and look for KOTM
+  after a plunge, a scoop, or with QUALIFY/LIGHT on as well.
+
+## Plan
+
+1. Godzilla LE: get KOTM (or Monster Island Madness) running on the rig, read the 0x90/0x91 lists and poll the
+   ball/player bytes and status while it ends; find the call that ends the game.
+2. The same on the other titles (Bond LE/Pro 1.06, Jaws LE/Pro 1.02, John Wick LE/Pro 1.02, JP LE/Pro 1.16,
+   Elvira 1.13), by the same framework shapes (`adv.py` finds each build's advance function).
+3. A card option (Defaults tab, beside Coin door), offered only on builds where the site is found: "A final wizard
+   does not end the game" - the game plays on to the remaining balls. Patch generically by shape, as coin_door.py.
+4. Prove on the emulator per build: the wizard ends, ball 2 follows; stock still ends the game.

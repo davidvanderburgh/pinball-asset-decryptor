@@ -238,8 +238,10 @@ class Launch:
         # visible (the LCD window) and audible, but NO virtual playfield
         # window: Visual Pinball is the playfield, and the rig's own would
         # take the keyboard from it the moment it opened
+        # ... unless the kit asked for the playfield window (padvpx playfield)
+        playfield = "1" if kit_load().get("playfield") else "0"
         env = ["PAD_SLOT=%d" % self.slot, "PAD_LABEL=%s" % LABEL,
-               "PAD_HIDDEN=0", "PAD_PLAYFIELD=0", "PAD_AUDIO=1", "PAD_CARD=%s" % card]
+               "PAD_HIDDEN=0", "PAD_PLAYFIELD=%s" % playfield, "PAD_AUDIO=1", "PAD_CARD=%s" % card]
         py = win_python()
         if py:
             env.append("PAD_WINPYTHON=%s" % padpath.to_wsl(py))

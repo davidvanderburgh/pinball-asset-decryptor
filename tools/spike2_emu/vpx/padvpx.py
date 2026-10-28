@@ -15,6 +15,10 @@ name the card a title boots, start or stop a run by hand.
         Where the game's LCD window goes when the controller starts a run:
         on top of a full-screen Visual Pinball in the upper middle of the
         main screen (the default), filling screen n, or at a rectangle.
+        Placed once; drag it anywhere after that.
+    padvpx playfield on | monitor <n> | <x> <y> <w> <h> | off
+        The rig's virtual playfield window too (off unless asked), placed
+        the same way.
     padvpx card <title> <image.raw>      record a title's card (or `padvpx card`: list)
     padvpx library <dir>                  a directory of cards: the newest build of a title is its card
     padvpx register | unregister          PAD.Controller in the registry (this Python, this folder)
@@ -208,6 +212,24 @@ def main(argv):
             import padcontroller
             padcontroller.main(["--register"])
         return patch(rest[0], None, rest[1])
+    if cmd == "playfield":
+        # the rig's own virtual playfield window beside Visual Pinball:
+        # `padvpx playfield on` (upper middle), `monitor 2`, `x y w h`, `off`
+        d = padlaunch.kit_load()
+        if rest and rest[0] == "monitor" and len(rest) == 2:
+            d["playfield"] = {"monitor": int(rest[1])}
+        elif len(rest) == 4:
+            d["playfield"] = {"x": int(rest[0]), "y": int(rest[1]), "w": int(rest[2]), "h": int(rest[3])}
+        elif rest and rest[0] == "on":
+            d["playfield"] = {"on": True}
+        elif rest and rest[0] == "off":
+            d.pop("playfield", None)
+        else:
+            print(json.dumps(d.get("playfield", {}), indent=1) or "off")
+            return 0
+        padlaunch.kit_save(d)
+        print("playfield: %s" % json.dumps(d.get("playfield", "off")))
+        return 0
     if cmd == "lcd":
         # where the game's LCD window goes when the controller starts a run:
         # `padvpx lcd top` (on top, upper middle of the main screen),

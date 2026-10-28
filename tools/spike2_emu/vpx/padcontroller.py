@@ -157,10 +157,15 @@ def monitors():
         return []
 
 
-def find_lcd_window():
-    """The started run's LCD window: the one top-level window whose title
-    carries the kit's label and the emulator's name (watch.sh titles it
-    `[rig N: PAD-VPX] <title> - Stern Spike 2 emulator (...)`)."""
+#: how long after a window's first placement a WSLg reset to the top-left
+#: is undone; after that the window is wherever the user put it
+PLACE_S = 15.0
+
+
+def find_kit_window(word):
+    """A started run's window: the top-level window whose title carries the
+    kit's label and `word` (watch.sh titles them `[rig N: PAD-VPX] <title> -
+    Stern Spike 2 emulator (...)` and `... - virtual playfield`)."""
     import ctypes
     u = ctypes.windll.user32
     found = []
@@ -170,11 +175,37 @@ def find_lcd_window():
         if u.IsWindowVisible(h):
             buf = ctypes.create_unicode_buffer(256)
             u.GetWindowTextW(h, buf, 256)
-            if padlaunch.LABEL in buf.value and "emulator" in buf.value:
+            if padlaunch.LABEL in buf.value and word in buf.value:
                 found.append(h)
         return True
     u.EnumWindows(proc(cb), 0)
     return found[0] if found else 0
+
+
+def find_lcd_window():
+    return find_kit_window("emulator")
+
+
+def kit_window_in_front():
+    """Whether the foreground window is one of the kit's run's own."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        fg = u.GetForegroundWindow()
+        if not fg:
+            return False
+        buf = ctypes.create_unicode_buffer(256)
+        u.GetWindowTextW(fg, buf, 256)
+        return padlaunch.LABEL in buf.value
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
+def at_reset_spot(rect):
+    """Where WSLg puts a window back: the screen's top-left corner."""
+    return rect[0] <= 0 and rect[1] <= 0
 
 
 def dpi_aware():
@@ -665,6 +696,12 @@ class Bridge:
         self.paused = bool(want)
         if not self.pipe or not self.rig:
             return
+        if want and kit_window_in_front():
+            # the player clicked the game's own LCD or playfield window (to
+            # move it, to look at it): Visual Pinball pauses, the GAME does
+            # not - freezing it here left the screen dead under the mouse
+            log("pause from the kit's own window in front: the game runs on")
+            return
 
         def rig_flag():
             sw = read_block(self.rig.sw_path(), padsw.OFF_PAUSED + 4)
@@ -721,42 +758,67 @@ class Bridge:
             self.last_poll_ms = (time.monotonic() - t0) * 1000.0
             time.sleep(POLL_S)
 
+    #: the kit's windows a started run opens, by the word in their title,
+    #: and the kit setting that places each
+    WINDOWS = (("lcd", "emulator"), ("playfield", "virtual playfield"))
+
     def _place_lcd(self):
-        """The started run's LCD window (its title carries the PAD-VPX
-        label and the emulator's name) is put where the kit says, ON TOP:
-        Visual Pinball comes up full screen and would cover it. The kit's
-        `lcd` (padvpx lcd) names a monitor to fill, a rectangle, or nothing
-        - then the upper middle of the main screen, 40% of its width in the
-        LCD's 16:9. Once per run; the window is the user's from there."""
+        """The started run's windows (their titles carry the PAD-VPX label:
+        the LCD, `... - Stern Spike 2 emulator`, and the virtual playfield
+        when the kit asked for one) are put where the kit says, the LCD ON
+        TOP: Visual Pinball comes up full screen and would cover it. The
+        kit's `lcd` / `playfield` (padvpx lcd, padvpx playfield) name a
+        monitor to fill, a rectangle, or nothing - then the upper middle of
+        the main screen, 40% of its width in the LCD's 16:9.
+
+        ONCE, AND THEN HANDS OFF. A WSLg window re-places itself at the
+        screen's top-left a few seconds after it opens, undoing a move that
+        read back fine, so for the first PLACE_S seconds a window found back
+        at the top-left is put again; anywhere else it is where the user
+        dragged it, and it stays there. David's first try had the window
+        snapping back under the mouse (2026-10-28)."""
         if sys.platform != "win32":
             self.lcd_placed = True
             return
-        hwnd = find_lcd_window()
-        if not hwnd:
-            return
-        setting = padlaunch.kit_load().get("lcd") or {}
+        kit = padlaunch.kit_load()
         self.lcd_tries = getattr(self, "lcd_tries", 0) + 1
+        if not hasattr(self, "placed_at"):
+            self.placed_at = {}
         try:
             dpi_aware()
-            rect = lcd_rect(setting, monitors())
-            # a WSLg window re-places itself a few seconds after it opens
-            # (its X client is still sizing it), undoing a move that read
-            # back fine a moment earlier: once a second, put it back when it
-            # has drifted, and call it placed only after it has stayed put
-            # for five checks in a row
-            now = window_rect(hwnd)
-            if all(abs(a - b) <= 40 for a, b in zip(now, rect)):
-                self.lcd_stable = getattr(self, "lcd_stable", 0) + 1
-            else:
-                place_window(hwnd, rect, bool(setting.get("topmost", True)))
-                self.lcd_stable = 0
-            if self.lcd_stable >= 5 or self.lcd_tries >= 40:
+            done = True
+            for key, word in self.WINDOWS:
+                setting = kit.get(key) if key == "lcd" else kit.get(key)
+                if key == "playfield" and not setting:
+                    continue                     # no playfield window asked for
+                hwnd = find_kit_window(word)
+                if not hwnd:
+                    done = False if key == "lcd" else done
+                    continue
+                rect = lcd_rect(setting or {}, monitors())
+                if key == "playfield" and not any(k in (setting or {}) for k in ("x", "monitor")):
+                    # no spot asked for: under the LCD, down to the screen's bottom
+                    lx, ly, lw, lh = lcd_rect(kit.get("lcd") or {}, monitors())
+                    mons = monitors() or [(0, 0, 1920, 1080)]
+                    rect = (lx, ly + lh, lw, max(300, mons[0][3] - (ly + lh)))
+                topmost = bool((setting or {}).get("topmost", key == "lcd"))
+                first = self.placed_at.get(key)
+                now = window_rect(hwnd)
+                if first is None:
+                    place_window(hwnd, rect, topmost)
+                    self.placed_at[key] = time.monotonic()
+                    log("%s window placed at %s%s" % (key, rect, ", on top" if topmost else ""))
+                    done = False
+                elif time.monotonic() - first < PLACE_S:
+                    if at_reset_spot(now) and not all(abs(a - b) <= 40 for a, b in zip(now, rect)):
+                        place_window(hwnd, rect, topmost)
+                        log("%s window put back from the top-left (%s)" % (key, now))
+                    done = False
+            if done or self.lcd_tries >= 60:
                 self.lcd_placed = True
-                log("lcd window placed at %s%s (%d checks; it sits at %s)"
-                    % (rect, ", on top" if setting.get("topmost", True) else "",
-                       self.lcd_tries, window_rect(hwnd)))
+                log("windows are the user's from here (%d checks)" % self.lcd_tries)
         except Exception as exc:                            # noqa: BLE001
-            log("lcd window not placed: %s" % exc)
+            log("window placement failed: %s" % exc)
             self.lcd_placed = True
 
     def _keep_player_front(self):

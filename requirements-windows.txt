@@ -33,3 +33,5 @@ imageio-ffmpeg==0.6.0
 sounddevice==0.5.6
 # pywin32: PAD.Controller, the Visual Pinball kit's COM server (tools/spike2_emu/vpx)
 pywin32==312
+# olefile reads a Visual Pinball table (the kit's patcher, tools/spike2_emu/vpx/vpxfile.py)
+olefile==0.47

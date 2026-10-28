@@ -584,3 +584,55 @@ play stays where it is, and the log says the game never plays it.
 groups), where 13 did; idx 205 moves with 949 and 956 (954 left), idx 895 with 962 (978
 left; 281 and 426 join it as a medley through 979). The 3 left, idx 612, 786 and 930, are
 played only by 267, 978 and 969: the game never plays them.
+
+## A music mode's file for a song in parts in a bank (PAD-791)
+
+PAD-608 banked a music mode's file only when every sound id that plays its slot plays it
+alone (or as the song it opens, PAD-511). Iron Maiden plays most songs as intro, song and
+outro sequences and medleys, so 7 of the PAD-777 reporter's 8 "Swapped Songs Version" files
+(slots 150, 178, 492, 575, 618, 623, 880) stayed in `image.bin` and were left out when it
+filled.
+
+**Which files move** (`engine._sound_modes_for_banks`, `bank_build.mode_seq_groups`): a host
+whose sound ids play its slot together with other records is no longer refused for that; its
+sound ids are read through their own end (`engine._wide_descriptors_once`, the same read
+PAD-779's songs use, done once a Write). Each (mode, sound id) is a LINE; hosts one line
+plays (a medley's two songs with files in the same mode: 150 and 618 under 960, 974, 976)
+are one group, placed whole (`soundbank.split_units`). The group's bank gets a COPY of every
+other record its lines play: the game's own decoded off `image.bin`, the user's same-length
+file, or the user's longer replacement at its length (`ModeSeq.grown`; 492's intro 307). A
+line for a file that plays in place of a whole song (PAD-511 `song` / `bodies`) needs none.
+A group moves only when every line's sound id is a plain listed `image.bin` id no mode of the
+Write plays, its script fits `DESC_SLOT_MAX`, and no part is another file's host, a mode's
+own grown sound or a record of several variants; otherwise its files stay in `image.bin`, and
+the log says why.
+
+**In the bank** each file's record and each copy is a record; a line takes its host's own
+fragment when it is the first to open with it, and every other line a fragment past the
+records (`bank_build.mode_seq_fragments`; a copy never gives a line its own fragment, since a
+PAD-779 song in the same bank may share the copy). Each line's descriptor is
+`_mode_descriptor_table`'s for that mode, off the game's own descriptor through its own end
+(`ends=`), every slot of that mode it plays swapped for its file, then every payload pointed
+at the bank's records (`bank_build.seq_descriptor`; a longer copy moves the declared
+duration). A line whose descriptor would name a record outside the bank plays the game's own
+(logged); a fragment no line plays gets a descriptor naming its record. The runtime is
+unchanged: `bsid <mode> <list id> <bank sid>`, one line per (mode, sound id) (`_bank_sid_lines`
+drops the medley's duplicate).
+
+**The game's longer song on the same slot** (the reporter lengthened those songs too): the
+sound ids of a music mode's file used to be kept out of PAD-606/779's banks altogether
+(`exclude_sids`), so those songs stayed in `image.bin`; with the files' banks taking memory
+beside it, a first run of this ticket cut 8 of them (PAD-777 cut 2). Now only the sound ids of a file that stays in
+`image.bin` (and of the files the runtime swaps by key: files in turn of a mode's file, the
+attract flipper sounds, the jukebox) are kept out; a game song on a banked file's sound ids
+goes into a bank of its own, its request lists name its bank id, and the file's `bsid` line
+names that id (`_list_ids`), which the runtime swaps from in the file's mode. If the planner
+then keeps such a file in `image.bin` after all (too big), the song stays with it
+(`_sm_kept_sids`): the runtime plays that file under the game's own id.
+
+**Iron Maiden LE 1.18**, the reporter's shape (17 longer songs, 8 Option B files, 16 GB
+card): all 8 files go into banks (5 groups, 7 of the game's parts copied) where 1 did, and
+his longer songs on those slots into banks of the game's beside them: 16 banks, together at
+most 2,172 MB with image.bin (Stern's largest 2,181 MB); 2 songs trimmed, idx 70 (its part
+91 plays another sound of the Write) and idx 930 (the game never plays it), as PAD-777 also
+trimmed 2.

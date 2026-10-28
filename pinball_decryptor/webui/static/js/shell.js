@@ -1,7 +1,7 @@
 // The frame around every tab: top bar, rail, status bar, log drawer,
 // the manufacturer picker, banners, toasts and the dialog host.
 
-import { html, useEffect, useLayoutEffect, useRef, useState, Icon, Button, Chip, openMenu, cx, fmtClock, tip, Empty, Spinner }
+import { html, useEffect, useLayoutEffect, useRef, useState, Icon, Button, Chip, Check, openMenu, cx, fmtClock, tip, Empty, Spinner }
   from "./core/ui.js";
 import { Component } from "./vendor/preact-htm.js";
 import { useNs, useLog, useConnected, useEvent, state } from "./core/store.js";
@@ -275,7 +275,7 @@ function eraMenu(anchor, shell) {
       disabled: locked, onClick: () => { if (m.key !== mfr.key) call("ui.pick_manufacturer", m.key); } });
   }
   items.push({ sep: true });
-  items.push({ label: "Browse manufacturers and their games…", icon: "home", disabled: locked,
+  items.push({ label: "My machines and manufacturers…", icon: "home", disabled: locked,
     onClick: () => call("ui.back_to_picker") });
   openShellMenu(anchor, items);
 }
@@ -844,6 +844,76 @@ function Toasts({ shell }) {
   </div>`;
 }
 
+// ----------------------------------------------------------- My machines
+// The owner's machines on the picker's home (PAD-783; webui/shellx_machines.py):
+// each one's title, edition, build, card and project, what its card is
+// (stock, a PAD build's revision, modified), and "1.17 is out" with a link to
+// the maker's game-code page once the daily check sees newer code.  The
+// buttons go straight into the working view for that machine.
+const MACH = {
+  intro: "Add the card image each of your machines runs. Its title, build and project show here, and PAD tells you when Stern puts out newer game code for it.",
+  add: "Pick the card image (.raw or .img) of the SD card a machine boots from. PAD reads which game and build it is; nothing on the card changes.",
+  watch: { head: "Check for new game code", lines: ["Once a day PAD reads Stern's public game-code page and shows here when a machine's game has a newer build, with a link to that page.", "Nothing is ever downloaded: you click through to Stern yourself.", "Only while you have a Stern machine here."] },
+  newer: (r) => ({ head: "Stern has " + r.title + " " + r.build_next + " out", lines: ["This machine's card runs " + r.build + ". Click to open Stern's game-code page; nothing is downloaded.", "Once you have the new card image: Transfer Mods carries this project's changes onto it."] }),
+  transfer: { head: "Transfer Mods", lines: ["Opens this machine's project and the Mod Pack tab's transfer, with this project as the one whose mods move.", "Pick the new code's card image there."] },
+  noProject: "No project of this card yet. Extract opens the Extract tab with this card picked; the project you make from it joins this row.",
+};
+
+function MachineRow({ r }) {
+  const more = (e) => openShellMenu(e.currentTarget, [
+    { label: "Show the card image", icon: "folder", disabled: r.card_missing, onClick: () => call("shellx.machines_show_card", r.id) },
+    { label: "Change card…", icon: "sd", onClick: () => call("shellx.machines_rebind", r.id) },
+    { label: "Rename…", icon: "edit", onClick: () => call("shellx.machines_rename", r.id) },
+    { sep: true },
+    { label: "Remove from My machines", icon: "trash", onClick: () => call("shellx.machines_remove", r.id) },
+  ]);
+  const proj = r.project && !r.project_missing;
+  return html`<div class="mach-row">
+    <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="sd" /></span>
+    <div class="stack grow" style="gap:3px;min-width:0">
+      <div class="row wrap" style="gap:4px 10px;align-items:baseline">
+        <span class="t">${r.name}</span>
+        <span class="notr">${r.title}${r.edition ? html` <span class="muted">${r.edition}</span>` : null}</span>
+        ${r.build ? html`<${Chip} kind="info" sm>${r.build}<//>` : null}
+        <${Chip} sm kind=${r.lineage === "Stock" ? "" : "warn"}>${r.lineage}<//>
+        ${r.newer ? html`<button type="button" class="mach-newer" onClick=${() => call("shellx.machines_open_page", r.id)}
+            ...${tip(MACH.newer({ ...r, build_next: r.newer }))}><${Icon} name="star" />${r.newer} is out<${Icon} name="external" /></button>` : null}
+      </div>
+      <div class="muted small mach-sub">
+        <span class=${cx("mono", r.card_missing && "err-ink")} title=${r.card}>${r.card_missing ? "Card image not found: " : ""}${r.card_name}</span>
+        ${r.size ? html` · ${r.size}` : null}
+        ${" · "}${proj ? html`project <b class="mach-proj" title=${r.project}>${r.project_name}</b>${r.more_projects.length ? " +" + r.more_projects.length + " more" : ""}`
+          : r.project_missing ? html`<span class="err-ink">project folder missing: ${r.project_name}</span>` : html`<span ...${tip(MACH.noProject)}>no project yet</span>`}
+      </div>
+    </div>
+    <div class="row mach-acts">
+      ${proj ? html`<${Button} size="sm" icon="folder" onClick=${() => call("shellx.machines_open_project", r.id)}>Open project<//>`
+        : html`<${Button} size="sm" icon="extract" disabled=${r.card_missing} title=${MACH.noProject} onClick=${() => call("shellx.machines_extract", r.id)}>Extract<//>`}
+      <${Button} size="sm" kind=${r.newer && proj ? "primary" : ""} icon="modpack" disabled=${!proj} title=${MACH.transfer} onClick=${() => call("shellx.machines_transfer", r.id)}>Transfer Mods<//>
+      <${Button} size="sm" icon="write" disabled=${!proj} onClick=${() => call("shellx.machines_write", r.id)}>Write<//>
+      <${Button} size="sm" kind="ghost" icon="more" title="More" onClick=${more} />
+    </div>
+  </div>`;
+}
+
+function MyMachines({ running }) {
+  const sx = useNs("shellx");
+  const m = sx.machines || { rows: [] };
+  useEffect(() => { call("shellx.machines_refresh"); }, []);
+  const rows = m.rows || [];
+  return html`<section class="mach">
+    <div class="row wrap" style="align-items:center;gap:8px 16px">
+      <h2 class="h1 grow" style="margin:0;font-size:24px">My machines</h2>
+      ${rows.length ? html`<${Check} checked=${m.watch !== false} title=${MACH.watch} label="Check for new game code once a day"
+        onChange=${(v) => call("shellx.machines_set_watch", v)} />` : null}
+      <${Button} icon="plus" disabled=${running} title=${MACH.add} onClick=${() => call("shellx.machines_add")}>Add machine…<//>
+    </div>
+    ${rows.length ? html`<div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} />`)}</div>
+      ${m.watch_text ? html`<div class="muted small">${m.watch_text}</div>` : null}`
+      : html`<p class="dim" style="margin:0">${MACH.intro}</p>`}
+  </section>`;
+}
+
 // --------------------------------------------------------------- picker
 // The manufacturer picker (gui/picker.py): a letter logo in the maker's
 // colour, the name and its EXTRACT ONLY / BETA badge, the game count and
@@ -853,6 +923,7 @@ function Picker({ shell }) {
   const sx = useNs("shellx");
   const cards = sx.picker && sx.picker.length ? sx.picker : (shell.mfrs || []).map((m) => ({ ...m, stats: "", letter: "", peek: "" }));
   return html`<div class="picker"><div class="inner">
+    <${MyMachines} running=${shell.running} />
     <div class="row" style="align-items:flex-end;gap:16px">
       <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">Choose a manufacturer</h1>
         <p class="dim" style="margin:6px 0 0">Pick the maker of the game you are working on. You can switch at any time from the manufacturer menu in the top bar.</p></div>

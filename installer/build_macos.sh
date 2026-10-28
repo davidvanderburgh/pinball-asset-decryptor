@@ -163,6 +163,10 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.info" \
     --hidden-import "pinball_decryptor.plugins.stern.compare" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_prints" \
+    `# My machines (PAD-783): imported function-locally by webui/shellx_machines.py` \
+    --hidden-import "pinball_decryptor.plugins.stern.machine_info" \
+    --hidden-import "pinball_decryptor.core.machines" \
+    --hidden-import "pinball_decryptor.core.code_watch" \
     --hidden-import "pinball_decryptor.plugins.stern.multiimage" \
     --hidden-import "pinball_decryptor.plugins.stern.card_size" \
     --hidden-import "pinball_decryptor.plugins.stern.bank_build" \
@@ -217,6 +221,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.clip_variants" \
     --hidden-import "pinball_decryptor.plugins.stern.sound_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.jukebox" \
+    --hidden-import "pinball_decryptor.plugins.stern.attract_items" \
+    --hidden-import "pinball_decryptor.plugins.stern.portattract" \
     --hidden-import "pinball_decryptor.plugins.stern.media_share" \
     --hidden-import "pinball_decryptor.plugins.stern.menu_settings" \
     --hidden-import "pinball_decryptor.plugins.stern.picture_settings" \

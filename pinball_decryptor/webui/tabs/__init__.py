@@ -31,6 +31,8 @@ TABS = (
     ("modes", "modes", "Modes", "Modes", "Make", "modes"),
     ("defaults", "defaults", "Default Settings", "Defaults", "Make",
      "defaults"),
+    # PAD-782: the attract mode editor (Stern Spike 2)
+    ("attract", "attract", "Attract", "Attract", "Make", "film"),
     ("write", "write", "Write", "Write", "Build", "write"),
     ("multiboot", "multiboot", "Multi-boot", "Multi-boot", "Build",
      "multiboot"),

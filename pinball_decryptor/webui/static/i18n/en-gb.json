@@ -300,6 +300,7 @@
 "Pending (color profile)": "Pending (colour profile)",
 "Pending (score colors)": "Pending (score colours)",
 "Pending (text color)": "Pending (text colour)",
+"Photos and clips are made into the game's clip format when the card is built, with your color profile, and carried in mod packs and Move Your Mods like your other files.": "Photos and clips are made into the game's clip format when the card is built, with your colour profile, and carried in mod packs and Move Your Mods like your other files.",
 "Pick No change and build again for the game's own colors.": "Pick No change and build again for the game's own colours.",
 "Pick or type an exact color (#RRGGBB) instead of using the wheel.": "Pick or type an exact colour (#RRGGBB) instead of using the wheel.",
 "Pick two project folders — two versions of a mod, or a mod against the stock extract — and see what changed from A to B: sounds, videos, images and the other files, compared as they are in the folders now, plus the Replace tabs' per-file settings (a sound's Level, a clip's length, the color profile ticks), which a build uses but no file holds. Double-click a listed file to open it.": "Pick two project folders — two versions of a mod, or a mod against the stock extract — and see what changed from A to B: sounds, videos, images and the other files, compared as they are in the folders now, plus the Replace tabs' per-file settings (a sound's Level, a clip's length, the colour profile ticks), which a build uses but no file holds. Double-click a listed file to open it.",

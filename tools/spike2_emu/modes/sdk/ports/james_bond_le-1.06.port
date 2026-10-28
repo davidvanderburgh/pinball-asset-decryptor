@@ -1032,3 +1032,20 @@ text  done_name_10                 Wizard Mode Multiball
 value done_flag_10                 136
 text  done_name_11                 Wizard Mode Level 2
 value done_flag_11                 174
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x007a6864
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       40
+site  attract_sleep       0x002fc42c 0xe3063df8 0xe3403082
+# PAD-782: the attract video element its pages play their clips through (an item plays the same way)
+data  attract_video       0x00818c80
+site  attract_video_play    0x001ce69c 0xe52de004 0xe24dd00c
+site  attract_video_playing 0x001ce680 0xe92d4008 0xe5900008
+site  attract_video_update  0x001ce788 0xe5900000 0xea0664b1
+site  attract_video_draw    0x001ce790 0xe5900000 0xe3a01003
+site  attract_video_yield   0x002fd144 0xe3063df8 0xe3403082
+text  attract_video_clip  Attract_BondIntro_LogoOnly
+# PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with
+site  attract_show        0x00367a84 0xe92d4070 0xe3064dfc

@@ -894,3 +894,12 @@ value mode_starts_at         0x5c
 site  mode_started           0x00140b78 0xe3510021 0xe92d4008
 data  mode_manager           0x008a05d0
 value mode_id_at             4
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x00810928
+value attract_entry_size  16
+value attract_page_at     4
+value attract_count       73
+site  attract_sleep       0x0051f15c 0xe30b3c88 0xe340308e
+# PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with
+site  attract_show        0x00517630 0xe92d4070 0xe30b4c8c

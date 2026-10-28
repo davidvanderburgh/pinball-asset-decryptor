@@ -587,6 +587,8 @@ class ModePlan:
     sounds_file: str = ""
     #: PAD-537: ``picture.cfg`` beside the mode files, the picture settings ("" = none)
     picture_file: str = ""
+    #: PAD-782: ``attract.cfg`` beside the mode files, the owner's attract items ("" = none)
+    attract_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -800,7 +802,8 @@ def mode_file_text(project, slug, spec, own_sounds):
 def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
          log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"", stock_select=b"",
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
-         sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None):
+         sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
+         attract=False, attract_prof=None, find_scene=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -821,12 +824,17 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     its own, for *sound_modes_prof*.
 
     PAD-537: *picture* is the picture settings' ``picture.cfg`` the engine wrote, put beside the
-    mode files; with nothing else it is a plan of its own, for *picture_prof*."""
+    mode files; with nothing else it is a plan of its own, for *picture_prof*.
+
+    PAD-782: *attract* adds the project's attract items (:mod:`.attract_items`) to the same bank, and
+    ``attract.cfg`` beside the mode files; with nothing else it is a plan of its own, for
+    *attract_prof*."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
     code = code_mode_list(project) if modes_on else []   # the code modes' own assets travel too
     if not modes and not code:
+        result = None
         if variants:
             result = variants_plan(project, stock_bank, game_elf, scratch, variants_prof, log=log,
                                    progress=progress, cancel=cancel, read_card=read_card,
@@ -834,15 +842,19 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
             if result is not None:
                 result.sounds_file = sound_modes or ""
                 result.picture_file = picture or ""
-                return result
-        if sound_modes:
+        if result is None and sound_modes:
             result = sound_modes_plan(project, game_elf, sound_modes_prof or variants_prof,
                                       sound_modes)
             result.picture_file = picture or ""
-            return result
-        if picture:
-            return picture_plan(project, game_elf, picture_prof or variants_prof, picture)
-        return None
+        if result is None and picture:
+            result = picture_plan(project, game_elf, picture_prof or variants_prof, picture)
+        if attract:                                  # PAD-782: the attract items, alone or with the above
+            if result is None:
+                result = attract_plan(project, game_elf,
+                                      attract_prof or variants_prof or sound_modes_prof or picture_prof)
+            attract_into(project, result, stock_bank, os.path.join(scratch, "tree"), log=log,
+                         progress=progress, cancel=cancel, read_card=read_card, find_scene=find_scene)
+        return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
         raise ModeWriteError("every mode on a card must be for the same game")
@@ -916,8 +928,80 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     if variants:
         variants_into(project, result, stock_bank, tree, only=False, log=log, progress=progress,
                       cancel=cancel, read_card=read_card, scan_card=scan_card)
+    if attract:                                      # PAD-782: onto the bank as the modes left it
+        attract_into(project, result, stock_bank, tree, log=log, progress=progress, cancel=cancel,
+                     read_card=read_card, find_scene=find_scene)
     result.sounds_file = sound_modes or ""
     result.picture_file = picture or ""
+    return result
+
+
+# ---- PAD-782: the owner's attract items -----------------------------------------------------------
+def attract_plan(project, game_elf, prof):
+    """A plan carrying only the attract items: the runtime, the title's port and ``attract.cfg`` on p2,
+    the items' clips in the bank (:func:`attract_into`)."""
+    from . import attract_items as AI
+    why = AI.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to add to the "
+                             "attract mode of" % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def attract_into(project, result, stock_bank, tree, log=None, progress=None, cancel=None, read_card=None,
+                 find_scene=None):
+    """Add the project's attract items to *result*: each a new clip in the bank scene the build has so
+    far (the modes' and random clips' own, or the stock one), the bank a rewritten file, ``attract.cfg``
+    for p2."""
+    from . import attract_items as AI
+    from . import clip_variants as CV
+    prof = result.profile
+    bank_card = CV.bank_scene(prof)
+    bank_src = ""
+    for card, src in result.replaced:
+        if card == bank_card:
+            bank_src = src
+    if bank_src:
+        with open(bank_src, "rb") as f:
+            bank = f.read()
+    else:
+        bank = stock_bank
+    if not bank:
+        raise ModeWriteError("the card's video bank (%s) was not read" % bank_card)
+    srcs = dict(result.replaced)
+
+    def read_scene(sc):
+        """a scene as the build has it so far: rewritten already, or the card's own"""
+        if sc in srcs:
+            with open(srcs[sc], "rb") as f:
+                return f.read()
+        return read_card(sc) if read_card is not None else None
+    try:
+        ab = AI.build(project, prof, bank, os.path.join(tree, "attract"), log=log, progress=progress,
+                      cancel=cancel, read_card=read_scene, find_scene=find_scene)
+    except AI.AttractError as e:
+        raise ModeWriteError("attract items: %s" % e) from None
+    if ab is None:
+        return result
+    scene = ab.scene or bank_card
+    if scene != bank_card:                       # clip v2: the attract video element's own scene
+        bank_src = srcs.get(scene, "")
+        bank = None
+    if ab.bank != bank:
+        if not bank_src:
+            bank_src = os.path.join(tree, "attract", *scene.split("/"))
+            os.makedirs(os.path.dirname(bank_src), exist_ok=True)
+            result.replaced.append((scene, bank_src))
+        with open(bank_src, "wb") as f:
+            f.write(ab.bank)
+    result.new.extend(ab.new)
+    result.attract_file = ab.cfg
+    result.lines += ["attract items: %s" % line for line in ab.lines]
+    result.lines.append("attract items: %s" % AI.INSIDER_WORDS.rstrip("."))
     return result
 
 
@@ -1445,6 +1529,11 @@ def p2_payload(result, out_dir, project=None):
             from . import picture_settings as PS
             dst = os.path.join(out_dir, PS.CFG_NAME)
             shutil.copyfile(result.picture_file, dst)
+            extras.append(dst)
+        if getattr(result, "attract_file", ""):        # PAD-782: attract.cfg, the attract items
+            from . import attract_items as AI
+            dst = os.path.join(out_dir, AI.CFG_NAME)
+            shutil.copyfile(result.attract_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

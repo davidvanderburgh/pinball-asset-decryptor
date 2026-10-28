@@ -2402,6 +2402,23 @@ static void *scene(const char *which)
     return player ? *(void **)((char *)player + at) : 0;
 }
 
+/* PAD-782: the scene PLAYER of a scene (what scene() reads the scene out of), or 0 */
+static void *scene_player_of(const char *which)
+{
+    const char *id = pm_scene_id(which);
+    unsigned str;
+    void *res, *manager;
+    if (!id) id = which;
+    if (!id || !*id) return 0;
+    manager = *(void **)(unsigned long)data("resource_manager");
+    if (!manager) return 0;
+    str = std_string(id);
+    res = ((void *(*)(void *, unsigned *, unsigned))(unsigned long)fn("resource_get"))(manager, &str, 0u);
+    if (!res) return 0;
+    return ((void *(*)(void *, unsigned, unsigned, int))(unsigned long)fn("dynamic_cast"))
+           (res, data("typeinfo_resource"), data("typeinfo_scene_player"), 0);
+}
+
 static void *find_with(unsigned finder, const char *where, const char *path)
 {
     unsigned str, out[2] = { 0, 0 };
@@ -3098,6 +3115,7 @@ static unsigned long frame_minute;
 static void clip_frames_said(void);
 
 static void gw_tick(void);
+static void ait_tick(void);                   /* PAD-782 */
 static void clip_tick(void)
 {
     void *player, *surface, *display;
@@ -9718,6 +9736,7 @@ static void on_tick(unsigned *r)
     wizards_tick();                           /* PAD-436: a mini-wizard's refused start, kept lit */
     launch_tick();                            /* PAD-643: a mode's challenge ball launched for the player */
     chg_pages_tick();                         /* PAD-663: a champion page cut short gives its entry back */
+    ait_tick();                               /* PAD-782: the owner's attract items */
     if (chg_end_owed && pm_ms() - chg_end_owed_ms > 1000) chg_end_ball_now("the tick");   /* PAD-663: no bus call came */
     shield_tick();                            /* PAD-392: kept, or a put-back owed */
     shake_tick();                             /* PAD-414: a game shake's later steps, and the stop at an end */
@@ -12541,6 +12560,7 @@ static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
  * at a yield, when it is already back. The game's own pages and their order are unchanged; the modes' follow its
  * last challenge champion's, and only while the game shows its champions at all (the same adjustment). */
 #define CHG_PAGES_MAX 8
+static int ait_champions_off;                     /* PAD-782: attract.cfg "champions off" */
 static void (*chg_page_game)(void);
 static const char *(*chg_page_text_game)(unsigned, unsigned, unsigned, unsigned);
 static unsigned *volatile chg_page_ent;           /* the entry pointed at a mode's record, until the page's first yield */
@@ -12627,6 +12647,7 @@ static void chg_page_wrap(void)
     long n;
     int i, k;
     chg_page_game();                                             /* the game's own page, as it was */
+    if (ait_champions_off) return;                               /* PAD-782: the owner switched them off */
     n = pm_read_file(CHG_SCORES, b, sizeof b);
     if (n <= 0) return;
     k = chg_page_names(names, CHG_PAGES_MAX);
@@ -12794,6 +12815,7 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
     }
     /* a category's first entry only (the GRAND CHAMPION's page, not HIGH SCORE #1's: Avengers calls one page per entry),
      * never while the end-of-game high scores run (a page function the game's end calls: the attract mode's only) */
+    if (ait_champions_off) return ret;                           /* PAD-782: the owner switched them off */
     if (pm_in_game() || chg_scores_running || (k != CHG_LIST_PAGE && chg_pages_n != 0)
         || !chg_pages_follow(cat, chg_pages_count, &chg_pages_first)) return ret;
     n = pm_read_file(CHG_SCORES, b, sizeof b);
@@ -12943,6 +12965,306 @@ static void chg_scores_arm(void)
     say("challenge scores: a mode's challenge game keeps its own high score (%s)", CHG_SCORES);
     chg_page_arm();                                              /* PAD-660 */
     chg_pages_arm();                                             /* PAD-663 */
+}
+
+/* ---- PAD-782: the owner's attract items between the game's own attract pages ------------------------------------
+ * The attract mode is one process walking a table of pages (portattract.py): each entry a test (shown this time
+ * round?) and a page the sequencer starts as a child process and waits for, one at a time; the flipper buttons step
+ * back and on through the table by ending the page. An item of the owner's - a clip in the video bank: a video, or a
+ * photo or a text card the card build made into one - goes between two pages by pointing ONE entry's page at a page
+ * of ours (ait_page_<k>): the game's page runs as it was, then, in the same process, each item after it plays while
+ * the process sleeps a frame at a time (the game's own process sleep, `site attract_sleep`), so the sequencer waits
+ * for it as for any page and the game's next page comes after. Items "before" an entry play first. The table keeps its
+ * size and every other entry; a test that says no skips the game's page and its items with it.
+ * The page process only asks; the tick starts our clip full screen (pm_clip) and stops it when the item's time is up,
+ * or when the page process is gone (a flipper, a game start): the process stops beating. Our content yields to the
+ * game: nothing plays in a game (PAD-353), while the end-of-game high scores run, or after the process is ended.
+ * attract.cfg (beside the runtime, or /dump for a rig):
+ *   item  <entry> after|before <clip> <ms>    up to AIT_ITEMS, in the order they play
+ *   champions off                             the modes' challenge champions (PAD-660/663) are not shown in attract
+ * Port lines: data attract_table, value attract_entry_size / attract_page_at / attract_count, site attract_sleep. */
+#define AIT_ITEMS    48
+#define AIT_ANCHORS  16
+#define AIT_BEAT_MS  600                   /* the page process slept no frame for this long: it is gone */
+static const char *const AIT_FILES[] = { "/usr/local/padmode/attract.cfg", "/dump/attract.cfg" };
+struct ait_item { unsigned entry, ms; unsigned char after, anchor; char clip[64]; };
+static struct ait_item ait_items[AIT_ITEMS];
+static unsigned ait_n, ait_anchors, ait_bad, ait_said;
+static unsigned ait_anchor_entry[AIT_ANCHORS];
+typedef unsigned (*ait_page_fn)(unsigned, unsigned, unsigned, unsigned);
+static ait_page_fn ait_game_page[AIT_ANCHORS];
+static unsigned (*ait_game_test[AIT_ANCHORS])(unsigned, unsigned, unsigned, unsigned);
+static volatile unsigned char ait_game_says[AIT_ANCHORS];   /* the game's own test said its page shows this time */
+static unsigned long ait_on_ms;
+static void (*ait_sleep)(unsigned);
+static volatile int ait_want = -1;          /* the item the page process waits on, -1: none */
+static volatile unsigned long ait_beat, ait_began;
+static int ait_on = -1;                     /* the item whose clip the tick put up */
+/* clip v2 (James Bond LE 1.06): the bank's surface is drawn only by the main-play screen, never in attract. There the
+ * attract pages play their clips through an ELEMENT of their own (`data attract_video`: the pointer to it) - play by
+ * name, then update, draw and the frame yield while it plays - and an item plays the same way from its page, its clip
+ * in that element's scene (the card build put it there). 0: the pm_clip route. */
+static void *(*ait_video_ptr);
+static int ait_video;
+/* clip v2 without that element (Aerosmith 1.16 and the other titles whose clips play on the video bank's surface): the
+ * attract mode never draws the bank's scene - the game's own clip pages put it on the glass themselves, every frame
+ * advancing its player and showing it (Aerosmith's OilProjectorLoop page 0x286a4: player_advance, scene_show(player, 3),
+ * the frame yield). An item does the same from its page while its clip plays on the bank's surface. */
+static int ait_show;
+static unsigned ait_show_fn;                /* `site attract_show` (portattract.show_lines), else the port's scene_show */
+
+static void ait_line(char *s)
+{
+    char *f[6];
+    int n = 0, ok;
+    const char *p;
+    struct ait_item *it;
+    unsigned k;
+    while (n < 6) {
+        while (*s == ' ' || *s == '\t') s++;
+        if (!*s) break;
+        f[n++] = s;
+        while (*s && *s != ' ' && *s != '\t') s++;
+        if (*s) *s++ = 0;
+    }
+    if (n >= 2 && str_eq(f[0], "champions")) { ait_champions_off = str_eq(f[1], "off"); return; }
+    if (n < 5 || !str_eq(f[0], "item")) return;
+    if (ait_n >= AIT_ITEMS) { ait_bad++; return; }
+    it = &ait_items[ait_n];
+    p = f[1];
+    it->entry = (unsigned)number(&p, &ok);
+    if (!ok) { ait_bad++; return; }
+    it->after = !str_eq(f[2], "before");
+    for (k = 0; f[3][k] && k + 1 < sizeof it->clip; k++) it->clip[k] = f[3][k];
+    it->clip[k] = 0;
+    p = f[4];
+    it->ms = (unsigned)number(&p, &ok);
+    if (!ok || !it->ms || !k) { ait_bad++; return; }
+    if (it->ms > 120000) it->ms = 120000;
+    ait_n++;
+}
+
+/* in the page process, the attract video element's way (clip v2): play, then update, draw and yield a frame while the
+ * clip plays, until the item's time is up or a game begins */
+static void ait_play_video(const struct ait_item *it)
+{
+    void *el = *ait_video_ptr;
+    unsigned str;
+    if (!el) return;
+    str = std_string(it->clip);
+    ((void (*)(void *, unsigned *, int, int))(unsigned long)fn("attract_video_play"))(el, &str, 0, 1);
+    while (pm_ms() - ait_began < it->ms && !pm_in_game()
+           && ((int (*)(void *))(unsigned long)fn("attract_video_playing"))(el)) {
+        ait_beat = pm_ms();
+        ((void (*)(void *))(unsigned long)fn("attract_video_update"))(el);
+        ((void (*)(void *))(unsigned long)fn("attract_video_draw"))(el);
+        ((void (*)(void))(unsigned long)fn("attract_video_yield"))();
+    }
+}
+
+/* in the page process: item i, until its time is up, the process is ended under us or a game begins */
+static void ait_play(unsigned i)
+{
+    const struct ait_item *it = &ait_items[i];
+    if (pm_in_game() || chg_scores_running) return;
+    ait_began = ait_beat = pm_ms();
+    ait_want = (int)i;
+    if (ait_video) {
+        ait_play_video(it);
+    } else {
+        unsigned long last = pm_ms();
+        long layer = pm_port_value("attract_show_layer", 3);
+        while (pm_ms() - ait_began < it->ms && !pm_in_game()) {
+            ait_beat = pm_ms();
+            if (ait_show && ait_on == (int)i) {           /* the tick has put the clip on the bank's surface */
+                void *pl = scene_player_of("video_bank");
+                unsigned long now = pm_ms();
+                if (pl) {
+                    ((void (*)(void *, float))(unsigned long)fn("player_advance"))(pl, (float)(now - last));
+                    ((void (*)(void *, int))(unsigned long)ait_show_fn)(pl, (int)layer);
+                }
+                last = now;
+            }
+            ait_sleep(1);
+        }
+    }
+    ait_want = -1;
+}
+
+static unsigned ait_page_run(unsigned a, unsigned a0, unsigned a1, unsigned a2, unsigned a3)
+{
+    unsigned i, r;
+    for (i = 0; i < ait_n; i++) if (ait_items[i].anchor == a && !ait_items[i].after) ait_play(i);
+    r = ait_game_says[a] ? ait_game_page[a](a0, a1, a2, a3) : 0;   /* the game's own page, as it was */
+    ait_game_says[a] = 1;
+    for (i = 0; i < ait_n; i++) if (ait_items[i].anchor == a && ait_items[i].after) ait_play(i);
+    return r;
+}
+
+/* an entry with items whose own test says no this time round (Godzilla's last-game score page before any game) still
+ * shows its items: the test is ours too, says yes, and the page runs the game's own only when the game's test did */
+static unsigned ait_test_run(unsigned a, unsigned a0, unsigned a1, unsigned a2, unsigned a3)
+{
+    ait_game_says[a] = ait_game_test[a](a0, a1, a2, a3) != 0;
+    return 1;
+}
+
+#define AIT_PAGE(k) static unsigned ait_page_##k(unsigned a0, unsigned a1, unsigned a2, unsigned a3) \
+    { return ait_page_run(k, a0, a1, a2, a3); } \
+    static unsigned ait_test_##k(unsigned a0, unsigned a1, unsigned a2, unsigned a3) \
+    { return ait_test_run(k, a0, a1, a2, a3); }
+AIT_PAGE(0) AIT_PAGE(1) AIT_PAGE(2) AIT_PAGE(3) AIT_PAGE(4) AIT_PAGE(5) AIT_PAGE(6) AIT_PAGE(7)
+AIT_PAGE(8) AIT_PAGE(9) AIT_PAGE(10) AIT_PAGE(11) AIT_PAGE(12) AIT_PAGE(13) AIT_PAGE(14) AIT_PAGE(15)
+static void *const ait_pages[AIT_ANCHORS] = {
+    (void *)ait_page_0, (void *)ait_page_1, (void *)ait_page_2, (void *)ait_page_3, (void *)ait_page_4,
+    (void *)ait_page_5, (void *)ait_page_6, (void *)ait_page_7, (void *)ait_page_8, (void *)ait_page_9,
+    (void *)ait_page_10, (void *)ait_page_11, (void *)ait_page_12, (void *)ait_page_13, (void *)ait_page_14,
+    (void *)ait_page_15,
+};
+static void *const ait_tests[AIT_ANCHORS] = {
+    (void *)ait_test_0, (void *)ait_test_1, (void *)ait_test_2, (void *)ait_test_3, (void *)ait_test_4,
+    (void *)ait_test_5, (void *)ait_test_6, (void *)ait_test_7, (void *)ait_test_8, (void *)ait_test_9,
+    (void *)ait_test_10, (void *)ait_test_11, (void *)ait_test_12, (void *)ait_test_13, (void *)ait_test_14,
+    (void *)ait_test_15,
+};
+
+/* the tick: the item the page process waits on is put up, and taken down when it is over or the process is gone */
+static void ait_tick(void)
+{
+    int want = ait_want;
+    unsigned long now = pm_ms();
+    if (!ait_n) return;
+    if (ait_on >= 0 && (want != ait_on || now - ait_beat > AIT_BEAT_MS || pm_in_game())) {
+        if (!ait_video) pm_clip_stop();         /* the element's clip is the game's to stop, as its own pages' are */
+        if (ait_said < 400) {
+            ait_said++;
+            say("attract items: item %d (\"%s\") %s after %lu ms", ait_on + 1, ait_items[ait_on].clip,
+                pm_in_game() ? "ends - a game began" : want == ait_on ? "ends - its page was ended (a flipper, or the game restarted its attract)"
+                : "is over", now - ait_on_ms);
+        }
+        ait_on = -1;
+    }
+    if (want >= 0 && ait_on < 0 && now - ait_beat <= AIT_BEAT_MS && !pm_in_game()) {
+        int ok = ait_video ? 1 : pm_clip(ait_items[want].clip);
+        ait_on = want;
+        ait_on_ms = now;
+        if (ait_said < 400) {
+            ait_said++;
+            say("attract items: item %d (\"%s\", %u ms) %s entry %u's page%s", want + 1, ait_items[want].clip,
+                ait_items[want].ms, ait_items[want].after ? "after" : "before", ait_items[want].entry,
+                ok ? "" : " - the clip could not be played");
+        }
+    }
+}
+
+/* attract.cfg asks something of the attract mode (an item, or the champions off): the card then takes the runtime's
+ * whole gate even when its other files say "only" (a card of random clips, music modes or picture settings and attract
+ * items) - an attract item is put in the way a mode's champion is, with the same Insider Connected gate */
+static int str_starts(const char *s, const char *prefix);
+static int attract_wanted(void)
+{
+    static char raw[8192];
+    long n = -1, i;
+    unsigned k;
+    for (k = 0; k < sizeof AIT_FILES / sizeof AIT_FILES[0] && n < 0; k++)
+        n = pm_read_file(AIT_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return 0;
+    raw[n] = 0;
+    for (i = 0; i < n; i++)
+        if ((!i || raw[i - 1] == '\n') && (str_starts(raw + i, "item ") || str_starts(raw + i, "champions off")))
+            return 1;
+    return 0;
+}
+
+static void attract_arm(void)
+{
+    static char raw[8192];
+    long n = -1, i, start = 0;
+    unsigned k, table, size, at, count;
+    for (k = 0; k < sizeof AIT_FILES / sizeof AIT_FILES[0] && n < 0; k++)
+        n = pm_read_file(AIT_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i <= n; i++)
+        if (i == n || raw[i] == '\n' || raw[i] == '\r') {
+            raw[i] = 0;
+            ait_line(raw + start);
+            start = i + 1;
+        }
+    if (ait_bad) say("attract items: %u line(s) of attract.cfg not read", ait_bad);
+    if (ait_champions_off) say("attract items: the modes' challenge champions are not shown in attract (attract.cfg)");
+    if (!ait_n) return;
+    {   /* clip v2: the attract video element, when the port names it */
+        static const char *const v_s[] = { "attract_video_play", "attract_video_playing", "attract_video_update",
+                                           "attract_video_draw", "attract_video_yield", 0 };
+        unsigned at = data("attract_video");
+        if (at && have_sites(v_s) && maps_has(at, 4, MAP_R)) {
+            for (k = 0; v_s[k] && fn(v_s[k]); k++) ;
+            if (!v_s[k]) {
+                ait_video_ptr = (void **)(unsigned long)at;
+                ait_video = 1;
+            }
+        }
+    }
+    /* the scene show: clip v2 titles, and the clip call's titles whose full-screen clip is not drawn at the frame
+     * hand-over (Godzilla's is, and needs nothing more) */
+    ait_show_fn = fn("attract_show") ? fn("attract_show") : fn("scene_show");
+    if (!ait_video && !clip_layer && !frame_hooked && ait_show_fn && fn("player_advance") && pm_scene_id("video_bank"))
+        ait_show = 1;
+    if (!ait_video && !(can & PM_CAN_CLIPS)) {
+        say("attract items: off - this build has no full-screen clip route");
+        ait_n = 0;
+        return;
+    }
+    table = data("attract_table");
+    size = (unsigned)pm_port_value("attract_entry_size", 0);
+    at = (unsigned)pm_port_value("attract_page_at", 4);
+    count = (unsigned)pm_port_value("attract_count", 0);
+    ait_sleep = (void (*)(unsigned))(unsigned long)fn("attract_sleep");
+    if (!table || (size != 8 && size != 12 && size != 16) || at + 4 > size || !count || count > 256 || !ait_sleep
+        || !maps_has(table, size * count, MAP_R)) {
+        say("attract items: off - the port has no attract page table this runtime can use");
+        ait_n = 0;
+        return;
+    }
+    for (i = 0; i < (long)ait_n; i++) {
+        struct ait_item *it = &ait_items[i];
+        unsigned a, *slot, page;
+        if (it->entry >= count) {
+            say("attract items: item %ld names entry %u, past the game's %u - not shown", i + 1, it->entry, count);
+            it->anchor = 0xFF;
+            continue;
+        }
+        for (a = 0; a < ait_anchors && ait_anchor_entry[a] != it->entry; a++) ;
+        if (a == ait_anchors) {
+            slot = (unsigned *)(unsigned long)(table + size * it->entry + at);
+            page = *slot;
+            if (a >= AIT_ANCHORS || !page || !maps_has(page, 4, MAP_R | MAP_X | MAP_GAME)) {
+                say("attract items: entry %u's page cannot take items (%s) - item %ld not shown", it->entry,
+                    a >= AIT_ANCHORS ? "too many pages with items" : "no page of the game's there", i + 1);
+                it->anchor = 0xFF;
+                continue;
+            }
+            ait_anchor_entry[a] = it->entry;
+            ait_game_page[a] = (ait_page_fn)(unsigned long)page;
+            ait_game_says[a] = 1;
+            {   /* the entry's test, at its start (0: always shown) */
+                unsigned *test = (unsigned *)(unsigned long)(table + size * it->entry);
+                if (*test && maps_has(*test, 4, MAP_R | MAP_X | MAP_GAME)) {
+                    ait_game_test[a] = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)*test;
+                    *(volatile unsigned *)test = (unsigned)(unsigned long)ait_tests[a];
+                }
+            }
+            *(volatile unsigned *)slot = (unsigned)(unsigned long)ait_pages[a];
+            ait_anchors++;
+        }
+        it->anchor = (unsigned char)a;
+    }
+    say("attract items: %u item(s) between the game's attract pages (table 0x%08x, %u entries of %u bytes, %u page(s) "
+        "taking items; the process sleep 0x%08x); played %s", ait_n, table, count, size, ait_anchors,
+        (unsigned)(unsigned long)ait_sleep, ait_video ? "through the attract video element (its pages' own way)"
+        : ait_show ? "on the video bank's surface, its scene shown by the page as the game's own clip pages do"
+        : "full screen (the clip route)");
 }
 
 /* ---- round 2: the game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract; Bond LE/Pro 1.06)
@@ -16397,7 +16719,7 @@ static void pad_mode_start(void)
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
     sndm_arm();                               /* PAD-494: nor does a music mode */
     pic_arm();                                /* PAD-537: nor do the picture settings */
-    if (clipv_only || sndm_only || pic_only) {
+    if ((clipv_only || sndm_only || pic_only) && !attract_wanted()) {   /* PAD-782: attract items take the whole gate */
         say("armed: %s%s%s only (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
             clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : "picture.cfg");
@@ -16520,6 +16842,7 @@ static void pad_mode_start(void)
     shows_arm();                                    /* PAD-411: the game's own light shows */
     wizards_arm();                                  /* PAD-436: the game's own mini-wizards */
     challenges_arm();                               /* PAD-615: the game's Challenge list */
+    attract_arm();                                  /* PAD-782: the owner's attract items */
     if (pm_hit_sounds()) {                          /* PAD-415: the game's own hit sounds */
         char key[20];
         pm_snprintf(key, sizeof key, "hit_sound_%d", pm_hit_sounds());

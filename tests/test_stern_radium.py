@@ -351,3 +351,86 @@ def test_replace_finds_a_line_broken_original_flattened_in_the_manifest(tmp_path
     assert n == 1 and len(writes) == 2
     dts = radium.display_texts(_apply(buf, writes))
     assert [e["text"] for e in dts] == ["JET JAGUAR\nVS. OMEGA"] * 2
+
+
+# --------------------------------------------------------------------------
+# PAD-795: the anchored find_strings returns exactly what the byte-at-a-time
+# scan did
+# --------------------------------------------------------------------------
+def _find_strings_per_byte(data):
+    """find_strings as it was before PAD-795: every offset tried in turn."""
+    n = len(data)
+    out = []
+    i = 0
+    while i + 8 <= n:
+        ln = struct.unpack_from("<Q", data, i)[0]
+        if 1 <= ln <= radium.MAXLEN and i + 8 + ln <= n:
+            body = data[i + 8:i + 8 + ln]
+            if all(32 <= b < 127 or b in (9, 10, 13) for b in body):
+                out.append((i, i + 8, ln, body))
+                i += 8 + ln
+                continue
+        i += 1
+    return out
+
+
+def _lp(text, ln=None):
+    body = text if isinstance(text, bytes) else text.encode("latin1")
+    return struct.pack("<Q", len(body) if ln is None else ln) + body
+
+
+def test_find_strings_matches_the_per_byte_scan_on_crafted_data():
+    cases = [
+        b"",
+        b"\x00" * 7,
+        b"\x00" * 8,
+        b"\x00" * 300,
+        _lp("hello"),
+        _lp("hello") + b"\x00" * 3,
+        # a hit whose body holds another candidate prefix (skipped past)
+        _lp(_lp("inner").decode("latin1").replace("\x00", " ").encode("latin1")),
+        _lp("abc" + "\x00" * 0) + _lp("x"),
+        # overlapping candidates: a long zero run then text, lengths 0 / 1
+        b"\x00" * 20 + _lp("A", 1) + _lp("", 0) + b"zz",
+        # lengths at and past the limit
+        _lp("Q" * radium.MAXLEN),
+        _lp("Q" * (radium.MAXLEN + 1)),
+        _lp("Q" * 10, 8193),
+        # a length that runs past the end of the data
+        _lp("short", 9),
+        # a string at the very end, and a prefix cut off by the end
+        b"\x01\x02\x03" + _lp("end"),
+        b"junk" + struct.pack("<Q", 3) + b"ab",
+        struct.pack("<Q", 3),
+        # the high length byte comes from the last byte of a zero run
+        b"\x00" * 40 + b"\x01" + b"\x00" * 6 + b"B" * 256 + b"tail",
+        b"\x00" * 40 + b"\x01" + b"\x00" * 6 + b"B" * 255 + b"\x80",
+        # a zero run that is also the leading zeros of a real prefix
+        b"\x00" * 9 + b"\x05\x00" + b"\x00" * 6 + b"12345",
+        # non-printable bodies next to printable ones
+        _lp(b"ok\x00no") + _lp("yes") + _lp(b"\x7f") + _lp("\t\n\r ~"),
+        # a 0x80 handle between two values, as the real framing has it
+        struct.pack("<I", 0x80000001) + _lp("Text") + struct.pack("<ff", 1.0, 2.0)
+        + _lp("Shoot Left Ramp") + struct.pack("<I", 2),
+    ]
+    for data in cases:
+        assert radium.find_strings(data) == _find_strings_per_byte(data), data[:40]
+        assert radium.find_strings(bytearray(data)) == _find_strings_per_byte(bytearray(data))
+
+
+def test_find_strings_matches_the_per_byte_scan_on_random_bytes():
+    import random
+    rng = random.Random(795)
+    for trial in range(40):
+        n = rng.randrange(0, 3000)
+        # byte values skewed towards zeros and printable ascii so that
+        # candidates, zero runs and near-misses are all common
+        pool = [0] * 40 + list(range(32, 127)) + [9, 10, 13, 0x80, 0xff, 1, 2, 3]
+        buf = bytearray(rng.choice(pool) for _ in range(n))
+        for _ in range(rng.randrange(0, 6)):             # planted strings
+            ln = rng.choice([1, 2, 7, 8, 9, 100, radium.MAXLEN, radium.MAXLEN + 1])
+            s = bytes(rng.choice(b"AZ az09\t\n\r~") for _ in range(ln))
+            at = rng.randrange(0, max(1, n))
+            buf[at:at + 8 + ln] = _lp(s)
+        data = bytes(buf)
+        assert radium.find_strings(data) == _find_strings_per_byte(data), trial

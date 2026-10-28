@@ -2,7 +2,8 @@
 
 A Pinside user asked for a way to turn off "the wizard modes that END THE GAME": on Godzilla (King of the
 Monsters), James Bond (Her Majesty's Secret Service), Jaws (Super Celebration Multiball), John Wick (Special
-Assignment), Jurassic Park (When Dinosaurs Ruled the Earth) and Elvira (Wild Market Value) the final wizard, once
+Assignment), Jurassic Park (When Dinosaurs Ruled the Earth) and Elvira (Wild Market Value) - the wizards as
+pinballrulesheets.com names them; the flags below confirm Bond's, John Wick's and Elvira's - the final wizard, once
 played, ends the player's game: every ball they have left is ended the moment it starts.  No adjustment controls it.
 
 HOW THE GAME DOES IT (emulator, Godzilla LE 1.16).  The framework's ball start has two handlers on it:

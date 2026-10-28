@@ -1716,10 +1716,6 @@ HELP_CONTENT = {
             "The **Final wizard** box appears on those cards only.",
             "- Tick **The final wizard does not end the game** and the next Build changes "
             "the game so the player goes on to their remaining balls after it.\n"
-            "- The wizards it covers: King of the Monsters (Godzilla), Her Majesty's Secret "
-            "Service (James Bond 007), Super Celebration Multiball (Jaws), Special "
-            "Assignment (John Wick), When Dinosaurs Ruled the Earth (Jurassic Park) and Wild "
-            "Market Value (Elvira's House of Horrors).\n"
             "- It changes the game itself (same card size), so it works on a machine that "
             "is already set up.\n"
             "- The other Player Challenge games end as they always have.\n"

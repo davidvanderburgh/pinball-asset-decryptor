@@ -106,7 +106,10 @@ _TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion",
                 "menu_expose_through",
                 # PAD-755: a Home Edition's coin door; a target that has one
                 # already, or can't be read, is left alone at build time
-                "coin_door")
+                "coin_door",
+                # PAD-786: a final wizard that does not end the game; a target
+                # whose final wizard the app doesn't know is left alone
+                "final_wizard")
 # Staged Defaults-tab edits.  These need no reconciliation at all: they are
 # keyed by the firmware's own ``AD_`` names and high-score slot labels, which
 # are the same words on a new version and on the other model of the same title

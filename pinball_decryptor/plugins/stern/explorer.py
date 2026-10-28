@@ -592,7 +592,8 @@ class CardImage:
     def write_adjustment_defaults(self, part_index, path, table, overrides,
                                   high_scores=None, name_overrides=None,
                                   menu_last_id=None, menu_plan=None,
-                                  log=None, ranges=None, coin_door=False):
+                                  log=None, ranges=None, coin_door=False,
+                                  final_wizard=False):
         """Patch the game ELF's compiled defaults and write it back in place
         (exact-size, extent-mapped) with the ``.sidx`` record refreshed.
 
@@ -615,6 +616,10 @@ class CardImage:
         :mod:`.coin_door`): the interlock switch linked to its handler.  A
         build that has one already, or can't be read, is left alone and said
         so through *log*.
+
+        *final_wizard* stops the final wizard from ending the game (PAD-786,
+        :mod:`.final_wizard`): the player's balls after it are played.  A build
+        whose final wizard is not one the app knows is left alone and said so.
 
         Returns ``(n_settings, sidx_refreshed)``, where n_settings counts every
         adjustment and high-score slot changed (the menu page is one edit to
@@ -639,6 +644,8 @@ class CardImage:
             new = widened_bytes(table, new, int(menu_last_id), plan=menu_plan)
         if coin_door:
             new = self._with_coin_door(table, new, log)
+        if final_wizard:
+            new = self._with_final_wizard(new, log)
         _n, refreshed = self.replace_file_bytes(part_index, path, new)
         return n, refreshed
 
@@ -664,6 +671,25 @@ class CardImage:
                 log("Coin door: this build's switch tables couldn't be read "
                     "with certainty, so its coin door was left as it ships.",
                     "warning")
+        return elf
+
+    @staticmethod
+    def _with_final_wizard(elf, log=None):
+        """*elf* with its final wizard no longer ending the game (see
+        :mod:`.final_wizard`), or unchanged with a note when this build's isn't
+        one the app knows."""
+        from . import final_wizard
+        p = final_wizard.plan(elf)
+        if p:
+            out = final_wizard.patched_bytes(elf, p)
+            if log:
+                log("Final wizard: once a player has played the final wizard, "
+                    "the game no longer ends their game; their remaining balls "
+                    "are played.", "info")
+            return out
+        if log:
+            log("Final wizard: this build's final wizard is not one this app "
+                "can change, so it still ends the game as it ships.", "warning")
         return elf
 
     @staticmethod

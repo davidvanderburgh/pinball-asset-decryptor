@@ -17257,9 +17257,18 @@ def _append_cave_segment(raw, need, fn):
       deliberately: the fix is a header reshuffle, it would move the cave out of
       last position and undo the .bss property above, and none of it can be
       confirmed without a machine.
+
+    The cave leaves the program-text segment its room (PAD-801): that segment
+    lives only in a text/data gap, never above .bss, so a cave that would take
+    a gap down to less than :data:`_TEXT_ROOM` (or half the gap, on a small
+    one) goes above .bss instead -- where every cave too big for the gap goes
+    already.  Godzilla Pro 1.16's gap is 32 KB and a cave costs ~1 KB a sound,
+    so 29 replaced sounds filled it and longer text, MUSIC MODE and the modes'
+    own clips were all refused "no free address space".  A small cave still
+    lands in the gap exactly as before.
     """
     return _append_extension_segment(raw, need, 7, near_fn=fn, allow_above=True,
-                                     what="cave")
+                                     what="cave", keep_text_room=True)
 
 
 # --------------------------------------------------------------------------
@@ -17289,6 +17298,9 @@ def _append_cave_segment(raw, need, fn):
 _PT_NOTE = 4
 _EXT_PAGE = 0x1000
 _EXT_ABOVE = 32 << 20              # synthetic region above the highest PT_LOAD
+# what a cave leaves the program-text segment of a text/data gap (PAD-801):
+# 63 longer strings, the MUSIC MODE table and the clips' names take a few KB
+_TEXT_ROOM = 16 << 10
 
 
 def _free_regions(raw, allow_above=True):
@@ -17314,15 +17326,32 @@ def _free_regions(raw, allow_above=True):
     return frees
 
 
-def _pick_region(frees, want, near_fn=None):
+def _pick_region(frees, want, near_fn=None, gaps=None):
     """The free region a *want*-byte extent goes in: the first within ARM
     branch reach of *near_fn* (the cave's preference, so a build that placed
     before still places identically), else the lowest that fits, else
-    ``None``."""
+    ``None``.
+
+    *gaps* (the cave's, PAD-801: :func:`_free_regions` without the region
+    above .bss) are the regions the program-text segment can use; a region
+    among them that this extent would leave with less than
+    :func:`_text_room` is passed over while another region in reach fits."""
     fits = [(lo, hi) for lo, hi in frees if hi - lo >= want]  # padded extent
     near = ([f for f in fits if abs(f[0] - (near_fn + 8)) < _CAVE_MAX_BRANCH]
             if near_fn is not None else [])
+    if gaps:
+        roomy = [(lo, hi) for lo, hi in near or fits if (lo, hi) not in gaps
+                 or hi - lo - want >= _text_room(hi - lo)]
+        if roomy:
+            return roomy[0]
     return near[0] if near else (fits[0] if fits else None)
+
+
+def _text_room(gap):
+    """What a cave leaves the program-text segment of a *gap*-byte text/data
+    gap: :data:`_TEXT_ROOM`, or half the gap (whole pages, one at least) on a
+    smaller one."""
+    return max(_EXT_PAGE, min(_TEXT_ROOM, (gap // 2) & ~(_EXT_PAGE - 1)))
 
 
 def _spare_phdr_slot(raw, types=(_PT_GNU_STACK,)):
@@ -17340,7 +17369,8 @@ def _spare_phdr_slot(raw, types=(_PT_GNU_STACK,)):
 
 
 def _append_extension_segment(raw, need, flags, near_fn=None, allow_above=True,
-                              what="segment", slots=(_PT_GNU_STACK,)):
+                              what="segment", slots=(_PT_GNU_STACK,),
+                              keep_text_room=False):
     """Append *need* bytes to the ELF *raw* and map them with a PT_LOAD of
     their own (``p_flags`` = *flags*) at a virtual address no existing segment
     claims, repurposing the first advisory header in *slots*.
@@ -17351,6 +17381,8 @@ def _append_extension_segment(raw, need, flags, near_fn=None, allow_above=True,
     near_fn=None, allow_above=False, slots=(PT_GNU_STACK, PT_NOTE)``:
     read-only, the lowest gap that fits, never the synthetic region above
     .bss, and PT_NOTE when the cave has already spent PT_GNU_STACK.
+    *keep_text_room* (the cave's) leaves a text/data gap room for that
+    segment when another region in reach fits (:func:`_pick_region`).
 
     Returns ``(seg_va, append_off, gap_bytes)`` -- *gap_bytes* being the size
     of the free region the segment went in, which is how much it could still
@@ -17359,7 +17391,9 @@ def _append_extension_segment(raw, need, flags, near_fn=None, allow_above=True,
     PAGE = _EXT_PAGE
     frees = _free_regions(raw, allow_above)
     want = (need + PAGE - 1) & ~(PAGE - 1)
-    pick = _pick_region(frees, want, near_fn)
+    pick = _pick_region(frees, want, near_fn,
+                        gaps=(_free_regions(raw, allow_above=False)
+                              if keep_text_room else None))
     if pick is None:
         raise RuntimeError(
             "no unclaimed address space fits a %d-byte %s -- using the "

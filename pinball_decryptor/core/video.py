@@ -144,6 +144,21 @@ class VideoInfo:
         self.nframes = nframes         # frame count (custom backends; 0=unknown)
         self.keyint = keyint           # most frames between key frames (0=unknown)
 
+    #: every field but ``path`` (which is the real path at load time)
+    FIELDS = ("vcodec", "width", "height", "fps", "duration", "has_audio",
+              "has_alpha", "pix_fmt", "container", "nframes", "audio_rate",
+              "audio_channels", "profile", "level", "keyint")
+
+    def to_dict(self):
+        """The probe's answer as JSON-able fields (for the probe cache)."""
+        return {name: getattr(self, name) for name in self.FIELDS}
+
+    @classmethod
+    def from_dict(cls, data, path):
+        """A :class:`VideoInfo` for *path* from :meth:`to_dict`'s fields
+        (unknown keys ignored, missing ones at their defaults)."""
+        return cls(path, **{k: v for k, v in data.items() if k in cls.FIELDS})
+
     def audio_summary(self):
         """Human audio-track summary — "44.1 kHz Stereo" — or "" for a silent
         clip and a bare "Audio" when the track exists but details didn't
@@ -237,6 +252,101 @@ def _probe_key(path):
         return None
     return (os.path.normcase(os.path.abspath(path)), st.st_size,
             st.st_mtime_ns, find_ffprobe())
+
+
+# ----------------------------------------------------------------------
+# The per-project probe cache: ffprobe's answers, kept across app starts
+# ----------------------------------------------------------------------
+#: ``{rel: [size, mtime_ns, prober_tag, info_dict]}`` beside the project's
+#: ``.hashcache.json``.  The memo above lives only as long as the process:
+#: every app start, folder switch or manufacturer change ffprobed every
+#: clip again, thousands of them on eight workers (PAD-797).  Advisory and
+#: corrupt-tolerant, like the hash cache: a missing or broken sidecar
+#: costs one probe pass.  A probe that answered None is not kept, so a
+#: transient failure (a timeout) does not outlive the session.
+PROBE_CACHE_FILE = ".probecache.json"
+
+
+def prober_tag():
+    """What probed: the ffprobe path, or "banner" for an ffmpeg-only
+    install (the banner carries less, so its answers are kept apart)."""
+    return find_ffprobe() or "banner"
+
+
+def load_probe_cache(folder):
+    """The folder's probe cache; ``{}`` when absent or unreadable."""
+    try:
+        with open(os.path.join(folder, PROBE_CACHE_FILE), "r",
+                  encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items()
+                    if isinstance(k, str) and isinstance(v, list)
+                    and len(v) == 4 and isinstance(v[3], dict)}
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def save_probe_cache(folder, cache):
+    """Best-effort persist.  Never in a capture run (PAD_UI_CAPTURE walks
+    the user's real project and must leave it as it found it)."""
+    if os.environ.get("PAD_UI_CAPTURE"):
+        return False
+    try:
+        with open(os.path.join(folder, PROBE_CACHE_FILE), "w",
+                  encoding="utf-8") as f:
+            json.dump(cache, f)
+        return True
+    except OSError:
+        return False
+
+
+def probe_cache_lookup(cache, rel, path):
+    """The cached :class:`VideoInfo` for *path* (keyed *rel*), or None when
+    the file's size or mtime moved, the prober changed, or it is not
+    there."""
+    ent = cache.get(rel)
+    if not ent:
+        return None
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    if (ent[0] != st.st_size or ent[1] != st.st_mtime_ns
+            or ent[2] != prober_tag()):
+        return None
+    try:
+        return VideoInfo.from_dict(ent[3], path)
+    except TypeError:
+        return None
+
+
+def probe_cache_store(cache, rel, path, info):
+    """Remember *info* for *path* (keyed *rel*) when the file is still what
+    was probed.  Returns whether the cache changed."""
+    if info is None:
+        return False
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    cache[rel] = [st.st_size, st.st_mtime_ns, prober_tag(), info.to_dict()]
+    return True
+
+
+def cached_video_info(folder, rel, cache, path=None):
+    """:func:`detect_video_info` through the folder's probe cache: the
+    cached answer when size, mtime and prober still match, else a probe
+    whose answer fills *cache* (the caller saves it)."""
+    if path is None:
+        path = os.path.join(folder, rel.replace("/", os.sep))
+    info = probe_cache_lookup(cache, rel, path)
+    if info is not None:
+        return info
+    info = detect_video_info(path)
+    probe_cache_store(cache, rel, path, info)
+    return info
 
 
 def _probe_video_info(path):

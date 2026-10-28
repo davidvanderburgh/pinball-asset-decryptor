@@ -251,7 +251,6 @@ def test_the_tabs_load_without_numpy_or_pillow():
 def test_the_server_names_its_content_types_without_the_registry():
     """mimetypes.init() reads the Windows registry (50 ms) on the first
     guess_type or add_type; the server's own table answers instead."""
-    import mimetypes
     from pinball_decryptor.webui import server
     for ext, want in (("js", "text/javascript"), ("css", "text/css"),
                       ("html", "text/html"), ("woff2", "font/woff2"),
@@ -346,3 +345,190 @@ def test_a_native_extension_probe_still_really_imports(tmp_path, monkeypatch):
     sys.modules.pop(good, None)
     assert prereqs._probe_python_import(good, really_import=True) == (True, good + " 1.0.1")
     sys.modules.pop(good, None)
+
+
+# ------------------------------------------------------- probe cache
+def _clip(tmp_path, rel, body=b"not really mp4 but enough"):
+    p = tmp_path / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(body)
+    return p
+
+
+def _info(path, **kw):
+    from pinball_decryptor.core.video import VideoInfo
+    base = dict(vcodec="h264", width=1920, height=1080, fps=30.0,
+                duration=4.5, has_audio=True, audio_rate=48000,
+                audio_channels=2, profile="High", level=41, keyint=60,
+                pix_fmt="yuv420p", container="mp4")
+    base.update(kw)
+    return VideoInfo(str(path), **base)
+
+
+def test_video_info_round_trips_through_a_dict(tmp_path):
+    from pinball_decryptor.core.video import VideoInfo
+    info = _info(tmp_path / "a.mp4", has_alpha=True, nframes=135)
+    d = info.to_dict()
+    assert "path" not in d and d["keyint"] == 60 and d["has_alpha"] is True
+    back = VideoInfo.from_dict(dict(d, stranger="ignored"), "elsewhere.mp4")
+    assert back.path == "elsewhere.mp4" and back.to_dict() == d
+    assert VideoInfo.from_dict({}, "x").to_dict() == VideoInfo("x").to_dict()
+
+
+def test_the_probe_cache_answers_a_hit_and_probes_a_miss(tmp_path, monkeypatch):
+    from pinball_decryptor.core import video
+    monkeypatch.setattr(video, "prober_tag", lambda: "ffprobe-test")
+    clip = _clip(tmp_path, "video/a.mp4")
+    probes = []
+
+    def fake_probe(path):
+        probes.append(path)
+        return _info(path)
+    monkeypatch.setattr(video, "detect_video_info", fake_probe)
+    cache = video.load_probe_cache(str(tmp_path))
+    assert cache == {}                                   # no sidecar yet
+    info = video.cached_video_info(str(tmp_path), "video/a.mp4", cache)
+    assert info.width == 1920 and probes == [str(clip)]
+    assert video.save_probe_cache(str(tmp_path), cache) is True
+    assert (tmp_path / video.PROBE_CACHE_FILE).exists()
+    # a hit: no probe, the same answer, for the real path
+    cache2 = video.load_probe_cache(str(tmp_path))
+    assert cache2 == cache
+    again = video.cached_video_info(str(tmp_path), "video/a.mp4", cache2)
+    assert again.to_dict() == info.to_dict() and again.path == str(clip)
+    assert probes == [str(clip)]
+    # a None answer is not kept
+    monkeypatch.setattr(video, "detect_video_info", lambda p: None)
+    _clip(tmp_path, "video/b.mp4")
+    assert video.cached_video_info(str(tmp_path), "video/b.mp4", cache2) is None
+    assert "video/b.mp4" not in cache2
+
+
+@pytest.mark.parametrize("how", ["size", "mtime", "prober", "gone"])
+def test_the_probe_cache_forgets_a_moved_clip(tmp_path, monkeypatch, how):
+    import os
+    from pinball_decryptor.core import video
+    monkeypatch.setattr(video, "prober_tag", lambda: "ffprobe-test")
+    clip = _clip(tmp_path, "video/a.mp4")
+    cache = {}
+    video.probe_cache_store(cache, "video/a.mp4", str(clip), _info(clip))
+    assert video.probe_cache_lookup(cache, "video/a.mp4", str(clip)) is not None
+    if how == "size":
+        clip.write_bytes(b"longer than before, so a different size")
+    elif how == "mtime":
+        st = os.stat(clip)
+        os.utime(clip, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    elif how == "prober":
+        monkeypatch.setattr(video, "prober_tag", lambda: "banner")
+    else:
+        clip.unlink()
+    assert video.probe_cache_lookup(cache, "video/a.mp4", str(clip)) is None
+    assert video.probe_cache_lookup(cache, "video/other.mp4", str(clip)) is None
+
+
+def test_a_corrupt_probe_cache_is_ignored(tmp_path):
+    import json
+    from pinball_decryptor.core import video
+    side = tmp_path / video.PROBE_CACHE_FILE
+    side.write_text("{not json")
+    assert video.load_probe_cache(str(tmp_path)) == {}
+    side.write_text(json.dumps([1, 2]))
+    assert video.load_probe_cache(str(tmp_path)) == {}
+    side.write_text(json.dumps({"ok.mp4": [1, 2, "t", {"width": 3}],
+                                "short.mp4": [1, 2, "t"],
+                                "wrong.mp4": [1, 2, "t", "nope"],
+                                "junk": 5}))
+    assert video.load_probe_cache(str(tmp_path)) == {
+        "ok.mp4": [1, 2, "t", {"width": 3}]}
+    assert video.load_probe_cache(str(tmp_path / "missing")) == {}
+
+
+def test_the_probe_cache_is_not_written_in_a_capture_run(tmp_path, monkeypatch):
+    from pinball_decryptor.core import video
+    monkeypatch.setenv("PAD_UI_CAPTURE", "1")
+    assert video.save_probe_cache(str(tmp_path), {"a": [1, 2, "t", {}]}) is False
+    assert not (tmp_path / video.PROBE_CACHE_FILE).exists()
+    monkeypatch.delenv("PAD_UI_CAPTURE")
+    assert video.save_probe_cache(str(tmp_path), {"a": [1, 2, "t", {}]}) is True
+    assert (tmp_path / video.PROBE_CACHE_FILE).exists()
+
+
+def test_the_probe_cache_sidecar_never_enters_a_baseline_or_a_write_scan(tmp_path):
+    from pinball_decryptor.core import checksums, video
+    from pinball_decryptor.webui.write_scan import walk_changes
+    assert video.PROBE_CACHE_FILE in checksums.TRACKING_SIDECARS
+    assert video.PROBE_CACHE_FILE in checksums.FINGERPRINT_SKIP_FILES
+    _clip(tmp_path, "video/a.mp4")
+    (tmp_path / video.PROBE_CACHE_FILE).write_text("{}")
+    checksums.generate_checksums(str(tmp_path))
+    listed = (tmp_path / checksums.CHECKSUMS_FILE).read_text()
+    assert "video/a.mp4" in listed and video.PROBE_CACHE_FILE not in listed
+    saved = {"video/a.mp4": "0" * 32, video.PROBE_CACHE_FILE: "0" * 32}
+    changed = walk_changes(str(tmp_path), saved, hide_imported_cache=False,
+                           current=lambda: True)
+    assert [rel for rel, _ in changed] == ["video/a.mp4"]
+
+
+def _probe_tab(tmp_path, slots, scan_id=7):
+    """A stand-in for the Video tab around _probe_metadata_async."""
+    import time as _time
+    import types as _types
+    from pinball_decryptor.webui.tabs.video import TAB
+    timers, applied = [], []
+    stub = _types.SimpleNamespace(
+        _slots=slots, _scan_dir=str(tmp_path), _scan_id=scan_id,
+        ctx=_types.SimpleNamespace(loop=_types.SimpleNamespace(
+            after=lambda ms, fn: timers.append(fn))),
+        _apply_meta=lambda sid, rel, info: applied.append((rel, info)))
+    TAB._probe_metadata_async(stub, scan_id)
+    deadline = _time.monotonic() + 10
+    while timers and _time.monotonic() < deadline:
+        fn = timers.pop(0)
+        fn()
+        if timers:
+            _time.sleep(0.01)
+    return applied
+
+
+def test_the_video_tab_probes_only_the_misses_and_saves_once(tmp_path, monkeypatch):
+    import json
+    from pinball_decryptor.core import video
+    from pinball_decryptor.core.video_slots import VideoSlot
+    monkeypatch.setattr(video, "prober_tag", lambda: "ffprobe-test")
+    a, b = _clip(tmp_path, "video/a.mp4"), _clip(tmp_path, "video/b.mp4")
+    cache = {}
+    video.probe_cache_store(cache, "video/a.mp4", str(a), _info(a, width=640))
+    video.save_probe_cache(str(tmp_path), cache)
+    probes, saves = [], []
+
+    def fake_probe(path):
+        probes.append(path)
+        return _info(path, width=1280)
+    monkeypatch.setattr(video, "detect_video_info", fake_probe)
+    real_save = video.save_probe_cache
+    monkeypatch.setattr(video, "save_probe_cache",
+                        lambda folder, c: saves.append(folder) or real_save(folder, c))
+
+    def slots():
+        return [VideoSlot("video/a.mp4", str(a), ".mp4", None, a.stat().st_size),
+                VideoSlot("video/b.mp4", str(b), ".mp4", None, b.stat().st_size)]
+    applied = dict(_probe_tab(tmp_path, slots()))
+    assert probes == [str(b)]                          # a was a hit
+    assert applied["video/a.mp4"].width == 640
+    assert applied["video/b.mp4"].width == 1280
+    assert saves == [str(tmp_path)]
+    on_disk = json.loads((tmp_path / video.PROBE_CACHE_FILE).read_text())
+    assert set(on_disk) == {"video/a.mp4", "video/b.mp4"}
+    # the next pass: all hits, no probe, no save
+    applied = dict(_probe_tab(tmp_path, slots()))
+    assert probes == [str(b)] and saves == [str(tmp_path)]
+    assert applied["video/b.mp4"].width == 1280
+    # a capture run: probes, but leaves the folder alone
+    monkeypatch.setattr(video, "save_probe_cache", real_save)
+    monkeypatch.setenv("PAD_UI_CAPTURE", "1")
+    c = _clip(tmp_path, "video/c.mp4")
+    _probe_tab(tmp_path, slots() + [
+        VideoSlot("video/c.mp4", str(c), ".mp4", None, c.stat().st_size)])
+    assert probes == [str(b), str(c)]
+    assert "video/c.mp4" not in json.loads(
+        (tmp_path / video.PROBE_CACHE_FILE).read_text())

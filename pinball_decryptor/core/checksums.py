@@ -18,7 +18,11 @@ _MD5SUM_LINE = re.compile(r'^([a-f0-9]{32})\s+\*?(.+)$')
 # derived tracking metadata — they have no destination inside the card/ISO
 # binary and must never be diffed as a "modified asset".  Excluded both from
 # the baseline written here and from the Write "Modified Files Preview".
-TRACKING_SIDECARS = frozenset({"callouts.csv", "music_titles.csv"})
+# The app's own cache sidecars (core.hashcache's ".hashcache.json", core.
+# video's ".probecache.json", PAD-797) are named too: dot-files are skipped
+# by every walk anyway, but the name says so.
+TRACKING_SIDECARS = frozenset({"callouts.csv", "music_titles.csv",
+                               ".hashcache.json", ".probecache.json"})
 
 # Top-level folders inside a project that hold generated or staged state rather
 # than card assets: the build output, the hydrate parking lot, and the copies a
@@ -57,12 +61,14 @@ NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
 # out of the "have the edits moved since the emulator's set was built?" walks
 # (the Emulate tab's and the Modes tab's Try it), at the top of the folder:
 # the project's log, the build output, the caches (".write_cache", core.
-# hashcache's ".hashcache.json") and core.history_log's ".history.log".
+# hashcache's ".hashcache.json", core.video's ".probecache.json") and
+# core.history_log's ".history.log".
 # PAD-509: the log is written on every line the app logs, so with it in the
 # walk no Start ever found its set current, and a Godzilla project with every
 # picture color-corrected rebuilt 1,243 files on each one.
 FINGERPRINT_SKIP_DIRS = frozenset({"logs", "build", ".write_cache"})
-FINGERPRINT_SKIP_FILES = frozenset({".hashcache.json", ".history.log"})
+FINGERPRINT_SKIP_FILES = frozenset({".hashcache.json", ".probecache.json",
+                                    ".history.log"})
 
 
 def is_other_extract(path):

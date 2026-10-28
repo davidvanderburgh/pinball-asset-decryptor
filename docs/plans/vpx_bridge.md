@@ -207,3 +207,25 @@ Proven 2026-10-27 23:01: Visual Pinball alone, opening the Rush table with
 no run up, brought rush_le up on slot 1 of PAD-Runtime (board entry in 8 s,
 attached in 56 s), Start served a ball and the lockbar launched it; closing
 the table stopped the run and emptied the board.
+
+## A table from the title's own device tables (vpxgen)
+
+David also asked for a table of another title to try, X-Men or James Bond.
+James Bond LE's build ships positions for 96 switches and 393 LEDs over its
+own playfield drawing (X-Men's only 55 LEDs), so `vpxgen.py` builds a table
+from those: the drawing as the art, a Trigger at every rollover and opto, a
+Bumper at every pop, standup and drop HitTargets, a Spinner, Kicker saucers
+at the VUKs, eject and rocket locks (each wired to its coil), slingshot
+walls, a Light at every positioned LED (RGB triples as one), three
+flippers at the flipper coils, plunger and ball release in the shooter
+lane, drain, outer walls and lane guides - 145 objects, 38 switches, 6
+saucers, 86 lights for Bond - and the shadow bridge (vpxshadow.gen) over a
+base script of the generator's own. The base file is Visual Pinball's own
+"Nudge Test and Calibration" table, emptied of its items and collections
+and resized to the drawing; the object prototypes
+(`vpxgen_protos.json`) are its flipper, plunger, kicker, trigger, wall,
+timer and gate, and a bumper, light, target, drop target and spinner with
+every name, material, image and layer string blanked. No ramps, plastics or
+sounds: the geometry made playable, for a title nobody has built a tribute
+for. The first load taught one thing: the table's own NAME must stay
+`Table1`, since Visual Pinball names the script's events after it.

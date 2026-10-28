@@ -221,6 +221,13 @@ class Launch:
         if want and r.returncode == 0 and not m:
             self.slot = int(want)
             return self.slot
+        if want and not m:
+            # the kit's slot is somebody else's now: any free one, then
+            log("slot %s is not ours (%s); taking any" % (want, out.strip()[-120:]))
+            r = _run(wsl_head(self.distro) + ["-e", "bash", "%s/riglock.sh" % self.rig_wsl,
+                                              "take", "--any", LABEL, what])
+            out = _text(r.stdout) + _text(r.stderr)
+            m = re.search(r"slot=(\d+)", out)
         if not m:
             raise RuntimeError("no rig slot free for %s: %s" % (self.title, out.strip()[-200:]))
         self.slot = int(m.group(1))

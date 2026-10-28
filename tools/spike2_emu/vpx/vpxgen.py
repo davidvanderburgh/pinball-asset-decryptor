@@ -425,11 +425,13 @@ class Gen:
             "\tplungerIM.Random 1.5",
             '\tplungerIM.CreateEvents "plungerIM"',
             "End Sub",
-            "Sub SolLFlipper(e) : If e Then LeftFlipper.RotateToEnd Else LeftFlipper.RotateToStart : End If : End Sub",
-            "Sub SolRFlipper(e) : If e Then RightFlipper.RotateToEnd Else RightFlipper.RotateToStart : End If : End Sub",
-            ("Sub SolULFlipper(e) : If e Then UpperLeftFlipper.RotateToEnd Else UpperLeftFlipper.RotateToStart : End If : End Sub"
-             if upper else "'"),
-            ""])
+            ] + self.flipper_sub("SolLFlipper", "LeftFlipper") + self.flipper_sub("SolRFlipper", "RightFlipper")
+            + (self.flipper_sub("SolULFlipper", "UpperLeftFlipper") if upper else []) + [""])
+
+    @staticmethod
+    def flipper_sub(sub, obj):
+        return ["Sub %s(e)" % sub, "\tIf e Then", "\t\t%s.RotateToEnd" % obj, "\tElse",
+                "\t\t%s.RotateToStart" % obj, "\tEnd If", "End Sub"]
 
     def script(self):
         m = json.loads(json.dumps(self.map))
@@ -511,7 +513,7 @@ def main(argv):
     os.makedirs(outdir, exist_ok=True)
     dst = os.path.join(outdir, g.map["output"])
     t = vpxfile.VpxTable(base)
-    gd = t.gamedata
+    gd = vpxfile.with_script(t.gamedata, script)      # the base's own script goes
     t.ole.close()
     mac = write_table(base, dst, "%s (PAD, generated)" % title, gd, g.items, "playfield",
                       os.path.join(tables, "playfield.png"), int(TABLE_W), int(g.table_h))

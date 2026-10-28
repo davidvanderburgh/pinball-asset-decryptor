@@ -1736,6 +1736,20 @@ HELP_CONTENT = {
                      "that input the game reads the door as open all the time and keeps "
                      "the message up.", "kind": "warn"},
         ]),
+        ("Final wizard (ends the game)", [
+            "On Godzilla, James Bond 007, Jaws, John Wick, Jurassic Park and Elvira's House "
+            "of Horrors, playing the final wizard ends the player's game: every ball they "
+            "have left ends the moment it starts. No setting of the game's changes that. "
+            "The **Final wizard** box appears on those cards only.",
+            "- Tick **The final wizard does not end the game** and the next Build changes "
+            "the game so the player goes on to their remaining balls after it.\n"
+            "- It changes the game itself (same card size), so it works on a machine that "
+            "is already set up.\n"
+            "- The other Player Challenge games end as they always have.\n"
+            "- Staged with the project and carried by mod packs.",
+            {"note": "A Player Challenge game that is the final wizard itself plays on after "
+                     "it as well."},
+        ]),
         ("Show hidden settings on the machine", [
             "**Show hidden settings in the machine's menu…** moves where the Feature "
             "Adjustments page stops, so the machine lists and edits the Debug settings "

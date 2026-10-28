@@ -32,6 +32,8 @@ const MENU_TIP = "Extends the machine's Feature Adjustments page so the settings
   + "on the machine itself, instead of only being preset from here.";
 const COIN_TEXT = "This is a Home Edition: it ships without a coin door, and its game ignores the door's interlock switch, though the cabinet board still has the input for it. Tick this if you have fitted a coin door with its interlock switch, and the next Build makes the game use it as a Pro does: opening the door puts up 48V DISABLED / CLOSE COIN DOOR until it is shut.";
 const COIN_WARN = "Only with a door and its interlock switch fitted. With nothing on that input the game reads the door as open all the time and keeps the 48V DISABLED message up.";
+const WIZARD_TEXT = "In this game, playing the final wizard ends the player's game: every ball they have left ends the moment it starts. Tick this and the next Build changes the game so the final wizard no longer does that, and the player goes on to their remaining balls. This is a change to the game itself, so it works on a machine that is already set up.";
+const WIZARD_NOTE = "A Player Challenge game that is the final wizard itself plays on after it as well.";
 const RANGE_CELL_TIP = "Change the lowest and highest value the machine's own menu offers for this setting.";
 const FRESH_TIP = "A machine uses these defaults on a fresh flash or after a factory reset. A machine that has "
   + "already been set up keeps its own settings — Stern stores those on the board, not on the card, so the app "
@@ -421,6 +423,13 @@ export default function DefaultsTab() {
       <${Check} checked=${!!s.coin_fitted} wrap label="This machine has a coin door fitted"
         onChange=${(v) => call(NS + ".coin_door_set", v)} />
       <${Note} kind="warn">${COIN_WARN}<//>
+    <//>` : null}
+
+    ${s.wizard_offer ? html`<${Card} title="Final wizard" cls="dflt-card-wizard">
+      <p class="dflt-coin-text">${WIZARD_TEXT}</p>
+      <${Check} checked=${!!s.wizard_on} wrap label="The final wizard does not end the game"
+        onChange=${(v) => call(NS + ".final_wizard_set", v)} />
+      <${Note}>${WIZARD_NOTE}<//>
     <//>` : null}
 
     <${Card} title="Settings" cls="dflt-card-form">

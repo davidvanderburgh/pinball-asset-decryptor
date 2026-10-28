@@ -7846,6 +7846,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the operator menu, which the
     # runtime applies to the whole screen live (the modes' delivery, as the music modes')
     picture_prof = _picture_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    # PAD-782: the owner's attract items: clips in the video bank and attract.cfg beside the runtime
+    attract_prof = _attract_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    _attract_on = attract_prof is not None
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -7853,7 +7856,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
-            and picture_prof is None
+            and picture_prof is None and not _attract_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -9156,15 +9159,17 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Music modes" if sound_modes_cfg and (sound_modes.count or sound_modes.turns)
                 else "Jukebox" if sound_modes_cfg and sound_modes.jukebox and not sound_modes.attract
                 else "Attract flipper sounds" if sound_modes_cfg  # PAD-641: theirs alone
-                else "Picture settings")
-        if _modes_on or _clips_on or sound_modes_cfg or picture_cfg:
+                else "Picture settings" if picture_cfg
+                else "Attract items")
+        if _modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on:
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
                          else "Adding the random clips to the video bank..."
                          if variant_slots else "Adding the jukebox to the video bank..."
                          if _clips_on else "Adding the music modes..."
-                         if sound_modes_cfg else "Adding the picture settings...")
+                         if sound_modes_cfg else "Adding the picture settings..."
+                         if picture_cfg else "Adding the attract items...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -9175,11 +9180,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     if _mprof is None:
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
-                    _mprof = variant_prof or sound_modes_prof or picture_prof
+                    _mprof = variant_prof or sound_modes_prof or picture_prof or attract_prof
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
                     if not _rel or (not _modes_on and (
-                            not _clips_on or _rel != _MW.scene_rels(_mprof)[1])):
+                            not (_clips_on or _attract_on) or _rel != _MW.scene_rels(_mprof)[1])):
                         continue        # a part this title cannot do (item 148)
                     _mnodes[_rel] = _MW.lookup(reader, _rel)
                     if _mnodes[_rel] is None:
@@ -9192,7 +9197,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 _hud_rel, _bank_rel = _MW.scene_rels(_mprof)
                 if not _modes_on:
                     _hud_rel = ""        # PAD-446: random clips change the bank only
-                    if not _clips_on:
+                    if not (_clips_on or _attract_on):
                         _bank_rel = ""   # PAD-494: music modes change neither
                 # item 164: the system scene whose full font a HUD with too few glyphs
                 # takes for its screens' words (absent: the words keep the HUD's font)
@@ -9227,6 +9232,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     variants_prof=variant_prof or sound_modes_prof, cancel=cancel,
                     sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof,
                     picture=picture_cfg, picture_prof=picture_prof,
+                    attract=_attract_on, attract_prof=attract_prof,   # PAD-782
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
                                             if _n is not None else None)(_MW.lookup(reader, _rel)),
@@ -9253,6 +9259,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
                     from None
             for _line in mode_plan.lines:
+                if _line.startswith("attract items: "):      # PAD-782: said under their own name
+                    log("Attract items: %s." % _line[len("attract items: "):], "info")
+                    continue
                 log("%s: %s." % ("Modes" if _modes_on else "Random clips",
                                  _line[len("random clips: "):]
                                  if _line.startswith("random clips: ") and not _modes_on
@@ -9262,7 +9271,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               % len(mode_plan.variants.new)
                               if mode_plan.variants is not None
                               else "adding the music modes" if sound_modes_cfg
-                              else "adding the picture settings"), t0)
+                              else "adding the picture settings" if picture_cfg
+                              else "adding the attract items"), t0)
 
         # PAD-444: the own copies' bank entries and files, on the bank the
         # modes just rewrote when they did.  The program part already landed
@@ -10530,6 +10540,46 @@ class _PictureMenu(_MusicModeMenu):
         self.why = str(why).rstrip(".") or "unknown"
         self.log("Picture settings: %s could not be added to the operator menu (%s)."
                  % (_MSet.SETTINGS[self.KEY][1], self.why), "warning")
+
+
+def _attract_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-782: the title of the card the attract items go on, or ``None`` when the project
+    asks nothing of the attract mode or they are left out (one warning says why). The modes'
+    gate: an image file, a host that can add files to it, a title whose attract table the
+    app can read."""
+    from . import attract_items as _AI
+    from . import mode_write as _MW
+    rec = _AI.load(assets_dir)
+    if rec.empty():
+        return None
+    if dest_is_device:
+        why = ("a direct-SD write cannot add files to the card; build an image file to carry "
+               "them")
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        from . import clip_variants as _CVa
+        prof = _CVa.project_title(assets_dir, probe=True)
+        why = _AI.title_refusal(prof)
+    if why:
+        log("Attract items: the attract mode's items are left out of this build: %s."
+            % why.rstrip("."), "warning")
+        return None
+    n = len(rec.items)
+    log("Attract items: %s%s. %s" % (
+        "%d item(s) of your own go between the game's attract screens" % n if n else
+        "the attract mode is changed",
+        "" if rec.champions else "; the modes' challenge champions are not shown in attract",
+        _AI.INSIDER_WORDS), "info")
+    return prof
 
 
 def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):

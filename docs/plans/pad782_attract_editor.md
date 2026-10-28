@@ -75,13 +75,30 @@ Rush, Star Wars x3, Sword of Rage, Venom) start their pages another way: the fin
    Godzilla derives them). Left out (refused up front by the app): D&D LE/Pro, Elvira, Bond 60th, SW ELG, Sword of
    Rage LE/Pro, Venom LE/Pro - their attract starts its pages from straight-line code (Sword of Rage 0x41138: `movw
    r0, #page; bl create` one after another), no table to put items into. tests/test_pad782_attract_items.py.
-4. `attract_items.py` (plugin): the project record (staged key `attract_items`: items with kind photo/clip/text/
-   champions, anchor entry + before/after, dwell), naming the game's pages for the page (entry -> what it shows:
-   champion pages via the challenge page sites, clip names the page plays, message text), making each item a clip
-   (stills via ffmpeg, text cards rendered with the game's font), attract.cfg; the engine's Write/Try it road beside
-   the random clips, gated like modes (Insider Connected); mod packs and Transfer Mods carry the files.
-5. The page: a new "Attract" tab (Make group): the game's pages in order with our items between them, drag to order,
-   dwell per item, add photo folder / clip / text card, champions on/off, the attract flipper sounds moved here from
-   the Audio tab; Try it. Help + Write log say the Insider gate.
-6. Proof: Try it on Godzilla LE 1.16 and Bond LE 1.06 with three photos and a text card; a built card; before/after
-   shots of the page and the attract cycle; prebuilt runtime rebuilt; tests.
+4. [done, run 2] `attract_items.py`: the record (staged key `attract_items`: items photo/clip/text with entry,
+   after/before, seconds; champions on/off), the game's pages named off the program (`read_pages`, `project_pages`
+   cached in the title cache: champion pages, clip names, the page's own names - Godzilla: Game Title, Player Id,
+   Credits Press Start, 32 champion pages...; Bond: the intro logo, the tutorials), every item made a clip of the
+   bank's format (photos / text cards: a still clip of their time at the reference clip's size; videos converted as a
+   slot's replacement; colour profile; never cut), `PadAttract<k>` in the bank, attract.cfg. mode_write.plan(attract=):
+   alone (attract_plan) or on top of modes / random clips / music modes / picture settings; p2_payload stages
+   attract.cfg; engine `_attract_for_build` (the gate, the Insider sentence in the Write log); tryit.sh and
+   cardmodes.sh carry attract.cfg; the runtime takes its whole gate when attract.cfg asks anything, whatever the other
+   .cfg files say ("only").
+   PROVEN: engine.write_overrides of a project (C:/tmp/PAD-782/proj_gz: three photos + a text card after GRAND
+   CHAMPION, a game clip before the first page) on stock Godzilla LE 1.16, run like Try it (rig job5.sh): GRAND
+   CHAMPION, PHOTO 1, PHOTO 2, PHOTO 3, the text card, HIGH SCORE #1 - every cycle; the clip before PLAYER 1; Start
+   during an item: the item comes down, the game starts; segv 0. Insider gate armed.
+   OPEN (next run): on James Bond (clip v2) the items do not reach the glass in attract - the bank's VideoSurface is
+   drawn only by the main-play screen, which is not up in attract (the frames show blue / the last page held). Find
+   how to put the bank scene (or a scene of ours) on the glass from an attract page: the game's attract pages show
+   their clips on surfaces of their own scenes (Bond 0xb54e7508 for the intro and tutorials) - candidates: show the
+   bank scene from the page process the way a page shows its scene; or put our clips into the attract scene that page
+   uses and run that page's own clip code with our name; or the display_draw route (the bank's player) during an item.
+5. The page: a new "Attract" tab (Make group): the game's screens in order (runs of the same name folded) with our
+   items between them, drag to order, seconds per item, add photos (several at once: a slideshow) / a clip / a text
+   card, champions on/off, the attract flipper sounds moved here from the Audio tab; Try it. Help + Write log + the
+   page say the Insider gate (attract_items.INSIDER_WORDS). Titles the app cannot add to say why (NO_TABLE: D&D,
+   Elvira, Bond 60th, SW ELG, Sword of Rage, Venom).
+6. Proof: Try it on Godzilla LE 1.16 (done at the engine level, run 5) and Bond LE 1.06 (after the clip v2 fix) from
+   the app; a built card on the rig; before/after shots of the page and of the attract cycle; tests.

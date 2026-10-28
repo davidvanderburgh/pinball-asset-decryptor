@@ -163,3 +163,39 @@ def test_the_finder_reads_each_shipped_port_off_its_program(name):
     assert (s.entry, s.size, s.page_at, s.count, s.sleep) == (
         want["attract_table"], want["attract_entry_size"], want["attract_page_at"], want["attract_count"],
         want["attract_sleep"])
+
+
+# ---- the project's record, attract.cfg, the text card ------------------------------------------------------
+from pinball_decryptor.plugins.stern import attract_items as AI   # noqa: E402
+
+
+def test_the_record_keeps_only_items_it_can_show():
+    rec = AI.clean({"champions": False, "items": [
+        {"kind": "photo", "file": "a.jpg", "entry": 8, "seconds": 400},
+        {"kind": "text", "text": "\n  Welcome  \n\n\nline3\nline4\nline5", "entry": "2", "where": "before"},
+        {"kind": "text", "text": "   ", "entry": 1},
+        {"kind": "clip", "file": "", "entry": 1},
+        {"kind": "sound", "file": "x.wav", "entry": 1},
+        {"kind": "clip", "file": "c.mp4", "entry": "x"},
+    ]})
+    assert not rec.champions and [i.kind for i in rec.items] == ["photo", "text"]
+    assert rec.items[0].seconds == AI.MAX_SECONDS and rec.items[0].where == "after"
+    assert rec.items[1].text == "Welcome\n\n\nline3" and rec.items[1].where == "before" and rec.items[1].entry == 2
+    assert AI.clean(rec.as_dict()).as_dict() == rec.as_dict()
+    assert AI.Record().empty() and not AI.Record(champions=False).empty()
+
+
+def test_attract_cfg_is_what_the_runtime_reads():
+    text = AI.cfg_text([(8, "after", "PadAttract1", 4000), (0, "before", "PadAttract2", 3000)], champions=False)
+    lines = [l for l in text.splitlines() if not l.startswith("#")]
+    assert lines == ["champions off", "item 8 after PadAttract1 4000", "item 0 before PadAttract2 3000"]
+    assert "champions" not in AI.cfg_text([], champions=True)
+
+
+def test_a_text_card_fills_the_screen(tmp_path):
+    from PIL import Image
+    out = AI.text_card("Welcome to Dave's basement\nFree play all night", str(tmp_path / "t.png"), 1360, 768)
+    im = Image.open(out).convert("L")
+    box = im.point(lambda v: 255 if v > 128 else 0).getbbox()
+    assert im.size == (1360, 768) and box is not None
+    assert box[2] - box[0] > 1360 * 0.5                         # the longer line runs over half the width

@@ -13095,6 +13095,25 @@ static void ait_tick(void)
     }
 }
 
+/* attract.cfg asks something of the attract mode (an item, or the champions off): the card then takes the runtime's
+ * whole gate even when its other files say "only" (a card of random clips, music modes or picture settings and attract
+ * items) - an attract item is put in the way a mode's champion is, with the same Insider Connected gate */
+static int str_starts(const char *s, const char *prefix);
+static int attract_wanted(void)
+{
+    static char raw[8192];
+    long n = -1, i;
+    unsigned k;
+    for (k = 0; k < sizeof AIT_FILES / sizeof AIT_FILES[0] && n < 0; k++)
+        n = pm_read_file(AIT_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return 0;
+    raw[n] = 0;
+    for (i = 0; i < n; i++)
+        if ((!i || raw[i - 1] == '\n') && (str_starts(raw + i, "item ") || str_starts(raw + i, "champions off")))
+            return 1;
+    return 0;
+}
+
 static void attract_arm(void)
 {
     static char raw[8192];
@@ -16619,7 +16638,7 @@ static void pad_mode_start(void)
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
     sndm_arm();                               /* PAD-494: nor does a music mode */
     pic_arm();                                /* PAD-537: nor do the picture settings */
-    if (clipv_only || sndm_only || pic_only) {
+    if ((clipv_only || sndm_only || pic_only) && !attract_wanted()) {   /* PAD-782: attract items take the whole gate */
         say("armed: %s%s%s only (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
             clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : "picture.cfg");

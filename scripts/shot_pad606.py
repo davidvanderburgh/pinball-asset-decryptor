@@ -1,4 +1,4 @@
-"""PAD-606 proof shot: Advanced Audio Options, the "Allow replacements longer than the original" text (2 GB no longer trims: past it the longer sounds go into extra sound banks).
+"""PAD-606 proof shot: Advanced Audio Options, the "Allow replacements longer or shorter than the original" text (2 GB no longer trims: past it the longer sounds go into extra sound banks).
 
     python scripts/shot_pad523.py <repo> <out_dir> <prefix>
 
@@ -45,7 +45,7 @@ def main():
             page.get_by_role("button", name="Advanced").first.click()
             page.wait_for_selector(".aud-adv", timeout=20000)
             time.sleep(1)
-            blip = page.get_by_text("Allow replacements longer than the original", exact=False).first
+            blip = page.get_by_text("Allow replacements longer or shorter than the original", exact=False).first
             blip.scroll_into_view_if_needed()
             page.evaluate("document.querySelector('.aud-adv').closest('.bd')"
                           ".scrollTop -= 40")

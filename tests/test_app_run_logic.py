@@ -561,7 +561,7 @@ def test_audio_advanced_offers_replacement_loudness(tmp_path):
 
 def test_audio_advanced_offers_longer_replacements_and_wires_them_up(
         tmp_path, monkeypatch):
-    """The "Allow replacements longer than the original" option carries out
+    """The "Allow replacements longer or shorter than the original" option carries out
     to the env var the engine gates on.  The engine reads it from os.environ
     (spawned encode workers inherit that, nothing else), so an option that
     is saved but not wired up would look normal and silently keep trimming.

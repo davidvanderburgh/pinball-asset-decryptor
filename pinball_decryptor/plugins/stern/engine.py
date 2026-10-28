@@ -101,7 +101,7 @@ _CACHE_KINDS = (
     (_REV_TAG + ".pkl",             re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.pkl$")),
     (_REV_TAG + ".consumed.npy",    re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.consumed\.npy$")),
     (_REV_TAG + ".sfxnames5.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
-    (_REV_TAG + ".sites2.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
+    (_REV_TAG + ".sites3.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
     (_REV_TAG + ".requests3.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.requests\d+\.json$")),
 )
 
@@ -4420,8 +4420,9 @@ def _audio_grow_gate(dest_is_device, gr_path=None):
         # Name the switch: the default is off, so this is the reason nearly
         # every trim gives, and a user who handed over a whole song has no
         # other way to learn the option exists (PAD-174).
-        return False, ("longer replacements are off; to keep them whole, tick "
-                       "\"Allow replacements longer than the original\" "
+        return False, ("longer and shorter replacements are off; to keep each at "
+                       "its own length, tick "
+                       "\"Allow replacements longer or shorter than the original\" "
                        "under the Audio tab's Advanced... and build an "
                        "image file")
     if dest_is_device:
@@ -4485,15 +4486,34 @@ def _trimmed_notice(grows, why):
     biggest cut first.  The line used to give only a count, so a user who
     replaced a looping music bed with a whole song found out it had been cut
     to the loop's length by extracting the card (PAD-174)."""
+    shorts = {i: g for i, g in grows.items() if g[1] < g[0]}
+    grows = {i: g for i, g in grows.items() if i not in shorts}
+    if not grows:
+        # PAD-800: only shorter ones lost their records (the bank's budget)
+        return _padded_notice(shorts, why)
     order = sorted(grows, key=lambda i: (grows[i][0] - grows[i][1], i))
     names = ", ".join("idx %d (%.2f s cut to %.2f s)"
                       % (i, grows[i][1] / 44100.0, grows[i][0] / 44100.0)
                       for i in order)
     worst = max(want - room for room, want in grows.values())
-    return ("%d replacement(s) run past their original sound's length and "
-            "are trimmed to fit: %s. Trimmed: %s."
-            % (len(grows), why, names),
-            "warning" if worst >= _TRIM_WARN_SAMPLES else "info")
+    msg = ("%d replacement(s) run past their original sound's length and "
+           "are trimmed to fit: %s. Trimmed: %s."
+           % (len(grows), why, names))
+    if shorts:
+        msg += " " + _padded_notice(shorts, why)[0]
+    return msg, "warning" if worst >= _TRIM_WARN_SAMPLES else "info"
+
+
+def _padded_notice(shorts, why):
+    """``(message, level)`` for the shorter replacements of *shorts* (idx ->
+    ``(room, wanted)``) this write pads with silence to their original's
+    length because it can't give them records of their own (PAD-800)."""
+    names = ", ".join("idx %d (%.2f s, padded to %.2f s)"
+                      % (i, shorts[i][1] / 44100.0, shorts[i][0] / 44100.0)
+                      for i in sorted(shorts))
+    return ("%d replacement(s) are shorter than their original sound and are "
+            "padded with silence to its length, which the game still plays "
+            "them for: %s. Padded: %s." % (len(shorts), why, names), "info")
 
 
 def _asset_path(assets_dir, wav):
@@ -4543,6 +4563,75 @@ def _classify_audio_edits(byidx, audio_edits, assets_dir):
         else:
             grows[idx] = (room, want)
     return fits, grows
+
+
+#: A replacement at least this much (card samples, 0.1 s) shorter than the sound
+#: it replaces ends at its own length when the bank may grow (PAD-800); one
+#: closer to the stock length is fitted in place, its few ms of silence not
+#: worth a record of its own.
+_SHORTER_MIN = 4410
+
+
+def _shorter_audio_edits(byidx, fits, assets_dir):
+    """PAD-800: ``{idx: (room, want)}`` for the replacements of *fits* (from
+    :func:`_classify_audio_edits`) that end at least :data:`_SHORTER_MIN`
+    before their slot does.
+
+    Fitted in place, such a sound is padded with silence to the stock length,
+    and the game still plays it for that long: a callout holds its voice
+    through the silence and a looping song sits silent before each loop.
+    Given a record of its own length, appended exactly as a longer one is
+    (:func:`_stage_grown_image`, ``want < room``), and its play tables
+    re-pointed with the declared duration moved DOWN by the difference
+    (:func:`_plan_descriptor_repoint`), it ends where its audio ends.  A
+    multi-band record keeps its length, as it does for a longer file."""
+    from .spike2.emulator import bands_of, emitted_length
+    out = {}
+    for idx, wav in fits.items():
+        p = byidx.get(idx)
+        if p is None or bands_of(p) > 1:
+            continue
+        want = _wav_frames_44k(_asset_path(assets_dir, wav))
+        room = emitted_length(p.get("length", 0))
+        if want and want > 0 and room - want >= _SHORTER_MIN:
+            out[idx] = (room, want)
+    return out
+
+
+def _shorter_kept_for_turns(shorts, modes, log):
+    """*shorts* (:func:`_shorter_audio_edits`) less every sound that plays
+    files in turn (PAD-565): those files are played under the sound's own
+    descriptor, for as long as it declares, so a shorter sound 1 would cut
+    every longer file in turn to its length.  Such a sound keeps the
+    original's length, padded with silence, and the log says so (PAD-800)."""
+    from . import sound_modes as _SMo
+    turned = {i for i in (_SMo.slot_idx(r) for r in getattr(modes, "turns", None) or ())
+              if i is not None}
+    kept = {}
+    for idx, spec in shorts.items():
+        if idx in turned:
+            log("idx %d: the replacement runs %.2f s where the original ran %.2f s, "
+                "but the sound plays files in turn, which the game plays for as long "
+                "as this sound; it keeps the original's length, padded with silence."
+                % (idx, spec[1] / 44100.0, spec[0] / 44100.0), "info")
+        else:
+            kept[idx] = spec
+    return kept
+
+
+def _resized_words(spec):
+    """How the log names what a grow of ``(room, want)`` gives a sound:
+    a "longer" or a "shorter" copy (PAD-800)."""
+    return "shorter" if spec[1] < spec[0] else "longer"
+
+
+def _kept_in_slot(spec):
+    """What happens to a replacement of ``(room, want)`` that can't have a
+    record of its own: a longer one is trimmed, a shorter one is padded
+    with silence to the original's length (PAD-800)."""
+    if spec[1] < spec[0]:
+        return "the replacement keeps the original's length, padded with silence"
+    return "the replacement is trimmed to fit"
 
 
 def _shader_colour_profile(assets_dir):
@@ -8152,14 +8241,27 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     _greads = None      # the staged bank's consumed map, once derived
                     _fits, _grows = _classify_audio_edits(
                         {p["idx"]: p for p in params}, audio_edits, assets_dir)
-                    if _grows:
+                    # PAD-800: a shorter replacement ends at its own length
+                    # on the terms a longer one keeps its whole length
+                    _shorts = _shorter_audio_edits(
+                        {p["idx"]: p for p in params}, _fits, assets_dir)
+                    if _shorts and sound_modes:
+                        _shorts = _shorter_kept_for_turns(
+                            _shorts, sound_modes, log)
+                    if _grows or _shorts:
                         _gok, _gwhy = _audio_grow_gate(dest_is_device, gr_path)
                         if _gok:
                             _gok, _gwhy = _grown_source_gate(params)
                         if _gok:
-                            grows = _grows
+                            grows = dict(_grows)
+                            grows.update(_shorts)
+                            _fits = {i: w for i, w in _fits.items()
+                                     if i not in _shorts}
                         else:
-                            log(*_trimmed_notice(_grows, _gwhy))
+                            if _grows:
+                                log(*_trimmed_notice(_grows, _gwhy))
+                            if _shorts:
+                                log(*_padded_notice(_shorts, _gwhy))
                     desc_sites = []
                     if grows:
                         # A longer copy is only worth appending if a play
@@ -8422,9 +8524,12 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         for idx in sorted(grows):
                             room, want = grows[idx]
                             log("idx %d: the replacement runs %.2f s where the "
-                                "original ran %.2f s; the sound bank grows to "
-                                "keep it whole." % (idx, want / 44100.0,
-                                                    room / 44100.0), "info")
+                                "original ran %.2f s; %s." % (
+                                    idx, want / 44100.0, room / 44100.0,
+                                    "it gets a record of its own length, so "
+                                    "it ends where its audio does" if want < room
+                                    else "the sound bank grows to keep it "
+                                    "whole"), "info")
                         # Each of the next two steps boots the emulator; a
                         # Cancel is answered between them rather than after
                         # the stage, the way the encode below answers one.
@@ -8668,7 +8773,25 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     # params for every sound before shipping.
                     pathA_applied = False
                     pathA_why = None
-                    if audio_patches and _pathA_enabled():
+                    # PAD-800: every replaced sound a record of its own, appended
+                    # and encoded along the chain (_chain_encode_appended): each
+                    # window holds its own audio already, so there is no scrap to
+                    # redirect (the cave found "no windows" and the build was
+                    # reported as one with the scrap)
+                    _all_own = bool(
+                        audio_patches and grow_places and not [
+                            o for o in audio_patches
+                            if o not in _appended_body_offsets(
+                                audio_patches, grow_places,
+                                last_only=not _family)])
+                    if _all_own:
+                        pathA_why = ("every replaced sound is a record of its own "
+                                     "holding its own audio")
+                        log("Blip-free callouts: every replaced sound is a new "
+                            "record encoded with its own audio in every window, so "
+                            "no scrap of the original plays and no firmware "
+                            "redirect is needed.", "info")
+                    elif audio_patches and _pathA_enabled():
                         try:
                             _pathA_preflight(dest_is_device)
                             # The cave grows game_real, so the whole firmware is
@@ -8813,7 +8936,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                 "PAD_STERN_SKIP_MASTERDIR_FIX") == "1":
                             why += ("; master-directory restore skipped "
                                     "(experimental)")
-                        audio_mode = (("blip-free", "") if pathA_applied
+                        audio_mode = (("blip-free", "")
+                                      if pathA_applied or _all_own
                                       else ("standard", why))
                         _audit_audio_patches(params, audio_patches, log)
                         # Honest end-of-pipeline check: decode the FINAL card
@@ -10908,7 +11032,7 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
     One file in several modes of a slot at one loudness goes in once: those modes share its
     record (at two loudnesses it is two records, each levelled its own way). A file longer
     than its slot's own sound is cut to that length unless the build may keep replacements whole
-    (*longer_ok*: "Allow replacements longer than the original"), as a replacement is.
+    (*longer_ok*: "Allow replacements longer or shorter than the original"), as a replacement is.
 
     PAD-511: a slot the game plays as the opening part of a song in parts (*sites*, the play
     tables: :func:`_sound_mode_song`) gives its file the whole song - ``"song"`` ``{sid: [idx,
@@ -11009,7 +11133,7 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                     who, ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
                     when), "info")
         if (not longer_ok or _SMo.is_turn(mode)) and want > room and not _SMo.is_juke(mode):
-            # as a replacement is with "Allow replacements longer than the original" off; a file
+            # as a replacement is with "Allow replacements longer or shorter than the original" off; a file
             # in turn always (PAD-565: the game plays it for as long as its slot's descriptor says).
             # Never a jukebox song (PAD-685): the game plays a record it is handed whole
             try:
@@ -11113,11 +11237,15 @@ def _mode_descriptor_swaps(desc, sid, mask, swaps, extent=None):
         d[off:off + 8] = _host_payload(payload, host_key, mask)
         done.add(slot_key)
         moved += mode_units - slot_units
+        if len(payloads) > 1:
+            _move_wait(d, off, mode_units - slot_units, extent)      # PAD-800
     if not done:
         return None, set()
     dur = struct.unpack_from("<I", d, _DESC_DUR_OFF)[0]
     # (a one-payload descriptor is one sound: its whole declared length is the mode file's)
     new = (swaps[next(iter(done))][1] if len(payloads) == 1 else max(1, dur + moved))
+    if len(payloads) == 1:
+        _move_wait(d, payloads[0][0], int(new) - dur, extent)       # PAD-800
     struct.pack_into("<I", d, _DESC_DUR_OFF, int(new) & 0xFFFFFF)
     return bytes(d), done
 
@@ -15148,8 +15276,10 @@ def _audit_audio_patches(params, patches, log):
         owner = None
         for p, s, d in own.get(off, ()):
             # an APPENDED record's encode also covers its silent lead-out (_APPENDED_TAIL,
-            # item 150 follow-up): its window is that much longer than its length
-            if len(body) == s * p["length"] or (p.get("grown") and not d and len(body) == s * (
+            # item 150 follow-up): its window is that much longer than its length.  It
+            # starts a word below its body as any window may (PAD-800: every appended
+            # body on Iron Maiden LE 1.18 did, and each build asked to be reported)
+            if len(body) == s * p["length"] or (p.get("grown") and len(body) == s * (
                     p["length"] + _APPENDED_TAIL)):
                 owner = (p, s, d)
                 break
@@ -18559,7 +18689,7 @@ def _derive_grown(gr_path, staged, params_stock, log, progress=None):
             "have changed (first: idx %d); aborting rather than building a "
             "card whose other callouts would play as noise."
             % (len(moved), moved[0]))
-    log("Sound bank staged with %d longer sound(s); the other %d are "
+    log("Sound bank staged with %d sound(s) at a new length; the other %d are "
         "byte-identical." % (len(grown_idx), len(params) - len(grown_idx)),
         "info")
     return params, reads
@@ -18793,9 +18923,41 @@ _DESC_DUR_RATE = 4000
 #: One op11 payload in one descriptor, as the card carries it.  ``off`` is
 #: where the eight payload bytes sit in ``image.bin`` and ``keystream`` the
 #: eight bytes whitening them there; ``dur_off`` / ``dur_keystream`` are the
-#: same for the four-byte declared duration, ``duration`` its plain value.
+#: same for the four-byte declared duration, ``duration`` its plain value;
+#: ``wait_off`` / ``wait_keystream`` / ``wait`` the same for the wait right
+#: after the payload (:func:`_wait_after`), ``None`` when it has none.
 _DescSite = namedtuple(
-    "_DescSite", "sid off keystream payload dur_off dur_keystream duration")
+    "_DescSite", "sid off keystream payload dur_off dur_keystream duration "
+    "wait_off wait_keystream wait", defaults=(None, None, None))
+
+#: PAD-800: ``10 <u32>`` waits that long (1/4000 s) before the script's next op.  A speech
+#: descriptor plays its record with no wait of its own (``0b 00 00 00`` + key) and then waits a
+#: fixed gap short of its declared length before it brings the music back up (``09 00 3c ...``);
+#: the game holds the sound's channel until the script is over.  Iron Maiden LE 1.18: 879 of its
+#: 983 descriptors, the gap 0.4 s (1601) or 0.2 s (801) on most.  A record given another length
+#: that left the wait as it was held its channel ~2x the difference past its audio (0.5 s for a
+#: 3.67 s call: 7.1 s), and a longer one brought the music back while it still played.  A wait
+#: after a later play runs from that play (sid 950's 20.7 s after its second record), so only
+#: the wait right after a record's own payload moves with it.
+_DESC_WAIT = 0x10
+
+
+def _wait_after(desc, payload_off, extent=None):
+    """``(offset of its word, value)`` of the wait (:data:`_DESC_WAIT`) right after the op11
+    payload at *payload_off* of descriptor *desc*, or ``None``."""
+    o = payload_off + 8
+    end = len(desc) if extent is None else min(len(desc), int(extent))
+    if o + 5 <= end and desc[o] == _DESC_WAIT:
+        return o + 1, struct.unpack_from("<I", desc, o + 1)[0]
+    return None
+
+
+def _move_wait(d, payload_off, delta, extent=None):
+    """Bytearray *d* (a plain descriptor) with the wait after its payload at *payload_off*
+    moved by *delta* (1/4000 s, never below 0), as its declared duration moves (PAD-800)."""
+    w = _wait_after(d, payload_off, extent)
+    if w is not None and delta:
+        struct.pack_into("<I", d, w[0], max(0, w[1] + int(delta)) & 0xFFFFFFFF)
 
 
 def _duration_units(samples):
@@ -18947,7 +19109,8 @@ def _card_sites_key(disk_f, gr_path, img_path):
 
 
 def _sites_cache_path(key):
-    return os.path.join(_params_cache_dir(), key[:32] + _REV_TAG + ".sites2.pkl")
+    # sites3: PAD-800's waits
+    return os.path.join(_params_cache_dir(), key[:32] + _REV_TAG + ".sites3.pkl")
 
 
 def _card_descriptor_sites(gr_path, img_path, log=None, card_key=None):
@@ -19013,8 +19176,10 @@ def _descriptor_sites(gr_path, img_path, log=None):
     for sid, dec0, ks, desc in found:
         dur = struct.unpack_from("<I", desc, d0)[0]
         for p, payload in _own_payloads(desc, extents[dec0]):
+            w = _wait_after(desc, p, min(extents[dec0], len(ks)))
             out.append(_DescSite(sid, dec0 + p, ks[p:p + 8], payload,
-                                 dec0 + d0, ks[d0:d0 + 4], dur))
+                                 dec0 + d0, ks[d0:d0 + 4], dur,
+                                 *((dec0 + w[0], ks[w[0]:w[0] + 4], w[1]) if w else ())))
     return out
 
 
@@ -19038,12 +19203,12 @@ def _grows_named_by_a_descriptor(grows, byidx, sites, log):
         if k0 is None:
             log("idx %d: this firmware's decode reports no container key for "
                 "the sound, so its play tables can't be re-pointed at a "
-                "longer copy; the replacement is trimmed to fit." % idx,
+                "%s copy; %s." % (idx, _resized_words(spec), _kept_in_slot(spec)),
                 "info")
         elif k0 not in named:
             log("idx %d: nothing in the game's play tables names this sound, "
-                "so a longer copy would never be played; the replacement is "
-                "trimmed to fit." % idx, "info")
+                "so a %s copy would never be played; %s."
+                % (idx, _resized_words(spec), _kept_in_slot(spec)), "info")
         else:
             kept[idx] = spec
     return kept
@@ -19068,8 +19233,8 @@ def _grows_reencodable(gr_path, img_path, grows, byidx, log):
         if p is not None and bands_of(p) > 1:
             # its appended copy would need every variant's lane laid out anew
             log("idx %d: this sound plays one of %d variants, which can't be "
-                "lengthened; the replacement is trimmed to fit."
-                % (idx, bands_of(p)), "info")
+                "given another length; %s."
+                % (idx, bands_of(p), _kept_in_slot(grows[idx])), "info")
             grows = {k: v for k, v in grows.items() if k != idx}
     if not grows:
         return grows
@@ -19090,8 +19255,8 @@ def _grows_reencodable(gr_path, img_path, grows, byidx, log):
                 kept[idx] = spec
             else:
                 log("idx %d: this app can't re-encode this sound's codec, so it "
-                    "can't be lengthened; the replacement is trimmed to fit."
-                    % idx, "info")
+                    "can't be given another length; %s."
+                    % (idx, _kept_in_slot(spec)), "info")
     finally:
         emu.close()
     return kept
@@ -20847,6 +21012,17 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
     return beds
 
 
+def _moved_wait_write(site, delta):
+    """``{off: bytes}``: the whitened write that moves *site*'s wait (:data:`_DESC_WAIT`) by
+    *delta*, or nothing when it has none (PAD-800)."""
+    w = getattr(site, "wait", None)
+    if w is None or not delta or site.wait_off is None:
+        return {}
+    new = max(0, int(w) + int(delta)) & 0xFFFFFFFF
+    return {site.wait_off: bytes(a ^ b for a, b in zip(struct.pack("<I", new),
+                                                        site.wait_keystream))}
+
+
 def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=(),
                              bank_beds=None):
     """``({off: bytes}, {sid: ({key8}, duration)})`` -- the writes that
@@ -20892,6 +21068,7 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=(),
             expect[s.sid] = (keys, dur)
             writes[s.dur_off] = bytes(
                 a ^ b for a, b in zip(struct.pack("<I", dur), s.dur_keystream))
+            writes.update(_moved_wait_write(s, grew))
             hits += 1
         if not hits:
             raise RuntimeError(
@@ -20948,6 +21125,8 @@ def _plan_descriptor_repoint(params, sites, mask=None, family=None, keep=(),
             expect[s.sid] = (keys, dur)
             writes[s.dur_off] = bytes(
                 a ^ b for a, b in zip(struct.pack("<I", dur), s.dur_keystream))
+            # and the wait after it, so the script ends with it (PAD-800)
+            writes.update(_moved_wait_write(s, grew))
             hits += 1
         if not hits:
             raise RuntimeError(
@@ -21097,8 +21276,8 @@ def _repoint_descriptors(gr_path, staged, params, sites, log, templates=None, ke
     # alone, is not counted: its descriptors were not touched)
     n_grown = sum(1 for p in params if p.get("grown") and p["idx"] not in keep
                   and bytes(p.get("stock_findkey") or b"") != bytes(p.get("findkey") or b""))
-    log("Play tables re-pointed: %d descriptor(s) now name the longer copy "
-        "of %d sound(s) and declare the new length, confirmed through the "
+    log("Play tables re-pointed: %d descriptor(s) now name the new copy "
+        "of %d sound(s) (longer or shorter) and declare its length, confirmed through the "
         "game's own resolver." % (len(expect), n_grown), "info")
     if keep:
         log("Play tables: %d sound(s) of the modes' own are in the bank under keys of their own "

@@ -703,6 +703,8 @@ def compose_descriptor(template, key8, duration, music):
                            % t[:40].hex())
     plain = bytearray(t)
     plain[p:p + 8] = bytes(key8)
+    # PAD-800: the wait after the play keeps its gap to the end (engine._DESC_WAIT)
+    E._move_wait(plain, p, int(duration) - struct.unpack_from("<I", t, E._DESC_DUR_OFF)[0])
     plain[E._DESC_DUR_OFF:E._DESC_DUR_OFF + 4] = struct.pack("<I", int(duration) & 0xFFFFFFFF)
     return bytes(plain)
 
@@ -1076,6 +1078,7 @@ def seq_descriptor(desc, sid, keys, moves, mask):
                                % sid)
         d[off:off + 8] = bytes(keys[k])
         moved += int(moves.get(k, 0))
+        E._move_wait(d, off, int(moves.get(k, 0)))      # PAD-800: its wait moves with it
     dur = struct.unpack_from("<I", d, E._DESC_DUR_OFF)[0]
     struct.pack_into("<I", d, E._DESC_DUR_OFF, max(1, dur + moved) & 0xFFFFFFFF)
     return bytes(d)

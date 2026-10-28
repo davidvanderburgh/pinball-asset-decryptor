@@ -445,11 +445,16 @@ def plan_grow_records(directory, edits, body_pad=BODY_PAD, file_size=None):
         if e.idx in seen:
             raise MasterDirError("record %d appears twice in the grow plan" % e.idx)
         seen.add(e.idx)
-        if e.new_length <= e.old_length:
+        if e.new_length == e.old_length:
+            # (PAD-800: a SHORTER one is appended as a longer one is, so the
+            # game plays it for its own length, not the stock one's)
             raise MasterDirError(
-                "record %d: new length %d is not longer than %d -- a sound that "
-                "fits its slot is written in place, not grown"
-                % (e.idx, e.new_length, e.old_length))
+                "record %d: new length %d is the length it has -- a sound that "
+                "fills its slot is written in place, not grown"
+                % (e.idx, e.new_length))
+        if e.new_length <= 0:
+            raise MasterDirError("record %d: new length %d is not a length"
+                                 % (e.idx, e.new_length))
         if e.body_bytes <= 0:
             raise MasterDirError("record %d: body_bytes must be positive" % e.idx)
 

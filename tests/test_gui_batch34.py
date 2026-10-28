@@ -199,6 +199,9 @@ class _ScanStub:
 def _sync_threads(monkeypatch):
     import threading
     monkeypatch.setattr(threading, "Thread", _SyncThread)
+    # a thread stand-in that runs inline cannot host a pool's worker loop, so
+    # the baseline hashing (PAD-794) runs inline too
+    monkeypatch.setattr(checksums, "HASH_THREADS", 1)
 
 
 def test_concurrent_change_scans_all_land(tmp_path, _sync_threads):

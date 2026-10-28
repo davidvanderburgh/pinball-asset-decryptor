@@ -76,12 +76,78 @@ def is_other_extract(path):
     return os.path.isfile(os.path.join(path, CHECKSUMS_FILE))
 
 
+#: how many files the baseline and the change scans hash at once.  MD5 runs
+#: outside the GIL, so a few threads overlap the reads with the hashing (one
+#: core hashed 1.8 GB in 2.6 s, PAD-610); more than this and a spinning disk
+#: or a network share just thrashes.
+HASH_THREADS = 4
+
+#: one read per MiB: the 64 KiB reads of old cost a Python round trip each
+#: (sixteen per MiB) and showed up as the hashing's own overhead on the
+#: multi-hundred-MB videos a Stern extract writes
+_HASH_BUF = 1 << 20
+
+
 def md5_file(path):
     h = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
+    buf = bytearray(_HASH_BUF)
+    view = memoryview(buf)
+    with open(path, "rb", buffering=0) as f:
+        while True:
+            n = f.readinto(view)
+            if not n:
+                break
+            h.update(view[:n])
     return h.hexdigest()
+
+
+def _stat_and_md5(abs_path):
+    """``(size, mtime_ns, md5)`` of a file: the stat first, so a file that
+    changes while it is being hashed is remembered with the OLD stat (and so
+    re-hashed next time) rather than with the new one."""
+    st = os.stat(abs_path)
+    return st.st_size, st.st_mtime_ns, md5_file(abs_path)
+
+
+def hash_files(abs_paths, cancel=None, threads=None):
+    """Yield ``(size, mtime_ns, md5)`` for each of *abs_paths*, IN ORDER, or
+    the ``OSError`` that reading it raised, hashing on *threads* threads
+    (:data:`HASH_THREADS` when not given; 1 hashes inline, no pool).
+
+    Stops yielding promptly once *cancel()* goes true: the files not started
+    yet are dropped, and the ones in flight finish on their own threads.
+    """
+    cancel = cancel or (lambda: False)
+    paths = list(abs_paths)
+    if not paths:
+        return
+    if threads is None:
+        threads = HASH_THREADS
+
+    def _one(abs_path):
+        if cancel():
+            return None
+        try:
+            return _stat_and_md5(abs_path)
+        except OSError as e:
+            return e
+
+    if threads <= 1 or len(paths) == 1:
+        for abs_path in paths:
+            result = _one(abs_path)
+            if result is None:
+                return
+            yield result
+        return
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=min(threads, len(paths)))
+    try:
+        for result in pool.map(_one, paths):
+            if cancel() or result is None:
+                break
+            yield result
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def generate_checksums(folder, log_cb=None, progress_cb=None,
@@ -138,27 +204,36 @@ def generate_checksums(folder, log_cb=None, progress_cb=None,
             rel_path = os.path.relpath(abs_path, folder).replace("\\", "/")
             files.append((rel_path, abs_path))
 
+    # The files are hashed on a few threads and written in walk order, so the
+    # baseline reads exactly as the one-at-a-time version wrote it.  Each
+    # file's size and mtime go into the hash cache as well (core.hashcache):
+    # the first change scan after an extract then costs a stat per file
+    # instead of hashing the whole extract a second time.
+    from . import hashcache
     out_path = os.path.join(folder, CHECKSUMS_FILE)
     skipped = 0
     written = 0
+    cache = {}
     with open(out_path, "w", encoding="utf-8") as out:
-        for i, (rel_path, abs_path) in enumerate(files):
-            if cancel():
-                break
-            try:
-                md5 = md5_file(abs_path)
-            except OSError as e:
+        results = hash_files((abs_path for _rel, abs_path in files), cancel)
+        for i, ((rel_path, _abs_path), result) in enumerate(zip(files, results)):
+            if isinstance(result, OSError):
                 skipped += 1
                 if log_cb and skipped <= 5:
-                    log_cb(f"  Skipping (cannot read): {rel_path} — {e}", "info")
+                    log_cb(f"  Skipping (cannot read): {rel_path} — {result}",
+                           "info")
                 elif log_cb and skipped == 6:
                     log_cb("  ... further unreadable files will be skipped silently.",
                            "info")
                 continue
+            size, mtime_ns, md5 = result
             out.write(f"{rel_path}\t{md5}\n")
+            cache[rel_path] = [size, mtime_ns, md5]
             written += 1
             if progress_cb:
                 progress_cb(i + 1, len(files), rel_path)
+    if cache and not cancel():
+        hashcache.save(folder, cache)
 
     if log_cb:
         if skipped:
@@ -314,21 +389,48 @@ def all_changed(folder, baseline=None, progress=None, cancel=None, quick=False):
     rels = [r for r in baseline if not r.startswith(".orig/")]
     out = set()
     total = len(rels)
+    # 1. a stat per file: the quick mtime fast-path, then the size+mtime hash
+    #    cache (core.hashcache, seeded by generate_checksums) answers for
+    #    every file untouched since it was last hashed
+    from . import hashcache
+    hcache = hashcache.load(folder)
+    todo = []                        # (index, rel, abs_path) still to hash
     for i, rel in enumerate(rels):
         if cancel():
             break
-        if progress:
-            progress(i, total)
         abs_path = os.path.join(folder, *rel.split("/"))
         try:
-            if skip_mtime is not None and int(os.path.getmtime(abs_path)) <= skip_mtime:
-                continue             # untouched since extract — pristine, skip hash
-            if md5_file(abs_path) != baseline[rel]:
-                out.add(rel)
+            st = os.stat(abs_path)
         except OSError:
             # Missing/unreadable now but present at extract — treat as changed so
             # the caller can try to restore it.
             out.add(rel)
+            continue
+        if skip_mtime is not None and int(st.st_mtime) <= skip_mtime:
+            continue                 # untouched since extract — pristine, skip hash
+        ent = hcache.get(rel)
+        if ent and ent[0] == st.st_size and ent[1] == st.st_mtime_ns:
+            if ent[2] != baseline[rel]:
+                out.add(rel)
+            continue
+        todo.append((i, rel, abs_path))
+    # 2. the rest are hashed on a few threads, in baseline order
+    dirty = False
+    if todo and not cancel():
+        results = hash_files((abs_path for _i, _rel, abs_path in todo), cancel)
+        for (i, rel, _abs_path), result in zip(todo, results):
+            if progress:
+                progress(i, total)
+            if isinstance(result, OSError):
+                out.add(rel)
+                continue
+            size, mtime_ns, md5 = result
+            hcache[rel] = [size, mtime_ns, md5]
+            dirty = True
+            if md5 != baseline[rel]:
+                out.add(rel)
+    if dirty and not os.environ.get("PAD_UI_CAPTURE"):
+        hashcache.save(folder, hcache)
     if progress:
         progress(total, total)
     return out

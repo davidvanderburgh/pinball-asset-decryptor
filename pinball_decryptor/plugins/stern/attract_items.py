@@ -55,8 +55,11 @@ NO_TABLE = ("%s starts its attract screens in a way the app cannot add to yet, s
 NO_CLIPS = ("%s plays its clips in a way the app cannot use, so this game's attract screens cannot take items of your "
             "own.")
 #: PAD-782 library sweep: on the titles whose clips play on the video bank's surface the attract mode never draws that
-#: surface (an item held the cycle but the glass kept the screen before it). Items go only where a route puts them on
-#: the glass: the game's own clip call (Godzilla, Jaws, King Kong) or the attract pages' video element (James Bond).
+#: surface by itself. Items go where a route puts them on the glass (emulator sweep, a marker item pictured): the game's
+#: own clip call (Godzilla, Jaws, King Kong), the attract pages' video element (James Bond), or the page showing the
+#: bank's scene each frame as the game's own clip pages do (Aerosmith, Beatles, Foo Fighters, Guardians, John Wick, Led
+#: Zeppelin, Mando, Star Wars, Stranger Things, TMNT, X-Men, JP The Pin...). Deadpool (its video layer) and the titles
+#: below were pictured without the item on the glass.
 NO_GLASS = ("%s shows its attract clips in a way the app cannot put your items through yet, so this game's attract "
             "screens cannot take items of your own.")
 #: the gate, said on the page, in the Write log and in the help
@@ -193,7 +196,15 @@ def port_table(prof):
         return None
     return {"table": data["attract_table"], "size": int(values.get("attract_entry_size", 0)),
             "video_clip": (port.get("text") or {}).get("attract_video_clip", "") if data.get("attract_video") else "",
+            # the scene show an item's page puts the bank's scene on the glass with (pad_mode_runtime.c ait_show)
+            "show": bool(("attract_show" in port["site"] or "scene_show" in port["site"])
+                         and "player_advance" in port["site"]),
             "page_at": int(values.get("attract_page_at", 4)), "count": int(values.get("attract_count", 0))}
+
+
+#: games whose attract pages play their clips on a scene of their own (4a3b5738...) that has no Video library, so
+#: neither the bank's scene shown nor that scene takes an item onto the glass (emulator sweep, PAD-782)
+NOT_ON_GLASS = ("avengers_infinity_le", "avengers_infinity_pro", "jurassic_park_le", "jurassic_park_pro")
 
 
 def title_refusal(prof):
@@ -207,7 +218,9 @@ def title_refusal(prof):
     route = CV.route_of(prof)
     if not route:
         return NO_CLIPS % prof.label
-    if route != "clip_play" and not t.get("video_clip"):
+    if getattr(prof, "game_dir", "") in NOT_ON_GLASS:
+        return NO_GLASS % prof.label
+    if route != "clip_play" and not t.get("video_clip") and not (route == "surface" and t.get("show")):
         return NO_GLASS % prof.label
     return ""
 

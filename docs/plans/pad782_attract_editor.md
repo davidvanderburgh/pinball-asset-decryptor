@@ -162,3 +162,20 @@ mode_install.py only took stock/clips/sounds/picture.cfg ("attract.cfg is not a 
 (EXTRA_FILES / STANDALONE_FILES), and the card log now speaks of "Attract items" (engine._install_modes). Booted on the
 rig with its own runtime (PAD_CARD_MODES=1, rig/jobcard.sh): Insider gate armed, all five items played at their times
 every cycle, PHOTO 1, 2, 3 on the glass, segv 0 fatal 0. Item 2 of NEXT RUN is done.
+
+## Run 4 (2026-10-28): the scene show, and the library proven
+
+- Aerosmith 1.16's own clip page (OilProjectorLoop 0x286a4) shows the video bank's scene itself every frame:
+  player_advance(player, ms); scene_show(player, 3); the frame yield. An item's page now does the same while its clip
+  plays on the bank's surface (runtime ait_show; `site attract_show`, portattract.scene_show: masked signature, agrees
+  with all 29 ports that name scene_show; 44 ports + recipes).
+- Sweep round 2 (C:/tmp/PAD-782/sweep/job2.sh: shots during up to three showings of the marker, because the game
+  restarts its attract soon after it first comes up and a cut showing proves nothing): the marker is ON THE GLASS on
+  31 builds - Aerosmith x2, Beatles, Foo Fighters x2, Godzilla x2, Guardians x2, James Bond x2 (element), Jaws x2,
+  John Wick x2, JP The Pin, King Kong x2, Led Zeppelin x2, Mando x2, Star Wars x2, Stranger Things LE, TMNT x2, X-Men x2.
+- Off: Avengers LE/Pro and JP LE/Pro (their attract clip pages play on scene 4a3b5738..., which has no Video library;
+  clips added to the bank are not found on that surface - tried and dropped), Deadpool LE/Pro (video layer). Refused up
+  front (attract_items.NOT_ON_GLASS, the layer route). Batman 66, Iron Maiden, Metallica, Munsters, Rush, Stranger
+  Things Pro: the card's bank cannot be added to (refused when the page reads the card). Older shipped ports (e.g.
+  aerosmith_le-1.15, godzilla_pro-1.15) carry no attract lines: their programs are in the archival folder; a user's
+  older card gets the lines through port_derive.

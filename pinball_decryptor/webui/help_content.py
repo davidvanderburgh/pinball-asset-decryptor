@@ -1346,9 +1346,10 @@ HELP_CONTENT = {
          "A card with attract items of your own keeps its scores off Insider Connected: they stay on the "
          "machine. The page and the Write log say so."),
         ("Which games",
-         "Godzilla, James Bond 007 (LE and Pro), Jaws and King Kong, every version the app can read. On the "
-         "other Spike 2 games the page says why not yet: most show their attract clips in a way the app cannot "
-         "put your items through yet."),
+         "Aerosmith, The Beatles, Foo Fighters, Godzilla, Guardians of the Galaxy, James Bond 007, Jaws, "
+         "John Wick, Jurassic Park (Home Edition), King Kong, Led Zeppelin, The Mandalorian, Star Wars, "
+         "Stranger Things (LE), Teenage Mutant Ninja Turtles and Uncanny X-Men. On the other Spike 2 games "
+         "the page says why not yet."),
         ("Attract flipper sounds",
          "Stern Spike 2, every game and version. Most games play a sound or a callout when "
          "a flipper button is pressed in attract mode, with no game being played; James "

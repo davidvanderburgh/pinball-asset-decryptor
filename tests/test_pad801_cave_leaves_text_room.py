@@ -71,3 +71,14 @@ def test_godzilla_pro_keeps_room_for_longer_text_whatever_the_cave(sounds, in_ga
     reloc, why = E._text_reloc_plan(raw)
     assert reloc is not None, why
     assert reloc["capacity"] >= E._TEXT_ROOM
+
+
+def test_an_unowned_audio_patch_names_the_nearest_sound():
+    """The Patch audit names the sound nearest an unowned patch (the reporter's 72 warnings
+    said only an offset and a size)."""
+    logs = []
+    params = [{"idx": 1, "body_off": 0, "length": 100, "chan": 1},
+              {"idx": 3, "body_off": 4096, "length": 60, "chan": 1}]
+    assert E._audit_audio_patches(params, {4096: b"\0" * 920},
+                                  lambda m, *a: logs.append(m)) == 1
+    assert "nearest: idx 3 at 0x1000, +0 bytes away, window 120 bytes, 800 bytes past it" in logs[0]

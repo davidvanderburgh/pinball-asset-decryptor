@@ -15124,6 +15124,24 @@ def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None,
     _write_machine_render(p, got, stereo, np)
 
 
+def _audit_nearest(params, off, n):
+    """What :func:`_audit_audio_patches` says about a patch no sound owns
+    (PAD-801): the sound whose body starts nearest to it, that sound's own
+    window size and whether it is an appended (grown) record, so a reported
+    log names the case instead of only an offset."""
+    from .spike2.emulator import frame_bytes
+    if not params:
+        return "no sounds in the table"
+    p = min(params, key=lambda q: abs(int(q["body_off"]) - off))
+    s = frame_bytes(p)
+    return ("nearest: idx %s at 0x%x, %+d bytes away, window %d bytes%s%s"
+            % (p.get("idx"), int(p["body_off"]), off - int(p["body_off"]),
+               s * int(p["length"]),
+               ", grown" if p.get("grown") else "",
+               ", %d bytes past it" % (n - s * int(p["length"]))
+               if int(p["body_off"]) == off else ""))
+
+
 def _audit_audio_patches(params, patches, log):
     """Byte-range audit of the assembled cat-0 patch set — the paranoid check
     that OUR writes land exactly where the model says they do.
@@ -15155,7 +15173,8 @@ def _audit_audio_patches(params, patches, log):
                 break
         if owner is None:
             log("Patch audit: patch at 0x%x (%d bytes) matches no sound's "
-                "write window — please report this build log." % (off, len(body)),
+                "write window (%s) — please report this build log."
+                % (off, len(body), _audit_nearest(params, off, len(body))),
                 "warning")
             issues += 1
         elif owner[2]:

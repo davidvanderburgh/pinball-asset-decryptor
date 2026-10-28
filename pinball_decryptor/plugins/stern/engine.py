@@ -9534,6 +9534,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "picture": ([m.setting.caption.upper() for m in picture_menus
                              if m.ok and m.setting is not None]
                             if getattr(mode_plan, "picture_file", "") else []),
+                # PAD-782: the owner's attract items (their clips' names)
+                "attract": ([n for _e, _w, n, _ms in _attract_entries(mode_plan.attract_file)]
+                            if getattr(mode_plan, "attract_file", "") else []),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -11645,6 +11648,20 @@ def _turn_key_lines(params, used, log, mode_hosts=None):
     return sorted(out, key=lambda t: (t[1], t[0]))
 
 
+def _attract_entries(cfg):
+    """PAD-782: ``[(entry, where, clip, ms), ...]`` of an ``attract.cfg``, ``[]`` when it cannot be read."""
+    out = []
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            for line in f:
+                p = line.split()
+                if len(p) == 5 and p[0] == "item":
+                    out.append((int(p[1]), p[2], p[3], int(p[4])))
+    except (OSError, ValueError):
+        return []
+    return out
+
+
 def _install_modes(output_path, modes, landed, planned, log):
     """Item 149: put the modes' runtime on the built card's system partition
     and say, file by file, what the modes added.  Only once every whole-file
@@ -11655,9 +11672,10 @@ def _install_modes(output_path, modes, landed, planned, log):
     # PAD-446: a card of random clips and no mode; PAD-494: of music modes only;
     # PAD-537: of picture settings only
     who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
-                                                 or modes.get("picture"))
+                                                 or modes.get("picture") or modes.get("attract"))
            else "Random clips" if modes.get("variants") else "Music modes"
-           if modes.get("music_modes") else "Picture settings")
+           if modes.get("music_modes") else "Picture settings" if modes.get("picture")
+           else "Attract items")              # PAD-782
     if who == "Music modes" and all(t.endswith(" in attract") for t in modes["music_modes"]):
         who = "Attract flipper sounds"   # PAD-641: the same program, its own words
     elif who == "Music modes" and all(t.endswith((" in turn)", " in attract"))
@@ -11681,6 +11699,11 @@ def _install_modes(output_path, modes, landed, planned, log):
                 "that applies them was NOT put on the system partition. The game "
                 "program with the menu rows may already be on it, so do not use "
                 "this card: fix the issue above and Write again.", "error")
+        elif who == "Attract items":           # PAD-782
+            log("Attract items: not every file reached the card, so the program "
+                "that plays them was NOT put on the system partition. The "
+                "rewritten scene may already be on it, so do not use this "
+                "card: fix the issue above and Write again.", "error")
         else:
             # words a copy with the mode maker switched off may show (PAD-446)
             log("Random clips: not every file reached the card, so the program "
@@ -11698,7 +11721,8 @@ def _install_modes(output_path, modes, landed, planned, log):
                if who == "Picture settings" else "program that picks them",
                {"Modes": "modes", "Random clips": "random clips",
                 "Picture settings": "picture settings",
-                "Attract flipper sounds": "sounds for the flipper buttons in attract"
+                "Attract flipper sounds": "sounds for the flipper buttons in attract",
+                "Attract items": "attract items",
                 }.get(who, "music modes"), e),
             "error")
         return None, False
@@ -11711,7 +11735,8 @@ def _install_modes(output_path, modes, landed, planned, log):
             "info")
     log("%s: /etc/init.d/game_monitor now loads the %s (port %s)."
         % (who, "mode runtime" if who == "Modes" else "program that applies them"
-           if who == "Picture settings" else "program that picks them",
+           if who == "Picture settings" else "program that plays them" if who == "Attract items"
+           else "program that picks them",
            modes.get("port")), "info")
     snd = modes.get("end_sound")
     if snd:
@@ -11721,8 +11746,12 @@ def _install_modes(output_path, modes, landed, planned, log):
         log("Modes: request %d (sound idx %d) plays %s's own %s."
             % (own["request"], own["idx"], own["name"],
                _MW.sound_words(own["key"])), "info")
+    if modes.get("attract"):                  # PAD-782
+        log("Attract items: %d item(s) of your own between the game's attract screens on the card. %s"
+            % (len(modes["attract"]), "A card with attract items of your own keeps its scores off Insider "
+               "Connected: they stay on the machine."), "success")
     if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
-                                  or modes.get("picture")):
+                                  or modes.get("picture") or modes.get("attract")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")

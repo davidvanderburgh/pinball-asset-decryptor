@@ -154,3 +154,11 @@ taken on the item's SECOND showing - the game restarts its attract once soon aft
 2. Boot the real card (D:/tmp/PAD-782/gz_attract.raw, engine.write_image of proj_gz) on the rig through cardmodes.sh
    (PAD_CARD_MODES=1) and picture the items - "a built card does the same".
 3. Merge main (moved to v1.274.0); rebuild prebuilt + recipes if the SDK changed; targeted tests; final shots.
+
+### Run 3, after the report: the BUILT card (Godzilla LE 1.16)
+
+engine.write_image of proj_gz (C:/tmp/PAD-782/card782.py -> D:/tmp/PAD-782/gz_attract.raw) first carried NO runtime:
+mode_install.py only took stock/clips/sounds/picture.cfg ("attract.cfg is not a file the mode runtime reads"). Fixed
+(EXTRA_FILES / STANDALONE_FILES), and the card log now speaks of "Attract items" (engine._install_modes). Booted on the
+rig with its own runtime (PAD_CARD_MODES=1, rig/jobcard.sh): Insider gate armed, all five items played at their times
+every cycle, PHOTO 1, 2, 3 on the glass, segv 0 fatal 0. Item 2 of NEXT RUN is done.

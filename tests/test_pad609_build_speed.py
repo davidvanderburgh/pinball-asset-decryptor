@@ -777,3 +777,37 @@ def test_windows_names_its_page_files():
     from pinball_decryptor.plugins.stern.spike2 import parallel as P
     for drive, mx in P._page_file_entries():
         assert len(drive) == 2 and drive[1] == ":" and (mx is None or mx >= 0)
+
+
+def test_a_bank_whose_worker_runs_out_of_memory_is_encoded_again_on_its_own(monkeypatch):
+    """PAD-777: three Iron Maiden bank workers, each holding a 2.1 GB image.bin, ran a
+    user's PC out of memory (UC_ERR_NOMEM) and the Write failed.  Such a bank is encoded
+    again in the Write's own process once the workers have gone; the others stand."""
+    import threading
+    BB, jobs, seen = _bank_stub(monkeypatch)
+    real = BB.encode_and_verify
+
+    def short(gr, img, job, *a, **k):
+        if job.cat == 3 and threading.current_thread() is not threading.main_thread():
+            raise RuntimeError("No memory available or memory not present (UC_ERR_NOMEM)")
+        return real(gr, img, job, *a, **k)
+    monkeypatch.setattr(BB, "encode_and_verify", short)
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "4")
+    logs = []
+    out = BB.encode_banks("gr", "img", jobs, [], None, lambda m, lv="info": logs.append(m))
+    assert [r[0][0]["host"] for r in out] == [1, 2, 3, 4, 5]
+    assert [c for c, _r in seen].count(3) == 1                  # once, on its own
+    assert any("its worker ran out of memory" in m for m in logs)
+    assert any("encoded again on its own" in m for m in logs)
+
+
+def test_a_bank_that_runs_out_of_memory_alone_too_says_so_in_words(monkeypatch):
+    BB, jobs, _seen = _bank_stub(monkeypatch)
+
+    def short(gr, img, job, *a, **k):
+        raise RuntimeError("No memory available or memory not present (UC_ERR_NOMEM)")
+    monkeypatch.setattr(BB, "encode_and_verify", short)
+    monkeypatch.setenv(BB.BANK_WORKERS_ENV, "1")
+    with pytest.raises(RuntimeError, match=r"ran out of memory encoding the sound banks, "
+                                           r"even one at a time: .*C: drive"):
+        BB.encode_banks("gr", "img", jobs, [], None, lambda *a, **k: None)

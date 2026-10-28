@@ -106,6 +106,11 @@ def word_count(kind, args):
     """How many words a row of *kind* with these VA args carries."""
     return WORD_COUNT.get(kind, len(args))
 
+#: PAD-798: an award record's numbers (stock_scan_cpp.AWARD_PARTS), in the Modes tab's words: what the level pays,
+#: how much it grows a shot, the most it grows to, and the growth's own step and ceiling
+AWARD_PART_WORDS = {"value": "value", "grows": "grows by", "cap": "grows to at most",
+                    "step": "growth steps up by", "stepcap": "growth tops out at"}
+
 #: .staged_changes.json key for the staged word values
 STAGE_KEY = "stock_modes"
 #: Defaults' key: adjustment rows stage there, so both tabs edit one number
@@ -316,6 +321,11 @@ class Number:
             role, role.replace("_", " ").capitalize())
         if re.fullmatch(r"v\d+", role):
             role_word = "Other"                 # a slot whose role the reader didn't name
+        award = re.fullmatch(r"award_(value|grows|cap|step|stepcap)_(\d+|now)", call)
+        if award:                               # PAD-798: an award record's number, by level
+            return "Award %s %s%s" % ("(the level it is on)" if award.group(2) == "now"
+                                      else "level %s" % award.group(2),
+                                      AWARD_PART_WORDS[award.group(1)], (" (%s)" % rep) if rep else "")
         if call == "award_value":
             what = "award value"
         elif call.startswith("caward_add_scaled"):
@@ -340,6 +350,8 @@ class Number:
         role = self.key.partition(".")[0]
         if role in ("path", "spins"):           # item 159: what a mode really plays
             return not self.follows
+        if re.match(r"award_(value|grows|cap|step|stepcap)_(\d+|now)$", call):
+            return True                         # PAD-798: an award record's number, by level
         return (call.startswith(("caward_add", "score_add", "award_value", "ctimer"))
                 or role == "timer")
 

@@ -46,8 +46,9 @@ from dataclasses import dataclass
 #: (2: tail calls end a function, a word read twice or an unnamed timer number is read-only,
 #: shared words carry their count, the index is keyed by SHA-1; 3: a plain-C title's audits read
 #: from the descriptor record that maps them, not the first one of the count - Batman 66 1.14 and
-#: Metallica 1.04 counted each mode's start in another mode's function, PAD-634)
-READER_REV = 3
+#: Metallica 1.04 counted each mode's start in another mode's function, PAD-634; 4: a crule title's
+#: award record read by table and level - value, growth, cap - and editable, PAD-798)
+READER_REV = 4
 
 #: game programs as Stern shipped them (sha1 -> "game version"), every build this app has seen
 KNOWN_STOCK = {

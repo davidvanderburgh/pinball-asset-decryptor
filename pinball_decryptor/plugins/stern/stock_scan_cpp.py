@@ -260,6 +260,391 @@ def award_field(prog, model, objs, modes, null):
 
 
 # ---- the reader ---------------------------------------------------------------------------------
+# ---- PAD-798: the award record's own numbers ------------------------------------------------------------------------
+# A crule title's mode keeps its points in a caward record (award_field): std::vector fields of per-level rows, a row
+# 32 bytes, one u64 per player. Read off the record's own code (TMNT 1.59, and the same on every crule build): the
+# function that ADDS to an award (add_capped: value += x, held at the cap when the cap is not 0) names the VALUE and
+# CAP tables, the one that COLLECTS a level (collect: the value grows by GROWS, which itself grows by STEP up to
+# STEPCAP) the other three. What a mode's reset stores there is then a number with a meaning: Turtle Power's first
+# level is worth 100,000, grows 25,000 a shot, up to 250,000. Both functions are found by their shape anywhere in the
+# code, so a build where either is missing (or ambiguous) keeps its award numbers read-only, as before.
+_ADD_CAPPED = ((0xFFFFFFFF, 0xE92D43F8), (0xFFFFFFFF, 0xE1A04000), (0xFFFFF000, 0xE59D5000),
+               (0xFFFFFFFF, 0xE1A08002), (0xFFFFFFFF, 0xE5901008), (0xFFFFFFFF, 0xE1A09003),
+               (0xFFFFFFFF, 0xE1550001))
+_COLLECT = ((0xFFFFFFFF, 0xE5903008), (0xFFFFFFFF, 0xE92D4FF0), (0xFFFFFFFF, 0xE1510003))
+#: the tables' names, as the row keys carry them (``reset.award_value_1``: level 1's value)
+AWARD_PARTS = ("value", "grows", "cap", "step", "stepcap")
+#: each part in a person's words (the rows' comments, and stock_modes' labels)
+AWARD_WORDS = {"value": "value", "grows": "growth a shot", "cap": "most it grows to",
+               "step": "growth's own step", "stepcap": "most the growth reaches"}
+
+
+def _sig_find(prog, sig):
+    tw = prog.tw
+    n = len(tw) - len(sig)
+    if n <= 0:
+        return []
+    hit = np.ones(n, dtype=bool)
+    for i, (mask, val) in enumerate(sig):
+        hit &= (tw[i:i + n] & np.uint32(mask)) == np.uint32(val)
+    return [prog.tlo + 4 * int(i) for i in np.nonzero(hit)[0]]
+
+
+def _ldr_offsets(prog, va, n, reg=4):
+    out = []
+    for a in range(va, va + 4 * n, 4):
+        w = prog.word(a)
+        if w is not None and (w & 0x0FF00000) == 0x05900000 and ((w >> 16) & 15) == reg:
+            out.append(w & 0xFFF)
+    return out
+
+
+#: the layout every crule build read so far keeps (value, grows, cap, step, stepcap), checked by use where the two
+#: functions' exact shapes differ (TMNT Pro 1.58 and the other builds of its time read the player inline)
+_LAYOUT = (0x10, 0x1c, 0x28, 0x34, 0x40)
+
+
+def _layout_by_use(prog, model):
+    """:data:`_LAYOUT` when the caward's own code USES it so: a function that adds a 64-bit number into +0x10 and
+    tests the cap at +0x28 (``adds``/``adc`` then ``orrs``), and one that does the same over +0x1c, +0x34 and
+    +0x40; the record's highest value read past the tables (``ldrd [rN, #H]``). None otherwise."""
+    if model is None or "caward" not in model:
+        return None
+    slots = S.vslots(prog, model, "caward")
+    if not slots:
+        return None
+    lo, hi = min(slots), min(slots) + 0x1400
+    funcs, cur = [], None
+    for va in range(lo, hi, 4):
+        w = prog.word(va)
+        if w is None:
+            break
+        if (w & 0xFFFF4000) == 0xE92D4000:
+            cur = {"va": va, "ldr": set(), "adds": False, "adc": False, "orrs": False, "ldrd": []}
+            funcs.append(cur)
+        if cur is None:
+            continue
+        if (w & 0x0FF00000) == 0x05900000 and ((w >> 16) & 15) not in (13, 15):
+            cur["ldr"].add(w & 0xFFF)
+        elif (w & 0x0FF00000) == 0x00900000:
+            cur["adds"] = True
+        elif (w & 0x0FE00000) == 0x00A00000 and cur["adds"]:
+            cur["adc"] = True
+        elif (w & 0x0FF00000) == 0x01900000 and cur["adc"]:
+            cur["orrs"] = True
+        elif (w & 0x0E5000F0) == 0x004000D0 and (w >> 23) & 1:
+            cur["ldrd"].append(((w >> 4) & 0xF0) | (w & 0xF))
+    value, grows, cap, step, stepcap = _LAYOUT
+    arith = [f for f in funcs if f["orrs"]]
+    adds = [f for f in arith if {value, cap} <= f["ldr"]]
+    cols = [f for f in arith if {grows, step, stepcap} <= f["ldr"]]
+    if not adds or not cols:
+        return None
+    out = dict(zip(_LAYOUT, AWARD_PARTS))
+    h = next((x for f in adds for x in f["ldrd"] if x > stepcap), None)
+    if h is not None:
+        out[h] = out[h + 0x20] = "record"
+    return out
+
+
+def award_layout(prog, model=None):
+    """``{table offset: part}`` of the award record (:data:`AWARD_PARTS`), read off this build's add_capped and
+    collect; None when either is not found exactly once or reads unlike the record (TMNT 1.59: value 0x10, grows
+    0x1c, cap 0x28, step 0x34, stepcap 0x40). A build where their exact shapes aren't found is read by
+    :func:`_layout_by_use`."""
+    add = _sig_find(prog, _ADD_CAPPED)
+    col = _sig_find(prog, _COLLECT)
+    if len(add) != 1 or len(col) != 1:
+        return _layout_by_use(prog, model)
+    a = _ldr_offsets(prog, add[0], 20)
+    c = _ldr_offsets(prog, col[0], 60)
+    if len(a) < 2 or len(c) < 5:
+        return None
+    value, cap = a[0], a[1]
+    grows, step, stepcap = c[1], c[2], c[4]
+    offs = (value, grows, cap, step, stepcap)
+    if len(set(offs)) != 5 or any(o < 0x10 or (o - 0x10) % 12 for o in offs):
+        return None                           # every table is a std::vector, 12 bytes apart
+    out = dict(zip(offs, AWARD_PARTS))
+    # the record's own per-player words: the highest value it has reached (add_capped's ldrd past the tables,
+    # TMNT +0x80, John Wick and Venom +0x90) and the copy a level is seeded into beside it (+0x20)
+    for va in range(add[0], add[0] + 4 * 60, 4):
+        w = prog.word(va)
+        if w is not None and (w & 0x0E5000F0) == 0x004000D0 and (w >> 23) & 1:
+            h = ((w >> 4) & 0xF0) | (w & 0xF)
+            if h > max(offs):
+                out[h] = out[h + 0x20] = "record"
+                break
+    return out
+
+
+def _is_level_check(prog, fn):
+    """The award record's level check (``ldr r3, [r0, #8]`` - the levels' count - then ``cmp r3, r1``) within the
+    function's first three words: TMNT 1.59's 0x33204, John Wick's 0x34160."""
+    if fn is None:
+        return False
+    w = [prog.word(fn + 4 * i) for i in range(4)]
+    return any(w[i] == 0xE5903008 and w[i + 1] == 0xE1530001 for i in range(3))
+
+
+def _r1_before(prog, b, lo):
+    """The level a check at *b* is handed: ``mov r1, #n`` -> n; r1 loaded from memory (the mode's own field: the
+    level it is on, picked as it plays) -> None; -1 when r1 can't be read."""
+    a = b - 4
+    while a >= lo:
+        x = prog.word(a)
+        if x is None or (x & 0x0F000000) == 0x0B000000:
+            return -1
+        if ((x >> 12) & 15) == 1:
+            if (x & 0x0FEF0000) == 0x03A00000:              # mov r1, #imm
+                v = S.rot_imm(x)
+                return v if v < 64 else -1
+            if (x & 0x0F700000) == 0x05100000 and ((x >> 16) & 15) != 13:   # ldr r1, [rn, #imm]
+                return None
+            if (x & 0x0FEF0FF0) == 0x01A00000 or S.written(x) is None or 1 in (S.written(x) or ()):
+                return -1
+        a -= 4
+    return -1
+
+
+def _arm_dp_shift(w):
+    """``(rd, rn, rm, lsl)`` of ``add rd, rn, rm, lsl #n`` (n = 0 for a plain add), else None."""
+    if (w & 0x0FE00070) == 0x00800000:                     # add (register), shift type LSL by an immediate
+        return (w >> 12) & 15, (w >> 16) & 15, w & 15, (w >> 7) & 31
+    return None
+
+
+def award_slot(prog, facts, va, layout, award_calls):
+    """What the ``strd`` at *va* fills: ``(part, level)``, ``("record", 0)`` for the record's own per-player words
+    (an add of the player's index straight onto the record), or None when the store is not read. Walks back from
+    the store: the address is a table row's word for the player (``add rA, rT, r0, lsl #3``, offset -8), the row
+    the table's start plus the level's 32 bytes (``add rT, rT, r0, lsl #5`` after the level check: the check's
+    r1, *award_calls* ``{call va: level}``; or none: level 0), the table ``ldr rT, [record, #table]``. A register
+    spilled to the stack is followed through its ``str``."""
+    w = prog.word(va)
+    if w is None or (w & 0x0E5000F0) != 0x004000F0:
+        return None
+    reg = (w >> 16) & 15
+    off = ((w >> 4) & 0xF0) | (w & 0xF)
+    if not (w >> 23) & 1:
+        off = -off
+    stage, level = "player", 0
+    a = va - 4
+    lo = max(facts.start, va - 4 * 48)
+    while a >= lo:
+        x = prog.word(a)
+        if x is None:
+            return None
+        d = _arm_dp_shift(x)
+        if (x & 0x0F000000) == 0x0B000000:                 # bl: everything but r4-r11 is the callee's
+            if reg < 4 or reg == 12:
+                return None
+        elif d and d[0] == reg:
+            rd, rn, rm, sh = d
+            if stage == "player" and sh == 3:             # rm: the player index, a call's r0 or read inline
+                if layout.get(off) == "record":                   # the record's own per-player words
+                    return "record", 0
+                if off != -8:
+                    return None
+                stage, reg = "row", rn
+            elif stage == "row" and rm == 0 and sh == 5:
+                b = a - 4
+                while b >= lo and (prog.word(b) & 0x0F000000) != 0x0B000000:
+                    b -= 4
+                if b in award_calls:
+                    level = award_calls[b]
+                elif b >= lo and _is_level_check(prog, S.branch_target(prog.word(b), b)):
+                    level = _r1_before(prog, b, lo)
+                    if level == -1:
+                        return None
+                else:
+                    return None
+                reg, stage = rn, "table"
+            else:
+                return None
+        elif (x & 0x0FF00000) == 0x02800000 and ((x >> 12) & 15) == reg and stage == "row":
+            imm = S.rot_imm(x)                            # add rT, rT, #level*32
+            if imm % 32:
+                return None
+            level, reg, stage = imm // 32, (x >> 16) & 15, "table"
+        elif (x & 0x0F700000) == 0x05100000 and ((x >> 12) & 15) == reg:     # ldr reg, [rn, #imm]
+            rn, imm = (x >> 16) & 15, x & 0xFFF
+            if rn == 13:                                  # a spill: follow the str to that slot
+                b = a - 4
+                while b >= lo:
+                    y = prog.word(b)
+                    if (y & 0x0FFF0000) == 0x058D0000 and (y & 0xFFF) == imm:
+                        reg = (y >> 12) & 15
+                        a = b
+                        break
+                    b -= 4
+                else:
+                    return None
+            elif stage in ("row", "table") and imm in layout:
+                return layout[imm], level
+            else:
+                return None
+        elif (x & 0x0FEF0FF0) == 0x01A00000 and ((x >> 12) & 15) == reg:     # mov reg, rm
+            reg = x & 15
+        elif S.written(x) is not None and reg in (S.written(x) or ()):
+            return None
+        a -= 4
+    return None
+
+
+AWARD_UNDECODED = "which part of the award record this is (a score, a step, a limit) isn't decoded"
+
+
+def _award_where(k, uses):
+    return "v[%d] stores it into the award record (strd at %s)%s" % (
+        k, ",".join("0x%x" % u for u in uses),
+        "; one word, stored %d times" % len(uses) if len(uses) > 1 else "")
+
+
+def _bl_before(prog, va, lo):
+    a = va - 4
+    while a >= lo:
+        w = prog.word(a)
+        if w is not None and (w & 0x0F000000) == 0x0B000000:
+            return a, S.branch_target(w, a)
+        a -= 4
+    return None, None
+
+
+def _award_also_read(prog, v, facts, uses, harmless):
+    """:func:`_also_read` for a number a reset stores into the award record, but a call to *harmless*
+    (``{target: registers it takes}``: the player getter takes none, the level check r0 and r1) is not a read of
+    a register it does not take - the value is still in r2 when the reset asks for the player's index."""
+    if S.kind_of(v)[0][0] == "code":
+        return ""
+    extra = S.other_uses(prog, v, facts, uses)
+    if extra:
+        try:
+            got = S._regs_at(prog, v.sites[-1][0])
+            reg = next(iter(got[1])) if got and len(got[1]) == 1 else None
+        except ImportError:
+            reg = None
+        keep = []
+        for x in extra:
+            w = prog.word(x)
+            if reg is not None and w is not None and (w & 0x0F000000) == 0x0B000000:
+                takes = harmless.get(S.branch_target(w, x))
+                if takes is not None and reg not in takes:
+                    continue
+            keep.append(x)
+        extra = keep
+    if not extra:
+        return ""
+    return ("the same instruction also feeds %s%s, so changing it would change more than this number" % (
+        ", ".join("0x%x" % x for x in extra[:3]), " and more" if len(extra) > 3 else ""))
+
+
+def _level_words(level):
+    return "the level it is on's" if level is None else "level %d's" % (level + 1)
+
+
+def _award_rows(prog, m, r, k, t, seen_sites, award_off, layout, sh):
+    """PAD-798: the rows of what one function (role *r*, slot *k*) stores into the award record: one row per level
+    and part (``reset.award_value_1``), editable when its words set that number alone. The record's own per-player
+    words a level is seeded with (``record``: the highest value it has reached) go with that level's value when
+    they hold the same number - one number at several sites, edited together (:func:`_multi_row`)."""
+    # the level check before each row: its r1, a level (not an address handed to another call), or None when the
+    # mode picks the level as it plays (John Wick: a field of the mode) - the row is then the current level's
+    levels = {}
+    for call in t.calls:
+        if call["args"].get("r0") != Sym("field", award_off):
+            continue
+        r1 = call["args"].get("r1")
+        if isinstance(r1, Val):
+            if 0 <= r1.v < 64:
+                levels[call["va"]] = r1.v
+        elif isinstance(r1, Sym) and r1.t[0] == "field":
+            levels[call["va"]] = None
+    # ...and every call of the record's level check the tracker lost the registers of (John Wick: the record loaded
+    # from a register it no longer follows), its r1 read off the instructions before it
+    for va in range(t.start, t.end, 4):
+        w = prog.word(va)
+        if va in levels or w is None or (w & 0xFF000000) != 0xEB000000:
+            continue
+        if _is_level_check(prog, S.branch_target(w, va)):
+            lv = _r1_before(prog, va, t.start)
+            if lv != -1:
+                levels[va] = lv
+    harmless = {}
+    for cva in levels:
+        w = prog.word(cva)
+        if w is not None and (w & 0x0F000000) == 0x0B000000:
+            harmless[S.branch_target(w, cva)] = (0, 1)
+    feeds = collections.OrderedDict()             # site set -> {(part, level)}
+    lo_of = {}
+    for sites, uses in seen_sites.items():
+        lo_of[sites] = next(x for va, x, _h, _b, _o in t.strd64 if tuple(x.sites) == sites)
+        got = set()
+        for u in uses:
+            s_ = award_slot(prog, t, u, layout, levels)
+            if s_ is None:
+                got.add(None)
+                continue
+            if s_[0] == "record":                 # seeded with the level checked last before it
+                b = u
+                while True:
+                    b, _tg = _bl_before(prog, b, t.start)
+                    if b is None or b in levels:
+                        break
+                s_ = ("value", levels[b]) if b is not None else None
+            else:
+                _bva, tg = _bl_before(prog, u, t.start)
+                if tg is not None:
+                    harmless.setdefault(tg, ())   # the player getter, right before the row's address
+            got.add(s_)
+        feeds[sites] = got
+    numbers = collections.OrderedDict()           # (part, level) -> [site set]
+    for sites, got in feeds.items():
+        for pl in got:
+            if pl is not None:
+                numbers.setdefault(pl, []).append(sites)
+    for sites, got in feeds.items():              # words the reader cannot place: as before
+        if None in got and len(got) == 1:
+            _word_row(m, "%s.award_value" % r, lo_of[sites], _award_where(k, seen_sites[sites]), sh,
+                      why_unsure=AWARD_UNDECODED)
+    for (part, level), site_sets in numbers.items():
+        key = "%s.award_%s_%s" % (r, part, "now" if level is None else level + 1)
+        uses = [u for s_ in site_sets for u in seen_sites[s_]]
+        what = "%s %s" % (_level_words(level), AWARD_WORDS[part])
+        others = sorted({pl for s_ in site_sets for pl in feeds[s_]} - {(part, level)},
+                        key=lambda x: (x is None, "" if x is None else str(x)))
+        lo = lo_of[site_sets[0]]
+        where = "%s; %s" % (_award_where(k, uses), what)
+        if others:
+            _word_row(m, key, lo, where, sh, why_unsure="the same words also set %s" % " and ".join(
+                "a number the reader cannot place" if pl is None else
+                "%s %s" % (_level_words(pl[1]), AWARD_WORDS[pl[0]]) for pl in others))
+            continue
+        if len({lo_of[s_].v for s_ in site_sets}) != 1:
+            _word_row(m, key, lo, where, sh, why_unsure="the record's own copy holds another number")
+            continue
+        if len(site_sets) == 1:
+            why = _award_also_read(prog, lo, t, uses, harmless)
+            _word_row(m, key, lo, where, sh, why_unsure=why)
+            continue
+        vals = [lo_of[s_] for s_ in site_sets]
+        kinds = [S.kind_of(v) for v in vals]
+        k0 = kinds[0][0][0]
+        why = next((w_ for w_ in (_award_also_read(prog, lo_of[s_], t, seen_sites[s_], harmless)
+                                  for s_ in site_sets) if w_), "")
+        if k0 not in ("imm", "movw", "movwt") or any(kd[0][0] != k0 for kd in kinds) or any(v.cond for v in vals):
+            why = why or "the same number is also held elsewhere in another form"
+        if why:
+            _word_row(m, key, lo, where, sh, why_unsure=why)
+            continue
+        sites_, words = [], []
+        for kd, w_ in kinds:
+            sites_.extend(kd[1:])
+            words.extend(w_)
+        m.add(key, lo.v, (k0,) + tuple(sites_), words, "word",
+              "%s (%d places, edited together: the record's own copies too)" % (where, len(site_sets)), sh)
+
+
 def kind_words(k):
     if k is None:
         return "?"
@@ -321,6 +706,7 @@ def read(prog, model=None, step=None, cancel=None):
     check()
     award_add = find_award_add(prog, own_facts)
     award_off = award_field(prog, model, objs, modes, null) if root == "crule" else None
+    award_layout_ = award_layout(prog, model) if award_off is not None else None      # PAD-798
     say(0.45, "Finding the modes' roles")
 
     # title: the slot most classes override with a distinct constant return
@@ -406,7 +792,7 @@ def read(prog, model=None, step=None, cancel=None):
                 m.facts.append("start start: the mode getter(%d) at %s then v[%d]" % (
                     rid, ",".join("0x%x" % v for v in vas[:4]), slot))
         _mode_rows(prog, model, m, o, c, fs, roles, get_adj, adj, award_add, award_off,
-                   timer_slots, tmodel, held, set(mode_classes))
+                   timer_slots, tmodel, held, set(mode_classes), award_layout_)
         m.facts.append("# overrides: %s" % " ".join("v[%d]=0x%x" % (k, f) for k, f, _t, _c in fs))
         reading.modes.append(m)
     S.settle_shared(reading)
@@ -582,7 +968,7 @@ def _word_row(m, key, v, comment, shared=0, why_unsure=""):
 
 
 def _mode_rows(prog, model, m, o, c, fs, roles, get_adj, adj, award_add, award_off, timer_slots,
-               tmodel, held, mode_classes):
+               tmodel, held, mode_classes, award_layout_=None):
     ctor_t = prog.facts(o["ctor"])
     fields = ctor_t.stores
     slots = S.vslots(prog, model, c)
@@ -629,19 +1015,22 @@ def _mode_rows(prog, model, m, o, c, fs, roles, get_adj, adj, award_add, award_o
         if award_off is not None:
             on_award = any(call["args"].get("r0") == Sym("field", award_off) for call in t.calls)
             seen_sites = collections.OrderedDict()
+            # PAD-798: a level's value seeds the record's own copies from the same register a few stores later
+            # (TMNT's Episode One: +0xa0, 0x48 bytes after the movw); its own-reads check still guards the edit
+            near = 192 if award_layout_ is not None else 64
             for va, lo, hi, _bs, _off in t.strd64:
                 if not on_award or hi.v != 0 or lo.v < 1000 or lo.v % 10 \
-                        or not all(va - 64 <= x[0] < va for x in lo.sites):
+                        or not all(va - near <= x[0] < va for x in lo.sites):
                     continue
                 seen_sites.setdefault(tuple(lo.sites), []).append(va)
-            for sites, uses in seen_sites.items():
-                lo = next(x for va, x, _h, _b, _o in t.strd64 if tuple(x.sites) == sites)
-                _word_row(m, "%s.award_value" % r, lo,
-                          "v[%d] stores it into the award record (strd at %s)%s" % (
-                              k, ",".join("0x%x" % u for u in uses),
-                              "; one word, stored %d times" % len(uses) if len(uses) > 1 else ""),
-                          sh, why_unsure="which part of the award record this is (a score, a "
-                                         "step, a limit) isn't decoded")
+            # PAD-798: which table and level each store fills (award_slot), read off the code
+            if award_layout_ is None:
+                for sites, uses in seen_sites.items():
+                    lo = next(x for va, x, _h, _b, _o in t.strd64 if tuple(x.sites) == sites)
+                    _word_row(m, "%s.award_value" % r, lo, _award_where(k, uses), sh,
+                              why_unsure=AWARD_UNDECODED)
+            else:
+                _award_rows(prog, m, r, k, t, seen_sites, award_off, award_layout_, sh)
         # a crule title's timer: its timer object's virtuals fed from a field or a constant
         if tmodel is not None:
             _timer_feed_rows(prog, m, o, k, t, ctor_t, fs, tmodel, sh)

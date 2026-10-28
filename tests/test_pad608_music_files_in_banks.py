@@ -206,14 +206,19 @@ def test_a_file_whose_every_sound_id_a_request_names_can_go_into_a_bank(monkeypa
             {"rel": "d", "slot": 6, "mode": 2, "host": 43},
             {"rel": "e", "slot": 7, "mode": SMo.turn_mode(2), "host": 44}]
     lines = []
-    frags, sids = E._sound_modes_for_banks(str(tmp_path / "game"), str(tmp_path / "image.bin"),
-                                           params, sites, used, [{"request": 77}], {},
-                                           lambda m, *a: lines.append(m))
+
+    def no_descriptors(*a, **k):        # (PAD-791: a song in parts needs them read whole)
+        raise RuntimeError("no resolver")
+    monkeypatch.setattr(E, "_wide_descriptors_once", no_descriptors)
+    frags, sids, seqs = E._sound_modes_for_banks(
+        str(tmp_path / "game"), str(tmp_path / "image.bin"), params, sites, used,
+        [{"request": 77}], {}, lambda m, *a: lines.append(m))
     # one record for one file in two modes: a fragment for each mode and each sound id
     assert [(u["mode"], s) for u, s in frags[40]] == [(2, 20), (2, 21), (3, 20), (3, 21)]
     assert [(u["mode"], s) for u, s in frags[44]] == [(SMo.turn_mode(2), 25)]
-    assert sorted(frags) == [40, 44]
-    assert sids == {20, 21, 22, 23, 24, 25}
+    assert sorted(frags) == [40, 44] and seqs == []
+    # (PAD-791: the sound ids of the files that stay in image.bin stay the game's)
+    assert sids == {22, 23, 24}
     text = "\n".join(lines)
     assert "sound id 22 plays sound idx 3 together with other sounds" in text
     # PAD-784: sid 23 is in no request: the game never plays it

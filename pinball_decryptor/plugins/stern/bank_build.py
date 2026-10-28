@@ -1081,6 +1081,134 @@ def seq_descriptor(desc, sid, keys, moves, mask):
     return bytes(d)
 
 
+#: PAD-791: music modes' files (or files in turn) a bank can hold whose slots the game plays in
+#: parts: *hosts* their records (idxs), *lines* ``[(mode, sid, first, [entry, ...])]`` one bank
+#: sound id each for every (mode, game sound id) that plays one of them (*first* the record its
+#: descriptor opens with: a host, or a part's copy; the entries the ones it plays), *descs*
+#: ``{sid: plain descriptor}`` (the game's own, through its own end), *parts* the records the
+#: lines play beside the files, copied into the bank, and *grown* ``{part: (room, want)}`` the
+#: parts the user made longer (copied at that length).
+ModeSeq = collections.namedtuple("ModeSeq", "hosts lines descs parts grown")
+
+
+def mode_seq_groups(cands, wide, slots, exclude=(), byidx=None, hosts=(), grows=None,
+                    user_grows=None):
+    """PAD-791: ``(groups, why)`` - the hosts *cands* ``{host: [entry, ...]}`` (music modes'
+    files, :func:`.engine._sound_modes_grow`'s entries, whose sound ids play the slot together
+    with other records) as :class:`ModeSeq` s a bank can hold, and ``why`` ``{host: reason}``
+    for the rest.  Iron Maiden plays its songs as intro, song and outro sequences and medleys:
+    a mode's file for such a song plays from a bank only under a bank sound id whose descriptor
+    names every record that sequence plays, and a bank's descriptor can only name records of
+    its own bank, so the records it plays beside the file are copied into the same bank, and
+    files one (mode, sound id) plays together (a medley's two songs in one mode) go into one
+    bank.  *wide* as :func:`game_sound_groups` takes it; *slots*, *exclude* as
+    :func:`game_sound_sids`; *hosts* every record this Write gives a music mode's file;
+    *grows* / *user_grows* the Write's longer records and the user's longer replacements among
+    them (a part the user made longer is copied at that length; one a mode's own sound grew
+    cannot be copied)."""
+    from .spike2.emulator import bands_of
+    exclude = {int(x) for x in exclude or ()}
+    hosts = {int(x) for x in hosts or ()}
+    grows, user_grows = dict(grows or {}), dict(user_grows or {})
+    byidx = byidx or {}
+    idle = never_played(wide, slots, exclude)
+    line_us, host_lines = {}, {}
+    for host, us in sorted(cands.items()):
+        for u in us:
+            slot = int(u["slot"])
+            sids = ({sid for sid, (_d, idxs) in wide.items() if slot in idxs}
+                    | {int(s) for s in (u.get("bodies") or {}) if int(s) in wide}) - idle
+            for sid in sids:
+                line_us.setdefault((int(u["mode"]), sid), []).append(u)
+                host_lines.setdefault(int(host), set()).add((int(u["mode"]), sid))
+    # hosts one (mode, sound id) plays together go into one bank
+    root = {int(h): int(h) for h in cands}
+
+    def find(h):
+        while root[h] != h:
+            h = root[h]
+        return h
+    owner = {}
+    for h in sorted(root):
+        for ln in sorted(host_lines.get(h, ())):
+            if ln in owner:
+                root[find(h)] = find(owner[ln])
+            else:
+                owner[ln] = h
+    clusters = {}
+    for h in sorted(root):
+        clusters.setdefault(find(h), []).append(h)
+    groups, why = [], {}
+    for _r, hs in sorted(clusters.items()):
+        lines, parts, bad = [], [], None
+        lns = sorted({ln for h in hs for ln in host_lines.get(h, ())})
+        if not lns:
+            bad = "no sound id of the game's plays it"
+        for mode, sid in lns:
+            desc, idxs = wide[sid]
+            if sid >> 16:
+                bad = "sound id %d is in a sound bank of the game's" % sid
+            elif sid in exclude:
+                bad = "sound id %d is one a mode of this card plays" % sid
+            elif not slots.get(sid):
+                bad = "the game's sound request table could not be read"
+            elif not idxs or None in idxs:
+                bad = "sound id %d plays a record the card's directory does not name" % sid
+            elif len(desc) > SB.DESC_SLOT_MAX:
+                bad = ("sound id %d's script is %d bytes, longer than a sound bank's can be (%d)"
+                       % (sid, len(desc), SB.DESC_SLOT_MAX))
+            if bad:
+                break
+            us = line_us[(mode, sid)]
+            swapped = {int(u["slot"]): int(u["host"]) for u in us}
+            # (a file that plays in place of a whole song names nothing else: PAD-511)
+            whole = [u for u in us if sid in {int(s) for s in (u.get("song") or {})}
+                     | {int(s) for s in (u.get("bodies") or {})}]
+            if whole:
+                first, need = int(whole[0]["host"]), []
+            else:
+                first = swapped.get(idxs[0], idxs[0])
+                need = [j for j in idxs if j not in swapped]
+            parts.extend(j for j in need if j not in parts)
+            lines.append((mode, sid, int(first), list(us)))
+        for j in parts:
+            if bad:
+                break
+            if j in hosts:
+                bad = "sound idx %d, a part its song plays, holds another file of this Write" % j
+            elif j not in byidx or bands_of(byidx[j]) > 1:
+                bad = "sound idx %d, a part its song plays, is a record of several variants" % j
+            elif j in grows and j not in user_grows:
+                bad = "sound idx %d, a part its song plays, plays another sound in this Write" % j
+        if bad:
+            for h in hs:
+                why[h] = bad
+            continue
+        groups.append(ModeSeq(sorted(hs), lines,
+                              {sid: bytes(wide[sid][0]) for _m, sid, _f, _u in lines}, parts,
+                              {j: tuple(grows[j]) for j in parts if j in user_grows
+                               and j in grows}))
+    return groups, why
+
+
+def mode_seq_fragments(group):
+    """PAD-791: ``(own, aliases)`` for :class:`ModeSeq` *group*'s fragments: ``own`` ``{host
+    idx: line}`` the line (an index into ``group.lines``) whose descriptor a file's record's own
+    fragment takes (the first that opens with it), ``aliases`` ``[(line, record idx)]`` the
+    rest, each a fragment past the records playing from the record it opens with.  A part's
+    copy never gives a line its own fragment (a song in parts in the same bank may share the
+    copy, and give that fragment a descriptor of its own); a record no line opens with gets a
+    descriptor nothing plays."""
+    own, aliases = {}, []
+    hosts = {int(h) for h in group.hosts}
+    for n, (_m, _sid, first, _us) in enumerate(group.lines):
+        if first in hosts and first not in own:
+            own[first] = n
+        else:
+            aliases.append((n, first))
+    return own, aliases
+
+
 def list_writes(slots, old_map, new_map):
     """``{file offset: u32 bytes}``: the request lists as this Write wants them, against
     *slots* (:func:`request_list_slots` of the game ELF the writes go into, keyed by the

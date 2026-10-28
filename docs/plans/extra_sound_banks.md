@@ -584,3 +584,79 @@ play stays where it is, and the log says the game never plays it.
 groups), where 13 did; idx 205 moves with 949 and 956 (954 left), idx 895 with 962 (978
 left; 281 and 426 join it as a medley through 979). The 3 left, idx 612, 786 and 930, are
 played only by 267, 978 and 969: the game never plays them.
+
+## A music mode's file for a song in parts in a bank (PAD-791)
+
+PAD-608 banked a music mode's file only when every sound id that plays its slot plays it
+alone (or as the song it opens, PAD-511). Iron Maiden plays most songs as intro, song and
+outro sequences and medleys, so 7 of the PAD-777 reporter's 8 "Swapped Songs Version" files
+(slots 150, 178, 492, 575, 618, 623, 880) stayed in `image.bin` and were left out when it
+filled.
+
+**Which files move** (`engine._sound_modes_for_banks`, `bank_build.mode_seq_groups`): a host
+whose sound ids play its slot together with other records is no longer refused for that; its
+sound ids are read through their own end (`engine._wide_descriptors_once`, the same read
+PAD-779's songs use, done once a Write). Each (mode, sound id) is a LINE; hosts one line
+plays (a medley's two songs with files in the same mode: 150 and 618 under 960, 974, 976)
+are one group, placed whole (`soundbank.split_units`). The group's bank gets a COPY of every
+other record its lines play: the game's own decoded off `image.bin`, the user's same-length
+file, or the user's longer replacement at its length (`ModeSeq.grown`; 492's intro 307). A
+line for a file that plays in place of a whole song (PAD-511 `song` / `bodies`) needs none.
+A group moves only when every line's sound id is a plain listed `image.bin` id no mode of the
+Write plays, its script fits `DESC_SLOT_MAX`, and no part is another file's host, a mode's
+own grown sound or a record of several variants; otherwise its files stay in `image.bin`, and
+the log says why.
+
+**In the bank** each file's record and each copy is a record; a line takes its host's own
+fragment when it is the first to open with it, and every other line a fragment past the
+records (`bank_build.mode_seq_fragments`; a copy never gives a line its own fragment, since a
+PAD-779 song in the same bank may share the copy). Each line's descriptor is
+`_mode_descriptor_table`'s for that mode, off the game's own descriptor through its own end
+(`ends=`), every slot of that mode it plays swapped for its file, then every payload pointed
+at the bank's records (`bank_build.seq_descriptor`; a longer copy moves the declared
+duration). A line whose descriptor would name a record outside the bank plays the game's own
+(logged); a fragment no line plays gets a descriptor naming its record. The runtime is
+unchanged: `bsid <mode> <list id> <bank sid>`, one line per (mode, sound id) (`_bank_sid_lines`
+drops the medley's duplicate).
+
+**The game's longer song on the same slot** (the reporter lengthened those songs too): the
+sound ids of a music mode's file used to be kept out of PAD-606/779's banks altogether
+(`exclude_sids`), so those songs stayed in `image.bin`; with the files' banks taking memory
+beside it, a first run of this ticket cut 8 of them (PAD-777 cut 2). Now only the sound ids of a file that stays in
+`image.bin` (and of the files the runtime swaps by key: files in turn of a mode's file, the
+attract flipper sounds, the jukebox) are kept out; a game song on a banked file's sound ids
+goes into a bank of its own, its request lists name its bank id, and the file's `bsid` line
+names that id (`_list_ids`), which the runtime swaps from in the file's mode. If the planner
+then keeps such a file in `image.bin` after all (too big), the song stays with it
+(`_sm_kept_sids`): the runtime plays that file under the game's own id.
+
+**The file's host record** (`_sound_mode_host`, `parts=`) is a record the game plays in a
+sequence only when nothing else fits: such a host cannot be a part's copy as well, and on the
+reporter's card 5 of the 8 hosts were parts (919 kept the 150/618 medley's files out; 91 kept
+idx 70's song out). The sequences are read off the descriptors whole before the hosts are
+picked (Iron Maiden's 974 plays idx 919 past the play tables' 80 bytes); `_wide_descriptors_once`
+keeps that read for the planner (5.8 s on Iron Maiden).
+
+**A record in two banks**: a part's copy can sit in a music mode's bank and, as the user's
+longer song, in PAD-779's bank of the game's (307, 492's intro). Banks know their groups by
+the units placed in them, not by record idx (an idx match put 307's song in the file's bank
+too, whose descriptors then failed: KeyError 492).
+
+**Iron Maiden LE 1.18**, the reporter's shape (17 longer songs, 8 Option B files, 16 GB card,
+`his777.py` through the app's Write): all 8 files go into banks where 1 did (0 left out,
+PAD-777 left out 7), and his longer songs on those slots into banks of the game's beside
+them: 17 banks, all verified and every bank sound id resolving through the game's resolver,
+together at most 2,172 MB with image.bin (Stern's largest 2,181 MB); 1 song trimmed, idx 930,
+which the game never plays (PAD-777 trimmed 2).
+
+**Proof** (2026-10-28, `artifacts/PAD-791/emulator/RESULTS.txt`): stock Iron Maiden LE 1.18,
+music mode 2 files of pure tones on the 7 slots (30 s each), the user's longer intro 307
+(300 Hz, 19 s) and longer 150 (450 Hz, 70 s), image.bin capped a little past stock, an
+override set: 4 banks verified, every sound id resolving. Rigs 1 and 2, hidden and muted, the
+sound_fire instrument, `force 2` then `force 1` in sounds.cfg. Mode 2: request 554 (960)
+played the 500 Hz file then the 700 Hz one; 555 (974) the game's intro 222, both files, the
+outro 919; 571 (945) 900 Hz then 94; 568 (975) 900 Hz; 535 (935) the longer 307 then 1100 Hz
+then 212; 543 (940) 1300 then 1500 Hz then 935; 539 (958) 818, 1700 Hz, 758. Every copied part
+matched its stock decode (NCC 0.89-0.96; noise 0.02, the wrong part at most 0.44). Mode 1:
+554 played the longer 150 whole (70 s) from the game's bank, then 618 (NCC 0.95); 555 222,
+the longer 150, 618; 535 the longer 307, then 492 (NCC 0.95). 0 segv, 0 fatal.

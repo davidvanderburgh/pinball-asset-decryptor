@@ -392,15 +392,23 @@ def encode_banks(gr_path, img_path, jobs, params, np, log, loops=(), gains=None,
         return out
     w = bank_workers(n, first_too=True)
     rev = known_revalidate(gr_path, img_path) if w > 1 else None
+    def again(got, first=0):
+        # PAD-777: a bank whose worker ran out of memory is encoded here, alone
+        for i, r in enumerate(got):
+            if r is _NO_MEMORY:
+                got[i] = _encode_alone(gr_path, img_path, jobs[first + i], params, np, log,
+                                       loops, gains, level_refs, cancel, rev, body_cache)
+        return got
     if rev is not None:
         got = _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains,
                                      level_refs, progress, cancel, body_cache, rev, w, n,
                                      done0=0)
         if got is not None:
-            return got
-    rows, rev = encode_and_verify(gr_path, img_path, jobs[0], params, np, log, loops=loops,
-                                  gains=gains, level_refs=level_refs, progress=span(0),
-                                  cancel=cancel, body_cache=body_cache)
+            return again(got)
+    rows, rev = _out_of_memory_words(lambda: encode_and_verify(
+        gr_path, img_path, jobs[0], params, np, log, loops=loops, gains=gains,
+        level_refs=level_refs, progress=span(0), cancel=cancel, body_cache=body_cache),
+        img_path)
     out.append((rows, rev))
     rest = jobs[1:]
     w = bank_workers(n)
@@ -409,12 +417,56 @@ def encode_banks(gr_path, img_path, jobs, params, np, log, loops=(), gains=None,
         got = _encode_banks_parallel(gr_path, img_path, rest, params, log, loops, gains,
                                      level_refs, progress, cancel, body_cache, rev, w, n)
     if got is not None:
-        return out + got
+        return out + again(got, 1)
     for i, job in enumerate(rest, 1):
-        out.append(encode_and_verify(gr_path, img_path, job, params, np, log, loops=loops,
-                                     gains=gains, level_refs=level_refs, progress=span(i),
-                                     cancel=cancel, revalidate=rev, body_cache=body_cache))
+        out.append(_out_of_memory_words(lambda job=job, i=i: encode_and_verify(
+            gr_path, img_path, job, params, np, log, loops=loops, gains=gains,
+            level_refs=level_refs, progress=span(i), cancel=cancel, revalidate=rev,
+            body_cache=body_cache), img_path))
     return out
+
+
+#: A bank :func:`_encode_banks_parallel`'s worker ran out of memory for (PAD-777).
+_NO_MEMORY = object()
+
+
+def _out_of_memory(text):
+    """Whether *text* (an exception's words) is an emulator or Python running out of
+    memory: Unicorn's ``UC_ERR_NOMEM``, a ``MemoryError``."""
+    t = str(text or "")
+    return "UC_ERR_NOMEM" in t or "MemoryError" in t
+
+
+def _out_of_memory_words(run, img_path):
+    """``run()``, its out-of-memory failure said in words a user can act on (PAD-777:
+    three Iron Maiden bank encoders at once died with ``UC_ERR_NOMEM`` on a PC whose
+    page file did not grow)."""
+    from .spike2.parallel import emulator_commit
+    try:
+        return run()
+    except MemoryError as e:
+        why = e
+    except Exception as e:                              # noqa: BLE001
+        if not _out_of_memory(e):
+            raise
+        why = e
+    raise RuntimeError(
+        "This computer ran out of memory encoding the sound banks, even one at a time "
+        "(a sound encoder needs about %.1f GB). Close other programs, and check the C: "
+        "drive has a few GB free so Windows can grow its page file, then Write again. (%s)"
+        % (emulator_commit(img_path) / 1e9, why))
+
+
+def _encode_alone(gr_path, img_path, job, params, np, log, loops, gains, level_refs, cancel,
+                  rev, body_cache):
+    """PAD-777: :func:`encode_and_verify` for a bank whose worker ran out of memory,
+    here in the Write's own process once the workers have gone."""
+    log("Sound bank %s: encoded again on its own, as its worker ran out of memory beside "
+        "the others." % SB.bank_name(job.cat), "info")
+    return _out_of_memory_words(lambda: encode_and_verify(
+        gr_path, img_path, job, params, np, log, loops=loops, gains=gains,
+        level_refs=level_refs, cancel=cancel, revalidate=rev, body_cache=body_cache),
+        img_path)
 
 
 def _job_bytes(job):
@@ -448,7 +500,8 @@ def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, l
                            progress, cancel, body_cache, rev, workers, n_all, done0=1):
     """:func:`encode_banks`' workers; None when the pool could not start (the
     caller encodes the banks itself).  *done0*: the banks already encoded
-    before these (the first, here)."""
+    before these (the first, here).  PAD-777: a bank whose worker ran out of
+    memory comes back as :data:`_NO_MEMORY`, for the caller to encode alone."""
     import multiprocessing as mp
     import tempfile
     from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -506,6 +559,15 @@ def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, l
                 tag, val, lines, used = results[said]
                 for m, lv in lines:
                     log(m, lv)
+                if tag != "ok" and _out_of_memory("%s %s" % tuple(val)):
+                    # (the commit room counts on a page file that can grow; this
+                    # computer's did not: PAD-777)
+                    log("Sound bank %s: its worker ran out of memory (%s); it is encoded "
+                        "again on its own once the others are done."
+                        % (SB.bank_name(jobs[said].cat), val[1]), "info")
+                    results[said] = ("again", None, [], None)
+                    said += 1
+                    continue
                 if tag != "ok":
                     open(flag, "w").close()
                     raise RuntimeError(val[1])
@@ -517,7 +579,7 @@ def _encode_banks_parallel(gr_path, img_path, jobs, params, log, loops, gains, l
                     progress(int(100 * (said + done0) / n_all), 100,
                              "Encoding the modes' sound banks (%d of %d)..."
                              % (said + done0, n_all))
-        return [r[1] for r in results]
+        return [_NO_MEMORY if r[0] == "again" else r[1] for r in results]
     finally:
         if pool is not None:
             pool.shutdown(wait=True, cancel_futures=True)

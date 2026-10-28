@@ -447,34 +447,32 @@ def start_block_pool(kind, gr_path, img_path, stock_rows, first_warm=None,
 
 
 # ---------------------------------------------------------------------------
-# How many emulators the computer has room for (PAD-609).  On Windows an
-# emulator process commits the guest memory it maps for image.bin (and a
-# bank's file) up front, ~2.6 GB on Godzilla LE 1.16 while it touches a few
-# hundred MB of it, and a Write that fails to commit one fails with the
-# emulator's UC_ERR_NOMEM.  The workers of a long build (the cat-0 pool, the
-# block workers, the banks') ran to sixty-odd GB of commit together, so each
-# count is held to what the commit limit (RAM and page file) has room for.
+# How many emulators the computer has room for (PAD-609).  A Write that
+# fails to commit an emulator's memory fails with the emulator's
+# UC_ERR_NOMEM.  The workers of a long build (the cat-0 pool, the block
+# workers, the banks') ran to sixty-odd GB of commit together, so each count
+# is held to what the commit limit (RAM and page file) has room for.
+#
+# PAD-777: an emulator used to commit image.bin's whole size (a private
+# copy-on-write view) and a 512 MB heap up front, ~2.1 GB on Iron Maiden
+# while it touched 43 MB; the card files are read-only views now and the heap
+# is mapped as it is used (spike2.window), so the files cost nothing.
 # ---------------------------------------------------------------------------
 
-#: what an emulator process commits besides the files it maps into the guest
-#: (measured 0.45-1.07 GB over a 1.65 GB image.bin, Godzilla LE 1.16)
-EMU_COMMIT_EXTRA = 5 << 28
+#: what an emulator process commits (PAD-777, Iron Maiden LE 1.18: 0.32 GB booted
+#: with its params derived, 2.15 GB at the peak of a whole decode of its 12.7-minute
+#: song, most of that the decoded audio; the out-of-memory retry of a bank's
+#: encode covers such a peak)
+EMU_COMMIT_EXTRA = 1 << 30
 #: commit left for the app itself and everything else on the computer
 COMMIT_RESERVE = 4 << 30
 
 
 def emulator_commit(*paths):
-    """The bytes one emulator process commits mapping the files *paths*
-    (image.bin, a bank's file; None and missing ones count nothing)."""
-    import os
-    n = EMU_COMMIT_EXTRA
-    for path in paths:
-        if path:
-            try:
-                n += os.path.getsize(path)
-            except OSError:
-                pass
-    return n
+    """The bytes one emulator process commits.  The files *paths* it maps
+    (image.bin, a bank's file) count nothing: they are read-only views of the
+    files (PAD-777), not memory of the emulator's own."""
+    return EMU_COMMIT_EXTRA
 
 
 def commit_room():

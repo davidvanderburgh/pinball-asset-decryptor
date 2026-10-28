@@ -492,6 +492,114 @@ def test_kit_recognises_each_supported_table(monkeypatch):
     assert pv.recognise("x.vpx") == (None, None)
 
 
+# ------------------------------------------------ the table generator -----
+
+MINI_TABLES = {
+    "switch_list.txt": "\n".join([
+        "# id   num   node  bit  name",
+        "34     100   1     2    Action Button", "36     103   1     11   Start Button",
+        "39     106   1     16   LEFT COIN", "38     111   1     14   TILT PENDULUM",
+        "63     10    8     24   RIGHT FLIPPER BUTTON", "64     9     8     25   LEFT FLIPPER BUTTON",
+        "66     22    8     28   SHOOTER LANE", "67     8     8     29   RIGHT SLINGSHOT",
+        "68     7     8     30   LEFT SLINGSHOT", "70     15    8     32   TROUGH 2", "71     16    8     33   TROUGH 1",
+        "72     21    8     38   TROUGH JAM", "80     40    9     8    LEFT ORBIT", "81     41    9     9    TANK TARGET",
+        "82     42    9     10   LEFT POP BUMPER", "83     43    9     11   LEFT SPINNER OPTO",
+        "84     44    9     12   RIGHT VUK OPTO", "85     45    9     13   CENTER 3 BANK DROP LEFT OPTO",
+        "86     46    9     14   JETPACK HOME OPTO", ""]),
+    "switch_xy.txt": "\n".join([
+        "# id   node bit  name                                 x     y",
+        "66     8     28    SHOOTER LANE                       416   859", "67     8     29    RIGHT SLINGSHOT   310   710",
+        "68     8     30    LEFT SLINGSHOT                     114   710", "70     8     32    TROUGH 2   364   859",
+        "71     8     33    TROUGH 1                           377   854", "72     8     38    TROUGH JAM   377   840",
+        "80     9     8     LEFT ORBIT                          43   169", "81     9     9     TANK TARGET   235   271",
+        "82     9     10    LEFT POP BUMPER                    305   263", "83     9     11    LEFT SPINNER OPTO   77   383",
+        "84     9     12    RIGHT VUK OPTO                     388   549", "85     9     13    CENTER 3 BANK DROP LEFT OPTO 124 273",
+        "86     9     14    JETPACK HOME OPTO                  234    17", ""]),
+    "device_xy.txt": "\n".join([
+        "# class   name                                   x     y    w    h  grp index  conn   image",
+        "coil      RIGHT FLIPPER                        281   813   20   20    7     0  -      playfield",
+        "coil      TROUGH                               370   858   20   20    7     1  -      playfield",
+        "coil      AUTO PLUNGER                         415   872   20   20    7     4  -      playfield",
+        "coil      LEFT FLIPPER                         141   813   20   20    7     5  -      playfield",
+        "coil      RIGHT VUK                            389   550   20   20    8     1  -      playfield",
+        "coil      CENTER 3 BANK DROP TARGET            147   258   20   20    8     4  -      playfield",
+        "led       SHOOT AGAIN                          210   863   20   20    8     8  -      playfield", ""]),
+    "led_io.txt": "\n".join([
+        "# node index name                                   x     y  conn  image",
+        "0      0     BACKBOX GI                             0     0  -     ",
+        "8      3     LEFT LANE ARROW-R                    117   356  -     playfield",
+        "8      4     LEFT LANE ARROW-G                    117   356  -     playfield",
+        "8      5     LEFT LANE ARROW-B                    117   356  -     playfield",
+        "8      8     SHOOT AGAIN                          210   863  -     playfield",
+        "9      45    BACKPANEL FLASH                      620   116  -     playfield",
+        "12     0     TOPPER 1-G                            69    77  -     topper", ""]),
+}
+
+
+@pytest.fixture(scope="module")
+def mini_tables(tmp_path_factory):
+    PIL = pytest.importorskip("PIL.Image")
+    d = tmp_path_factory.mktemp("tables")
+    for name, text in MINI_TABLES.items():
+        (d / name).write_text(text, encoding="utf-8")
+    PIL.new("L", (459, 998), 40).save(str(d / "playfield.png"))
+    return str(d)
+
+
+def test_generator_puts_the_titles_devices_on_a_table(mini_tables):
+    vg = pytest.importorskip("vpxgen")
+    g = vg.Gen("james_bond_le", mini_tables)
+    g.build()
+    kinds = {}
+    names = {}
+    for d in g.items:
+        kind, name, pos = vg.vpxfile.VpxTable.item_info(d)
+        kinds[kind] = kinds.get(kind, 0) + 1
+        names[name] = (kind, pos)
+    assert kinds["Flipper"] == 2 and kinds["Plunger"] == 1 and kinds["Timer"] == 2
+    assert kinds["Bumper"] == 1 and kinds["Spinner"] == 1 and kinds["HitTarget"] == 2
+    assert kinds["Light"] == 2, "an RGB triple is one light, the backpanel and topper none"
+    assert kinds["Kicker"] == 3                                   # drain, ball release, the VUK
+    assert "JetpackHomeOpto" not in names, "a mechanism's sensor is no object"
+    sx = vg.TABLE_W / 459.0
+    assert abs(names["LeftFlipper"][1][0] - 141 * sx) < 0.01 and abs(names["LeftFlipper"][1][1] - 813 * sx) < 0.01
+    assert abs(names["LeftPopBumper"][1][0] - 305 * sx) < 0.01
+    m = g.map
+    assert m["cabinet"]["start"] == 1036 and m["cabinet"]["launch"] == 1034 and m["cabinet"]["launch_key"] == "LockBarKey"
+    assert m["trough"]["switches"] == [71, 70, 72], "TROUGH 1 first, the jam last"
+    assert m["plunger"]["lane_switch"] == 66
+    assert m["switches"]["LeftOrbit"] == {"id": 80, "event": "hit", "name": "LEFT ORBIT"}
+    assert m["switches"]["LeftSpinnerOpto"]["event"] == "spin"
+    assert m["switches"]["LeftSlingshot"]["event"] == "slingshot"
+    assert m["saucers"]["RightVukOpto"]["switch"] == 84
+    sols = {v["callback"]: v["coil"] for v in m["solenoids"].values() if v["callback"]}
+    assert sols["bsTrough.SolOut"] == [7, 1] and sols["PadAutoPlunge"] == [7, 4]
+    assert sols["bsRightVukOpto.SolOut"] == [8, 1] and sols["PadResetDrops"] == [8, 4]
+    assert m["game_on"]["coils"] == [[7, 5], [7, 0]]
+    assert m["lamps"]["LLeftLaneArrow"]["leds"] == [[8, 3], [8, 4], [8, 5]]
+    assert "Center3BankDropLeftOpto.IsDropped = 0" in m["extra_vbs"]
+    script = g.script()
+    assert 'Controller.GameName = "james_bond_le"' in script
+    assert "Sub LeftOrbit_Hit : vpmTimer.PulseSw 1080 : End Sub" in script
+    assert 'SolCallback(sLLFlipper) = "SolLFlipper"' in script and "Sub SolLFlipper(e)" in script
+    assert 'PadLamps.Add "1803", Array(LLeftLaneArrow)' in script
+    assert "bsTrough.InitSw 0,1071,1070,1072" in script
+    assert script.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", script))
+
+
+def test_generator_shapes_carry_their_points():
+    vg = pytest.importorskip("vpxgen")
+    data = vg.set_points(vg.proto("trigger"), vg.circle(100, 200, 10, n=6))
+    recs = list(vg.vpxfile.item_records(data, 4))
+    pts = [struct.unpack_from("<ff", p, 0) for t, p, _ in recs if t == "VCEN"][1:]
+    assert len(pts) == 6 and abs(pts[0][0] - 110) < 0.01 and abs(pts[0][1] - 200) < 0.01
+    assert [t for t, _, _ in recs].count("DPNT") == 6 and recs[-1][0] == "ENDB"
+    wall = vg.set_points(vg.proto("wall"), [(0, 0), (10, 0), (10, 10)], slingshot_seg=1)
+    flags = [struct.unpack("<i", p)[0] for t, p, _ in vg.vpxfile.item_records(wall, 4) if t == "SLNG"]
+    assert flags == [0, 1, 0]
+    assert vg.ident("LEFT RAMP ENTER OPTO") == "LeftRampEnterOpto" and vg.ident("3 BANK") == "X3Bank"
+
+
 @pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le"])
 def test_shadow_maps_are_consistent(title):
     vs = pytest.importorskip("vpxshadow")

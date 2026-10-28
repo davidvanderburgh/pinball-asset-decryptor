@@ -204,11 +204,23 @@ class Launch:
         self.logfile = os.path.join(os.path.dirname(LOG), "padvpx-%s.log" % title)
 
     def take_slot(self):
-        cmd = wsl_head(self.distro) + ["-e", "bash", "%s/riglock.sh" % self.rig_wsl,
-                                       "take", "--any", LABEL, "%s for Visual Pinball" % self.title]
+        """A slot of the kit's own: the kit's `slot` when it names one (`use`
+        keeps it if it is already PAD-VPX's, takes it if free), else the first
+        free one."""
+        want = kit_load().get("slot")
+        what = "%s for Visual Pinball" % self.title
+        if want:
+            cmd = wsl_head(self.distro) + ["-e", "bash", "%s/riglock.sh" % self.rig_wsl,
+                                           "use", str(int(want)), LABEL, what]
+        else:
+            cmd = wsl_head(self.distro) + ["-e", "bash", "%s/riglock.sh" % self.rig_wsl,
+                                           "take", "--any", LABEL, what]
         r = _run(cmd)
         out = _text(r.stdout) + _text(r.stderr)
         m = re.search(r"slot=(\d+)", out)
+        if want and r.returncode == 0 and not m:
+            self.slot = int(want)
+            return self.slot
         if not m:
             raise RuntimeError("no rig slot free for %s: %s" % (self.title, out.strip()[-200:]))
         self.slot = int(m.group(1))

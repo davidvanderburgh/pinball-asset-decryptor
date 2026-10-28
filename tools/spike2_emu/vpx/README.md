@@ -25,6 +25,7 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `vpxkeys.py` | presses keys in a running patched table through its `PadTestTimer` (a test does not depend on VPX having the keyboard); `lamps <file>` dumps every mapped light's state. |
 | `padvpx.py` | the kit's command: patch a table (recognised by its map's `detect` words), register the controller, record cards, run and stop by hand, status. |
 | `padlaunch.py` | starts a run for a title when Visual Pinball opens its table and none is up, and stops what it started. |
+| `vpxgen.py`, `vpxgen_protos.json` | a table GENERATED from a title's own device tables (switch, coil and LED positions over the game's playfield drawing), for a title with no tribute; the prototypes are Visual Pinball's example table's objects with their strings blanked. |
 | `test_controller.vbs` | `cscript //nologo test_controller.vbs [run]` - the controller from VPX's own script engine, with no VPX installed; `run` presses Start and a flipper through a live rig and expects the coils back. |
 
 ## Numbering
@@ -186,6 +187,24 @@ timer, every `LightSeq` stopped at init) with its hit subs no longer called
 (`orig_hits: false`; `orig_keep` names the slingshots, whose originals
 animate the rubbers). `vpxkeys.py lamps <file>` makes the table write every
 mapped light's state, to compare with the machine's `padled` plane.
+
+## A table from nothing: `vpxgen.py <title> <rig tables dir> <out dir>`
+
+A title with no tribute still says where everything is. The rig's
+`dump/tables/<title>/` holds `switch_xy.txt` (every playfield switch's
+position, joined to the running game's ids), `device_xy.txt` (the coils),
+`led_io.txt` (every LED, RGB triples and all) and `playfield.png`, the game's
+own service-menu drawing of the playfield. The generator puts a flat table
+under that drawing: a Trigger at every rollover and opto, a Bumper at every
+pop, a standup or drop HitTarget at every target, a Spinner, a Kicker
+saucer at every VUK / eject / lock whose coil the game fires, slingshot
+walls, a Light at every LED with a position (an RGB insert is one light),
+flippers at the flipper coils, plunger and ball release in the shooter
+lane, a drain, outer walls and lane guides, and the shadow bridge over a
+base script of its own. No ramps, plastics or sounds: the title's geometry
+made playable. The base file is Visual Pinball's own "Nudge Test and
+Calibration" table (`PAD_VPX_BASE` names another), whose items and
+collections are dropped and whose GameData is resized to the drawing.
 
 ## Mapping another table
 

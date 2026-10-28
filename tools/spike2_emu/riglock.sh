@@ -184,6 +184,19 @@ sweep() {
     return 0
 }
 
+# THE BOARD HAS TO BE WRITABLE BY WHOEVER IS ASKING. A root run (the app's
+# Emulate tab, a `wsl -u root` take) that makes the board leaves it root's, and
+# a plain-user take after it could create no lock at all - and said "every
+# slot is in use" under a table of free ones (PAD-803, from the Visual Pinball
+# launcher). So root hands a board it touches back to the human, and a board
+# that still cannot be written is said to be the problem, not the slots.
+board_ready() {
+    mkdir -p "$BOARD" || die "cannot create the board at $BOARD"
+    pad_give_back "$BOARD"
+    [ -w "$BOARD" ] && return 0
+    die "cannot write the board at $BOARD (it is $(stat -c %U "$BOARD" 2>/dev/null || echo "another account")'s, and this is $(id -un 2>/dev/null)) - a run as root made it; fix once with: sudo chown $(id -un 2>/dev/null) '$BOARD'"
+}
+
 mount_hint() {
     local n=$1
     [ "$n" = 0 ] && return 0
@@ -207,7 +220,7 @@ cmd_take() {
     [ -n "$who" ] || die "take needs <who>: the item, ticket or branch this is for"
     shift || true
     what=$(clean "${*:-}")
-    mkdir -p "$BOARD" || die "cannot create the board at $BOARD"
+    board_ready
     sweep
     if [ -n "$slot" ]; then
         take_one "$slot" "$who" "$what" || { cmd_show "$slot" >&2; die "slot $slot is held"; }
@@ -246,7 +259,7 @@ cmd_use() {
         [ "$n" = 0 ] && touch -c "$LEGACY" 2>/dev/null
         return 0
     fi
-    mkdir -p "$BOARD" || die "cannot create the board at $BOARD"
+    board_ready
     sweep
     if take_one "$n" "$who" "$what"; then
         echo "riglock: slot $n is $who's now (it was free)" >&2

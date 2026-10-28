@@ -254,6 +254,25 @@ rm -rf "$t"
     assert out.splitlines() == ["slot=1", "slot=2", "slot=3", "full rc=1"]
 
 
+def test_a_board_this_account_cannot_write_is_named_not_every_slot_in_use():
+    """PAD-803: a board a root run made could take no lock from the plain
+    user, and riglock said "every slot 1..5 is in use" under a table of five
+    free slots. It says the board is the problem, and how to fix it."""
+    rc, out, err = _sh(_BOARD + r'''
+mkdir -p "$PAD_BOARD" && chmod 555 "$PAD_BOARD"
+# root writes any board, and Git Bash's chmod does not stop a write on NTFS
+[ -w "$PAD_BOARD" ] && { echo writable; chmod 755 "$PAD_BOARD"; rm -rf "$t"; exit 0; }
+L take --any PAD-VPX foo_fighters__le for Visual Pinball; echo "rc=$?"
+L use 2 PAD-VPX foo_fighters__le; echo "rc=$?"
+chmod 755 "$PAD_BOARD"; rm -rf "$t"
+''')
+    if out.strip() == "writable":
+        pytest.skip("this account can write a 555 directory (root, or NTFS)")
+    assert out.splitlines() == ["rc=1", "rc=1"], (out, err)
+    assert "in use" not in err, err
+    assert err.count("cannot write the board at ") == 2 and "chown" in err, err
+
+
 def test_a_held_slot_cannot_be_taken_and_only_its_holder_releases_it():
     rc, out, err = _sh(_BOARD + r'''
 L take --slot 2 item/48 godzilla run 2>/dev/null

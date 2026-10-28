@@ -185,6 +185,22 @@ def test_every_rig_command_carries_the_rig(board, monkeypatch):
     assert "PAD_SLOT=3" in env and "PAD_LABEL=item/48" in env
 
 
+def test_an_installed_rig_is_told_the_apps_board(monkeypatch):
+    """PAD-803: a rig under Program Files guesses the Linux home's board, so
+    it is told the profile's; a checkout under the profile guesses right and
+    its commands stay as they were."""
+    from pinball_decryptor.webui import emulate_core
+    monkeypatch.setattr(emulate_core.sys, "platform", "win32")
+    monkeypatch.setattr(rigslot, "board_dir", lambda: r"C:\Users\Deistar\.pad-rig")
+    monkeypatch.setenv("PAD_EMU_DIR", r"C:\Program Files\Pinball Asset Decryptor\tools\spike2_emu")
+    assert emulate_core._board_env() == ["PAD_BOARD=/mnt/c/Users/Deistar/.pad-rig"]
+    monkeypatch.setenv("PAD_EMU_DIR", r"C:\Users\Deistar\src\pad\tools\spike2_emu")
+    assert emulate_core._board_env() == []
+    monkeypatch.setattr(emulate_core.sys, "platform", "linux")
+    monkeypatch.setenv("PAD_EMU_DIR", "/opt/pad/tools/spike2_emu")
+    assert emulate_core._board_env() == []
+
+
 def test_a_run_says_its_speed(board):
     """PAD-649: watch.sh writes the game's speed into the run record once padspeed.py's ask is taken up, and
     the Emulate tab's rig strip says "4x"; an older record has none and reads as real time."""

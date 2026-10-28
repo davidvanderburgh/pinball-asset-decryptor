@@ -9,6 +9,7 @@
     "from the drawing's 313 x 710 by vp_x = 3.121*x - 18.9, vp_y = 3.474*y + 5.3."
   ],
   "title": "godzilla_le",
+  "detect": ["Godzilla", "SEGA.VBS"],
   "game_on": {
     "_": "a synthetic solenoid for core.vbs's GameOnSolenoid (UseSolenoids=2, fast flips): ON while the flipper coils' board rules are armed",
     "number": 40, "coils": [[8, 5], [8, 0]]

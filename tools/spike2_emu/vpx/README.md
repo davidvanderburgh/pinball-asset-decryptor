@@ -22,7 +22,9 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `patch_godzilla.py` | applies `godzilla_le.vpxmap.json` to marty02's "Godzilla Limited Edition" v2.6: rewires the script, adds 36 lights and the Mechagodzilla magnet, re-signs. |
 | `vpxshadow.py` | the patcher for a SCRIPTED tribute (no ROM): keeps its script as a shadow game, generates the bridge from `<title>.shadow.json`, neuters its own balls, makes PinUP Player optional, re-signs. |
 | `rush_le.shadow.json`, `foo_fighters_le.shadow.json` | the maps for drhotwing's "Rush LE Tribute" 2.0.2 and JP's "Foo Fighters" beta. |
-| `vpxkeys.py` | presses keys in a running patched table through its `PadTestTimer` (a test does not depend on VPX having the keyboard). |
+| `vpxkeys.py` | presses keys in a running patched table through its `PadTestTimer` (a test does not depend on VPX having the keyboard); `lamps <file>` dumps every mapped light's state. |
+| `padvpx.py` | the kit's command: patch a table (recognised by its map's `detect` words), register the controller, record cards, run and stop by hand, status. |
+| `padlaunch.py` | starts a run for a title when Visual Pinball opens its table and none is up, and stops what it started. |
 | `test_controller.vbs` | `cscript //nologo test_controller.vbs [run]` - the controller from VPX's own script engine, with no VPX installed; `run` presses Start and a flipper through a live rig and expects the coils back. |
 
 ## Numbering
@@ -41,15 +43,40 @@ range (`solenoids` in the map; the flippers keep core.vbs's own Consts
 below 1000 goes through the map (`switch_rewrite`, `lamps`), so a table can
 run on its original numbering while its map is being built.
 
-## Running a table
+## The kit: `padvpx`
 
-1. Start the game in the rig (the app's Emulate tab, or `watch.sh`); the
-   controller finds the run on the rig board (`~/.pad-rig/slot-N.run`) by the
-   title the table names, or through `PAD_WSL_DISTRO` / `PAD_ROOT_WSL` /
-   `PAD_SLOT` when VPX is started from a shell that has them.
-2. `python padcontroller.py --register` (once).
-3. Put `PADSPIKE2.vbs` beside the patched table and open it in VPX
-   (`VPinballX64.exe -Play "<table>.vpx"`).
+Nothing here needs the app running. `padvpx.py` is the whole kit, run with
+the app's own Python (`{app}\python\python.exe tools\spike2_emu\vpx\padvpx.py`
+on an installed app; the venv's in a checkout):
+
+    padvpx register                        PAD.Controller in the registry (once)
+    padvpx library D:\cards                a directory of card images: a title's newest build is its card
+    padvpx patch "<your table.vpx>" [--card <image>]
+                                           recognise the table, write "<name> (PAD).vpx" beside it
+    padvpx card <title> <image>            which card a title boots (padvpx card: list them)
+    padvpx run <title> | stop <title>      a run by hand, the way the controller starts one
+    padvpx status | tables                 what is registered, recorded, up, and patchable
+
+Then open the patched table in Visual Pinball. The table names its title,
+the controller looks for a run of it on the rig board (`~/.pad-rig/slot-N.run`)
+and, finding none, STARTS one (`padlaunch.py`): the title's card, in
+PAD-Runtime when that distro is installed (else the default distro), on a
+rig slot of its own taken as `PAD-VPX`, as `wsl -u root` with the user's HOME
+and `PAD_PIVOT=1` (the app's own launch shape, so save states work),
+visible (the LCD window on the desktop, for the backglass monitor) and with
+sound, but without the rig's virtual playfield window (Visual Pinball is the
+playfield, and that window would take the keyboard from it). `Run` returns
+at once; the table plays once the game is up, half a minute to a minute
+later, and `Controller.Stop` (Visual Pinball closing the table) stops what it
+started and gives the slot back. A run started any other way (the app's
+Emulate tab, `watch.sh`) is attached to and left alone; with several runs of
+a title up, the newest is taken. The kit's record is `~/.pad-vpx.json`
+(cards, library, distro, rig); `PAD_VPX_CARD` and `PAD_VPX_LIBRARY` override
+it, and `PAD_WSL_DISTRO` / `PAD_ROOT_WSL` / `PAD_SLOT` name a run outright
+when VPX is started from a shell that has them.
+
+PAD ships no table: the kit patches the copy the user downloaded, and a
+map's `detect` words say which table it is for.
 
 While a table is attached, `dump/ballfeed.off` tells the rig's `ballfeed.py`
 to leave the trough alone: the table's own `cvpmBallStack` owns the balls.

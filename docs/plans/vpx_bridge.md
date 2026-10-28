@@ -179,3 +179,31 @@ cannot keep a light wrong for longer than that.
 
 Ryguy417's Foo Fighters v2.0 (VPU 14455) is a second Foo Fighters table and
 would take a map of its own.
+
+## The kit: Visual Pinball starts the emulator
+
+David (2026-10-27, bedtime): the app should not have to start the
+emulator; Visual Pinball should, and PAD should only provide the patches.
+The emulator already runs without the app (watch.sh in the pinned
+PAD-Runtime distro), so this is a launcher, not a container:
+
+* `padlaunch.py`: when the table's title has no run on the board, the
+  controller starts one - the title's card (`~/.pad-vpx.json`, the kit's
+  library directory's newest build, or `PAD_VPX_CARD`), a slot taken as
+  `PAD-VPX`, `wsl -u root` + HOME + `PAD_PIVOT=1` exactly as the app's
+  Windows launch does (a plain user launch refused on a slot whose NVRAM an
+  earlier elevated run had left to root), visible and audible, with
+  `PAD_PLAYFIELD=0` so the rig's own playfield window does not take the
+  keyboard from Visual Pinball. `Run` returns at once and the poll thread
+  attaches when padled carries the magic; the switch table is read again
+  until the rig has written it (it comes a few seconds after the game).
+  `Stop` kills what it started and releases the slot.
+* `padvpx.py`: `register`, `library`, `patch` (the map's `detect` words say
+  which table a file is), `card`, `run`, `stop`, `status`, `tables`.
+* pywin32 joins requirements-windows.txt so the app's bundled Python can
+  host the COM server; the vpx folder already ships with the rig.
+
+Proven 2026-10-27 23:01: Visual Pinball alone, opening the Rush table with
+no run up, brought rush_le up on slot 1 of PAD-Runtime (board entry in 8 s,
+attached in 56 s), Start served a ball and the lockbar launched it; closing
+the table stopped the run and emptied the board.

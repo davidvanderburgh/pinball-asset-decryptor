@@ -31,3 +31,5 @@ fsb5==1.0
 pyogg==0.6.14a1
 imageio-ffmpeg==0.6.0
 sounddevice==0.5.6
+# pywin32: PAD.Controller, the Visual Pinball kit's COM server (tools/spike2_emu/vpx)
+pywin32==312

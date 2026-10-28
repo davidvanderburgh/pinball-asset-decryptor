@@ -13,6 +13,10 @@
     "quiet_subs: the tribute's own light shows and its GI timer (GIUpdateTimer_Timer turns GI off by ball count); orig_hits false: its hit subs stay out of the way once the machine lights the table."
   ],
   "title": "rush_le",
+  "detect": [
+    "Rush LE ver",
+    "DrHotWing"
+  ],
   "output": "Rush LE 2.0.2 (PAD).vpx",
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},

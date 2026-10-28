@@ -8,6 +8,10 @@
     "Stern's upper playfield (UP PF ...) has no counterpart on this table."
   ],
   "title": "foo_fighters_le",
+  "detect": [
+    "JP's Foo Fighters",
+    "jpsalas"
+  ],
   "output": "JP's Foo Fighters (PAD).vpx",
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},

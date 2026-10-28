@@ -73,6 +73,7 @@ if RIG not in sys.path:
 import coilmap    # noqa: E402  offsets into padled, the drive decoder
 import padpath    # noqa: E402  where the rig is
 import padsw      # noqa: E402  offsets into padsw
+import padlaunch  # noqa: E402  starts a run for a table when none is up
 
 try:
     import pythoncom
@@ -213,13 +214,13 @@ class Rig:
       3. padpath's default: the default distro's ~/spike2root.
     """
 
-    def __init__(self, title=None):
+    def __init__(self, title=None, record=None):
         self.distro = os.environ.get("PAD_WSL_DISTRO")
         self.root = os.environ.get("PAD_ROOT_WSL")        # posix
         self.slot = padpath.slot()
         self.how = "environment"
-        if not self.root:
-            rec = self.board_run(title)
+        if record or not self.root:
+            rec = record or self.board_run(title)
             if rec:
                 self.distro = rec.get("distro") or self.distro
                 self.root = rec.get("root")
@@ -232,6 +233,15 @@ class Rig:
         else:
             self.dump = padpath.dump() or ""
             self.how = "padpath default"
+
+    @staticmethod
+    def board_slot(slot):
+        """The board's record for one slot, or None until watch.sh writes it."""
+        try:
+            rec = json.load(open(os.path.join(BOARD, "slot-%d.run" % int(slot)), encoding="utf-8"))
+            return rec if isinstance(rec, dict) and rec.get("root") else None
+        except (OSError, ValueError):
+            return None
 
     @staticmethod
     def board_run(title):
@@ -394,6 +404,9 @@ class Bridge:
         self.title = ""
         self.rig = None
         self.pipe = None
+        self.launch = None                 # the run this bridge started, if any
+        self.attached = False              # the run is up and its tables read
+        self.start_t = 0.0
         self.running = False
         self.paused = False
         self._thread = None
@@ -422,15 +435,56 @@ class Bridge:
                len(self.map.lamp_groups)))
 
     def run(self):
+        """Attach to the title's run, or START one (padlaunch) when none is
+        up and a card for the title is known: Run returns at once, the poll
+        thread attaches when the game is up, and the table plays from then
+        on - switches before that are dropped, Visual Pinball never waits."""
         self.rig = Rig(self.title)
-        self.pipe = SwitchPipe(self.rig)
+        self.pipe = None
+        self.launch = None
+        self.attached = False
+        self.start_t = time.monotonic()
         log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         data = read_block(self.rig.led_path(), READ_N)
-        if not data or not coilmap.has_magic(data):
-            raise RuntimeError(
-                "no Spike 2 run is up for %s. Start the game first (the app's "
-                "Emulate tab, or watch.sh), then open the table. Looked at %s (%s)."
-                % (self.title or "this title", self.rig.led_path(), self.rig.how))
+        if data and coilmap.has_magic(data):
+            self._attach(data)
+        else:
+            card = padlaunch.card_for(self.title)
+            if not card:
+                raise RuntimeError(
+                    "no Spike 2 run is up for %s and no card image to start one "
+                    "(looked in %s). Start the game first (the app's Emulate tab, "
+                    "or watch.sh), or record its card: padvpx card %s <image>."
+                    % (self.title or "this title", padlaunch.card_places(self.title),
+                       self.title))
+            self.launch = padlaunch.Launch(self.title, card)
+            slot = self.launch.start()
+            self.rig = None
+            log("starting %s on slot %d; the table plays once the game is up" % (self.title, slot))
+        self.running = True
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._thread.start()
+        log("run")
+
+    def _attach(self, data):
+        """The run is up: read its tables, open the switch pipe, own the balls."""
+        self.pipe = SwitchPipe(self.rig)
+        self._read_tables(data)
+        for name, f in self.map.fakes.items():
+            self._fake[name] = {"open": 0}
+            self.pipe.set(f["closed"], 1)
+            self.pipe.set(f["open"], 0)
+        try:
+            open(self.rig.ballfeed_off_path(), "w").write("PAD.Controller\n")
+        except OSError as exc:
+            log("ballfeed.off not written: %s" % exc)
+        self.attached = True
+        log("attached to %s after %.0f s" % (self.rig.how, time.monotonic() - self.start_t))
+
+    def _read_tables(self, data):
+        """The run's switch table (the rig writes it a little after the game
+        is up, so a run this bridge started may be read again) and the
+        flipper buttons' coils for a run without the rule plane."""
         self.sw_ids = self.rig.switch_ids(self.title)
         ver = struct.unpack_from("<I", data, 4)[0]
         log("switch table: %d ids; padled version %d%s"
@@ -447,18 +501,34 @@ class Bridge:
             sid = cab.get(key, 0) - 1000
             if coil and sid in by_id:
                 self._button_coils[coil] = by_id[sid][1]
-        for name, f in self.map.fakes.items():
-            self._fake[name] = {"open": 0}
-            self.pipe.set(f["closed"], 1)
-            self.pipe.set(f["open"], 0)
-        try:
-            open(self.rig.ballfeed_off_path(), "w").write("PAD.Controller\n")
-        except OSError as exc:
-            log("ballfeed.off not written: %s" % exc)
-        self.running = True
-        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self._thread.start()
-        log("run")
+
+    #: how long a run started for a table may take to come up (a card copied
+    #: into the cache first, then the boot)
+    START_TIMEOUT_S = 420
+
+    def _poll_starting(self):
+        """Once a second until the run this bridge started is up."""
+        if self.launch is None:
+            return
+        if self.rig is None:
+            rec = Rig.board_slot(self.launch.slot)
+            if rec:
+                self.rig = Rig(self.title, record=rec)
+                log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
+        if self.rig is not None:
+            data = read_block(self.rig.led_path(), READ_N)
+            if data and coilmap.has_magic(data):
+                self._attach(data)
+                return
+        if not self.launch.alive() and self.rig is None:
+            log("the run started for %s ended before it came up (see %s)"
+                % (self.title, self.launch.logfile))
+            self.launch = None
+        elif time.monotonic() - self.start_t > self.START_TIMEOUT_S:
+            log("the run started for %s is not up after %d s; giving up on it"
+                % (self.title, self.START_TIMEOUT_S))
+            self.launch.stop()
+            self.launch = None
 
     def stop(self):
         self.running = False
@@ -473,6 +543,9 @@ class Bridge:
             except OSError:
                 pass
         log("stop after %d polls (%d failed)" % (self.polls, self.poll_fail))
+        if self.launch is not None:
+            self.launch.stop()           # what this bridge started, it stops
+            self.launch = None
 
     def set_pause(self, want):
         """VPX pauses when its window loses focus and says so through
@@ -481,6 +554,9 @@ class Bridge:
         `paused` flag (padsw) and toggle only when it differs from what VPX
         wants: two Pause=True in a row must not un-freeze the game."""
         want = 1 if want else 0
+        if not self.attached or not self.pipe:
+            self.paused = bool(want)         # nothing to freeze yet
+            return
         self.paused = bool(want)
         if not self.pipe or not self.rig:
             return
@@ -522,6 +598,10 @@ class Bridge:
     # -- the poll
     def _poll_loop(self):
         while self.running:
+            if not self.attached:
+                self._poll_starting()
+                time.sleep(1.0)
+                continue
             t0 = time.monotonic()
             self._poll_once()
             self.last_poll_ms = (time.monotonic() - t0) * 1000.0
@@ -533,6 +613,10 @@ class Bridge:
             self.poll_fail += 1
             return
         self.polls += 1
+        if not self.sw_ids and self.polls % 250 == 0:      # ~ every 2 s until the rig wrote it
+            self._read_tables(data)
+            if self.sw_ids:
+                log("switch table arrived: %d ids" % len(self.sw_ids))
         sw = read_block(self.rig.sw_path(), padsw.OFF_MRG + padsw.MAX_ID)
         now = time.monotonic()
         with self.lock:
@@ -693,6 +777,8 @@ class Bridge:
         return {"title": self.title, "running": self.running, "polls": self.polls,
                 "poll_fail": self.poll_fail, "last_poll_ms": round(self.last_poll_ms, 2),
                 "rig": self.rig.how if self.rig else None,
+                "attached": self.attached,
+                "started": self.launch.slot if self.launch else None,
                 "held": dict(self.pipe.held) if self.pipe else {},
                 "lamps_on": sum(self.lamp_state.values()),
                 "sols_on": [n for n, v in self.sol_state.items() if v]}

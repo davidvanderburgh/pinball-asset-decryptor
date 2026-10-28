@@ -410,6 +410,88 @@ def test_board_run_takes_the_newest_run_of_a_title(tmp_path, monkeypatch):
     assert pc.Rig.board_run("godzilla_le") is None                    # several runs, none of it
 
 
+def test_board_slot_reads_one_record(tmp_path, monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(pc, "BOARD", str(tmp_path))
+    assert pc.Rig.board_slot(3) is None                                  # watch.sh has not written it
+    (tmp_path / "slot-3.run").write_text('{"slot": 3, "game": "rush_le"}', encoding="utf-8")
+    assert pc.Rig.board_slot(3) is None                                  # no root yet: not a run
+    (tmp_path / "slot-3.run").write_text(
+        '{"slot": 3, "game": "rush_le", "root": "/home/pad/padslots/3/root", "distro": "PAD-Runtime"}',
+        encoding="utf-8")
+    rig = pc.Rig("rush_le", record=pc.Rig.board_slot(3))
+    assert rig.slot == 3 and rig.distro == "PAD-Runtime" and "padslots" in rig.dump
+
+
+# ------------------------------------------------- the launcher + kit -----
+
+def test_launcher_finds_the_card_env_then_kit_then_library(tmp_path, monkeypatch):
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    assert pl.card_for("rush_le") is None
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    for n in ("rush_le-1_18_0.Release.16G.sdcard.raw", "rush_le-1_19_0.Release.16G.sdcard.raw",
+              "rush_pro-1_19_0.Release.16G.sdcard.raw", "rush_le-1_9_0.Release.16G.sdcard.raw"):
+        (lib / n).write_bytes(b"x")
+    monkeypatch.setenv("PAD_VPX_LIBRARY", str(lib))
+    assert pl.card_for("rush_le").endswith("rush_le-1_19_0.Release.16G.sdcard.raw")   # newest, 1.19 > 1.9
+    assert pl.card_for("foo_fighters_le") is None
+    mine = tmp_path / "my_rush.raw"
+    mine.write_bytes(b"x")
+    pl.remember_card("rush_le", str(mine))                              # the kit beats the library
+    assert pl.card_for("rush_le") == str(mine)
+    assert pl.kit_load()["cards"]["rush_le"] == str(mine)
+    monkeypatch.setenv("PAD_VPX_CARD", str(lib / "rush_le-1_18_0.Release.16G.sdcard.raw"))
+    assert pl.card_for("rush_le").endswith("1_18_0.Release.16G.sdcard.raw")   # the env beats both
+    assert pl._version_key("x-1_19_0.raw") == (1, 19, 0) and pl._version_key("x.raw") == (0, 0, 0)
+
+
+def test_launcher_run_is_visible_audible_and_without_the_rigs_playfield(tmp_path, monkeypatch):
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pl, "win_python", lambda: None)
+    la = pl.Launch("rush_le", "/mnt/d/cards/rush_le-1_19_0.raw", dist="PAD-Runtime")
+    la.slot = 4
+    env = la.env()
+    assert "PAD_SLOT=4" in env and "PAD_LABEL=PAD-VPX" in env
+    assert "PAD_HIDDEN=0" in env and "PAD_AUDIO=1" in env and "PAD_PLAYFIELD=0" in env
+    assert "PAD_CARD=/mnt/d/cards/rush_le-1_19_0.raw" in env
+    assert pl.wsl_head("PAD-Runtime", root=True) == ["wsl.exe", "-d", "PAD-Runtime", "-u", "root"]
+    monkeypatch.setattr(pl, "account", lambda d=None: ("pad", "/home/pad"))
+    head, root = la.head()
+    assert root and head[:7] == ["wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e", "env"]
+    assert "HOME=/home/pad" in head and "PAD_PIVOT=1" in head
+    monkeypatch.setattr(pl, "account", lambda d=None: ("root", ""))
+    head, root = la.head()
+    assert not root and "-u" not in head
+
+
+def test_kit_recognises_each_supported_table(monkeypatch):
+    pv = pytest.importorskip("padvpx")
+    titles = pv.maps()
+    assert set(titles) >= {"rush_le", "foo_fighters_le", "godzilla_le"}
+    assert all(t["detect"] for t in titles.values()), "every map names the words that identify its table"
+
+    class Fake:
+        def __init__(self, script):
+            self._s = script
+
+        def script(self):
+            return self._s
+
+    for title, words in (("rush_le", ["Rush LE ver 2.0.2 / PUP ver 2.0.0 - By DrHotWing"]),
+                         ("foo_fighters_le", ["'  JP's Foo Fighters - a tribute", "script by jpsalas - 2025"]),
+                         ("godzilla_le", ["' Godzilla Limited Edition", 'ExecuteGlobal GetTextFile("SEGA.VBS")'])):
+        monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p, s="\n".join(words): Fake(s))
+        got, info = pv.recognise("x.vpx")
+        assert got == title, (title, got)
+    monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake("Option Explicit\n' some other table"))
+    assert pv.recognise("x.vpx") == (None, None)
+
+
 @pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le"])
 def test_shadow_maps_are_consistent(title):
     vs = pytest.importorskip("vpxshadow")

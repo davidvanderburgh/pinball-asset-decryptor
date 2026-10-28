@@ -127,10 +127,14 @@ def test_shipped_ports_carry_a_table_the_runtime_takes():
     ports = _attract_ports()
     assert len(ports) >= 44
     for n, v in ports:
-        assert set(v) == {"attract_table", "attract_entry_size", "attract_page_at", "attract_count",
-                          "attract_sleep"}, n
+        assert {"attract_table", "attract_entry_size", "attract_page_at", "attract_count", "attract_sleep"} <= set(v), n
+        if "attract_video" in v:                                 # clip v2: the attract video element, whole
+            assert {"attract_video_play", "attract_video_playing", "attract_video_update", "attract_video_draw",
+                    "attract_video_yield"} <= set(v), n
         assert v["attract_entry_size"] in (8, 12, 16) and v["attract_page_at"] == 4, n
         assert 2 <= v["attract_count"] <= 256, n                 # pad_mode_runtime.c attract_arm's bound
+    # James Bond LE/Pro 1.06 play their attract clips through the element (the bank's surface is not on the glass)
+    assert {n for n, v in ports if "attract_video" in v} >= {"james_bond_le-1.06.port", "james_bond_pro-1.06.port"}
 
 
 def test_runtime_reads_the_lines_and_the_cfg():
@@ -163,6 +167,11 @@ def test_the_finder_reads_each_shipped_port_off_its_program(name):
     assert (s.entry, s.size, s.page_at, s.count, s.sleep) == (
         want["attract_table"], want["attract_entry_size"], want["attract_page_at"], want["attract_count"],
         want["attract_sleep"])
+    el = PA.element(e)
+    assert (el.pointer if el else None) == want.get("attract_video")
+    if el:
+        assert (el.play, el.playing, el.update, el.draw, el.yield_) == tuple(
+            want["attract_video_" + k] for k in ("play", "playing", "update", "draw", "yield"))
 
 
 # ---- the project's record, attract.cfg, the text card ------------------------------------------------------

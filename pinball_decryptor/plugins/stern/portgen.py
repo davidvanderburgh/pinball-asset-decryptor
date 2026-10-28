@@ -903,7 +903,8 @@ _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block
                         r"site audit_add|value place_(?:audit_started|audit_completed|flag_played|flag_completed)_\d+|"
                         r"site place_start_\d+|"   # PAD-715
                         r"value challenge_place_\d+|"
-                        r"data attract_table|value attract_(?:entry_size|page_at|count)|site attract_sleep)\b")   # PAD-782
+                        r"data attract_table|value attract_(?:entry_size|page_at|count)|site attract_sleep|"
+                        r"data attract_video|site attract_video_\w+|text attract_video_clip)\b")   # PAD-782
 
 
 def generated(key, rest):

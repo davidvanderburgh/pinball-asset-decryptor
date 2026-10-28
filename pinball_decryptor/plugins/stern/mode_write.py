@@ -803,7 +803,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"", stock_select=b"",
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
-         attract=False, attract_prof=None):
+         attract=False, attract_prof=None, find_scene=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -853,7 +853,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                 result = attract_plan(project, game_elf,
                                       attract_prof or variants_prof or sound_modes_prof or picture_prof)
             attract_into(project, result, stock_bank, os.path.join(scratch, "tree"), log=log,
-                         progress=progress, cancel=cancel)
+                         progress=progress, cancel=cancel, read_card=read_card, find_scene=find_scene)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -929,7 +929,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         variants_into(project, result, stock_bank, tree, only=False, log=log, progress=progress,
                       cancel=cancel, read_card=read_card, scan_card=scan_card)
     if attract:                                      # PAD-782: onto the bank as the modes left it
-        attract_into(project, result, stock_bank, tree, log=log, progress=progress, cancel=cancel)
+        attract_into(project, result, stock_bank, tree, log=log, progress=progress, cancel=cancel,
+                     read_card=read_card, find_scene=find_scene)
     result.sounds_file = sound_modes or ""
     result.picture_file = picture or ""
     return result
@@ -951,7 +952,8 @@ def attract_plan(project, game_elf, prof):
     return ModePlan(project=project, profile=prof, port=port, build=None)
 
 
-def attract_into(project, result, stock_bank, tree, log=None, progress=None, cancel=None):
+def attract_into(project, result, stock_bank, tree, log=None, progress=None, cancel=None, read_card=None,
+                 find_scene=None):
     """Add the project's attract items to *result*: each a new clip in the bank scene the build has so
     far (the modes' and random clips' own, or the stock one), the bank a rewritten file, ``attract.cfg``
     for p2."""
@@ -970,18 +972,30 @@ def attract_into(project, result, stock_bank, tree, log=None, progress=None, can
         bank = stock_bank
     if not bank:
         raise ModeWriteError("the card's video bank (%s) was not read" % bank_card)
+    srcs = dict(result.replaced)
+
+    def read_scene(sc):
+        """a scene as the build has it so far: rewritten already, or the card's own"""
+        if sc in srcs:
+            with open(srcs[sc], "rb") as f:
+                return f.read()
+        return read_card(sc) if read_card is not None else None
     try:
         ab = AI.build(project, prof, bank, os.path.join(tree, "attract"), log=log, progress=progress,
-                      cancel=cancel)
+                      cancel=cancel, read_card=read_scene, find_scene=find_scene)
     except AI.AttractError as e:
         raise ModeWriteError("attract items: %s" % e) from None
     if ab is None:
         return result
+    scene = ab.scene or bank_card
+    if scene != bank_card:                       # clip v2: the attract video element's own scene
+        bank_src = srcs.get(scene, "")
+        bank = None
     if ab.bank != bank:
         if not bank_src:
-            bank_src = os.path.join(tree, "attract", *bank_card.split("/"))
+            bank_src = os.path.join(tree, "attract", *scene.split("/"))
             os.makedirs(os.path.dirname(bank_src), exist_ok=True)
-            result.replaced.append((bank_card, bank_src))
+            result.replaced.append((scene, bank_src))
         with open(bank_src, "wb") as f:
             f.write(ab.bank)
     result.new.extend(ab.new)

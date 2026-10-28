@@ -186,6 +186,7 @@ def port_table(prof):
     if not data.get("attract_table") or "attract_sleep" not in sites:
         return None
     return {"table": data["attract_table"], "size": int(values.get("attract_entry_size", 0)),
+            "video_clip": (port.get("text") or {}).get("attract_video_clip", "") if data.get("attract_video") else "",
             "page_at": int(values.get("attract_page_at", 4)), "count": int(values.get("attract_count", 0))}
 
 
@@ -476,11 +477,12 @@ def _stage(project, rel, info, src, out, cancel=None):
 
 @dataclass
 class AttractBuild:
-    bank: bytes
+    bank: bytes                 # the scene the clips went into, rewritten (``scene``: its card path)
     new: list
     cfg: str
     lines: list
     items: list
+    scene: str = ""
 
 
 def cfg_text(entries, champions=True):
@@ -492,7 +494,28 @@ def cfg_text(entries, champions=True):
     return "\n".join(out) + "\n"
 
 
-def build(project, prof, bank, out_dir, log=None, progress=None, cancel=None, rec=None, pages=None):
+def element_scene(reader, game_dir, clip):
+    """The card path (no leading slash) of the scene whose video library holds ``clip``: the attract video element's
+    own scene on a clip v2 title, or None. Reads every scene of the game until one has it."""
+    from . import video_bank as VB
+    tag = struct.pack("<Q", len(clip)) + clip.encode("latin1")
+    top = "/%s/assets/lcd/" % game_dir
+    for path, _ino, node in reader.iter_regular_files(max_depth=12):
+        if not path.endswith("/scene.radium") or not ("/" + path.lstrip("/")).startswith(top):
+            continue
+        raw = bytes(reader.read_file_bytes(node))
+        if tag not in raw:
+            continue
+        try:
+            if any(c.name == clip for c in VB.parse_scene(raw).library.entries):
+                return path.lstrip("/")
+        except VB.VideoBankError:
+            continue
+    return None
+
+
+def build(project, prof, bank, out_dir, log=None, progress=None, cancel=None, rec=None, pages=None,
+          read_card=None, find_scene=None):
     """Every item made into a clip and added to ``bank`` (the title's bank scene, as the build has it so far), each
     clip copied to its card path under ``out_dir``, ``attract.cfg`` written there. None when the project asks
     nothing of the attract mode. Raises :class:`AttractError`."""
@@ -523,6 +546,15 @@ def build(project, prof, bank, out_dir, log=None, progress=None, cancel=None, re
                            % (len(anchors), MAX_PAGES))
     os.makedirs(out_dir, exist_ok=True)
     data = bank
+    scene = CV.bank_scene(prof)
+    clip = port_table(prof).get("video_clip") or ""
+    if clip and items:
+        # clip v2: the attract pages' own video element plays the items, from its own scene's library
+        scene = find_scene(clip) if find_scene is not None else None
+        data = read_card(scene) if scene and read_card is not None else None
+        if not data:
+            raise AttractError("the scene the game's attract clips play from (the one holding %s) was not found on "
+                               "the card" % clip)
     new, entries, lines = [], [], []
     if items:
         rel, info = reference_slot(project, prof)
@@ -531,13 +563,13 @@ def build(project, prof, bank, out_dir, log=None, progress=None, cancel=None, re
                                "its videos first)")
         w, h = int(info.width), int(info.height)
         try:
-            parsed = VB.parse_scene(bank)
+            parsed = VB.parse_scene(data)
         except VB.VideoBankError as e:
             raise AttractError("the game's video bank could not be read (%s)" % e) from None
         taken = {c.name for c in parsed.library.entries}
         work = os.path.join(project, CACHE_DIR)
         os.makedirs(work, exist_ok=True)
-        assets = CV.bank_assets(prof)
+        assets = scene[:-len("scene.radium")] + "scene.assets/"
         for k, it in enumerate(items, 1):
             if cancel is not None and cancel():
                 raise AttractError("cancelled")
@@ -579,4 +611,4 @@ def build(project, prof, bank, out_dir, log=None, progress=None, cancel=None, re
     cfg = os.path.join(out_dir, CFG_NAME)
     with open(cfg, "w", encoding="utf-8", newline="\n") as f:
         f.write(cfg_text(entries, rec.champions))
-    return AttractBuild(bank=data, new=new, cfg=cfg, lines=lines, items=items)
+    return AttractBuild(bank=data, new=new, cfg=cfg, lines=lines, items=items, scene=scene)

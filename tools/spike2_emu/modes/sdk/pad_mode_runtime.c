@@ -12983,6 +12983,12 @@ static void (*ait_sleep)(unsigned);
 static volatile int ait_want = -1;          /* the item the page process waits on, -1: none */
 static volatile unsigned long ait_beat, ait_began;
 static int ait_on = -1;                     /* the item whose clip the tick put up */
+/* clip v2 (James Bond LE 1.06): the bank's surface is drawn only by the main-play screen, never in attract. There the
+ * attract pages play their clips through an ELEMENT of their own (`data attract_video`: the pointer to it) - play by
+ * name, then update, draw and the frame yield while it plays - and an item plays the same way from its page, its clip
+ * in that element's scene (the card build put it there). 0: the pm_clip route. */
+static void *(*ait_video_ptr);
+static int ait_video;
 
 static void ait_line(char *s)
 {
@@ -13015,6 +13021,24 @@ static void ait_line(char *s)
     ait_n++;
 }
 
+/* in the page process, the attract video element's way (clip v2): play, then update, draw and yield a frame while the
+ * clip plays, until the item's time is up or a game begins */
+static void ait_play_video(const struct ait_item *it)
+{
+    void *el = *ait_video_ptr;
+    unsigned str;
+    if (!el) return;
+    str = std_string(it->clip);
+    ((void (*)(void *, unsigned *, int, int))(unsigned long)fn("attract_video_play"))(el, &str, 0, 1);
+    while (pm_ms() - ait_began < it->ms && !pm_in_game()
+           && ((int (*)(void *))(unsigned long)fn("attract_video_playing"))(el)) {
+        ait_beat = pm_ms();
+        ((void (*)(void *))(unsigned long)fn("attract_video_update"))(el);
+        ((void (*)(void *))(unsigned long)fn("attract_video_draw"))(el);
+        ((void (*)(void))(unsigned long)fn("attract_video_yield"))();
+    }
+}
+
 /* in the page process: item i, until its time is up, the process is ended under us or a game begins */
 static void ait_play(unsigned i)
 {
@@ -13022,9 +13046,13 @@ static void ait_play(unsigned i)
     if (pm_in_game() || chg_scores_running) return;
     ait_began = ait_beat = pm_ms();
     ait_want = (int)i;
-    while (pm_ms() - ait_began < it->ms && !pm_in_game()) {
-        ait_beat = pm_ms();
-        ait_sleep(1);
+    if (ait_video) {
+        ait_play_video(it);
+    } else {
+        while (pm_ms() - ait_began < it->ms && !pm_in_game()) {
+            ait_beat = pm_ms();
+            ait_sleep(1);
+        }
     }
     ait_want = -1;
 }
@@ -13073,7 +13101,7 @@ static void ait_tick(void)
     unsigned long now = pm_ms();
     if (!ait_n) return;
     if (ait_on >= 0 && (want != ait_on || now - ait_beat > AIT_BEAT_MS || pm_in_game())) {
-        pm_clip_stop();
+        if (!ait_video) pm_clip_stop();         /* the element's clip is the game's to stop, as its own pages' are */
         if (ait_said < 400) {
             ait_said++;
             say("attract items: item %d (\"%s\") %s after %lu ms", ait_on + 1, ait_items[ait_on].clip,
@@ -13083,7 +13111,7 @@ static void ait_tick(void)
         ait_on = -1;
     }
     if (want >= 0 && ait_on < 0 && now - ait_beat <= AIT_BEAT_MS && !pm_in_game()) {
-        int ok = pm_clip(ait_items[want].clip);
+        int ok = ait_video ? 1 : pm_clip(ait_items[want].clip);
         ait_on = want;
         ait_on_ms = now;
         if (ait_said < 400) {
@@ -13132,7 +13160,19 @@ static void attract_arm(void)
     if (ait_bad) say("attract items: %u line(s) of attract.cfg not read", ait_bad);
     if (ait_champions_off) say("attract items: the modes' challenge champions are not shown in attract (attract.cfg)");
     if (!ait_n) return;
-    if (!(can & PM_CAN_CLIPS)) {
+    {   /* clip v2: the attract video element, when the port names it */
+        static const char *const v_s[] = { "attract_video_play", "attract_video_playing", "attract_video_update",
+                                           "attract_video_draw", "attract_video_yield", 0 };
+        unsigned at = data("attract_video");
+        if (at && have_sites(v_s) && maps_has(at, 4, MAP_R)) {
+            for (k = 0; v_s[k] && fn(v_s[k]); k++) ;
+            if (!v_s[k]) {
+                ait_video_ptr = (void **)(unsigned long)at;
+                ait_video = 1;
+            }
+        }
+    }
+    if (!ait_video && !(can & PM_CAN_CLIPS)) {
         say("attract items: off - this build has no full-screen clip route");
         ait_n = 0;
         return;
@@ -13182,8 +13222,9 @@ static void attract_arm(void)
         it->anchor = (unsigned char)a;
     }
     say("attract items: %u item(s) between the game's attract pages (table 0x%08x, %u entries of %u bytes, %u page(s) "
-        "taking items; the process sleep 0x%08x)", ait_n, table, count, size, ait_anchors,
-        (unsigned)(unsigned long)ait_sleep);
+        "taking items; the process sleep 0x%08x); played %s", ait_n, table, count, size, ait_anchors,
+        (unsigned)(unsigned long)ait_sleep, ait_video ? "through the attract video element (its pages' own way)"
+        : "full screen (the clip route)");
 }
 
 /* ---- round 2: the game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract; Bond LE/Pro 1.06)

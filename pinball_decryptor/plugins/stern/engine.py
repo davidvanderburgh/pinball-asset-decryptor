@@ -9214,6 +9214,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 from . import battle_select as _BSF, more_kaiju as _MKF
                 _sel_node = (_MW.lookup(reader, "%s/%s" % (_mprof.game_dir, _BSF.REL))
                              if _hud_rel and _mprof.can("roster") and _MKF.wanted(assets_dir) else None)
+                from . import attract_items as _AIS     # PAD-782: a clip v2 title's attract scene
                 mode_plan = _MW.plan(
                     assets_dir,
                     reader.read_file_bytes(_mnodes[_hud_rel]) if _hud_rel else b"",
@@ -9233,6 +9234,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof,
                     picture=picture_cfg, picture_prof=picture_prof,
                     attract=_attract_on, attract_prof=attract_prof,   # PAD-782
+                    find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
                                             if _n is not None else None)(_MW.lookup(reader, _rel)),

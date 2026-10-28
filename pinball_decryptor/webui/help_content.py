@@ -1346,11 +1346,9 @@ HELP_CONTENT = {
          "A card with attract items of your own keeps its scores off Insider Connected: they stay on the "
          "machine. The page and the Write log say so."),
         ("Which games",
-         "The games whose attract screens the app can read: most Spike 2 games, every version. Not yet: "
-         "Dungeons & Dragons, Elvira's House of Horrors, James Bond 60th, Star Wars Home Edition, Sword of "
-         "Rage and Venom (their attract screens are not a list the app can add to), and Batman 66, Iron "
-         "Maiden, Metallica Remastered, The Munsters, Rush and Stranger Things (not LE), whose clips the app "
-         "cannot add to yet. The page says why."),
+         "Godzilla, James Bond 007 (LE and Pro), Jaws and King Kong, every version the app can read. On the "
+         "other Spike 2 games the page says why not yet: most show their attract clips in a way the app cannot "
+         "put your items through yet."),
         ("Attract flipper sounds",
          "Stern Spike 2, every game and version. Most games play a sound or a callout when "
          "a flipper button is pressed in attract mode, with no game being played; James "

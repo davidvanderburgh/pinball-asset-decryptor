@@ -246,3 +246,15 @@ def test_a_mod_pack_carries_the_attract_items_and_an_import_puts_their_files_in_
     assert got.champions is False
     with open(os.path.join(folder, "p.jpg"), "rb") as f:
         assert f.read() == b"PHOTO" * 30
+
+
+# ---- which titles the page offers -----------------------------------------------------------------------------
+@pytest.mark.parametrize("key,offered", [("godzilla_le_1_16", True), ("godzilla_pro_1_16", True),
+                                         ("james_bond_le_1_06", True), ("james_bond_pro_1_06", True),
+                                         ("jaws_le_1_02", True), ("king_kong_pro_0_97", True),
+                                         ("aerosmith_1_16", False), ("deadpool_le_1_16", False),
+                                         ("star_wars_le_1_31", False), ("venom_le_1_07", False)])
+def test_items_are_offered_only_where_a_route_puts_them_on_the_glass(key, offered):
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    why = AI.title_refusal(MP.profile(key))
+    assert (why == "") is offered, (key, why)

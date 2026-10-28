@@ -54,6 +54,11 @@ NO_TABLE = ("%s starts its attract screens in a way the app cannot add to yet, s
             "take items of your own.")
 NO_CLIPS = ("%s plays its clips in a way the app cannot use, so this game's attract screens cannot take items of your "
             "own.")
+#: PAD-782 library sweep: on the titles whose clips play on the video bank's surface the attract mode never draws that
+#: surface (an item held the cycle but the glass kept the screen before it). Items go only where a route puts them on
+#: the glass: the game's own clip call (Godzilla, Jaws, King Kong) or the attract pages' video element (James Bond).
+NO_GLASS = ("%s shows its attract clips in a way the app cannot put your items through yet, so this game's attract "
+            "screens cannot take items of your own.")
 #: the gate, said on the page, in the Write log and in the help
 INSIDER_WORDS = ("A card with attract items of your own keeps its scores off Insider Connected: they stay on the "
                  "machine.")
@@ -199,8 +204,11 @@ def title_refusal(prof):
     t = port_table(prof)
     if t is None or t["size"] not in (8, 12, 16) or not 2 <= t["count"] <= 256:
         return NO_TABLE % prof.label
-    if not CV.route_of(prof):
+    route = CV.route_of(prof)
+    if not route:
         return NO_CLIPS % prof.label
+    if route != "clip_play" and not t.get("video_clip"):
+        return NO_GLASS % prof.label
     return ""
 
 

@@ -50,12 +50,15 @@ class _PyBuffer(ctypes.Structure):
                 ("internal", ctypes.c_void_p)]
 
 
-_get_buffer = ctypes.pythonapi.PyObject_GetBuffer
-_get_buffer.argtypes = [ctypes.py_object, ctypes.POINTER(_PyBuffer), ctypes.c_int]
-_get_buffer.restype = ctypes.c_int
-_release_buffer = ctypes.pythonapi.PyBuffer_Release
-_release_buffer.argtypes = [ctypes.POINTER(_PyBuffer)]
-_release_buffer.restype = None
+# Function objects of our own (PAD-793): ``ctypes.pythonapi.PyObject_GetBuffer``
+# is one object shared by the whole process, and pycryptodome types its argtypes
+# with its own buffer struct, so whichever module set them last broke the other
+# (AES on a bytearray raised ctypes.ArgumentError once the emulator was loaded).
+_get_buffer = ctypes.PYFUNCTYPE(
+    ctypes.c_int, ctypes.py_object, ctypes.POINTER(_PyBuffer), ctypes.c_int)(
+    ("PyObject_GetBuffer", ctypes.pythonapi))
+_release_buffer = ctypes.PYFUNCTYPE(None, ctypes.POINTER(_PyBuffer))(
+    ("PyBuffer_Release", ctypes.pythonapi))
 
 
 class FileView(object):

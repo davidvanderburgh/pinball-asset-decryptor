@@ -269,7 +269,9 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.sound_requests" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.soundbank" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.netbridge" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike2.window" \
     --hidden-import "pinball_decryptor.plugins.stern.game_check" \
+    --hidden-import "pinball_decryptor.plugins.stern.final_wizard" \
     --collect-all "unicorn" \
     --collect-all "capstone" \
     --collect-all "numpy" \

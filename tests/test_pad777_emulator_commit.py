@@ -140,3 +140,15 @@ def test_the_heap_is_mapped_as_it_is_handed_out_and_never_past_its_window():
     h.alloc(800 << 20)                                     # Led Zeppelin 1.21's ask
     assert h._heap_mapped == h.HEAP + h.HEAPSZ
     assert sum(s for _a, s in h.maps) == h.HEAPSZ
+
+
+def test_the_window_leaves_the_shared_ctypes_buffer_call_alone(card):
+    """PAD-793: retyping ``ctypes.pythonapi.PyObject_GetBuffer`` (one object for the
+    whole process) broke pycryptodome's AES on a bytearray, or pycryptodome broke the
+    window, whichever loaded last."""
+    from Crypto.Cipher import AES
+
+    mu, _path = card
+    AES.new(b"k" * 16, AES.MODE_ECB).decrypt(bytearray(16))
+    mu.copy_window(mu._windows[0])         # a FileView made after pycryptodome loaded
+    assert bytes(mu.mem_read(BASE + 1, 2)) == b"\x01\x02"

@@ -109,7 +109,10 @@ _TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion",
                 "coin_door",
                 # PAD-786: a final wizard that does not end the game; a target
                 # whose final wizard the app doesn't know is left alone
-                "final_wizard")
+                "final_wizard",
+                # PAD-798: every point the game adds, times N; a target whose
+                # title cannot have it is left out at build time, with a warning
+                "game_points")
 # Staged Defaults-tab edits.  These need no reconciliation at all: they are
 # keyed by the firmware's own ``AD_`` names and high-score slot labels, which
 # are the same words on a new version and on the other model of the same title

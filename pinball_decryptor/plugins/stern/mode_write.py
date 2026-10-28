@@ -589,6 +589,8 @@ class ModePlan:
     picture_file: str = ""
     #: PAD-782: ``attract.cfg`` beside the mode files, the owner's attract items ("" = none)
     attract_file: str = ""
+    #: PAD-798: ``points.cfg`` beside the mode files, the game's points times N ("" = none)
+    points_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -803,7 +805,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"", stock_select=b"",
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
-         attract=False, attract_prof=None, find_scene=None):
+         attract=False, attract_prof=None, find_scene=None, points="", points_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -828,7 +830,31 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
     PAD-782: *attract* adds the project's attract items (:mod:`.attract_items`) to the same bank, and
     ``attract.cfg`` beside the mode files; with nothing else it is a plan of its own, for
-    *attract_prof*."""
+    *attract_prof*.
+
+    PAD-798: *points* is the game points' ``points.cfg`` the engine wrote, put beside the mode files;
+    with nothing else it is a plan of its own, for *points_prof*."""
+    result = _plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=ffmpeg, sound_ok=sound_ok,
+                   log=log, end_sound=end_sound, own_sounds=own_sounds, progress=progress,
+                   stock_font=stock_font, hud_font=hud_font, stock_select=stock_select, modes_on=modes_on,
+                   variants=variants, variants_prof=variants_prof, cancel=cancel, sound_modes=sound_modes,
+                   sound_modes_prof=sound_modes_prof, picture=picture, picture_prof=picture_prof,
+                   read_card=read_card, scan_card=scan_card, attract=attract, attract_prof=attract_prof,
+                   find_scene=find_scene)
+    if points:
+        if result is None:
+            result = points_plan(project, game_elf, points_prof or variants_prof or sound_modes_prof
+                                 or picture_prof or attract_prof, points)
+        result.points_file = points
+    return result
+
+
+def _plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_ok=(True, ""),
+          log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"",
+          stock_select=b"", modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
+          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
+          attract=False, attract_prof=None, find_scene=None):
+    """:func:`plan` before PAD-798's game points."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -1055,6 +1081,24 @@ def picture_plan(project, game_elf, prof, cfg):
                              "the picture on" % prof.label) from None
     result = ModePlan(project=project, profile=prof, port=port, build=None)
     result.picture_file = cfg
+    return result
+
+
+# ---- PAD-798: the game's points times N ----------------------------------------------------------
+def points_plan(project, game_elf, prof, cfg):
+    """A plan carrying only the game points (:mod:`.game_points`): no mode, no scene; the runtime
+    and the title's port on p2 with the engine's ``points.cfg``."""
+    from . import game_points as GP
+    why = GP.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to change "
+                             "the scoring of" % prof.label) from None
+    result = ModePlan(project=project, profile=prof, port=port, build=None)
+    result.points_file = cfg
     return result
 
 
@@ -1534,6 +1578,11 @@ def p2_payload(result, out_dir, project=None):
             from . import attract_items as AI
             dst = os.path.join(out_dir, AI.CFG_NAME)
             shutil.copyfile(result.attract_file, dst)
+            extras.append(dst)
+        if getattr(result, "points_file", ""):         # PAD-798: points.cfg, the game points
+            from . import game_points as GP
+            dst = os.path.join(out_dir, GP.CFG_NAME)
+            shutil.copyfile(result.points_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

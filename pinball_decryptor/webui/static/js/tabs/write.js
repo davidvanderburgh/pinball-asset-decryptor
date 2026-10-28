@@ -221,6 +221,7 @@ function Destination({ s }) {
     ${s.card_fit_cap && !direct ? html`<${CardFit} s=${s} />` : null}
     ${s.editions_cap && !direct ? html`<${Editions} s=${s} />` : null}
     ${s.picture_cap && !direct ? html`<${Picture} s=${s} />` : null}
+    ${s.points_cap && !direct ? html`<${Points} s=${s} />` : null}
   <//>`;
 }
 
@@ -247,6 +248,17 @@ function Picture({ s }) {
     <${Check} checked=${s.picture_on} wrap label=${s.picture_label} title=${s.picture_tip}
       disabled=${s.running} onChange=${(v) => call("write.set_picture", v)} />
     ${s.picture_note ? html`<span class=${cx("small", s.picture_note_kind === "err" ? "err-ink" : "muted")}>${s.picture_note}</span>` : null}
+  </div>`;
+}
+
+// PAD-798: every point the game adds, times N.  The choice, and a note:
+// what it does on this card, or, in red, why this game cannot have it.
+function Points({ s }) {
+  return html`<div class="stack wr-build">
+    <label class="lbl" for="wr-points" ...${tip(s.points_tip)}>${s.points_label}</label>
+    <${Select} id="wr-points" value=${s.points_shown} options=${s.points_options || []} width=${160}
+      title=${s.points_tip} disabled=${s.running} onChange=${(v) => call("write.set_points", Number(v))} />
+    ${s.points_note ? html`<span class=${cx("small", s.points_note_kind === "err" ? "err-ink" : "muted")}>${s.points_note}</span>` : null}
   </div>`;
 }
 

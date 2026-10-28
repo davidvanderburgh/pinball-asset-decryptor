@@ -129,6 +129,16 @@ PICTURE_TIP = (
     "takes an extra step on the machine, which can slow busy scenes. They share the "
     "game's spare settings with the Audio tab's music choice and with Editions: with "
     "both on the card, only Brightness fits.")
+#: PAD-798: every point the game adds, times N (plugins/stern/game_points.py)
+POINTS_LABEL = "Game points"
+POINTS_TIP = (
+    "Multiplies every point the game gives: x10 puts an extra 0 on every score, "
+    "bonus and award, and on your modes' points too. The game's playfield "
+    "multiplier still applies on top. Replays and the high score board go by "
+    "the bigger scores, so you may want to raise the replay score and reset the "
+    "high scores. Like a card with modes, a card with game points sends no scores "
+    "to Insider Connected; players can still log in. Normal leaves the scoring as "
+    "the game shipped it.")
 EDITABLE_HINT = (
     "Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
     "files in pck/_EDITABLE ASSETS/ inside your Modified Assets "
@@ -559,7 +569,10 @@ class WriteTab(TabService):
                  editions_note_kind="", editions_label=EDITIONS_LABEL,
                  editions_tip=EDITIONS_TIP, picture_cap=False, picture_on=False,
                  picture_note="", picture_note_kind="",
-                 picture_label=PICTURE_LABEL, picture_tip=PICTURE_TIP)
+                 picture_label=PICTURE_LABEL, picture_tip=PICTURE_TIP,
+                 points_cap=False, points_shown="1", points_options=[],
+                 points_note="", points_note_kind="",
+                 points_label=POINTS_LABEL, points_tip=POINTS_TIP)
         self._hook_mirrors()
 
     # ------------------------------------------------------------------
@@ -700,6 +713,7 @@ class WriteTab(TabService):
         self._refresh_card_size()
         self._publish_editions()
         self._publish_picture()
+        self._publish_points()
         self._sync_buttons()
 
     @staticmethod
@@ -1845,6 +1859,61 @@ class WriteTab(TabService):
         self._publish_picture()
         return True
 
+    def _publish_points(self):
+        """PAD-798: the Game points choice, and under it what it does on this
+        card, or in red why this project's game cannot have it."""
+        if not self._editions_applies():               # a Stern Spike 2 image build
+            self.set(points_cap=False)
+            return
+        from ...plugins.stern import game_points as _GP
+        assets = self._info_assets_dir()
+        times = _GP.load(assets) if assets else 1
+        options = [{"value": str(t), "label": ("Normal" if t == 1 else "x%d" % t)}
+                   for t in _GP.CHOICES]
+        if str(times) not in {o["value"] for o in options}:
+            options.append({"value": str(times), "label": "x%d" % times})
+        note, kind = "", ""
+        if times > 1:
+            why = _GP.title_refusal(_GP.project_title(assets))
+            if why:
+                note, kind = why, "err"
+            else:
+                note = ("Every point the game adds is x%d on this card. It sends no scores to "
+                        "Insider Connected." % times)
+        self.set(points_cap=True, points_shown=str(times), points_options=options,
+                 points_note=note, points_note_kind=kind)
+
+    @rpc
+    def set_points(self, times):
+        """Set the project's Game points factor (1 = Normal)."""
+        from ...core import history_log
+        from ...plugins.stern import game_points as _GP
+        if self.window._running or not self._editions_applies():
+            return False
+        try:
+            times = int(times)
+        except (TypeError, ValueError):
+            return False
+        if not 1 <= times <= _GP.MAX_TIMES:
+            return False
+        assets = self._info_assets_dir()
+        if not assets:
+            compat.messagebox.showinfo(
+                "Game points", "Set the project folder on the Extract tab first.")
+            self._publish_points()
+            return False
+        was = _GP.save(assets, times)
+        hist = history_log.diff_scalar("write  game points", _GP.label(was), _GP.label(times))
+        history_log.record(assets, [hist] if hist else [])
+        self.log("Game points: %s." % (
+            "every point the game adds is x%d on the card" % times if times > 1
+            else "the game scores as it shipped"), "info")
+        cb = self.window.cb.get("on_folder_state_written")
+        if cb is not None:
+            cb(assets)
+        self._publish_points()
+        return True
+
     # ------------------------------------------------------------------
     # Modified Files: the scan
     # ------------------------------------------------------------------
@@ -2693,6 +2762,7 @@ class WriteTab(TabService):
         self._refresh_card_size()
         self._publish_editions()
         self._publish_picture()
+        self._publish_points()
         self.set_admin_warning_collapsed(self._shared_admin_collapsed())
 
     def on_close(self):

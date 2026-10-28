@@ -14,7 +14,8 @@ What the Tk ``MainWindow`` kept around the notebook, on the page:
   window (``show_update_banner`` & co, which the run logic calls);
 * the amber "source image changed" banner on the asset-editing tabs;
 * the log drawer's extras (previous sessions above a cut line, Save As, the
-  on-disk logs), the picker's cards and the prerequisites strip's facts.
+  on-disk logs), the picker's cards and the prerequisites strip's facts;
+* My machines on the picker's home (``shellx_machines.py``, PAD-783).
 
 The page half is ``static/js/shell.js`` (menus, strip, picker, log drawer)
 and ``static/js/shellx_dialogs.js`` (the windows).
@@ -31,6 +32,7 @@ from ...core import session_log
 from .. import compat
 from ..picker_data import MFR_VISUALS, peek_text, tooltip_text
 from ..shellx_disk import DiskMixin
+from ..shellx_machines import MachinesMixin
 from ..shellx_donations import DonationsMixin
 from ..shellx_projects import ProjectsMixin
 from ..shellx_reset import ResetMixin
@@ -79,8 +81,8 @@ def _visuals():
     return dict(MFR_VISUALS)
 
 
-class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, DonationsMixin,
-                  TabService):
+class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
+                  DonationsMixin, TabService):
     ns = "shellx"
     key = ""
     label = ""
@@ -131,6 +133,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, DonationsMixin,
         self._projects_init()
         self._disk_init()
         self._reset_init()
+        self._machines_init()
         self.set(update_state="", download=None, log_seed=None,
                  disk_badge="", picker=self._picker_cards(),
                  prereq_hints={}, platform=sys.platform,

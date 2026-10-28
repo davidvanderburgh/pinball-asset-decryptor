@@ -13105,7 +13105,7 @@ static void ait_tick(void)
         if (ait_said < 400) {
             ait_said++;
             say("attract items: item %d (\"%s\") %s after %lu ms", ait_on + 1, ait_items[ait_on].clip,
-                pm_in_game() ? "ends - a game began" : want == ait_on ? "ends - its page was ended (a flipper)"
+                pm_in_game() ? "ends - a game began" : want == ait_on ? "ends - its page was ended (a flipper, or the game restarted its attract)"
                 : "is over", now - ait_on_ms);
         }
         ait_on = -1;

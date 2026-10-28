@@ -43,7 +43,7 @@ MULTIBOOT_PHASES = ("Media", "Copy", "Inject", "Verify")
 #: Which chip row a tab owns (Tk's PHASE_ROW_BY_TAB): None = no run row.
 PHASE_ROW_BY_KEY = {
     "Extract": "extract", "Compare": "extract", "Mod Pack": "extract",
-    "Write": "write", "Modes": "write",
+    "Write": "write", "Modes": "write", "Attract": "write",
     "Emulate": "emulate", "Emulate JJP": "emulate",
     "Emulate Spike1": "emulate", "Emulate BoF": "emulate",
     "Emulate DP": "emulate",
@@ -421,6 +421,8 @@ class WebWindow:
             "Emulate PB": g("emulate_pb"),
             "Multi-boot": g("multiboot"),
             "Modes": self.modes_preview_on(mfr),
+            # PAD-782: the attract mode editor rides the mode runtime (Stern Spike 2)
+            "Attract": g("modes"),
         }
         return gates
 

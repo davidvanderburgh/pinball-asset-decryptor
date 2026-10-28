@@ -12,7 +12,7 @@ The project records them (``attract_items`` in ``.staged_changes.json``)::
                 "where": "after" | "before"}, ...],
      "champions": true}          # false: the modes' challenge champions (PAD-660/663) are not shown in attract
 
-and a Write (or Try it) makes every item a clip of the title's video bank - a photo or a text card a still clip of
+and a Write (or a run in the emulator) makes every item a clip of the title's video bank - a photo or a text card a still clip of
 its time at the screen's size, a video converted as a slot's replacement is, the project's colour profile applied,
 never cut to a slot's length - added under ``PadAttract<k>``, and writes ``attract.cfg`` beside the mode runtime.
 The runtime (pad_mode_runtime.c "attract items") plays them between the pages. A card with attract items carries the
@@ -47,15 +47,16 @@ VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm", ".wmv", ".mpg", "
 CACHE_DIR = os.path.join(".write_cache", "attract_items")
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
-NO_TITLE = ("The app cannot tell which game this project is for, so it cannot add to its attract mode. Extract the "
-            "project from a card again and try once more.")
-NOT_SPIKE2 = "Only a Stern Spike 2 game's attract mode can take items of your own."
-NO_TABLE = ("%s starts its attract screens in a way the app cannot add to yet, so this game's attract mode cannot "
+NO_TITLE = ("The app cannot tell which game this project is for, so it cannot add to its attract screens. Extract "
+            "the project from a card again and try once more.")
+NOT_SPIKE2 = "Only a Stern Spike 2 game's attract screens can take items of your own."
+NO_TABLE = ("%s starts its attract screens in a way the app cannot add to yet, so this game's attract screens cannot "
             "take items of your own.")
-NO_CLIPS = "%s plays its clips in a way the app cannot use, so this game's attract mode cannot take items of your own."
+NO_CLIPS = ("%s plays its clips in a way the app cannot use, so this game's attract screens cannot take items of your "
+            "own.")
 #: the gate, said on the page, in the Write log and in the help
-INSIDER_WORDS = ("A card with attract items of your own keeps its scores off Insider Connected, as a card with modes "
-                 "does.")
+INSIDER_WORDS = ("A card with attract items of your own keeps its scores off Insider Connected: they stay on the "
+                 "machine.")
 
 
 class AttractError(ValueError):
@@ -341,9 +342,45 @@ def read_pages(elf_bytes, prof, clip_names=()):
     return out
 
 
+NO_BANK = ("%s keeps its clips in a way the app cannot add to yet, so this game's attract screens cannot take "
+           "items of your own.")
+
+
+def _bank_refusal(card, prof):
+    """Why the scene the items' clips go into (the attract video element's own on a clip v2 title, else the video
+    bank) cannot take them on ``card``, or ``""``."""
+    from . import engine as E, mode_write as MW, video_bank as VB
+    from . import clip_variants as CV
+    clip = (port_table(prof) or {}).get("video_clip") or ""
+    try:
+        with open(card, "rb") as f:
+            reader, _fw, _img = E._locate(f, E._linux_partitions(card))
+            scene = element_scene(reader, prof.game_dir, clip) if clip else CV.bank_scene(prof)
+            node = MW.lookup(reader, scene) if scene else None
+            if node is None:
+                return NO_BANK % prof.label
+            VB.parse_scene(bytes(reader.read_file_bytes(node)))
+    except VB.VideoBankError:
+        return NO_BANK % prof.label
+    except Exception:                                   # noqa: BLE001 - an unreadable card: the build says
+        return ""
+    return ""
+
+
+def project_refusal(project, prof=None):
+    """Why the card this project was made from cannot take attract items (read with :func:`project_pages`, cached
+    with them), or ``""``."""
+    project_pages(project, prof)
+    return _CARD_WHY.get(os.path.abspath(project), "")
+
+
+_CARD_WHY = {}
+
+
 def project_pages(project, prof=None):
     """The game's attract pages for a project, read from the card it was extracted from (cached by the program's
-    hash in the title cache), or ``[]`` when the card is not on this PC."""
+    hash in the title cache), or ``[]`` when the card is not on this PC. Whether the card's clip scene can take the
+    items is read with them (:func:`project_refusal`)."""
     import hashlib
     import json
     from . import mode_project as MP, title_reader as TR, clip_variants as CV
@@ -359,7 +396,8 @@ def project_pages(project, prof=None):
     try:
         with open(cache, encoding="utf-8") as f:
             got = json.load(f)
-        if got.get("key") == key and got.get("v") == 1:
+        if got.get("key") == key and got.get("v") == 2:
+            _CARD_WHY[os.path.abspath(project)] = got.get("why", "")
             return [Page(**p) for p in got["pages"]]
     except (OSError, ValueError, KeyError, TypeError):
         pass
@@ -370,10 +408,12 @@ def project_pages(project, prof=None):
     names = {os.path.splitext(os.path.basename(r))[0] for r in CV.manifest(project)}
     names |= {n.split("_", 1)[-1] for n in names}
     pages = read_pages(elf, prof, names)
+    why = _bank_refusal(card, prof) if pages else ""
+    _CARD_WHY[os.path.abspath(project)] = why
     try:
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         with open(cache, "w", encoding="utf-8") as f:
-            json.dump({"v": 1, "key": key, "sha1": hashlib.sha1(elf).hexdigest(),
+            json.dump({"v": 2, "key": key, "sha1": hashlib.sha1(elf).hexdigest(), "why": why,
                        "pages": [p.__dict__ for p in pages]}, f)
     except OSError:
         pass

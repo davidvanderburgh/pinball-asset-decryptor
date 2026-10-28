@@ -208,3 +208,41 @@ def test_a_text_card_fills_the_screen(tmp_path):
     box = im.point(lambda v: 255 if v > 128 else 0).getbbox()
     assert im.size == (1360, 768) and box is not None
     assert box[2] - box[0] > 1360 * 0.5                         # the longer line runs over half the width
+
+
+# ---- mod packs carry the attract items ------------------------------------------------------------------------
+def test_a_mod_pack_carries_the_attract_items_and_an_import_puts_their_files_in_the_project(tmp_path):
+    import json as _json
+    import zipfile
+    from pinball_decryptor.core import checksums, modpack, staged_changes
+    from tests.test_pad494_mod_routes import _extract, _write
+    photo = str(tmp_path / "mine" / "p.jpg")
+    _write(photo, b"PHOTO" * 30)
+    src = tmp_path / "src"
+    _extract(src, {"video/attract.mov": b"ATT" * 50})
+    rec = AI.Record(items=[AI.Item("photo", 3, "after", file=photo, seconds=4),
+                           AI.Item("text", 3, "after", text="Hello", seconds=5),
+                           AI.Item("clip", 0, "before", file=str(tmp_path / "gone.mp4"))], champions=False)
+    staged_changes.save(str(src), {AI.STAGED_KEY: rec.as_dict()})
+    logs = []
+    zip_path = str(tmp_path / "pack.zip")
+    n, _ = modpack.export_mod_pack(str(src), zip_path, log_cb=lambda t, lvl="info": logs.append(t))
+    assert n == 0                                            # attract items alone are still a pack
+    assert any("NOT in the pack: 1 attract item(s)" in t for t in logs)
+    with zipfile.ZipFile(zip_path) as zf:
+        man = _json.loads(zf.read(modpack.MANIFEST_NAME).decode("utf-8"))
+    items = man["extras"][AI.STAGED_KEY]["items"]
+    assert [i["kind"] for i in items] == ["photo", "text"] and items[0]["file"] == ".modpack_attract/0/p.jpg"
+    dest = tmp_path / "dest"
+    _extract(dest, {"video/attract.mov": b"ATT" * 50})
+    plan = modpack.inspect_mod_pack(zip_path, str(dest))
+    assert plan["foreign"] == []
+    res = modpack.import_mod_pack(zip_path, str(dest), plan=plan)
+    assert res["extras"][AI.STAGED_KEY] == 2
+    got = AI.load(str(dest))
+    folder = str(dest / checksums.ATTRACT_FILES_DIR)
+    assert [(i.kind, i.file, i.text) for i in got.items] == [("photo", os.path.join(folder, "p.jpg"), ""),
+                                                            ("text", "", "Hello")]
+    assert got.champions is False
+    with open(os.path.join(folder, "p.jpg"), "rb") as f:
+        assert f.read() == b"PHOTO" * 30

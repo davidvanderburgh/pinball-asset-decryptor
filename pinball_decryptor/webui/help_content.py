@@ -232,25 +232,6 @@ HELP_CONTENT = {
          "- Needs an image build, not a direct SD write. Each file takes room in the "
          "sound bank, and in extra sound banks beside it once that is full, as a music "
          "mode's files do."),
-        ("Attract flipper sounds",
-         "Stern Spike 2, every game and version. Most games play a sound or a callout when "
-         "a flipper button is pressed in attract mode, with no game being played; James "
-         "Bond 007 plays none. "
-         "**Attract flipper sounds**, beside **Find originals…**, gives the flipper "
-         "buttons sounds of your own there.\n\n"
-         "- **Add a sound…** (up to 16). Each press of either flipper button plays the "
-         "next one, and after the last it starts again.\n"
-         "- **Play sound 2 (…)** previews one; **Take off sound 2 (…)** drops it.\n"
-         "- A press while one is still playing does not start another.\n"
-         "- **Time between sounds** spaces them out: any time, or at most one every 10 "
-         "seconds up to one every 5 minutes; a press before then plays nothing.\n"
-         "- They do not play while the game takes the initials for a high score.\n"
-         "- They ride one of the game's own sounds, so each plays for at most that "
-         "sound's length (about 2 seconds on Star Wars, almost 15 on James Bond 007 LE, "
-         "45 on Jaws); a longer file is cut to it, and the log says so.\n"
-         "- The game's own sound at the press does not play over yours.\n"
-         "- Not on TMNT 1.58 (Pro or LE) or Venom LE 1.06 yet; the menu says why.\n"
-         "- Needs an image build, not a direct SD write."),
         ("Jukebox",
          "The Beatles 1.29. **Jukebox**, beside **Find originals…**, gives the five song "
          "modes songs of your own: each time a song mode starts, the game plays one of them, "
@@ -1343,6 +1324,53 @@ HELP_CONTENT = {
     # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
     # The key stays so every notebook tab has an entry.
     "Modes": [],
+    "Attract": [
+        ("What it's for",
+         "Stern Spike 2. Put your own photos, clips and text cards between the screens the game shows in "
+         "attract mode, each for as long as you like. The page lists the game's own attract screens in "
+         "order (the last scores, PRESS START, the high scores and champions, the tutorial clips, the logos), "
+         "read off the game's program, with yours between them.\n\n"
+         "- **Add** on a game screen: photos (several at once make a slideshow), a clip or a text card, "
+         "after or before it.\n"
+         "- Drag an item, or use its arrows, to move it between the game's screens.\n"
+         "- **seconds**: how long it stays up. A clip at 0 plays to its end.\n"
+         "- A screen marked **at times** shows only now and then (after a game, or with one of the game's "
+         "settings on); your items next to it show every time round.\n"
+         "- Photos and clips are made into the game's clip format when the card is built, with your color "
+         "profile, and carried in mod packs and Move Your Mods like your other files.\n"
+         "- Your item gives way to the game: a flipper button moves on to the next screen and Start begins "
+         "a game at once.\n"
+         "- **Run in emulator** starts the emulator with this project's changes.\n"
+         "- Needs an image build, not a direct SD write."),
+        ("Insider Connected",
+         "A card with attract items of your own keeps its scores off Insider Connected: they stay on the "
+         "machine. The page and the Write log say so."),
+        ("Which games",
+         "The games whose attract screens the app can read: most Spike 2 games, every version. Not yet: "
+         "Dungeons & Dragons, Elvira's House of Horrors, James Bond 60th, Star Wars Home Edition, Sword of "
+         "Rage and Venom (their attract screens are not a list the app can add to), and Batman 66, Iron "
+         "Maiden, Metallica Remastered, The Munsters, Rush and Stranger Things (not LE), whose clips the app "
+         "cannot add to yet. The page says why."),
+        ("Attract flipper sounds",
+         "Stern Spike 2, every game and version. Most games play a sound or a callout when "
+         "a flipper button is pressed in attract mode, with no game being played; James "
+         "Bond 007 plays none. "
+         "**Flipper sounds** on the **Attract** page gives the flipper "
+         "buttons sounds of your own there.\n\n"
+         "- **Add a sound…** (up to 16). Each press of either flipper button plays the "
+         "next one, and after the last it starts again.\n"
+         "- **Play sound 2 (…)** previews one; **Take off sound 2 (…)** drops it.\n"
+         "- A press while one is still playing does not start another.\n"
+         "- **Time between sounds** spaces them out: any time, or at most one every 10 "
+         "seconds up to one every 5 minutes; a press before then plays nothing.\n"
+         "- They do not play while the game takes the initials for a high score.\n"
+         "- They ride one of the game's own sounds, so each plays for at most that "
+         "sound's length (about 2 seconds on Star Wars, almost 15 on James Bond 007 LE, "
+         "45 on Jaws); a longer file is cut to it, and the log says so.\n"
+         "- The game's own sound at the press does not play over yours.\n"
+         "- Not on TMNT 1.58 (Pro or LE) or Venom LE 1.06 yet; the menu says why.\n"
+         "- Needs an image build, not a direct SD write."),
+    ],
     "Write": [
         ("What a build does",
          "**Build** copies the untouched original and puts in every file that differs "

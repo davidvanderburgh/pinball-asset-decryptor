@@ -237,6 +237,11 @@ def test_watch_reboots_the_guest_inside_the_session():
     # an empty GL journal: magic only
     assert "printf 'PJL1" in reboot and "glreplay.req" in reboot
     assert "boot.id" in reboot
+    # PAD-778: the old game's Pause total goes back to 0 once the guest is
+    # gone - the new shim would take it off its clocks and run them backwards
+    assert "OFF_PAUSED_MS, 0)" in reboot
+    assert reboot.index("pad_guest_up || break") < reboot.index("OFF_PAUSED_MS, 0)") \
+        < reboot.index("launch_game")
     # the poll loop takes the request before it can read the gap as an exit
     loop = src[src.index("\nwhile :; do"):]
     assert loop.index('[ -f "$REBOOT_REQ" ]') < loop.index("if ! pad_guest_up; then")

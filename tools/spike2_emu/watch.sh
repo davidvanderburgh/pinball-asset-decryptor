@@ -3232,6 +3232,12 @@ fi
 #   boot.id        - new, so a later save-state load does not take this
 #                    renderer for one that still holds the save's GL world.
 # The switch block is NOT reset: the balls are where they are, as on a machine.
+# ONE FIELD OF IT IS (PAD-778): paused_ms, the time the OLD game spent frozen.
+# hwshim takes it off every clock the game reads (PAD-204), and a new guest's
+# shim reads 0 until it maps the block - so a total left from the old game
+# stepped the new game's clocks BACKWARDS by every Pause of the session, a few
+# seconds into its boot. After 37 s of Pause the restarted Godzilla sat on its
+# splash with "48V DISABLED" flashing for ever: timers that never came due.
 # A paused game is resumed first (the renderer would otherwise think the NEW
 # game is the one it froze), and a sped-up one boots at 1x as every start does.
 REBOOT_REQ=$ROOT/dump/reboot.req
@@ -3303,6 +3309,19 @@ PY
     rm -f "$ROOT/dump/glreplay.req" "$ROOT/dump/glreplay.bin" "$ROOT/dump/glreplay.ok"
     dd if=/dev/zero of="$LED_HOST" bs=16384 count=1 conv=notrunc status=none
     dd if=/dev/zero of="$LCD_HOST" bs=4096 count=1 conv=notrunc status=none
+    # paused_ms back to a fresh run's 0, now that no guest reads it (PAD-778,
+    # the header above). The renderer only ever adds to it, in place.
+    if [ -f "$SW_HOST" ]; then
+        python3 - "$S" "$SW_HOST" <<'PY' 2>&1 | sed 's/^/[watch]   /'
+import struct, sys
+sys.path.insert(0, sys.argv[1])
+import padsw
+m = padsw.open_block(sys.argv[2])
+if m is not None and struct.unpack_from("<I", m, padsw.OFF_PAUSED_MS)[0]:
+    struct.pack_into("<I", m, padsw.OFF_PAUSED_MS, 0)
+    print("the old game's paused time is cleared, so the new one's clock starts clean")
+PY
+    fi
     if [ -n "$VIDPG" ] && [ -f "$VID_HOST" ]; then
         kill -9 -"$VIDPG" 2>/dev/null
         pad_pkill -9 -f 'padvidhost.py'

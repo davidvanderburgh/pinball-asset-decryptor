@@ -40,6 +40,7 @@ partclone 0.3.36 / Clonezilla output and cross-checked with the upstream
                            blocks_per_checksum data blocks written.
 """
 
+import re
 import struct
 
 IMAGE_MAGIC = b"partclone-image"
@@ -131,32 +132,33 @@ class PartcloneImage:
 
         written = 0
         since_crc = 0
-        # Walk the bitmap byte-by-byte; bit i (LSB first) of byte b is block
-        # b*8 + i.  Writing each used block at its absolute offset keeps the
-        # output correctly positioned and lets unused blocks stay holes.
-        for byte_idx in range(self.bitmap_bytes):
-            bits = bitmap[byte_idx]
-            if bits == 0:
-                continue
-            base = byte_idx * 8
-            for i in range(8):
-                if not (bits >> i) & 1:
-                    continue
-                block = base + i
-                if block >= total:
-                    break
-                data = _read_exact(stream, bs)
+        # Used blocks come in runs (a filesystem's data is mostly contiguous),
+        # and the stream holds a run's blocks back to back, so a run is read,
+        # positioned and written in one go rather than block by block: a
+        # multi-GB partition was a million Python-level seek+write pairs
+        # (PAD-796).  Only the interleaved CRC after every ``bpc`` data
+        # blocks (counted across runs) and a memory cap cut a run into pieces.
+        # Writing each run at its absolute offset keeps the output correctly
+        # positioned and lets unused blocks stay holes.
+        for block, count in iter_runs(bitmap, total):
+            while count:
+                take = min(count, _RUN_CHUNK_BLOCKS)
+                if bpc:
+                    take = min(take, bpc - since_crc)
+                data = _read_exact(stream, take * bs)
                 out.seek(block * bs)
                 out.write(data)
-                written += 1
-                since_crc += 1
+                block += take
+                count -= take
+                written += take
+                since_crc += take
                 if bpc and since_crc == bpc:
                     _read_exact(stream, csize)  # interleaved CRC (reseeded)
                     since_crc = 0
                     if progress_cb:
                         progress_cb(written, self.usedblocks)
-            if cancel_cb and cancel_cb():
-                raise PartcloneError("Restore canceled.")
+                if cancel_cb and cancel_cb():
+                    raise PartcloneError("Restore canceled.")
 
         # Pad the image out to the full device size so the trailing unused
         # blocks read back as zeros (and the ext4 size is correct).
@@ -164,6 +166,65 @@ class PartcloneImage:
         if progress_cb:
             progress_cb(written, self.usedblocks)
         return written
+
+
+#: the most blocks a restore reads and writes in one piece (16 MiB of 4 KiB
+#: blocks): bounds memory on a run that spans most of a partition
+_RUN_CHUNK_BLOCKS = 4096
+
+_NOT_ZERO = re.compile(rb"[^\x00]")
+_NOT_FULL = re.compile(rb"[^\xff]")
+
+
+def iter_runs(bitmap, total):
+    """Yield ``(first_block, count)`` for every run of consecutive used blocks
+    in a partclone bitmap (bit i, LSB first, of byte b is block ``b*8 + i``),
+    in block order, clipped to *total* blocks (the bitmap's last byte is
+    padded with bits past the end).
+
+    Whole bytes of 0x00 and 0xFF are skipped in C (a regex search), so the
+    cost is in the mixed bytes at a run's ends, not in the bitmap's size.
+    """
+    for start, count in _runs(bitmap):
+        if start >= total:
+            break
+        yield start, min(count, total - start)
+
+
+def _runs(bitmap):
+    n = len(bitmap)
+    pos = 0
+    run_start = -1                     # block where the open run began
+    run_end = 0                        # one past its last block
+    while pos < n:
+        byte = bitmap[pos]
+        if byte == 0:
+            if run_start >= 0:
+                yield run_start, run_end - run_start
+                run_start = -1
+            m = _NOT_ZERO.search(bitmap, pos + 1)
+            pos = m.start() if m else n
+            continue
+        if byte == 0xFF:
+            m = _NOT_FULL.search(bitmap, pos + 1)
+            end = m.start() if m else n
+            if run_start < 0:
+                run_start = pos * 8
+            run_end = end * 8
+            pos = end
+            continue
+        base = pos * 8
+        for i in range(8):
+            if (byte >> i) & 1:
+                if run_start < 0:
+                    run_start = base + i
+                run_end = base + i + 1
+            elif run_start >= 0:
+                yield run_start, run_end - run_start
+                run_start = -1
+        pos += 1
+    if run_start >= 0:
+        yield run_start, run_end - run_start
 
 
 def _read_exact(stream, n):

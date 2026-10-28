@@ -204,7 +204,13 @@ lane, a drain, outer walls and lane guides, and the shadow bridge over a
 base script of its own. No ramps, plastics or sounds: the title's geometry
 made playable. The base file is Visual Pinball's own "Nudge Test and
 Calibration" table (`PAD_VPX_BASE` names another), whose items and
-collections are dropped and whose GameData is resized to the drawing.
+collections are dropped and whose GameData is resized to the drawing. The
+map it writes goes beside the table and to `~/.pad-vpx/maps/<title>.shadow.json`,
+where the controller looks first. What the first loads taught: the table's
+NAME stays `Table1` (the script's events are named after it), a Timer
+named `PulseTimer` must exist (core.vbs runs `vpmTimer` on it, and without
+it no `PulseSw` reaches the game), and a coil's group in `device_xy.txt` is
+a place in the title's node directory, translated through `group_node.txt`.
 
 ## Mapping another table
 

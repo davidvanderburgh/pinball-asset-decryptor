@@ -227,5 +227,25 @@ and resized to the drawing; the object prototypes
 timer and gate, and a bumper, light, target, drop target and spinner with
 every name, material, image and layer string blanked. No ramps, plastics or
 sounds: the geometry made playable, for a title nobody has built a tribute
-for. The first load taught one thing: the table's own NAME must stay
-`Table1`, since Visual Pinball names the script's events after it.
+for.
+
+Four loads taught four things: the table's own NAME must stay `Table1`,
+since Visual Pinball names the script's events after it; a single-line
+`If ... Then ... Else ...` inside a Sub is a compile error to VBScript's
+parser here, so the flipper subs are block-form; core.vbs runs `vpmTimer`
+on a Timer named `PulseTimer` (its `PulseTimer_Init` hands it over), so a
+table without one has every `PulseSw` go nowhere - no coin, no hit; and
+the coil table's group column is a board's PLACE in the title's node
+directory, not its node (`group_node.txt`: Bond's group 7 is node 8), so
+the first map reported no coil at all. The controller also looks for a
+title's map in `~/.pad-vpx/maps` first, where the generator writes it,
+since an installed kit's folder is not writable.
+
+Proven 2026-10-27 23:42-23:52: Visual Pinball opened the generated Bond
+table with no run up, the controller started james_bond_le on slot 3 of
+PAD-Runtime and attached in 26 s; four coins (the card prices a game at
+1.00) and Start began a game, the lockbar fired the auto plunger, the three
+flippers fired from their coils, and the table's 86 lights agreed with the
+machine's LED plane on every steady insert across four samples; closing
+the table stopped what it had started. The ball itself has only the outer
+walls, the lane guides and the slingshots to meet.

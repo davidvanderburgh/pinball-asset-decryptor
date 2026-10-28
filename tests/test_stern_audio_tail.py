@@ -2056,3 +2056,101 @@ def test_audio_profile_report(tmp_path):
            "hotter" in by_idx["idx0004"]["flags"]
     assert by_idx["idx0001"]["status"] == "stock"
     assert by_idx["idx0001"]["flags"] == ""
+
+
+# --------------------------------------------------------------------------
+# PAD-795: the FFT-convolved _lowpass equals the per-sample recurrence
+# --------------------------------------------------------------------------
+def _lowpass_per_sample(samples, cutoff_hz, np, fs=44100.0):
+    """_lowpass as it was before PAD-795 (the biquad run sample by sample in
+    Python), returning the float result before rounding."""
+    import math
+    x = np.asarray(samples, np.float64)
+    w0 = 2.0 * math.pi * cutoff_hz / fs
+    cw, sw = math.cos(w0), math.sin(w0)
+    alpha = sw / math.sqrt(2.0)
+    a0 = 1.0 + alpha
+    b0 = (1.0 - cw) / 2.0 / a0
+    b1 = (1.0 - cw) / a0
+    b2 = b0
+    a1 = (-2.0 * cw) / a0
+    a2 = (1.0 - alpha) / a0
+
+    def _iir(sig):
+        y = np.empty_like(sig)
+        x1 = x2 = y1 = y2 = 0.0
+        for i in range(len(sig)):
+            xi = sig[i]
+            yi = b0 * xi + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            x2, x1 = x1, xi
+            y2, y1 = y1, yi
+            y[i] = yi
+        return y
+
+    y = _iir(x)
+    return _iir(y[::-1])[::-1]
+
+
+@pytest.mark.parametrize("cutoff", [5000.0, 500.0, 15000.0])
+def test_lowpass_matches_the_per_sample_recurrence(cutoff):
+    """Seeded 16-bit noise plus tones, ~50k samples: within 1e-6 of the old loop
+    before rounding, and the rounded int64 output identical in all but (at most)
+    a handful of rounding-boundary samples, those off by one."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _lowpass, _lowpass_f64
+
+    rng = np.random.default_rng(795)
+    n = 50_000
+    t = np.arange(n) / 44100.0
+    sig = (rng.integers(-20000, 20000, n)
+           + 8000 * np.sin(2 * np.pi * 440 * t)).astype(np.int64)
+    sig = np.clip(sig, -32768, 32767)
+    ref = _lowpass_per_sample(sig, cutoff, np)
+    got = _lowpass_f64(np.asarray(sig, np.float64), cutoff, np, 44100.0)
+    assert len(got) == n
+    assert np.max(np.abs(got - ref)) < 1e-6
+    ri = np.round(ref).astype(np.int64)
+    gi = _lowpass(sig, cutoff, np)
+    assert gi.dtype == np.int64
+    diff = np.abs(gi - ri)
+    assert diff.max() <= 1
+    assert np.count_nonzero(diff) <= 5          # rounding-boundary cases only
+
+
+def test_lowpass_matches_the_per_sample_recurrence_on_a_long_signal():
+    """Past the FFT block size the passes are overlap-added: the join must be
+    as exact as the single-FFT path."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _lowpass_f64, _causal_convolve, _biquad_impulse
+
+    rng = np.random.default_rng(7)
+    n = (1 << 20) + 12345
+    sig = rng.integers(-30000, 30000, n).astype(np.float64)
+    h = _biquad_impulse(5000.0, 44100.0, np)
+    one = _causal_convolve(sig, h, np, block=1 << 24)        # one FFT
+    blocks = _causal_convolve(sig, h, np, block=1 << 16)     # many blocks
+    assert np.max(np.abs(one - blocks)) < 1e-6
+    got = _lowpass_f64(sig, 5000.0, np, 44100.0)
+    # the tail of the long signal equals the filter run on that tail's own
+    # window where the start-up has died away: zero phase and no block seam
+    head = _lowpass_per_sample(sig[:20000], 5000.0, np)
+    assert np.max(np.abs(got[:12000] - head[:12000])) < 1e-6
+
+
+def test_lowpass_short_signal_and_impulse_response():
+    """The early return (< 12 samples) is untouched, and the cached impulse
+    response is the recurrence's own, decayed to nothing."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _lowpass, _biquad_impulse, _BIQUAD_IMPULSES
+
+    short = np.array([1, -2, 3, -4, 5, -6, 7, -8, 9, -10, 11], np.int64)
+    assert np.array_equal(_lowpass(short, 5000.0, np), short)
+    twelve = np.array(list(short) + [12], np.int64)
+    ref = np.round(_lowpass_per_sample(twelve, 5000.0, np)).astype(np.int64)
+    assert np.array_equal(_lowpass(twelve, 5000.0, np), ref)
+    h = _biquad_impulse(5000.0, 44100.0, np)
+    assert _biquad_impulse(5000.0, 44100.0, np) is h            # cached
+    assert (5000.0, 44100.0) in _BIQUAD_IMPULSES
+    assert 64 < len(h) < 2000
+    assert abs(h[-1]) < 1e-12 * np.abs(h).max()
+    assert abs(h.sum() - 1.0) < 1e-9                             # unity DC gain

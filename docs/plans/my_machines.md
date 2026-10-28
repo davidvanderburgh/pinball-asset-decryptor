@@ -73,6 +73,55 @@ the project. Buttons (`webui/shellx_machines.py`):
 - `scripts/shot_pad783.py`: the same against the real app in Edge, the two real cards, a scratch project the real
   `note_extract` wrote from the stock card, Stern's page stubbed with 1.17.
 
-## Later
+## JJP and BoF (PAD-787)
 
-JJP and BoF register a source and a printer the same way (`code_watch.register_source`).
+A manufacturer joins with three registrations in its `manufacturer.py`: a printer (`lineage.register_printer`), a kind
+(`machines.register_kind`: maker name, release words, build spelling, the file's noun and picker types) and a source
+(`code_watch.register_source`). The page, the toast and the watch line take the maker's words from the row; nothing
+in `shellx_machines.py` names Stern any more.
+
+**What a machine runs.** JJP: the full-install ISO it was installed from. BoF: the `.fun` update it last ran. Both
+are one big file, so the print is `lineage.file_print`: the size, the first and last MiB and 64 slices of 64 KiB in
+between, plus the header the printer read. That is a few MiB, about 0.5 s on D:. Every rebuild moves a file's layout and
+size, so a PAD build never prints like its release. The CHAKAs GNR mod and the Sarah Labyrinth mod print apart from
+their stock files.
+
+**JJP release** (`plugins/jjp/machine_info.py`): the ISO's own volume ID (`Sonic-v00.926`), read from the primary
+volume descriptor at 32 KiB, so a renamed copy and PAD's xorriso rebuild still read correctly. That ID is the machine's
+`sidx`. JJP spells builds as decimals: `version_of` pads the fraction so `00.95` sorts above `00.926`. Every edition
+runs the same ISO, so no edition is shown.
+
+**BoF release** (`plugins/bof/machine_info.py`, `fun_head.py`): BoF stamps the build into the tar's first member.
+`GDHarvest_not_harvest_20260429.x86_64` names it for Winchester; Dune's `GDHarvest_202600513` reads as 2026-05-13 (it
+has a stray digit); Labyrinth's first member is the `update/` folder, whose file date is the build. `fun_head` decrypts
+only the first 256 KiB of the gpg stream, in Python: SKESK v4 with S2K 3, SEIPD v1 in CFB, a compressed packet, a
+literal packet, partial lengths. No gpg or WSL is needed, and it takes about 0.1 s. Bon Jovi's disk image names it in
+the outer EROFS (`bon-jovi_2026.10.01.img.root-x86-64`). The `sidx` is `<game>-YYYY.MM.DD`.
+
+**Stock tables**: `STOCK` in each `machine_info`, from David's library on 2026-10-27: 8 JJP ISOs and 5 BoF updates.
+A listed release with another print reads "Modified card"; an unlisted release reads "Not a known release", the same
+as Stern.
+
+**Pages: one per title.** JJP has a support page per edition; all editions of a title link the same ISO on both
+mirrors (`.../sonic/Sonic-v00.951.iso`), so `PAGES` holds one page per title. BoF's shop has a code-update page per
+title, each linking one Dropbox zip named for the build (`BOF_WMH_20261001.zip`); only that name is read. A check
+reads only the pages of the titles the owner has a machine of (`check(keys=)`). A title added after today's check
+makes its page due at once (`due(keys=)`). The row links to its title's page. A check finishing looks again for
+anything that became due while it ran: a second maker's machine added mid-check used to wait for the hourly tick.
+
+**Lineage for JJP and BoF projects**: Extract already printed through any registered printer (`app.py`), so JJP and
+BoF extracts now get a `.pad-lineage.json` too. Their Writes call `lineage.note_built` (new, shared) and record the
+file they built as a revision, so a machine running a PAD build reads "PAD build, rev N" and finds its project.
+
+**Mod Pack, not Transfer Mods**: only Stern's Mod Pack carries mods onto new code (`capabilities.mod_transfer`). On a
+JJP or BoF row the button reads "Mod Pack" and opens the project on that tab, where its pack is exported for the new
+code's project.
+
+Measured 2026-10-27 on the live pages: JJP lists Sonic 0.951 (the library has 0.926), Hobbit 4.02, Wizard of Oz 8.02,
+and every other library title at the build the library holds. BoF lists Labyrinth 2026-01-30 and Dune 2026-05-13 (both
+as held), Winchester 2026-10-01 (the library has 04-29 and 05-27) and Bon Jovi 2026-10-14 (the library has 10-01).
+
+Proven: `tests/test_machines_jjp_bof.py`. It uses a gpg-shaped `.fun` and an ISO built in Python; covers both printers,
+the parsers on the pages' real spellings, the per-title check, both Writes' revisions, and both makers' rows on the
+real web app with a stubbed page; and reads every library file when it is present. `scripts/shot_pad787.py` runs the
+same against the real app in Edge with three real library files.

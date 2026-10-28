@@ -118,7 +118,7 @@ def test_check_reads_once_with_the_app_user_agent(watch_cfg):
     # once a day
     assert not code_watch.due("stern", now=1000 + 23 * 3600)
     assert code_watch.due("stern", now=1000 + 24 * 3600)
-    assert not code_watch.due("jjp", now=1000)            # no page for it yet
+    assert not code_watch.due("cgc", now=1000)            # no page for it
 
 
 def test_failed_read_keeps_the_last_answer_and_retries_sooner(watch_cfg):
@@ -274,7 +274,8 @@ def test_picker_calls_add_and_transfer(tmp_path, monkeypatch):
             junk.write_bytes(b"0")
             w.answers.append("ok")
             assert w.call("shellx.machines_add", str(junk), "x") is None
-            assert "Stern Spike 2 card" in w.asked[-1]["message"]
+            assert "Stern Spike 2 card image" in w.asked[-1]["message"]
+            assert "Jersey Jack full-install ISO" in w.asked[-1]["message"]
             # the card: the name is asked, the release's words offered
             w.answers.append("Basement Godzilla")
             mid = w.call("shellx.machines_add", str(card))

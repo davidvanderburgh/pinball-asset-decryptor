@@ -849,20 +849,24 @@ function Toasts({ shell }) {
 // each one's title, edition, build, card and project, what its card is
 // (stock, a PAD build's revision, modified), and "1.17 is out" with a link to
 // the maker's game-code page once the daily check sees newer code.  The
-// buttons go straight into the working view for that machine.
+// buttons go straight into the working view for that machine.  A machine's
+// "card" is the file it runs: a Stern SD card image, a JJP install ISO, a
+// BoF .fun update (PAD-787); r.noun names it and r.maker its maker.
 const MACH = {
-  intro: "Add the card image each of your machines runs. Its title, build and project show here, and PAD tells you when Stern puts out newer game code for it.",
-  add: "Pick the card image (.raw or .img) of the SD card a machine boots from. PAD reads which game and build it is; nothing on the card changes.",
-  watch: { head: "Check for new game code", lines: ["Once a day PAD reads Stern's public game-code page and shows here when a machine's game has a newer build, with a link to that page.", "Nothing is ever downloaded: you click through to Stern yourself.", "Only while you have a Stern machine here."] },
-  newer: (r) => ({ head: "Stern has " + r.title + " " + r.build_next + " out", lines: ["This machine's card runs " + r.build + ". Click to open Stern's game-code page; nothing is downloaded.", "Once you have the new card image: Transfer Mods carries this project's changes onto it."] }),
+  intro: "Add the file each of your machines runs: a Stern SD card image, a Jersey Jack install ISO or a Barrels of Fun .fun update. Its title, build and project show here, and PAD tells you when the maker puts out newer game code for it.",
+  add: "Pick the file a machine runs: the .raw or .img of a Stern SD card, a Jersey Jack full-install .iso or a Barrels of Fun .fun update. PAD reads which game and build it is; nothing in the file changes.",
+  watch: { head: "Check for new game code", lines: ["Once a day PAD reads the makers' public game-code pages (Stern's, and the pages of your Jersey Jack and Barrels of Fun titles) and shows here when a machine's game has a newer build, with a link to that page.", "Nothing is ever downloaded: you click through to the maker yourself.", "Only the makers you have a machine of here."] },
+  newer: (r) => ({ head: r.maker + " has " + r.title + " " + r.build_next + " out", lines: ["This machine's " + r.noun + " is " + r.build + ". Click to open " + r.page_words.replace(/pages$/, "page") + "; nothing is downloaded.",
+    r.transfer ? "Once you have the new card image: Transfer Mods carries this project's changes onto it." : "Once you have the new " + r.noun + ": export this project's Mod Pack, extract the new one and import the pack into it."] }),
   transfer: { head: "Transfer Mods", lines: ["Opens this machine's project and the Mod Pack tab's transfer, with this project as the one whose mods move.", "Pick the new code's card image there."] },
-  noProject: "No project of this card yet. Extract opens the Extract tab with this card picked; the project you make from it joins this row.",
+  modpack: { head: "Mod Pack", lines: ["Opens this machine's project on the Mod Pack tab: export its changes as a pack, to import into a project of newer code."] },
+  noProject: (r) => "No project of this " + r.noun + " yet. Extract opens the Extract tab with it picked; the project you make from it joins this row.",
 };
 
 function MachineRow({ r }) {
   const more = (e) => openShellMenu(e.currentTarget, [
-    { label: "Show the card image", icon: "folder", disabled: r.card_missing, onClick: () => call("shellx.machines_show_card", r.id) },
-    { label: "Change card…", icon: "sd", onClick: () => call("shellx.machines_rebind", r.id) },
+    { label: "Show the " + r.noun, icon: "folder", disabled: r.card_missing, onClick: () => call("shellx.machines_show_card", r.id) },
+    { label: r.noun === "card image" ? "Change card…" : "Change " + r.noun + "…", icon: "sd", onClick: () => call("shellx.machines_rebind", r.id) },
     { label: "Rename…", icon: "edit", onClick: () => call("shellx.machines_rename", r.id) },
     { sep: true },
     { label: "Remove from My machines", icon: "trash", onClick: () => call("shellx.machines_remove", r.id) },
@@ -880,16 +884,16 @@ function MachineRow({ r }) {
             ...${tip(MACH.newer({ ...r, build_next: r.newer }))}><${Icon} name="star" />${r.newer} is out<${Icon} name="external" /></button>` : null}
       </div>
       <div class="muted small mach-sub">
-        <span class=${cx("mono", r.card_missing && "err-ink")} title=${r.card}>${r.card_missing ? "Card image not found: " : ""}${r.card_name}</span>
+        <span class=${cx("mono", r.card_missing && "err-ink")} title=${r.card}>${r.card_missing ? r.noun.charAt(0).toUpperCase() + r.noun.slice(1) + " not found: " : ""}${r.card_name}</span>
         ${r.size ? html` · ${r.size}` : null}
         ${" · "}${proj ? html`project <b class="mach-proj" title=${r.project}>${r.project_name}</b>${r.more_projects.length ? " +" + r.more_projects.length + " more" : ""}`
-          : r.project_missing ? html`<span class="err-ink">project folder missing: ${r.project_name}</span>` : html`<span ...${tip(MACH.noProject)}>no project yet</span>`}
+          : r.project_missing ? html`<span class="err-ink">project folder missing: ${r.project_name}</span>` : html`<span ...${tip(MACH.noProject(r))}>no project yet</span>`}
       </div>
     </div>
     <div class="row mach-acts">
       ${proj ? html`<${Button} size="sm" icon="folder" onClick=${() => call("shellx.machines_open_project", r.id)}>Open project<//>`
-        : html`<${Button} size="sm" icon="extract" disabled=${r.card_missing} title=${MACH.noProject} onClick=${() => call("shellx.machines_extract", r.id)}>Extract<//>`}
-      <${Button} size="sm" kind=${r.newer && proj ? "primary" : ""} icon="modpack" disabled=${!proj} title=${MACH.transfer} onClick=${() => call("shellx.machines_transfer", r.id)}>Transfer Mods<//>
+        : html`<${Button} size="sm" icon="extract" disabled=${r.card_missing} title=${MACH.noProject(r)} onClick=${() => call("shellx.machines_extract", r.id)}>Extract<//>`}
+      <${Button} size="sm" kind=${r.newer && proj ? "primary" : ""} icon="modpack" disabled=${!proj} title=${r.transfer ? MACH.transfer : MACH.modpack} onClick=${() => call("shellx.machines_transfer", r.id)}>${r.transfer ? "Transfer Mods" : "Mod Pack"}<//>
       <${Button} size="sm" icon="write" disabled=${!proj} onClick=${() => call("shellx.machines_write", r.id)}>Write<//>
       <${Button} size="sm" kind="ghost" icon="more" title="More" onClick=${more} />
     </div>

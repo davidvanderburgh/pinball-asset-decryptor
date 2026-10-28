@@ -20002,15 +20002,20 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # PAD-777/779: a bank unit is one sound, or a song in parts with a copy of every record
     # its sound ids play (the game's own as they are) and a fragment for each of them
     units = [SB.BankUnit([e]) for e in edits]
+    # (PAD-791: which group each unit is, so a bank knows its own: a record is no longer one
+    # bank's alone, a part's copy may sit in a music mode's bank and in a song's)
+    unit_of = {}
     for g in seqs:
         _own, aliases = BB.seq_fragments(g)
         units.append(SB.BankUnit(BB.bank_edits(_seq_grows(g, spilled, byidx), byidx, directory),
                                  len(aliases), _seq_desc_slot([g]), len(aliases)))
+        unit_of[id(units[-1])] = ("seq", g)
     for g in mseqs:
         _own, aliases = BB.mode_seq_fragments(g)
         units.append(SB.BankUnit(BB.bank_edits(_mseq_grows(g, spilled, byidx), byidx,
                                                directory),
                                  len(aliases), _seq_desc_slot([g])))
+        unit_of[id(units[-1])] = ("mseq", g)
     by_idx_used = {int(u["idx"]): u for u in used if u.get("idx") is not None}
 
     def _named(i):
@@ -20119,11 +20124,11 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     audio_edits = {i: w for i, w in audio_edits.items() if i not in spilled}
     grows = {i: g for i, g in grows.items() if i not in spilled}
     seq_by_cat, mseq_by_cat = {}, {}
-    for cat, group in banks:
-        here = {e.idx for e in group}
-        seq_by_cat[cat] = [g for g in seqs if g.grown[0] in here]
+    for (cat, group), bunits in zip(banks, bank_units):
+        mine = [unit_of[id(u)] for u in bunits if id(u) in unit_of]
+        seq_by_cat[cat] = [g for k, g in mine if k == "seq"]
         seq_al = sum(len(BB.seq_fragments(g)[1]) for g in seq_by_cat[cat])
-        mseq_by_cat[cat] = [g for g in mseqs if g.hosts[0] in here]
+        mseq_by_cat[cat] = [g for k, g in mine if k == "mseq"]
         mseq_al = sum(len(BB.mode_seq_fragments(g)[1]) for g in mseq_by_cat[cat])
         for e in group:
             u = by_idx_used.get(e.idx)

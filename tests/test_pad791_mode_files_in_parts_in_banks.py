@@ -319,3 +319,27 @@ def test_a_file_s_record_is_never_a_part_of_a_song_in_parts_if_it_can_help_it():
     assert E._sound_mode_host(params, slot, 1_300_000, {}, set(), parts={919, 758}) == 5
     # a part only when nothing else will do
     assert E._sound_mode_host(params, slot, 1_300_000, {}, {5}, parts={919, 758}) == 919
+
+
+def test_a_part_in_two_banks_leaves_each_group_in_its_own(monkeypatch, tmp_path):
+    """The rig proof's set: idx 307 is the user's longer intro of 492, a song in parts of the
+    game's (PAD-779) AND a copy beside 492's music mode file.  Its two copies are in two banks,
+    and the song's descriptors were made in the file's bank too, which has no 492 (KeyError)."""
+    img = _image(tmp_path)
+    params = [{"idx": i, "chan": 2, "length": 1000 + i, "findkey": _key(i)} for i in range(1, 8)]
+    grows = {5: (1000, 6_000_000), 6: (1000, 4_000_000), 1: (1000, 5_000_000)}
+    audio_edits = {5: "m5.wav", 6: "m6.wav", 1: "intro.wav"}
+    monkeypatch.setenv(BB.BANK_CAP_ENV, "1000")
+    monkeypatch.setattr(E, "_read_stock_directory",
+                        lambda gr, im: MD.Directory(b"".join(_rec(i) for i in range(8)), 8,
+                                                    0x9000, 0))
+    song = BB.SeqGroup([1], {13: [1, 3]}, {13: _desc(1, 3)}, [1, 3])
+    files = _group()._replace(grown={1: grows[1]})
+    plan, _e, grows2 = E._plan_sound_banks(
+        "game", str(img), params, audio_edits, grows, {1: grows[1]}, [], _Reader(), None, None,
+        lambda m, *a: None, game_seqs=[song], sm_seqs=[files])
+    assert grows2 == {} and len(plan.banks) == 2
+    assert sum(plan.seqs.values(), []) == [song] and sum(plan.sm_seqs.values(), []) == [files]
+    (scat,), (mcat,) = list(plan.seqs), list(plan.sm_seqs)
+    idxs = {c: sorted(e.idx for e in g) for c, g in plan.banks}
+    assert scat != mcat and idxs[scat] == [1, 3] and idxs[mcat] == [1, 5, 6]

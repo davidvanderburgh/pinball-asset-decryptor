@@ -335,3 +335,10 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-rep-tab td { padding: 2px 8px 2px 0; vertical-align: top; }
 .sx-rep-tab td:first-child { width: 96px; white-space: nowrap; }
 .dlg-report { margin-right: auto; }
+.sx-rep-mine { border-collapse: collapse; width: 100%; table-layout: fixed; margin-top: 6px; }
+.sx-rep-mine td { padding: 3px 8px 3px 0; vertical-align: top; }
+.sx-rep-mine td:first-child { width: 86px; white-space: nowrap; }
+.sx-rep-mine td:last-child { width: 200px; }
+.sx-rep-mine td.ok { color: var(--ok); font-weight: 600; }
+.sx-rep-mine tr.new td { background: var(--info-soft); }
+.sx-rep-mine tr.msg td { padding-top: 0; color: var(--ink-2); white-space: pre-line; }

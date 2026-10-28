@@ -477,7 +477,9 @@ Write what you did and what you expected; the app fills in the rest.
 - **What will be sent** shows the whole record before anything leaves
   your PC. Tick **Leave file paths and my account name out** to have
   those blanked.
-- **Name and email** are optional. Give the email if you would like an
-  answer.
+- **No email is asked for.** The app remembers the reports it sent and
+  asks after them now and then; when a release addresses one, a notice
+  at the top says so, with the developer's note if there is one, and
+  **Your reports** in the window lists each report's state.
 - **Save as a file…** writes the same report as a .zip to attach to a
   Discord post or a mail when the service cannot be reached.

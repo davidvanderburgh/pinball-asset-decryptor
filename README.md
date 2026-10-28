@@ -85,7 +85,8 @@ needs: **[Installing](docs/guide/install.md)**.
 The **?** button in the app opens tips for whichever tab you are on.
 Something wrong? **Report a problem** in the top bar sends the developer
 what happened, with the app's log and the card's details, after showing
-you exactly what goes.
+you exactly what goes. No email needed: the app tells you when a release
+addresses your report.
 
 ## Documentation
 

@@ -73,9 +73,11 @@ with mentions disarmed.
 | `GET /v1/admin/list` | header `X-PAD-Admin`; the last 200 rows with ids; `held` = 1 is one waiting for your review |
 | `POST /v1/admin/review/<id>` | header `X-PAD-Admin`; JSON `{"approve": true}` counts a held row from then on, `false` hides it |
 | `DELETE /v1/donate/<id>` | header `X-PAD-Admin` hides any row; `X-PAD-Key` plus `X-PAD-Edit` (the token the POST answered) lets the app that added a row take it back |
-| `POST /v1/report` | header `X-PAD-Key`; JSON `title, body, name, email, app_version, platform, picture_type, picture_b64`: the app's Report a problem (PAD-780) |
+| `POST /v1/report` | header `X-PAD-Key`; JSON `title, body, name, app_version, platform, picture_type, picture_b64`: the app's Report a problem (PAD-780) |
+| `GET /v1/report/status?ids=a,b` | header `X-PAD-Key`; each id's `state` (received, filed, released, closed, unknown), `version` and `message`: how the app tells its user |
 | `GET /v1/admin/reports` | header `X-PAD-Admin`; the reports not yet taken, oldest first, picture included |
-| `POST /v1/admin/reports/<id>/taken` | header `X-PAD-Admin`; deletes the row once the tracker has it |
+| `POST /v1/admin/reports/<id>/taken` | header `X-PAD-Admin`; blanks everything the user wrote, state `filed` |
+| `POST /v1/admin/reports/<id>/answer` | header `X-PAD-Admin`; JSON `{"state": "released"\|"closed", "version", "message"}`: what the app shows its user |
 
 Remove a junk entry:
 
@@ -89,12 +91,16 @@ The app's Report a problem window (PAD-780) posts its record here: the
 user's words, the app's version and system, the card and project it had
 open, the tail of its log and, if they added one, a picture shrunk to a
 JPEG under 700 KB. The row is the whole record plus the picture (base64),
-so it stays well under D1's 2 MB row limit, and it lives here only until
-David's tracker (pad-triage, `padtriage/appreports.py`) polls
-`/v1/admin/reports`, files it as a ticket and posts `/taken`, which deletes
-it. The same five-an-hour, hash-blanked-after-an-hour rule as donations
-applies. Discord gets one line per report (the title, the app version and
-the platform; never the name, the address or the record).
+so it stays well under D1's 2 MB row limit. David's tracker (pad-triage,
+`padtriage/appreports.py`) polls `/v1/admin/reports`, files each as a
+ticket and posts `/taken`, which blanks everything the user wrote; from
+then on the row is only a state. When the ticket ships or closes the
+tracker posts `/answer` with the version and David's message, and the app
+that sent the report (it keeps its ids) reads `/v1/report/status` and
+tells the user in the app. No address is asked for or stored; an answered
+row is dropped after 90 days. The same five-an-hour, hash-blanked-after-
+an-hour rule as donations applies. Discord gets one line per report (the
+title, the app version and the platform; never the name or the record).
 
 Adding this to a Worker deployed before it is one command, since the
 schema only creates what is missing:

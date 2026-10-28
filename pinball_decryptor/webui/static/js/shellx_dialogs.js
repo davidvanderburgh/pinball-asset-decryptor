@@ -1171,7 +1171,6 @@ function ReportDialog({ close, prefill = "" }) {
   const [info, setInfo] = useState(null);           // facts, log size, memory
   const [text, setText] = useState(prefill || "");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [hidePaths, setHidePaths] = useState(true);
   const [preview, setPreview] = useState(null);     // null, or the record's text
   const [showPreview, setShowPreview] = useState(false);
@@ -1184,18 +1183,18 @@ function ReportDialog({ close, prefill = "" }) {
       const i = await call("shellx.report_open", prefill || "");
       if (!i) return;
       setInfo(i);
-      setName(i.name || ""); setEmail(i.email || ""); setHidePaths(i.hide_paths !== false);
+      setName(i.name || ""); setHidePaths(i.hide_paths !== false);
       if (i.prefill && !text) setText(i.prefill);
     })();
   }, []);
   useEffect(() => {
     if (!showPreview) return undefined;
     const id = setTimeout(async () => {
-      const p = await call("shellx.report_preview", text, name, email, hidePaths);
+      const p = await call("shellx.report_preview", text, name, hidePaths);
       if (p) setPreview(p.text);
     }, 300);
     return () => clearTimeout(id);
-  }, [showPreview, text, name, email, hidePaths]);
+  }, [showPreview, text, name, hidePaths]);
   useEffect(() => {
     // the send finished off the loop: the service's answer, or why not
     if (!r.last || busy === false) return;
@@ -1217,15 +1216,33 @@ function ReportDialog({ close, prefill = "" }) {
   };
   const send = async () => {
     setErr(null); setBusy(true);
-    const ok = await act(() => call("shellx.report_send", text, name, email, hidePaths));
+    const ok = await act(() => call("shellx.report_send", text, name, hidePaths));
     if (!ok) setBusy(false);
   };
-  const save = () => act(() => call("shellx.report_save", text, name, email, hidePaths));
+  const save = () => act(() => call("shellx.report_save", text, name, hidePaths));
+  // the reports this app sent, newest first, with how each is doing; the
+  // list starts open when one has news, and showing it marks the news seen
+  const mine = (r.mine || []).slice().reverse();
+  const hasNews = !!mine.find((m) => m.seen === false);
+  const [mineOpen, setMineOpen] = useState(hasNews);
+  useEffect(() => { if (mineOpen && hasNews) call("shellx.report_mine_seen"); }, [mineOpen, hasNews]);
+  const Mine = () => mine.length ? html`<details class="sx-rep-facts" open=${mineOpen}
+      onToggle=${(e) => setMineOpen(e.target.open)}>
+    <summary class="small">Your reports (${mine.length})</summary>
+    <table class="sx-rep-mine small"><tbody>
+      ${mine.map((m) => html`<tr class=${m.seen === false ? "new" : ""}>
+        <td class="muted notr">${m.when}</td>
+        <td class="notr ellip" title=${m.title}>${m.title}</td>
+        <td class=${"notr " + (m.state === "released" ? "ok" : "muted")}>${m.words}</td>
+      </tr>${m.message ? html`<tr class="msg"><td></td><td colspan="2" class="notr">${m.message}</td></tr>` : null}`)}
+    </tbody></table>
+  </details>` : null;
   if (hidden) return null;
   if (sentId) {
     return html`<${Modal} title="Report a problem" icon="flag" onClose=${onClose} cls=${"sx-report " + uid}
       footer=${html`<${Button} kind="primary" onClick=${close}>Close<//>`}>
-      <${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached.${email ? " You'll hear back at " + email + " if a reply is needed." : ""}<//>
+      <${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached. When a release addresses it, this app tells you with a notice at the top, and under Your reports in this window.<//>
+      <${Mine} />
     <//>`;
   }
   const facts = (info && info.facts) || [];
@@ -1243,8 +1260,7 @@ function ReportDialog({ close, prefill = "" }) {
       <div class="row wrap" style="gap:14px">
         <span class="stack" style="gap:4px"><span class="lbl">Your name (optional)</span>
           <${Field} value=${name} onChange=${setName} width=${200} /></span>
-        <span class="stack" style="gap:4px"><span class="lbl">Email, if you'd like an answer (optional)</span>
-          <${Field} value=${email} onChange=${setEmail} width=${260} type="email" /></span>
+        <span class="small muted" style="align-self:flex-end">No email needed: when a release addresses your report, this app tells you.</span>
       </div>
       <div class="row wrap" style="gap:10px">
         <span class="lbl">Picture</span>
@@ -1265,6 +1281,7 @@ function ReportDialog({ close, prefill = "" }) {
       ${!r.available ? html`<${Note} kind="warn">This copy of the app has no report service configured. Save the report as a file and attach it to a message instead.<//>` : null}
       <${ErrorNote} text=${err} />
       ${err && r.last && r.last.offline ? html`<${Note} kind="info">Save as a file writes the same report as a .zip you can attach to a Discord post or a mail.<//>` : null}
+      <${Mine} />
     </div>
   <//>`;
 }

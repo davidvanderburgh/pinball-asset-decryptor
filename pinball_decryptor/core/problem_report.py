@@ -19,11 +19,17 @@ Three parts, none of them touching the UI (the window is
 * the wire: :func:`send` posts it to the app's service (the same
   Cloudflare Worker that keeps the donations tally, ``tools/donations_worker``),
   and :func:`save_zip` writes the same bundle to a file for when the
-  service cannot be reached, to attach by hand.
+  service cannot be reached, to attach by hand;
+* the answer: no address is asked for.  The app keeps the id the service
+  answered each report with (:func:`load_cache` / :func:`save_cache`,
+  ``reports_cache.json`` beside settings.json), asks after them with
+  :func:`fetch_status`, and tells the user in the app once the report's
+  ticket shipped in a release or was closed (:func:`state_words`), with
+  the developer's message when there is one.
 
-Nothing personal is gathered on its own: a name and an address are what
-the user typed, the log is the app's own log, and the user sees the whole
-record before it goes.
+Nothing personal is gathered on its own: a name is what the user typed,
+the log is the app's own log, and the user sees the whole record before
+it goes.
 """
 
 import base64
@@ -52,7 +58,10 @@ MAX_LOG_CHARS = 200_000
 #: the user's own words
 MAX_TEXT = 4000
 MAX_NAME = 80
-MAX_EMAIL = 120
+#: this many of the app's own reports are remembered and asked after
+KEEP_MINE = 20
+#: the service is asked after the open ones at most this often
+STATUS_AFTER = 6 * 3600
 #: a picture is shrunk until it fits this (the service keeps a row under
 #: Cloudflare D1's 2 MB; base64 adds a third)
 MAX_PICTURE_BYTES = 700_000
@@ -162,12 +171,6 @@ def validate(report):
         raise ValueError("Say what happened, in a sentence or two.")
     report["text"] = text[:MAX_TEXT]
     report["name"] = _clean(report.get("name"), MAX_NAME)
-    email = _clean(report.get("email"), MAX_EMAIL)
-    if email and ("@" not in email or " " in email or "." not in
-                  email.split("@")[-1]):
-        raise ValueError("That doesn't look like an email address. Leave "
-                         "it empty if you'd rather not give one.")
-    report["email"] = email
     return report
 
 
@@ -194,11 +197,8 @@ def as_text(report):
         if value in (None, ""):
             continue
         lines.append("%s: %s" % (label, fix(str(value))))
-    who = report.get("name") or ""
-    if report.get("email"):
-        who = ("%s <%s>" % (who, report["email"])).strip()
-    if who:
-        lines.append("From: %s" % who)
+    if report.get("name"):
+        lines.append("From: %s" % report["name"])
     if hide:
         lines.append("File paths and the account name were left out at "
                      "the user's request.")
@@ -221,8 +221,7 @@ def payload(report):
            "platform": report.get("platform") or sys.platform,
            "title": title_of(report),
            "body": as_text(report),
-           "name": report.get("name") or "",
-           "email": report.get("email") or ""}
+           "name": report.get("name") or ""}
     p = report.get("picture")
     if p and p.get("data"):
         out["picture_type"] = p.get("type") or "image/jpeg"
@@ -271,6 +270,120 @@ def send(url, key, report, timeout=TIMEOUT):
     if not out.get("ok"):
         raise ReportError(out.get("error") or "The service refused the report.")
     return out
+
+
+# ---------------------------------------------------------------- the answer
+#: state -> what the window and the notice say
+STATE_WORDS = {
+    "received": "Received, not looked at yet",
+    "filed": "Being looked at",
+    "released": "Addressed in v%s",
+    "closed": "Looked at and closed",
+    "unknown": "No longer on record",
+}
+
+
+def state_words(entry):
+    """One line for one of the app's own reports."""
+    state = entry.get("state") or "received"
+    words = STATE_WORDS.get(state, STATE_WORDS["received"])
+    if state == "released":
+        words = words % (entry.get("version") or "?")
+    return words
+
+
+def answered(entry):
+    """True once the developer's side said the last word on it."""
+    return (entry.get("state") or "") in ("released", "closed", "unknown")
+
+
+def fetch_status(url, key, ids, timeout=TIMEOUT):
+    """``{id: {"state", "version", "message", "answered_at"}}`` for the
+    app's own report *ids* (at most 20 a call)."""
+    ids = [i for i in ids if i][:20]
+    if not url or not ids:
+        return {}
+    req = urllib.request.Request(
+        url.rstrip("/") + "/v1/report/status?ids=" + ",".join(ids),
+        headers=_headers(**{"X-PAD-Key": key or ""}))
+    with urlopen(req, timeout) as resp:
+        out = _read_json(resp)
+    if not out.get("ok"):
+        raise ReportError(out.get("error") or "The service refused the ask.")
+    rows = {}
+    for r in out.get("rows") or ():
+        if isinstance(r, dict) and r.get("id"):
+            rows[r["id"]] = {"state": r.get("state") or "received",
+                             "version": r.get("version") or "",
+                             "message": r.get("message") or "",
+                             "answered_at": r.get("answered_at") or 0}
+    return rows
+
+
+def cache_path(settings_file):
+    return os.path.join(os.path.dirname(settings_file), "reports_cache.json")
+
+
+def load_cache(path):
+    """``{"mine": [entries], "checked_at": float}``; a missing or broken
+    file is an empty cache.  An entry: ``id, title, at, state, version,
+    message, answered_at, seen``."""
+    out = {"mine": [], "checked_at": 0.0}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return out
+    if not isinstance(data, dict):
+        return out
+    if isinstance(data.get("mine"), list):
+        out["mine"] = [m for m in data["mine"]
+                       if isinstance(m, dict) and m.get("id")][-KEEP_MINE:]
+    try:
+        out["checked_at"] = float(data.get("checked_at") or 0)
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def save_cache(path, cache):
+    """Never raises: a cache that cannot be written only loses the memory
+    of a report, never the report."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        from .atomic_file import write_json_atomic
+        write_json_atomic(path, cache)
+    except OSError:
+        pass
+
+
+def remember(cache, report, answer):
+    """Add the report the service just took to the cache's ``mine``."""
+    cache.setdefault("mine", []).append({
+        "id": str(answer.get("id") or ""), "title": title_of(report),
+        "at": report.get("at") or time.time(), "state": "received",
+        "version": "", "message": "", "answered_at": 0, "seen": True})
+    cache["mine"] = cache["mine"][-KEEP_MINE:]
+    return cache
+
+
+def apply_status(cache, rows):
+    """Fold the service's answers into the cache.  Returns the entries
+    whose answer is NEW (just released or closed, not yet seen)."""
+    news = []
+    for m in cache.get("mine") or ():
+        r = rows.get(m.get("id"))
+        if not r:
+            continue
+        was = m.get("state") or "received"
+        m["state"] = r["state"]
+        m["version"] = r["version"]
+        m["message"] = r["message"]
+        m["answered_at"] = r["answered_at"]
+        if answered(m) and not answered({"state": was}):
+            m["seen"] = False
+            news.append(m)
+    return news
 
 
 # ------------------------------------------------------------------ the file

@@ -177,6 +177,8 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, DonationsMixin,
             action)
         handlers["stale_source"] = (
             lambda _win, action: self._stale_banner_action(action))
+        handlers["report_answer"] = (
+            lambda _win, action: self._report_banner_action(action))
         win.banner_handlers = handlers
 
     def _settings_action_table(self):

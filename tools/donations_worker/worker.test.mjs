@@ -23,8 +23,8 @@ function fakeDb() {
           return { results: live().sort((a, b) => b.at - a.at).slice(off, off + args[0]) };
         }
         if (sql.startsWith("SELECT id, at, app_version")) {
-          return { results: reports.slice().sort((a, b) => a.at - b.at).slice(0, 20)
-            .map(({ ip_hash, ...r }) => r) };
+          return { results: reports.filter((r) => r.state === "received").sort((a, b) => a.at - b.at).slice(0, 20)
+            .map(({ ip_hash, state, version, message, answered_at, ...r }) => r) };
         }
         if (sql.startsWith("SELECT id, at")) {
           return { results: rows.slice().sort((a, b) => b.at - a.at).slice(0, 200) };
@@ -57,23 +57,40 @@ function fakeDb() {
         if (sql.startsWith("SELECT COUNT(*) AS n FROM reports WHERE ip_hash")) {
           return { n: reports.filter((r) => r.ip_hash === args[0] && r.at > args[1]).length };
         }
+        if (sql.startsWith("SELECT id, state, version, message, answered_at FROM reports")) {
+          const r = reports.find((x) => x.id === args[0]);
+          return r ? { id: r.id, state: r.state, version: r.version, message: r.message, answered_at: r.answered_at } : null;
+        }
         throw new Error("unexpected first(): " + sql);
       },
       async run() {
         if (sql.startsWith("INSERT INTO reports")) {
-          const [id, at, app_version, platform, title, body, name, email, picture_type, picture, ip_hash] = args;
-          reports.push({ id, at, app_version, platform, title, body, name, email, picture_type, picture, ip_hash });
+          const [id, at, app_version, platform, title, body, name, picture_type, picture, ip_hash] = args;
+          reports.push({ id, at, app_version, platform, title, body, name, picture_type, picture, ip_hash,
+            state: "received", version: "", message: "", answered_at: 0 });
           return { meta: { changes: 1 } };
+        }
+        if (sql.startsWith("UPDATE reports SET state = 'filed'")) {
+          const r = reports.find((x) => x.id === args[0] && x.state === "received");
+          if (r) Object.assign(r, { state: "filed", title: "", body: "", name: "", picture_type: "", picture: "", ip_hash: "" });
+          return { meta: { changes: r ? 1 : 0 } };
+        }
+        if (sql.startsWith("UPDATE reports SET state = ?")) {
+          const r = reports.find((x) => x.id === args[4]);
+          if (r) Object.assign(r, { state: args[0], version: args[1], message: args[2], answered_at: args[3] });
+          return { meta: { changes: r ? 1 : 0 } };
+        }
+        if (sql.startsWith("DELETE FROM reports WHERE answered_at")) {
+          let n = 0;
+          for (let i = reports.length - 1; i >= 0; i--) {
+            if (reports[i].answered_at > 0 && reports[i].answered_at < args[0]) { reports.splice(i, 1); n++; }
+          }
+          return { meta: { changes: n } };
         }
         if (sql.startsWith("UPDATE reports SET ip_hash = ''")) {
           let n = 0;
           for (const r of reports) if (r.ip_hash && r.at <= args[0]) { r.ip_hash = ""; n++; }
           return { meta: { changes: n } };
-        }
-        if (sql.startsWith("DELETE FROM reports")) {
-          const i = reports.findIndex((x) => x.id === args[0]);
-          if (i >= 0) reports.splice(i, 1);
-          return { meta: { changes: i >= 0 ? 1 : 0 } };
         }
         if (sql.startsWith("INSERT")) {
           const [id, at, amount, currency, usd, shelter, country, region, name, show_name, app_version, ip_hash, edit_token, held] = args;
@@ -332,7 +349,11 @@ test("a report needs the app key and some words", async () => {
   assert.equal(e.DB.reports.length, 0);
 });
 
-test("a report is stored whole, listed for the tracker, and gone once taken", async () => {
+const admin = (e, path, body) => worker.fetch(new Request(BASE + path,
+  { method: "POST", headers: { "X-PAD-Admin": "adm", "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body) }), e);
+
+test("a report is stored whole, listed for the tracker, and blanked once taken", async () => {
   const e = env();
   const [st, out] = await postReport(e, { title: "Write stopped at 40%", body: RECORD, name: "Joe",
     email: "joe@example.com", app_version: "1.274.0", platform: "win32",
@@ -343,17 +364,44 @@ test("a report is stored whole, listed for the tracker, and gone once taken", as
   const [, list] = await get(e, "/v1/admin/reports", { "X-PAD-Admin": "adm" });
   assert.equal(list.rows.length, 1);
   const row = list.rows[0];
-  assert.deepEqual([row.id, row.title, row.name, row.email, row.app_version, row.platform, row.picture_type, row.picture],
-    [out.id, "Write stopped at 40%", "Joe", "joe@example.com", "1.274.0", "win32", "image/jpeg", "/9j/4AAQ"]);
+  assert.deepEqual([row.id, row.title, row.name, row.app_version, row.platform, row.picture_type, row.picture],
+    [out.id, "Write stopped at 40%", "Joe", "1.274.0", "win32", "image/jpeg", "/9j/4AAQ"]);
   assert.equal(row.body, RECORD);
+  assert.equal("email" in row, false);          // never asked for, never stored
   assert.equal("ip_hash" in row, false);
-  const r = await worker.fetch(new Request(BASE + "/v1/admin/reports/" + out.id + "/taken",
-    { method: "POST", headers: { "X-PAD-Admin": "adm" } }), e);
+  const r = await admin(e, "/v1/admin/reports/" + out.id + "/taken");
   assert.equal(r.status, 200);
-  assert.equal(e.DB.reports.length, 0);
-  const again = await worker.fetch(new Request(BASE + "/v1/admin/reports/" + out.id + "/taken",
-    { method: "POST", headers: { "X-PAD-Admin": "adm" } }), e);
+  const kept = e.DB.reports[0];
+  assert.deepEqual([kept.state, kept.title, kept.body, kept.name, kept.picture, kept.ip_hash],
+    ["filed", "", "", "", "", ""]);
+  assert.equal((await get(e, "/v1/admin/reports", { "X-PAD-Admin": "adm" }))[1].rows.length, 0);
+  const again = await admin(e, "/v1/admin/reports/" + out.id + "/taken");
   assert.equal(again.status, 404);
+});
+
+test("the app asks after its reports and hears when a release addresses one", async () => {
+  const e = env();
+  const [, a] = await postReport(e, { body: RECORD });
+  const [, b] = await postReport(e, { body: RECORD });
+  assert.equal((await get(e, "/v1/report/status?ids=" + a.id))[0], 403);
+  const hdr = { "X-PAD-Key": "k" };
+  let [st, out] = await get(e, "/v1/report/status?ids=" + a.id + "," + b.id + ",nope", hdr);
+  assert.equal(st, 200);
+  assert.deepEqual(out.rows.map((r) => [r.id, r.state]), [[a.id, "received"], [b.id, "received"]]);
+  await admin(e, "/v1/admin/reports/" + a.id + "/taken");
+  assert.equal((await admin(e, "/v1/admin/reports/" + a.id + "/answer", { state: "fixed" })).status, 400);
+  assert.equal((await admin(e, "/v1/admin/reports/" + "0".repeat(32) + "/answer", { state: "released" })).status, 404);
+  const ans = await admin(e, "/v1/admin/reports/" + a.id + "/answer",
+    { state: "released", version: "1.275.0", message: "Fixed: the write no longer stops at 40%." });
+  assert.equal(ans.status, 200);
+  [st, out] = await get(e, "/v1/report/status?ids=" + a.id + "," + b.id, hdr);
+  assert.deepEqual([out.rows[0].state, out.rows[0].version, out.rows[0].message, out.rows[1].state],
+    ["released", "1.275.0", "Fixed: the write no longer stops at 40%.", "received"]);
+  assert.ok(out.rows[0].answered_at > 0);
+  // an answered row is dropped once it is old, and the app then hears "unknown"
+  e.DB.reports[0].answered_at = 1;
+  [st, out] = await get(e, "/v1/report/status?ids=" + a.id, hdr);
+  assert.deepEqual([out.rows[0].state, e.DB.reports.length], ["unknown", 1]);
 });
 
 test("a report without a title is named by its first line, and one address gets five an hour", async () => {
@@ -373,7 +421,7 @@ test("David hears on Discord that a report came, never who sent it", async () =>
   const waited = [];
   const ctx = { waitUntil: (p) => waited.push(p) };
   try {
-    await postReport(e, { title: "Write stopped at 40%", body: RECORD, name: "Joe", email: "joe@example.com",
+    await postReport(e, { title: "Write stopped at 40%", body: RECORD, name: "Joe",
       app_version: "1.274.0", platform: "darwin", picture_b64: "/9j/" }, undefined, ctx);
     await Promise.all(waited);
     assert.equal(posts.length, 1);

@@ -418,6 +418,7 @@ class Bridge:
         self.pipe = None
         self.launch = None                 # the run this bridge started, if any
         self.attached = False              # the run is up and its tables read
+        self.front_done = False            # the started run's LCD window was handed back once
         self.start_t = 0.0
         self.running = False
         self.paused = False
@@ -456,6 +457,7 @@ class Bridge:
         self.launch = None
         self.attached = False
         self.start_t = time.monotonic()
+        self.front_done = False            # the LCD window's first grab is undone once, never again
         log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         data = read_block(self.rig.led_path(), READ_N)
         if data and coilmap.has_magic(data):
@@ -612,7 +614,8 @@ class Bridge:
         last_front = 0.0
         while self.running:
             now = time.monotonic()
-            if self.launch is not None and now - last_front >= 1.0 and now - self.start_t < FRONT_WATCH_S:
+            if (self.launch is not None and not self.front_done and now - last_front >= 1.0
+                    and now - self.start_t < FRONT_WATCH_S):
                 last_front = now
                 self._keep_player_front()
             if not self.attached:
@@ -628,7 +631,8 @@ class Bridge:
         """A run this bridge started opens the game's LCD window, and that
         window takes the foreground - and Visual Pinball pauses the moment it
         loses it, so the table sat frozen until the player clicked it. While
-        the run comes up, the foreground is handed back to the player, but
+        the run comes up, the foreground is handed back to the player ONCE (a
+        click on the LCD window after that is the user wanting to see it), and
         ONLY from a window of the kit's own run (its title carries the
         PAD-VPX label): never from anything else the user has in front."""
         hwnd = getattr(self, "player_hwnd", 0)
@@ -654,7 +658,8 @@ class Bridge:
                 u.BringWindowToTop(hwnd)
             finally:
                 u.AttachThreadInput(me, fg_tid, False)
-            log("foreground: [%s] -> the player again" % buf.value)
+            self.front_done = True       # ONCE: a later click on the LCD window is the user's own
+            log("foreground: [%s] -> the player again (once; the window is the user's from here)" % buf.value)
         except Exception as exc:                            # noqa: BLE001
             log("foreground hand-back failed: %s" % exc)
 

@@ -301,7 +301,7 @@ flippers fired from their coils, and the LCD showed 3,117,950 on ball 1.
 The run started for a table brings up the game's LCD window, which took
 the foreground - and Visual Pinball pauses the moment it loses it. The
 controller now hands the foreground back to the player window it was given
-in `Run`, for the first five minutes, and only from a window whose title
+in `Run` - ONCE, the first time the LCD window takes it (a second version handed it back for five minutes and so pushed the window away every time David clicked it to look at the game), and only from a window whose title
 carries the kit's PAD-VPX label: proven in the same session (the log line
 `foreground: [... PAD-VPX ...] -> the player again`, four seconds after the
 launch).

@@ -330,3 +330,33 @@ shareable with somebody who has their own card image.
   brings the PAD installer, Visual Pinball, their own download of the
   tribute and their own card. The kit shares maps and patchers, never a
   table.
+
+## An all-in-one installer with a setup wizard
+
+David (2026-10-28): the README had too many steps; the installer should
+handle the prerequisites and the setup, with a wizard stepping through
+where the windows appear; a clean, easy handoff.
+
+* `padvpx wizard` (tools/spike2_emu/vpx/padwizard.py) is that window: six
+  pages (machine, Visual Pinball, cards, tables, windows, play), each one
+  a check with a button that fixes it. WSL 2 by `wsl --install
+  --no-distribution` elevated; the runtime by the app's own
+  `runtime.install` (with its replace-consent for a stale one, worded on the
+  page); the controller by an elevated `padvpx register`; Visual Pinball by
+  the 10.8.0 release zip (proven: 37 MB, unpacked flat, scripts/core.vbs and
+  a tables folder in place); the tables copied from the build's own folder;
+  the layout presets computed from the monitors found (a 2:3 playfield at
+  full height on the left and the LCD in the rest at 16:9; a second screen
+  for the LCD when there is one; Visual Pinball's own place) and written as
+  the kit's `player`/`lcd` plus Width/Height/FullScreen=0 in the ini.
+* The installer: `installer\vpx_tables\*.vpx` ships as `{app}\vpx\tables`
+  when the folder exists at build time (gitignored; the beta build has the
+  two tributes in it), a Start-menu "Visual Pinball setup", and a postinstall
+  entry for the wizard, `runascurrentuser` because it writes the user's kit
+  and ini and imports into the user's WSL; ticked by default only in a build
+  that ships tables.
+* Proven by stepping the page through all six pages under a harness that
+  captures each (scratch wizshots.py), the download into a scratch folder
+  with the kit redirected, and five tests on the pure parts (cards folder,
+  table titles, one listing per shipped table, the presets, the kit and ini
+  the layout writes, Visual Pinball found from the kit first).

@@ -67,6 +67,24 @@ On an installed app the command is `padvpx.cmd` in the app folder (a Start
 menu entry opens a prompt on it), and the installer registers the
 controller itself.
 
+**The setup window: `padvpx wizard`.** Everything above, as one window
+with six pages, for somebody who is not going to type any of it (the
+installer offers it on its last page, and the Start menu has it as "Visual
+Pinball setup"): the machine (WSL 2 installed from here if missing, the PAD
+runtime downloaded and imported, the controller registered), Visual Pinball
+(found, chosen, or the 10.8.0 release downloaded and unpacked), the card
+folder (which titles it covers), the tables (the ones a build ships, copied
+into Visual Pinball's tables folder, or the user's own tribute patched), the
+windows (a layout for the screens found, drawn, or numbers), and a Play page
+that opens a table. It writes only what the commands write: `~/.pad-vpx.json`
+and Visual Pinball's ini. A build ships tables only when
+`installer/vpx_tables/*.vpx` exists at build time (a beta for a tester; a
+release ships none, and the wizard then offers the patch button alone). The
+page is pywebview, and one trap cost an afternoon: pywebview walks EVERY
+public attribute of the js_api object into the page, so the window handle
+kept on the api is `_window`; as `window` it walked the WinForms tree
+forever (a 17 GB process that never answered).
+
 **The LCD window.** Visual Pinball comes up full screen and would cover the
 game's LCD window, so when the controller starts a run it puts that window
 where the kit says and ON TOP: by default the upper middle of the main

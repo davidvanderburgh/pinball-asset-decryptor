@@ -35,3 +35,4 @@ plans/*
 # these patterns are the second line of defence if a copy is ever dropped in one.
 *preview_signing_key*
 pinball_decryptor_signing/
+installer/vpx_tables/

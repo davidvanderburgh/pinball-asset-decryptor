@@ -740,3 +740,82 @@ def test_shadow_maps_are_consistent(title):
     had = {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")}
     out = vs.gen(m, had)
     assert "None" not in out and "Sub Table1_Init\n" in out
+
+
+# ------------------------------------------------------------- wizard -----
+
+def test_wizard_reads_the_card_folder_and_names_tables(tmp_path):
+    wz = pytest.importorskip("padwizard")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    for n in ("rush_le-1_19_0.Release.16G.sdcard.raw", "rush_le-1_18_0.Release.16G.sdcard.raw",
+              "foo_fighters_le-1_04_0.Release.16G.sdcard.raw", "notes.txt", "godzilla_le.raw"):
+        (lib / n).write_bytes(b"x")
+    cards = wz.cards_in(str(lib))
+    assert sorted(cards) == ["foo_fighters_le", "rush_le"] and len(cards["rush_le"]) == 2
+    assert wz.cards_in(str(tmp_path / "missing")) == {}
+    assert wz.table_title("Rush LE 2.0.2 (PAD).vpx") == "rush_le"
+    assert wz.table_title("JP's Foo Fighters (PAD).vpx") == "foo_fighters_le"
+    assert wz.table_title("Godzilla (PAD).vpx") == "godzilla_le" and wz.table_title("x.vpx") == ""
+
+
+def test_wizard_lists_each_shipped_table_once(tmp_path, monkeypatch):
+    wz = pytest.importorskip("padwizard")
+    d = tmp_path / "tables"
+    d.mkdir()
+    (d / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"x")
+    (d / "readme.txt").write_bytes(b"x")
+    # the same folder reached two ways (the env and a build's own) is one list
+    monkeypatch.setattr(wz, "TABLES_DIRS", [str(d), str(d).replace("\\", "/"), str(tmp_path / "none")])
+    assert [os.path.basename(p) for p in wz.shipped_tables()] == ["Rush LE 2.0.2 (PAD).vpx"]
+
+
+def test_wizard_layouts_fit_the_screens_found():
+    wz = pytest.importorskip("padwizard")
+    one = wz.layout_presets([(0, 0, 3840, 2160)])
+    keys = [k for k, _, _, _ in one]
+    assert keys == ["side", "centre"]
+    _, _, player, lcd = one[0]
+    assert player == (0, 0, 1440, 2160)              # a 2:3 playfield, full height
+    assert lcd[0] == 1440 and lcd[2] == 2400 and lcd[3] == 1350    # the rest, 16:9
+    two = wz.layout_presets([(0, 0, 1920, 1080), (1920, 0, 3840, 1080)])
+    assert [k for k, _, _, _ in two] == ["side", "two", "centre"]
+    assert two[1][3] == (1920, 0, 1920, 1080)        # the LCD fills the second screen
+    assert wz.layout_presets([])[0][2][3] == 1080    # no screens known: a 1080p guess
+
+
+def test_wizard_layout_writes_the_kit_and_the_ini(tmp_path, monkeypatch):
+    wz = pytest.importorskip("padwizard")
+    pl = pytest.importorskip("padlaunch")
+    pv = pytest.importorskip("padvpx")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    ini = tmp_path / "VPinballX.ini"
+    ini.write_text("[Player]\nFullScreen = 1\nWidth = 1920\n[Editor]\nX = 1\n", encoding="utf-8")
+    monkeypatch.setattr(pv, "vpx_ini_path", lambda: str(ini))
+    api = wz.Api()
+    assert api.apply_layout("side", [0, 0, 1440, 2160], [1440, 0, 2400, 1350]).startswith("layout side")
+    kit = pl.kit_load()
+    assert kit["player"] == {"x": 0, "y": 0, "w": 1440, "h": 2160}
+    assert kit["lcd"] == {"x": 1440, "y": 0, "w": 2400, "h": 1350, "topmost": True}
+    text = ini.read_text(encoding="utf-8")
+    assert "FullScreen = 0" in text and "Width = 1440" in text and "Height = 2160" in text and "X = 1" in text
+    api.apply_layout("centre", None, None)                 # Visual Pinball's own place, the LCD's default
+    kit = pl.kit_load()
+    assert "player" not in kit and kit["lcd"] == {"topmost": True}
+    assert "FullScreen = 0" in ini.read_text(encoding="utf-8")
+
+
+def test_wizard_finds_visual_pinball_from_the_kit_first(tmp_path, monkeypatch):
+    wz = pytest.importorskip("padwizard")
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(wz, "VPX_DEFAULT_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "pf"))
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path / "home"))
+    assert wz.find_vpx() == ""
+    mine = tmp_path / "vp"
+    mine.mkdir()
+    api = wz.Api()
+    assert api.set_vpx(str(mine)).startswith("no VPinballX64.exe")
+    (mine / "VPinballX64.exe").write_bytes(b"x")
+    assert api.set_vpx(str(mine)) == "ok" and wz.find_vpx() == str(mine)

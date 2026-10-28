@@ -630,9 +630,33 @@ names that id (`_list_ids`), which the runtime swaps from in the file's mode. If
 then keeps such a file in `image.bin` after all (too big), the song stays with it
 (`_sm_kept_sids`): the runtime plays that file under the game's own id.
 
-**Iron Maiden LE 1.18**, the reporter's shape (17 longer songs, 8 Option B files, 16 GB
-card): all 8 files go into banks (5 groups, 7 of the game's parts copied) where 1 did, and
-his longer songs on those slots into banks of the game's beside them: 16 banks, together at
-most 2,172 MB with image.bin (Stern's largest 2,181 MB); 2 songs trimmed, idx 70 (its part
-91 plays another sound of the Write) and idx 930 (the game never plays it), as PAD-777 also
-trimmed 2.
+**The file's host record** (`_sound_mode_host`, `parts=`) is a record the game plays in a
+sequence only when nothing else fits: such a host cannot be a part's copy as well, and on the
+reporter's card 5 of the 8 hosts were parts (919 kept the 150/618 medley's files out; 91 kept
+idx 70's song out). The sequences are read off the descriptors whole before the hosts are
+picked (Iron Maiden's 974 plays idx 919 past the play tables' 80 bytes); `_wide_descriptors_once`
+keeps that read for the planner (5.8 s on Iron Maiden).
+
+**A record in two banks**: a part's copy can sit in a music mode's bank and, as the user's
+longer song, in PAD-779's bank of the game's (307, 492's intro). Banks know their groups by
+the units placed in them, not by record idx (an idx match put 307's song in the file's bank
+too, whose descriptors then failed: KeyError 492).
+
+**Iron Maiden LE 1.18**, the reporter's shape (17 longer songs, 8 Option B files, 16 GB card,
+`his777.py` through the app's Write): all 8 files go into banks where 1 did (0 left out,
+PAD-777 left out 7), and his longer songs on those slots into banks of the game's beside
+them: 17 banks, all verified and every bank sound id resolving through the game's resolver,
+together at most 2,172 MB with image.bin (Stern's largest 2,181 MB); 1 song trimmed, idx 930,
+which the game never plays (PAD-777 trimmed 2).
+
+**Proof** (2026-10-28, `artifacts/PAD-791/emulator/RESULTS.txt`): stock Iron Maiden LE 1.18,
+music mode 2 files of pure tones on the 7 slots (30 s each), the user's longer intro 307
+(300 Hz, 19 s) and longer 150 (450 Hz, 70 s), image.bin capped a little past stock, an
+override set: 4 banks verified, every sound id resolving. Rigs 1 and 2, hidden and muted, the
+sound_fire instrument, `force 2` then `force 1` in sounds.cfg. Mode 2: request 554 (960)
+played the 500 Hz file then the 700 Hz one; 555 (974) the game's intro 222, both files, the
+outro 919; 571 (945) 900 Hz then 94; 568 (975) 900 Hz; 535 (935) the longer 307 then 1100 Hz
+then 212; 543 (940) 1300 then 1500 Hz then 935; 539 (958) 818, 1700 Hz, 758. Every copied part
+matched its stock decode (NCC 0.89-0.96; noise 0.02, the wrong part at most 0.44). Mode 1:
+554 played the longer 150 whole (70 s) from the game's bank, then 618 (NCC 0.95); 555 222,
+the longer 150, 618; 535 the longer 307, then 492 (NCC 0.95). 0 segv, 0 fatal.

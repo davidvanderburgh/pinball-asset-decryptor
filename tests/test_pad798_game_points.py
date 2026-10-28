@@ -132,6 +132,18 @@ def test_the_runtime_reads_the_file_and_takes_the_whole_gate():
     assert "!attract_wanted() && !points_wanted()" in body
 
 
+def test_the_wrap_takes_every_score_function_s_opening():
+    """The 69 builds' score functions open with `push`, `movw ; movt` (Godzilla 1.16, TMNT 1.59, one with a
+    movw value of 0xF... : Guardians 1.15, Star Wars LE 1.30) or `movw ; mov #0` (The Beatles 1.29): the wrap
+    is hook_wrap_at's form that takes those, and its pc check does not read a movw value's top bits as pc."""
+    src = _read(RUNTIME)
+    arm = _c_function(src, r"static void points_arm\(")
+    assert arm.count("hook_wrap_at(") == 2 and ", 0);" in arm and "hook_wrap(" not in arm
+    wrap = _c_function(src, r"static void \*hook_wrap_at\(unsigned addr, void \*wrapper, int opens_with_push\)\n\{")
+    assert "(p[i] & 0xFFFF0000u) != 0xE3A00000u" in wrap               # mov rd, #imm
+    assert "int mov16 = (w & 0xFFB00000u) == 0xE3000000u;" in wrap and "&& !mov16" in wrap
+
+
 # ---- the Write tab ------------------------------------------------------------------------------
 def test_the_write_tab_choice_saves_the_factor_and_says_what_it_does(tmp_path, monkeypatch):
     from pinball_decryptor.webui.tabs import write as W

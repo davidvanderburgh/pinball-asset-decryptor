@@ -742,80 +742,116 @@ def test_shadow_maps_are_consistent(title):
     assert "None" not in out and "Sub Table1_Init\n" in out
 
 
-# ------------------------------------------------------------- wizard -----
+# ------------------------------------------------- the app's setup -----
 
-def test_wizard_reads_the_card_folder_and_names_tables(tmp_path):
-    wz = pytest.importorskip("padwizard")
+def test_setup_reads_the_card_folder(tmp_path):
+    vs = pytest.importorskip("vpxsetup")
     lib = tmp_path / "lib"
     lib.mkdir()
     for n in ("rush_le-1_19_0.Release.16G.sdcard.raw", "rush_le-1_18_0.Release.16G.sdcard.raw",
               "foo_fighters_le-1_04_0.Release.16G.sdcard.raw", "notes.txt", "godzilla_le.raw"):
         (lib / n).write_bytes(b"x")
-    cards = wz.cards_in(str(lib))
+    cards = vs.cards_in(str(lib))
     assert sorted(cards) == ["foo_fighters_le", "rush_le"] and len(cards["rush_le"]) == 2
-    assert wz.cards_in(str(tmp_path / "missing")) == {}
-    assert wz.table_title("Rush LE 2.0.2 (PAD).vpx") == "rush_le"
-    assert wz.table_title("JP's Foo Fighters (PAD).vpx") == "foo_fighters_le"
-    assert wz.table_title("Godzilla (PAD).vpx") == "godzilla_le" and wz.table_title("x.vpx") == ""
+    assert vs.cards_in(str(tmp_path / "missing")) == {}
 
 
-def test_wizard_lists_each_shipped_table_once(tmp_path, monkeypatch):
-    wz = pytest.importorskip("padwizard")
-    d = tmp_path / "tables"
-    d.mkdir()
-    (d / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"x")
-    (d / "readme.txt").write_bytes(b"x")
-    # the same folder reached two ways (the env and a build's own) is one list
-    monkeypatch.setattr(wz, "TABLES_DIRS", [str(d), str(d).replace("\\", "/"), str(tmp_path / "none")])
-    assert [os.path.basename(p) for p in wz.shipped_tables()] == ["Rush LE 2.0.2 (PAD).vpx"]
+def test_setup_names_each_known_table_and_what_is_patched(tmp_path, monkeypatch):
+    """PAD-802: the app ships no table, so every map says which download it
+    fits (the tab lists them), and a table counts as patched once its (PAD)
+    copy is in Visual Pinball's tables folder."""
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    tables = tmp_path / "tables"
+    tables.mkdir()
+    (tables / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"x")
+    (tables / "Rush LE 2.0.2.vpx").write_bytes(b"x")
+    got = {t["title"]: t for t in vs.known_tables(str(tables))}
+    assert set(got) >= {"rush_le", "foo_fighters_le", "godzilla_le"}
+    for t in got.values():
+        assert t["name"] and t["by"] and t["where"] and t["output"].endswith("(PAD).vpx"), t
+        assert t["card"] == ""
+    assert got["rush_le"]["patched"] and not got["foo_fighters_le"]["patched"]
+    assert vs.patched_in(str(tables)) == ["Rush LE 2.0.2 (PAD).vpx"]
+    assert vs.patched_in(str(tmp_path / "none")) == []
 
 
-def test_wizard_layouts_fit_the_screens_found():
-    wz = pytest.importorskip("padwizard")
-    one = wz.layout_presets([(0, 0, 3840, 2160)])
+def test_setup_layouts_fit_the_screens_found():
+    vs = pytest.importorskip("vpxsetup")
+    one = vs.layout_presets([(0, 0, 3840, 2160)])
     keys = [k for k, _, _, _ in one]
     assert keys == ["side", "centre"]
     _, _, player, lcd = one[0]
     assert player == (0, 0, 1440, 2160)              # a 2:3 playfield, full height
     assert lcd[0] == 1440 and lcd[2] == 2400 and lcd[3] == 1350    # the rest, 16:9
-    two = wz.layout_presets([(0, 0, 1920, 1080), (1920, 0, 3840, 1080)])
+    two = vs.layout_presets([(0, 0, 1920, 1080), (1920, 0, 3840, 1080)])
     assert [k for k, _, _, _ in two] == ["side", "two", "centre"]
     assert two[1][3] == (1920, 0, 1920, 1080)        # the LCD fills the second screen
-    assert wz.layout_presets([])[0][2][3] == 1080    # no screens known: a 1080p guess
+    assert vs.layout_presets([])[0][2][3] == 1080    # no screens known: a 1080p guess
 
 
-def test_wizard_layout_writes_the_kit_and_the_ini(tmp_path, monkeypatch):
-    wz = pytest.importorskip("padwizard")
+def test_setup_layout_writes_the_kit_and_the_ini_and_reads_back(tmp_path, monkeypatch):
+    vs = pytest.importorskip("vpxsetup")
     pl = pytest.importorskip("padlaunch")
     pv = pytest.importorskip("padvpx")
     monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
     ini = tmp_path / "VPinballX.ini"
     ini.write_text("[Player]\nFullScreen = 1\nWidth = 1920\n[Editor]\nX = 1\n", encoding="utf-8")
     monkeypatch.setattr(pv, "vpx_ini_path", lambda: str(ini))
-    api = wz.Api()
-    assert api.apply_layout("side", [0, 0, 1440, 2160], [1440, 0, 2400, 1350]).startswith("layout side")
+    presets = vs.layout_presets([(0, 0, 3840, 2160)])
+    assert vs.layout_key(pl.kit_load(), presets) == ""
+    assert vs.apply_layout("side", [0, 0, 1440, 2160], [1440, 0, 2400, 1350]).startswith("layout side")
     kit = pl.kit_load()
     assert kit["player"] == {"x": 0, "y": 0, "w": 1440, "h": 2160}
     assert kit["lcd"] == {"x": 1440, "y": 0, "w": 2400, "h": 1350, "topmost": True}
+    assert vs.layout_key(kit, presets) == "side"      # the tab ticks the layout in use
     text = ini.read_text(encoding="utf-8")
     assert "FullScreen = 0" in text and "Width = 1440" in text and "Height = 2160" in text and "X = 1" in text
-    api.apply_layout("centre", None, None)                 # Visual Pinball's own place, the LCD's default
+    vs.apply_layout("centre", None, None)                 # Visual Pinball's own place, the LCD's default
     kit = pl.kit_load()
     assert "player" not in kit and kit["lcd"] == {"topmost": True}
+    assert vs.layout_key(kit, presets) == "centre"
     assert "FullScreen = 0" in ini.read_text(encoding="utf-8")
 
 
-def test_wizard_finds_visual_pinball_from_the_kit_first(tmp_path, monkeypatch):
-    wz = pytest.importorskip("padwizard")
+def test_setup_finds_visual_pinball_from_the_kit_first(tmp_path, monkeypatch):
+    vs = pytest.importorskip("vpxsetup")
     pl = pytest.importorskip("padlaunch")
     monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
-    monkeypatch.setattr(wz, "VPX_DEFAULT_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setattr(vs, "VPX_DEFAULT_DIR", str(tmp_path / "nowhere"))
     monkeypatch.setenv("ProgramFiles", str(tmp_path / "pf"))
     monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path / "home"))
-    assert wz.find_vpx() == ""
+    assert vs.find_vpx() == "" and vs.vpx_tables_dir() == ""
     mine = tmp_path / "vp"
     mine.mkdir()
-    api = wz.Api()
-    assert api.set_vpx(str(mine)).startswith("no VPinballX64.exe")
+    assert vs.set_vpx(str(mine)).startswith("There is no VPinballX64.exe")
     (mine / "VPinballX64.exe").write_bytes(b"x")
-    assert api.set_vpx(str(mine)) == "ok" and wz.find_vpx() == str(mine)
+    assert vs.set_vpx(str(mine)) == "ok" and vs.find_vpx() == str(mine)
+    assert vs.vpx_tables_dir() == os.path.join(str(mine), "tables")
+
+
+def test_setup_answers_the_app_in_one_json_line(tmp_path, monkeypatch, capsys):
+    """The app's tab reads the LAST line of the kit's output as JSON."""
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "rush_le-1_19_0.Release.16G.sdcard.raw").write_bytes(b"x")
+    assert vs.main(["library", str(lib)]) == 0
+    got = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert got == {"result": "ok", "cards": {"rush_le": ["rush_le-1_19_0.Release.16G.sdcard.raw"]}}
+    assert vs.main(["nonsense"]) == 2
+
+
+def test_no_table_ships_with_the_app():
+    """PAD-802: the tables are their authors' to hand out. The installer
+    carries none and offers no separate setup window."""
+    iss = open(os.path.join(ROOT, "installer", "pinball_decryptor.iss"), encoding="utf-8").read()
+    lines = [ln for ln in iss.splitlines() if not ln.lstrip().startswith(";")]
+    assert not [ln for ln in lines if "vpx_tables" in ln or "*.vpx" in ln]
+    assert not [ln for ln in lines if "wizard" in ln]
+    assert not os.path.exists(os.path.join(VPX, "padwizard.py"))

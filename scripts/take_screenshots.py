@@ -39,7 +39,7 @@ SHOTS = {
     "partition-explorer.png": "stern-spike2-partitions.png",
     "multi-boot.png": "stern-spike2-multiboot.png",
 }
-GATED_TABS = ("Modes",)
+GATED_TABS = ("Modes", "Visual Pinball")
 
 
 def settings_path():

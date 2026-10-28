@@ -1,0 +1,10 @@
+/* Visual Pinball (PAD-802): the kit's setup, the tables it patches, Play. */
+.vpx-status { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; min-height: 24px; }
+.vpx-prog { flex: 1; max-width: 320px; }
+.vpx-row, .vpx-table { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+.vpx-row + .vpx-row, .vpx-table + .vpx-table { border-top: 1px solid var(--line); }
+.vpx-row > .chip { flex: none; width: 74px; justify-content: center; }
+.vpx-what { flex: 1; min-width: 0; }
+.vpx-val { overflow-wrap: anywhere; }
+.vpx-acts { display: flex; gap: 6px; flex: none; }
+.vpx-pre { padding: 3px 0; }

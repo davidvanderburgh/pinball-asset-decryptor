@@ -58,8 +58,10 @@ PUBLIC_KEYS = (
 )
 
 #: The preview features this version of the app has, by id, with the name people see.
-#: None at the moment: the mode maker graduated (:data:`RELEASED`).
-FEATURES = {}
+#: The Visual Pinball tab (PAD-802): the Spike 2 emulator plays a Visual Pinball table.
+FEATURES = {
+    "vpx": "Visual Pinball",
+}
 #: Features that WERE previews and are now in every copy, switched on with no code
 #: (the mode maker, PAD-763). :func:`enabled` answers yes for them; a code that names
 #: one says it is no longer needed.

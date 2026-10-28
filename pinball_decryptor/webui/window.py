@@ -23,6 +23,7 @@ import collections
 import itertools
 import logging
 import os
+import sys
 import time
 
 from .. import __version__
@@ -428,8 +429,19 @@ class WebWindow:
             "Modes": self.modes_preview_on(mfr),
             # PAD-782: the attract mode editor rides the mode runtime (Stern Spike 2)
             "Attract": g("modes"),
+            # PAD-802: Visual Pinball on the Spike 2 emulator, a preview
+            "Visual Pinball": g("emulate") and self.vpx_preview_on(),
         }
         return gates
+
+    @staticmethod
+    def vpx_preview_on():
+        """The Visual Pinball tab's preview switch (core/preview.py "vpx");
+        Visual Pinball and the kit's controller are Windows only."""
+        if sys.platform != "win32":
+            return False
+        from ..core import preview
+        return preview.enabled("vpx")
 
     def modes_preview_on(self, mfr=None):
         mfr = mfr if mfr is not None else self.current_mfr

@@ -8,11 +8,8 @@ name the card a title boots, start or stop a run by hand.
         "<name> (PAD).vpx" beside it (or into DIR), re-signed, with the
         Spike 2 emulator behind it. --card records which card image the
         title boots when Visual Pinball opens the table and no run is up.
-    padvpx wizard
-        The setup window: WSL and the runtime, Visual Pinball found or
-        downloaded, the card folder, the shipped tables into Visual
-        Pinball's folder, where the windows go, open a table. The installer
-        offers it at its end.
+    The app's Visual Pinball tab (a preview feature) is the same kit with
+    buttons: vpxsetup.py is its half here.
     padvpx setup "<table.vpx>" <image.raw>
         The one step for a shared table: registers the controller if it is
         not, patches the table beside itself, records the card.
@@ -329,9 +326,6 @@ def main(argv):
         padlaunch.kit_save(d)
         print("library: %s" % d["library"])
         return 0
-    if cmd == "wizard":
-        import padwizard
-        return padwizard.main()
     if cmd in ("register", "unregister"):
         import padcontroller
         d = padlaunch.kit_load()

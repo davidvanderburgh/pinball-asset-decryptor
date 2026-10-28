@@ -13,6 +13,7 @@
     "jpsalas"
   ],
   "output": "JP's Foo Fighters (PAD).vpx",
+  "table": {"name": "JP's Foo Fighters 0.5.0", "by": "jpsalas", "where": "VPForums"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
   "cabinet": {"start": 1036, "launch": 1034, "launch_key": "LockBarKey", "tilt": 1038, "slam": 1045, "left_flipper": 1062, "right_flipper": 1061, "up_right_flipper": 1063, "coin": 1039, "coin_door_interlock": 1033},

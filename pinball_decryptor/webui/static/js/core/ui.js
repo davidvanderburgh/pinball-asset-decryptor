@@ -28,6 +28,8 @@ const P = {
   compare: "M4.5 4h4A1.5 1.5 0 0 1 10 5.5v13A1.5 1.5 0 0 1 8.5 20h-4A1.5 1.5 0 0 1 3 18.5v-13A1.5 1.5 0 0 1 4.5 4zM15.5 4h4A1.5 1.5 0 0 1 21 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-4a1.5 1.5 0 0 1-1.5-1.5v-13A1.5 1.5 0 0 1 15.5 4zM10 12h4",
   emulate: "M6 4l14 8-14 8z",
   play: "M6 4l14 8-14 8z",
+  // PAD-802: the Visual Pinball tab, a playfield with its flippers and a ball
+  playfield: "M7 2h10l2 20H5zM8.5 17.5l2.5 1.5M15.5 17.5l-2.5 1.5M12 8a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z",
   pause: "M7 5h3v14H7zM14 5h3v14h-3z",
   // PAD-701: the Audio players' previous / next row
   prev: "M18 5L9 12l9 7zM6 5v14",

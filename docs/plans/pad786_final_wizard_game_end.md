@@ -97,3 +97,22 @@ settings QUALIFY/LIGHT/START <wizard>).
    build's guard is a proven final wizard; mod packs / transfers carry it; help + de/es/fr.
 3. Emulator proof per title family (the wizard START called by calltest, played out, balls after it play), stock
    control still ends the game; unit tests on the finder against the real ELFs where present.
+
+## Run 4 (2026-10-28): shipped on the branch
+
+- The refusal (bus 0x25) matters: with only the ender patched, Godzilla LE's balls after King of the Monsters
+  started without their ball start (ball 3 drained at its first drain, no save). Both are patched.
+- The same ender also ends CHALLENGE games: Godzilla's King of the Monsters challenge game (game-play mode 4, set
+  in attract) ended through it as shipped and played on to 3 balls with the word patch. Avengers' ender is
+  challenge-only (game flag 0x12), Jaws switches on the game-play mode (Standard = case 1 reads the wizard's
+  state; the challenges 8-12 have their own cases), John Wick's tests its challenge-mode states before the
+  Special Assignment flag. The patch keeps every challenge ending but the WORD titles' own wizard challenge (no room
+  for a test without a code cave; the box's note says so).
+- `plugins/stern/final_wizard.py` (shapes WORD / FLAG / STATE, found generically) offers the patch on exactly the
+  11 newest builds of Godzilla, Jurassic Park, James Bond 007, Elvira, John Wick and Jaws; nothing elsewhere.
+- Emulator, stock vs patched, the wizard's mark set in ball 1 (rig: C:\tmp\PAD-786 call_job.sh + calltest_mode.c,
+  batch14): Bond LE 1.06, Elvira 1.13, John Wick LE 1.02, Jaws LE 1.02, Jurassic Park LE 1.16 - stock: balls 2 and 3
+  started and ended within milliseconds, GAME OVER; patched: each played ~40 s, then the ordinary GAME OVER.
+- Defaults tab "Final wizard" box (staged `final_wizard: plays_on`), Build step beside the coin door, mod packs and
+  transfers, help + de/es/fr. Tests: tests/test_pad786_final_wizard.py (synthetic shapes, the tab, every newest
+  build where the library is).

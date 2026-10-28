@@ -30,11 +30,29 @@ WATCH_TICK_MS = 3600 * 1000
 #: The first look, after the app has settled (ms).
 WATCH_FIRST_MS = 20 * 1000
 
-ADD_TITLE = "Pick the card image your machine runs"
-CARD_TYPES = [("Card images", "*.raw *.img *.bin"), ("All files", "*.*")]
-NOT_A_CARD = ("This file isn't a Stern Spike 2 card image PAD can read: it "
-              "has no Stern update index.\n\nPick the .raw or .img of the SD "
-              "card the machine boots from.")
+ADD_TITLE = "Pick the card image or update file your machine runs"
+
+
+def card_types():
+    """The picker's file types: every manufacturer's that lists machines
+    (PAD-787), then all of them, then any file."""
+    from ..core import machines
+    types = [t for k in machines.kinds().values() for t in k["types"]]
+    every = " ".join(sorted({p for _l, pats in types for p in pats.split()}))
+    return ([("Machine files", every)] if every else []) + types + \
+        [("All files", "*.*")]
+
+
+def not_a_card():
+    """The message for a file no manufacturer's printer can read."""
+    from ..core import machines
+    whats = [k["what"] for k in machines.kinds().values()]
+    if len(whats) > 1:
+        whats = ", ".join(whats[:-1]) + " or " + whats[-1]
+    else:
+        whats = "".join(whats) or "a card image"
+    return ("This file isn't one PAD can read the game and build of.\n\n"
+            "Pick the file your machine runs: %s." % whats)
 
 
 class MachinesMixin:
@@ -44,7 +62,7 @@ class MachinesMixin:
     def _machines_init(self):
         self._mach_token = 0
         self._mach_checking = False
-        self.set(machines={"rows": [], "watch": True, "watch_text": "",
+        self.set(machines={"rows": [], "watch": False, "watch_text": "",
                            "checking": False})
         self.ctx.loop.after(0, self._machines_refresh)
         self.ctx.loop.after(WATCH_FIRST_MS, self._machines_tick)
@@ -105,9 +123,10 @@ class MachinesMixin:
         if not fresh:
             return
         for r in fresh:
-            text = ("Stern has %s %s out; %s runs %s. My machines (manufacturer "
-                    "menu) links to Stern's game-code page."
-                    % (r["title"], r["newer"], r["name"], r["build"]))
+            text = ("%s has %s %s out; %s runs %s. My machines (manufacturer "
+                    "menu) links to %s."
+                    % (r["maker"], r["title"], r["newer"], r["name"],
+                       r["build"], r["page_words"]))
             self.window.append_log(text, "info")
             self.window.toast(text, "info", ms=12000)
             told.append("%s:%s" % (r["id"], r["newer"]))
@@ -117,11 +136,15 @@ class MachinesMixin:
     def _machine_row(self, m, folders):
         from ..core import code_watch, machines
         info = self._release_info(m)
+        mfr = m.get("manufacturer") or ""
         found = machines.projects_for(m, folders)
         place = found[0][1] if found else None
         card = m.get("card") or ""
         row = {"id": m["id"], "name": m.get("name") or "",
-               "mfr": m.get("manufacturer") or "",
+               "mfr": mfr, "maker": machines.maker(mfr),
+               "noun": machines.noun(mfr),
+               "page_words": code_watch.page_words(mfr),
+               "transfer": self._can_transfer(mfr),
                "title": (info or {}).get("title") or m.get("label") or "",
                "edition": (info or {}).get("edition") or "",
                "build": (info or {}).get("build") or "",
@@ -134,45 +157,65 @@ class MachinesMixin:
                "project_missing": bool(found) and not os.path.isdir(found[0][0]),
                "more_projects": [f for f, _w, _l in found[1:]],
                "newer": "", "newer_url": ""}
-        if info and code_watch.has_source(row["mfr"]):
-            newest = code_watch.newest(row["mfr"], info["key"])
+        if info and code_watch.has_source(mfr):
+            newest = code_watch.newest(mfr, info["key"])
             if newest and newest > tuple(info["version"]):
-                from ..plugins.stern.machine_info import short_version
-                row["newer"] = short_version(newest)
-                row["newer_url"] = code_watch.page_url(row["mfr"])
+                row["newer"] = machines.version_words(mfr, newest)
+                row["newer_url"] = code_watch.page_url(mfr, info["key"])
         return row
 
     @staticmethod
     def _release_info(m):
-        if m.get("manufacturer") != "stern":
-            return None
+        from ..core import machines
         try:
-            from ..plugins.stern import machine_info
-            return machine_info.release_info(
-                m.get("sidx"), machine_info.known_release_keys())
+            return machines.release_info(m)
         except Exception:                               # noqa: BLE001
             log.exception("release info")
             return None
 
+    def _can_transfer(self, mfr_key):
+        """Whether the maker's Mod Pack tab carries mods onto new code
+        (Stern's); the others' Mod Pack only exports and imports."""
+        mfr = next((x for x in getattr(self.window, "manufacturers", ())
+                    if x.key == mfr_key), None)
+        caps = getattr(mfr, "capabilities", None)
+        return bool(getattr(caps, "mod_transfer", False))
+
     def _watch_text(self, rows, on):
+        """One line under the list: when each maker's page was read, and
+        any that couldn't be."""
         from ..core import code_watch
-        if not on:
-            return "The daily check for new game code is off."
         mfrs = sorted({r["mfr"] for r in rows if code_watch.has_source(r["mfr"])})
         if not mfrs:
             return ""
-        st = code_watch.state(mfrs[0])
+        pages = _and([code_watch.page_words(k) for k in mfrs])
+        if not on:
+            return ("The check for new game code is off: PAD reads no "
+                    "maker's site. Tick it to have %s read once a day."
+                    % pages)
         if self._mach_checking:
-            return "Checking Stern's game-code page…"
-        if not st.get("checked"):
-            return "Stern's game-code page is checked once a day."
-        when = datetime.datetime.fromtimestamp(float(st["checked"]))
-        stamp = when.strftime("%H:%M") if when.date() == datetime.date.today() \
-            else when.strftime("%b %d")
-        if not st.get("ok"):
-            return ("Couldn't read Stern's game-code page at %s (%s); it is "
-                    "tried again later." % (stamp, st.get("error") or "no answer"))
-        return "Stern's game-code page checked at %s; once a day." % stamp
+            return "Checking %s…" % pages
+        states = {k: code_watch.state(k) for k in mfrs}
+        if not any(st.get("checked") for st in states.values()):
+            return "%s: checked once a day." % _cap(pages)
+        good, bad = [], []
+        for k in mfrs:
+            st = states[k]
+            if not st.get("checked"):
+                continue
+            if st.get("ok"):
+                good.append((k, float(st["checked"])))
+            else:
+                bad.append("Couldn't read %s at %s (%s); it is tried again "
+                           "later." % (code_watch.page_words(k),
+                                       _stamp(st["checked"]),
+                                       st.get("error") or "no answer"))
+        out = []
+        if good:
+            out.append("%s checked at %s; once a day." % (
+                _cap(_and([code_watch.page_words(k) for k, _t in good])),
+                _stamp(max(t for _k, t in good))))
+        return " ".join(out + bad)
 
     # -- the daily check -------------------------------------------------------
     def _machines_tick(self):
@@ -190,27 +233,42 @@ class MachinesMixin:
             return False
         if not machines.watch_on(settings) or not code_watch.allowed():
             return False
-        mfrs = sorted({m.get("manufacturer") for m in machines.entries(settings)
-                       if code_watch.has_source(m.get("manufacturer"))})
-        mfrs = [k for k in mfrs if force or code_watch.due(k)]
+        owned = {}
+        for m in machines.entries(settings):
+            k = m.get("manufacturer")
+            if not code_watch.has_source(k):
+                continue
+            rel = self._release_info(m)
+            owned.setdefault(k, set())
+            if rel:
+                owned[k].add(rel["key"])
+        mfrs = [k for k in sorted(owned)
+                if force or code_watch.due(k, keys=owned[k])]
         if not mfrs:
             return False
         self._mach_checking = True
         self._machines_refresh()
 
         def work():
-            for k in mfrs:
-                st = code_watch.check(k)
-                log.info("game-code check %s: %s", k,
-                         "ok" if st.get("ok") else st.get("error"))
-            self.ctx.loop.post(self._machines_checked)
+            try:
+                for k in mfrs:
+                    st = code_watch.check(k, keys=owned[k])
+                    log.info("game-code check %s: %s", k,
+                             "ok" if st.get("ok") else st.get("error"))
+            except Exception:                           # noqa: BLE001
+                log.exception("game-code check")
+            finally:
+                self.ctx.loop.post(self._machines_checked)
 
         threading.Thread(target=work, name="pad-codewatch", daemon=True).start()
         return True
 
     def _machines_checked(self):
         self._mach_checking = False
-        self._machines_refresh()
+        # a machine added while this check ran (another maker, another
+        # title) was turned away as busy: its page is read now
+        if not self._machines_check(force=False):
+            self._machines_refresh()
 
     # -- page calls ---------------------------------------------------------------
     def _mach(self, mid):
@@ -228,7 +286,7 @@ class MachinesMixin:
 
     def _pick_card(self, title=ADD_TITLE):
         return compat.filedialog.askopenfilename(title=title,
-                                                 filetypes=CARD_TYPES)
+                                                 filetypes=card_types())
 
     @rpc
     def machines_add(self, path=None, name=None):
@@ -240,10 +298,11 @@ class MachinesMixin:
             return None
         info = self._measure_card(path)
         if not info or not info.get("sidx"):
-            compat.messagebox.showerror("Add machine", NOT_A_CARD)
+            compat.messagebox.showerror("Add machine", not_a_card())
             return None
+        mfr = info.get("manufacturer") or "stern"
         if name is None:
-            rel = self._release_info({"manufacturer": "stern",
+            rel = self._release_info({"manufacturer": mfr,
                                       "sidx": info["sidx"]}) or {}
             guess = " ".join(x for x in (rel.get("title"),
                                          (rel.get("edition") or "").split(" /")[0])
@@ -254,7 +313,7 @@ class MachinesMixin:
             if name is None:
                 return None
         entry = machines.add(self.app._settings, os.path.abspath(path), info,
-                             name.strip(), "stern",
+                             name.strip(), mfr,
                              stamp=datetime.datetime.now().isoformat(
                                  timespec="seconds"))
         self._mach_save()
@@ -269,13 +328,20 @@ class MachinesMixin:
         m = self._mach(mid)
         if m is None:
             return False
-        path = path or self._pick_card("Pick the card image %s runs now"
-                                       % m.get("name"))
+        path = path or self._pick_card("Pick the %s %s runs now" % (
+            machines.noun(m.get("manufacturer")), m.get("name")))
         if not path:
             return False
         info = self._measure_card(path)
         if not info or not info.get("sidx"):
-            compat.messagebox.showerror("Change card", NOT_A_CARD)
+            compat.messagebox.showerror("Change card", not_a_card())
+            return False
+        if (info.get("manufacturer") or "stern") != m.get("manufacturer"):
+            compat.messagebox.showerror(
+                "Change card", "%s is a %s machine: pick the %s it runs now."
+                % (m.get("name") or "This machine",
+                   machines.maker(m.get("manufacturer")),
+                   machines.noun(m.get("manufacturer"))))
             return False
         machines.rebind(self.app._settings, mid, os.path.abspath(path), info)
         self._mach_save()
@@ -306,8 +372,9 @@ class MachinesMixin:
             return False
         if not compat.messagebox.askyesno(
                 "Remove machine",
-                "Take %s off My machines?\n\nThe card image and any project "
-                "stay where they are." % (m.get("name") or "this machine")):
+                "Take %s off My machines?\n\nThe %s and any project stay "
+                "where they are." % (m.get("name") or "this machine",
+                                     machines.noun(m.get("manufacturer")))):
             return False
         machines.remove(self.app._settings, mid)
         self._mach_save()
@@ -343,7 +410,8 @@ class MachinesMixin:
         """The manufacturer's game-code page, in the browser."""
         from ..core import code_watch
         m = self._mach(mid)
-        url = code_watch.page_url((m or {}).get("manufacturer"))
+        rel = self._release_info(m or {}) or {}
+        url = code_watch.page_url((m or {}).get("manufacturer"), rel.get("key"))
         if url:
             self.open_link(url)
         return bool(url)
@@ -416,6 +484,10 @@ class MachinesMixin:
         if r is None:
             return False
         self.window.select_tab("modpack")
+        if not r.get("transfer"):
+            # JJP, BoF: their Mod Pack exports and imports a pack; there is
+            # no transfer whose field 1 to fill
+            return True
         src = getattr(self.window, "transfer_src_var", None)
         dst = getattr(self.window, "transfer_dst_var", None)
         if src is not None:
@@ -433,6 +505,22 @@ class MachinesMixin:
             return False
         self.window.select_tab("write")
         return True
+
+
+def _and(words):
+    words = list(words)
+    return words[0] if len(words) == 1 else \
+        ", ".join(words[:-1]) + " and " + words[-1]
+
+
+def _cap(text):
+    return text[:1].upper() + text[1:]
+
+
+def _stamp(ts):
+    when = datetime.datetime.fromtimestamp(float(ts))
+    return when.strftime("%H:%M") if when.date() == datetime.date.today() \
+        else when.strftime("%b %d")
 
 
 def _same(a, b):

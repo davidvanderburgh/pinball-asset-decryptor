@@ -95,6 +95,8 @@ class _WriteWrapper(ModifyPipeline):
             game_key = next(iter(GAME_DB))
         else:
             self._init_failed = None
+        self._user_done_cb = done_cb
+        self._user_log_cb = log_cb
         super().__init__(
             original_fun=original_path,
             assets_dir=assets_dir,
@@ -104,10 +106,18 @@ class _WriteWrapper(ModifyPipeline):
             log_cb=log_cb,
             phase_cb=phase_cb,
             progress_cb=progress_cb,
-            done_cb=done_cb,
+            done_cb=self._intercept_done,
             version_date_override=version_date_override,
             loop_names=loop_names,
         )
+
+    def _intercept_done(self, success, summary):
+        # the .fun built is a revision of the project (PAD-787, My machines)
+        if success and os.path.isfile(self.output_fun_path):
+            from ...core import lineage
+            lineage.note_built(self.original_fun, self.assets_dir,
+                               self.output_fun_path, self._user_log_cb)
+        self._user_done_cb(success, summary)
 
     def run(self):
         if self._init_failed:
@@ -349,3 +359,20 @@ class BOFManufacturer(Manufacturer):
                 "Bon Jovi note: " + BONJOVI_WHY + " You can still extract its "
                 "assets to view or reuse, but changes can't be built in yet. "
                 + BONJOVI_HELP)
+
+
+# My machines (PAD-787): a BoF machine is the .fun update it last ran,
+# fingerprinted for project lineage, and BoF's per-title code-update pages
+# say when a newer build is out.
+from ...core import code_watch as _code_watch  # noqa: E402
+from ...core import lineage as _lineage  # noqa: E402
+from ...core import machines as _machines  # noqa: E402
+from . import machine_info as _machine_info  # noqa: E402
+_lineage.register_printer(_machine_info.fun_print)
+_machines.register_kind(
+    "bof", "Barrels of Fun", _machine_info.release_info,
+    _machine_info.version_words, "update file",
+    [("Barrels of Fun updates", "*.fun")], "a Barrels of Fun .fun update")
+_code_watch.register_source(
+    "bof", _machine_info.SUPPORT_PAGE, _machine_info.parse_code_page,
+    pages=_machine_info.PAGES, page_words="Barrels of Fun's code-update pages")

@@ -31,6 +31,7 @@ manufacturer that can fingerprint its cards registers a printer
 (:func:`register_printer`); this module stays plugin-free.
 """
 
+import hashlib
 import json
 import os
 import socket
@@ -107,8 +108,36 @@ def remember_print(card_path, info):
     data = _load_cache()
     data[_key(card_path)] = {
         "size": stamp[0], "mtime_ns": stamp[1], "seen": time.time(),
-        **{k: info.get(k) for k in ("print", "sidx", "label", "official")}}
+        **{k: info.get(k) for k in ("print", "sidx", "label", "official",
+                                    "manufacturer")}}
     _save_cache(data)
+
+
+#: How many slices of a file :func:`file_print` hashes, and their size.
+_SAMPLES = 64
+_SAMPLE_BYTES = 64 * 1024
+
+
+def file_print(path, tag, extra=b""):
+    """A fingerprint for a manufacturer whose card is one big file it can't
+    walk cheaply (a JJP install ISO, a BoF ``.fun``): the file's size, its
+    first and last MiB and :data:`_SAMPLES` slices spread evenly between,
+    with *tag* (the format) and *extra* (what the printer read of its
+    header).  Every rebuild of such a file moves its layout and size, so a
+    PAD build never prints like the release it was built over.  A few MiB
+    read: well under a second, even on a spinning disk."""
+    h = hashlib.sha256()
+    h.update(tag.encode() + b"\0" + extra)
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        h.update(str(size).encode())
+        spots = [0, max(0, size - (1 << 20))]
+        spots += [size * i // (_SAMPLES + 1) for i in range(1, _SAMPLES + 1)]
+        for off in spots:
+            f.seek(off)
+            h.update(f.read((1 << 20) if off in spots[:2] else _SAMPLE_BYTES))
+    return h.hexdigest()[:32]
 
 
 def card_print(card_path, measure=False):
@@ -291,6 +320,25 @@ def note_build(folder, out_name, out_info, parent_info, app_version=""):
              "parent_rev": parent_rev, **stamp}
     lin["revs"].append(entry)
     write_lineage(folder, lin)
+    return entry
+
+
+def note_built(original_path, folder, output_path, log=None):
+    """A Write just built *output_path* from the project in *folder* over
+    the card *original_path*: print both and add the revision (PAD-787: the
+    JJP and BoF Writes; Stern's adds its build record on top).  Returns the
+    entry, or ``None`` when either card can't be printed.  Best-effort."""
+    from .. import __version__
+    try:
+        out = card_print(output_path, measure=True)
+        parent = card_print(original_path, measure=True)
+        entry = note_build(folder, os.path.basename(output_path), out,
+                           parent, __version__)
+    except Exception:                                     # noqa: BLE001
+        return None
+    if entry and log is not None:
+        log("This build is rev %d of %s." % (
+            entry["rev"], base_words(read_lineage(folder) or {})), "info")
     return entry
 
 

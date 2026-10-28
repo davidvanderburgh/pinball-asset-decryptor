@@ -121,7 +121,21 @@ _lineage.register_off_stock(_spike2_off_stock)
 from ...core import code_watch as _code_watch  # noqa: E402
 from .machine_info import GAME_CODE_PAGE as _GAME_CODE_PAGE  # noqa: E402
 from .machine_info import parse_game_code_page as _parse_game_code_page  # noqa: E402
-_code_watch.register_source("stern", _GAME_CODE_PAGE, _parse_game_code_page)
+_code_watch.register_source("stern", _GAME_CODE_PAGE, _parse_game_code_page,
+                            page_words="Stern's game-code page")
+
+
+def _spike2_release(sidx):
+    from .machine_info import known_release_keys, release_info
+    return release_info(sidx, known_release_keys())
+
+
+from ...core import machines as _machines  # noqa: E402
+from .machine_info import short_version as _short_version  # noqa: E402
+_machines.register_kind(
+    "stern", "Stern", _spike2_release, _short_version, "card image",
+    [("Stern card images", "*.raw *.img *.bin")],
+    "a Stern Spike 2 card image (.raw or .img of the SD card)")
 
 _SPIKE2_GAMES = tuple(
     Game(key=k, display=info["display"], manufacturer_key="stern",

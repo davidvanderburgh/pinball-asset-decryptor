@@ -1,6 +1,8 @@
 """My machines (PAD-783): the owner's pinball machines, each a record they
 name, bound to the card it runs by that card's FINGERPRINT (see
-:mod:`.lineage`), not its path.
+:mod:`.lineage`), not its path.  "Card" is whatever file the machine runs:
+a Stern SD card image, a JJP full-install ISO, a BoF ``.fun`` update
+(PAD-787); each manufacturer joins with :func:`register_kind`.
 
 Pure functions over the app's settings dict, like :mod:`.project_registry`
 (the App owns persistence; every mutator rides on the caller's
@@ -22,11 +24,55 @@ import uuid
 from . import lineage
 
 SECTION = "machines"
-#: settings key: the daily game-code check (on unless switched off)
+#: settings key: the daily game-code check.  OFF until the owner ticks it
+#: (David, PAD-787: a maker could take an unasked-for daily read of its site
+#: amiss), so nothing reaches a maker's site on PAD's own initiative.
 WATCH_KEY = "machine_code_watch"
 #: settings key: ``"<machine id>:<build>"`` of every newer build already told
 TOLD_KEY = "machine_code_told"
 MAX_ENTRIES = 100
+
+
+_kinds = {}
+
+
+def register_kind(mfr_key, maker, release, words, noun, file_types,
+                  what=""):
+    """A manufacturer whose machines can be listed (PAD-787: Stern, JJP,
+    BoF).  *release(sidx)* is ``{"key", "version", "build", "title",
+    "edition"}`` for a release key its printer answered (or ``None``);
+    *words(version)* spells a build as the maker does; *noun* names the
+    file a machine runs ("card image", "install ISO"); *file_types* the
+    picker's ``(label, patterns)``; *what* that file in a phrase for the
+    "isn't a file PAD can read" message."""
+    _kinds[mfr_key] = {"maker": maker, "release": release, "words": words,
+                       "noun": noun, "types": tuple(file_types),
+                       "what": what or noun}
+
+
+def kinds():
+    return dict(_kinds)
+
+
+def maker(mfr_key):
+    return (_kinds.get(mfr_key) or {}).get("maker") or mfr_key or ""
+
+
+def noun(mfr_key):
+    return (_kinds.get(mfr_key) or {}).get("noun") or "card image"
+
+
+def release_info(machine):
+    """The release words for *machine* from its maker's kind, or ``None``."""
+    kind = _kinds.get((machine or {}).get("manufacturer"))
+    if kind is None or not machine.get("sidx"):
+        return None
+    return kind["release"](machine["sidx"])
+
+
+def version_words(mfr_key, version):
+    kind = _kinds.get(mfr_key)
+    return kind["words"](version) if kind else ""
 
 
 def _norm(path):
@@ -108,7 +154,7 @@ def remove(settings, mid):
 
 
 def watch_on(settings):
-    return bool(settings.get(WATCH_KEY, True))
+    return bool(settings.get(WATCH_KEY, False))
 
 
 def set_watch(settings, on):

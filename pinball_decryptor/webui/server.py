@@ -15,7 +15,6 @@ Routes
 """
 
 import json
-import mimetypes
 import os
 import re
 import threading
@@ -27,15 +26,29 @@ from urllib.parse import parse_qs, unquote, urlparse
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "static")
 
-mimetypes.add_type("text/javascript", ".js")
-mimetypes.add_type("text/css", ".css")
-mimetypes.add_type("font/woff2", ".woff2")
-mimetypes.add_type("image/svg+xml", ".svg")
-mimetypes.add_type("audio/wav", ".wav")
-mimetypes.add_type("audio/ogg", ".ogg")
-mimetypes.add_type("audio/flac", ".flac")
-mimetypes.add_type("video/mp4", ".mp4")
-mimetypes.add_type("video/webm", ".webm")
+# What the page's files and the media it plays are served as.  A table of
+# our own, not the mimetypes module: its first guess_type (or add_type)
+# reads the whole Windows registry, 50 ms on the startup path (PAD-797).
+CONTENT_TYPES = {
+    ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
+    ".html": "text/html", ".htm": "text/html", ".json": "application/json",
+    ".map": "application/json", ".txt": "text/plain", ".md": "text/markdown",
+    ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf",
+    ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+    ".ico": "image/x-icon", ".bmp": "image/bmp",
+    ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+    ".mov": "video/quicktime", ".mkv": "video/x-matroska",
+}
+
+
+def content_type(path):
+    """The Content-Type *path* is served with (by extension, or
+    ``application/octet-stream``)."""
+    ext = os.path.splitext(path)[1].lower()
+    return CONTENT_TYPES.get(ext, "application/octet-stream")
 
 _RANGE = re.compile(r"bytes=(\d*)-(\d*)")
 
@@ -136,7 +149,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not full.startswith(STATIC_DIR) or not os.path.isfile(full):
             return self._send(HTTPStatus.NOT_FOUND, b"not found",
                               "text/plain")
-        ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        ctype = content_type(full)
         if ctype.startswith("text/") or ctype.endswith("javascript"):
             ctype += "; charset=utf-8"
         with open(full, "rb") as f:
@@ -203,7 +216,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(HTTPStatus.NOT_FOUND, b"not found",
                               "text/plain")
         size = os.path.getsize(path)
-        ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        ctype = content_type(path)
         start, end = 0, size - 1
         status = HTTPStatus.OK
         rng = self.headers.get("Range")

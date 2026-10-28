@@ -245,3 +245,44 @@ def test_the_tabs_load_without_numpy_or_pillow():
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-2000:]
     assert r.stdout.strip() == "[]", r.stdout
+
+
+# ---------------------------------------------------------- content types
+def test_the_server_names_its_content_types_without_the_registry():
+    """mimetypes.init() reads the Windows registry (50 ms) on the first
+    guess_type or add_type; the server's own table answers instead."""
+    import mimetypes
+    from pinball_decryptor.webui import server
+    for ext, want in (("js", "text/javascript"), ("css", "text/css"),
+                      ("html", "text/html"), ("woff2", "font/woff2"),
+                      ("svg", "image/svg+xml"), ("png", "image/png"),
+                      ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"),
+                      ("gif", "image/gif"), ("webp", "image/webp"),
+                      ("ico", "image/x-icon"), ("json", "application/json"),
+                      ("wav", "audio/wav"), ("ogg", "audio/ogg"),
+                      ("flac", "audio/flac"), ("mp3", "audio/mpeg"),
+                      ("mp4", "video/mp4"), ("webm", "video/webm"),
+                      ("mov", "video/quicktime"), ("txt", "text/plain"),
+                      ("md", "text/markdown"), ("map", "application/json")):
+        assert server.content_type("C:/x/some.file." + ext) == want, ext
+        assert server.content_type("some." + ext.upper()) == want, ext
+    assert server.content_type("x.bin") == "application/octet-stream"
+    assert server.content_type("noext") == "application/octet-stream"
+    assert not hasattr(server, "mimetypes")
+    import inspect
+    assert "mimetypes." not in inspect.getsource(server)
+
+
+def test_importing_the_host_leaves_mimetypes_uninitialised():
+    import os
+    import subprocess
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    code = ("import mimetypes\n"
+            "import pinball_decryptor.webui.host\n"
+            "import pinball_decryptor.app\n"
+            "print(mimetypes.inited)\n")
+    r = subprocess.run([sys.executable, "-c", code], cwd=root,
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert r.stdout.strip() == "False", r.stdout

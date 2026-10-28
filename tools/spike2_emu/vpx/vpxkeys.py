@@ -5,6 +5,7 @@
     python vpxkeys.py launch 300       # the launch button
     python vpxkeys.py lflip 400 rflip 400
     python vpxkeys.py 2 300            # any DirectInput code
+    python vpxkeys.py lamps out.txt    # a tribute writes every mapped light's state
 
 The table's PadTestTimer (patch_godzilla.py) reads %TEMP%\\padvpx_keys.txt
 every 100 ms and feeds the table's own key handlers, so a test run does not
@@ -43,6 +44,17 @@ def main(argv):
     i = 0
     while i < len(argv):
         key = argv[i]
+        if key.lower() == "lamps" and i + 1 < len(argv):
+            # the table's PadDumpLamps (vpxshadow.py) writes `<number> <light> <state>`
+            path = os.path.abspath(argv[i + 1])
+            send("lamps %s" % path)
+            for _ in range(60):
+                if os.path.exists(path):
+                    break
+                time.sleep(0.1)
+            print("lamps -> %s (%s)" % (path, "written" if os.path.exists(path) else "NOT written"))
+            i += 2
+            continue
         code = KEYS.get(key.lower(), None)
         if code is None:
             code = int(key)

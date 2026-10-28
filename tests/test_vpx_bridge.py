@@ -363,6 +363,37 @@ def test_shadow_flipper_subs_are_found_whole_word_only():
     assert vs.flipper_subs({"flippers": {"_": "x", "sLLFlipper": "MyFlipL"}}, had) == {"sLLFlipper": "MyFlipL"}
 
 
+def test_shadow_lamps_drive_the_tables_lights():
+    # with `lamps` the machine lights the table: a dictionary from the lamp
+    # number (1000 + node*100 + index, the FIRST LED of an RGB insert) to the
+    # table lights, filled from ChangedLamps every tick; the tribute's own
+    # light shows are quieted and its hit subs stay out of the way
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["lamps"] = {"_": "x",
+                  "L1": {"leds": [[9, 59]], "name": "(R)USH TARGET"},
+                  "L2": {"leds": [[8, 32], [8, 33], [8, 34]], "name": "SHOOT ME LEFT ORBIT"},
+                  "gi1": {"leds": [[8, 1]], "name": "BOTTOM GI"},
+                  "gi2": {"leds": [[8, 1]], "name": "BOTTOM GI"}}
+    m["quiet_subs"] = ["LightEffect", "NoSuchSub"]
+    m["orig_hits"] = False
+    m["orig_keep"] = ["LeftSlingShot"]
+    m["_lightseqs"] = ["LightSeqAttract"]
+    script = MINI_TRIBUTE + "Sub LightEffect(n)\n    LightSeqInserts.Play SeqRandom\nEnd Sub\n"
+    out, rep = vs.patch(script, m)
+    assert 'PadLamps.Add "1959", Array(L1)' in out
+    assert 'PadLamps.Add "1832", Array(L2)' in out                 # the first LED names the insert
+    assert 'PadLamps.Add "1801", Array(gi1, gi2)' in out           # several lights on one LED
+    assert "\tLightSeqAttract.StopPlay\n\tPadLampsInit\n\tSet LampCallback = GetRef(\"PadUpdateLamps\")" in out
+    assert "chg = Controller.ChangedLamps" in out and "o.State = chg(ii, 1)" in out
+    assert "Sub LightEffect_orig(n)" in out and "Sub LightEffect(n) : End Sub" in out
+    assert any("NoSuchSub" in r for r in rep)
+    assert "Sub sw001_Hit : vpmTimer.PulseSw 1053 : End Sub" in out               # no _orig: its rules are quiet
+    assert "Sub LeftSlingShot_Slingshot : vpmTimer.PulseSw 1069 : LeftSlingShot_Slingshot_orig : End Sub" in out
+    assert "Sub PadDumpLamps(path)" in out and 'If parts(0) = "lamps" Then PadDumpLamps parts(1)' in out
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+
+
 @pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le"])
 def test_shadow_maps_are_consistent(title):
     vs = pytest.importorskip("vpxshadow")
@@ -405,6 +436,13 @@ def test_shadow_maps_are_consistent(title):
             assert cb[2:-7] in saucers, cb
         else:
             assert re.search(r"(?i)\bSub\s+%s\b" % re.escape(cb), extra), "%s has no Sub" % cb
+    # every lamp names LEDs on a board, one table light per entry
+    lamps = m.get("lamps", {})
+    for name, v in lamps.items():
+        if name == "_":
+            continue
+        assert all(0 <= n <= 15 and 0 <= i < 200 for n, i in v["leds"]), name
+        assert len(v["leds"]) in (1, 3), "%s: one LED or an RGB triple" % name
     had = {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")}
     out = vs.gen(m, had)
     assert "None" not in out and "Sub Table1_Init\n" in out

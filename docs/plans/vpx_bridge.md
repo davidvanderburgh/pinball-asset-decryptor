@@ -141,8 +141,36 @@ lockbar key (Left Alt, VPX's default) fires the auto plunger, both flippers
 flip from their coils, the pops fire from the board, a drain feeds the next
 ball (Foo Fighters' ball save re-served it), and the LCD shows the game
 played: Rush at 430,160 on ball 1 charging the time machine, Foo Fighters at
-109,760 on ball 2 picking a song. Lamps on both stay the tables' own until
-the titles' LED identities are known (these builds carry no lamp positions).
+109,760 on ball 2 picking a song.
+
+## Lamps on the tributes
+
+The rig's `led_io.txt` names every LED of both titles (170 and 176 off the
+speakers and topper) even though these builds ship no positions, so the
+tables' lights were matched to inserts by what each script does with a
+light (JP's eight city lights follow his `ModeName` order; drhotwing's
+colour-changing "planet" and "album" lights are the SHOOT ME and RECORD
+arrows of whichever lane's hit sub checks them; pops, lanes, targets,
+rock-o-meter, foobot, mods by place) - 102 lights on Rush, 117 on Foo
+Fighters, the uncertain ones marked GUESS in the maps. The generated script
+keeps a dictionary from lamp number (1000 + node*100 + first LED) to the
+lights and fills it from `ChangedLamps` every tick through core.vbs's
+`LampCallback`, with `UseLamps = 0` so core's 260-entry `Lights()` stays
+out of it. The tribute's own light shows are quieted (`quiet_subs`, every
+`LightSeq` stopped at init) and its hit subs are no longer called
+(`orig_hits: false`, slingshots kept for their rubber animation): the real
+game's LCD and sound say what a hit was worth.
+
+Proof so far (Rush, 2026-10-27 evening): with a game on, a dump of every
+mapped light (`vpxkeys.py lamps`) against a `padled` snapshot taken the same
+moment agreed on 88 of 102 lights, the other 14 being inserts the machine
+was pulsing (table on, LED mid-fade); in attract all 102 agreed. A later
+sample found the table's lights all off while the machine had 22 inserts
+lit, which turned up Rush's `GIUpdateTimer_Timer` (it turns GI off by the
+number of balls on the table) - quieted since - and is otherwise not yet
+explained: the sampling needed Visual Pinball in the foreground (its timers
+pause unfocused) and David's game had it, so the check stops there. Foo
+Fighters' lamps are built the same way and not yet watched in play.
 
 Ryguy417's Foo Fighters v2.0 (VPU 14455) is a second Foo Fighters table and
 would take a map of its own.

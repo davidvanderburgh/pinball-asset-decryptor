@@ -81,6 +81,20 @@ def _statements(line):
     return spans
 
 
+def quiet_sub(lines, name, rep):
+    """Rename `Sub <name>` to `_orig` and return its argument list, so gen can
+    stand an empty Sub of the same shape in its place; None if absent."""
+    pat = re.compile(SUB_RE % re.escape(name), re.I)
+    for i, line in enumerate(lines):
+        m = pat.match(line.rstrip("\r"))
+        if m:
+            lines[i] = line.replace(m.group(3), name + "_orig", 1)
+            rep.append("quieted Sub %s (its lights are the machine's now)" % name)
+            return m.group(4) or "()"
+    rep.append("WARNING: quiet_subs names %s, which the script has no Sub for" % name)
+    return None
+
+
 def neuter(lines, patterns, rep):
     """Comment out every line that creates or launches a ball. A statement
     sharing its line with others (`Sub Drain_Hit : PlungerIM.AutoFire : End
@@ -178,9 +192,35 @@ def pup_stub(lines, rep):
     return "\n".join(out)
 
 
-def gen(m, had):
+def lamp_number(node, index):
+    return 1000 + node * 100 + index
+
+
+def lamp_groups(m):
+    """lamp number -> [table lights]: the controller reports a mapped insert
+    under the number of its FIRST LED (padcontroller.VpxMap), lit when any of
+    the insert's LEDs is; several table lights may share one."""
+    groups = {}
+    for name, v in m.get("lamps", {}).items():
+        if name == "_" or not isinstance(v, dict):
+            continue
+        node, idx = v["leds"][0]
+        groups.setdefault(lamp_number(node, idx), []).append(name)
+    return groups
+
+
+def gen(m, had, quiet=None):
     """The bridge's own script, appended after the original."""
     cab = m["cabinet"]
+    quiet = quiet or {}
+    lamps = lamp_groups(m)
+    orig_keep = {n.lower() for n in m.get("orig_keep", [])}
+
+    def calls_orig(name):
+        # with the machine's lamps on the table, a tribute's own hit subs
+        # (its rules: lights, sounds, scores) stay out of the way; the real
+        # game's LCD and sound say what a hit was worth
+        return m.get("orig_hits", True) or name.lower() in orig_keep
     out = ["", "", "'" + "=" * 70, "'==== PAD: the Spike 2 emulator drives this table (vpxshadow.py) ====",
            "'" + "=" * 70,
            "' what core.vbs's PinMAMETimer expects a VPM table to declare",
@@ -209,6 +249,12 @@ def gen(m, had):
         out += ["\tSet bs%s = New cvpmBallStack" % k,
                 "\t\tbs%s.InitSaucer %s, 1%03d, %d, %d" % (k, k, s["switch"], s["dir"], s["power"]),
                 "\t\tbs%s.KickZ = %s" % (k, s.get("kickz", 0))]
+    if lamps:
+        out.append("\t' the machine's lamps: the shadow game's light shows stop, ours start")
+        for seq in m.get("_lightseqs", []):
+            out.append("\t%s.StopPlay" % seq)
+        out += ["\tPadLampsInit",
+                "\tSet LampCallback = GetRef(\"PadUpdateLamps\")"]
     out += ["End Sub", "",
             "Sub Table1_Exit",
             "\tOn Error Resume Next",
@@ -287,28 +333,62 @@ def gen(m, had):
         sid = 1000 + s["id"]
         if ev == "hit":
             body = "vpmTimer.PulseSw %d" % sid
-            if had.get(name + "_Hit"):
+            if had.get(name + "_Hit") and calls_orig(name):
                 body += " : %s_Hit_orig" % name
             out.append("Sub %s_Hit : %s : End Sub" % (name, body))
         elif ev == "hold":
             b1 = "Controller.Switch(%d) = True" % sid
             b0 = "Controller.Switch(%d) = False" % sid
-            if had.get(name + "_Hit"):
+            if had.get(name + "_Hit") and calls_orig(name):
                 b1 += " : %s_Hit_orig" % name
-            if had.get(name + "_UnHit"):
+            if had.get(name + "_UnHit") and calls_orig(name):
                 b0 += " : %s_UnHit_orig" % name
             out.append("Sub %s_Hit : %s : End Sub" % (name, b1))
             out.append("Sub %s_UnHit : %s : End Sub" % (name, b0))
         elif ev == "spin":
             body = "vpmTimer.PulseSw %d" % sid
-            if had.get(name + "_Spin"):
+            if had.get(name + "_Spin") and calls_orig(name):
                 body += " : %s_Spin_orig" % name
             out.append("Sub %s_Spin : %s : End Sub" % (name, body))
         elif ev == "slingshot":
             body = "vpmTimer.PulseSw %d" % sid
-            if had.get(name + "_Slingshot"):
+            if had.get(name + "_Slingshot") and calls_orig(name):
                 body += " : %s_Slingshot_orig" % name
             out.append("Sub %s_Slingshot : %s : End Sub" % (name, body))
+    # ---- lamps
+    if lamps:
+        out += ["", "'---- the machine's lamps: number 1000 + node * 100 + LED index, one",
+                "'     table light (or several) per insert; core.vbs calls LampCallback",
+                "'     every tick with UseLamps = 0, and this reads ChangedLamps itself",
+                "Dim PadLamps : Set PadLamps = CreateObject(\"Scripting.Dictionary\")",
+                "Sub PadLampsInit"]
+        for num in sorted(lamps):
+            out.append("\tPadLamps.Add \"%d\", Array(%s)" % (num, ", ".join(lamps[num])))
+        out += ["End Sub",
+                "Sub PadUpdateLamps",
+                "\tDim chg, ii, o, k",
+                "\tchg = Controller.ChangedLamps",
+                "\tIf IsEmpty(chg) Then Exit Sub",
+                "\tFor ii = 0 To UBound(chg)",
+                "\t\tk = CStr(chg(ii, 0))",
+                "\t\tIf PadLamps.Exists(k) Then",
+                "\t\t\tFor Each o In PadLamps(k) : o.State = chg(ii, 1) : Next",
+                "\t\tEnd If",
+                "\tNext",
+                "End Sub",
+                "Sub PadDumpLamps(path)   ' vpxkeys.py lamps <file>: every mapped light's state",
+                "\tDim fso, f, k, o",
+                "\tSet fso = CreateObject(\"Scripting.FileSystemObject\")",
+                "\tSet f = fso.CreateTextFile(path & \".tmp\", True)",
+                "\tFor Each k In PadLamps.Keys",
+                "\t\tFor Each o In PadLamps(k) : f.WriteLine k & \" \" & o.Name & \" \" & o.State : Next",
+                "\tNext",
+                "\tf.Close",
+                "\tIf fso.FileExists(path) Then fso.DeleteFile path",
+                "\tfso.MoveFile path & \".tmp\", path",
+                "End Sub"]
+    for name, args in quiet.items():
+        out.append("Sub %s%s : End Sub   ' PAD: quiet; the machine lights the table" % (name, args))
     # ---- saucers
     for k in saucers(m):
         out.append("Sub %s_Hit : bs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s : End Sub" % (k, k, k))
@@ -333,6 +413,7 @@ def gen(m, had):
             "\t\tIf UBound(parts) = 1 Then",
             "\t\t\tIf parts(0) = \"down\" Then Table1_KeyDown CInt(parts(1))",
             "\t\t\tIf parts(0) = \"up\" Then Table1_KeyUp CInt(parts(1))",
+            "\t\t\tIf parts(0) = \"lamps\" Then PadDumpLamps parts(1)",
             "\t\tEnd If",
             "\tLoop",
             "\tf.Close",
@@ -384,9 +465,14 @@ def patch(script, m):
         rename_sub(lines, k + "_Hit", rep)
     for sub in ("SolLFlipper", "SolRFlipper", "SolULFlipper", "SolURFlipper"):
         had[sub] = has_sub(lines, sub)
+    quiet = {}
+    for name in m.get("quiet_subs", []):
+        args = quiet_sub(lines, name, rep)
+        if args is not None:
+            quiet[name] = args
     neuter(lines, m.get("neuter", []), rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
-    text = "\n".join(lines) + gen(m, had) + stub
+    text = "\n".join(lines) + gen(m, had, quiet) + stub
     return text, rep
 
 
@@ -418,10 +504,12 @@ def main(argv):
     if not table.verify():
         print("refusing: %s does not verify against its own MAC" % src)
         return 1
-    names = {table.item_info(d)[1].lower() for d in table.items}
-    for name in list(m["switches"]) + list(saucers(m)):
+    info = [table.item_info(d) for d in table.items]
+    names = {n.lower() for _, n, _ in info}
+    for name in list(m["switches"]) + list(saucers(m)) + list(m.get("lamps", {})):
         if name != "_" and name.lower() not in names:
             print("WARNING: the table has no object named %s" % name)
+    m["_lightseqs"] = sorted(n for k, n, _ in info if k == "LightSeq")
     script, rep = patch(table.script(), m)
     items = retrofit_items(table, m)
     table.ole.close()

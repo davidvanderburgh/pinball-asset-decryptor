@@ -143,9 +143,22 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   sat in attract. `dump/tables/<title>/switch_list.txt` from the run the
   table will attach to is the numbering that counts.
 
-Lamps on both tributes stay the tables' own until the titles' LED identities
-are known (these builds carry no lamp positions or names in their device
-tables).
+**Lamps** (`lamps` in the map, the Godzilla map's format: table light ->
+the insert's LEDs, an RGB insert being lit when any of its three is): the
+rig's `led_io.txt` names every LED of both titles even where it has no
+positions, so each table light was matched by what its script does with it
+(JP's city lights follow his `ModeName` order, drhotwing's planet and album
+lights are the SHOOT ME and RECORD arrows of the lane whose hit sub checks
+them) and the rest by place; the ones marked GUESS want a look at the
+machine. The generated script keeps a dictionary from lamp number to the
+lights, fills it from `ChangedLamps` every tick through core.vbs's
+`LampCallback` (with `UseLamps = 0`, so core's own 260-entry `Lights()` is
+never touched), and the tribute's own light shows are quieted
+(`quiet_subs`: its attract sequences, GI and insert effects, Rush's GI
+timer, every `LightSeq` stopped at init) with its hit subs no longer called
+(`orig_hits: false`; `orig_keep` names the slingshots, whose originals
+animate the rubbers). `vpxkeys.py lamps <file>` makes the table write every
+mapped light's state, to compare with the machine's `padled` plane.
 
 ## Mapping another table
 

@@ -84,6 +84,11 @@ class WebWindow:
         self._timer = None
         self._log = collections.defaultdict(
             lambda: collections.deque(maxlen=LOG_KEEP))
+        # id -> entry per manufacturer, so an in-place progress line finds
+        # its entry without a walk of the 5,000-line deque (PAD-797).  Kept
+        # in step with the deque by _store_line, which is the one place a
+        # line enters it (an eviction drops the evicted id).
+        self._log_index = collections.defaultdict(dict)
         self._log_ids = itertools.count(1)
         self._log_line_run = 0
         self._keyed = {}                    # (run, key) -> line id
@@ -516,8 +521,19 @@ class WebWindow:
     # log
     # ------------------------------------------------------------------
     def _store_line(self, mfr_key, entry):
-        self._log[mfr_key].append(entry)
+        lines = self._log[mfr_key]
+        index = self._log_index[mfr_key]
+        if lines.maxlen is not None and len(lines) >= lines.maxlen:
+            # the deque is about to evict its oldest line
+            index.pop(lines[0].get("id"), None)
+        lines.append(entry)
+        index[entry.get("id")] = entry
         self.ctx.bus.publish("log", mfr=mfr_key, line=entry)
+
+    def _clear_log(self, mfr_key):
+        """Forget a manufacturer's lines (the deque AND its id index)."""
+        self._log.pop(mfr_key, None)
+        self._log_index.pop(mfr_key, None)
 
     def append_log(self, text, level="info"):
         text = session_log.clean_line(str(text))
@@ -551,11 +567,10 @@ class WebWindow:
                      "text": text, "level": level or "info"}
             self._store_line(mkey, entry)
             return
-        for entry in self._log[mkey]:
-            if entry["id"] == lid:
-                entry["text"] = text
-                entry["level"] = level or "info"
-                break
+        entry = self._log_index[mkey].get(lid)
+        if entry is not None:
+            entry["text"] = text
+            entry["level"] = level or "info"
         self.ctx.bus.publish("log_update", mfr=mkey, id=lid, text=text,
                              level=level or "info")
 

@@ -65,7 +65,11 @@ class EventBus:
                 return [], False
             first = self._events[0][0]
             gap = seq + 1 < first and seq < self._last
-            return [(s, t) for s, t in self._events if s > seq], gap
+            # Sequence numbers are contiguous and increasing, so the events
+            # after ``seq`` start at a known index: no walk of the whole
+            # buffer under the lock on every SSE wake (PAD-797).
+            start = max(0, seq + 1 - first)
+            return list(itertools.islice(self._events, start, None)), gap
 
     def wait(self, seq, timeout):
         """Block until an event after ``seq`` exists (or timeout)."""
@@ -89,6 +93,23 @@ class EventBus:
 
 
 _MISSING = object()
+_SCALARS = (type(None), bool, int, float, str)
+
+
+def _copy_value(value):
+    """A caller's own copy of a stored value: a flat dict or list (every
+    member a scalar) is copied shallowly, nested values deeply.  The footer
+    and the toasts are read on every progress message, and a deep copy of
+    a flat dict was most of that read (PAD-797)."""
+    if isinstance(value, _SCALARS):
+        return value
+    if isinstance(value, dict):
+        if all(isinstance(v, _SCALARS) for v in value.values()):
+            return dict(value)
+    elif isinstance(value, list):
+        if all(isinstance(v, _SCALARS) for v in value):
+            return list(value)
+    return copy.deepcopy(value)
 
 
 class Store:
@@ -112,7 +133,7 @@ class Store:
             value = self._ns.get(ns, {}).get(key, _MISSING)
             if value is _MISSING:
                 return default
-            return copy.deepcopy(value)
+            return _copy_value(value)
 
     def set(self, ns, **values):
         """Merge ``values`` into ``ns``; publish only the keys that changed."""

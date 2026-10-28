@@ -14762,8 +14762,8 @@ def _lowpass(samples, cutoff_hz, np, fs=44100.0):
     the causal convolution of the signal with the biquad's impulse response
     (:func:`_biquad_impulse`, the recurrence run once on a unit impulse and
     cached), done by FFT in :func:`_causal_convolve` instead of a Python loop
-    per sample (PAD-795: a 3-minute stereo bed took a minute).  Within 1e-6 of
-    the per-sample recurrence before rounding.
+    per sample (PAD-795: six seconds per 8M-sample channel, nine times what it
+    is now).  Within 1e-6 of the per-sample recurrence before rounding.
 
     Used to band-limit an audio replacement to the stock callout's spectral
     envelope; see :data:`_DECLICK_LOWPASS_HZ` for why."""

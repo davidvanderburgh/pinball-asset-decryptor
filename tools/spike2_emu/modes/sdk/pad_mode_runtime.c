@@ -16696,118 +16696,6 @@ static void pic_arm(void)
         PIC_SYMS[0], PIC_SYMS[1], PIC_SYMS[2], PIC_SYMS[3]);
 }
 
-/* ---- game points (PAD-798): every point the game adds, times N ------------------------------------------------------
- * An owner asked for TMNT's scoring "with an extra 0" on its point values. The Write tab's Game points picks N; the
- * build writes points.cfg beside the mode files (/usr/local/padmode/points.cfg on a card, /dump/points.cfg in the rig),
- * one TAB-separated line:
- *
- *     times <TAB> <N>
- *
- * and the runtime WRAPS the game's score function (site score_add; score_add32 on a 32-bit build): the points it is
- * asked to add are multiplied by N before the game's own work runs, so its playfield multiplier, the score on the
- * display and its replay and high-score checks all see the bigger number. A mode's points go through the same function
- * (pm_score_add), so they are multiplied too. A 32-bit build's product is cut to the room left below 4,294,967,295
- * (score32_points) so a score stops at the top instead of wrapping; a 64-bit one's saturates. The wrapper passes the
- * game's other argument registers on as they came.
- *
- * It takes the runtime's whole gate: a multiplied score is not one the game would have given, so it must never reach
- * Insider Connected as a real one (insider_arm runs first, and without it nothing is hooked). No file, no line, or N
- * of 1 and nothing here is hooked. (tests lift pts_line and pts_scale verbatim) */
-#define PTS_FILE_MAX  1024
-#define PTS_TIMES_MAX 1000
-static const char *const PTS_FILES[] = { "/usr/local/padmode/points.cfg", "/dump/points.cfg" };
-static unsigned pts_times;                  /* N; 0 or 1 = off */
-static unsigned pts_said;
-static uint64_t (*pts_orig64)(unsigned, unsigned, uint64_t);
-static unsigned (*pts_orig32)(unsigned, unsigned, unsigned, unsigned);
-
-static void pts_line(char *s)
-{
-    const char *p;
-    int ok;
-    while (*s == ' ') s++;
-    if (*s == '#' || !*s) return;
-    if (s[0] == 't' && s[1] == 'i' && s[2] == 'm' && s[3] == 'e' && s[4] == 's' && s[5] == '\t') {
-        uint64_t v;
-        p = s + 6;
-        v = number(&p, &ok);
-        if (ok && v >= 1 && v <= PTS_TIMES_MAX) pts_times = (unsigned)v;
-    }
-}
-
-/* `points` times N, saturating */
-static uint64_t pts_scale(uint64_t points, unsigned times)
-{
-    if (times <= 1) return points;
-    return points > ~(uint64_t)0 / times ? ~(uint64_t)0 : points * times;
-}
-
-static void pts_note(unsigned player, uint64_t asked, uint64_t adds)
-{
-    if (pts_said >= 12) return;
-    pts_said++;
-    say("points: player %u, the game adds %llu x%u = %llu", player, (unsigned long long)asked, pts_times,
-        (unsigned long long)adds);
-}
-
-static uint64_t pts_wrap64(unsigned player, unsigned r1, uint64_t points)
-{
-    uint64_t n = pts_scale(points, pts_times);
-    if (points) pts_note(player, points, n);
-    return pts_orig64(player, r1, n);
-}
-
-static unsigned pts_wrap32(unsigned player, unsigned points, unsigned r2, unsigned r3)
-{
-    unsigned n = points ? score32_points(player, pts_scale(points, pts_times)) : 0;
-    if (points) pts_note(player, points, n);
-    return pts_orig32(player, n, r2, r3);
-}
-
-/* the file asks for a factor above 1: the card then takes the runtime's whole gate (as attract items do) */
-static int points_wanted(void)
-{
-    static char raw[PTS_FILE_MAX + 1];
-    long n = -1, i, start = 0;
-    unsigned k;
-    if (pts_times) return pts_times > 1;
-    for (k = 0; k < sizeof PTS_FILES / sizeof PTS_FILES[0] && n < 0; k++)
-        n = pm_read_file(PTS_FILES[k], raw, PTS_FILE_MAX);
-    if (n <= 0) return 0;
-    raw[n] = 0;
-    for (i = 0; i <= n; i++)
-        if (i == n || raw[i] == '\n' || raw[i] == '\r') {
-            raw[i] = 0;
-            pts_line(raw + start);
-            start = i + 1;
-        }
-    return pts_times > 1;
-}
-
-/* from the constructor, after the score gate */
-static void points_arm(void)
-{
-    unsigned f32 = fn("score_add32"), f = fn("score_add");
-    if (!points_wanted()) return;
-    if (f32) {
-        if (!data("scores32")) {
-            say("points: x%u asked, but the port names no scores32 to keep a 32-bit score from wrapping - the "
-                "game's points stay as they are", pts_times);
-            return;
-        }
-        pts_orig32 = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(f32, (void *)pts_wrap32);
-    } else if (f) {
-        pts_orig64 = (uint64_t (*)(unsigned, unsigned, uint64_t))hook_wrap(f, (void *)pts_wrap64);
-    }
-    if (!pts_orig32 && !pts_orig64) {
-        say("points: x%u asked, but the game's score function (0x%08x) could not be wrapped - the game's points "
-            "stay as they are", pts_times, f32 ? f32 : f);
-        return;
-    }
-    say("points: every point the game adds is x%u (%s 0x%08x wrapped)", pts_times, f32 ? "score_add32" : "score_add",
-        f32 ? f32 : f);
-}
-
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
@@ -16831,14 +16719,13 @@ static void pad_mode_start(void)
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
     sndm_arm();                               /* PAD-494: nor does a music mode */
     pic_arm();                                /* PAD-537: nor do the picture settings */
-    if ((clipv_only || sndm_only || pic_only) && !attract_wanted() && !points_wanted()) {   /* PAD-782, PAD-798: attract items and game points take the whole gate */
+    if ((clipv_only || sndm_only || pic_only) && !attract_wanted()) {   /* PAD-782: attract items take the whole gate */
         say("armed: %s%s%s only (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
             clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : "picture.cfg");
         return;
     }
     if (!insider_arm()) return;               /* no score gate, no modes: see insider_arm */
-    points_arm();                             /* PAD-798: the game's points, times N */
     {
         static const char *const callout_s[] = { "callout", "callout_nth", 0 };
         static const char *const light_s[] = { "light_run", "lamp_group", "show_priority", 0 };

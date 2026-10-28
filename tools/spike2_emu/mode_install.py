@@ -82,14 +82,12 @@ EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 64))
 #: PAD-494: sounds.cfg, the music modes (pad_mode_runtime.c "music modes") - a whole install too.
 #: PAD-537: picture.cfg, the picture settings (pad_mode_runtime.c "picture settings") - and so
 #: PAD-782: attract.cfg, the owner's attract items (pad_mode_runtime.c "attract items") - a whole install too.
-#: PAD-798: points.cfg, the game's points times N (pad_mode_runtime.c "game points") - a whole install too.
 EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 0o100644),
-               ("picture.cfg", 0o100644), ("attract.cfg", 0o100644), ("points.cfg", 0o100644))
+               ("picture.cfg", 0o100644), ("attract.cfg", 0o100644))
 #: the extra file that is enough for an install without a mode (PAD-446)
 CLIPS_FILE = "clips.cfg"
-#: the extra files that are each enough for an install without a mode (PAD-446, PAD-494, PAD-537,
-#: PAD-782, PAD-798)
-STANDALONE_FILES = (CLIPS_FILE, "sounds.cfg", "picture.cfg", "attract.cfg", "points.cfg")
+#: the extra files that are each enough for an install without a mode (PAD-446, PAD-494, PAD-537)
+STANDALONE_FILES = (CLIPS_FILE, "sounds.cfg", "picture.cfg", "attract.cfg")
 #: PAD-432: the project's modes as the Modes tab saves them to a file (sources, pictures, clips and
 #: sounds), so another project can load them straight from this card. The runtime never reads it;
 #: placed when the install is given one (--bundle) and it fits, taken off when it is not
@@ -212,7 +210,7 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
                          % (1 + len(EXTRA_CFGS)))
     if not cfg_path and not assets and not set(STANDALONE_FILES) & {os.path.basename(x) for x in extras}:
         raise mk.Refused("no mode file, no code mode's assets, no clips.cfg, no sounds.cfg, no "
-                         "picture.cfg, no attract.cfg and no points.cfg - nothing has been written")
+                         "picture.cfg and no attract.cfg - nothing has been written")
     if extra_cfgs and not cfg_path:
         raise mk.Refused("slot files without a mode.cfg - nothing has been written")
     for a in assets:
@@ -378,8 +376,7 @@ def main(argv=None):
                         "name: stock.cfg, the counts-as table of the game's own rules (item 160), "
                         "clips.cfg, the clips that play one of several at random (PAD-446), "
                         "sounds.cfg, the music modes (PAD-494), picture.cfg, the picture "
-                        "settings (PAD-537), attract.cfg, the attract items (PAD-782), or "
-                        "points.cfg, the game's points times N (PAD-798)")
+                        "settings (PAD-537), or attract.cfg, the attract items (PAD-782)")
     p.add_argument("--port", help="the SDK runtime's port file for this game (item 134)")
     p.add_argument("--bundle", help="the project's modes file (PAD-432), for another project to "
                                     "load them from this card; left off when p2 has no room")

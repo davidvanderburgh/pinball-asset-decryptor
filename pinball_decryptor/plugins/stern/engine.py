@@ -7849,8 +7849,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-782: the owner's attract items: clips in the video bank and attract.cfg beside the runtime
     attract_prof = _attract_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _attract_on = attract_prof is not None
-    # PAD-798: the game's points times N, points.cfg beside the runtime
-    points_prof, points_times = _points_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -7858,7 +7856,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
-            and picture_prof is None and not _attract_on and points_prof is None
+            and picture_prof is None and not _attract_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -9180,10 +9178,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Jukebox" if sound_modes_cfg and sound_modes.jukebox and not sound_modes.attract
                 else "Attract flipper sounds" if sound_modes_cfg  # PAD-641: theirs alone
                 else "Picture settings" if picture_cfg
-                else "Attract items" if _attract_on
-                else "Game points")
-        if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on
-                or points_prof is not None):
+                else "Attract items")
+        if _modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on:
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -9191,11 +9187,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if variant_slots else "Adding the jukebox to the video bank..."
                          if _clips_on else "Adding the music modes..."
                          if sound_modes_cfg else "Adding the picture settings..."
-                         if picture_cfg else "Adding the attract items..."
-                         if _attract_on else "Changing the game's points...")
+                         if picture_cfg else "Adding the attract items...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
-            points_cfg = (_points_cfg(points_times, grow_work)     # PAD-798
-                          if points_prof is not None else "")
             try:
                 if mode_list:
                     _mprof = _MW.MP.profile(mode_list[0][1].title)
@@ -9205,8 +9198,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     if _mprof is None:
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
-                    _mprof = (variant_prof or sound_modes_prof or picture_prof or attract_prof
-                              or points_prof)
+                    _mprof = variant_prof or sound_modes_prof or picture_prof or attract_prof
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
                     if not _rel or (not _modes_on and (
@@ -9260,7 +9252,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof,
                     picture=picture_cfg, picture_prof=picture_prof,
                     attract=_attract_on, attract_prof=attract_prof,   # PAD-782
-                    points=points_cfg, points_prof=points_prof,       # PAD-798
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -9301,8 +9292,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               if mode_plan.variants is not None
                               else "adding the music modes" if sound_modes_cfg
                               else "adding the picture settings" if picture_cfg
-                              else "adding the attract items" if _attract_on
-                              else "changing the game's points"), t0)
+                              else "adding the attract items"), t0)
 
         # PAD-444: the own copies' bank entries and files, on the bank the
         # modes just rewrote when they did.  The program part already landed
@@ -9565,8 +9555,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 # PAD-782: the owner's attract items (their clips' names)
                 "attract": ([n for _e, _w, n, _ms in _attract_entries(mode_plan.attract_file)]
                             if getattr(mode_plan, "attract_file", "") else []),
-                # PAD-798: the game's points times this (0 = as they are)
-                "points": (points_times if getattr(mode_plan, "points_file", "") else 0),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -10652,49 +10640,6 @@ def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     return prof
 
 
-def _points_for_build(assets_dir, dest_is_device, log, ext4_available=None):
-    """PAD-798: ``(title, factor)`` of the card the game points go on, or ``(None, 1)`` when the
-    project asks for none or they are left out (one warning says why). The modes' gate: an image
-    file, a host that can add files to it, a title whose score function the runtime can wrap."""
-    from . import game_points as _GP
-    from . import mode_write as _MW
-    times = _GP.load(assets_dir)
-    if times <= 1:
-        return None, 1
-    if dest_is_device:
-        why = "a direct-SD write cannot add files to the card; build an image file to carry them"
-    else:
-        why = _MW.host_refusal()
-        if not why:
-            if ext4_available is None:
-                from ...core import ext4_grow
-                ext4_available = ext4_grow.available
-            ok, e4 = ext4_available()
-            if not ok:
-                why = "this system cannot write new files into the card image (%s)" % e4
-    prof = None
-    if not why:
-        prof = _GP.project_title(assets_dir, probe=True)
-        why = _GP.title_refusal(prof)
-    if why:
-        log("Game points: the game's points stay as they are in this build: %s." % why.rstrip("."),
-            "warning")
-        return None, 1
-    log("Game points: every point the game adds is x%d on this card. As on a card with modes, the "
-        "machine sends no scores to Insider Connected." % times, "info")
-    return prof, times
-
-
-def _points_cfg(times, work):
-    """PAD-798: ``points.cfg`` for factor *times*, written under *work*."""
-    from . import game_points as _GP
-    os.makedirs(work, exist_ok=True)
-    path = os.path.join(work, _GP.CFG_NAME)
-    with open(path, "w", encoding="ascii", newline="\n") as f:
-        f.write(_GP.cfg_text(times))
-    return path
-
-
 def _picture_cfg(menus, grown, only, work, log):
     """PAD-537: ``picture.cfg`` for the rows in *menus* that went into the menu, written
     under *work*; ``""`` when none did or the program cannot be re-pointed (said why)."""
@@ -11774,12 +11719,10 @@ def _install_modes(output_path, modes, landed, planned, log):
     # PAD-446: a card of random clips and no mode; PAD-494: of music modes only;
     # PAD-537: of picture settings only
     who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
-                                                 or modes.get("picture") or modes.get("attract")
-                                                 or modes.get("points"))
+                                                 or modes.get("picture") or modes.get("attract"))
            else "Random clips" if modes.get("variants") else "Music modes"
            if modes.get("music_modes") else "Picture settings" if modes.get("picture")
-           else "Attract items" if modes.get("attract")   # PAD-782
-           else "Game points")                # PAD-798
+           else "Attract items")              # PAD-782
     if who == "Music modes" and all(t.endswith(" in attract") for t in modes["music_modes"]):
         who = "Attract flipper sounds"   # PAD-641: the same program, its own words
     elif who == "Music modes" and all(t.endswith((" in turn)", " in attract"))
@@ -11808,11 +11751,6 @@ def _install_modes(output_path, modes, landed, planned, log):
                 "that plays them was NOT put on the system partition. The "
                 "rewritten scene may already be on it, so do not use this "
                 "card: fix the issue above and Write again.", "error")
-        elif who == "Game points":             # PAD-798
-            log("Game points: not every file reached the card, so the program "
-                "that changes the points was NOT put on the system partition and "
-                "the game scores as it always has. Fix the issue above and Write "
-                "again.", "error")
         else:
             # words a copy with the mode maker switched off may show (PAD-446)
             log("Random clips: not every file reached the card, so the program "
@@ -11832,7 +11770,6 @@ def _install_modes(output_path, modes, landed, planned, log):
                 "Picture settings": "picture settings",
                 "Attract flipper sounds": "sounds for the flipper buttons in attract",
                 "Attract items": "attract items",
-                "Game points": "change to the game's points",
                 }.get(who, "music modes"), e),
             "error")
         return None, False
@@ -11846,7 +11783,6 @@ def _install_modes(output_path, modes, landed, planned, log):
     log("%s: /etc/init.d/game_monitor now loads the %s (port %s)."
         % (who, "mode runtime" if who == "Modes" else "program that applies them"
            if who == "Picture settings" else "program that plays them" if who == "Attract items"
-           else "program that changes the points" if who == "Game points"
            else "program that picks them",
            modes.get("port")), "info")
     snd = modes.get("end_sound")
@@ -11861,12 +11797,8 @@ def _install_modes(output_path, modes, landed, planned, log):
         log("Attract items: %d item(s) of your own between the game's attract screens on the card. %s"
             % (len(modes["attract"]), "A card with attract items of your own keeps its scores off Insider "
                "Connected: they stay on the machine."), "success")
-    if modes.get("points"):                   # PAD-798
-        log("Game points: every point the game adds is x%d on this card. It keeps its scores off "
-            "Insider Connected: they stay on the machine." % modes["points"], "success")
     if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
-                                  or modes.get("picture") or modes.get("attract")
-                                  or modes.get("points")):
+                                  or modes.get("picture") or modes.get("attract")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")

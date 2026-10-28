@@ -73,7 +73,7 @@ forget() {
     [ -f "$MARK" ] || return 0
     rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP/game.port" \
           "$DUMP"/mode.start "$DUMP"/mode[1-7].start "$DUMP/mode.stop" "$DUMP/mode.clip" \
-          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$DUMP/sounds.cfg" "$DUMP/picture.cfg" "$DUMP/attract.cfg" "$DUMP/points.cfg" "$MARK" 2>/dev/null
+          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$DUMP/sounds.cfg" "$DUMP/picture.cfg" "$DUMP/attract.cfg" "$MARK" 2>/dev/null
     return 0
 }
 
@@ -171,15 +171,6 @@ if [ "$ATTRACT" != 0 ]; then
     if [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ]; then WHAT="attract items ($ATTRACT)"
     else WHAT="$WHAT and attract items ($ATTRACT)"; fi
 fi
-# PAD-798: points.cfg (the game's points times N) is a reason of its own too
-POINTS=0
-[ -f "$S/points.cfg" ] && POINTS=$(awk -F'	' '$1 == "times" { print $2; exit }' "$S/points.cfg" 2>/dev/null)
-case "$POINTS" in ''|*[!0-9]*) POINTS=0 ;; esac
-[ "$POINTS" -gt 1 ] 2>/dev/null || POINTS=0
-if [ "$POINTS" != 0 ]; then
-    if [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ]; then WHAT="game points x$POINTS"
-    else WHAT="$WHAT and game points x$POINTS"; fi
-fi
 
 if ! python3 "$RIG/parts.py" --rootfs-file /etc/init.d/game_monitor "$CARD" 2>/dev/null \
         | grep -qF "$HOOK"; then
@@ -193,7 +184,7 @@ if [ -n "${PAD_MODE_SO:-}" ]; then
         "(PAD_MODE_SO=$PAD_MODE_SO): that one runs, the card's own modes are left out"
     exit 0
 fi
-if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$POINTS" = 0 ]; }; then
+if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ]; }; then
     forget
     say "$WHO carries a mode object but no $([ -f "$S/game.port" ] && echo "mode file" || echo "port file") beside it:"
     say "  nothing the emulator can run. This run boots without it"
@@ -215,7 +206,7 @@ fi
 if [ "$(id -u)" = 0 ]; then
     _o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
     [ -n "$_o" ] && [ "$_o" != root ] && chown "$_o" "$ROOT$OBJECT" "$DUMP/game.port" \
-        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/points.cfg "$MARK" 2>/dev/null
+        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$MARK" 2>/dev/null
 fi
 say "$WHO carries $WHAT: their runtime runs in this game, as on the machine"
 echo "$OBJECT"

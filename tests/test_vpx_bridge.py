@@ -421,6 +421,19 @@ def test_the_users_own_map_is_found_first(tmp_path, monkeypatch):
     assert pc.VpxMap("rush_le").path.endswith("rush_le.shadow.json")       # the kit's own still answer
 
 
+def test_lcd_window_goes_where_the_kit_says():
+    # Visual Pinball comes up full screen: the game's LCD window is put on
+    # top, in the upper middle of the main screen by default, or on the
+    # monitor / at the rectangle the kit names
+    pc = pytest.importorskip("padcontroller")
+    mons = [(0, 0, 2560, 1440), (2560, 0, 4480, 1080)]
+    assert pc.lcd_rect(None, mons) == (768, 0, 1024, 576)              # 40% wide, 16:9, centred
+    assert pc.lcd_rect({"monitor": 2}, mons) == (2560, 0, 1920, 1080)
+    assert pc.lcd_rect({"monitor": 9}, mons) == (768, 0, 1024, 576)     # no such screen: the default
+    assert pc.lcd_rect({"x": 10, "y": 20, "w": 300, "h": 200, "topmost": False}, mons) == (10, 20, 300, 200)
+    assert pc.lcd_rect({}, []) == (576, 0, 768, 432)                     # no monitor answer: 1920x1080 assumed
+
+
 def test_board_slot_reads_one_record(tmp_path, monkeypatch):
     pc = pytest.importorskip("padcontroller")
     monkeypatch.setattr(pc, "BOARD", str(tmp_path))

@@ -176,6 +176,9 @@ Source: "{#ProjectDir}\tools\rigboard.sh"; DestDir: "{app}\tools"; Flags: ignore
 ; --- Entry point + bundled launcher --------------------------------------
 Source: "{#ProjectDir}\Pinball Asset Decryptor.pyw"; DestDir: "{app}"; Flags: ignoreversion
 Source: "launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
+; The Visual Pinball kit's command (tools\spike2_emu\vpx\padvpx.py on the
+; bundled Python): `padvpx setup "<table.vpx>" <card.raw>` and friends.
+Source: "padvpx.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 ; --- Prerequisites helper (re-runnable from Start Menu) ------------------
 Source: "install_prerequisites.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -192,6 +195,7 @@ Source: "{#ProjectDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\Pinball Asset Decryptor"; Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\pinball_decryptor\icon.ico"; Comment: "Decrypt and modify pinball machine assets across multiple manufacturers"
 Name: "{group}\Install Prerequisites"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_prerequisites.ps1"""; WorkingDir: "{app}"; Comment: "Install WSL2, partclone, debugfs, gpg"
+Name: "{group}\Visual Pinball kit (padvpx)"; Filename: "{cmd}"; Parameters: "/k ""{app}\padvpx.cmd"" status"; WorkingDir: "{app}"; Comment: "Run a Visual Pinball table on the emulator: padvpx setup ""<table.vpx>"" <card.raw>"
 Name: "{group}\{cm:UninstallProgram,Pinball Asset Decryptor}"; Filename: "{uninstallexe}"
 
 ; Inno deletes and re-creates a shortcut it writes, and Explorer places a
@@ -232,6 +236,14 @@ Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /grant *S-1-5-32-545
 ; costs that one slower start.
 Filename: "{app}\python\python.exe"; Parameters: "-m compileall -q -j 0 ""{app}\pinball_decryptor"""; WorkingDir: "{app}"; StatusMsg: "Preparing the app..."; Flags: runhidden waituntilterminated
 
+; --- The Visual Pinball kit's COM server ---------------------------------
+; PAD.Controller (tools\spike2_emu\vpx\padcontroller.py) is what a patched
+; Visual Pinball table creates; its registration is under HKLM, which this
+; elevated installer can write.  Registered on every install so the
+; LocalServer32 path follows the install directory.  Not fatal: a bundled
+; Python without pywin32 simply has no kit.
+Filename: "{app}\python\python.exe"; Parameters: """{app}\tools\spike2_emu\vpx\padvpx.py"" register"; WorkingDir: "{app}"; StatusMsg: "Registering the Visual Pinball controller..."; Flags: runhidden waituntilterminated
+
 Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Description: "Launch Pinball Asset Decryptor"; Flags: nowait postinstall skipifsilent
 
 ; --- In-app update relaunch ----------------------------------------------
@@ -242,6 +254,9 @@ Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app
 ; entry point (self-elevation), and gated on the /RELAUNCH=1 flag so a
 ; plain silent install (e.g. mass deployment) stays hands-off.
 Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Flags: nowait; Check: RelaunchRequested
+
+[UninstallRun]
+Filename: "{app}\python\python.exe"; Parameters: """{app}\tools\spike2_emu\vpx\padvpx.py"" unregister"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "padvpx-unregister"
 
 [UninstallDelete]
 ; Wipe Python bytecode caches so the install dir is clean before removal.

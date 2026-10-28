@@ -50,13 +50,42 @@ Nothing here needs the app running. `padvpx.py` is the whole kit, run with
 the app's own Python (`{app}\python\python.exe tools\spike2_emu\vpx\padvpx.py`
 on an installed app; the venv's in a checkout):
 
-    padvpx register                        PAD.Controller in the registry (once)
+    padvpx setup "<your table.vpx>" <card.raw>
+                                           THE one step: controller registered if it is not,
+                                           the table recognised and patched beside itself, its card recorded
+    padvpx register                        PAD.Controller in the registry (the installer does this)
     padvpx library D:\cards                a directory of card images: a title's newest build is its card
     padvpx patch "<your table.vpx>" [--card <image>]
                                            recognise the table, write "<name> (PAD).vpx" beside it
     padvpx card <title> <image>            which card a title boots (padvpx card: list them)
+    padvpx lcd top | monitor 2 | <x y w h> | off
+                                           where the game's LCD window goes (below)
     padvpx run <title> | stop <title>      a run by hand, the way the controller starts one
     padvpx status | tables                 what is registered, recorded, up, and patchable
+
+On an installed app the command is `padvpx.cmd` in the app folder (a Start
+menu entry opens a prompt on it), and the installer registers the
+controller itself.
+
+**The LCD window.** Visual Pinball comes up full screen and would cover the
+game's LCD window, so when the controller starts a run it puts that window
+where the kit says and ON TOP, once (from then on it is the user's to move):
+by default the upper middle of the main screen, 40% of its width in the
+LCD's 16:9; `padvpx lcd monitor 2` fills a second screen (a backglass
+monitor); `padvpx lcd 100 0 960 540` is a rectangle. A full-screen Visual
+Pinball must be the windowed kind for anything to show over it: its
+"Force exclusive fullscreen" option stays off.
+
+**Sharing a table with somebody else.** The kit never ships a table or a
+card. What the other person needs: the PAD installer (the emulator, its
+runtime distro, the bundled Python with pywin32, and this kit - all in it),
+Visual Pinball 10.8, their own download of the tribute table from where its
+author put it, and their own card image of the title. Then one command,
+`padvpx setup "<their table.vpx>" <their card.raw>`, and the (PAD) copy
+beside the table opens in Visual Pinball. A patched table could be handed
+over as a file, since it is the whole original plus the bridge, but that
+is the author's table to hand out, not ours - the kit's maps and patchers
+are what we share.
 
 Then open the patched table in Visual Pinball. The table names its title,
 the controller looks for a run of it on the rig board (`~/.pad-rig/slot-N.run`)

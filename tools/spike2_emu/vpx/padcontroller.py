@@ -119,6 +119,93 @@ def log(msg):
 #: where the user's own maps go (vpxgen.py writes a generated table's there)
 USER_MAPS = os.path.join(os.path.expanduser("~"), ".pad-vpx", "maps")
 
+#: the game's LCD is 16:9 (1360x768 on Spike 2)
+LCD_ASPECT = 16.0 / 9.0
+
+
+def lcd_rect(setting, mons, aspect=LCD_ASPECT):
+    """(x, y, w, h) for the LCD window: the kit's `lcd` setting against the
+    monitors [(left, top, right, bottom), ...] (the first is the main one).
+    A `monitor` n (1-based) fills that screen; `x y w h` is taken as is;
+    otherwise the upper middle of the main screen, 40% of its width."""
+    setting = setting or {}
+    if not mons:
+        mons = [(0, 0, 1920, 1080)]
+    if all(k in setting for k in ("x", "y", "w", "h")):
+        return int(setting["x"]), int(setting["y"]), int(setting["w"]), int(setting["h"])
+    n = setting.get("monitor")
+    if n and 1 <= int(n) <= len(mons):
+        l, t, r, b = mons[int(n) - 1]
+        return l, t, r - l, b - t
+    l, t, r, b = mons[0]
+    w = int((r - l) * 0.4)
+    h = int(w / aspect)
+    return l + ((r - l) - w) // 2, t, w, h
+
+
+def monitors():
+    """Every monitor's rectangle, the main one first (pywin32 or nothing)."""
+    try:
+        import win32api
+        out = []
+        for hmon, _, rect in win32api.EnumDisplayMonitors(None, None):
+            info = win32api.GetMonitorInfo(hmon)
+            out.append((tuple(rect), bool(info.get("Flags", 0) & 1)))
+        out.sort(key=lambda m: not m[1])
+        return [r for r, _ in out]
+    except Exception:                                       # noqa: BLE001
+        return []
+
+
+def find_lcd_window():
+    """The started run's LCD window: the one top-level window whose title
+    carries the kit's label and the emulator's name (watch.sh titles it
+    `[rig N: PAD-VPX] <title> - Stern Spike 2 emulator (...)`)."""
+    import ctypes
+    u = ctypes.windll.user32
+    found = []
+    proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def cb(h, _):
+        if u.IsWindowVisible(h):
+            buf = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(h, buf, 256)
+            if padlaunch.LABEL in buf.value and "emulator" in buf.value:
+                found.append(h)
+        return True
+    u.EnumWindows(proc(cb), 0)
+    return found[0] if found else 0
+
+
+def dpi_aware():
+    """This process in physical pixels: a process that is not DPI aware has
+    its window coordinates virtualised, and a WSLg window moved from one
+    ended up at the screen's top-left at the scaled size (150% here)."""
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:                                       # noqa: BLE001
+        pass
+
+
+def place_window(hwnd, rect, topmost=True):
+    import ctypes
+    u = ctypes.windll.user32
+    x, y, w, h = rect
+    HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+    SWP_SHOWWINDOW, SWP_NOACTIVATE = 0x0040, 0x0010
+    u.ShowWindow(hwnd, 9)                                   # SW_RESTORE
+    u.SetWindowPos(ctypes.c_void_p(hwnd), ctypes.c_void_p(HWND_TOPMOST if topmost else HWND_NOTOPMOST),
+                   x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE)
+    return window_rect(hwnd)
+
+
+def window_rect(hwnd):
+    import ctypes
+    r = (ctypes.c_long * 4)()
+    ctypes.windll.user32.GetWindowRect(ctypes.c_void_p(hwnd), r)
+    return r[0], r[1], r[2] - r[0], r[3] - r[1]
+
 
 class VpxMap:
     """A title's .vpxmap.json, reduced to the three lookups the server makes."""
@@ -419,6 +506,7 @@ class Bridge:
         self.launch = None                 # the run this bridge started, if any
         self.attached = False              # the run is up and its tables read
         self.front_done = False            # the started run's LCD window was handed back once
+        self.lcd_placed = False            # ... and put where the kit says, on top, once
         self.start_t = 0.0
         self.running = False
         self.paused = False
@@ -458,6 +546,9 @@ class Bridge:
         self.attached = False
         self.start_t = time.monotonic()
         self.front_done = False            # the LCD window's first grab is undone once, never again
+        self.lcd_placed = False
+        self.lcd_tries = 0
+        self.lcd_stable = 0
         log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         data = read_block(self.rig.led_path(), READ_N)
         if data and coilmap.has_magic(data):
@@ -614,10 +705,13 @@ class Bridge:
         last_front = 0.0
         while self.running:
             now = time.monotonic()
-            if (self.launch is not None and not self.front_done and now - last_front >= 1.0
-                    and now - self.start_t < FRONT_WATCH_S):
+            if (self.launch is not None and not (self.front_done and self.lcd_placed)
+                    and now - last_front >= 1.0 and now - self.start_t < FRONT_WATCH_S):
                 last_front = now
-                self._keep_player_front()
+                if not self.lcd_placed:
+                    self._place_lcd()
+                if not self.front_done:
+                    self._keep_player_front()
             if not self.attached:
                 self._poll_starting()
                 time.sleep(1.0)
@@ -626,6 +720,44 @@ class Bridge:
             self._poll_once()
             self.last_poll_ms = (time.monotonic() - t0) * 1000.0
             time.sleep(POLL_S)
+
+    def _place_lcd(self):
+        """The started run's LCD window (its title carries the PAD-VPX
+        label and the emulator's name) is put where the kit says, ON TOP:
+        Visual Pinball comes up full screen and would cover it. The kit's
+        `lcd` (padvpx lcd) names a monitor to fill, a rectangle, or nothing
+        - then the upper middle of the main screen, 40% of its width in the
+        LCD's 16:9. Once per run; the window is the user's from there."""
+        if sys.platform != "win32":
+            self.lcd_placed = True
+            return
+        hwnd = find_lcd_window()
+        if not hwnd:
+            return
+        setting = padlaunch.kit_load().get("lcd") or {}
+        self.lcd_tries = getattr(self, "lcd_tries", 0) + 1
+        try:
+            dpi_aware()
+            rect = lcd_rect(setting, monitors())
+            # a WSLg window re-places itself a few seconds after it opens
+            # (its X client is still sizing it), undoing a move that read
+            # back fine a moment earlier: once a second, put it back when it
+            # has drifted, and call it placed only after it has stayed put
+            # for five checks in a row
+            now = window_rect(hwnd)
+            if all(abs(a - b) <= 40 for a, b in zip(now, rect)):
+                self.lcd_stable = getattr(self, "lcd_stable", 0) + 1
+            else:
+                place_window(hwnd, rect, bool(setting.get("topmost", True)))
+                self.lcd_stable = 0
+            if self.lcd_stable >= 5 or self.lcd_tries >= 40:
+                self.lcd_placed = True
+                log("lcd window placed at %s%s (%d checks; it sits at %s)"
+                    % (rect, ", on top" if setting.get("topmost", True) else "",
+                       self.lcd_tries, window_rect(hwnd)))
+        except Exception as exc:                            # noqa: BLE001
+            log("lcd window not placed: %s" % exc)
+            self.lcd_placed = True
 
     def _keep_player_front(self):
         """A run this bridge started opens the game's LCD window, and that

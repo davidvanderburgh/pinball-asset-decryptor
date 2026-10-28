@@ -305,3 +305,28 @@ in `Run` - ONCE, the first time the LCD window takes it (a second version handed
 carries the kit's PAD-VPX label: proven in the same session (the log line
 `foreground: [... PAD-VPX ...] -> the player again`, four seconds after the
 launch).
+
+## The LCD window over a full-screen Visual Pinball; sharing the kit
+
+David (2026-10-28): the generated Bond table is not worth more; the two
+tributes should be more usable, starting with the game's LCD window, which
+a full-screen Visual Pinball covers; and the whole thing should be
+shareable with somebody who has their own card image.
+
+* When the controller starts a run it now puts the run's LCD window where
+  the kit says and ON TOP (`padvpx lcd top | monitor 2 | x y w h | off`;
+  the default is the upper middle of the main screen, 40% of its width in
+  the LCD's 16:9). Two things it took: the controller process declaring
+  itself DPI aware (a non-aware process's coordinates are virtualised, and
+  the WSLg window landed at the top-left at the scaled size), and
+  patience - a WSLg window re-places itself a few seconds after it opens,
+  undoing a move that read back fine, so the placement is checked once a
+  second and re-applied until it has stayed put for five checks (nine
+  checks on this machine). Exclusive full screen would still hide it; the
+  windowed kind is what Visual Pinball 10.8 uses by default.
+* Sharing: the installer now registers PAD.Controller (HKLM, which only it
+  can write) and ships `padvpx.cmd` with a Start-menu entry; `padvpx setup
+  "<table.vpx>" <card.raw>` is the one step for the other person, who
+  brings the PAD installer, Visual Pinball, their own download of the
+  tribute and their own card. The kit shares maps and patchers, never a
+  table.

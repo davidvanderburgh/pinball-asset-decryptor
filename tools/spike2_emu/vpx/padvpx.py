@@ -8,6 +8,13 @@ name the card a title boots, start or stop a run by hand.
         "<name> (PAD).vpx" beside it (or into DIR), re-signed, with the
         Spike 2 emulator behind it. --card records which card image the
         title boots when Visual Pinball opens the table and no run is up.
+    padvpx setup "<table.vpx>" <image.raw>
+        The one step for a shared table: registers the controller if it is
+        not, patches the table beside itself, records the card.
+    padvpx lcd top | monitor <n> | <x> <y> <w> <h> | off
+        Where the game's LCD window goes when the controller starts a run:
+        on top of a full-screen Visual Pinball in the upper middle of the
+        main screen (the default), filling screen n, or at a rectangle.
     padvpx card <title> <image.raw>      record a title's card (or `padvpx card`: list)
     padvpx library <dir>                  a directory of cards: the newest build of a title is its card
     padvpx register | unregister          PAD.Controller in the registry (this Python, this folder)
@@ -187,6 +194,38 @@ def main(argv):
             return 0
         for t, c in sorted((padlaunch.kit_load().get("cards") or {}).items()):
             print("%-18s %s" % (t, c))
+        return 0
+    if cmd == "setup" and len(rest) == 2:
+        # one step for a shared table: the controller registered, the table
+        # patched beside itself, the title's card recorded
+        d = padlaunch.kit_load()
+        d["rig"] = RIG
+        padlaunch.kit_save(d)
+        try:
+            import winreg
+            winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "PAD.Controller\\CLSID")
+        except Exception:                                   # noqa: BLE001
+            import padcontroller
+            padcontroller.main(["--register"])
+        return patch(rest[0], None, rest[1])
+    if cmd == "lcd":
+        # where the game's LCD window goes when the controller starts a run:
+        # `padvpx lcd top` (on top, upper middle of the main screen),
+        # `padvpx lcd monitor 2` (fills that screen), `padvpx lcd 100 0 960 540`
+        d = padlaunch.kit_load()
+        if rest and rest[0] == "monitor" and len(rest) == 2:
+            d["lcd"] = {"monitor": int(rest[1]), "topmost": True}
+        elif len(rest) == 4:
+            d["lcd"] = {"x": int(rest[0]), "y": int(rest[1]), "w": int(rest[2]), "h": int(rest[3]), "topmost": True}
+        elif rest and rest[0] == "top":
+            d["lcd"] = {"topmost": True}
+        elif rest and rest[0] == "off":
+            d.pop("lcd", None)
+        else:
+            print(json.dumps(d.get("lcd", {"topmost": True}), indent=1))
+            return 0
+        padlaunch.kit_save(d)
+        print("lcd: %s" % json.dumps(d.get("lcd")))
         return 0
     if cmd == "library" and len(rest) == 1:
         d = padlaunch.kit_load()

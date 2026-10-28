@@ -666,9 +666,7 @@ static void *hook_wrap(unsigned addr, void *wrapper)
 }
 
 /* PAD-663: a function may open with two words before its push (Avengers LE 1.10's champion page: `movw ip ; movt ip`):
- * opens_with_push 0 takes those as well - the pc checks below still hold for both words. PAD-798: and a plain
- * `mov rd, #imm` (The Beatles 1.29's score_add32: `movw r3 ; mov r2, #0`), which reads no register at all; and a
- * movw whose value's top four bits are all set (Guardians 1.15's `movw r1, #0xf11e`) is not a read of pc */
+ * opens_with_push 0 takes those as well - the pc checks below still hold for both words */
 static void *hook_wrap_at(unsigned addr, void *wrapper, int opens_with_push)
 {
     unsigned *p = (unsigned *)(unsigned long)addr, *t;
@@ -678,12 +676,11 @@ static void *hook_wrap_at(unsigned addr, void *wrapper, int opens_with_push)
     if (opens_with_push && (p[0] & 0xFFFF4000u) != 0xE92D4000u) return 0;
     for (i = 0; i < 2 && !opens_with_push; i++)                             /* plain movw / movt / push only */
         if ((p[i] & 0xFFF00000u) != 0xE3000000u && (p[i] & 0xFFF00000u) != 0xE3400000u
-            && (p[i] & 0xFFFF0000u) != 0xE92D0000u && (p[i] & 0xFFFF0000u) != 0xE3A00000u) return 0;
+            && (p[i] & 0xFFFF0000u) != 0xE92D0000u) return 0;
     for (i = 0; i < 2; i++) {
         unsigned w = p[i];
-        int mov16 = (w & 0xFFB00000u) == 0xE3000000u;   /* movw / movt: bits 16-19 are the value's top, not a register */
         if ((w & 0x0C000000u) == 0x04000000u && ((w >> 16) & 0xF) == 15) return 0;   /* ldr/str [pc, ..] */
-        if ((w & 0x0C000000u) == 0x00000000u && !mov16                       /* data processing: */
+        if ((w & 0x0C000000u) == 0x00000000u                                 /* data processing: */
             && (((w >> 16) & 0xF) == 15 || (!(w & 0x02000000u) && (w & 0xF) == 15))) return 0;   /* pc in */
         if (((w >> 12) & 0xF) == 15) return 0;                          /* writes pc */
     }
@@ -16745,29 +16742,26 @@ static uint64_t pts_scale(uint64_t points, unsigned times)
     return points > ~(uint64_t)0 / times ? ~(uint64_t)0 : points * times;
 }
 
-/* the first few adds, with the score before and after (the playfield multiplier is the game's, after ours) */
-static void pts_note(unsigned player, uint64_t asked, uint64_t adds, uint64_t before)
+static void pts_note(unsigned player, uint64_t asked, uint64_t adds)
 {
-    if (pts_said >= 24) return;
+    if (pts_said >= 12) return;
     pts_said++;
-    say("points: player %u, the game adds %llu x%u = %llu; score %llu -> %llu", player, (unsigned long long)asked,
-        pts_times, (unsigned long long)adds, (unsigned long long)before, (unsigned long long)pm_score(player));
+    say("points: player %u, the game adds %llu x%u = %llu", player, (unsigned long long)asked, pts_times,
+        (unsigned long long)adds);
 }
 
 static uint64_t pts_wrap64(unsigned player, unsigned r1, uint64_t points)
 {
-    uint64_t n = pts_scale(points, pts_times), before = pm_score(player), got = pts_orig64(player, r1, n);
-    if (points) pts_note(player, points, n, before);
-    return got;
+    uint64_t n = pts_scale(points, pts_times);
+    if (points) pts_note(player, points, n);
+    return pts_orig64(player, r1, n);
 }
 
 static unsigned pts_wrap32(unsigned player, unsigned points, unsigned r2, unsigned r3)
 {
-    unsigned n = points ? score32_points(player, pts_scale(points, pts_times)) : 0, got;
-    uint64_t before = pm_score(player);
-    got = pts_orig32(player, n, r2, r3);
-    if (points) pts_note(player, points, n, before);
-    return got;
+    unsigned n = points ? score32_points(player, pts_scale(points, pts_times)) : 0;
+    if (points) pts_note(player, points, n);
+    return pts_orig32(player, n, r2, r3);
 }
 
 /* the file asks for a factor above 1: the card then takes the runtime's whole gate (as attract items do) */
@@ -16801,9 +16795,9 @@ static void points_arm(void)
                 "game's points stay as they are", pts_times);
             return;
         }
-        pts_orig32 = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap_at(f32, (void *)pts_wrap32, 0);
-    } else if (f) {   /* Godzilla 1.16 and TMNT 1.59 open with `movw r1 ; movt r1` before the push: hook_wrap_at's case */
-        pts_orig64 = (uint64_t (*)(unsigned, unsigned, uint64_t))hook_wrap_at(f, (void *)pts_wrap64, 0);
+        pts_orig32 = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(f32, (void *)pts_wrap32);
+    } else if (f) {
+        pts_orig64 = (uint64_t (*)(unsigned, unsigned, uint64_t))hook_wrap(f, (void *)pts_wrap64);
     }
     if (!pts_orig32 && !pts_orig64) {
         say("points: x%u asked, but the game's score function (0x%08x) could not be wrapped - the game's points "

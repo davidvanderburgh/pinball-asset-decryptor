@@ -133,11 +133,12 @@ PICTURE_TIP = (
 POINTS_LABEL = "Game points"
 POINTS_TIP = (
     "Multiplies every point the game gives: x10 puts an extra 0 on every score, "
-    "bonus and award. The game's playfield multiplier still applies on top. "
-    "Replays and the high score board go by the bigger scores, so you may want "
-    "to raise the replay score and reset the high scores. A card with game "
-    "points sends no scores to Insider Connected; players can still log in. "
-    "Normal leaves the scoring as the game shipped it.")
+    "bonus and award, and on your modes' points too. The game's playfield "
+    "multiplier still applies on top. Replays and the high score board go by "
+    "the bigger scores, so you may want to raise the replay score and reset the "
+    "high scores. Like a card with modes, a card with game points sends no scores "
+    "to Insider Connected; players can still log in. Normal leaves the scoring as "
+    "the game shipped it.")
 EDITABLE_HINT = (
     "Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
     "files in pck/_EDITABLE ASSETS/ inside your Modified Assets "

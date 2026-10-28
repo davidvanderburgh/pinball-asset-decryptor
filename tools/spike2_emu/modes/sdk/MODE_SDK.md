@@ -815,10 +815,7 @@ and Try it's installer (`../tryit.sh install`) put them in `/dump`. Emulator-pro
 - **Countdown callouts:** variants n = 0..4 (5 down to 1) are proven. Others are not measured.
 - **Scoring:** `pm_score_add` goes through the game's scoring, so the playfield multiplier
   applies. There is no call that bypasses it. The return value is what the game actually
-  added, and it can be 0. On a card with Game points (PAD-798: `points.cfg`, `times N`
-  beside the mode files) the runtime wraps the game's score function, so every add the
-  game makes, a mode's included, is multiplied by N first (a 32-bit score capped at the
-  top); `mode.log` says `points: every point the game adds is xN`.
+  added, and it can be 0.
 - **`.ball_end`:** the game's end-of-ball broadcast, the one every stock mode ends on. What
   it does on a multiball drain or a ball save is not measured.
 - **`pm_in_game()`:** a player is up, and the game's mode mask shows none of the port's

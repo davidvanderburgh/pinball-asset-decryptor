@@ -10680,8 +10680,8 @@ def _points_for_build(assets_dir, dest_is_device, log, ext4_available=None):
         log("Game points: the game's points stay as they are in this build: %s." % why.rstrip("."),
             "warning")
         return None, 1
-    log("Game points: every point the game adds is x%d on this card, and the machine sends no "
-        "scores to Insider Connected." % times, "info")
+    log("Game points: every point the game adds is x%d on this card. As on a card with modes, the "
+        "machine sends no scores to Insider Connected." % times, "info")
     return prof, times
 
 

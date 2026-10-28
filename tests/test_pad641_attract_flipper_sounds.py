@@ -291,11 +291,15 @@ def test_a_game_without_them_says_why_and_adds_none(tmp_path, monkeypatch):
 
 
 def test_the_page_draws_the_button_from_the_tabs_state():
-    path = os.path.join(HERE, "..", "pinball_decryptor", "webui", "static", "js", "tabs", "audio.js")
-    with open(path, encoding="utf-8") as f:
+    # PAD-782: the flipper sounds moved to the Attract page (attract has one home); the Audio page's button takes
+    # the owner there, and the Attract page draws them from the Audio tab's state and calls its attract_action
+    tabs = os.path.join(HERE, "..", "pinball_decryptor", "webui", "static", "js", "tabs")
+    with open(os.path.join(tabs, "audio.js"), encoding="utf-8") as f:
         js = f.read()
-    assert "s.attract ? html`<${AttractButton}" in js
-    assert 'call("audio.attract_action", "add")' in js and "Why not on this game?" in js
+    assert 's.attract ? html`<${Button}' in js and 'call("ui.select_tab", "attract")' in js
+    with open(os.path.join(tabs, "attract.js"), encoding="utf-8") as f:
+        js = f.read()
+    assert 'useNs("audio")' in js and 'call("audio.attract_action", "add")' in js and "at.why" in js
 
 
 # ---- carried: mod routes, the music modes file, back out of a card ---------------------------------

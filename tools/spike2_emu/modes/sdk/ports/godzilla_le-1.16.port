@@ -1082,3 +1082,12 @@ value mode_id_at             4
 
 # PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
 value challenge_place_0        20
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x0070d858
+value attract_entry_size  16
+value attract_page_at     4
+value attract_count       91
+site  attract_sleep       0x003f3200 0xe3063278 0xe340307d
+# PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with
+site  attract_show        0x00405d2c 0xe92d4070 0xe306427c

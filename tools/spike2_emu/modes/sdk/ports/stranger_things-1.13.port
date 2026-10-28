@@ -580,3 +580,12 @@ text  done_name_18                 Demogorgon Challenge
 value done_flag_18                 110
 text  done_name_19                 Wizard Mode Multiball
 value done_flag_19                 113
+
+# PAD-782: the attract mode's page table (portattract.py); an owner's attract items play between its pages
+data  attract_table       0x00746a28
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       35
+site  attract_sleep       0x00181420 0xe3053ba8 0xe340307a
+# PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with
+site  attract_show        0x003111c0 0xe92d4070 0xe3054bac

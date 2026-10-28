@@ -2024,6 +2024,14 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     for k, v in plan.get("toggles", {}).items():
         tgt.setdefault(k, v)
 
+    # PAD-782: the attract items (photos, clips and text cards between the game's attract screens) are the project's
+    # as a whole: carried when the target has none of its own. Their files stay where they were picked.
+    n_attract = 0
+    at = src_saved.get("attract_items")
+    if isinstance(at, dict) and at.get("items") and not (tgt.get("attract_items") or {}).get("items"):
+        tgt["attract_items"] = at
+        n_attract = len(at["items"])
+
     # Staged Defaults-tab edits, merged per setting / per high-score slot so
     # anything already set on the target extract stays as the user left it.
     n_defaults = 0
@@ -2077,6 +2085,7 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
             _SOUND_MODES_KEY: len(record[_SOUND_MODES_KEY]),
             "image": len(plan["image"]["matched"]), "text": n_text,
             "group_tags": n_tags, "defaults": n_defaults,
+            "attract_items": n_attract,
             "superseded": n_superseded}
 
 

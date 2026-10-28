@@ -1,0 +1,26 @@
+/* Attract tab (js/tabs/attract.js): the game's attract screens in order, the owner's items between them. */
+
+.at-page { gap: 16px; }
+.at-page > .card { flex: 0 0 auto; }
+
+.at-seq { display: flex; flex-direction: column; gap: 4px; }
+.at-row { display: flex; align-items: center; gap: 8px 10px; min-height: 36px; padding: 4px 10px; border-radius: 8px;
+  min-width: 0; }
+.at-row .sp { flex: 1 1 auto; }
+.at-row .at-ic { flex: 0 0 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center;
+  justify-content: center; }
+.at-row .at-ic svg.i { width: 16px; height: 16px; }
+.at-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the game's own screens: quiet */
+.at-game { color: var(--ink-2); background: transparent; border: 1px dashed var(--line); }
+.at-game .at-ic { background: var(--panel-2); color: var(--ink-3); }
+
+/* the owner's items: they stand out */
+.at-item { background: var(--panel-2); border: 1px solid var(--accent-line); }
+.at-item .at-ic { background: var(--accent-soft); color: var(--accent); }
+.at-item.bad { border-color: var(--bad, #c0392b); }
+.at-item.dragging { opacity: 0.5; }
+.at-grip { cursor: grab; color: var(--ink-3); display: inline-flex; }
+.at-text { flex: 1 1 260px; min-width: 160px; resize: vertical; font: inherit; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }

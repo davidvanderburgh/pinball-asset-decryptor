@@ -73,11 +73,35 @@ with mentions disarmed.
 | `GET /v1/admin/list` | header `X-PAD-Admin`; the last 200 rows with ids; `held` = 1 is one waiting for your review |
 | `POST /v1/admin/review/<id>` | header `X-PAD-Admin`; JSON `{"approve": true}` counts a held row from then on, `false` hides it |
 | `DELETE /v1/donate/<id>` | header `X-PAD-Admin` hides any row; `X-PAD-Key` plus `X-PAD-Edit` (the token the POST answered) lets the app that added a row take it back |
+| `POST /v1/report` | header `X-PAD-Key`; JSON `title, body, name, email, app_version, platform, picture_type, picture_b64`: the app's Report a problem (PAD-780) |
+| `GET /v1/admin/reports` | header `X-PAD-Admin`; the reports not yet taken, oldest first, picture included |
+| `POST /v1/admin/reports/<id>/taken` | header `X-PAD-Admin`; deletes the row once the tracker has it |
 
 Remove a junk entry:
 
 ```bash
 curl -X DELETE -H "X-PAD-Admin: $ADMIN_KEY" https://pad-donations.<account>.workers.dev/v1/donate/<id>
+```
+
+## Problem reports
+
+The app's Report a problem window (PAD-780) posts its record here: the
+user's words, the app's version and system, the card and project it had
+open, the tail of its log and, if they added one, a picture shrunk to a
+JPEG under 700 KB. The row is the whole record plus the picture (base64),
+so it stays well under D1's 2 MB row limit, and it lives here only until
+David's tracker (pad-triage, `padtriage/appreports.py`) polls
+`/v1/admin/reports`, files it as a ticket and posts `/taken`, which deletes
+it. The same five-an-hour, hash-blanked-after-an-hour rule as donations
+applies. Discord gets one line per report (the title, the app version and
+the platform; never the name, the address or the record).
+
+Adding this to a Worker deployed before it is one command, since the
+schema only creates what is missing:
+
+```bash
+npx wrangler d1 execute pad-donations --remote --file schema.sql
+npx wrangler deploy
 ```
 
 ## Big entries wait for you

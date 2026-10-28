@@ -146,7 +146,7 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
         want += ["Logs ▸", "Save automatically ▸", "toggle_scenes_own_colours", "sep",
                  "clear_voice_models", "sep",
                  "Prerequisites ▸", "sep",
-                 "donations", "view_disclaimer"]
+                 "donations", "report_problem", "view_disclaimer"]
         assert shape == want
         assert not any(it.get("header") for it in items(w))
         up = cascade(w, "Check automatically")["submenu"]

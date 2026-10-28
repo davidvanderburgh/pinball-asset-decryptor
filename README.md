@@ -83,6 +83,9 @@ needs: **[Installing](docs/guide/install.md)**.
    put it in the machine. Keep a backup of the original first.
 
 The **?** button in the app opens tips for whichever tab you are on.
+Something wrong? **Report a problem** in the top bar sends the developer
+what happened, with the app's log and the card's details, after showing
+you exactly what goes.
 
 ## Documentation
 

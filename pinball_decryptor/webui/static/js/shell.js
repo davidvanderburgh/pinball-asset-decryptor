@@ -414,6 +414,8 @@ function TopBar({ shell }) {
       : html`<span class="hide-narrow"><${Chip} kind="ok" dot title=${sx.update_state === "latest" ? "You're on the latest version." : "This version"}>v${shell.version || ""}${sx.update_state === "latest" ? ", latest" : ""}<//></span>`}
     ${sx.donations ? html`<button type="button" class="btn sm sx-don-btn" onClick=${() => openDialog("donations")} ...${tip(sx.donations.tip)} aria-label="Donate to an animal shelter">
         <${Icon} name="paw" /><span>Donate</span></button>` : null}
+    <button type="button" class="btn sm sx-rep-btn" onClick=${() => openDialog("report")} ...${tip("Something went wrong? Send the developer what happened, with the log and the card's details.")} aria-label="Report a problem">
+        <${Icon} name="flag" /><span class="hide-narrow">Report a problem</span></button>
     <${LangBtn} shell=${shell} />
     ${working ? html`<${IconBtn} icon="help" label="Tips for this tab" cls="sx-help" onClick=${() => openDialog("tips")} />` : null}
     <span class="sx-gear">

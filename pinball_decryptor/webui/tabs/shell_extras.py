@@ -8,6 +8,7 @@ What the Tk ``MainWindow`` kept around the notebook, on the page:
 * the voice recognition quality (``voice_quality`` + ``voice_choices``), which
   the Extract tab shows beside Auto-name call-outs (PAD-460);
 * the green ? "Tips for this tab" window (``webui/help_content.py``);
+* the Report a problem window (``shellx_report.py``, PAD-780);
 * the Project menu's windows (``shellx_projects.py``) and Manage disk space
   (``shellx_disk.py``), and the top bar's Reset... (``shellx_reset.py``, PAD-569);
 * updates: the blue banner, the "Up to date" answer, the download progress
@@ -33,6 +34,7 @@ from ..picker_data import MFR_VISUALS, peek_text, tooltip_text
 from ..shellx_disk import DiskMixin
 from ..shellx_donations import DonationsMixin
 from ..shellx_projects import ProjectsMixin
+from ..shellx_report import ReportMixin
 from ..shellx_reset import ResetMixin
 from ..update_interval import (UPDATE_INTERVAL_CHOICES,
                                normalize_update_interval)
@@ -80,7 +82,7 @@ def _visuals():
 
 
 class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, DonationsMixin,
-                  TabService):
+                  ReportMixin, TabService):
     ns = "shellx"
     key = ""
     label = ""
@@ -151,6 +153,8 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, DonationsMixin,
         # PAD-754: the paw chip's total, from the cache at once and the
         # service in the background
         self._donations_init()
+        # PAD-780: the Report a problem window's memory and state
+        self._report_init()
         if sys.platform == "win32":
             try:
                 # the badge, after the automatic clean-up's first look
@@ -194,6 +198,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, DonationsMixin,
             "install_prereqs": self.install_prereqs,
             "preview_features": lambda: self._open_dialog("preview_features"),
             "donations": lambda: self._open_dialog("donations"),
+            "report_problem": lambda: self._open_dialog("report"),
             "view_disclaimer": lambda: self._open_dialog("disclaimer"),
             "tips": lambda: self._open_dialog("tips"),
             "change_history": self.change_history,
@@ -373,6 +378,7 @@ class ShellExtras(ProjectsMixin, DiskMixin, ResetMixin, DonationsMixin,
             items.append({"id": "preview_features",
                           "label": "Preview features…"})
         items.append({"id": "donations", "label": "Animal shelters…"})
+        items.append({"id": "report_problem", "label": "Report a problem…"})
         items.append({"id": "view_disclaimer", "label": "View disclaimer…"})
         self.ctx.store.set("shell", settings_items=items,
                            gear_dots={"update": bool(self._update_available),

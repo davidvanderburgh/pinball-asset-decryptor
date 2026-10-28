@@ -23,3 +23,24 @@ CREATE TABLE IF NOT EXISTS donations (
 );
 CREATE INDEX IF NOT EXISTS donations_at ON donations (at);
 CREATE INDEX IF NOT EXISTS donations_ip ON donations (ip_hash, at);
+
+-- Problem reports (PAD-780).  One row per Report a problem the app sent:
+-- the record as the user saw it before sending, a shrunk picture if they
+-- added one, and the name and address they typed (optional).  A row lives
+-- here only until David's tracker takes it (deleted on /taken); `ip_hash`
+-- is for the five-an-hour limit and is blanked after an hour, as above.
+CREATE TABLE IF NOT EXISTS reports (
+  id           TEXT PRIMARY KEY,
+  at           INTEGER NOT NULL,
+  app_version  TEXT    NOT NULL DEFAULT '',
+  platform     TEXT    NOT NULL DEFAULT '',
+  title        TEXT    NOT NULL DEFAULT '',
+  body         TEXT    NOT NULL DEFAULT '',
+  name         TEXT    NOT NULL DEFAULT '',
+  email        TEXT    NOT NULL DEFAULT '',
+  picture_type TEXT    NOT NULL DEFAULT '',
+  picture      TEXT    NOT NULL DEFAULT '',
+  ip_hash      TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS reports_at ON reports (at);
+CREATE INDEX IF NOT EXISTS reports_ip ON reports (ip_hash, at);

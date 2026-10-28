@@ -20,6 +20,11 @@ DONATIONS_URL = os.environ.get(
     "PAD_DONATIONS_URL",
     "https://pad-donations.davidvanderburgh.workers.dev")
 DONATIONS_APP_KEY = "pad-shelters-2026"
+# Report a problem (PAD-780, core/problem_report.py) goes to the same
+# Worker: PAD_REPORTS_URL points it elsewhere (tests); empty turns the
+# button into "save as a file" only.  Same key, same reasoning.
+REPORTS_URL = os.environ.get("PAD_REPORTS_URL", DONATIONS_URL)
+REPORTS_APP_KEY = DONATIONS_APP_KEY
 
 # Application name used for settings directory + window title.
 APP_NAME = "Pinball Asset Decryptor"

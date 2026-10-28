@@ -50,6 +50,13 @@ const RECENT = 12;
 const PLACES = 500;                // every place, for the board and the map
 const PAGE = 100;                  // /v1/all rows per page
 const PER_HOUR = 5;                // donations one address may add per hour
+// Problem reports (PAD-780): what the app's Report a problem window sends.
+// A row is the whole record plus a picture, and it lives here only until
+// David's tracker takes it (POST .../taken deletes it), so nothing a user
+// wrote stays on this side longer than that poll.
+const REPORTS_PER_HOUR = 5;
+const REPORT_MAX_BODY = 400000;    // the record (log tail included)
+const REPORT_MAX_PICTURE = 1000000; // base64 of a shrunk JPEG
 
 const json = (body, status = 200, extra = {}) =>
   new Response(JSON.stringify(body), {
@@ -297,6 +304,76 @@ async function remove(env, id) {
   return json({ ok: true, id });
 }
 
+// ---- problem reports (PAD-780) --------------------------------------------
+function validateReport(body) {
+  const title = clean(body.title, 120);
+  const record = typeof body.body === "string" ? body.body : "";
+  if (!record.trim()) return [null, "The report is empty."];
+  if (record.length > REPORT_MAX_BODY) return [null, "The report is too long."];
+  const picture = typeof body.picture_b64 === "string" ? body.picture_b64 : "";
+  if (picture.length > REPORT_MAX_PICTURE) return [null, "The picture is too big."];
+  if (picture && !/^[A-Za-z0-9+/=\r\n]+$/.test(picture)) return [null, "The picture is not base64."];
+  return [{
+    title: title || record.split("\n")[0].slice(0, 120),
+    body: record,
+    name: clean(body.name, 80),
+    email: clean(body.email, 120),
+    app_version: clean(body.app_version, 40),
+    platform: clean(body.platform, 40),
+    picture_type: picture ? clean(body.picture_type, 40) || "image/jpeg" : "",
+    picture,
+  }, null];
+}
+
+async function report(request, env, ctx) {
+  if (env.APP_KEY && request.headers.get("X-PAD-Key") !== env.APP_KEY) {
+    return fail("Not from the app.", 403);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch (e) {
+    return fail("Bad request.", 400);
+  }
+  const [rep, error] = validateReport(body || {});
+  if (error) return fail(error, 400);
+  const who = await ipHash(request, env);
+  const now = Math.floor(Date.now() / 1000);
+  const recent = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM reports WHERE ip_hash = ? AND at > ?")
+    .bind(who, now - 3600).first();
+  if (recent.n >= REPORTS_PER_HOUR) return fail("Too many reports in one hour. Try again later.", 429);
+  await env.DB.prepare(
+    "UPDATE reports SET ip_hash = '' WHERE ip_hash != '' AND at <= ?")
+    .bind(now - 3600).run();
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    "INSERT INTO reports (id, at, app_version, platform, title, body, name, email, " +
+    "picture_type, picture, ip_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, now, rep.app_version, rep.platform, rep.title, rep.body, rep.name,
+          rep.email, rep.picture_type, rep.picture, who).run();
+  // the line David sees: never the name or the address, never the record
+  notify(env, ctx, "🐞 Problem report from the app: " + rep.title
+    + " · app " + (rep.app_version || "?") + " on " + (rep.platform || "?")
+    + (rep.picture ? " · with a picture" : ""));
+  return json({ ok: true, id }, 201);
+}
+
+// David's tracker (pad-triage) polls this with the admin key, files each
+// row as a ticket, then takes it
+async function adminReports(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT id, at, app_version, platform, title, body, name, email, " +
+    "picture_type, picture FROM reports ORDER BY at LIMIT 20").all();
+  return json({ ok: true, rows: results });
+}
+
+async function reportTaken(env, id) {
+  const r = await env.DB.prepare("DELETE FROM reports WHERE id = ?").bind(id).run();
+  if (!r.meta.changes) return fail("No such report.", 404);
+  return json({ ok: true, id });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -310,6 +387,18 @@ export default {
       }
       if (request.method === "POST" && path === "/v1/donate") {
         return donate(request, env, ctx);
+      }
+      if (request.method === "POST" && path === "/v1/report") {
+        return report(request, env, ctx);
+      }
+      if (request.method === "GET" && path === "/v1/admin/reports") {
+        if (!isAdmin(request, env)) return fail("Not allowed.", 403);
+        return adminReports(env);
+      }
+      const tk = path.match(/^\/v1\/admin\/reports\/([0-9a-f-]{8,40})\/taken$/);
+      if (request.method === "POST" && tk) {
+        if (!isAdmin(request, env)) return fail("Not allowed.", 403);
+        return reportTaken(env, tk[1]);
       }
       if (path === "/v1/admin/list") {
         if (!isAdmin(request, env)) return fail("Not allowed.", 403);
@@ -339,4 +428,4 @@ export default {
 export function meta() {
   return { MILESTONES, RATES, HOLD_OVER_USD };
 }
-export { validate };
+export { validate, validateReport };

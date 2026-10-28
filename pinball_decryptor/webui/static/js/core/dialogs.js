@@ -18,6 +18,14 @@ export function openDialog(name, props = {}) { if (openHook) openHook(name, prop
 
 const ICON = { warning: ["warn", "icon-w"], error: ["error", "icon-e"], question: ["question", "icon-q"], info: ["info", "icon-i"] };
 
+// PAD-780: an error box's words, as the Report a problem window's opening
+// line, so the user need not retype them
+function reportWords(spec) {
+  const head = spec.title && spec.title !== "Pinball Asset Decryptor" ? spec.title + ": " : "";
+  return (head + (spec.message || "") + (spec.detail ? "\n" + spec.detail : "")).trim()
+    + "\n\nWhat I was doing: ";
+}
+
 function MessageModal({ spec }) {
   const [icon, iconCls] = ICON[spec.icon] || ICON.info;
   const answer = (id) => reply(spec.id, id);
@@ -38,7 +46,10 @@ function MessageModal({ spec }) {
     <div class="modal" role="alertdialog" aria-modal="true" aria-label=${spec.title}>
       <div class="hd"><span class=${iconCls}><${Icon} name=${icon} cls="lg" /></span><span class="h2">${spec.title || "Pinball Asset Decryptor"}</span></div>
       <div class="bd"><div class="msg">${spec.message}</div>${spec.detail ? html`<div class="msg muted small">${spec.detail}</div>` : null}</div>
-      <div class="ft">${buttons.map((b) => html`<${Button} kind=${b.id === deflt ? (spec.icon === "warning" && b.id === "yes" ? "primary" : "primary") : ""}
+      <div class="ft">${spec.icon === "error" && spec.report !== false ? html`<${Button} kind="ghost" size="sm" icon="flag" cls="dlg-report"
+          title="Send the developer what happened, with the log and the card's details"
+          onClick=${() => { answer(buttons.length === 1 ? buttons[0].id : cancelId); openDialog("report", { prefill: reportWords(spec) }); }}>Report a problem…<//><span class="grow"></span>` : null}
+        ${buttons.map((b) => html`<${Button} kind=${b.id === deflt ? (spec.icon === "warning" && b.id === "yes" ? "primary" : "primary") : ""}
         autoFocus=${b.id === deflt} onClick=${() => answer(b.id)}>${b.label}<//>`)}</div>
     </div></div>`;
 }

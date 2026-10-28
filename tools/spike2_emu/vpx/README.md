@@ -206,7 +206,32 @@ made playable. The base file is Visual Pinball's own "Nudge Test and
 Calibration" table (`PAD_VPX_BASE` names another), whose items and
 collections are dropped and whose GameData is resized to the drawing. The
 map it writes goes beside the table and to `~/.pad-vpx/maps/<title>.shadow.json`,
-where the controller looks first. What the first loads taught: the table's
+where the controller looks first.
+
+**Ramps, orbits and guides: `vpxgen_geo/<title>.json`.** The drawing is a
+full line drawing of the playfield, so a title's geometry is TRACED from it
+into a geometry file (drawing coordinates, heights in Visual Pinball
+units): the `outline` (with the playfield's arch), `walls` (an open path is
+a guide `thick` units wide; a `closed` polygon with a `slingshot` edge and
+its `switch` is a sling), `ramps` (`flat` or `wire`, height linear from
+`h0` to `h1`, so a ramp that climbs and comes back is two or three ramps
+end to end), `switch_surface` (a switch that rides a ramp), `drain`,
+`flippers` (an upper flipper's pivot and angles) and `saucer_dir`. A title
+without one gets an arched outline and the rest as before. Bond's
+(`james_bond_le.json`): the arch, both orbit lanes, inlane guides, slings,
+the apron funnel, and the right ramp (up from its enter opto, round the top
+past its exit opto, back down to the right inlane). Five things the live
+tests taught: Visual Pinball's example ramp is decoration (Collidable off,
+set on here); a flat ramp into a wireform threw the ball back at the join,
+so returns are flat ramps; a sling polygon wound clockwise on screen kicks
+the ball INTO itself, so `sling_winding` reverses it; the upper flipper
+points down along the left orbit and narrowed the lane below a ball's
+width where it stood at its coil; and the bridge's saucer and drain subs
+call `PlaySoundAt`, which every tribute defines and the base script now
+does. `vpxkeys.py shoot <x> <y> <angle> <speed>` fires a test ball from
+any spot (table units) and the table traces its path to
+`%TEMP%\padshoot.log`, which is how each shot was proven. What the first
+loads taught: the table's
 NAME stays `Table1` (the script's events are named after it), a Timer
 named `PulseTimer` must exist (core.vbs runs `vpmTimer` on it, and without
 it no `PulseSw` reaches the game), and a coil's group in `device_xy.txt` is

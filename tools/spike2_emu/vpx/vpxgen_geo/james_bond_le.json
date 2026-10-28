@@ -1,0 +1,47 @@
+{
+  "_": [
+    "james_bond_le's playfield geometry for vpxgen.py, traced from the game's",
+    "own service-menu drawing (dump/tables/james_bond_le/playfield.png, 459x998).",
+    "Points are in that drawing's coordinates, the same ones switch_xy.txt and",
+    "device_xy.txt use; heights are Visual Pinball units above the playfield.",
+    "walls: an open path is a wall `thick` drawing units wide along it; a",
+    "`closed` one is the polygon itself (a slingshot: `slingshot` names the",
+    "segment that kicks). ramps: `kind` flat or wire, height rising or falling",
+    "linearly from h0 at the first point to h1 at the last. A flat ramp joins a",
+    "flat one cleanly; a flat ramp into a wireform threw the ball back at the",
+    "join, so the right ramp's return is flat too. switch_surface: a",
+    "switch whose trigger sits ON a ramp. The upper left flipper points DOWN",
+    "along the left orbit's inner wall (pivot at its top, the drawing's",
+    "elongated shape at 62-70, 428-485), its pivot moved right a little so the",
+    "orbit lane past it stays a ball wide; the left eject kicks up and right.",
+    "The side ramp and the back-ramp",
+    "wireform are not built: where they start and join could not be read off",
+    "the drawing, and the side ramp's enter opto lies under the right ramp here."
+  ],
+  "outline": {"thick": 8, "height": 60, "points": [
+    [25, 995], [25, 300], [27, 250], [31, 190], [40, 140], [55, 100], [78, 68],
+    [105, 48], [140, 38], [380, 38], [405, 44], [420, 58], [429, 80], [432, 120], [432, 995]]},
+  "walls": [
+    {"name": "ShooterLaneWall", "thick": 6, "points": [[396, 995], [396, 585]]},
+    {"name": "RightOrbitInner", "thick": 6, "points": [[396, 585], [399, 460], [401, 335]]},
+    {"name": "LeftOrbitInner", "thick": 6, "points": [[62, 345], [60, 270], [66, 205], [84, 150], [110, 115], [140, 96]]},
+    {"name": "LeftOrbitExit", "thick": 6, "points": [[27, 515], [52, 558]]},
+    {"name": "LeftInlaneGuide", "thick": 6, "points": [[58, 650], [58, 745], [72, 770], [125, 800]]},
+    {"name": "RightInlaneGuide", "thick": 6, "points": [[362, 650], [362, 745], [348, 770], [295, 800]]},
+    {"name": "LeftSling", "closed": true, "slingshot": 0, "switch": 68, "points": [[90, 672], [128, 748], [112, 760], [88, 738]]},
+    {"name": "RightSling", "closed": true, "slingshot": 0, "switch": 67, "points": [[292, 748], [330, 672], [332, 738], [308, 760]]},
+    {"name": "Apron", "thick": 6, "points": [[25, 782], [130, 850], [168, 878], [200, 892], [222, 892], [255, 878], [290, 852], [396, 786]]}
+  ],
+  "drain": [211, 878],
+  "flippers": {"UpperLeftFlipper": {"at": [66, 428], "start": 172, "end": 125, "length": 115}},
+  "saucer_dir": {"53": 65},
+  "ramps": [
+    {"name": "RightRamp", "kind": "flat", "width": 70, "h0": 0, "h1": 90, "wall": 62,
+     "points": [[368, 482], [360, 420], [348, 340], [340, 290], [330, 264], [315, 255], [300, 262]]},
+    {"name": "RightRampReturn", "kind": "flat", "width": 60, "h0": 90, "h1": 75, "wall": 50,
+     "points": [[304, 258], [288, 310], [282, 390], [292, 450], [312, 505], [326, 560]]},
+    {"name": "RightRampDrop", "kind": "flat", "width": 60, "h0": 75, "h1": 0, "wall": 50,
+     "points": [[326, 556], [338, 620], [346, 668]]}
+  ],
+  "switch_surface": {"46": "RightRamp", "48": "RightRamp"}
+}

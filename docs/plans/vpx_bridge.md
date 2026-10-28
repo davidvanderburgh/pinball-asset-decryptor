@@ -249,3 +249,59 @@ flippers fired from their coils, and the table's 86 lights agreed with the
 machine's LED plane on every steady insert across four samples; closing
 the table stopped what it had started. The ball itself has only the outer
 walls, the lane guides and the slingshots to meet.
+
+## Ramps and real geometry on the generated table
+
+David (2026-10-28): "We should try to make the ramps etc in the vpx tables
+instead of a flat design". The service-menu drawing is a complete line
+drawing of the playfield - arch, orbit lanes, wireforms, ramp plastics,
+lane guides, slings, apron - in the same coordinates as the switch and
+coil positions, so a title's geometry is traced from it, by hand, into
+`vpxgen_geo/<title>.json` (outline, walls, slings, ramps, ramp-riding
+switches, drain, flipper placement, saucer directions), and the generator
+builds it. A title without a geometry file gets an arched outline; the
+automatic placing of switches, lights and coils is unchanged.
+
+Bond's file traces the playfield arch, both orbit lanes (the right one up
+the shooter side, the left one down to the left eject), the inlane guides,
+both slings, the apron funnel to the drain, and the right ramp: a flat ramp
+up from its enter opto (46), round the top past its exit opto (48), then a
+return down the right-hand wireform's line to the right inlane. The side
+ramp and the back-ramp wireform are not built: where they start and join
+could not be read off the drawing, and the side ramp's enter opto (47) lies
+under the right ramp as traced.
+
+The proof is shot by shot: `vpxkeys.py shoot` fires a test ball from a spot
+(a kicker off the table makes it, the script places and aims it) and the
+table writes the ball's position and height every tenth of a second. Five
+problems came out that way, each fixed:
+
+* the ball's height stayed at its radius the whole way up: Visual Pinball's
+  example ramp is decoration, Collidable off;
+* the ball climbed to height 114, crossed 46 and 48, and rolled back down at
+  the join of a flat ramp and a wireform: the return is a flat ramp now;
+* a ball fired at a sling ended up rattling inside it: the polygon was
+  wound clockwise on screen and Visual Pinball kicked it inwards
+  (`sling_winding` reverses it and renumbers the kicking edge);
+* an orbit ball wedged between the outer wall and the upper flipper: the
+  flipper points down along the orbit's inner wall (the drawing's
+  elongated shape) and its pivot moves a little right, and a deflector at
+  the orbit's foot steers the ball off the outlane;
+* the eject's handler called `PlaySoundAt`, which the base script lacked.
+
+Proven 2026-10-28 11:58-12:19 on slot 1 of PAD-Runtime, the run started by
+Visual Pinball itself: right-ramp shots at three speeds close 46, 48 and
+the right return lane (61); right-orbit shots close 108, 81 and 92 and
+reach the left eject (53), which the game empties; both slings kick out. A
+real game: four coins and Start served a ball (trough switches moved, the
+trough coil fired), the lockbar fired the auto plunger, the ball ran
+108-81-92 into the eject and out to the side ramp target, the three
+flippers fired from their coils, and the LCD showed 3,117,950 on ball 1.
+
+The run started for a table brings up the game's LCD window, which took
+the foreground - and Visual Pinball pauses the moment it loses it. The
+controller now hands the foreground back to the player window it was given
+in `Run`, for the first five minutes, and only from a window whose title
+carries the kit's PAD-VPX label: proven in the same session (the log line
+`foreground: [... PAD-VPX ...] -> the player again`, four seconds after the
+launch).

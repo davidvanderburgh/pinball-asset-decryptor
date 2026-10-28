@@ -97,6 +97,7 @@ POLL_S = 0.008                  # padled poll; a 9p read is ~1-3 ms
 READ_N = max(coilmap.HI_READ, coilmap.RULE_READ)   # one read takes every plane
 LAMP_ON = int(os.environ.get("PAD_VPX_LAMP_ON", "1"))   # LED level that is "lit"
 MIN_PULSE_MS = 40               # a coil pulse shorter than a poll still shows
+FRONT_WATCH_S = 300             # how long after Run a started run's windows are watched
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT = 1, 2, 4
@@ -608,7 +609,12 @@ class Bridge:
 
     # -- the poll
     def _poll_loop(self):
+        last_front = 0.0
         while self.running:
+            now = time.monotonic()
+            if self.launch is not None and now - last_front >= 1.0 and now - self.start_t < FRONT_WATCH_S:
+                last_front = now
+                self._keep_player_front()
             if not self.attached:
                 self._poll_starting()
                 time.sleep(1.0)
@@ -617,6 +623,40 @@ class Bridge:
             self._poll_once()
             self.last_poll_ms = (time.monotonic() - t0) * 1000.0
             time.sleep(POLL_S)
+
+    def _keep_player_front(self):
+        """A run this bridge started opens the game's LCD window, and that
+        window takes the foreground - and Visual Pinball pauses the moment it
+        loses it, so the table sat frozen until the player clicked it. While
+        the run comes up, the foreground is handed back to the player, but
+        ONLY from a window of the kit's own run (its title carries the
+        PAD-VPX label): never from anything else the user has in front."""
+        hwnd = getattr(self, "player_hwnd", 0)
+        if not hwnd or sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            fg = u.GetForegroundWindow()
+            if not fg or fg == hwnd:
+                return
+            buf = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(fg, buf, 256)
+            if padlaunch.LABEL not in buf.value:
+                return
+            k = ctypes.windll.kernel32
+            fg_tid = u.GetWindowThreadProcessId(fg, None)
+            me = k.GetCurrentThreadId()
+            u.AttachThreadInput(me, fg_tid, True)
+            try:
+                u.ShowWindow(hwnd, 9)            # SW_RESTORE, if it was minimised
+                u.SetForegroundWindow(hwnd)
+                u.BringWindowToTop(hwnd)
+            finally:
+                u.AttachThreadInput(me, fg_tid, False)
+            log("foreground: [%s] -> the player again" % buf.value)
+        except Exception as exc:                            # noqa: BLE001
+            log("foreground hand-back failed: %s" % exc)
 
     def _poll_once(self):
         data = read_block(self.rig.led_path(), READ_N)
@@ -893,6 +933,12 @@ class PadController:
         if key == "solenoid":
             return b.solenoid(args[0])
         if key == "run":
+            # Controller.Run GetPlayerHWnd: the player window, so a run this
+            # bridge starts can hand the foreground back to it
+            try:
+                b.player_hwnd = int(args[0]) if args and args[0] is not None else 0
+            except (TypeError, ValueError):
+                b.player_hwnd = 0
             b.run()
             return None
         if key == "stop":

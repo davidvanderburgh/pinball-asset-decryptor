@@ -121,9 +121,9 @@ def stop(title):
               % (title, rec.get("slot"), rec.get("label") or "somebody"))
         return 1
     launch = padlaunch.Launch(title, "", dist=rec.get("distro"))
-    launch.slot = int(rec.get("slot"))
+    slot = launch.slot = int(rec.get("slot"))
     launch.stop()
-    print("stopped %s on slot %d" % (title, launch.slot))
+    print("stopped %s on slot %d" % (title, slot))
     return 0
 
 

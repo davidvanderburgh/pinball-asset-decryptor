@@ -148,10 +148,11 @@ def ident(s):
     return name if name and not name[0].isdigit() else "X" + name
 
 
-def set_points(data, points, slingshot_seg=None):
-    """A shaped item (wall, trigger, light) with its drag points replaced:
-    `points` are (x, y) on the table; the segment from point i to i+1 gets
-    the slingshot flag when i == slingshot_seg."""
+def set_points(data, points, slingshot_seg=None, smooth=False):
+    """A shaped item (wall, trigger, light, ramp) with its drag points
+    replaced: `points` are (x, y) on the table; the segment from point i to
+    i+1 gets the slingshot flag when i == slingshot_seg; `smooth` makes every
+    point a curve point (a ramp's path)."""
     t = struct.unpack_from("<i", data, 0)[0]
     out = bytearray(struct.pack("<i", t))
     tmpl = None
@@ -183,7 +184,7 @@ def set_points(data, points, slingshot_seg=None):
             elif tag == "SLNG":
                 payload = i32(1 if slingshot_seg == k else 0)
             elif tag == "SMTH":
-                payload = i32(0)
+                payload = i32(1 if smooth else 0)
             out += vpxfile.biff_record(tag, payload)
         out += vpxfile.biff_record("ENDB", b"")
     out += vpxfile.biff_record("ENDB", b"")
@@ -193,6 +194,70 @@ def set_points(data, points, slingshot_seg=None):
 def circle(cx, cy, r, n=12):
     return [(cx + r * math.cos(2 * math.pi * k / n), cy + r * math.sin(2 * math.pi * k / n))
             for k in range(n)]
+
+
+def thick(points, t):
+    """The closed outline of an open path `t` wide: a wall along a guide
+    line. Each vertex moves half the width along the mean of its two
+    segments' normals (a mitre, clamped so a sharp corner stays bounded),
+    out along one side and back along the other."""
+    n = len(points)
+    if n < 2:
+        raise ValueError("a path needs two points")
+    h = t / 2.0
+    normals = []
+    for i in range(n - 1):
+        (x0, y0), (x1, y1) = points[i], points[i + 1]
+        dx, dy = x1 - x0, y1 - y0
+        ln = math.hypot(dx, dy) or 1.0
+        normals.append((-dy / ln, dx / ln))
+    side = []
+    for i in range(n):
+        if i == 0:
+            nx, ny = normals[0]
+        elif i == n - 1:
+            nx, ny = normals[-1]
+        else:
+            ax, ay = normals[i - 1]
+            bx, by = normals[i]
+            nx, ny = ax + bx, ay + by
+            ln = math.hypot(nx, ny) or 1.0
+            nx, ny = nx / ln, ny / ln
+            cos = max(0.3, nx * ax + ny * ay)       # mitre length 1/cos, at most ~3.3x
+            nx, ny = nx / cos, ny / cos
+        side.append((nx * h, ny * h))
+    left = [(x + ox, y + oy) for (x, y), (ox, oy) in zip(points, side)]
+    right = [(x - ox, y - oy) for (x, y), (ox, oy) in zip(points, side)]
+    return left + right[::-1]
+
+
+def sling_winding(points, seg):
+    """A slingshot wall's corners in the order Visual Pinball kicks OUT of:
+    it takes a slingshot's push from the winding of the polygon, and a
+    polygon wound clockwise on screen (y down) kicked the ball INTO the
+    triangle, where it rattled for ever. Such a polygon is reversed, and the
+    kicking edge (segment `seg`, from point seg to seg+1) renumbered."""
+    n = len(points)
+    area = sum(points[i][0] * points[(i + 1) % n][1] - points[(i + 1) % n][0] * points[i][1]
+               for i in range(n))
+    if area <= 0:
+        return list(points), seg
+    return list(reversed(points)), (n - 2 - seg) % n
+
+
+def load_geo(title):
+    """A title's traced geometry (vpxgen_geo/<title>.json, or the user's own
+    in ~/.pad-vpx/geo), or None: the generator then builds its plain outline."""
+    for d in (os.path.join(os.path.expanduser("~"), ".pad-vpx", "geo"), os.path.join(HERE, "vpxgen_geo")):
+        p = os.path.join(d, "%s.json" % title)
+        if os.path.exists(p):
+            return json.load(open(p, encoding="utf-8"))
+    return None
+
+
+#: Visual Pinball's ramp kinds (RampType): a flat ramp has solid walls, a
+#: 4-wire ramp is a wireform that holds the ball on all sides
+RAMP_TYPES = {"flat": 0, "wire": 1}
 
 
 class Gen:
@@ -215,6 +280,9 @@ class Gen:
                     "lamps": {}, "extra_vbs": ""}
         self.script_parts = []
         self.rep = []
+        self.geo = load_geo(title)
+        # a switch whose trigger rides a ramp: id -> ramp name
+        self.surface = {int(k): v for k, v in ((self.geo or {}).get("switch_surface") or {}).items()}
 
     # -- geometry
     def pt(self, x, y):
@@ -234,10 +302,76 @@ class Gen:
         return data
 
     def wall(self, name, points, slingshot_seg=None, height=50.0, hit_event=False):
+        if slingshot_seg is not None:
+            points, slingshot_seg = sling_winding(points, slingshot_seg)
         data = vpxfile.set_fields(proto("wall"), {
             "NAME": vpxfile.wide(name), "HTTP": f32(height), "HTEV": i32(1 if hit_event else 0),
             "VSBL": i32(1), "SVBL": i32(1), "CLDW": i32(1), "SLGF": f32(80.0 if slingshot_seg is not None else 0.0)})
         return self.add(set_points(data, points, slingshot_seg))
+
+    def geo_wall(self, spec, name=None):
+        """One wall of the traced geometry: an open guide path `thick` wide,
+        or a `closed` polygon (with a `slingshot` segment, for a sling)."""
+        pts = [self.pt(x, y) for x, y in spec["points"]]
+        if spec.get("closed"):
+            poly = pts
+        else:
+            poly = thick(pts, spec.get("thick", 6) * self.scale)
+        sling = spec.get("slingshot")
+        return self.wall(name or spec["name"], poly, slingshot_seg=sling,
+                         height=spec.get("height", 50.0), hit_event=sling is not None)
+
+    def flipper(self, name, x, y, key="flipper_left"):
+        """A flipper at its coil's place, unless the traced geometry places it
+        (`flippers`: {name: {"at": [x, y], "start": deg, "end": deg,
+        "length": units}}): an upper flipper rarely points the way the main
+        ones do."""
+        spec = ((self.geo or {}).get("flippers") or {}).get(name)
+        if not spec:
+            return self.clone(key, name, x, y)
+        if spec.get("at"):
+            x, y = self.pt(*spec["at"])
+        fields = {}
+        if "start" in spec:
+            fields["ANGS"] = f32(spec["start"])
+        if "end" in spec:
+            fields["ANGE"] = f32(spec["end"])
+        if "length" in spec:
+            fields["FLPR"] = f32(spec["length"])
+        return self.clone(key, name, x, y, fields)
+
+    def saucer_dir(self, sw, y):
+        """Which way a saucer kicks: the traced geometry's `saucer_dir`
+        {switch id: degrees, 0 = up}, else down the table from the upper
+        half and up it from the lower."""
+        d = ((self.geo or {}).get("saucer_dir") or {}).get(str(sw["id"]))
+        if d is not None:
+            return float(d)
+        return 180.0 if y < self.table_h / 2 else 0.0
+
+    def geo_switch_walls(self):
+        """{switch id: wall name} for the traced walls that are a switch (a sling)."""
+        return {int(w["switch"]): w["name"] for w in (self.geo or {}).get("walls", []) if "switch" in w}
+
+    def ramp(self, spec):
+        """A ramp along a path: flat (solid floor and walls) or a wireform,
+        its height going linearly from h0 at the first point to h1 at the
+        last - a ramp that climbs then falls is two ramps end to end."""
+        x0, y0 = self.pt(*spec["points"][0])
+        kind = spec.get("kind", "flat")
+        wall = float(spec.get("wall", 62.0 if kind == "flat" else 0.0))
+        w = float(spec.get("width", 70.0 if kind == "flat" else 55.0))
+        data = vpxfile.clone_item(proto("ramp"), spec["name"], x0, y0)
+        data = vpxfile.set_fields(data, {
+            "HTBT": f32(spec.get("h0", 0.0)), "HTTP": f32(spec.get("h1", 60.0)),
+            "WDBT": f32(w), "WDTP": f32(w), "TYPE": i32(RAMP_TYPES[kind]),
+            "WLHL": f32(wall), "WLHR": f32(wall),
+            "WVHL": f32(min(wall, 30.0)), "WVHR": f32(min(wall, 30.0)), "RVIS": i32(1),
+            # the example table's ramp is decoration (Collidable off): ours
+            # must carry the ball
+            "CLDR": i32(1)})
+        pts = [self.pt(x, y) for x, y in spec["points"]]
+        return self.add(set_points(data, pts, smooth=True))
 
     # -- the switches
     def switch_kind(self, sw):
@@ -290,11 +424,25 @@ class Gen:
         lane = sw_by_name.get("SHOOTER LANE")
         lane_x = (lane["x"] * self.scale) if lane else W - 45
         lane_wall_x = lane_x - 40
-        # outer walls (the top is round on the real table; a rectangle here)
-        self.wall("OuterLeft", [(0, 0), (0, H)])
-        self.wall("OuterTop", [(0, 0), (W, 0)])
-        self.wall("OuterRight", [(W, 0), (W, H)])
-        self.wall("ShooterLaneWall", [(lane_wall_x, H * 0.42), (lane_wall_x, H)])
+        geo = self.geo
+        if geo:
+            # the title's traced geometry: its outline, guides, slings, apron
+            # and ramps, from the drawing's own lines
+            self.geo_wall(geo["outline"], name="Outline")
+            for spec in geo.get("walls", []):
+                self.geo_wall(spec)
+            for spec in geo.get("ramps", []):
+                self.ramp(spec)
+        else:
+            # no traced geometry: the playfield's outline with a round top
+            # (an arch of a quarter of the width at each corner), and the
+            # shooter lane's wall
+            r = W * 0.25
+            arc = lambda cx, cy, a0, a1: [(cx + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a)))
+                                          for a in range(a0, a1 + 1, 10)]
+            outline = [(8, H)] + arc(r + 8, r + 8, 180, 270) + arc(W - r - 8, r + 8, 270, 360) + [(W - 8, H)]
+            self.wall("Outline", thick(outline, 16), height=60.0)
+            self.wall("ShooterLaneWall", thick([(lane_wall_x, H), (lane_wall_x, H * 0.42)], 12))
         # flippers
         lf, rf, uf = self.coil_named("LEFT", "FLIPPER"), self.coil_named("RIGHT", "FLIPPER"), self.coil_named("UPPER", "FLIPPER")
         if lf and "UPPER" in lf["name"].upper():
@@ -307,12 +455,16 @@ class Gen:
         self.add(self.clone("flipper_right", "RightFlipper", rx, ry))
         if uf:
             ux, uy = self.pt(uf["x"], uf["y"])
-            self.add(self.clone("flipper_left", "UpperLeftFlipper", ux, uy))
-        # the apron: guides from the outlanes down to the flipper bases, a drain between
-        self.wall("ApronLeft", [(0, H * 0.78), (lx - 60, ly - 10), (lx - 30, ly + 36)])
-        self.wall("ApronRight", [(W - 100, H * 0.78), (rx + 60, ry - 10), (rx + 30, ry + 36)])
-        drain_y = min(H - 60, max(ly, ry) + 160)
-        self.add(self.clone("kicker", "Drain", (lx + rx) / 2, drain_y, {"RADI": f32(60.0), "TYPE": i32(0)}))
+            self.add(self.flipper("UpperLeftFlipper", ux, uy))
+        if geo and geo.get("drain"):
+            dx, dy = self.pt(*geo["drain"])
+            self.add(self.clone("kicker", "Drain", dx, dy, {"RADI": f32(40.0), "TYPE": i32(0)}))
+        else:
+            # the apron: guides from the outlanes down to the flipper bases, a drain between
+            self.wall("ApronLeft", thick([(8, H * 0.78), (lx - 60, ly - 10), (lx - 30, ly + 36)], 12))
+            self.wall("ApronRight", thick([(lane_wall_x, H * 0.78), (rx + 60, ry - 10), (rx + 30, ry + 36)], 12))
+            drain_y = min(H - 60, max(ly, ry) + 160)
+            self.add(self.clone("kicker", "Drain", (lx + rx) / 2, drain_y, {"RADI": f32(60.0), "TYPE": i32(0)}))
         self.map["trough"] = {"release": "BallRelease", "drain": "Drain",
                               "switches": [s["id"] for s in trough] + [j["id"] for j in jam[:1]],   # TROUGH 1 first: the eject end
                               "balls": max(1, len(trough)), "kick": [0, 4]}
@@ -332,7 +484,10 @@ class Gen:
             x, y = self.pt(s["x"], s["y"])
             name = ident(s["name"])
             if kind == "trigger":
-                data = vpxfile.set_fields(self.clone("trigger", name, x, y), {"RADI": f32(26.0)})
+                fields = {"RADI": f32(26.0)}
+                if s["id"] in self.surface:
+                    fields["SURF"] = narrow(self.surface[s["id"]])     # it rides that ramp
+                data = vpxfile.set_fields(self.clone("trigger", name, x, y), fields)
                 self.add(set_points(data, circle(x, y, 26)))
                 self.map["switches"][name] = {"id": s["id"], "event": "hit", "name": s["name"]}
             elif kind == "bumper":
@@ -352,6 +507,10 @@ class Gen:
                 self.map["switches"][name] = {"id": s["id"], "event": "hit", "name": s["name"]}
                 if kind == "drop":
                     self.drops = getattr(self, "drops", []) + [name]
+            elif kind == "sling" and s["id"] in self.geo_switch_walls():
+                # the traced sling wall is this switch's
+                wname = self.geo_switch_walls()[s["id"]]
+                self.map["switches"][wname] = {"id": s["id"], "event": "slingshot", "name": s["name"]}
             elif kind == "sling":
                 left = x < W / 2
                 pts = [(x - 40, y + 60), (x + 50, y - 50)] if left else [(x + 40, y + 60), (x - 50, y - 50)]
@@ -361,7 +520,7 @@ class Gen:
             elif kind == "saucer":
                 coil = self.saucer_coil(s)
                 self.add(self.clone("kicker", name, x, y, {"RADI": f32(28.0), "TYPE": i32(0)}))
-                self.map["saucers"][name] = {"switch": s["id"], "dir": 180.0 if y < H / 2 else 0.0,
+                self.map["saucers"][name] = {"switch": s["id"], "dir": self.saucer_dir(s, y),
                                              "power": 20, "name": s["name"]}
                 if coil:
                     self.coil_use(coil, "bs%s.SolOut" % name)
@@ -423,6 +582,10 @@ class Gen:
         self.add(self.clone("timer", "PinMAMETimer", -200, 100, {"TMON": i32(1), "TMIN": i32(1)}))
         self.add(self.clone("timer", "PulseTimer", -200, 150, {"TMON": i32(1), "TMIN": i32(100)}))
         self.add(self.clone("timer", "PadTestTimer", -200, 200, {"TMON": i32(1), "TMIN": i32(100)}))
+        # the test shooter (vpxkeys.py shoot): a kicker off the table that a
+        # test moves to a spot, makes a ball in and kicks
+        self.add(self.clone("kicker", "PadTestKicker", -150, 300, {"RADI": f32(25.0), "TYPE": i32(0)}))
+        self.map["test_shoot"] = True
 
     def saucer_coil(self, sw):
         words = [w for w in sw["name"].upper().split() if w not in ("OPTO", "1", "2", "3", "SWITCH")]
@@ -453,6 +616,10 @@ class Gen:
             'If Err Then MsgBox "Can\'t open core.vbs"',
             "On Error Goto 0",
             "Dim plungerIM",
+            "' the bridge's saucer and drain handlers call it (every tribute defines it)",
+            "Sub PlaySoundAt(sound, obj)",
+            "\tPlaySound sound, 0, 1",
+            "End Sub",
             "Sub Table1_Init",
             "\tSet plungerIM = New cvpmImpulseP",
             "\tplungerIM.InitImpulseP ShooterLane, 45, 0.6",
@@ -460,7 +627,39 @@ class Gen:
             '\tplungerIM.CreateEvents "plungerIM"',
             "End Sub",
             ] + self.flipper_sub("SolLFlipper", "LeftFlipper") + self.flipper_sub("SolRFlipper", "RightFlipper")
-            + (self.flipper_sub("SolULFlipper", "UpperLeftFlipper") if upper else []) + [""])
+            + (self.flipper_sub("SolULFlipper", "UpperLeftFlipper") if upper else []) + [
+            "Sub PadShoot(x, y, a, s)   ' a test ball at (x, y), moving at angle a (0 = up), speed s",
+            "\tOn Error Resume Next",
+            "\tDim b, r",
+            "\tSet b = PadTestKicker.CreateBall",
+            "\tPadTestKicker.Kick 0, 0",
+            "\tr = a * 3.14159265 / 180",
+            "\tb.X = x",
+            "\tb.Y = y",
+            "\tb.Z = 25",
+            "\tb.VelZ = 0",
+            "\tb.VelX = s * Sin(r)",
+            "\tb.VelY = -s * Cos(r)",
+            "\tIf Err Then PadShootLog \"PadShoot: \" & Err.Description",
+            "\tSet PadBall = b",
+            "\tPadTraceN = 60",
+            "\tPadShootLog \"shoot \" & x & \" \" & y & \" \" & a & \" \" & s",
+            "End Sub",
+            "Dim PadBall, PadTraceN : PadTraceN = 0",
+            "Sub PadTraceTick   ' the test ball's place, every test tick, for six seconds",
+            "\tIf PadTraceN <= 0 Then Exit Sub",
+            "\tPadTraceN = PadTraceN - 1",
+            "\tOn Error Resume Next",
+            "\tPadShootLog \"at \" & Int(PadBall.X) & \" \" & Int(PadBall.Y) & \" \" & Int(PadBall.Z)",
+            "End Sub",
+            "Sub PadShootLog(t)",
+            "\tDim fso, f",
+            "\tSet fso = CreateObject(\"Scripting.FileSystemObject\")",
+            "\tSet f = fso.OpenTextFile(fso.GetSpecialFolder(2) & \"\\padshoot.log\", 8, True)",
+            "\tf.WriteLine t",
+            "\tf.Close",
+            "End Sub",
+            ""])
 
     @staticmethod
     def flipper_sub(sub, obj):

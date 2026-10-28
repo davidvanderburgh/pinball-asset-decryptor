@@ -532,6 +532,7 @@ MINI_TABLES = {
         "coil      TROUGH                               370   858   20   20    7     1  -      playfield",
         "coil      AUTO PLUNGER                         415   872   20   20    7     4  -      playfield",
         "coil      LEFT FLIPPER                         141   813   20   20    7     5  -      playfield",
+        "coil      UPPER LEFT FLIPPER                    60   432   20   20    7     6  -      playfield",
         "coil      RIGHT VUK                            389   550   20   20    8     1  -      playfield",
         "coil      CENTER 3 BANK DROP TARGET            147   258   20   20    8     4  -      playfield",
         "led       SHOOT AGAIN                          210   863   20   20    8     8  -      playfield", ""]),
@@ -571,12 +572,15 @@ def test_generator_puts_the_titles_devices_on_a_table(mini_tables):
         kind, name, pos = vg.vpxfile.VpxTable.item_info(d)
         kinds[kind] = kinds.get(kind, 0) + 1
         names[name] = (kind, pos)
-    assert kinds["Flipper"] == 2 and kinds["Plunger"] == 1
+    assert kinds["Flipper"] == 3 and kinds["Plunger"] == 1
     assert kinds["Timer"] == 3 and "PulseTimer" in names, "vpmTimer runs on PulseTimer: no PulseSw without it"
     assert kinds["Bumper"] == 1 and kinds["Spinner"] == 1 and kinds["HitTarget"] == 2
     assert kinds["Light"] == 3, "an RGB triple is one light, the backpanel and topper none"
     assert "LBathOSub" in names, "a name ending in B is not a blue channel"
-    assert kinds["Kicker"] == 3                                   # drain, ball release, the VUK
+    assert kinds["Kicker"] == 4                                   # drain, ball release, the VUK, the test shooter
+    # james_bond_le's traced geometry rides along: outline, guides, slings, ramps
+    assert kinds["Ramp"] == 3 and "RightRamp" in names and "Outline" in names
+    assert "LeftSling" in names and "LeftSlingshot" not in names, "the traced sling is the switch's"
     assert "JetpackHomeOpto" not in names, "a mechanism's sensor is no object"
     sx = vg.TABLE_W / 459.0
     assert abs(names["LeftFlipper"][1][0] - 141 * sx) < 0.01 and abs(names["LeftFlipper"][1][1] - 813 * sx) < 0.01
@@ -587,7 +591,7 @@ def test_generator_puts_the_titles_devices_on_a_table(mini_tables):
     assert m["plunger"]["lane_switch"] == 66
     assert m["switches"]["LeftOrbit"] == {"id": 80, "event": "hit", "name": "LEFT ORBIT"}
     assert m["switches"]["LeftSpinnerOpto"]["event"] == "spin"
-    assert m["switches"]["LeftSlingshot"]["event"] == "slingshot"
+    assert m["switches"]["LeftSling"]["event"] == "slingshot"      # the traced sling wall
     assert m["saucers"]["RightVukOpto"]["switch"] == 84
     sols = {v["callback"]: v["coil"] for v in m["solenoids"].values() if v["callback"]}
     # the coil table's group is a place in the node directory: 7 -> node 8, 8 -> node 9
@@ -603,6 +607,59 @@ def test_generator_puts_the_titles_devices_on_a_table(mini_tables):
     assert 'PadLamps.Add "1803", Array(LLeftLaneArrow)' in script
     assert "bsTrough.InitSw 0,1071,1070,1072" in script
     assert script.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", script))
+
+
+def test_generator_ramps_slings_and_guides(mini_tables):
+    vg = pytest.importorskip("vpxgen")
+    g = vg.Gen("james_bond_le", mini_tables)
+    g.build()
+    by = {vg.vpxfile.VpxTable.item_info(d)[1]: d for d in g.items}
+
+    def fields(d):
+        out = {}
+        for t, p, _ in vg.vpxfile.item_records(d, 4):
+            out.setdefault(t, p)
+        return out
+
+    ramp = fields(by["RightRamp"])
+    # collidable (the example table's ramp is not), flat, climbing 0 -> 90
+    assert struct.unpack("<i", ramp["CLDR"])[0] == 1 and struct.unpack("<i", ramp["TYPE"])[0] == 0
+    assert struct.unpack("<f", ramp["HTBT"])[0] == 0 and struct.unpack("<f", ramp["HTTP"])[0] == 90
+    drop = fields(by["RightRampDrop"])
+    assert struct.unpack("<f", drop["HTBT"])[0] == 75 and struct.unpack("<f", drop["HTTP"])[0] == 0
+    # a switch on the ramp rides it
+    assert fields(by["RightRampExitOpto"])["SURF"][4:] == b"RightRamp" if "RightRampExitOpto" in by else True
+    # the sling kicks OUT: its corners wound the way Visual Pinball pushes outwards
+    pts = [struct.unpack_from("<ff", p, 0) for t, p, _ in vg.vpxfile.item_records(by["LeftSling"], 4) if t == "VCEN"]
+    n = len(pts)
+    assert sum(pts[i][0] * pts[(i + 1) % n][1] - pts[(i + 1) % n][0] * pts[i][1] for i in range(n)) <= 0
+    flags = [struct.unpack("<i", p)[0] for t, p, _ in vg.vpxfile.item_records(by["LeftSling"], 4) if t == "SLNG"]
+    k = flags.index(1)
+    a, b = pts[k], pts[(k + 1) % n]
+    s = vg.TABLE_W / 459.0
+    assert {(round(a[0] / s), round(a[1] / s)), (round(b[0] / s), round(b[1] / s))} == {(90, 672), (128, 748)}
+    # the upper flipper points down from where the geometry puts it
+    fl = fields(by["UpperLeftFlipper"])
+    assert struct.unpack("<f", fl["ANGS"])[0] == 172 and abs(struct.unpack_from("<f", fl["VCEN"], 0)[0] - 66 * s) < 0.01
+    m = g.map
+    assert m["saucers"]["RightVukOpto"]["dir"] in (0.0, 180.0)
+    script = g.script()
+    assert "Sub PlaySoundAt(sound, obj)" in script, "the bridge's saucer and drain subs call it"
+    assert 'If parts(0) = "shoot" Then' in script and "Sub PadShoot(x, y, a, s)" in script
+
+
+def test_winding_and_thick_walls():
+    vg = pytest.importorskip("vpxgen")
+    cw = [(90, 672), (128, 748), (112, 760), (88, 738)]           # clockwise on screen
+    q, s = vg.sling_winding(cw, 0)
+    assert q == list(reversed(cw)) and (q[s], q[(s + 1) % 4]) == ((128, 748), (90, 672))
+    q2, s2 = vg.sling_winding(q, s)
+    assert q2 == q and s2 == s, "a polygon already wound the right way is kept"
+    poly = vg.thick([(0, 0), (0, 100)], 10)
+    assert len(poly) == 4 and {round(x) for x, _ in poly} == {-5, 5}
+    bend = vg.thick([(0, 0), (0, 100), (100, 100)], 10)
+    assert len(bend) == 6
+    assert vg.load_geo("nosuchtitle") is None and vg.load_geo("james_bond_le")["ramps"]
 
 
 def test_generator_shapes_carry_their_points():

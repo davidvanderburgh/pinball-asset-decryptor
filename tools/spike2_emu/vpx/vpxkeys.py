@@ -6,6 +6,7 @@
     python vpxkeys.py lflip 400 rflip 400
     python vpxkeys.py 2 300            # any DirectInput code
     python vpxkeys.py lamps out.txt    # a tribute writes every mapped light's state
+    python vpxkeys.py shoot 760 990 355 45   # a generated table: a test ball at (x, y), angle, speed
 
 The table's PadTestTimer (patch_godzilla.py) reads %TEMP%\\padvpx_keys.txt
 every 100 ms and feeds the table's own key handlers, so a test run does not
@@ -44,6 +45,12 @@ def main(argv):
     i = 0
     while i < len(argv):
         key = argv[i]
+        if key.lower() == "shoot" and i + 4 < len(argv):
+            # a generated table's test ball: shoot <x> <y> <angle> <speed>, table units
+            send("shoot %s" % " ".join(str(int(float(a))) for a in argv[i + 1:i + 5]))
+            print("shoot %s" % " ".join(argv[i + 1:i + 5]))
+            i += 5
+            continue
         if key.lower() == "lamps" and i + 1 < len(argv):
             # the table's PadDumpLamps (vpxshadow.py) writes `<number> <light> <state>`
             path = os.path.abspath(argv[i + 1])

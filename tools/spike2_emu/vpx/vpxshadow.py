@@ -419,6 +419,8 @@ def gen(m, had, quiet=None):
         # tilt) can overwrite the machine's states; every half second they
         # are put back, so the machine always wins within that
         out.append("\tPadTick = PadTick + 1 : If PadTick Mod 5 = 0 Then PadReassertLamps")
+    if m.get("test_shoot"):
+        out.append("\tPadTraceTick")
     out += ["\tDim fso, p, f, parts",
             "\tSet fso = CreateObject(\"Scripting.FileSystemObject\")",
             "\tp = fso.GetSpecialFolder(2) & \"\\padvpx_keys.txt\"",
@@ -430,8 +432,15 @@ def gen(m, had, quiet=None):
             "\t\t\tIf parts(0) = \"down\" Then Table1_KeyDown CInt(parts(1))",
             "\t\t\tIf parts(0) = \"up\" Then Table1_KeyUp CInt(parts(1))",
             "\t\t\tIf parts(0) = \"lamps\" Then PadDumpLamps parts(1)",
-            "\t\tEnd If",
-            "\tLoop",
+            "\t\tEnd If"]
+    if m.get("test_shoot"):
+        # a generated table's test shooter (vpxgen.PadShoot): a ball at a spot
+        out += ["\t\tIf UBound(parts) = 4 Then",
+                "\t\t\tIf parts(0) = \"shoot\" Then",
+                "\t\t\t\tPadShoot CInt(parts(1)), CInt(parts(2)), CInt(parts(3)), CInt(parts(4))",
+                "\t\t\tEnd If",
+                "\t\tEnd If"]
+    out += ["\tLoop",
             "\tf.Close",
             "\tfso.DeleteFile p",
             "End Sub", ""]

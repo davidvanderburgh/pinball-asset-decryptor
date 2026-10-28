@@ -27,7 +27,12 @@ size-neutral by construction just like the BC3 pair.
 """
 
 import struct
-import numpy as np
+
+from ...core.lazy_import import lazy_module
+
+# numpy loads on first use, not with this module (PAD-797): the Modes tab
+# imports this chain at startup, on the UI loop.
+np = lazy_module("numpy")
 
 
 # --------------------------------------------------------------------------

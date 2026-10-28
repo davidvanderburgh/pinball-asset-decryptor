@@ -202,3 +202,46 @@ def test_a_waking_queue_still_drains_by_hand():
     q.put(1)
     q.put_nowait(2)
     assert q.get_nowait() == 1 and q.get() == 2 and q.empty()
+
+
+# ------------------------------------------------------- startup imports
+def test_a_lazy_module_imports_on_first_use():
+    import sys
+    from pinball_decryptor.core.lazy_import import lazy_module
+    name = "pad797_lazy_probe_mod"
+    sys.modules.pop(name, None)
+    import types as _types
+    mod = _types.ModuleType(name)
+    mod.answer = 42
+    lazy = lazy_module(name)
+    assert "not loaded" in repr(lazy)
+    sys.modules[name] = mod
+    try:
+        assert lazy.answer == 42
+        assert "loaded" in repr(lazy) and "not loaded" not in repr(lazy)
+        with pytest.raises(AttributeError):
+            lazy.missing
+    finally:
+        sys.modules.pop(name, None)
+    with pytest.raises(ImportError):
+        lazy_module("pad797_no_such_module_anywhere").anything
+
+
+def test_the_tabs_load_without_numpy_or_pillow():
+    """numpy and PIL cost the UI loop 65 to 130 ms at startup through the
+    Modes tab's module chain (block_modes, more_kaiju, battle_select, dds,
+    scene_write, film_cut) and the Multi-boot tab; they load on first use."""
+    import os
+    import subprocess
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    code = ("import sys\n"
+            "import pinball_decryptor.webui.tabs.modes\n"
+            "from pinball_decryptor.webui.tabs import load_tab_classes\n"
+            "load_tab_classes()\n"
+            "print(sorted(m for m in sys.modules "
+            "if m == 'numpy' or m == 'PIL' or m.startswith('PIL.')))\n")
+    r = subprocess.run([sys.executable, "-c", code], cwd=root,
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert r.stdout.strip() == "[]", r.stdout

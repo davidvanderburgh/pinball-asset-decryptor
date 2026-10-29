@@ -81,8 +81,8 @@ def disk_path() -> str:
     override = os.environ.get("PAD_DATA_DISK")
     if override:
         return override
-    base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-    return os.path.join(base, "pinball_decryptor", "data", "pad-data.vhdx")
+    from . import wsl_place
+    return os.path.join(wsl_place.data_dir(), "pad-data.vhdx")
 
 
 def exists() -> bool:
@@ -108,8 +108,8 @@ def cards_disk_path() -> str:
     override = os.environ.get("PAD_CARDS_DISK")
     if override:
         return override
-    base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-    return os.path.join(base, "pinball_decryptor", "data", "pad-cards.vhdx")
+    from . import wsl_place
+    return os.path.join(wsl_place.data_dir(), "pad-cards.vhdx")
 
 
 def cards_exists() -> bool:

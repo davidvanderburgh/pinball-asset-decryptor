@@ -345,12 +345,33 @@ function ResizePrompt({ spec, onDone }) {
   <//>`;
 }
 
+// PAD-819 "Move to another drive": every fixed drive, the ones WSL's disks can't go to greyed
+// with why; Return is Move, Escape closes the prompt only.
+function MovePrompt({ spec, onDone }) {
+  const [pick, setPick] = useState(spec.pick);
+  const [uid, onClose] = useWin(() => onDone(null));
+  return html`<${Modal} title="Move to another drive" onClose=${onClose} cls=${uid}
+    footer=${html`<${Button} onClick=${() => onDone(null)}>Cancel<//><${Button} kind="primary" disabled=${!pick} onClick=${() => onDone(pick)}>Move…<//>`}>
+    <div class="muted small">Now:</div>
+    <div class="mono small sx-pre">${spec.where}</div>
+    <div class="small">Move to:</div>
+    <div class="stack" style="gap:2px" role="radiogroup" aria-label="Drive"
+      onKeyDown=${(e) => { if (e.key === "Enter" && pick) { e.preventDefault(); onDone(pick); } }}>
+      ${spec.drives.map((o) => html`<label class=${cx("row", !o.ok && "dim")} title=${o.why}>
+        <input type="radio" name="sx-move-drive" checked=${pick === o.letter} disabled=${!o.ok}
+          onChange=${() => setPick(o.letter)} />
+        <span>${o.text}</span>${o.ok ? null : html`<span class="small muted">${o.why}</span>`}</label>`)}
+    </div>
+  <//>`;
+}
+
 function DiskSpaceDialog({ close }) {
   const dup = useSingleton("disk_space", close);
   const sx = useNs("shellx");
   const d = sx.disk;
   const [sel, setSel] = useState(new Set());
   const [resize, setResize] = useState(null);
+  const [move, setMove] = useState(null);
   useEffect(() => { if (!dup) call("shellx.disk_open"); }, []);
   useEffect(() => { setSel(new Set()); }, [d && d.rows && d.rows.map((r) => r.id).join("|")]);
   const tryClose = async () => { const ok = await call("shellx.disk_close"); if (ok) close(); };
@@ -371,6 +392,10 @@ function DiskSpaceDialog({ close }) {
   const startResize = async () => {
     const spec = await call("shellx.disk_resize_prepare");
     if (spec) setResize(spec);
+  };
+  const startMove = async () => {
+    const spec = await call("shellx.disk_move_prepare");
+    if (spec) setMove(spec);
   };
   return html`<${Modal} title="Manage disk space" icon="disk" wide onClose=${onClose} cls=${uid}
     footer=${html`<span class="grow small dim ellip" title=${d ? d.status : ""}>${d ? d.status : ""}</span><${Button} onClick=${tryClose}>Close<//>`}>
@@ -418,6 +443,14 @@ function DiskSpaceDialog({ close }) {
       <span class="small muted">${d ? d.resize_note : ""}</span>
       <div><${Button} onClick=${startResize} disabled=${!(d && d.can_resize)}>Resize WSL disk…<//></div>
     </div>
+    <hr class="sx-hr" />
+    <div class="stack" style="gap:4px">
+      <span class="h2">Move to another drive</span>
+      <span class="small muted wrap">${d ? d.move_note : ""}</span>
+      ${d && d.move_where ? html`<div class="mono small sx-pre">${d.move_where}</div>` : null}
+      <div><${Button} onClick=${startMove} disabled=${!(d && d.can_move)}>Move to another drive…<//></div>
+    </div>
+    ${move ? html`<${MovePrompt} spec=${move} onDone=${(letter) => { setMove(null); if (letter) call("shellx.disk_move", letter); }} />` : null}
     ${resize ? html`<${ResizePrompt} spec=${resize} onDone=${(gib) => { setResize(null); if (gib) call("shellx.disk_resize", gib); }} />` : null}
   <//>`;
 }

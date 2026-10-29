@@ -30,13 +30,23 @@ for good. `status` says how many of them it holds.
 param(
     [Parameter(Position = 0)] [ValidateSet('create', 'mount', 'fill', 'status', 'task')] [string] $Cmd = 'status',
     [int] $SizeGB = 400,
-    [string] $Path = (Join-Path $env:LOCALAPPDATA 'pinball_decryptor\data\pad-cards.vhdx'),
+    [string] $Path = '',
     [string] $Distro = 'Ubuntu',
     # the copy of this script the logon task runs: the main checkout's, which outlives a ticket's worktree
     [string] $TaskScript = '',
     [switch] $NoFill
 )
 $ErrorActionPreference = 'Stop'
+if (-not $Path) {
+    # where the app keeps its disks: moved off C: by Manage disk space > Move to another drive (PAD-819,
+    # core/wsl_place.py), else beside the app's other state under LOCALAPPDATA
+    $Root = Join-Path $env:LOCALAPPDATA 'pinball_decryptor'
+    $Place = Join-Path $Root 'wsl_place.json'
+    if (Test-Path $Place) {
+        try { $saved = (Get-Content $Place -Raw | ConvertFrom-Json).root; if ($saved) { $Root = $saved } } catch { }
+    }
+    $Path = Join-Path $Root 'data\pad-cards.vhdx'
+}
 $Name = 'cards'
 $MountPoint = "/mnt/wsl/$Name"
 

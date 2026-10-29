@@ -959,7 +959,9 @@ def _diagnose_wsl_silent() -> Tuple[str, str]:
                f"disk grows on it: WSL freezes when that drive fills up, so "
                f"that is the likely cause, not a missing install.")
         cure = (f"Free some space on {drive} first: WSL's disk cannot grow "
-                f"without it. Then: " + cure)
+                f"without it. Then: " + cure + " Once WSL answers again, "
+                f"Settings > Manage disk space > Move to another drive puts "
+                f"its disks on a roomier drive.")
     else:
         why = (" That is WSL stuck, which usually follows a hang or a crash, "
                "not a missing install.")

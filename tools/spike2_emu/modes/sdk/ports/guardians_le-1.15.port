@@ -532,3 +532,10 @@ value attract_count       24
 site  attract_sleep       0x003e1124 0xe3013788 0xe3403067
 # PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with
 site  attract_show        0x00291fb8 0xe92d4070 0xe301478c
+
+# ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
+# docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch
+# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit)
+site coil_frame            0x00497fe4 0xe5d13000 0xe3530008
+site coil_off              0x004940d0 0xe3510008 0xe1a02001
+data sw_struct             0x00667048

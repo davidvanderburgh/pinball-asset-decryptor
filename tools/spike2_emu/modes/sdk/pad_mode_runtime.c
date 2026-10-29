@@ -943,6 +943,7 @@ static unsigned long show_ended_ms;
 #define FIN_GRACE_MS 1200ul
 #define FIN_MAX_MS  12000ul
 static struct { const struct pm_mode *mode; unsigned long ended; int seen; } fin;
+static void spare_outs_off(const char *why);   /* PAD-826: the spare outputs section */
 static int finish_on(void);
 void pm_end(void)
 {
@@ -953,6 +954,7 @@ void pm_end(void)
     if (was_taker) chg_mode_ended(1);   /* PAD-630: a challenge game's mode ended - its ball ends */
     if (!running) bd_mode_ended();
     if (!running) magnet_let_go("the mode ended");
+    if (!running) spare_outs_off("the mode ended");   /* PAD-826 */
     if (!running) scoop_let_go();
     if (!running) building_let_go("the mode ended");
     if (!running) shield_let_go("the mode ended");
@@ -6085,6 +6087,315 @@ static void coils_arm(void)
         MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
 }
 
+/* ---- spare switch inputs and driver outputs (PAD-826; docs/plans/mode_spare_io.md) -------------------------------------
+ * RobF on Pinside: "unmask unused switches and coils". Hardware a mod adds, on what the game never uses.
+ *
+ * INPUTS. The switch service (Godzilla Pro 1.15 0x1e78f4) keeps, in its struct (`data sw_struct`), one 160-byte block
+ * per node at +16: +20 the board's current 64 input bits as read off the bus, +28 a u16 switch id per bit, 0 where the
+ * game has no switch - those bits it reads and never looks at. The layout is checked once against the game's own
+ * switch entries (the array at struct +0, 32 bytes each: +18 the bit, +20 the node) before any bit is read: every id
+ * in the map must be the entry naming that node and bit. A struct that does not check out takes the inputs away.
+ *
+ * OUTPUTS. `site coil_frame` is the node-bus library's fire-by-address (Godzilla Pro 1.16 0x5a9afc), the call the coil
+ * service thread makes for each coil record: fire(node, spec) with spec { u8 coil, u8 pulse power, u16 pulse ms, u8
+ * hold power, -, u16 hold ms, u16 x }. It takes the ms (the board's ticks are its business), refuses a coil above 8,
+ * and sends `8n 0b 40 ..` through the bus transfer, which holds the bus's own lock - so the tick may call it. `site
+ * coil_off` sends the board's OFF (`8n 03 4d <coil>`). An output is SPARE when some coil record of the game's is on
+ * that node (a driver board) and none on that output: no record, so the game never sends it anything. The board ends a
+ * command by itself, so a command of ours outlives nothing it was not asked for. */
+#define SPARE_SHOTS        8u
+#define SPARE_OUTS         8u
+#define SPARE_PULSE_MAX 1000u      /* ms of pulse in one command */
+#define SPARE_CMD_MAX   5000u      /* ms of one command, pulse + hold */
+#define SPARE_WINDOW   10000ul     /* ... and of all of an output's commands in any 10 s */
+#define SPARE_ON_MAX    5000ul
+#define SPARE_RING        50u      /* commands remembered per output: at most 50 in any 10 s */
+#define SW_BLOCK(st, n) ((st) + 16u + (unsigned)(n) * 160u)
+
+static int spare_sw_ok;            /* 0 not checked yet, 1 the struct checks out, -1 it does not */
+static struct spare_shot {
+    unsigned char node, bit, active_high, stable, last, seen;
+    uint64_t mask;
+    unsigned hits;
+} spare_shots[SPARE_SHOTS];
+static unsigned n_spare_shots;
+static struct spare_out {
+    unsigned char node, out, live;
+    const struct pm_mode *by;
+    unsigned long until;
+    unsigned long at[SPARE_RING], ms[SPARE_RING];
+    unsigned next;
+} spare_outs[SPARE_OUTS];
+static unsigned n_spare_outs;
+
+/* the switch struct, its layout checked against the game's own switch entries; 0 when not (yet) */
+static unsigned spare_sw_struct(void)
+{
+    unsigned st = data("sw_struct"), ents, n, b, id, e, total = 0, bad = 0;
+    if (!(can & PM_CAN_SPARE_SWITCHES) || spare_sw_ok < 0 || !st) return 0;
+    if (spare_sw_ok > 0) return st;
+    if (!maps_has(st, 16u + 64u * 160u, MAP_R)) maps_read();
+    if (!maps_has(st, 16u + 64u * 160u, MAP_R)) { spare_sw_ok = -1; say("spare inputs: the switch struct at 0x%08x is not mapped - off", st); return 0; }
+    ents = *(const unsigned *)(unsigned long)st;
+    if (!ents) return 0;                                  /* the game has not built its switches yet: ask later */
+    for (n = 0; n < 64; n++)
+        for (b = 0; b < 64; b++) {
+            id = *(const unsigned short *)(unsigned long)(SW_BLOCK(st, n) + 28u + 2u * b);
+            if (!id) continue;
+            total++;
+            e = ents + id * 32u;
+            if (!maps_has(e, 32, MAP_R)) maps_read();
+            if (!maps_has(e, 32, MAP_R) || *(const unsigned short *)(unsigned long)(e + 18) != b
+                || *(const unsigned char *)(unsigned long)(e + 20) != n)
+                bad++;
+        }
+    if (total < 8 || bad) {
+        spare_sw_ok = -1;
+        say("spare inputs: the switch struct at 0x%08x does not check out (%u of %u bits name another switch's entry) - off",
+            st, bad, total);
+        return 0;
+    }
+    spare_sw_ok = 1;
+    say("spare inputs: the switch struct at 0x%08x checks out (%u bits of the game's, each its own entry's)", st, total);
+    return st;
+}
+
+/* the input's level (0/1), or -1 when it is not a spare input (a switch of the game's there, or no struct) */
+static int spare_level(unsigned node, unsigned bit)
+{
+    unsigned st = spare_sw_struct();
+    if (!st || node > 63 || bit > 63) return -1;
+    if (*(const unsigned short *)(unsigned long)(SW_BLOCK(st, node) + 28u + 2u * bit)) return -1;
+    return (*(const volatile unsigned char *)(unsigned long)(SW_BLOCK(st, node) + 20u + bit / 8u) >> (bit % 8u)) & 1;
+}
+
+int pm_spare_switch(unsigned node, unsigned input)
+{
+    unsigned i;
+    int lv = spare_level(node, input);
+    if (lv < 0) return -1;
+    for (i = 0; i < n_spare_shots; i++)
+        if (spare_shots[i].node == node && spare_shots[i].bit == input) return lv == spare_shots[i].active_high;
+    return lv == 0;
+}
+
+/* a shot bit nothing of the port's uses (bit 0 is the game's "a playfield switch was hit"), highest first */
+static uint64_t spare_free_bit(void)
+{
+    uint64_t used = 1;
+    int i;
+    for (i = 0; i < port.n_shot; i++) used |= port.shot[i].mask;
+    for (i = 0; i < port.n_switch; i++) used |= port.sw[i].mask;
+    for (i = 63; i > 0; i--)
+        if (!(used & ((uint64_t)1 << i))) return (uint64_t)1 << i;
+    return 0;
+}
+
+uint64_t pm_spare_shot(unsigned node, unsigned input, const char *name, int active_high)
+{
+    struct spare_shot *s;
+    unsigned i, k;
+    int lv;
+    uint64_t bit;
+    for (i = 0; i < n_spare_shots; i++)
+        if (spare_shots[i].node == node && spare_shots[i].bit == input) return spare_shots[i].mask;
+    if (!name || !*name) name = "Spare";
+    if ((lv = spare_level(node, input)) < 0) {
+        say("spare input %u:%u refused - %s", node, input, !(can & PM_CAN_SPARE_SWITCHES) ? "this port has no switch struct"
+            : spare_sw_ok < 0 ? "the switch struct did not check out" : !spare_sw_ok ? "the game's switches are not up yet"
+            : "the game has a switch there");
+        return 0;
+    }
+    if (n_spare_shots >= SPARE_SHOTS || port.n_shot >= N_SHOTS || !(bit = spare_free_bit())) {
+        say("spare input %u:%u refused - no room for another shot", node, input);
+        return 0;
+    }
+    if (pm_shot(name)) { say("spare input %u:%u refused - a shot is named \"%s\" already", node, input, name); return 0; }
+    s = &spare_shots[n_spare_shots++];
+    s->node = (unsigned char)node;
+    s->bit = (unsigned char)input;
+    s->active_high = active_high ? 1 : 0;
+    s->mask = bit;
+    s->last = s->stable = (unsigned char)lv;
+    s->seen = 1;
+    for (k = 0; name[k] && k + 1 < sizeof port.shot[0].name; k++) port.shot[port.n_shot].name[k] = name[k];
+    port.shot[port.n_shot].name[k] = 0;
+    port.shot[port.n_shot].mask = bit;
+    port.n_shot++;
+    say("spare input %u:%u is shot \"%s\" 0x%llx (closed reads %u; it reads %u now)", node, input, name,
+        (unsigned long long)bit, s->active_high, (unsigned)lv);
+    return bit;
+}
+
+/* every tick: each spare input's close (the same level two ticks running) as its shot */
+static void spare_deliver(uint64_t mask);       /* below EACH_MODE: a shot to every mode */
+static void spare_switches_tick(void)
+{
+    unsigned i;
+    for (i = 0; i < n_spare_shots; i++) {
+        struct spare_shot *s = &spare_shots[i];
+        int lv = spare_level(s->node, s->bit);
+        if (lv < 0) continue;
+        if ((unsigned char)lv != s->last) { s->last = (unsigned char)lv; continue; }   /* one tick: maybe a bounce */
+        if ((unsigned char)lv == s->stable) continue;
+        s->stable = (unsigned char)lv;
+        if (lv != s->active_high) continue;                                          /* it opened */
+        s->hits++;
+        if (s->hits <= 20) say("spare input %u:%u closed (hit %u)", s->node, s->bit, s->hits);
+        spare_deliver(s->mask);
+    }
+}
+
+/* is (node, output) a spare output: a driver board of the game's (some record on that node), no record on it */
+int pm_spare_output(unsigned node, unsigned output)
+{
+    unsigned tab = data("coil_table"), cnt = data("coil_count"), base, n, d, rec, board = 0;
+    if (!(can & PM_CAN_SPARE_COILS) || node > 63 || output > 8) return 0;
+    if (!maps_has(tab, 4, MAP_R) || !maps_has(cnt, 4, MAP_R)) return 0;
+    base = *(const unsigned *)(unsigned long)tab;
+    n = *(const unsigned *)(unsigned long)cnt;
+    if (!base || !n || n > 512) return 0;
+    if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) maps_read();
+    if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) return 0;
+    for (d = 1; d < n; d++) {
+        rec = base + d * COIL_REC_SIZE;
+        if (*(const unsigned char *)(unsigned long)(rec + COIL_REC_NODE) != node) continue;
+        board = 1;
+        if (*(const unsigned short *)(unsigned long)(rec + COIL_REC_COIL) == output) return 0;
+    }
+    return board;
+}
+
+static struct spare_out *spare_out_find(unsigned node, unsigned output, int make)
+{
+    unsigned i;
+    for (i = 0; i < n_spare_outs; i++)
+        if (spare_outs[i].node == node && spare_outs[i].out == output) return &spare_outs[i];
+    if (!make || n_spare_outs >= SPARE_OUTS) return 0;
+    spare_outs[n_spare_outs].node = (unsigned char)node;
+    spare_outs[n_spare_outs].out = (unsigned char)output;
+    return &spare_outs[n_spare_outs++];
+}
+
+/* Why a command of `ms` may not go to output o now, or 0. (tests lift it verbatim) */
+static const char *spare_refusal(int running_mode, int in_game, unsigned pulse_power, unsigned pulse_ms,
+                                 unsigned hold_power, unsigned hold_ms, const unsigned long at[SPARE_RING],
+                                 const unsigned long ms[SPARE_RING], unsigned long now)
+{
+    unsigned long on = 0;
+    unsigned i, recent = 0;
+    if (!running_mode) return "only the running mode may drive it";
+    if (!in_game) return "no game is being played (attract or a tilt)";
+    if (!pulse_power || pulse_power > 255 || hold_power > 255) return "a power is out of 1..255";
+    if (!pulse_ms || pulse_ms > SPARE_PULSE_MAX) return "the pulse is out of 1..1000 ms";
+    if (pulse_ms + (hold_power ? hold_ms : 0) > SPARE_CMD_MAX) return "one command is longer than 5000 ms";
+    for (i = 0; i < SPARE_RING; i++) {
+        if (!at[i] || now - at[i] >= SPARE_WINDOW) continue;
+        recent++;
+        on += ms[i];
+    }
+    if (recent >= SPARE_RING) return "50 commands in the last 10 s already";
+    if (on + pulse_ms + (hold_power ? hold_ms : 0) > SPARE_ON_MAX) return "it would be on more than 5 s of the last 10 s";
+    return 0;
+}
+
+int pm_spare_drive(unsigned node, unsigned output, unsigned pulse_power, unsigned pulse_ms, unsigned hold_power,
+                   unsigned hold_ms)
+{
+    struct { unsigned char coil, pulse_pwr; unsigned short pulse_ms; unsigned char hold_pwr, pad;
+             unsigned short hold_ms, x; } spec;
+    struct spare_out *o;
+    unsigned long now = pm_ms(), t0;
+    unsigned total, prev, rc;
+    const char *why;
+    if (!(can & PM_CAN_SPARE_COILS)) return 0;
+    if (!pm_spare_output(node, output)) {
+        say("spare output %u:%u refused - not a spare output here (a coil of the game's, or no driver board)", node, output);
+        return 0;
+    }
+    if (!(o = spare_out_find(node, output, 1))) { say("spare output %u:%u refused - eight outputs in use already", node, output); return 0; }
+    if (!hold_power) hold_ms = 0;
+    why = spare_refusal(pm_running(), pm_in_game(), pulse_power, pulse_ms, hold_power, hold_ms, o->at, o->ms, now);
+    if (why) { say("spare output %u:%u refused - %s", node, output, why); return 0; }
+    total = pulse_ms + hold_ms;
+    prev = (o->next + SPARE_RING - 1) % SPARE_RING;
+    if (o->until > now && o->at[prev]) o->ms[prev] = now - o->at[prev];   /* replaced: it was on until now */
+    spec.coil = (unsigned char)output;
+    spec.pulse_pwr = (unsigned char)pulse_power;
+    spec.pulse_ms = (unsigned short)pulse_ms;
+    spec.hold_pwr = (unsigned char)hold_power;
+    spec.pad = 0;
+    spec.hold_ms = (unsigned short)hold_ms;
+    spec.x = 0;
+    t0 = pm_ms();
+    rc = ((unsigned (*)(unsigned, const void *))(unsigned long)fn("coil_frame"))(node, &spec);
+    o->at[o->next] = now | 1;
+    o->ms[o->next] = total;
+    o->next = (o->next + 1) % SPARE_RING;
+    o->until = now + total;
+    o->live = 1;
+    o->by = current;
+    say("spare output %u:%u: ONE command, %u/255 for %u ms then %u/255 for %u ms, which the board ends by itself (the "
+        "send took %lu ms, said %u)", node, output, pulse_power, pulse_ms, hold_power, hold_ms, pm_ms() - t0, rc);
+    return 1;
+}
+
+int pm_spare_pulse(unsigned node, unsigned output, unsigned power, unsigned ms)
+{
+    return pm_spare_drive(node, output, power, ms, 0, 0);
+}
+
+static void spare_out_off(struct spare_out *o, const char *why)
+{
+    if (!o->live) return;
+    if (fn("coil_off")) ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_off"))(o->node, o->out);
+    if (o->until > pm_ms()) {
+        unsigned prev = (o->next + SPARE_RING - 1) % SPARE_RING;
+        o->ms[prev] = pm_ms() - o->at[prev];
+        say("spare output %u:%u: OFF - %s", o->node, o->out, why);
+    }
+    o->until = 0;
+    o->live = 0;
+}
+
+void pm_spare_off(unsigned node, unsigned output)
+{
+    struct spare_out *o = spare_out_find(node, output, 0);
+    if (o && (o->by == current || !o->by)) spare_out_off(o, "the mode let go");
+}
+
+/* every spare output a mode drove, OFF (the mode ended, the ball ended, the game ended or tilted) */
+static void spare_outs_off(const char *why)
+{
+    unsigned i;
+    for (i = 0; i < n_spare_outs; i++) spare_out_off(&spare_outs[i], why);
+}
+
+static void spare_tick(void)
+{
+    unsigned i;
+    spare_switches_tick();
+    for (i = 0; i < n_spare_outs; i++) {
+        struct spare_out *o = &spare_outs[i];
+        if (!o->live) continue;
+        if (!pm_in_game()) spare_out_off(o, "the game ended or tilted");
+        else if (!running) spare_out_off(o, "no mode is running");
+        else if (pm_ms() >= o->until) o->live = 0;        /* the board ended it */
+    }
+}
+
+static void spare_arm(void)
+{
+    static const char *const outs[] = { "coil_frame", "coil_off", 0 };
+    if (data("sw_struct")) can |= PM_CAN_SPARE_SWITCHES;
+    if (have_sites(outs) && data("coil_table") && data("coil_count")) can |= PM_CAN_SPARE_COILS;
+    if (can & (PM_CAN_SPARE_SWITCHES | PM_CAN_SPARE_COILS))
+        say("spare inputs %s (switch struct 0x%08x), spare outputs %s (fire 0x%08x, off 0x%08x): each command at most %u ms, "
+            "pulse %u ms, %lu ms on in any %lu s", can & PM_CAN_SPARE_SWITCHES ? "armed" : "not here", data("sw_struct"),
+            can & PM_CAN_SPARE_COILS ? "armed" : "not here", fn("coil_frame"), fn("coil_off"), SPARE_CMD_MAX,
+            SPARE_PULSE_MAX, SPARE_ON_MAX, SPARE_WINDOW / 1000ul);
+}
+
 /* ---- the scoop: a ball held there for the mode, then the game kicks it out (PAD-381) ----------
  * David (2026-10-04): "putting the ball in the scoop during a mode". A mode may HOLD a ball that lands
  * in the scoop for a while - its screen, a callout - and nothing else: the kick-out stays the game's
@@ -9725,7 +10036,8 @@ static void on_tick(unsigned *r)
     events_deliver();
     event_census();                           /* PAD-420: `value event_census 1` */
     switches_deliver();
-    stock_balls_tick();                       /* PAD-687: how long two balls have been in play */
+    spare_tick();                             /* PAD-826: spare inputs' closes as shots; spare outputs' ends */
+    stock_balls_tick();                      /* PAD-687: how long two balls have been in play */
     dto_tick();                               /* PAD-733: dead flippers until the balls drain to one */
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
@@ -9849,6 +10161,7 @@ static void on_ball_end(unsigned *r)
     current = 0;
     beh.asking = 0;
     magnet_let_go("the ball ended");          /* PAD-381 */
+    spare_outs_off("the ball ended");         /* PAD-826 */
     building_let_go("the ball ended");        /* PAD-393 */
     shield_let_go("the ball ended");          /* PAD-392 */
     shake_let_go("the ball ended");           /* PAD-414 */
@@ -14147,6 +14460,14 @@ static void switches_deliver(void)
     }
 }
 
+/* PAD-826: a spare input's close, to every mode's .shot (spare_switches_tick) */
+static void spare_deliver(uint64_t mask)
+{
+    const struct pm_mode *m;
+    EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); }
+    current = 0;
+}
+
 static int is_switch_hit(const char *name)
 {
     static const char want[] = "switch_hit";
@@ -16834,7 +17155,8 @@ static void pad_mode_start(void)
     stock_arm();                                    /* item 160: the port's `rule` lines (stock rules section) */
     multiball_arm();                                /* item 167: a multiball of the mode's own */
     coils_arm();                                    /* PAD-381: a magnet grab of the mode's own */
-    scoop_arm();                                    /* PAD-381: a ball held in the scoop */
+    spare_arm();                                    /* PAD-826: spare switch inputs and driver outputs */
+    scoop_arm();                                   /* PAD-381: a ball held in the scoop */
     ball_end_hold_arm();                            /* PAD-622: the end of a ball held for a mode's total */
     shield_arm();                                   /* PAD-379: the Premium's shield platform */
     building_arm();                                 /* PAD-393: the Premium's building */

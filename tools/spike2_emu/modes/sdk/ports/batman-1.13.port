@@ -516,3 +516,8 @@ text  done_name_0                  Shame Mode Ep 59 60
 value done_audit_0                 419
 text  done_name_1                  Shame Mode Ep 115 116
 value done_audit_1                 424
+
+# ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
+# docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch
+# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit)
+site coil_frame            0x0051c024 0xe5d13000 0xe3530008

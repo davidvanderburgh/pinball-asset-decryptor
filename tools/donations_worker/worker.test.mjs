@@ -413,7 +413,7 @@ test("a report without a title is named by its first line, and one address gets 
   assert.equal((await postReport(e, { body: RECORD }, { "X-PAD-Key": "k", "CF-Connecting-IP": "8.8.8.8" }))[0], 201);
 });
 
-test("David hears on Discord that a report came, never who sent it", async () => {
+test("a report posts nothing to the #donations webhook", async () => {
   const e = { ...env(), DISCORD_WEBHOOK: "https://discord.example/api/webhooks/1/x" };
   const posts = [];
   const realFetch = globalThis.fetch;
@@ -424,9 +424,8 @@ test("David hears on Discord that a report came, never who sent it", async () =>
     await postReport(e, { title: "Write stopped at 40%", body: RECORD, name: "Joe",
       app_version: "1.274.0", platform: "darwin", picture_b64: "/9j/" }, undefined, ctx);
     await Promise.all(waited);
-    assert.equal(posts.length, 1);
-    assert.equal(posts[0][1].content, "🐞 Problem report from the app: Write stopped at 40% · app 1.274.0 on darwin · with a picture");
-    assert.equal(posts[0][1].content.includes("Joe"), false);
+    assert.equal(posts.length, 0);                        // pad-triage posts it in #bug-reports
+    assert.equal(waited.length, 0);
   } finally {
     globalThis.fetch = realFetch;
   }

@@ -99,8 +99,9 @@ tracker posts `/answer` with the version and David's message, and the app
 that sent the report (it keeps its ids) reads `/v1/report/status` and
 tells the user in the app. No address is asked for or stored; an answered
 row is dropped after 90 days. The same five-an-hour, hash-blanked-after-
-an-hour rule as donations applies. Discord gets one line per report (the
-title, the app version and the platform; never the name or the record).
+an-hour rule as donations applies. The Worker posts nothing about a
+report on Discord (PAD-836): the webhook is the #donations channel, and
+pad-triage posts each report in #bug-reports once it takes it.
 
 Adding this to a Worker deployed before it is one command, since the
 schema only creates what is missing:

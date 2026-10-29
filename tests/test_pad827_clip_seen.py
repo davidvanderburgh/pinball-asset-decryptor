@@ -314,23 +314,27 @@ class _Prog:
 
 def test_a_loader_that_keeps_its_index_in_an_object_and_moves_it_on_steps_in_turn(monkeypatch):
     from pinball_decryptor.plugins.stern import stock_scan as S
-    ebirah = [0xE92D4030,             # push {r4, r5, lr}
-              0xE590107C,             # ldr r1, [r0, #0x7c]   the index
-              0xE7925101,             # ldr r5, [r2, r1, lsl #2]  the table's entry
-              0xE0810093,             # umull r0, r1, r3, r0  the compiler's mod 3
-              0xE584307C,             # str r3, [r4, #0x7c]   moved on
-              0xE8BD8030]             # pop {r4, r5, pc}
-    monkeypatch.setattr(S, "function_extent", lambda prog, start, cap=0: (start + 24, set()))
-    assert ST.steps_in_turn(_Prog(0x8000, ebirah), 0x8000, 3) is True
-    picked = list(ebirah)
-    picked[4] = 0xE5843080              # str to another field: no index kept
-    assert ST.steps_in_turn(_Prog(0x8000, picked), 0x8000, 3) is False
-    counted = list(ebirah)
-    counted[3] = 0xE2833001             # add r3, r3, #1 and no wrap: a count (JP's amber mines)
-    assert ST.steps_in_turn(_Prog(0x8000, counted), 0x8000, 3) is False
-    capped = list(counted)
-    capped[3] = 0xE3530003              # cmp r3, #3: wrapped at the table's length
-    assert ST.steps_in_turn(_Prog(0x8000, capped), 0x8000, 3) is True
+    PUSH, POP = 0xE92D4030, 0xE8BD8030
+    LDR_I = 0xE594307C                  # ldr r3, [r4, #0x7c]   the index
+    ADD1 = 0xE2833001                   # add r3, r3, #1        the next one
+    UMULL = 0xE0810093                  # umull r0, r1, r3, r0  the compiler's mod 3
+    LDR_T = 0xE7925101                  # ldr r5, [r2, r1, lsl #2]  the table's entry
+    STR_I = 0xE584307C                  # str r3, [r4, #0x7c]   kept
+    CMP3 = 0xE3530003                   # cmp r3, #3
+    MOVGE0, MOVGE2 = 0xA3A03000, 0xA3A03002   # movge r3, #0 (round) / #2 (held at the end)
+
+    def turn(*words):
+        monkeypatch.setattr(S, "function_extent", lambda prog, start, cap=0: (start + 4 * len(words) + 8, set()))
+        return ST.steps_in_turn(_Prog(0x8000, [PUSH] + list(words) + [POP]), 0x8000, 3)
+    assert turn(LDR_I, ADD1, UMULL, LDR_T, STR_I) is True                 # Ebirah's fight loops
+    assert turn(LDR_I, ADD1, CMP3, MOVGE0, LDR_T, STR_I) is True          # round by a compare
+    monkeypatch.setattr(S, "function_extent", lambda prog, start, cap=0: (start + 32, set()))
+    two = [PUSH, LDR_I, ADD1, 0xE2033001, LDR_T, STR_I, POP]   # and r3, r3, #1: Gigan's backgrounds
+    assert ST.steps_in_turn(_Prog(0x8000, two), 0x8000, 2) is True
+    assert turn(LDR_I, UMULL, LDR_T, STR_I) is False      # no add: a pick it remembers (Bond's ball save)
+    assert turn(LDR_I, ADD1, LDR_T, STR_I) is False       # no wrap: a count (JP's amber mines)
+    assert turn(LDR_I, ADD1, CMP3, MOVGE2, LDR_T, STR_I) is False   # held at the end: progress
+    assert turn(LDR_I, ADD1, UMULL, STR_I) is False       # no table indexed
 
 
 GZLE = os.path.join(os.environ.get("PAD444_CARDS", r"D:\Pinball\images\Stern\spike2"),

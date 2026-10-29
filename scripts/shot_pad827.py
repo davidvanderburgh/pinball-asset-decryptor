@@ -91,7 +91,7 @@ def main():
             page.mouse.move(5, 990)
             time.sleep(0.6)
             page.screenshot(path=os.path.join(out, ("after_" if after else "before_")
-                                              + "video_battle.png"))
+                                              + os.environ.get("PAD827_SCREEN", "video_battle") + ".png"))
             v = state().get("video") or {}
             print("rows:", [(r.get("rel"), r.get("seen")) for r in v.get("rows") or []][:40],
                   flush=True)

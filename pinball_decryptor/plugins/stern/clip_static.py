@@ -140,63 +140,87 @@ def _mem(w):
     return bool(w & 0x00100000), (w >> 16) & 0xF, imm, regoff, (w >> 12) & 0xF
 
 
-def _wraps(w, n):
-    """Whether the instruction *w* is one a turn counter wraps a table of *n* with: a compare
-    with *n* or *n* - 1, an ``and`` with *n* - 1 (a power of two), a multiply-high (the
-    compiler's division by a constant: Ebirah's ``umull`` by 0xaaaaaaab, mod 3) or a divide."""
-    if (w >> 28) == 0xF:
-        return False
-    if (w & 0x0FE000F0) in (0x00800090, 0x00C00090):   # umull / smull
-        return True
-    if (w & 0x0FF0F0F0) in (0x0710F010, 0x0730F010):   # sdiv / udiv
-        return True
-    if (w & 0x0E000000) == 0x02000000:                 # data processing, immediate
-        from .stock_scan import rot_imm
-        op = (w >> 21) & 0xF
-        v = rot_imm(w)
-        if op == 0xA and (w & 0x00100000) and v in (n, n - 1):      # cmp rX, #n
-            return True
-        if op == 0x0 and n & (n - 1) == 0 and v == n - 1:           # and rX, rX, #n-1
-            return True
-    return False
+def _is_divide(w):
+    """A multiply-high (the compiler's division by a constant: Ebirah's ``umull`` by
+    0xaaaaaaab, mod 3) or a divide instruction."""
+    return (w >> 28) != 0xF and ((w & 0x0FE000F0) in (0x00800090, 0x00C00090)
+                                  or (w & 0x0FF0F0F0) in (0x0710F010, 0x0730F010))
 
 
 def steps_in_turn(prog, start, n=0):
-    """Whether the function at *start* reads an object's field, indexes with it, wraps it at the
-    table's length *n* (:func:`_wraps`) and writes the same field back: ``ldr rI, [rB, #off]``
-    ... a register-offset load ... ``str rX, [rB', #off]`` (the table's index kept in the object
-    and moved on to the next, round to the first). A field read, used and written back with no
-    wrap is a count (Jurassic Park's amber mines: the clip of the mine the player is on, which
-    the emulator saw played 2, 1, 1, 4), not a turn."""
+    """Whether the function at *start* keeps a table's index in an object and moves it on to the
+    next, round to the first: it loads a field (``ldr rI, [rB, #off]``), adds 1 to it, WRAPS
+    it - a division after the add (``(i + 1) % n``: Ebirah's ``umull``), an ``and`` with *n* - 1
+    for a power of two (the Gigan battle's two backgrounds: ``& 1``) or a compare with the
+    table's length *n* (or *n* - 1) followed by a conditional ``mov rX, #0`` - stores it back to
+    the same field, and indexes a table (a register-offset load).
+
+    Each part is needed. A field read and written back with no add is a choice the code made
+    elsewhere (Bond's ball save clips, played 6 then 5: a random pick it remembers); an add with
+    no wrap, or a compare that holds the count at the end, is progress (Jurassic Park's amber
+    mines, the emulator saw 2, 1, 1, 4; Bond's gadget backgrounds, one per gadget collected)."""
     from . import stock_scan as S
     try:
         end, lits = S.function_extent(prog, start, cap=LOADER_MAX)
     except Exception:                                   # noqa: BLE001 - unreadable: no
         return False
-    loads, stores, indexed, wraps = {}, set(), False, False
+    holds = {}                  # register -> the field offset it was loaded from
+    plus = {}                   # register -> the field offset it holds 1 more than
+    stepped, wrapped, stored = set(), set(), set()
+    indexed = False
+    cmp_at = None               # (VA of a cmp with n / n-1, the field it compared)
     va = start
     while va < end:
         w = prog.word(va)
         va += 4
         if w is None:
             break
-        if va - 4 in lits:
+        if va - 4 in lits or (w >> 28) == 0xF:
             continue
-        wraps = wraps or _wraps(w, n)
+        cond = w >> 28
         m = _mem(w)
-        if m is None:
+        if m is not None:
+            load, base, off, regoff, rt = m
+            if regoff:
+                indexed = indexed or load
+                continue
+            if base in (13, 15) or off <= 0:            # the stack and literals are no object field
+                if load:
+                    holds.pop(rt, None)
+                    plus.pop(rt, None)
+                continue
+            if load:
+                holds[rt] = off
+                plus.pop(rt, None)
+            elif off in stepped and off in wrapped:
+                stored.add(off)
             continue
-        load, base, off, regoff, _rt = m
-        if regoff:
-            indexed = indexed or load
+        if _is_divide(w):
+            wrapped |= stepped
             continue
-        if base in (13, 15) or off <= 0:             # the stack and literals are no object field
-            continue
-        if load:
-            loads.setdefault(off, va)
-        elif off in loads and loads[off] < va:
-            stores.add(off)
-    return indexed and bool(stores) and wraps
+        if (w & 0x0E000000) == 0x02000000:              # data processing, immediate
+            from .stock_scan import rot_imm
+            op, rn, rd, v = (w >> 21) & 0xF, (w >> 16) & 0xF, (w >> 12) & 0xF, rot_imm(w)
+            if op == 0x4 and v == 1 and cond == 0xE and (rn in holds or rn in plus):   # add rd, rn, #1
+                off = holds.get(rn, plus.get(rn))
+                plus[rd] = off
+                holds.pop(rd, None)
+                stepped.add(off)
+                continue
+            if op == 0x0 and rn in plus and n and n & (n - 1) == 0 and v == n - 1:     # and rd, rn, #n-1
+                plus[rd] = plus[rn]                      # (i + 1) % n of a power of two:
+                wrapped.add(plus[rn])                    # Godzilla's Gigan backgrounds, & 1
+                continue
+            if op == 0xA and (w & 0x00100000) and v in (n, n - 1) and rn in plus:      # cmp rn, #n
+                cmp_at = (va - 4, plus[rn])
+                continue
+            if op == 0xD and v == 0 and cond != 0xE and cmp_at and va - 4 - cmp_at[0] <= 12:
+                wrapped.add(cmp_at[1])                   # movge rd, #0 right after it: round
+                continue
+            holds.pop(rd, None)
+            if op not in (0x8, 0x9, 0xA, 0xB):           # tst/teq/cmp/cmn write no register
+                plus.pop(rd, None)
+    return indexed and bool(stored)
 
 
 def table_loaders(prog, table):

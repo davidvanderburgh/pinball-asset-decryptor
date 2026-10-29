@@ -70,6 +70,7 @@ export function hatWords(h = {}, ch = {}) {
     case "shot": return `When ${h.shot || "a shot"} is made${when}`;
     case "any_shot": return `When any shot is made${when}`;
     case "switch": return `When any playfield switch is hit${when}`;
+    case "spare_switch": return `When the spare switch on board ${h.node} input ${h.input} closes${when}`;   // PAD-826
     case "every": return `Every ${h.seconds} seconds while it runs`;
     case "seconds_left": return `When ${h.seconds} seconds are left`;
     case "event": return `When ${eventLabel(h.event, ch)}${when}`;
@@ -105,7 +106,7 @@ export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "m
   if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show",
   log: "show", clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
-  shake: "mech", shake_game: "mech" };
+  shake: "mech", shake_game: "mech", spare_drive: "mech" };
 const COLOR_NAMES = { "#ffd000": "yellow", "#00a0ff": "blue", "#ff0000": "red", "#00c040": "green", "#ffffff": "white",
   "#ff7800": "orange", "#a040ff": "purple", "#00ff00": "green" };
 const PATTERN_WORDS = { solid: "solid", blink: "blinking", pulse: "pulsing", chase: "chasing",
@@ -180,6 +181,7 @@ export function stmtWords(b, ch = {}) {
     case "building": return `Move the building to ${String(b.floor) === "0" ? "where the game keeps it" : "floor " + b.floor}`;
     case "shake": return `Shake the cabinet (${b.strength || "hard"}) for ${msWords(b.ms)}`;
     case "shake_game": return `Shake the cabinet with ${b.shake || "?"}`;
+    case "spare_drive": return `Drive spare output ${b.node}:${b.output} at ${b.power} for ${b.ms} ms${+b.hold_power ? `, then ${b.hold_power} for ${b.hold_ms} ms` : ""}`;   // PAD-826
     case "score": return `Score ${valWords(b.points)} points`;
     case "set": return `Set ${b.var || "?"} to ${valWords(b.value)}`;
     case "change": return `Change ${b.var || "?"} by ${valWords(b.by)}`;

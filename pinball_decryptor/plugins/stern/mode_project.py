@@ -122,6 +122,9 @@ class TitleProfile:
     limits: tuple = ()               # PAD-479: the parts (PARTS, "end_game" = the game's own time-up call, "stack",
     #                                  "own_music") whose reason is a GAME limit, every place on the card checked:
     #                                  the tab says so in grey, not in yellow (nothing left for the app to find)
+    spare: tuple = ()                # PAD-826: "in" / "out": the board inputs the game has no switch on and the driver
+    #                                  outputs it never fires, for hardware a mod adds (the port's spare lines, the
+    #                                  build in SPARE_IO_PROVEN); () = neither on this build
     info_at: tuple = ()              # PAD-547: (x, y) on the glass, the middle of a mode's info line (its words and a
     #                                  value, "SUPER JACKPOT = 53,200,000"), from the port's `text info_line_at`: where
     #                                  the game shows its own (Bond LE: under the status bar); () = INFO_AT_DEFAULT
@@ -2672,7 +2675,30 @@ def profile_from_port(path):
         wizard_claims=_wizard_route(port) == 1 and "wizard_light" in port["site"],
         status_bar=all(n in port["site"] for n in ("status_bar", "set_text", "string_new")),   # PAD-521
         info_at=_info_at(port),                              # PAD-547
+        spare=_spare(port, key),                             # PAD-826
     )
+
+
+#: PAD-826: the builds whose spare inputs and outputs a mode used in the emulator (C:/tmp/PAD-826/spare_sweep_job.sh
+#: on the stock card, hidden, muted: the switch struct checked out, a spare input set through /dump/spare_in came to the
+#: mode as its shot in a game, and the spare output it then pulsed went out on the bus as [coildrive] node N coil O)
+SPARE_IO_PROVEN = frozenset({
+    "godzilla_pro-1.16",   # 2026-10-29 rig 1 spare_job.sh: 9:24 -> shot "Spare 9:24" -> 9:4 255/40 then 128/500 on the bus;
+                           # the trough (8:1) refused; a 4 s hold OFF at the mode's end with 2500 ms left; 5 s in 10 s held
+})
+
+
+def _spare(port, key):
+    """PAD-826: ("in", "out") as far as this build has them: the switch struct (`data sw_struct`) for spare inputs;
+    the node-bus fire and OFF (`site coil_frame` / `coil_off`) and the coil table for spare outputs."""
+    if not port or key not in SPARE_IO_PROVEN:
+        return ()
+    out = ()
+    if port["data"].get("sw_struct"):
+        out += ("in",)
+    if all(n in port["site"] for n in ("coil_frame", "coil_off")) and all(port["data"].get(n) for n in ("coil_table", "coil_count")):
+        out += ("out",)
+    return out
 
 
 def _info_at(port):

@@ -267,3 +267,108 @@ def test_the_playfield_window_builds_its_reader_beside_the_volume_file(monkeypat
     assert cw.names_path == str(tmp_path / "clip_names_4.json")
     assert cw.seen_path == str(tmp_path / "clips_seen_4.jsonl")
     assert cw.names_path == CS.names_file(str(tmp_path), 4) and cw.seen_path == CS.seen_file(str(tmp_path), 4)
+
+
+# ---- what the game program says (clip_static) ------------------------------------------------------
+from pinball_decryptor.plugins.stern import clip_static as ST  # noqa: E402
+
+
+def test_a_run_of_clip_name_pointers_is_a_table_and_a_second_tables_start_splits_it():
+    words = [(0x1000, "fight_loop"), (0x1004, "fight_loop2"), (0x1008, "fight_loop3"),
+             (0x100c, "bg1"), (0x1010, "bg2"),                       # the next mode's table
+             (0x2000, "lock1"), (0x2010, "lock2"), (0x2020, "lock3"),  # records, 16 bytes each
+             (0x3000, "alone")]
+    got = ST.tables(words, starts=lambda va, stride: va == 0x100c)
+    assert [(t.at, t.stride, t.names) for t in got] == [
+        (0x1000, 4, ["fight_loop", "fight_loop2", "fight_loop3"]), (0x100c, 4, ["bg1", "bg2"]),
+        (0x2000, 16, ["lock1", "lock2", "lock3"])]
+
+
+def test_the_program_words_for_a_clip():
+    turn = {"group": ["a", "b", "c"], "turn": True}
+    assert ST.words("b", turn) == ("In turn with 2 others", [
+        "The game plays it in turn with a, c: each time it comes, the next one."])
+    pick = {"group": ["a", "b"], "turn": False, "loop": True}
+    cell, lines = ST.words("a", pick)
+    assert cell == "1 of 2 · loops" and lines[0].startswith("The game keeps it in a table with b")
+    assert lines[1] == "The game asks for it as a loop: it plays again each time it ends."
+    assert ST.words("x", None) == ("", [])
+
+
+class _Prog:
+    """Words of a made-up ARM function, for :func:`clip_static.steps_in_turn`."""
+    def __init__(self, start, words):
+        self.start, self.words = start, words
+
+    def word(self, va):
+        i = (va - self.start) // 4
+        return self.words[i] if 0 <= i < len(self.words) else None
+
+
+def test_a_loader_that_keeps_its_index_in_an_object_and_moves_it_on_steps_in_turn(monkeypatch):
+    from pinball_decryptor.plugins.stern import stock_scan as S
+    ebirah = [0xE92D4030,             # push {r4, r5, lr}
+              0xE590107C,             # ldr r1, [r0, #0x7c]   the index
+              0xE7925101,             # ldr r5, [r2, r1, lsl #2]  the table's entry
+              0xE584307C,             # str r3, [r4, #0x7c]   moved on
+              0xE8BD8030]             # pop {r4, r5, pc}
+    monkeypatch.setattr(S, "function_extent", lambda prog, start, cap=0: (start + 20, set()))
+    assert ST.steps_in_turn(_Prog(0x8000, ebirah), 0x8000) is True
+    picked = list(ebirah)
+    picked[3] = 0xE5843080              # str to another field: no index kept
+    assert ST.steps_in_turn(_Prog(0x8000, picked), 0x8000) is False
+
+
+GZLE = os.path.join(os.environ.get("PAD444_CARDS", r"D:\Pinball\images\Stern\spike2"),
+                    "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw")
+
+
+def test_godzilla_le_ebirahs_fight_loops_take_turns_and_its_tank_clips_are_picked():
+    """Against the emulator (PAD-827, stock LE 1.16, battle vs Ebirah): the fight loops played
+    24 of 24 changes in table order; Advance_Tanks1, 7, 6, 9, 16 played out of order."""
+    if not os.path.isfile(GZLE):
+        pytest.skip("no Godzilla LE 1.16 card on this machine")
+    from pinball_decryptor.plugins.stern import clip_modes as CM, video_bank as VB
+    from pinball_decryptor.plugins.stern.explorer import CardImage
+    from pinball_decryptor.plugins.stern.mode_tryit import card_title
+    game, version, part = card_title(GZLE)
+    with CardImage(GZLE) as img:
+        elf = img.preview(part, "/%s/game" % game, cap=256 << 20)
+        bank = img.preview(part, "/%s/assets/lcd/auto_loaded/%s/scene.radium"
+                           % (game, VB.GODZILLA_PRO_BANK), cap=64 << 20)
+    names = [c.name for c in VB.parse(bank).library.entries]
+    ctx = {}
+    reading = CM.analyse(elf, names, ctx=ctx)
+    facts = ST.analyse(ctx["prog"], reading.refs, game, version).facts()
+    fight = facts["ebirah_vs_godzilla_fight_loop2"]
+    assert fight["turn"] is True and fight["group"] == [
+        "ebirah_vs_godzilla_fight_loop", "ebirah_vs_godzilla_fight_loop2", "ebirah_vs_godzilla_fight_loop3"]
+    assert facts["Advance_Tanks7"]["turn"] is False and len(facts["Advance_Tanks7"]["group"]) > 2
+    assert facts["EndOfBallBonus_BackgroundLoop"].get("loop") is True     # re-asked in the run too
+
+
+def test_the_video_tab_shows_what_the_program_says_beside_what_the_emulator_saw(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import clip_modes as CM
+    proj = _project(tmp_path, names=(SHARED, SOLO, OTHER, MAIN))
+    _stub_reading(monkeypatch, tmp_path, proj)
+    fake = CM.read_card
+
+    def with_static(card, rows, cancel=None):
+        got = fake(card, rows, cancel)
+        got.static = {"solo": {"group": ["solo", "main"], "turn": True},
+                      "main": {"group": ["solo", "main"], "turn": True, "loop": True}}
+        return got
+    monkeypatch.setattr(CM, "read_card", with_static)
+    CS.save(str(proj), {SOLO: {"plays": 2, "after": {"RIGHT RAMP MADE": 2}, "loops": False}})
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        st = _ready(w, lambda st: _row(st, MAIN)["seen"])
+        assert _row(st, SOLO)["seen"] == "After RIGHT RAMP MADE · In turn with 1 other"
+        assert _row(st, SOLO)["seen_tip"][-2:] == [
+            "From the game program:", "The game plays it in turn with main: each time it comes, the next one."]
+        assert _row(st, MAIN)["seen"] == "In turn with 1 other · loops"      # no emulator run saw it
+        assert _row(st, MAIN)["seen_head"] == "From the game program"
+        w.call("video.select", MAIN)
+        st = _wait(w, lambda st: ((st.get("preview") or {}).get("seen") or {}).get("rel") == MAIN)
+        pv = st["preview"]["seen"]
+        assert pv["head"] == "" and pv["prog_head"] == "From the game program:" and len(pv["prog_lines"]) == 2

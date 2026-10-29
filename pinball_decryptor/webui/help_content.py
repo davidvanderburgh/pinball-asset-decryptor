@@ -707,6 +707,11 @@ HELP_CONTENT = {
             "The Video tab keeps what was seen for the project, so a battle's clips can be "
             "told apart by their shots. The words the game draws over a clip are on the "
             "game's screen while it plays.",
+            "The same column also says what the card's game program shows about a clip, with "
+            "no emulator run: **In turn with 2 others** (the game plays a set of clips one "
+            "after the other, each time the moment comes), **1 of 6** (one of a set it picks "
+            "from as it plays) and **loops** (it asks for the clip as a loop). Which shot "
+            "starts a clip is only known from the emulator.",
         ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "

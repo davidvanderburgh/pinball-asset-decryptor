@@ -36,7 +36,7 @@ const T = {
   compare: "Play the selected clips side by side, big, beside the Color profiles bar: up to 4 (Ctrl-click or Shift-click rows to select them). One clip shows its Original beside its Replacement.\n\nClick a clip there and the bar changes its colors, so you see a profile or a slider on it against the others as you go.",
   // PAD-444: which of the game's modes plays each clip, read off the card's game program
   // PAD-827
-  seen: "What the emulator saw the game do with this clip: the switch made just before it started, and \"loops\" when the game starts it again each time it ends. It fills in as you play games on the Emulate tab, where the playfield window lists the clips as they play. The words the game draws over a clip are on the game's screen there.",
+  seen: "What the emulator saw the game do with this clip: the switch made just before it started, and \"loops\" when the game starts it again each time it ends. It fills in as you play games on the Emulate tab, where the playfield window lists the clips as they play. The words the game draws over a clip are on the game's screen there. Beside it, what the card's game program says: a clip the game plays in turn with others, one of a set it picks from, or one it asks for as a loop.",
   modes: "Which of the game's battles, multiballs and other modes play this clip, read from the card's game program. A clip two modes share has a row for each: choose a replacement in one mode's row to change it for that mode only. Not played: nothing in the game asks for the clip, so the machine never shows it.",
   modeFilter: "List only the clips one mode of the game plays.",
   modesBusy: "Reading which mode plays each clip…",
@@ -1064,7 +1064,7 @@ export default function VideoTab() {
     // PAD-827: what the emulator saw (beside Played in, on the cards that column is read for)
     modesCol && { key: "seen", label: "When it plays", width: width("seen"), sort: "seen", title: T.seen,
       render: (r) => (r.seen
-        ? html`<span class="vid-seen-cell" ...${tip({ head: "Seen in the emulator", lines: r.seen_tip || [] })}>${r.seen}</span>`
+        ? html`<span class="vid-seen-cell" ...${tip({ head: r.seen_head || "When it plays", lines: r.seen_tip || [] })}>${r.seen}</span>`
         : "") },
     colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
       render: (r) => (r.col_lock
@@ -1231,8 +1231,11 @@ export default function VideoTab() {
             ${pv.sounds.foot ? html`<div class="small muted">${pv.sounds.foot}</div>` : null}</div><//>
         </div>` : null}
         ${pv.seen && pv.seen.rel === currentRel ? html`<div class="vid-seen">
-          <${Note} kind="info"><div><span>${pv.seen.head}</span>
-            <ul class="vid-sound-list">${pv.seen.lines.map((t) => html`<li key=${t}>${t}</li>`)}</ul></div><//>
+          <${Note} kind="info"><div>
+            ${pv.seen.head ? html`<span>${pv.seen.head}</span>
+            <ul class="vid-sound-list">${pv.seen.lines.map((t) => html`<li key=${t}>${t}</li>`)}</ul>` : null}
+            ${pv.seen.prog_head ? html`<span>${pv.seen.prog_head}</span>
+            <ul class="vid-sound-list">${pv.seen.prog_lines.map((t) => html`<li key=${t}>${t}</li>`)}</ul>` : null}</div><//>
         </div>` : null}
         ${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
         <div class="vid-panes">

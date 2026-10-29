@@ -39,7 +39,7 @@ def test_the_build_puts_them_on_the_carriers_slot_once_it_has_one():
     m.attract_rel = CARRIER
     assert m.files()[1:] == [(CARRIER, SMo.attract_mode(1), "a.wav"), (CARRIER, SMo.attract_mode(2), "b.wav")]
     a = SMo.attract_mode(2)
-    # built as a file in turn is (cut to its carrier's length, its loudness), said in their own words
+    # built as a file in turn is (its loudness; PAD-809: not cut to its carrier), said in their own words
     assert SMo.is_turn(a) and SMo.is_attract(a) and not SMo.is_attract(SMo.turn_mode(16))
     assert SMo.attract_of(a) == 2 and m.name(a) == "in attract" and m.level(CARRIER, a) == 0
     assert SMo.who(a) == "Attract flipper sounds" and SMo.what(CARRIER, a) == "flipper sound 2"
@@ -183,7 +183,11 @@ def test_the_carrier_is_the_first_whose_sound_the_build_leaves_alone(tmp_path, m
                               "left out of this build: ")
 
 
-def test_each_file_goes_on_the_card_as_a_record_of_its_own_cut_to_its_carrier(tmp_path, monkeypatch):
+def test_each_file_goes_on_the_card_as_a_record_of_its_own_whole_past_its_carrier(tmp_path, monkeypatch):
+    """PAD-809 (an owner of a Bond LE: 5 s and 8 s callouts "cut to 4 seconds"): a file longer than its carrier
+    keeps its whole length. The runtime plays the carrier with the file's own record swapped in, which plays
+    whole past the carrier's length (PAD-533, emulator-proven again on Bond LE 1.06 for PAD-809), and waits out
+    the file's own length (afile). Only "longer replacements" off still cuts it, as it does a replacement."""
     from pinball_decryptor.plugins.stern.spike2.emulator import BLOCK
     made = {"a.wav": _wav(tmp_path / "conv_a.wav", 0.5), "b.wav": _wav(tmp_path / "conv_b.wav", 3.0)}
     monkeypatch.setattr(SMo, "convert", lambda project, rel, mode, src, log=None: made[src])
@@ -195,9 +199,18 @@ def test_each_file_goes_on_the_card_as_a_record_of_its_own_cut_to_its_carrier(tm
                                               lambda t, lvl="info": logs.append(t), longer_ok=True)
     assert [(u["mode"], u["slot"]) for u in used] == [(SMo.attract_mode(1), 46), (SMo.attract_mode(2), 46)]
     assert len({u["host"] for u in used}) == 2 and 46 not in edits       # the carrier keeps its record
-    assert used[0]["frames"] == 22050 and used[1]["frames"] < 2 * 44100  # the long one cut to the carrier
+    assert used[0]["frames"] == 22050 and used[1]["frames"] == 3 * 44100  # the long one whole
     assert all(t.startswith("Attract flipper sounds: ") for t in logs)
-    assert any("flipper sound 2" in t and "is cut to its slot's" in t for t in logs)
+    assert not any("is cut to its slot's" in t for t in logs)
+    assert _grows[used[1]["host"]][1] == 3 * 44100                        # its record grown to hold it
+    # longer replacements off: cut to the carrier, for that reason, as a replacement is
+    logs = []
+    _e, _g, used = E._sound_modes_grow(str(tmp_path), params, {}, {}, m,
+                                       lambda t, lvl="info": logs.append(t), longer_ok=False,
+                                       longer_why="longer sounds are off")
+    assert used[1]["frames"] < 2 * 44100
+    assert any("flipper sound 2" in t and "is cut to its slot's" in t and t.endswith("longer sounds are off.")
+               for t in logs)
     assert E._SMo_tag(CARRIER, SMo.attract_mode(2)) == "flipper sound 2 in attract"
 
 

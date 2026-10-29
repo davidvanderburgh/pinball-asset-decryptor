@@ -91,6 +91,9 @@ what happened, with the app's log and the card's details, after showing
 you exactly what goes. No email needed: the app tells you when a release
 addresses your report.
 
+Questions, or something to show off? The **Discord** button in the top bar
+(also ⚙ > **Join our Discord**) opens the PAD Discord server.
+
 ## Documentation
 
 | Page | What is in it |

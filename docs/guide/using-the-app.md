@@ -476,6 +476,12 @@ session.
 **Language:** English (US and UK), Spanish, German and French. Switch with
 the globe button in the top bar or ⚙ > **Language**.
 
+## Discord
+
+**Discord** in the top bar (also ⚙ > **Join our Discord**) opens the PAD
+Discord server in your browser: ask questions, share what you made and hear
+about new releases.
+
 ## Report a problem
 
 **Report a problem** in the top bar (also ⚙ > **Report a problem…**, and a

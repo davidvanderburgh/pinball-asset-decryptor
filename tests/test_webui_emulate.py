@@ -1023,6 +1023,43 @@ def test_slots_not_read_yet_is_not_no_slots(tmp_path):
         assert w.state(NS)["slots_read"] is True
 
 
+def test_macos_manages_its_slots_through_the_box(tmp_path, monkeypatch):
+    """★ PAD-835: the Mac's container carries criu now, so its Save states
+    panel works. The slot scripts go to padbox.sh as the ORDINARY command
+    (it runs them as root inside the box; there is no `wsl -u root` to ask),
+    and the words name the Mac's disk and engine, not WSL."""
+    from pinball_decryptor.webui.tabs import emulate as tab
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        monkeypatch.setattr(tab, "no_rig", lambda: False)
+        monkeypatch.setattr(tab.rig, "rig_cmd",
+                            lambda script, *a, env=(): ["padbox.sh", script]
+                            + list(a))
+
+        def root(*_a):
+            raise AssertionError("rig_cmd_root is WSL-only")
+        monkeypatch.setattr(tab.rig, "rig_cmd_root", root)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        assert w.run(lambda: svc._cmd_root("slots.sh", "list")) == [
+            "padbox.sh", "slots.sh", "list"]
+
+        def failed():
+            svc._slots_rows, svc._slots_total, svc._slots_free = [], None, None
+            svc._slots_paint()
+        w.run(failed)
+        assert w.state(NS)["slots_sum"] == ("Could not read the slots - is "
+                                            "Docker running?")
+        _slots(w, svc)
+        assert w.state(NS)["slots_sum"].endswith(
+            "free on the emulator's disk: 61.2 GB")
+        rec = _patch(svc, monkeypatch, answers={
+            "slots.sh list": _Done(b"total|0\nfree|1\n")})
+        assert w.call(NS + ".slots_refresh") is True
+        _wait(w, lambda: any(c[-1] == "list" for c in rec.calls))
+        monkeypatch.setattr(sys, "platform", "linux")
+        assert w.call(NS + ".slots_refresh") is False
+
+
 def test_slots_are_scoped_to_the_card(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)

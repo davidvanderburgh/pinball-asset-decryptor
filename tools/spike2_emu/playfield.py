@@ -842,6 +842,22 @@ def wsl_run(script, *args):
     return r
 
 
+def _as_root(cmd):
+    """*cmd* through ``sudo -n`` where the machine has said that is how this
+    window reaches root, else as it is.
+
+    The Mac's emulator box (PAD-835) sets PAD_STATE_SUDO=1 and lets its
+    ``pad`` user, which this window runs as, run the three save-state scripts
+    as root without a password (docker/Dockerfile's sudoers rule). The rule
+    names ``/bin/bash``, so that is the path asked for. ``-n``: a password
+    prompt would be a hang with nobody to answer it.
+    """
+    if (os.environ.get("PAD_STATE_SUDO") == "1" and hasattr(os, "geteuid")
+            and os.geteuid() != 0):
+        return ["sudo", "-n", "/bin/bash"] + cmd[1:]
+    return cmd
+
+
 def state_run(script, slot="quicksave", label=None):
     """Run savegame.sh / loadgame.sh, the item 13 save-state wrappers.
 
@@ -865,7 +881,7 @@ def state_run(script, slot="quicksave", label=None):
     else:
         # The native-Linux path: run it plainly; without root the script's own
         # "needs root" line lands in the status bar, which is the honest hint.
-        cmd = ["bash", os.path.join(HERE, script), slot] + extra
+        cmd = _as_root(["bash", os.path.join(HERE, script), slot] + extra)
     try:
         return subprocess.run(cmd, capture_output=True, timeout=240,
                               creationflags=_CREATE_NO_WINDOW)
@@ -1776,7 +1792,7 @@ def state_slots():
         cmd = (wsl_head(root=True) + ["-e", "env"] + wsl_rig_env()
                + ["bash", "%s/slots.sh" % WSL_DIR, "list"])
     else:
-        cmd = ["bash", os.path.join(HERE, "slots.sh"), "list"]
+        cmd = _as_root(["bash", os.path.join(HERE, "slots.sh"), "list"])
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=30,
                            creationflags=_CREATE_NO_WINDOW)

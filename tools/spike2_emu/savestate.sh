@@ -134,6 +134,18 @@ while IFS= read -r line; do
     fstype=$(awk '{for(i=7;i<=NF;i++) if($i=="-"){print $(i+1); exit}}' <<<"$line")
     base=${mp##*/}
     key="ext_$(echo "${mp#/}" | tr '/.' '__')"
+    # ★ PAD-835: A CONTAINER'S /dev IS A tmpfs. run_game.sh binds the host's
+    # /dev/null, /dev/tty... over the guest's device files, and on WSL those
+    # come from devtmpfs - the case below. In the Mac's emulator box (Docker,
+    # colima) /dev is a tmpfs the engine filled with nodes, so the same binds
+    # read "tmpfs" here and were skipped as a fresh tmpfs, and criu died at
+    # "./dev/tty doesn't have a proper root mount". A bind of ONE device
+    # (a root field that is not "/", a guest path under /dev) is the
+    # devtmpfs case whatever the host's /dev is; /dev/shm, a fresh tmpfs of
+    # the guest's own, has root "/" and stays internal.
+    if [ "$fstype" = tmpfs ] && [ "$(awk '{print $4}' <<<"$line")" != / ]; then
+        case "$mp" in /dev/*) fstype=devtmpfs ;; esac
+    fi
     case "$fstype" in
     devtmpfs)
         if [ "$base" = null ] || [ "$base" = zero ] || \

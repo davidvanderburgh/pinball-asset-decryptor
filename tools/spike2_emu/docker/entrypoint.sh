@@ -30,12 +30,51 @@ PORT=${PAD_VNC_PORT:-5900}
 # the cheapest, most-run command in the rig pay two seconds and leave an X
 # server behind it.
 case "${1:-}" in
-    alive.sh|killgame.sh|status.sh|gameinfo.py|mktables.py|parts.py)
+    alive.sh|killgame.sh|status.sh|gameinfo.py|mktables.py|parts.py|slots.sh)
         exec bash "$RIG/$1" "${@:2}" ;;
 esac
 
+# ★ A SAVE-STATE RUN STARTS AS ROOT (PAD-835), the same shape `wsl -u root`
+# gives it on Windows: criu can only freeze a root guest (watch.sh says why),
+# and watch.sh boots that guest as root and drops every helper back to pad.
+# The display belongs to pad as well, as WSLg's does to the desktop user -
+# the dropped renderer and playfield connect to it, and x11vnc's password
+# file lives in pad's home. Off a root start, as_pad is nothing at all.
+as_pad() { if [ "$(id -u)" = 0 ]; then runuser -u pad -- "$@"; else "$@"; fi; }
+if [ "$(id -u)" = 0 ] && [ -n "${PAD_PIVOT:-}" ]; then
+    # PRESENT IS NOT THE SAME AS WORKING, one layer further down than
+    # getcriu.sh's check: the Linux the box runs on is whatever the Mac's
+    # container engine brought (Docker Desktop, colima, OrbStack...), and
+    # criu needs kernel support that is that machine's to give. Asked once,
+    # here, so a kernel that cannot freeze a program costs the save states
+    # and nothing else - the run boots the ordinary way and the playfield
+    # shows no buttons that could only fail.
+    #
+    # ...AND THE ENGINE MAY CONFINE THE WHOLE BOX, which `criu check` does not
+    # see. Docker Desktop runs dockerd itself under a seccomp filter, and a
+    # filter is inherited for good - --privileged and seccomp=unconfined
+    # cannot lift it - so every process in here carries one. criu has to
+    # suspend the game's filter to freeze it and the kernel refuses that to
+    # a tracer under a filter of its own: measured, the save died at
+    # "suspending seccomp failed: Operation not permitted" (PAD-835, Docker
+    # Desktop 29.6 on WSL 2). An engine whose dockerd runs plainly in its
+    # Linux VM (colima, which "Set up emulator..." installs) has none.
+    if ! grep -q '^Seccomp:[[:space:]]*0' /proc/self/status 2>/dev/null; then
+        echo "[box] save states are off for this run: this container engine"
+        echo "[box] runs every container under a seccomp filter (Docker Desktop"
+        echo "[box] does), and the game cannot be frozen inside one. colima runs"
+        echo "[box] them without it."
+        unset PAD_PIVOT
+    elif ! criu check >/tmp/criu-check.log 2>&1; then
+        echo "[box] this container's Linux cannot freeze a running program, so"
+        echo "[box] save states are off for this run (criu check said:)"
+        tail -n 3 /tmp/criu-check.log | sed 's/^/[box]   /'
+        unset PAD_PIVOT
+    fi
+fi
+
 echo "[box] starting Xvfb on $XDISPLAY at $GEOM"
-Xvfb "$XDISPLAY" -screen 0 "$GEOM" -nolisten tcp >/tmp/xvfb.log 2>&1 &
+as_pad Xvfb "$XDISPLAY" -screen 0 "$GEOM" -nolisten tcp >/tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
 for _ in $(seq 1 40); do
     xdpyinfo -display "$XDISPLAY" >/dev/null 2>&1 && break
@@ -51,7 +90,7 @@ xdpyinfo -display "$XDISPLAY" >/dev/null 2>&1 || {
 # keys stay with it) and title bars, so the three windows can be dragged into
 # an arrangement instead of landing in a pile.
 if command -v openbox >/dev/null 2>&1; then
-    openbox >/tmp/openbox.log 2>&1 &
+    as_pad openbox >/tmp/openbox.log 2>&1 &
 fi
 
 # -forever   the viewer may disconnect and come back without ending the run
@@ -61,7 +100,7 @@ fi
 #            and PAD_VNC_PASSWD is there for anyone who disagrees.
 VNC_AUTH=(-nopw)
 if [ -n "${PAD_VNC_PASSWD:-}" ]; then
-    x11vnc -storepasswd "$PAD_VNC_PASSWD" "$HOME/.vncpw" >/dev/null 2>&1 \
+    as_pad x11vnc -storepasswd "$PAD_VNC_PASSWD" "$HOME/.vncpw" >/dev/null 2>&1 \
         && VNC_AUTH=(-rfbauth "$HOME/.vncpw")
 fi
 # -threads   INPUT IS READ ON ITS OWN THREAD, and without it the run is
@@ -82,7 +121,7 @@ fi
 echo "[box] VNC on port $PORT - open vnc://localhost:$PORT"
 (
     while :; do
-        x11vnc -display "$XDISPLAY" -rfbport "$PORT" -forever -shared -quiet \
+        as_pad x11vnc -display "$XDISPLAY" -rfbport "$PORT" -forever -shared -quiet \
                -threads "${VNC_AUTH[@]}"
         echo "[box] x11vnc exited ($?); starting it again"
         sleep 1
@@ -97,6 +136,8 @@ cleanup() {
     bash "$RIG/killgame.sh" >/dev/null 2>&1
     kill -9 "$VNC_PID" "$XVFB_PID" 2>/dev/null
     pkill -9 -x x11vnc 2>/dev/null      # the loop's child outlives the loop
+    # ...and on a root start XVFB_PID is runuser's, not the server's
+    pkill -9 -x Xvfb 2>/dev/null
 }
 trap cleanup EXIT INT TERM
 

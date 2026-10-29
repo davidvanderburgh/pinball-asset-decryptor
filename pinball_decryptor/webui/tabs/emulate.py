@@ -55,6 +55,12 @@ def no_rig():
     return bool(os.environ.get(NO_RIG_ENV))
 
 
+#: Where the Save states panel works: Windows through WSL, and macOS through
+#: the emulator's container, which carries criu since PAD-835. A Linux
+#: desktop has no passwordless root to run the slot scripts with.
+_SLOT_PLATFORMS = ("win32", "darwin")
+
+
 # ----------------------------------------------------------------- volume
 # Item 56: the master volume / Mute control file.  emulate_core computes
 # its path once, at import, from settings.json's folder; here it is computed
@@ -328,10 +334,11 @@ class EmulateTab(TabService):
             rt_enabled=True, check_label="Check setup…", check_enabled=True,
             fixaud_enabled=rig_ok, winreset_enabled=rig_ok,
             slots=[], slots_read=False, slot_sel=None,
-            slots_enabled=sys.platform == "win32",
+            slots_enabled=sys.platform in _SLOT_PLATFORMS,
             slots_sum=("The slots appear with the next status poll."
-                       if sys.platform == "win32" else
-                       "Slot management is available on Windows (WSL)."),
+                       if sys.platform in _SLOT_PLATFORMS else
+                       "Slot management is available on Windows (WSL) "
+                       "and macOS."),
             game=None, which=None, mains_note="", not_card="",
             assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
             cache=None, rename=None)
@@ -380,7 +387,9 @@ class EmulateTab(TabService):
         return rig.rig_cmd(script, *args, env=env)
 
     def _cmd_root(self, script, *args):
-        if no_rig():
+        # macOS: padbox.sh runs the save-state scripts as root inside the
+        # box itself (PAD-835), so the ordinary command is the root one.
+        if no_rig() or sys.platform == "darwin":
             return self._cmd(script, *args)
         return rig.rig_cmd_root(script, *args)
 
@@ -1068,6 +1077,10 @@ class EmulateTab(TabService):
         self._docker_report_if_asked(state)
         if state == "ok":
             self.set(docker_btn=None, setup_btn=False, docker_msg="")
+            # the first read of the slots: with no run up the status poll
+            # has no saves stamp to report, so it never asks (PAD-835)
+            if self._slots_rows is None:
+                self.slots_refresh()
             return
         plan = (rig.engine_setup_plan(self._docker_cli)
                 if state in ("engineless", "absent") else None)
@@ -1621,7 +1634,7 @@ class EmulateTab(TabService):
     # ------------------------------------------------------------------
     @rpc
     def slots_refresh(self):
-        if sys.platform != "win32":
+        if sys.platform not in _SLOT_PLATFORMS:
             return False
 
         def run():
@@ -1676,8 +1689,10 @@ class EmulateTab(TabService):
         self._slot_by_iid = by_iid
         if self._slot_sel not in by_iid:
             self._slot_sel = None
+        mac = sys.platform == "darwin"
         if self._slots_total is None:
-            summary = "Could not read the slots - is WSL up?"
+            summary = ("Could not read the slots - is Docker running?" if mac
+                       else "Could not read the slots - is WSL up?")
         else:
             bits = []
             if game_now:
@@ -1689,7 +1704,8 @@ class EmulateTab(TabService):
             else:
                 bits.append("%d slot%s" % (shown, "" if shown == 1 else "s"))
             bits.append("all slots %s" % rig.human(self._slots_total))
-            bits.append("free on the WSL disk: %s"
+            bits.append(("free on the emulator's disk: %s" if mac else
+                         "free on the WSL disk: %s")
                         % rig.human(self._slots_free))
             summary = " · ".join(bits)
         # "No save states" only after a read that answered (a failed read

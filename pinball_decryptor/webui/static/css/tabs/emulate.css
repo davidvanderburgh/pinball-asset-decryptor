@@ -78,6 +78,10 @@
 .emu-win .emu-wt { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
 .emu-win .mono.emu-wt { font-family: var(--sans); font-size: 14px; }
 
+/* game display (PAD-811) */
+.emu-gdisp > .bd { gap: 10px; }
+.emu-gdisp .row.wrap { white-space: normal; row-gap: 8px; }
+
 /* the card cache window */
 .emu-cache .tbl { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .emu-cache-hint { flex: 1 1 240px; min-width: 0; }

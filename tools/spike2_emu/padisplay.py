@@ -44,11 +44,19 @@ def monitors():
     import ctypes
     from ctypes import wintypes
     u = ctypes.windll.user32
+    # physical pixels on EVERY monitor: an unaware process sees scaled ones,
+    # and a system-aware one (the app's, pywebview's) still sees a monitor
+    # whose DPI differs from the main one's scaled. Per-monitor v2 for this
+    # thread only, put back after.
+    old = None
     try:
-        # physical pixels: an unaware process sees virtualised, scaled ones
-        u.SetProcessDPIAware()
+        u.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        old = u.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
     except Exception:                                       # noqa: BLE001
-        pass
+        try:
+            u.SetProcessDPIAware()
+        except Exception:                                   # noqa: BLE001
+            pass
 
     class MONITORINFO(ctypes.Structure):
         _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
@@ -66,6 +74,8 @@ def monitors():
                           "h": r.bottom - r.top, "primary": bool(mi.dwFlags & 1)})
         return 1
     u.EnumDisplayMonitors(None, None, proc(cb), None)
+    if old:
+        u.SetThreadDpiAwarenessContext(ctypes.c_void_p(old))
     found.sort(key=lambda m: (not m["primary"], m["x"], m["y"]))
     for i, m in enumerate(found):
         m["n"] = i + 1

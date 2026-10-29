@@ -89,7 +89,7 @@ class VpxTab(TabService):
                  ok=ok and not missing, note=note, loaded=False, busy="",
                  progress=None, registered=False, vpx="", tables_dir="",
                  library="", cards={}, tables=[], patched=[], presets=[],
-                 layout="", monitors=0, runtime_state="unknown",
+                 layout="", monitors=0, display=None, runtime_state="unknown",
                  runtime_text="Checking…", message="", message_level="info")
 
     # -- hooks ---------------------------------------------------------------

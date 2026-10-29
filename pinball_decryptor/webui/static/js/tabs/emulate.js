@@ -337,6 +337,37 @@ function WindowsCard({ s }) {
   return html`<${Card} title="Windows the emulator opens" cls="emu-wins">${body}<//>`;
 }
 
+// PAD-811: where the game window goes, full screen or a window on a chosen
+// monitor, borderless or framed (tools/spike2_emu/padisplay.py).  Each
+// change is saved at once and a running game's window follows it.
+const DISPLAY_MODES = [
+  { value: "free", label: "Where I leave it" },
+  { value: "fullscreen", label: "Full screen" },
+  { value: "window", label: "Window" },
+];
+
+function GameDisplay({ s }) {
+  const d = s.gdisp;
+  if (!d || s.platform !== "win32") return null;
+  const set = (k, v) => call("emulate.display_set", k, v);
+  const free = d.mode === "free";
+  const num = (k, label) => html`<label class="lbl small" for=${"emu-gd-" + k}>${label}</label>
+    <${Field} id=${"emu-gd-" + k} sm type="number" width=${84} value=${String(d[k])} onCommit=${(v) => set(k, v)} />`;
+  return html`<${Card} title="Game display" cls="emu-gdisp">
+    <div class="row wrap">
+      <label class="lbl small" for="emu-gd-mon">Monitor</label>
+      <${Select} id="emu-gd-mon" sm width=${190} value=${d.monitor} options=${d.mons} disabled=${free}
+        onChange=${(v) => set("monitor", v)} title="The monitor the game window goes on. 1 is the main one." />
+      <${Select} sm width=${150} value=${d.mode} options=${DISPLAY_MODES} onChange=${(v) => set("mode", v)}
+        title="Where I leave it: where you last dragged it, with its frame. Full screen: fills the monitor. Window: the size and place below, on that monitor." />
+      <${Check} label="Borderless" checked=${!d.border} disabled=${free} onChange=${(v) => set("border", !v)}
+        title="No title bar or frame around the game's picture." />
+    </div>
+    ${d.mode === "window" ? html`<div class="row wrap">${num("rx", "X")}${num("ry", "Y")}${num("w", "Width")}${num("h", "Height")}</div>` : null}
+    <span class="small muted">${(d.text || "").charAt(0).toUpperCase() + (d.text || "").slice(1)}. Changes apply at once, to a running game too.</span>
+  <//>`;
+}
+
 // ------------------------------------------------------------- modals
 const CACHE_COLS = [
   { key: "label", label: "Card", width: "minmax(160px,1.2fr)", cls: "mono", titleOf: (r) => r.label },
@@ -471,6 +502,7 @@ export default function EmulateTab() {
       <div class="stack emu-col">
         <${Status} s=${s} />
         <${WindowsCard} s=${s} />
+        <${GameDisplay} s=${s} />
       </div>
     </div>
     ${s.cache ? html`<${CacheModal} c=${s.cache} />` : null}

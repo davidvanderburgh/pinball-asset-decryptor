@@ -77,6 +77,7 @@ export default function Vpx() {
           ${presets.map((p) => html`<div class="vpx-pre">
             <${Radio} name="vpx-layout" checked=${s.layout === p.key} disabled=${busy || !s.ok} label=${p.words}
               onChange=${() => call("vpx.layout", p.key)} /></div>`)}
+          ${s.display && s.display.text ? html`<div class="small muted">The game's screen: ${s.display.text}. The Emulate tab's Game display changes it, live.</div>` : null}
         <//>
       </div>
       <div class="stack">

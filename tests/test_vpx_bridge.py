@@ -970,6 +970,12 @@ def test_setup_layout_writes_the_kit_and_the_ini_and_reads_back(tmp_path, monkey
     ini = tmp_path / "VPinballX.ini"
     ini.write_text("[Player]\nFullScreen = 1\nWidth = 1920\n[Editor]\nX = 1\n", encoding="utf-8")
     monkeypatch.setattr(pv, "vpx_ini_path", lambda: str(ini))
+    # PAD-811: a layout also saves the game display; never the real one
+    pd = pytest.importorskip("padisplay")
+    conf = str(tmp_path / "display.conf")
+    monkeypatch.setattr(pd, "CONF", conf)
+    monkeypatch.setattr(pd, "monitors", lambda: [
+        {"n": 1, "x": 0, "y": 0, "w": 3840, "h": 2160, "primary": True}])
     presets = vs.layout_presets([(0, 0, 3840, 2160)])
     assert vs.layout_key(pl.kit_load(), presets) == ""
     assert vs.apply_layout("side", [0, 0, 1440, 2160], [1440, 0, 2400, 1350]).startswith("layout side")
@@ -979,11 +985,47 @@ def test_setup_layout_writes_the_kit_and_the_ini_and_reads_back(tmp_path, monkey
     assert vs.layout_key(kit, presets) == "side"      # the tab ticks the layout in use
     text = ini.read_text(encoding="utf-8")
     assert "FullScreen = 0" in text and "Width = 1440" in text and "Height = 2160" in text and "X = 1" in text
+    # the LCD rectangle is a borderless window there
+    assert pd.load(conf) == {"mode": "window", "monitor": 1, "border": False,
+                             "rx": 1440, "ry": 0, "w": 2400, "h": 1350}
     vs.apply_layout("centre", None, None)                 # Visual Pinball's own place, the LCD's default
     kit = pl.kit_load()
     assert "player" not in kit and kit["lcd"] == {"topmost": True}
     assert vs.layout_key(kit, presets) == "centre"
     assert "FullScreen = 0" in ini.read_text(encoding="utf-8")
+    assert pd.load(conf)["mode"] == "free"                # the kit places it, as before
+
+
+def test_setup_layout_display_fills_a_monitor_or_sits_on_one():
+    """PAD-811: the LCD rectangle becomes the game display setting: full
+    screen on a monitor it fills, else a borderless window on the monitor
+    holding its middle, at its offset there."""
+    vs = pytest.importorskip("vpxsetup")
+    mons = [{"n": 1, "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True},
+            {"n": 2, "x": 1920, "y": 0, "w": 1920, "h": 1080, "primary": False}]
+    assert vs.display_for([1920, 0, 1920, 1080], mons) == {
+        "mode": "fullscreen", "monitor": 2, "border": False}
+    assert vs.display_for([2000, 100, 1360, 768], mons) == {
+        "mode": "window", "monitor": 2, "border": False, "rx": 80, "ry": 100, "w": 1360, "h": 768}
+    # off every monitor: on the main one
+    assert vs.display_for([9000, 0, 100, 100], mons)["monitor"] == 1
+    assert vs.display_for(None, mons)["mode"] == "free"
+
+
+def test_setup_state_reports_the_game_display(tmp_path, monkeypatch):
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    pd = pytest.importorskip("padisplay")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pd, "CONF", str(tmp_path / "display.conf"))
+    monkeypatch.setattr(pd, "monitors", lambda: [
+        {"n": 1, "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True}])
+    monkeypatch.setattr(vs, "controller_registered", lambda: False)
+    monkeypatch.setattr(vs, "vpx_tables_dir", lambda: "")
+    pd.save({"mode": "fullscreen", "monitor": 1, "border": False}, pd.CONF)
+    got = vs.state()["display"]
+    assert got["setting"]["mode"] == "fullscreen"
+    assert got["text"] == "full screen on monitor 1, borderless"
 
 
 def test_setup_finds_visual_pinball_from_the_kit_first(tmp_path, monkeypatch):

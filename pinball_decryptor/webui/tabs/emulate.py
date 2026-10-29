@@ -55,6 +55,61 @@ def no_rig():
     return bool(os.environ.get(NO_RIG_ENV))
 
 
+# ----------------------------------------------------------- game display
+# PAD-811: where the game window goes (full screen or a window on a chosen
+# monitor, borderless or framed) is tools/spike2_emu/padisplay.py's setting;
+# the renderer of a running game reads it twice a second, so a change here
+# moves the window at once.  padisplay is a script beside the rig, not a
+# package, so it is loaded by path, once per rig folder.
+_PADISPLAY = {}
+
+#: Window mode's first rectangle: the Spike 2 screen's own size
+DISPLAY_WINDOW = {"rx": 0, "ry": 0, "w": 1360, "h": 768}
+
+
+def padisplay_mod():
+    """The rig's padisplay module, or None when the rig has none."""
+    path = os.path.join(rig.rig_dir(), "padisplay.py")
+    if path in _PADISPLAY:
+        return _PADISPLAY[path]
+    mod = None
+    if os.path.isfile(path):
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("pad_padisplay", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        except Exception:                                # noqa: BLE001
+            log.exception("padisplay")
+            mod = None
+    _PADISPLAY[path] = mod
+    return mod
+
+
+def physical(fn, *args):
+    """``fn(*args)`` with monitors in physical pixels, for padisplay's
+    monitors() and save() (which resolves against them).  The app's process
+    is only system DPI aware (pywebview), which scales a monitor whose DPI
+    differs from the main one's; the per-monitor context set here is this
+    thread's alone and is put back after."""
+    if sys.platform != "win32":
+        return fn(*args)
+    import ctypes
+    old = None
+    try:
+        ctx = ctypes.windll.user32.SetThreadDpiAwarenessContext
+        ctx.restype = ctypes.c_void_p
+        ctx.argtypes = [ctypes.c_void_p]
+        old = ctx(ctypes.c_void_p(-4))        # PER_MONITOR_AWARE_V2
+    except Exception:                                    # noqa: BLE001
+        ctx = None
+    try:
+        return fn(*args)
+    finally:
+        if ctx is not None and old:
+            ctx(ctypes.c_void_p(old))
+
+
 # ----------------------------------------------------------------- volume
 # Item 56: the master volume / Mute control file.  emulate_core computes
 # its path once, at import, from settings.json's folder; here it is computed
@@ -333,7 +388,7 @@ class EmulateTab(TabService):
                        "Slot management is available on Windows (WSL)."),
             game=None, which=None, mains_note="", not_card="",
             assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
-            cache=None, rename=None)
+            cache=None, rename=None, gdisp=None)
         self._run_label(False, False)
         # The panel wrote the control file at build so it exists before a
         # first Start (padplay.py reads it): the same here, bar captures.
@@ -447,6 +502,7 @@ class EmulateTab(TabService):
         self._select_probe_kick()
         self._spike3_kick()
         self._backup_kick()
+        self._display_paint()
         if no_rig() or self._stopped:
             return
         if sys.platform == "darwin":
@@ -485,6 +541,8 @@ class EmulateTab(TabService):
         except Exception:                                # noqa: BLE001
             pass
         self._paint_footer()
+        # a monitor plugged in or out since: the picker lists them as now
+        self._display_paint()
 
     def on_close(self):
         self._stopped = True
@@ -3387,6 +3445,76 @@ class EmulateTab(TabService):
                 self._post(self._paint_buttons)
 
         self._thread(run)
+        return True
+
+    # ------------------------------------------------------------------
+    # PAD-811: the game display
+    # ------------------------------------------------------------------
+    def _display_paint(self):
+        """The Game display control: padisplay's setting, the monitors as
+        they are now, and the line that says what the two make."""
+        mod = padisplay_mod()
+        if mod is None:
+            self.set(gdisp=None)
+            return
+        try:
+            s = mod.load(mod.CONF)
+            mons = physical(mod.monitors)
+            text = mod.describe(s, mons)
+        except Exception:                                # noqa: BLE001
+            log.exception("game display")
+            self.set(gdisp=None)
+            return
+        opts = [{"value": str(m["n"]),
+                 "label": "%d - %dx%d%s" % (m["n"], m["w"], m["h"],
+                                            " (main)" if m["primary"] else "")}
+                for m in mons]
+        n = int(s.get("monitor") or 1)
+        if not any(m["n"] == n for m in mons):
+            opts.append({"value": str(n), "label": "%d - not connected" % n})
+        win = dict(DISPLAY_WINDOW, **{k: s[k] for k in DISPLAY_WINDOW if k in s})
+        self.set(gdisp=dict(win, mode=s["mode"], monitor=str(n),
+                            border=bool(s.get("border")), mons=opts,
+                            text=text))
+
+    @rpc
+    def display_set(self, key, value):
+        """One change to the game display, saved at once: a running game's
+        window follows it within half a second."""
+        mod = padisplay_mod()
+        if mod is None:
+            return False
+        s = mod.load(mod.CONF)
+        try:
+            if key == "mode":
+                if value not in mod.MODES:
+                    return False
+                if s["mode"] == "free" and value != "free":
+                    s["border"] = False         # a new choice starts borderless
+                if value == "window" and s["mode"] != "window":
+                    # full screen's line holds the monitor's size: start
+                    # from the machine's own screen instead
+                    s.update(DISPLAY_WINDOW)
+                s["mode"] = value
+            elif key == "monitor":
+                s["monitor"] = max(1, int(value))
+            elif key == "border":
+                s["border"] = bool(value)
+            elif key in DISPLAY_WINDOW:
+                v = int(float(value))
+                s[key] = max(64, v) if key in ("w", "h") else v
+            else:
+                return False
+        except (TypeError, ValueError):
+            self._display_paint()               # the field shows what holds
+            return False
+        try:
+            physical(mod.save, s, mod.CONF)
+        except OSError as exc:
+            self._log("[emulate] game display not saved: %s" % exc)
+            return False
+        self._display_paint()
+        self._log("[emulate] game display: %s" % (self.get("gdisp") or {}).get("text", ""))
         return True
 
     def _restart_wsl(self, why, pre_kill=False):

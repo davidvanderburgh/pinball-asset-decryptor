@@ -47,8 +47,10 @@ from dataclasses import dataclass
 #: shared words carry their count, the index is keyed by SHA-1; 3: a plain-C title's audits read
 #: from the descriptor record that maps them, not the first one of the count - Batman 66 1.14 and
 #: Metallica 1.04 counted each mode's start in another mode's function, PAD-634; 4: a crule title's
-#: award record read by table and level - value, growth, cap - and editable, PAD-798)
-READER_REV = 4
+#: award record read by table and level - value, growth, cap - and editable, PAD-798; 5: a mode
+#: constructor that stores its vptr post-indexed, or is called a word before its push, is found -
+#: Jurassic Park LE/Pro 1.16 read 11 of their 24 modes, PAD-834)
+READER_REV = 5
 
 #: game programs as Stern shipped them (sha1 -> "game version"), every build this app has seen
 KNOWN_STOCK = {

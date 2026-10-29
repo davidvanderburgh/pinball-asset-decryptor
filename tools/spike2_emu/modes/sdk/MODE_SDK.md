@@ -1822,7 +1822,10 @@ must be the entry naming that node and bit, or the spare inputs are off for the 
 check out`). `PM_CAN_SPARE_SWITCHES` and `PM_CAN_SPARE_COILS` say what this port has.
 
 **In the emulator** a spare input reads 0 (closed) unless set: `/dump/spare_in` takes one line per input, `<node>
-<bit> <level>`, re-read every 200 ms (hwshim's `[sparein]` lines). A spare output's commands show as `[coildrive]`
+<bit> <level>`, re-read every 200 ms (hwshim's `[sparein]` lines), and `pullup` on a line of its own makes every
+input no switch of the game's is on read 1, as a Stern board's open inputs do. Without it the first scan of a board
+(the emulator scans one only when it has news) takes its unused inputs from 1 to 0 and looks like a close. Write the
+file whole (a temporary name, then a rename). A spare output's commands show as `[coildrive]`
 lines under `PAD_COIL_PROBE=1`. `sdk/spare_test_mode.c` drives both; `C:/tmp/PAD-826/spare_job.sh` is the proof job.
 
 ## The scoop (PAD-381)

@@ -10326,12 +10326,21 @@ static int sw_rest_pending(unsigned id)
  * a job flips an input by rewriting the file. Only bits the file names change,
  * and only on boards that already answer the scan; with no file nothing changes.
  * A real board's unwired input reads whatever its pull leaves it at - 1 on a
- * pulled-up input - which is what `<node> <bit> 1` stands in for. */
+ * pulled-up input - which is what `<node> <bit> 1` stands in for.
+ *
+ * `pullup` on a line of its own: every input no switch of the game's is on
+ * reads 1, as a Stern board's open inputs do. WITHOUT IT THE FIRST SCAN OF A
+ * BOARD LOOKS LIKE A CLOSE (the PAD-826 sweep): the game keeps a board's bits
+ * at 1 until it scans the board, and this shim scans a board only when it has
+ * news, so on a board with no news for a while the first scan came seconds into
+ * attract and took every unused input from 1 to 0 at once. The lines naming a
+ * bit win over it. Write the file whole (a temporary name, then a rename): a
+ * read between a truncate and the write sees no lines at all. */
 #define SPARE_IN_MAX 16
-static void sw_spare_in(unsigned nid, unsigned char out[8])
+static void sw_spare_in(unsigned nid, unsigned char out[8], const unsigned char named[8])
 {
     static unsigned char sn[SPARE_IN_MAX], sb[SPARE_IN_MAX], sl[SPARE_IN_MAX];
-    static int n_spare = -1;
+    static int n_spare = -1, pullup;
     static unsigned long read_at;
     static unsigned char said[64][64];
     int i;
@@ -10341,6 +10350,7 @@ static void sw_spare_in(unsigned nid, unsigned char out[8])
         int fd = real_open("/dump/spare_in", 0, 0);
         read_at = pad_ms();
         n_spare = 0;
+        pullup = 0;
         if (fd >= 0) {
             long (*rd)(int, void *, unsigned long) = dlsym(RTLD_NEXT, "read");
             if (rd) r = rd(fd, buf, sizeof buf - 1);
@@ -10351,6 +10361,8 @@ static void sw_spare_in(unsigned nid, unsigned char out[8])
             buf[r] = 0;
             while (*p && n_spare < SPARE_IN_MAX) {
                 unsigned v[3] = { 0, 0, 0 }, k;
+                while (*p == ' ' || *p == '\t') p++;
+                if (!strncmp(p, "pullup", 6)) pullup = 1;
                 for (k = 0; k < 3; k++) {
                     while (*p == ' ' || *p == '\t') p++;
                     if (*p < '0' || *p > '9') break;
@@ -10367,6 +10379,8 @@ static void sw_spare_in(unsigned nid, unsigned char out[8])
             }
         }
     }
+    if (pullup)
+        for (i = 0; i < 8; i++) out[i] |= (unsigned char)~named[i];
     for (i = 0; i < n_spare; i++) {
         if (sn[i] != nid) continue;
         if (sl[i]) out[sb[i] >> 3] |= (unsigned char)(1u << (sb[i] & 7));
@@ -10384,6 +10398,7 @@ static int sw_scan_bytes(unsigned nid, unsigned char out[8])
 {
     unsigned st, n, id;
     int placed = 0;
+    unsigned char named[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
     out[0] = out[1] = out[2] = out[3] = 0;
     out[4] = out[5] = out[6] = out[7] = 0;
@@ -10510,10 +10525,11 @@ static int sw_scan_bytes(unsigned nid, unsigned char out[8])
          * sent next to the bit the game recorded in NodeRec.cur[], and those
          * two must be equal on every single sample. */
         if (id < 256) sw_sent[id] = (unsigned char)level;
+        named[bit >> 3] |= (unsigned char)(1u << (bit & 7));   /* PAD-826: a switch of the game's is here */
         if (level) out[bit >> 3] |= (unsigned char)(1u << (bit & 7));
         placed = 1;
     }
-    if (placed) sw_spare_in(nid, out);     /* PAD-826: inputs the game has no switch on */
+    if (placed) sw_spare_in(nid, out, named);   /* PAD-826: inputs the game has no switch on */
     return placed;
 }
 

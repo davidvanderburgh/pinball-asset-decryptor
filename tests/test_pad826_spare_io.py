@@ -193,7 +193,8 @@ def test_the_emulator_sets_a_spare_input():
     src = HWSHIM.read_text(encoding="utf-8")
     assert '"/dump/spare_in"' in src
     body = _lift(src, "static int sw_scan_bytes(")
-    assert "sw_spare_in(nid, out)" in body
+    assert "sw_spare_in(nid, out, named)" in body
+    assert "out[i] |= (unsigned char)~named[i]" in _lift(src, "static void sw_spare_in(")   # pullup: open inputs read 1
 
 
 GAME = {"in", "out"}

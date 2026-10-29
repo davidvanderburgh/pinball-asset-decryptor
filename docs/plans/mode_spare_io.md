@@ -90,3 +90,26 @@ sends that output anything, neither an OFF nor a fire.
 In the emulator: the spare switch set with PAD_NB_SW reaches the mode as a
 shot. The spare output appears in `[coildrive]` as `node N coil M`, with its
 time, and nothing of the game's lands on it. Census over every port.
+
+## Where it stands (2026-10-29, end of run 2)
+
+- **Newer framework, 59 builds**: every port has `coil_frame`, `coil_off`, `sw_struct`, `coil_count`,
+  `coil_table` (`modes/spare_io.py --write`; `--census` lists them; tests/test_pad826_spare_io.py checks every
+  port against the finder when the binaries are in /var/tmp/pad826/elf). The switch service keeps **32** node
+  blocks (its mutex follows at +0x1410 = 16 + 32 * 160). A spare input = no id in the map AND no switch entry
+  naming that node and bit (Deadpool LE 1.14's 8:14: an entry the map does not route, which read 1 at rest and
+  changed in attract - the runtime now walks the entry array too).
+- **Proven** in the emulator: Godzilla Pro 1.16 by hand (spare_job.sh) and as a Blocks mode (blocks_job.sh, the
+  app's own C); the library by `spare_sweep_job.sh` (rigbatch), whose builds go into mode_project.SPARE_IO_PROVEN.
+- **Older framework, 10 builds** (aerosmith_le 1.15, avengers_infinity_le 1.09, batman 1.13, guardians_le 1.14,
+  iron_maiden_le 1.16, mando_le 1.44, rush_le 1.18, stranger_things_le 1.12, sword_of_rage_le 1.18, turtles_pro
+  1.58): the fire wrapper is there (`site coil_frame` written), but no switch service struct, no 32-byte switch
+  entries (findent.py finds none) and no coil table of the newer shape. What is known, Mando LE 1.44:
+  - the 0x11 scan is `0x51fdc0` (wrapper `0x51fed0`), called from `0x3a4044(node, ...)`, which hands the 8 bytes
+    to `0x453368` and `0x3a3eb0`;
+  - `0x3a3eb0`: board object = `[0x743fb0 + 144 + node * 4]`; it stores `scan ^ [board + 580..587]` at
+    `board + 572..579` and flags `board + 592` on a change; then `0x3a1bb8(board)` processes it;
+  - `0x1e396c(node, bits)`: a listener table at `0x6b47bc` (+268 count, +12 entries of 8 bytes: [0] -> a record
+    whose byte 0 is the node, [4] -> a list of listeners with +16/+17 previous/current level, +8/+12 counts).
+  Left: which (node, bit) the game uses there (the listener records), and the coil records' shape (for the OFF
+  wrapper too: `coil_off` was not found on them).

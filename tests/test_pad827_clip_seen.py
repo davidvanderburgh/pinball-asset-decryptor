@@ -273,6 +273,13 @@ def test_the_playfield_window_builds_its_reader_beside_the_volume_file(monkeypat
 from pinball_decryptor.plugins.stern import clip_static as ST  # noqa: E402
 
 
+def test_a_record_table_names_each_clip_once_and_a_catalogue_is_no_table():
+    recs = [(0x5000 + 8 * k, "saucer_lands_long") for k in range(6)] + [(0x5030, "Xilien_2")]
+    assert [t.names for t in ST.tables(recs)] == [["saucer_lands_long", "Xilien_2"]]
+    catalogue = [(0x6000 + 4 * k, "film_%d" % k) for k in range(ST.TABLE_MAX + 1)]
+    assert ST.tables(catalogue) == []
+
+
 def test_a_run_of_clip_name_pointers_is_a_table_and_a_second_tables_start_splits_it():
     words = [(0x1000, "fight_loop"), (0x1004, "fight_loop2"), (0x1008, "fight_loop3"),
              (0x100c, "bg1"), (0x1010, "bg2"),                       # the next mode's table
@@ -310,13 +317,20 @@ def test_a_loader_that_keeps_its_index_in_an_object_and_moves_it_on_steps_in_tur
     ebirah = [0xE92D4030,             # push {r4, r5, lr}
               0xE590107C,             # ldr r1, [r0, #0x7c]   the index
               0xE7925101,             # ldr r5, [r2, r1, lsl #2]  the table's entry
+              0xE0810093,             # umull r0, r1, r3, r0  the compiler's mod 3
               0xE584307C,             # str r3, [r4, #0x7c]   moved on
               0xE8BD8030]             # pop {r4, r5, pc}
-    monkeypatch.setattr(S, "function_extent", lambda prog, start, cap=0: (start + 20, set()))
-    assert ST.steps_in_turn(_Prog(0x8000, ebirah), 0x8000) is True
+    monkeypatch.setattr(S, "function_extent", lambda prog, start, cap=0: (start + 24, set()))
+    assert ST.steps_in_turn(_Prog(0x8000, ebirah), 0x8000, 3) is True
     picked = list(ebirah)
-    picked[3] = 0xE5843080              # str to another field: no index kept
-    assert ST.steps_in_turn(_Prog(0x8000, picked), 0x8000) is False
+    picked[4] = 0xE5843080              # str to another field: no index kept
+    assert ST.steps_in_turn(_Prog(0x8000, picked), 0x8000, 3) is False
+    counted = list(ebirah)
+    counted[3] = 0xE2833001             # add r3, r3, #1 and no wrap: a count (JP's amber mines)
+    assert ST.steps_in_turn(_Prog(0x8000, counted), 0x8000, 3) is False
+    capped = list(counted)
+    capped[3] = 0xE3530003              # cmp r3, #3: wrapped at the table's length
+    assert ST.steps_in_turn(_Prog(0x8000, capped), 0x8000, 3) is True
 
 
 GZLE = os.path.join(os.environ.get("PAD444_CARDS", r"D:\Pinball\images\Stern\spike2"),

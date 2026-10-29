@@ -83,7 +83,10 @@ def main():
                 time.sleep(1)
             api("video.set_mode_filter", MODE)
             time.sleep(2)
-            page.locator(".vid-tbl .tr:has-text('%s')" % ROW).first.click()
+            if os.environ.get("PAD827_SEARCH"):
+                api("ui.set", "video", "search", os.environ["PAD827_SEARCH"])
+                time.sleep(2)
+            api("video.select", "video/" + ROW)
             time.sleep(3)
             page.mouse.move(5, 990)
             time.sleep(0.6)

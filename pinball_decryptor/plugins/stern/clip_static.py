@@ -20,7 +20,8 @@ Two things are in the program whatever the title, and :func:`analyse` reads both
   0 or 1 at nearly every such call. At each of those calls a constant 1 means the game loops the
   clip. A 0 says only that this call does not ask for a loop: a game can still ask for the clip
   again as it ends (the emulator saw Ebirah's fight loops re-asked with the flag 0), so only the
-  1 is shown. A clip v2 build sets a clip on a surface and plays it with a separate call, so it
+  1 is shown. Only a clip named right before the call gets it: a call that plays an entry of a
+  table plays whichever one the index says. A clip v2 build sets a clip on a surface and plays it with a separate call, so it
   has no such player and no flag is read there.
 
 What the program does NOT say statically, measured on Godzilla LE 1.16 against the emulator:
@@ -37,6 +38,11 @@ from dataclasses import dataclass, field
 READ_REV = 1
 #: the widest record a table of clips is read with (bytes between two names' pointers)
 STRIDE_MAX = 64
+#: the most clips a table may name and still be one moment's set: past it a table is a catalogue
+#: (Elvira's 2246 film clips, Star Wars' 426 scenes), which says nothing about how one plays;
+#: Batman's per-episode sets (up to 194) and Elvira's per-film ones are picked from but are too
+#: many to name as a set
+TABLE_MAX = 64
 #: how far back from a table's first name its start may be (words): a record array's other fields
 TABLE_BACK = 16
 #: how many instructions after a clip name is made its play call is looked for
@@ -87,7 +93,8 @@ class StaticReading:
 def tables(words, starts=None):
     """[:class:`Table`] from *words* ``[(VA, clip name)]``: the pointers to clip names in the
     program's data. A table is a run of two or more at one stride, at most :data:`STRIDE_MAX`
-    apart; a run of one stride is taken whole before a wider one is tried. *starts*
+    apart, naming two to :data:`TABLE_MAX` different clips (a record table may name one clip in
+    several records); a run of one stride is taken whole before a wider one is tried. *starts*
     (``VA -> bool``, the code makes this address) splits a run where a second table begins: the
     linker lays one mode's table right after another's (Godzilla's Ebirah fight loops, then
     Gigan's backgrounds, at one stride)."""
@@ -108,8 +115,8 @@ def tables(words, starts=None):
                 and not starts(va, stride):
             i += 1                                     # one name before the next table's start
             continue
-        names = [n for _v, n in words[i:j + 1]]
-        if len(set(names)) >= 2:
+        names = list(dict.fromkeys(n for _v, n in words[i:j + 1]))    # once each, in order
+        if 2 <= len(names) <= TABLE_MAX:
             out.append(Table(va, stride, names))
         i = j + 1
     return out
@@ -133,16 +140,40 @@ def _mem(w):
     return bool(w & 0x00100000), (w >> 16) & 0xF, imm, regoff, (w >> 12) & 0xF
 
 
-def steps_in_turn(prog, start):
-    """Whether the function at *start* reads an object's field, indexes with it and writes the
-    same field back: ``ldr rI, [rB, #off]`` ... a register-offset load ... ``str rX, [rB', #off]``
-    (the table's index kept in the object and moved on)."""
+def _wraps(w, n):
+    """Whether the instruction *w* is one a turn counter wraps a table of *n* with: a compare
+    with *n* or *n* - 1, an ``and`` with *n* - 1 (a power of two), a multiply-high (the
+    compiler's division by a constant: Ebirah's ``umull`` by 0xaaaaaaab, mod 3) or a divide."""
+    if (w >> 28) == 0xF:
+        return False
+    if (w & 0x0FE000F0) in (0x00800090, 0x00C00090):   # umull / smull
+        return True
+    if (w & 0x0FF0F0F0) in (0x0710F010, 0x0730F010):   # sdiv / udiv
+        return True
+    if (w & 0x0E000000) == 0x02000000:                 # data processing, immediate
+        from .stock_scan import rot_imm
+        op = (w >> 21) & 0xF
+        v = rot_imm(w)
+        if op == 0xA and (w & 0x00100000) and v in (n, n - 1):      # cmp rX, #n
+            return True
+        if op == 0x0 and n & (n - 1) == 0 and v == n - 1:           # and rX, rX, #n-1
+            return True
+    return False
+
+
+def steps_in_turn(prog, start, n=0):
+    """Whether the function at *start* reads an object's field, indexes with it, wraps it at the
+    table's length *n* (:func:`_wraps`) and writes the same field back: ``ldr rI, [rB, #off]``
+    ... a register-offset load ... ``str rX, [rB', #off]`` (the table's index kept in the object
+    and moved on to the next, round to the first). A field read, used and written back with no
+    wrap is a count (Jurassic Park's amber mines: the clip of the mine the player is on, which
+    the emulator saw played 2, 1, 1, 4), not a turn."""
     from . import stock_scan as S
     try:
         end, lits = S.function_extent(prog, start, cap=LOADER_MAX)
     except Exception:                                   # noqa: BLE001 - unreadable: no
         return False
-    loads, stores, indexed = {}, set(), False
+    loads, stores, indexed, wraps = {}, set(), False, False
     va = start
     while va < end:
         w = prog.word(va)
@@ -151,6 +182,7 @@ def steps_in_turn(prog, start):
             break
         if va - 4 in lits:
             continue
+        wraps = wraps or _wraps(w, n)
         m = _mem(w)
         if m is None:
             continue
@@ -164,7 +196,7 @@ def steps_in_turn(prog, start):
             loads.setdefault(off, va)
         elif off in loads and loads[off] < va:
             stores.add(off)
-    return indexed and bool(stores)
+    return indexed and bool(stores) and wraps
 
 
 def table_loaders(prog, table):
@@ -277,8 +309,9 @@ def _flag(prog, site, reg):
 
 def play_calls(prog, players, marks):
     """``[(call VA, flag, names)]``: every call of each of *players* with a constant 0 or 1
-    flag, and what it plays - the clip, or the table of clips, named last before it in the same
-    function within :data:`NAME_BACK` instructions (*marks*: sorted ``[(code VA, [names])]``)."""
+    flag, and what it plays - the clip named last before it in the same function within
+    :data:`NAME_BACK` instructions (*marks*: sorted ``[(code VA, [name] or None)]``, None for the
+    address of a table, whose clip the call plays is not known: such a call is left out)."""
     keys = [m[0] for m in marks]
     out = []
     for tgt, reg in players:
@@ -338,17 +371,16 @@ def _analyse(prog, refs, out, game, version):
     marks = [(at, [name]) for name, at, _reg in code]
     for t in tables(words, starts):
         t.loaders = table_loaders(prog, t)
-        t.turn = any(steps_in_turn(prog, f) for f in t.loaders)
+        t.turn = any(steps_in_turn(prog, f, len(t.names)) for f in t.loaders)
         out.tables.append(t)
         for k in range(TABLE_BACK):
             for site in prog.references(t.at - 4 * k):
-                marks.append((site, list(t.names)))
+                marks.append((site, None))         # a table: which of it the call plays is open
     marks.sort(key=lambda m: m[0])
     out.players = port_players(prog, game, version) or found_players(prog, code)
     for _site, v, names in play_calls(prog, out.players, marks):
-        if v == 1:
-            for n in names:
-                out.loops[n] = True
+        if v == 1 and names:
+            out.loops[names[0]] = True
 
 
 def _movt_after(prog, at, reg):

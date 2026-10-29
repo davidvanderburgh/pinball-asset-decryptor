@@ -60,9 +60,19 @@ pkill -f "padrelay.py /home/.*/s1emu/audio.fifo"  2>/dev/null
     >/dev/null 2>&1 || true
 sleep 1
 
-# restore the stock ARM binfmt handler (the Spike 2 rig relies on it)
-[ -e "$BF/qemu-arm-pad" ] && echo -1 > "$BF/qemu-arm-pad" 2>/dev/null
-echo 1 > "$BF/qemu-arm" 2>/dev/null
+# restore the stock ARM binfmt handler (the Spike 2 rig relies on it).
+# Only when the distro HAS one: a Linux without qemu-user-binfmt has no
+# qemu-arm entry, and writing the path tries to CREATE it in binfmt_misc,
+# which root gets "Permission denied" for - printed on the user's log, since
+# a trailing 2>/dev/null only takes effect after the > open (PAD-839).  The
+# braces put the redirect around the open.
+[ -e "$BF/qemu-arm-pad" ] && { echo -1 > "$BF/qemu-arm-pad"; } 2>/dev/null
+if [ -e "$BF/qemu-arm" ]; then
+  { echo 1 > "$BF/qemu-arm"; } 2>/dev/null
+  _bf="stock qemu-arm binfmt restored."
+else
+  _bf="ARM binfmt handler removed."
+fi
 
 [ -f "$HERE/../rigboard.sh" ] && { . "$HERE/../rigboard.sh"; rigboard_clear spike1 0; }
-echo "Spike 1 emulator stopped; stock qemu-arm binfmt restored."
+echo "Spike 1 emulator stopped; $_bf"

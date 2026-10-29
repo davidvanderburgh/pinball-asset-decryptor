@@ -41,7 +41,9 @@ export default function Vpx() {
     <//>
     ${s.note ? html`<${Note} kind="warn">${s.note}<//>` : null}
     ${busy || s.message ? html`<div class="vpx-status">
-      ${busy ? html`<${Spinner} /><span>${s.busy}…</span>` : html`<span class="muted">${s.message}</span>`}
+      ${busy ? html`<${Spinner} /><span>${s.busy}…</span>`
+        : s.message_level === "error" ? html`<${Note} kind="warn">${s.message}<//>`
+        : html`<span class="muted">${s.message}</span>`}
       ${busy && s.progress != null ? html`<div class="vpx-prog"><${Progress} pct=${s.progress * 100} /></div>` : null}
     </div>` : null}
     <div class="cols c75 vpx-cols">

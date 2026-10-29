@@ -173,6 +173,24 @@ def test_nothing_runs_when_a_dialog_is_cancelled(tab):
     assert not [c for c in tab.calls if c[1] and c[1][0] != "state"]
 
 
+def test_play_refused_shows_as_a_warning_on_the_page(tab):
+    """PAD-806: Play on a PC with no WSL comes back with the kit's reason; the
+    page shows it as a warning, not the muted line an "opening..." gets."""
+    tab.on_show()
+    _wait(tab)
+    tab.answers[("vpxsetup.py", "open")] = {"result": "The game cannot start: WSL is not installed on this PC yet."}
+    assert tab.play("JP's Foo Fighters (PAD).vpx")
+    _wait(tab)
+    st = tab.window.ctx.store.d["vpx"]
+    assert st["message"].startswith("The game cannot start") and st["message_level"] == "error"
+    assert ("error", "Visual Pinball: " + st["message"]) in tab.window.lines
+    tab.answers[("vpxsetup.py", "open")] = {"result": "ok"}
+    assert tab.play("JP's Foo Fighters (PAD).vpx")
+    _wait(tab)
+    st = tab.window.ctx.store.d["vpx"]
+    assert st["message"].startswith("opening") and st["message_level"] == "info"
+
+
 def test_one_job_at_a_time(tab):
     tab._busy = True
     assert tab.refresh() is False and tab.play("x (PAD).vpx") is False

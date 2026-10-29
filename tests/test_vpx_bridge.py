@@ -528,6 +528,60 @@ def test_launcher_takes_its_rig_as_root_on_the_apps_board(tmp_path, monkeypatch)
         la.take_slot()
 
 
+def test_launcher_says_wsl_is_missing_not_no_rig_slot(tmp_path, monkeypatch):
+    """PAD-806: on a PC with no WSL, Play opened the table and the launcher
+    came back with "no rig slot free for foo_fighters_le", which reads like a
+    game already running. The registry says there is no Linux before any
+    wsl.exe is asked, and the launch and Play both say that instead."""
+    pl = pytest.importorskip("padlaunch")
+    vs = pytest.importorskip("vpxsetup")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    calls = []
+    monkeypatch.setattr(pl, "_run", lambda cmd, timeout=60: calls.append(cmd))
+    monkeypatch.setattr(pl, "registered", lambda: [])
+    assert pl.no_linux() == pl.no_linux("PAD-Runtime") == pl.NO_LINUX
+    assert "WSL is not installed" in pl.NO_LINUX and "slot" not in pl.NO_LINUX
+    la = pl.Launch("foo_fighters_le", "/mnt/d/cards/ff.raw", dist=None)
+    with pytest.raises(RuntimeError, match="WSL is not installed"):
+        la.start()
+    assert calls == [] and la.slot is None              # no wsl.exe, no slot taken
+    # Play refuses before Visual Pinball opens the table
+    vp = tmp_path / "vp"
+    (vp / "tables").mkdir(parents=True)
+    (vp / "tables" / "Foo (PAD).vpx").write_bytes(b"x")
+    monkeypatch.setattr(vs, "find_vpx", lambda: str(vp))
+    monkeypatch.setattr(pl, "distro", lambda: None)
+    opened = []
+    monkeypatch.setattr(vs.subprocess, "Popen", lambda *a, **k: opened.append(a))
+    assert vs.open_table("Foo (PAD).vpx") == pl.NO_LINUX and opened == []
+    # a distro the kit names that is not there is named
+    monkeypatch.setattr(pl, "registered", lambda: ["Ubuntu"])
+    assert "(PAD-Runtime) is not installed" in pl.no_linux("PAD-Runtime")
+    assert pl.no_linux("ubuntu") == pl.no_linux(None) == ""
+    assert vs.open_table("Foo (PAD).vpx") == "ok" and len(opened) == 1
+    # the registry unreadable (or not Windows): nothing refused on a guess
+    monkeypatch.setattr(pl, "registered", lambda: None)
+    assert pl.no_linux("PAD-Runtime") == ""
+
+
+def test_launcher_reads_no_distros_from_a_failing_wsl_list(monkeypatch):
+    """With no WSL, `wsl -l -q` exits non-zero and prints its complaint;
+    those lines are not distro names."""
+    pl = pytest.importorskip("padlaunch")
+
+    class R:
+        returncode = -1
+        stdout = "Windows Subsystem for Linux has no installed distributions.\r\n".encode("utf-16-le")
+
+    monkeypatch.setattr(pl.subprocess, "run", lambda *a, **k: R())
+    assert pl.distros() == []
+    R.returncode, R.stdout = 0, "Ubuntu\r\nPAD-Runtime\r\n".encode("utf-16-le")
+    assert pl.distros() == ["Ubuntu", "PAD-Runtime"]
+    # and a refusal wsl.exe prints itself reads as words, not "W i n d o w s"
+    assert pl._text("There is no distribution.\r\n".encode("utf-16-le")).strip() == "There is no distribution."
+    assert pl._text("slot=3\n".encode()) == "slot=3\n" and pl._text(None) == ""
+
+
 def test_launcher_uses_the_rigs_own_home_off_the_runtime(monkeypatch):
     pl = pytest.importorskip("padlaunch")
     assert pl.app_home("Ubuntu") == ""

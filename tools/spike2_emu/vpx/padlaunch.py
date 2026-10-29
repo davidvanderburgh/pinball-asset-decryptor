@@ -118,10 +118,14 @@ def card_places(title):
 
 def distros():
     try:
-        out = subprocess.run(["wsl.exe", "-l", "-q"], capture_output=True, timeout=20,
-                             creationflags=_CREATE_NO_WINDOW).stdout
+        r = subprocess.run(["wsl.exe", "-l", "-q"], capture_output=True, timeout=20,
+                           creationflags=_CREATE_NO_WINDOW)
     except Exception:                                       # noqa: BLE001
         return []
+    if r.returncode != 0:
+        # with no WSL (or no distro) its lines are the complaint, not names
+        return []
+    out = r.stdout
     text = out.decode("utf-16-le", "replace") if b"\x00" in out else out.decode("utf-8", "replace")
     return [ln.strip() for ln in text.splitlines() if ln.strip()]
 
@@ -137,6 +141,60 @@ def distro():
     if RUNTIME_DISTRO in distros():
         return RUNTIME_DISTRO
     return None
+
+
+#: What Play and the launcher say when this PC has no Linux to run the game
+#: in. It used to come out as "no rig slot free for <title>: <wsl.exe's own
+#: words>", which read like a game already running (PAD-806).
+NO_LINUX = ("The game cannot start: the emulator runs in WSL, and WSL is not "
+            "installed on this PC yet. Click 'Install Missing' above the app's "
+            "tabs (it asks for one Windows restart), then play again.")
+
+
+def registered():
+    """The WSL distros Windows has registered (HKCU ...\\Lxss), read without
+    wsl.exe: [] when there is no Lxss key at all (WSL never set up), None
+    off Windows or when the registry cannot be read (then nobody knows, and
+    nothing is refused on it)."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    names = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Lxss") as k:
+            i = 0
+            while True:
+                try:
+                    sub = winreg.EnumKey(k, i)
+                except OSError:
+                    break
+                i += 1
+                try:
+                    with winreg.OpenKey(k, sub) as dk:
+                        names.append(winreg.QueryValueEx(dk, "DistributionName")[0])
+                except OSError:
+                    continue
+    except FileNotFoundError:
+        return []
+    except OSError:
+        return None
+    return names
+
+
+def no_linux(dist=None):
+    """Why a run cannot start in `dist` (None: the machine's default) before
+    any wsl.exe is asked, or "" when it can - or when that cannot be told."""
+    names = registered()
+    if names is None:
+        return ""
+    if not names:
+        return NO_LINUX
+    if dist and dist.lower() not in [n.lower() for n in names]:
+        return ("The game cannot start: the Linux it runs in (%s) is not installed "
+                "on this PC. Set it up on the app's Emulate tab, then play again." % dist)
+    return ""
 
 
 def rig_dir():
@@ -223,7 +281,10 @@ def _run(args, timeout=60):
 
 
 def _text(b):
-    return (b or b"").decode("utf-8", "replace")
+    # wsl.exe's own complaints (no distro, WSL not answering) are UTF-16;
+    # what bash prints is UTF-8 and never carries a NUL
+    b = b or b""
+    return b.decode("utf-16-le" if b"\x00" in b else "utf-8", "replace")
 
 
 # ------------------------------------------------------------- the launch --
@@ -323,6 +384,10 @@ class Launch:
         return wsl_head(self.distro) + ["-e", "env"], False
 
     def start(self):
+        why = no_linux(self.distro)
+        if why:
+            log(why)
+            raise RuntimeError(why)
         if self.slot is None:
             self.take_slot()
         head, self.as_root = self.head()

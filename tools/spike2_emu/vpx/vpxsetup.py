@@ -205,6 +205,10 @@ def open_table(name):
     path = os.path.join(vpx, "tables", name)
     if not os.path.isfile(path):
         return "There is no %s in %s." % (name, os.path.join(vpx, "tables"))
+    # no Linux, no game: say so here, not from inside the opened table
+    why = padlaunch.no_linux(padlaunch.distro())
+    if why:
+        return why
     subprocess.Popen([os.path.join(vpx, "VPinballX64.exe"), "-play", path], cwd=vpx)
     return "ok"
 

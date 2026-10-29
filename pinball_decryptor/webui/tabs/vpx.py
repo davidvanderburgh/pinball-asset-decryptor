@@ -90,7 +90,7 @@ class VpxTab(TabService):
                  progress=None, registered=False, vpx="", tables_dir="",
                  library="", cards={}, tables=[], patched=[], presets=[],
                  layout="", monitors=0, runtime_state="unknown",
-                 runtime_text="Checking…", message="")
+                 runtime_text="Checking…", message="", message_level="info")
 
     # -- hooks ---------------------------------------------------------------
     def on_show(self):
@@ -155,7 +155,7 @@ class VpxTab(TabService):
         return True
 
     def _say(self, text, level="info"):
-        self.set(message=text)
+        self.set(message=text, message_level=level)
         try:
             self.ctx.loop.post(self.window.append_log, "Visual Pinball: " + text, level)
         except Exception:                                   # noqa: BLE001
@@ -171,7 +171,7 @@ class VpxTab(TabService):
             rt_state, rt_text = "unknown", str(exc)
         if "error" in st:
             self.set(loaded=True, busy="", runtime_state=rt_state, runtime_text=rt_text,
-                     message=st["error"])
+                     message=st["error"], message_level="error")
             return
         st.pop("_text", None)
         self.set(loaded=True, busy="", runtime_state=rt_state, runtime_text=rt_text, **st)

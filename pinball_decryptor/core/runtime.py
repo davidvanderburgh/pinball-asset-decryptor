@@ -139,12 +139,13 @@ def install_dir() -> str:
 
     Under LOCALAPPDATA, not APPDATA: it is machine-local state that must never
     follow a roaming profile onto another PC, and it is measured in hundreds of
-    megabytes."""
+    megabytes.  Or on the drive the user moved the app's disks to (PAD-819,
+    core/wsl_place.py)."""
     override = os.environ.get("PAD_RUNTIME_DIR")
     if override:
         return override
-    base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-    return os.path.join(base, "pinball_decryptor", "runtime")
+    from . import wsl_place
+    return wsl_place.runtime_dir()
 
 
 def available() -> bool:

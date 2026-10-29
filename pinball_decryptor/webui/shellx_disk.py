@@ -64,6 +64,11 @@ RESIZE_NOTE = ("Set how large the WSL virtual disk may grow. Increase it when "
                "can need 20+ GiB); the disk only uses real space as it fills. "
                "Shrinking is allowed down to what's already in use. No "
                "Administrator needed.")
+#: PAD-819: users with a small C: asked whether WSL can use another drive.
+MOVE_NOTE = ("Everything the app keeps in WSL lives in virtual-disk files on "
+             "a Windows drive, normally C:. Move them to a roomier drive; "
+             "WSL is shut down while they move, and the app finds them there "
+             "from then on. No Administrator needed.")
 RECLAIM_NOTE = ("Deleting WSL staging frees space inside WSL but doesn't "
                 "return it to Windows. Compact the virtual disk to hand it "
                 "back.")
@@ -221,13 +226,14 @@ class DiskMixin:
             "wsl_ok": False,
             "wsl_msg": "", "usage": {LOC_WSL: None, LOC_HOST: None,
                                      LOC_EMU: None},
-            "vhdx": None,
+            "vhdx": None, "place": [],
             "view": {"intro": INTRO, "tree_note": TREE_NOTE,
                      "auto_note": AUTO_NOTE,
                      "auto_summary": space_keeper.summary(),
                      "can_tidy": False,
                      "auto_on": space_keeper.auto_enabled(),
                      "resize_note": RESIZE_NOTE, "reclaim_note": RECLAIM_NOTE,
+                     "move_note": MOVE_NOTE, "move_where": "",
                      "bars": [
                          {"key": LOC_WSL, "text": "Checking WSL…",
                           "pct": None},
@@ -239,7 +245,7 @@ class DiskMixin:
                           "pct": None}],
                      "rows": [], "status": "", "busy": False,
                      "can_clean_all": False, "can_reclaim": False,
-                     "can_resize": False}}
+                     "can_resize": False, "can_move": False}}
         self.set(disk=self._disk_state())
         self.disk_refresh()
         return self._disk_state()
@@ -256,6 +262,7 @@ class DiskMixin:
                           and d["vhdx"].get("path"))
         kw["can_reclaim"] = reclaim_ok
         kw["can_resize"] = bool(not busy and d["wsl_ok"])
+        kw["can_move"] = bool(not busy and d["wsl_ok"] and d["place"])
         kw["can_clean_all"] = bool(not busy and d["entries"])
         kw["can_tidy"] = bool(not busy and not space_keeper.disabled())
         self._disk_view(**kw)
@@ -293,6 +300,8 @@ class DiskMixin:
                     data["wsl_usage"] = wsl_disk.usage()
                     data["wsl_entries"] = wsl_disk.scan_staging()
                     data["vhdx"] = wsl_disk.vhdx_info()
+                    from ..core import wsl_place
+                    data["place"] = wsl_place.items()
                 except Exception as e:                  # noqa: BLE001
                     data["wsl_ok"] = False
                     data["wsl_msg"] = str(e)
@@ -430,6 +439,7 @@ class DiskMixin:
         d["live"] = {(e["location"], e["path"]) for e in entries
                      if e.get("live")}
         d["vhdx"] = data.get("vhdx")
+        d["place"] = data.get("place") or []
         staging = [e for e in entries if e["location"] in (LOC_WSL, LOC_HOST)]
         rigs = [e for e in entries if e["location"] == LOC_RIG]
         cached = [e for e in entries if e["location"] == LOC_EMU]
@@ -451,7 +461,8 @@ class DiskMixin:
         status = ("Found " + " and ".join(parts) + ".") if parts else \
             "No leftover staging and no cached cards."
         self._disk_view(bars=self._bar_texts(), rows=self._disk_rows(),
-                        reclaim_note=self._reclaim_text())
+                        reclaim_note=self._reclaim_text(),
+                        move_where=self._move_where())
         self._disk_busy(False, status)
 
     # ------------------------------------------------------------------
@@ -734,6 +745,114 @@ class DiskMixin:
         _mb().showinfo("Resized", "WSL disk is now %s (%s free)." % (
             _fmt((usage or {}).get("total")),
             _fmt((usage or {}).get("free"))))
+        if self._disk is not None:
+            self._disk["busy"] = False
+            self.disk_refresh()
+
+    # ------------------------------------------------------------------
+    # move to another drive (PAD-819)
+    # ------------------------------------------------------------------
+    def _move_where(self):
+        """Where each disk is now, one line apiece."""
+        from ..core import wsl_place
+        d = self._disk
+        if not d["wsl_ok"]:
+            return ""
+        return "\n".join(
+            "%s  %s  (%s)\n      %s" % (
+                wsl_place.drive_of(i["path"]) or "?",
+                i["label"][0].upper() + i["label"][1:], _fmt(i["size"]),
+                i["path"])
+            for i in d["place"])
+
+    @rpc
+    def disk_move_prepare(self):
+        """Move to another drive…: the checks before the drive prompt, and
+        the drives it offers (or None when it cannot go ahead)."""
+        from ..core import wsl_place
+        d = self._disk
+        if d is None or d["busy"]:
+            return None
+        if not d["wsl_ok"] or not d["place"]:
+            _mb().showinfo("WSL not available",
+                           "There's no WSL disk to move.")
+            return None
+        ok, msg = wsl_place.move_supported()
+        if not ok:
+            _mb().showwarning("Move not available", msg)
+            return None
+        opts = []
+        for dv in wsl_place.drives():
+            _moving, _root, problem = wsl_place.plan(
+                dv["letter"], d["place"], [dv])
+            name = dv["letter"] + (" " + dv["label"] if dv["label"] else "")
+            opts.append({
+                "letter": dv["letter"],
+                "text": "%s  —  %s free of %s" % (
+                    name, _fmt(dv["free"]), _fmt(dv["total"])),
+                "ok": not problem, "why": problem})
+        if not any(o["ok"] for o in opts):
+            _mb().showinfo(
+                "No other drive",
+                "There's no other drive WSL's disks (%s) can move to:\n\n%s"
+                % (_fmt(sum(i["size"] for i in d["place"])),
+                   "\n".join(o["why"] for o in opts)))
+            return None
+        pick = next((o["letter"] for o in opts if o["ok"]), None)
+        return {"drives": opts, "pick": pick, "where": self._move_where()}
+
+    @rpc
+    def disk_move(self, letter):
+        from ..core import wsl_place
+        d = self._disk
+        if d is None or d["busy"]:
+            return False
+        moving, dest_root, problem = wsl_place.plan(letter, d["place"])
+        if problem:
+            _mb().showwarning("Can't move there", problem)
+            return False
+        size = sum(i["size"] for i in moving)
+        if not _mb().askyesno(
+                "Move to another drive",
+                "Move %s (%s) to %s?\n\n%s\n\n• WSL will be shut down, and "
+                "the app holds it off until the move is done: close any "
+                "running extract, build or emulator first.\n• Copying %s "
+                "can take a while.\n• Close Docker Desktop and any Linux "
+                "terminal windows first: they start WSL again and keep its "
+                "disk in use.\n\nContinue?" % (
+                    " and ".join(i["label"] for i in moving), _fmt(size),
+                    letter, "\n".join("%s  →  %s" % (
+                        i["path"], wsl_place.target_of(i, dest_root))
+                        for i in moving), _fmt(size))):
+            return False
+        self._disk_busy(True, "Moving…")
+        place = list(d["place"])
+
+        def _worker():
+            try:
+                done = wsl_place.move(letter, progress=self._disk_progress,
+                                      all_items=place)
+                self.ctx.loop.post(self._disk_after_move, letter, done, None)
+            except Exception as e:                      # noqa: BLE001
+                log.exception("moving WSL's disks to %s", letter)
+                self.ctx.loop.post(self._disk_after_move, letter, [], str(e))
+
+        threading.Thread(target=_worker, name="pad-shellx-move",
+                         daemon=True).start()
+        return True
+
+    def _disk_after_move(self, letter, done, err):
+        if self._disk is None:
+            return
+        if err:
+            self._disk_busy(False, "")
+            _mb().showerror("Move failed", err)
+        else:
+            _mb().showinfo(
+                "Moved",
+                "Moved to %s:\n\n%s\n\nThe app uses them there from now on."
+                % (letter, "\n".join("%s  →  %s" % (lbl, path)
+                                     for lbl, path in done)))
         if self._disk is not None:
             self._disk["busy"] = False
             self.disk_refresh()

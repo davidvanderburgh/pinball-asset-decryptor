@@ -1,0 +1,1314 @@
+{
+  "_": [
+    "star_wars_pro on Llyrric's 'star wars stern layout' (13 Jul 25; TableInfo 'Star Wars Pro 2017',",
+    "'Original based on Stern Layout'), a scripted original with no ROM (LoadEM; controller.vbs",
+    "embedded only for B2S/DOF). Its playfield IS the Pro's: every target, lane and insert lands on",
+    "the Pro's switch_xy/led_io positions under one affine fit, and it has no fork ramp or",
+    "accelerator (the LE's extra switches), so this is a Pro map.",
+    "Three things differ from the Rush/Foo Fighters maps, all in extra_vbs:",
+    "1. The table object is SW2017, not Table1: the bridge's Table1_* subs never fire as events, so",
+    "   SW2017_Init/KeyDown/KeyUp/Exit are quieted (renamed _orig) and extra_vbs redefines them to",
+    "   call the bridge and then the originals (VBScript keeps the last definition of a Sub).",
+    "2. PHYSICAL trough (six balls created in kicker1 + swTrough2..6, gBOT used for roll sounds and",
+    "   shadows): kept. Each trough kicker is a hold switch (Trough 1..6), extra_vbs's Drain_Hit",
+    "   kicks into the trough as the table did, the TROUGH coil kicks kicker1. bsTrough is inert.",
+    "3. PinUP: the script creates PuPlayer twice, once outside any Sub at load; pup_stub wraps only",
+    "   the first (in PuPInit), so LoadCoreFiles (called at line 143, before the load-time block) is",
+    "   redefined to set PuPlayer = New PadNoPuP first.",
+    "Unmapped: flipper EOS (46, 61), trough jam (68), 10 PT (85, no object), R2-D2 head optos",
+    "(95-97, no mech). Coils with no table mech: L/R control gates, up post-loop, double post."
+  ],
+  "title": "star_wars_pro",
+  "model": "Pro",
+  "preferred": true,
+  "detect": [
+    "Llyrric",
+    "BigTieInit"
+  ],
+  "output": "star wars stern layout llyrric 13 Jul 25 (PAD).vpx",
+  "table": {
+    "name": "Star Wars (Stern layout) 13 Jul 25",
+    "by": "Llyrric",
+    "where": "not named in the table"
+  },
+  "solenoid_max": 68,
+  "game_on": {
+    "number": 40,
+    "coils": [
+      [
+        8,
+        5
+      ],
+      [
+        8,
+        0
+      ]
+    ]
+  },
+  "cabinet": {
+    "start": 1036,
+    "launch": 1034,
+    "launch_key": "LockBarKey",
+    "tilt": 1038,
+    "slam": 1045,
+    "left_flipper": 1055,
+    "right_flipper": 1054,
+    "coin": 1039,
+    "coin_door_interlock": 1033
+  },
+  "keys_skip_orig": [
+    "StartGameKey",
+    "AddCreditKey",
+    "AddCreditKey2",
+    "LockBarKey"
+  ],
+  "switches": {
+    "_": "object -> Spike 2 switch id; event hit (pulse), hold (Hit/UnHit), spin, slingshot. Placed by an affine fit of the table's objects to the Pro's switch_xy.txt (22 pairs, worst 17 units)",
+    "TR4": {
+      "id": 47,
+      "event": "hit",
+      "name": "LEFT OUTLANE"
+    },
+    "TR5": {
+      "id": 48,
+      "event": "hit",
+      "name": "LEFT RETURN LANE"
+    },
+    "TR6": {
+      "id": 49,
+      "event": "hit",
+      "name": "RIGHT RETURN LANE"
+    },
+    "TR7": {
+      "id": 50,
+      "event": "hit",
+      "name": "RIGHT OUTLANE"
+    },
+    "LeftSlingShot": {
+      "id": 60,
+      "event": "slingshot",
+      "name": "LEFT SLINGSHOT"
+    },
+    "RightSlingShot": {
+      "id": 59,
+      "event": "slingshot",
+      "name": "RIGHT SLINGSHOT"
+    },
+    "TopSlingShot": {
+      "id": 93,
+      "event": "hit",
+      "name": "TOP SLING"
+    },
+    "Bumper001": {
+      "id": 91,
+      "event": "hit",
+      "name": "LEFT POP BUMPER"
+    },
+    "Bumper002": {
+      "id": 92,
+      "event": "hit",
+      "name": "RIGHT POP BUMPER"
+    },
+    "TR1": {
+      "id": 88,
+      "event": "hit",
+      "name": "TOP LANE LEFT"
+    },
+    "TR2": {
+      "id": 89,
+      "event": "hit",
+      "name": "TOP LANE CENTER"
+    },
+    "TR3": {
+      "id": 90,
+      "event": "hit",
+      "name": "TOP LANE RIGHT"
+    },
+    "LeftOrbitSpinner": {
+      "id": 56,
+      "event": "spin",
+      "name": "SPINNER"
+    },
+    "TriggerUpperOrbitGateLeft": {
+      "id": 51,
+      "event": "hit",
+      "name": "LEFT ORBIT"
+    },
+    "TriggerUpperOrbitGateRight": {
+      "id": 81,
+      "event": "hit",
+      "name": "RIGHT ORBIT"
+    },
+    "TriggerLeftRampTop": {
+      "id": 52,
+      "event": "hit",
+      "name": "LEFT RAMP OPTO"
+    },
+    "TriggerRightRampTop": {
+      "id": 94,
+      "event": "hit",
+      "name": "RIGHT RAMP"
+    },
+    "TriggerLeftMiniLoopEnter": {
+      "id": 80,
+      "event": "hit",
+      "name": "LEFT LOOP ENTER"
+    },
+    "TriggerMiniLoopLeftTop": {
+      "id": 86,
+      "event": "hit",
+      "name": "INNER LOOP LEFT"
+    },
+    "TriggerMiniLoopRightTop": {
+      "id": 87,
+      "event": "hit",
+      "name": "INNER LOOP RIGHT"
+    },
+    "T1": {
+      "id": 57,
+      "event": "hit",
+      "name": "MINI TARGET 1"
+    },
+    "T2": {
+      "id": 74,
+      "event": "hit",
+      "name": "MINI TARGET 2"
+    },
+    "T3": {
+      "id": 75,
+      "event": "hit",
+      "name": "MINI TARGET 3"
+    },
+    "T4": {
+      "id": 76,
+      "event": "hit",
+      "name": "MINI TARGET 4"
+    },
+    "T5": {
+      "id": 77,
+      "event": "hit",
+      "name": "MINI TARGET 5"
+    },
+    "T6": {
+      "id": 78,
+      "event": "hit",
+      "name": "MINI TARGET 6"
+    },
+    "T1X": {
+      "id": 82,
+      "event": "hit",
+      "name": "3 BANK TARGET LEFT"
+    },
+    "T2X": {
+      "id": 83,
+      "event": "hit",
+      "name": "3 BANK TARGET CENTER"
+    },
+    "T3X": {
+      "id": 84,
+      "event": "hit",
+      "name": "3 BANK TARGET RIGHT"
+    },
+    "DT1": {
+      "id": 69,
+      "event": "hit",
+      "name": "(F)ORCE DROP TARGET"
+    },
+    "DT2": {
+      "id": 70,
+      "event": "hit",
+      "name": "F(O)RCE DROP TARGET"
+    },
+    "DT3": {
+      "id": 71,
+      "event": "hit",
+      "name": "FO(R)CE DROP TARGET"
+    },
+    "DT4": {
+      "id": 72,
+      "event": "hit",
+      "name": "FOR(C)E DROP TARGET"
+    },
+    "DT5": {
+      "id": 73,
+      "event": "hit",
+      "name": "FORC(E) DROP TARGET"
+    },
+    "skillshottrigger": {
+      "id": 79,
+      "event": "hit",
+      "name": "UPPER SHOOTER LANE"
+    },
+    "Trigger1": {
+      "id": 58,
+      "event": "hold",
+      "name": "SHOOTER LANE"
+    },
+    "kicker1": {
+      "id": 67,
+      "event": "hold",
+      "name": "TROUGH 1"
+    },
+    "swTrough2": {
+      "id": 66,
+      "event": "hold",
+      "name": "TROUGH 2"
+    },
+    "swTrough3": {
+      "id": 65,
+      "event": "hold",
+      "name": "TROUGH 3"
+    },
+    "swTrough4": {
+      "id": 64,
+      "event": "hold",
+      "name": "TROUGH 4"
+    },
+    "swTrough5": {
+      "id": 63,
+      "event": "hold",
+      "name": "TROUGH 5"
+    },
+    "swTrough6": {
+      "id": 62,
+      "event": "hold",
+      "name": "TROUGH 6"
+    }
+  },
+  "trough": {
+    "release": "kicker1",
+    "drain": "Drain",
+    "switches": [
+      67,
+      66,
+      65,
+      64,
+      63,
+      62,
+      68
+    ],
+    "balls": 0,
+    "kick": [
+      90,
+      10
+    ]
+  },
+  "saucers": {
+    "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power[, kickz])",
+    "K2mystery": {
+      "switch": 53,
+      "dir": 180,
+      "power": 10,
+      "name": "RIGHT EJECT"
+    }
+  },
+  "solenoids": {
+    "1": {
+      "coil": [
+        8,
+        1
+      ],
+      "name": "TROUGH",
+      "callback": "PadTroughOut"
+    },
+    "2": {
+      "coil": [
+        8,
+        4
+      ],
+      "name": "AUTO PLUNGER",
+      "callback": "PadAutoPlunge"
+    },
+    "3": {
+      "coil": [
+        8,
+        6
+      ],
+      "name": "RIGHT EJECT",
+      "callback": "bsK2mystery.SolOut"
+    },
+    "4": {
+      "coil": [
+        9,
+        1
+      ],
+      "name": "5 BANK RESET",
+      "callback": "PadResetDrops"
+    },
+    "5": {
+      "coil": [
+        8,
+        7
+      ],
+      "name": "LOCK POST (GUESS: leftrampmagnet holds while ON)",
+      "callback": "PadLockPost"
+    },
+    "6": {
+      "coil": [
+        8,
+        8
+      ],
+      "name": "TIE FIGHTER",
+      "callback": "PadTieShake"
+    },
+    "7": {
+      "coil": [
+        9,
+        5
+      ],
+      "name": "L/R CONTROL GATES",
+      "callback": null
+    },
+    "8": {
+      "coil": [
+        9,
+        6
+      ],
+      "name": "UP POST-LOOP",
+      "callback": null
+    },
+    "9": {
+      "coil": [
+        9,
+        7
+      ],
+      "name": "DOUBLE POST",
+      "callback": null
+    },
+    "10": {
+      "coil": [
+        9,
+        2
+      ],
+      "name": "LEFT POP BUMPER",
+      "callback": null
+    },
+    "11": {
+      "coil": [
+        9,
+        3
+      ],
+      "name": "RIGHT POP BUMPER",
+      "callback": null
+    },
+    "12": {
+      "coil": [
+        9,
+        4
+      ],
+      "name": "TOP SLING",
+      "callback": null
+    },
+    "13": {
+      "coil": [
+        8,
+        3
+      ],
+      "name": "LEFT SLINGSHOT",
+      "callback": null
+    },
+    "14": {
+      "coil": [
+        8,
+        2
+      ],
+      "name": "RIGHT SLINGSHOT",
+      "callback": null
+    },
+    "46": {
+      "coil": [
+        8,
+        0
+      ],
+      "name": "RIGHT FLIPPER",
+      "callback": null
+    },
+    "48": {
+      "coil": [
+        8,
+        5
+      ],
+      "name": "LEFT FLIPPER",
+      "callback": null
+    }
+  },
+  "pup_stub": true,
+  "neuter": [
+    "Kicker1.Kick 90,10",
+    "AutoPlungeTimer.enabled = true"
+  ],
+  "extra_vbs": "'---- PAD: this table's object is SW2017, not Table1, so VPX never fires the\n'     bridge's Table1_* events; the table's own SW2017_* subs are renamed _orig\n'     (quiet_subs) and these stand in for the empty stubs (VBScript keeps the\n'     LAST definition of a Sub, and these come last).\nSub SW2017_Init()\n\tSW2017_Init_orig\n\tTable1_Init\n\tB2SOn = False\n\tB2SOnALT = False\n\tPadTroughSync\nEnd Sub\nSub SW2017_Exit()\n\tTable1_Exit\n\tSW2017_Exit_orig\nEnd Sub\nSub SW2017_Paused()\n\tTable1_Paused\nEnd Sub\nSub SW2017_UnPaused()\n\tTable1_UnPaused\nEnd Sub\nFunction PadMachineKey(k)\n\tSelect Case k\n\t\tCase StartGameKey, AddCreditKey, AddCreditKey2, LockBarKey, LeftFlipperKey, RightFlipperKey\n\t\t\tPadMachineKey = True\n\t\tCase Else\n\t\t\tPadMachineKey = False\n\tEnd Select\nEnd Function\nSub SW2017_KeyDown(ByVal keycode)\n\tTable1_KeyDown keycode\n\tIf Not PadMachineKey(keycode) Then\n\t\tSW2017_KeyDown_orig keycode\n\tEnd If\nEnd Sub\nSub SW2017_KeyUp(ByVal keycode)\n\tTable1_KeyUp keycode\n\tIf Not PadMachineKey(keycode) Then\n\t\tSW2017_KeyUp_orig keycode\n\tEnd If\nEnd Sub\n\n'---- PAD: PinUP Player made optional BEFORE the table's own load-time\n'     CreateObject (outside any Sub, under On Error Resume Next): without PuP\n'     it leaves PuPlayer as it was, so it must already be the stand-in, or the\n'     table's \"HasPuP = False\" (a Const) dies of Illegal assignment\nSub LoadCoreFiles\n\tLoadCoreFiles_orig\n\tSet PuPlayer = New PadNoPuP\nEnd Sub\n\n'---- PAD: the table's PHYSICAL trough stays (its six balls live in kicker1 and\n'     swTrough2..6, which roll them on by UpdateTrough); each kicker is its\n'     Trough switch, the drain kicks into the trough as the table always did,\n'     and the TROUGH coil kicks kicker1 into the shooter lane. bsTrough is\n'     inert (0 balls, nothing calls it).\nSub Drain_Hit\n\tvpmTimer.AddTimer 500, \"Drain.kick 57, 20'\"\n\tRandomSoundDrain Drain\nEnd Sub\nSub PadTroughSync\n\tController.Switch(1067) = (kicker1.BallCntOver > 0)\n\tController.Switch(1066) = (swTrough2.BallCntOver > 0)\n\tController.Switch(1065) = (swTrough3.BallCntOver > 0)\n\tController.Switch(1064) = (swTrough4.BallCntOver > 0)\n\tController.Switch(1063) = (swTrough5.BallCntOver > 0)\n\tController.Switch(1062) = (swTrough6.BallCntOver > 0)\nEnd Sub\nSub PadTroughOut(e)\n\tIf e Then\n\t\tIf kicker1.BallCntOver > 0 Then\n\t\t\tkicker1.Kick 90, 10\n\t\t\tRandomSoundBallRelease kicker1\n\t\tEnd If\n\tEnd If\nEnd Sub\nSub PadAutoPlunge(e)\n\tIf e Then\n\t\tAutoPlungeBall\n\tEnd If\nEnd Sub\nSub PadResetDrops(e)\n\tIf e Then\n\t\tDT1.IsDropped = 0\n\t\tDT2.IsDropped = 0\n\t\tDT3.IsDropped = 0\n\t\tDT4.IsDropped = 0\n\t\tDT5.IsDropped = 0\n\tEnd If\nEnd Sub\nSub PadLockPost(e)\n\tIf e Then\n\t\tleftrampmagnet.Enabled = True\n\tElse\n\t\tleftrampmagnet.Kick 180, 2\n\t\tleftrampmagnet.Enabled = False\n\tEnd If\nEnd Sub\nSub PadTieShake(e)\n\tbTieFighterShakeOngoing = e\nEnd Sub\n",
+  "retrofit_timers": {
+    "PinMAMETimer": {
+      "clone": "PulseTimer",
+      "interval_ms": 1
+    },
+    "PadTestTimer": {
+      "clone": "PulseTimer",
+      "interval_ms": 100
+    }
+  },
+  "lamps": {
+    "_": "table light -> Spike 2 LEDs [node, index] (three = an RGB insert); placed by the same affine fit (most within 20 units) and checked against the script's use of the light; GUESS = flasher or far match",
+    "Light075": {
+      "leds": [
+        [
+          10,
+          46
+        ]
+      ],
+      "name": "TOPLANE LEFT"
+    },
+    "Light076": {
+      "leds": [
+        [
+          10,
+          47
+        ]
+      ],
+      "name": "TOPLANE CENTER"
+    },
+    "Light077": {
+      "leds": [
+        [
+          10,
+          48
+        ]
+      ],
+      "name": "TOPLANE RIGHT"
+    },
+    "Light071": {
+      "leds": [
+        [
+          10,
+          51
+        ]
+      ],
+      "name": "POPS FL (GUESS)"
+    },
+    "Light023": {
+      "leds": [
+        [
+          10,
+          26
+        ],
+        [
+          10,
+          27
+        ],
+        [
+          10,
+          28
+        ]
+      ],
+      "name": "INNER LOOP RIGHT ARROW"
+    },
+    "Light020": {
+      "leds": [
+        [
+          10,
+          29
+        ],
+        [
+          10,
+          30
+        ],
+        [
+          10,
+          31
+        ]
+      ],
+      "name": "INNER LOOP RIGHT X"
+    },
+    "Light010": {
+      "leds": [
+        [
+          10,
+          19
+        ],
+        [
+          10,
+          20
+        ],
+        [
+          10,
+          21
+        ]
+      ],
+      "name": "INNER LOOP LEFT ARROW"
+    },
+    "Light011": {
+      "leds": [
+        [
+          10,
+          1
+        ],
+        [
+          10,
+          2
+        ],
+        [
+          10,
+          3
+        ]
+      ],
+      "name": "INNER LOOP LEFT X"
+    },
+    "Light015": {
+      "leds": [
+        [
+          10,
+          8
+        ],
+        [
+          10,
+          9
+        ],
+        [
+          10,
+          10
+        ]
+      ],
+      "name": "LEFT ORBIT ARROW"
+    },
+    "Light016": {
+      "leds": [
+        [
+          10,
+          11
+        ],
+        [
+          10,
+          12
+        ],
+        [
+          10,
+          13
+        ]
+      ],
+      "name": "LEFT ORBIT X"
+    },
+    "Light021": {
+      "leds": [
+        [
+          10,
+          37
+        ],
+        [
+          10,
+          38
+        ],
+        [
+          10,
+          39
+        ]
+      ],
+      "name": "LEFT RAMP ARROW"
+    },
+    "Light012": {
+      "leds": [
+        [
+          10,
+          22
+        ],
+        [
+          10,
+          23
+        ],
+        [
+          10,
+          24
+        ]
+      ],
+      "name": "LEFT RAMP X"
+    },
+    "Light048": {
+      "leds": [
+        [
+          9,
+          29
+        ],
+        [
+          9,
+          30
+        ],
+        [
+          9,
+          31
+        ]
+      ],
+      "name": "RIGHT RAMP ARROW"
+    },
+    "Light045": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "name": "RIGHT RAMP X"
+    },
+    "Light047": {
+      "leds": [
+        [
+          9,
+          25
+        ],
+        [
+          9,
+          26
+        ],
+        [
+          9,
+          27
+        ]
+      ],
+      "name": "RIGHT ORBIT ARROW"
+    },
+    "Light046": {
+      "leds": [
+        [
+          9,
+          34
+        ],
+        [
+          9,
+          35
+        ],
+        [
+          9,
+          36
+        ]
+      ],
+      "name": "RIGHT ORBIT X"
+    },
+    "Light051": {
+      "leds": [
+        [
+          9,
+          9
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          9,
+          11
+        ]
+      ],
+      "name": "RIGHT EJECT ARROW"
+    },
+    "Light050": {
+      "leds": [
+        [
+          9,
+          13
+        ],
+        [
+          9,
+          14
+        ],
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "RIGHT EJECT X"
+    },
+    "Light013": {
+      "leds": [
+        [
+          10,
+          34
+        ],
+        [
+          10,
+          35
+        ],
+        [
+          10,
+          36
+        ]
+      ],
+      "name": "XWING 3"
+    },
+    "Light017": {
+      "leds": [
+        [
+          10,
+          5
+        ]
+      ],
+      "name": "XWING 1"
+    },
+    "Light014": {
+      "leds": [
+        [
+          10,
+          17
+        ]
+      ],
+      "name": "XWING 2"
+    },
+    "Light040": {
+      "leds": [
+        [
+          10,
+          33
+        ]
+      ],
+      "name": "XWING 4"
+    },
+    "Light041": {
+      "leds": [
+        [
+          10,
+          45
+        ]
+      ],
+      "name": "XWING 5"
+    },
+    "Light042": {
+      "leds": [
+        [
+          10,
+          44
+        ]
+      ],
+      "name": "XWING 6"
+    },
+    "Light044": {
+      "leds": [
+        [
+          9,
+          28
+        ]
+      ],
+      "name": "XWING 7"
+    },
+    "Light043": {
+      "leds": [
+        [
+          9,
+          8
+        ]
+      ],
+      "name": "XWING 8"
+    },
+    "Light074": {
+      "leds": [
+        [
+          9,
+          19
+        ]
+      ],
+      "name": "XWING 9"
+    },
+    "Light033": {
+      "leds": [
+        [
+          10,
+          4
+        ]
+      ],
+      "name": "MINI 1"
+    },
+    "Light030": {
+      "leds": [
+        [
+          10,
+          18
+        ]
+      ],
+      "name": "MINI 2"
+    },
+    "Light031": {
+      "leds": [
+        [
+          9,
+          24
+        ]
+      ],
+      "name": "MINI 3"
+    },
+    "Light039": {
+      "leds": [
+        [
+          9,
+          12
+        ]
+      ],
+      "name": "MINI 4"
+    },
+    "Light038": {
+      "leds": [
+        [
+          9,
+          16
+        ]
+      ],
+      "name": "MINI 5"
+    },
+    "Light022": {
+      "leds": [
+        [
+          10,
+          25
+        ]
+      ],
+      "name": "VIDEO MODE"
+    },
+    "Light008": {
+      "leds": [
+        [
+          10,
+          32
+        ]
+      ],
+      "name": "HOTH"
+    },
+    "Light006": {
+      "leds": [
+        [
+          10,
+          0
+        ]
+      ],
+      "name": "DEATH STAR"
+    },
+    "Light018": {
+      "leds": [
+        [
+          10,
+          16
+        ]
+      ],
+      "name": "EXTRA BALL"
+    },
+    "Light019": {
+      "leds": [
+        [
+          8,
+          40
+        ]
+      ],
+      "name": "SUPER JACKPOT"
+    },
+    "Light007": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "ENDOR"
+    },
+    "Light053": {
+      "leds": [
+        [
+          9,
+          17
+        ]
+      ],
+      "name": "TATOOINE"
+    },
+    "Light049": {
+      "leds": [
+        [
+          9,
+          18
+        ]
+      ],
+      "name": "MYSTERY"
+    },
+    "Light001": {
+      "leds": [
+        [
+          8,
+          46
+        ]
+      ],
+      "name": "(F)ORCE"
+    },
+    "Light002": {
+      "leds": [
+        [
+          8,
+          45
+        ]
+      ],
+      "name": "F(O)RCE"
+    },
+    "Light003": {
+      "leds": [
+        [
+          8,
+          44
+        ]
+      ],
+      "name": "FO(R)CE"
+    },
+    "Light004": {
+      "leds": [
+        [
+          8,
+          43
+        ]
+      ],
+      "name": "FOR(C)E"
+    },
+    "Light005": {
+      "leds": [
+        [
+          8,
+          42
+        ]
+      ],
+      "name": "FORC(E)"
+    },
+    "Light009": {
+      "leds": [
+        [
+          8,
+          47
+        ]
+      ],
+      "name": "LIGHT SABER DUEL"
+    },
+    "Light024": {
+      "leds": [
+        [
+          8,
+          38
+        ]
+      ],
+      "name": "JEDI"
+    },
+    "Light029": {
+      "leds": [
+        [
+          8,
+          20
+        ]
+      ],
+      "name": "VICTORY MULTI-BALL"
+    },
+    "Light073": {
+      "leds": [
+        [
+          8,
+          21
+        ]
+      ],
+      "name": "SKILL SHOT"
+    },
+    "Light052": {
+      "leds": [
+        [
+          8,
+          24
+        ]
+      ],
+      "name": "DEATHSTAR MINI"
+    },
+    "Light054": {
+      "leds": [
+        [
+          8,
+          25
+        ]
+      ],
+      "name": "DEATHSTAR ONE"
+    },
+    "Light055": {
+      "leds": [
+        [
+          8,
+          26
+        ]
+      ],
+      "name": "DEATHSTAR TWO"
+    },
+    "Light056": {
+      "leds": [
+        [
+          8,
+          27
+        ]
+      ],
+      "name": "DEATHSTAR THREE"
+    },
+    "Light064": {
+      "leds": [
+        [
+          8,
+          32
+        ]
+      ],
+      "name": "HOTH MINI"
+    },
+    "Light062": {
+      "leds": [
+        [
+          8,
+          33
+        ]
+      ],
+      "name": "HOTH ONE"
+    },
+    "Light063": {
+      "leds": [
+        [
+          8,
+          34
+        ]
+      ],
+      "name": "HOTH TWO"
+    },
+    "Light061": {
+      "leds": [
+        [
+          8,
+          35
+        ]
+      ],
+      "name": "HOTH THREE"
+    },
+    "Light068": {
+      "leds": [
+        [
+          8,
+          16
+        ]
+      ],
+      "name": "TATOOINE MINI"
+    },
+    "Light065": {
+      "leds": [
+        [
+          8,
+          17
+        ]
+      ],
+      "name": "TATOOINE ONE"
+    },
+    "Light067": {
+      "leds": [
+        [
+          8,
+          18
+        ]
+      ],
+      "name": "TATOOINE TWO"
+    },
+    "Light066": {
+      "leds": [
+        [
+          8,
+          19
+        ]
+      ],
+      "name": "TATOOINE THREE"
+    },
+    "Light060": {
+      "leds": [
+        [
+          8,
+          8
+        ]
+      ],
+      "name": "ENDOR MINI"
+    },
+    "Light059": {
+      "leds": [
+        [
+          8,
+          11
+        ]
+      ],
+      "name": "ENDOR ONE"
+    },
+    "Light057": {
+      "leds": [
+        [
+          8,
+          10
+        ]
+      ],
+      "name": "ENDOR TWO"
+    },
+    "Light058": {
+      "leds": [
+        [
+          8,
+          9
+        ]
+      ],
+      "name": "ENDOR THREE"
+    },
+    "Light028": {
+      "leds": [
+        [
+          8,
+          15
+        ]
+      ],
+      "name": "HAN"
+    },
+    "Light026": {
+      "leds": [
+        [
+          8,
+          14
+        ]
+      ],
+      "name": "LEIA"
+    },
+    "Light027": {
+      "leds": [
+        [
+          8,
+          13
+        ]
+      ],
+      "name": "R2D2"
+    },
+    "Light025": {
+      "leds": [
+        [
+          8,
+          12
+        ]
+      ],
+      "name": "LUKE"
+    },
+    "Light034": {
+      "leds": [
+        [
+          8,
+          36
+        ]
+      ],
+      "name": "LEFT OUTLANE"
+    },
+    "Light035": {
+      "leds": [
+        [
+          8,
+          37
+        ]
+      ],
+      "name": "LEFT RETURNLANE"
+    },
+    "Light036": {
+      "leds": [
+        [
+          8,
+          23
+        ]
+      ],
+      "name": "RIGHT RETURNLANE"
+    },
+    "Light037": {
+      "leds": [
+        [
+          8,
+          22
+        ]
+      ],
+      "name": "RIGHT OUTLANE"
+    },
+    "Light079": {
+      "leds": [
+        [
+          8,
+          3
+        ]
+      ],
+      "name": "SHOOT AGAIN"
+    },
+    "LightFireButton": {
+      "leds": [
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          5
+        ],
+        [
+          1,
+          7
+        ]
+      ],
+      "name": "LOCKDOWN BUTTON"
+    },
+    "Light032": {
+      "leds": [
+        [
+          10,
+          14
+        ]
+      ],
+      "name": "SPINNER FL (GUESS)"
+    },
+    "Light069": {
+      "leds": [
+        [
+          10,
+          43
+        ]
+      ],
+      "name": "RIGHT TIE FIGHTER FL (GUESS)"
+    },
+    "Light070": {
+      "leds": [
+        [
+          10,
+          42
+        ]
+      ],
+      "name": "RIGHT DEATH STAR FL (GUESS)"
+    },
+    "LightMysteryScoop": {
+      "leds": [
+        [
+          9,
+          32
+        ]
+      ],
+      "name": "RIGHT EJECT (GUESS)"
+    }
+  },
+  "quiet_subs": [
+    "SW2017_Init",
+    "SW2017_KeyDown",
+    "SW2017_KeyUp",
+    "SW2017_Exit",
+    "LoadCoreFiles",
+    "SetupAttractMode",
+    "LightXMultShots",
+    "ForceShowModeShots"
+  ],
+  "orig_hits": false,
+  "orig_keep": [
+    "LeftSlingShot",
+    "RightSlingShot",
+    "kicker1",
+    "swTrough2",
+    "swTrough3",
+    "swTrough4",
+    "swTrough5",
+    "swTrough6"
+  ]
+}

@@ -57,7 +57,7 @@ def rename_sub(lines, name, rep):
     """Rename `Sub <name>` to `Sub <name>_orig`; True if it existed."""
     pat = re.compile(SUB_RE % re.escape(name), re.I)
     for i, line in enumerate(lines):
-        m = pat.match(line.rstrip("\r"))
+        m = pat.match(line.rstrip())  # Batman 66: a header can end in a space
         if m:
             lines[i] = line.replace(m.group(3), name + "_orig", 1)
             rep.append("renamed Sub %s -> %s_orig" % (name, name))
@@ -86,7 +86,7 @@ def quiet_sub(lines, name, rep):
     stand an empty Sub of the same shape in its place; None if absent."""
     pat = re.compile(SUB_RE % re.escape(name), re.I)
     for i, line in enumerate(lines):
-        m = pat.match(line.rstrip("\r"))
+        m = pat.match(line.rstrip())  # Batman 66: a header can end in a space
         if m:
             lines[i] = line.replace(m.group(3), name + "_orig", 1)
             rep.append("quieted Sub %s (its lights are the machine's now)" % name)
@@ -148,6 +148,32 @@ def _argcount(rest):
     return (n + 1) if seen else 0
 
 
+def _resuming(lines, i):
+    """Whether line i already runs under the enclosing procedure's own `On
+    Error Resume Next`: a wrapper then must not end it with `On Error Goto 0`
+    (GOTG's and Aerosmith's PuPInit relied on theirs for the rest)."""
+    for j in range(i - 1, -1, -1):
+        s = lines[j].strip().lower()
+        if re.match(r"(public\s+|private\s+)?(sub|function)\s", s):
+            return False
+        if s.startswith("on error resume next"):
+            return True
+        if s.startswith("on error goto 0"):
+            return False
+    return False
+
+
+def _optional(lines, i, fallback, note):
+    """Wrap line i's CreateObject so a failure runs `fallback` instead."""
+    line = lines[i]
+    ind = re.match(r"^\s*", line).group(0)
+    out = [ind + "On Error Resume Next", line.rstrip("\r"),
+           ind + "If Err Then Err.Clear : %s : End If   ' PAD: %s" % (fallback, note)]
+    if not _resuming(lines, i):
+        out.append(ind + "On Error Goto 0")
+    lines[i] = "\n".join(out)
+
+
 def pup_stub(lines, rep):
     """PinUP Player is a separate install most machines lack, and a tribute
     that calls it dies at CreateObject before anything else runs. Make the
@@ -159,7 +185,8 @@ def pup_stub(lines, rep):
         s = line.strip()
         if s.startswith("'"):
             continue
-        for m in re.finditer(r"\bPuPlayer\.(\w+)\s*(.*)$", s):
+        # any case: Aerosmith's PuPInit calls `puplayer.getroot`
+        for m in re.finditer(r"\bPuPlayer\.(\w+)\s*(.*)$", s, re.I):
             meth, rest = m.groups()
             if rest.startswith("("):
                 inner = rest[1:rest.rfind(")")] if ")" in rest else rest[1:]
@@ -173,15 +200,16 @@ def pup_stub(lines, rep):
             spelling.setdefault(meth.lower(), meth)
     for i, line in enumerate(lines):
         if re.search(r'Set\s+PuPlayer\s*=\s*CreateObject\("PinUpPlayer\.PinDisplay"\)', line, re.I):
-            ind = re.match(r"^\s*", line).group(0)
-            lines[i] = "\n".join([
-                ind + "On Error Resume Next",
-                line.rstrip("\r"),
-                ind + "If Err Then Err.Clear : Set PuPlayer = New PadNoPuP : End If   ' PAD: no PinUP Player here",
-                ind + "On Error Goto 0"])
+            _optional(lines, i, "Set PuPlayer = New PadNoPuP", "no PinUP Player here")
             rep.append("PuP made optional (PadNoPuP stands in, %d methods)" % len(counts))
             break
     out = ["", "'---- PAD: PinUP Player's shape, for a machine without it", "Class PadNoPuP"]
+    for meth, cs in list(counts.items()):
+        if meth in ("getroot",):
+            # a property read (`Set r = PuPlayer.getroot`), not a Sub
+            del counts[meth]
+            out.append("\tPublic Function %s() : Set %s = Nothing : End Function"
+                       % (spelling[meth], spelling[meth]))
     for meth, cs in sorted(counts.items()):
         n = max(cs, key=cs.get)
         if len(cs) > 1:
@@ -190,6 +218,21 @@ def pup_stub(lines, rep):
         out.append("\tPublic Sub %s(%s) : End Sub" % (spelling[meth], args))
     out += ["End Class", ""]
     return "\n".join(out)
+
+
+def flex_optional(lines, rep):
+    """FlexDMD is a separate install too, and JP's Deadpool (DMD Type
+    defaults to FlexDMD) dies at its CreateObject. When it fails, the table
+    falls back to its desktop DMD: the object is Nothing and UseFlexDMD is
+    False (ExecuteGlobal, so a table where it is a Const just keeps it). The
+    machine's LCD is the real display either way."""
+    for i, line in enumerate(lines):
+        m = re.match(r'^(\s*)Set\s+(\w+)\s*=\s*CreateObject\("FlexDMD\.FlexDMD"\)', line, re.I)
+        if m:
+            var = m.group(2)
+            _optional(lines, i, 'Set %s = Nothing : ExecuteGlobal "UseFlexDMD = False"' % var,
+                      "no FlexDMD here")
+            rep.append("FlexDMD made optional (%s falls back to the desktop DMD)" % var)
 
 
 def lamp_number(node, index):
@@ -497,6 +540,7 @@ def patch(script, m):
             quiet[name] = args
     neuter(lines, m.get("neuter", []), rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
+    flex_optional(lines, rep)
     text = "\n".join(lines) + gen(m, had, quiet) + stub
     return text, rep
 

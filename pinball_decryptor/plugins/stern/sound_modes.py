@@ -94,7 +94,8 @@ a few. The project lists its own files (``attract``: ``[file 1, file 2, ...]``, 
 :data:`ATTRACT_MAX`); a press of either flipper button in attract plays the next of them, in turn.
 The game has no sound for that, so the files ride a CARRIER, a request the game never plays (the
 modes' own calls' road, :mod:`.mode_sounds`): each is a record of its own, made as a file in turn
-is (a grown copy of a host record, cut to the carrier's length) under a pseudo mode
+is (a grown copy of a host record; PAD-809: whole, not cut to the carrier's length, which a swapped
+record plays past) under a pseudo mode
 (:func:`attract_mode`) on the carrier's slot, and ``sounds.cfg`` names the carrier, its record's
 key, the flipper buttons' switch ids and each file's record key and length (``attract`` /
 ``afile`` lines). The runtime (pad_mode_runtime.c "attract flipper sounds") hooks the framework's
@@ -125,7 +126,7 @@ MAX_MODES = 8
 SHOWN_MODES = 4
 #: PAD-641: the most files the flipper buttons play in attract, and the pseudo mode file k of them
 #: is built under (:func:`attract_mode`; above :data:`TURN_BASE`, so the build treats it as a file in
-#: turn: cut to its carrier's length, matched to the carrier's loudness)
+#: turn: matched to the carrier's loudness; PAD-809: never cut to the carrier's length)
 ATTRACT_MAX = 16
 #: PAD-641 round 2: the times the Audio tab offers between two of them, in seconds (0: any time, once
 #: the last one has played), the owner's "only allow playing the flipper sounds every so often like 30

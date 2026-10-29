@@ -11132,10 +11132,13 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                 "too %s." % (
                     who, ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
                     when), "info")
-        if (not longer_ok or _SMo.is_turn(mode)) and want > room and not _SMo.is_juke(mode):
+        if (not longer_ok or (_SMo.is_turn(mode) and not _SMo.is_attract(mode))) and want > room \
+                and not _SMo.is_juke(mode):
             # as a replacement is with "Allow replacements longer or shorter than the original" off; a file
             # in turn always (PAD-565: the game plays it for as long as its slot's descriptor says).
-            # Never a jukebox song (PAD-685): the game plays a record it is handed whole
+            # Never a jukebox song (PAD-685): the game plays a record it is handed whole. PAD-809: nor
+            # a flipper sound in attract: the runtime hands the carrier its own record, which plays
+            # whole past the carrier's length (PAD-533), and waits out the file's own length (afile)
             try:
                 wav = _SMo.cut(wav, room)
             except (OSError, EOFError) as e:
@@ -11144,7 +11147,8 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                 continue
             log("%s: %s (%.2f s) is cut to its %s %.2f s: %s." % (
                 who, what, want / 44100.0, "song's" if song else "slot's", room / 44100.0,
-                "the game plays it for as long as its sound" if _SMo.is_turn(mode)
+                "the game plays it for as long as its sound"
+                if _SMo.is_turn(mode) and not _SMo.is_attract(mode)
                 else longer_why or "longer replacements are off"), "info")
             want = room
         host = _sound_mode_host(params, p, want, audio_edits, taken, parts=in_seq)

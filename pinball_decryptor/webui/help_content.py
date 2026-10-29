@@ -700,6 +700,13 @@ HELP_CONTENT = {
             "clip with none of those lists the sounds that may be its (named like it, or "
             "asked for in the same part of the program). A sound the game picks at random, "
             "or a clip's own audio track, is not listed.",
+            "**When it plays** (Spike 2): what the emulator saw the game do with each clip. "
+            "Play a game on the **Emulate** tab and the playfield window's **CLIPS** list "
+            "names each clip as it plays, with the switch made just before it (**after "
+            "RIGHT RAMP**) and **loops** when the game starts it again each time it ends. "
+            "The Video tab keeps what was seen for the project, so a battle's clips can be "
+            "told apart by their shots. The words the game draws over a clip are on the "
+            "game's screen while it plays.",
         ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "

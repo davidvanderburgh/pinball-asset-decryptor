@@ -267,6 +267,8 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         self._default_assets_from_extract()
         self._update_project()
         self._maybe_rescan()
+        if self._m_seen_changed():          # PAD-827: an Emulate run saw clips since
+            self._refresh_list()
         self.publish_look()
 
     # -- As on the machine on the players (PAD-329) ------------------------
@@ -1557,6 +1559,9 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             if col == "aud":
                 a = s.info.audio_summary() if s.info else ""
                 return (a.lower(), s.rel_path.lower())
+            if col == "seen":                   # PAD-827: the seen clips first
+                c = self._m_seen_row(s.rel_path)["seen"]
+                return ((0, c.lower()) if c else (1, ""), s.rel_path.lower())
             if col == "rep":
                 rep = self._assign.get(s.rel_path)
                 if rep:

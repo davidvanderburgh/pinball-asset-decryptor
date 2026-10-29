@@ -1109,11 +1109,14 @@ def chan_loop(m, c, resume=False):
         # Log what was actually ASKED FOR. The basename of the parent directory
         # is "2.asset" for every video in the game, so the old form made two
         # different clips look like the same clip served twice.
-        log("ch%d serving %dx%d %d frames (acked %.1f ms after notice) %s%s%s%s"
+        # PAD-827: the rate goes last, so the playfield's clip list can tell
+        # a loop (the same file asked for again as it ends) from a replay.
+        log("ch%d serving %dx%d %d frames (acked %.1f ms after notice) %s%s%s%s%s"
             % (c, w, h, n, (time.monotonic() - t_notice) * 1000.0, want,
                "  (from %d ms)" % start_ms if start_ms else "",
                "  (RESCALED from %dx%d)" % native if (w, h) != native else "",
-               "  (your edit)" if from_edits(full) else ""))
+               "  (your edit)" if from_edits(full) else "",
+               "  (%.3f fps)" % (float(num) / den) if num and den else ""))
         note_serve(c, want)
         try:
             serve(m, c, full, w, h, native, req, old_read, start_ms)

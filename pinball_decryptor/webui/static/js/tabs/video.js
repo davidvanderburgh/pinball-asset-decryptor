@@ -35,6 +35,8 @@ const T = {
   best: "Convert every replaced clip at full quality from your own files, for a card built with room to spare (Write tab → SD card size). If this project doesn't know which files your clips came from, it finds them: point it at a card built with your videos and the folder they are in.",
   compare: "Play the selected clips side by side, big, beside the Color profiles bar: up to 4 (Ctrl-click or Shift-click rows to select them). One clip shows its Original beside its Replacement.\n\nClick a clip there and the bar changes its colors, so you see a profile or a slider on it against the others as you go.",
   // PAD-444: which of the game's modes plays each clip, read off the card's game program
+  // PAD-827
+  seen: "What the emulator saw the game do with this clip: the switch made just before it started, and \"loops\" when the game starts it again each time it ends. It fills in as you play games on the Emulate tab, where the playfield window lists the clips as they play. The words the game draws over a clip are on the game's screen there.",
   modes: "Which of the game's battles, multiballs and other modes play this clip, read from the card's game program. A clip two modes share has a row for each: choose a replacement in one mode's row to change it for that mode only. Not played: nothing in the game asks for the clip, so the machine never shows it.",
   modeFilter: "List only the clips one mode of the game plays.",
   modesBusy: "Reading which mode plays each clip…",
@@ -138,9 +140,10 @@ function clock(pos, dur) {
 // Tk tree's minwidth.  Measured over every slot, not only the filtered view,
 // so typing in Search doesn't make the columns jump.
 const FIT_MAX = 480;
-const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 56, conv: 60, modes: 110 };
+const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 56, conv: 60, modes: 110, seen: 120 };
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
-                aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert", modes: "Played in" };
+                aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert", modes: "Played in",
+                seen: "When it plays" };
 // PAD-444: a row's Played in cell, in words
 const modesText = (r) => (r.unplayed ? "Not played" : r.other ? "Other parts of the game"
   : (r.modes || []).join(", "));
@@ -177,7 +180,7 @@ const colorTip = (r, cs) => (r.col_lock
 // The long-named columns share the width that is left over (more or less
 // of it); the others keep the width that fits them, so a narrow window
 // shortens names, never "MP4 h264 30fps" or a length.
-const FLEX = ["rel", "rep", "modes"];
+const FLEX = ["rel", "rep", "modes", "seen"];
 const ROW_H = 34;
 let measurer = null;
 const textCache = new Map();
@@ -207,7 +210,7 @@ function rowFit(r, f) {
     w = { rel: textWidth(r.dir, f.mono) + textWidth(r.name, f.body), len: textWidth(r.len, f.mono),
           res: textWidth(r.res, f.body), fmt: textWidth(r.fmt, f.body), aud: textWidth(r.aud, f.body),
           rep: textWidth(r.rep, f.body), col: 0, conv: textWidth(r.conv, f.body),
-          modes: textWidth(modesText(r), f.body) };
+          modes: textWidth(modesText(r), f.body), seen: textWidth(r.seen || "", f.body) };
     rowFits.set(r, w);
   }
   return w;
@@ -1058,6 +1061,11 @@ export default function VideoTab() {
             : r.pair ? { head: r.modes[0], lines: ["Another mode plays this clip too: it has its own row below."] }
             : modesText(r))}>${modesText(r)}</span>`
           : "") },
+    // PAD-827: what the emulator saw (beside Played in, on the cards that column is read for)
+    modesCol && { key: "seen", label: "When it plays", width: width("seen"), sort: "seen", title: T.seen,
+      render: (r) => (r.seen
+        ? html`<span class="vid-seen-cell" ...${tip({ head: "Seen in the emulator", lines: r.seen_tip || [] })}>${r.seen}</span>`
+        : "") },
     colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
       render: (r) => (r.col_lock
         ? html`<span class="vid-color locked" aria-label="The game's own clip: no color profile can be attached" ...${tip(colorTip(r, colorNs))}><${Icon} name="lock" /></span>`

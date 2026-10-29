@@ -271,6 +271,7 @@ function startMain() {
   on("frame", (f) => view && view.frame(f));
   on("slots", (s) => { if (S) { S.slots = s.values; S.state_busy = s.busy; } if (view) view.slots(s); });
   on("run", (r) => { if (S) S.run = r; if (view) view.run(r); });
+  on("clips", (c) => { if (S) S.clips = c; if (view) view.clips(c); });
 
   function render() {
     app.textContent = "";
@@ -333,6 +334,13 @@ function startMain() {
     if (info && S.view.cab_panel) { cabp = cabPanel(S.view.cab_panel); (shaker || top).el.after(cabp.el); }
     // the single-colour inserts' colours (PAD-668), last in the column
     if (info && S.view.lens && S.view.lens.length) (cabp || shaker || top).el.after(lensPanel(S.view.lens).el);
+    // PAD-827: the clips the game plays, right under the info, where a shot's
+    // clip is read off as it starts
+    let clips = null;
+    if (side && S.clips) {
+      clips = clipsPanel(S.clips);
+      if (top) top.el.after(clips.el); else side.prepend(clips.el);
+    }
     app.append(body, status);
     view = {
       frame(f) {
@@ -344,7 +352,49 @@ function startMain() {
       },
       slots(s) { if (states) states.update(s); },
       run(r) { run.update(r); },
+      clips(c) { if (clips) clips.update(c); },
     };
+  }
+
+  // ================================================== the clips (PAD-827)
+  // Each clip the game plays, newest first: its name (the Video tab row's),
+  // the switch made just before it started, and whether the game loops it.
+  // Rows are {name, sw, loop, n, now}. Open unless it was folded.
+  function clipsPanel(rows) {
+    const acc = el("details", "kp-acc pf-clips");
+    let open = true;
+    try { open = localStorage.getItem("pf-acc-clips") !== "0"; } catch (e) { /* no storage */ }
+    acc.open = open;
+    const sum = el("summary", null, "CLIPS");
+    // never keep the keyboard: a focused summary would eat the space bar
+    sum.tabIndex = -1;
+    sum.addEventListener("mousedown", (ev) => ev.preventDefault());
+    const list = el("div", "cl-list");
+    const foot = el("div", "cl-foot", "Newest first, with the switch made just before each. The Video tab shows them too.");
+    acc.append(sum, list, foot);
+    acc.title = "The clips the game plays, as it plays them. \"after\" is the switch made just before the clip "
+      + "started; \"loops\" means the game starts it again each time it ends. The words the game draws over a clip "
+      + "are on the game's screen while it plays.";
+    acc.addEventListener("toggle", () => {
+      try { localStorage.setItem("pf-acc-clips", acc.open ? "1" : "0"); } catch (e) { /* no storage */ }
+    });
+    function update(data) {
+      list.textContent = "";
+      if (!data.length) { list.append(el("div", "cl-none", "No clip yet")); return; }
+      for (const r of data) {
+        const row = el("div", "cl-row" + (r.now ? " now" : ""));
+        const head = el("div", "cl-name", r.name);
+        if (r.n > 1) head.append(el("span", "cl-n", " ×" + r.n));
+        row.append(head);
+        const bits = [];
+        if (r.sw) bits.push("after " + r.sw);
+        if (r.loop) bits.push("loops");
+        if (bits.length) row.append(el("div", "cl-why", bits.join(" · ")));
+        list.append(row);
+      }
+    }
+    update(rows);
+    return { el: acc, update };
   }
 
   // ---- the run's own controls (PAD-204): Pause, and the PC-side volume -------

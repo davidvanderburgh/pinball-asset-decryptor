@@ -382,7 +382,41 @@ class ModesMixin:
             out["follow"] = self._m_label(lead)
             out["rep"] = "Same clip as %s" % self._m_label(lead)
             out["rep_cls"] = "follow"
+        out.update(self._m_seen_row(rel))
         return out
+
+    # -- PAD-827: what the emulator saw the game do with each clip -----------------------------
+    def _m_seen_all(self):
+        """``{rel: record}`` of :func:`..plugins.stern.clip_seen.load`, read again when the
+        project's file changed."""
+        from ..plugins.stern import clip_seen
+        folder = self._assets_path()
+        path = clip_seen.seen_path(folder) if folder else ""
+        try:
+            m = os.path.getmtime(path) if path else None
+        except OSError:
+            m = None
+        if getattr(self, "_m_seen_key", None) != (path, m):
+            self._m_seen_key = (path, m)
+            self._m_seen = clip_seen.load(folder) if m else {}
+        return self._m_seen
+
+    def _m_seen_row(self, rel):
+        """The row's When it plays cell and its tooltip lines ("" for a clip the emulator
+        has not seen; a follower with no file of its own has none)."""
+        from ..plugins.stern import clip_seen
+        c = None if rel in self._m_virtual else self._m_seen_all().get(rel)
+        return {"seen": clip_seen.cell(c), "seen_tip": clip_seen.lines(c)}
+
+    def _m_seen_changed(self):
+        """Whether the record changed since the rows were made (the tab shows again after a
+        run): the caller repaints them."""
+        before = getattr(self, "_m_seen_key", None)
+        self._m_seen_all()
+        return before is not None and before != self._m_seen_key
+
+    def _m_seen_any(self):
+        return bool(self._m_seen_all())
 
     def _m_keep(self, rel):
         """Whether the mode filter keeps *rel* in the list."""

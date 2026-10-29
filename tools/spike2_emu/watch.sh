@@ -520,6 +520,8 @@ BOARD_SPEED=""
 BOARD_STARTED=$(date +%s)
 pad_board_run() {
     mkdir -p "$(dirname "$BOARD_RUN")" 2>/dev/null || return 0
+    # a root run's board stays the human's: their plain-user takes write locks in it (riglock.sh, PAD-803)
+    pad_give_back "$(dirname "$BOARD_RUN")"
     BOARD_SPEED=$(pad_board_speed); BOARD_SPEED=${BOARD_SPEED:-1}
     # "emu" and "audio" as every emulator's record has them (tools/rigboard.sh,
     # PAD-296); a hidden run is silent whatever PAD_AUDIO says (see below).

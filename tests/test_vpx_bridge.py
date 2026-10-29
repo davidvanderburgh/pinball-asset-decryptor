@@ -493,6 +493,46 @@ def test_launcher_run_is_visible_audible_and_without_the_rigs_playfield(tmp_path
     assert not root and "-u" not in head
 
 
+def test_launcher_takes_its_rig_as_root_on_the_apps_board(tmp_path, monkeypatch):
+    """PAD-803: the take ran as the plain user on the board riglock.sh guessed
+    from an installed rig (the Linux home's ~/.pad-rig, root's after the app's
+    runs), and refused with every slot free. It runs as root, like the run,
+    and every rig command names the board the app and the controller read."""
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pl, "win_python", lambda: None)
+    monkeypatch.setattr(pl, "account", lambda d=None: ("pad", "/home/pad"))
+    monkeypatch.setattr(pl, "app_home", lambda d: "/mnt/wsl/paddata/spike2")
+    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p: "/mnt/c/Users/me/.pad-rig")
+    calls = []
+
+    class R:
+        returncode, stdout, stderr = 0, b"slot=3\n", b""
+
+    monkeypatch.setattr(pl, "_run", lambda cmd, timeout=60: calls.append(cmd) or R())
+    la = pl.Launch("foo_fighters__le", "/mnt/d/cards/ff.raw", dist="PAD-Runtime")
+    assert la.take_slot() == 3
+    cmd = calls[0]
+    assert cmd[:7] == ["wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e", "env"]
+    assert "HOME=/home/pad" in cmd and "PAD_HOME=/mnt/wsl/paddata/spike2" in cmd
+    if sys.platform == "win32":
+        assert "PAD_BOARD=/mnt/c/Users/me/.pad-rig" in cmd
+        assert "PAD_BOARD=/mnt/c/Users/me/.pad-rig" in la.env()
+    assert cmd[-4:] == ["take", "--any", "PAD-VPX", "foo_fighters__le for Visual Pinball"]
+    assert "PAD_HOME=/mnt/wsl/paddata/spike2" in la.env()
+    # riglock's own last words come back whole, not cut to the slot table
+    R.returncode, R.stdout = 1, b""
+    R.stderr = (b"x" * 400) + b"\nriglock: cannot write the board at /home/pad/.pad-rig"
+    la.slot = None
+    with pytest.raises(RuntimeError, match="cannot write the board"):
+        la.take_slot()
+
+
+def test_launcher_uses_the_rigs_own_home_off_the_runtime(monkeypatch):
+    pl = pytest.importorskip("padlaunch")
+    assert pl.app_home("Ubuntu") == ""
+
+
 def test_kit_recognises_each_supported_table(monkeypatch):
     pv = pytest.importorskip("padvpx")
     titles = pv.maps()

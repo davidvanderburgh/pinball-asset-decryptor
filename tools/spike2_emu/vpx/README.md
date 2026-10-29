@@ -122,8 +122,11 @@ Then open the patched table in Visual Pinball. The table names its title,
 the controller looks for a run of it on the rig board (`~/.pad-rig/slot-N.run`)
 and, finding none, STARTS one (`padlaunch.py`): the title's card, in
 PAD-Runtime when that distro is installed (else the default distro), on a
-rig slot of its own taken as `PAD-VPX`, as `wsl -u root` with the user's HOME
-and `PAD_PIVOT=1` (the app's own launch shape, so save states work),
+rig slot of its own taken as `PAD-VPX` (the take as root too, on the app's
+board in the Windows profile and in the app's rig on its data disk, so an
+installed app's runs and the controller agree on both - PAD-803), as
+`wsl -u root` with the user's HOME and `PAD_PIVOT=1` (the app's own launch
+shape, so save states work),
 visible (the LCD window on the desktop, for the backglass monitor) and with
 sound, but without the rig's virtual playfield window (Visual Pinball is the
 playfield, and that window would take the keyboard from it). `Run` returns

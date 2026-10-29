@@ -267,8 +267,19 @@ cache_used_kb() {
 # (PAD_CACHE_KEEP_FREE_GB, default 8, on a distro's disk; 2 on the store).
 # PAD-739: it also keeps the cache under its own size limit (cache_limit_gb), because on a distro's disk df is the
 # virtual disk's and never ran short; and a copy that never finished goes first of all.
+# PAD-816: AND THE WINDOWS DRIVE BEHIND IT. The same virtual-size df let a 14.7 GB copy start on a machine whose C:
+# had a few GB left: the vhdx could not grow, ext4 hit a failed write at 3.6 GB and remounted the WHOLE distro
+# read-only, and nothing in WSL worked again until a restart. The app names that drive (PAD_HOST_DRIVE, the drvfs
+# mount of the drive ext4.vhdx is on); its free space, plus what this call has evicted (freed blocks inside the vhdx
+# are reused before it grows - and if they were handed back to Windows instead, df of the drive shows them), is the
+# room a copy really has. PAD_HOST_KEEP_FREE_GB (4) stays free for Windows. Not on the store, whose disk is its own.
+host_free_kb() {
+    [ -n "${PAD_HOST_DRIVE:-}" ] && [ "$CACHE" != /mnt/wsl/cards/cardcache ] || return 1
+    df -k --output=avail "$PAD_HOST_DRIVE" 2>/dev/null | tail -1 | tr -d " " | grep -E '^[0-9]+$'
+}
 cache_make_room() {   # <img> <own-copy-path>
     local need keep free f vlabel vboot victim oldest size alloc pinned limit used over why
+    local host0 hnow hroom hkeep evicted=0 hshort=0
     size=$(stat -c %s "$1" 2>/dev/null || echo 0)
     alloc=$(( $(stat -c '%b * %B' "$1" 2>/dev/null || echo 0) ))
     if [ "$alloc" -gt 0 ] && [ "$alloc" -lt "$size" ]; then
@@ -278,9 +289,20 @@ cache_make_room() {   # <img> <own-copy-path>
     fi
     keep=$(( CACHE_KEEP_GB * 1048576 ))
     limit=$(( $(cache_limit_gb) * 1048576 ))
+    host0=$(host_free_kb) || host0=""
+    hkeep=$(( ${PAD_HOST_KEEP_FREE_GB:-4} * 1048576 ))
     while :; do
         free=$(df -k --output=avail "$CACHE" 2>/dev/null | tail -1 | tr -d " ")
         [ -n "$free" ] || return 0             # df unreadable: do not guess
+        hshort=0
+        if [ -n "$host0" ]; then
+            hnow=$(host_free_kb) || hnow=$host0
+            hroom=$(( host0 + evicted ))
+            [ "$hnow" -gt "$hroom" ] && hroom=$hnow
+            # The Windows drive's own floor, carried into the ext4 terms the checks below use.
+            hroom=$(( hroom - hkeep + keep ))
+            if [ "$hroom" -lt "$free" ]; then free=$hroom; hshort=1; fi
+        fi
         over=0
         if [ "$limit" -gt 0 ]; then
             used=$(cache_used_kb)
@@ -325,6 +347,10 @@ cache_make_room() {   # <img> <own-copy-path>
                 fi
                 return 0
             fi
+            if [ "$hshort" = 1 ]; then
+                echo "[card] the Windows drive behind WSL ($PAD_HOST_DRIVE) is too full to cache this card ($(awk "BEGIN { printf \"%.1f\", $hnow / 1048576 }") GB free, want $(( (need + hkeep) / 1048576 )) GB) - running off the original. Free space there and the next boot caches it." >&2
+                return 1
+            fi
             echo "[card] disk too full to cache ($(( free / 1048576 )) GB free, want $(( (need + keep) / 1048576 )) GB) and nothing evictable ($pinned library cards kept) - running off the original" >&2
             return 1
         fi
@@ -341,6 +367,7 @@ cache_make_room() {   # <img> <own-copy-path>
             echo "[card] evicting cached $victim ($why) to make room" >&2
         fi
         why=""
+        evicted=$(( evicted + $(du -ck "$CACHE/$victim.raw" "$CACHE/$victim.raw.partial" 2>/dev/null | tail -1 | cut -f1) ))
         rm -f "$CACHE/$victim.raw" "$CACHE/$victim.raw.partial" \
               "$CACHE/$victim.src" "$CACHE/$victim.log" \
               "$CACHE/$victim.boot" "$CACHE/$victim.pid"
@@ -965,6 +992,8 @@ fi
 # syscall and nothing that could be acted on. pad_can_write names the owner and
 # the chown; the die below still ends the run, because an unmountable card is
 # the end of it.
+# A disk gone read-only under the cache copy (PAD-816) lands here first: name it, not the mount point.
+if pad_disk_readonly; then pad_disk_readonly_say card; die "cannot create $MNT"; fi
 pad_can_write "$MNT" card || die "cannot create $MNT"
 mkdir -p "$MNT" || die "cannot create $MNT"
 

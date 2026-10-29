@@ -1402,6 +1402,10 @@ class EmulateTab(TabService):
                           "installation: the package it needs is not offered "
                           "by any of that Linux's package sources, so trying "
                           "again will say the same thing.")
+            elif result == "readonly":
+                self._log("[emulate] setup did not run: WSL's disk has gone "
+                          "read-only (see above). Free space on the Windows "
+                          "drive, restart WSL, then press this button again.")
             else:
                 self._log("[emulate] setup did not finish — the emulator will "
                           "probably still fail to start.")

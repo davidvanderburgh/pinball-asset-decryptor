@@ -271,6 +271,11 @@ LOG=${LOG:-$PAD_LOGDIR/gzwatch.log}
 # game simply never ran. macOS hit exactly this with a WSL home path handed
 # into the container. `>>` on purpose - this is a writability probe, and the
 # truncation stays where it always was, at the game start itself.
+# A read-only Linux disk fails this probe too, and its cure is not LOG (PAD-816).
+if pad_disk_readonly "$(dirname "$LOG")"; then
+    pad_disk_readonly_say watch
+    exit 1
+fi
 : >> "$LOG" || { echo "[watch] LOG=$LOG is not writable here - nothing would start. Fix or unset LOG." >&2; exit 1; }
 HOSTLOG=$PAD_LOGDIR/padglhost.log
 # The virtual playfield's own log, on the same rule as autoattract's and the

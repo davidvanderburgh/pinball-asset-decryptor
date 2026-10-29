@@ -73,6 +73,10 @@ SOUNDS_HOW = {"record": "kept with the clip", "next": "asked for right after it"
               "name": "named after it"}
 SOUNDS_FOOT = ("Extract the card again to see which sound files these are: the extract writes "
                "sound_requests.tsv.")
+#: PAD-827: the callout's part for what the emulator saw the game do with the clip
+SEEN_HEAD = "Seen in the emulator (Emulate tab runs of this project):"
+#: PAD-827: the callout's part for what the game program says about how the clip is played
+PROG_HEAD = "From the game program:"
 #: PAD-592: a clip with none of those - the sounds that MAY be its, each kind in words
 MAYBE_HEAD = "No sound is sure for this clip. These may be its:"
 MAYBE_MAX = 12
@@ -382,7 +386,71 @@ class ModesMixin:
             out["follow"] = self._m_label(lead)
             out["rep"] = "Same clip as %s" % self._m_label(lead)
             out["rep_cls"] = "follow"
+        out.update(self._m_seen_row(rel))
         return out
+
+    # -- PAD-827: what the emulator saw the game do with each clip -----------------------------
+    def _m_seen_all(self):
+        """``{rel: record}`` of :func:`..plugins.stern.clip_seen.load`, read again when the
+        project's file changed."""
+        from ..plugins.stern import clip_seen
+        folder = self._assets_path()
+        path = clip_seen.seen_path(folder) if folder else ""
+        try:
+            m = os.path.getmtime(path) if path else None
+        except OSError:
+            m = None
+        if getattr(self, "_m_seen_key", None) != (path, m):
+            self._m_seen_key = (path, m)
+            self._m_seen = clip_seen.load(folder) if m else {}
+        return self._m_seen
+
+    def _m_seen_parts(self, rel):
+        """``(emulator cell, emulator lines, program cell, program lines)`` for *rel*: what the
+        project's Emulate runs saw (:mod:`..plugins.stern.clip_seen`) and what the card's game
+        program says (:mod:`..plugins.stern.clip_static`, read with the modes). A follower with
+        no file of its own has neither."""
+        from ..plugins.stern import clip_seen, clip_static
+        if rel in self._m_virtual:
+            return "", [], "", []
+        c = self._m_seen_all().get(rel)
+        clips = self._m_clips
+        name = (clips.name_of or {}).get(rel) if clips is not None else None
+        fact = (clips.static or {}).get(name) if name else None
+        pcell, plines = clip_static.words(name, fact)
+        return clip_seen.cell(c), clip_seen.lines(c), pcell, plines
+
+    def _m_seen_row(self, rel):
+        """The row's When it plays cell (the emulator's words, then the program's) and its
+        tooltip lines ("" / [] for a clip neither says anything about)."""
+        ecell, elines, pcell, plines = self._m_seen_parts(rel)
+        tip = list(elines)
+        if plines:
+            tip += ([PROG_HEAD] if elines else []) + plines
+        return {"seen": " · ".join(x for x in (ecell, pcell) if x), "seen_tip": tip,
+                "seen_head": "Seen in the emulator" if elines else "From the game program"}
+
+    def _m_seen_preview(self, rel):
+        """The callout's When it plays part for the row on show, or None: every switch the
+        emulator saw before the clip, in full (the cell keeps to the commonest), then what the
+        game program says."""
+        if not rel:
+            return None
+        _e, elines, _p, plines = self._m_seen_parts(rel)
+        if not (elines or plines):
+            return None
+        return {"rel": rel, "head": SEEN_HEAD if elines else "", "lines": elines,
+                "prog_head": PROG_HEAD if plines else "", "prog_lines": plines}
+
+    def _m_seen_changed(self):
+        """Whether the record changed since the rows were made (the tab shows again after a
+        run): the caller repaints them."""
+        before = getattr(self, "_m_seen_key", None)
+        self._m_seen_all()
+        return before is not None and before != self._m_seen_key
+
+    def _m_seen_any(self):
+        return bool(self._m_seen_all())
 
     def _m_keep(self, rel):
         """Whether the mode filter keeps *rel* in the list."""

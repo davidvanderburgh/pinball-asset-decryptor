@@ -139,6 +139,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ballmodel
 import bootprog
 import cablights
+import clipwatch
 import coilact
 import coilmap
 import devicexy
@@ -4452,6 +4453,23 @@ TABLES_EVERY_S = 2.0
 #: so writing it here moves the sound live, and the tab's own slider follows.
 AUDIO_CTL = os.environ.get("PAD_AUDIO_CTL") or None
 RUN_POLL_S = 0.3
+
+
+def clip_watch():
+    """PAD-827: the CLIPS list's reader, or None where there is no run log to
+    read. The names and the record go beside the Emulate tab's volume file, so
+    a window started by hand (no PAD_AUDIO_CTL) lists clips by file and keeps
+    no record."""
+    d = padpath.logdir()
+    if not d:
+        return None
+    ctl = os.path.dirname(AUDIO_CTL) if AUDIO_CTL else None
+    n = padpath.slot()
+    return clipwatch.ClipWatch(
+        os.path.join(d, "padvid.log"),
+        os.path.join(ctl, "clip_names_%d.json" % n) if ctl else None,
+        os.path.join(ctl, "clips_seen_%d.jsonl" % n) if ctl else None,
+        game=GAME or "")
 #: Restart game in flight (PAD-744): the button says Restarting… while the app
 #: has not taken the request (its poll) or the run has not taken dump/reboot.req
 #: (watch.sh), then until the old boot's log is gone (the new launch truncates
@@ -4679,6 +4697,11 @@ class Playfield:
         self.lcd = LcdPanel(GAME, on_build=self._open_lcd)
         self.lcd.drv = self.drv
         self.run = RunCtl(AUDIO_CTL)
+        # PAD-827: which clip the game plays, and the switch made before it
+        self.clips = clip_watch()
+        self._clip_mrg = None
+        self._sw_names = {}
+        self._sw_names_next = 0.0
         self._wait_deadline = time.time() + TABLES_TIMEOUT_S
         self._wait_next = time.monotonic() + TABLES_EVERY_S
         self._build_view()
@@ -4931,12 +4954,33 @@ class Playfield:
                 self.publish("layout")
             if frame:
                 self.publish("frame", frame)
+        self._clips_tick(now)
         self.lcd.poll()
         if self.lcd.dirty:
             self.lcd.dirty = False
             self.publish("lcd", self.lcd.dyn())
         if self.run.poll(now):
             self.publish("run", self.run.dyn())
+
+    def _clips_tick(self, now):
+        """PAD-827: the switch edges the view's paced read saw, then the run
+        log; the list goes to the page when it changed."""
+        cw = self.clips
+        if cw is None:
+            return
+        sw = getattr(self.view, "sw", None)
+        mrg = sw.mrg if sw is not None else None
+        if mrg is not None and mrg is not self._clip_mrg:
+            self._clip_mrg = mrg
+            if not self._sw_names and now >= self._sw_names_next:
+                self._sw_names_next = now + 5.0
+                self._sw_names = {r["id"]: r["name"] for r in load_switch_list()
+                                  if r.get("name")}
+            cw.feed_switches(mrg, self._sw_names, now)
+        cw.poll(now)
+        if cw.dirty:
+            cw.dirty = False
+            self.publish("clips", cw.dyn())
 
     # ---- windows ---------------------------------------------------------------
     def window_spec(self):
@@ -5055,6 +5099,8 @@ class Playfield:
                   "savestates": SAVESTATES, "slots": self.slot_values(),
                   "state_busy": self._state_busy,
                   "run": self.run.dyn(),
+                  "clips": (self.clips.dyn() if self.clips is not None
+                            else None),
                   "acts":([[i, a[0]] for i, a in enumerate(WINDOW_ACTIONS)]
                            if self.acts_shown and self.view is not None
                            else []),

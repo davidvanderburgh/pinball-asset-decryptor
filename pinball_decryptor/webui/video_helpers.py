@@ -54,7 +54,8 @@ PICK_FILETYPES = [("Video files",
 SORT_CFG = (("#0", "Original Video", False), ("len", "Length", True),
             ("res", "Resolution", True), ("fmt", "Format", False),
             ("aud", "Audio", False), ("rep", "Replacement", False),
-            ("conv", "Convert", False))
+            ("conv", "Convert", False),
+            ("seen", "When it plays", False))      # PAD-827
 
 
 # ---------------------------------------------------------------------------

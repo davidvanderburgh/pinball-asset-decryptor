@@ -267,6 +267,8 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         self._default_assets_from_extract()
         self._update_project()
         self._maybe_rescan()
+        if self._m_seen_changed():          # PAD-827: an Emulate run saw clips since
+            self._refresh_list()
         self.publish_look()
 
     # -- As on the machine on the players (PAD-329) ------------------------
@@ -1557,6 +1559,9 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             if col == "aud":
                 a = s.info.audio_summary() if s.info else ""
                 return (a.lower(), s.rel_path.lower())
+            if col == "seen":                   # PAD-827: the seen clips first
+                c = self._m_seen_row(s.rel_path)["seen"]
+                return ((0, c.lower()) if c else (1, ""), s.rel_path.lower())
             if col == "rep":
                 rep = self._assign.get(s.rel_path)
                 if rep:
@@ -3310,11 +3315,14 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         pv = self.get("preview") or {}
         modes = self._m_preview(rel)
         sounds = self._m_sounds(rel)
-        if pv.get("note") != note or pv.get("modes") != modes or pv.get("sounds") != sounds:
+        seen = self._m_seen_preview(rel)        # PAD-827
+        if (pv.get("note") != note or pv.get("modes") != modes or pv.get("sounds") != sounds
+                or pv.get("seen") != seen):
             pv = dict(pv)
             pv["note"] = note
             pv["modes"] = modes
             pv["sounds"] = sounds
+            pv["seen"] = seen
             self.set(preview=pv)
 
     def _reselect(self, rels):

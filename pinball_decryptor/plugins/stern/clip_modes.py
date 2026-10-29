@@ -60,8 +60,9 @@ from dataclasses import dataclass, field
 #: (4: each clip's sounds, :mod:`.clip_sounds`; 5: freely named and singleton mode classes, PAD-624,
 #: and a bank's clip another bank also names, and the scenes that play their own clips, PAD-627;
 #: 6: the clips of a scene that is no video bank, by name, PAD-624; 7: the plain-C titles and
-#: Deadpool, source file by source file, PAD-634: :mod:`.clip_files`)
-READ_REV = 7
+#: Deadpool, source file by source file, PAD-634: :mod:`.clip_files`; 8: how the program plays
+#: each clip, PAD-827: :mod:`.clip_static`)
+READ_REV = 8
 #: a :attr:`CardClips.bank_of` value's third item: the clip is a scene's own, not a video bank's
 SCENE = "scene"
 #: the most clip-name characters a project file keeps (engine._sanitize_title's cap)
@@ -829,6 +830,9 @@ class CardClips:
     #: of a scene's own clip; both from the project's manifest, as :attr:`name_of`
     twin_of: dict = field(default_factory=dict)
     scene_of: dict = field(default_factory=dict)
+    #: PAD-827: clip name -> what the program says about how it is played (a table it is
+    #: picked from or played in turn with, a play call that loops it): :mod:`.clip_static`
+    static: dict = field(default_factory=dict)
 
     @property
     def sound_reading(self):
@@ -844,7 +848,8 @@ class CardClips:
                 "reading": self.reading.to_json(), "name_of": dict(self.name_of),
                 "bank_of": dict(self.bank_of), "note": self.note,
                 "unplayed": list(self.unplayed), "sounds": dict(self.sounds),
-                "twins": dict(self.twins), "scenes": list(self.scenes)}
+                "twins": dict(self.twins), "scenes": list(self.scenes),
+                "static": dict(self.static)}
 
     @classmethod
     def from_json(cls, d):
@@ -852,7 +857,8 @@ class CardClips:
                    Reading.from_json(d.get("reading") or {}), dict(d.get("name_of") or {}),
                    dict(d.get("bank_of") or {}), d.get("note", ""),
                    list(d.get("unplayed") or ()), dict(d.get("sounds") or {}),
-                   dict(d.get("twins") or {}), list(d.get("scenes") or ()))
+                   dict(d.get("twins") or {}), list(d.get("scenes") or ()),
+                   static=dict(d.get("static") or {}))
 
 
 def manifest_rows(project):
@@ -964,6 +970,7 @@ def read_card(card, rows, cancel=None):
     ctx = {}
     out.reading = analyse(elf, names, ctx=ctx)
     out.sounds = _sounds(elf, names, fragments, out, ctx)
+    out.static = _static(out, ctx)
     for name, v in own.items():                     # a bank's clip of the name comes first
         banks.setdefault(name, v)
     out.bank_of = {n: v for n, v in banks.items()}
@@ -993,6 +1000,16 @@ def _sounds(elf, names, fragments, clips, ctx):
     except Exception as e:                                  # noqa: BLE001
         got = CS.SoundReading(note="the sounds could not be read (%s)" % e)
     return got.to_json()
+
+
+def _static(clips, ctx):
+    """:func:`.clip_static.analyse`'s facts per clip; {} when the program could not be read
+    (it rides along, it never breaks the tab)."""
+    from . import clip_static as ST
+    prog = ctx.get("prog")
+    if prog is None:
+        return {}
+    return ST.analyse(prog, clips.reading.refs, clips.game, clips.version).facts()
 
 
 def unplayed(reading, bank_of):

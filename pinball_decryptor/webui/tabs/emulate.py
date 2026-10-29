@@ -222,6 +222,7 @@ class EmulateTab(TabService):
         self._cache_meta = None
         self._cache_sel = []
         self._pf_proc = None
+        self._clip_merger = None          # PAD-827: the run's clip sightings, folded in
         self._last_up = False
         self._last_info = None
         self._starting = False
@@ -2740,6 +2741,20 @@ class EmulateTab(TabService):
                   "untouched, and PAD_RUNTIME=0 goes back to using it."
                   % runtime.DISTRO)
 
+    def _clip_names_for_run(self):
+        """PAD-827: the playfield window's CLIPS list names each clip as the
+        project's Video tab row does, from a map beside the volume file; what
+        it sees comes back beside it and the status poll folds it into the
+        project (plugins/stern/clip_seen.py)."""
+        from ...core import rigslot
+        from ...plugins.stern import clip_seen
+        d = os.path.dirname(audio_ctl_file())
+        n = rigslot.slot()
+        project = self._assets()
+        named = clip_seen.write_names(clip_seen.names_file(d, n), project)
+        self._clip_merger = (clip_seen.Merger(clip_seen.seen_file(d, n), project)
+                             if named else None)
+
     def _launch_env(self, src):
         # PAD_AUDIO=1: a rig is silent unless it is asked (PAD-253), and this
         # tab's run is the one that has a window and a Volume / Mute.
@@ -2874,6 +2889,7 @@ class EmulateTab(TabService):
             self._refuse_start(self.get("hint") or "")
             return
         env = self._launch_env(src)
+        self._clip_names_for_run()
         # PAD-173: a lock this game will not give is worth saying once more
         # here, because the log is what a user sends when it "did not work".
         if self._mains_note:
@@ -3514,6 +3530,12 @@ class EmulateTab(TabService):
                 rigs = rigslot.board()
             except Exception:                            # noqa: BLE001
                 rigs = []
+            merger = getattr(self, "_clip_merger", None)
+            if merger is not None:
+                try:
+                    merger.poll()
+                except Exception:                        # noqa: BLE001
+                    pass
             if self._stopped:
                 self._poll_busy = False
                 return

@@ -266,3 +266,13 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .pf-lens .r .k { flex: 1 1 auto; font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pf-lens .r.set .k { color: var(--ink); }
 .pf-lens .r .x { flex: 0 0 auto; padding: 0 5px; height: 16px; line-height: 14px; font-size: 12px; }
+/* PAD-827: the clips the game plays */
+.pf-clips .cl-list { display: flex; flex-direction: column; gap: 3px; padding: 2px 8px 4px; max-height: 300px; overflow-y: auto; }
+.pf-clips .cl-row { font: 12px var(--mono); line-height: 16px; padding: 2px 4px; border-radius: 4px; }
+.pf-clips .cl-row.now { background: var(--panel-2); }
+.pf-clips .cl-name { color: #d8d8d8; overflow-wrap: anywhere; }
+.pf-clips .cl-row.now .cl-name { color: var(--key); }
+.pf-clips .cl-n { color: var(--ink-3); }
+.pf-clips .cl-why { font-size: 11px; color: #8a93a2; }
+.pf-clips .cl-none { font: 12px var(--mono); color: var(--ink-3); }
+.pf-clips .cl-foot { font-size: 11px; color: #8a93a2; line-height: 15px; padding: 0 8px 8px; }

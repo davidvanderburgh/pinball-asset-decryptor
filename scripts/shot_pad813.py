@@ -25,9 +25,10 @@ import webui_shot  # noqa: E402
 LAUNCHER = r'''
 import sys
 sys.path.insert(0, %r)
-from pinball_decryptor.webui import host
-sys.argv = ["host"] + sys.argv[1:]
-sys.exit(host.main())
+if __name__ == "__main__":       # spawned workers import this file too
+    from pinball_decryptor.webui import host
+    sys.argv = ["host"] + sys.argv[1:]
+    sys.exit(host.main())
 '''
 
 

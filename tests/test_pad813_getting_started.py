@@ -155,7 +155,9 @@ def test_every_page_string_is_translated():
         words += [a, b]
     words += ["Pick what you want to do. Each one is a short video and a few steps.",
               "Show this when the app opens", "If something goes wrong",
-              "New here? Short videos show the common jobs.", "Getting started…"]
+              "New here? Short videos show the common jobs.", "Getting started…",
+              "More common problems and their fixes",
+              "Your first mod, written out step by step"]
     for lang in ("de", "es", "fr"):
         path = os.path.join(REPO, "pinball_decryptor", "webui", "static", "i18n", lang + ".json")
         with open(path, encoding="utf-8") as f:
@@ -174,3 +176,68 @@ def test_the_videos_name_the_controls_the_steps_do():
     films = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign)
                  and getattr(n.targets[0], "id", "") == "FILMS")
     assert {k.value for k in films.value.keys} == {t["id"] for t in GS.TASKS}
+
+
+# ------------------------------------------------- the written guides (PAD-814)
+GUIDE = os.path.join(REPO, "docs", "guide")
+LINK = re.compile(r"\]\(([^)\s]+)\)")
+
+
+def _service_class():
+    from pinball_decryptor.webui.tabs import shell_extras
+    return shell_extras.ShellExtras
+
+
+def test_the_page_opens_the_guides_on_github(tmp_path, monkeypatch):
+    opened = []
+    monkeypatch.setattr(_service_class(), "open_link_checked",
+                        lambda self, url, what="": opened.append((url, what)))
+    with web_app(tmp_path, mfr="stern") as w:
+        assert w.call("shellx.getting_started_guide", "common_problems") is True
+        assert w.call("shellx.getting_started_guide", "getting_started") is True
+        assert w.call("shellx.getting_started_guide", "nope") is False
+    assert opened == [
+        ("https://github.com/davidvanderburgh/pinball-asset-decryptor/blob/main/"
+         "docs/guide/%s" % page, "the user guide")
+        for page in ("common-problems.md", "getting-started.md")]
+
+
+@pytest.mark.parametrize("page", sorted(GS.GUIDES.values()))
+def test_every_guide_page_is_in_the_repo(page):
+    assert os.path.isfile(os.path.join(GUIDE, page)), page
+
+
+def _anchors(path):
+    """GitHub's heading anchors in a markdown file."""
+    out = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            m = re.match(r"#+\s+(.*)", line)
+            if m:
+                slug = re.sub(r"[^\w\- ]", "", m.group(1).strip().lower())
+                out.add(slug.replace(" ", "-"))
+    return out
+
+
+@pytest.mark.parametrize("page", ["getting-started.md", "common-problems.md"])
+def test_the_guides_links_all_land(page):
+    path = os.path.join(GUIDE, page)
+    with open(path, encoding="utf-8") as f:
+        links = LINK.findall(f.read())
+    assert links
+    for link in links:
+        if link.startswith("http"):
+            continue
+        target, _, anchor = link.partition("#")
+        dest = os.path.normpath(os.path.join(GUIDE, target)) if target else path
+        assert os.path.isfile(dest), link
+        if anchor:
+            assert anchor in _anchors(dest), link
+
+
+def test_the_readme_links_both_guides_and_names_the_page():
+    with open(os.path.join(REPO, "README.md"), encoding="utf-8") as f:
+        text = f.read()
+    for page in ("getting-started.md", "common-problems.md"):
+        assert "(docs/guide/%s)" % page in text, page
+    assert "**Getting started** page" in text

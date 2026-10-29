@@ -1006,6 +1006,8 @@ function GettingStarted({ shell }) {
     ${(gs.problems || []).length ? html`<section class="sx-gs-probs">
       <h2 class="h2">If something goes wrong</h2>
       <dl>${gs.problems.map((p) => html`<div><dt>${p.title}</dt><dd>${p.text}</dd></div>`)}</dl>
+      <p class="small" style="margin:0"><a href="#" class="sx-gs-guide" onClick=${(e) => { e.preventDefault(); call("shellx.getting_started_guide", "common_problems"); }}>More common problems and their fixes</a>
+        <span class="muted"> · </span><a href="#" class="sx-gs-guide" onClick=${(e) => { e.preventDefault(); call("shellx.getting_started_guide", "getting_started"); }}>Your first mod, written out step by step</a></p>
     </section>` : null}
   </div></div>`;
 }

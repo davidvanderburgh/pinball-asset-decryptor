@@ -137,6 +137,21 @@ PROBLEMS = (
      "Report a problem in the top bar sends the log and the card's details."),
 )
 
+#: The written guides on GitHub (docs/guide), opened from the page.
+GUIDES = {
+    "getting_started": "getting-started.md",
+    "common_problems": "common-problems.md",
+}
+
+
+def guide_url(key):
+    from ..core.config import GITHUB_REPO
+    page = GUIDES.get(key)
+    if not page:
+        return ""
+    return "https://github.com/%s/blob/main/docs/guide/%s" % (GITHUB_REPO, page)
+
+
 NOTE = ("The videos use a Stern Spike 2 card. Other makers work the same way on the tabs "
         "they have.")
 

@@ -12785,5 +12785,7 @@
 "A tab has a lock on it": "Una pestaña tiene un candado",
 "That tab needs the card's files. Extract the card into a project folder first.": "Esa pestaña necesita los archivos de la tarjeta. Extrae primero la tarjeta en una carpeta de proyecto.",
 "Something else went wrong": "Algo más salió mal",
-"Report a problem in the top bar sends the log and the card's details.": "Informar de un problema, en la barra superior, envía el registro y los datos de la tarjeta."
+"Report a problem in the top bar sends the log and the card's details.": "Informar de un problema, en la barra superior, envía el registro y los datos de la tarjeta.",
+"More common problems and their fixes": "Más problemas habituales y sus soluciones",
+"Your first mod, written out step by step": "Tu primer mod, paso a paso por escrito"
 }

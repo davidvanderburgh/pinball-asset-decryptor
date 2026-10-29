@@ -85,6 +85,16 @@ class GettingStartedMixin:
         return True
 
     @rpc
+    def getting_started_guide(self, key):
+        """A written guide on GitHub: the first-mod walkthrough or Common
+        problems."""
+        url = GS.guide_url(key)
+        if not url:
+            return False
+        self.open_link_checked(url, what="the user guide")
+        return True
+
+    @rpc
     def getting_started_go(self, task_id):
         """A task's button: close the page and open its tab when the open
         manufacturer has it, else the picker to choose one."""

@@ -12733,7 +12733,6 @@
 "On Extract, pick a project folder and press Extract.": "En Extraer, elige una carpeta de proyecto y pulsa Extraer.",
 "Reading an SD card? Save card as image… on Select card keeps a backup of it first.": "¿Lees una tarjeta SD? Guardar tarjeta como imagen… en Seleccionar tarjeta guarda antes una copia.",
 "Extract the card first.": "Extrae primero la tarjeta.",
-"On Replace Audio, set Type to Music and find the song. Most Stern games name their own sounds.": "En Reemplazar audio, pon Tipo en Música y busca la canción. La mayoría de los juegos de Stern ponen nombre a sus sonidos.",
 "Right-click it, choose Choose replacement… and pick your mp3, wav or flac.": "Haz clic derecho, elige Elegir reemplazo… y escoge tu mp3, wav o flac.",
 "Play Original and Replacement to compare. Write builds the card.": "Reproduce Original y Reemplazo para compararlos. Escribir compila la tarjeta.",
 "On Write, press Build / flash SD card….": "En Escribir, pulsa Compilar / grabar tarjeta SD….",
@@ -12787,5 +12786,6 @@
 "Something else went wrong": "Algo más salió mal",
 "Report a problem in the top bar sends the log and the card's details.": "Informar de un problema, en la barra superior, envía el registro y los datos de la tarjeta.",
 "More common problems and their fixes": "Más problemas habituales y sus soluciones",
-"Your first mod, written out step by step": "Tu primer mod, paso a paso por escrito"
+"Your first mod, written out step by step": "Tu primer mod, paso a paso por escrito",
+"On Replace Audio, set Type to Music and sort by Length: the songs are the long ones. Play sequentially plays down the list.": "En Reemplazar audio, pon Tipo en Música y ordena por Duración: las canciones son las largas. Reproducir en secuencia recorre la lista."
 }

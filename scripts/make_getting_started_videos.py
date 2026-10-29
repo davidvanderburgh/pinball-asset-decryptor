@@ -214,7 +214,7 @@ RECAPS = {
     "text": ["Replace Text: search the words", "New text, then Apply", "Build on Write"],
     "install": ["Run the installer", "Install Prerequisites, then Restart if asked", "⚙ > Prerequisites re-checks"],
     "extract": ["Choose your manufacturer", "Select card: Browse… to the image", "Extract into a project folder"],
-    "song": ["Replace Audio, Type: Music", "Right-click the song, Choose replacement…", "Compare, then build on Write"],
+    "song": ["Replace Audio, Type: Music", "Sort by Length, listen down the list", "Right-click it, Choose replacement…"],
     "build": ["Write: Build / flash SD card…", "Tick build, flash or both", "Pick the SD card and start"],
     "flash": ["Write: Build / flash SD card…", "Image file: Browse… to the image", "Pick the SD card, Flash image"],
     "multiboot": ["Multi-boot: add your card images", "✎ dresses each menu card", "Build / flash card…"],
@@ -296,7 +296,9 @@ def _project(work):
 
 def _with_project(proj):
     return {"last_manufacturer": "stern",
-            "manufacturers": {"stern": {"extract_output": proj, "write_assets": proj}}}
+            "manufacturers": {"stern": {"extract_input": CARDS["deadpool"],
+                                        "write_original": CARDS["deadpool"],
+                                        "extract_output": proj, "write_assets": proj}}}
 
 
 def _my_song(work):
@@ -330,31 +332,37 @@ def film_song(pw, work, out):
         f = Film(app, out, "song")
         page = app.page
         _clear_rail_switch(app, f, "audio", "Audio", "Open <b>Replace Audio</b>", 1)
-        app.wait(lambda: app.state("audio").get("rows") is not None or app.state("audio").get("loaded"),
-                 timeout=180)
+        app.wait(lambda: page.locator(".aud-tbl .tr:not(.th)").count() > 0, timeout=600, step=1)
         time.sleep(3)
-        music = page.locator(".aud-seg").get_by_role("button", name="Music", exact=True).first
-        f.snap("Set <b>Type</b> to <b>Music</b>", music, n=2)
-        music.click()
-        time.sleep(1.5)
-        search = page.locator(".aud-tools .search input").first
-        f.snap("Search for the song: the game names its own sounds", search, n=3, click=True)
-        search.click()
-        search.type("disco", delay=60)
+        music = page.locator(".aud-tools").get_by_text("Music", exact=True)
+        print("Music filter:", music.count(), flush=True)
+        f.snap("Set <b>Type</b> to <b>Music</b>", music.first, n=2)
+        music.first.click()
         time.sleep(2)
-        row = page.locator(".aud-tbl .tr").first
-        f.snap("Right-click the song", row, n=4)
+        length = page.locator(".aud-tbl .tr.th").get_by_text("Length", exact=False).first
+        f.snap("Sort by <b>Length</b>: the songs are the long ones", length, n=3)
+        import re
+        for _ in range(3):                # until the longest is on top
+            length.click()
+            time.sleep(1.5)
+            first = page.locator(".aud-tbl .tr:not(.th)").first.inner_text()
+            m = re.search(r"(\d+):(\d\d)\.\d+", first)
+            if m and int(m.group(1)) >= 2:
+                break
+        seq = page.locator(".aud-tools").get_by_text("Play sequentially", exact=True).first
+        f.snap("Tick <b>Play sequentially</b> and listen down the list until you hear your song",
+               seq, n=4, click=False, hold=5)
+        row = page.locator(".aud-tbl .tr:not(.th)").first
+        f.snap("Found it? Right-click the song", row, n=5)
         row.click(button="right")
         time.sleep(0.8)
         item = page.locator(".menu [role=menuitem]", has_text="Choose replacement").first
-        f.snap("<b>Choose replacement…</b>, then pick your mp3, wav or flac", item, n=5, settle=0.3)
-        th, _ = (threading.Thread(target=item.click), None)
-        th.start()
+        f.snap("<b>Choose replacement…</b>, then pick your mp3, wav or flac", item, n=6, settle=0.3)
+        item.click()                      # the picker blocks the server, not the page
         app.answer_modal(song, kind="file")
-        th.join(30)
         time.sleep(2.5)
         play = page.locator(".aud-pane").nth(1).get_by_role("button", name="Play").first
-        f.snap("Play <b>Original</b> and <b>Replacement</b> to compare them", play, n=6, click=False,
+        f.snap("Play <b>Original</b> and <b>Replacement</b> to compare them", play, n=7, click=False,
                hold=4.6)
         f.snap("Done. <b>Write</b> builds the card with it",
                rail_item(app, "Write"), click=False, hold=4.4)
@@ -384,6 +392,12 @@ def film_build(pw, work, out):
         f.snap("Press <b>Build / flash SD card…</b>", btn, n=2)
         btn.click()
         app.wait(lambda: app.state("write").get("flash_dlg"), timeout=30)
+        time.sleep(1)
+        st = app.state("write").get("flash_dlg") or {}
+        if not st.get("build"):
+            app.api("write.flash_set", "build", True)
+        if not st.get("write"):
+            app.api("write.flash_set", "write", True)
         time.sleep(1.5)
         dlg = _flash_dialog(app)
         f.snap("Tick what to do: build the image, flash it, or both", dlg, n=3, click=False, zoom=1.15,
@@ -582,10 +596,8 @@ def _choose_replacement(app, f, row, path, n, caption):
     time.sleep(0.8)
     item = app.page.locator(".menu [role=menuitem]", has_text="Choose replacement").first
     f.snap(caption, item, n=n, settle=0.3)
-    th = threading.Thread(target=item.click)
-    th.start()
+    item.click()
     app.answer_modal(path, kind="file")
-    th.join(30)
     time.sleep(3)
 
 
@@ -742,7 +754,9 @@ def render(script, mp4, poster):
         n = int(total * FPS)
         ff = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "image2pipe", "-framerate", str(FPS),
                                "-c:v", "mjpeg", "-i", "-", "-c:v", "libx264", "-preset", "slow",
-                               "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                               "-crf", "26", "-vf", "scale=out_range=tv:out_color_matrix=bt709,format=yuv420p",
+                               "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709",
+                               "-color_trc", "bt709", "-movflags", "+faststart",
                                "-tune", "stillimage", tmp], stdin=subprocess.PIPE)
         stage = page.locator("#stage")
         for i in range(n):

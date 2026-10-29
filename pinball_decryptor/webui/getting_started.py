@@ -47,8 +47,8 @@ TASKS = (
      "go": "Open Replace Audio",
      "steps": (
          "Extract the card first.",
-         "On Replace Audio, set Type to Music and find the song. Most Stern games name "
-         "their own sounds.",
+         "On Replace Audio, set Type to Music and sort by Length: the songs are the long "
+         "ones. Play sequentially plays down the list.",
          "Right-click it, choose Choose replacement… and pick your mp3, wav or flac.",
          "Play Original and Replacement to compare. Write builds the card.",
      )},

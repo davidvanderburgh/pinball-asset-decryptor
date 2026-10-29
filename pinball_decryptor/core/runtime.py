@@ -159,13 +159,25 @@ def registered(runner=None) -> bool:
     Asked of `wsl -l -q` rather than by looking for the install directory: a
     user can delete the folder, and a distro can be unregistered while the
     folder survives.  WSL's own list is the only thing that decides."""
+    return bool(_listed(runner))
+
+
+def _listed(runner=None) -> Optional[bool]:
+    """:func:`registered`, with None for "wsl.exe did not answer".
+
+    A TIMEOUT IS NOT A NO (PAD-840, as PAD-490 was for the prerequisites).  A
+    stuck WSL times out the list, and reading that as "not installed" sent a
+    user round "install, reboot, still not installed" six times on a PC that
+    may well have had it: no install can help a WSL that does not answer."""
     if sys.platform != "win32":
         return False
     run = runner or _run
     try:
         out = run(["wsl.exe", "-l", "-q"], timeout=20)
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
         return False
+    except subprocess.TimeoutExpired:
+        return None
     names = [n.strip() for n in _text(out.stdout).splitlines()]
     return DISTRO in [n for n in names if n]
 
@@ -234,8 +246,9 @@ def status(runner=None, refresh: bool = False) -> Tuple[str, str]:
     States: ``unsupported`` (not Windows), ``unpublished`` (no image pinned in
     this app version yet), ``absent``, ``foreign`` (a distro of that name that
     is not ours), ``stale`` (ours, older than this app expects), ``ready``, and
-    ``unknown`` - which means only "nobody has asked yet on a thread allowed to
-    wait", never "something is wrong".
+    ``unknown`` - which means "nobody has asked yet on a thread allowed to
+    wait", or that wsl.exe did not answer when asked (its sentence says
+    which); never "not installed".
     """
     if runner is None:
         # The two answers that cost NOTHING are always exact, cache or no
@@ -294,7 +307,14 @@ def _status(runner=None) -> Tuple[str, str]:
     if not available():
         return ("unpublished",
                 "This app version has no pinned runtime image yet.")
-    if not registered(runner=runner):
+    listed = _listed(runner)
+    if listed is None:
+        return ("unknown",
+                "WSL did not answer, so the app cannot tell whether its Linux "
+                "is installed. Installing again will not help: restart WSL "
+                "(wsl --shutdown in a terminal) or restart Windows, then "
+                "check again.")
+    if not listed:
         return "absent", "The runtime is not installed on this machine yet."
     info = _read_manifest(runner)
     if info is None:

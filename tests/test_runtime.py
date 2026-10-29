@@ -580,3 +580,28 @@ def test_no_apostrophe_inside_the_workflows_single_quoted_shell_blocks():
         "%s" % "; ".join(offenders))
     assert not inside, (
         "a `bash -c '` block opened at line %d is never closed" % opened_at)
+
+
+def test_a_wsl_that_does_not_answer_is_not_a_missing_runtime():
+    """PAD-840: a timed-out `wsl -l -q` read as "not installed", and the user
+    installed and rebooted six times.  It is "unknown", with a sentence that
+    says installing will not help, and the install ladder does not start."""
+    def silent(args, timeout=None, stdin=None):
+        raise subprocess.TimeoutExpired(args, timeout)
+    state, detail = runtime.status(runner=silent)
+    assert state == "unknown"
+    assert "did not answer" in detail and "wsl --shutdown" in detail
+    assert not runtime.registered(runner=silent)
+
+    def no_wsl(args, timeout=None, stdin=None):
+        raise FileNotFoundError("wsl.exe")
+    assert runtime.status(runner=no_wsl)[0] == "absent"
+
+
+def test_the_install_ladder_does_not_install_into_a_silent_wsl(monkeypatch):
+    from pinball_decryptor.webui import runtime_prompt
+    monkeypatch.setattr(runtime, "status", lambda **k: ("unknown", "WSL did not answer."))
+    monkeypatch.setattr(runtime, "install", lambda **k: pytest.fail("installed"))
+    said = []
+    assert runtime_prompt.ensure(say=said.append) == "unknown"
+    assert said == ["WSL did not answer."]

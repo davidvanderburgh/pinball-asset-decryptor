@@ -1837,8 +1837,9 @@ HELP_CONTENT = {
          "emulator already in it. Your own distro is not touched, and a PC with WSL "
          "but no distro can still run a game.\n"
          "- A one-time download of about 414 MB. Start never does it: use **Fix "
-         "setup**, or **Update emulator Linux…** on the Stern Spike 2 Emulate tab "
-         "(shown there when the installed one is older than this app).\n"
+         "setup**, **Install** on the Visual Pinball tab's PAD runtime row, or "
+         "**Update emulator Linux…** on the Stern Spike 2 Emulate tab (shown there "
+         "when the installed one is older than this app).\n"
          "- Once installed, everything the app sends to Linux runs there: the "
          "emulators, extract and write, the disk tools and the card builder.\n"
          "- Set `PAD_RUNTIME=0` to use the PC's default distro instead."),
@@ -3449,7 +3450,7 @@ PREVIEW_HELP = {
             ("Getting started", [
                 {"flow": [
                     {"icon": "check", "title": "Setup",
-                     "text": "the PAD runtime (Emulate tab), Visual Pinball, the controller"},
+                     "text": "the PAD runtime, Visual Pinball, the controller: each row installs its own"},
                     {"icon": "sd", "title": "Cards",
                      "text": "the folder with your SD card images"},
                     {"icon": "upload", "title": "Patch",

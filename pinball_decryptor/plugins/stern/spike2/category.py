@@ -741,7 +741,10 @@ def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
         emu.set_category_file(sc_path)
         try:
             rows = emu._derive_cat(catid, rev)
-        except Exception:
+        except Exception as e:
+            from .parallel import out_of_memory
+            if out_of_memory(e):
+                raise   # PAD-830: the caller decodes the bank again alone
             rows = None
         if not rows:
             return 0
@@ -857,6 +860,14 @@ def _bank_pool_worker(args):
     return n, sum(renamed)
 
 
+def _decode_again(task, n):
+    """Whether a bank pool's answer *n* for *task* wants another go alone
+    (PAD-830): it ran out of memory, or decoded nothing it was asked for."""
+    from .parallel import NO_MEMORY
+    only = task[6] if len(task) > 6 else None
+    return n == NO_MEMORY or (n == 0 and (only is None or bool(only)))
+
+
 def _bank_pool_indexed(arg):
     """``(i, task)`` -> ``(i, _bank_pool_worker(task))``: which bank a pool
     answer is for, to decode it again when it ran out of memory (PAD-830)."""
@@ -935,7 +946,7 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
             for i, (n, t) in pool.imap_unordered(_bank_pool_indexed,
                                                  list(enumerate(tasks))):
                 task = tasks[i]
-                if n == NO_MEMORY:
+                if _decode_again(task, n):
                     again.append(task)
                 else:
                     ok += n
@@ -946,17 +957,21 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
                 if cancel():
                     pool.terminate()
                     break
-        # PAD-830: a bank whose worker ran out of memory beside the others is
+        # PAD-830: a bank that came back with nothing beside the others is
         # decoded again here, alone, once the pool has given its memory back
-        missing = []
+        # (out of memory is not always an error that reaches here: the codec
+        # probes take any failure for a codec that does not fit, and a song
+        # then decodes to nothing)
+        missing, short = [], False
         for task in again:
             if cancel():
                 break
-            log("Music bank %d ran out of memory beside the others; decoding it "
+            log("Music bank %d did not decode beside the others; decoding it "
                 "again on its own." % task[3], "warning")
             n, t = _bank_pool_worker(task)
-            if n == NO_MEMORY:
+            if _decode_again(task, n):
                 missing.append(task[3])
+                short = short or n == NO_MEMORY
                 continue
             ok += n
             titled += t
@@ -964,11 +979,12 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
             if progress:
                 progress(done, len(tasks))
         if missing:
-            log("Music bank(s) %s could not be decoded: this computer ran out of "
-                "memory even with nothing else decoding. Close other programs, "
-                "check the C: drive has a few GB free so Windows can grow its "
-                "page file, and extract again."
-                % ", ".join(map(str, missing)), "error")
+            log("Music bank(s) %s could not be decoded%s."
+                % (", ".join(map(str, sorted(missing))),
+                   ": this computer ran out of memory even with nothing else "
+                   "decoding. Close other programs, check the C: drive has a few "
+                   "GB free so Windows can grow its page file, and extract again"
+                   if short else ""), "error" if short else "warning")
         _log_titled(log, titled)
         return ok
     except Exception as e:

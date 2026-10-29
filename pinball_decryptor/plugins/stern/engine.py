@@ -2989,9 +2989,11 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                                 log_line=log_line,
                                 duration_names=duration_names)
         elif again and not cancel():
-            # PAD-830: the sounds a worker ran out of memory on, once the pool
-            # has gone and given its memory back
-            log("%d sound(s) ran out of memory beside the others; decoding them "
+            # PAD-830: the sounds that did not decode in the pool, once it has
+            # gone and given its memory back (out of memory does not always
+            # say so: the codec probes take any failure for a codec that does
+            # not fit, and the sound then decodes to nothing)
+            log("%d sound(s) did not decode beside the others; decoding them "
                 "again one at a time." % len(again), "warning")
             emu = Spike2Emu(gr_path, img_path)
             emu.boot()
@@ -3226,7 +3228,7 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
     """Decode across ``nworkers`` spawned emulator processes (each boots once,
     decodes its share, writes WAVs directly).  Raises on any pool failure so the
     caller can fall back to a single process.  Returns ``(decoded, params of
-    the sounds a worker ran out of memory on)`` (PAD-830).
+    the sounds that did not decode)``, for the caller to try alone (PAD-830).
 
     A shared queue carries per-sound start/progress/done events from the
     workers; a daemon thread drains it and forwards each to ``_emit_decode`` so
@@ -3235,7 +3237,7 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
     import multiprocessing as mp
     import threading
 
-    from .spike2.parallel import NO_MEMORY, decode_to_wav, init_worker, probe
+    from .spike2.parallel import decode_to_wav, init_worker, probe
 
     # Decode in natural (master-directory) order so the short sounds finish
     # first and WAVs stream into the output folder right away — the live
@@ -3279,10 +3281,10 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
         pool.apply_async(probe).get(timeout=180)
         i = 0
         for idx, good in pool.imap_unordered(decode_to_wav, tasks, chunksize=4):
-            if good == NO_MEMORY:
-                again.append(byidx[idx])
+            if good is True:
+                ok += 1
             else:
-                ok += bool(good)
+                again.append(byidx[idx])
             i += 1
             if progress and (i % 4 == 0 or i == total):
                 progress(15 + int(i * 85 / max(total, 1)), 100,

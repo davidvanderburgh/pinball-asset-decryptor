@@ -90,15 +90,26 @@ class _Ctx:
         return _InlinePool(n, **kw)
 
 
-def test_bank_that_ran_out_of_memory_is_decoded_again_alone(monkeypatch, tmp_path):
-    files = [str(tmp_path / ("image-sc%02d.bin" % c)) for c in (1, 2, 3)]
+def _banks(monkeypatch, tmp_path, cats, worker, room=4):
+    files = [str(tmp_path / ("image-sc%02d.bin" % c)) for c in cats]
     for f in files:
         open(f, "wb").close()
     monkeypatch.setattr(C, "read_category_id", lambda p: int(p[-6:-4]))
     monkeypatch.setattr(C, "_find_revalidate", lambda *a: 0x1234)
     monkeypatch.setattr(multiprocessing, "get_context", lambda kind: _Ctx())
-    monkeypatch.setattr(P, "commit_room", lambda: P.COMMIT_RESERVE + 4 * P.EMU_COMMIT_EXTRA)
+    monkeypatch.setattr(P, "commit_room",
+                        lambda: P.COMMIT_RESERVE + room * P.EMU_COMMIT_EXTRA)
     monkeypatch.setattr(os, "cpu_count", lambda: 16)
+    monkeypatch.setattr(C, "_bank_pool_worker", worker)
+    lines = []
+    _Ctx.pools = []
+    n = C.extract_category_audio_parallel(
+        "gr", "img", files, str(tmp_path),
+        log=lambda m, lvl="info": lines.append((lvl, m)))
+    return n, lines
+
+
+def test_a_bank_that_did_not_decode_is_decoded_again_alone(monkeypatch, tmp_path):
     tries = {}
 
     def worker(task):
@@ -106,21 +117,35 @@ def test_bank_that_ran_out_of_memory_is_decoded_again_alone(monkeypatch, tmp_pat
         tries[cat] = tries.get(cat, 0) + 1
         if cat == 2 and tries[cat] == 1:      # beside the others: no memory
             return P.NO_MEMORY, 0
+        if cat == 4 and tries[cat] == 1:      # a swallowed failure: no songs
+            return 0, 0
         if cat == 3:                          # not even alone
             return P.NO_MEMORY, 0
         return 5, 0
-    monkeypatch.setattr(C, "_bank_pool_worker", worker)
-    lines = []
-    _Ctx.pools = []
-    n = C.extract_category_audio_parallel(
-        "gr", "img", files, str(tmp_path),
-        log=lambda m, lvl="info": lines.append((lvl, m)))
-    assert n == 10                            # banks 1 and 2 (the second go)
-    assert tries == {1: 1, 2: 2, 3: 2}
+    n, lines = _banks(monkeypatch, tmp_path, (1, 2, 3, 4), worker)
+    assert n == 15                            # banks 1, 2 and 4
+    assert tries == {1: 1, 2: 2, 3: 2, 4: 2}
     assert _Ctx.pools == [2]                  # 4 GB of room = two bank decoders
     text = "\n".join(m for _l, m in lines)
-    assert "Music bank 2 ran out of memory beside the others" in text
-    assert ("error", next(m for _l, m in lines if m.startswith("Music bank(s) 3"))) in lines
+    assert "Music bank 2 did not decode beside the others" in text
+    assert "Music bank 4 did not decode beside the others" in text
+    err = [m for lvl, m in lines if lvl == "error"]
+    assert len(err) == 1 and err[0].startswith("Music bank(s) 3 could not be decoded: "
+                                               "this computer ran out of memory")
+
+
+def test_a_bank_that_never_decodes_is_said_once(monkeypatch, tmp_path):
+    n, lines = _banks(monkeypatch, tmp_path, (1, 2), lambda task: (0, 0))
+    assert n == 0
+    assert ("warning", "Music bank(s) 1, 2 could not be decoded.") in lines
+
+
+def test_a_bank_asked_for_nothing_is_not_tried_again():
+    task = ("gr", "img", 1, 5, "sc", "out", frozenset())
+    assert not C._decode_again(task, 0)
+    assert C._decode_again(task[:6] + (None,), 0)
+    assert C._decode_again(task, P.NO_MEMORY)
+    assert not C._decode_again(task[:6] + (None,), 3)
 
 
 def test_off_windows_the_room_is_the_ram(monkeypatch):

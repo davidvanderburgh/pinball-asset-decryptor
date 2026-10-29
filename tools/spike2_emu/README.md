@@ -1386,6 +1386,13 @@ Three container details are load-bearing, all in `padbox.sh`:
 | `--cap-add SYS_ADMIN --device /dev/fuse` | `cardmount.sh`'s read-only card mount |
 | `-p 127.0.0.1:5900` | the VNC display is an unauthenticated view of the machine; loopback only |
 
+**x11vnc runs with `-threads`** (`entrypoint.sh`, PAD-805). Without it, clicks
+and keys wait in line behind the ~1.5 MB frames the server is sending. The
+picture stays smooth, but input gets later and later while the mouse moves:
+Start landed 14 s late after 20 s of mouse movement, and not within 4 minutes
+after 60 s (one CPU, Jurassic Park Pro). Threaded, it lands in 0.1 s. A loop
+restarts x11vnc if it exits.
+
 **KNOWN, and see REMAINING item 30: a container run ends by itself after about
 60 seconds.** Everything is healthy until it does — full frame rate, clean
 teardown — and `watch.sh`'s three exit paths all stay silent, so it is taking a

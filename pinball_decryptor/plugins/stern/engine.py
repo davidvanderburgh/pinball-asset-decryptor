@@ -100,7 +100,7 @@ _REV_TAG = ".r%d" % _DERIVE_REV
 _CACHE_KINDS = (
     (_REV_TAG + ".pkl",             re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.pkl$")),
     (_REV_TAG + ".consumed.npy",    re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.consumed\.npy$")),
-    (_REV_TAG + ".sfxnames5.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
+    (_REV_TAG + ".sfxnames6.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
     (_REV_TAG + ".sites3.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
     (_REV_TAG + ".requests3.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.requests\d+\.json$")),
 )
@@ -2511,13 +2511,38 @@ def _sfx_names_cache_path(fp):
     and ``4`` retires the maps built while the menu table was located by the
     literal "SE FX " (which found it on two titles out of fourteen), and ``5``
     the maps that read a descriptor's first marker as ``0b 00 00 00`` only
-    (PAD-636).
+    (PAD-636), and ``6`` the maps that named the placeholder sound a title
+    parks its unwired Sound Test entries on, and the empty ones cached when the
+    resolver didn't answer on the derive's emulator (PAD-823).
 
     Also carries the derive revision, because a name map is validated against
     the audio the params point at -- params from a superseded derive can only
     have produced a superseded map."""
     return os.path.join(_params_cache_dir(),
-                        fp[:32] + _REV_TAG + ".sfxnames5.json")
+                        fp[:32] + _REV_TAG + ".sfxnames6.json")
+
+
+def _resolver_emu(emu, game_real_path, image_path):
+    """*emu*, or a fresh boot of the same card when the game's resolver doesn't
+    answer on *emu*: the emulator the Sound Test names and the request map are
+    resolved on.
+
+    A first extract derives the params on *emu*, and on Venom Pro 1.07, Star
+    Wars Pro 1.31 and X-Men Pro 0.98 the resolver then indexes a table the
+    derive left empty and jumps to 0 (PAD-823), so neither ran: the names were
+    cached empty for good and the request map (PAD-635) waited for a second
+    extract.  The params' records are the card's, so a fresh boot resolves
+    onto them unchanged.  The caller closes a fresh one."""
+    try:
+        from .spike2 import sfx_names as _sfxn
+        from .spike2.emulator import Spike2Emu
+        if _sfxn._find_resolver(emu)[0] is not None:
+            return emu
+        fresh = Spike2Emu(game_real_path, image_path)
+        fresh.boot()
+        return fresh
+    except Exception:
+        return emu
 
 
 def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
@@ -2907,8 +2932,9 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         # Map the game's Sound Test menu names onto the sounds while the codec
         # emu is still booted (mines the firmware menu + drives its resolver).
         # Best-effort + cached; {} for titles without the menu.
+        name_emu = _resolver_emu(emu, gr_path, img_path)
         sfx_name_map = _load_or_build_sfx_names(
-            emu, gr_path, img_path, params, log)
+            name_emu, gr_path, img_path, params, log)
         # Even with auto-apply off, the menu NAME LIST itself is verified data
         # (name<->displayed-number matches the machine's menu): ship it as a
         # sidecar so users can play a number in the machine's Sound Test and
@@ -2917,7 +2943,10 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         _write_sound_test_names(gr_path, output_dir, log)
         # Which sounds each request plays, for the Video tab's "sounds this
         # clip's code plays" (clip_sounds); the resolver needs this emu.
-        _write_sound_requests(emu, gr_path, img_path, params, output_dir, log)
+        _write_sound_requests(name_emu, gr_path, img_path, params, output_dir, log)
+        if name_emu is not emu:
+            name_emu.close()
+        name_emu = None
         # The sounds whose file is several variants one after another (PAD-637),
         # for the Audio tab's Format and Type columns.
         try:

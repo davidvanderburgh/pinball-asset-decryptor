@@ -38,6 +38,7 @@ the audio, so a build whose layout differs enough to shift the mapping rejects
 its own names instead of shipping mislabels.
 """
 
+import collections
 import random
 import re
 import struct
@@ -66,6 +67,35 @@ def _is_music_entry(name):
     music-length guard below exists for the opposite case, where an *event*
     name would otherwise land on a shared song master."""
     return name.strip().upper().startswith(("MUSIC:", "SONG:"))
+
+_KIND = re.compile(r"\s*([A-Za-z][A-Za-z ]*?)\s*:")
+
+
+def _entry_kind(name):
+    """The kind a menu name gives its sound (``SPEECH``, ``SOUND``, ``MUSIC``,
+    ``VO``, ``FX``...), the words before its colon; ``""`` without one."""
+    m = _KIND.match(name)
+    return m.group(1).upper() if m else ""
+
+
+def _placeholder_sids(entries):
+    """Sids that menu entries of more than one kind share: ``{sid}``.
+
+    The small 10-entry Sound Test (PAD-823: Mandalorian, Foo Fighters, Venom,
+    TMNT, D&D ...) is a template every title fills in, two speech lines, two
+    sounds, two songs and the speakers.  A title that never wired an entry
+    leaves its node on a placeholder sound, the same one for each: Foo Fighters
+    Pro 1.04 plays sid 0x44 (half a second) for all six, SPEECH, SOUND and
+    MUSIC alike, and Mandalorian Pro 1.45 sid 0xfb for both speech lines and
+    both sounds.  One recording can't be a speech line and a sound and a song,
+    so no name describes it.  Entries of ONE kind sharing a sid are real
+    (Iron Maiden's three "SPEECH: SUPER JACKPOT"); no full-size menu of the
+    library shares one across kinds.  *entries* = ``[(sid, name)]``."""
+    kinds = collections.defaultdict(set)
+    for sid, name in entries:
+        kinds[sid].add(_entry_kind(name))
+    return {sid for sid, k in kinds.items() if len(k) > 1}
+
 
 # Ceiling for a node id (an index into the sound-id list block, so bounded by
 # the block's length) — guards the walk over the {group_ptr, node_id} array.
@@ -286,6 +316,9 @@ def locate_menu_sids(raw):
     sid the entry plays.  Multi-element lists are routing/prefix sequences: the
     speaker-test prompts carry three, the first two selecting the output.
 
+    An entry the title left on a placeholder sound is left out
+    (:func:`_placeholder_sids`).
+
     Returns ``[]`` when the menu or the indirection can't be read."""
     t = _walk_menu_table(raw)
     if t is None:
@@ -305,7 +338,8 @@ def locate_menu_sids(raw):
         lst = lists[li]
         if lst:
             out.append((lst[-1], name))
-    return out
+    parked = _placeholder_sids(out)
+    return [(sid, name) for sid, name in out if sid not in parked]
 
 
 def _find_resolver(emu, fw=None):

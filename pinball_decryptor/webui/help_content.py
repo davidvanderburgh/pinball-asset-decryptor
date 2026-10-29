@@ -542,6 +542,15 @@ HELP_CONTENT = {
          "- Clips under a second (a sixth of one Batman card's 6331, down to one-frame "
          "stills) show milliseconds, like 0:00.033, not an empty-looking 0:00. The "
          "preview shows their first frame."),
+        ("Compare report",
+         "More > **Export compare report (CSV)…** saves a row for every replacement, "
+         "every random clip and every mode's row of a shared clip, beside the game's "
+         "own clip it plays in place of.\n\n"
+         "- Both lengths in seconds to two decimals, the difference, and the length it "
+         "will have on the card after Write (the stock length when Trim / pad applies, "
+         "your own when the clip goes on as-is).\n"
+         "- Resolution, frame rate, frames, codec, audio and file size of each, and a "
+         "note when Write cuts, pads, scales or changes the frame rate."),
         ("Size limits", [
             "How big a replacement may be depends on the game.",
             {"cards": [

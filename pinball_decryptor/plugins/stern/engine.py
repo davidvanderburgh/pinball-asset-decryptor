@@ -2969,14 +2969,15 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                                     duration_names=duration_names)
         total = len(params)
         ok = None
-        nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
+        again = []
+        nworkers = _decode_workers(img_path, log)
         if nworkers > 1 and not cancel():
             try:
                 log("Decoding %d sounds across %d processes..." % (total, nworkers), "info")
-                ok = _parallel_decode(gr_path, img_path, params, audio_dir,
-                                      log, progress, cancel, nworkers,
-                                      log_line=log_line,
-                                      duration_names=duration_names)
+                ok, again = _parallel_decode(gr_path, img_path, params, audio_dir,
+                                             log, progress, cancel, nworkers,
+                                             log_line=log_line,
+                                             duration_names=duration_names)
             except Exception as e:
                 log("Parallel decode unavailable (%s); using a single process."
                     % e, "warning")
@@ -2987,6 +2988,16 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             ok = _serial_decode(emu, params, audio_dir, log, progress, cancel,
                                 log_line=log_line,
                                 duration_names=duration_names)
+        elif again and not cancel():
+            # PAD-830: the sounds a worker ran out of memory on, once the pool
+            # has gone and given its memory back
+            log("%d sound(s) ran out of memory beside the others; decoding them "
+                "again one at a time." % len(again), "warning")
+            emu = Spike2Emu(gr_path, img_path)
+            emu.boot()
+            ok += _serial_decode(emu, again, audio_dir, log, None, cancel,
+                                 log_line=log_line,
+                                 duration_names=duration_names)
         if ok == 0 and total > 0:
             # Every sound failed to decode -- a systemic problem (a build whose
             # codec the engine couldn't drive), not a per-sound hiccup.  Surface
@@ -3112,6 +3123,20 @@ def _serial_progress_cb(p, emit):
     return cb
 
 
+def _decode_workers(img_path, log):
+    """How many processes an extract decodes its sounds across: the computer's
+    cores less two, at most eight, and (PAD-830) no more emulators than it has
+    the memory for now -- eight on a laptop ran Windows out of memory, and
+    then every program it started failed (0xc000012d)."""
+    from .spike2.parallel import emulator_commit, emulators_that_fit
+    cores = max(1, min((os.cpu_count() or 2) - 2, 8))
+    n = emulators_that_fit(emulator_commit(img_path), cores)
+    if n < cores:
+        log("Decoding on %d process(es), not %d: this computer has the memory "
+            "for %d sound decoder(s) now." % (n, cores, n), "info")
+    return n
+
+
 def _serial_decode(emu, params, audio_dir, log, progress, cancel, log_line=None,
                    duration_names=False):
     total = len(params)
@@ -3200,7 +3225,8 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
                      nworkers, log_line=None, duration_names=False):
     """Decode across ``nworkers`` spawned emulator processes (each boots once,
     decodes its share, writes WAVs directly).  Raises on any pool failure so the
-    caller can fall back to a single process.
+    caller can fall back to a single process.  Returns ``(decoded, params of
+    the sounds a worker ran out of memory on)`` (PAD-830).
 
     A shared queue carries per-sound start/progress/done events from the
     workers; a daemon thread drains it and forwards each to ``_emit_decode`` so
@@ -3209,7 +3235,7 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
     import multiprocessing as mp
     import threading
 
-    from .spike2.parallel import decode_to_wav, init_worker, probe
+    from .spike2.parallel import NO_MEMORY, decode_to_wav, init_worker, probe
 
     # Decode in natural (master-directory) order so the short sounds finish
     # first and WAVs stream into the output folder right away — the live
@@ -3218,6 +3244,8 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
     # away that "files appear as it goes" feedback.
     tasks = [(p, os.path.join(audio_dir, _wav_basename(p, duration_names)))
              for p in params]
+    byidx = {p["idx"]: p for p in params}
+    again = []
     total = len(tasks)
     ctx = mp.get_context("spawn")
     # Manager queue: picklable across spawn (a plain mp.Queue isn't), so it can
@@ -3251,7 +3279,10 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
         pool.apply_async(probe).get(timeout=180)
         i = 0
         for idx, good in pool.imap_unordered(decode_to_wav, tasks, chunksize=4):
-            ok += good
+            if good == NO_MEMORY:
+                again.append(byidx[idx])
+            else:
+                ok += bool(good)
             i += 1
             if progress and (i % 4 == 0 or i == total):
                 progress(15 + int(i * 85 / max(total, 1)), 100,
@@ -3273,7 +3304,7 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
             mgr.shutdown()
         except Exception:
             pass
-    return ok
+    return ok, again
 
 
 # --------------------------------------------------------------------------
@@ -21870,6 +21901,11 @@ def _run_bank_encode(tasks, log, progress, cancel):
     bank, or ``None`` if cancelled."""
     nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
     nworkers = max(1, min(nworkers, len(tasks)))
+    if tasks:
+        # PAD-830: no more bank emulators (each holding a whole song) than the
+        # computer has the memory for, as the extract's bank decode
+        from .spike2.parallel import emulator_commit, emulators_that_fit
+        nworkers = emulators_that_fit(2 * emulator_commit(tasks[0][1]), nworkers)
     if (not _FORCE_SERIAL_ENCODE and nworkers > 1 and len(tasks) > 1
             and not cancel()):
         try:

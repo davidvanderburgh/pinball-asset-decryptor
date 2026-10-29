@@ -752,7 +752,10 @@ def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
                 continue
             try:
                 res = emu.decode_cat(r, cancel=cancel)
-            except Exception:
+            except Exception as e:
+                from .parallel import out_of_memory
+                if out_of_memory(e):
+                    raise   # PAD-830: the caller decodes the bank again alone
                 res = None
             if res is None:
                 continue
@@ -830,7 +833,9 @@ def _bank_pool_worker(args):
     """One task = derive + decode a SINGLE bank on a fresh emu, writing its WAVs
     straight to ``out_dir`` (so only a small count crosses the process boundary).
     Top-level so it pickles across the spawn boundary; ``rev`` is found once in
-    the parent and passed in.  Returns ``(decoded, named from the Sound Test)``."""
+    the parent and passed in.  Returns ``(decoded, named from the Sound Test)``;
+    decoded is :data:`.parallel.NO_MEMORY` when the bank ran out of memory
+    (PAD-830: it used to come back as 0, its songs silently missing)."""
     game_real_path, image_path, rev, catid, sc_path, out_dir = args[:6]
     only = args[6] if len(args) > 6 else None
     menu = args[7] if len(args) > 7 else None
@@ -844,9 +849,19 @@ def _bank_pool_worker(args):
             lambda c, idx, L, R, stereo: _write_cat_wav(out_dir, c, idx, L, R,
                                                         stereo),
             lambda: False, only=only, menu=menu, named=named)
-    except Exception:
+    except Exception as e:
+        from .parallel import NO_MEMORY, out_of_memory
+        if out_of_memory(e):
+            return NO_MEMORY, 0
         n = 0
     return n, sum(renamed)
+
+
+def _bank_pool_indexed(arg):
+    """``(i, task)`` -> ``(i, _bank_pool_worker(task))``: which bank a pool
+    answer is for, to decode it again when it ran out of memory (PAD-830)."""
+    i, task = arg
+    return i, _bank_pool_worker(task)
 
 
 def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_dir,
@@ -872,8 +887,15 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
         return 0
     import multiprocessing as mp
 
-    nworkers = nworkers or max(1, min((os.cpu_count() or 2) - 2, 8))
-    nworkers = max(1, min(nworkers, len(files)))
+    from .parallel import NO_MEMORY, emulator_commit, emulators_that_fit
+    want = max(1, min(nworkers or max(1, min((os.cpu_count() or 2) - 2, 8)),
+                      len(files)))
+    # PAD-830: a bank's worker holds its longest song decoded, so it is held to
+    # two emulators' worth of the memory the computer has room for
+    nworkers = emulators_that_fit(2 * emulator_commit(image_path), want)
+    if nworkers < want:
+        log("Decoding the music banks on %d process(es), not %d: this computer "
+            "has the memory for %d now." % (nworkers, want, nworkers), "info")
     # Longest-processing-time-first: the pool pulls tasks greedily, so start the
     # biggest banks (≈ longest songs ≈ longest decodes) first — otherwise a 9-min
     # song picked up in the final round becomes pure tail latency.  Bank file
@@ -908,16 +930,45 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
         # maxtasksperchild=1: a fresh process per bank reclaims the large
         # unicorn mappings a long song's decode allocates, and guarantees the
         # per-bank emu never inherits another bank's accumulated state.
+        again = []
         with ctx.Pool(nworkers, maxtasksperchild=1) as pool:
-            for n, t in pool.imap_unordered(_bank_pool_worker, tasks):
-                ok += n
-                titled += t
-                done += 1
+            for i, (n, t) in pool.imap_unordered(_bank_pool_indexed,
+                                                 list(enumerate(tasks))):
+                task = tasks[i]
+                if n == NO_MEMORY:
+                    again.append(task)
+                else:
+                    ok += n
+                    titled += t
+                    done += 1
                 if progress:
                     progress(done, len(tasks))
                 if cancel():
                     pool.terminate()
                     break
+        # PAD-830: a bank whose worker ran out of memory beside the others is
+        # decoded again here, alone, once the pool has given its memory back
+        missing = []
+        for task in again:
+            if cancel():
+                break
+            log("Music bank %d ran out of memory beside the others; decoding it "
+                "again on its own." % task[3], "warning")
+            n, t = _bank_pool_worker(task)
+            if n == NO_MEMORY:
+                missing.append(task[3])
+                continue
+            ok += n
+            titled += t
+            done += 1
+            if progress:
+                progress(done, len(tasks))
+        if missing:
+            log("Music bank(s) %s could not be decoded: this computer ran out of "
+                "memory even with nothing else decoding. Close other programs, "
+                "check the C: drive has a few GB free so Windows can grow its "
+                "page file, and extract again."
+                % ", ".join(map(str, missing)), "error")
         _log_titled(log, titled)
         return ok
     except Exception as e:
@@ -928,6 +979,10 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
             if cancel():
                 break
             n, t = _bank_pool_worker(_task(catid, p))
+            if n == NO_MEMORY:
+                log("Music bank %d could not be decoded: this computer ran out "
+                    "of memory." % catid, "error")
+                continue
             ok += n
             titled += t
             if progress:

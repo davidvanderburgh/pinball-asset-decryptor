@@ -2458,9 +2458,10 @@ static int win_open(void)
     disp_open(xwin);        /* PAD-811: borderless from the first map */
     /* StructureNotifyMask (1<<17) gives ConfigureNotify for resizes;
      * KeyPressMask (1) and KeyReleaseMask (2) are what make the keyboard work. */
-    /* ButtonPressMask (1<<2): PAD-811's drag to move / resize a borderless
-     * window (disp_press) */
-    XSelectInput(xdpy, xwin, (1L << 17) | (1L << 2) | 1L | 2L);
+    /* ButtonPress/ButtonRelease/Button1Motion (1<<2, 1<<3, 1<<8): PAD-811's
+     * drag to move / resize a borderless window and double-click for full
+     * screen (disp_button, disp_motion) */
+    XSelectInput(xdpy, xwin, (1L << 17) | (1L << 2) | (1L << 3) | (1L << 8) | 1L | 2L);
     wm_delete = XInternAtom(xdpy, "WM_DELETE_WINDOW", 0);
     XSetWMProtocols(xdpy, xwin, &wm_delete, 1);
     XMapWindow(xdpy, xwin);
@@ -2869,6 +2870,50 @@ extern int XUngrabPointer(XDisplay *, unsigned long);
 static double disp_cfg_s;                /* last ConfigureNotify of xwin      */
 static int disp_dragged;                 /* a hand move/resize to write back  */
 
+/* A press only REMEMBERS where it was; the move/resize starts when the
+ * pointer then travels DISP_SLOP px with the button down (disp_motion), so a
+ * click stays a click - and two of them within DISP_DCLICK_S, close together,
+ * are a double-click: full screen on the monitor the window is on, and the
+ * next double-click puts it back (David, 2026-10-29). That toggle is this
+ * run's only; the saved setting is what the next run opens with. */
+#define DISP_SLOP 4
+#define DISP_DCLICK_S 0.4
+static int disp_down, disp_down_x, disp_down_y, disp_down_xr, disp_down_yr;
+static double disp_last_click_s;
+static int disp_last_click_xr, disp_last_click_yr;
+static void disp_press(int x, int y, int xr, int yr, unsigned long t);
+
+static void disp_button(int x, int y, int xr, int yr)
+{
+    double t = now_s();
+    if (t - disp_last_click_s < DISP_DCLICK_S &&
+        abs(xr - disp_last_click_xr) < 8 && abs(yr - disp_last_click_yr) < 8) {
+        disp_down = 0;
+        disp_last_click_s = 0;
+        if (!disp_cur_fs) {
+            disp_fullscreen(xwin, 1); disp_cur_fs = 1;
+            fprintf(stderr, "[padglhost] display: double-click, full screen\n");
+        } else {
+            disp_fullscreen(xwin, 0); disp_cur_fs = 0;
+            fprintf(stderr, "[padglhost] display: double-click, back to the window\n");
+        }
+        XFlush(xdpy);
+        return;
+    }
+    disp_last_click_s = t; disp_last_click_xr = xr; disp_last_click_yr = yr;
+    disp_down = 1;
+    disp_down_x = x; disp_down_y = y; disp_down_xr = xr; disp_down_yr = yr;
+}
+
+static void disp_motion(int xr, int yr, unsigned long t)
+{
+    if (!disp_down) return;
+    if (abs(xr - disp_down_xr) < DISP_SLOP && abs(yr - disp_down_yr) < DISP_SLOP) return;
+    disp_down = 0;
+    disp_last_click_s = 0;               /* a drag is not half a double-click */
+    disp_press(disp_down_x, disp_down_y, disp_down_xr, disp_down_yr, t);
+}
+
 static void disp_press(int x, int y, int xr, int yr, unsigned long t)
 {
     union { long l[24]; struct {
@@ -3241,7 +3286,14 @@ static void win_pump(void)
         case 4:                        /* ButtonPress: x y x_root y_root at
                                           ints 16-19, button at 21, time ul[7] */
             if (ev.ul[4] == xwin && ev.i[21] == 1)
-                disp_press(ev.i[16], ev.i[17], ev.i[18], ev.i[19], ev.ul[7]);
+                disp_button(ev.i[16], ev.i[17], ev.i[18], ev.i[19]);
+            break;
+        case 5:                        /* ButtonRelease */
+            if (ev.ul[4] == xwin && ev.i[21] == 1) disp_down = 0;
+            break;
+        case 6:                        /* MotionNotify (button 1 down):
+                                          x_root y_root at ints 18-19 */
+            if (ev.ul[4] == xwin) disp_motion(ev.i[18], ev.i[19], ev.ul[7]);
             break;
         case 12:                       /* Expose */
             legend_dirty = 1;

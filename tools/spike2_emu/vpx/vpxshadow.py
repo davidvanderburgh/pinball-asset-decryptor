@@ -403,10 +403,14 @@ def gen(m, had, quiet=None):
         out += ["", "'---- the machine's lamps: number 1000 + node * 100 + LED index, one",
                 "'     table light (or several) per insert; core.vbs calls LampCallback",
                 "'     every tick with UseLamps = 0, and this reads ChangedLamps itself",
-                "Dim PadLamps : Set PadLamps = CreateObject(\"Scripting.Dictionary\")",
-                "Dim PadLampState : Set PadLampState = CreateObject(\"Scripting.Dictionary\")",
-                "Dim PadTick : PadTick = 0",
-                "Sub PadLampsInit"]
+                "'     The dictionaries are made in PadLampsInit, not by top-level",
+                "'     code here: Iron Maiden's script stops running its top level",
+                "'     before this tail, and a Set up here never happened",
+                "Dim PadLamps, PadLampState, PadTick",
+                "Sub PadLampsInit",
+                "\tSet PadLamps = CreateObject(\"Scripting.Dictionary\")",
+                "\tSet PadLampState = CreateObject(\"Scripting.Dictionary\")",
+                "\tPadTick = 0"]
         for num in sorted(lamps):
             out.append("\tPadLamps.Add \"%d\", Array(%s)" % (num, ", ".join(lamps[num])))
         out += ["End Sub",

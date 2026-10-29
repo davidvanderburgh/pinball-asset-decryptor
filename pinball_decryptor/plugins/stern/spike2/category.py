@@ -647,8 +647,74 @@ def _find_revalidate(game_real_path, image_path, files, log):
         emu.close()
 
 
+def bank_sound_test_names(game_real_path, image_path, rev, catid, sc_path, rows,
+                          entries):
+    """``{record: name}``: the Sound Test entries *entries* ``[(sid, name)]`` of
+    category *catid* (:func:`.sfx_names.bank_menu_sids`), landed on the bank's
+    records (*rows*, its derive, for the keys and lengths) through the game's
+    own resolver (PAD-820).  A FRESH emulator, the bank loaded by the game's
+    loader alone: a full derive leaves an emulator unable to run the resolver
+    (:meth:`CatEmu.register_bank`).  ``{}`` when nothing can be named; never
+    raises."""
+    from . import sfx_names as SN
+    entries = [(s, n) for s, n in entries if s >> 16 == catid]
+    if not entries or not rows:
+        return {}
+    keys = collections.Counter(r.get("key0") for r in rows)
+    key0_to_idx = {r["key0"]: r["idx"] for r in rows
+                   if r.get("key0") is not None and keys[r["key0"]] == 1}
+    seconds = {r["idx"]: r.get("length", 0) / 44100.0 for r in rows}
+    emu = CatEmu(game_real_path, image_path)
+    try:
+        emu.boot()
+        if not emu.register_bank(catid, sc_path, revalidate=rev):
+            return {}
+        resolver, out = SN._find_resolver(emu)
+        if resolver is None:
+            return {}
+        d2, mm = emu.DESC2, emu._mm_cat
+
+        def resolve(sid):
+            emu.mu.mem_write(out, b"\x00" * 0x40)
+            st = emu.call(resolver, (sid, out), limit=5_000_000)
+            if st[0] != "ok" or not d2 <= st[1] < d2 + emu.cat2size:
+                return None
+            off = st[1] - d2
+            ks = _u32(bytes(emu.mu.mem_read(out, 4))) - emu.VF2_VA
+            if not 0 <= ks < 0x3F00:
+                return None
+            body = mm[off:off + SN.DESC_WINDOW]
+            vf2 = bytes(emu.mu.mem_read(emu.VF2_VA + ks, len(body)))
+            return bytes(a ^ b for a, b in zip(body, vf2))
+        return SN.bank_name_map(resolve, entries, key0_to_idx, seconds)
+    except Exception:                                               # noqa: BLE001
+        return {}
+    finally:
+        emu.close()
+
+
+def name_cat_wavs(out_dir, catid, names):
+    """Rename this bank's decoded ``music_catNN_MMMM.wav`` files to
+    ``music_catNN_MMMM - <name>.wav`` (the cat-0 ``idx#### - <name>`` shape,
+    the name cleaned the same way).  Returns the count renamed."""
+    from ..engine import _ILLEGAL_FN
+    n = 0
+    for idx, name in names.items():
+        stem = "music_cat%02d_%04d" % (catid, idx)
+        src = os.path.join(out_dir, stem + ".wav")
+        safe = _ILLEGAL_FN.sub("", name).strip().rstrip(".")[:80]
+        if not safe or not os.path.isfile(src):
+            continue
+        try:
+            os.replace(src, os.path.join(out_dir, "%s - %s.wav" % (stem, safe)))
+            n += 1
+        except OSError:
+            pass
+    return n
+
+
 def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
-                        cancel, only=None):
+                        cancel, only=None, menu=None, named=None):
     """Derive + decode ONE bank on a FRESH CatEmu, emitting each decoded sound
     to ``sink(catid, idx, L, R, stereo)``.  Returns the count decoded.
 
@@ -660,8 +726,14 @@ def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
     and switches the emulator to the narrow-hook fast path (~1 s per 20 s of
     audio), so re-deriving it elsewhere would be wasted work.  *only*: the
     record numbers to decode (PAD-608: a sound bank of this app's, of which an
-    extract wants the music modes' files alone); all when None."""
+    extract wants the music modes' files alone); all when None.
+
+    *menu* ``[(sid, name)]`` (:func:`.sfx_names.bank_menu_sids`, PAD-820): once
+    the bank is decoded, the Sound Test names of its records are worked out on
+    a fresh emulator (:func:`bank_sound_test_names`) and handed to
+    ``named(catid, {record: name})``."""
     emu = CatEmu(game_real_path, image_path)
+    ok = 0
     try:
         emu.boot()
         if not emu.categories_supported:
@@ -673,7 +745,6 @@ def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
             rows = None
         if not rows:
             return 0
-        ok = 0
         for r in rows:
             if cancel():
                 break
@@ -688,9 +759,14 @@ def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
             L, R, stereo = res
             sink(catid, r["idx"], L, R, stereo)
             ok += 1
-        return ok
     finally:
         emu.close()
+    if ok and menu and named is not None and not cancel():
+        names = bank_sound_test_names(game_real_path, image_path, rev, catid,
+                                      sc_path, rows, menu)
+        if names:
+            named(catid, names)
+    return ok
 
 
 def extract_category_audio(game_real_path, image_path, sc_files, write_wav,
@@ -754,29 +830,37 @@ def _bank_pool_worker(args):
     """One task = derive + decode a SINGLE bank on a fresh emu, writing its WAVs
     straight to ``out_dir`` (so only a small count crosses the process boundary).
     Top-level so it pickles across the spawn boundary; ``rev`` is found once in
-    the parent and passed in."""
+    the parent and passed in.  Returns ``(decoded, named from the Sound Test)``."""
     game_real_path, image_path, rev, catid, sc_path, out_dir = args[:6]
     only = args[6] if len(args) > 6 else None
+    menu = args[7] if len(args) > 7 else None
+    renamed = []
+
+    def named(c, names):
+        renamed.append(name_cat_wavs(out_dir, c, names))
     try:
-        return _derive_decode_bank(
+        n = _derive_decode_bank(
             game_real_path, image_path, rev, catid, sc_path,
             lambda c, idx, L, R, stereo: _write_cat_wav(out_dir, c, idx, L, R,
                                                         stereo),
-            lambda: False, only=only)
+            lambda: False, only=only, menu=menu, named=named)
     except Exception:
-        return 0
+        n = 0
+    return n, sum(renamed)
 
 
 def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_dir,
                                     nworkers=None, log=None, progress=None,
-                                    cancel=None, only=None):
+                                    cancel=None, only=None, names=False):
     """Parallel twin of :func:`extract_category_audio` — one task PER BANK, each
     deriving + decoding on a fresh emulator in its own spawned process (so the
     per-bank derive can't accumulate the state that grinds a long-lived emu, and
     the work spreads across cores).  ``rev`` is located once up front and shared.
     Writes ``music_catNN_*.wav`` into ``out_dir``; falls back to the serial path
     if the pool can't start.  Returns the count decoded.  *only* ``{category:
-    {record, ...}}`` decodes just those records of those banks (PAD-608)."""
+    {record, ...}}`` decodes just those records of those banks (PAD-608).
+    *names* titles the songs the game's Sound Test names
+    (``music_catNN_MMMM - <name>.wav``, :func:`bank_sound_test_names`, PAD-820)."""
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     files = sorted((c, p) for p in sc_files
@@ -800,9 +884,21 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
         except OSError:
             return 0
     ordered = sorted(files, key=lambda cp: _sz(cp[1]), reverse=True)
-    tasks = [(game_real_path, image_path, rev, catid, p, out_dir)
-             + ((frozenset((only or {}).get(catid, ())),) if only is not None else ())
-             for catid, p in ordered]
+    menu = None
+    if names:
+        try:
+            from .sfx_names import bank_menu_sids
+            with open(game_real_path, "rb") as f:
+                menu = bank_menu_sids(f.read()) or None
+        except Exception:                                           # noqa: BLE001
+            menu = None
+
+    def _task(catid, p):
+        return (game_real_path, image_path, rev, catid, p, out_dir,
+                frozenset((only or {}).get(catid, ())) if only is not None else None,
+                [e for e in menu if e[0] >> 16 == catid] if menu else None)
+    tasks = [_task(catid, p) for catid, p in ordered]
+    titled = 0
     log("Decoding %d music bank(s) across %d process(es)..."
         % (len(files), nworkers), "info")
     try:
@@ -813,25 +909,34 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
         # unicorn mappings a long song's decode allocates, and guarantees the
         # per-bank emu never inherits another bank's accumulated state.
         with ctx.Pool(nworkers, maxtasksperchild=1) as pool:
-            for n in pool.imap_unordered(_bank_pool_worker, tasks):
+            for n, t in pool.imap_unordered(_bank_pool_worker, tasks):
                 ok += n
+                titled += t
                 done += 1
                 if progress:
                     progress(done, len(tasks))
                 if cancel():
                     pool.terminate()
                     break
+        _log_titled(log, titled)
         return ok
     except Exception as e:
         log("Parallel music decode unavailable (%s); using one process." % e,
             "warning")
-        ok = 0
+        ok = titled = 0
         for catid, p in files:
             if cancel():
                 break
-            ok += _bank_pool_worker(
-                (game_real_path, image_path, rev, catid, p, out_dir)
-                + ((frozenset((only or {}).get(catid, ())),) if only is not None else ()))
+            n, t = _bank_pool_worker(_task(catid, p))
+            ok += n
+            titled += t
             if progress:
                 progress(ok, len(files))
+        _log_titled(log, titled)
         return ok
+
+
+def _log_titled(log, titled):
+    if titled:
+        log("Named %d song file(s) from the game's Sound Test menu." % titled,
+            "success")

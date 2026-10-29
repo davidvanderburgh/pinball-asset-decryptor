@@ -461,6 +461,73 @@ def _part_idxs(desc, key0_to_idx, extent=None):
     return out
 
 
+# --------------------------------------------------------------------------
+# Sound-bank songs (PAD-820)
+#
+# A music title's Sound Test plays its songs by sids of their bank's category
+# (``cat << 16 | n``), and the game's resolver, with that bank loaded, hands back
+# the song's descriptor inside the bank.  ``n`` is NOT the record: Deadpool Pro
+# 1.16's DISCO MULTIBALL is 0x100003 and plays record 4 of image-sc16.bin.  A
+# song can be several records in turn (an intro, then the body: 9 of Deadpool's
+# 24), each named by an op11 marker of the descriptor, and the lengths of those
+# records add up exactly to the length the descriptor declares (bytes 3..5, in
+# 1/4000 s) -- which is the check every name has to pass.
+
+#: The descriptor's declared length: a 24-bit count at byte 3, in 1/4000 s
+#: (``engine._DESC_DUR_OFF`` / ``_DESC_DUR_RATE``).
+_DESC_DUR_OFF = 3
+_DESC_DUR_RATE = 4000.0
+#: How far a song's records may miss its declared length, per record, seconds.
+#: Deadpool's 24 land within 0.01 s.
+_BANK_PART_SLACK = 0.05
+
+
+def bank_menu_sids(raw):
+    """``[(sid, name)]`` of the Sound Test entries a sound bank plays (sid of a
+    category above 0), in menu order; ``[]`` without a menu."""
+    return [(sid, name) for sid, name in locate_menu_sids(raw) if sid >> 16]
+
+
+def declared_seconds(desc):
+    """The length a descriptor declares it plays for, in seconds."""
+    return (_u32(desc, _DESC_DUR_OFF) & 0xFFFFFF) / _DESC_DUR_RATE
+
+
+def song_parts(desc, key0_to_idx, seconds_by_idx):
+    """The records a song's descriptor plays, in order, or ``[]`` when they do
+    not add up to the length it declares.  Markers are taken while the sum is
+    short of it, so a window that runs on into the next descriptor stops at
+    this one's end (PAD-636)."""
+    want = declared_seconds(desc)
+    parts, total = [], 0.0
+    for idx in _part_idxs(desc, key0_to_idx):
+        parts.append(idx)
+        total += seconds_by_idx.get(idx, 0.0)
+        if abs(total - want) <= _BANK_PART_SLACK * len(parts):
+            return parts
+        if total > want:
+            break
+    return []
+
+
+def bank_name_map(resolve, entries, key0_to_idx, seconds_by_idx):
+    """``{record: name}`` for one bank: each Sound Test entry of *entries*
+    ``[(sid, name)]`` whose descriptor ``resolve(sid)`` (de-whitened bytes, or
+    None) plays records of this bank adding up to its declared length.  A song
+    of several records names each ``"<name> (k of n)"``; where two entries name
+    one record, the earlier in the menu wins, as on cat-0."""
+    out = {}
+    for sid, name in entries:
+        desc = resolve(sid)
+        if not desc or desc[0] != 5:
+            continue
+        parts = song_parts(desc, key0_to_idx, seconds_by_idx)
+        for k, idx in enumerate(parts):
+            out.setdefault(idx, name if len(parts) == 1
+                           else "%s (%d of %d)" % (name, k + 1, len(parts)))
+    return out
+
+
 def _select_names(entries, seconds_by_idx):
     """``{idx: name}`` from resolved menu *entries* = ``[(sid, name, idx)]``.
 

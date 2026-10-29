@@ -3011,7 +3011,9 @@ def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
                             progress, cancel, pad_banks=None, pad_dir=None):
     """Extract the card's ``image-scNN.bin`` banks to ``work`` and decode each to
     WAV under ``audio/`` (named ``music_catNN_idx.wav`` so the existing
-    AcoustID auto-naming can title the songs).  Returns the count decoded; 0 (and
+    AcoustID auto-naming can title the songs; a song the game's Sound Test
+    names is ``music_catNN_idx - <its name>.wav`` instead, PAD-820, and the
+    auto-naming leaves it be).  Returns the count decoded; 0 (and
     a clean skip) when there are no banks or the build can't be driven.
 
     PAD-608: of a bank this app built, the records *pad_banks* ``{category:
@@ -3054,8 +3056,11 @@ def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
         if progress:
             progress(min(100, int(c * 100 / max(t, 1))), 100,
                      "Decoding music bank %d/%d" % (c, t))
+    # PAD-820: the songs the game's Sound Test names are titled by it
+    # (PINBALL_SFX_NAMES=0 turns it off with the sound effects' names)
     n = extract_category_audio_parallel(gr_path, img_path, sc_paths, audio_dir,
-                                        log=log, progress=_prog, cancel=cancel)
+                                        log=log, progress=_prog, cancel=cancel,
+                                        names=os.environ.get("PINBALL_SFX_NAMES") != "0")
     log("Decoded %d per-category music sound(s)." % n, "success")
     return n
 

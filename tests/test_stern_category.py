@@ -95,3 +95,57 @@ def test_changed_music_banks_no_baseline_is_empty(tmp_path):
     audio.mkdir()
     (audio / "music_cat01_0001.wav").write_bytes(b"x")
     assert E._changed_music_banks(str(tmp_path), {}) == []
+
+
+# ---------------------------------------------- PAD-813: Deadpool's leaf helper
+class _Fw:
+    """A one-section stand-in for locate._FwView: .text at 0x1000."""
+
+    def __init__(self, words):
+        import struct
+        self.raw = b"".join(struct.pack("<I", w) for w in words)
+        self.secs = {".text": {"addr": 0x1000, "off": 0, "size": len(self.raw)}}
+
+
+# Deadpool Pro 1.16's map-revalidation stub (0x3845e8), as the card has it:
+# movw r3; movw ip; movt r3; movt ip; push {r4, r5}; ldrd; ...
+DEADPOOL_REV = [0xE30F30B0, 0xE304C3A0, 0xE340306E, 0xE340C064, 0xE92D0030,
+                0xE1C340D0, 0xE1CC20D8, 0xE0900004, 0xE0A11005, 0xE1510003]
+# the stub the other titles have: a push that saves lr up front
+LR_FUNC = [0xE30F30B0, 0xE340306E, 0xE92D4070, 0xE283500C, 0xE5934014,
+           0xE1A06000, 0xE1540005, 0x08BD8070, 0xE5940010, 0xE1500006]
+
+
+def test_a_leaf_function_with_globals_first_is_a_candidate():
+    fw = _Fw(DEADPOOL_REV + [0] * 8)
+    assert not C._is_funcstart(fw, 0x1000)          # what turned it down
+    assert C._is_leaf_funcstart(fw, 0x1000)
+
+
+def test_a_literal_pool_word_is_no_leaf_function():
+    # data a raw bl scan lands in: no movw/movt run ending in a push
+    fw = _Fw([0x00000000, 0x3F800000, 0xDEADBEEF, 0x00010203] + [0] * 10)
+    assert not C._is_leaf_funcstart(fw, 0x1000)
+    # a push with nothing in it is no function either
+    fw = _Fw([0xE30F30B0, 0xE92D0000] + [0] * 10)
+    assert not C._is_leaf_funcstart(fw, 0x1000)
+
+
+def test_lr_functions_stay_first_and_leaves_follow(monkeypatch):
+    """A title that worked keeps its candidates in the same order; a leaf
+    helper is tried after them (so nothing that worked pays for it)."""
+    # the loader at 0x1000: bl leaf(0x2000); bl lr_func(0x3000); bl mmap64
+    def bl(site, tgt):
+        return 0xEB000000 | (((tgt - site - 8) >> 2) & 0xFFFFFF)
+    words = [0] * 0x1000
+    words[0], words[1], words[2] = bl(0x1000, 0x2000), bl(0x1004, 0x3000), bl(0x1008, 0x1F00)
+    words[0x400:0x40A] = DEADPOOL_REV
+    words[0x800:0x80A] = LR_FUNC
+    fw = _Fw(words)
+    monkeypatch.setattr(C.L, "_FwView", lambda raw: fw)
+    monkeypatch.setattr(C.L, "_func_end", lambda fw, va: 0x100C)
+    monkeypatch.setattr(C, "_find_snprintf", lambda fw, a, b: 0x9999)
+    monkeypatch.setattr(C, "_plt_got", lambda fw, tgt: tgt)      # the target is its GOT
+    monkeypatch.setattr(C, "parse_elf", lambda raw: ([], [(0x1F00, "mmap64")]))
+    out = C.category_locators(b"", {"CAT0_REGISTER": 0x1000})
+    assert out == {"SNPRINTF": 0x9999, "REVALIDATE_CANDIDATES": [0x3000, 0x2000]}

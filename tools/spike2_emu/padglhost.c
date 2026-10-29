@@ -2458,7 +2458,9 @@ static int win_open(void)
     disp_open(xwin);        /* PAD-811: borderless from the first map */
     /* StructureNotifyMask (1<<17) gives ConfigureNotify for resizes;
      * KeyPressMask (1) and KeyReleaseMask (2) are what make the keyboard work. */
-    XSelectInput(xdpy, xwin, (1L << 17) | 1L | 2L);
+    /* ButtonPressMask (1<<2): PAD-811's drag to move / resize a borderless
+     * window (disp_press) */
+    XSelectInput(xdpy, xwin, (1L << 17) | (1L << 2) | 1L | 2L);
     wm_delete = XInternAtom(xdpy, "WM_DELETE_WINDOW", 0);
     XSetWMProtocols(xdpy, xwin, &wm_delete, 1);
     XMapWindow(xdpy, xwin);
@@ -2713,7 +2715,7 @@ static void win_raise_all(const char *why)
 extern int XSendEvent(XDisplay *, unsigned long, int, long, void *);
 extern int XMoveResizeWindow(XDisplay *, unsigned long, int, int, unsigned, unsigned);
 
-struct disp_set { int set, x, y, w, h, fs, border; };
+struct disp_set { int set, x, y, w, h, fs, border, rx, ry; };
 static struct disp_set disp_want;
 static int disp_placed;                  /* the wanted setting is applied     */
 static int disp_cur_border = 1;          /* what the window HAS now           */
@@ -2732,7 +2734,7 @@ static const char *disp_path(void)
  * newer writer's extra fields cannot break an older renderer. */
 static struct disp_set disp_read(void)
 {
-    struct disp_set d = { 0, 0, 0, 0, 0, 0, 1 };
+    struct disp_set d = { 0, 0, 0, 0, 0, 0, 1, 0, 0 };
     const char *p = disp_path();
     char line[512];
     FILE *f;
@@ -2753,6 +2755,8 @@ static struct disp_set disp_read(void)
             else if (!strcmp(tok, "h")) d.h = v;
             else if (!strcmp(tok, "fs")) d.fs = v != 0;
             else if (!strcmp(tok, "border")) d.border = v != 0;
+            else if (!strcmp(tok, "rx")) d.rx = v;
+            else if (!strcmp(tok, "ry")) d.ry = v;
         }
         break;
     }
@@ -2850,11 +2854,102 @@ static void disp_open(unsigned long w)
     game_want_pos = 0;           /* the setting, not the remembered spot */
 }
 
+/* ★ MOVED AND RESIZED BY HAND (David, 2026-10-29: "i need to be able to move
+ * and reposition the display and make it borderless and resize it with the
+ * mouse cursor while it's up"). A borderless window has no title bar to drag,
+ * so a left press inside it asks the compositor to MOVE it, and one within
+ * DISP_EDGE px of an edge or corner to RESIZE from there (_NET_WM_MOVERESIZE,
+ * the request a client-drawn title bar makes). The pointer's implicit grab
+ * from the press is released first, or the compositor cannot take it. When
+ * the window has been still for a second after, its place and size go back
+ * into display.conf (disp_writeback), so the setting, the Emulate tab and the
+ * next run all agree with where the user put it. */
+#define DISP_EDGE 16
+extern int XUngrabPointer(XDisplay *, unsigned long);
+static double disp_cfg_s;                /* last ConfigureNotify of xwin      */
+static int disp_dragged;                 /* a hand move/resize to write back  */
+
+static void disp_press(int x, int y, int xr, int yr, unsigned long t)
+{
+    union { long l[24]; struct {
+        int type; unsigned long serial; int send_event; void *display;
+        unsigned long window, message_type; int format; long data[5];
+    } c; } ev;
+    int l = x < DISP_EDGE, r = x >= win_w - DISP_EDGE;
+    int top = y < DISP_EDGE, bot = y >= win_h - DISP_EDGE;
+    /* EWMH directions: 0 top-left 1 top 2 top-right 3 right 4 bottom-right
+     * 5 bottom 6 bottom-left 7 left 8 move */
+    long dir = top ? (l ? 0 : r ? 2 : 1) : bot ? (l ? 6 : r ? 4 : 5)
+                                               : l ? 7 : r ? 3 : 8;
+    if (!disp_want.set || disp_cur_border || disp_cur_fs) return;
+    XUngrabPointer(xdpy, t);
+    memset(&ev, 0, sizeof ev);
+    ev.c.type = 33;
+    ev.c.window = xwin;
+    ev.c.message_type = XInternAtom(xdpy, "_NET_WM_MOVERESIZE", 0);
+    ev.c.format = 32;
+    ev.c.data[0] = xr; ev.c.data[1] = yr; ev.c.data[2] = dir;
+    ev.c.data[3] = 1;                    /* button 1 */
+    ev.c.data[4] = 1;                    /* source: an application */
+    XSendEvent(xdpy, XRootWindow(xdpy, XDefaultScreen(xdpy)), 0,
+               (1L << 20) | (1L << 19), &ev);
+    XFlush(xdpy);
+    disp_dragged = 1;
+    disp_fixups = 0;                     /* the user's place, not ours */
+}
+
+/* The game line again with this place and size: x y w h, and rx ry moved by
+ * as much (the monitor's corner is x - rx). Every other line is kept. */
+static void disp_writeback(void)
+{
+    const char *p = disp_path();
+    char lines[16][512], tmp[1100], line[512];
+    int n = 0, i, ax, ay;
+    FILE *f;
+    struct stat st;
+    if (!p || !winpos_read(xwin, &ax, &ay)) return;
+    if ((f = fopen(p, "r"))) {
+        while (n < 16 && fgets(lines[n], sizeof lines[n], f)) n++;
+        fclose(f);
+    }
+    snprintf(tmp, sizeof tmp, "%s.tmp", p);
+    if (!(f = fopen(tmp, "w"))) return;
+    for (i = 0; i < n; i++) {
+        if (strncmp(lines[i], "game ", 5) == 0) {
+            int mon = 1, border = disp_cur_border;
+            char mode[32] = "window", *tok, *save = NULL;
+            snprintf(line, sizeof line, "%s", lines[i] + 5);
+            for (tok = strtok_r(line, " \t\r\n", &save); tok;
+                 tok = strtok_r(NULL, " \t\r\n", &save)) {
+                if (!strncmp(tok, "monitor=", 8)) mon = atoi(tok + 8);
+            }
+            fprintf(f, "game monitor=%d mode=%s border=%d rx=%d ry=%d x=%d y=%d "
+                    "w=%d h=%d fs=0\n", mon, mode, border,
+                    ax - (disp_want.x - disp_want.rx), ay - (disp_want.y - disp_want.ry),
+                    ax, ay, win_w, win_h);
+        } else {
+            fputs(lines[i], f);
+        }
+    }
+    fclose(f);
+    rename(tmp, p);
+    disp_want.rx = ax - (disp_want.x - disp_want.rx);
+    disp_want.ry = ay - (disp_want.y - disp_want.ry);
+    disp_want.x = ax; disp_want.y = ay; disp_want.w = win_w; disp_want.h = win_h;
+    if (stat(p, &st) == 0) disp_mtim = st.st_mtim;   /* ours: not a change */
+    fprintf(stderr, "[padglhost] display: moved by hand to %d,%d %dx%d; saved\n",
+            ax, ay, win_w, win_h);
+}
+
 static void disp_poll(void)
 {
     double t = now_s();
     const char *p = disp_path();
     if (!p || !xwin || t - win_mapped_s < 2.5) return;
+    if (disp_dragged && t - disp_cfg_s > 1.0) {
+        disp_dragged = 0;
+        disp_writeback();
+    }
     if (t >= disp_check_s) {
         struct stat st;
         int changed = 0;
@@ -3128,7 +3223,7 @@ static void win_pump(void)
         case 22:                       /* ConfigureNotify: width/height ints at 56/60 */
             /* The GAME window drives the drawable size; the legend window
              * resizing must not be mistaken for it. */
-            if (ev.ul[4] == xwin) { win_w = ev.i[14]; win_h = ev.i[15]; }
+            if (ev.ul[4] == xwin) { win_w = ev.i[14]; win_h = ev.i[15]; disp_cfg_s = now_s(); }
             else if (xwin2 && ev.ul[4] == xwin2) {
                 win2_w = ev.i[14]; win2_h = ev.i[15];
                 break;             /* item 44: not the game window; no save */
@@ -3142,6 +3237,11 @@ static void win_pump(void)
              * second behind the window's resting spot with nothing left to
              * re-save it. */
             save_pending = 1;
+            break;
+        case 4:                        /* ButtonPress: x y x_root y_root at
+                                          ints 16-19, button at 21, time ul[7] */
+            if (ev.ul[4] == xwin && ev.i[21] == 1)
+                disp_press(ev.i[16], ev.i[17], ev.i[18], ev.i[19], ev.ul[7]);
             break;
         case 12:                       /* Expose */
             legend_dirty = 1;

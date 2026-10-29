@@ -16,7 +16,8 @@ What the Tk ``MainWindow`` kept around the notebook, on the page:
 * the amber "source image changed" banner on the asset-editing tabs;
 * the log drawer's extras (previous sessions above a cut line, Save As, the
   on-disk logs), the picker's cards and the prerequisites strip's facts;
-* My machines on the picker's home (``shellx_machines.py``, PAD-783).
+* My machines on the picker's home (``shellx_machines.py``, PAD-783);
+* the Getting started page (``shellx_getting_started.py``, PAD-813).
 
 The page half is ``static/js/shell.js`` (menus, strip, picker, log drawer)
 and ``static/js/shellx_dialogs.js`` (the windows).
@@ -35,6 +36,7 @@ from ..picker_data import MFR_VISUALS, peek_text, tooltip_text
 from ..shellx_disk import DiskMixin
 from ..shellx_machines import MachinesMixin
 from ..shellx_donations import DonationsMixin
+from ..shellx_getting_started import GettingStartedMixin
 from ..shellx_projects import ProjectsMixin
 from ..shellx_report import ReportMixin
 from ..shellx_reset import ResetMixin
@@ -84,7 +86,7 @@ def _visuals():
 
 
 class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
-                  DonationsMixin, ReportMixin, TabService):
+                  DonationsMixin, ReportMixin, GettingStartedMixin, TabService):
     ns = "shellx"
     key = ""
     label = ""
@@ -136,6 +138,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         self._disk_init()
         self._reset_init()
         self._machines_init()
+        self._gs_init()
         self.set(update_state="", download=None, log_seed=None,
                  disk_badge="", picker=self._picker_cards(),
                  prereq_hints={}, platform=sys.platform,
@@ -206,6 +209,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             "report_problem": lambda: self._open_dialog("report"),
             "view_disclaimer": lambda: self._open_dialog("disclaimer"),
             "tips": lambda: self._open_dialog("tips"),
+            "getting_started": self.getting_started_open,
             "change_history": self.change_history,
         }
 
@@ -382,6 +386,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             # only while a version has a preview to unlock (none since PAD-763)
             items.append({"id": "preview_features",
                           "label": "Preview features…"})
+        items.append({"id": "getting_started", "label": "Getting started…"})
         items.append({"id": "donations", "label": "Animal shelters…"})
         items.append({"id": "report_problem", "label": "Report a problem…"})
         items.append({"id": "view_disclaimer", "label": "View disclaimer…"})

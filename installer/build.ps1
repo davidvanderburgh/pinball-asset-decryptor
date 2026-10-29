@@ -155,6 +155,32 @@ $ErrorActionPreference = "Stop"
 if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip dependencies"; exit 1 }
 Write-Host "  Dependencies installed successfully" -ForegroundColor Green
 
+# --- Visual C++ runtime, app-local ----------------------------------------
+# The embeddable zip carries vcruntime140(_1).dll but not the C++ library
+# MSVCP140.dll, and the native wheels need it: ctranslate2 (Auto-name
+# call-outs), onnxruntime, astc_encoder and UnityPy's boost module all import
+# it.  A PC with the Visual C++ Redistributable has it in System32 so nothing
+# showed - but a clean one does not, and there "import faster_whisper" died
+# with "Could not find module ...ctranslate2.dll (or one of its
+# dependencies)" while the prerequisite list read all green (PAD-821).
+# Copied next to python.exe, the application directory every extension and
+# ctypes.CDLL load searches first.  The vcruntime pair is taken from the same
+# set so the C++ library never runs on an older vcruntime than it was built
+# against (newer is backward compatible; the embeddable's is replaced).
+$vcDlls = @("vcruntime140.dll", "vcruntime140_1.dll",
+            "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll")
+$vcSrc = Join-Path $env:SystemRoot "System32"
+Write-Host "`nBundling the Visual C++ runtime from $vcSrc..." -ForegroundColor Cyan
+foreach ($dll in $vcDlls) {
+    $src = Join-Path $vcSrc $dll
+    if (-not (Test-Path $src)) {
+        Write-Error "$dll not found in $vcSrc - install the Visual C++ 2015-2022 Redistributable (x64) on the build machine."
+        exit 1
+    }
+    Copy-Item -Path $src -Destination (Join-Path $PythonDir $dll) -Force
+    Write-Host ("  {0} {1}" -f $dll, (Get-Item $src).VersionInfo.FileVersion)
+}
+
 # --- Patch python3XX._pth for final layout --------------------------------
 # The bundled python.exe lives in <app>\python\, so '..' makes the
 # pinball_decryptor package (one level up) importable.
@@ -175,6 +201,16 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "  $testDeps" -ForegroundColor Green
 } else {
     Write-Warning "Dependency smoke test failed: $testDeps"
+}
+
+# The C++ runtime a native wheel loads must be the bundled one: one from the
+# build machine's System32 here is one a clean PC does not have (PAD-821).
+$testVc = & $pythonExe -c "import ctypes, os, sys, astc_encoder, UnityPy; k = ctypes.WinDLL('kernel32'); k.GetModuleHandleW.restype = ctypes.c_void_p; h = k.GetModuleHandleW('msvcp140.dll'); b = ctypes.create_unicode_buffer(1024); k.GetModuleFileNameW(ctypes.c_void_p(h), b, 1024); p = b.value; print('C++ runtime bundled:', p) if h and os.path.dirname(p).lower() == os.path.dirname(sys.executable).lower() else (_ for _ in ()).throw(SystemExit('msvcp140.dll not loaded from the bundle: %r' % p))" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  $testVc" -ForegroundColor Green
+} else {
+    Write-Error "C++ runtime smoke test failed: $testVc"
+    exit 1
 }
 
 # imageio-ffmpeg must ship a real ffmpeg binary, not just the package (the app

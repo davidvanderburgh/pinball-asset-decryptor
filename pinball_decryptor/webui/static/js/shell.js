@@ -937,8 +937,8 @@ function Picker({ shell }) {
     <${MyMachines} running=${shell.running} />
     <div class="row" style="align-items:flex-end;gap:16px">
       <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">Choose a manufacturer</h1>
-        <p class="dim" style="margin:6px 0 0">Pick the maker of the game you are working on. You can switch at any time from the manufacturer menu in the top bar.
-          New here? <a href="#" class="sx-gs-link" onClick=${(e) => { e.preventDefault(); call("shellx.getting_started_open"); }}>Getting started</a> has short videos.</p></div>
+        <p class="dim" style="margin:6px 0 0">Pick the maker of the game you are working on. You can switch at any time from the manufacturer menu in the top bar.</p>
+        <p style="margin:6px 0 0"><a href="#" class="sx-gs-link" onClick=${(e) => { e.preventDefault(); call("shellx.getting_started_open"); }}>New here? Short videos show the common jobs.</a></p></div>
       ${shell.mfr ? html`<${Button} onClick=${() => call("ui.pick_manufacturer", shell.mfr.key)}>Back to ${shell.mfr.display}<//>` : null}
     </div>
     <div class="grid">

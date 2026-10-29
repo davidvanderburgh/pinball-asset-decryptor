@@ -31,7 +31,8 @@ TASKS = (
          "On Select card, press Browse… and pick the card image, or switch to From SD card "
          "and read the card in a reader.",
          "On Extract, pick a project folder and press Extract.",
-         "Save card as image… keeps a backup of a stock card first.",
+         "Reading an SD card? Save card as image… on Select card keeps a backup of it "
+         "first.",
      )},
     {"id": "song", "title": "Swap a song", "tab": "audio",
      "go": "Open Replace Audio",
@@ -53,10 +54,10 @@ TASKS = (
     {"id": "flash", "title": "Write an image to an SD card", "tab": "write",
      "go": "Open Write",
      "steps": (
-         "On Select card, press Browse… and pick the image file.",
          "Open Write. Stern, Jersey Jack and Chicago Gaming images need no extract.",
-         "Press Build / flash SD card… and pick the SD card.",
-         "Confirm. Flashing erases the whole SD card.",
+         "Press Build / flash SD card… and tick Write an image onto the SD card.",
+         "Next to Image file, press Browse… and pick the image, then pick the SD card.",
+         "Press Flash image and confirm. Flashing erases the whole SD card.",
      )},
     {"id": "multiboot", "title": "Several games on one card", "tab": "multiboot",
      "go": "Open Multi-boot",
@@ -78,11 +79,11 @@ TASKS = (
     {"id": "transfer", "title": "Move your mods to a new game version", "tab": "modpack",
      "go": "Open Mod Pack",
      "steps": (
-         "Extract the new stock card into a folder of its own.",
-         "On Mod Pack, open Transfer Mods to New Version.",
-         "Fill in your old extract, the new extract and the new card image.",
-         "Read the plan in the log, then confirm. Your sounds follow even if their "
-         "numbers moved.",
+         "Open the project that holds your mods.",
+         "On Mod Pack, press Port + build onto card image(s)….",
+         "Pick the new stock card image: a new version, or the other model.",
+         "It extracts that card, moves your mods onto it and builds it. The log names "
+         "anything it skipped.",
      )},
 )
 

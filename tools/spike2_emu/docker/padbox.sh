@@ -334,6 +334,23 @@ esac
 # on a Mac without the developer tools pops Apple's install dialog mid-run.
 # The poll is long (10 min) because a FIRST run builds the guest rootfs out of
 # the card before the game ever configures audio.
+# HOW THE CHANNEL COUNT IS SAID depends on the ffplay (PAD-832). FFmpeg 7 took
+# `-ac` away from ffplay (it was the raw demuxer's `channels` option, now gone;
+# only `-ch_layout` is left), and Homebrew ships 7 and newer, so a Mac's ffplay
+# said "Failed to set value '2' for option 'ac': Option not found", exited, and
+# every run was silent. `-ch_layout` exists from 5.1 on; an older ffplay has
+# no such option and still takes `-ac`. Ask the ffplay which one it has.
+ffplay_channel_args() {
+    if ffplay -hide_banner -h demuxer=s16le 2>/dev/null | grep -q -- '-ch_layout'; then
+        case "$1" in
+            1) echo "-ch_layout mono" ;;
+            2) echo "-ch_layout stereo" ;;
+            *) echo "-ch_layout ${1}c" ;;
+        esac
+    else
+        echo "-ac $1"
+    fi
+}
 host_player() {
     [ "${PAD_AUDIO:-1}" = 0 ] && return 0
     fmt=""
@@ -345,10 +362,12 @@ host_player() {
     set -- $fmt
     rate=${1:-48000}; ch=${2:-2}
     if command -v ffplay >/dev/null 2>&1; then
-        echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch from tcp/$AUDIO_PORT"
+        chargs=$(ffplay_channel_args "$ch")
+        echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch ($chargs) from tcp/$AUDIO_PORT"
+        # $chargs unquoted on purpose: it is an option and its value
         exec ffplay -hide_banner -loglevel error -nodisp -autoexit \
              -fflags nobuffer -flags low_delay \
-             -f s16le -ar "$rate" -ac "$ch" "tcp://127.0.0.1:$AUDIO_PORT"
+             -f s16le -ar "$rate" $chargs "tcp://127.0.0.1:$AUDIO_PORT"
     fi
     echo "[box] no ffplay on this Mac, so this run is silent. Fix:" >&2
     echo "[box]   brew install ffmpeg   (the same package the app's previews use)" >&2

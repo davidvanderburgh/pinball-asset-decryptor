@@ -15166,8 +15166,11 @@ def _audit_audio_patches(params, patches, log):
         owner = None
         for p, s, d in own.get(off, ()):
             # an APPENDED record's encode also covers its silent lead-out (_APPENDED_TAIL,
-            # item 150 follow-up): its window is that much longer than its length
-            if len(body) == s * p["length"] or (p.get("grown") and not d and len(body) == s * (
+            # item 150 follow-up): its window is that much longer than its length.  It
+            # starts 1-2 words below the body on a delta<0 key exactly as a stock
+            # sound's does (PAD-801: 72 of a Godzilla Pro card's 109 appended sounds
+            # were reported as matching no window for that alone)
+            if len(body) == s * p["length"] or (p.get("grown") and len(body) == s * (
                     p["length"] + _APPENDED_TAIL)):
                 owner = (p, s, d)
                 break

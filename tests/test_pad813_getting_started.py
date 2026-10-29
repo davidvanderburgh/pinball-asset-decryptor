@@ -1,0 +1,243 @@
+"""PAD-813: the Getting started page - short videos and steps for the jobs a
+new user comes for, open by itself on a first launch and from the top bar."""
+
+import json
+import os
+import re
+import subprocess
+
+import pytest
+
+from pinball_decryptor.webui import getting_started as GS
+from tests.webui_harness import web_app
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+# ------------------------------------------------------------- at launch
+def test_opens_for_a_new_user_only():
+    assert GS.opens_at_launch({}, {}) is True
+    assert GS.opens_at_launch({"disclaimer_accepted": True}, {}) is True
+    # someone who has used the app does not get it again
+    assert GS.opens_at_launch({"last_manufacturer": "stern"}, {}) is False
+    assert GS.opens_at_launch({"projects": [{"folder": "x"}]}, {}) is False
+
+
+def test_the_tick_wins():
+    assert GS.opens_at_launch({"last_manufacturer": "stern",
+                               "getting_started_at_launch": True}, {}) is True
+    assert GS.opens_at_launch({"getting_started_at_launch": False}, {}) is False
+
+
+def test_test_runs_and_plain_captures_never_get_it():
+    assert GS.opens_at_launch({}, {"PAD_UI_NO_GETTING_STARTED": "1"}) is False
+    assert GS.opens_at_launch({}, {"PYTEST_CURRENT_TEST": "x"}) is False
+
+
+def _settings(tmp_path):
+    with open(tmp_path / "cfg" / "settings.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def test_first_launch_opens_it_once(tmp_path, monkeypatch):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    with web_app(tmp_path) as w:
+        gs = w.state("shellx")["getting_started"]
+        assert gs["open"] is True
+        # seen once: unticked, so the next start goes to the picker
+        assert gs["at_launch"] is False
+        assert w.app._settings["getting_started_at_launch"] is False
+        assert w.call("shellx.getting_started_close") is True
+        assert w.state("shellx")["getting_started"]["open"] is False
+
+
+def test_tick_is_saved(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        assert w.state("shellx")["getting_started"]["open"] is False
+        w.call("shellx.getting_started_at_launch", True)
+        assert w.state("shellx")["getting_started"]["at_launch"] is True
+        assert w.app._settings["getting_started_at_launch"] is True
+    assert _settings(tmp_path)["getting_started_at_launch"] is True
+
+
+# ------------------------------------------------------------- the page
+def test_top_bar_and_gear_open_it(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        w.call("shellx.getting_started_open")
+        assert w.state("shellx")["getting_started"]["open"] is True
+        w.call("shellx.getting_started_close")
+        w.call("ui.settings_action", "getting_started")
+        assert w.state("shellx")["getting_started"]["open"] is True
+
+
+def test_go_opens_the_task_tab(tmp_path):
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        for task in GS.TASKS:
+            if not task["tab"]:
+                continue
+            w.call("shellx.getting_started_open")
+            assert w.call("shellx.getting_started_go", task["id"]) == task["tab"], task["id"]
+            assert w.state("shell")["tab"] == task["tab"]
+            assert w.state("shellx")["getting_started"]["open"] is False
+        # the install card opens no tab: it only closes the page
+        w.call("shellx.getting_started_open")
+        before = w.state("shell")["tab"]
+        assert w.call("shellx.getting_started_go", "install") == ""
+        assert w.state("shell")["tab"] == before
+
+
+def test_go_without_a_manufacturer_goes_to_the_picker(tmp_path):
+    with web_app(tmp_path) as w:
+        w.call("shellx.getting_started_open")
+        assert w.call("shellx.getting_started_go", "song") == ""
+        assert w.state("shellx")["getting_started"]["open"] is False
+        assert w.state("shell")["view"] == "picker"
+
+
+def test_every_task_names_a_real_tab_and_has_steps(tmp_path):
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        rail = {t["ns"] for t in w.state("shell")["tabs"]}
+        gs = w.state("shellx")["getting_started"]
+    assert len({t["id"] for t in GS.TASKS}) == len(GS.TASKS)
+    for t in GS.TASKS:
+        assert t["tab"] in rail or (t["id"] == "install" and t["tab"] == ""), t
+        assert 3 <= len(t["steps"]) <= 5, t["id"]
+    assert [t["id"] for t in gs["tasks"]] == [t["id"] for t in GS.TASKS]
+    # Phantasize's list (Pinside #406): install, a song, a video, text and pictures
+    assert {"install", "song", "video", "text", "images"} <= {t["id"] for t in GS.TASKS}
+    assert gs["problems"] and all(p["title"] and p["text"] for p in gs["problems"])
+
+
+def test_every_task_ships_its_video_and_poster():
+    for t in GS.TASKS:
+        for ext in ("mp4", "jpg"):
+            path = GS.video_path(t["id"], ext)
+            assert os.path.isfile(path), path
+            assert os.path.getsize(path) > 2000, path
+
+
+def test_videos_are_small_h264(tmp_path):
+    """Every video plays in every webview (H.264 yuv420p) and stays small
+    enough to ship in the installer."""
+    probe = "ffprobe"
+    try:
+        subprocess.run([probe, "-version"], capture_output=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("no ffprobe")
+    total = 0
+    for t in GS.TASKS:
+        path = GS.video_path(t["id"])
+        total += os.path.getsize(path)
+        out = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                              "stream=codec_name,pix_fmt,width,height:format=duration",
+                              "-of", "json", path], capture_output=True, text=True, check=True)
+        info = json.loads(out.stdout)
+        st = info["streams"][0]
+        assert (st["codec_name"], st["pix_fmt"]) == ("h264", "yuv420p"), t["id"]
+        assert (st["width"], st["height"]) == (1280, 720), t["id"]
+        assert 10 <= float(info["format"]["duration"]) <= 120, t["id"]
+    assert total < 40 * 1024 * 1024
+
+
+def test_page_strings_are_plain_american(tmp_path):
+    words = " ".join([GS.NOTE] + [t["title"] + " " + " ".join(t["steps"]) for t in GS.TASKS]
+                     + [a + " " + b for a, b in GS.PROBLEMS])
+    assert "—" not in words
+    assert not re.search(r"\b(colour|favourite|organise|centre)\b", words, re.I)
+
+
+def test_every_page_string_is_translated():
+    """The page's words are in the German, Spanish and French catalogs."""
+    words = [GS.NOTE] + [b for _, b in GS.FLOW]
+    for t in GS.TASKS:
+        words += [t["title"]] + list(t["steps"]) + ([t["go"]] if t["go"] else [])
+    for a, b in GS.PROBLEMS:
+        words += [a, b]
+    words += ["Pick what you want to do. Each one is a short video and a few steps.",
+              "Show this when the app opens", "If something goes wrong",
+              "New here? Short videos show the common jobs.", "Getting started…",
+              "More common problems and their fixes",
+              "Your first mod, written out step by step"]
+    for lang in ("de", "es", "fr"):
+        path = os.path.join(REPO, "pinball_decryptor", "webui", "static", "i18n", lang + ".json")
+        with open(path, encoding="utf-8") as f:
+            cat = json.load(f)
+        missing = [w for w in words if w not in cat]
+        assert not missing, (lang, missing[:5])
+
+
+def test_the_videos_name_the_controls_the_steps_do():
+    """Each video's script (scripts/make_getting_started_videos.py) films the
+    task the page lists, so a step and its video can't drift apart."""
+    import ast
+    src = open(os.path.join(REPO, "scripts", "make_getting_started_videos.py"),
+               encoding="utf-8").read()
+    tree = ast.parse(src)
+    films = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                 and getattr(n.targets[0], "id", "") == "FILMS")
+    assert {k.value for k in films.value.keys} == {t["id"] for t in GS.TASKS}
+
+
+# ------------------------------------------------- the written guides (PAD-814)
+GUIDE = os.path.join(REPO, "docs", "guide")
+LINK = re.compile(r"\]\(([^)\s]+)\)")
+
+
+def _service_class():
+    from pinball_decryptor.webui.tabs import shell_extras
+    return shell_extras.ShellExtras
+
+
+def test_the_page_opens_the_guides_on_github(tmp_path, monkeypatch):
+    opened = []
+    monkeypatch.setattr(_service_class(), "open_link_checked",
+                        lambda self, url, what="": opened.append((url, what)))
+    with web_app(tmp_path, mfr="stern") as w:
+        assert w.call("shellx.getting_started_guide", "common_problems") is True
+        assert w.call("shellx.getting_started_guide", "getting_started") is True
+        assert w.call("shellx.getting_started_guide", "nope") is False
+    assert opened == [
+        ("https://github.com/davidvanderburgh/pinball-asset-decryptor/blob/main/"
+         "docs/guide/%s" % page, "the user guide")
+        for page in ("common-problems.md", "getting-started.md")]
+
+
+@pytest.mark.parametrize("page", sorted(GS.GUIDES.values()))
+def test_every_guide_page_is_in_the_repo(page):
+    assert os.path.isfile(os.path.join(GUIDE, page)), page
+
+
+def _anchors(path):
+    """GitHub's heading anchors in a markdown file."""
+    out = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            m = re.match(r"#+\s+(.*)", line)
+            if m:
+                slug = re.sub(r"[^\w\- ]", "", m.group(1).strip().lower())
+                out.add(slug.replace(" ", "-"))
+    return out
+
+
+@pytest.mark.parametrize("page", ["getting-started.md", "common-problems.md"])
+def test_the_guides_links_all_land(page):
+    path = os.path.join(GUIDE, page)
+    with open(path, encoding="utf-8") as f:
+        links = LINK.findall(f.read())
+    assert links
+    for link in links:
+        if link.startswith("http"):
+            continue
+        target, _, anchor = link.partition("#")
+        dest = os.path.normpath(os.path.join(GUIDE, target)) if target else path
+        assert os.path.isfile(dest), link
+        if anchor:
+            assert anchor in _anchors(dest), link
+
+
+def test_the_readme_links_both_guides_and_names_the_page():
+    with open(os.path.join(REPO, "README.md"), encoding="utf-8") as f:
+        text = f.read()
+    for page in ("getting-started.md", "common-problems.md"):
+        assert "(docs/guide/%s)" % page in text, page
+    assert "**Getting started** page" in text

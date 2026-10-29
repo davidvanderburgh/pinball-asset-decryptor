@@ -1,7 +1,7 @@
 // The frame around every tab: top bar, rail, status bar, log drawer,
 // the manufacturer picker, banners, toasts and the dialog host.
 
-import { html, useEffect, useLayoutEffect, useRef, useState, Icon, Button, Chip, Check, openMenu, cx, fmtClock, tip, Empty, Spinner }
+import { html, useEffect, useLayoutEffect, useRef, useState, Icon, Button, Chip, Check, openMenu, cx, fmtClock, tip, Empty, Spinner, mediaUrl }
   from "./core/ui.js";
 import { Component } from "./vendor/preact-htm.js";
 import { useNs, useLog, useConnected, useEvent, state } from "./core/store.js";
@@ -381,6 +381,7 @@ function TopBar({ shell }) {
   const upd = shell.update;
   const sx = useNs("shellx");
   const working = shell.view === "mfr";
+  const gsOpen = !!(sx.getting_started && sx.getting_started.open);
   const dots = shell.gear_dots || {};
   const connectedNow = useConnected();
   const [connected, setShown] = useState(true);
@@ -412,6 +413,10 @@ function TopBar({ shell }) {
     ${upd && upd.available ? html`<${Chip} kind="info" dot onClick=${() => call("ui.settings_action", "install_update")}
         title=${"Pinball Asset Decryptor v" + upd.version + " is available — you're on v" + (shell.version || "") + "."}>${upd.label || ("v" + upd.version + " available")}<//>`
       : html`<span class="hide-narrow"><${Chip} kind="ok" dot title=${sx.update_state === "latest" ? "You're on the latest version." : "This version"}>v${shell.version || ""}${sx.update_state === "latest" ? ", latest" : ""}<//></span>`}
+    <button type="button" class=${cx("btn sm sx-gs-open", gsOpen && "on")}
+        onClick=${() => call(gsOpen ? "shellx.getting_started_close" : "shellx.getting_started_open")}
+        ...${tip("Short videos and steps for the common jobs: extract a card, swap a song, build and flash, multi-boot.")} aria-label="Getting started">
+        <${Icon} name="play" /><span class="hide-narrow">Getting started</span></button>
     <button type="button" class="btn sm sx-discord-btn" onClick=${() => call("shellx.open_discord")}
         ...${tip("Join the PAD Discord server: ask questions, share what you made and hear about new releases.")} aria-label="Join our Discord">
         <${Icon} name="discord" /><span class="hide-narrow">Discord</span></button>
@@ -935,7 +940,8 @@ function Picker({ shell }) {
     <${MyMachines} running=${shell.running} />
     <div class="row" style="align-items:flex-end;gap:16px">
       <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">Choose a manufacturer</h1>
-        <p class="dim" style="margin:6px 0 0">Pick the maker of the game you are working on. You can switch at any time from the manufacturer menu in the top bar.</p></div>
+        <p class="dim" style="margin:6px 0 0">Pick the maker of the game you are working on. You can switch at any time from the manufacturer menu in the top bar.</p>
+        <p style="margin:6px 0 0"><a href="#" class="sx-gs-link" onClick=${(e) => { e.preventDefault(); call("shellx.getting_started_open"); }}>New here? Short videos show the common jobs.</a></p></div>
       ${shell.mfr ? html`<${Button} onClick=${() => call("ui.pick_manufacturer", shell.mfr.key)}>Back to ${shell.mfr.display}<//>` : null}
     </div>
     <div class="grid">
@@ -952,6 +958,60 @@ function Picker({ shell }) {
         <div class="games">${(m.games || []).slice(0, 14).map((g, i) => html`${i ? " · " : ""}<span class=${g.supported ? "notr" : "sx-unsup notr"} title=${g.supported ? undefined : (g.reason ? g.display + " — " + g.reason : g.display + " — not supported")}>${g.display}</span>`)}${(m.games || []).length > 14 ? html` · <span class="muted">+${m.games.length - 14} more</span>` : ""}</div>
       </button>`)}
     </div>
+  </div></div>`;
+}
+
+// The Getting started page (PAD-813, webui/shellx_getting_started.py): a short
+// video and a few steps for each job a new user comes for.  It takes the
+// place of the picker or the tab while it is open; the top bar stays, and its
+// Getting started button closes it again.
+function GettingStarted({ shell }) {
+  const sx = useNs("shellx");
+  const gs = sx.getting_started || { tasks: [], flow: [] };
+  const tasks = gs.tasks || [];
+  const [pick, setPick] = useState(() => (tasks[0] || {}).id);
+  const cur = tasks.find((t) => t.id === pick) || tasks[0] || { steps: [] };
+  const working = shell.view === "mfr";
+  const visible = new Set((shell.tabs || []).filter((t) => t.visible).map((t) => t.ns));
+  const canGo = working && visible.has(cur.tab);
+  const vid = useRef(null);
+  useEffect(() => { if (vid.current) vid.current.load(); }, [cur.id]);
+  const close = () => call("shellx.getting_started_close");
+  return html`<div class="picker sx-gs"><div class="inner">
+    <div class="row wrap" style="align-items:flex-end;gap:12px 24px">
+      <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">Getting started</h1>
+        <p class="dim" style="margin:6px 0 0">Pick what you want to do. Each one is a short video and a few steps.</p></div>
+      <${Check} checked=${!!gs.at_launch} label="Show this when the app opens"
+        onChange=${(v) => call("shellx.getting_started_at_launch", v)} />
+      <${Button} cls="sx-gs-close" onClick=${close}>${working && shell.mfr ? "Back to " + shell.mfr.display : "Choose a manufacturer"}<//>
+    </div>
+    <ol class="sx-gs-flow">${(gs.flow || []).map((f, i) => html`<li><span class="n">${i + 1}</span><b>${f.tab}</b><span class="dim">${f.what}</span></li>`)}</ol>
+    <div class="sx-gs-main">
+      <div class="sx-gs-video">
+        ${cur.video ? html`<video ref=${vid} controls preload="metadata" playsinline aria-label=${cur.title}
+            poster=${cur.poster ? mediaUrl(cur.poster) : undefined} src=${mediaUrl(cur.video)}></video>`
+          : html`<div class="sx-gs-novideo"><${Icon} name="film" cls="lg" /><span>The video for this one is not in this build.</span></div>`}
+      </div>
+      <aside class="sx-gs-steps">
+        <h2 class="h2">${cur.title}</h2>
+        <ol>${(cur.steps || []).map((s, i) => html`<li><span class="n">${i + 1}</span><span>${s}</span></li>`)}</ol>
+        ${cur.tab ? html`<${Button} kind="primary" onClick=${() => call("shellx.getting_started_go", cur.id)}>${canGo ? cur.go : "Choose a manufacturer"}<//>` : null}
+      </aside>
+    </div>
+    <div class="sx-gs-tasks">
+      ${tasks.map((t) => html`<button type="button" class=${cx("sx-gs-task", t.id === cur.id && "on")}
+          aria-pressed=${t.id === cur.id ? "true" : "false"} onClick=${() => setPick(t.id)}>
+        <span class="sx-gs-thumb">${t.poster ? html`<img src=${mediaUrl(t.poster)} alt="" />` : html`<${Icon} name="film" />`}</span>
+        <span class="t">${t.title}</span>
+      </button>`)}
+    </div>
+    ${gs.note ? html`<p class="muted small" style="margin:0">${gs.note}</p>` : null}
+    ${(gs.problems || []).length ? html`<section class="sx-gs-probs">
+      <h2 class="h2">If something goes wrong</h2>
+      <dl>${gs.problems.map((p) => html`<div><dt>${p.title}</dt><dd>${p.text}</dd></div>`)}</dl>
+      <p class="small" style="margin:0"><a href="#" class="sx-gs-guide" onClick=${(e) => { e.preventDefault(); call("shellx.getting_started_guide", "common_problems"); }}>More common problems and their fixes</a>
+        <span class="muted"> · </span><a href="#" class="sx-gs-guide" onClick=${(e) => { e.preventDefault(); call("shellx.getting_started_guide", "getting_started"); }}>Your first mod, written out step by step</a></p>
+    </section>` : null}
   </div></div>`;
 }
 
@@ -997,6 +1057,8 @@ function Disclaimer({ shell }) {
 // ---------------------------------------------------------------- shell
 export function Shell() {
   const shell = useNs("shell");
+  const sx = useNs("shellx");
+  const gsOpen = !!(sx.getting_started && sx.getting_started.open);
   const [logOpen, setLogOpen] = useState(() => { try { return localStorage.getItem("pad.log.open") !== "0"; } catch (e) { return true; } });
   const [logH, setLogH] = useState(() => { try { return Number(localStorage.getItem("pad.log.h")) || 150; } catch (e) { return 150; } });
   useEffect(() => { try { localStorage.setItem("pad.log.open", logOpen ? "1" : "0"); localStorage.setItem("pad.log.h", String(Math.round(logH))); } catch (e) {} }, [logOpen, logH]);
@@ -1048,7 +1110,7 @@ export function Shell() {
   return html`<div class="app">
     <${TopBar} shell=${shell} />
     <${Banners} shell=${shell} />
-    ${shell.view === "picker" ? html`<${Picker} shell=${shell} />` : html`
+    ${gsOpen ? html`<${GettingStarted} shell=${shell} />` : shell.view === "picker" ? html`<${Picker} shell=${shell} />` : html`
       <${Prereqs} shell=${shell} />
       <div class="body">
         <${Rail} shell=${shell} />

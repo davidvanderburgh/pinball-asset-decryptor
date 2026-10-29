@@ -151,7 +151,7 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
                  "Prerequisites ▸", "sep"]
         if preview.FEATURES:                    # PAD-802: Visual Pinball is a preview
             want.append("preview_features")
-        want += ["discord", "donations", "report_problem", "view_disclaimer"]
+        want += ["getting_started", "discord", "donations", "report_problem", "view_disclaimer"]
         assert shape == want
         assert not any(it.get("header") for it in items(w))
         up = cascade(w, "Check automatically")["submenu"]

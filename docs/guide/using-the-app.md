@@ -4,7 +4,9 @@
 
 A walk through the app from launch to a finished card. Emulating a game
 and multi-boot cards have pages of their own: [Emulate](emulate.md) and
-[Multi-boot cards](multi-boot.md).
+[Multi-boot cards](multi-boot.md). New to the app? [Getting started: your
+first mod](getting-started.md) is a shorter walk through one song swap, and
+[Common problems](common-problems.md) lists what new users run into.
 
 **A mod is four steps, one tab each:**
 
@@ -17,6 +19,12 @@ Every tab has a **?** button in the top bar with tips for that tab.
 
 ## Getting started
 
+- **The Getting started page** opens the first time the app starts: a short
+  video and a few steps for each common job (extract a card, swap a song,
+  build and flash, write an image to an SD card, a multi-boot card, trying
+  it in the emulator, moving mods to a new game version). The **Getting
+  started** button in the top bar brings it back, and a tick on the page
+  opens it at every start.
 - **The picker** shows a card per manufacturer with its games. A greyed,
   struck-through game can't be decrypted yet (Spooky's Total Nuclear
   Annihilation: its key is unknown). Click a card to open that

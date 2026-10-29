@@ -120,6 +120,25 @@ def _is_funcstart(fw, tgt):
     return False
 
 
+def _is_leaf_funcstart(fw, tgt):
+    """True if ``tgt`` looks like a LEAF function's entry: up to four
+    ``movw``/``movt`` loading its globals, then a ``push`` that saves no ``lr``
+    (it calls nothing).  Deadpool 1.16's map-revalidation helper (0x3845e8) is
+    one: ``movw r3; movw ip; movt r3; movt ip; push {r4, r5}``, which
+    :func:`_is_funcstart` turns down, so its 16 song banks never extracted
+    (PAD-813)."""
+    t = fw.secs[".text"]; base = t["addr"]; o = t["off"]
+    if not (base <= tgt < base + t["size"] - 24):
+        return False
+    for d in range(0, 24, 4):
+        w = struct.unpack_from("<I", fw.raw, o + (tgt - base + d))[0]
+        if (w & 0xFFFF0000) == 0xE92D0000 and w & 0xFFFF:       # push {...}
+            return True
+        if (w & 0x0FF00000) not in (0x03000000, 0x03400000) or (w >> 28) != 0xE:
+            return False                                         # not movw / movt
+    return False
+
+
 def _find_snprintf(fw, cat0, end):
     """First ``bl`` after the movw/movt that builds the ``image-sc…`` filename
     string's address."""
@@ -171,13 +190,19 @@ def category_locators(raw, addrs):
 
         # The map-revalidation helper is a local function called between the
         # fstat and mmap calls (the not-found registration path).  Usually 1-3
-        # candidates; the caller trial-selects.
+        # candidates; the caller trial-selects.  A leaf function (no lr saved)
+        # is a candidate too, tried after the others (PAD-813: Deadpool 1.16's).
         lo = fstat_site if fstat_site is not None else cat0
-        cands, seen = [], set()
+        cands, leaves, seen = [], [], set()
         for site, tgt in _raw_bls(fw, lo, mmap_site):
-            if tgt != cat0 and tgt not in seen and _is_funcstart(fw, tgt):
-                seen.add(tgt)
+            if tgt == cat0 or tgt in seen:
+                continue
+            seen.add(tgt)
+            if _is_funcstart(fw, tgt):
                 cands.append(tgt)
+            elif _is_leaf_funcstart(fw, tgt):
+                leaves.append(tgt)
+        cands += leaves
         if not cands:
             return None
         return {"SNPRINTF": snp, "REVALIDATE_CANDIDATES": cands}

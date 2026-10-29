@@ -2684,7 +2684,26 @@ def profile_from_port(path):
 #: mode as its shot in a game, and the spare output it then pulsed went out on the bus as [coildrive] node N coil O)
 SPARE_IO_PROVEN = frozenset({
     "godzilla_pro-1.16",   # 2026-10-29 rig 1 spare_job.sh: 9:24 -> shot "Spare 9:24" -> 9:4 255/40 then 128/500 on the bus;
-                           # the trough (8:1) refused; a 4 s hold OFF at the mode's end with 2500 ms left; 5 s in 10 s held
+                           # the trough (8:1) refused; a 4 s hold OFF at the mode's end with 2500 ms left; 5 s in 10 s held;
+                           # and as a Blocks mode (blocks_job.sh, the app's own C): 9:24 started it and drove 9:4 twice
+    # 2026-10-29 spare_sweep_job.sh (rigbatch sweep3 + the rerun of rig 2's ten, whose NVRAM refused every game start; the
+    # final runtime and shim, stock cards, hidden, muted): the struct checked out against every entry, the mode's own spare
+    # input (the first spare bit from 8 on the board with the most switches) closed by /dump/spare_in in a game came as its
+    # shot, and the spare output it then pulsed (1:1, the cabinet board's) went out as [coildrive] node 1 coil 1 200/30 ms;
+    # in 105 runs the game itself never sent that output anything
+    "aerosmith-1.16", "aerosmith_le-1.16", "avengers_infinity_le-1.10", "avengers_infinity_pro-1.10", "batman-1.14",
+    "beatles-1.29", "deadpool_le-1.14", "deadpool_le-1.16", "deadpool_pro-1.16", "dungeons_and_dragons_le-1.00",
+    "dungeons_and_dragons_le-1.10", "dungeons_and_dragons_pro-1.10", "elvira3-1.13", "foo_fighters_le-1.04",
+    "foo_fighters_pro-1.04", "godzilla_le-1.16", "godzilla_pro-1.15", "guardians-1.15", "guardians_le-1.15",
+    "iron_maiden_le-1.18", "iron_maiden_pro-1.18", "james_bond_60th_le-1.11", "james_bond_le-1.06",
+    "james_bond_pro-1.06", "jaws_le-1.02", "jaws_pro-1.02", "john_wick_le-1.01", "john_wick_le-1.02",
+    "john_wick_pro-1.02", "jurassic_park_le-1.16", "jurassic_park_pro-1.16", "jurassic_park_the_pin-1.05",
+    "king_kong_le-0.97", "king_kong_pro-0.97", "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22", "mando_le-1.45",
+    "mando_pro-1.45", "metallica_spike-1.03", "metallica_spike-1.04", "munsters_le-1.28", "munsters_pro-1.28",
+    "rush_le-1.19", "rush_pro-1.19", "star_wars_elg-1.10", "star_wars_le-1.30", "star_wars_le-1.31",
+    "star_wars_pro-1.31", "stranger_things-1.13", "stranger_things_le-1.13", "sword_of_rage_le-1.19",
+    "sword_of_rage_pro-1.19", "turtles_le-1.59", "turtles_pro-1.59", "uncanny_xmen_le-0.98",
+    "uncanny_xmen_pro-0.98", "venom_le-1.07", "venom_pro-1.07",
 })
 
 
@@ -2960,6 +2979,7 @@ try:
         roster_counts=bool(_port_115 and "battle_stop" in _port_115["site"]),   # PAD-706: not on Pro 1.15
         places=_places(_port_115) if not _place_cannot(_key_115, _label_115, _port_115) else (),   # PAD-710
         done_modes=_done_modes(_port_115) if not _done_cannot(_key_115, _label_115, _port_115) else (),   # PAD-747
+        spare=_spare(_port_115, _key_115),                   # PAD-826
         absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
                      if c[0] not in ("magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "roster",

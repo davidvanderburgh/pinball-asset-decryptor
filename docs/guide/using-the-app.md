@@ -216,6 +216,7 @@ The **Convert** column says it before you build:
   built elsewhere, by how they look, not by name.
 - **Check card…** lists the clips on any built card whose bitrate is low
   enough to look blocky. It opens the card read-only.
+- **More > Export compare report (CSV)…** writes one row per replacement, random clip and mode copy beside the game's own clip: lengths, the length after Write, resolution, fps and a note when Write cuts, pads or scales.
 - **The Big Lebowski's** `.cdmd` clips are re-encoded back into `.cdmd`
   at the original frame count, so they stay in sync with their sound.
 

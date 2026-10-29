@@ -83,6 +83,22 @@ writes only what the commands write: `~/.pad-vpx.json` and Visual Pinball's
 ini. NO BUILD SHIPS A TABLE: the separate setup window (`padvpx wizard`)
 and the beta installer that carried two patched tables are gone.
 
+**The game window, borderless and on its own monitor (PAD-811).** One
+setting places the game's display for every run, desktop and cabinet alike:
+`padvpx display monitor 2` fills monitor 2, borderless; `padvpx display
+monitor 1 window 0 0 1360 768` is a borderless window at that monitor's
+corner; `padvpx display border on` puts the frame back; `padvpx display
+free` returns it to wherever it was left (`padvpx display` lists the
+monitors: 1 is the main one, then left to right). The app's Emulate tab has
+the same choices. It is `display.conf` on the rig board, written by
+`tools/spike2_emu/padisplay.py`, and the renderer (padglhost) of every
+visible run reads it twice a second, so a change moves a running game's
+window at once. The renderer does the moving, on the X side: a window moved
+from Windows (SetWindowPos) cannot be dragged afterwards (padglhost.c, "THE
+DELAYED MOVE"), so with a display setting the controller only keeps the
+LCD on top of Visual Pinball. `padvpx lcd ...` below now writes this
+setting.
+
 **The LCD window.** Visual Pinball comes up full screen and would cover the
 game's LCD window, so when the controller starts a run it puts that window
 where the kit says and ON TOP: by default the upper middle of the main

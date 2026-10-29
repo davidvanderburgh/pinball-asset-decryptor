@@ -131,3 +131,14 @@ time, and nothing of the game's lands on it. Census over every port.
     record with that node and input. Next: the numbering of +20 against the bits at board + 576 (a known switch of
     the switch list, e.g. a flipper button, pressed in the emulator), then the finder (the registration's two
     movw/movt tables and the 44/56 strides) over the ten builds.
+
+## Done (2026-10-29, run 3): every Spike 2 build
+
+- The ten older builds carry `data sw_listen`, `data sw_boards`, `site coil_used` (spare_io.py --write). The board's
+  bits are at **+576** (mask +584), not +572: `0x3a3eb0` adds 572 / 580, then 3, and walks with a pre-incrementing
+  `ldrb [ip,#1]!`; the first sweep read 4 bytes early and saw no close on any of the ten.
+- Emulator: all ten pass spare_sweep_job.sh (listener tables 93-110 switches, as each switch list; input -> shot ->
+  output on the bus; the game never drove 1:1). Mando LE 1.44 with spare_job.sh on its spare 8:8: the game's 9:0
+  refused, a 2000 ms pulse refused, a 4 s hold OFF at the mode's end as a fire of nothing (`[coildrive] ... - OFF`),
+  the 5 s in 10 s budget held.
+- `mode_project.SPARE_IO_PROVEN` names all 69 builds.

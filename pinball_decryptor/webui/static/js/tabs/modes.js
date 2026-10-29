@@ -221,13 +221,14 @@ function ListRow({ r, i, selIdx, isSel }) {
     : r.kind === "game" ? "One of the game's own modes: its timers and awards" : "modes/" + r.slug;
   return html`<button type="button" role="option" key=${r.kind + r.slug}
       aria-selected=${isSel(r)} tabindex=${i === Math.max(0, selIdx) ? 0 : -1}
-      class=${cx("li", isSel(r) && "sel", r.kind === "game" && "game")}
+      class=${cx("li", isSel(r) && "sel", r.kind === "game" && "game", r.bare && "dim")}
       onClick=${() => call("modes.select", r.slug, r.kind)}
       ...${tip(where + (r.chip_tip ? "\n" + r.chip_tip : ""))}>
       <span class="ellip">${r.name}</span>
       ${r.blocks ? html`<span class="r pill bk-pill" title="Made of blocks">Blocks</span>`
         : r.kind === "code" ? html`<span class="r pill" title="Written in C">C</span>`
-        : r.kind === "game" ? (r.chip ? html`<span class="r chip acc sm">${r.chip}</span>` : null)
+        : r.kind === "game" ? (r.chip ? html`<span class="r chip acc sm">${r.chip}</span>`
+          : r.bare ? html`<span class="r small dim">nothing to change</span>` : null)
         : r.chip === "ready" ? html`<span class="r chip ok sm">ready</span>`
         : r.chip ? html`<span class="r chip warn sm">${r.chip}</span>` : null}
     </button>`;
@@ -273,8 +274,7 @@ function ModeList({ s, onNew, onAllNumbers, onSheet }) {
         ${own.map((r, i) => html`<${ListRow} key=${r.kind + r.slug} r=${r} i=${i} selIdx=${selIdx} isSel=${isSel} />`)}
         ${allGame.length && !own.length && s.project ? html`<div class="small muted modes-list-empty">No modes of your own yet.</div>` : null}
         ${allGame.length ? html`<button type="button" class="modes-list-grp" aria-expanded=${!folded}
-            title=${(folded ? "Show the game's own modes: their timers and awards" : "Fold the game's own modes away")
-              + (s.game_hidden ? `\n${s.game_hidden} more have nothing to change here (the game's own timers and awards dialog lists every number).` : "")}
+            title=${folded ? "Show the game's own modes: their timers and awards" : "Fold the game's own modes away"}
             onClick=${() => setFold(folded ? "open" : "closed")}>
             <${Icon} name=${folded ? "right" : "down"} /> The game's own (${allGame.length})</button>` : null}
         ${game.map((r, i) => html`<${ListRow} key=${"g" + r.slug} r=${r} i=${i + own.length} selIdx=${selIdx} isSel=${isSel} />`)}

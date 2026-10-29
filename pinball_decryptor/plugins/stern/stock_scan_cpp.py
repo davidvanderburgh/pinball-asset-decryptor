@@ -78,6 +78,24 @@ def vptr_sites(prog, vptrs):
     return out
 
 
+def _entries_before(prog, f, n=3):
+    """The entries a few words before the ``push`` at *f* that run straight into it and are
+    called: an instruction the compiler scheduled ahead of the push (PAD-834: Jurassic Park
+    LE's Goat Mania constructor is called at ``movw r1`` one word before its ``push``)."""
+    out = []
+    for k in range(1, n + 1):
+        va = f - 4 * k
+        w = prog.word(va)
+        if w is None:
+            break
+        d = S.decode(w, va)
+        if S.ends_flow(d) or d[0] in ("bl", "pushlr") or d[0] in S.TERMINATORS:
+            break
+        if prog.callers(va):
+            out.append(va)
+    return out
+
+
 def init_objects(prog, model, root):
     """Every static object of a class deriving from *root*: ``[{id, a, award, b, timer,
     class, obj, ctor, ctor_call, init}]``. A constructor is a function that stores a class's
@@ -92,6 +110,8 @@ def init_objects(prog, model, root):
         st = prog.facts(f).stores.get(0)
         if isinstance(st, Val) and st.v in by_vptr:
             ctor_class[f] = by_vptr[st.v]
+            for e in _entries_before(prog, f):
+                ctor_class.setdefault(e, by_vptr[st.v])
     funcs = collections.Counter()
     for f in ctor_class:
         for va in prog.callers(f):

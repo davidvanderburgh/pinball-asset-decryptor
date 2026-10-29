@@ -1176,7 +1176,10 @@ def test_no_port_says_why_and_the_server_refuses(tmp_path, preview_on, beatles):
         assert st["new_ok"] is False and st["ex_ok"] is False and st["examples"] == []
         assert st["shots_text"] == "(no shots: modes of your own can't be made for this card yet)"
         # the game's own modes do not need a port: they are listed and can be changed
-        assert [r["name"] for r in st["game_rows"]][:2] == ["Drive My Car", "Main Multiball"]
+        game = {r["name"]: r for r in st["game_rows"]}
+        assert not game["Drive My Car"]["bare"] and not game["Main Multiball"]["bare"]
+        # PAD-834: a mode with nothing to change is listed too, and says so
+        assert game["All My Loving"]["bare"] and "Nothing of it to change" in game["All My Loving"]["chip_tip"]
         n = len(w.asked)
         assert w.call("modes.new") is None
         assert w.asked[n]["title"] == "New mode" and "hands out its shots" in w.asked[n]["message"]

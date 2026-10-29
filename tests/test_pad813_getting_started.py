@@ -73,10 +73,17 @@ def test_top_bar_and_gear_open_it(tmp_path):
 def test_go_opens_the_task_tab(tmp_path):
     with web_app(tmp_path, mfr="stern", era="spike2") as w:
         for task in GS.TASKS:
+            if not task["tab"]:
+                continue
             w.call("shellx.getting_started_open")
             assert w.call("shellx.getting_started_go", task["id"]) == task["tab"], task["id"]
             assert w.state("shell")["tab"] == task["tab"]
             assert w.state("shellx")["getting_started"]["open"] is False
+        # the install card opens no tab: it only closes the page
+        w.call("shellx.getting_started_open")
+        before = w.state("shell")["tab"]
+        assert w.call("shellx.getting_started_go", "install") == ""
+        assert w.state("shell")["tab"] == before
 
 
 def test_go_without_a_manufacturer_goes_to_the_picker(tmp_path):
@@ -93,9 +100,12 @@ def test_every_task_names_a_real_tab_and_has_steps(tmp_path):
         gs = w.state("shellx")["getting_started"]
     assert len({t["id"] for t in GS.TASKS}) == len(GS.TASKS)
     for t in GS.TASKS:
-        assert t["tab"] in rail, t
+        assert t["tab"] in rail or (t["id"] == "install" and t["tab"] == ""), t
         assert 3 <= len(t["steps"]) <= 5, t["id"]
     assert [t["id"] for t in gs["tasks"]] == [t["id"] for t in GS.TASKS]
+    # Phantasize's list (Pinside #406): install, a song, a video, text and pictures
+    assert {"install", "song", "video", "text", "images"} <= {t["id"] for t in GS.TASKS}
+    assert gs["problems"] and all(p["title"] and p["text"] for p in gs["problems"])
 
 
 def test_every_task_ships_its_video_and_poster():
@@ -130,6 +140,37 @@ def test_videos_are_small_h264(tmp_path):
 
 
 def test_page_strings_are_plain_american(tmp_path):
-    words = " ".join([GS.NOTE] + [t["title"] + " " + " ".join(t["steps"]) for t in GS.TASKS])
+    words = " ".join([GS.NOTE] + [t["title"] + " " + " ".join(t["steps"]) for t in GS.TASKS]
+                     + [a + " " + b for a, b in GS.PROBLEMS])
     assert "—" not in words
     assert not re.search(r"\b(colour|favourite|organise|centre)\b", words, re.I)
+
+
+def test_every_page_string_is_translated():
+    """The page's words are in the German, Spanish and French catalogs."""
+    words = [GS.NOTE] + [b for _, b in GS.FLOW]
+    for t in GS.TASKS:
+        words += [t["title"]] + list(t["steps"]) + ([t["go"]] if t["go"] else [])
+    for a, b in GS.PROBLEMS:
+        words += [a, b]
+    words += ["Pick what you want to do. Each one is a short video and a few steps.",
+              "Show this when the app opens", "If something goes wrong",
+              "New here? Short videos show the common jobs.", "Getting started…"]
+    for lang in ("de", "es", "fr"):
+        path = os.path.join(REPO, "pinball_decryptor", "webui", "static", "i18n", lang + ".json")
+        with open(path, encoding="utf-8") as f:
+            cat = json.load(f)
+        missing = [w for w in words if w not in cat]
+        assert not missing, (lang, missing[:5])
+
+
+def test_the_videos_name_the_controls_the_steps_do():
+    """Each video's script (scripts/make_getting_started_videos.py) films the
+    task the page lists, so a step and its video can't drift apart."""
+    import ast
+    src = open(os.path.join(REPO, "scripts", "make_getting_started_videos.py"),
+               encoding="utf-8").read()
+    tree = ast.parse(src)
+    films = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                 and getattr(n.targets[0], "id", "") == "FILMS")
+    assert {k.value for k in films.value.keys} == {t["id"] for t in GS.TASKS}

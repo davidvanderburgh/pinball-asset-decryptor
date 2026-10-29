@@ -21,9 +21,18 @@ FLOW = (
     ("Write", "build and flash"),
 )
 
-#: id, title, the tab its button opens (a rail ns), the button's words, steps.
-#: The tab is only offered when the open manufacturer has it.
+#: id, title, the tab its button opens (a rail ns, or "" for none), the
+#: button's words, steps.  The tab is only offered when the open manufacturer
+#: has it.
 TASKS = (
+    {"id": "install", "title": "Install and get ready", "tab": "", "go": "",
+     "steps": (
+         "Run the installer. It brings its own Python, so the app starts straight away.",
+         "From the Start Menu, run Install Prerequisites and tick the makers you use.",
+         "If it says restart required, use Restart (not Shut down), then run it again.",
+         "In the app, ⚙ > Prerequisites shows what is in, and Install missing "
+         "prerequisites… adds the rest.",
+     )},
     {"id": "extract", "title": "Open and extract a card", "tab": "card",
      "go": "Open Select card",
      "steps": (
@@ -42,6 +51,32 @@ TASKS = (
          "their own sounds.",
          "Right-click it, choose Choose replacement… and pick your mp3, wav or flac.",
          "Play Original and Replacement to compare. Write builds the card.",
+     )},
+    {"id": "video", "title": "Swap a video", "tab": "video",
+     "go": "Open Replace Video",
+     "steps": (
+         "Extract the card first.",
+         "On Replace Video, find the clip. Click it to play it in the Original pane.",
+         "Right-click it, choose Choose replacement… and pick your clip. One that does "
+         "not match the slot is converted when you build.",
+         "Compare plays them side by side. Write builds the card.",
+     )},
+    {"id": "images", "title": "Swap a picture", "tab": "images",
+     "go": "Open Replace Images",
+     "steps": (
+         "Extract the card first.",
+         "On Replace Images, search for the picture and click it.",
+         "Right-click it, choose Choose replacement… and pick your png or jpg.",
+         "It is scaled to the original's size, transparency kept. Write builds the card.",
+     )},
+    {"id": "text", "title": "Change the game's text", "tab": "text",
+     "go": "Open Replace Text",
+     "steps": (
+         "Extract the card first.",
+         "On Replace Text, search for the words you want to change and click the line.",
+         "Type the new words in New text and press Apply. Max is how long the line can be.",
+         "Replace everywhere… changes the same words on every line at once. Write builds "
+         "the card.",
      )},
     {"id": "build", "title": "Build and flash your card", "tab": "write",
      "go": "Open Write",
@@ -85,6 +120,21 @@ TASKS = (
          "It extracts that card, moves your mods onto it and builds it. The log names "
          "anything it skipped.",
      )},
+)
+
+#: Common first-day problems and what fixes them (docs/guide/install.md).
+PROBLEMS = (
+    ("Ubuntu failed to install",
+     "Restart Windows with Restart, then run Install Prerequisites again. Still missing? "
+     "Install Ubuntu from the Microsoft Store, open it once, and run Install Prerequisites "
+     "again."),
+    ("Virtualization is disabled",
+     "Turn on Intel VT-x or AMD SVM in the PC's firmware setup, then run Install "
+     "Prerequisites again."),
+    ("A tab has a lock on it",
+     "That tab needs the card's files. Extract the card into a project folder first."),
+    ("Something else went wrong",
+     "Report a problem in the top bar sends the log and the card's details."),
 )
 
 NOTE = ("The videos use a Stern Spike 2 card. Other makers work the same way on the tabs "

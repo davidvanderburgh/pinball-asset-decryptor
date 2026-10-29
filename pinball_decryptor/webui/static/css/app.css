@@ -438,3 +438,9 @@ html.h-short .page { padding-top: 12px; gap: 10px; }
 .sx-gs-task .t { font-family: var(--cond); font-weight: 600; font-size: 14.5px; line-height: 1.25; padding: 0 4px 4px; }
 .sx-gs-thumb { aspect-ratio: 16 / 9; border-radius: 6px; overflow: hidden; background: var(--bg-2); display: flex; align-items: center; justify-content: center; color: var(--ink-3); }
 .sx-gs-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sx-gs-probs { display: flex; flex-direction: column; gap: 10px; }
+.sx-gs-probs .h2 { margin: 0; font-family: var(--cond); font-size: 18px; }
+.sx-gs-probs dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.sx-gs-probs dl > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.sx-gs-probs dt { font-weight: 600; margin-bottom: 4px; }
+.sx-gs-probs dd { margin: 0; color: var(--ink-2); line-height: 1.45; }

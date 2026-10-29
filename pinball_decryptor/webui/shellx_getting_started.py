@@ -63,7 +63,8 @@ class GettingStartedMixin:
             "open": bool(self._gs_open),
             "at_launch": bool(settings.get(SETTING, False)),
             "flow": [{"tab": a, "what": b} for a, b in GS.FLOW],
-            "tasks": tasks, "note": GS.NOTE})
+            "tasks": tasks, "note": GS.NOTE,
+            "problems": [{"title": a, "text": b} for a, b in GS.PROBLEMS]})
 
     @rpc
     def getting_started_open(self):
@@ -91,7 +92,8 @@ class GettingStartedMixin:
         self._gs_open = False
         self._gs_publish()
         shell = self.ctx.store.get("shell", "view")
-        if task is not None and shell == "mfr" and task["tab"] in self._gs_tabs():
+        if (task is not None and task["tab"] and shell == "mfr"
+                and task["tab"] in self._gs_tabs()):
             self.window.select_tab(task["tab"])
             return task["tab"]
         return ""

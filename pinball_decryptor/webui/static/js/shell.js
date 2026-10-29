@@ -992,7 +992,7 @@ function GettingStarted({ shell }) {
       <aside class="sx-gs-steps">
         <h2 class="h2">${cur.title}</h2>
         <ol>${(cur.steps || []).map((s, i) => html`<li><span class="n">${i + 1}</span><span>${s}</span></li>`)}</ol>
-        <${Button} kind="primary" onClick=${() => call("shellx.getting_started_go", cur.id)}>${canGo ? cur.go : "Choose a manufacturer"}<//>
+        ${cur.tab ? html`<${Button} kind="primary" onClick=${() => call("shellx.getting_started_go", cur.id)}>${canGo ? cur.go : "Choose a manufacturer"}<//>` : null}
       </aside>
     </div>
     <div class="sx-gs-tasks">
@@ -1003,6 +1003,10 @@ function GettingStarted({ shell }) {
       </button>`)}
     </div>
     ${gs.note ? html`<p class="muted small" style="margin:0">${gs.note}</p>` : null}
+    ${(gs.problems || []).length ? html`<section class="sx-gs-probs">
+      <h2 class="h2">If something goes wrong</h2>
+      <dl>${gs.problems.map((p) => html`<div><dt>${p.title}</dt><dd>${p.text}</dd></div>`)}</dl>
+    </section>` : null}
   </div></div>`;
 }
 

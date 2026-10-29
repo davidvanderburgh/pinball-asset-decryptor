@@ -181,6 +181,11 @@ class Film:
         self.shots.append(shot)
         return shot
 
+    def slide(self, kicker, title, lines, hold=5.2):
+        """A step outside the app (the installer, a restart): a title card."""
+        self.shots.append({"slide": {"kicker": kicker, "title": title, "lines": lines},
+                           "caption": "", "box": None, "n": None, "click": False, "hold": hold})
+
     def save(self, task):
         script = {"title": task["title"], "subtitle": SUBTITLES.get(self.vid, ""),
                   "recap": RECAPS.get(self.vid) or list(task["steps"]), "shots": self.shots}
@@ -190,6 +195,10 @@ class Film:
 
 
 SUBTITLES = {
+    "video": "Put your own clip in place of one of the game's.",
+    "images": "Put your own art in place of one of the game's pictures.",
+    "text": "Change the words the game shows on its screen.",
+    "install": "From the installer to a PC that is ready for your first card.",
     "extract": "A Deadpool Pro card, from the picker to a project folder.",
     "song": "Replace one tune on a Deadpool card with your own.",
     "build": "Turn your changes into a card the machine boots.",
@@ -199,6 +208,10 @@ SUBTITLES = {
     "transfer": "New game code? Carry your mods onto it in one go.",
 }
 RECAPS = {
+    "video": ["Replace Video: find the clip", "Right-click, Choose replacement…", "Compare, then build on Write"],
+    "images": ["Replace Images: find the picture", "Right-click, Choose replacement…", "Build on Write"],
+    "text": ["Replace Text: search the words", "New text, then Apply", "Build on Write"],
+    "install": ["Run the installer", "Install Prerequisites, then Restart if asked", "⚙ > Prerequisites re-checks"],
     "extract": ["Choose your manufacturer", "Select card: Browse… to the image", "Extract into a project folder"],
     "song": ["Replace Audio, Type: Music", "Right-click the song, Choose replacement…", "Compare, then build on Write"],
     "build": ["Write: Build / flash SD card…", "Tick build, flash or both", "Pick the SD card and start"],
@@ -519,7 +532,196 @@ def film_transfer(pw, work, out):
         app.close()
 
 
-FILMS = {"extract": film_extract, "song": film_song, "build": film_build, "flash": film_flash,
+def _my_clip(work):
+    """A stand-in for the user's own clip."""
+    path = os.path.join(work, "My clips", "My intro.mp4")
+    if not os.path.isfile(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                        "mandelbrot=size=1280x720:rate=30", "-t", "6", "-pix_fmt", "yuv420p",
+                        "-c:v", "libx264", path], check=True)
+    return path
+
+
+def _my_picture(work, size=(800, 450)):
+    """A stand-in for the user's own art."""
+    path = os.path.join(work, "My art", "My logo.png")
+    if not os.path.isfile(path):
+        from PIL import Image, ImageDraw, ImageFont
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        im = Image.new("RGBA", size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(im)
+        for i in range(0, size[0], 4):
+            d.line([(i, 0), (i, size[1])], fill=(232, 163 - i * 80 // size[0], 61 + i * 120 // size[0], 255))
+        try:
+            font = ImageFont.truetype("arialbd.ttf", size[1] // 4)
+        except OSError:
+            font = ImageFont.load_default()
+        d.text((size[0] // 2, size[1] // 2), "MY ART", fill="white", font=font, anchor="mm",
+               stroke_width=6, stroke_fill="black")
+        im.save(path)
+    return path
+
+
+def _find_row(app, card_sel, table_sel, words):
+    """Type the first of ``words`` that lists a row into the tab's search box."""
+    search = app.page.locator(card_sel + " .toolbar .search input").first
+    for w in words:
+        search.fill("")
+        search.type(w, delay=50)
+        time.sleep(2.2)
+        rows = app.page.locator(table_sel + " .tr:not(.th)")
+        if rows.count():
+            return search, rows.first, w
+    raise SystemExit("none of %s lists a row in %s" % (words, table_sel))
+
+
+def _choose_replacement(app, f, row, path, n, caption):
+    row.click(button="right")
+    time.sleep(0.8)
+    item = app.page.locator(".menu [role=menuitem]", has_text="Choose replacement").first
+    f.snap(caption, item, n=n, settle=0.3)
+    th = threading.Thread(target=item.click)
+    th.start()
+    app.answer_modal(path, kind="file")
+    th.join(30)
+    time.sleep(3)
+
+
+def film_video(pw, work, out):
+    proj = _project(work)
+    clip = _my_clip(work)
+    app = App(pw, work, _with_project(proj))
+    try:
+        to_spike2(app)
+        app.api("ui.select_tab", "audio")
+        f = Film(app, out, "video")
+        page = app.page
+        _clear_rail_switch(app, f, "video", "Video", "Open <b>Replace Video</b>", 1)
+        app.wait(lambda: page.locator(".vid-tbl .tr:not(.th)").count() > 0, timeout=300, step=1)
+        time.sleep(2)
+        search, row, _ = _find_row(app, ".vid-card", ".vid-tbl", ["disco", "multiball", "intro"])
+        f.snap("Search for the clip", search, n=2, click=False)
+        f.snap("Click it to play it in the <b>Original</b> pane", row, n=3)
+        row.click()
+        time.sleep(3)
+        row = page.locator(".vid-tbl .tr:not(.th)").first
+        _choose_replacement(app, f, row, clip, 4,
+                            "Right-click, <b>Choose replacement…</b> and pick your clip")
+        f.snap("One that does not match the slot is converted when you build",
+               page.locator(".vid-preview").first, click=False, zoom=1.15, hold=4.6)
+        cmp_btn = page.locator(".vid-cmp-open").first
+        f.snap("<b>Compare</b> plays them side by side. Write builds the card", cmp_btn, n=5,
+               click=False, hold=4.4)
+        return f.save(_task("video"))
+    finally:
+        app.close()
+
+
+def film_images(pw, work, out):
+    proj = _project(work)
+    app = App(pw, work, _with_project(proj))
+    try:
+        to_spike2(app)
+        app.api("ui.select_tab", "video")
+        f = Film(app, out, "images")
+        page = app.page
+        _clear_rail_switch(app, f, "images", "Images", "Open <b>Replace Images</b>", 1)
+        app.wait(lambda: page.locator(".img-tbl .tr:not(.th)").count() > 0, timeout=300, step=1)
+        time.sleep(2)
+        search, row, _ = _find_row(app, ".img-card", ".img-tbl", ["logo", "deadpool", "title"])
+        f.snap("Search for the picture", search, n=2, click=False)
+        f.snap("Click it to see it in the <b>Original</b> pane", row, n=3)
+        row.click()
+        time.sleep(2.5)
+        row = page.locator(".img-tbl .tr:not(.th)").first
+        _choose_replacement(app, f, row, _my_picture(work), 4,
+                            "Right-click, <b>Choose replacement…</b> and pick your png or jpg")
+        f.snap("It is scaled to the original's size, transparency kept. Write builds the card",
+               page.locator(".img-prev").first, click=False, zoom=1.2, hold=5)
+        return f.save(_task("images"))
+    finally:
+        app.close()
+
+
+def film_text(pw, work, out):
+    proj = _project(work)
+    app = App(pw, work, _with_project(proj))
+    try:
+        to_spike2(app)
+        app.api("ui.select_tab", "images")
+        f = Film(app, out, "text")
+        page = app.page
+        _clear_rail_switch(app, f, "text", "Text", "Open <b>Replace Text</b>", 1)
+        app.wait(lambda: page.locator(".text-table .tr:not(.th)").count() > 0, timeout=300, step=1)
+        time.sleep(2)
+        search, row, word = _find_row(app, ".text-card", ".text-table",
+                                      ["DISCO", "MULTIBALL", "JACKPOT"])
+        f.snap("Search for the words you want to change", search, n=2, click=False)
+        f.snap("Click the line", row, n=3)
+        row.click()
+        time.sleep(1.5)
+        field = page.locator("#text-new").first
+        field = field.locator("input") if field.locator("input").count() else field
+        new = "PARTY TIME" if word == "DISCO" else "MY " + word
+        f.snap("Type the new words in <b>New text</b>", field, n=4)
+        field.fill("")
+        field.type(new, delay=70)
+        time.sleep(1)
+        apply_btn = page.locator(".text-editor").get_by_role("button", name="Apply").first
+        f.snap("Press <b>Apply</b>. Max is how long the line can be", apply_btn, n=5)
+        apply_btn.click()
+        time.sleep(2)
+        f.snap("The new words show in the <b>New Text</b> column. Write builds the card",
+               page.locator(".text-table .tr.sel, .text-table .tr:not(.th)").first, click=False,
+               zoom=1.25, hold=4.8)
+        return f.save(_task("text"))
+    finally:
+        app.close()
+
+
+def film_install(pw, work, out):
+    app = App(pw, work, {"last_manufacturer": "stern"}, rig=True)
+    try:
+        to_spike2(app)
+        app.api("ui.select_tab", "card")
+        f = Film(app, out, "install")
+        page = app.page
+        f.slide("Step 1", "Run the installer",
+                ["It brings its own Python, so the app starts straight away.",
+                 "Its shortcuts start the app as Administrator: writing SD cards needs it."])
+        f.slide("Step 2", "Start Menu: Install Prerequisites",
+                ["Tick the makers you use. It installs only what they need.",
+                 "On Windows that includes <b>WSL2</b> and <b>Ubuntu</b>, which read the card images."])
+        f.slide("Step 3", "Restart required?",
+                ["Use <b>Restart</b>, not Shut down, then run Install Prerequisites again.",
+                 "Ubuntu failed to install? A restart and a second run usually fix it."], hold=5.6)
+        app.wait(lambda: app.state("shell").get("prereqs"), timeout=120, step=2)
+        time.sleep(4)
+        gear = page.locator("header button[aria-label='Settings']").first
+        f.snap("In the app, ⚙ shows what is installed", gear, n=4)
+        gear.click()
+        time.sleep(0.8)
+        pre = page.locator(".menu [role=menuitem]", has_text="Prerequisites").first
+        pre.hover()
+        time.sleep(1.2)
+        item = page.locator(".menu [role=menuitem]", has_text="prerequisites").last
+        f.snap("<b>Prerequisites</b> re-checks, and installs anything missing", item, n=5, click=False,
+               settle=0.3, hold=4.8)
+        page.keyboard.press("Escape")
+        time.sleep(0.5)
+        app.api("shellx.getting_started_open")
+        time.sleep(2)
+        probs = page.locator(".sx-gs-probs").first
+        f.snap("Getting started lists the common problems and their fixes", probs, click=False,
+               zoom=1.2, hold=5.2)
+        return f.save(_task("install"))
+    finally:
+        app.close()
+
+
+FILMS = {"install": film_install, "extract": film_extract, "video": film_video,
+         "images": film_images, "text": film_text, "song": film_song, "build": film_build, "flash": film_flash,
          "multiboot": film_multiboot, "emulate": film_emulate, "transfer": film_transfer}
 
 
@@ -531,7 +733,8 @@ def render(script, mp4, poster):
         b = p.chromium.launch(channel="msedge")
         page = b.new_page(viewport={"width": 1280, "height": 720})
         page.goto("file:///" + PLAYER.replace("\\", "/"))
-        shots = [dict(s, img="file:///" + s["img"].replace("\\", "/")) for s in script["shots"]]
+        shots = [dict(s, img="file:///" + s["img"].replace("\\", "/")) if s.get("img") else s
+                 for s in script["shots"]]
         total = page.evaluate("s => load(s)", dict(script, shots=shots))
         page.wait_for_function("Array.from(document.images).every(i => i.complete)", timeout=60000)
         page.evaluate("document.fonts.ready")

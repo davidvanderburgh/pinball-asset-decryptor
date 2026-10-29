@@ -42,6 +42,14 @@
   .card .steps div { display: flex; gap: 14px; align-items: center; font-size: 25px; color: #e9eae7; }
   .card .steps span { flex: none; width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(232,163,61,.6); color: #e8a33d;
                       font: 700 15px "IBM Plex Mono", monospace; display: flex; align-items: center; justify-content: center; }
+  /* a slide: a step that happens outside the app (the installer, a restart) */
+  .slide { width: 1600px; height: 900px; box-sizing: border-box; padding: 0 150px; background: #15171a; display: flex;
+           flex-direction: column; justify-content: center; gap: 22px; }
+  .slide .k { font: 600 21px "IBM Plex Sans", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #e8a33d; }
+  .slide .h { font: 700 64px "IBM Plex Sans Condensed", "IBM Plex Sans", sans-serif; line-height: 1.1; color: #e9eae7; }
+  .slide .l { font-size: 31px; line-height: 1.45; color: #b7bbb9; max-width: 1200px; }
+  .slide .l b { color: #e9eae7; font-weight: 600; }
+  .slide code { font: 500 28px "IBM Plex Mono", monospace; color: #f3c27a; background: #22262b; padding: 2px 10px; border-radius: 6px; }
 </style>
 </head>
 <body>
@@ -89,9 +97,19 @@ function load(script) {
   S.shots.forEach(function (sh, i) {
     var el = document.createElement("div");
     el.className = "shot";
-    var img = document.createElement("img");
-    img.src = sh.img;
-    el.appendChild(img);
+    if (sh.slide) {
+      var sl = document.createElement("div");
+      sl.className = "slide";
+      sl.innerHTML = '<div class="k"></div><div class="h"></div>' +
+        (sh.slide.lines || []).map(function (l) { return '<div class="l">' + l + "</div>"; }).join("");
+      sl.querySelector(".k").textContent = sh.slide.kicker || "";
+      sl.querySelector(".h").textContent = sh.slide.title || "";
+      el.appendChild(sl);
+    } else {
+      var img = document.createElement("img");
+      img.src = sh.img;
+      el.appendChild(img);
+    }
     if (sh.box) {
       var r = document.createElement("div");
       r.className = "ring";
@@ -159,7 +177,7 @@ function setTime(t) {
     var to = bx ? [bx[0] + Math.min(bx[2] * .5, 60), bx[1] + bx[3] * .6] : from;
     var k2 = ease((local - 0.7) / 1.0);
     var pt = toStage(c, lerp(from[0], to[0], k2), lerp(from[1], to[1], k2));
-    cur.style.opacity = bx || prev ? 1 : 0;
+    cur.style.opacity = (bx || prev) && !p.sh.slide ? 1 : 0;
     cur.style.transform = "translate(" + (pt[0] - 6) + "px," + (pt[1] - 3) + "px)";
     var press = local - 1.85;
     var clicks = bx && p.sh.click !== false;
@@ -169,7 +187,7 @@ function setTime(t) {
     rip.style.width = rip.style.height = rs + "px";
     rip.style.transform = "translate(" + (pt[0] - rs / 2) + "px," + (pt[1] - rs / 2) + "px)";
     // the caption
-    var capK = ease((local - 0.15) / 0.4);
+    var capK = p.sh.slide ? 0 : ease((local - 0.15) / 0.4);
     cap.style.opacity = capK;
     cap.style.transform = "translateY(" + (18 * (1 - capK)) + "px)";
     cap.querySelector(".n").textContent = p.sh.n != null ? String(p.sh.n) : "";

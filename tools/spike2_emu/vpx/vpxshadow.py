@@ -554,7 +554,9 @@ def patch(script, m):
     # Iron Maiden loads core.vbs and controller.vbs itself near its start,
     # and they died on "Variable is undefined: 'UseSolenoids'" with this line
     # at the end of the script, not yet run
-    at = next((i + 1 for i, ln in enumerate(lines[:50])
+    # after Option Explicit wherever it is (Aerosmith's is on line 133, under
+    # a long comment header): before it, VBScript refuses the whole script
+    at = next((i + 1 for i, ln in enumerate(lines)
                if ln.strip().lower().startswith("option explicit")), 0)
     lines.insert(at, "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0"
                      "   ' PAD: for core.vbs (vpxshadow.py)")

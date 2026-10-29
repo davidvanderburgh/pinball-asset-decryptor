@@ -554,7 +554,12 @@ echo "gone=$(pad_slot_of $a)"
 def test_pad_pids_sees_only_its_own_slot():
     rc, out, err = _sh(r'''
 . "$R/padslot.sh"
-cp "$(command -v sleep)" /tmp/pss.$$ && S=/tmp/pss.$$
+# a script, not a renamed copy of sleep: a shebang script's comm is its own
+# file name, while uutils' multicall sleep (Ubuntu 26.04) refuses a new name
+S=/tmp/pss.$$
+printf '#!/bin/sh
+sleep "$1"
+' > "$S" && chmod +x "$S"
 env PAD_SLOT=1 "$S" 30 & a=$!
 env PAD_SLOT=2 "$S" 30 & b=$!
 "$S" 30 & c=$!

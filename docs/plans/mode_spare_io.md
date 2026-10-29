@@ -1,0 +1,92 @@
+# Spare switches and coils for modes (PAD-826)
+
+## The ask
+
+RobF on Pinside (post #420): *"Do you think it's possible to unmask unused
+switches and coils? This could be a mod maker's dream come true."* David,
+2026-10-29: tackle it in this ticket.
+
+A mod maker wires a new target to a switch input the game never reads, or a new
+coil, flasher or toy to a driver output the game never fires, and a PAD mode
+uses it: the switch as a shot, the output held for a moment with the same
+limits as the mode coils (PAD-381 / PAD-420).
+
+## What the game does, read from its code
+
+Godzilla Pro 1.15 (`spike2root/games/godzilla_pro/game`) and 1.16
+(`godzilla_pro-1_16_0_spike2.raw`). The node-bus library is shared framework
+code, so the shapes below should hold on every Spike 2 build. The census
+script checks that build by build.
+
+### Switch inputs
+
+Every board's switches come back as 64 bits per node on command 0x11
+(`0x59ef60` on 1.15). The switch service `0x1e78f4(node, bits[8])` keeps one
+160-byte block per node inside the switch struct (1.15: `0x7a958c`, the struct
+hwshim calls SW_STRUCT; +0 is the entry array):
+
+| block offset (from struct + 16 + node*160) | what |
+|---|---|
+| +12 | the previous 8 bytes of input bits |
+| +20 | the current 8 bytes, as read off the board (electrical level) |
+| +28 | u16[64]: switch id per input bit; **0 = the game has no switch there** |
+
+The service walks the changed bits and skips every bit whose id is 0, so a
+spare input's level is in memory and nothing in the game ever acts on it. A
+mode can read it from `+20` without touching the game's switches.
+
+Bit numbering is the switch list's: byte = bit / 8, mask = 1 << (bit % 8)
+(Godzilla Pro: node 8 bit 8 = Skill Shot).
+
+### Driver outputs
+
+The coil request (`coil_fire`) only fills the coil's record in the coil table
+(1.15: pointer at `0x7bcc98`, count at `0x7e4578`, mutex `0x7bcc9c`). The
+coil service thread (`0x403df4` on 1.16) sends the fire frame through
+`0x5a9afc(node, spec)`:
+
+    spec: +0 u8 coil, +1 u8 pulse power, +2 u16 pulse ms, +4 u8 hold power,
+          +6 u16 hold ms, +8 u16 x (0)
+
+`0x5a995c` turns the ms into board ticks itself (the node's tps from
+`0x5a9164`; 0 = the board is not registered and nothing is sent), and builds
+`8n 0b 40 <coil> <pp> <pt lo hi> <hp> <ht lo hi> <x lo hi> <ck>`, the frame
+hwshim's `[coildrive]` decodes. The frame goes out through the bus transfer
+`0x5a3a44`, which takes the bus mutex itself (lock, tcflush, write, read,
+unlock), so a game process of ours can call the wrapper directly.
+
+The wrapper refuses any coil above 8 (`ldrb r3,[r1]; cmp r3,#8; bls`), so a
+driver board has outputs 0..8 as far as the game's framework goes. A spare
+output = a node that has coil records (a driver board) and an index 0..8 that
+no record names. Godzilla Pro: node 8 uses 0-8 (none spare), node 9 uses 1, 2,
+3, 6, 7 (spare: 0, 4, 5, 8).
+
+The board ends the command by itself at pulse + hold, so one bounded command
+of ours needs nothing from the game to stop. No record means the game never
+sends that output anything, neither an OFF nor a fire.
+
+## The design
+
+- Port lines, per build, found by `modes/spare_io.py` from the build's own
+  binary: `site coil_frame` (the wrapper, its first words checked like every
+  site) and `data sw_struct`. Where a port has no `coil_table`/`coil_count`
+  yet, the same script adds them.
+- Runtime (`pad_mode_runtime.c`):
+  - spare outputs are worked out at run time from the coil table (node with
+    records, index 0..8 with none), so no list per build can go stale.
+  - `pm_spare_coil(node, coil, power, ms)`: ONE bounded command, at most
+    5000 ms (the MAGNET_MAX_MS rules: 3 s between, 6 a minute, only while the
+    mode runs, in a game, not tilted), refused for an output the game uses.
+    Let go early with an all-zero fire (power 0 for 0 ms), as the game's
+    OFF.
+  - `pm_spare_switch(node, bit)`: 1 closed, 0 open, -1 not a spare input.
+    Edges reach a mode as shots ("Spare 9:4"), debounced over two ticks.
+    A spare input reads closed when its bit is 0 (Stern's switches are active
+    low, hwshim's sw_inactive_level) unless the mode asks for active high.
+- Blocks: a "spare switch" shot and a "pulse spare output" action.
+
+## Proof
+
+In the emulator: the spare switch set with PAD_NB_SW reaches the mode as a
+shot. The spare output appears in `[coildrive]` as `node N coil M`, with its
+time, and nothing of the game's lands on it. Census over every port.

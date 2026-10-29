@@ -70,6 +70,14 @@ if [ "$(id -u)" != 0 ]; then
     exit 1
 fi
 
+# A read-only disk makes every step below fail with I/O errors that read like
+# a broken apt (PAD-816) - and the run still ended "result=ok". Say what it is.
+if pad_disk_readonly /var/lib; then
+    pad_disk_readonly_say setup 2>&1
+    echo "result=readonly"
+    exit 1
+fi
+
 #: The facts, from the ONE place that derives them. setupfix does not repeat
 #: setupcheck's probing - it asks it, so the two can never disagree about what
 #: is missing or about which register command this distro wants.

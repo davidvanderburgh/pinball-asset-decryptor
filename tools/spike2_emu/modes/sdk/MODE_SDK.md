@@ -1817,6 +1817,18 @@ data sw_struct    <the switch service's struct>              +16 one 160-byte bl
 data coil_count / coil_table                                 the coil records (also PAD-420's)
 ```
 
+The ten builds of the OLDER framework (Aerosmith LE 1.15, Avengers LE 1.09, Batman 1.13, Guardians LE 1.14, Iron Maiden
+LE 1.16, Mando LE 1.44, Rush LE 1.18, Stranger Things LE 1.12, Sword of Rage LE 1.18, Turtles Pro 1.58) keep switches
+and coils another way, and carry instead:
+
+```
+data sw_listen    <the switch listener table>   +268 boards, +12 an entry each [board record, first listener]; a listener's switch at +20 (its bit at +18), the next at +24
+data sw_boards    <the board table>             board = [sw_boards + node * 4]: its bits at +576, XORed with its mask at +584
+site coil_used    <the game's "a coil there">   used(node, output): a spare output is one it says no to, on a board it says yes to for another
+```
+
+They have no OFF frame: a spare output is switched off there with a fire of nothing (every power and time 0).
+
 The switch struct is checked against the game's own switch entries before any bit is read: every switch id in the map
 must be the entry naming that node and bit, or the spare inputs are off for the run (`spare inputs: ... does not
 check out`). `PM_CAN_SPARE_SWITCHES` and `PM_CAN_SPARE_COILS` say what this port has.

@@ -2704,18 +2704,26 @@ SPARE_IO_PROVEN = frozenset({
     "star_wars_pro-1.31", "stranger_things-1.13", "stranger_things_le-1.13", "sword_of_rage_le-1.19",
     "sword_of_rage_pro-1.19", "turtles_le-1.59", "turtles_pro-1.59", "uncanny_xmen_le-0.98",
     "uncanny_xmen_pro-0.98", "venom_le-1.07", "venom_pro-1.07",
+    # 2026-10-29 run 3, the OLDER framework (the listener table, the board table, the game's coil query; rerun.sh on rigs
+    # 1 and 4, the same job): each listener table checked out (93-110 switches, as each switch list), the spare input
+    # closing came as the mode's shot in a game and the spare output 1:1 went out on the bus; the game never drove it
+    "aerosmith_le-1.15", "avengers_infinity_le-1.09", "batman-1.13", "guardians_le-1.14", "iron_maiden_le-1.16",
+    "mando_le-1.44", "rush_le-1.18", "stranger_things_le-1.12", "sword_of_rage_le-1.18", "turtles_pro-1.58",
 })
 
 
 def _spare(port, key):
-    """PAD-826: ("in", "out") as far as this build has them: the switch struct (`data sw_struct`) for spare inputs;
-    the node-bus fire and OFF (`site coil_frame` / `coil_off`) and the coil table for spare outputs."""
+    """PAD-826: ("in", "out") as far as this build has them: the switch struct (`data sw_struct`), or on the older
+    framework the listener and board tables, for spare inputs; the node-bus fire (`site coil_frame`) with the OFF and the
+    coil table, or on the older framework the game's coil query (`site coil_used`), for spare outputs."""
     if not port or key not in SPARE_IO_PROVEN:
         return ()
     out = ()
-    if port["data"].get("sw_struct"):
-        out += ("in",)
-    if all(n in port["site"] for n in ("coil_frame", "coil_off")) and all(port["data"].get(n) for n in ("coil_table", "coil_count")):
+    if port["data"].get("sw_struct") or (port["data"].get("sw_listen") and port["data"].get("sw_boards")):
+        out += ("in",)                                   # the newer framework's struct, or the older one's listeners
+    if "coil_frame" in port["site"] and (
+            ("coil_off" in port["site"] and all(port["data"].get(n) for n in ("coil_table", "coil_count")))
+            or ("coil_used" in port["site"] and not port["data"].get("coil_table"))):   # the older framework
         out += ("out",)
     return out
 

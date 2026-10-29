@@ -249,7 +249,7 @@ def test_blocks_compile_to_the_sdk_calls():
 def test_only_a_proven_build_offers_them():
     profiles = MP.profiles()
     assert profiles["godzilla_pro_1_16"].spare == ("in", "out")
-    assert sum(1 for p in profiles.values() if p.spare == ("in", "out")) == len(MP.SPARE_IO_PROVEN) == 59
+    assert sum(1 for p in profiles.values() if p.spare == ("in", "out")) == len(MP.SPARE_IO_PROVEN) == 69
     for p in profiles.values():
         key = "%s-%s" % (p.key.rsplit("_", 2)[0], ".".join(p.key.rsplit("_", 2)[1:]))
         if key not in MP.SPARE_IO_PROVEN:

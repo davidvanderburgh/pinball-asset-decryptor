@@ -448,6 +448,71 @@ def test_displayed_number_is_a_reversed_position_not_the_sid():
         ((n - 1) - p, nm) for p, nm in enumerate(names[:-1])]
 
 
+def _template_fixture(parked):
+    """The 10-entry Sound Test template, its six sound entries on node ids 14..9
+    and *parked* {position: sid} left on a placeholder sound by the title."""
+    names = ["SPEECH: 'WHAT IS IT ...'", "SPEECH: 'NOTHING CAN ...'",
+             "SOUND: CROWD CHEER", "SOUND: STINGER",
+             "MUSIC: ALTERNATE MAIN PLAY", "MUSIC: SHOOTER GROOVE",
+             "Cabinet Speaker", "Right Backbox Speaker",
+             "Left Backbox Speaker", "Cabinet and Backbox Speakers", "INVALID"]
+    node_ids = [14, 13, 12, 11, 10, 9, 1, 2, 3, 4, 0]
+    lists_by_id = {0: [], 5: [0x91], 6: [0x92], 7: [0x93], 8: [0x94]}
+    for p, nid in enumerate(node_ids[:-1]):
+        lists_by_id[nid] = [parked.get(p, 0x700 + p)]
+    return names, _fake_fw(names, node_ids, lists_by_id)
+
+
+def test_template_left_on_a_placeholder_names_nothing():
+    """PAD-823: Foo Fighters Pro 1.04 leaves all six template sounds on sid 0x44
+    (SPEECH, SOUND and MUSIC alike) and Mandalorian Pro 1.45 its two speech
+    lines and two sounds on 0xfb.  The game plays that one sound for every one
+    of them, so none of their names is its name; the speakers still are."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    names, fw = _template_fixture({p: 0x44 for p in range(6)})
+    assert sfx_names.locate_menu_sids(fw) == [
+        (0x700 + p, n) for p, n in enumerate(names[6:10], 6)]
+    names, fw = _template_fixture({p: 0xFB for p in range(4)})
+    assert sfx_names.locate_menu_sids(fw) == [
+        (0x700 + p, n) for p, n in enumerate(names[4:10], 4)]
+
+
+def test_template_wired_by_the_title_keeps_every_name():
+    """TMNT Pro 1.59 wires its template (sid 0x306 says "What is it now,
+    Krang?"): every entry plays its own sound and keeps its name."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    names, fw = _template_fixture({})
+    assert sfx_names.locate_menu_sids(fw) == [
+        (0x700 + p, n) for p, n in enumerate(names[:-1])]
+
+
+def test_entries_of_one_kind_may_share_a_sound():
+    """Iron Maiden plays one recording for three "SPEECH: SUPER JACKPOT"s and
+    Godzilla one for six "SE GZ VO GAME BATTLE ... COMPLETED 3"s: a shared
+    sid is a placeholder only when entries of different kinds share it."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names as SN
+    assert SN._placeholder_sids([(1, "SPEECH: A"), (1, "SPEECH: B"),
+                                 (2, "SE GZ VO X 3"), (2, "SE GZ VO Y 3"),
+                                 (3, "SOUND: C"), (3, "MUSIC: D"),
+                                 (4, "Speech: 'x'"), (4, "SPEECH: y")]) == {3}
+    assert SN._entry_kind("SE: TEST 2: LEARN GENDERS") == "SE"
+    assert SN._entry_kind("Music: Shooter Groove") == "MUSIC"
+    assert SN._entry_kind("Cabinet Speaker") == ""
+
+
+def test_clip_sound_menu_names_skip_a_placeholder():
+    """The clip-sound request names read the same menu: a request the title
+    left on the placeholder is not given a template name either."""
+    from pinball_decryptor.plugins.stern import clip_sounds as CS
+    names, fw = _template_fixture({p: 0x44 for p in range(6)})
+    lists = [[]] * 15
+    for p, nid in enumerate([14, 13, 12, 11, 10, 9, 1, 2, 3, 4]):
+        lists[nid] = [0x44] if p < 6 else [0x700 + p]
+    assert CS.menu_names(fw, lists) == {
+        1: "Cabinet Speaker", 2: "Right Backbox Speaker",
+        3: "Left Backbox Speaker", 4: "Cabinet and Backbox Speakers"}
+
+
 # ---- build_name_map graceful degradation ------------------------------------
 
 def test_locate_menu_names_empty_on_junk():
@@ -503,3 +568,34 @@ def test_a_result_is_cached_and_no_names_is_said(tmp_path, monkeypatch):
     assert len(os.listdir(str(tmp_path))) == 1      # a real "none fit" is kept
     got, _ = _naming_run(tmp_path, monkeypatch, lambda e, p, log=None: {7: "SE FX A"})
     assert got == {}                                 # served from the cache
+
+
+# ---- PAD-823: the resolver answers on a fresh boot when the derive's emu won't ----
+
+def test_resolver_emu_boots_a_fresh_one_only_when_needed(monkeypatch):
+    """A first extract derives the params on its emulator, and on Venom Pro 1.07,
+    Star Wars Pro 1.31 and X-Men Pro 0.98 the resolver then jumps to 0: no names
+    and no request map. The names and requests go to a fresh boot of the card."""
+    from pinball_decryptor.plugins.stern.spike2 import emulator as EM
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    booted = []
+
+    class _Fresh:
+        def __init__(self, gr, img):
+            self.paths = (gr, img)
+
+        def boot(self):
+            booted.append(self.paths)
+
+    monkeypatch.setattr(EM, "Spike2Emu", _Fresh)
+    derived = object()
+    monkeypatch.setattr(sfx_names, "_find_resolver", lambda emu, fw=None: (0x3F5854, 0x40))
+    assert engine._resolver_emu(derived, "gr", "img") is derived and not booted
+    monkeypatch.setattr(sfx_names, "_find_resolver", lambda emu, fw=None: (None, None))
+    got = engine._resolver_emu(derived, "gr", "img")
+    assert isinstance(got, _Fresh) and booted == [("gr", "img")]
+
+    def _no_boot(emu, fw=None):
+        raise RuntimeError("no firmware")
+    monkeypatch.setattr(sfx_names, "_find_resolver", _no_boot)
+    assert engine._resolver_emu(derived, "gr", "img") is derived

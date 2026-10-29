@@ -46,6 +46,7 @@ def test_all_current_paths_land_in_one_directory():
     STEM + ".r1.requests1.json",
     STEM + _REV_TAG + ".requests1.json",     # PAD-635: no later parts
     STEM + _REV_TAG + ".sfxnames4.json",     # PAD-636: first marker 0b 00 00 00 only
+    STEM + _REV_TAG + ".sfxnames5.json",     # PAD-823: placeholder named, dead resolver
     STEM + _REV_TAG + ".sites1.pkl",         # PAD-636: next descriptor's payloads
     STEM + _REV_TAG + ".requests2.json",     # PAD-636: next descriptor's parts
     STEM + _REV_TAG + ".sites2.pkl",         # PAD-800: no waits
@@ -57,7 +58,7 @@ def test_superseded_files_are_stale(name):
 @pytest.mark.parametrize("name", [
     STEM + _REV_TAG + ".pkl",
     STEM + _REV_TAG + ".consumed.npy",
-    STEM + _REV_TAG + ".sfxnames5.json",
+    STEM + _REV_TAG + ".sfxnames6.json",
     STEM + _REV_TAG + ".requests3.json",
     STEM + _REV_TAG + ".sites3.pkl",
 ])

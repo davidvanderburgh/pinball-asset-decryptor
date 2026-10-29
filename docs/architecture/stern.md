@@ -367,13 +367,16 @@ menu name      24B name-group table (5 identical char*, one per UI language)
 
 **The table is found by shape, never by a name.** Of the ~140 name-group tables in a Stern binary, exactly one has a `{group_ptr, node_id}` array pointing at it, so `_group_sites` enumerates every candidate table and a single numpy pass finds the longest stride-8 run of references into one of them. Anchoring on the literal `SE FX ` (v0.91.0) only ever matched Led Zeppelin and Rush, and left TMNT, Elvira, Godzilla, Jaws, Deadpool, Iron Maiden, James Bond and Jurassic Park naming nothing.
 
-Five traps, each of which produced wrong or absent names in a shipped build:
+Six traps, each of which produced wrong or absent names in a shipped build:
 
 1. the 8-byte array is `{group_ptr, node_id}`, **not** `{node_id, group_ptr}` — reading it the other way shifts every id by one entry (v0.61.0);
 2. the list block's final u32 closes list id 0, and trailing padding words split into further empty lists. Since ids count from the **end**, one stray empty renumbers everything (`_walk_menu_table` keeps exactly one);
 3. the block's extent is found by counting terminators, **not** by bounding sid values: on the multi-category titles a sid carries its category in the high half (`category = sid >> 16`), so Rush's ids run past `0x10000` and a value ceiling truncated the block to 86 of 550 lists, resolving nothing (v0.91.0);
 4. the array is **not** necessarily adjacent to the table it indexes — Godzilla parks its array 14 KB ahead of a 1315-entry table, so requiring adjacency found no menu there at all (v0.91.0);
-5. the blanket "never name a record ≥ 20s" music guard must not apply to a menu entry that is *itself* a music name, or Elvira's 53 `MUSIC:` tracks are all discarded.
+5. the blanket "never name a record ≥ 20s" music guard must not apply to a menu entry that is *itself* a music name, or Elvira's 53 `MUSIC:` tracks are all discarded;
+6. the small 10-entry Sound Test (two speech lines, two sounds, two songs, the four speakers: Mandalorian, Foo Fighters, Venom, TMNT, Star Wars, Munsters, Guardians, Stranger Things, Bond, D&D, X-Men, Beatles) is a template each title fills in, and a title that never wired an entry leaves its node on one placeholder sound: Foo Fighters 1.04 plays sid `0x44` (half a second) for all six, Mandalorian 1.45 `0xfb` for both speech lines and both sounds. Those lists are the firmware's real ones (TMNT's decode to "What is it now, Krang?" / "Nothing can stop the almighty Krang!"), so the reader is right and the *names* are not: a sid shared by entries of more than one kind (`SPEECH:` / `SOUND:` / `MUSIC:` ...) names nothing (`_placeholder_sids`, PAD-823). Entries of one kind may share a sound (Iron Maiden's three `SPEECH: SUPER JACKPOT`), and no full-size menu in the library shares one across kinds. Where a title wired real sounds under the template's stock labels (Venom's `SPEECH: 'WHAT IS IT ...'` says "Hang on, got to send a quick text"; D&D's, "A spectator is attacking you!") the game's own label is kept.
+
+The resolver must answer on the emulator the names are resolved on: after a first extract's derive, Venom Pro 1.07, Star Wars Pro 1.31 and X-Men Pro 0.98 index a table the derive left empty and jump to 0, so the names and the request map run on a fresh boot of the card there (`engine._resolver_emu`, PAD-823).
 
 The number the machine **displays** is a fourth thing again — a reversed position `(N-1) - p` over the whole table, OCR-verified against a real Sound Test. `locate_menu_names` returns that for the `sound_test_names.csv` sidecar; `locate_menu_sids` returns the resolver sid for naming. They are not interchangeable.
 

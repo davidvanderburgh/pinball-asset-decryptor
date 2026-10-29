@@ -157,13 +157,14 @@ def request_table(raw, fragments):
 
 def menu_names(raw, lists):
     """``{request: Sound Test name}``: the menu's node id is the request id; a name is kept only
-    where the menu's sid list is the request's own, list for list (``sound_map.py``)."""
+    where the menu's sid list is the request's own, list for list (``sound_map.py``), and never
+    where the title left the entry on a placeholder sound (PAD-823, ``_placeholder_sids``)."""
     from .spike2 import sfx_names as SN
     t = SN._walk_menu_table(raw)
     if t is None:
         return {}
     ml, nl = t["lists"], len(t["lists"])
-    out = {}
+    found = []
     for p, name in enumerate(t["names"]):
         if not SN._is_sound_entry(name):
             continue
@@ -172,8 +173,9 @@ def menu_names(raw, lists):
             continue
         li = (nl - 1) - nid
         if 0 <= li < nl and ml[li] == lists[nid]:
-            out[nid] = name.strip()
-    return out
+            found.append((nid, ml[li][-1] if ml[li] else None, name.strip()))
+    parked = SN._placeholder_sids([(sid, name) for _nid, sid, name in found if sid is not None])
+    return {nid: name for nid, sid, name in found if sid not in parked}
 
 
 # ---- where the sound functions are -----------------------------------------------------------

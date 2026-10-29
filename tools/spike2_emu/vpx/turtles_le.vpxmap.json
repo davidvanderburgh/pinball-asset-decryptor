@@ -11,43 +11,123 @@
     "under each light, and the table script's own comments. GUESS = wants a look at the machine."
   ],
   "title": "turtles_le",
-  "detect": ["tmnt_104", "Bigus / Cheese3075"],
+  "detect": [
+    "tmnt_104",
+    "Bigus / Cheese3075"
+  ],
   "patcher": "patch_turtles_le.py",
   "model": "LE",
-  "output": "Teenage Mutant Ninja Turtles (Stern-Data East mash-up) v2.86d (PAD).vpx",
-  "table": {"name": "Teenage Mutant Ninja Turtles (Stern-Data East mash-up) v2.86d", "by": "Bigus / Cheese3075", "where": "VPUniverse"},
+  "output": "Teenage Mutant Ninja Turtles (Stern-Data East mash-up) v2.86d LE (PAD).vpx",
+  "table": {
+    "name": "Teenage Mutant Ninja Turtles (Stern-Data East mash-up) v2.86d",
+    "by": "Bigus / Cheese3075",
+    "where": "VPUniverse"
+  },
   "game_on": {
     "_": "a synthetic solenoid for core.vbs's GameOnSolenoid (UseSolenoids=2, fast flips): ON while the flipper coils' board rules are armed",
-    "number": 40, "coils": [[8, 5], [8, 0]]
+    "number": 40,
+    "coils": [
+      [
+        8,
+        5
+      ],
+      [
+        8,
+        0
+      ]
+    ]
   },
   "cabinet": {
-    "start": 1036, "launch": 1034, "tilt": 1038, "slam": 1045,
-    "left_flipper": 1066, "right_flipper": 1065, "up_left_flipper": 1068,
+    "start": 1036,
+    "launch": 1034,
+    "tilt": 1038,
+    "slam": 1045,
+    "left_flipper": 1066,
+    "right_flipper": 1065,
+    "up_left_flipper": 1068,
     "coin_door_interlock": 1033
   },
-
   "switch_rewrite": {
     "_": "the table's old Data East number -> Spike 2 switch id where the number names ONE thing (0 = no Stern switch: the edge is dropped). Shared numbers (20, 32, 40, 49, 50) go by object below.",
-    "10": 0, "11": 0, "12": 0, "13": 0, "14": 69, "17": 58, "18": 62, "19": 61,
-    "23": 0, "25": 0, "26": 63, "27": 63, "28": 63, "29": 63, "30": 48, "31": 0,
-    "33": 49, "34": 46, "35": 80, "36": 64, "37": 64, "38": 64, "39": 95, "41": 0,
-    "46": 94, "47": 93, "48": 92, "55": 81, "56": 56
+    "10": 0,
+    "11": 0,
+    "12": 0,
+    "13": 0,
+    "14": 69,
+    "17": 58,
+    "18": 62,
+    "19": 61,
+    "23": 0,
+    "25": 0,
+    "26": 63,
+    "27": 63,
+    "28": 63,
+    "29": 63,
+    "30": 48,
+    "31": 0,
+    "33": 49,
+    "34": 46,
+    "35": 80,
+    "36": 64,
+    "37": 64,
+    "38": 64,
+    "39": 95,
+    "41": 0,
+    "46": 94,
+    "47": 93,
+    "48": 92,
+    "55": 81,
+    "56": 56
   },
   "switch_by_object": {
     "_": "every switch edge, by the table object whose event sub sends it (the patcher rewrites by this first)",
     "sw14": 69,
-    "sw17": 58, "sw20a": 59, "sw18": 62, "sw20": 60, "sw19": 61,
-    "Bumper3": 92, "Bumper1": 93, "Bumper2": 94,
-    "t26": 63, "t27": 63, "t28": 63, "t29": 63,
-    "DoubleTarget1": 63, "DoubleTarget2": 63, "DoubleTarget3": 63, "DoubleTarget4": 63,
-    "t36": 64, "t37": 64, "t38": 64, "DoubleTarget8": 64, "DoubleTarget9": 64,
-    "t30": 48, "t33": 49,
-    "t34": 46, "t35": 80, "t39": 95,
-    "t49a": 85, "t32": 86, "t49": 0,
-    "t55": 81, "t25": 0, "t24": 0,
-    "sw50": 87, "sw50a": 82, "sw56": 56,
-    "sw32": 89, "sw40": 90, "sw31": 0, "sw40a": 47,
-    "sw41": 0, "SewerUpKick": 0, "Drain": 0, "BallRelease": 0, "BallRelease2": 0, "BallRelease3": 0, "CreatBalls": 0,
+    "sw17": 58,
+    "sw20a": 59,
+    "sw18": 62,
+    "sw20": 60,
+    "sw19": 61,
+    "Bumper3": 92,
+    "Bumper1": 93,
+    "Bumper2": 94,
+    "t26": 63,
+    "t27": 63,
+    "t28": 63,
+    "t29": 63,
+    "DoubleTarget1": 63,
+    "DoubleTarget2": 63,
+    "DoubleTarget3": 63,
+    "DoubleTarget4": 63,
+    "t36": 64,
+    "t37": 64,
+    "t38": 64,
+    "DoubleTarget8": 64,
+    "DoubleTarget9": 64,
+    "t30": 48,
+    "t33": 49,
+    "t34": 46,
+    "t35": 80,
+    "t39": 95,
+    "t49a": 85,
+    "t32": 86,
+    "t49": 0,
+    "t55": 81,
+    "t25": 0,
+    "t24": 0,
+    "sw50": 87,
+    "sw50a": 82,
+    "sw56": 56,
+    "sw32": 89,
+    "sw40": 90,
+    "sw31": 0,
+    "sw40a": 47,
+    "sw41": 0,
+    "SewerUpKick": 0,
+    "Drain": 0,
+    "BallRelease": 0,
+    "BallRelease2": 0,
+    "BallRelease3": 0,
+    "CreatBalls": 0,
     "_why": {
       "t26..t29": "the LAIR standups (lights l26..l29 sit on the L-A-I-R letters); the machine reads the bank as ONE switch",
       "t36..t38": "the APRIL standups (only three on the table for five letters); ONE switch on the machine",
@@ -69,8 +149,19 @@
   },
   "switch_holds": {
     "_": "switches held while a ball sits somewhere (cvpmBallStack serves them)",
-    "trough": [78, 77, 76, 75, 74, 73, 79],
-    "van": [50, 51]
+    "trough": [
+      78,
+      77,
+      76,
+      75,
+      74,
+      73,
+      79
+    ],
+    "van": [
+      50,
+      51
+    ]
   },
   "switch_extra": {
     "_": "edges the Data East script never sent, added by the patcher in the named sub",
@@ -83,7 +174,6 @@
   "switch_fakes": {
     "_": "mechs the table has no object for: none on this title (no motor end stops in its switch table)"
   },
-
   "solenoid_max": 68,
   "solenoids": {
     "_": [
@@ -91,92 +181,821 @@
       "SolCallback(68) and friends by it); the flippers keep core.vbs's own Consts (sLRFlipper 46,",
       "sLLFlipper 48, sULFlipper 36). device_xy.txt group 6 = node 8, group 7 = node 9 (group_node.txt)."
     ],
-    "1":  {"coil": [8, 1], "name": "TROUGH", "callback": "bsTrough.SolOut"},
-    "2":  {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "SolAutofire"},
-    "3":  {"coil": [8, 7], "name": "LOWER LOCK", "callback": "PadVanOut"},
-    "4":  {"coil": [8, 8], "name": "UPPER LOCK", "callback": null},
-    "5":  {"coil": [9, 7], "name": "VAN DOOR", "callback": null},
-    "6":  {"coil": [9, 8], "name": "VAN DIVERTER", "callback": null},
-    "7":  {"coil": [9, 5], "name": "KRANG", "callback": "PadKrang"},
-    "8":  {"coil": [9, 6], "name": "PIZZA MAGNET", "callback": null},
-    "9":  {"coil": [9, 1], "name": "UP POST", "callback": null},
-    "10": {"coil": [9, 0], "name": "GLIDER DIVERTER SERVO", "callback": null},
-    "11": {"coil": [9, 2], "name": "LEFT POP BUMPER", "callback": null},
-    "12": {"coil": [9, 3], "name": "RIGHT POP BUMPER", "callback": null},
-    "13": {"coil": [9, 4], "name": "BOTTOM POP BUMPER", "callback": null},
-    "14": {"coil": [8, 2], "name": "RIGHT SLINGSHOT", "callback": null},
-    "15": {"coil": [8, 3], "name": "LEFT SLINGSHOT", "callback": null},
-    "46": {"coil": [8, 0], "name": "RIGHT FLIPPER", "callback": "SolRFlipper"},
-    "48": {"coil": [8, 5], "name": "LEFT FLIPPER", "callback": "SolLFlipper"},
-    "36": {"coil": [8, 6], "name": "UPPER LEFT FLIPPER", "callback": null}
+    "1": {
+      "coil": [
+        8,
+        1
+      ],
+      "name": "TROUGH",
+      "callback": "bsTrough.SolOut"
+    },
+    "2": {
+      "coil": [
+        8,
+        4
+      ],
+      "name": "AUTO PLUNGER",
+      "callback": "SolAutofire"
+    },
+    "3": {
+      "coil": [
+        8,
+        7
+      ],
+      "name": "LOWER LOCK",
+      "callback": "PadVanOut"
+    },
+    "4": {
+      "coil": [
+        8,
+        8
+      ],
+      "name": "UPPER LOCK",
+      "callback": null
+    },
+    "5": {
+      "coil": [
+        9,
+        7
+      ],
+      "name": "VAN DOOR",
+      "callback": null
+    },
+    "6": {
+      "coil": [
+        9,
+        8
+      ],
+      "name": "VAN DIVERTER",
+      "callback": null
+    },
+    "7": {
+      "coil": [
+        9,
+        5
+      ],
+      "name": "KRANG",
+      "callback": "PadKrang"
+    },
+    "8": {
+      "coil": [
+        9,
+        6
+      ],
+      "name": "PIZZA MAGNET",
+      "callback": null
+    },
+    "9": {
+      "coil": [
+        9,
+        1
+      ],
+      "name": "UP POST",
+      "callback": null
+    },
+    "10": {
+      "coil": [
+        9,
+        0
+      ],
+      "name": "GLIDER DIVERTER SERVO",
+      "callback": null
+    },
+    "11": {
+      "coil": [
+        9,
+        2
+      ],
+      "name": "LEFT POP BUMPER",
+      "callback": null
+    },
+    "12": {
+      "coil": [
+        9,
+        3
+      ],
+      "name": "RIGHT POP BUMPER",
+      "callback": null
+    },
+    "13": {
+      "coil": [
+        9,
+        4
+      ],
+      "name": "BOTTOM POP BUMPER",
+      "callback": null
+    },
+    "14": {
+      "coil": [
+        8,
+        2
+      ],
+      "name": "RIGHT SLINGSHOT",
+      "callback": null
+    },
+    "15": {
+      "coil": [
+        8,
+        3
+      ],
+      "name": "LEFT SLINGSHOT",
+      "callback": null
+    },
+    "46": {
+      "coil": [
+        8,
+        0
+      ],
+      "name": "RIGHT FLIPPER",
+      "callback": "SolRFlipper"
+    },
+    "48": {
+      "coil": [
+        8,
+        5
+      ],
+      "name": "LEFT FLIPPER",
+      "callback": "SolLFlipper"
+    },
+    "36": {
+      "coil": [
+        8,
+        6
+      ],
+      "name": "UPPER LEFT FLIPPER",
+      "callback": null
+    }
   },
-
   "lamps": {
     "_": "table light -> Spike 2 LEDs [node, index] (several = an RGB insert: lit when any is). Matched by the Stern art under each light.",
-    "L1":   {"leds": [[8, 40], [8, 41], [8, 42]], "name": "APRIL (lower right arrow)"},
-    "L24a": {"leds": [[8, 40], [8, 41], [8, 42]], "name": "APRIL (APRIL HURRY UP disc, GUESS: shares the APRIL insert)"},
-    "L2":   {"leds": [[9, 8], [9, 9], [9, 10]], "name": "SPLINTER"},
-    "L4":   {"leds": [[9, 11]], "name": "JACKPOTO GRANDE"},
-    "L5":   {"leds": [[9, 12]], "name": "TRAINING"},
-    "L6":   {"leds": [[9, 13], [9, 14], [9, 15]], "name": "LEONARDO"},
-    "L7":   {"leds": [[8, 18]], "name": "EPISODE 1 (GUESS order)"},
-    "L7a":  {"leds": [[8, 8]],  "name": "EPISODE 2 (GUESS order)"},
-    "L16":  {"leds": [[8, 17]], "name": "EPISODE 3 (GUESS order)"},
-    "L16a": {"leds": [[8, 16]], "name": "EPISODE 4 (GUESS order)"},
-    "L42":  {"leds": [[9, 53]], "name": "EPISODE 5 (GUESS order)"},
-    "L42a": {"leds": [[8, 10]], "name": "EPISODE 6 (GUESS order)"},
-    "L41":  {"leds": [[8, 20]], "name": "EPISODE 7 (GUESS order)"},
-    "L41a": {"leds": [[8, 19]], "name": "EPISODE 8 (GUESS order)"},
-    "L8":   {"leds": [[8, 14]], "name": "SHOOT AGAIN"},
-    "L17":  {"leds": [[8, 3]],  "name": "LEFT OUTLANE"},
-    "L20a": {"leds": [[8, 4], [8, 5], [8, 6]], "name": "LEFT RETURN LANE LEFT"},
-    "L18":  {"leds": [[9, 20]], "name": "LEFT RETURN LANE RIGHT"},
-    "L20":  {"leds": [[8, 55], [8, 56], [8, 57]], "name": "RIGHT RETURN LANE"},
-    "L19":  {"leds": [[8, 58]], "name": "RIGHT OUTLANE"},
-    "L21":  {"leds": [[8, 24]], "name": "FOOT COMBO 1 (GUESS order)"},
-    "L22":  {"leds": [[8, 32]], "name": "FOOT COMBO 2 (GUESS order)"},
-    "L53":  {"leds": [[8, 33]], "name": "FOOT COMBO 3 (GUESS order)"},
-    "L22a": {"leds": [[9, 43]], "name": "FOOT COMBO 2 LOOP"},
-    "L23":  {"leds": [[8, 21], [8, 22], [8, 23]], "name": "SHREDDER"},
-    "L23a": {"leds": [[9, 22], [9, 23], [9, 24]], "name": "RAPHAEL (left ramp arrow)"},
-    "L23b": {"leds": [[8, 29], [8, 30], [8, 31]], "name": "DONATELLO"},
-    "L24":  {"leds": [[9, 30]], "name": "LEFT RAMP FLASH (GUESS: the red dome beside the left ramp)"},
-    "L26":  {"leds": [[9, 16]], "name": "(L)AIR"},
-    "L27":  {"leds": [[9, 17]], "name": "L(A)IR"},
-    "L28":  {"leds": [[9, 18]], "name": "LA(I)R"},
-    "L29":  {"leds": [[9, 19]], "name": "LAI(R)"},
-    "L30":  {"leds": [[9, 21]], "name": "LEFT RAMP LEFT X"},
-    "L33":  {"leds": [[9, 25]], "name": "LEFT RAMP RIGHT X"},
-    "L49a": {"leds": [[9, 38]], "name": "TOP LANE LEFT"},
-    "L32":  {"leds": [[9, 39]], "name": "TOP LANE RIGHT"},
-    "L36":  {"leds": [[8, 47]], "name": "(A)PRIL"},
-    "L37":  {"leds": [[8, 46]], "name": "A(P)RIL"},
-    "L38":  {"leds": [[8, 45]], "name": "AP(R)IL"},
-    "L34":  {"leds": [[8, 44]], "name": "APR(I)L"},
-    "L35":  {"leds": [[8, 43]], "name": "APRI(L)"},
-    "L34a": {"leds": [[8, 27]], "name": "ADD TIME"},
-    "L35a": {"leds": [[9, 29]], "name": "2X PLAYFIELD"},
-    "L51":  {"leds": [[9, 44], [9, 45], [9, 46]], "name": "MONDO JACKPOT"},
-    "L52":  {"leds": [[9, 40], [9, 41], [9, 42]], "name": "KRANG"},
-    "L50":  {"leds": [[8, 48], [8, 49], [8, 50]], "name": "ROCKSTEADY (right orbit)"},
-    "L56":  {"leds": [[8, 51]], "name": "RIGHT ORBIT TRAINING"},
-    "L49":  {"leds": [[8, 52], [8, 53], [8, 54]], "name": "RIGHT ORBIT WEAPON"},
-    "L61":  {"leds": [[9, 55], [9, 56], [9, 57]], "name": "BEBOP (left orbit)"},
-    "L57":  {"leds": [[9, 58]], "name": "LEFT ORBIT TRAINING"},
-    "L55":  {"leds": [[9, 59], [9, 60], [9, 61]], "name": "LEFT ORBIT WEAPON"},
-    "L56a": {"leds": [[8, 25]], "name": "TURTLE POWER MULTIBALL"},
-    "L58":  {"leds": [[8, 28]], "name": "COWABUNGA DUDE FLASH"},
-    "L58a": {"leds": [[9, 36]], "name": "NINJA PIZZA PARLOR"},
-    "L59":  {"leds": [[9, 32], [9, 33], [9, 34]], "name": "MICHAEL (van arrow)"},
-    "L59a": {"leds": [[8, 11], [8, 12], [8, 13]], "name": "TEAM UP"},
-    "L60":  {"leds": [[9, 35]], "name": "EXTRA BALL"}
+    "L1": {
+      "leds": [
+        [
+          8,
+          40
+        ],
+        [
+          8,
+          41
+        ],
+        [
+          8,
+          42
+        ]
+      ],
+      "name": "APRIL (lower right arrow)"
+    },
+    "L24a": {
+      "leds": [
+        [
+          8,
+          40
+        ],
+        [
+          8,
+          41
+        ],
+        [
+          8,
+          42
+        ]
+      ],
+      "name": "APRIL (APRIL HURRY UP disc, GUESS: shares the APRIL insert)"
+    },
+    "L2": {
+      "leds": [
+        [
+          9,
+          8
+        ],
+        [
+          9,
+          9
+        ],
+        [
+          9,
+          10
+        ]
+      ],
+      "name": "SPLINTER"
+    },
+    "L4": {
+      "leds": [
+        [
+          9,
+          11
+        ]
+      ],
+      "name": "JACKPOTO GRANDE"
+    },
+    "L5": {
+      "leds": [
+        [
+          9,
+          12
+        ]
+      ],
+      "name": "TRAINING"
+    },
+    "L6": {
+      "leds": [
+        [
+          9,
+          13
+        ],
+        [
+          9,
+          14
+        ],
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "LEONARDO"
+    },
+    "L7": {
+      "leds": [
+        [
+          8,
+          18
+        ]
+      ],
+      "name": "EPISODE 1 (GUESS order)"
+    },
+    "L7a": {
+      "leds": [
+        [
+          8,
+          8
+        ]
+      ],
+      "name": "EPISODE 2 (GUESS order)"
+    },
+    "L16": {
+      "leds": [
+        [
+          8,
+          17
+        ]
+      ],
+      "name": "EPISODE 3 (GUESS order)"
+    },
+    "L16a": {
+      "leds": [
+        [
+          8,
+          16
+        ]
+      ],
+      "name": "EPISODE 4 (GUESS order)"
+    },
+    "L42": {
+      "leds": [
+        [
+          9,
+          53
+        ]
+      ],
+      "name": "EPISODE 5 (GUESS order)"
+    },
+    "L42a": {
+      "leds": [
+        [
+          8,
+          10
+        ]
+      ],
+      "name": "EPISODE 6 (GUESS order)"
+    },
+    "L41": {
+      "leds": [
+        [
+          8,
+          20
+        ]
+      ],
+      "name": "EPISODE 7 (GUESS order)"
+    },
+    "L41a": {
+      "leds": [
+        [
+          8,
+          19
+        ]
+      ],
+      "name": "EPISODE 8 (GUESS order)"
+    },
+    "L8": {
+      "leds": [
+        [
+          8,
+          14
+        ]
+      ],
+      "name": "SHOOT AGAIN"
+    },
+    "L17": {
+      "leds": [
+        [
+          8,
+          3
+        ]
+      ],
+      "name": "LEFT OUTLANE"
+    },
+    "L20a": {
+      "leds": [
+        [
+          8,
+          4
+        ],
+        [
+          8,
+          5
+        ],
+        [
+          8,
+          6
+        ]
+      ],
+      "name": "LEFT RETURN LANE LEFT"
+    },
+    "L18": {
+      "leds": [
+        [
+          9,
+          20
+        ]
+      ],
+      "name": "LEFT RETURN LANE RIGHT"
+    },
+    "L20": {
+      "leds": [
+        [
+          8,
+          55
+        ],
+        [
+          8,
+          56
+        ],
+        [
+          8,
+          57
+        ]
+      ],
+      "name": "RIGHT RETURN LANE"
+    },
+    "L19": {
+      "leds": [
+        [
+          8,
+          58
+        ]
+      ],
+      "name": "RIGHT OUTLANE"
+    },
+    "L21": {
+      "leds": [
+        [
+          8,
+          24
+        ]
+      ],
+      "name": "FOOT COMBO 1 (GUESS order)"
+    },
+    "L22": {
+      "leds": [
+        [
+          8,
+          32
+        ]
+      ],
+      "name": "FOOT COMBO 2 (GUESS order)"
+    },
+    "L53": {
+      "leds": [
+        [
+          8,
+          33
+        ]
+      ],
+      "name": "FOOT COMBO 3 (GUESS order)"
+    },
+    "L22a": {
+      "leds": [
+        [
+          9,
+          43
+        ]
+      ],
+      "name": "FOOT COMBO 2 LOOP"
+    },
+    "L23": {
+      "leds": [
+        [
+          8,
+          21
+        ],
+        [
+          8,
+          22
+        ],
+        [
+          8,
+          23
+        ]
+      ],
+      "name": "SHREDDER"
+    },
+    "L23a": {
+      "leds": [
+        [
+          9,
+          22
+        ],
+        [
+          9,
+          23
+        ],
+        [
+          9,
+          24
+        ]
+      ],
+      "name": "RAPHAEL (left ramp arrow)"
+    },
+    "L23b": {
+      "leds": [
+        [
+          8,
+          29
+        ],
+        [
+          8,
+          30
+        ],
+        [
+          8,
+          31
+        ]
+      ],
+      "name": "DONATELLO"
+    },
+    "L24": {
+      "leds": [
+        [
+          9,
+          30
+        ]
+      ],
+      "name": "LEFT RAMP FLASH (GUESS: the red dome beside the left ramp)"
+    },
+    "L26": {
+      "leds": [
+        [
+          9,
+          16
+        ]
+      ],
+      "name": "(L)AIR"
+    },
+    "L27": {
+      "leds": [
+        [
+          9,
+          17
+        ]
+      ],
+      "name": "L(A)IR"
+    },
+    "L28": {
+      "leds": [
+        [
+          9,
+          18
+        ]
+      ],
+      "name": "LA(I)R"
+    },
+    "L29": {
+      "leds": [
+        [
+          9,
+          19
+        ]
+      ],
+      "name": "LAI(R)"
+    },
+    "L30": {
+      "leds": [
+        [
+          9,
+          21
+        ]
+      ],
+      "name": "LEFT RAMP LEFT X"
+    },
+    "L33": {
+      "leds": [
+        [
+          9,
+          25
+        ]
+      ],
+      "name": "LEFT RAMP RIGHT X"
+    },
+    "L49a": {
+      "leds": [
+        [
+          9,
+          38
+        ]
+      ],
+      "name": "TOP LANE LEFT"
+    },
+    "L32": {
+      "leds": [
+        [
+          9,
+          39
+        ]
+      ],
+      "name": "TOP LANE RIGHT"
+    },
+    "L36": {
+      "leds": [
+        [
+          8,
+          47
+        ]
+      ],
+      "name": "(A)PRIL"
+    },
+    "L37": {
+      "leds": [
+        [
+          8,
+          46
+        ]
+      ],
+      "name": "A(P)RIL"
+    },
+    "L38": {
+      "leds": [
+        [
+          8,
+          45
+        ]
+      ],
+      "name": "AP(R)IL"
+    },
+    "L34": {
+      "leds": [
+        [
+          8,
+          44
+        ]
+      ],
+      "name": "APR(I)L"
+    },
+    "L35": {
+      "leds": [
+        [
+          8,
+          43
+        ]
+      ],
+      "name": "APRI(L)"
+    },
+    "L34a": {
+      "leds": [
+        [
+          8,
+          27
+        ]
+      ],
+      "name": "ADD TIME"
+    },
+    "L35a": {
+      "leds": [
+        [
+          9,
+          29
+        ]
+      ],
+      "name": "2X PLAYFIELD"
+    },
+    "L51": {
+      "leds": [
+        [
+          9,
+          44
+        ],
+        [
+          9,
+          45
+        ],
+        [
+          9,
+          46
+        ]
+      ],
+      "name": "MONDO JACKPOT"
+    },
+    "L52": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "name": "KRANG"
+    },
+    "L50": {
+      "leds": [
+        [
+          8,
+          48
+        ],
+        [
+          8,
+          49
+        ],
+        [
+          8,
+          50
+        ]
+      ],
+      "name": "ROCKSTEADY (right orbit)"
+    },
+    "L56": {
+      "leds": [
+        [
+          8,
+          51
+        ]
+      ],
+      "name": "RIGHT ORBIT TRAINING"
+    },
+    "L49": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "name": "RIGHT ORBIT WEAPON"
+    },
+    "L61": {
+      "leds": [
+        [
+          9,
+          55
+        ],
+        [
+          9,
+          56
+        ],
+        [
+          9,
+          57
+        ]
+      ],
+      "name": "BEBOP (left orbit)"
+    },
+    "L57": {
+      "leds": [
+        [
+          9,
+          58
+        ]
+      ],
+      "name": "LEFT ORBIT TRAINING"
+    },
+    "L55": {
+      "leds": [
+        [
+          9,
+          59
+        ],
+        [
+          9,
+          60
+        ],
+        [
+          9,
+          61
+        ]
+      ],
+      "name": "LEFT ORBIT WEAPON"
+    },
+    "L56a": {
+      "leds": [
+        [
+          8,
+          25
+        ]
+      ],
+      "name": "TURTLE POWER MULTIBALL"
+    },
+    "L58": {
+      "leds": [
+        [
+          8,
+          28
+        ]
+      ],
+      "name": "COWABUNGA DUDE FLASH"
+    },
+    "L58a": {
+      "leds": [
+        [
+          9,
+          36
+        ]
+      ],
+      "name": "NINJA PIZZA PARLOR"
+    },
+    "L59": {
+      "leds": [
+        [
+          9,
+          32
+        ],
+        [
+          9,
+          33
+        ],
+        [
+          9,
+          34
+        ]
+      ],
+      "name": "MICHAEL (van arrow)"
+    },
+    "L59a": {
+      "leds": [
+        [
+          8,
+          11
+        ],
+        [
+          8,
+          12
+        ],
+        [
+          8,
+          13
+        ]
+      ],
+      "name": "TEAM UP"
+    },
+    "L60": {
+      "leds": [
+        [
+          9,
+          35
+        ]
+      ],
+      "name": "EXTRA BALL"
+    }
   },
   "lamp_flasher_numbers": {
     "_": "the old lamp numbers the table's LampFlasher sub reads (flasher domes and insert caps) -> the Stern lamp number now behind them; matched by the dome's place (GUESS) or, for an insert cap, the insert's own LED",
-    "61": 1947, "58": 1937, "59": 1937, "60": 1937,
-    "7": 1818, "41": 1820, "42": 1953, "16": 1817,
-    "24": 1863, "39": 1863, "22": 1839, "40": 1839,
-    "21": 1930, "31": 1930, "23": 1807, "32": 1807,
+    "61": 1947,
+    "58": 1937,
+    "59": 1937,
+    "60": 1937,
+    "7": 1818,
+    "41": 1820,
+    "42": 1953,
+    "16": 1817,
+    "24": 1863,
+    "39": 1863,
+    "22": 1839,
+    "40": 1839,
+    "21": 1930,
+    "31": 1930,
+    "23": 1807,
+    "32": 1807,
     "_names": {
       "1947": "UPPER FLIPPER FLASH (flasher15 by the upper flipper, flasher16 right)",
       "1937": "VAN FLASH (flasher001, top left above the van)",
@@ -188,18 +1007,68 @@
   },
   "gi_leds": {
     "_": "the GI strings: the table's SolGi (GI off when Enabled) follows these, lit when any is",
-    "leds": [[8, 0], [8, 1], [8, 2], [9, 0], [9, 1], [9, 2]]
+    "leds": [
+      [
+        8,
+        0
+      ],
+      [
+        8,
+        1
+      ],
+      [
+        8,
+        2
+      ],
+      [
+        9,
+        0
+      ],
+      [
+        9,
+        1
+      ],
+      [
+        9,
+        2
+      ]
+    ]
   },
   "disc_leds": {
     "_": "the spinning pizza disc's motor outputs are LED channels on this title (SPIN DISC CW / CCW): the table's ttPizza turntable follows them (GUESS that they drive the motor)",
-    "cw": [9, 51], "ccw": [9, 52]
+    "cw": [
+      9,
+      51
+    ],
+    "ccw": [
+      9,
+      52
+    ]
   },
-
   "retrofit_lights": {
     "_": "Stern inserts with no table light: a new Light cloned from `clone`, placed at [x, y]",
     "clone": "l58a",
     "lights": {
-      "PL_START_EPISODE": {"leds": [[9, 26], [9, 27], [9, 28]], "at": [381, 678]}
+      "PL_START_EPISODE": {
+        "leds": [
+          [
+            9,
+            26
+          ],
+          [
+            9,
+            27
+          ],
+          [
+            9,
+            28
+          ]
+        ],
+        "at": [
+          381,
+          678
+        ]
+      }
     }
   },
   "retrofit_triggers": {
@@ -207,9 +1076,11 @@
   },
   "retrofit_timers": {
     "_": "PadTestTimer feeds %TEMP%\\padvpx_keys.txt to the table's key handlers: scripted keys for a test run",
-    "PadTestTimer": {"clone": "DiscsTimer", "interval_ms": 100}
+    "PadTestTimer": {
+      "clone": "DiscsTimer",
+      "interval_ms": 100
+    }
   },
-
   "unmapped": {
     "_": "table objects / machine parts with no counterpart, left as they were but never driven",
     "lights": {
@@ -219,12 +1090,42 @@
       "flasher9, flasher10, flasherl11..15, l43..l48 (+a)": "backbox / Mystery X apron flashers on DE lamps 9..15, 43..48: left on their old numbers (dark)",
       "light12, Light001, Flasher11a, Flasher12a": "driven by the table script itself (bumper, van door, sling hits)"
     },
-    "stern_leds_without_light": ["PIZZA SLICE 8/26", "PIZZA TOPPING 9/6", "POP FLASH 9/7", "KRANG BODY FLASH 9/48", "PIZZA FLASH LEFT/RIGHT 8/37,38", "LEFT/RIGHT SLING FLASH 8/9,15", "TURTLE MICHEALANGELO/RAPHEAL/DONATELLO/LEONARDO 8/59..62", "WEAPON RGB 8/34..36", "LEFT RAMP TRAINING 9/49", "LEFT RAMP GLIDER 9/50", "RIGHT RAMP TRAINING 9/62", "RIGHT RAMP GLIDER 9/63", "FINAL BATTLE 9/54", "EPISODE lights order is a GUESS"],
+    "stern_leds_without_light": [
+      "PIZZA SLICE 8/26",
+      "PIZZA TOPPING 9/6",
+      "POP FLASH 9/7",
+      "KRANG BODY FLASH 9/48",
+      "PIZZA FLASH LEFT/RIGHT 8/37,38",
+      "LEFT/RIGHT SLING FLASH 8/9,15",
+      "TURTLE MICHEALANGELO/RAPHEAL/DONATELLO/LEONARDO 8/59..62",
+      "WEAPON RGB 8/34..36",
+      "LEFT RAMP TRAINING 9/49",
+      "LEFT RAMP GLIDER 9/50",
+      "RIGHT RAMP TRAINING 9/62",
+      "RIGHT RAMP GLIDER 9/63",
+      "FINAL BATTLE 9/54",
+      "EPISODE lights order is a GUESS"
+    ],
     "stern_switches_without_object": {
-      "52": "UPPER LOCK 1", "53": "UPPER LOCK 2", "54": "UPPER LOCK 3", "91": "GLIDER LOCK OPTO",
+      "52": "UPPER LOCK 1",
+      "53": "UPPER LOCK 2",
+      "54": "UPPER LOCK 3",
+      "91": "GLIDER LOCK OPTO",
       "67": "SKILL SHOT",
-      "55": "UP LEFT FLIPPER EOS", "57": "LEFT FLIPPER EOS", "72": "RIGHT FLIPPER EOS"
+      "55": "UP LEFT FLIPPER EOS",
+      "57": "LEFT FLIPPER EOS",
+      "72": "RIGHT FLIPPER EOS"
     },
-    "coils_without_object": ["UPPER LOCK 8/8", "VAN DOOR 9/7", "VAN DIVERTER 9/8", "PIZZA MAGNET 9/6", "UP POST 9/1", "GLIDER DIVERTER SERVO 9/0", "UPPER LEFT FLIPPER 8/6 (LeftFlipper1 follows the LEFT FLIPPER coil, as the table had it)"]
-  }
+    "coils_without_object": [
+      "UPPER LOCK 8/8",
+      "VAN DOOR 9/7",
+      "VAN DIVERTER 9/8",
+      "PIZZA MAGNET 9/6",
+      "UP POST 9/1",
+      "GLIDER DIVERTER SERVO 9/0",
+      "UPPER LEFT FLIPPER 8/6 (LeftFlipper1 follows the LEFT FLIPPER coil, as the table had it)"
+    ]
+  },
+  "preferred": false,
+  "patcher_takes_map": true
 }

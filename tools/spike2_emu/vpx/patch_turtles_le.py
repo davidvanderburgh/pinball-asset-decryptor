@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """patch_turtles_le.py - Bigus / Cheese3075's "Teenage Mutant Ninja Turtles
 (Stern-Data East mash-up)" v2.86d, rewired from Data East's 1991 tmnt_104 ROM
-to the Spike 2 emulator running turtles_le.
+to the Spike 2 emulator running turtles_le (or turtles_pro: --map).
 
-    python patch_turtles_le.py "<Teenage Mutant Ninja Turtles (Stern-Data East mash-up) v2.86d.vpx>" <out dir>
+    python patch_turtles_le.py "<Teenage Mutant Ninja Turtles (Stern-Data East mash-up) v2.86d.vpx>" <out dir> [--map <x.vpxmap.json>]
+
+turtles_pro.vpxmap.json is this map renumbered by name for the Pro card, the
+one the table plays today: the LE card starts no game in the emulator
+(PAD-811, rigbatch startcheck), so the Pro map is the preferred one and
+writes "(PAD).vpx"; the LE map writes "... LE (PAD).vpx".
 
 Writes `<out dir>/<original name> (PAD).vpx` beside a copy of PADSPIKE2.vbs,
 which the table loads from its own folder, and the patched script as
@@ -260,7 +265,7 @@ def patch_script(src, m):
             out.append("UseVPMDMD = False   ' PAD: the game's LCD is the rig's window, not a VPM DMD")
             continue
         if low.startswith("const cgamename"):
-            out.append('Const cGameName = "turtles_le"')
+            out.append('Const cGameName = "%s"' % m["title"])
             out.append("Dim bsTrough, bsVan, padGiState, padDiscOn")
             out.append("padGiState = -1 : padDiscOn = 0")
             continue
@@ -481,24 +486,30 @@ def retrofit_items(table, m):
 
 
 def main(argv):
+    mpath = MAP
+    if "--map" in argv:
+        i = argv.index("--map")
+        mpath = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
     if len(argv) != 3:
         print(__doc__)
         return 2
     src, outdir = argv[1], argv[2]
     os.makedirs(outdir, exist_ok=True)
-    m = json.load(open(MAP, encoding="utf-8"))
+    m = json.load(open(mpath, encoding="utf-8"))
     table = vpxfile.VpxTable(src)
     if not table.verify():
         print("refusing: %s does not verify against its own MAC" % src)
         return 1
     script = table.script()
     if not all(d in script or d in os.path.basename(src) for d in m["detect"]):
-        print("refusing: %s is not the table turtles_le.vpxmap.json is for (detect %s)" % (src, m["detect"]))
+        print("refusing: %s is not the table %s is for (detect %s)"
+              % (src, os.path.basename(mpath), m["detect"]))
         return 1
     script, rep = patch_script(script, m)
     items = retrofit_items(table, m)
     table.ole.close()
-    out_name = os.path.splitext(os.path.basename(src))[0] + " (PAD).vpx"
+    out_name = m.get("output") or os.path.splitext(os.path.basename(src))[0] + " (PAD).vpx"
     dst = os.path.join(outdir, out_name)
     mac = vpxfile.write_patched(src, dst, script=script, new_items=items)
     shutil.copyfile(os.path.join(HERE, "PADSPIKE2.vbs"), os.path.join(outdir, "PADSPIKE2.vbs"))

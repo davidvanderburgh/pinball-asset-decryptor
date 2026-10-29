@@ -76,7 +76,9 @@ def maps():
                           "output": m.get("output", ""), "model": m.get("model", ""),
                           "preferred": bool(m.get("preferred")),
                           # a ROM table's map names its own patcher
-                          "patcher": m.get("patcher", "patch_godzilla.py")}
+                          "patcher": m.get("patcher", "patch_godzilla.py"),
+                          # one patcher, several maps (TMNT's LE and Pro)
+                          "patcher_takes_map": bool(m.get("patcher_takes_map"))}
     return dict(sorted(out.items(), key=lambda kv: not kv[1]["preferred"]))
 
 
@@ -142,6 +144,8 @@ def patch(table_path, outdir=None, card=None, title=None):
         cmd = [py, os.path.join(HERE, "vpxshadow.py"), info["map"], table_path, outdir]
     else:
         cmd = [py, os.path.join(HERE, info["patcher"]), table_path, outdir]
+        if info.get("patcher_takes_map"):
+            cmd += ["--map", info["map"]]
     print("recognised %s: %s" % (title, " ".join(info["detect"])))
     r = subprocess.run(cmd)
     if r.returncode == 0 and card:

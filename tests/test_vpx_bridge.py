@@ -1107,3 +1107,14 @@ def test_losing_the_focus_lets_go_of_held_buttons():
     b.pipe, b.map = Pipe(), Map()
     b._release_buttons()
     assert b.pipe.held == {34: 0, 36: 0, 65: 0, 39: 1}   # coins are not buttons
+
+
+def test_a_titles_card_is_the_stock_release_over_a_custom_one_of_its_version(tmp_path, monkeypatch):
+    pl = pytest.importorskip("padlaunch")
+    for n in ("turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw", "turtles_pro-1_59_0.Release.8G.sdcard.raw",
+              "turtles_pro-1_58_0.Release.8G.sdcard.raw"):
+        (tmp_path / n).write_bytes(b"")
+    monkeypatch.setattr(pl, "kit_load", lambda: {"library": str(tmp_path)})
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    assert os.path.basename(pl.card_for("turtles_pro")) == "turtles_pro-1_59_0.Release.8G.sdcard.raw"

@@ -105,7 +105,10 @@ def card_for(title):
     if lib and os.path.isdir(lib):
         found = glob.glob(os.path.join(lib, "%s-*.sdcard.raw" % title))
         if found:
-            return max(found, key=_version_key)
+            # of one version, the stock Release build over a custom one beside
+            # it (turtles_pro-1_59_0.1987-upscaled tied with the Release and
+            # was taken - PAD-811); `padvpx card` names a custom one
+            return max(found, key=lambda p: (_version_key(p), ".Release." in os.path.basename(p)))
     return None
 
 

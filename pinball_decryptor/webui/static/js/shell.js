@@ -412,6 +412,9 @@ function TopBar({ shell }) {
     ${upd && upd.available ? html`<${Chip} kind="info" dot onClick=${() => call("ui.settings_action", "install_update")}
         title=${"Pinball Asset Decryptor v" + upd.version + " is available — you're on v" + (shell.version || "") + "."}>${upd.label || ("v" + upd.version + " available")}<//>`
       : html`<span class="hide-narrow"><${Chip} kind="ok" dot title=${sx.update_state === "latest" ? "You're on the latest version." : "This version"}>v${shell.version || ""}${sx.update_state === "latest" ? ", latest" : ""}<//></span>`}
+    <button type="button" class="btn sm sx-discord-btn" onClick=${() => call("shellx.open_discord")}
+        ...${tip("Join the PAD Discord server: ask questions, share what you made and hear about new releases.")} aria-label="Join our Discord">
+        <${Icon} name="discord" /><span class="hide-narrow">Discord</span></button>
     ${sx.donations ? html`<button type="button" class="btn sm sx-don-btn" onClick=${() => openDialog("donations")} ...${tip(sx.donations.tip)} aria-label="Donate to an animal shelter">
         <${Icon} name="paw" /><span>Donate</span></button>` : null}
     <button type="button" class="btn sm sx-rep-btn" onClick=${() => openDialog("report")} ...${tip("Something went wrong? Send the developer what happened, with the log and the card's details.")} aria-label="Report a problem">

@@ -151,7 +151,7 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
                  "Prerequisites ▸", "sep"]
         if preview.FEATURES:                    # PAD-802: Visual Pinball is a preview
             want.append("preview_features")
-        want += ["donations", "report_problem", "view_disclaimer"]
+        want += ["discord", "donations", "report_problem", "view_disclaimer"]
         assert shape == want
         assert not any(it.get("header") for it in items(w))
         up = cascade(w, "Check automatically")["submenu"]
@@ -364,6 +364,32 @@ def test_log_link_opens_the_url_or_says_it_cannot(tmp_path, monkeypatch):
         assert {"t": "clipboard", "text": "https://example.invalid/r2"} in [
             {k: e.get(k) for k in ("t", "text")} for e in events]
         assert w.call("shellx.open_link", "") is False
+
+
+def test_discord_button_opens_the_pad_server(tmp_path, monkeypatch):
+    """PAD-815: the top bar's Discord button (and Settings > Join our
+    Discord) opens the PAD server's permanent invite in the browser; the
+    page names no URL of its own, so the link lives in one place."""
+    import pathlib
+    from pinball_decryptor.core import desktop
+    from pinball_decryptor.webui.tabs import shell_extras
+    assert shell_extras.DISCORD_URL == "https://discord.gg/343hTHykka"
+    opened = []
+    with web_app(tmp_path, mfr="stern") as w:
+        monkeypatch.setattr(desktop, "open_url",
+                            lambda url, env=None: (opened.append(url)
+                                                   or (True, "")))
+        assert w.call("shellx.open_discord") is True
+        assert until(w, lambda: opened == [shell_extras.DISCORD_URL])
+        assert item(w, "discord")["label"] == "Join our Discord"
+        w.call("ui.settings_action", "discord")
+        assert until(w, lambda: opened == [shell_extras.DISCORD_URL] * 2)
+    js = (pathlib.Path(shell_extras.__file__).parents[1] / "static" / "js"
+          / "shell.js").read_text(encoding="utf-8")
+    top = js[js.index("function TopBar("):js.index("// ---", js.index("function TopBar("))]
+    assert 'call("shellx.open_discord")' in top
+    assert 'aria-label="Join our Discord"' in top
+    assert "discord.gg" not in js
 
 
 def test_first_run_theme_follows_the_os(tmp_path, monkeypatch):

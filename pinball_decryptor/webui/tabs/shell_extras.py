@@ -62,6 +62,11 @@ ASSET_TAB_KEYS = ("Write", "Replace Audio", "Replace Video",
 #: previous-session lines seeded above the log's cut line (Tk LOG_SEED_LINES)
 LOG_SEED_LINES = 600
 
+#: the PAD Discord server (PAD-815): the top bar's Discord button and
+#: Settings > Join our Discord open it.  A permanent invite (never expires,
+#: no use limit) into #read-me-first, made by the PAD bot.
+DISCORD_URL = "https://discord.gg/343hTHykka"
+
 
 def update_action_verb(installer):
     """main_window._update_action_verb: Linux downloads an AppImage and
@@ -203,6 +208,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             "install_prereqs": self.install_prereqs,
             "preview_features": lambda: self._open_dialog("preview_features"),
             "donations": lambda: self._open_dialog("donations"),
+            "discord": self.open_discord,
             "report_problem": lambda: self._open_dialog("report"),
             "view_disclaimer": lambda: self._open_dialog("disclaimer"),
             "tips": lambda: self._open_dialog("tips"),
@@ -382,6 +388,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             # only while a version has a preview to unlock (none since PAD-763)
             items.append({"id": "preview_features",
                           "label": "Preview features…"})
+        items.append({"id": "discord", "label": "Join our Discord"})
         items.append({"id": "donations", "label": "Animal shelters…"})
         items.append({"id": "report_problem", "label": "Report a problem…"})
         items.append({"id": "view_disclaimer", "label": "View disclaimer…"})
@@ -665,6 +672,13 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         if not isinstance(url, str) or not url.strip():
             return False
         self.open_link_checked(url.strip(), what="that link")
+        return True
+
+    @rpc
+    def open_discord(self):
+        """The top bar's Discord button (PAD-815): the PAD server's invite
+        in the browser, or on the clipboard when nothing can open it."""
+        self.open_link_checked(DISCORD_URL, what="the PAD Discord server")
         return True
 
     def open_link_checked(self, url, what="that link"):

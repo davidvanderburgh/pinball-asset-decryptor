@@ -3444,6 +3444,8 @@ PREVIEW_HELP = {
                 "who made it; download it from there.\n"
                 "- **Patch a table...** writes a copy named \"(PAD)\" into Visual "
                 "Pinball's tables folder. Your download stays as it was.\n"
+                "- A backglass (.directb2s) named like the table, beside it or already in "
+                "the tables folder, is copied to match the \"(PAD)\" name.\n"
                 "- A title plays the newest build of its card in the card folder.\n"
                 "- **Windows** sets where Visual Pinball's playfield and the game's screen "
                 "go when a table opens. You can drag the game's screen anywhere after that.",

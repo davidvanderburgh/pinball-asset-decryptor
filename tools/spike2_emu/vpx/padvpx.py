@@ -43,6 +43,7 @@ and with sound; nothing of the app's or a session's is touched.
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -152,9 +153,35 @@ def patch(table_path, outdir=None, card=None, title=None):
         padlaunch.remember_card(title, os.path.abspath(card))
         print("card for %s: %s" % (title, os.path.abspath(card)))
     if r.returncode == 0:
-        print("open \"%s\" in Visual Pinball; the game starts with it when its card is known"
-              % os.path.join(outdir, info["output"] or "<name> (PAD).vpx"))
+        out = os.path.join(outdir, info["output"] or
+                           os.path.splitext(os.path.basename(table_path))[0] + " (PAD).vpx")
+        b2s = copy_backglass(table_path, out)
+        if b2s:
+            print("backglass: %s" % b2s)
+        print("open \"%s\" in Visual Pinball; the game starts with it when its card is known" % out)
     return r.returncode
+
+
+def copy_backglass(table_path, out_vpx):
+    """B2S finds a table's backglass by the .vpx name, so <name> (PAD).vpx
+    never finds <name>.directb2s: copy it beside the patched table under the
+    matching name. Looks beside the original, then beside the output; a
+    backglass already at the target is the user's and is left alone. Returns
+    the target, or None when there is no backglass to copy."""
+    want = os.path.splitext(os.path.basename(table_path))[0].lower() + ".directb2s"
+    dst = os.path.splitext(out_vpx)[0] + ".directb2s"
+    if os.path.exists(dst):
+        return dst
+    for d in (os.path.dirname(os.path.abspath(table_path)), os.path.dirname(os.path.abspath(out_vpx))):
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            if n.lower() == want:   # B2S files ship as .directb2s and .directb2S
+                shutil.copy2(os.path.join(d, n), dst)
+                return dst
+    return None
 
 
 def vpx_ini_path():

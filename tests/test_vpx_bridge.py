@@ -1130,3 +1130,23 @@ def test_a_named_table_never_takes_the_lone_run_of_another_title(tmp_path, monke
     assert pc.Rig.board_run("jaws_le") is None
     assert pc.Rig.board_run("godzilla_le")["slot"] == 2
     assert pc.Rig.board_run(None)["slot"] == 2                         # a nameless table still finds it
+
+
+def test_patched_table_gets_its_backglass_under_the_matching_name(tmp_path):
+    # B2S looks for <table name>.directb2s, and the patched table is
+    # "<name> (PAD).vpx": the original's backglass is copied to match
+    pv = pytest.importorskip("padvpx")
+    src, out = tmp_path / "src", tmp_path / "out"
+    src.mkdir(), out.mkdir()
+    (src / "JAWS.vpx").write_bytes(b"t")
+    (src / "JAWS.directb2S").write_bytes(b"bg")
+    got = pv.copy_backglass(str(src / "JAWS.vpx"), str(out / "JAWS (PAD).vpx"))
+    assert got == str(out / "JAWS (PAD).directb2s")
+    assert (out / "JAWS (PAD).directb2s").read_bytes() == b"bg"
+    # one the user already put there is theirs
+    (out / "JAWS (PAD).directb2s").write_bytes(b"mine")
+    pv.copy_backglass(str(src / "JAWS.vpx"), str(out / "JAWS (PAD).vpx"))
+    assert (out / "JAWS (PAD).directb2s").read_bytes() == b"mine"
+    # no backglass anywhere: nothing
+    (src / "Bond.vpx").write_bytes(b"t")
+    assert pv.copy_backglass(str(src / "Bond.vpx"), str(out / "Bond (PAD).vpx")) is None

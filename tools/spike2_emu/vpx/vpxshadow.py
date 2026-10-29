@@ -198,11 +198,18 @@ def pup_stub(lines, rep):
             counts.setdefault(meth.lower(), {}).setdefault(n, 0)
             counts[meth.lower()][n] += 1
             spelling.setdefault(meth.lower(), meth)
+    # EVERY creation: Iron Maiden makes it twice (lines 104 and 1738), and
+    # the second, left bare, stopped the table at load
+    made = 0
     for i, line in enumerate(lines):
+        if line.lstrip().startswith("'"):
+            continue
         if re.search(r'Set\s+PuPlayer\s*=\s*CreateObject\("PinUpPlayer\.PinDisplay"\)', line, re.I):
             _optional(lines, i, "Set PuPlayer = New PadNoPuP", "no PinUP Player here")
-            rep.append("PuP made optional (PadNoPuP stands in, %d methods)" % len(counts))
-            break
+            made += 1
+    if made:
+        rep.append("PuP made optional at %d place(s) (PadNoPuP stands in, %d methods)"
+                   % (made, len(counts)))
     out = ["", "'---- PAD: PinUP Player's shape, for a machine without it", "Class PadNoPuP"]
     for meth, cs in list(counts.items()):
         if meth in ("getroot",):
@@ -266,8 +273,6 @@ def gen(m, had, quiet=None):
         return m.get("orig_hits", True) or name.lower() in orig_keep
     out = ["", "", "'" + "=" * 70, "'==== PAD: the Spike 2 emulator drives this table (vpxshadow.py) ====",
            "'" + "=" * 70,
-           "' what core.vbs's PinMAMETimer expects a VPM table to declare",
-           "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0",
            "Dim bsTrough"]
     for k in saucers(m):
         out.append("Dim bs%s" % k)
@@ -545,6 +550,14 @@ def patch(script, m):
     neuter(lines, m.get("neuter", []), rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
     flex_optional(lines, rep)
+    # what core.vbs's PinMAMETimer expects a VPM table to declare, at the TOP:
+    # Iron Maiden loads core.vbs and controller.vbs itself near its start,
+    # and they died on "Variable is undefined: 'UseSolenoids'" with this line
+    # at the end of the script, not yet run
+    at = next((i + 1 for i, ln in enumerate(lines[:50])
+               if ln.strip().lower().startswith("option explicit")), 0)
+    lines.insert(at, "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0"
+                     "   ' PAD: for core.vbs (vpxshadow.py)")
     text = "\n".join(lines) + gen(m, had, quiet) + stub
     return text, rep
 

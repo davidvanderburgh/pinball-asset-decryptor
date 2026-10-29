@@ -8,7 +8,7 @@ import pytest
 
 from pinball_decryptor.plugins.stern import clip_seen as CS
 from tests.test_pad444_clip_modes import GIGAN, SOLO, SHARED, OTHER, MAIN, _ready, _stub_reading
-from tests.test_webui_video import _project, _row, _scan
+from tests.test_webui_video import _project, _row, _scan, _wait
 from tests.webui_harness import web_app
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -45,12 +45,12 @@ def seen(tmp_path):
 # ---- the playfield window's reading ------------------------------------------------------------
 def test_a_clip_is_named_as_its_video_tab_row_and_credited_with_the_switch_made_before_it(tmp_path):
     cw, log = watch(tmp_path)
-    names = {40: "RIGHT RAMP MADE", 41: "LEFT FLIPPER BUTTON", 42: "TROUGH 1"}
+    names = {40: "RIGHT RAMP MADE", 41: "LEFT FLIPPER BUTTON", 42: "TROUGH 1", 43: "Shield Motor Open"}
     cw.feed_switches(bytes(256), names, 10.0)
     on = bytearray(256)
     on[40] = 1
     cw.feed_switches(bytes(on), names, 11.0)
-    on[41] = on[42] = 1                      # a flipper and the trough: never a clip's trigger
+    on[41] = on[42] = on[43] = 1             # a flipper, the trough, a motor: never a clip's trigger
     cw.feed_switches(bytes(on), names, 11.5)
     append(log, serve(50.0, 361))
     assert cw.poll(12.0) is True
@@ -85,10 +85,21 @@ def test_the_same_file_asked_for_again_as_it_ends_is_a_loop(tmp_path):
     assert cw.dyn() == [{"name": "gigan_ghidorah_vs_godzilla56", "sw": "", "loop": True, "n": 1,
                          "now": True}]
     assert [e.get("loop", False) for e in seen(tmp_path)] == [False, True]   # one play, one loop
-    # played again much later: a second play of the same row, still a loop
-    append(log, serve(90.0, 361, 91))
-    cw.poll(2.0)
-    assert cw.dyn()[0]["n"] == 2
+    # played again later after a shot: the same row, back at the top, with the shot
+    names = {40: "Left Spinner"}
+    cw.feed_switches(bytes(256), names, 2.0)
+    on = bytearray(256)
+    on[40] = 1
+    cw.feed_switches(bytes(on), names, 2.1)
+    append(log, serve(80.0, 362), serve(90.0, 361, 91))
+    cw.poll(3.0)
+    assert [(r["name"], r["n"], r["sw"], r["loop"]) for r in cw.dyn()] == [
+        ("gigan_ghidorah_vs_godzilla56", 2, "", True), ("2.asset/362.asset", 1, "Left Spinner", False)]
+    cw.feed_switches(bytes(256), names, 4.0)
+    cw.feed_switches(bytes(on), names, 4.1)
+    append(log, serve(95.0, 362))
+    cw.poll(4.5)
+    assert cw.dyn()[0]["sw"] == "Left Spinner" and cw.dyn()[0]["n"] == 2   # one row, not two
 
 
 def test_the_log_is_read_as_it_grows_and_again_from_the_start_after_a_new_run(tmp_path):
@@ -182,6 +193,14 @@ def test_the_video_tab_shows_when_each_clip_plays_and_sorts_by_it(tmp_path, monk
         assert _row(st, SOLO)["seen_tip"][0] == "Played 2 times in the emulator."
         assert _row(st, MAIN)["seen"] == "Loops"
         assert _row(st, OTHER)["seen"] == ""
+        # the callout says it in full for the row on show, and nothing for a clip not seen
+        w.call("video.select", SOLO)
+        st = _wait(w, lambda st: ((st.get("preview") or {}).get("seen") or {}).get("rel") == SOLO)
+        assert st["preview"]["seen"]["lines"] == ["Played 2 times in the emulator.",
+                                                  "After RIGHT RAMP MADE: 2 times"]
+        w.call("video.select", OTHER)
+        _wait(w, lambda st: (st.get("preview") or {}).get("rel") == OTHER
+              and not (st.get("preview") or {}).get("seen"))
         assert w.call("video.sort", "seen") is True
         st = w.state("video")
         order = [st["rows"][i]["rel"] for i in st["view"]]
@@ -206,3 +225,45 @@ def test_the_page_draws_the_column_beside_played_in():
 def test_the_serving_line_is_read_with_or_without_its_rate(line, want):
     m = CW.LINE.search(line)
     assert (int(m.group(2)), int(m.group(3)), m.group(4)) == want
+
+
+# ---- the Emulate tab and the playfield window agree on the files ---------------------------------
+def test_a_start_writes_the_map_where_the_window_reads_it_and_the_poll_folds_what_it_saw(
+        tmp_path, monkeypatch):
+    from tests.test_webui_emulate import _svc
+    monkeypatch.setenv("PAD_SLOT", "3")
+    proj = tmp_path / "proj"
+    _manifest(proj, [("ebirah_vs_godzilla22.mp4", "/godzilla_le" + BANK[1:] + "120.asset")])
+    with web_app(tmp_path, mfr="stern") as w:
+        from pinball_decryptor.webui.tabs import emulate as emod
+        svc = _svc(w)
+        monkeypatch.setattr(svc, "_assets", lambda: str(proj))
+        w.run(svc._clip_names_for_run)
+        ctl = emod.audio_ctl_file()
+        names = os.path.join(os.path.dirname(ctl), "clip_names_3.json")
+        got = CW.load_names(names, "godzilla_le")
+        assert got == {BANK + "120.asset": ["video/ebirah_vs_godzilla22.mp4", "ebirah_vs_godzilla22"]}
+        # the window's own reader, as playfield.clip_watch() builds it for this rig
+        cw = CW.ClipWatch(str(tmp_path / "padvid.log"), names,
+                          os.path.join(os.path.dirname(ctl), "clips_seen_3.jsonl"), game="godzilla_le")
+        append(tmp_path / "padvid.log", serve(5.0, 120))
+        cw.poll(1.0)
+        assert cw.dyn()[0]["name"] == "ebirah_vs_godzilla22"
+        assert svc._clip_merger.poll() == 1
+        assert CS.load(str(proj)) == {"video/ebirah_vs_godzilla22.mp4":
+                                      {"plays": 1, "after": {}, "loops": False}}
+
+
+def test_the_playfield_window_builds_its_reader_beside_the_volume_file(monkeypatch, tmp_path):
+    try:
+        import playfield as pf
+    except Exception:                                        # noqa: BLE001
+        pytest.skip("playfield not importable")
+    monkeypatch.setattr(pf, "AUDIO_CTL", str(tmp_path / "audio_ctl.json"))
+    monkeypatch.setattr(pf.padpath, "logdir", lambda: str(tmp_path / "logs"))
+    monkeypatch.setattr(pf.padpath, "slot", lambda: 4)
+    cw = pf.clip_watch()
+    assert cw.log_path == str(tmp_path / "logs" / "padvid.log")
+    assert cw.names_path == str(tmp_path / "clip_names_4.json")
+    assert cw.seen_path == str(tmp_path / "clips_seen_4.jsonl")
+    assert cw.names_path == CS.names_file(str(tmp_path), 4) and cw.seen_path == CS.seen_file(str(tmp_path), 4)

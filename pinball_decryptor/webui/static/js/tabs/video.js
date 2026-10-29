@@ -1230,6 +1230,10 @@ export default function VideoTab() {
             ${pv.sounds.none ? html`<span>${pv.sounds.none}</span>` : null}
             ${pv.sounds.foot ? html`<div class="small muted">${pv.sounds.foot}</div>` : null}</div><//>
         </div>` : null}
+        ${pv.seen && pv.seen.rel === currentRel ? html`<div class="vid-seen">
+          <${Note} kind="info"><div><span>${pv.seen.head}</span>
+            <ul class="vid-sound-list">${pv.seen.lines.map((t) => html`<li key=${t}>${t}</li>`)}</ul></div><//>
+        </div>` : null}
         ${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
         <div class="vid-panes">
           <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />

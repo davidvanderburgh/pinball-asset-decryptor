@@ -73,6 +73,8 @@ SOUNDS_HOW = {"record": "kept with the clip", "next": "asked for right after it"
               "name": "named after it"}
 SOUNDS_FOOT = ("Extract the card again to see which sound files these are: the extract writes "
                "sound_requests.tsv.")
+#: PAD-827: the callout's part for what the emulator saw the game do with the clip
+SEEN_HEAD = "Seen in the emulator (Emulate tab runs of this project):"
 #: PAD-592: a clip with none of those - the sounds that MAY be its, each kind in words
 MAYBE_HEAD = "No sound is sure for this clip. These may be its:"
 MAYBE_MAX = 12
@@ -407,6 +409,12 @@ class ModesMixin:
         from ..plugins.stern import clip_seen
         c = None if rel in self._m_virtual else self._m_seen_all().get(rel)
         return {"seen": clip_seen.cell(c), "seen_tip": clip_seen.lines(c)}
+
+    def _m_seen_preview(self, rel):
+        """The callout's When it plays part for the row on show, or None: every switch the
+        emulator saw before the clip, in full (the cell keeps to the commonest)."""
+        lines = self._m_seen_row(rel)["seen_tip"] if rel else []
+        return {"rel": rel, "head": SEEN_HEAD, "lines": lines} if lines else None
 
     def _m_seen_changed(self):
         """Whether the record changed since the rows were made (the tab shows again after a

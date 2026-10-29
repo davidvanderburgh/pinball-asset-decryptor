@@ -3315,11 +3315,14 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         pv = self.get("preview") or {}
         modes = self._m_preview(rel)
         sounds = self._m_sounds(rel)
-        if pv.get("note") != note or pv.get("modes") != modes or pv.get("sounds") != sounds:
+        seen = self._m_seen_preview(rel)        # PAD-827
+        if (pv.get("note") != note or pv.get("modes") != modes or pv.get("sounds") != sounds
+                or pv.get("seen") != seen):
             pv = dict(pv)
             pv["note"] = note
             pv["modes"] = modes
             pv["sounds"] = sounds
+            pv["seen"] = seen
             self.set(preview=pv)
 
     def _reselect(self, rels):

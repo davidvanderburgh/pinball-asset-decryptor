@@ -21,11 +21,11 @@ sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 import shot_pad312 as base  # noqa: E402
 
-PROJECT = os.environ.get("PAD827_PROJECT", r"C:\tmp\PAD-827\gzle116")
+PROJECT = os.environ.get("PAD827_PROJECT", r"C:\tmp\PAD-827\gzle116e")
 CARD = os.environ.get("PAD827_CARD", r"D:\Pinball\images\Stern\spike2"
                       r"\godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw")
-GIGAN = "cmode_battle_vs_gigan"
-ROW = "GodzillaVsGigan_Background1.mov"
+MODE = os.environ.get("PAD827_MODE", "cmode_battle_vs_ebirah")
+ROW = os.environ.get("PAD827_ROW", "ebirah_vs_godzilla22.mp4")
 
 
 def _serve(repo, scratch, project):
@@ -81,7 +81,7 @@ def main():
                 if ((state().get("video") or {}).get("modes") or {}).get("ready"):
                     break
                 time.sleep(1)
-            api("video.set_mode_filter", GIGAN)
+            api("video.set_mode_filter", MODE)
             time.sleep(2)
             page.locator(".vid-tbl .tr:has-text('%s')" % ROW).first.click()
             time.sleep(3)

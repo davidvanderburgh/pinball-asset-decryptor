@@ -51,9 +51,13 @@ POLL_S = 0.25
 #: how much of the log's start tells one run's log from the next's (its first
 #: line carries the time it was written to the hundredth of a second)
 HEAD = 64
-#: switches made all game long that start no clip of their own: the
-#: flippers' buttons and end-of-stroke, the trough's ball counting, the door
-NOT_TRIGGERS = re.compile(r"flipper|\beos\b|end of stroke|trough|coin door", re.I)
+#: switches that start no clip of their own: the flippers' buttons and
+#: end-of-stroke and the trough's ball counting (made all game long), the door,
+#: and the ones the GAME moves - a motor's position switches, a stepper's reset,
+#: a "virtual" switch the board raises for a fired magnet (Godzilla's Shield
+#: Motor Open closed as the battle it had just started opened the shield)
+NOT_TRIGGERS = re.compile(r"flipper|\beos\b|end of stroke|trough|coin door|"
+                          r"motor|stepper|virtual", re.I)
 
 
 def short(p):
@@ -78,17 +82,24 @@ def load_names(path, game=""):
 
 
 class Clip:
-    __slots__ = ("path", "name", "rel", "ch", "t", "dur", "switch", "loops",
+    """One row: a clip, every switch seen just before one of its plays (in
+    the order seen), how many plays, whether it loops."""
+    __slots__ = ("path", "name", "rel", "ch", "t", "dur", "switches", "loops",
                  "plays", "seen")
 
-    def __init__(self, path, name, rel, ch, t, dur, switch, seen):
+    def __init__(self, path, name, rel, ch, t, dur, seen):
         self.path, self.name, self.rel, self.ch = path, name, rel, ch
-        self.t, self.dur, self.switch = t, dur, switch
-        self.loops, self.plays, self.seen = False, 1, seen
+        self.t, self.dur = t, dur
+        self.switches, self.loops, self.plays, self.seen = [], False, 0, seen
+
+    def played(self, switch):
+        self.plays += 1
+        if switch and switch not in self.switches:
+            self.switches.append(switch)
 
     def row(self, now_path):
-        return {"name": self.name, "sw": self.switch or "", "loop": self.loops,
-                "n": self.plays, "now": self.path == now_path}
+        return {"name": self.name, "sw": ", ".join(self.switches),
+                "loop": self.loops, "n": self.plays, "now": self.path == now_path}
 
 
 class ClipWatch:
@@ -203,22 +214,20 @@ class ClipWatch:
                     self.dirty = True
                     return True
                 return False
-        rel, name = (self.names().get(path) or [None, None])
-        clip = Clip(path, name or short(path), rel, ch, t, dur,
-                    self._trigger(now), now)
+        switch = self._trigger(now)
+        clip = next((c for c in self.clips if c.path == path), None)
+        if clip is not None:                   # played again: to the top
+            self.clips.remove(clip)
+            clip.ch, clip.t, clip.dur, clip.seen = ch, t, dur, now
+        else:
+            rel, name = (self.names().get(path) or [None, None])
+            clip = Clip(path, name or short(path), rel, ch, t, dur, now)
+        clip.played(switch)
+        self.clips.appendleft(clip)
         self.last[ch] = clip
         self.now_path = path
-        same = next((c for c in self.clips if c.path == path), None)
-        if same is not None and same.switch == clip.switch:
-            self.clips.remove(same)
-            same.plays += 1
-            same.t, same.dur, same.seen = t, dur, now
-            self.last[ch] = same
-            self.clips.appendleft(same)
-        else:
-            self.clips.appendleft(clip)
-        self._record({"path": path, "rel": rel, "name": clip.name,
-                      "switch": clip.switch})
+        self._record({"path": path, "rel": clip.rel, "name": clip.name,
+                      "switch": switch})
         self.dirty = True
         return True
 

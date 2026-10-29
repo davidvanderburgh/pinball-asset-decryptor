@@ -15252,6 +15252,24 @@ def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None,
     _write_machine_render(p, got, stereo, np)
 
 
+def _audit_nearest(params, off, n):
+    """What :func:`_audit_audio_patches` says about a patch no sound owns
+    (PAD-801): the sound whose body starts nearest to it, that sound's own
+    window size and whether it is an appended (grown) record, so a reported
+    log names the case instead of only an offset."""
+    from .spike2.emulator import frame_bytes
+    if not params:
+        return "no sounds in the table"
+    p = min(params, key=lambda q: abs(int(q["body_off"]) - off))
+    s = frame_bytes(p)
+    return ("nearest: idx %s at 0x%x, %+d bytes away, window %d bytes%s%s"
+            % (p.get("idx"), int(p["body_off"]), off - int(p["body_off"]),
+               s * int(p["length"]),
+               ", grown" if p.get("grown") else "",
+               ", %d bytes past it" % (n - s * int(p["length"]))
+               if int(p["body_off"]) == off else ""))
+
+
 def _audit_audio_patches(params, patches, log):
     """Byte-range audit of the assembled cat-0 patch set — the paranoid check
     that OUR writes land exactly where the model says they do.
@@ -15277,15 +15295,17 @@ def _audit_audio_patches(params, patches, log):
         for p, s, d in own.get(off, ()):
             # an APPENDED record's encode also covers its silent lead-out (_APPENDED_TAIL,
             # item 150 follow-up): its window is that much longer than its length.  It
-            # starts a word below its body as any window may (PAD-800: every appended
-            # body on Iron Maiden LE 1.18 did, and each build asked to be reported)
+            # starts 1-2 words below its body on a delta<0 key exactly as a stock
+            # sound's does (PAD-800: every appended body on Iron Maiden LE 1.18 did;
+            # PAD-801: 72 of a Godzilla Pro card's 109, and each build asked to be reported)
             if len(body) == s * p["length"] or (p.get("grown") and len(body) == s * (
                     p["length"] + _APPENDED_TAIL)):
                 owner = (p, s, d)
                 break
         if owner is None:
             log("Patch audit: patch at 0x%x (%d bytes) matches no sound's "
-                "write window — please report this build log." % (off, len(body)),
+                "write window (%s) — please report this build log."
+                % (off, len(body), _audit_nearest(params, off, len(body))),
                 "warning")
             issues += 1
         elif owner[2]:

@@ -5,9 +5,12 @@
     "script as a shadow game and hands the ball to the real game. This build of",
     "foo_fighters_le ships no lamp or switch positions; the objects are placed by",
     "JP's own comments ('left outlane', 'Overlord opto') against Stern's names.",
-    "Stern's upper playfield (UP PF ...) has no counterpart on this table."
+    "Stern's upper playfield (UP PF ...) has no counterpart on this table, nor",
+    "has the Overlord magnet or hit coil: the table is a Pro's playfield, and Patch",
+    "takes foo_fighters_pro.shadow.json for it unless only an LE card is there."
   ],
   "title": "foo_fighters_le",
+  "model": "LE",
   "detect": [
     "JP's Foo Fighters",
     "jpsalas"

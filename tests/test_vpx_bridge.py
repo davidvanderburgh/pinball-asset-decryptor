@@ -590,7 +590,7 @@ def test_launcher_uses_the_rigs_own_home_off_the_runtime(monkeypatch):
 def test_kit_recognises_each_supported_table(monkeypatch):
     pv = pytest.importorskip("padvpx")
     titles = pv.maps()
-    assert set(titles) >= {"rush_le", "foo_fighters_le", "godzilla_le"}
+    assert set(titles) >= {"rush_le", "foo_fighters_le", "foo_fighters_pro", "godzilla_le"}
     assert all(t["detect"] for t in titles.values()), "every map names the words that identify its table"
 
     class Fake:
@@ -600,14 +600,77 @@ def test_kit_recognises_each_supported_table(monkeypatch):
         def script(self):
             return self._s
 
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: None)
     for title, words in (("rush_le", ["Rush LE ver 2.0.2 / PUP ver 2.0.0 - By DrHotWing"]),
-                         ("foo_fighters_le", ["'  JP's Foo Fighters - a tribute", "script by jpsalas - 2025"]),
+                         ("foo_fighters_pro", ["'  JP's Foo Fighters - a tribute", "script by jpsalas - 2025"]),
                          ("godzilla_le", ["' Godzilla Limited Edition", 'ExecuteGlobal GetTextFile("SEGA.VBS")'])):
         monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p, s="\n".join(words): Fake(s))
         got, info = pv.recognise("x.vpx")
         assert got == title, (title, got)
     monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake("Option Explicit\n' some other table"))
     assert pv.recognise("x.vpx") == (None, None)
+
+
+def test_jps_foo_fighters_plays_as_the_pro_unless_only_an_le_card_is_there(monkeypatch):
+    """PAD-808: JP's table has no upper playfield and no Overlord magnet or
+    hit coil - a Pro's playfield. Both maps fit the download; Patch takes the
+    one asked for, else the one the card given is for, else the first with a
+    card known, else the Pro."""
+    pv = pytest.importorskip("padvpx")
+
+    class Fake:
+        def script(self):
+            return "'  JP's Foo Fighters - a tribute\n' script by jpsalas - 2025"
+    monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
+    fits = [t for t, _ in pv.fitting("x.vpx")]
+    assert fits == ["foo_fighters_pro", "foo_fighters_le"], "the preferred map first"
+    cards = {}
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: cards.get(t))
+    assert pv.recognise("x.vpx")[0] == "foo_fighters_pro"
+    cards["foo_fighters_le"] = "D:/c/foo_fighters_le-1_04_0.Release.16G.sdcard.raw"
+    assert pv.recognise("x.vpx")[0] == "foo_fighters_le", "only an LE card: the LE"
+    cards["foo_fighters_pro"] = "D:/c/foo_fighters_pro-1_04_0.Release.16G.sdcard.raw"
+    assert pv.recognise("x.vpx")[0] == "foo_fighters_pro", "both: the Pro"
+    assert pv.recognise("x.vpx", title="foo_fighters_le")[0] == "foo_fighters_le"
+    assert pv.recognise("x.vpx", card="E:/foo_fighters_le-1_04_0.Release.16G.sdcard.raw")[0] \
+        == "foo_fighters_le", "setup's card names the title"
+    assert pv.card_title("rush_le-1_19_0.Release.16G.sdcard.raw") == "rush_le"
+    assert pv.patch("x.vpx", title="rush_le") == 2, "a title whose map does not fit"
+
+
+def _ff_maps():
+    return [json.load(open(os.path.join(VPX, "foo_fighters_%s.shadow.json" % m), encoding="utf-8"))
+            for m in ("le", "pro")]
+
+
+def test_the_foo_fighters_pro_map_is_the_le_map_on_the_pros_numbers():
+    """PAD-808: the Pro map was made from the LE one through both programs'
+    own switch tables (swelf, 1.04.0): the same table objects on the same
+    switch names, the Pro's ids (lower past each of the LE's upper
+    playfield switches, which the Pro has none of), the LE-only coils gone,
+    the lights as they are."""
+    le, pro = _ff_maps()
+    assert pro["title"] == "foo_fighters_pro" and pro["model"] == "Pro" and pro["preferred"]
+    assert le["model"] == "LE" and not le.get("preferred")
+    for k in ("detect", "output", "table", "game_on", "keys_skip_orig", "neuter", "extra_vbs",
+              "quiet_subs", "orig_keep", "retrofit_timers"):
+        assert pro[k] == le[k], k
+    assert {k: v["name"] for k, v in pro["switches"].items() if k != "_"} == \
+        {k: v["name"] for k, v in le["switches"].items() if k != "_"}
+    for k, v in pro["switches"].items():
+        if k != "_":
+            assert 0 <= le["switches"][k]["id"] - v["id"] <= 3, (k, v)
+    assert pro["switches"]["Target004"]["id"] == 48, "LOWER RIGHT TARGET: below every UP PF switch"
+    assert pro["switches"]["Trigger003"]["id"] == 54, "LEFT OUTLANE on the Pro"
+    assert pro["switches"]["LeftSlingShot"]["id"] == 65
+    assert pro["switches"]["Trigger015"]["id"] == 82, "OVERLORD OPTO on the Pro"
+    assert pro["trough"]["switches"] == [72, 71, 70, 69, 68, 67, 73]
+    assert pro["plunger"]["lane_switch"] == 63
+    assert pro["cabinet"]["left_flipper"] == 1061 and pro["cabinet"]["start"] == 1036
+    gone = {v["name"] for k, v in le["solenoids"].items() if k not in pro["solenoids"]}
+    assert gone == {"OUTLANE UP POST", "OVERLORD MAGNET", "OVERLORD HIT", "UP PF DIVERTER"}
+    assert all(pro["solenoids"][k] == v for k, v in le["solenoids"].items() if k in pro["solenoids"])
+    assert {k: v["leds"] for k, v in pro["lamps"].items() if k != "_"} ==         {k: v["leds"] for k, v in le["lamps"].items() if k != "_"}
 
 
 # ------------------------------------------------ the table generator -----
@@ -782,7 +845,7 @@ def test_generator_shapes_carry_their_points():
     assert vg.ident("LEFT RAMP ENTER OPTO") == "LeftRampEnterOpto" and vg.ident("3 BANK") == "X3Bank"
 
 
-@pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le"])
+@pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le", "foo_fighters_pro"])
 def test_shadow_maps_are_consistent(title):
     vs = pytest.importorskip("vpxshadow")
     path = os.path.join(VPX, title + ".shadow.json")
@@ -864,11 +927,23 @@ def test_setup_names_each_known_table_and_what_is_patched(tmp_path, monkeypatch)
     (tables / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"x")
     (tables / "Rush LE 2.0.2.vpx").write_bytes(b"x")
     got = {t["title"]: t for t in vs.known_tables(str(tables))}
-    assert set(got) >= {"rush_le", "foo_fighters_le", "godzilla_le"}
+    assert set(got) >= {"rush_le", "foo_fighters_pro", "godzilla_le"}
     for t in got.values():
         assert t["name"] and t["by"] and t["where"] and t["output"].endswith("(PAD).vpx"), t
         assert t["card"] == ""
-    assert got["rush_le"]["patched"] and not got["foo_fighters_le"]["patched"]
+    assert got["rush_le"]["patched"] and not got["foo_fighters_pro"]["patched"]
+    # PAD-808: one row for JP's Foo Fighters, the Pro first, the LE beside it
+    assert "foo_fighters_le" not in got
+    ff = got["foo_fighters_pro"]
+    assert ff["titles"] == ["foo_fighters_pro", "foo_fighters_le"]
+    assert ff["models"] == {"foo_fighters_pro": "Pro", "foo_fighters_le": "LE"}
+    assert got["rush_le"]["titles"] == ["rush_le"]
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "foo_fighters_le-1_04_0.Release.16G.sdcard.raw").write_bytes(b"x")
+    monkeypatch.setenv("PAD_VPX_LIBRARY", str(lib))
+    ff = {t["output"]: t for t in vs.known_tables(str(tables))}[ff["output"]]
+    assert ff["title"] == "foo_fighters_le" and ff["card"].endswith("foo_fighters_le-1_04_0.Release.16G.sdcard.raw")
     assert vs.patched_in(str(tables)) == ["Rush LE 2.0.2 (PAD).vpx"]
     assert vs.patched_in(str(tmp_path / "none")) == []
 

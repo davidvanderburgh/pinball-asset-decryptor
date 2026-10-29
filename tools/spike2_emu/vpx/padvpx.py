@@ -73,7 +73,9 @@ def maps():
             out[title] = {"kind": "shadow" if f.endswith(".shadow.json") else "mashup",
                           "map": os.path.join(HERE, f), "detect": m.get("detect", []),
                           "output": m.get("output", ""), "model": m.get("model", ""),
-                          "preferred": bool(m.get("preferred"))}
+                          "preferred": bool(m.get("preferred")),
+                          # a ROM table's map names its own patcher
+                          "patcher": m.get("patcher", "patch_godzilla.py")}
     return dict(sorted(out.items(), key=lambda kv: not kv[1]["preferred"]))
 
 
@@ -138,7 +140,7 @@ def patch(table_path, outdir=None, card=None, title=None):
     if info["kind"] == "shadow":
         cmd = [py, os.path.join(HERE, "vpxshadow.py"), info["map"], table_path, outdir]
     else:
-        cmd = [py, os.path.join(HERE, "patch_godzilla.py"), table_path, outdir]
+        cmd = [py, os.path.join(HERE, info["patcher"]), table_path, outdir]
     print("recognised %s: %s" % (title, " ".join(info["detect"])))
     r = subprocess.run(cmd)
     if r.returncode == 0 and card:

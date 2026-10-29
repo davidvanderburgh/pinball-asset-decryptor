@@ -2160,16 +2160,21 @@ class AudioTab(FindOriginalsMixin, TabService):
         return self.choose(rel)
 
     @rpc
-    def choose(self, rel):
+    def choose(self, rel, dropped=None):
         """The replacement picker for *rel* (the Replacement cell, a
-        double-click, the menu or the pane's Choose…)."""
+        double-click, the menu or the pane's Choose…), or the file
+        *dropped* on its row (the dropped files' names, PAD-838)."""
         if not rel or rel not in self._by_rel:
             return False
         self._cancel_select_job()
         self.stop_all_preview_playback()
-        path = self._ask_path(
-            "open", "audio_replacement", "Choose a replacement for %s" % rel,
-            filetypes=_AUDIO_FILETYPES)
+        if dropped is not None:
+            path = self.dropped_file(dropped, _AUDIO_FILETYPES, "a sound")
+        else:
+            path = self._ask_path(
+                "open", "audio_replacement",
+                "Choose a replacement for %s" % rel,
+                filetypes=_AUDIO_FILETYPES)
         if not path:
             return False
         if isinstance(path, (list, tuple)):

@@ -143,6 +143,8 @@ HELP_CONTENT = {
                 {"icon": "write", "title": "Build",
                  "text": "on the **Write** tab; there is no separate stage step"}]},
             "- Almost any audio file works: mp3, wav, ogg, flac, m4a and more.\n"
+            "- Drop a sound file from your desktop or a folder on a row to make it "
+            "that row's replacement.\n"
             "- Any sample rate or bit depth (16, 24 or 32-bit, float or integer). "
             "Length, rate and volume are fitted for you when you build.",
         ]),
@@ -421,6 +423,8 @@ HELP_CONTENT = {
                 {"icon": "write", "title": "Build",
                  "text": "on the **Write** tab: picks apply then"}]},
             "- No stage step: the assets folder is the one Extract made and Write reads.\n"
+            "- Drop a video file from your desktop or a folder on a row to make it "
+            "that row's replacement.\n"
             "- The log says at once whether a pick \"already matches this slot\" (copied "
             "in, no re-encode) or \"will be re-encoded to match this slot\". "
             "Transparency is kept where the original has it.\n"
@@ -879,6 +883,8 @@ HELP_CONTENT = {
                 {"icon": "write", "title": "Build",
                  "text": "on the Write tab: there is no separate stage step"}]},
             "- The folder is the one **Extract** made, the same one Write reads.\n"
+            "- Drop an image file from your desktop or a folder on a row to make it "
+            "that row's replacement.\n"
             "- Keep the original's resolution for the best result.",
         ]),
         ("Where pictures come from",

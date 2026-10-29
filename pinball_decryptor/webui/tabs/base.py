@@ -22,6 +22,8 @@ Hooks (all on the UI loop):
   on_project(folder)     the project folder changed
 """
 
+import os
+
 from .. import compat
 from ..rpc import rpc  # noqa: F401  (re-exported for tab modules)
 
@@ -87,6 +89,34 @@ class TabService:
 
     def toast(self, text, level="info"):
         self.window.toast(text, level)
+
+    def dropped_file(self, names, filetypes, what):
+        """The full path of the one file the page says was dropped on a row
+        (*names*: the dropped files' names), or ``None`` after saying why
+        not (PAD-838).  It must be one file of a kind *filetypes* (a
+        picker's list) names: *what* says that kind ("an image")."""
+        if len(names or []) != 1:
+            compat.messagebox.showinfo(
+                "Drop a file", "Drop one file on a row: it becomes that "
+                "row's replacement. For a whole set at once, use Replace "
+                "from folder… with the files named like their slots.")
+            return None
+        got = self.ctx.drops.take(names)
+        if not got:
+            compat.messagebox.showinfo(
+                "Drop a file", "This window could not tell where the "
+                "dropped file is. Use Choose… to pick it instead.")
+            return None
+        path = got[0]
+        exts = {e.lstrip("*").lower() for _l, spec in filetypes or []
+                for e in spec.split() if e != "*.*"}
+        if os.path.isdir(path) or (
+                exts and os.path.splitext(path)[1].lower() not in exts):
+            compat.messagebox.showinfo(
+                "Drop a file", "%s is not %s file, so it was not used."
+                % (os.path.basename(path), what))
+            return None
+        return path
 
     # -- hooks -----------------------------------------------------------
     def on_manufacturer(self, mfr):

@@ -199,6 +199,29 @@ def test_cancel_scan(tmp_path):
 
 
 # ----------------------------------------------------------------- picking
+def test_a_sound_dropped_on_a_row_is_its_replacement(tmp_path):
+    """PAD-838: a sound dropped on a row from the desktop takes the
+    picker's place."""
+    folder = _project(tmp_path)
+    rep = str(tmp_path / "mine" / "new_jackpot.wav")
+    _wav(rep, seconds=1.0)
+    rel = "audio/idx0001 - Jackpot.wav"
+    with web_app(tmp_path, mfr="ap") as w:
+        _open(w, folder)
+        n = len(w.asked)
+        w.ctx.drops.put([rep])
+        assert w.call("audio.choose", rel, ["new_jackpot.wav"]) is True
+        assert len(w.asked) == n                 # no picker opened
+        row = w.state("audio")["rows"][0]
+        assert row["rep"] == "new_jackpot.wav" and row["t"] == "picked"
+        assert _sidecar(folder)["audio"] == {rel: os.path.normpath(rep)}
+        # a folder is not a sound
+        w.ctx.drops.put([str(tmp_path / "mine")])
+        assert w.call("audio.choose", rel, ["mine"]) is False
+        assert w.asked[-1]["message"] == (
+            "mine is not a sound file, so it was not used.")
+
+
 def test_choose_stages_in_the_sidecar_and_feeds_the_write(tmp_path):
     folder = _project(tmp_path)
     rep = str(tmp_path / "mine" / "new_jackpot.wav")

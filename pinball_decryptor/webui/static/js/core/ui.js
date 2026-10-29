@@ -441,13 +441,17 @@ export function PageHead({ title, sub, children }) {
 // resizable: drag a header's right edge; widths = {key: px} saved widths;
 // onResize(widths) gets every column's px after a drag (Tk saved the dragged
 // widths under column_widths).  The last column always takes what is left.
+// onFileDrop(row, i, names): files from the desktop dropped on a row (the row
+// lights while they are over it; fileDropOk(row, i) says which rows take them).
 export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect, onActivate,
                         rowClass, sort, onSort, empty, rowHeight = 34, cls = "", style,
-                        onContext, header = true, multi, resizable, widths, onResize }) {
+                        onContext, header = true, multi, resizable, widths, onResize,
+                        onFileDrop, fileDropOk }) {
   const scroller = useRef(null);
   const headRef = useRef(null);
   const [view, setView] = useState({ top: 0, h: 600 });
   const [live, setLive] = useState(null);
+  const [dropOn, setDropOn] = useState(null);     // the row files are dragged over
   const wmap = live || widths || null;
   const template = columns.map((c, i) => (i === columns.length - 1 ? (c.width && !/px$/.test(c.width) ? c.width : "minmax(0,1fr)")
     : wmap && wmap[c.key] ? Math.max(36, wmap[c.key]) + "px" : (c.width || "minmax(0,1fr)"))).join(" ");
@@ -512,6 +516,22 @@ export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect,
     atRef.current = rowKey(rows[idx], idx);
     onSelect(rows[idx], idx, e);
   };
+  const isFiles = (e) => !!e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files");
+  const fileDrop = (r, i, id) => !onFileDrop || (fileDropOk && !fileDropOk(r, i)) ? {} : {
+    onDragOver: (e) => {
+      if (!isFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      if (dropOn !== id) setDropOn(id);
+    },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropOn((d) => (d === id ? null : d)); },
+    onDrop: (e) => {
+      if (!isFiles(e)) return;
+      e.preventDefault();
+      setDropOn(null);
+      onFileDrop(r, i, [...e.dataTransfer.files].map((f) => f.name));
+    },
+  };
   return html`<div class=${cx("tbl", cls)} style=${style}>
     <div class="scroller" ref=${scroller} onScroll=${onScroll} tabindex="0" onKeyDown=${onKey}>
       ${header ? html`<div class="tr th" ref=${headRef} style=${`grid-template-columns:${template}`}>
@@ -523,11 +543,12 @@ export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect,
         ${slice.map((i) => {
           const r = rows[i];
           const id = rowKey(r, i);
-          return html`<div key=${id} class=${cx("tr", (onSelect || onActivate) && "click", isSel(id) && "sel", rowClass && rowClass(r, i))}
+          return html`<div key=${id} class=${cx("tr", (onSelect || onActivate) && "click", isSel(id) && "sel", dropOn === id && "drop-on", rowClass && rowClass(r, i))}
             style=${`grid-template-columns:${template};position:absolute;left:0;right:0;top:${i * rowHeight}px;height:${rowHeight}px`}
             onClick=${(e) => { atRef.current = id; if (onSelect) onSelect(r, i, e); }}
             onDblClick=${() => onActivate && onActivate(r, i)}
-            onContextMenu=${onContext ? (e) => { e.preventDefault(); onContext(r, i, e); } : undefined}>
+            onContextMenu=${onContext ? (e) => { e.preventDefault(); onContext(r, i, e); } : undefined}
+            ...${fileDrop(r, i, id)}>
             ${columns.map((c) => html`<span class=${cx("c", c.num && "num", c.cls)} title=${c.titleOf ? c.titleOf(r) : undefined}>${c.render ? c.render(r, i) : r[c.key]}</span>`)}
           </div>`;
         })}

@@ -2147,16 +2147,21 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
             self._picking = False
 
     @rpc
-    def choose(self, rel):
-        """Tk _image_assign_rel: pick the replacement for one slot."""
+    def choose(self, rel, dropped=None):
+        """Tk _image_assign_rel: pick the replacement for one slot, or use
+        the file *dropped* on its row (the dropped files' names, PAD-838)."""
         if not rel or rel not in self._by_rel:
             if rel is None:
                 compat.messagebox.showinfo("No Slot Selected",
                                            "Select an image to assign.")
             return None
-        path = self._pick(
-            self.window.ask_open, "image_replacement",
-            "Choose a replacement for %s" % rel, self._image_filetypes())
+        if dropped is not None:
+            path = self.dropped_file(dropped, self._image_filetypes(),
+                                     "an image")
+        else:
+            path = self._pick(
+                self.window.ask_open, "image_replacement",
+                "Choose a replacement for %s" % rel, self._image_filetypes())
         if not path:
             return None
         self._assignments[rel] = path

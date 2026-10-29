@@ -36,7 +36,7 @@ const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for s
 // PAD-534: the scene(s) a picture is in, and how the game turns it there
 const SCENES_TIP = "Where the game draws this picture. The picture here is the file as it is stored; a scene can draw it turned or mirrored, as the Scenes tab shows.";
 const KEEP_TIP = "Off: the replacement is scaled to the original picture's size, which squeezes a longer name. On: it keeps its own width and height, and the build grows the scene to fit it. The game draws it from the same top-left corner, so a wider picture reaches further right. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is fitted instead, and the log says so.";
-const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same).";
+const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same), or drop an image file on the row.";
 // PAD-312: the chosen-files color profile, baked into this picture as it is staged
 const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build. Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own picture, never touched (tick Unlock extracted images to give it a palette too). Click a palette to attach or detach it. Select several pictures (Shift-click or Ctrl-click) and pick a profile in the Colors bar to give it to all of them.";
 // PAD-368: the profile a file has, for its tooltips (null where the Color column is not offered);
@@ -350,6 +350,14 @@ export default function ImagesTab() {
     setSel(next);
     setCur(id);
     call("images.select", id);
+  };
+
+  // PAD-838: an image file dropped on a row from the desktop is its replacement
+  const onFileDrop = (e, _i, names) => {
+    const row = slotAt(s, e);
+    if (!row) return;
+    selectOnly(row.r);
+    call("images.choose", row.r, names);
   };
 
   const onActivate = (e) => {
@@ -694,7 +702,8 @@ export default function ImagesTab() {
       <${Table} cls="img-tbl" columns=${columns} rows=${view} rowKey=${idOf} selected=${cur}
         onSelect=${onSelect} onActivate=${onActivate} onContext=${onContext} rowClass=${rowClass}
         sort=${s.sort} onSort=${(k) => call("images.sort", k)} empty=${tableEmpty} rowHeight=${36}
-        resizable widths=${widths} onResize=${onResize} />
+        resizable widths=${widths} onResize=${onResize}
+        fileDropOk=${(e) => typeof e === "number"} onFileDrop=${onFileDrop} />
       <div class=${cx("ft img-prev", look.offered && "img-looks")}>
         ${look.offered ? html`<div class="img-lk"><${LookRow} look=${look} ns="images" note=${false}
           onOpen=${colorsOn ? openColors : undefined} /></div>` : null}

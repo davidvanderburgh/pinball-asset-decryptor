@@ -466,6 +466,30 @@ def test_choose_previews_the_row_it_picks_for(tmp_path):
         assert st["select"]["rels"] == ["video/sub/boss.mp4"]
 
 
+def test_a_clip_dropped_on_a_row_is_its_replacement(tmp_path):
+    """PAD-838: a video dropped on a row from the desktop takes the
+    picker's place and shows in that row's panes."""
+    proj = _project(tmp_path)
+    mine = _mine(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        n = len(w.asked)
+        w.ctx.drops.put([str(mine)])
+        assert w.call("video.choose", "video/sub/boss.mp4",
+                      ["mine.mp4"]) is True
+        assert len(w.asked) == n                 # no picker opened
+        st = w.state("video")
+        assert st["preview"]["rel"] == "video/sub/boss.mp4"
+        assert st["preview"]["rep"]["path"] == os.path.normpath(str(mine))
+        # a picture is not a clip
+        pic = _mine(tmp_path, "still.png")
+        w.ctx.drops.put([str(pic)])
+        assert w.call("video.choose", "video/intro.mp4",
+                      ["still.png"]) is False
+        assert w.asked[-1]["message"] == (
+            "still.png is not a video file, so it was not used.")
+
+
 def test_selecting_the_row_on_show_keeps_it_playing(tmp_path):
     """Tk _video_preview_selected: the row already loaded is left alone
     (a click on it while it plays doesn't restart it); ▶ on an empty pane

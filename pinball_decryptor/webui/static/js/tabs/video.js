@@ -878,6 +878,12 @@ export default function VideoTab() {
   };
   // Python loads the row into the panes before the picker opens
   const choose = (rel) => { clearTimeout(selectJob.current); pauseAll(); call("video.choose", rel); };
+  // PAD-838: a video file dropped on a row from the desktop is its replacement
+  const dropOn = (rel, names) => {
+    setSel(new Set([rel])); anchor.current = rel;
+    clearTimeout(selectJob.current); pauseAll();
+    call("video.choose", rel, names);
+  };
   const playRow = (rel, side = "orig") => {
     setSel(new Set([rel])); anchor.current = rel;
     clearTimeout(selectJob.current);
@@ -1209,6 +1215,7 @@ export default function VideoTab() {
           sort=${s.sort} onSort=${(k) => call("video.sort", k)}
           resizable widths=${tuned} onResize=${onResize} style=${`--vid-minw:${Math.round(minWidth)}px`}
           rowClass=${(r) => cx(r.rep_cls === "stray" && "vid-foreign")}
+          onFileDrop=${(r, _i, names) => dropOn(r.rel, names)}
           empty=${emptyNode} />
       </div>
       <div class="vid-preview">

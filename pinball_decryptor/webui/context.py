@@ -4,6 +4,7 @@ import secrets
 import threading
 
 from .dialogs import Dialogs
+from .drops import DropBox
 from .loop import UiLoop
 from .rpc import Registry
 from .state import EventBus, Store
@@ -27,6 +28,8 @@ class Context:
         # set once a page has asked for its state: the native window's page
         # reached the app (the host's blank-window watch, PAD-748)
         self.page_seen = threading.Event()
+        # files dropped on the window, by full path (drops.py, PAD-838)
+        self.drops = DropBox()
 
     # -- read by the HTTP server ----------------------------------------
     def state_snapshot(self):

@@ -797,7 +797,8 @@ export default function AudioTab() {
           onSelect=${onSelect} onActivate=${(r) => { if (!r.g) call("audio.choose", r.k); }} onContext=${onContext}
           sort=${s.sort || {}} onSort=${(k) => call("audio.sort", k)}
           resizable widths=${tblWidths} onResize=${onResize}
-          rowClass=${(r) => cx(r.g && "aud-grp", r.t === "stray" && "aud-stray")} empty=${empty} rowHeight=${ROW_H} />
+          rowClass=${(r) => cx(r.g && "aud-grp", r.t === "stray" && "aud-stray")} empty=${empty} rowHeight=${ROW_H}
+          fileDropOk=${(r) => !r.g} onFileDrop=${(r, _i, names) => { selectOne(r.k); call("audio.choose", r.k, names); }} />
       </div>
     <//>
     ${props ? html`<${PropsModal} data=${props} onClose=${() => setProps(null)} />` : null}

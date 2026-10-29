@@ -231,6 +231,29 @@ def place_window(hwnd, rect, topmost=True):
     return window_rect(hwnd)
 
 
+def raise_window(hwnd, topmost=True):
+    """On top (or not) WITHOUT moving it: the z-order only. Moving a WSLg
+    window from this side breaks dragging it (padglhost.c, "THE DELAYED
+    MOVE"); where it goes is the renderer's, from display.conf (PAD-811)."""
+    import ctypes
+    HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+    SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+    ctypes.windll.user32.SetWindowPos(
+        ctypes.c_void_p(hwnd), ctypes.c_void_p(HWND_TOPMOST if topmost else HWND_NOTOPMOST),
+        0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
+
+
+def display_setting():
+    """The game window's display setting (padisplay.py), or None when it is
+    free - then the kit's own `lcd` placement below still applies."""
+    try:
+        import padisplay
+        s = padisplay.load()
+        return None if s.get("mode", "free") == "free" else s
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def window_rect(hwnd):
     import ctypes
     r = (ctypes.c_long * 4)()
@@ -791,6 +814,7 @@ class Bridge:
         try:
             dpi_aware()
             done = True
+            shown = display_setting()
             for key, word in self.WINDOWS:
                 setting = kit.get(key) if key == "lcd" else kit.get(key)
                 if key == "playfield" and not setting:
@@ -798,6 +822,16 @@ class Bridge:
                 hwnd = find_kit_window(word)
                 if not hwnd:
                     done = False if key == "lcd" else done
+                    continue
+                if key == "lcd" and shown:
+                    # PAD-811: the renderer puts it where display.conf says
+                    # (and keeps it there as that changes); here only ON TOP
+                    # of Visual Pinball, which comes up full screen
+                    if key not in self.placed_at:
+                        raise_window(hwnd, bool((setting or {}).get("topmost", True)))
+                        self.placed_at[key] = time.monotonic()
+                        log("lcd window left to the display setting (%s), on top"
+                            % shown.get("mode"))
                     continue
                 rect = lcd_rect(setting or {}, monitors())
                 if key == "playfield" and not any(k in (setting or {}) for k in ("x", "monitor")):

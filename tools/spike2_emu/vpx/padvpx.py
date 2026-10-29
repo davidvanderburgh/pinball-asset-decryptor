@@ -52,6 +52,7 @@ for p in (HERE, RIG):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import padisplay   # noqa: E402  where the game window goes (PAD-811)
 import padlaunch   # noqa: E402
 import vpxfile     # noqa: E402
 
@@ -351,24 +352,40 @@ def main(argv):
         padlaunch.kit_save(d)
         print("playfield: %s" % json.dumps(d.get("playfield", "off")))
         return 0
+    if cmd == "display":
+        # the game window for every run, desktop and Visual Pinball alike
+        # (PAD-811): padisplay.py's commands, applied live by the renderer
+        return padisplay.main(rest)
     if cmd == "lcd":
-        # where the game's LCD window goes when the controller starts a run:
-        # `padvpx lcd top` (on top, upper middle of the main screen),
-        # `padvpx lcd monitor 2` (fills that screen), `padvpx lcd 100 0 960 540`
+        # where the game's LCD window goes: `padvpx lcd top` (on top, upper
+        # middle of the main screen), `padvpx lcd monitor 2` (fills that
+        # screen), `padvpx lcd 100 0 960 540`, `padvpx lcd off`. Since PAD-811
+        # these are the display setting (padvpx display), borderless, which
+        # the renderer applies live; the kit keeps only "on top".
         d = padlaunch.kit_load()
+        mons = padisplay.monitors()
         if rest and rest[0] == "monitor" and len(rest) == 2:
-            d["lcd"] = {"monitor": int(rest[1]), "topmost": True}
+            s = {"mode": "fullscreen", "monitor": int(rest[1]), "border": False}
         elif len(rest) == 4:
-            d["lcd"] = {"x": int(rest[0]), "y": int(rest[1]), "w": int(rest[2]), "h": int(rest[3]), "topmost": True}
+            x, y, w, h = (int(v) for v in rest)
+            mon = next((m for m in mons if m["x"] <= x < m["x"] + m["w"]
+                        and m["y"] <= y < m["y"] + m["h"]), mons[0])
+            s = {"mode": "window", "monitor": mon["n"], "border": False,
+                 "rx": x - mon["x"], "ry": y - mon["y"], "w": w, "h": h}
         elif rest and rest[0] == "top":
-            d["lcd"] = {"topmost": True}
+            from padcontroller import lcd_rect
+            x, y, w, h = lcd_rect({}, [(m["x"], m["y"], m["x"] + m["w"], m["y"] + m["h"]) for m in mons])
+            s = {"mode": "window", "monitor": 1, "border": False,
+                 "rx": x - mons[0]["x"], "ry": y - mons[0]["y"], "w": w, "h": h}
         elif rest and rest[0] == "off":
-            d.pop("lcd", None)
+            s = {"mode": "free"}
         else:
-            print(json.dumps(d.get("lcd", {"topmost": True}), indent=1))
+            print("game window: %s" % padisplay.describe(padisplay.load(), mons))
             return 0
+        padisplay.save(s)
+        d["lcd"] = {"topmost": s["mode"] != "free"}
         padlaunch.kit_save(d)
-        print("lcd: %s" % json.dumps(d.get("lcd")))
+        print("game window: %s" % padisplay.describe(s, mons))
         return 0
     if cmd == "library" and len(rest) == 1:
         d = padlaunch.kit_load()

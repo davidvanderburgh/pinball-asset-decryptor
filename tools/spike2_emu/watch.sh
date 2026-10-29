@@ -92,6 +92,14 @@ if [ -z "${PAD_HIDDEN:-}" ]; then
     fi
 fi
 export PAD_HIDDEN
+# PAD-811: where the game window goes (borderless, a monitor, full screen or
+# a rectangle) is one file on the rig board, written by the app's Emulate tab
+# and padvpx display, read live by padglhost. A hidden run's window is on a
+# private display, so it never reads it.
+if [ "$PAD_HIDDEN" = 0 ] && [ -z "${PAD_DISPLAY_CONF:-}" ]; then
+    PAD_DISPLAY_CONF="$(pad_board_dir)/display.conf"
+fi
+export PAD_DISPLAY_CONF
 if [ "$PAD_HIDDEN" = 1 ]; then
     if ! HID_N=$(pad_hidden_display "$PAD_SLOT"); then
         echo "[watch] PAD_HIDDEN=1: no private X display for rig $PAD_SLOT" \

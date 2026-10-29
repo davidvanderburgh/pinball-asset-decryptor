@@ -185,7 +185,7 @@ function CardSource({ s }) {
       <div class="grow emu-path" ref=${pathRef}>
         <${Field} ns="emulate" k="card" value=${s.card} mono placeholder="Pick a Spike 2 card image" title=${s.card || ""} />
       </div>
-      <${Button} onClick=${() => call("emulate.browse")}>Browse…<//>
+      <${Button} drop onClick=${() => call("emulate.browse")}>Browse…<//>
       <${Button} kind="ghost" onClick=${() => call("emulate.open_cache")}
         title="Shows and manages the card cache: the copies of each card on the WSL disk that later boots start from. Deleting frees the space now; the card re-copies on its next boot.">Cache…<//>
     </div>

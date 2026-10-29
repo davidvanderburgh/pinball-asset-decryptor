@@ -82,7 +82,7 @@ export function FilmDialog({ film }) {
       <div class="row">
         <${Field} value=${v.film} onChange=${put("film")} mono cls="grow" placeholder="A video file on this computer"
           onCommit=${(x) => call("modes.film_probe", Object.assign({}, v, { film: x }))} />
-        <${Button} onClick=${() => call("modes.film_choose", v)}>Choose…<//>
+        <${Button} drop onClick=${() => call("modes.film_choose", v)}>Choose…<//>
       </div>
       <span></span><div class="small muted wrap">${film.info}</div>
 

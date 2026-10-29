@@ -100,7 +100,7 @@ export function FlashDialog({ f }) {
         <div class="wr-frow">
           <span class="lbl">Image file:</span>
           <${Field} value=${f.image_path} mono cls="grow" disabled=${!f.image_enabled} ...${imagePath} />
-          <${Button} disabled=${!f.image_enabled} onClick=${() => call("write.flash_browse", "image")}>Browse…<//>
+          <${Button} drop disabled=${!f.image_enabled} onClick=${() => call("write.flash_browse", "image")}>Browse…<//>
         </div>
         ${f.targets && f.targets.length ? html`<div class="wr-frow top">
           <span class="lbl">Onto:</span>
@@ -116,7 +116,7 @@ export function FlashDialog({ f }) {
         ${f.show_from ? html`<div class="wr-frow">
           <span class="lbl">From ISO:</span>
           <${Field} value=${f.from_path} mono cls="grow" ...${fromPath} />
-          <${Button} onClick=${() => call("write.flash_browse", "from")}>Browse…<//>
+          <${Button} drop onClick=${() => call("write.flash_browse", "from")}>Browse…<//>
         </div>` : null}
         ${f.menu_offered ? html`<div class="stack" style="gap:2px">
           <${Check} checked=${f.menu} disabled=${!f.menu_enabled}

@@ -183,7 +183,7 @@ export default function PartitionsTab() {
             placeholder="A card image: .raw, .img or .bin" />
           <${Button} icon="down" title="Recent card images" disabled=${running}
             onClick=${(e) => recentMenu(e.currentTarget, history, (p) => call("partitions.open_image", p))} />
-          <${Button} disabled=${running} onClick=${() => call("partitions.browse")}>Browse…<//>
+          <${Button} drop disabled=${running} onClick=${() => call("partitions.browse")}>Browse…<//>
         </form>
         <label class="lbl" for="pex-part">Partition</label>
         <div class="row wrap pex-prow">
@@ -222,7 +222,7 @@ export default function PartitionsTab() {
           footer=${selRow ? html`
             <span class="mono small ellip grow" title=${selRow.id}>${selRow.id}</span>
             <${Button} size="sm" onClick=${() => call("partitions.properties", selRow.id)}>Properties…<//>
-            ${!selRow.dir ? html`<${Button} size="sm" disabled=${running} onClick=${() => call("partitions.replace", selRow.id)}
+            ${!selRow.dir ? html`<${Button} drop size="sm" disabled=${running} onClick=${() => call("partitions.replace", selRow.id)}
                 title="Write a file of your own over this one on the card">Replace with…<//>` : null}` : null}>
         <div class="pex-prevbox" ref=${prevRef}>
           ${!preview ? html`<div class="pex-noprev muted small">${sel ? "" : "Pick a file in the tree to preview it here."}</div>`

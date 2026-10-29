@@ -1797,7 +1797,7 @@ function TreeActions({ t }) {
   const [adding, setAdding] = useState(false);
   const [words, setWords] = useState("");
   return html`<div class="row tree-actions">
-    <${Button} size="sm" kind="ghost" icon="plus" title="Add a picture of your own (PNG, JPG or WEBP) to this scene"
+    <${Button} drop size="sm" kind="ghost" icon="plus" title="Add a picture of your own (PNG, JPG or WEBP) to this scene"
       onClick=${() => call("text_scenes.tree_add_picture")}>Picture…<//>
     <${Button} size="sm" kind="ghost" icon="plus" title="Add a line of text to this scene"
       onClick=${() => { setWords(""); setAdding(true); }}>Text…<//>

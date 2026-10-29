@@ -344,13 +344,15 @@ def run_native(ctx, server, host):
             except Exception:                           # noqa: BLE001
                 log.warning("could not show the window", exc_info=True)
         # A Python-side drop handler makes pywebview give every dropped File
-        # a pywebviewFullPath, which the page's drop zones read (a browser
-        # never exposes a dropped file's path).  preventDefault stops the
-        # web view from navigating to a file dropped outside a drop zone.
+        # a pywebviewFullPath (a browser never exposes a dropped file's
+        # path).  It goes in the context's drop box, where the tab the page
+        # called for the drop takes it by name (drops.py, PAD-838).
+        # preventDefault stops the web view from navigating to a file
+        # dropped outside a drop target.
         try:
             from webview.dom import DOMEventHandler
             win.dom.document.events.drop += DOMEventHandler(
-                lambda _e: None, True, False)
+                ctx.drops.put_event, True, False)
         except Exception:                               # noqa: BLE001
             log.warning("drag and drop of files is not available",
                         exc_info=True)

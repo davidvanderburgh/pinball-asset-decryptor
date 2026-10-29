@@ -98,7 +98,7 @@ export function OriginalsWindow({ ns, o }) {
         <label class="lbl nw" for=${ns + "-org-folder"}>Your files:</label>
         <${Field} id=${ns + "-org-folder"} value=${o.folder} mono cls="grow" disabled=${o.busy}
           onChange=${(v) => { folder.current = v; }} onCommit=${(v) => call(fn("set"), "folder", v)} />
-        <${Button} onClick=${() => call(fn("browse"))} disabled=${o.busy}>Browse…<//>
+        <${Button} drop onClick=${() => call(fn("browse"))} disabled=${o.busy}>Browse…<//>
         <${Button} onClick=${find}>${o.busy ? "Stop" : "Find"}<//>
       </div>
       <div class="row small" style="gap:8px">${o.busy ? html`<${Spinner} />` : null}<span>${o.status}</span></div>

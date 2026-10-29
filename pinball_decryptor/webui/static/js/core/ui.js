@@ -277,11 +277,14 @@ export function InfoBadge({ text, label = "i", onClick }) {
 }
 
 // --------------------------------------------------------------- controls
+// drop: it opens a file / folder picker, so files from the desktop dropped on
+// it answer that picker (see armDrop below, PAD-838).
 export function Button({ kind = "", size = "", icon, iconRight, onClick, disabled, title,
-                         children, busy, type = "button", cls = "", label, autoFocus }) {
+                         children, busy, type = "button", cls = "", label, autoFocus, drop }) {
   const ref = useRef(null);
   useEffect(() => { if (autoFocus && ref.current) ref.current.focus(); }, []);
   return html`<button type=${type} ref=${ref} class=${cx("btn", kind, size, !children && icon && "icon", cls)}
+    data-drop=${drop ? "" : undefined}
     disabled=${!!disabled} onClick=${onClick} aria-label=${label || (typeof title === "string" && !children ? title : undefined)}
     ...${tip(title)}>
     ${busy ? html`<span class="spin"></span>` : icon ? html`<${Icon} name=${icon} />` : null}
@@ -331,11 +334,12 @@ export function Field({ ns, k, value, onChange, onCommit, placeholder, mono, sm,
 export function PathField({ ns, k, value, onBrowse, browseLabel = "Browse…", placeholder,
                             history, readOnly, disabled, onCommit, title, extra, bad }) {
   const listId = history && history.length ? `hist-${ns}-${k}` : undefined;
-  return html`<div class="row" style="gap:8px">
+  // a file dropped on the path or its Browse… answers Browse…'s picker (PAD-838)
+  return html`<div class="row" style="gap:8px" data-drop=${onBrowse && !disabled ? "" : undefined}>
     <${Field} ns=${ns} k=${k} value=${value} mono readOnly=${readOnly} disabled=${disabled}
       placeholder=${placeholder} cls="grow" list=${listId} onCommit=${onCommit} title=${title} bad=${bad} />
     ${listId ? html`<datalist id=${listId}>${history.map((p) => html`<option value=${p} />`)}</datalist>` : null}
-    ${onBrowse ? html`<${Button} onClick=${onBrowse} disabled=${disabled}>${browseLabel}<//>` : null}
+    ${onBrowse ? html`<${Button} onClick=${onBrowse} disabled=${disabled} drop>${browseLabel}<//>` : null}
     ${extra}
   </div>`;
 }
@@ -434,6 +438,51 @@ export function PageHead({ title, sub, children }) {
     ${children ? html`<div class="actions">${children}</div>` : null}</div>`;
 }
 
+// ------------------------------------------------- files from the desktop
+// PAD-838.  A page never learns where a dropped file lives; the app window's
+// own drop handler does, and keeps the paths for "ui.drop_arm", which makes
+// the next file / folder picker answer with them instead of showing.  So a
+// drop on anything marked data-drop (a Button with drop, a PathField) arms,
+// then clicks it: its picker takes the files, through every check a picked
+// file gets.  A Table's onFileDrop does the same for a row.
+const hasFiles = (e) => !!e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files");
+export async function armDrop(e) {
+  const names = [...e.dataTransfer.files].map((f) => f.name);
+  return names.length ? !!(await call("ui.drop_arm", names)) : false;
+}
+const dropTarget = (e) => {
+  const el = e.target && e.target.closest ? e.target.closest("[data-drop]") : null;
+  if (!el) return null;
+  const btn = el.matches("button") ? el : el.querySelector("button[data-drop]");
+  return btn && !btn.disabled ? el : null;
+};
+let dropLit = null;
+const lightDrop = (el) => {
+  if (dropLit === el) return;
+  if (dropLit) dropLit.classList.remove("drop-on");
+  dropLit = el;
+  if (el) el.classList.add("drop-on");
+};
+window.addEventListener("dragover", (e) => {
+  if (!hasFiles(e) || e.defaultPrevented) { lightDrop(null); return; }
+  const el = dropTarget(e);
+  lightDrop(el);
+  if (el) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
+});
+window.addEventListener("dragleave", (e) => { if (!e.relatedTarget) lightDrop(null); });
+window.addEventListener("dragend", () => lightDrop(null));
+// capture: the app window's own drop handler on the document cancels every
+// drop before it would bubble here (a row's drop is its own, see Table)
+window.addEventListener("drop", async (e) => {
+  lightDrop(null);
+  if (!hasFiles(e)) return;
+  const el = dropTarget(e);
+  if (!el) return;
+  e.preventDefault();
+  const btn = el.matches("button") ? el : el.querySelector("button[data-drop]");
+  if (await armDrop(e)) btn.click();
+}, true);
+
 // ----------------------------------------------------------------- table
 // columns: [{key, label, width: "120px" | "minmax(0,1fr)", num, render(row), sort, title}]
 // A virtual list: only the rows in view are in the DOM, so 3 000 rows scroll
@@ -441,13 +490,18 @@ export function PageHead({ title, sub, children }) {
 // resizable: drag a header's right edge; widths = {key: px} saved widths;
 // onResize(widths) gets every column's px after a drag (Tk saved the dragged
 // widths under column_widths).  The last column always takes what is left.
+// onFileDrop(row, i): files from the desktop dropped on a row, once armed (see
+// armDrop): open the row's picker and they answer it.  The row lights while
+// they are over it; fileDropOk(row, i) says which rows take them.
 export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect, onActivate,
                         rowClass, sort, onSort, empty, rowHeight = 34, cls = "", style,
-                        onContext, header = true, multi, resizable, widths, onResize }) {
+                        onContext, header = true, multi, resizable, widths, onResize,
+                        onFileDrop, fileDropOk }) {
   const scroller = useRef(null);
   const headRef = useRef(null);
   const [view, setView] = useState({ top: 0, h: 600 });
   const [live, setLive] = useState(null);
+  const [dropOn, setDropOn] = useState(null);     // the row files are dragged over
   const wmap = live || widths || null;
   const template = columns.map((c, i) => (i === columns.length - 1 ? (c.width && !/px$/.test(c.width) ? c.width : "minmax(0,1fr)")
     : wmap && wmap[c.key] ? Math.max(36, wmap[c.key]) + "px" : (c.width || "minmax(0,1fr)"))).join(" ");
@@ -512,6 +566,21 @@ export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect,
     atRef.current = rowKey(rows[idx], idx);
     onSelect(rows[idx], idx, e);
   };
+  const fileDrop = (r, i, id) => !onFileDrop || (fileDropOk && !fileDropOk(r, i)) ? {} : {
+    onDragOver: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      if (dropOn !== id) setDropOn(id);
+    },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropOn((d) => (d === id ? null : d)); },
+    onDrop: async (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDropOn(null);
+      if (await armDrop(e)) onFileDrop(r, i);
+    },
+  };
   return html`<div class=${cx("tbl", cls)} style=${style}>
     <div class="scroller" ref=${scroller} onScroll=${onScroll} tabindex="0" onKeyDown=${onKey}>
       ${header ? html`<div class="tr th" ref=${headRef} style=${`grid-template-columns:${template}`}>
@@ -523,11 +592,12 @@ export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect,
         ${slice.map((i) => {
           const r = rows[i];
           const id = rowKey(r, i);
-          return html`<div key=${id} class=${cx("tr", (onSelect || onActivate) && "click", isSel(id) && "sel", rowClass && rowClass(r, i))}
+          return html`<div key=${id} class=${cx("tr", (onSelect || onActivate) && "click", isSel(id) && "sel", dropOn === id && "drop-on", rowClass && rowClass(r, i))}
             style=${`grid-template-columns:${template};position:absolute;left:0;right:0;top:${i * rowHeight}px;height:${rowHeight}px`}
             onClick=${(e) => { atRef.current = id; if (onSelect) onSelect(r, i, e); }}
             onDblClick=${() => onActivate && onActivate(r, i)}
-            onContextMenu=${onContext ? (e) => { e.preventDefault(); onContext(r, i, e); } : undefined}>
+            onContextMenu=${onContext ? (e) => { e.preventDefault(); onContext(r, i, e); } : undefined}
+            ...${fileDrop(r, i, id)}>
             ${columns.map((c) => html`<span class=${cx("c", c.num && "num", c.cls)} title=${c.titleOf ? c.titleOf(r) : undefined}>${c.render ? c.render(r, i) : r[c.key]}</span>`)}
           </div>`;
         })}

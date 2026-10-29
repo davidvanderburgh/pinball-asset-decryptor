@@ -726,7 +726,7 @@ export default function AudioTab() {
     ${s.scanning || s.dup_scanning ? html`<${Spinner} />` : null}<span class="wrap">${s.empty || ""}</span></div>`;
 
   const repActions = html`
-    <${Button} size="sm" disabled=${!cur} onClick=${() => call("audio.choose_selected")}>Choose…<//>
+    <${Button} drop size="sm" disabled=${!cur} onClick=${() => call("audio.choose_selected")}>Choose…<//>
     ${cur && cur.built ? html`<${Button} size="sm" kind="ghost" icon="undo" onClick=${() => call("audio.remove_selected")}>Revert to original<//>`
       : cur && cur.assigned ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("audio.remove_selected")}>Remove replacement<//>` : null}`;
 
@@ -734,7 +734,7 @@ export default function AudioTab() {
     <${PageHead} title="Audio" sub=${T.intro}>
       ${s.status ? html`<${Chip} kind="acc">${s.status}<//>` : null}
       <${Button} onClick=${() => call("audio.scan")} icon=${s.scanning ? "x" : "refresh"}>${s.scanning ? "Cancel scan" : "Scan"}<//>
-      <${Button} icon="folder" disabled=${s.running} title=${T.fromFolder} onClick=${() => call("audio.replace_from_folder")}>Replace from folder…<//>
+      <${Button} drop icon="folder" disabled=${s.running} title=${T.fromFolder} onClick=${() => call("audio.replace_from_folder")}>Replace from folder…<//>
       <${Button} icon="search" disabled=${s.running} title=${T.originals} onClick=${() => call("audio.originals_open")}>Find originals…<//>
       ${s.attract ? html`<${Button} kind="ghost" icon="audio" title="The attract flipper sounds are on the Attract page now"
         onClick=${() => call("ui.select_tab", "attract")}>Attract flipper sounds…<//>` : null}
@@ -797,7 +797,8 @@ export default function AudioTab() {
           onSelect=${onSelect} onActivate=${(r) => { if (!r.g) call("audio.choose", r.k); }} onContext=${onContext}
           sort=${s.sort || {}} onSort=${(k) => call("audio.sort", k)}
           resizable widths=${tblWidths} onResize=${onResize}
-          rowClass=${(r) => cx(r.g && "aud-grp", r.t === "stray" && "aud-stray")} empty=${empty} rowHeight=${ROW_H} />
+          rowClass=${(r) => cx(r.g && "aud-grp", r.t === "stray" && "aud-stray")} empty=${empty} rowHeight=${ROW_H}
+          fileDropOk=${(r) => !r.g} onFileDrop=${(r) => { selectOne(r.k); call("audio.choose", r.k); }} />
       </div>
     <//>
     ${props ? html`<${PropsModal} data=${props} onClose=${() => setProps(null)} />` : null}

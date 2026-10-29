@@ -92,7 +92,7 @@ function TransferRow({ s, row }) {
     </label>
     <div class="mp-fctl">
       <${Field} ns="modpack" k=${row.k} value=${s[row.k]} mono id=${"mp-" + row.k} cls="grow" title=${s[row.k] || ""} />
-      <${Button} title=${row.browseTip} onClick=${() => call("modpack.browse", row.k)}>Browse…<//>
+      <${Button} drop title=${row.browseTip} onClick=${() => call("modpack.browse", row.k)}>Browse…<//>
       <span class="mp-ver">${ver ? html`<${Chip} kind="info" sm title=${ver + "\n\n" + T.verTip}>${ver}<//>` : null}</span>
     </div>
   </div>`;

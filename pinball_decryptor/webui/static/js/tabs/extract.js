@@ -48,11 +48,12 @@ function PathCombo({ k, value, history, placeholder, onBrowse, badge, title, bro
   const caret = history && history.length ? html`<button type="button" ...${tip("Recent paths")} class="x-caret" aria-label="Recent paths"
       onClick=${(e) => openMenu(e.currentTarget.closest(".field") || e.currentTarget,
         history.map((p) => ({ label: p, onClick: () => call("extract.use_recent", k, p) })))}>▾</button>` : null;
-  return html`<div class="row x-pathrow">
+  // a file (or folder) dropped on the path or Browse… answers Browse… (PAD-838)
+  return html`<div class="row x-pathrow" data-drop>
     <${Field} id=${id} ns="extract" k=${k} value=${value} mono cls="grow" placeholder=${placeholder} title=${title}
       suffix=${caret} onCommit=${(v) => call("extract.unmap", k, v)} />
     ${badge}
-    <${Button} onClick=${onBrowse} title=${browseTitle}>Browse…<//>
+    <${Button} drop onClick=${onBrowse} title=${browseTitle}>Browse…<//>
   </div>`;
 }
 
@@ -181,7 +182,7 @@ function Options({ s, shell }) {
         <span class="lbl">Optional: updates to merge on top</span>
         <div class="small dim x-pre">${s.deltas_help}</div>
         <div class="row wrap">
-          <${Button} size="sm" icon="plus" onClick=${() => call("extract.add_deltas")}>Add updates...<//>
+          <${Button} drop size="sm" icon="plus" onClick=${() => call("extract.add_deltas")}>Add updates...<//>
           <${Button} size="sm" onClick=${() => call("extract.clear_deltas")} disabled=${!(s.deltas || []).length}>Clear<//>
           <span class="small dim" title=${(s.deltas || []).join("\n")}>${s.deltas_summary}</span>
         </div>

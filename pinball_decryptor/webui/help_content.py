@@ -31,9 +31,13 @@ HELP_CONTENT = {
                  "text": "a new card image, then flash it"}]},
         ]),
         ("Pick the card",
-         "**Browse…** to a card image or update file. Or use **From SD card / SSD** "
-         "(where available) to read a card in a reader; on Windows that needs "
-         "Administrator."),
+         "**Browse…** to a card image or update file, or drop the file from your "
+         "desktop or a folder on the path or on **Browse…**. Or use **From SD card / "
+         "SSD** (where available) to read a card in a reader; on Windows that needs "
+         "Administrator.\n\n"
+         "The app's **Browse…**, **Choose…** and **Add…** buttons take a dropped "
+         "file or folder the same way, and so does a row on the Images, Video and Audio "
+         "tabs."),
         ("Is it the right card?",
          "For a Stern Spike 2 card, the page shows what the machine shows as it starts: "
          "the game's loading screen, or a multi-boot card's menu with the default game "
@@ -143,6 +147,8 @@ HELP_CONTENT = {
                 {"icon": "write", "title": "Build",
                  "text": "on the **Write** tab; there is no separate stage step"}]},
             "- Almost any audio file works: mp3, wav, ogg, flac, m4a and more.\n"
+            "- Drop a sound file from your desktop or a folder on a row to make it "
+            "that row's replacement.\n"
             "- Any sample rate or bit depth (16, 24 or 32-bit, float or integer). "
             "Length, rate and volume are fitted for you when you build.",
         ]),
@@ -421,6 +427,8 @@ HELP_CONTENT = {
                 {"icon": "write", "title": "Build",
                  "text": "on the **Write** tab: picks apply then"}]},
             "- No stage step: the assets folder is the one Extract made and Write reads.\n"
+            "- Drop a video file from your desktop or a folder on a row to make it "
+            "that row's replacement.\n"
             "- The log says at once whether a pick \"already matches this slot\" (copied "
             "in, no re-encode) or \"will be re-encoded to match this slot\". "
             "Transparency is kept where the original has it.\n"
@@ -879,6 +887,8 @@ HELP_CONTENT = {
                 {"icon": "write", "title": "Build",
                  "text": "on the Write tab: there is no separate stage step"}]},
             "- The folder is the one **Extract** made, the same one Write reads.\n"
+            "- Drop an image file from your desktop or a folder on a row to make it "
+            "that row's replacement.\n"
             "- Keep the original's resolution for the best result.",
         ]),
         ("Where pictures come from",

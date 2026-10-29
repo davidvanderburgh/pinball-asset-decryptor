@@ -44,14 +44,15 @@ its own default, exactly as before.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from typing import Optional, Tuple
 
-from .payloads import (Payload, ensure_cached, is_published,  # noqa: F401
-                       verify)
+from .payloads import (Payload, cache_path, ensure_cached,  # noqa: F401
+                       is_published, verify)
 
 class RuntimeNeedsReplacing(RuntimeError):
     """Raised instead of destroying a runtime that is already installed.
@@ -332,6 +333,49 @@ def _status(runner=None) -> Tuple[str, str]:
                info.get("built", "?")))
 
 
+#: Free space the import needs on the drive the runtime's disk goes on: the
+#: image unpacks to 1.2 GB, the new ext4.vhdx is about 1.5 GB, and the rest
+#: is room for it to start.  A handheld's small drive is where this bites, and
+#: WSL's own answer to a full disk is an error code (PAD-840).
+IMPORT_ROOM = 3 * 1024 ** 3
+
+#: ...and on top of the image itself where it is downloaded to.
+DOWNLOAD_SLACK = 512 * 1024 ** 2
+
+#: shutil.disk_usage, here so a test can set the free space.
+_disk_usage = shutil.disk_usage
+
+
+def _free(path) -> Optional[int]:
+    try:
+        return _disk_usage(path).free
+    except OSError:
+        return None
+
+
+def _drive(path) -> str:
+    return os.path.splitdrive(os.path.abspath(path))[0] or path
+
+
+def _need_room(path, need, what) -> None:
+    """Refuse, with the drive and both numbers, when *path*'s drive has less
+    than *need* bytes free.  An unreadable drive is not a refusal."""
+    free = _free(path)
+    if free is not None and free < need:
+        raise RuntimeError(
+            "not enough free space to %s: it needs about %.1f GB on %s, which "
+            "has %.1f GB free. Free some space on %s, then try again."
+            % (what, need / 1024 ** 3, _drive(path), free / 1024 ** 3,
+               _drive(path)))
+
+
+def _room_note(path) -> str:
+    """" (<drive> has N GB free)" for a failure message; "" when unreadable."""
+    free = _free(path)
+    return ("" if free is None else " (%s has %.1f GB free)"
+            % (_drive(path), free / 1024 ** 3))
+
+
 def usable(runner=None) -> bool:
     return status(runner=runner)[0] == "ready"
 
@@ -365,6 +409,11 @@ def install(log=None, progress=None, runner=None, opener=None,
                                % (os.path.basename(source), why))
         tarball = source
     else:
+        cached = cache_path(IMAGE)
+        if not (os.path.isfile(cached)
+                and os.path.getsize(cached) == IMAGE.size):
+            _need_room(os.path.dirname(cached), IMAGE.size + DOWNLOAD_SLACK,
+                       "download the emulator's Linux")
         tarball = ensure_cached(IMAGE, log=log, progress=progress,
                                 opener=opener)
 
@@ -387,15 +436,18 @@ def install(log=None, progress=None, runner=None, opener=None,
 
     target = install_dir()
     os.makedirs(target, exist_ok=True)
+    _need_room(target, IMPORT_ROOM, "install the emulator's Linux")
     say("Installing the runtime (this takes a moment, once)…")
     out = run(["wsl.exe", "--import", DISTRO, target, tarball, "--version", "2"],
               timeout=900)
     if out.returncode != 0:
+        # _why, not stderr: wsl.exe writes its errors to STDOUT, so a full
+        # disk read "exit 4294967295" here and the reason was lost (PAD-840)
         raise RuntimeError(
-            "could not import the runtime: %s\nWSL 2 itself has to be "
-            "installed first - `wsl --install --no-distribution` in an "
+            "could not import the runtime: %s%s\nIf WSL 2 itself is not "
+            "installed: `wsl --install --no-distribution` in an "
             "administrator terminal, then restart."
-            % (_text(out.stderr).strip() or "exit %d" % out.returncode))
+            % (_why(out), _room_note(target)))
 
     invalidate()
     state, detail = status(runner=runner, refresh=True)

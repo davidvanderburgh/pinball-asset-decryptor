@@ -605,3 +605,64 @@ def test_the_install_ladder_does_not_install_into_a_silent_wsl(monkeypatch):
     said = []
     assert runtime_prompt.ensure(say=said.append) == "unknown"
     assert said == ["WSL did not answer."]
+
+
+# ------------------------------------------------ disk space (PAD-840) --
+
+def _space(monkeypatch, free_gb):
+    usage = type("U", (), {"free": int(free_gb * 1024 ** 3)})
+    monkeypatch.setattr(runtime, "_disk_usage", lambda path: usage)
+
+
+def test_too_little_space_for_the_download_is_said_before_it_starts(
+        monkeypatch, tmp_path):
+    """A handheld's small drive: the download is refused up front with the
+    drive and both numbers, not left to die with Errno 28 part way."""
+    _space(monkeypatch, 0.2)
+    monkeypatch.setattr(runtime, "cache_path", lambda p: str(tmp_path / "c" / "img"))
+    monkeypatch.setattr(runtime, "ensure_cached",
+                        lambda *a, **k: pytest.fail("downloaded anyway"))
+    monkeypatch.setenv("PAD_RUNTIME_DIR", str(tmp_path / "dest"))
+    with pytest.raises(RuntimeError) as exc:
+        runtime.install(runner=_runner())
+    msg = str(exc.value)
+    assert "not enough free space to download" in msg and "0.2 GB free" in msg
+
+
+def test_too_little_space_for_the_import_is_said_before_wsl_is_asked(
+        monkeypatch, tmp_path):
+    tar = tmp_path / "img.tar.gz"
+    tar.write_bytes(b"x")
+    _space(monkeypatch, 1.0)
+    monkeypatch.setattr(runtime, "ensure_cached", lambda *a, **k: str(tar))
+    monkeypatch.setattr(runtime, "cache_path", lambda p: str(tar))
+    monkeypatch.setattr(runtime, "IMAGE", replace(runtime.IMAGE, size=1))
+    monkeypatch.setenv("PAD_RUNTIME_DIR", str(tmp_path / "dest"))
+    calls = []
+    with pytest.raises(RuntimeError) as exc:
+        runtime.install(runner=_runner(calls=calls))
+    assert "not enough free space to install" in str(exc.value)
+    assert "1.0 GB free" in str(exc.value)
+    assert not [c for c in calls if "--import" in c]
+
+
+def test_a_failed_import_says_what_wsl_said_and_how_full_the_drive_is(
+        monkeypatch, tmp_path):
+    """wsl.exe writes its errors to STDOUT; reading stderr alone turned a full
+    disk into "exit 4294967295"."""
+    tar = tmp_path / "img.tar.gz"
+    tar.write_bytes(b"x")
+    _space(monkeypatch, 50)
+    monkeypatch.setattr(runtime, "ensure_cached", lambda *a, **k: str(tar))
+    monkeypatch.setenv("PAD_RUNTIME_DIR", str(tmp_path / "dest"))
+
+    def run(args, timeout=None, stdin=None):
+        if "--import" in args:
+            return _proc("There is not enough space on the disk.\r\n"
+                         .encode("utf-16-le"), rc=4294967295)
+        return _runner(listed=[])(args, timeout, stdin)
+    with pytest.raises(RuntimeError) as exc:
+        runtime.install(runner=run)
+    msg = str(exc.value)
+    assert "There is not enough space on the disk." in msg
+    assert "50.0 GB free" in msg and "wsl --install" in msg

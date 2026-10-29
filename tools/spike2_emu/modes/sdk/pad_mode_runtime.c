@@ -6131,11 +6131,63 @@ static struct spare_out {
 } spare_outs[SPARE_OUTS];
 static unsigned n_spare_outs;
 
+/* THE OLDER FRAMEWORK (ten builds: Mando LE 1.44, Rush LE 1.18, Turtles Pro 1.58 ...) has no switch service struct.
+ * Its switches are LISTENERS (Mando LE 1.44 0x1e396c, the bits of one board's scan): `data sw_listen` is the table -
+ * +268 how many boards, +12 an 8-byte entry each: [0] the board's record (its first byte the node), [4] its first
+ * listener; a listener's +20 is the switch's device (+18 its input bit), +24 the next listener. Every bit a listener
+ * names is the game's. The board's bits (`data sw_boards`: board = [sw_boards + node * 4]) are at +576, XORed with
+ * the board's own mask at +584 (0x3a3eb0 adds 572 and 580, then 3, and walks them with a pre-increment: the first run
+ * read 4 bytes early and saw no close at all): the raw level is the two XORed back. The same on all ten builds
+ * (C:/tmp/PAD-826/find_old.py). 1 = the table reads as one, the named bits built; 0 = not (yet). */
+static int spare_sw_listen(void)
+{
+    unsigned t = data("sw_listen"), n, k, e, rec, it, dev, bit, total = 0, steps;
+    if (!t || !data("sw_boards")) return 0;
+    if (!maps_has(t, 12u + 8u * 64u, MAP_R)) maps_read();
+    if (!maps_has(t, 12u + 8u * 64u, MAP_R)) { spare_sw_ok = -1; say("spare inputs: the listener table at 0x%08x is not mapped - off", t); return 0; }
+    n = *(const unsigned *)(unsigned long)(t + 268u);
+    if (!n) return 0;                                     /* the game has not built its switches yet: ask later */
+    if (n > 64) { spare_sw_ok = -1; say("spare inputs: the listener table at 0x%08x says %u boards - off", t, n); return 0; }
+    for (k = 0; k < SW_NODES; k++) spare_sw_named[k] = 0;
+    for (k = 0; k < n; k++) {
+        e = t + 12u + 8u * k;
+        rec = *(const unsigned *)(unsigned long)e;
+        if (!rec) continue;
+        if (!maps_has(rec, 1, MAP_R)) maps_read();
+        if (!maps_has(rec, 1, MAP_R) || *(const unsigned char *)(unsigned long)rec >= SW_NODES) {
+            spare_sw_ok = -1;
+            say("spare inputs: the listener table at 0x%08x has a board record that does not read (entry %u) - off", t, k);
+            return 0;
+        }
+        for (it = *(const unsigned *)(unsigned long)(e + 4), steps = 0; it && steps < 512; steps++) {
+            if (!maps_has(it, 28, MAP_R)) maps_read();
+            if (!maps_has(it, 28, MAP_R)) { spare_sw_ok = -1; say("spare inputs: a listener at 0x%08x does not read - off", it); return 0; }
+            dev = *(const unsigned *)(unsigned long)(it + 20);
+            if (dev) {
+                if (!maps_has(dev, 20, MAP_R)) maps_read();
+                if (!maps_has(dev, 20, MAP_R) || (bit = *(const unsigned char *)(unsigned long)(dev + 18)) > 63) {
+                    spare_sw_ok = -1;
+                    say("spare inputs: a listener's switch at 0x%08x does not read as one - off", dev);
+                    return 0;
+                }
+                spare_sw_named[*(const unsigned char *)(unsigned long)rec] |= (uint64_t)1 << bit;
+                total++;
+            }
+            it = *(const unsigned *)(unsigned long)(it + 24);
+        }
+    }
+    if (total < 8) { spare_sw_ok = -1; say("spare inputs: the listener table at 0x%08x names %u switches - off", t, total); return 0; }
+    spare_sw_ok = 1;
+    say("spare inputs: the listener table at 0x%08x checks out (%u switches of the game's on %u boards)", t, total, n);
+    return 1;
+}
+
 /* the switch struct, its layout checked against the game's own switch entries; 0 when not (yet) */
 static unsigned spare_sw_struct(void)
 {
     unsigned st = data("sw_struct"), ents, n, b, id, e, total = 0, bad = 0;
-    if (!(can & PM_CAN_SPARE_SWITCHES) || spare_sw_ok < 0 || !st) return 0;
+    if (!(can & PM_CAN_SPARE_SWITCHES) || spare_sw_ok < 0) return 0;
+    if (!st) return spare_sw_ok > 0 || spare_sw_listen() ? data("sw_listen") : 0;   /* the older framework */
     if (spare_sw_ok > 0) return st;
     if (!maps_has(st, 16u + SW_NODES * 160u, MAP_R)) maps_read();
     if (!maps_has(st, 16u + SW_NODES * 160u, MAP_R)) { spare_sw_ok = -1; say("spare inputs: the switch struct at 0x%08x is not mapped - off", st); return 0; }
@@ -6184,8 +6236,17 @@ static unsigned spare_sw_struct(void)
 /* the input's level (0/1), or -1 when it is not a spare input (a switch of the game's there, or no struct) */
 static int spare_level(unsigned node, unsigned bit)
 {
-    unsigned st = spare_sw_struct();
+    unsigned st = spare_sw_struct(), board;
     if (!st || node >= SW_NODES || bit > 63) return -1;
+    if (!data("sw_struct")) {                             /* the older framework: the board's own bits */
+        if (spare_sw_named[node] & ((uint64_t)1 << bit)) return -1;
+        board = data("sw_boards") + node * 4u;
+        if (!maps_has(board, 4, MAP_R) || !(board = *(const unsigned *)(unsigned long)board)) return -1;   /* no such board */
+        if (!maps_has(board + 576u, 16, MAP_R)) maps_read();
+        if (!maps_has(board + 576u, 16, MAP_R)) return -1;
+        return ((*(const volatile unsigned char *)(unsigned long)(board + 576u + bit / 8u)
+                 ^ *(const volatile unsigned char *)(unsigned long)(board + 584u + bit / 8u)) >> (bit % 8u)) & 1;
+    }
     if (*(const unsigned short *)(unsigned long)(SW_BLOCK(st, node) + 28u + 2u * bit)) return -1;
     if (spare_sw_named[node] & ((uint64_t)1 << bit)) return -1;    /* a switch entry of the game's names it */
     return (*(const volatile unsigned char *)(unsigned long)(SW_BLOCK(st, node) + 20u + bit / 8u) >> (bit % 8u)) & 1;
@@ -6273,6 +6334,14 @@ int pm_spare_output(unsigned node, unsigned output)
 {
     unsigned tab = data("coil_table"), cnt = data("coil_count"), base, n, d, rec, board = 0;
     if (!(can & PM_CAN_SPARE_COILS) || node > 63 || output > 8) return 0;
+    if (!tab && fn("coil_used")) {     /* the older framework: the game's own "a coil there" (Mando LE 1.44 0x3a1710),
+                                        * which walks its device records for a coil on that board and output */
+        unsigned (*used)(unsigned, unsigned) = (unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_used");
+        if (node > 30 || (used(node, output) & 0xffu)) return 0;
+        for (d = 0; d <= 8; d++)
+            if (used(node, d) & 0xffu) return 1;          /* a driver board of the game's, nothing on this output */
+        return 0;
+    }
     if (!maps_has(tab, 4, MAP_R) || !maps_has(cnt, 4, MAP_R)) return 0;
     base = *(const unsigned *)(unsigned long)tab;
     n = *(const unsigned *)(unsigned long)cnt;
@@ -6371,6 +6440,11 @@ static void spare_out_off(struct spare_out *o, const char *why)
 {
     if (!o->live) return;
     if (fn("coil_off")) ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("coil_off"))(o->node, o->out);
+    else {                                                /* the older framework has no OFF frame: a fire of nothing */
+        struct { unsigned char coil, pulse_pwr; unsigned short pulse_ms; unsigned char hold_pwr, pad;
+                 unsigned short hold_ms, x; } spec = { o->out, 0, 0, 0, 0, 0, 0 };
+        ((unsigned (*)(unsigned, const void *))(unsigned long)fn("coil_frame"))(o->node, &spec);
+    }
     if (o->until > pm_ms()) {
         unsigned prev = (o->next + SPARE_RING - 1) % SPARE_RING;
         o->ms[prev] = pm_ms() - o->at[prev];
@@ -6409,12 +6483,16 @@ static void spare_tick(void)
 static void spare_arm(void)
 {
     static const char *const outs[] = { "coil_frame", "coil_off", 0 };
-    if (data("sw_struct")) can |= PM_CAN_SPARE_SWITCHES;
-    if (have_sites(outs) && data("coil_table") && data("coil_count")) can |= PM_CAN_SPARE_COILS;
+    static const char *const old_outs[] = { "coil_frame", "coil_used", 0 };   /* the older framework */
+    if (data("sw_struct") || (data("sw_listen") && data("sw_boards"))) can |= PM_CAN_SPARE_SWITCHES;
+    if ((have_sites(outs) && data("coil_table") && data("coil_count")) || (!data("coil_table") && have_sites(old_outs)))
+        can |= PM_CAN_SPARE_COILS;
     if (can & (PM_CAN_SPARE_SWITCHES | PM_CAN_SPARE_COILS))
-        say("spare inputs %s (switch struct 0x%08x), spare outputs %s (fire 0x%08x, off 0x%08x): each command at most %u ms, "
-            "pulse %u ms, %lu ms on in any %lu s", can & PM_CAN_SPARE_SWITCHES ? "armed" : "not here", data("sw_struct"),
-            can & PM_CAN_SPARE_COILS ? "armed" : "not here", fn("coil_frame"), fn("coil_off"), SPARE_CMD_MAX,
+        say("spare inputs %s (%s 0x%08x), spare outputs %s (fire 0x%08x, %s 0x%08x): each command at most %u ms, "
+            "pulse %u ms, %lu ms on in any %lu s", can & PM_CAN_SPARE_SWITCHES ? "armed" : "not here",
+            data("sw_struct") ? "switch struct" : "listener table", data("sw_struct") ? data("sw_struct") : data("sw_listen"),
+            can & PM_CAN_SPARE_COILS ? "armed" : "not here", fn("coil_frame"), fn("coil_off") ? "off" : "coil query",
+            fn("coil_off") ? fn("coil_off") : fn("coil_used"), SPARE_CMD_MAX,
             SPARE_PULSE_MAX, SPARE_ON_MAX, SPARE_WINDOW / 1000ul);
 }
 

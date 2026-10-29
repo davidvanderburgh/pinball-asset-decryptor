@@ -27,8 +27,17 @@ What it finds, read from the build's own binary (docs/plans/mode_spare_io.md has
                     2026-10-29 against the 46 ports that already named the table: the same pair on all 46.
 
 The ten builds of the OLDER framework (Mando 1.44, Rush 1.18, Turtles Pro 1.58, ...) have the fire wrapper but
-neither the switch service's struct nor this coil table; they keep switches and coils their own way, and get
-their lines from find_old_* below.
+neither the switch service's struct nor this coil table nor an OFF frame; they keep switches and coils their own way,
+and get these instead (the same shapes on all ten, 2026-10-29):
+
+  data sw_listen    the switch listener table (Mando LE 1.44 0x6b47bc): +268 how many boards, +12 an 8-byte entry
+                    each [board record (byte 0 the node), first listener]; a listener's +20 its switch (+18 the bit),
+                    +24 the next. Found by the walk: ldr rD,[rI,#20] .. ldrb rB,[rD,#18]; cmp rB,#63; and r0,rB,#7, its
+                    table the movw/movt base read at +268 with an add of #12.
+  data sw_boards    the board table (0x744040): board = [sw_boards + node * 4], its bits at +576 XOR its mask at +584 (the walk's
+                    adds of 572 and 580, +3, then a pre-incrementing ldrb).
+                    Found by: add rD, rB, rN, lsl #2; ldr rO, [rD, #K]; add .., rO, #572; add .., rO, #580.
+  site coil_used    "the game has a coil there" (0x3a1710): ldrh [r0,#20]; cmp #2; .. ldrh [r0,#18] .. ldrb [r0,#14].
 """
 import argparse
 import os
@@ -215,11 +224,91 @@ def find_coil_table_shape(text):
     return found
 
 
+def _imm_ldr(v, op):
+    """(rt, rn, imm) for a positive-offset ldr (op 0x59) / ldrb (op 0x5d), else None"""
+    if v & 0xfff00000 == (0xe0000000 | (op << 20)):
+        return (v >> 12) & 15, (v >> 16) & 15, v & 0xfff
+    return None
+
+
+def _add_imm(v):
+    """(rd, rn, imm) for add rd, rn, #imm (any condition, rotated immediate)"""
+    if v & 0x0ff00000 == 0x02800000 and v >> 28 != 0xf:
+        rot = ((v >> 8) & 15) * 2
+        imm = v & 0xff
+        return (v >> 12) & 15, (v >> 16) & 15, (((imm >> rot) | (imm << (32 - rot))) & 0xffffffff) if rot else imm
+    return None
+
+
+def find_sw_listen(text):
+    """{table: hits}: the older framework's listener walk (see the header)"""
+    found = {}
+    for va, ws in words(text):
+        for i in range(80, len(ws) - 1):
+            w = ws[i]
+            if w & 0xfff0ffff != 0xe350003f:                                 # cmp rB, #63
+                continue
+            lb = _imm_ldr(ws[i - 1], 0x5d)
+            if not lb or lb[0] != (w >> 16) & 15 or lb[2] != 18 or (ws[i + 1] & 0xfff0f0ff) != 0xe2000007:
+                continue
+            ld = next((x for x in (_imm_ldr(v, 0x59) for v in ws[i - 5:i - 1]) if x and x[0] == lb[1] and x[2] == 20), None)
+            if not ld:
+                continue
+            base = pairs(ws, i, i - 80, i)
+            cnt = {base[x[1]] for x in (_imm_ldr(v, 0x59) for v in ws[i - 80:i]) if x and x[1] in base and x[2] == 268}
+            ent = {base[x[1]] for x in (_add_imm(v) for v in ws[i - 80:i]) if x and x[1] in base and x[2] == 12}
+            for t in cnt & ent:
+                found[t] = found.get(t, 0) + 1
+    return found
+
+
+def find_sw_boards(text):
+    """{table + K: hits}: the board table the scan's bits are kept through (see the header)"""
+    found = {}
+    for va, ws in words(text):
+        for i in range(12, len(ws) - 8):
+            w = ws[i]
+            if w & 0xfff00ff0 != 0xe0800100:                                 # add rD, rB, rN, lsl #2
+                continue
+            d, b = (w >> 12) & 15, (w >> 16) & 15
+            l = _imm_ldr(ws[i + 1], 0x59)
+            if not l or l[1] != d:
+                continue
+            imms = {a[2] for a in (_add_imm(v) for v in ws[i + 2:i + 8]) if a and a[1] == l[0]}
+            base = pairs(ws, i, i - 12, i)
+            if {572, 580} <= imms and b in base:
+                found[base[b] + l[2]] = found.get(base[b] + l[2], 0) + 1
+    return found
+
+
+def find_coil_used(text):
+    """[(address, w0, w1)]: the older framework's "a coil there" query (see the header)"""
+    out = []
+    for va, ws in words(text):
+        for i in range(40, len(ws) - 12):
+            w = ws[i]
+            if w & 0xfff000f0 != 0xe1d000b0 or ((w >> 4) & 0xf0) | (w & 15) != 20 or (ws[i + 1] & 0xfff0ffff) != 0xe3500002:
+                continue
+            h = ws[i + 3]
+            if h & 0xfff000f0 != 0xe1d000b0 or ((h >> 4) & 0xf0) | (h & 15) != 18:
+                continue
+            if not any((_imm_ldr(v, 0x5d) or (0, 0, 0))[2] == 14 for v in ws[i + 4:i + 12]):
+                continue
+            j = i
+            while j > i - 40 and ws[j] & 0xffff0000 != 0xe92d0000:          # its push {...}
+                j -= 1
+            out.append((va + 4 * j, ws[j], ws[j + 1]))
+    return out
+
+
 def port_value(port, kind, name):
+    """The port's own line, outside the block this script writes (so --write again gives the same lines)."""
     if not port:
         return None
     with open(port) as f:
         for line in f:
+            if line.startswith("# ---- PAD-826: spare switch"):
+                break
             p = line.split()
             if len(p) >= 3 and p[0] == kind and p[1] == name:
                 return int(p[2], 0)
@@ -240,13 +329,22 @@ def lines_for(elf, port=None):
     if len(off) == 1:
         a, w1, w2 = off[0]
         out.append("site coil_off              0x%08x 0x%08x 0x%08x" % (a, w1, w2))
-    else:
+    elif off:
         notes.append("coil_off: %d matches" % len(off))
     sw = find_sw_struct(text)
     if len(sw) == 1:
         out.append("data sw_struct             0x%08x" % next(iter(sw)))
+    elif not sw:                                     # the older framework
+        old = (find_sw_listen(text), find_sw_boards(text), find_coil_used(text))
+        if len(old[0]) == 1 and len(old[1]) == 1 and len(old[2]) == 1:
+            out.append("data sw_listen             0x%08x" % next(iter(old[0])))
+            out.append("data sw_boards             0x%08x" % next(iter(old[1])))
+            out.append("site coil_used             0x%08x 0x%08x 0x%08x" % old[2][0])
+            return [l for l in out if not l.startswith("site coil_off")], notes
+        notes.append("sw_struct: none; the older framework's listener table %d, board table %d, coil query %d"
+                     % tuple(len(x) for x in old))
     else:
-        notes.append("sw_struct: %s" % (", ".join("0x%x x%d" % kv for kv in sorted(sw.items())) or "none"))
+        notes.append("sw_struct: %s" % ", ".join("0x%x x%d" % kv for kv in sorted(sw.items())))
     if port and port_value(port, "data", "coil_table") is None:
         cf = port_value(port, "site", "coil_fire")
         tab = find_coil_table(text, cf) if cf else None
@@ -267,13 +365,14 @@ def lines_for(elf, port=None):
 
 HEADER = ("# ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;\n"
           "# docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch\n"
-          "# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit)\n")
+          "# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit); on the\n"
+          "# older framework sw_listen / sw_boards / coil_used instead (the listener table, the board table, a coil there)\n")
 
 
 def write(port, lines):
     with open(port) as f:
         body = f.read()
-    body = re.sub(r"\n# ---- PAD-826: spare switch.*?(?=\n(?!site coil_frame|site coil_off|data sw_struct|data coil_count|data coil_table|# )|\Z)",
+    body = re.sub(r"\n# ---- PAD-826: spare switch.*?(?=\n(?!site coil_frame|site coil_off|site coil_used|data sw_struct|data sw_listen|data sw_boards|data coil_count|data coil_table|# )|\Z)",
                   "", body, flags=re.S)
     if not body.endswith("\n"):
         body += "\n"

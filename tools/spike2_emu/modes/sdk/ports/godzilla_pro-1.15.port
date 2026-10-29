@@ -788,9 +788,12 @@ value mode_id_at             4
 # PAD-710: the challenges that are one of the game's own modes: a mode taking the challenge counts as it
 value challenge_place_0        20
 
+
+
 # ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
 # docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch
-# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit)
+# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit); on the
+# older framework sw_listen / sw_boards / coil_used instead (the listener table, the board table, a coil there)
 site coil_frame            0x005a38dc 0xe5d13000 0xe3530008
 site coil_off              0x0059f9c8 0xe3510008 0xe1a02001
 data sw_struct             0x007a958c

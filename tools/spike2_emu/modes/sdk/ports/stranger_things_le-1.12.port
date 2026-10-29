@@ -538,7 +538,13 @@ value done_flag_6                  105
 text  done_name_7                  Wizard Mode Multiball
 value done_flag_7                  108
 
+
+
 # ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
 # docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch
-# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit)
+# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit); on the
+# older framework sw_listen / sw_boards / coil_used instead (the listener table, the board table, a coil there)
 site coil_frame            0x004f02ec 0xe5d13000 0xe3530008
+data sw_listen             0x00775d78
+data sw_boards             0x00776494
+site coil_used             0x00202eec 0xe92d43f8 0xe3048f00

@@ -107,8 +107,8 @@ time, and nothing of the game's lands on it. Census over every port.
   entries (findent.py finds none) and no coil table of the newer shape. What is known, Mando LE 1.44:
   - the 0x11 scan is `0x51fdc0` (wrapper `0x51fed0`), called from `0x3a4044(node, ...)`, which hands the 8 bytes
     to `0x453368` and `0x3a3eb0`;
-  - `0x3a3eb0`: board object = `[0x743fb0 + 144 + node * 4]`; it stores `scan ^ [board + 580..587]` at
-    `board + 572..579` and flags `board + 592` on a change; then `0x3a1bb8(board)` processes it;
+  - `0x3a3eb0`: board object = `[0x743fb0 + 144 + node * 4]`; it stores `scan ^ [board + 584..591]` at
+    `board + 576..583` (adds of 572 / 580, +3, then a pre-incrementing walk) and flags `board + 592` on a change; then `0x3a1bb8(board)` processes it;
   - `0x1e396c(node, bits)`: a listener table at `0x6b47bc` (+268 count, +12 entries of 8 bytes: [0] -> a record
     whose byte 0 is the node, [4] -> a list of listeners with +16/+17 previous/current level, +8/+12 counts).
   Left: which (node, bit) the game uses there (the listener records), and the coil records' shape (for the OFF
@@ -121,13 +121,13 @@ time, and nothing of the game's lands on it. Census over every port.
     the same kind of query (`0x1d5414` on Godzilla Pro 1.15). There is NO OFF frame on these builds (no
     `mov rX,#0x4d` into a frame anywhere): the runtime's OFF there is the fire with every power and time 0, which
     hwshim's [coildrive] reads as off.
-  - Inputs on the older framework: the board's bits are at `board + 572` (`board = [0x743fb0 + 144 + node * 4]`),
-    already XORed with the board's per-bit mask at +580. "The game has a switch there" is still to find: the same
+  - Inputs on the older framework: the board's bits are at `board + 576` (`board = [0x743fb0 + 144 + node * 4]`),
+    already XORed with the board's per-bit mask at +584. "The game has a switch there" is still to find: the same
     device records with the switch kind are the likely route.
   - The older framework's switches (Mando LE 1.44, the registration at `0x1e3100`): switch records `[0x663e8c]`,
     44 bytes each, count `[0x6b4f28]`; record +26 the device id -> `0x20a624` -> +20 its input (refused when 0 or
     at/above `[0x577fd8]`), +16 -> `0x416a8c` -> +14 the node; each is appended to its node's entry in the listener
     table (`0x6b47bc`, +12: 8-byte entries [board record, list]). So "the game has a switch there" = some switch
-    record with that node and input. Next: the numbering of +20 against the bits at board + 572 (a known switch of
+    record with that node and input. Next: the numbering of +20 against the bits at board + 576 (a known switch of
     the switch list, e.g. a flipper button, pressed in the emulator), then the finder (the registration's two
     movw/movt tables and the 44/56 strides) over the ten builds.

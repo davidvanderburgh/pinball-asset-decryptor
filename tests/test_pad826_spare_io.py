@@ -130,6 +130,10 @@ def test_what_is_spare_is_the_games_own_tables():
     check = _lift(src, "static unsigned spare_sw_struct(")
     assert "n < SW_NODES" in check and "bad" in check and "spare_sw_ok = -1" in check
     assert re.search(r"^#define SW_NODES 32u", src, re.M)
+    old = _lift(src, "static int spare_sw_listen(")                             # the older framework's listener table
+    assert "t + 268u" in old and "t + 12u + 8u * k" in old and "it + 20" in old and "dev + 18" in old and "it + 24" in old
+    assert "board + 576u" in level and "board + 584u" in level                 # its board's bits, XORed back with the mask
+    assert 'fn("coil_used")' in out and "used(node, output)" in out
     assert "+ (unsigned)(n) * 160u" in src
 
 
@@ -148,7 +152,7 @@ def _port_lines(path):
     for line in path.read_text(encoding="utf-8").splitlines():
         p = line.split()
         if len(p) >= 3 and p[0] in ("site", "data") and p[1] in ("coil_frame", "coil_off", "sw_struct", "coil_table",
-                                                                 "coil_count"):
+                                                                 "coil_count", "sw_listen", "sw_boards", "coil_used"):
             out[p[1]] = p[2:]
     return out
 
@@ -158,7 +162,7 @@ def test_the_ports_carry_the_wrappers_by_their_words():
     spec = importlib.util.spec_from_file_location("spare_io", SDK.parent / "spare_io.py")
     sio = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sio)
-    full = 0
+    full = old = 0
     for path in sorted(PORTS.glob("*.port")):
         lines = _port_lines(path)
         assert "coil_frame" in lines, path.name                                  # every build has the wrapper
@@ -167,7 +171,13 @@ def test_the_ports_carry_the_wrappers_by_their_words():
             full += 1
             assert [int(w, 0) for w in lines["coil_off"][1:3]] == list(sio.OFF[:2]), path.name
             assert "coil_table" in lines and "coil_count" in lines, path.name
+        else:                                       # the older framework: its listener table, board table, coil query
+            old += 1
+            assert {"sw_listen", "sw_boards", "coil_used"} <= set(lines), path.name
+            assert lines["coil_used"][1] == "0xe92d43f8", path.name                  # push {r3-r9, lr}
+            assert "coil_off" not in lines and "coil_table" not in lines, path.name
     assert full == 59                                                            # the newer framework's builds
+    assert old == 10
 
 
 def test_every_port_is_what_the_finder_reads(request):

@@ -74,7 +74,7 @@ def main():
                                 clip={"x": 600, "y": 0, "width": 900, "height": 130})
                 print("shot topbar_hover.png", flush=True)
                 btn.click()
-                for _ in range(40):
+                for _ in range(80):
                     if os.path.exists(log):
                         break
                     time.sleep(0.25)

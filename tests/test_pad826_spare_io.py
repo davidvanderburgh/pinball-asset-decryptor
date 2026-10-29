@@ -126,6 +126,7 @@ def test_what_is_spare_is_the_games_own_tables():
     assert drive.index("pm_spare_output(") < drive.index('fn("coil_frame")')     # checked before anything is sent
     level = _lift(src, "static int spare_level(")
     assert "+ 28u + 2u * bit" in level and "return -1" in level                  # a switch of the game's: never read
+    assert "spare_sw_named[node]" in level            # a bit a switch entry names is the game's, map or not (Deadpool 1.14)
     check = _lift(src, "static unsigned spare_sw_struct(")
     assert "n < SW_NODES" in check and "bad" in check and "spare_sw_ok = -1" in check
     assert re.search(r"^#define SW_NODES 32u", src, re.M)

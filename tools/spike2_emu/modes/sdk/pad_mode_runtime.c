@@ -6094,7 +6094,8 @@ static void coils_arm(void)
  * per node 0..31 at +16 (the service's mutex follows at +0x1410 = 16 + 32 * 160): +20 the board's current 64 input bits as read off the bus, +28 a u16 switch id per bit, 0 where the
  * game has no switch - those bits it reads and never looks at. The layout is checked once against the game's own
  * switch entries (the array at struct +0, 32 bytes each: +18 the bit, +20 the node) before any bit is read: every id
- * in the map must be the entry naming that node and bit. A struct that does not check out takes the inputs away.
+ * in the map must be the entry naming that node and bit. A struct that does not check out takes the inputs away. And
+ * a bit any entry names is the game's too, map or not (spare_sw_named).
  *
  * OUTPUTS. `site coil_frame` is the node-bus library's fire-by-address (Godzilla Pro 1.16 0x5a9afc), the call the coil
  * service thread makes for each coil record: fire(node, spec) with spec { u8 coil, u8 pulse power, u16 pulse ms, u8
@@ -6114,6 +6115,7 @@ static void coils_arm(void)
 #define SW_NODES 32u               /* the blocks: nodes 0..31, then the service's mutex at +0x1410 */
 
 static int spare_sw_ok;            /* 0 not checked yet, 1 the struct checks out, -1 it does not */
+static uint64_t spare_sw_named[SW_NODES];   /* the bits a switch entry of the game's names, map or not */
 static struct spare_shot {
     unsigned char node, bit, active_high, stable, last, seen;
     uint64_t mask;
@@ -6156,8 +6158,26 @@ static unsigned spare_sw_struct(void)
             st, bad, total);
         return 0;
     }
+    /* THE OTHER WAY ROUND (the PAD-826 sweep, Deadpool LE 1.14): a switch entry of the game's on a bit the map leaves
+     * at 0 - the service's map does not route it, but the game has a switch there (8:14 read 1 at rest and changed in
+     * attract with nothing of ours touching it). Every entry the array holds, in the shape hwshim's sw_entry_ok reads
+     * (two pointers, a bit under 64, a board, a level 0/1), names its bit as the game's: never spare. */
+    for (n = 0; n < SW_NODES; n++) spare_sw_named[n] = 0;
+    for (id = 1, b = 0; id < 1024; id++, b++) {
+        e = ents + id * 32u;
+        if (!maps_has(e, 32, MAP_R)) maps_read();
+        if (!maps_has(e, 32, MAP_R)) break;
+        n = *(const unsigned char *)(unsigned long)(e + 20);
+        if (!maps_has(*(const unsigned *)(unsigned long)(e + 8), 4, MAP_R)
+            || !maps_has(*(const unsigned *)(unsigned long)(e + 12), 4, MAP_R)
+            || *(const unsigned short *)(unsigned long)(e + 18) >= 64 || n >= SW_NODES
+            || *(const unsigned char *)(unsigned long)(e + 24) > 1)
+            break;
+        spare_sw_named[n] |= (uint64_t)1 << *(const unsigned short *)(unsigned long)(e + 18);
+    }
     spare_sw_ok = 1;
-    say("spare inputs: the switch struct at 0x%08x checks out (%u bits of the game's, each its own entry's)", st, total);
+    say("spare inputs: the switch struct at 0x%08x checks out (%u bits of the game's, each its own entry's; %u entries "
+        "in the array)", st, total, b);
     return st;
 }
 
@@ -6167,6 +6187,7 @@ static int spare_level(unsigned node, unsigned bit)
     unsigned st = spare_sw_struct();
     if (!st || node >= SW_NODES || bit > 63) return -1;
     if (*(const unsigned short *)(unsigned long)(SW_BLOCK(st, node) + 28u + 2u * bit)) return -1;
+    if (spare_sw_named[node] & ((uint64_t)1 << bit)) return -1;    /* a switch entry of the game's names it */
     return (*(const volatile unsigned char *)(unsigned long)(SW_BLOCK(st, node) + 20u + bit / 8u) >> (bit % 8u)) & 1;
 }
 

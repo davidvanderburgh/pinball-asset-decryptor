@@ -190,7 +190,7 @@ disk. **⚙ > Manage disk space** shows it all.
 - **Move to another drive**: WSL's disks are files on C: by default. Pick
   a roomier drive (NTFS) and the app's Linux, the emulators' data disk and
   the Spike 2 card store move there; the app finds them there from then
-  on. WSL is shut down while they move. No admin needed.
+  on. WSL is shut down while they move, and no admin is needed.
 - **Cached cards** of the Spike 2 emulator, several GB each. Delete any:
   it re-copies on its next boot.
 - **What each Emulate tab keeps** in WSL, by maker. A running emulator's

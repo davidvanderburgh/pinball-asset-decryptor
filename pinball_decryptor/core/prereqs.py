@@ -113,7 +113,10 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
     hint_override = ""
     try:
         if prereq.probe.startswith("python:"):
-            ok, msg = _probe_python_import(prereq.probe.split(":", 1)[1])
+            module = prereq.probe.split(":", 1)[1]
+            ok, msg = _probe_python_import(module)
+            if ok and module in CPP_RUNTIME_PROBES and not cpp_runtime_found():
+                ok, msg, hint_override = False, CPP_RUNTIME_MISSING, CPP_RUNTIME_HINT
         elif prereq.where == "host":
             ok, msg = _probe_host(prereq.probe)
         elif prereq.where == "wsl":
@@ -162,6 +165,32 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
 #: another CPU, a missing runtime).  Everything else is answered from the
 #: file system (PAD-797).
 IMPORT_PROBES = frozenset({"unicorn", "capstone"})
+
+
+#: Modules answered from the file system whose native code needs the Visual
+#: C++ runtime on Windows (ctranslate2 under faster_whisper imports
+#: MSVCP140.dll).  Installed is not "loads" without it: a clean PC read
+#: faster-whisper green, then Auto-name died loading ctranslate2.dll
+#: (PAD-821).  Checked by file, not by import, for PAD-797's speed.
+CPP_RUNTIME_PROBES = frozenset({"faster_whisper"})
+
+CPP_RUNTIME_MISSING = ("installed, but the Visual C++ runtime it needs "
+                       "(MSVCP140.dll) is missing")
+CPP_RUNTIME_HINT = ("Reinstall Pinball Asset Decryptor (its installer ships "
+                    "the Visual C++ runtime), or install Microsoft's Visual "
+                    "C++ 2015-2022 Redistributable (x64).")
+
+
+def cpp_runtime_found() -> bool:
+    """True when MSVCP140.dll is where a native extension's load looks for
+    it: beside the running python.exe (the app's own bundle ships it) or in
+    System32 (the Visual C++ Redistributable).  Always True off Windows."""
+    if sys.platform != "win32":
+        return True
+    system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                            "System32")
+    return any(os.path.isfile(os.path.join(d, "msvcp140.dll"))
+               for d in (os.path.dirname(sys.executable), system32))
 
 
 def _probe_python_import(module_name: str, really_import=None) -> Tuple[bool, str]:

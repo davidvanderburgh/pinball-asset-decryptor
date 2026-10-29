@@ -40,6 +40,13 @@ WHISPER_IMPORT_HINT = (
     "Subsequent runs reuse the cached model offline."
 )
 
+WHISPER_LOAD_HINT = (
+    "Auto-name call-outs could not start its speech engine: %s\n\n"
+    "faster-whisper is installed but a library it needs did not load. "
+    "Reinstalling Pinball Asset Decryptor puts back the runtime files it "
+    "ships with."
+)
+
 CALLOUTS_CSV = "callouts.csv"
 
 # Rough one-time download size per model (the GUI's quality choices), for
@@ -238,6 +245,12 @@ class TranscribePipeline(BasePipeline):
             from faster_whisper import WhisperModel  # noqa: F401 (probe only)
         except ImportError:
             raise PipelineError("Transcribe", WHISPER_IMPORT_HINT)
+        except OSError as e:
+            # Installed but its engine's DLL will not load - on Windows a
+            # missing Visual C++ runtime (PAD-821), which surfaced as an
+            # "Unexpected error" traceback after an all-green prerequisite
+            # list.
+            raise PipelineError("Transcribe", WHISPER_LOAD_HINT % e)
 
         if not os.path.isdir(self.assets_dir):
             raise PipelineError("Transcribe",

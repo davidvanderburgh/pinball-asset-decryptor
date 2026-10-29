@@ -27,6 +27,7 @@ Store namespace ``video``:
              column_widths["video_web"]); the rest fit their content
   compare    {open, max, tiles: [{id, rel, side, sides, pane, look}]}: the
              Compare view's players (PAD-440), each with its colour steps
+  report_busy  the compare report CSV is being made (PAD-812)
 
 A row's RANDOM CLIPS (PAD-446): more clips for one slot, the game playing
 one of them at random each time it plays the slot's clip.  Kept in the
@@ -41,6 +42,7 @@ import os
 import queue as queue_mod
 import threading
 import time
+from dataclasses import replace
 
 from .. import compat
 from ...core.video_slots import LENGTH_FULL, LENGTH_STOCK, length_seconds
@@ -164,6 +166,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         self._restoring = False
         self._pane_seq = 0
         self._cmp = []                   # the Compare players (PAD-440)
+        self._report_busy = False        # the compare report is being made (PAD-812)
         self._cmp_open = False
         self._cmp_ids = 0
         # PAD-448: the players' colour tables still to build ({path: steps}),
@@ -199,7 +202,8 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                  best_tip=BEST_TIP, best_supported=False,
                  color_offered=False, color_stock=False,
                  compare={"open": False, "max": COMPARE_MAX, "tiles": []},
-                 widths=self._saved_widths(), var_share=False)
+                 widths=self._saved_widths(), var_share=False,
+                 report_busy=False)
         threading.Thread(target=vh.prune_cache, daemon=True,
                          name="video-cache-prune").start()
 
@@ -2287,6 +2291,148 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         self.log("Video table exported: %d slot(s) → %s"
                  % (len(self._slots), os.path.normpath(path)), "success")
         return True
+
+    # ---- Export compare report (PAD-812) ----------------------------------
+    def _report_stock(self, rel):
+        """The game's own clip *rel* stands in for: its pristine snapshot,
+        the shared clip's for a mode's own clip new to the card (PAD-444:
+        its file is a copy of that one, and a Write puts the replacement
+        over it), else the slot's file as the extract left it."""
+        snap = self._stock_path(rel)
+        if snap:
+            return rel, snap, None
+        of = self._m_of.get(rel)
+        on_card = rel in ((self._m_clips.name_of if self._m_clips else {})
+                          or {})
+        if of and (rel in self._m_virtual
+                   or (rel in self._m_copy and not on_card)):
+            snap = self._stock_path(of)
+            slot = self._by_rel.get(of)
+            if snap:
+                return of, snap, None
+            if slot is not None:
+                return of, slot.abs_path, slot.info
+        slot = self._by_rel.get(rel)
+        if slot is None:
+            return rel, "", None
+        return rel, slot.abs_path, slot.info
+
+    def compare_entries(self):
+        """Every clip the project plays in a slot's place, as
+        :class:`core.video_compare_report.Entry` items in list order: each
+        replacement, each random clip, and each mode's row of a shared clip
+        that plays another mode's replacement (PAD-444)."""
+        from ...core import video_compare_report as VR
+        by_rel, follow = {}, []
+        for s in sorted(self._m_slots(), key=lambda q: q.rel_path.lower()):
+            rel = s.rel_path
+            modes = ", ".join(self._m_label(m)
+                              for m in self._m_modes.get(rel) or ())
+            rep = self._assign.get(rel) or ""
+            if not rep and self._m_follow.get(rel):
+                follow.append((rel, modes))
+                continue
+            files = self._variants.get(rel) or []
+            if not rep and not files:
+                continue
+            stock_rel, stock_path, stock_info = self._report_stock(rel)
+            asis = self._asis_for(rel)
+            choice = self._length.get(rel)
+            if asis:
+                after = VR.AFTER_OWN
+            elif length_seconds(choice):
+                after = length_seconds(choice)
+            else:
+                after = VR.AFTER_STOCK if self._trim_for(rel) else VR.AFTER_OWN
+            base = dict(slot=rel, stock_rel=stock_rel, stock_path=stock_path,
+                        stock_info=stock_info, played_in=modes, after=after,
+                        asis=asis)
+            n = 1 + len(files)
+            got = []
+            if rep:
+                got.append(VR.Entry(
+                    what=("Replacement (%s's own clip)"
+                          % self._m_label(self._m_copy[rel]["mode"])
+                          if rel in self._m_copy else "Replacement")
+                    + (", random clip 1 of %d" % n if files else ""),
+                    file=rep, **base))
+            else:
+                got.append(VR.Entry(what="Game's own clip, random clip 1 of %d"
+                                    % n, file="", **base))
+            for k, f in enumerate(files, 2):
+                got.append(VR.Entry(what="Random clip %d of %d" % (k, n),
+                                    file=f, **base))
+            by_rel[rel] = got
+        # a mode's row of a shared clip with no replacement of its own plays
+        # whatever the lead mode's row plays (PAD-444): the same rows, its own
+        for rel, modes in follow:
+            lead = self._m_follow[rel]
+            for e in by_rel.get(self._m_of.get(rel) or "", ()):
+                by_rel.setdefault(rel, []).append(replace(
+                    e, slot=rel, played_in=modes,
+                    what="Same clip as %s: %s" % (self._m_label(lead),
+                                                  e.what[0].lower() + e.what[1:])))
+        out = []
+        for rel in sorted(by_rel, key=str.lower):
+            out.extend(by_rel[rel])
+        return out
+
+    @rpc
+    def export_compare(self, path=None):
+        """More > Export compare report (CSV)...: every replacement, random
+        clip and mode's shared-clip row beside the stock clip it stands in
+        for, its length to the hundredth of a second first (PAD-812). The
+        files are probed and the CSV written off the loop."""
+        from ...core import video_compare_report as VR
+        if not self._slots:
+            compat.messagebox.showinfo("Export compare report",
+                                       "Scan an assets folder first — the "
+                                       "video table is empty.")
+            return False
+        entries = self.compare_entries()
+        if not entries:
+            compat.messagebox.showinfo(
+                "Export compare report",
+                "No clip has a replacement or random clips yet, so there is "
+                "nothing to compare with the game's own clips.")
+            return False
+        if not path:
+            path = self.window.ask_save(
+                "video_csv", "Save the video compare report as CSV",
+                initialfile="video_compare.csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                defaultextension=".csv")
+        if not path:
+            return False
+        if self._report_busy:
+            self.log("Replace Video: the compare report is still being "
+                     "made.", "warning")
+            return False
+        self._report_busy = True
+        self.set(report_busy=True)
+        self.log("Replace Video: reading %d clip(s) for the compare report…"
+                 % len(entries), "info")
+
+        def _work():
+            try:
+                n, err = VR.write(path, entries), None
+            except OSError as e:
+                n, err = 0, e
+            self.ctx.loop.post(self._compare_done, path, n, err)
+
+        threading.Thread(target=_work, daemon=True,
+                         name="video-compare-report").start()
+        return True
+
+    def _compare_done(self, path, n, err):
+        self._report_busy = False
+        self.set(report_busy=False)
+        if err is not None:
+            compat.messagebox.showerror(
+                "Export compare report", "Couldn't write the CSV:\n%s" % err)
+            return
+        self.log("Video compare report exported: %d clip(s) → %s"
+                 % (n, os.path.normpath(path)), "success")
 
     # ==================================================================
     # the row menu

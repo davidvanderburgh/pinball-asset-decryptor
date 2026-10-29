@@ -21,6 +21,7 @@ const T = {
   csave: "Save a copy of each clip, its replacement if it has one, with its color profile baked in, into a folder you pick. Same size, frame rate and sound; the project and the card are not changed.",
   csaveAll: "Save a copy of every clip with a color profile attached (green palette), with that profile baked in, into a folder you pick. To save others, select them, right-click and save them. The project and the card are not changed.",
   csv: "Save the whole video table (every slot, not just the filtered view) as a CSV — name, length, resolution, format, audio, replacement and changed-on-disk status — for tracking a big replacement project in a spreadsheet.",
+  compareCsv: "Save a CSV with a row for every replacement, every random clip and every mode's row of a shared clip, beside the game's own clip it plays in place of: both lengths in seconds to two decimals and the difference, the length it will have on the card after Write, resolution, frame rate, frames, codec, audio and file size.",
   check: "Measure every clip already written to a card image and list the ones low enough in bitrate to look blocky — the Write-time \"it will look very blocky\" check, asked of a finished card. Reads the image only; nothing is written.",
   folder: "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.",
   clear: "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.",
@@ -1143,9 +1144,11 @@ export default function VideoTab() {
       <${Button} icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
       ${s.best_supported ? html`<${Button} kind="ghost" icon="star" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
       <${Button} kind="ghost" icon="more" label="More"
-        title=${"More: Export CSV, " + (s.color_offered ? "Save clips with their color profiles…, " : "") + "Clear replacements…, Save / load settings" + (s.var_share ? ", Save / load random clips" : "") + (s.quality_report ? ", Check card…" : "")}
+        title=${"More: Export CSV, Export compare report, " + (s.color_offered ? "Save clips with their color profiles…, " : "") + "Clear replacements…, Save / load settings" + (s.var_share ? ", Save / load random clips" : "") + (s.quality_report ? ", Check card…" : "")}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("video.export_csv") },
+          { label: "Export compare report (CSV)…", icon: "download", title: T.compareCsv, disabled: s.report_busy,
+            onClick: () => call("video.export_compare") },
           s.color_offered ? { label: "Save clips with their color profiles…", icon: "download", title: T.csaveAll,
             onClick: () => call("video.colour_save") } : null,
           { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || running,

@@ -10,6 +10,8 @@ What is worth failing on:
     error the page can show, never a crash.
   * PATCH WRITES INTO VISUAL PINBALL'S TABLES FOLDER, from the person's own
     download, and says so when the table is not one the kit knows.
+  * THE PAD RUNTIME ROW INSTALLS IT (PAD-840). It sent people to the Emulate
+    tab, which offers no install on a PC with a working Ubuntu.
 """
 import os
 import sys
@@ -36,6 +38,9 @@ class _Store:
 class _Loop:
     def post(self, fn, *a):
         fn(*a)
+
+    def call(self, fn, *a):
+        return fn(*a)
 
 
 class _Win:
@@ -204,3 +209,37 @@ def test_a_layout_is_saved_from_the_presets_the_kit_offered(tab):
     _wait(tab)
     script, args = [c for c in tab.calls if c[1] and c[1][0] == "layout"][-1]
     assert args == ["layout", "side", "[0, 0, 720, 1080]", "[720, 0, 1200, 675]"]
+
+
+def test_the_runtime_row_installs_the_runtime_itself(tab, monkeypatch):
+    """PAD-840: "Set it up on the Emulate tab" sent a user round install and
+    reboot six times; that tab has no install for a PC with a working Ubuntu.
+    The row runs the shared ladder, and the page then reads the new state."""
+    from pinball_decryptor.core import runtime
+    from pinball_decryptor.webui import runtime_prompt
+    now = {"state": ("absent", "The runtime is not installed on this machine yet.")}
+    monkeypatch.setattr(runtime, "status", lambda **k: now["state"])
+    asked = []
+
+    def ensure(say, progress=None, ask=None, on_blocked=None):
+        asked.append(ask)
+        progress(50, 100)
+        now["state"] = ("ready", "Runtime 6 (full).")
+        return "ready"
+    monkeypatch.setattr(runtime_prompt, "ensure", ensure)
+    tab.on_show()
+    _wait(tab)
+    assert tab.window.ctx.store.d["vpx"]["runtime_state"] == "absent"
+    assert tab.install_runtime()
+    _wait(tab)
+    st = tab.window.ctx.store.d["vpx"]
+    assert asked and callable(asked[0])
+    assert st["runtime_state"] == "ready" and st["progress"] is None
+    assert "installed" in st["message"]
+
+
+def test_the_runtime_row_no_longer_points_at_the_emulate_tab():
+    js = open(os.path.join(os.path.dirname(V.__file__), "..", "static", "js", "tabs", "vpx.js"),
+              encoding="utf-8").read()
+    assert "Set it up on the Emulate tab" not in js
+    assert 'call("vpx.install_runtime")' in js

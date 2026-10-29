@@ -7,7 +7,7 @@ docs/plans/vpx_bridge.md) with buttons, in place of the separate setup
 window and beta installer it used to need:
 
 * the controller (``PAD.Controller``) registered, Visual Pinball found,
-  chosen or downloaded, the PAD runtime the Emulate tab sets up;
+  chosen or downloaded, the PAD runtime (installed from its own row);
 * the folder of card images, and which card each title boots;
 * the tables the kit knows: which download each one is (PAD SHIPS NO
   TABLE: the person downloads the tribute from its author), and a Patch
@@ -180,6 +180,37 @@ class VpxTab(TabService):
     @rpc
     def refresh(self):
         return self._start("Checking", lambda: None)
+
+    @rpc
+    def install_runtime(self):
+        """Install (or update) the PAD runtime from its own row (PAD-840).
+
+        The row used to say "Set it up on the Emulate tab", and that tab offers
+        the install only when its Linux is out of date or logs in as root: on a
+        PC with a working Ubuntu it says nothing, and "Install Missing" installs
+        WSL and Ubuntu, never this.  So the row was red with no way to clear it.
+        The same ladder as every Emulate tab (core/runtime_prompt.ensure), with
+        its consent before a replace."""
+        from ...core import runtime
+        from .. import runtime_prompt
+
+        def progress(done, total):
+            if total:
+                self.set(progress=done / total)
+
+        def ask():
+            return bool(self.ctx.loop.call(runtime_prompt.ask_before_replacing))
+
+        def work():
+            state = runtime_prompt.ensure(
+                say=self._say, progress=progress, ask=ask,
+                on_blocked=lambda exc: self._say(
+                    "the download did not go through: %s" % exc, "error"))
+            runtime.invalidate()
+            self.set(progress=None)
+            if state == "ready":
+                self._say("the emulator's Linux is installed.")
+        return self._start("Installing the emulator's Linux", work)
 
     @rpc
     def register(self):

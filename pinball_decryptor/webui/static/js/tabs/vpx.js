@@ -37,6 +37,8 @@ export default function Vpx() {
   const playsAs = (t) => fits(t).length > 1 && (t.models || {})[t.title]
     ? "Plays as the " + t.models[t.title] + ". " : "";
   const rtOk = s.runtime_state === "ready";
+  // PAD-840: installed from here; the Emulate tab only offers it in some cases
+  const rtFix = s.runtime_state === "absent" || s.runtime_state === "stale";
   return html`<div class="page vpx-page">
     <${PageHead} title="Visual Pinball" sub=${(s.intro || "").split("\n").map((l) => html`${l}<br />`)}>
       <${Chip} kind="info" sm>Preview<//>
@@ -52,8 +54,10 @@ export default function Vpx() {
     <div class="cols c75 vpx-cols">
       <div class="stack">
         <${Card} title="Setup">
-          <${Row} ok=${rtOk} label="The emulator's Linux (PAD runtime)"
-            value=${rtOk ? s.runtime_text : (s.runtime_text || "") + " Set it up on the Emulate tab."} />
+          <${Row} ok=${rtOk} label="The emulator's Linux (PAD runtime)" value=${s.runtime_text || ""}>
+            ${rtFix ? html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"
+              onClick=${() => call("vpx.install_runtime")}>${s.runtime_state === "stale" ? "Update" : "Install"}<//>` : null}
+          <//>
           <${Row} ok=${!!s.vpx} label="Visual Pinball" value=${s.vpx || "Not found on this PC."}>
             <${Button} drop size="sm" kind="ghost" disabled=${busy || !s.ok} onClick=${() => call("vpx.choose_vpx")}>Choose folder…<//>
             ${s.vpx ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"

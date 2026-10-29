@@ -351,8 +351,9 @@ function GameDisplay({ s }) {
   if (!d || s.platform !== "win32") return null;
   const set = (k, v) => call("emulate.display_set", k, v);
   const free = d.mode === "free";
-  const num = (k, label) => html`<label class="lbl small" for=${"emu-gd-" + k}>${label}</label>
-    <${Field} id=${"emu-gd-" + k} sm type="number" width=${84} value=${String(d[k])} onCommit=${(v) => set(k, v)} />`;
+  // a label and its field wrap together, never a label left at a line's end
+  const num = (k, label) => html`<span class="emu-gd-f"><label class="lbl small" for=${"emu-gd-" + k}>${label}</label>
+    <${Field} id=${"emu-gd-" + k} sm type="number" width=${76} value=${String(d[k])} onCommit=${(v) => set(k, v)} /></span>`;
   return html`<${Card} title="Game display" cls="emu-gdisp">
     <div class="row wrap">
       <label class="lbl small" for="emu-gd-mon">Monitor</label>

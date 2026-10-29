@@ -124,3 +124,10 @@ time, and nothing of the game's lands on it. Census over every port.
   - Inputs on the older framework: the board's bits are at `board + 572` (`board = [0x743fb0 + 144 + node * 4]`),
     already XORed with the board's per-bit mask at +580. "The game has a switch there" is still to find: the same
     device records with the switch kind are the likely route.
+  - The older framework's switches (Mando LE 1.44, the registration at `0x1e3100`): switch records `[0x663e8c]`,
+    44 bytes each, count `[0x6b4f28]`; record +26 the device id -> `0x20a624` -> +20 its input (refused when 0 or
+    at/above `[0x577fd8]`), +16 -> `0x416a8c` -> +14 the node; each is appended to its node's entry in the listener
+    table (`0x6b47bc`, +12: 8-byte entries [board record, list]). So "the game has a switch there" = some switch
+    record with that node and input. Next: the numbering of +20 against the bits at board + 572 (a known switch of
+    the switch list, e.g. a flipper button, pressed in the emulator), then the finder (the registration's two
+    movw/movt tables and the 44/56 strides) over the ten builds.

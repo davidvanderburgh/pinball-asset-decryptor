@@ -747,6 +747,8 @@ class Bridge:
         self.paused = bool(want)
         if not self.pipe or not self.rig:
             return
+        if want:
+            self._release_buttons()
         if want and kit_window_in_front():
             # the player clicked the game's own LCD or playfield window (to
             # move it, to look at it): Visual Pinball pauses, the GAME does
@@ -771,6 +773,28 @@ class Bridge:
                 if now == want:
                     break
         log("pause -> %d (rig now %d)" % (want, now))
+
+    #: the cabinet buttons a player holds down with a key
+    BUTTONS = ("start", "launch", "left_flipper", "right_flipper",
+               "up_left_flipper", "up_right_flipper", "tilt")
+
+    def _release_buttons(self):
+        """Visual Pinball delivers a key's release only while its window has
+        the focus, so a key held as the focus goes (David clicked the game's
+        display to drag it) stays pressed in the game for good: TMNT's
+        launch button stuck down and every ball was launched the moment it
+        reached the shooter lane, a game nobody could play (PAD-811). Losing
+        the focus lets go of every cabinet button, as letting go of the keys
+        would."""
+        cab = getattr(self.map, "cabinet", None) or {}
+        for key in self.BUTTONS:
+            n = cab.get(key)
+            if not n or not self.pipe:
+                continue
+            sid = self.map.switch_id(int(n))
+            if sid > 0 and self.pipe.held.get(sid) == 1:
+                self.set_switch(int(n), 0)
+                log("focus lost: %s (switch %d) let go" % (key, sid))
 
     # -- switches
     def set_switch(self, n, level):
@@ -808,8 +832,30 @@ class Bridge:
                 continue
             t0 = time.monotonic()
             self._poll_once()
+            if now - getattr(self, "_front_check", 0.0) >= 0.25:
+                self._front_check = now
+                self._watch_focus()
             self.last_poll_ms = (time.monotonic() - t0) * 1000.0
             time.sleep(POLL_S)
+
+    def _watch_focus(self):
+        """Not every table tells the controller it lost the focus (TMNT's
+        never said Pause), so the foreground itself is watched: the moment
+        Visual Pinball's player is not the window in front, the held
+        buttons are let go (_release_buttons)."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            buf = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(u.GetForegroundWindow(), buf, 256)
+            front = buf.value.startswith("Visual Pinball Player")
+        except Exception:                                   # noqa: BLE001
+            return
+        if getattr(self, "_player_front", True) and not front:
+            self._release_buttons()
+        self._player_front = front
 
     #: the kit's windows a started run opens, by the word in their title,
     #: and the kit setting that places each

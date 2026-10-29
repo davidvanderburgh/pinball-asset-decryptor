@@ -1083,3 +1083,27 @@ def test_a_slots_first_run_takes_the_titles_switch_table_from_another_slot(tmp_p
     assert rig.switch_ids("turtles_le") == {(1, 11): 36}
     assert (dump / "tables" / "turtles_le" / "switch_list.txt").exists()
     assert rig.switch_ids("venom_le") == {}          # nobody has one: nothing made up
+
+
+def test_losing_the_focus_lets_go_of_held_buttons():
+    # PAD-811: VPX sends no key-up once its window loses the focus; TMNT's
+    # launch button stayed down and launched every ball it was given
+    pc = pytest.importorskip("padcontroller")
+
+    class Pipe:
+        def __init__(self):
+            self.held = {34: 1, 36: 0, 65: 1, 39: 1}
+
+        def set(self, sid, level):
+            self.held[sid] = 1 if level else 0
+
+    class Map:
+        cabinet = {"start": 1036, "launch": 1034, "right_flipper": 1065, "coin": 1039}
+
+        def switch_id(self, n):
+            return n - 1000
+
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.pipe, b.map = Pipe(), Map()
+    b._release_buttons()
+    assert b.pipe.held == {34: 0, 36: 0, 65: 0, 39: 1}   # coins are not buttons

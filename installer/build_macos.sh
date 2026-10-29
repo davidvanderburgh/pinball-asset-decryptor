@@ -218,6 +218,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.clip_files" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_sounds" \
+    --hidden-import "pinball_decryptor.plugins.stern.clip_seen" \
+    --hidden-import "pinball_decryptor.plugins.stern.clip_static" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_variants" \
     --hidden-import "pinball_decryptor.plugins.stern.sound_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.jukebox" \

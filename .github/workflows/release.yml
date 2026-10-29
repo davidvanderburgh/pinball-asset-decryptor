@@ -126,7 +126,9 @@ jobs:
         run: bash .github/scripts/attach_release_asset.sh "$GITHUB_REF_NAME" installer/Output/*.dmg
 
   build-linux:
-    runs-on: ubuntu-latest
+    # The oldest supported runner: the AppImage runs only on a glibc at least
+    # as new as the build machine's (PAD-837; build_linux.sh checks it).
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

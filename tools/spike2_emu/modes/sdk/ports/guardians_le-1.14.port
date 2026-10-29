@@ -428,3 +428,14 @@ value place_audit_started_3        223
 # some of them are completed - each one's COMPLETED audit (through audit_add) or COMPLETED flag
 text  done_name_0                  Cherry Bomb Multiball
 value done_flag_0                  51
+
+
+
+# ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
+# docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch
+# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit); on the
+# older framework sw_listen / sw_boards / coil_used instead (the listener table, the board table, a coil there)
+site coil_frame            0x00467aa4 0xe5d13000 0xe3530008
+data sw_listen             0x00642e54
+data sw_boards             0x00644368
+site coil_used             0x00247618 0xe92d43f8 0xe30e8654

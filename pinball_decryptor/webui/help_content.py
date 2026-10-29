@@ -3183,7 +3183,7 @@ PREVIEW_HELP = {
                     {"icon": "defaults", "tone": "warn", "title": "The game's modes",
                      "text": "**Numbers only.** Timers and awards, not how they play."},
                     {"icon": "lock", "tone": "err", "title": "Everything else",
-                     "text": "**Off limits.** Progression, settings, high scores, Insider Connected, and coils but a few Godzilla mechanisms."}]},
+                     "text": "**Off limits.** Progression, settings, high scores, Insider Connected, and the game's coils but the mechanisms a mode may hold. Spare switches and outputs you add are yours."}]},
                 _limits("Quick answers"),
             ]),
             ("Which games", _modes_which_games),

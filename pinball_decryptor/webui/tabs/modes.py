@@ -2959,6 +2959,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                 and not p.can("building") else "" if p is not None else "No card picked yet.",
                 # PAD-420: the mechanisms this machine does not have: their blocks are left out of the palette
                 "absent": list(getattr(p, "absent", ()) or ()) if p is not None else [],
+                # PAD-826: spare switch inputs ("in") / driver outputs ("out") a block may use here ([] = neither)
+                "spare": list(getattr(p, "spare", ()) or ()) if p is not None else [],
                 # PAD-414: the shaker - the game's own shakes a block can play, and why the blocks are greyed if not
                 "shaker_off": ("Not on this game: " + p.why_not("shaker")) if p is not None and not p.can("shaker")
                               else "" if p is not None else "No card picked yet.",

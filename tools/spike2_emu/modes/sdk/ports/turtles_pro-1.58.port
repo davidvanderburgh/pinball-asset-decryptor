@@ -272,3 +272,14 @@ value mode_slot_stop         42
 value mode_stopped_at        0x37
 value mode_starts_at         0x48
 value mode_wins_at           0x64
+
+
+
+# ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
+# docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch
+# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit); on the
+# older framework sw_listen / sw_boards / coil_used instead (the listener table, the board table, a coil there)
+site coil_frame            0x004a2a9c 0xe5d13000 0xe3530008
+data sw_listen             0x006782f0
+data sw_boards             0x006c3ff4
+site coil_used             0x0034f170 0xe92d43f8 0xe30781e8

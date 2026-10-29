@@ -286,7 +286,7 @@ function ModeList({ s, onNew, onAllNumbers, onSheet }) {
       ${s.cap_text ? html`<span class="small muted">${s.cap_text}</span>` : null}
       <div class="row modes-list-acts">
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>
-        <${Button} size="sm" disabled=${!s.copy_ok} onClick=${() => call("modes.copy_to")}
+        <${Button} drop size="sm" disabled=${!s.copy_ok} onClick=${() => call("modes.copy_to")}
           title="Copy every mode here into another card's project: pick that project's folder. Each is matched to that card's shots by name, and the app says which need a look there.">Copy to…<//>
         ${s.port_shown ? html`<${Button} size="sm" iconRight="down" disabled=${!s.port_ok}
           title=${`Every mode here, made to run on this game's ${s.port_word || "other model"} in one go: shots matched by their switches, mechanisms that model does not have left out. Each mode keeps its version for this model, and porting again replaces the earlier port and keeps what you set there.`}
@@ -1209,7 +1209,7 @@ function TryFooter({ s }) {
           <${Field} value=${emu.card} mono readOnly=${!emu.box} placeholder=${NO_CARD}
             onCommit=${(v) => setField("modes", "try_on", v, { flush: true })} title=${emu.card ? emu.card + "\n" + TRY_ON_TIP : TRY_ON_TIP} />
         </div>
-        <${Button} kind=${emu.box && !emu.card && s.project ? "primary" : undefined} disabled=${!emu.box || working}
+        <${Button} drop kind=${emu.box && !emu.card && s.project ? "primary" : undefined} disabled=${!emu.box || working}
           title=${emu.card ? "Pick another card image to try the modes on." : NO_CARD}
           onClick=${() => call("modes.browse_card")}>Browse…<//>
         ${emu.verdict ? html`<${Chip} kind=${emu.verdict_kind} dot title=${emu.verdict_tip}>${emu.verdict}<//>` : null}
@@ -1220,7 +1220,7 @@ function TryFooter({ s }) {
           disabled=${!s.project || (!working && !!s.no_port)} onClick=${() => call("modes.tryit")}>${working ? "Cancel" : "Try it"}<//>
         <${Check} label=${html`leave out own sounds<span class="modes-long"> (the game's calls play; skips the sound bank)</span>`} title=${T.leaveOut}
           checked=${s.leave_out} disabled=${working} ns="modes" k="leave_out" />
-        <button type="button" class="chip modes-tryon-chip" disabled=${!emu.box || working} onClick=${() => call("modes.browse_card")}
+        <button type="button" class="chip modes-tryon-chip" data-drop disabled=${!emu.box || working} onClick=${() => call("modes.browse_card")}
           ...${tip((emu.card ? emu.card + "\n" : "") + TRY_ON_TIP + " Click to pick another.")}>
           <${Icon} name="file" /><span class="ellip">${emu.card ? emu.card.split(/[\\/]/).pop() : "Pick a card…"}</span></button>
         <span class="vsep"></span>

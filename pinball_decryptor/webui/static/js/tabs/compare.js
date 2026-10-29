@@ -56,8 +56,8 @@ function PathRow({ side, label, value, history, running, imagesOk }) {
         placeholder=${imagesOk ? "A card image, or a project folder" : "A project folder"} />
       <${Button} icon="down" title="Recently compared"
         onClick=${(e) => recentMenu(e.currentTarget, history || [], (p) => call("ui.set", "compare", side, p))} />
-      ${imagesOk ? html`<${Button} title="Pick a card image" onClick=${() => call("compare.browse", side)}>Image…<//>` : null}
-      <${Button} icon="folder" title="Pick a project folder: what Extract made, with your changes in it"
+      ${imagesOk ? html`<${Button} drop title="Pick a card image" onClick=${() => call("compare.browse", side)}>Image…<//>` : null}
+      <${Button} drop icon="folder" title="Pick a project folder: what Extract made, with your changes in it"
         onClick=${() => call("compare.browse", side, true)}>Folder…<//>
     </form>`;
 }

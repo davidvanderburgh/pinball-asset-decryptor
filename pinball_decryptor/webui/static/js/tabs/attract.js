@@ -97,7 +97,7 @@ function FlipperSounds() {
       <${Button} size="sm" kind="ghost" icon="x" title="Take it off" onClick=${() => call("audio.attract_action", `off:${i + 1}`)} />
     </div>`)}
     <div class="row">
-      <${Button} size="sm" icon="plus" disabled=${files.length >= at.max} onClick=${() => call("audio.attract_action", "add")}>Add a sound…<//>
+      <${Button} drop size="sm" icon="plus" disabled=${files.length >= at.max} onClick=${() => call("audio.attract_action", "add")}>Add a sound…<//>
       ${files.length ? html`<${Button} size="sm" kind="ghost" onClick=${(e) => openMenu(e.currentTarget,
         (at.gaps || []).map((g) => ({ label: g.label, checked: g.s === at.gap,
           onClick: () => call("audio.attract_action", `gap:${g.s}`) })))}>Time between sounds<//>` : null}

@@ -10,13 +10,23 @@ page that reloads shows them again.
 File pickers are native when the desktop host provides them (pywebview's
 dialogs: the real Windows / macOS / GTK-Qt panels); otherwise the page shows
 its own folder browser, served by :func:`list_dir`.
+
+Files dropped on a Browse… / Choose… button or a row answer the picker that
+button opens instead (PAD-838): the page arms them (:meth:`Dialogs.arm_drop`)
+and then clicks, and the next open / folder picker takes them without
+showing, through every check a picked file goes through.
 """
 
+import fnmatch
 import itertools
 import os
 import string
 import sys
 import threading
+import time
+
+#: how long armed drops wait for the picker their click opens
+DROP_WAIT_S = 5.0
 
 
 class DialogClosed(Exception):
@@ -33,6 +43,7 @@ class Dialogs:
         self._open = []             # specs shown, oldest first
         #: set by the desktop host: fn(kind, spec) -> answer, runs off-loop
         self.native_file_dialog = None
+        self._drop = None           # (time armed, [paths]) for the next picker
 
     # ------------------------------------------------------------------
     def ask(self, spec):
@@ -95,6 +106,7 @@ class Dialogs:
     def file(self, mode, title="", initialdir="", initialfile="",
              filetypes=None, multiple=False, defaultextension="",
              confirmoverwrite=True):
+        dropped = self._take_drop()
         spec = {
             "kind": "file", "mode": mode, "title": title or "",
             "initialdir": initialdir or "", "initialfile": initialfile or "",
@@ -104,6 +116,8 @@ class Dialogs:
             "defaultextension": defaultextension or "",
             "confirmoverwrite": bool(confirmoverwrite),
         }
+        if dropped is not None and mode != "save":
+            return self._normalise(self._drop_answer(dropped, spec), spec)
         native = self.native_file_dialog
         if native is not None:
             # the OS draws this one: its file-type names in the app's
@@ -118,6 +132,47 @@ class Dialogs:
             if result is not NotImplemented:
                 return self._normalise(result, spec)
         return self._normalise(self.ask(spec), spec)
+
+    # ------------------------------------------------------------------
+    # files dropped on what opens a picker (PAD-838)
+    # ------------------------------------------------------------------
+    def arm_drop(self, paths):
+        """The next open / folder picker (within :data:`DROP_WAIT_S`) answers
+        with *paths* instead of showing."""
+        self._drop = (time.monotonic(), [os.path.normpath(p) for p in paths])
+
+    def _take_drop(self):
+        drop, self._drop = self._drop, None
+        if drop and time.monotonic() - drop[0] < DROP_WAIT_S:
+            return drop[1]
+        return None
+
+    def _drop_answer(self, paths, spec):
+        """What the picker *spec* answers for the dropped *paths*: what
+        picking them would have given, or nothing after saying why not."""
+        def no(text):
+            from . import compat
+            compat.messagebox.showinfo("Drop", text)
+            return None
+        if spec["mode"] == "folder":
+            if len(paths) != 1 or not os.path.isdir(paths[0]):
+                return no("This asks for a folder: drop one folder here.")
+            return paths[0]
+        if len(paths) > 1 and not spec["multiple"]:
+            return no("This takes one file: drop just one here.")
+        if any(os.path.isdir(p) for p in paths):
+            return no("This asks for a file, not a folder: drop the file "
+                      "itself here.")
+        pats = [pat.lower() for _label, pats in spec["filetypes"]
+                for pat in str(pats).split()]
+        bad = [p for p in paths if pats and not any(
+            fnmatch.fnmatch(os.path.basename(p).lower(), pat)
+            for pat in pats)]
+        if bad:
+            kinds = " ".join(pats)
+            return no("%s is not a file this takes (%s), so it was not used."
+                      % (os.path.basename(bad[0]), kinds))
+        return list(paths) if spec["multiple"] else paths[0]
 
     def _run_native(self, native, spec):
         """Run the native picker off the loop and keep the loop turning."""

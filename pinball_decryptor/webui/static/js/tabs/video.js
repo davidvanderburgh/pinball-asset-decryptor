@@ -645,7 +645,7 @@ function QualityWindow({ q }) {
         <label class="lbl nw" for="vid-q-card">Card image:</label>
         <${Field} id="vid-q-card" value=${q.card} mono cls="grow" disabled=${q.busy}
           onChange=${(v) => { card.current = v; }} onCommit=${(v) => call("video.quality_set_card", v)} />
-        <${Button} onClick=${() => call("video.quality_browse")} disabled=${q.busy}>Browse…<//>
+        <${Button} drop onClick=${() => call("video.quality_browse")} disabled=${q.busy}>Browse…<//>
         <${Button} kind="primary" onClick=${() => call("video.quality_check", card.current)}>${q.busy ? "Stop" : "Check"}<//>
       </div>
       <div class="row small" style="gap:8px">${q.busy ? html`<${Spinner} />` : null}<span>${q.summary}</span></div>
@@ -710,7 +710,7 @@ function BestWindow({ b }) {
     <label class="lbl nw vid-blbl" for=${id}>${label}</label>
     <${Field} id=${id} value=${b[k]} mono cls="grow" disabled=${b.busy}
       onChange=${(v) => { fields.current[k] = v; }} onCommit=${(v) => call("video.best_set", k, v)} />
-    <${Button} onClick=${() => call("video.best_browse", k)} disabled=${b.busy}>Browse…<//>
+    <${Button} drop onClick=${() => call("video.best_browse", k)} disabled=${b.busy}>Browse…<//>
   </div>`;
   // a typed path counts even if the field never lost focus
   const find = async () => {
@@ -742,7 +742,7 @@ function BestWindow({ b }) {
           <label class="lbl nw vid-blbl" for="vid-b-folder">Your videos:</label>
           <${Field} id="vid-b-folder" value=${b.folder} mono cls="grow" disabled=${b.busy}
             onChange=${(v) => { fields.current.folder = v; }} onCommit=${(v) => call("video.best_set", "folder", v)} />
-          <${Button} onClick=${() => call("video.best_browse", "folder")} disabled=${b.busy}>Browse…<//>
+          <${Button} drop onClick=${() => call("video.best_browse", "folder")} disabled=${b.busy}>Browse…<//>
           <${Button} onClick=${find}>${b.busy ? "Stop" : "Find"}<//>
         </div>
       </div>
@@ -879,10 +879,9 @@ export default function VideoTab() {
   // Python loads the row into the panes before the picker opens
   const choose = (rel) => { clearTimeout(selectJob.current); pauseAll(); call("video.choose", rel); };
   // PAD-838: a video file dropped on a row from the desktop is its replacement
-  const dropOn = (rel, names) => {
+  const dropOn = (rel) => {
     setSel(new Set([rel])); anchor.current = rel;
-    clearTimeout(selectJob.current); pauseAll();
-    call("video.choose", rel, names);
+    choose(rel);
   };
   const playRow = (rel, side = "orig") => {
     setSel(new Set([rel])); anchor.current = rel;
@@ -1124,7 +1123,7 @@ export default function VideoTab() {
     ${rep.path ? html`<span class="mono small nw ellip acc-ink" ...${tip(repLine
       ? { head: rep.path, lines: [repLine] } : rep.path)}>— ${rep.label}</span>` : null}
     <span class="grow"></span>
-    <${Button} size="sm" onClick=${() => currentRel && choose(currentRel)} disabled=${!currentRel}>Choose…<//>
+    <${Button} drop size="sm" onClick=${() => currentRel && choose(currentRel)} disabled=${!currentRel}>Choose…<//>
     ${pv.can_clear ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("video.clear", [pv.rel])}>Clear replacement<//>` : null}
   </div>`;
   const origHead = html`<div class="row vid-panehead">
@@ -1155,7 +1154,7 @@ export default function VideoTab() {
       <${Button} icon=${s.scanning ? "x" : "refresh"} onClick=${() => call(s.scanning ? "video.cancel_scan" : "video.scan")}>${s.scanning ? "Cancel scan" : "Scan"}<//>
       <${Button} icon="compare" cls="vid-cmp-open" onClick=${() => openCompare(compareRels())} disabled=${!currentRel}
         title=${T.compare}>Compare<//>
-      <${Button} icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
+      <${Button} drop icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
       ${s.best_supported ? html`<${Button} kind="ghost" icon="star" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
       <${Button} kind="ghost" icon="more" label="More"
         title=${"More: Export CSV, Export compare report, " + (s.color_offered ? "Save clips with their color profiles…, " : "") + "Clear replacements…, Save / load settings" + (s.var_share ? ", Save / load random clips" : "") + (s.quality_report ? ", Check card…" : "")}
@@ -1215,7 +1214,7 @@ export default function VideoTab() {
           sort=${s.sort} onSort=${(k) => call("video.sort", k)}
           resizable widths=${tuned} onResize=${onResize} style=${`--vid-minw:${Math.round(minWidth)}px`}
           rowClass=${(r) => cx(r.rep_cls === "stray" && "vid-foreign")}
-          onFileDrop=${(r, _i, names) => dropOn(r.rel, names)}
+          onFileDrop=${(r) => dropOn(r.rel)}
           empty=${emptyNode} />
       </div>
       <div class="vid-preview">

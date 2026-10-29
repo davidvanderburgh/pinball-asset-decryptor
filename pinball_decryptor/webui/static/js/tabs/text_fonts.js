@@ -274,7 +274,7 @@ export function FontsWindow() {
         <section class="fonts-import">
           <div class="eyebrow">Import a desktop font</div>
           <div class="row wrap">
-            <${Button} size="sm" onClick=${() => call("text_fonts.pick_ttf")} disabled=${!s.sel}>Import font file…<//>
+            <${Button} drop size="sm" onClick=${() => call("text_fonts.pick_ttf")} disabled=${!s.sel}>Import font file…<//>
             <span class="small muted">${s.ttf_label}</span>
           </div>
           <div class="row wrap">

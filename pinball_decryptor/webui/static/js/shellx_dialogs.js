@@ -565,14 +565,14 @@ function NewProjectDialog({ close, stock: forCard = "", name: suggested = "", pa
     <div class="sx-form">
       <${Row} label="Location:"><div class="row">
         <${Field} value=${parent} onChange=${(v) => { setParent(v); setErr(""); }} mono cls="grow" placeholder="The folder the project folder goes in" />
-        <${Button} onClick=${async () => { const p = await call("shellx.browse_location", parent); if (p) setParent(p); }}>Browse...<//></div><//>
+        <${Button} drop onClick=${async () => { const p = await call("shellx.browse_location", parent); if (p) setParent(p); }}>Browse...<//></div><//>
       <${Row} label="Folder name:"><${Field} value=${name} onChange=${(v) => { setName(v); setErr(""); }} autoFocus
         bad=${!!name && BAD_NAME.test(name)} placeholder="TMNT 1.59 upscale" /><//>
       <${Row} label="Manufacturer:"><${Select} value=${mfr} onChange=${setMfr}
         options=${form.mfrs.map((m) => ({ value: m.key, label: m.display }))} /><//>
       <${Row} label="Stock image:"><div class="row">
         <${Field} value=${stock} onChange=${(v) => { setStock(v); setErr(""); }} mono cls="grow" placeholder="Optional: the card image the project starts from" />
-        <${Button} onClick=${async () => { const p = await call("shellx.browse_stock", mfr, stock); if (p) setStock(p); }}>Browse...<//></div><//>
+        <${Button} drop onClick=${async () => { const p = await call("shellx.browse_stock", mfr, stock); if (p) setStock(p); }}>Browse...<//></div><//>
     </div>
     <div class="stack" style="gap:4px">
       <span class="small muted">${prev.title}</span>
@@ -614,7 +614,7 @@ function SaveAsDialog({ close, folder }) {
     <div class="sx-form">
       <${Row} label="Location:"><div class="row">
         <${Field} value=${parent} onChange=${(v) => { setParent(v); setErr(""); }} mono cls="grow" />
-        <${Button} onClick=${async () => { const x = await call("shellx.browse_location", parent); if (x) setParent(x); }}>Browse...<//></div><//>
+        <${Button} drop onClick=${async () => { const x = await call("shellx.browse_location", parent); if (x) setParent(x); }}>Browse...<//></div><//>
       <${Row} label="Folder name:"><${Field} value=${name} onChange=${(v) => { setName(v); setErr(""); }} autoFocus bad=${!!name && BAD_NAME.test(name)} /><//>
     </div>
     <div class="small muted mono ellip" title=${dest}>${dest}</div>
@@ -723,7 +723,7 @@ function ManagerDialog({ close }) {
       <${Button} disabled=${!live || !ent.anchored || running} onClick=${() => call("shellx.project_archive", sel)}>Archive...<//>
       <${Button} disabled=${!live} onClick=${() => call("shellx.manager_reveal", sel)}>Reveal<//>
       <${Button} disabled=${!ent} onClick=${() => call("shellx.manager_remove", sel).then(() => setSel(null))}>Remove from list<//>
-      <${Button} disabled=${!ent} onClick=${() => call("shellx.manager_locate", sel)}>Locate...<//>
+      <${Button} drop disabled=${!ent} onClick=${() => call("shellx.manager_locate", sel)}>Locate...<//>
       <span class="grow"></span><${Button} onClick=${close}>Close<//>`}>
     <${Table} columns=${cols} rows=${rows} rowKey=${(r) => r.folder} selected=${sel}
       onSelect=${(r) => setSel(r.folder)} onActivate=${(r) => { setSel(r.folder); if (!r.missing && !running) call("shellx.manager_open", r.folder); }}
@@ -766,7 +766,7 @@ function RelinkDialog({ close, folder }) {
     <div class="row" onKeyDown=${onEnter((t) => { if (rl.busy || rl.done) return; setRoot(t); search(t); })}>
       <span class="lbl nw">Where are those files now?</span>
       <${Field} value=${rootShown} onChange=${setRoot} mono cls="grow" disabled=${rl.busy} />
-      <${Button} onClick=${browse} disabled=${rl.busy}>Browse...<//>
+      <${Button} drop onClick=${browse} disabled=${rl.busy}>Browse...<//>
     </div>
     <${Table} columns=${cols} rows=${rl.rows || []} rowKey=${(r) => r.path} cls="card sx-fill"
       resizable widths=${widths} onResize=${setWidths}
@@ -1299,7 +1299,7 @@ function ReportDialog({ close, prefill = "" }) {
         <span class="lbl">Picture</span>
         ${picture ? html`<span class="chip acc sm notr" title=${picture.name}>${picture.name} · ${picture.kb} KB</span>
             <${Button} size="sm" kind="ghost" onClick=${clearPic}>Remove<//>`
-          : html`<${Button} size="sm" onClick=${pick}>Add a picture…<//>
+          : html`<${Button} drop size="sm" onClick=${pick}>Add a picture…<//>
             ${r.capture ? html`<${Button} size="sm" onClick=${shoot} title="Hides this window for a moment and takes a picture of the app">Take a picture of the app<//>` : null}`}
       </div>
       <${Check} checked=${hidePaths} onChange=${setHidePaths} label="Leave file paths and my account name out of the report" />

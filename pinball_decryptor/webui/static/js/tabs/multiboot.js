@@ -388,7 +388,7 @@ function CardCard({ s, w, busy }) {
         </div>
         <div class="row mb-pathbtns">
           ${w.read_card ? html`<${Button} disabled=${busy} title=${w.from_card_tip} onClick=${() => call("multiboot.from_card")}>From SD card…<//>` : null}
-          <${Button} disabled=${busy} onClick=${() => call("multiboot.browse")}>Browse…<//>
+          <${Button} drop disabled=${busy} onClick=${() => call("multiboot.browse")}>Browse…<//>
           <${Button} kind="ghost" disabled=${busy} title=${w.new_tip} onClick=${() => call("multiboot.new_card")}>${w.new_text || "New card"}<//>
         </div>
       </div>
@@ -429,7 +429,7 @@ function SoundRow({ label, field, value, words, used, playTip }) {
     <div class="row mb-sound">
       <${Field} id=${fid(field)} ns=${NS} k=${field} value=${value} cls="grow" mono
         suffix=${html`<button type="button" class="mb-drop" aria-label=${"Choose the " + noColon(label).toLowerCase()} onClick=${choose}>▾</button>`} />
-      <${Button} onClick=${() => call("multiboot.sound_browse", field)}>Browse…<//>
+      <${Button} drop onClick=${() => call("multiboot.sound_browse", field)}>Browse…<//>
       <${Button} icon="play" title=${playTip} onClick=${() => call("multiboot.play", field)}>Play<//>
     </div>`;
 }
@@ -462,7 +462,7 @@ function EditDialog({ s, w }) {
             ${ed.file_kind ? html`<label class="k" for=${fid(fileKey)}>${ed.file_label}</label>
               <div class="row">
                 <${Field} id=${fid(fileKey)} ns=${NS} k=${fileKey} value=${s[fileKey]} mono cls="grow" disabled=${!ed.file_live} />
-                <${Button} onClick=${() => call("multiboot.edit_browse", ed.file_kind)}>Browse…<//>
+                <${Button} drop onClick=${() => call("multiboot.edit_browse", ed.file_kind)}>Browse…<//>
               </div>` : null}
           </div>
           ${ed.note ? html`<span class="small muted">${ed.note}</span>` : null}
@@ -523,8 +523,8 @@ function Members({ m }) {
       </li>`)}
     </ol>
     <div class="row">
-      <${Button} onClick=${() => call("multiboot.member_add")}>Add files…<//>
-      <${Button} onClick=${() => call("multiboot.member_add_folder")}>Add folder…<//>
+      <${Button} drop onClick=${() => call("multiboot.member_add")}>Add files…<//>
+      <${Button} drop onClick=${() => call("multiboot.member_add_folder")}>Add folder…<//>
     </div>
     <span class="small muted">${m.note}</span>
   <//>`;

@@ -179,7 +179,7 @@ function TextColor({ p, c }) {
       <span class="sp"></span>
       <${Button} size="xs" icon="save" onClick=${() => call("text_scenes.tree_text_colour_save", pick, bright)}
         title="Save this color as a file of its own, listed under Saved from then on (as Save a copy keeps a color profile)">Save a copy...<//>
-      <${Button} size="xs" icon="upload" onClick=${() => call("text_scenes.tree_text_colour_load", id)}
+      <${Button} drop size="xs" icon="upload" onClick=${() => call("text_scenes.tree_text_colour_load", id)}
         title="Load a text color saved earlier and give it to this line">Load...<//>
     </div>
     <div class="row fnt-row fnt-color-all">

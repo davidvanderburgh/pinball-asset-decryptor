@@ -353,11 +353,11 @@ export default function ImagesTab() {
   };
 
   // PAD-838: an image file dropped on a row from the desktop is its replacement
-  const onFileDrop = (e, _i, names) => {
+  const onFileDrop = (e) => {
     const row = slotAt(s, e);
     if (!row) return;
     selectOnly(row.r);
-    call("images.choose", row.r, names);
+    call("images.choose", row.r);
   };
 
   const onActivate = (e) => {
@@ -659,7 +659,7 @@ export default function ImagesTab() {
       ${s.scanning
         ? html`<${Button} icon="x" onClick=${() => call("images.cancel_scan")}>Cancel scan<//>`
         : html`<${Button} icon="refresh" onClick=${() => call("images.scan")}>Scan<//>`}
-      <${Button} icon="folder" onClick=${() => call("images.from_folder")} disabled=${running} title=${FOLDER_TIP}>Replace from folder…<//>
+      <${Button} drop icon="folder" onClick=${() => call("images.from_folder")} disabled=${running} title=${FOLDER_TIP}>Replace from folder…<//>
       <${Button} icon="search" onClick=${() => call("images.originals_open")} disabled=${running} title=${ORIGINALS_TIP}>Find originals…<//>
       <${Button} icon="compare" cls="img-cmp-open" onClick=${() => openCompare(compareRels())} disabled=${!compareRels().length}
         title=${COMPARE_TIP}>Compare<//>
@@ -717,7 +717,7 @@ export default function ImagesTab() {
           ${p.rep_name ? html`<span class="mono small ellip img-repname" ...${tip(p.color
             ? { head: p.rep, lines: [{ profile: p.color.on ? p.color.name : "None" }] } : p.rep)}>— ${p.rep_name}</span>` : null}
           <span class="grow"></span>
-          ${prevRel ? html`<${Button} size="sm" onClick=${() => call("images.choose", prevRel)}>Choose…<//>` : null}
+          ${prevRel ? html`<${Button} drop size="sm" onClick=${() => call("images.choose", prevRel)}>Choose…<//>` : null}
           ${prevRel && p.clearable ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("images.clear_one", prevRel)}>Clear replacement<//>` : null}
         </div>
         ${p.hdr_note || p.scenes ? html`<div class="small img-on">

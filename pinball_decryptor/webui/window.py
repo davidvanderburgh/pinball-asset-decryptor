@@ -183,6 +183,22 @@ class WebWindow:
     fans_tab_changes = True
 
     @rpc
+    def drop_arm(self, names):
+        """Files from the desktop were dropped on something that opens a
+        picker (PAD-838): their full paths, from the window's drop handler,
+        answer the picker the page's click on it opens next.  False, after
+        saying why, when the paths never came (a browser has no window
+        handler)."""
+        paths = self.ctx.drops.take(names or [])
+        if not paths:
+            compat.messagebox.showinfo(
+                "Drop", "This window could not tell where the dropped file "
+                "is. Use Browse… or Choose… to pick it instead.")
+            return False
+        self.ctx.dialogs.arm_drop(paths)
+        return True
+
+    @rpc
     def select_tab(self, ns):
         svc = self._by_ns.get(ns)
         if svc is None:

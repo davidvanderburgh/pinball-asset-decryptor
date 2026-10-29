@@ -920,7 +920,7 @@ function MyMachines({ running }) {
       <h2 class="h1 grow" style="margin:0;font-size:24px">My machines</h2>
       ${rows.length ? html`<${Check} checked=${m.watch === true} title=${MACH.watch} label="Check for new game code once a day"
         onChange=${(v) => call("shellx.machines_set_watch", v)} />` : null}
-      <${Button} icon="plus" disabled=${running} title=${MACH.add} onClick=${() => call("shellx.machines_add")}>Add machine…<//>
+      <${Button} drop icon="plus" disabled=${running} title=${MACH.add} onClick=${() => call("shellx.machines_add")}>Add machine…<//>
     </div>
     ${rows.length ? html`<div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} />`)}</div>
       ${m.watch_text ? html`<div class="muted small">${m.watch_text}</div>` : null}`

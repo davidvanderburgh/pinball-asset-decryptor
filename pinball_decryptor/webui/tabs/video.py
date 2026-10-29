@@ -1812,10 +1812,9 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
     # ==================================================================
     @rpc
     @undoable("the pick for %s")
-    def choose(self, rel, dropped=None):
+    def choose(self, rel):
         """MainWindow._video_assign_rel: the picker, the as-is gate, the
-        pick, its log line.  *dropped*: the names of the files dropped on
-        the row, used instead of the picker (PAD-838)."""
+        pick, its log line."""
         if not rel or rel not in self._by_rel:
             return False
         # The row the picker is for is the row the panes show, whether a
@@ -1825,12 +1824,9 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         if rel != self._current:
             self._load_track(rel)
         self.stop_all_preview_playback()
-        if dropped is not None:
-            path = self.dropped_file(dropped, vh.PICK_FILETYPES, "a video")
-        else:
-            path = self.window.ask_open("video_replacement",
-                                        "Choose a replacement for %s" % rel,
-                                        vh.PICK_FILETYPES)
+        path = self.window.ask_open("video_replacement",
+                                    "Choose a replacement for %s" % rel,
+                                    vh.PICK_FILETYPES)
         if not path:
             return False
         path = os.path.normpath(path)

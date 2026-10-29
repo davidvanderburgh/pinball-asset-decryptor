@@ -31,9 +31,13 @@ HELP_CONTENT = {
                  "text": "a new card image, then flash it"}]},
         ]),
         ("Pick the card",
-         "**Browse…** to a card image or update file. Or use **From SD card / SSD** "
-         "(where available) to read a card in a reader; on Windows that needs "
-         "Administrator."),
+         "**Browse…** to a card image or update file, or drop the file from your "
+         "desktop or a folder on the path or on **Browse…**. Or use **From SD card / "
+         "SSD** (where available) to read a card in a reader; on Windows that needs "
+         "Administrator.\n\n"
+         "The app's **Browse…**, **Choose…** and **Add…** buttons take a dropped "
+         "file or folder the same way, and so does a row on the Images, Video and Audio "
+         "tabs."),
         ("Is it the right card?",
          "For a Stern Spike 2 card, the page shows what the machine shows as it starts: "
          "the game's loading screen, or a multi-boot card's menu with the default game "

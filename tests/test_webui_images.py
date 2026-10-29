@@ -360,32 +360,32 @@ def test_group_blank_and_clear(scanned):
 
 # ------------------------------------------------------------ picking
 def test_a_file_dropped_on_a_row_is_its_replacement(scanned):
-    """PAD-838: an image dropped on a row from the desktop takes the
-    picker's place; a drop that is not one image file is turned down."""
+    """PAD-838: an image dropped on a row from the desktop answers the
+    row's picker (the page arms the drop, then asks for the pick)."""
     w, assets, reps, _st = scanned
     rep = os.path.join(reps, "SpaceGodzilla.png")
     n = len(w.asked)
     w.ctx.drops.put([rep])
-    assert w.call("images.choose", BANNER, ["SpaceGodzilla.png"]) == BANNER
+    assert w.call("ui.drop_arm", ["SpaceGodzilla.png"]) is True
+    assert w.call("images.choose", BANNER) == BANNER
     assert len(w.asked) == n                     # no picker opened
     row = _by_rel(w.state("images"))[BANNER]
     assert row["p"] == "SpaceGodzilla.png" and row["t"] == "assigned"
     assert w.window.pending_image_assignments(assets)[1] == {
         BANNER: os.path.normpath(rep)}
-    # not an image: turned down, the pick stays
-    txt = os.path.join(reps, "notes.txt")
-    open(txt, "w").close()
-    w.ctx.drops.put([txt])
-    assert w.call("images.choose", BANNER, ["notes.txt"]) is None
+    # a folder is not a picture: said so, and the pick stays
+    w.ctx.drops.put([reps])
+    assert w.call("ui.drop_arm", [os.path.basename(reps)]) is True
+    assert w.call("images.choose", PLAIN) is None
     assert w.asked[-1]["message"] == (
-        "notes.txt is not an image file, so it was not used.")
-    # two files on one row, and a drop whose path never came (a browser)
-    assert w.call("images.choose", PLAIN, ["a.png", "b.png"]) is None
-    assert w.asked[-1]["message"].startswith("Drop one file on a row")
-    assert w.call("images.choose", PLAIN, ["gone.png"]) is None
-    assert "could not tell where" in w.asked[-1]["message"]
+        "This asks for a file, not a folder: drop the file itself here.")
     assert _by_rel(w.state("images"))[PLAIN]["t"] != "assigned"
-    assert _by_rel(w.state("images"))[BANNER]["p"] == "SpaceGodzilla.png"
+    # a folder on Replace from folder… is that folder
+    w.ctx.drops.put([reps])
+    assert w.call("ui.drop_arm", [os.path.basename(reps)]) is True
+    w.answers = ["yes"]                          # "Use 1 file(s) from ..."
+    assert w.call("images.from_folder") == 1     # backglass.jpg
+    assert _by_rel(w.state("images"))[PLAIN]["p"] == "backglass.jpg"
 
 
 def test_choose_keep_size_and_the_build_tuple(scanned):

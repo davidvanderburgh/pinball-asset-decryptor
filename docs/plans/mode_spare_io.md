@@ -113,3 +113,14 @@ time, and nothing of the game's lands on it. Census over every port.
     whose byte 0 is the node, [4] -> a list of listeners with +16/+17 previous/current level, +8/+12 counts).
   Left: which (node, bit) the game uses there (the listener records), and the coil records' shape (for the OFF
   wrapper too: `coil_off` was not found on them).
+  - Outputs on the older framework (Mando LE 1.44): `0x3a1c6c(node, coil, pulse power, pulse ms, hold power, hold
+    ms)` is its fire by address (refuses node > 30, coil > 8; fills the spec and calls the wrapper `0x5246f4`);
+    `0x3a1710(node, coil)` is "the game has a coil there": it walks the device records (`[0x665674]`, 56 bytes
+    each, count `[0x6b8be8]`; +32 the device id -> `0x20a624` -> +20 kind (2 = coil), +18 its index, +16 ->
+    `0x416a8c` -> +14 the node) - a pure query, usable as `site coil_used`. The newer framework's board test calls
+    the same kind of query (`0x1d5414` on Godzilla Pro 1.15). There is NO OFF frame on these builds (no
+    `mov rX,#0x4d` into a frame anywhere): the runtime's OFF there is the fire with every power and time 0, which
+    hwshim's [coildrive] reads as off.
+  - Inputs on the older framework: the board's bits are at `board + 572` (`board = [0x743fb0 + 144 + node * 4]`),
+    already XORed with the board's per-bit mask at +580. "The game has a switch there" is still to find: the same
+    device records with the switch kind are the likely route.

@@ -471,6 +471,9 @@ it again restores the whole setup.
   is copied or written until you press Relink.
 - **Recent paths:** every file and folder box keeps a dropdown of your
   recent paths, per manufacturer.
+- **Drag and drop:** drop a file or folder from the desktop on any
+  Browse…/Choose…/Add… button, path box or Replace row to pick it. It is
+  checked just like a pick from the picker, and a refused drop says why.
 
 **App-wide settings** describe you or your cabinet, not a card: theme,
 window, volumes, the Emulate country and power, and the Default Settings

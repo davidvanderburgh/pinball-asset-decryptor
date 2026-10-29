@@ -119,9 +119,11 @@ def test_menu_choices():
 # ---------------------------------------------------------- gear menu
 def test_preview_features_is_offered_only_while_there_is_a_preview(tmp_path, monkeypatch):
     """PAD-763 released the mode maker, the one preview: the gear menu no longer offers
-    Preview features... with nothing to unlock, and offers it again for a new preview."""
+    Preview features... with nothing to unlock, and offers it again for a new preview
+    (PAD-802's Visual Pinball is one)."""
     from pinball_decryptor.core import preview
-    assert preview.FEATURES == {} and "modes" in preview.RELEASED
+    assert "modes" in preview.RELEASED and "modes" not in preview.FEATURES
+    monkeypatch.setattr(preview, "FEATURES", {})
     with web_app(tmp_path, mfr="stern") as w:
         assert item(w, "preview_features") is None
     monkeypatch.setattr(preview, "FEATURES", {"next": "Next thing"})
@@ -135,6 +137,7 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
     top-level.  The voice recognition quality moved to the Extract tab
     (PAD-460), and clearing the downloaded models stays here."""
     import sys
+    from pinball_decryptor.core import preview
     with web_app(tmp_path, mfr="stern") as w:
         top = w.state("shell")["settings_items"]
         shape = [("sep" if it.get("sep") else
@@ -145,8 +148,10 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
             want.append("disk_space")
         want += ["Logs ▸", "Save automatically ▸", "toggle_scenes_own_colours", "sep",
                  "clear_voice_models", "sep",
-                 "Prerequisites ▸", "sep",
-                 "donations", "report_problem", "view_disclaimer"]
+                 "Prerequisites ▸", "sep"]
+        if preview.FEATURES:                    # PAD-802: Visual Pinball is a preview
+            want.append("preview_features")
+        want += ["donations", "report_problem", "view_disclaimer"]
         assert shape == want
         assert not any(it.get("header") for it in items(w))
         up = cascade(w, "Check automatically")["submenu"]
@@ -471,10 +476,12 @@ def test_every_rail_tab_has_tips_under_its_own_key():
     """PAD-388: the ? window looks a tab's tips up by the tab's key, so a
     HELP_CONTENT entry spelt otherwise ("Color profile" for the tab keyed
     "Color Profile") left that tab's Tips window empty."""
-    from pinball_decryptor.webui.help_content import HELP_CONTENT, sections_for
+    from pinball_decryptor.webui.help_content import HELP_CONTENT, PREVIEW_HELP, sections_for
     from pinball_decryptor.webui.tabs import TABS
     keys = [key for _m, _ns, key, _label, _group, _icon in TABS if key]
-    missing = [k for k in keys if not HELP_CONTENT.get(k) and k != "Modes"]
+    # a preview tab's tips are in PREVIEW_HELP (Modes; Visual Pinball, PAD-802)
+    preview_tabs = {t for f in PREVIEW_HELP.values() for t in f}
+    missing = [k for k in keys if not HELP_CONTENT.get(k) and k not in preview_tabs]
     assert not missing, missing
     assert not [k for k in HELP_CONTENT if k not in keys], "a key no tab has"
     assert sections_for("Color Profile")

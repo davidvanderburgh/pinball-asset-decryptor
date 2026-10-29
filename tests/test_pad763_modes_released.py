@@ -27,7 +27,9 @@ def test_the_modes_tab_shows_for_stern_without_a_code(tmp_path):
         assert tabs["modes"]["visible"]
         assert P.SETTINGS_KEY not in w.app._settings
         ids = [it.get("id") for it in w.state("shell")["settings_items"]]
-        assert "preview_features" not in ids
+        # the gear menu offers Preview features... only for a preview still to unlock
+        # (PAD-802's Visual Pinball), never for the mode maker
+        assert ("preview_features" in ids) == bool(P.FEATURES)
         # every Stern era the picker offers keeps it; another manufacturer never has it
         w.call("ui.pick_manufacturer", "spooky")
         w.drain()

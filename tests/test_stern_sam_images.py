@@ -417,7 +417,8 @@ def test_sam_pages_leave_out_scenes_and_colors(stern):
     from types import SimpleNamespace
 
     from pinball_decryptor.webui.window import WebWindow
-    me = SimpleNamespace(modes_preview_on=lambda mfr=None: False)
+    me = SimpleNamespace(modes_preview_on=lambda mfr=None: False,
+                         vpx_preview_on=lambda: False)
     stern.set_era("sam")
     gates = WebWindow._gate(me, stern)
     assert gates["Replace Images"] and gates["Replace Audio"]

@@ -321,12 +321,16 @@ def main(argv):
         # Visual Pinball's own playfield window: borderless in windowed
         # mode, so it cannot be dragged, and 10.8 ignores WindowPosX/Y in
         # its ini - the controller moves it once when a table starts
+        # (PAD-811: it gets a title bar and resize edges, keeps the table's
+        # proportions, and remembers where it is left; `player frame off`)
         d = padlaunch.kit_load()
-        if len(rest) in (2, 4):
+        if len(rest) == 2 and rest[0] == "frame" and rest[1] in ("on", "off"):
+            d["player_frame"] = rest[1] == "on"
+        elif len(rest) in (2, 3, 4) and all(v.lstrip("-").isdigit() for v in rest):
             vals = [int(v) for v in rest]
             d["player"] = {"x": vals[0], "y": vals[1]}
-            if len(vals) == 4:
-                d["player"].update(w=vals[2], h=vals[3])
+            if len(vals) >= 3:
+                d["player"]["w"] = vals[2]          # the height follows the table's proportions
         elif rest and rest[0] == "monitor" and len(rest) == 2:
             d["player"] = {"monitor": int(rest[1])}
         elif rest and rest[0] == "off":
@@ -335,8 +339,9 @@ def main(argv):
             print(json.dumps(d.get("player", {}), indent=1) or "off")
             return 0
         padlaunch.kit_save(d)
-        print("player window: %s (applied when a table is next opened; its size stays Visual Pinball's own unless w h are given)"
-              % json.dumps(d.get("player", "off")))
+        print("player window: %s, frame %s (applied when a table is next opened; a width scales"
+              " the picture, its height follows the table's proportions)"
+              % (json.dumps(d.get("player", "off")), "off" if d.get("player_frame") is False else "on"))
         return 0
     if cmd == "playfield":
         # the rig's own virtual playfield window beside Visual Pinball:

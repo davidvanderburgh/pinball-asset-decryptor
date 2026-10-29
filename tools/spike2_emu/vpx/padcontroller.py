@@ -361,8 +361,8 @@ class Rig:
       1. the environment (PAD_WSL_DISTRO / PAD_ROOT_WSL / PAD_SLOT), which the
          app sets for every tool it launches;
       2. the rig board (~/.pad-rig/slot-N.run, written by watch.sh for every
-         run): the run whose `game` is the title the table named, else the
-         only Spike 2 run up. This is how a Visual Pinball started from the
+         run): the run whose `game` is the title the table named (a table
+         that names none: the only Spike 2 run up). This is how a Visual Pinball started from the
          Start menu, with no PAD environment at all, finds the app's run;
       3. padpath's default: the default distro's ~/spike2root.
     """
@@ -425,7 +425,11 @@ class Rig:
                 ", ".join("slot %s" % r.get("slot") for r in mine[1:])))
         if mine:
             return mine[0]
-        return runs[0] if len(runs) == 1 else None
+        # a table that names its title takes only a run OF that title: the
+        # one other run up may be anything - PAD-811: JAWS attached to
+        # another ticket's hidden Godzilla run, drove its switches and never
+        # started its own. Only a nameless table takes the lone run.
+        return runs[0] if len(runs) == 1 and not title else None
 
     def wsl_head(self):
         head = ["wsl.exe"]
@@ -835,6 +839,7 @@ class Bridge:
             if now - getattr(self, "_front_check", 0.0) >= 0.25:
                 self._front_check = now
                 self._watch_focus()
+                self._watch_player()
             self.last_poll_ms = (time.monotonic() - t0) * 1000.0
             time.sleep(POLL_S)
 
@@ -939,25 +944,123 @@ class Bridge:
         size stays Visual Pinball's own unless the kit gives one."""
         hwnd = getattr(self, "player_hwnd", 0)
         setting = padlaunch.kit_load().get("player")
-        if sys.platform != "win32" or not setting:
+        if sys.platform != "win32":
             self.player_placed = True
             return
         if not hwnd:
             return
         try:
             dpi_aware()
+            # THE TABLE'S OWN PROPORTIONS (PAD-811): Visual Pinball scales its
+            # picture to the window, so a window forced to the kit's 1440x2160
+            # squeezed a table that opens at 2000x1500 (JAWS, Metallica: "way
+            # too stretched vertically"). Read before the frame goes on (the
+            # borderless window IS the picture); a saved width scales it, the
+            # height follows; a saved height is not used.
             cur = window_rect(hwnd)
+            aspect = cur[3] / float(cur[2]) if cur[2] else 1.0
+            self.player_aspect = aspect
+            framed = self._frame_player(hwnd)
+            if not setting:
+                self.player_placed = True
+                log("player window left where Visual Pinball put it (%s)%s"
+                    % (cur, ", framed" if framed else ""))
+                return
             if "monitor" in setting:
-                x, y, w, h = lcd_rect(setting, monitors())
+                mx, my, mw, mh = lcd_rect(setting, monitors())
+                w = min(mw, int(mh / aspect))
+                h = int(w * aspect)
+                x, y = mx + (mw - w) // 2, my + (mh - h) // 2
             else:
                 x, y = int(setting["x"]), int(setting["y"])
-                w, h = int(setting.get("w", cur[2])), int(setting.get("h", cur[3]))
-            place_window(hwnd, (x, y, w, h), False)
+                w = int(setting.get("w", cur[2]))
+                h = int(round(w * aspect))
+            ow, oh = self._outer_for_client(hwnd, w, h) if framed else (w, h)
+            place_window(hwnd, (x, y, ow, oh), False)
             self.player_placed = True
-            log("player window placed at %s (was %s)" % ((x, y, w, h), cur))
+            log("player window placed at %s, picture %dx%d (was %s)" % ((x, y, ow, oh), w, h, cur))
         except Exception as exc:                            # noqa: BLE001
             log("player window not placed: %s" % exc)
             self.player_placed = True
+
+    # ---- the playfield window, by hand (PAD-811) ------------------------
+    #
+    # David: "i just need to be able to move them around and resize those
+    # windows like we do for the display" - Visual Pinball's windowed player
+    # has no frame, so it could not be moved at all. It gets a title bar and
+    # resize edges (WS_CAPTION | WS_THICKFRAME; Visual Pinball draws on into
+    # the smaller client area), and after a resize the client area is snapped
+    # back to the table's own proportions: Visual Pinball scales its picture
+    # to the window, so any other shape stretches it. Where it is left is
+    # saved as the kit's `player` (x, y of the window, w of the picture), so
+    # the next table opens there. `padvpx player frame off` turns the frame
+    # off again.
+    _WS_FRAME = 0x00C00000 | 0x00040000 | 0x00020000     # caption, thickframe, minimize box
+
+    def _frame_player(self, hwnd):
+        import ctypes
+        u = ctypes.windll.user32
+        if padlaunch.kit_load().get("player_frame", True) is False:
+            return False
+        style = u.GetWindowLongW(ctypes.c_void_p(hwnd), -16)
+        if style & 0x00C00000 != 0x00C00000:
+            u.SetWindowLongW(ctypes.c_void_p(hwnd), -16, style | self._WS_FRAME)
+            # SWP_FRAMECHANGED | NOMOVE | NOSIZE | NOZORDER | NOACTIVATE
+            u.SetWindowPos(ctypes.c_void_p(hwnd), None, 0, 0, 0, 0, 0x20 | 0x2 | 0x1 | 0x4 | 0x10)
+            log("player window framed: drag it by its title bar, resize from its edges")
+        return True
+
+    @staticmethod
+    def _client_size(hwnd):
+        import ctypes
+        r = (ctypes.c_long * 4)()
+        ctypes.windll.user32.GetClientRect(ctypes.c_void_p(hwnd), r)
+        return r[2], r[3]
+
+    def _outer_for_client(self, hwnd, cw, ch):
+        """The window size that gives a cw x ch client area with its frame."""
+        ww, wh = window_rect(hwnd)[2:]
+        ow, oh = self._client_size(hwnd)
+        return cw + (ww - ow), ch + (wh - oh)
+
+    def _watch_player(self):
+        """After the user moves or resizes the playfield window: the picture's
+        proportions put back, and the place saved (once the mouse is up and
+        the window has been still for half a second)."""
+        hwnd = getattr(self, "player_hwnd", 0)
+        aspect = getattr(self, "player_aspect", None)
+        if sys.platform != "win32" or not hwnd or not aspect or not self.player_placed:
+            return
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            if not u.IsWindow(ctypes.c_void_p(hwnd)):
+                return
+            rect = window_rect(hwnd)
+            now = time.monotonic()
+            if rect != getattr(self, "_player_seen", None):
+                self._player_seen, self._player_seen_t = rect, now
+                return
+            if rect == getattr(self, "_player_settled", None) or now - self._player_seen_t < 0.5:
+                return
+            if u.GetAsyncKeyState(0x01) & 0x8000:            # the left button is still down
+                return
+            cw, ch = self._client_size(hwnd)
+            want = int(round(cw * aspect))
+            if cw > 0 and abs(ch - want) > 2:
+                ow, oh = self._outer_for_client(hwnd, cw, want)
+                u.SetWindowPos(ctypes.c_void_p(hwnd), None, 0, 0, ow, oh, 0x2 | 0x4 | 0x10)
+                log("player window kept to the table's proportions: %dx%d" % (cw, want))
+                rect = window_rect(hwnd)
+                self._player_seen = rect
+            self._player_settled = rect
+            kit = padlaunch.kit_load()
+            if (kit.get("player") or {}) != {"x": rect[0], "y": rect[1], "w": cw}:
+                kit["player"] = {"x": rect[0], "y": rect[1], "w": cw}
+                padlaunch.kit_save(kit)
+                log("player window left at %d,%d, %d wide: saved" % (rect[0], rect[1], cw))
+        except Exception as exc:                            # noqa: BLE001
+            log("player window watch failed: %s" % exc)
 
     def _keep_player_front(self):
         """A run this bridge started opens the game's LCD window, and that

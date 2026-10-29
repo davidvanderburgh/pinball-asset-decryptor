@@ -1118,3 +1118,15 @@ def test_a_titles_card_is_the_stock_release_over_a_custom_one_of_its_version(tmp
     monkeypatch.delenv("PAD_VPX_CARD", raising=False)
     monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
     assert os.path.basename(pl.card_for("turtles_pro")) == "turtles_pro-1_59_0.Release.8G.sdcard.raw"
+
+
+def test_a_named_table_never_takes_the_lone_run_of_another_title(tmp_path, monkeypatch):
+    # PAD-811: JAWS attached to another ticket's hidden Godzilla run, the
+    # only one up, drove its switches and never started its own
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(pc, "BOARD", str(tmp_path))
+    (tmp_path / "slot-2.run").write_text(json.dumps(
+        {"emu": "spike2", "slot": 2, "game": "godzilla_le", "label": "PAD-827", "hidden": True}), encoding="utf-8")
+    assert pc.Rig.board_run("jaws_le") is None
+    assert pc.Rig.board_run("godzilla_le")["slot"] == 2
+    assert pc.Rig.board_run(None)["slot"] == 2                         # a nameless table still finds it

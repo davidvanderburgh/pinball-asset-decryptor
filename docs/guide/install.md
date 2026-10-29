@@ -132,6 +132,11 @@ manufacturer runs without Docker, and Windows and Linux never need it.
   the script prints both spellings when it finds neither manager.
 - **Run the app as yourself**, not with `sudo`.
 
+### On a server, over VNC
+
+To run it in Docker on a server (Unraid, a NAS) and use it from any PC
+through a VNC viewer or a browser, see [Docker](docker.md).
+
 ### Arch package names
 
 Everything not listed is spelled the same as on apt.

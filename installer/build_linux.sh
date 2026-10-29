@@ -194,6 +194,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.clip_files" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_sounds" \
+    --hidden-import "pinball_decryptor.plugins.stern.clip_seen" \
+    --hidden-import "pinball_decryptor.plugins.stern.clip_static" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_variants" \
     --hidden-import "pinball_decryptor.plugins.stern.sound_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.jukebox" \
@@ -321,6 +323,31 @@ export PATH="${HERE}/usr/bin:${PATH}"
 exec "${HERE}/usr/bin/pinball-decryptor" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
+
+# --- Oldest glibc it runs on ------------------------------------------
+# PyInstaller copies system libraries (glib, alsa, gnutls...) from the build
+# machine, and each runs only on a glibc at least as new as the one it was
+# built against.  An ubuntu-latest that moved to glibc 2.43 shipped an app
+# whose window could not open on Ubuntu 24.04 or Debian 12 (PAD-837), so a
+# library needing more than GLIBC_MAX stops the build instead.
+GLIBC_MAX="${GLIBC_MAX:-2.35}"
+echo "Checking the bundled libraries run on glibc $GLIBC_MAX..."
+TOO_NEW=""
+while IFS= read -r -d '' f; do
+    need=$(objdump -T "$f" 2>/dev/null | grep -o 'GLIBC_2\.[0-9]*' \
+        | sort -t. -k2 -n -u | tail -1 || true)
+    [ -n "$need" ] || continue
+    if [ "${need#GLIBC_2.}" -gt "${GLIBC_MAX#2.}" ]; then
+        TOO_NEW="$TOO_NEW  $need  ${f#"$APPDIR/usr/bin/"}"$'\n'
+    fi
+done < <(find "$APPDIR/usr/bin" -type f \( -name '*.so*' -o -name pinball-decryptor \) -print0)
+if [ -n "$TOO_NEW" ]; then
+    echo "These need a glibc newer than $GLIBC_MAX, so the app would not"
+    echo "start (or open its window) on older Linux.  Build on an older"
+    echo "distro (the release builds on ubuntu-22.04):"
+    printf '%s' "$TOO_NEW"
+    exit 1
+fi
 
 # --- Fetch appimagetool if needed --------------------------------------
 APPIMAGETOOL="$BUILD_DIR/appimagetool"

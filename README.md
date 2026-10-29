@@ -76,6 +76,11 @@ needs: **[Installing](docs/guide/install.md)**.
 
 ## Quick start
 
+New here? **[Getting started: your first mod](docs/guide/getting-started.md)**
+walks through swapping one song, step by step, and
+**[Common problems](docs/guide/common-problems.md)** has what new users
+most often run into.
+
 1. Launch the app and **pick a manufacturer**. The prerequisites row turns
    green once the tools it needs are installed.
 2. On **Select card**, browse to the card image, update file or SD card.
@@ -95,6 +100,8 @@ addresses your report.
 
 | Page | What is in it |
 |---|---|
+| [Getting started](docs/guide/getting-started.md) | Your first mod, step by step: swap one song and put it on the machine |
+| [Common problems](docs/guide/common-problems.md) | What new users most often run into, and what to do |
 | [Using the app](docs/guide/using-the-app.md) | Every tab from Extract to Mod Pack, projects, history and the log |
 | [Emulate](docs/guide/emulate.md) | Playing a game on this PC: Stern Spike 2, Jersey Jack, Dutch Pinball |
 | [Multi-boot cards](docs/guide/multi-boot.md) | Several games on one card with a menu at power-up |

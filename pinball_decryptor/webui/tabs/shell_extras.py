@@ -62,6 +62,20 @@ ASSET_TAB_KEYS = ("Write", "Replace Audio", "Replace Video",
 #: previous-session lines seeded above the log's cut line (Tk LOG_SEED_LINES)
 LOG_SEED_LINES = 600
 
+#: ⚙ > Help: the user guide pages a new user looks for first (PAD-814), as
+#: (key, menu label, page under docs/guide on GitHub)
+GUIDE_PAGES = (
+    ("getting_started", "Getting started: your first mod…", "getting-started.md"),
+    ("common_problems", "Common problems…", "common-problems.md"),
+    ("using_the_app", "The full user guide…", "using-the-app.md"),
+)
+
+
+def guide_url(page):
+    """The GitHub page of docs/guide/*page* on main."""
+    from ...core.config import GITHUB_REPO
+    return "https://github.com/%s/blob/main/docs/guide/%s" % (GITHUB_REPO, page)
+
 
 def update_action_verb(installer):
     """main_window._update_action_verb: Linux downloads an AppImage and
@@ -206,6 +220,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             "report_problem": lambda: self._open_dialog("report"),
             "view_disclaimer": lambda: self._open_dialog("disclaimer"),
             "tips": lambda: self._open_dialog("tips"),
+            "open_guide": self._open_guide,
             "change_history": self.change_history,
         }
 
@@ -382,6 +397,9 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             # only while a version has a preview to unlock (none since PAD-763)
             items.append({"id": "preview_features",
                           "label": "Preview features…"})
+        items.append({"label": "Help", "submenu": [
+            {"id": "open_guide", "args": [key], "label": label}
+            for key, label, _page in GUIDE_PAGES]})
         items.append({"id": "donations", "label": "Animal shelters…"})
         items.append({"id": "report_problem", "label": "Report a problem…"})
         items.append({"id": "view_disclaimer", "label": "View disclaimer…"})
@@ -656,6 +674,14 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         url = self._update_banner_url or (
             self._update_available[1] if self._update_available else None)
         self.open_link_checked(url, what="the release page")
+        return True
+
+    def _open_guide(self, key):
+        """⚙ > Help > a user guide page, in the browser."""
+        page = next((p for k, _l, p in GUIDE_PAGES if k == key), None)
+        if page is None:
+            return False
+        self.open_link_checked(guide_url(page), what="the user guide")
         return True
 
     @rpc

@@ -4,7 +4,9 @@
 
 A walk through the app from launch to a finished card. Emulating a game
 and multi-boot cards have pages of their own: [Emulate](emulate.md) and
-[Multi-boot cards](multi-boot.md).
+[Multi-boot cards](multi-boot.md). New to the app? [Getting started: your
+first mod](getting-started.md) is a shorter walk through one song swap, and
+[Common problems](common-problems.md) lists what new users run into.
 
 **A mod is four steps, one tab each:**
 

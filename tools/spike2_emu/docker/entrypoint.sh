@@ -64,9 +64,30 @@ if [ -n "${PAD_VNC_PASSWD:-}" ]; then
     x11vnc -storepasswd "$PAD_VNC_PASSWD" "$HOME/.vncpw" >/dev/null 2>&1 \
         && VNC_AUTH=(-rfbauth "$HOME/.vncpw")
 fi
+# -threads   INPUT IS READ ON ITS OWN THREAD, and without it the run is
+#            unplayable from a Mac (PAD-805: "I press Start and it takes 2
+#            minutes"). Unthreaded, x11vnc reads the viewer's messages in the
+#            same loop that encodes and sends the picture, and the picture here
+#            is ~1.5 MB a frame (the game and the playfield repaint all the
+#            time). A viewer that asks for frames as fast as the mouse moves
+#            then piles clicks and keys up behind the frames: measured in this
+#            container on one CPU, a pointer move landed 13-16 s late after
+#            4 s of moving, and the lag only grows while the mouse keeps
+#            moving. The picture never lags, so it looks smooth. Threaded:
+#            0.02-0.3 s under the same load, and Start 0.1 s after 60 s of
+#            mouse movement (unthreaded: still not there 4 minutes later).
+#            x11vnc's own docs warn that -threads can be unstable, hence the loop:
+#            a crashed x11vnc comes back in a second, the viewer reconnects,
+#            and the run carries on.
 echo "[box] VNC on port $PORT - open vnc://localhost:$PORT"
-x11vnc -display "$XDISPLAY" -rfbport "$PORT" -forever -shared -quiet \
-       "${VNC_AUTH[@]}" >/tmp/x11vnc.log 2>&1 &
+(
+    while :; do
+        x11vnc -display "$XDISPLAY" -rfbport "$PORT" -forever -shared -quiet \
+               -threads "${VNC_AUTH[@]}"
+        echo "[box] x11vnc exited ($?); starting it again"
+        sleep 1
+    done
+) >/tmp/x11vnc.log 2>&1 &
 VNC_PID=$!
 
 cleanup() {
@@ -75,6 +96,7 @@ cleanup() {
     # signals and spins at ~140% CPU forever if merely asked to stop.
     bash "$RIG/killgame.sh" >/dev/null 2>&1
     kill -9 "$VNC_PID" "$XVFB_PID" 2>/dev/null
+    pkill -9 -x x11vnc 2>/dev/null      # the loop's child outlives the loop
 }
 trap cleanup EXIT INT TERM
 

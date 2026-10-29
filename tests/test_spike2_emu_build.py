@@ -474,3 +474,49 @@ def test_an_image_with_the_cross_compiler_has_its_headers(image):
         "%s installs the ARM cross compiler with --no-install-recommends but "
         "not libc6-dev-armhf-cross, so the shim fails at bits/wordsize.h "
         "(PAD-785)" % image)
+
+
+# --------------------------------------------------------------------------
+# The Mac's picture is x11vnc in the container, and its INPUT must not queue
+# behind the picture (PAD-805: "I press the Start Button and it takes 2
+# minutes"). Unthreaded, x11vnc reads clicks and keys in the loop that encodes
+# ~1.5 MB frames, and a busy viewer stacked them up 13-16 s deep after 4 s of
+# mouse movement on one CPU; threaded, 0.02-0.3 s.
+# --------------------------------------------------------------------------
+
+def _entrypoint_code():
+    path = os.path.join(RIG, "docker", "entrypoint.sh")
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+    return [l for l in lines if not l.lstrip().startswith("#")]
+
+
+def test_the_mac_vnc_server_reads_input_on_its_own_thread():
+    code = _entrypoint_code()
+    # the server itself, not the -storepasswd helper
+    starts = [i for i, l in enumerate(code)
+              if re.match(r"\s*x11vnc\s+-display\b", l)]
+    assert len(starts) == 1, starts
+    cmd = []
+    i = starts[0]
+    while True:
+        cmd.append(code[i].rstrip("\\"))
+        if not code[i].rstrip().endswith("\\"):
+            break
+        i += 1
+    words = " ".join(cmd).split()
+    assert "-threads" in words, (
+        "x11vnc runs unthreaded, so a Mac's clicks queue behind the picture "
+        "(PAD-805): %s" % " ".join(words))
+    for flag in ("-forever", "-shared"):
+        assert flag in words, flag
+
+
+def test_the_mac_vnc_server_comes_back_if_it_exits():
+    """x11vnc's docs warn -threads can be unstable, so a crash
+    must cost the viewer a reconnect, not the run its picture."""
+    code = "\n".join(_entrypoint_code())
+    m = re.search(r"while :; do\s*\n\s*x11vnc\s+-display(.*?)\bdone\b", code,
+                  re.S)
+    assert m, "the x11vnc server is not started inside a restart loop"
+    assert "sleep" in m.group(1), "a restart loop with no pause spins"

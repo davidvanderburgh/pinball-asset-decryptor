@@ -75,6 +75,7 @@ def test_a_broken_place_file_is_the_default(place):
     assert wsl_place.root() == wsl_place.default_root()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows drive paths")
 def test_root_on_a_drive(place, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\u\AppData\Local")
     assert wsl_place.root_on("d:") == r"D:\pinball_decryptor"
@@ -109,6 +110,7 @@ def test_plan_moves_only_what_is_elsewhere_and_not_pinned(place):
                                            r"C:\d\pad-data.vhdx"]
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows drive paths")
 def test_targets(place):
     root = r"D:\pinball_decryptor"
     assert wsl_place.target_of(ITEMS[0], root) == root + r"\runtime"
@@ -321,7 +323,8 @@ def test_disk_space_window_moves_to_the_picked_drive(tmp_path, monkeypatch):
         assert w.call("shellx.disk_move", "E:") is False
         ask = w.asked[-1]
         assert ask["title"] == "Move to another drive"
-        assert r"→  E:\pinball_decryptor\runtime" in ask["message"]
+        assert "→  " + os.path.join(r"E:\pinball_decryptor", "runtime") \
+            in ask["message"]
         assert "WSL will be shut down" in ask["message"]
         assert moved == []
         w.answers.append("yes")

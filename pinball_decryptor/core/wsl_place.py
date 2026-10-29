@@ -228,9 +228,9 @@ def target_of(item, dest_root):
     from . import runtime
     if item["key"] == "distro":
         if item["distro"] == runtime.DISTRO:
-            return ntpath.join(dest_root, "runtime")
-        return ntpath.join(dest_root, "wsl", item["distro"])
-    return ntpath.join(dest_root, "data", ntpath.basename(item["path"]))
+            return os.path.join(dest_root, "runtime")
+        return os.path.join(dest_root, "wsl", item["distro"])
+    return os.path.join(dest_root, "data", ntpath.basename(item["path"]))
 
 
 def plan(drive, all_items=None, all_drives=None):
@@ -328,7 +328,7 @@ def _move_distro(name, dest, size, on_progress, run=None):
     stop = threading.Event()
 
     def watch():
-        new = ntpath.join(dest, "ext4.vhdx")
+        new = os.path.join(dest, "ext4.vhdx")
         while not stop.wait(1.0):
             on_progress(_size(new))
 

@@ -752,17 +752,17 @@ class DiskMixin:
     # ------------------------------------------------------------------
     # move to another drive (PAD-819)
     # ------------------------------------------------------------------
-    def _move_where(self):
-        """Where each disk is now, one line apiece."""
+    def _move_where(self, paths=True):
+        """Where each disk is now, a line apiece (and its file under it)."""
         from ..core import wsl_place
         d = self._disk
         if not d["wsl_ok"]:
             return ""
         return "\n".join(
-            "%s  %s  (%s)\n      %s" % (
+            "%s  %s  (%s)%s" % (
                 wsl_place.drive_of(i["path"]) or "?",
                 i["label"][0].upper() + i["label"][1:], _fmt(i["size"]),
-                i["path"])
+                "\n      " + i["path"] if paths else "")
             for i in d["place"])
 
     @rpc
@@ -799,7 +799,8 @@ class DiskMixin:
                    "\n".join(o["why"] for o in opts)))
             return None
         pick = next((o["letter"] for o in opts if o["ok"]), None)
-        return {"drives": opts, "pick": pick, "where": self._move_where()}
+        return {"drives": opts, "pick": pick,
+                "where": self._move_where(paths=False)}
 
     @rpc
     def disk_move(self, letter):

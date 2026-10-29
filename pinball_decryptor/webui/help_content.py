@@ -3443,6 +3443,8 @@ PREVIEW_HELP = {
              "playfield once and play on."),
             ("If it does not start",
              "- **Check again** says what is missing.\n"
+             "- \"WSL is not installed on this PC\": the emulator runs in WSL. Click "
+             "**Install Missing** above the tabs, restart Windows when it asks, then Play.\n"
              "- \"no rig slot free\": a game is already running, on the Emulate tab or "
              "from a table closed without Esc. Stop it on the Emulate tab.\n"
              "- The table loads and nothing happens: `%TEMP%\\padcontroller.log` says what "

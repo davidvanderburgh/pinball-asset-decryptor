@@ -179,7 +179,7 @@ STATES_TIP = (
     "to that exact moment later - including in a future session, or "
     "after replacing assets, to compare how a mode looks.\n\n"
     "The cost:\n"
-    "• each slot stores roughly 50-150 MB on the WSL disk "
+    "• each slot stores roughly 50-150 MB on the emulator's disk "
     "(snapshots compress ~20x; a save briefly needs ~1.5 GB free "
     "while it packs)\n"
     "• saving freezes the game and its sound for a few seconds "

@@ -297,3 +297,33 @@ def test_the_load_credit_is_the_time_the_game_perceives_and_errs_short():
     assert "wakes 7.5 s after it was saved" in out or "wakes 7.6 s" in out, out
     assert int(out.split("again ")[1].split()[0]) == total, out
     assert "before WSL last restarted" in out, out
+
+
+@pytest.mark.skipif(not HAS_BASH, reason="no working bash")
+def test_a_containers_tmpfs_dev_binds_are_externals_like_devtmpfs():
+    """PAD-835: in the Mac's emulator box /dev is a tmpfs the engine filled,
+    so the guest's /dev/null and /dev/tty binds read "tmpfs" and were skipped
+    as a fresh tmpfs - criu then died at "./dev/tty doesn't have a proper
+    root mount". The guest's own /dev/shm (root "/") stays internal. Lines
+    from a real guest in the box."""
+    body = src("savestate.sh")
+    start = body.index("    # ★ PAD-835: A CONTAINER'S /dev IS A tmpfs.")
+    block = body[start:body.index('    case "$fstype" in', start)]
+    lines = {
+        "/dev/null": "1349 1345 0:221 /null /dev/null rw,relatime - tmpfs dev rw,mode=755",
+        "/dev/tty": "1470 1345 0:221 /null /dev/tty rw,relatime - tmpfs dev rw,mode=755",
+        "/dev/shm": "1347 1345 0:232 / /dev/shm rw,relatime - tmpfs tmpfs rw",
+        "/tmp": "1351 1345 0:233 /x /tmp rw,relatime - tmpfs tmpfs rw",
+        "/dev/ttymxc1": "1472 1345 0:222 /0 /dev/ttymxc1 rw,relatime - devpts devpts rw",
+    }
+    want = {"/dev/null": "devtmpfs", "/dev/tty": "devtmpfs",
+            "/dev/shm": "tmpfs", "/tmp": "tmpfs", "/dev/ttymxc1": "devpts"}
+    for mp, line in lines.items():
+        script = "\n".join([
+            "line='%s'" % line,
+            "mp=$(awk '{print $5}' <<<\"$line\")",
+            "fstype=$(awk '{for(i=7;i<=NF;i++) if($i==\"-\"){print $(i+1); exit}}' <<<\"$line\")",
+            block, 'echo "$fstype"', ""])
+        out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                             stdout=subprocess.PIPE, timeout=30)
+        assert out.stdout.decode().strip() == want[mp], (mp, out.stdout)

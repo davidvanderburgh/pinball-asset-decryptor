@@ -2508,7 +2508,7 @@ HELP_CONTENT = {
             "Mute.",
         ]),
         ("Save states", [
-            "**Save state** on the playfield window (Windows) checkpoints the whole "
+            "**Save state** on the playfield window (Windows and Mac) checkpoints the whole "
             "running game into a slot; **Load state** brings that exact moment back, "
             "mid-game too, even in a later session.",
             "- Every game has its own **ten slots**; one game's saves never load into, "
@@ -2522,8 +2522,11 @@ HELP_CONTENT = {
             "already on screen keeps its saved look until the game redraws it.\n"
             "- They need busybox-static and criu in WSL. Without them every title runs; "
             "only slots do nothing, and the tab says so before Start. **Set up "
-            "emulator…** gets both.",
-            {"note": "Each slot takes about 50–150 MB of the WSL disk, and a save briefly "
+            "emulator…** gets both.\n"
+            "- On a Mac the emulator's container brings them. Docker Desktop cannot "
+            "freeze a running game, so there a run starts without save states and the "
+            "log says why; colima, which **Set up emulator…** installs, can.",
+            {"note": "Each slot takes about 50–150 MB of the emulator's disk, and a save briefly "
                      "needs about 1.5 GB free. Saving freezes the game and its sound for "
                      "a few seconds. A slot only loads on the same app build, game and "
                      "firmware it was saved on: after an update older slots are refused "

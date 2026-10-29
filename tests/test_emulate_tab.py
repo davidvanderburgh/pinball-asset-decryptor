@@ -843,16 +843,33 @@ def test_savestates_off_is_the_ordinary_launch(monkeypatch, tmp_path):
     assert "PAD_CARD=/mnt/c/x.raw" in cmd
 
 
-def test_other_platforms_keep_their_launch(monkeypatch, tmp_path):
-    """The pivot boot is a WSL arrangement; macOS's container and a Linux
-    desktop keep the launch they had."""
-    for platform in ("linux", "darwin"):
-        monkeypatch.setattr(emulate_core.sys, "platform", platform)
-        monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
-        _home(monkeypatch, "/home/somebody")
-        cmd = emulate_core.watch_cmd(30, [])
-        assert "wsl.exe" not in cmd, (platform, cmd)
-        assert "PAD_PIVOT=1" not in cmd, (platform, cmd)
+def test_a_linux_desktop_keeps_its_launch(monkeypatch, tmp_path):
+    """A Linux desktop has no passwordless root for the pivot boot, so it
+    keeps the launch it had."""
+    monkeypatch.setattr(emulate_core.sys, "platform", "linux")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_core.watch_cmd(30, [])
+    assert "wsl.exe" not in cmd, cmd
+    assert "PAD_PIVOT=1" not in cmd, cmd
+
+
+def test_macos_asks_its_box_for_the_checkpointable_boot(monkeypatch,
+                                                        tmp_path):
+    """★ PAD-835: save states on a Mac. The launch is still padbox.sh, with
+    PAD_PIVOT=1 set for IT (padbox.sh turns that into a root, privileged
+    box) - and the opt-out is the plain launch, as on Windows."""
+    monkeypatch.setattr(emulate_core.sys, "platform", "darwin")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    cmd = emulate_core.watch_cmd(30, ["PAD_CARD=/Users/a/x.raw"])
+    assert any(c.endswith("padbox.sh") for c in cmd), cmd
+    box = next(i for i, c in enumerate(cmd) if c.endswith("padbox.sh"))
+    assert "PAD_PIVOT=1" in cmd[:box], cmd
+    assert "PAD_CARD=/Users/a/x.raw" in cmd[:box], cmd
+    assert cmd[box + 1:] == ["watch.sh", "30"], cmd
+    assert "-u" not in cmd and "wsl.exe" not in cmd, cmd
+    plain = emulate_core.watch_cmd(30, [], savestates=False)
+    assert "PAD_PIVOT=1" not in plain, plain
 
 
 def test_launch_from_slot_loads_as_root_with_the_desktop_home(monkeypatch,

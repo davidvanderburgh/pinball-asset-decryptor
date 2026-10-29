@@ -24,6 +24,27 @@
 # rasterisation is NOT the bottleneck here and never was - the 1 fps number this
 # project remembers is `glraster.c` running inside the emulated ARM guest, which
 # the GL bridge replaced and which this never uses.
+
+# ---- criu, FOR SAVE STATES (PAD-835) ----------------------------------------
+# criu is what freezes the running game and thaws it again (savestate.sh /
+# restorestate.sh), and no Ubuntu publishes it (getcriu.sh says why), so it is
+# built here, in a stage of its own: the compilers and -dev packages stay in
+# this stage and only the one binary reaches the image below. The SAME pinned
+# tag getcriu.sh builds on Windows, because the whole save-state ladder was
+# proven against v4.1 and a different criu would make every Mac failure a
+# question about which one it had. 24.04's gcc 13 is C17 by default, so
+# neither of getcriu.sh's C23 patches applies here.
+FROM ubuntu:24.04 AS criu
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git ca-certificates pkg-config \
+        libprotobuf-dev libprotobuf-c-dev protobuf-c-compiler \
+        protobuf-compiler python3-protobuf libnl-3-dev libnet1-dev \
+        libcap-dev libbsd-dev uuid-dev \
+    && git clone --depth 1 --branch v4.1 \
+        https://github.com/checkpoint-restore/criu.git /criu \
+    && make -C /criu -j"$(nproc)" criu \
+    && install -m 0755 /criu/criu/criu /usr/local/bin/criu
+
 FROM ubuntu:24.04
 
 # qemu-user-static        runs the machine's 32-bit ARM game binary
@@ -73,7 +94,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb x11vnc x11-utils openbox \
         libegl1 libgl1-mesa-dri libx11-6 libgles2 \
         ffmpeg \
+        `# SAVE STATES (PAD-835). busybox-static is the static /bin/busybox` \
+        `# the checkpointable (PAD_PIVOT) boot needs; the libraries are what` \
+        `# the criu built above links against; sudo is how the playfield,` \
+        `# which runs as pad, reaches the three save-state scripts as root` \
+        `# (the sudoers rule below names those three and nothing else);` \
+        `# zstd packs a slot to ~5% of its ~800 MB (savegame.sh).` \
+        busybox-static sudo zstd \
+        libprotobuf-c1 libnl-3-200 libnet1 libcap2 libbsd0 libuuid1 \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=criu /usr/local/bin/criu /usr/local/bin/criu
 
 # NOT root, because the rig is built around not having root and says so
 # everywhere: cardmount.sh fetches fuse2fs into a private prefix rather than
@@ -88,6 +118,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # that read like rig bugs rather than like a container detail.
 RUN userdel -r ubuntu 2>/dev/null || true; \
     useradd -m -u 1000 -s /bin/bash pad
+# THE PLAYFIELD'S SAVE AND LOAD BUTTONS (PAD-835). criu needs root, the
+# playfield runs as pad (watch.sh drops every helper to the desktop user), and
+# on Windows the window simply asks `wsl -u root`. Here it asks sudo, for these
+# three scripts at their mounted path and nothing else; the rig is mounted
+# read-only, so pad cannot change what they run.
+RUN printf '%s\n' \
+    'pad ALL=(root) NOPASSWD: /bin/bash /pad/rig/savegame.sh *, /bin/bash /pad/rig/loadgame.sh *, /bin/bash /pad/rig/slots.sh *' \
+    > /etc/sudoers.d/pad-savestates && chmod 0440 /etc/sudoers.d/pad-savestates
 WORKDIR /pad
 
 # /pad/rig     the rig itself, mounted from the checkout
@@ -98,7 +136,8 @@ ENV PAD_ROOT=/pad/rootfs \
     HOME=/pad/home \
     DISPLAY=:99 \
     GALLIUM_DRIVER=llvmpipe \
-    PAD_FORCE_NATIVE=1
+    PAD_FORCE_NATIVE=1 \
+    PAD_STATE_SUDO=1
 RUN mkdir -p /pad/rig /pad/cards /pad/home /pad/rootfs \
     && chown -R pad:pad /pad
 VOLUME ["/pad/home", "/pad/rootfs"]

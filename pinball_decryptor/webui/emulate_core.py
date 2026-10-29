@@ -1459,7 +1459,15 @@ def watch_cmd(minutes, env, savestates=True):
     broken probe degrades to what this tab always did - no save states,
     everything else identical - rather than to a root run pointed at
     /root/spike2root.
+
+    macOS (PAD-835) asks for the same boot with ``PAD_PIVOT=1`` alone:
+    ``docker/padbox.sh`` turns it into a root, privileged box, the image
+    carries criu and the static busybox, and a container engine whose Linux
+    cannot checkpoint withdraws the request in ``entrypoint.sh`` - so there,
+    too, the worst case is the ordinary run without save states.
     """
+    if savestates and sys.platform == "darwin":
+        return rig_cmd("watch.sh", minutes, env=list(env) + ["PAD_PIVOT=1"])
     if savestates and sys.platform == "win32":
         home = wsl_home()
         if home:

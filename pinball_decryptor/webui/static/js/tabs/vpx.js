@@ -25,14 +25,17 @@ export default function Vpx() {
   const patched = s.patched || [];
   const presets = s.presets || [];
   const titles = Object.keys(s.cards || {});
-  // the folder may hold every title; what matters here is the tables' own
-  const want = tables.map((t) => t.title);
-  const have = want.filter((t) => titles.includes(t));
-  const lack = want.filter((t) => !titles.includes(t));
+  // the folder may hold every title; what matters here is the tables' own.
+  // A table several titles fit (JP's Foo Fighters: Pro or LE) needs one of them
+  const fits = (t) => t.titles || [t.title];
+  const have = tables.filter((t) => fits(t).some((x) => titles.includes(x))).map((t) => t.title);
+  const lack = tables.filter((t) => !fits(t).some((x) => titles.includes(x))).map((t) => fits(t).join(" or "));
   const cardWords = !s.library ? "" : !titles.length ? "No card images in this folder."
     : (titles.length + " title" + (titles.length === 1 ? "" : "s") + " in this folder. "
       + (have.length ? "For the tables here: " + have.join(", ") + "." : "None of them is for a table here.")
       + (have.length && lack.length ? " No card for " + lack.join(", ") + "." : ""));
+  const playsAs = (t) => fits(t).length > 1 && (t.models || {})[t.title]
+    ? "Plays as the " + t.models[t.title] + ". " : "";
   const rtOk = s.runtime_state === "ready";
   return html`<div class="page vpx-page">
     <${PageHead} title="Visual Pinball" sub=${(s.intro || "").split("\n").map((l) => html`${l}<br />`)}>
@@ -81,7 +84,7 @@ export default function Vpx() {
           ${tables.length ? tables.map((t) => html`<div class="vpx-table">
             <div class="vpx-what"><div><b>${t.name}</b></div>
               <div class="small muted">${t.by ? "by " + t.by : ""}${t.where ? ", on " + t.where : ""}</div>
-              <div class="small muted">${t.card ? "Card: " + base(t.card) : "No card image for " + t.title + " yet."}</div></div>
+              <div class="small muted">${t.card ? playsAs(t) + "Card: " + base(t.card) : "No card image for " + fits(t).join(" or ") + " yet."}</div></div>
             <${Chip} kind=${t.patched ? "ok" : ""} dot sm>${t.patched ? "Patched" : "Not patched"}<//>
           </div>`) : html`<div class="muted small">${s.loaded ? "No tables." : "Checking…"}</div>`}
         <//>

@@ -2,12 +2,15 @@
 """padvpx.py - the Visual Pinball kit: patch a table, register the controller,
 name the card a title boots, start or stop a run by hand.
 
-    padvpx patch "<table.vpx>" [--out DIR] [--card IMAGE]
+    padvpx patch "<table.vpx>" [--out DIR] [--card IMAGE] [--title TITLE]
         Recognise the table (each map carries the words that identify it:
         drhotwing's Rush, JP's Foo Fighters, marty02's Godzilla) and write
         "<name> (PAD).vpx" beside it (or into DIR), re-signed, with the
         Spike 2 emulator behind it. --card records which card image the
         title boots when Visual Pinball opens the table and no run is up.
+        A table more than one title's map fits (JP's Foo Fighters: Pro or
+        LE) takes --title, else the title of --card, else the first with
+        a card known, else its preferred map (the Pro).
     The app's Visual Pinball tab (a preview feature) is the same kit with
     buttons: vpxsetup.py is its half here.
     padvpx setup "<table.vpx>" <image.raw>
@@ -59,7 +62,9 @@ _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 def maps():
     """Every map in this folder: {title: {"kind": shadow|mashup, "map": path,
-    "detect": [words], "output": name}}."""
+    "detect": [words], "output": name, "model": "Pro"|"LE"|"",
+    "preferred": bool}}. Several maps can fit one download (JP's Foo Fighters
+    is a Pro's playfield, and has an LE map too): the preferred one first."""
     out = {}
     for f in sorted(os.listdir(HERE)):
         if f.endswith(".shadow.json") or f.endswith(".vpxmap.json"):
@@ -67,27 +72,67 @@ def maps():
             title = m.get("title") or f.split(".")[0]
             out[title] = {"kind": "shadow" if f.endswith(".shadow.json") else "mashup",
                           "map": os.path.join(HERE, f), "detect": m.get("detect", []),
-                          "output": m.get("output", "")}
-    return out
+                          "output": m.get("output", ""), "model": m.get("model", ""),
+                          "preferred": bool(m.get("preferred"))}
+    return dict(sorted(out.items(), key=lambda kv: not kv[1]["preferred"]))
 
 
-def recognise(table_path):
-    """Which title's map fits this table: every `detect` word of the map is
-    in the table's script (case does not matter). None when no map does."""
+def card_title(card):
+    """`foo_fighters_le-1_04_0.Release.16G.sdcard.raw` -> foo_fighters_le."""
+    m = re.match(r"^([a-z0-9_]+)-\d+_\d+_\d+", os.path.basename(card or ""), re.I)
+    return m.group(1).lower() if m else None
+
+
+def fitting(table_path):
+    """The titles whose map fits this table, preferred first: every `detect`
+    word of the map is in the table's script (case does not matter)."""
     script = vpxfile.VpxTable(table_path).script().lower()
+    out = []
     for title, info in maps().items():
         words = [w.lower() for w in info["detect"]]
         if words and all(w in script for w in words):
-            return title, info
-    return None, None
+            out.append((title, info))
+    return out
 
 
-def patch(table_path, outdir=None, card=None):
-    title, info = recognise(table_path)
+def choose(fits, title=None, card=None):
+    """Which of the fitting maps a patch takes: the title asked for, else the
+    one the card given is for, else the first with a card known
+    (padlaunch.card_for), else the preferred."""
+    if not fits:
+        return None, None
+    by = dict(fits)
+    for want in (title, card_title(card)):
+        if want in by:
+            return want, by[want]
+    for t, info in fits:
+        if padlaunch.card_for(t):
+            return t, info
+    return fits[0]
+
+
+def recognise(table_path, title=None, card=None):
+    """Which title's map this table is patched with (see choose()). None
+    when no map fits."""
+    return choose(fitting(table_path), title, card)
+
+
+def patch(table_path, outdir=None, card=None, title=None):
+    fits = fitting(table_path)
+    if title and title not in dict(fits):
+        print("the map for %s does not fit this table; it fits: %s"
+              % (title, ", ".join(t for t, _ in fits) or "none"))
+        return 2
+    title, info = choose(fits, title, card)
     if not title:
         print("this table is not one the kit knows; it can patch: %s" % ", ".join(
             "%s (%s)" % (t, ", ".join(i["detect"])) for t, i in maps().items()))
         return 2
+    others = [t for t, _ in fits if t != title]
+    if others:
+        print("patching for %s%s; it plays as %s too (padvpx patch --title %s)"
+              % (title, " (%s)" % info["model"] if info["model"] else "",
+                 " or ".join(others), others[0]))
     outdir = outdir or os.path.dirname(os.path.abspath(table_path))
     py = sys.executable
     if info["kind"] == "shadow":
@@ -224,7 +269,7 @@ def main(argv):
         return 2
     cmd, rest = argv[0], argv[1:]
     if cmd == "patch":
-        outdir = card = None
+        outdir = card = title = None
         args = []
         i = 0
         while i < len(rest):
@@ -234,13 +279,16 @@ def main(argv):
             elif rest[i] == "--card" and i + 1 < len(rest):
                 card = rest[i + 1]
                 i += 2
+            elif rest[i] == "--title" and i + 1 < len(rest):
+                title = rest[i + 1]
+                i += 2
             else:
                 args.append(rest[i])
                 i += 1
         if len(args) != 1:
             print(__doc__)
             return 2
-        return patch(args[0], outdir, card)
+        return patch(args[0], outdir, card, title)
     if cmd == "card":
         if len(rest) == 2:
             padlaunch.remember_card(rest[0], os.path.abspath(rest[1]))

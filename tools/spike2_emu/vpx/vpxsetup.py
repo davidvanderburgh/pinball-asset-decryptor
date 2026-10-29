@@ -94,11 +94,14 @@ def cards_in(folder):
 
 
 def known_tables(tables_dir=None):
-    """Each table the kit can patch: its title, the download it fits (the
-    map's `table`), the patched name, whether that is in Visual Pinball's
-    tables folder, and the card the title boots."""
+    """Each table the kit can patch: the download it fits (the map's
+    `table`), the patched name, whether that is in Visual Pinball's tables
+    folder, the title Patch takes for it and the card that title boots.
+    Maps for one download (JP's Foo Fighters: Pro and LE) are one row:
+    `titles` all of them, preferred first, `title` the one padvpx.choose()
+    takes, `models` each one's model."""
     tables_dir = vpx_tables_dir() if tables_dir is None else tables_dir
-    out = []
+    rows = {}
     for title, info in padvpx.maps().items():
         try:
             m = json.load(open(info["map"], encoding="utf-8"))
@@ -106,11 +109,22 @@ def known_tables(tables_dir=None):
             m = {}
         t = m.get("table") or {}
         out_name = info["output"] or ""
-        out.append({"title": title, "name": t.get("name") or title, "by": t.get("by") or "",
-                    "where": t.get("where") or "", "output": out_name,
-                    "patched": bool(out_name and tables_dir
-                                    and os.path.isfile(os.path.join(tables_dir, out_name))),
-                    "card": padlaunch.card_for(title) or ""})
+        row = rows.get(out_name or title)
+        if row is None:
+            row = rows[out_name or title] = {
+                "name": t.get("name") or title, "by": t.get("by") or "",
+                "where": t.get("where") or "", "output": out_name,
+                "patched": bool(out_name and tables_dir
+                                and os.path.isfile(os.path.join(tables_dir, out_name))),
+                "titles": [], "models": {}, "fits": []}
+        row["titles"].append(title)
+        row["models"][title] = info["model"]
+        row["fits"].append((title, info))
+    out = []
+    for row in rows.values():
+        title, _ = padvpx.choose(row.pop("fits"))
+        row.update(title=title, card=padlaunch.card_for(title) or "")
+        out.append(row)
     return out
 
 

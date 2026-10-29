@@ -1763,6 +1763,68 @@ hold - one command, 255 for 60 ms then 48 for 8930 ms, let go at 9011 ms, the cl
 the game may raise the post again at the next switch hit for its own first-ramp hold (the ball is past it by then).
 Desk: tests/test_stern_mode_post_hold.py (the clock standing still while held, a challenge ball not held).
 
+## Spare switches and outputs (PAD-826)
+
+For hardware a mod ADDS to the machine: a switch wired to a node board input the game has no switch on, or a coil,
+flasher or toy wired to a driver output the game never fires. RobF on Pinside: *"unmask unused switches and coils"*.
+docs/plans/mode_spare_io.md has the disassembly.
+
+**Naming them.** By the board's own numbers: the node (8, 9 ... the `node` column of the title's switch list) and
+an input bit 0..63 (its `bit` column) or a driver output 0..8 (the node-bus library refuses a coil above 8 itself).
+The runtime reads the game's own tables LIVE and takes only what nothing of the game's uses; anything else is refused,
+said in `mode.log`, and never touched:
+
+- an input is spare when the switch service's map has no switch of the game's on that node and bit. The service
+  reads the bit off the board every scan and skips it, so reading it changes nothing the game does;
+- an output is spare when some coil record of the game's is on that node (it is a driver board) and none is on that
+  output. No record means the game never sends that output anything.
+
+```c
+uint64_t pm_spare_shot(unsigned node, unsigned input, const char *name, int active_high);
+int pm_spare_switch(unsigned node, unsigned input);         /* 1 closed, 0 open, -1 not a spare input */
+int pm_spare_drive(unsigned node, unsigned output, unsigned pulse_power, unsigned pulse_ms,
+                   unsigned hold_power, unsigned hold_ms);
+int pm_spare_pulse(unsigned node, unsigned output, unsigned power, unsigned ms);
+void pm_spare_off(unsigned node, unsigned output);
+int pm_spare_output(unsigned node, unsigned output);        /* 1 = spare here */
+```
+
+**A spare input is a shot.** `pm_spare_shot` gives it a shot bit of its own, one no shot of the port's uses, named
+`name` (`pm_shot(name)` finds it, so a mode file or blocks script can name it like any shot). Every time the switch
+CLOSES, that mask comes to every mode's `.shot`, from the tick. A close is the input at its closed level two ticks
+running, so a bounce is not a hit. Closed reads 0, which is how Stern's switches work (the board pulls an open input
+up). Pass `active_high` 1 for one that reads 1 when made, an opto's way. At most 8 spare inputs per game. Ask again
+with the same node and input for the same mask.
+
+**A spare output gets ONE command at a time**, which the board ends by itself: `pulse_power` (1..255) for
+`pulse_ms`, then `hold_power` (0 = none) for `hold_ms`. It is 48 V into wiring PAD has never seen, so the limits
+are the runtime's and cannot be raised:
+
+| | |
+|---|---|
+| who | only the running mode, in a game (not attract, not tilted) |
+| one command | pulse 1..1000 ms; pulse and hold together at most 5000 ms |
+| over time | an output's commands in any 10 s add up to 5000 ms or less (half the time on), at most 50 of them |
+| a new command | replaces the one running on that output (a flasher's pattern) |
+| off | the board's own OFF, for every spare output a mode drove, when the mode ends, the ball ends, the game ends or tilts, and on `pm_spare_off` |
+
+**What the port carries** (spare_io.py writes it from each build's own binary; `--census` lists every port):
+
+```
+site coil_frame   <the node-bus library's fire-by-address>   fire(node, {coil, pulse power, pulse ms, hold power, -, hold ms, x})
+site coil_off     <its OFF>                                  off(node, coil): 8n 03 4d <coil>
+data sw_struct    <the switch service's struct>              +16 one 160-byte block per node: +20 its 64 input bits, +28 a switch id per bit
+data coil_count / coil_table                                 the coil records (also PAD-420's)
+```
+
+The switch struct is checked against the game's own switch entries before any bit is read: every switch id in the map
+must be the entry naming that node and bit, or the spare inputs are off for the run (`spare inputs: ... does not
+check out`). `PM_CAN_SPARE_SWITCHES` and `PM_CAN_SPARE_COILS` say what this port has.
+
+**In the emulator** a spare input reads 0 (closed) unless set: `/dump/spare_in` takes one line per input, `<node>
+<bit> <level>`, re-read every 200 ms (hwshim's `[sparein]` lines). A spare output's commands show as `[coildrive]`
+lines under `PAD_COIL_PROBE=1`. `sdk/spare_test_mode.c` drives both; `C:/tmp/PAD-826/spare_job.sh` is the proof job.
+
 ## The scoop (PAD-381)
 
 A mode may hold a ball that lands in the scoop - while its screen or a callout plays - and nothing more:

@@ -6091,7 +6091,7 @@ static void coils_arm(void)
  * RobF on Pinside: "unmask unused switches and coils". Hardware a mod adds, on what the game never uses.
  *
  * INPUTS. The switch service (Godzilla Pro 1.15 0x1e78f4) keeps, in its struct (`data sw_struct`), one 160-byte block
- * per node at +16: +20 the board's current 64 input bits as read off the bus, +28 a u16 switch id per bit, 0 where the
+ * per node 0..31 at +16 (the service's mutex follows at +0x1410 = 16 + 32 * 160): +20 the board's current 64 input bits as read off the bus, +28 a u16 switch id per bit, 0 where the
  * game has no switch - those bits it reads and never looks at. The layout is checked once against the game's own
  * switch entries (the array at struct +0, 32 bytes each: +18 the bit, +20 the node) before any bit is read: every id
  * in the map must be the entry naming that node and bit. A struct that does not check out takes the inputs away.
@@ -6111,6 +6111,7 @@ static void coils_arm(void)
 #define SPARE_ON_MAX    5000ul
 #define SPARE_RING        50u      /* commands remembered per output: at most 50 in any 10 s */
 #define SW_BLOCK(st, n) ((st) + 16u + (unsigned)(n) * 160u)
+#define SW_NODES 32u               /* the blocks: nodes 0..31, then the service's mutex at +0x1410 */
 
 static int spare_sw_ok;            /* 0 not checked yet, 1 the struct checks out, -1 it does not */
 static struct spare_shot {
@@ -6134,11 +6135,11 @@ static unsigned spare_sw_struct(void)
     unsigned st = data("sw_struct"), ents, n, b, id, e, total = 0, bad = 0;
     if (!(can & PM_CAN_SPARE_SWITCHES) || spare_sw_ok < 0 || !st) return 0;
     if (spare_sw_ok > 0) return st;
-    if (!maps_has(st, 16u + 64u * 160u, MAP_R)) maps_read();
-    if (!maps_has(st, 16u + 64u * 160u, MAP_R)) { spare_sw_ok = -1; say("spare inputs: the switch struct at 0x%08x is not mapped - off", st); return 0; }
+    if (!maps_has(st, 16u + SW_NODES * 160u, MAP_R)) maps_read();
+    if (!maps_has(st, 16u + SW_NODES * 160u, MAP_R)) { spare_sw_ok = -1; say("spare inputs: the switch struct at 0x%08x is not mapped - off", st); return 0; }
     ents = *(const unsigned *)(unsigned long)st;
     if (!ents) return 0;                                  /* the game has not built its switches yet: ask later */
-    for (n = 0; n < 64; n++)
+    for (n = 0; n < SW_NODES; n++)
         for (b = 0; b < 64; b++) {
             id = *(const unsigned short *)(unsigned long)(SW_BLOCK(st, n) + 28u + 2u * b);
             if (!id) continue;
@@ -6164,7 +6165,7 @@ static unsigned spare_sw_struct(void)
 static int spare_level(unsigned node, unsigned bit)
 {
     unsigned st = spare_sw_struct();
-    if (!st || node > 63 || bit > 63) return -1;
+    if (!st || node >= SW_NODES || bit > 63) return -1;
     if (*(const unsigned short *)(unsigned long)(SW_BLOCK(st, node) + 28u + 2u * bit)) return -1;
     return (*(const volatile unsigned char *)(unsigned long)(SW_BLOCK(st, node) + 20u + bit / 8u) >> (bit % 8u)) & 1;
 }

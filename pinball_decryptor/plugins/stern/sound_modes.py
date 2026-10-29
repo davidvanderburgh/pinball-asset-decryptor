@@ -22,7 +22,7 @@ more), the project names the modes (``.staged_changes.json`` ``sound_modes``: ``
    A project saved before mode files had their own (no ``levels`` key) gives each one its slot's
    offset, as those builds did. One file in several modes of a slot at one level is one record. A
    file longer than its slot's sound is cut
-   to that length unless the build may keep replacements whole ("Allow replacements longer than
+   to that length unless the build may keep replacements whole ("Allow replacements longer or shorter than
    the original"), as a replacement is;
 2. the operator menu gets MUSIC MODE (:mod:`.menu_settings`: Audio Content, the modes' names in
    its help line, values 1..n; PAD-724: on the 21 games whose Adjustments are Standard and Feature

@@ -108,7 +108,7 @@ def test_the_advanced_audio_text_knows_the_platform():
                       "static", "js", "tabs", "audio.js")
     with open(js, encoding="utf-8") as f:
         src = f.read()
-    start = src.index('label="Allow replacements longer than the original')
+    start = src.index('label="Allow replacements longer or shorter than the original')
     para = src[start:src.index("</p>", start)]
     assert "${mac ?" in para and "Windows and Linux" in para
     assert "trimmed to fit it" in para

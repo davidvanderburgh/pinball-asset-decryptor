@@ -285,7 +285,8 @@ def test_a_grown_bank_keeps_the_sound_engines_failed_count_at_zero(
     seen.clear()
     folded.clear()
     _reader, _staged = _grow_card(monkeypatch, tmp_path, params)
-    assets2, _w2 = _edits(tmp_path / "b", 0.5)
+    # (within 0.1 s of its slot: a clip further short has a record of its own, PAD-800)
+    assets2, _w2 = _edits(tmp_path / "b", 0.95)
     writes2, _c, _p, _m, _v = _run(
         monkeypatch, assets2, params, params[0]["body_off"], log)
     assert not seen

@@ -1102,7 +1102,24 @@ def _rig_env():
     # reach the same rig, and every window that rig opens is titled with it.
     # Empty on an ordinary install.
     return rigdata.rig_env("spike2", bool(d) and rigdata.exists()) \
-        + rigslot.rig_env()
+        + rigslot.rig_env() + _board_env()
+
+
+def _board_env():
+    """PAD_BOARD, on Windows, when the rig would guess another board than the
+    one the app and the Visual Pinball controller read (the profile's
+    .pad-rig).  padpath.sh's pad_board_dir guesses that one only for a rig
+    under a profile; an INSTALLED rig (Program Files) guesses the Linux home's
+    ~/.pad-rig, which nothing on Windows reads, so its runs were invisible to
+    them (PAD-803).  Empty where the guess is already right, so a checkout's
+    commands are unchanged."""
+    if sys.platform != "win32":
+        return []
+    board = _wsl_path(rigslot.board_dir()).rstrip("/")
+    m = re.match(r"(/mnt/[a-z]/Users/[^/]+)/.", _wsl_path(rig_dir()), re.I)
+    if m and (m.group(1) + "/.pad-rig").lower() == board.lower():
+        return []
+    return ["PAD_BOARD=%s" % board]
 
 
 def rig_cmd(script, *args, env=()):

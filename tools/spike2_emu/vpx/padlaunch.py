@@ -12,7 +12,10 @@ board. When there is none, this starts one - no app in the loop:
   * the Linux it runs in: PAD_WSL_DISTRO, else the kit's `distro`, else
     PAD-Runtime when that distro is installed, else the machine's default;
   * a rig slot of its own, taken with riglock.sh (`PAD-VPX` as its holder),
-    so the app's and a session's rigs are never disturbed;
+    so the app's and a session's rigs are never disturbed - on the app's own
+    board (.pad-rig in the Windows profile, where the controller looks for
+    the run)
+    and in the app's own rig (its data disk, when the app keeps one);
   * `watch.sh` as the desktop user, VISIBLE (the LCD window on the desktop)
     and with SOUND, since this run is for playing, and the Windows Python
     beside this one for the sound bridge (PAD-95) when there is one.
@@ -41,6 +44,14 @@ RUNTIME_DISTRO = "PAD-Runtime"
 LOG = os.path.join(os.environ.get("TEMP") or os.environ.get("TMPDIR") or "/tmp",
                    "padcontroller.log")
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+#: The board as Windows opens it: the one the app (core/rigslot.py) and the
+#: controller (padcontroller.BOARD) read. Every rig command gets it as
+#: PAD_BOARD, because riglock.sh and watch.sh would otherwise guess it from
+#: where the rig is - and an INSTALLED rig, under Program Files, makes them
+#: guess the Linux home's ~/.pad-rig: a board nobody on Windows reads, and one
+#: the app's own runs (root) leave root's, so a plain-user take there found
+#: every slot "in use" while it listed them all free (PAD-803).
+BOARD = os.path.join(os.path.expanduser("~"), ".pad-rig")
 
 
 def log(msg):
@@ -155,6 +166,34 @@ def wsl_head(dist=None, root=False):
     return head
 
 
+def app_home(dist):
+    """The app's PAD_HOME for a run in `dist`, or "" for the rig's own default.
+
+    The app keeps the Spike 2 rig on its data disk when it runs in its own
+    runtime and that disk exists (emulate_core._rig_env, core/rigdata.py), and
+    attaches the disk again after a WSL restart before a run. A run started
+    here has to land in that same rig - its rootfs, cards and NVRAM - so this
+    asks rigdata the same question, from the app's package beside the kit."""
+    if sys.platform != "win32" or dist != RUNTIME_DISTRO:
+        return ""
+    app = os.path.dirname(os.path.dirname(os.path.abspath(rig_dir())))
+    if app not in sys.path:
+        sys.path.append(app)
+    try:
+        from pinball_decryptor.core import rigdata
+    except Exception as exc:                                # noqa: BLE001
+        log("no app package beside the rig (%s): the rig's own PAD_HOME" % exc)
+        return ""
+    if not rigdata.exists():
+        return ""
+    try:
+        rigdata.ensure(dist, log=log)
+    except Exception as exc:                                # noqa: BLE001
+        log("the app's data disk did not attach (%s): the rig's own PAD_HOME" % exc)
+        return ""
+    return rigdata.work_dir("spike2") or ""
+
+
 _ACCOUNT = {}
 
 
@@ -202,6 +241,32 @@ class Launch:
         self.as_root = False
         self.rig_wsl =padpath.to_wsl(rig_dir()) if padpath.is_windows_path(rig_dir()) else rig_dir()
         self.logfile = os.path.join(os.path.dirname(LOG), "padvpx-%s.log" % title)
+        self.home = None        # app_home(), asked once
+
+    def rig_head(self):
+        """How every riglock.sh call starts: as root, the way the run itself
+        starts (head()), on the app's board and in the app's rig. Root because
+        the board may be root's already (the app's runs are root) and because
+        taking a slot >= 1 also mounts its rootfs, which only root can
+        (riglock.sh, "RUN IT AS ROOT"). A distro whose account has no home
+        gets the plain user, as head() does."""
+        user, home = account(self.distro)
+        if home and user:
+            head = wsl_head(self.distro, root=True) + ["-e", "env", "HOME=" + home]
+        else:
+            head = wsl_head(self.distro) + ["-e", "env"]
+        return head + self.board_env() + ["bash", "%s/riglock.sh" % self.rig_wsl]
+
+    def board_env(self):
+        """PAD_BOARD (see BOARD) and the app's PAD_HOME (see app_home)."""
+        out = []
+        if sys.platform == "win32":
+            out.append("PAD_BOARD=%s" % padpath.to_wsl(BOARD))
+        if self.home is None:
+            self.home = app_home(self.distro)
+        if self.home:
+            out.append("PAD_HOME=%s" % self.home)
+        return out
 
     def take_slot(self):
         """A slot of the kit's own: the kit's `slot` when it names one (`use`
@@ -210,11 +275,9 @@ class Launch:
         want = kit_load().get("slot")
         what = "%s for Visual Pinball" % self.title
         if want:
-            cmd = wsl_head(self.distro) + ["-e", "bash", "%s/riglock.sh" % self.rig_wsl,
-                                           "use", str(int(want)), LABEL, what]
+            cmd = self.rig_head() + ["use", str(int(want)), LABEL, what]
         else:
-            cmd = wsl_head(self.distro) + ["-e", "bash", "%s/riglock.sh" % self.rig_wsl,
-                                           "take", "--any", LABEL, what]
+            cmd = self.rig_head() + ["take", "--any", LABEL, what]
         r = _run(cmd)
         out = _text(r.stdout) + _text(r.stderr)
         m = re.search(r"slot=(\d+)", out)
@@ -224,12 +287,13 @@ class Launch:
         if want and not m:
             # the kit's slot is somebody else's now: any free one, then
             log("slot %s is not ours (%s); taking any" % (want, out.strip()[-120:]))
-            r = _run(wsl_head(self.distro) + ["-e", "bash", "%s/riglock.sh" % self.rig_wsl,
-                                              "take", "--any", LABEL, what])
+            r = _run(self.rig_head() + ["take", "--any", LABEL, what])
             out = _text(r.stdout) + _text(r.stderr)
             m = re.search(r"slot=(\d+)", out)
         if not m:
-            raise RuntimeError("no rig slot free for %s: %s" % (self.title, out.strip()[-200:]))
+            # the LAST lines say why (riglock.sh's own word), the slot table
+            # above them only what it saw
+            raise RuntimeError("no rig slot free for %s: %s" % (self.title, out.strip()[-300:]))
         self.slot = int(m.group(1))
         return self.slot
 
@@ -240,7 +304,7 @@ class Launch:
         # take the keyboard from it the moment it opened
         # ... unless the kit asked for the playfield window (padvpx playfield)
         playfield = "1" if kit_load().get("playfield") else "0"
-        env = ["PAD_SLOT=%d" % self.slot, "PAD_LABEL=%s" % LABEL,
+        env = self.board_env() + ["PAD_SLOT=%d" % self.slot, "PAD_LABEL=%s" % LABEL,
                "PAD_HIDDEN=0", "PAD_PLAYFIELD=%s" % playfield, "PAD_AUDIO=1", "PAD_CARD=%s" % card]
         py = win_python()
         if py:
@@ -278,10 +342,9 @@ class Launch:
             return
         try:
             head, _ = self.head() if getattr(self, "as_root", False) else (wsl_head(self.distro) + ["-e", "env"], False)
-            _run(head + ["PAD_SLOT=%d" % self.slot, "PAD_LABEL=%s" % LABEL,
-                         "bash", "%s/killgame.sh" % self.rig_wsl], timeout=120)
-            _run(wsl_head(self.distro) + ["-e", "bash", "%s/riglock.sh" % self.rig_wsl,
-                                          "release", str(self.slot), LABEL], timeout=30)
+            _run(head + self.board_env() + ["PAD_SLOT=%d" % self.slot, "PAD_LABEL=%s" % LABEL,
+                                            "bash", "%s/killgame.sh" % self.rig_wsl], timeout=120)
+            _run(self.rig_head() + ["release", str(self.slot), LABEL], timeout=30)
             log("stopped %s on slot %d" % (self.title, self.slot))
         except Exception as exc:                            # noqa: BLE001
             log("stop of slot %d failed: %s" % (self.slot, exc))

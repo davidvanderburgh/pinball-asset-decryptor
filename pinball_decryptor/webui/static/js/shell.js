@@ -417,6 +417,9 @@ function TopBar({ shell }) {
         onClick=${() => call(gsOpen ? "shellx.getting_started_close" : "shellx.getting_started_open")}
         ...${tip("Short videos and steps for the common jobs: extract a card, swap a song, build and flash, multi-boot.")} aria-label="Getting started">
         <${Icon} name="play" /><span class="hide-narrow">Getting started</span></button>
+    <button type="button" class="btn sm sx-discord-btn" onClick=${() => call("shellx.open_discord")}
+        ...${tip("Join the PAD Discord server: ask questions, share what you made and hear about new releases.")} aria-label="Join our Discord">
+        <${Icon} name="discord" /><span class="hide-narrow">Discord</span></button>
     ${sx.donations ? html`<button type="button" class="btn sm sx-don-btn" onClick=${() => openDialog("donations")} ...${tip(sx.donations.tip)} aria-label="Donate to an animal shelter">
         <${Icon} name="paw" /><span>Donate</span></button>` : null}
     <button type="button" class="btn sm sx-rep-btn" onClick=${() => openDialog("report")} ...${tip("Something went wrong? Send the developer what happened, with the log and the card's details.")} aria-label="Report a problem">

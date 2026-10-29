@@ -2697,6 +2697,8 @@ def test_no_interpreter_to_name_leaves_the_rig_as_it_was(monkeypatch,
     # a rig whose board guess is already the app's (PAD-803 names PAD_BOARD
     # only otherwise; a CI runner's tmp_path is not under a Windows profile)
     monkeypatch.setattr(emulate_core, "_board_env", lambda: [])
+    # and no vhdx drive to name (PAD-816 names it where the registry has one)
+    monkeypatch.setattr(emulate_core, "_host_drive_env", lambda: [])
     cmd = _cmd_on(monkeypatch, "win32", tmp_path, "setupcheck.sh")
     assert not any(c.startswith("PAD_WINPYTHON") for c in cmd), cmd
     assert "env" not in cmd, cmd

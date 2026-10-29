@@ -282,7 +282,10 @@ def draws(tmp_path_factory):
     d = tmp_path_factory.mktemp("juke")
     (d / "h.c").write_text(_HARNESS.replace("@STATE@", state).replace("@FUNCS@", "\n".join(funcs)))
     exe = d / "h"
-    r = subprocess.run([cc, "-std=gnu17", "-O1", "-Wall", "-o", str(exe), str(d / "h.c")],
+    # the runtime declares clock_gettime(int, void *) for itself; against <time.h> its
+    # `struct { long s, ns; }` is a warning up to gcc 13 and an error from gcc 14 (Ubuntu 26.04)
+    r = subprocess.run([cc, "-std=gnu17", "-O1", "-Wall", "-Wno-incompatible-pointer-types",
+                       "-o", str(exe), str(d / "h.c")],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 

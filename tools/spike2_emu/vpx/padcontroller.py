@@ -459,6 +459,8 @@ class Rig:
         reading of the game's switch table (empty when the run has none)."""
         out = {}
         path = os.path.join(self.dump, "tables", title or "", "switch_list.txt")
+        if title and not os.path.exists(path):
+            self.seed_switch_list(title, path)
         try:
             for line in open(path, encoding="utf-8", errors="replace"):
                 p = line.split()
@@ -467,6 +469,30 @@ class Rig:
         except OSError:
             pass
         return out
+
+    def seed_switch_list(self, title, path):
+        """A title's FIRST run on a slot has no switch_list.txt, and under a
+        table it never gets one: the rig derives it once the game is up, the
+        game waits on a trough the table cannot report without it, and the
+        ball feeder stands aside for the table (PAD-811: TMNT sat on its logo
+        on a fresh slot for minutes). Another slot's copy of the same title
+        is the same game's table: the newest goes in, for the renderer's
+        keyboard and the playfield as well."""
+        import glob
+        import shutil
+        slots = os.path.dirname(os.path.dirname(os.path.dirname(self.dump)))   # .../padslots
+        found = [p for p in glob.glob(os.path.join(slots, "*", "root", "dump", "tables",
+                                                   title, "switch_list.txt"))
+                 if os.path.normcase(p) != os.path.normcase(path)]
+        if not found:
+            return
+        src = max(found, key=os.path.getmtime)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            shutil.copyfile(src, path)
+            log("switch table for %s taken from %s (this slot had none)" % (title, src))
+        except OSError as exc:
+            log("switch table for %s not copied from %s: %s" % (title, src, exc))
 
 
 def read_block(path, n):

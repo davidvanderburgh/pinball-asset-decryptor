@@ -1066,3 +1066,20 @@ def test_no_table_ships_with_the_app():
     assert not [ln for ln in lines if "vpx_tables" in ln or "*.vpx" in ln]
     assert not [ln for ln in lines if "wizard" in ln]
     assert not os.path.exists(os.path.join(VPX, "padwizard.py"))
+
+
+def test_a_slots_first_run_takes_the_titles_switch_table_from_another_slot(tmp_path):
+    # PAD-811: TMNT on a slot that had never run it sat on its logo, the
+    # table unable to report a trough without the run's switch_list.txt
+    pc = pytest.importorskip("padcontroller")
+    slots = tmp_path / "padslots"
+    old = slots / "3" / "root" / "dump" / "tables" / "turtles_le"
+    old.mkdir(parents=True)
+    (old / "switch_list.txt").write_text("# turtles_le\n36 73 1 11 Start Button\n", encoding="utf-8")
+    dump = slots / "2" / "root" / "dump"
+    dump.mkdir(parents=True)
+    rig = pc.Rig.__new__(pc.Rig)
+    rig.dump = str(dump)
+    assert rig.switch_ids("turtles_le") == {(1, 11): 36}
+    assert (dump / "tables" / "turtles_le" / "switch_list.txt").exists()
+    assert rig.switch_ids("venom_le") == {}          # nobody has one: nothing made up

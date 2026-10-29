@@ -63,6 +63,14 @@ def shoot(repo, out_dir, prefix, key):
             out = os.path.join(out_dir, "%s_modes_list_%s.png" % (prefix, key))
             page.locator(".modes-list").screenshot(path=out)
             print("shot", out, flush=True)
+            bare = page.locator(".modes-list .li.game.bare")
+            if bare.count():                    # a mode with nothing to change opens and says why
+                bare.last.click()
+                time.sleep(2)
+                print("  opened", bare.last.inner_text().strip(), "->",
+                      [t for t in page.locator("main").all_inner_texts()
+                       if "nothing" in t.lower()][:1] and "says nothing to change" or "no reason shown",
+                      flush=True)
         S._shoot(url, go, height=1600)
     finally:
         proc.terminate()

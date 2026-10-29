@@ -87,6 +87,8 @@ button.modes-list-grp { cursor: pointer; border-radius: 6px; }
 button.modes-list-grp:hover { color: var(--ink-2); background: var(--panel-2); }
 .modes-list-grp:first-child { padding-top: 2px; }
 .modes-list .li.game .ellip { color: var(--ink-2); }
+/* PAD-834: one of the game's modes with nothing to change here (its tooltip says so) */
+.modes-list .li.game.bare .ellip { color: var(--ink-3); }
 .modes-list .li.modes-list-all { color: var(--ink-3); gap: 6px; justify-content: flex-start; }
 .modes-list .li.modes-list-all:hover { color: var(--ink-2); }
 

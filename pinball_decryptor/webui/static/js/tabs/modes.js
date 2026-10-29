@@ -221,14 +221,13 @@ function ListRow({ r, i, selIdx, isSel }) {
     : r.kind === "game" ? "One of the game's own modes: its timers and awards" : "modes/" + r.slug;
   return html`<button type="button" role="option" key=${r.kind + r.slug}
       aria-selected=${isSel(r)} tabindex=${i === Math.max(0, selIdx) ? 0 : -1}
-      class=${cx("li", isSel(r) && "sel", r.kind === "game" && "game", r.bare && "dim")}
+      class=${cx("li", isSel(r) && "sel", r.kind === "game" && "game", r.bare && "bare")}
       onClick=${() => call("modes.select", r.slug, r.kind)}
       ...${tip(where + (r.chip_tip ? "\n" + r.chip_tip : ""))}>
       <span class="ellip">${r.name}</span>
       ${r.blocks ? html`<span class="r pill bk-pill" title="Made of blocks">Blocks</span>`
         : r.kind === "code" ? html`<span class="r pill" title="Written in C">C</span>`
-        : r.kind === "game" ? (r.chip ? html`<span class="r chip acc sm">${r.chip}</span>`
-          : r.bare ? html`<span class="r small dim">nothing to change</span>` : null)
+        : r.kind === "game" ? (r.chip ? html`<span class="r chip acc sm">${r.chip}</span>` : null)
         : r.chip === "ready" ? html`<span class="r chip ok sm">ready</span>`
         : r.chip ? html`<span class="r chip warn sm">${r.chip}</span>` : null}
     </button>`;

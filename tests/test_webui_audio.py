@@ -111,10 +111,15 @@ def test_no_audio_tab_for_williams(tmp_path):
         assert not tabs["audio"]["visible"]
 
 
-def test_grow_active_follows_the_advanced_option(tmp_path):
-    settings = {"audio_advanced": {"audio_grow": True}}
+def test_grow_active_on_every_spike2_card(tmp_path, monkeypatch):
+    """Always on since PAD-843, whatever an older settings.json says."""
+    monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
+    settings = {"audio_advanced": {"audio_grow": False}}
     with web_app(tmp_path, mfr="stern", settings=settings) as w:
         assert w.window._audio_grow_active() is True
+        monkeypatch.setenv("PAD_STERN_AUDIO_GROW", "0")
+        assert w.window._audio_grow_active() is False
+        monkeypatch.delenv("PAD_STERN_AUDIO_GROW")
         w.call("ui.set_era", "spike1")
         assert w.window._audio_grow_active() is False
     with web_app(tmp_path / "b", mfr="jjp", settings=settings) as w:
@@ -409,11 +414,12 @@ def test_stern_advanced_dialog(tmp_path):
         data = w.call("audio.advanced_get")
         assert data["cfg"]["head_mode"] == "encode"
         assert w.state("audio")["adv_marker"] is False
-        cfg = dict(data["cfg"], audio_grow=True, loudness_db=40,
+        assert "audio_grow" not in data["cfg"]
+        cfg = dict(data["cfg"], audio_grow=False, loudness_db=40,
                    experiment_idxs="231; 258, x")
         w.call("audio.advanced_set", cfg)
         saved = w.app._settings["audio_advanced"]
-        assert saved["audio_grow"] is True
+        assert "audio_grow" not in saved
         assert saved["loudness_db"] == 12
         assert saved["experiment_idxs"] == "231,258"
         assert w.state("audio")["adv_marker"] is True
@@ -431,7 +437,7 @@ def test_advanced_dialog_is_loudness_only_off_spike2(tmp_path, era):
         assert [c["label"] for c in data["loudness"]][1] == \
             "Keep each replacement's own level"
         # a Spike 2-only lever left on from a Spike 2 card: no marker here
-        w.call("audio.advanced_set", dict(data["cfg"], audio_grow=True))
+        w.call("audio.advanced_set", dict(data["cfg"], slot_seed=True))
         assert w.state("audio")["adv_marker"] is False
         w.call("audio.advanced_set", dict(data["cfg"], loudness_db=3))
         assert w.state("audio")["adv_marker"] is True
@@ -440,8 +446,7 @@ def test_advanced_dialog_is_loudness_only_off_spike2(tmp_path, era):
 def test_stern_keep_whole_menu(tmp_path):
     folder = _project(tmp_path)
     rel = "audio/idx0001 - Jackpot.wav"
-    settings = {"audio_advanced": {"audio_grow": True}}
-    with web_app(tmp_path, mfr="stern", settings=settings) as w:
+    with web_app(tmp_path, mfr="stern") as w:
         _open(w, folder)
         items = {i.get("label"): i for i in w.call("audio.menu", rel, [rel])}
         keep = items["Keep this song whole if the bank fills up"]

@@ -81,32 +81,45 @@ def _said(msgs, needle):
 # --------------------------------------------------------------------------
 # the gate
 # --------------------------------------------------------------------------
-def test_gate_is_off_unless_asked_for(monkeypatch):
-    """Growing changes the build (an image build), so it is opt-in: a build
-    must never produce a grown bank unless the user asked for it by name."""
+def test_gate_is_on_unless_switched_off(monkeypatch):
+    """PAD-843: a grown bank is confirmed on a real machine, so it is always
+    on (the Advanced checkbox is gone): unset opens the gate, and only the
+    engine-level PAD_STERN_AUDIO_GROW=0 closes it, naming itself."""
+    monkeypatch.setattr(ext4_grow, "available", lambda: (True, "test"))
     monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
+    assert engine._audio_grow_gate(False) == (True, "")
+    monkeypatch.setenv("PAD_STERN_AUDIO_GROW", "0")
     ok, why = engine._audio_grow_gate(False)
     assert not ok
-    assert "longer and shorter replacements are off" in why
-
-
-def test_the_off_reason_names_the_option_the_dialog_really_has(monkeypatch):
-    """Off is the default, so this is the reason nearly every trim gives, and
-    it is the only place a Write tells the user the option exists (PAD-174:
-    a whole song cut to its slot's 38 s loop, found by extracting the card).
-    It quotes the checkbox, so the quote has to be the checkbox's text."""
-    import pinball_decryptor.webui as webui_pkg
-
+    assert "longer and shorter replacements are switched off" in why
+    assert "PAD_STERN_AUDIO_GROW=0" in why
+    # a direct-SD write still can't grow, with the option on
     monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
-    _ok, why = engine._audio_grow_gate(False)
-    label = "Allow replacements longer or shorter than the original"
-    assert '"%s"' % label in why and "Advanced" in why
+    ok, why = engine._audio_grow_gate(True)
+    assert not ok and "direct-SD" in why
+
+
+def test_the_dialog_has_no_checkbox_and_says_always_on():
+    """PAD-843: the checkbox is replaced by an always-on line, the way
+    blip-free callouts went (PAD-523), and no text still tells the user to
+    tick it."""
+    import pinball_decryptor.webui as webui_pkg
+    from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
+    from pinball_decryptor.webui.help_content import HELP_CONTENT
+
     js = os.path.join(os.path.dirname(webui_pkg.__file__),
                       "static", "js", "tabs", "audio.js")
     with open(js, encoding="utf-8") as f:
         src = f.read()
-    assert 'label="%s' % label in src
-    assert 'title="Advanced Audio Options"' in src
+    assert "audio_grow" not in src
+    assert "<b>Longer and shorter replacements: always on.</b>" in src
+    label = "Allow replacements longer or shorter than the original"
+    texts = [src, SternManufacturer().audio_length_note()]
+    texts += [body for _t, body in HELP_CONTENT["Replace Audio"]
+              if isinstance(body, str)]
+    for text in texts:
+        assert label not in text
+    assert "always on" in SternManufacturer().audio_length_note()
 
 
 @pytest.mark.usefixtures("not_macos")
@@ -128,10 +141,10 @@ def test_longer_sound_texts_name_both_limits():
                       "static", "js", "tabs", "audio.js")
     with open(js, encoding="utf-8") as f:
         src = f.read()
-    start = src.index('label="Allow replacements longer or shorter than the original')
+    start = src.index("<b>Longer and shorter replacements: always on.</b>")
     advanced = src[start:src.index("</p>", start)]
     help_ = dict(HELP_CONTENT["Replace Audio"])[
-        "Longer replacements (Advanced Audio Options)"]
+        "Longer and shorter replacements (always on)"]
     note = SternManufacturer().audio_length_note()
     for text in (advanced, help_, note):
         assert "games partition" in text, text
@@ -574,7 +587,7 @@ def test_a_build_of_appended_records_only_needs_no_redirect(monkeypatch, tmp_pat
 
 @pytest.mark.parametrize("device,flag,needle", [
     (True, "1", "direct-SD"),
-    (False, None, "longer and shorter replacements are off"),
+    (False, "0", "longer and shorter replacements are switched off"),
 ])
 def test_a_closed_gate_trims_and_says_why(monkeypatch, tmp_path, device, flag,
                                           needle):
@@ -800,10 +813,11 @@ def _sidx_size(reader, writes, path):
 # --------------------------------------------------------------------------
 # the GUI option
 # --------------------------------------------------------------------------
-def test_the_gui_option_is_the_only_thing_that_opens_the_gate(monkeypatch):
-    """Unset must mean the build every headless caller and every spawned encode
-    worker already makes — they inherit os.environ without ever seeing the
-    dialog, so whatever "unset" means is what they build."""
+def test_the_app_never_closes_the_gate(monkeypatch):
+    """PAD-843: always on, and unset is what every headless caller and every
+    spawned encode worker builds, so the app sets nothing: an "audio_grow"
+    an older settings.json carries is ignored, and neither defaults table
+    has the key any more."""
     from pinball_decryptor.app import App
     from pinball_decryptor.webui.tabs import audio as audio_tab
 
@@ -811,20 +825,13 @@ def test_the_gui_option_is_the_only_thing_that_opens_the_gate(monkeypatch):
     monkeypatch.setattr(ext4_grow, "available", lambda: (True, "test"))
     app = object.__new__(App)
 
-    App._apply_audio_advanced_env(app, {})                 # defaults
-    assert "PAD_STERN_AUDIO_GROW" not in os.environ
-    assert engine._audio_grow_gate(False)[0] is False
+    for cfg in ({}, {"audio_grow": False}, {"audio_grow": True}):
+        App._apply_audio_advanced_env(app, cfg)
+        assert "PAD_STERN_AUDIO_GROW" not in os.environ
+        assert engine._audio_grow_gate(False)[0] is True
 
-    App._apply_audio_advanced_env(app, {"audio_grow": True})
-    assert os.environ["PAD_STERN_AUDIO_GROW"] == "1"
-    assert engine._audio_grow_gate(False)[0] is True
-
-    App._apply_audio_advanced_env(app, {"audio_grow": False})
-    assert "PAD_STERN_AUDIO_GROW" not in os.environ
-
-    # Both defaults tables agree, so the dialog and the engine can't drift.
-    assert App._AUDIO_ADV_DEFAULTS["audio_grow"] is False
-    assert audio_tab.ADV_DEFAULTS["audio_grow"] is False
+    assert "audio_grow" not in App._AUDIO_ADV_DEFAULTS
+    assert "audio_grow" not in audio_tab.ADV_DEFAULTS
 
 
 @pytest.mark.parametrize("grow,seconds", [(True, 3.0), (False, 1.0)])

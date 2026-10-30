@@ -142,12 +142,10 @@ def test_the_option_and_its_help_name_shorter_replacements():
     js = os.path.join(os.path.dirname(webui_pkg.__file__), "static", "js", "tabs", "audio.js")
     with open(js, encoding="utf-8") as f:
         src = f.read()
-    assert 'label="Allow replacements longer or shorter than the original' in src
-    assert "Shorter ones too." in src
-    help_ = dict(HELP_CONTENT["Replace Audio"])["Longer replacements (Advanced Audio Options)"]
+    start = src.index("<b>Longer and shorter replacements: always on.</b>")
+    assert "0.1 s before the sound it replaces gets its own length" in src[start:]
+    help_ = dict(HELP_CONTENT["Replace Audio"])["Longer and shorter replacements (always on)"]
     assert "0.1 s shorter than the original" in help_
-    why = E._audio_grow_gate(False)[1]
-    assert '"Allow replacements longer or shorter than the original"' in why
 
 
 # --------------------------------------------------------------------------

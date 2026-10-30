@@ -559,23 +559,22 @@ def test_audio_advanced_offers_replacement_loudness(tmp_path):
             assert var not in os.environ
 
 
-def test_audio_advanced_offers_longer_replacements_and_wires_them_up(
-        tmp_path, monkeypatch):
-    """The "Allow replacements longer or shorter than the original" option carries out
-    to the env var the engine gates on.  The engine reads it from os.environ
-    (spawned encode workers inherit that, nothing else), so an option that
-    is saved but not wired up would look normal and silently keep trimming.
-    It defaults to off."""
+def test_longer_replacements_are_always_on(tmp_path, monkeypatch):
+    """PAD-843: longer and shorter replacements are always on, so the
+    Advanced dialog no longer carries the option, and an "audio_grow" an
+    older settings.json carries (on or off) never reaches the engine: the
+    engine's default with PAD_STERN_AUDIO_GROW unset is on."""
     monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
-    with web_app(tmp_path, mfr="stern") as w:
+    settings = {"audio_advanced": {"audio_grow": False}}
+    with web_app(tmp_path, mfr="stern", settings=settings) as w:
         app = w.app
-        assert not w.call("audio.advanced_get")["cfg"].get("audio_grow")
+        assert "audio_grow" not in w.call("audio.advanced_get")["cfg"]
         assert "PAD_STERN_AUDIO_GROW" not in os.environ
-        w.run(app._on_audio_advanced_change, {"audio_grow": True})
-        assert os.environ.get("PAD_STERN_AUDIO_GROW") == "1"
-        assert app._settings["audio_advanced"]["audio_grow"] is True
-        w.run(app._on_audio_advanced_change, {})
-        assert "PAD_STERN_AUDIO_GROW" not in os.environ
+        assert w.window._audio_grow_active() is True
+        for cfg in ({"audio_grow": True}, {"audio_grow": False}, {}):
+            w.run(app._on_audio_advanced_change, cfg)
+            assert "PAD_STERN_AUDIO_GROW" not in os.environ
+            assert w.window._audio_grow_active() is True
 
 
 def test_audio_group_duplicates_off_by_default_and_not_remembered(tmp_path):
@@ -655,11 +654,12 @@ def test_audio_preview_limit_caps_trimmed_replacement(tmp_path):
 
 
 def test_audio_preview_keeps_a_longer_replacement_whole_when_the_bank_grows(
-        tmp_path):
-    """With the Stern longer-replacements option on, a replacement longer
-    than its slot is kept whole on Write, so the Replacement pane must not
-    mark its tail as trimmed: no cap, the original's end marked instead.
-    Off, or on Spike 1 (no grow path), it trims exactly as before."""
+        tmp_path, monkeypatch):
+    """Longer replacements are always on for Stern Spike 2 (PAD-843), so a
+    replacement longer than its slot is kept whole on Write and the
+    Replacement pane must not mark its tail as trimmed: no cap, the
+    original's end marked instead.  Switched off (PAD_STERN_AUDIO_GROW=0), or
+    on Spike 1 (no grow path), it trims exactly as before."""
     with web_app(tmp_path, mfr="stern") as w:
         svc = w.window.service("audio")
         stern = w.window.current_mfr
@@ -671,11 +671,11 @@ def test_audio_preview_keeps_a_longer_replacement_whole_when_the_bank_grows(
             svc._keep = {}
             svc.audio_trim_var.set(True)
         w.run(_setup)
-        svc._advanced = dict(svc._advanced, audio_grow=False)
+        monkeypatch.setenv("PAD_STERN_AUDIO_GROW", "0")
         assert w.run(svc._compute_preview_limit, rel, 45.6) == 0.32
         assert w.run(svc._preview_grow_from, rel, 45.6) is None
 
-        svc._advanced = dict(svc._advanced, audio_grow=True)
+        monkeypatch.delenv("PAD_STERN_AUDIO_GROW")
         assert w.run(svc._compute_preview_limit, rel, 45.6) is None
         assert w.run(svc._preview_grow_from, rel, 45.6) == 0.32
         # a replacement that fits its slot has nothing to mark

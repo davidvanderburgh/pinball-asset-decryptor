@@ -6749,11 +6749,12 @@ class App:
     # engine baseline stays authoritative.
     # Blip-free callouts are not here any more: they are always on (PAD-523),
     # so a "blip_free" / "blip_free_optin" left in an older settings.json is
-    # ignored and never reaches PAD_STERN_BLIP_FREE.
+    # ignored and never reaches PAD_STERN_BLIP_FREE.  Longer and shorter
+    # replacements went the same way (PAD-843): always on, so an "audio_grow"
+    # left in an older settings.json is ignored too.
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "audio_grow": False,
         "loudness": "match", "loudness_db": 0,
     }
 
@@ -6803,13 +6804,9 @@ class App:
             setenv("PAD_STERN_SLOT_SEED_DB", -max(min(mag, 90), 40))
         else:
             setenv("PAD_STERN_SLOT_SEED_DB", None)
-        # Replacements longer than their slot.  Only the ON case sets a var:
-        # spawned encode workers and headless callers inherit os.environ
-        # without ever going through this dialog, so unset means the build
-        # they already make, which trims a long clip to fit.  Only an explicit
-        # "1" grows the sound bank.
-        setenv("PAD_STERN_AUDIO_GROW",
-               "1" if d.get("audio_grow", False) else None)
+        # Replacements longer or shorter than their slot are always on
+        # (PAD-843): the engine's default with PAD_STERN_AUDIO_GROW unset, so
+        # nothing here sets it, and a support-set "0" is left alone.
 
     def _on_audio_advanced_change(self, cfg):
         """Persist + apply the Advanced audio options."""

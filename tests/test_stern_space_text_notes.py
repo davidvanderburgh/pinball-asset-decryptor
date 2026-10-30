@@ -108,7 +108,7 @@ def test_the_advanced_audio_text_knows_the_platform():
                       "static", "js", "tabs", "audio.js")
     with open(js, encoding="utf-8") as f:
         src = f.read()
-    start = src.index('label="Allow replacements longer or shorter than the original')
+    start = src.index("<b>Longer and shorter replacements: always on.</b>")
     para = src[start:src.index("</p>", start)]
     assert "${mac ?" in para and "Windows and Linux" in para
     assert "trimmed to fit it" in para
@@ -119,7 +119,7 @@ def test_static_help_says_where_the_control_is():
     """The help can't tell the platform, so every pointer at the control says
     it is on Windows and Linux."""
     for tab, section in (("Replace Audio",
-                          "Longer replacements (Advanced Audio Options)"),
+                          "Longer and shorter replacements (always on)"),
                          ("Replace Video", "Size limits"),
                          ("Replace Video", "Checking a card you already built")):
         text = plain(render(dict(HELP_CONTENT[tab])[section]))
@@ -131,7 +131,7 @@ def test_static_help_says_where_the_control_is():
 # ------------------------------------------------------- what the code does
 def test_help_says_longer_sounds_are_trimmed_to_the_room():
     text = dict(HELP_CONTENT["Replace Audio"])[
-        "Longer replacements (Advanced Audio Options)"]
+        "Longer and shorter replacements (always on)"]
     assert "is not trimmed" not in text
     assert "trimmed to fit it" in text
     assert "Keep this song whole if the bank fills up" in text

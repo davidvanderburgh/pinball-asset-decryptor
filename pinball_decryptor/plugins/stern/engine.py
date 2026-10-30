@@ -4474,24 +4474,19 @@ def _audio_grow_gate(dest_is_device, gr_path=None):
     """``(ok, why)`` — may this write place a replacement callout LONGER than
     its stock slot in new space at the end of the sound bank?
 
-    Off unless ``PAD_STERN_AUDIO_GROW=1`` asks for it: a grown sound bank is
-    confirmed playing on a real machine, but it is opt-in because it changes
-    the build (an image build only) rather than something to do on every
-    write without asking.  Beyond the flag it needs the
+    Always on since PAD-843: a grown sound bank is confirmed playing on a
+    real machine (no loop, correct cut-off), so the Advanced Audio Options
+    checkbox that made it opt-in is gone.  ``PAD_STERN_AUDIO_GROW=0`` still
+    turns it off (engine-level only, for support and tests, like
+    ``PAD_STERN_BLIP_FREE=0``).  Beyond that it needs the
     same things a longer game program needs — an image build, and a host that
     can grow a file inside an ext4 image — plus a firmware whose codec objects
     carry their own length, which is what lets a sound decode past its stock
     range at all.  A closed gate is never an error: the sound is fitted to its
     slot exactly as it is today and the log says why."""
-    if os.environ.get("PAD_STERN_AUDIO_GROW") != "1":
-        # Name the switch: the default is off, so this is the reason nearly
-        # every trim gives, and a user who handed over a whole song has no
-        # other way to learn the option exists (PAD-174).
-        return False, ("longer and shorter replacements are off; to keep each at "
-                       "its own length, tick "
-                       "\"Allow replacements longer or shorter than the original\" "
-                       "under the Audio tab's Advanced... and build an "
-                       "image file")
+    if os.environ.get("PAD_STERN_AUDIO_GROW") == "0":
+        return False, ("longer and shorter replacements are switched off "
+                       "(PAD_STERN_AUDIO_GROW=0)")
     if dest_is_device:
         return False, ("a direct-SD write can't grow the sound bank; build an "
                        "image file")
@@ -11099,7 +11094,7 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
     One file in several modes of a slot at one loudness goes in once: those modes share its
     record (at two loudnesses it is two records, each levelled its own way). A file longer
     than its slot's own sound is cut to that length unless the build may keep replacements whole
-    (*longer_ok*: "Allow replacements longer or shorter than the original"), as a replacement is.
+    (*longer_ok*: longer and shorter replacements, always on since PAD-843), as a replacement is.
 
     PAD-511: a slot the game plays as the opening part of a song in parts (*sites*, the play
     tables: :func:`_sound_mode_song`) gives its file the whole song - ``"song"`` ``{sid: [idx,
@@ -11201,7 +11196,7 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                     when), "info")
         if (not longer_ok or (_SMo.is_turn(mode) and not _SMo.is_attract(mode))) and want > room \
                 and not _SMo.is_juke(mode):
-            # as a replacement is with "Allow replacements longer or shorter than the original" off; a file
+            # as a replacement is when the bank can't grow (direct-SD, PAD_STERN_AUDIO_GROW=0); a file
             # in turn always (PAD-565: the game plays it for as long as its slot's descriptor says).
             # Never a jukebox song (PAD-685): the game plays a record it is handed whole. PAD-809: nor
             # a flipper sound in attract: the runtime hands the carrier its own record, which plays

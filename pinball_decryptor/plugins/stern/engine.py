@@ -20470,6 +20470,13 @@ def _list_ids(plan, old_map, touched):
     return out
 
 
+
+class SoundRoomError(RuntimeError):
+    """The card's longer sounds pass what the machine holds in memory beside image.bin
+    (:func:`_plan_sound_banks`): an answer for the Write Failed dialog, not a crash
+    (PAD-880, as card_size.CardSizeError is)."""
+
+
 def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows, used,
                       reader, img_node, space_chk, log, game_sids=None, game_why=None,
                       sm_frags=None, game_seqs=None, sm_seqs=None):
@@ -20670,11 +20677,14 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             from . import sound_modes as _SMo
             u = sm_frags[i][0][0]
             return _SMo.what(u["rel"], u["mode"], u.get("name", ""))
+        # (PAD-880: the user's own file by name: "the game's idx 70" read as a stock sound)
+        mine = ("your %s for " % os.path.basename(str(audio_edits[i]))
+                if i in user_grows and audio_edits.get(i) else "")
         if i in game_sids:
-            return "the game's sound id %d (idx %d)" % (game_sids[i], i)
+            return "%sthe game's sound id %d (idx %d)" % (mine, game_sids[i], i)
         if i in seq_of:
-            return "the game's idx %d (played in parts by sound id(s) %s)" % (
-                i, ", ".join(map(str, sorted(seq_of[i].sids))))
+            return "%sthe game's idx %d (played in parts by sound id(s) %s)" % (
+                mine, i, ", ".join(map(str, sorted(seq_of[i].sids))))
         if i in parts_of:
             return "idx %d (copied: a part of idx %s)" % (
                 i, ", ".join(map(str, parts_of[i].grown)))
@@ -20698,25 +20708,55 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
                    key=lambda u: (-one_of[id(u)], u.edits[0].idx))
     bank_units = SB.split_units(small, limit=limit, stride=stride) if small else []
     cap_alone = SB.alone_bank_room(staged)
-    for u in longs:
+    def _bank_words(g):
+        """The sounds of bank *g* a user can shorten, one line of the refusal (PAD-880)."""
+        names = [os.path.basename(str(audio_edits[e.idx]))
+                 if e.idx in user_grows and audio_edits.get(e.idx) else _named(e.idx)
+                 for x in g for e in x.edits
+                 if e.idx not in parts_of and e.idx not in mparts_of]
+        if len(names) > 3:
+            names = ["%d shorter sounds" % len(names)]
+        return "    %d MB  %s" % (SB.unit_bytes(g, stride) // 10**6, ", ".join(names))
+    for n, u in enumerate(longs):
         e = u.edits[0]
-        others = sorted((SB.unit_bytes(g, stride) for g in bank_units),
-                        reverse=True)[:SB.SOUND_CHANNELS - 1]
+        others_g = sorted(bank_units, key=lambda g: -SB.unit_bytes(g, stride))[
+            :SB.SOUND_CHANNELS - 1]
+        others = [SB.unit_bytes(g, stride) for g in others_g]
         room = min(cap_alone, max(0, SB.MAPPED_MAX - staged - sum(others)))
         if one_of[id(u)] > room:
             stereo = byidx[e.idx].get("chan") == 2
-            raise RuntimeError(
+            # PAD-880: an Iron Maiden card with a dozen longer songs was refused naming one
+            # by the game's sound ids alone, and its maker cut videos (card space, not the
+            # machine's memory) to make room: name every bank that can play beside it, and
+            # how much the longest of the card's sounds, this one and the rest still to
+            # place, have to lose all told
+            top = sorted(others + [one_of[id(x)] for x in longs[n:]],
+                         reverse=True)[:SB.SOUND_CHANNELS]
+            over = staged + sum(top) - SB.MAPPED_MAX
+            what = (
                 "%s is too long for this card: it goes into a sound bank, and the game holds "
                 "image.bin (%d MB) and every bank it is playing a sound from in memory at once, "
                 "so beside the %d other bank(s) that can play with it (%d MB) this sound's bank "
                 "can be at most %d MB here, about %.1f minutes of %s sound (this one needs %d "
-                "MB%s). Shorten it, or make fewer of the card's other sounds longer."
+                "MB%s)."
                 % (_named(e.idx)[0].upper() + _named(e.idx)[1:], staged // 10**6, len(others),
                    sum(others) // 10**6, room // 10**6,
                    room / float(_STEREO_BYTES_PER_MIN // (1 if stereo else 2)),
                    "stereo" if stereo else "mono", one_of[id(u)] // 10**6,
                    ", with the %d other record(s) the game plays it with" % (len(u.edits) - 1)
                    if len(u.edits) > 1 else ""))
+            if over > 0 and others_g:
+                what += (
+                    "\n\nThe longer sounds together have to come to about %d MB less (about "
+                    "%.1f minutes of stereo sound), best taken from the longest of them:\n%s"
+                    % (-(-over // 10**6), over / float(_STEREO_BYTES_PER_MIN),
+                       "\n".join([_bank_words(g) for g in others_g] + [
+                           _bank_words([u]) + "  (this one)"])))
+            else:
+                what += " Shorten it, or make fewer of the card's other sounds longer."
+            raise SoundRoomError(
+                what + "\n\nThis is the machine's memory, not the card's space: removing "
+                "videos or other files does not change it.")
         bank_units.append([u])
     groups = []
     for g in bank_units:
@@ -20731,7 +20771,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     sizes = sorted((SB.unit_bytes(g, stride) for g in bank_units), reverse=True)
     live = sum(sizes[:SB.SOUND_CHANNELS])
     if staged + live > SB.MAPPED_MAX:
-        raise RuntimeError(
+        raise SoundRoomError(
             "The game holds image.bin and every sound bank it is playing a sound from in "
             "memory at once (up to one for each of its %d sound channels), and here they could "
             "come to %d MB (image.bin %d MB with the card's own sounds, the banks %d MB), past "

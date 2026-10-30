@@ -16,6 +16,9 @@ def _open(w, proj):
     w.drain()
     w.call("color.panel_open")
     w.drain()
+    # PAD-864: a Spike 2 machine opens on individual files; these are the overlay's
+    w.call("color.set_mode", "display")
+    w.drain()
 
 
 def test_one_drag_is_one_step_and_undo_puts_it_back(tmp_path):

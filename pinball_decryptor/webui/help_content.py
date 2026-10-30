@@ -926,8 +926,10 @@ HELP_CONTENT = {
          "- The build grows the scene to fit it. The game draws it from the same "
          "top-left corner, so a wider picture reaches further right.\n"
          "- Needs an image build, not a direct SD write.\n"
-         "- A few pictures can't change size (full-screen backgrounds, for one): the "
-         "build fits those to the original size and the log names each.\n"
+         "- A picture the scene draws as a box fill keeps its box on screen: the "
+         "extra pixels give more detail where the scene zooms in.\n"
+         "- A few pictures can't change size (font atlases, for one): the build "
+         "fits those to the original size and the log names each.\n"
          "- Tested in the PC emulator; no machine has run one yet."),
         ("Color column (Spike 2)", [
             "Every row has a Color mark saying whether a color profile goes into "

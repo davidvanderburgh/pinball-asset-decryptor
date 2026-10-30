@@ -157,6 +157,27 @@ def manifest(scene, tex2rel=None, font_of=None, asset2rel=None):
     return out
 
 
+def picture_fills(man):
+    """``({image: [(w, h), ...]}, {image, ...})`` of a scene's manifest: the size of every
+    Shape that fills with each picture, and every picture a Bitmap names.  A Shape draws its
+    fill into its own fixed rect, so such a picture cannot take a new size in that scene
+    (PAD-857, the engine's ``radium_grow.drawn_by``)."""
+    objs = man.get("objects") or {}
+    fills, named = {}, set()
+    for o in objs.values():
+        if not o:
+            continue
+        if o.get("kind") == "Bitmap" and o.get("image"):
+            named.add(o["image"])
+        elif o.get("kind") == "Shape" and o.get("fill") is not None:
+            bm = objs.get(str(o["fill"])) or {}
+            if bm.get("image"):
+                left, top, right, bottom = o["rect"]
+                fills.setdefault(bm["image"], []).append(
+                    (int(round(right - left)), int(round(bottom - top))))
+    return fills, named
+
+
 def font_sizes(scene, data, images, tables, off2rel):
     """``{font size id: (fontrender key, px)}``: each size object of the scene's fonts
     matched to the glyph table that follows it (:func:`radium.parse_glyph_tables`), named the
@@ -341,7 +362,10 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
             out.append(dict(common, kind="bitmap", image=o.get("image"), w=o["w"], h=o["h"]))
         elif k == "Shape":
             fill = objects.get(str(o.get("fill"))) if o.get("fill") is not None else None
-            x, y, rw, rh = o["rect"]
+            # left, top, right, bottom: Godzilla's attract title fills (422, 4, 939, 664)
+            # with a 517x660 Bitmap, and the game squeezes the fill into that box (PAD-857)
+            x, y, right, bottom = o["rect"]
+            rw, rh = right - x, bottom - y
             if fill is not None and fill.get("w") and fill.get("h"):
                 sx, sy = rw / float(fill["w"]), rh / float(fill["h"])
                 out.append(dict(common, kind="bitmap", image=fill.get("image"),

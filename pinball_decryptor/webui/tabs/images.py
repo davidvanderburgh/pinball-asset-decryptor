@@ -175,17 +175,41 @@ _TREES = {"key": None, "trees": {}}
 _TREES_LOCK = threading.Lock()
 
 
+def _trees(assets_path):
+    """The project's scene trees, read once per ``scene_tree.json``."""
+    from ...plugins.stern import scene_edit
+    stamp = scene_edit._trees_stamp(assets_path)
+    with _TREES_LOCK:
+        if _TREES["key"] != (assets_path, stamp):
+            _TREES["key"], _TREES["trees"] = (assets_path, stamp), scene_edit.trees_of(assets_path)
+        return _TREES["trees"]
+
+
+def fill_boxes(assets_path):
+    """PAD-857 (DragonRR): ``{image rel: (w, h)}``, the biggest Shape box each picture is
+    the fill of in any scene (Godzilla's map monitor overlay: a 1360x768 box, the whole
+    screen, that the scene zooms in on).  The game squeezes a fill into its box whatever its
+    own size, so a bigger one keeps its place and size and shows more detail when zoomed."""
+    from ...plugins.stern import scene_eval
+    boxes = {}
+    for man in _trees(assets_path).values():
+        try:
+            fills, _named = scene_eval.picture_fills(man)
+        except Exception:                                # noqa: BLE001
+            continue
+        for image, sizes in fills.items():
+            boxes.setdefault(image, set()).update(sizes)
+    return {"images/" + image: max(v, key=lambda s: s[0] * s[1])
+            for image, v in boxes.items()}
+
+
 def scene_turns(assets_path, rel, cards):
     """PAD-534 (DragonRR): ``{card: [(degrees clockwise, mirrored), ...]}``, how each scene
     in *cards* turns picture *rel* where it draws it at rest (the Scenes window's still);
     a scene that draws it upright, or not at rest, is left out.  Planet X's bridge pointer
     is a south-pointing picture the game draws turned 48 degrees."""
-    from ...plugins.stern import scene_edit, scene_eval
-    stamp = scene_edit._trees_stamp(assets_path)
-    with _TREES_LOCK:
-        if _TREES["key"] != (assets_path, stamp):
-            _TREES["key"], _TREES["trees"] = (assets_path, stamp), scene_edit.trees_of(assets_path)
-        trees = _TREES["trees"]
+    from ...plugins.stern import scene_eval
+    trees = _trees(assets_path)
     image = rel[len("images/"):] if rel.startswith("images/") else rel
     out = {}
     for card in cards:
@@ -337,6 +361,7 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
         self._open_groups = set()
         self._view_groups = {}
         self._atlas_cache = None
+        self._fills_cache = None
         self._keep_col_cache = None
         self._nchunks = 0
         self._shown = 0
@@ -1046,6 +1071,20 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
             return False
         stem = os.path.splitext(os.path.basename(rel))[0]
         return stem not in self._font_atlas_stems()
+
+    def _fill_box(self, rel):
+        """``(w, h)`` of the Shape box the game squeezes *rel* into (:func:`fill_boxes`),
+        or None."""
+        scan = self._scan_dir or ""
+        cache = self._fills_cache
+        if not cache or cache[0] != scan:
+            try:
+                got = fill_boxes(scan) if scan else {}
+            except Exception:                            # noqa: BLE001
+                log.exception("fill boxes %s", scan)
+                got = {}
+            cache = self._fills_cache = (scan, got)
+        return cache[1].get(rel)
 
     def _keep_state(self, rel):
         if not (self._assignments.get(rel) and self._can_keep_size(rel)):
@@ -2090,6 +2129,11 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
         self.image_keep_size_var.set(keep)
         if new == orig:
             text = "Same size as the original (%d×%d)." % orig
+        elif keep and self._fill_box(rel):
+            # PAD-857: the game squeezes a Shape's fill into the Shape's box
+            text = ("Kept at %d×%d (the original is %d×%d): the game draws it in the same "
+                    "%d×%d box, so it shows at the same size, with more detail where the "
+                    "scene zooms in on it." % (new + orig + self._fill_box(rel)))
         elif keep:
             text = ("Kept at %d×%d (the original is %d×%d): the scene grows "
                     "to fit it." % (new + orig))

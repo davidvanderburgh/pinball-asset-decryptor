@@ -86,6 +86,11 @@ encryption. The app opens all three; you get the game's asset tree.
 | Pulp Fiction | 6 sound banks decoded into ~1,000 `.wav` files, repacked on Write ([docs/CGC_BNK_RE.md](../../docs/CGC_BNK_RE.md)) |
 | Cactus Canyon | The Williams DCS sound ROMs, CGC's 756 added sounds and 2,044 colour display pictures, each repacked on Write ([docs/CC_REVISITED_RE.md](../../docs/CC_REVISITED_RE.md)) |
 
+### Code mods on Write
+
+- **pad_mods folder:** C files in the project's `pad_mods` folder are built for the machine on Write (`pad_mods/lib/hook.c` becomes `lib/hook.so`). They are linked against the libraries on the card being written, and the sources never ship. Building needs `arm-linux-gnueabihf-gcc`.
+- **Checked before writing:** every program or library going onto the card must be 32-bit ARM hard-float and need nothing newer than the machine's glibc 2.13. One that fails stops the Write before anything changes, since a bad preloaded library boot-loops the machine.
+
 ### Options on the Extract and Replace tabs
 
 - **Auto-transcribe samples to callouts.csv** names CGC's numbered sounds

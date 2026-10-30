@@ -1366,6 +1366,7 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
         return None
     from . import fontrender as fr
     from . import scene_eval as ev
+    from . import radium_grow
     try:
         w, h = int(man["stage"][0]), int(man["stage"][1])
     except (KeyError, TypeError, ValueError, IndexError):
@@ -1404,7 +1405,14 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             img = _picture(assets_dir, d.get("image"), cache, pictures, sizes)
             if img is None:
                 continue
-            got = _warp(img, d["m"], w, h)
+            m = d["m"]
+            want = (sizes or {}).get(d.get("image"))
+            if d["kind"] == "bitmap" and d.get("w") and d.get("h") and own_size(img.size, want):
+                # kept at its own size: in the original's place and size, fitted and
+                # centred, as the Write lays it out (PAD-865, radium_grow.keep_boxes)
+                m = ev.compose(m, radium_grow.fit_box(img.size[0], img.size[1],
+                                                      d["w"], d["h"]))
+            got = _warp(img, m, w, h)
             if got is not None:
                 _composite(canvas, got[0], got[1], got[2], d["mul"], d["add"])
                 if skip is not None:

@@ -5040,6 +5040,26 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
         n_tree = 0
         if card_path in tree_ops:
             new, n_tree = _apply_tree_ops(new, card_path, *tree_ops[card_path], log=log)
+        if got["images"]:
+            # PAD-865: a picture kept at its own size shows in the original's place and
+            # size, fitted and centred, over whatever the Scenes window did to its node
+            try:
+                new, n_fit, n_box, n_left = radium_grow.keep_boxes(bytes(buf), new,
+                                                                    got["images"])
+            except Exception as e:                          # noqa: BLE001
+                n_fit = n_box = n_left = 0
+                log("Scene %s: its resized picture(s) couldn't be fitted to the original's "
+                    "place (%s), so they draw at their own size from the original's "
+                    "top-left corner." % (card_path, e), "warning")
+            if n_fit or n_box:
+                log("Scene %s: %d place(s) that draw a picture kept at its own size show it "
+                    "in the original's place and size, fitted and centered, with its extra "
+                    "pixels for where the scene zooms in." % (card_path, n_fit + n_box),
+                    "info")
+            if n_left:
+                log("Scene %s: %d place(s) draw a picture kept at its own size together with "
+                    "something else, so they show it at its own size from the original's "
+                    "top-left corner." % (card_path, n_left), "warning")
         if not occ and not got["images"] and not n_tree:
             log("Display text in %s: none of the longer lines were found when "
                 "re-serializing; the scene is left unchanged." % card_path,

@@ -1404,9 +1404,12 @@ class TreeEditMixin:
 
     def _fit_kept(self, draws, worlds):
         """A pick that keeps its own size is written at that size (the Write regrows the
-        picture's record and every sprite that names it, PAD-154), so the box it draws on the
-        glass is the pick's size, not the stock one.  Only a Bitmap drawn by its own node: a
-        Shape's fill is stretched to the shape's rect whatever its size."""
+        picture's record and every sprite that names it, PAD-154), so its draw is the pick's
+        size; one the Write grows shows in the original's place and size, fitted and centred
+        (PAD-865, radium_grow.keep_boxes), so its draw is scaled into the stock box: what is
+        picked and measured on the glass is the picture where it shows.  Only a Bitmap drawn
+        by its own node: a Shape's fill is fitted into the shape's rect as it is drawn."""
+        from ..plugins.stern import radium_grow, scene_eval, scene_render
         picks = self._tree_pictures()
         sizes = self._tree_sizes()
         for d in draws:
@@ -1416,8 +1419,12 @@ class TreeEditMixin:
                 continue
             size = _kept_size(picks.get(d["image"]) or {}, self.assets_dir, d["image"],
                               sizes.get(d["image"]))
-            if size is not None:
-                d["w"], d["h"] = size
+            if size is None:
+                continue
+            if d.get("w") and d.get("h") and scene_render.own_size(size, sizes.get(d["image"])):
+                d["m"] = scene_eval.compose(d["m"], radium_grow.fit_box(
+                    size[0], size[1], d["w"], d["h"]))
+            d["w"], d["h"] = size
 
     def _tree_unselect(self):
         """Nothing selected: a scene opens, and the Scenes tab comes forward, with no layer

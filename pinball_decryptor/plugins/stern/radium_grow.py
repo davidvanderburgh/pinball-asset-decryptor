@@ -216,6 +216,75 @@ def regrow(data, texts=None, images=None):
             "shift": shift}
 
 
+def fit_box(w, h, bw, bh):
+    """The affine ``(a, b, c, d, tx, ty)`` that draws a *w* x *h* picture inside a *bw* x *bh*
+    box: scaled to fit whole (its shape kept) and centred in it (PAD-865)."""
+    s = min(bw / float(w), bh / float(h))
+    return (s, 0.0, 0.0, s, (bw - s * w) / 2.0, (bh - s * h) / 2.0)
+
+
+def keep_boxes(stock, grown, offs):
+    """*grown* (a scene :func:`regrow` resized the pictures at the stock offsets *offs* in)
+    with each of those pictures shown in its stock place and size, fitted and centred:
+    ``(bytes, n nodes, n shapes, n left)``.
+
+    The game draws a Bitmap's ``[w][h]`` texels 1:1 in its node's units from the node's
+    origin, and a bigger texture under a stock ``[w][h]`` is CROPPED to its top-left corner
+    (PAD-865, emulator: Godzilla LE's in-game tank icon).  So a picture kept at its own
+    size (DragonRR: "retain the original image's size ... keep the image centered") keeps
+    its new size, and every node that draws it has :func:`fit_box` multiplied into its
+    tracks on the right, inside whatever the Scenes window did to the node: the same
+    picture the Scenes preview draws.  A Shape's fill is squeezed into the Shape's box by
+    the game (PAD-857), so its box is narrowed to the picture's shape, centred.  A node
+    that also draws something else (another picture over its timeline, text, a group) is
+    left as it was and counted in *n left*."""
+    from . import scene_tree
+    from .scene_edit import _composed, _m16_with, _m6_of16, _tree_index
+    sc0 = scene_tree.parse(stock)
+    sc = scene_tree.parse(grown)
+    tids = {tid for tid, t in sc0.textures.items() if t.get("data_off") in set(offs)}
+    if not tids:
+        return grown, 0, 0, 0
+
+    def box_of(o):
+        was = sc0.objects.get(o.id)
+        if was is None or was.kind != "Bitmap":
+            return None
+        w, h, bw, bh = o.body["w"], o.body["h"], was.body["w"], was.body["h"]
+        if not (w and h and bw and bh) or (w, h) == (bw, bh):
+            return None
+        return fit_box(w, h, bw, bh)
+    n_nodes = n_shapes = n_left = 0
+    for n, _sibs in _tree_index(sc).values():
+        mine = [c.obj for c in n.components
+                if c.obj.kind == "Bitmap" and c.obj.body.get("tex") in tids]
+        if not mine:
+            continue
+        fits = {box_of(o) for o in mine}
+        if len(fits) != 1 or len(mine) != len(n.components):
+            n_left += 1
+            continue
+        fit = fits.pop()
+        if fit is None:
+            continue
+        tracks = n.tracks or [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])]
+        n.tracks = [(f, _m16_with(m, _composed(_m6_of16(m), fit))) for f, m in tracks]
+        n_nodes += 1
+    for o in sc.objects.values():
+        bm = o.body.get("bitmap") if o.kind == "Shape" else None
+        if bm is None or bm.body.get("tex") not in tids:
+            continue
+        left, top, right, bottom = o.body["rect"]
+        a, _b, _c, d, tx, ty = fit_box(bm.body["w"], bm.body["h"], right - left, bottom - top)
+        rect = [left + tx, top + ty, left + tx + a * bm.body["w"], top + ty + d * bm.body["h"]]
+        if any(abs(x - y) > 0.01 for x, y in zip(rect, o.body["rect"])):
+            o.body["rect"] = rect
+            n_shapes += 1
+    if not (n_nodes or n_shapes):
+        return grown, 0, 0, n_left
+    return scene_tree.serialize(sc), n_nodes, n_shapes, n_left
+
+
 def grow(data, edits):
     """Return ``(new_bytes, occurrences, shift)`` for *data* with every
     display-text occurrence equal to a key of *edits* (``{old: new}``,

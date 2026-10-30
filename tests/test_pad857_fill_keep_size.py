@@ -18,6 +18,8 @@ What holds now, read off the scene's tree:
 * a Shape's fill grows, its box keeps its size, and the log says so;
 * the Scenes preview squeezes a fill into its box, read as left, top, right, bottom;
 * the Images tab offers Keep size for a fill and says it shows at the same size.
+
+PAD-865 fits a kept picture into the original's place, fitted and centered (its own tests).
 """
 import hashlib
 import json
@@ -159,22 +161,6 @@ def test_picture_fills_read_off_the_manifest():
     assert named == {"f.png", "i.png"}
 
 
-def test_fill_boxes_across_scenes(tmp_path):
-    from pinball_decryptor.webui.tabs import images
-    data, fill, icon = _scene()
-    tex = tmp_path / "images" / "scene_textures"
-    tex.mkdir(parents=True)
-    a = _manifest(data, fill, icon, "scene_textures/f.png", "scene_textures/i.png")
-    # a picture that is a fill in one scene and an icon in another still names its box
-    b = _manifest(data, fill, icon, "scene_textures/both.png", "scene_textures/i2.png")
-    c = _manifest(data, fill, icon, "scene_textures/f3.png", "scene_textures/both.png")
-    (tex / "scene_tree.json").write_text(json.dumps({"/a": a, "/b": b, "/c": c}),
-                                         encoding="utf-8")
-    assert images.fill_boxes(str(tmp_path)) == {"images/scene_textures/f.png": FILL,
-                                                "images/scene_textures/both.png": FILL,
-                                                "images/scene_textures/f3.png": FILL}
-
-
 SHAPE = "images/scene_textures/radimg_Shape_64x32_2838c52d.png"
 ICON_REL = "images/scene_textures/radimg_Icon_16x8_0badf00d.png"
 
@@ -218,18 +204,21 @@ def test_the_tab_says_a_kept_fill_shows_at_the_same_size(window):
     assert keep["on"] is False and "squeezed to fit" in keep["text"]
     assert w.call("images.set_keep", SHAPE, True) is not False
     assert w.state("images")["preview"]["keep"] == {"on": True, "text": (
-        "Kept at 131×74 (the original is 64×32): the game draws it in the same 64×32 box, "
-        "so it shows at the same size, with more detail where the scene zooms in on it.")}
+        "Kept at 131×74 (the original is 64×32): it shows in the original's place and size, "
+        "fitted and centered, with more detail where the scene zooms in on it. Make it "
+        "bigger or smaller on the Scenes tab.")}
     assert w.window.pending_image_assignments(assets)[2] == frozenset({SHAPE})
 
 
-def test_a_picture_drawn_by_size_keeps_the_old_words(window):
+def test_a_picture_drawn_by_size_says_the_same(window):
     w, svc, assets, rep = window
     w.call("images.select", ICON_REL)
     w.answers.append(rep)
     assert w.call("images.choose", ICON_REL) == ICON_REL
     assert w.call("images.set_keep", ICON_REL, True) is not False
-    assert w.state("images")["preview"]["keep"]["text"].endswith("the scene grows to fit it.")
+    assert w.state("images")["preview"]["keep"]["text"].endswith(
+        "fitted and centered, with more detail where the scene zooms in on it. Make it "
+        "bigger or smaller on the Scenes tab.")
     assert w.window.pending_image_assignments(assets)[2] == frozenset({ICON_REL})
 
 

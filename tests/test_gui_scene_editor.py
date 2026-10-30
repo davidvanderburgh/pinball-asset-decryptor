@@ -629,8 +629,8 @@ def test_an_exact_size_in_pixels(tmp_path):
 def test_a_kept_size_pick_whose_file_is_gone_boxes_the_picture_drawn(tmp_path):
     """DragonRR (PAD-332): a Write puts a kept-size pick over the project's own file at its
     own size.  With the pick's source file gone (moved, renamed) the preview draws that
-    project file, so its box is that size too, not the stock picture's (which sat up and
-    left of the art)."""
+    project file, at that size.  PAD-865: in the original's place and size, so its box is
+    the stock one, the picture inside it at half the scale."""
     from PIL import Image
     from pinball_decryptor.core import staged_changes
     folder = tmp_path / "proj"
@@ -656,11 +656,11 @@ def test_a_kept_size_pick_whose_file_is_gone_boxes_the_picture_drawn(tmp_path):
         tv = _tv(w)
         p = tv["props"]
         assert (p["pic"]["w"], p["pic"]["h"]) == grown
-        assert abs(p["w"] - w0 * 2) <= 1.5 and abs(p["h"] - h0 * 2) <= 1.5
-        assert p["pic"]["sx"] == sx
+        assert abs(p["w"] - w0) <= 1.5 and abs(p["h"] - h0) <= 1.5
+        assert abs(p["pic"]["sx"] - sx / 2) <= 0.1
         pts = next(h for h in tv["hits"] if h["id"] == art)["pts"]
         xs = [q[0] for q in pts]
-        assert abs((max(xs) - min(xs)) - w0 * 2) <= 1.5
+        assert abs((max(xs) - min(xs)) - w0) <= 1.5
         w.call("text_scenes.close")
 
 
@@ -668,7 +668,7 @@ def test_a_built_own_size_picture_with_no_pick_keeps_its_size(tmp_path):
     """DragonRR (PAD-337): picking another picture saved the picks without the ones already
     built at their own size, so they lost their keep marks and were drawn squeezed back to the
     stock size.  A Write keeps a project file's own size with no pick at all, so the preview
-    does too: the box and the picture drawn are the file's size."""
+    does too: the picture is the file's size, shown in the original's box (PAD-865)."""
     import numpy as np
     from PIL import Image
     from pinball_decryptor.core import staged_changes
@@ -691,7 +691,7 @@ def test_a_built_own_size_picture_with_no_pick_keeps_its_size(tmp_path):
         w.call("text_scenes.tree_moment", "f:%d" % _tv(w)["frame"])
         p = _tv(w)["props"]
         assert (p["pic"]["w"], p["pic"]["h"]) == grown
-        assert abs(p["w"] - w0 * 2) <= 1.5 and abs(p["h"] - h0 * 2) <= 1.5
+        assert abs(p["w"] - w0) <= 1.5 and abs(p["h"] - h0) <= 1.5
         w.call("text_scenes.close")
     sizes = scene_render.picture_sizes(str(folder))
     img = scene_render._picture(str(folder), rel, {}, {}, sizes)
@@ -705,8 +705,9 @@ def test_a_built_own_size_picture_with_no_pick_keeps_its_size(tmp_path):
 def test_a_pictures_own_size_and_scale_and_draw_it_1_to_1(tmp_path):
     """DragonRR (PAD-277): Stern ships Credits_Text at 1044 x 264 and lets the game shrink it,
     which leaves jagged edges.  The panel shows a picture's own size and the scale it is drawn
-    at; a picture made at the size it shows (kept at its own size on the Images tab) is then
-    drawn pixel for pixel with Draw 1:1, its top-left corner where it was."""
+    at; a picture made at the size it shows (kept at its own size on the Images tab) shows in
+    the original's box (PAD-865), so near pixel for pixel already, and exactly with Draw 1:1,
+    its top-left corner where it was."""
     from PIL import Image
     from pinball_decryptor.core import staged_changes
     folder = tmp_path / "proj"
@@ -733,7 +734,8 @@ def test_a_pictures_own_size_and_scale_and_draw_it_1_to_1(tmp_path):
         w.call("text_scenes.tree_moment", "f:%d" % _tv(w)["frame"])
         p = _tv(w)["props"]
         assert (p["pic"]["w"], p["pic"]["h"]) == Image.open(str(small)).size
-        assert p["pic"]["sx"] == s0 and p["w"] < stock[0] * s0 / 100.0 / 2
+        assert 90 <= p["pic"]["sx"] <= 115 and p["pic"]["sx"] != 100
+        x0, y0 = p["x"], p["y"]
         assert w.call("text_scenes.tree_one_to_one", art)
         p = _tv(w)["props"]
         assert p["pic"]["sx"] == 100 and p["pic"]["sy"] == 100

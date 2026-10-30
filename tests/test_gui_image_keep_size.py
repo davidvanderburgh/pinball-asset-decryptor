@@ -249,7 +249,9 @@ def test_the_original_size_is_the_snapshots_once_a_pick_is_applied(window):
     assert keep is not None
     assert keep["on"] is True
     assert keep["text"] == (
-        "Kept at 90×22 (the original is 40×20): the scene grows to fit it.")
+        "Kept at 90×22 (the original is 40×20): it shows in the original's place and "
+        "size, fitted and centered, with more detail where the scene zooms in on it. Make "
+        "it bigger or smaller on the Scenes tab.")
     # unticked, the build squeezes the pick to the snapshot's size, not the
     # slot file's
     w.call("images.set_keep", BANNER, False)

@@ -1329,7 +1329,10 @@ def rig_cmd_root(script, *args):
     if sys.platform != "win32":
         raise RuntimeError("rig_cmd_root is WSL-only")
     root_env = _rig_env()
-    return _wsl_head(root=True) + (["env"] + root_env if root_env else []) +         ["bash", "%s/%s" % (_wsl_path(rig_dir()), script)] +         [str(a) for a in args]
+    return _rig.reach_argv(
+        _wsl_head(root=True) + (["env"] + root_env if root_env else [])
+        + ["bash", "%s/%s" % (_wsl_path(rig_dir()), script)]
+        + [str(a) for a in args])
 
 
 #: wsl_account()'s cache: [(user, home), probed].  One probe per app run is
@@ -1475,11 +1478,13 @@ def watch_cmd(minutes, env, savestates=True):
             # checkpointable launch is built here rather than by rig_cmd, and
             # a run started without it is a run whose sound quietly takes the
             # WSLg path (PAD-95).
-            return (_wsl_head(root=True) + ["env",
-                     "HOME=" + home, "PAD_PIVOT=1"] + _rig_env()
-                    + list(rig_win_python_env()) + list(env)
-                    + ["bash", "%s/watch.sh" % _wsl_path(rig_dir()),
-                       str(minutes)])
+            # and a card on a network share mounted first (PAD-849)
+            return _rig.reach_argv(
+                _wsl_head(root=True) + ["env",
+                 "HOME=" + home, "PAD_PIVOT=1"] + _rig_env()
+                + list(rig_win_python_env()) + list(env)
+                + ["bash", "%s/watch.sh" % _wsl_path(rig_dir()),
+                   str(minutes)])
     return rig_cmd("watch.sh", minutes, env=env)
 
 

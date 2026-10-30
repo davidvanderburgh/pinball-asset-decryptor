@@ -31,11 +31,128 @@ def wsl_path(win_path):
 
     A POSIX path has no drive letter and passes through untouched, so this is
     also correct on a Linux desktop where there is no translation to do.
+
+    PAD-849: WSL mounts the PC's LOCAL drives and nothing else.  A card on a
+    network share, a mapped network drive or a ``subst`` drive opened fine in
+    the app and was a path that did not exist inside WSL, so the emulator said
+    "pick a card image" about the card that was picked.  A ``subst`` letter is
+    spelled as the folder it stands for; a share (or a letter mapped to one)
+    as ``/mnt/unc/<server>/<share>/...``, which :func:`reach_argv` mounts.
     """
     p = (win_path or "").replace("\\", "/")
+    if sys.platform == "win32":
+        p = _real_host_path(p)
+    if p.startswith("//"):
+        return _unc_wsl_path(p)
     if len(p) > 1 and p[1] == ":":
         p = "/mnt/" + p[0].lower() + p[2:]
     return p
+
+
+#: Where a network share is mounted inside WSL: ``/mnt/unc/<server>/<share>``,
+#: both lower-cased (SMB names ignore case) - where core/executor.py mounts a
+#: share for Extract and Write too.
+UNC_ROOT = "/mnt/unc"
+
+
+def _unc_wsl_path(p):
+    parts = [x for x in p.split("/") if x]
+    if len(parts) < 2:
+        return p                          # a bare //server: nothing to mount
+    return "/".join([UNC_ROOT, parts[0].lower(), parts[1].lower()]
+                    + parts[2:])
+
+
+def _real_host_path(p):
+    """*p* (forward slashes) with what WSL cannot see spelled as what it can:
+    the ``\\\\?\\`` long-path prefix dropped, a ``subst`` drive replaced by its
+    folder and a mapped network drive by its share.  Anything else, or
+    anything the lookups cannot answer, comes back unchanged."""
+    if p[:4] in ("//?/", "//./"):
+        p = p[4:]
+        if p[:4].upper() == "UNC/":
+            p = "//" + p[4:]
+    for _ in range(4):                  # a subst of a subst, at most a few
+        if not (len(p) > 1 and p[1] == ":" and p[0].isalpha()
+                and (len(p) == 2 or p[2] == "/")):
+            return p
+        target = _drive_target(p[0])
+        if not target:
+            return p
+        p = target.replace("\\", "/").rstrip("/") + p[2:]
+    return p
+
+
+def _drive_target(letter):
+    """``C:\\folder`` for a ``subst`` drive, ``\\\\server\\share`` for a mapped
+    network drive, None for a drive WSL mounts itself (or when Windows will
+    not say).  In-memory lookups only: nothing here touches the drive, so a
+    sleeping NAS cannot stall the caller."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        buf = ctypes.create_unicode_buffer(1024)
+        if ctypes.windll.kernel32.QueryDosDeviceW(letter + ":", buf, 1024):
+            dev = buf.value
+            if dev.startswith("\\??\\"):            # subst
+                dev = dev[4:]
+                if dev[:4].upper() == "UNC\\":
+                    return "\\" + dev[3:]
+                return dev
+        n = wintypes.DWORD(1024)
+        if ctypes.windll.mpr.WNetGetConnectionW(letter + ":", buf,
+                                                ctypes.byref(n)) == 0:
+            return buf.value or None
+    except Exception:                                    # noqa: BLE001
+        return None
+    # a mapping this session cannot see (the app run elevated) is still the
+    # user's, in the registry
+    from ..core.admin import _drive_visible, _persistent_mapping
+    if not _drive_visible(letter):
+        return _persistent_mapping(letter)
+    return None
+
+
+def unc_mounts(argv):
+    """``[(source, mount point)]`` for every network share named in *argv*
+    (as :func:`wsl_path` spells one), each once."""
+    import re
+    seen = []
+    pat = re.compile(r"%s/([^/\n]+)/([^/\n]+)" % re.escape(UNC_ROOT))
+    for a in argv:
+        for m in pat.finditer(str(a)):
+            pair = ("//%s/%s" % m.groups(), m.group(0))
+            if pair not in seen and "'" not in m.group(0):
+                seen.append(pair)
+    return seen
+
+
+def reach_argv(argv):
+    """A root ``wsl.exe ... -e <command>`` with the network shares its
+    arguments name mounted first (PAD-849); any other command unchanged.
+
+    Done in the same process, ahead of the command, rather than once per app
+    run: a WSL restart (which the app does itself) drops every mount, and a
+    remembered "mounted" would then be the original bug again.  Only a root
+    command can mount; one that runs as the user is left alone, and fails on
+    the path in its own words if nothing has mounted it yet."""
+    if sys.platform != "win32" or "-e" not in argv:
+        return argv
+    at = argv.index("-e")
+    head = argv[:at]
+    if "root" not in head or "-u" not in head:
+        return argv
+    mounts = unc_mounts(argv[at + 1:])
+    if not mounts:
+        return argv
+    step = "".join(
+        "mountpoint -q '%s' 2>/dev/null || { mkdir -p '%s' && "
+        "mount -t drvfs '%s' '%s' || printf '%%s\\n' '[pad] could not open "
+        "the network share %s from WSL' >&2; }; "
+        % (mp, mp, src, mp, src.replace("/", "\\"))
+        for src, mp in mounts)
+    return argv[:at + 1] + ["sh", "-c", step + 'exec "$@"', "pad-reach"] \
+        + argv[at + 1:]
 
 
 def linux_host_env(environ=None, scrubbed=None):
@@ -126,8 +243,8 @@ def rig_cmd_root(rig_dir, script, *args, env=(), distro=None):
     head = ["wsl.exe"] + (["-d", str(distro)] if distro else [])         + ["-u", "root", "-e"]
     if env:
         head = head + ["env"] + [str(e) for e in env]
-    return head + ["bash", "%s/%s" % (wsl_path(rig_dir), script)] + \
-        [str(a) for a in args]
+    return reach_argv(head + ["bash", "%s/%s" % (wsl_path(rig_dir), script)]
+                      + [str(a) for a in args])
 
 
 def parse_status(text):

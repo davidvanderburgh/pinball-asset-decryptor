@@ -351,8 +351,10 @@ def main(argv):
         # Visual Pinball's own playfield window: borderless in windowed
         # mode, so it cannot be dragged, and 10.8 ignores WindowPosX/Y in
         # its ini - the controller moves it once when a table starts
-        # (PAD-811: it gets a title bar and resize edges, keeps the table's
-        # proportions, and remembers where it is left; `player frame off`)
+        # (PAD-811, PAD-845: borderless, dragged to move, 16 px from an edge
+        # to resize, double-click to fill the screen, in the table's
+        # proportions, and remembered where it is left; `player frame on`
+        # gives it a title bar instead)
         d = padlaunch.kit_load()
         if len(rest) == 2 and rest[0] == "frame" and rest[1] in ("on", "off"):
             d["player_frame"] = rest[1] == "on"
@@ -371,7 +373,7 @@ def main(argv):
         padlaunch.kit_save(d)
         print("player window: %s, frame %s (applied when a table is next opened; a width scales"
               " the picture, its height follows the table's proportions)"
-              % (json.dumps(d.get("player", "off")), "off" if d.get("player_frame") is False else "on"))
+              % (json.dumps(d.get("player", "off")), "on" if d.get("player_frame") else "off"))
         return 0
     if cmd == "playfield":
         # the rig's own virtual playfield window beside Visual Pinball:

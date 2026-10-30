@@ -417,6 +417,118 @@ def test_shadow_dof_reaches_b2s_under_vbscript(tmp_path):
     assert r.stdout.strip() == "B2S got name 101=1 110=1 110=0", r.stdout + r.stderr
 
 
+DOF_TRIBUTE = """Option Explicit
+ExecuteGlobal GetTextFile("controller.vbs")
+Const cGameName = "rushle"   ' DOF's name
+Sub Table1_Init : LoadEM : End Sub
+Sub Drain_Hit : DOF 127, DOFOff : End Sub
+Sub sw001_Hit()
+    DOF 107, DOFPulse
+    If BumperLevel = 0 Then DOF 99, DOFPulse : AddScore 10
+    If bGameOn Then
+        DOF 98, DOFPulse
+    Else
+        DOF 97, DOFPulse
+    End If
+    PlaySoundAt SoundFXDOF("Bump_" & Int(Rnd * 5) + 1, 141, DOFPulse, DOFContactors), sw001 ' x
+End Sub
+Sub LeftSlingShot_Slingshot : DOF 103, DOFPulse : End Sub
+Sub kicker1_Timer
+    kicker1.Kick 190, 15
+    PlaySoundAt SoundFXDOF("fx_kicker", 113, DOFPulse, DOFContactors), Kicker1
+End Sub
+Sub CreateNewBall()
+    BallRelease.CreateBall
+    PlaySoundAt SoundFXDOF("fx_Ballrel", 123, DOFPulse, DOFContactors), BallRelease
+    BallRelease.Kick 90, 4
+End Sub
+Sub Trigger1_Hit()
+    If bAutoPlunger Then
+        PlungerIM.AutoFire
+        DOF 110, DOFPulse
+    End If
+    DOF 77, DOFPulse
+End Sub
+"""
+
+
+def _dof_shadow():
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m.update(orig_hits=False, orig_keep=["LeftSlingShot"], b2s_name="rush_le")
+    return m
+
+
+def test_shadow_carries_the_tables_dof_into_its_own_subs():
+    # PAD-847: with orig_hits false a bumper's own Hit sub never runs, and the
+    # kickers, trough and plunger fire on the machine's coils through
+    # cvpmBallStack: the table's DOF calls there were lost. The unconditional
+    # ones come along; a branch of the shadow game's rules does not.
+    vs = pytest.importorskip("vpxshadow")
+    out, rep = vs.patch(DOF_TRIBUTE, _dof_shadow())
+    assert ("Sub sw001_Hit : vpmTimer.PulseSw 1053 : PadDOF 107, DOFPulse, Empty"
+            " : PadDOF 141, DOFPulse, DOFContactors : End Sub") in out
+    for n in (99, 98, 97, 77):
+        assert "PadDOF %d," % n not in out
+    # its own sub still runs, so its DOF is not doubled
+    assert "Sub LeftSlingShot_Slingshot : vpmTimer.PulseSw 1069 : LeftSlingShot_Slingshot_orig : End Sub" in out
+    assert "PadDOF 103," not in out
+    assert "\tPlaySoundAt \"fx_drain\", Drain\n\tPadDOF 127, DOFOff, Empty\nEnd Sub" in out
+    # the coils: beside kicker1.Kick, BallRelease.Kick (neutered by now) and
+    # PlungerIM.AutoFire in the same branch
+    assert "Sub PadSol1(e)\n\tbsTrough.SolOut e\n\tIf e Then\n\t\tPadDOF 123, DOFPulse, DOFContactors\n\tEnd If" in out
+    assert "Sub PadSol2(e)\n\tPadAutoPlunge e\n\tIf e Then\n\t\tPadDOF 110, DOFPulse, Empty\n\tEnd If" in out
+    assert "Sub PadSol3(e)\n\tbsKicker1.SolOut e\n\tIf e Then\n\t\tPadDOF 113, DOFPulse, DOFContactors" in out
+    assert 'SolCallback(1) = "PadSol1"' in out and 'SolCallback(3) = "PadSol3"' in out
+    assert "SolCallback(7)" not in out
+    assert 'Const cGameName = "rush_le"   \' DOF\'s name' in out
+    assert "Sub PadDOF(e, s, toy)" in out
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+    # a table with no DOF anywhere gets none of it
+    plain, _ = vs.patch(MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    assert "PadDOF" not in plain and 'SolCallback(1) = "bsTrough.SolOut"' in plain
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_carried_dof_reaches_b2s_under_vbscript(tmp_path):
+    # the bridge's generated subs, run for real against a controller.vbs
+    # shaped DOF sub: a bumper hit and the coils pulse the B2S server, and a
+    # toy set to sound only (DOFeffects 0) stays still, as SoundFXDOF does
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch(DOF_TRIBUTE, _dof_shadow())
+    tail = out[out.index("Dim bsTrough"):out.index("Sub PadTestTimer_Timer")]
+    lib = ('Dim Controller, B2SOn, DOFeffects(9)\\n'
+           'Const DOFOff = 0, DOFOn = 1, DOFPulse = 2, DOFContactors = 1\\n'
+           'Sub DOF(e, s)\\nIf B2SOn Then\\nIf s = 2 Then\\n'
+           'Controller.B2SSetData e, 1:Controller.B2SSetData e, 0\\nElse\\n'
+           'Controller.B2SSetData e, s\\nEnd If\\nEnd If\\nEnd Sub')
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log, SolCallback(68), sLLFlipper, sLRFlipper",
+        "Class FakeB2S", "Public Sub B2SSetData(a, b) : Log = Log & a & \"=\" & b & \" \" : End Sub", "End Class",
+        "Class FakePad", "Public Sub B2SSetData(a, b) : Log = Log & \"PAD\" & a & \" \" : End Sub", "End Class",
+        "Class FakeStack", "Public Sub SolOut(e) : Log = Log & \"kick \" : End Sub", "End Class",
+        "Class FakeTimer", "Public Sub PulseSw(n) : Log = Log & \"sw\" & n & \" \" : End Sub", "End Class",
+        "Class FakeImpulse", "Public Sub AutoFire : Log = Log & \"fire \" : End Sub", "End Class",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim plungerIM : Set plungerIM = New FakeImpulse",
+        tail,
+        "ExecuteGlobal PadB2SText(Replace(\"%s\", \"\\n\", vbNewLine))" % lib.replace('"', '""'),
+        "Set PadB2S = New FakeB2S : Set Controller = New FakePad : B2SOn = True",
+        "Set bsTrough = New FakeStack : Set bsKicker1 = New FakeStack",
+        "DOFeffects(DOFContactors) = 2",
+        "sw001_Hit : Log = Log & \"| \"",
+        "Execute SolCallback(1) & \" True\" : Execute SolCallback(1) & \" False\" : Log = Log & \"| \"",
+        "Execute SolCallback(2) & \" True\" : Execute SolCallback(3) & \" True\" : Log = Log & \"| \"",
+        "DOFeffects(DOFContactors) = 0",
+        "sw001_Hit",
+        "WScript.Echo Log"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == ("sw1053 107=1 107=0 141=1 141=0 | kick 123=1 123=0 kick | "
+                                "fire 110=1 110=0 kick 113=1 113=0 | sw1053 107=1 107=0"), r.stdout + r.stderr
+
+
 def test_shadow_flipper_subs_are_found_whole_word_only():
     vs = pytest.importorskip("vpxshadow")
     lines = ["Sub SolLFlipperX(e)", "  Private Sub SolRFlipper (Enabled) ' x", "Function SolURFlipper()"]
@@ -1251,3 +1363,56 @@ def test_tmnt_lists_only_the_pro():
     titles = [t for row in vs.known_tables("") for t in row["titles"]]
     assert "turtles_pro" in titles and "turtles_le" not in titles
     assert pv.maps()["turtles_le"]["listed"] is False and pv.maps()["turtles_pro"]["listed"]
+
+
+def test_player_resize_keeps_the_side_the_user_dragged():
+    # PAD-845: the snap kept the width, so a bottom-edge drag (height only)
+    # was put straight back. A 4:3 picture, 1440x1080 before each drag
+    pc = pytest.importorskip("padcontroller")
+    a, before = 0.75, (1440, 1080)
+    assert pc.keep_proportions(before, (1140, 1080), a) == (1140, 855)    # side edge: width wins
+    assert pc.keep_proportions(before, (1440, 810), a) == (1080, 810)     # bottom edge: height wins
+    assert pc.keep_proportions(before, (1200, 700), a) == (933, 700)      # corner: the bigger change
+    assert pc.keep_proportions(None, (1000, 999), a) == (1000, 750)       # nothing before: width
+
+
+def test_player_fills_its_monitor_at_the_tables_proportions():
+    # the maximize box / title double-click: the largest picture that keeps
+    # its shape, centred; the frame as on David's PC (11 px sides, 45 top)
+    pc = pytest.importorskip("padcontroller")
+    win, client = (1653, 516, 1462, 1136), (1664, 561, 1440, 1080)
+    x, y, w, h = pc.fill_monitor(win, client, (0, 0, 3840, 2160))
+    assert h <= 2160 and abs((w - 22) * 0.75 - (h - 56)) <= 1
+    assert x == (3840 - w) // 2 and y == (2160 - h) // 2
+    x, y, w, h = pc.fill_monitor(win, client, (3840, 0, 5760, 1080))    # a second, smaller monitor
+    assert 3840 <= x and x + w <= 5760 and h <= 1080
+
+
+def test_player_grips_take_16_px_inside_the_playfield_edge():
+    # PAD-845: "loosely grab 16 pixels from the edge", like the display.
+    # The picture 1440x1080 at 1664,561 on the screen
+    pc = pytest.importorskip("padcontroller")
+    c = (1664, 561, 1440, 1080)
+    assert pc.grip_edge((1664 + 1440 - 10, 900), c) == "r"
+    assert pc.grip_edge((1664 + 5, 900), c) == "l"
+    assert pc.grip_edge((2300, 561 + 1080 - 15), c) == "b"
+    assert pc.grip_edge((2300, 561 + 3), c) == "t"
+    assert pc.grip_edge((1664 + 1440 - 2, 561 + 1080 - 2), c) == "br"
+    assert pc.grip_edge((1664 + 4, 561 + 4), c) == "tl"
+    assert pc.grip_edge((1664 + 1440 - 17, 900), c) is None                 # 17 px in: the game's
+    assert pc.grip_edge((2300, 900), c) is None
+    assert pc.grip_edge((1600, 900), c) is None                             # off the picture
+
+
+def test_player_grip_drag_resizes_in_the_tables_proportions():
+    pc = pytest.importorskip("padcontroller")
+    win, client = (1653, 516, 1462, 1136), (1664, 561, 1440, 1080)
+    x, y, w, h = pc.resized("r", win, client, (3100, 900), (2800, 900))
+    assert (x, y) == (1653, 516) and (w - 22, h - 56) == (1140, 855)
+    x, y, w, h = pc.resized("l", win, client, (1670, 900), (1970, 900))
+    assert x + w == 1653 + 1462 and w - 22 == 1140                          # the right side stays
+    x, y, w, h = pc.resized("b", win, client, (2300, 1630), (2300, 1360))
+    assert (w - 22, h - 56) == (1080, 810)
+    x, y, w, h = pc.resized("t", win, client, (2300, 565), (2300, 835))
+    assert y + h == 516 + 1136 and h - 56 == 810                            # the bottom stays
+    assert pc.resized("r", win, client, (3100, 900), (0, 900))[2] - 22 == pc.PLAYER_MIN_W

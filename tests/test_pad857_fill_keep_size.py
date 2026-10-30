@@ -1,22 +1,23 @@
-"""PAD-857 (DragonRR): Keep size on a picture the game draws as a fixed fill.
+"""PAD-857 (DragonRR): Keep size on a picture the game draws as a Shape's fill.
 
 "Radium image scene_textures/radimg_Shape_1360x768_2838c52d.png is 6573x3712, and this
 picture can't take a new size (nothing in its scene draws it by size ...)": Godzilla's map
-monitor overlay is the fill of three 1360x768 Shapes, the whole screen.  A Shape draws its
-fill into its own fixed rect, so the size of the picture cannot change what shows; the build
-was right to fit it, but said so in words that read like a bug, and the Images tab had
-offered Keep size ("the scene grows to fit it") all along.
+monitor overlay is the fill of three 1360x768 Shape boxes, and the scene zooms in on it to
+2x, so a bigger picture is exactly what the user wants.  The rule read the bytes for
+:func:`radium_grow.image_refs` triples only, and a picture ONE Bitmap draws has none: that
+Bitmap's size is the picture record's own.  71 of Godzilla's pictures drawn by one Bitmap,
+and 32 box fills, were refused a new size they could take.
 
-The same rule read the bytes for :func:`radium_grow.image_refs` triples only, and a picture
-ONE Bitmap draws has none (that Bitmap's size is the picture record's own): 71 of Godzilla's
-pictures were refused a new size they could take.
+Measured in the emulator (stock Godzilla LE 1.16, the attract title: a 517x660 Bitmap filling
+the box (422, 4, 939, 664)): grown to 1034x1320 the regrow way, the WHOLE picture is drawn
+squeezed into the same box.  A Shape's rect is left, top, right, bottom.
 
 What holds now, read off the scene's tree:
 
-* a Shape's fill is fitted, and the log names the fixed size and the whole screen;
 * a picture one Bitmap draws grows, and the grown scene's Bitmap is drawn at the new size;
-* the Images tab offers no Keep size for a fill and says why under the preview, and the
-  build is handed the picture without Keep size.
+* a Shape's fill grows, its box keeps its size, and the log says so;
+* the Scenes preview squeezes a fill into its box, read as left, top, right, bottom;
+* the Images tab offers Keep size for a fill and says it shows at the same size.
 """
 import hashlib
 import json
@@ -36,6 +37,7 @@ from tests.test_stern_text_grow import RAD_PATH                     # noqa: E402
 
 STAGE = (64, 32)
 FILL, ICON = (64, 32), (16, 8)
+BOX2 = (8.0, 4.0, 72.0, 36.0)          # the second box: 64x32 again, its corner at (8, 4)
 
 
 def _texture(tid, w, h, rgba):
@@ -46,15 +48,15 @@ def _texture(tid, w, h, rgba):
 
 
 def _scene():
-    """A 64x32 stage: an overlay that is the fill of two 64x32 Shapes (the whole screen),
-    and an icon drawn by one Bitmap.  Returns ``(bytes, fill_off, icon_off)``."""
+    """A 64x32 stage: an overlay that fills two 64x32 Shape boxes, one at the origin and
+    one at (8, 4), and an icon drawn by one Bitmap.  Returns ``(bytes, fill_off, icon_off)``."""
     kids = [
         node(50, "Overlay", [u32(1) + cls(4, "Shape") + u32(FLAG | 14) + u32(6) + s("")
                              + fs(0, 0, *FILL) + u32(0x40000000) + u32(FLAG | 16)
                              + u32(3) + s("") + u32(FILL[0]) + u32(FILL[1])
                              + _texture(20, *FILL, (30, 200, 60, 255))]),
         node(51, "OverlayAgain", [u32(1) + cls(4) + u32(FLAG | 15) + u32(6) + s("")
-                                  + fs(0, 0, *FILL) + u32(0x40000000) + u32(16)]),
+                                  + fs(*BOX2) + u32(0x40000000) + u32(16)]),
         node(52, "Icon", [u32(1) + cls(1, "Bitmap") + u32(FLAG | 12) + u32(3) + s("")
                           + u32(ICON[0]) + u32(ICON[1])
                           + _texture(21, *ICON, (200, 40, 40, 255))],
@@ -74,58 +76,58 @@ def test_the_scene_reads_as_a_tree_and_has_no_triples():
     assert radium_grow.image_refs(data, fill) == []
     assert radium_grow.image_refs(data, icon) == []
     how = radium_grow.drawn_by(scene_tree.parse(data))
+    # a box is left, top, right, bottom: the second one is 64x32 too, not 72x36
     assert how[20] == {"bitmaps": 1, "fills": [FILL, FILL]}
     assert how[21] == {"bitmaps": 1, "fills": []}
 
 
-def test_fill_words_name_the_size_and_the_whole_screen():
-    assert radium_grow.fill_words([(64, 32)], (64, 32)) == (
-        "the game draws it as the fill of a fixed 64x32 shape, the whole screen, so a "
-        "bigger picture would still show at 64x32")
-    assert "whole screen" not in radium_grow.fill_words([(10, 10), (40, 20)], (64, 32))
-    assert "fixed 40x20 shape" in radium_grow.fill_words([(10, 10), (40, 20)], (64, 32))
-
-
-def test_a_fill_is_fitted_and_the_log_says_why(tmp_path, monkeypatch):
+def _grown(tmp_path, monkeypatch, off, size, new, name):
     monkeypatch.setattr(engine, "_image_grow_gate", lambda d: (True, ""))
-    data, fill, _icon = _scene()
-    png = _project(tmp_path, data, fill, *FILL)
-    Image.new("RGBA", (128, 64), (255, 0, 255, 255)).save(png)
+    data = _scene()[0]
+    png = _project(tmp_path, data, off, *size, name=name)
+    Image.new("RGBA", new, (255, 0, 255, 255)).save(png)
     writes, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
-    assert n == 1 and grown == {}
-    assert [w[0] for w in writes] == [fill]
-    said = [m for lvl, m in msgs if lvl == "warning" and "can't take a new size" in m]
-    assert len(said) == 1
-    assert ("fill of a fixed 64x32 shape, the whole screen, so a bigger picture would "
-            "still show at 64x32" in said[0])
-    assert "fitted to the original 64x32" in said[0]
-    assert "nothing in its scene draws it" not in said[0]
+    assert writes == [] and n == 1
+    assert not any("can't take a new size" in m for _l, m in msgs)
+    (_node, imgs), = grown.values()
+    w, h, payload = imgs[off]
+    assert (w, h) == new
+    out = radium_grow.regrow(data, images={off: (w, h, payload)})
+    assert radium_grow.agree(data, out["data"], {}, out["shift"], images={off: new})[0] == []
+    return out, msgs
 
 
 def test_a_picture_one_bitmap_draws_takes_a_new_size(tmp_path, monkeypatch):
-    monkeypatch.setattr(engine, "_image_grow_gate", lambda d: (True, ""))
-    data, _fill, icon = _scene()
-    png = _project(tmp_path, data, icon, *ICON, name="icon")
-    Image.new("RGBA", (30, 10), (255, 0, 255, 255)).save(png)
-    writes, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
-    assert writes == [] and n == 1
-    (_node, imgs), = grown.values()
-    w, h, payload = imgs[icon]
-    assert (w, h) == (30, 10)
-    assert not any("can't take a new size" in m for _l, m in msgs)
-    # the grown scene draws its one Bitmap at the new size: the record's own size is it
-    out = radium_grow.regrow(data, images={icon: (w, h, payload)})
+    _data, _fill, icon = _scene()
+    out, msgs = _grown(tmp_path, monkeypatch, icon, ICON, (30, 10), "icon")
     assert out["images"] == {icon: 0}
     sc = scene_tree.parse(out["data"])
     bm, = [o for o in sc.objects.values() if o.kind == "Bitmap" and o.body["tex"] == 21]
     assert (bm.body["w"], bm.body["h"]) == (30, 10)
     assert (sc.textures[21]["w"], sc.textures[21]["h"]) == (30, 10)
-    assert radium_grow.agree(data, out["data"], {}, out["shift"],
-                             images={icon: (30, 10)})[0] == []
-    # the preview draws it at the new size too
+    assert not any("box" in m for _l, m in msgs)
     man = scene_eval.manifest(sc, {sc.textures[21]["data_off"]: "icon.png"})
     d, = [d for d in scene_eval.draw_list(man) if d.get("image") == "icon.png"]
     assert (d["w"], d["h"]) == (30, 10)
+
+
+def test_a_fill_takes_a_new_size_and_its_box_keeps_its_own(tmp_path, monkeypatch):
+    _data, fill, _icon = _scene()
+    out, msgs = _grown(tmp_path, monkeypatch, fill, FILL, (128, 64), "fill")
+    sc = scene_tree.parse(out["data"])
+    assert (sc.textures[20]["w"], sc.textures[20]["h"]) == (128, 64)
+    bm, = [o for o in sc.objects.values() if o.kind == "Bitmap" and o.body["tex"] == 20]
+    assert (bm.body["w"], bm.body["h"]) == (128, 64)
+    boxes = sorted(tuple(o.body["rect"]) for o in sc.objects.values() if o.kind == "Shape")
+    assert boxes == [(0.0, 0.0, 64.0, 32.0), BOX2]
+    said = [m for lvl, m in msgs if "box" in m]
+    assert len(said) == 1 and "fills a 64x32 box in its scene, and the box keeps its size" \
+        in said[0] and "128x64 pixels" in said[0]
+    # the preview squeezes the bigger picture into the same boxes, where the boxes are
+    man = scene_eval.manifest(sc, {sc.textures[20]["data_off"]: "fill.png"})
+    got = sorted((d["m"][4], d["m"][5], d["m"][0] * d["w"], d["m"][3] * d["h"])
+                 for d in scene_eval.draw_list(man) if d.get("image") == "fill.png")
+    assert got == [(0.0, 0.0, 64.0, 32.0), (8.0, 4.0, 64.0, 32.0)]
 
 
 def test_a_scene_that_does_not_walk_keeps_the_byte_rule(tmp_path, monkeypatch):
@@ -157,20 +159,20 @@ def test_picture_fills_read_off_the_manifest():
     assert named == {"f.png", "i.png"}
 
 
-def test_fixed_fills_need_every_scene_to_fill(tmp_path):
+def test_fill_boxes_across_scenes(tmp_path):
     from pinball_decryptor.webui.tabs import images
     data, fill, icon = _scene()
     tex = tmp_path / "images" / "scene_textures"
     tex.mkdir(parents=True)
     a = _manifest(data, fill, icon, "scene_textures/f.png", "scene_textures/i.png")
-    # "both.png" is a fill in one scene and drawn by size in another: it keeps the box
-    b = _manifest(data, fill, icon, "scene_textures/x.png", "scene_textures/both.png")
-    c = _manifest(data, fill, icon, "scene_textures/both.png", "scene_textures/i3.png")
+    # a picture that is a fill in one scene and an icon in another still names its box
+    b = _manifest(data, fill, icon, "scene_textures/both.png", "scene_textures/i2.png")
+    c = _manifest(data, fill, icon, "scene_textures/f3.png", "scene_textures/both.png")
     (tex / "scene_tree.json").write_text(json.dumps({"/a": a, "/b": b, "/c": c}),
                                          encoding="utf-8")
-    got = images.fixed_fills(str(tmp_path))
-    assert got == {"images/scene_textures/f.png": (64, 32, True),
-                   "images/scene_textures/x.png": (64, 32, True)}
+    assert images.fill_boxes(str(tmp_path)) == {"images/scene_textures/f.png": FILL,
+                                                "images/scene_textures/both.png": FILL,
+                                                "images/scene_textures/f3.png": FILL}
 
 
 SHAPE = "images/scene_textures/radimg_Shape_64x32_2838c52d.png"
@@ -207,37 +209,32 @@ def window(tmp_path):
         yield w, svc, str(assets), str(rep)
 
 
-def test_the_tab_says_a_fill_cannot_take_a_new_size(window):
+def test_the_tab_says_a_kept_fill_shows_at_the_same_size(window):
     w, svc, assets, rep = window
     w.call("images.select", SHAPE)
     w.answers.append(rep)
     assert w.call("images.choose", SHAPE) == SHAPE
     keep = w.state("images")["preview"]["keep"]
-    assert keep == {"fixed": True, "on": False, "text": (
-        "The game draws this picture as a fixed 64×32 fill, the whole screen, so it "
-        "can't take a new size: your 131×74 picture will be squeezed to fit.")}
-    assert w.call("images.set_keep", SHAPE, True) is False
-    rows = {r["r"]: r for k in range(w.state("images")["nchunks"])
-            for r in w.state("images")["rows_%d" % k]}
-    assert rows[SHAPE]["k"] is None                 # no box in the Keep size column
-    # a Keep size saved before this release is not handed to the build
-    svc._keep_size.add(SHAPE)
-    assert w.window.pending_image_assignments(assets)[2] == frozenset()
+    assert keep["on"] is False and "squeezed to fit" in keep["text"]
+    assert w.call("images.set_keep", SHAPE, True) is not False
+    assert w.state("images")["preview"]["keep"] == {"on": True, "text": (
+        "Kept at 131×74 (the original is 64×32): the game draws it in the same 64×32 box, "
+        "so it shows at the same size, with more detail where the scene zooms in on it.")}
+    assert w.window.pending_image_assignments(assets)[2] == frozenset({SHAPE})
 
 
-def test_the_tab_still_offers_it_for_a_picture_drawn_by_size(window):
+def test_a_picture_drawn_by_size_keeps_the_old_words(window):
     w, svc, assets, rep = window
     w.call("images.select", ICON_REL)
     w.answers.append(rep)
     assert w.call("images.choose", ICON_REL) == ICON_REL
-    keep = w.state("images")["preview"]["keep"]
-    assert keep["on"] is False and "fixed" not in keep
     assert w.call("images.set_keep", ICON_REL, True) is not False
+    assert w.state("images")["preview"]["keep"]["text"].endswith("the scene grows to fit it.")
     assert w.window.pending_image_assignments(assets)[2] == frozenset({ICON_REL})
 
 
 # ---------------------------------------------------------------------------------------------
-# DragonRR's scene (Godzilla's Tokyo map, cac32730), when a copy is at hand
+# DragonRR's scene (Godzilla's map, cac32730), when a copy is at hand
 # ---------------------------------------------------------------------------------------------
 REAL = os.path.join(os.environ.get("PAD_SCENE_DIR", r"c:\tmp\pad251"), "cac32730.radium")
 
@@ -253,10 +250,8 @@ def test_the_monitor_overlay_on_the_real_scene():
     overlay, = [i for i in imgs if hashlib.md5(
         data[i["data_off"]:i["data_off"] + i["length"]]).hexdigest().startswith("2838c52d")]
     got = how[tid_of[overlay["data_off"]]]
-    assert got["fills"] and set(got["fills"]) == {(1360, 768)}
-    assert "the whole screen" in radium_grow.fill_words(got["fills"], sc.stage[:2])
-    # the pictures one Bitmap draws, refused before, are now let grow
+    assert got["bitmaps"] == 1 and set(got["fills"]) == {(1360, 768)}
+    # every picture a Bitmap draws can now take a new size; the triples alone missed some
     single = [i for i in imgs if not radium_grow.image_refs(data, i["data_off"], imgs)
-              and how.get(tid_of[i["data_off"]], {}).get("bitmaps")
-              and not how[tid_of[i["data_off"]]]["fills"]]
-    assert single
+              and how.get(tid_of[i["data_off"]], {}).get("bitmaps")]
+    assert overlay in single and len(single) > 1

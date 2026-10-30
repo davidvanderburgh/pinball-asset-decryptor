@@ -185,24 +185,22 @@ def _trees(assets_path):
         return _TREES["trees"]
 
 
-def fixed_fills(assets_path):
-    """PAD-857 (DragonRR): ``{image rel: (w, h, whole screen)}`` for every picture that
-    every scene drawing it draws as the fill of a fixed Shape (Godzilla's map monitor
-    overlays, 1360x768 fills of the whole screen).  Such a picture cannot take a new size:
-    the build fits it to the original, Keep size or not."""
+def fill_boxes(assets_path):
+    """PAD-857 (DragonRR): ``{image rel: (w, h)}``, the biggest Shape box each picture is
+    the fill of in any scene (Godzilla's map monitor overlay: a 1360x768 box, the whole
+    screen, that the scene zooms in on).  The game squeezes a fill into its box whatever its
+    own size, so a bigger one keeps its place and size and shows more detail when zoomed."""
     from ...plugins.stern import scene_eval
-    fills, named = {}, set()
+    boxes = {}
     for man in _trees(assets_path).values():
         try:
-            f, n = scene_eval.picture_fills(man)
+            fills, _named = scene_eval.picture_fills(man)
         except Exception:                                # noqa: BLE001
             continue
-        stage = tuple((man.get("stage") or (0, 0))[:2])
-        named |= n - set(f)
-        for image, sizes in f.items():
-            w, h = max(sizes, key=lambda s: s[0] * s[1])
-            fills.setdefault(image, (w, h, (w, h) == stage))
-    return {"images/" + image: v for image, v in fills.items() if image not in named}
+        for image, sizes in fills.items():
+            boxes.setdefault(image, set()).update(sizes)
+    return {"images/" + image: max(v, key=lambda s: s[0] * s[1])
+            for image, v in boxes.items()}
 
 
 def scene_turns(assets_path, rel, cards):
@@ -1072,19 +1070,18 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
         if source_label(rel) != "Radium":
             return False
         stem = os.path.splitext(os.path.basename(rel))[0]
-        return (stem not in self._font_atlas_stems()
-                and self._fixed_fill(rel) is None)
+        return stem not in self._font_atlas_stems()
 
-    def _fixed_fill(self, rel):
-        """``(w, h, whole screen)`` when the game draws *rel* as a fixed Shape's fill
-        (:func:`fixed_fills`), else None."""
+    def _fill_box(self, rel):
+        """``(w, h)`` of the Shape box the game squeezes *rel* into (:func:`fill_boxes`),
+        or None."""
         scan = self._scan_dir or ""
         cache = self._fills_cache
         if not cache or cache[0] != scan:
             try:
-                got = fixed_fills(scan) if scan else {}
+                got = fill_boxes(scan) if scan else {}
             except Exception:                            # noqa: BLE001
-                log.exception("fixed fills %s", scan)
+                log.exception("fill boxes %s", scan)
                 got = {}
             cache = self._fills_cache = (scan, got)
         return cache[1].get(rel)
@@ -2111,11 +2108,9 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
         return "In %d scenes: %s%s" % (len(named), shown, more)
 
     def _keep_row(self, rel):
-        """Tk _image_refresh_keep_row: ``{on, text}`` or None (hidden).  PAD-857: a
-        picture drawn as a fixed fill gets ``{fixed: True, text}``, its words only."""
+        """Tk _image_refresh_keep_row: ``{on, text}`` or None (hidden)."""
         rep = self._assignments.get(rel) if rel else None
-        fixed = self._fixed_fill(rel) if rep and rel in self._by_rel else None
-        if not rep or not (fixed or self._can_keep_size(rel)):
+        if not rep or not self._can_keep_size(rel):
             return None
         slot = self._by_rel[rel]
         from ...core import staged_originals
@@ -2130,22 +2125,15 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
                 new = im.size
         except Exception:                                # noqa: BLE001
             return None
-        if fixed:
-            w, h, whole = fixed
-            if new == orig:
-                text = "Same size as the original (%d×%d)." % orig
-            else:
-                text = (("The game draws this picture as a fixed %d×%d fill, the whole "
-                         "screen, so it can't take a new size: your %d×%d picture will be "
-                         "squeezed to fit.") if whole else
-                        ("The game draws this picture as a fixed %d×%d fill, so it can't "
-                         "take a new size: your %d×%d picture will be squeezed to fit.")
-                        ) % (w, h, new[0], new[1])
-            return {"fixed": True, "on": False, "text": text}
         keep = rel in self._keep_size
         self.image_keep_size_var.set(keep)
         if new == orig:
             text = "Same size as the original (%d×%d)." % orig
+        elif keep and self._fill_box(rel):
+            # PAD-857: the game squeezes a Shape's fill into the Shape's box
+            text = ("Kept at %d×%d (the original is %d×%d): the game draws it in the same "
+                    "%d×%d box, so it shows at the same size, with more detail where the "
+                    "scene zooms in on it." % (new + orig + self._fill_box(rel)))
         elif keep:
             text = ("Kept at %d×%d (the original is %d×%d): the scene grows "
                     "to fit it." % (new + orig))
@@ -3022,8 +3010,7 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
         if not assignments:
             return None
         return (dict(self._by_rel), assignments,
-                frozenset(r for r in self._keep_size
-                          if r in assignments and self._can_keep_size(r)))
+                frozenset(r for r in self._keep_size if r in assignments))
 
     def invalidate_asset_scans(self, rescan_visible=True):
         if self._scan_dir:

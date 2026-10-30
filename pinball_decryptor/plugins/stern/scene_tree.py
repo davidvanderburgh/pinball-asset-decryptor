@@ -27,7 +27,7 @@ occurrence, which carries the definition; later occurrences are the bare id)::
     texture    u32 id (first: | u32 w | u32 h | u32 format | name | u32 length | blob)
     Text       u32 symbol | name | f32 L T R B | f32 r g b a | u8 u8 | u32 align | f32 f32
                | text | u32 font | [u64 n](name, u32) | [u64 n] u32 | u8 | u32
-    Shape      u32 symbol | name | f32 x y w h | u32 fill (0: none | else: object, a Bitmap)
+    Shape      u32 symbol | name | f32 left top right bottom | u32 fill (0: none | else: object, a Bitmap)
     StreamingFlipbook  a Sprite body | u32 w | u32 h
                | [u64 n] frame (u32 0 = none | a shared Frame: u32 w | u32 h | u32 fmt
                | asset | u32 index | 4x4)          asset: u32 id (first: | path | u32 size)

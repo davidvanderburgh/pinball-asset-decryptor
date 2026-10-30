@@ -172,8 +172,9 @@ def picture_fills(man):
         elif o.get("kind") == "Shape" and o.get("fill") is not None:
             bm = objs.get(str(o["fill"])) or {}
             if bm.get("image"):
-                _x, _y, w, h = o["rect"]
-                fills.setdefault(bm["image"], []).append((int(round(w)), int(round(h))))
+                left, top, right, bottom = o["rect"]
+                fills.setdefault(bm["image"], []).append(
+                    (int(round(right - left)), int(round(bottom - top))))
     return fills, named
 
 
@@ -361,7 +362,10 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
             out.append(dict(common, kind="bitmap", image=o.get("image"), w=o["w"], h=o["h"]))
         elif k == "Shape":
             fill = objects.get(str(o.get("fill"))) if o.get("fill") is not None else None
-            x, y, rw, rh = o["rect"]
+            # left, top, right, bottom: Godzilla's attract title fills (422, 4, 939, 664)
+            # with a 517x660 Bitmap, and the game squeezes the fill into that box (PAD-857)
+            x, y, right, bottom = o["rect"]
+            rw, rh = right - x, bottom - y
             if fill is not None and fill.get("w") and fill.get("h"):
                 sx, sy = rw / float(fill["w"]), rh / float(fill["h"])
                 out.append(dict(common, kind="bitmap", image=fill.get("image"),

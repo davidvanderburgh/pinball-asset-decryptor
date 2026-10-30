@@ -1,10 +1,10 @@
-"""PAD-857 proof shot: Keep size on a picture the game draws as a fixed fill.
+"""PAD-857 proof shot: Keep size on a picture the game draws as a Shape box fill.
 
     python scripts/shot_pad857.py <repo> <one-scene project> <out_dir> [--after]
 
 The project is a one-scene extract of Godzilla's Kaiju Battle Select scene
 (``cac32730...``): its full-screen overlay ``radimg_Shape_1360x768_2838c52d.png`` is
-drawn by three Shapes at a fixed 1360x768.  A copy of it gets a 6573x3712 replacement
+the fill of three 1360x768 Shape boxes, which the scene zooms in on.  A copy of it gets a 6573x3712 replacement
 with Keep size ticked (DragonRR's case), and the Images tab's preview is photographed
 as ``before_``/``after_images_keep.png``.
 

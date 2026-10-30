@@ -76,15 +76,16 @@ def image_record(data, data_off):
 def drawn_by(scene):
     """``{texture id: {"bitmaps": n, "fills": [(w, h), ...]}}`` for a parsed
     :class:`scene_tree.Scene`: how many Bitmaps name each picture, and the
-    size of every Shape that fills with one (PAD-857).
+    size of every Shape box that fills with one (PAD-857).
 
     A Bitmap draws its picture at its own ``[w][h]``: the FIRST Bitmap of a
     picture carries the picture's definition right after them, so its size
     is the record's ``disp`` pair, and every later one is an
-    :func:`image_refs` triple; :func:`regrow` rewrites both.  A Shape draws
-    its fill Bitmap into its own fixed rect instead (Godzilla's map
-    monitors: a 1360x768 overlay filling a 1360x768 Shape, the whole
-    screen), so a new size there would not show."""
+    :func:`image_refs` triple; :func:`regrow` rewrites both.  A Shape squeezes
+    its fill Bitmap into its own box (``rect`` is left, top, right, bottom),
+    which regrow leaves alone: a bigger fill keeps its place and size on
+    screen and is sharper where the scene zooms in (emulator: Godzilla's
+    attract title, 517x660, drawn whole at 1034x1320 in the same box)."""
     out = {}
 
     def entry(tid):
@@ -93,19 +94,10 @@ def drawn_by(scene):
         if o.kind == "Bitmap":
             entry(o.body["tex"])["bitmaps"] += 1
         elif o.kind == "Shape" and o.body.get("bitmap") is not None:
-            _x, _y, w, h = o.body["rect"]
+            left, top, right, bottom = o.body["rect"]
             entry(o.body["bitmap"].body["tex"])["fills"].append(
-                (int(round(w)), int(round(h))))
+                (int(round(right - left)), int(round(bottom - top))))
     return out
-
-
-def fill_words(fills, stage=None):
-    """Why a picture filling the Shapes *fills* (``[(w, h), ...]``) cannot
-    take a new size, in words; *stage* is the scene's ``(w, h)``."""
-    w, h = max(fills, key=lambda s: s[0] * s[1])
-    whole = ", the whole screen," if stage and (w, h) == tuple(stage[:2]) else ""
-    return ("the game draws it as the fill of a fixed %dx%d shape%s so a "
-            "bigger picture would still show at %dx%d" % (w, h, whole, w, h))
 
 
 def image_refs(data, data_off, images=None):

@@ -6407,7 +6407,10 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
         PAD-857: read off the scene's tree when it walks (:func:`radium_grow.
         drawn_by`): a picture ONE Bitmap draws has no :func:`image_refs`
         triple, only its record's own size, and was refused for it (71 of
-        Godzilla's); a Shape's fill is refused with its fixed size named."""
+        Godzilla's).  A Shape's fill grows too: the game squeezes the whole
+        picture into the Shape's own box (emulator, Godzilla's attract title
+        at 2x), so it keeps its place and size on screen and the extra pixels
+        show where the scene zooms in on it (:func:`_fill_box`)."""
         if radium_path not in scenes:
             from . import radium as _radium, radium_grow as _rg
             from . import scene_tree as _scene_tree
@@ -6426,7 +6429,6 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                     draws = {t["data_off"]: how.get(tid, {"bitmaps": 0,
                                                           "fills": []})
                              for tid, t in sc.textures.items()}
-                    stage = sc.stage[:2]
                 else:
                     # the byte rule: a picture is drawn by size where a
                     # triple names it
@@ -6434,25 +6436,29 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                         "bitmaps": len(_rg.image_refs(data, im["data_off"],
                                                       imgs)), "fills": []}
                         for im in imgs}
-                    stage = None
-                scenes[radium_path] = (atlas, draws, stage)
+                scenes[radium_path] = (atlas, draws)
             except Exception:
                 scenes[radium_path] = None
         facts = scenes[radium_path]
         if facts is None:
             return "its scene couldn't be read"
-        atlas, draws, stage = facts
+        atlas, draws = facts
         if data_off in atlas:
             return ("it is a font atlas, and its letters are measured in its "
                     "pixels")
         how = draws.get(data_off) or {"bitmaps": 0, "fills": []}
-        if how["fills"]:
-            from . import radium_grow as _rg
-            return _rg.fill_words(how["fills"], stage)
         if not how["bitmaps"]:
             return ("nothing in its scene draws it by size, so a new size "
                     "would not be followed")
         return ""
+
+    def _fill_box(radium_path, data_off):
+        """``(w, h)`` of the biggest Shape box that fills with the picture at
+        *data_off*, once :func:`_resize_refusal` has read its scene, or None."""
+        facts = scenes.get(radium_path)
+        fills = ((facts[1].get(data_off) or {}).get("fills") if facts
+                 else None)
+        return max(fills, key=lambda s: s[0] * s[1]) if fills else None
 
     moved = {}                     # card path -> outputs whose record isn't there
     # The block encodes run on a pool (PAD-599): a BC3 encode of a screen
@@ -6541,6 +6547,13 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                             "the scene (%s) is re-serialized around its new "
                             "size." % (output, w, h, pad_w, pad_h, radium_path),
                             "info")
+                        box = _fill_box(radium_path, data_off)
+                        if box:
+                            log("Radium image %s fills a %dx%d box in its scene, "
+                                "and the box keeps its size: the picture shows "
+                                "at the same place and size, with %dx%d pixels "
+                                "for where the scene zooms in on it."
+                                % ((output,) + box + (w, h)), "info")
                         continue
                 if override is not None:
                     log("Radium image %s is %dx%d but must stay %dx%d; skipped "

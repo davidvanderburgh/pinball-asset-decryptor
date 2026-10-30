@@ -120,7 +120,7 @@
     "BallRelease.Kick 90",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "'---- PAD: Batman 66's mechs follow the machine\nDim PadGateA, PadGateB, PadTTWant, PadCraneWant, PadDiscLast\nPadGateA = False : PadGateB = False : PadTTWant = 0 : PadCraneWant = -1 : PadDiscLast = 0\nSub PadAutoPlunge(e)\n\tIf CBool(e) Then\n\t\tplungerIM.AutoFire\n\tEnd If\nEnd Sub\nSub PadMagnet(e)\n\tmMagnaSave.MagnetOn = CBool(e)\nEnd Sub\nSub PadControlGate(e)\n\tPadGateB = CBool(e)\n\tPadApplyGate\nEnd Sub\nSub PadDiverterPower(e)\n\tPadGateA = CBool(e)\n\tPadApplyGate\nEnd Sub\nSub PadApplyGate   ' the tribute's OpenPFAGate, held where the machine has it\n\tDim o\n\to = PadGateA Or PadGateB\n\tIf WallDoor1.Collidable <> o Then\n\t\tWallDoor1.Collidable = o\n\t\tWallDoor1.Visible = o\n\t\tWallDoor2.Collidable = Not o\n\t\tWallDoor2.Visible = Not o\n\tEnd If\nEnd Sub\nSub PadLockRelease(e)\n\tIf CBool(e) Then\n\t\tRPFA_BallLockPos1.Collidable = False\n\t\tRPFA_BallLockPost.Visible = False\n\t\tvpmTimer.AddTimer 2000, \"PadLockPostUp '\"\n\tEnd If\nEnd Sub\nSub PadLockPostUp\n\tIf CurMechPos = kTT_TV Then\n\t\tRPFA_BallLockPos1.Collidable = True\n\t\tRPFA_BallLockPost.Visible = True\n\tEnd If\nEnd Sub\nFunction PadSw(n)   ' the machine's switch plane; False when the controller cannot say\n\tPadSw = False\n\tOn Error Resume Next\n\tPadSw = CBool(Controller.Switch(n + 0))\nEnd Function\nSub PadMechTimer_Timer\n\tOn Error Resume Next\n\tDim want, i\n\t' the lock lane's triggers stay armed (the shadow game only arms them in its own lock mode)\n\ttrgBallLock1.Enabled = True\n\ttrgBallLock2.Enabled = True\n\ttrgBallLock3.Enabled = True\n\tPadApplyGate\n\t' the turntable: position #1 home, #2, #3 away -> the tribute's TV, Phone, Batcave faces\n\twant = 0\n\tIf PadSw(1077) Then want = kTT_TV\n\tIf PadSw(1078) Then want = kTT_Phone\n\tIf PadSw(1079) Then want = kTT_Batcave\n\tIf want <> 0 And want <> PadTTWant Then\n\t\tPadTTWant = want\n\t\tTurnTable_Goto want\n\tEnd If\n\t' the crane: position #1 home (switch 87) .. #6 away (82) -> CraneGoto 0..5\n\tFor i = 0 To 5\n\t\tIf PadSw(1087 - i) Then\n\t\t\tIf i <> PadCraneWant Then\n\t\t\t\tPadCraneWant = i\n\t\t\t\tCraneGoto i\n\t\t\tEnd If\n\t\tEnd If\n\tNext\n\t' the bat spinner disc: each half turn passes the machine's two optos, in its direction\n\tIf discLastPos <> PadDiscLast Then\n\t\tIf PadDiscLast <> 0 Then\n\t\t\tIf discSpinSpeed > 0 Then\n\t\t\t\tvpmTimer.PulseSw 1105\n\t\t\t\tvpmTimer.AddTimer 30, \"vpmTimer.PulseSw 1106 '\"\n\t\t\tElse\n\t\t\t\tvpmTimer.PulseSw 1106\n\t\t\t\tvpmTimer.AddTimer 30, \"vpmTimer.PulseSw 1105 '\"\n\t\t\tEnd If\n\t\tEnd If\n\t\tPadDiscLast = discLastPos\n\tEnd If\nEnd Sub\n",
+  "extra_vbs": "'---- PAD: Batman 66's mechs follow the machine\nDim PadGateA, PadGateB, PadTTWant, PadCraneWant, PadDiscLast\nPadGateA = False : PadGateB = False : PadTTWant = 0 : PadCraneWant = -1 : PadDiscLast = 0\nSub PadAutoPlunge(e)\n\tIf CBool(e) Then\n\t\tplungerIM.AutoFire\n\tEnd If\nEnd Sub\nSub PadMagnet(e)\n\tmMagnaSave.MagnetOn = CBool(e)\nEnd Sub\nSub PadControlGate(e)\n\tPadGateB = CBool(e)\n\tPadApplyGate\nEnd Sub\nSub PadDiverterPower(e)\n\tPadGateA = CBool(e)\n\tPadApplyGate\nEnd Sub\nSub PadApplyGate   ' the tribute's OpenPFAGate, held where the machine has it\n\tDim o\n\to = PadGateA Or PadGateB\n\tIf WallDoor1.Collidable <> o Then\n\t\tWallDoor1.Collidable = o\n\t\tWallDoor1.Visible = o\n\t\tWallDoor2.Collidable = Not o\n\t\tWallDoor2.Visible = Not o\n\tEnd If\nEnd Sub\nSub PadLockRelease(e)\n\tIf CBool(e) Then\n\t\tRPFA_BallLockPos1.Collidable = False\n\t\tRPFA_BallLockPost.Visible = False\n\t\tvpmTimer.AddTimer 2000, \"PadLockPostUp '\"\n\tEnd If\nEnd Sub\nSub PadLockPostUp\n\tIf CurMechPos = kTT_TV Then\n\t\tRPFA_BallLockPos1.Collidable = True\n\t\tRPFA_BallLockPost.Visible = True\n\tEnd If\nEnd Sub\nFunction PadSw(n)   ' the machine's switch plane; False when the controller cannot say\n\tPadSw = False\n\tOn Error Resume Next\n\tPadSw = CBool(Controller.Switch(n + 0))\nEnd Function\nSub PadMechTimer_Timer\n\tOn Error Resume Next\n\tDim want, i\n\t' the lock lane's triggers stay armed (the shadow game only arms them in its own lock mode)\n\ttrgBallLock1.Enabled = True\n\ttrgBallLock2.Enabled = True\n\ttrgBallLock3.Enabled = True\n\tPadApplyGate\n\t' the turntable: position #1 home, #2, #3 away -> the tribute's TV, Phone, Batcave faces\n\twant = 0\n\tIf PadSw(1077) Then want = kTT_TV\n\tIf PadSw(1078) Then want = kTT_Phone\n\tIf PadSw(1079) Then want = kTT_Batcave\n\tIf want <> 0 And want <> PadTTWant Then\n\t\tPadTTWant = want\n\t\tTurnTable_Goto want\n\tEnd If\n\t' the crane: position #1 home (switch 87) .. #6 away (82) -> CraneGoto 0..5\n\tFor i = 0 To 5\n\t\tIf PadSw(1087 - i) Then\n\t\t\tIf i <> PadCraneWant Then\n\t\t\t\tPadCraneWant = i\n\t\t\t\tCraneGoto i\n\t\t\tEnd If\n\t\tEnd If\n\tNext\n\t' the bat spinner disc: each half turn passes the machine's two optos, in its direction\n\tIf discLastPos <> PadDiscLast Then\n\t\tIf PadDiscLast <> 0 Then\n\t\t\tIf discSpinSpeed > 0 Then\n\t\t\t\tvpmTimer.PulseSw 1105\n\t\t\t\tvpmTimer.AddTimer 30, \"vpmTimer.PulseSw 1106 '\"\n\t\t\tElse\n\t\t\t\tvpmTimer.PulseSw 1106\n\t\t\t\tvpmTimer.AddTimer 30, \"vpmTimer.PulseSw 1105 '\"\n\t\t\tEnd If\n\t\tEnd If\n\t\tPadDiscLast = discLastPos\n\tEnd If\nEnd Sub\n'---- PAD-859: the inserts the tribute shows without a Light\nSub PadBulb(i, v)   ' one of the tribute's fader bulbs (Lampz 1-12), shown: its own modes hide l7-l12\n\tDim nm : nm = Array(\"\", \"80\", \"81\", \"82\", \"83\", \"84\", \"85\", \"7\", \"8\", \"9\", \"10\", \"11\", \"12\")(i)\n\tExecute \"pFiliment\" & nm & \".Visible = True : l\" & nm & \".Visible = True : pFBase\" & nm & \".Visible = True\"\n\tLampz.state(i) = Abs(v <> 0)\nEnd Sub\nSub PadCatBulbs(first, v)   ' a Catwoman billboard: its three C-A-T bulbs together\n\tDim i\n\tFor i = first To first + 2 : PadBulb i, v : Next\nEnd Sub\nSub PadPop(n, v)   ' a pop bumper's insert: the tribute lights its plastic\n\tDim img : img = \"B66_Popbumpers_GIOFFB\"\n\tIf v <> 0 Then img = \"B66_Popbumpers_GION\"\n\tSelect Case n\n\t\tCase 1 : B66_PlasticPop1.Image = img\n\t\tCase 2 : B66_PlasticPop2.Image = img\n\t\tCase 3 : B66_PlasticPop3.Image = img\n\tEnd Select\nEnd Sub\nSub PadBatSignal(a, v)\n\tSetLightFlasher flshBatSignal, Abs(v <> 0)\nEnd Sub\n",
   "retrofit_timers": {
     "PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1},
     "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100},
@@ -200,13 +200,37 @@
     "lPFBSpinner": {"leds": [[10, 0], [10, 1], [10, 2], [10, 3], [10, 4]], "name": "BAT SPINNER 1-5"},
     "lPFBSpinner2": {"leds": [[10, 0], [10, 1], [10, 2], [10, 3], [10, 4]], "name": "BAT SPINNER 1-5"}
   },
+  "lamp_calls": {
+    "_": "inserts the tribute shows with something other than a Light: `call` is a sub of extra_vbs, called (arg, value) when the machine's LED changes (PAD-859)",
+    "PadCatLeftBillboard": {"leds": [[9, 37], [9, 38], [9, 39]], "rgb": true, "call": "PadCatBulbs", "arg": 1, "name": "CATWOMAN LEFT BILLBOARD (the tribute's left C-A-T bulbs, Lampz 1-3)"},
+    "PadCatRightBillboard": {"leds": [[9, 42], [9, 43], [9, 44]], "rgb": true, "call": "PadCatBulbs", "arg": 4, "name": "CATWOMAN RIGHT BILLBOARD (the right C-A-T bulbs, Lampz 4-6)"},
+    "PadBatComputer1": {"leds": [[10, 5]], "call": "PadBulb", "arg": 7, "name": "BAT COMPUTER 1 (bulb l7)"},
+    "PadBatComputer2": {"leds": [[10, 6]], "call": "PadBulb", "arg": 8, "name": "BAT COMPUTER 2 (bulb l8)"},
+    "PadBatComputer3": {"leds": [[10, 7]], "call": "PadBulb", "arg": 9, "name": "BAT COMPUTER 3 (bulb l9)"},
+    "PadCrimeAnalyzer1": {"leds": [[10, 8]], "call": "PadBulb", "arg": 10, "name": "CRIME ANALYZER 1 (bulb l10)"},
+    "PadCrimeAnalyzer2": {"leds": [[10, 9]], "call": "PadBulb", "arg": 11, "name": "CRIME ANALYZER 2 (bulb l11)"},
+    "PadCrimeAnalyzer3": {"leds": [[10, 10]], "call": "PadBulb", "arg": 12, "name": "CRIME ANALYZER 3 (bulb l12)"},
+    "PadLeftPop": {"leds": [[8, 55]], "call": "PadPop", "arg": 1, "name": "LEFT POP BUMPER (Bumper003's plastic)"},
+    "PadRightPop": {"leds": [[8, 56]], "call": "PadPop", "arg": 2, "name": "RIGHT POP BUMPER (Bumper001's plastic)"},
+    "PadBottomPop": {"leds": [[8, 57]], "call": "PadPop", "arg": 3, "name": "BOTTOM POP BUMPER (Bumper002's plastic)"},
+    "PadBatSignal": {"leds": [[8, 59]], "call": "PadBatSignal", "arg": 0, "name": "BAT SIGNAL (flshBatSignal)"}
+  },
+  "retrofit_lights": {
+    "_": "LE inserts with no table object: a new Light cloned from `clone`, at [x, y] (the led_io position through the fit of the mapped lights, PAD-859)",
+    "lights": {
+      "PadReactorFlash": {"leds": [[10, 11]], "name": "TURNTABLE REACTOR FLASH", "clone": "Flasherlight9", "at": [305, 307]}
+    }
+  },
   "quiet_subs": [
     "StartLightSeq",
     "tmrMyLightSeq_Timer",
     "swPenguinBumpEntry_Hit",
     "trgVirtualGate_Hit",
     "Gate004_Hit",
-    "CraneHit_Hit"
+    "CraneHit_Hit",
+    "tmrBatCompPulse_Timer",
+    "flshCatwoman_Timer",
+    "tmrPops_Timer"
   ],
   "orig_hits": false,
   "orig_keep": [

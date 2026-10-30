@@ -88,6 +88,12 @@ export default function Vpx() {
         <${Card} title="Tables" sub=${s.tables_tip}
           footer=${html`<${Button} drop kind="primary" icon="upload" disabled=${busy || !s.ok}
             onClick=${() => call("vpx.patch")}>Patch a table…<//>`}>
+          <div class="vpx-row">
+            <div class="vpx-what"><div class="small muted">Your tables folder</div>
+              <div class="mono small vpx-val">${s.tables_dir || "Not set: choose where your patched tables are."}</div></div>
+            <div class="vpx-acts"><${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
+              onClick=${() => call("vpx.choose_tables")}>Choose folder…<//></div>
+          </div>
           ${tables.length ? tables.map((t) => html`<div class="vpx-table">
             <div class="vpx-what"><div><b>${t.name}</b></div>
               <div class="small muted">${t.by ? "by " + t.by : ""}${t.where ? ", on " + t.where : ""}</div>

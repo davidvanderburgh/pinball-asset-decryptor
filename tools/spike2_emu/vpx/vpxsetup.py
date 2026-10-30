@@ -12,6 +12,8 @@ process:
     vpxsetup.py download <folder>         download the 10.8.0 release and unpack it there
                                           (progress lines first: `progress <0..1>`)
     vpxsetup.py library <folder>          the folder of card images
+    vpxsetup.py tables [<folder>]         where the patched tables live (none:
+                                          Visual Pinball's own tables folder)
     vpxsetup.py layout <key> <player> <lcd>
                                           where the windows go: [x, y, w, h] JSON or null
     vpxsetup.py open <table name>         open a (PAD) table in Visual Pinball
@@ -63,8 +65,28 @@ def find_vpx():
 
 
 def vpx_tables_dir():
+    """Where the patched tables live: the folder chosen on the tab (PAD-848,
+    David keeps his in a folder on the desktop), else Visual Pinball's own
+    tables folder. The "Patched" marks, the Play list and Patch's output all
+    use it."""
+    own = padlaunch.kit_load().get("tables")
+    if own and os.path.isdir(own):
+        return own
     vpx = find_vpx()
     return os.path.join(vpx, "tables") if vpx else ""
+
+
+def set_tables(folder):
+    """The patched tables' folder (PAD-848); "" goes back to Visual Pinball's."""
+    if folder and not os.path.isdir(folder):
+        return "There is no folder %s." % folder
+    d = padlaunch.kit_load()
+    if folder:
+        d["tables"] = folder
+    else:
+        d.pop("tables", None)
+    padlaunch.kit_save(d)
+    return "ok"
 
 
 def set_vpx(folder):
@@ -238,9 +260,10 @@ def open_table(name):
     vpx = find_vpx()
     if not vpx:
         return "Visual Pinball is not set up."
-    path = os.path.join(vpx, "tables", name)
+    tables = vpx_tables_dir()
+    path = os.path.join(tables, name)
     if not os.path.isfile(path):
-        return "There is no %s in %s." % (name, os.path.join(vpx, "tables"))
+        return "There is no %s in %s." % (name, tables)
     # no Linux, no game: say so here, not from inside the opened table
     why = padlaunch.no_linux(padlaunch.distro())
     if why:
@@ -265,6 +288,7 @@ def state():
         "registered": controller_registered(),
         "vpx": find_vpx(),
         "tables_dir": tables,
+        "tables_own": bool(kit.get("tables")) and tables == kit.get("tables"),
         "library": lib,
         "cards": cards_in(lib),
         "tables": known_tables(tables),
@@ -296,6 +320,9 @@ def main(argv):
                                           progress=prog)}
         except Exception as exc:                            # noqa: BLE001
             out = {"result": "The download did not finish: %s" % exc}
+    elif cmd == "tables" and len(rest) <= 1:
+        folder = os.path.abspath(rest[0]) if rest and rest[0] else ""
+        out = {"result": set_tables(folder), "patched": patched_in(vpx_tables_dir())}
     elif cmd == "open" and len(rest) == 1:
         out = {"result": open_table(rest[0])}
     else:

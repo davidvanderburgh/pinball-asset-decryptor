@@ -1214,3 +1214,30 @@ def test_patched_table_gets_its_backglass_under_the_matching_name(tmp_path):
     # no backglass anywhere: nothing
     (src / "Bond.vpx").write_bytes(b"t")
     assert pv.copy_backglass(str(src / "Bond.vpx"), str(out / "Bond (PAD).vpx")) is None
+
+
+def test_the_tables_folder_can_be_chosen(tmp_path, monkeypatch):
+    # PAD-848: David keeps his patched tables in a folder on the desktop; the
+    # tab's folder is where "Patched" looks, what Play lists and opens
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    vpx = tmp_path / "Visual Pinball"
+    (vpx / "tables").mkdir(parents=True)
+    (vpx / "VPinballX64.exe").write_bytes(b"x")
+    monkeypatch.setattr(vs, "find_vpx", lambda: str(vpx))
+    assert vs.vpx_tables_dir() == str(vpx / "tables")                     # nothing chosen: Visual Pinball's
+    mine = tmp_path / "desktop tables"
+    mine.mkdir()
+    (mine / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"x")
+    assert vs.set_tables(str(mine)) == "ok"
+    assert vs.vpx_tables_dir() == str(mine)
+    rush = next(t for t in vs.known_tables() if t["title"] == "rush_le")
+    assert rush["patched"]
+    assert vs.patched_in(vs.vpx_tables_dir()) == ["Rush LE 2.0.2 (PAD).vpx"]
+    assert "no folder" in vs.set_tables(str(tmp_path / "gone")).lower()    # refused, the setting kept
+    assert vs.vpx_tables_dir() == str(mine)
+    import shutil
+    shutil.rmtree(mine)                                                     # a folder that went away
+    assert vs.vpx_tables_dir() == str(vpx / "tables")
+    assert vs.set_tables("") == "ok" and "tables" not in pl.kit_load()

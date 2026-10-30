@@ -70,6 +70,15 @@
  * <VW>x<VH> the buffer (default the same): "1280x390x32,1366x768" is a
  * Labyrinth's console.  The test reads the file back as the glass.
  * PAD_SELECT_FB names another device (default /dev/fb0).
+ *
+ * THE X SERVER (the Dutch Pinball build, make PLATFORM=dp, -DFB_X11; PAD-853).
+ * A Big Lebowski machine starts its game from ~/.xinitrc, so the menu runs
+ * with an X server owning the screen.  There the "framebuffer" is a buffer in
+ * memory the root window's size (32 bits, 0x00RRGGBB), and telling the driver
+ * is sending the rows that changed to a full-screen window (x11_raw.c, the
+ * X protocol by hand: a static program cannot load libX11).  Everything else
+ * - placement, scaling, colour - is this file's, unchanged.  PAD_SELECT_FAKEFB
+ * still wins, so the framebuffer tests run on this build too.
  */
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -83,6 +92,9 @@
 #include <linux/fb.h>
 #include "egl_stern.h"
 #include "log.h"
+#ifdef FB_X11
+#include "x11_raw.h"
+#endif
 
 /* the canvas the menu draws: codeselect.c's HEADLESS_W x HEADLESS_H */
 #define CANVAS_W 1360
@@ -101,9 +113,17 @@ static struct {
     int *xmap, *ymap;         /* scaled: glass column/row -> canvas column/row */
     int fake;
     struct fb_var_screeninfo var;   /* as read: the pan fallback hands it back unchanged */
-    int tell;                 /* how the driver hears of a frame: 0 write(2), 1 pan, -1 not at all */
+    int tell;                 /* how the driver hears of a frame: 0 write(2), 1 pan, 2 the X server, -1 not at all */
+    int dy0, dy1;             /* X: the glass rows changed since the last send */
+    int x11;                  /* the glass is memory sent to an X window */
     long long told;
 } F = { .fd = -1 };
+
+static void dirty(int y0, int y1)
+{
+    if (y0 < F.dy0) F.dy0 = y0;
+    if (y1 > F.dy1) F.dy1 = y1;
+}
 
 static unsigned pixel_of(unsigned char r, unsigned char g, unsigned char b)
 {
@@ -155,6 +175,22 @@ static int fake_up(const char *spec)
     sel_log("fb: fake framebuffer %s %dx%d of a %dx%d buffer, %d bpp", path, w, h, vw, vh, bpp);
     return 0;
 }
+
+#ifdef FB_X11
+static int x11_up(void)
+{
+    int w, h;
+    if (x11raw_open(&w, &h) < 0) return -1;
+    F.fb_w = F.vw = w; F.fb_h = F.vh = h; F.bpp = 32; F.panned = 0;
+    F.stride = w * 4;
+    F.map_len = (size_t)F.stride * h;
+    F.r_off = 16; F.r_len = 8; F.g_off = 8; F.g_len = 8; F.b_off = 0; F.b_len = 8;
+    if (!(F.map = calloc(1, F.map_len))) { x11raw_close(); return -1; }
+    F.page = F.map;
+    F.x11 = 1;
+    return 0;
+}
+#endif
 
 static int fb_up(void)
 {
@@ -269,6 +305,7 @@ static void clear_glass(void)
     int r;
     unsigned black = pixel_of(0, 0, 0);
     int bp = F.bpp / 8, c;
+    dirty(0, F.fb_h);
     for (r = 0; r < F.fb_h; r++) {
         unsigned char *d = F.page + (size_t)r * F.stride;
         if (!black) { memset(d, 0, (size_t)F.fb_w * bp); continue; }
@@ -283,6 +320,7 @@ static void blit(const unsigned char *src, int pitch, int x, int y, int w, int h
     int bp = F.bpp / 8;
     if (!F.scaled) {
         int r, c;
+        dirty(F.oy + y, F.oy + y + h);
         for (r = 0; r < h; r++) {
             const unsigned char *s = src + (size_t)r * pitch * 4;
             unsigned char *d = F.page + (size_t)(F.oy + y + r) * F.stride + (size_t)(F.ox + x) * bp;
@@ -298,6 +336,7 @@ static void blit(const unsigned char *src, int pitch, int x, int y, int w, int h
             int sy = F.ymap[dy];
             unsigned char *d;
             if (sy < y || sy >= y + h) continue;
+            dirty(F.oy + dy, F.oy + dy + 1);
             d = F.page + (size_t)(F.oy + dy) * F.stride + (size_t)F.ox * bp;
             for (dx = 0; dx < F.dw; dx++) {
                 int sx = F.xmap[dx];
@@ -317,6 +356,17 @@ static void tell_driver(void)
 {
     unsigned char px[4];
     size_t n = (size_t)(F.bpp / 8);
+#ifdef FB_X11
+    if (F.tell == 2) {
+        if (F.dy1 > F.dy0) {
+            if (x11raw_put(F.map, F.stride, F.dy0, F.dy1 - F.dy0) == 0) F.told++;
+            else { sel_log("x11: the connection to the X server is gone: nothing more is shown"); F.tell = -1; }
+        }
+        F.dy0 = F.fb_h;
+        F.dy1 = 0;
+        return;
+    }
+#endif
     if (F.tell == 0) {
         memcpy(px, F.map, n);
         if (pwrite(F.fd, px, n, 0) == (ssize_t)n) { F.told++; return; }
@@ -339,7 +389,7 @@ static void tell_driver(void)
 static void cursor_off(void)
 {
     static const char seq[] = "\033[?25l\033[?17;0;0c";
-    if (!F.fake && isatty(1)) {
+    if (!F.fake && F.fd >= 0 && isatty(1)) {
         ssize_t n = write(1, seq, sizeof seq - 1);
         (void)n;
     }
@@ -354,7 +404,14 @@ int egl_stern_init(struct egl_stern *e, int retries, int retry_ms)
     e->h = CANVAS_H;
     if (retries < 1) retries = 1;
     for (attempt = 1; attempt <= retries; attempt++) {
+#ifdef FB_X11
+        /* no X server (DISPLAY unset, nothing answering): the console's
+         * framebuffer, as the BOF build draws */
+        ok = fake && *fake ? (fake_up(fake) == 0 ? map_fake() : -1)
+           : x11_up() == 0 ? 0 : fb_up();
+#else
         ok = fake && *fake ? (fake_up(fake) == 0 ? map_fake() : -1) : fb_up();
+#endif
         if (ok == 0) break;
         if (attempt < retries) {
             sel_log("fb: attempt %d/%d failed, retrying in %d ms", attempt, retries, retry_ms);
@@ -372,12 +429,15 @@ int egl_stern_init(struct egl_stern *e, int retries, int retry_ms)
         return -1;
     }
     cursor_off();
+    F.dy0 = F.fb_h;
+    F.dy1 = 0;
+    F.tell = F.x11 ? 2 : 0;
     clear_glass();
-    F.tell = 0;
     F.told = 0;
     tell_driver();
-    sel_log("fb: after every frame the driver is told the buffer changed (a write of its first pixel): "
-            "a compressed scan-out shows only what it is told");
+    if (!F.x11)
+        sel_log("fb: after every frame the driver is told the buffer changed (a write of its first pixel): "
+                "a compressed scan-out shows only what it is told");
     e->up = 1;
     sel_log("fb: canvas %dx%d %s at %d,%d on the %dx%d screen", CANVAS_W, CANVAS_H,
             F.scaled ? "scaled" : "1:1", F.ox, F.oy, F.fb_w, F.fb_h);
@@ -426,7 +486,16 @@ void egl_stern_close(struct egl_stern *e)
     if (e->up)
         sel_log("fb: %d frames, %lld KB drawn, the driver told %lld times by %s, closing "
                 "(the LOADING frame stays up until the game draws)", e->frames, e->uploaded / 1024, F.told,
-                F.tell == 0 ? "a write" : F.tell == 1 ? "a pan" : "nothing");
+                F.tell == 0 ? "a write" : F.tell == 1 ? "a pan" : F.tell == 2 ? "the X server" : "nothing");
+#ifdef FB_X11
+    if (F.x11) {
+        /* the window goes with the connection: the game's own takes the screen */
+        x11raw_close();
+        free(F.map);
+        F.map = NULL;
+        F.x11 = 0;
+    }
+#endif
     /* THE PICTURE STAYS: nothing is cleared.  The LOADING frame is what the
      * player sees until the game's own first frame replaces it. */
     if (F.map) {

@@ -18,6 +18,15 @@
 #                           on), input_fast.c (the FAST Neuron's SA: switch
 #                           levels) and stubs_bof.c (no codecs, no node bus, no
 #                           sound) stand in for the Stern hardware files.
+#   make PLATFORM=dp        a Dutch Pinball machine, The Big Lebowski (PAD-853):
+#                           x86-64, ONE STATIC binary like BOF's, as
+#                           $(BUILD)/dpselect, plus $(BUILD)/dpprocsw, the
+#                           button reader linked to the game's own
+#                           libpinproc.so.2.0 (GLIBC_2.2.5 only).  fb_linux.c
+#                           with -DFB_X11 + x11_raw.c (the X server the game
+#                           draws on), input_pipe.c (dpprocsw's lines) and
+#                           stubs_dp.c stand in for the Stern hardware files.
+#                           tools/dp_emu/MULTIBOOT.md.
 #
 # THE STERN BUILD.  The card rootfs copy ($(ROOT)) is used as the sysroot BY
 # HAND: the cross gcc searches its own tooldir /usr/arm-linux-gnueabihf/
@@ -43,6 +52,8 @@ ifeq ($(PLATFORM),jjp)
 BUILD    ?= build-jjp
 else ifeq ($(PLATFORM),bof)
 BUILD    ?= build-bof
+else ifeq ($(PLATFORM),dp)
+BUILD    ?= build-dp
 else
 BUILD    ?= build
 endif
@@ -108,7 +119,7 @@ endif
 GLLIBS    =
 AUDLIBS   =
 LIBC      =
-SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c input_fast.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c
 HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h jjp_glibc.h $(BUILD)/theme_table.h
 else ifeq ($(PLATFORM),bof)
 # ---- BOF: native x86-64, the host gcc, STATIC, the machine's paths baked in ----
@@ -137,8 +148,37 @@ LDPOST    =
 GLLIBS    =
 AUDLIBS   =
 LIBC      = -lpthread -lm
-SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c input.c input_jjpio.c input_padsw.c input_fast.c stubs_bof.c log.c art.c audio.c audio_fifo.c nvm.c
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_bof.c log.c art.c audio.c audio_fifo.c nvm.c
 HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
+else ifeq ($(PLATFORM),dp)
+# ---- DP: native x86-64, the host gcc, STATIC (as BOF), drawing on X ----
+# Every path is passed by the launcher (padselect_dp.sh): the menu's folder
+# is <V>/pad, and V is the update's own version folder name.
+CC        = gcc
+CROSS     =
+BINNAME   = dpselect
+PREFIX   ?= /home/dp/game/pad
+QEMU      = $(CURDIR)/test/native.sh
+export QEMU
+CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
+            -DFB_X11 \
+            -DDEF_CONF='"$(PREFIX)/images.conf"' \
+            -DDEF_OUT='"/tmp/padselect.choice"' \
+            -DDEF_LAST='"$(PREFIX)/last"' \
+            -DDEF_FONT='"$(PREFIX)/font.ttf"' \
+            -DDEF_MEDIA='"$(PREFIX)/media"' \
+            -DDEF_COLOUR_FILE='"$(PREFIX)/color"' \
+            -DCARD_FONT='"/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"' \
+            -DFIFO_LEAD_MS=40 -DFIFO_PIPE_MAX_MS=120 \
+            -I$(BUILD) $(EXTRA_CFLAGS)
+LDPRE     = -static
+LDPOST    =
+GLLIBS    =
+AUDLIBS   =
+LIBC      = -lpthread -lm
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c x11_raw.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_dp.c log.c art.c audio.c audio_fifo.c nvm.c
+HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h x11_raw.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
 else
 # ---- Stern: the ARM cross build against the card rootfs ----
 CC        = $(CROSS)gcc
@@ -177,7 +217,7 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 AUDLIBS   = -l:libasound.so.2
 # input_jjpio.c is plain POSIX and rides along: codeselect.c dispatches every
 # backend by name, and on a Stern card `--input jjpio` finds no /dev/jjpio
-SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c input_fast.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c input_fast.c input_pipe.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
 HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
 endif
 
@@ -204,6 +244,21 @@ all: $(BIN) $(DELTA)
 
 $(DELTA): paddelta.c | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -static paddelta.c -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
+else ifeq ($(PLATFORM),dp)
+# the button reader: linked to libpinproc.so.2.0 BY NAME (a link-only stub
+# carries the soname; the machine's own library is found at run time through
+# LD_LIBRARY_PATH), -nostartfiles for a GLIBC_2.2.5 ceiling (dpprocsw.c)
+PROCSW = $(BUILD)/dpprocsw
+all: $(BIN) $(PROCSW)
+
+$(BUILD)/libpinproc.so.2.0: | $(BUILD)
+> printf 'void PRCreate(void){} void PRDelete(void){} void PRSwitchGetStates(void){} void PRGetLastErrorText(void){}\n' > $(BUILD)/pinproc_stub.c
+> $(CC) -shared -fPIC -Wl,-soname,libpinproc.so.2.0 -o $@ $(BUILD)/pinproc_stub.c
+
+$(PROCSW): dpprocsw.c $(BUILD)/libpinproc.so.2.0 | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
+>     -nostartfiles dpprocsw.c $(BUILD)/libpinproc.so.2.0 -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
 else
 all: $(BIN)
@@ -254,6 +309,24 @@ install: $(BIN) $(DELTA)
 > install -m 755 "$(DELTA)" "$(DESTDIR)$(PREFIX)/paddelta"
 > install -m 755 padselect_bof.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > install -m 755 pad_install_bof.sh "$(DESTDIR)$(PREFIX)/pad_install.sh"
+> if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi
+else ifeq ($(PLATFORM),dp)
+check: $(BIN) $(PROCSW)
+> bash test/check_elf_dp.sh "$(BIN)" "$(PROCSW)"
+> bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> bash test/fb_bof_test.sh "$(BIN)" "$(DEJAVU)"
+> $(PYTHON) test/x11_dp_test.py "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> bash -n padselect_dp.sh && bash test/padselect_dp_test.sh "$(BIN)" "$(DEJAVU)"
+> @echo "check: OK (dp)"
+
+check-hw:
+> @echo "check-hw: the node-bus test is Stern's; the DP board is proven on the rig (tools/dp_emu/MULTIBOOT.md)"
+
+install: $(BIN) $(PROCSW)
+> install -d "$(DESTDIR)$(PREFIX)"
+> install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/dpselect"
+> install -m 755 "$(PROCSW)" "$(DESTDIR)$(PREFIX)/dpprocsw"
+> install -m 755 padselect_dp.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi
 else ifeq ($(PLATFORM),jjp)
 check: $(BIN) capbin

@@ -104,6 +104,9 @@ struct input *input_jjpio_open(const struct input_cfg *cfg);
 /* fast: a BOF machine's cabinet buttons off its FAST Neuron (input_fast.c);
  * only in the BOF build */
 struct input *input_fast_open(const struct input_cfg *cfg);
+/* pipe: LEFT / RIGHT / START as "sw L|R|S 1|0" lines on standard input -
+ * a Dutch Pinball machine, from dpprocsw (input_pipe.c, PAD-853) */
+struct input *input_pipe_open(const struct input_cfg *cfg);
 /* hw only - no-ops on every other backend (they return -1 / do nothing):
  *   input_hw_bridge  sends the CPU board's bridge MCU a one-argument command
  *                    ({cmd, 01, arg}, write-only, like the game's 0x59ebac)

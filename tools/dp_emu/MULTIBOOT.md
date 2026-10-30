@@ -92,7 +92,8 @@ Every failure ends on the newest stock folder, exactly as the machine would boot
 
       gcc -shared -fPIC -o B/libpinproc.so.2.0 -Wl,-soname,libpinproc.so.2.0 stub.c  # link-only stub
       gcc -O2 -fno-stack-protector -fno-pie -no-pie -nostartfiles -o B/dpprocsw dpprocsw.c B/libpinproc.so.2.0
-      AAIW_PROC_CHIP=p3 DPEMU_FIFO=B/fifo LD_PRELOAD=B/aaiwshim.so           LD_LIBRARY_PATH=/var/tmp/pad_dp/cache/<build>/1.13 B/dpprocsw L=SD67 R=SD65 S=SD68
+      AAIW_PROC_CHIP=p3 DPEMU_FIFO=B/fifo LD_PRELOAD=B/aaiwshim.so \
+          LD_LIBRARY_PATH=/var/tmp/pad_dp/cache/<build>/1.13 B/dpprocsw L=SD67 R=SD65 S=SD68
 
   (`aaiwshim` now also reads its FIFO from `ftdi_read_data`, for a program with no SDL
   loop.)
@@ -102,8 +103,15 @@ Every failure ends on the newest stock folder, exactly as the machine would boot
 ## Work list
 
 1. DONE `dpprocsw.c` - buttons off libpinproc; proven in the rig under aaiwshim.
-2. `x11_raw.c`, `input_pipe.c`, `stubs_dp.c`, `make PLATFORM=dp` - the menu on an X
-   server; proven on the rig's Xvfb (shot) with presses from 1.
+2. DONE `x11_raw.c`, `input_pipe.c`, `stubs_dp.c`, `make PLATFORM=dp` - the menu on an
+   X server. `fb_linux.c -DFB_X11` draws into a memory glass the root's size and sends
+   the changed rows with PutImage to an override-redirect window with an invisible
+   pointer (the X protocol by hand; no X server = the console framebuffer). Proven
+   2026-10-29: `dpprocsw` on 1.13's libpinproc over aaiwshim piped into `dpselect
+   --input pipe` on an Xvfb: RIGHT moved the highlight (x11grab shot), START booted
+   image 1. `make PLATFORM=dp check` = check_elf_dp.sh, headless.sh, fb_bof_test.sh,
+   x11_dp_test.py (1:1, scaled 1366x512, pipe ended, no display), padselect_dp_test.sh
+   (step 3). BOF `make check` still passes; JJP and Stern still build.
 3. `padselect_dp.sh` (`<V>/start`) - the launcher; a shell test like
    `padselect_bof_test.sh`.
 4. `mkdpmulti.py` - the zip builder (and its tests).

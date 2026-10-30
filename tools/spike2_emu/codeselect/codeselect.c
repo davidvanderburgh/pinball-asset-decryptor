@@ -199,8 +199,9 @@ static void usage(FILE *f)
         "codeselect " VERSION " - Spike 2 boot-time code selector\n"
         "  --conf PATH        images.conf (default " DEF_CONF ")\n"
         "  --out PATH         choice file, one line '<index>' (default " DEF_OUT ")\n"
-        "  --input hw|padsw|jjpio|fast|none   button source (default hw; jjpio = a JJP machine's I/O\n"
-        "                     board; fast = a Barrels of Fun machine's FAST Neuron)\n"
+        "  --input hw|padsw|jjpio|fast|pipe|none   button source (default hw; jjpio = a JJP machine's I/O\n"
+        "                     board; fast = a Barrels of Fun machine's FAST Neuron; pipe =\n"
+        "                     \"sw L|R|S 1|0\" lines on stdin, a Dutch Pinball machine's dpprocsw)\n"
         "  --nodebus DEV      node bus tty (default /dev/ttymxc1)\n"
         "  --spi DEV          cabinet spidev, 'none' disables (default /dev/spidev1.0)\n"
         "  --jjpio DEV        jjpio: the I/O board node (default /dev/jjpio100, then /dev/jjpio0)\n"
@@ -375,8 +376,8 @@ missing:
         return -1;
     }
     if (strcmp(o->input, "hw") && strcmp(o->input, "padsw") && strcmp(o->input, "jjpio")
-        && strcmp(o->input, "fast") && strcmp(o->input, "none")) {
-        fprintf(stderr, "codeselect: --input must be hw, padsw, jjpio, fast or none\n");
+        && strcmp(o->input, "fast") && strcmp(o->input, "pipe") && strcmp(o->input, "none")) {
+        fprintf(stderr, "codeselect: --input must be hw, padsw, jjpio, fast, pipe or none\n");
         return -1;
     }
     if (strcmp(o->codec, "auto") && strcmp(o->codec, "off")) {
@@ -2175,6 +2176,7 @@ int main(int argc, char **argv)
     else if (!strcmp(o.input, "padsw")) in = input_padsw_open(&icfg);
     else if (!strcmp(o.input, "jjpio")) in = input_jjpio_open(&icfg);
     else if (!strcmp(o.input, "fast")) in = input_fast_open(&icfg);
+    else if (!strcmp(o.input, "pipe")) in = input_pipe_open(&icfg);
 
     /* THE AUDIO SECTION, in the game's order (0x1fa9c8 then 0x1fb2a8): the
      * codecs as found go in the log; the amplifiers are muted in the cabinet

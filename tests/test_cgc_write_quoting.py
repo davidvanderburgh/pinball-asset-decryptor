@@ -284,6 +284,83 @@ def test_write_replays_armed_journal_before_any_debugfs(tmp_path, monkeypatch):
             f"the machine would replay the stale journal over the edits")
 
 
+class _OrphanListExecutor(_RecordingExecutor):
+    """Reports every staged partition as carrying a kernel orphan list (an
+    unclean unmount with a deleted-but-open file) and NO armed journal:
+    ``e2fsck -fn`` exits 4 until an ``e2fsck -fy`` has run against that image
+    (or forever, with ``repairable=False``).  PAD-874: the post-edit check
+    blamed the build for damage that was in the source."""
+
+    def __init__(self, repairable=True):
+        super().__init__()
+        self.repairable = repairable
+        self.repaired = set()
+
+    def run(self, bash_cmd, timeout=120):
+        if bash_cmd.startswith(("dumpe2fs -h ", "e2fsck ")):
+            self.commands.append(bash_cmd)
+            target = shlex.split(bash_cmd)[2]
+            if bash_cmd.startswith("dumpe2fs -h "):
+                if target in self.repaired:
+                    return "Filesystem features:      has_journal extent"
+                return ("Filesystem features:      has_journal extent\n"
+                        "First orphan inode:       39687")
+            if bash_cmd.startswith("e2fsck -fy "):
+                if self.repairable:
+                    self.repaired.add(target)
+                return "Clearing orphaned inode 39687\n__RC__1"
+            if target in self.repaired:
+                return "__RC__0"
+            return "Deleted inode 39687 has zero dtime.  Fix? no\n__RC__4"
+        return super().run(bash_cmd, timeout)
+
+
+def test_write_tidies_source_orphan_list_before_debugfs(tmp_path, monkeypatch):
+    """A source fs left with an orphan list fails ``e2fsck -fn`` whatever we
+    write, so the build aborted at the post-edit check (PAD-874).  It must be
+    tidied with ``e2fsck -fy`` BEFORE debugfs edits it, and the build must
+    then succeed with the strict read-only checks still run afterwards."""
+    rec = _OrphanListExecutor()
+    done, cmds = _drive_write_with(rec, tmp_path, monkeypatch)
+    assert done.get("ok") is True, done
+
+    for img in ("p3.img", "inner.img"):
+        fix_idx = [i for i, c in enumerate(cmds)
+                   if c.startswith("e2fsck -fy ") and img in c]
+        assert fix_idx, f"source {img} never tidied: {cmds}"
+        debugfs_idx = [i for i, c in enumerate(cmds)
+                       if c.startswith("debugfs") and img in c]
+        assert fix_idx[0] < debugfs_idx[0], (
+            f"{img} tidied only AFTER debugfs touched it")
+        # The strict post-edit check still runs read-only after the last edit.
+        last_write = max(i for i, c in enumerate(cmds)
+                         if c.startswith("debugfs -w") and img in c)
+        assert any(c.startswith("e2fsck -fn ") and img in c
+                   for c in cmds[last_write:]), (
+            f"{img} not verified read-only after its edits")
+        assert not any(c.startswith("e2fsck -fy ") and img in c
+                       for c in cmds[last_write:]), (
+            f"{img} auto-repaired after the edits -- that would hide damage "
+            f"our own debugfs writes caused")
+
+
+def test_write_clean_source_is_not_repaired(tmp_path, monkeypatch):
+    """A clean source is only checked, never rewritten by e2fsck -fy."""
+    rec, done, _out = _drive_write(tmp_path, monkeypatch)
+    assert done.get("ok") is True, done
+    assert not any(c.startswith("e2fsck -fy ") for c in rec.commands)
+
+
+def test_write_refuses_source_e2fsck_cannot_repair(tmp_path, monkeypatch):
+    """If the source still fails -fn after -fy, stop before editing with a
+    message that blames the source, not the build."""
+    rec = _OrphanListExecutor(repairable=False)
+    done, cmds = _drive_write_with(rec, tmp_path, monkeypatch)
+    assert done.get("ok") is False, done
+    assert "source image" in done["msg"], done["msg"]
+    assert not any(c.startswith("debugfs -w") for c in cmds)
+
+
 def test_write_verifies_each_written_file_size(tmp_path, monkeypatch):
     """debugfs write failures are masked by `|| true` (needed for the grep)
     and by debugfs's own exit-0-on-error habit; a dropped/truncated file must

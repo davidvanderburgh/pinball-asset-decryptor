@@ -1315,7 +1315,7 @@ class WritePipeline(BasePipeline):
                 f"image is unchanged.\n\ndebugfs stat output:\n{out.strip()}")
 
     def _replay_stale_journal(self, image_exec, label):
-        """Replay and retire a stale ext4 journal BEFORE debugfs edits.
+        """Replay a stale ext4 journal and tidy the source BEFORE debugfs edits.
 
         CGC masters their installer partitions by yanking the card without a
         clean unmount, so stock images ship with ``needs_recovery`` set and
@@ -1331,15 +1331,35 @@ class WritePipeline(BasePipeline):
         Neither ``e2fsck -fn`` (which skips journal recovery) nor our
         pure-Python ext4 reader (which ignores journals) can see this armed
         state, so it must be defused here, not detected later.
+
+        The same unclean unmount can also leave the source with a kernel
+        orphan list (a file deleted while still open; ``First orphan inode``
+        in the superblock) and no armed journal.  The kernel would tidy that
+        at mount, but ``e2fsck -fn`` reports it as errors (exit 4), so the
+        strict check after our edits failed on damage that was in the source
+        all along (PAD-874).  Check the source read-only first and let
+        ``e2fsck -fy`` tidy anything it finds BEFORE debugfs edits it, so
+        the post-edit check only ever sees what our edits did.
         """
         out = self.executor.run(
             f"dumpe2fs -h {shlex.quote(image_exec)} 2>&1", timeout=60)
-        if "needs_recovery" not in out:
-            return
-        self._log(
-            f"  {label}: factory journal left armed (needs_recovery) -- "
-            f"replaying it now so the machine can't replay it over the "
-            f"modifications.", "info")
+        if "needs_recovery" in out:
+            self._log(
+                f"  {label}: factory journal left armed (needs_recovery) -- "
+                f"replaying it now so the machine can't replay it over the "
+                f"modifications.", "info")
+        else:
+            # Not while armed: -fn skips journal recovery, so an armed fs
+            # reads as inconsistent until the replay below.
+            if self._fsck_readonly_rc(image_exec)[0] == "0":
+                return
+            orphans = ("orphan list left by an unclean unmount"
+                       if "First orphan inode" in out
+                       else "inconsistencies")
+            self._log(
+                f"  {label}: the source filesystem has {orphans} -- "
+                f"tidying it with e2fsck before writing the modifications.",
+                "info")
         out = self.executor.run(
             f"e2fsck -fy {shlex.quote(image_exec)} 2>&1; echo __RC__$?",
             timeout=900)
@@ -1349,15 +1369,15 @@ class WritePipeline(BasePipeline):
         # something.  Anything else means the source fs is genuinely damaged.
         if rc not in ("0", "1"):
             raise PipelineError("Stage partitions",
-                f"Replaying the {label}'s stale journal failed (e2fsck exit "
+                f"Repairing the {label} before editing failed (e2fsck exit "
                 f"{rc}) -- the source image's filesystem is damaged and can't "
                 f"be built on. If this source .img was produced by an older "
                 f"version of this app, rebuild from a factory installer "
                 f"image.\n\ne2fsck output:\n{body}")
         if rc == "1":
             self._log(
-                f"  {label}: e2fsck corrected inconsistencies during the "
-                f"replay (usually a source .img built by an older app "
+                f"  {label}: e2fsck corrected inconsistencies before the "
+                f"edits (an unclean unmount, or a source .img built by an older app "
                 f"version). Downstream payload checks will confirm the "
                 f"result.\n{body}", "info")
         check = self.executor.run(
@@ -1367,6 +1387,21 @@ class WritePipeline(BasePipeline):
                 f"The {label}'s journal is still marked needs_recovery after "
                 f"replay -- refusing to build an image the machine would "
                 f"corrupt at first mount.")
+        rc, body = self._fsck_readonly_rc(image_exec)
+        if rc != "0":
+            raise PipelineError("Stage partitions",
+                f"The source image's {label} still fails its filesystem "
+                f"check after e2fsck repaired it (exit {rc}) -- it is too "
+                f"damaged to build on. Rebuild from a factory installer "
+                f"image.\n\ne2fsck output:\n{body}")
+
+    def _fsck_readonly_rc(self, image_exec):
+        """``e2fsck -fn`` an image; return (exit code str, output)."""
+        out = self.executor.run(
+            f"e2fsck -fn {shlex.quote(image_exec)} 2>&1; echo __RC__$?",
+            timeout=900)
+        return (out.rsplit("__RC__", 1)[-1].strip(),
+                out.rsplit("__RC__", 1)[0].strip())
 
     def _verify_partition_fs(self, image_exec, label):
         """Read-only e2fsck of a re-packed ext4 partition image; abort on any
@@ -1380,17 +1415,14 @@ class WritePipeline(BasePipeline):
         flashed.
         """
         self._log(f"Verifying {label} filesystem...", "info")
-        out = self.executor.run(
-            f"e2fsck -fn {shlex.quote(image_exec)} 2>&1; echo __RC__$?",
-            timeout=900)
-        rc = out.rsplit("__RC__", 1)[-1].strip()
+        rc, body = self._fsck_readonly_rc(image_exec)
         if rc != "0":
             raise PipelineError("Write",
                 f"The re-packed {label} failed its filesystem check — the "
                 f"rebuilt installer would freeze the machine at power-up "
                 f"(a corrupt ext4 the on-machine kernel can't mount). The "
                 f"build was aborted; the original image is unchanged.\n\n"
-                f"e2fsck output:\n{out.rsplit('__RC__', 1)[0].strip()}")
+                f"e2fsck output:\n{body}")
         # e2fsck -fn deliberately SKIPS journal recovery, so it returns 0 even
         # when the journal is still armed with stale factory transactions the
         # machine would replay over this build's edits.  The replay step

@@ -1241,3 +1241,13 @@ def test_the_tables_folder_can_be_chosen(tmp_path, monkeypatch):
     shutil.rmtree(mine)                                                     # a folder that went away
     assert vs.vpx_tables_dir() == str(vpx / "tables")
     assert vs.set_tables("") == "ok" and "tables" not in pl.kit_load()
+
+
+def test_tmnt_lists_only_the_pro():
+    # PAD-848: the TMNT LE card starts no game in the emulator (PAD-829); the
+    # tab lists the Pro alone, and Patch still takes the Pro for the download
+    vs = pytest.importorskip("vpxsetup")
+    pv = pytest.importorskip("padvpx")
+    titles = [t for row in vs.known_tables("") for t in row["titles"]]
+    assert "turtles_pro" in titles and "turtles_le" not in titles
+    assert pv.maps()["turtles_le"]["listed"] is False and pv.maps()["turtles_pro"]["listed"]

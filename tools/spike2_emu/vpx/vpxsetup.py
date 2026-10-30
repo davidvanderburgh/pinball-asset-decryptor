@@ -126,6 +126,8 @@ def known_tables(tables_dir=None):
     tables_dir = vpx_tables_dir() if tables_dir is None else tables_dir
     rows = {}
     for title, info in padvpx.maps().items():
+        if not info.get("listed", True):
+            continue
         try:
             m = json.load(open(info["map"], encoding="utf-8"))
         except (OSError, ValueError):

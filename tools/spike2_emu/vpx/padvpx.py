@@ -79,7 +79,10 @@ def maps():
                           # a ROM table's map names its own patcher
                           "patcher": m.get("patcher", "patch_godzilla.py"),
                           # one patcher, several maps (TMNT's LE and Pro)
-                          "patcher_takes_map": bool(m.get("patcher_takes_map"))}
+                          "patcher_takes_map": bool(m.get("patcher_takes_map")),
+                          # PAD-848: off the tab's Tables list (TMNT's LE: its card
+                          # starts no game in the emulator, PAD-829; the Pro plays)
+                          "listed": m.get("listed", True) is not False}
     return dict(sorted(out.items(), key=lambda kv: not kv[1]["preferred"]))
 
 

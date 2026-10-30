@@ -1374,6 +1374,37 @@ pad_window_line() {
     printf '%s\n' "$head"
 }
 
+# ★ WAIT FOR THE RENDERER TO GET PAST ITS GRAPHICS DRIVER (PAD-854).
+#
+#     pad_gl_wait_started HOSTLOG TENTHS ALIVE-CMD [ARGS...]
+#
+# padglhost creates its ring FIRST, then opens and maps its window, and only
+# THEN asks Mesa for an EGL display - so the ring appearing says nothing about
+# whether the driver will come up. watch.sh used to wait for the ring and
+# 0.3 s more, and called a renderer still alive then "started". On a WSL VM
+# whose GPU the host refused (the PAD-497 shape: "Dropped Escape call",
+# "failed to create dri2 screen", "eglInitialize failed") d3d12 took a second
+# or two to give up, so the renderer died AFTER that check: the software
+# retry never ran, the guest was launched beside a dead renderer, and the run
+# ended a second later as "THE RENDERER STOPPED ON ITS OWN". A user's Star
+# Wars Pro start, twice in a row, 2026-10-29.
+#
+# "[padglhost] ready" is printed after eglInitialize, the config, the context
+# and the screen framebuffer, so it is the line that means the driver is up.
+# Returns 0 on that line, 1 the moment ALIVE-CMD says the renderer is gone,
+# and 0 after TENTHS tenths of a second with neither - a slow renderer that is
+# still alive is the caller's own liveness check to judge, as it always was.
+pad_gl_wait_started() {
+    local log=${1:-} n=${2:-0} i
+    shift 2 || return 0
+    for ((i = 0; i < n; i++)); do
+        grep -aq '^\[padglhost\] ready' "$log" 2>/dev/null && return 0
+        "$@" || return 1
+        sleep 0.1
+    done
+    return 0
+}
+
 # ★ WHY THERE IS NO WINDOW (PAD-127). padglhost's two headless lines are two
 # different problems, and only one of them is worth a second attempt:
 #

@@ -2093,9 +2093,16 @@ pad_gl_try() {
     HOSTPG=$!
 
     for i in $(seq 1 100); do [ -s "$RING_HOST" ] && break; sleep 0.1; done
+    # PAD-854: THE RING IS NOT THE DRIVER. It exists before the window and
+    # the window before eglInitialize, and a d3d12 that the host refuses can
+    # take a second or two to fail - after a ring-plus-0.3 s check had
+    # already called it started. Wait for its "ready" line (or its death),
+    # 15 s at most; pad_gl_wait_started in padpath.sh has the reported run.
+    pad_gl_wait_started "$HOSTLOG" 150 pad_gl_alive
     sleep 0.3
-    [ -n "$(pad_pids -x padglhost)" ]
+    pad_gl_alive
 }
+pad_gl_alive() { [ -n "$(pad_pids -x padglhost)" ]; }
 
 # PAD_GL_SOFTWARE=1 skips the GPU attempt altogether: for a machine known to
 # fail it, and so the software path can be exercised deliberately rather than

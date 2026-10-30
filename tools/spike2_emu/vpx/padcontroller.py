@@ -57,8 +57,11 @@ answers every name, so a VPinMAME member this does not model (DIP, NVRAM,
 the DMD) is a no-op rather than a script error - the table scripts wrap
 those in On Error Resume Next anyway.
 """
+import atexit
 import json
 import os
+import queue
+import re
 import struct
 import subprocess
 import sys
@@ -325,6 +328,7 @@ class VpxMap:
         # handed, so ChangedSolenoids may only carry numbers up to this; a
         # coil's 1000+ name still answers Controller.Solenoid(n).
         self.sol_max = 68
+        self._load_dof({})
         # a rebuilt table's map (<title>.vpxmap.json) or a shadow-patched
         # tribute's (<title>.shadow.json, vpxshadow.py): same keys where
         # they overlap - solenoids, game_on, cabinet, solenoid_max. The
@@ -364,6 +368,36 @@ class VpxMap:
                 if v.get("rgb") and len(leds) == 3:
                     self.rgb_groups.add(lamp_number(*leds[0]))
         self.fakes = {k: v for k, v in m.get("switch_fakes", {}).items() if k != "_"}
+        self._load_dof(m)
+
+    def _load_dof(self, m):
+        """What DOF hears, in the ORIGINAL ROM's numbers (PAD-879): the
+        table's DOF config (the B2S name, PadB2SName) is keyed by the S/L/W
+        numbers VPinMAME reported through B2S.Server, so each is the map's
+        own key read backwards - a solenoid's number (or its `dof`, where the
+        key is core.vbs's flipper Const: null = not sent), a light named
+        l<n> (lamp n) or f<n> (the flasher solenoid n), and every table
+        switch number the rewrite sends to a Spike 2 id."""
+        self.dof_sols = {}                  # S number -> (node, index)
+        self.dof_lamps = {}                 # L number -> [(node, index), ...]
+        self.dof_flashers = {}              # S number -> [(node, index), ...]
+        self.dof_switches = {}              # Spike 2 id -> [W numbers]
+        for k, v in m.get("solenoids", {}).items():
+            if k == "_" or not isinstance(v, dict):
+                continue
+            n = v["dof"] if "dof" in v else int(k)
+            if n is not None and 0 < int(n) < 1000:
+                self.dof_sols[int(n)] = tuple(v["coil"])
+        for name, v in m.get("lamps", {}).items():
+            hit = re.match(r"^([lf])(\d+)[a-z]?$", name, re.I)
+            if not hit or not isinstance(v, dict) or not v.get("leds"):
+                continue
+            table = self.dof_lamps if hit.group(1).lower() == "l" else self.dof_flashers
+            leds = table.setdefault(int(hit.group(2)), [])
+            leds.extend(tuple(x) for x in v["leds"] if tuple(x) not in leds)
+        for k, v in m.get("switch_rewrite", {}).items():
+            if k != "_" and int(v) > 0:
+                self.dof_switches.setdefault(int(v), []).append(int(k))
 
     # -- resolution. A VBScript Empty arrives as None: VPinMAME reads that as
     # switch 0 and ignores it (core.vbs's classes hand one over for a slot
@@ -869,6 +903,81 @@ class PlayerGrips:
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
 
+class DofHost:
+    """DOF for a table PAD drives (PAD-879). Under VPinMAME a table's DOF is
+    B2S.Server's DOF plugin hearing every solenoid, lamp and switch the ROM
+    reports (S/L/W); here B2S.Server runs BESIDE PAD.Controller (PAD-852) and
+    a released one passes another controller only the script's own `DOF n`
+    calls (E). So this hosts DOF itself, through the COM object DOF ships for
+    exactly that (DirectOutput.ComObject), under B2S's host name - the same
+    GlobalConfig_B2SServer.xml, cabinet and table configs the plugin reads -
+    and is started before B2S.Server, so it opens the cabinet's devices first.
+
+    One thread owns the object (its own apartment); send() only queues."""
+
+    PROGID = "DirectOutput.ComObject"
+    HOST = "B2SServer"
+    INIT_WAIT_S = 20
+
+    def __init__(self, rom, table_file, factory=None):
+        self.rom = rom
+        self.up = False
+        self.why = ""
+        self.sent = 0
+        self._q = queue.Queue()
+        self._ready = threading.Event()
+        self._factory = factory
+        self._thread = threading.Thread(target=self._run, args=(rom, table_file), daemon=True)
+        self._thread.start()
+        if not self._ready.wait(self.INIT_WAIT_S):
+            self.why = "DOF did not finish starting in %d s" % self.INIT_WAIT_S
+        log("DOF for %s: %s" % (rom, "up" if self.up else "off - " + self.why))
+
+    def _run(self, rom, table_file):
+        if pythoncom:
+            pythoncom.CoInitialize()
+        try:
+            if self._factory:
+                dof = self._factory()
+            else:
+                import win32com.client
+                dof = win32com.client.Dispatch(self.PROGID)
+            dof.Init(self.HOST, table_file, rom)
+            self.up = True
+        except Exception as exc:                            # noqa: BLE001
+            self.why = "no %s (%s)" % (self.PROGID, exc)
+        self._ready.set()
+        if not self.up:
+            return
+        failed = False
+        while True:
+            item = self._q.get()
+            if item is None:
+                break
+            try:
+                dof.UpdateTableElement(*item)
+                self.sent += 1
+            except Exception as exc:                        # noqa: BLE001
+                if not failed:
+                    log("DOF UpdateTableElement%r failed: %s" % (item, exc))
+                failed = True
+        try:
+            dof.Finish()
+        except Exception as exc:                            # noqa: BLE001
+            log("DOF Finish failed: %s" % exc)
+        log("DOF for %s finished after %d events" % (rom, self.sent))
+
+    def send(self, kind, number, value):
+        if self.up:
+            self._q.put((kind, int(number), int(value)))
+
+    def finish(self):
+        if self.up:
+            self.up = False
+            self._q.put(None)
+            self._thread.join(timeout=5)
+
+
 class Bridge:
     """Everything that is not COM: the poll thread, the state, the pipe.
     Testable on its own (see --selftest and tests/test_vpx_bridge.py)."""
@@ -903,6 +1012,8 @@ class Bridge:
         self.poll_fail = 0
         self.last_poll_ms = 0.0
         self._fake = {}                    # name -> state for switch_fakes
+        self.dof = None                    # DofHost, when the table asked for DOF
+        self._dof_state = {}               # (kind, number) -> value last sent
 
     # -- lifecycle
     def set_game(self, title):
@@ -911,6 +1022,45 @@ class Bridge:
         log("game %s: map %s: switches=%d solenoids=%d lamp groups=%d"
             % (title, self.map.path or "NONE", len(self.map.switch_rewrite),
                len(self.map.solenoids), len(self.map.lamp_groups)))
+
+    def dof_init(self, rom, table_file, factory=None):
+        """Start DOF for the table's ROM name (PADSPIKE2.vbs, before it
+        starts B2S.Server). True when DOF is up; a second call for the same
+        name keeps the one that is up (the table's Reset key)."""
+        if self.dof and self.dof.up and self.dof.rom == rom:
+            return True
+        self.dof_finish()
+        self.dof = DofHost(rom, table_file, factory=factory)
+        self._dof_state = {}
+        return self.dof.up
+
+    def dof_send(self, kind, number, value):
+        if self.dof:
+            self.dof.send(kind, number, value)
+
+    def dof_finish(self):
+        if self.dof:
+            self.dof.finish()
+            self.dof = None
+
+    def _dof_set(self, kind, number, value):
+        if self._dof_state.get((kind, number)) != value:
+            self._dof_state[(kind, number)] = value
+            self.dof.send(kind, number, value)
+
+    def _poll_dof(self, data):
+        """The machine's coils and lights, as the ROM's S and L for DOF: a
+        coil on its state (the board-fired ones included), a lamp lit when
+        any of its LEDs is, a flasher at its LED's level."""
+        m = self.map
+        for n, key in m.dof_sols.items():
+            self._dof_set("S", n, 1 if self.sol_state.get(sol_number(*key)) else 0)
+        for n, leds in m.dof_lamps.items():
+            level = max(self._led_level(data, nd, ix) for nd, ix in leds)
+            self._dof_set("L", n, 1 if level >= LAMP_ON else 0)
+        for n, leds in m.dof_flashers.items():
+            level = max(self._led_level(data, nd, ix) for nd, ix in leds)
+            self._dof_set("S", n, level if level >= LAMP_ON else 0)
 
     def run(self):
         """Attach to the title's run, or START one (padlaunch) when none is
@@ -1104,6 +1254,9 @@ class Bridge:
     # -- switches
     def set_switch(self, n, level):
         sid = self.map.switch_id(n)
+        if getattr(self, "dof", None) and self.dof.up:
+            for w in self.map.dof_switches.get(sid, ()):
+                self._dof_set("W", w, 1 if level else 0)
         if 0 < sid < padsw.MAX_ID and self.pipe:
             if self.pipe.held.get(sid) != (1 if level else 0):
                 log("sw %s -> id %d = %d" % (n, sid, 1 if level else 0))
@@ -1463,6 +1616,8 @@ class Bridge:
                 self.mrg = sw[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
             self._poll_lamps(data)
             self._poll_coils(data, now)
+            if self.dof and self.dof.up:
+                self._poll_dof(data)
 
     @staticmethod
     def _led_level(data, node, idx):
@@ -1625,6 +1780,8 @@ class Bridge:
                 "started": self.launch.slot if self.launch else None,
                 "held": dict(self.pipe.held) if self.pipe else {},
                 "lamps_on": sum(1 for v in self.lamp_state.values() if v),
+                "dof": (("up, %d sent" % self.dof.sent) if self.dof.up else self.dof.why)
+                if self.dof else "not asked",
                 "sols_on": [n for n, v in self.sol_state.items() if v]}
 
 
@@ -1660,6 +1817,7 @@ class PadController:
     def __init__(self):
         self.bridge = Bridge()
         self.props = {}
+        atexit.register(self.bridge.dof_finish)    # DOF turns the toys off as it goes
         log("PAD.Controller created")
 
     TRACE = os.path.exists(os.path.join(os.path.dirname(LOG), "padvpx_trace"))
@@ -1754,6 +1912,16 @@ class PadController:
             return 0
         if key == "padstatus":
             return json.dumps(b.status())
+        # DOF (PAD-879): PADSPIKE2.vbs starts it before B2S.Server, sends the
+        # script's own DOF calls through it, and finishes it with the table
+        if key == "paddofinit":
+            return b.dof_init(str(args[0] or ""), str(args[1] or "") if len(args) > 1 else "")
+        if key == "paddof":
+            b.dof_send(str(args[0] or "E")[:1], int(args[1] or 0), int(args[2] or 0))
+            return None
+        if key == "paddoffinish":
+            b.dof_finish()
+            return None
         return self.props.get(key, 0)
 
 

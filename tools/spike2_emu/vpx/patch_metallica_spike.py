@@ -5,9 +5,10 @@ Metallica Remastered (metallica_spike), the same playfield.
 
     python patch_metallica_spike.py "<Metallica Premium Monsters (Stern 2013) VPW 2.0.2.vpx>" <out dir>
 
-Writes `<out dir>/<original name> (PAD).vpx` beside a copy of PADSPIKE2.vbs,
-which the table loads from its own folder, and the patched script as
-`<original name> (PAD).script.vbs`. The table is re-signed
+Writes `<out dir>/<the map's output>`, whatever the download is called (it is
+the name padvpx copies the backglass to and the tab marks Patched, PAD-852),
+beside a copy of PADSPIKE2.vbs, which the table loads from its own folder, and
+the patched script as `<output name less .vpx>.script.vbs`. The table is re-signed
 (vpxfile.write_patched) so Visual Pinball loads it.
 
 WHAT CHANGES, all of it driven by metallica_spike.vpxmap.json:
@@ -81,6 +82,7 @@ def patch_script(src, m):
             continue
         if re.match(r'^const cgamename\s*=\s*"mtl_180h"', low):
             out.append('Const cGameName = "%s"\t\' PAD: Spike 2 Metallica Remastered (was mtl_180h)' % m["title"])
+            out.append('PadB2SName = "mtl_180h"\t\' PAD: the backglass (B2S, DOF) knows the table by its ROM')
             need("gamename")
             continue
         if re.match(r"^const usesolenoids\s*=", low):
@@ -94,6 +96,10 @@ def patch_script(src, m):
         if re.match(r"^const usevpmmodsol\s*=", low):
             out.append("Const UseVPMModSol = 0\t' PAD: the controller reports solenoids 0/1")
             need("modsol")
+            continue
+        if re.match(r"^sub\s+table1?_exit\b", low) and "controller.stop" in low:
+            # the backglass PADSPIKE2.vbs started goes with the table (PAD-852)
+            out.append(re.sub(r"(?i)\bController\.Stop\b", "Controller.Stop : PadStopB2S", line, count=1))
             continue
         if low.startswith("loadvpm "):
             out.append("' PAD: this title's cabinet (PADSPIKE2.vbs defaults to godzilla_le's)")
@@ -317,7 +323,7 @@ def main(argv):
     script, rep = patch_script(table.script(), m)
     items = retrofit_items(table, m)
     table.ole.close()
-    out_name = os.path.splitext(os.path.basename(src))[0] + " (PAD).vpx"
+    out_name = m.get("output") or os.path.splitext(os.path.basename(src))[0] + " (PAD).vpx"
     dst = os.path.join(outdir, out_name)
     mac = vpxfile.write_patched(src, dst, script=script, new_items=items)
     shutil.copyfile(os.path.join(HERE, "PADSPIKE2.vbs"), os.path.join(outdir, "PADSPIKE2.vbs"))

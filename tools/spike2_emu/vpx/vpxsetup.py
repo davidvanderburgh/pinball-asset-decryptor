@@ -275,6 +275,22 @@ def download_vpx(folder, say=print, progress=None):
     return set_vpx(folder)
 
 
+def refresh_system_script(tables):
+    """A patch copies PADSPIKE2.vbs beside the table, and the table loads that
+    copy: one an older release left there is brought up to this kit's, so a
+    table patched before a fix to it (PAD-852: the backglass) has the fix
+    without patching it again. Returns whether it was replaced."""
+    ours = os.path.join(HERE, "PADSPIKE2.vbs")
+    there = os.path.join(tables, "PADSPIKE2.vbs")
+    try:
+        if not os.path.isfile(there) or open(there, "rb").read() == open(ours, "rb").read():
+            return False
+        shutil.copyfile(ours, there)
+        return True
+    except OSError:
+        return False
+
+
 def open_table(name):
     vpx = find_vpx()
     if not vpx:
@@ -287,6 +303,7 @@ def open_table(name):
     why = padlaunch.no_linux(padlaunch.distro())
     if why:
         return why
+    refresh_system_script(tables)
     subprocess.Popen([os.path.join(vpx, "VPinballX64.exe"), "-play", path], cwd=vpx)
     return "ok"
 

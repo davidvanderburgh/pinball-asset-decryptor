@@ -250,6 +250,15 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `PadB2S` before `Controller` becomes PAD.Controller; every
   `Controller.B2S...` in the script, and in controller.vbs as it loads
   (`PadB2SText`), goes to it, and Table1_Exit stops it.
+* **A ROM table's backglass runs beside PAD.Controller** (PAD-852). There
+  controller.vbs's `LoadVPM` made `Controller` a B2S.Server, which runs
+  VPinMAME inside itself and shows the .directb2s; PADSPIKE2.vbs makes it
+  PAD.Controller, so Metallica, Godzilla and TMNT opened with no backglass.
+  `LoadVPM` now starts B2S.Server as `B2SController` (controller.vbs's own
+  two-controller way, ForceDisableB2S and `B2SOff` respected), named by
+  `PadB2SName`, the ROM name the patcher keeps; the table's exit sub stops
+  it (`PadStopB2S`). Play brings an older PADSPIKE2.vbs beside the tables
+  up to the kit's, so a table patched before a fix has it.
 * **The table's own DOF calls come along** (PAD-847). With `orig_hits:
   false` a bumper's Hit sub never runs, and the kickers, trough and plunger
   fire on the machine's coils through cvpmBallStack, so the `DOF 107,

@@ -218,6 +218,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             "toggle_log_history": self._toggle_log_history,
             "toggle_scenes_own_colours": self._toggle_scenes_own_colours,
             "toggle_agent_access": self._toggle_agent_access,
+            "agent_setup": self._show_agent_setup,
             "voice_quality": self._pick_voice_quality,
             "clear_voice_models": self._clear_voice_models,
             "recheck_prereqs": self._recheck_prereqs,
@@ -328,10 +329,10 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
     # the gear menu
     # ------------------------------------------------------------------
     def publish_settings_items(self):
-        """The gear menu, in Tk's order and with Tk's cascades
-        (_build_settings_menu): an item with ``submenu`` is a cascade.  The
-        page puts its own Appearance and Zoom cascades after the leading
-        update entry, where Tk had the theme toggle."""
+        """The gear menu: an item with ``submenu`` is a cascade.  The page
+        puts its own Appearance, Language and Zoom cascades after the
+        leading update entry.  Grouped and re-ordered in PAD-844 (it had
+        grown a row at a time from Tk's)."""
         items = []
         if self._update_available:
             version, _url, installer = self._update_available
@@ -343,54 +344,48 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
                 items.append({"id": "download_update", "dot": True,
                               "label": "Download update v%s…" % version})
             items.append({"sep": True})
-        items.append({"id": "check_updates",
-                      "label": ("Checking for updates…"
-                                if self._update_check_busy
-                                else "Check for updates"),
-                      "disabled": self._update_check_busy})
+        # PAD-844: one rule for the whole menu - the top level only opens
+        # things (a window, or a submenu ▸); every choice and on/off switch
+        # sits in a submenu, where the check column lines its rows up.
+        # Groups: how the app looks (the page's Appearance / Language / Zoom,
+        # above these), how it runs, upkeep, then help and the rest.
         cur = self._int(self.update_interval_var.get())
-        items.append({"label": "Check automatically", "submenu": [
+        items.append({"label": "Updates", "submenu": [
+            {"id": "check_updates",
+             "label": ("Checking for updates…" if self._update_check_busy
+                       else "Check for updates now"),
+             "disabled": self._update_check_busy},
+            {"header": "Check automatically"}] + [
             {"id": "update_interval", "args": [hours], "label": label,
              "checked": cur == hours, "radio": True}
             for hours, label in UPDATE_INTERVAL_CHOICES]})
+        cur = self._int(self.autosave_interval_var.get())
+        items.append({"label": "Save automatically", "submenu": [
+            {"id": "autosave_interval", "args": [minutes], "label": label,
+             "checked": cur == minutes, "radio": True, "title": AUTOSAVE_TIP}
+            for minutes, label in AUTOSAVE_INTERVAL_CHOICES]})
+        items.append({"label": "Logs", "submenu": [
+            {"id": "log_history", "label": "View log history…"},
+            {"id": "project_log", "label": "View this project's log…"},
+            {"sep": True},
+            {"id": "toggle_log_history",
+             "label": "Show previous sessions in the log",
+             "checked": bool(self.show_log_history_var.get())}]})
+        items.append({"label": "AI agents", "submenu": [
+            {"id": "toggle_agent_access",
+             "label": "Let AI agents control PAD",
+             "checked": bool(self.agent_access_var.get()),
+             "title": AGENT_ACCESS_TIP},
+            {"id": "agent_setup", "label": "Connect an agent…",
+             "disabled": not self.agent_access_var.get(),
+             "title": "The lines to add to an AI agent's MCP servers."}]})
+        items.append({"sep": True})
         if sys.platform == "win32":
             label = "Manage disk space…"
             if self.disk_badge_suffix:
                 label += "   %s" % self.disk_badge_suffix
             items.append({"id": "disk_space", "label": label,
                           "warn": bool(self.disk_badge_suffix)})
-        items.append({"label": "Logs", "submenu": [
-            {"id": "log_history", "label": "View log history…"},
-            {"id": "project_log", "label": "View this project's log…"},
-            {"id": "toggle_log_history",
-             "label": "Show previous sessions in the log",
-             "checked": bool(self.show_log_history_var.get())}]})
-        cur = self._int(self.autosave_interval_var.get())
-        items.append({"label": "Save automatically", "submenu": [
-            {"id": "autosave_interval", "args": [minutes], "label": label,
-             "checked": cur == minutes, "radio": True, "title": AUTOSAVE_TIP}
-            for minutes, label in AUTOSAVE_INTERVAL_CHOICES]})
-        items.append({"id": "toggle_scenes_own_colours",
-                      "label": "Files with no color profile attached skip the Machine screen",
-                      "checked": bool(self.scenes_own_colours_var.get()),
-                      "title": ("With the Machine screen ticked under Preview "
-                                "colors, in Scenes and on the Video tab's players, a "
-                                "file with no color profile attached (red palette) "
-                                "shows as you made it instead of through the machine's "
-                                "screen (the whole screen overlay still applies). Off "
-                                "(the default) draws every file through the screen, "
-                                "an added test card too.")})
-        items.append({"id": "toggle_agent_access",
-                      "label": "Let AI agents control PAD",
-                      "checked": bool(self.agent_access_var.get()),
-                      "title": AGENT_ACCESS_TIP})
-        items.append({"sep": True})
-        # the quality itself is picked beside Auto-name call-outs on the
-        # Extract tab (PAD-460); clearing the downloads stays a setting
-        items.append({"id": "clear_voice_models",
-                      "label": "Clear downloaded voice models…",
-                      "needs_idle": True})
-        items.append({"sep": True})
         # the cascade's LABEL is the live prerequisite summary, so the state
         # shows without opening it (the page counts shell.prereqs, which
         # the probes fill in)
@@ -403,6 +398,11 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
                            "label_missing": "Install missing prerequisites…"})
         items.append({"label": "Prerequisites", "prereq_summary": True,
                       "submenu": prereq})
+        # the quality itself is picked beside Auto-name call-outs on the
+        # Extract tab (PAD-460); clearing the downloads stays a setting
+        items.append({"id": "clear_voice_models",
+                      "label": "Clear downloaded voice models…",
+                      "needs_idle": True})
         items.append({"sep": True})
         from ...core import preview
         if preview.FEATURES:
@@ -580,6 +580,11 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             return True
         self.log("AI agents can control PAD while it is open (link: %s)."
                  % path, "info")
+        return self._show_agent_setup()
+
+    def _show_agent_setup(self):
+        """⚙ → AI agents → Connect an agent…: the MCP server lines to paste."""
+        from .. import agent_link
         compat.messagebox.showinfo(
             "Let AI agents control PAD",
             "An AI agent that supports MCP (Claude Desktop, Claude Code, "

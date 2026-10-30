@@ -37,9 +37,10 @@ Every tab has a **?** button in the top bar with tips for that tab.
   machine; Stern rows can also transfer mods.
 - **Prerequisites** sit in a row at the top: green ✓ or red ✗ per tool, with
   an install hint on hover. Once all are green the row tucks itself away.
-- **The ⚙ settings menu** (top right) keeps the prerequisites, the theme,
-  the update check, disk space, logs, language and voice-recognition
-  quality.
+- **The ⚙ settings menu** (top right) keeps the theme, language and zoom,
+  the update check, autosave, logs, AI agents, disk space, the
+  prerequisites and the downloaded voice models. Every choice and on/off
+  switch is in a submenu (▸).
 - **The app remembers** the manufacturer you last used and opens straight
   into it. **< Back** returns to the picker.
 

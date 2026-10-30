@@ -131,11 +131,13 @@ def test_preview_features_is_offered_only_while_there_is_a_preview(tmp_path, mon
         assert item(w, "preview_features") is not None
 
 
-def test_gear_menu_keeps_the_tk_cascades(tmp_path):
-    """_build_settings_menu's order and cascades: Check automatically ▸,
-    Logs ▸ and the prerequisites summary ▸; the plain entries stay
-    top-level.  The voice recognition quality moved to the Extract tab
-    (PAD-460), and clearing the downloaded models stays here."""
+def test_gear_menu_groups_and_no_top_level_checks(tmp_path):
+    """PAD-844: the top level only opens things (a window or a submenu);
+    every choice and on/off switch sits in a submenu, where the check
+    column lines its rows up.  Groups: how it runs (Updates, Save
+    automatically, Logs, AI agents), upkeep (disk, prerequisites, voice
+    models), then help and the rest.  The color-profile switch moved to the
+    Color profile tab's Machine screen mode."""
     import sys
     from pinball_decryptor.core import preview
     with web_app(tmp_path, mfr="stern") as w:
@@ -143,26 +145,31 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
         shape = [("sep" if it.get("sep") else
                   (it.get("label") + " ▸") if it.get("submenu") is not None
                   else it.get("id")) for it in top]
-        want = ["check_updates", "Check automatically ▸"]
+        want = ["Updates ▸", "Save automatically ▸", "Logs ▸",
+                "AI agents ▸", "sep"]
         if sys.platform == "win32":
             want.append("disk_space")
-        want += ["Logs ▸", "Save automatically ▸", "toggle_scenes_own_colours",
-                 "toggle_agent_access", "sep",
-                 "clear_voice_models", "sep",
-                 "Prerequisites ▸", "sep"]
+        want += ["Prerequisites ▸", "clear_voice_models", "sep"]
         if preview.FEATURES:                    # PAD-802: Visual Pinball is a preview
             want.append("preview_features")
         want += ["getting_started", "discord", "donations", "report_problem", "view_disclaimer"]
         assert shape == want
-        assert not any(it.get("header") for it in items(w))
-        up = cascade(w, "Check automatically")["submenu"]
-        assert [it["label"] for it in up] == [
+        assert not any("checked" in it for it in top)
+        assert item(w, "toggle_scenes_own_colours") is None
+        up = cascade(w, "Updates")["submenu"]
+        assert up[0]["id"] == "check_updates"
+        assert up[1] == {"header": "Check automatically"}
+        assert [it["label"] for it in up[2:]] == [
             "Only at startup", "Every hour", "Every 6 hours", "Once a day"]
         assert all(it["id"] == "update_interval" and it["radio"]
-                   for it in up)
+                   for it in up[2:])
         logs = cascade(w, "Logs")["submenu"]
-        assert [it["id"] for it in logs] == [
-            "log_history", "project_log", "toggle_log_history"]
+        assert [it.get("id", "sep") for it in logs] == [
+            "log_history", "project_log", "sep", "toggle_log_history"]
+        agents = cascade(w, "AI agents")["submenu"]
+        assert [it["id"] for it in agents] == ["toggle_agent_access",
+                                               "agent_setup"]
+        assert agents[1]["disabled"]            # nothing to connect while off
         assert cascade(w, "Voice recognition quality") is None
         assert item(w, "voice_quality") is None
         assert item(w, "clear_voice_models")["needs_idle"]
@@ -207,7 +214,7 @@ def test_update_check_busy_label(tmp_path):
         assert it["label"] == "Checking for updates…" and it["disabled"]
         w.run(w.window.set_update_check_running, False)
         it = item(w, "check_updates")
-        assert it["label"] == "Check for updates" and not it["disabled"]
+        assert it["label"] == "Check for updates now" and not it["disabled"]
 
 
 def test_log_history_toggle_and_seed(tmp_path):

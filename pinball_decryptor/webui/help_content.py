@@ -1334,9 +1334,10 @@ HELP_CONTENT = {
             "own colors.\n"
             "- Pictures, videos and test cards go through the Machine screen. Lines "
             "of text don't: they keep their own color and get only the overlay.\n"
-            "- The gear menu's **Files with no color profile attached skip the "
-            "Machine screen** lets red-palette files skip it, to compare them with "
-            "the game's art. They still get the overlay.\n"
+            "- **Files with no color profile attached skip the Machine screen**, "
+            "on the Color profile tab's Machine screen mode, lets red-palette "
+            "files skip it, to compare them with the game's art. They still get "
+            "the overlay.\n"
             "- Click a name to open that profile. Only the preview changes, never "
             "the card.",
         ]),
@@ -3517,14 +3518,19 @@ def sections_for(tab_name):
 # Appended to every tab's sections — app-wide behaviours users ask about.
 GENERAL_CONTENT = [
     ("The ⚙ settings menu",
-     "The gear at the top right holds the app-wide controls:\n\n"
-     "- light / dark theme\n"
-     "- **Check for updates**, and **Check automatically**: at startup only, hourly, "
-     "every 6 hours or daily\n"
+     "The gear at the top right holds the app-wide controls. Every choice and "
+     "on/off switch is in a submenu (▸):\n\n"
+     "- **Appearance** (dark, light or the system's), **Language** and **Zoom**\n"
+     "- **Updates**: Check for updates now, and check automatically at startup "
+     "only, hourly, every 6 hours or daily\n"
      "- **Save automatically**: every 1, 5 (the default), 15 or 30 minutes, or never. "
      "Changes to files are saved the moment you make them; this saves the rest of "
      "the project (the Multi-boot list, the Emulate card, the Extract options, the "
      "Write file name), which otherwise waits until PAD closes\n"
+     "- **Logs**: the log history, this project's log, and whether the log "
+     "shows previous sessions\n"
+     "- **AI agents**: let an AI agent (one that supports MCP) use PAD for you, "
+     "and the lines to connect it\n"
      "- disk-space management, and clearing the downloaded voice models\n"
      "- the prerequisite tools: status, re-check, install\n"
      "- **View disclaimer…**, the first-launch disclaimer again"),

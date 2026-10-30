@@ -317,7 +317,9 @@ export function settingsMenuItems(shell) {
          checked: it.checked, title: it.title,
          disabled: !!(it.disabled || (it.needs_idle && shell.running) || (it.needs_prereqs && !rows.length)),
          onClick: () => call("ui.settings_action", it.id, ...(it.args || [])) });
-  return [
+  // PAD-844: no ✓ at this level (shellx keeps every switch in a submenu);
+  // should one come back, its whole level still lines up
+  return alignChecks([
     ...lead.map(item),
     ...(lead.length ? [{ sep: true }] : []),
     { label: "Appearance", submenu: [
@@ -333,7 +335,7 @@ export function settingsMenuItems(shell) {
     ] },
     { sep: true },
     ...all.slice(i).map(item),
-  ];
+  ]);
 }
 // PAD-458: each language by its own name, so it can be found from any of them
 export function languageItems(shell) {

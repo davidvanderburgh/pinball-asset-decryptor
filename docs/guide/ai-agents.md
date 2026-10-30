@@ -11,7 +11,8 @@ your project like your own edits.
 
 ## Turning it on
 
-1. In the app: **Settings** (the gear) > **Let AI agents control PAD**.
+1. In the app: **Settings** (the gear) > **AI agents** > **Let AI agents
+   control PAD**.
 2. The app shows the lines to add to your agent's MCP servers. For a
    Windows install they look like this:
 
@@ -32,7 +33,8 @@ your project like your own edits.
 3. Restart the agent so it picks up the new server, and keep the app open
    while it works.
 
-Untick the setting to stop it: agents can no longer reach the app.
+**AI agents** > **Connect an agent…** shows those lines again. Untick
+the setting to stop it: agents can no longer reach the app.
 
 ## What the agent gets
 

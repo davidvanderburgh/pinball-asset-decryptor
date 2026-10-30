@@ -78,7 +78,7 @@ def link_path():
 
 
 NOT_OPEN = ("Pinball Asset Decryptor is not reachable. Open it and tick "
-            "Settings (the gear) > Let AI agents control PAD, then try "
+            "Settings (the gear) > AI agents > Let AI agents control PAD, then try "
             "again.")
 
 

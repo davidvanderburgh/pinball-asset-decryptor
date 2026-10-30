@@ -1,10 +1,13 @@
-"""PAD-844 proof shot: the gear menu's "Let AI agents control PAD" (and,
-with --agent, what ticking it shows: the MCP config to paste).
+"""PAD-844 proof shots: the gear menu (grouped, no top-level checks, the AI
+agents submenu) and the Color profile tab's Machine screen mode, where the
+"Files with no color profile attached skip the Machine screen" box moved.
 
-    python scripts/shot_pad844.py <repo> <out_png> [--agent <out2_png>]
+    python scripts/shot_pad844.py <repo> <out_dir> <prefix> [<project>]
 
+Writes <prefix>_gear_menu.png, <prefix>_ai_agents.png (when <repo> has the
+submenu) and, with a Spike 2 <project>, <prefix>_color_machine_screen.png.
 Serves <repo>'s app against a scratch settings folder; <repo> may be an
-older tree (the before shot) that has no such row.
+older tree (the before shots).
 """
 import json
 import os
@@ -26,12 +29,12 @@ sys.exit(host.main())
 
 
 def main():
-    repo, out_png = sys.argv[1:3]
-    agent_png = sys.argv[sys.argv.index("--agent") + 1] \
-        if "--agent" in sys.argv else ""
+    repo, out_dir, prefix = sys.argv[1:4]
+    project = sys.argv[4] if len(sys.argv) > 4 else ""
     scratch = tempfile.mkdtemp(prefix="pad844-")
-    project = os.path.join(scratch, "proj")
-    os.makedirs(project)
+    if not project:
+        project = os.path.join(scratch, "proj")
+        os.makedirs(project)
     launcher = os.path.join(scratch, "launch844.py")
     with open(launcher, "w", encoding="utf-8") as f:
         f.write(LAUNCHER % repo)
@@ -45,6 +48,7 @@ def main():
     proc, url = webui_shot.start_server(
         settings, scratch, app_cmd=[sys.executable, launcher],
         extra_env={"PYTHONPATH": site.getusersitepackages()})
+    out = lambda name: os.path.join(out_dir, "%s_%s.png" % (prefix, name))
     from playwright.sync_api import sync_playwright
     try:
         with sync_playwright() as p:
@@ -55,23 +59,30 @@ def main():
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             webui_shot.api(url, "ui.pick_manufacturer", "stern")
-            time.sleep(1.5)
+            time.sleep(2.0)
             page.get_by_role("button", name="Settings").first.click()
             time.sleep(1.2)
-            row = page.get_by_text("Let AI agents control PAD")
-            target = row.first if row.count() else page.get_by_text(
-                "Files with no color profile attached").first
-            target.hover()
-            time.sleep(1.5)
-            page.screenshot(path=out_png)
-            print("row present:", bool(row.count()), flush=True)
-            if agent_png and row.count():
-                row.first.click()
-                time.sleep(2.0)
-                page.screenshot(path=agent_png)
-                link = os.path.join(scratch, "cfg", "pinball_decryptor",
-                                    "agent.json")
-                print("link written:", os.path.isfile(link), flush=True)
+            page.mouse.move(700, 600)
+            time.sleep(0.6)
+            page.screenshot(path=out("gear_menu"))
+            sub = page.locator(".menu button.mi", has_text="AI agents")
+            if sub.count():
+                sub.first.hover()
+                time.sleep(1.2)
+                page.screenshot(path=out("ai_agents"))
+            page.keyboard.press("Escape")
+            time.sleep(0.5)
+            st = webui_shot.state(url)
+            if st.get("color", {}).get("per_file") is not None:
+                webui_shot.api(url, "ui.select_tab", "color")
+                time.sleep(1.0)
+                webui_shot.api(url, "color.set_mode", "screen")
+                time.sleep(2.5)
+                page.mouse.move(5, 450)
+                page.screenshot(path=out("color_machine_screen"))
+                print("color per_file:",
+                      webui_shot.state(url)["color"].get("per_file"),
+                      flush=True)
             browser.close()
     finally:
         proc.terminate()

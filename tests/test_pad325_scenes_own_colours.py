@@ -3,6 +3,7 @@ off (red in the Layers list) passes the machine screen by and shows its own
 colours, so it can be seen against the game's own art; the gear menu's
 "Scenes: switched-off files in their own colors" turns that off."""
 
+import json
 import pytest
 
 from pinball_decryptor.core import colour_profile as cp
@@ -101,24 +102,28 @@ def test_the_editors_layers_keep_it_too(tmp_path):
     assert under[4, 2, 0] == under[4, 2, 1] == under[4, 2, 2]
 
 
-def test_the_gear_menu_turns_it_on_and_off_and_scenes_follows(tmp_path):
+def test_the_color_tab_turns_it_on_and_off_and_scenes_follows(tmp_path):
     """Off by default since PAD-339: the machine screen reaches the whole frame,
-    an added test card included, until the gear menu says otherwise."""
+    an added test card included, until the Color profile tab's Machine screen
+    mode says otherwise (the gear menu's until PAD-844)."""
     from tests.webui_harness import web_app
     with web_app(tmp_path, mfr="stern") as w:
-        items = w.state("shell")["settings_items"]
-        it = next(i for i in items if i.get("id") == "toggle_scenes_own_colours")
-        assert it["checked"] is False
+        assert not any(i.get("id") == "toggle_scenes_own_colours"
+                       for i in w.state("shell")["settings_items"])
         svc = w.window.service("text").scenes
         assert w.run(svc._as_made) is False
-        w.call("ui.settings_action", "toggle_scenes_own_colours")
+        assert w.call("color.set_screen_skips_plain", True) is True
         w.drain()
-        it = next(i for i in w.state("shell")["settings_items"]
-                  if i.get("id") == "toggle_scenes_own_colours")
-        assert it["checked"] is True
+        assert w.state("color")["screen_skips_plain"] is True
         assert w.run(svc._as_made) is True
-        w.call("ui.settings_action", "toggle_scenes_own_colours")
+        assert json.loads((tmp_path / "cfg" / "settings.json").read_text(
+            encoding="utf-8"))["scenes_own_colours"] is True
+        # the same answer twice changes nothing
+        assert w.call("color.set_screen_skips_plain", True) is True
+        assert w.run(svc._as_made) is True
+        assert w.call("color.set_screen_skips_plain", False) is False
         w.drain()
+        assert w.state("color")["screen_skips_plain"] is False
         assert w.run(svc._as_made) is False
 
 

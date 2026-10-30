@@ -242,6 +242,12 @@ def test_stdio_process_speaks_line_json(tmp_path):
     assert len(out[2]["result"]["tools"]) == len(mcp.TOOLS)
 
 
+def _agent_item(w):
+    menu = [i for i in w.state("shell")["settings_items"]
+            if i.get("label") == "AI agents"][0]["submenu"]
+    return [i for i in menu if i.get("id") == "toggle_agent_access"][0]
+
+
 def test_settings_toggle_publishes_and_persists(tmp_path, monkeypatch):
     from tests.webui_harness import web_app
     _patch_link(monkeypatch, tmp_path)
@@ -250,8 +256,7 @@ def test_settings_toggle_publishes_and_persists(tmp_path, monkeypatch):
         w.ctx.server.start()
         agent_link.register(w.ctx)          # host.build does, for real
         try:
-            item = [i for i in w.state("shell")["settings_items"]
-                    if i.get("id") == "toggle_agent_access"][0]
+            item = _agent_item(w)
             assert item["label"] == "Let AI agents control PAD"
             assert item["checked"] is False
             assert not os.path.exists(agent_link.link_path())
@@ -269,8 +274,7 @@ def test_settings_toggle_publishes_and_persists(tmp_path, monkeypatch):
             settings = json.loads((tmp_path / "cfg" / "settings.json")
                                   .read_text(encoding="utf-8"))
             assert settings["agent_access"] is True
-            item = [i for i in w.state("shell")["settings_items"]
-                    if i.get("id") == "toggle_agent_access"][0]
+            item = _agent_item(w)
             assert item["checked"] is True
 
             # the real App's calls answer through the link too

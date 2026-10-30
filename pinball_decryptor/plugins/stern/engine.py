@@ -19229,6 +19229,7 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
             # the lead-out block too, as silence (_APPENDED_TAIL); the target is zero-padded to it
             pe = _extended_row(p, _APPENDED_TAIL)
             # *body_cache*: the same encode a build made before (PAD-599)
+            hits = body_cache.hits if body_cache is not None else 0
             off, body = _chain_encoded(
                 body_cache, "image", emu_e, pe, wav,
                 lambda: (_encode_stereo(emu_e, state["sr"], pe, wav, np, **refs.kw(idx, kw))
@@ -19246,6 +19247,9 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
                 progress(95 + int(len(done) * 5 / max(len(want), 1)), 100,
                          "Encoding the new sounds along the firmware's chain "
                          "(%d of %d)..." % (len(done), len(want)))
+            if body_cache is not None and body_cache.hits > hits:
+                state["kept"] = state.get("kept", 0) + 1   # PAD-863: said once, below
+                return redo()
             log("idx %d (record %d): encoded on the chain's parameters (scale "
                 "%s), %s; its windows hold its own audio."
                 % (idx, raw_idx, p["scale"],
@@ -19283,6 +19287,9 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
     log("%d appended sound(s) encoded along the firmware's chain: no window of "
         "theirs is restored, so none plays a scrap of another sound."
         % len(done), "success")
+    if state.get("kept"):
+        log("%d of them are the encodes an earlier build made of the same files on the "
+            "same chain, kept." % state["kept"], "info")
     return patches, out
 
 

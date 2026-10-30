@@ -160,3 +160,84 @@ def test_a_start_after_an_app_update_converts_no_picture_again(tmp_path, monkeyp
     assert image_slots.pictures_due(slots, {}, assets_dir=assets) == 0
     assert image_slots.stage_replacements(slots, {}, assets_dir=assets) == (3, [])
     assert len(seen) == 3
+
+
+# --------------------------------------------------------------------------
+# 4. round 2 (DragonRR: "There is a lot going on" on a Start that moved one picture):
+#    what an earlier build made and this one kept is said once, not once per item
+# --------------------------------------------------------------------------
+
+def test_kept_random_clips_are_said_once(tmp_path, monkeypatch):
+    import json
+    from pinball_decryptor.core import video as V
+    from pinball_decryptor.core import video_slots as VS
+    from pinball_decryptor.plugins.stern import clip_variants as CV
+    from tests.test_stern_clip_variants import _clip_files
+    project = tmp_path / "project"
+    (project / "video").mkdir(parents=True)
+    (project / "video" / "Delta.mov").write_bytes(b"x" * 50)
+    (project / ".staged_changes.json").write_text(json.dumps({}))
+    info = V.VideoInfo("Delta.mov", duration=6.0, width=1360, height=768, fps=30.0,
+                       vcodec="h264")
+    monkeypatch.setattr(V, "detect_video_info", lambda p: info)
+    monkeypatch.setattr(VS, "_clip_bitrate", lambda p: 4e6)
+
+    def fake_stage(slot, src, **k):
+        with open(slot.abs_path, "wb") as f:
+            f.write(b"made from " + os.path.basename(src).encode())
+        return True, "re-encoded"
+    monkeypatch.setattr(VS, "stage_replacement", fake_stage)
+    mine = _clip_files(tmp_path, "b.mp4", "c.mp4")
+    said = []
+    log = lambda t, l="info": said.append(t)                        # noqa: E731
+    out = CV.stage(str(project), "video/Delta.mov", mine, log=log)
+    assert len(said) == 2 and all("\u2190" in t for t in said)      # made: one line each
+    # the next build's: kept, and the caller says how many
+    said.clear()
+    kept = []
+    assert CV.stage(str(project), "video/Delta.mov", mine, log=log, kept=kept) == out
+    assert kept == out and said == []
+    # without *kept* (another caller), one line each as before
+    CV.stage(str(project), "video/Delta.mov", mine, log=log)
+    assert len(said) == 2 and all("already converted" in t for t in said)
+
+
+def test_build_sums_up_the_kept_clips(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import clip_variants as CV
+    from tests.test_stern_clip_variants import (VP, VP_BANK, VP_DIR, _clip_files,
+                                                _project, synthetic)
+    mine = _clip_files(tmp_path, "b.mp4", "c.mp4")
+    project = _project(tmp_path, {"video/AttractMode_BG.mov": mine},
+                       [("AttractMode_BG.mov", VP_DIR + "2.asset/0.asset")])
+
+    def real_like(project, rel, files, log=None, cancel=None, tag="", first=2,
+                  what="random clip", kept=None):
+        out = []
+        for k, f in enumerate(files, first):
+            p = os.path.join(project, CV.CACHE_DIR, "%s__%d.mov" % (CV._safe(rel), k))
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as b:
+                b.write(b"staged")
+            kept.append(p)
+            out.append(p)
+        return out
+    # the build hands *kept* only to the module's own stage (a stand-in takes none)
+    monkeypatch.setattr(CV, "_STAGE", real_like)
+    said = []
+    CV.build(project, VP, b"hud", str(tmp_path / "out"), only=True, stage_fn=real_like,
+             log=lambda t, l="info": said.append(t),
+             read_card=lambda sc: synthetic(("AttractMode_BG", "Bubbles")))
+    assert [t for t in said if "already converted" in t] == [
+        "  \u2713 2 clip(s) already converted from their files by an earlier build - kept"]
+    assert VP_BANK
+
+
+def test_kept_chain_encodes_are_said_once():
+    """The per-sound line is for a sound encoded now; the ones the chain-body cache
+    handed back are counted into one line after the total (engine._chain_grow source)."""
+    import inspect
+    src = inspect.getsource(engine)
+    i = src.index("hits = body_cache.hits if body_cache is not None else 0")
+    j = src.index("encoded on the chain's parameters (scale", i)
+    assert "body_cache.hits > hits" in src[i:j] and "return redo()" in src[i:j]
+    assert "of them are the encodes an earlier build made" in src

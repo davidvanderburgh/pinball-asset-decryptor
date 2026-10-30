@@ -27,9 +27,20 @@ image again is how it updates.
 
 ## Run it
 
+Copy the image's seccomp profile out once (Stern Emulate needs it, below):
+
+```bash
+mkdir -p /mnt/user/appdata/pinball-asset-decryptor
+docker run --rm --entrypoint cat pinball-asset-decryptor \
+  /usr/share/pad/pad-seccomp.json > /mnt/user/appdata/pinball-asset-decryptor/pad-seccomp.json
+```
+
+Then start it:
+
 ```bash
 docker run -d --name pinball-asset-decryptor \
-  --cap-add SYS_ADMIN --device /dev/fuse --shm-size 1g \
+  --device /dev/fuse --shm-size 1g \
+  --security-opt seccomp=/mnt/user/appdata/pinball-asset-decryptor/pad-seccomp.json \
   --device /dev/dri \
   -p 3001:3001 \
   -e PUID=99 -e PGID=100 -e PASSWORD=choose-one \
@@ -51,24 +62,29 @@ stream on a secure page.
 | `PASSWORD` | Asked for when you connect. Leave it out and anyone who can reach the port can use the app. |
 | `PUID` / `PGID` | Who the files the app writes belong to. On Unraid, `99` / `100` (`nobody:users`). |
 | `--device /dev/dri` | The server's GPU (Intel, AMD), as Jellyfin or Plex use it. The desktop encodes the stream with it and the emulator draws the game with it. Leave it out and both run on the CPU. |
-| `--cap-add SYS_ADMIN --device /dev/fuse` | Only Stern Emulate needs these (below). |
+| `--device /dev/fuse`, `--security-opt seccomp=...` | Only Stern Emulate needs these (below). |
 | `--shm-size 1g` | Room for the desktop's shared memory. |
 | `TZ` | Time zone for the log, e.g. `America/Chicago`. |
 
-On Unraid, add a container with these as its paths, port and variables, add
-`/dev/dri` as a Device, and put `--cap-add SYS_ADMIN --device /dev/fuse
---shm-size 1g` in **Extra Parameters**. **Privileged** stays off.
+On Unraid, copy the profile out as above (from a terminal), add a container
+with these as its paths, port and variables, add `/dev/dri` as a Device, and
+put `--device /dev/fuse --shm-size 1g --security-opt
+seccomp=/mnt/user/appdata/pinball-asset-decryptor/pad-seccomp.json` in
+**Extra Parameters**. **Privileged** stays off.
 
 ### What Stern Emulate needs, and why
 
-The container does not need `--privileged`. Stern Emulate needs two things
-from the server; everything else (extracting, replacing, building cards,
-every other manufacturer) needs neither.
+The container does not need `--privileged`, or any added capability. Stern
+Emulate needs two things from the server; everything else (extracting,
+replacing, building cards, every other manufacturer) needs neither.
 
 - **Mounting the card.** The emulator reads the card image without copying
-  6 GB out of it, through a FUSE mount: `--device /dev/fuse` and
-  `--cap-add SYS_ADMIN`, the same pair an rclone or sshfs container asks
-  for. That one capability, not every one, and no other devices.
+  6 GB out of it, through a FUSE mount (`--device /dev/fuse`). It makes
+  that mount inside a user namespace of its own, which changes only what
+  the emulator itself sees. Docker's standard seccomp profile refuses
+  namespaces to a container, so the image ships `pad-seccomp.json`: the
+  same profile with namespaces and mounts allowed. The kernel still
+  decides what may be mounted in them.
 - **Running 32-bit ARM programs.** The game is one, and the server's kernel
   runs it through qemu once qemu is registered with it. That is the one
   step that needs privileges, so it is a separate container that runs once
@@ -85,7 +101,10 @@ every other manufacturer) needs neither.
 
 On a host that uses AppArmor (Ubuntu, Debian), also add
 `--security-opt apparmor=unconfined`, or the FUSE mount is refused. Unraid
-does not use AppArmor.
+does not use AppArmor. Ubuntu 23.10 and later also restrict user namespaces
+on the host itself; there, use `--cap-add SYS_ADMIN` in place of the
+seccomp profile (that still works on any host). With neither, the
+emulator's log says what to add.
 
 ## What to expect
 

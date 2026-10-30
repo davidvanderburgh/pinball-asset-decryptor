@@ -138,7 +138,10 @@ def test_the_image_does_not_ask_for_privileges_it_does_not_need():
     run = guide[guide.index("docker run -d"):]
     run = run[:run.index("```")]
     assert "--privileged" not in run
-    assert "--cap-add SYS_ADMIN --device /dev/fuse" in run
+    # not even SYS_ADMIN since PAD-872: the card mounts in the run's own
+    # user namespace (tests/test_pad872_card_userns.py)
+    assert "--cap-add" not in run
+    assert "--device /dev/fuse" in run
 
 
 def test_the_arm_helper_registers_what_the_rig_looks_for():

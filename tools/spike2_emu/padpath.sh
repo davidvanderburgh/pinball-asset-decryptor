@@ -589,6 +589,67 @@ pad_is_wsl() {
     grep -qi microsoft /proc/version 2>/dev/null
 }
 
+# ---- A CARD WITHOUT SYS_ADMIN (PAD-872) ------------------------------------
+#
+# cardmount.sh mounts the card with fuse2fs through the setuid fusermount3,
+# and that mount(2) needs CAP_SYS_ADMIN in the namespace the mount lands in.
+# Every desktop has it to give; a Docker container has it only when started
+# with --cap-add SYS_ADMIN (the bounding set caps even setuid root), so the
+# image's run line used to ask for it - and Docker's seccomp profile opens
+# unshare/mount to a container only with that same capability, which is why
+# run_game.sh's own namespace failed beside the mount, not after it.
+#
+# A user namespace is the other way to own a mount. A process in one it made
+# holds every capability THERE, may mount FUSE in a mount namespace it owns,
+# and that is all it may do: nothing outside it changes. So a card run in a
+# container without SYS_ADMIN re-executes itself as
+#
+#   unshare --user --map-current-user --keep-caps --mount --propagation slave
+#
+# and everything under it - cardmount.sh's fuse2fs (which mounts directly,
+# with no fusermount, when it has the capability), the video host reading
+# clips off the mount, run_game.sh's inner `unshare -r -m -p -f` binding it
+# into the chroot, teardown's fusermount -u - shares the one mount namespace
+# the card is in, exactly as they share the host's on a desktop. The uid
+# stays the user's own (--map-current-user), so no `id -u = 0` branch in the
+# rig flips; --keep-caps carries the namespace's capabilities across the exec
+# as ambient ones; slave propagation lets mounts made on the host later (a
+# /data share) still reach the run. Measured in the image with only
+# --device /dev/fuse and the image's seccomp profile: Venom Pro boots.
+#
+# Asked only of a CARD run (a folder needs no mount), not as root (root is
+# what a privileged container or WSL's -u root gives, and it mounts as
+# always), and once (PAD_CARD_NS marks the re-executed copy). A container
+# where the namespace is refused too - Docker's default seccomp profile, or a
+# host that restricts user namespaces - is told what to add instead of
+# failing later at "fuse2fs did not mount". 0 = carry on here, 1 = refuse.
+pad_card_ns_needed() {
+    [ -n "${PAD_CARD:-}" ] || return 1
+    [ "${PAD_CARD_NS:-}" = 1 ] && return 1
+    [ "$(id -u)" = 0 ] && return 1
+    local bnd
+    bnd=$(awk '/^CapBnd:/ {print $2}' /proc/self/status 2>/dev/null)
+    [ -n "$bnd" ] || return 1
+    # CAP_SYS_ADMIN is bit 21: with it the setuid fusermount3 mounts as always.
+    (( (16#$bnd >> 21) & 1 )) && return 1
+    return 0
+}
+pad_card_ns() {                    # <script> [args...]  -> execs, or returns 0/1
+    pad_card_ns_needed || return 0
+    local ns=(unshare --user --map-current-user --keep-caps --mount --propagation slave)
+    if "${ns[@]}" true 2>/dev/null; then
+        echo "[card] no SYS_ADMIN here: this run mounts the card in its own user namespace"
+        export PAD_CARD_NS=1
+        exec "${ns[@]}" bash "$@"
+    fi
+    echo "[card] This container cannot mount a card: it has no SYS_ADMIN, and it may" >&2
+    echo "[card]   not make a user namespace either. Start it with the image's seccomp" >&2
+    echo "[card]   profile (--security-opt seccomp=pad-seccomp.json, see docs/guide/docker.md)," >&2
+    echo "[card]   or with --cap-add SYS_ADMIN. A host with AppArmor also needs" >&2
+    echo "[card]   --security-opt apparmor=unconfined." >&2
+    return 1
+}
+
 # Is the emulated GUEST running? Ask about BOTH process shapes, because the
 # qemu interpreter's name is a PLATFORM detail, not a fact about the guest:
 # WSL registers qemu under binfmt as `arm-binfmt-P` and that path appears on

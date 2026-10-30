@@ -22,6 +22,9 @@
 #   * fusermount3 is setuid, so an unprivileged user may create a FUSE mount -
 #     and FUSE is one of the few filesystem types the kernel permits inside a
 #     user namespace, which is where run_game.sh does its work.
+#   * where even setuid cannot mount (a container without SYS_ADMIN), the run
+#     has already moved into a user namespace of its own and fuse2fs mounts
+#     there directly - padpath.sh pad_card_ns (PAD-872).
 #
 # The partition is mounted `ro`. Nothing here can write to a card image, which
 # is the right guarantee to have when the images are the only copies.

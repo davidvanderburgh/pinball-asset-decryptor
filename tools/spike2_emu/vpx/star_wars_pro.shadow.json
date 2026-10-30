@@ -501,7 +501,8 @@
           28
         ]
       ],
-      "name": "INNER LOOP RIGHT ARROW"
+      "name": "INNER LOOP RIGHT ARROW",
+      "rgb": true
     },
     "Light020": {
       "leds": [
@@ -518,7 +519,8 @@
           31
         ]
       ],
-      "name": "INNER LOOP RIGHT X"
+      "name": "INNER LOOP RIGHT X",
+      "rgb": true
     },
     "Light010": {
       "leds": [
@@ -535,7 +537,8 @@
           21
         ]
       ],
-      "name": "INNER LOOP LEFT ARROW"
+      "name": "INNER LOOP LEFT ARROW",
+      "rgb": true
     },
     "Light011": {
       "leds": [
@@ -552,7 +555,8 @@
           3
         ]
       ],
-      "name": "INNER LOOP LEFT X"
+      "name": "INNER LOOP LEFT X",
+      "rgb": true
     },
     "Light015": {
       "leds": [
@@ -569,7 +573,8 @@
           10
         ]
       ],
-      "name": "LEFT ORBIT ARROW"
+      "name": "LEFT ORBIT ARROW",
+      "rgb": true
     },
     "Light016": {
       "leds": [
@@ -586,7 +591,8 @@
           13
         ]
       ],
-      "name": "LEFT ORBIT X"
+      "name": "LEFT ORBIT X",
+      "rgb": true
     },
     "Light021": {
       "leds": [
@@ -603,7 +609,8 @@
           39
         ]
       ],
-      "name": "LEFT RAMP ARROW"
+      "name": "LEFT RAMP ARROW",
+      "rgb": true
     },
     "Light012": {
       "leds": [
@@ -620,7 +627,8 @@
           24
         ]
       ],
-      "name": "LEFT RAMP X"
+      "name": "LEFT RAMP X",
+      "rgb": true
     },
     "Light048": {
       "leds": [
@@ -637,7 +645,8 @@
           31
         ]
       ],
-      "name": "RIGHT RAMP ARROW"
+      "name": "RIGHT RAMP ARROW",
+      "rgb": true
     },
     "Light045": {
       "leds": [
@@ -654,7 +663,8 @@
           39
         ]
       ],
-      "name": "RIGHT RAMP X"
+      "name": "RIGHT RAMP X",
+      "rgb": true
     },
     "Light047": {
       "leds": [
@@ -671,7 +681,8 @@
           27
         ]
       ],
-      "name": "RIGHT ORBIT ARROW"
+      "name": "RIGHT ORBIT ARROW",
+      "rgb": true
     },
     "Light046": {
       "leds": [
@@ -688,7 +699,8 @@
           36
         ]
       ],
-      "name": "RIGHT ORBIT X"
+      "name": "RIGHT ORBIT X",
+      "rgb": true
     },
     "Light051": {
       "leds": [
@@ -705,7 +717,8 @@
           11
         ]
       ],
-      "name": "RIGHT EJECT ARROW"
+      "name": "RIGHT EJECT ARROW",
+      "rgb": true
     },
     "Light050": {
       "leds": [
@@ -722,7 +735,8 @@
           15
         ]
       ],
-      "name": "RIGHT EJECT X"
+      "name": "RIGHT EJECT X",
+      "rgb": true
     },
     "Light013": {
       "leds": [
@@ -739,7 +753,8 @@
           36
         ]
       ],
-      "name": "XWING 3"
+      "name": "XWING 3",
+      "rgb": true
     },
     "Light017": {
       "leds": [
@@ -1288,6 +1303,167 @@
         ]
       ],
       "name": "RIGHT EJECT (GUESS)"
+    }
+  },
+  "retrofit_lights": {
+    "_": "inserts with no table light: a new Light cloned from `clone`, at [x, y] (the led_io place through the fit, vpxlamps.py suggest)",
+    "lights": {
+      "PadBehindDeathStarFl": {
+        "leds": [
+          [
+            10,
+            55
+          ]
+        ],
+        "name": "BEHIND DEATH STAR FL",
+        "clone": "Light023",
+        "at": [
+          173,
+          308
+        ]
+      },
+      "PadDeathStarLaser1": {
+        "leds": [
+          [
+            9,
+            40
+          ],
+          [
+            9,
+            41
+          ],
+          [
+            9,
+            42
+          ],
+          [
+            9,
+            43
+          ],
+          [
+            9,
+            44
+          ]
+        ],
+        "name": "DEATH STAR LASER 1 + DEATH STAR LASER 2 + DEATH STAR LASER 3 + DEATH STAR LASER 4 + DEATH STAR LASER CENTER",
+        "clone": "Light023",
+        "at": [
+          280,
+          456
+        ]
+      },
+      "PadLeftDeathStarFl": {
+        "leds": [
+          [
+            10,
+            40
+          ]
+        ],
+        "name": "LEFT DEATH STAR FL",
+        "clone": "Light016",
+        "at": [
+          23,
+          823
+        ]
+      },
+      "PadLeftPopBumper": {
+        "leds": [
+          [
+            10,
+            49
+          ]
+        ],
+        "name": "LEFT POP BUMPER",
+        "clone": "Light071",
+        "at": [
+          539,
+          438
+        ]
+      },
+      "PadLeftSideFl": {
+        "leds": [
+          [
+            10,
+            15
+          ]
+        ],
+        "name": "LEFT SIDE FL",
+        "clone": "Light032",
+        "at": [
+          87,
+          1031
+        ]
+      },
+      "PadLeftSlingFl": {
+        "leds": [
+          [
+            8,
+            4
+          ]
+        ],
+        "name": "LEFT SLING FL",
+        "clone": "Light035",
+        "at": [
+          156,
+          1718
+        ]
+      },
+      "PadLeftTieFighterFl": {
+        "leds": [
+          [
+            10,
+            41
+          ]
+        ],
+        "name": "LEFT TIE FIGHTER FL",
+        "clone": "Light032",
+        "at": [
+          37,
+          910
+        ]
+      },
+      "PadMillenniumFalconFl": {
+        "leds": [
+          [
+            10,
+            6
+          ]
+        ],
+        "name": "MILLENNIUM FALCON FL",
+        "clone": "Light003",
+        "at": [
+          76,
+          1266
+        ]
+      },
+      "PadRightPopBumper": {
+        "leds": [
+          [
+            10,
+            50
+          ]
+        ],
+        "name": "RIGHT POP BUMPER",
+        "clone": "Light071",
+        "at": [
+          805,
+          455
+        ]
+      },
+      "PadRightSlingFl": {
+        "leds": [
+          [
+            8,
+            5
+          ]
+        ],
+        "name": "RIGHT SLING FL",
+        "clone": "Light036",
+        "at": [
+          699,
+          1717
+        ]
+      }
     }
   },
   "quiet_subs": [

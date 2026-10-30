@@ -565,7 +565,7 @@ def test_shadow_lamps_drive_the_tables_lights():
     assert 'PadLamps.Add "1832", Array(L2)' in out                 # the first LED names the insert
     assert 'PadLamps.Add "1801", Array(gi1, gi2)' in out           # several lights on one LED
     assert "\tLightSeqAttract.StopPlay\n\tPadLampsInit\n\tSet LampCallback = GetRef(\"PadUpdateLamps\")" in out
-    assert "chg = Controller.ChangedLamps" in out and "o.State = chg(ii, 1)" in out
+    assert "chg = Controller.ChangedLamps" in out and "PadLampSet o, chg(ii, 1)" in out
     assert "Sub LightEffect_orig(n)" in out and "Sub LightEffect(n) : End Sub" in out
     assert any("NoSuchSub" in r for r in rep)
     assert "Sub sw001_Hit : vpmTimer.PulseSw 1053 : End Sub" in out               # no _orig: its rules are quiet
@@ -1553,3 +1553,120 @@ def test_play_brings_the_tables_padspike2_up_to_date(tmp_path):
     assert vs.refresh_system_script(str(tmp_path))
     assert (tmp_path / "PADSPIKE2.vbs").read_bytes() == ours
     assert not vs.refresh_system_script(str(tmp_path))                 # already this kit's
+
+
+# ------------------------------------------------- PAD-859: lamps that show ---
+
+def test_shadow_lamps_colour_dark_calls_and_the_tables_own_reads():
+    # Bond: RGB inserts give their light the insert's colour (PadLampSet),
+    # lights the machine has no LED for are held off (PadDark). Batman:
+    # inserts its tribute shows without a Light go to a sub (lamp_calls), and
+    # its own LampTimer's `Controller.ChangedLamps` must no longer take the
+    # changes the bridge waits for
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["lamps"] = {"_": "x", "L2": {"leds": [[8, 32], [8, 33], [8, 34]], "rgb": True, "name": "ARROW"}}
+    m["dark"] = ["L9", "F1"]
+    m["lamp_calls"] = {"_": "x",
+                       "PadBill": {"leds": [[9, 37], [9, 38], [9, 39]], "rgb": True, "call": "PadCatBulbs", "arg": 1},
+                       "PadSig": {"leds": [[8, 59]], "call": "PadBatSignal", "arg": "flsh"}}
+    script = MINI_TRIBUTE + ("Sub LampTimer()\n\tIf b2son then chglamp = Controller.ChangedLamps "
+                             "' Controller.ChangedLamps\nEnd Sub\n")
+    out, rep = vs.patch(script, m)
+    assert "If b2son then chglamp = Empty ' Controller.ChangedLamps" in out    # the comment kept
+    assert any("ChangedLamps answer Empty" in r for r in rep)
+    assert out.count("Controller.ChangedLamps") == 2                    # the bridge's, and the comment
+    assert 'PadCalls.Add "1937", Array(Array(GetRef("PadCatBulbs"), 1))' in out
+    assert 'PadCalls.Add "1859", Array(Array(GetRef("PadBatSignal"), "flsh"))' in out
+    assert "Set f = c(0) : f c(1), chg(ii, 1)" in out
+    assert "\tPadDark = Array(L9, F1)" in out
+    assert "If o.ColorFull <> v Then o.ColorFull = v : o.Color = PadDim(v)" in out
+    assert r"PadDim = RGB((v And 255) \ 14, ((v \ 256) And 255) \ 14, ((v \ 65536) And 255) \ 14)" in out
+    assert "\t\tIf PadLamps.Exists(k) Then\n\t\t\tFor Each o In PadLamps(k) : PadLampSet o, PadLampState(k) : Next" in out
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+    only_calls = json.loads(json.dumps(MINI_SHADOW))
+    only_calls["lamp_calls"] = m["lamp_calls"]
+    assert "Sub PadUpdateLamps" in vs.patch(MINI_TRIBUTE, only_calls)[0]   # calls alone still get the loop
+
+
+def test_controller_reports_an_rgb_insert_in_its_colour():
+    pc = pytest.importorskip("padcontroller")
+    assert pc.rgb_value(255, 0, 0) == 0x0000FF                          # VBScript RGB(): red in the low byte
+    assert pc.rgb_value(148, 0, 211) == 178 | 0 << 8 | 255 << 16        # brightest channel to 255
+    assert pc.rgb_value(1, 0, 0) == 255 and pc.rgb_value(0, 0, 0) == 2   # never 0 or 1 (off / on)
+    vm = pc.VpxMap(None)
+    vm.lamp_groups = {1832: [(8, 32), (8, 33), (8, 34)], 1859: [(8, 59)]}
+    vm.rgb_groups = {1832}
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.map, b.lamp_state, b.lamp_pending = vm, {}, set()
+    data = bytearray(20 + 16 * 96)
+    data[20 + 8 * 96 + 32], data[20 + 8 * 96 + 34], data[20 + 8 * 96 + 59] = 200, 100, 255
+    b._poll_lamps(bytes(data))
+    assert b.lamp_state[1832] == 255 | 0 << 8 | 127 << 16 and b.lamp_state[1859] == 1
+    assert b.lamp_state[1833] == 0                                      # an RGB insert's other LEDs stay unreported
+
+
+def test_every_shadow_maps_lamps_are_consistent():
+    # the controller keys a lamp by its FIRST LED: two entries starting on one
+    # LED must be the same insert, or one would light the other's light
+    for path in sorted(os.listdir(VPX)):
+        if not path.endswith((".shadow.json", ".vpxmap.json")):
+            continue
+        m = json.load(open(os.path.join(VPX, path), encoding="utf-8"))
+        first = {}
+        wired = set()
+        for sect in ("lamps", "lamp_calls", "retrofit_lights"):
+            table = m.get(sect, {})
+            if sect == "retrofit_lights":
+                table = table.get("lights", {})
+            for name, v in table.items():
+                if name == "_":
+                    continue
+                leds = [tuple(x) for x in v["leds"]]
+                assert first.setdefault(leds[0], (leds, bool(v.get("rgb")))) == (leds, bool(v.get("rgb"))), \
+                    "%s: %s starts on another insert's LED" % (path, name)
+                assert not v.get("rgb") or len(leds) == 3, "%s: %s rgb needs R, G, B" % (path, name)
+                assert not (v.get("rgb") and path.endswith(".vpxmap.json")), "a ROM table's lamps are 0/1"
+                if sect == "retrofit_lights" and path.endswith(".shadow.json"):
+                    assert v.get("clone") or m["retrofit_lights"].get("clone"), (path, name)
+                    assert len(v["at"]) == 2, (path, name)
+                if sect == "lamp_calls":
+                    assert v["call"] in m.get("extra_vbs", ""), "%s: %s calls a sub extra_vbs lacks" % (path, name)
+                wired.add(name)
+        assert not wired & set(m.get("dark", [])), "%s: dark and wired" % path
+
+
+def test_vpxlamps_fit_suggest_and_write(tmp_path):
+    vl = pytest.importorskip("vpxlamps")
+    # the fit: table units -> drawing px, recovered from wired lights
+    lights = {"a": (100.0, 100.0), "b": (900.0, 100.0), "c": (100.0, 2000.0), "d": (900.0, 2000.0),
+              "e": (500.0, 1000.0), "f": (300.0, 1500.0)}
+    leds = {(8, i): ("I%d" % i, round(x * 0.48 + 3), round(y * 0.45 - 2))
+            for i, (x, y) in enumerate(lights.values())}
+    wires = {n: [(8, i)] for i, n in enumerate(lights)}
+    fit, rms = vl.fit_table(lights, wires, leds)
+    assert rms < 1 and abs(vl.apply(fit, (500, 1000))[0] - 243) < 1
+    back = vl.apply(vl.invert(fit), vl.apply(fit, (321, 654)))
+    assert abs(back[0] - 321) < 0.01 and abs(back[1] - 654) < 0.01
+    assert vl._base("RIGHT ORBIT ARROW-G") == "RIGHT ORBIT ARROW"
+    assert vl.is_rgb({(8, 1): ("X-R",), (8, 2): ("X-G",), (8, 3): ("X-B",)}, [[8, 1], [8, 2], [8, 3]])
+    assert vl.retrofit_name("LEFT ORBIT-T-BALL 3") == "PadLeftOrbitTBall3"
+    # writing keeps a hand-laid map's one-entry-per-line layout
+    p = tmp_path / "t.shadow.json"
+    p.write_text('{\n  "title": "t",\n  "lamps": {\n    "_": "x",\n'
+                 '    "L1": {"leds": [[8, 1], [8, 2], [8, 3]], "name": "ARROW"}\n  },\n  "dark": []\n}\n',
+                 encoding="utf-8")
+    vl.write_lamps(str(p), {"L2": {"leds": [[8, 9]], "name": "NEW"}},
+                   {"PadX": {"leds": [[8, 10]], "name": "X", "clone": "L1", "at": [1, 2]}}, ["L1"])
+    text = p.read_text(encoding="utf-8")
+    assert '    "L1": {"leds": [[8, 1], [8, 2], [8, 3]], "rgb": true, "name": "ARROW"},\n    "L2": {' in text
+    m = json.loads(text)
+    assert list(m) == ["title", "lamps", "retrofit_lights", "dark"]
+    assert m["retrofit_lights"]["lights"]["PadX"]["at"] == [1, 2]
+    # and a json.dump file is dumped again, the same way
+    q = tmp_path / "d.shadow.json"
+    q.write_text(json.dumps({"title": "d", "lamps": {"L1": {"leds": [[8, 1]]}}, "quiet_subs": []}, indent=2) + "\n")
+    vl.write_lamps(str(q), {}, {"PadY": {"leds": [[8, 5]], "clone": "L1", "at": [3, 4]}})
+    mq = json.loads(q.read_text())
+    assert list(mq) == ["title", "lamps", "retrofit_lights", "quiet_subs"]
+    assert q.read_text() == json.dumps(mq, indent=2) + "\n"

@@ -273,13 +273,44 @@ def test_the_build_adds_each_clip_and_moves_no_stock_clip(tmp_path):
     assert vb.lines[0].startswith("video/Delta.mov plays one of 3 clips at random (b.mp4, c.mp4)")
 
 
-def test_a_card_that_already_has_random_clips_is_refused(tmp_path):
+def test_a_card_an_earlier_build_gave_random_clips_takes_new_ones_in_its_files(tmp_path):
+    """PAD-862: a project extracted from a card PAD built with random clips (or that card written
+    again) was refused - "the card being written already has random clips from an earlier build".
+    Now an earlier build's clip of the name this build wants keeps its entry and its file, and the
+    new clip goes in that file: no clip is added, the bank's other entries do not move, and the
+    file is a card file rewritten (``reused``), not a new one."""
     bank_dir = CV.bank_assets(GZ)
-    stock, _info = VB.add_clip(synthetic(("Alpha", "Delta")), "Delta__PadVar2", 10)
-    project = _project(tmp_path, {"video/Delta.mov": _clip_files(tmp_path, "b.mp4")},
+    stock, first = VB.add_clip(synthetic(("Alpha", "Delta")), "Delta__PadVar2", 10)
+    project = _project(tmp_path, {"video/Delta.mov": _clip_files(tmp_path, "b.mp4", "c.mp4")},
                        [("Delta.mov", bank_dir + "2.asset/1.asset")])
-    with pytest.raises(CV.VariantError, match="already has random clips from an earlier build"):
-        CV.build(project, GZ, stock, str(tmp_path / "out"), only=True, stage_fn=_fake_stage())
+    msgs = []
+    vb = CV.build(project, GZ, stock, str(tmp_path / "out"), only=True, stage_fn=_fake_stage(),
+                  log=lambda m, lvl="info": msgs.append((lvl, m)))
+    assert vb.slots[0].names == ["Delta__PadVar2", "Delta__PadVar3"]
+    old_card = bank_dir + first["path"]
+    assert [c for c, _d in vb.reused] == [old_card]
+    assert [c for c, _d in vb.new] != [old_card] and len(vb.new) == 1
+    before, after = VB.parse(stock), VB.parse(vb.bank)
+    assert len(after.library.entries) == len(before.library.entries) + 1
+    entry = {c.name: c for c in after.library.entries}["Delta__PadVar2"]
+    dst = vb.reused[0][1]
+    assert entry.path == first["path"] and entry.size == os.path.getsize(dst)
+    assert entry.clip_id == first["clip_id"]
+    assert open(dst, "rb").read() == b"staged my clip b.mp4"
+    assert open(vb.cfg, encoding="utf-8").read().splitlines()[2] ==         "clip	Delta	Delta__PadVar2	Delta__PadVar3"
+    assert "earlier build" in vb.lines[-1]
+    assert "(2 added clip(s))" in CV.describe(vb)
+
+
+def test_set_clip_size_rewrites_only_that_entrys_size():
+    data, info = VB.add_clip(synthetic(("Alpha", "Delta")), "Delta__PadVar2", 10)
+    new, path = VB.set_clip_size(data, "Delta__PadVar2", 12345)
+    assert path == info["path"] and len(new) == len(data)
+    a, b = VB.parse(data), VB.parse(new)
+    assert [(c.name, c.clip_id, c.path) for c in a.library.entries] ==         [(c.name, c.clip_id, c.path) for c in b.library.entries]
+    assert {c.name: c.size for c in b.library.entries}["Delta__PadVar2"] == 12345
+    with pytest.raises(VB.VideoBankError, match="no clip called"):
+        VB.set_clip_size(data, "Nope", 5)
 
 
 def test_relink_repoints_the_random_clips_too(tmp_path):

@@ -1133,6 +1133,7 @@ def variants_into(project, result, stock_bank, tree, only, log=None, progress=No
             f.write(data)
         result.replaced.append((card, src))
     result.new.extend(vb.new)
+    result.replaced.extend(vb.reused)            # PAD-862: files the card has, rewritten
     result.variants = vb
     result.clips_file = vb.cfg
     result.lines += ["random clips: %s" % line for line in vb.lines]

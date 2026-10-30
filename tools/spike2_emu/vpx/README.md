@@ -250,6 +250,17 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `PadB2S` before `Controller` becomes PAD.Controller; every
   `Controller.B2S...` in the script, and in controller.vbs as it loads
   (`PadB2SText`), goes to it, and Table1_Exit stops it.
+* **The table's own DOF calls come along** (PAD-847). With `orig_hits:
+  false` a bumper's Hit sub never runs, and the kickers, trough and plunger
+  fire on the machine's coils through cvpmBallStack, so the `DOF 107,
+  DOFPulse` and `SoundFXDOF(..., 113, ...)` there were lost. `dof_calls`
+  reads them from the script as written: what a stood-in event sub fires at
+  its own level (not in a branch of the shadow game's rules), and per coil
+  what the table fires beside `<release|saucer|plunger>.Kick/AutoFire` in
+  the same branch. They become `PadDOF` calls (SoundFXDOF's toy check kept)
+  in the bridge's subs and `PadSol<n>` coil wrappers. `b2s_name` renames
+  cGameName, the name B2S.Server gives DOF to find the table's config
+  (Rush: `rush_le`, not the script's `rushle`).
 * **Use the RIG's switch table.** The first Rush map came from an older
   reading of the title that numbered every switch one higher: the table
   pressed Tournament Start for Start and filled the jam opto, and the game

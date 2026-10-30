@@ -10,7 +10,8 @@
     "The ids are the RIG's switch_list.txt for rush_le-1_19_0 (the shim's own",
     "reading): an older table of this title numbered every switch one higher and",
     "pressed Tournament Start for Start.",
-    "quiet_subs: the tribute's own light shows and its GI timer (GIUpdateTimer_Timer turns GI off by ball count); orig_hits false: its hit subs stay out of the way once the machine lights the table."
+    "quiet_subs: the tribute's own light shows and its GI timer (GIUpdateTimer_Timer turns GI off by ball count); orig_hits false: its hit subs stay out of the way once the machine lights the table.",
+    "b2s_name: the script's cGameName is \"rushle\", but the DOF Config Tool lists the table as rush_le, and B2S.Server hands DOF that name (PAD-847)."
   ],
   "title": "rush_le",
   "detect": [
@@ -18,6 +19,7 @@
     "DrHotWing"
   ],
   "output": "Rush LE 2.0.2 (PAD).vpx",
+  "b2s_name": "rush_le",
   "table": {"name": "Rush LE Tribute 2.0.2", "by": "drhotwing", "where": "VPUniverse"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},

@@ -34,13 +34,33 @@ GI_PREFIXES = ("gi",)
 
 
 def read_led_io(path):
-    """(node, index) -> (name, x, y) of every positioned playfield LED."""
+    """(node, index) -> (name, x, y) of every LED placed on the playfield drawing."""
     out = {}
     for line in open(path, encoding="utf-8", errors="replace"):
-        if line.startswith("#") or not line.rstrip().endswith("playfield"):
-            continue
         p = line.split()
+        # the image column: "playfield", or Metallica's TestMode/metallica_playfield_with_handle_cropped
+        if line.startswith("#") or len(p) < 7 or "playfield" not in p[-1].lower():
+            continue
         out[(int(p[0]), int(p[1]))] = (" ".join(p[2:-4]), int(p[-4]), int(p[-3]))
+    return out
+
+
+NOT_PLAYFIELD = re.compile(r"SPEAKER|TOPPER|BACKBOX|CABINET|COIN|START BUTTON|TOURNAMENT|LOCKDOWN|"
+                           r"SHOOTER ILLUM|FLIPPER BUTTON|\bGI\b|GEN(ERAL)? ILLUM", re.I)
+
+
+def read_unplaced(path):
+    """(node, index) -> name of the LEDs a build names but does not place
+    (Rush's and Foo Fighters' device tables have no positions): the
+    cabinet, speakers, topper and GI left out."""
+    out = {}
+    for line in open(path, encoding="utf-8", errors="replace"):
+        p = line.split()
+        if line.startswith("#") or len(p) < 6 or p[-1] != "-" or p[-3:-1] != ["0", "0"]:
+            continue
+        name = " ".join(p[2:-3])
+        if int(p[0]) > 1 and not NOT_PLAYFIELD.search(name):
+            out[(int(p[0]), int(p[1]))] = name
     return out
 
 
@@ -134,20 +154,30 @@ def fit_table(lights, wires, leds):
     return fit, rms
 
 
-def audit(m, table, leds):
+def _base(name):
+    """An RGB insert's name without its -R/-G/-B."""
+    return name[:-2] if name[-2:] in ("-R", "-G", "-B") else name
+
+
+def audit(m, table, leds, unplaced=None):
     lights = table_lights(table)
     wires = wired(m)
     dark = set(m.get("dark", []))
     fit, rms = fit_table(lights, wires, leds)
     shown = {g for group in wires.values() for g in group}
-    rep = {"fit_rms": rms, "unwired_leds": [], "unmapped_lights": [], "far": []}
+    rep = {"fit_rms": rms, "unwired_leds": [], "unwired_unplaced": [], "unmapped_lights": [], "far": []}
     base = {}
     for k, (name, x, y) in leds.items():
-        b = name[:-2] if name[-2:] in ("-R", "-G", "-B") else name
-        base.setdefault(b, []).append(k)
+        base.setdefault(_base(name), []).append(k)
     for b, ks in sorted(base.items()):
         if not any(k in shown for k in ks):
             rep["unwired_leds"].append((b, sorted(ks)))
+    named = {}
+    for k, name in (unplaced or {}).items():
+        named.setdefault(_base(name), []).append(k)
+    for b, ks in sorted(named.items()):
+        if not any(k in shown for k in ks):
+            rep["unwired_unplaced"].append((b, sorted(ks)))
     script = table.script().lower()
     for name, pos in sorted(lights.items()):
         if name in wires or name in dark:
@@ -224,27 +254,33 @@ def draw_lit(m, table, levels, out, height=1600):
     s = height / float(bottom)
     img = img.resize((int(right * s), height)).point(lambda v: v * 0.45)
     d = ImageDraw.Draw(img)
-    lights = {}
+    objs = {}
     for data in table.items:
         kind, name, pos = table.item_info(data)
-        if kind == "Light" and pos:
-            lights[name] = pos
+        if pos:
+            objs[name] = pos
     entries = {}
-    for sect in (m.get("lamps", {}), m.get("retrofit_lights", {}).get("lights", {})):
+    for sect in (m.get("lamps", {}), m.get("lamp_calls", {}),
+                 m.get("retrofit_lights", {}).get("lights", {})):
         entries.update((k, v) for k, v in sect.items() if k != "_" and isinstance(v, dict))
     n = 0
     for name, v in entries.items():
-        pos = lights.get(name) or tuple(v.get("at", ()))
-        if not pos:
-            continue
-        val = lamp_value(levels, [tuple(x) for x in v["leds"]], v.get("rgb"))
-        x, y = pos[0] * s, pos[1] * s
-        if val:
-            n += 1
-            col = (255, 240, 120) if val == 1 else (val & 255, (val >> 8) & 255, (val >> 16) & 255)
-            d.ellipse((x - 9, y - 9, x + 9, y + 9), fill=col, outline=(255, 255, 255), width=2)
+        # a Light where it is, a retrofit one where it goes, a lamp call at what shows it
+        if name in objs:
+            places = [objs[name]]
+        elif v.get("at"):
+            places = [tuple(v["at"])]
         else:
-            d.ellipse((x - 4, y - 4, x + 4, y + 4), outline=(110, 110, 110), width=1)
+            places = [objs[o] for o in v.get("show", ()) if o in objs]
+        val = lamp_value(levels, [tuple(x) for x in v["leds"]], v.get("rgb"))
+        n += bool(val) and bool(places)
+        for pos in places:
+            x, y = pos[0] * s, pos[1] * s
+            if val:
+                col = (255, 240, 120) if val == 1 else (val & 255, (val >> 8) & 255, (val >> 16) & 255)
+                d.ellipse((x - 9, y - 9, x + 9, y + 9), fill=col, outline=(255, 255, 255), width=2)
+            else:
+                d.ellipse((x - 4, y - 4, x + 4, y + 4), outline=(110, 110, 110), width=1)
     img.save(out)
     return n
 
@@ -300,11 +336,15 @@ def main(argv):
         n = draw_lit(m, table, led_levels(argv[5]), argv[6])
         print("%d lights lit -> %s" % (n, argv[6]))
         return 0
-    rep, fit = audit(m, table, leds)
+    rep, fit = audit(m, table, leds, read_unplaced(argv[4]))
     print("fit: %s" % ("rms %.1f drawing px" % rep["fit_rms"] if fit else "too few single-insert lights"))
     print("playfield inserts no table light shows (%d):" % len(rep["unwired_leds"]))
     for b, ks in rep["unwired_leds"]:
         print("   %-30s %s" % (b, " ".join("%d/%d" % k for k in ks)))
+    if rep["unwired_unplaced"]:
+        print("LEDs the build names but does not place, no table light shows (%d):" % len(rep["unwired_unplaced"]))
+        for b, ks in rep["unwired_unplaced"]:
+            print("   %-30s %s" % (b, " ".join("%d/%d" % k for k in ks)))
     print("table lights neither wired nor dark (%d):" % len(rep["unmapped_lights"]))
     for name, near in rep["unmapped_lights"]:
         print("   %-20s nearest %s" % (name, "%s at %d px" % near if near else "-"))

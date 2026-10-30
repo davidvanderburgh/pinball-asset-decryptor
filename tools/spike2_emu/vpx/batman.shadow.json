@@ -201,19 +201,19 @@
     "lPFBSpinner2": {"leds": [[10, 0], [10, 1], [10, 2], [10, 3], [10, 4]], "name": "BAT SPINNER 1-5"}
   },
   "lamp_calls": {
-    "_": "inserts the tribute shows with something other than a Light: `call` is a sub of extra_vbs, called (arg, value) when the machine's LED changes (PAD-859)",
-    "PadCatLeftBillboard": {"leds": [[9, 37], [9, 38], [9, 39]], "rgb": true, "call": "PadCatBulbs", "arg": 1, "name": "CATWOMAN LEFT BILLBOARD (the tribute's left C-A-T bulbs, Lampz 1-3)"},
-    "PadCatRightBillboard": {"leds": [[9, 42], [9, 43], [9, 44]], "rgb": true, "call": "PadCatBulbs", "arg": 4, "name": "CATWOMAN RIGHT BILLBOARD (the right C-A-T bulbs, Lampz 4-6)"},
-    "PadBatComputer1": {"leds": [[10, 5]], "call": "PadBulb", "arg": 7, "name": "BAT COMPUTER 1 (bulb l7)"},
-    "PadBatComputer2": {"leds": [[10, 6]], "call": "PadBulb", "arg": 8, "name": "BAT COMPUTER 2 (bulb l8)"},
-    "PadBatComputer3": {"leds": [[10, 7]], "call": "PadBulb", "arg": 9, "name": "BAT COMPUTER 3 (bulb l9)"},
-    "PadCrimeAnalyzer1": {"leds": [[10, 8]], "call": "PadBulb", "arg": 10, "name": "CRIME ANALYZER 1 (bulb l10)"},
-    "PadCrimeAnalyzer2": {"leds": [[10, 9]], "call": "PadBulb", "arg": 11, "name": "CRIME ANALYZER 2 (bulb l11)"},
-    "PadCrimeAnalyzer3": {"leds": [[10, 10]], "call": "PadBulb", "arg": 12, "name": "CRIME ANALYZER 3 (bulb l12)"},
-    "PadLeftPop": {"leds": [[8, 55]], "call": "PadPop", "arg": 1, "name": "LEFT POP BUMPER (Bumper003's plastic)"},
-    "PadRightPop": {"leds": [[8, 56]], "call": "PadPop", "arg": 2, "name": "RIGHT POP BUMPER (Bumper001's plastic)"},
-    "PadBottomPop": {"leds": [[8, 57]], "call": "PadPop", "arg": 3, "name": "BOTTOM POP BUMPER (Bumper002's plastic)"},
-    "PadBatSignal": {"leds": [[8, 59]], "call": "PadBatSignal", "arg": 0, "name": "BAT SIGNAL (flshBatSignal)"}
+    "_": "inserts the tribute shows with something other than a Light: `call` is a sub of extra_vbs, called (arg, value) when the machine's LED changes; `show` names the objects that show it (PAD-859)",
+    "PadCatLeftBillboard": {"leds": [[9, 37], [9, 38], [9, 39]], "rgb": true, "call": "PadCatBulbs", "arg": 1, "name": "CATWOMAN LEFT BILLBOARD (the tribute's left C-A-T bulbs, Lampz 1-3)", "show": ["l80", "l81", "l82"]},
+    "PadCatRightBillboard": {"leds": [[9, 42], [9, 43], [9, 44]], "rgb": true, "call": "PadCatBulbs", "arg": 4, "name": "CATWOMAN RIGHT BILLBOARD (the right C-A-T bulbs, Lampz 4-6)", "show": ["l83", "l84", "l85"]},
+    "PadBatComputer1": {"leds": [[10, 5]], "call": "PadBulb", "arg": 7, "name": "BAT COMPUTER 1 (bulb l7)", "show": ["l7"]},
+    "PadBatComputer2": {"leds": [[10, 6]], "call": "PadBulb", "arg": 8, "name": "BAT COMPUTER 2 (bulb l8)", "show": ["l8"]},
+    "PadBatComputer3": {"leds": [[10, 7]], "call": "PadBulb", "arg": 9, "name": "BAT COMPUTER 3 (bulb l9)", "show": ["l9"]},
+    "PadCrimeAnalyzer1": {"leds": [[10, 8]], "call": "PadBulb", "arg": 10, "name": "CRIME ANALYZER 1 (bulb l10)", "show": ["l10"]},
+    "PadCrimeAnalyzer2": {"leds": [[10, 9]], "call": "PadBulb", "arg": 11, "name": "CRIME ANALYZER 2 (bulb l11)", "show": ["l11"]},
+    "PadCrimeAnalyzer3": {"leds": [[10, 10]], "call": "PadBulb", "arg": 12, "name": "CRIME ANALYZER 3 (bulb l12)", "show": ["l12"]},
+    "PadLeftPop": {"leds": [[8, 55]], "call": "PadPop", "arg": 1, "name": "LEFT POP BUMPER (Bumper003's plastic)", "show": ["Bumper003"]},
+    "PadRightPop": {"leds": [[8, 56]], "call": "PadPop", "arg": 2, "name": "RIGHT POP BUMPER (Bumper001's plastic)", "show": ["Bumper001"]},
+    "PadBottomPop": {"leds": [[8, 57]], "call": "PadPop", "arg": 3, "name": "BOTTOM POP BUMPER (Bumper002's plastic)", "show": ["Bumper002"]},
+    "PadBatSignal": {"leds": [[8, 59]], "call": "PadBatSignal", "arg": 0, "name": "BAT SIGNAL (flshBatSignal)", "show": ["flshBatSignal"]}
   },
   "retrofit_lights": {
     "_": "LE inserts with no table object: a new Light cloned from `clone`, at [x, y] (the led_io position through the fit of the mapped lights, PAD-859)",

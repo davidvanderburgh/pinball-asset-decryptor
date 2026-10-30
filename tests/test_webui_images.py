@@ -415,7 +415,9 @@ def test_choose_keep_size_and_the_build_tuple(scanned):
     assert pend[2] == frozenset()
     w.call("images.set_keep", BANNER, True)
     p = w.state("images")["preview"]
-    assert p["keep"]["on"] is True and "the scene grows" in p["keep"]["text"]
+    assert p["keep"]["on"] is True and p["keep"]["text"].startswith(
+        "Kept at 90×22 (the original is 40×20): it shows in the original's place "
+        "and size")
     assert _by_rel(w.state("images"))[BANNER]["k"] is True
     assert w.window.pending_image_assignments(assets)[2] == frozenset(
         {BANNER})

@@ -406,12 +406,15 @@ def _safe(rel):
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in rel.replace("/", "__"))
 
 
-def stage(project, rel, files, log=None, cancel=None, tag="", first=2, what="random clip"):
+def stage(project, rel, files, log=None, cancel=None, tag="", first=2, what="random clip",
+          kept=None):
     """Each of ``files`` made into slot ``rel``'s format, as the slot's own replacement would be
     (its length and conversion choices, the tab's options, the project's colour profile).
     Returns the converted files in order. Raises :class:`VariantError` naming the clip that
     could not be made. PAD-685: *tag* keeps another feature's clips made like the same slot apart
-    in the cache (the jukebox's ``"juke"``), numbered from *first* and called *what* in the log."""
+    in the cache (the jukebox's ``"juke"``), numbered from *first* and called *what* in the log.
+    PAD-863: *kept*, a list, collects the clips an earlier build already converted instead of a
+    log line for each (the caller says how many once)."""
     from ...core import staged_changes, staged_originals
     from ...core import video_slots as VS
     from ...core.video import detect_video_info
@@ -464,8 +467,11 @@ def stage(project, rel, files, log=None, cancel=None, tag="", first=2, what="ran
                                            colour=colour.key() if colour is not None else "")
             key = target.rel_path
             if cache.fresh(key, recipe, out):
-                log("  ✓ %s, %s %d (already converted from this file - kept)" % (rel, what, k),
-                    "success")
+                if kept is not None:
+                    kept.append(out)
+                else:
+                    log("  ✓ %s, %s %d (already converted from this file - kept)"
+                        % (rel, what, k), "success")
                 made.append(out)
                 continue
             ok, detail = VS.stage_replacement(
@@ -484,6 +490,10 @@ def stage(project, rel, files, log=None, cancel=None, tag="", first=2, what="ran
     finally:
         cache.save()
     return made
+
+
+#: :func:`stage` as defined here (a stand-in takes no *kept*)
+_STAGE = stage
 
 
 def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=None, cancel=None,
@@ -579,6 +589,9 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
             if counts.get(s.stock) == 1:
                 s.scene = "*" + s.scene
     stage_fn = stage_fn or stage
+    # PAD-863: an Emulate Start on a card with 63 random clips logged 63 "kept" lines
+    kept = []
+    quiet = {"kept": kept} if stage_fn is _STAGE else {}
     total = sum(len(s.files) for s in slots) + (len(juke[1]) if juke else 0)
     done = 0
     new = []
@@ -621,7 +634,7 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
     for s in slots:
         if progress is not None:
             progress(done, total, "Converting the random clips for %s..." % s.rel)
-        s.staged = list(stage_fn(project, s.rel, s.files, log=log, cancel=cancel))
+        s.staged = list(stage_fn(project, s.rel, s.files, log=log, cancel=cancel, **quiet))
         for k, src in enumerate(s.staged, 2):
             name = variant_name(s.stock, k)
             card = add(s.bank_sc, name, src)
@@ -642,7 +655,7 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
         if progress is not None:
             progress(done, total, "Converting the jukebox's intro videos...")
         made = list(stage_fn(project, rel, [f for _k, f in songs], log=log, cancel=cancel,
-                             tag="juke", first=1, what="jukebox song"))
+                             tag="juke", first=1, what="jukebox song", **quiet))
         for (k, src_file), src in zip(songs, made):
             name = _jb_clip_name(k)
             if not add(own, name, src):
@@ -652,6 +665,9 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
                      % (len(songs), ", ".join(_jb_clip_name(k) for k, _f in songs)))
     if progress is not None:
         progress(total, total, "")
+    if kept:
+        log("  ✓ %d clip(s) already converted from their files by an earlier build - kept"
+            % len(kept), "success")
     os.makedirs(out_dir, exist_ok=True)
     cfg = os.path.join(out_dir, CFG_NAME)
     with open(cfg, "w", encoding="utf-8", newline="\n") as f:

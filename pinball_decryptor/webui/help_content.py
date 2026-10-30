@@ -3483,7 +3483,11 @@ PREVIEW_HELP = {
                 "the tables folder, is copied to match the \"(PAD)\" name.\n"
                 "- A title plays the newest build of its card in the card folder.\n"
                 "- **Windows** sets where Visual Pinball's playfield and the game's screen "
-                "go when a table opens. You can drag the game's screen anywhere after that.",
+                "go when a table opens. You can drag the game's screen anywhere after that.\n"
+                "- The playfield and the game's screen work the same way: drag to move, "
+                "grab within 16 pixels of an edge to resize (the pointer shows the arrow), "
+                "double-click to fill the screen and again to go back. The playfield keeps "
+                "the table's proportions.",
             ]),
             ("Playing",
              "| Key | Does |\n"

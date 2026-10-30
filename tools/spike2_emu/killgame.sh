@@ -324,6 +324,33 @@ while IFS= read -r m; do
         echo "  a killed daemon wedges the mountpoint and the next run cannot start." >&2
     fi
 done < <(card_mounts)
+# A CARD MOUNTED IN A RUN'S OWN USER NAMESPACE (PAD-872: a container without
+# SYS_ADMIN) is not in /proc/self/mounts out here, and fusermount out here
+# cannot reach it. fuse2fs can: it was started in that namespace holding its
+# capabilities, and on SIGTERM it leaves its loop and unmounts itself - the
+# whole mount, kernel half and daemon, the same as fusermount -u (measured:
+# the namespace, still held open by the hidden run's Xvfb, lists no card
+# afterwards). TERM and not KILL, for the reason above. The sweep has
+# already killed everything of the run that could be reading it.
+# WHICH ONES: a fuse2fs serving this slot's card folder whose mountpoint is
+# NOT in our own mount table - one that is, the loop above has just tried
+# and must be left. Not by comparing /proc/<pid>/ns/mnt: the app's Stop for
+# a save-state Start is root through sudo, and root without SYS_PTRACE (a
+# container's) may not read another user's namespace links (measured).
+_cards=$(readlink -f "$PAD_CARDS" 2>/dev/null) || _cards=$PAD_CARDS
+_seen=$(card_mounts)
+for _fp in $(pad_pids -x fuse2fs); do
+    _m=$(tr '\0' '\n' < "/proc/$_fp/cmdline" 2>/dev/null | grep -m1 "^${_cards%/}/[^/]*$") || continue
+    printf '%s\n' "$_seen" | grep -qxF -- "$_m" && continue
+    kill -TERM "$_fp" 2>/dev/null || continue
+    for _ in 1 2 3 4 5 6 7 8 9 10; do [ -d "/proc/$_fp" ] || break; sleep 0.2; done
+    if [ -d "/proc/$_fp" ]; then
+        echo "COULD NOT UNMOUNT $_m - its fuse2fs ($_fp, in the run's own namespace) did not stop" >&2
+    else
+        rmdir "$_m" 2>/dev/null
+        echo "unmounted card $_m (in the run's own namespace)"
+    fi
+done
 sleep 1
 
 # The board's run record (riglock.sh list, the app, the triage dashboard) says

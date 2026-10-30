@@ -25,6 +25,10 @@
 #     child, which here is a setsid wrapper, so the guest survives it.
 set -u
 . "$(dirname "$0")/padpath.sh"
+# A card run in a container without SYS_ADMIN goes on in its own user
+# namespace, where it may mount the card (padpath.sh, PAD-872). First, so the
+# lease, the build and every helper below are the re-executed run's.
+pad_card_ns "$0" "$@" || exit 1
 
 # ★ RIG SLOTS (padpath.sh). A slot run boots from and builds into its own
 # overlay rootfs, so that has to be up before the first build below - and when

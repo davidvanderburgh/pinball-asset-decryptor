@@ -86,10 +86,14 @@ RUN sed -i 's#<application class="\*"><maximized>yes</maximized></application>#<
 # The app starts with the desktop (/defaults/autostart) and again whenever
 # it is closed (RESTART_APP); pad-register-arm is the one-off privileged
 # helper Stern Emulate needs on a server with no ARM handler yet
-# (docs/guide/docker.md).
+# (docs/guide/docker.md).  pad-seccomp.json is the seccomp profile the run
+# line names (PAD-872): Docker's default (moby/profiles seccomp/default.json
+# at 6fe7deb, 2026-09-17) with namespaces and mounts allowed, so Emulate
+# mounts the card in its own user namespace and the container needs no
+# SYS_ADMIN.  Docker reads it on the server, so the guide copies it out.
 COPY docker/root/ /
 RUN chmod 755 /usr/local/bin/pad-app /usr/local/bin/pad-register-arm \
-    && chmod 644 /defaults/autostart
+    && chmod 644 /defaults/autostart /usr/share/pad/pad-seccomp.json
 
 # /config is the app's home (settings, projects, logs, the emulator's
 # working files); /data is where your game files live.

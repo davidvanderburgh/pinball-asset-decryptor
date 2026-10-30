@@ -8,6 +8,9 @@
 # directory under games/ holding its own `game` ELF and assets. Which one boots
 # is decided here and nowhere else.
 . "$(dirname "$0")/padpath.sh"
+# Started by hand in a container without SYS_ADMIN (watch.sh has already done
+# this for its own runs): the card mounts in this run's user namespace.
+pad_card_ns "$0" "$@" || exit 1
 R=$ROOT
 S=$RIG
 

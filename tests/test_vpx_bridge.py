@@ -1289,6 +1289,53 @@ def test_losing_the_focus_lets_go_of_held_buttons():
     assert b.pipe.held == {34: 0, 36: 0, 65: 0, 39: 1}   # coins are not buttons
 
 
+def test_switches_the_table_sets_before_the_game_is_up_reach_it_at_attach(tmp_path, monkeypatch):
+    # PAD-878 "star wars vpx - looking for ball error on boot": the table sets
+    # its trough once, at Init, right after Controller.Run starts the game -
+    # half a minute before the bridge attaches - and those edges were dropped.
+    # On Star Wars Pro's first run the renderer had no switch list to fill the
+    # trough from either, so the game booted on an empty one.
+    pc = pytest.importorskip("padcontroller")
+    sent = []
+
+    class Pipe:
+        def __init__(self, rig):
+            self.held = {}
+
+        def set(self, sid, level):
+            self.held[sid] = 1 if level else 0
+            sent.append((sid, self.held[sid]))
+
+    class Rig:
+        how = "test"
+
+        def ballfeed_off_path(self):
+            return str(tmp_path / "ballfeed.off")
+
+    monkeypatch.setattr(pc, "SwitchPipe", Pipe)
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    b = pc.Bridge()
+    b.set_game("star_wars_pro")
+    b.start_t = 0.0
+    b._read_tables = lambda data: None
+    # bsTrough.Balls = 0 opens the trough, then PadTroughSync closes its six
+    for n in (1067, 1066, 1065, 1064, 1063, 1062, 1068):
+        b.set_switch(n, 0)
+    for n in (1067, 1066, 1065, 1064, 1063, 1062):
+        b.set_switch(n, 1)
+    b.set_switch(1055, 1)                      # a flipper pressed and let go while it booted
+    b.set_switch(1055, 0)
+    assert b.get_switch(1067) and not b.get_switch(1068) and not b.get_switch(1055)
+    assert sent == []                          # nothing to send them to yet
+    b.rig = Rig()
+    b._attach(b"")
+    assert dict(sent) == {62: 1, 63: 1, 64: 1, 65: 1, 66: 1, 67: 1, 68: 0, 55: 0}
+    assert len(sent) == 8                      # each once, its last level
+    sent.clear()
+    b.set_switch(1067, 0)                      # from here on straight through
+    assert sent == [(67, 0)] and b._early == {}
+
+
 def test_a_titles_card_is_the_stock_release_over_a_custom_one_of_its_version(tmp_path, monkeypatch):
     pl = pytest.importorskip("padlaunch")
     for n in ("turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw", "turtles_pro-1_59_0.Release.8G.sdcard.raw",
@@ -1551,6 +1598,47 @@ def test_padspike2_backglass_off_or_missing_changes_nothing(tmp_path):
     body = sysvbs[sysvbs.index("Sub LoadVPM("):]
     body = body[:body.index("End Sub")]
     assert body.index('CreateObject("PAD.Controller")') < body.index("PadStartB2S")
+
+
+_KEYS_HARNESS = '''
+Class FakeCtl
+	Public Property Let Switch(n, v) : WScript.Echo "sw" & n & "=" & v : End Property
+End Class
+Class FakeFlips
+	Public FlipperSolNumber(3)
+	Sub FlipL(e) : WScript.Echo "L=" & e : End Sub
+	Sub FlipR(e) : WScript.Echo "R=" & e : End Sub
+	Sub FlipUL(e) : WScript.Echo "UL=" & e : End Sub
+	Sub FlipUR(e) : WScript.Echo "UR=" & e : End Sub
+End Class
+Set Controller = New FakeCtl
+Set vpmFlips = New FakeFlips
+vpmFlips.FlipperSolNumber(0) = 48 : vpmFlips.FlipperSolNumber(1) = 46
+vpmFlips.FlipperSolNumber(2) = 36 : vpmFlips.FlipperSolNumber(3) = 0
+LeftFlipperKey = 42 : RightFlipperKey = 54
+StagedLeftFlipperKey = 219 : StagedRightFlipperKey = 184
+keyStagedFlipperL = LeftFlipperKey : keyStagedFlipperR = RightFlipperKey
+'''
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs PADSPIKE2.vbs under cscript")
+def test_padspike2_left_key_flips_the_upper_left_flipper(tmp_path):
+    # PAD-878 "GODZILLA VPX - no third flipper": Visual Pinball's own staged
+    # keys default to Left Windows / Right Alt, and the handlers read those,
+    # so the left key never closed UP LEFT FLIP (1061) and Godzilla's upper
+    # flipper sat still. VPMKeys.vbs's keyStagedFlipperL is the left key
+    # itself, as on the machine, whose button closes both switches.
+    out, _ = _run_padspike2(tmp_path, [_KEYS_HARNESS, "vpmKeyDown 42", "vpmKeyUp 42"])
+    assert out == ["sw1060=True", "L=True", "UL=True", "sw1061=True",
+                   "sw1060=False", "L=False", "UL=False", "sw1061=False"]
+    # no upper right flipper on Godzilla: the right key is the right flipper only
+    out, _ = _run_padspike2(tmp_path, [_KEYS_HARNESS, "vpmKeyDown 54", "vpmKeyUp 54"])
+    assert out == ["sw1059=True", "R=True", "UR=True", "sw1059=False", "R=False", "UR=False"]
+    # a table that names its own staged key keeps the upper flipper on that key
+    out, _ = _run_padspike2(tmp_path, [_KEYS_HARNESS, "keyStagedFlipperL = 219",
+                                       "vpmKeyDown 42", "vpmKeyDown 219", "vpmKeyUp 219"])
+    assert out == ["sw1060=True", "L=True", "UL=True", "sw1061=True", "UL=False", "sw1061=False"]
 
 
 def test_rom_patchers_keep_the_rom_name_for_the_backglass():

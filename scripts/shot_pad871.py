@@ -87,7 +87,10 @@ def main():
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             webui_shot.api(url, "ui.select_tab", "emulate")
-            time.sleep(4)
+            time.sleep(2)
+            # the slots, as Refresh reads them (a main tree's Linux panel refuses)
+            webui_shot.api(url, "emulate.slots_refresh")
+            time.sleep(3)
             em = webui_shot.state(url).get("emulate", {})
             print("slots_enabled:", em.get("slots_enabled"), "| sum:", em.get("slots_sum"),
                   "| rows:", len(em.get("slots") or []))

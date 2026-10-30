@@ -1757,9 +1757,11 @@ class EmulateTab(TabService):
         if self._slot_sel not in by_iid:
             self._slot_sel = None
         mac = sys.platform == "darwin"
+        wsl = sys.platform == "win32"       # a Linux desktop has no WSL (PAD-871)
         if self._slots_total is None:
             summary = ("Could not read the slots - is Docker running?" if mac
-                       else "Could not read the slots - is WSL up?")
+                       else "Could not read the slots - is WSL up?" if wsl
+                       else "Could not read the slots.")
         else:
             bits = []
             if game_now:
@@ -1771,8 +1773,8 @@ class EmulateTab(TabService):
             else:
                 bits.append("%d slot%s" % (shown, "" if shown == 1 else "s"))
             bits.append("all slots %s" % rig.human(self._slots_total))
-            bits.append(("free on the emulator's disk: %s" if mac else
-                         "free on the WSL disk: %s")
+            bits.append(("free on the WSL disk: %s" if wsl else
+                         "free on the emulator's disk: %s")
                         % rig.human(self._slots_free))
             summary = " · ".join(bits)
         # "No save states" only after a read that answered (a failed read

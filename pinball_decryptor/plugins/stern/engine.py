@@ -18853,7 +18853,7 @@ def _ungrow_dead_records(gr_path, img_path, params, sites, log, family=None):
         "nothing on it any more (%.0f MB: that build's music modes' files, sounds in turn or "
         "modes' sounds, which this build puts on again), so image.bin is rebuilt from the "
         "card's own %d records and the %d longer sound(s) of the card's own go back on whole, "
-        "as they play now. image.bin is %.0f MB smaller for it." % (
+        "as they play now: %.0f MB of image.bin freed for this build's own." % (
             len(dead), len(shadows), dead_bytes / 1e6, n, len(live), dead_bytes / 1e6), "info")
     return carried
 

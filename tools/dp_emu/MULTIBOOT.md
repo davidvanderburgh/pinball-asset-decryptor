@@ -81,11 +81,27 @@ Every failure ends on the newest stock folder, exactly as the machine would boot
   `libftdi1.so.2`), and `tools/dp_emu/aaiw/aaiwshim.c` already answers libftdi1 the way
   a P-ROC does, so the rig can run `dpprocsw` on the real library.
 * Buttons (1.13 `config/machine.yaml`, a P3-ROC, `machineType: pdb`): `flipperLwL` SD67,
-  `flipperLwR` SD65, `startButton` SD68.
+  `flipperLwR` SD65, `startButton` SD68. The game's `dp/pdb.py` (PDBSwitch) reads "SD<n>"
+  as P-ROC switch n; libpinproc's own `PRDecode` reads it as 0 on a PDB machine, so
+  `dpprocsw` uses the game's rule.
+* **`dpprocsw` reads the buttons through the game's real libpinproc** (step 1, rig,
+  2026-10-29): 1.13's `libpinproc.so.2.0` over `aaiwshim.so` as a P3-ROC
+  (`AAIW_PROC_CHIP=p3`): chip id 0xf33db33f, `ready`, then `sw L 1` / `sw L 0` / `sw S 1`
+  for `sw 67 c` / `sw 67 o` / `sw 68 c` on the shim's FIFO. Its only glibc version is
+  GLIBC_2.2.5 (`-nostartfiles`, its own `_start`). Build and run, as root in Ubuntu:
+
+      gcc -shared -fPIC -o B/libpinproc.so.2.0 -Wl,-soname,libpinproc.so.2.0 stub.c  # link-only stub
+      gcc -O2 -fno-stack-protector -fno-pie -no-pie -nostartfiles -o B/dpprocsw dpprocsw.c B/libpinproc.so.2.0
+      AAIW_PROC_CHIP=p3 DPEMU_FIFO=B/fifo LD_PRELOAD=B/aaiwshim.so           LD_LIBRARY_PATH=/var/tmp/pad_dp/cache/<build>/1.13 B/dpprocsw L=SD67 R=SD65 S=SD68
+
+  (`aaiwshim` now also reads its FIFO from `ftdi_read_data`, for a program with no SDL
+  loop.)
+* Rig gotcha: a prepared build in the cache is HARD-LINKED into copies; `rm` a copy's
+  `version` before writing it, or the cache's own changes too.
 
 ## Work list
 
-1. `dpprocsw.c` - buttons off libpinproc; proven in the rig under aaiwshim.
+1. DONE `dpprocsw.c` - buttons off libpinproc; proven in the rig under aaiwshim.
 2. `x11_raw.c`, `input_pipe.c`, `stubs_dp.c`, `make PLATFORM=dp` - the menu on an X
    server; proven on the rig's Xvfb (shot) with presses from 1.
 3. `padselect_dp.sh` (`<V>/start`) - the launcher; a shell test like

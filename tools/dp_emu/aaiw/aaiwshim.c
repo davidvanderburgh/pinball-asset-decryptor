@@ -250,10 +250,15 @@ int ftdi_write_data(void *ctx, const unsigned char *buf, int size)
     return size;
 }
 
+static void pump(void);
+
 int ftdi_read_data(void *ctx, unsigned char *buf, int size)
 {
     int n = 0;
     (void)ctx;
+    /* a program with no SDL event loop (the TBL boot menu's dpprocsw,
+     * PAD-853) reads its presses here */
+    pump();
     pthread_mutex_lock(&pmx);
     while (n < size && out_h != out_t) {
         buf[n++] = outq[out_h];
@@ -340,7 +345,7 @@ static void run_line(const char *t)
     logf_("input: %s\n", t);
 }
 
-static void pump(void)
+static void pump_one(void)
 {
     double now = now_s();
     for (int i = 0; i < 32; i++)
@@ -376,6 +381,16 @@ static void pump(void)
         if (lbn >= (int)sizeof lb - 1)
             lbn = 0;
     }
+}
+
+/* the game's SDL thread and its P-ROC reads both pump; one at a time */
+static void pump(void)
+{
+    static pthread_mutex_t pumpmx = PTHREAD_MUTEX_INITIALIZER;
+    if (pthread_mutex_trylock(&pumpmx))
+        return;
+    pump_one();
+    pthread_mutex_unlock(&pumpmx);
 }
 
 int SDL_PollEvent(void *ev)

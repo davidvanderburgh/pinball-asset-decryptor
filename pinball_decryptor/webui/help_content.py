@@ -36,7 +36,7 @@ HELP_CONTENT = {
          "SSD** (where available) to read a card in a reader; on Windows that needs "
          "Administrator.\n\n"
          "The app's **Browse…**, **Choose…** and **Add…** buttons take a dropped "
-         "file or folder the same way, and so does a row on the Images, Video and Audio "
+         "file or folder the same way (so does the path box beside one), and so does a row on the Images, Video and Audio "
          "tabs."),
         ("Is it the right card?",
          "For a Stern Spike 2 card, the page shows what the machine shows as it starts: "

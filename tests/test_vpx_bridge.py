@@ -1214,3 +1214,32 @@ def test_patched_table_gets_its_backglass_under_the_matching_name(tmp_path):
     # no backglass anywhere: nothing
     (src / "Bond.vpx").write_bytes(b"t")
     assert pv.copy_backglass(str(src / "Bond.vpx"), str(out / "Bond (PAD).vpx")) is None
+
+
+def test_player_frame_edges_resize_keeping_the_tables_proportions():
+    # PAD-845: Visual Pinball's window answers no border hit-test, so the
+    # controller resizes it. The window as seen on David's PC: 11 px frame,
+    # a 45 px top (title bar), a 1440x1080 picture
+    pc = pytest.importorskip("padcontroller")
+    win, client = (1653, 516, 1462, 1136), (1664, 561, 1440, 1080)
+    assert pc.frame_edge((1653 + 1462 - 3, 516 + 500), win, client) == "r"
+    assert pc.frame_edge((1653 + 700, 516 + 1136 - 3), win, client) == "b"
+    assert pc.frame_edge((1653 + 2, 516 + 1136 - 2), win, client) == "bl"
+    assert pc.frame_edge((1653 + 700, 516 + 2), win, client) == "t"
+    assert pc.frame_edge((1653 + 700, 516 + 25), win, client) == "caption"
+    assert pc.frame_edge((1653 + 700, 516 + 500), win, client) is None      # the playfield itself
+    assert pc.frame_edge((100, 100), win, client) is None                   # not on the window
+    # right edge 300 px left: the picture 1140 wide, height by the table's 4:3
+    x, y, w, h = pc.resized("r", win, client, (3112, 1000), (2812, 1000))
+    assert (x, y) == (1653, 516) and (w - 22, h - 56) == (1140, 855)
+    # left edge: the right side stays where it was
+    x, y, w, h = pc.resized("l", win, client, (1655, 1000), (1955, 1000))
+    assert x + w == 1653 + 1462 and (w - 22) == 1140
+    # bottom edge sets the height, the width follows
+    x, y, w, h = pc.resized("b", win, client, (2300, 1650), (2300, 1650 - 270))
+    assert (w - 22, h - 56) == (1080, 810)
+    # never smaller than the minimum
+    assert pc.resized("r", win, client, (3112, 1000), (0, 1000))[2] - 22 == pc.PLAYER_MIN_W
+    # double-click on the title bar: the largest 4:3 picture on a 4K monitor, centred
+    x, y, w, h = pc.fill_monitor(win, client, (0, 0, 3840, 2160))
+    assert h <= 2160 and abs((w - 22) * 0.75 - (h - 56)) <= 1 and x == (3840 - w) // 2

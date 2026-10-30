@@ -726,8 +726,8 @@ export default function ImagesTab() {
         </div>` : null}
         ${p.keep || p.color ? html`<div class="img-rk img-opts">
           ${p.keep ? html`<div class="img-keeprow">
-            <${Check} checked=${!!p.keep.on} onChange=${(v) => call("images.set_keep", prevRel, v)}
-              label="Keep this picture's own size" title=${KEEP_TIP} />
+            ${p.keep.fixed ? null : html`<${Check} checked=${!!p.keep.on} onChange=${(v) => call("images.set_keep", prevRel, v)}
+              label="Keep this picture's own size" title=${KEEP_TIP} />`}
             <span class="small muted">${p.keep.text}</span>
           </div>` : null}
           ${p.color ? html`<div class="img-keeprow img-colorrow">

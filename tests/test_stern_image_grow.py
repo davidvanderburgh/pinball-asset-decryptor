@@ -527,7 +527,7 @@ def test_write_ships_the_grown_scene_whole(tmp_path, monkeypatch):
             hmac.new(sidx.SIDX_KEY, shipped, hashlib.sha1).digest(),
             hashlib.md5(shipped).digest(), fmt, size=len(shipped)):
         assert by_disk[reader.SIDX_DISK + foff] == b
-    assert any("sprite reference(s) that draw it resized" in m
+    assert any("place(s) that draw it resized" in m
                for _l, m in msgs)
 
 

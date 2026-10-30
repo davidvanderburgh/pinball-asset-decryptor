@@ -157,6 +157,26 @@ def manifest(scene, tex2rel=None, font_of=None, asset2rel=None):
     return out
 
 
+def picture_fills(man):
+    """``({image: [(w, h), ...]}, {image, ...})`` of a scene's manifest: the size of every
+    Shape that fills with each picture, and every picture a Bitmap names.  A Shape draws its
+    fill into its own fixed rect, so such a picture cannot take a new size in that scene
+    (PAD-857, the engine's ``radium_grow.drawn_by``)."""
+    objs = man.get("objects") or {}
+    fills, named = {}, set()
+    for o in objs.values():
+        if not o:
+            continue
+        if o.get("kind") == "Bitmap" and o.get("image"):
+            named.add(o["image"])
+        elif o.get("kind") == "Shape" and o.get("fill") is not None:
+            bm = objs.get(str(o["fill"])) or {}
+            if bm.get("image"):
+                _x, _y, w, h = o["rect"]
+                fills.setdefault(bm["image"], []).append((int(round(w)), int(round(h))))
+    return fills, named
+
+
 def font_sizes(scene, data, images, tables, off2rel):
     """``{font size id: (fontrender key, px)}``: each size object of the scene's fonts
     matched to the glyph table that follows it (:func:`radium.parse_glyph_tables`), named the

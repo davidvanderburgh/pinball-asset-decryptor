@@ -73,6 +73,41 @@ def image_record(data, data_off):
                 tex_h=tex_h, fmt=fmt, length=length)
 
 
+def drawn_by(scene):
+    """``{texture id: {"bitmaps": n, "fills": [(w, h), ...]}}`` for a parsed
+    :class:`scene_tree.Scene`: how many Bitmaps name each picture, and the
+    size of every Shape that fills with one (PAD-857).
+
+    A Bitmap draws its picture at its own ``[w][h]``: the FIRST Bitmap of a
+    picture carries the picture's definition right after them, so its size
+    is the record's ``disp`` pair, and every later one is an
+    :func:`image_refs` triple; :func:`regrow` rewrites both.  A Shape draws
+    its fill Bitmap into its own fixed rect instead (Godzilla's map
+    monitors: a 1360x768 overlay filling a 1360x768 Shape, the whole
+    screen), so a new size there would not show."""
+    out = {}
+
+    def entry(tid):
+        return out.setdefault(tid, {"bitmaps": 0, "fills": []})
+    for o in scene.objects.values():
+        if o.kind == "Bitmap":
+            entry(o.body["tex"])["bitmaps"] += 1
+        elif o.kind == "Shape" and o.body.get("bitmap") is not None:
+            _x, _y, w, h = o.body["rect"]
+            entry(o.body["bitmap"].body["tex"])["fills"].append(
+                (int(round(w)), int(round(h))))
+    return out
+
+
+def fill_words(fills, stage=None):
+    """Why a picture filling the Shapes *fills* (``[(w, h), ...]``) cannot
+    take a new size, in words; *stage* is the scene's ``(w, h)``."""
+    w, h = max(fills, key=lambda s: s[0] * s[1])
+    whole = ", the whole screen," if stage and (w, h) == tuple(stage[:2]) else ""
+    return ("the game draws it as the fill of a fixed %dx%d shape%s so a "
+            "bigger picture would still show at %dx%d" % (w, h, whole, w, h))
+
+
 def image_refs(data, data_off, images=None):
     """File offsets of every sprite-instance triple that draws the image at
     *data_off* (``[dispW][dispH][handle & 0xFFFFFF]``, or the texture size in

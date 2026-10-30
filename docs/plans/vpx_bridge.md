@@ -420,10 +420,24 @@ for every other table.
   inserts (the return lanes, the beach rescue lights, the shark and Orca
   bash toys), Jurassic Park 26, Iron Maiden 18, Star Wars 14 (the Death Star
   lasers, the pops), Deadpool 1; `suggest` mended each by its fit (rms 1-6
-  px). Aerosmith had Batman's lamp-stealing loop. Stranger Things' fit does
-  not hold (its layout departs from Stern's) and its unwired inserts are its
-  mode names: by eye, next. The builds that place no LEDs (Rush, Foo
-  Fighters, Guardians, Sword of Rage, Aerosmith, TMNT) are checked by name.
+  px). Aerosmith had Batman's lamp-stealing loop.
+* **Names**: audit also compares each lamp's insert with what the build calls
+  its LED. Two maps were wrong at the root: Guardians LE (the map the table
+  prefers) carried the Pro's LED numbers, so on the LE card it lit other
+  inserts - rebuilt by insert name onto the LE's RGB triples; and TMNT Pro's
+  eight episode lights all sat on EPISODE 2 and its Foot Combo lights on
+  FOOT COMBO 1.
+* **Left as they are**: Stranger Things is an original layout on its own
+  art; its unshown Stern inserts are the centre cluster of mode names, which
+  the table has no inserts for, so none is placed by guess. Metallica's
+  unshown ones are the Remastered machine's additions (UV lights, sling
+  skulls, the hardwired lane lights) the 2013-layout table lacks. Backpanel
+  lights (JAWS' Quint's bash toy, JP's M-A-P) are off the playfield.
+
+On the rig (7 builds, attract and a game, rigbatch): lit inserts the table
+shows went Guardians LE 36% -> 90% (and the 36% were the wrong inserts),
+JAWS 65% -> 95%, Iron Maiden 77% -> 97%, Star Wars 81% -> 100%, Jurassic
+Park 62% -> 79%, Deadpool 98% -> 100%, TMNT Pro 81% -> 84%.
 
 Proof: rig frames of each mode, drawn through the controller and the map on
 the table's art (`vpxlamps.py lit`), before and after; a cscript run of the

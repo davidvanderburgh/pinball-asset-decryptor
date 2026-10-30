@@ -1416,3 +1416,21 @@ def test_player_grip_drag_resizes_in_the_tables_proportions():
     x, y, w, h = pc.resized("t", win, client, (2300, 565), (2300, 835))
     assert y + h == 516 + 1136 and h - 56 == 810                            # the bottom stays
     assert pc.resized("r", win, client, (3100, 900), (0, 900))[2] - 22 == pc.PLAYER_MIN_W
+
+
+def test_a_registration_whose_folder_is_gone_is_not_registered(tmp_path):
+    # PAD-850: the tab said "Registered" while PAD.Controller pointed at a
+    # deleted folder, and every table failed to load it
+    vs = pytest.importorskip("vpxsetup")
+    kit = tmp_path / "vpx"
+    kit.mkdir()
+    (kit / "padcontroller.py").write_text("")
+    py = tmp_path / "pythonw.exe"
+    py.write_bytes(b"")
+    server = '%s "C:/x/localserver.py" {7D5B2A1E}' % py
+    assert vs.registration_ok(str(kit), server)
+    assert vs.registration_ok(str(kit), '"%s" localserver.py' % py)            # a quoted exe
+    assert not vs.registration_ok(str(tmp_path / "gone"), server)               # the folder deleted
+    assert not vs.registration_ok(str(kit), str(tmp_path / "nopython.exe") + " x")
+    assert not vs.registration_ok("", server)
+    assert vs.controller_registered() in (True, False)                          # never raises

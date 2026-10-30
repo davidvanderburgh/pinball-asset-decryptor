@@ -170,11 +170,18 @@ def known_tables(tables_dir=None):
     return out
 
 
+#: (PAD) tables an earlier release patched whose map the kit no longer has
+#: (PAD-860: marty's "Jurassic Park Limited Edition" is not the real JP's
+#: playfield). A copy left in the tables folder is neither listed nor opened.
+DROPPED = ("Jurassic Park Limited Edition (PAD).vpx",)
+
+
 def patched_in(tables_dir):
     """The (PAD) tables in a tables folder: what can be opened."""
     if not tables_dir or not os.path.isdir(tables_dir):
         return []
-    return sorted(f for f in os.listdir(tables_dir) if f.lower().endswith(".vpx") and "(PAD)" in f)
+    return sorted(f for f in os.listdir(tables_dir) if f.lower().endswith(".vpx") and "(PAD)" in f
+                  and f not in DROPPED)
 
 
 def layout_presets(mons):
@@ -295,6 +302,8 @@ def open_table(name):
     vpx = find_vpx()
     if not vpx:
         return "Visual Pinball is not set up."
+    if name in DROPPED:
+        return "%s is no longer supported." % name
     tables = vpx_tables_dir()
     path = os.path.join(tables, name)
     if not os.path.isfile(path):

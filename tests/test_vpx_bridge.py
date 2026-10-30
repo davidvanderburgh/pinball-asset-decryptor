@@ -1369,6 +1369,28 @@ def test_tmnt_lists_only_the_pro():
     assert pv.maps()["turtles_le"]["listed"] is False and pv.maps()["turtles_pro"]["listed"]
 
 
+def test_jurassic_park_table_is_dropped(tmp_path, monkeypatch):
+    # PAD-860: marty's "Jurassic Park Limited Edition" is not the real JP's
+    # playfield; the kit has no map for it, recognises nothing in it, and a
+    # copy an earlier release patched is neither listed nor opened
+    vs = pytest.importorskip("vpxsetup")
+    pv = pytest.importorskip("padvpx")
+    assert not any("jurassic" in t for t in pv.maps())
+    assert not any("jurassic" in t for row in vs.known_tables("") for t in row["titles"])
+
+    class Fake:
+        def script(self):
+            return "' Jurassic Parc Limited Edition\nSub TRexlockhaut_Hit\n"
+
+    monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
+    assert pv.recognise("x.vpx") == (None, None)
+    (tmp_path / "Jurassic Park Limited Edition (PAD).vpx").write_bytes(b"")
+    (tmp_path / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"")
+    assert vs.patched_in(str(tmp_path)) == ["Rush LE 2.0.2 (PAD).vpx"]
+    monkeypatch.setattr(vs, "find_vpx", lambda: str(tmp_path))
+    assert "no longer supported" in vs.open_table("Jurassic Park Limited Edition (PAD).vpx")
+
+
 def test_player_resize_keeps_the_side_the_user_dragged():
     # PAD-845: the snap kept the width, so a bottom-edge drag (height only)
     # was put straight back. A 4:3 picture, 1440x1080 before each drag

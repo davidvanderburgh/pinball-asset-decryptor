@@ -332,12 +332,16 @@ done < <(card_mounts)
 # the namespace, still held open by the hidden run's Xvfb, lists no card
 # afterwards). TERM and not KILL, for the reason above. The sweep has
 # already killed everything of the run that could be reading it.
-_myns=$(readlink /proc/self/ns/mnt 2>/dev/null)
+# WHICH ONES: a fuse2fs serving this slot's card folder whose mountpoint is
+# NOT in our own mount table - one that is, the loop above has just tried
+# and must be left. Not by comparing /proc/<pid>/ns/mnt: the app's Stop for
+# a save-state Start is root through sudo, and root without SYS_PTRACE (a
+# container's) may not read another user's namespace links (measured).
 _cards=$(readlink -f "$PAD_CARDS" 2>/dev/null) || _cards=$PAD_CARDS
+_seen=$(card_mounts)
 for _fp in $(pad_pids -x fuse2fs); do
-    _ns=$(readlink "/proc/$_fp/ns/mnt" 2>/dev/null) || continue
-    [ -n "$_ns" ] && [ "$_ns" != "$_myns" ] || continue
     _m=$(tr '\0' '\n' < "/proc/$_fp/cmdline" 2>/dev/null | grep -m1 "^${_cards%/}/[^/]*$") || continue
+    printf '%s\n' "$_seen" | grep -qxF -- "$_m" && continue
     kill -TERM "$_fp" 2>/dev/null || continue
     for _ in 1 2 3 4 5 6 7 8 9 10; do [ -d "/proc/$_fp" ] || break; sleep 0.2; done
     if [ -d "/proc/$_fp" ]; then

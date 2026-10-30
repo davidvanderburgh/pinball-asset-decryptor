@@ -50,19 +50,22 @@ FULL = "000001ffffffffff"
 DOCKER_DEFAULT = "00000000a80425fb"
 
 
-def _needed(capbnd, uid="1000", **env):
-    fn = _fn((RIG / "padpath.sh").read_text(encoding="utf-8"),
-             "pad_card_ns_needed")
+def _needed(capbnd, uid="1000", ask="pad_card_ns_needed", **env):
+    src = (RIG / "padpath.sh").read_text(encoding="utf-8")
+    fn = "\n".join(_fn(src, n) for n in ("pad_no_sys_admin", ask))
     fn = fn.replace("/proc/self/status", '"$STATUS"')
     # On stdin, not -c: on Windows `bash` is WSL's launcher, which mangles a
     # -c script on the way in (and passes no environment).
+    # `id -u` answers this run's uid; `id -u <name>` answers 1000 for a real
+    # account and nothing for one that does not exist.
     script = (
         "".join("%s='%s'\n" % kv for kv in env.items())
         + 'UID_IS=%s\n' % uid
         + 'STATUS=$(mktemp); printf "Name:\\tbash\\nCapBnd:\\t%s\\n" "$1" > "$STATUS"\n'
-        'id() { echo "$UID_IS"; }\n'
+        'id() { if [ -n "$2" ]; then [ "$2" = nosuch ] || echo 1000;'
+        ' else echo "$UID_IS"; fi; }\n'
         + fn +
-        '\npad_card_ns_needed; rc=$?; rm -f "$STATUS"; echo "rc=$rc"\n')
+        '\nout=$(%s); rc=$?; rm -f "$STATUS"; echo "rc=$rc $out"\n' % ask)
     # bytes, so Windows does not turn the script's newlines into CRLF
     r = subprocess.run(["bash", "-s", "--", capbnd],
                        input=script.encode("utf-8"),
@@ -86,6 +89,39 @@ def test_root_a_folder_run_and_the_reexecuted_run_stay_where_they_are():
     assert _needed(DOCKER_DEFAULT) == "rc=1"                  # no card
     assert _needed(DOCKER_DEFAULT, PAD_CARD="/data/x.raw",
                    PAD_CARD_NS="1") == "rc=1"
+
+
+def _handback(capbnd, uid="0", **env):
+    return _needed(capbnd, uid=uid, ask="pad_card_root_handback", **env)
+
+
+@needs_bash
+def test_a_save_state_start_without_sys_admin_goes_back_to_its_user():
+    # PAD-871's Start with Save states ticked is root through sudo; without
+    # SYS_ADMIN root cannot mount the card, so it goes back to SUDO_USER
+    assert _handback(DOCKER_DEFAULT, PAD_CARD="/data/x.raw",
+                     SUDO_USER="abc") == "rc=0 abc"
+    assert _handback(DOCKER_DEFAULT, PAD_CARD="/data/x.raw", SUDO_USER="abc",
+                     PAD_USER="pad") == "rc=0 pad"
+
+
+@needs_bash
+def test_root_with_sys_admin_or_nobody_to_go_back_to_stays_root():
+    card = {"PAD_CARD": "/data/x.raw"}
+    assert _handback(FULL, SUDO_USER="abc", **card) == "rc=1"      # desktop, WSL
+    assert _handback(DOCKER_DEFAULT, **card) == "rc=1"             # no user
+    assert _handback(DOCKER_DEFAULT, SUDO_USER="root", **card) == "rc=1"
+    assert _handback(DOCKER_DEFAULT, SUDO_USER="nosuch", **card) == "rc=1"
+    assert _handback(DOCKER_DEFAULT, uid="1000", SUDO_USER="abc",
+                     **card) == "rc=1"                             # not root
+    assert _handback(DOCKER_DEFAULT, SUDO_USER="abc") == "rc=1"    # no card
+
+
+def test_the_handed_back_run_has_no_save_states():
+    src = _fn((RIG / "padpath.sh").read_text(encoding="utf-8"), "pad_card_ns")
+    hb = src[src.index("pad_card_root_handback"):src.index("    fi\n")]
+    assert "exec setpriv" in hb and "--init-groups" in hb
+    assert "env -u PAD_PIVOT" in hb      # the user's run is not a pivot boot
 
 
 def test_the_namespace_keeps_the_users_uid_and_its_capabilities():
@@ -113,7 +149,22 @@ def test_killgame_ends_a_mount_in_a_runs_own_namespace_with_term():
     body = body[:body.index("\ndone\n")]
     assert 'kill -TERM "$_fp"' in body          # fuse2fs unmounts itself
     assert "kill -9" not in body                # never the wedging kill
-    assert '"$_ns" != "$_myns"' in body          # only another namespace's
+    # only one whose mountpoint is not in our own table (the loop above has
+    # tried those); never by reading another user's /proc/<pid>/ns, which a
+    # container's root may not
+    assert '_seen=$(card_mounts)' in body
+    assert 'grep -qxF -- "$_m" && continue' in body
+    assert "/ns/mnt" not in body.split("\n_cards=")[1]
+
+
+def test_the_guide_keeps_sys_admin_for_save_states():
+    # PAD-871 measured the save-state flags on top of SYS_ADMIN; criu needs
+    # it, so dropping it from the run line must not drop it from there
+    guide = (REPO / "docs" / "guide" / "docker.md").read_text(encoding="utf-8")
+    bullet = guide[guide.index("- **Save states**"):]
+    bullet = " ".join(bullet[:bullet.index("\n- ")].split())
+    assert "--cap-add SYS_ADMIN --cap-add SYS_PTRACE" in bullet
+    assert "systempaths=unconfined" in bullet
 
 
 # --- the image -------------------------------------------------------------

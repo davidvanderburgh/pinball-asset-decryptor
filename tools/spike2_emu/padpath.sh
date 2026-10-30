@@ -623,10 +623,15 @@ pad_is_wsl() {
 # where the namespace is refused too - Docker's default seccomp profile, or a
 # host that restricts user namespaces - is told what to add instead of
 # failing later at "fuse2fs did not mount". 0 = carry on here, 1 = refuse.
-pad_card_ns_needed() {
-    [ -n "${PAD_CARD:-}" ] || return 1
-    [ "${PAD_CARD_NS:-}" = 1 ] && return 1
-    [ "$(id -u)" = 0 ] && return 1
+#
+# ROOT WITHOUT SYS_ADMIN (PAD-871's save states, in that same container): a
+# Start with Save states ticked is this script as root through sudo, and
+# root without the capability cannot mount the card either - the whole Start
+# failed, not just its save states, which need SYS_ADMIN anyway (criu). Such
+# a run goes back to the user sudo came from, without PAD_PIVOT, and as that
+# user takes the namespace above: the game runs, with no Save or Load
+# buttons, exactly as when the save-state check withdraws them.
+pad_no_sys_admin() {
     local bnd
     bnd=$(awk '/^CapBnd:/ {print $2}' /proc/self/status 2>/dev/null)
     [ -n "$bnd" ] || return 1
@@ -634,7 +639,31 @@ pad_card_ns_needed() {
     (( (16#$bnd >> 21) & 1 )) && return 1
     return 0
 }
+pad_card_ns_needed() {
+    [ -n "${PAD_CARD:-}" ] || return 1
+    [ "${PAD_CARD_NS:-}" = 1 ] && return 1
+    [ "$(id -u)" = 0 ] && return 1
+    pad_no_sys_admin
+}
+pad_card_root_handback() {         # -> the user a root card run goes back to
+    [ -n "${PAD_CARD:-}" ] || return 1
+    [ "${PAD_CARD_NS:-}" = 1 ] && return 1
+    [ "$(id -u)" = 0 ] || return 1
+    pad_no_sys_admin || return 1
+    local u=${PAD_USER:-${SUDO_USER:-}}
+    [ -n "$u" ] && [ "$u" != root ] || return 1
+    [ "$(id -u "$u" 2>/dev/null)" ] && [ "$(id -u "$u")" != 0 ] || return 1
+    echo "$u"
+}
 pad_card_ns() {                    # <script> [args...]  -> execs, or returns 0/1
+    local u
+    if u=$(pad_card_root_handback); then
+        echo "[card] no SYS_ADMIN here: root cannot mount the card, so this run goes on"
+        echo "[card]   as $u, without save states (they need --cap-add SYS_ADMIN)"
+        exec setpriv --reuid="$u" --regid="$(id -g "$u")" --init-groups \
+            env -u PAD_PIVOT HOME="$(getent passwd "$u" | cut -d: -f6)" \
+            USER="$u" LOGNAME="$u" bash "$@"
+    fi
     pad_card_ns_needed || return 0
     local ns=(unshare --user --map-current-user --keep-caps --mount --propagation slave)
     if "${ns[@]}" true 2>/dev/null; then

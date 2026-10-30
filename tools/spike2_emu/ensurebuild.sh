@@ -589,9 +589,21 @@ _pad_guest_probe() {
 #: (e_machine 0x28 = ARM, at offset 18), because THAT is the fact and the name
 #: is only a convention. aarch64 and armeb are 64-bit and big-endian and would
 #: both match a sloppier test.
+#:
+#: A TABLE THAT CANNOT BE SEEN IS NOT AN EMPTY ONE (PAD-837). A container
+#: without privileges has no binfmt_misc mounted, however many handlers the
+#: server registered - and a registration made with the F flag (as Debian's
+#: and Ubuntu's qemu-arm.conf do) runs ARM programs in that container all the
+#: same, qemu or no qemu inside it. So when the table is not there to read,
+#: the answer is got the only other way: by running a 32-bit ARM program and
+#: seeing it exit 0. "exec" then stands where the table's file would.
+#: PAD_BINFMT_DIR lets the tests point it at a fake table.
 _pad_binfmt_arm() {
-    local d=/proc/sys/fs/binfmt_misc f
-    [ -d "$d" ] || return 1
+    local d=${PAD_BINFMT_DIR:-/proc/sys/fs/binfmt_misc} f
+    if [ ! -e "$d/status" ]; then
+        _pad_arm_runs && { echo exec; return 0; }
+        return 1
+    fi
     [ -f "$d/qemu-arm" ] && { printf '%s\n' "$d/qemu-arm"; return 0; }
     for f in "$d"/*; do
         case "${f##*/}" in register|status|*aarch64*|*armeb*) continue ;; esac
@@ -600,6 +612,26 @@ _pad_binfmt_arm() {
             printf '%s\n' "$f"; return 0; }
     done
     return 1
+}
+
+#: The smallest 32-bit ARM Linux program: `mov r0,#0; mov r7,#1; svc 0`,
+#: exit(0), in a 96-byte ELF (EABI5, loaded at 0x10000). Base64, because a
+#: shell cannot hold the bytes any other way that every printf agrees on.
+PAD_ARM_EXIT0_B64=f0VMRgEBAQAAAAAAAAAAAAIAKAABAAAAVAABADQAAAAAAAAAAAQABTQAIAABAAAAAAAAAAEAAAAAAAAAAAABAAAAAQBgAAAAYAAAAAUAAAAAEAAAAACg4wFwoOMAAADv
+
+#: Does this kernel run 32-bit ARM programs? Asked by running one. A temp
+#: directory that will not take the file (or one mounted noexec) answers no
+#: rather than guessing yes: the caller then names the handler, which is the
+#: likelier fault.
+_pad_arm_runs() {
+    local t rc=1
+    t=$(mktemp -d 2>/dev/null) || return 1
+    if printf '%s' "$PAD_ARM_EXIT0_B64" | base64 -d > "$t/armexit0" 2>/dev/null &&
+       chmod +x "$t/armexit0" 2>/dev/null; then
+        "$t/armexit0" >/dev/null 2>&1; rc=$?
+    fi
+    rm -rf "$t" 2>/dev/null
+    return $rc
 }
 
 #: The command that would register the ARM handler ON THIS MACHINE. Ubuntu

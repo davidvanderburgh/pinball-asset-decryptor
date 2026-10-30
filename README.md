@@ -115,7 +115,7 @@ Questions, or something to show off? The **Discord** button in the top bar
 | [Color profile maths](docs/guide/color-profile-maths.md) | Every step of the Color profile tab, in order, with its limits |
 | [Supported manufacturers](docs/guide/manufacturers.md) | Per-manufacturer detail, formats and quirks |
 | [Installing](docs/guide/install.md) | Install, prerequisites, troubleshooting, auto-update |
-| [Docker](docs/guide/docker.md) | Run it on a server (Unraid, a NAS) and use it from any PC over VNC or a browser |
+| [Docker](docs/guide/docker.md) | Run it on a server (Unraid, a NAS) and use it from any PC in a browser, sound included |
 | [Disclaimer](docs/guide/legal.md) | The full legal notes: DMCA, manufacturer EULAs, no warranty |
 | [Development](docs/development.md) | Running from source, architecture, adding a manufacturer, tests, building installers |
 | [Architecture notes](docs/architecture/README.md) | How each manufacturer's formats and pipelines work |

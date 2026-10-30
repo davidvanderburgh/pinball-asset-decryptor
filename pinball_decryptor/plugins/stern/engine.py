@@ -8288,6 +8288,25 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         gr_path, img_path, log,
                         _span(progress, 10, 12,
                               "Deriving the card's sound parameters"))
+                    # PAD-855: records an earlier build added that nothing plays
+                    # any more leave image.bin; the card's own longer sounds are
+                    # grown again below (_carried) as they play now
+                    _carried, _ungrown = {}, False
+                    if any(p.get("shadows") is not None for p in params):
+                        if progress:
+                            progress(12, 100, "Reading the game's play tables...")
+                        _ug = _ungrow_dead_records(
+                            gr_path, img_path, params,
+                            _card_descriptor_sites(gr_path, img_path, log,
+                                                   card_key=_sites_key),
+                            log)
+                        if _ug is not None:
+                            _carried, _ungrown = _ug, True
+                            _sites_key = None   # its play tables moved back
+                            params = _params_for(
+                                gr_path, img_path, log,
+                                _span(progress, 12, 14,
+                                      "Deriving the card's sound parameters"))
                     # The encode cache is keyed on the STOCK bank even when this
                     # build grows it, so one longer callout doesn't re-encode
                     # every other sound in the mod.  Captured before the grow
@@ -8345,6 +8364,21 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     # the user's longer sounds; the modes' own are FORCED
                     # grows added below, which the bank's budget can't trim
                     _user_grows = dict(grows)
+                    # PAD-855: the card's own longer sounds, grown again as forced
+                    # grows (never trimmed) unless the user replaces one of them
+                    _carried = {i: w for i, w in _carried.items()
+                                if i not in audio_edits}
+                    if _carried:
+                        from .spike2.emulator import emitted_length as _eml
+                        _cbyidx = {p["idx"]: p for p in params}
+                        for _i, _w in sorted(_carried.items()):
+                            audio_edits[_i] = _w
+                            slot_gains[_i] = 0.0   # (its own level: _LEVEL_SELF)
+                            grows[_i] = (_eml(int(_cbyidx[_i]["length"])),
+                                         _wav_frames_44k(_w))
+                        if not desc_sites:
+                            desc_sites = _card_descriptor_sites(
+                                gr_path, img_path, log, card_key=_sites_key)
                     if mode_sound:
                         # Item 149: a mode's own end sound is a FORCED grow of
                         # the record its time-up request plays, so the re-point,
@@ -8716,7 +8750,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             cancel, assets_dir=assets_dir,
                             gains=_sm_gains(slot_gains, sound_mode_used),
                             cache_img_ident=stock_ident,
-                            level_refs=_sm_level_refs(sound_mode_used))
+                            level_refs={**_sm_level_refs(sound_mode_used),
+                                        **{i: _LEVEL_SELF for i in _carried}})
                     if audio_patches is None:
                         return None, None, None, None, None
                     bank_beds = {}
@@ -8725,6 +8760,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                    if sound_ok is not False
                                    and (_chain_edits or bank_plan is not None)
                                    else None)
+                    if _ungrown and grow_places is None:
+                        # PAD-855: image.bin was cut back to its own records, so
+                        # it goes on whole even with nothing appended to it
+                        grow_work = grow_work or _work_dir(
+                            label, base="spike2_grow_")
+                        _st = os.path.join(grow_work, "image.bin")
+                        os.replace(_lp(img_path), _lp(_st))
+                        img_path, grow_places = _st, []
                     if bank_plan is not None:
                         # PAD-595: the sound banks of the modes' own sounds
                         # image.bin had no room for.  image.bin's header
@@ -8754,10 +8797,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                 gr_path, img_path, params, _chain_edits, np, log,
                                 loops=_loop_idx,
                                 gains=_sm_gains(slot_gains, sound_mode_used),
-                                level_refs=_chain_level_refs(_mode_music_level_refs(
+                                level_refs={**_chain_level_refs(_mode_music_level_refs(
                                     gr_path, img_path, params, desc_sites,
                                     _loop_idx, log, used=mode_own_used),
                                     sound_mode_used),
+                                    **{i: _LEVEL_SELF for i in _carried}},
                                 progress=_span(progress, 45, 75),
                                 cancel=cancel, body_cache=chain_cache)
                             audio_patches.update(_cp)
@@ -14622,11 +14666,14 @@ def _stock_render(emu, p, np, stereo):
     return np.asarray(out[0], np.int64)
 
 
-def _level_ref_render(emu, byidx, p, ref, np):
+def _level_ref_render(emu, byidx, p, ref, np, wav=None):
     """The loudness reference for encoding *p*: :data:`_LEVEL_REF_UNSET` (its own
     stock render, the encoders' default) unless *ref* names another record, whose
     stock render it is then (PAD-494: a music mode's file, in a host record,
-    matches the slot it plays for)."""
+    matches the slot it plays for), or is :data:`_LEVEL_SELF`, the file *wav* itself
+    (PAD-855)."""
+    if ref == _LEVEL_SELF:
+        return _self_level_render(wav, p, np) if wav else _LEVEL_REF_UNSET
     q = byidx.get(ref) if ref is not None else None
     if q is None:
         return _LEVEL_REF_UNSET
@@ -15741,6 +15788,18 @@ def _lowpass_loop(samples, cutoff_hz, np, pad=4096):
 
 
 _LEVEL_REF_UNSET = object()
+#: A level reference (``level_refs`` value) that is the sound's OWN file (PAD-855): a sound
+#: the card already had and a build only carries over keeps the loudness it has.
+_LEVEL_SELF = "self"
+
+
+def _self_level_render(wav_path, p, np):
+    """*wav_path*'s own samples as a loudness reference for encoding it into *p*."""
+    stereo = p.get("chan") == 2
+    try:
+        return np.asarray(_load_wav(wav_path, stereo, np), np.int64)
+    except Exception:                                   # noqa: BLE001 - the stock render then
+        return _LEVEL_REF_UNSET
 
 
 #: How far (a fraction of its length) a replacement for a multi-band record may
@@ -16710,7 +16769,7 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                 continue
             try:
                 gdb = gains.get(idx)
-                orig = _level_ref_render(emu, byidx, p, refs.get(idx), np)
+                orig = _level_ref_render(emu, byidx, p, refs.get(idx), np, wav=wav)
                 off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred,
                                             log=log, gain_db=gdb, orig=orig,
                                             **bkw)
@@ -18664,6 +18723,141 @@ def _chain_order(grows):
     return sorted(grows, key=lambda i: (-int(grows[i][1]), int(i)))
 
 
+def _ungrow_dir(gr_path, img_path):
+    """Where :func:`_ungrow_dead_records` keeps the decoded sounds of the card *gr_path* /
+    *img_path* (its params-cache fingerprint), so the next build of the same card reads
+    them back instead of decoding them again."""
+    return os.path.join(_params_cache_dir(),
+                        "ungrow_" + _fingerprint(gr_path, img_path)[:32] + _REV_TAG)
+
+
+def _ungrow_dead_records(gr_path, img_path, params, sites, log, family=None):
+    """PAD-855: ``{idx: wav}`` -- this card's own longer sounds, decoded -- when *img_path*
+    (the build's working copy of ``image.bin``) was cut back to its stock records here,
+    else ``None`` with the file untouched.
+
+    A build appends a record for every sound it lengthens (re-pointing the play tables at
+    it) and for every music mode's file, sound in turn and mode sound (left un-pointed: the
+    mode runtime swaps its key in).  A later build from that card rewrites the runtime, so
+    an un-pointed record of the earlier build is never played again, and the grow kept it
+    anyway: an owner's Godzilla card, built with music modes in image.bin by an earlier
+    version and extracted (which brought the modes back), carried those 255 MB beside the
+    same files this build added, image.bin at 2,010 MB, and the build refused a 3-minute
+    song for want of room beside it (:data:`.spike2.soundbank.MAPPED_MAX`).
+
+    So when the earlier build's appended records are the last of the array, in place
+    (the layout a grow of a stock-shaped card leaves) and some of them no play table names
+    (*sites*), the array is cut back to the stock records and the file to its end, which is
+    byte for byte the stock directory, and every descriptor that named a record still
+    played is pointed back at its stock record with its declared duration moved back by
+    the growth, exactly as :func:`_plan_descriptor_repoint` will move it again (*family*,
+    default the preview switch).  The caller grows those sounds again from the returned
+    files (their decoded samples, each its own loudness reference: :data:`_LEVEL_SELF`),
+    so they keep their length and play as they did.  A card this cannot do that for keeps
+    the earlier build's records, as before."""
+    from .spike2 import masterdir as MD
+    from .spike2.emulator import Spike2Emu, bands_of, collapse_shadowed, frame_bytes
+    shadows = {int(p["idx"]): p for p in params if p.get("shadows") is not None}
+    if not shadows or not sites:
+        return None
+    if family is None:
+        family = _mode_family_on()
+    with open(_lp(img_path), "rb") as f:
+        md_off, count = MD.header_geometry(f.read(0x100))
+    raws = sorted(int(p["shadows"]) for p in shadows.values())
+    n = raws[0]
+    if raws != list(range(n, count)) or md_off + MD.tail_len(n) > min(
+            int(p["body_off"]) for p in shadows.values()):
+        # (an array moved past the earlier bodies, or records that are not one sound's
+        # longer copy: not a layout this can put back)
+        return None
+    try:
+        mask = _desc_key_mask(params, sites)
+    except RuntimeError:
+        return None
+    named = {_play_key(s.payload, s.sid, mask) for s in sites}
+    live = {i: p for i, p in shadows.items() if bytes(p.get("findkey") or b"") in named}
+    dead = {i: p for i, p in shadows.items() if i not in live}
+    if not dead:
+        return None
+    multi = sorted(i for i, p in live.items() if bands_of(p) > 1)
+    if multi:
+        log("image.bin keeps the %d record(s) an earlier build added: idx %s %s more than "
+            "one variant, which a build cannot lengthen again." % (
+                len(shadows), ", ".join(map(str, multi)), "has" if len(multi) == 1 else "have"),
+            "info")
+        return None
+    dead_bytes = sum(frame_bytes(p) * int(p["length"]) for p in dead.values())
+    keep = _ungrow_dir(gr_path, img_path)
+    os.makedirs(_lp(keep), exist_ok=True)
+    carried = {}
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        # (the directory first: the emulator's decode hooks end its reading)
+        d = MD.read_directory(img_path, emu)
+        cut = d.with_records(d.records[:MD.RECORD_SIZE * n], n)
+        cut.md_off = md_off
+        writes = MD.write_directory(cut, emu)
+        for i, p in sorted(live.items()):
+            wav = os.path.join(keep, "idx%04d.wav" % i)
+            if not os.path.isfile(_lp(wav)):
+                out = emu.decode(p)
+                if out is None:
+                    log("image.bin keeps the %d record(s) an earlier build added: idx %d "
+                        "(record %d) could not be decoded to grow it again." % (
+                            len(shadows), i, int(p["shadows"])), "info")
+                    return None
+                L, R, stereo = out[0], out[1], bool(out[2])
+                tmp = wav + ".tmp"
+                _write_wav(_lp(tmp), L, R if stereo else None, stereo)
+                os.replace(_lp(tmp), _lp(wav))
+            carried[i] = wav
+    finally:
+        emu.close()
+    with open(_lp(img_path), "r+b") as f:
+        for off, data in writes.items():
+            f.seek(off)
+            f.write(data)
+        f.truncate(md_off + MD.tail_len(n))
+    # the stock records the played ones grew from, read off the file as it is now
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        stock = {int(r["idx"]): r for r in collapse_shadowed(emu.derive_params())}
+    finally:
+        emu.close()
+    back, durs = {}, {}
+    for i, p in sorted(live.items()):
+        q = stock[i]
+        old, new = bytes(p["findkey"]), bytes(q["findkey"])
+        grew = ((_duration_units_emitted(p["length"]) if family
+                 else _duration_units(p["length"])) - _duration_units(q["length"]))
+        for s in sites:
+            if _play_key(s.payload, s.sid, mask) != old:
+                continue
+            w1, w2 = struct.unpack("<II", new)
+            _o1, o2 = struct.unpack("<II", s.payload)
+            plain = struct.pack("<II", w1, (o2 & ~mask & 0xFFFFFFFF) | (w2 & mask))
+            back[s.off] = bytes(a ^ b for a, b in zip(plain, s.keystream))
+            dur = (durs.get(s.dur_off, s.duration) - grew) & 0xFFFFFFFF
+            durs[s.dur_off] = dur
+            back[s.dur_off] = bytes(a ^ b for a, b in zip(struct.pack("<I", dur),
+                                                          s.dur_keystream))
+            back.update(_moved_wait_write(s, -grew))
+    with open(_lp(img_path), "r+b") as f:
+        for off, data in back.items():
+            f.seek(off)
+            f.write(data)
+    log("image.bin: %d of the %d records an earlier build added to this card are played by "
+        "nothing on it any more (%.0f MB: that build's music modes' files, sounds in turn or "
+        "modes' sounds, which this build puts on again), so image.bin is rebuilt from the "
+        "card's own %d records and the %d longer sound(s) of the card's own go back on whole, "
+        "as they play now. image.bin is %.0f MB smaller for it." % (
+            len(dead), len(shadows), dead_bytes / 1e6, n, len(live), dead_bytes / 1e6), "info")
+    return carried
+
+
 def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
     """Build the sound bank a longer replacement needs, and return
     ``(staged_path, placements)``.
@@ -18907,9 +19101,15 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
         emu_e.warm_slots_for_grown(params)
         # PAD-609: decoded when an encode needs it, not up front: a sound the
         # body cache already holds is never encoded, and never needed it
+        # (PAD-855: a carried sound's reference is its own file)
+        own = {i: w for i, w in want.values()}
         refs = _LazyRefs(
-            {idx: byidx[ref] for idx, ref in level_refs.items() if byidx.get(ref) is not None},
-            lambda idx, q: _stock_render(emu_e, q, np, stereo=byidx[idx].get("chan") == 2))
+            {idx: (_LEVEL_SELF if ref == _LEVEL_SELF else byidx[ref])
+             for idx, ref in level_refs.items()
+             if (ref == _LEVEL_SELF and idx in own) or byidx.get(ref) is not None},
+            lambda idx, q: (_self_level_render(own[idx], byidx[idx], np) if q == _LEVEL_SELF
+                            else _stock_render(emu_e, q, np,
+                                               stereo=byidx[idx].get("chan") == 2)))
         emu_d.boot()
         order = sorted(want)
 
@@ -18948,7 +19148,8 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
                          if p["chan"] == 2 else
                          _encode_mono(emu_e, state["gr"], pe, wav, np, **refs.kw(idx, kw))),
                 gain_db=kw["gain_db"], loop=kw["loop"],
-                ref=byidx.get(level_refs[idx]) if idx in refs else None,
+                ref=(({"level": _LEVEL_SELF} if level_refs[idx] == _LEVEL_SELF
+                      else byidx.get(level_refs[idx])) if idx in refs else None),
                 chan=p["chan"])
             emu_d._ensure_range(EM.DESC_BASE + off, len(body))
             emu_d.mu.mem_write(EM.DESC_BASE + off, bytes(body))

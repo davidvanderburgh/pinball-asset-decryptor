@@ -1015,7 +1015,8 @@ def test_slots_not_read_yet_is_not_no_slots(tmp_path, monkeypatch):
         w.run(failed)
         s = w.state(NS)
         assert s["slots_read"] is False
-        assert s["slots_sum"] == "Could not read the slots - is WSL up?"
+        # a Linux desktop has no WSL to blame (PAD-871)
+        assert s["slots_sum"] == "Could not read the slots."
 
         def empty():
             svc._slots_rows, svc._slots_total, svc._slots_free = [], 0, 1 << 30
@@ -1078,7 +1079,7 @@ def test_slots_are_scoped_to_the_card(tmp_path, monkeypatch):
         assert s["slots"][1]["size"] == "1.2 GB"
         assert s["slots_sum"] == ("2 slots for godzilla_le · 1 for other game "
                                   "hidden · all slots 1.4 GB · free on the "
-                                  "WSL disk: 61.2 GB")
+                                  "emulator's disk: 61.2 GB")
 
 
 def test_slot_guards_and_launch(tmp_path, monkeypatch):

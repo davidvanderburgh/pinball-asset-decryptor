@@ -163,7 +163,12 @@ class TextTab(TabService):
             self.fonts.close(force=True)
         self._clear_edit_panel()
         self._refresh_list()
-        self.set(scanning=False, empty=EMPTY_NO_FOLDER)
+        # PAD-869: the scene actions only where there is a Scenes tab (not a
+        # DMD game's, whose every line is the game program's)
+        caps = getattr(mfr, "capabilities", None)
+        self.set(scanning=False, empty=EMPTY_NO_FOLDER,
+                 scenes=bool(getattr(caps, "replace_image", False)
+                             and not getattr(caps, "dmd_shades", False)))
         self._mirror_folder()
 
     def on_show(self):

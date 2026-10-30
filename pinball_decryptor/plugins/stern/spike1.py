@@ -545,9 +545,69 @@ def write_game_elf_defaults(card_path, overrides_by_id, log=None, cancel=None,
     return len(set(clean) | set(ranges))
 
 
+def _program_path(game_dir):
+    """The Text tab's path for the game program's rows (``/KISS_LE/game``)."""
+    from .spike1_text import PROGRAM_NAME
+    return "/%s/%s" % (game_dir, PROGRAM_NAME)
+
+
+def extract_text(reader, game_dir, output_dir, log=None):
+    """Write the game program's display text to ``text/strings.tsv`` (PAD-869,
+    :mod:`.spike1_text`): one row per line, with its byte budget and whether
+    longer text can be placed for it.  A replacement already typed for a line
+    the program still has is kept (a re-extract never blanks the user's
+    edits).  Returns the number of rows; never raises (a program that can't be
+    read just extracts no text)."""
+    from ...core import text_manifest
+    from . import spike1_text
+    from .engine import _program_modes_read
+    log = log or (lambda *a, **k: None)
+    try:
+        node = _find_game_elf_node(reader, game_dir)
+        if node is None:
+            log("No game program found next to image.bin; no display text "
+                "extracted.", "warning")
+            return 0
+        rows = spike1_text.scan(reader.read_file_bytes(node))
+    except Exception as e:                          # noqa: BLE001
+        log("Couldn't read the game program's display text (%s); text "
+            "skipped." % e, "warning")
+        return 0
+    if not rows:
+        return 0
+    path = _program_path(game_dir)
+    try:
+        kept = {(r["path"], r["original"]): r["replacement"]
+                for r in text_manifest.load(output_dir) if r["replacement"]}
+    except Exception:                               # noqa: BLE001
+        kept = {}
+    for r in rows:
+        r["path"] = path
+        r["replacement"] = kept.get((path, r["original"]), "")
+    try:
+        text_manifest.save(output_dir, rows)
+    except OSError as e:
+        log("Couldn't write text/strings.tsv (%s); text skipped." % e,
+            "warning")
+        return 0
+    # Spike 1 has no mode scenes to read: mark the manifest read so the Text
+    # tab doesn't go looking for a Spike 2 card behind it
+    _program_modes_read(output_dir, era="spike1")
+    n_grow = sum(1 for r in rows if r.get("grow"))
+    log("Display text: %d line(s) of the game program in text/strings.tsv "
+        "(%d can take longer text)." % (len(rows), n_grow))
+    n_kept = sum(1 for r in rows if r["replacement"])
+    if n_kept:
+        log("Kept %d text edit(s) already in text/strings.tsv." % n_kept)
+    return len(rows)
+
+
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
-                cancel=None, phase=None, open_disk=None, duration_names=False):
-    """Decode every Spike 1 sound to ``audio/idxNNNN[-tK].wav``.
+                cancel=None, phase=None, open_disk=None, duration_names=False,
+                do_text=True):
+    """Decode every Spike 1 sound to ``audio/idxNNNN[-tK].wav``, and (with
+    *do_text*) the game program's display text to ``text/strings.tsv``
+    (:func:`extract_text`).
 
     Mirrors the Spike 2 engine's contract: *partitions* is the
     ``[(byte_offset, byte_size), ...]`` list the pipeline located, *open_disk*
@@ -567,6 +627,8 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         reader, game_dir, image_node, _sp, _sn = locate_assets(f, partitions)
         log("Game folder: %s (image.bin %.1f MB)"
             % (game_dir, image_node["size"] / 1e6))
+        if do_text:
+            extract_text(reader, game_dir, output_dir, log)
 
         # Stream image.bin out to a flat temp file first: the per-body reads
         # are random-access, and ext2's one-block runs make random access
@@ -811,9 +873,10 @@ def _slot_gains(assets_dir):
 
 def write_image(original_path, assets_dir, output_path, log=None,
                 progress=None, cancel=None, phase=None):
-    """Copy *original_path* to *output_path* and patch the changed sounds in.
+    """Copy *original_path* to *output_path* and patch the changed sounds,
+    and the edited display text (``text/strings.tsv``, PAD-869), in.
 
-    Returns ``{"audio": n_patched, "skipped": [names]}``.  Raises
+    Returns ``{"audio": n_patched, "text": n_strings, "skipped": [names]}``.  Raises
     :class:`Spike1Cancelled` on cancel and :class:`Spike1Error` on a
     card/asset mismatch; either way the partial output file is removed —
     a multi-GB unpatched copy must not be left looking like a build.
@@ -822,10 +885,14 @@ def write_image(original_path, assets_dir, output_path, log=None,
 
     changed = _select_changed_wavs(assets_dir, log)
     gains = _slot_gains(assets_dir)
+    text_edits = _text_edits(assets_dir)
     log("Changed sounds: %d" % len(changed))
-    if not changed:
-        log("  ! no changed audio WAVs vs the extract baseline — the build "
-            "will be an unmodified copy of the original image", "warning")
+    if text_edits:
+        log("Edited display text: %d line(s)" % len(text_edits))
+    if not changed and not text_edits:
+        log("  ! no changed audio WAVs vs the extract baseline and no edited "
+            "text — the build will be an unmodified copy of the original "
+            "image", "warning")
 
     # Everything from the copy on owns the output file: on cancel or error
     # remove it, so no multi-GB partial/unpatched copy is left looking like
@@ -833,7 +900,7 @@ def write_image(original_path, assets_dir, output_path, log=None,
     # early failure must NOT delete a pre-existing build at that path.)
     try:
         return _write_image_inner(original_path, output_path, changed, gains,
-                                  log, progress, cancel, phase)
+                                  log, progress, cancel, phase, text_edits)
     except BaseException:
         try:
             os.remove(_lp(output_path))
@@ -842,8 +909,54 @@ def write_image(original_path, assets_dir, output_path, log=None,
         raise
 
 
+def _text_edits(assets_dir):
+    """``{original: replacement}`` of the project's edited game-program
+    lines (manifest form: :func:`.progtext.plan_writes` reads it)."""
+    from ...core import text_manifest
+    from .spike1_text import PROGRAM_NAME
+    out = {}
+    try:
+        changed = text_manifest.changed(assets_dir)
+    except Exception:                               # noqa: BLE001
+        return out
+    for path, pairs in changed.items():
+        if path.rsplit("/", 1)[-1] == PROGRAM_NAME:
+            out.update(pairs)
+    return out
+
+
+def _write_text(disk, reader, game_dir, sidx_path, sidx_node, edits, log,
+                check):
+    """Patch *edits* into the card's game program in place and refresh its
+    ``.sidx`` record; returns the number of lines changed."""
+    from . import spike1_text
+    node = _find_game_elf_node(reader, game_dir)
+    if node is None:
+        log("  ! no game program found on the card — %d text edit(s) "
+            "skipped" % len(edits), "warning")
+        return 0
+    emap = _FileMap(reader, node)
+    raw = emap.read(disk, 0, emap.size)
+    writes, n = spike1_text.plan(raw, edits, log)
+    if not writes:
+        return 0
+    for file_off, payload in writes:
+        for disk_off, nbytes in emap.ranges(file_off, len(payload)):
+            disk.seek(disk_off)
+            disk.write(payload[:nbytes])
+            payload = payload[nbytes:]
+    disk.flush()
+    if sidx_node is not None:
+        _refresh_sidx_record(disk, reader, emap, "%s/game" % game_dir,
+                             sidx_path, sidx_node, log, check=check)
+    else:
+        log("  ! no /spk/index/*.sidx manifest found — the card's own "
+            "validation may reject the modified game program")
+    return n
+
+
 def _write_image_inner(original_path, output_path, changed, gains, log,
-                       progress, cancel, phase):
+                       progress, cancel, phase, text_edits=None):
     import numpy as np
     from .formats import spike1_linux_partitions
 
@@ -965,7 +1078,12 @@ def _write_image_inner(original_path, output_path, changed, gains, log,
             log("  ! no /spk/index/*.sidx manifest found — the card's own "
                 "validation may reject the modified image")
 
-    return {"audio": patched, "skipped": skipped}
+        n_text = 0
+        if text_edits:
+            n_text = _write_text(disk, reader, game_dir, sidx_path,
+                                 sidx_node, text_edits, log, check)
+
+    return {"audio": patched, "text": n_text, "skipped": skipped}
 
 
 def _write_preview(preview_dir, idx, track, body, ch, rate, log):

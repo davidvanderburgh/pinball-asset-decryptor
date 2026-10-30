@@ -94,6 +94,7 @@ def test_stern_spike1_era_surface(manufacturers_by_key):
         assert stern.current_era == "spike1"
         caps = stern.capabilities
         assert caps.extract and caps.write and caps.replace_audio
+        assert caps.replace_text            # PAD-869
         assert not caps.direct_ssd and not caps.emulate
         assert stern.write_output_ext() == ".iso"
         from pinball_decryptor.plugins.stern.pipeline import (
@@ -286,7 +287,7 @@ def test_synth_card_write_patches_and_refreshes_sidx(tmp_path, monkeypatch):
     monkeypatch.setenv("PAD_STERN_MATCH_LOUDNESS", "0")
     out_card = str(tmp_path / "out.iso")
     res = spike1.write_image(card, out_dir, out_card)
-    assert res == {"audio": 1, "skipped": []}
+    assert res == {"audio": 1, "text": 0, "skipped": []}
 
     with open(out_card, "rb") as f:
         reader, game_dir, node, _sp, sn = spike1.locate_assets(

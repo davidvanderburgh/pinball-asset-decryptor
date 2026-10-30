@@ -540,7 +540,8 @@ def check_update_dir(u):
 # ============================================================================== the conf
 def render_conf(programs, titles, subtitles, default, timeout, rows, sound_move, sound_confirm, volume,
                 switches, theme=None, colors=None, heading=None, text_size=None, counter=None,
-                countdown_word=None, footer=None, font=True, learn=False, groups=None, default_card=None):
+                countdown_word=None, footer=None, font=True, learn=False, groups=None, default_card=None,
+                header=None):
     """images.conf text.  ``groups`` are RANDOM cards (mkmulticard's check_groups shape: title,
     subtitle, media, members, keep, pos, roll), written as the Stern card writes them: a
     ``group=`` line before the image it sits in front of.  The menu and the hook need nothing
@@ -579,6 +580,9 @@ def render_conf(programs, titles, subtitles, default, timeout, rows, sound_move,
            "# <program> = the file in %s that becomes craze/GDCraze.x86_64 when it is chosen;" % DECRYPT,
            "# default = highlight when there is no last choice; timeout = seconds before it boots by itself;",
            "# switch_* = the FAST switch numbers of the buttons the menu reads (a second after a comma)"]
+    if header is not None:
+        # another platform's words for the same lines (mkdpmulti.py, PAD-853)
+        out = list(header)
     if groups:
         out.append("# group=[+][not-last|any|shuffle:]<first>-<last>|<title>|<subtitle>[|media]   a RANDOM card:")
         out.append("# it boots one of those images at every power-up ('+' = they keep cards of their own too)")

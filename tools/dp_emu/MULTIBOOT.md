@@ -120,7 +120,13 @@ Every failure ends on the newest stock folder, exactly as the machine would boot
    the BOF hook (aplay on a pipe, only when the conf names one). `pad/ran` = the build
    that ran last, for the database carry. `test/padselect_dp_test.sh` (6 cases) passes;
    `make PLATFORM=dp check` passes as a whole.
-4. `mkdpmulti.py` - the zip builder (and its tests).
+4. DONE `mkdpmulti.py` - the zip builder: plan / build / verify / inspect / inject / media,
+   the BOF builder's command line (the tab's contract). `--primary` = the stock version's
+   update zip (only its version is read: its card boots that folder); each `--extra` = a
+   TBL update zip whose `<version>/` travels as `pad/b<k>/` and becomes `<V><k>`. `<V>` =
+   `9.` + four digits from the build minute (`--version` overrides), the file is always
+   `TBL-v<V>.zip` (the update menu reads the version off the name). `ensuredpselect.sh`
+   installs dpselect/dpprocsw/padselect.sh into /var/tmp/dpselect. tests/test_mkdpmulti.py.
 5. `machine_sim.sh` - the whole thing in the rig: the USB update's install steps on a
    prepared build, Version Select, the menu, a pick, the chosen build in attract.
 6. The Multi-boot tab: a Dutch Pinball backend (`multiboot_backend.py`), the TBL

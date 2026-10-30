@@ -139,9 +139,9 @@
     "li036": {"leds": [[8, 37]], "name": "3-BANK DROP TARGET LEFT"},
     "li035": {"leds": [[8, 38]], "name": "3-BANK DROP TARGET CENTER"},
     "li034": {"leds": [[8, 39]], "name": "3-BANK DROP TARGET RIGHT"},
-    "li044": {"leds": [[8, 3], [8, 4], [8, 5]], "name": "LIL DP FLOOD"},
-    "li044a": {"leds": [[8, 3], [8, 4], [8, 5]], "name": "LIL DP FLOOD"},
-    "li044a001": {"leds": [[8, 3], [8, 4], [8, 5]], "name": "LIL DP FLOOD"},
+    "li044": {"leds": [[8, 3], [8, 4], [8, 5]], "rgb": true, "name": "LIL DP FLOOD"},
+    "li044a": {"leds": [[8, 3], [8, 4], [8, 5]], "rgb": true, "name": "LIL DP FLOOD"},
+    "li044a001": {"leds": [[8, 3], [8, 4], [8, 5]], "rgb": true, "name": "LIL DP FLOOD"},
     "li048": {"leds": [[8, 63]], "name": "LOCK"},
     "li049": {"leds": [[8, 26]], "name": "(B)AM! lane (the LED table calls it BAM(!); place wins)"},
     "li050": {"leds": [[8, 27]], "name": "B(A)M! lane (LED BA(M)!)"},
@@ -158,12 +158,12 @@
     "li046": {"leds": [[9, 46]], "name": "CENTER LOOP WEAPON"},
     "li032": {"leds": [[8, 48]], "name": "RIGHT RAMP WEAPON"},
     "li033": {"leds": [[8, 43]], "name": "RIGHT ORBIT WEAPON"},
-    "li054": {"leds": [[9, 23], [9, 24], [9, 25]], "name": "LEFT ORBIT ARROW"},
-    "li057": {"leds": [[9, 18], [9, 17], [9, 16]], "name": "LEFT RAMP ARROW"},
-    "li055": {"leds": [[9, 52], [9, 53], [9, 54]], "name": "INNER LOOP ARROW (by use: arrow 3, the colossus loop)"},
-    "li071": {"leds": [[9, 47], [9, 48], [9, 49]], "name": "CENTER LOOP ARROW"},
-    "li058": {"leds": [[8, 51], [8, 50], [8, 49]], "name": "RIGHT RAMP ARROW"},
-    "li059": {"leds": [[8, 44], [8, 45], [8, 46]], "name": "RIGHT ORBIT ARROW"},
+    "li054": {"leds": [[9, 23], [9, 24], [9, 25]], "rgb": true, "name": "LEFT ORBIT ARROW"},
+    "li057": {"leds": [[9, 18], [9, 17], [9, 16]], "rgb": true, "name": "LEFT RAMP ARROW"},
+    "li055": {"leds": [[9, 52], [9, 53], [9, 54]], "rgb": true, "name": "INNER LOOP ARROW (by use: arrow 3, the colossus loop)"},
+    "li071": {"leds": [[9, 47], [9, 48], [9, 49]], "rgb": true, "name": "CENTER LOOP ARROW"},
+    "li058": {"leds": [[8, 51], [8, 50], [8, 49]], "rgb": true, "name": "RIGHT RAMP ARROW"},
+    "li059": {"leds": [[8, 44], [8, 45], [8, 46]], "rgb": true, "name": "RIGHT ORBIT ARROW"},
     "li043": {"leds": [[9, 19]], "name": "DAZZLER SPINNER FLASH"},
     "li053": {"leds": [[9, 21]], "name": "DISCO"},
     "li039": {"leds": [[9, 33]], "name": "SPECIAL"},
@@ -258,6 +258,12 @@
     "gi070": {"leds": [[9, 37]], "name": "BOTTOM POP BUMPER (GUESS)"},
     "gi071": {"leds": [[8, 0]], "name": "BOTTOM GI (GUESS)"},
     "gi072": {"leds": [[8, 0]], "name": "BOTTOM GI (GUESS)"}
+  },
+  "retrofit_lights": {
+    "_": "inserts with no table light: a new Light cloned from `clone`, at [x, y] (the led_io place through the fit, vpxlamps.py suggest)",
+    "lights": {
+      "PadWolverineSpinnerFlash": {"leds": [[9, 50]], "name": "WOLVERINE SPINNER FLASH", "clone": "li071", "at": [400, 246]}
+    }
   },
   "quiet_subs": [
     "StartLightSeq",

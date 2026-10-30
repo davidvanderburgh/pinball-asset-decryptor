@@ -317,6 +317,7 @@ class VpxMap:
         self.switch_rewrite = {}            # old table number -> Spike 2 id
         self.solenoids = {}                 # number -> (node, index)
         self.lamp_groups = {}               # number -> [(node, index), ...]
+        self.rgb_groups = set()             # numbers whose LEDs are an insert's R, G, B
         self.fakes = {}                     # name -> dict (switch_fakes)
         self.game_on = None                 # (number, [coils]) "flippers armed"
         self.cabinet = {}                   # cabinet switch names -> 1000+id
@@ -353,13 +354,15 @@ class VpxMap:
         for k, v in m.get("solenoids", {}).items():
             if k != "_":
                 self.solenoids[int(k)] = tuple(v["coil"])
-        for sect in ("lamps", m.get("retrofit_lights", {}).get("lights", {})):
+        for sect in ("lamps", "lamp_calls", m.get("retrofit_lights", {}).get("lights", {})):
             table = m.get(sect, {}) if isinstance(sect, str) else sect
             for name, v in table.items():
                 if name == "_" or not isinstance(v, dict):
                     continue
                 leds = [tuple(x) for x in v["leds"]]
                 self.lamp_groups[lamp_number(*leds[0])] = leds
+                if v.get("rgb") and len(leds) == 3:
+                    self.rgb_groups.add(lamp_number(*leds[0]))
         self.fakes = {k: v for k, v in m.get("switch_fakes", {}).items() if k != "_"}
 
     # -- resolution. A VBScript Empty arrives as None: VPinMAME reads that as
@@ -390,6 +393,15 @@ class VpxMap:
 
 def lamp_number(node, index):
     return 1000 + node * 100 + index
+
+
+def rgb_value(r, g, b):
+    """A lit RGB insert's lamp value (PAD-859): its colour as VBScript's RGB()
+    makes it, brightest channel at 255, so a mode's shot colour reaches the
+    table - never 0 or 1, which a table reads as off / on."""
+    top = max(r, g, b, 1)
+    r, g, b = (min(255, c * 255 // top) for c in (r, g, b))
+    return max(r | g << 8 | b << 16, 2)
 
 
 def sol_number(node, index):
@@ -1465,8 +1477,13 @@ class Bridge:
     def _poll_lamps(self, data):
         # mapped groups first, then every LED any table might name directly
         for n, leds in self.map.lamp_groups.items():
-            level = max(self._led_level(data, nd, ix) for nd, ix in leds)
-            self._lamp_set(n, 1 if level >= LAMP_ON else 0)
+            levels = [self._led_level(data, nd, ix) for nd, ix in leds]
+            if max(levels) < LAMP_ON:
+                self._lamp_set(n, 0)
+            elif n in self.map.rgb_groups:
+                self._lamp_set(n, rgb_value(*levels))
+            else:
+                self._lamp_set(n, 1)
         for node in range(16):
             base = 20 + node * 96
             for idx in range(96):
@@ -1607,7 +1624,7 @@ class Bridge:
                 "attached": self.attached,
                 "started": self.launch.slot if self.launch else None,
                 "held": dict(self.pipe.held) if self.pipe else {},
-                "lamps_on": sum(self.lamp_state.values()),
+                "lamps_on": sum(1 for v in self.lamp_state.values() if v),
                 "sols_on": [n for n, v in self.sol_state.items() if v]}
 
 

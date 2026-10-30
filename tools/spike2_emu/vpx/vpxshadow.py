@@ -34,8 +34,11 @@ the smaller thing that makes the real game playable on it:
     sounds stay), since a tribute flips from the key only while ITS game is
     in play, which it never is. The map's `flippers` can name other subs.
 
-Lamps are left to the shadow game until the title's LED identities are known
-(these builds carry no lamp positions or names in their device table).
+Lamps: the map's `lamps` put table lights on the machine's LEDs (an RGB
+insert's three, `rgb`, also give the light the insert's colour);
+`retrofit_lights` are new lights cloned where the machine has an insert the
+table lacks, and `dark` lights, which the machine has no LED for, are held
+off so the shadow game cannot leave them lit.
 
 The map (<title>.shadow.json) says which object is which switch; see
 rush_le.shadow.json for the fields. The patched table is re-signed and gets
@@ -298,6 +301,11 @@ def vb(s):
     return '"' + s.replace('"', '""') + '"'
 
 
+def vb_value(v):
+    """A JSON number or string as a VBScript literal."""
+    return str(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else vb(str(v))
+
+
 def _argcount(rest):
     depth, inq, n, seen = 0, False, 0, False
     for ch in rest:
@@ -415,17 +423,65 @@ def lamp_number(node, index):
     return 1000 + node * 100 + index
 
 
+def mapped_lights(m):
+    """name -> lamp entry, the table's own lights and the retrofit ones."""
+    out = {}
+    for table in (m.get("lamps", {}), m.get("retrofit_lights", {}).get("lights", {})):
+        out.update((k, v) for k, v in table.items() if k != "_" and isinstance(v, dict))
+    return out
+
+
 def lamp_groups(m):
     """lamp number -> [table lights]: the controller reports a mapped insert
     under the number of its FIRST LED (padcontroller.VpxMap), lit when any of
     the insert's LEDs is; several table lights may share one."""
     groups = {}
-    for name, v in m.get("lamps", {}).items():
-        if name == "_" or not isinstance(v, dict):
-            continue
+    for name, v in mapped_lights(m).items():
         node, idx = v["leds"][0]
         groups.setdefault(lamp_number(node, idx), []).append(name)
     return groups
+
+
+def lamp_calls(m):
+    """lamp number -> [lamp_calls entries]: inserts the table shows with a
+    sub of its own (extra_vbs) rather than a Light, keyed like lamp_groups."""
+    out = {}
+    for name, v in m.get("lamp_calls", {}).items():
+        if name == "_" or not isinstance(v, dict):
+            continue
+        node, idx = v["leds"][0]
+        out.setdefault(lamp_number(node, idx), []).append(v)
+    return out
+
+
+LAMP_READ_RE = re.compile(r"\bController\.ChangedLamps\b", re.I)
+
+
+def own_lamp_reads(lines, rep):
+    """A tribute that once ran a ROM keeps a lamp loop of its own
+    (Batman 66's and Aerosmith's LampTimer, `If B2SOn Then chglamp =
+    Controller.ChangedLamps`). `Controller` is PAD.Controller now, and each
+    such read takes the changes PadUpdateLamps waits for: the lights it
+    missed stayed as they were. The table's reads come back Empty."""
+    n = 0
+    for i, line in enumerate(lines):
+        code, sep, comment = _split_comment(line)
+        code, k = LAMP_READ_RE.subn("Empty", code)
+        if k:
+            lines[i], n = code + sep + comment, n + k
+    if n:
+        rep.append("the table's own %d read(s) of Controller.ChangedLamps answer Empty "
+                   "(the bridge reads it)" % n)
+
+
+def _split_comment(line):
+    inq = False
+    for i, ch in enumerate(line):
+        if ch == '"':
+            inq = not inq
+        elif ch == "'" and not inq:
+            return line[:i], "'", line[i + 1:]
+    return line, "", ""
 
 
 def _calls_orig(m, name):
@@ -444,7 +500,7 @@ def gen(m, had, quiet=None, dof=None):
 
     def fx(handler):
         return "".join(" : " + c for c in dof.get(handler, ()))
-    lamps = lamp_groups(m)
+    lamps = lamp_groups(m) or lamp_calls(m)
 
     def calls_orig(name):
         return _calls_orig(m, name)
@@ -622,32 +678,61 @@ def gen(m, had, quiet=None, dof=None):
                 "'     The dictionaries are made in PadLampsInit, not by top-level",
                 "'     code here: Iron Maiden's script stops running its top level",
                 "'     before this tail, and a Set up here never happened",
-                "Dim PadLamps, PadLampState, PadTick",
+                "Dim PadLamps, PadLampState, PadTick, PadDark, PadCalls",
                 "Sub PadLampsInit",
                 "\tSet PadLamps = CreateObject(\"Scripting.Dictionary\")",
                 "\tSet PadLampState = CreateObject(\"Scripting.Dictionary\")",
                 "\tPadTick = 0"]
-        for num in sorted(lamps):
-            out.append("\tPadLamps.Add \"%d\", Array(%s)" % (num, ", ".join(lamps[num])))
-        out += ["End Sub",
+        for num, names in sorted(lamp_groups(m).items()):
+            out.append("\tPadLamps.Add \"%d\", Array(%s)" % (num, ", ".join(names)))
+        # an insert the table shows some other way (a fader's bulb, a plastic's
+        # image, a flasher): the map's sub of extra_vbs, called (arg, value)
+        out.append("\tSet PadCalls = CreateObject(\"Scripting.Dictionary\")")
+        for num, calls in sorted(lamp_calls(m).items()):
+            out.append("\tPadCalls.Add \"%d\", Array(%s)" % (num, ", ".join(
+                "Array(GetRef(%s), %s)" % (vb(c["call"]), vb_value(c.get("arg", 0))) for c in calls)))
+        # lights the machine has no LED for: held off, or the shadow game's
+        # last state (an attract light, a blink) would stay on them
+        out += ["\tPadDark = Array(%s)" % ", ".join(m.get("dark", [])),
+                "\tPadReassertLamps",
+                "End Sub",
                 "Sub PadUpdateLamps",
-                "\tDim chg, ii, o, k",
+                "\tDim chg, ii, o, k, c, f",
                 "\tchg = Controller.ChangedLamps",
                 "\tIf IsEmpty(chg) Then Exit Sub",
                 "\tFor ii = 0 To UBound(chg)",
                 "\t\tk = CStr(chg(ii, 0))",
                 "\t\tIf PadLamps.Exists(k) Then",
                 "\t\t\tPadLampState(k) = chg(ii, 1)",
-                "\t\t\tFor Each o In PadLamps(k) : o.State = chg(ii, 1) : Next",
+                "\t\t\tFor Each o In PadLamps(k) : PadLampSet o, chg(ii, 1) : Next",
+                "\t\tEnd If",
+                "\t\tIf PadCalls.Exists(k) Then",
+                "\t\t\tFor Each c In PadCalls(k)",
+                "\t\t\t\tSet f = c(0) : f c(1), chg(ii, 1)",
+                "\t\t\tNext",
                 "\t\tEnd If",
                 "\tNext",
                 "End Sub",
+                "Sub PadLampSet(o, v)   ' 0 off, 1 on, more: a lit RGB insert's colour",
+                "\tIf v > 1 Then",
+                "\t\tIf o.ColorFull <> v Then o.ColorFull = v : o.Color = PadDim(v)",
+                "\t\tIf o.State <> 1 Then o.State = 1",
+                "\tElseIf o.State <> v Then",
+                "\t\to.State = v",
+                "\tEnd If",
+                "End Sub",
+                "Function PadDim(v)   ' the unlit tint, as the tributes' SetLightColor makes it",
+                "\tPadDim = RGB((v And 255) \\ 14, ((v \\ 256) And 255) \\ 14, ((v \\ 65536) And 255) \\ 14)",
+                "End Function",
                 "Sub PadReassertLamps   ' the machine's last word on every mapped light, again",
                 "\tDim k, o",
                 "\tFor Each k In PadLampState.Keys",
-                "\t\tFor Each o In PadLamps(k)",
-                "\t\t\tIf o.State <> PadLampState(k) Then o.State = PadLampState(k)",
-                "\t\tNext",
+                "\t\tIf PadLamps.Exists(k) Then",
+                "\t\t\tFor Each o In PadLamps(k) : PadLampSet o, PadLampState(k) : Next",
+                "\t\tEnd If",
+                "\tNext",
+                "\tFor Each o In PadDark",
+                "\t\tIf o.State <> 0 Then o.State = 0",
                 "\tNext",
                 "End Sub",
                 "Sub PadDumpLamps(path)   ' vpxkeys.py lamps <file>: every mapped light's state",
@@ -806,6 +891,7 @@ def patch(script, m):
             quiet[name] = args
     neuter(lines, m.get("neuter", []), rep)
     route_b2s(lines, rep)
+    own_lamp_reads(lines, rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
     flex_optional(lines, rep)
     # what core.vbs's PinMAMETimer expects a VPM table to declare, at the TOP:
@@ -828,6 +914,13 @@ def retrofit_items(table, m):
         kind, name, pos = table.item_info(data)
         by_name[name] = (kind, data)
     items = []
+    rl = m.get("retrofit_lights", {})
+    for name, v in rl.get("lights", {}).items():
+        if name == "_":
+            continue
+        kind, src = by_name[v.get("clone", rl.get("clone"))]
+        assert kind == "Light", v.get("clone", rl.get("clone"))
+        items.append(vpxfile.clone_item(src, name, *v["at"]))
     for name, v in m.get("retrofit_timers", {}).items():
         if name == "_":
             continue
@@ -852,7 +945,7 @@ def main(argv):
         return 1
     info = [table.item_info(d) for d in table.items]
     names = {n.lower() for _, n, _ in info}
-    for name in list(m["switches"]) + list(saucers(m)) + list(m.get("lamps", {})):
+    for name in list(m["switches"]) + list(saucers(m)) + list(m.get("lamps", {})) + m.get("dark", []):
         if name != "_" and name.lower() not in names:
             print("WARNING: the table has no object named %s" % name)
     m["_lightseqs"] = sorted(n for k, n, _ in info if k == "LightSeq")

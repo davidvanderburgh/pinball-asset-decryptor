@@ -23,7 +23,10 @@ the smaller thing that makes the real game playable on it:
   * DOF and the backglass stay on the B2S.Server the tribute's LoadEM made:
     Table1_Init keeps it as PadB2S before `Controller` becomes PAD.Controller,
     and every `Controller.B2S...` call (the script's own and controller.vbs's
-    DOF sub) goes to it;
+    DOF sub) goes to it; the DOF calls of the table's own subs the bridge
+    stands in for (a bumper's Hit, the sub that kicks a saucer, the trough
+    or the plunger) are copied into the bridge's subs and coil callbacks,
+    and the map's `b2s_name` renames cGameName, the name DOF looks for;
   * keys: Start, launch, coins and the flipper BUTTONS go to the machine, and
     Table1_KeyDown passes everything else on to the original handler;
   * the flippers are the MACHINE's coils: core.vbs's sLLFlipper/sLRFlipper
@@ -148,6 +151,146 @@ def route_b2s(lines, rep):
     if n or loads:
         rep.append("B2S/DOF kept on the B2S server: %d call(s) in the script%s"
                    % (n, ", and controller.vbs's" if loads else ""))
+
+
+GAMENAME_RE = re.compile(r'^(\s*(?:Const\s+)?cGameName\s*=\s*)"[^"]*"', re.I)
+
+
+def rename_game(lines, name, rep):
+    """The map's `b2s_name`: the name LoadEM hands B2S.Server, which is the
+    name DOF looks the table up by in its config (Rush's tribute says
+    "rushle", the DOF Config Tool knows it as "rush_le")."""
+    for i, line in enumerate(lines):
+        if GAMENAME_RE.match(line):
+            lines[i] = GAMENAME_RE.sub(lambda mo: mo.group(1) + vb(name), line, count=1)
+            rep.append("B2S/DOF game name is %s" % name)
+            return
+
+
+# ---- DOF: the table's own feedback calls, carried into the bridge's subs
+#
+# A shadow map's `orig_hits: false` keeps a tribute's hit subs out of the way,
+# and its kickers, trough and plunger now fire on the machine's coils through
+# cvpmBallStack: the `DOF 107, DOFPulse` in a bumper's Hit sub and the
+# SoundFXDOF beside `Kicker1.Kick` never ran, so a cabinet's contactors stayed
+# still. The unconditional ones are copied into the subs that stand in.
+
+DOF_RE = re.compile(r"^(?:Call\s+)?DOF\s*\(?\s*([^,()]+?)\s*,\s*([^,()]+?)\s*\)?$", re.I)
+FXDOF_RE = re.compile(r"\bSoundFXDOF\s*\(", re.I)
+
+
+def _code(line):
+    """A line without its comment."""
+    inq = False
+    for i, ch in enumerate(line):
+        if ch == '"':
+            inq = not inq
+        elif ch == "'" and not inq:
+            return line[:i]
+    return line
+
+
+def _args(text):
+    """The comma-separated arguments up to the closing paren, nesting kept."""
+    out, depth, inq, cur = [], 0, False, ""
+    for ch in text:
+        if ch == '"':
+            inq = not inq
+        elif not inq and ch == "(":
+            depth += 1
+        elif not inq and ch == ")":
+            if depth == 0:
+                break
+            depth -= 1
+        elif not inq and ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+            continue
+        cur += ch
+    out.append(cur.strip())
+    return out
+
+
+def _dof_in(stmt):
+    """`PadDOF event, state, toy` for each DOF a statement fires."""
+    found = []
+    mo = DOF_RE.match(stmt)
+    if mo:
+        found.append("PadDOF %s, %s, Empty" % (mo.group(1), mo.group(2)))
+    for mo in FXDOF_RE.finditer(stmt):
+        a = _args(stmt[mo.end():])
+        if len(a) == 4:
+            found.append("PadDOF %s, %s, %s" % (a[1], a[2], a[3]))
+    return found
+
+
+def _walk(lines):
+    """Every statement inside a Sub or Function, as (sub name lowered, block
+    path, statement). The path names the If/Case/loop branch the statement
+    runs in - () is the sub's own level; a single-line If's statements are
+    conditional and get a path of their own."""
+    head = re.compile(r"^(?:public\s+|private\s+)?(?:sub|function)\s+(\w+)", re.I)
+    sub, path, ids = None, [], [0]
+
+    def new():
+        ids[0] += 1
+        return ids[0]
+    for line in lines:
+        code = _code(line)
+        cond = None             # a single-line If: the rest of the line is its
+        for a, b in _statements(code):
+            s = code[a:b].strip()
+            low = s.lower()
+            if not s:
+                continue
+            if cond:
+                if not re.match(r"end\s+if\b", low):
+                    yield sub, cond, s
+                continue
+            mo = head.match(s)
+            if mo:
+                sub, path = mo.group(1).lower(), []
+                continue
+            if sub is None:
+                continue
+            if re.match(r"end\s+(sub|function)\b", low):
+                sub = None
+                continue
+            if low.startswith("if ") and re.search(r"\bthen$", low):
+                path.append(new())
+            elif low.startswith("if ") and re.search(r"\bthen\b", low):
+                cond = tuple(path) + (new(),)
+                yield sub, cond, re.split(r"(?i)\bthen\b", s, maxsplit=1)[1].strip()
+            elif re.match(r"(elseif\b.*\bthen$|else$|case\b)", low) and path:
+                path[-1] = new()
+            elif re.match(r"(select\s+case|for\b|do\b|while\b)", low):
+                path.append(new())
+            elif re.match(r"(end\s+(if|select)|next|loop|wend)\b", low) and path:
+                path.pop()
+            else:
+                yield sub, tuple(path), s
+
+
+def _dedupe(calls):
+    seen = []
+    for c in calls:
+        if c not in seen:
+            seen.append(c)
+    return seen
+
+
+def dof_of_sub(stmts, name):
+    """The DOF a sub always fires: its own level, no branch."""
+    return _dedupe([c for sub, path, s in stmts if sub == name.lower() and not path
+                    for c in _dof_in(s)])
+
+
+def dof_at_fire(stmts, obj):
+    """The DOF fired beside `<obj>.Kick` / `.AutoFire` / `.Fire`, in the same
+    branch of the same sub (Rush: `kicker1.Kick 190, 15` then SoundFXDOF 113)."""
+    fire = re.compile(r"\b%s\.(kick\w*|autofire|fire)\b" % re.escape(obj), re.I)
+    where = {(sub, path) for sub, path, s in stmts if fire.search(s)}
+    return _dedupe([c for sub, path, s in stmts if (sub, path) in where for c in _dof_in(s)])
 
 
 def vb(s):
@@ -284,18 +427,26 @@ def lamp_groups(m):
     return groups
 
 
-def gen(m, had, quiet=None):
-    """The bridge's own script, appended after the original."""
+def _calls_orig(m, name):
+    # with the machine's lamps on the table, a tribute's own hit subs (its
+    # rules: lights, sounds, scores) stay out of the way; the real game's LCD
+    # and sound say what a hit was worth
+    return m.get("orig_hits", True) or name.lower() in {n.lower() for n in m.get("orig_keep", [])}
+
+
+def gen(m, had, quiet=None, dof=None):
+    """The bridge's own script, appended after the original. `dof`: handler
+    (`sw001_Hit`, `sol:3`) -> the table's DOF calls it must fire itself."""
     cab = m["cabinet"]
     quiet = quiet or {}
+    dof = dof or {}
+
+    def fx(handler):
+        return "".join(" : " + c for c in dof.get(handler, ()))
     lamps = lamp_groups(m)
-    orig_keep = {n.lower() for n in m.get("orig_keep", [])}
 
     def calls_orig(name):
-        # with the machine's lamps on the table, a tribute's own hit subs
-        # (its rules: lights, sounds, scores) stay out of the way; the real
-        # game's LCD and sound say what a hit was worth
-        return m.get("orig_hits", True) or name.lower() in orig_keep
+        return _calls_orig(m, name)
     out = ["", "", "'" + "=" * 70, "'==== PAD: the Spike 2 emulator drives this table (vpxshadow.py) ====",
            "'" + "=" * 70,
            "Dim bsTrough"]
@@ -312,6 +463,14 @@ def gen(m, had, quiet=None):
             "\tre.Pattern = \"\\bController\\.B2S\" : re.IgnoreCase = True : re.Global = True",
             "\tPadB2SText = re.Replace(t, \"PadB2SCtl.B2S\")",
             "End Function"]
+    if dof:
+        out += ["Sub PadDOF(e, s, toy)   ' a DOF call of the table's, from a sub the bridge stands in for",
+                "\tOn Error Resume Next   ' a table without controller.vbs has no DOF",
+                "\tIf Not IsEmpty(toy) Then",
+                "\t\tIf DOFeffects(toy) <> 1 And DOFeffects(toy) <> 2 Then Exit Sub   ' as SoundFXDOF",
+                "\tEnd If",
+                "\tDOF e, s",
+                "End Sub"]
     # ---- Init
     out += ["", "Sub Table1_Init"]
     if had["Table1_Init"]:
@@ -401,8 +560,9 @@ def gen(m, had, quiet=None):
     t = m["trough"]
     out += ["Sub %s_Hit" % t["drain"],
             "\tbsTrough.AddBall Me",
-            "\tPlaySoundAt \"fx_drain\", %s" % t["drain"],
-            "End Sub"]
+            "\tPlaySoundAt \"fx_drain\", %s" % t["drain"]]
+    out += ["\t" + c for c in dof.get(t["drain"] + "_Hit", ())]
+    out += ["End Sub"]
     p = m.get("plunger")
     if p:
         out += ["Sub %s_Hit : Controller.Switch(1%03d) = True" % (p["lane_trigger"], p["lane_switch"])
@@ -423,25 +583,35 @@ def gen(m, had, quiet=None):
             body = "vpmTimer.PulseSw %d" % sid
             if had.get(name + "_Hit") and calls_orig(name):
                 body += " : %s_Hit_orig" % name
+            else:
+                body += fx(name + "_Hit")
             out.append("Sub %s_Hit : %s : End Sub" % (name, body))
         elif ev == "hold":
             b1 = "Controller.Switch(%d) = True" % sid
             b0 = "Controller.Switch(%d) = False" % sid
             if had.get(name + "_Hit") and calls_orig(name):
                 b1 += " : %s_Hit_orig" % name
+            else:
+                b1 += fx(name + "_Hit")
             if had.get(name + "_UnHit") and calls_orig(name):
                 b0 += " : %s_UnHit_orig" % name
+            else:
+                b0 += fx(name + "_UnHit")
             out.append("Sub %s_Hit : %s : End Sub" % (name, b1))
             out.append("Sub %s_UnHit : %s : End Sub" % (name, b0))
         elif ev == "spin":
             body = "vpmTimer.PulseSw %d" % sid
             if had.get(name + "_Spin") and calls_orig(name):
                 body += " : %s_Spin_orig" % name
+            else:
+                body += fx(name + "_Spin")
             out.append("Sub %s_Spin : %s : End Sub" % (name, body))
         elif ev == "slingshot":
             body = "vpmTimer.PulseSw %d" % sid
             if had.get(name + "_Slingshot") and calls_orig(name):
                 body += " : %s_Slingshot_orig" % name
+            else:
+                body += fx(name + "_Slingshot")
             out.append("Sub %s_Slingshot : %s : End Sub" % (name, body))
     # ---- lamps
     if lamps:
@@ -494,13 +664,22 @@ def gen(m, had, quiet=None):
         out.append("Sub %s%s : End Sub   ' PAD: quiet; the machine lights the table" % (name, args))
     # ---- saucers
     for k in saucers(m):
-        out.append("Sub %s_Hit : bs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s : End Sub" % (k, k, k))
+        out.append("Sub %s_Hit : bs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
+                   % (k, k, k, fx(k + "_Hit")))
     # ---- solenoids
     out += ["", "'---- the machine's coils (godzilla-style numbering: the map's small numbers)"]
     for num, s in m["solenoids"].items():
         if num == "_" or not s.get("callback"):
             continue
-        out.append("SolCallback(%s) = %s          ' %s" % (num, vb(s["callback"]), s["name"]))
+        calls = dof.get("sol:" + num)
+        if calls:
+            # the coil's own action, then the DOF the table fired beside it
+            out += ["Sub PadSol%s(e)" % num, "\t%s e" % s["callback"], "\tIf e Then"]
+            out += ["\t\t" + c for c in calls]
+            out += ["\tEnd If", "End Sub",
+                    "SolCallback(%s) = %s          ' %s" % (num, vb("PadSol" + num), s["name"])]
+        else:
+            out.append("SolCallback(%s) = %s          ' %s" % (num, vb(s["callback"]), s["name"]))
     for const, sub in flips.items():
         out.append("SolCallback(%s) = %s          ' the machine's flipper coil" % (const, vb(sub)))
     # ---- test hook
@@ -560,9 +739,46 @@ def has_sub(lines, name):
     return any(pat.match(ln) for ln in lines)
 
 
+def dof_calls(lines, m):
+    """Handler -> the table's DOF calls the bridge's own sub must make: what
+    each stood-in event sub fires at its own level (gen uses it only where
+    the original is not called), and per coil what the table fires beside
+    kicking the trough's release, a saucer or the auto plunger. Read from the
+    script as written, before any sub is renamed or line neutered."""
+    stmts = list(_walk(lines))
+    dof = {}
+    evs = {"hit": ("_Hit",), "hold": ("_Hit", "_UnHit"), "spin": ("_Spin",),
+           "slingshot": ("_Slingshot",)}
+    for name, s in m["switches"].items():
+        if name != "_":
+            for ev in evs[s.get("event", "hit")]:
+                dof[name + ev] = dof_of_sub(stmts, name + ev)
+    for name in [m["trough"]["drain"]] + list(saucers(m)):
+        dof[name + "_Hit"] = dof_of_sub(stmts, name + "_Hit")
+    fires = {"bsTrough.SolOut": m["trough"]["release"]}
+    fires.update({"bs%s.SolOut" % k: k for k in saucers(m)})
+    if m.get("plunger"):
+        fires["PadAutoPlunge"] = m["plunger"]["autoplunge"]
+    for num, s in m["solenoids"].items():
+        obj = fires.get(s.get("callback")) if num != "_" else None
+        if obj:
+            dof["sol:" + num] = dof_at_fire(stmts, obj)
+    return {k: v for k, v in dof.items() if v}
+
+
 def patch(script, m):
     rep = []
     lines = script.split("\n")
+    dof = dof_calls(lines, m)
+    for name in m["switches"]:
+        if name != "_" and _calls_orig(m, name):   # its own sub runs and fires them
+            for k in [k for k in dof if k.rsplit("_", 1)[0] == name]:
+                del dof[k]
+    if dof:
+        rep.append("DOF carried into the bridge: %s" % ", ".join(
+            "%s (%s)" % (k, ", ".join(c.split()[1].rstrip(",") for c in v)) for k, v in dof.items()))
+    if m.get("b2s_name"):
+        rename_game(lines, m["b2s_name"], rep)
     had = {}
     for name in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit",
                  "Table1_Paused", "Table1_UnPaused", m["trough"]["drain"] + "_Hit"):
@@ -601,7 +817,7 @@ def patch(script, m):
                if ln.strip().lower().startswith("option explicit")), 0)
     lines.insert(at, "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0"
                      "   ' PAD: for core.vbs (vpxshadow.py)")
-    text = "\n".join(lines) + gen(m, had, quiet) + stub
+    text = "\n".join(lines) + gen(m, had, quiet, dof) + stub
     return text, rep
 
 

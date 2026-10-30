@@ -417,6 +417,118 @@ def test_shadow_dof_reaches_b2s_under_vbscript(tmp_path):
     assert r.stdout.strip() == "B2S got name 101=1 110=1 110=0", r.stdout + r.stderr
 
 
+DOF_TRIBUTE = """Option Explicit
+ExecuteGlobal GetTextFile("controller.vbs")
+Const cGameName = "rushle"   ' DOF's name
+Sub Table1_Init : LoadEM : End Sub
+Sub Drain_Hit : DOF 127, DOFOff : End Sub
+Sub sw001_Hit()
+    DOF 107, DOFPulse
+    If BumperLevel = 0 Then DOF 99, DOFPulse : AddScore 10
+    If bGameOn Then
+        DOF 98, DOFPulse
+    Else
+        DOF 97, DOFPulse
+    End If
+    PlaySoundAt SoundFXDOF("Bump_" & Int(Rnd * 5) + 1, 141, DOFPulse, DOFContactors), sw001 ' x
+End Sub
+Sub LeftSlingShot_Slingshot : DOF 103, DOFPulse : End Sub
+Sub kicker1_Timer
+    kicker1.Kick 190, 15
+    PlaySoundAt SoundFXDOF("fx_kicker", 113, DOFPulse, DOFContactors), Kicker1
+End Sub
+Sub CreateNewBall()
+    BallRelease.CreateBall
+    PlaySoundAt SoundFXDOF("fx_Ballrel", 123, DOFPulse, DOFContactors), BallRelease
+    BallRelease.Kick 90, 4
+End Sub
+Sub Trigger1_Hit()
+    If bAutoPlunger Then
+        PlungerIM.AutoFire
+        DOF 110, DOFPulse
+    End If
+    DOF 77, DOFPulse
+End Sub
+"""
+
+
+def _dof_shadow():
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m.update(orig_hits=False, orig_keep=["LeftSlingShot"], b2s_name="rush_le")
+    return m
+
+
+def test_shadow_carries_the_tables_dof_into_its_own_subs():
+    # PAD-847: with orig_hits false a bumper's own Hit sub never runs, and the
+    # kickers, trough and plunger fire on the machine's coils through
+    # cvpmBallStack: the table's DOF calls there were lost. The unconditional
+    # ones come along; a branch of the shadow game's rules does not.
+    vs = pytest.importorskip("vpxshadow")
+    out, rep = vs.patch(DOF_TRIBUTE, _dof_shadow())
+    assert ("Sub sw001_Hit : vpmTimer.PulseSw 1053 : PadDOF 107, DOFPulse, Empty"
+            " : PadDOF 141, DOFPulse, DOFContactors : End Sub") in out
+    for n in (99, 98, 97, 77):
+        assert "PadDOF %d," % n not in out
+    # its own sub still runs, so its DOF is not doubled
+    assert "Sub LeftSlingShot_Slingshot : vpmTimer.PulseSw 1069 : LeftSlingShot_Slingshot_orig : End Sub" in out
+    assert "PadDOF 103," not in out
+    assert "\tPlaySoundAt \"fx_drain\", Drain\n\tPadDOF 127, DOFOff, Empty\nEnd Sub" in out
+    # the coils: beside kicker1.Kick, BallRelease.Kick (neutered by now) and
+    # PlungerIM.AutoFire in the same branch
+    assert "Sub PadSol1(e)\n\tbsTrough.SolOut e\n\tIf e Then\n\t\tPadDOF 123, DOFPulse, DOFContactors\n\tEnd If" in out
+    assert "Sub PadSol2(e)\n\tPadAutoPlunge e\n\tIf e Then\n\t\tPadDOF 110, DOFPulse, Empty\n\tEnd If" in out
+    assert "Sub PadSol3(e)\n\tbsKicker1.SolOut e\n\tIf e Then\n\t\tPadDOF 113, DOFPulse, DOFContactors" in out
+    assert 'SolCallback(1) = "PadSol1"' in out and 'SolCallback(3) = "PadSol3"' in out
+    assert "SolCallback(7)" not in out
+    assert 'Const cGameName = "rush_le"   \' DOF\'s name' in out
+    assert "Sub PadDOF(e, s, toy)" in out
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+    # a table with no DOF anywhere gets none of it
+    plain, _ = vs.patch(MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    assert "PadDOF" not in plain and 'SolCallback(1) = "bsTrough.SolOut"' in plain
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_carried_dof_reaches_b2s_under_vbscript(tmp_path):
+    # the bridge's generated subs, run for real against a controller.vbs
+    # shaped DOF sub: a bumper hit and the coils pulse the B2S server, and a
+    # toy set to sound only (DOFeffects 0) stays still, as SoundFXDOF does
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch(DOF_TRIBUTE, _dof_shadow())
+    tail = out[out.index("Dim bsTrough"):out.index("Sub PadTestTimer_Timer")]
+    lib = ('Dim Controller, B2SOn, DOFeffects(9)\\n'
+           'Const DOFOff = 0, DOFOn = 1, DOFPulse = 2, DOFContactors = 1\\n'
+           'Sub DOF(e, s)\\nIf B2SOn Then\\nIf s = 2 Then\\n'
+           'Controller.B2SSetData e, 1:Controller.B2SSetData e, 0\\nElse\\n'
+           'Controller.B2SSetData e, s\\nEnd If\\nEnd If\\nEnd Sub')
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log, SolCallback(68), sLLFlipper, sLRFlipper",
+        "Class FakeB2S", "Public Sub B2SSetData(a, b) : Log = Log & a & \"=\" & b & \" \" : End Sub", "End Class",
+        "Class FakePad", "Public Sub B2SSetData(a, b) : Log = Log & \"PAD\" & a & \" \" : End Sub", "End Class",
+        "Class FakeStack", "Public Sub SolOut(e) : Log = Log & \"kick \" : End Sub", "End Class",
+        "Class FakeTimer", "Public Sub PulseSw(n) : Log = Log & \"sw\" & n & \" \" : End Sub", "End Class",
+        "Class FakeImpulse", "Public Sub AutoFire : Log = Log & \"fire \" : End Sub", "End Class",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim plungerIM : Set plungerIM = New FakeImpulse",
+        tail,
+        "ExecuteGlobal PadB2SText(Replace(\"%s\", \"\\n\", vbNewLine))" % lib.replace('"', '""'),
+        "Set PadB2S = New FakeB2S : Set Controller = New FakePad : B2SOn = True",
+        "Set bsTrough = New FakeStack : Set bsKicker1 = New FakeStack",
+        "DOFeffects(DOFContactors) = 2",
+        "sw001_Hit : Log = Log & \"| \"",
+        "Execute SolCallback(1) & \" True\" : Execute SolCallback(1) & \" False\" : Log = Log & \"| \"",
+        "Execute SolCallback(2) & \" True\" : Execute SolCallback(3) & \" True\" : Log = Log & \"| \"",
+        "DOFeffects(DOFContactors) = 0",
+        "sw001_Hit",
+        "WScript.Echo Log"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == ("sw1053 107=1 107=0 141=1 141=0 | kick 123=1 123=0 kick | "
+                                "fire 110=1 110=0 kick 113=1 113=0 | sw1053 107=1 107=0"), r.stdout + r.stderr
+
+
 def test_shadow_flipper_subs_are_found_whole_word_only():
     vs = pytest.importorskip("vpxshadow")
     lines = ["Sub SolLFlipperX(e)", "  Private Sub SolRFlipper (Enabled) ' x", "Function SolURFlipper()"]

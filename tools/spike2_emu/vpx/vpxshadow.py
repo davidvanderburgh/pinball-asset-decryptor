@@ -20,6 +20,10 @@ the smaller thing that makes the real game playable on it:
     drop-target resets follow their coils;
   * the original's own ball creation and auto-launch lines are commented out
     (`neuter`), so the shadow game cannot add balls;
+  * DOF and the backglass stay on the B2S.Server the tribute's LoadEM made:
+    Table1_Init keeps it as PadB2S before `Controller` becomes PAD.Controller,
+    and every `Controller.B2S...` call (the script's own and controller.vbs's
+    DOF sub) goes to it;
   * keys: Start, launch, coins and the flipper BUTTONS go to the machine, and
     Table1_KeyDown passes everything else on to the original handler;
   * the flippers are the MACHINE's coils: core.vbs's sLLFlipper/sLRFlipper
@@ -125,6 +129,27 @@ def neuter(lines, patterns, rep):
     rep.append("neutered %d line(s) that created or launched balls" % n)
 
 
+B2S_RE = re.compile(r"\bController\.B2S", re.I)
+CONTROLLER_VBS_RE = re.compile(r'ExecuteGlobal\s+(GetTextFile\s*\(\s*"controller\.vbs"\s*\))', re.I)
+
+
+def route_b2s(lines, rep):
+    """A tribute's LoadEM (controller.vbs) puts B2S.Server in `Controller`,
+    and DOF and the backglass go through it (`Controller.B2SSetData`). Once
+    Table1_Init hands `Controller` to PAD.Controller those calls must still
+    reach the B2S server: the table's own become `PadB2SCtl.B2S...`, and
+    controller.vbs gets the same rewrite as it loads (PadB2SText), which
+    covers its DOF sub. `\\b` keeps B2SController.B2S... (DOFALT) as it is."""
+    n = loads = 0
+    for i, line in enumerate(lines):
+        line, k = B2S_RE.subn("PadB2SCtl.B2S", line)
+        line, j = CONTROLLER_VBS_RE.subn(r"ExecuteGlobal PadB2SText(\1)", line)
+        lines[i], n, loads = line, n + k, loads + j
+    if n or loads:
+        rep.append("B2S/DOF kept on the B2S server: %d call(s) in the script%s"
+                   % (n, ", and controller.vbs's" if loads else ""))
+
+
 def vb(s):
     return '"' + s.replace('"', '""') + '"'
 
@@ -228,11 +253,25 @@ def gen(m, had, quiet=None):
            "Dim bsTrough"]
     for k in saucers(m):
         out.append("Dim bs%s" % k)
+    out += ["", "' the B2S.Server LoadEM made (DOF, the backglass): `Controller` is",
+            "' PAD.Controller once Table1_Init has run, so B2S calls go here",
+            "Dim PadB2S",
+            "Function PadB2SCtl",
+            "\tIf IsObject(PadB2S) Then Set PadB2SCtl = PadB2S Else Set PadB2SCtl = Controller",
+            "End Function",
+            "Function PadB2SText(t)   ' controller.vbs as it loads: its B2S calls to PadB2SCtl",
+            "\tDim re : Set re = New RegExp",
+            "\tre.Pattern = \"\\bController\\.B2S\" : re.IgnoreCase = True : re.Global = True",
+            "\tPadB2SText = re.Replace(t, \"PadB2SCtl.B2S\")",
+            "End Function"]
     # ---- Init
     out += ["", "Sub Table1_Init"]
     if had["Table1_Init"]:
         out.append("\tTable1_Init_orig            ' the table's own physics, sounds, attract")
     out += ["\tOn Error Resume Next",
+            "\tIf IsObject(Controller) Then",
+            "\t\tIf Not Controller Is Nothing Then Set PadB2S = Controller",
+            "\tEnd If",
             "\tSet Controller = CreateObject(\"PAD.Controller\")",
             "\tIf Err Then MsgBox \"Can't load PAD.Controller: \" & Err.Description",
             "\tController.GameName = %s" % vb(m["title"]),
@@ -261,7 +300,8 @@ def gen(m, had, quiet=None):
             "\tController.Stop"]
     if had["Table1_Exit"]:
         out.append("\tTable1_Exit_orig")
-    out += ["End Sub",
+    out += ["\tIf IsObject(PadB2S) Then PadB2S.Stop   ' its backglass closes with the table",
+            "End Sub",
             "Sub Table1_Paused : Controller.Pause = 1 : End Sub",
             "Sub Table1_UnPaused : Controller.Pause = 0 : End Sub", ""]
     # ---- keys
@@ -496,6 +536,7 @@ def patch(script, m):
         if args is not None:
             quiet[name] = args
     neuter(lines, m.get("neuter", []), rep)
+    route_b2s(lines, rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
     text = "\n".join(lines) + gen(m, had, quiet) + stub
     return text, rep

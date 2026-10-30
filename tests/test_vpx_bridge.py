@@ -23,6 +23,7 @@ What is worth failing on, none of it needing Windows, VPX or a run:
 import json
 import os
 import re
+import shutil
 import struct
 import sys
 
@@ -351,6 +352,69 @@ def test_shadow_makes_pinup_player_optional(shadow):
     i = out.index('CreateObject("PinUpPlayer.PinDisplay")')
     assert "On Error Resume Next" in out[i - 60:i]
     assert "Set PuPlayer = New PadNoPuP" in out[i:i + 200]
+
+
+B2S_TRIBUTE = """Option Explicit
+ExecuteGlobal GetTextFile("controller.vbs")
+Sub Table1_Init : LoadEM : End Sub
+Sub Table1_Exit : If B2SOn Then Controller.Stop
+End Sub
+Sub Lights : If B2SOn Then Controller.B2SSetData 50, 1 : B2SController.B2SSetData 9, 1
+End Sub
+"""
+
+
+def test_shadow_keeps_dof_on_the_b2s_server():
+    # PAD-841: LoadEM puts B2S.Server in Controller; Table1_Init then gives
+    # Controller to PAD.Controller, and every DOF event (controller.vbs's DOF
+    # sub, the table's own B2SSetData) went to PAD instead of B2S.
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    out, rep = vs.patch(B2S_TRIBUTE, m)
+    assert 'ExecuteGlobal PadB2SText(GetTextFile("controller.vbs"))' in out
+    assert "PadB2SCtl.B2SSetData 50, 1 : B2SController.B2SSetData 9, 1" in out
+    assert "If B2SOn Then Controller.Stop" in out        # Stop/Pause stay PAD's
+    i = out.index("If Not Controller Is Nothing Then Set PadB2S = Controller")
+    assert i < out.index('Set Controller = CreateObject("PAD.Controller")')
+    assert "If IsObject(PadB2S) Then PadB2S.Stop" in out
+    assert "1 call(s) in the script, and controller.vbs's" in " ".join(rep)
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_dof_reaches_b2s_under_vbscript(tmp_path):
+    # the generated helpers and Init swap, run for real: a controller.vbs
+    # shaped DOF sub, loaded through PadB2SText, must reach the B2S server
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch(B2S_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    lines = out.split("\n")
+    a = lines.index("Dim PadB2S")
+    b = next(n for n in range(a, len(lines)) if lines[n].startswith("End Function")
+             and "PadB2SText" in "".join(lines[a:n]))
+    helpers = "\n".join(lines[a:b + 1])
+    k = out.index("\tOn Error Resume Next\n\tIf IsObject(Controller)")
+    swap = out[k:out.index("\tController.GameName", k)]
+    lib = ('Dim Controller, B2SController, B2SOn\\n'
+           'Sub LoadEM : Set Controller = New FakeB2S : Controller.B2SName = "x" : B2SOn = True : End Sub\\n'
+           'Sub DOF(e, s)\\nIf B2SOn Then\\nIf s = 2 Then\\n'
+           'Controller.B2SSetData e, 1:Controller.B2SSetData e, 0\\nElse\\n'
+           'Controller.B2SSetData e, s\\nEnd If\\nEnd If\\nEnd Sub')
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Class FakeB2S", "Public Log",
+        "Public Property Let B2SName(v) : Log = Log & \"name \" : End Property",
+        "Public Sub B2SSetData(a, b) : Log = Log & a & \"=\" & b & \" \" : End Sub", "End Class",
+        "Class FakePad", "Public Sub B2SSetData(a, b) : WScript.Echo \"PAD got \" & a : End Sub", "End Class",
+        "Function CreateObject(p) : Set CreateObject = New FakePad : End Function",
+        helpers,
+        "ExecuteGlobal PadB2SText(Replace(\"%s\", \"\\n\", vbNewLine))" % lib.replace('"', '""'),
+        "Sub PadSwap", swap, "End Sub",
+        "LoadEM : PadSwap : DOF 101, 1 : DOF 110, 2",
+        "WScript.Echo \"B2S got \" & PadB2S.Log"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "B2S got name 101=1 110=1 110=0", r.stdout + r.stderr
 
 
 def test_shadow_flipper_subs_are_found_whole_word_only():

@@ -100,6 +100,14 @@ class ArtTable:
     formats: frozenset = frozenset()
     #: number -> True when nothing but the table points at the record
     movable: dict = field(default_factory=dict)
+    #: the table's entries: 4-byte bank pointers (SAM) or 8-byte file
+    #: offsets (Stern Spike 1, PAD-870)
+    entry: int = 4
+    #: records start on this boundary
+    align: int = 4
+    #: a run of records laid out again stays inside one bank this big
+    #: (None: the file has no banks)
+    bank: int = BANK
 
     def by_offset(self):
         return sorted(self.records, key=lambda r: r.offset)
@@ -177,6 +185,14 @@ def read_table(data):
     else:
         raise SamAnimError("no graphics table with frame records (the "
                            "2006-2008 titles have none)")
+    finish(art)
+    art.movable = _movable(data, art)
+    return art
+
+
+def finish(art):
+    """Fill in *art*'s format facts from its records (which formats the
+    engine has, and its row-order numbers)."""
     fmts = {r.fmt for r in art.records}
     art.formats = frozenset(fmts)
     if fmts & {8, 10}:
@@ -186,7 +202,6 @@ def read_table(data):
         if not fmts & {7, 9, 12}:
             # an engine that shows only 0/1/3: offer no row formats
             art.row_rle = art.row_delta = None
-    art.movable = _movable(data, art)
     return art
 
 
@@ -543,8 +558,8 @@ def simplify(frame, levels, base=None):
 SIMPLIFY_LEVELS = (8, 4, 2)
 
 
-def _align4(x):
-    return (x + 3) & ~3
+def _align(x, a=4):
+    return (x + a - 1) & ~(a - 1)
 
 
 def slots(art):
@@ -553,7 +568,7 @@ def slots(art):
     order = art.by_offset()
     out = {}
     for r, nxt in zip(order, order[1:] + [None]):
-        end = _align4(r.offset + r.length)
+        end = _align(r.offset + r.length, art.align)
         if nxt is not None:
             end = min(end, nxt.offset)
         out[r.number] = (r.offset, max(end, r.offset + r.length))
@@ -563,8 +578,8 @@ def slots(art):
 def runs(art, owned):
     """Groups of records (numbers, in file order) that may be laid out
     again together: adjacent owned movable records with only padding
-    between them, all in one 8 MB bank.  Every other owned record is a
-    group of its own."""
+    between them, all in one 8 MB bank (where the file has banks).  Every
+    other owned record is a group of its own."""
     sl = slots(art)
     groups = []
     cur = []
@@ -572,7 +587,8 @@ def runs(art, owned):
     for r in art.by_offset():
         ok = r.number in owned and art.movable.get(r.number)
         if ok and cur and prev_end is not None and r.offset == prev_end \
-                and r.offset // BANK == art.records[cur[0]].offset // BANK:
+                and (not art.bank or r.offset // art.bank
+                     == art.records[cur[0]].offset // art.bank):
             cur.append(r.number)
         else:
             if cur:
@@ -598,16 +614,23 @@ class WritePlan:
     written: dict = field(default_factory=dict)
     #: frames the game will now show (number -> frame)
     frames: dict = field(default_factory=dict)
+    #: records written whole into the *spare* space, out of their run
+    away: set = field(default_factory=set)
 
 
-def plan_write(data, art, frames, edits, owned):
+def plan_write(data, art, frames, edits, owned, spare=None):
     """How to write *edits* (number -> new frame) into the image.
 
     *frames* are the original decoded frames (:func:`decode_all`); only
     *owned* records are written.  Every delta whose base frame changes is
     re-encoded too, so the frames the game shows are exactly the edited
     ones and the originals everywhere else -- or, for a frame that can't
-    fit, a simplified version of it, or its original."""
+    fit, a simplified version of it, or its original.
+
+    *spare* (optional) is room the file has free elsewhere, an object whose
+    ``take(n)`` returns the file offset of ``n`` bytes it gives up, or
+    None: an edited keyframe that doesn't fit its own run goes there whole
+    (its table entry repointed) before any picture loses shades."""
     base_of = bases(art)
     recs = art.records
     sl = slots(art)
@@ -675,17 +698,40 @@ def plan_write(data, art, frames, edits, owned):
                 fmts[n], body[n] = enc[0]
             size = 0
             for n in g:
-                size = _align4(size)
+                if n in away:
+                    continue
+                size = _align(size, art.align)
                 size += len(body[n]) if n in body else recs[n].length
             return trial, body, fmts, start + size <= end
 
-        # exact first; while it doesn't fit, take the largest edited frame
-        # one step down the ladder (fewer shades, then its original), so
-        # only as much detail goes as the space needs.  Originals always
-        # fit: the encoder is never longer than the game's own data.
+        # exact first; while it doesn't fit, move the largest edited
+        # keyframe out to the spare room (if any takes it), else take the
+        # largest edited frame one step down the ladder (fewer shades, then
+        # its original), so only as much detail goes as the space needs.
+        # Originals always fit: the encoder is never longer than the game's
+        # own data.
+        away = {}
         trial, body, fmts, fits = attempt()
         while not fits:
-            left = [n for n in step if step[n] < len(ladder) - 1]
+            if spare is not None:
+                # a keyframe's bytes don't depend on any other frame's, so
+                # the room it takes stays right whatever happens after
+                cand = sorted((n for n in step if step[n] == 0
+                               and n not in away and art.movable.get(n)
+                               and base_of.get(n) is None),
+                              key=lambda k: (-len(body[k]), k))
+                for n in cand:
+                    off = spare.take(len(body[n]))
+                    if off is not None:
+                        away[n] = off
+                        break
+                else:
+                    cand = None
+                if cand:
+                    trial, body, fmts, fits = attempt()
+                    continue
+            left = [n for n in step if step[n] < len(ladder) - 1
+                    and n not in away]
             if not left:
                 raise SamAnimError("frames %s don't fit their place" % work)
             n = max(left, key=lambda k: (len(body[k]), -k))
@@ -699,9 +745,15 @@ def plan_write(data, art, frames, edits, owned):
             plan.how[n] = ("exact" if level is None else
                            "original" if level == "original" else
                            "%d shades" % level)
+        for n, off in away.items():
+            plan.patches.append((off, body[n]))
+            plan.moved[n] = off
+            plan.away.add(n)
         buf = bytearray()
         for n in g:
-            buf += bytes(_align4(len(buf)) - len(buf))
+            if n in away:
+                continue
+            buf += bytes(_align(len(buf), art.align) - len(buf))
             off = start + len(buf)
             if off != recs[n].offset:
                 plan.moved[n] = off
@@ -727,9 +779,10 @@ def apply_plan(image, art, plan):
             image[off:off + len(buf)] = buf
             changes.append((off, off + len(buf), sum(buf) - sum(old)))
     for n, off in plan.moved.items():
-        at = art.table + 4 * n
-        old = bytes(image[at:at + 4])
-        new = struct.pack("<I", bank_pointer(off))
-        image[at:at + 4] = new
-        changes.append((at, at + 4, sum(new) - sum(old)))
+        at = art.table + art.entry * n
+        old = bytes(image[at:at + art.entry])
+        new = struct.pack("<I", bank_pointer(off)) if art.entry == 4 \
+            else struct.pack("<Q", off)
+        image[at:at + art.entry] = new
+        changes.append((at, at + art.entry, sum(new) - sum(old)))
     return changes

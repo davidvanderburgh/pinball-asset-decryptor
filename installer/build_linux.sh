@@ -130,6 +130,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.pinmame_classic.sam_anim" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_adjustments" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_emulate" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike1_images" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_text" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx" \
     --hidden-import "pinball_decryptor.plugins.stern.valpatch" \

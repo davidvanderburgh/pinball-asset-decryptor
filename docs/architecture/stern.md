@@ -411,6 +411,11 @@ Two GUI features ride these passes:
   partition is a **logical** partition (EBR chain — `parse_all_partitions`),
   and the card's `/spk/index/*.sidx` manifests use the same FINF records and
   the same global HMAC key as Spike 2, so Write refreshes them the same way.
+  Its DMD pictures, font glyphs and animation frames (PAD-870,
+  `plugins/stern/spike1_images.py`) sit in the same `image.bin` in S.A.M.'s
+  record formats, reached through a u64 picture table the game program's
+  own `hook_image_table_*` symbols name; see
+  [docs/plans/spike1_dmd_pictures.md](../plans/spike1_dmd_pictures.md).
 - **Spike 3** (RPi CM4) is a *different and harder* scheme entirely: its SD data partitions are **LUKS2 / AES-XTS** keyed by the 256-bit CM4 customer OTP fuse — hardware-bound, so the key isn't on the card. That is out of scope for this plugin (Spike 2's card is unencrypted ext4).
 
 ---

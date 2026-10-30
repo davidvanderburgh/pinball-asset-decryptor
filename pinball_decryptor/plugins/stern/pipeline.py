@@ -764,9 +764,11 @@ class SternFlashImagePipeline(BasePipeline):
 # numpy (for the Write's resample/level fit).
 
 class Spike1ExtractPipeline(BasePipeline):
-    """Decode every sound in a Spike 1 card image (.iso) to a per-sound WAV."""
+    """Decode every sound in a Spike 1 card image (.iso) to a per-sound WAV,
+    and every DMD picture, font glyph and animation frame to a PNG."""
 
-    PHASES = ("Detect", "Locate partitions", "Decode audio", "Checksums")
+    PHASES = ("Detect", "Locate partitions", "Decode audio",
+              "Decode pictures", "Checksums")
 
     def __init__(self, input_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
@@ -808,6 +810,7 @@ class Spike1ExtractPipeline(BasePipeline):
         self._check_cancel()
 
         os.makedirs(self.output_dir, exist_ok=True)
+        flags = _category_flags(self.extract_categories)
         try:
             result = spike1.extract_all(
                 self.input_path, parts, self.output_dir,
@@ -816,12 +819,13 @@ class Spike1ExtractPipeline(BasePipeline):
                 cancel=lambda: self._cancelled,
                 phase=self._set_phase,
                 duration_names=self.duration_names,
-                do_text=_category_flags(self.extract_categories)["do_text"])
+                do_text=flags["do_text"],
+                do_images=flags["do_images"])
         except spike1.Spike1Error as e:
             raise PipelineError("Decode audio", str(e))
         self._check_cancel()
 
-        self._set_phase(3)  # Checksums
+        self._set_phase(4)  # Checksums
         discard_snapshots(self.output_dir)
         self._log("Generating checksums...", "info")
         self._progress(0, 0, "Generating checksums...")
@@ -829,11 +833,17 @@ class Spike1ExtractPipeline(BasePipeline):
                            progress_cb=self._progress,
                            cancel=lambda: self._cancelled)
         self._check_cancel()
+        pics = result.get("pictures")
+        pictures = ""
+        if pics:
+            pictures = (", %d DMD picture(s), %d font glyph(s) and %d "
+                        "animation frame(s) as PNGs"
+                        % (pics["pictures"], pics["glyphs"], pics["frames"]))
         self._done(True,
                    "Extracted %d Spike 1 sound(s) (%d WAV(s), %.1f minutes "
-                   "of audio) -> %s"
+                   "of audio)%s -> %s"
                    % (result["sounds"], result["tracks"],
-                      result["seconds"] / 60.0, self.output_dir))
+                      result["seconds"] / 60.0, pictures, self.output_dir))
 
 
 class Spike1WritePipeline(BasePipeline):
@@ -879,15 +889,17 @@ class Spike1WritePipeline(BasePipeline):
         skipped = ""
         if result["skipped"]:
             skipped = " (%d skipped — see log)" % len(result["skipped"])
-        text = ""
-        if result.get("text"):
-            text = "%d line(s) of text" % result["text"]
+        parts = []
         if result["audio"]:
-            summary = "Wrote %d replaced sound(s)%s%s to %s" \
-                % (result["audio"], skipped, " and " + text if text else "",
-                   self.output_path)
-        elif text:
-            summary = "Wrote %s%s to %s" % (text, skipped, self.output_path)
+            parts.append("%d replaced sound(s)" % result["audio"])
+        if result.get("images"):
+            parts.append("%d DMD picture(s)" % result["images"])
+        if result.get("text"):
+            parts.append("%d line(s) of text" % result["text"])
+        if parts:
+            what = parts[0] if len(parts) == 1 else \
+                ", ".join(parts[:-1]) + " and " + parts[-1]
+            summary = "Wrote %s%s to %s" % (what, skipped, self.output_path)
         else:
             summary = ("No changed audio found — %s is an unmodified copy "
                        "of the original image%s" % (self.output_path, skipped))

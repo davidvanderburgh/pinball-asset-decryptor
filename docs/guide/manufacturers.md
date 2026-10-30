@@ -314,12 +314,26 @@ picks Spike 2, Spike 1, SAM or Whitestar. Architecture notes:
 
 - **Games:** 6 (WWE WrestleMania, KISS, Whoa Nellie!, Game of Thrones, Spider-Man VE, Ghostbusters)
 - **Reads:** Stern's update `.iso` (a raw MBR SD-card image), or a card dump (`.img`/`.bin`/`.raw`)
-- **Tabs:** Extract, Write, Replace Audio, Default Settings, Mod Pack, Emulate
+- **Tabs:** Extract, Write, Replace Audio, Replace Images, Replace Text,
+  Default Settings, Mod Pack, Emulate
 
 - **Fast extract.** Every sound is plain 16-bit PCM, so a whole card
   decodes in seconds, one WAV per sound. An unlisted title still extracts.
 - **Write** fits each replacement to its slot, matches its loudness and
   refreshes the card's validation record.
+- **The DMD's pictures:** Extract writes every one as a PNG in the DMD's
+  16 shades: still pictures (`images/pictures/`), the letters of every
+  font (`images/fonts/fontNN (H px)/`, each named by its character) and
+  animation frames (`animations/`), numbered in the game's order so an
+  animation's frames sort together (KISS LE: 24,195 in all).
+- **Replace Images** puts edits back in the game's own formats. A picture
+  of another size is scaled to fit. A frame busier than the bytes it had
+  goes to free space in `image.bin` on every title but Ghostbusters, which
+  has none (there it may lose shades, and the log says so).
+- **Not in `image.bin`:** the power-up screen (title, version, language)
+  draws with fonts built into the game program, so it doesn't change.
+- **The words on the DMD** (song names, prompts) are text: edit them on
+  Replace Text.
 - **Default Settings** edits every operator adjustment (up to 175 on
   Ghostbusters LE).
 - **Auto-transcribe, Music ID, per-clip loudness, Flash and Save card as

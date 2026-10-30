@@ -229,6 +229,18 @@ under the game's own name (`lab.fun` for Labyrinth).
 | Dune, Winchester | Not yet (they update differently) |
 | Bon Jovi | No (its updates are signed) |
 
+## Dutch Pinball (The Big Lebowski)
+
+The tab takes the stock version plus more builds of the game, and **Build update…** writes one update zip, `TBL-v<version>.zip`.
+
+1. **Install it.** Copy the zip onto a USB stick, then in the service menu pick **USB update** and install it.
+2. **Switch to it.** Service menu, **Version Select**, the new version, **YES**. The game restarts into the menu.
+3. **Every power-up**: the flippers choose, START boots, and the countdown boots the last build you chose.
+
+- All the builds share one set of settings and scores, carried over from the version you switched from.
+- If anything goes wrong, the machine starts the stock version.
+- To take the menu away, Version Select another version and Delete the menu's version and its builds.
+
 ## Building on a Mac
 
 The tab's tools are Linux tools, so on a Mac the app runs them in a Linux

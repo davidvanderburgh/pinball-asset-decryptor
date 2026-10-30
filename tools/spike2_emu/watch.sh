@@ -1085,10 +1085,44 @@ if [ -n "${PAD_PIVOT:-}" ] && ! pad_can_pivot; then
     if ! pad_criu >/dev/null 2>&1; then
         echo "[watch]   there is no criu, which is what freezes the game."
         echo "[watch]   No Ubuntu packages it, so it is built once, from source:"
-        echo "[watch]   wsl -u root -e bash $RIG/getcriu.sh"
+        if pad_is_wsl; then
+            echo "[watch]   wsl -u root -e bash $RIG/getcriu.sh"
+        else
+            echo "[watch]   sudo bash $RIG/getcriu.sh"
+        fi
     fi
     echo "[watch] starting WITHOUT them - nothing else about the run changes."
     unset PAD_PIVOT
+fi
+
+# ★ PAD-871: AND OFF WSL, CRIU MUST BE ALLOWED TO WORK HERE, not only present.
+# WSL's own Linux has always let it; a Linux desktop or the Docker image is
+# whatever kernel, seccomp filter and capabilities it was given, and the
+# Docker image runs by default with none of what criu needs. Asked the way
+# the Mac's box asks (docker/entrypoint.sh, PAD-835): a seccomp filter on
+# this very process (criu cannot suspend the game's filter from under one),
+# then `criu check` - and then a real freeze and thaw, because a container
+# missing one right passed that check and failed the thaw (padpath.sh,
+# pad_criu_roundtrip). Any one costs the save states and nothing else.
+if [ -n "${PAD_PIVOT:-}" ] && ! pad_is_wsl && [ "$(id -u)" = 0 ]; then
+    if ! grep -q '^Seccomp:[[:space:]]*0' /proc/self/status 2>/dev/null; then
+        echo "[watch] save states are off for this run: it runs under a seccomp"
+        echo "[watch]   filter, and the game cannot be frozen inside one. A"
+        echo "[watch]   container needs --security-opt seccomp=unconfined; Docker"
+        echo "[watch]   Desktop filters every container and cannot lift it."
+        unset PAD_PIVOT
+    elif ! _criu_said=$("$(pad_criu)" check 2>&1); then
+        echo "[watch] save states are off for this run: this Linux will not let"
+        echo "[watch]   criu freeze a running program (criu check said:)"
+        printf '%s\n' "$_criu_said" | tail -n 3 | sed 's/^/[watch]     /'
+        unset PAD_PIVOT
+    elif ! _criu_said=$(pad_criu_roundtrip); then
+        echo "[watch] save states are off for this run: criu could not freeze and"
+        echo "[watch]   thaw a test program here (it said:)"
+        printf '%s\n' "$_criu_said" | sed 's/^/[watch]     /'
+        unset PAD_PIVOT
+    fi
+    unset _criu_said
 fi
 
 # ---- WHAT THIS RUN ACTUALLY IS, in the run's own log ----------------------

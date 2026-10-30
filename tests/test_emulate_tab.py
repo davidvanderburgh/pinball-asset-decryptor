@@ -854,6 +854,132 @@ def test_a_linux_desktop_keeps_its_launch(monkeypatch, tmp_path):
     assert "PAD_PIVOT=1" not in cmd, cmd
 
 
+def _linux_root(monkeypatch, tmp_path, head):
+    """A Linux desktop whose root route is *head* (PAD-871)."""
+    monkeypatch.setattr(emulate_core.sys, "platform", "linux")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    monkeypatch.setattr(emulate_core, "_LINUX_ROOT", [head, True])
+    monkeypatch.setattr(emulate_core._rig, "linux_host_env", lambda: [])
+    monkeypatch.setenv("HOME", "/home/somebody")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+    monkeypatch.delenv("PAD_HOME", raising=False)
+
+
+def test_a_linux_desktop_with_password_free_sudo_boots_checkpointable(
+        monkeypatch, tmp_path):
+    """★ PAD-871: save states on a Linux desktop and in the Docker image.
+    The same root boot Windows asks `wsl -u root` for, through `sudo -n -k`;
+    sudo's env_reset clears the session, so the display and the audio
+    server's runtime dir are handed back by name, the rig's home is the
+    user's, and the playfield is told to reach root the same way."""
+    _linux_root(monkeypatch, tmp_path, ["sudo", "-n", "-k"])
+    cmd = emulate_core.watch_cmd(30, ["PAD_CARD=/cards/x.raw"])
+    assert cmd[:4] == ["sudo", "-n", "-k", "env"], cmd
+    for want in ("PAD_PIVOT=1", "PAD_STATE_SUDO=1", "HOME=/home/somebody",
+                 "PAD_HOME=/home/somebody", "DISPLAY=:0",
+                 "XDG_RUNTIME_DIR=/run/user/1000", "PAD_CARD=/cards/x.raw"):
+        assert want in cmd, (want, cmd)
+    assert cmd[-3] == "bash" and cmd[-2].endswith("watch.sh") \
+        and cmd[-1] == "30", cmd
+    # the opt-out is the ordinary user launch
+    assert "sudo" not in emulate_core.watch_cmd(30, [], savestates=False)
+    # a root guest needs a root Stop, Restart, Load and slot list ...
+    for cmd in (emulate_core.kill_cmd(), emulate_core.restart_cmd(),
+                emulate_core.load_cmd("slot1"),
+                emulate_core.rig_cmd_root("slots.sh", "list")):
+        assert cmd[:3] == ["sudo", "-n", "-k"], cmd
+    assert "PAD_RESTORE_KILL=1" in emulate_core.load_cmd("slot1")
+    # ... but not a root status poll: a user's status.sh counts an
+    # unreadable (root) run as rig 0's, and sudo every poll fills the
+    # system log
+    assert emulate_core.status_cmd()[0] != "sudo"
+    # ... except off rig 0, where a user's poll counts no root run at all
+    monkeypatch.setenv("PAD_SLOT", "2")
+    assert emulate_core.status_cmd()[:3] == ["sudo", "-n", "-k"]
+    assert emulate_core.savestates_possible()
+
+
+def test_try_it_knows_a_linux_launch_is_root(monkeypatch, tmp_path):
+    """The Modes tab's Try it installs as root when Start is root; on a
+    Linux desktop that now follows the same probe as the launch."""
+    tab = SimpleNamespace()
+    as_root = emulate_web.EmulateTab.launch_as_root
+    monkeypatch.setattr(emulate_web, "no_rig", lambda: False)
+    _linux_root(monkeypatch, tmp_path, ["sudo", "-n", "-k"])
+    assert as_root(tab) is True
+    monkeypatch.setattr(emulate_core, "_LINUX_ROOT", [None, True])
+    assert as_root(tab) is False
+
+
+def test_a_linux_app_running_as_root_needs_no_sudo(monkeypatch, tmp_path):
+    _linux_root(monkeypatch, tmp_path, [])
+    cmd = emulate_core.watch_cmd(30, [])
+    assert cmd[0] == "env" and "PAD_PIVOT=1" in cmd, cmd
+    assert "PAD_STATE_SUDO=1" not in cmd and "sudo" not in cmd, cmd
+
+
+def test_the_linux_root_probe(monkeypatch):
+    """Only a sudo that asks no password counts, cached credentials ignored
+    (-k): they would lapse under a run whose Stop then could not reach it."""
+    monkeypatch.setattr(emulate_core.sys, "platform", "linux")
+    monkeypatch.setattr(emulate_core.os, "geteuid", lambda: 1000,
+                        raising=False)
+    seen = []
+
+    def run(rc):
+        def fake(argv, **kw):
+            seen.append(argv)
+            if rc is None:
+                raise FileNotFoundError("sudo")
+            return SimpleNamespace(returncode=rc)
+        return fake
+    for rc, want in ((0, ["sudo", "-n", "-k"]), (1, None), (None, None)):
+        monkeypatch.setattr(emulate_core, "_LINUX_ROOT", [None, False])
+        monkeypatch.setattr(emulate_core.subprocess, "run", run(rc))
+        assert emulate_core.linux_root_head() == want, rc
+    assert seen[0] == ["sudo", "-n", "-k", "env", "true"]
+    monkeypatch.setattr(emulate_core, "_LINUX_ROOT", [None, False])
+    monkeypatch.setattr(emulate_core.os, "geteuid", lambda: 0, raising=False)
+    assert emulate_core.linux_root_head() == []
+    for plat in ("win32", "darwin"):
+        monkeypatch.setattr(emulate_core, "_LINUX_ROOT", [None, False])
+        monkeypatch.setattr(emulate_core.sys, "platform", plat)
+        assert emulate_core.linux_root_head() is None
+
+
+def test_a_linux_desktop_with_root_is_told_what_save_states_need(
+        monkeypatch, tmp_path):
+    """The Save states packages are named off WSL too once that machine's
+    Start asks for the boot they serve."""
+    _linux_root(monkeypatch, tmp_path, ["sudo", "-n", "-k"])
+    facts = _facts(busybox="0", iswsl="0", wslconf="1")
+    assert ("busybox-static", emulate_core._SETUP_OPTIONAL[0][2]) in \
+        setup_extras(facts)
+
+
+def test_watch_sh_asks_whether_criu_may_work_off_wsl():
+    """PAD-871: the Docker image's default container gives criu nothing, so
+    a native root boot checks for a seccomp filter and runs `criu check`
+    before it offers save states - the Mac box's two questions - and then
+    freezes and thaws a test program for real."""
+    watch = _rig_text("watch.sh")
+    at = watch.index("PAD-871: AND OFF WSL")
+    block = watch[at:watch.index("\nfi\n", at)]
+    assert '! pad_is_wsl && [ "$(id -u)" = 0 ]' in block
+    assert "Seccomp:" in block and '"$(pad_criu)" check' in block
+    # `criu check` passed in a container missing CAP_SYS_TIME whose thaw
+    # then failed, so a test program is frozen and thawed for real
+    assert "pad_criu_roundtrip" in block
+    assert block.count("unset PAD_PIVOT") == 3
+    probe = _rig_text("padpath.sh")
+    probe = probe[probe.index("pad_criu_roundtrip() {"):]
+    probe = probe[:probe.index("\n}\n")]
+    for step in (" dump -t ", " restore -D ", "--pidfile", "rm -rf",
+                 "exec $_fd>&-"):
+        assert step in probe, step
+
+
 def test_macos_asks_its_box_for_the_checkpointable_boot(monkeypatch,
                                                         tmp_path):
     """★ PAD-835: save states on a Mac. The launch is still padbox.sh, with

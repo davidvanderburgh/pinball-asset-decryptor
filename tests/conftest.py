@@ -114,6 +114,16 @@ def _not_a_session(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_linux_root(monkeypatch):
+    """Every test is a Linux desktop with no password-free root (PAD-871),
+    whatever the machine running it: a CI runner's sudo asks no password, and
+    asked for real it would turn on the root launch under tests that never
+    meant one.  A test of that launch pins ``_LINUX_ROOT`` itself."""
+    from pinball_decryptor.webui import emulate_core
+    monkeypatch.setattr(emulate_core, "_LINUX_ROOT", [None, True])
+
+
+@pytest.fixture(autouse=True)
 def _isolate_title_cache(tmp_path_factory, monkeypatch):
     """Every test gets its own empty per-build cache (title_reader.cache_dir: ports and
     tables worked out on this machine), so no test reads or writes the developer's own,

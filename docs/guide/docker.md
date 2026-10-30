@@ -93,7 +93,11 @@ does not use AppArmor.
   not the network. Only the picture and sound travel, so a slow link
   (Tailscale from outside, say) makes the stream less smooth but does not
   slow the game.
-- **Save states** are not offered on Linux, so not in the container either.
+- **Save states** need two more settings, because freezing a running game
+  is something a container is not allowed by default:
+  `--security-opt seccomp=unconfined --cap-add SYS_PTRACE`. Without them
+  every game still runs, the playfield shows no Save or Load buttons, and
+  the log says why. Docker Desktop cannot give them at all.
 - **Writing to an SD card** needs the card reader on the server. Building a
   card image into `/data` and flashing it from the PC you sit at works
   anywhere.

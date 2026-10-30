@@ -760,6 +760,45 @@ pad_criu_runs() {
     "$c" --version >/dev/null 2>&1
 }
 
+#: ...AND ONE THAT IS ALLOWED TO FREEZE AND THAW HERE, which is the question
+#: under that one (PAD-871). `criu check` is not it: in a Docker container on
+#: a plain Linux host, with every right but CAP_SYS_TIME, it said "Looks
+#: good." and the thaw then died at "Unable to set a monotonic clock offset".
+#: So a throwaway sleep is frozen and thawed for real; it costs well under a
+#: second. ROOT ONLY (criu is). Prints criu's last words when it fails.
+pad_criu_roundtrip() {
+    local c d p rc=1
+    c=$(pad_criu) || return 1
+    d=$(mktemp -d) || return 1
+    # its own session and no terminal: the shape criu dumps without options.
+    # EVERY inherited descriptor closed, not only 0-2: under `wsl -e` the
+    # shell holds a terminal on fd 7, and criu refuses to dump a program
+    # with a terminal it did not start ("Found dangling tty").
+    (
+        for _fd in /proc/$BASHPID/fd/*; do
+            _fd=${_fd##*/}
+            [ "$_fd" -gt 2 ] 2>/dev/null && eval "exec $_fd>&-"
+        done
+        exec setsid sleep 60
+    ) </dev/null >/dev/null 2>&1 &
+    p=$!
+    if "$c" dump -t "$p" -D "$d" >"$d/dump.log" 2>&1; then
+        wait "$p" 2>/dev/null           # the dump killed it; free its pid
+        if "$c" restore -D "$d" -d --pidfile "$d/pid" >"$d/restore.log" 2>&1
+        then
+            rc=0
+            kill "$(cat "$d/pid" 2>/dev/null)" 2>/dev/null
+        else
+            grep -h 'Error' "$d/restore.log" | tail -n 2
+        fi
+    else
+        grep -h 'Error' "$d/dump.log" | tail -n 2
+        kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+    fi
+    rm -rf "$d"
+    return $rc
+}
+
 # THE OTHER HALF OF A PIVOT, AND THE HALF NOBODY CHECKED: the program that
 # performs it. Reported 2026-08-11 by the same user as the busybox fault above,
 # one release later and on the very next run - he installed the package the tab

@@ -29,6 +29,10 @@ class DutchPinballManufacturer(Manufacturer):
         # Emulate tab: The Big Lebowski off a machine's disk image, on the
         # game's own FakePinPROC (tools/dp_emu).
         emulate_dp=True,
+        # Multi-boot (PAD-853): one TBL update zip, installed by the machine's
+        # own USB update, carries several builds and a boot menu
+        # (tools/dp_emu/mkdpmulti.py)
+        multiboot=True,
     )
     # Direct-SSD: read/write the game's physical SSD without an .img/.zip.
     direct_ssd_extract_phases = ("Copy from SSD", "Checksums")

@@ -814,7 +814,7 @@ class WebMultibootPanel(_Base):
             "scores_column": bool(be.scores_column),
             "emulate": bool(be.emulate),
             "flash": bool(be.flash),
-            "new_text": "New update" if be.key == "bof" else "New card",
+            "new_text": "New update" if be.update_file else "New card",
             "out_label": be.out_label,
             "out_noun": be.out_noun,
             "medium": be.medium,
@@ -904,7 +904,7 @@ class WebMultibootPanel(_Base):
         for key, label, state, detail in self.checks():
             if label == plain.get(key):
                 label = words.get(key, label)
-            if self._backend.key == "bof":
+            if self._backend.update_file:
                 detail = bof_words(detail)
             checks.append({"key": key, "label": label, "state": state,
                            "mark": mt.CHECK_MARKS.get(state, ""),

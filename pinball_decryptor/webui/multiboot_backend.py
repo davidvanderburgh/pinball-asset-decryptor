@@ -24,6 +24,7 @@ and the default is Stern, so every argv the Stern tests pin is unchanged.
 """
 import os
 import re
+import time
 from dataclasses import dataclass
 
 
@@ -131,11 +132,21 @@ class MultibootBackend:
     #: (0 = the rows, max_cards).  A BOF update carries four builds in one FAT32
     #: file, and a random card over them is a row that adds no build.
     max_games: int = 0
+    #: THE OUTPUT IS ONE UPDATE FILE the machine's own updater installs (BOF's
+    #: .fun, PAD-342; a Big Lebowski update zip, PAD-853): built as the user,
+    #: by a tool with the same command line, from a static menu program that
+    #: also draws the preview.  The tab's update-file words and steps key on
+    #: this, not on one platform's name.
+    update_file: bool = False
 
     # ---- pure helpers -----------------------------------------------------
     def device(self, img):
         """images.conf's device token for image *img* (0 = the primary).  On
-        BOF it is the program FILE the image becomes (mkbofmulti.py)."""
+        BOF it is the program FILE the image becomes (mkbofmulti.py); on a Big
+        Lebowski the version folder (mkdpmulti.py: the stock version, then
+        each build's)."""
+        if self.key == "dp":
+            return "stock" if img == 0 else "build%d" % img
         if self.key == "bof":
             return "GDCraze.x86_64" if img == 0 else "pad_image%d.bin" % img
         if self.key == "jjp":
@@ -151,6 +162,15 @@ class MultibootBackend:
         # the way the building machine spelled it, and a card built on
         # Windows is read on Linux too (os.path.basename splits only on /)
         b = re.split(r"[\\/]", path or "")[-1]
+        if self.key == "dp":
+            # Dutch Pinball's updates are TBL-v<version>.zip; a mod PAD wrote
+            # carries the same name or a word after it ("TBL-v1.15 my mod")
+            stem = re.sub(r"\.zip$", "", b, flags=re.I)
+            m = re.match(r"^TBL-v([\d.]+?)\.?(?:[\s_-]+(.*))?$", stem, flags=re.I)
+            if m:
+                rest = re.sub(r"[_\s]+", " ", m.group(2) or "").strip()
+                return "THE BIG LEBOWSKI", rest or ("Version %s" % m.group(1))
+            return "THE BIG LEBOWSKI", re.sub(r"[_\s]+", " ", stem).strip()
         if self.key == "bof":
             # A .fun is named for its TITLE (lab.fun) whatever build it is, so
             # the file says which game and the folder may say which build:
@@ -178,6 +198,12 @@ class MultibootBackend:
         puts every output in."""
         if self.key == "bof":
             return os.path.basename(primary or "") or "lab.fun"
+        if self.key == "dp":
+            # the machine's update menu reads the version off the NAME, and it
+            # must be one the machine has not got: '9.' and four digits from
+            # the minute (mkdpmulti.py default_v), read back by the builder
+            minute = int(time.time() // 60)
+            return "TBL-v9.%04d.zip" % (minute % 9000 + 1000)
         base = os.path.basename(primary or "")
         stem = re.sub(r"\.(raw|img|iso)$", "", base, flags=re.I)
         return stem + self.out_suffix
@@ -340,9 +366,61 @@ BOF = MultibootBackend(
     tab_sub=("Several builds of one game in one update file, with a boot menu "
              "the machine shows on power-up."),
     add_choices=frozenset({"_add_image", "_add_random_over_existing"}),
-    max_games=4)
+    max_games=4, update_file=True)
 
-BACKENDS = {STERN.key: STERN, JJP.key: JJP, BOF.key: BOF}
+#: DUTCH PINBALL - THE BIG LEBOWSKI (PAD-853): the machine's own USB update
+#: installs a TBL update zip as a new version folder and its own Version Select
+#: switches to one, so ONE zip carries the launcher (its start), the menu and
+#: every build's files; the stock version is already on the machine and does
+#: not travel (tools/dp_emu/mkdpmulti.py, MULTIBOOT.md).  Nothing needs root:
+#: the zips are read with Python, and the menu programs are built natively
+#: (ensuredpselect.sh), the static menu also drawing the preview.
+_DP = "tools/dp_emu"
+DP = MultibootBackend(
+    key="dp", label="Dutch Pinball",
+    tool_dir=_DP, tool=_DP + "/mkdpmulti.py",
+    media_tool=(_DP + "/mkdpmulti.py", "media"),
+    selector_src=_SPIKE2 + "/codeselect", ensure_tool=_DP + "/ensuredpselect.sh",
+    card_flag="--zip",
+    image_exts=(".zip",),
+    image_types=(("Big Lebowski updates", "*.zip"), ("All files", "*.*")),
+    image_noun="update (.zip)",
+    image_pick_title="Pick a Big Lebowski update (.zip) for the menu",
+    out_ext=".zip", out_suffix=".zip", out_noun="update",
+    out_label="Multi-boot update (.zip):",
+    empty_path_text=("No update yet. Add the update zips below - the stock "
+                     "version first - and the path fills itself in, or type "
+                     "where the multi-boot zip (TBL-v9.xxxx.zip) should be written."),
+    medium="USB stick", medium_needed="USB stick needed:", medium_holds="stick holds",
+    flash_frame="Put it on a USB stick",
+    flash_tick="Copy the update onto a USB stick",
+    flash_detail=("Copy the finished zip onto a USB stick under its own name "
+                  "(TBL-v9.xxxx.zip), install it with the service menu's USB "
+                  "update, then select that version in Version Select. The "
+                  "menu shows from then on; selecting another version takes "
+                  "it away again."),
+    build_flash_text="Build update…",
+    overhead_label="The menu, its pictures and the launcher",
+    sizes=(("8G", "8 GB"), ("16G", "16 GB"), ("32G", "32 GB"), ("64G", "64 GB")),
+    fits_re=re.compile(r"fits USB\s+(\d+G)\s+stick size\s+\d+:\s+(YES|NO)\s*\(spare\s+(-?\d+)\)"),
+    total_re=re.compile(r"^zip-size\s+(\d+)"),
+    status_checks=(("card", "Update"), ("images", "Images"),
+                   ("built", "Built"), ("ready", "Ready for the stick")),
+    max_cards=7, groups=False, compact=False, machine_volume=False,
+    # a TBL update has no clip or still the tools can take: 'auto' is none
+    volume_default=50, volume_max=100, attract_clip=False,
+    update=False, bypass=False, extract=False, read_card=False,
+    selector_default="/var/tmp/dpselect",
+    selector_suffix="/dpselect", selector_binary="dpselect",
+    preview_native=True, conf_font="/var/tmp/dpselect/font.ttf",
+    root_steps=frozenset(),
+    sound=True, scores_column=False, emulate=False, flash=False,
+    tab_sub=("Several builds of The Big Lebowski on one machine, in one update "
+             "zip, with a boot menu the machine shows on power-up."),
+    add_choices=frozenset({"_add_image"}),
+    update_file=True)
+
+BACKENDS = {STERN.key: STERN, JJP.key: JJP, BOF.key: BOF, DP.key: DP}
 
 
 def backend_for(what):

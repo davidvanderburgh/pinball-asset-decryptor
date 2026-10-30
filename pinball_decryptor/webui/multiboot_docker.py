@@ -120,7 +120,7 @@ CMD ["bash"]
 #: Docker Desktop shares by default, and the JJP pipeline already answers
 #: this the same way (``_stage_project_file`` copies partclone_to_raw.py
 #: into the cache rather than mounting the bundle).
-_RIGS = ("jjp_emu", "spike2_emu", "bof_emu")
+_RIGS = ("jjp_emu", "spike2_emu", "bof_emu", "dp_emu")
 
 #: ...and the package's leaf modules a rig imports from a bare python3 (see
 #: plugins/__init__.py): mkbofmulti.py reads both programs' Godot pack

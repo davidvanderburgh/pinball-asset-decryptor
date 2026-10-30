@@ -217,7 +217,7 @@ from .theme import THEMES
 # ISO.  Every builder below takes its backend from the form (``platform``),
 # the panel from the manufacturer the app switched to, and the default is
 # Stern - so every argv the Stern tests pin is unchanged.
-from pinball_decryptor.webui.multiboot_backend import BOF, JJP, backend_for
+from pinball_decryptor.webui.multiboot_backend import BOF, DP, JJP, backend_for
 
 #: Where the JJP builder keeps its scratch (a loop-mounted copy of root A, the
 #: re-imaged pieces): a Linux path, never beside the output on a Windows drive.
@@ -2153,7 +2153,7 @@ def sound_as_rendered(platform, kind, value, recorded=None):
     sound read as stale against its manifest, so the strip said 'not
     rendered' for good and every highlight change rendered them again."""
     v = (value or "").strip().lower()
-    if backend_for(platform).key != "bof" or not v.startswith("auto"):
+    if not backend_for(platform).update_file or not v.startswith("auto"):
         return value
     fallback = "synth" if kind == "sound" else "none"
     return recorded if recorded in (value, fallback) else value
@@ -2440,7 +2440,7 @@ def _bof_media_args(form, media_dir, visual_only=False):
     sounds.  The tool maps what a .fun cannot give: 'auto' pictures and music
     are none (they sit inside the packed program), an 'auto' sound is the
     synthetic one, and a random card's style is none (it is drawn from logos)."""
-    args = list(BOF.media_tool) + _media_image_args(form) + [
+    args = list(backend_for(form).media_tool) + _media_image_args(form) + [
         "--out", wsl(media_dir), "--cards", str(max(1, len(form.images)))] + group_media_args(form)
     if visual_only:
         args.append("--visual-only")
@@ -2473,7 +2473,7 @@ def prepare_args(form, media_dir, visual_only=False):
     goes to :func:`_jjp_media_args` (the same manifest out of the JJP tool)."""
     if backend_for(form).key == "jjp":
         return _jjp_media_args(form, media_dir, visual_only)
-    if backend_for(form).key == "bof":
+    if backend_for(form).update_file:
         return _bof_media_args(form, media_dir, visual_only)
     args = [SELECTMEDIA, "prepare"] + _media_image_args(form) + [
         "--out", wsl(media_dir),
@@ -2531,10 +2531,14 @@ def plan_args(form):
     Writes nothing.  (``mkjjpmulti.py plan`` for a JJP form: the two ISOs'
     pieces and which USB stick they fit.)"""
     be = backend_for(form)
-    if be.key in ("jjp", "bof"):
+    if be.key == "jjp" or be.update_file:
         args = [be.tool, "plan"] + _image_args(form) + group_roll_args(form)
         if form.media_dir:
             args += ["--media-dir", wsl(form.media_dir)]
+        if be.key == "dp" and (form.out or "").strip():
+            # a Big Lebowski update's version IS its file name (TBL-v9.xxxx.zip):
+            # the plan names the version the build will write (PAD-853)
+            args += ["--out", wsl(form.out.strip().strip('"'))]
         return args
     return ([MKMULTICARD, "plan"] + _image_args(form) + group_roll_args(form)
             + ["--layout", "store" if form_compact(form) else "auto"] + cache_dir_args())
@@ -2579,7 +2583,7 @@ def _bof_build_args(form):
     a delta against it, the menu and the hook (PAD-342) - the BOF twin of
     :func:`build_args`.  No layout, no bypass, no machine volume, no scores:
     none of those exist on a Barrels of Fun machine."""
-    be = BOF
+    be = backend_for(form)          # BOF, or a Big Lebowski (PAD-853): one command line
     titles, subtitles = game_titles(form, be.key)
     # the random cards ride on _image_args (--group-over ...) as on a Stern
     # card, and --default names an IMAGE: a row that is a random card is named
@@ -2609,7 +2613,7 @@ def build_args(form):
     to :func:`_jjp_build_args`."""
     if backend_for(form).key == "jjp":
         return _jjp_build_args(form)
-    if backend_for(form).key == "bof":
+    if backend_for(form).update_file:
         return _bof_build_args(form)
     titles, subtitles = game_titles(form)
     args = [MKMULTICARD, "build"] + _image_args(form) + group_roll_args(form) + [
@@ -2661,10 +2665,11 @@ def verify_args(form):
         # the deep check restores root A to scratch: the Linux side, as build
         return ([be.tool, "verify", "--iso", wsl(form.out.strip().strip('"'))]
                 + _image_args(form) + ["--workdir", JJP_WORKDIR + "_verify"])
-    if be.key == "bof":
-        # the update unpacked as the machine's updater will, every image
-        # rebuilt by the paddelta it carries and checked against its md5
-        return [be.tool, "verify", "--fun", wsl(form.out.strip().strip('"'))]
+    if be.update_file:
+        # BOF: the update unpacked as the machine's updater will, every image
+        # rebuilt by the paddelta it carries and checked against its md5; a Big
+        # Lebowski zip: every member's CRC, the launcher, every card's build
+        return [be.tool, "verify", be.card_flag, wsl(form.out.strip().strip('"'))]
     args = [MKMULTICARD, "verify", "--card",
             wsl(form.out.strip().strip('"'))] + _image_args(form)
     if form.selector_dir:
@@ -2688,11 +2693,12 @@ def inject_args(form, card):
     record) - subtitles included, so clearing them clears them."""
     be = backend_for(form)
     titles, subtitles = game_titles(form, be.key)
-    if be.key == "bof":
+    if be.update_file:
         # mkbofmulti.py inject --fun: the update unpacked, its menu rewritten,
-        # packed and encrypted again over the same file (PAD-342)
+        # packed and encrypted again over the same file (PAD-342); mkdpmulti.py
+        # inject --zip: the zip's menu rewritten, the builds copied across
         args = [be.tool, "inject",
-                "--fun", wsl(card.strip().strip('"')),
+                be.card_flag, wsl(card.strip().strip('"')),
                 "--selector-dir", platform_selector_dir(form.selector_dir, be),
                 "--titles", ";".join(titles),
                 "--subtitles", ";".join(subtitles),
@@ -3115,8 +3121,8 @@ def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
     filesystem at all: see the comment below, where ensureselect.sh unpacks
     one and does install a selector, because nothing can be compiled until
     it has.  No ``$``: wsl.exe would eat it."""
-    if backend_for(platform).key == "bof":
-        # ensurebofselect.sh builds the static bofselect natively - nothing of
+    if backend_for(platform).update_file:
+        # ensurebofselect.sh / ensuredpselect.sh build the static menu natively - nothing of
         # the machine is needed - and, with --preview, never rebuilds an
         # installed one (PAD-342)
         be = backend_for(platform)
@@ -3270,7 +3276,7 @@ def install_selector_line(selector_dir, card="", tool=ENSURESELECT, platform="st
     prints the same ready line, and the preview's, so one step serves both.
     """
     be = backend_for(platform)
-    if be.key == "bof":
+    if be.update_file:
         return "bash %s %s %s" % (_q(be.ensure_tool), _q(card or ""),
                                   _q(platform_selector_dir(selector_dir, be)))
     if be.key == "jjp":
@@ -5046,7 +5052,7 @@ def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
     elif kind == "dir":
         state = ("dir", "That path is a folder, not a card.", "error", False)
     elif kind == "file":
-        bof = backend_for(platform).key == "bof"
+        bof = backend_for(platform).update_file
         why = (facts or {}).get("unreadable")
         if why:
             # It has been read, and it refused.  The sentence says what was
@@ -5064,7 +5070,7 @@ def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
                      "fg", True)
     elif kind == "missing":
         be = backend_for(platform)
-        button, noun = ((be.build_flash_text, be.out_noun) if be.key == "bof"
+        button, noun = ((be.build_flash_text, be.out_noun) if be.update_file
                         else (WRITE_BUTTON, "card"))
         if (facts or {}).get("parent"):
             sentence = "%s will write a new %s at %s." % (button, noun, name)
@@ -5507,7 +5513,7 @@ def card_size_view(info, platform="stern"):
     over = info.get("overhead")
     if over:
         view["bands"].append((be.overhead_label, over, "overhead"))
-    if view["over"] and be.key == "bof" and info.get("fat32") is False:
+    if view["over"] and be.update_file and info.get("fat32") is False:
         # not a stick that is too small: the FILE is, for FAT32 (PAD-342)
         view["head"] = "too big"
         view["detail"] = ("%s - more than one file on a FAT32 stick can be (4 GB). "
@@ -5550,7 +5556,7 @@ def card_size_view(info, platform="stern"):
                 "is copied whole - empty space and all. Tick Compact build to "
                 "size the card to what is actually in the images."
                 % (label, _gbytes(cap), _gbytes(total), _gbytes(games)))
-    elif be.key == "bof":
+    elif be.update_file:
         view["head"] = view["need"]
         view["detail"] = "a %s update, %s spare on a %s %s." % (
             _gbytes(total), _gbytes(view["spare"] or 0), view["need"],
@@ -6573,6 +6579,35 @@ class MultibootPanel:
                      ".fun is made by the app's tools in its Linux; nothing here "
                      "touches the .fun files you pick.")
     ADD_ROW_TEXT_BOF = "Add another build or random…"
+    #: ...and on The Big Lebowski (PAD-853).
+    ABOUT_TIP_DP = ("Builds ONE Big Lebowski update (TBL-v9.xxxx.zip) that puts "
+                    "several builds of the game on the machine - the stock "
+                    "version and your own - and a menu it shows at power-up: the "
+                    "flippers choose, START boots, a countdown boots the "
+                    "remembered choice. The first row is the STOCK version the "
+                    "machine already runs: nothing of it travels, its card starts "
+                    "that version. Every other row is an update zip (a mod PAD "
+                    "wrote, or another Dutch Pinball version); its files travel "
+                    "in the zip, and the machine makes the build beside its stock "
+                    "versions the first time the menu starts. Install the zip with "
+                    "the service menu's USB update and select it once in Version "
+                    "Select; selecting another version there takes the menu away. "
+                    "Settings and scores follow you from build to build, as "
+                    "Version Select carries them. Nothing here touches the zips you pick.")
+    ADD_ROW_TEXT_DP = "Add another build…"
+    LIST_TIP_DP = ("Each row carries its own icons: ✎ edits the image, − takes it "
+                   "out of the update, ▲ / ▼ move it in the menu's order (the "
+                   "outlined arrow means that row cannot go further). The first "
+                   "row is the STOCK version the machine already has (pick its "
+                   "Dutch Pinball update zip, e.g. TBL-v1.15.zip): its card starts "
+                   "that version and nothing of it travels. Every other row is a "
+                   "Big Lebowski update zip whose files travel in the update.")
+    SIZE_TIP_DP = (
+        "How big the update comes out - measured from the zips themselves. The "
+        "stock version costs nothing (the machine has it); every other build "
+        "costs its own update zip's files. The gray band at the end is the menu "
+        "and the launcher. A FAT32 stick holds at most 4 GB in one file, and the "
+        "machine's USB update wants 2.5 times the unpacked size free on its drive.")
     LIST_TIP_BOF = ("Each row carries its own icons: ✎ edits the image, − takes "
                     "it out of the update, ▲ / ▼ move it in the menu's order "
                     "(the outlined arrow means that row cannot go further). "
@@ -7270,7 +7305,8 @@ class MultibootPanel:
 
     def about_tip(self):
         """The badge's words for the platform the tab is on."""
-        return {"jjp": self.ABOUT_TIP_JJP, "bof": self.ABOUT_TIP_BOF}.get(
+        return {"jjp": self.ABOUT_TIP_JJP, "bof": self.ABOUT_TIP_BOF,
+                "dp": self.ABOUT_TIP_DP}.get(
             self._backend.key, self.ABOUT_TIP)
 
     def _apply_platform_words(self):
@@ -7287,10 +7323,12 @@ class MultibootPanel:
         sel = getattr(self, "_selector_var", None)
         if sel is not None:
             cur = sel.get().strip()
-            defaults = (DEFAULT_SELECTOR_DIR, JJP.selector_default, BOF.selector_default)
-            if be.key in ("jjp", "bof") and (not cur or cur in defaults):
+            defaults = (DEFAULT_SELECTOR_DIR, JJP.selector_default, BOF.selector_default,
+                        DP.selector_default)
+            if be.key != "stern" and (not cur or cur in defaults):
                 sel.set(be.selector_default)
-            elif be.key == "stern" and cur in (JJP.selector_default, BOF.selector_default):
+            elif be.key == "stern" and cur in (JJP.selector_default, BOF.selector_default,
+                                               DP.selector_default):
                 sel.set(os.environ.get("PAD_MULTIBOOT_SELECTOR") or DEFAULT_SELECTOR_DIR)
         about = getattr(getattr(self, "_about_badge", None), "icon_tip", None)
         if about is not None:
@@ -7300,7 +7338,7 @@ class MultibootPanel:
         # compact layout or in-place update to explain.  Instance attributes
         # over the class's, so a Stern panel keeps the texts its tests pin.
         cls = type(self)
-        suffix = {"jjp": "_JJP", "bof": "_BOF"}.get(be.key, "")
+        suffix = {"jjp": "_JJP", "bof": "_BOF", "dp": "_DP"}.get(be.key, "")
         self.ADD_ROW_TEXT = getattr(cls, "ADD_ROW_TEXT" + suffix)
         self.LIST_TIP = getattr(cls, "LIST_TIP" + suffix)
         self.SIZE_TIP = getattr(cls, "SIZE_TIP" + suffix)
@@ -8502,6 +8540,11 @@ class MultibootPanel:
             # card, and its own music while it is highlighted (mkbofmulti.py
             # media pulls both out of the .fun); the menu-wide confirm sound
             row.art, row.anim, row.music, row.confirm = "auto", "auto", "auto", ""
+        elif be.key == "dp":
+            # PAD-853: a Big Lebowski update has no still or clip the tools can
+            # take, so a card is its words until a picture is given; the
+            # menu-wide confirm sound
+            row.art, row.anim, row.music, row.confirm = "none", "none", "none", ""
         self._rows.append(row)
         self._refresh_tree(select=len(self._rows) - 1)
         if len(self._rows) == 1:
@@ -11255,7 +11298,7 @@ class MultibootPanel:
             # pressed); ``default_write`` pre-ticks it only when something
             # actually changed, so opening the modal on an untouched card
             # does not offer to re-write it for nothing.
-            if menu and self._backend.key == "bof":
+            if menu and self._backend.update_file:
                 detail = ("%s - the builds are untouched; the update is "
                           "unpacked, its menu rewritten and packed again "
                           "(a minute or two, not a fresh build)."
@@ -11284,7 +11327,13 @@ class MultibootPanel:
             }
         can = bool(self._rows and field) and not self._busy
         bof = self._backend.key == "bof"
-        if can and bof:
+        if can and self._backend.key == "dp":
+            # PAD-853: what a Big Lebowski build does, in its own words
+            detail = ("Writes a new update at %s - the stock version stays on "
+                      "the machine, every other build's files go into the zip "
+                      "beside the menu, and the zip is read back (a minute or "
+                      "two)." % field)
+        elif can and bof:
             # PAD-342: what a BOF build does, in its own words
             detail = ("Writes a new update at %s - the .fun files are "
                       "unpacked, every build after the first is stored as "

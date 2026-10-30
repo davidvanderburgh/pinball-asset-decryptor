@@ -65,10 +65,14 @@ def read_names(path):
     """(node, index) -> name of every LED led_io.txt lists (its fixed name column)."""
     out = {}
     for line in open(path, encoding="utf-8", errors="replace"):
-        p = line.split()
-        if not line.startswith("#") and len(p) > 3 and p[0].isdigit():
-            out[(int(p[0]), int(p[1]))] = re.sub(r"(\s+\d+)+$", "", line[13:51].strip())
+        mo = None if line.startswith("#") else LED_ROW.match(line)
+        if mo:
+            out[(int(mo.group(1)), int(mo.group(2)))] = mo.group(3)
     return out
+
+
+# node, index, then the name up to the x and y columns (two spaces at least before them)
+LED_ROW = re.compile(r"^\s*(\d+)\s+(\d+)\s+(\S.*?)\s{2,}-?\d+\s+-?\d+(\s|$)")
 
 
 def misnamed(m, names):

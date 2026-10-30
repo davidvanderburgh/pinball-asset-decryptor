@@ -275,6 +275,28 @@ def keep_proportions(before, now, aspect):
     return cw, int(round(cw * aspect))
 
 
+def fit_on_monitor(rect, aspect, mons):
+    """The saved playfield place, made to fit its monitor (PAD-851). The
+    place is saved as a WIDTH, the height following each table's own
+    proportions, so a width filled by a wide table (Iron Maiden, 2881) made
+    a tall one (JAWS) 4322 high on a 2160 screen, half of it off the
+    bottom. Scaled down to the monitor the window's middle is on (the main
+    one when none), in proportion, and moved inside it."""
+    x, y, w, h = rect
+    if not mons:
+        return rect
+    cx, cy = x + w // 2, y + h // 2
+    m = next((m for m in mons if m[0] <= cx < m[2] and m[1] <= cy < m[3]),
+             next((m for m in mons if m[0] <= x < m[2] and m[1] <= y < m[3]), mons[0]))
+    mw, mh = m[2] - m[0], m[3] - m[1]
+    if w > mw or h > mh:
+        w = min(mw, int(mh / aspect))
+        h = int(round(w * aspect))
+    x = min(max(x, m[0]), m[2] - w)
+    y = min(max(y, m[1]), m[3] - h)
+    return x, y, w, h
+
+
 def fill_monitor(win, client, mon):
     """The largest window on monitor `mon` (left, top, right, bottom) whose
     picture keeps its proportions, centred: the maximize box or a title-bar
@@ -657,7 +679,12 @@ class PlayerGrips:
         puts it back (Bridge._fill_player).
 
     It never takes the focus (WS_EX_NOACTIVATE, MA_NOACTIVATE): Visual
-    Pinball pauses the moment it loses it. The cost: the table gets no mouse
+    Pinball pauses the moment it loses it. And a press on it hands the
+    keyboard to the player (PAD-851): the window covers the whole picture,
+    so the click that used to activate Visual Pinball lands here, and with
+    the game display in front the flippers went to the display instead
+    ("i can't do the flippers with left and right shift"). The click is
+    input to this process, so Windows lets it set the foreground. The cost: the table gets no mouse
     of its own while this is up (`padvpx player frame on` brings back the
     frame instead). One thread with its own message loop, following the
     player every 50 ms."""
@@ -783,6 +810,9 @@ class PlayerGrips:
                 u.SetCursor(u.LoadCursorW(None, ctypes.c_void_p(self.CURSORS[edge])))
                 return 1
             if msg == 0x0201:                                # WM_LBUTTONDOWN: only remembered
+                if u.GetForegroundWindow() != self.player:
+                    ok = u.SetForegroundWindow(ctypes.c_void_p(self.player))
+                    log("player window clicked: it has the keyboard%s" % ("" if ok else " (Windows refused)"))
                 p = self._point()
                 client = Bridge._client_on_screen(self.player)
                 self.press = (grip_edge(p, client) or "move", window_rect(self.player), client, p)
@@ -1234,6 +1264,7 @@ class Bridge:
                 x, y = int(setting["x"]), int(setting["y"])
                 w = int(setting.get("w", cur[2]))
                 h = int(round(w * aspect))
+                x, y, w, h = fit_on_monitor((x, y, w, h), aspect, monitors())
             ow, oh = self._outer_for_client(hwnd, w, h) if framed else (w, h)
             place_window(hwnd, (x, y, ow, oh), False)
             self.player_placed = True

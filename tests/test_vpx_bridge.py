@@ -1416,3 +1416,19 @@ def test_player_grip_drag_resizes_in_the_tables_proportions():
     x, y, w, h = pc.resized("t", win, client, (2300, 565), (2300, 835))
     assert y + h == 516 + 1136 and h - 56 == 810                            # the bottom stays
     assert pc.resized("r", win, client, (3100, 900), (0, 900))[2] - 22 == pc.PLAYER_MIN_W
+
+
+def test_a_saved_playfield_place_fits_its_monitor():
+    # PAD-851: Iron Maiden filled the 4K screen 2881 wide; JAWS (1.5 tall)
+    # then opened 2881 x 4322, half of it below the screen
+    pc = pytest.importorskip("padcontroller")
+    mons = [(0, 0, 3840, 2160)]
+    x, y, w, h = pc.fit_on_monitor((479, 0, 2881, 4322), 1.5, mons)
+    assert h == 2160 and w == 1440 and 0 <= x and x + w <= 3840 and y == 0
+    assert pc.fit_on_monitor((100, 100, 1000, 1500), 1.5, mons) == (100, 100, 1000, 1500)  # fits: kept
+    x, y, w, h = pc.fit_on_monitor((3500, 1900, 1000, 1500), 1.5, mons)                    # hangs off: moved in
+    assert (w, h) == (1000, 1500) and x + w <= 3840 and y + h <= 2160
+    two = [(0, 0, 3840, 2160), (3840, 0, 5760, 1080)]
+    x, y, w, h = pc.fit_on_monitor((4000, 0, 1500, 2250), 1.5, two)                        # on the small one
+    assert h == 1080 and x >= 3840 and x + w <= 5760
+    assert pc.fit_on_monitor((1, 2, 3, 4), 1.0, []) == (1, 2, 3, 4)

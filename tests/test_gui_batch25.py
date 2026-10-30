@@ -275,6 +275,9 @@ class _NoteStub:
         if rep and mode is not None:
             self._conv_cache[self._conv_key(slot.rel_path, rep)] = mode
 
+    def _m_seen_preview(self, rel):
+        return None                       # no emulator record of clips (PAD-827)
+
     def _mfr_key(self):
         return "stern"
 

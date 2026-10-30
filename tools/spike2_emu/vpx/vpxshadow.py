@@ -52,6 +52,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import vpxfile  # noqa: E402
+import vpxsounds  # noqa: E402
 
 SUB_RE = r"^(\s*)(Public\s+|Private\s+)?Sub\s+(%s)\s*(\([^)]*\))?(\s*'.*|\s*:.*)?$"
 
@@ -856,10 +857,11 @@ def main(argv):
             print("WARNING: the table has no object named %s" % name)
     m["_lightseqs"] = sorted(n for k, n, _ in info if k == "LightSeq")
     script, rep = patch(table.script(), m)
+    script, streams = vpxsounds.quiet(script, table.ole, rep)   # PAD-858
     items = retrofit_items(table, m)
     table.ole.close()
     dst = os.path.join(outdir, m["output"])
-    mac = vpxfile.write_patched(src, dst, script=script, new_items=items)
+    mac = vpxfile.write_patched(src, dst, script=script, new_items=items, streams=streams)
     open(os.path.join(outdir, m["output"][:-4] + ".script.vbs"), "w", encoding="utf-8",
          newline="").write(script)
     ok = vpxfile.VpxTable(dst).verify()

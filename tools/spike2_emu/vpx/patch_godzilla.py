@@ -33,6 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import vpxfile  # noqa: E402
+import vpxsounds  # noqa: E402
 
 MAP = os.path.join(HERE, "godzilla_le.vpxmap.json")
 OUT_NAME = "Godzilla limited edition (PAD).vpx"
@@ -331,10 +332,11 @@ def main(argv):
         print("refusing: %s does not verify against its own MAC" % src)
         return 1
     script, rep = patch_script(table.script(), m)
+    script, streams = vpxsounds.quiet(script, table.ole, rep)   # PAD-858
     items = retrofit_items(table, m)
     table.ole.close()
     dst = os.path.join(outdir, OUT_NAME)
-    mac = vpxfile.write_patched(src, dst, script=script, new_items=items)
+    mac = vpxfile.write_patched(src, dst, script=script, new_items=items, streams=streams)
     shutil.copyfile(os.path.join(HERE, "PADSPIKE2.vbs"), os.path.join(outdir, "PADSPIKE2.vbs"))
     open(os.path.join(outdir, OUT_NAME[:-4] + ".script.vbs"), "w", encoding="utf-8",
          newline="").write(script)

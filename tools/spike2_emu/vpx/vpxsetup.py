@@ -304,6 +304,13 @@ def open_table(name):
     if why:
         return why
     refresh_system_script(tables)
+    # PAD-858: a table patched before the patchers muted its soundtrack
+    # loses it here, once; a table Visual Pinball holds open stays as it is
+    try:
+        import vpxsounds
+        vpxsounds.quiet_in_place(path)
+    except (OSError, ValueError):
+        pass
     subprocess.Popen([os.path.join(vpx, "VPinballX64.exe"), "-play", path], cwd=vpx)
     return "ok"
 

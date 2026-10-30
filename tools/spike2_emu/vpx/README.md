@@ -236,7 +236,12 @@ A load in VPX itself is David's to run, when he asks for one.
 * **Motors the table has no object for** (`switch_fakes`): the controller
   answers their end stops itself, the way hwshim does for node-board motors.
 * **The LCD and the sound are the rig's.** Nothing to bridge; put the game
-  window on the backglass monitor.
+  window on the backglass monitor. The table keeps only its PLAYFIELD sounds
+  (ball rolling, flippers, rubbers, bumpers, coils): every patcher runs
+  `vpxsounds.py`, which turns the table's own songs, call-outs and effects
+  into 10 ms of silence under their own names and sends `PlayMusic` to an
+  empty sub (PAD-858). Play quiets a table patched before that, once, in
+  place. `python vpxsounds.py <table.vpx>` lists what is kept and muted.
 
 ## Scripted tributes (Rush, Foo Fighters)
 

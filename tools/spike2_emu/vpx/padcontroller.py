@@ -261,66 +261,29 @@ def window_rect(hwnd):
     return r[0], r[1], r[2] - r[0], r[3] - r[1]
 
 
-# ---- resizing Visual Pinball's window from here (PAD-845) -----------------
-#
-# The frame PAD-811 puts on the player window moves it (its title bar), but
-# its edges never resized it: Visual Pinball's window procedure does not
-# answer WM_NCHITTEST with the border codes, so Windows starts no resize. A
-# SetWindowPos from here does resize it, and Visual Pinball draws at the new
-# size, so the controller runs the resize itself: a press on the frame edge,
-# the window follows the mouse until the button is let go, keeping the
-# table's proportions. These three are the geometry, kept free of Windows.
-# Rectangles are (x, y, w, h); a monitor is (left, top, right, bottom).
-
-PLAYER_MIN_W = 240
-
-
-def frame_edge(pt, win, client):
-    """Which edges of the frame `pt` is on ("l", "rb", ...), "caption" for
-    the title bar, None inside the picture or off the window."""
-    px, py = pt
-    wx, wy, ww, wh = win
-    cx, cy, cw, ch = client
-    if not (wx <= px < wx + ww and wy <= py < wy + wh):
-        return None
-    if cx <= px < cx + cw and cy <= py < cy + ch:
-        return None
-    border = max(cx - wx, 4)
-    edges = ("t" if py < wy + border else "") + ("b" if py >= cy + ch else "") \
-        + ("l" if px < cx else "") + ("r" if px >= cx + cw else "")
-    return edges or "caption"
-
-
-def resized(edges, win, client, start, pt, min_w=PLAYER_MIN_W):
-    """The window rectangle after dragging `edges` from `start` to `pt`. The
-    picture keeps its proportions: a side edge sets its width, a top or
-    bottom edge its height, and the edges opposite the dragged ones stay."""
-    wx, wy, ww, wh = win
-    cw, ch = client[2], client[3]
-    aspect = ch / float(cw) if cw else 1.0
-    dx, dy = pt[0] - start[0], pt[1] - start[1]
-    if "l" in edges or "r" in edges:
-        ncw = cw + (dx if "r" in edges else -dx)
-    else:
-        nch = ch + (dy if "b" in edges else -dy)
-        ncw = nch / aspect
-    ncw = max(int(round(ncw)), min_w)
-    nch = int(round(ncw * aspect))
-    nw, nh = ncw + (ww - cw), nch + (wh - ch)
-    nx = wx + ww - nw if "l" in edges else wx
-    ny = wy + wh - nh if "t" in edges else wy
-    return nx, ny, nw, nh
+def keep_proportions(before, now, aspect):
+    """The playfield picture's size after a resize, in the table's own
+    proportions (PAD-845): the side the user dragged wins. A side edge
+    changes the width, so the height follows; a top or bottom edge only the
+    height, so the width follows (keeping the width put a bottom-edge drag
+    straight back); a corner, whichever changed more."""
+    cw, ch = now
+    if before and before[0] and before[1]:
+        dw, dh = abs(cw - before[0]) / float(before[0]), abs(ch - before[1]) / float(before[1])
+        if dh > dw:
+            return int(round(ch / aspect)), ch
+    return cw, int(round(cw * aspect))
 
 
 def fill_monitor(win, client, mon):
-    """The largest window on `mon` whose picture keeps its proportions,
-    centred: double-click on the title bar (like the game's display)."""
+    """The largest window on monitor `mon` (left, top, right, bottom) whose
+    picture keeps its proportions, centred: the maximize box or a title-bar
+    double-click (PAD-845). `win` and `client` are (x, y, w, h)."""
     fw, fh = win[2] - client[2], win[3] - client[3]
     mw, mh = mon[2] - mon[0], mon[3] - mon[1]
     aspect = client[3] / float(client[2]) if client[2] else 1.0
     ncw = min(mw - fw, int((mh - fh) / aspect))
-    nch = int(round(ncw * aspect))
-    nw, nh = ncw + fw, nch + fh
+    nw, nh = ncw + fw, int(round(ncw * aspect)) + fh
     return mon[0] + (mw - nw) // 2, mon[1] + (mh - nh) // 2, nw, nh
 
 
@@ -698,7 +661,7 @@ class Bridge:
         self.lcd_tries = 0
         self.lcd_stable = 0
         self.player_placed = False
-        self.player_framed = False
+        self._player_client = self._player_unfill = self._player_filled = None
         log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         data = read_block(self.rig.led_path(), READ_N)
         if data and coilmap.has_magic(data):
@@ -719,9 +682,6 @@ class Bridge:
         self.running = True
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
-        if sys.platform == "win32" and not getattr(self, "_mouse_thread", None):
-            self._mouse_thread = threading.Thread(target=self._player_mouse_loop, daemon=True)
-            self._mouse_thread.start()
         log("run")
 
     def _attach(self, data):
@@ -793,9 +753,6 @@ class Bridge:
         if self._thread:
             self._thread.join(timeout=2)
             self._thread = None
-        if getattr(self, "_mouse_thread", None):
-            self._mouse_thread.join(timeout=1)
-            self._mouse_thread = None
         if self.pipe:
             self.pipe.close()
         if self.rig:
@@ -1031,7 +988,6 @@ class Bridge:
             aspect = cur[3] / float(cur[2]) if cur[2] else 1.0
             self.player_aspect = aspect
             framed = self._frame_player(hwnd)
-            self.player_framed = framed
             if not setting:
                 self.player_placed = True
                 log("player window left where Visual Pinball put it (%s)%s"
@@ -1066,7 +1022,15 @@ class Bridge:
     # saved as the kit's `player` (x, y of the window, w of the picture), so
     # the next table opens there. `padvpx player frame off` turns the frame
     # off again.
-    _WS_FRAME = 0x00C00000 | 0x00040000 | 0x00020000     # caption, thickframe, minimize box
+    #
+    # PAD-845: the snap kept the WIDTH and set the height from it, so a drag
+    # of the top or bottom edge (only the height changes) was put straight
+    # back - "i want to be able to resize the virtual pinball display". The
+    # side the user dragged now wins (keep_proportions). And a maximize box:
+    # its button, or a double-click on the title bar, fills the monitor at the
+    # table's proportions (a maximized window would stretch it), and doing it
+    # again puts the window back, as the game's display does.
+    _WS_FRAME = 0x00C00000 | 0x00040000 | 0x00020000 | 0x00010000   # caption, thickframe, min + max box
 
     def _frame_player(self, hwnd):
         import ctypes
@@ -1074,7 +1038,7 @@ class Bridge:
         if padlaunch.kit_load().get("player_frame", True) is False:
             return False
         style = u.GetWindowLongW(ctypes.c_void_p(hwnd), -16)
-        if style & 0x00C00000 != 0x00C00000:
+        if style & self._WS_FRAME != self._WS_FRAME:
             u.SetWindowLongW(ctypes.c_void_p(hwnd), -16, style | self._WS_FRAME)
             # SWP_FRAMECHANGED | NOMOVE | NOSIZE | NOZORDER | NOACTIVATE
             u.SetWindowPos(ctypes.c_void_p(hwnd), None, 0, 0, 0, 0, 0x20 | 0x2 | 0x1 | 0x4 | 0x10)
@@ -1107,6 +1071,9 @@ class Bridge:
             u = ctypes.windll.user32
             if not u.IsWindow(ctypes.c_void_p(hwnd)):
                 return
+            if u.IsZoomed(ctypes.c_void_p(hwnd)):
+                self._fill_player(hwnd)
+                return
             rect = window_rect(hwnd)
             now = time.monotonic()
             if rect != getattr(self, "_player_seen", None):
@@ -1117,14 +1084,18 @@ class Bridge:
             if u.GetAsyncKeyState(0x01) & 0x8000:            # the left button is still down
                 return
             cw, ch = self._client_size(hwnd)
-            want = int(round(cw * aspect))
-            if cw > 0 and abs(ch - want) > 2:
-                ow, oh = self._outer_for_client(hwnd, cw, want)
+            tw, th = keep_proportions(getattr(self, "_player_client", None), (cw, ch), aspect)
+            if cw > 0 and (abs(ch - th) > 2 or abs(cw - tw) > 2):
+                ow, oh = self._outer_for_client(hwnd, tw, th)
                 u.SetWindowPos(ctypes.c_void_p(hwnd), None, 0, 0, ow, oh, 0x2 | 0x4 | 0x10)
-                log("player window kept to the table's proportions: %dx%d" % (cw, want))
+                log("player window kept to the table's proportions: %dx%d" % (tw, th))
                 rect = window_rect(hwnd)
                 self._player_seen = rect
-            self._player_settled = rect
+                cw, ch = self._client_size(hwnd)
+            self._player_settled, self._player_client = rect, (cw, ch)
+            filled = getattr(self, "_player_filled", None)
+            if filled and max(abs(a - b) for a, b in zip(rect, filled)) > 4:
+                self._player_unfill = self._player_filled = None    # resized by hand since: forget it
             kit = padlaunch.kit_load()
             if (kit.get("player") or {}) != {"x": rect[0], "y": rect[1], "w": cw}:
                 kit["player"] = {"x": rect[0], "y": rect[1], "w": cw}
@@ -1133,77 +1104,26 @@ class Bridge:
         except Exception as exc:                            # noqa: BLE001
             log("player window watch failed: %s" % exc)
 
-    @staticmethod
-    def _client_on_screen(hwnd):
+    def _fill_player(self, hwnd):
+        """Maximized (its button, or a double-click on the title bar): fill
+        the monitor at the table's proportions instead - or, when it already
+        fills it, go back to where it was before."""
         import ctypes
-        from ctypes import wintypes
-        cw, ch = Bridge._client_size(hwnd)
-        pt = wintypes.POINT(0, 0)
-        ctypes.windll.user32.ClientToScreen(ctypes.c_void_p(hwnd), ctypes.byref(pt))
-        return pt.x, pt.y, cw, ch
-
-    def _player_mouse_loop(self):
-        """The playfield window by hand, the rest of it (PAD-845): drag a
-        frame edge to resize it (frame_edge / resized, above), double-click
-        the title bar to fill its monitor and again to put it back. Polled
-        at 60 Hz; only a press that lands on the player's own frame counts.
-        _watch_player saves where it is left, as for a move."""
-        import ctypes
-        from ctypes import wintypes
         u = ctypes.windll.user32
-        u.WindowFromPoint.argtypes = [wintypes.POINT]
-        u.WindowFromPoint.restype = ctypes.c_void_p
-        u.GetAncestor.restype = ctypes.c_void_p
-        try:
-            u.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))     # physical pixels, as the rest
-        except Exception:                                   # noqa: BLE001
-            pass
-        down, drag, last = False, None, (0.0, (0, 0))
-        restore = None
-        while self.running:
-            time.sleep(1 / 60.0)
-            hwnd = getattr(self, "player_hwnd", 0)
-            if not hwnd or not getattr(self, "player_framed", False):
-                down, drag = False, None
-                continue
-            try:
-                pressed = bool(u.GetAsyncKeyState(0x01) & 0x8000)
-                cur = wintypes.POINT()
-                u.GetCursorPos(ctypes.byref(cur))
-                p = (cur.x, cur.y)
-                if pressed and not down:
-                    on = u.GetAncestor(u.WindowFromPoint(cur), 2) == hwnd    # GA_ROOT
-                    win, client = window_rect(hwnd), self._client_on_screen(hwnd)
-                    edge = frame_edge(p, win, client) if on else None
-                    now = time.monotonic()
-                    if edge == "caption":
-                        if now - last[0] < 0.4 and abs(p[0] - last[1][0]) + abs(p[1] - last[1][1]) < 8:
-                            if restore:
-                                to, restore = restore, None
-                            else:
-                                mons = monitors() or [(0, 0, 1920, 1080)]
-                                mx, my = win[0] + win[2] // 2, win[1] + win[3] // 2
-                                mon = next((m for m in mons if m[0] <= mx < m[2] and m[1] <= my < m[3]), mons[0])
-                                to, restore = fill_monitor(win, client, mon), win
-                            u.SetWindowPos(ctypes.c_void_p(hwnd), None, *to, 0x4 | 0x10)  # NOZORDER|NOACTIVATE
-                            log("player window %s: %s" % ("fills its monitor" if restore else "put back", to))
-                            now = 0.0
-                        last = (now, p)
-                    elif edge:
-                        drag = (edge, win, client, p)
-                        restore = None
-                elif pressed and drag:
-                    to = resized(drag[0], drag[1], drag[2], drag[3], p)
-                    if to != window_rect(hwnd):
-                        u.SetWindowPos(ctypes.c_void_p(hwnd), None, *to, 0x4 | 0x10)
-                elif not pressed and drag:
-                    log("player window resized by hand from its %s edge: %s" % (drag[0], window_rect(hwnd)))
-                    drag = None
-                down = pressed
-            except Exception as exc:                        # noqa: BLE001
-                log("player window mouse failed: %s" % exc)
-                drag = None
-                time.sleep(1.0)
+        u.ShowWindow(ctypes.c_void_p(hwnd), 9)               # SW_RESTORE: back to its own rectangle
+        back = getattr(self, "_player_unfill", None)
+        if back:
+            to, self._player_unfill = back, None
+            log("player window put back: %s" % (to,))
+        else:
+            win, client = window_rect(hwnd), self._client_size(hwnd)
+            mons = monitors() or [(0, 0, 1920, 1080)]
+            mx, my = win[0] + win[2] // 2, win[1] + win[3] // 2
+            mon = next((m for m in mons if m[0] <= mx < m[2] and m[1] <= my < m[3]), mons[0])
+            to = fill_monitor(win, (0, 0) + tuple(client), mon)
+            self._player_unfill, self._player_filled = win, to
+            log("player window fills its monitor: %s" % (to,))
+        u.SetWindowPos(ctypes.c_void_p(hwnd), None, *to, 0x4 | 0x10)  # NOZORDER | NOACTIVATE
 
     def _keep_player_front(self):
         """A run this bridge started opens the game's LCD window, and that

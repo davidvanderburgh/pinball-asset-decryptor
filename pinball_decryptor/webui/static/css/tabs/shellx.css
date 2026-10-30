@@ -107,6 +107,8 @@ html.bp-900 .sx-tips-body { grid-template-columns: minmax(0, 1fr); }
 html.bp-900 .sx-toc { display: none; }
 
 /* ------------------------------------------------------------- disk */
+/* PAD-819: where each WSL disk is, a line apiece */
+.sx-pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
 .sx-usage { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 12px; align-items: center; }
 .sx-bar { height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; border: 1px solid var(--line); }
 .sx-bar i { display: block; height: 100%; background: var(--ink-3); }
@@ -138,6 +140,11 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
    value too (an amber button beside the amber language button was loud) */
 .sx-don-btn { gap: 7px; font-weight: 600; }
 .sx-don-btn svg { width: 19px; height: 19px; flex: 0 0 19px; color: var(--info); }
+/* PAD-815: the top bar's Discord button dressed as Discord's own: its
+   blurple, white text and the filled logo (like pad-triage's thread link) */
+.btn.sx-discord-btn { gap: 7px; font-weight: 600; background: #5865f2; border-color: #5865f2; color: #fff; }
+.btn.sx-discord-btn:hover { background: #4752c4; border-color: #4752c4; color: #fff; }
+.btn.sx-discord-btn svg { width: 18px; height: 18px; flex: 0 0 18px; fill: currentColor; stroke: none; }
 .topbar .chip svg { width: 14px; height: 14px; }
 /* nearly the whole screen (David): four columns, the thermometer, the
    total and the list, the places and the map, the form */

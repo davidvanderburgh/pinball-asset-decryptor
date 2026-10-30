@@ -23,6 +23,7 @@ import { html, useEffect, useRef, useState, Button, Field, Select, Check, Note, 
 import { PlayButton } from "./modes_dialogs.js";
 
 const WHEN = [["any", "any time"], ["idle", "while it is not running"], ["running", "while it runs"]];
+const SPARE_CLOSED = [["low", "reads low when closed"], ["high", "reads high when closed"]];   // PAD-826
 const RESETS = [["ball", "each ball"], ["mode", "each time it starts"], ["game", "each game"]];
 const SHARED_RESETS = RESETS.filter(([r]) => r !== "mode");
 // MODE_SDK.md "Display priority": a mode's 180 lets jackpots, starts and the tilt warning through
@@ -115,6 +116,9 @@ const TIP = {
   scoopHold: "A ball that settles in the scoop waits this many ms (100 to 10000), then the game kicks it out as always. The next ball, or every ball while the mode runs. The game's own use of the scoop comes first; the mode ending lets it go.",
   letGo: "Lets go of a held mechanism now, or stops holding balls in the scoop (a ball held there goes).",
   shake: "Shakes the cabinet's shaker motor for this long, the way the game shakes it: the operator's Shaker Motor setting still applies (switched off, or no shaker fitted: nothing). A strength the game itself shakes at (some games have one only), never longer than the game's own longest at that strength. One at a time - a longer one takes over, a shorter one is skipped, as in the game - never over one of the game's own, the motor running 30 seconds a minute at most (the game's own shakes count too); it runs out when the mode ends, and the ball or the game ending stops it.",
+  // PAD-826: hardware a mod adds, on what the game never uses
+  spareSwitch: "A switch you wired to a node board input the game has no switch on. Board and input are the board's own numbers (the node, and the input bit 0 to 63). Only an input with no switch of the game's on it is read: anything else is refused and left alone. Closed is the input reading low, Stern's way for a switch; pick high for one that reads high when made (an opto). A bounce is not a hit.",
+  spareDrive: "Sends ONE command to a driver output you wired something to that the game never fires: the power (1 to 255) for the pulse's ms, then an optional hold power for more ms. Board and output are the board's own numbers (the node, output 0 to 8). It is 48 V into wiring PAD has never seen, so the limits cannot be raised: only while the mode runs in a game, a pulse of at most 1000 ms, at most 5 s in all, the output on at most half of any 10 seconds, and it goes off when the mode ends, the ball ends or the game ends or tilts. An output the game uses is refused.",
   shakeGame: "Plays one of the game's own shakes, as the game does: on Godzilla its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble or its multiball start (five shakes over 4 seconds); on the other games the one it plays most of each length (a tap, a short, medium or long shake, a rumble). The same limits as Shake the cabinet.",
   gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds; a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
   lightMode: "Lights this mode for the player up, as the game lights one of its own mini-wizards: the shot's lights and the inserts picked (a villain's; several take turns with Chase) shine in this color while the mode is not running, ball after ball, and that shot made starts the mode. As the game's own do, it waits while the game says one of its modes is in the way (on James Bond: a henchman, villain or Q Branch mode, or one of its mini-wizards) and, as this mode is set, while another of the game's modes or a multiball runs; it stays lit for the next shot. While the game says one of its modes is in the way, only the insert held solid shows: the shot's lights and the inserts picked light once that mode is over, as the game's own wait to cycle their villains. Once it could start, its shot is its own: the game does not start one of its own modes on it (on James Bond's Right ramp, a henchman or villain), which waits for a later shot. It stays lit when a ball or one of the game's modes ends. Starting, however it starts, puts the light out, and so does a new game. Each player's is their own.",
@@ -160,6 +164,8 @@ export function hatTemplates(ch, timers) {
     ...((ch.places || []).length ? [{ kind: "game_mode", mode: ch.places[0].id, name: ch.places[0].name }] : []),
     // PAD-747: only where the app sees the game's own modes completed (proven builds): its main modes ticked, 4 of them
     ...((ch.done || []).length ? [doneHat(ch)] : []),
+    // PAD-826: only where the runtime can read a spare switch input on this build (proven builds)
+    ...((ch.spare || []).includes("in") ? [{ kind: "spare_switch", node: 9, input: 0, closed: "low", when: "any" }] : []),
   ];
 }
 
@@ -197,7 +203,10 @@ export function stmtTemplates(ch, vars, prog = {}) {
     ["Mechanisms", [{ op: "hold", what: ((ch.mechs || [])[0] || {}).name || "magnet", ms: num(2000) },
       { op: "scoop_hold", ms: num(3000), which: "next" }, { op: "let_go", what: "*" },
       { op: "shield", where: "toward" }, { op: "building", floor: "3" }, { op: "shake", ms: num(500), strength: "hard" },
-      { op: "shake_game", shake: ((ch.shakes || [])[0] || {}).name || "jackpot" }].filter((t) => !machineLacks(t, ch))],
+      { op: "shake_game", shake: ((ch.shakes || [])[0] || {}).name || "jackpot" },
+      // PAD-826: a driver output the game never fires (proven builds only)
+      ...((ch.spare || []).includes("out") ? [{ op: "spare_drive", node: 9, output: 0, power: 255, ms: 40, hold_power: 0, hold_ms: 0 }] : []),
+    ].filter((t) => !machineLacks(t, ch))],
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
       { op: "change", var: v, by: num(1) }, { op: "set_hits", shot, value: num(0) }]],
     ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
@@ -242,7 +251,7 @@ export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
-  shake: "mech", shake_game: "mech" };
+  shake: "mech", shake_game: "mech", spare_drive: "mech" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
 const GAUGES = [["diamond", "diamonds"], ["segment", "a bar of segments"], ["spike", "spikes"],
@@ -538,6 +547,10 @@ function StmtBody({ b, path, ed }) {
     case "shield": return html`<span class="bk-w" ...${tip(TIP.shield)}>Turn the shield targets</span><${Pick} value=${b.where || "toward"} options=${SHIELD_WHERE} onChange=${(v) => set("where", v)} />`;
     case "shake": return html`<span class="bk-w" ...${tip(TIP.shake)}>Shake the cabinet:</span><${Pick} value=${b.strength || "hard"} options=${shakeStrengths(ed.ch)} missing="(not on this game)" onChange=${(v) => set("strength", v)} />
       <span class="bk-w">shake for</span><${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
+    case "spare_drive": return html`<span class="bk-w" ...${tip(TIP.spareDrive)}>Spare output on board</span><${Num} value=${b.node} width=${40} onChange=${(v) => set("node", v)} />
+      <span class="bk-w">output</span><${Num} value=${b.output} width=${36} onChange=${(v) => set("output", v)} /><span class="bk-w">: power</span><${Num} value=${b.power} width=${44} onChange=${(v) => set("power", v)} />
+      <span class="bk-w">for</span><${Num} value=${b.ms} width=${52} onChange=${(v) => set("ms", v)} /><span class="bk-w">ms, then hold at</span><${Num} value=${b.hold_power} width=${44} onChange=${(v) => set("hold_power", v)} />
+      <span class="bk-w">for</span><${Num} value=${b.hold_ms} width=${52} onChange=${(v) => set("hold_ms", v)} /><span class="bk-w">ms</span>`;
     case "shake_game": return html`<span class="bk-w" ...${tip(TIP.shakeGame)}>Shake the cabinet with</span><${Pick} value=${b.shake}
         options=${(ed.ch.shakes || []).map((m) => [m.name, m.label])} missing="(not on this game)" onChange=${(v) => set("shake", v)} />`;
     default: return html`<span class="bk-w">${b.op}</span>`;
@@ -692,6 +705,8 @@ export function HatBody({ h, path, ed }) {
     case "shot": return html`<span class="bk-w b">When</span><${ShotPick} value=${h.shot} ed=${ed} onChange=${(v) => set("shot", v)} /><span class="bk-w b">is made</span>${when}`;
     case "any_shot": return html`<span class="bk-w b">When any shot is made</span>${when}`;
     case "switch": return html`<span class="bk-w b">When any playfield switch is hit</span>${when}`;
+    case "spare_switch": return html`<span class="bk-w b" ...${tip(TIP.spareSwitch)}>When the spare switch on board</span><${Num} value=${h.node} width=${40} onChange=${(v) => set("node", v)} />
+      <span class="bk-w b">input</span><${Num} value=${h.input} width=${40} onChange=${(v) => set("input", v)} /><span class="bk-w b">closes, it</span><${Pick} value=${h.closed || "low"} options=${SPARE_CLOSED} onChange=${(v) => set("closed", v)} />${when}`;
     case "every": return html`<span class="bk-w b">Every</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds while it runs</span>`;
     case "seconds_left": return html`<span class="bk-w b">When</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds are left</span>`;
     case "event": return html`<span class="bk-w b">When</span><${Pick} value=${h.event} options=${(ed.ch.events || []).map((x) => [x.name, x.label])} onChange=${(v) => set("event", v)} />${when}`;
@@ -758,6 +773,7 @@ export function hatLabel(h) {
     challenge: "When the player picks a challenge", battle: "When the player picks a battle",
     game_mode: "When the game starts one of its modes",
     completed: "When the player has completed some of the game's modes",
+    spare_switch: "When a spare switch closes",
     combo: (h.shots || []).every((x) => x === "lit") ? "When a lit shot follows a lit shot" : "When a shot follows a shot (a combo)" }[h.kind] || h.kind;
 }
 
@@ -771,6 +787,7 @@ export function stmtLabel(b) {
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", building: "Move the building to",
     shake: "Shake the cabinet for", shake_game: "Shake it the game's way", game_wizard: "The game's mini-wizard",
+    spare_drive: "Drive a spare output",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
 

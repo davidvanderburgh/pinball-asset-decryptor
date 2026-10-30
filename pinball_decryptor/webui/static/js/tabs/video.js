@@ -21,6 +21,7 @@ const T = {
   csave: "Save a copy of each clip, its replacement if it has one, with its color profile baked in, into a folder you pick. Same size, frame rate and sound; the project and the card are not changed.",
   csaveAll: "Save a copy of every clip with a color profile attached (green palette), with that profile baked in, into a folder you pick. To save others, select them, right-click and save them. The project and the card are not changed.",
   csv: "Save the whole video table (every slot, not just the filtered view) as a CSV — name, length, resolution, format, audio, replacement and changed-on-disk status — for tracking a big replacement project in a spreadsheet.",
+  compareCsv: "Save a CSV with a row for every replacement, every random clip and every mode's row of a shared clip, beside the game's own clip it plays in place of: both lengths in seconds to two decimals and the difference, the length it will have on the card after Write, resolution, frame rate, frames, codec, audio and file size.",
   check: "Measure every clip already written to a card image and list the ones low enough in bitrate to look blocky — the Write-time \"it will look very blocky\" check, asked of a finished card. Reads the image only; nothing is written.",
   folder: "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.",
   clear: "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.",
@@ -34,6 +35,8 @@ const T = {
   best: "Convert every replaced clip at full quality from your own files, for a card built with room to spare (Write tab → SD card size). If this project doesn't know which files your clips came from, it finds them: point it at a card built with your videos and the folder they are in.",
   compare: "Play the selected clips side by side, big, beside the Color profiles bar: up to 4 (Ctrl-click or Shift-click rows to select them). One clip shows its Original beside its Replacement.\n\nClick a clip there and the bar changes its colors, so you see a profile or a slider on it against the others as you go.",
   // PAD-444: which of the game's modes plays each clip, read off the card's game program
+  // PAD-827
+  seen: "What the emulator saw the game do with this clip: the switch made just before it started, and \"loops\" when the game starts it again each time it ends. It fills in as you play games on the Emulate tab, where the playfield window lists the clips as they play. The words the game draws over a clip are on the game's screen there. Beside it, what the card's game program says: a clip the game plays in turn with others, one of a set it picks from, or one it asks for as a loop.",
   modes: "Which of the game's battles, multiballs and other modes play this clip, read from the card's game program. A clip two modes share has a row for each: choose a replacement in one mode's row to change it for that mode only. Not played: nothing in the game asks for the clip, so the machine never shows it.",
   modeFilter: "List only the clips one mode of the game plays.",
   modesBusy: "Reading which mode plays each clip…",
@@ -137,9 +140,10 @@ function clock(pos, dur) {
 // Tk tree's minwidth.  Measured over every slot, not only the filtered view,
 // so typing in Search doesn't make the columns jump.
 const FIT_MAX = 480;
-const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 56, conv: 60, modes: 110 };
+const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 56, conv: 60, modes: 110, seen: 120 };
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
-                aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert", modes: "Played in" };
+                aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert", modes: "Played in",
+                seen: "When it plays" };
 // PAD-444: a row's Played in cell, in words
 const modesText = (r) => (r.unplayed ? "Not played" : r.other ? "Other parts of the game"
   : (r.modes || []).join(", "));
@@ -176,7 +180,7 @@ const colorTip = (r, cs) => (r.col_lock
 // The long-named columns share the width that is left over (more or less
 // of it); the others keep the width that fits them, so a narrow window
 // shortens names, never "MP4 h264 30fps" or a length.
-const FLEX = ["rel", "rep", "modes"];
+const FLEX = ["rel", "rep", "modes", "seen"];
 const ROW_H = 34;
 let measurer = null;
 const textCache = new Map();
@@ -206,7 +210,7 @@ function rowFit(r, f) {
     w = { rel: textWidth(r.dir, f.mono) + textWidth(r.name, f.body), len: textWidth(r.len, f.mono),
           res: textWidth(r.res, f.body), fmt: textWidth(r.fmt, f.body), aud: textWidth(r.aud, f.body),
           rep: textWidth(r.rep, f.body), col: 0, conv: textWidth(r.conv, f.body),
-          modes: textWidth(modesText(r), f.body) };
+          modes: textWidth(modesText(r), f.body), seen: textWidth(r.seen || "", f.body) };
     rowFits.set(r, w);
   }
   return w;
@@ -641,7 +645,7 @@ function QualityWindow({ q }) {
         <label class="lbl nw" for="vid-q-card">Card image:</label>
         <${Field} id="vid-q-card" value=${q.card} mono cls="grow" disabled=${q.busy}
           onChange=${(v) => { card.current = v; }} onCommit=${(v) => call("video.quality_set_card", v)} />
-        <${Button} onClick=${() => call("video.quality_browse")} disabled=${q.busy}>Browse…<//>
+        <${Button} drop onClick=${() => call("video.quality_browse")} disabled=${q.busy}>Browse…<//>
         <${Button} kind="primary" onClick=${() => call("video.quality_check", card.current)}>${q.busy ? "Stop" : "Check"}<//>
       </div>
       <div class="row small" style="gap:8px">${q.busy ? html`<${Spinner} />` : null}<span>${q.summary}</span></div>
@@ -706,7 +710,7 @@ function BestWindow({ b }) {
     <label class="lbl nw vid-blbl" for=${id}>${label}</label>
     <${Field} id=${id} value=${b[k]} mono cls="grow" disabled=${b.busy}
       onChange=${(v) => { fields.current[k] = v; }} onCommit=${(v) => call("video.best_set", k, v)} />
-    <${Button} onClick=${() => call("video.best_browse", k)} disabled=${b.busy}>Browse…<//>
+    <${Button} drop onClick=${() => call("video.best_browse", k)} disabled=${b.busy}>Browse…<//>
   </div>`;
   // a typed path counts even if the field never lost focus
   const find = async () => {
@@ -738,7 +742,7 @@ function BestWindow({ b }) {
           <label class="lbl nw vid-blbl" for="vid-b-folder">Your videos:</label>
           <${Field} id="vid-b-folder" value=${b.folder} mono cls="grow" disabled=${b.busy}
             onChange=${(v) => { fields.current.folder = v; }} onCommit=${(v) => call("video.best_set", "folder", v)} />
-          <${Button} onClick=${() => call("video.best_browse", "folder")} disabled=${b.busy}>Browse…<//>
+          <${Button} drop onClick=${() => call("video.best_browse", "folder")} disabled=${b.busy}>Browse…<//>
           <${Button} onClick=${find}>${b.busy ? "Stop" : "Find"}<//>
         </div>
       </div>
@@ -874,6 +878,11 @@ export default function VideoTab() {
   };
   // Python loads the row into the panes before the picker opens
   const choose = (rel) => { clearTimeout(selectJob.current); pauseAll(); call("video.choose", rel); };
+  // PAD-838: a video file dropped on a row from the desktop is its replacement
+  const dropOn = (rel) => {
+    setSel(new Set([rel])); anchor.current = rel;
+    choose(rel);
+  };
   const playRow = (rel, side = "orig") => {
     setSel(new Set([rel])); anchor.current = rel;
     clearTimeout(selectJob.current);
@@ -1057,6 +1066,11 @@ export default function VideoTab() {
             : r.pair ? { head: r.modes[0], lines: ["Another mode plays this clip too: it has its own row below."] }
             : modesText(r))}>${modesText(r)}</span>`
           : "") },
+    // PAD-827: what the emulator saw (beside Played in, on the cards that column is read for)
+    modesCol && { key: "seen", label: "When it plays", width: width("seen"), sort: "seen", title: T.seen,
+      render: (r) => (r.seen
+        ? html`<span class="vid-seen-cell" ...${tip({ head: r.seen_head || "When it plays", lines: r.seen_tip || [] })}>${r.seen}</span>`
+        : "") },
     colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
       render: (r) => (r.col_lock
         ? html`<span class="vid-color locked" aria-label="The game's own clip: no color profile can be attached" ...${tip(colorTip(r, colorNs))}><${Icon} name="lock" /></span>`
@@ -1109,7 +1123,7 @@ export default function VideoTab() {
     ${rep.path ? html`<span class="mono small nw ellip acc-ink" ...${tip(repLine
       ? { head: rep.path, lines: [repLine] } : rep.path)}>— ${rep.label}</span>` : null}
     <span class="grow"></span>
-    <${Button} size="sm" onClick=${() => currentRel && choose(currentRel)} disabled=${!currentRel}>Choose…<//>
+    <${Button} drop size="sm" onClick=${() => currentRel && choose(currentRel)} disabled=${!currentRel}>Choose…<//>
     ${pv.can_clear ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("video.clear", [pv.rel])}>Clear replacement<//>` : null}
   </div>`;
   const origHead = html`<div class="row vid-panehead">
@@ -1140,12 +1154,14 @@ export default function VideoTab() {
       <${Button} icon=${s.scanning ? "x" : "refresh"} onClick=${() => call(s.scanning ? "video.cancel_scan" : "video.scan")}>${s.scanning ? "Cancel scan" : "Scan"}<//>
       <${Button} icon="compare" cls="vid-cmp-open" onClick=${() => openCompare(compareRels())} disabled=${!currentRel}
         title=${T.compare}>Compare<//>
-      <${Button} icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
+      <${Button} drop icon="folder" onClick=${() => call("video.replace_from_folder")} disabled=${running} title=${T.folder}>Replace from folder…<//>
       ${s.best_supported ? html`<${Button} kind="ghost" icon="star" onClick=${() => call("video.best_open")} title=${T.best}>Best quality…<//>` : null}
       <${Button} kind="ghost" icon="more" label="More"
-        title=${"More: Export CSV, " + (s.color_offered ? "Save clips with their color profiles…, " : "") + "Clear replacements…, Save / load settings" + (s.var_share ? ", Save / load random clips" : "") + (s.quality_report ? ", Check card…" : "")}
+        title=${"More: Export CSV, Export compare report, " + (s.color_offered ? "Save clips with their color profiles…, " : "") + "Clear replacements…, Save / load settings" + (s.var_share ? ", Save / load random clips" : "") + (s.quality_report ? ", Check card…" : "")}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("video.export_csv") },
+          { label: "Export compare report (CSV)…", icon: "download", title: T.compareCsv, disabled: s.report_busy,
+            onClick: () => call("video.export_compare") },
           s.color_offered ? { label: "Save clips with their color profiles…", icon: "download", title: T.csaveAll,
             onClick: () => call("video.colour_save") } : null,
           { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || running,
@@ -1198,6 +1214,7 @@ export default function VideoTab() {
           sort=${s.sort} onSort=${(k) => call("video.sort", k)}
           resizable widths=${tuned} onResize=${onResize} style=${`--vid-minw:${Math.round(minWidth)}px`}
           rowClass=${(r) => cx(r.rep_cls === "stray" && "vid-foreign")}
+          onFileDrop=${(r) => dropOn(r.rel)}
           empty=${emptyNode} />
       </div>
       <div class="vid-preview">
@@ -1218,6 +1235,13 @@ export default function VideoTab() {
             ${pv.sounds.maybe_more ? html`<div class="small muted">${pv.sounds.maybe_more}</div>` : null}
             ${pv.sounds.none ? html`<span>${pv.sounds.none}</span>` : null}
             ${pv.sounds.foot ? html`<div class="small muted">${pv.sounds.foot}</div>` : null}</div><//>
+        </div>` : null}
+        ${pv.seen && pv.seen.rel === currentRel ? html`<div class="vid-seen">
+          <${Note} kind="info"><div>
+            ${pv.seen.head ? html`<span>${pv.seen.head}</span>
+            <ul class="vid-sound-list">${pv.seen.lines.map((t) => html`<li key=${t}>${t}</li>`)}</ul>` : null}
+            ${pv.seen.prog_head ? html`<span>${pv.seen.prog_head}</span>
+            <ul class="vid-sound-list">${pv.seen.prog_lines.map((t) => html`<li key=${t}>${t}</li>`)}</ul>` : null}</div><//>
         </div>` : null}
         ${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
         <div class="vid-panes">

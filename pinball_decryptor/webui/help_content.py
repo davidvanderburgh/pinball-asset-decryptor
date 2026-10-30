@@ -31,9 +31,13 @@ HELP_CONTENT = {
                  "text": "a new card image, then flash it"}]},
         ]),
         ("Pick the card",
-         "**Browse…** to a card image or update file. Or use **From SD card / SSD** "
-         "(where available) to read a card in a reader; on Windows that needs "
-         "Administrator."),
+         "**Browse…** to a card image or update file, or drop the file from your "
+         "desktop or a folder on the path or on **Browse…**. Or use **From SD card / "
+         "SSD** (where available) to read a card in a reader; on Windows that needs "
+         "Administrator.\n\n"
+         "The app's **Browse…**, **Choose…** and **Add…** buttons take a dropped "
+         "file or folder the same way, and so does a row on the Images, Video and Audio "
+         "tabs."),
         ("Is it the right card?",
          "For a Stern Spike 2 card, the page shows what the machine shows as it starts: "
          "the game's loading screen, or a multi-boot card's menu with the default game "
@@ -143,6 +147,8 @@ HELP_CONTENT = {
                 {"icon": "write", "title": "Build",
                  "text": "on the **Write** tab; there is no separate stage step"}]},
             "- Almost any audio file works: mp3, wav, ogg, flac, m4a and more.\n"
+            "- Drop a sound file from your desktop or a folder on a row to make it "
+            "that row's replacement.\n"
             "- Any sample rate or bit depth (16, 24 or 32-bit, float or integer). "
             "Length, rate and volume are fitted for you when you build.",
         ]),
@@ -421,6 +427,8 @@ HELP_CONTENT = {
                 {"icon": "write", "title": "Build",
                  "text": "on the **Write** tab: picks apply then"}]},
             "- No stage step: the assets folder is the one Extract made and Write reads.\n"
+            "- Drop a video file from your desktop or a folder on a row to make it "
+            "that row's replacement.\n"
             "- The log says at once whether a pick \"already matches this slot\" (copied "
             "in, no re-encode) or \"will be re-encoded to match this slot\". "
             "Transparency is kept where the original has it.\n"
@@ -542,6 +550,15 @@ HELP_CONTENT = {
          "- Clips under a second (a sixth of one Batman card's 6331, down to one-frame "
          "stills) show milliseconds, like 0:00.033, not an empty-looking 0:00. The "
          "preview shows their first frame."),
+        ("Compare report",
+         "More > **Export compare report (CSV)…** saves a row for every replacement, "
+         "every random clip and every mode's row of a shared clip, beside the game's "
+         "own clip it plays in place of.\n\n"
+         "- Both lengths in seconds to two decimals, the difference, and the length it "
+         "will have on the card after Write (the stock length when Trim / pad applies, "
+         "your own when the clip goes on as-is).\n"
+         "- Resolution, frame rate, frames, codec, audio and file size of each, and a "
+         "note when Write cuts, pads, scales or changes the frame rate."),
         ("Size limits", [
             "How big a replacement may be depends on the game.",
             {"cards": [
@@ -691,6 +708,18 @@ HELP_CONTENT = {
             "clip with none of those lists the sounds that may be its (named like it, or "
             "asked for in the same part of the program). A sound the game picks at random, "
             "or a clip's own audio track, is not listed.",
+            "**When it plays** (Spike 2): what the emulator saw the game do with each clip. "
+            "Play a game on the **Emulate** tab and the playfield window's **CLIPS** list "
+            "names each clip as it plays, with the switch made just before it (**after "
+            "RIGHT RAMP**) and **loops** when the game starts it again each time it ends. "
+            "The Video tab keeps what was seen for the project, so a battle's clips can be "
+            "told apart by their shots. The words the game draws over a clip are on the "
+            "game's screen while it plays.",
+            "The same column also says what the card's game program shows about a clip, with "
+            "no emulator run: **In turn with 2 others** (the game plays a set of clips one "
+            "after the other, each time the moment comes), **1 of 6** (one of a set it picks "
+            "from as it plays) and **loops** (it asks for the clip as a loop). Which shot "
+            "starts a clip is only known from the emulator.",
         ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and options; "
@@ -858,6 +887,8 @@ HELP_CONTENT = {
                 {"icon": "write", "title": "Build",
                  "text": "on the Write tab: there is no separate stage step"}]},
             "- The folder is the one **Extract** made, the same one Write reads.\n"
+            "- Drop an image file from your desktop or a folder on a row to make it "
+            "that row's replacement.\n"
             "- Keep the original's resolution for the best result.",
         ]),
         ("Where pictures come from",
@@ -1806,8 +1837,9 @@ HELP_CONTENT = {
          "emulator already in it. Your own distro is not touched, and a PC with WSL "
          "but no distro can still run a game.\n"
          "- A one-time download of about 414 MB. Start never does it: use **Fix "
-         "setup**, or **Update emulator Linux…** on the Stern Spike 2 Emulate tab "
-         "(shown there when the installed one is older than this app).\n"
+         "setup**, **Install** on the Visual Pinball tab's PAD runtime row, or "
+         "**Update emulator Linux…** on the Stern Spike 2 Emulate tab (shown there "
+         "when the installed one is older than this app).\n"
          "- Once installed, everything the app sends to Linux runs there: the "
          "emulators, extract and write, the disk tools and the card builder.\n"
          "- Set `PAD_RUNTIME=0` to use the PC's default distro instead."),
@@ -2499,7 +2531,7 @@ HELP_CONTENT = {
             "Mute.",
         ]),
         ("Save states", [
-            "**Save state** on the playfield window (Windows) checkpoints the whole "
+            "**Save state** on the playfield window (Windows and Mac) checkpoints the whole "
             "running game into a slot; **Load state** brings that exact moment back, "
             "mid-game too, even in a later session.",
             "- Every game has its own **ten slots**; one game's saves never load into, "
@@ -2513,8 +2545,11 @@ HELP_CONTENT = {
             "already on screen keeps its saved look until the game redraws it.\n"
             "- They need busybox-static and criu in WSL. Without them every title runs; "
             "only slots do nothing, and the tab says so before Start. **Set up "
-            "emulator…** gets both.",
-            {"note": "Each slot takes about 50–150 MB of the WSL disk, and a save briefly "
+            "emulator…** gets both.\n"
+            "- On a Mac the emulator's container brings them. Docker Desktop cannot "
+            "freeze a running game, so there a run starts without save states and the "
+            "log says why; colima, which **Set up emulator…** installs, can.",
+            {"note": "Each slot takes about 50–150 MB of the emulator's disk, and a save briefly "
                      "needs about 1.5 GB free. Saving freezes the game and its sound for "
                      "a few seconds. A slot only loads on the same app build, game and "
                      "firmware it was saved on: after an update older slots are refused "
@@ -3192,7 +3227,7 @@ PREVIEW_HELP = {
                     {"icon": "defaults", "tone": "warn", "title": "The game's modes",
                      "text": "**Numbers only.** Timers and awards, not how they play."},
                     {"icon": "lock", "tone": "err", "title": "Everything else",
-                     "text": "**Off limits.** Progression, settings, high scores, Insider Connected, and coils but a few Godzilla mechanisms."}]},
+                     "text": "**Off limits.** Progression, settings, high scores, Insider Connected, and the game's coils but the mechanisms a mode may hold. Spare switches and outputs you add are yours."}]},
                 _limits("Quick answers"),
             ]),
             ("Which games", _modes_which_games),
@@ -3433,7 +3468,7 @@ PREVIEW_HELP = {
             ("Getting started", [
                 {"flow": [
                     {"icon": "check", "title": "Setup",
-                     "text": "the PAD runtime (Emulate tab), Visual Pinball, the controller"},
+                     "text": "the PAD runtime, Visual Pinball, the controller: each row installs its own"},
                     {"icon": "sd", "title": "Cards",
                      "text": "the folder with your SD card images"},
                     {"icon": "upload", "title": "Patch",

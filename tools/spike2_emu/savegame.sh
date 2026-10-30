@@ -110,7 +110,7 @@ if [ "${PAD_SAVE_NOPACK:-0}" = 0 ] && command -v zstd >/dev/null 2>&1; then
         echo "[savegame] NOTE: packing failed - the slot stays raw ($(du -sh "$DIR" | cut -f1))"
     fi
 elif [ "${PAD_SAVE_NOPACK:-0}" = 0 ]; then
-    echo "[savegame] NOTE: no zstd in WSL - the slot stays raw ($(du -sh "$DIR" | cut -f1))"
+    echo "[savegame] NOTE: no zstd here - the slot stays raw ($(du -sh "$DIR" | cut -f1))"
 fi
 
 echo "[savegame] saved to slot '$SLOT'. Keep playing; loadgame.sh $SLOT jumps back here."

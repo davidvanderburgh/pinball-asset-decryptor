@@ -161,8 +161,29 @@ def encode_one(task):
     return (idx, off, bytes(body), True)
 
 
+def out_of_memory(exc):
+    """Whether *exc* is the computer running out of memory rather than a sound
+    that cannot be decoded: a ``MemoryError`` (numpy's "Unable to allocate"),
+    Unicorn's ``UC_ERR_NOMEM``, Windows' "paging file is too small" (PAD-830).
+    The one is worth another go once memory is free; the other is not."""
+    if isinstance(exc, MemoryError):
+        return True
+    if getattr(exc, "winerror", None) == 1455:
+        return True
+    t = str(exc)
+    return ("UC_ERR_NOMEM" in t or "MemoryError" in t or "Unable to allocate" in t
+            or "paging file is too small" in t)
+
+
+#: :func:`decode_to_wav`'s answer for a sound its worker ran out of memory on
+#: (PAD-830): the parent decodes it again once the pool is gone
+NO_MEMORY = "no-memory"
+
+
 def decode_to_wav(task):
-    """task = (param_dict, out_wav_path).  Returns (idx, ok)."""
+    """task = (param_dict, out_wav_path).  Returns (idx, ok): ok is True, False
+    (the sound did not decode) or :data:`NO_MEMORY` (PAD-830: the worker ran out
+    of memory; that used to raise in the parent and end the whole pool)."""
     p, out_path = task
     idx = p["idx"]
     length = p.get("length", 0)
@@ -172,19 +193,21 @@ def decode_to_wav(task):
     _put(("start", idx, length, chan))
     try:
         r = _EMU.decode(p, progress=_make_progress_cb(idx, length, chan))
-    except Exception:
-        return (idx, False)
-    if r is None:
-        return (idx, False)
-    L, R, stereo = r
-    chans = [L, R] if stereo else [L]
-    n = len(chans[0])
-    inter = np.empty(n * len(chans), np.int16)
-    for i, c in enumerate(chans):
-        inter[i::len(chans)] = np.clip(c, -32768, 32767).astype(np.int16)
-    w = wave.open(out_path, "wb")
-    w.setnchannels(len(chans)); w.setsampwidth(2); w.setframerate(44100)
-    w.writeframes(inter.tobytes()); w.close()
+        if r is None:
+            return (idx, False)
+        L, R, stereo = r
+        chans = [L, R] if stereo else [L]
+        n = len(chans[0])
+        inter = np.empty(n * len(chans), np.int16)
+        for i, c in enumerate(chans):
+            inter[i::len(chans)] = np.clip(c, -32768, 32767).astype(np.int16)
+        del L, R, chans, r
+        w = wave.open(out_path, "wb")
+        w.setnchannels(2 if stereo else 1)
+        w.setsampwidth(2); w.setframerate(44100)
+        w.writeframes(inter.tobytes()); w.close()
+    except Exception as e:                              # noqa: BLE001
+        return (idx, NO_MEMORY if out_of_memory(e) else False)
     _put(("done", idx, length, chan))
     return (idx, True)
 
@@ -476,17 +499,20 @@ def emulator_commit(*paths):
 
 
 def commit_room():
-    """The bytes Windows can still commit, or None elsewhere and when it does
-    not say: Linux and macOS commit a page when it is touched.  That is the
-    commit limit less what is committed, and three quarters of what the page
-    files can still grow by (:func:`_page_file_growth`): a system-managed
+    """The bytes Windows can still commit, or None when it does not say.  That
+    is the commit limit less what is committed, and three quarters of what the
+    page files can still grow by (:func:`_page_file_growth`): a system-managed
     page file shrinks back between builds (80 GB of commit limit on this
     PC between them, 125 GB during one), so the limit alone holds the
-    workers back for nothing."""
+    workers back for nothing.
+
+    Linux and macOS commit a page when it is touched, so there it is the
+    computer's RAM (PAD-830: six decoders, each holding a long song, on an
+    8 GB Mac is a computer swapping to a stop), or None when it does not say."""
     import ctypes
     import os
     if os.name != "nt":
-        return None
+        return _ram()
 
     class _Status(ctypes.Structure):
         _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
@@ -510,6 +536,16 @@ def commit_room():
     except Exception:                                   # noqa: BLE001
         grow = 0
     return int(st.ullAvailPageFile) + grow * 3 // 4
+
+
+def _ram():
+    """The computer's RAM in bytes (Linux, macOS), or None."""
+    import os
+    try:
+        n = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (AttributeError, ValueError, OSError):
+        return None
+    return n if n > 0 else None
 
 
 def _page_file_entries():

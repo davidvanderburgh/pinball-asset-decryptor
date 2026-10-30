@@ -41,6 +41,9 @@ const P = {
   folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   // PAD-754: the animal shelter donations chip and window
   paw: "M6.5 10.5a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6zM12 7.6a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6zM17.5 10.5a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6zM12 11.5c-2.7 0-4.1 2-5.1 3.5-.9 1.3-1.9 2-1.9 3.4A2.8 2.8 0 0 0 7.8 21c1.4 0 2.8-.9 4.2-.9s2.8.9 4.2.9a2.8 2.8 0 0 0 2.8-2.6c0-1.4-1-2.1-1.9-3.4-1-1.5-2.4-3.5-5.1-3.5z",
+  // Discord's own logo (Simple Icons, the one pad-triage's thread button
+  // uses): a filled shape, which .sx-discord-btn fills (PAD-815)
+  discord: "M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .078-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009c.12.1.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z",
   file: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5",
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01",
   warn: "M12 3l10 18H2zM12 10v4M12 18h.01",
@@ -274,11 +277,14 @@ export function InfoBadge({ text, label = "i", onClick }) {
 }
 
 // --------------------------------------------------------------- controls
+// drop: it opens a file / folder picker, so files from the desktop dropped on
+// it answer that picker (see armDrop below, PAD-838).
 export function Button({ kind = "", size = "", icon, iconRight, onClick, disabled, title,
-                         children, busy, type = "button", cls = "", label, autoFocus }) {
+                         children, busy, type = "button", cls = "", label, autoFocus, drop }) {
   const ref = useRef(null);
   useEffect(() => { if (autoFocus && ref.current) ref.current.focus(); }, []);
   return html`<button type=${type} ref=${ref} class=${cx("btn", kind, size, !children && icon && "icon", cls)}
+    data-drop=${drop ? "" : undefined}
     disabled=${!!disabled} onClick=${onClick} aria-label=${label || (typeof title === "string" && !children ? title : undefined)}
     ...${tip(title)}>
     ${busy ? html`<span class="spin"></span>` : icon ? html`<${Icon} name=${icon} />` : null}
@@ -328,11 +334,12 @@ export function Field({ ns, k, value, onChange, onCommit, placeholder, mono, sm,
 export function PathField({ ns, k, value, onBrowse, browseLabel = "Browse…", placeholder,
                             history, readOnly, disabled, onCommit, title, extra, bad }) {
   const listId = history && history.length ? `hist-${ns}-${k}` : undefined;
-  return html`<div class="row" style="gap:8px">
+  // a file dropped on the path or its Browse… answers Browse…'s picker (PAD-838)
+  return html`<div class="row" style="gap:8px" data-drop=${onBrowse && !disabled ? "" : undefined}>
     <${Field} ns=${ns} k=${k} value=${value} mono readOnly=${readOnly} disabled=${disabled}
       placeholder=${placeholder} cls="grow" list=${listId} onCommit=${onCommit} title=${title} bad=${bad} />
     ${listId ? html`<datalist id=${listId}>${history.map((p) => html`<option value=${p} />`)}</datalist>` : null}
-    ${onBrowse ? html`<${Button} onClick=${onBrowse} disabled=${disabled}>${browseLabel}<//>` : null}
+    ${onBrowse ? html`<${Button} onClick=${onBrowse} disabled=${disabled} drop>${browseLabel}<//>` : null}
     ${extra}
   </div>`;
 }
@@ -431,6 +438,51 @@ export function PageHead({ title, sub, children }) {
     ${children ? html`<div class="actions">${children}</div>` : null}</div>`;
 }
 
+// ------------------------------------------------- files from the desktop
+// PAD-838.  A page never learns where a dropped file lives; the app window's
+// own drop handler does, and keeps the paths for "ui.drop_arm", which makes
+// the next file / folder picker answer with them instead of showing.  So a
+// drop on anything marked data-drop (a Button with drop, a PathField) arms,
+// then clicks it: its picker takes the files, through every check a picked
+// file gets.  A Table's onFileDrop does the same for a row.
+const hasFiles = (e) => !!e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files");
+export async function armDrop(e) {
+  const names = [...e.dataTransfer.files].map((f) => f.name);
+  return names.length ? !!(await call("ui.drop_arm", names)) : false;
+}
+const dropTarget = (e) => {
+  const el = e.target && e.target.closest ? e.target.closest("[data-drop]") : null;
+  if (!el) return null;
+  const btn = el.matches("button") ? el : el.querySelector("button[data-drop]");
+  return btn && !btn.disabled ? el : null;
+};
+let dropLit = null;
+const lightDrop = (el) => {
+  if (dropLit === el) return;
+  if (dropLit) dropLit.classList.remove("drop-on");
+  dropLit = el;
+  if (el) el.classList.add("drop-on");
+};
+window.addEventListener("dragover", (e) => {
+  if (!hasFiles(e) || e.defaultPrevented) { lightDrop(null); return; }
+  const el = dropTarget(e);
+  lightDrop(el);
+  if (el) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
+});
+window.addEventListener("dragleave", (e) => { if (!e.relatedTarget) lightDrop(null); });
+window.addEventListener("dragend", () => lightDrop(null));
+// capture: the app window's own drop handler on the document cancels every
+// drop before it would bubble here (a row's drop is its own, see Table)
+window.addEventListener("drop", async (e) => {
+  lightDrop(null);
+  if (!hasFiles(e)) return;
+  const el = dropTarget(e);
+  if (!el) return;
+  e.preventDefault();
+  const btn = el.matches("button") ? el : el.querySelector("button[data-drop]");
+  if (await armDrop(e)) btn.click();
+}, true);
+
 // ----------------------------------------------------------------- table
 // columns: [{key, label, width: "120px" | "minmax(0,1fr)", num, render(row), sort, title}]
 // A virtual list: only the rows in view are in the DOM, so 3 000 rows scroll
@@ -438,13 +490,18 @@ export function PageHead({ title, sub, children }) {
 // resizable: drag a header's right edge; widths = {key: px} saved widths;
 // onResize(widths) gets every column's px after a drag (Tk saved the dragged
 // widths under column_widths).  The last column always takes what is left.
+// onFileDrop(row, i): files from the desktop dropped on a row, once armed (see
+// armDrop): open the row's picker and they answer it.  The row lights while
+// they are over it; fileDropOk(row, i) says which rows take them.
 export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect, onActivate,
                         rowClass, sort, onSort, empty, rowHeight = 34, cls = "", style,
-                        onContext, header = true, multi, resizable, widths, onResize }) {
+                        onContext, header = true, multi, resizable, widths, onResize,
+                        onFileDrop, fileDropOk }) {
   const scroller = useRef(null);
   const headRef = useRef(null);
   const [view, setView] = useState({ top: 0, h: 600 });
   const [live, setLive] = useState(null);
+  const [dropOn, setDropOn] = useState(null);     // the row files are dragged over
   const wmap = live || widths || null;
   const template = columns.map((c, i) => (i === columns.length - 1 ? (c.width && !/px$/.test(c.width) ? c.width : "minmax(0,1fr)")
     : wmap && wmap[c.key] ? Math.max(36, wmap[c.key]) + "px" : (c.width || "minmax(0,1fr)"))).join(" ");
@@ -509,6 +566,21 @@ export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect,
     atRef.current = rowKey(rows[idx], idx);
     onSelect(rows[idx], idx, e);
   };
+  const fileDrop = (r, i, id) => !onFileDrop || (fileDropOk && !fileDropOk(r, i)) ? {} : {
+    onDragOver: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      if (dropOn !== id) setDropOn(id);
+    },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropOn((d) => (d === id ? null : d)); },
+    onDrop: async (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDropOn(null);
+      if (await armDrop(e)) onFileDrop(r, i);
+    },
+  };
   return html`<div class=${cx("tbl", cls)} style=${style}>
     <div class="scroller" ref=${scroller} onScroll=${onScroll} tabindex="0" onKeyDown=${onKey}>
       ${header ? html`<div class="tr th" ref=${headRef} style=${`grid-template-columns:${template}`}>
@@ -520,11 +592,12 @@ export function Table({ columns, rows, rowKey = (r, i) => i, selected, onSelect,
         ${slice.map((i) => {
           const r = rows[i];
           const id = rowKey(r, i);
-          return html`<div key=${id} class=${cx("tr", (onSelect || onActivate) && "click", isSel(id) && "sel", rowClass && rowClass(r, i))}
+          return html`<div key=${id} class=${cx("tr", (onSelect || onActivate) && "click", isSel(id) && "sel", dropOn === id && "drop-on", rowClass && rowClass(r, i))}
             style=${`grid-template-columns:${template};position:absolute;left:0;right:0;top:${i * rowHeight}px;height:${rowHeight}px`}
             onClick=${(e) => { atRef.current = id; if (onSelect) onSelect(r, i, e); }}
             onDblClick=${() => onActivate && onActivate(r, i)}
-            onContextMenu=${onContext ? (e) => { e.preventDefault(); onContext(r, i, e); } : undefined}>
+            onContextMenu=${onContext ? (e) => { e.preventDefault(); onContext(r, i, e); } : undefined}
+            ...${fileDrop(r, i, id)}>
             ${columns.map((c) => html`<span class=${cx("c", c.num && "num", c.cls)} title=${c.titleOf ? c.titleOf(r) : undefined}>${c.render ? c.render(r, i) : r[c.key]}</span>`)}
           </div>`;
         })}

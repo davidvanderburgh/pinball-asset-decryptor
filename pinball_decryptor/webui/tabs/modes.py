@@ -409,7 +409,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  film=None, about=self.ABOUT_TIP, n_form=0, n_code=0, n_blocks=0, ready=False,
                  fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(),
                  no_port_details="", ex_tip="", own_extra_ok=True, write_waits=False,
-                 game_hidden=0, check_offer=False, check_wanted=False, check_done=None,
+                 check_offer=False, check_wanted=False, check_done=None,
                  check_tip=self.CHECK_TIP, insider_note="", sheet=None)
         self._show_starts_words()
 
@@ -700,7 +700,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             text = "No modes of your own yet."
         else:
             text = "No modes yet. Start from an example, or make a blank one."
-        if self._game_ids():
+        if self._game_changeable_ids():
             text += (" The game's own modes are listed under yours: pick one to see and change "
                      "its timers and awards.")
         return text
@@ -1993,7 +1993,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 and kind not in ("reading", "cancelled", "failed")):
             # a card with no port: what still works, and the SDK pointer in a tooltip
             details = MP.NO_PORT_DETAILS
-            if self._game_ids():
+            if self._game_changeable_ids():
                 note = "%s %s" % (note, MP.NO_PORT_STILL)
         self._title_note = note
         from ...plugins.stern import mode_write as MW
@@ -2959,6 +2959,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                 and not p.can("building") else "" if p is not None else "No card picked yet.",
                 # PAD-420: the mechanisms this machine does not have: their blocks are left out of the palette
                 "absent": list(getattr(p, "absent", ()) or ()) if p is not None else [],
+                # PAD-826: spare switch inputs ("in") / driver outputs ("out") a block may use here ([] = neither)
+                "spare": list(getattr(p, "spare", ()) or ()) if p is not None else [],
                 # PAD-414: the shaker - the game's own shakes a block can play, and why the blocks are greyed if not
                 "shaker_off": ("Not on this game: " + p.why_not("shaker")) if p is not None and not p.can("shaker")
                               else "" if p is not None else "No card picked yet.",
@@ -4042,16 +4044,23 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     # -- the game's own modes in the list, and a page for each ---------------------------
     def _game_ids(self):
-        """The ids of the game's own modes the list shows, in the game's order: the ones with
-        a number the person can change, and the rules the card's port names (their page takes
-        another shot or a rewrite in C). A mode with neither has nothing to do here and is left
-        out; the stock dialog still lists every row."""
+        """The ids of the game's own modes the list shows, in the game's order: every one the
+        card's read found. PAD-834 (Dustin): the list used to leave out a mode with nothing to
+        change, so Iron Maiden showed no Two Minutes to Midnight; one like that now says so
+        (:meth:`_game_changeable_ids`) and its page says why."""
         build = self._stock_build
         if build is None:
             return []
-        editable = {n.mode_id for n in build.numbers if n.is_player_facing and n.editable}
-        editable |= self._port_rule_ids()
-        return sorted(m for m in build.modes if m in editable)
+        return sorted(build.modes)
+
+    def _game_changeable_ids(self):
+        """The game's own modes with something to change here: a number the person can change,
+        or a rule the card's port names (their page takes another shot or a rewrite in C)."""
+        build = self._stock_build
+        if build is None:
+            return set()
+        ids = {n.mode_id for n in build.numbers if n.is_player_facing and n.editable}
+        return ids | self._port_rule_ids()
 
     def _port_rule_ids(self):
         """The ids of the game's rules the card's port names (``rule`` lines), when its runtime
@@ -4080,7 +4089,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return []
         rows = {r["key"]: r for r in (self.get("stock") or {}).get("rows", [])}
         out = []
-        self.set(game_hidden=max(0, len(build.modes) - len(self._game_ids())))
+        can = self._game_changeable_ids()
         for mid in self._game_ids():
             mine = [r for r in rows.values() if r.get("mode_id") == mid]
             changed = sum(1 for r in mine if r["changed"])
@@ -4088,8 +4097,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             out.append({"slug": str(mid), "kind": "game", "name": build.mode_name(mid),
                         "chip": "%d changed" % changed if changed else "",
                         "chip_tip": ("%d of its numbers are staged for the next Write"
-                                     % changed) if changed else "",
-                        "n": n})
+                                     % changed) if changed else
+                        "" if mid in can else
+                        "Nothing of it to change here: the app found no timer, shot count or "
+                        "award of it that it can change",
+                        "bare": mid not in can, "n": n})
         return out
 
     def _after_stock(self):

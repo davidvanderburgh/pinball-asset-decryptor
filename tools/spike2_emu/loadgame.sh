@@ -97,7 +97,7 @@ trap 'rm -f "$RELOAD_FLAG" 2>/dev/null; [ -n "$STAGE" ] && rm -rf "$STAGE"' EXIT
 DDIR=$DIR
 if [ -f "$DIR/slot.tar.zst" ]; then
     command -v zstd >/dev/null 2>&1 \
-        || { echo "loadgame: slot '$SLOT' is packed but WSL has no zstd"; exit 1; }
+        || { echo "loadgame: slot '$SLOT' is packed but there is no zstd here"; exit 1; }
     STAGE=$(mktemp -d /var/tmp/padslot.XXXXXX) \
         || { echo "loadgame: cannot make a staging dir"; exit 1; }
     if ! zstd -d -q -c "$DIR/slot.tar.zst" | tar -C "$STAGE" -xf -; then

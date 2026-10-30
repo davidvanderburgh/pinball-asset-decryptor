@@ -37,6 +37,8 @@ export default function Vpx() {
   const playsAs = (t) => fits(t).length > 1 && (t.models || {})[t.title]
     ? "Plays as the " + t.models[t.title] + ". " : "";
   const rtOk = s.runtime_state === "ready";
+  // PAD-840: installed from here; the Emulate tab only offers it in some cases
+  const rtFix = s.runtime_state === "absent" || s.runtime_state === "stale";
   return html`<div class="page vpx-page">
     <${PageHead} title="Visual Pinball" sub=${(s.intro || "").split("\n").map((l) => html`${l}<br />`)}>
       <${Chip} kind="info" sm>Preview<//>
@@ -52,10 +54,12 @@ export default function Vpx() {
     <div class="cols c75 vpx-cols">
       <div class="stack">
         <${Card} title="Setup">
-          <${Row} ok=${rtOk} label="The emulator's Linux (PAD runtime)"
-            value=${rtOk ? s.runtime_text : (s.runtime_text || "") + " Set it up on the Emulate tab."} />
+          <${Row} ok=${rtOk} label="The emulator's Linux (PAD runtime)" value=${s.runtime_text || ""}>
+            ${rtFix ? html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"
+              onClick=${() => call("vpx.install_runtime")}>${s.runtime_state === "stale" ? "Update" : "Install"}<//>` : null}
+          <//>
           <${Row} ok=${!!s.vpx} label="Visual Pinball" value=${s.vpx || "Not found on this PC."}>
-            <${Button} size="sm" kind="ghost" disabled=${busy || !s.ok} onClick=${() => call("vpx.choose_vpx")}>Choose folder…<//>
+            <${Button} drop size="sm" kind="ghost" disabled=${busy || !s.ok} onClick=${() => call("vpx.choose_vpx")}>Choose folder…<//>
             ${s.vpx ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"
               onClick=${() => call("vpx.download_vpx")}>Download 10.8.0<//>`}
           <//>
@@ -69,7 +73,7 @@ export default function Vpx() {
             <${Chip} kind=${have.length ? "ok" : "warn"} dot sm>${have.length ? "Ready" : "Needed"}<//>
             <div class="vpx-what"><div class="mono small vpx-val">${s.library || "No folder chosen."}</div>
               ${cardWords ? html`<div class="small muted">${cardWords}</div>` : null}</div>
-            <div class="vpx-acts"><${Button} size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
+            <div class="vpx-acts"><${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
               onClick=${() => call("vpx.choose_library")}>Choose folder…<//></div>
           </div>
         <//>
@@ -82,7 +86,7 @@ export default function Vpx() {
       </div>
       <div class="stack">
         <${Card} title="Tables" sub=${s.tables_tip}
-          footer=${html`<${Button} kind="primary" icon="upload" disabled=${busy || !s.ok}
+          footer=${html`<${Button} drop kind="primary" icon="upload" disabled=${busy || !s.ok}
             onClick=${() => call("vpx.patch")}>Patch a table…<//>`}>
           ${tables.length ? tables.map((t) => html`<div class="vpx-table">
             <div class="vpx-what"><div><b>${t.name}</b></div>

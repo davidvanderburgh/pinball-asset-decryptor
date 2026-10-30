@@ -221,7 +221,7 @@ function ListRow({ r, i, selIdx, isSel }) {
     : r.kind === "game" ? "One of the game's own modes: its timers and awards" : "modes/" + r.slug;
   return html`<button type="button" role="option" key=${r.kind + r.slug}
       aria-selected=${isSel(r)} tabindex=${i === Math.max(0, selIdx) ? 0 : -1}
-      class=${cx("li", isSel(r) && "sel", r.kind === "game" && "game")}
+      class=${cx("li", isSel(r) && "sel", r.kind === "game" && "game", r.bare && "bare")}
       onClick=${() => call("modes.select", r.slug, r.kind)}
       ...${tip(where + (r.chip_tip ? "\n" + r.chip_tip : ""))}>
       <span class="ellip">${r.name}</span>
@@ -273,8 +273,7 @@ function ModeList({ s, onNew, onAllNumbers, onSheet }) {
         ${own.map((r, i) => html`<${ListRow} key=${r.kind + r.slug} r=${r} i=${i} selIdx=${selIdx} isSel=${isSel} />`)}
         ${allGame.length && !own.length && s.project ? html`<div class="small muted modes-list-empty">No modes of your own yet.</div>` : null}
         ${allGame.length ? html`<button type="button" class="modes-list-grp" aria-expanded=${!folded}
-            title=${(folded ? "Show the game's own modes: their timers and awards" : "Fold the game's own modes away")
-              + (s.game_hidden ? `\n${s.game_hidden} more have nothing to change here (the game's own timers and awards dialog lists every number).` : "")}
+            title=${folded ? "Show the game's own modes: their timers and awards" : "Fold the game's own modes away"}
             onClick=${() => setFold(folded ? "open" : "closed")}>
             <${Icon} name=${folded ? "right" : "down"} /> The game's own (${allGame.length})</button>` : null}
         ${game.map((r, i) => html`<${ListRow} key=${"g" + r.slug} r=${r} i=${i + own.length} selIdx=${selIdx} isSel=${isSel} />`)}
@@ -287,7 +286,7 @@ function ModeList({ s, onNew, onAllNumbers, onSheet }) {
       ${s.cap_text ? html`<span class="small muted">${s.cap_text}</span>` : null}
       <div class="row modes-list-acts">
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>
-        <${Button} size="sm" disabled=${!s.copy_ok} onClick=${() => call("modes.copy_to")}
+        <${Button} drop size="sm" disabled=${!s.copy_ok} onClick=${() => call("modes.copy_to")}
           title="Copy every mode here into another card's project: pick that project's folder. Each is matched to that card's shots by name, and the app says which need a look there.">Copy to…<//>
         ${s.port_shown ? html`<${Button} size="sm" iconRight="down" disabled=${!s.port_ok}
           title=${`Every mode here, made to run on this game's ${s.port_word || "other model"} in one go: shots matched by their switches, mechanisms that model does not have left out. Each mode keeps its version for this model, and porting again replaces the earlier port and keeps what you set there.`}
@@ -1210,7 +1209,7 @@ function TryFooter({ s }) {
           <${Field} value=${emu.card} mono readOnly=${!emu.box} placeholder=${NO_CARD}
             onCommit=${(v) => setField("modes", "try_on", v, { flush: true })} title=${emu.card ? emu.card + "\n" + TRY_ON_TIP : TRY_ON_TIP} />
         </div>
-        <${Button} kind=${emu.box && !emu.card && s.project ? "primary" : undefined} disabled=${!emu.box || working}
+        <${Button} drop kind=${emu.box && !emu.card && s.project ? "primary" : undefined} disabled=${!emu.box || working}
           title=${emu.card ? "Pick another card image to try the modes on." : NO_CARD}
           onClick=${() => call("modes.browse_card")}>Browse…<//>
         ${emu.verdict ? html`<${Chip} kind=${emu.verdict_kind} dot title=${emu.verdict_tip}>${emu.verdict}<//>` : null}
@@ -1221,7 +1220,7 @@ function TryFooter({ s }) {
           disabled=${!s.project || (!working && !!s.no_port)} onClick=${() => call("modes.tryit")}>${working ? "Cancel" : "Try it"}<//>
         <${Check} label=${html`leave out own sounds<span class="modes-long"> (the game's calls play; skips the sound bank)</span>`} title=${T.leaveOut}
           checked=${s.leave_out} disabled=${working} ns="modes" k="leave_out" />
-        <button type="button" class="chip modes-tryon-chip" disabled=${!emu.box || working} onClick=${() => call("modes.browse_card")}
+        <button type="button" class="chip modes-tryon-chip" data-drop disabled=${!emu.box || working} onClick=${() => call("modes.browse_card")}
           ...${tip((emu.card ? emu.card + "\n" : "") + TRY_ON_TIP + " Click to pick another.")}>
           <${Icon} name="file" /><span class="ellip">${emu.card ? emu.card.split(/[\\/]/).pop() : "Pick a card…"}</span></button>
         <span class="vsep"></span>

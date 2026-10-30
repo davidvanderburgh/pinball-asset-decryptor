@@ -4,7 +4,9 @@
 
 A walk through the app from launch to a finished card. Emulating a game
 and multi-boot cards have pages of their own: [Emulate](emulate.md) and
-[Multi-boot cards](multi-boot.md).
+[Multi-boot cards](multi-boot.md). New to the app? [Getting started: your
+first mod](getting-started.md) is a shorter walk through one song swap, and
+[Common problems](common-problems.md) lists what new users run into.
 
 **A mod is four steps, one tab each:**
 
@@ -17,6 +19,12 @@ Every tab has a **?** button in the top bar with tips for that tab.
 
 ## Getting started
 
+- **The Getting started page** opens the first time the app starts: a short
+  video and a few steps for each common job (extract a card, swap a song,
+  build and flash, write an image to an SD card, a multi-boot card, trying
+  it in the emulator, moving mods to a new game version). The **Getting
+  started** button in the top bar brings it back, and a tick on the page
+  opens it at every start.
 - **The picker** shows a card per manufacturer with its games. A greyed,
   struck-through game can't be decrypted yet (Spooky's Total Nuclear
   Annihilation: its key is unknown). Click a card to open that
@@ -216,6 +224,7 @@ The **Convert** column says it before you build:
   built elsewhere, by how they look, not by name.
 - **Check card…** lists the clips on any built card whose bitrate is low
   enough to look blocky. It opens the card read-only.
+- **More > Export compare report (CSV)…** writes one row per replacement, random clip and mode copy beside the game's own clip: lengths, the length after Write, resolution, fps and a note when Write cuts, pads or scales.
 - **The Big Lebowski's** `.cdmd` clips are re-encoded back into `.cdmd`
   at the original frame count, so they stay in sync with their sound.
 
@@ -462,6 +471,9 @@ it again restores the whole setup.
   is copied or written until you press Relink.
 - **Recent paths:** every file and folder box keeps a dropdown of your
   recent paths, per manufacturer.
+- **Drag and drop:** drop a file or folder from the desktop on any
+  Browse…/Choose…/Add… button, path box or Replace row to pick it. It is
+  checked just like a pick from the picker, and a refused drop says why.
 
 **App-wide settings** describe you or your cabinet, not a card: theme,
 window, volumes, the Emulate country and power, and the Default Settings
@@ -474,6 +486,12 @@ session.
 
 **Language:** English (US and UK), Spanish, German and French. Switch with
 the globe button in the top bar or ⚙ > **Language**.
+
+## Discord
+
+**Discord** in the top bar (also ⚙ > **Join our Discord**) opens the PAD
+Discord server in your browser: ask questions, share what you made and hear
+about new releases.
 
 ## Report a problem
 

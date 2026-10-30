@@ -345,12 +345,33 @@ function ResizePrompt({ spec, onDone }) {
   <//>`;
 }
 
+// PAD-819 "Move to another drive": every fixed drive, the ones WSL's disks can't go to greyed
+// with why; Return is Move, Escape closes the prompt only.
+function MovePrompt({ spec, onDone }) {
+  const [pick, setPick] = useState(spec.pick);
+  const [uid, onClose] = useWin(() => onDone(null));
+  return html`<${Modal} title="Move to another drive" onClose=${onClose} cls=${uid}
+    footer=${html`<${Button} onClick=${() => onDone(null)}>Cancel<//><${Button} kind="primary" disabled=${!pick} onClick=${() => onDone(pick)}>Move…<//>`}>
+    <div class="muted small">Now:</div>
+    <div class="mono small sx-pre">${spec.where}</div>
+    <div class="small">Move to:</div>
+    <div class="stack" style="gap:2px" role="radiogroup" aria-label="Drive"
+      onKeyDown=${(e) => { if (e.key === "Enter" && pick) { e.preventDefault(); onDone(pick); } }}>
+      ${spec.drives.map((o) => html`<label class=${cx("row", !o.ok && "dim")} title=${o.why}>
+        <input type="radio" name="sx-move-drive" checked=${pick === o.letter} disabled=${!o.ok}
+          onChange=${() => setPick(o.letter)} />
+        <span>${o.text}</span>${o.ok ? null : html`<span class="small muted">${o.why}</span>`}</label>`)}
+    </div>
+  <//>`;
+}
+
 function DiskSpaceDialog({ close }) {
   const dup = useSingleton("disk_space", close);
   const sx = useNs("shellx");
   const d = sx.disk;
   const [sel, setSel] = useState(new Set());
   const [resize, setResize] = useState(null);
+  const [move, setMove] = useState(null);
   useEffect(() => { if (!dup) call("shellx.disk_open"); }, []);
   useEffect(() => { setSel(new Set()); }, [d && d.rows && d.rows.map((r) => r.id).join("|")]);
   const tryClose = async () => { const ok = await call("shellx.disk_close"); if (ok) close(); };
@@ -371,6 +392,10 @@ function DiskSpaceDialog({ close }) {
   const startResize = async () => {
     const spec = await call("shellx.disk_resize_prepare");
     if (spec) setResize(spec);
+  };
+  const startMove = async () => {
+    const spec = await call("shellx.disk_move_prepare");
+    if (spec) setMove(spec);
   };
   return html`<${Modal} title="Manage disk space" icon="disk" wide onClose=${onClose} cls=${uid}
     footer=${html`<span class="grow small dim ellip" title=${d ? d.status : ""}>${d ? d.status : ""}</span><${Button} onClick=${tryClose}>Close<//>`}>
@@ -418,6 +443,14 @@ function DiskSpaceDialog({ close }) {
       <span class="small muted">${d ? d.resize_note : ""}</span>
       <div><${Button} onClick=${startResize} disabled=${!(d && d.can_resize)}>Resize WSL disk…<//></div>
     </div>
+    <hr class="sx-hr" />
+    <div class="stack" style="gap:4px">
+      <span class="h2">Move to another drive</span>
+      <span class="small muted wrap">${d ? d.move_note : ""}</span>
+      ${d && d.move_where ? html`<div class="mono small sx-pre">${d.move_where}</div>` : null}
+      <div><${Button} onClick=${startMove} disabled=${!(d && d.can_move)}>Move to another drive…<//></div>
+    </div>
+    ${move ? html`<${MovePrompt} spec=${move} onDone=${(letter) => { setMove(null); if (letter) call("shellx.disk_move", letter); }} />` : null}
     ${resize ? html`<${ResizePrompt} spec=${resize} onDone=${(gib) => { setResize(null); if (gib) call("shellx.disk_resize", gib); }} />` : null}
   <//>`;
 }
@@ -532,14 +565,14 @@ function NewProjectDialog({ close, stock: forCard = "", name: suggested = "", pa
     <div class="sx-form">
       <${Row} label="Location:"><div class="row">
         <${Field} value=${parent} onChange=${(v) => { setParent(v); setErr(""); }} mono cls="grow" placeholder="The folder the project folder goes in" />
-        <${Button} onClick=${async () => { const p = await call("shellx.browse_location", parent); if (p) setParent(p); }}>Browse...<//></div><//>
+        <${Button} drop onClick=${async () => { const p = await call("shellx.browse_location", parent); if (p) setParent(p); }}>Browse...<//></div><//>
       <${Row} label="Folder name:"><${Field} value=${name} onChange=${(v) => { setName(v); setErr(""); }} autoFocus
         bad=${!!name && BAD_NAME.test(name)} placeholder="TMNT 1.59 upscale" /><//>
       <${Row} label="Manufacturer:"><${Select} value=${mfr} onChange=${setMfr}
         options=${form.mfrs.map((m) => ({ value: m.key, label: m.display }))} /><//>
       <${Row} label="Stock image:"><div class="row">
         <${Field} value=${stock} onChange=${(v) => { setStock(v); setErr(""); }} mono cls="grow" placeholder="Optional: the card image the project starts from" />
-        <${Button} onClick=${async () => { const p = await call("shellx.browse_stock", mfr, stock); if (p) setStock(p); }}>Browse...<//></div><//>
+        <${Button} drop onClick=${async () => { const p = await call("shellx.browse_stock", mfr, stock); if (p) setStock(p); }}>Browse...<//></div><//>
     </div>
     <div class="stack" style="gap:4px">
       <span class="small muted">${prev.title}</span>
@@ -581,7 +614,7 @@ function SaveAsDialog({ close, folder }) {
     <div class="sx-form">
       <${Row} label="Location:"><div class="row">
         <${Field} value=${parent} onChange=${(v) => { setParent(v); setErr(""); }} mono cls="grow" />
-        <${Button} onClick=${async () => { const x = await call("shellx.browse_location", parent); if (x) setParent(x); }}>Browse...<//></div><//>
+        <${Button} drop onClick=${async () => { const x = await call("shellx.browse_location", parent); if (x) setParent(x); }}>Browse...<//></div><//>
       <${Row} label="Folder name:"><${Field} value=${name} onChange=${(v) => { setName(v); setErr(""); }} autoFocus bad=${!!name && BAD_NAME.test(name)} /><//>
     </div>
     <div class="small muted mono ellip" title=${dest}>${dest}</div>
@@ -690,7 +723,7 @@ function ManagerDialog({ close }) {
       <${Button} disabled=${!live || !ent.anchored || running} onClick=${() => call("shellx.project_archive", sel)}>Archive...<//>
       <${Button} disabled=${!live} onClick=${() => call("shellx.manager_reveal", sel)}>Reveal<//>
       <${Button} disabled=${!ent} onClick=${() => call("shellx.manager_remove", sel).then(() => setSel(null))}>Remove from list<//>
-      <${Button} disabled=${!ent} onClick=${() => call("shellx.manager_locate", sel)}>Locate...<//>
+      <${Button} drop disabled=${!ent} onClick=${() => call("shellx.manager_locate", sel)}>Locate...<//>
       <span class="grow"></span><${Button} onClick=${close}>Close<//>`}>
     <${Table} columns=${cols} rows=${rows} rowKey=${(r) => r.folder} selected=${sel}
       onSelect=${(r) => setSel(r.folder)} onActivate=${(r) => { setSel(r.folder); if (!r.missing && !running) call("shellx.manager_open", r.folder); }}
@@ -733,7 +766,7 @@ function RelinkDialog({ close, folder }) {
     <div class="row" onKeyDown=${onEnter((t) => { if (rl.busy || rl.done) return; setRoot(t); search(t); })}>
       <span class="lbl nw">Where are those files now?</span>
       <${Field} value=${rootShown} onChange=${setRoot} mono cls="grow" disabled=${rl.busy} />
-      <${Button} onClick=${browse} disabled=${rl.busy}>Browse...<//>
+      <${Button} drop onClick=${browse} disabled=${rl.busy}>Browse...<//>
     </div>
     <${Table} columns=${cols} rows=${rl.rows || []} rowKey=${(r) => r.path} cls="card sx-fill"
       resizable widths=${widths} onResize=${setWidths}
@@ -1266,7 +1299,7 @@ function ReportDialog({ close, prefill = "" }) {
         <span class="lbl">Picture</span>
         ${picture ? html`<span class="chip acc sm notr" title=${picture.name}>${picture.name} · ${picture.kb} KB</span>
             <${Button} size="sm" kind="ghost" onClick=${clearPic}>Remove<//>`
-          : html`<${Button} size="sm" onClick=${pick}>Add a picture…<//>
+          : html`<${Button} drop size="sm" onClick=${pick}>Add a picture…<//>
             ${r.capture ? html`<${Button} size="sm" onClick=${shoot} title="Hides this window for a moment and takes a picture of the app">Take a picture of the app<//>` : null}`}
       </div>
       <${Check} checked=${hidePaths} onChange=${setHidePaths} label="Leave file paths and my account name out of the report" />

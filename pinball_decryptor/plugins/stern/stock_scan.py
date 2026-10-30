@@ -424,6 +424,17 @@ def decode(w, va):
     return ("other", written(w), cond)
 
 
+def _str_writeback(w):
+    """``(rt, rn, offset stored at)`` for a word store that moves its base (``str rt, [rn],
+    #imm`` stores at [rn], ``str rt, [rn, #imm]!`` at [rn + imm]), else None. PAD-834: 13 of
+    Jurassic Park LE's mode constructors store their vptr ``str r2, [r0], #0x30``."""
+    if (w & 0x0F700000) not in (0x04000000, 0x05200000):
+        return None
+    imm = w & 0xFFF
+    return ((w >> 12) & 0xF, (w >> 16) & 0xF,
+            (imm if w & 0x00800000 else -imm) if w & 0x01000000 else 0)
+
+
 def written(w):
     """Registers an instruction outside :func:`decode`'s shapes may write (conservative)."""
     op = (w >> 25) & 7
@@ -741,6 +752,11 @@ def track(prog, start, entry_args=False):
                 out.calls.append({"va": va, "target": d[1], "tail": True, "cond": False,
                                   "args": {REG[r]: state[r] for r in range(4) if r in state}})
         elif kind == "other":
+            wb = _str_writeback(w)
+            if wb is not None and wb[1] != 13 and state.get(wb[1]) == THIS and not cond \
+                    and isinstance(state.get(wb[0]), Val) and wb[2] >= 0:
+                out.stores[wb[2]] = state[wb[0]]
+                out.store_at[wb[2]] = va
             for r in d[1]:
                 state.pop(r, None)
         prev = d

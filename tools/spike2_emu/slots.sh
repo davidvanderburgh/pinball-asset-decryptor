@@ -47,6 +47,14 @@ find_root() {
         done
         return 1
     fi
+    # THE MAC'S BOX (PAD-835) keeps its rootfs at a fixed PAD_ROOT (the
+    # image sets it, /pad/rootfs) rather than under a home, and a throwaway
+    # box with no game up lists the slots from there. A rootfs no run has
+    # saved into yet has no saves dir; that is "no slots", not "no rig".
+    if [ -n "${PAD_ROOT:-}" ] && [ -d "$PAD_ROOT" ]; then
+        mkdir -p "$PAD_ROOT/saves" 2>/dev/null
+        [ -d "$PAD_ROOT/saves" ] && { echo "$PAD_ROOT/saves"; return 0; }
+    fi
     for d in /home/*/spike2root/saves /root/spike2root/saves; do
         [ -d "$d" ] && { echo "$d"; return 0; }
     done

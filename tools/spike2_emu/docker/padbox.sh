@@ -78,16 +78,37 @@ docker info >/dev/null 2>&1 || {
 # a mount or a staged copy. It used to sit at the bottom, so every poll built
 # the whole run configuration and could even trigger an image build, to answer
 # a question that needs neither.
+#
+# AS ROOT IN THE BOX (PAD-835), every one of them. A save-state run's guest is
+# root's (see RUN_ARGS below), and the box's own user can neither see its
+# environment - which is how status.sh and killgame.sh tell a run's processes
+# apart - nor kill it: the same reason the app runs these as `wsl -u root` on
+# Windows. Root sees and stops an ordinary run just as well. The three
+# save-state scripts are here for the same reason and need root besides
+# (criu does); PAD_RESTORE_KILL is the one setting of theirs that has to cross.
+box_up() { docker ps --format '{{.Names}}' | grep -qx "$NAME"; }
+box_exec() {
+    local e=()
+    [ -n "${PAD_RESTORE_KILL:-}" ] && e+=(-e "PAD_RESTORE_KILL=$PAD_RESTORE_KILL")
+    exec docker exec -u 0 "${e[@]}" "$NAME" bash "/pad/rig/$1" "${@:2}"
+}
 case "${1:-}" in
-    alive.sh|killgame.sh|status.sh)
-        if docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
-            exec docker exec "$NAME" bash "/pad/rig/$1" "${@:2}"
-        fi
+    alive.sh|killgame.sh|status.sh|restartgame.sh)
+        box_up && box_exec "$@"
         # No container: nothing this rig started can be running, so answer
         # rather than starting a box to ask.
         [ "${1:-}" = "alive.sh" ] && { echo "TOTAL STILL RUNNING    : 0  (clean)"; exit 0; }
         [ "${1:-}" = "status.sh" ] && { echo "state=off"; echo "procs=0"; exit 0; }
         echo "[box] nothing running"; exit 0 ;;
+    savegame.sh|loadgame.sh)
+        box_up && box_exec "$@"
+        echo "[${1%.sh}] the emulator is not running - start it first"; exit 1 ;;
+    slots.sh)
+        # A running box answers from the guest it holds. Without one the slots
+        # are still on the rootfs volume, and the Emulate tab lists and deletes
+        # them with no game up, as it does on Windows: further down, once the
+        # image is known.
+        box_up && box_exec "$@" ;;
 esac
 
 # ---- THE RIG HAS TO LIVE SOMEWHERE DOCKER IS ALLOWED TO LOOK ---------------
@@ -209,6 +230,18 @@ case "${1:-}" in
     --build) build; exit $? ;;
 esac
 
+# THE SLOTS WITH NO RUN (PAD-835): a throwaway box with only the rig and the
+# rootfs volume, as root because the slots are root's. Never a BUILD for it,
+# though: a slot list is a status read, and minutes of image build behind one
+# would be a hang. No image yet means no run has ever been, so no slots.
+if [ "${1:-}" = slots.sh ]; then
+    docker image inspect "$IMAGE" >/dev/null 2>&1 ||
+        { echo "slots: the emulator has not been set up yet"; exit 1; }
+    exec docker run --rm -u 0 -v "$RIG:/pad/rig:ro" \
+        -v "${NAME}-rootfs:/pad/rootfs" --entrypoint /bin/bash \
+        "$IMAGE" /pad/rig/slots.sh "${@:2}"
+fi
+
 # Build on demand rather than making the user remember a separate step.
 docker image inspect "$IMAGE" >/dev/null 2>&1 || build || exit 1
 # Prune the generations this one supersedes. rmi refuses an image a live
@@ -253,6 +286,20 @@ RUN_ARGS=(
     -e "PAD_VNC_PORT=5900"
 )
 [ -n "${PAD_VNC_PASSWD:-}" ] && RUN_ARGS+=(-e "PAD_VNC_PASSWD=$PAD_VNC_PASSWD")
+
+# ★ A SAVE-STATE RUN (PAD-835): PAD_PIVOT=1, which the Emulate tab asks for on
+# every Start, as it does on Windows. criu can only freeze the game when the
+# guest is booted as ROOT in its own namespaces (watch.sh: "ROOT RUNS THE
+# GUEST"), so the box starts as root - watch.sh drops every helper back to pad,
+# and entrypoint.sh keeps the display pad's - and PRIVILEGED, because criu
+# walks and rebuilds a process tree with ptrace, its namespaces and its
+# /proc/sys knobs, which no short list of capabilities covers on every
+# container engine a Mac might have. The box is a Linux VM's process with
+# loopback-only ports, so this widens nothing a Mac exposes. A kernel that
+# still cannot do it is caught in entrypoint.sh and costs only the save states.
+if [ "${1:-}" = watch.sh ] && [ "${PAD_PIVOT:-}" = 1 ]; then
+    RUN_ARGS+=(--privileged -u 0 -e PAD_PIVOT=1 -e PAD_USER=pad)
+fi
 
 # SOUND LEAVES OVER TCP. No audio server exists inside the box and VNC carries
 # no sound, so the guest's PCM is served raw on a loopback port (playaudio.sh's
@@ -334,6 +381,23 @@ esac
 # on a Mac without the developer tools pops Apple's install dialog mid-run.
 # The poll is long (10 min) because a FIRST run builds the guest rootfs out of
 # the card before the game ever configures audio.
+# HOW THE CHANNEL COUNT IS SAID depends on the ffplay (PAD-832). FFmpeg 7 took
+# `-ac` away from ffplay (it was the raw demuxer's `channels` option, now gone;
+# only `-ch_layout` is left), and Homebrew ships 7 and newer, so a Mac's ffplay
+# said "Failed to set value '2' for option 'ac': Option not found", exited, and
+# every run was silent. `-ch_layout` exists from 5.1 on; an older ffplay has
+# no such option and still takes `-ac`. Ask the ffplay which one it has.
+ffplay_channel_args() {
+    if ffplay -hide_banner -h demuxer=s16le 2>/dev/null | grep -q -- '-ch_layout'; then
+        case "$1" in
+            1) echo "-ch_layout mono" ;;
+            2) echo "-ch_layout stereo" ;;
+            *) echo "-ch_layout ${1}c" ;;
+        esac
+    else
+        echo "-ac $1"
+    fi
+}
 host_player() {
     [ "${PAD_AUDIO:-1}" = 0 ] && return 0
     fmt=""
@@ -345,10 +409,12 @@ host_player() {
     set -- $fmt
     rate=${1:-48000}; ch=${2:-2}
     if command -v ffplay >/dev/null 2>&1; then
-        echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch from tcp/$AUDIO_PORT"
+        chargs=$(ffplay_channel_args "$ch")
+        echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch ($chargs) from tcp/$AUDIO_PORT"
+        # $chargs unquoted on purpose: it is an option and its value
         exec ffplay -hide_banner -loglevel error -nodisp -autoexit \
              -fflags nobuffer -flags low_delay \
-             -f s16le -ar "$rate" -ac "$ch" "tcp://127.0.0.1:$AUDIO_PORT"
+             -f s16le -ar "$rate" $chargs "tcp://127.0.0.1:$AUDIO_PORT"
     fi
     echo "[box] no ffplay on this Mac, so this run is silent. Fix:" >&2
     echo "[box]   brew install ffmpeg   (the same package the app's previews use)" >&2

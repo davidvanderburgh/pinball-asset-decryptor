@@ -441,3 +441,23 @@ def test_a_trough_dot_click_also_says_what_it_did(offline, monkeypatch):
     # ...and run_plunge itself, the one both callers share.
     pf.run_plunge("drain")
     assert pf.drv.ran == [("plunge.py", ("drain",))] * 2
+
+
+def test_the_macs_box_reaches_the_save_state_scripts_through_sudo(monkeypatch):
+    """PAD-835: in the Mac's emulator box this window runs as pad, criu needs
+    root, and the box lets pad run the three save-state scripts as root with
+    `sudo -n` (docker/Dockerfile's sudoers rule names /bin/bash). Only where
+    the box has said so with PAD_STATE_SUDO=1, and never as root already."""
+    import playfield
+    if not hasattr(os, "geteuid"):
+        monkeypatch.setattr(os, "geteuid", lambda: 1000, raising=False)
+    else:
+        monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    cmd = ["bash", "/pad/rig/savegame.sh", "slot1"]
+    monkeypatch.delenv("PAD_STATE_SUDO", raising=False)
+    assert playfield._as_root(cmd) == cmd
+    monkeypatch.setenv("PAD_STATE_SUDO", "1")
+    assert playfield._as_root(cmd) == ["sudo", "-n", "/bin/bash",
+                                       "/pad/rig/savegame.sh", "slot1"]
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    assert playfield._as_root(cmd) == cmd

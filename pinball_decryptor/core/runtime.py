@@ -44,14 +44,15 @@ its own default, exactly as before.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from typing import Optional, Tuple
 
-from .payloads import (Payload, ensure_cached, is_published,  # noqa: F401
-                       verify)
+from .payloads import (Payload, cache_path, ensure_cached,  # noqa: F401
+                       is_published, verify)
 
 class RuntimeNeedsReplacing(RuntimeError):
     """Raised instead of destroying a runtime that is already installed.
@@ -139,12 +140,13 @@ def install_dir() -> str:
 
     Under LOCALAPPDATA, not APPDATA: it is machine-local state that must never
     follow a roaming profile onto another PC, and it is measured in hundreds of
-    megabytes."""
+    megabytes.  Or on the drive the user moved the app's disks to (PAD-819,
+    core/wsl_place.py)."""
     override = os.environ.get("PAD_RUNTIME_DIR")
     if override:
         return override
-    base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-    return os.path.join(base, "pinball_decryptor", "runtime")
+    from . import wsl_place
+    return wsl_place.runtime_dir()
 
 
 def available() -> bool:
@@ -158,13 +160,25 @@ def registered(runner=None) -> bool:
     Asked of `wsl -l -q` rather than by looking for the install directory: a
     user can delete the folder, and a distro can be unregistered while the
     folder survives.  WSL's own list is the only thing that decides."""
+    return bool(_listed(runner))
+
+
+def _listed(runner=None) -> Optional[bool]:
+    """:func:`registered`, with None for "wsl.exe did not answer".
+
+    A TIMEOUT IS NOT A NO (PAD-840, as PAD-490 was for the prerequisites).  A
+    stuck WSL times out the list, and reading that as "not installed" sent a
+    user round "install, reboot, still not installed" six times on a PC that
+    may well have had it: no install can help a WSL that does not answer."""
     if sys.platform != "win32":
         return False
     run = runner or _run
     try:
         out = run(["wsl.exe", "-l", "-q"], timeout=20)
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
         return False
+    except subprocess.TimeoutExpired:
+        return None
     names = [n.strip() for n in _text(out.stdout).splitlines()]
     return DISTRO in [n for n in names if n]
 
@@ -233,8 +247,9 @@ def status(runner=None, refresh: bool = False) -> Tuple[str, str]:
     States: ``unsupported`` (not Windows), ``unpublished`` (no image pinned in
     this app version yet), ``absent``, ``foreign`` (a distro of that name that
     is not ours), ``stale`` (ours, older than this app expects), ``ready``, and
-    ``unknown`` - which means only "nobody has asked yet on a thread allowed to
-    wait", never "something is wrong".
+    ``unknown`` - which means "nobody has asked yet on a thread allowed to
+    wait", or that wsl.exe did not answer when asked (its sentence says
+    which); never "not installed".
     """
     if runner is None:
         # The two answers that cost NOTHING are always exact, cache or no
@@ -293,7 +308,14 @@ def _status(runner=None) -> Tuple[str, str]:
     if not available():
         return ("unpublished",
                 "This app version has no pinned runtime image yet.")
-    if not registered(runner=runner):
+    listed = _listed(runner)
+    if listed is None:
+        return ("unknown",
+                "WSL did not answer, so the app cannot tell whether its Linux "
+                "is installed. Installing again will not help: restart WSL "
+                "(wsl --shutdown in a terminal) or restart Windows, then "
+                "check again.")
+    if not listed:
         return "absent", "The runtime is not installed on this machine yet."
     info = _read_manifest(runner)
     if info is None:
@@ -309,6 +331,49 @@ def _status(runner=None) -> Tuple[str, str]:
             "Runtime %s (%s), built %s."
             % (info.get("runtime_version"), info.get("variant", "?"),
                info.get("built", "?")))
+
+
+#: Free space the import needs on the drive the runtime's disk goes on: the
+#: image unpacks to 1.2 GB, the new ext4.vhdx is about 1.5 GB, and the rest
+#: is room for it to start.  A handheld's small drive is where this bites, and
+#: WSL's own answer to a full disk is an error code (PAD-840).
+IMPORT_ROOM = 3 * 1024 ** 3
+
+#: ...and on top of the image itself where it is downloaded to.
+DOWNLOAD_SLACK = 512 * 1024 ** 2
+
+#: shutil.disk_usage, here so a test can set the free space.
+_disk_usage = shutil.disk_usage
+
+
+def _free(path) -> Optional[int]:
+    try:
+        return _disk_usage(path).free
+    except OSError:
+        return None
+
+
+def _drive(path) -> str:
+    return os.path.splitdrive(os.path.abspath(path))[0] or path
+
+
+def _need_room(path, need, what) -> None:
+    """Refuse, with the drive and both numbers, when *path*'s drive has less
+    than *need* bytes free.  An unreadable drive is not a refusal."""
+    free = _free(path)
+    if free is not None and free < need:
+        raise RuntimeError(
+            "not enough free space to %s: it needs about %.1f GB on %s, which "
+            "has %.1f GB free. Free some space on %s, then try again."
+            % (what, need / 1024 ** 3, _drive(path), free / 1024 ** 3,
+               _drive(path)))
+
+
+def _room_note(path) -> str:
+    """" (<drive> has N GB free)" for a failure message; "" when unreadable."""
+    free = _free(path)
+    return ("" if free is None else " (%s has %.1f GB free)"
+            % (_drive(path), free / 1024 ** 3))
 
 
 def usable(runner=None) -> bool:
@@ -344,6 +409,11 @@ def install(log=None, progress=None, runner=None, opener=None,
                                % (os.path.basename(source), why))
         tarball = source
     else:
+        cached = cache_path(IMAGE)
+        if not (os.path.isfile(cached)
+                and os.path.getsize(cached) == IMAGE.size):
+            _need_room(os.path.dirname(cached), IMAGE.size + DOWNLOAD_SLACK,
+                       "download the emulator's Linux")
         tarball = ensure_cached(IMAGE, log=log, progress=progress,
                                 opener=opener)
 
@@ -366,15 +436,18 @@ def install(log=None, progress=None, runner=None, opener=None,
 
     target = install_dir()
     os.makedirs(target, exist_ok=True)
+    _need_room(target, IMPORT_ROOM, "install the emulator's Linux")
     say("Installing the runtime (this takes a moment, once)…")
     out = run(["wsl.exe", "--import", DISTRO, target, tarball, "--version", "2"],
               timeout=900)
     if out.returncode != 0:
+        # _why, not stderr: wsl.exe writes its errors to STDOUT, so a full
+        # disk read "exit 4294967295" here and the reason was lost (PAD-840)
         raise RuntimeError(
-            "could not import the runtime: %s\nWSL 2 itself has to be "
-            "installed first - `wsl --install --no-distribution` in an "
+            "could not import the runtime: %s%s\nIf WSL 2 itself is not "
+            "installed: `wsl --install --no-distribution` in an "
             "administrator terminal, then restart."
-            % (_text(out.stderr).strip() or "exit %d" % out.returncode))
+            % (_why(out), _room_note(target)))
 
     invalidate()
     state, detail = status(runner=runner, refresh=True)

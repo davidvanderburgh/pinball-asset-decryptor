@@ -100,7 +100,7 @@ _REV_TAG = ".r%d" % _DERIVE_REV
 _CACHE_KINDS = (
     (_REV_TAG + ".pkl",             re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.pkl$")),
     (_REV_TAG + ".consumed.npy",    re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.consumed\.npy$")),
-    (_REV_TAG + ".sfxnames5.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
+    (_REV_TAG + ".sfxnames6.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
     (_REV_TAG + ".sites3.pkl",      re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sites\d+\.pkl$")),
     (_REV_TAG + ".requests3.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.requests\d+\.json$")),
 )
@@ -2511,13 +2511,38 @@ def _sfx_names_cache_path(fp):
     and ``4`` retires the maps built while the menu table was located by the
     literal "SE FX " (which found it on two titles out of fourteen), and ``5``
     the maps that read a descriptor's first marker as ``0b 00 00 00`` only
-    (PAD-636).
+    (PAD-636), and ``6`` the maps that named the placeholder sound a title
+    parks its unwired Sound Test entries on, and the empty ones cached when the
+    resolver didn't answer on the derive's emulator (PAD-823).
 
     Also carries the derive revision, because a name map is validated against
     the audio the params point at -- params from a superseded derive can only
     have produced a superseded map."""
     return os.path.join(_params_cache_dir(),
-                        fp[:32] + _REV_TAG + ".sfxnames5.json")
+                        fp[:32] + _REV_TAG + ".sfxnames6.json")
+
+
+def _resolver_emu(emu, game_real_path, image_path):
+    """*emu*, or a fresh boot of the same card when the game's resolver doesn't
+    answer on *emu*: the emulator the Sound Test names and the request map are
+    resolved on.
+
+    A first extract derives the params on *emu*, and on Venom Pro 1.07, Star
+    Wars Pro 1.31 and X-Men Pro 0.98 the resolver then indexes a table the
+    derive left empty and jumps to 0 (PAD-823), so neither ran: the names were
+    cached empty for good and the request map (PAD-635) waited for a second
+    extract.  The params' records are the card's, so a fresh boot resolves
+    onto them unchanged.  The caller closes a fresh one."""
+    try:
+        from .spike2 import sfx_names as _sfxn
+        from .spike2.emulator import Spike2Emu
+        if _sfxn._find_resolver(emu)[0] is not None:
+            return emu
+        fresh = Spike2Emu(game_real_path, image_path)
+        fresh.boot()
+        return fresh
+    except Exception:
+        return emu
 
 
 def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
@@ -2907,8 +2932,9 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         # Map the game's Sound Test menu names onto the sounds while the codec
         # emu is still booted (mines the firmware menu + drives its resolver).
         # Best-effort + cached; {} for titles without the menu.
+        name_emu = _resolver_emu(emu, gr_path, img_path)
         sfx_name_map = _load_or_build_sfx_names(
-            emu, gr_path, img_path, params, log)
+            name_emu, gr_path, img_path, params, log)
         # Even with auto-apply off, the menu NAME LIST itself is verified data
         # (name<->displayed-number matches the machine's menu): ship it as a
         # sidecar so users can play a number in the machine's Sound Test and
@@ -2917,7 +2943,10 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         _write_sound_test_names(gr_path, output_dir, log)
         # Which sounds each request plays, for the Video tab's "sounds this
         # clip's code plays" (clip_sounds); the resolver needs this emu.
-        _write_sound_requests(emu, gr_path, img_path, params, output_dir, log)
+        _write_sound_requests(name_emu, gr_path, img_path, params, output_dir, log)
+        if name_emu is not emu:
+            name_emu.close()
+        name_emu = None
         # The sounds whose file is several variants one after another (PAD-637),
         # for the Audio tab's Format and Type columns.
         try:
@@ -2940,14 +2969,15 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                                     duration_names=duration_names)
         total = len(params)
         ok = None
-        nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
+        again = []
+        nworkers = _decode_workers(img_path, log)
         if nworkers > 1 and not cancel():
             try:
                 log("Decoding %d sounds across %d processes..." % (total, nworkers), "info")
-                ok = _parallel_decode(gr_path, img_path, params, audio_dir,
-                                      log, progress, cancel, nworkers,
-                                      log_line=log_line,
-                                      duration_names=duration_names)
+                ok, again = _parallel_decode(gr_path, img_path, params, audio_dir,
+                                             log, progress, cancel, nworkers,
+                                             log_line=log_line,
+                                             duration_names=duration_names)
             except Exception as e:
                 log("Parallel decode unavailable (%s); using a single process."
                     % e, "warning")
@@ -2958,6 +2988,18 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             ok = _serial_decode(emu, params, audio_dir, log, progress, cancel,
                                 log_line=log_line,
                                 duration_names=duration_names)
+        elif again and not cancel():
+            # PAD-830: the sounds that did not decode in the pool, once it has
+            # gone and given its memory back (out of memory does not always
+            # say so: the codec probes take any failure for a codec that does
+            # not fit, and the sound then decodes to nothing)
+            log("%d sound(s) did not decode beside the others; decoding them "
+                "again one at a time." % len(again), "warning")
+            emu = Spike2Emu(gr_path, img_path)
+            emu.boot()
+            ok += _serial_decode(emu, again, audio_dir, log, None, cancel,
+                                 log_line=log_line,
+                                 duration_names=duration_names)
         if ok == 0 and total > 0:
             # Every sound failed to decode -- a systemic problem (a build whose
             # codec the engine couldn't drive), not a per-sound hiccup.  Surface
@@ -3011,7 +3053,9 @@ def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
                             progress, cancel, pad_banks=None, pad_dir=None):
     """Extract the card's ``image-scNN.bin`` banks to ``work`` and decode each to
     WAV under ``audio/`` (named ``music_catNN_idx.wav`` so the existing
-    AcoustID auto-naming can title the songs).  Returns the count decoded; 0 (and
+    AcoustID auto-naming can title the songs; a song the game's Sound Test
+    names is ``music_catNN_idx - <its name>.wav`` instead, PAD-820, and the
+    auto-naming leaves it be).  Returns the count decoded; 0 (and
     a clean skip) when there are no banks or the build can't be driven.
 
     PAD-608: of a bank this app built, the records *pad_banks* ``{category:
@@ -3054,8 +3098,11 @@ def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
         if progress:
             progress(min(100, int(c * 100 / max(t, 1))), 100,
                      "Decoding music bank %d/%d" % (c, t))
+    # PAD-820: the songs the game's Sound Test names are titled by it
+    # (PINBALL_SFX_NAMES=0 turns it off with the sound effects' names)
     n = extract_category_audio_parallel(gr_path, img_path, sc_paths, audio_dir,
-                                        log=log, progress=_prog, cancel=cancel)
+                                        log=log, progress=_prog, cancel=cancel,
+                                        names=os.environ.get("PINBALL_SFX_NAMES") != "0")
     log("Decoded %d per-category music sound(s)." % n, "success")
     return n
 
@@ -3076,6 +3123,20 @@ def _serial_progress_cb(p, emit):
         st["last"] = now
         emit(("prog", p["idx"], cur / max(nmax, 1), length, chan))
     return cb
+
+
+def _decode_workers(img_path, log):
+    """How many processes an extract decodes its sounds across: the computer's
+    cores less two, at most eight, and (PAD-830) no more emulators than it has
+    the memory for now -- eight on a laptop ran Windows out of memory, and
+    then every program it started failed (0xc000012d)."""
+    from .spike2.parallel import emulator_commit, emulators_that_fit
+    cores = max(1, min((os.cpu_count() or 2) - 2, 8))
+    n = emulators_that_fit(emulator_commit(img_path), cores)
+    if n < cores:
+        log("Decoding on %d process(es), not %d: this computer has the memory "
+            "for %d sound decoder(s) now." % (n, cores, n), "info")
+    return n
 
 
 def _serial_decode(emu, params, audio_dir, log, progress, cancel, log_line=None,
@@ -3166,7 +3227,8 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
                      nworkers, log_line=None, duration_names=False):
     """Decode across ``nworkers`` spawned emulator processes (each boots once,
     decodes its share, writes WAVs directly).  Raises on any pool failure so the
-    caller can fall back to a single process.
+    caller can fall back to a single process.  Returns ``(decoded, params of
+    the sounds that did not decode)``, for the caller to try alone (PAD-830).
 
     A shared queue carries per-sound start/progress/done events from the
     workers; a daemon thread drains it and forwards each to ``_emit_decode`` so
@@ -3184,6 +3246,8 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
     # away that "files appear as it goes" feedback.
     tasks = [(p, os.path.join(audio_dir, _wav_basename(p, duration_names)))
              for p in params]
+    byidx = {p["idx"]: p for p in params}
+    again = []
     total = len(tasks)
     ctx = mp.get_context("spawn")
     # Manager queue: picklable across spawn (a plain mp.Queue isn't), so it can
@@ -3217,7 +3281,10 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
         pool.apply_async(probe).get(timeout=180)
         i = 0
         for idx, good in pool.imap_unordered(decode_to_wav, tasks, chunksize=4):
-            ok += good
+            if good is True:
+                ok += 1
+            else:
+                again.append(byidx[idx])
             i += 1
             if progress and (i % 4 == 0 or i == total):
                 progress(15 + int(i * 85 / max(total, 1)), 100,
@@ -3239,7 +3306,7 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
             mgr.shutdown()
         except Exception:
             pass
-    return ok
+    return ok, again
 
 
 # --------------------------------------------------------------------------
@@ -21836,6 +21903,11 @@ def _run_bank_encode(tasks, log, progress, cancel):
     bank, or ``None`` if cancelled."""
     nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
     nworkers = max(1, min(nworkers, len(tasks)))
+    if tasks:
+        # PAD-830: no more bank emulators (each holding a whole song) than the
+        # computer has the memory for, as the extract's bank decode
+        from .spike2.parallel import emulator_commit, emulators_that_fit
+        nworkers = emulators_that_fit(2 * emulator_commit(tasks[0][1]), nworkers)
     if (not _FORCE_SERIAL_ENCODE and nworkers > 1 and len(tasks) > 1
             and not cancel()):
         try:

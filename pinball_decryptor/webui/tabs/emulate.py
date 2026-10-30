@@ -110,6 +110,12 @@ def physical(fn, *args):
             ctx(ctypes.c_void_p(old))
 
 
+#: Where the Save states panel works: Windows through WSL, and macOS through
+#: the emulator's container, which carries criu since PAD-835. A Linux
+#: desktop has no passwordless root to run the slot scripts with.
+_SLOT_PLATFORMS = ("win32", "darwin")
+
+
 # ----------------------------------------------------------------- volume
 # Item 56: the master volume / Mute control file.  emulate_core computes
 # its path once, at import, from settings.json's folder; here it is computed
@@ -277,6 +283,7 @@ class EmulateTab(TabService):
         self._cache_meta = None
         self._cache_sel = []
         self._pf_proc = None
+        self._clip_merger = None          # PAD-827: the run's clip sightings, folded in
         self._last_up = False
         self._last_info = None
         self._starting = False
@@ -382,10 +389,11 @@ class EmulateTab(TabService):
             rt_enabled=True, check_label="Check setup…", check_enabled=True,
             fixaud_enabled=rig_ok, winreset_enabled=rig_ok,
             slots=[], slots_read=False, slot_sel=None,
-            slots_enabled=sys.platform == "win32",
+            slots_enabled=sys.platform in _SLOT_PLATFORMS,
             slots_sum=("The slots appear with the next status poll."
-                       if sys.platform == "win32" else
-                       "Slot management is available on Windows (WSL)."),
+                       if sys.platform in _SLOT_PLATFORMS else
+                       "Slot management is available on Windows (WSL) "
+                       "and macOS."),
             game=None, which=None, mains_note="", not_card="",
             assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
             cache=None, rename=None, gdisp=None)
@@ -434,7 +442,9 @@ class EmulateTab(TabService):
         return rig.rig_cmd(script, *args, env=env)
 
     def _cmd_root(self, script, *args):
-        if no_rig():
+        # macOS: padbox.sh runs the save-state scripts as root inside the
+        # box itself (PAD-835), so the ordinary command is the root one.
+        if no_rig() or sys.platform == "darwin":
             return self._cmd(script, *args)
         return rig.rig_cmd_root(script, *args)
 
@@ -1125,6 +1135,10 @@ class EmulateTab(TabService):
         self._docker_report_if_asked(state)
         if state == "ok":
             self.set(docker_btn=None, setup_btn=False, docker_msg="")
+            # the first read of the slots: with no run up the status poll
+            # has no saves stamp to report, so it never asks (PAD-835)
+            if self._slots_rows is None:
+                self.slots_refresh()
             return
         plan = (rig.engine_setup_plan(self._docker_cli)
                 if state in ("engineless", "absent") else None)
@@ -1460,6 +1474,10 @@ class EmulateTab(TabService):
                           "installation: the package it needs is not offered "
                           "by any of that Linux's package sources, so trying "
                           "again will say the same thing.")
+            elif result == "readonly":
+                self._log("[emulate] setup did not run: WSL's disk has gone "
+                          "read-only (see above). Free space on the Windows "
+                          "drive, restart WSL, then press this button again.")
             else:
                 self._log("[emulate] setup did not finish — the emulator will "
                           "probably still fail to start.")
@@ -1674,7 +1692,7 @@ class EmulateTab(TabService):
     # ------------------------------------------------------------------
     @rpc
     def slots_refresh(self):
-        if sys.platform != "win32":
+        if sys.platform not in _SLOT_PLATFORMS:
             return False
 
         def run():
@@ -1729,8 +1747,10 @@ class EmulateTab(TabService):
         self._slot_by_iid = by_iid
         if self._slot_sel not in by_iid:
             self._slot_sel = None
+        mac = sys.platform == "darwin"
         if self._slots_total is None:
-            summary = "Could not read the slots - is WSL up?"
+            summary = ("Could not read the slots - is Docker running?" if mac
+                       else "Could not read the slots - is WSL up?")
         else:
             bits = []
             if game_now:
@@ -1742,7 +1762,8 @@ class EmulateTab(TabService):
             else:
                 bits.append("%d slot%s" % (shown, "" if shown == 1 else "s"))
             bits.append("all slots %s" % rig.human(self._slots_total))
-            bits.append("free on the WSL disk: %s"
+            bits.append(("free on the emulator's disk: %s" if mac else
+                         "free on the WSL disk: %s")
                         % rig.human(self._slots_free))
             summary = " · ".join(bits)
         # "No save states" only after a read that answered (a failed read
@@ -2794,6 +2815,20 @@ class EmulateTab(TabService):
                   "untouched, and PAD_RUNTIME=0 goes back to using it."
                   % runtime.DISTRO)
 
+    def _clip_names_for_run(self):
+        """PAD-827: the playfield window's CLIPS list names each clip as the
+        project's Video tab row does, from a map beside the volume file; what
+        it sees comes back beside it and the status poll folds it into the
+        project (plugins/stern/clip_seen.py)."""
+        from ...core import rigslot
+        from ...plugins.stern import clip_seen
+        d = os.path.dirname(audio_ctl_file())
+        n = rigslot.slot()
+        project = self._assets()
+        named = clip_seen.write_names(clip_seen.names_file(d, n), project)
+        self._clip_merger = (clip_seen.Merger(clip_seen.seen_file(d, n), project)
+                             if named else None)
+
     def _launch_env(self, src):
         # PAD_AUDIO=1: a rig is silent unless it is asked (PAD-253), and this
         # tab's run is the one that has a window and a Volume / Mute.
@@ -2928,6 +2963,7 @@ class EmulateTab(TabService):
             self._refuse_start(self.get("hint") or "")
             return
         env = self._launch_env(src)
+        self._clip_names_for_run()
         # PAD-173: a lock this game will not give is worth saying once more
         # here, because the log is what a user sends when it "did not work".
         if self._mains_note:
@@ -3638,6 +3674,12 @@ class EmulateTab(TabService):
                 rigs = rigslot.board()
             except Exception:                            # noqa: BLE001
                 rigs = []
+            merger = getattr(self, "_clip_merger", None)
+            if merger is not None:
+                try:
+                    merger.poll()
+                except Exception:                        # noqa: BLE001
+                    pass
             if self._stopped:
                 self._poll_busy = False
                 return

@@ -1102,7 +1102,36 @@ def _rig_env():
     # reach the same rig, and every window that rig opens is titled with it.
     # Empty on an ordinary install.
     return rigdata.rig_env("spike2", bool(d) and rigdata.exists()) \
-        + rigslot.rig_env() + _board_env()
+        + rigslot.rig_env() + _board_env() + _host_drive_env()
+
+
+_HOST_DRIVE = {}
+
+
+def _host_drive_env():
+    """PAD_HOST_DRIVE, on Windows: the drive the distro's ext4.vhdx is on, as
+    WSL opens it (``/mnt/c``).  Inside WSL ``df`` reports the VIRTUAL disk's
+    size (1 TB), so the card cache copy started a 14.7 GB copy onto a C:
+    with a few GB left; the vhdx could not grow, ext4 went read-only and the
+    whole distro with it until WSL restarted (PAD-816).  cardmount.sh checks
+    this drive's free space before it copies.  Looked up once per distro (a
+    registry read); empty when the disk cannot be found."""
+    if sys.platform != "win32":
+        return []
+    want = runtime.wsl_distro()
+    if want not in _HOST_DRIVE:
+        drive = ""
+        try:
+            from ..core import wsl_disk
+            _, vhdx = wsl_disk._default_distro_vhdx()
+            letter = ntpath.splitdrive(vhdx or "")[0]
+            if re.fullmatch(r"[A-Za-z]:", letter):
+                drive = _wsl_path(letter + "\\").rstrip("/")
+        except Exception:                                # noqa: BLE001
+            drive = ""                  # unknown: the copier checks as before
+        _HOST_DRIVE[want] = drive
+    d = _HOST_DRIVE[want]
+    return ["PAD_HOST_DRIVE=%s" % d] if d else []
 
 
 def _board_env():
@@ -1430,7 +1459,15 @@ def watch_cmd(minutes, env, savestates=True):
     broken probe degrades to what this tab always did - no save states,
     everything else identical - rather than to a root run pointed at
     /root/spike2root.
+
+    macOS (PAD-835) asks for the same boot with ``PAD_PIVOT=1`` alone:
+    ``docker/padbox.sh`` turns it into a root, privileged box, the image
+    carries criu and the static busybox, and a container engine whose Linux
+    cannot checkpoint withdraws the request in ``entrypoint.sh`` - so there,
+    too, the worst case is the ordinary run without save states.
     """
+    if savestates and sys.platform == "darwin":
+        return rig_cmd("watch.sh", minutes, env=list(env) + ["PAD_PIVOT=1"])
     if savestates and sys.platform == "win32":
         home = wsl_home()
         if home:

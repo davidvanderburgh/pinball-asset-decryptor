@@ -154,6 +154,7 @@ html.bp-1020 .vcm-grid.n2, html.bp-1020 .vcm-grid.n3, html.bp-1020 .vcm-grid.n4 
 .vid-modes-cell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .vid-modes-cell.pair { color: var(--accent); }
 .vid-modes-cell.unplayed, .vid-modes-cell.other { color: var(--ink-3); font-style: italic; }
+.vid-seen-cell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }   /* PAD-827 */
 .vid-modes .note { align-items: center; }
 .vid-sound-list { margin: 4px 0 2px; padding-left: 18px; }
 .vid-sound-list li { overflow-wrap: anywhere; }

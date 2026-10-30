@@ -453,6 +453,44 @@ def test_a_strd_of_a_constant_pair_is_recorded_unconditional():
     assert (va, lo.v, hi.v, base, off) == (TEXT_VA + 0x10, 100000, 0, SS.THIS, 0x80)
 
 
+def test_a_store_that_moves_its_base_is_recorded_and_the_base_forgotten():
+    """PAD-834: Jurassic Park LE's mode constructors store their vptr ``str r2, [r0], #0x30``;
+    the store lands at this+0, and r0 is no longer ``this`` after it."""
+    post = [PUSH, 0xE3012234,                    # movw r2, #0x1234
+            0xE4802030,                          # str r2, [r0], #0x30   (this+0, r0 += 0x30)
+            0xE5802004,                          # str r2, [r0, #4]      (not this+4)
+            POP]
+    assert {k: v.v for k, v in SS.track(SS.Program(elf(post)), TEXT_VA).stores.items()} \
+        == {0: 0x1234}
+    pre = [PUSH, 0xE3A03005,                     # mov r3, #5
+           0xE5A03008,                           # str r3, [r0, #8]!     (this+8)
+           POP]
+    assert {k: v.v for k, v in SS.track(SS.Program(elf(pre)), TEXT_VA).stores.items()} == {8: 5}
+
+
+#: PAD-834: Jurassic Park LE 1.16's 24 mode objects (the cmode_manager constructor builds them
+#: all); the reader found 11 before - 12 constructors store their vptr post-indexed and Goat
+#: Mania's is called a word before its push
+JP_LE_MODES = {
+    "When Dinos Ruled the Earth", "Escape Nublar Hurry Up", "Escape Nublar", "Secure Control Room",
+    "Museum Mayhem", "Museum Mayhem Victory Laps", "Visitor Center Victory Multiball",
+    "Visitor Center", "Visitor Center Hurry Up", "Goat Mania", "Pteranodon Attack",
+    "Ctrl Room Invalid Frenzy", "Ctrl Room System Boot", "Ctrl Room Restore Power",
+    "Ctrl Room Virus Attack", "Trex Rampage", "Trex Encounter", "Trex Chase",
+    "Trex Feed Hurry Up", "King of the Island", "Chaos Hurry Up", "Chaos Multiball",
+    "Raptor Triball", "Trex Multiball"}
+
+
+def test_jurassic_park_le_reads_all_24_of_its_modes():
+    data = real_elf("jurassic_park_le-1.16.0")
+    text, info = R.generate(data, "jurassic_park_le", "1.16.0")
+    (b,) = SM.parse(text)
+    assert {b.mode_name(m) for m in b.modes} == JP_LE_MODES and info["modes"] == 24
+    # Goat Mania (the one called before its push) carries its own operator setting
+    goat = next(m for m in b.modes if b.mode_name(m) == "Goat Mania")
+    assert any(n.mode_id == goat and n.kind == "adj" and n.editable for n in b.numbers)
+
+
 def _two_site_table(data, va1, va2, klass="word"):
     return ("build two 1.0 sha1 %s\nmode 5 ctwo obj 0x0 vtable 0x0 title_msg ? name Two_Sites\n"
             "number 5 timer.seconds 16 imm 0x%x 0x%x e3a01010,e3a01010 %s  # two words\n"

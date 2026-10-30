@@ -413,7 +413,7 @@ export function Controls({ s, p, update }) {
   const extra = html`<div class="row cp-file">
     <${Button} size="sm" icon="save" onClick=${() => call("color.save_copy")}
       title="Save this profile as a file of its own, e.g. one per machine">Save a copy...<//>
-    <${Button} size="sm" icon="upload" onClick=${() => call("color.load_file")}
+    <${Button} drop size="sm" icon="upload" onClick=${() => call("color.load_file")}
       title="Use a profile saved earlier">Load...<//>
   </div>`;
   const footer = html`<span class="small muted">Saved with this project as you go, like your other changes. Save a copy keeps it for another table.</span>`;

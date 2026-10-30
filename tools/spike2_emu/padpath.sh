@@ -523,6 +523,44 @@ pad_can_write() {                 # <path> [<log-tag>]
     return 1
 }
 
+# HAS THE LINUX DISK GONE READ-ONLY? (PAD-816) ext4 remounts itself read-only
+# the moment a write to its disk fails, and in WSL that disk is ext4.vhdx on a
+# Windows drive: when that drive fills, the vhdx cannot grow, and the whole
+# distro turns read-only mid-run - every write after it is "Read-only file
+# system" or "Input/output error" until WSL restarts. A reporter's card cache
+# copy did exactly that at 3.6 of 14.7 GB, and what he was told next was
+# "LOG=... is not writable here - fix or unset LOG" and, from the setup
+# button, "this PC can run the emulator now". Not an owner or a mode, so
+# pad_can_write's cures are the wrong ones too; this asks the filesystem by
+# writing to it, which is the only question it answers truthfully (root's
+# `-w` says yes on a read-only mount on some kernels).
+pad_disk_readonly() {             # [<dir>]  -> 0 when nothing can be written there
+    local d=${1:-$PAD_HOME} f err
+    [ -d "$d" ] || d=/
+    f="$d/.pad_rw_probe.$$"
+    if err=$( { : > "$f"; } 2>&1 ); then
+        rm -f "$f"
+        return 1
+    fi
+    case $err in
+        *"Read-only file system"*|*"Input/output error"*) return 0 ;;
+    esac
+    return 1
+}
+pad_disk_readonly_say() {         # [<log-tag>]
+    local tag=${1:-rig} free
+    echo "[$tag] THE LINUX DISK HAS GONE READ-ONLY: nothing can be written inside WSL." >&2
+    echo "[$tag] Linux does that to protect its files when a write to its disk fails, most" >&2
+    echo "[$tag] often because the Windows drive that holds WSL's disk (ext4.vhdx) is full." >&2
+    if [ -n "${PAD_HOST_DRIVE:-}" ] && \
+       free=$(df -k --output=avail "$PAD_HOST_DRIVE" 2>/dev/null | tail -1 | tr -d " ") && \
+       [ -n "$free" ]; then
+        echo "[$tag] That drive ($PAD_HOST_DRIVE) has $(awk "BEGIN { printf \"%.1f\", $free / 1048576 }") GB free now." >&2
+    fi
+    echo "[$tag] Free some space on it, then restart WSL: close the app, run 'wsl --shutdown'" >&2
+    echo "[$tag] in PowerShell, and open the app again. Card images on Windows are not touched." >&2
+}
+
 # Which distro this is, so a Windows child can ask questions of the RIGHT one.
 # WSL sets WSL_DISTRO_NAME; if it is somehow unset the Windows side falls back
 # to the default distro, which is right far more often than it is wrong.

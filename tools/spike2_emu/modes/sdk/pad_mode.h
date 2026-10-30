@@ -854,4 +854,39 @@ int pm_game_mode_done(unsigned id);
 int pm_game_mode_done_seen(unsigned id);                         /* 1 = its completion is seen here */
 int pm_game_modes_done(const unsigned char *ids, unsigned n);
 
+/* ---- spare switches and driver outputs (PAD-826; MODE_SDK.md "Spare switches and outputs") -------------------------
+ * For hardware a mod ADDS: a switch wired to a node board input the game has no switch on, a coil, flasher or toy
+ * wired to a driver output the game never fires. Both are named by the board's own numbers: the node (8, 9 ... as the
+ * switch list names it) and, for a switch, its input bit 0..63 (the switch list's `bit`), for an output its number
+ * 0..8. The runtime reads the game's own tables live and takes ONLY what nothing of the game's uses: an input with no
+ * switch of the game's, an output with no coil of the game's (on a board that drives coils). Anything else is
+ * refused, said in mode.log, and never touched.
+ *
+ * pm_spare_shot: the input as a SHOT of its own: a fresh shot bit, named `name` (pm_shot finds it), that comes to every
+ * mode's .shot each time the switch CLOSES (two ticks the same: a bounce is not a hit). Closed is the input reading 0,
+ * Stern's own way for a switch (`active_high` 1: closed reads 1, an opto's). 0 = refused, or no PM_CAN_SPARE_SWITCHES.
+ * Ask again with the same node and input for the same mask. At most 8 per game.
+ * pm_spare_switch: 1 closed, 0 open, -1 not a spare input here (or not readable now).
+ *
+ * pm_spare_drive: ONE command to a spare output, ended on the board by itself: `pulse_power` (1..255) for `pulse_ms`,
+ * then `hold_power` (0..255; 0 = none) for `hold_ms`. The runtime's limits, which cannot be raised (it is 48 V into
+ * wiring PAD has never seen):
+ *   - only the running mode, in a game (not attract, not tilted);
+ *   - pulse_ms 1..1000, the whole command at most 5000 ms;
+ *   - at most half the time on: an output's commands over any 10 s add up to 5000 ms or less;
+ *   - a new command to an output replaces the one running there (a flasher's pattern).
+ * Every spare output a mode drove goes off (the board's OFF) when the mode ends, the ball ends, and the game ends or
+ * tilts. pm_spare_drive: 1 = sent; 0 = refused (mode.log says why). pm_spare_pulse(n, o, power, ms) is
+ * pm_spare_drive(n, o, power, ms, 0, 0). pm_spare_off: the board's OFF now, for an output this mode drove.
+ * pm_spare_output: 1 when that output is spare here (no coil of the game's on it), else 0. */
+#define PM_CAN_SPARE_SWITCHES 0x40000000u /* pm_spare_shot / pm_spare_switch */
+#define PM_CAN_SPARE_COILS    0x80000000u /* pm_spare_drive / pm_spare_pulse / pm_spare_off / pm_spare_output */
+uint64_t pm_spare_shot(unsigned node, unsigned input, const char *name, int active_high);
+int pm_spare_switch(unsigned node, unsigned input);
+int pm_spare_drive(unsigned node, unsigned output, unsigned pulse_power, unsigned pulse_ms, unsigned hold_power,
+                   unsigned hold_ms);
+int pm_spare_pulse(unsigned node, unsigned output, unsigned power, unsigned ms);
+void pm_spare_off(unsigned node, unsigned output);
+int pm_spare_output(unsigned node, unsigned output);
+
 #endif

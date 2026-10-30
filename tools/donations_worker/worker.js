@@ -18,8 +18,9 @@
 //                                   or David (X-PAD-Admin = ADMIN_KEY)
 //
 // Bindings (wrangler.toml / secrets): DB (D1), APP_KEY, ADMIN_KEY, IP_SALT,
-// and DISCORD_WEBHOOK (optional): every entry, hold and take-back is posted
-// there so David hears about it as it happens.
+// and DISCORD_WEBHOOK (optional, the #donations channel): every entry, hold
+// and take-back is posted there so David hears about it as it happens.
+// Problem reports are not: pad-triage posts those in #bug-reports.
 // APP_KEY ships inside the public app, so it only keeps casual scripts
 // out; the per-address rate limit and the single-entry cap do the real
 // work.  ADMIN_KEY and IP_SALT are real secrets (`wrangler secret put`).
@@ -356,10 +357,8 @@ async function report(request, env, ctx) {
     "picture_type, picture, ip_hash, state) VALUES (?,?,?,?,?,?,?,?,?,?,'received')")
     .bind(id, now, rep.app_version, rep.platform, rep.title, rep.body, rep.name,
           rep.picture_type, rep.picture, who).run();
-  // the line David sees: never the name or the address, never the record
-  notify(env, ctx, "🐞 Problem report from the app: " + rep.title
-    + " · app " + (rep.app_version || "?") + " on " + (rep.platform || "?")
-    + (rep.picture ? " · with a picture" : ""));
+  // no Discord line (PAD-836): the webhook is #donations, and pad-triage
+  // posts each report in #bug-reports itself once it takes it
   return json({ ok: true, id }, 201);
 }
 

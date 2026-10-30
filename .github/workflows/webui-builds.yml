@@ -20,7 +20,8 @@ concurrency:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    # The release's runner: the AppImage must run on glibc 2.35 (PAD-837).
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +36,7 @@ jobs:
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
             libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
             libxcb-xkb1 libnss3 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-            libasound2t64 libxtst6 libxshmfence1 fonts-dejavu-core
+            libasound2 libxtst6 libxshmfence1 fonts-dejavu-core
           pip install -r requirements.txt -r requirements-build.txt -r requirements-ui.txt
           pip install playwright pytest
           python -m playwright install --with-deps chromium

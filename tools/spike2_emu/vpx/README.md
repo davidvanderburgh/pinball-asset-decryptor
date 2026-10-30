@@ -244,6 +244,12 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   patcher scans every `PuPlayer.` call, writes a `PadNoPuP` class with those
   methods and argument counts, and wraps the CreateObject so the class
   stands in.
+* **DOF stays on B2S.Server** (PAD-841): a tribute's `LoadEM` puts
+  B2S.Server in `Controller`, and controller.vbs's `DOF` sub sends through
+  `Controller.B2SSetData`. The bridge's Table1_Init keeps that object as
+  `PadB2S` before `Controller` becomes PAD.Controller; every
+  `Controller.B2S...` in the script, and in controller.vbs as it loads
+  (`PadB2SText`), goes to it, and Table1_Exit stops it.
 * **Use the RIG's switch table.** The first Rush map came from an older
   reading of the title that numbered every switch one higher: the table
   pressed Tournament Start for Start and filled the jam opto, and the game

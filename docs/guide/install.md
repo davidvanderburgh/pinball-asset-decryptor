@@ -132,6 +132,11 @@ manufacturer runs without Docker, and Windows and Linux never need it.
   the script prints both spellings when it finds neither manager.
 - **Run the app as yourself**, not with `sudo`.
 
+### On a server, over VNC
+
+To run it in Docker on a server (Unraid, a NAS) and use it from any PC
+through a VNC viewer or a browser, see [Docker](docker.md).
+
 ### Arch package names
 
 Everything not listed is spelled the same as on apt.
@@ -187,6 +192,10 @@ The WSL extracts and the emulators keep gigabytes inside WSL's virtual
 disk. **⚙ > Manage disk space** shows it all.
 
 - **Resize the WSL disk** (grow or shrink, no admin needed).
+- **Move to another drive**: WSL's disks are files on C: by default. Pick
+  a roomier drive (NTFS) and the app's Linux, the emulators' data disk and
+  the Spike 2 card store move there; the app finds them there from then
+  on. WSL is shut down while they move, and no admin is needed.
 - **Cached cards** of the Spike 2 emulator, several GB each. Delete any:
   it re-copies on its next boot.
 - **What each Emulate tab keeps** in WSL, by maker. A running emulator's

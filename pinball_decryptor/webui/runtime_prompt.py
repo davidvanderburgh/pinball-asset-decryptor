@@ -152,7 +152,9 @@ def ensure(say, progress=None, ask=None, on_blocked=None):
     state, detail = runtime.status(refresh=True)
     if state in QUIET:
         return None
-    if state in ("ready", "foreign"):
+    # "unknown" here is WSL not answering (core.runtime._status): an install
+    # would wait on the same WSL and could only fail or time out
+    if state in ("ready", "foreign", "unknown"):
         say(detail)
         return state
     say("installing the Linux the emulator runs on (%s)…"

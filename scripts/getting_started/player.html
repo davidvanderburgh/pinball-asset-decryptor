@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Getting started video</title>
+<!-- PAD-813: the motion of a Getting started video.  make_getting_started_videos.py
+     loads this page with window.SCRIPT = {title, kicker, shots: [...]}, calls
+     setTime(t) for every frame and screenshots it; the same page plays live in a
+     browser for a look (open it with ?play). Each shot is a real 1600x900 capture
+     of the app, with the control the step uses (box, in capture pixels). -->
+<style>
+  /* the app's own fonts (pinball_decryptor/webui/static/fonts) */
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 400; src: url(../../pinball_decryptor/webui/static/fonts/ibm-plex-sans-latin-400-normal.woff2); }
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 500; src: url(../../pinball_decryptor/webui/static/fonts/ibm-plex-sans-latin-500-normal.woff2); }
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 600 700; src: url(../../pinball_decryptor/webui/static/fonts/ibm-plex-sans-latin-600-normal.woff2); }
+  @font-face { font-family: "IBM Plex Sans Condensed"; font-weight: 500; src: url(../../pinball_decryptor/webui/static/fonts/ibm-plex-sans-condensed-latin-500-normal.woff2); }
+  @font-face { font-family: "IBM Plex Sans Condensed"; font-weight: 600 700; src: url(../../pinball_decryptor/webui/static/fonts/ibm-plex-sans-condensed-latin-600-normal.woff2); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 400 700; src: url(../../pinball_decryptor/webui/static/fonts/ibm-plex-mono-latin-500-normal.woff2); }
+  html, body { margin: 0; background: #15171a; }
+  #stage { position: relative; width: 1280px; height: 720px; overflow: hidden; background: #15171a;
+           font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; color: #e9eae7; }
+  .shot { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; will-change: transform, opacity; }
+  .shot img { display: block; width: 1600px; height: 900px; }
+  .ring { position: absolute; border: 3px solid #e8a33d; border-radius: 8px; box-shadow: 0 0 0 9999px rgba(10,11,12,.0); pointer-events: none; }
+  #dim { position: absolute; inset: 0; pointer-events: none; }
+  #cursor { position: absolute; z-index: 20; left: 0; top: 0; width: 30px; height: 30px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.6)); }
+  #ripple { position: absolute; z-index: 19; width: 20px; height: 20px; border-radius: 50%; border: 3px solid #e8a33d; opacity: 0; }
+  #cap { position: absolute; z-index: 21; left: 40px; right: 40px; bottom: 34px; display: flex; align-items: center; gap: 16px;
+         padding: 16px 22px; border-radius: 12px; background: rgba(17,19,22,.92); border: 1px solid #414951;
+         box-shadow: 0 12px 32px rgba(0,0,0,.45); }
+  #cap .n { flex: none; min-width: 34px; height: 34px; padding: 0 8px; box-sizing: border-box; border-radius: 17px; background: #e8a33d; color: #1b1d1f;
+            font: 700 17px "IBM Plex Mono", Consolas, monospace; display: flex; align-items: center; justify-content: center; }
+  #cap .t { font-size: 25px; line-height: 1.3; font-weight: 500; }
+  #cap .t b { color: #f3c27a; font-weight: 600; }
+  .card { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; justify-content: center; padding: 0 110px; gap: 14px;
+          background: #15171a; }
+  .card .k { font: 600 17px "IBM Plex Sans", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #8b9196; }
+  .card .h { font: 700 68px "IBM Plex Sans Condensed", "IBM Plex Sans", sans-serif; letter-spacing: -.01em; line-height: 1.05; }
+  .card .s { font-size: 26px; color: #b7bbb9; max-width: 900px; line-height: 1.4; }
+  .card .bar { width: 84px; height: 6px; border-radius: 3px; background: #e8a33d; }
+  .card .steps { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+  .card .steps div { display: flex; gap: 14px; align-items: center; font-size: 25px; color: #e9eae7; }
+  .card .steps span { flex: none; width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(232,163,61,.6); color: #e8a33d;
+                      font: 700 15px "IBM Plex Mono", monospace; display: flex; align-items: center; justify-content: center; }
+  /* a slide: a step that happens outside the app (the installer, a restart) */
+  .slide { width: 1600px; height: 900px; box-sizing: border-box; padding: 0 150px; background: #15171a; display: flex;
+           flex-direction: column; justify-content: center; gap: 22px; }
+  .slide .k { font: 600 21px "IBM Plex Sans", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #e8a33d; }
+  .slide .h { font: 700 64px "IBM Plex Sans Condensed", "IBM Plex Sans", sans-serif; line-height: 1.1; color: #e9eae7; }
+  .slide .l { font-size: 31px; line-height: 1.45; color: #b7bbb9; max-width: 1200px; }
+  .slide .l b { color: #e9eae7; font-weight: 600; }
+  .slide code { font: 500 28px "IBM Plex Mono", monospace; color: #f3c27a; background: #22262b; padding: 2px 10px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="shots"></div>
+  <svg id="cursor" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 2l15 11.5-6.6.9 3.9 7.4-2.9 1.5-3.9-7.5L4 20z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round"/></svg>
+  <div id="ripple"></div>
+  <div id="cap"><span class="n"></span><span class="t"></span></div>
+  <div class="card" id="intro"><div class="k"></div><div class="h"></div><div class="bar"></div><div class="s"></div></div>
+  <div class="card" id="outro"><div class="k">Done</div><div class="h"></div><div class="steps"></div></div>
+</div>
+<script>
+// ------------------------------------------------------------------ timing
+var W = 1280, H = 720, SRC_W = 1600, SRC_H = 900, BASE = W / SRC_W;
+var INTRO = 2.6, OUTRO = 3.6, FADE = 0.45;
+var S = null, shotEls = [], plan = [], total = 0;
+
+function ease(x) { x = Math.max(0, Math.min(1, x)); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+function lerp(a, b, k) { return a + (b - a) * k; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// a camera = the capture point at the stage centre and a zoom over the base fit
+function camFor(box, zoom) {
+  if (!box) return { x: SRC_W / 2, y: SRC_H / 2, z: 1 };
+  var z = zoom || 1.45;
+  var cx = box[0] + box[2] / 2, cy = box[1] + box[3] / 2;
+  var halfW = SRC_W / 2 / z, halfH = SRC_H / 2 / z;
+  return { x: clamp(cx, halfW, SRC_W - halfW), y: clamp(cy, halfH, SRC_H - halfH), z: z };
+}
+function camLerp(a, b, k) { return { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k), z: lerp(a.z, b.z, k) }; }
+function applyCam(el, c) {
+  var s = BASE * c.z;
+  el.style.transform = "translate(" + (W / 2 - c.x * s) + "px," + (H / 2 - c.y * s) + "px) scale(" + s + ")";
+}
+// a capture point -> stage pixels under camera c
+function toStage(c, x, y) { var s = BASE * c.z; return [W / 2 + (x - c.x) * s, H / 2 + (y - c.y) * s]; }
+
+function load(script) {
+  S = script;
+  var host = document.getElementById("shots");
+  host.innerHTML = "";
+  shotEls = [];
+  plan = [];
+  var t = INTRO;
+  S.shots.forEach(function (sh, i) {
+    var el = document.createElement("div");
+    el.className = "shot";
+    if (sh.slide) {
+      var sl = document.createElement("div");
+      sl.className = "slide";
+      sl.innerHTML = '<div class="k"></div><div class="h"></div>' +
+        (sh.slide.lines || []).map(function (l) { return '<div class="l">' + l + "</div>"; }).join("");
+      sl.querySelector(".k").textContent = sh.slide.kicker || "";
+      sl.querySelector(".h").textContent = sh.slide.title || "";
+      el.appendChild(sl);
+    } else {
+      var img = document.createElement("img");
+      img.src = sh.img;
+      el.appendChild(img);
+    }
+    if (sh.box) {
+      var r = document.createElement("div");
+      r.className = "ring";
+      var pad = 6;
+      r.style.left = (sh.box[0] - pad) + "px"; r.style.top = (sh.box[1] - pad) + "px";
+      r.style.width = (sh.box[2] + 2 * pad) + "px"; r.style.height = (sh.box[3] + 2 * pad) + "px";
+      el.appendChild(r);
+      el._ring = r;
+    }
+    host.appendChild(el);
+    shotEls.push(el);
+    var dur = sh.hold || 4.2;
+    plan.push({ start: t, dur: dur, sh: sh });
+    t += dur;
+  });
+  total = t + OUTRO;
+  var intro = document.getElementById("intro");
+  intro.querySelector(".k").textContent = S.kicker || "Pinball Asset Decryptor · Getting started";
+  intro.querySelector(".h").textContent = S.title;
+  intro.querySelector(".s").textContent = S.subtitle || "";
+  var outro = document.getElementById("outro");
+  outro.querySelector(".h").textContent = S.title;
+  outro.querySelector(".steps").innerHTML = "";
+  (S.recap || []).forEach(function (line, i) {
+    var d = document.createElement("div");
+    var n = document.createElement("span"); n.textContent = String(i + 1);
+    var tx = document.createElement("p"); tx.style.margin = "0"; tx.textContent = line;
+    d.appendChild(n); d.appendChild(tx);
+    outro.querySelector(".steps").appendChild(d);
+  });
+  return total;
+}
+
+function setTime(t) {
+  var intro = document.getElementById("intro"), outro = document.getElementById("outro");
+  intro.style.opacity = t < INTRO - FADE ? 1 : Math.max(0, 1 - (t - (INTRO - FADE)) / FADE);
+  intro.style.transform = "translateY(" + (-14 * ease((t - (INTRO - FADE)) / FADE)) + "px)";
+  var outroStart = total - OUTRO;
+  outro.style.opacity = t < outroStart ? 0 : Math.min(1, (t - outroStart) / FADE);
+  var cur = document.getElementById("cursor"), rip = document.getElementById("ripple"), cap = document.getElementById("cap");
+  var active = -1;
+  for (var i = 0; i < plan.length; i++) if (t >= plan[i].start - (i ? FADE : 0)) active = i;
+  shotEls.forEach(function (el, i) {
+    var p = plan[i], local = t - p.start;
+    var vis = 0;
+    if (i === active) vis = i === 0 ? 1 : Math.min(1, (local + FADE) / FADE);
+    else if (i === active - 1) vis = 1;
+    el.style.opacity = vis;
+    el.style.zIndex = i === active ? 2 : 1;
+    // camera: full view -> the step's control, then hold
+    var full = camFor(null), focus = p.sh.box && p.sh.zoom !== 0 ? camFor(p.sh.box, p.sh.zoom) : full;
+    var k = ease((local - 0.5) / 1.1);
+    var c = camLerp(full, focus, k);
+    if (p.sh.pull) { c = camLerp(c, full, ease((local - (p.dur - 1.1)) / 0.9)); }
+    applyCam(el, c);
+    el._cam = c;
+    if (el._ring) el._ring.style.opacity = ease((local - 1.7) / 0.35) * (p.sh.click === false ? 0.85 : 1);
+  });
+  // cursor: glides from the last step's control to this one's, then clicks
+  if (active >= 0 && t < outroStart) {
+    var p = plan[active], local = t - p.start, c = shotEls[active]._cam;
+    var prev = active > 0 && plan[active - 1].sh.box ? plan[active - 1].sh.box : null;
+    var bx = p.sh.box;
+    var from = prev ? [prev[0] + prev[2] * .6, prev[1] + prev[3] * .65] : [SRC_W * .55, SRC_H * .62];
+    var to = bx ? [bx[0] + Math.min(bx[2] * .5, 60), bx[1] + bx[3] * .6] : from;
+    var k2 = ease((local - 0.7) / 1.0);
+    var pt = toStage(c, lerp(from[0], to[0], k2), lerp(from[1], to[1], k2));
+    cur.style.opacity = (bx || prev) && !p.sh.slide ? 1 : 0;
+    cur.style.transform = "translate(" + (pt[0] - 6) + "px," + (pt[1] - 3) + "px)";
+    var press = local - 1.85;
+    var clicks = bx && p.sh.click !== false;
+    cur.style.transform += clicks && press > 0 && press < .18 ? " scale(.86)" : "";
+    rip.style.opacity = clicks && press > 0 && press < .6 ? (1 - press / .6) : 0;
+    var rs = 20 + 70 * Math.max(0, press);
+    rip.style.width = rip.style.height = rs + "px";
+    rip.style.transform = "translate(" + (pt[0] - rs / 2) + "px," + (pt[1] - rs / 2) + "px)";
+    // the caption
+    var capK = p.sh.slide ? 0 : ease((local - 0.15) / 0.4);
+    cap.style.opacity = capK;
+    cap.style.transform = "translateY(" + (18 * (1 - capK)) + "px)";
+    cap.querySelector(".n").textContent = p.sh.n != null ? String(p.sh.n) : "";
+    cap.querySelector(".n").style.display = p.sh.n != null ? "" : "none";
+    cap.querySelector(".t").innerHTML = p.sh.caption;
+  } else {
+    cur.style.opacity = 0; rip.style.opacity = 0; cap.style.opacity = 0;
+  }
+  return total;
+}
+
+window.load = load;
+window.setTime = setTime;
+if (location.search.indexOf("play") >= 0 && window.SCRIPT) {
+  load(window.SCRIPT);
+  var t0 = performance.now();
+  (function tick() { setTime(((performance.now() - t0) / 1000) % total); requestAnimationFrame(tick); })();
+}
+</script>
+</body>
+</html>

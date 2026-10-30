@@ -270,6 +270,7 @@ HATS = {
     "battle": "When the player picks a battle",       # PAD-706: a slot of Godzilla's battle selection screen
     "game_mode": "When the game starts one of its modes",   # PAD-710: the mode runs in its place, counting as it
     "completed": "When the player has completed some of the game's modes",   # PAD-747: N of them, in one game
+    "spare_switch": "When a spare switch closes",     # PAD-826: a board input the game has no switch on (a mod's own)
 }
 #: PAD-615 round 2: the challenge hat's choice that adds the mode to the game's start menu as a challenge of its own
 CHALLENGE_NEW = "A new challenge of its own"
@@ -338,10 +339,17 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
               "gi",                                                      # PAD-767: the GI dark for the rest of the mode
-              "light_mode", "unlight_mode", "set_hits")
+              "light_mode", "unlight_mode", "set_hits",
+              "spare_drive")                                             # PAD-826: a driver output the game never fires
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
 HOLD_MIN_MS, HOLD_MAX_MS = MP.COIL_MIN_MS, MP.COIL_MAX_MS
+#: PAD-826: a spare switch's board and input, a spare output's board and output (the node-bus library's own ranges), and
+#: a spare output's one command (pad_mode_runtime.c's SPARE_PULSE_MAX / SPARE_CMD_MAX: the runtime refuses past them)
+SPARE_NODES, SPARE_INPUTS, SPARE_OUTPUTS = 32, 64, 9
+SPARE_PULSE_MAX_MS, SPARE_CMD_MAX_MS = 1000, 5000
+#: PAD-826: a spare switch is closed when its input reads low (Stern's switches) or high (an opto's way)
+SPARE_CLOSED = {"low": "reads low when closed", "high": "reads high when closed"}
 #: PAD-690: a Ball save block's seconds (pm_ball_save's own range)
 BALL_SAVE_MAX = 120
 #: PAD-621: a post the game keeps up itself is held up to its own longest (James Bond's right return up post: 14 s);
@@ -1154,13 +1162,14 @@ def card_checks(p):
         "roster": list(getattr(p, "roster", ()) or ()),     # PAD-706: the battle slots a mode may take ([] = none)
         "places": [list(x) for x in getattr(p, "places", ()) or ()],   # PAD-710: [[id, name, counts]] ([] = none)
         "done": [list(x) for x in getattr(p, "done_modes", ()) or ()] if p.can("done") else [],   # PAD-747: [[id, name]]
+        "spare": list(getattr(p, "spare", ()) or ()),       # PAD-826: "in" / "out" ([] = neither)
     }
 
 
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
              game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None,
-             drain=None, roster=None, places=None, done=None):
+             drain=None, roster=None, places=None, done=None, spare=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -1234,6 +1243,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "roster": list(roster) if roster is not None else None, "battles": set(),   # PAD-706
            "places": {int(x[0]): x for x in places} if places is not None else None, "placed": set(),   # PAD-710
            "done": {int(x[0]): x for x in done} if done is not None else None, "done_hats": 0,   # PAD-747
+           "spare": list(spare) if spare is not None else None,       # PAD-826: "in" / "out" this card's game has
            "program": program}                        # PAD-646: a Light show block names one of its shows
     _check_shows(program, ctx)                        # PAD-646
     hud = program["hud"]
@@ -1482,8 +1492,17 @@ def _check_hat(hat, n, ctx):
         _check_shot(hat.get("shot"), where + "'s When", ctx)
     if kind == "combo":                                                              # PAD-708
         _check_combo(hat, where, ctx)
-    if kind in ("shot", "any_shot", "switch", "event", "drain", "combo") and hat.get("when", "any") not in WHEN:
+    if kind in ("shot", "any_shot", "switch", "event", "drain", "combo", "spare_switch") and \
+            hat.get("when", "any") not in WHEN:
         ctx["out"].append("%s's When has no while." % where)
+    if kind == "spare_switch":                                                       # PAD-826
+        if ctx.get("spare") is not None and "in" not in ctx["spare"]:
+            ctx["out"].append("%s waits for a spare switch, which a mode cannot read on this card's game." % where)
+        elif not _int_ok(hat.get("node"), 0, SPARE_NODES - 1) or not _int_ok(hat.get("input"), 0, SPARE_INPUTS - 1):
+            ctx["out"].append("%s's spare switch needs its board (0 to %d) and input (0 to %d)."
+                              % (where, SPARE_NODES - 1, SPARE_INPUTS - 1))
+        elif hat.get("closed", "low") not in SPARE_CLOSED:
+            ctx["out"].append("%s's spare switch reads low or high when closed." % where)
     if kind == "drain" and ctx.get("drain") is False:
         ctx["out"].append("%s waits for a ball in the trough, which this card's game does not report." % where)
     if kind == "event":
@@ -1809,6 +1828,20 @@ def _check_stack(stack, depth, where, ctx):
                                   % where)
             elif ctx["building"] is False:
                 ctx["out"].append("%s moves the building, which a mode cannot do on this card's game." % where)
+        elif op == "spare_drive":                                                    # PAD-826
+            if ctx.get("spare") is not None and "out" not in ctx["spare"]:
+                ctx["out"].append("%s drives a spare output, which a mode cannot do on this card's game." % where)
+            elif not _int_ok(b.get("node"), 0, SPARE_NODES - 1) or not _int_ok(b.get("output"), 0, SPARE_OUTPUTS - 1):
+                ctx["out"].append("%s drives a spare output: its board (0 to %d) and output (0 to %d)."
+                                  % (where, SPARE_NODES - 1, SPARE_OUTPUTS - 1))
+            elif not _int_ok(b.get("power"), 1, 255) or not _int_ok(b.get("hold_power", 0), 0, 255):
+                ctx["out"].append("%s drives a spare output: its power is 1 to 255, its hold 0 to 255 (0 = none)."
+                                  % where)
+            elif not _int_ok(b.get("ms"), 1, SPARE_PULSE_MAX_MS):
+                ctx["out"].append("%s drives a spare output: its pulse is 1 to %d ms." % (where, SPARE_PULSE_MAX_MS))
+            elif not _int_ok(b.get("hold_ms", 0), 0, SPARE_CMD_MAX_MS) or int(b.get("ms")) + (
+                    int(b.get("hold_ms", 0)) if int(b.get("hold_power", 0)) else 0) > SPARE_CMD_MAX_MS:
+                ctx["out"].append("%s drives a spare output for more than %d ms in all." % (where, SPARE_CMD_MAX_MS))
         elif op in ("shake", "shake_game"):                                          # PAD-414
             shaker = ctx["shaker"]
             if shaker is False:
@@ -2488,6 +2521,13 @@ class _Gen:
                 if floor in BUILDING_FLOOR:
                     self.mech = True
                     out.append(pad + "building(%d);" % int(floor))
+            elif op == "spare_drive":                                                 # PAD-826: the runtime's limits
+                if all(_int_ok(b.get(k, 0), 0, SPARE_CMD_MAX_MS)
+                       for k in ("node", "output", "power", "ms", "hold_power", "hold_ms")):
+                    hp = int(b.get("hold_power", 0) or 0)
+                    out.append(pad + "if (run.on) pm_spare_drive(%du, %du, %du, %du, %du, %du);" % (
+                        int(b["node"]), int(b["output"]), int(b["power"]), int(b["ms"]), hp,
+                        int(b.get("hold_ms", 0) or 0) if hp else 0))
             elif op == "shake":                                                       # PAD-414
                 strength = SHAKE_STRENGTH.get(b.get("strength"))
                 if strength is not None:
@@ -2614,6 +2654,7 @@ def to_c(program, slug):
     battle_more = set()                     # PAD-707: of those, the ones it is a monster on MORE KAIJU behind
     place_ids = []                          # PAD-710: the game's own modes its scripts take the place of
     done_hats = []                          # PAD-747: (count, ids) of each When the player has completed
+    spare_inputs = []                       # PAD-826: (node, input, closed high) of each When a spare switch closes
     for kind, items in bodies.items():
         for n, hat, body in items:
             head = "    /* script %d: %s */" % (n, _comment(_hat_words(hat)))
@@ -2621,7 +2662,7 @@ def to_c(program, slug):
             # a shot or event is judged by the mode's state BEFORE it: the shot that starts
             # the mode is not also one "while it runs"
             gate = {"idle": "!was_on", "running": "was_on"}.get(when)
-            if kind in ("shot", "any_shot", "switch") and when == "idle":
+            if kind in ("shot", "any_shot", "switch", "spare_switch") and when == "idle":
                 gate = "idle"                   # PAD-675: not running, and no other mode is either
             if kind == "shot":
                 test = "(%s && (shot & %s))" % (g.shot(hat.get("shot")), g.shot(hat.get("shot")))
@@ -2671,6 +2712,14 @@ def to_c(program, slug):
                 done_hats.append((max(1, int(hat.get("count"))) if _int_ok(hat.get("count"), 1, DONE_MAX) else 1,
                                   done_hat_ids(hat)))
                 test = "(done_fired & %du)" % (1 << k) if k < DONE_HATS_MAX else "(0)"
+            elif kind == "spare_switch":                 # PAD-826: its own shot bit, given by pm_spare_shot
+                key = spare_key(hat)
+                if key not in spare_inputs:
+                    spare_inputs.append(key)
+                k = spare_inputs.index(key)
+                test = "(spare_mask[%d] && (shot & spare_mask[%d]))" % (k, k)
+                if gate:
+                    test = "(%s && %s)" % (gate, test)
             elif kind == "challenge":                    # PAD-615: picked on the game's thread, run on the tick
                 name = str(hat.get("challenge") or "")
                 if name not in challenge_names:
@@ -3736,6 +3785,25 @@ def to_c(program, slug):
         L.append("    if (!run.on) info_show(0);")
         L.append("}")
         L.append("")
+    if spare_inputs:                        # PAD-826: each spare switch asked for until the runtime gives its shot bit
+        L.append("/* PAD-826: the spare switches its scripts wait for: board, input, closed reads high */")
+        L.append("static const unsigned char SPARE_IN[%d][3] = { %s };" % (len(spare_inputs), ", ".join(
+            "{ %d, %d, %d }" % k for k in spare_inputs)))
+        L.append("static uint64_t spare_mask[%d];" % len(spare_inputs))
+        L.append("")
+        L.append("static void spare_ask(void)")
+        L.append("{")
+        L.append("    static unsigned tries;")
+        L.append("    char name[24];")
+        L.append("    int k;")
+        L.append("    if ((tries++ % 30) != 0 || tries > 60u * 300u) return;   /* twice a second, the first five minutes */")
+        L.append("    for (k = 0; k < %d; k++)" % len(spare_inputs))
+        L.append("        if (!spare_mask[k]) {")
+        L.append('            pm_snprintf(name, sizeof name, "Spare %u:%u", SPARE_IN[k][0], SPARE_IN[k][1]);')
+        L.append("            spare_mask[k] = pm_spare_shot(SPARE_IN[k][0], SPARE_IN[k][1], name, SPARE_IN[k][2]);")
+        L.append("        }")
+        L.append("}")
+        L.append("")
     L.append("static void on_shot(uint64_t shot)")
     L.append("{")
     L.append("    unsigned p = pm_player();")
@@ -3751,6 +3819,9 @@ def to_c(program, slug):
         L.append("    if (shot & 1ull) {                /* PAD-675: a playfield switch was hit (its 0x1 dispatch) */")
         L.extend("    " + line if line else line for code in switch_scripts for line in code.split("\n"))
         L.append("    }")
+    spare_scripts = scripts_of("spare_switch")
+    if spare_scripts:                       # PAD-826: a spare switch's bit is none of the port's named shots
+        L.extend(spare_scripts)
     L.append("    if (!(shot & named)) return;      /* a switch's 0x1 dispatch, not a shot */")
     L.append("    for (i = 0; i < %d; i++)" % len(g.hits))
     L.append("        if (S[(int)HIT_OF[i]] & shot) {")
@@ -3782,6 +3853,8 @@ def to_c(program, slug):
     L.append("{")
     L.append("    unsigned seconds = 0;")
     L.append("    int in_game = pm_in_game();")
+    if spare_inputs:
+        L.append("    spare_ask();                      /* PAD-826: the spare switches' shot bits */")
     L.append("    find_screen();")
     L.append("    if (drain_hold && !pm_ball_end_holding()) {   /* PAD-622: the game's end of ball goes on: so does its TOTAL */")
     L.append("        drain_hold = drain_long = 0;")
@@ -5332,6 +5405,14 @@ def combo_words(hat, when=True):
     return out + (", %s" % WHEN.get(hat.get("when", "any"), "") if when else "")
 
 
+def spare_key(hat):
+    """PAD-826: (board, input, closed reads high) of a When a spare switch closes hat."""
+    def i(v, top):
+        return int(v) if _int_ok(v, 0, top) else 0
+    return (i(hat.get("node"), SPARE_NODES - 1), i(hat.get("input"), SPARE_INPUTS - 1),
+            1 if hat.get("closed") == "high" else 0)
+
+
 def _hat_words(hat):
     kind = hat.get("kind")
     when = WHEN.get(hat.get("when", "any"), "")
@@ -5341,6 +5422,8 @@ def _hat_words(hat):
         return "when any shot is made, %s" % when
     if kind == "switch":
         return "when any playfield switch is hit, %s" % when
+    if kind == "spare_switch":                                                       # PAD-826
+        return "when the spare switch on board %s input %s closes, %s" % (hat.get("node"), hat.get("input"), when)
     if kind == "drain":
         return "when a ball goes into the trough, %s" % when
     if kind == "every":

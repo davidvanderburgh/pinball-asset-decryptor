@@ -260,7 +260,7 @@ input[type=range] { accent-color: var(--accent); }
 .tbl .tr.sel { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); }
 .tbl .tr.sel:hover { background: var(--sel); }
 /* a file from the desktop dragged over a row, a Browse… or a path that takes it (PAD-838) */
-.drop-on[data-drop] { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.drop-on:not(.tr) { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
 .tbl .tr.drop-on, .tbl .tr.drop-on:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
 .tbl .c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .tbl .num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; }

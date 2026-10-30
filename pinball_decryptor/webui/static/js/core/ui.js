@@ -450,8 +450,22 @@ export async function armDrop(e) {
   const names = [...e.dataTransfer.files].map((f) => f.name);
   return names.length ? !!(await call("ui.drop_arm", names)) : false;
 }
+// A path box answers for the Browse… beside it (PAD-838: the New project
+// window's Stock image box took nothing): the nearest row around the box
+// that holds exactly one data-drop button is the target.
+const fieldRow = (t) => {
+  let el = t.closest(".field");
+  for (let i = 0; el && i < 3; i++, el = el.parentElement) {
+    const btns = el.querySelectorAll("button[data-drop]");
+    if (btns.length === 1) return el;
+    if (btns.length > 1) return null;
+  }
+  return null;
+};
 const dropTarget = (e) => {
-  const el = e.target && e.target.closest ? e.target.closest("[data-drop]") : null;
+  const t = e.target && e.target.closest ? e.target : null;
+  if (!t) return null;
+  const el = t.closest("[data-drop]") || fieldRow(t);
   if (!el) return null;
   const btn = el.matches("button") ? el : el.querySelector("button[data-drop]");
   return btn && !btn.disabled ? el : null;

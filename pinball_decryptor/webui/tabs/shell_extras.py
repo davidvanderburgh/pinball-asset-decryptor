@@ -69,6 +69,14 @@ LOG_SEED_LINES = 600
 #: no use limit) into #read-me-first, made by the PAD bot.
 DISCORD_URL = "https://discord.gg/343hTHykka"
 
+#: ⚙ → Let AI agents control PAD (PAD-844)
+AGENT_ACCESS_TIP = (
+    "Lets an AI agent on this PC (one that supports MCP servers, such as "
+    "Claude or Cursor) use PAD for you while PAD is open: find and change "
+    "pictures, sounds, videos, text and scenes, and run builds "
+    "through the same checks as clicking. Off by default; only programs "
+    "running as you on this PC can reach it.")
+
 
 def update_action_verb(installer):
     """main_window._update_action_verb: Linux downloads an AppImage and
@@ -100,7 +108,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
     exports = (
         "voice_quality_var", "update_interval_var", "autosave_interval_var",
         "show_log_history_var",
-        "scenes_own_colours_var",
+        "scenes_own_colours_var", "agent_access_var",
         "set_update_check_running", "show_update_banner",
         "show_up_to_date_toast", "open_update_download_dialog",
         "apply_preview_features",
@@ -128,6 +136,10 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         self.scenes_own_colours_var = self.var(
             "scenes_own_colours", "bool",
             bool(cb.get("initial_scenes_own_colours", False)))
+        # PAD-844: an AI agent may drive the app through its MCP server
+        self.agent_access_var = self.var(
+            "agent_access", "bool",
+            bool(cb.get("initial_agent_access", False)))
         self._update_check_busy = False
         self._update_available = None       # (version, url, installer|None)
         self._update_banner_url = None
@@ -205,6 +217,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             "project_log": self._open_project_log,
             "toggle_log_history": self._toggle_log_history,
             "toggle_scenes_own_colours": self._toggle_scenes_own_colours,
+            "toggle_agent_access": self._toggle_agent_access,
             "voice_quality": self._pick_voice_quality,
             "clear_voice_models": self._clear_voice_models,
             "recheck_prereqs": self._recheck_prereqs,
@@ -367,6 +380,10 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
                                 "screen (the whole screen overlay still applies). Off "
                                 "(the default) draws every file through the screen, "
                                 "an added test card too.")})
+        items.append({"id": "toggle_agent_access",
+                      "label": "Let AI agents control PAD",
+                      "checked": bool(self.agent_access_var.get()),
+                      "title": AGENT_ACCESS_TIP})
         items.append({"sep": True})
         # the quality itself is picked beside Auto-name call-outs on the
         # Extract tab (PAD-460); clearing the downloads stays a setting
@@ -542,6 +559,35 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
                    "full history in the log file) · this session below "
                    "────────────" % LOG_SEED_LINES)
         self.set(log_seed={"lines": lines, "cut": cut})
+
+    def _toggle_agent_access(self):
+        """⚙ → Let AI agents control PAD (PAD-844): publish or take away the
+        link an MCP server reaches the app by, and say how to use it."""
+        from .. import agent_link
+        on = not bool(self.agent_access_var.get())
+        self.agent_access_var.set(on)
+        fn = self.window.cb.get("on_agent_access_change")
+        if fn is not None:
+            fn(on)
+        self.publish_settings_items()
+        path = agent_link.set_enabled(self.ctx, on, __version__)
+        if not on:
+            self.log("AI agents can no longer control PAD.", "info")
+            return True
+        if path is None:
+            self.log("AI agents: the link file could not be written; see "
+                     "the log history.", "warning")
+            return True
+        self.log("AI agents can control PAD while it is open (link: %s)."
+                 % path, "info")
+        compat.messagebox.showinfo(
+            "Let AI agents control PAD",
+            "An AI agent that supports MCP (Claude Desktop, Claude Code, "
+            "Cursor, VS Code and others) can now use PAD while it is open: "
+            "every button and field, through the same checks as a click. "
+            "Add this to the agent's MCP servers:",
+            detail=agent_link.mcp_config_snippet())
+        return True
 
     def _toggle_scenes_own_colours(self):
         on = not bool(self.scenes_own_colours_var.get())

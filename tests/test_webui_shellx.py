@@ -146,7 +146,8 @@ def test_gear_menu_keeps_the_tk_cascades(tmp_path):
         want = ["check_updates", "Check automatically ▸"]
         if sys.platform == "win32":
             want.append("disk_space")
-        want += ["Logs ▸", "Save automatically ▸", "toggle_scenes_own_colours", "sep",
+        want += ["Logs ▸", "Save automatically ▸", "toggle_scenes_own_colours",
+                 "toggle_agent_access", "sep",
                  "clear_voice_models", "sep",
                  "Prerequisites ▸", "sep"]
         if preview.FEATURES:                    # PAD-802: Visual Pinball is a preview

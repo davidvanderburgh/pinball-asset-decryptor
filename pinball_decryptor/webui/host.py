@@ -198,6 +198,13 @@ def build(ctx=None, meanwhile=None):
     reg.register("shell.zoom", app._on_ui_zoom_change)
     reg.register("shell.quit", lambda: ctx.host.quit() if ctx.host else None,
                  on_loop=False)
+    # an AI agent driving the app (PAD-844): its calls always, the link
+    # file only while Settings > Let AI agents control PAD is ticked
+    from . import agent_link
+    ctx.server = server
+    agent_link.register(ctx)
+    if (getattr(app, "_settings", None) or {}).get("agent_access"):
+        agent_link.set_enabled(ctx, True, _app_version())
     # hot reload while developing (never in a frozen build): see devreload
     from . import devreload
     if devreload.enabled() and ctx.host is not None:
@@ -213,7 +220,20 @@ def url_for(ctx, server, query=""):
     return base + ("&" + query if query else "")
 
 
+def _app_version():
+    try:
+        from .. import __version__
+        return __version__
+    except Exception:                                   # noqa: BLE001
+        return ""
+
+
 def _close_app(ctx):
+    try:
+        from . import agent_link
+        agent_link.remove_link(ctx)
+    except Exception:                                   # noqa: BLE001
+        pass
     try:
         ctx.loop.call(ctx.app._on_close, timeout=60)
     except Exception:                                   # noqa: BLE001

@@ -21,5 +21,11 @@ if __name__ == "__main__":
         from pinball_decryptor.core.elevated_flash import run_helper_main
         sys.exit(run_helper_main(sys.argv))
 
+    # The MCP server an AI agent starts (PAD-844): the frozen binary with
+    # --mcp, as ``python -m pinball_decryptor.mcp`` is on Windows.
+    if "--mcp" in sys.argv:
+        from pinball_decryptor.mcp import main as mcp_main
+        sys.exit(mcp_main())
+
     from pinball_decryptor.webui.host import main
     sys.exit(main(sys.argv[1:]))

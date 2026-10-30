@@ -999,10 +999,11 @@ def _slots(w, svc):
     w.run(fill)
 
 
-def test_slots_not_read_yet_is_not_no_slots(tmp_path):
+def test_slots_not_read_yet_is_not_no_slots(tmp_path, monkeypatch):
     """Before the first slot read (and all through a WSL boot) the table
     claims nothing: the page shows "No save states" only after a read that
     answered, and a failed read says so in the summary instead."""
+    monkeypatch.setattr(sys, "platform", "linux")   # not the Mac's words (PAD-835)
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)
         s = w.state(NS)
@@ -1060,7 +1061,8 @@ def test_macos_manages_its_slots_through_the_box(tmp_path, monkeypatch):
         assert w.call(NS + ".slots_refresh") is False
 
 
-def test_slots_are_scoped_to_the_card(tmp_path):
+def test_slots_are_scoped_to_the_card(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")   # not the Mac's words (PAD-835)
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)
         _slots(w, svc)

@@ -112,6 +112,8 @@ SAY = {
     "building": lambda b: "Move the building to %s" % BM.BUILDING_FLOOR.get(str(b.get("floor")), "?"),
     "shake": lambda b: "Shake the cabinet %s for %s" % (b.get("strength") or "", _ms(b.get("ms"))),
     "shake_game": lambda b: "The game's %s shake" % (b.get("shake") or "?"),
+    "spare_drive": lambda b: "Spare output on board %s output %s: power %s for %s, then hold at %s for %s" % (   # PAD-826
+        b.get("node"), b.get("output"), b.get("power"), _ms(b.get("ms")), b.get("hold_power"), _ms(b.get("hold_ms"))),
     "score": lambda b: "Score %s" % points(b.get("points")),
     "set": lambda b: "Set %s to %s" % (b.get("var"), val(b.get("value"))),
     "change": lambda b: "Add %s to %s" % (val(b.get("by")), b.get("var")),
@@ -145,7 +147,7 @@ FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "s
           "lights_off": "show", "gi": "show", "show": "show", "game_show": "show", "log": "show", "clip": "own", "sound": "own", "music": "own",
           "timer_start": "timer", "timer_stop": "timer", "hud_text": "hud", "hud_counter": "hud", "hud_gauge": "hud", "hud_progress": "hud", "roster_progress": "hud",
           "hud_award": "hud", "hold": "mech", "scoop_hold": "mech", "let_go": "mech", "shield": "mech",
-          "building": "mech", "shake": "mech", "shake_game": "mech"}
+          "building": "mech", "shake": "mech", "shake_game": "mech", "spare_drive": "mech"}
 FAMILY_COLOUR = {"hat": "#c28a12", "mode": "#8b5bd6", "score": "#2f9a5b", "var": "#c8553a", "timer": "#b0457e",
                  "flow": "#d77a21", "show": "#3a78c9", "hud": "#a8457a", "own": "#b8458f", "mech": "#5d6b7e"}
 
@@ -195,6 +197,9 @@ def hat(h):
         return "When the game starts its %s" % BM.place_name(h)
     if k == "completed":                                                    # PAD-747
         return "When the player has completed %s of %d of the game's modes" % (h.get("count"), len(BM.done_hat_ids(h)))
+    if k == "spare_switch":                                                 # PAD-826
+        return "When the spare switch on board %s input %s closes, it %s%s" % (
+            h.get("node"), h.get("input"), BM.SPARE_CLOSED.get(h.get("closed") or "low", "?"), when)
     return "(%s)" % k
 
 

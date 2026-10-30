@@ -9,21 +9,29 @@ import time
 from pinball_decryptor.webui.drops import DropBox
 
 
+def _p(drive, *parts):
+    """A full path as this OS's window hands it in: a Mac or Linux runner has
+    no C:, and its basename of a Windows path is the whole path."""
+    if os.name == "nt":
+        return os.path.join(drive + os.sep, *parts)
+    return os.path.join(os.sep + drive.rstrip(":").lower(), *parts)
+
+
 def test_take_finds_the_paths_by_name():
     box = DropBox()
-    box.put([r"C:\pics\a.png", r"C:\pics\b.png"])
-    assert box.take(["b.png"], wait=0) == [os.path.normpath(r"C:\pics\b.png")]
+    box.put([_p("C:", "pics", "a.png"), _p("C:", "pics", "b.png")])
+    assert box.take(["b.png"], wait=0) == [_p("C:", "pics", "b.png")]
     # each path is handed out once
     assert box.take(["b.png"], wait=0) == []
-    assert box.take(["a.png"], wait=0) == [os.path.normpath(r"C:\pics\a.png")]
+    assert box.take(["a.png"], wait=0) == [_p("C:", "pics", "a.png")]
 
 
 def test_take_waits_for_the_window_to_hand_them_in():
     """The page's call can reach the app before the window's handler."""
     box = DropBox()
-    threading.Timer(0.2, box.put, [[r"D:\x\late.png"]]).start()
+    threading.Timer(0.2, box.put, [[_p("D:", "x", "late.png")]]).start()
     t0 = time.monotonic()
-    assert box.take(["late.png"], wait=5) == [os.path.normpath(r"D:\x\late.png")]
+    assert box.take(["late.png"], wait=5) == [_p("D:", "x", "late.png")]
     assert time.monotonic() - t0 < 4
 
 
@@ -36,27 +44,27 @@ def test_take_gives_up_when_no_path_comes():
 
 def test_take_wants_every_name():
     box = DropBox()
-    box.put([r"C:\p\a.png"])
+    box.put([_p("C:", "p", "a.png")])
     assert box.take(["a.png", "b.png"], wait=0) == []
     # a part-claim takes nothing
-    assert box.take(["a.png"], wait=0) == [os.path.normpath(r"C:\p\a.png")]
+    assert box.take(["a.png"], wait=0) == [_p("C:", "p", "a.png")]
 
 
 def test_the_newest_drop_of_a_name_wins():
     box = DropBox()
-    box.put([r"C:\old\a.png"])
-    box.put([r"C:\new\a.png"])
-    assert box.take(["a.png"], wait=0) == [os.path.normpath(r"C:\new\a.png")]
+    box.put([_p("C:", "old", "a.png")])
+    box.put([_p("C:", "new", "a.png")])
+    assert box.take(["a.png"], wait=0) == [_p("C:", "new", "a.png")]
 
 
 def test_put_event_reads_pywebviews_drop_event():
     box = DropBox()
     box.put_event({"type": "drop", "dataTransfer": {"files": [
-        {"name": "a.png", "pywebviewFullPath": r"C:\p\a.png"},
+        {"name": "a.png", "pywebviewFullPath": _p("C:", "p", "a.png")},
         {"name": "nopath.png"}]}})
     box.put_event({"type": "drop"})            # no dataTransfer: ignored
     box.put_event(None)
-    assert box.take(["a.png"], wait=0) == [os.path.normpath(r"C:\p\a.png")]
+    assert box.take(["a.png"], wait=0) == [_p("C:", "p", "a.png")]
     assert box.take(["nopath.png"], wait=0) == []
 
 

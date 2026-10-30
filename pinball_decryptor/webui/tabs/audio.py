@@ -4063,7 +4063,10 @@ class AudioTab(FindOriginalsMixin, TabService):
     @rpc
     def advanced_get(self):
         cfg = dict(ADV_DEFAULTS)
-        cfg.update({k: v for k, v in self._advanced.items() if v is not None})
+        # only the options the dialog has: an "audio_grow" an older
+        # settings.json carries is gone with its checkbox (PAD-843)
+        cfg.update({k: v for k, v in self._advanced.items()
+                    if v is not None and k in ADV_DEFAULTS})
         if cfg.get("loudness") not in dict(LOUDNESS_CHOICES):
             cfg["loudness"] = "match"
         if cfg.get("head_mode") not in dict(HEAD_CHOICES):

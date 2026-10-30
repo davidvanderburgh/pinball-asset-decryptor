@@ -1299,8 +1299,11 @@ EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  # PAD-342: the Stern and JJP SRCS took the BOF build's FAST
                  # Neuron reader too, and the Makefile installs the BOF hooks
                  "input_fast.c",
+                 # PAD-853: every SRCS took the Big Lebowski build's dpprocsw
+                 # reader, and the Makefile's check runs the TBL launcher
+                 "input_pipe.c",
                  "egl_x11.c", "stubs_jjp.c", "audio_pulse.c",
-                 "jjp_glibc.h", "padselect.sh", "padselect_bof.sh", "pad_install_bof.sh",
+                 "jjp_glibc.h", "padselect.sh", "padselect_bof.sh", "padselect_dp.sh", "pad_install_bof.sh",
                  "log.c", "log.h",
                  "art.c", "art.h", "audio.c", "audio.h", "audio_fifo.c", "audio_alsa.c",
                  "codec.c", "codec.h",

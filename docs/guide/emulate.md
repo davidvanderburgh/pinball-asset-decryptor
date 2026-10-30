@@ -78,6 +78,7 @@ is never written to.
 - **Videos and pictures are converted first.** Start says how many and
   about how long, and asks first when it is a minute or more. Converted
   files are kept, so the next Start redoes only what changed.
+- **The first Start with edits is the longest.** It lays down the edited files for this card and project, and the State line says "Preparing your edits (first time: the longest)". Later Starts on the same card and project only patch what changed, and app updates keep the converted pictures.
 - **Only the files your edits touch are copied** (e.g. `image.bin` and its
   `.sidx` for a replaced sound). A repeat run reuses them.
 - **On a card the app built,** the edits are prepared from the card your

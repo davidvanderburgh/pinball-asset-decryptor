@@ -127,7 +127,18 @@ Every failure ends on the newest stock folder, exactly as the machine would boot
    `9.` + four digits from the build minute (`--version` overrides), the file is always
    `TBL-v<V>.zip` (the update menu reads the version off the name). `ensuredpselect.sh`
    installs dpselect/dpprocsw/padselect.sh into /var/tmp/dpselect. tests/test_mkdpmulti.py.
-5. `machine_sim.sh` - the whole thing in the rig: the USB update's install steps on a
-   prepared build, Version Select, the menu, a pick, the chosen build in attract.
+5. DONE `machine_sim.sh` - the whole thing in the rig: the USB update's install steps (as
+   menuitem_usbupdate_download.py: a delta gets only the running version's assets/), Version
+   Select (the database copied, `version` written), the machine's run.sh with the rig's
+   arguments (`fakepinproc dev`). PASS 2026-10-29, slot 2, TBL_justin_113_v10 (1.13
+   installed): TBL-v1.15.zip installed + selected, then TBL-v9.0853.zip (stock 1.15 + a
+   1.15 mod with a marker file) installed + selected; at power-up the launcher made 9.08531
+   from 1.13 + the mod's files (the mod's delta names 1.01-1.14, as the USB update would
+   lay it), the menu came up on X (shot), RIGHT + START through 1.15's libpinproc over the
+   fake P3-ROC, the database Version Select put in 9.0853 carried into 9.08531, 9.08531 in
+   attract (shot: the Grand Champion screen); the second power-up's countdown booted the
+   remembered 9.08531 without making it again. `PADSELECT_PROCSW_PRELOAD` puts the fake
+   board under the reader ONLY: preloaded into the game, aaiwshim's Mix_OpenAudio hook
+   cannot find TBL's SDL 1.2 mixer and the game dies ("mixer system not initialized").
 6. The Multi-boot tab: a Dutch Pinball backend (`multiboot_backend.py`), the TBL
    capability, before/after shots.

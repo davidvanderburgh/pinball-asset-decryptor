@@ -214,7 +214,9 @@ else
             procsw=$!
         elif [ -n "$stock" ] && [ -f "$G/$stock/libpinproc.so.2.0" ]; then
             # the board through the stock version's own libpinproc / libftdi1 / libusb
-            LD_LIBRARY_PATH="$G/$stock" "$P/dpprocsw" L="$L" R="$R" S="$S" >"$BTN" 2>>"$P/dpprocsw.log" &
+            # (PADSELECT_PROCSW_PRELOAD: the rig's fake P3-ROC, for the reader alone)
+            env ${PADSELECT_PROCSW_PRELOAD:+LD_PRELOAD="$PADSELECT_PROCSW_PRELOAD"} LD_LIBRARY_PATH="$G/$stock" \
+                "$P/dpprocsw" L="$L" R="$R" S="$S" >"$BTN" 2>>"$P/dpprocsw.log" &
             procsw=$!
         else
             say "no libpinproc.so.2.0 in '${stock}': no buttons, the countdown boots"
@@ -247,14 +249,25 @@ target=$(resolve "${targets[$choice]}")
 [ -n "$target" ] || fallback "image $choice (${targets[$choice]}) is not on this machine"
 
 # ---- 3. the settings database follows the player ----------------------------
+# From the build that ran last; the first time, from this version's own database/, where
+# Version Select put the database of the version the owner was running when they picked
+# the multi-boot.  Version Select back into <V> later puts the running one there again:
+# whichever of the two is newer is the one the player last played on.
 ran=$(cat "$P/ran" 2>/dev/null)
-if [ -n "$ran" ] && [ "$ran" != "$target" ] && [ -f "$G/$ran/database/database.db" ]; then
+src=""; from=""
+if [ -n "$ran" ] && [ -f "$G/$ran/database/database.db" ]; then src=$G/$ran/database/database.db; from=$ran; fi
+if [ -f "$V_DIR/database/database.db" ] && { [ -z "$src" ] || [ "$V_DIR/database/database.db" -nt "$src" ]; }; then
+    src=$V_DIR/database/database.db; from="$V (Version Select)"
+fi
+if [ -n "$src" ] && [ "$src" != "$G/$target/database/database.db" ]; then
     mkdir -p "$G/$target/database"
-    if cp -f "$G/$ran/database/database.db" "$G/$target/database/database.db.pad" \
+    if cp -f "$src" "$G/$target/database/database.db.pad" \
         && mv -f "$G/$target/database/database.db.pad" "$G/$target/database/database.db"; then
-        say "database: carried from $ran to $target"
+        say "database: carried from $from to $target"
+        # once carried, <V>'s copy is older than the build's from now on
+        [ "$src" = "$V_DIR/database/database.db" ] && touch -r "$G/$target/database/database.db" -d '-1 sec' "$src" 2>/dev/null
     else
-        say "database: could not carry it from $ran to $target"
+        say "database: could not carry it from $from to $target"
     fi
 fi
 echo "$target" > "$P/ran"

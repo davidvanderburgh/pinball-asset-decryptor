@@ -14,6 +14,7 @@
 #   4  the card of a build that could not be made -> the stock version
 #   5  no menu program -> the stock version
 #   6  no conf -> the stock version; a launcher with no stock version at all exits 1
+#   7  the first boot carries the database Version Select copied into <V>; later boots the last build's
 set -u
 BIN=$1; FONT=${2:-}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -147,6 +148,21 @@ if [ "$a" = "1.13 fullscreen os_version 2021-10-14-21" ] && [ "$rc" = 1 ] && [ -
     ok "6 no conf -> stock 1.13; nothing to start at all -> exit 1"
 else
     bad "6 no conf (started '$a', then rc $rc)"
+fi
+
+# 7
+setup
+mkdir -p "$G/9.0/database"; echo "db the owner was running" > "$G/9.0/database/database.db"
+run >/dev/null
+first=$(cat "$G/9.01/database/database.db")
+echo "db played on 9.01" > "$G/9.01/database/database.db"; touch -d '+5 sec' "$G/9.01/database/database.db"
+sed -i 's/^default=0/default=1/' "$G/9.0/pad/images.conf"; rm -f "$G/9.0/pad/last"
+run >/dev/null
+if [ "$first" = "db the owner was running" ] && grep -q "database: carried from 9.01 to 1.13" "$G/9.0/pad/padselect.log" \
+    && [ "$(cat "$G/1.13/database/database.db")" = "db played on 9.01" ]; then
+    ok "7 the first boot carries the database Version Select put in 9.0; later ones carry the last build's"
+else
+    bad "7 first carry ('$first', 1.13 has '$(cat "$G/1.13/database/database.db")')"
 fi
 
 echo "padselect_dp_test: $([ $FAILS = 0 ] && echo OK || echo "$FAILS FAILED")"

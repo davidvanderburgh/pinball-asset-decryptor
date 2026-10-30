@@ -597,3 +597,21 @@ def test_the_waiting_window_wires_its_keyboard_in_main(pf, monkeypatch, tmp_path
     ctl2.api_key("ArrowRight", "ArrowRight", True)     # still held at close
     ctl2.bye()
     assert k2.pipe.calls[-2:] == [("cab", "right", 0), ("close",)]
+
+
+def test_the_save_buttons_sudo_carries_the_rig_slot(pf, monkeypatch):
+    """PAD-871: on a Linux desktop or in the Docker image the playfield asks
+    `sudo -n` for the save-state scripts, and sudo's env_reset drops PAD_SLOT
+    - so a run on rig 1 saved nothing ("no game is running": the script looked
+    on rig 0). Rig 0, and the Mac box whose sudoers rule names bash alone,
+    keep the plain form."""
+    monkeypatch.setenv("PAD_STATE_SUDO", "1")
+    monkeypatch.setattr(pf.os, "geteuid", lambda: 1000, raising=False)
+    monkeypatch.delenv("PAD_SLOT", raising=False)
+    assert pf._as_root(["bash", "/r/savegame.sh", "s"]) == \
+        ["sudo", "-n", "/bin/bash", "/r/savegame.sh", "s"]
+    monkeypatch.setenv("PAD_SLOT", "1")
+    assert pf._as_root(["bash", "/r/savegame.sh", "s"]) == \
+        ["sudo", "-n", "env", "PAD_SLOT=1", "/bin/bash", "/r/savegame.sh", "s"]
+    monkeypatch.delenv("PAD_STATE_SUDO")
+    assert pf._as_root(["bash", "/r/savegame.sh"]) == ["bash", "/r/savegame.sh"]

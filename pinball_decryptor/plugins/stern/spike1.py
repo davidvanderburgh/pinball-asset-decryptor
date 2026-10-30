@@ -602,18 +602,52 @@ def extract_text(reader, game_dir, output_dir, log=None):
     return len(rows)
 
 
+def _picture_layout(reader, game_dir):
+    """The :class:`.spike1_images.Layout` the card's game program names."""
+    from . import spike1_images
+    node = _find_game_elf_node(reader, game_dir)
+    if node is None:
+        raise spike1_images.Spike1ImagesError(
+            "no game program next to image.bin")
+    return spike1_images.locate(reader.read_file_bytes(node))
+
+
+def extract_pictures(reader, game_dir, m, output_dir, log=None,
+                     progress=None, check=None):
+    """Write the DMD pictures of ``image.bin`` (*m*, its bytes) to PNGs
+    (PAD-870, :mod:`.spike1_images`).  Returns its counts, or None when
+    they can't be read (the sounds and text still are)."""
+    from . import spike1_images
+    log = log or (lambda *a, **k: None)
+    try:
+        lay = _picture_layout(reader, game_dir)
+        end = spike1_images.art_extent(lambda o, n: m[o:o + n], len(m), lay)
+        return spike1_images.extract_all(
+            m[:end], lay, output_dir, log=log, progress=progress,
+            cancel=check)
+    except spike1_images.Spike1ImagesError as e:
+        if check and check():
+            return None
+        log("  ! DMD pictures couldn't be read (%s) - left out" % e,
+            "warning")
+        return None
+
+
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 cancel=None, phase=None, open_disk=None, duration_names=False,
-                do_text=True):
-    """Decode every Spike 1 sound to ``audio/idxNNNN[-tK].wav``, and (with
+                do_text=True, do_images=True):
+    """Decode every Spike 1 sound to ``audio/idxNNNN[-tK].wav``, (with
     *do_text*) the game program's display text to ``text/strings.tsv``
-    (:func:`extract_text`).
+    (:func:`extract_text`), and (with *do_images*) every DMD picture, font
+    glyph and animation frame to a PNG (:func:`extract_pictures`).
 
     Mirrors the Spike 2 engine's contract: *partitions* is the
     ``[(byte_offset, byte_size), ...]`` list the pipeline located, *open_disk*
     optionally supplies the disk file object (the Direct-SD hook), and *phase*
     is called with the pipeline's phase index when decoding starts.
-    Returns ``{"sounds": n, "tracks": n, "seconds": float}``.
+    Returns ``{"sounds": n, "tracks": n, "seconds": float}``, plus
+    ``"pictures"`` (:func:`.spike1_images.extract_all`'s counts, or None
+    when they couldn't be read) when pictures were asked for.
     """
     import mmap
     import shutil
@@ -688,8 +722,15 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                                 "Decoding audio (%d/%d)" % (done, n_tracks))
                 log("Decoded %d WAVs (%.1f minutes of audio)"
                     % (done, seconds / 60.0))
-                return {"sounds": len(records), "tracks": done,
-                        "seconds": seconds}
+                result = {"sounds": len(records), "tracks": done,
+                          "seconds": seconds}
+                if do_images and not check():
+                    if phase:
+                        phase(3)
+                    result["pictures"] = extract_pictures(
+                        reader, game_dir, m, output_dir, log, progress,
+                        check)
+                return result
             finally:
                 m.close()
     finally:
@@ -874,9 +915,11 @@ def _slot_gains(assets_dir):
 def write_image(original_path, assets_dir, output_path, log=None,
                 progress=None, cancel=None, phase=None):
     """Copy *original_path* to *output_path* and patch the changed sounds,
-    and the edited display text (``text/strings.tsv``, PAD-869), in.
+    the edited display text (``text/strings.tsv``, PAD-869) and the edited
+    DMD pictures (PAD-870, :mod:`.spike1_images`) in.
 
-    Returns ``{"audio": n_patched, "text": n_strings, "skipped": [names]}``.  Raises
+    Returns ``{"audio": n_patched, "text": n_strings, "images": n_pictures,
+    "skipped": [names]}``.  Raises
     :class:`Spike1Cancelled` on cancel and :class:`Spike1Error` on a
     card/asset mismatch; either way the partial output file is removed —
     a multi-GB unpatched copy must not be left looking like a build.
@@ -886,13 +929,17 @@ def write_image(original_path, assets_dir, output_path, log=None,
     changed = _select_changed_wavs(assets_dir, log)
     gains = _slot_gains(assets_dir)
     text_edits = _text_edits(assets_dir)
+    from . import spike1_images
+    pictures = spike1_images.changed_pngs(assets_dir, log)
     log("Changed sounds: %d" % len(changed))
     if text_edits:
         log("Edited display text: %d line(s)" % len(text_edits))
-    if not changed and not text_edits:
-        log("  ! no changed audio WAVs vs the extract baseline and no edited "
-            "text — the build will be an unmodified copy of the original "
-            "image", "warning")
+    if pictures:
+        log("Changed DMD pictures: %d" % len(pictures))
+    if not changed and not text_edits and not pictures:
+        log("  ! no changed audio WAVs or pictures vs the extract baseline "
+            "and no edited text — the build will be an unmodified copy of "
+            "the original image", "warning")
 
     # Everything from the copy on owns the output file: on cancel or error
     # remove it, so no multi-GB partial/unpatched copy is left looking like
@@ -900,7 +947,8 @@ def write_image(original_path, assets_dir, output_path, log=None,
     # early failure must NOT delete a pre-existing build at that path.)
     try:
         return _write_image_inner(original_path, output_path, changed, gains,
-                                  log, progress, cancel, phase, text_edits)
+                                  log, progress, cancel, phase, text_edits,
+                                  pictures)
     except BaseException:
         try:
             os.remove(_lp(output_path))
@@ -956,7 +1004,8 @@ def _write_text(disk, reader, game_dir, sidx_path, sidx_node, edits, log,
 
 
 def _write_image_inner(original_path, output_path, changed, gains, log,
-                       progress, cancel, phase, text_edits=None):
+                       progress, cancel, phase, text_edits=None,
+                       pictures=None):
     import numpy as np
     from .formats import spike1_linux_partitions
 
@@ -1064,6 +1113,13 @@ def _write_image_inner(original_path, output_path, changed, gains, log,
         if phase:
             phase(3)
 
+        # ---- DMD pictures (PAD-870) ------------------------------------
+        n_images = 0
+        if pictures:
+            n_images, skipped_pics = _picture_writes(
+                disk, reader, game_dir, imap, pictures, writes, log, check)
+            skipped += skipped_pics
+
         # ---- apply ----------------------------------------------------
         for disk_off, buf in writes:
             disk.seek(disk_off)
@@ -1071,10 +1127,10 @@ def _write_image_inner(original_path, output_path, changed, gains, log,
         disk.flush()
 
         # ---- refresh the card's own validation manifest ---------------
-        if patched and sidx_node is not None:
+        if (patched or n_images) and sidx_node is not None:
             _refresh_sidx(disk, reader, imap, game_dir, sidx_path,
                           sidx_node, log, progress, total, check)
-        elif patched:
+        elif patched or n_images:
             log("  ! no /spk/index/*.sidx manifest found — the card's own "
                 "validation may reject the modified image")
 
@@ -1083,7 +1139,35 @@ def _write_image_inner(original_path, output_path, changed, gains, log,
             n_text = _write_text(disk, reader, game_dir, sidx_path,
                                  sidx_node, text_edits, log, check)
 
-    return {"audio": patched, "text": n_text, "skipped": skipped}
+    return {"audio": patched, "text": n_text, "images": n_images,
+            "skipped": skipped}
+
+
+def _picture_writes(disk, reader, game_dir, imap, pictures, writes, log,
+                    check):
+    """Plan the changed picture PNGs into ``image.bin`` and add the disk
+    writes to *writes*.  Returns ``(pictures written, names skipped)``."""
+    from . import spike1_images
+    log("Encoding DMD pictures…")
+    try:
+        lay = _picture_layout(reader, game_dir)
+        end = spike1_images.art_extent(
+            lambda o, n: imap.read(disk, o, n), imap.size, lay)
+        data = imap.read(disk, 0, end)
+        file_writes, n, skipped = spike1_images.plan(
+            data, lay, pictures, log=log, cancel=check)
+    except spike1_images.Spike1ImagesError as e:
+        if check():
+            raise Spike1Cancelled("cancelled")
+        names = sorted(os.path.basename(p) for p in pictures.values())
+        log("  ! the DMD pictures can't be written to this card (%s) - %d "
+            "picture(s) skipped" % (e, len(names)), "warning")
+        return 0, names
+    for file_off, payload in file_writes:
+        for disk_off, nbytes in imap.ranges(file_off, len(payload)):
+            writes.append((disk_off, payload[:nbytes]))
+            payload = payload[nbytes:]
+    return n, skipped
 
 
 def _write_preview(preview_dir, idx, track, body, ch, rate, log):
@@ -1111,8 +1195,9 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
 
     The no-``.orig``-snapshot Revert fallback: each rel like
     ``audio/idx0398.wav`` (renamed forms included) is decoded from the card
-    and written back over the edited copy.  Returns ``(reverted, failed)``
-    rel lists.
+    and written back over the edited copy, and each DMD picture
+    (``images/...`` / ``animations/...``, PAD-870) likewise.  Returns
+    ``(reverted, failed)`` rel lists.
     """
     from .formats import spike1_linux_partitions
 
@@ -1123,8 +1208,17 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
         raise Spike1Error("no ext partitions found in the source card image")
     reverted, failed = [], []
     with open(_lp(source_path), "rb") as disk:
-        reader, _game_dir, image_node, _sp, _sn = locate_assets(disk, parts)
+        reader, game_dir, image_node, _sp, _sn = locate_assets(disk, parts)
         imap = _FileMap(reader, image_node)
+        pics = [r for r in rels
+                if r.replace("\\", "/").split("/")[0] in ("images",
+                                                           "animations")]
+        if pics:
+            rels = [r for r in rels if r not in pics]
+            got, lost = _revert_pictures(disk, reader, game_dir, imap,
+                                         assets_dir, pics, log)
+            reverted += got
+            failed += lost
         window = _CardWindow(disk, imap)
         master = parse_master(window, imap.size)
         records = {r["idx"]: r for r in master["records"]}
@@ -1146,6 +1240,19 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
             if progress:
                 progress(n + 1, len(rels), "Restoring originals")
     return reverted, failed
+
+
+def _revert_pictures(disk, reader, game_dir, imap, assets_dir, rels, log):
+    from . import spike1_images
+    try:
+        lay = _picture_layout(reader, game_dir)
+        end = spike1_images.art_extent(
+            lambda o, n: imap.read(disk, o, n), imap.size, lay)
+        return spike1_images.revert(imap.read(disk, 0, end), lay,
+                                    assets_dir, rels, log)
+    except spike1_images.Spike1ImagesError as e:
+        log("  ! the source card's DMD pictures can't be read (%s)" % e)
+        return [], list(rels)
 
 
 def _refresh_sidx(disk, reader, imap, game_dir, sidx_path, sidx_node, log,

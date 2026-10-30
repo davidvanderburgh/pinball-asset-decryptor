@@ -110,10 +110,21 @@ def physical(fn, *args):
             ctx(ctypes.c_void_p(old))
 
 
-#: Where the Save states panel works: Windows through WSL, and macOS through
-#: the emulator's container, which carries criu since PAD-835. A Linux
-#: desktop has no passwordless root to run the slot scripts with.
-_SLOT_PLATFORMS = ("win32", "darwin")
+#: Where the Save states panel works: Windows through WSL, macOS through the
+#: emulator's container, which carries criu since PAD-835, and a Linux desktop
+#: whose root needs no password - the app run as root, or a sudo that asks
+#: none, which the Docker image gives its user (PAD-871). Any other Linux
+#: desktop has no root to run the slot scripts with: a GUI has nowhere to
+#: type a password into.
+def _slots_here():
+    return rig.savestates_possible()
+
+
+#: What the panel says on a Linux desktop without that root.
+_SLOTS_NEED_ROOT = ("Save states need the emulator to run as root, and on "
+                    "Linux the app can only do that without a password: "
+                    "start the app as root, or let your account use sudo "
+                    "without one.")
 
 
 # ----------------------------------------------------------------- volume
@@ -389,11 +400,9 @@ class EmulateTab(TabService):
             rt_enabled=True, check_label="Check setup…", check_enabled=True,
             fixaud_enabled=rig_ok, winreset_enabled=rig_ok,
             slots=[], slots_read=False, slot_sel=None,
-            slots_enabled=sys.platform in _SLOT_PLATFORMS,
+            slots_enabled=_slots_here(),
             slots_sum=("The slots appear with the next status poll."
-                       if sys.platform in _SLOT_PLATFORMS else
-                       "Slot management is available on Windows (WSL) "
-                       "and macOS."),
+                       if _slots_here() else _SLOTS_NEED_ROOT),
             game=None, which=None, mains_note="", not_card="",
             assets="", ovr_hint=rig.OVR_OFF, ovr_refused=False,
             cache=None, rename=None, gdisp=None)
@@ -1692,7 +1701,7 @@ class EmulateTab(TabService):
     # ------------------------------------------------------------------
     @rpc
     def slots_refresh(self):
-        if sys.platform not in _SLOT_PLATFORMS:
+        if not _slots_here():
             return False
 
         def run():
@@ -1748,9 +1757,11 @@ class EmulateTab(TabService):
         if self._slot_sel not in by_iid:
             self._slot_sel = None
         mac = sys.platform == "darwin"
+        wsl = sys.platform == "win32"       # a Linux desktop has no WSL (PAD-871)
         if self._slots_total is None:
             summary = ("Could not read the slots - is Docker running?" if mac
-                       else "Could not read the slots - is WSL up?")
+                       else "Could not read the slots - is WSL up?" if wsl
+                       else "Could not read the slots.")
         else:
             bits = []
             if game_now:
@@ -1762,8 +1773,8 @@ class EmulateTab(TabService):
             else:
                 bits.append("%d slot%s" % (shown, "" if shown == 1 else "s"))
             bits.append("all slots %s" % rig.human(self._slots_total))
-            bits.append(("free on the emulator's disk: %s" if mac else
-                         "free on the WSL disk: %s")
+            bits.append(("free on the WSL disk: %s" if wsl else
+                         "free on the emulator's disk: %s")
                         % rig.human(self._slots_free))
             summary = " · ".join(bits)
         # "No save states" only after a read that answered (a failed read
@@ -2727,7 +2738,11 @@ class EmulateTab(TabService):
     def launch_as_root(self):
         if no_rig():
             return False
-        return sys.platform == "win32" and bool(rig.wsl_home())
+        if sys.platform == "win32":
+            return bool(rig.wsl_home())
+        # a Linux desktop's Start is root where root needs no password
+        # (PAD-871, rig.watch_cmd)
+        return sys.platform != "darwin" and rig.linux_root_head() is not None
 
     def launch_state(self):
         return {

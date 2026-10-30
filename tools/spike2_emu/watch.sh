@@ -431,6 +431,11 @@ if [ -n "${PAD_CARD:-}" ]; then
              "on the card, so it cannot be emulated." >&2
         exit 1
     fi
+    if [ ! -f "$PAD_CARD" ]; then
+        echo "[watch] The card image this run was started with" >&2
+        pad_card_unseen "$PAD_CARD" watch
+        exit 1
+    fi
     # Keep the WHOLE output, not just the path: it is the only place that says
     # whether this run created the mount or joined one that already existed,
     # and teardown must not unmount a card someone else is using. The [card]

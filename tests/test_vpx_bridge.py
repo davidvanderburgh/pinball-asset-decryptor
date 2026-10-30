@@ -1432,3 +1432,21 @@ def test_a_saved_playfield_place_fits_its_monitor():
     x, y, w, h = pc.fit_on_monitor((4000, 0, 1500, 2250), 1.5, two)                        # on the small one
     assert h == 1080 and x >= 3840 and x + w <= 5760
     assert pc.fit_on_monitor((1, 2, 3, 4), 1.0, []) == (1, 2, 3, 4)
+
+
+def test_a_registration_whose_folder_is_gone_is_not_registered(tmp_path):
+    # PAD-850: the tab said "Registered" while PAD.Controller pointed at a
+    # deleted folder, and every table failed to load it
+    vs = pytest.importorskip("vpxsetup")
+    kit = tmp_path / "vpx"
+    kit.mkdir()
+    (kit / "padcontroller.py").write_text("")
+    py = tmp_path / "pythonw.exe"
+    py.write_bytes(b"")
+    server = '%s "C:/x/localserver.py" {7D5B2A1E}' % py
+    assert vs.registration_ok(str(kit), server)
+    assert vs.registration_ok(str(kit), '"%s" localserver.py' % py)            # a quoted exe
+    assert not vs.registration_ok(str(tmp_path / "gone"), server)               # the folder deleted
+    assert not vs.registration_ok(str(kit), str(tmp_path / "nopython.exe") + " x")
+    assert not vs.registration_ok("", server)
+    assert vs.controller_registered() in (True, False)                          # never raises

@@ -36,6 +36,12 @@ export default function Vpx() {
       + (have.length && lack.length ? " No card for " + lack.join(", ") + "." : ""));
   const playsAs = (t) => fits(t).length > 1 && (t.models || {})[t.title]
     ? "Plays as the " + t.models[t.title] + ". " : "";
+  // PAD-850: ONE list, alphabetical - the tables the app knows, a patched one
+  // with its Play button, and any other (PAD) table in the folder as its own row
+  const known = new Set(tables.map((t) => t.output));
+  const rows = tables.concat(patched.filter((n) => !known.has(n)).map((n) => ({
+    name: n.replace(/ \(PAD\)\.vpx$/i, ""), output: n, patched: true, extra: true })))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   const rtOk = s.runtime_state === "ready";
   // PAD-840: installed from here; the Emulate tab only offers it in some cases
   const rtFix = s.runtime_state === "absent" || s.runtime_state === "stale";
@@ -94,18 +100,15 @@ export default function Vpx() {
             <div class="vpx-acts"><${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
               onClick=${() => call("vpx.choose_tables")}>Choose folder…<//></div>
           </div>
-          ${tables.length ? tables.map((t) => html`<div class="vpx-table">
+          ${rows.length ? rows.map((t) => html`<div class="vpx-table">
             <div class="vpx-what"><div><b>${t.name}</b></div>
+              ${t.extra ? html`<div class="small muted">${t.output}</div>` : html`
               <div class="small muted">${t.by ? "by " + t.by : ""}${t.where ? ", on " + t.where : ""}</div>
-              <div class="small muted">${t.card ? playsAs(t) + "Card: " + base(t.card) : "No card image for " + fits(t).join(" or ") + " yet."}</div></div>
-            <${Chip} kind=${t.patched ? "ok" : ""} dot sm>${t.patched ? "Patched" : "Not patched"}<//>
+              <div class="small muted">${t.card ? playsAs(t) + "Card: " + base(t.card) : "No card image for " + fits(t).join(" or ") + " yet."}</div>`}</div>
+            ${t.patched ? html`<${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx}
+                onClick=${() => call("vpx.play", t.output)}>Play<//>`
+              : html`<${Chip} dot sm>Not patched<//>`}
           </div>`) : html`<div class="muted small">${s.loaded ? "No tables." : "Checking…"}</div>`}
-        <//>
-        <${Card} title="Play">
-          ${patched.length ? patched.map((n) => html`<div class="vpx-table">
-            <div class="vpx-what">${n}</div>
-            <${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx} onClick=${() => call("vpx.play", n)}>Play<//>
-          </div>`) : html`<div class="muted small">Patched tables show up here.</div>`}
         <//>
       </div>
     </div>

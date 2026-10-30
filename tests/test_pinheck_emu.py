@@ -163,6 +163,29 @@ def test_timer_interrupt_runs_the_handler_and_returns_to_the_main_code():
     assert 0 < ram(0x104) <= pic.clock // 2
 
 
+def test_count_keeps_moving_across_its_wrap():
+    """PAD-843: CP0 Count wraps at 2^32 (107.37 s emulated).  Masked before
+    the max(), the first read past the wrap stuck there: every later read in
+    the slice gave the same value, so a delayMicroseconds() spin in an
+    interrupt handler never got out (Rob Zombie hung 107 s into attract)."""
+    class Uc:
+        def __init__(self):
+            self.vals = []
+
+        def reg_write(self, reg, val):
+            self.vals.append(val)
+
+    pic = object.__new__(Pic32)
+    pic.clock = 2 * (1 << 32) + 20000       # just past the wrap, mid-slice
+    pic._count = (1 << 32) - 16
+    uc = Uc()
+    for _ in range(4):
+        pic._read_count(uc, 0, 4, 2)
+    assert all(0 <= v < (1 << 32) for v in uc.vals)
+    assert uc.vals[0] == 10000
+    assert uc.vals[1:] == [10008, 10016, 10024]
+
+
 def test_no_interrupt_while_disabled():
     pic = bare_machine()
     pic.sfr[0x1F800820] = 9999
@@ -470,6 +493,21 @@ def test_sound_plays_queues_and_stops_music(tmp_path):
     assert 3 not in s.channels
     s.packet(b"\x00C99\xff" + bytes(10) + b"\x01", 3000)
     assert s.levels[-1] == (3000, "missing C99")
+
+
+def test_music_by_name_with_the_play_once_bit(tmp_path):
+    """PAD-843: Rob Zombie's attract sound comes as 5a cd 30 (ZM0, bit 7 on
+    the M): it plays ZM0 once rather than reading as a missing name, and the
+    game's fade 15 s later (z 1 0) silences it."""
+    from tools.pinheck_emu.audio import RATE, Sound
+    _wav(tmp_path / "SFX" / "_FZ" / "ZM0.wav", 0.05)
+    s = Sound(str(tmp_path))
+    s.packet(b"Z\xcd0" + bytes(12) + b"\x09", 904815)
+    assert [t for _, t in s.levels] == ["music ZM0"]
+    assert s.channels[3].once
+    assert s.mix(RATE // 100).any()
+    s.packet(b"z\x01\x00" + bytes(12) + b"\x10", 919816)       # fade to 0
+    assert not s.mix(RATE // 100).any()
 
 
 def test_sound_priority_and_master_volume(tmp_path):

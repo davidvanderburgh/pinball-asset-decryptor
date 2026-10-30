@@ -333,8 +333,13 @@ class Pic32:
             uc.emu_stop()
 
     def _read_count(self, uc, address, size, reg):
-        self._count = max(self._count + 8, self.clock // 2) & 0xFFFFFFFF
-        uc.reg_write(reg, self._count)
+        # Kept unwrapped and masked only on the way into the register: masked
+        # here, the first read past the 2^32 wrap (107.37 s emulated) came back
+        # small, lost the max() to clock // 2 on every later read in the slice
+        # and masked to the same value again, so Count stood still and any
+        # spin on it never got out (PAD-843: Rob Zombie hung in attract).
+        self._count = max(self._count + 8, self.clock // 2)
+        uc.reg_write(reg, self._count & 0xFFFFFFFF)
 
     def _eret(self, uc, address, size, data):
         if self._in_isr:

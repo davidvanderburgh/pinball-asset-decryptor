@@ -1343,6 +1343,10 @@ def rig_cmd_root(script, *args):
     to them), and the two must not be one call that a wrong argument could
     flip.
     """
+    if sys.platform not in ("win32", "darwin") and \
+            linux_root_head() is not None:
+        # ...except where root needs no password after all (PAD-871)
+        return _linux_root_argv(script, args)
     if sys.platform != "win32":
         raise RuntimeError("rig_cmd_root is WSL-only")
     root_env = _rig_env()
@@ -1350,6 +1354,99 @@ def rig_cmd_root(script, *args):
         _wsl_head(root=True) + (["env"] + root_env if root_env else [])
         + ["bash", "%s/%s" % (_wsl_path(rig_dir()), script)]
         + [str(a) for a in args])
+
+
+#: linux_root_head()'s cache: [head, probed].
+_LINUX_ROOT = [None, False]
+
+#: How long ``sudo -n`` gets to answer.  It answers in milliseconds; the bound
+#: is for a sudo whose policy asks a directory server that is not there.
+_SUDO_PROBE_S = 10
+
+
+def linux_root_head():
+    """How a LINUX DESKTOP reaches root without a password (PAD-871): ``[]``
+    when the app already is root, ``["sudo", "-n", "-k"]`` when the user's
+    sudo needs no password, None when neither - and always None on Windows
+    and macOS, which have their own root (``wsl -u root``, the container).
+
+    Save states need it (criu can only freeze a root guest, watch.sh says
+    why), and a GUI has nowhere to type a password into, so a sudo that
+    would ask one is the same as no root at all - ``-n`` turns the prompt
+    into a refusal instead of a hang.  ``-k`` ignores a password typed into
+    a terminal a minute ago: that would pass this probe and then lapse under
+    the run, leaving a root game that the Stop button's sudo could no longer
+    reach.  Probed with the same ``env`` every root command here starts
+    with, so a sudoers rule narrower than that answers None rather than
+    clearing a launch it would refuse.
+
+    The Docker image (installer/docker) gives its user that rule, which is
+    how the container gets save states.  Probed once per app run.
+    """
+    if sys.platform in ("win32", "darwin"):
+        return None
+    if _LINUX_ROOT[1]:
+        return _LINUX_ROOT[0]
+    head = None
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        head = []
+    else:
+        try:
+            r = subprocess.run(["sudo", "-n", "-k", "env", "true"],
+                               stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL,
+                               timeout=_SUDO_PROBE_S)
+            if r.returncode == 0:
+                head = ["sudo", "-n", "-k"]
+        except Exception:                               # noqa: BLE001
+            head = None                     # no sudo, or it never answered
+    _LINUX_ROOT[:] = [head, True]
+    return head
+
+
+def savestates_possible():
+    """Whether this machine can run a checkpointable boot at all: Windows
+    (WSL) and macOS (the container) always, a Linux desktop when it has a
+    password-free root (:func:`linux_root_head`)."""
+    if sys.platform in ("win32", "darwin"):
+        return True
+    return linux_root_head() is not None
+
+
+#: What a root run on a Linux desktop must be handed back.  sudo's env_reset
+#: clears the session - the display, the audio server, the session bus - and
+#: watch.sh's dropped helpers (renderer, playfield, audio) need exactly
+#: those, the way WSLg's are simply there for ``wsl -u root``.  HOME is the
+#: desktop user's, for wsl_home()'s reason: root's own would be /root.
+_SESSION_VARS = ("HOME", "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY",
+                 "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE",
+                 "DBUS_SESSION_BUS_ADDRESS", "PULSE_SERVER", "LANG", "LC_ALL")
+
+
+def _linux_root_argv(script, args=(), env=()):
+    """A rig script as root on a Linux desktop, through
+    :func:`linux_root_head` - only called once that has answered.
+
+    Every ``PAD_*`` the app runs with rides along too (the Docker image's
+    PAD_FORCE_NATIVE, a rig slot), and PAD_STATE_SUDO=1 when root came from
+    sudo: the playfield runs dropped to the desktop user, and that is how its
+    Save and Load buttons know to ask ``sudo -n`` for the save-state scripts
+    (playfield._as_root), as the Mac's box does.
+    """
+    head = linux_root_head() or []
+    keep = ["%s=%s" % (k, os.environ[k]) for k in _SESSION_VARS
+            if os.environ.get(k)]
+    keep += ["%s=%s" % (k, v) for k, v in sorted(os.environ.items())
+             if k.startswith("PAD_")]
+    if head:
+        keep.append("PAD_STATE_SUDO=1")
+        # the rig is this user's: padpath.sh's own search, run as root, would
+        # look under /home/$SUDO_USER, which is not the Docker image's home
+        if os.environ.get("HOME") and not os.environ.get("PAD_HOME"):
+            keep.append("PAD_HOME=" + os.environ["HOME"])
+    return head + ["env"] + _rig.linux_host_env() + keep + list(env) \
+        + ["bash", os.path.join(rig_dir(), script)] + [str(a) for a in args]
 
 
 #: wsl_account()'s cache: [(user, home), probed].  One probe per app run is
@@ -1502,6 +1599,11 @@ def watch_cmd(minutes, env, savestates=True):
                 + list(rig_win_python_env()) + list(env)
                 + ["bash", "%s/watch.sh" % _wsl_path(rig_dir()),
                    str(minutes)])
+    if savestates and sys.platform not in ("win32", "darwin")             and linux_root_head() is not None:
+        # A Linux desktop (PAD-871): the same boot, as root by the one route
+        # that needs no password, or not at all - the ordinary run below.
+        return _linux_root_argv("watch.sh", [minutes],
+                                ["PAD_PIVOT=1"] + list(env))
     return rig_cmd("watch.sh", minutes, env=env)
 
 
@@ -1520,6 +1622,8 @@ def kill_cmd():
         if home:
             return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
                     "bash", "%s/killgame.sh" % _wsl_path(rig_dir())]
+    if linux_root_head() is not None:
+        return _linux_root_argv("killgame.sh")
     return rig_cmd("killgame.sh")
 
 
@@ -1532,6 +1636,8 @@ def restart_cmd():
         if home:
             return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
                     "bash", "%s/restartgame.sh" % _wsl_path(rig_dir())]
+    if linux_root_head() is not None:
+        return _linux_root_argv("restartgame.sh")
     return rig_cmd("restartgame.sh")
 
 
@@ -1552,6 +1658,12 @@ def status_cmd():
         if home:
             return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
                     "bash", "%s/status.sh" % _wsl_path(rig_dir())]
+    if linux_root_head() is not None and rigslot.slot() >= 1:
+        # A Linux desktop's root run (PAD-871) is read fine by the user's
+        # poll on rig 0, where an unreadable run counts as rig 0's
+        # (padslot.sh) - and sudo on every poll would fill the system log.
+        # Off rig 0 only root can tell whose run it is.
+        return _linux_root_argv("status.sh")
     return rig_cmd("status.sh")
 
 
@@ -1567,6 +1679,8 @@ def load_cmd(slot):
             return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
                     "PAD_RESTORE_KILL=1", "bash",
                     "%s/loadgame.sh" % _wsl_path(rig_dir()), str(slot)]
+    if linux_root_head() is not None:
+        return _linux_root_argv("loadgame.sh", [slot], ["PAD_RESTORE_KILL=1"])
     return rig_cmd("loadgame.sh", slot, env=("PAD_RESTORE_KILL=1",))
 
 
@@ -1681,9 +1795,10 @@ _SETUP_OPTIONAL = (
      "Multi-boot cards"),
 )
 
-#: OF THOSE FEATURES, THE ONES ONLY A WSL RUN EVER WANTS.  ``watch_cmd`` asks
-#: for the checkpointable boot on Windows and nowhere else, so a Linux
-#: desktop's Start never wants a static busybox or a criu - and naming a
+#: OF THOSE FEATURES, THE ONES ONLY A ROOT RUN EVER WANTS.  ``watch_cmd`` asks
+#: for the checkpointable boot on Windows, and on a Linux desktop only where
+#: root needs no password (PAD-871, :func:`linux_root_head`), so any other
+#: Linux desktop's Start never wants a static busybox or a criu - and naming a
 #: package that machine's runs would never use is a wrong accusation.  Card
 #: building is not like that: the Multi-boot tab builds its menu program the
 #: same way on every desktop, so the feature added by PAD-126 is deliberately
@@ -1796,11 +1911,11 @@ def _setup_optional_rows(facts):
     """
     if not facts:
         return []
-    wsl = facts.get("iswsl") != "0"
+    root_run = facts.get("iswsl") != "0" or linux_root_head() is not None
     return [(feat, _apt_name(facts, key, pkg), why)
             for key, pkg, why, _how, feat in _SETUP_OPTIONAL
             if facts.get(key) == "0"
-            and (wsl or feat not in _WSL_ONLY_FEATURES)]
+            and (root_run or feat not in _WSL_ONLY_FEATURES)]
 
 
 def _and_list(names):

@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y \
         e2fsprogs gnupg ffmpeg partclone zstd python3-zstandard tar unzip \
         xvfb webp xorriso pigz gcc libc6-dev xxd \
         qemu-user-static gcc-arm-linux-gnueabihf make fuse3 fuse2fs \
-        python3-gi gir1.2-webkit2-4.1 busybox-static \
+        python3-gi gir1.2-webkit2-4.1 busybox-static sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Barrels of Fun's old Godot 3 packs need GDRE Tools.
@@ -67,6 +67,14 @@ RUN set -eu; \
 RUN (bash /opt/pad/usr/bin/_internal/tools/spike2_emu/getcriu.sh \
         || install -m 755 /var/tmp/pad-criu/criu/criu/criu /usr/local/bin/criu) \
     && rm -rf /var/tmp/pad-criu /var/lib/apt/lists/*
+
+# Save states (PAD-871): criu can only freeze a game booted as root, and the
+# app runs as abc. The app reaches root only through a sudo that asks no
+# password (a desktop app has nowhere to type one), so abc gets that here.
+# It is root inside this container only; what the container itself may do
+# is still whatever `docker run` gave it (docs/guide/docker.md).
+RUN printf '%s\n' 'abc ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/pad-savestates \
+    && chmod 0440 /etc/sudoers.d/pad-savestates
 
 # Only the app's own window is maximized.  The desktop maximizes every
 # window, which would stack the emulator's game, controls and playfield

@@ -2354,8 +2354,10 @@ HELP_CONTENT = {
          "still runs; only save slots do nothing (\"The emulator runs on this PC. "
          "Save states do not yet.\"). No Ubuntu publishes criu, so the button builds "
          "it from source and says how long first. If only these cannot be had, your "
-         "Linux is left alone and save states stay off. Linux desktops are never "
-         "asked for them.\n"
+         "Linux is left alone and save states stay off. A Linux desktop is asked "
+         "for them only when the app can run the emulator as root without a "
+         "password (it runs as root, or your sudo asks none), because only then "
+         "are save states on there.\n"
          "- **Multi-boot cards need:** make, which builds a multi-boot card's boot "
          "menu. Every desktop is asked for it.\n\n"
          "### On Linux and macOS\n"
@@ -2554,7 +2556,8 @@ HELP_CONTENT = {
             "Mute.",
         ]),
         ("Save states", [
-            "**Save state** on the playfield window (Windows and Mac) checkpoints the whole "
+            "**Save state** on the playfield window (Windows, Mac, and Linux when the app "
+            "may run the emulator as root without a password) checkpoints the whole "
             "running game into a slot; **Load state** brings that exact moment back, "
             "mid-game too, even in a later session.",
             "- Every game has its own **ten slots**; one game's saves never load into, "

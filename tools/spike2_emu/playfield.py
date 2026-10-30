@@ -851,10 +851,17 @@ def _as_root(cmd):
     as root without a password (docker/Dockerfile's sudoers rule). The rule
     names ``/bin/bash``, so that is the path asked for. ``-n``: a password
     prompt would be a hang with nobody to answer it.
+
+    A Linux desktop or the Docker image (PAD-871) sets it too, where sudo
+    asks no password for anything. Its env_reset drops PAD_SLOT, and the
+    scripts find the guest among their slot's processes, so a run on a rig
+    other than 0 hands the slot over through ``env`` - only there: the box
+    runs on rig 0, and its rule names bash alone.
     """
     if (os.environ.get("PAD_STATE_SUDO") == "1" and hasattr(os, "geteuid")
             and os.geteuid() != 0):
-        return ["sudo", "-n", "/bin/bash"] + cmd[1:]
+        slot = ["env", "PAD_SLOT=%d" % padpath.slot()] if padpath.slot()             else []
+        return ["sudo", "-n"] + slot + ["/bin/bash"] + cmd[1:]
     return cmd
 
 

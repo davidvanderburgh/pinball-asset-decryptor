@@ -10,7 +10,7 @@ watch what you built before it goes near the machine.
 | Runs on | Windows (WSL2), Linux, macOS (container) | Windows (WSL2) | Windows (WSL2), Linux |
 | Needs | a card image | the game ISO + its purple USB key | the disk image |
 | Playfield window | Yes, clickable | Switch matrix | Switch window |
-| Save states | Yes (Windows, macOS) | No | No |
+| Save states | Yes (Windows, macOS, Linux run as root) | No | No |
 
 The American Pinball, Barrels of Fun, Pinball Brothers and Spooky Emulate
 tabs are described with their manufacturers in [Supported
@@ -137,7 +137,7 @@ every insert lit live and every switch clickable.
 - **Pause** (the Pause key or F9, in either window) freezes the whole game,
   video and sound too. The next press carries on from that frame.
 
-### Save states (Windows and Mac)
+### Save states
 
 **Save state** on the playfield window checkpoints the whole running game;
 **Load state** brings that moment back, mid-game too, even in a later
@@ -153,6 +153,12 @@ session.
 - They need `busybox-static` and `criu`. **Set up emulator…** gets both
   (criu is built from source, a few minutes). Without them every game
   still runs; only save states are off.
+- **On Linux** a game can only be frozen if it runs as root, and the app
+  cannot type a password: save states are on when the app itself runs as
+  root, or when your account may use `sudo` without a password (the Docker
+  image's does). Otherwise the slot list says so and every game still runs.
+  A run whose Linux will not let criu work (a container without the rights
+  below) starts without save states and the log says why.
 - **On a Mac** the emulator's container brings both. Docker Desktop cannot freeze a running game, so there a run starts without save states and the log says why; colima, which **Set up emulator…** installs, can.
 
 ### Sound and windows

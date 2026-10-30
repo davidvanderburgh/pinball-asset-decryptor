@@ -139,6 +139,7 @@ def test_load_in_another_mode_keeps_the_extras(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         w.call("ui.set", "extract", "output", str(proj))
         w.call("ui.select_tab", "color")
+        w.call("color.set_mode", "display")     # PAD-864: Spike 2 opens on Files
         w.drain()
         w.window.ask_open = lambda *a, **k: str(path)
         assert w.call("color.load_file") is True

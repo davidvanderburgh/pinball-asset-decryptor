@@ -347,7 +347,11 @@ def test_color_tab_stages_on_the_project(tmp_path):
         s = w.state("color")
         assert s["has_project"] and s["active"] is False
         assert s["sample_url"].startswith("data:image/png;base64,")
-        rev = s["rev"]
+        # PAD-864: Spike 2 opens on individual files; this is the overlay's
+        assert s["mode"] == "assets"
+        w.call("color.set_mode", "display")
+        w.drain()
+        rev = w.state("color")["rev"]
 
         w.call("color.preset", "recommended")
         w.drain()

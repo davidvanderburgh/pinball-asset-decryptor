@@ -320,7 +320,7 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
         ${MODES.map((m) => {
           const used = !!(parts[PART[m.value]] || {}).set;
           return html`<button type="button" role="tab" key=${m.value} aria-selected=${mode === m.value ? "true" : "false"}
-            class=${cx(mode === m.value && "on")} onClick=${() => mode !== m.value && setMode(m.value)}
+            class=${cx(mode === m.value && "on", m.value === "display" && "cpd-apart")} onClick=${() => mode !== m.value && setMode(m.value)}
             ...${tip({ head: SHORT[m.value] + (used ? ": in use" : ": changes nothing yet"), lines: [m.title] })}>
             ${SHORT[m.value]}${used ? html`<span class="cpd-dot" aria-label="in use"></span>` : null}</button>`;
         })}

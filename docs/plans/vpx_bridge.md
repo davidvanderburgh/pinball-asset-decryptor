@@ -388,3 +388,43 @@ to patch the known tables, and never distribute the tables themselves.
   downloads (both "(PAD)" copies written), unlock and remove at run time,
   hidden without a code; tests/test_vpx_tab.py and the setup tests in
   tests/test_vpx_bridge.py.
+
+## Lamps that show what the machine lights (PAD-859)
+
+David (2026-10-30): "Bond VPX lights not mapped correctly. Most of them are
+not mapped or are missing (starting a cat woman mode should light the
+correct indicators)" - he meant Batman, and Bond as well, and the lessons
+for every other table.
+
+* **Bond** was mapped by guess: of the LE's 105 placed playfield LEDs, 14
+  inserts had no table light (the left lane and right orbit arrows, the
+  rocket ring, Oddjob, the flashers) and six lights sat on the wrong one
+  (the side loop arrow on a light by the pops). The rig showed what it cost:
+  in Rosa Klebb's henchman mode the game lights seven RGB shot arrows, and
+  the table showed four of them. The map is rebuilt by place - the table's
+  own art (it is the LE's real playfield) fitted to led_io.txt on 41 inserts,
+  rms 6 px - and, where the tribute repainted an area, by the insert's shape;
+  12 retrofit lights fill the inserts it lacks, 23 lights it has and the
+  machine does not are held dark.
+* **Batman 66**'s own `LampTimer` (every frame) read `Controller.ChangedLamps`
+  whenever a backglass is up, a leftover of its ROM days; with `Controller`
+  being PAD.Controller it took a share of the lamp changes, and the lights
+  whose change it took stayed wrong. And the Catwoman billboards, Bat
+  Computer, Crime Analyzer, pops and bat signal were never wired, because
+  the tribute shows them with fader bulbs, plastic images and a flasher, not
+  Lights: `lamp_calls` hands those LEDs to subs of its own. On the rig, the
+  Catwoman ramp shots light both billboards (R+G); the table now does too.
+* **RGB colour**: Spike 2 arrows say which mode a shot belongs to by colour;
+  the bridge said only on/off. Lamps marked `rgb` now arrive as their colour.
+* **Every other map**, through `vpxlamps.py audit`: JAWS was missing 40
+  inserts (the return lanes, the beach rescue lights, the shark and Orca
+  bash toys), Jurassic Park 26, Iron Maiden 18, Star Wars 14 (the Death Star
+  lasers, the pops), Deadpool 1; `suggest` mended each by its fit (rms 1-6
+  px). Aerosmith had Batman's lamp-stealing loop. Stranger Things' fit does
+  not hold (its layout departs from Stern's) and its unwired inserts are its
+  mode names: by eye, next. The builds that place no LEDs (Rush, Foo
+  Fighters, Guardians, Sword of Rage, Aerosmith, TMNT) are checked by name.
+
+Proof: rig frames of each mode, drawn through the controller and the map on
+the table's art (`vpxlamps.py lit`), before and after; a cscript run of the
+generated lamp code with stand-in lights; every patched table re-signs.

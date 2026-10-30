@@ -293,6 +293,42 @@ timer, every `LightSeq` stopped at init) with its hit subs no longer called
 animate the rubbers). `vpxkeys.py lamps <file>` makes the table write every
 mapped light's state, to compare with the machine's `padled` plane.
 
+Four more map fields (PAD-859), all in the generated script:
+
+* `"rgb": true` on a lamp whose three LEDs are an insert's -R, -G, -B: the
+  controller reports it lit as its colour (VBScript `RGB()`, brightest
+  channel at 255; never 0 or 1) and the light takes it as `ColorFull`, so a
+  mode's shot arrows show the mode's colour. ROM tables' maps never carry
+  it: their own lamp code takes 0/1.
+* `retrofit_lights`: `{"lights": {name: {"leds", "clone", "at"}}}`, a new
+  Light cloned from `clone` at `at` (table units) for an insert the table
+  has no light for (Bond's rocket ring and right orbit arrow).
+* `dark`: lights the machine has no LED for, held off, so a light the
+  shadow game left on cannot stay on.
+* `lamp_calls`: `{name: {"leds", "call", "arg", "show"}}` for an insert the
+  table shows with something other than a Light (Batman's Catwoman
+  billboards are fader bulbs, its pops are plastic images): `call` is a sub
+  of `extra_vbs`, called `(arg, value)` when the LED changes; `show` names
+  the objects, for `vpxlamps.py lit`.
+
+The patcher also empties a tribute's own reads of `Controller.ChangedLamps`
+(Batman 66's and Aerosmith's `LampTimer` kept one from their ROM days): with
+`Controller` being PAD.Controller, each read took changes the bridge waits
+for.
+
+**Checking a map: `vpxlamps.py`.** `audit <map> <table.vpx> <led_io.txt>
+[overlay.png]` fits the table's light positions to the title's LED places
+over the lights the map puts on one insert, then lists the inserts no light
+shows (and, for builds without positions, the named LEDs no light shows),
+the lights neither wired nor dark (GI collections and lights the script
+never names left out) and the wired lights far from their insert.
+`suggest ... [--write]` mends what audit found by the fit (the nearest free
+light, a free light beside a shown insert, otherwise a retrofit light;
+refused when the fit is over 10 px, as on Stranger Things), `rgb <map>
+<led_io.txt> [--write]` marks the RGB inserts, and `lit <map> <table.vpx>
+<led_io.txt> <padled> <out.png>` draws what the table shows for one sample
+of a rig's `dump/padled` on the table's own art.
+
 ## A table from nothing: `vpxgen.py <title> <rig tables dir> <out dir>`
 
 A title with no tribute still says where everything is. The rig's

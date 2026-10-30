@@ -2460,8 +2460,9 @@ static int win_open(void)
      * KeyPressMask (1) and KeyReleaseMask (2) are what make the keyboard work. */
     /* ButtonPress/ButtonRelease/Button1Motion (1<<2, 1<<3, 1<<8): PAD-811's
      * drag to move / resize a borderless window and double-click for full
-     * screen (disp_button, disp_motion) */
-    XSelectInput(xdpy, xwin, (1L << 17) | (1L << 2) | (1L << 3) | (1L << 8) | 1L | 2L);
+     * screen (disp_button, disp_motion); PointerMotion (1<<6, PAD-845) for
+     * the resize arrows over the edges (disp_hover) */
+    XSelectInput(xdpy, xwin, (1L << 17) | (1L << 2) | (1L << 3) | (1L << 6) | (1L << 8) | 1L | 2L);
     wm_delete = XInternAtom(xdpy, "WM_DELETE_WINDOW", 0);
     XSetWMProtocols(xdpy, xwin, &wm_delete, 1);
     XMapWindow(xdpy, xwin);
@@ -2905,6 +2906,39 @@ static void disp_button(int x, int y, int xr, int yr)
     disp_down_x = x; disp_down_y = y; disp_down_xr = xr; disp_down_yr = yr;
 }
 
+/* EWMH direction of a point in the window: 0 top-left 1 top 2 top-right
+ * 3 right 4 bottom-right 5 bottom 6 bottom-left 7 left 8 move */
+static long disp_dir(int x, int y)
+{
+    int l = x < DISP_EDGE, r = x >= win_w - DISP_EDGE;
+    int top = y < DISP_EDGE, bot = y >= win_h - DISP_EDGE;
+    return top ? (l ? 0 : r ? 2 : 1) : bot ? (l ? 6 : r ? 4 : 5) : l ? 7 : r ? 3 : 8;
+}
+
+/* ★ THE RESIZE ARROWS (PAD-845, David: "can we show the cursor for resizing
+ * on the display too when we are at the border?"). Over the DISP_EDGE band
+ * the pointer is the X font cursor for that edge or corner, the same band
+ * disp_press resizes from; inside it, and whenever the window is not ours to
+ * move (no setting, a border, full screen), the default arrow. Set only when
+ * the band changes. */
+extern unsigned long XCreateFontCursor(XDisplay *, unsigned int);
+extern int XDefineCursor(XDisplay *, unsigned long, unsigned long);
+static unsigned long disp_cursor[8];
+static long disp_cursor_dir = 8;
+
+static void disp_hover(int x, int y)
+{
+    /* XC_top_left_corner, top_side, top_right_corner, right_side,
+     * bottom_right_corner, bottom_side, bottom_left_corner, left_side */
+    static const unsigned shape[8] = { 134, 138, 136, 96, 14, 16, 12, 70 };
+    long dir = (!disp_want.set || disp_cur_border || disp_cur_fs) ? 8 : disp_dir(x, y);
+    if (dir == disp_cursor_dir) return;
+    disp_cursor_dir = dir;
+    if (dir < 8 && !disp_cursor[dir]) disp_cursor[dir] = XCreateFontCursor(xdpy, shape[dir]);
+    XDefineCursor(xdpy, xwin, dir < 8 ? disp_cursor[dir] : 0);   /* 0: None, the default */
+    XFlush(xdpy);
+}
+
 static void disp_motion(int xr, int yr, unsigned long t)
 {
     if (!disp_down) return;
@@ -2920,12 +2954,7 @@ static void disp_press(int x, int y, int xr, int yr, unsigned long t)
         int type; unsigned long serial; int send_event; void *display;
         unsigned long window, message_type; int format; long data[5];
     } c; } ev;
-    int l = x < DISP_EDGE, r = x >= win_w - DISP_EDGE;
-    int top = y < DISP_EDGE, bot = y >= win_h - DISP_EDGE;
-    /* EWMH directions: 0 top-left 1 top 2 top-right 3 right 4 bottom-right
-     * 5 bottom 6 bottom-left 7 left 8 move */
-    long dir = top ? (l ? 0 : r ? 2 : 1) : bot ? (l ? 6 : r ? 4 : 5)
-                                               : l ? 7 : r ? 3 : 8;
+    long dir = disp_dir(x, y);
     if (!disp_want.set || disp_cur_border || disp_cur_fs) return;
     XUngrabPointer(xdpy, t);
     memset(&ev, 0, sizeof ev);
@@ -3291,9 +3320,12 @@ static void win_pump(void)
         case 5:                        /* ButtonRelease */
             if (ev.ul[4] == xwin && ev.i[21] == 1) disp_down = 0;
             break;
-        case 6:                        /* MotionNotify (button 1 down):
-                                          x_root y_root at ints 18-19 */
-            if (ev.ul[4] == xwin) disp_motion(ev.i[18], ev.i[19], ev.ul[7]);
+        case 6:                        /* MotionNotify: x y at ints 16-17,
+                                          x_root y_root at 18-19 */
+            if (ev.ul[4] == xwin) {
+                disp_hover(ev.i[16], ev.i[17]);
+                disp_motion(ev.i[18], ev.i[19], ev.ul[7]);
+            }
             break;
         case 12:                       /* Expose */
             legend_dirty = 1;

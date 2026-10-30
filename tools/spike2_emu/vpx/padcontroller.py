@@ -640,29 +640,40 @@ def resized(edges, win, client, start, pt, min_w=PLAYER_MIN_W):
 
 
 class PlayerGrips:
-    """The playfield window's edges, grabbed the way the game display's are
-    (PAD-845). David: "you have to be exact on the border and there's no
-    cursor change ... I wish it worked more like the display where you could
-    loosely grab 16 pixels from the edge". Visual Pinball's window procedure
-    is its own, so this lays a window of ours over the picture's outer 16
-    pixels: a ring (SetWindowRgn), all but invisible (alpha 1, which still
-    takes the mouse), owned by the player so it stays just above it. Over the
-    ring the cursor is the resize arrow for that edge or corner; a press
-    there resizes the player, keeping the table's proportions (resized()),
-    and a double-click fills the monitor and back (Bridge._fill_player). It
-    never takes the focus (WS_EX_NOACTIVATE, MA_NOACTIVATE): Visual Pinball
-    pauses the moment it loses it. One thread with its own message loop,
-    following the player every 50 ms."""
+    """The playfield window by hand, the way the game display is (PAD-845).
+    David: "I wish it worked more like the display where you could loosely
+    grab 16 pixels from the edge", "we should be able to double click it to
+    fill the screen and it should be borderless". Visual Pinball's window
+    procedure is its own, so a window of ours lies over the whole picture,
+    all but invisible (alpha 1, which still takes the mouse) and owned by the
+    player so it stays just above it:
+
+      * within GRIP_EDGE px of an edge or corner the cursor is that resize
+        arrow, and a drag resizes the player in the table's proportions
+        (resized());
+      * anywhere else a drag moves it;
+      * a press becomes a drag only after GRIP_SLOP px, so a click stays a
+        click, and a double-click anywhere fills the monitor and the next
+        puts it back (Bridge._fill_player).
+
+    It never takes the focus (WS_EX_NOACTIVATE, MA_NOACTIVATE): Visual
+    Pinball pauses the moment it loses it. The cost: the table gets no mouse
+    of its own while this is up (`padvpx player frame on` brings back the
+    frame instead). One thread with its own message loop, following the
+    player every 50 ms."""
 
     CLASS = "PADPlayerGrips"
+    GRIP_SLOP = 4
     CURSORS = {"l": 32644, "r": 32644, "t": 32645, "b": 32645,          # IDC_SIZEWE, IDC_SIZENS
-               "tl": 32642, "br": 32642, "tr": 32643, "bl": 32643}      # IDC_SIZENWSE, IDC_SIZENESW
+               "tl": 32642, "br": 32642, "tr": 32643, "bl": 32643,      # IDC_SIZENWSE, IDC_SIZENESW
+               None: 32512}                                            # IDC_ARROW
 
     def __init__(self, bridge):
         self.bridge = bridge
         self.hwnd = 0
         self.player = 0
         self.placed = None
+        self.press = None
         self.drag = None
         self.tid = 0
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -731,30 +742,26 @@ class PlayerGrips:
                                                         "PAD grips", 0x80000000, 0, 0, 1, 1, player, 0,
                                                         self.hinst, None)
                     u.SetLayeredWindowAttributes(ctypes.c_void_p(self.hwnd), 0, 1, 2)    # alpha 1: there, unseen
-                    log("player grips on: grab the playfield %d px inside its edge to resize it" % GRIP_EDGE)
+                    log("player grips on: drag the playfield to move it, %d px from an edge to resize it, "
+                        "double-click it to fill the screen" % GRIP_EDGE)
             if self.hwnd and not self.drag:
                 self._follow()
         except Exception as exc:                            # noqa: BLE001
             log("player grips: %s" % exc)
 
     def _follow(self):
-        """Over the picture's outer GRIP_EDGE pixels, wherever the player is."""
+        """Over the whole picture, wherever the player is."""
         import ctypes
-        u, gdi = self.u, ctypes.windll.gdi32
+        u = self.u
         c = Bridge._client_on_screen(self.player)
         if c == self.placed:
             return
         self.placed = c
-        x, y, w, h = c
-        if u.IsZoomed(ctypes.c_void_p(self.player)) or w <= 3 * GRIP_EDGE or h <= 3 * GRIP_EDGE:
+        if u.IsZoomed(ctypes.c_void_p(self.player)) or c[2] < 2 * GRIP_EDGE or c[3] < 2 * GRIP_EDGE:
             u.ShowWindow(ctypes.c_void_p(self.hwnd), 0)
             return
-        outer, inner = gdi.CreateRectRgn(0, 0, w, h), gdi.CreateRectRgn(GRIP_EDGE, GRIP_EDGE, w - GRIP_EDGE, h - GRIP_EDGE)
-        gdi.CombineRgn(outer, outer, inner, 4)               # RGN_DIFF: the ring
-        gdi.DeleteObject(inner)
-        u.SetWindowRgn(ctypes.c_void_p(self.hwnd), ctypes.c_void_p(outer), True)   # the window owns it now
-        # SWP_NOACTIVATE | SWP_SHOWWINDOW; HWND_TOP keeps it over its owner
-        u.SetWindowPos(ctypes.c_void_p(self.hwnd), None, x, y, w, h, 0x0010 | 0x0040)
+        # SWP_NOACTIVATE | SWP_SHOWWINDOW; an owned window stays over its owner
+        u.SetWindowPos(ctypes.c_void_p(self.hwnd), None, *c, 0x0010 | 0x0040)
 
     def _point(self):
         import ctypes
@@ -771,41 +778,52 @@ class PlayerGrips:
             if msg == 0x0021:                                # WM_MOUSEACTIVATE
                 return 3                                     # MA_NOACTIVATE: the player keeps the focus
             if msg == 0x0020:                                # WM_SETCURSOR
-                edge = self.drag[0] if self.drag else grip_edge(self._point(), Bridge._client_on_screen(self.player))
-                if edge:
-                    u.SetCursor(u.LoadCursorW(None, ctypes.c_void_p(self.CURSORS[edge])))
-                    return 1
-            elif msg == 0x0201:                              # WM_LBUTTONDOWN
+                edge = (self.drag or self.press or (grip_edge(self._point(), Bridge._client_on_screen(self.player)),))[0]
+                edge = None if edge == "move" else edge
+                u.SetCursor(u.LoadCursorW(None, ctypes.c_void_p(self.CURSORS[edge])))
+                return 1
+            if msg == 0x0201:                                # WM_LBUTTONDOWN: only remembered
                 p = self._point()
                 client = Bridge._client_on_screen(self.player)
-                edge = grip_edge(p, client)
-                if edge:
-                    self.drag = (edge, window_rect(self.player), client, p)
-                    u.SetCapture(ctypes.c_void_p(hwnd))
+                self.press = (grip_edge(p, client) or "move", window_rect(self.player), client, p)
+                u.SetCapture(ctypes.c_void_p(hwnd))
                 return 0
-            elif msg == 0x0200 and self.drag:                # WM_MOUSEMOVE while dragging
-                to = resized(self.drag[0], self.drag[1], self.drag[2], self.drag[3], self._point())
+            if msg == 0x0200 and (self.press or self.drag):  # WM_MOUSEMOVE with the button down
+                p = self._point()
+                if not self.drag:
+                    s = self.press[3]
+                    if abs(p[0] - s[0]) < self.GRIP_SLOP and abs(p[1] - s[1]) < self.GRIP_SLOP:
+                        return 0
+                    self.drag, self.press = self.press, None
+                edge, win, client, start = self.drag
+                if edge == "move":
+                    to = (win[0] + p[0] - start[0], win[1] + p[1] - start[1], win[2], win[3])
+                else:
+                    to = resized(edge, win, client, start, p)
                 if to != window_rect(self.player):
                     u.SetWindowPos(ctypes.c_void_p(self.player), None, *to, 0x4 | 0x10)   # NOZORDER | NOACTIVATE
                     self.placed = None
                     self._follow()
                 return 0
-            elif msg in (0x0202, 0x0215) and self.drag:      # WM_LBUTTONUP, WM_CAPTURECHANGED
-                log("player window resized from its %s grip: %s" % (self.drag[0], window_rect(self.player)))
-                self.drag = None
+            if msg in (0x0202, 0x0215):                      # WM_LBUTTONUP, WM_CAPTURECHANGED
+                if self.drag:
+                    log("player window %s by hand: %s" % ("moved" if self.drag[0] == "move" else
+                                                          "resized from its %s edge" % self.drag[0],
+                                                          window_rect(self.player)))
+                self.press = self.drag = None
                 if msg == 0x0202:
                     u.ReleaseCapture()
                 self.placed = None
                 return 0
-            elif msg == 0x0203:                              # WM_LBUTTONDBLCLK: fill the monitor, or back
-                self.drag = None
+            if msg == 0x0203:                                # WM_LBUTTONDBLCLK: fill the screen, or back
+                self.press = self.drag = None
                 u.ReleaseCapture()
                 self.bridge._fill_player(self.player)
                 self.placed = None
                 return 0
         except Exception as exc:                            # noqa: BLE001
             log("player grips: %s" % exc)
-            self.drag = None
+            self.press = self.drag = None
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
 
@@ -1249,8 +1267,8 @@ class Bridge:
     def _frame_player(self, hwnd):
         import ctypes
         u = ctypes.windll.user32
-        if padlaunch.kit_load().get("player_frame", True) is False:
-            return False
+        if not padlaunch.kit_load().get("player_frame", False):
+            return False          # borderless, as the game display (PAD-845): PlayerGrips moves and resizes it
         style = u.GetWindowLongW(ctypes.c_void_p(hwnd), -16)
         if style & self._WS_FRAME != self._WS_FRAME:
             u.SetWindowLongW(ctypes.c_void_p(hwnd), -16, style | self._WS_FRAME)

@@ -154,6 +154,13 @@ def default_v(now=None):
     return "9.%04d" % (minute % 9000 + 1000)
 
 
+def version_of_out(out):
+    """'.../TBL-v9.0853.zip' -> '9.0853': the tab names the file, and the name IS the
+    version on the machine (its update menu reads it off the name)."""
+    m = re.match(r"^TBL-v([0-9]+(?:\.[0-9]+)*)\.zip$", os.path.basename(out or ""), flags=re.I)
+    return m.group(1) if m else None
+
+
 def check_v(v, n_builds):
     if not VERSION_RE.match(v or ""):
         raise Refused("--version %r: the machine's update menu and Version Select list only "
@@ -172,7 +179,8 @@ def _inputs(a):
     if 1 + len(a.extra) > MAX_IMAGES:
         raise Refused("at most %d images in one Big Lebowski multi-boot" % MAX_IMAGES)
     zs = [TblZip(a.primary)] + [TblZip(e) for e in a.extra]
-    v = check_v(getattr(a, "version", None) or default_v(), len(zs) - 1)
+    v = check_v(getattr(a, "version", None) or version_of_out(getattr(a, "out", None)) or default_v(),
+                len(zs) - 1)
     for z in zs:
         if z.version == v:
             raise Refused("%s is version %s, the multi-boot's own: pick another --version"
@@ -272,7 +280,8 @@ def conf_from_args(a, targets, media, titles_default, subtitles_default):
     return render_conf(targets, titles, subtitles, a.default or 0, 15 if a.timeout is None else a.timeout,
                        rows, move, confirm, volume, theme=a.theme, colors=mkc.parse_color_flags(a.color),
                        heading=a.heading, text_size=a.text_size, counter=a.counter,
-                       countdown_word=a.countdown_word, footer=footer, learn=bool(getattr(a, "learn", False)))
+                       countdown_word=a.countdown_word, footer=footer, learn=bool(getattr(a, "learn", False)),
+                       default_card=getattr(a, "default_card", None))
 
 
 # ============================================================================== the zip
@@ -383,17 +392,16 @@ def builds_text(zs, v):
 
 def build_zip(a):
     zs, v = _inputs(a)
-    out_default = "TBL-v%s.zip" % v
+    want = "TBL-v%s.zip" % v
     out = os.path.abspath(a.out)
     if os.path.isdir(out):
-        out = os.path.join(out, out_default)
-    out = os.path.abspath(check_output_path(out, [z.path for z in zs], force=a.force))
-    want = "TBL-v%s.zip" % v
+        out = os.path.join(out, want)
     if os.path.basename(out) != want:
-        # the machine's update menu reads the version off the FILE NAME; the folder inside must match
-        say("note: the machine's update menu reads the version off the file name: it is written as %s" % want)
-        out = os.path.join(os.path.dirname(out), want)
-        out = os.path.abspath(check_output_path(out, [z.path for z in zs], force=a.force))
+        # the machine's update menu reads the version off the FILE NAME, and the
+        # folder inside must be that version: a zip named otherwise never installs
+        raise Refused("--out %s: the machine's update menu reads the version off the file name, "
+                      "so it must be %s" % (os.path.basename(out), want))
+    out = os.path.abspath(check_output_path(out, [z.path for z in zs], force=a.force))
     check_selector_dir(a.selector_dir)
     media = mkc.plan_media(a.media_dir, len(zs)) if a.media_dir else None
     targets = targets_of(zs, v)
@@ -744,9 +752,11 @@ def main(argv=None):
         s.add_argument("--cache-dir", help="(accepted for the tab; nothing is cached)")
         if name == "plan":
             s.add_argument("--media-dir")
+            s.add_argument("--out", help="the zip the build will write: its name gives the version")
         else:
-            s.add_argument("--out", required=True, help="the zip to write (or a folder: TBL-v<V>.zip in it)")
+            s.add_argument("--out", required=True, help="the zip to write, TBL-v<V>.zip (or a folder for it)")
             _add_conf_flags(s)
+            s.add_argument("--default-card", type=int)
             s.add_argument("--force", action="store_true")
             s.add_argument("--workdir")
             s.add_argument("--keep-work", action="store_true")

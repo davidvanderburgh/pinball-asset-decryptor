@@ -111,6 +111,9 @@ pyinstaller \
     `# into the tab's container with the two leaf modules mkbofmulti.py` \
     `# imports from a bare python3 (multiboot_docker._PACKAGE_FILES).` \
     --add-data "$ROOT_DIR/tools/bof_emu:tools/bof_emu" \
+    `# The Dutch Pinball rig, for the Big Lebowski Multi-boot tab (PAD-853),` \
+    `# staged into the tab's container like the others (multiboot_docker._RIGS).` \
+    --add-data "$ROOT_DIR/tools/dp_emu:tools/dp_emu" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/pck_directory.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \

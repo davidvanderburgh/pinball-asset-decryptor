@@ -140,5 +140,19 @@ Every failure ends on the newest stock folder, exactly as the machine would boot
    remembered 9.08531 without making it again. `PADSELECT_PROCSW_PRELOAD` puts the fake
    board under the reader ONLY: preloaded into the game, aaiwshim's Mix_OpenAudio hook
    cannot find TBL's SDL 1.2 mixer and the game dies ("mixer system not initialized").
-6. The Multi-boot tab: a Dutch Pinball backend (`multiboot_backend.py`), the TBL
-   capability, before/after shots.
+6. DONE The Multi-boot tab: `multiboot_backend.DP` (and `update_file`, the flag the tab's
+   update-file steps and words key on, BOF's and DP's), `multiboot=True` on the Dutch
+   Pinball manufacturer, the DP words for the badge, the list and the size strip; the
+   plan is given the output's name (its version). tests/test_multiboot_dp.py. The tab's
+   own selector -> plan -> build -> verify command lines, run as they are, wrote a
+   TBL-v9.0854.zip that verifies. scripts/shot_pad853.py takes the before/after pair.
+   Linux and macOS bundles now carry tools/dp_emu (Windows ships it whole already).
+
+## On the machine, for the owner
+
+1. Copy TBL-v9.xxxx.zip onto a USB stick; service menu -> USB update -> install it.
+2. Service menu -> Version Select -> 9.xxxx -> YES. The game restarts into the menu.
+3. Every power-up: flippers choose, START boots, the countdown boots the last pick.
+4. To leave: Version Select another version (and Delete 9.xxxx and its builds 9.xxxx1...).
+   Install a Dutch Pinball update while running the STOCK build: the update copies the
+   running version's assets into the new version, and a mod's would come along.

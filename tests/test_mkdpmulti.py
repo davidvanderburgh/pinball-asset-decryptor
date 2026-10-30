@@ -79,6 +79,10 @@ def test_plan(inputs, capsys):
     assert "image-size 1 9.12341 " in out
     assert "fat32: fits" in out and "zip-size " in out and "fits USB 8G stick size" in out
     assert "select 9.1234 in Version Select" in out
+    # the tab gives the output's name instead of a --version
+    assert md.main(["plan", "--primary", inputs["stock"], "--extra", inputs["mod"],
+                    "--out", "/x/TBL-v9.7777.zip"]) == 0
+    assert "image-size 1 9.77771 " in capsys.readouterr().out
 
 
 def test_build_shape(inputs):
@@ -130,10 +134,26 @@ def test_inject_rewrites_the_menu_and_keeps_the_builds(inputs):
     assert md.main(["verify", "--zip", out]) == 0
 
 
-def test_out_is_named_for_the_version(inputs):
+def test_out_must_be_named_for_the_version(inputs):
+    # the machine's update menu reads the version off the name: any other name is refused
     rc = md.main(["build", "--primary", inputs["stock"], "--extra", inputs["mod"], "--version", "9.4321",
                   "--out", str(inputs["dir"] / "whatever.zip"), "--selector-dir", inputs["sel"]])
+    assert rc == 2 and not os.path.exists(str(inputs["dir"] / "whatever.zip"))
+    # a folder gets TBL-v<V>.zip in it
+    rc = md.main(["build", "--primary", inputs["stock"], "--extra", inputs["mod"], "--version", "9.4321",
+                  "--out", str(inputs["dir"]), "--selector-dir", inputs["sel"]])
     assert rc == 0 and os.path.isfile(str(inputs["dir"] / "TBL-v9.4321.zip"))
+
+
+def test_version_comes_from_the_name_the_tab_gives(inputs):
+    # the tab names the output (TBL-v9.xxxx.zip) and passes no --version
+    out = str(inputs["dir"] / "TBL-v9.2468.zip")
+    rc = md.main(["build", "--primary", inputs["stock"], "--extra", inputs["mod"], "--out", out,
+                  "--selector-dir", inputs["sel"], "--default-card", "1"])
+    assert rc == 0
+    with zipfile.ZipFile(out) as z:
+        assert z.read("9.2468/pad/images.conf").decode().count("image=9.24681|") == 1
+        assert "default_card=1" in z.read("9.2468/pad/images.conf").decode()
 
 
 @pytest.mark.parametrize("version,why", [("9.12345", "characters"), ("v9", "digits and dots")])

@@ -973,7 +973,7 @@ def test_suggest_title_splits_the_card_name():
     assert suggest_title("card.img") == ("card", "")
 
 
-def test_capability_is_spike2_jjp_and_bof_only(manufacturers_by_key):
+def test_capability_is_spike2_jjp_bof_and_dp_only(manufacturers_by_key):
     """Multi-boot is Stern's Spike 2 era, Jersey Jack (item 118: the same
     tab with a JJP backend behind it) and Barrels of Fun (PAD-342: a BOF
     backend) - and nobody else."""
@@ -991,8 +991,9 @@ def test_capability_is_spike2_jjp_and_bof_only(manufacturers_by_key):
         stern.set_era("spike2")
     assert manufacturers_by_key["jjp"].capabilities.multiboot is True
     assert manufacturers_by_key["bof"].capabilities.multiboot is True
+    assert manufacturers_by_key["dp"].capabilities.multiboot is True      # PAD-853
     for key, mfr in manufacturers_by_key.items():
-        if key not in ("stern", "jjp", "bof"):
+        if key not in ("stern", "jjp", "bof", "dp"):
             assert getattr(mfr.capabilities, "multiboot", False) is False, key
 
 

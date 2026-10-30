@@ -28,6 +28,8 @@ PREVIEW=0
 if [ "${1:-}" = "--preview" ]; then PREVIEW=1; shift; fi
 SEL=${2:-${DP_SELECTOR_DIR:-/var/tmp/dpselect}}
 BUILD=${DP_SELECTOR_BUILD:-/var/tmp/dpselect_build}
+# a build folder another user made (a rig run as root) is not ours to write the log into
+if [ -e "$BUILD" ] && [ ! -w "$BUILD" ]; then BUILD=$BUILD.$(id -u); fi
 DEJAVU=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
 FILES="dpselect dpprocsw padselect.sh"
 

@@ -371,3 +371,20 @@ def add_clip(data, name, size, path=None, spaces=False):
     info = {"name": name, "clip_id": cid, "path": path, "size": size,
             "clips": len(check.library.entries), "md5": hashlib.md5(new).hexdigest()}
     return new, info
+
+
+def set_clip_size(data, name, size):
+    """PAD-862: the bank with clip ``name``'s size field set to ``size`` - an earlier build's added
+    clip whose file a new build puts a new clip in, at the same path. Returns (new bytes, path)."""
+    bank = parse_scene(data)
+    clip = next((c for c in bank.library.entries if c.name == name), None)
+    if clip is None:
+        raise VideoBankError("the bank has no clip called %r" % name)
+    if not 0 < size < 0x100000000:
+        raise VideoBankError("a clip's size field is a u32; got %d" % size)
+    new = bytearray(data)
+    struct.pack_into("<I", new, clip.end - 4, size)     # the library entry ends with its size
+    new = bytes(new)
+    if next(c for c in parse_scene(new).library.entries if c.name == name).size != size:
+        raise VideoBankError("the bank does not read back with %r's new size" % name)
+    return new, clip.path

@@ -9559,7 +9559,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                  else _line), "info")
             _stage_done(log, ("building %d mode(s)" % (len(mode_list) + len(code_list))
                               if _modes_on else "adding %d random clip(s)"
-                              % len(mode_plan.variants.new)
+                              % (len(mode_plan.variants.new) + len(mode_plan.variants.reused))
                               if mode_plan.variants is not None
                               else "adding the music modes" if sound_modes_cfg
                               else "adding the picture settings" if picture_cfg

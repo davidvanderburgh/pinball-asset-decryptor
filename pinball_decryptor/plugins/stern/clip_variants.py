@@ -338,6 +338,8 @@ class VariantBuild:
     cfg: str                                     # clips.cfg's path
     lines: list = field(default_factory=list)    # what the log says
     others: dict = field(default_factory=dict)   # PAD-723: {scene card path: bytes}, other banks grown
+    reused: list = field(default_factory=list)   # PAD-862: [(card path, staged file)] put in the
+                                                 # files of an earlier build's clips of their names
 
 
 def cfg_text(slots, only):
@@ -580,13 +582,30 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
     total = sum(len(s.files) for s in slots) + (len(juke[1]) if juke else 0)
     done = 0
     new = []
+    reused = []
     taken = {}                                    # {scene card path: the names its library has}
+    added = set()                                 # (scene, name) this build added or reused
 
     def add(sc, name, src):
         if sc not in taken:                       # read here: a jukebox-only build parses the bank late
             taken[sc] = {c.name for c in bank_of(sc)[0].library.entries}
-        if name in taken[sc]:
+        if (sc, name) in added:
             return False
+        added.add((sc, name))
+        if name in taken[sc]:
+            # PAD-862: a card an earlier build gave random clips (a project extracted from it, or
+            # the card itself written again): that clip's entry and file take this one, so the
+            # bank and the card stay the size they are and nothing the game plays moves
+            try:
+                data[sc], path = VB.set_clip_size(data[sc], name, os.path.getsize(src))
+            except VB.VideoBankError as e:
+                raise VariantError("%s could not be put in the video bank (%s)" % (name, e)) from None
+            card = sc[:-len("scene.radium")] + "scene.assets/" + path
+            dst = os.path.join(out_dir, *card.split("/"))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+            reused.append((card, dst))
+            return card
         try:
             data[sc], info = VB.add_clip(data[sc], name, os.path.getsize(src), spaces=" " in name)
         except VB.VideoBankError as e:
@@ -607,9 +626,7 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
             name = variant_name(s.stock, k)
             card = add(s.bank_sc, name, src)
             if not card:
-                raise VariantError("the card being written already has random clips from an "
-                                   "earlier build (its video bank has %s); write onto the card "
-                                   "that build was made from" % name)
+                raise VariantError("%s is in the video bank twice" % name)
             s.names.append(name)
             s.paths.append(card)
             done += 1
@@ -629,9 +646,7 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
         for (k, src_file), src in zip(songs, made):
             name = _jb_clip_name(k)
             if not add(own, name, src):
-                raise VariantError("the card being written already has a jukebox from an earlier "
-                                   "build (its video bank has %s); write onto the card that build "
-                                   "was made from" % name)
+                raise VariantError("%s is in the video bank twice" % name)
             done += 1
         lines.append("the jukebox's %d intro video(s) are in the video bank (%s)"
                      % (len(songs), ", ".join(_jb_clip_name(k) for k, _f in songs)))
@@ -641,9 +656,13 @@ def build(project, prof, bank, out_dir, only, variants=None, log=None, progress=
     cfg = os.path.join(out_dir, CFG_NAME)
     with open(cfg, "w", encoding="utf-8", newline="\n") as f:
         f.write(cfg_text(slots, only))
+    if reused:
+        lines.append("%d of the clips are in the files an earlier build's clips of their names were "
+                     "in" % len(reused))
     return VariantBuild(bank=data[own], slots=slots, new=new, cfg=cfg, lines=lines,
                         others={sc: b for sc, b in data.items()
-                                if sc != own and any(s.bank_sc == sc for s in slots)})
+                                if sc != own and any(s.bank_sc == sc for s in slots)},
+                        reused=reused)
 
 
 def _jb_clip_name(k):
@@ -747,4 +766,4 @@ def describe(vb):
     if vb is None or not vb.slots:
         return ""
     return ("%d clip(s) play one of several at random (%d added clip(s))"
-            % (len(vb.slots), len(vb.new)))
+            % (len(vb.slots), len(vb.new) + len(vb.reused)))

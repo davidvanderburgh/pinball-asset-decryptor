@@ -288,7 +288,11 @@ def test_color_tab_has_a_chosen_files_mode_with_its_own_profile_and_boxes(tmp_pa
         w.call("ui.select_tab", "color")
         w.drain()
         s = w.state("color")
-        assert s["per_file"] is True and s["mode"] == "display"
+        # PAD-864: individual files first; the overlay is a section of its own
+        assert s["per_file"] is True and s["mode"] == "assets"
+        assert w.call("color.set_mode", "display") == "display"
+        w.drain()
+        s = w.state("color")
         assert s["active"] is False and s["name"] == "No change"
         rev = s["rev"]
         assert w.call("color.set_mode", "assets") == "assets"

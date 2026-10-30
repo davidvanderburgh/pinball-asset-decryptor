@@ -25,6 +25,7 @@ def test_opening_colors_reads_the_profiles_again(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         w.call("ui.set", "extract", "output", str(proj))
         w.call("ui.select_tab", "scenes")
+        w.call("color.set_mode", "display")     # PAD-864: Spike 2 opens on Files
         w.drain()
         # staged behind the view's back (another window, a Load on the tab)
         cp.store(str(proj), cp.Profile(name="Godzilla", gamma=(1.2, 1.1, 0.9)))

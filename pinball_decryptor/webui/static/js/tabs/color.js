@@ -26,6 +26,14 @@
 // (apply_ranges, curve_table); its comment there spells out every step.
 // PAD-343: every mode has them now; the files bake them and the Spike 2
 // overlay's shaders draw them (plugins/stern/shader_profile.py extras_glsl).
+//
+// PAD-864 (DragonRR): the whole screen overlay is a specialized one, so it is
+// a section of its own beside the two everyday modes (individual files, the
+// Machine screen), and a Spike 2 machine opens on individual files.  Every
+// mode has a Machine screen box: the Machine screen switch of every preview
+// at once (Scenes, Images, the Video players), and this tab's preview drawn
+// through the screen too.  Make your own: the test card as a PNG to put in a
+// scene, a profile template for an AI, and Load for the file it makes.
 
 import { html, useState, useEffect, useRef, useCallback, PageHead, Card, Button, Field, Select, Seg, Note, Check,
          Icon, tip, call, cx, mediaUrl } from "../core/ui.js";
@@ -192,7 +200,7 @@ function rangePixel(r, g, b, ranges) {
 }
 
 // ------------------------------------------------------------- the preview
-function Preview({ s, p, screen }) {
+function Preview({ s, p, screen, after = [] }) {
   const beforeRef = useRef(null);
   const afterRef = useRef(null);
   const wrapRef = useRef(null);
@@ -208,8 +216,10 @@ function Preview({ s, p, screen }) {
     const ctx = cv.getContext("2d");
     const out = ctx.createImageData(data.width, data.height);
     correct(data, out, p);
+    // PAD-864: then what the machine does to it (correct() works in place)
+    for (const q of after) correct(out, out, q);
     ctx.putImageData(out, 0, 0);
-  }, [p]);
+  }, [p, after]);
 
   useEffect(() => {
     if (!url) return undefined;
@@ -264,10 +274,10 @@ function Preview({ s, p, screen }) {
       <canvas class="cp-before" ref=${beforeRef} style=${`clip-path: inset(0 ${100 - split}% 0 0)`}></canvas>
       <div class="cp-handle" style=${`left:${split}%`}><span class="cp-knob"><${Icon} name="left" /><${Icon} name="right" /></span></div>
       <span class="cp-tag cp-tag-l">Your picture</span>
-      <span class="cp-tag cp-tag-r">${screen ? "On the machine's screen" : "Written to the card"}</span>
+      <span class="cp-tag cp-tag-r">${screen ? "On the machine's screen" : after.length ? "On the machine" : "Written to the card"}</span>
     </div>
     ${failed ? html`<${Note} kind="warn">That picture could not be shown here. Pick another one, or the test card.<//>` : null}
-    <p class="small muted cp-why">${screen ? screenWords(p) : previewWords(p)} Drag the line to compare.</p>
+    <p class="small muted cp-why">${screen ? screenWords(p) : after.length ? throughWords(s) : previewWords(p)} Drag the line to compare.</p>
   </div>`;
 }
 
@@ -280,6 +290,13 @@ function previewWords(p) {
     && [0, 1, 2].every((i) => Number(p.gamma[i]) === 1 && Number(p.gain[i]) === 1) && !hasExtras(p);
   if (same) return "No change: the card gets your picture exactly as it is.";
   return "The right side is meant to look off here: it is corrected for the machine's screen, which shifts it back to what you made.";
+}
+
+// PAD-864: the Machine screen box ticked: the right side is the profile, then what the
+// machine does to it
+function throughWords(s) {
+  const overlay = s.mode === "assets" && s.display_active;
+  return `The right side is how the machine will show it: this profile, ${overlay ? "then the whole screen overlay, " : ""}then the Machine screen “${s.screen_name || "Recommended screen"}”. Close to your picture means the profile undoes the screen.`;
 }
 
 // PAD-324: the right side is the screen's version of the left, not a fix.
@@ -414,7 +431,7 @@ export function Controls({ s, p, update }) {
     <${Button} size="sm" icon="save" onClick=${() => call("color.save_copy")}
       title="Save this profile as a file of its own, e.g. one per machine">Save a copy...<//>
     <${Button} drop size="sm" icon="upload" onClick=${() => call("color.load_file")}
-      title="Use a profile saved earlier">Load...<//>
+      title="Use a profile file: one saved earlier, or one you or an AI made from the template (Make your own profile)">Load...<//>
   </div>`;
   const footer = html`<span class="small muted">Saved with this project as you go, like your other changes. Save a copy keeps it for another table.</span>`;
   // PAD-360: the profile files saved earlier, by file name; the one in use is shown picked
@@ -670,10 +687,13 @@ export function CurveEditor({ s, p, update }) {
 }
 
 export const MODES = [
-  { value: "display", label: "Adjust whole screen overlay", title: "One correction drawn over everything the game shows: its own art, videos, mode screens, text and your replacements. No file is changed." },
   { value: "assets", label: "Adjust individual files", title: "A correction baked into the replaced pictures and videos you attach it to (and pictures added in Scenes). The game's own art is left as Stern made it." },
   { value: "screen", label: "Machine screen (preview only)", title: "Not a correction: how the machine's screen changes what it is given. Only the preview uses it (Scenes and the Video tab's players), when its Machine screen switch is on. Nothing is written to the card." },
+  { value: "display", label: "Adjust whole screen overlay", title: "One correction drawn over everything the game shows: its own art, videos, mode screens, text and your replacements. No file is changed." },
 ];
+// PAD-864: the everyday two, and the overlay in a section of its own
+const MAIN_MODES = MODES.filter((m) => m.value !== "display");
+const OVERLAY = MODES.find((m) => m.value === "display");
 
 export const MODE_WORDS = {
   display: "Drawn over everything the game shows, its own art included; no file is changed.",
@@ -702,6 +722,40 @@ const EVERY = [
   ["videos", "All videos…", "video", "clip", "the game's own clips while Advanced is ticked (Video tab)", "each replaced one"],
   ["text", "All text…", "line of text", "line", "the game's own lines while they are unlocked (Scenes, Advanced)", "each one added in Scenes"],
 ];
+// PAD-864 (DragonRR): the Machine screen switch of every preview, in every mode, saying it
+// reaches ALL files (Scenes, Images, the Video players and this tab's own preview)
+function ScreenLook({ s, screen }) {
+  return html`<div class="row cp-screen-look">
+    <${Check} checked=${!!s.screen_look} label="Machine screen" onChange=${(v) => call("color.set_screen_look", v)}
+      title=${{ head: "Show ALL files through the Machine screen", lines: [
+        "Ticked, every preview draws ALL files through the Machine screen profile, after their own color profiles: Scenes, the Images tab, the Video tab's players and this tab's preview. They look the way the machine will show them.",
+        "The same switch as Machine screen under Preview colors on those tabs.",
+        "Only the previews change. Nothing is written to the card."] }} />
+    <span class="small muted">${screen
+      ? "Ticked, this screen is applied to the look of ALL files in every preview (Scenes, Images, Video). Preview only."
+      : "Ticked, the Machine screen is applied to the look of ALL files in every preview (Scenes, Images, Video and this one), after this profile. Preview only."}</span>
+  </div>`;
+}
+
+// PAD-864 (DragonRR): make a profile of your own, or have an AI make one
+function MakeOwn() {
+  return html`<${Card} title="Make your own profile" cls="cp-make">
+    <ol class="small muted cp-make-steps">
+      <li>Put the test card in a scene and show it on your machine. Photograph the screen.</li>
+      <li>Hand the photo, the test card and the template to an AI (or fill the template in yourself).</li>
+      <li>Load the profile file it makes.</li>
+    </ol>
+    <div class="row cp-make-btns">
+      <${Button} size="sm" icon="download" onClick=${() => call("color.save_test_card")}
+        title="Download a test card to insert in a scene and display on your pinball table to enable you to make your own color profile">Download test card...<//>
+      <${Button} size="sm" icon="download" onClick=${() => call("color.save_template")}
+        title="Download a color profile template to hand to an AI, with a photo of the test card on your machine, so it can make a color profile for you. Its notes tell the AI what every number does and the test card's exact colors.">Download AI template...<//>
+      <${Button} drop size="sm" icon="upload" onClick=${() => call("color.load_file")}
+        title="Add a finished color profile file from your PC, made by you or by an AI from the template. It goes onto the profile on show.">Load a profile file...<//>
+    </div>
+  <//>`;
+}
+
 export function WhichFiles({ s }) {
   const n = s.asset_counts || {};
   const words = countWords(n);
@@ -885,8 +939,10 @@ export default function ColorTab() {
   const samples = [...(s.samples || []), { value: "browse", label: "Another picture..." }];
   const assets = s.per_file && s.mode === "assets";
   const screen = s.per_file && s.mode === "screen";
+  const overlay = s.per_file && s.mode === "display";
   const nFiles = Object.values(s.asset_counts || {}).reduce((a, b) => a + (b || 0), 0);
   const note = statusNote(s);
+  const after = s.per_file && s.screen_look && !screen ? s.after || [] : [];
   return html`<div class="page cp-page">
     <${PageHead} title="Color profile" sub=${INTRO}>
       <${UndoRedo} s=${s} flush=${flush} />
@@ -895,9 +951,16 @@ export default function ColorTab() {
         title="Run this project in the emulator with this profile (a running game restarts, since the colors are set when the game starts)">See it in the emulator<//>
     <//>
     ${s.per_file ? html`<div class="row cp-modes">
-      <${Seg} value=${s.mode || "display"} options=${MODES} onChange=${setMode} />
-      <span class="small muted">${MODE_WORDS[s.mode] || MODE_WORDS.display}</span>
+      <${Seg} value=${s.mode || "assets"} options=${MAIN_MODES} onChange=${setMode} />
+      <div class="row cp-overlay-sect" role="group" aria-label="Specialized">
+        <span class="eyebrow nw">Specialized</span>
+        <${Button} size="sm" cls=${cx("cp-overlay-btn", overlay && "on")} icon="scenes" onClick=${() => setMode("display")}
+          title=${{ head: OVERLAY.label + (s.display_active ? ": in use" : ""), lines: [OVERLAY.title,
+            "A specialized, global profile this machine supports. Most projects only need Adjust individual files."] }}>
+          Whole screen overlay${s.display_active ? html`<span class="cpd-dot" aria-label="in use"></span>` : null}<//>
+      </div>
     </div>
+    <div class="small muted cp-mode-words">${MODE_WORDS[s.mode] || MODE_WORDS.assets}</div>
     ${screen ? html`<${Note} kind="info" cls="cp-both"><b>Preview only.</b> Scenes draws the game's own art and your files through this, after the whole screen overlay. The two corrections are not changed by it.<//>`
     : html`<${Note} kind="info" cls="cp-both"><b>Both can be on at once.</b> ${assets
       ? (s.display_active ? `The whole screen overlay “${s.display_name}” is on too: the game draws these files through it like everything else.`
@@ -905,6 +968,7 @@ export default function ColorTab() {
       : (nFiles ? `The individual files profile “${s.asset_name}” is on too, baked into ${countWords(s.asset_counts || {})}; the overlay is drawn over those as well.`
         : "No individual file is switched on; switch files on under Adjust individual files to correct only your own art.")}<//>`}` : null}
     ${note}
+    ${s.per_file ? html`<${ScreenLook} s=${s} screen=${screen} />` : null}
     ${screen ? html`<div class="row cp-skip-plain">
       <${Check} checked=${!!s.screen_skips_plain} label="Files with no color profile attached skip the Machine screen"
         onChange=${(v) => call("color.set_screen_skips_plain", v)}
@@ -917,7 +981,7 @@ export default function ColorTab() {
             <${Select} sm value=${s.sample || "card"} options=${samples} width=${260}
               onChange=${(v) => call("color.pick_sample", v)} title="The picture to try the profile on" />
           </div>`}>
-          <${Preview} s=${s} p=${p} screen=${screen} />
+          <${Preview} s=${s} p=${p} screen=${screen} after=${after} />
         <//>
         <${Ranges} s=${s} p=${p} update=${update} />
         <${CurveEditor} s=${s} p=${p} update=${update} />
@@ -926,6 +990,7 @@ export default function ColorTab() {
       <div class="cp-side">
         ${assets ? html`<${WhichFiles} s=${s} />` : null}
         <${Controls} s=${s} p=${p} update=${update} />
+        <${MakeOwn} />
       </div>
     </div>
   </div>`;

@@ -98,6 +98,7 @@ def test_the_tab_offers_it_follows_and_lets_go_on_a_slider(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         w.call("ui.set", "extract", "output", d)
         w.call("ui.select_tab", "color")
+        w.call("color.set_mode", "display")     # PAD-864: Spike 2 opens on Files
         w.drain()
         tips = {p["key"]: p["tip"] for p in w.state("color")["presets"]}
         assert "Undoes the Machine screen" in tips["recommended"]

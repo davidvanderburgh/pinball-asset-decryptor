@@ -1222,16 +1222,38 @@ HELP_CONTENT = {
             "shades and level, the color strength and the shadow lift. **No change** "
             "leaves the colors alone. There are three profiles:",
             {"cards": [
-                {"icon": "sun", "tone": "info", "title": "Whole screen overlay",
-                 "text": "Spike 2: the game draws everything through it, its own art "
-                         "too. Other machines: the replaced files are corrected when "
-                         "staged."},
                 {"icon": "image", "tone": "ok", "title": "Individual files",
-                 "text": "Spike 2: baked into only the replaced files it is attached to."},
+                 "text": "Spike 2: baked into only the replaced files it is attached to. "
+                         "Other machines: the one profile, corrects the replaced files "
+                         "when staged."},
                 {"icon": "eye", "tone": "warn", "title": "Machine screen",
                  "text": "Spike 2, preview only: what your machine's screen does. "
-                         "Never on the card."}]},
+                         "Never on the card."},
+                {"icon": "sun", "tone": "info", "title": "Whole screen overlay",
+                 "text": "Spike 2, under Specialized: the game draws everything "
+                         "through it, its own art too."}]},
+            "On Spike 2 the tab opens on **Adjust individual files**. The whole "
+            "screen overlay is specialized, so it has its own button at the right, "
+            "shown only on machines that can draw one.",
         ]),
+        ("Machine screen box",
+         "Every mode has a **Machine screen** box above the preview.\n\n"
+         "- Ticked, every preview shows ALL files through the Machine screen, after "
+         "their own color profiles: Scenes, the Images tab, the Video tab's players, "
+         "and this tab's preview, whose right side then says **On the machine**.\n"
+         "- It is the same switch as Machine screen under Preview colors on those "
+         "tabs, all at once.\n"
+         "- Only the previews change. Nothing is written to the card."),
+        ("Make your own profile",
+         "The **Make your own profile** card, under Adjust:\n\n"
+         "1. **Download test card...** saves the test card as a PNG. Put it in a "
+         "scene, build, show it on your machine and photograph the screen.\n"
+         "2. **Download AI template...** saves a profile file whose notes explain "
+         "every number, the order they are applied in, their limits and the test "
+         "card's exact colors. Hand it to an AI with the photo and the test card, "
+         "or fill it in yourself.\n"
+         "3. **Load a profile file...** puts the finished file onto the profile on "
+         "show, the same as **Load...**."),
         ("Starting points and preview",
          "Pick a starting point, then fine-tune it.\n\n"
          "- **Recommended** is the usual start. **Black and white** suits the "

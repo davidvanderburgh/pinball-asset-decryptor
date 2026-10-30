@@ -68,6 +68,17 @@ html.bp-1020 .cp-grid { grid-template-columns: minmax(0, 1fr); }
 /* PAD-312: the two modes, and the chosen-files boxes */
 .cp-modes { gap: 12px; align-items: center; flex-wrap: wrap; }
 .cp-modes .seg { flex: 0 0 auto; }
+/* PAD-864: the overlay in a section of its own; the Machine screen box; Make your own */
+.cp-overlay-sect { gap: 8px; align-items: center; margin-left: auto; padding-left: 12px; border-left: 1px solid var(--line-2); }
+.cp-overlay-sect .eyebrow { color: var(--ink-3); }
+.cp-overlay-btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+.cp-overlay-btn .cpd-dot { margin-left: 6px; }
+.cp-mode-words { margin-top: -4px; }
+.cp-screen-look { gap: 12px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.cp-screen-look .chk span { font-weight: 600; }
+.cp-make .bd { gap: 10px; }
+.cp-make-steps { margin: 0; padding-left: 18px; line-height: 1.5; }
+.cp-make-btns { gap: 8px; flex-wrap: wrap; }
 .cp-both b { color: var(--ink); }
 .cp-which .bd { gap: 8px; }
 .cp-which-now { margin: 0; line-height: 1.45; }

@@ -51,6 +51,8 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
   cursor: pointer; white-space: nowrap; }
 .cpd-tabs button:hover { color: var(--ink); }
 .cpd-tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+/* PAD-864: the overlay, specialized, set apart after the everyday two */
+.cpd-tabs button.cpd-apart { margin-left: 8px; border-left: 1px solid var(--line); }
 .cpd-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: 0 0 auto; }
 
 .cpd-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 10px 16px 14px; display: flex;

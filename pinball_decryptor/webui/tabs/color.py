@@ -121,36 +121,39 @@ def default_profiles_dir():
                         "Color profiles")
 
 
-def test_card_png():
-    """A small display test card (grey steps, full and half colours, dark
-    sea tones, a smooth ramp and skin tones): the shades a display gets
-    wrong first.  Drawn here, so it ships with nothing of anyone else's."""
-    if _CARD_CACHE:
-        return _CARD_CACHE[0]
+#: the test card's patches (PAD-864: shared with the AI template, which
+#: names each one's exact color so a photo of the card on the machine can be
+#: read against them): grey steps, full and half colors, dark sea tones,
+#: skin tones, then a smooth black-to-white ramp
+CARD_SIZE = (640, 400)
+CARD_GREYS = [0, 8, 16, 24, 32, 48, 64, 80, 96, 112, 128, 160, 192, 224,
+              240, 255]
+CARD_FULL = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (0, 255, 255),
+             (255, 0, 255), (255, 255, 0)]
+CARD_SEA = [(8, 24, 40), (8, 32, 56), (12, 48, 80), (16, 64, 104),
+            (24, 80, 128), (32, 96, 152)]
+CARD_SKIN = [(255, 224, 196), (234, 192, 160), (198, 145, 110),
+             (160, 105, 75), (110, 70, 50), (70, 45, 32)]
+
+
+def card_bytes():
+    """The test card as PNG bytes."""
     from PIL import Image, ImageDraw
-    w, h = 640, 400
+    w, h = CARD_SIZE
     im = Image.new("RGB", (w, h), (24, 24, 24))
     d = ImageDraw.Draw(im)
     x0, cw = 16, (w - 32)
-    greys = [0, 8, 16, 24, 32, 48, 64, 80, 96, 112, 128, 160, 192, 224, 240,
-             255]
-    step = cw / len(greys)
-    for i, v in enumerate(greys):
+    step = cw / len(CARD_GREYS)
+    for i, v in enumerate(CARD_GREYS):
         d.rectangle([x0 + i * step, 16, x0 + (i + 1) * step - 1, 76],
                     fill=(v, v, v))
-    full = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (0, 255, 255),
-            (255, 0, 255), (255, 255, 0)]
-    step = cw / len(full)
-    for i, c in enumerate(full):
+    step = cw / len(CARD_FULL)
+    for i, c in enumerate(CARD_FULL):
         half = tuple(v // 2 for v in c)
         d.rectangle([x0 + i * step, 88, x0 + (i + 1) * step - 1, 138], fill=c)
         d.rectangle([x0 + i * step, 140, x0 + (i + 1) * step - 1, 190],
                     fill=half)
-    sea = [(8, 24, 40), (8, 32, 56), (12, 48, 80), (16, 64, 104),
-           (24, 80, 128), (32, 96, 152)]
-    skin = [(255, 224, 196), (234, 192, 160), (198, 145, 110),
-            (160, 105, 75), (110, 70, 50), (70, 45, 32)]
-    for row, (y, colours) in enumerate(((202, sea), (254, skin))):
+    for y, colours in ((202, CARD_SEA), (254, CARD_SKIN)):
         step = cw / len(colours)
         for i, c in enumerate(colours):
             d.rectangle([x0 + i * step, y, x0 + (i + 1) * step - 1, y + 48],
@@ -160,9 +163,141 @@ def test_card_png():
         d.line([x0 + x, 314, x0 + x, 384], fill=(v, v, v))
     buf = io.BytesIO()
     im.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_card_png():
+    """A small display test card (grey steps, full and half colours, dark
+    sea tones, a smooth ramp and skin tones): the shades a display gets
+    wrong first.  Drawn here, so it ships with nothing of anyone else's."""
+    if _CARD_CACHE:
+        return _CARD_CACHE[0]
     _CARD_CACHE.append("data:image/png;base64,"
-                       + base64.b64encode(buf.getvalue()).decode())
+                       + base64.b64encode(card_bytes()).decode())
     return _CARD_CACHE[0]
+
+
+def _rgb(c):
+    return "%d %d %d" % tuple(c)
+
+
+def template_text():
+    """PAD-864 (DragonRR): a color profile file to hand to an AI with a
+    photo of the test card on the machine.  Every line but the values is a
+    comment, so Load reads the file as it is (it changes nothing until the
+    numbers do) and an AI has all it needs: what each number does, in what
+    order, its limits, and the test card's exact colors."""
+    lim = cp.LIMITS
+    rl = cp.RANGE_LIMITS
+    full = ", ".join("%s %s" % (n, _rgb(c)) for n, c in zip(
+        ("red", "green", "blue", "cyan", "magenta", "yellow"), CARD_FULL))
+    half = ", ".join(_rgb(tuple(v // 2 for v in c)) for c in CARD_FULL)
+    lines = [
+        "# Pinball Asset Decryptor color profile TEMPLATE",
+        "#",
+        "# For an AI (or you) to fill in.  Change the numbers at the bottom,",
+        "# save the file as plain text (.txt), then on PAD's Color profile tab",
+        "# press Load a profile file... and pick it.",
+        "#",
+        "# WHAT IT IS FOR",
+        "# A pinball machine's screen does not show colors the way a PC",
+        "# monitor does.  This profile is a CORRECTION: PAD shifts colors the",
+        "# opposite way to the machine's screen, so the screen shifts them",
+        "# back to what was made on the PC.  Example: if the machine shows",
+        "# grey 128 as 164 187 226 (too bright, too blue), the profile must",
+        "# darken the middle shades, blue most of all.",
+        "# Loaded in PAD's Machine screen mode it is read the other way round:",
+        "# as what the screen does to each color, not a correction.",
+        "#",
+        "# HOW TO MAKE ONE",
+        "# 1. Put PAD's test card (Download test card... on the Color profile",
+        "#    tab) in a scene, build, and show it on the machine.",
+        "# 2. Photograph the machine's screen straight on, in a dim room,",
+        "#    with no flash.  Hand the AI the photo, the test card PNG and",
+        "#    this file.",
+        "# 3. Compare each patch in the photo with its true color below and",
+        "#    pick numbers that undo the difference.  A phone photo is not a",
+        "#    color meter: judge the patches against each other (greys that",
+        "#    turn blue, dark steps that merge, middle shades too bright).",
+        "#",
+        "# THE TEST CARD (%d x %d PNG; exact colors as red green blue, 0-255)"
+        % CARD_SIZE,
+        "#   row 1, 16 grey steps, left to right: %s" % " ".join(
+            str(v) for v in CARD_GREYS),
+        "#   row 2, full colors: %s" % full,
+        "#   row 3, the same colors at half: %s" % half,
+        "#   row 4, dark sea blues: %s" % ", ".join(
+            _rgb(c) for c in CARD_SEA),
+        "#   row 5, skin tones: %s" % ", ".join(_rgb(c) for c in CARD_SKIN),
+        "#   row 6, a smooth ramp from black (left) to white (right)",
+        "#   background: 24 24 24",
+        "#",
+        "# THE MATHS, in this order, on each pixel (values 0-255, no linear",
+        "# light).  Three numbers on a line = red green blue.",
+        "#   1. saturation: mix toward the pixel's grey (0.299 R + 0.587 G +",
+        "#      0.114 B); 1 = unchanged, 0 = black and white, above 1 = more.",
+        "#   2. each channel: x = clip(v / 255 * gain, 0, 1), then",
+        "#      out = 255 * (lift + (1 - lift) * x ^ gamma).",
+        "#      gamma above 1 darkens the middle shades, below 1 brightens",
+        "#      them; gain 0.9 = 10% less of that color, even in white;",
+        "#      lift raises the darkest shades (0.05 = black becomes 13).",
+        "#      brightness b and contrast c (1 = unchanged) are folded in",
+        "#      first: gain becomes b * 2 * 0.5^(1/c) * gain^(1/c) and gamma",
+        "#      becomes gamma * c.",
+        "#   3. color ranges (optional): range = hue width soft shift",
+        "#      saturation brightness protect.  One band of hues (degrees: 0",
+        "#      red, 120 green, 240 blue), its width and soft edge in degrees,",
+        "#      the hue shift in degrees, its saturation and brightness",
+        "#      (1 = unchanged), and how much color a pixel needs before it is",
+        "#      touched (0.15 = greys and near-greys left alone).  At most %d."
+        % cp.MAX_RANGES,
+        "#   4. curves (optional): curve_rgb on all three, then curve_red,",
+        "#      curve_green, curve_blue = in out, in out, ... (points 0-255,",
+        "#      at most %d, a smooth curve through them)." % cp.MAX_POINTS,
+        "#",
+        "# LIMITS (a number outside them is refused when the file is loaded)",
+    ]
+    for k in ("gamma", "gain", "lift", "saturation", "brightness",
+              "contrast"):
+        lines.append("#   %-11s %g to %g" % (k, lim[k][0], lim[k][1]))
+    lines.append("#   range       hue %g-%g, width %g-%g, soft %g-%g, "
+                 "shift %g to %g," % (rl["hue"] + rl["width"] + rl["soft"]
+                                       + rl["shift"]))
+    lines.append("#               saturation %g-%g, brightness %g-%g, "
+                 "protect %g-%g" % (rl["saturation"] + rl["brightness"]
+                                    + rl["protect"]))
+    lines += [
+        "#",
+        "# Lines starting with # are notes and are ignored.  Take the # off",
+        "# the range and curve examples to use them.  As it is, this file",
+        "# changes nothing.",
+        "",
+        "name = My machine",
+        "gamma = 1.00 1.00 1.00",
+        "gain = 1.00 1.00 1.00",
+        "lift = 0.00 0.00 0.00",
+        "saturation = 1.00",
+        "brightness = 1.00",
+        "contrast = 1.00",
+        "# range = 200 60 30 0 1 1 0.15",
+        "# curve_rgb = 0 0, 128 128, 255 255",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _values(p):
+    """A profile's numbers as the page's maths takes them."""
+    return dict(gamma=list(p.gamma), gain=list(p.gain), lift=max(p.lift),
+                saturation=p.saturation, brightness=p.brightness,
+                contrast=p.contrast, ranges=[list(r) for r in p.ranges],
+                curves={ch: [list(pt) for pt in pts] for ch, pts in p.curves})
+
+
+#: PAD-864: the previews whose Machine screen switch the tab's own box sets:
+#: (service, its place in the remembered switches)
+SCREEN_LOOKS = (("text_scenes", "scenes"), ("images", "images"),
+                ("video", "video"))
 
 
 def _clamp(key, v):
@@ -520,6 +655,8 @@ class ColorTab(TabService):
             follows_screen=self._follows(),
             screen_stored=self._screen_stored,
             screen_skips_plain=self._skips_plain(),
+            screen_look=self._screen_look(), after=self._after(),
+            screen_name=(self._screen or cp.SCREEN_PRESETS[0][1]).label(),
             screen_follow=bool(self._screen_mode() and assets
                                and os.path.isdir(assets)
                                and cp.screen_follows(assets)),
@@ -1440,6 +1577,89 @@ class ColorTab(TabService):
             return False
         return self._load_path(path)
 
+    # -- make your own (PAD-864, DragonRR) ------------------------------------
+    @rpc
+    def save_test_card(self):
+        """Download test card: the preview's test card as a PNG, to put in a
+        scene and photograph on the machine."""
+        path = self.window.ask_save(
+            "colour_test_card", "Save the color test card",
+            initialfile="PAD color test card.png", defaultextension=".png",
+            filetypes=[("PNG picture", "*.png")])
+        if not path:
+            return False
+        try:
+            with open(path, "wb") as f:
+                f.write(card_bytes())
+        except OSError as e:
+            self.toast("Could not save the test card: %s" % e, "error")
+            return False
+        self.toast("Saved %s" % os.path.basename(path), "success")
+        return True
+
+    @rpc
+    def save_template(self):
+        """Download AI template: a profile file whose notes tell an AI how
+        to fill it in from a photo of the test card (:func:`template_text`).
+        Load reads it back."""
+        path = self.window.ask_save(
+            "colour_template", "Save the color profile template",
+            initialfile="PAD color profile template.txt",
+            defaultextension=".txt",
+            filetypes=[("Color profile", "*.txt"), ("All files", "*.*")])
+        if not path:
+            return False
+        try:
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(template_text())
+        except OSError as e:
+            self.toast("Could not save the template: %s" % e, "error")
+            return False
+        self.toast("Saved %s" % os.path.basename(path), "success")
+        return True
+
+    def _screen_look(self):
+        """The Machine screen switch of the previews (Scenes, Images, Video
+        players): on in every one of them?"""
+        from .. import look_switches
+        return all(look_switches.initial(self.window, where)["screen"]
+                   for _ns, where in SCREEN_LOOKS)
+
+    @rpc
+    def set_screen_look(self, on):
+        """PAD-864 (DragonRR): the tab's Machine screen box, in every mode:
+        the Machine screen switch of every preview at once, and this tab's
+        own preview drawn through the screen too."""
+        from .. import look_switches
+        on = bool(on)
+        for ns, where in SCREEN_LOOKS:
+            svc = self.window.service(ns)
+            fn = getattr(svc, "set_look_part", None)
+            try:
+                if fn is not None:
+                    fn("screen", on)
+                    continue
+            except Exception:                           # noqa: BLE001
+                log.exception("color profile screen look %s", ns)
+            sw = look_switches.initial(self.window, where)
+            sw["screen"] = on
+            look_switches.save(self.window, where, sw)
+        self._publish()
+        return self._screen_look()
+
+    def _after(self):
+        """What the preview draws after the profile on show when the Machine
+        screen box is ticked, in order: the whole screen overlay (Files mode,
+        when one is set), then the machine screen.  Nothing in the Machine
+        screen mode: that preview is the screen already."""
+        if not self._on_display or self._screen_mode():
+            return []
+        out = []
+        if self._assets_mode() and self._prof is not None:
+            out.append(self._prof)
+        out.append(self._screen or cp.SCREEN_PRESETS[0][1])
+        return [_values(p) for p in out]
+
     @rpc
     def use_saved(self, path):
         """The Saved profiles list: load the file picked (PAD-360)."""
@@ -1581,6 +1801,10 @@ class ColorTab(TabService):
             on_display = bool(mfr.colour_profile_on_display())
         except Exception:                               # noqa: BLE001
             on_display = False
+        if on_display and not self._on_display:
+            # PAD-864 (DragonRR): the whole screen overlay is a section of
+            # its own now, so a Spike 2 machine opens on individual files
+            self._mode = "assets"
         self._on_display = on_display
         if not on_display:
             self._mode = "display"

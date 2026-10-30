@@ -13539,6 +13539,16 @@ def _override_reuse(out_dir, manifest, original_path):
     return have
 
 
+def override_set_kept(out_dir, original_path):
+    """Will the next :func:`write_overrides` from *original_path* into
+    *out_dir* patch the set there (:func:`_override_reuse`), rather than lay
+    one down whole?  PAD-863: the Emulate tab says so before a first one,
+    the longest wait there is."""
+    out_dir = os.path.abspath(str(out_dir))
+    return _override_reuse(out_dir, read_override_manifest(out_dir),
+                           original_path) is not None
+
+
 def _same_file_bytes(a, b):
     """True when *a* and *b* are both files of the same size and the same
     bytes.  The size test first, because the common miss is a different

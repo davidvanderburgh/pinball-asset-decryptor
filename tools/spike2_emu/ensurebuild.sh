@@ -453,6 +453,27 @@ pad_ensure_bridge() {
     return 0
 }
 
+# PAD-849: A CARD WAS PICKED, AND THIS LINUX CANNOT SEE IT. "Pick a card image"
+# about the card the user had picked sent them round in circles for an evening.
+# WSL mounts the PC's local drives and nothing else: the app spells a network
+# share (or a drive mapped to one) as /mnt/unc/<server>/<share> and mounts it
+# before a root run, so what is left here is a share that would not open, or a
+# drive WSL started without. Says which, and what to do; the caller exits.
+pad_card_unseen() {
+    echo "[$2]   $1" >&2
+    echo "[$2] cannot be opened from inside WSL, which is where the emulator" >&2
+    echo "[$2] runs (it opens fine in the app, which runs on Windows)." >&2
+    case $1 in
+        /mnt/unc/*)
+            echo "[$2] It is on a network share. Check that the share opens in" >&2
+            echo "[$2] File Explorer, or copy the card to a local drive." >&2 ;;
+        *)
+            echo "[$2] Copy the card to a local drive (C:, D: ...) and pick it" >&2
+            echo "[$2] there, or restart WSL if its drive was plugged in after" >&2
+            echo "[$2] WSL started." >&2 ;;
+    esac
+}
+
 # ---- THE GUEST FILESYSTEM, WHICH IS STEP ONE AND WAS NOT CHECKED EITHER -----
 #
 # run_game.sh chroots into $ROOT, and $ROOT is what rootfs.sh builds out of a
@@ -489,7 +510,13 @@ pad_ensure_rootfs() {
     [ -d "$ROOT/usr/lib" ] && return 0          # already built
 
     _card=${PAD_CARD:-}
-    if [ -z "$_card" ] || [ ! -f "$_card" ]; then
+    if [ -n "$_card" ] && [ ! -f "$_card" ]; then
+        echo "[build] There is no guest filesystem at $ROOT yet, and the card" >&2
+        echo "[build] image it is built from is not there either:" >&2
+        pad_card_unseen "$_card" build
+        return 1
+    fi
+    if [ -z "$_card" ]; then
         echo "[build] There is no guest filesystem at $ROOT, and that is what" >&2
         echo "[build] the game runs inside - it is built once, from a card" >&2
         echo "[build] image, and this machine has not done it yet." >&2

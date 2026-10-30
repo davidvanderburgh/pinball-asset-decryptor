@@ -93,11 +93,14 @@ does not use AppArmor.
   not the network. Only the picture and sound travel, so a slow link
   (Tailscale from outside, say) makes the stream less smooth but does not
   slow the game.
-- **Save states** need two more settings, because freezing a running game
-  is something a container is not allowed by default:
-  `--security-opt seccomp=unconfined --cap-add SYS_PTRACE`. Without them
-  every game still runs, the playfield shows no Save or Load buttons, and
-  the log says why. Docker Desktop cannot give them at all.
+- **Save states** need more than Emulate does, because freezing a running
+  game and bringing it back is something a container is not allowed by
+  default. Add `--cap-add SYS_PTRACE --cap-add NET_ADMIN --cap-add SYS_TIME
+  --security-opt seccomp=unconfined --security-opt systempaths=unconfined`
+  to the line above, or run the container `--privileged`. Each Start checks
+  by freezing and thawing a small test program; without these every game
+  still runs, the playfield shows no Save or Load buttons, and the log says
+  what was missing. Docker Desktop cannot give them at all.
 - **Writing to an SD card** needs the card reader on the server. Building a
   card image into `/data` and flashing it from the PC you sit at works
   anywhere.

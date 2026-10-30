@@ -321,7 +321,9 @@ for.
 over the lights the map puts on one insert, then lists the inserts no light
 shows (and, for builds without positions, the named LEDs no light shows),
 the lights neither wired nor dark (GI collections and lights the script
-never names left out) and the wired lights far from their insert.
+never names left out), the wired lights far from their insert, and the
+lamps whose LED the build calls something else (a map numbered for another
+build: Guardians LE once carried the Pro's numbers).
 `suggest ... [--write]` mends what audit found by the fit (the nearest free
 light, a free light beside a shown insert, otherwise a retrofit light;
 refused when the fit is over 10 px, as on Stranger Things), `rgb <map>

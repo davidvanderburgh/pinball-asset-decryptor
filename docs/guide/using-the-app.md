@@ -132,10 +132,10 @@ build.
 
 ### Longer and shorter sounds (Stern Spike 2)
 
-A longer replacement is normally trimmed to the sound it replaces, and a
-shorter one is padded with silence to its length (the game plays it for
-that long). Tick **Allow replacements longer or shorter than the original**
-(Advanced Audio Options) and each plays at its own length instead.
+Each replacement plays at its own length, longer or shorter than the
+sound it replaces. This is always on; there is nothing to tick. On a
+Direct-SD write a longer one is trimmed to the sound it replaces and a
+shorter one padded with silence to its length instead.
 
 - Your clip is added at the end of the sound bank; every other sound is
   untouched. It needs an image build, not a direct SD write.
@@ -166,8 +166,8 @@ Audio Content.
   chosen mode plays its mode 1 sound.
 - **Name the music modes…** puts the names in the setting's help line on
   the machine.
-- **Length** follows *Allow replacements longer or shorter than the original*, as a
-  replacement does. **Loudness** is set per mode file (**Music modes** >
+- **Length:** a mode file plays at its own length, as a replacement
+  does. **Loudness** is set per mode file (**Music modes** >
   **Loudness of mode 2's sound…**).
 - **Songs in parts:** where a song is a short opening plus a longer
   unnamed part, a file for the opening replaces the whole song.

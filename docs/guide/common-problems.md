@@ -36,7 +36,7 @@ what happened, with the app's log, after showing you exactly what goes.
 | What you see | What to do |
 |---|---|
 | Can't find the sound I want | Set **Type** to **Music**, **Sound FX** or **Callouts**, search part of its name, or tick **Play sequentially** and listen down the list. |
-| My song is cut short, or has silence at its end (Stern Spike 2) | A replacement is cut or padded to the original's length. Tick **Allow replacements longer or shorter than the original** under **Advanced…** for its own length. |
+| My song is cut short, or has silence at its end (Stern Spike 2) | Each replacement plays at its own length on a card built as an image. A Direct-SD write cuts or pads it to the original's length: build an image instead. |
 | A replacement is too loud or too quiet | Use **Loudness for this clip** beside the Replacement player. Changing the file's own level does nothing: replacements are matched to the original's loudness. |
 | Picks made, but nothing changed | Picks only reach the card on a build: press the build button on **Write**. Picks are kept in the project folder between sessions. |
 

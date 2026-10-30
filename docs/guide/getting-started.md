@@ -68,9 +68,8 @@ Click the row's **Replacement** cell (or select the row and press
 format and loudness when it builds.
 
 - **Original** and **Replacement** play side by side, so you can compare.
-- **Length:** by default your song is cut or padded to the original's
-  length. Tick **Allow replacements longer or shorter than the original**
-  under **Advanced…** to have it play at its own length.
+- **Length:** your song plays at its own length, longer or shorter than
+  the original (on Stern Spike 2 this needs the card built as an image).
 - **Too loud or quiet?** Use **Loudness for this clip** beside the
   Replacement player, not your audio editor.
 - Changed your mind? **Remove replacement** drops the pick.

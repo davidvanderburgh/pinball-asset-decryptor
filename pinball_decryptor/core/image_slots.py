@@ -170,6 +170,41 @@ def stage_replacement(slot: ImageSlot, replacement_path: str,
 #: picture slot (see :class:`PictureCache`).
 PICTURE_CACHE = os.path.join(".write_cache", "image_staged.json")
 
+#: Part of every picture recipe: bump it whenever what a conversion produces
+#: changes in a way the converter's own source does not show.
+CONVERSION_REV = 1
+
+_CONVERTER_KEYS = {}
+
+
+def _converter_key(coloured):
+    """What converts a picture, for :class:`PictureCache`: :data:`CONVERSION_REV`
+    and the source of the converter (``core/image.py``, and ``core/
+    colour_profile.py`` for a picture under a color profile).
+
+    PAD-863 (DragonRR): the recipe held the app's version, so every update
+    converted every staged picture again on the next Start - his one large
+    picture 20 s after each of the near-daily releases, all 5,811 of
+    Godzilla's when they are under a profile - although nearly no release
+    changes how a picture converts.  Like the card's picture cache
+    (``engine._picture_cache_recipe``), the app's version stands in only
+    when the source cannot be read."""
+    key = _CONVERTER_KEYS.get(coloured)
+    if key is None:
+        import hashlib
+        from . import colour_profile, image
+        h = hashlib.sha1(str(CONVERSION_REV).encode())
+        try:
+            for mod in (image, colour_profile) if coloured else (image,):
+                with open(mod.__file__, "rb") as f:
+                    h.update(f.read())
+            key = h.hexdigest()[:16]
+        except (OSError, TypeError):
+            from .. import __version__
+            key = "app-" + __version__
+        _CONVERTER_KEYS[coloured] = key
+    return key
+
 
 class PictureCache(_StagedCache):
     """What each picture slot was last staged from, so a Start (or a Write)
@@ -182,9 +217,9 @@ class PictureCache(_StagedCache):
     minutes on a busy PC.  A recipe is the source (its path, size and
     modification time; for the game's own picture that is its ``.orig/``
     snapshot), the pristine snapshot the size is fitted to, Keep size, the
-    color profile and this app's version (a new version converts once more,
-    in case it converts differently); the slot's file afterwards has to be
-    the one that staging left."""
+    color profile and the converter (:func:`_converter_key`: a new one
+    converts once more, in case it converts differently); the slot's file
+    afterwards has to be the one that staging left."""
 
     FILE = PICTURE_CACHE
 
@@ -192,7 +227,6 @@ class PictureCache(_StagedCache):
     def recipe(rep, orig=None, keep_size=False, colour=None):
         import hashlib
         import json
-        from .. import __version__
         try:
             st = os.stat(rep)
         except (OSError, TypeError):
@@ -204,7 +238,8 @@ class PictureCache(_StagedCache):
                 shape = [ost.st_size, ost.st_mtime_ns]
             except OSError:
                 shape = None
-        blob = json.dumps([__version__, os.path.normcase(os.path.abspath(rep)),
+        blob = json.dumps([_converter_key(colour is not None),
+                           os.path.normcase(os.path.abspath(rep)),
                            st.st_size, st.st_mtime_ns, shape, bool(keep_size),
                            colour.key() if colour is not None else None])
         return hashlib.sha1(blob.encode("utf-8")).hexdigest()

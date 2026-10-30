@@ -403,6 +403,8 @@ def test_the_override_build_shows_its_own_steps(monkeypatch, tmp_path):
     monkeypatch.setattr(rig, "overrides_reason", lambda *a, **k: "first run")
     monkeypatch.setattr(E, "read_override_manifest", lambda out: None)
     monkeypatch.setattr(E, "stamp_override_manifest", lambda *a, **k: None)
+    # a set there to patch (a first one says so: tests/test_pad863_first_set_notice.py)
+    monkeypatch.setattr(E, "override_set_kept", lambda out, card: True)
     monkeypatch.setattr(tab, "_scene_edits_on", lambda: True, raising=False)
     monkeypatch.setattr(tab, "_live_ready", lambda a, o, env: env, raising=False)
     monkeypatch.setattr(tab, "_with_override_modes", lambda o, env: env, raising=False)

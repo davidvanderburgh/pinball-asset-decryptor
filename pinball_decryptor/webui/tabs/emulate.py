@@ -2338,7 +2338,12 @@ class EmulateTab(TabService):
             return self._live_ready(assets, out, self._with_override_modes(
                 out, ["PAD_OVERRIDE_DIR=%s" % rig.wsl_path(out)]))
         self._log("[emulate] preparing your edits (%s)" % why)
-        self._preparing = "Preparing your edits…"
+        # PAD-863: a set laid down whole is the long wait; say so up front
+        head = "Preparing your edits"
+        if not stern_engine.override_set_kept(out, card):
+            self._log(rig.FIRST_SET_NOTE)
+            head = rig.FIRST_SET_WORDS
+        self._preparing = head + "…"
         self._preparing_kind = "edits"
         self._post(self._repaint_preparing)
 
@@ -2346,8 +2351,8 @@ class EmulateTab(TabService):
             # PAD-489: the build's own bar and words, not a still "Preparing"
             words = str(words or "").strip().rstrip(".…")
             self._show_preparing(
-                "Preparing your edits: %s%s" % (words[:1].lower(), words[1:])
-                if words else "Preparing your edits…",
+                "%s: %s%s" % (head, words[:1].lower(), words[1:])
+                if words else head + "…",
                 int(done * 100 / total) if total else None)
 
         try:

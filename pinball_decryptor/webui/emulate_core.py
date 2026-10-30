@@ -255,6 +255,23 @@ _OVERRIDE_EXPLAIN = (
     "stands, and a changed one is patched where it changed rather than "
     "built again, so a second run only costs what you have edited since.")
 
+#: PAD-863 (DragonRR: "WARN the user that this is the case and tell him that
+#: if he continues to use the same build, future changes will be faster IF
+#: this is actually true!").  It is: said in the log when a Start has no set
+#: it can patch (none yet, another card, the set's files moved), the one
+#: wait that is long however little was changed.
+FIRST_SET_NOTE = (
+    "[emulate] first time these edits are prepared on this card, so this is "
+    "the longest wait: the card files your edits live in are copied out "
+    "whole and every edit in the project is made ready (a replaced sound "
+    "re-encoded, a picture or clip converted). It is all kept: as long as "
+    "you Start this card with this project, later Starts are quicker, "
+    "because what an earlier Start made is reused and the set is patched "
+    "where your edits changed instead of built again.")
+
+#: The State line's words for that wait (the build's own step follows them).
+FIRST_SET_WORDS = "Preparing your edits (first time: the longest)"
+
 #: Item 127 / feature/emulate-prepare: the same badge while the Modes tab's
 #: Try it is preparing its set.  Its own paragraph because the slow part is a
 #: different one - not a re-encode of the user's sounds, but the staging of the

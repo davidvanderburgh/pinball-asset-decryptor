@@ -95,3 +95,13 @@ def test_every_subprocess_call_gets_the_systems_library_path(frozen_env,
         assert out == ["/usr/local/lib", "None"]
     finally:
         subprocess.Popen.__init__ = original
+
+
+def test_workers_get_the_guard_too():
+    """freeze_support() runs a multiprocessing worker and exits, so the
+    guard has to be in place before it (PAD-875)."""
+    entry = os.path.join(os.path.dirname(__file__), os.pardir, "installer",
+                         "pyinstaller_entry.py")
+    with open(entry, encoding="utf-8") as fh:
+        src = fh.read()
+    assert src.index("guard_child_env()") < src.index("freeze_support()")

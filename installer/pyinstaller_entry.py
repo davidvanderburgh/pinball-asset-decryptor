@@ -10,15 +10,17 @@ import sys
 
 
 if __name__ == "__main__":
-    # Required so PyInstaller-frozen child processes spawned by multiprocessing
-    # (Stern Spike 2 parallel audio decode) bootstrap instead of re-running the
-    # app.  Must be the first thing the frozen entry does.
-    multiprocessing.freeze_support()
-
     # Linux: the system's programs (ffmpeg above all) get the system's
-    # libraries, not the bundle's older ones (PAD-837).
+    # libraries, not the bundle's older ones (PAD-837).  Before
+    # freeze_support, which runs a multiprocessing worker and exits there:
+    # workers start system programs too (PAD-875).
     from pinball_decryptor.core.desktop import guard_child_env
     guard_child_env()
+
+    # Required so PyInstaller-frozen child processes spawned by multiprocessing
+    # (Stern Spike 2 parallel audio decode) bootstrap instead of re-running the
+    # app.  Must come before any app code runs.
+    multiprocessing.freeze_support()
 
     # Elevated flash-helper re-invocation (see core.elevated_flash): the frozen
     # binary re-execs itself as root to run the raw card write, with no GUI.

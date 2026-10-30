@@ -94,7 +94,14 @@ def patch_script(src, m):
             continue
         if low.startswith("const cgamename="):
             out.append('Const cGameName="godzilla_le",UseSolenoids=2,UseLamps=0,UseGI=0, SCoin="coin"')
+            rom = re.search(r'cgamename\s*=\s*"([^"]*)"', low)
+            if rom:   # the backglass (B2S, DOF) knows the table by its ROM
+                out.append('PadB2SName = "%s"' % rom.group(1))
             out.append("Dim mMechaMagnet, bsScoop")
+            continue
+        if re.match(r"^sub\s+table1?_exit\b", low) and "controller.stop" in low:
+            # the backglass PADSPIKE2.vbs started goes with the table (PAD-852)
+            out.append(re.sub(r"(?i)\bController\.Stop\b", "Controller.Stop : PadStopB2S", line, count=1))
             continue
         if low.startswith("loadvpm "):
             out.append('LoadVPM "01000000","PADSPIKE2.vbs",3.10')

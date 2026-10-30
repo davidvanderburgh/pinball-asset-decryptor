@@ -266,6 +266,9 @@ def patch_script(src, m):
             continue
         if low.startswith("const cgamename"):
             out.append('Const cGameName = "%s"' % m["title"])
+            rom = re.search(r'cgamename\s*=\s*"([^"]*)"', low)
+            if rom:   # the backglass (B2S, DOF) knows the table by its ROM
+                out.append('PadB2SName = "%s"' % rom.group(1))
             out.append("Dim bsTrough, bsVan, padGiState, padDiscOn")
             out.append("padGiState = -1 : padDiscOn = 0")
             continue

@@ -78,6 +78,16 @@ Const DOFOn = 1
 Const DOFPulse = 2
 Dim B2SOn : B2SOn = False
 Dim B2SOnALT : B2SOnALT = False
+' the backglass (PAD-852). controller.vbs's LoadVPM makes `Controller` a
+' B2S.Server, which runs VPinMAME inside itself and shows the .directb2s;
+' here `Controller` is PAD.Controller, so B2S.Server runs beside it as
+' B2SController - controller.vbs's own two-controller (LoadVPMALT) way.
+' B2SOn stays False: `Controller.B2S...` calls would reach PAD.Controller.
+' PadB2SName is the table's own ROM name, which the patch keeps: the name
+' B2S and DOF know the table by. B2SOff = True before LoadVPM: none.
+Dim B2SController
+Dim B2SOff : B2SOff = False
+Dim PadB2SName : PadB2SName = ""
 Function SoundFX(sound, effect) : SoundFX = sound : End Function
 Function SoundFXDOF(sound, DOFevent, State, effect) : SoundFXDOF = sound : End Function
 Sub DOF(DOFevent, State) : End Sub
@@ -97,6 +107,7 @@ Sub LoadVPM(VPMver, VBSfile, VBSver)
 	If Err Then MsgBox "Can't load PAD.Controller: register it with" & vbNewLine & _
 		"  python tools\spike2_emu\vpx\padcontroller.py --register" & vbNewLine & Err.Description
 	If VPinMAMEDriverVer < VBSver Or Err Then MsgBox "PADSPIKE2.vbs ver " & VBSver & " or higher required."
+	PadStartB2S
 	vpmSystemHelp = "Stern Spike 2 (PAD emulator) keys:" & vbNewLine &_
 	  vpmKeyName(keyInsertCoin1)  & vbTab & "Left Coin"       & vbNewLine &_
 	  vpmKeyName(keyInsertCoin2)  & vbTab & "Center Coin"     & vbNewLine &_
@@ -198,6 +209,37 @@ Function vpmKeyUp(ByVal keycode)
 		End Select
 	End With
 End Function
+
+' ---- the backglass: B2S.Server beside the controller, unless Visual
+' Pinball's ForceDisableB2S setting or the table's B2SOff says not (as
+' controller.vbs). No B2S installed: no backglass, and nothing else changes.
+Private Sub PadStartB2S
+	Dim off, name, e
+	off = 0
+	On Error Resume Next
+	If VPBuildVersion >= 10704 Then off = CInt(Setting("Controller", "ForceDisableB2S"))
+	Err.Clear
+	If B2SOff Then off = 1
+	If off <> 0 Then PadLog "B2S.Server: off (ForceDisableB2S or B2SOff)" : Exit Sub
+	name = PadB2SName
+	If name = "" Then name = Eval("cGameName")
+	Err.Clear
+	Set B2SController = CreateObject("B2S.Server")
+	If Err Then PadLog "B2S.Server: none (" & Err.Description & ") - no backglass" : Err.Clear : Exit Sub
+	B2SController.B2SName = name
+	B2SController.Run
+	e = Err.Number & " " & Err.Description   ' PadLog's return clears Err
+	If Err = 0 Then B2SOnALT = True
+	Err.Clear
+	PadLog "B2S.Server: started as " & name & " err=" & e
+End Sub
+
+' the table's exit sub calls this beside Controller.Stop (the patch puts it there)
+Sub PadStopB2S
+	On Error Resume Next
+	If IsObject(B2SController) Then B2SController.Stop
+	B2SOnALT = False
+End Sub
 
 ' no DIP switches on a Spike 2 machine: its settings are the game's own menu
 ' (vpmShowDips is core.vbs's Dim, so LoadVPM points it here after LoadCore)

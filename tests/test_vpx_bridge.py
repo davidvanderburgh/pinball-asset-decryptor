@@ -174,6 +174,7 @@ def test_patcher_rewrites_a_miniature(gzmap):
         'If Err Then MsgBox "You need the controller.vbs in order to run this table"',
         'Const cGameName="godzilla",UseSolenoids=1,UseLamps=0,UseGI=0, SCoin="coin"',
         'LoadVPM "01000000","SEGA.VBS",3.10',
+        'sub Table1_Exit:Controller.Stop:End Sub',
         ' SolCallBack(1) = "SolRelease"',
         'SolCallback(3) = "solTopMagnet"',
         '',
@@ -214,6 +215,9 @@ def test_patcher_rewrites_a_miniature(gzmap):
     out, rep = patch.patch_script(mini, gzmap)
     assert 'GetTextFile("PADSPIKE2.vbs")' in out and "SEGA.VBS" not in out
     assert 'cGameName="godzilla_le",UseSolenoids=2' in out
+    # PAD-852: the backglass keeps the table's ROM name, and goes with the table
+    assert 'PadB2SName = "godzilla"' in out
+    assert "sub Table1_Exit:Controller.Stop : PadStopB2S:End Sub" in out
     assert out.count("PAD: Spike 2 coils") == 1
     assert 'SolCallback(1) = "SolRelease"' in out and "solTopMagnet" not in out
     assert 'SolCallback(sLLFlipper) = "SolLFlipper"' in out
@@ -1450,3 +1454,102 @@ def test_a_registration_whose_folder_is_gone_is_not_registered(tmp_path):
     assert not vs.registration_ok(str(kit), str(tmp_path / "nopython.exe") + " x")
     assert not vs.registration_ok("", server)
     assert vs.controller_registered() in (True, False)                          # never raises
+
+
+# ------------------------------------------------- the backglass (PAD-852) --
+
+_B2S_HARNESS = r'''
+Class FakeB2S
+	Public Sub Run : WScript.Echo "run" : End Sub
+	Public Sub [Stop] : WScript.Echo "stop" : End Sub
+	Public Property Let B2SName(v) : WScript.Echo "name " & v : End Property
+End Class
+Function PadNewB2S
+	If NoB2S Then Err.Raise 429, "x", "ActiveX component can't create object" : Exit Function
+	Set PadNewB2S = New FakeB2S
+End Function
+Function Setting(s, k) : Setting = ForceOff : End Function
+'''
+
+
+def _run_padspike2(tmp_path, lines):
+    """PADSPIKE2.vbs as Visual Pinball loads it (ExecuteGlobal), with a
+    stand-in B2S.Server, then `lines`; what it echoed, and padspike2.log."""
+    import subprocess
+    sysvbs = open(os.path.join(VPX, "PADSPIKE2.vbs"), encoding="utf-8").read()
+    assert sysvbs.count('CreateObject("B2S.Server")') == 1
+    sysvbs = sysvbs.replace('CreateObject("B2S.Server")', "PadNewB2S")
+    (tmp_path / "sys.vbs").write_text(sysvbs, encoding="latin-1")
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim NoB2S, ForceOff, VPBuildVersion, cGameName",
+        "VPBuildVersion = 10800 : ForceOff = 0 : cGameName = \"metallica_spike\"",
+        _B2S_HARNESS,
+        'ExecuteGlobal CreateObject("Scripting.FileSystemObject").OpenTextFile("%s").ReadAll'
+        % str(tmp_path / "sys.vbs")] + lines), encoding="latin-1")
+    env = dict(os.environ, TEMP=str(tmp_path), TMP=str(tmp_path))
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True,
+                       timeout=60, env=env)
+    assert not r.stderr.strip(), r.stdout + r.stderr
+    log = tmp_path / "padspike2.log"
+    return r.stdout.split(), log.read_text(encoding="latin-1") if log.exists() else ""
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs PADSPIKE2.vbs under cscript")
+def test_padspike2_starts_the_backglass_beside_the_controller(tmp_path):
+    # controller.vbs's LoadVPM made `Controller` a B2S.Server, and that is
+    # what shows a ROM table's backglass; PADSPIKE2.vbs makes it
+    # PAD.Controller, so B2S.Server has to run beside it (Metallica: none)
+    out, log = _run_padspike2(tmp_path, [
+        'PadB2SName = "mtl_180h"', "PadStartB2S",
+        'WScript.Echo "alt=" & B2SOnALT & " on=" & B2SOn',
+        "PadStopB2S", 'WScript.Echo "alt=" & B2SOnALT'])
+    assert out == ["name", "mtl_180h", "run", "alt=True", "on=False", "stop", "alt=False"]
+    assert "B2S.Server: started as mtl_180h err=0" in log
+    # no ROM name kept: the table's cGameName
+    out, _ = _run_padspike2(tmp_path, ["PadStartB2S"])
+    assert out[:2] == ["name", "metallica_spike"]
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs PADSPIKE2.vbs under cscript")
+def test_padspike2_backglass_off_or_missing_changes_nothing(tmp_path):
+    for pre in ("ForceOff = 1", "B2SOff = True"):        # Visual Pinball's setting, the table's
+        out, log = _run_padspike2(tmp_path, [pre, "PadStartB2S", 'WScript.Echo "alt=" & B2SOnALT'])
+        assert out == ["alt=False"], pre
+        assert "B2S.Server: off" in log
+    # B2S not installed: no backglass, no message box, the load goes on
+    out, log = _run_padspike2(tmp_path, ["NoB2S = True", "PadStartB2S", "PadStopB2S",
+                                         'WScript.Echo "alt=" & B2SOnALT'])
+    assert out == ["alt=False"]
+    assert "B2S.Server: none" in log
+    # LoadVPM starts it, after the controller
+    sysvbs = open(os.path.join(VPX, "PADSPIKE2.vbs"), encoding="utf-8").read()
+    body = sysvbs[sysvbs.index("Sub LoadVPM("):]
+    body = body[:body.index("End Sub")]
+    assert body.index('CreateObject("PAD.Controller")') < body.index("PadStartB2S")
+
+
+def test_rom_patchers_keep_the_rom_name_for_the_backglass():
+    tm = pytest.importorskip("patch_turtles_le")
+    m = json.load(open(os.path.join(VPX, "turtles_le.vpxmap.json"), encoding="utf-8"))
+    out, _ = tm.patch_script('Const cGameName = "tmnt_104"\nLoadVPM "01560000", "DE.VBS", 3.26', m)
+    assert 'Const cGameName = "%s"\nPadB2SName = "tmnt_104"' % m["title"] in out
+    mt = pytest.importorskip("patch_metallica_spike")
+    src = open(mt.__file__, encoding="utf-8").read()
+    assert "PadB2SName = \"mtl_180h\"" in src
+    # PAD-852: the output is the map's name whatever the download is called,
+    # so the backglass padvpx copies to that name sits beside the table
+    assert 'out_name = m.get("output") or' in src
+
+
+def test_play_brings_the_tables_padspike2_up_to_date(tmp_path):
+    vs = pytest.importorskip("vpxsetup")
+    ours = open(os.path.join(VPX, "PADSPIKE2.vbs"), "rb").read()
+    assert not vs.refresh_system_script(str(tmp_path))                 # none there: none written
+    assert not (tmp_path / "PADSPIKE2.vbs").exists()
+    (tmp_path / "PADSPIKE2.vbs").write_bytes(b"' an older release's")
+    assert vs.refresh_system_script(str(tmp_path))
+    assert (tmp_path / "PADSPIKE2.vbs").read_bytes() == ours
+    assert not vs.refresh_system_script(str(tmp_path))                 # already this kit's

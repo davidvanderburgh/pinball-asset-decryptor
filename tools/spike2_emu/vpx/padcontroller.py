@@ -603,6 +603,212 @@ class SwitchPipe:
 
 # ---------------------------------------------------------------- the bridge
 
+#: how far inside the playfield's edge a press grabs it to resize (the game
+#: display's DISP_EDGE, padglhost.c)
+GRIP_EDGE = 16
+PLAYER_MIN_W = 240
+
+
+def grip_edge(pt, client, edge=GRIP_EDGE):
+    """Which edges of the playfield picture `pt` is within `edge` pixels of
+    ("l", "br", ...), or None: the grip ring (PAD-845). `client` is the
+    picture's (x, y, w, h) on the screen."""
+    x, y = pt
+    cx, cy, cw, ch = client
+    if not (cx <= x < cx + cw and cy <= y < cy + ch):
+        return None
+    edges = ("t" if y < cy + edge else "b" if y >= cy + ch - edge else "") \
+        + ("l" if x < cx + edge else "r" if x >= cx + cw - edge else "")
+    return edges or None
+
+
+def resized(edges, win, client, start, pt, min_w=PLAYER_MIN_W):
+    """The window rectangle after dragging `edges` from `start` to `pt`, the
+    picture in its proportions: a side edge sets the width, a top or bottom
+    edge the height, and the edges opposite the dragged ones stay put."""
+    wx, wy, ww, wh = win
+    cw, ch = client[2], client[3]
+    aspect = ch / float(cw) if cw else 1.0
+    dx, dy = pt[0] - start[0], pt[1] - start[1]
+    if "l" in edges or "r" in edges:
+        ncw = cw + (dx if "r" in edges else -dx)
+    else:
+        ncw = (ch + (dy if "b" in edges else -dy)) / aspect
+    ncw = max(int(round(ncw)), min_w)
+    nw, nh = ncw + (ww - cw), int(round(ncw * aspect)) + (wh - ch)
+    return (wx + ww - nw if "l" in edges else wx), (wy + wh - nh if "t" in edges else wy), nw, nh
+
+
+class PlayerGrips:
+    """The playfield window's edges, grabbed the way the game display's are
+    (PAD-845). David: "you have to be exact on the border and there's no
+    cursor change ... I wish it worked more like the display where you could
+    loosely grab 16 pixels from the edge". Visual Pinball's window procedure
+    is its own, so this lays a window of ours over the picture's outer 16
+    pixels: a ring (SetWindowRgn), all but invisible (alpha 1, which still
+    takes the mouse), owned by the player so it stays just above it. Over the
+    ring the cursor is the resize arrow for that edge or corner; a press
+    there resizes the player, keeping the table's proportions (resized()),
+    and a double-click fills the monitor and back (Bridge._fill_player). It
+    never takes the focus (WS_EX_NOACTIVATE, MA_NOACTIVATE): Visual Pinball
+    pauses the moment it loses it. One thread with its own message loop,
+    following the player every 50 ms."""
+
+    CLASS = "PADPlayerGrips"
+    CURSORS = {"l": 32644, "r": 32644, "t": 32645, "b": 32645,          # IDC_SIZEWE, IDC_SIZENS
+               "tl": 32642, "br": 32642, "tr": 32643, "bl": 32643}      # IDC_SIZENWSE, IDC_SIZENESW
+
+    def __init__(self, bridge):
+        self.bridge = bridge
+        self.hwnd = 0
+        self.player = 0
+        self.placed = None
+        self.drag = None
+        self.tid = 0
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        import ctypes
+        if self.tid:
+            ctypes.windll.user32.PostThreadMessageW(self.tid, 0x0012, 0, 0)     # WM_QUIT
+        self.thread.join(timeout=2)
+
+    def _run(self):
+        import ctypes
+        from ctypes import wintypes
+        import win32api
+        import win32gui
+        u = self.u = ctypes.windll.user32
+        u.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        u.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))     # physical pixels, as the player's
+        u.LoadCursorW.restype = ctypes.c_void_p
+        u.SetCursor.argtypes = [ctypes.c_void_p]
+        self.tid = ctypes.windll.kernel32.GetCurrentThreadId()
+        wc = win32gui.WNDCLASS()
+        wc.lpszClassName = self.CLASS
+        wc.lpfnWndProc = self._proc
+        wc.style = 0x0008                                    # CS_DBLCLKS
+        wc.hInstance = self.hinst = win32api.GetModuleHandle(None)
+        try:
+            win32gui.RegisterClass(wc)
+        except win32gui.error:
+            pass                                             # this process registered it already
+        u.SetTimer(None, 0, 50, None)
+        msg = wintypes.MSG()
+        try:
+            while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                if msg.message == 0x0113 and not msg.hWnd:   # WM_TIMER, the thread's own
+                    self._tick()
+                    continue
+                u.TranslateMessage(ctypes.byref(msg))
+                u.DispatchMessageW(ctypes.byref(msg))
+        except Exception as exc:                            # noqa: BLE001
+            log("player grips stopped: %s" % exc)
+        finally:
+            if self.hwnd:
+                win32gui.DestroyWindow(self.hwnd)
+                self.hwnd = 0
+
+    def _tick(self):
+        import ctypes
+        import win32gui
+        u = self.u
+        try:
+            b = self.bridge
+            player = getattr(b, "player_hwnd", 0) if b.running else 0
+            if player and not (u.IsWindow(ctypes.c_void_p(player)) and u.IsWindowVisible(ctypes.c_void_p(player))
+                               and not u.IsIconic(ctypes.c_void_p(player))):
+                player = 0
+            if player != self.player:
+                if self.hwnd:
+                    win32gui.DestroyWindow(self.hwnd)
+                    self.hwnd = 0
+                self.player, self.placed = player, None
+                if player:
+                    # WS_EX_LAYERED | TOOLWINDOW | NOACTIVATE, WS_POPUP owned by the player
+                    self.hwnd = win32gui.CreateWindowEx(0x00080000 | 0x00000080 | 0x08000000, self.CLASS,
+                                                        "PAD grips", 0x80000000, 0, 0, 1, 1, player, 0,
+                                                        self.hinst, None)
+                    u.SetLayeredWindowAttributes(ctypes.c_void_p(self.hwnd), 0, 1, 2)    # alpha 1: there, unseen
+                    log("player grips on: grab the playfield %d px inside its edge to resize it" % GRIP_EDGE)
+            if self.hwnd and not self.drag:
+                self._follow()
+        except Exception as exc:                            # noqa: BLE001
+            log("player grips: %s" % exc)
+
+    def _follow(self):
+        """Over the picture's outer GRIP_EDGE pixels, wherever the player is."""
+        import ctypes
+        u, gdi = self.u, ctypes.windll.gdi32
+        c = Bridge._client_on_screen(self.player)
+        if c == self.placed:
+            return
+        self.placed = c
+        x, y, w, h = c
+        if u.IsZoomed(ctypes.c_void_p(self.player)) or w <= 3 * GRIP_EDGE or h <= 3 * GRIP_EDGE:
+            u.ShowWindow(ctypes.c_void_p(self.hwnd), 0)
+            return
+        outer, inner = gdi.CreateRectRgn(0, 0, w, h), gdi.CreateRectRgn(GRIP_EDGE, GRIP_EDGE, w - GRIP_EDGE, h - GRIP_EDGE)
+        gdi.CombineRgn(outer, outer, inner, 4)               # RGN_DIFF: the ring
+        gdi.DeleteObject(inner)
+        u.SetWindowRgn(ctypes.c_void_p(self.hwnd), ctypes.c_void_p(outer), True)   # the window owns it now
+        # SWP_NOACTIVATE | SWP_SHOWWINDOW; HWND_TOP keeps it over its owner
+        u.SetWindowPos(ctypes.c_void_p(self.hwnd), None, x, y, w, h, 0x0010 | 0x0040)
+
+    def _point(self):
+        import ctypes
+        from ctypes import wintypes
+        p = wintypes.POINT()
+        self.u.GetCursorPos(ctypes.byref(p))
+        return p.x, p.y
+
+    def _proc(self, hwnd, msg, wparam, lparam):
+        import ctypes
+        import win32gui
+        u = self.u
+        try:
+            if msg == 0x0021:                                # WM_MOUSEACTIVATE
+                return 3                                     # MA_NOACTIVATE: the player keeps the focus
+            if msg == 0x0020:                                # WM_SETCURSOR
+                edge = self.drag[0] if self.drag else grip_edge(self._point(), Bridge._client_on_screen(self.player))
+                if edge:
+                    u.SetCursor(u.LoadCursorW(None, ctypes.c_void_p(self.CURSORS[edge])))
+                    return 1
+            elif msg == 0x0201:                              # WM_LBUTTONDOWN
+                p = self._point()
+                client = Bridge._client_on_screen(self.player)
+                edge = grip_edge(p, client)
+                if edge:
+                    self.drag = (edge, window_rect(self.player), client, p)
+                    u.SetCapture(ctypes.c_void_p(hwnd))
+                return 0
+            elif msg == 0x0200 and self.drag:                # WM_MOUSEMOVE while dragging
+                to = resized(self.drag[0], self.drag[1], self.drag[2], self.drag[3], self._point())
+                if to != window_rect(self.player):
+                    u.SetWindowPos(ctypes.c_void_p(self.player), None, *to, 0x4 | 0x10)   # NOZORDER | NOACTIVATE
+                    self.placed = None
+                    self._follow()
+                return 0
+            elif msg in (0x0202, 0x0215) and self.drag:      # WM_LBUTTONUP, WM_CAPTURECHANGED
+                log("player window resized from its %s grip: %s" % (self.drag[0], window_rect(self.player)))
+                self.drag = None
+                if msg == 0x0202:
+                    u.ReleaseCapture()
+                self.placed = None
+                return 0
+            elif msg == 0x0203:                              # WM_LBUTTONDBLCLK: fill the monitor, or back
+                self.drag = None
+                u.ReleaseCapture()
+                self.bridge._fill_player(self.player)
+                self.placed = None
+                return 0
+        except Exception as exc:                            # noqa: BLE001
+            log("player grips: %s" % exc)
+            self.drag = None
+        return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
+
+
 class Bridge:
     """Everything that is not COM: the poll thread, the state, the pipe.
     Testable on its own (see --selftest and tests/test_vpx_bridge.py)."""
@@ -682,6 +888,11 @@ class Bridge:
         self.running = True
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
+        if sys.platform == "win32" and not getattr(self, "_grips", None):
+            try:
+                self._grips = PlayerGrips(self)
+            except Exception as exc:                        # noqa: BLE001
+                log("player grips not started: %s" % exc)
         log("run")
 
     def _attach(self, data):
@@ -753,6 +964,9 @@ class Bridge:
         if self._thread:
             self._thread.join(timeout=2)
             self._thread = None
+        if getattr(self, "_grips", None):
+            self._grips.stop()
+            self._grips = None
         if self.pipe:
             self.pipe.close()
         if self.rig:
@@ -1044,6 +1258,16 @@ class Bridge:
             u.SetWindowPos(ctypes.c_void_p(hwnd), None, 0, 0, 0, 0, 0x20 | 0x2 | 0x1 | 0x4 | 0x10)
             log("player window framed: drag it by its title bar, resize from its edges")
         return True
+
+    @staticmethod
+    def _client_on_screen(hwnd):
+        """The picture's (x, y, w, h) on the screen."""
+        import ctypes
+        from ctypes import wintypes
+        cw, ch = Bridge._client_size(hwnd)
+        pt = wintypes.POINT(0, 0)
+        ctypes.windll.user32.ClientToScreen(ctypes.c_void_p(hwnd), ctypes.byref(pt))
+        return pt.x, pt.y, cw, ch
 
     @staticmethod
     def _client_size(hwnd):

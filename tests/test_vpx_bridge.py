@@ -1237,3 +1237,33 @@ def test_player_fills_its_monitor_at_the_tables_proportions():
     assert x == (3840 - w) // 2 and y == (2160 - h) // 2
     x, y, w, h = pc.fill_monitor(win, client, (3840, 0, 5760, 1080))    # a second, smaller monitor
     assert 3840 <= x and x + w <= 5760 and h <= 1080
+
+
+def test_player_grips_take_16_px_inside_the_playfield_edge():
+    # PAD-845: "loosely grab 16 pixels from the edge", like the display.
+    # The picture 1440x1080 at 1664,561 on the screen
+    pc = pytest.importorskip("padcontroller")
+    c = (1664, 561, 1440, 1080)
+    assert pc.grip_edge((1664 + 1440 - 10, 900), c) == "r"
+    assert pc.grip_edge((1664 + 5, 900), c) == "l"
+    assert pc.grip_edge((2300, 561 + 1080 - 15), c) == "b"
+    assert pc.grip_edge((2300, 561 + 3), c) == "t"
+    assert pc.grip_edge((1664 + 1440 - 2, 561 + 1080 - 2), c) == "br"
+    assert pc.grip_edge((1664 + 4, 561 + 4), c) == "tl"
+    assert pc.grip_edge((1664 + 1440 - 17, 900), c) is None                 # 17 px in: the game's
+    assert pc.grip_edge((2300, 900), c) is None
+    assert pc.grip_edge((1600, 900), c) is None                             # off the picture
+
+
+def test_player_grip_drag_resizes_in_the_tables_proportions():
+    pc = pytest.importorskip("padcontroller")
+    win, client = (1653, 516, 1462, 1136), (1664, 561, 1440, 1080)
+    x, y, w, h = pc.resized("r", win, client, (3100, 900), (2800, 900))
+    assert (x, y) == (1653, 516) and (w - 22, h - 56) == (1140, 855)
+    x, y, w, h = pc.resized("l", win, client, (1670, 900), (1970, 900))
+    assert x + w == 1653 + 1462 and w - 22 == 1140                          # the right side stays
+    x, y, w, h = pc.resized("b", win, client, (2300, 1630), (2300, 1360))
+    assert (w - 22, h - 56) == (1080, 810)
+    x, y, w, h = pc.resized("t", win, client, (2300, 565), (2300, 835))
+    assert y + h == 516 + 1136 and h - 56 == 810                            # the bottom stays
+    assert pc.resized("r", win, client, (3100, 900), (0, 900))[2] - 22 == pc.PLAYER_MIN_W

@@ -21,6 +21,7 @@ Linux, Docker on macOS) since Python has no in-tree ext4 writer.
 
 import json
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -46,6 +47,7 @@ from ..williams import wpc_extract
 from .formats import (detect_game, find_data_partition, find_game_partition,
                       is_img_file, read_mbr_partitions)
 from .games import GAME_DB
+from . import mods as M
 
 
 # CGC's WPC remakes (MM/AFM/MB) ship the original Williams WPC ROM
@@ -813,6 +815,16 @@ class WritePipeline(BasePipeline):
 
         changed, missing = _diff_assets(self.assets_dir, baseline,
                                         log=self._log)
+        # PAD-877: C under pad_mods/ is built for the machine in phase 3,
+        # against the card's own libraries; its library ships like any file.
+        mod_plan = M.mod_sources(self.assets_dir)
+        for target in sorted(mod_plan):
+            if target in changed:
+                self._log(f"  {target} is built from {M.MODS_DIR}/ -- the "
+                          f"copy in the project folder is not used.",
+                          "warning")
+            changed[target] = os.path.join(
+                self.assets_dir, "build", M.MODS_DIR, *target.split("/"))
         if not changed:
             self._log(
                 "  No modified files found -- output will be a byte-for-byte "
@@ -919,9 +931,16 @@ class WritePipeline(BasePipeline):
             self._replay_stale_journal(inner_exec, "inner game partition")
 
             self._set_phase(3)
+            inner_root_to_assets_root = info["asset_subtree"]
+            card_dir = tempfile.mkdtemp(prefix="pad_cgc_libs_")
+            try:
+                self._build_mods(inner_exec, mod_plan, changed, card_dir)
+                self._check_programs(inner_exec, changed, card_dir,
+                                     inner_root_to_assets_root)
+            finally:
+                shutil.rmtree(card_dir, ignore_errors=True)
             self._log("Writing modified files into inner ext4 via debugfs...",
                       "info")
-            inner_root_to_assets_root = info["asset_subtree"]
             self._write_modified_files(
                 inner_exec, changed, inner_root_to_assets_root)
 
@@ -1000,6 +1019,168 @@ class WritePipeline(BasePipeline):
             f"machine powered off, power on, and follow CGC's on-screen "
             f"installer prompt. Keep a backup of the untouched card/drive "
             f"first.")
+
+    def _inner_stat(self, inner_exec, path):
+        cmd = shlex.quote(f"stat {_quote_dbg(path)}")
+        return self.executor.run(
+            f"debugfs -R {cmd} {shlex.quote(inner_exec)} 2>&1", timeout=60)
+
+    def _dump_card_lib(self, inner_exec, name, dirs, host_dir):
+        """Copy the library *name* the machine would load out of the game
+        filesystem into *host_dir*: the first of *dirs* that has it, its
+        symlinks followed inside the image.  Returns the host path, or None
+        when no folder has it."""
+        for d in dirs:
+            path = f"{d.rstrip('/')}/{name}"
+            for _hop in range(8):
+                out = self._inner_stat(inner_exec, path)
+                m = re.search(r"\bType:\s*(\w+)", out)
+                if not m or "not found" in out.lower():
+                    break
+                if m.group(1) == "symlink":
+                    link = re.search(r'Fast link dest:\s*"([^"]*)"', out)
+                    if not link:
+                        break
+                    path = posixpath.normpath(posixpath.join(
+                        posixpath.dirname(path), link.group(1)))
+                    continue
+                if m.group(1) != "regular":
+                    break
+                sub = os.path.join(host_dir, str(len(os.listdir(host_dir))))
+                os.makedirs(sub)
+                dest = os.path.join(sub, name)
+                dump = shlex.quote(
+                    f"dump {_quote_dbg(path)} "
+                    f"{_quote_dbg(self.executor.to_exec_path(dest))}")
+                self.executor.run(
+                    f"debugfs -R {dump} {shlex.quote(inner_exec)} 2>&1",
+                    timeout=120)
+                if os.path.isfile(dest) and os.path.getsize(dest):
+                    return dest
+                break
+        return None
+
+    def _build_mods(self, inner_exec, plan, changed, card_dir):
+        """Compile the project's ``pad_mods/`` C for the machine (PAD-877),
+        linked against the glibc on the card being written, so a mod can ask
+        for nothing the machine does not have."""
+        if not plan:
+            return
+        self._log(f"Building {len(plan)} code mod(s) from {M.MODS_DIR}/ "
+                  f"against the machine's own libraries...", "info")
+        try:
+            self.executor.run(f"command -v {M.CROSS_CC} >/dev/null",
+                              timeout=10)
+        except CommandError:
+            raise PipelineError("Write",
+                f"Building {M.MODS_DIR}/ needs the ARM cross compiler "
+                f"({M.CROSS_CC}), which is not installed. "
+                f"{_cross_cc_hint()} Nothing was written; the original "
+                f"image is unchanged.")
+        x = self.executor.to_exec_path
+        libs = []
+        for name in M.LINK_LIBS:
+            got = self._dump_card_lib(inner_exec, name, M.LIB_DIRS, card_dir)
+            if got:
+                libs.append(x(got))
+            elif name == "libc.so.6":
+                raise PipelineError("Write",
+                    f"The game filesystem has no libc.so.6 to build "
+                    f"{M.MODS_DIR}/ against. Nothing was written; the "
+                    f"original image is unchanged.")
+        compat = os.path.join(card_dir, "pad_libc_compat.c")
+        with open(compat, "w", encoding="utf-8", newline="\n") as f:
+            f.write(M.COMPAT_SOURCE)
+        mods_root = os.path.join(self.assets_dir, M.MODS_DIR)
+        for target, sources in sorted(plan.items()):
+            self._check_cancel()
+            out = changed[target]
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            if os.path.exists(out):
+                os.remove(out)
+            incs = []
+            for d in [os.path.dirname(s) for s in sources] + [mods_root]:
+                if x(d) not in incs:
+                    incs.append(x(d))
+            cmd = M.compile_command(M.CROSS_CC, x(out),
+                                    [x(s) for s in sources] + [x(compat)],
+                                    incs, libs)
+            try:
+                said = self.executor.run(cmd, timeout=300)
+            except CommandError as e:
+                raise PipelineError("Write",
+                    f"{target} did not build from {M.MODS_DIR}/ (a function "
+                    f"the machine's glibc does not have shows up as an "
+                    f"\"undefined reference\"). Nothing was written; the "
+                    f"original image is unchanged.\n\n"
+                    f"{(e.output or '').strip()[-1500:]}")
+            if not os.path.isfile(out):
+                raise PipelineError("Write",
+                    f"{target} did not build (no library was written): "
+                    f"{(said or '').strip()[-600:]}")
+            for line in (said or "").strip().splitlines()[-10:]:
+                self._log(f"    {line}", "info")
+            self._log(f"  built {target} ({os.path.getsize(out):,} bytes)",
+                      "success")
+
+    def _check_programs(self, inner_exec, changed, card_dir, inner_root):
+        """Refuse a program or library the machine cannot load (PAD-877):
+        not 32-bit hard-float ARM, or asking a library for a symbol version
+        the card's copy of it does not define -- a modern gcc's
+        ``dlsym@GLIBC_2.34`` against the machine's glibc 2.13.  Preloaded at
+        boot that is a dead PID 1 and a boot loop, so it never ships."""
+        elfs = {rel: p for rel, p in changed.items() if M.is_elf(p)}
+        if not elfs:
+            return
+        self._log(f"Checking {len(elfs)} program(s) and librar(ies) against "
+                  f"the machine's own libraries...", "info")
+        shipped = {rel.rsplit("/", 1)[-1]: p for rel, p in changed.items()}
+        root = inner_root.rstrip("/")
+        found = {}
+        problems = []
+        for rel, path in sorted(elfs.items()):
+            self._check_cancel()
+            try:
+                info = M.read_elf_file(path)
+            except (OSError, M.ElfError) as e:
+                problems.append(f"{rel} could not be read as a program ({e}).")
+                continue
+            here = posixpath.dirname(f"{root}/{rel}")
+            dirs = [p.replace("${ORIGIN}", here).replace("$ORIGIN", here)
+                    for p in info["runpath"]]
+            dirs = tuple(dirs + [here] + list(M.LIB_DIRS))
+            card_libs = {}
+            for lib in sorted(set(info["needed"]) | set(info["verneed"])):
+                if lib in shipped and M.is_elf(shipped[lib]):
+                    host = shipped[lib]
+                else:
+                    if (lib, dirs) not in found:
+                        found[(lib, dirs)] = self._dump_card_lib(
+                            inner_exec, lib, dirs, card_dir)
+                    host = found[(lib, dirs)]
+                try:
+                    card_libs[lib] = M.read_elf_file(host) if host else None
+                except (OSError, M.ElfError):
+                    card_libs[lib] = None
+                if card_libs[lib] is None:
+                    self._log(f"  {rel} needs {lib}, which is not in the "
+                              f"machine's library folders -- not checked "
+                              f"(the game may load it from a folder of its "
+                              f"own).", "warning")
+            why = M.check_elf(rel, info, card_libs)
+            if why:
+                problems += why
+                continue
+            top = M.newest([v for vs in info["verneed"].values() for v in vs])
+            self._log(f"  {rel}: 32-bit ARM"
+                      + (f", asks for up to {top} -- the machine has it"
+                         if top else ""), "success")
+        if problems:
+            raise PipelineError("Write",
+                "This build would not run on the machine:\n\n"
+                + "\n\n".join(problems)
+                + "\n\nNothing was written; the original image is "
+                  "unchanged.")
 
     def _make_inner_dirs(self, inner_exec, inner_root, changed):
         """Create every folder a modified file needs inside the inner ext4.
@@ -1651,7 +1832,10 @@ def _diff_assets(assets_dir, baseline, log=None):
     # project first extracted under v0.43).  build/ is the same trap with worse
     # odds: it is where Write puts its own output, so a second build would post
     # a multi-GB installer image into the game partition.
-    _skip_top = set(_DERIVED_SUBDIRS) | {ORIG_DIR} | set(NON_ASSET_DIRS)
+    # ``pad_mods/`` holds C the Write compiles for the machine (PAD-877): its
+    # sources never ship, the libraries built from them do.
+    _skip_top = (set(_DERIVED_SUBDIRS) | {ORIG_DIR} | set(NON_ASSET_DIRS)
+                 | {M.MODS_DIR})
     # Directories the inner ext4 is known to have -- every directory the
     # baseline lists a file in, plus the assets root.  A new file anywhere
     # else ships too (a mod's own ``custom_modes/mod.c`` or ``lib/custom.so``,
@@ -2169,6 +2353,20 @@ def _missing_tool_hint(platform=None):
         return "Install in WSL: apt-get install e2fsprogs xxd coreutils"
     return ("Install them: sudo apt install e2fsprogs xxd  (Debian/Ubuntu; "
             "other distros: the e2fsprogs and xxd packages)")
+
+
+def _cross_cc_hint(platform=None):
+    """How to get the ARM cross compiler a ``pad_mods/`` build needs."""
+    p = platform or sys.platform
+    if p == "win32":
+        return ("Install it in WSL: apt-get install gcc-arm-linux-gnueabihf "
+                "(or press Install Missing on the Emulate tab's "
+                "prerequisites).")
+    if p == "darwin":
+        return ("macOS has no packaged ARM Linux cross compiler; build on "
+                "Windows or Linux.")
+    return ("Install it: sudo apt install gcc-arm-linux-gnueabihf "
+            "(Debian/Ubuntu; Arch: arm-linux-gnueabihf-gcc from the AUR).")
 
 
 def _verify_executor_tools(executor):

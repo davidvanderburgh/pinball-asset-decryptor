@@ -1559,6 +1559,22 @@ HELP_CONTENT = {
             "- The dialog remembers your last ticks per manufacturer.",
             {"note": "Flashing **erases the whole card**.", "kind": "warn"},
         ]),
+        ("Code mods (CGC)", [
+            "A CGC machine runs Debian 7 with glibc 2.13. A library or program "
+            "built on a newer Linux won't load there; preloaded at power-up, the "
+            "machine boot-loops.",
+            "- Put C files in the project's **pad_mods** folder: "
+            "`pad_mods/lib/hook.c` is built into `lib/hook.so` in the game folder. "
+            "A folder named `<name>.so` inside it builds all its `.c` files into "
+            "one library.\n"
+            "- The build is linked against the machine's own libraries from the "
+            "card being written, so a function the machine lacks stops the build "
+            "with its name instead of reaching the card. The sources never ship.\n"
+            "- Every program or library going onto the card, built here or dropped "
+            "in by hand, is checked first: it must be 32-bit ARM (hard-float) and "
+            "need nothing newer than the machine's libraries have. If it fails, "
+            "the build stops and nothing is written.",
+        ]),
         ("Direct write", [
             {"note": "**Write to SD card / SSD** (where available) changes the card "
                      "itself. Take it out of the machine first, and always keep a "

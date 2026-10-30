@@ -211,7 +211,7 @@ disk. **⚙ > Manage disk space** shows it all.
 ## Auto-update
 
 The app checks for a new release at launch and then as it runs (⚙ >
-**Check automatically**: at startup, hourly, every 6 hours or daily; 6
+**Updates**: at startup, hourly, every 6 hours or daily; 6
 hours by default). A new release shows a banner, a ● on the ⚙ gear and a
 line in the log.
 

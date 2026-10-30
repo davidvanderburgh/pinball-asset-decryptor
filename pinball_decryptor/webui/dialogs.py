@@ -106,7 +106,7 @@ class Dialogs:
     def file(self, mode, title="", initialdir="", initialfile="",
              filetypes=None, multiple=False, defaultextension="",
              confirmoverwrite=True):
-        dropped = self._take_drop()
+        dropped = self._take_drop(mode)
         spec = {
             "kind": "file", "mode": mode, "title": title or "",
             "initialdir": initialdir or "", "initialfile": initialfile or "",
@@ -116,7 +116,9 @@ class Dialogs:
             "defaultextension": defaultextension or "",
             "confirmoverwrite": bool(confirmoverwrite),
         }
-        if dropped is not None and mode != "save":
+        if dropped is not None and mode == "save":
+            return self._normalise(dropped[0], spec)
+        if dropped is not None:
             return self._normalise(self._drop_answer(dropped, spec), spec)
         native = self.native_file_dialog
         if native is not None:
@@ -136,14 +138,18 @@ class Dialogs:
     # ------------------------------------------------------------------
     # files dropped on what opens a picker (PAD-838)
     # ------------------------------------------------------------------
-    def arm_drop(self, paths):
-        """The next open / folder picker (within :data:`DROP_WAIT_S`) answers
-        with *paths* instead of showing."""
-        self._drop = (time.monotonic(), [os.path.normpath(p) for p in paths])
+    def arm_drop(self, paths, wait=DROP_WAIT_S, save=False):
+        """The next open / folder picker (within *wait* seconds) answers
+        with *paths* instead of showing; with *save*, a Save As takes the
+        first path too (an agent picking where a file goes, PAD-844)."""
+        self._drop = (time.monotonic() + wait,
+                      [os.path.normpath(p) for p in paths], bool(save))
 
-    def _take_drop(self):
+    def _take_drop(self, mode="open"):
         drop, self._drop = self._drop, None
-        if drop and time.monotonic() - drop[0] < DROP_WAIT_S:
+        if drop and mode == "save" and not drop[2]:
+            return None             # a drop never answers a Save As
+        if drop and drop[1] and time.monotonic() < drop[0]:
             return drop[1]
         return None
 

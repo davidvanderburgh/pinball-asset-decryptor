@@ -473,6 +473,8 @@ class App:
             on_show_log_history_change=self._on_show_log_history_change,
             initial_scenes_own_colours=bool(s.get("scenes_own_colours", False)),
             on_scenes_own_colours_change=self._on_scenes_own_colours_change,
+            initial_agent_access=bool(s.get("agent_access", False)),
+            on_agent_access_change=self._on_agent_access_change,
             initial_look_switches=s.get("look_switches") or {},
             on_look_switches_change=self._on_look_switches_change,
             initial_compare_row_limit=s.get("compare_row_limit"),
@@ -6447,6 +6449,11 @@ class App:
     def _on_scenes_own_colours_change(self, on):
         """Persist the ⚙ "Scenes: switched-off files in their own colors" toggle (PAD-325)."""
         self._settings["scenes_own_colours"] = bool(on)
+        self._save_settings()
+
+    def _on_agent_access_change(self, on):
+        """Persist the ⚙ "Let AI agents control PAD" toggle (PAD-844)."""
+        self._settings["agent_access"] = bool(on)
         self._save_settings()
 
     def _on_look_switches_change(self, switches):

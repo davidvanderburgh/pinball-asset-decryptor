@@ -451,6 +451,27 @@ class ColorTab(TabService):
                 "on": f.get("on"), "own": self._own() is not None,
                 "count": len(rels), "own_n": own_n}
 
+    def _skips_plain(self):
+        """Files with no color profile attached skip the Machine screen in
+        the previews (PAD-325; the gear menu's until PAD-844)."""
+        var = getattr(self.window, "scenes_own_colours_var", None)
+        try:
+            return bool(var.get()) if var is not None else False
+        except Exception:                               # noqa: BLE001
+            return False
+
+    @rpc
+    def set_screen_skips_plain(self, on):
+        """The Machine screen mode's "Files with no color profile attached
+        skip the Machine screen" box (moved here from the gear, PAD-844)."""
+        if bool(on) != self._skips_plain():
+            toggle = getattr(self.window, "settings_actions", {}).get(
+                "toggle_scenes_own_colours")
+            if toggle is not None:
+                toggle(self.window)
+        self.set(screen_skips_plain=self._skips_plain())
+        return self._skips_plain()
+
     def _publish(self, problems=None):
         p = self._shown()
         saved, saved_on = self._saved_state(p)
@@ -498,6 +519,7 @@ class ColorTab(TabService):
                         or cp.recommended(assets, files=True)).label(),
             follows_screen=self._follows(),
             screen_stored=self._screen_stored,
+            screen_skips_plain=self._skips_plain(),
             screen_follow=bool(self._screen_mode() and assets
                                and os.path.isdir(assets)
                                and cp.screen_follows(assets)),

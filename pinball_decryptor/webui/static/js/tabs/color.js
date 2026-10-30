@@ -905,6 +905,11 @@ export default function ColorTab() {
       : (nFiles ? `The individual files profile “${s.asset_name}” is on too, baked into ${countWords(s.asset_counts || {})}; the overlay is drawn over those as well.`
         : "No individual file is switched on; switch files on under Adjust individual files to correct only your own art.")}<//>`}` : null}
     ${note}
+    ${screen ? html`<div class="row cp-skip-plain">
+      <${Check} checked=${!!s.screen_skips_plain} label="Files with no color profile attached skip the Machine screen"
+        onChange=${(v) => call("color.set_screen_skips_plain", v)}
+        title="With the Machine screen ticked under Preview colors, in Scenes and on the Video tab's players, a file with no color profile attached (red palette) shows as you made it instead of through the machine's screen (the whole screen overlay still applies). Off (the default) draws every file through the screen, an added test card too." />
+    </div>` : null}
     ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
     <div class="cp-grid">
       <div class="cp-main">

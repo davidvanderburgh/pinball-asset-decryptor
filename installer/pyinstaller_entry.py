@@ -15,6 +15,11 @@ if __name__ == "__main__":
     # app.  Must be the first thing the frozen entry does.
     multiprocessing.freeze_support()
 
+    # Linux: the system's programs (ffmpeg above all) get the system's
+    # libraries, not the bundle's older ones (PAD-837).
+    from pinball_decryptor.core.desktop import guard_child_env
+    guard_child_env()
+
     # Elevated flash-helper re-invocation (see core.elevated_flash): the frozen
     # binary re-execs itself as root to run the raw card write, with no GUI.
     if "--flash-helper" in sys.argv:

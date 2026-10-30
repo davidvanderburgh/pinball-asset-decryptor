@@ -164,6 +164,7 @@ session.
 - **Each window reopens where you left it.** A spot that is off every
   screen (an unplugged monitor) is skipped. **Reset windows** puts them all
   back at their defaults.
+- **Game display** picks the game window's monitor and whether it sits where you leave it, fills the screen or takes a set window, with or without a frame. A change reaches a running game within a second.
 - **Silence after the boot chime** usually means it is still at Tech
   Alerts.
 

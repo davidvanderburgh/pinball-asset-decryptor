@@ -683,6 +683,47 @@ def test_a_rebuilt_program_that_is_bypassed_runs_as_it_is(
     assert any("own program" in m for _l, m in lines)
 
 
+def test_edits_that_bring_a_sound_bank_keep_their_program(
+        card, built, tmp_path, validator_at_bypass):
+    """PAD-867: a set with an image.bin of its own runs the program that
+    bank was built with, not the picked card's (no sound after boot)."""
+    built.program = _program(count_nop=True, bypass=True) + b"CAVE" * 8
+    card.state["writes"].append(
+        (_disk(built.stock, "/turtles_pro/image.bin", 4), b"N"))
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(bypass=True)
+    assert (out / "turtles_pro" / "image.bin").exists()
+    assert not [m for lvl, m in lines if lvl == "warning"]
+    assert any("sound bank of their own" in m for _l, m in lines)
+
+
+def test_a_grown_sound_bank_keeps_its_program(card, built, tmp_path,
+                                              validator_at_bypass):
+    """The reporter's set: image.bin outgrew its slot and is rebuilt whole
+    (a grow job), never an in-place write."""
+    built.program = _program(count_nop=True, bypass=True) + b"CAVE" * 8
+    reader = built.stock
+    by_file = {"/turtles_pro/game": (reader.node("/turtles_pro/game"),
+                                     [(BYPASS_AT, BYPASS)])}
+    plan = {"jobs": [("turtles_pro/image.bin", "grown.bin")]}
+    lines, log = _logged()
+    assert engine._carry_run_card_program(
+        reader, reader.node("/turtles_pro/game"), by_file, plan,
+        str(card.img), str(built.img), log) == 0
+    assert "/turtles_pro/game" in by_file
+    assert any("sound bank of their own" in m for _l, m in lines)
+    # the same set without the bank: PAD-200's card's own program
+    plan["jobs"] = []
+    engine._carry_run_card_program(
+        reader, reader.node("/turtles_pro/game"), by_file, plan,
+        str(card.img), str(built.img), log)
+    assert "/turtles_pro/game" not in by_file
+
+
 def test_a_program_a_previous_set_carried_leaves_it(
         card, built, tmp_path, validator_at_bypass):
     out = tmp_path / "ovr"

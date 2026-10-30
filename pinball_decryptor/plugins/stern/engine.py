@@ -13396,7 +13396,9 @@ def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
     so nothing is carried and the log says what that can cost - unless the
     edits bring the program nothing but the bypass and that card's program
     already has it, when the program leaves the set and the card's own runs
-    (PAD-200, :func:`_bypass_only`).  The set's
+    (PAD-200, :func:`_bypass_only`) - and the set brings no sound bank of
+    its own, which runs only with the program it was built with (PAD-867).
+    The set's
     ``.sidx`` record for the program is left as prepared: a card run never
     binds the ``.sidx`` (it sits beside the title), and only the bypassed
     validator ever reads it.
@@ -13428,6 +13430,20 @@ def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
         return 0
     stock = bytes(reader.read_file_bytes(fw_node))
     if picked == stock:
+        return 0
+    # PAD-867: the set's own sound bank was built for the set's program.  The
+    # picked card's program goes with the picked card's bank, so it runs only
+    # while that bank does: DragonRR's V2 edits brought a rebuilt image.bin,
+    # PAD-200's shortcut ran his V2.1 card's program over it, and the game
+    # wrote 0.3 s of sound at boot and nothing after.
+    bank = any(os.path.basename(p) == "image.bin" for p in by_file) or any(
+        os.path.basename(rel) == "image.bin"
+        for rel, _src in (grow_plan or {}).get("jobs", ()))
+    if bank and not rebuilt and len(picked) != len(stock):
+        log("%s carries a game program its own build changed for its own "
+            "sound bank, and your edits bring a sound bank of their own, "
+            "built with the program from %s, so this run uses that program "
+            "with it." % (name, os.path.basename(str(original_path))), "info")
         return 0
     if not rebuilt and len(picked) != len(stock) and _bypass_only(
             by_file[key][1], stock, picked):

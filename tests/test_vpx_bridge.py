@@ -1670,3 +1670,23 @@ def test_vpxlamps_fit_suggest_and_write(tmp_path):
     mq = json.loads(q.read_text())
     assert list(mq) == ["title", "lamps", "retrofit_lights", "quiet_subs"]
     assert q.read_text() == json.dumps(mq, indent=2) + "\n"
+
+
+def test_vpxlamps_names_a_lamp_on_another_inserts_led(tmp_path):
+    # Guardians LE's map carried the Pro's LED numbers; TMNT Pro's eight
+    # episode lights all sat on EPISODE 2. The build's own LED names say so.
+    vl = pytest.importorskip("vpxlamps")
+    io = tmp_path / "led_io.txt"
+    io.write_text("# node index name\n"
+                  "8      8     EPISODE 2                              0     0  -     \n"
+                  "8      18    EPISODE 1                              0     0  -     \n"
+                  "9      19    LEFT RAMP ARROW-R                    120   300  9a    playfield\n",
+                  encoding="utf-8")
+    names = vl.read_names(str(io))
+    assert names[(9, 19)] == "LEFT RAMP ARROW-R" and names[(8, 18)] == "EPISODE 1"
+    m = {"lamps": {"_": "x",
+                   "L7": {"leds": [[8, 8]], "name": "EPISODE 1 (GUESS order)"},
+                   "L7a": {"leds": [[8, 8]], "name": "EPISODE 2"},
+                   "LA": {"leds": [[9, 19], [9, 20], [9, 21]], "name": "LEFT RAMP ARROW"},
+                   "gi1": {"leds": [[8, 0]], "name": "BOTTOM GI"}}}            # an LED the build does not name
+    assert vl.misnamed(m, names) == [("L7", "EPISODE 1 (GUESS order)", "EPISODE 2")]

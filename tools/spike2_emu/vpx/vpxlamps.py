@@ -58,20 +58,46 @@ def read_led_io(path):
 
 
 NOT_PLAYFIELD = re.compile(r"SPEAKER|TOPPER|BACKBOX|CABINET|COIN|START BUTTON|TOURNAMENT|LOCKDOWN|"
-                           r"SHOOTER ILLUM|FLIPPER BUTTON|\bGI\b|GEN(ERAL)? ILLUM", re.I)
+                           r"SHOOTER ILLUM|FLIPPER BUTTON|\bGI\d*\b|GEN(ERAL)? ILLUM|MOTOR", re.I)
+
+
+def read_names(path):
+    """(node, index) -> name of every LED led_io.txt lists (its fixed name column)."""
+    out = {}
+    for line in open(path, encoding="utf-8", errors="replace"):
+        p = line.split()
+        if not line.startswith("#") and len(p) > 3 and p[0].isdigit():
+            out[(int(p[0]), int(p[1]))] = re.sub(r"(\s+\d+)+$", "", line[13:51].strip())
+    return out
+
+
+def misnamed(m, names):
+    """Lamps whose map name is not what the build calls its first LED: the
+    Guardians LE map carried the Pro's numbers, TMNT Pro's eight episodes all
+    sat on EPISODE 2 (PAD-859)."""
+    def norm(s):
+        return re.sub(r"[^A-Z0-9]", "", re.sub(r"-(RED|GRN|BLU|R|G|B)$", "", s.upper()))
+    out = []
+    for k, v in m.get("lamps", {}).items():
+        if k == "_" or not isinstance(v, dict) or "name" not in v:
+            continue
+        want, got = norm(v["name"].split(" (")[0]), norm(names.get(tuple(v["leds"][0]), ""))
+        if got and not (want == got or want in got or got in want):
+            out.append((k, v["name"], names.get(tuple(v["leds"][0]), "-")))
+    return out
 
 
 def read_unplaced(path):
     """(node, index) -> name of the LEDs a build names but does not place
     (Rush's and Foo Fighters' device tables have no positions): the
-    cabinet, speakers, topper and GI left out."""
+    cabinet, speakers, topper, motors and GI left out."""
     out = {}
     for line in open(path, encoding="utf-8", errors="replace"):
         p = line.split()
         if line.startswith("#") or len(p) < 6 or p[-1] != "-" or p[-3:-1] != ["0", "0"]:
             continue
         name = " ".join(p[2:-3])
-        if int(p[0]) > 1 and not NOT_PLAYFIELD.search(name):
+        if 1 < int(p[0]) < 12 and not NOT_PLAYFIELD.search(name):   # 12-15: topper boards (PAD-498)
             out[(int(p[0]), int(p[1]))] = name
     return out
 
@@ -238,15 +264,22 @@ def table_image(table):
             for magic in (b"\x89PNG", b"\xff\xd8\xff", b"RIFF"):
                 k = data.find(magic)
                 if k >= 0:
-                    img = Image.open(io.BytesIO(data[k:])).convert("RGB")
+                    try:
+                        img = Image.open(io.BytesIO(data[k:])).convert("RGB")
+                    except Exception:           # noqa: BLE001 - a raw BITS picture, or WebP PIL lacks
+                        img = None
                     break
             else:
                 img = None
-            right = struct.unpack("<f", table.gamedata_field("RGHT")[:4])[0]
-            bottom = struct.unpack("<f", table.gamedata_field("BOTM")[:4])[0]
-            return img, right, bottom
+            break
         i += 1
-    return None, 0, 0
+    else:
+        img = None
+    right = struct.unpack("<f", table.gamedata_field("RGHT")[:4])[0]
+    bottom = struct.unpack("<f", table.gamedata_field("BOTM")[:4])[0]
+    if img is None:                             # no picture PIL reads: draw on black
+        img = Image.new("RGB", (int(right), int(bottom)), (40, 40, 40))
+    return img, right, bottom
 
 
 def lamp_value(levels, group, rgb):
@@ -506,6 +539,10 @@ def main(argv):
     print("playfield inserts no table light shows (%d):" % len(rep["unwired_leds"]))
     for b, ks in rep["unwired_leds"]:
         print("   %-30s %s" % (b, " ".join("%d/%d" % k for k in ks)))
+    bad = misnamed(m, read_names(argv[4]))
+    print("lamps on an LED the build names otherwise (%d):" % len(bad))
+    for k, name, got in bad:
+        print("   %-20s %-30s LED is %s" % (k, name[:30], got))
     if rep["unwired_unplaced"]:
         print("LEDs the build names but does not place, no table light shows (%d):" % len(rep["unwired_unplaced"]))
         for b, ks in rep["unwired_unplaced"]:

@@ -391,7 +391,7 @@
       "leds": [
         [
           8,
-          8
+          18
         ]
       ],
       "name": "EPISODE 1 (GUESS order)"
@@ -409,7 +409,7 @@
       "leds": [
         [
           8,
-          8
+          17
         ]
       ],
       "name": "EPISODE 3 (GUESS order)"
@@ -418,7 +418,7 @@
       "leds": [
         [
           8,
-          8
+          16
         ]
       ],
       "name": "EPISODE 4 (GUESS order)"
@@ -426,8 +426,8 @@
     "L42": {
       "leds": [
         [
-          8,
-          8
+          9,
+          53
         ]
       ],
       "name": "EPISODE 5 (GUESS order)"
@@ -436,7 +436,7 @@
       "leds": [
         [
           8,
-          8
+          10
         ]
       ],
       "name": "EPISODE 6 (GUESS order)"
@@ -445,7 +445,7 @@
       "leds": [
         [
           8,
-          8
+          20
         ]
       ],
       "name": "EPISODE 7 (GUESS order)"
@@ -454,7 +454,7 @@
       "leds": [
         [
           8,
-          8
+          19
         ]
       ],
       "name": "EPISODE 8 (GUESS order)"
@@ -542,7 +542,7 @@
       "leds": [
         [
           8,
-          24
+          32
         ]
       ],
       "name": "FOOT COMBO 2 (GUESS order)"
@@ -551,7 +551,7 @@
       "leds": [
         [
           8,
-          24
+          33
         ]
       ],
       "name": "FOOT COMBO 3 (GUESS order)"
@@ -559,8 +559,8 @@
     "L22a": {
       "leds": [
         [
-          8,
-          24
+          9,
+          43
         ]
       ],
       "name": "FOOT COMBO 2 LOOP"

@@ -1,0 +1,34 @@
+#!/bin/bash
+# The ONE step Stern Emulate needs privileges for (PAD-837): telling the
+# server's kernel to run 32-bit ARM programs through qemu.  Run it as its
+# own short-lived container, once per server boot, and the app's container
+# itself needs no privileges for it:
+#
+#   docker run --rm --privileged --entrypoint pad-register-arm pinball-asset-decryptor
+#
+# The kernel keeps the registration (and, with the F flag, the qemu it
+# opened) after this container is gone, until the server restarts.  A
+# server that already has an ARM handler is left alone.
+set -u
+B=/proc/sys/fs/binfmt_misc
+if [ ! -e "$B/register" ]; then
+    mount -t binfmt_misc binfmt_misc "$B" 2>/dev/null || {
+        echo "Cannot reach the kernel's binary formats: run this with --privileged."
+        exit 1
+    }
+fi
+# Any handler for 32-bit little-endian ARM counts, whatever its name:
+# e_machine 0x28 at offset 18 of the ELF header, as the emulator checks it.
+for f in "$B"/*; do
+    case "${f##*/}" in register|status|*aarch64*|*armeb*) continue ;; esac
+    if grep -qs '^enabled' "$f" && grep -qis '^magic .*02002800$' "$f"; then
+        echo "The server already runs 32-bit ARM programs (${f##*/}); nothing to do."
+        exit 0
+    fi
+done
+if cat /usr/lib/binfmt.d/qemu-arm.conf > "$B/register"; then
+    echo "Registered qemu-arm with the server's kernel until it restarts."
+    exit 0
+fi
+echo "The kernel refused the registration: run this with --privileged."
+exit 1

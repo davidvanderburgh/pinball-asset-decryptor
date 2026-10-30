@@ -1,0 +1,16 @@
+#!/bin/bash
+# The app on the container's desktop (PAD-837), started by openbox's
+# autostart and started again by the desktop's watchdog when it exits.
+
+# The app's own window is a web page: Qt draws it in software and its web
+# view leaves the GPU alone, so it starts the same with or without one.  A
+# GPU passed in (/dev/dri) is the desktop's, for its video stream and for
+# the emulator's game window.
+export QT_XCB_GL_INTEGRATION=none QT_QUICK_BACKEND=software
+# The web view's sandbox needs namespaces this container may not be given,
+# and Docker's 64 MB /dev/shm is too small for it.
+export QTWEBENGINE_DISABLE_SANDBOX=1
+export QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --disable-dev-shm-usage"
+
+cd /data 2>/dev/null || cd "$HOME"
+exec /opt/pad/AppRun

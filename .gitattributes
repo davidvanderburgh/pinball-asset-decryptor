@@ -18,3 +18,7 @@ Dockerfile text eol=lf
 tools/spike2_emu/modes/sdk/prebuilt/mode.so binary
 # git hooks run under sh: LF, like every other shell script here
 .githooks/* text eol=lf
+
+# The Docker image's own files (PAD-837) run in the container: scripts with
+# no .sh to match above, and a CR would break their #! lines.
+installer/docker/root/** text eol=lf

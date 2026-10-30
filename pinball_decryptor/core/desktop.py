@@ -161,6 +161,86 @@ def desktop_env(env=None, bundle_dirs=None):
     return out
 
 
+def child_env(env=None, bundle_dirs=None):
+    """*env* (``None``: ours) for a SYSTEM program: every bundle variable
+    it inherited from this process unchanged gets the system's value back
+    (:func:`desktop_env`), and one the caller set itself is left as set."""
+    base = os.environ
+    clean = desktop_env(base, bundle_dirs)
+    out = dict(base if env is None else env)
+    for var in _BUNDLE_VARS:
+        for name in (var, var + "_ORIG"):
+            if out.get(name) != base.get(name):
+                continue                    # the caller's own choice
+            if name in clean:
+                out[name] = clean[name]
+            else:
+                out.pop(name, None)
+    return out
+
+
+def _system_program(args, executable, shell, env, dirs):
+    """Whether a child is a program of the SYSTEM's rather than one of the
+    bundle's own (the frozen app itself, a tool shipped inside it)."""
+    if shell:
+        return True                         # /bin/sh
+    prog = executable
+    if prog is None:
+        if isinstance(args, (str, bytes, os.PathLike)):
+            prog = args
+        elif args:
+            prog = args[0]
+        else:
+            return True
+    prog = os.fsdecode(prog)
+    if os.sep not in prog:
+        found = shutil.which(prog, path=(env if env is not None
+                                         else os.environ).get("PATH"))
+        if not found:
+            return True
+        prog = found
+    return not _inside(prog, dirs)
+
+
+def guard_child_env():
+    """Frozen Linux only: every system program the app starts gets the
+    system's libraries, not the bundle's (PAD-837).
+
+    PyInstaller points ``LD_LIBRARY_PATH`` at the bundle so the app finds
+    its own copies, and every child inherited that.  Built on Ubuntu 22.04
+    (v1.292.0, for older Linux), those copies are OLDER than a 24.04
+    system's, so the system's ffmpeg died loading them (``GLIBCXX_3.4.32
+    not found``): no sound previews, no spectrograms.  Desktop launches
+    and the emulator already scrubbed their own environment; this does it
+    for every ``subprocess`` call at once.  Programs inside the bundle keep
+    it, and the web view's own processes are started by Qt, not here.
+    """
+    if not (getattr(sys, "frozen", False) and sys.platform.startswith("linux")):
+        return False
+    popen_init = subprocess.Popen.__init__
+    if getattr(popen_init, "_pad_orig", None) is not None:
+        return True
+    import inspect
+    sig = inspect.signature(popen_init)
+
+    def __init__(self, *a, **kw):
+        try:
+            bound = sig.bind(self, *a, **kw)
+            p = bound.arguments
+            if _system_program(p.get("args"), p.get("executable"),
+                               p.get("shell", False), p.get("env"),
+                               _bundle_dirs()):
+                p["env"] = child_env(p.get("env"))
+                a, kw = bound.args[1:], bound.kwargs
+        except Exception:                               # noqa: BLE001
+            pass                    # never let the guard stop a launch
+        popen_init(self, *a, **kw)
+
+    __init__._pad_orig = popen_init
+    subprocess.Popen.__init__ = __init__
+    return True
+
+
 def _which(prog, env):
     return shutil.which(prog, path=env.get("PATH") or os.defpath)
 

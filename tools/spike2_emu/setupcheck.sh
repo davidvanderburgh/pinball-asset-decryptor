@@ -308,7 +308,8 @@ fi
 entry=$(_pad_binfmt_arm)
 if [ -z "$entry" ]; then
     echo "binfmt=0"
-elif [ "$(head -1 "$entry" 2>/dev/null)" = disabled ]; then
+elif [ "$entry" != exec ] &&
+     [ "$(head -1 "$entry" 2>/dev/null)" = disabled ]; then
     echo "binfmt=disabled"
     echo "entry=$entry"
 else

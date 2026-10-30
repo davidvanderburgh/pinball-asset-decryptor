@@ -231,6 +231,29 @@ def place_window(hwnd, rect, topmost=True):
     return window_rect(hwnd)
 
 
+def raise_window(hwnd, topmost=True):
+    """On top (or not) WITHOUT moving it: the z-order only. Moving a WSLg
+    window from this side breaks dragging it (padglhost.c, "THE DELAYED
+    MOVE"); where it goes is the renderer's, from display.conf (PAD-811)."""
+    import ctypes
+    HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+    SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+    ctypes.windll.user32.SetWindowPos(
+        ctypes.c_void_p(hwnd), ctypes.c_void_p(HWND_TOPMOST if topmost else HWND_NOTOPMOST),
+        0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
+
+
+def display_setting():
+    """The game window's display setting (padisplay.py), or None when it is
+    free - then the kit's own `lcd` placement below still applies."""
+    try:
+        import padisplay
+        s = padisplay.load()
+        return None if s.get("mode", "free") == "free" else s
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def window_rect(hwnd):
     import ctypes
     r = (ctypes.c_long * 4)()
@@ -338,8 +361,8 @@ class Rig:
       1. the environment (PAD_WSL_DISTRO / PAD_ROOT_WSL / PAD_SLOT), which the
          app sets for every tool it launches;
       2. the rig board (~/.pad-rig/slot-N.run, written by watch.sh for every
-         run): the run whose `game` is the title the table named, else the
-         only Spike 2 run up. This is how a Visual Pinball started from the
+         run): the run whose `game` is the title the table named (a table
+         that names none: the only Spike 2 run up). This is how a Visual Pinball started from the
          Start menu, with no PAD environment at all, finds the app's run;
       3. padpath's default: the default distro's ~/spike2root.
     """
@@ -402,7 +425,11 @@ class Rig:
                 ", ".join("slot %s" % r.get("slot") for r in mine[1:])))
         if mine:
             return mine[0]
-        return runs[0] if len(runs) == 1 else None
+        # a table that names its title takes only a run OF that title: the
+        # one other run up may be anything - PAD-811: JAWS attached to
+        # another ticket's hidden Godzilla run, drove its switches and never
+        # started its own. Only a nameless table takes the lone run.
+        return runs[0] if len(runs) == 1 and not title else None
 
     def wsl_head(self):
         head = ["wsl.exe"]
@@ -436,6 +463,8 @@ class Rig:
         reading of the game's switch table (empty when the run has none)."""
         out = {}
         path = os.path.join(self.dump, "tables", title or "", "switch_list.txt")
+        if title and not os.path.exists(path):
+            self.seed_switch_list(title, path)
         try:
             for line in open(path, encoding="utf-8", errors="replace"):
                 p = line.split()
@@ -444,6 +473,30 @@ class Rig:
         except OSError:
             pass
         return out
+
+    def seed_switch_list(self, title, path):
+        """A title's FIRST run on a slot has no switch_list.txt, and under a
+        table it never gets one: the rig derives it once the game is up, the
+        game waits on a trough the table cannot report without it, and the
+        ball feeder stands aside for the table (PAD-811: TMNT sat on its logo
+        on a fresh slot for minutes). Another slot's copy of the same title
+        is the same game's table: the newest goes in, for the renderer's
+        keyboard and the playfield as well."""
+        import glob
+        import shutil
+        slots = os.path.dirname(os.path.dirname(os.path.dirname(self.dump)))   # .../padslots
+        found = [p for p in glob.glob(os.path.join(slots, "*", "root", "dump", "tables",
+                                                   title, "switch_list.txt"))
+                 if os.path.normcase(p) != os.path.normcase(path)]
+        if not found:
+            return
+        src = max(found, key=os.path.getmtime)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            shutil.copyfile(src, path)
+            log("switch table for %s taken from %s (this slot had none)" % (title, src))
+        except OSError as exc:
+            log("switch table for %s not copied from %s: %s" % (title, src, exc))
 
 
 def read_block(path, n):
@@ -698,6 +751,8 @@ class Bridge:
         self.paused = bool(want)
         if not self.pipe or not self.rig:
             return
+        if want:
+            self._release_buttons()
         if want and kit_window_in_front():
             # the player clicked the game's own LCD or playfield window (to
             # move it, to look at it): Visual Pinball pauses, the GAME does
@@ -722,6 +777,28 @@ class Bridge:
                 if now == want:
                     break
         log("pause -> %d (rig now %d)" % (want, now))
+
+    #: the cabinet buttons a player holds down with a key
+    BUTTONS = ("start", "launch", "left_flipper", "right_flipper",
+               "up_left_flipper", "up_right_flipper", "tilt")
+
+    def _release_buttons(self):
+        """Visual Pinball delivers a key's release only while its window has
+        the focus, so a key held as the focus goes (David clicked the game's
+        display to drag it) stays pressed in the game for good: TMNT's
+        launch button stuck down and every ball was launched the moment it
+        reached the shooter lane, a game nobody could play (PAD-811). Losing
+        the focus lets go of every cabinet button, as letting go of the keys
+        would."""
+        cab = getattr(self.map, "cabinet", None) or {}
+        for key in self.BUTTONS:
+            n = cab.get(key)
+            if not n or not self.pipe:
+                continue
+            sid = self.map.switch_id(int(n))
+            if sid > 0 and self.pipe.held.get(sid) == 1:
+                self.set_switch(int(n), 0)
+                log("focus lost: %s (switch %d) let go" % (key, sid))
 
     # -- switches
     def set_switch(self, n, level):
@@ -759,8 +836,31 @@ class Bridge:
                 continue
             t0 = time.monotonic()
             self._poll_once()
+            if now - getattr(self, "_front_check", 0.0) >= 0.25:
+                self._front_check = now
+                self._watch_focus()
+                self._watch_player()
             self.last_poll_ms = (time.monotonic() - t0) * 1000.0
             time.sleep(POLL_S)
+
+    def _watch_focus(self):
+        """Not every table tells the controller it lost the focus (TMNT's
+        never said Pause), so the foreground itself is watched: the moment
+        Visual Pinball's player is not the window in front, the held
+        buttons are let go (_release_buttons)."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            buf = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(u.GetForegroundWindow(), buf, 256)
+            front = buf.value.startswith("Visual Pinball Player")
+        except Exception:                                   # noqa: BLE001
+            return
+        if getattr(self, "_player_front", True) and not front:
+            self._release_buttons()
+        self._player_front = front
 
     #: the kit's windows a started run opens, by the word in their title,
     #: and the kit setting that places each
@@ -791,6 +891,7 @@ class Bridge:
         try:
             dpi_aware()
             done = True
+            shown = display_setting()
             for key, word in self.WINDOWS:
                 setting = kit.get(key) if key == "lcd" else kit.get(key)
                 if key == "playfield" and not setting:
@@ -798,6 +899,16 @@ class Bridge:
                 hwnd = find_kit_window(word)
                 if not hwnd:
                     done = False if key == "lcd" else done
+                    continue
+                if key == "lcd" and shown:
+                    # PAD-811: the renderer puts it where display.conf says
+                    # (and keeps it there as that changes); here only ON TOP
+                    # of Visual Pinball, which comes up full screen
+                    if key not in self.placed_at:
+                        raise_window(hwnd, bool((setting or {}).get("topmost", True)))
+                        self.placed_at[key] = time.monotonic()
+                        log("lcd window left to the display setting (%s), on top"
+                            % shown.get("mode"))
                     continue
                 rect = lcd_rect(setting or {}, monitors())
                 if key == "playfield" and not any(k in (setting or {}) for k in ("x", "monitor")):
@@ -833,25 +944,123 @@ class Bridge:
         size stays Visual Pinball's own unless the kit gives one."""
         hwnd = getattr(self, "player_hwnd", 0)
         setting = padlaunch.kit_load().get("player")
-        if sys.platform != "win32" or not setting:
+        if sys.platform != "win32":
             self.player_placed = True
             return
         if not hwnd:
             return
         try:
             dpi_aware()
+            # THE TABLE'S OWN PROPORTIONS (PAD-811): Visual Pinball scales its
+            # picture to the window, so a window forced to the kit's 1440x2160
+            # squeezed a table that opens at 2000x1500 (JAWS, Metallica: "way
+            # too stretched vertically"). Read before the frame goes on (the
+            # borderless window IS the picture); a saved width scales it, the
+            # height follows; a saved height is not used.
             cur = window_rect(hwnd)
+            aspect = cur[3] / float(cur[2]) if cur[2] else 1.0
+            self.player_aspect = aspect
+            framed = self._frame_player(hwnd)
+            if not setting:
+                self.player_placed = True
+                log("player window left where Visual Pinball put it (%s)%s"
+                    % (cur, ", framed" if framed else ""))
+                return
             if "monitor" in setting:
-                x, y, w, h = lcd_rect(setting, monitors())
+                mx, my, mw, mh = lcd_rect(setting, monitors())
+                w = min(mw, int(mh / aspect))
+                h = int(w * aspect)
+                x, y = mx + (mw - w) // 2, my + (mh - h) // 2
             else:
                 x, y = int(setting["x"]), int(setting["y"])
-                w, h = int(setting.get("w", cur[2])), int(setting.get("h", cur[3]))
-            place_window(hwnd, (x, y, w, h), False)
+                w = int(setting.get("w", cur[2]))
+                h = int(round(w * aspect))
+            ow, oh = self._outer_for_client(hwnd, w, h) if framed else (w, h)
+            place_window(hwnd, (x, y, ow, oh), False)
             self.player_placed = True
-            log("player window placed at %s (was %s)" % ((x, y, w, h), cur))
+            log("player window placed at %s, picture %dx%d (was %s)" % ((x, y, ow, oh), w, h, cur))
         except Exception as exc:                            # noqa: BLE001
             log("player window not placed: %s" % exc)
             self.player_placed = True
+
+    # ---- the playfield window, by hand (PAD-811) ------------------------
+    #
+    # David: "i just need to be able to move them around and resize those
+    # windows like we do for the display" - Visual Pinball's windowed player
+    # has no frame, so it could not be moved at all. It gets a title bar and
+    # resize edges (WS_CAPTION | WS_THICKFRAME; Visual Pinball draws on into
+    # the smaller client area), and after a resize the client area is snapped
+    # back to the table's own proportions: Visual Pinball scales its picture
+    # to the window, so any other shape stretches it. Where it is left is
+    # saved as the kit's `player` (x, y of the window, w of the picture), so
+    # the next table opens there. `padvpx player frame off` turns the frame
+    # off again.
+    _WS_FRAME = 0x00C00000 | 0x00040000 | 0x00020000     # caption, thickframe, minimize box
+
+    def _frame_player(self, hwnd):
+        import ctypes
+        u = ctypes.windll.user32
+        if padlaunch.kit_load().get("player_frame", True) is False:
+            return False
+        style = u.GetWindowLongW(ctypes.c_void_p(hwnd), -16)
+        if style & 0x00C00000 != 0x00C00000:
+            u.SetWindowLongW(ctypes.c_void_p(hwnd), -16, style | self._WS_FRAME)
+            # SWP_FRAMECHANGED | NOMOVE | NOSIZE | NOZORDER | NOACTIVATE
+            u.SetWindowPos(ctypes.c_void_p(hwnd), None, 0, 0, 0, 0, 0x20 | 0x2 | 0x1 | 0x4 | 0x10)
+            log("player window framed: drag it by its title bar, resize from its edges")
+        return True
+
+    @staticmethod
+    def _client_size(hwnd):
+        import ctypes
+        r = (ctypes.c_long * 4)()
+        ctypes.windll.user32.GetClientRect(ctypes.c_void_p(hwnd), r)
+        return r[2], r[3]
+
+    def _outer_for_client(self, hwnd, cw, ch):
+        """The window size that gives a cw x ch client area with its frame."""
+        ww, wh = window_rect(hwnd)[2:]
+        ow, oh = self._client_size(hwnd)
+        return cw + (ww - ow), ch + (wh - oh)
+
+    def _watch_player(self):
+        """After the user moves or resizes the playfield window: the picture's
+        proportions put back, and the place saved (once the mouse is up and
+        the window has been still for half a second)."""
+        hwnd = getattr(self, "player_hwnd", 0)
+        aspect = getattr(self, "player_aspect", None)
+        if sys.platform != "win32" or not hwnd or not aspect or not self.player_placed:
+            return
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            if not u.IsWindow(ctypes.c_void_p(hwnd)):
+                return
+            rect = window_rect(hwnd)
+            now = time.monotonic()
+            if rect != getattr(self, "_player_seen", None):
+                self._player_seen, self._player_seen_t = rect, now
+                return
+            if rect == getattr(self, "_player_settled", None) or now - self._player_seen_t < 0.5:
+                return
+            if u.GetAsyncKeyState(0x01) & 0x8000:            # the left button is still down
+                return
+            cw, ch = self._client_size(hwnd)
+            want = int(round(cw * aspect))
+            if cw > 0 and abs(ch - want) > 2:
+                ow, oh = self._outer_for_client(hwnd, cw, want)
+                u.SetWindowPos(ctypes.c_void_p(hwnd), None, 0, 0, ow, oh, 0x2 | 0x4 | 0x10)
+                log("player window kept to the table's proportions: %dx%d" % (cw, want))
+                rect = window_rect(hwnd)
+                self._player_seen = rect
+            self._player_settled = rect
+            kit = padlaunch.kit_load()
+            if (kit.get("player") or {}) != {"x": rect[0], "y": rect[1], "w": cw}:
+                kit["player"] = {"x": rect[0], "y": rect[1], "w": cw}
+                padlaunch.kit_save(kit)
+                log("player window left at %d,%d, %d wide: saved" % (rect[0], rect[1], cw))
+        except Exception as exc:                            # noqa: BLE001
+            log("player window watch failed: %s" % exc)
 
     def _keep_player_front(self):
         """A run this bridge started opens the game's LCD window, and that

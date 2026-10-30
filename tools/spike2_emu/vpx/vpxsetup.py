@@ -35,6 +35,7 @@ for p in (HERE, RIG):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import padisplay  # noqa: E402
 import padlaunch   # noqa: E402
 import padvpx      # noqa: E402
 
@@ -183,7 +184,28 @@ def apply_layout(key, player, lcd):
     else:
         d["lcd"] = {"topmost": True}
     padlaunch.kit_save(d)
+    # PAD-811: the game's renderer places its own window from the display
+    # setting, live; CONF named here so a test can point it elsewhere
+    padisplay.save(display_for(lcd, padisplay.monitors()), padisplay.CONF)
     return "layout %s saved" % key
+
+
+def display_for(lcd, mons):
+    """The display setting (padisplay) for an LCD rectangle: full screen on a
+    monitor it fills, else a borderless window on the monitor holding its
+    middle (the main one when none does); no rectangle is free, the kit's
+    own place for it."""
+    if not lcd:
+        return {"mode": "free", "monitor": 1, "border": True}
+    x, y, w, h = [int(v) for v in lcd]
+    for m in mons:
+        if (m["x"], m["y"], m["w"], m["h"]) == (x, y, w, h):
+            return {"mode": "fullscreen", "monitor": m["n"], "border": False}
+    cx, cy = x + w // 2, y + h // 2
+    mon = next((m for m in mons if m["x"] <= cx < m["x"] + m["w"]
+                and m["y"] <= cy < m["y"] + m["h"]), mons[0])
+    return {"mode": "window", "monitor": mon["n"], "border": False,
+            "rx": x - mon["x"], "ry": y - mon["y"], "w": w, "h": h}
 
 
 def download_vpx(folder, say=print, progress=None):
@@ -238,6 +260,7 @@ def state():
         mons = []
     presets = layout_presets(mons)
     tables = vpx_tables_dir()
+    shown = padisplay.load(padisplay.CONF)
     return {
         "registered": controller_registered(),
         "vpx": find_vpx(),
@@ -249,6 +272,9 @@ def state():
         "monitors": len(mons),
         "presets": [{"key": k, "words": w, "player": p, "lcd": q} for k, w, p, q in presets],
         "layout": layout_key(kit, presets),
+        # PAD-811: where the game's screen goes, as the layout or the
+        # Emulate tab last set it
+        "display": {"setting": shown, "text": padisplay.describe(shown)},
     }
 
 

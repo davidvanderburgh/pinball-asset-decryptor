@@ -2562,6 +2562,24 @@ HELP_CONTENT = {
          "that spot is still on screen. A window left on an unplugged second monitor "
          "comes back out of reach.\n"
          "- Works on every platform, with or without a game running."),
+        ("Game display",
+         "Where the game window goes, on Windows: pick a **Monitor** and how it "
+         "sits there.\n\n"
+         "- **Where I leave it:** the game window opens where you last dragged it, "
+         "with its frame, as it always has.\n"
+         "- **Full screen:** the game's picture fills the monitor you pick. Made for "
+         "a second screen or a cabinet's own LCD.\n"
+         "- **Window:** a window of the **Width** and **Height** you give, its top "
+         "left corner **X** and **Y** pixels from the top left of that monitor "
+         "(1360 x 768, the machine's own screen, to start).\n"
+         "- **Borderless** takes away the title bar and frame. A new choice starts "
+         "borderless.\n"
+         "- Every change is saved at once and applies to a running game within half "
+         "a second: no restart. Monitor 1 is the main one, the rest left to right. "
+         "If the chosen monitor is unplugged, the game goes on the main one until it "
+         "is back.\n"
+         "- The Visual Pinball tab's window layouts set this too, for the game's "
+         "screen in a cabinet."),
         ("Black game window",
          "On Windows the usual cause is a WSL that logs in as **root**: the renderer "
          "cannot reach WSLg's shared memory and draws nothing, while sound, switches "
@@ -3461,6 +3479,8 @@ PREVIEW_HELP = {
                 "who made it; download it from there.\n"
                 "- **Patch a table...** writes a copy named \"(PAD)\" into Visual "
                 "Pinball's tables folder. Your download stays as it was.\n"
+                "- A backglass (.directb2s) named like the table, beside it or already in "
+                "the tables folder, is copied to match the \"(PAD)\" name.\n"
                 "- A title plays the newest build of its card in the card folder.\n"
                 "- **Windows** sets where Visual Pinball's playfield and the game's screen "
                 "go when a table opens. You can drag the game's screen anywhere after that.",

@@ -1034,6 +1034,12 @@ def test_setup_layout_writes_the_kit_and_the_ini_and_reads_back(tmp_path, monkey
     ini = tmp_path / "VPinballX.ini"
     ini.write_text("[Player]\nFullScreen = 1\nWidth = 1920\n[Editor]\nX = 1\n", encoding="utf-8")
     monkeypatch.setattr(pv, "vpx_ini_path", lambda: str(ini))
+    # PAD-811: a layout also saves the game display; never the real one
+    pd = pytest.importorskip("padisplay")
+    conf = str(tmp_path / "display.conf")
+    monkeypatch.setattr(pd, "CONF", conf)
+    monkeypatch.setattr(pd, "monitors", lambda: [
+        {"n": 1, "x": 0, "y": 0, "w": 3840, "h": 2160, "primary": True}])
     presets = vs.layout_presets([(0, 0, 3840, 2160)])
     assert vs.layout_key(pl.kit_load(), presets) == ""
     assert vs.apply_layout("side", [0, 0, 1440, 2160], [1440, 0, 2400, 1350]).startswith("layout side")
@@ -1043,11 +1049,47 @@ def test_setup_layout_writes_the_kit_and_the_ini_and_reads_back(tmp_path, monkey
     assert vs.layout_key(kit, presets) == "side"      # the tab ticks the layout in use
     text = ini.read_text(encoding="utf-8")
     assert "FullScreen = 0" in text and "Width = 1440" in text and "Height = 2160" in text and "X = 1" in text
+    # the LCD rectangle is a borderless window there
+    assert pd.load(conf) == {"mode": "window", "monitor": 1, "border": False,
+                             "rx": 1440, "ry": 0, "w": 2400, "h": 1350}
     vs.apply_layout("centre", None, None)                 # Visual Pinball's own place, the LCD's default
     kit = pl.kit_load()
     assert "player" not in kit and kit["lcd"] == {"topmost": True}
     assert vs.layout_key(kit, presets) == "centre"
     assert "FullScreen = 0" in ini.read_text(encoding="utf-8")
+    assert pd.load(conf)["mode"] == "free"                # the kit places it, as before
+
+
+def test_setup_layout_display_fills_a_monitor_or_sits_on_one():
+    """PAD-811: the LCD rectangle becomes the game display setting: full
+    screen on a monitor it fills, else a borderless window on the monitor
+    holding its middle, at its offset there."""
+    vs = pytest.importorskip("vpxsetup")
+    mons = [{"n": 1, "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True},
+            {"n": 2, "x": 1920, "y": 0, "w": 1920, "h": 1080, "primary": False}]
+    assert vs.display_for([1920, 0, 1920, 1080], mons) == {
+        "mode": "fullscreen", "monitor": 2, "border": False}
+    assert vs.display_for([2000, 100, 1360, 768], mons) == {
+        "mode": "window", "monitor": 2, "border": False, "rx": 80, "ry": 100, "w": 1360, "h": 768}
+    # off every monitor: on the main one
+    assert vs.display_for([9000, 0, 100, 100], mons)["monitor"] == 1
+    assert vs.display_for(None, mons)["mode"] == "free"
+
+
+def test_setup_state_reports_the_game_display(tmp_path, monkeypatch):
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    pd = pytest.importorskip("padisplay")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pd, "CONF", str(tmp_path / "display.conf"))
+    monkeypatch.setattr(pd, "monitors", lambda: [
+        {"n": 1, "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True}])
+    monkeypatch.setattr(vs, "controller_registered", lambda: False)
+    monkeypatch.setattr(vs, "vpx_tables_dir", lambda: "")
+    pd.save({"mode": "fullscreen", "monitor": 1, "border": False}, pd.CONF)
+    got = vs.state()["display"]
+    assert got["setting"]["mode"] == "fullscreen"
+    assert got["text"] == "full screen on monitor 1, borderless"
 
 
 def test_setup_finds_visual_pinball_from_the_kit_first(tmp_path, monkeypatch):
@@ -1088,3 +1130,87 @@ def test_no_table_ships_with_the_app():
     assert not [ln for ln in lines if "vpx_tables" in ln or "*.vpx" in ln]
     assert not [ln for ln in lines if "wizard" in ln]
     assert not os.path.exists(os.path.join(VPX, "padwizard.py"))
+
+
+def test_a_slots_first_run_takes_the_titles_switch_table_from_another_slot(tmp_path):
+    # PAD-811: TMNT on a slot that had never run it sat on its logo, the
+    # table unable to report a trough without the run's switch_list.txt
+    pc = pytest.importorskip("padcontroller")
+    slots = tmp_path / "padslots"
+    old = slots / "3" / "root" / "dump" / "tables" / "turtles_le"
+    old.mkdir(parents=True)
+    (old / "switch_list.txt").write_text("# turtles_le\n36 73 1 11 Start Button\n", encoding="utf-8")
+    dump = slots / "2" / "root" / "dump"
+    dump.mkdir(parents=True)
+    rig = pc.Rig.__new__(pc.Rig)
+    rig.dump = str(dump)
+    assert rig.switch_ids("turtles_le") == {(1, 11): 36}
+    assert (dump / "tables" / "turtles_le" / "switch_list.txt").exists()
+    assert rig.switch_ids("venom_le") == {}          # nobody has one: nothing made up
+
+
+def test_losing_the_focus_lets_go_of_held_buttons():
+    # PAD-811: VPX sends no key-up once its window loses the focus; TMNT's
+    # launch button stayed down and launched every ball it was given
+    pc = pytest.importorskip("padcontroller")
+
+    class Pipe:
+        def __init__(self):
+            self.held = {34: 1, 36: 0, 65: 1, 39: 1}
+
+        def set(self, sid, level):
+            self.held[sid] = 1 if level else 0
+
+    class Map:
+        cabinet = {"start": 1036, "launch": 1034, "right_flipper": 1065, "coin": 1039}
+
+        def switch_id(self, n):
+            return n - 1000
+
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.pipe, b.map = Pipe(), Map()
+    b._release_buttons()
+    assert b.pipe.held == {34: 0, 36: 0, 65: 0, 39: 1}   # coins are not buttons
+
+
+def test_a_titles_card_is_the_stock_release_over_a_custom_one_of_its_version(tmp_path, monkeypatch):
+    pl = pytest.importorskip("padlaunch")
+    for n in ("turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw", "turtles_pro-1_59_0.Release.8G.sdcard.raw",
+              "turtles_pro-1_58_0.Release.8G.sdcard.raw"):
+        (tmp_path / n).write_bytes(b"")
+    monkeypatch.setattr(pl, "kit_load", lambda: {"library": str(tmp_path)})
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    assert os.path.basename(pl.card_for("turtles_pro")) == "turtles_pro-1_59_0.Release.8G.sdcard.raw"
+
+
+def test_a_named_table_never_takes_the_lone_run_of_another_title(tmp_path, monkeypatch):
+    # PAD-811: JAWS attached to another ticket's hidden Godzilla run, the
+    # only one up, drove its switches and never started its own
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(pc, "BOARD", str(tmp_path))
+    (tmp_path / "slot-2.run").write_text(json.dumps(
+        {"emu": "spike2", "slot": 2, "game": "godzilla_le", "label": "PAD-827", "hidden": True}), encoding="utf-8")
+    assert pc.Rig.board_run("jaws_le") is None
+    assert pc.Rig.board_run("godzilla_le")["slot"] == 2
+    assert pc.Rig.board_run(None)["slot"] == 2                         # a nameless table still finds it
+
+
+def test_patched_table_gets_its_backglass_under_the_matching_name(tmp_path):
+    # B2S looks for <table name>.directb2s, and the patched table is
+    # "<name> (PAD).vpx": the original's backglass is copied to match
+    pv = pytest.importorskip("padvpx")
+    src, out = tmp_path / "src", tmp_path / "out"
+    src.mkdir(), out.mkdir()
+    (src / "JAWS.vpx").write_bytes(b"t")
+    (src / "JAWS.directb2S").write_bytes(b"bg")
+    got = pv.copy_backglass(str(src / "JAWS.vpx"), str(out / "JAWS (PAD).vpx"))
+    assert got == str(out / "JAWS (PAD).directb2s")
+    assert (out / "JAWS (PAD).directb2s").read_bytes() == b"bg"
+    # one the user already put there is theirs
+    (out / "JAWS (PAD).directb2s").write_bytes(b"mine")
+    pv.copy_backglass(str(src / "JAWS.vpx"), str(out / "JAWS (PAD).vpx"))
+    assert (out / "JAWS (PAD).directb2s").read_bytes() == b"mine"
+    # no backglass anywhere: nothing
+    (src / "Bond.vpx").write_bytes(b"t")
+    assert pv.copy_backglass(str(src / "Bond.vpx"), str(out / "Bond (PAD).vpx")) is None

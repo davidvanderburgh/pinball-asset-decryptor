@@ -43,6 +43,7 @@ and with sound; nothing of the app's or a session's is touched.
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -52,6 +53,7 @@ for p in (HERE, RIG):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import padisplay   # noqa: E402  where the game window goes (PAD-811)
 import padlaunch   # noqa: E402
 import vpxfile     # noqa: E402
 
@@ -73,7 +75,11 @@ def maps():
             out[title] = {"kind": "shadow" if f.endswith(".shadow.json") else "mashup",
                           "map": os.path.join(HERE, f), "detect": m.get("detect", []),
                           "output": m.get("output", ""), "model": m.get("model", ""),
-                          "preferred": bool(m.get("preferred"))}
+                          "preferred": bool(m.get("preferred")),
+                          # a ROM table's map names its own patcher
+                          "patcher": m.get("patcher", "patch_godzilla.py"),
+                          # one patcher, several maps (TMNT's LE and Pro)
+                          "patcher_takes_map": bool(m.get("patcher_takes_map"))}
     return dict(sorted(out.items(), key=lambda kv: not kv[1]["preferred"]))
 
 
@@ -138,16 +144,44 @@ def patch(table_path, outdir=None, card=None, title=None):
     if info["kind"] == "shadow":
         cmd = [py, os.path.join(HERE, "vpxshadow.py"), info["map"], table_path, outdir]
     else:
-        cmd = [py, os.path.join(HERE, "patch_godzilla.py"), table_path, outdir]
+        cmd = [py, os.path.join(HERE, info["patcher"]), table_path, outdir]
+        if info.get("patcher_takes_map"):
+            cmd += ["--map", info["map"]]
     print("recognised %s: %s" % (title, " ".join(info["detect"])))
     r = subprocess.run(cmd)
     if r.returncode == 0 and card:
         padlaunch.remember_card(title, os.path.abspath(card))
         print("card for %s: %s" % (title, os.path.abspath(card)))
     if r.returncode == 0:
-        print("open \"%s\" in Visual Pinball; the game starts with it when its card is known"
-              % os.path.join(outdir, info["output"] or "<name> (PAD).vpx"))
+        out = os.path.join(outdir, info["output"] or
+                           os.path.splitext(os.path.basename(table_path))[0] + " (PAD).vpx")
+        b2s = copy_backglass(table_path, out)
+        if b2s:
+            print("backglass: %s" % b2s)
+        print("open \"%s\" in Visual Pinball; the game starts with it when its card is known" % out)
     return r.returncode
+
+
+def copy_backglass(table_path, out_vpx):
+    """B2S finds a table's backglass by the .vpx name, so <name> (PAD).vpx
+    never finds <name>.directb2s: copy it beside the patched table under the
+    matching name. Looks beside the original, then beside the output; a
+    backglass already at the target is the user's and is left alone. Returns
+    the target, or None when there is no backglass to copy."""
+    want = os.path.splitext(os.path.basename(table_path))[0].lower() + ".directb2s"
+    dst = os.path.splitext(out_vpx)[0] + ".directb2s"
+    if os.path.exists(dst):
+        return dst
+    for d in (os.path.dirname(os.path.abspath(table_path)), os.path.dirname(os.path.abspath(out_vpx))):
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            if n.lower() == want:   # B2S files ship as .directb2s and .directb2S
+                shutil.copy2(os.path.join(d, n), dst)
+                return dst
+    return None
 
 
 def vpx_ini_path():
@@ -314,12 +348,16 @@ def main(argv):
         # Visual Pinball's own playfield window: borderless in windowed
         # mode, so it cannot be dragged, and 10.8 ignores WindowPosX/Y in
         # its ini - the controller moves it once when a table starts
+        # (PAD-811: it gets a title bar and resize edges, keeps the table's
+        # proportions, and remembers where it is left; `player frame off`)
         d = padlaunch.kit_load()
-        if len(rest) in (2, 4):
+        if len(rest) == 2 and rest[0] == "frame" and rest[1] in ("on", "off"):
+            d["player_frame"] = rest[1] == "on"
+        elif len(rest) in (2, 3, 4) and all(v.lstrip("-").isdigit() for v in rest):
             vals = [int(v) for v in rest]
             d["player"] = {"x": vals[0], "y": vals[1]}
-            if len(vals) == 4:
-                d["player"].update(w=vals[2], h=vals[3])
+            if len(vals) >= 3:
+                d["player"]["w"] = vals[2]          # the height follows the table's proportions
         elif rest and rest[0] == "monitor" and len(rest) == 2:
             d["player"] = {"monitor": int(rest[1])}
         elif rest and rest[0] == "off":
@@ -328,8 +366,9 @@ def main(argv):
             print(json.dumps(d.get("player", {}), indent=1) or "off")
             return 0
         padlaunch.kit_save(d)
-        print("player window: %s (applied when a table is next opened; its size stays Visual Pinball's own unless w h are given)"
-              % json.dumps(d.get("player", "off")))
+        print("player window: %s, frame %s (applied when a table is next opened; a width scales"
+              " the picture, its height follows the table's proportions)"
+              % (json.dumps(d.get("player", "off")), "off" if d.get("player_frame") is False else "on"))
         return 0
     if cmd == "playfield":
         # the rig's own virtual playfield window beside Visual Pinball:
@@ -349,24 +388,40 @@ def main(argv):
         padlaunch.kit_save(d)
         print("playfield: %s" % json.dumps(d.get("playfield", "off")))
         return 0
+    if cmd == "display":
+        # the game window for every run, desktop and Visual Pinball alike
+        # (PAD-811): padisplay.py's commands, applied live by the renderer
+        return padisplay.main(rest)
     if cmd == "lcd":
-        # where the game's LCD window goes when the controller starts a run:
-        # `padvpx lcd top` (on top, upper middle of the main screen),
-        # `padvpx lcd monitor 2` (fills that screen), `padvpx lcd 100 0 960 540`
+        # where the game's LCD window goes: `padvpx lcd top` (on top, upper
+        # middle of the main screen), `padvpx lcd monitor 2` (fills that
+        # screen), `padvpx lcd 100 0 960 540`, `padvpx lcd off`. Since PAD-811
+        # these are the display setting (padvpx display), borderless, which
+        # the renderer applies live; the kit keeps only "on top".
         d = padlaunch.kit_load()
+        mons = padisplay.monitors()
         if rest and rest[0] == "monitor" and len(rest) == 2:
-            d["lcd"] = {"monitor": int(rest[1]), "topmost": True}
+            s = {"mode": "fullscreen", "monitor": int(rest[1]), "border": False}
         elif len(rest) == 4:
-            d["lcd"] = {"x": int(rest[0]), "y": int(rest[1]), "w": int(rest[2]), "h": int(rest[3]), "topmost": True}
+            x, y, w, h = (int(v) for v in rest)
+            mon = next((m for m in mons if m["x"] <= x < m["x"] + m["w"]
+                        and m["y"] <= y < m["y"] + m["h"]), mons[0])
+            s = {"mode": "window", "monitor": mon["n"], "border": False,
+                 "rx": x - mon["x"], "ry": y - mon["y"], "w": w, "h": h}
         elif rest and rest[0] == "top":
-            d["lcd"] = {"topmost": True}
+            from padcontroller import lcd_rect
+            x, y, w, h = lcd_rect({}, [(m["x"], m["y"], m["x"] + m["w"], m["y"] + m["h"]) for m in mons])
+            s = {"mode": "window", "monitor": 1, "border": False,
+                 "rx": x - mons[0]["x"], "ry": y - mons[0]["y"], "w": w, "h": h}
         elif rest and rest[0] == "off":
-            d.pop("lcd", None)
+            s = {"mode": "free"}
         else:
-            print(json.dumps(d.get("lcd", {"topmost": True}), indent=1))
+            print("game window: %s" % padisplay.describe(padisplay.load(), mons))
             return 0
+        padisplay.save(s)
+        d["lcd"] = {"topmost": s["mode"] != "free"}
         padlaunch.kit_save(d)
-        print("lcd: %s" % json.dumps(d.get("lcd")))
+        print("game window: %s" % padisplay.describe(s, mons))
         return 0
     if cmd == "library" and len(rest) == 1:
         d = padlaunch.kit_load()

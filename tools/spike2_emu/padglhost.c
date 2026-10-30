@@ -883,6 +883,7 @@ static int win_w, win_h;                 /* current drawable size            */
 static int win_reported_panel;
 static int win_flip;                     /* 0 = correct here; see win_present() */
 static int win_every = 1;                /* present every Nth frame          */
+static void disp_open(unsigned long w);  /* PAD-811, the display setting     */
 
 /* THE GAME'S OWN TASKBAR BUTTON. Under WSLg every X window is drawn by
  * msrdc.exe, and one with no WM_CLASS gets no app id, so Windows files it in
@@ -2454,9 +2455,13 @@ static int win_open(void)
         XStoreName(xdpy, xwin, win_title);
     }
     win_brand(xwin);
+    disp_open(xwin);        /* PAD-811: borderless from the first map */
     /* StructureNotifyMask (1<<17) gives ConfigureNotify for resizes;
      * KeyPressMask (1) and KeyReleaseMask (2) are what make the keyboard work. */
-    XSelectInput(xdpy, xwin, (1L << 17) | 1L | 2L);
+    /* ButtonPress/ButtonRelease/Button1Motion (1<<2, 1<<3, 1<<8): PAD-811's
+     * drag to move / resize a borderless window and double-click for full
+     * screen (disp_button, disp_motion) */
+    XSelectInput(xdpy, xwin, (1L << 17) | (1L << 2) | (1L << 3) | (1L << 8) | 1L | 2L);
     wm_delete = XInternAtom(xdpy, "WM_DELETE_WINDOW", 0);
     XSetWMProtocols(xdpy, xwin, &wm_delete, 1);
     XMapWindow(xdpy, xwin);
@@ -2677,6 +2682,354 @@ static void win_raise_all(const char *why)
                     "(item 22; PAD_GL_RAISE=0 to skip)\n", why);
 }
 
+/* ★ PAD-811: THE DISPLAY SETTING - borderless, and on the monitor the user
+ * named, full screen or a rectangle, changed WHILE THE GAME RUNS. David,
+ * 2026-10-29: "make the emulated display borderless ... simple to place on a
+ * specified monitor. think virtual pinball and desktop ... on a cabinet it
+ * should have its own designated monitor ... ideally on the fly".
+ *
+ * PAD_DISPLAY_CONF (watch.sh: display.conf on the rig board, visible runs
+ * only) holds one line per window, written by the Windows side (the app's
+ * Emulate tab, padvpx display), which alone knows the monitors:
+ *
+ *     game monitor=2 x=3840 y=0 w=1920 h=1080 fs=1 border=0
+ *
+ * x y w h are the target in X root coordinates, which under WSLg ARE Windows'
+ * physical desktop pixels (measured: root 3840x2160 on a 3840x2160 screen,
+ * a fullscreen window read back 0,0,3840,2160 from GetWindowRect). No line,
+ * or no file: the window is free - opened where it was left, as before.
+ *
+ * What the compositor does with each piece, measured on WSLg 2026-10-29:
+ *   - _MOTIF_WM_HINTS decorations 0 drops Weston's title bar and frame, but
+ *     only for a window MAPPED with it: set on a live window it is ignored
+ *     until an unmap/map, so a live border change remaps the window (the
+ *     EGL surface survives it; the picture carried on).
+ *   - _NET_WM_STATE_FULLSCREEN fills exactly the monitor the window is on,
+ *     no shadow margin, so fs=1 first moves the window inside the target
+ *     rectangle and then asks for full screen.
+ *   - a plain move lands the CLIENT near, not at, the aim (insets differ by
+ *     border state), so a rectangle is moved, read back and corrected, the
+ *     same verify-and-retry the remembered-position restore uses above.
+ * The file is checked twice a second; a change is applied at once, no
+ * restart. Placement waits for the compositor's own first placement, like
+ * the restore (2.5 s after mapping). */
+extern int XSendEvent(XDisplay *, unsigned long, int, long, void *);
+extern int XMoveResizeWindow(XDisplay *, unsigned long, int, int, unsigned, unsigned);
+
+struct disp_set { int set, x, y, w, h, fs, border, rx, ry; };
+static struct disp_set disp_want;
+static int disp_placed;                  /* the wanted setting is applied     */
+static int disp_cur_border = 1;          /* what the window HAS now           */
+static int disp_cur_fs;
+static int disp_fixups;                  /* rectangle corrections left        */
+static double disp_check_s, disp_fix_s;
+static struct timespec disp_mtim;
+
+static const char *disp_path(void)
+{
+    const char *p = getenv("PAD_DISPLAY_CONF");
+    return (p && *p) ? p : NULL;
+}
+
+/* The "game" line of the file, or set=0. Unknown keys are skipped, so a
+ * newer writer's extra fields cannot break an older renderer. */
+static struct disp_set disp_read(void)
+{
+    struct disp_set d = { 0, 0, 0, 0, 0, 0, 1, 0, 0 };
+    const char *p = disp_path();
+    char line[512];
+    FILE *f;
+    if (!p || !(f = fopen(p, "r"))) return d;
+    while (fgets(line, sizeof line, f)) {
+        char *tok, *save = NULL;
+        if (strncmp(line, "game ", 5) != 0) continue;
+        d.set = 1;
+        for (tok = strtok_r(line + 5, " \t\r\n", &save); tok;
+             tok = strtok_r(NULL, " \t\r\n", &save)) {
+            char *eq = strchr(tok, '=');
+            int v;
+            if (!eq) continue;
+            *eq = 0; v = atoi(eq + 1);
+            if (!strcmp(tok, "x")) d.x = v;
+            else if (!strcmp(tok, "y")) d.y = v;
+            else if (!strcmp(tok, "w")) d.w = v;
+            else if (!strcmp(tok, "h")) d.h = v;
+            else if (!strcmp(tok, "fs")) d.fs = v != 0;
+            else if (!strcmp(tok, "border")) d.border = v != 0;
+            else if (!strcmp(tok, "rx")) d.rx = v;
+            else if (!strcmp(tok, "ry")) d.ry = v;
+        }
+        break;
+    }
+    fclose(f);
+    /* a rectangle no screen could hold is no setting: free, and say so */
+    if (d.set && (d.w < 160 || d.h < 120 || d.w > 16384 || d.h > 16384)) {
+        fprintf(stderr, "[padglhost] display: %s has a game line with no usable "
+                "size (%dx%d); the window stays free\n", p, d.w, d.h);
+        d.set = 0;
+    }
+    return d;
+}
+
+static void disp_border(unsigned long w, int border)
+{
+    /* MWM_HINTS_DECORATIONS (1<<1); decorations 0 = none, 1 = all. Format-32
+     * data is an array of C longs (see win_brand). */
+    long hints[5] = { 2, 0, border ? 1 : 0, 0, 0 };
+    unsigned long a = XInternAtom(xdpy, "_MOTIF_WM_HINTS", 0);
+    XChangeProperty(xdpy, w, a, a, 32, 0, (const unsigned char *)hints, 5);
+}
+
+static void disp_fullscreen(unsigned long w, int on)
+{
+    /* the EWMH request: a ClientMessage to the root, _NET_WM_STATE
+     * add/remove _NET_WM_STATE_FULLSCREEN, source 1 (an application) */
+    union { long l[24]; struct {
+        int type; unsigned long serial; int send_event; void *display;
+        unsigned long window, message_type; int format; long data[5];
+    } c; } ev;
+    memset(&ev, 0, sizeof ev);
+    ev.c.type = 33;                               /* ClientMessage */
+    ev.c.window = w;
+    ev.c.message_type = XInternAtom(xdpy, "_NET_WM_STATE", 0);
+    ev.c.format = 32;
+    ev.c.data[0] = on ? 1 : 0;
+    ev.c.data[1] = (long)XInternAtom(xdpy, "_NET_WM_STATE_FULLSCREEN", 0);
+    ev.c.data[3] = 1;
+    /* SubstructureRedirectMask | SubstructureNotifyMask */
+    XSendEvent(xdpy, XRootWindow(xdpy, XDefaultScreen(xdpy)), 0,
+               (1L << 20) | (1L << 19), &ev);
+}
+
+static void disp_set_border(int border)
+{
+    if (border == disp_cur_border) return;
+    disp_border(xwin, border);
+    XUnmapWindow(xdpy, xwin); XSync(xdpy, 0); XMapWindow(xdpy, xwin);
+    disp_cur_border = border;
+}
+
+static void disp_apply(void)
+{
+    struct disp_set d = disp_want;
+    if (!xwin) return;
+    if (!d.set) {
+        /* back to free: frame on, out of full screen, where it is */
+        if (disp_cur_fs) { disp_fullscreen(xwin, 0); disp_cur_fs = 0; }
+        disp_set_border(1);
+        XFlush(xdpy);
+        fprintf(stderr, "[padglhost] display: free (no setting)\n");
+    } else {
+        int left_fs = disp_cur_fs && !d.fs;
+        disp_set_border(d.border);
+        if (left_fs) { disp_fullscreen(xwin, 0); disp_cur_fs = 0; }
+        /* into the target first: full screen fills the monitor the window
+         * is ON, and a rectangle is the target itself */
+        XMoveResizeWindow(xdpy, xwin, d.x, d.y, (unsigned)d.w, (unsigned)d.h);
+        if (d.fs) { disp_fullscreen(xwin, 1); disp_cur_fs = 1; }
+        XFlush(xdpy);
+        disp_fixups = d.fs ? 0 : 4;
+        /* leaving full screen, the window reads 0,0 for a moment before the
+         * compositor restores it: checking at 0.7 s "corrected" that stale
+         * spot and bounced the window once (measured 2026-10-29) */
+        disp_fix_s = now_s() + (left_fs ? 2.0 : 0.7);
+        fprintf(stderr, "[padglhost] display: %s at %d,%d %dx%d, %s\n",
+                d.fs ? "full screen" : "window", d.x, d.y, d.w, d.h,
+                d.border ? "with its frame" : "borderless");
+    }
+    disp_placed = 1;
+}
+
+/* At window creation, before it is mapped: the border has to be right from
+ * the first map, and a setting replaces the remembered position. */
+static void disp_open(unsigned long w)
+{
+    struct stat st;
+    const char *p = disp_path();
+    disp_want = disp_read();
+    if (p && stat(p, &st) == 0) disp_mtim = st.st_mtim;
+    if (!disp_want.set) return;
+    disp_border(w, disp_want.border);
+    disp_cur_border = disp_want.border;
+    disp_placed = 0;             /* placement still owed: disp_poll does it */
+    game_want_pos = 0;           /* the setting, not the remembered spot */
+}
+
+/* ★ MOVED AND RESIZED BY HAND (David, 2026-10-29: "i need to be able to move
+ * and reposition the display and make it borderless and resize it with the
+ * mouse cursor while it's up"). A borderless window has no title bar to drag,
+ * so a left press inside it asks the compositor to MOVE it, and one within
+ * DISP_EDGE px of an edge or corner to RESIZE from there (_NET_WM_MOVERESIZE,
+ * the request a client-drawn title bar makes). The pointer's implicit grab
+ * from the press is released first, or the compositor cannot take it. When
+ * the window has been still for a second after, its place and size go back
+ * into display.conf (disp_writeback), so the setting, the Emulate tab and the
+ * next run all agree with where the user put it. */
+#define DISP_EDGE 16
+extern int XUngrabPointer(XDisplay *, unsigned long);
+static double disp_cfg_s;                /* last ConfigureNotify of xwin      */
+static int disp_dragged;                 /* a hand move/resize to write back  */
+
+/* A press only REMEMBERS where it was; the move/resize starts when the
+ * pointer then travels DISP_SLOP px with the button down (disp_motion), so a
+ * click stays a click - and two of them within DISP_DCLICK_S, close together,
+ * are a double-click: full screen on the monitor the window is on, and the
+ * next double-click puts it back (David, 2026-10-29). That toggle is this
+ * run's only; the saved setting is what the next run opens with. */
+#define DISP_SLOP 4
+#define DISP_DCLICK_S 0.4
+static int disp_down, disp_down_x, disp_down_y, disp_down_xr, disp_down_yr;
+static double disp_last_click_s;
+static int disp_last_click_xr, disp_last_click_yr;
+static void disp_press(int x, int y, int xr, int yr, unsigned long t);
+
+static void disp_button(int x, int y, int xr, int yr)
+{
+    double t = now_s();
+    if (t - disp_last_click_s < DISP_DCLICK_S &&
+        abs(xr - disp_last_click_xr) < 8 && abs(yr - disp_last_click_yr) < 8) {
+        disp_down = 0;
+        disp_last_click_s = 0;
+        if (!disp_cur_fs) {
+            disp_fullscreen(xwin, 1); disp_cur_fs = 1;
+            fprintf(stderr, "[padglhost] display: double-click, full screen\n");
+        } else {
+            disp_fullscreen(xwin, 0); disp_cur_fs = 0;
+            fprintf(stderr, "[padglhost] display: double-click, back to the window\n");
+        }
+        XFlush(xdpy);
+        return;
+    }
+    disp_last_click_s = t; disp_last_click_xr = xr; disp_last_click_yr = yr;
+    disp_down = 1;
+    disp_down_x = x; disp_down_y = y; disp_down_xr = xr; disp_down_yr = yr;
+}
+
+static void disp_motion(int xr, int yr, unsigned long t)
+{
+    if (!disp_down) return;
+    if (abs(xr - disp_down_xr) < DISP_SLOP && abs(yr - disp_down_yr) < DISP_SLOP) return;
+    disp_down = 0;
+    disp_last_click_s = 0;               /* a drag is not half a double-click */
+    disp_press(disp_down_x, disp_down_y, disp_down_xr, disp_down_yr, t);
+}
+
+static void disp_press(int x, int y, int xr, int yr, unsigned long t)
+{
+    union { long l[24]; struct {
+        int type; unsigned long serial; int send_event; void *display;
+        unsigned long window, message_type; int format; long data[5];
+    } c; } ev;
+    int l = x < DISP_EDGE, r = x >= win_w - DISP_EDGE;
+    int top = y < DISP_EDGE, bot = y >= win_h - DISP_EDGE;
+    /* EWMH directions: 0 top-left 1 top 2 top-right 3 right 4 bottom-right
+     * 5 bottom 6 bottom-left 7 left 8 move */
+    long dir = top ? (l ? 0 : r ? 2 : 1) : bot ? (l ? 6 : r ? 4 : 5)
+                                               : l ? 7 : r ? 3 : 8;
+    if (!disp_want.set || disp_cur_border || disp_cur_fs) return;
+    XUngrabPointer(xdpy, t);
+    memset(&ev, 0, sizeof ev);
+    ev.c.type = 33;
+    ev.c.window = xwin;
+    ev.c.message_type = XInternAtom(xdpy, "_NET_WM_MOVERESIZE", 0);
+    ev.c.format = 32;
+    ev.c.data[0] = xr; ev.c.data[1] = yr; ev.c.data[2] = dir;
+    ev.c.data[3] = 1;                    /* button 1 */
+    ev.c.data[4] = 1;                    /* source: an application */
+    XSendEvent(xdpy, XRootWindow(xdpy, XDefaultScreen(xdpy)), 0,
+               (1L << 20) | (1L << 19), &ev);
+    XFlush(xdpy);
+    disp_dragged = 1;
+    disp_fixups = 0;                     /* the user's place, not ours */
+}
+
+/* The game line again with this place and size: x y w h, and rx ry moved by
+ * as much (the monitor's corner is x - rx). Every other line is kept. */
+static void disp_writeback(void)
+{
+    const char *p = disp_path();
+    char lines[16][512], tmp[1100], line[512];
+    int n = 0, i, ax, ay;
+    FILE *f;
+    struct stat st;
+    if (!p || !winpos_read(xwin, &ax, &ay)) return;
+    if ((f = fopen(p, "r"))) {
+        while (n < 16 && fgets(lines[n], sizeof lines[n], f)) n++;
+        fclose(f);
+    }
+    snprintf(tmp, sizeof tmp, "%s.tmp", p);
+    if (!(f = fopen(tmp, "w"))) return;
+    for (i = 0; i < n; i++) {
+        if (strncmp(lines[i], "game ", 5) == 0) {
+            int mon = 1, border = disp_cur_border;
+            char mode[32] = "window", *tok, *save = NULL;
+            snprintf(line, sizeof line, "%s", lines[i] + 5);
+            for (tok = strtok_r(line, " \t\r\n", &save); tok;
+                 tok = strtok_r(NULL, " \t\r\n", &save)) {
+                if (!strncmp(tok, "monitor=", 8)) mon = atoi(tok + 8);
+            }
+            fprintf(f, "game monitor=%d mode=%s border=%d rx=%d ry=%d x=%d y=%d "
+                    "w=%d h=%d fs=0\n", mon, mode, border,
+                    ax - (disp_want.x - disp_want.rx), ay - (disp_want.y - disp_want.ry),
+                    ax, ay, win_w, win_h);
+        } else {
+            fputs(lines[i], f);
+        }
+    }
+    fclose(f);
+    rename(tmp, p);
+    disp_want.rx = ax - (disp_want.x - disp_want.rx);
+    disp_want.ry = ay - (disp_want.y - disp_want.ry);
+    disp_want.x = ax; disp_want.y = ay; disp_want.w = win_w; disp_want.h = win_h;
+    if (stat(p, &st) == 0) disp_mtim = st.st_mtim;   /* ours: not a change */
+    fprintf(stderr, "[padglhost] display: moved by hand to %d,%d %dx%d; saved\n",
+            ax, ay, win_w, win_h);
+}
+
+static void disp_poll(void)
+{
+    double t = now_s();
+    const char *p = disp_path();
+    if (!p || !xwin || t - win_mapped_s < 2.5) return;
+    if (disp_dragged && t - disp_cfg_s > 1.0) {
+        disp_dragged = 0;
+        disp_writeback();
+    }
+    if (t >= disp_check_s) {
+        struct stat st;
+        int changed = 0;
+        disp_check_s = t + 0.5;
+        if (stat(p, &st) == 0) {
+            changed = st.st_mtim.tv_sec != disp_mtim.tv_sec ||
+                      st.st_mtim.tv_nsec != disp_mtim.tv_nsec;
+            disp_mtim = st.st_mtim;
+        } else if (disp_mtim.tv_sec) {
+            changed = 1;                        /* the file went: free */
+            disp_mtim.tv_sec = disp_mtim.tv_nsec = 0;
+        }
+        if (changed) disp_want = disp_read();
+        if (changed || (!disp_placed && disp_want.set)) disp_apply();
+    }
+    /* a rectangle: read back, shift the aim by the miss (see the restore) */
+    if (disp_fixups > 0 && t >= disp_fix_s) {
+        int ax, ay;
+        disp_fix_s = t + 1.0;
+        disp_fixups--;
+        if (winpos_read(xwin, &ax, &ay) &&
+            (ax != disp_want.x || ay != disp_want.y)) {
+            static int aim_x, aim_y;
+            if (disp_fixups == 3) { aim_x = disp_want.x; aim_y = disp_want.y; }
+            aim_x += disp_want.x - ax; aim_y += disp_want.y - ay;
+            XMoveWindow(xdpy, xwin, aim_x, aim_y);
+            XFlush(xdpy);
+            fprintf(stderr, "[padglhost] display: window at %d,%d, want %d,%d "
+                    "-> aim %d,%d\n", ax, ay, disp_want.x, disp_want.y, aim_x, aim_y);
+        } else {
+            disp_fixups = 0;
+        }
+    }
+}
+
 static void win_pump(void)
 {
     /* sizeof(XEvent) is 192 on this LP64 build; 256 bytes is a safe
@@ -2840,6 +3193,8 @@ static void win_pump(void)
         }
     }
 
+    disp_poll();            /* PAD-811: the display setting, live */
+
     /* ITEM 22: retry the raise across the boot. The schedule is deliberately
      * over by 30 s, which is before the game has a picture on any run measured
      * here (~15-20 s to the first picture, and the raise wants to have won by
@@ -2913,7 +3268,7 @@ static void win_pump(void)
         case 22:                       /* ConfigureNotify: width/height ints at 56/60 */
             /* The GAME window drives the drawable size; the legend window
              * resizing must not be mistaken for it. */
-            if (ev.ul[4] == xwin) { win_w = ev.i[14]; win_h = ev.i[15]; }
+            if (ev.ul[4] == xwin) { win_w = ev.i[14]; win_h = ev.i[15]; disp_cfg_s = now_s(); }
             else if (xwin2 && ev.ul[4] == xwin2) {
                 win2_w = ev.i[14]; win2_h = ev.i[15];
                 break;             /* item 44: not the game window; no save */
@@ -2927,6 +3282,18 @@ static void win_pump(void)
              * second behind the window's resting spot with nothing left to
              * re-save it. */
             save_pending = 1;
+            break;
+        case 4:                        /* ButtonPress: x y x_root y_root at
+                                          ints 16-19, button at 21, time ul[7] */
+            if (ev.ul[4] == xwin && ev.i[21] == 1)
+                disp_button(ev.i[16], ev.i[17], ev.i[18], ev.i[19]);
+            break;
+        case 5:                        /* ButtonRelease */
+            if (ev.ul[4] == xwin && ev.i[21] == 1) disp_down = 0;
+            break;
+        case 6:                        /* MotionNotify (button 1 down):
+                                          x_root y_root at ints 18-19 */
+            if (ev.ul[4] == xwin) disp_motion(ev.i[18], ev.i[19], ev.ul[7]);
             break;
         case 12:                       /* Expose */
             legend_dirty = 1;

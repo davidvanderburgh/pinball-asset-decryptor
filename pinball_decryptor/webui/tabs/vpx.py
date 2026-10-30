@@ -38,8 +38,8 @@ INTRO = ("Play a Visual Pinball table with the real Stern game behind it: the "
          "it with Play.")
 
 TABLES_TIP = ("The app ships no tables. Download a table below from its author, "
-              "then Patch it: the app writes a copy named \"(PAD)\" into Visual "
-              "Pinball's tables folder and leaves your download as it is.")
+              "then Patch it: the app writes a copy named \"(PAD)\" into your tables "
+              "folder and leaves your download as it is.")
 
 CARDS_TIP = ("The folder with your SD card images (the normal .raw files, named "
              "like rush_le-1_19_0.Release.16G.sdcard.raw). A title plays its "
@@ -292,6 +292,27 @@ class VpxTab(TabService):
             self._say("card folder %s: %s." % (folder, "%d title%s" % (n, "" if n == 1 else "s")
                                                  if n else "no card images found in it"))
         return self._start("Reading the card folder", work)
+
+    @rpc
+    def choose_tables(self):
+        """Where the patched tables live (PAD-848): the "Patched" marks, the
+        Play list and where Patch writes. Cancel keeps the current one."""
+        folder = self.window.ask_folder("vpx_tables", "The folder with your patched (PAD) tables",
+                                        initialdir=self.get("tables_dir") or None)
+        if not folder:
+            return False
+        folder = os.path.normpath(folder)
+
+        def work():
+            got = self._kit("vpxsetup.py", ["tables", folder])
+            res = got.get("result") or got.get("error")
+            if res != "ok":
+                self._say(res, "error")
+                return
+            n = len(got.get("patched") or [])
+            self._say("tables folder %s: %s." % (folder, "%d patched table%s" % (n, "" if n == 1 else "s")
+                                                  if n else "no patched tables in it yet"))
+        return self._start("Reading the tables folder", work)
 
     @rpc
     def patch(self):

@@ -1553,3 +1553,125 @@ def test_play_brings_the_tables_padspike2_up_to_date(tmp_path):
     assert vs.refresh_system_script(str(tmp_path))
     assert (tmp_path / "PADSPIKE2.vbs").read_bytes() == ours
     assert not vs.refresh_system_script(str(tmp_path))                 # already this kit's
+
+
+# ---------------------------------------------------- PAD-858: the soundtrack
+
+def _snd(name, path, data, out, lower=True, fmt=b""):
+    def s(b):
+        return struct.pack("<i", len(b)) + b
+    rec = s(name.encode()) + s(path.encode())
+    if lower:
+        rec += s(name.lower().encode())
+    return rec + fmt + s(data) + bytes([out]) + struct.pack("<4i", -37, 0, 0, -37)
+
+
+WAVFMT = struct.pack("<HHIIHHH", 1, 2, 44100, 176400, 4, 16, 0)
+
+
+@pytest.mark.parametrize("lower", [True, False])
+def test_sound_record_reads_and_mutes_in_its_own_layout(lower):
+    vs = pytest.importorskip("vpxsounds")
+    for path, fmt in (("C:/x/mu_main1.ogg", b""), ("C:/x/fx_bumper.wav", WAVFMT)):
+        rec = _snd("mu_main1", path, b"OggS" + bytes(5000), 1, lower, fmt)
+        snd = vs.read_sound(rec)
+        assert snd["name"] == "mu_main1" and snd["size"] == 5004 and snd["wav"] == bool(fmt)
+        assert (snd["lower"] is not None) == lower
+        quiet = vs.read_sound(vs.silent(snd))
+        assert quiet["name"] == "mu_main1" and quiet["wav"] and quiet["size"] == 882
+        assert quiet["trailer"] == snd["trailer"] and quiet["lower"] == snd["lower"]
+        assert quiet["path"].endswith(".pad-muted.wav")
+    assert vs.read_sound(b"\x05\x00\x00\x00abc") is None                 # fits no layout
+
+
+def test_playfield_sounds_stay_and_the_soundtrack_goes():
+    vs = pytest.importorskip("vpxsounds")
+    keep = ["fx_ballrolling3", "Flipper_L01", "Rubber_Strong_4", "fx_bumper", "Drain_7",
+            "BallRoll_0_amp5", "WireLoop2", "fx_kicker_enter", "fx_solenoidon", "Sling_R3",
+            "Coin_In_2", "IdolMotor", "DTReset", "magnet", "Bridge_Move", "ShakeBass2"]
+    mute = ["mu_main1", "vo_mother12", "sfx_thunder3", "Song1-WorkingMan", "b66-start3",
+            "say-ShootTheTargets", "explosion", "Sound-0x0111", "fx_guitar2", "pistolet",
+            "shootgoldenball", "redbarchettahorns", "KickDrum1", "bumperDino1", "combo"]
+    for n in keep:
+        assert vs.mechanical(n, 0), n
+    for n in mute:
+        assert not vs.mechanical(n, 0), n
+    assert not vs.mechanical("fx_bumper", vs.OUT_BACKGLASS)              # a table's own bumper sfx
+
+
+def test_playmusic_goes_to_empty_subs_by_argument_count():
+    vs = pytest.importorskip("vpxsounds")
+    lines = ['Sub Table1_MusicDone : PlayMusic "Aerosmith\\" & Song : End Sub',
+             '    If x Then Call PlayMusic("a.mp3", 0.5) Else EndMusic',
+             "' PlayMusic \"comment.mp3\"",
+             '    D "PlayMusic is a word here" : Call PlayMusic(Song)  \' PlayMusic again']
+    rep = []
+    subs = vs.quiet_music(lines, rep)
+    assert lines[0] == 'Sub Table1_MusicDone : PadNoMusic1 "Aerosmith\\" & Song : End Sub'
+    assert lines[1] == '    If x Then Call PadNoMusic2("a.mp3", 0.5) Else EndMusic'
+    assert lines[2] == "' PlayMusic \"comment.mp3\""
+    assert lines[3] == '    D "PlayMusic is a word here" : Call PadNoMusic1(Song)  \' PlayMusic again'
+    assert "Sub PadNoMusic1(a0) : End Sub" in subs and "Sub PadNoMusic2(a0, a1) : End Sub" in subs
+    own = ["sub playMusic(fileName)", "  playmedia fileName", "end sub", 'playMusic "x.mp3"']
+    assert vs.quiet_music(own, rep) == "" and own[3] == 'playMusic "x.mp3"'   # PinUP's, left
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the quieted VBScript under cscript")
+def test_quieted_playmusic_runs_under_vbscript(tmp_path):
+    vs = pytest.importorskip("vpxsounds")
+    lines = ['Dim Song : Song = "a.mp3"', 'PlayMusic "x\\" & Song', "Call PlayMusic(Song, 0.5)",
+             'WScript.Echo "quiet"']
+    subs = vs.quiet_music(lines, [])
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join(lines) + subs, encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "quiet", r.stdout + r.stderr
+
+
+def _mini_vpx(path, vpxfile, sounds, script):
+    """A compound file with just what VpxTable reads, signed."""
+    pythoncom = pytest.importorskip("pythoncom")
+    from win32com import storagecon as sc
+    pytest.importorskip("Crypto.Hash.MD2")
+    gd = _code(script) + _rec("SEDT", struct.pack("<i", 0)) + _rec("ENDB", b"")
+    mode = sc.STGM_CREATE | sc.STGM_READWRITE | sc.STGM_SHARE_EXCLUSIVE
+    root = pythoncom.StgCreateDocfile(str(path), mode, 0)
+    stg = root.CreateStorage("GameStg", mode, 0, 0)
+    for name, data in [("Version", struct.pack("<i", 1072)), ("GameData", gd)] + \
+            [("Sound%d" % i, s) for i, s in enumerate(sounds)]:
+        stm = stg.CreateStream(name, mode, 0, 0)
+        stm.Write(data)
+        stm.Commit(0)
+    stm = stg.CreateStream("MAC", mode, 0, 0)
+    stm.Write(bytes(16))
+    stm.Commit(0)
+    stg.Commit(0)
+    root.Commit(0)
+    del stm, stg, root
+    t = vpxfile.VpxTable(str(path))
+    mac = t.digest()
+    t.ole.close()
+    vpxfile.write_patched(str(path), str(path) + ".s", streams={"MAC": mac})
+    os.replace(str(path) + ".s", str(path))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="writes through Windows structured storage")
+def test_a_table_patched_before_is_quieted_in_place_once(tmp_path, vpxfile):
+    vs = pytest.importorskip("vpxsounds")
+    p = tmp_path / "old (PAD).vpx"
+    keep = _snd("fx_flipperup", "C:/fx_flipperup.wav", bytes(400), 0, fmt=WAVFMT)
+    song = _snd("mu_main1", "C:/main1.ogg", b"OggS" + bytes(9000), 1)
+    _mini_vpx(p, vpxfile, [keep, song], 'Sub Table1_MusicDone : PlayMusic "a.mp3" : End Sub')
+    t = vpxfile.VpxTable(str(p))
+    assert t.verify()
+    t.ole.close()
+    rep = vs.quiet_in_place(str(p))
+    assert rep and "muted 1 more" in rep[0] and "PlayMusic goes nowhere" in rep[0]
+    t = vpxfile.VpxTable(str(p))
+    assert t.verify() and "PadNoMusic1" in t.script()
+    assert t.ole.openstream("GameStg/Sound0").read() == keep
+    assert vs.read_sound(t.ole.openstream("GameStg/Sound1").read())["size"] == 882
+    t.ole.close()
+    assert vs.quiet_in_place(str(p)) == []                              # once

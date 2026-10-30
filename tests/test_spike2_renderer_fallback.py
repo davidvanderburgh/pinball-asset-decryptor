@@ -751,3 +751,97 @@ def test_status_reports_the_fallback_and_only_while_running():
     assert line_of(text, 'echo "running=1"') < \
         line_of(text, "padglhost.log.fallback")
     assert 'echo "gl_fallback=$g"' in text
+
+
+# --------------------------------------------------------------------------
+# PAD-854: A RENDERER THAT DIES ON ITS DRIVER AFTER ITS WINDOW OPENED.
+# --------------------------------------------------------------------------
+
+#: The reporter's renderer log (Star Wars Pro 1.31, 2026-10-29), twice in a
+#: row: the window opened, then d3d12 took long enough to fail that the old
+#: ring-plus-0.3 s check had already called the renderer started.
+LATE_DEATH_LOG = """\
+[padglhost] window opened 1360x768 on DISPLAY=:0
+libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Ensure your X server supports DRI3 to get accelerated rendering
+Dropped Escape call with ulEscapeCode : 0x03007703
+libEGL warning: egl: failed to create dri2 screen
+eglInitialize failed
+"""
+
+#: A stand-in renderer: writes its log in two halves with a pause between, as
+#: padglhost does around eglInitialize, and either dies or says ready.
+_WAIT_DRIVER = """#!/bin/bash
+RIG=$(pwd); export RIG
+PAD_HOME=$RIG; export PAD_HOME
+. "$RIG/padpath.sh"
+: > "$RIG/log"
+( echo '[padglhost] window opened 1360x768 on DISPLAY=:0' >> "$RIG/log"
+  sleep 1.2
+  if [ "$1" = die ]; then cat "$RIG/hostlog" >> "$RIG/log"; exit 1; fi
+  echo '[padglhost] ready, waiting for the game' >> "$RIG/log"
+  sleep 3 ) &
+KID=$!
+alive() { kill -0 "$KID" 2>/dev/null; }
+START=$(date +%s%N)
+pad_gl_wait_started "$RIG/log" "${2:-50}" alive; echo "RC=$?"
+echo "MS=$(( ($(date +%s%N) - START) / 1000000 ))"
+alive && echo "ALIVE=1" || echo "ALIVE=0"
+kill "$KID" 2>/dev/null
+exit 0
+"""
+
+
+def _wait(tmp_path, mode, tenths="50"):
+    driver = _WAIT_DRIVER.replace('"$1"', '"%s"' % mode).replace(
+        '"${2:-50}"', tenths)
+    return _drive(tmp_path, LATE_DEATH_LOG, driver)
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_a_renderer_that_dies_after_its_window_is_seen_dying(tmp_path):
+    """The reported shape, timed for real: dead 1.2 s after its window, which
+    is past the old 0.3 s check.  The wait must see the death and say so."""
+    facts = _wait(tmp_path, "die")
+    assert facts["RC"] == "1"
+    assert facts["ALIVE"] == "0"
+    assert 1000 <= int(facts["MS"]) < 4000
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_a_renderer_that_comes_up_is_released_on_its_ready_line(tmp_path):
+    """A healthy start is released the moment it says ready - not after the
+    whole bound."""
+    facts = _wait(tmp_path, "ready")
+    assert facts["RC"] == "0"
+    assert facts["ALIVE"] == "1"
+    assert int(facts["MS"]) < 4000
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_a_slow_live_renderer_is_left_to_the_callers_check(tmp_path):
+    """Bounded: a renderer still alive and still not ready when the bound
+    runs out is not called dead here; pad_gl_try's own liveness check is
+    still what judges it."""
+    facts = _wait(tmp_path, "ready", tenths="5")
+    assert facts["RC"] == "0"
+    assert facts["ALIVE"] == "1"
+    assert int(facts["MS"]) < 1100
+
+
+def test_each_attempt_waits_for_the_driver_not_just_the_ring():
+    """The order inside pad_gl_try: ring, THEN the driver's ready line, THEN
+    the liveness verdict - so the death path, the software retry and the
+    verdict see a renderer that died on eglInitialize."""
+    text = src("watch.sh")
+    body = text[text.index("pad_gl_try() {"):]
+    body = body[:body.index("\n}\n")]
+    assert line_of(body, '[ -s "$RING_HOST" ]') \
+        < line_of(body, 'pad_gl_wait_started "$HOSTLOG"') \
+        < line_of(body, "    pad_gl_alive")
+    assert "pad_gl_alive() {" in text
+    # The line the wait keys on is the one padglhost prints after the driver,
+    # the context and the screen framebuffer are all up.
+    host = src("padglhost.c")
+    assert line_of(host, "eglInitialize(dpy") \
+        < line_of(host, '"[padglhost] ready, waiting for the game')

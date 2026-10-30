@@ -291,7 +291,9 @@ def test_write_verifies_each_written_file_size(tmp_path, monkeypatch):
     class _TruncatingExecutor(_RecordingExecutor):
         def run(self, bash_cmd, timeout=120):
             if (bash_cmd.startswith("debugfs -R") and "'stat " in bash_cmd
-                    and "/emmc.img'" not in bash_cmd):
+                    and "/emmc.img'" not in bash_cmd
+                    # the file itself; its folder is there
+                    and ".wav" in bash_cmd):
                 self.commands.append(bash_cmd)
                 return "audio_001.wav: File not found by ext2_lookup\n"
             return super().run(bash_cmd, timeout)

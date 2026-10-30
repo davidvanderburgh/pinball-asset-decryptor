@@ -32,6 +32,7 @@ import zipfile
 
 from ...core.checksums import (CHECKSUMS_FILE, NON_ASSET_DIRS,
                                TRACKING_SIDECARS, generate_checksums,
+                               is_other_extract,
                                md5_file, read_checksums)
 from ...core import runtime
 from ...core.executor import CommandError, create_executor
@@ -1000,6 +1001,54 @@ class WritePipeline(BasePipeline):
             f"installer prompt. Keep a backup of the untouched card/drive "
             f"first.")
 
+    def _make_inner_dirs(self, inner_exec, inner_root, changed):
+        """Create every folder a modified file needs inside the inner ext4.
+
+        debugfs ``write`` cannot create a parent directory: a brand-new file
+        in a folder the game does not have (``custom_modes/mod.c``,
+        ``lib/custom.so``) never lands and the post-write verify aborts the
+        build.  Walk each file's folders from the asset root down, ``mkdir``
+        the missing ones and give each the owner of the folder it sits in
+        (debugfs makes them root's), so a new folder looks like its
+        siblings to the game's own user.
+        """
+        img_q = shlex.quote(inner_exec)
+
+        def stat(path):
+            cmd = shlex.quote(f"stat {_quote_dbg(path)}")
+            return self.executor.run(f"debugfs -R {cmd} {img_q} 2>&1",
+                                     timeout=60)
+
+        root = inner_root.rstrip("/")
+        seen = set()
+        for rel in sorted(changed):
+            parent = root
+            for part in rel.split("/")[:-1]:
+                path = f"{parent}/{part}"
+                if path not in seen:
+                    seen.add(path)
+                    if "not found" in stat(path).lower():
+                        self._mkdir_inner(img_q, path, stat(parent or "/"))
+                        if "not found" in stat(path).lower():
+                            raise PipelineError("Write",
+                                f"Could not create the folder {path} inside "
+                                f"the game filesystem for {rel}. The build "
+                                f"was aborted; the original image is "
+                                f"unchanged.")
+                parent = path
+
+    def _mkdir_inner(self, img_q, path, parent_stat):
+        self._log(f"  + folder {path}", "info")
+        self.executor.run(
+            f"debugfs -w -R {shlex.quote(f'mkdir {_quote_dbg(path)}')} "
+            f"{img_q} 2>&1", timeout=60)
+        m = re.search(r"\bUser:\s*(\d+)\s+Group:\s*(\d+)", parent_stat)
+        if m:
+            for field, value in (("uid", m.group(1)), ("gid", m.group(2))):
+                sif = shlex.quote(f"sif {_quote_dbg(path)} {field} {value}")
+                self.executor.run(f"debugfs -w -R {sif} {img_q} 2>&1",
+                                  timeout=60)
+
     def _write_modified_files(self, inner_exec, changed,
                               inner_root_to_assets_root):
         """Replace each modified file inside the inner ext4 via debugfs -w.
@@ -1009,6 +1058,7 @@ class WritePipeline(BasePipeline):
         ``inner_root_to_assets_root + "/" + rel``.
         """
         total = len(changed)
+        self._make_inner_dirs(inner_exec, inner_root_to_assets_root, changed)
         for i, (rel, abs_host) in enumerate(sorted(changed.items())):
             self._check_cancel()
             inner_path = f"{inner_root_to_assets_root.rstrip('/')}/{rel}"
@@ -1074,17 +1124,14 @@ class WritePipeline(BasePipeline):
                 # Two different faults share this check, and naming the
                 # wrong one sends the user resizing a partition that was
                 # never full.  No inode at all + "not found" from debugfs
-                # means the path is not in the image: debugfs `write`
-                # cannot create a parent directory, so a file whose folder
-                # the game does not have simply never lands.  A short
-                # inode is the real out-of-space signature.
+                # means the path is not in the image: its folder was made
+                # above, so debugfs `write` itself refused the file.  A
+                # short inode is the real out-of-space signature.
                 if got is None and "not found" in out.lower():
                     cause = (f"There is no {inner_path} inside the game "
-                             f"filesystem, and debugfs cannot create the "
-                             f"folder it would go in, so the file was "
-                             f"never written. That normally means it is "
-                             f"not a game asset at all -- something else "
-                             f"in the project folder picked up as one.")
+                             f"filesystem: debugfs did not create it, so "
+                             f"the file was never written. This is not "
+                             f"the partition running out of space.")
                 else:
                     cause = ("debugfs reported success but the file is "
                              "missing or truncated -- often the game "
@@ -1574,18 +1621,23 @@ def _diff_assets(assets_dir, baseline, log=None):
     # a multi-GB installer image into the game partition.
     _skip_top = set(_DERIVED_SUBDIRS) | {ORIG_DIR} | set(NON_ASSET_DIRS)
     # Directories the inner ext4 is known to have -- every directory the
-    # baseline lists a file in, plus the assets root.  debugfs `write` cannot
-    # create a parent directory, so a "new" file anywhere else can never land;
-    # shipping it only buys the misleading out-of-space abort above.  Skip
-    # those and say so, rather than dropping them silently.
+    # baseline lists a file in, plus the assets root.  A new file anywhere
+    # else ships too (a mod's own ``custom_modes/mod.c`` or ``lib/custom.so``,
+    # PAD-876): WritePipeline._make_inner_dirs creates its folders inside the
+    # image first.  Name those files in the log, since no on-screen list
+    # shows an unbaselined folder.
     baseline_dirs = {""}
     for rel in baseline:
         rel_norm = rel.replace("\\", "/")
         baseline_dirs.add(rel_norm.rsplit("/", 1)[0] if "/" in rel_norm else "")
-    stray = []
+    new_dirs = []
     for dirpath, dirnames, filenames in os.walk(assets_dir):
         if os.path.relpath(dirpath, assets_dir).replace("\\", "/") == ".":
             dirnames[:] = [d for d in dirnames if d not in _skip_top]
+        # A whole extract dropped inside this one (Extract Both, PAD-211) is
+        # another card's files, never new assets of this one.
+        dirnames[:] = [d for d in dirnames
+                       if not is_other_extract(os.path.join(dirpath, d))]
         for fn in filenames:
             if (fn == CHECKSUMS_FILE
                     or fn in TRACKING_SIDECARS
@@ -1602,16 +1654,15 @@ def _diff_assets(assets_dir, baseline, log=None):
             if rel not in consumed_on_disk:
                 parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
                 if parent not in baseline_dirs:
-                    stray.append(rel)
-                    continue
+                    new_dirs.append(rel)
                 changed[rel] = abs_path
-    if stray and log:
-        log(f"  {len(stray)} new file(s) sit in a folder the game "
-            f"filesystem does not have -- not written back:", "info")
-        for rel in sorted(stray)[:10]:
+    if new_dirs and log:
+        log(f"  {len(new_dirs)} new file(s) in a folder the game "
+            f"filesystem does not have yet -- the folder is created:", "info")
+        for rel in sorted(new_dirs)[:10]:
             log(f"    {rel}", "info")
-        if len(stray) > 10:
-            log(f"    ... and {len(stray) - 10} more", "info")
+        if len(new_dirs) > 10:
+            log(f"    ... and {len(new_dirs) - 10} more", "info")
     return changed, missing
 
 

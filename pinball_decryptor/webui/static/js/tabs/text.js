@@ -117,8 +117,9 @@ export default function TextTab() {
     openMenu({ x: e.clientX, y: e.clientY }, [
       { label: "Edit…", icon: "edit", onClick: () => setTimeout(focusEditor, 60) },
       { label: "Replace everywhere…", onClick: () => openReplace(r.i) },
-      { label: "Show in Scenes…", onClick: () => call("text.show_in_scene", r.i) },
-      { label: "Name this scene…", onClick: () => openRename(r.i) },
+      ...(s.scenes ? [
+        { label: "Show in Scenes…", onClick: () => call("text.show_in_scene", r.i) },
+        { label: "Name this scene…", onClick: () => openRename(r.i) }] : []),
       ...(r.ed ? [{ sep: true }, { label: "Revert this string", icon: "undo",
         onClick: () => call("text.select", r.i).then(() => call("text.revert")) }] : []),
     ]);
@@ -140,7 +141,8 @@ export default function TextTab() {
       <${Button} onClick=${() => call(s.scanning ? "text.cancel_scan" : "text.scan")}
         icon=${s.scanning ? "x" : "refresh"}>${s.scanning ? "Cancel scan" : "Scan"}<//>
       <${Button} kind="ghost" title=${TIP_REPLACE} onClick=${() => openReplace(null)}>Replace everywhere…<//>
-      <${Button} kind="ghost" title=${TIP_SCENES} onClick=${() => call("text.show_in_scene", null)}>Show in Scenes…<//>
+      ${s.scenes ? html`<${Button} kind="ghost" title=${TIP_SCENES}
+        onClick=${() => call("text.show_in_scene", null)}>Show in Scenes…<//>` : null}
       <${Button} kind="ghost" iconRight="down" disabled=${!total}
         title="Save your text edits to a file, to keep as a backup or send to someone, and load a file of text edits into this project"
         onClick=${(e) => openMenu(e.currentTarget, [
@@ -213,8 +215,8 @@ function Editor({ s, editRef, apply }) {
     <div class="row wrap text-edit-actions">
       <span class=${cx("small mono", s.budget_over ? "err-ink" : "dim")}>${s.budget || ""}</span>
       <span class="text-saved-i"><${InfoBadge} text=${SAVED_NOTE} /></span>
-      <${Check} ns="text" k="apply_all" checked=${s.apply_all} title=${TIP_APPLY_ALL}
-        label="Apply to every scene with the same original text" />
+      ${s.scenes ? html`<${Check} ns="text" k="apply_all" checked=${s.apply_all} title=${TIP_APPLY_ALL}
+        label="Apply to every scene with the same original text" />` : null}
       <span class="grow"></span>
       <${Button} icon="undo" disabled=${!on} onClick=${() => call("text.revert")}>Revert<//>
       <${Button} kind="primary" disabled=${!on || s.budget_over || s.locked} onClick=${apply}>Apply<//>

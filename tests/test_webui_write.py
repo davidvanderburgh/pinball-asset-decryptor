@@ -105,7 +105,7 @@ def point_at(w, original, project):
 CASES = [
     # mfr, era, direct, flash, revert, diagnose, grow, version, delta, help
     ("stern", "", True, True, True, False, True, False, False, False),
-    ("stern", "spike1", False, True, True, False, False, False, False, False),
+    ("stern", "spike1", False, True, True, False, True, False, False, False),
     ("jjp", "", True, True, True, False, False, False, False, True),
     ("cgc", "", False, True, True, True, False, False, False, True),
     ("dp", "", True, False, True, False, False, False, True, False),

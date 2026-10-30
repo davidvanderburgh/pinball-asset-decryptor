@@ -127,7 +127,7 @@ def test_rules_scene_menu_and_filters():
 
 
 # ------------------------------------------------------ per manufacturer
-def test_the_tab_is_shown_only_for_stern_spike2(tmp_path):
+def test_the_tab_is_shown_only_for_stern_spike2_and_spike1(tmp_path):
     with web_app(tmp_path) as w:
         keys = {m.key for m in w.window.manufacturers}
         for mfr in MFRS:
@@ -145,7 +145,8 @@ def test_the_tab_is_shown_only_for_stern_spike2(tmp_path):
             assert w.window.text_status_var.get() == ""
         if "stern" in keys:
             w.call("ui.pick_manufacturer", "stern")
-            for era, shown in (("spike1", False), ("whitestar", False),
+            # PAD-869: Spike 1's DMD text is the game program's, edited here
+            for era, shown in (("spike1", True), ("whitestar", False),
                                ("spike2", True)):
                 w.call("ui.set_era", era)
                 w.drain()

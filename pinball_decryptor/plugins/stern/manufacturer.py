@@ -184,10 +184,9 @@ _SAM_CAPS = Capabilities(
     audio_duration_names=True,
 )
 
-# Spike 1: audio extract + write.  The master directory is plaintext and every
-# sound is raw PCM, so no emulator/codec prerequisites; the surface is audio-
-# only for now (the DMD-era display content is .spv/dot data — a future era
-# upgrade, not a video/image replace tab).  Partition Explorer stays off: the
+# Spike 1: audio and display text extract + write.  The master directory is
+# plaintext and every sound is raw PCM, so no emulator/codec prerequisites;
+# the DMD pictures are not offered yet.  Partition Explorer stays off: the
 # game data lives on a *logical* partition, which the explorer doesn't
 # enumerate yet.
 _SPIKE1_CAPS = Capabilities(
@@ -196,6 +195,13 @@ _SPIKE1_CAPS = Capabilities(
     modpack=True,
     replace_audio=True,
     audio_level_offset=True,
+    # PAD-869: every word on the DMD is a string in the game program (the
+    # KISS song names on its song-select screen among them).  Extract lists
+    # them in text/strings.tsv, the Replace Text tab edits them, and Write
+    # patches them into the card's game ELF in place - a longer line goes in
+    # space the ELF already carries (spike1_text.py), so the file keeps its
+    # size.
+    replace_text=True,
     flash_image=True,
     # Emulate tab (its OWN flag, era-gated — the Spike 2 ``emulate`` panel is a
     # different rig).  The static armel game now boots and renders its attract

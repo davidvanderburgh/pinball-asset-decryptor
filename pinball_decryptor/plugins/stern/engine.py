@@ -2169,12 +2169,15 @@ _PROGRAM_MODES_FILE = "program_modes.json"
 SCENES_REV = 3
 
 
-def _program_modes_read(assets_dir, scenes=None, boxes=None, paths=None):
+def _program_modes_read(assets_dir, scenes=None, boxes=None, paths=None,
+                        era=None):
     """Note that the manifest's game-program rows carry this build's reading
     of the game's own modes (:mod:`.text_modes`), with *scenes*, the screens
     each mode names (``{mode class: [scene key]}``), and *boxes*, the text
     boxes it names with them (``{mode class: {scene key: [node path]}}``),
     and *paths*, every node path the program points at (PAD-513).
+    *era* ``"spike1"`` (PAD-869) marks a Spike 1 project, whose program has
+    no modes to read and no Spike 2 card to re-read them from.
     Never raises."""
     import json
     from . import text_modes
@@ -2183,10 +2186,13 @@ def _program_modes_read(assets_dir, scenes=None, boxes=None, paths=None):
         with open(os.path.join(assets_dir, text_manifest.RELDIR,
                                _PROGRAM_MODES_FILE), "w",
                   encoding="utf-8") as f:
-            json.dump({"rev": text_modes.READ_REV, "scenes_rev": SCENES_REV,
-                       "scenes": dict(scenes or {}),
-                       "boxes": dict(boxes or {}),
-                       "paths": sorted(paths or ())}, f)
+            got = {"rev": text_modes.READ_REV, "scenes_rev": SCENES_REV,
+                   "scenes": dict(scenes or {}),
+                   "boxes": dict(boxes or {}),
+                   "paths": sorted(paths or ())}
+            if era:
+                got["era"] = era
+            json.dump(got, f)
     except OSError:
         pass
 
@@ -2250,7 +2256,8 @@ def program_text_needs_refresh(assets_dir, rows):
     manifest *rows* of the project at *assets_dir*: a game-program row with
     no limit flag (extracted before they were measured), or game-program
     rows whose modes were read by an older build (PAD-470), or before the
-    screens each mode names were noted (PAD-485)."""
+    screens each mode names were noted (PAD-485).  Never for a Spike 1
+    project (PAD-869): its program has no modes to read."""
     import json
     from . import text_modes
     from ...core import text_manifest
@@ -2264,6 +2271,8 @@ def program_text_needs_refresh(assets_dir, rows):
         with open(os.path.join(assets_dir, text_manifest.RELDIR,
                                _PROGRAM_MODES_FILE), encoding="utf-8") as f:
             got = json.load(f)
+        if got.get("era") == "spike1":
+            return False
         rev = int(got.get("rev") or 0)
         scenes_rev = int(got.get("scenes_rev") or 0)
     except (OSError, ValueError, TypeError, AttributeError):

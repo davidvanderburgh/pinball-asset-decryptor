@@ -774,6 +774,7 @@ class Spike1ExtractPipeline(BasePipeline):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.input_path = input_path
         self.output_dir = output_dir
+        self.extract_categories = extract_categories
         self.duration_names = duration_names
 
     def _run(self):
@@ -814,7 +815,8 @@ class Spike1ExtractPipeline(BasePipeline):
                 progress=self._progress,
                 cancel=lambda: self._cancelled,
                 phase=self._set_phase,
-                duration_names=self.duration_names)
+                duration_names=self.duration_names,
+                do_text=_category_flags(self.extract_categories)["do_text"])
         except spike1.Spike1Error as e:
             raise PipelineError("Decode audio", str(e))
         self._check_cancel()
@@ -877,9 +879,15 @@ class Spike1WritePipeline(BasePipeline):
         skipped = ""
         if result["skipped"]:
             skipped = " (%d skipped — see log)" % len(result["skipped"])
+        text = ""
+        if result.get("text"):
+            text = "%d line(s) of text" % result["text"]
         if result["audio"]:
-            summary = "Wrote %d replaced sound(s)%s to %s" \
-                % (result["audio"], skipped, self.output_path)
+            summary = "Wrote %d replaced sound(s)%s%s to %s" \
+                % (result["audio"], skipped, " and " + text if text else "",
+                   self.output_path)
+        elif text:
+            summary = "Wrote %s%s to %s" % (text, skipped, self.output_path)
         else:
             summary = ("No changed audio found — %s is an unmodified copy "
                        "of the original image%s" % (self.output_path, skipped))

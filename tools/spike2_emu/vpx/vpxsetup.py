@@ -47,12 +47,29 @@ VPX_DEFAULT_DIR = r"C:\Visual Pinball"
 
 
 def controller_registered():
+    """PAD.Controller is registered AND what it is registered to is still
+    there (PAD-850). The key alone said "Registered" while the folder it
+    named had been deleted, and every table then stopped on "Can't load
+    PAD.Controller: ActiveX component can't create object"; now the tab
+    offers Register again instead."""
     try:
         import winreg
-        winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "PAD.Controller\\CLSID")
-        return True
+        root = winreg.HKEY_CLASSES_ROOT
+        clsid = winreg.QueryValue(root, "PAD.Controller\\CLSID")
+        path = winreg.QueryValue(root, "CLSID\\%s\\PythonCOMPath" % clsid)
+        server = winreg.QueryValue(root, "CLSID\\%s\\LocalServer32" % clsid)
     except Exception:                                       # noqa: BLE001
         return False
+    return registration_ok(path, server)
+
+
+def registration_ok(com_path, server_cmd):
+    """The registered folder holds padcontroller.py, and the python the
+    server command starts exists."""
+    exe = server_cmd.strip()
+    exe = exe[1:].split('"', 1)[0] if exe.startswith('"') else exe.split(" ", 1)[0]
+    return (bool(com_path) and os.path.isfile(os.path.join(com_path, "padcontroller.py"))
+            and bool(exe) and os.path.isfile(exe))
 
 
 def find_vpx():

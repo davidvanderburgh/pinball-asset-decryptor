@@ -493,9 +493,10 @@ def _entrypoint_code():
 
 def test_the_mac_vnc_server_reads_input_on_its_own_thread():
     code = _entrypoint_code()
-    # the server itself, not the -storepasswd helper
+    # the server itself, not the -storepasswd helper; as pad on a root
+    # start (PAD-835's as_pad)
     starts = [i for i, l in enumerate(code)
-              if re.match(r"\s*x11vnc\s+-display\b", l)]
+              if re.match(r"\s*(?:as_pad\s+)?x11vnc\s+-display\b", l)]
     assert len(starts) == 1, starts
     cmd = []
     i = starts[0]
@@ -516,7 +517,7 @@ def test_the_mac_vnc_server_comes_back_if_it_exits():
     """x11vnc's docs warn -threads can be unstable, so a crash
     must cost the viewer a reconnect, not the run its picture."""
     code = "\n".join(_entrypoint_code())
-    m = re.search(r"while :; do\s*\n\s*x11vnc\s+-display(.*?)\bdone\b", code,
+    m = re.search(r"while :; do\s*\n\s*(?:as_pad\s+)?x11vnc\s+-display(.*?)\bdone\b", code,
                   re.S)
     assert m, "the x11vnc server is not started inside a restart loop"
     assert "sleep" in m.group(1), "a restart loop with no pause spins"

@@ -297,9 +297,10 @@ def set_fields(data, fields):
     return bytes(out)
 
 
-def write_patched(src, dst, gamedata=None, new_items=(), script=None):
+def write_patched(src, dst, gamedata=None, new_items=(), script=None, streams=None):
     """Copy `src` to `dst`, then replace GameData (optionally with a new
-    script), append `new_items` (GameItem streams) and re-sign."""
+    script), append `new_items` (GameItem streams), replace `streams`
+    ({name under GameStg: bytes}, unhashed ones such as Sound<n>) and re-sign."""
     import pythoncom
     from win32com import storagecon as sc
     table = VpxTable(src)
@@ -317,7 +318,8 @@ def write_patched(src, dst, gamedata=None, new_items=(), script=None):
     stg = root.OpenStorage("GameStg", None, mode, None, 0)
     cmode = sc.STGM_CREATE | sc.STGM_READWRITE | sc.STGM_SHARE_EXCLUSIVE
     for name, data in [("GameData", gd), ("MAC", mac)] + \
-            [("GameItem%d" % (n0 + i), item) for i, item in enumerate(new_items)]:
+            [("GameItem%d" % (n0 + i), item) for i, item in enumerate(new_items)] + \
+            sorted((streams or {}).items()):
         stm = stg.CreateStream(name, cmode, 0, 0)
         stm.Write(data)
         stm.Commit(0)

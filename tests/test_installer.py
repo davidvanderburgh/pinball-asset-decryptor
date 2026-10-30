@@ -1222,7 +1222,10 @@ def _rigs_the_app_names():
     for path in (REPO / "pinball_decryptor").rglob("*.py"):
         for m in pat.finditer(path.read_text(encoding="utf-8",
                                              errors="replace")):
-            rigs.add(m.group(1) or m.group(2))
+            # only a folder the checkout has: the MCP server's JSON-RPC
+            # methods "tools/list" and "tools/call" (PAD-844) are no rig
+            if (REPO / "tools" / (m.group(1) or m.group(2))).is_dir():
+                rigs.add(m.group(1) or m.group(2))
     # ...and every rig THOSE rigs' scripts reach beside themselves: the
     # Spooky P-ROC rig and AP's apiav rig cd to ../../proc_emu, which no
     # tab names, so it never shipped and both failed with exit 7 on every

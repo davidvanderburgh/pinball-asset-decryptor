@@ -50,6 +50,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import vpxfile  # noqa: E402
+import vpxsounds  # noqa: E402
 
 MAP = os.path.join(HERE, "turtles_le.vpxmap.json")
 LAMP_ARRAY = 3000          # lamp numbers run to 1000 + 15 * 100 + 95
@@ -510,11 +511,12 @@ def main(argv):
               % (src, os.path.basename(mpath), m["detect"]))
         return 1
     script, rep = patch_script(script, m)
+    script, streams = vpxsounds.quiet(script, table.ole, rep)   # PAD-858
     items = retrofit_items(table, m)
     table.ole.close()
     out_name = m.get("output") or os.path.splitext(os.path.basename(src))[0] + " (PAD).vpx"
     dst = os.path.join(outdir, out_name)
-    mac = vpxfile.write_patched(src, dst, script=script, new_items=items)
+    mac = vpxfile.write_patched(src, dst, script=script, new_items=items, streams=streams)
     shutil.copyfile(os.path.join(HERE, "PADSPIKE2.vbs"), os.path.join(outdir, "PADSPIKE2.vbs"))
     open(os.path.join(outdir, out_name[:-4] + ".script.vbs"), "w", encoding="utf-8",
          newline="").write(script)

@@ -49,6 +49,7 @@ EVERY_BLOCK = [
     {"op": "hud_progress", "value": num(7)},
     {"op": "roster_progress", "done": num(2), "of": num(5)},                       # PAD-733
     {"op": "hud_award", "text": "JACKPOT", "value": None, "sub": "", "seconds": 2},
+    {"op": "spare_drive", "node": 9, "output": 0, "power": 255, "ms": 40, "hold_power": 0, "hold_ms": 0},  # PAD-826
 ]
 #: one of every value and condition (modes_blocks.js valueTemplates / condTemplates), with the operators
 EVERY_VALUE = [num(1000), {"k": "var", "name": "combo"}, {"k": "hits", "shot": "Left ramp"}, {"k": "scored"},
@@ -71,7 +72,8 @@ EVERY_HAT = [{"kind": "mode_start"}, {"kind": "mode_end"}, {"kind": "shot", "sho
               "name": "RAMPS"},                                                                   # PAD-708
              {"kind": "battle", "slot": 2, "name": "Gigan"},                                          # PAD-706
              {"kind": "game_mode", "mode": 21, "name": "Jet Fighter Attack"},                         # PAD-710
-             {"kind": "completed", "count": 4, "modes": [3, 4, 5, 6, 7, 8, 9, 10]}]                   # PAD-747
+             {"kind": "completed", "count": 4, "modes": [3, 4, 5, 6, 7, 8, 9, 10]},                   # PAD-747
+             {"kind": "spare_switch", "node": 9, "input": 0, "closed": "low", "when": "any"}]           # PAD-826
 
 
 def every_program():

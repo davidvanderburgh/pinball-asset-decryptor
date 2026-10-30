@@ -75,6 +75,9 @@ def rig(monkeypatch, tmp_path):
                  "BALL_PATH"):
         monkeypatch.setattr(pf, name, str(tmp_path / ("absent_" + name)))
     monkeypatch.setattr(pf, "STATE", str(tmp_path / "state.json"))
+    # no run log to read: PAD-827's CLIPS list posts its first (empty) list
+    # on the first tick, which is not the page re-laying out
+    monkeypatch.setattr(pf, "clip_watch", lambda: None)
     tables = {"rows": [], "loads": 0, "on_load": None}
 
     def load(*a, **k):

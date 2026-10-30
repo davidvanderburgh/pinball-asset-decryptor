@@ -90,7 +90,9 @@ box_up() { docker ps --format '{{.Names}}' | grep -qx "$NAME"; }
 box_exec() {
     local e=()
     [ -n "${PAD_RESTORE_KILL:-}" ] && e+=(-e "PAD_RESTORE_KILL=$PAD_RESTORE_KILL")
-    exec docker exec -u 0 "${e[@]}" "$NAME" bash "/pad/rig/$1" "${@:2}"
+    # ${e[@]+...}: the Mac's bash 3.2 under set -u calls an EMPTY array
+    # unbound and stops here, so no script ran in the box (PAD-856)
+    exec docker exec -u 0 ${e[@]+"${e[@]}"} "$NAME" bash "/pad/rig/$1" "${@:2}"
 }
 case "${1:-}" in
     alive.sh|killgame.sh|status.sh|restartgame.sh)

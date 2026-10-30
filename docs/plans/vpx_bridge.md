@@ -420,7 +420,9 @@ for every other table.
   inserts (the return lanes, the beach rescue lights, the shark and Orca
   bash toys), Jurassic Park 26, Iron Maiden 18, Star Wars 14 (the Death Star
   lasers, the pops), Deadpool 1; `suggest` mended each by its fit (rms 1-6
-  px). Aerosmith had Batman's lamp-stealing loop.
+  px). Aerosmith had Batman's lamp-stealing loop. (Jurassic Park's map was
+  dropped by PAD-860 since - its table is not a faithful Jurassic Park - and
+  its mend went with it.)
 * **Names**: audit also compares each lamp's insert with what the build calls
   its LED. Two maps were wrong at the root: Guardians LE (the map the table
   prefers) carried the Pro's LED numbers, so on the LE card it lit other

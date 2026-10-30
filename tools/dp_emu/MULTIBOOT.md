@@ -112,8 +112,14 @@ Every failure ends on the newest stock folder, exactly as the machine would boot
    image 1. `make PLATFORM=dp check` = check_elf_dp.sh, headless.sh, fb_bof_test.sh,
    x11_dp_test.py (1:1, scaled 1366x512, pipe ended, no display), padselect_dp_test.sh
    (step 3). BOF `make check` still passes; JJP and Stern still build.
-3. `padselect_dp.sh` (`<V>/start`) - the launcher; a shell test like
-   `padselect_bof_test.sh`.
+3. DONE `padselect_dp.sh` (`<V>/start`) - the launcher. `pad/images.conf` cards name a
+   folder (or `stock` = the newest stock version); `pad/builds.txt` lines are
+   `<folder> <bases,...|-> <files dir under pad/>`. Buttons from the stock version's
+   machine.yaml PRSwitches (default SD67/SD65/SD68); dpprocsw runs with
+   LD_LIBRARY_PATH at the stock version and is killed before the game starts; sound as
+   the BOF hook (aplay on a pipe, only when the conf names one). `pad/ran` = the build
+   that ran last, for the database carry. `test/padselect_dp_test.sh` (6 cases) passes;
+   `make PLATFORM=dp check` passes as a whole.
 4. `mkdpmulti.py` - the zip builder (and its tests).
 5. `machine_sim.sh` - the whole thing in the rig: the USB update's install steps on a
    prepared build, Version Select, the menu, a pick, the chosen build in attract.

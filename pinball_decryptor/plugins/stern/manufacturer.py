@@ -184,9 +184,9 @@ _SAM_CAPS = Capabilities(
     audio_duration_names=True,
 )
 
-# Spike 1: audio and display text extract + write.  The master directory is
-# plaintext and every sound is raw PCM, so no emulator/codec prerequisites;
-# the DMD pictures are not offered yet.  Partition Explorer stays off: the
+# Spike 1: audio, display text and DMD pictures extract + write.  The master
+# directory is plaintext and every sound is raw PCM, so no emulator/codec
+# prerequisites.  Partition Explorer stays off: the
 # game data lives on a *logical* partition, which the explorer doesn't
 # enumerate yet.
 _SPIKE1_CAPS = Capabilities(
@@ -202,6 +202,14 @@ _SPIKE1_CAPS = Capabilities(
     # space the ELF already carries (spike1_text.py), so the file keeps its
     # size.
     replace_text=True,
+    # PAD-870: every DMD picture, font glyph and animation frame in
+    # image.bin's picture table (S.A.M.'s formats, spike1_images.py):
+    # Extract writes them as PNGs, Replace Images + Write re-encode edits in
+    # place, or into the free page at the front of image.bin when they
+    # outgrow their own bytes.  A display of 16 shades: no Scenes or Color
+    # Profile.
+    replace_image=True,
+    dmd_shades=True,
     flash_image=True,
     # Emulate tab (its OWN flag, era-gated — the Spike 2 ``emulate`` panel is a
     # different rig).  The static armel game now boots and renders its attract

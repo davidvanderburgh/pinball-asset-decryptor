@@ -287,7 +287,7 @@ def test_synth_card_write_patches_and_refreshes_sidx(tmp_path, monkeypatch):
     monkeypatch.setenv("PAD_STERN_MATCH_LOUDNESS", "0")
     out_card = str(tmp_path / "out.iso")
     res = spike1.write_image(card, out_dir, out_card)
-    assert res == {"audio": 1, "text": 0, "skipped": []}
+    assert res == {"audio": 1, "text": 0, "images": 0, "skipped": []}
 
     with open(out_card, "rb") as f:
         reader, game_dir, node, _sp, sn = spike1.locate_assets(

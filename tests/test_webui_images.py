@@ -151,15 +151,20 @@ def test_tab_shows_exactly_where_the_plugin_replaces_images(tmp_path, mkey):
             assert w.window.pending_image_assignments(str(tmp_path)) is None
 
 
-def test_stern_spike2_only(tmp_path):
+def test_stern_images_eras(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}
         assert tabs["images"]["visible"]
         assert tabs["images"]["label"] == "Images"
-        for era in ("spike1", "whitestar"):
-            w.call("ui.set_era", era)
-            tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}
-            assert not tabs["images"]["visible"]
+        # PAD-870: Spike 1's DMD pictures, shades of one colour (no Scenes or
+        # Color Profile); Whitestar is capture-only
+        w.call("ui.set_era", "spike1")
+        tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}
+        assert tabs["images"]["visible"]
+        assert not tabs.get("scenes", {}).get("visible")
+        w.call("ui.set_era", "whitestar")
+        tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}
+        assert not tabs["images"]["visible"]
 
 
 def test_exports_are_on_the_window(tmp_path):

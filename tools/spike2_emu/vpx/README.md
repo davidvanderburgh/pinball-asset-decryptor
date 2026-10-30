@@ -187,6 +187,23 @@ The player window renders through DirectX and is not capturable by GDI,
 `PrintWindow` or Desktop Duplication from a tool on this machine; the proof
 picture of a run is the emulator's own LCD (`glshot.sh`) while VPX plays it.
 
+## Checking a patched table without Visual Pinball (PAD-861)
+
+Never start `VPinballX64.exe` from a test or a session to look at a table
+(`-ExtractVBS`, `-Pov`, `-play`, even `-Minimized`): it runs on David's own
+desktop, its "Command Line Error" boxes land in front of whatever he is
+playing, and every load rewrites his `%APPDATA%\VPinballX\VPinballX.ini`
+recent-tables list. A path built in the Bash tool as `"...\\load\\$t.vpx"`
+reaches bash as `load\$t`, so `$t` stays literal and VPX says
+`File 'C:\tmp\PAD-858\load$t.vpx' was not found`: David took that box for his
+GotG table failing to start. Read the table here instead:
+
+    python vpxfile.py verify "<table.vpx>"         # the MAC VPX checks on load
+    python vpxfile.py script "<table.vpx>" out.vbs  # the script, as -ExtractVBS gives it
+    python vpxfile.py items  "<table.vpx>"         # every game item closes
+
+A load in VPX itself is David's to run, when he asks for one.
+
 ## What Visual Pinball itself turned up (2026-10-27)
 
 * **Every GameItem must close.** A light's shape is a run of DPNT drag points

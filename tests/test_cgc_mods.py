@@ -250,7 +250,10 @@ def test_write_says_how_to_get_the_compiler(tmp_path):
     with pytest.raises(PipelineError) as e:
         p._build_mods("inner.img", M.mod_sources(str(tmp_path)),
                       {"hook.so": str(tmp_path / "hook.so")}, str(tmp_path))
-    assert "gcc-arm-linux-gnueabihf" in e.value.message
+    # each OS gets its own hint (macOS has no packaged cross compiler to name)
+    assert cgc_pipeline._cross_cc_hint() in e.value.message
+    assert "gcc-arm-linux-gnueabihf" in cgc_pipeline._cross_cc_hint("linux")
+    assert "gcc-arm-linux-gnueabihf" in cgc_pipeline._cross_cc_hint("win32")
 
 
 def test_write_without_card_libc_refuses_to_build(tmp_path):

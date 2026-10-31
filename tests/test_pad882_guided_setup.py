@@ -19,9 +19,11 @@ import pytest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RIG = os.path.join(REPO, "tools", "spike2_emu")
 
+# the rig is Linux's (WSL): guidedsetup.sh holds util-linux's flock, which macOS has not
 needs_bash = pytest.mark.skipif(
-    not (sys.platform != "win32" and shutil.which("bash") and shutil.which("python3")),
-    reason="needs Linux bash and python3")
+    not (sys.platform.startswith("linux") and shutil.which("bash") and shutil.which("python3")
+         and shutil.which("flock")),
+    reason="needs Linux bash, python3 and flock")
 
 LIST = """# id   num   node  bit  name
 25     1009  0     8    Service Select
@@ -47,7 +49,7 @@ with open(os.path.join(os.path.dirname(__file__), "presses.txt"), "a") as f:
 def _rig(tmp_path, states, with_list=True):
     rig = tmp_path / "rig"
     root = tmp_path / "root"
-    rig.mkdir()
+    rig.mkdir(parents=True)
     (root / "dump" / "tables" / "jaws_le").mkdir(parents=True)
     shutil.copy(os.path.join(RIG, "guidedsetup.sh"), rig / "guidedsetup.sh")
     (rig / "padpath.sh").write_text('ROOT=%s\npad_gsleep() { :; }\n' % root)

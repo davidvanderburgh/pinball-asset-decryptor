@@ -161,7 +161,7 @@ FROM_THE_BASE_IMAGE_COMMANDS = {
     "df", "du", "echo", "find", "findmnt", "grep", "head", "ls", "lsblk",
     "md5sum", "mkdir", "mount", "mountpoint", "mv", "pgrep", "rm", "rmdir",
     "sed", "sort", "stat", "sync", "tail", "test", "true", "truncate",
-    "umount", "wc", "which", "losetup", "apt-get", "tar",
+    "umount", "wc", "which", "losetup", "apt-get", "tar", "printf",
 }
 
 #: Words the scan picks up that are NOT commands: shell variables holding a

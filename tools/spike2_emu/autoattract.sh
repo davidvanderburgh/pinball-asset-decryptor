@@ -174,6 +174,33 @@ operator() { grep -aqE '\[sw\] [0-9]+ ms [+-][0-9]+[fkp]' "$LOG"; }
 # press does, as the header above records. Same swpoke.py, retagged.
 press()   { resolve_back; PAD_SW_SRC=a python3 "$S/swpoke.py" "$BACK" "$1" >/dev/null 2>&1; }
 
+# GUIDED SETUP, THE SCREEN AFTER TECH ALERTS ON A FIRST BOOT (PAD-882). A title
+# booting a fresh NVRAM (Jaws, Jurassic Park, King Kong, Stranger Things...)
+# opens its Guided Setup menu and waits there for an operator. `past` cannot
+# see it: on Jaws the attract light show runs under the menu, so this script
+# said "already past Tech Alerts" and left a game that ignored Start and the
+# flippers - and a Visual Pinball table has no service keys to leave it with.
+# So once past Tech Alerts, look for the menu for a while (glshot.sh +
+# menurow.py, guidedsetup.sh: the walk the rig's own jobs use) and press its
+# Save & Exit; every setting keeps the game's default. A human press stands
+# this down, as it does the presses above: somebody walking the menu with the
+# keys is setting it up on purpose.
+SETUP_WAIT=${PAD_AUTO_SETUP_WAIT:-150}   # s to keep looking for the menu
+setup()   { PAD_SW_SRC=a bash "$S/guidedsetup.sh" 0 --confirm < /dev/null; }
+watch_setup() {
+    [ "${PAD_AUTO_SETUP:-1}" != 0 ] || return 0
+    local end=$((SECONDS + SETUP_WAIT))
+    while [ "$SECONDS" -lt "$end" ]; do
+        up || return 0
+        operator && { echo "[auto] an operator is driving; Guided Setup is theirs"; return 0; }
+        if setup; then
+            echo "[auto] left Guided Setup by Save & Exit (a first boot's menu; the game's own settings kept)"
+            return 0
+        fi
+        sleep 5
+    done
+}
+
 # A US MACHINE ON 50 Hz MAINS - STAND DOWN BEFORE THE FIRST PRESS (PAD-173).
 # The game's refusal is what this run was set up to show, and the game only
 # decides it ~16 s in: a press that lands first carries it into attract mode
@@ -218,7 +245,7 @@ last=$(probes)
 nop=0
 while [ "$waited" -lt "$WAIT_MAX" ]; do
     up || { echo "[auto] the game exited"; exit 0; }
-    past && { echo "[auto] already past Tech Alerts; nothing to do"; exit 0; }
+    past && { echo "[auto] already past Tech Alerts"; watch_setup; exit 0; }
     operator && { echo "[auto] an operator is driving (human press in the log); standing down"; exit 0; }
     sleep 1
     waited=$((waited + 1))
@@ -245,9 +272,15 @@ echo "[auto] bus quiet after ${waited}s ($last probes); pressing Service Back on
 
 for i in $(seq 1 "$TRIES"); do
     up || { echo "[auto] the game exited"; exit 0; }
-    past && { echo "[auto] past Tech Alerts after $((i - 1)) presses"; exit 0; }
+    past && { echo "[auto] past Tech Alerts after $((i - 1)) presses"; watch_setup; exit 0; }
     operator && { echo "[auto] an operator is driving; standing down"; exit 0; }
     [ -e "$SW" ] || { sleep 1; continue; }
+    # a press that seemed not to take may have taken into Guided Setup, which
+    # runs no light show (Stranger Things): leave it rather than press into it
+    if [ "$i" -gt 1 ] && [ "${PAD_AUTO_SETUP:-1}" != 0 ] && setup; then
+        echo "[auto] past Tech Alerts: left Guided Setup by Save & Exit (a first boot's menu; the game's own settings kept)"
+        exit 0
+    fi
     [ "$i" -gt 1 ] && echo "[auto] press $i (the last one did not take)"
     press "$HOLD"
     # Poll FAST after the press, so that the moment it works we stop. Checking
@@ -257,8 +290,14 @@ for i in $(seq 1 "$TRIES"); do
     while [ "$n" -lt "$GAP" ]; do
         sleep 0.5; sleep 0.5
         n=$((n + 1))
-        past && { echo "[auto] past Tech Alerts after $i press(es)"; exit 0; }
+        past && { echo "[auto] past Tech Alerts after $i press(es)"; watch_setup; exit 0; }
         operator && { echo "[auto] an operator took over mid-gap; standing down"; exit 0; }
+        # every 15 s, the menu that press may have opened (Jurassic Park LE:
+        # up 25 s in, cursor already on Save & Exit, and no light show)
+        if [ $((n % 15)) = 0 ] && [ "${PAD_AUTO_SETUP:-1}" != 0 ] && setup; then
+            echo "[auto] past Tech Alerts: left Guided Setup by Save & Exit (a first boot's menu; the game's own settings kept)"
+            exit 0
+        fi
     done
 done
 

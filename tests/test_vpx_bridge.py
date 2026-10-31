@@ -1224,6 +1224,35 @@ def test_setup_finds_visual_pinball_from_the_kit_first(tmp_path, monkeypatch):
     assert vs.vpx_tables_dir() == os.path.join(str(mine), "tables")
 
 
+def test_setup_state_names_the_minimum_visual_pinball(tmp_path, monkeypatch):
+    # PAD-887: the Setup line shows the oldest Visual Pinball the tables open
+    # in, and a copy older than that is not "Ready"
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    pd = pytest.importorskip("padisplay")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pd, "CONF", str(tmp_path / "display.conf"))
+    monkeypatch.setattr(vs, "controller_registered", lambda: False)
+    monkeypatch.setattr(vs, "vpx_tables_dir", lambda: "")
+    monkeypatch.setattr(vs, "find_vpx", lambda: str(tmp_path))
+    for have, shown, old in (((10, 7, 3), "10.7.3", True), ((10, 8, 0), "10.8.0", False),
+                             ((10, 8, 1), "10.8.1", False), (None, "", False)):
+        monkeypatch.setattr(vs, "vpx_version", lambda d, v=have: v)
+        got = vs.state()
+        assert (got["vpx_min"], got["vpx_version"], got["vpx_old"]) == ("10.8.0", shown, old)
+    # the reader itself: nothing there is None, not an error
+    assert vs.vpx_version("") is None and vs.vpx_version(str(tmp_path / "none")) is None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="reads a Windows exe's version resource")
+def test_visual_pinball_version_is_read_from_the_exe(tmp_path):
+    vs = pytest.importorskip("vpxsetup")
+    # any exe with a version resource stands in for VPinballX64.exe
+    shutil.copyfile(sys.executable, str(tmp_path / "VPinballX64.exe"))
+    got = vs.vpx_version(str(tmp_path))
+    assert got and got[:2] == tuple(sys.version_info[:2])
+
+
 def test_setup_answers_the_app_in_one_json_line(tmp_path, monkeypatch, capsys):
     """The app's tab reads the LAST line of the kit's output as JSON."""
     vs = pytest.importorskip("vpxsetup")

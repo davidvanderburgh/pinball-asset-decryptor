@@ -97,17 +97,18 @@ def is_windows_path(p):
                         or (len(p) > 1 and p[1] == ":"))
 
 
-def _wsl(args):
+def _wsl(args, distro=None):
     """Run a program inside WSL, from Windows, and return its stdout or None.
 
     `wsl.exe -e <prog>` runs the program DIRECTLY, with no shell, and that is
     the whole point rather than a detail: with a shell in the way the arguments
     are re-parsed, and `$VAR` and `$(...)` both expand to nothing in that second
     pass. `printenv` and `wslpath` are used below for the same reason - neither
-    needs a shell to do its job.
+    needs a shell to do its job. `distro`: the one to ask (default:
+    PAD_WSL_DISTRO, else the machine's default distro).
     """
     cmd = ["wsl.exe"]
-    distro = _env("PAD_WSL_DISTRO")
+    distro = distro or _env("PAD_WSL_DISTRO")
     if distro:
         cmd += ["-d", distro]
     cmd += ["-e"] + list(args)
@@ -138,20 +139,30 @@ def to_win(path):
     return _WIN_CACHE[path]
 
 
-def to_wsl(path):
+def to_wsl(path, distro=None):
     """A Windows path as WSL sees it, or `path` unchanged if it already is one.
 
     The mirror of to_win(), and needed for the same reason: the playfield window
     runs helper scripts INSIDE WSL through interop, and cannot hand them the
     Windows path it was itself loaded from. The literal this replaces assumed
     the checkout was under `/mnt/c/Users/david/...`.
+
+    `distro`: the one the path is for - ASK IT, not the machine's default
+    (PAD-882: a Visual Pinball launch into PAD-Runtime converted its paths in
+    a default distro that could not answer, and bash was handed
+    `C:\\Program Files\\...\\riglock.sh`). When no WSL answers, a drive-letter
+    path still comes back as WSL's standard /mnt/<drive>/... mount rather
+    than unchanged: a Windows path is never what a Linux caller can use.
     """
     if not path or not is_windows_path(path):
         return path
-    key = "u:" + path
+    key = "u:%s:%s" % (distro or "", path)
     if key in _WIN_CACHE:
         return _WIN_CACHE[key]
-    _WIN_CACHE[key] = _wsl(["wslpath", "-u", path]) or path
+    got = _wsl(["wslpath", "-u", path], distro)
+    if not got and len(path) > 2 and path[1] == ":" and path[0].isalpha():
+        got = "/mnt/%s%s" % (path[0].lower(), path[2:].replace("\\", "/"))
+    _WIN_CACHE[key] = got or path
     return _WIN_CACHE[key]
 
 

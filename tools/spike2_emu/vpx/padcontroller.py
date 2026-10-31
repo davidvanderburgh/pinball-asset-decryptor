@@ -620,7 +620,7 @@ class SwitchPipe:
         try:
             if sys.platform == "win32":
                 cmd = (self.rig.wsl_head() + ["-e", "env"] + self.rig.wsl_env()
-                       + ["python3", "%s/swkeys.py" % padpath.to_wsl(RIG)])
+                       + ["python3", "%s/swkeys.py" % padpath.to_wsl(RIG, self.rig.distro)])
             else:
                 cmd = ["python3", os.path.join(RIG, "swkeys.py")]
             self._p = subprocess.Popen(cmd, stdin=subprocess.PIPE,

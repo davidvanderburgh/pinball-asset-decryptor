@@ -1878,6 +1878,8 @@ def _tmnt_patch(title, src):
     return tm.patch_script(src, m)[0], m
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the TMNT table script under cscript")
 def test_tmnt_lock_ball_goes_to_the_upper_section_and_drops_on_its_coil(tmp_path):
     # PAD-896: the Pro let a ball put straight onto LOWER LOCK 1 out again
     # (emulator: LOWER LOCK fired 7 s later, nothing locked); a ball resting
@@ -1935,6 +1937,8 @@ def test_tmnt_lock_ball_goes_to_the_upper_section_and_drops_on_its_coil(tmp_path
     assert "Controller.Switch(1054) = 1" in out
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the TMNT table script under cscript")
 def test_tmnt_pro_lair_lane_drops_the_ball_onto_the_lower_lock(tmp_path):
     # PAD-896: a spelled LAIR lights Training at the LAIR lane, which on the
     # Pro runs to LOWER LOCK 1 (emulator: a ball there that skipped the upper
@@ -1967,6 +1971,8 @@ def test_tmnt_pro_lair_lane_drops_the_ball_onto_the_lower_lock(tmp_path):
     assert "PadLairIn" not in out
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the TMNT table script under cscript")
 def test_tmnt_pro_disc_spins_on_its_pizza_motor_coil(tmp_path):
     # PAD-896: the Pro has no SPIN DISC CW/CCW LEDs (the LE's); its disc is
     # the PIZZA MOTOR coil, which DOF hears as Data East's 22. The game

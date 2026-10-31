@@ -8,6 +8,12 @@ app run from its disk image or from a translocated copy was mounted uncopied
 and the box said "no rig at /pad/rig". The override set lives in the Mac's temp
 dir (/var/folders/...) and had the same hole, silently: a run without your edits.
 
+...BUT THAT WAS NOT DUSTIN'S CASE. His app was in /Applications, already copied
+into home, and colima still said "no rig at /pad/rig": entrypoint.sh tested
+watch.sh with -x, the rig ships its scripts 644, and only Docker Desktop's
+sharing (and WSL's /mnt/c) invents the execute bit. colima's virtiofs shows the
+real mode. The last tests here run the real entrypoint against a 644 rig.
+
 padbox.sh is fed on stdin as in test_padbox_savestates.py, with `uname` faked
 to say Darwin and `docker` / `rsync` stand-ins that print what they were asked.
 """
@@ -120,3 +126,42 @@ def test_an_override_set_under_home_is_mounted_where_it_is():
     assert rc == 0, text
     assert "RSYNC" not in text, text
     assert "/home/dev/rig:/pad/overrides:ro" in run, run
+
+
+ENTRY = os.path.join(RIG, "docker", "entrypoint.sh")
+
+_ENTRY_RIG = r"""
+W=$(mktemp -d)
+trap 'rm -rf "$W"' EXIT
+mkdir -p "$W/rig" "$W/empty"
+echo 'echo WATCH' > "$W/rig/watch.sh"
+echo 'echo ALIVE "$@"' > "$W/rig/alive.sh"
+chmod 644 "$W/rig/"*.sh
+"""
+
+
+def _entry(rig_dir):
+    with open(ENTRY, "rb") as fh:
+        body = fh.read().decode("utf-8")
+    prelude = "\n".join([_ENTRY_RIG,
+                         'export PAD_RIG="$W/%s"' % rig_dir,
+                         "set -- alive.sh now", ""])
+    out = subprocess.run(["bash", "-s"], input=(prelude + body).encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=60)
+    return out.returncode, out.stdout.decode("utf-8", "replace")
+
+
+@needs_bash
+def test_the_box_runs_a_rig_whose_scripts_have_no_execute_bit():
+    rc, text = _entry("rig")
+    assert "no rig" not in text, text
+    assert "ALIVE now" in text, text
+    assert rc == 0, text
+
+
+@needs_bash
+def test_an_empty_rig_mount_says_the_engine_did_not_share_it():
+    rc, text = _entry("empty")
+    assert rc == 1, text
+    assert "did not share the folder" in text, text

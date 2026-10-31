@@ -21,8 +21,18 @@ XDISPLAY=${DISPLAY:-:99}
 GEOM=${PAD_VNC_GEOMETRY:-1920x1080x24}
 PORT=${PAD_VNC_PORT:-5900}
 
-[ -x "$RIG/watch.sh" ] || {
-    echo "[box] no rig at $RIG - mount the checkout's tools/spike2_emu there" >&2
+# -f, NEVER -x (PAD-884): every rig script is run through bash or python3
+# below, and the rig ships them without the execute bit (git keeps 644). Only
+# a sharing that invents the bit passed -x - Docker Desktop's, and WSL's
+# /mnt/c - so on colima, whose virtiofs shows the real 644, a rig that was
+# right there was "no rig at /pad/rig".
+[ -f "$RIG/watch.sh" ] || {
+    if [ -z "$(ls -A "$RIG" 2>/dev/null)" ]; then
+        echo "[box] no rig at $RIG: the folder is empty in here, so the container" >&2
+        echo "[box] engine did not share the folder it was given" >&2
+    else
+        echo "[box] no rig at $RIG - mount the checkout's tools/spike2_emu there" >&2
+    fi
     exit 1
 }
 

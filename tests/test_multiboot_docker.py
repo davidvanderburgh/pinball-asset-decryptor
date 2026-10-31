@@ -608,7 +608,9 @@ def unix_paths(mac, monkeypatch, tmp_path):
     root = str(tmp_path / "fs")
 
     def back(p):
-        return root + p if p.startswith("/") else p
+        if not p.startswith("/") or p.startswith(root):
+            return p          # a real path already (os is patched for all)
+        return root + p
     real_isdir, real_listdir = os.path.isdir, os.listdir
     real_open, real_remove = open, os.remove
     monkeypatch.setattr(D.os.path, "isdir", lambda p: real_isdir(back(p)))

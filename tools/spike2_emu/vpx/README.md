@@ -288,6 +288,14 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `PadB2SName`, the ROM name the patcher keeps; the table's exit sub stops
   it (`PadStopB2S`). Play brings an older PADSPIKE2.vbs beside the tables
   up to the kit's, so a table patched before a fix has it.
+* **The backglass's grab of the focus is undone** (PAD-893). B2S.Server's
+  window takes the foreground as it opens and hands it back only to a
+  VISIBLE "Visual Pinball Player" window (formBackglass.vb
+  `SetFocusToVPPlayer`, as it shows and 2 s later). Started from `LoadVPM`,
+  after DOF has opened the cabinet, it could open before the playfield did
+  and keep the focus, so Metallica sat paused. PAD.Controller's poll hands
+  the foreground back from each "B2S Backglass" / "B2S DMD" window once,
+  for any run, as it does from the started run's LCD window.
 * **The table's own DOF calls come along** (PAD-847). With `orig_hits:
   false` a bumper's Hit sub never runs, and the kickers, trough and plunger
   fire on the machine's coils through cvpmBallStack, so the `DOF 107,

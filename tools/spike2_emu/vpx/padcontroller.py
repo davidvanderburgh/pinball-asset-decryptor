@@ -201,6 +201,36 @@ def find_lcd_window():
     return find_kit_window("emulator")
 
 
+#: B2S.Server's own windows, by how B2SScreen.vb titles them: the backglass
+#: ("B2S Backglass" / "B2S Backglass Server") and its DMD ("B2S DMD")
+B2S_TITLES = ("B2S Backglass", "B2S DMD")
+
+
+def b2s_window(title):
+    """Whether a window is the backglass's (PAD-893)."""
+    return title.startswith(B2S_TITLES)
+
+
+def find_player_window():
+    """Visual Pinball's playfield: the visible top-level "Visual Pinball
+    Player" window, as B2S.Server finds it - for a table that ran the
+    controller without GetPlayerHWnd."""
+    import ctypes
+    u = ctypes.windll.user32
+    found = []
+    proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def cb(h, _):
+        if u.IsWindowVisible(h):
+            buf = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(h, buf, 256)
+            if buf.value.startswith("Visual Pinball Player"):
+                found.append(h)
+        return True
+    u.EnumWindows(proc(cb), 0)
+    return found[0] if found else 0
+
+
 def kit_window_in_front():
     """Whether the foreground window is one of the kit's run's own."""
     if sys.platform != "win32":
@@ -1022,6 +1052,7 @@ class Bridge:
         self.launch = None                 # the run this bridge started, if any
         self.attached = False              # the run is up and its tables read
         self.front_done = False            # the started run's LCD window was handed back once
+        self.b2s_handed = set()            # ... and each backglass window, once (PAD-893)
         self.lcd_placed = False            # ... and put where the kit says, on top, once
         self.player_placed = False         # Visual Pinball's own window moved where the kit says, once
         self.start_t = 0.0
@@ -1106,6 +1137,7 @@ class Bridge:
         self.attached = False
         self.start_t = time.monotonic()
         self.front_done = False            # the LCD window's first grab is undone once, never again
+        self.b2s_handed = set()            # backglass windows whose first grab was undone (PAD-893)
         self.lcd_placed = False
         self.lcd_tries = 0
         self.lcd_stable = 0
@@ -1346,13 +1378,13 @@ class Bridge:
         last_front = 0.0
         while self.running:
             now = time.monotonic()
-            if (self.launch is not None and not (self.front_done and self.lcd_placed)
-                    and now - last_front >= 1.0 and now - self.start_t < FRONT_WATCH_S):
+            # PAD-893: the backglass's grab is undone for any run, not only
+            # one this bridge started, so the watch runs for every Run
+            if now - last_front >= 1.0 and now - self.start_t < FRONT_WATCH_S:
                 last_front = now
-                if not self.lcd_placed:
+                if self.launch is not None and not self.lcd_placed:
                     self._place_lcd()
-                if not self.front_done:
-                    self._keep_player_front()
+                self._keep_player_front()
             if not self.player_placed and now - self.start_t < FRONT_WATCH_S:
                 self._place_player()
             if not self.attached:
@@ -1641,19 +1673,20 @@ class Bridge:
         the run comes up, the foreground is handed back to the player ONCE (a
         click on the LCD window after that is the user wanting to see it), and
         ONLY from a window of the kit's own run (its title carries the
-        PAD-VPX label): never from anything else the user has in front."""
-        hwnd = getattr(self, "player_hwnd", 0)
-        if not hwnd or sys.platform != "win32":
+        PAD-VPX label) or the backglass's (_hand_back_from): never from
+        anything else the user has in front."""
+        if sys.platform != "win32":
             return
         try:
             import ctypes
             u = ctypes.windll.user32
+            hwnd = getattr(self, "player_hwnd", 0) or find_player_window()
             fg = u.GetForegroundWindow()
-            if not fg or fg == hwnd:
+            if not hwnd or not fg or fg == hwnd:
                 return
             buf = ctypes.create_unicode_buffer(256)
             u.GetWindowTextW(fg, buf, 256)
-            if padlaunch.LABEL not in buf.value:
+            if not self._hand_back_from(fg, buf.value):
                 return
             k = ctypes.windll.kernel32
             fg_tid = u.GetWindowThreadProcessId(fg, None)
@@ -1665,10 +1698,30 @@ class Bridge:
                 u.BringWindowToTop(hwnd)
             finally:
                 u.AttachThreadInput(me, fg_tid, False)
-            self.front_done = True       # ONCE: a later click on the LCD window is the user's own
             log("foreground: [%s] -> the player again (once; the window is the user's from here)" % buf.value)
         except Exception as exc:                            # noqa: BLE001
             log("foreground hand-back failed: %s" % exc)
+
+    def _hand_back_from(self, fg, title):
+        """Whether the window in front is one whose grab is undone, marking
+        it done. The started run's LCD window: once. THE BACKGLASS (PAD-893):
+        PADSPIKE2.vbs starts B2S.Server from LoadVPM, and its window takes
+        the foreground as it opens; B2S hands it back only to a VISIBLE
+        "Visual Pinball Player" window, at the moment it shows and 2 s later
+        (formBackglass.vb SetFocusToVPPlayer), so a backglass that opened
+        before the playfield did - later since DOF opens the cabinet first
+        (PAD-879) - kept it, and Metallica sat paused. Each backglass window
+        (the backglass, its DMD) is undone once, for any run: a later click
+        on it is the user's own."""
+        if b2s_window(title):
+            if fg in self.b2s_handed:
+                return False
+            self.b2s_handed.add(fg)
+            return True
+        if self.launch is not None and not self.front_done and padlaunch.LABEL in title:
+            self.front_done = True       # ONCE: a later click on the LCD window is the user's own
+            return True
+        return False
 
     def _poll_once(self):
         data = read_block(self.rig.led_path(), READ_N)

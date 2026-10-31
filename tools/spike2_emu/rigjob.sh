@@ -90,8 +90,41 @@ job_boot() {                      # [minutes the run may last, default 30]
 #: job_guided_setup <backs>: a row's EDITOR is not the menu; up to <backs> SERVICE BACKs close it first.
 #: 0 = Save & Exit was pressed; 1 = not that menu (or no switch list yet).
 job_guided_setup() {
+    local plus sel back k state shot backs=${1:-0} again
     [ -s "$LIST" ] || return 1
-    LIST=$LIST bash "$RIG/guidedsetup.sh" "${1:-0}" < /dev/null
+    plus=$(awk '!/^#/ && toupper($0) ~ /SERVICE PLUS/ {print $1; exit}' "$LIST")
+    sel=$(awk '!/^#/ && toupper($0) ~ /SERVICE SELECT/ {print $1; exit}' "$LIST")
+    back=$(awk '!/^#/ && toupper($0) ~ /SERVICE BACK/ {print $1; exit}' "$LIST")
+    [ -n "$plus" ] && [ -n "$sel" ] || return 1
+    shot=$(mktemp "${TMPDIR:-/tmp}/rigjob.XXXXXX.png")
+    for k in $(seq 1 16); do
+        (cd "$RIG" && bash glshot.sh "$shot" > /dev/null 2>&1) || break
+        state=$(python3 "$RIG/menurow.py" "$shot" 2>/dev/null)
+        # a cursor that PULSES (Jaws Pro: bright, then a dim teal menurow does not read) - look again a few
+        # times, half a second apart, before calling it no menu
+        for again in 1 2 3 4 5; do
+            [ "${state#menu}" != "$state" ] && break
+            sleep 0.5; (cd "$RIG" && bash glshot.sh "$shot" > /dev/null 2>&1) || break
+            state=$(python3 "$RIG/menurow.py" "$shot" 2>/dev/null)
+        done
+        case "$state" in
+            "menu last=yes")
+                python3 "$RIG/swpoke.py" "$sel" 300 > /dev/null 2>&1 < /dev/null
+                pad_gsleep 4; rm -f "$shot"; return 0 ;;
+            "menu last=no")
+                python3 "$RIG/swpoke.py" "$plus" 300 > /dev/null 2>&1 < /dev/null
+                pad_gsleep 1.2 ;;
+            *)
+                if [ "$backs" -gt 0 ] && [ -n "$back" ]; then
+                    backs=$((backs - 1))
+                    python3 "$RIG/swpoke.py" "$back" 300 > /dev/null 2>&1 < /dev/null
+                    pad_gsleep 1.5; continue
+                fi
+                break ;;
+        esac
+    done
+    rm -f "$shot"
+    return 1
 }
 
 #: job_wait_attract [wall seconds, default 300]: until status.sh says attract (the game's own light show,

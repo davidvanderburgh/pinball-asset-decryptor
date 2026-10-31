@@ -89,7 +89,37 @@ start_game() {
 #: previewing each language as PLUS walks it) is not the menu; up to <backs> SERVICE BACKs close it,
 #: leaving the setting as it was, and the walk goes on from the menu
 guided_setup() {
-    LIST=$LIST GS_KEEP="$DUMP/gamecheck.png" bash "$RIG/guidedsetup.sh" "${1:-0}" < /dev/null
+    local plus sel back k state shot backs=${1:-0}
+    plus=$(awk '!/^#/ && toupper($0) ~ /SERVICE PLUS/ {print $1; exit}' "$LIST")
+    sel=$(awk '!/^#/ && toupper($0) ~ /SERVICE SELECT/ {print $1; exit}' "$LIST")
+    back=$(awk '!/^#/ && toupper($0) ~ /SERVICE BACK/ {print $1; exit}' "$LIST")
+    [ -n "$plus" ] && [ -n "$sel" ] || return 1
+    shot=$(mktemp "${TMPDIR:-/tmp}/gamecheck.XXXXXX.png")
+    for k in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+        (cd "$RIG" && bash glshot.sh "$shot" > /dev/null 2>&1) || break
+        state=$(python3 "$RIG/menurow.py" "$shot" 2>/dev/null)
+        case "$state" in
+            "menu last=yes")
+                python3 "$RIG/swpoke.py" "$sel" 300 > /dev/null 2>&1
+                pad_gsleep 4
+                rm -f "$shot"
+                return 0 ;;
+            "menu last=no")
+                python3 "$RIG/swpoke.py" "$plus" 300 > /dev/null 2>&1
+                pad_gsleep 1.2 ;;
+            *)
+                if [ "$backs" -gt 0 ] && [ -n "$back" ]; then
+                    backs=$((backs - 1))
+                    python3 "$RIG/swpoke.py" "$back" 300 > /dev/null 2>&1
+                    pad_gsleep 1.5
+                    continue
+                fi
+                cp "$shot" "$DUMP/gamecheck.png" 2>/dev/null   # the frame it judged, for a person
+                break ;;
+        esac
+    done
+    rm -f "$shot"
+    return 1
 }
 #: drain until the object logs one more end of ball: 0 when one did. A drain inside the ball saver
 #: comes back as a new ball, and a ball drained before any playfield switch since its launch is given

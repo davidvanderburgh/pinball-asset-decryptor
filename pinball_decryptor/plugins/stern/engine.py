@@ -24,6 +24,7 @@ import hmac
 import os
 import pickle
 import re
+import shutil
 import struct
 import sys
 import tempfile
@@ -8284,6 +8285,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # else -- it goes on the card as a whole-file copy through the ext4
         # driver, and its .sidx record carries the new size as well as digests.
         patched_gr = None
+        _cave_rebuild = None
+        _dead_cands = set()
         # A sound bank grown to hold a replacement longer than its slot.  Like
         # the rebuilt firmware it is longer than the file it replaces, so it
         # goes on the card whole through the ext4 driver and its in-place
@@ -8434,6 +8437,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     # the user's longer sounds; the modes' own are FORCED
                     # grows added below, which the bank's budget can't trim
                     _user_grows = dict(grows)
+                    # (PAD-880: the sounds whose own records may come out of
+                    # image.bin once nothing plays them)
+                    _dead_cands = set(_user_grows)
                     # PAD-855: the card's own longer sounds, grown again as forced
                     # grows (never trimmed) unless the user replaces one of them
                     _carried = {i: w for i, w in _carried.items()
@@ -9000,9 +9006,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                 if o not in _appended_body_offsets(
                                     audio_patches, grow_places,
                                     last_only=not _family)}
+                            _cave_entries = []
                             patched_gr, _fw_size = _build_derive_redirect_cave(
                                 gr_path, img_path, _cave_patches, np, log,
-                                grow_work, progress, extra_fw_writes=_vbypass)
+                                grow_work, progress, extra_fw_writes=_vbypass,
+                                windows_out=_cave_entries)
                             # Safety net: boot the PATCHED firmware on the patched
                             # image (our whole bodies) and confirm every sound
                             # still derives stock codec params, else abort.
@@ -9013,6 +9021,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                                     audio_patches, params, np,
                                                     log, work, progress)
                             pathA_applied = True
+                            # (PAD-880: what a compacted image.bin's cave is
+                            # rebuilt from, its windows moved with their bodies)
+                            _cave_rebuild = (_cave_entries, _vbypass)
                             # The bypass rode along inside the rebuilt firmware,
                             # so this build's validator status is that overlay's.
                             valpatch_mode = _vmode
@@ -9024,7 +9035,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             # build -- a working card with the brief original
                             # scrap -- never a hard build failure.  The fallback
                             # path re-asserts integrity.
-                            patched_gr = None
+                            patched_gr = _cave_rebuild = None
                             pathA_why = str(e)
                             log("Blip-free callouts not applied (%s); building the "
                                 "standard way instead (the brief original-callout "
@@ -9726,6 +9737,33 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 % (len(audio_patches),
                    os.path.getsize(_lp(img_path)) / 1e6), "info")
             audio_inplace = {}
+        # PAD-880: the game's own records nothing plays any more (a replaced sound's that
+        # plays its own record or a bank's) come out of image.bin, which the game holds in
+        # memory whole beside the banks; the file then goes on the card whole
+        _img_rel = (_card_rel_path(reader, img_node) if img_node is not None
+                    and (grow_places is not None or bank_plan is not None) else None)
+        if _img_rel and _IC_enabled():
+            if progress:
+                progress(96, 100, "Taking the sounds nothing plays out of image.bin...")
+            _cands = set(_dead_cands)
+            if bank_plan is not None:
+                _cands |= set(bank_plan.game) | set(bank_plan.seq_grown)
+            grow_work = grow_work or _work_dir(label, base="spike2_grow_")
+            # (a build that patches image.bin in place composes into a copy: the
+            # extracted file is the next build's stock one)
+            _got = _compact_after_build(
+                gr_path, img_path, patched_gr, _cave_rebuild, params, bank_plan, _cands,
+                _mode_swap_idx(mode_own_used) | _sm_hosts(sound_mode_used),
+                _mode_sids(mode_own_used, sound_mode_used, bank_plan),
+                None if grow_places is not None else audio_inplace, grow_work, log)
+            if _got is not None:
+                img_path, patched_gr = _got
+                if image_grow_job is None:
+                    image_grow_job = (_img_rel, img_path)
+                    grown_files[bytes(img_node["i_block"])] = img_path
+                audio_inplace = {}
+        if bank_plan is not None and getattr(bank_plan, "dead_credit", 0):
+            _memory_check(img_path, bank_plan)
         for body_off, body in audio_inplace.items():
             writes.extend(_place(reader, img_node, body_off, body))
         # Music songs patch their OWN bank inode (image-scNN.bin), not image.bin.
@@ -18040,7 +18078,8 @@ def _text_segment_to_eof(raw):
 
 
 def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
-                                out_dir, progress=None, extra_fw_writes=None):
+                                out_dir, progress=None, extra_fw_writes=None,
+                                entries=None, windows_out=None):
     """Build the blip-free firmware cave for the replaced sounds in *patches*
     (``{body_off: body}``), generically for any Stern Spike 2 firmware.
 
@@ -18051,6 +18090,10 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
     Anything in *extra_fw_writes* (``{file_off: bytes}`` -- in practice the
     validator bypass) is baked into the same image, because the whole file is
     copied onto the card in one piece.
+
+    PAD-880: *entries* ``[(lo, hi, stock bytes)]`` are the windows to redirect, given
+    rather than read off *img_path* (a compacted image.bin's, moved with their bodies), and
+    *windows_out*, a list, gets the ones this cave redirects.
 
     Returns ``(patched_gr_path, new_size)``.  The result is LONGER than the stock
     firmware, so the caller must write it through the ext4 grow path and refresh
@@ -18104,13 +18147,17 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
     # Read off the firmware as it is on the card: a carried window is served
     # from the old cave, so only the signature check's first bytes of it show
     # up here, and those are dropped in favour of the carried entry.
-    per_body = _replaced_consumed_offsets(gr_path, img_path, patches, np, log,
-                                          progress)
+    moved = entries is not None
+    if moved:
+        per_body, entries, carried = {}, list(entries), []
+    else:
+        per_body = _replaced_consumed_offsets(gr_path, img_path, patches, np, log,
+                                              progress)
+        entries = list(carried)
     c_lo = np.array([w[0] for w in carried], np.int64)
     c_hi = np.array([w[1] for w in carried], np.int64)
-    entries = list(carried)
     with open(img_path, "rb") as f:
-        for off in sorted(patches):
+        for off in sorted(patches if per_body else ()):
             wcon = per_body.get(off)
             if wcon is None or not len(wcon):
                 continue
@@ -18127,6 +18174,8 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
                 f.seek(a0)
                 entries.append((a0, b0, f.read(b0 - a0)))
     entries.sort(key=lambda w: w[0])
+    if windows_out is not None:
+        windows_out[:] = entries
     windows = [(a0, b0) for a0, b0, _s in entries]   # (lo, hi) image file-offset ranges (2 per mono sound)
     stock_chunks = [s for _a, _b, s in entries]
     if not windows:
@@ -18205,11 +18254,12 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
     with open(patched_gr, "wb") as f:
         f.write(bytes(raw))
 
-    log("Blip-free cave built: %d window(s) across %d replaced sound(s) "
+    log("Blip-free cave built: %d window(s) %s "
         "redirected to stock%s; fn=0x%x FIRST_OFF=0x%x; cave@0x%x in its own "
         "%d-byte segment (file+0x%x), placed in %d bytes of unclaimed address "
         "space %s; game_real %d -> %d bytes."
-        % (len(windows), len(patches),
+        % (len(windows), "at their offsets in the compacted image.bin" if moved
+           else "across %d replaced sound(s)" % len(patches),
            (" (%d of them carried from the earlier build's cave)"
             % len(carried) if carried else ""),
            fn, first_off, cave_va, len(blob),
@@ -20139,6 +20189,10 @@ class _BankPlan(object):
         # PAD-791: the music modes' files the game plays in parts, ``{cat:
         # [bank_build.ModeSeq]}``, each with a copy of every other record its sound ids play
         self.sm_seqs = {}
+        # PAD-880: how much smaller image.bin was counted on coming out (the game's own
+        # records of ``dead_idx``, which the banks play instead): image_compact's to keep
+        self.dead_credit = 0
+        self.dead_idx = set()
 
 
 def _bankable_idx(used):
@@ -20471,6 +20525,222 @@ def _list_ids(plan, old_map, touched):
 
 
 
+def _IC_enabled():
+    from . import image_compact as IC
+    return IC.enabled()
+
+
+def _alone_room(mem_img, staged):
+    """:func:`.spike2.soundbank.alone_bank_room` beside an image.bin the game holds as
+    *mem_img* bytes (PAD-880: without the bodies that come out of it), the emulator's
+    window beside the *staged* one the build verifies the banks with."""
+    from .spike2 import soundbank as SB
+    return max(0, min(SB.MAPPED_MAX - int(mem_img), SB.BANK_MAX_SEEN, SB.MAX_BANK_BYTES,
+                      SB.emulator_bank_room(staged)))
+
+
+def _dead_credited(spilled, game_sids, seqs):
+    """PAD-880: the game's own records nothing plays once *spilled* goes into sound banks:
+    a game sound's (its one sound id now names the bank's) and a song in parts' longer
+    records (every sound id that plays them moves with them)."""
+    if not _IC_enabled():
+        return []
+    out = {i for i in spilled if i in game_sids}
+    for g in seqs:
+        if all(i in spilled for i in g.grown):
+            out.update(int(i) for i in g.grown)
+    return sorted(out)
+
+
+def _dead_credit(byidx, idxs, reads=None):
+    """PAD-880: how much smaller image.bin comes out once the bodies of the game's own
+    records *idxs* are taken out (:mod:`.image_compact`): their bodies, less the bytes kept
+    around them and the region their derive windows go into (the widest spread of a record's
+    windows, from the card's consumed map *reads*; without one, the longest body)."""
+    from . import image_compact as IC
+    from .spike2.emulator import frame_bytes
+    sizes = {}
+    for i in idxs:
+        p = byidx.get(i)
+        if p is None or p.get("shadows") is not None:
+            continue
+        n = frame_bytes(p) * int(p["length"])
+        if n > 4 * IC.MARGIN:
+            sizes[i] = n
+    if not sizes:
+        return 0
+    spread = max(sizes.values())
+    if reads is not None and len(reads):
+        spreads = []
+        for i, n in sorted(sizes.items()):
+            w = IC.windows_of(reads, int(byidx[i]["body_off"]), n)
+            if not w:
+                sizes.pop(i)
+                continue
+            spreads.append(max(r + k for r, k in w) - min(r for r, _k in w))
+        if not sizes:
+            return 0
+        spread = max(spreads)
+    region = spread + len(sizes) * (IC.WINDOW_GAP + 4096) + IC.ALIGN
+    return max(0, sum(sizes.values()) - 2 * IC.MARGIN * len(sizes) - region)
+
+
+def _mode_sids(mode_used, sm_used, plan):
+    """PAD-880: the game sound ids and record keys a mode's runtime plays or swaps by
+    (``(sids, keys)``): a record any of them can reach is never taken out of image.bin, even
+    where the request lists no longer name it."""
+    sids, keys = set(), set()
+    for u in list(mode_used or ()) + list(sm_used or ()):
+        for k in ("sid", "slot_sid", "game_sid"):
+            if isinstance(u.get(k), int):
+                sids.add(int(u[k]))
+        sids.update(int(x) for x in (u.get("bank_sids") or {}))
+        for k in ("stock_key", "key"):
+            if isinstance(u.get(k), (bytes, bytearray)):
+                keys.add(bytes(u[k]))
+    for frs in (getattr(plan, "sm_frags", None) or {}).values():
+        sids.update(int(sid) for _u, sid in frs)
+    for gs in (getattr(plan, "sm_seqs", None) or {}).values():
+        for g in gs:
+            sids.update(int(sid) for _m, sid, _f, _u in g.lines)
+    return sids, keys
+
+
+def _dead_keys(gr_path, img_path, params, plan, cands, keep, mode, log):
+    """PAD-880: the container keys of the game's own records of *cands* that nothing plays
+    after this build: no play table names them but those of the sound ids the request lists
+    now name a sound bank's id for (*plan*.banked), and no mode plays or swaps by them
+    (*mode*, :func:`_mode_sids`; *keep*, the records left un-pointed for a mode)."""
+    sites = _descriptor_sites(gr_path, img_path, log)
+    if not sites:
+        return set()
+    mask = _desc_key_mask(params, sites)
+    sids, keys = mode
+    banked = set(getattr(plan, "banked", None) or ()) - set(sids)
+    named = {_play_key(s.payload, s.sid, mask) for s in sites if s.sid not in banked}
+    out = set()
+    for p in params:
+        i = int(p["idx"])
+        if i not in cands or i in keep:
+            continue
+        if p.get("grown"):
+            key = p.get("stock_findkey")
+        elif p.get("shadows") is None:
+            key = p.get("findkey")
+        else:
+            continue
+        key = bytes(key or b"")
+        if key and key not in named and key not in keys:
+            out.add(key)
+    return out
+
+
+def _compact_after_build(gr_path, img_path, patched_gr, cave, params, plan, cands, keep,
+                         mode, inplace, work, log):
+    """PAD-880: take the bodies of the game's own records nothing plays any more out of
+    the finished *img_path* (:mod:`.image_compact`).  Returns ``(image.bin, program)`` to put
+    on the card whole, or ``None`` (the build as it was, with the reason logged).
+
+    *inplace* ``{body offset: body}`` are the re-encoded bodies of a build that patches
+    image.bin in place (``None`` for one that staged its own copy): they are composed into a
+    copy first, and the copy is the one returned.  *cave* ``(windows, bypass)`` is the blip-free cave's
+    (:func:`_build_derive_redirect_cave`), rebuilt for the windows' new offsets;
+    *patched_gr* the program the input plays with."""
+    from . import image_compact as IC
+    try:
+        dead = _dead_keys(gr_path, img_path, params, plan, cands, keep, mode, log)
+    except Exception as e:                                  # noqa: BLE001
+        log("image.bin keeps the replaced sounds' own records (which ones nothing plays "
+            "could not be read: %s)." % e, "info")
+        return None
+    if not dead:
+        return None
+    src = img_path
+    if inplace is not None:
+        src = os.path.join(work, "image_pre_compact.bin")
+        shutil.copyfile(_lp(img_path), _lp(src))
+        with open(_lp(src), "r+b") as f:
+            for off, body in inplace.items():
+                f.seek(off)
+                f.write(body)
+    dst = os.path.join(work, "image_compact.bin")
+    out_dir = os.path.join(work, "compact_fw")
+    os.makedirs(_lp(out_dir), exist_ok=True)
+
+    def firmware_for(layout):
+        if not cave:
+            return patched_gr or gr_path
+        import numpy as np
+        moved = []
+        for lo, hi, stock in cave[0]:
+            a = IC.translate(layout, lo)
+            if a is None or IC.translate(layout, hi - 1) != a + (hi - 1 - lo):
+                raise IC.CompactError("a blip-free window (%d-%d) is not in one kept range"
+                                      % (lo, hi))
+            moved.append((a, a + (hi - lo), stock))
+        # (on the program as this build left it: the request lists, the score colours and
+        # the rest went into it after its cave, and only the cave is rebuilt)
+        fw, _n = _build_derive_redirect_cave(patched_gr, dst, {}, np, log, out_dir,
+                                             extra_fw_writes=cave[1], entries=moved)
+        # the program as it was but for its cave: anything else that differs was lost
+        # in the rebuild (a first rebuild from the stock program dropped the request
+        # lists that point the game at the banks, and every bank song played as noise)
+        a = np.frombuffer(open(_lp(patched_gr), "rb").read(), np.uint8)
+        b = np.frombuffer(open(_lp(fw), "rb").read(), np.uint8)
+        room = 4096 + sum(16 + (hi - lo) for lo, hi, _s in moved)
+        if len(a) != len(b) or int(np.count_nonzero(a != b)) > room:
+            raise IC.CompactError("the program rebuilt for the moved windows differs from "
+                                  "the build's by more than its cave")
+        return fw
+
+    t0 = time.monotonic()
+    before = os.path.getsize(_lp(src))
+    try:
+        layout, fw = IC.compact(patched_gr or gr_path, src, dst, dead, log,
+                                firmware_for=firmware_for)
+    except Exception as e:                                  # noqa: BLE001
+        log("image.bin keeps the replaced sounds' own records (%s); it is written as the "
+            "build made it." % e, "warning")
+        for p in (dst, src if src != img_path else None):
+            if p:
+                try:
+                    os.remove(_lp(p))
+                except OSError:
+                    pass
+        return None
+    os.replace(_lp(dst), _lp(src))
+    log("image.bin: the game's own recordings of %d replaced sound(s), which nothing plays "
+        "any more, came out of it: %.0f MB on the card rather than %.0f MB (%.0f MB less "
+        "for the game to hold in memory). Every sound's codec parameters derive "
+        "as before." % (len(layout.gone), layout.size / 1e6, before / 1e6,
+                        layout.saved / 1e6), "success")
+    if len(dead) > len(layout.gone):
+        log("image.bin keeps %d more of the replaced sounds' own records whole: another record "
+            "shares its body, or it is too short to gain anything." % (
+                len(dead) - len(layout.gone)), "info")
+    _stage_done(log, "taking the sounds nothing plays out of image.bin", t0)
+    return src, (fw if cave else patched_gr)
+
+
+def _memory_check(img_path, plan):
+    """PAD-880: a build whose sound banks were planned beside an image.bin without the
+    records they play instead (``plan.dead_credit``) is refused when image.bin did not come
+    out that small: past :data:`.spike2.soundbank.MAPPED_MAX` the machine stops at its first
+    bank sound."""
+    from .spike2 import soundbank as SB
+    img = os.path.getsize(_lp(img_path))
+    banks = sorted((os.path.getsize(_lp(bp)) for _c, bp in plan.files), reverse=True)
+    live = sum(banks[:SB.SOUND_CHANNELS])
+    if img + live > SB.MAPPED_MAX:
+        raise SoundRoomError(
+            "The game holds image.bin and every sound bank it is playing a sound from in "
+            "memory at once, and here they could come to %d MB (image.bin %d MB, the banks "
+            "%d MB), past the %d MB a machine has been seen to hold: the game's own recordings "
+            "of the sounds the banks play could not all be taken out of image.bin (the log "
+            "says why). Some of the longer sounds have to be shorter."
+            % ((img + live) // 10**6, img // 10**6, live // 10**6, SB.MAPPED_MAX // 10**6))
+
+
 class SoundRoomError(RuntimeError):
     """The card's longer sounds pass what the machine holds in memory beside image.bin
     (:func:`_plan_sound_banks`): an answer for the Write Failed dialog, not a crash
@@ -20575,14 +20845,24 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # shrank the slice, which kept more: an Iron Maiden card with a few longer songs ended
     # at image.bin 2,428 MB and 0 MB for a music mode's file.  In a bank such a song is in
     # memory only while it plays, and in image.bin always.
+    try:
+        reads = _load_consumed(gr_path, img_path) if _IC_enabled() else None
+    except OSError:                     # (a stand-in card: the longest body is counted)
+        reads = None
     while True:
         # a bank the emulator can serve beside the staged image.bin (its window
         # follows image.bin's in the game's 32-bit address space)
         staged = _grown_bank_bytes(md_off, count, hard + [
             _grown_body_bytes(byidx[i], g[1]) for i, g in sorted(kept.items())])
+        # PAD-880: the game's own records of the sounds the banks play come out of
+        # image.bin once nothing plays them (image_compact), so what the game holds
+        # beside the banks is image.bin without them
+        dead_idx = _dead_credited(spilled, game_sids, seqs)
+        credit = _dead_credit(byidx, dead_idx, reads)
+        mem_img = max(0, staged - credit)
         slice_max = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged), SB.BANK_SLICE)
-        limit = min(slice_max, max(0, SB.MAPPED_MAX - staged) // SB.SOUND_CHANNELS)
-        alone = SB.alone_bank_room(staged)
+        limit = min(slice_max, max(0, SB.MAPPED_MAX - mem_img) // SB.SOUND_CHANNELS)
+        alone = _alone_room(mem_img, staged)
         big = [i for i in sorted(spilled) if i in game_sids and SB.bank_bytes(
             [_grown_body_bytes(byidx[i], spilled[i][1])], stride) > alone]
         # (PAD-779: a song in parts with every record its sound ids play)
@@ -20707,7 +20987,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     longs = sorted((u for u in units if one_of[id(u)] > limit),
                    key=lambda u: (-one_of[id(u)], u.edits[0].idx))
     bank_units = SB.split_units(small, limit=limit, stride=stride) if small else []
-    cap_alone = SB.alone_bank_room(staged)
+    cap_alone = _alone_room(mem_img, staged)
     def _bank_words(g):
         """The sounds of bank *g* a user can shorten, one line of the refusal (PAD-880)."""
         names = [os.path.basename(str(audio_edits[e.idx]))
@@ -20722,7 +21002,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         others_g = sorted(bank_units, key=lambda g: -SB.unit_bytes(g, stride))[
             :SB.SOUND_CHANNELS - 1]
         others = [SB.unit_bytes(g, stride) for g in others_g]
-        room = min(cap_alone, max(0, SB.MAPPED_MAX - staged - sum(others)))
+        room = min(cap_alone, max(0, SB.MAPPED_MAX - mem_img - sum(others)))
         if one_of[id(u)] > room:
             stereo = byidx[e.idx].get("chan") == 2
             # PAD-880: an Iron Maiden card with a dozen longer songs was refused naming one
@@ -20732,14 +21012,14 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             # place, have to lose all told
             top = sorted(others + [one_of[id(x)] for x in longs[n:]],
                          reverse=True)[:SB.SOUND_CHANNELS]
-            over = staged + sum(top) - SB.MAPPED_MAX
+            over = mem_img + sum(top) - SB.MAPPED_MAX
             what = (
                 "%s is too long for this card: it goes into a sound bank, and the game holds "
                 "image.bin (%d MB) and every bank it is playing a sound from in memory at once, "
                 "so beside the %d other bank(s) that can play with it (%d MB) this sound's bank "
                 "can be at most %d MB here, about %.1f minutes of %s sound (this one needs %d "
                 "MB%s)."
-                % (_named(e.idx)[0].upper() + _named(e.idx)[1:], staged // 10**6, len(others),
+                % (_named(e.idx)[0].upper() + _named(e.idx)[1:], mem_img // 10**6, len(others),
                    sum(others) // 10**6, room // 10**6,
                    room / float(_STEREO_BYTES_PER_MIN // (1 if stereo else 2)),
                    "stereo" if stereo else "mono", one_of[id(u)] // 10**6,
@@ -20770,14 +21050,14 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         groups.append(one)
     sizes = sorted((SB.unit_bytes(g, stride) for g in bank_units), reverse=True)
     live = sum(sizes[:SB.SOUND_CHANNELS])
-    if staged + live > SB.MAPPED_MAX:
+    if mem_img + live > SB.MAPPED_MAX:
         raise SoundRoomError(
             "The game holds image.bin and every sound bank it is playing a sound from in "
             "memory at once (up to one for each of its %d sound channels), and here they could "
             "come to %d MB (image.bin %d MB with the card's own sounds, the banks %d MB), past "
             "the %d MB a machine has been seen to hold (Stern's own largest). The modes' own "
             "sounds or the music modes' files have to be fewer or shorter."
-            % (SB.SOUND_CHANNELS, (staged + live) // 10**6, staged // 10**6, live // 10**6,
+            % (SB.SOUND_CHANNELS, (mem_img + live) // 10**6, mem_img // 10**6, live // 10**6,
                SB.MAPPED_MAX // 10**6))
     kinds = [w for w, on in (
         ("the modes' own sounds", set(spilled) - set(game_sids) - set(sm_frags) - set(seq_of)
@@ -20789,8 +21069,13 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         "and every bank it is playing a sound from in memory at once, one for each of its %d "
         "sound channels at most, and together they come to at most %d MB (Stern's largest "
         "is %d MB)." % (who[0].upper() + who[1:], len(groups), limit // 10**6,
-                        staged // 10**6, SB.SOUND_CHANNELS, (staged + live) // 10**6,
+                        mem_img // 10**6, SB.SOUND_CHANNELS, (mem_img + live) // 10**6,
                         SB.MAPPED_MAX // 10**6), "info")
+    if credit:
+        log("image.bin comes to about %d MB on the card rather than %d MB: the game's own "
+            "recordings of the %d sound(s) the banks play instead come out of it, which "
+            "nothing plays any more." % (mem_img // 10**6, staged // 10**6, len(dead_idx)),
+            "info")
     if longs:
         log("%d sound(s) too long for a %d MB bank get a bank of their own, as big as "
             "the room left beside image.bin and the other banks that can play with them "
@@ -20841,7 +21126,10 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     plan.game = {i: game_sids[i] for i in spilled if i in game_sids}
     # PAD-777: the most image.bin may come to beside the banks: the user's longer sounds
     # that stay in it are trimmed to this
-    plan.image_room = SB.MAPPED_MAX - live
+    plan.image_room = SB.MAPPED_MAX - live + credit
+    # PAD-880: what that counted on: image_compact takes these records' bodies out, and a
+    # build that could not is refused rather than shipped past what the machine holds
+    plan.dead_credit, plan.dead_idx = credit, set(dead_idx)
     plan.sm_frags = {i: sm_frags[i] for i in spilled if i in sm_frags}
     plan.seqs = {c: gs for c, gs in seq_by_cat.items() if gs}
     plan.seq_grown = set(seq_of)

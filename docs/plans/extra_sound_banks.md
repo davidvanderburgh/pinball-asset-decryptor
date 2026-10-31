@@ -660,3 +660,58 @@ then 212; 543 (940) 1300 then 1500 Hz then 935; 539 (958) 818, 1700 Hz, 758. Eve
 matched its stock decode (NCC 0.89-0.96; noise 0.02, the wrong part at most 0.44). Mode 1:
 554 played the longer 150 whole (70 s) from the game's bank, then 618 (NCC 0.95); 555 222,
 the longer 150, 618; 535 the longer 307, then 492 (NCC 0.95). 0 segv, 0 fatal.
+
+## image.bin without the bodies nothing plays (PAD-880)
+
+A replaced sound longer than its slot plays from a record of its own or from a bank, and the
+game's own record stayed in `image.bin` whole; `image.bin` is mapped whole beside every bank the
+game plays from (`MAPPED_MAX`). An Iron Maiden LE 1.18 card with 23 replaced songs carried
+834 MB of their stock bodies in its 1,312 MB `image.bin`, and the build was refused for 35 MB.
+
+`image_compact.py` takes those bodies out after the build (`engine._compact_after_build`, at the
+point the grown bank is composed), and the bank plan counts `image.bin` without them
+(`_dead_credit`; `plan.image_room` gains the same, and `_memory_check` refuses a build whose
+`image.bin` did not come out that small). What the firmware needs, measured on that card:
+
+* every record keeps its place in the directory, its length word and its identity;
+* the boot derive reads about 1 KB of each body, in two windows spread over it (a quarter and
+  three quarters in), into the chain that sets every later record's parameters and key: a
+  record that comes out keeps its windows at the same distance from its body offset, in one
+  sparse region of zeros (the widest record's spread, 67 MB for 23 songs);
+* a body's keystream does not follow its offset: a body moved anywhere (16 bytes to 1 MB, or
+  past the end) decodes the same, and its directory entry is all that names it;
+* the descriptors sit after the last body, before the directory (74,640 bytes on Iron Maiden
+  LE 1.18), and the fragment table (`hdr[0x28]`) names them by offset (whitened with
+  `slot_vf2_offset`'s four vf2 bytes). The first rig run moved them with everything else and
+  the game played none of `image.bin`'s sounds (the bank songs played): no sound id resolved.
+  The range holding them moves by a multiple of 0x4000, which keeps each descriptor's
+  whitening (`(off ^ xor) & mask`, every mask inside the 0x3F00 window), and the slots naming
+  them are rewritten (`fragment_slots`, `slot_writes`).
+
+Which records come out (`engine._dead_keys`): the stock record of a sound this build replaced
+(a longer one in `image.bin`, a game sound or a song in parts in a bank) whose key no play
+table names, except those of the sound ids the request lists now name a bank's id for, and no
+mode plays or swaps by. A body another record shares stays whole. With the blip-free cave its
+windows move with their bodies and the cave is rebuilt on the build's own program (a first
+rebuild from the stock program dropped the request lists that name the banks, and every bank
+song played as noise; the rebuilt program may now differ from the build's by its cave alone).
+
+Every compaction is checked before it is used: a full derive of the result (every record's
+every field the same, its body offset aside), eight sounds decoded the same, and every sound id
+resolved through the game's own resolver to the same descriptor bytes. A failed check leaves
+`image.bin` as the build made it. `PAD_STERN_COMPACT=0` turns it off.
+
+**Proof** (2026-10-31, `C:\tmp\PAD-880`, rig A/B against the same set built uncompacted; the
+sound_fire instrument firing ten requests in attract on each, captures compared):
+1. 5 songs into banks: `image.bin` 1,312 -> 1,147 MB; requests 20/120/220 bit-identical (NCC
+   1.000), the four bank songs' tones identical, the three random-variant requests (320/420/
+   500) each matching a stock run's pick.
+2. The same with idx 655 replaced in place (blip-free cave rebuilt for the moved windows): the
+   1500 Hz file on request 20, the game's sounds and bank songs identical.
+3. The songs grown inside `image.bin`, no banks (976 records): 1,529 -> 1,365 MB, the tones and
+   the game's sounds as before.
+4. The reporter's shape, 23 songs: the plan that refused the card puts them in 15 banks beside
+   an `image.bin` of 544 MB, 1,429 MB at most in memory.
+0 segv, 0 fatal on every run. The bisection that found the descriptor block (moving a record
+past the end with its old copy zeroed plays; zeroing the old range of the last 271 records does
+not; then idx 970, i.e. the bytes after its body) is in `C:\tmp\PAD-880\tools\variants.py`.

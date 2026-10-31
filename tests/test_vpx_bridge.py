@@ -2346,3 +2346,32 @@ def test_the_grips_stand_aside_while_visual_pinball_is_paused(monkeypatch):
     g.bridge.set_pause(0)                                                       # Resume
     assert tick() == [("SetWindowPos", (77, None, 10, 20, 400, 600, 0x50))]     # back, shown again
     assert not g.aside and any("grips back" in s for s in logged)
+
+
+# --------------------------------- PAD-893: the backglass keeps the focus -----
+
+def test_the_backglass_hands_the_foreground_back_once_per_window(monkeypatch):
+    """PAD-893: B2S.Server, started from PADSPIKE2.vbs's LoadVPM, takes the
+    foreground as its window opens and gives it back only to a playfield that
+    is already showing, so Metallica sat paused behind its backglass. Each
+    backglass window's first grab is undone, for any run (the bridge's own
+    or not); a later click on it is the user's. The LCD rule stays: once,
+    only for a run the bridge started, and nothing else is ever taken."""
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    b = pc.Bridge()
+    b.b2s_handed = set()
+    assert pc.b2s_window("B2S Backglass Server") and pc.b2s_window("B2S DMD")
+    assert pc.b2s_window("B2S Backglass")
+    assert not pc.b2s_window("Visual Pinball Player") and not pc.b2s_window("Notepad")
+    assert b.launch is None
+    assert b._hand_back_from(101, "B2S Backglass Server")           # no started run: still
+    assert not b._hand_back_from(101, "B2S Backglass Server")       # once
+    assert b._hand_back_from(102, "B2S DMD")                        # its DMD: its own once
+    assert not b._hand_back_from(103, "Untitled - Notepad")         # never the user's windows
+    lcd = "[rig 1: %s] Metallica - Stern Spike 2 emulator" % pc.padlaunch.LABEL
+    assert not b._hand_back_from(104, lcd)                          # not a run it started
+    b.launch = object()
+    assert b._hand_back_from(104, lcd) and b.front_done
+    assert not b._hand_back_from(104, lcd)                          # once
+    assert b._hand_back_from(105, "B2S Backglass Server")           # a new backglass window

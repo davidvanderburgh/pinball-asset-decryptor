@@ -728,3 +728,218 @@ def test_a_container_that_cannot_be_asked_is_not_called_unshared(
     monkeypatch.setattr(D, "_docker", lambda args, timeout=30: _R("x", 1))
     assert D.unseen_mounts(["/Volumes/Mac SSD/Sonichedge"]) == []
     assert D.unseen_mounts(["/Volumes/not there"]) == []
+
+
+# ------------------------------------- the app shares them itself (PAD-903)
+
+from pinball_decryptor.webui import emulate_core as E
+
+
+def _colima_yaml(monkeypatch, tmp_path, text, profile="default"):
+    home = tmp_path / "colima"
+    (home / profile).mkdir(parents=True)
+    (home / profile / "colima.yaml").write_text(text, encoding="utf-8")
+    monkeypatch.setenv("COLIMA_HOME", str(home))
+    monkeypatch.setattr(E.os.path, "expanduser",
+                        lambda p: p.replace("~", "/Users/me", 1))
+
+
+def test_a_fresh_colima_is_started_sharing_home_and_volumes(monkeypatch,
+                                                            tmp_path):
+    """Set up emulator's own start: the ISOs on another disk are seen from
+    the first run.  Home is named, because --mount replaces colima's list
+    and home is in it only while the list is empty."""
+    monkeypatch.setenv("COLIMA_HOME", str(tmp_path / "none"))
+    monkeypatch.setattr(E.os.path, "expanduser",
+                        lambda p: p.replace("~", "/Users/me", 1))
+    assert E.colima_start_argv("/opt/homebrew/bin/colima") == [
+        "/opt/homebrew/bin/colima", "start",
+        "--mount", "/Users/me:w", "--mount", "/Volumes:w"]
+
+
+def test_the_folders_colima_already_shares_are_kept(monkeypatch, tmp_path):
+    _colima_yaml(monkeypatch, tmp_path, (
+        "cpu: 2\n"
+        "mounts:\n"
+        "  - location: ~\n"
+        "    writable: true\n"
+        "  - location: '/opt/src'   # theirs\n"
+        "    writable: false\n"
+        "mountType: virtiofs\n"))
+    assert E.colima_mounts() == [("/Users/me", True), ("/opt/src", False)]
+    assert E.colima_start_argv("colima", share=["/Volumes", "/opt/src/x"]) == [
+        "colima", "start", "--mount", "/Users/me:w", "--mount", "/opt/src",
+        "--mount", "/Volumes:w"]
+
+
+def test_an_empty_mount_list_is_colimas_home_default(monkeypatch, tmp_path):
+    _colima_yaml(monkeypatch, tmp_path, "mounts: []\nmountType: sshfs\n",
+                 profile="work")
+    assert E.colima_mounts("work") == []
+    assert E.colima_start_argv("colima", "work") == [
+        "colima", "start", "-p", "work",
+        "--mount", "/Users/me:w", "--mount", "/Volumes:w"]
+
+
+def test_volumes_already_shared_is_not_named_twice(monkeypatch, tmp_path):
+    _colima_yaml(monkeypatch, tmp_path, (
+        "mounts:\n- location: /Users/me\n  writable: true\n"
+        "- location: /Volumes\n  writable: true\n"))
+    assert E.colima_start_argv("colima").count("/Volumes:w") == 1
+
+
+def test_the_unshared_error_carries_colimas_fix(unix_paths, monkeypatch):
+    """stop, then a start sharing /Volumes: what the panel offers to run."""
+    monkeypatch.setattr(D, "_docker", _Engine(_cache_only, context="colima-work"))
+    monkeypatch.setattr(E, "which_tool", lambda n, *a: "/usr/local/bin/" + n)
+    monkeypatch.setattr(E, "colima_mounts", lambda profile="": [])
+    monkeypatch.setattr(E.os.path, "expanduser",
+                        lambda p: p.replace("~", "/Users/me", 1))
+    with pytest.raises(D.Unshared) as e:
+        D.ensure_container([ISO0], "/repo")
+    assert e.value.unseen == ["/Volumes/Mac SSD/Sonichedge"]
+    assert e.value.fix == [
+        ["/usr/local/bin/colima", "stop", "-p", "work"],
+        ["/usr/local/bin/colima", "start", "-p", "work",
+         "--mount", "/Users/me:w", "--mount", "/Volumes:w"]]
+    assert "colima stop -p work" in str(e.value)        # the sentence stays
+
+
+def test_docker_desktop_gets_no_fix_to_run(unix_paths, monkeypatch):
+    monkeypatch.setattr(D, "_docker", _Engine(_cache_only, name="docker-desktop",
+                                              context="desktop-linux"))
+    with pytest.raises(D.Unshared) as e:
+        D.ensure_container([ISO0], "/repo")
+    assert e.value.fix is None and "File sharing" in str(e.value)
+
+
+def test_share_folders_runs_each_command_into_the_log():
+    lines = []
+    py = sys.executable
+    ok = D.share_folders([[py, "-c", "print('stopped')"],
+                          [py, "-c", "print('started')"]], log=lines.append)
+    assert ok and "stopped" in lines and "started" in lines
+    assert lines[0].startswith("$ ")
+    lines = []
+    assert not D.share_folders([[py, "-c", "import sys; sys.exit(3)"],
+                                [py, "-c", "print('never')"]],
+                               log=lines.append)
+    assert "never" not in lines
+
+
+class _Panel:
+    """Just enough of MultibootPanel for _run_commands' container guard."""
+
+    def __init__(self):
+        self._busy = self._pv_busy = False
+        self._cancelled = self._cancel_pending = False
+        self._drain_job = None
+        self.asked, self.errors, self.written, self.started = [], [], [], []
+        self.busy_log = []
+
+    def _set_busy(self, b):
+        self._busy = b
+        self.busy_log.append(b)
+
+    def _write(self, line):
+        self.written.append(line)
+
+    _append = _write
+
+    def _error(self, msg):
+        self.errors.append(msg)
+
+    def _ui(self, fn):
+        fn()
+
+    def _drain(self):
+        pass
+
+    def _run_paths(self):
+        return [ISO0]
+
+    def _start_worker(self, *a):
+        self.started.append(a)
+
+
+def _panel_run(monkeypatch, times, answer, shared_ok=True):
+    """A build whose first *times* container checks say the ISO folder is
+    unseen, the user answering *answer* to the offer."""
+    p = _Panel()
+    for name in ("_run_commands", "_share_and_retry"):
+        monkeypatch.setattr(_Panel, name, getattr(mt.MultibootPanel, name),
+                            raising=False)
+    monkeypatch.setattr(D, "enabled", lambda: True)
+    monkeypatch.setattr(D, "colima_fix", lambda unseen: [["colima", "stop"]])
+    monkeypatch.setattr(D, "unshared_reason", lambda unseen: "cannot see it")
+    calls = {"ensure": 0, "share": 0}
+
+    def ensure(paths, repo, log=None):
+        calls["ensure"] += 1
+        if calls["ensure"] <= times:
+            raise D.Unshared(["/Volumes/Mac SSD/Sonichedge"])
+    monkeypatch.setattr(D, "ensure_container", ensure)
+
+    def share(fix, log=None):
+        calls["share"] += 1
+        return shared_ok
+    monkeypatch.setattr(D, "share_folders", share)
+
+    def ask(title, body):
+        p.asked.append(body)
+        return answer
+    monkeypatch.setattr(mt.messagebox, "askyesno", ask)
+
+    class _T:                       # the worker thread, run in place
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+    monkeypatch.setattr(mt.threading, "Thread", _T)
+    p._run_commands([("build", ["true"])])
+    return p, calls
+
+
+def test_a_yes_restarts_colima_and_runs_again(monkeypatch):
+    p, calls = _panel_run(monkeypatch, times=1, answer=True)
+    assert len(p.asked) == 1 and "/Volumes/Mac SSD/Sonichedge" in p.asked[0]
+    assert calls == {"ensure": 2, "share": 1}
+    assert len(p.started) == 1 and not p.errors
+    assert p.busy_log[:2] == [True, False]   # greyed while Colima restarts
+
+
+def test_a_no_stops_with_the_sentence(monkeypatch):
+    p, calls = _panel_run(monkeypatch, times=1, answer=False)
+    assert calls["share"] == 0 and not p.started
+    assert p.errors == ["cannot see it"]
+
+
+def test_a_colima_still_blind_is_not_asked_again(monkeypatch):
+    p, calls = _panel_run(monkeypatch, times=2, answer=True)
+    assert len(p.asked) == 1 and calls["share"] == 1 and not p.started
+    assert p.errors == ["cannot see it"]
+
+
+def test_a_failed_restart_says_so(monkeypatch):
+    p, calls = _panel_run(monkeypatch, times=1, answer=True, shared_ok=False)
+    assert calls["ensure"] == 1 and not p.started
+    assert "did not restart" in p.errors[0]
+
+
+def test_the_config_is_found_where_colima_keeps_it(monkeypatch, tmp_path):
+    """colima's config/files.go: COLIMA_HOME when it exists, ~/.colima,
+    then the XDG config folder when ~/.colima is not there."""
+    monkeypatch.setenv("COLIMA_HOME", str(tmp_path / "missing"))
+    monkeypatch.setattr(E.os.path, "expanduser",
+                        lambda p: p.replace("~", str(tmp_path / "home"), 1))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    assert E.colima_profile_dir("work") == os.path.join(
+        str(tmp_path / "xdg"), "colima", "work")
+    (tmp_path / "home" / ".colima").mkdir(parents=True)
+    assert os.path.normpath(E.colima_profile_dir()) == os.path.join(
+        str(tmp_path / "home"), ".colima", "default")
+    (tmp_path / "ch").mkdir()
+    monkeypatch.setenv("COLIMA_HOME", str(tmp_path / "ch"))
+    assert E.colima_profile_dir() == os.path.join(str(tmp_path / "ch"),
+                                                  "default")

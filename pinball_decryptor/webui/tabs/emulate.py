@@ -1526,8 +1526,10 @@ class EmulateTab(TabService):
 
     @staticmethod
     def _colima_argv():
+        # /Volumes too, from the first start: the Multi-boot tab's ISOs live
+        # on other disks as often as not (PAD-903).
         colima = rig.which_tool("colima")
-        return [colima, "start"] if colima else None
+        return rig.colima_start_argv(colima) if colima else None
 
     def _setup_recheck(self):
         self.set(setup_enabled=True, setup_label="Set up emulator…",

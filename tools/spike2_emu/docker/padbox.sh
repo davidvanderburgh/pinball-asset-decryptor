@@ -133,9 +133,19 @@ esac
 # the milliseconds, and an app update reaches the box with no cache to reason
 # about. (The hardware shim is the opposite case - minutes to rebuild - which is
 # why that one is digest-tracked instead. See watch.sh.)
+#
+# ...AND THE ONE FOLDER EVERY MAC ENGINE SHARES IS HOME (PAD-884). Docker
+# Desktop's list above is Docker Desktop's: colima - what "Set up emulator..."
+# installs - shares ~ and nothing else, and a bind mount of a path its Linux VM
+# cannot see is not refused, it is an EMPTY directory. So an app opened from
+# its disk image (/Volumes/...) or one macOS runs from a translocated copy
+# (/private/var/folders/...) passed the old Docker-Desktop list, was mounted
+# uncopied, and the box said "no rig at /pad/rig" (a Mac on colima, first run).
+# Home is shared by Docker Desktop (/Users), colima, OrbStack and Rancher
+# Desktop alike, so "under home" is the test, and anything else is copied.
 pad_docker_can_share() {
     case "$1" in
-        /Users/*|/Volumes/*|/private/*|/tmp/*|/var/folders/*) return 0 ;;
+        "$HOME"/*) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -154,6 +164,10 @@ if [ "$(uname -s)" = Darwin ] && ! pad_docker_can_share "$RIG"; then
     # bind mounted, and deleting it underneath one would break a run that has
     # nothing to do with this command. Nothing in the rig is written to at run
     # time, so an overwrite in place is safe.
+    # Never a copy of something that is not a rig: a wrong $RIG would have
+    # this copy whatever directory it named, however large.
+    [ -f "$RIG/watch.sh" ] || {
+        echo "[box] no rig at $RIG (no watch.sh there)" >&2; exit 1; }
     mkdir -p "$STAGE" || exit 1
     cp -R "$RIG"/. "$STAGE"/ || {
         echo "[box] could not copy the rig into $STAGE" >&2; exit 1; }
@@ -326,6 +340,20 @@ fi
 # where anybody keeps card images, and read-only because the box only reads it
 # (overrides.sh stages a copy inside the box's own home volume).
 if [ -n "${PAD_OVERRIDE_DIR:-}" ]; then
+    # THE SET IS BUILT IN THE APP'S TEMP DIR, which on a Mac is
+    # /var/folders/..., outside home - the same empty mount the rig got on
+    # colima (PAD-884), and an empty override set is a run that quietly shows
+    # none of your edits. So it is copied into home first, MIRRORED (--delete)
+    # rather than copied over the top: a file left from an older set would
+    # still override the card. rsync, so an unchanged set costs a compare and
+    # not a copy - sets can be hundreds of MB.
+    if [ "$(uname -s)" = Darwin ] && [ -d "$PAD_OVERRIDE_DIR" ]        && ! pad_docker_can_share "$PAD_OVERRIDE_DIR"; then
+        OSTAGE=${PAD_BOX_OVERRIDE_STAGE:-$HOME/Library/Caches/pinball_decryptor/spike2_overrides}
+        echo "[box] $PAD_OVERRIDE_DIR is outside Docker's file sharing; using a copy in $OSTAGE"
+        mkdir -p "$OSTAGE" && rsync -a --delete "${PAD_OVERRIDE_DIR%/}/" "$OSTAGE/" || {
+            echo "[box] could not copy your edits into $OSTAGE" >&2; exit 1; }
+        PAD_OVERRIDE_DIR=$OSTAGE
+    fi
     if [ -d "$PAD_OVERRIDE_DIR" ]; then
         RUN_ARGS+=(-v "${PAD_OVERRIDE_DIR%/}:/pad/overrides:ro"
                    -e "PAD_OVERRIDE_DIR=/pad/overrides")

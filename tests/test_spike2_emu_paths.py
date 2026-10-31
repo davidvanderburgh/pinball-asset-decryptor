@@ -616,11 +616,19 @@ def test_the_rig_is_staged_out_of_a_path_docker_cannot_share():
     lives in /Applications, which is NOT on it, so mounting the rig out of the
     bundle failed with "is not shared from the host and is not known to
     Docker" - for precisely the people who installed the app rather than
-    cloning it."""
+    cloning it.
+
+    PAD-884: and that list is Docker Desktop's.  colima shares only home, and
+    mounts what it cannot see as an EMPTY directory ("no rig at /pad/rig"),
+    so home is the one place trusted and everything else is copied
+    (behaviour: tests/test_padbox_mac_sharing.py)."""
     box = _padbox()
     assert "pad_docker_can_share" in box
-    for shared in ("/Users/", "/Volumes/", "/private/", "/tmp/", "/var/folders/"):
-        assert shared in box, shared
+    share = box[box.index("pad_docker_can_share() {"):]
+    share = share[:share.index("}")]
+    assert '"$HOME"/*) return 0' in share, share
+    for unshared in ("/Volumes/", "/private/", "/tmp/", "/var/folders/"):
+        assert unshared not in share, unshared
     # The staging copy, and the mount that uses it.
     assert "PAD_BOX_STAGE" in box
     assert "$RIG:/pad/rig:ro" in box

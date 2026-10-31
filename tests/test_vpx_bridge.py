@@ -1842,6 +1842,21 @@ def test_rom_patchers_keep_the_rom_name_for_the_backglass():
     assert 'out_name = m.get("output") or' in src
 
 
+def test_tmnt_shooter_lane_top_switch_ends_the_turtle_select():
+    # PAD-897: the game keeps the turtle select open, turtles cycling, until
+    # the launched ball crosses the shooter lane's upper switch; the table had
+    # no object for it, so the pick waited for the first playfield switch
+    tm = pytest.importorskip("patch_turtles_le")
+    for name, sid in (("turtles_pro", 66), ("turtles_le", 67)):   # UPPER SHOOTER LANE / SKILL SHOT
+        m = json.load(open(os.path.join(VPX, name + ".vpxmap.json"), encoding="utf-8"))
+        trig = m["retrofit_triggers"]["PadUpperShooter"]
+        assert trig["switch"] == sid and trig["clone"] == "sw14"
+        assert str(sid) not in m["unmapped"]["stern_switches_without_object"]
+        out, _ = tm.patch_script("", m)
+        assert "Sub PadUpperShooter_Hit : Controller.Switch(%d) = 1 : End Sub" % (1000 + sid) in out
+        assert "Sub PadUpperShooter_unHit : Controller.Switch(%d) = 0 : End Sub" % (1000 + sid) in out
+
+
 def test_tmnt_dof_hears_data_easts_numbers():
     # PAD-896: tmnt_104's DOF config is keyed by Data East's solenoids, not
     # the small numbers the patched script calls the Stern coils by (S11 was

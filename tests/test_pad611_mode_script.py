@@ -55,7 +55,8 @@ EVERY_BLOCK = [
 EVERY_VALUE = [num(1000), {"k": "var", "name": "combo"}, {"k": "hits", "shot": "Left ramp"}, {"k": "scored"},
                {"k": "mode_hits", "shot": "Left ramp"},                                                  # PAD-721
                {"k": "total"}, {"k": "secs_left"}, {"k": "timer_left", "timer": "window"}, {"k": "balls"},
-               {"k": "player"}, {"k": "combo_chain"}, {"k": "combo_steps", "combo": "RAMPS"}] + [   # PAD-708
+               {"k": "player"}, {"k": "combo_chain"}, {"k": "combo_steps", "combo": "RAMPS"},       # PAD-708
+               {"k": "women_mult"}] + [                                                                 # PAD-889
                 {"k": "op", "op": o, "a": num(2), "b": {"k": "var", "name": "combo"}} for o in "+-*/"]
 EVERY_COND = [{"k": "cmp", "op": o, "a": {"k": "secs_left"}, "b": num(3)} for o in BM.CMPS] + [
     {"k": "and", "a": {"k": "running"}, "b": {"k": "lit"}}, {"k": "or", "a": {"k": "stock"}, "b": {"k": "can_start"}},

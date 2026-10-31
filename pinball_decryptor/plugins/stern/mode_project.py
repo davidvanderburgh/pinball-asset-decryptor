@@ -119,6 +119,8 @@ class TitleProfile:
     #                                  on Bond's Right ramp, shot or not); () = none it can light on this title
     status_bar: bool = False         # PAD-521: the port names the game's own status bar (`site status_bar`): a mode's
     #                                  name, colour and clock can go in it (Bond LE: the coloured bar under the TV)
+    bond_women: bool = False         # PAD-889: the port names the game's Bond Women multiplier (`site bond_women_mult`):
+    #                                  a blocks value reads it (James Bond LE / Pro)
     limits: tuple = ()               # PAD-479: the parts (PARTS, "end_game" = the game's own time-up call, "stack",
     #                                  "own_music") whose reason is a GAME limit, every place on the card checked:
     #                                  the tab says so in grey, not in yellow (nothing left for the app to find)
@@ -2674,6 +2676,7 @@ def profile_from_port(path):
         wizard_lights=_wizard_lights(port),                  # PAD-473
         wizard_claims=_wizard_route(port) == 1 and "wizard_light" in port["site"],
         status_bar=all(n in port["site"] for n in ("status_bar", "set_text", "string_new")),   # PAD-521
+        bond_women="bond_women_mult" in port["site"],                       # PAD-889
         info_at=_info_at(port),                              # PAD-547
         spare=_spare(port, key),                             # PAD-826
     )

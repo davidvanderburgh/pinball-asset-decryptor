@@ -376,6 +376,9 @@ site reel_tick       0x003fc044 0xe92d47f0 0xe1a04000
 # Seen on the glass in the emulator 2026-10-11: a green bar named YOLT WIZARD, its wipe at 100 and 40, a blue one
 # with no wipe, the empty bar back when given back.
 site status_bar       0x001862dc 0xe92d4038 0xe30e48f8
+# PAD-889: the Bond Women multiplier's getter (2X-7X while it runs, else 1): the byte at +0x20 of its record while
+# process 0x1ab runs; the game adds it to the playfield multiplier score_add multiplies by. pm_bond_women_mult.
+site bond_women_mult  0x0008c9e4 0xe92d4008 0xe3a01f6b
 # PAD-547: where a mode's info line goes (the middle of the line, glass pixels): under the status bar, where the game's
 # own mini-wizards show theirs (Duel on the Disco Volante: "SUPER JACKPOT = 53,200,000", a node of each mode's own scene).
 text info_line_at 679 510

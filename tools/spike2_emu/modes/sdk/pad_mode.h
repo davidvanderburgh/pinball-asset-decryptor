@@ -758,6 +758,14 @@ int pm_lit_claim(uint64_t shots);
 #define PM_CAN_STATUS_BAR   0x4000000u /* pm_status_bar */
 int pm_status_bar(const char *words, unsigned rgb, int percent);
 
+/* ---- the Bond Women multiplier (PAD-889; title specific: James Bond LE and Pro 1.06) --------------------------------
+ * The game's own 2X-7X: each Bond Woman the player collects adds one (2X at the first, 7X at the sixth), and the
+ * multiplier then runs for a time of its own. While it runs the game counts it into its playfield multiplier, which
+ * pm_score_add's points go through - a mode's points are already multiplied by it, as the game's own are. This says
+ * what it is now: the game's own answer (`site bond_women_mult`, its getter), 1 when none runs or the port names none
+ * (the 60th Anniversary builds have no Bond Women). From a tick, shot or event callback (the game's own thread). */
+unsigned pm_bond_women_mult(void);
+
 /* ---- the game's Challenge list (PAD-615, PAD-619; title specific: Bond, Stranger Things, Rush, Sword of Rage) -
  * A Player Challenge game: the player picks one of the game's challenges as the game starts and plays it on one
  * ball, the game ending at that ball's end. A mode can CLAIM one of the challenges (slot 0.. in the order of the

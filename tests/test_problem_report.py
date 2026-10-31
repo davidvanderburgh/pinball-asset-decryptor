@@ -180,6 +180,36 @@ def test_the_log_tail_is_the_last_lines_of_the_session_log(tmp_path):
         session_log.LOG_DIR_OVERRIDE = old
 
 
+def test_a_visual_pinball_report_carries_the_controller_log(tmp_path, monkeypatch):
+    """PAD-902: a table's run and its DOF are logged by the controller, not
+    the app, so a Visual Pinball report said nothing about DOF at all."""
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    assert R.vpx_log_tail("Visual Pinball") == []
+    log = tmp_path / "padcontroller.log"
+    log.write_text("\n".join(
+        ["15:36:44 game metallica_spike: map C:\\x\\metallica_spike.vpxmap.json"]
+        + ["15:36:45 sol %d -> 1" % i for i in range(400)]
+        + ["15:36:45 sw 1065 -> id 65 = 1",
+           "15:36:45 DOF for mtl_180h: up", "",
+           "15:40:02 DOF for mtl_180h finished after 0 events"]) + "\n",
+        encoding="utf-8")
+    tail = R.vpx_log_tail("Visual Pinball")
+    assert tail == ["15:36:44 game metallica_spike: map C:\\x\\metallica_spike.vpxmap.json",
+                    "15:36:45 DOF for mtl_180h: up",
+                    "15:40:02 DOF for mtl_180h finished after 0 events"]
+    assert len(R.vpx_log_tail("Visual Pinball", max_lines=2)) == 2
+    # another tab: only while a table ran lately
+    assert R.vpx_log_tail("Stern Pinball") == tail
+    later = os.path.getmtime(str(log)) + R.VPX_RECENT_S + 1
+    assert R.vpx_log_tail("Stern Pinball", now=later) == []
+    assert R.vpx_log_tail("Visual Pinball", now=later) == tail
+    text = R.as_text(_report(vpx_log=tail, hide_paths=True))
+    assert "Visual Pinball controller log (last 3 lines)" in text
+    assert "15:36:44 game metallica_spike: map <path>" in text
+    assert text.index("Log (last") < text.index("Visual Pinball controller log")
+    assert "controller log" not in R.as_text(_report())
+
+
 def test_a_picture_is_shrunk_to_a_small_jpeg():
     data, kind = R.shrink_picture(_png(3000, 2000))
     assert kind == "image/jpeg" and data[:3] == b"\xff\xd8\xff"

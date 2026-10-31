@@ -35,8 +35,12 @@ turtles_le.vpxmap.json:
            outputs; the lamp arrays grow to 3000;
            slingshots, the left ramp entry, the van entry and the right
            ramp exit send the edges the Data East script never did;
-           Plunger key and Lockbar key hold the Action button (launch).
-  objects  START EPISODE's insert (cloned from l58a) and PadTestTimer.
+           Plunger key and Lockbar key hold the Action button (launch);
+           the shooter lane's upper switch (UPPER SHOOTER LANE on the Pro,
+           SKILL SHOT on the LE) on a trigger of its own: the game keeps the
+           turtle select open until the launched ball crosses it (PAD-897).
+  objects  START EPISODE's insert (cloned from l58a), PadUpperShooter (cloned
+           from sw14) and PadTestTimer.
 
 Everything else - art, physics, ramps, sounds, animations - is the authors'.
 """
@@ -117,6 +121,23 @@ def gen_lamp_lines(m):
     return out
 
 
+def trigger_subs(m):
+    """A retrofit trigger with a `switch` holds that switch while a ball sits
+    on it, as a rollover on the machine does."""
+    out = []
+    for name, v in m.get("retrofit_triggers", {}).items():
+        if name.startswith("_") or not v.get("switch"):
+            continue
+        sid = 1000 + v["switch"]
+        out += [
+            "' %s: %s" % (name, v.get("why", "")),
+            "Sub %s_Hit : Controller.Switch(%d) = 1 : End Sub" % (name, sid),
+            "Sub %s_unHit : Controller.Switch(%d) = 0 : End Sub" % (name, sid),
+            "",
+        ]
+    return out
+
+
 def pad_subs(m):
     gi = " Or ".join("LampState(%d)" % lamp_num([l]) for l in m["gi_leds"]["leds"])
     cw = lamp_num([m["disc_leds"]["cw"]])
@@ -170,6 +191,7 @@ def pad_subs(m):
         "\tEnd If",
         "End Sub",
         "",
+    ] + trigger_subs(m) + [
         "' at most as many shadows / rolling sounds as the table made objects for",
         "Function PadMin(a, b)",
         "\tIf a < b Then",

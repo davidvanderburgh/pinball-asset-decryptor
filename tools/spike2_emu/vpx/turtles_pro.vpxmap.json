@@ -1045,7 +1045,16 @@
     }
   },
   "retrofit_triggers": {
-    "_": "none: every edge the machine needs rides an existing object"
+    "_": "switches the table has no object for: a Trigger cloned from `clone` (invisible, on the playfield), placed at [x, y]; `switch` is held while a ball sits on it",
+    "PadUpperShooter": {
+      "clone": "sw14",
+      "at": [
+        918,
+        1100
+      ],
+      "switch": 66,
+      "why": "UPPER SHOOTER LANE, high in the shooter lane below the wire (Ramp019): the game keeps the turtle select open, turtles cycling, until the launched ball crosses it (PAD-897)"
+    }
   },
   "retrofit_timers": {
     "_": "PadTestTimer feeds %TEMP%\\padvpx_keys.txt to the table's key handlers: scripted keys for a test run",
@@ -1080,14 +1089,12 @@
       "EPISODE lights order is a GUESS"
     ],
     "stern_switches_without_object": {
-      "52": "UPPER LOCK 1",
-      "53": "UPPER LOCK 2",
-      "54": "UPPER LOCK 3",
-      "91": "GLIDER LOCK OPTO",
-      "67": "SKILL SHOT",
-      "55": "UP LEFT FLIPPER EOS",
-      "57": "LEFT FLIPPER EOS",
-      "72": "RIGHT FLIPPER EOS"
+      "51": "UPPER LOCK 1",
+      "52": "UPPER LOCK 2",
+      "53": "UPPER LOCK 3",
+      "54": "UP LEFT FLIPPER EOS",
+      "56": "LEFT FLIPPER EOS",
+      "71": "RIGHT FLIPPER EOS"
     },
     "coils_without_object": [
       "UPPER LOCK 8/8",

@@ -10,8 +10,10 @@
     "checked against what each hit sub does. Lights matched the same way to led_io.txt",
     "(most within 4 units); the GI LEDs are the LE's names (BOTTOM / MID LEFT / MID",
     "RIGHT / UPPER LEFT / UPPER RIGHT GI), which the Pro's device table leaves out, so",
-    "every gi light is a GUESS by region. The lock lane is one kicker in the table and",
-    "four switches on the machine: only LOCK 1 is answered (see the report)."
+    "every gi light is a GUESS by region. The Katana Handle lock lane is one kicker in",
+    "the table and LOCK 1-4 on the machine: the kicker feeds a four-ball stack on them,",
+    "and the LOCK POST, which the game holds down for as long as it wants balls out (12 s",
+    "at a multiball), lets one out every 600 ms while it is down (PAD-901)."
   ],
   "title": "deadpool_pro",
   "model": "Pro",
@@ -73,9 +75,9 @@
   "plunger": {"lane_trigger": "swPlungerRest", "lane_switch": 64, "autoplunge": "plungerIM"},
   "trough": {"release": "BallRelease", "drain": "Drain", "switches": [73, 72, 71, 70, 69, 68, 74], "balls": 6, "kick": [90, 4]},
   "saucers": {
-    "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power[, kickz]); JP's own kicks",
+    "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power[, kickz]); JP's own kicks. stack: the switches behind it (a lock lane); held_ms: a post the game holds down, a ball out each held_ms while it is",
     "HellHouse": {"switch": 51, "dir": 164, "power": 30, "kickz": 1, "name": "HELLHOUSE EJECT"},
-    "lock": {"switch": 88, "dir": 180, "power": 3, "name": "LOCK 1 (the lock lane's lowest ball; LOCK 2-4 have no object)"}
+    "lock": {"switch": 88, "stack": [89, 90, 91], "held_ms": 600, "dir": 180, "power": 3, "name": "LOCK 1 (the lock lane's lowest ball; LOCK 2-4 behind it, the stack's)"}
   },
   "solenoids": {
     "1": {"coil": [8, 1], "name": "TROUGH", "callback": "bsTrough.SolOut"},

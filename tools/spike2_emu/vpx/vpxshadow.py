@@ -556,9 +556,16 @@ def gen(m, had, quiet=None, dof=None):
             "\t\tbsTrough.Balls = %d" % m["trough"].get("balls", 6),
             "\t\tbsTrough.InitKick %s, %d, %d" % (m["trough"]["release"], *m["trough"]["kick"])]
     for k, s in saucers(m).items():
-        out += ["\tSet bs%s = New cvpmBallStack" % k,
-                "\t\tbs%s.InitSaucer %s, 1%03d, %d, %d" % (k, k, s["switch"], s["dir"], s["power"]),
-                "\t\tbs%s.KickZ = %s" % (k, s.get("kickz", 0))]
+        out.append("\tSet bs%s = New cvpmBallStack" % k)
+        if s.get("stack"):
+            # a lock lane (PAD-901): the kicker takes each ball in and the
+            # stack rolls it down to the lowest free switch, `switch` first
+            sw = ["1%03d" % n for n in [s["switch"]] + s["stack"]]
+            out += ["\t\tbs%s.InitSw 0,%s" % (k, ",".join((sw + ["0"] * 7)[:7])),
+                    "\t\tbs%s.InitKick %s, %d, %d" % (k, k, s["dir"], s["power"])]
+        else:
+            out.append("\t\tbs%s.InitSaucer %s, 1%03d, %d, %d" % (k, k, s["switch"], s["dir"], s["power"]))
+        out.append("\t\tbs%s.KickZ = %s" % (k, s.get("kickz", 0)))
     if lamps:
         out.append("\t' the machine's lamps: the shadow game's light shows stop, ours start")
         for seq in m.get("_lightseqs", []):
@@ -769,23 +776,56 @@ def gen(m, had, quiet=None, dof=None):
     for name, args in quiet.items():
         out.append("Sub %s%s : End Sub   ' PAD: quiet; the machine lights the table" % (name, args))
     # ---- saucers
-    for k in saucers(m):
-        out.append("Sub %s_Hit : bs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
-                   % (k, k, k, fx(k + "_Hit")))
+    for k, s in saucers(m).items():
+        if s.get("stack"):
+            # a full lane: the ball has nowhere to stop and rolls back out
+            out += ["Sub %s_Hit" % k,
+                    "\tIf bs%s.Balls >= %d Then" % (k, 1 + len(s["stack"])),
+                    "\t\tMe.Kick %d, %d" % (s["dir"], s["power"]),
+                    "\t\tExit Sub",
+                    "\tEnd If",
+                    "\tbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s" % (k, k, fx(k + "_Hit"))]
+            if s.get("held_ms"):          # the post is down: it rolls on through
+                out.append("\tIf PadHeld%s And Not PadHeld%sRun Then PadHeld%s_Next" % (k, k, k))
+            out.append("End Sub")
+        else:
+            out.append("Sub %s_Hit : bs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
+                       % (k, k, k, fx(k + "_Hit")))
+        if s.get("held_ms"):
+            # a lock POST (PAD-901): the game holds it down for as long as it
+            # wants balls out (Deadpool: 12 s at a multiball, every locked
+            # ball rolling out under it), where a kicker coil is one pulse a
+            # ball; a ball each held_ms while the post stays down
+            out += ["Dim PadHeld%s, PadHeld%sRun" % (k, k),
+                    "PadHeld%s = False : PadHeld%sRun = False" % (k, k),
+                    "Sub PadHeld%s_Sol(e)" % k,
+                    "\tPadHeld%s = CBool(e)" % k,
+                    "\tIf PadHeld%s And Not PadHeld%sRun Then PadHeld%s_Next" % (k, k, k),
+                    "End Sub",
+                    "Sub PadHeld%s_Next" % k,
+                    "\tPadHeld%sRun = False" % k,
+                    "\tIf Not PadHeld%s Then Exit Sub" % k,
+                    "\tIf bs%s.Balls = 0 Then Exit Sub" % k,
+                    "\tbs%s.ExitSol_On" % k,
+                    "\tPadHeld%sRun = True" % k,
+                    "\tvpmTimer.AddTimer %d, \"PadHeld%s_Next '\"" % (s["held_ms"], k),
+                    "End Sub"]
     # ---- solenoids
     out += ["", "'---- the machine's coils (godzilla-style numbering: the map's small numbers)"]
+    held = {"bs%s.SolOut" % k: "PadHeld%s_Sol" % k for k, s in saucers(m).items() if s.get("held_ms")}
     for num, s in m["solenoids"].items():
         if num == "_" or not s.get("callback"):
             continue
+        cb = held.get(s["callback"], s["callback"])
         calls = dof.get("sol:" + num)
         if calls:
             # the coil's own action, then the DOF the table fired beside it
-            out += ["Sub PadSol%s(e)" % num, "\t%s e" % s["callback"], "\tIf e Then"]
+            out += ["Sub PadSol%s(e)" % num, "\t%s e" % cb, "\tIf e Then"]
             out += ["\t\t" + c for c in calls]
             out += ["\tEnd If", "End Sub",
                     "SolCallback(%s) = %s          ' %s" % (num, vb("PadSol" + num), s["name"])]
         else:
-            out.append("SolCallback(%s) = %s          ' %s" % (num, vb(s["callback"]), s["name"]))
+            out.append("SolCallback(%s) = %s          ' %s" % (num, vb(cb), s["name"]))
     for const, sub in flips.items():
         out.append("SolCallback(%s) = %s          ' the machine's flipper coil" % (const, vb(sub)))
     # ---- test hook

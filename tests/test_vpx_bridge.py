@@ -344,6 +344,58 @@ def test_shadow_spinner_as_an_opto_pulses_once_a_pass(tmp_path):
     assert r.stdout.split() == ["1083@1000", "1083@2140", "1056@2400"], r.stdout + r.stderr
 
 
+def _lock_stack_shadow():
+    # PAD-901: Deadpool's Katana Handle lock is one kicker in JP's table and
+    # LOCK 1-4 on the machine, under a post the game holds down for seconds
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["saucers"]["Kicker1"].update({"stack": [79, 80, 81], "held_ms": 600})
+    return m
+
+
+def test_shadow_lock_lane_is_a_stack_on_every_lock_switch():
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch(MINI_TRIBUTE, _lock_stack_shadow())
+    assert "bsKicker1.InitSw 0,1078,1079,1080,1081,0,0,0" in out
+    assert "bsKicker1.InitKick Kicker1, 190, 15" in out and "InitSaucer Kicker1" not in out
+    assert "\tIf bsKicker1.Balls >= 4 Then\n\t\tMe.Kick 190, 15" in out, "a full lane sends the ball back"
+    assert 'SolCallback(3) = "PadHeldKicker1_Sol"' in out, "the post's coil holds, not pulses"
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+    plain, _ = vs.patch(MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    assert "PadHeld" not in plain and 'SolCallback(3) = "bsKicker1.SolOut"' in plain
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_held_lock_post_lets_every_ball_out(tmp_path):
+    # the emulator (PAD-901): a held post, one ball out per coil edge, left two
+    # balls on LOCK 1/2 under it; held, the lock must empty, then stop
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch(MINI_TRIBUTE, _lock_stack_shadow())
+    lines = out.split("\n")
+    a = lines.index("Dim PadHeldKicker1, PadHeldKicker1Run")
+    b = lines.index("End Sub", lines.index("Sub PadHeldKicker1_Next"))
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log, Pending",
+        "Class FakeStack : Public Balls : Public Sub ExitSol_On : Balls = Balls - 1 : Log = Log & \"out \" : End Sub : End Class",
+        "Class FakeTimer : Public Sub AddTimer(ms, cb) : Pending = Pending + 1 : Log = Log & \"t\" & ms & \" \" : End Sub : End Class",
+        "Dim bsKicker1 : Set bsKicker1 = New FakeStack : bsKicker1.Balls = 3",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "\n".join(lines[a:b + 1]),
+        "Sub Tick : If Pending > 0 Then Pending = Pending - 1 : PadHeldKicker1_Next",
+        "End Sub",
+        "PadHeldKicker1_Sol 1",           # the post goes down
+        "Tick : Tick : Tick : Tick",       # the timer runs out of balls
+        "Log = Log & \"| \"",
+        "PadHeldKicker1_Sol 0 : bsKicker1.Balls = 2 : PadHeldKicker1_Sol 1 : PadHeldKicker1_Sol 0 : Tick",
+        "WScript.Echo Log & bsKicker1.Balls"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    # three balls out 600 ms apart while held; then a short pulse lets one go
+    assert r.stdout.split() == ["out", "t600", "out", "t600", "out", "t600", "|", "out", "t600", "1"], \
+        r.stdout + r.stderr
+
+
 def test_shadow_neuters_the_tributes_own_balls(shadow):
     out, rep = shadow
     assert "'PAD neutered: BallRelease.CreateBall" in out
@@ -1151,7 +1203,7 @@ def test_generator_shapes_carry_their_points():
     assert vg.ident("LEFT RAMP ENTER OPTO") == "LeftRampEnterOpto" and vg.ident("3 BANK") == "X3Bank"
 
 
-@pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le", "foo_fighters_pro"])
+@pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le", "foo_fighters_pro", "deadpool_pro"])
 def test_shadow_maps_are_consistent(title):
     vs = pytest.importorskip("vpxshadow")
     path = os.path.join(VPX, title + ".shadow.json")
@@ -1164,6 +1216,7 @@ def test_shadow_maps_are_consistent(title):
     assert all(1 <= i < 1000 for i in ids) and len(set(ids)) == len(ids), "cabinet switches"
     sw = [s["id"] for k, s in m["switches"].items() if k != "_"]
     sw += m["trough"]["switches"] + [s["switch"] for k, s in m["saucers"].items() if k != "_"]
+    sw += [n for k, s in m["saucers"].items() if k != "_" for n in s.get("stack", ())]
     if m.get("plunger"):
         sw.append(m["plunger"]["lane_switch"])
     sw += ids

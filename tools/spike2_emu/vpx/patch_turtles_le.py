@@ -27,8 +27,12 @@ turtles_le.vpxmap.json:
            the table's own kicker trough (three balls, outhole + ball
            release coils) -> a cvpmBallStack on TROUGH 1..6 + JAM with the
            machine's six balls, emptied by the TROUGH coil;
-           the van kicker -> a two-ball stack on LOWER LOCK 1/2, emptied by
-           the LOWER LOCK coil; KRANG shakes Krang;
+           the van kicker (the Pro's Ninja Pizza Parlor) -> the lock's two
+           sections: a ball goes into the UPPER one (UPPER LOCK 1..3), the
+           UPPER LOCK coil drops it into the lower one (LOWER LOCK 1/2, a
+           cvpmBallStack), the LOWER LOCK coil lets it out; a ball going up
+           the LAIR lane (lair_lane) drops straight into the lower one, as on
+           the Pro; KRANG shakes Krang;
            UpdateLamps' inserts -> their Stern LEDs (1000 + node * 100 +
            index), the flasher domes LampFlasher drives -> the Stern flash
            LEDs; GI follows the GI LEDs, the pizza turntable the SPIN DISC
@@ -66,7 +70,8 @@ def lamp_num(leds):
 
 
 def sw_holds(m, key):
-    return [1000 + x for x in m["switch_holds"][key]]
+    """The held switches' numbers; a 0 in the map (no such switch) is left out."""
+    return [1000 + x for x in m["switch_holds"].get(key, []) if x]
 
 
 def object_of(sub):
@@ -117,7 +122,8 @@ def gen_lamp_lines(m):
         light, name = lights[0]
         out.append("\tNFadeL %d, %s    ' %s" % (num, light, name))
     out.append("\tPadGiTick")
-    out.append("\tPadDiscTick")
+    if "disc_leds" in m:
+        out.append("\tPadDiscTick")
     return out
 
 
@@ -138,11 +144,79 @@ def trigger_subs(m):
     return out
 
 
-def pad_subs(m):
-    gi = " Or ".join("LampState(%d)" % lamp_num([l]) for l in m["gi_leds"]["leds"])
+def disc_subs(m):
+    """The pizza disc on the LE's SPIN DISC CW / CCW outputs, which are LED
+    channels there. The Pro's disc is its PIZZA MOTOR coil (its `solenoids`
+    entry calls PadPizzaMotor): the game commands it again every ~2.25 s
+    while the disc should turn (emulator, Ninja Pizza Multiball), so it spins
+    until no command came for 3 s rather than stopping between them."""
+    if "disc_leds" not in m:
+        return [
+            "' the pizza disc: the PIZZA MOTOR coil, commanded again and again while it turns",
+            "Sub PadPizzaMotor(Enabled)",
+            "\tIf Enabled Then",
+            "\t\tpadDiscOn = padDiscOn + 1",
+            "\t\tIf padDiscOn = 1 Then SolPizzaSpin True",
+            "\t\tvpmTimer.AddTimer 3000, \"PadPizzaQuiet \" & padDiscOn & \" '\"",
+            "\tEnd If",
+            "End Sub",
+            "",
+            "Sub PadPizzaQuiet(n)",
+            "\tIf n = padDiscOn Then",
+            "\t\tpadDiscOn = 0",
+            "\t\tSolPizzaSpin False",
+            "\tEnd If",
+            "End Sub",
+            "",
+        ]
     cw = lamp_num([m["disc_leds"]["cw"]])
     ccw = lamp_num([m["disc_leds"]["ccw"]])
+    return [
+        "' the pizza disc: SPIN DISC CW (%d) / CCW (%d) are the motor's outputs" % (cw, ccw),
+        "Sub PadDiscTick",
+        "\tDim lit",
+        "\tlit = 0",
+        "\tIf LampState(%d) Or LampState(%d) Then" % (cw, ccw),
+        "\t\tlit = 1",
+        "\tEnd If",
+        "\tIf lit <> padDiscOn Then",
+        "\t\tpadDiscOn = lit",
+        "\t\tttPizza.SpinCW = (LampState(%d) = 0)" % ccw,
+        "\t\tSolPizzaSpin (lit = 1)",
+        "\tEnd If",
+        "End Sub",
+        "",
+    ]
+
+
+def lair_subs(m, van):
+    """The Pro's LAIR lane runs under the playfield to the lock's lower place:
+    with Training lit, a ball landing on LOWER LOCK 1 without passing the upper
+    section starts it, and the game holds the ball through its start before
+    LOWER LOCK lets it out (emulator, PAD-896). A ball coming DOWN the lane is
+    not a shot into it."""
+    if not (m.get("lair_lane") or {}).get("trigger"):
+        return []
+    return [
+        "' the LAIR lane: a ball going up it drops onto LOWER LOCK, where the game holds it",
+        "Sub PadLairIn(aTrigger)",
+        "\tIf ActiveBall.VelY < 0 And bsVan.Balls < %d Then" % len(van),
+        "\t\taTrigger.DestroyBall",
+        "\t\tbsVan.Balls = bsVan.Balls + 1",
+        "\tEnd If",
+        "End Sub",
+        "",
+    ]
+
+
+def pad_subs(m):
+    gi = " Or ".join("LampState(%d)" % lamp_num([l]) for l in m["gi_leds"]["leds"])
     van = sw_holds(m, "van")
+    up = sw_holds(m, "van_upper")
+    up_sw = []
+    for k, n in enumerate(up):
+        up_sw += ["\tIf padVanUp >= %d Then" % (k + 1), "\t\tController.Switch(%d) = 1" % n,
+                  "\tElse", "\t\tController.Switch(%d) = 0" % n, "\tEnd If"]
     return [
         "",
         "'---- PAD: what the Spike 2 machine drives that Data East's ROM did not ----",
@@ -159,21 +233,35 @@ def pad_subs(m):
         "\tEnd If",
         "End Sub",
         "",
-        "' the pizza disc: SPIN DISC CW (%d) / CCW (%d) are the motor's outputs" % (cw, ccw),
-        "Sub PadDiscTick",
-        "\tDim lit",
-        "\tlit = 0",
-        "\tIf LampState(%d) Or LampState(%d) Then" % (cw, ccw),
-        "\t\tlit = 1",
-        "\tEnd If",
-        "\tIf lit <> padDiscOn Then",
-        "\t\tpadDiscOn = lit",
-        "\t\tttPizza.SpinCW = (LampState(%d) = 0)" % ccw,
-        "\t\tSolPizzaSpin (lit = 1)",
+    ] + disc_subs(m) + [
+        "' the lock's upper section (UPPER LOCK 1..%d): a ball shot in rests on the" % len(up),
+        "' UPPER LOCK post. The game counts a lock there; a ball put straight into",
+        "' the lower section was let out again at once (PAD-896)",
+        "Sub PadVanIn(aKicker)",
+        "\tIf padVanUp < %d Then" % len(up),
+        "\t\taKicker.DestroyBall",
+        "\t\tpadVanUp = padVanUp + 1",
+        "\t\tPadVanUpperSw",
+        "\tElse",
+        "\t\taKicker.Kick 190, 7        ' the upper section is full: it comes back out",
         "\tEnd If",
         "End Sub",
         "",
-        "' LOWER LOCK: the van gives back one ball (LOWER LOCK 1/2 = %d/%d)" % tuple(van),
+        "Sub PadVanUpperSw",
+    ] + up_sw + [
+        "End Sub",
+        "",
+        "' UPPER LOCK: the post drops the upper section's bottom ball into the lower one",
+        "Sub PadVanDrop(Enabled)",
+        "\tIf Enabled And padVanUp > 0 And bsVan.Balls < %d Then" % len(van),
+        "\t\tpadVanUp = padVanUp - 1",
+        "\t\tPadVanUpperSw",
+        "\t\tbsVan.Balls = bsVan.Balls + 1",
+        "\tEnd If",
+        "End Sub",
+        "",
+    ] + lair_subs(m, van) + [
+        "' LOWER LOCK: the van gives back one ball (LOWER LOCK %s)" % "/".join(str(x) for x in van),
         "Sub PadVanOut(Enabled)",
         "\tIf Enabled Then",
         "\t\tIf bsVan.Balls > 0 Then",
@@ -293,8 +381,8 @@ def patch_script(src, m):
             rom = re.search(r'cgamename\s*=\s*"([^"]*)"', low)
             if rom:   # the backglass (B2S, DOF) knows the table by its ROM
                 out.append('PadB2SName = "%s"' % rom.group(1))
-            out.append("Dim bsTrough, bsVan, padGiState, padDiscOn")
-            out.append("padGiState = -1 : padDiscOn = 0")
+            out.append("Dim bsTrough, bsVan, padVanUp, padGiState, padDiscOn")
+            out.append("padVanUp = 0 : padGiState = -1 : padDiscOn = 0")
             continue
         if low.startswith("loadvpm "):
             out.append('LoadVPM "01000000","PADSPIKE2.vbs",3.10')
@@ -372,15 +460,16 @@ def patch_script(src, m):
                 "\tbsTrough.InitExitSnd SoundFX(\"BallRelease\",DOFContactors), SoundFX(\"Solenoid\",DOFContactors)",
                 "\tbsTrough.Balls = 6",
                 "",
-                "\t' PAD: the van: LOWER LOCK 1/2 held while it holds balls, out on the LOWER LOCK coil",
+                "\t' PAD: the lock's lower section: LOWER LOCK held while it holds balls, out on the",
+                "\t' LOWER LOCK coil; the upper section is padVanUp (PadVanIn, PadVanDrop)",
                 "\tSet bsVan = New cvpmBallStack",
-                "\tbsVan.InitSw 0, %d, %d, 0, 0, 0, 0, 0" % tuple(van),
+                "\tbsVan.InitSw 0, %s" % ", ".join(str(x) for x in (van + [0] * 7)[:7]),
                 "\tbsVan.InitKick sw41, 190, 7",
                 "\tbsVan.InitExitSnd SoundFX(\"solenoid\",DOFContactors), \"\"",
             ]
             continue
         if sub_low == "sw41_hit" and re.match(r"^controller\.switch\s*\(\s*41\s*\)", low):
-            out.append("\tbsVan.AddBall Me        ' LOWER LOCK 1/2: the van holds it until the coil")
+            out.append("\tPadVanIn Me        ' the lock's upper section, until UPPER LOCK drops it")
             edges += 1
             continue
 
@@ -415,6 +504,15 @@ def patch_script(src, m):
             continue
         if sub_low == "rollingtimer_timer" and low == "for b = 0 to ubound(bot)":
             out.append(line.replace("UBound(BOT)", "PadMin(UBound(BOT), tnob)"))
+            continue
+
+        # ---- the LAIR lane (the map's lair_lane): a ball going up it drops into the
+        # lock's lower place, as the Pro's lane does
+        lair = (m.get("lair_lane") or {}).get("trigger", "")
+        if lair and one_liner and sub_low == lair.lower() + "_hit":
+            out.append("Sub %s:PadLairIn Me:End Sub   ' PAD: the LAIR lane" % msub.group(1))
+            edges += 1
+            cur_sub = None
             continue
 
         # ---- switch numbers: by the object whose sub sends them, else the rewrite

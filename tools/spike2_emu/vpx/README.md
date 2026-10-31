@@ -324,6 +324,24 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `DOFALT` and `SoundFXDOF` go through it (`PadDOF`), with Visual Pinball's
   sound-or-toy settings as controller.vbs reads them. No DOF installed: the
   script's DOF goes to B2S.Server as before and every sound plays.
+* **A map whose keys are not the ROM's numbers says so per coil** (PAD-896).
+  TMNT's solenoid keys are small numbers of PAD's own (11 = LEFT POP
+  BUMPER), but tmnt_104's DOF config is Data East's (11 is its GI relay,
+  14 a flasher), so DOF fired the wrong toys. Each TMNT coil carries its
+  Data East number as `dof` (trough 2, auto plunger 4, the lock's kick 7,
+  pops 17-19, slings 20-21, the Pro's pizza motor 22), and `null` where Data
+  East had none.
+* **TMNT's lock has two sections** (PAD-896). The Pro's Ninja Pizza Parlor
+  (the LE's van) holds a ball shot in on UPPER LOCK 1-3; the UPPER LOCK coil
+  drops it to LOWER LOCK, the LOWER LOCK coil lets it out. The table put
+  the ball straight onto LOWER LOCK 1 and the game let it out again: no lock,
+  no Ninja Pizza Multiball. On the emulator, balls on the upper section read
+  BALL ONE LOCKED and three started the multiball. The Pro's LAIR lane, where
+  a spelled LAIR lights Training, runs to the same lock's LOWER place: a ball
+  on LOWER LOCK 1 that skipped the upper section started TRAINING LEVEL 2,
+  held ~10 s before LOWER LOCK let it out. So a ball going UP the table's
+  t25 lane (behind the LAIR bank, above the left outlane) goes there
+  (`lair_lane`), and comes back out of the parlor.
 * **Use the RIG's switch table.** The first Rush map came from an older
   reading of the title that numbered every switch one higher: the table
   pressed Tournament Start for Start and filled the jam opto, and the game

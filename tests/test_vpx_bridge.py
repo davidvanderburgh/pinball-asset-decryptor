@@ -1857,6 +1857,148 @@ def test_tmnt_shooter_lane_top_switch_ends_the_turtle_select():
         assert "Sub PadUpperShooter_unHit : Controller.Switch(%d) = 0 : End Sub" % (1000 + sid) in out
 
 
+def test_tmnt_dof_hears_data_easts_numbers():
+    # PAD-896: tmnt_104's DOF config is keyed by Data East's solenoids, not
+    # the small numbers the patched script calls the Stern coils by (S11 was
+    # Data East's GI relay, S14 a flasher)
+    pc = pytest.importorskip("padcontroller")
+    for title in ("turtles_pro", "turtles_le"):
+        m = pc.VpxMap(title)
+        assert m.dof_sols[2] == (8, 1) and m.dof_sols[4] == (8, 4)        # trough, auto plunger
+        assert m.dof_sols[7] == (8, 7)                                     # the lock's kick out
+        assert {m.dof_sols[n] for n in (17, 18, 19)} == {(9, 2), (9, 3), (9, 4)}   # pops
+        assert m.dof_sols[20] == (8, 3) and m.dof_sols[21] == (8, 2)      # slings
+        assert m.dof_sols[46] == (8, 0) and m.dof_sols[48] == (8, 5)      # flippers
+        assert not {1, 3, 11, 12, 13, 14, 15, 36} & set(m.dof_sols)
+
+
+def _tmnt_patch(title, src):
+    tm = pytest.importorskip("patch_turtles_le")
+    m = json.load(open(os.path.join(VPX, "%s.vpxmap.json" % title), encoding="utf-8"))
+    return tm.patch_script(src, m)[0], m
+
+
+def test_tmnt_lock_ball_goes_to_the_upper_section_and_drops_on_its_coil(tmp_path):
+    # PAD-896: the Pro let a ball put straight onto LOWER LOCK 1 out again
+    # (emulator: LOWER LOCK fired 7 s later, nothing locked); a ball resting
+    # on UPPER LOCK 1 is what the game drops (UPPER LOCK) and holds. Run the
+    # generated subs for real with a fake ball stack and controller.
+    out, m = _tmnt_patch("turtles_pro", "Sub sw41_Hit()\n\tController.Switch(41) = 1\nEnd Sub\n")
+    assert "\tPadVanIn Me" in out
+    tm = pytest.importorskip("patch_turtles_le")
+    assert any(x.startswith('SolCallback(4) = "PadVanDrop"') for x in tm.gen_sol_callbacks(m))
+    lines = out.split("\n")
+    a = lines.index("Sub PadVanIn(aKicker)")
+    b = lines.index("Sub PadKrang(Enabled)")
+    subs = "\n".join(lines[a:b])
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Class FakeCtl", "Public Sub SetSw(n, v) : WScript.Echo \"sw \" & n & \"=\" & v : End Sub",
+        "Public Property Let Switch(n, v) : SetSw n, v : End Property", "End Class",
+        "Class FakeStack", "Public Balls", "Public Sub ExitSol_On : Balls = Balls - 1 : "
+        "WScript.Echo \"out\" : End Sub", "End Class",
+        "Class FakeKicker", "Public Sub DestroyBall : WScript.Echo \"taken\" : End Sub",
+        "Public Sub Kick(a, p) : WScript.Echo \"kicked back\" : End Sub", "End Class",
+        "Dim Controller, bsVan, padVanUp, sw41",
+        "Set Controller = New FakeCtl : Set bsVan = New FakeStack : bsVan.Balls = 0 : padVanUp = 0",
+        "Set sw41 = New FakeKicker",
+        "Sub pizzavanshake : End Sub",
+        "Class FakeVan", "Public blenddisablelighting", "End Class",
+        "Dim pizzavan : Set pizzavan = New FakeVan",
+        subs,
+        "PadVanIn sw41 : PadVanIn sw41",
+        "WScript.Echo \"lower \" & bsVan.Balls",
+        "PadVanDrop True",
+        "WScript.Echo \"lower \" & bsVan.Balls & \" upper \" & padVanUp",
+        "PadVanDrop True",
+        "WScript.Echo \"lower \" & bsVan.Balls & \" upper \" & padVanUp",
+        "PadVanOut True : PadVanDrop True",
+        "WScript.Echo \"lower \" & bsVan.Balls & \" upper \" & padVanUp",
+        "PadVanIn sw41 : PadVanIn sw41 : PadVanIn sw41 : PadVanIn sw41"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    got = [x.strip() for x in r.stdout.strip().splitlines()]
+    assert got == [
+        "taken", "sw 1051=1", "sw 1052=0", "sw 1053=0",          # into UPPER LOCK 1, not LOWER LOCK 1
+        "taken", "sw 1051=1", "sw 1052=1", "sw 1053=0",
+        "lower 0",
+        "sw 1051=1", "sw 1052=0", "sw 1053=0", "lower 1 upper 1",  # UPPER LOCK dropped one
+        "lower 1 upper 1",                                         # the lower place is full: no drop
+        "out", "sw 1051=0", "sw 1052=0", "sw 1053=0", "lower 1 upper 0",
+        "taken", "sw 1051=1", "sw 1052=0", "sw 1053=0",
+        "taken", "sw 1051=1", "sw 1052=1", "sw 1053=0",
+        "taken", "sw 1051=1", "sw 1052=1", "sw 1053=1",
+        "kicked back"], r.stdout + r.stderr                        # the upper section is full
+    # the LE's lock has two lower places and the same three upper ones
+    out, _ = _tmnt_patch("turtles_le", "Sub Table1_Init()\n\tCreatBalls\nEnd Sub\n")
+    assert "\tbsVan.InitSw 0, 1050, 1051, 0, 0, 0, 0, 0" in out
+    assert "Controller.Switch(1054) = 1" in out
+
+
+def test_tmnt_pro_lair_lane_drops_the_ball_onto_the_lower_lock(tmp_path):
+    # PAD-896: a spelled LAIR lights Training at the LAIR lane, which on the
+    # Pro runs to LOWER LOCK 1 (emulator: a ball there that skipped the upper
+    # section started TRAINING LEVEL 2 and was held ~10 s). A ball going UP
+    # the table's t25 lane goes there; one rolling down is left alone.
+    out, m = _tmnt_patch("turtles_pro", "Sub t25_Hit:vpmTimer.PulseSw(25):End Sub\n")
+    assert "Sub t25_Hit:PadLairIn Me:End Sub" in out
+    assert "PulseSw(25)" not in out and "PulseSw(1066)" not in out
+    lines = out.split("\n")
+    a = lines.index("Sub PadLairIn(aTrigger)")
+    subs = "\n".join(lines[a:lines.index("End Sub", a) + 1])
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Class FakeStack", "Public Balls", "End Class",
+        "Class FakeBall", "Public VelY", "End Class",
+        "Class FakeTrigger", "Public Sub DestroyBall : WScript.Echo \"taken\" : End Sub", "End Class",
+        "Dim bsVan, ActiveBall, t25",
+        "Set bsVan = New FakeStack : bsVan.Balls = 0 : Set ActiveBall = New FakeBall",
+        "Set t25 = New FakeTrigger",
+        subs,
+        "ActiveBall.VelY = 4 : PadLairIn t25 : WScript.Echo \"down: lower \" & bsVan.Balls",
+        "ActiveBall.VelY = -6 : PadLairIn t25 : WScript.Echo \"up: lower \" & bsVan.Balls",
+        "PadLairIn t25 : WScript.Echo \"up, lower full: lower \" & bsVan.Balls"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert [x.strip() for x in r.stdout.strip().splitlines()] == [
+        "down: lower 0", "taken", "up: lower 1", "up, lower full: lower 1"], r.stdout + r.stderr
+    # the LE map has no lair_lane: its t25 stays as it was
+    out, _ = _tmnt_patch("turtles_le", "Sub t25_Hit:vpmTimer.PulseSw(25):End Sub\n")
+    assert "PadLairIn" not in out
+
+
+def test_tmnt_pro_disc_spins_on_its_pizza_motor_coil(tmp_path):
+    # PAD-896: the Pro has no SPIN DISC CW/CCW LEDs (the LE's); its disc is
+    # the PIZZA MOTOR coil, which DOF hears as Data East's 22. The game
+    # commands it again every ~2.25 s while it turns: one spin, stopped only
+    # once 3 s pass without a command.
+    tm = pytest.importorskip("patch_turtles_le")
+    pc = pytest.importorskip("padcontroller")
+    _, m = _tmnt_patch("turtles_pro", "")
+    assert 'SolCallback(16) = "PadPizzaMotor"          \' PIZZA MOTOR' in tm.gen_sol_callbacks(m)
+    assert "\tPadDiscTick" not in tm.gen_lamp_lines(m)
+    assert not any("Sub PadDiscTick" in x for x in tm.pad_subs(m))
+    assert pc.VpxMap("turtles_pro").dof_sols[22] == (9, 5)
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Class FakeTimer", "Public Due", "Public Sub AddTimer(t, cb) : Due = Due & cb & vbLf : End Sub",
+        "Public Sub Fire(k)", "Dim c : c = Split(Due, vbLf)(k)",
+        "Execute Left(c, InStr(c, \"'\") - 1)", "End Sub", "End Class",
+        "Dim vpmTimer, padDiscOn : Set vpmTimer = New FakeTimer : padDiscOn = 0",
+        "Sub SolPizzaSpin(v) : WScript.Echo \"spin \" & v : End Sub",
+        "\n".join(tm.disc_subs(m)),
+        "PadPizzaMotor True : PadPizzaMotor False : PadPizzaMotor True",
+        "vpmTimer.Fire 0 : WScript.Echo \"first timer ran out\"",
+        "vpmTimer.Fire 1 : WScript.Echo \"done\""]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert [x.strip() for x in r.stdout.strip().splitlines()] == [
+        "spin True", "first timer ran out", "spin False", "done"], r.stdout + r.stderr
+    _, le = _tmnt_patch("turtles_le", "")
+    assert "\tPadDiscTick" in tm.gen_lamp_lines(le)
+    assert "Sub PadDiscTick" in tm.pad_subs(le)
+
+
 def test_play_brings_the_tables_padspike2_up_to_date(tmp_path):
     vs = pytest.importorskip("vpxsetup")
     ours = open(os.path.join(VPX, "PADSPIKE2.vbs"), "rb").read()

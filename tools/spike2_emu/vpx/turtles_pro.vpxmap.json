@@ -2,7 +2,8 @@
   "_": [
     "turtles_pro on the same table as turtles_le.vpxmap.json, made from it by tmnt_pro_map.py:",
     "every switch, coil and LED renumbered by name through the Pro's rig tables. The Pro has no",
-    "van lock (the Party Wagon's LOWER LOCK 1/2 and its coil), so the table's van holds no ball.",
+    "van, but its Ninja Pizza Parlor is the same lock with one lower place (LOWER LOCK 1, UPPER",
+    "LOCK 1-3 and both coils), and the table's van kicker plays it (PAD-896).",
     "PAD-811: the LE card does not start a game in the emulator (rigbatch startcheck: 'no game",
     "started after three tries'; the Pro passes), so the Pro is what the table plays today.",
     "turtles_le on Bigus / Cheese3075's 'Teenage Mutant Ninja Turtles (Stern-Data East mash-up)' v2.86d:",
@@ -142,18 +143,18 @@
       "t49a, t32": "the two top-lane rollovers under TOP LANE LEFT / RIGHT (l49a, l32)",
       "t49": "the rollover at the top of the loop lane: the loop is already counted by sw50",
       "t55": "the floor rollover at the top-left of the orbit",
-      "t25": "the lane behind the LAIR bank that orbit and right-ramp balls come DOWN: not a shot",
+      "t25": "the LAIR lane behind the LAIR bank, under the upper flipper, entered above the left outlane: no switch of its own on the Pro (lair_lane)",
       "sw50": "the lane right of the pops, under the FOOT COMBO 2 LOOP insert (l22a): CENTER LOOP (GUESS)",
       "sw50a": "the right orbit lane with the spinner and the ROCKSTEADY / TRAINING / WEAPON inserts",
       "sw32": "rides Ramp008, the wire that returns a made left ramp to the left inlane",
       "sw40": "rides Ramp009 (center ramp) at its top, before it drops onto the return",
       "sw31": "rides Ramp009 midway: the exit opto (sw40) says it",
       "sw40a": "rides Ramp011 (the ramp from the right that crosses the top to the left): RIGHT RAMP ENTER while held, RAMP RIGHT EXIT 400 ms later (the patcher adds it)",
-      "sw41": "the van kicker: now a ball stack on LOWER LOCK 1/2 (switch_holds.van)"
+      "sw41": "the van kicker (the Pro's Ninja Pizza Parlor): a ball goes into the lock's upper section (switch_holds.van_upper), UPPER LOCK drops it to the lower (switch_holds.van)"
     }
   },
   "switch_holds": {
-    "_": "switches held while a ball sits somewhere (cvpmBallStack serves them)",
+    "_": "switches held while a ball sits somewhere (cvpmBallStack serves them); the lock has two sections (PAD-896): a ball shot in rests in van_upper (UPPER LOCK 1..3) until the UPPER LOCK coil drops it into van (LOWER LOCK), which the LOWER LOCK coil lets out",
     "trough": [
       77,
       76,
@@ -164,9 +165,17 @@
       78
     ],
     "van": [
-      50,
-      0
+      50
+    ],
+    "van_upper": [
+      51,
+      52,
+      53
     ]
+  },
+  "lair_lane": {
+    "_": "the Pro's LAIR lane runs to the lock's lower place: with Training lit, a ball onto LOWER LOCK 1 that did not pass the upper section starts it, and the game holds it ~10 s before LOWER LOCK lets it out (PAD-896, emulator). A ball going UP this trigger's lane is taken into bsVan (PadLairIn); one coming down is left alone",
+    "trigger": "t25"
   },
   "switch_extra": {
     "_": "edges the Data East script never sent, added by the patcher in the named sub",
@@ -184,7 +193,10 @@
     "_": [
       "Spike 2 coil [node, index] -> the SMALL number the table script sees it as (core.vbs indexes",
       "SolCallback(68) and friends by it); the flippers keep core.vbs's own Consts (sLRFlipper 46,",
-      "sLLFlipper 48, sULFlipper 36). device_xy.txt group 6 = node 8, group 7 = node 9 (group_node.txt)."
+      "sLLFlipper 48, sULFlipper 36). device_xy.txt group 6 = node 8, group 7 = node 9 (group_node.txt).",
+      "`dof`: the number DOF hears the coil as - Data East's tmnt_104 solenoid, which the table's DOF",
+      "config is keyed on (KickBallToLane 2, SolAutofire 4, SewerUpKick 7, pops 17-19, slings 20-21;",
+      "PAD-896); null = Data East had no such coil, nothing sent. The flippers keep core.vbs's 46/48."
     ],
     "1": {
       "coil": [
@@ -192,7 +204,8 @@
         1
       ],
       "name": "TROUGH",
-      "callback": "bsTrough.SolOut"
+      "callback": "bsTrough.SolOut",
+      "dof": 2
     },
     "2": {
       "coil": [
@@ -200,7 +213,8 @@
         4
       ],
       "name": "AUTO PLUNGER",
-      "callback": "SolAutofire"
+      "callback": "SolAutofire",
+      "dof": 4
     },
     "3": {
       "coil": [
@@ -208,7 +222,8 @@
         7
       ],
       "name": "LOWER LOCK",
-      "callback": "PadVanOut"
+      "callback": "PadVanOut",
+      "dof": 7
     },
     "4": {
       "coil": [
@@ -216,7 +231,8 @@
         8
       ],
       "name": "UPPER LOCK",
-      "callback": null
+      "callback": "PadVanDrop",
+      "dof": null
     },
     "8": {
       "coil": [
@@ -224,7 +240,8 @@
         6
       ],
       "name": "PIZZA MAGNET",
-      "callback": null
+      "callback": null,
+      "dof": null
     },
     "9": {
       "coil": [
@@ -232,7 +249,8 @@
         1
       ],
       "name": "UP POST",
-      "callback": null
+      "callback": null,
+      "dof": null
     },
     "11": {
       "coil": [
@@ -240,7 +258,8 @@
         2
       ],
       "name": "LEFT POP BUMPER",
-      "callback": null
+      "callback": null,
+      "dof": 18
     },
     "12": {
       "coil": [
@@ -248,7 +267,8 @@
         3
       ],
       "name": "RIGHT POP BUMPER",
-      "callback": null
+      "callback": null,
+      "dof": 17
     },
     "13": {
       "coil": [
@@ -256,7 +276,8 @@
         4
       ],
       "name": "BOTTOM POP BUMPER",
-      "callback": null
+      "callback": null,
+      "dof": 19
     },
     "14": {
       "coil": [
@@ -264,7 +285,8 @@
         2
       ],
       "name": "RIGHT SLINGSHOT",
-      "callback": null
+      "callback": null,
+      "dof": 21
     },
     "15": {
       "coil": [
@@ -272,7 +294,8 @@
         3
       ],
       "name": "LEFT SLINGSHOT",
-      "callback": null
+      "callback": null,
+      "dof": 20
     },
     "46": {
       "coil": [
@@ -296,7 +319,18 @@
         6
       ],
       "name": "UPPER LEFT FLIPPER",
-      "callback": null
+      "callback": null,
+      "dof": null
+    },
+    "16": {
+      "coil": [
+        9,
+        5
+      ],
+      "name": "PIZZA MOTOR",
+      "callback": "PadPizzaMotor",
+      "dof": 22,
+      "_": "the Pro's spinning pizza disc is this coil (the LE's is two LED channels, SPIN DISC CW / CCW, which the Pro has none of); the game commands it again every ~2.25 s while it turns (PAD-896, emulator: Ninja Pizza Multiball), so PadPizzaMotor spins the table's disc until 3 s pass without one. Data East span its disc on 22"
     }
   },
   "lamps": {
@@ -1007,17 +1041,6 @@
       ]
     ]
   },
-  "disc_leds": {
-    "_": "the spinning pizza disc's motor outputs are LED channels on this title (SPIN DISC CW / CCW): the table's ttPizza turntable follows them (GUESS that they drive the motor)",
-    "cw": [
-      9,
-      51
-    ],
-    "ccw": [
-      9,
-      52
-    ]
-  },
   "retrofit_lights": {
     "_": "Stern inserts with no table light: a new Light cloned from `clone`, placed at [x, y]",
     "clone": "l58a",
@@ -1089,15 +1112,11 @@
       "EPISODE lights order is a GUESS"
     ],
     "stern_switches_without_object": {
-      "51": "UPPER LOCK 1",
-      "52": "UPPER LOCK 2",
-      "53": "UPPER LOCK 3",
       "54": "UP LEFT FLIPPER EOS",
       "56": "LEFT FLIPPER EOS",
       "71": "RIGHT FLIPPER EOS"
     },
     "coils_without_object": [
-      "UPPER LOCK 8/8",
       "VAN DOOR 9/7",
       "VAN DIVERTER 9/8",
       "PIZZA MAGNET 9/6",

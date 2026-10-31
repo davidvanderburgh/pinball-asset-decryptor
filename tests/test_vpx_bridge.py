@@ -2327,7 +2327,10 @@ def test_the_grips_stand_aside_while_visual_pinball_is_paused(monkeypatch):
 
     g = pc.PlayerGrips.__new__(pc.PlayerGrips)
     g.u, g.hwnd, g.player, g.placed, g.drag, g.press, g.aside = U(), 77, 55, None, None, None, False
-    g.bridge = type("B", (), {"running": True, "player_hwnd": 55, "paused": False})()
+    # the real chain: VPX's Esc opens its menu and fires the table's Paused,
+    # whose `Controller.Pause = 1` is Bridge.set_pause (PadController._dynamic_)
+    g.bridge = pc.Bridge()
+    g.bridge.running, g.bridge.player_hwnd = True, 55
 
     def tick():
         calls.clear()
@@ -2336,10 +2339,10 @@ def test_the_grips_stand_aside_while_visual_pinball_is_paused(monkeypatch):
 
     assert tick() == [("SetWindowPos", (77, None, 10, 20, 400, 600, 0x50))]     # over the picture
     assert tick() == []                                                         # placed: nothing to do
-    g.bridge.paused = True                                                      # Esc: VPX pauses for its menu
+    g.bridge.set_pause(1)                                                       # Esc: VPX pauses for its menu
     assert tick() == [("ShowWindow", (77, 0))] and g.aside
     assert tick() == []                                                         # hidden once, not every tick
     assert any("grips aside" in s for s in logged)
-    g.bridge.paused = False                                                     # Resume
+    g.bridge.set_pause(0)                                                       # Resume
     assert tick() == [("SetWindowPos", (77, None, 10, 20, 400, 600, 0x50))]     # back, shown again
     assert not g.aside and any("grips back" in s for s in logged)

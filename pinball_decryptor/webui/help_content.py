@@ -361,7 +361,12 @@ HELP_CONTENT = {
          "- Blank puts the stock name back.\n"
          "- On Stern games with a Sound Test menu, the dialog suggests the menu's "
          "names (also saved in sound_test_names.csv). Play a number on the "
-         "machine's Sound Test menu, then type that number to find its entry."),
+         "machine's Sound Test menu, then type that number to find its entry.\n\n"
+         "Fixing many at once: correct the text column of the project's "
+         "callouts.csv (by hand or in a spreadsheet), save it, then **More > "
+         "Rename from callouts.csv…** renames every sound to its corrected text. "
+         "Characters a file name can't hold become _, and the names are "
+         "remembered like a rename in Properties."),
         ("Blip-free callouts (always on)",
          "Every replaced sound plays your audio all the way through, with no "
          "scrap of the original inside it. There is nothing to switch on.\n\n"

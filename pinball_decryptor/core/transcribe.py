@@ -1001,6 +1001,58 @@ def _keep_earlier_rows(assets_dir, rows):
     return sorted(list(rows) + kept, key=lambda r: r[0].lower())
 
 
+class CalloutsFile:
+    """A ``callouts.csv`` as the user left it, for Rename from callouts.csv
+    (PAD-894).  Spreadsheets save it back their own way (a French Excel
+    writes ``;`` and Windows-1252, others add a BOM), so the delimiter and
+    encoding are read from the file and :meth:`save` writes them back the
+    same.  ``rows`` are dicts keyed by the header as written; ``key(name)``
+    finds a column whatever its case or padding."""
+
+    def __init__(self, path):
+        self.path = path
+        with open(path, "rb") as f:
+            raw = f.read()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            self.encoding = "utf-8-sig"
+        else:
+            try:
+                raw.decode("utf-8")
+                self.encoding = "utf-8"
+            except UnicodeDecodeError:
+                self.encoding = "cp1252"
+        text = raw.decode(self.encoding, errors="replace")
+        head = text.split("\n", 1)[0]
+        self.delimiter = max(",;\t", key=head.count)
+        reader = csv.DictReader(text.splitlines(), delimiter=self.delimiter)
+        self.fields = list(reader.fieldnames or [])
+        self.rows = list(reader)
+        for want in ("file", "text"):
+            if self.key(want) is None:
+                raise ValueError(
+                    "%s has no \"%s\" column (its first line names the "
+                    "columns: folder, file, seconds, classification, text)."
+                    % (CALLOUTS_CSV, want))
+
+    def key(self, name):
+        for f in self.fields:
+            if (f or "").strip().lower() == name:
+                return f
+        return None
+
+    def get(self, row, name):
+        k = self.key(name)
+        return ((row.get(k) if k else "") or "").strip()
+
+    def save(self):
+        with open(self.path, "w", encoding=self.encoding, errors="replace",
+                  newline="") as f:
+            w = csv.DictWriter(f, self.fields, delimiter=self.delimiter,
+                               extrasaction="ignore")
+            w.writeheader()
+            w.writerows(self.rows)
+
+
 def _wav_seconds(path):
     """Play length of *path* in seconds (float), or None if unreadable."""
     import wave

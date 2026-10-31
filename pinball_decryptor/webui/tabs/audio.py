@@ -3875,8 +3875,6 @@ class AudioTab(FindOriginalsMixin, TabService):
         """OK in Audio Properties: rename the file in place (keeping its
         decode index), re-point the baseline, remember the name and Type."""
         from ...core import name_memory
-        from ...core.audio_slots import replace_with_retry
-        from ...core.checksums import rename_in_baseline
         slot = self._by_rel.get(rel)
         if slot is None:
             return False
@@ -3910,32 +3908,59 @@ class AudioTab(FindOriginalsMixin, TabService):
             return True
         new_base = ("%s - %s%s" % (prefix, new_label, ext) if new_label
                     else prefix + ext)
-        folder = rel.rpartition("/")[0]
-        new_rel = (folder + "/" + new_base) if folder else new_base
-        dst = os.path.join(os.path.dirname(slot.abs_path), new_base)
-        if os.path.exists(dst):
+        if os.path.exists(os.path.join(os.path.dirname(slot.abs_path),
+                                       new_base)):
             compat.messagebox.showerror(
                 "Audio Properties",
                 "A file named\n%s\nalready exists in that folder." % new_base)
             return False
-        md5 = name_memory.baseline_md5(self._scan_dir, rel)
-        if md5 is None and rel not in self._changed:
-            md5 = name_memory.file_md5(slot.abs_path)
         self._stop_playback()
         try:
-            replace_with_retry(slot.abs_path, dst)
+            new_rel, md5 = self._rename_slot(rel, new_label, new_cat)
         except OSError as e:
             compat.messagebox.showerror("Audio Properties",
                                         "Rename failed:\n%s" % e)
             return False
-        try:
-            rename_in_baseline(self._scan_dir, {rel: new_rel})
-        except OSError as e:
-            self.log(
-                "Replace Audio: renamed the file, but couldn't re-point the "
-                "extract baseline (%s) — the slot will read as \"changed on "
-                "disk\" until the next Extract, even though its audio is "
-                "untouched." % e, "error")
+        self._repoint_baseline({rel: new_rel})
+        self._sel = [new_rel]
+        self._refresh_type_filter()
+        self._refresh_list()
+        self._on_select(None)
+        if not md5:
+            note = " (not remembered: the slot is modded and has no baseline)"
+        elif new_label:
+            note = " (remembered for future extracts)"
+        else:
+            note = " (forgotten)"
+        self.log("Replace Audio: renamed %s → %s%s" % (rel, new_base, note),
+                 "info")
+        self._save_staged_changes()
+        return True
+
+    def _rename_slot(self, rel, new_label, new_cat):
+        """Rename decode slot *rel* on disk to ``<prefix> - <new_label>``
+        (bare prefix when blank), remember the name and Type against its
+        factory hash, and move every per-slot setting to the new rel.
+        Returns ``(new_rel, md5)`` (md5 None when nothing was remembered);
+        raises OSError when the target exists or the move fails.  The caller
+        re-points the extract baseline (:meth:`_repoint_baseline`) and
+        repaints the list."""
+        from ...core import name_memory
+        from ...core.audio_slots import replace_with_retry
+        slot = self._by_rel[rel]
+        prefix, _label, ext = name_memory.split_decode_name(
+            os.path.basename(rel))
+        new_base = ("%s - %s%s" % (prefix, new_label, ext) if new_label
+                    else prefix + ext)
+        folder = rel.rpartition("/")[0]
+        new_rel = (folder + "/" + new_base) if folder else new_base
+        dst = os.path.join(os.path.dirname(slot.abs_path), new_base)
+        if os.path.exists(dst):
+            raise OSError("a file named %s already exists" % new_base)
+        md5 = name_memory.baseline_md5(self._scan_dir, rel)
+        if md5 is None and rel not in self._changed:
+            md5 = name_memory.file_md5(slot.abs_path)
+        replace_with_retry(slot.abs_path, dst)
         if md5:
             try:
                 name_memory.remember(md5, new_label, category=new_cat)
@@ -3963,19 +3988,159 @@ class AudioTab(FindOriginalsMixin, TabService):
                     rels[i] = new_rel
         if self._current_rel == rel:
             self._clear_preview()
-        self._sel = [new_rel]
-        self._refresh_type_filter()
-        self._refresh_list()
-        self._on_select(None)
-        if not md5:
-            note = " (not remembered: the slot is modded and has no baseline)"
-        elif new_label:
-            note = " (remembered for future extracts)"
-        else:
-            note = " (forgotten)"
-        self.log("Replace Audio: renamed %s → %s%s" % (rel, new_base, note),
-                 "info")
-        self._save_staged_changes()
+        return new_rel, md5
+
+    def _repoint_baseline(self, renames):
+        """Re-point the extract baseline at renamed files (bytes unchanged),
+        so they don't read as "changed on disk"."""
+        from ...core.checksums import rename_in_baseline
+        if not renames:
+            return
+        try:
+            rename_in_baseline(self._scan_dir, renames)
+        except OSError as e:
+            self.log(
+                "Replace Audio: renamed the file, but couldn't re-point the "
+                "extract baseline (%s) — the slot will read as \"changed on "
+                "disk\" until the next Extract, even though its audio is "
+                "untouched." % e, "error")
+
+    # ------------------------------------------------------------------
+    # More > Rename from callouts.csv (PAD-894)
+    # ------------------------------------------------------------------
+    def _callout_renames(self, callouts):
+        """``(plan, unmatched, fixed)`` for *callouts*: plan is
+        ``[(rel, label, row)]`` for every row whose text names a scanned
+        decode sound something other than what it is called now.  A row finds
+        its sound by folder + file, or, when that name has changed since the
+        CSV was written, by its idx number in the same folder.  *unmatched*
+        counts rows with text whose sound is not here; *fixed* the sounds whose
+        names cannot change (not idx-numbered)."""
+        from ...core import name_memory
+        by_stem = {}
+        for rel in self._by_rel:
+            parts = name_memory.split_decode_name(rel.rpartition("/")[2])
+            if parts:
+                stem = parts[0].rpartition(" - ")[2].lower()
+                by_stem[(rel.rpartition("/")[0].lower(), stem)] = rel
+        plan, seen = [], set()
+        unmatched = fixed = 0
+        for row in callouts.rows:
+            text = callouts.get(row, "text")
+            fname = callouts.get(row, "file")
+            if not text or not fname:
+                continue
+            folder = callouts.get(row, "folder").replace("\\", "/").strip("/")
+            rel = (folder + "/" + fname) if folder else fname
+            if rel not in self._by_rel:
+                parts = name_memory.split_decode_name(fname)
+                stem = parts[0].rpartition(" - ")[2].lower() if parts else None
+                rel = by_stem.get((folder.lower(), stem))
+                if rel is None:
+                    unmatched += 1
+                    continue
+            if rel in seen:
+                continue
+            seen.add(rel)
+            parts = name_memory.split_decode_name(rel.rpartition("/")[2])
+            if parts is None:
+                fixed += 1
+                continue
+            label = name_memory.sanitize_label(text)
+            if label and label != parts[1]:
+                plan.append((rel, label, row))
+        return plan, unmatched, fixed
+
+    @rpc
+    def rename_from_callouts(self):
+        """More > Rename from callouts.csv…: give every sound the text its
+        row in the project's callouts.csv has now (corrected by hand or in a
+        spreadsheet), the way Audio Properties renames one: the idx number
+        stays, characters a file name can't hold become '_', and the name is
+        remembered for future extracts.  The CSV's file column follows."""
+        from ...core.transcribe import CALLOUTS_CSV, CalloutsFile
+        title = "Rename from callouts.csv"
+        if self._running():
+            return False
+        if not self._slots or not self._scan_dir:
+            compat.messagebox.showinfo(
+                title, "Scan an assets folder first — the audio table is "
+                       "empty.")
+            return False
+        path = os.path.join(self._scan_dir, CALLOUTS_CSV)
+        if not os.path.isfile(path):
+            compat.messagebox.showinfo(
+                title, "This project has no %s yet.\n\nAuto-name call-outs on "
+                       "the Extract tab writes one: a row per sound with the "
+                       "words heard in it, which you can correct and bring "
+                       "back here." % CALLOUTS_CSV)
+            return False
+        try:
+            callouts = CalloutsFile(path)
+        except (OSError, ValueError, csv.Error) as e:
+            compat.messagebox.showerror(title, "Couldn't read %s:\n%s"
+                                        % (CALLOUTS_CSV, e))
+            return False
+        plan, unmatched, fixed = self._callout_renames(callouts)
+        notes = []
+        if unmatched:
+            notes.append("%d row(s) name a sound this project doesn't have."
+                         % unmatched)
+        if fixed:
+            notes.append("%d sound(s) keep their names: only idx-numbered "
+                         "sounds can be renamed." % fixed)
+        if not plan:
+            compat.messagebox.showinfo(
+                title, "Every sound already has the name %s gives it."
+                       % CALLOUTS_CSV + "".join("\n\n" + n for n in notes))
+            return True
+        if not compat.messagebox.askyesno(
+                title, "Rename %d sound(s) to their text in %s?\n\nEach keeps "
+                       "its idx number, characters a file name can't hold "
+                       "become _, and the names are remembered for future "
+                       "extracts." % (len(plan), CALLOUTS_CSV)):
+            return False
+        self._stop_playback()
+        renames, failed, forgot = {}, [], 0
+        file_key = callouts.key("file")
+        for rel, label, row in plan:
+            try:
+                new_rel, md5 = self._rename_slot(
+                    rel, label, self._cats.get(rel) or "other")
+            except OSError as e:
+                failed.append("%s: %s" % (rel, e))
+                continue
+            renames[rel] = new_rel
+            row[file_key] = new_rel.rpartition("/")[2]
+            forgot += not md5
+        self._repoint_baseline(renames)
+        if renames:
+            try:
+                callouts.save()
+            except OSError as e:
+                self.log("Replace Audio: renamed the sounds, but couldn't "
+                         "update %s (%s)." % (CALLOUTS_CSV, e), "error")
+            self._sel = [renames.get(r, r) for r in self._sel]
+            self._refresh_type_filter()
+            self._refresh_list()
+            self._on_select(None)
+            self._save_staged_changes()
+        for line in failed:
+            self.log("Replace Audio: couldn't rename %s" % line, "error")
+        self.log("Replace Audio: renamed %d sound(s) from %s."
+                 % (len(renames), CALLOUTS_CSV),
+                 "success" if renames else "info")
+        msg = "Renamed %d sound(s)." % len(renames)
+        if forgot:
+            notes.append("%d of them were modded with no extract baseline, so "
+                         "their names are not remembered for future extracts."
+                         % forgot)
+        if failed:
+            notes.append("%d couldn't be renamed:\n%s" % (
+                len(failed), "\n".join(failed[:10])
+                + ("\n…" if len(failed) > 10 else "")))
+        compat.messagebox.showinfo(title, msg + "".join("\n\n" + n
+                                                        for n in notes))
         return True
 
     # ------------------------------------------------------------------

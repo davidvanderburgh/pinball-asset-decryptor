@@ -250,4 +250,5 @@ the tab tells you which of the two is wrong and writes nothing.
 - The first card you write builds the container. After that it is reused.
   On Apple silicon it runs emulated, so the first time takes a few minutes.
 - No password is asked for.
+- **Images on another disk** (under /Volumes) need sharing with Docker. Colima shares only your home folder, so the Log stops before writing and gives the two Terminal lines that share it.
 - The preview, the size strip and reading a card all work without Docker.

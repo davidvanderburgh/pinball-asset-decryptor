@@ -453,6 +453,73 @@ def _engine_name():
     return names[-1] if names else ""
 
 
+def _share_roots(unseen):
+    """The folders to share so the container sees *unseen*: /Volumes whole
+    for anything on it (so the next disk plugged in is seen too), any other
+    folder by name, and nothing for what is under home (always shared)."""
+    home = _norm(os.path.expanduser("~"))
+    roots = []
+    for d in unseen:
+        if d == home or d.startswith(home + "/"):
+            continue                    # the $HOME mount has it
+        r = "/Volumes" if d.startswith("/Volumes/") else d
+        if r not in roots:
+            roots.append(r)
+    return roots
+
+
+def colima_fix(unseen):
+    """The commands that make colima share *unseen*: ``[stop, start]``
+    argv, or None when the engine is not colima or the command is not
+    there.  The start keeps every folder the profile already shares
+    (:func:`emulate_core.colima_start_argv`)."""
+    from .emulate_core import colima_start_argv, which_tool
+    engine = _engine_name()
+    if not (engine == "colima" or engine.startswith("colima-")):
+        return None
+    colima = which_tool("colima")
+    if not colima:
+        return None
+    profile = engine[len("colima-"):]
+    p = ["-p", profile] if profile else []
+    return [[colima, "stop"] + p,
+            colima_start_argv(colima, profile, _share_roots(unseen))]
+
+
+class Unshared(RuntimeError):
+    """The container cannot see *unseen*; ``str()`` is what to tell the
+    user, and ``fix`` the :func:`colima_fix` commands that would share them
+    (None when the engine is not colima)."""
+
+    def __init__(self, unseen):
+        self.unseen = list(unseen)
+        self.fix = colima_fix(self.unseen)
+        super().__init__(unshared_reason(self.unseen))
+
+
+def share_folders(fix, log=None):
+    """Run *fix* (:func:`colima_fix`), every line of it into *log*.  True
+    when every command succeeded.  Minutes the first time, so a worker
+    thread's job."""
+    for argv in fix:
+        if log:
+            log("$ " + " ".join(shlex.quote(a) for a in argv))
+        try:
+            p = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True,
+                                 encoding="utf-8", errors="replace")
+        except OSError as exc:
+            if log:
+                log(str(exc))
+            return False
+        for line in p.stdout:
+            if log:
+                log(line.rstrip("\n"))
+        if p.wait() != 0:
+            return False
+    return True
+
+
 def unshared_reason(unseen):
     """What to tell the user when the container cannot see *unseen*.
 
@@ -468,14 +535,7 @@ def unshared_reason(unseen):
     if engine == "colima" or engine.startswith("colima-"):
         profile = engine[len("colima-"):]
         p = " -p %s" % shlex.quote(profile) if profile else ""
-        home = _norm(os.path.expanduser("~"))
-        roots = []
-        for d in unseen:
-            if d == home or d.startswith(home + "/"):
-                continue                    # the $HOME mount has it
-            r = "/Volumes" if d.startswith("/Volumes/") else d
-            if r not in roots:
-                roots.append(r)
+        roots = _share_roots(unseen)
         mounts = "".join(" --mount %s" % shlex.quote(r + ":w")
                          for r in roots)
         return ("The Linux toolbox cannot see %s: Colima shares only your "
@@ -533,7 +593,7 @@ def ensure_container(paths, repo_src, log=None):
     unseen = unseen_mounts([cache_root()] + want)
     if unseen:
         _docker(["rm", "-f", CONTAINER], timeout=30)
-        raise RuntimeError(unshared_reason(unseen))
+        raise Unshared(unseen)
 
 
 def exec_argv(line):

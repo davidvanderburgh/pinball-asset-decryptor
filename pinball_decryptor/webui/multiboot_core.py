@@ -13274,6 +13274,16 @@ class MultibootPanel:
             try:
                 _mac.ensure_container(self._run_paths(), rig_repo_dir(),
                                       log=self._append)
+            except _mac.Unshared as exc:
+                # Offered once per folder: a Colima that came back still
+                # blind gets the sentence, not the same question again.
+                tried = getattr(self, "_share_tried", set())
+                if (exc.fix and not set(exc.unseen) <= tried
+                        and self._share_and_retry(
+                            exc, (cmds, on_step, on_done, quiet, on_tick))):
+                    return True
+                self._error(str(exc))
+                return False
             except Exception as exc:                    # noqa: BLE001
                 self._error(str(exc))
                 return False
@@ -13441,6 +13451,62 @@ class MultibootPanel:
                 pass
             self._drain_job = None
         self._drain()
+
+    def _share_and_retry(self, exc, run):
+        """Colima cannot see this run's folders (PAD-903): offer to share
+        them, restarting Colima the way :func:`multiboot_docker.colima_fix`
+        says, and start *run* again once it is back.  False when the user
+        said no, so the run stops with the sentence instead.
+
+        THE APP DOES IT rather than handing over two Terminal lines (David,
+        2026-08-19: a Mac handed a command to type was being asked to do the
+        app's job).  The ISOs are GBs of the user's own data, so copying
+        them in the way the emulator's rig is copied is no answer; sharing
+        /Volumes is, once, and Colima keeps it for every start after.
+        """
+        folders = "\n".join("  " + d for d in exc.unseen)
+        if not messagebox.askyesno(
+                "Share these folders with Colima?",
+                "The Linux tools cannot see:\n\n%s\n\nColima shares only "
+                "your home folder with its Linux machine, so these would "
+                "look empty. Restart Colima sharing them too? It takes a "
+                "minute, and stops the emulator if it is running. Colima "
+                "remembers it for next time." % folders):
+            return False
+        self._share_tried = (getattr(self, "_share_tried", set())
+                             | set(exc.unseen))
+        self._set_busy(True)
+        self._write("[multi-boot] restarting Colima to share %s"
+                    % ", ".join(exc.unseen))
+
+        def work():
+            ok = _mac.share_folders(exc.fix, log=self._append)
+
+            def back():
+                self._set_busy(False)
+                if self._cancelled:
+                    self._cancelled = self._cancel_pending = False
+                    self._phase_cancelled()
+                elif ok:
+                    self._write("[multi-boot] Colima is back; starting the "
+                                "run again")
+                    cmds, on_step, on_done, quiet, on_tick = run
+                    self._run_commands(cmds, on_step, on_done, quiet,
+                                       on_tick=on_tick)
+                else:
+                    self._error("Colima did not restart (see the Log). "
+                                + str(exc))
+            self._ui(back)
+
+        threading.Thread(target=work, daemon=True).start()
+        if self._drain_job is not None:
+            try:
+                self._timer().after_cancel(self._drain_job)
+            except (tk.TclError, ValueError):
+                pass
+            self._drain_job = None
+        self._drain()
+        return True
 
     def _run_paths(self):
         """Every host path a run reads or writes, for the container's bind

@@ -986,7 +986,8 @@ def engine_setup_plan(cli=None):
                else [tool, "install"] + packages)
     steps = ["Install %s with %s. Nothing already on this Mac is changed or "
              "removed." % (label, mgr),
-             "Start Colima, the Linux machine the docker command talks to. It "
+             "Start Colima, the Linux machine the docker command talks to, "
+             "sharing your home folder and your disks (/Volumes) with it. It "
              "runs in the background and takes a couple of minutes the first "
              "time, while it downloads its disk image."]
     if admin:
@@ -994,6 +995,91 @@ def engine_setup_plan(cli=None):
                      "dialog, because %s installs system-wide." % mgr)
     return {"manager": mgr, "packages": packages, "label": label,
             "admin": admin, "install": install, "steps": steps}
+
+
+def colima_profile_dir(profile=""):
+    """The folder colima keeps *profile*'s ``colima.yaml`` in, found the
+    way colima's own config/files.go finds it: ``$COLIMA_HOME`` when that
+    exists, else ``~/.colima``, else ``$XDG_CONFIG_HOME/colima`` (or
+    ``~/.config/colima``) when ``~/.colima`` is not there.  The default
+    profile's folder is "default"; ``-p work``'s is "work"."""
+    name = profile or "default"
+    home = os.environ.get("COLIMA_HOME") or ""
+    if not os.path.isdir(home):
+        home = os.path.expanduser("~/.colima")
+        xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser(
+            "~/.config")
+        alt = os.path.join(xdg, "colima")
+        if not os.path.isdir(home) and (os.environ.get("XDG_CONFIG_HOME")
+                                        or os.path.isdir(alt)):
+            home = alt
+    return os.path.join(home, name)
+
+
+def colima_mounts(profile=""):
+    """``[(location, writable)]`` from *profile*'s ``colima.yaml``: the
+    folders it was told to share.  ``[]`` is colima's default (the home
+    folder alone), and also what an unreadable config gives.
+
+    Read by line rather than with a YAML library, which the app does not
+    ship: colima writes its own file, as ``mounts: []`` or as a list of
+    ``- location: X`` / ``writable: B`` items under ``mounts:``."""
+    try:
+        with open(os.path.join(colima_profile_dir(profile), "colima.yaml"),
+                  encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return []
+    out, inside = [], False
+    for line in lines:
+        bare = line.split(" #", 1)[0].rstrip()
+        if not inside:
+            inside = bare == "mounts:"
+            continue
+        if bare and not bare[0].isspace() and not bare.startswith("-"):
+            break                                   # the next top-level key
+        item = bare.strip()
+        if item.startswith("- "):
+            item = item[2:].strip()
+            out.append(["", False])
+        if not out:
+            continue
+        key, _sep, val = item.partition(":")
+        val = val.strip().strip("'\"")
+        if key == "location":
+            out[-1][0] = os.path.expanduser(val)
+        elif key == "writable":
+            out[-1][1] = val.lower() == "true"
+    return [(loc, w) for loc, w in out if loc]
+
+
+def colima_start_argv(colima, profile="", share=("/Volumes",)):
+    """``colima start`` sharing *share* with its Linux machine as well as
+    what it shares already (PAD-903).
+
+    Colima shares only the home folder, and a docker bind mount of a folder
+    it does not share is its VM's own folder of that name, empty (PAD-885):
+    the Multi-boot tab's ISOs on an external disk under /Volumes looked like
+    nothing at all.  ``--mount`` REPLACES the list rather than adding to it,
+    so every folder the profile already mounts is named again - home first,
+    which is in that list only implicitly while the list is empty, and
+    which the emulator's rig and the toolbox's cache live in.  Colima keeps
+    the list in its config, so a later plain ``colima start`` keeps it.
+    """
+    home = os.path.expanduser("~").replace("\\", "/").rstrip("/")
+    have = [(loc.replace("\\", "/").rstrip("/") or "/", w)
+            for loc, w in colima_mounts(profile)]
+    if not have:
+        have = [(home, True)]
+    for d in share:
+        d = d.replace("\\", "/").rstrip("/") or "/"
+        if not any(loc == "/" or d == loc or d.startswith(loc + "/")
+                   for loc, _w in have):
+            have.append((d, True))
+    argv = [colima, "start"] + (["-p", profile] if profile else [])
+    for loc, w in have:
+        argv += ["--mount", loc + (":w" if w else "")]
+    return argv
 
 
 def parse_status(text):

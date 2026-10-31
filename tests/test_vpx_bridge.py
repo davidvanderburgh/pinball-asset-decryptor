@@ -683,7 +683,7 @@ def test_launcher_takes_its_rig_as_root_on_the_apps_board(tmp_path, monkeypatch)
     monkeypatch.setattr(pl, "win_python", lambda: None)
     monkeypatch.setattr(pl, "account", lambda d=None: ("pad", "/home/pad"))
     monkeypatch.setattr(pl, "app_home", lambda d: "/mnt/wsl/paddata/spike2")
-    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p: "/mnt/c/Users/me/.pad-rig")
+    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p, distro=None: "/mnt/c/Users/me/.pad-rig")
     calls = []
 
     class R:
@@ -731,6 +731,7 @@ def test_launcher_says_wsl_is_missing_not_no_rig_slot(tmp_path, monkeypatch):
     (vp / "tables" / "Foo (PAD).vpx").write_bytes(b"x")
     monkeypatch.setattr(vs, "find_vpx", lambda: str(vp))
     monkeypatch.setattr(pl, "distro", lambda: None)
+    monkeypatch.setattr(vs, "missing_directx", lambda vpx: "")   # PAD-882's own test
     opened = []
     monkeypatch.setattr(vs.subprocess, "Popen", lambda *a, **k: opened.append(a))
     assert vs.open_table("Foo (PAD).vpx") == pl.NO_LINUX and opened == []
@@ -2042,3 +2043,78 @@ def test_a_table_patched_before_is_quieted_in_place_once(tmp_path, vpxfile):
     assert vs.read_sound(t.ole.openstream("GameStg/Sound1").read())["size"] == 882
     t.ole.close()
     assert vs.quiet_in_place(str(p)) == []                              # once
+
+
+# ------------------------------------------- PAD-882: paths and DirectX -----
+
+def test_a_launch_converts_its_paths_in_its_own_distro(monkeypatch, tmp_path):
+    """PAD-882: Jim-Beam's installed app handed bash `C:\Program Files\...
+    \riglock.sh`: the launch into PAD-Runtime asked the machine's DEFAULT
+    distro to convert its Windows paths, that distro could not answer, and
+    the path came back unchanged. Every path is now converted by the distro
+    the run is in, and a drive-letter path becomes /mnt/<drive>/... even
+    when no WSL answers."""
+    import padpath
+    pl = pytest.importorskip("padlaunch")
+    asked = []
+
+    def fake_wsl(args, distro=None):
+        asked.append(distro)
+        if distro != "PAD-Runtime":
+            return None                         # the default distro: no answer
+        p = args[-1]
+        return "/mnt/%s%s" % (p[0].lower(), p[2:].replace("\\", "/"))
+
+    monkeypatch.setattr(padpath, "_wsl", fake_wsl)
+    monkeypatch.setattr(padpath, "_WIN_CACHE", {})
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    rig = r"C:\Program Files\Pinball Asset Decryptor\tools\spike2_emu"
+    monkeypatch.setattr(pl, "rig_dir", lambda: rig)
+    la = pl.Launch("jaws_le", r"C:\_Ricker\Pinball\Jaws\jaws_le-1_02_0.Release.16G.sdcard.raw",
+                   dist="PAD-Runtime")
+    assert la.rig_wsl == "/mnt/c/Program Files/Pinball Asset Decryptor/tools/spike2_emu"
+    assert "PAD-Runtime" in asked and None not in asked
+    monkeypatch.setattr(pl, "app_home", lambda d: "")
+    la.slot = 1
+    env = la.env()
+    assert "PAD_CARD=/mnt/c/_Ricker/Pinball/Jaws/jaws_le-1_02_0.Release.16G.sdcard.raw" in env
+    assert all(":" not in e.split("=", 1)[1][:3] for e in env if e.startswith(("PAD_BOARD=", "PAD_CARD=")))
+    # no WSL answering at all: still a Linux path, never the Windows one
+    monkeypatch.setattr(padpath, "_wsl", lambda args, distro=None: None)
+    monkeypatch.setattr(padpath, "_WIN_CACHE", {})
+    assert padpath.to_wsl(rig + r"\riglock.sh", "PAD-Runtime") == \
+        "/mnt/c/Program Files/Pinball Asset Decryptor/tools/spike2_emu/riglock.sh"
+    assert padpath.to_wsl("/already/linux", "PAD-Runtime") == "/already/linux"
+    assert padpath.to_wsl(r"\server\share\x", "PAD-Runtime") == r"\server\share\x"
+
+
+def test_play_says_when_directx_is_missing(monkeypatch, tmp_path):
+    """PAD-882: VPinballX64.exe imports XINPUT1_3.dll, which only Microsoft's
+    DirectX End-User Runtime installs; without it Windows stopped Play with a
+    system-error box. Play now says so before starting Visual Pinball."""
+    pl = pytest.importorskip("padlaunch")
+    vs = pytest.importorskip("vpxsetup")
+    win = tmp_path / "Windows"
+    (win / "System32").mkdir(parents=True)
+    vp = tmp_path / "vp"
+    (vp / "tables").mkdir(parents=True)
+    (vp / "tables" / "Foo (PAD).vpx").write_bytes(b"x")
+    monkeypatch.setattr(vs.sys, "platform", "win32")
+    monkeypatch.setenv("SystemRoot", str(win))
+    assert vs.missing_directx(str(vp)) == vs.NO_DIRECTX
+    assert "XINPUT1_3.dll" in vs.NO_DIRECTX and "DirectX End-User Runtime" in vs.NO_DIRECTX
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(vs, "find_vpx", lambda: str(vp))
+    monkeypatch.setattr(pl, "distro", lambda: "PAD-Runtime")
+    monkeypatch.setattr(pl, "no_linux", lambda d=None: "")
+    monkeypatch.setattr(vs, "refresh_system_script", lambda t: False)
+    opened = []
+    monkeypatch.setattr(vs.subprocess, "Popen", lambda *a, **k: opened.append(a))
+    assert vs.open_table("Foo (PAD).vpx") == vs.NO_DIRECTX and opened == []
+    (win / "System32" / "xinput1_3.dll").write_bytes(b"")
+    assert vs.missing_directx(str(vp)) == ""
+    assert vs.open_table("Foo (PAD).vpx") == "ok" and len(opened) == 1
+    # Visual Pinball's own folder carrying the DLL counts too
+    (win / "System32" / "xinput1_3.dll").unlink()
+    (vp / "xinput1_3.dll").write_bytes(b"")
+    assert vs.missing_directx(str(vp)) == ""

@@ -298,6 +298,37 @@ def refresh_system_script(tables):
         return False
 
 
+#: What Play says when VPinballX64.exe cannot start: it imports XINPUT1_3.dll,
+#: which is not part of Windows but of Microsoft's DirectX End-User Runtime
+#: (June 2010). Without it Windows stops the launch with a "system error" box
+#: naming the DLL, and nothing here said why (PAD-882).
+NO_DIRECTX = ("Visual Pinball cannot start on this PC: XINPUT1_3.dll is missing. "
+              "It comes with Microsoft's DirectX End-User Runtime (June 2010): "
+              "install that, then press Play again.")
+
+
+def missing_directx(vpx):
+    """NO_DIRECTX when VPinballX64.exe would not find XINPUT1_3.dll (in its
+    own folder or Windows' 64-bit system folder), else "". Off Windows, or
+    when the system folder cannot be told, nothing is refused.
+    PAD_VPX_SYSDIR names the system folder instead (the proof shots: a PC
+    without the DLL, with no Visual Pinball started)."""
+    if sys.platform != "win32":
+        return ""
+    root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or ""
+    # a 32-bit Python sees System32 as SysWOW64; Sysnative is the real one
+    sysdirs = ([os.environ["PAD_VPX_SYSDIR"]] if os.environ.get("PAD_VPX_SYSDIR")
+               else [os.path.join(root, "Sysnative"), os.path.join(root, "System32")] if root
+               else [])
+    sysdir = next((d for d in sysdirs if os.path.isdir(d)), None)
+    if sysdir is None:
+        return ""
+    for d in (vpx, sysdir):
+        if os.path.isfile(os.path.join(d, "xinput1_3.dll")):
+            return ""
+    return NO_DIRECTX
+
+
 def open_table(name):
     vpx = find_vpx()
     if not vpx:
@@ -310,6 +341,9 @@ def open_table(name):
         return "There is no %s in %s." % (name, tables)
     # no Linux, no game: say so here, not from inside the opened table
     why = padlaunch.no_linux(padlaunch.distro())
+    if why:
+        return why
+    why = missing_directx(vpx)
     if why:
         return why
     refresh_system_script(tables)

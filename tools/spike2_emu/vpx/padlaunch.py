@@ -303,7 +303,9 @@ class Launch:
         self.slot = None
         self.proc = None
         self.as_root = False
-        self.rig_wsl =padpath.to_wsl(rig_dir()) if padpath.is_windows_path(rig_dir()) else rig_dir()
+        # every path below is for THIS run's distro, so that distro converts
+        # it, not the machine's default (PAD-882)
+        self.rig_wsl = padpath.to_wsl(rig_dir(), self.distro)
         self.logfile = os.path.join(os.path.dirname(LOG), "padvpx-%s.log" % title)
         self.home = None        # app_home(), asked once
 
@@ -325,7 +327,7 @@ class Launch:
         """PAD_BOARD (see BOARD) and the app's PAD_HOME (see app_home)."""
         out = []
         if sys.platform == "win32":
-            out.append("PAD_BOARD=%s" % padpath.to_wsl(BOARD))
+            out.append("PAD_BOARD=%s" % padpath.to_wsl(BOARD, self.distro))
         if self.home is None:
             self.home = app_home(self.distro)
         if self.home:
@@ -362,7 +364,7 @@ class Launch:
         return self.slot
 
     def env(self):
-        card = padpath.to_wsl(self.card) if padpath.is_windows_path(self.card) else self.card
+        card = padpath.to_wsl(self.card, self.distro)
         # visible (the LCD window) and audible, but NO virtual playfield
         # window: Visual Pinball is the playfield, and the rig's own would
         # take the keyboard from it the moment it opened
@@ -372,7 +374,7 @@ class Launch:
                "PAD_HIDDEN=0", "PAD_PLAYFIELD=%s" % playfield, "PAD_AUDIO=1", "PAD_CARD=%s" % card]
         py = win_python()
         if py:
-            env.append("PAD_WINPYTHON=%s" % padpath.to_wsl(py))
+            env.append("PAD_WINPYTHON=%s" % padpath.to_wsl(py, self.distro))
         return env
 
     def head(self):

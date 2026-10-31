@@ -140,11 +140,16 @@ Dim swMemoryProtect : swMemoryProtect = 0
 ' ---- the keyboard. core.vbs's KeyDownHandler/KeyUpHandler call these and
 ' leave them to the system script (sega.vbs defines Whitestar's); the table
 ' script calls the handlers from Table1_KeyDown/KeyUp.
+' The upper flippers follow VPMKeys.vbs's keyStagedFlipperL/R, which are the
+' flipper keys themselves unless a table sets them: the machine's button
+' closes both its switches, so the left key flips the upper left flipper too
+' (PAD-878). Visual Pinball's own StagedLeftFlipperKey is Left Windows by
+' default, and reading it left Godzilla's third flipper on a key nobody holds.
 Function vpmKeyDown(ByVal keycode)
 	vpmKeyDown = True ' Assume we handle the key
 	Dim stagedFlipperL, stagedFlipperR
-	If keyStagedFlipperL & "" = "" Then stagedFlipperL = -1 Else stagedFlipperL = StagedLeftFlipperKey
-	If keyStagedFlipperR & "" = "" Then stagedFlipperR = -1 Else stagedFlipperR = StagedRightFlipperKey
+	If keyStagedFlipperL & "" = "" Then stagedFlipperL = -1 Else stagedFlipperL = keyStagedFlipperL
+	If keyStagedFlipperR & "" = "" Then stagedFlipperR = -1 Else stagedFlipperR = keyStagedFlipperR
 	With Controller
 		Select Case keycode
 			Case LeftFlipperKey
@@ -178,8 +183,8 @@ End Function
 Function vpmKeyUp(ByVal keycode)
 	vpmKeyUp = True ' Assume we handle the key
 	Dim stagedFlipperL, stagedFlipperR
-	If keyStagedFlipperL & "" = "" Then stagedFlipperL = -1 Else stagedFlipperL = StagedLeftFlipperKey
-	If keyStagedFlipperR & "" = "" Then stagedFlipperR = -1 Else stagedFlipperR = StagedRightFlipperKey
+	If keyStagedFlipperL & "" = "" Then stagedFlipperL = -1 Else stagedFlipperL = keyStagedFlipperL
+	If keyStagedFlipperR & "" = "" Then stagedFlipperR = -1 Else stagedFlipperR = keyStagedFlipperR
 	With Controller
 		Select Case keycode
 			Case LeftFlipperKey

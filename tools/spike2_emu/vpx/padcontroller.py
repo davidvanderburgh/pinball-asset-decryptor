@@ -903,6 +903,7 @@ class Bridge:
         self.poll_fail = 0
         self.last_poll_ms = 0.0
         self._fake = {}                    # name -> state for switch_fakes
+        self._early = {}                   # switch id -> level the table set before the run was up
 
     # -- lifecycle
     def set_game(self, title):
@@ -916,7 +917,8 @@ class Bridge:
         """Attach to the title's run, or START one (padlaunch) when none is
         up and a card for the title is known: Run returns at once, the poll
         thread attaches when the game is up, and the table plays from then
-        on - switches before that are dropped, Visual Pinball never waits."""
+        on - switches before that are kept and handed over at attach (the
+        table's trough, set once at its Init), Visual Pinball never waits."""
         self.rig = Rig(self.title)
         self.pipe = None
         self.launch = None
@@ -957,7 +959,24 @@ class Bridge:
 
     def _attach(self, data):
         """The run is up: read its tables, open the switch pipe, own the balls."""
-        self.pipe = SwitchPipe(self.rig)
+        pipe = SwitchPipe(self.rig)
+        with self.lock:
+            early, self._early = self._early, {}
+            self.pipe = pipe
+        # PAD-878: what the table said while the game booted. A table sets its
+        # trough once, at Init - Star Wars' physical trough by PadTroughSync,
+        # the others by bsTrough.Balls - long before a run it started is up,
+        # and those edges used to be dropped. The renderer's own boot fill
+        # covered for it only where the slot had the title's switch list: on
+        # Star Wars Pro's first run (its list cannot be read from the binary)
+        # the game came up on an empty trough and searched for its balls.
+        # A switch the table has set again since the pipe went up is newer.
+        early = {sid: level for sid, level in sorted(early.items()) if sid not in pipe.held}
+        for sid, level in early.items():
+            pipe.set(sid, level)
+        if early:
+            log("handed the game %d switch(es) the table set while it booted: %s"
+                % (len(early), " ".join("%d=%d" % kv for kv in early.items())))
         self._read_tables(data)
         for name, f in self.map.fakes.items():
             self._fake[name] = {"open": 0}
@@ -1104,15 +1123,24 @@ class Bridge:
     # -- switches
     def set_switch(self, n, level):
         sid = self.map.switch_id(n)
-        if 0 < sid < padsw.MAX_ID and self.pipe:
-            if self.pipe.held.get(sid) != (1 if level else 0):
-                log("sw %s -> id %d = %d" % (n, sid, 1 if level else 0))
-            self.pipe.set(sid, level)
+        if not 0 < sid < padsw.MAX_ID:
+            return
+        if not self.pipe:
+            with self.lock:
+                if not self.pipe:
+                    # the run is not up yet: kept for _attach, which hands it over
+                    self._early[sid] = 1 if level else 0
+                    return
+        if self.pipe.held.get(sid) != (1 if level else 0):
+            log("sw %s -> id %d = %d" % (n, sid, 1 if level else 0))
+        self.pipe.set(sid, level)
 
     def get_switch(self, n):
         sid = self.map.switch_id(n)
         if sid <= 0:
             return False
+        if not self.pipe and sid in self._early:
+            return bool(self._early[sid])
         if self.pipe and sid in self.pipe.held:
             return bool(self.pipe.held[sid])
         return bool(self.mrg[sid]) if sid < len(self.mrg) else False

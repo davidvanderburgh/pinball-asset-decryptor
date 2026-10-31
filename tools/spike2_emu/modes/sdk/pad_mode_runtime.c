@@ -3975,6 +3975,28 @@ static void status_bar_arm(void)
         fn("status_bar"));
 }
 
+/* ---- the Bond Women multiplier (PAD-889) ---------------------------------------------------------------------------
+ * James Bond LE 1.06 (read off the game program): each Bond Woman collected sets a bit of the player's mask (0x52194),
+ * and the multiplier is the bits counted plus one, held to 2-7 (0x5211c). Its start (0x8d4d0) puts that in byte +0x20
+ * of its record (0x81a064) and runs process 0x1ab for a time from adjustment 225, the game's Double Scoring's process
+ * too. The getter (`site bond_women_mult`, 0x8c9e4: Pro 0x8c89c) is the byte while the process runs and 1 otherwise; a
+ * hook of the game's (0x9d334) adds it to the playfield multiplier score_add multiplies by (data score_mult). */
+unsigned pm_bond_women_mult(void)
+{
+    unsigned f = fn("bond_women_mult"), m;
+    if (!f) return 1;
+    m = ((unsigned (*)(void))(unsigned long)f)() & 0xff;
+    return m ? m : 1;
+}
+
+static void bond_women_arm(void)
+{
+    if (fn("bond_women_mult"))
+        say("Bond Women multiplier: on - a mode can read the game's own 2X-7X (getter 0x%08x)", fn("bond_women_mult"));
+    else if (site("bond_women_mult"))
+        say("Bond Women multiplier: off - the port's getter does not match this game program");
+}
+
 /* ---- display priority (item 154 display) --------------------------------------------------------
  * HOW THE GAME LAYERS ITS DISPLAY (read off Godzilla Pro 1.15 and Premium 1.16, measured in the
  * emulator with display_probe.c; MODE_SDK.md "Display priority"):
@@ -17207,6 +17229,7 @@ static void pad_mode_start(void)
     backdrop_arm();                           /* hud-layers: a clip behind the HUD */
     ck_arm();                                 /* PAD-530: a mode's clip comes back after the game's */
     status_bar_arm();                         /* PAD-521: the game's own status bar */
+    bond_women_arm();                         /* PAD-889: the game's own Bond Women multiplier */
     frame_arm();                              /* PAD-301: a full-screen clip drawn at the frame hand-over */
     if ((can & PM_CAN_OWN_SOUND) && !lookup_hooked && hook(fn("sound_lookup"), on_sound_lookup))
         lookup_hooked = 1;

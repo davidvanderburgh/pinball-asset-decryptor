@@ -45,6 +45,8 @@ def val(e):
         return "balls in play"
     if k == "player":
         return "the player up"
+    if k == "women_mult":                                                    # PAD-889
+        return "the Bond Women multiplier"
     if k == "timer_left":
         return "ms left on %s" % (e.get("timer") or "?")
     if k == "combo_chain":                                           # PAD-708

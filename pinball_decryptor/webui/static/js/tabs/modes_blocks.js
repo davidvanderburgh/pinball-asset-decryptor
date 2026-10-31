@@ -86,6 +86,7 @@ const TIP = {
   comboStep: "A step of the combo: a shot of the game's, any shot, or a lit shot (one this mode has lit as it is made, not held dark)",
   comboOr: "Or another shot: this step is made by any one of them (a pop bumper or the Mecha lane), up to four",
   comboName: "Its name, for the value \"shots made of a combo\" (a HUD counter's 2 of 3); none is needed otherwise",
+  women_mult: "James Bond's Bond Women multiplier as it is now: 2 to 7 while the game's own runs, 1 when none does. The game already multiplies every Score block's points by it, as it does its own shots, so use it to show it (a HUD counter, Show words) or to decide on it in an If, not to multiply a score by again.",
   combo_chain: "The combos in a row for the player up: one more for each shot that makes a combo, back to 0 when the window of the last one lapses with no other, when the ball ends, and as the mode starts and ends. The \"x combo\" to multiply a score by, or a COMBO counter on the HUD.",
   comboSteps: "How many of a combo's shots the player has made so far, in its order and in its window (2 after the ramp and the loop of ramp, then loop, then ramp); 0 once its window lapses.",
   wait: "A Start the mode block while a multiball or one of the game's own modes runs does nothing, and the mode stays ready: the next one after it starts it, as the example modes do.",
@@ -228,7 +229,9 @@ function valueTemplates(ch, vars, timers, prog = {}) {
   return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" }, { k: "mode_hits", shot: (ch.shots || [])[0] || "" },
     { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "timer_left", timer: ((timers || [])[0] || {}).name || "" },
     { k: "combo_chain" }, { k: "combo_steps", combo: comboNames(prog)[0] || "" },          // PAD-708
-    { k: "balls" }, { k: "player" }, { k: "op", op: "+", a: null, b: null }];
+    { k: "balls" }, { k: "player" },
+    ...(ch.bond_women ? [{ k: "women_mult" }] : []),                                      // PAD-889: Bond LE / Pro only
+    { k: "op", op: "+", a: null, b: null }];
 }
 
 // PAD-708: the names of the program's combos (a When shots are made one after another's own name)
@@ -243,7 +246,8 @@ const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and
 
 const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot this ball", mode_hits: "hits of a shot since it started", scored: "times it has scored",
   total: "points so far", secs_left: "seconds left", timer_left: "ms left on a timer", balls: "balls in play",
-  player: "the player up", op: "a sum", combo_chain: "combos in a row", combo_steps: "shots made of a combo" };
+  player: "the player up", op: "a sum", combo_chain: "combos in a row", combo_steps: "shots made of a combo",
+  women_mult: "the Bond Women multiplier" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
@@ -831,7 +835,7 @@ function Palette({ ed }) {
     ${stmtTemplates(ed.ch, ed.vars, ed.prog).filter(([_g, items]) => items.length).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
       ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t)), null, whyOff(t, ed.ch)))}`)}
     <div class="bk-pal-h">Values</div>
-    ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, t.k === "combo_chain" ? TIP.combo_chain : "Drag into a value slot (the round holes)"))}
+    ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, TIP[t.k] && (t.k === "combo_chain" || t.k === "women_mult") ? TIP[t.k] : "Drag into a value slot (the round holes)"))}
     <div class="bk-pal-h">Conditions</div>
     ${condTemplates().map((t) => piece("bk-bool", COND_WORDS[t.k], t, null, "Drag into an If's condition slot"))}
   </div>`;

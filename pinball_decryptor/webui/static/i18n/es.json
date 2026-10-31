@@ -12601,6 +12601,8 @@
 "When a shot follows a shot (a combo)": "Cuando un tiro sigue a otro tiro (un combo)",
 "When a lit shot follows a lit shot": "Cuando un tiro iluminado sigue a otro tiro iluminado",
 "combos in a row": "combos seguidos",
+"the Bond Women multiplier": "el multiplicador Bond Women",
+"James Bond's Bond Women multiplier as it is now: 2 to 7 while the game's own runs, 1 when none does. The game already multiplies every Score block's points by it, as it does its own shots, so use it to show it (a HUD counter, Show words) or to decide on it in an If, not to multiply a score by again.": "El multiplicador Bond Women de James Bond tal como está ahora: de 2 a 7 mientras corre el del juego, 1 cuando no corre ninguno. El juego ya multiplica por él los puntos de cada bloque Puntuar, como hace con sus propios tiros, así que úsalo para mostrarlo (un contador del HUD, Mostrar palabras) o para decidir con él en un Si, no para volver a multiplicar una puntuación.",
 "shots made of a combo": "tiros hechos de un combo",
 "shots made of": "tiros hechos de",
 "a lit shot": "un tiro iluminado",

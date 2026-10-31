@@ -5497,6 +5497,28 @@ under the TV with its clock full; its loop in the TV after the intro, the bar dr
 over the loop and its one-shot in the loop's place, the loop back after; ended, "TOTAL 2,000,000" over its total clip
 with the bar full, both given back 3 s later. No abort.
 
+### The Bond Women multiplier (PAD-889)
+
+James Bond LE and Pro 1.06 have a multiplier of their own: each Bond Woman the player collects adds one, and once
+collected it runs for a time at 2X (the first) up to 7X (the sixth). While it runs the game counts it into its playfield
+multiplier, the one score_add multiplies every award by, so a mode's `pm_score_add` points are multiplied by it already,
+as the game's own shots are. A mode can read what it is now (a blocks mode: the value "the Bond Women multiplier"):
+
+```c
+unsigned x = pm_bond_women_mult();   /* 2-7 while it runs, else 1 (and 1 on a title without it) */
+```
+
+How the game keeps it (read off the game program, LE 1.06): collecting sets the player's bit in a mask (0x52194), the
+multiplier is the bits counted plus one, held to 2-7 (0x5211c), and its start (0x8d4d0) stores that at +0x20 of its
+record (0x81a064) and runs process 0x1ab (Double Scoring's too) for a time from adjustment 225. Its getter is the port's
+`site bond_women_mult` (LE 0x8c9e4, Pro 0x8c89c): the byte while the process runs, 1 otherwise; a hook of the game's
+(0x9d334) adds it to `data score_mult`. The 60th Anniversary builds have no Bond Women (no line; the recipe refuses it).
+
+**Measured (emulator, the stock Bond LE 1.06 and Pro 1.06 cards, 2026-10-31, rig 1):** a blocks mode started at the
+ball start scored 1000 when the value read 1, and 1000 again when it read 4, after an instrument gave player 1 three Bond
+Women and called the game's own start: the game's playfield multiplier went 1 to 4 within the frame, the score 1000 to
+5000, and the mode's END said "2 scores, total 5000" on both. No abort.
+
 ### A line under its name (PAD-547)
 
 The game's own modes show a running value under their name: James Bond's Duel on the Disco Volante has

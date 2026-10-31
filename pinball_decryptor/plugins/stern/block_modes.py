@@ -73,7 +73,9 @@ one in When the mode ends runs out after the mode, and (PAD-436) hand the player
 mini-wizards, lit for its start shot or started (James Bond LE 1.06's four), and (PAD-503) light the
 mode itself at a shot, as the game lights one of its mini-wizards. Values: a
 number, a variable, a shot's hits this ball, how many shots the mode has scored, its points so
-far, the seconds left, the balls in play, the player up, and + - x / of two values. Conditions:
+far, the seconds left, the balls in play, the player up, (PAD-889) James Bond's Bond Women multiplier as it is now (2-7
+while it runs, else 1: the game already counts it into the multiplier every Score block's points go through, so it is
+for showing and deciding on, not for multiplying by again), and + - x / of two values. Conditions:
 compare two values, and / or / not, the mode is running, one of the game's own modes is running,
 the mode could start now, the mode is lit, the shield targets face away (PAD-690).
 
@@ -521,7 +523,8 @@ SHOWS = {
 CALLOUT_ROLES = {"ten_seconds": "Ten seconds left", "time_up": "Time is up"}
 NUM_KINDS = ("num", "var", "hits", "mode_hits", "scored", "total", "secs_left", "balls", "player", "op",
              "timer_left",
-             "combo_chain", "combo_steps")   # PAD-708: the combos in a row; a combo's shots made so far
+             "combo_chain", "combo_steps",   # PAD-708: the combos in a row; a combo's shots made so far
+             "women_mult")                   # PAD-889: James Bond's Bond Women multiplier now (1 when none runs)
 BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock", "can_start", "lit",
               "shields_away")   # PAD-690: Godzilla Premium/LE's shield targets face away (never on a Pro)
 OPS = {"+": "+", "-": "-", "*": "*", "/": "/"}
@@ -2277,6 +2280,8 @@ class _Gen:
             return "(long long)pm_balls_in_play()"
         if k == "player":
             return "(long long)pm_player()"
+        if k == "women_mult":           # PAD-889: the game's own 2X-7X (its Score blocks are already multiplied by it)
+            return "(long long)pm_bond_women_mult()"
         if k == "op":
             a, b = self.num(e.get("a")), self.num(e.get("b"))
             op = e.get("op")

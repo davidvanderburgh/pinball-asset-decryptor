@@ -364,6 +364,8 @@ class Sim:
             return self.balls
         if k == "player":
             return 1
+        if k == "women_mult":                   # PAD-889: the game's Bond Women multiplier (1: none runs)
+            return getattr(self, "women_mult", 1)
         if k == "timer_left":
             at = self.timers.get(e.get("timer"))
             return max(0, at - self.now) if at is not None else 0

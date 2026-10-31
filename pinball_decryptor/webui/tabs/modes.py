@@ -2992,6 +2992,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                          if p is not None and p.can("done") else []),
                 # PAD-521: the game's own status bar a mode's name, colour and clock can go in (Bond LE)
                 "status_bar": bool(getattr(p, "status_bar", False)) if p is not None else False,
+                # PAD-889: the game's own Bond Women multiplier a value block can read (Bond LE / Pro)
+                "bond_women": bool(getattr(p, "bond_women", False)) if p is not None else False,
                 # PAD-547: an info line is a screen of its own, so it goes on every title that takes screens
                 "info_line": p is None or bool(p.can("screen")),
                 # PAD-600: the project's other blocks modes, whose light a Put out the light of block may put out

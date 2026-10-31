@@ -70,6 +70,9 @@ value backdrop_surface 1
 # +0x11e..+0x121 - the runtime's defaults. Seen on the glass in the emulator 2026-10-25: a blue bar named FRWL WIZARD,
 # its clock draining along it, held again when a display of the game's moved it.
 site status_bar       0x00184aec 0xe92d4038 0xe3004138
+# PAD-889: the Bond Women multiplier's getter (2X-7X while it runs, else 1): the byte at +0x20 of its record while
+# process 0x1ab runs; the game adds it to the playfield multiplier score_add multiplies by. pm_bond_women_mult.
+site bond_women_mult  0x0008c89c 0xe92d4008 0xe3a01f6b
 # PAD-722: where a mode's info line goes, as on LE 1.06 (PAD-547): under the status bar.
 text info_line_at 679 510
 site balls_in_play    0x00264464 0xe92d4010 0xe3094860

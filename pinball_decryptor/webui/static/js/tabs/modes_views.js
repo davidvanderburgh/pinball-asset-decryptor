@@ -131,6 +131,7 @@ export function valWords(e) {
     case "secs_left": return "seconds left";
     case "balls": return "balls in play";
     case "player": return "the player up";
+    case "women_mult": return "the Bond Women multiplier";                // PAD-889
     case "timer_left": return `ms left on ${e.timer || "?"}`;
     case "combo_chain": return "combos in a row";                         // PAD-708
     case "combo_steps": return `shots made of ${e.combo || "?"}`;

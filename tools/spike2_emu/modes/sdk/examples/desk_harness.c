@@ -23,6 +23,8 @@
  *   multiball <0|1>     the game's own multiball is active or not
  *   timed <0|1>         one of the game's other modes is active (Jet Fighter Attack: PAD-347)
  *   balls <n>           the balls in play
+ *   women <n>           PAD-889: James Bond's Bond Women multiplier runs at <n>X (1 = none runs): pm_bond_women_mult
+ *                       says it, and the game's scoring multiplies every pm_score_add by it, as Bond's does
  *   ball_end            the ball drained (PAD-622: a hold a mode asks for runs as ticks, then "BALL END goes on")
  *   tilt                the ball in play tilted: its ball_end holds nothing
  *   player <n>          the player up
@@ -147,9 +149,12 @@ const char *pm_version(void) { return "1.16"; }
 int pm_in_game(void) { return in_game && player; }
 unsigned pm_player(void) { return player; }
 uint64_t pm_score(unsigned p) { return p >= 1 && p <= 4 ? score[p] : 0; }
+static unsigned women_mult = 1;            /* PAD-889: `women <n>` */
+unsigned pm_bond_women_mult(void) { return women_mult; }
 uint64_t pm_score_add(unsigned p, uint64_t v)
 {
     if (p < 1 || p > 4) return 0;
+    v *= women_mult;                       /* the game's playfield multiplier, which Bond counts the multiplier into */
     score[p] += v;
     printf("%6lu SCORE +%llu (player %u: %llu)\n", now_ms, (unsigned long long)v, p, (unsigned long long)score[p]);
     return v;
@@ -1194,6 +1199,11 @@ int main(int argc, char **argv)
             shield_to = shield_at = !strcmp(argv[++k], "toward") ? PM_SHIELD_TOWARD : PM_SHIELD_AWAY;
             printf("%6lu >> shield %s\n", now_ms, argv[k]);
         } else if (!strcmp(c, "balls")) { balls_in_play = atoi(argv[++k]); printf("%6lu >> balls in play %d\n", now_ms, balls_in_play); }
+        else if (!strcmp(c, "women")) {              /* PAD-889 */
+            women_mult = (unsigned)atoi(argv[++k]);
+            if (!women_mult) women_mult = 1;
+            printf("%6lu >> Bond Women multiplier %uX\n", now_ms, women_mult);
+        }
         else if (!strcmp(c, "ball_end")) {
             printf("%6lu >> ball_end\n", now_ms);
             beh_ms = 0;

@@ -155,8 +155,9 @@ Sub LoadVPM(VPMver, VBSfile, VBSver)
 	  vpmKeyName(keyInsertCoin2)  & vbTab & "Center Coin"     & vbNewLine &_
 	  vpmKeyName(keyInsertCoin3)  & vbTab & "Right Coin"      & vbNewLine &_
 	  vpmKeyName(keyBlack)        & vbTab & "Service Back"    & vbNewLine &_
-	  vpmKeyName(keyGreen)        & vbTab & "Service Select"  & vbNewLine &_
+	  vpmKeyName(keyGreen)        & vbTab & "Service Minus"   & vbNewLine &_
 	  vpmKeyName(keyRed)          & vbTab & "Service Plus"    & vbNewLine &_
+	  vpmKeyName(keyEnter)        & vbTab & "Service Select"  & vbNewLine &_
 	  vpmKeyName(keySlamDoorHit)  & vbTab & "Slam Tilt"
 End Sub
 
@@ -172,10 +173,17 @@ Dim swLRFlip        : swLRFlip        = 1059  ' Right Flipper Button
 Dim swLLFlip        : swLLFlip        = 1060  ' Left Flipper Button
 Dim swULFlip        : swULFlip        = 1061  ' Up Left Flip Button
 Dim swURFlip        : swURFlip        = 0     ' none on this title
-' the coin door's service buttons on the three VPM service keys
-Dim swBlack         : swBlack         = 1028  ' Service Back
-Dim swGreen         : swGreen         = 1025  ' Service Select
-Dim swRed           : swRed           = 1026  ' Service Plus
+' the coin door's four service buttons on VPM's 7 8 9 0, in the coin door's
+' order (Back, Minus, Plus, Select), so a first boot's Guided Setup can be
+' walked from the table (PAD-882). The numbers are the controller's SERVICE
+' ones: it finds each button's id in the title's own switch table, because
+' Godzilla's 1028 is another title's Service Select.
+Dim swSvcBack       : swSvcBack       = 9011  ' Service Back
+Dim swSvcMinus      : swSvcMinus      = 9010  ' Service Minus
+Dim swSvcPlus       : swSvcPlus       = 9009  ' Service Plus
+Dim swSvcSelect     : swSvcSelect     = 9008  ' Service Select
+' kept for tables patched before PAD-882, whose scripts still set them
+Dim swBlack, swGreen, swRed
 ' never touch the coin door interlock: open = no 48 V for every coil
 Dim swMemoryProtect : swMemoryProtect = 0
 
@@ -212,9 +220,10 @@ Function vpmKeyDown(ByVal keycode)
 			Case keyInsertCoin2  vpmTimer.AddTimer 750,"vpmTimer.PulseSw swCoin2'" : If Not IsEmpty(Eval("SCoin")) Then Playsound SCoin
 			Case keyInsertCoin3  vpmTimer.AddTimer 750,"vpmTimer.PulseSw swCoin3'" : If Not IsEmpty(Eval("SCoin")) Then Playsound SCoin
 			Case StartGameKey    .Switch(swStartButton) = True
-			Case keyBlack        .Switch(swBlack)       = True
-			Case keyGreen        .Switch(swGreen)       = True
-			Case keyRed          .Switch(swRed)         = True
+			Case keyBlack        .Switch(swSvcBack)     = True
+			Case keyGreen        .Switch(swSvcMinus)    = True
+			Case keyRed          .Switch(swSvcPlus)     = True
+			Case keyEnter        .Switch(swSvcSelect)   = True
 			Case keySlamDoorHit  .Switch(swSlamTilt)    = True
 			Case keyBangBack     vpmNudge.DoMechTilt
 			Case Else            vpmKeyDown = False
@@ -244,9 +253,10 @@ Function vpmKeyUp(ByVal keycode)
 			Case stagedFlipperL vpmFlips.FlipUL False : If vpmFlips.FlipperSolNumber(2) <> 0 Then .Switch(swULFlip) = False
 			Case stagedFlipperR vpmFlips.FlipUR False : If vpmFlips.FlipperSolNumber(3) <> 0 And swURFlip <> 0 Then .Switch(swURFlip) = False
 			Case StartGameKey    .Switch(swStartButton) = False
-			Case keyBlack        .Switch(swBlack)       = False
-			Case keyGreen        .Switch(swGreen)       = False
-			Case keyRed          .Switch(swRed)         = False
+			Case keyBlack        .Switch(swSvcBack)     = False
+			Case keyGreen        .Switch(swSvcMinus)    = False
+			Case keyRed          .Switch(swSvcPlus)     = False
+			Case keyEnter        .Switch(swSvcSelect)   = False
 			Case keySlamDoorHit  .Switch(swSlamTilt)    = False
 			Case keyShowOpts     .Pause = True : vpmShowOptions : .Pause = False
 			Case keyShowKeys     .Pause = True : vpmShowHelp : .Pause = False

@@ -80,7 +80,8 @@ def cabinet_lines(m):
         "swLLFlip = %d : swLRFlip = %d : swULFlip = %d"
         % (c["left_flipper"], c["right_flipper"], c["up_left_flipper"]),
         "swCoin1 = 1039 : swCoin2 = 1040 : swCoin3 = 1041",
-        "swBlack = 1028 : swGreen = 1025 : swRed = 1026",
+        # the service buttons: PADSPIKE2.vbs's own (the controller finds each
+        # in the title's switch table, PAD-882)
     ]
 
 

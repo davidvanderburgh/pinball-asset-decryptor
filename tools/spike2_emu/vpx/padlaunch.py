@@ -154,6 +154,13 @@ NO_LINUX = ("The game cannot start: the emulator runs in WSL, and WSL is not "
             "tabs (it asks for one Windows restart), then play again.")
 
 
+#: What the table says when the emulator was never set up on this PC: every
+#: Visual Pinball run is a slot layered over the ordinary rig, which the
+#: Emulate tab's first game builds (PAD-882).
+NO_RIG = ("The game cannot start: the emulator is not set up on this PC yet. "
+          "Start a game once on the app's Emulate tab, then open the table again.")
+
+
 def registered():
     """The WSL distros Windows has registered (HKCU ...\\Lxss), read without
     wsl.exe: [] when there is no Lxss key at all (WSL never set up), None
@@ -388,11 +395,28 @@ class Launch:
             return wsl_head(self.distro, root=True) + ["-e", "env", "HOME=" + home, "PAD_PIVOT=1"], True
         return wsl_head(self.distro) + ["-e", "env"], False
 
+    def base_rig(self):
+        """The ordinary rig every slot is layered over (padpath.sh's
+        PAD_BASE_ROOT: $PAD_HOME/spike2root), or "" when it cannot be told."""
+        self.board_env()
+        home = self.home or account(self.distro)[1]
+        return home + "/spike2root" if home else ""
+
     def start(self):
         why = no_linux(self.distro)
         if why:
             log(why)
             raise RuntimeError(why)
+        # PAD-882: on a PC whose Emulate tab never ran a game there is no rig
+        # to layer this run's slot over; the run died a second in with that
+        # said only in its log, and the table sat there. Said here instead,
+        # where the table shows it. `test` answers 1 for "not there"; any
+        # other failure (WSL not answering) refuses nothing.
+        base = self.base_rig()
+        if base and _run(wsl_head(self.distro, root=True) + ["-e", "test", "-d", base],
+                         timeout=60).returncode == 1:
+            log("no rig at %s" % base)
+            raise RuntimeError(NO_RIG)
         if self.slot is None:
             self.take_slot()
         head, self.as_root = self.head()

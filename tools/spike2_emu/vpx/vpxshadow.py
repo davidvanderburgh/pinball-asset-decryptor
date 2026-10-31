@@ -620,6 +620,7 @@ def gen(m, had, quiet=None, dof=None):
     elif had["Table1_KeyUp"]:
         out.append("\tTable1_KeyUp_orig KeyCode")
     out += ["End Sub", ""]
+    out, _ = with_service_keys(out)
     # ---- the trough and the plunger lane
     t = m["trough"]
     out += ["Sub %s_Hit" % t["drain"],
@@ -822,6 +823,67 @@ def gen(m, had, quiet=None, dof=None):
             "End Sub", ""]
     out += [m.get("extra_vbs", "")]
     return "\n".join(out) + "\n"
+
+
+#: The coin door's service buttons on Visual Pinball's 7 8 9 0 (DirectInput
+#: 8-11, VPM's coin door keys), in the coin door's order: Back, Minus, Plus,
+#: Select. A first boot opens Guided Setup, where a player sets Free Play,
+#: and a table without these could never leave it (PAD-882). The switch is
+#: the controller's SERVICE number (padcontroller.py), not a title's id.
+SERVICE_KEYS = [(8, 9011, "7: Service Back"), (9, 9010, "8: Service Minus"),
+                (10, 9009, "9: Service Plus"), (11, 9008, "0: Service Select")]
+
+
+def with_service_keys(lines):
+    """`lines` (a script's) with the service buttons in the bridge's
+    Table1_KeyDown / Table1_KeyUp, and the table's own handler kept off those
+    four keys. Used by the patch and, for a table patched before PAD-882, by
+    service_keys_in_place: both give the same script. -> (lines, changed)."""
+    if any("Controller.Switch(%d)" % SERVICE_KEYS[0][1] in ln for ln in lines):
+        return lines, False
+    out, sub, changed = [], None, False
+    lo, hi = SERVICE_KEYS[0][0], SERVICE_KEYS[-1][0]
+    for ln in lines:
+        s, cr = ln.strip(), "\r" if ln.endswith("\r") else ""
+        if s in ("Sub Table1_KeyDown(ByVal KeyCode)", "Sub Table1_KeyUp(ByVal KeyCode)"):
+            sub = "True" if "KeyDown" in s else "False"
+            out.append(ln)
+            out += ["\tIf KeyCode = %d Then Controller.Switch(%d) = %s   ' %s%s"
+                    % (k, sw, sub, what, cr) for k, sw, what in SERVICE_KEYS]
+            changed = True
+            continue
+        if sub and s == "End Sub":
+            sub = None
+        elif sub and s in ("Table1_KeyDown_orig KeyCode", "Table1_KeyUp_orig KeyCode"):
+            ln = "%sIf KeyCode < %d Or KeyCode > %d Then %s%s" % (
+                ln[:len(ln) - len(ln.lstrip())], lo, hi, s, cr)
+        out.append(ln)
+    return out, changed
+
+
+def service_keys_in_place(path):
+    """A table this patcher wrote before PAD-882 gets the service keys where
+    it is, once (the tab's Play runs this, as it quiets old soundtracks).
+    Returns the report lines, [] when there was nothing to do."""
+    table = vpxfile.VpxTable(path)
+    script = table.script()
+    table.ole.close()
+    if "(vpxshadow.py)" not in script:
+        return []                           # not a scripted tribute this kit patched
+    lines, changed = with_service_keys(script.split("\n"))
+    if not changed:
+        return []
+    tmp = path + ".pad-keys.tmp"
+    vpxfile.write_patched(path, tmp, script="\n".join(lines))
+    check = vpxfile.VpxTable(tmp)
+    ok = check.verify()
+    check.ole.close()
+    if not ok:
+        os.remove(tmp)
+        return ["WARNING: %s with the service keys does not verify; left as it was"
+                % os.path.basename(path)]
+    os.replace(tmp, path)
+    return ["keys: the coin door's service buttons on 7 8 9 0 (Back, Minus, Plus, Select)"]
 
 
 def flipper_subs(m, had):

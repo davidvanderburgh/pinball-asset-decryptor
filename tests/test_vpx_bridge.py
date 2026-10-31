@@ -2115,7 +2115,7 @@ def test_a_table_patched_before_is_quieted_in_place_once(tmp_path, vpxfile):
 # ------------------------------------------- PAD-882: paths and DirectX -----
 
 def test_a_launch_converts_its_paths_in_its_own_distro(monkeypatch, tmp_path):
-    """PAD-882: Jim-Beam's installed app handed bash `C:\Program Files\...
+    r"""PAD-882: Jim-Beam's installed app handed bash `C:\Program Files\...
     \riglock.sh`: the launch into PAD-Runtime asked the machine's DEFAULT
     distro to convert its Windows paths, that distro could not answer, and
     the path came back unchanged. Every path is now converted by the distro
@@ -2185,3 +2185,121 @@ def test_play_says_when_directx_is_missing(monkeypatch, tmp_path):
     (win / "System32" / "xinput1_3.dll").unlink()
     (vp / "xinput1_3.dll").write_bytes(b"")
     assert vs.missing_directx(str(vp)) == ""
+
+
+# ------------------------------------- PAD-882: the coin door's buttons -----
+
+def test_the_service_buttons_reach_each_titles_own_switch(monkeypatch):
+    """PAD-882: a first boot's Guided Setup (Free Play, pricing...) needs the
+    coin door's buttons, and a table had none (tributes) or Godzilla's ids
+    (PADSPIKE2.vbs: 1028 is Back there, Select on Batman). A table sends the
+    SERVICE numbers; the bridge finds each button by its wire in the run's
+    switch table."""
+    pc = pytest.importorskip("padcontroller")
+    sent = []
+
+    class Pipe:
+        def __init__(self, rig=None):
+            self.held = {}
+
+        def set(self, sid, level):
+            self.held[sid] = 1 if level else 0
+            sent.append((sid, self.held[sid]))
+
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    b = pc.Bridge()
+    b.set_game("jaws_le")
+    b.pipe = Pipe()
+    assert b.switch_id(9011) == 0                       # no switch table yet: nothing
+    b.sw_ids = {(0, 8): 25, (0, 9): 26, (0, 10): 27, (0, 11): 28}
+    for n, sid in ((9011, 28), (9010, 27), (9009, 26), (9008, 25)):
+        b.set_switch(n, 1)
+        b.set_switch(n, 0)
+        assert sent[-2:] == [(sid, 1), (sid, 0)], n
+    b.sw_ids = {(0, 8): 28, (0, 11): 31}                # another title's numbering
+    sent.clear()
+    b.set_switch(9008, 1)
+    assert sent == [(28, 1)] and b.get_switch(9008)
+    b.set_switch(9011, 1)                               # held when the table loses focus
+    b._release_buttons()
+    assert (28, 0) in sent and (31, 0) in sent          # let go, as a cabinet button is
+    assert pc.SERVICE == {9008: (0, 8), 9009: (0, 9), 9010: (0, 10), 9011: (0, 11)}
+
+
+def test_padspike2_puts_all_four_service_buttons_on_7_8_9_0():
+    s = open(os.path.join(VPX, "PADSPIKE2.vbs"), encoding="utf-8").read()
+    for key, var, num in (("keyBlack", "swSvcBack", 9011), ("keyGreen", "swSvcMinus", 9010),
+                          ("keyRed", "swSvcPlus", 9009), ("keyEnter", "swSvcSelect", 9008)):
+        assert "Dim %s" % var in s and "= %d" % num in s
+        assert re.search(r"Case %s\s+\.Switch\(%s\)\s+= True" % (key, var), s), key
+        assert re.search(r"Case %s\s+\.Switch\(%s\)\s+= False" % (key, var), s), key
+    # a table patched before still sets these: they stay declared
+    assert "Dim swBlack, swGreen, swRed" in s
+    assert "swBlack = 1028" not in open(os.path.join(VPX, "patch_turtles_le.py"), encoding="utf-8").read()
+
+
+def test_a_tribute_gets_the_service_keys_and_an_old_patch_the_same_in_place():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    had = {k: True for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")}
+    new = vs.gen(m, had)
+    down = new[new.index("Sub Table1_KeyDown(ByVal KeyCode)"):]
+    down = down[:down.index("End Sub")]
+    up = new[new.index("Sub Table1_KeyUp(ByVal KeyCode)"):]
+    up = up[:up.index("End Sub")]
+    for k, sw in ((8, 9011), (9, 9010), (10, 9009), (11, 9008)):
+        assert "If KeyCode = %d Then Controller.Switch(%d) = True" % (k, sw) in down
+        assert "If KeyCode = %d Then Controller.Switch(%d) = False" % (k, sw) in up
+    # the shadow game never sees those four keys
+    assert "If KeyCode < 8 Or KeyCode > 11 Then Table1_KeyDown_orig KeyCode" in down
+    assert "If KeyCode < 8 Or KeyCode > 11 Then Table1_KeyUp_orig KeyCode" in up
+    # a script patched before PAD-882 (no service lines, a bare orig call)
+    old = [ln for ln in new.split("\n") if "Service " not in ln]
+    old = [ln.replace("If KeyCode < 8 Or KeyCode > 11 Then ", "") for ln in old]
+    up_again, changed = vs.with_service_keys(old)
+    assert changed and "\n".join(up_again) == new
+    assert vs.with_service_keys(up_again) == (up_again, False)      # once
+    # CRLF scripts keep their line ends
+    crlf = [ln + "\r" for ln in old]
+    got, _ = vs.with_service_keys(crlf)
+    assert all(ln.endswith("\r") for ln in got if ln)
+
+
+def test_a_launch_with_no_emulator_set_up_says_so(tmp_path, monkeypatch):
+    """PAD-882: Jim-Beam's first table run died a second in with "no rig to
+    layer slot 1 over: /home/pad/spike2root does not exist" in its log only,
+    and the table sat there. The launch says it, and the table shows it."""
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pl, "no_linux", lambda d=None: "")
+    monkeypatch.setattr(pl, "account", lambda d=None: ("pad", "/home/pad"))
+    monkeypatch.setattr(pl, "app_home", lambda d: "")
+    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p, distro=None: "/mnt/c/x")
+    calls = []
+
+    class R:
+        returncode, stdout, stderr = 1, b"", b""
+
+    monkeypatch.setattr(pl, "_run", lambda cmd, timeout=60: calls.append(cmd) or R())
+    la = pl.Launch("sword_of_rage_le", "/mnt/c/cards/bk.raw", dist="PAD-Runtime")
+    with pytest.raises(RuntimeError) as e:
+        la.start()
+    assert str(e.value) == pl.NO_RIG and "Emulate tab" in pl.NO_RIG
+    assert calls == [["wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e", "test", "-d",
+                      "/home/pad/spike2root"]]
+    assert la.slot is None                              # no slot taken for nothing
+    # the app's data disk holds the rig: that is where it is looked for
+    monkeypatch.setattr(pl, "app_home", lambda d: "/mnt/wsl/paddata/spike2")
+    la2 = pl.Launch("sword_of_rage_le", "/mnt/c/cards/bk.raw", dist="PAD-Runtime")
+    assert la2.base_rig() == "/mnt/wsl/paddata/spike2/spike2root"
+    # WSL not answering (any other code) refuses nothing on a guess
+    R.returncode = 2
+    calls.clear()
+    monkeypatch.setattr(pl.subprocess, "Popen", lambda *a, **k: None)
+    R.stdout = b"slot=2\n"
+    la3 = pl.Launch("sword_of_rage_le", "/mnt/c/cards/bk.raw", dist="PAD-Runtime")
+    monkeypatch.setattr(la3, "take_slot", lambda: setattr(la3, "slot", 2))
+    monkeypatch.setattr(pl, "LOG", str(tmp_path / "padcontroller.log"))
+    la3.logfile = str(tmp_path / "padvpx.log")
+    la3.start()
+    assert la3.slot == 2

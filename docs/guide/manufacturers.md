@@ -99,6 +99,10 @@ encryption. The app opens all three; you get the game's asset tree.
 - **…and rename WAVs using transcripts** renames the files too
   (`S0197_C6 - Get the troops ready.wav`). Write still puts each one back
   at the path the game expects.
+- **Audio > More > Rename from callouts.csv** renames the sounds to the
+  text you corrected in the CSV, the same way Properties renames one. A
+  blank row keeps its name, and it reports how many were renamed or
+  unmatched.
 - **Auto-name now** names the sounds in an existing project without
   extracting again. A clip that failed for lack of memory shows as `error`
   in the CSV, not `non-speech`.

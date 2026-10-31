@@ -1,0 +1,1402 @@
+{
+  "_": [
+    "james_bond_pro on marty & jpsalas's 'BOND for VISUAL PINBALL X 10.7' 4.3 (bond.vpx, PAD-900):",
+    "the same table as james_bond_le.shadow.json, on a Pro card. The table has no rocket",
+    "VUK or physical rocket lock, no jet pack magnet, center lane diverter or back ramp",
+    "post, as the Pro, whose locks are virtual: so the Pro is what Patch picks for it when",
+    "both cards are there (`preferred`). Made from the LE map: every switch renumbered by",
+    "its name through the Pro 1.06.0 program's own switch table (each sits on the same node",
+    "and bit as the LE's; the Pro has none of the LE's tank hood, jetpack and rocket lock",
+    "switches), the LE-only coils left out (the tribute's magnet stays its own), the lights",
+    "as they are (the Pro's LEDs are where the LE's are) but the TANK HOOD insert, which the",
+    "Pro has none of."
+  ],
+  "title": "james_bond_pro",
+  "model": "Pro",
+  "preferred": true,
+  "detect": [
+    "BOND for VISUAL PINBALL X 10.7",
+    "bondjetpack"
+  ],
+  "output": "bond (PAD).vpx",
+  "table": {
+    "name": "BOND for Visual Pinball X 4.3",
+    "by": "marty & jpsalas",
+    "where": "VPUniverse"
+  },
+  "solenoid_max": 68,
+  "game_on": {
+    "number": 40,
+    "coils": [
+      [
+        8,
+        5
+      ],
+      [
+        8,
+        0
+      ]
+    ]
+  },
+  "cabinet": {
+    "start": 1036,
+    "launch": 1034,
+    "launch_key": "PlungerKey",
+    "tilt": 1038,
+    "slam": 1045,
+    "left_flipper": 1063,
+    "right_flipper": 1062,
+    "up_left_flipper": 1064,
+    "coin": 1039,
+    "coin_door_interlock": 1033
+  },
+  "keys_skip_orig": [
+    "StartGameKey",
+    "AddCreditKey",
+    "AddCreditKey2"
+  ],
+  "switches": {
+    "_": "object -> Spike 2 switch id; event hit (pulse), hold (Hit/UnHit), spin, slingshot. GUESS = placed by the table's geometry, not seen on the machine",
+    "Trigger001": {
+      "id": 58,
+      "event": "hit",
+      "name": "LEFT OUTLANE"
+    },
+    "Trigger002": {
+      "id": 59,
+      "event": "hit",
+      "name": "LEFT RETURN LANE"
+    },
+    "Trigger003": {
+      "id": 60,
+      "event": "hit",
+      "name": "RIGHT RETURN LANE"
+    },
+    "Trigger004": {
+      "id": 61,
+      "event": "hit",
+      "name": "RIGHT OUTLANE"
+    },
+    "LeftSlingShot": {
+      "id": 67,
+      "event": "slingshot",
+      "name": "LEFT SLINGSHOT"
+    },
+    "RightSlingShot": {
+      "id": 66,
+      "event": "slingshot",
+      "name": "RIGHT SLINGSHOT"
+    },
+    "Bumper2": {
+      "id": 97,
+      "event": "hit",
+      "name": "LEFT POP BUMPER"
+    },
+    "Bumper1": {
+      "id": 98,
+      "event": "hit",
+      "name": "RIGHT POP BUMPER"
+    },
+    "Trigger006": {
+      "id": 99,
+      "event": "hit",
+      "name": "POP BUMPER EXIT"
+    },
+    "Target004": {
+      "id": 78,
+      "event": "hit",
+      "name": "CENTER 3 BANK DROP LEFT OPTO (a standup here)"
+    },
+    "Target005": {
+      "id": 79,
+      "event": "hit",
+      "name": "CENTER 3 BANK DROP CENTER OPTO (a standup here)"
+    },
+    "Target006": {
+      "id": 80,
+      "event": "hit",
+      "name": "CENTER 3 BANK DROP RIGHT OPTO (a standup here)"
+    },
+    "Spinner003": {
+      "id": 54,
+      "event": "spin",
+      "name": "LEFT SPINNER OPTO"
+    },
+    "Trigger018": {
+      "id": 84,
+      "event": "hit",
+      "name": "LEFT ORBIT"
+    },
+    "Trigger017": {
+      "id": 53,
+      "event": "hit",
+      "name": "LEFT LANE (GUESS: the lane under the left-lane arrow, into the rocket ring)"
+    },
+    "Trigger007": {
+      "id": 81,
+      "event": "hit",
+      "name": "ROCKET OPTO 1 (GUESS: the rocket ring's entry)"
+    },
+    "Trigger011": {
+      "id": 82,
+      "event": "hit",
+      "name": "ROCKET OPTO 2 (GUESS: up in the ring, the tribute's lock trigger)"
+    },
+    "Trigger014": {
+      "id": 83,
+      "event": "hit",
+      "name": "CENTER LANE"
+    },
+    "Target007": {
+      "id": 94,
+      "event": "hit",
+      "name": "TOP LANE LEFT (GUESS: a standup at the left lane's place, behind the captive ball)"
+    },
+    "Trigger002a": {
+      "id": 95,
+      "event": "hit",
+      "name": "TOP LANE CENTER (GUESS)"
+    },
+    "Trigger003a": {
+      "id": 96,
+      "event": "hit",
+      "name": "TOP LANE RIGHT (GUESS)"
+    },
+    "Trigger009": {
+      "id": 85,
+      "event": "hit",
+      "name": "SIDE LOOP (GUESS)"
+    },
+    "Trigger005": {
+      "id": 100,
+      "event": "hit",
+      "name": "RIGHT ORBIT (GUESS: above the shooter lane's one-way gate)"
+    },
+    "Trigger016": {
+      "id": 77,
+      "event": "hit",
+      "name": "BACK RAMP OPTO (GUESS: the tribute's 'left ramp done', top right)"
+    },
+    "Trigger013": {
+      "id": 47,
+      "event": "hit",
+      "name": "SIDE RAMP ENTER OPTO"
+    },
+    "Target001": {
+      "id": 49,
+      "event": "hit",
+      "name": "SIDE RAMP TARGET"
+    },
+    "Trigger017b": {
+      "id": 46,
+      "event": "hit",
+      "name": "RIGHT RAMP ENTER OPTO"
+    },
+    "Trigger015": {
+      "id": 48,
+      "event": "hit",
+      "name": "RIGHT RAMP EXIT OPTO (GUESS: the tribute's 'right ramp done')"
+    },
+    "scoop": {
+      "id": 93,
+      "event": "hold",
+      "name": "RIGHT VUK OPTO (held until the RIGHT VUK coil; PadScoopOut)"
+    }
+  },
+  "plunger": {
+    "lane_trigger": "swPlungerRest",
+    "lane_switch": 65,
+    "autoplunge": "plungerIM"
+  },
+  "trough": {
+    "release": "BallRelease",
+    "drain": "Drain",
+    "switches": [
+      74,
+      73,
+      72,
+      71,
+      70,
+      69,
+      75
+    ],
+    "balls": 6,
+    "kick": [
+      90,
+      4
+    ]
+  },
+  "saucers": {},
+  "solenoids": {
+    "1": {
+      "coil": [
+        8,
+        1
+      ],
+      "name": "TROUGH",
+      "callback": "bsTrough.SolOut"
+    },
+    "2": {
+      "coil": [
+        8,
+        4
+      ],
+      "name": "AUTO PLUNGER",
+      "callback": "PadAutoPlunge"
+    },
+    "3": {
+      "coil": [
+        9,
+        1
+      ],
+      "name": "RIGHT VUK",
+      "callback": "PadScoopOut"
+    },
+    "5": {
+      "coil": [
+        9,
+        4
+      ],
+      "name": "CENTER 3 BANK DROP TARGET",
+      "callback": null
+    },
+    "6": {
+      "coil": [
+        8,
+        8
+      ],
+      "name": "LEFT EJECT",
+      "callback": null
+    },
+    "7": {
+      "coil": [
+        8,
+        7
+      ],
+      "name": "RIGHT RETURN UP POST",
+      "callback": null
+    },
+    "10": {
+      "coil": [
+        9,
+        6
+      ],
+      "name": "CONTROL GATE",
+      "callback": null
+    },
+    "46": {
+      "coil": [
+        8,
+        0
+      ],
+      "name": "RIGHT FLIPPER",
+      "callback": null
+    },
+    "48": {
+      "coil": [
+        8,
+        5
+      ],
+      "name": "LEFT FLIPPER",
+      "callback": null
+    },
+    "36": {
+      "coil": [
+        8,
+        6
+      ],
+      "name": "UPPER LEFT FLIPPER",
+      "callback": null
+    }
+  },
+  "flippers": {
+    "_": "the tribute's SolLFlipper moves BOTH left flippers and both subs need bFlippersEnabled, which only its own game start sets",
+    "sLLFlipper": "PadLFlip",
+    "sLRFlipper": "PadRFlip"
+  },
+  "neuter": [
+    "BallRelease.CreateSizedBallWithMass",
+    "BallRelease.Kick",
+    "PlungerIM.AutoFire"
+  ],
+  "extra_vbs": "B2SOff = True   ' PAD: the bridge owns Controller; DOF calls must not reach it\nSub PadLFlip(e)\n\tbFlippersEnabled = True\n\tSolLFlipper e\nEnd Sub\nSub PadRFlip(e)\n\tbFlippersEnabled = True\n\tSolRFlipper e\nEnd Sub\nSub PadScoopOut(e)   ' the RIGHT VUK: the ball sank into scoop, it comes back out of scoop1\n\tIf e Then\n\t\tController.Switch(1093) = False\n\t\tIf scoop.BallCntOver > 0 Then\n\t\t\tscoop.DestroyBall\n\t\t\tscoop1.CreateSizedBallWithMass BallSize / 2, BallMass\n\t\t\tscoop1.Kick 270, 3\n\t\t\tPlaySoundAt \"fx_popper\", scoop\n\t\tEnd If\n\tEnd If\nEnd Sub\n",
+  "retrofit_timers": {
+    "PinMAMETimer": {
+      "clone": "PulseTimer",
+      "interval_ms": 1
+    },
+    "PadTestTimer": {
+      "clone": "PulseTimer",
+      "interval_ms": 100
+    }
+  },
+  "lamps": {
+    "_": "table light -> Spike 2 LEDs [node, index] (rgb: an RGB insert, lit when any is, in its colour); matched by place (the table's art fitted to the LE's led_io positions on 41 inserts, rms 6 px) and by the insert's shape where the tribute's art differs (PAD-859)",
+    "LightShootAgain": {
+      "leds": [
+        [
+          8,
+          8
+        ]
+      ],
+      "name": "SHOOT AGAIN"
+    },
+    "LightShootAgain2": {
+      "leds": [
+        [
+          8,
+          9
+        ]
+      ],
+      "name": "H.M.S.S."
+    },
+    "li001": {
+      "leds": [
+        [
+          8,
+          10
+        ]
+      ],
+      "name": "DR. NO"
+    },
+    "li002": {
+      "leds": [
+        [
+          8,
+          11
+        ]
+      ],
+      "name": "F.R.W.L."
+    },
+    "li003": {
+      "leds": [
+        [
+          8,
+          12
+        ]
+      ],
+      "name": "GOLDFINGER"
+    },
+    "li004": {
+      "leds": [
+        [
+          8,
+          13
+        ]
+      ],
+      "name": "THUNDERBALL"
+    },
+    "li005": {
+      "leds": [
+        [
+          8,
+          14
+        ]
+      ],
+      "name": "Y.O.L.T."
+    },
+    "li006": {
+      "leds": [
+        [
+          8,
+          15
+        ]
+      ],
+      "name": "DIAMONDS ARE FOREVER"
+    },
+    "li017": {
+      "leds": [
+        [
+          8,
+          21
+        ]
+      ],
+      "name": "LEFT OUTLANE"
+    },
+    "li018": {
+      "leds": [
+        [
+          8,
+          22
+        ]
+      ],
+      "name": "LEFT RETURN LANE"
+    },
+    "li019": {
+      "leds": [
+        [
+          8,
+          29
+        ]
+      ],
+      "name": "RIGHT RETURN LANE"
+    },
+    "li020": {
+      "leds": [
+        [
+          8,
+          30
+        ]
+      ],
+      "name": "RIGHT OUTLANE"
+    },
+    "li017a": {
+      "leds": [
+        [
+          8,
+          23
+        ]
+      ],
+      "name": "LEFT BALL SAVE"
+    },
+    "li020a": {
+      "leds": [
+        [
+          8,
+          31
+        ]
+      ],
+      "name": "RIGHT BALL SAVE"
+    },
+    "li063": {
+      "leds": [
+        [
+          8,
+          19
+        ]
+      ],
+      "name": "MYSTERY"
+    },
+    "li035": {
+      "leds": [
+        [
+          8,
+          20
+        ]
+      ],
+      "name": "EXTRA BALL"
+    },
+    "li070": {
+      "leds": [
+        [
+          8,
+          20
+        ]
+      ],
+      "name": "EXTRA BALL (the art's Extra Ball insert by the lock)"
+    },
+    "li062": {
+      "leds": [
+        [
+          8,
+          16
+        ],
+        [
+          8,
+          17
+        ],
+        [
+          8,
+          18
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT EJECT ARROW"
+    },
+    "li028": {
+      "leds": [
+        [
+          8,
+          28
+        ]
+      ],
+      "name": "007 LOGO"
+    },
+    "li007": {
+      "leds": [
+        [
+          8,
+          40
+        ]
+      ],
+      "name": "DR. NO-RIGHT RAMP"
+    },
+    "li008": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "ROSA KLEBB"
+    },
+    "li009": {
+      "leds": [
+        [
+          8,
+          42
+        ]
+      ],
+      "name": "GOLDFINGER-RIGHT RAMP"
+    },
+    "li010": {
+      "leds": [
+        [
+          8,
+          46
+        ]
+      ],
+      "name": "LARGO"
+    },
+    "li011": {
+      "leds": [
+        [
+          8,
+          47
+        ]
+      ],
+      "name": "BLOFELD"
+    },
+    "li012": {
+      "leds": [
+        [
+          8,
+          51
+        ]
+      ],
+      "name": "MR. HENDERSON"
+    },
+    "li076": {
+      "leds": [
+        [
+          8,
+          43
+        ],
+        [
+          8,
+          44
+        ],
+        [
+          8,
+          45
+        ]
+      ],
+      "rgb": true,
+      "name": "Q BRANCH"
+    },
+    "li029": {
+      "leds": [
+        [
+          8,
+          48
+        ],
+        [
+          8,
+          49
+        ],
+        [
+          8,
+          50
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT VUK ARROW"
+    },
+    "li032": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW"
+    },
+    "li034": {
+      "leds": [
+        [
+          8,
+          2
+        ]
+      ],
+      "name": "DB5 UNDER"
+    },
+    "li059": {
+      "leds": [
+        [
+          8,
+          58
+        ]
+      ],
+      "name": "RIGHT ORBIT-1"
+    },
+    "li077": {
+      "leds": [
+        [
+          8,
+          59
+        ]
+      ],
+      "name": "RIGHT ORBIT-2"
+    },
+    "li036": {
+      "leds": [
+        [
+          8,
+          60
+        ]
+      ],
+      "name": "RIGHT ORBIT-3"
+    },
+    "F2A": {
+      "leds": [
+        [
+          8,
+          61
+        ]
+      ],
+      "name": "RIGHT RAMP FLASH"
+    },
+    "F2B": {
+      "leds": [
+        [
+          8,
+          61
+        ]
+      ],
+      "name": "RIGHT RAMP FLASH"
+    },
+    "li058": {
+      "leds": [
+        [
+          8,
+          32
+        ]
+      ],
+      "name": "RAMP TARGET"
+    },
+    "li043": {
+      "leds": [
+        [
+          8,
+          33
+        ]
+      ],
+      "name": "KNIFE SHOE"
+    },
+    "li042": {
+      "leds": [
+        [
+          8,
+          34
+        ]
+      ],
+      "name": "ODDJOB HAT"
+    },
+    "li041": {
+      "leds": [
+        [
+          8,
+          35
+        ]
+      ],
+      "name": "SHARK"
+    },
+    "li046": {
+      "leds": [
+        [
+          8,
+          36
+        ]
+      ],
+      "name": "BIRD ONE"
+    },
+    "li045": {
+      "leds": [
+        [
+          8,
+          37
+        ]
+      ],
+      "name": "BATH-O-SUB"
+    },
+    "li047": {
+      "leds": [
+        [
+          8,
+          38
+        ]
+      ],
+      "name": "GUN BARREL"
+    },
+    "li044": {
+      "leds": [
+        [
+          8,
+          39
+        ]
+      ],
+      "name": "TARANTULA"
+    },
+    "li041a": {
+      "leds": [
+        [
+          8,
+          35
+        ]
+      ],
+      "name": "SHARK (the backwall copy of li041)"
+    },
+    "li042a": {
+      "leds": [
+        [
+          8,
+          34
+        ]
+      ],
+      "name": "ODDJOB HAT (the backwall copy of li042)"
+    },
+    "li043a": {
+      "leds": [
+        [
+          8,
+          33
+        ]
+      ],
+      "name": "KNIFE SHOE (the backwall copy of li043)"
+    },
+    "li044a": {
+      "leds": [
+        [
+          8,
+          39
+        ]
+      ],
+      "name": "TARANTULA (the backwall copy of li044)"
+    },
+    "li045a": {
+      "leds": [
+        [
+          8,
+          37
+        ]
+      ],
+      "name": "BATH-O-SUB (the backwall copy of li045)"
+    },
+    "li046a": {
+      "leds": [
+        [
+          8,
+          36
+        ]
+      ],
+      "name": "BIRD ONE (the backwall copy of li046)"
+    },
+    "li047a": {
+      "leds": [
+        [
+          8,
+          38
+        ]
+      ],
+      "name": "GUN BARREL (the backwall copy of li047)"
+    },
+    "F005": {
+      "leds": [
+        [
+          8,
+          7
+        ]
+      ],
+      "name": "TANK (the tank's flasher)"
+    },
+    "li013": {
+      "leds": [
+        [
+          9,
+          17
+        ]
+      ],
+      "name": "PROF. DENT"
+    },
+    "li014": {
+      "leds": [
+        [
+          9,
+          8
+        ]
+      ],
+      "name": "GRANT"
+    },
+    "li015": {
+      "leds": [
+        [
+          9,
+          18
+        ]
+      ],
+      "name": "FIONA VOLPE"
+    },
+    "li016": {
+      "leds": [
+        [
+          9,
+          19
+        ]
+      ],
+      "name": "MR. OSATO"
+    },
+    "li075": {
+      "leds": [
+        [
+          9,
+          28
+        ]
+      ],
+      "name": "MR. WINT MR. KIDD"
+    },
+    "li064": {
+      "leds": [
+        [
+          9,
+          10
+        ],
+        [
+          9,
+          11
+        ],
+        [
+          9,
+          12
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT ORBIT ARROW"
+    },
+    "li037": {
+      "leds": [
+        [
+          9,
+          13
+        ]
+      ],
+      "name": "LEFT ORBIT-T-BALL 1"
+    },
+    "li069": {
+      "leds": [
+        [
+          9,
+          14
+        ]
+      ],
+      "name": "LEFT ORBIT-T-BALL 2"
+    },
+    "li066": {
+      "leds": [
+        [
+          8,
+          3
+        ],
+        [
+          8,
+          4
+        ],
+        [
+          8,
+          5
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LANE ARROW (the art's arrow at the head of the left lane)"
+    },
+    "li053": {
+      "leds": [
+        [
+          8,
+          3
+        ],
+        [
+          8,
+          4
+        ],
+        [
+          8,
+          5
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LANE ARROW (the round insert at the foot of the Stern arrow's place)"
+    },
+    "li021": {
+      "leds": [
+        [
+          9,
+          16
+        ]
+      ],
+      "name": "DAF SPINNER FLASH"
+    },
+    "F5": {
+      "leds": [
+        [
+          9,
+          16
+        ]
+      ],
+      "name": "DAF SPINNER FLASH (the flasher on the wall by the spinner)"
+    },
+    "F3A": {
+      "leds": [
+        [
+          9,
+          26
+        ]
+      ],
+      "name": "GANTRY FLASH-TOP (the rocket's flasher)"
+    },
+    "F001": {
+      "leds": [
+        [
+          8,
+          26
+        ]
+      ],
+      "name": "UNDERWATER FLASH 1"
+    },
+    "F004": {
+      "leds": [
+        [
+          8,
+          27
+        ]
+      ],
+      "name": "GANTRY FLASH-BOTTOM (the Pro's LED where the LE's UNDERWATER FLASH 2 is)"
+    },
+    "li067": {
+      "leds": [
+        [
+          9,
+          29
+        ],
+        [
+          9,
+          30
+        ],
+        [
+          9,
+          31
+        ]
+      ],
+      "rgb": true,
+      "name": "CENTER LANE ARROW"
+    },
+    "li039": {
+      "leds": [
+        [
+          9,
+          32
+        ]
+      ],
+      "name": "LOCK"
+    },
+    "li060": {
+      "leds": [
+        [
+          9,
+          33
+        ]
+      ],
+      "name": "POP EXIT"
+    },
+    "li061": {
+      "leds": [
+        [
+          9,
+          53
+        ],
+        [
+          9,
+          54
+        ],
+        [
+          9,
+          55
+        ]
+      ],
+      "rgb": true,
+      "name": "SIDE LOOP ARROW (the art's Super Loops arrow)"
+    },
+    "li068": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "SIDE RAMP ARROW (the art's arrow up the side ramp)"
+    },
+    "li018a": {
+      "leds": [
+        [
+          9,
+          34
+        ]
+      ],
+      "name": "TOP LANE-LEFT"
+    },
+    "li019a": {
+      "leds": [
+        [
+          9,
+          35
+        ]
+      ],
+      "name": "TOP LANE-CENTER"
+    },
+    "li049": {
+      "leds": [
+        [
+          9,
+          40
+        ]
+      ],
+      "name": "CENTER 3 BANK DROP LEFT"
+    },
+    "li050": {
+      "leds": [
+        [
+          9,
+          41
+        ]
+      ],
+      "name": "CENTER 3 BANK DROP CENTER"
+    },
+    "li051": {
+      "leds": [
+        [
+          9,
+          42
+        ]
+      ],
+      "name": "CENTER 3 BANK DROP RIGHT"
+    },
+    "libumper1": {
+      "leds": [
+        [
+          9,
+          43
+        ]
+      ],
+      "name": "LEFT POP BUMPER"
+    },
+    "libumper": {
+      "leds": [
+        [
+          9,
+          44
+        ]
+      ],
+      "name": "RIGHT POP BUMPER"
+    },
+    "li079": {
+      "leds": [
+        [
+          9,
+          27
+        ]
+      ],
+      "name": "POP FLASH"
+    },
+    "li026": {
+      "leds": [
+        [
+          9,
+          56
+        ]
+      ],
+      "name": "KISSY"
+    },
+    "li027": {
+      "leds": [
+        [
+          9,
+          57
+        ]
+      ],
+      "name": "TIFFANY CASE"
+    },
+    "li025": {
+      "leds": [
+        [
+          9,
+          60
+        ]
+      ],
+      "name": "DOMINO"
+    },
+    "li024": {
+      "leds": [
+        [
+          9,
+          61
+        ]
+      ],
+      "name": "PUSSY GALORE"
+    },
+    "li023": {
+      "leds": [
+        [
+          9,
+          62
+        ]
+      ],
+      "name": "TATIANA ROMANOVA"
+    },
+    "li022": {
+      "leds": [
+        [
+          9,
+          63
+        ]
+      ],
+      "name": "HONEY RYDER"
+    }
+  },
+  "retrofit_lights": {
+    "_": "LE inserts with no table light: a new Light cloned from `clone`, at [x, y] (the led_io position through the fit, PAD-859)",
+    "lights": {
+      "PadOddjob": {
+        "leds": [
+          [
+            9,
+            9
+          ]
+        ],
+        "name": "ODDJOB",
+        "clone": "li014",
+        "at": [
+          272,
+          947
+        ]
+      },
+      "PadLeftOrbitTBall3": {
+        "leds": [
+          [
+            9,
+            15
+          ]
+        ],
+        "name": "LEFT ORBIT-T-BALL 3",
+        "clone": "li069",
+        "at": [
+          118,
+          718
+        ]
+      },
+      "PadRightOrbitArrow": {
+        "leds": [
+          [
+            8,
+            55
+          ],
+          [
+            8,
+            56
+          ],
+          [
+            8,
+            57
+          ]
+        ],
+        "rgb": true,
+        "name": "RIGHT ORBIT ARROW",
+        "clone": "li059",
+        "at": [
+          780,
+          775
+        ]
+      },
+      "PadTopLaneRight": {
+        "leds": [
+          [
+            9,
+            36
+          ]
+        ],
+        "name": "TOP LANE-RIGHT",
+        "clone": "li019a",
+        "at": [
+          730,
+          177
+        ]
+      },
+      "PadRocket1": {
+        "leds": [
+          [
+            9,
+            20
+          ]
+        ],
+        "name": "ROCKET 1",
+        "clone": "li049",
+        "at": [
+          185,
+          422
+        ]
+      },
+      "PadRocket2": {
+        "leds": [
+          [
+            9,
+            21
+          ]
+        ],
+        "name": "ROCKET 2",
+        "clone": "li049",
+        "at": [
+          201,
+          500
+        ]
+      },
+      "PadRocket3": {
+        "leds": [
+          [
+            9,
+            22
+          ]
+        ],
+        "name": "ROCKET 3",
+        "clone": "li049",
+        "at": [
+          277,
+          532
+        ]
+      },
+      "PadRocket4": {
+        "leds": [
+          [
+            9,
+            23
+          ]
+        ],
+        "name": "ROCKET 4",
+        "clone": "li049",
+        "at": [
+          335,
+          473
+        ]
+      },
+      "PadRocket5": {
+        "leds": [
+          [
+            9,
+            24
+          ]
+        ],
+        "name": "ROCKET 5",
+        "clone": "li049",
+        "at": [
+          324,
+          399
+        ]
+      },
+      "PadRocket6": {
+        "leds": [
+          [
+            9,
+            25
+          ]
+        ],
+        "name": "ROCKET 6",
+        "clone": "li049",
+        "at": [
+          243,
+          368
+        ]
+      },
+      "PadLeftSlingFlash": {
+        "leds": [
+          [
+            8,
+            24
+          ]
+        ],
+        "name": "LEFT SLING FLASH",
+        "clone": "F001",
+        "at": [
+          205,
+          1641
+        ]
+      },
+      "PadRightSlingFlash": {
+        "leds": [
+          [
+            8,
+            25
+          ]
+        ],
+        "name": "RIGHT SLING FLASH",
+        "clone": "F001",
+        "at": [
+          683,
+          1645
+        ]
+      }
+    }
+  },
+  "dark": [
+    "F002",
+    "F003",
+    "F006",
+    "F1A",
+    "F1B",
+    "F3",
+    "F4",
+    "PoliceL1",
+    "PoliceL2",
+    "li030",
+    "li031",
+    "li033",
+    "li034a",
+    "li038",
+    "li040",
+    "li048",
+    "li052",
+    "li057",
+    "li065",
+    "li071",
+    "li072",
+    "li073",
+    "li074",
+    "li078"
+  ],
+  "quiet_subs": [
+    "StartLightSeq",
+    "StartRainbow",
+    "GiEffect",
+    "LightEffect",
+    "FlashEffect"
+  ],
+  "orig_hits": false,
+  "orig_keep": [
+    "LeftSlingShot",
+    "RightSlingShot"
+  ]
+}

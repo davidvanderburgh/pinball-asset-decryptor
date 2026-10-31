@@ -885,6 +885,100 @@ def test_the_foo_fighters_pro_map_is_the_le_map_on_the_pros_numbers():
     assert {k: v["leds"] for k, v in pro["lamps"].items() if k != "_"} ==         {k: v["leds"] for k, v in le["lamps"].items() if k != "_"}
 
 
+
+def _bond_maps():
+    return [json.load(open(os.path.join(VPX, "james_bond_%s.shadow.json" % m), encoding="utf-8"))
+            for m in ("le", "pro")]
+
+
+def test_the_bond_table_plays_as_the_pro(monkeypatch):
+    """PAD-900: marty & jpsalas's BOND has no rocket VUK or physical rocket
+    lock (the Pro's locks are virtual) and no jet pack magnet: both maps fit
+    it, the Pro first; the LE only when an LE card is the one there."""
+    pv = pytest.importorskip("padvpx")
+
+    class Fake:
+        def script(self):
+            return "' BOND for VISUAL PINBALL X 10.7\nDim bondjetpack"
+    monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
+    assert [t for t, _ in pv.fitting("x.vpx")] == ["james_bond_pro", "james_bond_le"]
+    cards = {}
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: cards.get(t))
+    assert pv.recognise("x.vpx")[0] == "james_bond_pro"
+    cards["james_bond_le"] = "D:/c/james_bond_le-1_06_0.Release.16G.sdcard.raw"
+    assert pv.recognise("x.vpx")[0] == "james_bond_le", "only an LE card: the LE"
+    cards["james_bond_pro"] = "D:/c/james_bond_pro-1_06_0.Release.16G.sdcard.raw"
+    assert pv.recognise("x.vpx")[0] == "james_bond_pro", "both: the Pro"
+
+
+def test_the_bond_pro_map_is_the_le_map_on_the_pros_numbers():
+    """PAD-900: the Pro map was made from the LE one through both programs'
+    own switch tables (1.06.0): the same table objects on the same switch
+    names, the Pro's ids (lower past the LE's tank hood, jetpack and rocket
+    lock switches, which the Pro has none of), the LE-only coils gone, the
+    lights as they are but the TANK HOOD insert. Every id was in the Pro
+    game's own switch table on the emulator, and its Start, left flipper,
+    trough and right VUK answered on these numbers."""
+    le, pro = _bond_maps()
+    assert pro["title"] == "james_bond_pro" and pro["model"] == "Pro" and pro["preferred"]
+    assert le["model"] == "LE" and not le.get("preferred")
+    for k in ("detect", "output", "table", "game_on", "keys_skip_orig", "neuter", "flippers",
+              "quiet_subs", "orig_keep", "retrofit_timers", "retrofit_lights", "solenoid_max"):
+        assert pro[k] == le[k], k
+    assert {k: v["name"] for k, v in pro["switches"].items() if k != "_"} == \
+        {k: v["name"] for k, v in le["switches"].items() if k != "_"}
+    for k, v in pro["switches"].items():
+        if k != "_":
+            assert 0 <= le["switches"][k]["id"] - v["id"] <= 8, (k, v)
+    assert pro["switches"]["Trigger001"]["id"] == 58, "LEFT OUTLANE on the Pro"
+    assert pro["switches"]["Trigger011"]["id"] == 82, "ROCKET OPTO 2 on the Pro"
+    assert pro["switches"]["Bumper2"]["id"] == 97, "LEFT POP BUMPER on the Pro"
+    assert pro["switches"]["scoop"]["id"] == 93, "RIGHT VUK OPTO on the Pro"
+    assert pro["switches"]["Trigger013"]["id"] == 47, "below the LE's TANK HOOD TARGET: the same"
+    assert pro["trough"]["switches"] == [74, 73, 72, 71, 70, 69, 75]
+    assert pro["plunger"]["lane_switch"] == 65
+    assert pro["cabinet"]["left_flipper"] == 1063 and pro["cabinet"]["right_flipper"] == 1062
+    assert pro["cabinet"]["up_left_flipper"] == 1064 and pro["cabinet"]["start"] == 1036
+    # the scoop's sub clears the RIGHT VUK opto on the Pro's number, and the
+    # magnet sub is gone with the coil that called it
+    assert "Controller.Switch(1093) = False" in pro["extra_vbs"] and "1101" not in pro["extra_vbs"]
+    assert "PadMagnet" not in pro["extra_vbs"] and "PadMagnet" in le["extra_vbs"]
+    gone = {v["name"] for k, v in le["solenoids"].items() if k not in pro["solenoids"]}
+    assert gone == {"JET PACK MAGNET", "ROCKET LOCK", "CENTER LANE DIVERTER", "BACK RAMP UP POST",
+                    "ROCKET VUK"}
+    assert all(pro["solenoids"][k] == v for k, v in le["solenoids"].items() if k in pro["solenoids"])
+    assert "li065" not in pro["lamps"] and "li065" in pro["dark"]
+    assert {k: v["leds"] for k, v in pro["lamps"].items() if k != "_"} == \
+        {k: v["leds"] for k, v in le["lamps"].items() if k not in ("_", "li065")}
+
+
+def test_setup_says_when_a_patched_table_is_for_another_model(tmp_path, monkeypatch):
+    """PAD-900: a Bond table patched for the LE before the Pro map keeps
+    playing as the LE; the tab reads which title its patch named, from the
+    script written beside it, so it can say to patch it again."""
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    tables = tmp_path / "tables"
+    tables.mkdir()
+    (tables / "bond (PAD).vpx").write_bytes(b"x")
+    (tables / "bond (PAD).script.vbs").write_text(
+        'Const cGameName = "bond"\nSub Table1_Init\n\tController.GameName = "james_bond_le"\nEnd Sub\n',
+        encoding="utf-8")
+    (tables / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"x")
+    got = {t["output"]: t for t in vs.known_tables(str(tables))}
+    bond = got["bond (PAD).vpx"]
+    assert bond["title"] == "james_bond_pro" and bond["titles"] == ["james_bond_pro", "james_bond_le"]
+    assert bond["patched"] and bond["patched_title"] == "james_bond_le"
+    assert got["Rush LE 2.0.2 (PAD).vpx"]["patched_title"] == "", "no script beside it"
+    assert got["JP's Foo Fighters (PAD).vpx"]["patched_title"] == "", "not patched"
+    # a ROM table's patcher names it on cGameName
+    (tables / "x (PAD).script.vbs").write_text('Const cGameName = "turtles_le"\n', encoding="utf-8")
+    assert vs.patched_title(str(tables), "x (PAD).vpx") == "turtles_le"
+
+
 # ------------------------------------------------ the table generator -----
 
 MINI_TABLES = {

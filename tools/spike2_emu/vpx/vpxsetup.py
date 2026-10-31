@@ -198,9 +198,34 @@ def known_tables(tables_dir=None):
     out = []
     for row in rows.values():
         title, _ = padvpx.choose(row.pop("fits"))
-        row.update(title=title, card=padlaunch.card_for(title) or "")
+        row.update(title=title, card=padlaunch.card_for(title) or "",
+                   patched_title=patched_title(tables_dir, row["output"]) if row["patched"] else "")
         out.append(row)
     return out
+
+
+#: a scripted tribute's bridge names it on Controller; a ROM table's patcher
+#: on its own cGameName (a tribute's cGameName is the table's, "bond")
+GAMENAME_RES = (re.compile(r'^\s*Controller\.GameName\s*=\s*"([^"]+)"', re.M),
+                re.compile(r'^\s*Const\s+cGameName\s*=\s*"([^"]+)"', re.M | re.I))
+
+
+def patched_title(tables_dir, out_name):
+    """The title a (PAD) table was patched for, from the script every patcher
+    writes beside it (`<name>.script.vbs`): an earlier patch may be for another
+    model than Patch takes now (PAD-900: Bond's table, patched for the LE
+    before the Pro map). "" when the script is not there or names none; a
+    name that is none of the row's titles is the table's own, not a model."""
+    try:
+        text = open(os.path.join(tables_dir, out_name[:-4] + ".script.vbs"),
+                    encoding="utf-8", errors="replace").read()
+    except OSError:
+        return ""
+    for rx in GAMENAME_RES:
+        m = rx.search(text)
+        if m:
+            return m.group(1)
+    return ""
 
 
 #: (PAD) tables an earlier release patched whose map the kit no longer has

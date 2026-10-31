@@ -342,6 +342,15 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   held ~10 s before LOWER LOCK let it out. So a ball going UP the table's
   t25 lane (behind the LAIR bank, above the left outlane) goes there
   (`lair_lane`), and comes back out of the parlor.
+* **A lock lane is a stack, its post is held** (PAD-901). Deadpool's Katana
+  Handle lock is one kicker in JP's table and LOCK 1-4 on the machine. As a
+  saucer it held one ball on LOCK 1: the next sat unseen behind it, the game
+  counted one lock and never started the multiball, and when the post dropped
+  a hidden ball rolled onto LOCK 1 under it (the operator alert's "ball may be
+  sticking"). A saucer's `stack` names the switches behind `switch`, and the
+  kicker feeds a ball stack on all of them; `held_ms` is for a post the game
+  holds down (12 s at Deadpool's multiball): a ball goes out each `held_ms`
+  while it is down, where a kicker coil lets one go per pulse.
 * **Use the RIG's switch table.** The first Rush map came from an older
   reading of the title that numbered every switch one higher: the table
   pressed Tournament Start for Start and filled the jam opto, and the game

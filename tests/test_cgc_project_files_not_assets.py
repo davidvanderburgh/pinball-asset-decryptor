@@ -194,8 +194,13 @@ def test_write_creates_the_missing_folders(tmp_path):
     assert len(mkdirs) == 3, mkdirs
     assert any("+ folder /home/debian/pin/a b/c" in ln for ln in lines)
     # Each new folder takes the owner of the folder it sits in.
-    sifs = [c for c in ex.commands if "'sif " in c]
+    sifs = [c for c in ex.commands if c.startswith("debugfs -w -R 'sif ")]
     assert len(sifs) == 6 and all(" 1000'" in c for c in sifs), sifs
+    # ...and so does each new file (PAD-886), set in one debugfs run.
+    owns = [c for c in ex.commands if "debugfs -w -f -" in c]
+    assert len(owns) == 3, owns
+    assert all("uid 1000'" in c and "gid 1000'" in c and " mode " not in c
+               for c in owns), owns
 
 
 def test_a_folder_debugfs_will_not_make_aborts_the_build(tmp_path):

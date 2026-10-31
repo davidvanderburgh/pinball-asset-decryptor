@@ -313,6 +313,8 @@ def test_shadow_keeps_the_original_subs_behind_the_bridge(shadow):
         "every Sub closes once"
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
 def test_shadow_spinner_as_an_opto_pulses_once_a_pass(tmp_path):
     # PAD-887: Jurassic Park 4.02 has spinners where the machine has optos (the
     # right orbit's mouth, the right half pipe); a ball spins one a dozen

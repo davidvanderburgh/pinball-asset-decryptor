@@ -79,9 +79,9 @@ Emulate needs two things from the server; everything else (extracting,
 replacing, building cards, every other manufacturer) needs neither.
 
 - **Mounting the card.** The emulator reads the card image without copying
-  6 GB out of it, through a FUSE mount (`--device /dev/fuse`). It makes
-  that mount inside a user namespace of its own, which changes only what
-  the emulator itself sees. Docker's standard seccomp profile refuses
+  6 GB out of it, through a FUSE mount (`--device /dev/fuse`) made inside a
+  user namespace of its own, which changes only what the emulator itself
+  sees. Docker's standard seccomp profile refuses
   namespaces to a container, so the image ships `pad-seccomp.json`: the
   same profile with namespaces and mounts allowed. The kernel still
   decides what may be mounted in them.
@@ -119,9 +119,10 @@ emulator's log says what to add.
   systempaths=unconfined` to the line above (the unconfined seccomp takes
   the place of `pad-seccomp.json`), or run the container `--privileged`.
   The freeze needs `SYS_ADMIN` even though Emulate alone no longer does.
-  Each Start checks by freezing and thawing a small test program; without
-  these every game still runs, the playfield shows no Save or Load buttons,
-  and the log says what was missing. Docker Desktop cannot give them at all.
+- **Without those flags** every game still runs. Each Start checks by
+  freezing and thawing a small test program; when it cannot, the playfield
+  shows no Save or Load buttons and the log says what was missing. Docker
+  Desktop cannot give them at all.
 - **Writing to an SD card** needs the card reader on the server. Building a
   card image into `/data` and flashing it from the PC you sit at works
   anywhere.

@@ -489,6 +489,11 @@ class SternWritePipeline(BasePipeline):
                 self._log(msg, "error")
                 self.card_size_refusal = e
             raise PipelineError("Re-encode", msg) from e
+        except getattr(engine, "SoundRoomError", ()) as e:
+            # (PAD-880: so is the longer sounds' refusal, the same way; a stand-in
+            # engine without the class matches nothing here)
+            self._log(str(e), "error")
+            raise PipelineError("Re-encode", str(e)) from e
         self._set_phase(3)  # Patch image
         # Item 149: the modes this build put on the card, from its record.
         try:

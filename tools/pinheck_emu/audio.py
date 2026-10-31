@@ -13,7 +13,8 @@ every game seen so far:
 * 0x10 volume: ``f`` channel left right; ``z`` fade the music (speed,
   target; 0 0 stops it); ``r`` repeat the music (1) or not.
 * 0x09 (the colour games, not AMH): play music by name, bytes 0..2
-  (``ZBB`` -> ``SFX/_FZ/ZBB.wav``).
+  (``ZBB`` -> ``SFX/_FZ/ZBB.wav``); bit 7 on a byte is dropped from the
+  name (Rob Zombie's ``5a cd 30`` is ZM0) and the clip loops as music does.
 
 ``mix(n)`` renders the next n stereo frames at ``RATE`` as int16 numpy;
 the window plays them, a headless run never does. ``levels`` logs what
@@ -118,7 +119,11 @@ class Sound:
                     self.music_fade = None
                 self.levels.append((millis, "ch%d %s" % (ch, clip.name)))
         elif cmd == MUSIC_BY_NAME:
-            name = bytes(pkt[0:3]).decode("latin1")
+            # bit 7 of a name byte is not part of the name: Rob Zombie's
+            # 15-minute attract sound is 5a cd 30, ZM0.  It still loops like
+            # any music: on a real machine a ZM0 shorter than the 15 s before
+            # the game's fade played three times over (PAD-843)
+            name = bytes(b & 0x7F for b in pkt[0:3]).decode("latin1")
             if not name.isalnum():
                 return
             clip = self._clip(name[0], name[1:], 255)

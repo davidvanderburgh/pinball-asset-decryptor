@@ -14,6 +14,8 @@ program's compile) are called out in multiboot_docker's own docstring.
 """
 import hashlib
 import os
+import re
+import shlex
 import sys
 from dataclasses import replace
 
@@ -553,3 +555,176 @@ def test_cancel_reaches_the_tools_whatever_their_parent(monkeypatch):
         assert pat.search(cmd), cmd
     assert not pat.search(line)
     assert not pat.search("umount /var/tmp/jjp_x/iso")
+
+
+# ------------------------------------------------- folders the engine shares
+
+class _R:
+    def __init__(self, out, rc=0):
+        self.returncode, self.stdout, self.stderr = rc, out, ""
+
+
+class _Engine(_Fake):
+    """A _Fake whose container sees only what *sees(path)* allows, the way
+    colima's VM has the home folder and nothing else: a bind mount of any
+    other folder is the VM's own empty one (PAD-885).  Answers the probe
+    line ``[ -e <in container> ] || echo <host dir>; ...`` from that."""
+
+    def __init__(self, sees, name="colima", context="colima", **kw):
+        super().__init__(arch=D.ARCH, **kw)
+        self.sees, self.name, self.context = sees, name, context
+
+    def __call__(self, args, timeout=30):
+        args = list(args)
+        if args[0] == "exec" and args[-2] == "-c":
+            self.calls.append(args)
+            out = []
+            for part in args[-1].split("; "):
+                m = re.match(r"\[ -e (.+) \] \|\| echo (.+)$", part)
+                assert m, part
+                cpath = shlex.split(m.group(1))[0]
+                host = shlex.split(m.group(2))[0]
+                if not self.sees(cpath):
+                    out.append(host)
+            return _R("\n".join(out))
+        if args[:2] == ["context", "show"]:
+            self.calls.append(args)
+            return _R(self.context, 0 if self.context else 1)
+        if args[0] == "info":
+            self.calls.append(args)
+            return _R(self.name, 0 if self.name else 1)
+        return super().__call__(args, timeout)
+
+
+def _cache_only(cpath):
+    return cpath.startswith("/tmp/")
+
+
+@pytest.fixture
+def unix_paths(mac, monkeypatch, tmp_path):
+    """Host folders spelled the way a Mac spells them (``/Volumes/...``),
+    backed by real folders under tmp_path so they can be listed.  Returns
+    the function that maps one to its real folder."""
+    root = str(tmp_path / "fs")
+
+    def back(p):
+        if not p.startswith("/") or p.startswith(root):
+            return p          # a real path already (os is patched for all)
+        return root + p
+    real_isdir, real_listdir = os.path.isdir, os.listdir
+    real_open, real_remove = open, os.remove
+    monkeypatch.setattr(D.os.path, "isdir", lambda p: real_isdir(back(p)))
+    monkeypatch.setattr(D.os, "listdir", lambda p: real_listdir(back(p)))
+    monkeypatch.setattr(D.os, "remove", lambda p: real_remove(back(p)))
+    monkeypatch.setattr(D, "open", lambda p, *a, **k: real_open(back(p), *a, **k),
+                        raising=False)
+    monkeypatch.setattr(D, "cache_root", lambda: "/Users/me/Library/Caches/pad")
+    monkeypatch.setattr(D.os.path, "expanduser",
+                        lambda p: p.replace("~", "/Users/me", 1))
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    monkeypatch.setattr(D, "stage_rig", lambda src: D.staged_repo())
+    os.makedirs(back(D.staged_repo()))
+    iso_dir = back("/Volumes/Mac SSD/Sonichedge")
+    os.makedirs(iso_dir)
+    with real_open(iso_dir + "/Sonic-v00.930.iso", "wb") as fh:
+        fh.write(b"\0")
+    os.makedirs(back("/Volumes/Mac SSD/out"))
+    return back
+
+
+OUT = "/Volumes/Mac SSD/out/multi.iso"
+
+
+def test_a_folder_colima_does_not_share_stops_the_run(unix_paths, monkeypatch):
+    """The ISOs on /Volumes: docker run succeeds, the mount is colima's
+    own empty folder, and every tool after it would have found nothing.
+    The run stops before it starts, saying which folders and how."""
+    eng = _Engine(_cache_only)
+    monkeypatch.setattr(D, "_docker", eng)
+    with pytest.raises(RuntimeError) as e:
+        D.ensure_container([ISO0, OUT], "/repo")
+    why = str(e.value)
+    assert "/Volumes/Mac SSD/Sonichedge" in why and "/Volumes/Mac SSD/out" in why
+    assert "colima stop\n" in why
+    # --mount replaces colima's list: home must be named again, or the
+    # cache (and the rig in it) goes next; /Volumes is shared whole.
+    assert 'colima start --mount "$HOME:w" --mount /Volumes:w\n' in why
+    assert D.cache_root() not in why, "the cache was seen: not named"
+    # ...and the container that cannot see them is not left for the next
+    # run to call "already right".
+    probed = [i for i, c in enumerate(eng.calls) if c[0] == "exec"][-1]
+    assert ["rm", "-f", D.CONTAINER] in eng.calls[probed:]
+
+
+def test_the_empty_output_folder_is_checked_with_a_marker_it_does_not_keep(
+        unix_paths, monkeypatch):
+    eng = _Engine(_cache_only)
+    monkeypatch.setattr(D, "_docker", eng)
+    with pytest.raises(RuntimeError):
+        D.ensure_container([OUT], "/repo")
+    probe = [c for c in eng.calls if c[0] == "exec"][0][-1]
+    assert D._PROBE in probe
+    assert os.listdir(unix_paths("/Volumes/Mac SSD/out")) == []
+
+
+def test_folders_it_shares_run_as_before(unix_paths, monkeypatch):
+    """OrbStack, Docker Desktop with /Volumes shared, or colima started
+    with the mounts the message gives: nothing said, the run goes on."""
+    eng = _Engine(lambda p: True)
+    monkeypatch.setattr(D, "_docker", eng)
+    D.ensure_container([ISO0, OUT], "/repo")
+    assert eng.calls[-1] != ["rm", "-f", D.CONTAINER]
+    probe = [c for c in eng.calls if c[0] == "exec"][0][-1]
+    # the ISO itself is what is looked for, quoted for the space in it
+    assert "'/host/Volumes/Mac SSD/Sonichedge/Sonic-v00.930.iso'" in probe
+    assert "[ -e /tmp/repo ]" in probe
+
+
+def test_a_kept_container_is_checked_too(unix_paths, monkeypatch):
+    """The one a failed run left would be "already right" next time: same
+    mounts, same image.  So the check is on every run, not only a new one."""
+    mounts = {D.cache_root(), "/Volumes/Mac SSD/Sonichedge"}
+    eng = _Engine(_cache_only, container=("sha256:new", mounts))
+    monkeypatch.setattr(D, "_docker", eng)
+    with pytest.raises(RuntimeError, match="cannot see"):
+        D.ensure_container([ISO0], "/repo")
+    assert not any(c[0] == "run" for c in eng.calls)
+
+
+def test_a_colima_profile_gets_its_own_commands(mac, monkeypatch):
+    monkeypatch.setattr(D, "_docker", _Engine(_cache_only, name="",
+                                              context="colima-work"))
+    why = D.unshared_reason(["/Volumes/Big/isos"])
+    assert "colima stop -p work\n" in why
+    assert "colima start -p work --mount" in why
+    # lima's name for the VM, when the context is not colima's
+    monkeypatch.setattr(D, "_docker", _Engine(_cache_only, name="lima-colima",
+                                              context="default"))
+    why = D.unshared_reason(["/Volumes/Big/isos"])
+    assert "colima stop\n" in why and "Big/isos: Colima" in why
+
+
+def test_a_folder_outside_volumes_is_shared_by_name(mac, monkeypatch):
+    monkeypatch.setattr(D, "_docker", _Engine(_cache_only))
+    why = D.unshared_reason(["/opt/isos", "/Volumes/A/x", "/Volumes/B/y"])
+    assert '--mount "$HOME:w" --mount /opt/isos:w --mount /Volumes:w\n' in why
+    assert "Share them" in why and "those folders" in why
+
+
+def test_docker_desktop_and_others_get_their_own_sentence(mac, monkeypatch):
+    monkeypatch.setattr(D, "_docker", _Engine(_cache_only, name="docker-desktop",
+                                              context="desktop-linux"))
+    why = D.unshared_reason(["/Volumes/A/x"])
+    assert "File sharing" in why and "colima" not in why.lower()
+    monkeypatch.setattr(D, "_docker", _Engine(_cache_only, name="orbstack",
+                                              context="orbstack"))
+    why = D.unshared_reason(["/Volumes/A/x"])
+    assert "shared folders" in why and "colima" not in why.lower()
+
+
+def test_a_container_that_cannot_be_asked_is_not_called_unshared(
+        unix_paths, monkeypatch):
+    """No answer is not "empty": the steps say what is wrong themselves."""
+    monkeypatch.setattr(D, "_docker", lambda args, timeout=30: _R("x", 1))
+    assert D.unseen_mounts(["/Volumes/Mac SSD/Sonichedge"]) == []
+    assert D.unseen_mounts(["/Volumes/not there"]) == []

@@ -495,17 +495,19 @@ def test_sound_plays_queues_and_stops_music(tmp_path):
     assert s.levels[-1] == (3000, "missing C99")
 
 
-def test_music_by_name_with_the_play_once_bit(tmp_path):
+def test_music_by_name_drops_bit_7_and_loops_until_the_fade(tmp_path):
     """PAD-843: Rob Zombie's attract sound comes as 5a cd 30 (ZM0, bit 7 on
-    the M): it plays ZM0 once rather than reading as a missing name, and the
-    game's fade 15 s later (z 1 0) silences it."""
+    the M).  It is ZM0, not a missing name, and it loops like any music: a
+    real machine played a 4-5 s ZM0 three times before the game's fade
+    (z 1 0, 15 s after the play) silenced it.  ZM0 padded with silence to
+    15 s or more is heard once."""
     from tools.pinheck_emu.audio import RATE, Sound
     _wav(tmp_path / "SFX" / "_FZ" / "ZM0.wav", 0.05)
     s = Sound(str(tmp_path))
     s.packet(b"Z\xcd0" + bytes(12) + b"\x09", 904815)
     assert [t for _, t in s.levels] == ["music ZM0"]
-    assert s.channels[3].once
-    assert s.mix(RATE // 100).any()
+    assert not s.channels[3].once
+    assert s.mix(RATE // 10).all()          # 0.1 s of a 0.05 s clip: looped
     s.packet(b"z\x01\x00" + bytes(12) + b"\x10", 919816)       # fade to 0
     assert not s.mix(RATE // 100).any()
 

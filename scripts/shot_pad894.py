@@ -104,7 +104,7 @@ def main():
             time.sleep(1)
             page.screenshot(path=out("audio_more_menu.png"))
             print("shot", out("audio_more_menu.png"), flush=True)
-            item = page.get_by_text("Rename from callouts.csv", exact=False)
+            item = page.get_by_text("Rename from callouts.csv…", exact=True)
             if after and item.count():
                 item.first.click()
                 time.sleep(1.5)

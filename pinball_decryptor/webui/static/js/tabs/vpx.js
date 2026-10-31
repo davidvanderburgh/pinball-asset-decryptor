@@ -36,6 +36,10 @@ export default function Vpx() {
       + (have.length && lack.length ? " No card for " + lack.join(", ") + "." : ""));
   const playsAs = (t) => fits(t).length > 1 && (t.models || {})[t.title]
     ? "Plays as the " + t.models[t.title] + ". " : "";
+  // PAD-900: the copy in the folder was patched for another model than Patch
+  // takes now (Bond's, for the LE before its Pro map): it still plays as that
+  const stale = (t) => t.patched && t.patched_title && t.patched_title !== t.title
+    && fits(t).includes(t.patched_title) && (t.models || {})[t.patched_title] && t.models[t.title];
   // PAD-850: ONE list, alphabetical - the tables the app knows, a patched one
   // with its Play button, and any other (PAD) table in the folder as its own row
   const known = new Set(tables.map((t) => t.output));
@@ -109,7 +113,9 @@ export default function Vpx() {
             <div class="vpx-what"><div><b>${t.name}</b></div>
               ${t.extra ? html`<div class="small muted">${t.output}</div>` : html`
               <div class="small muted">${t.by ? "by " + t.by : ""}${t.where ? ", on " + t.where : ""}</div>
-              <div class="small muted">${t.card ? playsAs(t) + "Card: " + base(t.card) : "No card image for " + fits(t).join(" or ") + " yet."}</div>`}</div>
+              <div class="small muted">${t.card ? playsAs(t) + "Card: " + base(t.card) : "No card image for " + fits(t).join(" or ") + " yet."}</div>
+              ${stale(t) && t.card ? html`<div class="small">Your copy was patched for the ${t.models[t.patched_title]} and still plays as it.
+                Patch the table again to play it as the ${t.models[t.title]}.</div>` : null}`}</div>
             ${t.patched ? html`<${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx}
                 onClick=${() => call("vpx.play", t.output)}>Play<//>`
               : html`<${Chip} dot sm>Not patched<//>`}

@@ -2,7 +2,9 @@
   "_": [
     "james_bond_le on marty & jpsalas's 'BOND for VISUAL PINBALL X 10.7' 4.3 (bond.vpx,",
     "JP's Friday the 13th script re-themed): a scripted tribute on the 2022 007 LE's",
-    "OWN playfield art, rocket ring, tank and jet pack magnet, so the LE is its card.",
+    "OWN playfield art, rocket ring, tank and jet pack magnet. PAD-900: with no physical",
+    "rocket lock it plays better as the Pro (james_bond_pro.shadow.json, preferred); this",
+    "map is taken when only an LE card is there.",
     "Every object was placed against the rig's switch_xy/led_io drawing (table x * 459/952,",
     "y * 998/2228); the art lines up with the LED frame within a few px at the top and",
     "~20 px low at the bottom. Mechs the table lacks: left eject, rocket VUK + lock,",
@@ -18,7 +20,7 @@
   ],
   "title": "james_bond_le",
   "model": "LE",
-  "preferred": true,
+  "preferred": false,
   "detect": [
     "BOND for VISUAL PINBALL X 10.7",
     "bondjetpack"

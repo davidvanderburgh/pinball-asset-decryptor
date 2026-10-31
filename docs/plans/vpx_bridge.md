@@ -422,7 +422,7 @@ for every other table.
   lasers, the pops), Deadpool 1; `suggest` mended each by its fit (rms 1-6
   px). Aerosmith had Batman's lamp-stealing loop. (Jurassic Park's map was
   dropped by PAD-860 since - its table is not a faithful Jurassic Park - and
-  its mend went with it.)
+  its mend went with it; PAD-887 below has the table that replaced it.)
 * **Names**: audit also compares each lamp's insert with what the build calls
   its LED. Two maps were wrong at the root: Guardians LE (the map the table
   prefers) carried the Pro's LED numbers, so on the LE card it lit other
@@ -444,3 +444,37 @@ Park 62% -> 79%, Deadpool 98% -> 100%, TMNT Pro 81% -> 84%.
 Proof: rig frames of each mode, drawn through the controller and the map on
 the table's art (`vpxlamps.py lit`), before and after; a cscript run of the
 generated lamp code with stand-in lights; every patched table re-signs.
+
+## Jurassic Park, on a faithful table (PAD-887)
+
+A user pointed at JPSalas & marty's "Jurassic Park Pro Le" 4.02 (VPUniverse
+20502) and David said to integrate it in place of the dropped one. Unlike
+marty's Limited Edition it is the real machine: its playfield picture is
+Stern's own Jurassic Park art, and fitted to the rig's drawing on seven
+anchors (outlanes, return lanes, the three pops) it holds at 8 table units
+(about 2 drawing px). Every Pro switch but the flipper EOS has a table
+object within ~60 units, most within 20, and the table's lights fit the
+build's LED places at 1.8 px. Its rules are JPSalas's usual template
+(battles, jackpots), which the bridge never lets run; its ball paths are the
+machine's.
+
+Two maps, the Foo Fighters way: `jurassic_park_pro` (preferred; the table's
+T-Rex, raptor pit and helicopter are scripted, and the Pro needs none of the
+LE's mechs) and `jurassic_park_le`, which adds the raptor pit lock
+(PyramidKicker as a saucer on LOCK-RAPTOR PIT), K7 as the left ramp's mouth
+(its teleport sub kept) and Targetraptor as the motor bank's target. Three
+switches are guesses: TARGET-LITE ESCAPE (the only target near it), RAPTOR
+PIT-UP L (the target lane beside the pit) and the two Newton ball optos (the
+table's jeep stands there). All 85 placed inserts are shown, 11 of them by
+retrofit lights; the shadow game's 32 own insert lights are held dark.
+
+**A spinner where the machine has an opto.** The table spins a spinner at
+the right orbit's mouth and in the right half pipe, both optos on the
+machine; a ball through either spins it a dozen times. `"event": "pass"`
+pulses once a pass (every spin restarts a 600 ms quiet time).
+
+On the rig (rigbatch, both builds): the patched table lights every insert
+the machine lights, 19 of 19 in the Pro's attract, 10 of 10 in the LE's and
+17-18 of 17-18 in an LE game, the RGB arrows in their colours. Both
+patched tables re-sign, and their scripts compile under Windows Script Host
+(the first runtime stop is `Table1`, which only Visual Pinball has).

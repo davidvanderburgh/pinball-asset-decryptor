@@ -44,6 +44,11 @@ import padvpx      # noqa: E402
 VPX_URL = ("https://github.com/vpinball/vpinball/releases/download/v10.8.0-2051-28dd6c3/"
            "Developer.VPinballX-10.8.0-2051-28dd6c3-Release-win-x64.zip")
 VPX_DEFAULT_DIR = r"C:\Visual Pinball"
+#: the oldest Visual Pinball the kit's tables open in (PAD-887): JAWS, Deadpool,
+#: Foo Fighters, Metallica, Rush, Sword of Rage and Star Wars are saved by 10.8
+#: (file version 1080), which an older player refuses; 10.8.0 is what the tab
+#: downloads and what every table was proven on
+VPX_MIN = (10, 8, 0)
 
 
 def controller_registered():
@@ -79,6 +84,34 @@ def find_vpx():
         if d and os.path.isfile(os.path.join(d, "VPinballX64.exe")):
             return d
     return ""
+
+
+def vpx_version(folder):
+    """VPinballX64.exe's own file version in *folder*, as (major, minor,
+    patch), or None when it cannot be read (no exe, not Windows)."""
+    exe = os.path.join(folder or "", "VPinballX64.exe")
+    if not folder or not os.path.isfile(exe) or sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        ver = ctypes.windll.version
+        n = ver.GetFileVersionInfoSizeW(exe, None)
+        buf = ctypes.create_string_buffer(n)
+        if not n or not ver.GetFileVersionInfoW(exe, 0, n, buf):
+            return None
+        p, size = ctypes.c_void_p(), wintypes.UINT()
+        if not ver.VerQueryValueW(buf, "\\", ctypes.byref(p), ctypes.byref(size)):
+            return None
+        # VS_FIXEDFILEINFO: signature, struct version, then FileVersionMS/LS
+        ms, ls = ctypes.cast(p, ctypes.POINTER(wintypes.DWORD * 4)).contents[2:4]
+    except Exception:                                       # noqa: BLE001
+        return None
+    return (ms >> 16, ms & 0xFFFF, ls >> 16)
+
+
+def dotted(v):
+    return ".".join(str(x) for x in v) if v else ""
 
 
 def vpx_tables_dir():
@@ -172,8 +205,10 @@ def known_tables(tables_dir=None):
 
 #: (PAD) tables an earlier release patched whose map the kit no longer has
 #: (PAD-860: marty's "Jurassic Park Limited Edition" is not the real JP's
-#: playfield). A copy left in the tables folder is neither listed nor opened.
-DROPPED = ("Jurassic Park Limited Edition (PAD).vpx",)
+#: playfield; JPSalas & marty's "Jurassic Park Pro Le" took its place,
+#: PAD-887). A copy left in the tables folder is neither listed nor opened.
+#: The value is the table to patch in its place.
+DROPPED = {"Jurassic Park Limited Edition (PAD).vpx": "JPSalas & marty's Jurassic Park Pro Le 4.02"}
 
 
 def patched_in(tables_dir):
@@ -303,7 +338,7 @@ def open_table(name):
     if not vpx:
         return "Visual Pinball is not set up."
     if name in DROPPED:
-        return "%s is no longer supported." % name
+        return "%s is no longer supported: patch %s instead." % (name, DROPPED[name])
     tables = vpx_tables_dir()
     path = os.path.join(tables, name)
     if not os.path.isfile(path):
@@ -336,9 +371,16 @@ def state():
     presets = layout_presets(mons)
     tables = vpx_tables_dir()
     shown = padisplay.load(padisplay.CONF)
+    vpx = find_vpx()
+    have = vpx_version(vpx)
     return {
         "registered": controller_registered(),
-        "vpx": find_vpx(),
+        "vpx": vpx,
+        # PAD-887: the minimum shown beside the Visual Pinball line, and an
+        # older copy is "Needed", not "Ready" (unread: taken as fine)
+        "vpx_min": dotted(VPX_MIN),
+        "vpx_version": dotted(have),
+        "vpx_old": bool(have) and have < VPX_MIN,
         "tables_dir": tables,
         "tables_own": bool(kit.get("tables")) and tables == kit.get("tables"),
         "library": lib,

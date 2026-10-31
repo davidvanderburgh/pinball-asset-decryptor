@@ -64,9 +64,14 @@ export default function Vpx() {
             ${rtFix ? html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"
               onClick=${() => call("vpx.install_runtime")}>${s.runtime_state === "stale" ? "Update" : "Install"}<//>` : null}
           <//>
-          <${Row} ok=${!!s.vpx} label="Visual Pinball" value=${s.vpx || "Not found on this PC."}>
+          <${Row} ok=${!!s.vpx && !s.vpx_old} label=${html`Visual Pinball${s.vpx_min
+              ? html` <span class="small muted">${s.vpx_min} or later</span>` : null}`}
+            value=${!s.vpx ? "Not found on this PC."
+              : s.vpx_old ? "Version " + s.vpx_version + " in " + s.vpx + ". The tables need " + s.vpx_min
+                + " or later: choose a newer copy, or download " + s.vpx_min + " into another folder."
+              : s.vpx + (s.vpx_version ? " (version " + s.vpx_version + ")" : "")}>
             <${Button} drop size="sm" kind="ghost" disabled=${busy || !s.ok} onClick=${() => call("vpx.choose_vpx")}>Choose folder…<//>
-            ${s.vpx ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"
+            ${s.vpx && !s.vpx_old ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"
               onClick=${() => call("vpx.download_vpx")}>Download 10.8.0<//>`}
           <//>
           <${Row} ok=${!!s.registered} label="The game's link to Visual Pinball (PAD.Controller)"

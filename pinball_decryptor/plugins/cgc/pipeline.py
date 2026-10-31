@@ -959,12 +959,17 @@ class WritePipeline(BasePipeline):
                           seek=inner_part['start_bytes']), timeout=900)
 
             self._log("Re-packing installer P3 (emmc.img into P3)...", "info")
+            emmc_meta = _parse_inode_meta(
+                self._inner_stat(p3_exec, EMMC_INNER_PATH))
             self.executor.run(
                 f"debugfs -w -R 'rm {EMMC_INNER_PATH}' {p3_exec} 2>&1 "
                 f"|| true", timeout=120)
             self.executor.run(
                 f"debugfs -w -R 'write {emmc_exec} {EMMC_INNER_PATH}' "
                 f"{p3_exec} 2>&1", timeout=900)
+            self._restore_meta(p3_exec, EMMC_INNER_PATH, emmc_meta,
+                               _parse_inode_meta(
+                                   self._inner_stat(p3_exec, EMMC_INNER_PATH)))
 
             # debugfs `write` exits 0 even when it never created the file or
             # ran P3 out of space partway.  e2fsck below can't catch that
@@ -1240,6 +1245,8 @@ class WritePipeline(BasePipeline):
         """
         total = len(changed)
         self._make_inner_dirs(inner_exec, inner_root_to_assets_root, changed)
+        # The mode/owner each file must land with (PAD-886): _wanted_meta.
+        want_meta = {}
         for i, (rel, abs_host) in enumerate(sorted(changed.items())):
             self._check_cancel()
             inner_path = f"{inner_root_to_assets_root.rstrip('/')}/{rel}"
@@ -1262,6 +1269,8 @@ class WritePipeline(BasePipeline):
             # transcribe-named callouts) would otherwise close a naive outer
             # 'rm "..."' early ("unexpected EOF while looking for matching '").
             img_q = shlex.quote(inner_exec)
+            want_meta[rel] = self._wanted_meta(inner_exec, inner_path,
+                                               abs_host)
             rm_cmd = shlex.quote(f"rm {_quote_dbg(inner_path)}")
             self.executor.run(
                 f"debugfs -w -R {rm_cmd} {img_q} "
@@ -1324,6 +1333,56 @@ class WritePipeline(BasePipeline):
                     f"{cause} The build was aborted; the original "
                     f"image is "
                     f"unchanged.\n\ndebugfs stat output:\n{out.strip()}")
+            self._restore_meta(inner_exec, inner_path, want_meta.get(rel),
+                               _parse_inode_meta(out))
+
+    def _wanted_meta(self, inner_exec, inner_path, abs_host):
+        """(perms, uid, gid) the file at *inner_path* must keep once written.
+
+        debugfs ``write`` builds a brand-new inode and takes its mode off the
+        HOST file -- 0664 for anything PAD extracted, since debugfs ``dump``
+        ignores the inode's own mode.  An edited ``service.sh`` or ``pin``
+        then lands non-executable, init.sh (PID 1) gets EACCES running it,
+        exits, and the machine kernel-panics in a boot loop (PAD-886).  So a
+        replaced file keeps the mode and owner of the one it replaces; a new
+        file takes its folder's owner, and is executable when it is a
+        program (an ELF or a ``#!`` script).
+        """
+        meta = _parse_inode_meta(self._inner_stat(inner_exec, inner_path))
+        if meta:
+            return meta
+        parent = _parse_inode_meta(self._inner_stat(
+            inner_exec, posixpath.dirname(inner_path) or "/"))
+        uid, gid = parent[1:] if parent else (0, 0)
+        return (0o755 if _is_program(abs_host) else 0o644, uid, gid)
+
+    def _restore_meta(self, inner_exec, inner_path, want, got):
+        """Set the fields of *want* that *got* (the written inode) lacks, in
+        one debugfs run, and refuse the build if the mode still is not
+        right: a game program the machine cannot run is a boot loop."""
+        if not want:
+            return
+        perms, uid, gid = want
+        # sif wants the full mode word, file-type bits included.
+        fields = [(f, v) for f, v, idx in
+                  (("mode", f"0{0o100000 | perms:o}", 0),
+                   ("uid", str(uid), 1), ("gid", str(gid), 2))
+                  if not got or got[idx] != want[idx]]
+        if not fields:
+            return
+        q = _quote_dbg(inner_path)
+        script = " ".join(shlex.quote(f"sif {q} {f} {v}") for f, v in fields)
+        self.executor.run(
+            f"printf '%s\\n' {script} | debugfs -w -f - "
+            f"{shlex.quote(inner_exec)} 2>&1", timeout=60)
+        out = self._inner_stat(inner_exec, inner_path)
+        now = _parse_inode_meta(out)
+        if not now or now[0] != perms:
+            raise PipelineError("Write",
+                f"{inner_path} was written but its permissions could not be "
+                f"set back to {perms:04o}, so the machine could not run it. "
+                f"The build was aborted; the original image is "
+                f"unchanged.\n\ndebugfs stat output:\n{out.strip()}")
 
     # A real CGC install payload (emmc.img) is 2-4 GB; anything under this
     # is an empty/truncated payload the machine can't install.
@@ -2256,6 +2315,25 @@ def _verify_staged_sizes(executor, image_exec, src_dir, staged_dir):
         elif got < size:
             problems.append((name, size, got))
     return problems
+
+
+def _parse_inode_meta(stat_out):
+    """(perms, uid, gid) out of a debugfs ``stat`` dump, or None."""
+    mode = re.search(r"\bMode:\s*0?([0-7]{3,4})\b", stat_out or "")
+    owner = re.search(r"\bUser:\s*(\d+)\s+Group:\s*(\d+)", stat_out or "")
+    if not mode or not owner:
+        return None
+    return (int(mode.group(1), 8), int(owner.group(1)), int(owner.group(2)))
+
+
+def _is_program(path):
+    """An ELF or a ``#!`` script -- a file the machine runs."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4)
+    except OSError:
+        return False
+    return head == b"\x7fELF" or head[:2] == b"#!"
 
 
 def _quote_dbg(p):

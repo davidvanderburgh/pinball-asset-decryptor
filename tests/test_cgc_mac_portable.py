@@ -372,3 +372,64 @@ def test_extract_write_extract_round_trip_on_this_host(tmp_path, monkeypatch):
     # The partition table and everything outside P3 came through untouched.
     a, b = img.read_bytes(), built.read_bytes()
     assert len(a) == len(b) and a[:4099 * 512] == b[:4099 * 512]
+
+
+def _built_inner_stat(tmp, built, path):
+    """debugfs ``stat`` of *path* inside the inner game ext4 of *built*."""
+    data = built.read_bytes()
+    (tmp / "b_p3.raw").write_bytes(data[4099 * 512:(4099 + 26627) * 512])
+    subprocess.run([_tool("debugfs"), "-R",
+                    f"dump /emmc.img {tmp / 'b_emmc.img'}", str(tmp / "b_p3.raw")],
+                   check=True, capture_output=True)
+    emmc = (tmp / "b_emmc.img").read_bytes()
+    (tmp / "b_inner.raw").write_bytes(emmc[2055 * 512:(2055 + 16387) * 512])
+    return subprocess.run([_tool("debugfs"), "-R", f'stat "{path}"',
+                           str(tmp / "b_inner.raw")], check=True,
+                          capture_output=True, text=True).stdout
+
+
+def _arm_elf(body):
+    """A bare 32-bit hard-float ARM ELF header, enough for the Write's
+    will-it-run check."""
+    return (b"\x7fELF\x01\x01\x01" + b"\0" * 9
+            + struct.pack("<HHIIIIIHHHHHH", 2, 40, 1, 0, 0, 0, 0x05000400,
+                          52, 0, 0, 0, 0, 0) + body)
+
+
+@pytest.mark.skipif(not _HAVE, reason="needs e2fsprogs (mke2fs, debugfs) and "
+                                      "xxd on a Linux or Mac host")
+def test_written_programs_keep_their_mode(tmp_path, monkeypatch):
+    """PAD-886: debugfs ``dump`` hands PAD a 0664 copy of the card's 0755
+    ``service.sh``/``pin``, and ``write`` used to put that 0664 on the card:
+    init.sh (PID 1) could not run them, exited, and the machine kernel
+    panicked in a boot loop.  An edited file keeps the mode of the one it
+    replaces; a new program arrives executable, a new data file does not."""
+    assets = {"service.sh": b"#!/bin/sh\n./pin\n", "pin": _arm_elf(b"\0"),
+              "afmdata/data.bin": b"d" * 100}
+    img_root = tmp_path / "inner_root" / "home" / "debian" / "emumm"
+    (img_root / "afmdata").mkdir(parents=True)
+    for rel, mode in (("service.sh", 0o755), ("pin", 0o755),
+                      ("afmdata/data.bin", 0o664)):
+        (img_root / rel).write_bytes(assets[rel])
+        (img_root / rel).chmod(mode)             # mke2fs -d copies the mode
+    img = _build_installer(tmp_path, assets)
+
+    out = tmp_path / "out dir"
+    _extract(img, out)
+    (out / "service.sh").write_bytes(b"#!/bin/sh\necho hi\n./pin\n")
+    (out / "pin").write_bytes(_arm_elf(b"\1" * 80))
+    (out / "afmdata" / "new.sh").write_bytes(b"#!/bin/sh\n")
+    (out / "afmdata" / "new.dat").write_bytes(b"new")
+    for rel in ("service.sh", "pin", "afmdata/new.sh", "afmdata/new.dat"):
+        (out / rel).chmod(0o664)                   # what dump leaves on the host
+    monkeypatch.setattr(P.WritePipeline, "_MIN_PLAUSIBLE_EMMC", 1)
+    built = tmp_path / "built" / "AttackFromMars test Installer.img"
+    _run(P.WritePipeline(str(img), str(out), str(built), lambda *a, **k: None,
+                         lambda *a, **k: None, lambda *a, **k: None, None))
+
+    want = {"service.sh": 0o755, "pin": 0o755, "afmdata/data.bin": 0o664,
+            "afmdata/new.sh": 0o755, "afmdata/new.dat": 0o644}
+    for rel, mode in want.items():
+        meta = P._parse_inode_meta(_built_inner_stat(
+            tmp_path, built, f"/home/debian/emumm/{rel}"))
+        assert meta and meta[0] == mode, (rel, meta and oct(meta[0]))

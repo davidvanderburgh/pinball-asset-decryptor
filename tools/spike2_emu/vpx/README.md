@@ -22,6 +22,7 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `patch_godzilla.py` | applies `godzilla_le.vpxmap.json` to marty02's "Godzilla Limited Edition" v2.6: rewires the script, adds 36 lights and the Mechagodzilla magnet, re-signs. |
 | `vpxshadow.py` | the patcher for a SCRIPTED tribute (no ROM): keeps its script as a shadow game, generates the bridge from `<title>.shadow.json`, neuters its own balls, makes PinUP Player optional, re-signs. |
 | `rush_le.shadow.json`, `foo_fighters_pro.shadow.json`, `foo_fighters_le.shadow.json` | the maps for drhotwing's "Rush LE Tribute" 2.0.2 and JP's "Foo Fighters" beta. JP's table is a Pro's playfield (no upper playfield, no Overlord magnet), so Patch takes the Pro map, or the LE one when only an LE card is there (`padvpx patch --title` picks). |
+| `jurassic_park_pro.shadow.json`, `jurassic_park_le.shadow.json` | the maps for JPSalas & marty's "Jurassic Park Pro Le" 4.02 (VPUniverse), on Stern's own Jurassic Park playfield (PAD-887; it replaced marty's "Jurassic Park Limited Edition", PAD-860). Patch takes the Pro; the LE map adds the raptor pit lock, the left ramp's mouth and the motor bank's target. |
 | `vpxkeys.py` | presses keys in a running patched table through its `PadTestTimer` (a test does not depend on VPX having the keyboard); `lamps <file>` dumps every mapped light's state. |
 | `padvpx.py` | the kit's command: patch a table (recognised by its map's `detect` words), register the controller, record cards, run and stop by hand, status. |
 | `vpxsetup.py` | the app's Visual Pinball tab's half here: what is set up (Visual Pinball, the controller, the cards, each known table and whether it is patched), the card folder, the window layout, the Visual Pinball download, Play; one JSON line back. |
@@ -331,6 +332,11 @@ timer, every `LightSeq` stopped at init) with its hit subs no longer called
 (`orig_hits: false`; `orig_keep` names the slingshots, whose originals
 animate the rubbers). `vpxkeys.py lamps <file>` makes the table write every
 mapped light's state, to compare with the machine's `padled` plane.
+
+**A spinner where the machine has an opto** (PAD-887): a switch's
+`"event": "pass"` takes the spinner's Spin as one pulse a pass, not one a
+spin: every spin restarts a 600 ms quiet time (`PadPassSw`), so the ball
+through Jurassic Park's right orbit or half pipe is one opto edge.
 
 Four more map fields (PAD-859), all in the generated script:
 

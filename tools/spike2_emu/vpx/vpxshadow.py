@@ -59,6 +59,13 @@ import vpxsounds  # noqa: E402
 
 SUB_RE = r"^(\s*)(Public\s+|Private\s+)?Sub\s+(%s)\s*(\([^)]*\))?(\s*'.*|\s*:.*)?$"
 
+#: a switch's event -> the table sub(s) that carry it. "pass" (PAD-887) is a
+#: spinner standing in for the machine's OPTO: a ball through it spins it a
+#: dozen times, and the opto must see one pass, not twelve
+EVENT_SUBS = {"hit": ("_Hit",), "hold": ("_Hit", "_UnHit"), "spin": ("_Spin",),
+              "pass": ("_Spin",), "slingshot": ("_Slingshot",)}
+PASS_MS = 600
+
 
 def saucers(m):
     return {k: v for k, v in m.get("saucers", {}).items() if k != "_"}
@@ -631,6 +638,18 @@ def gen(m, had, quiet=None, dof=None):
                 "Sub PadAutoPlunge(e) : If e Then %s.AutoFire : End If : End Sub" % p["autoplunge"]]
     # ---- switches
     out.append("")
+    if any(s.get("event") == "pass" for k, s in m["switches"].items() if k != "_"):
+        # every spin restarts the quiet time, so one pass is one pulse; the
+        # dictionary is made on first use (a top-level Set may never run)
+        out += ["Dim PadPassAt",
+                "Sub PadPassSw(sw)",
+                "\tIf IsEmpty(PadPassAt) Then Set PadPassAt = CreateObject(\"Scripting.Dictionary\")",
+                "\tIf PadPassAt.Exists(sw) Then",
+                "\t\tIf GameTime - PadPassAt(sw) < %d Then PadPassAt(sw) = GameTime : Exit Sub" % PASS_MS,
+                "\tEnd If",
+                "\tPadPassAt(sw) = GameTime",
+                "\tvpmTimer.PulseSw sw",
+                "End Sub"]
     for name, s in m["switches"].items():
         if name == "_":
             continue
@@ -656,8 +675,8 @@ def gen(m, had, quiet=None, dof=None):
                 b0 += fx(name + "_UnHit")
             out.append("Sub %s_Hit : %s : End Sub" % (name, b1))
             out.append("Sub %s_UnHit : %s : End Sub" % (name, b0))
-        elif ev == "spin":
-            body = "vpmTimer.PulseSw %d" % sid
+        elif ev in ("spin", "pass"):
+            body = ("vpmTimer.PulseSw %d" if ev == "spin" else "PadPassSw %d") % sid
             if had.get(name + "_Spin") and calls_orig(name):
                 body += " : %s_Spin_orig" % name
             else:
@@ -833,11 +852,9 @@ def dof_calls(lines, m):
     script as written, before any sub is renamed or line neutered."""
     stmts = list(_walk(lines))
     dof = {}
-    evs = {"hit": ("_Hit",), "hold": ("_Hit", "_UnHit"), "spin": ("_Spin",),
-           "slingshot": ("_Slingshot",)}
     for name, s in m["switches"].items():
         if name != "_":
-            for ev in evs[s.get("event", "hit")]:
+            for ev in EVENT_SUBS[s.get("event", "hit")]:
                 dof[name + ev] = dof_of_sub(stmts, name + ev)
     for name in [m["trough"]["drain"]] + list(saucers(m)):
         dof[name + "_Hit"] = dof_of_sub(stmts, name + "_Hit")
@@ -876,9 +893,7 @@ def patch(script, m):
     for name, s in m["switches"].items():
         if name == "_":
             continue
-        evs = {"hit": ("_Hit",), "hold": ("_Hit", "_UnHit"), "spin": ("_Spin",),
-               "slingshot": ("_Slingshot",)}[s.get("event", "hit")]
-        for ev in evs:
+        for ev in EVENT_SUBS[s.get("event", "hit")]:
             had[name + ev] = rename_sub(lines, name + ev, rep)
     for k in saucers(m):
         rename_sub(lines, k + "_Hit", rep)

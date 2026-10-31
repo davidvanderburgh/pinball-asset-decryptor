@@ -205,8 +205,10 @@ def known_tables(tables_dir=None):
 
 #: (PAD) tables an earlier release patched whose map the kit no longer has
 #: (PAD-860: marty's "Jurassic Park Limited Edition" is not the real JP's
-#: playfield). A copy left in the tables folder is neither listed nor opened.
-DROPPED = ("Jurassic Park Limited Edition (PAD).vpx",)
+#: playfield; JPSalas & marty's "Jurassic Park Pro Le" took its place,
+#: PAD-887). A copy left in the tables folder is neither listed nor opened.
+#: The value is the table to patch in its place.
+DROPPED = {"Jurassic Park Limited Edition (PAD).vpx": "JPSalas & marty's Jurassic Park Pro Le 4.02"}
 
 
 def patched_in(tables_dir):
@@ -336,7 +338,7 @@ def open_table(name):
     if not vpx:
         return "Visual Pinball is not set up."
     if name in DROPPED:
-        return "%s is no longer supported." % name
+        return "%s is no longer supported: patch %s instead." % (name, DROPPED[name])
     tables = vpx_tables_dir()
     path = os.path.join(tables, name)
     if not os.path.isfile(path):

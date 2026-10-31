@@ -313,6 +313,35 @@ def test_shadow_keeps_the_original_subs_behind_the_bridge(shadow):
         "every Sub closes once"
 
 
+def test_shadow_spinner_as_an_opto_pulses_once_a_pass(tmp_path):
+    # PAD-887: Jurassic Park 4.02 has spinners where the machine has optos (the
+    # right orbit's mouth, the right half pipe); a ball spins one a dozen
+    # times, and the opto must see one pass. Run for real under VBScript
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["switches"]["Spinner"]["event"] = "pass"
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    assert "Sub Spinner_Spin : PadPassSw 1083 : End Sub" in out
+    assert "PadPassSw" not in vs.patch(MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))[0]
+    lines = out.split("\n")
+    a = lines.index("Dim PadPassAt")
+    b = lines.index("End Sub", a)
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim GameTime, Pulses",
+        "Class FakeTimer : Public Sub PulseSw(n) : Pulses = Pulses & n & \"@\" & GameTime & \" \" : End Sub : End Class",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "\n".join(lines[a:b + 1]),
+        # a pass: twelve spins 40 ms apart; 700 ms quiet; the next pass
+        "Dim i : For i = 0 To 11 : GameTime = 1000 + i * 40 : PadPassSw 1083 : Next",
+        "For i = 0 To 5 : GameTime = 2140 + i * 40 : PadPassSw 1083 : Next",
+        "GameTime = 2400 : PadPassSw 1056",
+        "WScript.Echo Pulses"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.split() == ["1083@1000", "1083@2140", "1056@2400"], r.stdout + r.stderr
+
+
 def test_shadow_neuters_the_tributes_own_balls(shadow):
     out, rep = shadow
     assert "'PAD neutered: BallRelease.CreateBall" in out
@@ -1447,19 +1476,26 @@ def test_tmnt_lists_only_the_pro():
 
 def test_jurassic_park_table_is_dropped(tmp_path, monkeypatch):
     # PAD-860: marty's "Jurassic Park Limited Edition" is not the real JP's
-    # playfield; the kit has no map for it, recognises nothing in it, and a
-    # copy an earlier release patched is neither listed nor opened
+    # playfield; the kit recognises nothing in it, and a copy an earlier
+    # release patched is neither listed nor opened. PAD-887: JPSalas &
+    # marty's "Jurassic Park Pro Le" 4.02 is the Jurassic Park table now
     vs = pytest.importorskip("vpxsetup")
     pv = pytest.importorskip("padvpx")
-    assert not any("jurassic" in t for t in pv.maps())
-    assert not any("jurassic" in t for row in vs.known_tables("") for t in row["titles"])
+    rows = [r for r in vs.known_tables("") if any("jurassic" in t for t in r["titles"])]
+    assert [r["output"] for r in rows] == ["Jurassic Park Pro Le (PAD).vpx"]
+    assert sorted(rows[0]["titles"]) == ["jurassic_park_le", "jurassic_park_pro"]
 
     class Fake:
+        text = "' Jurassic Parc Limited Edition\nSub TRexlockhaut_Hit\n"
+
         def script(self):
-            return "' Jurassic Parc Limited Edition\nSub TRexlockhaut_Hit\n"
+            return self.text
 
     monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
     assert pv.recognise("x.vpx") == (None, None)
+    Fake.text = "'                 Jurassic Park Le Script JPSalas & marty\n"
+    assert pv.recognise("x.vpx")[0] == "jurassic_park_pro"
+    assert pv.recognise("x.vpx", title="jurassic_park_le")[0] == "jurassic_park_le"
     (tmp_path / "Jurassic Park Limited Edition (PAD).vpx").write_bytes(b"")
     (tmp_path / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"")
     assert vs.patched_in(str(tmp_path)) == ["Rush LE 2.0.2 (PAD).vpx"]

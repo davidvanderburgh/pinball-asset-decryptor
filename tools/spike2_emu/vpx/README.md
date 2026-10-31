@@ -162,7 +162,13 @@ map's `detect` words say which table it is for.
 While a table is attached, `dump/ballfeed.off` tells the rig's `ballfeed.py`
 to leave the trough alone: the table's own `cvpmBallStack` owns the balls.
 Keys are VPX's usual ones: 1 Start, 5 coin, the Shift keys flip, Esc
-leaves. The launch button is Enter on Godzilla (marty02 wired it to the
+leaves. The coin door's service buttons are VPM's 7 8 9 0, in the coin
+door's order: Back, Minus, Plus, Select (PAD-882). A title's first boot opens
+its Guided Setup, which is where a player sets Free Play, and that is walked
+with these. The table sends the controller's SERVICE numbers (9000 + the
+button's bit on node 0), and the controller finds each button's id in the
+title's own switch table: the ids differ by title, the wire does not. A table
+patched before them gets them the first time the app's Play opens it. The launch button is Enter on Godzilla (marty02 wired it to the
 plunger key) and the lockbar key, Left Alt by VPX's default, on Rush and Foo
 Fighters (their scripts wired the Action button to `LockBarKey`).
 `%TEMP%\padcontroller.log` says what the controller did;

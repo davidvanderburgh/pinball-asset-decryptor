@@ -39,6 +39,13 @@ A number below 1000 is a table's ORIGINAL number and goes through the map
 (`switch_rewrite`, `solenoids`, `lamps`), so a table can be driven with its
 script left on its old numbering while the map is being built.
 
+    service  9000 + <node 0 bit>                 SERVICE below
+
+The coin door's four service buttons sit on the same wire on every Spike 2
+machine (node 0, bits 8-11) but under a different switch id per title
+(Godzilla's 28 is Batman's Service Select), so a table names the button and
+this resolves it through the run's switch_list.txt (PAD-882).
+
 WHICH MAP: `Controller.GameName` names the title (`godzilla_le`), and
 `<title>.vpxmap.json` beside this file is loaded on `Run`. No map = the
 1000+ convention alone, which is enough to start.
@@ -101,6 +108,11 @@ READ_N = max(coilmap.HI_READ, coilmap.RULE_READ)   # one read takes every plane
 LAMP_ON = int(os.environ.get("PAD_VPX_LAMP_ON", "1"))   # LED level that is "lit"
 MIN_PULSE_MS = 40               # a coil pulse shorter than a poll still shows
 FRONT_WATCH_S = 300             # how long after Run a started run's windows are watched
+#: the coin door's service buttons by number: {number: (node, bit)}
+SERVICE = {9008: (0, 8),        # Service Select
+           9009: (0, 9),        # Service Plus
+           9010: (0, 10),       # Service Minus
+           9011: (0, 11)}       # Service Back
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT = 1, 2, 4
@@ -1269,10 +1281,22 @@ class Bridge:
             if sid > 0 and self.pipe.held.get(sid) == 1:
                 self.set_switch(int(n), 0)
                 log("focus lost: %s (switch %d) let go" % (key, sid))
+        for n in SERVICE if self.pipe else ():
+            sid = self.switch_id(n)
+            if sid > 0 and self.pipe.held.get(sid) == 1:
+                self.set_switch(n, 0)
+                log("focus lost: service %d (switch %d) let go" % (n, sid))
 
     # -- switches
+    def switch_id(self, n):
+        """The map's switch id for table number `n`; a SERVICE button by its
+        wire in this run's switch table (0 until the table is read)."""
+        if n is not None and int(n) in SERVICE:
+            return (getattr(self, "sw_ids", None) or {}).get(SERVICE[int(n)], 0)
+        return self.map.switch_id(n)
+
     def set_switch(self, n, level):
-        sid = self.map.switch_id(n)
+        sid = self.switch_id(n)
         if getattr(self, "dof", None) and self.dof.up:
             for w in self.map.dof_switches.get(sid, ()):
                 self._dof_set("W", w, 1 if level else 0)
@@ -1289,7 +1313,7 @@ class Bridge:
         self.pipe.set(sid, level)
 
     def get_switch(self, n):
-        sid = self.map.switch_id(n)
+        sid = self.switch_id(n)
         if sid <= 0:
             return False
         if not self.pipe and sid in self._early:

@@ -389,6 +389,12 @@ def open_table(name):
         vpxsounds.quiet_in_place(path)
     except (OSError, ValueError):
         pass
+    # PAD-882: and one patched before the service keys gets them, once
+    try:
+        import vpxshadow
+        vpxshadow.service_keys_in_place(path)
+    except Exception:                                       # noqa: BLE001  never in Play's way
+        pass
     subprocess.Popen([os.path.join(vpx, "VPinballX64.exe"), "-play", path], cwd=vpx)
     return "ok"
 

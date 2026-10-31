@@ -2303,3 +2303,46 @@ def test_a_launch_with_no_emulator_set_up_says_so(tmp_path, monkeypatch):
     la3.logfile = str(tmp_path / "padvpx.log")
     la3.start()
     assert la3.slot == 2
+
+
+def test_the_grips_stand_aside_while_visual_pinball_is_paused(monkeypatch):
+    """PAD-882: the grips window lies over the whole picture and takes every
+    click, and Visual Pinball's Esc menu (Resume, Quit to editor...) is drawn
+    inside that picture: its buttons took no click, so the only way out of a
+    table was closing its windows. While VPX is paused the grips are hidden;
+    when it plays on they cover the picture again. _tick as it runs every
+    50 ms, against a recording user32."""
+    pc = pytest.importorskip("padcontroller")
+    pytest.importorskip("win32gui")
+    logged, calls = [], []
+    monkeypatch.setattr(pc, "log", logged.append)
+    monkeypatch.setattr(pc.Bridge, "_client_on_screen", staticmethod(lambda h: (10, 20, 400, 600)))
+
+    class U:
+        def __getattr__(self, name):
+            def f(*a):
+                calls.append((name, tuple(getattr(x, "value", x) for x in a)))
+                return 0 if name in ("IsIconic", "IsZoomed") else 1
+            return f
+
+    g = pc.PlayerGrips.__new__(pc.PlayerGrips)
+    g.u, g.hwnd, g.player, g.placed, g.drag, g.press, g.aside = U(), 77, 55, None, None, None, False
+    # the real chain: VPX's Esc opens its menu and fires the table's Paused,
+    # whose `Controller.Pause = 1` is Bridge.set_pause (PadController._dynamic_)
+    g.bridge = pc.Bridge()
+    g.bridge.running, g.bridge.player_hwnd = True, 55
+
+    def tick():
+        calls.clear()
+        g._tick()
+        return [c for c in calls if c[0] in ("ShowWindow", "SetWindowPos")]
+
+    assert tick() == [("SetWindowPos", (77, None, 10, 20, 400, 600, 0x50))]     # over the picture
+    assert tick() == []                                                         # placed: nothing to do
+    g.bridge.set_pause(1)                                                       # Esc: VPX pauses for its menu
+    assert tick() == [("ShowWindow", (77, 0))] and g.aside
+    assert tick() == []                                                         # hidden once, not every tick
+    assert any("grips aside" in s for s in logged)
+    g.bridge.set_pause(0)                                                       # Resume
+    assert tick() == [("SetWindowPos", (77, None, 10, 20, 400, 600, 0x50))]     # back, shown again
+    assert not g.aside and any("grips back" in s for s in logged)

@@ -87,7 +87,9 @@
       "solenoid number the table's SolCallback already uses, except the flippers, which take",
       "core.vbs's Consts (sLRFlipper 46, sLLFlipper 48). Coil groups -> nodes from",
       "group_node.txt; group 9 (the Mag Sensor board, node 10 in node_ident.txt) has no node",
-      "there because the census skipped that board, so its two coils are GUESS."
+      "there because the census skipped that board, so its two coils are GUESS.",
+      "`dof`: the number DOF knows a coil by (the ROM's, mtl_180h's DOF config), where the",
+      "key is not it - the flippers, SAM solenoids 15 and 16 (PAD-879)."
     ],
     "1":  {"coil": [8, 1], "name": "TROUGH", "callback": "solTrough"},
     "2":  {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "solAutofire"},
@@ -109,8 +111,8 @@
     "54": {"coil": [8, 7], "name": "3 BANK DROP", "callback": "ResetDTs"},
     "55": {"coil": [11, 2], "name": "LOOP UP POST", "callback": "OrbitPost"},
     "56": {"coil": [9, 7], "name": "SNAKE JAW", "callback": "SolSnakeJaw"},
-    "46": {"coil": [8, 0], "name": "RIGHT FLIPPER", "callback": "SolRFlipper"},
-    "48": {"coil": [8, 5], "name": "LEFT FLIPPER", "callback": "SolLFlipper"}
+    "46": {"coil": [8, 0], "name": "RIGHT FLIPPER", "callback": "SolRFlipper", "dof": 16},
+    "48": {"coil": [8, 5], "name": "LEFT FLIPPER", "callback": "SolLFlipper", "dof": 15}
   },
 
   "lamps": {

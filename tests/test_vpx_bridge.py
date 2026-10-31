@@ -1532,12 +1532,21 @@ Class FakeB2S
 	Public Sub Run : WScript.Echo "run" : End Sub
 	Public Sub [Stop] : WScript.Echo "stop" : End Sub
 	Public Property Let B2SName(v) : WScript.Echo "name " & v : End Property
+	Public Sub B2SSetData(n, v) : WScript.Echo "b2s" & n & "=" & v : End Sub
 End Class
+Class FakePad
+	Public Function PadDOFInit(rom, f) : WScript.Echo "dofinit " & rom & " " & (f <> "") : PadDOFInit = DofUp : End Function
+	Public Sub PadDOF(k, n, v) : WScript.Echo k & n & "=" & v : End Sub
+	Public Sub PadDOFFinish : WScript.Echo "doffinish" : End Sub
+End Class
+Dim Controller, DofUp, DOFSet
 Function PadNewB2S
 	If NoB2S Then Err.Raise 429, "x", "ActiveX component can't create object" : Exit Function
 	Set PadNewB2S = New FakeB2S
 End Function
-Function Setting(s, k) : Setting = ForceOff : End Function
+Function Setting(s, k)
+	If k = "ForceDisableB2S" Then Setting = ForceOff Else Setting = DOFSet
+End Function
 '''
 
 
@@ -1598,6 +1607,117 @@ def test_padspike2_backglass_off_or_missing_changes_nothing(tmp_path):
     body = sysvbs[sysvbs.index("Sub LoadVPM("):]
     body = body[:body.index("End Sub")]
     assert body.index('CreateObject("PAD.Controller")') < body.index("PadStartB2S")
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs PADSPIKE2.vbs under cscript")
+def test_padspike2_hosts_dof_before_the_backglass(tmp_path):
+    # PAD-879: under VPinMAME a ROM table's DOF is B2S.Server's plugin hearing
+    # the ROM; beside PAD.Controller it heard nothing, and `Sub DOF` was empty.
+    # PAD.Controller hosts DOF now, started for the ROM's name BEFORE B2S (so
+    # it opens the cabinet's devices first), and the script's DOF goes there;
+    # Visual Pinball's "toy only" settings mute the sound the toy replaces
+    pre = ["Set Controller = New FakePad", 'PadB2SName = "mtl_180h"', "DOFSet = 1"]
+    calls = ["PadStartDOF", "PadStartB2S",
+             'WScript.Echo "dof=" & PadDOFOn',
+             'WScript.Echo "[" & SoundFX("knock", DOFKnocker) & "]"',
+             'WScript.Echo "[" & SoundFXDOF("bump", 141, DOFPulse, DOFContactors) & "]"',
+             "DOF 101, DOFOn", "DOFALT 102, DOFOff", "PadStopB2S"]
+    out, log = _run_padspike2(tmp_path, pre + ["DofUp = True"] + calls)
+    assert out == ["dofinit", "mtl_180h", "True", "name", "mtl_180h", "run", "dof=True",
+                   "[]", "E141=1", "E141=0", "[]", "E101=1", "E102=0", "stop", "doffinish"]
+    assert "DOF: True for mtl_180h err=0" in log
+    # sound and toy (2): both
+    out, _ = _run_padspike2(tmp_path, pre[:2] + ["DOFSet = 2", "DofUp = True"] + calls[:1] + [
+        'WScript.Echo "[" & SoundFX("knock", DOFKnocker) & "]"',
+        'WScript.Echo "[" & SoundFXDOF("bump", 141, DOFPulse, DOFContactors) & "]"'])
+    assert out[-4:] == ["[knock]", "E141=1", "E141=0", "[bump]"]
+    # no DOF installed: every sound plays (a toy that cannot fire mutes
+    # nothing), and the script's DOF reaches B2S.Server as controller.vbs's
+    # DOFALT would
+    out, _ = _run_padspike2(tmp_path, pre + ["DofUp = False"] + calls)
+    assert out == ["dofinit", "mtl_180h", "True", "name", "mtl_180h", "run", "dof=False",
+                   "[knock]", "b2s141=1", "b2s141=0", "[bump]", "b2s101=1", "b2s102=0", "stop"]
+    # B2S turned off: no DOF either (controller.vbs's rule)
+    out, log = _run_padspike2(tmp_path, pre + ["DofUp = True", "ForceOff = 1"] + calls[:3])
+    assert out == ["dof=False"] and "DOF: off" in log
+    # LoadVPM starts DOF after the controller and before the backglass
+    sysvbs = open(os.path.join(VPX, "PADSPIKE2.vbs"), encoding="utf-8").read()
+    body = sysvbs[sysvbs.index("Sub LoadVPM("):]
+    body = body[:body.index("End Sub")]
+    assert (body.index('CreateObject("PAD.Controller")') < body.index("PadStartDOF")
+            < body.index("PadStartB2S"))
+    assert "Sub DOF(DOFevent, State) : End Sub" not in sysvbs
+
+
+def test_metallica_dof_hears_the_roms_numbers():
+    # PAD-879: mtl_180h's DOF config is keyed by the SAM ROM's solenoids,
+    # lamps and switches; the map read backwards gives them
+    pc = pytest.importorskip("padcontroller")
+    m = pc.VpxMap("metallica_spike")
+    assert m.dof_sols[15] == (8, 5) and m.dof_sols[16] == (8, 0)     # flippers, not 46/48
+    assert 46 not in m.dof_sols and 48 not in m.dof_sols
+    assert m.dof_sols[13] == (8, 3) and m.dof_sols[9] == (9, 2)      # sling, pop
+    assert m.dof_flashers[27] == [(9, 24), (9, 25), (9, 26), (9, 27)]  # f27 SPARKY FLASH 1-4
+    assert m.dof_lamps[17] == [(9, 35), (9, 36), (9, 37)]            # l17, an RGB insert
+    assert m.dof_switches[37] == [15] and m.dof_switches[63] == [1]  # Spike 2 id -> SAM switch
+    assert 22 not in sum(m.dof_switches.values(), [])                # no Spike 2 switch: none
+    # a title on core.vbs's own numbering keeps them (Whitestar's flippers are 46/48)
+    g = pc.VpxMap("godzilla_le")
+    assert 46 in g.dof_sols and 48 in g.dof_sols and g.dof_lamps
+
+
+def test_bridge_feeds_dof_the_machines_coils_lights_and_switches():
+    pc = pytest.importorskip("padcontroller")
+
+    class FakeDOF:
+        def __init__(self):
+            self.got = []
+
+        def Init(self, host, table, rom):
+            self.got.append(("init", host, rom))
+
+        def UpdateTableElement(self, kind, n, v):
+            self.got.append((kind, n, v))
+
+        def Finish(self):
+            self.got.append(("finish",))
+
+    dof = FakeDOF()
+    b = pc.Bridge()
+    b.set_game("metallica_spike")
+    assert b.dof_init("mtl_180h", "x.vpx", factory=lambda: dof)
+    assert b.dof_init("mtl_180h", "x.vpx", factory=lambda: dof)      # Reset: the same one
+    data = bytearray(pc.READ_N)
+    data[20 + 9 * 96 + 36] = 200                                     # l17's green channel
+    data[20 + 9 * 96 + 25] = 128                                     # one of f27's LEDs
+    b.sol_state[pc.sol_number(8, 5)] = 1                             # left flipper held
+    b._poll_dof(bytes(data))
+    b._poll_dof(bytes(data))                                         # unchanged: nothing again
+    b.sol_state[pc.sol_number(8, 5)] = 0
+    b._poll_dof(bytes(data))
+    b.set_switch(1037, 1)                                            # a Spike 2 id the table wrote
+    b.set_switch(1037, 1)
+    b.dof_send("E", 101, 1)                                          # the script's own DOF
+    b.dof_finish()
+    got = dof.got
+    assert got[0] == ("init", "B2SServer", "mtl_180h") and got[-1] == ("finish",)
+    assert got.count(("S", 15, 1)) == 1 and ("S", 15, 0) in got
+    assert got.index(("S", 15, 1)) < got.index(("S", 15, 0))
+    assert ("L", 17, 1) in got and ("L", 18, 0) in got
+    assert ("S", 27, 128) in got and ("S", 19, 0) in got
+    assert got.count(("W", 15, 1)) == 1 and ("E", 101, 1) in got
+    assert len([g for g in got if g[0] == "S" and g[1] == 16]) == 1  # sent once, off
+    assert b.dof is None
+
+    # no DOF installed: off, and nothing is sent or raised
+    def missing():
+        raise OSError("Invalid class string")
+    assert not b.dof_init("mtl_180h", "x.vpx", factory=missing)
+    assert "no DirectOutput.ComObject" in b.dof.why
+    b.dof_send("E", 101, 1)
+    b.set_switch(1037, 0)
+    b.dof_finish()
 
 
 _KEYS_HARNESS = '''

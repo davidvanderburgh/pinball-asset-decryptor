@@ -292,6 +292,23 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   in the bridge's subs and `PadSol<n>` coil wrappers. `b2s_name` renames
   cGameName, the name B2S.Server gives DOF to find the table's config
   (Rush: `rush_le`, not the script's `rushle`).
+* **A ROM table's DOF is PAD.Controller's** (PAD-879). Under VPinMAME the
+  DOF of Metallica, Godzilla or TMNT is B2S.Server's DOF plugin hearing the
+  ROM: every solenoid, lamp and switch (S/L/W) it reports, in the numbers
+  the table's DOF config (by ROM name) is keyed on. Beside PAD.Controller a
+  released B2S.Server hears only the script's `B2SSetData` (E), and
+  PADSPIKE2.vbs's `DOF` was empty. `LoadVPM` now asks PAD.Controller to
+  host DOF (`PadDOFInit`, through `DirectOutput.ComObject` under B2S's host
+  name, so the same GlobalConfig_B2SServer.xml and cabinet config) BEFORE
+  it starts B2S.Server, so DOF opens the cabinet's devices first. The poll
+  sends the machine's coils and lights in the ROM's numbers, the map read
+  backwards (`dof_sols`: a solenoid's key, or its `dof` where the key is a
+  core.vbs flipper Const - Metallica's flippers are SAM 15/16; `l<n>` =
+  lamp n, `f<n>` = flasher solenoid n at its LED level; W = every table
+  switch number the rewrite sends to a Spike 2 id), and the script's `DOF`,
+  `DOFALT` and `SoundFXDOF` go through it (`PadDOF`), with Visual Pinball's
+  sound-or-toy settings as controller.vbs reads them. No DOF installed: the
+  script's DOF goes to B2S.Server as before and every sound plays.
 * **Use the RIG's switch table.** The first Rush map came from an older
   reading of the title that numbered every switch one higher: the table
   pressed Tournament Start for Start and filled the jam opto, and the game

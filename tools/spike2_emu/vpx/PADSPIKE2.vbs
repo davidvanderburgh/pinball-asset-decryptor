@@ -88,9 +88,50 @@ Dim B2SOnALT : B2SOnALT = False
 Dim B2SController
 Dim B2SOff : B2SOff = False
 Dim PadB2SName : PadB2SName = ""
-Function SoundFX(sound, effect) : SoundFX = sound : End Function
-Function SoundFXDOF(sound, DOFevent, State, effect) : SoundFXDOF = sound : End Function
-Sub DOF(DOFevent, State) : End Sub
+
+' ---- DOF (PAD-879). Under VPinMAME B2S.Server runs the ROM and its DOF
+' plugin hears every solenoid, lamp and switch; beside PAD.Controller it hears
+' only what the script hands it. So PAD.Controller hosts DOF itself, fed the
+' machine's coils, lights and switches in the ROM's own numbers (the
+' .vpxmap.json read backwards), and the script's DOF calls go there too. It
+' is started before B2S.Server, so it opens the cabinet's devices first.
+' PadDOFOn: it is up. DOFeffects: controller.vbs's sound-or-toy settings
+' (0 sound, 1 toy, 2 both), honoured only while a toy can answer.
+Dim DOFeffects(9)
+Dim PadDOFOn : PadDOFOn = False
+Function SoundFX(Sound, Effect)
+	If PadDOFOn And (Effect = 0 Or DOFeffects(Effect) = 1) Then
+		SoundFX = ""
+	Else
+		SoundFX = Sound
+	End If
+End Function
+Function SoundFXDOF(Sound, DOFevent, State, Effect)
+	SoundFXDOF = Sound
+	If DOFeffects(Effect) = 1 Or DOFeffects(Effect) = 2 Then
+		If PadDOFOn And DOFeffects(Effect) = 1 Then SoundFXDOF = ""
+		DOF DOFevent, State
+	End If
+End Function
+Function SoundFXDOFALT(Sound, DOFevent, State, Effect)
+	SoundFXDOFALT = SoundFXDOF(Sound, DOFevent, State, Effect)
+End Function
+Sub DOF(DOFevent, State)
+	If PadDOFOn Then
+		If State = 2 Then
+			Controller.PadDOF "E", DOFevent, 1 : Controller.PadDOF "E", DOFevent, 0
+		Else
+			Controller.PadDOF "E", DOFevent, State
+		End If
+	ElseIf B2SOnALT Then
+		If State = 2 Then
+			B2SController.B2SSetData DOFevent, 1 : B2SController.B2SSetData DOFevent, 0
+		Else
+			B2SController.B2SSetData DOFevent, State
+		End If
+	End If
+End Sub
+Sub DOFALT(DOFevent, State) : DOF DOFevent, State : End Sub
 
 ' ---- the controller. The VPM version string and the driver version are what
 ' core.vbs and LoadVPM's callers compare against. GameOnSolenoid is the
@@ -107,6 +148,7 @@ Sub LoadVPM(VPMver, VBSfile, VBSver)
 	If Err Then MsgBox "Can't load PAD.Controller: register it with" & vbNewLine & _
 		"  python tools\spike2_emu\vpx\padcontroller.py --register" & vbNewLine & Err.Description
 	If VPinMAMEDriverVer < VBSver Or Err Then MsgBox "PADSPIKE2.vbs ver " & VBSver & " or higher required."
+	PadStartDOF
 	PadStartB2S
 	vpmSystemHelp = "Stern Spike 2 (PAD emulator) keys:" & vbNewLine &_
 	  vpmKeyName(keyInsertCoin1)  & vbTab & "Left Coin"       & vbNewLine &_
@@ -215,19 +257,62 @@ Function vpmKeyUp(ByVal keycode)
 	End With
 End Function
 
-' ---- the backglass: B2S.Server beside the controller, unless Visual
-' Pinball's ForceDisableB2S setting or the table's B2SOff says not (as
-' controller.vbs). No B2S installed: no backglass, and nothing else changes.
-Private Sub PadStartB2S
-	Dim off, name, e
+' Visual Pinball's ForceDisableB2S setting or the table's B2SOff: no B2S,
+' and so (as controller.vbs) no DOF either
+Private Function PadB2SDisabled
+	Dim off
 	off = 0
 	On Error Resume Next
 	If VPBuildVersion >= 10704 Then off = CInt(Setting("Controller", "ForceDisableB2S"))
 	Err.Clear
 	If B2SOff Then off = 1
-	If off <> 0 Then PadLog "B2S.Server: off (ForceDisableB2S or B2SOff)" : Exit Sub
-	name = PadB2SName
-	If name = "" Then name = Eval("cGameName")
+	PadB2SDisabled = (off <> 0)
+End Function
+
+' the name the backglass and DOF know the table by: the ROM's (PadB2SName)
+Private Function PadB2SGameName
+	On Error Resume Next
+	PadB2SGameName = PadB2SName
+	If PadB2SGameName = "" Then PadB2SGameName = Eval("cGameName")
+	Err.Clear
+End Function
+
+' DOF: controller.vbs's sound-or-toy settings, then PAD.Controller's DOF
+' host for the table's ROM name. No DOF installed: no toys, and nothing else
+' changes (the sounds all play).
+Private Sub PadStartDOF
+	Dim i, keys, sh, e
+	keys = Array("", "DOFContactors", "DOFKnocker", "DOFChimes", "DOFBell", "DOFGear", _
+		"DOFShaker", "DOFFlippers", "DOFTargets", "DOFDropTargets")
+	On Error Resume Next
+	If VPBuildVersion < 10704 Then Set sh = CreateObject("WScript.Shell")
+	For i = 1 To 9
+		Err.Clear
+		If VPBuildVersion >= 10704 Then
+			DOFeffects(i) = CInt(Setting("Controller", keys(i)))
+		Else
+			DOFeffects(i) = sh.RegRead("HKCU\Software\Visual Pinball\Controller\" & keys(i))
+		End If
+		If Err Then DOFeffects(i) = Empty   ' unset: sound only, as controller.vbs
+	Next
+	Err.Clear
+	If PadB2SDisabled Then PadLog "DOF: off (ForceDisableB2S or B2SOff)" : Exit Sub
+	PadDOFOn = CBool(Controller.PadDOFInit(PadB2SGameName, _
+		CreateObject("Scripting.FileSystemObject").GetAbsolutePathName(".") & "\" & PadB2SGameName & ".vpx"))
+	e = Err.Number & " " & Err.Description
+	If Err Then PadDOFOn = False
+	Err.Clear
+	PadLog "DOF: " & PadDOFOn & " for " & PadB2SGameName & " err=" & e
+End Sub
+
+' ---- the backglass: B2S.Server beside the controller, unless Visual
+' Pinball's ForceDisableB2S setting or the table's B2SOff says not (as
+' controller.vbs). No B2S installed: no backglass, and nothing else changes.
+Private Sub PadStartB2S
+	Dim name, e
+	On Error Resume Next
+	If PadB2SDisabled Then PadLog "B2S.Server: off (ForceDisableB2S or B2SOff)" : Exit Sub
+	name = PadB2SGameName
 	Err.Clear
 	Set B2SController = CreateObject("B2S.Server")
 	If Err Then PadLog "B2S.Server: none (" & Err.Description & ") - no backglass" : Err.Clear : Exit Sub
@@ -244,6 +329,8 @@ Sub PadStopB2S
 	On Error Resume Next
 	If IsObject(B2SController) Then B2SController.Stop
 	B2SOnALT = False
+	If PadDOFOn Then Controller.PadDOFFinish
+	PadDOFOn = False
 End Sub
 
 ' no DIP switches on a Spike 2 machine: its settings are the game's own menu

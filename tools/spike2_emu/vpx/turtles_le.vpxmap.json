@@ -145,11 +145,11 @@
       "sw40": "rides Ramp009 (center ramp) at its top, before it drops onto the return",
       "sw31": "rides Ramp009 midway: the exit opto (sw40) says it",
       "sw40a": "rides Ramp011 (the ramp from the right that crosses the top to the left): RIGHT RAMP ENTER while held, RAMP RIGHT EXIT 400 ms later (the patcher adds it)",
-      "sw41": "the van kicker: now a ball stack on LOWER LOCK 1/2 (switch_holds.van)"
+      "sw41": "the van kicker (the Pro's Ninja Pizza Parlor): a ball goes into the lock's upper section (switch_holds.van_upper), UPPER LOCK drops it to the lower (switch_holds.van)"
     }
   },
   "switch_holds": {
-    "_": "switches held while a ball sits somewhere (cvpmBallStack serves them)",
+    "_": "switches held while a ball sits somewhere (cvpmBallStack serves them); the lock has two sections (PAD-896): a ball shot in rests in van_upper (UPPER LOCK 1..3) until the UPPER LOCK coil drops it into van (LOWER LOCK), which the LOWER LOCK coil lets out",
     "trough": [
       78,
       77,
@@ -162,6 +162,11 @@
     "van": [
       50,
       51
+    ],
+    "van_upper": [
+      52,
+      53,
+      54
     ]
   },
   "switch_extra": {
@@ -180,7 +185,10 @@
     "_": [
       "Spike 2 coil [node, index] -> the SMALL number the table script sees it as (core.vbs indexes",
       "SolCallback(68) and friends by it); the flippers keep core.vbs's own Consts (sLRFlipper 46,",
-      "sLLFlipper 48, sULFlipper 36). device_xy.txt group 6 = node 8, group 7 = node 9 (group_node.txt)."
+      "sLLFlipper 48, sULFlipper 36). device_xy.txt group 6 = node 8, group 7 = node 9 (group_node.txt).",
+      "`dof`: the number DOF hears the coil as - Data East's tmnt_104 solenoid, which the table's DOF",
+      "config is keyed on (KickBallToLane 2, SolAutofire 4, SewerUpKick 7, pops 17-19, slings 20-21;",
+      "PAD-896); null = Data East had no such coil, nothing sent. The flippers keep core.vbs's 46/48."
     ],
     "1": {
       "coil": [
@@ -188,7 +196,8 @@
         1
       ],
       "name": "TROUGH",
-      "callback": "bsTrough.SolOut"
+      "callback": "bsTrough.SolOut",
+      "dof": 2
     },
     "2": {
       "coil": [
@@ -196,7 +205,8 @@
         4
       ],
       "name": "AUTO PLUNGER",
-      "callback": "SolAutofire"
+      "callback": "SolAutofire",
+      "dof": 4
     },
     "3": {
       "coil": [
@@ -204,7 +214,8 @@
         7
       ],
       "name": "LOWER LOCK",
-      "callback": "PadVanOut"
+      "callback": "PadVanOut",
+      "dof": 7
     },
     "4": {
       "coil": [
@@ -212,7 +223,8 @@
         8
       ],
       "name": "UPPER LOCK",
-      "callback": null
+      "callback": "PadVanDrop",
+      "dof": null
     },
     "5": {
       "coil": [
@@ -220,7 +232,8 @@
         7
       ],
       "name": "VAN DOOR",
-      "callback": null
+      "callback": null,
+      "dof": null
     },
     "6": {
       "coil": [
@@ -228,7 +241,8 @@
         8
       ],
       "name": "VAN DIVERTER",
-      "callback": null
+      "callback": null,
+      "dof": null
     },
     "7": {
       "coil": [
@@ -236,7 +250,8 @@
         5
       ],
       "name": "KRANG",
-      "callback": "PadKrang"
+      "callback": "PadKrang",
+      "dof": null
     },
     "8": {
       "coil": [
@@ -244,7 +259,8 @@
         6
       ],
       "name": "PIZZA MAGNET",
-      "callback": null
+      "callback": null,
+      "dof": null
     },
     "9": {
       "coil": [
@@ -252,7 +268,8 @@
         1
       ],
       "name": "UP POST",
-      "callback": null
+      "callback": null,
+      "dof": null
     },
     "10": {
       "coil": [
@@ -260,7 +277,8 @@
         0
       ],
       "name": "GLIDER DIVERTER SERVO",
-      "callback": null
+      "callback": null,
+      "dof": null
     },
     "11": {
       "coil": [
@@ -268,7 +286,8 @@
         2
       ],
       "name": "LEFT POP BUMPER",
-      "callback": null
+      "callback": null,
+      "dof": 18
     },
     "12": {
       "coil": [
@@ -276,7 +295,8 @@
         3
       ],
       "name": "RIGHT POP BUMPER",
-      "callback": null
+      "callback": null,
+      "dof": 17
     },
     "13": {
       "coil": [
@@ -284,7 +304,8 @@
         4
       ],
       "name": "BOTTOM POP BUMPER",
-      "callback": null
+      "callback": null,
+      "dof": 19
     },
     "14": {
       "coil": [
@@ -292,7 +313,8 @@
         2
       ],
       "name": "RIGHT SLINGSHOT",
-      "callback": null
+      "callback": null,
+      "dof": 21
     },
     "15": {
       "coil": [
@@ -300,7 +322,8 @@
         3
       ],
       "name": "LEFT SLINGSHOT",
-      "callback": null
+      "callback": null,
+      "dof": 20
     },
     "46": {
       "coil": [
@@ -324,7 +347,8 @@
         6
       ],
       "name": "UPPER LEFT FLIPPER",
-      "callback": null
+      "callback": null,
+      "dof": null
     }
   },
   "lamps": {
@@ -1108,9 +1132,6 @@
       "EPISODE lights order is a GUESS"
     ],
     "stern_switches_without_object": {
-      "52": "UPPER LOCK 1",
-      "53": "UPPER LOCK 2",
-      "54": "UPPER LOCK 3",
       "91": "GLIDER LOCK OPTO",
       "67": "SKILL SHOT",
       "55": "UP LEFT FLIPPER EOS",
@@ -1118,7 +1139,6 @@
       "72": "RIGHT FLIPPER EOS"
     },
     "coils_without_object": [
-      "UPPER LOCK 8/8",
       "VAN DOOR 9/7",
       "VAN DIVERTER 9/8",
       "PIZZA MAGNET 9/6",

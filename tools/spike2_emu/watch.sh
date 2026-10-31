@@ -2523,7 +2523,13 @@ launch_game
 # Everything here but the window reads these files (plunge.py, swpoke.py,
 # ballfeed.py, gamecheck.sh, padglhost's binds), so they are built whatever
 # is shown.
-if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then
+# PAD-882: AND A VISIBLE RUN WITH NO PLAYFIELD WINDOW IS ONE TOO. The gate was
+# "a window, or a hidden run", which left out exactly a Visual Pinball run
+# (the game's screen on the desktop, the table as the playfield): a title
+# never run any other way got no switch list, the controller matched none of
+# the game's flipper rules (Jim-Beam: Start and the plunger worked, no flipper
+# ever moved on Jaws or Black Knight) and found no service button. Every run.
+if :; then
     # THE TABLES ARE BUILT FROM THE TITLE, HERE, RATHER THAN COMMITTED. See
     # mktables.py. Three of the four need nothing but the game binary, so the
     # window can open with artwork, inserts and coils on a title's very first

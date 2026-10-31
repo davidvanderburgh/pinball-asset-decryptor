@@ -543,7 +543,10 @@ def test_a_hidden_run_builds_the_tables_and_opens_no_window():
     a slot: every id one off - Tournament Start pressed for Start, the coin door latched on the wrong switch ("48V
     DISABLED"), no ball feeder - and "no game started after three tries"."""
     w = _text("watch.sh")
-    i = w.index('if [ "${PAD_PLAYFIELD:-1}" != 0 ] || [ "${PAD_HIDDEN:-0}" = 1 ]; then')
+    # PAD-882: every run builds them, a visible one with no window (Visual
+    # Pinball's) included - no PAD_PLAYFIELD/PAD_HIDDEN gate in front
+    i = w.index("# PAD-882: AND A VISIBLE RUN WITH NO PLAYFIELD WINDOW IS ONE TOO.")
+    i = w.index("\nif :; then\n", i) + 1
     end = w.index("\nfi\n", i)
     tables = w[i:end]
     assert 'python3 "$RIG/mktables.py" "${MKT_ARGS[@]}" > "$TBL_OUT" 2>&1' in tables  # pass one

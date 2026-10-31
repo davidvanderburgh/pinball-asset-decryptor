@@ -2178,6 +2178,38 @@ static void key_log(int b, int press, unsigned long xt)
                             : (press ? "DOWN " : "UP   "), ids);
 }
 
+/* ★ PAD-891: A KEY THAT WENT DOWN HERE AND CAME UP SOMEWHERE ELSE.
+ *
+ * X sends the KeyRelease to whichever window has the focus WHEN THE KEY
+ * COMES UP. A key pressed in one of these windows and let go after the focus
+ * moved on never comes back up here, so its switch stayed made for the rest
+ * of the run. A Visual Pinball run does exactly that to a cabinet: the game
+ * window takes the foreground as it opens, the controller hands it back to
+ * the table (padcontroller _keep_player_front), and a button the player held
+ * across the swap was held in the game for good. On Deadpool that was '=',
+ * Service Plus, and the game's own auto-repeat ran the volume to the top
+ * with nobody touching anything (reproduced: + without - in the [sw] log,
+ * VOLUME 62, 63 on the screen). So losing the focus lets go of every key
+ * this process holds. Latched rows (C, B) are the user's state, not a held
+ * key, and stay as they are. */
+static void keys_let_go(const char *why)
+{
+    int i, n = 0, cab = 0;
+    for (i = 0; i < nbinds; i++)
+        if (!binds[i].toggle && key_down[i]) {
+            key_down[i] = 0;
+            key_log(i, 0, 0);
+            n++;
+        }
+    if (n) sw_publish();
+    /* the boot menu's copy of the same keys (cab_key) */
+    for (i = 0; i < NCAB_KEYS; i++)
+        if (cab_key_down[i]) { cab_key_down[i] = 0; cab = 1; }
+    if (cab) cab_publish();
+    if (n || cab)
+        fprintf(stderr, "[padglhost] %s: let go of %d held key(s)\n", why, n);
+}
+
 static void sw_shm_open(void)
 {
     const char *path = getenv("PAD_SW_SHM");
@@ -2270,8 +2302,9 @@ static void legend_open(int scr)
     }
     win_brand(legend_win);
     /* KeyPress | KeyRelease | Exposure | StructureNotify. Keys are selected on
-     * this window too, so whichever of the two has focus can drive the game. */
-    XSelectInput(xdpy, legend_win, 1L | 2L | (1L << 15) | (1L << 17));
+     * this window too, so whichever of the two has focus can drive the game.
+     * FocusChange (1<<21): losing the focus lets go of held keys (PAD-891). */
+    XSelectInput(xdpy, legend_win, 1L | 2L | (1L << 15) | (1L << 17) | (1L << 21));
     XSetWMProtocols(xdpy, legend_win, &wm_delete, 1);
     XMapWindow(xdpy, legend_win);
     legend_gc = XCreateGC(xdpy, legend_win, 0, 0);
@@ -2461,8 +2494,10 @@ static int win_open(void)
     /* ButtonPress/ButtonRelease/Button1Motion (1<<2, 1<<3, 1<<8): PAD-811's
      * drag to move / resize a borderless window and double-click for full
      * screen (disp_button, disp_motion); PointerMotion (1<<6, PAD-845) for
-     * the resize arrows over the edges (disp_hover) */
-    XSelectInput(xdpy, xwin, (1L << 17) | (1L << 2) | (1L << 3) | (1L << 6) | (1L << 8) | 1L | 2L);
+     * the resize arrows over the edges (disp_hover); FocusChange (1<<21) so
+     * losing the focus lets go of held keys (PAD-891, keys_let_go) */
+    XSelectInput(xdpy, xwin, (1L << 17) | (1L << 2) | (1L << 3) | (1L << 6) | (1L << 8) | 1L | 2L |
+                 (1L << 21));
     wm_delete = XInternAtom(xdpy, "WM_DELETE_WINDOW", 0);
     XSetWMProtocols(xdpy, xwin, &wm_delete, 1);
     XMapWindow(xdpy, xwin);
@@ -3330,6 +3365,11 @@ static void win_pump(void)
         case 12:                       /* Expose */
             legend_dirty = 1;
             break;
+        case 10:                       /* FocusOut: detail at int 11; the
+                                          focus moving into a child of ours
+                                          (NotifyInferior, 2) keeps the keys */
+            if (ev.i[11] != 2) keys_let_go("focus left the window");
+            break;
         case 2:                        /* KeyPress   */
         case 3: {                      /* KeyRelease */
             int press = ev.i[0] == 2;
@@ -3616,8 +3656,9 @@ static void win2_open(int disp)
     }
     win_brand(xwin2);
     /* Keys selected here too, legend-style: whichever window has focus can
-     * drive the game. StructureNotify for resize. */
-    XSelectInput(xdpy, xwin2, (1L << 17) | 1L | 2L);
+     * drive the game. StructureNotify for resize, FocusChange for
+     * keys_let_go (PAD-891). */
+    XSelectInput(xdpy, xwin2, (1L << 17) | 1L | 2L | (1L << 21));
     XSetWMProtocols(xdpy, xwin2, &wm_delete, 1);
     XMapWindow(xdpy, xwin2);
     /* MEASURED, and it is why this window is not created the way the main

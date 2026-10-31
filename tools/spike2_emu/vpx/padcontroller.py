@@ -760,6 +760,7 @@ class PlayerGrips:
         self.placed = None
         self.press = None
         self.drag = None
+        self.aside = False                  # hidden while Visual Pinball is paused
         self.tid = 0
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
@@ -830,9 +831,27 @@ class PlayerGrips:
                     log("player grips on: drag the playfield to move it, %d px from an edge to resize it, "
                         "double-click it to fill the screen" % GRIP_EDGE)
             if self.hwnd and not self.drag:
-                self._follow()
+                if getattr(b, "paused", False):
+                    self._stand_aside()
+                else:
+                    if self.aside:
+                        self.aside = False
+                        log("player grips back: Visual Pinball plays on")
+                    self._follow()
         except Exception as exc:                            # noqa: BLE001
             log("player grips: %s" % exc)
+
+    def _stand_aside(self):
+        """Out of the way while Visual Pinball is paused (PAD-882): Esc opens
+        its menu (Resume, Quit to editor...) INSIDE the picture this window
+        covers, and the menu's buttons took no click. Back, over the whole
+        picture again, the moment VPX plays on (_follow, placed forgotten)."""
+        import ctypes
+        if not self.aside:
+            self.aside = True
+            self.placed = None
+            self.u.ShowWindow(ctypes.c_void_p(self.hwnd), 0)            # SW_HIDE
+            log("player grips aside: Visual Pinball is paused, its menu takes the mouse")
 
     def _follow(self):
         """Over the whole picture, wherever the player is."""

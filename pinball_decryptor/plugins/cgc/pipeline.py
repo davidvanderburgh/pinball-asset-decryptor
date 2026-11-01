@@ -2240,8 +2240,12 @@ def _repack_modified_cc_assets(assets_dir, log=None):
         try:
             from . import cc_dcs
             cc_dcs.repack(data_rom, dcs_dir, data_rom)
-        except Exception:
-            pass
+        except Exception as e:
+            # Said out loud (PAD-919): a blob that could not be rebuilt
+            # ships stock, so the user's edits are NOT on the card.
+            if log:
+                log(f"  Could not rebuild the sound ROMs from {DCS_SUBDIR}/ "
+                    f"({e}); its sounds stay as they were.", "warning")
 
     # new_audio WAVs -> usb.so (re-encrypt).  Each sound keeps its own
     # length (PAD-919); Write fits them back if the card has no room
@@ -2260,8 +2264,6 @@ def _repack_modified_cc_assets(assets_dir, log=None):
             elif os.path.exists(tmp):
                 os.remove(tmp)
         except Exception as e:
-            # Said out loud: a bank that could not be rebuilt ships stock,
-            # so the user's new_audio edits are NOT on the card.
             if log:
                 log(f"  Could not rebuild ccdata/usb.so from "
                     f"{NEW_AUDIO_SUBDIR}/ ({e}); its sounds stay as they "
@@ -2283,7 +2285,10 @@ def _repack_modified_cc_assets(assets_dir, log=None):
                 os.replace(tmp, cgc_so)
             elif os.path.exists(tmp):
                 os.remove(tmp)
-        except Exception:
+        except Exception as e:
+            if log:
+                log(f"  Could not rebuild ccdata/cgc.so from {ART_SUBDIR}/ "
+                    f"({e}); its pictures stay as they were.", "warning")
             if os.path.exists(cgc_so + ".repack_tmp"):
                 try:
                     os.remove(cgc_so + ".repack_tmp")

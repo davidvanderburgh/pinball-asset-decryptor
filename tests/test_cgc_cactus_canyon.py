@@ -334,3 +334,16 @@ def test_cc_write_cuts_sounds_back_when_the_card_is_full(tmp_path):
     assert _records(built)[1] == _tone(27000, 13)[:18000]
     warn = "\n".join(m for level, m in logs if level == "warning")
     assert "0001_music.wav: 0.6 s cut to 0.2 s" in warn
+
+
+def test_cc_repack_failure_is_reported(tmp_path):
+    # A usb.so that is not a bank cannot be rebuilt: the build used to ship
+    # the stock one silently, so the user's sound edits never reached the card.
+    (tmp_path / "ccdata").mkdir()
+    (tmp_path / "ccdata" / "usb.so").write_bytes(b"\x00" * 64)
+    (tmp_path / "new_audio").mkdir()
+    logs = []
+    cgc_pipeline._repack_modified_cc_assets(
+        str(tmp_path), log=lambda m, level="info": logs.append((level, m)))
+    assert any(level == "warning" and "ccdata/usb.so" in m
+               for level, m in logs)

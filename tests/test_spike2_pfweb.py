@@ -225,6 +225,89 @@ def test_the_window_rung_can_be_forced(host, monkeypatch):
     assert pfweb.pick_backend(host) is not None
 
 
+def _fake_rungs(monkeypatch, pfweb, log):
+    """webview: raises like pythonnet with no .NET; gtk: ends without ever
+    coming up; app: comes up, then the user closes it."""
+    def no_net():
+        try:
+            raise RuntimeError("netfx said no")
+        except RuntimeError:
+            raise RuntimeError("Failed to create a .NET runtime (coreclr) "
+                               "using the\n      parameters {}.")
+
+    class Dead(pfweb._Base):
+        available = staticmethod(lambda: True)
+
+        def run(self, main, on_close, ready=None):
+            log.append(type(self).__name__)
+            no_net()
+
+    class Quiet(pfweb._Base):
+        available = staticmethod(lambda: True)
+
+        def run(self, main, on_close, ready=None):
+            log.append(type(self).__name__)
+            self._on_close = on_close
+            self._finish()
+
+    class Up(pfweb._Base):
+        available = staticmethod(lambda: True)
+
+        def run(self, main, on_close, ready=None):
+            log.append(type(self).__name__)
+            self._on_close = on_close
+            ready()
+            self._finish()
+    monkeypatch.setattr(pfweb, "BACKENDS", {
+        "webview": Dead, "gtk": Quiet, "app": Up,
+        "browser": pfweb.BrowserBackend})
+    monkeypatch.delenv("PAD_PF_WINDOW", raising=False)
+    return Up
+
+
+def test_a_rung_that_fails_before_its_window_is_up_hands_over(host,
+                                                               monkeypatch,
+                                                               capsys):
+    # PAD-924: pywebview imported fine on Mike's PC, then its .NET runtime
+    # would not load inside start() and the whole playfield died with it
+    import pfweb
+    log, closed = [], []
+    Up = _fake_rungs(monkeypatch, pfweb, log)
+    host.run({"page": "main"}, lambda: closed.append(1))
+    assert log == ["Dead", "Quiet", "Up"]
+    assert isinstance(host.backend, Up)
+    assert closed == [1]                 # only the window that was up closes
+    out = capsys.readouterr().out
+    fell = [ln for ln in out.splitlines() if ln.startswith("pfweb: fell back")]
+    assert len(fell) == 2
+    # the coreclr error alone says nothing: the netfx one under it is the why
+    assert ("RuntimeError: Failed to create a .NET runtime (coreclr) using "
+            "the parameters {}. <- RuntimeError: netfx said no") in fell[0]
+    assert "before its window was up" in fell[1]
+    assert "pfweb: window up (Up)" in out
+    assert "Traceback" in out            # in full, for padplayfield.log
+
+
+def test_a_rung_whose_window_was_up_does_not_fall(host, monkeypatch):
+    import pfweb
+    log = []
+    _fake_rungs(monkeypatch, pfweb, log)
+    monkeypatch.setenv("PAD_PF_WINDOW", "app")
+    host.run({"page": "main"}, lambda: None)
+    assert log == ["Up"]                 # closed by the user: no second window
+
+
+def test_a_quit_before_the_window_is_up_does_not_open_the_next(host,
+                                                               monkeypatch):
+    import pfweb
+    log = []
+    _fake_rungs(monkeypatch, pfweb, log)
+    monkeypatch.setenv("PAD_PF_WINDOW", "gtk")
+    host.quit()
+    host.run({"page": "main"}, lambda: None)
+    assert log == ["Quiet"]
+
+
 def test_a_browser_tab_window_ends_once_its_page_has_gone_quiet(host,
                                                                 monkeypatch):
     import pfweb

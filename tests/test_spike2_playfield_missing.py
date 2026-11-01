@@ -134,6 +134,17 @@ def test_a_window_that_comes_up_says_nothing(tmp_path):
 
 
 @needs_bash
+def test_a_window_up_on_a_lower_rung_says_why(tmp_path):
+    # PAD-924: pywebview's .NET would not load, so the window is an Edge app
+    # window - the run log says so, and why, instead of nothing at all
+    out = _run(tmp_path, 'sleep 1; { echo "Traceback: ..."; echo "pfweb: fell'
+                         ' back from WebviewBackend: RuntimeError: no .NET";'
+                         ' echo "pfweb: window up (AppBackend)"; } >> "$PFLOG"')
+    assert out == ("[watch] playfield window fell back from WebviewBackend: "
+                   "RuntimeError: no .NET\n")
+
+
+@needs_bash
 def test_a_window_that_never_comes_up_is_named(tmp_path):
     out = _run(tmp_path, ":")
     assert "has not come up after 4 s" in out

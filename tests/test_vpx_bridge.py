@@ -387,6 +387,29 @@ def test_rushs_time_machine_is_the_lift_ramp_opto():
     assert [k for k, v in m["switches"].items() if k != "_" and v["id"] == 82] == ["tm2"]
 
 
+def test_rushs_side_scoop_rests_on_the_lower_switch():
+    # PAD-910: the game fires SIDE SCOOP from LOWER SIDE SCOOP (85); SIDE
+    # SCOOP OPTO (78) is the way in. Held on 78 it never kicked (emulator)
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
+    k = m["saucers"]["Kicker1"]
+    assert (k["switch"], k["enter"]) == (85, 78)
+    assert m["solenoids"]["3"]["callback"] == "bsKicker1.SolOut"
+    t = json.loads(json.dumps(MINI_SHADOW))
+    t["saucers"]["Kicker1"]["enter"] = 77
+    out, _ = vs.patch(MINI_TRIBUTE, t)
+    assert "bsKicker1.InitSaucer Kicker1, 1078, 190, 15" in out
+    assert "Sub Kicker1_Hit : vpmTimer.PulseSw 1077 : bsKicker1.AddBall Me" in out
+    t["saucers"]["Kicker1"]["stack"] = [79]
+    out, _ = vs.patch(MINI_TRIBUTE, t)
+    lines = out.split("\n")
+    a = lines.index("Sub Kicker1_Hit")
+    assert lines[a + 1:a + 3] == ["\tvpmTimer.PulseSw 1077", "\tIf bsKicker1.Balls >= 2 Then"]
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+    plain, _ = vs.patch(MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    assert "Sub Kicker1_Hit : bsKicker1.AddBall Me" in plain
+
+
 def _lock_stack_shadow():
     # PAD-901: Deadpool's Katana Handle lock is one kicker in JP's table and
     # LOCK 1-4 on the machine, under a post the game holds down for seconds
@@ -1345,6 +1368,7 @@ def test_shadow_maps_are_consistent(title):
     sw = [s["id"] for k, s in m["switches"].items() if k != "_"]
     sw += m["trough"]["switches"] + [s["switch"] for k, s in m["saucers"].items() if k != "_"]
     sw += [n for k, s in m["saucers"].items() if k != "_" for n in s.get("stack", ())]
+    sw += [s["enter"] for k, s in m["saucers"].items() if k != "_" and s.get("enter")]
     if m.get("plunger"):
         sw.append(m["plunger"]["lane_switch"])
     sw += ids

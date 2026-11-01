@@ -789,6 +789,10 @@ def gen(m, had, quiet=None, dof=None):
         out.append("Sub %s%s : End Sub   ' PAD: quiet; the machine lights the table" % (name, args))
     # ---- saucers
     for k, s in saucers(m).items():
+        # an entry opto the ball passes on its way in (PAD-910: Rush's side
+        # scoop is SIDE SCOOP OPTO, then LOWER SIDE SCOOP where it rests and
+        # the coil kicks; held on the opto, the game never kicked)
+        enter = "vpmTimer.PulseSw 1%03d" % s["enter"] if s.get("enter") else ""
         if s.get("stack"):
             # a full lane: the ball has nowhere to stop and rolls back out
             if s.get("kick_from"):
@@ -796,7 +800,7 @@ def gen(m, had, quiet=None, dof=None):
                         "\t\t%s.Kick %d, %d" % (s["kick_from"], s["dir"], s["power"])]
             else:
                 full = ["\t\tMe.Kick %d, %d" % (s["dir"], s["power"])]
-            out += ["Sub %s_Hit" % k,
+            out += ["Sub %s_Hit" % k] + (["\t" + enter] if enter else []) + [
                     "\tIf bs%s.Balls >= %d Then" % (k, 1 + len(s["stack"]))] + full + [
                     "\t\tExit Sub",
                     "\tEnd If",
@@ -805,8 +809,8 @@ def gen(m, had, quiet=None, dof=None):
                 out.append("\tIf PadHeld%s And Not PadHeld%sRun Then PadHeld%s_Next" % (k, k, k))
             out.append("End Sub")
         else:
-            out.append("Sub %s_Hit : bs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
-                       % (k, k, k, fx(k + "_Hit")))
+            out.append("Sub %s_Hit : %sbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
+                       % (k, enter + " : " if enter else "", k, k, fx(k + "_Hit")))
         if s.get("held_ms"):
             # a lock POST (PAD-901): the game holds it down for as long as it
             # wants balls out (Deadpool: 12 s at a multiball, every locked

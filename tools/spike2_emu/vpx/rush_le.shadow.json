@@ -12,6 +12,7 @@
     "pressed Tournament Start for Start.",
     "quiet_subs: the tribute's own light shows and its GI timer (GIUpdateTimer_Timer turns GI off by ball count); orig_hits false: its hit subs stay out of the way once the machine lights the table.",
     "tm2 is the time machine: the shot the game starts modes and multiballs on is LIFT RAMP OPTO (82), where its TimeMachineMagnet grabs the ball (PAD-420). It counts on the way up only, as the tribute did; LL3 (the VUK lane, its own VUK switch is Kicker3) no longer stands in for it (PAD-907).",
+    "Kicker1 is the side scoop: the ball passes SIDE SCOOP OPTO (78, `enter`) and rests on LOWER SIDE SCOOP (85), where the game fires SIDE SCOOP. Held on 78 the game only held its trough lock and waited, the ball sat until a ball search and the switch read stuck (PAD-910).",
     "b2s_name: the script's cGameName is \"rushle\", but the DOF Config Tool lists the table as rush_le, and B2S.Server hands DOF that name (PAD-847)."
   ],
   "title": "rush_le",
@@ -66,7 +67,7 @@
   "trough": {"release": "BallRelease", "drain": "Drain", "switches": [76, 75, 74, 73, 72, 71, 77], "balls": 6, "kick": [90, 4]},
   "saucers": {
     "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power[, kickz])",
-    "Kicker1": {"switch": 78, "dir": 190, "power": 15, "name": "SIDE SCOOP OPTO"},
+    "Kicker1": {"switch": 85, "enter": 78, "dir": 190, "power": 15, "name": "LOWER SIDE SCOOP (the ball passes SIDE SCOOP OPTO on its way in)"},
     "Kicker2": {"switch": 93, "dir": 270, "power": 30, "name": "MAIN SCOOP OPTO"},
     "Kicker3": {"switch": 79, "dir": 1, "power": 55, "kickz": 1.4, "name": "VUK"}
   },

@@ -35,6 +35,8 @@ def mac(monkeypatch, tmp_path):
     monkeypatch.setattr(mt.sys, "platform", "darwin")
     monkeypatch.setattr(D.sys, "platform", "darwin")
     monkeypatch.setattr(D, "cache_root", lambda: str(tmp_path / "cache"))
+    monkeypatch.setattr(D, "_STAGED", set())
+    monkeypatch.setattr(D, "_PREVIEW_REFUSED", set())
     os.makedirs(str(tmp_path / "cache"), exist_ok=True)
     return tmp_path
 
@@ -476,6 +478,69 @@ def test_ensure_ready_container_starts_when_image_exists_and_never_builds(
     assert D.ensure_ready_container([ISO0], "/repo", log=logs.append) is True
     assert any(c[0] == "run" for c in ready.calls)
     assert any("starting the Linux toolbox container" in m for m in logs)
+
+
+def test_a_preview_finds_the_container_up_with_two_calls(mac, monkeypatch):
+    """Every redraw calls ensure_ready_container.  A container already up
+    on this image with these folders mounted costs one ``inspect`` and one
+    ``image inspect``: no ``docker info``, no ``run``, and the ~50 MB rig
+    copy only on the session's first call."""
+    staged = []
+    monkeypatch.setattr(D, "stage_rig", lambda src: staged.append(src))
+    want = set(D.mount_points([ISO0])) | {D.cache_root()}
+    fake = _Fake(arch=D.ARCH, image_id="sha256:new",
+                 container=("sha256:new", want))
+    monkeypatch.setattr(D, "_docker", fake)
+    for _ in range(3):
+        assert D.ensure_ready_container([ISO0], "/repo") is True
+    assert staged == ["/repo"], "staged once per session, not per redraw"
+    assert [c[0] for c in fake.calls] == ["inspect", "image"] * 3
+    assert not any(c[0] in ("info", "run", "rm") for c in fake.calls)
+
+
+def test_a_preview_does_not_retry_folders_the_engine_cannot_see(
+        mac, monkeypatch):
+    """Unshared from a preview is remembered: retrying it on every redraw
+    would start and remove a container per keystroke.  A writing run that
+    brings a container up clears it."""
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    tries = []
+
+    def unshared(paths, repo_src, log):
+        tries.append(paths)
+        raise D.Unshared(["/Volumes/Cards"])
+    monkeypatch.setattr(D, "_ensure_container", unshared)
+    monkeypatch.setattr(D, "_docker", _Fake(arch=D.ARCH))
+    assert D.ensure_ready_container([ISO0], "/repo") is False
+    assert D.ensure_ready_container([ISO0], "/repo") is False
+    assert len(tries) == 1
+    monkeypatch.setattr(D, "_ensure_container", lambda p, r, l: None)
+    D.ensure_container([ISO0], "/repo")
+    assert not D._PREVIEW_REFUSED
+
+
+def test_a_build_waits_for_the_preview_s_container_start(mac, monkeypatch):
+    """The UI thread's Build and the preview's worker share one container
+    name: two rm -f / run pairs interleaved fail one run on the name."""
+    import threading
+    import time
+    inside, overlap = [], []
+
+    def slow(paths, repo_src, log):
+        if inside:
+            overlap.append(True)
+        inside.append(True)
+        time.sleep(0.05)
+        inside.pop()
+    monkeypatch.setattr(D, "_ensure_container", slow)
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    monkeypatch.setattr(D, "_docker", _Fake(arch=D.ARCH))
+    t = threading.Thread(target=D.ensure_ready_container,
+                         args=([ISO0], "/repo"))
+    t.start()
+    D.ensure_container([ISO0], "/repo")
+    t.join()
+    assert not overlap
 
 
 def test_a_stopped_container_gets_the_same_sentence(mac):

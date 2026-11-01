@@ -59,6 +59,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 
 #: Bumped whenever DOCKERFILE changes.  The tag IS the cache key - ``docker
 #: image inspect`` succeeds on a stale image built from an older Dockerfile,
@@ -601,22 +602,28 @@ def ensure_container(paths, repo_src, log=None):
     checked on every run, a container kept from an earlier one included,
     since that one was mounted the same way.  One that cannot is removed
     and the run stops here with the way to share the folders.
+
+    Under :data:`_LOCK`: a Build asked for while a preview's worker is in
+    :func:`ensure_ready_container` would otherwise ``rm -f`` and ``run`` the
+    same container name beside it, and one of the two ``docker run`` calls
+    fails on the name.
     """
+    with _LOCK:
+        _ensure_container(paths, repo_src, log)
+        _PREVIEW_REFUSED.clear()
+
+
+def _ensure_container(paths, repo_src, log):
     reason = unavailable_reason()
     if reason:
         raise RuntimeError(reason)
     ensure_image(log)
     stage_rig(repo_src)
+    _STAGED.add(repo_src)
     want = mount_points(paths)
     have = _running_state()
     if (have is None or have[0] != _image_field(".Id")
             or set(want) | {cache_root()} != have[1]):
-        if log:
-            if want:
-                log("starting the Linux toolbox container (mounting %s)..."
-                    % ", ".join(want))
-            else:
-                log("starting the Linux toolbox container...")
         _docker(["rm", "-f", CONTAINER], timeout=30)
         args = ["run", "-d", "--name", CONTAINER, "--privileged",
                 "--platform", PLATFORM,
@@ -636,19 +643,57 @@ def ensure_container(paths, repo_src, log=None):
 
 def ensure_ready_container(paths, repo_src, log=None):
     """Start or remount the container when :data:`IMAGE` is ALREADY built.
+    True when a container that serves *paths* is up afterwards.
 
-    Background preview and size-check runs call this on the worker thread:
-    they must never build a multi-minute Docker image behind a keystroke,
-    but once the image is on the machine, starting or remounting the
-    container takes a fraction of a second and lets the size check and
-    preview work as soon as a card is chosen."""
-    if unavailable_reason() or _image_field(".Architecture") != ARCH:
-        return False
-    try:
-        ensure_container(paths, repo_src, log=log)
-    except Exception:                                   # noqa: BLE001
-        return False
+    Background preview and size-check runs call this on the worker thread,
+    on every redraw.  So it never builds the multi-minute image behind a
+    keystroke, and when the container is already up on this image with
+    these folders mounted it stops after one ``docker inspect`` and one
+    ``docker image inspect``: no ``docker info``, and no copy of the rigs
+    (``tools/spike2_emu`` alone is ~50 MB) - :func:`stage_rig` runs once
+    per app session here, and on every writing run as before.
+
+    A mount set the engine could not see (:class:`Unshared`) is not tried
+    again on the next redraw: that would start and remove a container per
+    keystroke.  The Build offers to share the folders; once a writing run
+    has brought a container up, the set is tried again.
+    """
+    want = frozenset(mount_points(paths))
+    with _LOCK:
+        try:
+            have = _running_state()
+            if (have is not None and have[0] == _image_field(".Id")
+                    and set(want) | {cache_root()} == have[1]):
+                if repo_src not in _STAGED:
+                    stage_rig(repo_src)
+                    _STAGED.add(repo_src)
+                return True
+            if want in _PREVIEW_REFUSED:
+                return False
+            if unavailable_reason() or _image_field(".Architecture") != ARCH:
+                return False
+            if log:
+                log("[multi-boot] starting the Linux toolbox container"
+                    + (" (mounting %s)..." % ", ".join(sorted(want))
+                       if want else "..."))
+            _ensure_container(paths, repo_src, log)
+        except Unshared:
+            _PREVIEW_REFUSED.add(want)
+            return False
+        except Exception:                               # noqa: BLE001
+            return False
     return True
+
+
+#: Held by :func:`ensure_container` and :func:`ensure_ready_container`: the
+#: UI thread's writing run and the preview's worker share one container.
+_LOCK = threading.RLock()
+
+#: Mount sets a preview found the engine could not see (see above).
+_PREVIEW_REFUSED = set()
+
+#: Repo sources :func:`stage_rig` has copied in this app session.
+_STAGED = set()
 
 
 def exec_argv(line):

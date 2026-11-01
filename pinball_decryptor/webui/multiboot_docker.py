@@ -60,6 +60,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 
 #: Bumped whenever DOCKERFILE changes.  The tag IS the cache key - ``docker
 #: image inspect`` succeeds on a stale image built from an older Dockerfile,
@@ -341,6 +342,67 @@ def _image_field(field):
     return (r.stdout or "").strip()
 
 
+#: How long the image build may take before it is given up on.  On Apple
+#: silicon every apt-get in it runs emulated, and a slow network makes the
+#: 60 MB qemu-user-static alone a minute or more.
+BUILD_TIMEOUT = 3600
+
+#: How often a build that is still going says so in the Log.
+BUILD_HEARTBEAT = 30
+
+#: The ``docker build`` in flight, so :func:`cancel_build` can stop it.
+_BUILD = {"proc": None}
+
+
+def _docker_build(args, on_line, timeout):
+    """Run ``docker`` + *args*, every output line to *on_line*.  Returns
+    ``(returncode, the last 2000 characters it printed)``.
+
+    Streamed rather than captured: :func:`_docker` waits for the end in
+    silence, and a build is minutes of it.  Killing the client is what
+    stops the build (BuildKit cancels a build whose client went away), so
+    :data:`_BUILD` holds it for :func:`cancel_build`.
+    """
+    proc = subprocess.Popen(["docker"] + list(args), stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace")
+    _BUILD["proc"] = proc
+    timer = threading.Timer(timeout, proc.kill)
+    timer.daemon = True
+    timer.start()
+    tail = []
+    try:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            tail.append(line)
+            if len(tail) > 60:
+                del tail[0]
+            on_line(line)
+        rc = proc.wait()
+    finally:
+        timer.cancel()
+        _BUILD["proc"] = None
+    return rc, "\n".join(tail)[-2000:]
+
+
+def cancel_build():
+    """Stop the image build in flight, if there is one.  True when there
+    was."""
+    proc = _BUILD["proc"]
+    if proc is None:
+        return False
+    try:
+        proc.kill()
+    except Exception:                                   # noqa: BLE001
+        pass
+    return True
+
+
+def _minutes(secs):
+    m, s = divmod(int(secs), 60)
+    return "%dm %02ds" % (m, s) if m else "%ds" % s
+
+
 def ensure_image(log=None):
     """Build :data:`IMAGE` if this machine has not got a usable one yet.
 
@@ -348,23 +410,47 @@ def ensure_image(log=None):
     :data:`PLATFORM` was named is an arm64 Debian under the right tag, and
     inspecting it succeeds.  Building over it re-points the tag, so nothing
     is left behind but dangling layers.
+
+    A WORKER THREAD'S JOB (PAD-911).  It is minutes - on Apple silicon
+    every apt-get in it runs emulated - and run on the app's main thread it
+    froze the window for all of them: the Log said nothing, macOS called
+    the app not responding, and quitting it cancelled the build ("failed
+    to solve: Canceled: context canceled"), so the next Build started from
+    nothing again.  So it says it is still going every
+    :data:`BUILD_HEARTBEAT` seconds, with the step it is on, and
+    :func:`cancel_build` stops it.
     """
     if _image_field(".Architecture") == ARCH:
         return
     if log:
-        log("[multi-boot] building the Linux toolbox image (once, a few "
-            "minutes)...")
+        log("building the Linux toolbox image. This is once "
+            "per app update that changes it, and takes a few minutes (10 "
+            "or more on a Mac with Apple silicon); the app stays usable and "
+            "Cancel stops it.")
     ctx = os.path.join(cache_root(), "image")
     os.makedirs(ctx, exist_ok=True)
     with open(os.path.join(ctx, "Dockerfile"), "w",
               encoding="utf-8", newline="\n") as fh:
         fh.write(DOCKERFILE)
-    # Long: on Apple silicon every apt-get in here runs emulated.
-    r = _docker(["build", "--platform", PLATFORM, "-t", IMAGE, ctx],
-                timeout=1800)
-    if r.returncode != 0:
+    start = time.monotonic()
+    state = {"said": start, "last": ""}
+
+    def on_line(line):
+        if line.strip():
+            state["last"] = line.strip()
+        now = time.monotonic()
+        if log and now - state["said"] >= BUILD_HEARTBEAT:
+            state["said"] = now
+            log("still building the Linux toolbox image (%s): "
+                "%s" % (_minutes(now - start), state["last"][:120]))
+    rc, tail = _docker_build(["build", "--platform", PLATFORM, "-t", IMAGE,
+                              ctx], on_line, BUILD_TIMEOUT)
+    if rc != 0:
         raise RuntimeError("could not build the Linux toolbox image:\n"
-                           + (r.stderr or r.stdout or "").strip()[-2000:])
+                           + tail.strip())
+    if log:
+        log("the Linux toolbox image is built (%s)."
+            % _minutes(time.monotonic() - start))
 
 
 def _running_state():
@@ -673,7 +759,7 @@ def ensure_ready_container(paths, repo_src, log=None):
             if unavailable_reason() or _image_field(".Architecture") != ARCH:
                 return False
             if log:
-                log("[multi-boot] starting the Linux toolbox container"
+                log("starting the Linux toolbox container"
                     + (" (mounting %s)..." % ", ".join(sorted(want))
                        if want else "..."))
             _ensure_container(paths, repo_src, log)

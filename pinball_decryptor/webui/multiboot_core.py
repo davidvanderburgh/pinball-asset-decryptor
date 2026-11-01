@@ -8061,13 +8061,15 @@ class MultibootPanel:
         self._cancel_pending = True
         self._cancelled = True
         self._pending_run = None
-        self._write("[multi-boot] canceling - stopping the tool now.")
+        self._write("canceling - stopping the tool now.")
         self._ok("Canceling\u2026")
         self._sync_build_button()
         try:
             self._phase_fn(None, status="Canceling\u2026")
         except Exception:                               # noqa: BLE001
             pass
+        if _mac.enabled():
+            _mac.cancel_build()     # the toolbox image, before the first step
         proc, mine = self._proc, not self._proc_preview
         if proc is not None and mine:
             try:
@@ -10365,7 +10367,7 @@ class MultibootPanel:
             if new and not row.modes and not (row.own_scores or "").strip():
                 taken = {(r.own_scores or "").strip() for r in self._rows if r is not row}
                 row.own_scores = scores_name_for(row.title or list_title(row, ri), taken)
-                self._write("[multi-boot] image %d runs custom modes (%s): it keeps its own "
+                self._write("image %d runs custom modes (%s): it keeps its own "
                          "high scores (Edit image... to change that)" % (ri, new))
             row.modes = new
             changed = True
@@ -13250,7 +13252,7 @@ class MultibootPanel:
             pass
 
     def _run_commands(self, cmds, on_step=None, on_done=None, quiet=(),
-                      preview=False, on_tick=None):
+                      preview=False, on_tick=None, _ready=False):
         """Run ``[(label, argv), ...]`` in order on a worker, streaming every
         line into the pane; stop at the first failure.  An *argv* may be a
         callable ``fn(texts)`` - evaluated on the worker just before its
@@ -13282,28 +13284,15 @@ class MultibootPanel:
         """
         # macOS runs its steps in a container, so one has to be up and able
         # to see this run's ISOs before the first step starts.  A WRITING run
-        # builds the image if it has to; the preview redraws on every
-        # keystroke and must not, so its worker only starts or remounts a
-        # container once the image is built (_start_worker,
-        # multiboot_docker.ensure_ready_container) and otherwise its step
-        # fails and says so, once.
-        if not preview and _mac.enabled():
-            try:
-                _mac.ensure_container(self._run_paths(), rig_repo_dir(),
-                                      log=self._append)
-            except _mac.Unshared as exc:
-                # Offered once per folder: a Colima that came back still
-                # blind gets the sentence, not the same question again.
-                tried = getattr(self, "_share_tried", set())
-                if (exc.fix and not set(exc.unseen) <= tried
-                        and self._share_and_retry(
-                            exc, (cmds, on_step, on_done, quiet, on_tick))):
-                    return True
-                self._error(str(exc))
-                return False
-            except Exception as exc:                    # noqa: BLE001
-                self._error(str(exc))
-                return False
+        # builds the image if it has to - on a worker, see
+        # _prepare_container - and comes back here with _ready once it is up.
+        # The preview redraws on every keystroke and must not, so its worker
+        # only starts or remounts a container once the image is built
+        # (_start_worker, multiboot_docker.ensure_ready_container) and
+        # otherwise its step fails and says so, once.
+        if not preview and not _ready and _mac.enabled():
+            return self._prepare_container((cmds, on_step, on_done, quiet,
+                                            on_tick))
         if preview:
             # A render never queues behind anything: it is cheap, and the
             # next keystroke asks for another one anyway.
@@ -13356,7 +13345,7 @@ class MultibootPanel:
                     try:
                         argv = argv(texts)
                     except Exception as exc:                # noqa: BLE001
-                        self._append("[multi-boot] %s: %s" % (label, exc))
+                        self._append("%s: %s" % (label, exc))
                         rc, failed = 1, label
                         break
                 # EVERY STEP OF A RUN IN THE SAME LINUX: the distro is asked
@@ -13373,7 +13362,7 @@ class MultibootPanel:
                         argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                         creationflags=_rig.CREATE_FLAGS)
                 except Exception as exc:                # noqa: BLE001
-                    self._append("[multi-boot] cannot start %s: %s"
+                    self._append("cannot start %s: %s"
                                  % (label, exc))
                     rc, failed = 1, label
                     break
@@ -13474,6 +13463,70 @@ class MultibootPanel:
             self._drain_job = None
         self._drain()
 
+    def _prepare_container(self, run):
+        """Bring the Mac's container up for *run* on a worker, then start it.
+
+        NOT ON THE MAIN THREAD (PAD-911).  The first Build after an app
+        update that changes the image builds it: minutes, ten or more on
+        Apple silicon, where every apt-get runs emulated.  Run from the
+        button handler it froze the window for all of them - the Log could
+        not even show the line saying so - and a person who quit the
+        frozen app cancelled the build, so the next Build started it from
+        nothing again.  Here the tab is busy (actions greyed, Cancel live)
+        and the Log shows the build going.  False when a run is already up.
+        """
+        if self._busy:
+            self._error("A run is already in progress.")
+            return False
+        self._cancelled = self._cancel_pending = False
+        self._set_busy(True)
+        try:
+            self._phase_fn(None, status="Preparing the Linux toolbox\u2026")
+        except Exception:                               # noqa: BLE001
+            pass
+        paths = self._run_paths()       # reads the form: main thread only
+        box = {}
+
+        def work():
+            try:
+                _mac.ensure_container(paths, rig_repo_dir(),
+                                      log=self._append)
+            except Exception as exc:                    # noqa: BLE001
+                box["exc"] = exc
+
+            def back():
+                self._set_busy(False)
+                exc = box.get("exc")
+                if self._cancelled:
+                    self._cancelled = self._cancel_pending = False
+                    self._phase_cancelled()
+                    return
+                if isinstance(exc, _mac.Unshared):
+                    # Offered once per folder: a Colima that came back still
+                    # blind gets the sentence, not the same question again.
+                    tried = getattr(self, "_share_tried", set())
+                    if (exc.fix and not set(exc.unseen) <= tried
+                            and self._share_and_retry(exc, run)):
+                        return
+                if exc is not None:
+                    self._phase_done(1, "the Linux toolbox")
+                    self._error(str(exc))
+                    return
+                cmds, on_step, on_done, quiet, on_tick = run
+                self._run_commands(cmds, on_step, on_done, quiet,
+                                   on_tick=on_tick, _ready=True)
+            self._ui(back)
+
+        threading.Thread(target=work, daemon=True).start()
+        if self._drain_job is not None:
+            try:
+                self._timer().after_cancel(self._drain_job)
+            except (tk.TclError, ValueError):
+                pass
+            self._drain_job = None
+        self._drain()
+        return True
+
     def _share_and_retry(self, exc, run):
         """Colima cannot see this run's folders (PAD-903): offer to share
         them, restarting Colima the way :func:`multiboot_docker.colima_fix`
@@ -13498,7 +13551,7 @@ class MultibootPanel:
         self._share_tried = (getattr(self, "_share_tried", set())
                              | set(exc.unseen))
         self._set_busy(True)
-        self._write("[multi-boot] restarting Colima to share %s"
+        self._write("restarting Colima to share %s"
                     % ", ".join(exc.unseen))
 
         def work():
@@ -13510,7 +13563,7 @@ class MultibootPanel:
                     self._cancelled = self._cancel_pending = False
                     self._phase_cancelled()
                 elif ok:
-                    self._write("[multi-boot] Colima is back; starting the "
+                    self._write("Colima is back; starting the "
                                 "run again")
                     cmds, on_step, on_done, quiet, on_tick = run
                     self._run_commands(cmds, on_step, on_done, quiet,

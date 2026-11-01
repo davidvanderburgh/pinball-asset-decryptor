@@ -24,6 +24,7 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `rush_le.shadow.json`, `foo_fighters_pro.shadow.json`, `foo_fighters_le.shadow.json` | the maps for drhotwing's "Rush LE Tribute" 2.0.2 and JP's "Foo Fighters" beta. JP's table is a Pro's playfield (no upper playfield, no Overlord magnet), so Patch takes the Pro map, or the LE one when only an LE card is there (`padvpx patch --title` picks). |
 | `jurassic_park_pro.shadow.json`, `jurassic_park_le.shadow.json` | the maps for JPSalas & marty's "Jurassic Park Pro Le" 4.02 (VPUniverse), on Stern's own Jurassic Park playfield (PAD-887; it replaced marty's "Jurassic Park Limited Edition", PAD-860). Patch takes the Pro; the LE map adds the raptor pit lock, the left ramp's mouth and the motor bank's target. |
 | `james_bond_pro.shadow.json`, `james_bond_le.shadow.json` | the maps for marty & jpsalas's "BOND for Visual Pinball X" 4.3. The table has no rocket VUK or physical rocket lock (the Pro's locks are virtual) and no jet pack magnet, so Patch takes the Pro map (PAD-900), or the LE one when only an LE card is there. |
+| `john_wick_pro.shadow.json`, `john_wick_le.shadow.json` | the maps for JPSalas & marty's "John Wick" 3.0 (the `John_Wick_Legend` pack), on Stern's John Wick art (PAD-905). Its car does not move and its lock is scripted, so Patch takes the Pro map; the LE one adds the arch's lock (LOCK 1-3 behind the post, the center ramp's diverter) and the pops' drop target. |
 | `vpxkeys.py` | presses keys in a running patched table through its `PadTestTimer` (a test does not depend on VPX having the keyboard); `lamps <file>` dumps every mapped light's state. |
 | `padvpx.py` | the kit's command: patch a table (recognised by its map's `detect` words), register the controller, record cards, run and stop by hand, status. |
 | `vpxsetup.py` | the app's Visual Pinball tab's half here: what is set up (Visual Pinball, the controller, the cards, each known table and whether it is patched), the card folder, the window layout, the Visual Pinball download, Play; one JSON line back. |
@@ -352,6 +353,13 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   kicker feeds a ball stack on all of them; `held_ms` is for a post the game
   holds down (12 s at Deadpool's multiball): a ball goes out each `held_ms`
   while it is down, where a kicker coil lets one go per pulse.
+* **A kicker that teleports keeps its exit** (PAD-905). JPSalas's John Wick
+  takes the VUK's ball in at Krampcoude and pops it out of Krampcoude1 on the
+  return wire, and the arch lock's in at Karche (the center ramp's top) and
+  shows it in KArche1-3. A saucer's `kick_from` names that exit kicker: the
+  entry kicker takes the ball in (`AddBall`), and the machine's coil kicks it
+  out of the exit, where the table's own timer did. With a `stack`, a full lane
+  sends the ball out of the exit too.
 * **Use the RIG's switch table.** The first Rush map came from an older
   reading of the title that numbered every switch one higher: the table
   pressed Tournament Start for Start and filled the jam opto, and the game

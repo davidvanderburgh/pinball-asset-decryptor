@@ -364,6 +364,28 @@ def test_shadow_lock_lane_is_a_stack_on_every_lock_switch():
     assert "PadHeld" not in plain and 'SolCallback(3) = "bsKicker1.SolOut"' in plain
 
 
+def test_shadow_saucer_kicks_from_another_kicker():
+    # PAD-905: JPSalas's John Wick teleports its VUK's ball (Krampcoude ->
+    # Krampcoude1) and its arch lock's (Karche -> KArche1-3): the ball the
+    # machine's coil kicks leaves by the table's own exit kicker
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["saucers"]["Kicker1"]["kick_from"] = "Kicker2"
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    assert "bsKicker1.InitSw 0,1078,0,0,0,0,0,0" in out
+    assert "bsKicker1.InitKick Kicker2, 190, 15" in out and "InitSaucer" not in out
+    assert "bsKicker1.KickZ = 1.4" in out
+    assert "Sub Kicker1_Hit : bsKicker1.AddBall Me" in out, "the ball in the entry kicker is taken in"
+    m = _lock_stack_shadow()
+    m["saucers"]["Kicker1"]["kick_from"] = "Kicker2"
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    assert "bsKicker1.InitSw 0,1078,1079,1080,1081,0,0,0" in out
+    assert "bsKicker1.InitKick Kicker2, 190, 15" in out
+    assert ("\tIf bsKicker1.Balls >= 4 Then\n\t\tMe.DestroyBall : vpmCreateBall Kicker2\n"
+            "\t\tKicker2.Kick 190, 15\n\t\tExit Sub") in out, "a full lane sends the ball out the exit"
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+
+
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the generated VBScript under cscript")
 def test_shadow_held_lock_post_lets_every_ball_out(tmp_path):
@@ -961,6 +983,69 @@ def test_the_bond_table_plays_as_the_pro(monkeypatch):
     assert pv.recognise("x.vpx")[0] == "james_bond_le", "only an LE card: the LE"
     cards["james_bond_pro"] = "D:/c/james_bond_pro-1_06_0.Release.16G.sdcard.raw"
     assert pv.recognise("x.vpx")[0] == "james_bond_pro", "both: the Pro"
+
+
+def _john_wick_maps():
+    return [json.load(open(os.path.join(VPX, "john_wick_%s.shadow.json" % m), encoding="utf-8"))
+            for m in ("le", "pro")]
+
+
+def test_the_john_wick_table_plays_as_the_pro(monkeypatch):
+    """PAD-905: JPSalas & marty's John Wick 3.0 has neither the LE's moving car
+    nor a physical lock, so both maps fit it, the Pro first; the LE only when
+    an LE card is the one there. One row in the Visual Pinball tab."""
+    pv = pytest.importorskip("padvpx")
+    vs = pytest.importorskip("vpxsetup")
+
+    class Fake:
+        def script(self):
+            return "'                 JOHN WICK Script JPSalas & marty\n"
+    monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
+    assert [t for t, _ in pv.fitting("x.vpx")] == ["john_wick_pro", "john_wick_le"]
+    cards = {}
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: cards.get(t))
+    assert pv.recognise("x.vpx")[0] == "john_wick_pro"
+    cards["john_wick_le"] = "D:/c/john_wick_le-1_02_0.Release.16G.sdcard.raw"
+    assert pv.recognise("x.vpx")[0] == "john_wick_le", "only an LE card: the LE"
+    cards["john_wick_pro"] = "D:/c/john_wick_pro-1_02_0.Release.16G.sdcard.raw"
+    assert pv.recognise("x.vpx")[0] == "john_wick_pro", "both: the Pro"
+    rows = [r for r in vs.known_tables("") if "john_wick_pro" in r["titles"]]
+    assert [(r["output"], sorted(r["titles"])) for r in rows] == \
+        [("John_Wick_Legend (PAD).vpx", ["john_wick_le", "john_wick_pro"])]
+
+
+def test_the_john_wick_maps_split_at_the_les_mechs():
+    """PAD-905: both maps on the same table objects, numbered by each program's
+    own switch table (1.02.0, read on the emulator, where the Pro started a
+    game through PAD.Controller on these numbers and its LEFT EJECT and
+    RIGHT VUK kicked). The LE adds the arch's lock (LOCK 1-3 behind the
+    post, the center ramp's diverter), the pops' drop target and the car's
+    optos; the Pro has a CAR HIT OPTO where the LE's car holds the ball."""
+    le, pro = _john_wick_maps()
+    assert pro["preferred"] and not le["preferred"] and pro["model"] == "Pro"
+    assert pro["output"] == le["output"] and pro["detect"] == le["detect"]
+    # the LE numbers its switches higher past the car's five and the drop target
+    shared = set(pro["switches"]) & set(le["switches"]) - {"_", "lock"}
+    for obj in shared:
+        p, e = pro["switches"][obj], le["switches"][obj]
+        assert p["name"] == e["name"] and p["event"] == e["event"], obj
+        assert e["id"] - p["id"] in (0, 2, 3, 5), obj
+    assert pro["switches"]["lock"]["name"].startswith("CAR HIT OPTO")
+    assert le["switches"]["lock"]["name"].startswith("CAR HOLD OPTO")
+    assert set(le["switches"]) - set(pro["switches"]) == {"Target11"}
+    # the same three kickers on the machine's coils; the lock is the LE's
+    assert sorted(k for k in pro["saucers"] if k != "_") == ["Krampcoude", "PyramidKicker"]
+    lock = le["saucers"]["Karche"]
+    assert lock["kick_from"] == "KArche3" and len(lock["stack"]) == 2 and lock["held_ms"]
+    assert pro["saucers"]["Krampcoude"]["kick_from"] == "Krampcoude1"
+    names = {s["name"] for s in le["solenoids"].values()} - {s["name"] for s in pro["solenoids"].values()}
+    assert names == {"DIVERTER", "LOCK POST", "DROP TRIP", "DROP RESET", "CRATE", "MARKER"}
+    for k, v in pro["solenoids"].items():
+        assert v["name"] == "CAR" or le["solenoids"][k] == v, k
+    assert "PadHeldKarche_Sol e" in le["extra_vbs"] and "Targetclub.IsDropped = 1" in pro["extra_vbs"]
+    assert "Tenemy7.Enabled = 1 : Tkatia.Enabled = 1" in pro["extra_vbs"], "the skill shot's triggers are live"
+    assert {k: v["leds"] for k, v in pro["lamps"].items() if k != "_"}.keys() == \
+        {k: v["leds"] for k, v in le["lamps"].items() if k != "_"}.keys()
 
 
 def test_the_bond_pro_map_is_the_le_map_on_the_pros_numbers():

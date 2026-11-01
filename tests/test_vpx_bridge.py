@@ -121,7 +121,7 @@ def test_shadow_retrofit_trigger_is_live_invisible_and_on_the_playfield(vpxfile)
     # PAD-922: John Wick's car has no object the ball hits; the map adds one,
     # cloned from a trigger that is off, drawn and on a ramp (SURF)
     vs = pytest.importorskip("vpxshadow")
-    src = struct.pack("<i", 6) + _rec("VCEN", struct.pack("<ff", 5, 5)) +         _rec("SURF", struct.pack("<i", 7) + b"Ramp023") + _rec("EBLD", struct.pack("<i", 0)) +         _rec("SHAP", struct.pack("<i", 2)) + _rec("NAME", vpxfile.wide("Tarche2")) +         b"".join(_rec("DPNT", b"") + _rec("VCEN", struct.pack("<ff", k, k)) + _rec("ENDB", b"")
+    src = struct.pack("<i", 6) + _rec("VCEN", struct.pack("<ff", 5, 5)) +         _rec("SURF", struct.pack("<i", 7) + b"Ramp023") + _rec("EBLD", struct.pack("<i", 0)) +         _rec("SHAP", struct.pack("<i", 2)) + _rec("RADI", struct.pack("<f", 25)) + _rec("NAME", vpxfile.wide("Tarche2")) +         b"".join(_rec("DPNT", b"") + _rec("VCEN", struct.pack("<ff", k, k)) + _rec("ENDB", b"")
                  for k in range(4)) + _rec("ENDB", b"")
 
     class Table:
@@ -134,6 +134,17 @@ def test_shadow_retrofit_trigger_is_live_invisible_and_on_the_playfield(vpxfile)
     top = {t: p for t, p, _ in vpxfile.biff_records(item, 4)}
     assert top["EBLD"] == struct.pack("<i", 1) and top["SHAP"] == struct.pack("<i", 0)
     assert top["SURF"] == struct.pack("<i", 0), "on the playfield, not the clone's ramp"
+    # PAD-925: or on a ramp the map names, with a radius (a cvpmMagnet's reach)
+    ramp = struct.pack("<i", 12) + _rec("NAME", vpxfile.wide("Ramp023")) + _rec("ENDB", b"")
+    Table.items = [src, ramp]
+    m["retrofit_triggers"]["PadCarHit"].update(surface="Ramp023", radius=40)
+    (item,) = vs.retrofit_items(Table, m)
+    top = {t: p for t, p, _ in vpxfile.biff_records(item, 4)}
+    assert top["SURF"] == struct.pack("<i", 7) + b"Ramp023"
+    assert struct.unpack("<f", top["RADI"]) == (40.0,)
+    m["retrofit_triggers"]["PadCarHit"]["surface"] = "Tarche2"
+    with pytest.raises(AssertionError):
+        vs.retrofit_items(Table, m)                       # a trigger is no surface
     out, _ = vs.patch(MINI_TRIBUTE, dict(json.loads(json.dumps(MINI_SHADOW)),
                                         switches={"PadCarHit": {"id": 77, "event": "hit"}}))
     assert "Sub PadCarHit_Hit : vpmTimer.PulseSw 1077 : End Sub" in out
@@ -432,6 +443,108 @@ def test_rushs_right_return_lanes_match_their_inserts():
     assert sw["TRightInlane"]["id"] == 63 and sw["TRightInlane2"]["id"] == 61
     assert lamps["I96"]["leds"] == [[8, 5]] and "INNER" in lamps["I96"]["name"]
     assert lamps["I97"]["leds"] == [[8, 6]] and "OUTER" in lamps["I97"]["name"]
+
+
+def test_rushs_time_machine_magnet_follows_its_coil():
+    # PAD-925: the tribute has no magnet; the game's MAGNET (coil 9) found a
+    # null callback. A trigger added on the time machine ramp is a cvpmMagnet
+    m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
+    assert m["solenoids"]["9"] == {"coil": [9, 7], "name": "MAGNET", "callback": "PadTimeMachineMagnet"}
+    t = m["retrofit_triggers"]["PadTMMagnet"]
+    assert t["clone"] == "tm2" and t["surface"] == "Ramp011", "on the ramp tm2 sits on"
+    xs, ys = zip(*t["shape"])
+    assert min(ys) < 589 - 40, "up the ramp from tm2 (y 589), the shot the game turns it on at"
+    assert ".InitMagnet PadTMMagnet, 40" in m["extra_vbs"]
+    assert "Sub PadTimeMachineMagnet(e) : mPadTM.MagnetOn = CBool(e) : End Sub" in m["extra_vbs"]
+
+
+CORE_VBS = r"C:\Visual Pinball\scripts\core.vbs"
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript") and os.path.exists(CORE_VBS)),
+                    reason="runs core.vbs's cvpmMagnet under cscript")
+def test_rushs_time_machine_magnet_holds_the_ball_while_the_coil_is_on(tmp_path):
+    # PAD-925: core.vbs's own cvpmMagnet, on the map's trigger, the map's
+    # extra_vbs, a ball shot up Ramp011 (y 659 up to 473, 80 units high:
+    # gravity pulls it back down, past the ramp's top it meets tm1 at y 394
+    # and bounces), and coil 9 as the emulator fires it: on as the ball
+    # passes tm2, 4.1 s, off, a 60 ms pulse 0.16 s later. Every shot from
+    # one that barely passes tm2 to one that flies off the top is held for
+    # the 4.1 s and rolls back down past tm2 once let go (the fast ones,
+    # caught on the way back, slipped through core.vbs's 20-unit grab
+    # between its 10 ms updates before the field took their speed); with no
+    # coil the ball is never held. Not Visual Pinball's physics: the
+    # magnet's own logic on a ball that moves like one
+    m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
+    core = open(CORE_VBS, encoding="latin-1").read()
+
+    def block(start, end):   # to `end` at a line's start (vpmBuildEvent has an "End Sub" in a string)
+        a = core.index(start)
+        b = core.index("\n" + end, a) + 1 + len(end)
+        return core[a:b].replace("Private Function", "Function").replace("Private Sub", "Sub")
+    t = m["retrofit_triggers"]["PadTMMagnet"]
+    xs, ys = zip(*t["shape"])
+    cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        block("Class cvpmDictionary", "End Class"),
+        block("Class cvpmMagnet", "End Class"),
+        block("Private Function vpmCheckEvent", "End Function"),
+        block("Private Sub vpmBuildEvent", "End Sub"),
+        block("Private Function vpmIsArray", "End Function"),
+        block("Private Function vpmIsCollection", "End Function"),
+        "Class FakeTimer",
+        "\tPublic Upd, UpdOn",
+        "\tPublic Sub InitTimer(o, f) : End Sub",
+        "\tSub EnableUpdate(c, f, e) : Set Upd = c : UpdOn = e : End Sub",
+        "End Class",
+        "Class FakeTrigger : Public Name, X, Y, Radius, TimerInterval, TimerEnabled : End Class",
+        "Class FakeBall : Public X, Y, VelX, VelY : End Class",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim PadTMMagnet : Set PadTMMagnet = New FakeTrigger",
+        "PadTMMagnet.Name = \"PadTMMagnet\" : PadTMMagnet.X = %r : PadTMMagnet.Y = %r : PadTMMagnet.Radius = %r"
+        % (cx, cy, t["radius"]),
+        "Dim ActiveBall",
+        m["extra_vbs"],
+        "Function Shot(v0, xoff, coil)",
+        "\tDim b, t, inside, was, tOn, held1, held4, back, dx, dy",
+        "\tSet b = New FakeBall : b.X = %r + xoff : b.Y = 650 : b.VelX = 0 : b.VelY = -v0" % cx,
+        "\tSet ActiveBall = b : was = False : tOn = -1 : held1 = False : held4 = False : back = False",
+        "\tFor t = 0 To 9000",
+        "\t\tIf b.Y > 400 Then b.VelY = b.VelY + 0.089 Else b.Y = 400 : b.VelY = Abs(b.VelY) * 0.5",
+        "\t\tb.X = b.X + b.VelX / 10 : b.Y = b.Y + b.VelY / 10",
+        "\t\tinside = b.X > %r And b.X < %r And b.Y > %r And b.Y < %r" % (min(xs), max(xs), min(ys), max(ys)),
+        "\t\tIf inside And Not was Then PadTMMagnet_Hit",
+        "\t\tIf was And Not inside Then PadTMMagnet_UnHit",
+        "\t\twas = inside",
+        "\t\tIf tOn < 0 And b.Y < 589 And b.VelY < 0 Then tOn = t + 20",
+        "\t\tIf coil And t = tOn Then PadTimeMachineMagnet 1",
+        "\t\tIf coil And t = tOn + 4100 Then PadTimeMachineMagnet 0",
+        "\t\tIf coil And t = tOn + 4260 Then PadTimeMachineMagnet 1",
+        "\t\tIf coil And t = tOn + 4320 Then PadTimeMachineMagnet 0",
+        "\t\tIf t Mod 10 = 0 And vpmTimer.UpdOn Then vpmTimer.Upd.Update",
+        "\t\tdx = b.X - PadTMMagnet.X : dy = b.Y - PadTMMagnet.Y",
+        "\t\tIf tOn > 0 And t = tOn + 1000 Then held1 = Sqr(dx * dx + dy * dy) < 2",
+        "\t\tIf tOn > 0 And t = tOn + 4000 Then held4 = Sqr(dx * dx + dy * dy) < 2",
+        "\t\tIf b.Y > 600 And b.VelY > 0 And tOn > 0 Then back = True : Exit For",
+        "\tNext",
+        "\tShot = held1 & \"/\" & held4 & \"/\" & back & \"@\" & Int((t - tOn) / 100) / 10",
+        "End Function",
+        "Dim xoff, v, s",
+        "For Each xoff In Array(-12, -3, 6, 11) : For v = 15 To 160 Step 5",
+        "\ts = s & v & \"/\" & xoff & \":\" & Shot(v, xoff, True) & \" \"",
+        "Next : Next",
+        "WScript.Echo s & \"nocoil:\" & Shot(60, 6, False)",
+    ]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=120)
+    got = r.stdout.split()
+    assert len(got) == 4 * 30 + 1, r.stdout + r.stderr
+    for s in got[:-1]:
+        flags, after = s.split(":")[1].split("@")
+        assert flags == "True/True/True", s                 # held at 1 s and 4 s, then rolled back down
+        assert 4.1 <= float(after) <= 5.5, s                # down past tm2 soon after the magnet let go
+    assert got[-1].split(":")[1].split("@")[0] == "False/False/True", got[-1]   # no coil: straight back down
 
 
 def test_rushs_side_scoop_rests_on_the_lower_switch():

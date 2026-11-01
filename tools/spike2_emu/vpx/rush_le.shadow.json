@@ -14,6 +14,7 @@
     "tm2 is the time machine: the shot the game starts modes and multiballs on is LIFT RAMP OPTO (82), where its TimeMachineMagnet grabs the ball (PAD-420). It counts on the way up only, as the tribute did; LL3 (the VUK lane, its own VUK switch is Kicker3) no longer stands in for it (PAD-907).",
     "Kicker1 is the side scoop: the ball passes SIDE SCOOP OPTO (78, `enter`) and rests on LOWER SIDE SCOOP (85), where the game fires SIDE SCOOP. Held on 78 the game only held its trough lock and waited, the ball sat until a ball search and the switch read stuck (PAD-910).",
     "The right side has two return lanes: TRightInlane (x 692, lighting I96) is the inner one, RIGHT RETURN LANE-INNER (63); TRightInlane2 (x 761, lighting I97) the outer, RIGHT RETURN LANE (61). They were the other way round and each lit the other's insert (PAD-921).",
+    "The time machine's MAGNET (coil 9): the tribute has no magnet, so its ball ran up Ramp011 over tm2, met tm1 and rolled straight back down while the game held MAGNET ~4.1 s for it (emulator: on at LIFT RAMP OPTO, off, one 60 ms pulse 0.16 s later). PadTMMagnet is a trigger added on Ramp011's top (retrofit_triggers, `surface`), made a cvpmMagnet in extra_vbs that the coil turns on and off: the ball is held there while it is on and rolls back down the ramp when it lets go (PAD-925).",
     "b2s_name: the script's cGameName is \"rushle\", but the DOF Config Tool lists the table as rush_le, and B2S.Server hands DOF that name (PAD-847)."
   ],
   "title": "rush_le",
@@ -81,7 +82,7 @@
     "6": {"coil": [8, 8], "name": "3 BANK DROP", "callback": "PadResetDrops"},
     "7": {"coil": [8, 6], "name": "UP POST", "callback": null},
     "8": {"coil": [9, 6], "name": "RAMP DIVERTER", "callback": null},
-    "9": {"coil": [9, 7], "name": "MAGNET", "callback": null},
+    "9": {"coil": [9, 7], "name": "MAGNET", "callback": "PadTimeMachineMagnet"},
     "10": {"coil": [9, 0], "name": "TROUGH LOCK", "callback": null},
     "11": {"coil": [9, 2], "name": "LEFT POP BUMPER", "callback": null},
     "12": {"coil": [9, 3], "name": "RIGHT POP BUMPER", "callback": null},
@@ -97,7 +98,11 @@
     "BallRelease.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "Sub PadResetDrops(e) : If e Then ResetDropTargets : End If : End Sub\n",
+  "extra_vbs": "Sub PadResetDrops(e) : If e Then ResetDropTargets : End If : End Sub\n' PAD-925: the time machine magnet on PadTMMagnet (Ramp011's top): MAGNET holds the ball there, let go it rolls back down\nDim mPadTM : Set mPadTM = New cvpmMagnet\nWith mPadTM\n\t.InitMagnet PadTMMagnet, 40\n\t.GrabCenter = True\nEnd With\n' cvpmMagnet grabs a ball only inside 20 units, at its 10 ms update: a fast one crossed that between two.\n' A live magnet takes the ball's speed as it comes into the field, so the grab cannot miss\nSub PadTMMagnet_Hit\n\tmPadTM.AddBall ActiveBall\n\tIf mPadTM.MagnetOn Then ActiveBall.VelX = ActiveBall.VelX * 0.2 : ActiveBall.VelY = ActiveBall.VelY * 0.2\nEnd Sub\nSub PadTMMagnet_UnHit : mPadTM.RemoveBall ActiveBall : End Sub\nSub PadTimeMachineMagnet(e) : mPadTM.MagnetOn = CBool(e) : End Sub\n",
+  "retrofit_triggers": {
+    "_": "no table object: a Trigger cloned from `clone`, given `shape` (its drag points), live and drawn as nothing, on `surface`",
+    "PadTMMagnet": {"clone": "tm2", "surface": "Ramp011", "radius": 40, "shape": [[482, 470], [552, 470], [552, 540], [482, 540]], "name": "the time machine magnet: Ramp011's top 70 units, its whole width (the ramp runs from y 659 up to 473, 80 units high); centre 517,505"}
+  },
   "retrofit_timers": {
     "PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1},
     "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100}

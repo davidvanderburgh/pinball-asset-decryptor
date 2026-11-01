@@ -42,7 +42,9 @@ off so the shadow game cannot leave them lit.
 
 Switches the table has no object for: `retrofit_triggers` are new triggers,
 cloned from `clone` and given a `shape` (drag points), drawn as nothing; the
-switches map names them like any other object.
+switches map names them like any other object. On a ramp (`surface`), with a
+`radius`, one is also where a magnet the table lacks goes (Rush's time
+machine, a cvpmMagnet in `extra_vbs` that its coil turns on and off).
 
 The map (<title>.shadow.json) says which object is which switch; see
 rush_le.shadow.json for the fields. The patched table is re-signed and gets
@@ -1065,16 +1067,24 @@ def retrofit_items(table, m):
     # PAD-922: a switch where the table has no object - a Trigger cloned from
     # `clone`, given its own `shape` (drag points), switched on, drawn as
     # nothing and on the playfield (SURF: John Wick's arch triggers sit on a
-    # ramp), so a ball reaching the spot reaches the machine's switch
+    # ramp), so a ball reaching the spot reaches the machine's switch.
+    # PAD-925: or on the ramp `surface` names - a trigger at playfield height
+    # never meets a ball rolling 80 units up Rush's time machine ramp - and
+    # `radius` is the reach of a cvpmMagnet built on it (core.vbs takes
+    # the trigger's Radius as the magnet's size)
     for name, v in m.get("retrofit_triggers", {}).items():
         if name == "_":
             continue
         kind, src = by_name[v["clone"]]
         assert kind == "Trigger", v["clone"]
+        surf = v.get("surface", "")
+        assert not surf or by_name.get(surf, ("",))[0] in ("Ramp", "Wall"), surf
+        fields = {"EBLD": struct.pack("<i", 1), "SHAP": struct.pack("<i", 0),
+                  "SURF": struct.pack("<I", len(surf)) + surf.encode("latin1")}
+        if "radius" in v:
+            fields["RADI"] = struct.pack("<f", float(v["radius"]))
         item = vpxfile.reshape_item(vpxfile.clone_item(src, name, 0, 0), v["shape"])
-        items.append(vpxfile.set_fields(item, {"EBLD": struct.pack("<i", 1),
-                                               "SHAP": struct.pack("<i", 0),
-                                               "SURF": struct.pack("<i", 0)}))
+        items.append(vpxfile.set_fields(item, fields))
     for name, v in m.get("retrofit_timers", {}).items():
         if name == "_":
             continue

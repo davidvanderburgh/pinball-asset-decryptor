@@ -17,14 +17,19 @@ against a Unicorn emulation of the real ``pin`` loop — see
   3. a 16-bit running prefix-sum over all halfwords.
 
 The decrypted container is a 16-byte header + ``count`` records of 0x58 bytes
-(``filename`` @+0x04, ``data_off`` @+0x44 (absolute), ``decoded_len`` @+0x4C,
-``sample_count`` @+0x50), followed by the concatenated payloads.  The payloads
-are **raw 48 kHz / mono / 16-bit PCM** (verified: ``decoded_len == 2 *
-sample_count`` for every record), so each one is sliced straight out and
-wrapped in a WAV header — no audio codec needed.
+(``filename`` @+0x04, ``data_off`` @+0x44 (absolute), ``frames`` @+0x48,
+``decoded_len`` @+0x4C, ``sample_count`` @+0x50), followed by the concatenated
+payloads.  The payloads are **raw 48 kHz / mono / 16-bit PCM** (verified:
+``decoded_len == 2 * sample_count`` for every record), so each one is sliced
+straight out and wrapped in a WAV header — no audio codec needed.
 
-This module is **extract-only**.  Repack (edited WAV → re-encrypt → usb.so) is
-separate, future work.
+What the game reads back (``pin``, PAD-919): ``dcs_load_samplefile`` mallocs
+the file's own size, so the bank may be any length, and points each record at
+``buffer + data_off`` (stored @+0x54); ``dcs_subc01_0181`` plays a sound for
+its ``frames`` — DCS frames of 240 samples at 31250 Hz, 368.64 samples at
+48 kHz, ``ceil(sample_count / 368.64)`` in all 756 stock records.  So a sound
+can be given a new length by re-laying the payloads and rewriting those four
+fields, which :func:`repack_usb` does.
 """
 
 from __future__ import annotations
@@ -47,6 +52,14 @@ _BASE = 0x10      # records start after the 16-byte header
 _SAMPLE_RATE = 48000
 _CHANNELS = 1
 _SAMPLE_WIDTH = 2  # 16-bit
+# Zero fill after a re-laid payload: the player reads whole frames, up to one
+# frame's worth past the sound's last sample (stock gaps are 100-4900 bytes).
+_TAIL_PAD = 64
+
+
+def frames_for(sample_count: int) -> int:
+    """The ``frames`` field the game plays *sample_count* samples for."""
+    return -(-sample_count * 3125 // 1152000)  # ceil(n / 368.64), exact
 
 
 class UsbAudioError(Exception):
@@ -209,17 +222,29 @@ def _read_wav_pcm(path: str):
         return w.readframes(w.getnframes())
 
 
+def _secs(nbytes: int) -> float:
+    return nbytes / (_SAMPLE_RATE * _SAMPLE_WIDTH)
+
+
 def repack_usb(orig_usb_so_path: str, new_audio_dir: str, out_usb_so_path: str,
-               log_cb: Optional[Callable[[str, str], None]] = None) -> dict:
+               log_cb: Optional[Callable[[str, str], None]] = None,
+               fit: bool = False) -> dict:
     """Rebuild usb.so with edited WAVs from *new_audio_dir* spliced in.
 
     Each ``new_audio/<NNNN>_*.wav`` whose PCM differs from the original
-    record ``NNNN`` is spliced back into the decrypted bank (trimmed/padded to
-    the original byte length, so the record table + size-check word stay
-    valid), then the whole bank is re-encrypted to *out_usb_so_path*.
+    record ``NNNN`` goes back into the decrypted bank at ITS OWN length: the
+    payloads after it move, and the record's offset, frames and lengths plus
+    the header's size word are rewritten (PAD-919: this used to cut every
+    replacement to the stock length, whatever the "Trim / pad" box said; the
+    box does that cut, when ticked, before the WAV gets here).  With *fit*
+    each one is cut or silence-padded to its stock record's length instead,
+    so the bank keeps its size - what a card with no room for a longer bank
+    needs.  The whole bank is then re-encrypted to *out_usb_so_path*.
 
-    A no-op repack (no WAV changed) reproduces the original bytes exactly.
-    Returns ``{"modified_count": n, "total": count}``.
+    A no-op repack (no WAV changed) writes nothing; one whose sounds all keep
+    their lengths reproduces every other byte of the original exactly.
+    Returns ``{"modified_count", "total", "size", "orig_size", "longer",
+    "cut"}`` - *longer* and *cut* list ``(wav name, stock s, new s)``.
     """
     import glob as _glob
 
@@ -232,31 +257,86 @@ def repack_usb(orig_usb_so_path: str, new_audio_dir: str, out_usb_so_path: str,
     dec = bytearray(decode_usb_so(orig_usb_so_path))  # validates integrity
     count = struct.unpack_from("<I", dec, 0)[0]
 
-    modified = 0
+    recs = []          # (data_off, index)
+    edits = {}         # index -> new PCM
+    longer, cut = [], []
     for i in range(count):
         o = _BASE + i * _REC
         data_off = struct.unpack_from("<I", dec, o + 0x44)[0]
         decoded_len = struct.unpack_from("<I", dec, o + 0x4C)[0]
+        recs.append((data_off, i))
         matches = _glob.glob(os.path.join(
             _glob.escape(new_audio_dir), f"{i:04d}_*.wav"))
         if len(matches) != 1:
             continue
+        name = os.path.basename(matches[0])
         try:
             pcm = _read_wav_pcm(matches[0])
         except UsbAudioError as e:
-            log(f"  skip {os.path.basename(matches[0])}: {e}", "warning")
+            log(f"  skip {name}: {e}", "warning")
             continue
-        if len(pcm) != decoded_len:
+        if fit and len(pcm) != decoded_len:
+            if len(pcm) > decoded_len:
+                cut.append((name, _secs(decoded_len), _secs(len(pcm))))
             pcm = (pcm + b"\x00" * decoded_len)[:decoded_len]
         if dec[data_off:data_off + decoded_len] == pcm:
             continue  # unchanged
-        dec[data_off:data_off + decoded_len] = pcm
-        modified += 1
+        if len(pcm) > decoded_len:
+            longer.append((name, _secs(decoded_len), _secs(len(pcm))))
+        edits[i] = pcm
 
-    if modified:
-        out = _dcs_encrypt(bytes(dec))
-        # Preserve original length exactly (no trailing pad).
-        out = out[:len(raw)]
-        with open(out_usb_so_path, "wb") as f:
-            f.write(out)
-    return {"modified_count": modified, "total": count}
+    summary = {"modified_count": len(edits), "total": count,
+               "size": len(raw), "orig_size": len(raw),
+               "longer": longer, "cut": cut}
+    if not edits:
+        return summary
+
+    if all(len(p) == struct.unpack_from("<I", dec, _BASE + i * _REC + 0x4C)[0]
+           for i, p in edits.items()):
+        # Every sound keeps its length: splice in place.
+        for i, pcm in edits.items():
+            data_off = struct.unpack_from("<I", dec, _BASE + i * _REC + 0x44)[0]
+            dec[data_off:data_off + len(pcm)] = pcm
+        out = _dcs_encrypt(bytes(dec))[:len(raw)]  # no trailing pad
+    else:
+        out = _dcs_encrypt(_relayout(dec, recs, edits))
+        summary["size"] = len(out)
+    with open(out_usb_so_path, "wb") as f:
+        f.write(out)
+    return summary
+
+
+def _relayout(dec: bytearray, recs, edits) -> bytes:
+    """*dec* with each payload in *edits* at its new length.
+
+    Payloads keep their order; an untouched one keeps its bytes and the zero
+    fill after it, an edited one is followed by zeros covering the last frame
+    the player reads plus :data:`_TAIL_PAD`, 4-byte aligned.  The header's
+    ``hdr[8] ^ hdr[0xc]`` - the loader's file-size check - is rewritten."""
+    recs = sorted(recs)
+    start = recs[0][0] if recs else len(dec)
+    if start < _BASE + len(recs) * _REC:
+        raise UsbAudioError("usb.so payloads overlap the record table")
+    out = bytearray(dec[:start])
+    for k, (data_off, i) in enumerate(recs):
+        o = _BASE + i * _REC
+        end = recs[k + 1][0] if k + 1 < len(recs) else len(dec)
+        new_off = len(out)
+        pcm = edits.get(i)
+        if pcm is None:
+            out += dec[data_off:end]
+        else:
+            samples = len(pcm) // _SAMPLE_WIDTH
+            frames = frames_for(samples)
+            reads = -(-frames * 1152000 // 3125) * _SAMPLE_WIDTH
+            span = max(len(pcm), reads) + _TAIL_PAD
+            span += -span % 4
+            out += pcm + b"\x00" * (span - len(pcm))
+            struct.pack_into("<IIII", out, o + 0x44,
+                             new_off, frames, len(pcm), samples)
+        if pcm is None:
+            struct.pack_into("<I", out, o + 0x44, new_off)
+    out += b"\x00" * (-len(out) % 4)
+    struct.pack_into("<I", out, 8,
+                     len(out) ^ struct.unpack_from("<I", out, 0xC)[0])
+    return bytes(out)

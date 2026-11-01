@@ -161,3 +161,189 @@ def test_cc_repack_prestep_noop_on_non_cc_dir(tmp_path):
     (tmp_path / "some_other.wav").write_bytes(b"x")
     cgc_pipeline._repack_modified_cc_assets(str(tmp_path))  # must not raise
     assert sorted(p.name for p in tmp_path.iterdir()) == ["some_other.wav"]
+
+
+# --- usb.so sounds at their own length (PAD-919) ---------------------------
+
+def _bank(tmp_path, sounds):
+    """An encrypted usb.so holding *sounds* ([(name, pcm)]) laid out the way
+    CGC's is: records in order, zero fill after each, hdr[8]^hdr[0xc] = size."""
+    import struct
+    from pinball_decryptor.plugins.cgc import cc_usb_audio as U
+    table = 16 + len(sounds) * 0x58
+    dec = bytearray(table)
+    struct.pack_into("<4I", dec, 0, len(sounds), 0x180A070A, 0, 0x6C84)
+    for i, (name, pcm) in enumerate(sounds):
+        o = 16 + i * 0x58
+        dec[o + 4:o + 4 + len(name)] = name.encode()
+        struct.pack_into("<4I", dec, o + 0x44, len(dec),
+                         U.frames_for(len(pcm) // 2), len(pcm), len(pcm) // 2)
+        dec += pcm + b"\x00" * 800
+    struct.pack_into("<I", dec, 8, len(dec) ^ 0x6C84)
+    path = tmp_path / "usb.so"
+    path.write_bytes(U._dcs_encrypt(bytes(dec)))
+    return str(path)
+
+
+def _wav(path, pcm):
+    import wave
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(pcm)
+
+
+def _records(path):
+    import struct
+    from pinball_decryptor.plugins.cgc import cc_usb_audio as U
+    dec = U.decode_usb_so(path)        # the loader's size check
+    out = []
+    for i in range(struct.unpack_from("<I", dec, 0)[0]):
+        off, frames, dlen, samples = struct.unpack_from(
+            "<4I", dec, 16 + i * 0x58 + 0x44)
+        assert dlen == 2 * samples and frames == U.frames_for(samples)
+        # the player reads whole frames: they stay inside the bank
+        assert off + -(-frames * 1152000 // 3125) * 2 <= len(dec)
+        out.append(bytes(dec[off:off + dlen]))
+    return out
+
+
+def _tone(n, k):
+    return bytes((i * k) & 0xFF for i in range(2 * n))
+
+
+def test_usb_frames_match_the_stock_bank():
+    # Values read from Cactus Canyon 1.13's usb.so: (sample_count, frames).
+    from pinball_decryptor.plugins.cgc import cc_usb_audio as U
+    for samples, frames in ((4800, 14), (10030, 28), (369006, 1001),
+                            (2192005, 5947), (2123364, 5760), (169501, 460)):
+        assert U.frames_for(samples) == frames
+
+
+def test_usb_repack_keeps_each_sounds_own_length(tmp_path):
+    import pytest
+    pytest.importorskip("numpy")
+    from pinball_decryptor.plugins.cgc import cc_usb_audio as U
+    stock = [("a.wav", _tone(4000, 3)), ("music.wav", _tone(9000, 5)),
+             ("b.wav", _tone(3000, 7)), ("c.wav", _tone(5000, 11))]
+    usb = _bank(tmp_path, stock)
+    na = tmp_path / "new_audio"
+    na.mkdir()
+    for i, (name, pcm) in enumerate(stock):
+        _wav(na / f"{i:04d}_{name}", pcm)
+    out = str(tmp_path / "out.so")
+
+    # Nothing edited: nothing written.
+    s = U.repack_usb(usb, str(na), out)
+    assert s["modified_count"] == 0 and not os.path.exists(out)
+
+    # A song three times the slot, and a shorter sound: both kept whole.
+    song, short = _tone(27000, 13), _tone(1200, 17)
+    _wav(na / "0001_music.wav", song)
+    _wav(na / "0002_b.wav", short)
+    s = U.repack_usb(usb, str(na), out)
+    assert s["modified_count"] == 2
+    assert [n for n, *_ in s["longer"]] == ["0001_music.wav"]
+    assert s["size"] == os.path.getsize(out) > os.path.getsize(usb)
+    assert _records(out) == [stock[0][1], song, short, stock[3][1]]
+
+    # The grown bank is a valid original for the next build: same WAVs, no
+    # change; the stock music back, the bank lays it out at its stock length.
+    assert U.repack_usb(out, str(na), str(tmp_path / "x.so"))[
+        "modified_count"] == 0
+    _wav(na / "0001_music.wav", stock[1][1])
+    U.repack_usb(out, str(na), str(tmp_path / "back.so"))
+    assert _records(str(tmp_path / "back.so"))[1] == stock[1][1]
+
+
+def test_usb_repack_fit_cuts_to_the_stock_slot(tmp_path):
+    import pytest
+    pytest.importorskip("numpy")
+    from pinball_decryptor.plugins.cgc import cc_usb_audio as U
+    stock = [("a.wav", _tone(4000, 3)), ("music.wav", _tone(9000, 5))]
+    usb = _bank(tmp_path, stock)
+    na = tmp_path / "new_audio"
+    na.mkdir()
+    _wav(na / "0001_music.wav", _tone(27000, 13))
+    out = str(tmp_path / "out.so")
+    s = U.repack_usb(usb, str(na), out, fit=True)
+    assert os.path.getsize(out) == os.path.getsize(usb)
+    assert s["cut"] == [("0001_music.wav", 9000 / 48000, 27000 / 48000)]
+    assert _records(out)[1] == _tone(27000, 13)[:18000]
+
+
+class _Exec:
+    """debugfs on a game partition holding *files* ({inner path: host file})
+    with *free* bytes free."""
+
+    def __init__(self, files, free):
+        self.files, self.free = files, free
+
+    def to_exec_path(self, p):
+        return p
+
+    def run(self, cmd, timeout=None):
+        import shlex
+        import shutil
+        req = shlex.split(cmd)[2]
+        if req == "stats":
+            return (f"Block size:               4096\n"
+                    f"Free blocks:              {self.free // 4096}\n")
+        op, *args = shlex.split(req)
+        if op == "stat":
+            return f"  Size: {os.path.getsize(self.files[args[0]])}\n"
+        if op == "dump":
+            shutil.copyfile(self.files[args[0]], args[1])
+            return ""
+        raise AssertionError(cmd)
+
+
+def _fit(tmp_path, free):
+    import pytest
+    pytest.importorskip("numpy")
+    from pinball_decryptor.plugins.cgc import cc_usb_audio as U
+    stock = [("a.wav", _tone(4000, 3)), ("music.wav", _tone(9000, 5))]
+    card = _bank(tmp_path, stock)
+    assets = tmp_path / "assets"
+    (assets / "new_audio").mkdir(parents=True)
+    _wav(assets / "new_audio" / "0001_music.wav", _tone(27000, 13))
+    (assets / "ccdata").mkdir()
+    built = str(assets / "ccdata" / "usb.so")
+    U.repack_usb(card, str(assets / "new_audio"), built)
+    p = cgc_pipeline.WritePipeline.__new__(cgc_pipeline.WritePipeline)
+    p.assets_dir = str(assets)
+    p.executor = _Exec({"/home/debian/pin/ccdata/usb.so": card}, free)
+    logs = []
+    p._log = lambda m, level="info": logs.append((level, m))
+    p._fit_cc_bank("inner.img", {"ccdata/usb.so": built}, "/home/debian/pin")
+    return card, built, logs
+
+
+def test_cc_write_keeps_a_longer_bank_that_fits(tmp_path):
+    card, built, logs = _fit(tmp_path, 40 * 1024 * 1024)
+    assert os.path.getsize(built) > os.path.getsize(card)
+    assert _records(built)[1] == _tone(27000, 13)
+    assert any("grows by" in m for _, m in logs)
+    assert not any(level == "warning" for level, _ in logs)
+
+
+def test_cc_write_cuts_sounds_back_when_the_card_is_full(tmp_path):
+    card, built, logs = _fit(tmp_path, cgc_pipeline.CC_BANK_HEADROOM)
+    assert os.path.getsize(built) == os.path.getsize(card)
+    assert _records(built)[1] == _tone(27000, 13)[:18000]
+    warn = "\n".join(m for level, m in logs if level == "warning")
+    assert "0001_music.wav: 0.6 s cut to 0.2 s" in warn
+
+
+def test_cc_repack_failure_is_reported(tmp_path):
+    # A usb.so that is not a bank cannot be rebuilt: the build used to ship
+    # the stock one silently, so the user's sound edits never reached the card.
+    (tmp_path / "ccdata").mkdir()
+    (tmp_path / "ccdata" / "usb.so").write_bytes(b"\x00" * 64)
+    (tmp_path / "new_audio").mkdir()
+    logs = []
+    cgc_pipeline._repack_modified_cc_assets(
+        str(tmp_path), log=lambda m, level="info": logs.append((level, m)))
+    assert any(level == "warning" and "ccdata/usb.so" in m
+               for level, m in logs)

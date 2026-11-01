@@ -181,7 +181,12 @@ class CGCManufacturer(Manufacturer):
                 "silence the sound and mistime the rest of the bank on the "
                 "machine). The WPC remakes (Medieval Madness / Attack From "
                 "Mars / Monster Bash) use loose .wav files that play at their "
-                "own length, so trimming isn't needed there.")
+                "own length, so trimming isn't needed there. Cactus Canyon's "
+                "added music and speech also play at their own length, as "
+                "long as the card has room: its game partition has about 20 "
+                "MB to spare (around 3.5 minutes of sound in all). Longer "
+                "sounds past that are cut to their original length when the "
+                "image is built, and the build log names each one.")
 
     def decode_dmd_applies(self, input_path):
         # MM/AFM/MB: decode the bundled Williams WPC ROM to PNG scenes + MP4s.

@@ -91,6 +91,9 @@ _DCS_ROM_RE = re.compile(r"^s\d+\.rom$", re.IGNORECASE)
 #   new_audio/    -- CGC's added music/speech/SFX decoded from ccdata/usb.so
 #   display_art/  -- the 2044 colour images decoded from ccdata/cgc.so
 NEW_AUDIO_SUBDIR = "new_audio"
+# Room Write leaves free on Cactus Canyon's game partition when a longer
+# new_audio sound grows ccdata/usb.so (PAD-919, WritePipeline._fit_cc_bank).
+CC_BANK_HEADROOM = 16 * 1024 * 1024
 ART_SUBDIR = "display_art"
 VIDEO_SUBDIR = "videos"
 
@@ -939,6 +942,9 @@ class WritePipeline(BasePipeline):
                                      inner_root_to_assets_root)
             finally:
                 shutil.rmtree(card_dir, ignore_errors=True)
+            if game_key == "cactus_canyon":
+                self._fit_cc_bank(inner_exec, changed,
+                                  inner_root_to_assets_root)
             self._log("Writing modified files into inner ext4 via debugfs...",
                       "info")
             self._write_modified_files(
@@ -1024,6 +1030,78 @@ class WritePipeline(BasePipeline):
             f"machine powered off, power on, and follow CGC's on-screen "
             f"installer prompt. Keep a backup of the untouched card/drive "
             f"first.")
+
+    def _fit_cc_bank(self, inner_exec, changed, inner_root):
+        """Cut Cactus Canyon's longer sounds back if the card has no room.
+
+        The repack pre-step let each new_audio sound keep its own length, so
+        ccdata/usb.so grows with a longer one (PAD-919).  The game partition
+        it lives on is CGC's Debian root, shipped nearly full (cc113: 37 MB
+        free, already inside root's reserve), and it is also where the
+        machine keeps its logs and settings - so the bank may only grow
+        while :data:`CC_BANK_HEADROOM` stays free.  Past that, the bank is
+        rebuilt from the card's own usb.so with every replacement fitted to
+        its original slot, as Write always did before, and each cut is named
+        in the log.
+        """
+        rel = "ccdata/usb.so"
+        host = changed.get(rel)
+        if not host or not os.path.isfile(host):
+            return
+        root = inner_root.rstrip("/")
+
+        def card_size(r):
+            m = re.search(r"\bSize:\s*(\d+)",
+                          self._inner_stat(inner_exec, f"{root}/{r}"))
+            return int(m.group(1)) if m else 0
+
+        grow = os.path.getsize(host) - card_size(rel)
+        if grow <= 0:
+            return
+        others = sum(max(0, os.path.getsize(p) - card_size(r))
+                     for r, p in changed.items() if r != rel)
+        stats = self.executor.run(
+            f"debugfs -R stats {shlex.quote(inner_exec)} 2>&1", timeout=60)
+        free = re.search(r"^Free blocks:\s*(\d+)", stats, re.M)
+        bsize = re.search(r"^Block size:\s*(\d+)", stats, re.M)
+        if not (free and bsize):
+            raise PipelineError("Write",
+                f"Could not read the game partition's free space "
+                f"(debugfs stats):\n{stats.strip()[:400]}")
+        free = int(free.group(1)) * int(bsize.group(1))
+        mb = 1024 * 1024
+        if grow + others + CC_BANK_HEADROOM <= free:
+            self._log(
+                f"  Cactus Canyon's sound bank grows by {grow / mb:.1f} MB "
+                f"for the longer sounds; {(free - grow - others) / mb:.1f} "
+                f"MB of the card's game partition stays free.", "info")
+            return
+        from . import cc_usb_audio
+        card = tempfile.mkdtemp(prefix="pad_cc_usb_")
+        try:
+            card_usb = os.path.join(card, "usb.so")
+            dump = shlex.quote(
+                f"dump {_quote_dbg(f'{root}/{rel}')} "
+                f"{_quote_dbg(self.executor.to_exec_path(card_usb))}")
+            self.executor.run(
+                f"debugfs -R {dump} {shlex.quote(inner_exec)} 2>&1",
+                timeout=600)
+            summary = cc_usb_audio.repack_usb(
+                card_usb, os.path.join(self.assets_dir, NEW_AUDIO_SUBDIR),
+                host, fit=True)
+        finally:
+            shutil.rmtree(card, ignore_errors=True)
+        self._log(
+            f"  The longer sounds need {grow / mb:.1f} MB more on the card, "
+            f"but its game partition has {free / mb:.1f} MB free and "
+            f"{CC_BANK_HEADROOM // mb} MB of that must stay free for the "
+            f"machine. Each was cut to its original length instead:",
+            "warning")
+        for name, was, now in summary["cut"]:
+            self._log(f"    {NEW_AUDIO_SUBDIR}/{name}: {now:.1f} s cut to "
+                      f"{was:.1f} s", "warning")
+        self._log("  Shorter files fit: about 10 s of sound per MB.",
+                  "warning")
 
     def _inner_stat(self, inner_exec, path):
         cmd = shlex.quote(f"stat {_quote_dbg(path)}")
@@ -1815,7 +1893,7 @@ def _diff_assets(assets_dir, baseline, log=None):
     # source eMMC blobs (s*.rom / usb.so / cgc.so) in place, so the baseline
     # md5 diff below picks the blobs up as changed.  No-op when those dirs
     # aren't present (other CGC titles / non-CC extracts).
-    _repack_modified_cc_assets(assets_dir)
+    _repack_modified_cc_assets(assets_dir, log=log)
 
     changed = {}
     missing = []
@@ -2136,7 +2214,7 @@ def _repack_modified_jps_bnks(assets_dir, baseline=None, log=None):
     return decoded_subdir_files
 
 
-def _repack_modified_cc_assets(assets_dir):
+def _repack_modified_cc_assets(assets_dir, log=None):
     """Re-encode edited Cactus Canyon decoded assets back into their source
     eMMC blobs, in place, so the Write diff picks the blobs up as changed.
 
@@ -2162,20 +2240,34 @@ def _repack_modified_cc_assets(assets_dir):
         try:
             from . import cc_dcs
             cc_dcs.repack(data_rom, dcs_dir, data_rom)
-        except Exception:
-            pass
+        except Exception as e:
+            # Said out loud (PAD-919): a blob that could not be rebuilt
+            # ships stock, so the user's edits are NOT on the card.
+            if log:
+                log(f"  Could not rebuild the sound ROMs from {DCS_SUBDIR}/ "
+                    f"({e}); its sounds stay as they were.", "warning")
 
-    # new_audio WAVs -> usb.so (re-encrypt).
+    # new_audio WAVs -> usb.so (re-encrypt).  Each sound keeps its own
+    # length (PAD-919); Write fits them back if the card has no room
+    # (WritePipeline._fit_cc_bank).
     if os.path.isfile(usb_so) and os.path.isdir(new_audio):
         try:
             from . import cc_usb_audio
             tmp = usb_so + ".repack_tmp"
-            summary = cc_usb_audio.repack_usb(usb_so, new_audio, tmp)
+            summary = cc_usb_audio.repack_usb(usb_so, new_audio, tmp, log_cb=log)
             if summary.get("modified_count", 0) > 0 and os.path.isfile(tmp):
                 os.replace(tmp, usb_so)
+                if log:
+                    for name, was, now in summary["longer"]:
+                        log(f"  {NEW_AUDIO_SUBDIR}/{name} plays "
+                            f"{now:.1f} s (was {was:.1f} s).", "info")
             elif os.path.exists(tmp):
                 os.remove(tmp)
-        except Exception:
+        except Exception as e:
+            if log:
+                log(f"  Could not rebuild ccdata/usb.so from "
+                    f"{NEW_AUDIO_SUBDIR}/ ({e}); its sounds stay as they "
+                    f"were.", "warning")
             if os.path.exists(usb_so + ".repack_tmp"):
                 try:
                     os.remove(usb_so + ".repack_tmp")
@@ -2193,7 +2285,10 @@ def _repack_modified_cc_assets(assets_dir):
                 os.replace(tmp, cgc_so)
             elif os.path.exists(tmp):
                 os.remove(tmp)
-        except Exception:
+        except Exception as e:
+            if log:
+                log(f"  Could not rebuild ccdata/cgc.so from {ART_SUBDIR}/ "
+                    f"({e}); its pictures stay as they were.", "warning")
             if os.path.exists(cgc_so + ".repack_tmp"):
                 try:
                     os.remove(cgc_so + ".repack_tmp")

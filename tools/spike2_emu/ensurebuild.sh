@@ -764,9 +764,21 @@ pad_ensure_guest_exec() {
             echo "[guest] restart. It lists what it will change before it changes it." >&2
             echo "[guest] By hand instead:" >&2
         fi
-        echo "[guest] Now:  $(_pad_binfmt_advice)" >&2
-        echo "[guest] Keep: put   [boot]   and   systemd=true   in /etc/wsl.conf," >&2
-        echo "[guest]       then wsl --shutdown once." >&2
+        # IN THE MAC'S BOX (PAD-884) none of that is the answer: the table is
+        # the container engine's, and padbox.sh registers the handler in it
+        # before every run. Reaching here means that step said why it could
+        # not, a few lines up.
+        if [ -f /.dockerenv ]; then
+            echo "[guest] This is the Mac's container: the handler is registered" >&2
+            echo "[guest] in the container engine before every run, and that step" >&2
+            echo "[guest] failed - its reason is a few lines above." >&2
+        else
+            echo "[guest] Now:  $(_pad_binfmt_advice)" >&2
+            if [ "${IS_WSL:-0}" = 1 ]; then
+                echo "[guest] Keep: put   [boot]   and   systemd=true   in /etc/wsl.conf," >&2
+                echo "[guest]       then wsl --shutdown once." >&2
+            fi
+        fi
         return 1
     fi
     if [ "$(head -1 "$entry" 2>/dev/null)" = disabled ]; then

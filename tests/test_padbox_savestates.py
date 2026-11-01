@@ -55,8 +55,10 @@ def _box(*args, **env):
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          timeout=60)
     text = out.stdout.decode("utf-8", "replace")
+    # binfmt.sh's throwaway box (PAD-884) is not the run; test_padbox_binfmt.py
     return out.returncode, [ln for ln in text.splitlines()
-                            if ln.startswith("DOCKER ")], text
+                            if ln.startswith("DOCKER ")
+                            and "binfmt.sh" not in ln], text
 
 
 def _one(calls, verb):

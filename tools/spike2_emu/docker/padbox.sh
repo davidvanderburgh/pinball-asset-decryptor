@@ -450,6 +450,25 @@ host_player() {
     echo "[box]   brew install ffmpeg   (the same package the app's previews use)" >&2
 }
 
+# THE ENGINE HAS TO RUN 32-BIT ARM (PAD-884), and colima's does not out of the
+# box (Docker Desktop's does). binfmt.sh registers the image's own qemu handler
+# in the engine's Linux when none is there, and says nothing when one is. A
+# failure is said and the run goes on: the guest check in the box then names
+# exactly what is missing.
+if [ "${1:-}" = watch.sh ]; then
+    bf=$(docker run --rm --privileged -v "$RIG:/pad/rig:ro" \
+             --entrypoint /bin/bash "$IMAGE" /pad/rig/docker/binfmt.sh 2>&1)
+    # its own last line is the answer; anything docker printed comes before it
+    case "$(printf '%s\n' "$bf" | tail -n 1)" in
+        "binfmt: present"*) ;;
+        "binfmt: registered"*|"binfmt: enabled"*)
+            echo "[box] this container engine could not run 32-bit ARM programs (the"
+            echo "[box] game is one); registered the image's qemu handler for it" ;;
+        *)  echo "[box] could not check this container engine's 32-bit ARM support:" >&2
+            printf '%s\n' "$bf" | sed 's/^/[box]   /' >&2 ;;
+    esac
+fi
+
 echo "[box] starting; the picture appears at vnc://:$PAD_VNC_PASSWD@localhost:$PORT"
 echo "[box] on macOS: open 'vnc://:$PAD_VNC_PASSWD@localhost:$PORT'   (Screen Sharing; VNC password: $PAD_VNC_PASSWD)"
 # NOT exec'd any more: the run has a Mac-side child now, and something has to

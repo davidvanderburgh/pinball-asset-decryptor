@@ -37,6 +37,12 @@ def mac(monkeypatch, tmp_path):
     monkeypatch.setattr(D, "cache_root", lambda: str(tmp_path / "cache"))
     monkeypatch.setattr(D, "_STAGED", set())
     monkeypatch.setattr(D, "_PREVIEW_REFUSED", set())
+    # the build streams through its own Popen; route it to whatever _docker
+    # fake the test installs, so no test here ever runs a real docker build
+    def build(args, on_line, timeout):
+        r = D._docker(args, timeout=timeout)
+        return r.returncode, (r.stderr or r.stdout or "")
+    monkeypatch.setattr(D, "_docker_build", build)
     os.makedirs(str(tmp_path / "cache"), exist_ok=True)
     return tmp_path
 
@@ -987,12 +993,21 @@ class _Panel:
     def _start_worker(self, *a):
         self.started.append(a)
 
+    def _phase_cancelled(self):
+        self.written.append("cancelled")
+
+    def _phase_fn(self, index, total=None, status=None):
+        self.written.append("status: %s" % status)
+
+    def _phase_done(self, rc, failed):
+        self.written.append("status: %s failed" % failed)
+
 
 def _panel_run(monkeypatch, times, answer, shared_ok=True):
     """A build whose first *times* container checks say the ISO folder is
     unseen, the user answering *answer* to the offer."""
     p = _Panel()
-    for name in ("_run_commands", "_share_and_retry"):
+    for name in ("_run_commands", "_share_and_retry", "_prepare_container"):
         monkeypatch.setattr(_Panel, name, getattr(mt.MultibootPanel, name),
                             raising=False)
     monkeypatch.setattr(D, "enabled", lambda: True)
@@ -1069,3 +1084,145 @@ def test_the_config_is_found_where_colima_keeps_it(monkeypatch, tmp_path):
     monkeypatch.setenv("COLIMA_HOME", str(tmp_path / "ch"))
     assert E.colima_profile_dir() == os.path.join(str(tmp_path / "ch"),
                                                   "default")
+
+
+# ------------------------------------------- the build is a worker's (PAD-911)
+
+_real_docker_build = D._docker_build
+
+
+def _held_panel(monkeypatch, ensure):
+    """A Build press whose worker thread is HELD, not run: what the main
+    thread has done by the time the button handler returns."""
+    p = _Panel()
+    for name in ("_run_commands", "_share_and_retry", "_prepare_container"):
+        monkeypatch.setattr(_Panel, name, getattr(mt.MultibootPanel, name),
+                            raising=False)
+    monkeypatch.setattr(D, "enabled", lambda: True)
+    monkeypatch.setattr(D, "ensure_container", ensure)
+    threads = []
+
+    class _T:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            threads.append(self.target)
+    monkeypatch.setattr(mt.threading, "Thread", _T)
+    return p, threads
+
+
+def test_build_press_does_not_build_the_image_on_the_main_thread(monkeypatch):
+    """THE BUG (PAD-911).  The reporter's log: three "could not build the
+    Linux toolbox image ... CANCELED ... context canceled", each a few
+    seconds before the app opened again.  ensure_container ran from the
+    button handler, so the minutes of `docker build` froze the window, and
+    quitting it cancelled the build.  The press now only greys the tab and
+    hands the build to a worker."""
+    seen = []
+    p, threads = _held_panel(
+        monkeypatch, lambda paths, repo, log=None: seen.append(paths))
+    assert p._run_commands([("build", ["true"])]) is True
+    assert seen == [] and p.started == []          # nothing ran yet
+    assert p._busy and len(threads) == 1           # busy: actions greyed
+    threads.pop()()                                # the worker
+    assert seen == [[ISO0]] and len(p.started) == 1 and not p.errors
+
+
+def test_a_second_press_while_the_image_builds_is_refused(monkeypatch):
+    p, threads = _held_panel(monkeypatch, lambda *a, **k: None)
+    p._run_commands([("build", ["true"])])
+    assert p._run_commands([("build", ["true"])]) is False
+    assert p.errors == ["A run is already in progress."] and len(threads) == 1
+
+
+def test_a_failed_image_build_says_so_and_frees_the_tab(monkeypatch):
+    def ensure(paths, repo, log=None):
+        raise RuntimeError("could not build the Linux toolbox image:\nboom")
+    p, threads = _held_panel(monkeypatch, ensure)
+    p._run_commands([("build", ["true"])])
+    threads.pop()()
+    assert not p._busy and not p.started
+    assert p.errors and "could not build" in p.errors[0]
+
+
+def test_cancel_during_the_image_build_stops_it_and_runs_nothing(monkeypatch):
+    killed = []
+    monkeypatch.setattr(D, "cancel_build", lambda: killed.append(1) or True)
+    monkeypatch.setattr(D, "kill_running", lambda: None)
+
+    def ensure(paths, repo, log=None):
+        raise RuntimeError("could not build the Linux toolbox image:\n"
+                           "Canceled: context canceled")
+    p, threads = _held_panel(monkeypatch, ensure)
+    p._proc = None
+    p._proc_preview = False
+    p._pending_run = None
+    p._ok = p._write
+    p._sync_build_button = lambda: None
+    p._phase_fn = lambda *a, **k: None
+    p._run_commands([("build", ["true"])])
+    assert mt.MultibootPanel.cancel_run(p) is True
+    assert killed == [1]
+    threads.pop()()
+    assert not p._busy and not p.started and not p.errors
+    assert p.written[-1] == "cancelled"
+
+
+class _Proc:
+    """A `docker build` client: prints *lines*, then exits *rc*."""
+
+    def __init__(self, lines, rc=0):
+        self.stdout = iter(line + "\n" for line in lines)
+        self.rc, self.killed = rc, False
+
+    def wait(self):
+        return self.rc
+
+    def kill(self):
+        self.killed = True
+
+
+def test_the_build_streams_and_says_it_is_still_going(mac, monkeypatch):
+    """Minutes of a silent Log read as a hung app.  The build's own lines
+    are read as they come, and every BUILD_HEARTBEAT seconds the Log says
+    it is still going and the step it is on."""
+    monkeypatch.setattr(D, "_image_field", lambda f: "")
+    clock = iter([0, 5, 31, 40, 70, 75])
+    monkeypatch.setattr(D.time, "monotonic", lambda: next(clock))
+    lines = ["#5 1.0 Get:1 http://deb.debian.org/debian bookworm/main gzip",
+             "#5 30.9 Get:287 qemu-user-static [62.6 MB]",
+             "#5 40.0 Unpacking ffmpeg",
+             "#5 69.0 Setting up ffmpeg"]
+    proc = _Proc(lines)
+    monkeypatch.setattr(D, "_docker_build", _real_docker_build)
+    monkeypatch.setattr(D.subprocess, "Popen", lambda *a, **k: proc)
+    log = []
+    D.ensure_image(log=log.append)
+    still = [line for line in log if "still building" in line]
+    assert len(still) == 2, log
+    assert "qemu-user-static" in still[0] and "(31s)" in still[0]
+    assert "Setting up ffmpeg" in still[1] and "1m 10s" in still[1]
+    assert "is built (1m 15s)" in log[-1]
+    assert D._BUILD["proc"] is None                 # nothing left to cancel
+
+
+def test_a_failed_build_carries_its_last_lines(mac, monkeypatch):
+    monkeypatch.setattr(D, "_image_field", lambda f: "")
+    monkeypatch.setattr(D, "_docker_build", _real_docker_build)
+    monkeypatch.setattr(D.subprocess, "Popen", lambda *a, **k: _Proc(
+        ["#5 CANCELED", "ERROR: failed to build: failed to solve: Canceled"],
+        rc=1))
+    with pytest.raises(RuntimeError) as e:
+        D.ensure_image()
+    assert "failed to solve" in str(e.value)
+
+
+def test_cancel_build_kills_the_client(monkeypatch):
+    """Killing the client is what stops a BuildKit build - the reporter's
+    "context canceled" is exactly that happening by accident."""
+    proc = _Proc([])
+    monkeypatch.setitem(D._BUILD, "proc", proc)
+    assert D.cancel_build() is True and proc.killed
+    monkeypatch.setitem(D._BUILD, "proc", None)
+    assert D.cancel_build() is False

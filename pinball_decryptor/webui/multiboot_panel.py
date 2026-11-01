@@ -1501,13 +1501,13 @@ class WebMultibootPanel(_Base):
 
     # -- the rig switch (tests, captures) ---------------------------------
     def _run_commands(self, cmds, on_step=None, on_done=None, quiet=(),
-                      preview=False, on_tick=None):
+                      preview=False, on_tick=None, _ready=False):
         if no_rig():
             if not preview:
                 self._error(NO_RIG_TEXT)
             return False
         return super()._run_commands(cmds, on_step, on_done, quiet, preview,
-                                     on_tick)
+                                     on_tick, _ready)
 
     def load_from_card(self, device_path, drive, whole=False):
         if no_rig():

@@ -32,6 +32,7 @@
 # Switches: sw.py.  Picture: shot.sh.  Stop: killgame.sh.
 set -u
 . "$(dirname "$0")/spkpath.sh"
+ARGS=("$@")             # a start again on the CPU runs this script again
 BUILD=${1:-}; shift 2>/dev/null || true
 VISIBLE=0; AUDIO=0
 while [ $# -gt 0 ]; do
@@ -169,16 +170,21 @@ fi
 # drew the game at a crawl on the desktop.  WSL gives Linux the Windows GPU
 # (/dev/dxg + /usr/lib/wsl/lib/libd3d12.so) and Mesa's d3d12 driver renders
 # OpenGL on it - on WSLg's desktop and on a hidden Xvfb alike.  SPK_GL=
-# llvmpipe forces the CPU (a machine without a usable GPU does that anyway:
-# Mesa falls back).  The frame rate: Mesa's HUD samples it, draws nothing
-# (GALLIUM_HUD_VISIBLE=false) and appends it to $SPK_RIG/hud/fps; status.sh
-# reports the latest.
+# llvmpipe forces the CPU.  Mesa does NOT fall back by itself: with d3d12
+# named and a GPU it cannot use, every GL context is refused ("glx: failed
+# to create drisw screen", X_GLXCreateContext BadValue) and the game dies
+# before attract - so a start that died that way runs again on llvmpipe
+# (PAD-917, the end of this script).  The frame rate: Mesa's HUD samples
+# it, draws nothing (GALLIUM_HUD_VISIBLE=false) and appends it to
+# $SPK_RIG/hud/fps; status.sh reports the latest.
 GL=${SPK_GL:-auto}
 if [ "$GL" = auto ]; then
     GL=llvmpipe
     [ -e /dev/dxg ] && [ -e /usr/lib/wsl/lib/libd3d12.so ] && GL=d3d12
 fi
 echo "$GL" > "$SPK_RIG/gl"
+# What a refused GL context leaves in the logs (Mesa/X for Unity, Godot's own).
+SPK_GL_REFUSED='glx: failed|X_GLXCreateContext|libGL error|Unable to create .*context|Your video card drivers seem not to support'
 mkdir -p "$SPK_RIG/hud"; chown "$SPK_USER": "$SPK_RIG/hud"
 GL_ENV="GALLIUM_DRIVER=$GL GALLIUM_HUD=fps GALLIUM_HUD_VISIBLE=false GALLIUM_HUD_PERIOD=1 GALLIUM_HUD_DUMP_DIR=$SPK_RIG/hud"
 # libd3d12 lives in /usr/lib/wsl/lib; it joins $LIBS (a Godot title's
@@ -242,6 +248,15 @@ if spk_game_alive && spk_attract; then
             --skip "$(tget own_keys 2>/dev/null)" \
             < /dev/null > "$SPK_RIG/gamekeys.log" 2>&1
     fi
+elif [ "$GL" = d3d12 ] && [ "${SPK_GL:-auto}" = auto ] && ! spk_game_alive &&
+     grep -qsE "$SPK_GL_REFUSED" "$SPK_RIG/player.log" "$SPK_RIG/game.out"; then
+    # The GPU path refused a GL context (PAD-917: Evil Dead and Ultraman on
+    # a PC whose d3d12 would not start, every start "exit 6").  The GPU is
+    # only faster; the CPU still plays.  Once: SPK_GL=llvmpipe is no "auto".
+    echo "run_game.sh: the GPU renderer (d3d12) would not start on this PC; starting again on the CPU (llvmpipe):" >&2
+    grep -hsE "$SPK_GL_REFUSED" "$SPK_RIG/player.log" "$SPK_RIG/game.out" | head -n 3 >&2
+    bash "$SPK_TOOLS/killgame.sh" >/dev/null 2>&1
+    SPK_GL=llvmpipe exec bash "$SPK_TOOLS/run_game.sh" "${ARGS[@]}"
 else
     echo "run_game.sh: the game did not reach attract:" >&2
     # each log on its own: `tail -20 a b` is refused outright ("option used

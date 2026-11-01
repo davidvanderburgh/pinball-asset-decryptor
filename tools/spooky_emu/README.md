@@ -265,8 +265,10 @@ the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
   hidden Xvfb alike (`run_game.sh` picks it whenever WSL offers it). Beetlejuice's
   attract measured 52-65 fps hidden at 1920x1080 and 66-80 fps in the
   1280x720 desktop window, ~170% CPU (2026-09-30, an AMD Radeon iGPU);
-  Mesa's llvmpipe (the old default, and the fallback where WSL has no GPU;
-  `SPK_GL=llvmpipe` forces it) managed 5.5-7.8 fps on ~500% CPU. All seven
+  Mesa's llvmpipe (the old default, and the fallback where WSL has no GPU
+  or its d3d12 refuses a GL context - a start that died on "glx: failed to
+  create drisw screen" runs again on it, PAD-917; `SPK_GL=llvmpipe` forces
+  it) managed 5.5-7.8 fps on ~500% CPU. All seven
   on d3d12, hidden at 1920x1080 (PAD-321, 2026-10-02): Beetlejuice 55-60
   fps in play, Scooby-Doo 105-120, Looney Tunes 240+ (127% CPU); Texas
   Chainsaw, Evil Dead, Halloween and Ultraman hold themselves at 30 fps

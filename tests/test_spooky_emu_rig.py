@@ -753,6 +753,51 @@ def test_a_failed_start_shows_the_games_last_words():
     assert "game.out" in src.split("did not reach attract", 1)[1]
 
 
+# ------------------------------- the GPU refused a GL context (PAD-917)
+#: Evil Dead 2026.10.30 and Ultraman on a PC whose d3d12 would not start:
+#: every start died here, "start failed (exit 6)".
+REFUSED_LOG = """\
+Display 0 'rdp-0': 1920x1080 (primary device).
+Desktop is 1920 x 1080 @ 60 Hz
+Dropped Escape call with ulEscapeCode : 0x03007703
+glx: failed to create drisw screen
+X Error of failed request:  BadValue (integer parameter out of range for operation)
+  Major opcode of failed request:  149 (GLX)
+  Minor opcode of failed request:  3 (X_GLXCreateContext)
+"""
+
+
+def _gl_refused_pattern():
+    src = (RIG / "run_game.sh").read_text()
+    return re.search(r"^SPK_GL_REFUSED='([^']+)'", src, re.M).group(1)
+
+
+def test_a_refused_gl_context_is_recognised_and_a_working_gpu_is_not():
+    """The pattern catches the report's lines, and none of the lines a
+    d3d12 start that works prints too (the "Dropped Escape" noise)."""
+    pat = re.compile(_gl_refused_pattern())
+    hits = [ln for ln in REFUSED_LOG.splitlines() if pat.search(ln)]
+    assert "glx: failed to create drisw screen" in hits
+    assert not any(pat.search(ln) for ln in REFUSED_LOG.splitlines()[:3])
+
+
+def test_a_start_the_gpu_refused_runs_again_on_the_cpu():
+    """Mesa does not fall back from a named d3d12 by itself; run_game.sh
+    starts the game once more on llvmpipe, and only then gives up.  Order is
+    what would break: the retry before the give-up, only for an automatic
+    d3d12 choice, and the re-run forced to llvmpipe so it cannot loop."""
+    src = (RIG / "run_game.sh").read_text()
+    code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
+    assert code.index('ARGS=("$@")') < code.index("shift 2>/dev/null")
+    retry = code.index('elif [ "$GL" = d3d12 ] && [ "${SPK_GL:-auto}" = auto ]')
+    assert code.index("SPK_GL_REFUSED=") < retry
+    assert retry < code.index("did not reach attract")
+    block = code[retry:code.index("did not reach attract")]
+    assert "! spk_game_alive" in block and '"$SPK_RIG/player.log"' in block
+    assert 'killgame.sh' in block
+    assert 'SPK_GL=llvmpipe exec bash "$SPK_TOOLS/run_game.sh" "${ARGS[@]}"' in block
+
+
 def test_the_game_window_gets_the_playfield_keys_but_not_the_games_own():
     """PAD-313: run_game.sh starts the shared game-window key listener on
     the desktop, and Beetlejuice's own desktop keys stay the game's."""

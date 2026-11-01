@@ -378,6 +378,16 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   it on the playfield whatever surface the clone sat on; the switches map
   names it like any table object (`PadCarHit`: the band in front of the car's
   nose, CAR HIT OPTO).
+* **A magnet the table has no object for** (PAD-925). drhotwing's Rush has
+  no time machine magnet: the game holds MAGNET ~4.1 s after each LIFT RAMP
+  OPTO (emulator), while the tribute's ball ran up Ramp011 and straight back
+  down. A retrofit trigger can sit on a ramp (`surface`; on the playfield a
+  ball 80 units up the ramp never meets it) with a `radius`, the reach
+  core.vbs's cvpmMagnet takes from it. `PadTMMagnet` is one on Ramp011's top,
+  made a cvpmMagnet in `extra_vbs` that the coil turns on and off. Its own Hit
+  sub takes most of a ball's speed as it comes into a live magnet's field:
+  cvpmMagnet grabs only inside 20 units, at its 10 ms update, and a fast ball
+  crossed that window between two updates.
 * **A scoop the ball passes an opto into** (PAD-910). Rush's side scoop is
   SIDE SCOOP OPTO on the way in and LOWER SIDE SCOOP where the ball rests;
   the game fires SIDE SCOOP only from the lower one. The saucer held the

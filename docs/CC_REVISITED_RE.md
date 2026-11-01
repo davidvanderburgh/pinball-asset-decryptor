@@ -288,8 +288,13 @@ of `(byte, index)` → portable to pure Python with no Unicorn dependency.
   re-extracts silent, others preserved.
 - **new audio** ([cc_usb_audio.py](../pinball_decryptor/plugins/cgc/cc_usb_audio.py)):
   `_dcs_encrypt` is the exact inverse (un-prefix-sum → XOR → un-shuffle); `encrypt(decrypt(file))
-  == file` verified byte-exact. Repack splices edited PCM (trimmed/padded to the record's original
-  length, so the size-check word stays valid) and re-encrypts.
+  == file` verified byte-exact. Repack puts edited PCM back at its OWN length (PAD-919): payloads
+  after it move, the record's `data_off` / `frames` (@+0x48, `ceil(samples / 368.64)`, what
+  `dcs_subc01_0181` plays for) / `decoded_len` / `sample_count` and the header's size word
+  (`hdr[8]^hdr[0xc]`) are rewritten, then it re-encrypts. `dcs_load_samplefile` mallocs the file's
+  own size, so a longer bank loads (proven under Unicorn with pin's own loader + sample-start
+  code). The card's game partition is the limit: cc113 ships 37 MB free, so Write lets the bank
+  grow while 16 MB stays free and otherwise fits every sound to its stock slot (the old behaviour).
 - **art** ([cc_art.py](../pinball_decryptor/plugins/cgc/cc_art.py)): `cgc_reobfuscate` = inverse
   (conditional `ROR8(,3)` → XOR); edits detected in rendered-RGBA space (RGB565→RGBA isn't
   idempotent, so untouched images keep exact bytes), re-encoded to RGB565 into the `newimg`

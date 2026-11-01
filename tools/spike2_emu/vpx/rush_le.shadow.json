@@ -11,6 +11,7 @@
     "reading): an older table of this title numbered every switch one higher and",
     "pressed Tournament Start for Start.",
     "quiet_subs: the tribute's own light shows and its GI timer (GIUpdateTimer_Timer turns GI off by ball count); orig_hits false: its hit subs stay out of the way once the machine lights the table.",
+    "tm2 is the time machine: the shot the game starts modes and multiballs on is LIFT RAMP OPTO (82), where its TimeMachineMagnet grabs the ball (PAD-420). It counts on the way up only, as the tribute did; LL3 (the VUK lane, its own VUK switch is Kicker3) no longer stands in for it (PAD-907).",
     "b2s_name: the script's cGameName is \"rushle\", but the DOF Config Tool lists the table as rush_le, and B2S.Server hands DOF that name (PAD-847)."
   ],
   "title": "rush_le",
@@ -53,13 +54,13 @@
     "SpinnerDrax": {"id": 83, "event": "spin", "name": "SPINNER"},
     "LL1": {"id": 88, "event": "hit", "name": "LEFT ORBIT (GUESS)"},
     "LL2": {"id": 89, "event": "hit", "name": "INNER LOOP (GUESS)"},
-    "LL3": {"id": 82, "event": "hit", "name": "LIFT RAMP OPTO (GUESS)"},
     "LL4": {"id": 84, "event": "hit", "name": "RIGHT ORBIT (GUESS)"},
     "LL5": {"id": 81, "event": "hit", "name": "RIGHT RAMP EXIT OPTO (GUESS)"},
     "LeftRampTrigger": {"id": 80, "event": "hit", "name": "LEFT RAMP ENTER"},
     "LeftRampTrigger001": {"id": 87, "event": "hit", "name": "L RAMP EXIT OPTO (GUESS)"},
     "RightRampTrigger": {"id": 86, "event": "hit", "name": "R RAMP ENTER OPTO"},
-    "sw20": {"id": 52, "event": "hit", "name": "SKILL SHOT (GUESS)"}
+    "sw20": {"id": 52, "event": "hit", "name": "SKILL SHOT (GUESS)"},
+    "tm2": {"id": 82, "event": "hit", "up": true, "name": "LIFT RAMP OPTO (the time machine shot)"}
   },
   "plunger": {"lane_trigger": "Trigger1", "lane_switch": 67, "autoplunge": "plungerIM"},
   "trough": {"release": "BallRelease", "drain": "Drain", "switches": [76, 75, 74, 73, 72, 71, 77], "balls": 6, "kick": [90, 4]},

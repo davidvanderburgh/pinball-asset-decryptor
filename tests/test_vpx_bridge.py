@@ -344,6 +344,8 @@ def test_shadow_spinner_as_an_opto_pulses_once_a_pass(tmp_path):
     assert r.stdout.split() == ["1083@1000", "1083@2140", "1056@2400"], r.stdout + r.stderr
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
 def test_shadow_up_only_opto_pulses_on_the_way_up(tmp_path):
     # PAD-907: Rush's time machine (tm2) is LIFT RAMP OPTO; the tribute's ball
     # rolls back down over it, which the machine's magnet would have kept.

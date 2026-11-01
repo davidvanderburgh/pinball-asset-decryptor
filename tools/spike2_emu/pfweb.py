@@ -24,8 +24,11 @@ THE WINDOW, best first, and each rung is a property of the machine:
   4. The system browser, as a tab. The window still works; it just looks
      like a web page.
 
-PAD_PF_WINDOW=webview|gtk|app|browser forces one rung (for testing a rung on
-a machine that would pick a higher one).
+A rung that fails before its window is up falls to the next (PAD-924: a PC
+whose .NET will not load imports pywebview fine and fails in start()).
+
+PAD_PF_WINDOW=webview|gtk|app|browser puts one rung first (for testing a rung
+on a machine that would pick a higher one).
 
 The page talks back over the same server: GET /state for a full snapshot,
 /events for the change stream (Server-Sent Events, numbered, with a long-poll
@@ -151,6 +154,7 @@ class WebHost:
         self.backend = None
         self._pending = []              # windows asked for before run()
         self._ready = False
+        self._quitting = False
         self._plock = threading.Lock()
 
     # ---- lifecycle -------------------------------------------------------
@@ -329,9 +333,37 @@ class WebHost:
 
         `main` is a dict: page, title, width, height, x, y. `on_close` runs
         on the way out, whatever closed the window - the user, quit(), or the
-        window's process dying."""
-        self.backend = pick_backend(self)
-        self.backend.run(main, on_close, self._flush)
+        window's process dying.
+
+        PAD-924: a rung that fails BEFORE its window is up hands over to the
+        next one instead of ending the process. pywebview imports fine on a
+        PC whose .NET will not load (netfx, then its coreclr fallback, both
+        refused), and only fails inside start() - which took the whole
+        playfield down with a traceback, when an Edge app window would have
+        done. Why it fell is printed in full (padplayfield.log) and as one
+        "pfweb: fell back" line that watch.sh carries into the run log."""
+        for cls in _ladder():
+            self.backend = cls(self)
+            final = cls is BrowserBackend
+            try:
+                self.backend.run(main, on_close if final
+                                 else self._guarded(on_close), self._flush)
+            except Exception as e:                      # noqa: BLE001
+                if final or self._ready or self._quitting:
+                    raise
+                _fell_back(cls, e)
+                continue
+            if final or self._ready or self._quitting:
+                return
+            _fell_back(cls, None)
+
+    def _guarded(self, on_close):
+        """on_close for a rung that may yet fall: a rung that ends before
+        its window was ever up is not the user closing it."""
+        def _cb():
+            if self._ready or self._quitting:
+                on_close()
+        return _cb
 
     def _flush(self):
         """The window system is up: open whatever was asked for before it
@@ -367,6 +399,7 @@ class WebHost:
         return None
 
     def quit(self):
+        self._quitting = True
         if self.backend is not None:
             self.backend.quit()
 
@@ -399,14 +432,58 @@ def screen_size():
 # ---------------------------------------------------------------------------
 # window backends
 # ---------------------------------------------------------------------------
-def pick_backend(host):
+def _ladder():
+    """The window backends this machine offers, best first (PAD_PF_WINDOW's
+    rung ahead of the rest), always ending with the system browser. Lazy:
+    a rung is only probed once the ones above it have failed."""
     want = (os.environ.get("PAD_PF_WINDOW") or "").strip().lower()
     order = ([want] if want else []) + ["webview", "gtk", "app", "browser"]
+    seen = set()
     for name in order:
         cls = BACKENDS.get(name)
-        if cls is not None and cls.available():
-            return cls(host)
-    return BrowserBackend(host)
+        if cls is None or cls in seen:
+            continue
+        seen.add(cls)
+        if cls is BrowserBackend or cls.available():
+            yield cls
+        if cls is BrowserBackend:
+            return
+
+
+def pick_backend(host):
+    return next(_ladder())(host)
+
+
+def _why(exc):
+    """One line for an exception and everything it was raised from or while
+    handling - pythonnet's coreclr error alone says nothing; the netfx error
+    under it is the reason."""
+    parts, seen = [], set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        text = " ".join(str(exc).split())
+        if len(text) > 160:
+            text = text[:157] + "..."
+        if any(text in p for p in parts):
+            # pywebview's own retry fails the same way twice over
+            exc = exc.__cause__ or exc.__context__
+            continue
+        parts.append("%s: %s" % (type(exc).__name__, text) if text
+                     else type(exc).__name__)
+        exc = exc.__cause__ or exc.__context__
+    return " <- ".join(parts)
+
+
+def _fell_back(cls, exc):
+    """Say that a rung could not open the window, and why: the traceback in
+    full for padplayfield.log, then the line watch.sh relays."""
+    if exc is not None:
+        import traceback
+        traceback.print_exception(type(exc), exc, exc.__traceback__,
+                                  file=sys.stdout)
+    print("pfweb: fell back from %s: %s" % (
+        cls.__name__, _why(exc) if exc is not None
+        else "it ended before its window was up"), flush=True)
 
 
 class _Base:

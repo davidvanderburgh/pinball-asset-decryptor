@@ -2932,7 +2932,13 @@ if [ "${PF_LAUNCHED:-0}" = 1 ]; then
         (
             _i=0; _n=$(( ${PAD_PF_WAIT:-60} * 2 ))
             while [ "$_i" -lt "$_n" ]; do
-                grep -aq '^pfweb: window up' "$PFLOG" 2>/dev/null && exit 0
+                if grep -aq '^pfweb: window up' "$PFLOG" 2>/dev/null; then
+                    # PAD-924: up, but on a lower rung than its own window
+                    # (pywebview's .NET would not load) - say which and why
+                    grep -a '^pfweb: fell back' "$PFLOG" | head -3 |
+                        sed 's/^pfweb: /[watch] playfield window /'
+                    exit 0
+                fi
                 pf_up || break
                 sleep 0.5
                 _i=$((_i + 1))

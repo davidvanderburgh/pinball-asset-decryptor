@@ -436,7 +436,9 @@ test("the tracker moves a report along the app's board, and hears when the app l
   // not yet asked: the push hears seen_at 0
   let r = await admin(e, "/v1/admin/reports/" + a.id + "/stage", { stage: "working", ticket: "PAD-914", progress: 45 });
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { ok: true, id: a.id, stage: "working", seen_at: 0 });
+  const first = await r.json();
+  assert.deepEqual([first.ok, first.id, first.stage, first.seen_at], [true, a.id, "working", 0]);
+  assert.ok(first.at > 0, "the push answers with the Worker's own clock");
   let [, out] = await get(e, "/v1/report/status?ids=" + a.id + "," + b.id, hdr);
   assert.deepEqual([out.rows[0].stage, out.rows[0].ticket, out.rows[0].progress], ["working", "PAD-914", 45]);
   assert.deepEqual([out.rows[1].stage, out.rows[1].progress], ["", -1]);

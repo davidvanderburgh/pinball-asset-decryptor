@@ -430,7 +430,9 @@ async function reportStage(request, env, id) {
     .bind(stage, clean(body.ticket, 20), p, now, id).run();
   if (!r.meta.changes) return fail("No such report.", 404);
   const row = await env.DB.prepare("SELECT seen_at FROM reports WHERE id = ?").bind(id).first();
-  return json({ ok: true, id, stage, seen_at: (row && row.seen_at) || 0 });
+  // `at` is this Worker's clock, which seen_at is on too: the tracker
+  // compares the two, never its own clock with ours
+  return json({ ok: true, id, stage, seen_at: (row && row.seen_at) || 0, at: now });
 }
 
 // the app asking after the reports it sent (ids it was answered, up to 20)

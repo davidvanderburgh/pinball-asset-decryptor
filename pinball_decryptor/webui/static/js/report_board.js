@@ -35,7 +35,7 @@
 .prb-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; background: var(--ink-3, #888); }
 .prb-col[data-stage="queued"] .prb-dot { background: var(--info, #6aa0d8); }
 .prb-col[data-stage="working"] .prb-dot { background: var(--accent, #e8a33d); }
-.prb-col[data-stage="ready"] .prb-dot { background: var(--warn, #e0b34a); }
+.prb-col[data-stage="ready"] .prb-dot { background: var(--cp-ink, #b98ae0); }
 .prb-col[data-stage="done"] .prb-dot { background: var(--ok, #6fc07a); }
 .prb-card { background: var(--panel, rgba(127,127,127,.12)); border: 1px solid var(--line-2, rgba(127,127,127,.35)); border-radius: 6px; padding: 7px 8px; margin-top: 6px; font-size: 12.5px; line-height: 1.35; color: var(--ink, inherit); }
 .prb-card.prb-new { border-color: var(--info, #6aa0d8); box-shadow: inset 3px 0 0 var(--info, #6aa0d8); }

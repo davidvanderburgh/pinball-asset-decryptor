@@ -84,7 +84,8 @@ def _box(where, **env):
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          timeout=60)
     text = out.stdout.decode("utf-8", "replace")
-    run = [ln for ln in text.splitlines() if ln.startswith("DOCKER run ")]
+    run = [ln for ln in text.splitlines() if ln.startswith("DOCKER run ")
+           and "binfmt.sh" not in ln]
     assert len(run) == 1, text
     return out.returncode, run[0], text
 

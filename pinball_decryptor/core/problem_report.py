@@ -120,6 +120,39 @@ def log_tail(max_lines=MAX_LOG_LINES):
     return kept
 
 
+#: Visual Pinball's controller log (tools/spike2_emu/vpx/padcontroller.py's
+#: LOG): a table's run, its DOF and its backglass are written there, never
+#: to the session log, so a Visual Pinball report carried none of it (PAD-902)
+MAX_VPX_LINES = 150
+#: a report from another tab carries it too while a table ran this recently
+VPX_RECENT_S = 2 * 3600
+#: one line per switch edge and solenoid change: the rest drowns in them
+_VPX_NOISE = re.compile(r"^\S+ (?:sol|sw) -?\d+ ->")
+
+
+def vpx_log_path():
+    return os.path.join(os.environ.get("TEMP") or os.environ.get("TMPDIR")
+                        or "/tmp", "padcontroller.log")
+
+
+def vpx_log_tail(tab="", max_lines=MAX_VPX_LINES, now=None):
+    """The controller log's last *max_lines* lines, switch and solenoid
+    edges left out, for a report from the Visual Pinball tab or one sent
+    while a table ran in the last :data:`VPX_RECENT_S`.  ``[]`` otherwise,
+    and when there is no log."""
+    path = vpx_log_path()
+    try:
+        recent = (now or time.time()) - os.path.getmtime(path) < VPX_RECENT_S
+        if tab != "Visual Pinball" and not recent:
+            return []
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return []
+    kept = [ln[:1000] for ln in lines if ln.strip() and not _VPX_NOISE.match(ln)]
+    return kept[-max_lines:]
+
+
 # --------------------------------------------------------------- the picture
 def shrink_picture(source):
     """``(jpeg_bytes, "image/jpeg")`` for *source* (a path or bytes),
@@ -212,6 +245,11 @@ def as_text(report):
     log = report.get("log") or []
     lines += ["Log (last %d lines)" % len(log), "-" * 24]
     lines += [fix(ln) for ln in log]
+    vpx = report.get("vpx_log") or []
+    if vpx:
+        lines += ["", "Visual Pinball controller log (last %d lines)" % len(vpx),
+                  "-" * 24]
+        lines += [fix(ln) for ln in vpx]
     return "\n".join(lines) + "\n"
 
 

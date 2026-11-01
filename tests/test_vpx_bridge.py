@@ -2813,3 +2813,124 @@ def test_the_backglass_hands_the_foreground_back_once_per_window(monkeypatch):
     assert b._hand_back_from(104, lcd) and b.front_done
     assert not b._hand_back_from(104, lcd)                          # once
     assert b._hand_back_from(105, "B2S Backglass Server")           # a new backglass window
+
+
+def _fake_win32com(monkeypatch, objects):
+    """win32com.client whose Dispatch knows only `objects` (name -> factory);
+    anything else fails the way an unregistered ProgID does."""
+    import types
+    client = types.ModuleType("win32com.client")
+
+    def dispatch(name):
+        if name in objects:
+            return objects[name]()
+        raise OSError(-2147221005, "Invalid class string", None, None)
+    client.Dispatch = dispatch
+    pkg = types.ModuleType("win32com")
+    pkg.client = client
+    monkeypatch.setitem(sys.modules, "win32com", pkg)
+    monkeypatch.setitem(sys.modules, "win32com.client", client)
+
+
+class _RecDOF:
+    def __init__(self, *a):
+        self.got = []
+
+    def Init(self, host, table, rom):
+        self.got.append(("init", host, rom))
+
+    def UpdateTableElement(self, kind, n, v):
+        self.got.append((kind, n, v))
+
+    def Finish(self):
+        self.got.append(("finish",))
+
+
+def test_dof_comes_up_without_its_com_registration(monkeypatch):
+    """PAD-909: DOF's per-user COM registration went missing on a cabinet
+    (every run: 'no DirectOutput.ComObject (Invalid class string)') while DOF
+    itself still worked through B2S. The class id is tried next, then DOF's
+    own DLL in a helper; with none of them DOF is off and says why."""
+    pc = pytest.importorskip("padcontroller")
+    rec = _RecDOF()
+    _fake_win32com(monkeypatch, {pc.DofHost.CLSID: lambda: rec})
+    h = pc.DofHost("mtl_180h", "", dlls=[])
+    assert h.up and "class id" in h.how and rec.got == [("init", "B2SServer", "mtl_180h")]
+    h.finish()
+
+    _fake_win32com(monkeypatch, {})
+    made = []
+
+    class Proc(_RecDOF):
+        def __init__(self, dll, shell):
+            super().__init__()
+            self.where = (dll, shell)
+            made.append(self)
+    monkeypatch.setattr(pc, "_DofProcess", Proc)
+    h = pc.DofHost("mtl_180h", "t.vpx", dlls=[(r"D:\DOF\x64\DirectOutputComObject.dll", ["ps64"])])
+    assert h.up and "COM registration is missing" in h.how
+    h.send("S", 16, 1)
+    h.finish()
+    assert made[0].where == (r"D:\DOF\x64\DirectOutputComObject.dll", "ps64")
+    assert made[0].got == [("init", "B2SServer", "mtl_180h"), ("S", 16, 1), ("finish",)]
+
+    h = pc.DofHost("mtl_180h", "", dlls=[])
+    assert not h.up
+    assert "no DirectOutput.ComObject" in h.why and "Invalid class string" in h.why
+    assert "no DirectOutputComObject.dll" in h.why
+
+
+def test_dof_dll_is_found_in_every_install_layout(tmp_path):
+    pc = pytest.importorskip("padcontroller")
+    ps64, ps32 = pc._dof_shells()
+    shared = tmp_path / "Direct Output"
+    for sub in ("x64", "x86"):
+        (shared / sub).mkdir(parents=True)
+        (shared / sub / pc.DOF_DLL).write_bytes(b"")
+    flat = tmp_path / "old"
+    flat.mkdir()
+    (flat / pc.DOF_DLL).write_bytes(b"")
+    got = pc.dof_dll_candidates([str(shared), str(shared / "x64"), "", str(flat),
+                                 str(tmp_path / "none")])
+    assert got == [(str(shared / "x64" / pc.DOF_DLL), [ps64]),
+                   (str(shared / "x86" / pc.DOF_DLL), [ps32]),
+                   (str(flat / pc.DOF_DLL), [ps64, ps32])]
+
+
+STANDIN_DOF = r"""
+namespace DirectOutputCom {
+  public class ComObject {
+    void Say(string s) { System.IO.File.AppendAllText(System.Environment.GetEnvironmentVariable("PAD_TEST_DOF_OUT"), s + "\n"); }
+    public void Init(string host, string table, string rom) { Say("init " + host + " " + rom + " " + System.IO.Directory.GetCurrentDirectory()); }
+    public void UpdateTableElement(string kind, int n, int v) { Say(kind + n + "=" + v); }
+    public void Finish() { Say("finish"); }
+  }
+}
+"""
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows PowerShell")
+def test_dof_helper_loads_dofs_own_dll(tmp_path, monkeypatch):
+    """The helper for real: a stand-in DirectOutputComObject.dll in a shared
+    install's x64 folder, loaded by path with nothing registered."""
+    import subprocess
+    pc = pytest.importorskip("padcontroller")
+    dof = tmp_path / "Direct Output"
+    (dof / "x64").mkdir(parents=True)
+    src = tmp_path / "standin.cs"
+    src.write_text(STANDIN_DOF)
+    dll = dof / "x64" / pc.DOF_DLL
+    subprocess.run([pc._dof_shells()[0], "-NoProfile", "-NonInteractive", "-Command",
+                    "Add-Type -Path '%s' -OutputAssembly '%s' -OutputType Library" % (src, dll)],
+                   check=True, timeout=120)
+    out = tmp_path / "said.txt"
+    monkeypatch.setenv("PAD_TEST_DOF_OUT", str(out))
+    _fake_win32com(monkeypatch, {})
+    h = pc.DofHost("mtl_180h", "", dlls=pc.dof_dll_candidates([str(dof)]))
+    assert h.up, h.why
+    for ev in (("S", 16, 1), ("S", 16, 0), ("L", 17, 1)):
+        h.send(*ev)
+    h.finish()
+    said = out.read_text().splitlines()
+    assert said[0] == "init B2SServer mtl_180h %s" % dof        # DOF's log lands in its main folder
+    assert said[1:] == ["S16=1", "S16=0", "L17=1", "finish"]

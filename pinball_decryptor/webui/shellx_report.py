@@ -162,9 +162,15 @@ class ReportMixin:
         return facts
 
     def _report_record(self, text, name, hide_paths):
+        tab = ""
+        try:
+            tab = self.window.current_tab_key()
+        except Exception:                               # noqa: BLE001
+            pass
         return {"app_version": __version__, "platform": sys.platform,
                 "facts": self._report_facts(),
                 "log": problem_report.log_tail(),
+                "vpx_log": problem_report.vpx_log_tail(tab),
                 "text": text or "", "name": name or "",
                 "hide_paths": bool(hide_paths),
                 "picture": self._rep_picture, "at": time.time()}

@@ -371,6 +371,12 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   entry kicker takes the ball in (`AddBall`), and the machine's coil kicks it
   out of the exit, where the table's own timer did. With a `stack`, a full lane
   sends the ball out of the exit too.
+* **A scoop the ball passes an opto into** (PAD-910). Rush's side scoop is
+  SIDE SCOOP OPTO on the way in and LOWER SIDE SCOOP where the ball rests;
+  the game fires SIDE SCOOP only from the lower one. The saucer held the
+  opto: the game held its trough lock and waited, the ball sat until a ball
+  search, and the opto read stuck. A saucer's `enter` is the opto: the
+  kicker pulses it as the ball comes in and holds `switch`.
 * **Use the RIG's switch table.** The first Rush map came from an older
   reading of the title that numbered every switch one higher: the table
   pressed Tournament Start for Start and filled the jam opto, and the game

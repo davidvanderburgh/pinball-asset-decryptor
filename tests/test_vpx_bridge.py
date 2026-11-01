@@ -344,6 +344,49 @@ def test_shadow_spinner_as_an_opto_pulses_once_a_pass(tmp_path):
     assert r.stdout.split() == ["1083@1000", "1083@2140", "1056@2400"], r.stdout + r.stderr
 
 
+def test_shadow_up_only_opto_pulses_on_the_way_up(tmp_path):
+    # PAD-907: Rush's time machine (tm2) is LIFT RAMP OPTO; the tribute's ball
+    # rolls back down over it, which the machine's magnet would have kept.
+    # One pulse a shot, on the way up. Run for real under VBScript
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["switches"]["sw001"]["up"] = True
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    lines = out.split("\n")
+    a = lines.index("Sub sw001_Hit")
+    # the pulse waits for the way up; the table's own sub runs on every hit
+    assert lines[a + 1:a + 4] == ["\tIf ActiveBall.VelY < 0 Then vpmTimer.PulseSw 1053",
+                                  "\tsw001_Hit_orig", "End Sub"]
+    assert "Sub sw001_Hit : vpmTimer.PulseSw 1053 : sw001_Hit_orig : End Sub" in vs.patch(
+        MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))[0]
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Pulses",
+        "Class FakeTimer : Public Sub PulseSw(n) : Pulses = Pulses & n & \" \" : End Sub : End Class",
+        "Class FakeBall : Public VelY : End Class",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim ActiveBall : Set ActiveBall = New FakeBall",
+        "Dim Hits : Hits = 0",
+        "Sub sw001_Hit_orig : Hits = Hits + 1 : End Sub",
+        "\n".join(lines[a:a + 4]),
+        "ActiveBall.VelY = -12 : sw001_Hit",       # up the ramp
+        "ActiveBall.VelY = 9 : sw001_Hit",         # back down over it
+        "WScript.Echo \"[\" & Pulses & \"] \" & Hits"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "[1053 ] 2", r.stdout + r.stderr
+
+
+def test_rushs_time_machine_is_the_lift_ramp_opto():
+    # PAD-907: the game starts its modes and multiballs at the time machine,
+    # LIFT RAMP OPTO (82); the tribute's time machine trigger is tm2. LL3 is
+    # the VUK lane, no longer a stand-in for it
+    m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
+    assert m["switches"]["tm2"] == {"id": 82, "event": "hit", "up": True,
+                                    "name": "LIFT RAMP OPTO (the time machine shot)"}
+    assert [k for k, v in m["switches"].items() if k != "_" and v["id"] == 82] == ["tm2"]
+
+
 def _lock_stack_shadow():
     # PAD-901: Deadpool's Katana Handle lock is one kicker in JP's table and
     # LOCK 1-4 on the machine, under a post the game holds down for seconds

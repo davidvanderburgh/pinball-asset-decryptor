@@ -666,12 +666,22 @@ def gen(m, had, quiet=None, dof=None):
         ev = s.get("event", "hit")
         sid = 1000 + s["id"]
         if ev == "hit":
-            body = "vpmTimer.PulseSw %d" % sid
+            pulse = "vpmTimer.PulseSw %d" % sid
             if had.get(name + "_Hit") and calls_orig(name):
-                body += " : %s_Hit_orig" % name
+                rest = " : %s_Hit_orig" % name
             else:
-                body += fx(name + "_Hit")
-            out.append("Sub %s_Hit : %s : End Sub" % (name, body))
+                rest = fx(name + "_Hit")
+            if s.get("up"):
+                # a ramp's opto the ball also rolls back over: one pulse a
+                # shot, on the way up (PAD-907, Rush's time machine); the
+                # table's own sub still runs on every hit
+                out += ["Sub %s_Hit" % name,
+                        "\tIf ActiveBall.VelY < 0 Then %s" % pulse]
+                if rest:
+                    out.append("\t" + rest[3:])
+                out.append("End Sub")
+            else:
+                out.append("Sub %s_Hit : %s%s : End Sub" % (name, pulse, rest))
         elif ev == "hold":
             b1 = "Controller.Switch(%d) = True" % sid
             b0 = "Controller.Switch(%d) = False" % sid

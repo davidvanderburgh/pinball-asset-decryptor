@@ -388,6 +388,12 @@ mapped light's state, to compare with the machine's `padled` plane.
 spin: every spin restarts a 600 ms quiet time (`PadPassSw`), so the ball
 through Jurassic Park's right orbit or half pipe is one opto edge.
 
+**A ramp the ball rolls back down** (PAD-907): `"up": true` on a `hit`
+switch pulses it only while the ball moves up the table
+(`ActiveBall.VelY < 0`), so a shot that falls back over the trigger is one
+edge, the way the machine's magnet or lift would have kept it. Rush's time
+machine (`tm2`) is LIFT RAMP OPTO this way.
+
 Four more map fields (PAD-859), all in the generated script:
 
 * `"rgb": true` on a lamp whose three LEDs are an insert's -R, -G, -B: the

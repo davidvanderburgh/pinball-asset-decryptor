@@ -424,6 +424,16 @@ def test_rushs_time_machine_is_the_lift_ramp_opto():
     assert [k for k, v in m["switches"].items() if k != "_" and v["id"] == 82] == ["tm2"]
 
 
+def test_rushs_right_return_lanes_match_their_inserts():
+    # PAD-921: TRightInlane is the inner lane (its insert I96 is RIGHT RETURN
+    # LANE INNER), TRightInlane2 the outer; each pressed the other's switch
+    m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
+    sw, lamps = m["switches"], m["lamps"]
+    assert sw["TRightInlane"]["id"] == 63 and sw["TRightInlane2"]["id"] == 61
+    assert lamps["I96"]["leds"] == [[8, 5]] and "INNER" in lamps["I96"]["name"]
+    assert lamps["I97"]["leds"] == [[8, 6]] and "OUTER" in lamps["I97"]["name"]
+
+
 def test_rushs_side_scoop_rests_on_the_lower_switch():
     # PAD-910: the game fires SIDE SCOOP from LOWER SIDE SCOOP (85); SIDE
     # SCOOP OPTO (78) is the way in. Held on 78 it never kicked (emulator)

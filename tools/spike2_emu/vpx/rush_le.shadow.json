@@ -13,6 +13,7 @@
     "quiet_subs: the tribute's own light shows and its GI timer (GIUpdateTimer_Timer turns GI off by ball count); orig_hits false: its hit subs stay out of the way once the machine lights the table.",
     "tm2 is the time machine: the shot the game starts modes and multiballs on is LIFT RAMP OPTO (82), where its TimeMachineMagnet grabs the ball (PAD-420). It counts on the way up only, as the tribute did; LL3 (the VUK lane, its own VUK switch is Kicker3) no longer stands in for it (PAD-907).",
     "Kicker1 is the side scoop: the ball passes SIDE SCOOP OPTO (78, `enter`) and rests on LOWER SIDE SCOOP (85), where the game fires SIDE SCOOP. Held on 78 the game only held its trough lock and waited, the ball sat until a ball search and the switch read stuck (PAD-910).",
+    "The right side has two return lanes: TRightInlane (x 692, lighting I96) is the inner one, RIGHT RETURN LANE-INNER (63); TRightInlane2 (x 761, lighting I97) the outer, RIGHT RETURN LANE (61). They were the other way round and each lit the other's insert (PAD-921).",
     "b2s_name: the script's cGameName is \"rushle\", but the DOF Config Tool lists the table as rush_le, and B2S.Server hands DOF that name (PAD-847)."
   ],
   "title": "rush_le",
@@ -44,8 +45,8 @@
     "Lock2": {"id": 51, "event": "hit", "name": "RT RAMP RT TARGET"},
     "TLeftOutlane": {"id": 59, "event": "hit", "name": "LEFT OUTLANE"},
     "TLeftInlane": {"id": 60, "event": "hit", "name": "LEFT RETURN LANE"},
-    "TRightInlane": {"id": 61, "event": "hit", "name": "RIGHT RETURN LANE"},
-    "TRightInlane2": {"id": 63, "event": "hit", "name": "RIGHT RETURN LANE-INNER"},
+    "TRightInlane": {"id": 63, "event": "hit", "name": "RIGHT RETURN LANE-INNER"},
+    "TRightInlane2": {"id": 61, "event": "hit", "name": "RIGHT RETURN LANE (the outer one)"},
     "TRightOutlane": {"id": 62, "event": "hit", "name": "RIGHT OUTLANE"},
     "LeftSlingShot": {"id": 69, "event": "slingshot", "name": "LEFT SLINGSHOT"},
     "RightSlingShot": {"id": 68, "event": "slingshot", "name": "RIGHT SLINGSHOT"},

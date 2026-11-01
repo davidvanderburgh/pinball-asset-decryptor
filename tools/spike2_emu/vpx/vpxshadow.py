@@ -40,6 +40,10 @@ insert's three, `rgb`, also give the light the insert's colour);
 table lacks, and `dark` lights, which the machine has no LED for, are held
 off so the shadow game cannot leave them lit.
 
+Switches the table has no object for: `retrofit_triggers` are new triggers,
+cloned from `clone` and given a `shape` (drag points), drawn as nothing; the
+switches map names them like any other object.
+
 The map (<title>.shadow.json) says which object is which switch; see
 rush_le.shadow.json for the fields. The patched table is re-signed and gets
 a PinMAMETimer (core.vbs's) and a PadTestTimer (vpxkeys.py) cloned from an
@@ -1058,6 +1062,19 @@ def retrofit_items(table, m):
         kind, src = by_name[v.get("clone", rl.get("clone"))]
         assert kind == "Light", v.get("clone", rl.get("clone"))
         items.append(vpxfile.clone_item(src, name, *v["at"]))
+    # PAD-922: a switch where the table has no object - a Trigger cloned from
+    # `clone`, given its own `shape` (drag points), switched on, drawn as
+    # nothing and on the playfield (SURF: John Wick's arch triggers sit on a
+    # ramp), so a ball reaching the spot reaches the machine's switch
+    for name, v in m.get("retrofit_triggers", {}).items():
+        if name == "_":
+            continue
+        kind, src = by_name[v["clone"]]
+        assert kind == "Trigger", v["clone"]
+        item = vpxfile.reshape_item(vpxfile.clone_item(src, name, 0, 0), v["shape"])
+        items.append(vpxfile.set_fields(item, {"EBLD": struct.pack("<i", 1),
+                                               "SHAP": struct.pack("<i", 0),
+                                               "SURF": struct.pack("<i", 0)}))
     for name, v in m.get("retrofit_timers", {}).items():
         if name == "_":
             continue
@@ -1081,7 +1098,7 @@ def main(argv):
         print("refusing: %s does not verify against its own MAC" % src)
         return 1
     info = [table.item_info(d) for d in table.items]
-    names = {n.lower() for _, n, _ in info}
+    names = {n.lower() for _, n, _ in info} | {n.lower() for n in m.get("retrofit_triggers", {})}
     for name in list(m["switches"]) + list(saucers(m)) + list(m.get("lamps", {})) + m.get("dark", []):
         if name != "_" and name.lower() not in names:
             print("WARNING: the table has no object named %s" % name)

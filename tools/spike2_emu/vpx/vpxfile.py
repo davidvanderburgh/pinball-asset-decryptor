@@ -277,6 +277,35 @@ def clone_item(data, name, x, y):
     return bytes(out)
 
 
+def reshape_item(data, points):
+    """A GameItem stream with its drag points moved to `points`, one each, in
+    order, and its centre to their middle: a trigger cloned into a place AND
+    a shape the table has nothing of (PAD-922: John Wick's car nose)."""
+    pts = [tuple(map(float, p)) for p in points]
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    t = struct.unpack_from("<i", data, 0)[0]
+    out = bytearray(struct.pack("<i", t))
+    depth = n = 0
+    for tag, payload, _ in item_records(data, 4):
+        if tag == "VCEN" and len(payload) >= 8:
+            if depth == 0:
+                xy = (cx, cy)
+            else:
+                if n == len(pts):
+                    raise ValueError("the item has more drag points than the %d given" % len(pts))
+                xy, n = pts[n], n + 1
+            payload = struct.pack("<ff", *xy) + payload[8:]
+        out += biff_record(tag, payload)
+        if tag == "DPNT":
+            depth += 1
+        elif tag == "ENDB" and depth:
+            depth -= 1
+    if n != len(pts):
+        raise ValueError("the item has %d drag points, %d given" % (n, len(pts)))
+    return bytes(out)
+
+
 def set_fields(data, fields):
     """A GameItem stream with the first top-level record of each tag in
     `fields` given a new payload (a timer's TMON/TMIN, say)."""

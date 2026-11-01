@@ -104,6 +104,41 @@ def test_clone_item_shifts_every_vcen_and_renames(vpxfile):
     assert vpxfile.unwide([p for t, p in recs if t == "NAME"][0]) == "PL_NEW"
 
 
+def test_reshape_item_moves_every_drag_point_and_the_centre(vpxfile):
+    # PAD-922: a trigger cloned into a shape the table has nothing of
+    item = struct.pack("<i", 6) + _rec("VCEN", struct.pack("<ff", 100, 200)) +         _rec("NAME", vpxfile.wide("T1")) +         b"".join(_rec("DPNT", b"") + _rec("VCEN", struct.pack("<ff", 100 + k, 200)) + _rec("ENDB", b"")
+                 for k in range(4)) + _rec("ENDB", b"")
+    pts = [(0, 0), (40, 0), (40, 20), (0, 20)]
+    out = vpxfile.reshape_item(item, pts)
+    recs = [(t, p) for t, p, _ in vpxfile.item_records(out, 4)]
+    assert [struct.unpack("<ff", p) for t, p in recs if t == "VCEN"] == [(20.0, 10.0)] + pts
+    assert len(out) == len(item) and [t for t, _ in recs].count("ENDB") == 5
+    with pytest.raises(ValueError):
+        vpxfile.reshape_item(item, pts[:3])
+
+
+def test_shadow_retrofit_trigger_is_live_invisible_and_on_the_playfield(vpxfile):
+    # PAD-922: John Wick's car has no object the ball hits; the map adds one,
+    # cloned from a trigger that is off, drawn and on a ramp (SURF)
+    vs = pytest.importorskip("vpxshadow")
+    src = struct.pack("<i", 6) + _rec("VCEN", struct.pack("<ff", 5, 5)) +         _rec("SURF", struct.pack("<i", 7) + b"Ramp023") + _rec("EBLD", struct.pack("<i", 0)) +         _rec("SHAP", struct.pack("<i", 2)) + _rec("NAME", vpxfile.wide("Tarche2")) +         b"".join(_rec("DPNT", b"") + _rec("VCEN", struct.pack("<ff", k, k)) + _rec("ENDB", b"")
+                 for k in range(4)) + _rec("ENDB", b"")
+
+    class Table:
+        items = [src]
+        item_info = staticmethod(vpxfile.VpxTable.item_info)
+    m = {"retrofit_triggers": {"_": "", "PadCarHit": {"clone": "Tarche2",
+                                                      "shape": [[478, 474], [557, 449], [571, 492], [492, 517]]}}}
+    (item,) = vs.retrofit_items(Table, m)
+    assert vpxfile.VpxTable.item_info(item)[:2] == ("Trigger", "PadCarHit")
+    top = {t: p for t, p, _ in vpxfile.biff_records(item, 4)}
+    assert top["EBLD"] == struct.pack("<i", 1) and top["SHAP"] == struct.pack("<i", 0)
+    assert top["SURF"] == struct.pack("<i", 0), "on the playfield, not the clone's ramp"
+    out, _ = vs.patch(MINI_TRIBUTE, dict(json.loads(json.dumps(MINI_SHADOW)),
+                                        switches={"PadCarHit": {"id": 77, "event": "hit"}}))
+    assert "Sub PadCarHit_Hit : vpmTimer.PulseSw 1077 : End Sub" in out
+
+
 # ---------------------------------------------------------------- padled v7 -
 
 def test_rule_plane_offsets_match_padled_h():
@@ -1088,18 +1123,24 @@ def test_the_john_wick_maps_split_at_the_les_mechs():
     game through PAD.Controller on these numbers and its LEFT EJECT and
     RIGHT VUK kicked). The LE adds the arch's lock (LOCK 1-3 behind the
     post, the center ramp's diverter), the pops' drop target and the car's
-    optos; the Pro has a CAR HIT OPTO where the LE's car holds the ball."""
+    optos. PAD-922: the self-kicking hole at the Continental's mouth is the
+    CAPTIVE BALL TGT on both, and the car a trigger added on its nose."""
     le, pro = _john_wick_maps()
     assert pro["preferred"] and not le["preferred"] and pro["model"] == "Pro"
     assert pro["output"] == le["output"] and pro["detect"] == le["detect"]
     # the LE numbers its switches higher past the car's five and the drop target
-    shared = set(pro["switches"]) & set(le["switches"]) - {"_", "lock"}
+    shared = set(pro["switches"]) & set(le["switches"]) - {"_", "PadCarHit"}
     for obj in shared:
         p, e = pro["switches"][obj], le["switches"][obj]
         assert p["name"] == e["name"] and p["event"] == e["event"], obj
         assert e["id"] - p["id"] in (0, 2, 3, 5), obj
-    assert pro["switches"]["lock"]["name"].startswith("CAR HIT OPTO")
-    assert le["switches"]["lock"]["name"].startswith("CAR HOLD OPTO")
+    assert pro["switches"]["lock"]["id"] == 79 and le["switches"]["lock"]["id"] == 82
+    assert pro["switches"]["lock"]["name"].startswith("CAPTIVE BALL TGT (the Continental")
+    assert pro["switches"]["PadCarHit"]["name"].startswith("CAR HIT OPTO")
+    assert le["switches"]["PadCarHit"]["name"].startswith("CAR FRONT OPTO")
+    assert pro["switches"]["PadCarHit"]["id"] == le["switches"]["PadCarHit"]["id"] == 77
+    assert "CapTrigger1" not in pro["switches"] and "CapTrigger1" not in le["switches"],         "the captive ball top right is the table's own, not the Continental"
+    assert pro["retrofit_triggers"] == le["retrofit_triggers"]
     assert set(le["switches"]) - set(pro["switches"]) == {"Target11"}
     # the same three kickers on the machine's coils; the lock is the LE's
     assert sorted(k for k in pro["saucers"] if k != "_") == ["Krampcoude", "PyramidKicker"]

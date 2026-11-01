@@ -371,6 +371,13 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   entry kicker takes the ball in (`AddBall`), and the machine's coil kicks it
   out of the exit, where the table's own timer did. With a `stack`, a full lane
   sends the ball out of the exit too.
+* **A switch the table has no object for** (PAD-922). John Wick's table
+  walls its car in with an invisible ramp, so a car shot met no switch.
+  `retrofit_triggers` clones a trigger (`clone`), gives it its own drag
+  points (`shape`, table units), switches it on, draws it as nothing and puts
+  it on the playfield whatever surface the clone sat on; the switches map
+  names it like any table object (`PadCarHit`: the band in front of the car's
+  nose, CAR HIT OPTO).
 * **A scoop the ball passes an opto into** (PAD-910). Rush's side scoop is
   SIDE SCOOP OPTO on the way in and LOWER SIDE SCOOP where the ball rests;
   the game fires SIDE SCOOP only from the lower one. The saucer held the

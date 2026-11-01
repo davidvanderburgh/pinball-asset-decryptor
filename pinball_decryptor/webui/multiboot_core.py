@@ -2967,30 +2967,46 @@ def sudo_password_note(text):
             "terminal where `sudo -v` has already been run.")
 
 
-#: What Docker prints when a step is run and no container of ours is up:
-#: none at all, or one Docker Desktop stopped when it quit (PAD-203).
-_NO_CONTAINER = ("No such container", "is not running")
+#: What Docker or Podman prints when a step is run and no container of ours
+#: is up: none at all, or one that stopped when the engine quit (PAD-203).
+#: Matched case-insensitively because Docker says "No such container" and
+#: Podman says "no such container".
+_NO_CONTAINER = ("no such container", "is not running")
+
+#: What a rig tool inside a running container prints when a preview or size
+#: check adds a card from a folder the container was not started with yet.
+_UNMOUNTED_HOST = ("no such file or directory", "does not exist",
+                   "no card image at /host/")
 
 
 def container_note(text):
-    """One sentence for a macOS step that ran before the container was up,
-    or "" when that is not what happened.
+    """One sentence for a macOS step that ran before the container was up
+    (or before a newly added folder was mounted into it), or "" when that
+    is not what happened.
 
-    A run that WRITES starts the container itself; the preview deliberately
-    does not (it redraws on every keystroke and must not build an image
-    behind the user), so on a Mac every preview step before the session's
-    first build dies on Docker's own "No such container:
-    pad-multiboot-worker".  That line reads like a broken app rather than a
+    A run that WRITES starts the container itself, building its image the
+    first time.  The preview starts or remounts one only once that image is
+    built (:func:`multiboot_docker.ensure_ready_container`: it redraws on
+    every keystroke and must not build an image behind the user), so on a
+    Mac that has never built a card every preview step dies on Docker's own
+    "No such container: pad-multiboot-worker".  That line reads like a broken app rather than a
     step waiting for one - :meth:`MultibootPanel._run_commands` always meant
     it to "say so, once", and this is what it says.
     """
-    if not _mac.enabled() or not any(m in (text or "")
-                                     for m in _NO_CONTAINER):
+    if not _mac.enabled():
         return ""
-    return ("The Linux container this Mac runs the tools in is not up yet. "
-            "Build / flash card... starts it (and builds its image the "
-            "first time); the preview and the size check never start one "
-            "behind you, so they stay blank until it is up.")
+    t = (text or "").lower()
+    if any(m in t for m in _NO_CONTAINER):
+        return ("The Linux container this Mac runs the tools in is not up yet. "
+                "Build / flash card... builds its image the first time (a few "
+                "minutes) and starts it; the preview and the size check never "
+                "build one behind you, so they stay blank until then.")
+    if "/host/" in t and any(m in t for m in _UNMOUNTED_HOST):
+        return ("The Linux container this Mac runs the tools in does not have "
+                "this folder mounted yet. Build / flash card... mounts it, and "
+                "offers to share it with the engine if the engine cannot see "
+                "it; the preview and the size check stay blank until then.")
+    return ""
 
 
 def root_command(args, cwd=None, exe="python3"):
@@ -13265,10 +13281,11 @@ class MultibootPanel:
         ordinary output.
         """
         # macOS runs its steps in a container, so one has to be up and able
-        # to see this run's ISOs before the first step starts.  Only for a
-        # WRITING run: the preview redraws on every keystroke and must not
-        # build an image or start a container behind one: it either finds a
-        # container already up (a build earlier in the session) or its step
+        # to see this run's ISOs before the first step starts.  A WRITING run
+        # builds the image if it has to; the preview redraws on every
+        # keystroke and must not, so its worker only starts or remounts a
+        # container once the image is built (_start_worker,
+        # multiboot_docker.ensure_ready_container) and otherwise its step
         # fails and says so, once.
         if not preview and _mac.enabled():
             try:
@@ -13314,6 +13331,11 @@ class MultibootPanel:
         guards.  Split out so a queued action can be started from the
         render's own finish without going through them again."""
         def run():
+            if preview and _mac.enabled():
+                # Never raises; False leaves the step to fail and say why
+                # (container_note).
+                _mac.ensure_ready_container(self._run_paths(), rig_repo_dir(),
+                                            log=self._append)
             rc = 0
             failed = None
             texts = {}

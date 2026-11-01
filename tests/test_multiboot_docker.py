@@ -35,6 +35,8 @@ def mac(monkeypatch, tmp_path):
     monkeypatch.setattr(mt.sys, "platform", "darwin")
     monkeypatch.setattr(D.sys, "platform", "darwin")
     monkeypatch.setattr(D, "cache_root", lambda: str(tmp_path / "cache"))
+    monkeypatch.setattr(D, "_STAGED", set())
+    monkeypatch.setattr(D, "_PREVIEW_REFUSED", set())
     os.makedirs(str(tmp_path / "cache"), exist_ok=True)
     return tmp_path
 
@@ -293,14 +295,25 @@ def test_the_image_carries_ffmpeg_for_the_menu_media():
     assert "ffmpeg" in D.DOCKERFILE
 
 
+def test_the_image_carries_the_arm_toolchain_and_qemu_for_stern_spike2():
+    """Stern Spike 2's ensureselect.sh cross-compiles the 32-bit ARM
+    codeselect binary with arm-linux-gnueabihf-gcc (needing
+    libc6-dev-armhf-cross explicitly because --no-install-recommends skips
+    recommended packages), and the preview renders its snapshot with
+    qemu-arm-static."""
+    assert "gcc-arm-linux-gnueabihf" in D.DOCKERFILE
+    assert "libc6-dev-armhf-cross" in D.DOCKERFILE
+    assert "qemu-user-static" in D.DOCKERFILE
+
+
 #: (tag, sha256 of DOCKERFILE) as they were last agreed.  A machine that has
 #: already built an image is offered the tag, not the file: ``ensure_image``
 #: asks ``docker image inspect`` about IMAGE and returns happily, so a changed
 #: package list under an unchanged tag reaches nobody who needs it - which is
 #: the mistake PAD-194's fix would have made.  Change one, change both.
 _IMAGE_AS_AGREED = (
-    "pad-multiboot:4",
-    "44260b35c00af9e2e1cb98d608e98b736368a9e3bfa73141af745ea0ce8b2014",
+    "pad-multiboot:5",
+    "68307675b7e90eba9c7e3c40e0430119caf79233cb698ff5a86917963164e79e",
 )
 
 
@@ -445,6 +458,91 @@ def test_a_stopped_container_is_started_again(mac, monkeypatch):
         "the stopped one still holds the name"
 
 
+def test_ensure_ready_container_starts_when_image_exists_and_never_builds(
+        mac, monkeypatch):
+    """Background preview and size-check runs call ensure_ready_container on
+    the worker thread: when the image is not built yet it returns False
+    without building one; once the image exists it starts (or remounts) the
+    container and logs the mounted folders."""
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    monkeypatch.setattr(D, "stage_rig", lambda src: D.staged_repo())
+
+    no_img = _Fake(arch="")
+    monkeypatch.setattr(D, "_docker", no_img)
+    assert D.ensure_ready_container([ISO0], "/repo") is False
+    assert not any(c[0] in ("build", "run") for c in no_img.calls)
+
+    ready = _Fake(arch=D.ARCH, image_id="sha256:new")
+    monkeypatch.setattr(D, "_docker", ready)
+    logs = []
+    assert D.ensure_ready_container([ISO0], "/repo", log=logs.append) is True
+    assert any(c[0] == "run" for c in ready.calls)
+    assert any("starting the Linux toolbox container" in m for m in logs)
+
+
+def test_a_preview_finds_the_container_up_with_two_calls(mac, monkeypatch):
+    """Every redraw calls ensure_ready_container.  A container already up
+    on this image with these folders mounted costs one ``inspect`` and one
+    ``image inspect``: no ``docker info``, no ``run``, and the ~50 MB rig
+    copy only on the session's first call."""
+    staged = []
+    monkeypatch.setattr(D, "stage_rig", lambda src: staged.append(src))
+    want = set(D.mount_points([ISO0])) | {D.cache_root()}
+    fake = _Fake(arch=D.ARCH, image_id="sha256:new",
+                 container=("sha256:new", want))
+    monkeypatch.setattr(D, "_docker", fake)
+    for _ in range(3):
+        assert D.ensure_ready_container([ISO0], "/repo") is True
+    assert staged == ["/repo"], "staged once per session, not per redraw"
+    assert [c[0] for c in fake.calls] == ["inspect", "image"] * 3
+    assert not any(c[0] in ("info", "run", "rm") for c in fake.calls)
+
+
+def test_a_preview_does_not_retry_folders_the_engine_cannot_see(
+        mac, monkeypatch):
+    """Unshared from a preview is remembered: retrying it on every redraw
+    would start and remove a container per keystroke.  A writing run that
+    brings a container up clears it."""
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    tries = []
+
+    def unshared(paths, repo_src, log):
+        tries.append(paths)
+        raise D.Unshared(["/Volumes/Cards"])
+    monkeypatch.setattr(D, "_ensure_container", unshared)
+    monkeypatch.setattr(D, "_docker", _Fake(arch=D.ARCH))
+    assert D.ensure_ready_container([ISO0], "/repo") is False
+    assert D.ensure_ready_container([ISO0], "/repo") is False
+    assert len(tries) == 1
+    monkeypatch.setattr(D, "_ensure_container", lambda p, r, l: None)
+    D.ensure_container([ISO0], "/repo")
+    assert not D._PREVIEW_REFUSED
+
+
+def test_a_build_waits_for_the_preview_s_container_start(mac, monkeypatch):
+    """The UI thread's Build and the preview's worker share one container
+    name: two rm -f / run pairs interleaved fail one run on the name."""
+    import threading
+    import time
+    inside, overlap = [], []
+
+    def slow(paths, repo_src, log):
+        if inside:
+            overlap.append(True)
+        inside.append(True)
+        time.sleep(0.05)
+        inside.pop()
+    monkeypatch.setattr(D, "_ensure_container", slow)
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    monkeypatch.setattr(D, "_docker", _Fake(arch=D.ARCH))
+    t = threading.Thread(target=D.ensure_ready_container,
+                         args=([ISO0], "/repo"))
+    t.start()
+    D.ensure_container([ISO0], "/repo")
+    t.join()
+    assert not overlap
+
+
 def test_a_stopped_container_gets_the_same_sentence(mac):
     """What the reporter's preview and size check printed, a dozen times."""
     raw = ("Error response from daemon: container 888b1f58e3f1 is not "
@@ -462,9 +560,26 @@ def test_a_step_before_the_container_is_up_gets_a_sentence(mac):
     note = mt.container_note(raw)
     assert "not up yet" in note and "Build / flash card" in note
     assert D.CONTAINER not in note, "the sentence is for a person"
+    # Podman spells the same refusal with a lowercase "no such container".
+    podman_raw = ('Error: no container with name or ID "%s" found: '
+                  'no such container' % D.CONTAINER)
+    assert mt.container_note(podman_raw) == note
     # Anything else a step says is not this.
     assert mt.container_note("partclone.restore failed") == ""
     assert mt.container_note("") == ""
+
+
+def test_a_step_for_an_unmounted_host_folder_gets_a_sentence(mac):
+    """When a container from an earlier build is already running, adding a
+    card from a new folder runs the preview/plan before Build / flash card...
+    has recreated the container with that folder's /host/... bind mount."""
+    for raw in ("mkmulticard.py: REFUSED: /host/Users/me/cards/a.raw: "
+                "No such file or directory",
+                "selectmedia.py: REFUSED: card image "
+                "/host/Users/me/cards/a.raw does not exist",
+                "[rootfs] no card image at /host/Users/me/cards/a.raw"):
+        note = mt.container_note(raw)
+        assert "mounted yet" in note and "Build / flash card" in note
 
 
 def test_only_a_mac_gets_that_sentence(monkeypatch):
@@ -473,6 +588,7 @@ def test_only_a_mac_gets_that_sentence(monkeypatch):
     monkeypatch.setattr(mt.sys, "platform", "linux")
     monkeypatch.setattr(D.sys, "platform", "linux")
     assert mt.container_note("No such container: x") == ""
+    assert mt.container_note("/host/x: No such file or directory") == ""
 
 
 # ---------------------------------------------------------------- guard rails
@@ -510,6 +626,16 @@ def test_staging_skips_the_host_pycache(mac, tmp_path):
     staged = os.path.join(D.staged_repo(), "tools", "jjp_emu")
     assert os.path.isfile(os.path.join(staged, "mkjjpmulti.py"))
     assert not os.path.exists(os.path.join(staged, "__pycache__"))
+
+
+def test_staging_includes_stern_multiboot_leaf_modules(mac):
+    """mkmulticard.py and selectmedia.py run on the container's bare python3
+    with only the staged tree on sys.path; every Stern and core leaf module
+    they import must be staged by stage_rig."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    staged = D.stage_rig(repo_root)
+    for rel in D._PACKAGE_FILES:
+        assert os.path.isfile(os.path.join(staged, rel)), rel
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX path shapes")

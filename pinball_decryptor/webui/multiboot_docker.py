@@ -59,12 +59,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 
 #: Bumped whenever DOCKERFILE changes.  The tag IS the cache key - ``docker
 #: image inspect`` succeeds on a stale image built from an older Dockerfile,
 #: so a new package list that kept the old tag would never reach anybody who
 #: had already built one.
-IMAGE = "pad-multiboot:4"
+IMAGE = "pad-multiboot:5"
 CONTAINER = "pad-multiboot-worker"
 
 #: The architecture the image and the container are built and run for - see
@@ -83,6 +84,14 @@ ARCH = "amd64"
 #: pair on purpose - that file's comment says why ("gcc pulls libc6-dev only
 #: as a *recommended* package") and the menu program's link needs the crt
 #: files and libc_nonshared.a that come with it.
+#:
+#: ``gcc-arm-linux-gnueabihf``, ``libc6-dev-armhf-cross`` and
+#: ``qemu-user-static`` ARE THE STERN SPIKE 2 MENU AND ITS PREVIEW.
+#: ``ensureselect.sh`` cross-compiles the 32-bit ARM ``codeselect`` binary
+#: that boots on the machine (``libc6-dev-armhf-cross`` is named beside the
+#: cross compiler for the same ``--no-install-recommends`` reason as
+#: ``libc6-dev``; see ``tools/spike2_emu/ensurebuild.sh``), and the tab's
+#: preview renders its snapshot with ``qemu-arm-static -L ~/spike2root``.
 #:
 #: ``fonts-dejavu-core`` IS A BUILD TOOL HERE (PAD-194).  A Debian slim image
 #: carries no fonts at all, and two separate things then have none:
@@ -110,7 +119,9 @@ DOCKERFILE = """\
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \\
         partclone e2fsprogs xorriso pigz gzip coreutils util-linux \\
-        python3 bash make gcc libc6-dev fonts-dejavu-core ffmpeg gnupg \\
+        python3 bash make gcc libc6-dev \\
+        gcc-arm-linux-gnueabihf libc6-dev-armhf-cross qemu-user-static \\
+        fonts-dejavu-core ffmpeg gnupg \\
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp
 CMD ["bash"]
@@ -131,11 +142,33 @@ _RIGS = ("jjp_emu", "spike2_emu", "bof_emu", "dp_emu")
 #: (installer/build_macos.sh) and they are staged from there.  'auto' sound
 #: decodes the game's own samples with plugins.bof.source_converter (and its
 #: QOA decoder): without them a Mac build's media step failed with an
-#: ImportError (COOLTOY, 2026-10-05).
+#: ImportError (COOLTOY, 2026-10-05).  Stern Spike 2's mkmulticard.py and
+#: selectmedia.py likewise import plugins.stern's validator bypass, sidx,
+#: ext4, adjustments, editions, factory_volume, shader_profile, explorer and
+#: engine modules (plus their core leaf dependencies) under the container's
+#: bare python3.
 _PACKAGE_FILES = ("pinball_decryptor/plugins/bof/pck_directory.py",
                   "pinball_decryptor/plugins/bof/aes_py.py",
                   "pinball_decryptor/plugins/bof/source_converter.py",
-                  "pinball_decryptor/plugins/bof/qoa_codec.py")
+                  "pinball_decryptor/plugins/bof/qoa_codec.py",
+                  "pinball_decryptor/core/audio.py",
+                  "pinball_decryptor/core/checksums.py",
+                  "pinball_decryptor/core/colour_profile.py",
+                  "pinball_decryptor/core/longpath.py",
+                  "pinball_decryptor/core/rawdevice.py",
+                  "pinball_decryptor/plugins/stern/adjustments.py",
+                  "pinball_decryptor/plugins/stern/editions.py",
+                  "pinball_decryptor/plugins/stern/engine.py",
+                  "pinball_decryptor/plugins/stern/explorer.py",
+                  "pinball_decryptor/plugins/stern/ext4.py",
+                  "pinball_decryptor/plugins/stern/factory_volume.py",
+                  "pinball_decryptor/plugins/stern/formats.py",
+                  "pinball_decryptor/plugins/stern/games.py",
+                  "pinball_decryptor/plugins/stern/menu_settings.py",
+                  "pinball_decryptor/plugins/stern/progreloc.py",
+                  "pinball_decryptor/plugins/stern/shader_profile.py",
+                  "pinball_decryptor/plugins/stern/sidx.py",
+                  "pinball_decryptor/plugins/stern/valpatch.py")
 
 #: Copied without these - build scratch that is large, useless in the
 #: container, and in __pycache__'s case actively wrong (host .pyc files).
@@ -569,12 +602,24 @@ def ensure_container(paths, repo_src, log=None):
     checked on every run, a container kept from an earlier one included,
     since that one was mounted the same way.  One that cannot is removed
     and the run stops here with the way to share the folders.
+
+    Under :data:`_LOCK`: a Build asked for while a preview's worker is in
+    :func:`ensure_ready_container` would otherwise ``rm -f`` and ``run`` the
+    same container name beside it, and one of the two ``docker run`` calls
+    fails on the name.
     """
+    with _LOCK:
+        _ensure_container(paths, repo_src, log)
+        _PREVIEW_REFUSED.clear()
+
+
+def _ensure_container(paths, repo_src, log):
     reason = unavailable_reason()
     if reason:
         raise RuntimeError(reason)
     ensure_image(log)
     stage_rig(repo_src)
+    _STAGED.add(repo_src)
     want = mount_points(paths)
     have = _running_state()
     if (have is None or have[0] != _image_field(".Id")
@@ -594,6 +639,61 @@ def ensure_container(paths, repo_src, log=None):
     if unseen:
         _docker(["rm", "-f", CONTAINER], timeout=30)
         raise Unshared(unseen)
+
+
+def ensure_ready_container(paths, repo_src, log=None):
+    """Start or remount the container when :data:`IMAGE` is ALREADY built.
+    True when a container that serves *paths* is up afterwards.
+
+    Background preview and size-check runs call this on the worker thread,
+    on every redraw.  So it never builds the multi-minute image behind a
+    keystroke, and when the container is already up on this image with
+    these folders mounted it stops after one ``docker inspect`` and one
+    ``docker image inspect``: no ``docker info``, and no copy of the rigs
+    (``tools/spike2_emu`` alone is ~50 MB) - :func:`stage_rig` runs once
+    per app session here, and on every writing run as before.
+
+    A mount set the engine could not see (:class:`Unshared`) is not tried
+    again on the next redraw: that would start and remove a container per
+    keystroke.  The Build offers to share the folders; once a writing run
+    has brought a container up, the set is tried again.
+    """
+    want = frozenset(mount_points(paths))
+    with _LOCK:
+        try:
+            have = _running_state()
+            if (have is not None and have[0] == _image_field(".Id")
+                    and set(want) | {cache_root()} == have[1]):
+                if repo_src not in _STAGED:
+                    stage_rig(repo_src)
+                    _STAGED.add(repo_src)
+                return True
+            if want in _PREVIEW_REFUSED:
+                return False
+            if unavailable_reason() or _image_field(".Architecture") != ARCH:
+                return False
+            if log:
+                log("[multi-boot] starting the Linux toolbox container"
+                    + (" (mounting %s)..." % ", ".join(sorted(want))
+                       if want else "..."))
+            _ensure_container(paths, repo_src, log)
+        except Unshared:
+            _PREVIEW_REFUSED.add(want)
+            return False
+        except Exception:                               # noqa: BLE001
+            return False
+    return True
+
+
+#: Held by :func:`ensure_container` and :func:`ensure_ready_container`: the
+#: UI thread's writing run and the preview's worker share one container.
+_LOCK = threading.RLock()
+
+#: Mount sets a preview found the engine could not see (see above).
+_PREVIEW_REFUSED = set()
+
+#: Repo sources :func:`stage_rig` has copied in this app session.
+_STAGED = set()
 
 
 def exec_argv(line):

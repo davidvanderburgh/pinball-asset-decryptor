@@ -118,6 +118,28 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/qoa_codec.py:pinball_decryptor/plugins/bof" \
+    `# Stern Spike 2 Multi-boot leaf modules (mkmulticard.py + selectmedia.py):` \
+    `# imported by the rig's bare python3 inside the container, so they must` \
+    `# exist on disk beside tools/spike2_emu rather than only inside the` \
+    `# frozen PYZ archive (multiboot_docker._PACKAGE_FILES).` \
+    --add-data "$ROOT_DIR/pinball_decryptor/core/audio.py:pinball_decryptor/core" \
+    --add-data "$ROOT_DIR/pinball_decryptor/core/checksums.py:pinball_decryptor/core" \
+    --add-data "$ROOT_DIR/pinball_decryptor/core/colour_profile.py:pinball_decryptor/core" \
+    --add-data "$ROOT_DIR/pinball_decryptor/core/longpath.py:pinball_decryptor/core" \
+    --add-data "$ROOT_DIR/pinball_decryptor/core/rawdevice.py:pinball_decryptor/core" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/adjustments.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/editions.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/engine.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/explorer.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/ext4.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/factory_volume.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/formats.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/games.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/menu_settings.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/progreloc.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/shader_profile.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/sidx.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/valpatch.py:pinball_decryptor/plugins/stern" \
     `# the official Stern stock fingerprints (PAD-426): data, not code` \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/data/stock_prints.json.xz:pinball_decryptor/plugins/stern/data" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto.py:pinball_decryptor/plugins/jjp" \

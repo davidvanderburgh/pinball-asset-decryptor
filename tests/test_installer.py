@@ -1349,6 +1349,21 @@ def test_the_bof_multiboot_builder_s_leaf_modules_ship_as_files():
                 "%s does not ship plugins/bof/%s" % (build, mod))
 
 
+def test_every_staged_multiboot_leaf_module_ships_as_a_file():
+    """Every leaf module multiboot_docker._PACKAGE_FILES stages into the
+    macOS container (BOF + Stern Spike 2 mkmulticard.py / selectmedia.py)
+    must be shipped as a real file on disk by both frozen builds, because
+    PyInstaller puts pinball_decryptor inside the binary's PYZ archive."""
+    from pinball_decryptor.webui import multiboot_docker as D
+
+    for build in ("build_linux.sh", "build_macos.sh"):
+        text = (INSTALLER / build).read_text(encoding="utf-8")
+        for rel in D._PACKAGE_FILES:
+            parent = rel.rsplit("/", 1)[0]
+            assert ("%s:%s" % (rel, parent)) in text, (
+                "%s does not ship %s as a file" % (build, rel))
+
+
 def test_the_jjp_rig_can_run_from_program_files():
     """Shipping it puts it at ``C:\\Program Files\\Pinball Asset Decryptor\\
     tools\\jjp_emu``: read-only for the user, and a SPACE in every path.

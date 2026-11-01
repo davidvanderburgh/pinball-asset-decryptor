@@ -557,12 +557,14 @@ def gen(m, had, quiet=None, dof=None):
             "\t\tbsTrough.InitKick %s, %d, %d" % (m["trough"]["release"], *m["trough"]["kick"])]
     for k, s in saucers(m).items():
         out.append("\tSet bs%s = New cvpmBallStack" % k)
-        if s.get("stack"):
+        if s.get("stack") or s.get("kick_from"):
             # a lock lane (PAD-901): the kicker takes each ball in and the
-            # stack rolls it down to the lowest free switch, `switch` first
-            sw = ["1%03d" % n for n in [s["switch"]] + s["stack"]]
+            # stack rolls it down to the lowest free switch, `switch` first.
+            # kick_from (PAD-905): the ball leaves by another kicker, where
+            # the table's own teleport put it (John Wick's VUK and arch lock)
+            sw = ["1%03d" % n for n in [s["switch"]] + s.get("stack", [])]
             out += ["\t\tbs%s.InitSw 0,%s" % (k, ",".join((sw + ["0"] * 7)[:7])),
-                    "\t\tbs%s.InitKick %s, %d, %d" % (k, k, s["dir"], s["power"])]
+                    "\t\tbs%s.InitKick %s, %d, %d" % (k, s.get("kick_from", k), s["dir"], s["power"])]
         else:
             out.append("\t\tbs%s.InitSaucer %s, 1%03d, %d, %d" % (k, k, s["switch"], s["dir"], s["power"]))
         out.append("\t\tbs%s.KickZ = %s" % (k, s.get("kickz", 0)))
@@ -779,9 +781,13 @@ def gen(m, had, quiet=None, dof=None):
     for k, s in saucers(m).items():
         if s.get("stack"):
             # a full lane: the ball has nowhere to stop and rolls back out
+            if s.get("kick_from"):
+                full = ["\t\tMe.DestroyBall : vpmCreateBall %s" % s["kick_from"],
+                        "\t\t%s.Kick %d, %d" % (s["kick_from"], s["dir"], s["power"])]
+            else:
+                full = ["\t\tMe.Kick %d, %d" % (s["dir"], s["power"])]
             out += ["Sub %s_Hit" % k,
-                    "\tIf bs%s.Balls >= %d Then" % (k, 1 + len(s["stack"])),
-                    "\t\tMe.Kick %d, %d" % (s["dir"], s["power"]),
+                    "\tIf bs%s.Balls >= %d Then" % (k, 1 + len(s["stack"]))] + full + [
                     "\t\tExit Sub",
                     "\tEnd If",
                     "\tbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s" % (k, k, fx(k + "_Hit"))]

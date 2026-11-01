@@ -478,3 +478,51 @@ the machine lights, 19 of 19 in the Pro's attract, 10 of 10 in the LE's and
 17-18 of 17-18 in an LE game, the RGB arrows in their colours. Both
 patched tables re-sign, and their scripts compile under Windows Script Host
 (the first runtime stop is `Table1`, which only Visual Pinball has).
+
+## John Wick, on JPSalas & marty's table (PAD-905)
+
+David added JPSalas & marty's "John Wick" 3.0 (the `John_Wick_Legend` pack:
+table, backglass, PuP pack). Its playfield picture is Stern's John Wick art
+and its lower half is the machine's: fitted to the rig's drawing on fifteen
+switches (lanes, the left and right ramp targets, the pop and five of its
+targets, the VUK) it holds at 17 table units, and its lights fit the build's
+LED places at 1.2 px. The top is JPSalas's template moved onto that art: the
+center ramp climbs to a guide (`guideramp`) that sends the ball either right
+and down the long wire to the left inlane or left into the arch's lock (a
+teleport from Karche into KArche1-3), the right ramp's top hops the ball
+onto the right return wire (Kramploop), and the VUK and the crate are
+teleports too.
+
+Two maps. `john_wick_pro` (preferred): the table's car does not move and
+its lock is scripted, and the Pro has neither (its CAR HIT OPTO is where the
+lane round the car ends, its locks virtual) nor the drop target at the pops,
+held down here. `john_wick_le` adds the arch's lock as a stack on LOCK 1-3
+behind the LOCK POST (lockarche), the DIVERTER turning the guide, the drop
+target (DROP TRIP/RESET; its opto is made while it is down) and the car's
+front and hold optos; its motor's end stops are the rig's, as on any LE run.
+
+**A kicker that teleports keeps its exit.** A saucer's new `kick_from`
+names the kicker the ball leaves by: the VUK takes the ball in at
+Krampcoude and the RIGHT VUK coil pops it out of Krampcoude1 onto the wire,
+as the table's own timer did; the LE's lock takes it in at Karche and the
+post lets it out of KArche3.
+
+Mission triggers the shadow game keeps disabled are made live where they
+are the machine's (SKILL SHOT 1/2 in the shooter lane), the life-ring
+target where MID RIGHT TGT BOT is is made solid, and the return lane posts'
+triggers are switched off (the machine has no posts). The machine switches
+with no object here: POP TARGET 6/7, POP ENTER and the flipper EOS. Two are
+guesses: MID RIGHT TGT TOP (the crate face's top target) and the CAPTIVE
+BALL TGT (the table's captive ball, top right).
+
+On the rig (both 1.02.0 builds, rigbatch): the patched table lights every
+insert the machine lights in every sample (the Pro's attract 54/54, 17/17,
+69/69 and game 11/11, 13/13, 18/18; the LE's, whose first boot stayed in
+Guided Setup there, 16/16, 39/39, 17/17, 19/19, 11/11).
+Through PAD.Controller on the Pro map (hidden, muted): the first boot's
+Guided Setup walked with the table's service keys (Plus to Save & Exit,
+Select), coins and Start started a game (flippers armed, the trough coil),
+the left flipper flipped, ten table objects reached the switches they are
+named for, and a ball held on LEFT EJECT and on RIGHT VUK OPTO was kicked
+by its coil. Both patched tables re-sign and their scripts compile under
+Windows Script Host (the first runtime stop is a table object).

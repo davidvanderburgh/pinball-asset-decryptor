@@ -64,7 +64,7 @@ import sys
 #: image inspect`` succeeds on a stale image built from an older Dockerfile,
 #: so a new package list that kept the old tag would never reach anybody who
 #: had already built one.
-IMAGE = "pad-multiboot:4"
+IMAGE = "pad-multiboot:5"
 CONTAINER = "pad-multiboot-worker"
 
 #: The architecture the image and the container are built and run for - see
@@ -83,6 +83,14 @@ ARCH = "amd64"
 #: pair on purpose - that file's comment says why ("gcc pulls libc6-dev only
 #: as a *recommended* package") and the menu program's link needs the crt
 #: files and libc_nonshared.a that come with it.
+#:
+#: ``gcc-arm-linux-gnueabihf``, ``libc6-dev-armhf-cross`` and
+#: ``qemu-user-static`` ARE THE STERN SPIKE 2 MENU AND ITS PREVIEW.
+#: ``ensureselect.sh`` cross-compiles the 32-bit ARM ``codeselect`` binary
+#: that boots on the machine (``libc6-dev-armhf-cross`` is named beside the
+#: cross compiler for the same ``--no-install-recommends`` reason as
+#: ``libc6-dev``; see ``tools/spike2_emu/ensurebuild.sh``), and the tab's
+#: preview renders its snapshot with ``qemu-arm-static -L ~/spike2root``.
 #:
 #: ``fonts-dejavu-core`` IS A BUILD TOOL HERE (PAD-194).  A Debian slim image
 #: carries no fonts at all, and two separate things then have none:
@@ -110,7 +118,9 @@ DOCKERFILE = """\
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \\
         partclone e2fsprogs xorriso pigz gzip coreutils util-linux \\
-        python3 bash make gcc libc6-dev fonts-dejavu-core ffmpeg gnupg \\
+        python3 bash make gcc libc6-dev \\
+        gcc-arm-linux-gnueabihf libc6-dev-armhf-cross qemu-user-static \\
+        fonts-dejavu-core ffmpeg gnupg \\
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp
 CMD ["bash"]
@@ -131,11 +141,33 @@ _RIGS = ("jjp_emu", "spike2_emu", "bof_emu", "dp_emu")
 #: (installer/build_macos.sh) and they are staged from there.  'auto' sound
 #: decodes the game's own samples with plugins.bof.source_converter (and its
 #: QOA decoder): without them a Mac build's media step failed with an
-#: ImportError (COOLTOY, 2026-10-05).
+#: ImportError (COOLTOY, 2026-10-05).  Stern Spike 2's mkmulticard.py and
+#: selectmedia.py likewise import plugins.stern's validator bypass, sidx,
+#: ext4, adjustments, editions, factory_volume, shader_profile, explorer and
+#: engine modules (plus their core leaf dependencies) under the container's
+#: bare python3.
 _PACKAGE_FILES = ("pinball_decryptor/plugins/bof/pck_directory.py",
                   "pinball_decryptor/plugins/bof/aes_py.py",
                   "pinball_decryptor/plugins/bof/source_converter.py",
-                  "pinball_decryptor/plugins/bof/qoa_codec.py")
+                  "pinball_decryptor/plugins/bof/qoa_codec.py",
+                  "pinball_decryptor/core/audio.py",
+                  "pinball_decryptor/core/checksums.py",
+                  "pinball_decryptor/core/colour_profile.py",
+                  "pinball_decryptor/core/longpath.py",
+                  "pinball_decryptor/core/rawdevice.py",
+                  "pinball_decryptor/plugins/stern/adjustments.py",
+                  "pinball_decryptor/plugins/stern/editions.py",
+                  "pinball_decryptor/plugins/stern/engine.py",
+                  "pinball_decryptor/plugins/stern/explorer.py",
+                  "pinball_decryptor/plugins/stern/ext4.py",
+                  "pinball_decryptor/plugins/stern/factory_volume.py",
+                  "pinball_decryptor/plugins/stern/formats.py",
+                  "pinball_decryptor/plugins/stern/games.py",
+                  "pinball_decryptor/plugins/stern/menu_settings.py",
+                  "pinball_decryptor/plugins/stern/progreloc.py",
+                  "pinball_decryptor/plugins/stern/shader_profile.py",
+                  "pinball_decryptor/plugins/stern/sidx.py",
+                  "pinball_decryptor/plugins/stern/valpatch.py")
 
 #: Copied without these - build scratch that is large, useless in the
 #: container, and in __pycache__'s case actively wrong (host .pyc files).
@@ -579,6 +611,12 @@ def ensure_container(paths, repo_src, log=None):
     have = _running_state()
     if (have is None or have[0] != _image_field(".Id")
             or set(want) | {cache_root()} != have[1]):
+        if log:
+            if want:
+                log("starting the Linux toolbox container (mounting %s)..."
+                    % ", ".join(want))
+            else:
+                log("starting the Linux toolbox container...")
         _docker(["rm", "-f", CONTAINER], timeout=30)
         args = ["run", "-d", "--name", CONTAINER, "--privileged",
                 "--platform", PLATFORM,
@@ -594,6 +632,23 @@ def ensure_container(paths, repo_src, log=None):
     if unseen:
         _docker(["rm", "-f", CONTAINER], timeout=30)
         raise Unshared(unseen)
+
+
+def ensure_ready_container(paths, repo_src, log=None):
+    """Start or remount the container when :data:`IMAGE` is ALREADY built.
+
+    Background preview and size-check runs call this on the worker thread:
+    they must never build a multi-minute Docker image behind a keystroke,
+    but once the image is on the machine, starting or remounting the
+    container takes a fraction of a second and lets the size check and
+    preview work as soon as a card is chosen."""
+    if unavailable_reason() or _image_field(".Architecture") != ARCH:
+        return False
+    try:
+        ensure_container(paths, repo_src, log=log)
+    except Exception:                                   # noqa: BLE001
+        return False
+    return True
 
 
 def exec_argv(line):

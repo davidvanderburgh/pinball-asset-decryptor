@@ -36,6 +36,15 @@ RIG_LEAF_MODULES = [
     ("pinball_decryptor.plugins.stern.formats", "tools/spike1_emu/build_rootfs.py"),
     ("pinball_decryptor.plugins.stern.spike1_emulate", "tools/spike1_emu/s1view.py"),
     ("pinball_decryptor.plugins.jjp.crypto", "tools/jjp_emu/pfimage.py"),
+    ("pinball_decryptor.plugins.stern.valpatch", "tools/spike2_emu/mkmulticard.py"),
+    ("pinball_decryptor.plugins.stern.sidx", "tools/spike2_emu/mkmulticard.py"),
+    ("pinball_decryptor.plugins.stern.adjustments", "tools/spike2_emu/mkmulticard.py"),
+    ("pinball_decryptor.plugins.stern.editions", "tools/spike2_emu/mkmulticard.py"),
+    ("pinball_decryptor.plugins.stern.factory_volume", "tools/spike2_emu/mkmulticard.py"),
+    ("pinball_decryptor.plugins.stern.shader_profile", "tools/spike2_emu/mkmulticard.py"),
+    ("pinball_decryptor.plugins.stern.explorer", "tools/spike2_emu/selectmedia.py"),
+    ("pinball_decryptor.plugins.stern.engine", "tools/spike2_emu/selectmedia.py"),
+    ("pinball_decryptor.core.audio", "tools/spike2_emu/selectmedia.py"),
 ]
 
 # Installed in the child before anything of ours is imported: every
@@ -116,3 +125,24 @@ def test_load_plugins_registers_every_manufacturer(capsys):
     keys = {m.key for m in all_manufacturers()}
     assert {"ap", "bof", "cgc", "dp", "jjp", "pb", "spooky", "stern",
             "williams", "data_east", "sega"} <= keys
+
+
+def test_staged_multiboot_leaf_modules_are_a_closed_stdlib_only_set(tmp_path):
+    """Inside the macOS Multi-boot container, /tmp/repo has ONLY the files
+    multiboot_docker._PACKAGE_FILES stages (not the whole checkout) and ONLY
+    the container's bare stdlib python3.  Every staged leaf module must
+    import cleanly from that tree alone."""
+    import shutil
+    from pinball_decryptor.webui import multiboot_docker as D
+
+    for rel in D._PACKAGE_FILES:
+        dst = tmp_path / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(os.path.join(REPO, rel), dst)
+
+    modules = [rel[:-3].replace("/", ".") for rel in D._PACKAGE_FILES]
+    code = _SANDBOX + "".join("import %s\n" % m for m in modules)
+    env = dict(os.environ, PYTHONPATH=str(tmp_path))
+    done = subprocess.run([sys.executable, "-c", code], cwd=str(tmp_path),
+                          env=env, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr

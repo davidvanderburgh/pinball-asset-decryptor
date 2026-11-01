@@ -494,8 +494,8 @@ onto the right return wire (Kramploop), and the VUK and the crate are
 teleports too.
 
 Two maps. `john_wick_pro` (preferred): the table's car does not move and
-its lock is scripted, and the Pro has neither (its CAR HIT OPTO is where the
-lane round the car ends, its locks virtual) nor the drop target at the pops,
+its lock is scripted, and the Pro has neither (its CAR HIT OPTO is the
+car's nose, below; its locks virtual) nor the drop target at the pops,
 held down here. `john_wick_le` adds the arch's lock as a stack on LOCK 1-3
 behind the LOCK POST (lockarche), the DIVERTER turning the guide, the drop
 target (DROP TRIP/RESET; its opto is made while it is down) and the car's
@@ -511,9 +511,24 @@ Mission triggers the shadow game keeps disabled are made live where they
 are the machine's (SKILL SHOT 1/2 in the shooter lane), the life-ring
 target where MID RIGHT TGT BOT is is made solid, and the return lane posts'
 triggers are switched off (the machine has no posts). The machine switches
-with no object here: POP TARGET 6/7, POP ENTER and the flipper EOS. Two are
-guesses: MID RIGHT TGT TOP (the crate face's top target) and the CAPTIVE
-BALL TGT (the table's captive ball, top right).
+with no object here: POP TARGET 6/7, POP ENTER and the flipper EOS. One is
+a guess: MID RIGHT TGT TOP (the crate face's top target).
+
+**The Continental and the car (PAD-922).** Two of those guesses were wrong.
+Laid over the machine's drawing, the table's self-kicking hole (`lock`) sits
+at the mouth of the Continental's lane, where the machine's CAPTIVE BALL TGT
+is, and the "lane round the car" is not there: the table walls its car in
+(Ramp012 round its sides, the invisible Ramp034 across its nose), so a car
+shot hit a wall no switch was on and a Continental shot reported the car.
+`lock` is now CAPTIVE BALL TGT on both maps, `CapTrigger1` (the table's own
+captive ball, top right, past the right orbit) is nothing, and the car is a
+new trigger on its nose, `PadCarHit`: `retrofit_triggers` clones a trigger,
+gives it its own drag points (`vpxfile.reshape_item`), switches it on, draws
+it as nothing and puts it on the playfield (the obvious clone, the arch's
+Tarche2, sits on Ramp023). It is the band 5 to 50 units in front of
+Ramp034's face, so a ball touching the car's nose is inside it: CAR HIT OPTO
+on the Pro, CAR FRONT OPTO on the LE (beside Target11). The LE's CAR HOLD
+OPTO has no object now; the table's car never holds a ball.
 
 On the rig (both 1.02.0 builds, rigbatch): the patched table lights every
 insert the machine lights in every sample (the Pro's attract 54/54, 17/17,

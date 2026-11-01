@@ -11,6 +11,9 @@
     "The machine's switches with no object here are left out: POP TARGET 6/7, POP ENTER",
     "and the flipper EOS. Mission triggers the shadow game keeps disabled are made live",
     "where they are the machine's (the skill shot), and the life-ring target solid.",
+    "PAD-922: the Continental (CAPTIVE BALL TGT) is the self-kicking hole at its mouth (lock), and the",
+    "car (CAR HIT OPTO) a trigger added on its nose, the invisible wall the ball meets in front of",
+    "the table's car (retrofit_triggers); the captive ball top right is the table's own.",
     "Pro is preferred: the table's car does not move and its lock is scripted; the",
     "Pro has neither (its locks are virtual), nor the drop target at the pops."
   ],
@@ -57,7 +60,6 @@
     "Gate001": {"id": 80, "event": "hit", "name": "CENTER RAMP EXIT OPTO (the gate where the center ramp turns right, past the diverter)"},
     "sw6": {"id": 81, "event": "hit", "name": "RIGHT ORBIT"},
     "Kramploop": {"id": 82, "event": "hit", "name": "RIGHT RAMP EXIT OPTO (the right ramp's top (the table hops the ball onto its return wire))"},
-    "CapTrigger1": {"id": 79, "event": "hit", "name": "CAPTIVE BALL TGT (GUESS: the table's captive ball, top right)"},
     "Tclub1": {"id": 84, "event": "hit", "name": "POP TARGET 1"},
     "Tclub2": {"id": 85, "event": "hit", "name": "POP TARGET 2"},
     "Tclub3": {"id": 86, "event": "hit", "name": "POP TARGET 3"},
@@ -65,7 +67,8 @@
     "Tclub5": {"id": 88, "event": "hit", "name": "POP TARGET 5"},
     "sw8": {"id": 92, "event": "hit", "name": "POP EXIT OPTO"},
     "Bumper1": {"id": 93, "event": "hit", "name": "POP BUMPER"},
-    "lock": {"id": 77, "event": "hit", "name": "CAR HIT OPTO (GUESS: the lane round the car ends in this self-kicking hole)"}
+    "lock": {"id": 79, "event": "hit", "name": "CAPTIVE BALL TGT (the Continental: the self-kicking hole at its mouth, PAD-922)"},
+    "PadCarHit": {"id": 77, "event": "hit", "name": "CAR HIT OPTO (a trigger on the car's nose, where the ball meets the car, PAD-922)"}
   },
   "plunger": {"lane_trigger": "swPlungerRest", "lane_switch": 66, "autoplunge": "plungerIM"},
   "trough": {"release": "BallRelease", "drain": "Drain", "switches": [75, 74, 73, 72, 71, 70, 76], "balls": 6, "kick": [90, 4]},
@@ -94,6 +97,10 @@
     "kicker001.createball"
   ],
   "extra_vbs": "'---- PAD (PAD-905): John Wick's switches the shadow game kept for its missions\nTenemy7.Enabled = 1 : Tkatia.Enabled = 1          ' the skill shot, in the shooter lane\nTargetsave.Collidable = 1                        ' MID RIGHT TGT BOT\nTpostG.Enabled = 0 : TpostD.Enabled = 0          ' the machine has no return lane posts\n'---- the Pro has no drop target at the pops' entrance\nTargetclub.IsDropped = 1\n",
+  "retrofit_triggers": {
+    "_": "switches with no table object: a Trigger cloned from `clone`, given `shape` (its drag points), live and drawn as nothing",
+    "PadCarHit": {"clone": "Tclub6", "shape": [[478, 474], [557, 449], [571, 492], [492, 517]], "name": "the car's nose (the table's invisible wall Ramp034 in front of the car), 5 to 50 units out"}
+  },
   "retrofit_timers": {"PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1}, "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100}},
   "lamps": {
     "_": "table light -> Spike 2 LEDs [node, index] (an RGB insert's three: rgb); by PLACE through the fit, then vpxlamps suggest",
@@ -268,7 +275,6 @@
     "LeftSlingShotht",
     "Bumper1",
     "Kramploop",
-    "CapTrigger1",
     "lock"
   ]
 }

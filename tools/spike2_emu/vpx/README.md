@@ -326,6 +326,17 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `DOFALT` and `SoundFXDOF` go through it (`PadDOF`), with Visual Pinball's
   sound-or-toy settings as controller.vbs reads them. No DOF installed: the
   script's DOF goes to B2S.Server as before and every sound plays.
+* **DOF without its COM registration** (PAD-909). DOF's installer registers
+  `DirectOutput.ComObject` per user, and on one cabinet the name vanished
+  between two runs (`no DirectOutput.ComObject (Invalid class string)` in
+  padcontroller.log) while B2S.Server's plugin, which loads DOF's DLLs by
+  path, still started DOF - with nothing to tell it. The controller now tries
+  the ProgID, then DOF's class id, then DOF's own `DirectOutputComObject.dll`
+  (the folder DOF's installer saved in HKCU\SOFTWARE\DirectOutput, B2S's
+  Plugins\DirectOutput, C:\DirectOutput; x64\, x86\ or an old flat folder)
+  in a hidden Windows PowerShell that takes the events on its stdin. The
+  log line says which: `DOF for mtl_180h: up (DOF's own ...; DOF's COM
+  registration is missing)`.
 * **A map whose keys are not the ROM's numbers says so per coil** (PAD-896).
   TMNT's solenoid keys are small numbers of PAD's own (11 = LEFT POP
   BUMPER), but tmnt_104's DOF config is Data East's (11 is its GI relay,

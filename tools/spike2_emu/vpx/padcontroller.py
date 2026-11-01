@@ -964,6 +964,165 @@ class PlayerGrips:
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
 
+DOF_DLL = "DirectOutputComObject.dll"
+
+
+def _dof_shells():
+    """(64-bit, 32-bit) Windows PowerShell; a 32-bit Python sees the 64-bit
+    one as Sysnative."""
+    root = os.environ.get("SystemRoot", r"C:\Windows")
+    ps = r"WindowsPowerShell\v1.0\powershell.exe"
+    native = os.path.join(root, "Sysnative", ps)
+    if not os.path.exists(native):
+        native = os.path.join(root, "System32", ps)
+    return native, os.path.join(root, "SysWOW64", ps)
+
+
+def _dof_dirs():
+    """DOF's install folders, best first: the one its installer saved, the
+    one B2S.Server's DOF plugin points at, then the default C:\\DirectOutput."""
+    out = []
+    try:
+        import winreg
+    except ImportError:
+        return out
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\DirectOutput\DirectOutput") as k:
+            out.append(winreg.QueryValueEx(k, "InstallPath")[0])
+    except OSError:
+        pass
+    for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"B2S.Server\CLSID") as k:
+                clsid = winreg.QueryValueEx(k, "")[0]
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"CLSID\%s\InprocServer32" % clsid,
+                                0, winreg.KEY_READ | view) as k:
+                code = winreg.QueryValueEx(k, "CodeBase")[0]
+        except OSError:
+            continue
+        b2s = os.path.dirname(code.replace("file:///", "").replace("/", "\\"))
+        for sub in ("Plugins64", "Plugins"):
+            d = os.path.join(b2s, sub, "DirectOutput")
+            if os.path.isdir(d):
+                out.append(d)
+            elif os.path.isfile(d + ".lnk"):
+                try:
+                    import win32com.client
+                    out.append(win32com.client.Dispatch("WScript.Shell").CreateShortcut(d + ".lnk").TargetPath)
+                except Exception:                           # noqa: BLE001
+                    pass
+    out.append(os.path.join(os.environ.get("SystemDrive", "C:") + "\\", "DirectOutput"))
+    return out
+
+
+def dof_dll_candidates(dirs=None):
+    """[(DirectOutputComObject.dll, [PowerShell to load it in])]: the x64
+    build in a 64-bit PowerShell, the x86 one in a 32-bit one, and an older
+    install's single folder in whichever loads it."""
+    ps64, ps32 = _dof_shells()
+    seen, out = set(), []
+    for d in (dirs if dirs is not None else _dof_dirs()):
+        d = os.path.normpath(d) if d else ""
+        if not d or d.lower() in seen:
+            continue
+        seen.add(d.lower())
+        if os.path.basename(d).lower() in ("x64", "x86"):
+            d = os.path.dirname(d)
+        for sub, shells in (("x64", [ps64]), ("x86", [ps32]), ("", [ps64, ps32])):
+            dll = os.path.join(d, sub, DOF_DLL) if sub else os.path.join(d, DOF_DLL)
+            if os.path.isfile(dll) and dll.lower() not in seen:
+                seen.add(dll.lower())
+                out.append((dll, shells))
+    return out
+
+
+#: run by _DofProcess: DOF's ComObject loaded from its DLL, Init'ed from the
+#: environment, then one "<kind> <number> <value>" line per event on stdin
+_DOF_PS = r"""
+$ErrorActionPreference = 'Stop'
+try {
+  $a = [Reflection.Assembly]::LoadFrom($env:PAD_DOF_DLL)
+  $d = $a.CreateInstance('DirectOutputCom.ComObject')
+  $d.Init($env:PAD_DOF_HOST, $env:PAD_DOF_TABLE, $env:PAD_DOF_ROM)
+} catch {
+  [Console]::Out.WriteLine('PADDOF ERR ' + $_.Exception.GetBaseException().Message)
+  exit 1
+}
+[Console]::Out.WriteLine('PADDOF UP')
+[Console]::Out.Flush()
+[Console]::SetOut([IO.TextWriter]::Null)
+$in = [Console]::In
+while ($true) {
+  $l = $in.ReadLine()
+  if ($l -eq $null -or $l -eq 'END') { break }
+  $p = $l.Split(' ')
+  try { $d.UpdateTableElement($p[0], [int]$p[1], [int]$p[2]) } catch {}
+}
+$d.Finish()
+"""
+
+
+class _DofProcess:
+    """DOF's ComObject without its COM registration (PAD-909): a PowerShell
+    helper loads DirectOutputComObject.dll itself and takes the events on
+    its stdin. Same three methods DofHost calls on the COM object."""
+
+    INIT_WAIT_S = 15
+
+    def __init__(self, dll, shell):
+        self.dll = dll
+        self.shell = shell
+        self.proc = None
+
+    def Init(self, host, table_file, rom):                 # noqa: N802  DOF's own name
+        import base64
+        if not os.path.isfile(self.shell):
+            raise RuntimeError("no %s" % self.shell)
+        env = dict(os.environ, PAD_DOF_DLL=self.dll, PAD_DOF_HOST=host,
+                   PAD_DOF_TABLE=table_file or "", PAD_DOF_ROM=rom or "")
+        cmd = [self.shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+               "-EncodedCommand", base64.b64encode(_DOF_PS.encode("utf-16-le")).decode("ascii")]
+        # DOF's log (.\DirectOutput.log) lands in DOF's main folder, not x64
+        cwd = os.path.dirname(self.dll)
+        if os.path.basename(cwd).lower() in ("x64", "x86"):
+            cwd = os.path.dirname(cwd)
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.DEVNULL, env=env, cwd=cwd,
+                                     creationflags=_CREATE_NO_WINDOW)
+        said = []
+
+        def read():
+            for raw in self.proc.stdout:
+                line = raw.decode("utf-8", "replace").strip()
+                if line.startswith("PADDOF "):
+                    said.append(line[7:])
+                    return
+        t = threading.Thread(target=read, daemon=True)
+        t.start()
+        t.join(self.INIT_WAIT_S)
+        if said[:1] != ["UP"]:
+            self._kill()
+            raise RuntimeError(said[0] if said else "DOF did not start in %d s" % self.INIT_WAIT_S)
+
+    def UpdateTableElement(self, kind, number, value):     # noqa: N802
+        self.proc.stdin.write(b"%s %d %d\n" % (kind.encode("ascii"), number, value))
+        self.proc.stdin.flush()
+
+    def Finish(self):                                       # noqa: N802
+        try:
+            self.proc.stdin.write(b"END\n")
+            self.proc.stdin.close()
+            self.proc.wait(timeout=10)
+        except Exception:                                   # noqa: BLE001
+            self._kill()
+
+    def _kill(self):
+        try:
+            self.proc.kill()
+        except Exception:                                   # noqa: BLE001
+            pass
+
+
 class DofHost:
     """DOF for a table PAD drives (PAD-879). Under VPinMAME a table's DOF is
     B2S.Server's DOF plugin hearing every solenoid, lamp and switch the ROM
@@ -974,17 +1133,27 @@ class DofHost:
     GlobalConfig_B2SServer.xml, cabinet and table configs the plugin reads -
     and is started before B2S.Server, so it opens the cabinet's devices first.
 
+    DOF's installer registers that object per user, and the registration can
+    go missing while DOF itself still works through B2S.Server's plugin
+    (PAD-909: one install lost its ProgID between two runs). So the object is
+    found by ProgID, then by its class id, then by loading DOF's own
+    DirectOutputComObject.dll from DOF's folder in a PowerShell helper
+    (_DofProcess), which needs no registration at all.
+
     One thread owns the object (its own apartment); send() only queues."""
 
     PROGID = "DirectOutput.ComObject"
+    CLSID = "{A23BFDBC-9A8A-46C0-8672-60F23D54FFB6}"   # DOF's ComObject.ClassId
     HOST = "B2SServer"
     INIT_WAIT_S = 20
 
-    def __init__(self, rom, table_file, factory=None):
+    def __init__(self, rom, table_file, factory=None, dlls=None):
         self.rom = rom
         self.up = False
         self.why = ""
+        self.how = ""
         self.sent = 0
+        self._dlls = dlls
         self._q = queue.Queue()
         self._ready = threading.Event()
         self._factory = factory
@@ -992,21 +1161,53 @@ class DofHost:
         self._thread.start()
         if not self._ready.wait(self.INIT_WAIT_S):
             self.why = "DOF did not finish starting in %d s" % self.INIT_WAIT_S
-        log("DOF for %s: %s" % (rom, "up" if self.up else "off - " + self.why))
+        log("DOF for %s: %s" % (rom, ("up" + (" (%s)" % self.how if self.how else ""))
+                                if self.up else "off - " + self.why))
+
+    def _open(self, table_file, rom):
+        """DOF's object, Init'ed: by ProgID, by class id, else DOF's own DLL."""
+        import win32com.client
+        tried = []
+        for name in (self.PROGID, self.CLSID):
+            try:
+                dof = win32com.client.Dispatch(name)
+            except Exception as exc:                        # noqa: BLE001
+                tried.append("no %s (%s)" % (name, exc))
+                continue
+            dof.Init(self.HOST, table_file, rom)
+            if name == self.CLSID:
+                self.how = "by its class id; the %s name is not registered" % self.PROGID
+            return dof
+        dlls = self._dlls if self._dlls is not None else dof_dll_candidates()
+        if not dlls:
+            tried.append("no DirectOutputComObject.dll in DOF's folder either")
+        for dll, shells in dlls:
+            for shell in shells:
+                try:
+                    dof = _DofProcess(dll, shell)
+                    dof.Init(self.HOST, table_file, rom)
+                except Exception as exc:                    # noqa: BLE001
+                    tried.append("%s: %s" % (dll, exc))
+                    continue
+                self.how = "DOF's own %s; DOF's COM registration is missing" % dll
+                return dof
+        raise RuntimeError("; ".join(tried))
 
     def _run(self, rom, table_file):
         if pythoncom:
             pythoncom.CoInitialize()
         try:
             if self._factory:
-                dof = self._factory()
+                try:
+                    dof = self._factory()
+                except Exception as exc:                    # noqa: BLE001
+                    raise RuntimeError("no %s (%s)" % (self.PROGID, exc))
+                dof.Init(self.HOST, table_file, rom)
             else:
-                import win32com.client
-                dof = win32com.client.Dispatch(self.PROGID)
-            dof.Init(self.HOST, table_file, rom)
+                dof = self._open(table_file, rom)
             self.up = True
         except Exception as exc:                            # noqa: BLE001
-            self.why = "no %s (%s)" % (self.PROGID, exc)
+            self.why = str(exc)
         self._ready.set()
         if not self.up:
             return

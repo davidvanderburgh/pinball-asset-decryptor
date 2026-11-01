@@ -509,7 +509,11 @@ Write what you did and what you expected; the app fills in the rest.
   those blanked.
 - **No email is asked for.** The app remembers the reports it sent and
   asks after them now and then; when a release addresses one, a notice
-  at the top says so, with the developer's note if there is one, and
-  **Your reports** in the window lists each report's state.
+  at the top says so, with the developer's note if there is one.
+- **Your reports** (a button in the window, and on the notice) is a board
+  of every report this app sent: Received, In the queue, Being worked on
+  (with how far along the fix is), Fix ready and Done. Each card shows its
+  ticket number; mention it if you write about the problem elsewhere.
+  **Check now** asks for the latest.
 - **Save as a file…** writes the same report as a .zip to attach to a
   Discord post or a mail when the service cannot be reached.

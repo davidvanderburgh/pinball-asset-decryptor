@@ -243,7 +243,7 @@ def test_the_payload_and_the_zip_carry_the_record_and_the_picture(tmp_path):
 def test_the_cache_remembers_sent_reports_and_folds_in_the_answers(tmp_path):
     path = R.cache_path(str(tmp_path / "settings.json"))
     cache = R.load_cache(path)
-    assert cache == {"mine": [], "checked_at": 0.0}
+    assert cache == {"mine": [], "checked_at": 0.0, "install": ""}
     for i in range(25):
         R.remember(cache, _report(text="report number %d of many" % i),
                    {"id": "id-%d" % i})
@@ -292,7 +292,8 @@ def test_send_and_status_talk_to_the_worker_and_tell_a_refusal_from_a_dead_line(
                             "message": "Fixed.", "answered_at": 9}
     rows = R.fetch_status(worker.url, config.REPORTS_APP_KEY, ["r-1", "zz"])
     assert rows["r-1"] == {"state": "released", "version": "1.275.0",
-                           "message": "Fixed.", "answered_at": 9}
+                           "message": "Fixed.", "answered_at": 9,
+                           "stage": "", "ticket": "", "progress": -1}
     assert rows["zz"]["state"] == "received"
     assert R.fetch_status(worker.url, config.REPORTS_APP_KEY, []) == {}
     with pytest.raises(R.ReportError, match="Not from the app"):
@@ -477,3 +478,167 @@ def test_no_service_configured_means_save_only(tmp_path, monkeypatch):
         with pytest.raises(Exception, match="No report service"):
             w.call("shellx.report_send", "Write stopped at 40% today",
                    "", True)
+
+
+# ------------------------------------------------------- the board (PAD-914)
+def test_the_board_column_comes_from_the_tracker_or_from_the_state():
+    # a service from before the board has only the state
+    assert R.stage_of({"state": "received"}) == "received"
+    assert R.stage_of({"state": "filed"}) == "queued"
+    assert R.stage_of({"state": "released", "stage": "working"}) == "done"
+    assert R.stage_of({"state": "closed"}) == "done"
+    assert R.stage_of({"state": "unknown"}) == "done"
+    # the tracker's stage wins while the report has no last word
+    assert R.stage_of({"state": "filed", "stage": "working"}) == "working"
+    assert R.stage_of({"state": "filed", "stage": "ready"}) == "ready"
+    assert R.stage_of({"state": "filed", "stage": "done"}) == "queued"
+    assert R.stage_of({"state": "filed", "stage": "nonsense"}) == "queued"
+    e = R.board_entry({"id": "r-1", "title": "Write stopped", "at": 5,
+                       "state": "filed", "stage": "working",
+                       "ticket": "PAD-914", "progress": 45, "seen": False})
+    assert e == {"id": "r-1", "title": "Write stopped", "at": 5,
+                 "stage": "working", "state": "filed", "ticket": "PAD-914",
+                 "progress": 45, "version": "", "message": "", "new": True}
+    assert R.board_entry({"progress": 250})["progress"] == -1
+    assert R.board_entry({"progress": None})["progress"] == -1
+
+
+def test_the_install_id_is_anonymous_kept_and_named_in_the_record(tmp_path):
+    path = R.cache_path(str(tmp_path / "settings.json"))
+    cache = R.load_cache(path)
+    i = R.install_id(cache)
+    assert len(i) == 16 and int(i, 16) >= 0
+    assert R.install_id(cache) == i
+    R.save_cache(path, cache)
+    assert R.load_cache(path)["install"] == i
+    # junk on disk is not an id
+    (tmp_path / "reports_cache.json").write_text(
+        json.dumps({"mine": [], "install": "C:/Users/joe"}), encoding="utf-8")
+    assert R.load_cache(path)["install"] == ""
+    rep = _report(install=i)
+    assert ("App id: %s" % i) in R.as_text(rep)
+    assert R.payload(rep)["install"] == i
+    assert "install" not in R.payload(_report())
+
+
+def test_status_carries_the_board_and_folds_into_the_cache(worker):
+    worker.states["r-1"] = {"state": "filed", "stage": "working",
+                            "ticket": "PAD-914", "progress": 45}
+    worker.states["r-2"] = {"state": "filed", "stage": "ready",
+                            "ticket": "PAD-915", "progress": "lots"}
+    rows = R.fetch_status(worker.url, config.REPORTS_APP_KEY, ["r-1", "r-2"])
+    assert (rows["r-1"]["stage"], rows["r-1"]["ticket"],
+            rows["r-1"]["progress"]) == ("working", "PAD-914", 45)
+    assert rows["r-2"]["progress"] == -1
+    cache = {"mine": [{"id": "r-1", "title": "a", "state": "filed",
+                       "seen": True},
+                      {"id": "r-2", "title": "b", "state": "filed",
+                       "seen": True}]}
+    assert R.apply_status(cache, rows) == []        # a move is not news
+    by = {m["id"]: R.board_entry(m) for m in cache["mine"]}
+    assert (by["r-1"]["stage"], by["r-1"]["progress"]) == ("working", 45)
+    assert (by["r-2"]["stage"], by["r-2"]["ticket"]) == ("ready", "PAD-915")
+
+
+def test_your_reports_board_asks_when_stale_and_shows_each_column(
+        tmp_path, worker, monkeypatch):
+    from tests.webui_harness import web_app
+    monkeypatch.setenv("PAD_REPORTS_URL", worker.url)
+    monkeypatch.setattr(config, "REPORTS_URL", worker.url)
+    cfg = tmp_path / "cfg"
+    cfg.mkdir(parents=True, exist_ok=True)
+    R.save_cache(R.cache_path(str(cfg / "settings.json")), {"mine": [
+        {"id": "r-a", "title": "Write stopped at 40%", "at": 1700000000,
+         "state": "filed", "seen": True},
+        {"id": "r-b", "title": "No sound in attract", "at": 1700001000,
+         "state": "received", "seen": True}], "checked_at": 0})
+    worker.states["r-a"] = {"state": "filed", "stage": "working",
+                            "ticket": "PAD-914", "progress": 60}
+    worker.states["r-b"] = {"state": "filed", "stage": "queued",
+                            "ticket": ""}
+    with web_app(tmp_path) as w:
+        assert until(w, lambda: worker.asked)
+        assert until(w, lambda: w.state("shellx")["report"]["checked_at"] > 0)
+        rep = w.state("shellx")["report"]
+        assert rep["checking"] is False
+        board = {m["id"]: m["board"] for m in rep["mine"]}
+        assert (board["r-a"]["stage"], board["r-a"]["ticket"],
+                board["r-a"]["progress"]) == ("working", "PAD-914", 60)
+        assert board["r-b"]["stage"] == "queued"
+        # opening the board right after the ask asks nothing ...
+        assert w.call("shellx.report_board_open") is True
+        w.drain()
+        assert len(worker.asked) == 1
+        # ... and once the last ask is older than a few minutes, it asks
+        svc = w.ctx.registry._methods["shellx.report_board_open"][0].__self__
+        svc._rep_cache["checked_at"] = time.time() - R.BOARD_STATUS_AFTER - 5
+        worker.states["r-a"] = {"state": "filed", "stage": "ready",
+                                "ticket": "PAD-914"}
+        assert w.call("shellx.report_board_open") is True
+        assert until(w, lambda: len(worker.asked) == 2)
+        assert until(w, lambda: {m["id"]: m["board"]["stage"] for m in
+                                 w.state("shellx")["report"]["mine"]}["r-a"]
+                     == "ready")
+        # the notice's Your reports opens the board window
+        opened = []
+        svc._open_dialog = lambda name, **kw: opened.append(name) or True
+        svc._report_banner_action("view")
+        assert opened == ["reports"]
+
+
+def test_a_sent_report_carries_this_apps_id(app_with_worker, tmp_path):
+    w, worker = app_with_worker
+    assert w.call("shellx.report_send", "Write stopped at 40% today",
+                  "", True) == {"sent": True}
+    assert until(w, lambda: (w.state("shellx")["report"]["last"] or {}
+                             ).get("ok"))
+    body = worker.posts[0][2]
+    cache = R.load_cache(R.cache_path(str(tmp_path / "cfg" / "settings.json")))
+    assert cache["install"] and body["install"] == cache["install"]
+    assert ("App id: %s" % cache["install"]) in body["body"]
+    board = w.state("shellx")["report"]["mine"][0]["board"]
+    assert (board["stage"], board["ticket"], board["progress"]) == (
+        "received", "", -1)
+
+
+def test_the_board_script_draws_five_columns_and_escapes_the_words(tmp_path):
+    """report_board.js is the one script the app and the tracker draw the
+    board with: run it under node as the tracker loads it (no module)."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("no node")
+    js = os.path.join(os.path.dirname(__file__), "..", "pinball_decryptor",
+                      "webui", "static", "js", "report_board.js")
+    entries = [
+        {"id": "a", "title": "<b>Write</b> stopped", "at": 1700000000,
+         "stage": "working", "state": "filed", "ticket": "PAD-914",
+         "progress": 45, "version": "", "message": "", "new": False},
+        {"id": "b", "title": "No sound", "at": 1700001000, "stage": "done",
+         "state": "released", "ticket": "PAD-915", "progress": -1,
+         "version": "1.300.0", "message": "Sound is back.", "new": True}]
+    drive = tmp_path / "drive.js"
+    drive.write_text(
+        "globalThis.window = globalThis;\n"
+        "require(%s);\n"
+        "const e = %s;\n"
+        "process.stdout.write(JSON.stringify({\n"
+        "  board: window.PADReportBoard.html(e, {current: 'a'}),\n"
+        "  empty: window.PADReportBoard.html([], {empty: 'none yet'}),\n"
+        "  stages: window.PADReportBoard.STAGES.map((s) => s.key)}));\n"
+        % (json.dumps(os.path.abspath(js)), json.dumps(entries)),
+        encoding="utf-8")
+    out = json.loads(subprocess.run([node, str(drive)], capture_output=True,
+                                    text=True, check=True).stdout)
+    assert out["stages"] == list(R.STAGES)
+    b = out["board"]
+    for label in ("Received", "In the queue", "Being worked on",
+                  "Fix ready", "Done"):
+        assert label in b
+    assert "&lt;b&gt;Write&lt;/b&gt; stopped" in b and "<b>Write" not in b
+    assert "PAD-914" in b and "45% through the work" in b
+    assert "This ticket" in b
+    assert "Fixed in v1.300.0" in b and "Sound is back." in b
+    assert 'class="prb-card prb-new"' in b
+    assert "none yet" in out["empty"]

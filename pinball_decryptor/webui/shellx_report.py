@@ -16,6 +16,11 @@ the last ask is old) and, when one has been addressed in a release or
 closed, shows a notice at the top (the ``report_answer`` banner) and the
 developer's message under Your reports in the window.
 
+Your reports is a board of its own (PAD-914, the ``reports`` window): each
+report in the column of where it is in the developer's queue, with its
+ticket and how far the work is, drawn by ``static/js/report_board.js`` -
+the same script the developer's tracker draws the ticket's copy with.
+
 State: ``shellx.report`` = ``{"available", "busy", "last", "picture",
 "capture", "mine"}``.  Settings (``settings.json`` ``report``): ``name``
 and ``hide_paths``, what the form remembers, through the
@@ -83,7 +88,8 @@ class ReportMixin:
                         "state": m.get("state") or "received",
                         "words": problem_report.state_words(m),
                         "message": m.get("message") or "",
-                        "seen": m.get("seen", True)})
+                        "seen": m.get("seen", True),
+                        "board": problem_report.board_entry(m)})
         return out
 
     def _publish_report(self):
@@ -95,7 +101,9 @@ class ReportMixin:
             "picture": ({"name": p["name"], "kb": (len(p["data"]) + 512) // 1024}
                         if p else None),
             "capture": self._report_can_capture(),
-            "mine": self._report_mine_view()})
+            "mine": self._report_mine_view(),
+            "checking": self._rep_checking,
+            "checked_at": float(self._rep_cache.get("checked_at") or 0)})
 
     def _save_report_settings(self, **changes):
         self._rep_settings.update(changes)
@@ -167,7 +175,9 @@ class ReportMixin:
             tab = self.window.current_tab_key()
         except Exception:                               # noqa: BLE001
             pass
+        install = problem_report.install_id(self._rep_cache)
         return {"app_version": __version__, "platform": sys.platform,
+                "install": install,
                 "facts": self._report_facts(),
                 "log": problem_report.log_tail(),
                 "vpx_log": problem_report.vpx_log_tail(tab),
@@ -347,6 +357,7 @@ class ReportMixin:
         if not ids:
             return False
         self._rep_checking = True
+        self._publish_report()
         key = config.REPORTS_APP_KEY
 
         def _run():
@@ -364,6 +375,7 @@ class ReportMixin:
     def _report_status_in(self, rows):
         self._rep_checking = False
         if rows is None:
+            self._publish_report()
             return
         news = problem_report.apply_status(self._rep_cache, rows)
         self._rep_cache["checked_at"] = time.time()
@@ -400,7 +412,7 @@ class ReportMixin:
 
     def _report_banner_action(self, action):
         if action == "view":
-            self._open_dialog("report")
+            self._open_dialog("reports")
             return True
         self.report_mine_seen()
         return True
@@ -417,6 +429,15 @@ class ReportMixin:
             problem_report.save_cache(self._rep_path, self._rep_cache)
             self._publish_report()
         self.window.set_banner("report_answer", None)
+        return True
+
+    @rpc
+    def report_board_open(self):
+        """Your reports opened: ask after the open ones when the last ask
+        is more than a few minutes old, so the board is current."""
+        age = time.time() - float(self._rep_cache.get("checked_at") or 0)
+        if age > problem_report.BOARD_STATUS_AFTER:
+            self._report_check_status()
         return True
 
     @rpc

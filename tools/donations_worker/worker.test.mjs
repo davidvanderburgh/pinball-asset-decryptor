@@ -24,7 +24,8 @@ function fakeDb() {
         }
         if (sql.startsWith("SELECT id, at, app_version")) {
           return { results: reports.filter((r) => r.state === "received").sort((a, b) => a.at - b.at).slice(0, 20)
-            .map(({ ip_hash, state, version, message, answered_at, ...r }) => r) };
+            .map(({ ip_hash, state, version, message, answered_at, stage, ticket, progress, stage_at,
+                    seen_at, ...r }) => r) };
         }
         if (sql.startsWith("SELECT id, at")) {
           return { results: rows.slice().sort((a, b) => b.at - a.at).slice(0, 200) };
@@ -57,23 +58,40 @@ function fakeDb() {
         if (sql.startsWith("SELECT COUNT(*) AS n FROM reports WHERE ip_hash")) {
           return { n: reports.filter((r) => r.ip_hash === args[0] && r.at > args[1]).length };
         }
-        if (sql.startsWith("SELECT id, state, version, message, answered_at FROM reports")) {
+        if (sql.startsWith("SELECT id, state, version, message, answered_at, stage, ticket, progress FROM reports")) {
           const r = reports.find((x) => x.id === args[0]);
-          return r ? { id: r.id, state: r.state, version: r.version, message: r.message, answered_at: r.answered_at } : null;
+          return r ? { id: r.id, state: r.state, version: r.version, message: r.message, answered_at: r.answered_at,
+            stage: r.stage, ticket: r.ticket, progress: r.progress } : null;
+        }
+        if (sql.startsWith("SELECT seen_at FROM reports")) {
+          const r = reports.find((x) => x.id === args[0]);
+          return r ? { seen_at: r.seen_at } : null;
         }
         throw new Error("unexpected first(): " + sql);
       },
       async run() {
         if (sql.startsWith("INSERT INTO reports")) {
-          const [id, at, app_version, platform, title, body, name, picture_type, picture, ip_hash] = args;
-          reports.push({ id, at, app_version, platform, title, body, name, picture_type, picture, ip_hash,
-            state: "received", version: "", message: "", answered_at: 0 });
+          const [id, at, app_version, platform, title, body, name, picture_type, picture, ip_hash, install] = args;
+          reports.push({ id, at, app_version, platform, title, body, name, picture_type, picture, ip_hash, install,
+            state: "received", version: "", message: "", answered_at: 0,
+            stage: "", ticket: "", progress: -1, stage_at: 0, seen_at: 0 });
           return { meta: { changes: 1 } };
         }
         if (sql.startsWith("UPDATE reports SET state = 'filed'")) {
           const r = reports.find((x) => x.id === args[0] && x.state === "received");
-          if (r) Object.assign(r, { state: "filed", title: "", body: "", name: "", picture_type: "", picture: "", ip_hash: "" });
+          if (r) Object.assign(r, { state: "filed", title: "", body: "", name: "", picture_type: "", picture: "",
+            ip_hash: "", install: "", stage: "queued" });
           return { meta: { changes: r ? 1 : 0 } };
+        }
+        if (sql.startsWith("UPDATE reports SET stage = ?")) {
+          const r = reports.find((x) => x.id === args[4]);
+          if (r) Object.assign(r, { stage: args[0], ticket: args[1], progress: args[2], stage_at: args[3] });
+          return { meta: { changes: r ? 1 : 0 } };
+        }
+        if (sql.startsWith("UPDATE reports SET seen_at = ?")) {
+          let n = 0;
+          for (const r of reports) if (args.slice(1).includes(r.id)) { r.seen_at = args[0]; n++; }
+          return { meta: { changes: n } };
         }
         if (sql.startsWith("UPDATE reports SET state = ?")) {
           const r = reports.find((x) => x.id === args[4]);
@@ -402,6 +420,39 @@ test("the app asks after its reports and hears when a release addresses one", as
   e.DB.reports[0].answered_at = 1;
   [st, out] = await get(e, "/v1/report/status?ids=" + a.id, hdr);
   assert.deepEqual([out.rows[0].state, e.DB.reports.length], ["unknown", 1]);
+});
+
+test("the tracker moves a report along the app's board, and hears when the app last looked", async () => {
+  const e = env();
+  const [, a] = await postReport(e, { body: RECORD, install: "0123456789abcdef" });
+  const [, b] = await postReport(e, { body: RECORD, install: "not an id" });
+  assert.equal(e.DB.reports[0].install, "0123456789abcdef");
+  assert.equal(e.DB.reports[1].install, "", "only 16 hex digits are kept");
+  const [, list] = await get(e, "/v1/admin/reports", { "X-PAD-Admin": "adm" });
+  assert.equal(list.rows[0].install, "0123456789abcdef");
+  await admin(e, "/v1/admin/reports/" + a.id + "/taken");
+  assert.deepEqual([e.DB.reports[0].stage, e.DB.reports[0].install], ["queued", ""]);
+  const hdr = { "X-PAD-Key": "k" };
+  // not yet asked: the push hears seen_at 0
+  let r = await admin(e, "/v1/admin/reports/" + a.id + "/stage", { stage: "working", ticket: "PAD-914", progress: 45 });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { ok: true, id: a.id, stage: "working", seen_at: 0 });
+  let [, out] = await get(e, "/v1/report/status?ids=" + a.id + "," + b.id, hdr);
+  assert.deepEqual([out.rows[0].stage, out.rows[0].ticket, out.rows[0].progress], ["working", "PAD-914", 45]);
+  assert.deepEqual([out.rows[1].stage, out.rows[1].progress], ["", -1]);
+  assert.ok(e.DB.reports[0].seen_at > 0 && e.DB.reports[1].seen_at > 0);
+  r = await admin(e, "/v1/admin/reports/" + a.id + "/stage", { stage: "ready", ticket: "PAD-914", progress: 250 });
+  const j = await r.json();
+  assert.equal(j.seen_at, e.DB.reports[0].seen_at, "the push says when the app last asked");
+  assert.equal(e.DB.reports[0].progress, -1, "a percent out of range is not said");
+  assert.equal((await admin(e, "/v1/admin/reports/" + a.id + "/stage", { stage: "fixed" })).status, 400);
+  assert.equal((await admin(e, "/v1/admin/reports/" + "0".repeat(32) + "/stage", { stage: "queued" })).status, 404);
+  const anon = await worker.fetch(new Request(BASE + "/v1/admin/reports/" + a.id + "/stage",
+    { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }), e);
+  assert.equal(anon.status, 403);
+  // an unknown id is still "unknown", with the board's fields blank
+  [, out] = await get(e, "/v1/report/status?ids=" + "f".repeat(32), hdr);
+  assert.deepEqual([out.rows[0].state, out.rows[0].stage, out.rows[0].progress], ["unknown", "", -1]);
 });
 
 test("a report without a title is named by its first line, and one address gets five an hour", async () => {

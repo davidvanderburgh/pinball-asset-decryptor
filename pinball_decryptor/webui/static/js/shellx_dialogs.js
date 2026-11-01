@@ -14,6 +14,7 @@ import { html, useEffect, useRef, useState, Modal, Button, Field, Select, Icon, 
 import { useNs, useEvent } from "./core/store.js";
 import { call } from "./core/rpc.js";
 import { registerDialog, openDialog } from "./core/dialogs.js";
+import "./report_board.js";   // window.PADReportBoard (PAD-914)
 
 // ------------------------------------------------------------ helpers
 // Escape closes only the window on TOP, as in Tk, where each window had its
@@ -1253,29 +1254,19 @@ function ReportDialog({ close, prefill = "" }) {
     if (!ok) setBusy(false);
   };
   const save = () => act(() => call("shellx.report_save", text, name, hidePaths));
-  // the reports this app sent, newest first, with how each is doing; the
-  // list starts open when one has news, and showing it marks the news seen
-  const mine = (r.mine || []).slice().reverse();
+  // the reports this app sent are a board of their own (PAD-914)
+  const mine = r.mine || [];
   const hasNews = !!mine.find((m) => m.seen === false);
-  const [mineOpen, setMineOpen] = useState(hasNews);
-  useEffect(() => { if (mineOpen && hasNews) call("shellx.report_mine_seen"); }, [mineOpen, hasNews]);
-  const Mine = () => mine.length ? html`<details class="sx-rep-facts" open=${mineOpen}
-      onToggle=${(e) => setMineOpen(e.target.open)}>
-    <summary class="small">Your reports (${mine.length})</summary>
-    <table class="sx-rep-mine small"><tbody>
-      ${mine.map((m) => html`<tr class=${m.seen === false ? "new" : ""}>
-        <td class="muted notr">${m.when}</td>
-        <td class="notr ellip" title=${m.title}>${m.title}</td>
-        <td class=${"notr " + (m.state === "released" ? "ok" : "muted")}>${m.words}</td>
-      </tr>${m.message ? html`<tr class="msg"><td></td><td colspan="2" class="notr">${m.message}</td></tr>` : null}`)}
-    </tbody></table>
-  </details>` : null;
+  const board = () => { close(); openDialog("reports"); };
+  const Mine = () => mine.length ? html`<div class="row" style="gap:8px">
+    <${Button} size="sm" onClick=${board}>Your reports (${mine.length})<//>
+    ${hasNews ? html`<span class="chip sm info">News</span>` : null}
+  </div>` : null;
   if (hidden) return null;
   if (sentId) {
     return html`<${Modal} title="Report a problem" icon="flag" onClose=${onClose} cls=${"sx-report " + uid}
-      footer=${html`<${Button} kind="primary" onClick=${close}>Close<//>`}>
-      <${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached. When a release addresses it, this app tells you with a notice at the top, and under Your reports in this window.<//>
-      <${Mine} />
+      footer=${html`<${Button} onClick=${board}>See your reports<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
+      <${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached. Your reports shows where it is in the queue, and when a release addresses it this app tells you with a notice at the top.<//>
     <//>`;
   }
   const facts = (info && info.facts) || [];
@@ -1319,5 +1310,43 @@ function ReportDialog({ close, prefill = "" }) {
   <//>`;
 }
 registerDialog("report", ReportDialog);
+
+// PAD-914: Your reports, a board of every report this app sent, in the
+// column of where it is in the developer's queue.  report_board.js draws
+// it, the same script the developer's tracker draws the ticket's copy
+// with, so both see the same thing.  Opening it asks after the open
+// reports when the last ask is a few minutes old, and marks news seen.
+function ReportsDialog({ close }) {
+  const sx = useNs("shellx");
+  const r = sx.report || {};
+  const [uid, onClose] = useWin(close);
+  const mine = r.mine || [];
+  const hasNews = !!mine.find((m) => m.seen === false);
+  useEffect(() => { call("shellx.report_board_open"); }, []);
+  useEffect(() => { if (hasNews) call("shellx.report_mine_seen"); }, [hasNews]);
+  // the news stays marked for as long as the window is open
+  const [news] = useState(() => new Set(mine.filter((m) => m.seen === false).map((m) => m.id)));
+  const entries = mine.map((m) => Object.assign({}, m.board, { new: news.has(m.id) }));
+  const board = window.PADReportBoard
+    ? window.PADReportBoard.html(entries, { empty: "No reports sent from this app yet. Report a problem sends one." })
+    : "";
+  const ago = r.checked_at ? Math.max(0, Math.round((Date.now() / 1000 - r.checked_at) / 60)) : null;
+  const checked = r.checking ? "Asking the developer's service…"
+    : ago === null ? "Not asked yet"
+    : ago < 1 ? "Up to date" : ago < 60 ? `Asked ${ago} min ago`
+    : ago < 2880 ? `Asked ${Math.round(ago / 60)} h ago` : `Asked ${Math.round(ago / 1440)} days ago`;
+  return html`<${Modal} title="Your reports" icon="flag" xwide onClose=${onClose} cls=${"sx-reports " + uid}
+    footer=${html`<span class="small muted">${checked}</span>
+      <span class="grow"></span>
+      <${Button} kind="ghost" onClick=${() => call("shellx.report_refresh")} disabled=${!r.available || r.checking}>Check now<//>
+      <${Button} onClick=${() => { close(); openDialog("report"); }}>Report a problem…<//>
+      <${Button} kind="primary" onClick=${close}>Close<//>`}>
+    <div class="stack" style="gap:10px">
+      <p class="sx-p">Every report this app sent, and where it is in the developer's queue. The number on a card is its ticket: mention it if you write about the problem anywhere else.</p>
+      <div class="sx-board" dangerouslySetInnerHTML=${{ __html: board }}></div>
+    </div>
+  <//>`;
+}
+registerDialog("reports", ReportsDialog);
 
 export { TipsPanel };

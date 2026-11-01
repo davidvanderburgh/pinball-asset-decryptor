@@ -25,7 +25,15 @@ Three parts, none of them touching the UI (the window is
   ``reports_cache.json`` beside settings.json), asks after them with
   :func:`fetch_status`, and tells the user in the app once the report's
   ticket shipped in a release or was closed (:func:`state_words`), with
-  the developer's message when there is one.
+  the developer's message when there is one;
+* the board (PAD-914): every report on its way through the developer's
+  queue, Received -> In the queue -> Being worked on -> Fix ready -> Done,
+  with the ticket's number and how far through the work it is
+  (:func:`stage_of`, :func:`board_entry`).  The developer's tracker pushes
+  each report's stage to the service, and draws the very same board from
+  the same script (``webui/static/js/report_board.js``) in the ticket, so
+  what the user sees is what the developer sees.  An anonymous id made on
+  this PC (:func:`install_id`) ties the app's reports together there.
 
 Nothing personal is gathered on its own: a name is what the user typed,
 the log is the app's own log, and the user sees the whole record before
@@ -37,6 +45,7 @@ import io
 import json
 import os
 import re
+import secrets
 import sys
 import time
 import urllib.error
@@ -60,8 +69,11 @@ MAX_TEXT = 4000
 MAX_NAME = 80
 #: this many of the app's own reports are remembered and asked after
 KEEP_MINE = 20
-#: the service is asked after the open ones at most this often
+#: the service is asked after the open ones at most this often in the
+#: background ...
 STATUS_AFTER = 6 * 3600
+#: ... and when the user opens the board, when the last ask is older
+BOARD_STATUS_AFTER = 10 * 60
 #: a picture is shrunk until it fits this (the service keeps a row under
 #: Cloudflare D1's 2 MB; base64 adds a third)
 MAX_PICTURE_BYTES = 700_000
@@ -232,6 +244,9 @@ def as_text(report):
         lines.append("%s: %s" % (label, fix(str(value))))
     if report.get("name"):
         lines.append("From: %s" % report["name"])
+    if report.get("install"):
+        lines.append("App id: %s (made on this PC, names nobody; it ties "
+                     "this app's reports together)" % report["install"])
     if hide:
         lines.append("File paths and the account name were left out at "
                      "the user's request.")
@@ -260,6 +275,8 @@ def payload(report):
            "title": title_of(report),
            "body": as_text(report),
            "name": report.get("name") or ""}
+    if report.get("install"):
+        out["install"] = report["install"]
     p = report.get("picture")
     if p and p.get("data"):
         out["picture_type"] = p.get("type") or "image/jpeg"
@@ -321,6 +338,40 @@ STATE_WORDS = {
 }
 
 
+#: the board's columns, in order (report_board.js draws the same five)
+STAGES = ("received", "queued", "working", "ready", "done")
+
+
+def stage_of(entry):
+    """Which column of the board *entry* is in.  The tracker's own stage
+    when the service has one; a service that predates the board
+    (PAD-914) has only the state, which says as much as it can."""
+    state = entry.get("state") or "received"
+    if answered(entry):
+        return "done"
+    stage = entry.get("stage") or ""
+    if stage in STAGES and stage != "done":
+        return stage
+    return "queued" if state == "filed" else "received"
+
+
+def board_entry(entry):
+    """One report as the board draws it: the shape report_board.js reads,
+    in the app and in the developer's tracker alike."""
+    try:
+        progress = int(entry.get("progress"))
+    except (TypeError, ValueError):
+        progress = -1
+    return {"id": entry.get("id") or "", "title": entry.get("title") or "",
+            "at": entry.get("at") or 0, "stage": stage_of(entry),
+            "state": entry.get("state") or "received",
+            "ticket": entry.get("ticket") or "",
+            "progress": progress if 0 <= progress <= 100 else -1,
+            "version": entry.get("version") or "",
+            "message": entry.get("message") or "",
+            "new": entry.get("seen") is False}
+
+
 def state_words(entry):
     """One line for one of the app's own reports."""
     state = entry.get("state") or "received"
@@ -336,8 +387,10 @@ def answered(entry):
 
 
 def fetch_status(url, key, ids, timeout=TIMEOUT):
-    """``{id: {"state", "version", "message", "answered_at"}}`` for the
-    app's own report *ids* (at most 20 a call)."""
+    """``{id: {"state", "version", "message", "answered_at", "stage",
+    "ticket", "progress"}}`` for the app's own report *ids* (at most 20 a
+    call).  The last three are the board's; an older service leaves them
+    out (blank, and -1 for no progress)."""
     ids = [i for i in ids if i][:20]
     if not url or not ids:
         return {}
@@ -354,8 +407,19 @@ def fetch_status(url, key, ids, timeout=TIMEOUT):
             rows[r["id"]] = {"state": r.get("state") or "received",
                              "version": r.get("version") or "",
                              "message": r.get("message") or "",
-                             "answered_at": r.get("answered_at") or 0}
+                             "answered_at": r.get("answered_at") or 0,
+                             "stage": r.get("stage") or "",
+                             "ticket": r.get("ticket") or "",
+                             "progress": _progress(r.get("progress"))}
     return rows
+
+
+def _progress(value):
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return -1
+    return n if 0 <= n <= 100 else -1
 
 
 def cache_path(settings_file):
@@ -366,7 +430,7 @@ def load_cache(path):
     """``{"mine": [entries], "checked_at": float}``; a missing or broken
     file is an empty cache.  An entry: ``id, title, at, state, version,
     message, answered_at, seen``."""
-    out = {"mine": [], "checked_at": 0.0}
+    out = {"mine": [], "checked_at": 0.0, "install": ""}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -381,7 +445,19 @@ def load_cache(path):
         out["checked_at"] = float(data.get("checked_at") or 0)
     except (TypeError, ValueError):
         pass
+    if re.fullmatch(r"[0-9a-f]{16}", str(data.get("install") or "")):
+        out["install"] = data["install"]
     return out
+
+
+def install_id(cache):
+    """This app's anonymous id, made the first time it is needed and kept
+    in the cache: 16 random hex digits, nothing about the PC or the user.
+    The developer's tracker groups the reports that carry it, so the
+    ticket shows the whole board this app shows."""
+    if not cache.get("install"):
+        cache["install"] = secrets.token_hex(8)
+    return cache["install"]
 
 
 def save_cache(path, cache):
@@ -400,7 +476,8 @@ def remember(cache, report, answer):
     cache.setdefault("mine", []).append({
         "id": str(answer.get("id") or ""), "title": title_of(report),
         "at": report.get("at") or time.time(), "state": "received",
-        "version": "", "message": "", "answered_at": 0, "seen": True})
+        "version": "", "message": "", "answered_at": 0, "seen": True,
+        "stage": "received", "ticket": "", "progress": -1})
     cache["mine"] = cache["mine"][-KEEP_MINE:]
     return cache
 
@@ -418,6 +495,9 @@ def apply_status(cache, rows):
         m["version"] = r["version"]
         m["message"] = r["message"]
         m["answered_at"] = r["answered_at"]
+        m["stage"] = r.get("stage") or ""
+        m["ticket"] = r.get("ticket") or ""
+        m["progress"] = r.get("progress", -1)
         if answered(m) and not answered({"state": was}):
             m["seen"] = False
             news.append(m)

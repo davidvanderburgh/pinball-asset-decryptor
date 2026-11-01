@@ -58,11 +58,18 @@ const PER_HOUR = 5;                // donations one address may add per hour
 // closed.  The app that sent it asks after its own ids (GET
 // /v1/report/status) and tells the user in the app, so no address is ever
 // asked for or stored.  An answered row is dropped after REPORT_KEEP_DAYS.
+// PAD-914: between filed and the answer the tracker also pushes the row's
+// STAGE on the app's board (POST .../stage: queued, working or ready, the
+// ticket's number and how far through the work it is), and every ask from
+// the app stamps `seen_at`, which the push answers with, so the tracker
+// knows when the user's app last looked.  `install` (an anonymous id the
+// app made) goes to the tracker with the report and is blanked on taken.
 const REPORTS_PER_HOUR = 5;
 const REPORT_MAX_BODY = 400000;    // the record (log tail included)
 const REPORT_MAX_PICTURE = 1000000; // base64 of a shrunk JPEG
 const REPORT_KEEP_DAYS = 90;
 const REPORT_STATES = ["released", "closed"];
+const REPORT_STAGES = ["queued", "working", "ready", "done"];
 
 const json = (body, status = 200, extra = {}) =>
   new Response(JSON.stringify(body), {
@@ -325,6 +332,7 @@ function validateReport(body) {
     name: clean(body.name, 80),
     app_version: clean(body.app_version, 40),
     platform: clean(body.platform, 40),
+    install: /^[0-9a-f]{16}$/.test(body.install || "") ? body.install : "",
     picture_type: picture ? clean(body.picture_type, 40) || "image/jpeg" : "",
     picture,
   }, null];
@@ -354,9 +362,9 @@ async function report(request, env, ctx) {
   const id = crypto.randomUUID();
   await env.DB.prepare(
     "INSERT INTO reports (id, at, app_version, platform, title, body, name, " +
-    "picture_type, picture, ip_hash, state) VALUES (?,?,?,?,?,?,?,?,?,?,'received')")
+    "picture_type, picture, ip_hash, install, state) VALUES (?,?,?,?,?,?,?,?,?,?,?,'received')")
     .bind(id, now, rep.app_version, rep.platform, rep.title, rep.body, rep.name,
-          rep.picture_type, rep.picture, who).run();
+          rep.picture_type, rep.picture, who, rep.install).run();
   // no Discord line (PAD-836): the webhook is #donations, and pad-triage
   // posts each report in #bug-reports itself once it takes it
   return json({ ok: true, id }, 201);
@@ -367,7 +375,7 @@ async function report(request, env, ctx) {
 async function adminReports(env) {
   const { results } = await env.DB.prepare(
     "SELECT id, at, app_version, platform, title, body, name, " +
-    "picture_type, picture FROM reports WHERE state = 'received' ORDER BY at LIMIT 20").all();
+    "picture_type, picture, install FROM reports WHERE state = 'received' ORDER BY at LIMIT 20").all();
   return json({ ok: true, rows: results });
 }
 
@@ -376,7 +384,8 @@ async function adminReports(env) {
 async function reportTaken(env, id) {
   const r = await env.DB.prepare(
     "UPDATE reports SET state = 'filed', title = '', body = '', name = '', " +
-    "picture_type = '', picture = '', ip_hash = '' WHERE id = ? AND state = 'received'")
+    "picture_type = '', picture = '', ip_hash = '', install = '', stage = 'queued' " +
+    "WHERE id = ? AND state = 'received'")
     .bind(id).run();
   if (!r.meta.changes) return fail("No such report.", 404);
   return json({ ok: true, id });
@@ -401,6 +410,31 @@ async function reportAnswer(request, env, id) {
   return json({ ok: true, id, state });
 }
 
+// the tracker moving a report along the app's board (PAD-914): its stage,
+// its ticket's number and how far through the work it is (-1: not said).
+// The answer carries when the app last asked, so the tracker can say
+// whether the user has seen this stage yet.
+async function reportStage(request, env, id) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (e) {
+    return fail("Bad request.", 400);
+  }
+  const stage = clean(body.stage, 20);
+  if (!REPORT_STAGES.includes(stage)) return fail("stage must be one of " + REPORT_STAGES.join(", ") + ".", 400);
+  const p = Number.isInteger(body.progress) && body.progress >= 0 && body.progress <= 100 ? body.progress : -1;
+  const now = Math.floor(Date.now() / 1000);
+  const r = await env.DB.prepare(
+    "UPDATE reports SET stage = ?, ticket = ?, progress = ?, stage_at = ? WHERE id = ?")
+    .bind(stage, clean(body.ticket, 20), p, now, id).run();
+  if (!r.meta.changes) return fail("No such report.", 404);
+  const row = await env.DB.prepare("SELECT seen_at FROM reports WHERE id = ?").bind(id).first();
+  // `at` is this Worker's clock, which seen_at is on too: the tracker
+  // compares the two, never its own clock with ours
+  return json({ ok: true, id, stage, seen_at: (row && row.seen_at) || 0, at: now });
+}
+
 // the app asking after the reports it sent (ids it was answered, up to 20)
 async function reportStatus(request, env, url) {
   if (env.APP_KEY && request.headers.get("X-PAD-Key") !== env.APP_KEY) {
@@ -416,9 +450,17 @@ async function reportStatus(request, env, url) {
   const rows = [];
   for (const id of ids) {
     const r = await env.DB.prepare(
-      "SELECT id, state, version, message, answered_at FROM reports WHERE id = ?")
+      "SELECT id, state, version, message, answered_at, stage, ticket, progress " +
+      "FROM reports WHERE id = ?")
       .bind(id).first();
-    rows.push(r || { id, state: "unknown", version: "", message: "", answered_at: 0 });
+    rows.push(r || { id, state: "unknown", version: "", message: "", answered_at: 0,
+                     stage: "", ticket: "", progress: -1 });
+  }
+  // when the app last looked, for the tracker's copy of the board
+  if (ids.length) {
+    await env.DB.prepare(
+      "UPDATE reports SET seen_at = ? WHERE id IN (" + ids.map(() => "?").join(",") + ")")
+      .bind(now, ...ids).run();
   }
   return json({ ok: true, rows });
 }
@@ -447,9 +489,10 @@ export default {
         if (!isAdmin(request, env)) return fail("Not allowed.", 403);
         return adminReports(env);
       }
-      const tk = path.match(/^\/v1\/admin\/reports\/([0-9a-f-]{8,40})\/(taken|answer)$/);
+      const tk = path.match(/^\/v1\/admin\/reports\/([0-9a-f-]{8,40})\/(taken|answer|stage)$/);
       if (request.method === "POST" && tk) {
         if (!isAdmin(request, env)) return fail("Not allowed.", 403);
+        if (tk[2] === "stage") return reportStage(request, env, tk[1]);
         return tk[2] === "taken" ? reportTaken(env, tk[1]) : reportAnswer(request, env, tk[1]);
       }
       if (path === "/v1/admin/list") {

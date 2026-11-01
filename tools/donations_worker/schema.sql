@@ -46,7 +46,17 @@ CREATE TABLE IF NOT EXISTS reports (
   state        TEXT    NOT NULL DEFAULT 'received',
   version      TEXT    NOT NULL DEFAULT '',
   message      TEXT    NOT NULL DEFAULT '',
-  answered_at  INTEGER NOT NULL DEFAULT 0
+  answered_at  INTEGER NOT NULL DEFAULT 0,
+  -- PAD-914, the app's board: the column the tracker last put it in, its
+  -- ticket, how far through the work (-1: not said), when that was, when
+  -- the app last asked, and the app's anonymous id until /taken.  A
+  -- database made before these is brought up with migrate_pad914.sql.
+  stage        TEXT    NOT NULL DEFAULT '',
+  ticket       TEXT    NOT NULL DEFAULT '',
+  progress     INTEGER NOT NULL DEFAULT -1,
+  stage_at     INTEGER NOT NULL DEFAULT 0,
+  seen_at      INTEGER NOT NULL DEFAULT 0,
+  install      TEXT    NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS reports_at ON reports (at);
 CREATE INDEX IF NOT EXISTS reports_ip ON reports (ip_hash, at);

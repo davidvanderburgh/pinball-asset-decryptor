@@ -73,11 +73,12 @@ with mentions disarmed.
 | `GET /v1/admin/list` | header `X-PAD-Admin`; the last 200 rows with ids; `held` = 1 is one waiting for your review |
 | `POST /v1/admin/review/<id>` | header `X-PAD-Admin`; JSON `{"approve": true}` counts a held row from then on, `false` hides it |
 | `DELETE /v1/donate/<id>` | header `X-PAD-Admin` hides any row; `X-PAD-Key` plus `X-PAD-Edit` (the token the POST answered) lets the app that added a row take it back |
-| `POST /v1/report` | header `X-PAD-Key`; JSON `title, body, name, app_version, platform, picture_type, picture_b64`: the app's Report a problem (PAD-780) |
-| `GET /v1/report/status?ids=a,b` | header `X-PAD-Key`; each id's `state` (received, filed, released, closed, unknown), `version` and `message`: how the app tells its user |
+| `POST /v1/report` | header `X-PAD-Key`; JSON `title, body, name, app_version, platform, install, picture_type, picture_b64`: the app's Report a problem (PAD-780) |
+| `GET /v1/report/status?ids=a,b` | header `X-PAD-Key`; each id's `state` (received, filed, released, closed, unknown), `version`, `message`, and the board's `stage`, `ticket`, `progress`: how the app tells its user. Stamps `seen_at` |
 | `GET /v1/admin/reports` | header `X-PAD-Admin`; the reports not yet taken, oldest first, picture included |
 | `POST /v1/admin/reports/<id>/taken` | header `X-PAD-Admin`; blanks everything the user wrote, state `filed` |
 | `POST /v1/admin/reports/<id>/answer` | header `X-PAD-Admin`; JSON `{"state": "released"\|"closed", "version", "message"}`: what the app shows its user |
+| `POST /v1/admin/reports/<id>/stage` | header `X-PAD-Admin`; JSON `{"stage": "queued"\|"working"\|"ready"\|"done", "ticket", "progress"}`: the report's column on the app's Your reports board (PAD-914); answers `seen_at`, when the app last asked |
 
 Remove a junk entry:
 
@@ -108,6 +109,17 @@ schema only creates what is missing:
 
 ```bash
 npx wrangler d1 execute pad-donations --remote --file schema.sql
+npx wrangler deploy
+```
+
+**Your reports board (PAD-914).** Between `/taken` and `/answer` the
+tracker posts `/stage` whenever a report moves (in the queue, being
+worked on with a percent, fix ready), and the app draws the user's reports
+as a board. A database made before PAD-914 needs its new columns once,
+before the deploy:
+
+```bash
+npx wrangler d1 execute pad-donations --remote --file migrate_pad914.sql
 npx wrangler deploy
 ```
 

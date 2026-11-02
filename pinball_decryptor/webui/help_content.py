@@ -3555,7 +3555,7 @@ PREVIEW_HELP = {
             ("For table authors",
              "The game sees a table only through its own switches, coils and lights, so a "
              "table of a Stern game is complete when every one of them has its object. "
-             "**Checklist...** writes a Markdown file for the game chosen: every playfield "
+             "**Checklist...** opens the checklist for the game chosen: every playfield "
              "switch (its id and number, what kind of part it is, where it sits on the "
              "game's own drawing, and what a table does for one of its kind), every coil "
              "(which ones the node boards fire themselves from their switch, which the game "
@@ -3566,10 +3566,16 @@ PREVIEW_HELP = {
              "inserts no light shows, and the places the map marks GUESS. A table the app has "
              "no map for gets a starter map beside the checklist, every part of the machine "
              "listed under a TODO key to rename to the table's object.\n"
+             "- **Coverage** on a table's row is how much of the game the app's map for it "
+             "wires (switches, coils and inserts the table owes, less what the map leaves "
+             "out); click it for that table's checklist, checked against the download it "
+             "was patched from.\n"
              "- The games listed are the ones that have run on this PC: the checklist is read "
              "from the game's own tables, which the emulator writes on a title's first run. "
              "Play a game once and it appears.\n"
-             "- The file opens when written; it is plain Markdown, so it reads anywhere."),
+             "- **Only what is missing** narrows the sheet to the NO rows. **Export CSV...** "
+             "and **Save Markdown...** write it out; **Save starter map...** appears for a "
+             "table the app has no map for."),
             ("Playing",
              "| Key | Does |\n"
              "|---|---|\n"

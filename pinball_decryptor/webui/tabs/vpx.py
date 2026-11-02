@@ -88,6 +88,7 @@ class VpxTab(TabService):
         super().__init__(window)
         self._lock = threading.Lock()
         self._busy = False
+        self._want_coverage = True
         ok = sys.platform == "win32"
         missing = not os.path.isfile(os.path.join(kit_dir(), "vpxsetup.py"))
         note = ("Visual Pinball runs on Windows only." if not ok else
@@ -100,7 +101,7 @@ class VpxTab(TabService):
                  layout="", monitors=0, display=None, runtime_state="unknown",
                  runtime_text="Checking…", message="", message_level="info",
                  authors_intro=AUTHORS_INTRO, authors_titles_tip=AUTHORS_TITLES_TIP,
-                 author_titles=[], author_title="", author_note="", author_out="")
+                 author_titles=[], author_title="", author_note="", coverage={}, sheet=None)
 
     # -- hooks ---------------------------------------------------------------
     def on_show(self):
@@ -197,12 +198,22 @@ class VpxTab(TabService):
             chosen = next((t.get("title") for t in st.get("tables") or []
                            if t.get("title") in titles and set(t.get("titles") or []) & cards), None) \
                 or (titles[0] if titles else "")
+        # how much each table's map wires of its game (the Coverage column):
+        # read from the same tables, ~10 s over WSL's share for 20 titles, so
+        # once per sitting and on Check again, not after every job
+        coverage = self.get("coverage") or {}
+        if self._want_coverage or not coverage:
+            got = self._kit("vpxauthor.py", ["coverage"], timeout=300)
+            if "error" not in got and isinstance(got.get("coverage"), dict):
+                coverage = got["coverage"]
+            self._want_coverage = False
         self.set(loaded=True, busy="", runtime_state=rt_state, runtime_text=rt_text,
-                 author_titles=titles, author_title=chosen, **st)
+                 author_titles=titles, author_title=chosen, coverage=coverage, **st)
 
     # -- the page's buttons -------------------------------------------------
     @rpc
     def refresh(self):
+        self._want_coverage = True
         return self._start("Checking", lambda: None)
 
     @rpc
@@ -459,11 +470,10 @@ class VpxTab(TabService):
 
     @rpc
     def checklist(self, with_table=False):
-        """Write the title's checklist (padvpx checklist, vpxauthor.py) into a
-        folder of the person's choosing and open it. With *with_table*, the
-        dialog first asks for the .vpx to check: the checklist then marks
-        every part of the machine that table leaves out, and a table the kit
-        has no map for gets a starter map beside it."""
+        """The chosen title's checklist, shown in the app (the `sheet`). With
+        *with_table*, the dialog first asks for the .vpx to check: the sheet
+        then marks every part of the machine that table leaves out, and a
+        table the kit has no map for gets a starter map to save."""
         title = self.get("author_title") or ""
         if not title:
             return False
@@ -474,28 +484,71 @@ class VpxTab(TabService):
             if not table:
                 return False
             table = os.path.normpath(table)
-        folder = self.window.ask_folder("vpx_checklist", "Where to write the checklist",
-                                        initialdir=self.get("tables_dir") or None)
-        if not folder:
-            return False
-        folder = os.path.normpath(folder)
+        return self._sheet(title, table)
 
+    @rpc
+    def row_checklist(self, output):
+        """A table row's Coverage cell: the checklist for that table, checked
+        against the download it was patched from (or its (PAD) copy)."""
+        t = next((t for t in self.get("tables") or [] if output and t.get("output") == output), None)
+        if not t or not t.get("title"):
+            return False
+        tables_dir = self.get("tables_dir") or ""
+        table = t.get("source") or ""
+        if not table and t.get("patched") and tables_dir:
+            table = os.path.join(tables_dir, output)
+        return self._sheet(t["title"], table)
+
+    def _sheet(self, title, table):
         def work():
-            args = ["checklist", title] + (["--table", table] if table else []) + ["--out", folder]
-            got = self._kit("padvpx.py", args, timeout=300)
+            args = ["data", title] + (["--table", table] if table else [])
+            got = self._kit("vpxauthor.py", args, timeout=300)
             if "error" in got:
                 self.set(author_note=got["error"])
                 self._say(got["error"], "warning" if "No device tables" in got["error"] else "error")
                 return
-            words = self._checklist_words(got)
-            self.set(author_note=words, author_out=got.get("out") or "")
+            got.pop("_text", None)
+            words = self._checklist_words(got["summary"])
+            self.set(author_note=words, sheet=got)
             self._say(words)
-            if sys.platform == "win32" and got.get("out"):
-                try:
-                    os.startfile(got["out"])                # noqa: S606
-                except OSError:
-                    pass
-        return self._start("Writing the checklist", work)
+        return self._start("Reading the checklist", work)
+
+    @rpc
+    def close_sheet(self):
+        self.set(sheet=None)
+        return True
+
+    @rpc
+    def export(self, kind):
+        """The open sheet as a file: CSV, Markdown, or the starter map."""
+        sheet = self.get("sheet") or {}
+        if not sheet:
+            return False
+        stem = "%s - Visual Pinball table checklist" % sheet.get("title", "")
+        if sheet.get("inventory"):
+            stem += " - " + re.sub(r'[\/:*?"<>|]+', "_", os.path.splitext(sheet["inventory"]["name"])[0])
+        if kind == "csv":
+            text, name, types = sheet.get("csv", ""), stem + ".csv", [("CSV", "*.csv")]
+        elif kind == "md":
+            text, name, types = sheet.get("markdown", ""), stem + ".md", [("Markdown", "*.md")]
+        elif kind == "starter" and sheet.get("starter"):
+            text = json.dumps(sheet["starter"], indent=1)
+            name, types = "%s.starter.shadow.json" % sheet.get("title", ""), [("Map", "*.json")]
+        else:
+            return False
+        path = self.window.ask_save("vpx_checklist", "Save the checklist as", initialfile=name, filetypes=types,
+                                    defaultextension=os.path.splitext(name)[1],
+                                    initialdir=self.get("tables_dir") or None)
+        if not path:
+            return False
+        try:
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+        except OSError as exc:
+            self._say("could not write %s: %s" % (path, exc), "error")
+            return False
+        self._say("saved %s." % path)
+        return True
 
     @staticmethod
     def _checklist_words(got):
@@ -506,18 +559,18 @@ class VpxTab(TabService):
         if got.get("asked") and got["asked"] != t:
             words = "%s is %s's table. " % (got.get("table", "the table"), t) + words
         if "missing_switches" in got:
-            words += (". %s against the kit's map: %d switches, %d coils and %d inserts the table "
+            words += (". %s against the app's map: %d switches, %d coils and %d inserts the table "
                       "leaves out, %d marked GUESS" % (got.get("table", "the table"), got["missing_switches"],
                                                        got["missing_coils"], got["missing_inserts"],
                                                        got.get("guesses", 0)))
             if got.get("id_mismatch"):
-                words += ("; %d switches the map numbers otherwise than this PC's game (see the "
-                          "checklist)" % got["id_mismatch"])
-        elif got.get("starter"):
-            words += ". The kit has no map for %s: a starter map is beside the checklist" % got.get("table", "it")
+                words += ("; %d switches the map numbers otherwise than this PC's game"
+                          % got["id_mismatch"])
+        elif got.get("table"):
+            words += ". The app has no map for %s: a starter map is ready to save" % got["table"]
         if not got.get("ids", True):
             words += ". No switch ids yet: play the title once and make it again"
-        return words + ". Written to %s." % (got.get("out") or "")
+        return words + "."
 
     @rpc
     def play(self, name):

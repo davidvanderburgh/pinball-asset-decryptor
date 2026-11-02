@@ -5,8 +5,9 @@
 Serves THIS checkout on a scratch settings.json holding one preview code,
 PAD802_CODE from the environment (``tools/preview_code.py issue --name x
 --feature vpx``), and Stern Spike 2. Writes <before_|after_>vpx_authors.png:
-the whole Visual Pinball page (setup strip, tables, and - after - the "For
-table authors" card with its title list and buttons).
+the whole Visual Pinball page (setup strip, the "For table authors" card,
+the tables with their Coverage column), and - after - checklist_bond.png: the
+checklist sheet opened from the Bond row.
 
 The tab's state is the kit's real one on this PC (~/.pad-vpx.json, Visual
 Pinball's folder, the card folder). Needs Playwright and the installed Edge.
@@ -26,9 +27,20 @@ WIDTH = int(sys.argv[sys.argv.index("--width") + 1]) if "--width" in sys.argv el
 HEIGHT = int(sys.argv[sys.argv.index("--height") + 1]) if "--height" in sys.argv else 1500
 
 
+def wait_idle(url, timeout=300):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        st = webui_shot.state(url).get("vpx") or {}
+        if st.get("loaded") and not st.get("busy"):
+            return st
+        time.sleep(1)
+    return webui_shot.state(url).get("vpx") or {}
+
+
 def main():
     out_dir = os.path.abspath(sys.argv[1])
-    pre = "after_" if "--after" in sys.argv else "before_"
+    after = "--after" in sys.argv
+    pre = "after_" if after else "before_"
     code = os.environ.get("PAD802_CODE", "")
     os.makedirs(out_dir, exist_ok=True)
     scratch = tempfile.mkdtemp(prefix="pad941-")
@@ -55,17 +67,21 @@ def main():
                 webui_shot.api(url, "ui.set_era", "spike2")
                 time.sleep(1)
             webui_shot.api(url, "ui.select_tab", "vpx")
-            deadline = time.time() + 120
-            while time.time() < deadline:
-                st = webui_shot.state(url).get("vpx") or {}
-                if st.get("loaded") and not st.get("busy"):
-                    break
-                time.sleep(1)
-            st = webui_shot.state(url).get("vpx") or {}
-            print("vpx:", json.dumps({k: st.get(k) for k in (
-                "vpx", "vpx_version", "message", "author_titles", "author_note")}), flush=True)
+            st = wait_idle(url)
+            print("vpx:", json.dumps({k: st.get(k) for k in ("vpx", "vpx_version", "message", "author_titles")}),
+                  flush=True)
+            print("coverage:", json.dumps({k: v.get("pct") for k, v in (st.get("coverage") or {}).items()}), flush=True)
             time.sleep(1.5)
             page.locator(".vpx-page").screenshot(path=os.path.join(out_dir, pre + "vpx_authors.png"))
+            if after:
+                bond = next((t for t in st.get("tables") or [] if t.get("title", "").startswith("james_bond")), None)
+                if bond:
+                    webui_shot.api(url, "vpx.row_checklist", bond["output"])
+                    st = wait_idle(url)
+                    print("sheet:", json.dumps((st.get("sheet") or {}).get("summary")), flush=True)
+                    page.wait_for_selector(".vpx-sheet", timeout=30000)
+                    time.sleep(1)
+                    page.screenshot(path=os.path.join(out_dir, "after_checklist_bond.png"))
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

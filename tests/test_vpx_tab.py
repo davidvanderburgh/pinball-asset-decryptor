@@ -310,7 +310,8 @@ def test_the_page_is_laid_out_for_a_set_up_pc():
     window layouts as Use buttons (no radio that nothing had picked)."""
     js = open(os.path.join(os.path.dirname(V.__file__), "..", "static", "js", "tabs", "vpx.js"),
               encoding="utf-8").read()
-    assert "Patch a table" not in js and "footer=" not in js
+    # PAD-941: the checklist sheet (a Modal, before the page) has a footer; the Tables card none
+    assert "Patch a table" not in js and "footer=" not in js[js.index("export default function Vpx"):]
     assert 'call("vpx.patch", t.output)' in js
     assert "Radio" not in js and 'call("vpx.layout", p.key)' in js and "p.short" in js
     assert "Where you left them" in js
@@ -349,8 +350,8 @@ def test_a_folder_of_downloads_is_patched_in_one_go(tab, monkeypatch, tmp_path):
         if args and args[0] == "state":
             return {"registered": True, "vpx": r"C:\VP", "tables_dir": r"C:\VP\tables", "library": "",
                     "cards": {}, "tables": [], "patched": [], "presets": [], "layout": ""}
-        if args and args[0] == "titles":                 # PAD-941: the authors' card asks after each job
-            return {"titles": []}
+        if args and args[0] in ("titles", "coverage"):   # PAD-941: the authors' card asks after each job
+            return {"titles": [], "coverage": {}}
         seen.append(args)
         name = os.path.basename(args[1])
         if name == "Other.vpx":
@@ -384,60 +385,83 @@ def test_the_author_titles_come_from_the_kit_and_a_card_title_is_picked_first(ta
     assert not tab.pick_author_title("nosuch") and tab.get("author_title") == "james_bond_le"
 
 
-def test_the_checklist_runs_the_kit_on_the_chosen_title_and_folder(tab, monkeypatch):
+def _data(**summary):
+    return {"title": summary.get("title", ""), "summary": summary, "notes": [], "map": summary.get("map", ""),
+            "switches": [], "coils": [], "inserts": [], "guesses": [], "wrong": [], "inventory": None,
+            "starter": None, "markdown": "# x", "csv": "a,b"}
+
+
+def test_the_checklist_opens_the_sheet_from_the_kits_data(tab):
     tab.answers[("vpxauthor.py", "titles")] = {"titles": ["james_bond_le"]}
     tab.on_show()
     _wait(tab)
-    opened = []
-    monkeypatch.setattr(V.os, "startfile", lambda p: opened.append(p), raising=False)
-    tab.window.pick = r"D:\checklists"
-    tab.answers[("padvpx.py", "checklist")] = {
-        "result": "ok", "out": r"D:\checklists\james_bond_le - Visual Pinball table checklist.md",
-        "title": "james_bond_le", "switches": 63, "coils": 17, "inserts": 86, "ids": True}
+    tab.answers[("vpxauthor.py", "data")] = _data(title="james_bond_le", switches=63, coils=17, inserts=86, ids=True)
     assert tab.checklist(False)
     _wait(tab)
-    script, args = [c for c in tab.calls if c[0] == "padvpx.py" and c[1][0] == "checklist"][-1]
-    assert args == ["checklist", "james_bond_le", "--out", r"D:\checklists"]
-    assert opened == [r"D:\checklists\james_bond_le - Visual Pinball table checklist.md"]
+    script, args = [c for c in tab.calls if c[0] == "vpxauthor.py" and c[1][0] == "data"][-1]
+    assert args == ["data", "james_bond_le"]
+    assert tab.get("sheet")["summary"]["switches"] == 63 and "_text" not in tab.get("sheet")
     assert tab.get("author_note").startswith("james_bond_le: 63 switches, 17 coils, 86 inserts.")
-    assert tab.get("author_out") == opened[0]
+    assert tab.close_sheet() and tab.get("sheet") is None
 
 
-def test_checking_a_table_passes_it_and_says_what_it_lacks(tab, monkeypatch):
+def test_checking_a_table_passes_it_and_says_what_it_lacks(tab):
     tab.answers[("vpxauthor.py", "titles")] = {"titles": ["james_bond_le"]}
     tab.on_show()
     _wait(tab)
-    monkeypatch.setattr(V.os, "startfile", lambda p: None, raising=False)
-    tab.window.pick = r"D:\Downloads\bond.vpx"            # the table AND the folder in this harness
-    tab.answers[("padvpx.py", "checklist")] = {
-        "result": "ok", "out": r"D:\Downloads\bond.vpx\x.md", "title": "james_bond_le",
-        "switches": 63, "coils": 17, "inserts": 86, "ids": True, "table": "bond.vpx",
-        "missing_switches": 19, "missing_coils": 0, "missing_inserts": 0, "guesses": 10, "id_mismatch": 0}
+    tab.window.pick = r"D:\Downloads\bond.vpx"
+    tab.answers[("vpxauthor.py", "data")] = _data(
+        title="james_bond_le", switches=63, coils=17, inserts=86, ids=True, table="bond.vpx",
+        map="james_bond_le.shadow.json", missing_switches=19, missing_coils=0, missing_inserts=0,
+        guesses=10, id_mismatch=0)
     assert tab.checklist(True)
     _wait(tab)
-    script, args = [c for c in tab.calls if c[0] == "padvpx.py" and c[1][0] == "checklist"][-1]
-    assert args == ["checklist", "james_bond_le", "--table", r"D:\Downloads\bond.vpx", "--out", r"D:\Downloads\bond.vpx"]
-    note = tab.get("author_note")
-    assert "bond.vpx against the kit's map: 19 switches, 0 coils and 0 inserts the table leaves out, 10 marked GUESS" in note
+    args = [c for c in tab.calls if c[0] == "vpxauthor.py" and c[1][0] == "data"][-1][1]
+    assert args == ["data", "james_bond_le", "--table", r"D:\Downloads\bond.vpx"]
+    assert ("bond.vpx against the app's map: 19 switches, 0 coils and 0 inserts the table leaves out, "
+            "10 marked GUESS") in tab.get("author_note")
 
 
-def test_a_title_with_no_tables_yet_is_a_warning_not_an_error(tab, monkeypatch):
+def test_export_writes_the_sheets_csv_markdown_or_starter(tab, tmp_path):
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["godzilla_le"]}
+    tab.on_show()
+    _wait(tab)
+    assert not tab.export("csv")                             # no sheet open
+    tab.window.ctx.store.set("vpx", sheet={
+        "title": "godzilla_le", "summary": {}, "inventory": {"name": "Nudge: Test.vpx"},
+        "csv": "section,ok\nswitch,yes\n", "markdown": "# godzilla_le\n", "starter": {"title": "godzilla_le"}})
+    asked = []
+
+    def ask_save(key, title, initialfile="", filetypes=None, defaultextension="", initialdir=None):
+        asked.append((initialfile, defaultextension))
+        return str(tmp_path / initialfile)
+    tab.window.ask_save = ask_save
+    assert tab.export("csv") and tab.export("md") and tab.export("starter")
+    assert asked == [("godzilla_le - Visual Pinball table checklist - Nudge_ Test.csv", ".csv"),
+                     ("godzilla_le - Visual Pinball table checklist - Nudge_ Test.md", ".md"),
+                     ("godzilla_le.starter.shadow.json", ".json")]
+    assert (tmp_path / asked[0][0]).read_text(encoding="utf-8") == "section,ok\nswitch,yes\n"
+    assert (tmp_path / asked[1][0]).read_text(encoding="utf-8") == "# godzilla_le\n"
+    assert '"title": "godzilla_le"' in (tmp_path / asked[2][0]).read_text(encoding="utf-8")
+    assert not tab.export("nosuch")
+
+
+def test_a_title_with_no_tables_yet_is_a_warning_not_an_error(tab):
     tab.answers[("vpxauthor.py", "titles")] = {"titles": ["venom_le"]}
     tab.on_show()
     _wait(tab)
-    tab.window.pick = r"D:\checklists"
-    tab.answers[("padvpx.py", "checklist")] = {
+    tab.answers[("vpxauthor.py", "data")] = {
         "error": "No device tables for venom_le on this PC yet: play it once (the Emulate tab, or its table) and try again."}
     assert tab.checklist(False)
     _wait(tab)
     assert [lv for lv, t in tab.window.lines if "No device tables" in t] == ["warning"]
-    assert "No device tables" in tab.get("author_note")
+    assert "No device tables" in tab.get("author_note") and not tab.get("sheet")
 
 
 def test_the_words_name_a_starter_map_and_another_titles_table():
     words = V.VpxTab._checklist_words({"title": "godzilla_le", "switches": 48, "coils": 14, "inserts": 89,
-                                       "ids": True, "table": "Nudge.vpx", "starter": "x.json", "out": "o.md"})
-    assert "The kit has no map for Nudge.vpx: a starter map is beside the checklist" in words
+                                       "ids": True, "table": "Nudge.vpx"})
+    assert "The app has no map for Nudge.vpx: a starter map is ready to save" in words
     words = V.VpxTab._checklist_words({"title": "rush_le", "asked": "stranger_things_le", "table": "Rush.vpx",
                                        "switches": 54, "coils": 17, "inserts": 72, "ids": True, "out": "o.md",
                                        "missing_switches": 0, "missing_coils": 0, "missing_inserts": 0,
@@ -451,5 +475,52 @@ def test_nothing_runs_when_the_checklist_dialog_is_cancelled(tab):
     tab.on_show()
     _wait(tab)
     tab.window.pick = ""
-    assert not tab.checklist(False) and not tab.checklist(True)
-    assert not [c for c in tab.calls if c[1] and c[1][0] == "checklist"]
+    assert not tab.checklist(True)
+    assert not [c for c in tab.calls if c[1] and c[1][0] == "data"]
+
+
+def test_coverage_is_read_once_per_sitting_and_on_check_again(tab):
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["rush_le"]}
+    tab.answers[("vpxauthor.py", "coverage")] = {"coverage": {"rush_le": {"pct": 78, "switches": [44, 51],
+                                                                          "coils": [7, 11], "inserts": [70, 94]}}}
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("coverage")["rush_le"]["pct"] == 78
+    n = len([c for c in tab.calls if c == ("vpxauthor.py", ["coverage"])])
+    assert n == 1
+    tab.answers[("vpxauthor.py", "data")] = _data(title="rush_le", switches=1, coils=1, inserts=1, ids=True)
+    tab.checklist(False)                                     # a job: the page reloads, coverage is kept
+    _wait(tab)
+    assert len([c for c in tab.calls if c == ("vpxauthor.py", ["coverage"])]) == n
+    tab.refresh()
+    _wait(tab)
+    assert len([c for c in tab.calls if c == ("vpxauthor.py", ["coverage"])]) == n + 1
+
+
+def test_a_rows_coverage_button_checks_the_download_it_was_patched_from(tab, monkeypatch):
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["rush_le", "beatles"]}
+    tab.on_show()
+    _wait(tab)
+    monkeypatch.setattr(V.os, "startfile", lambda p: None, raising=False)
+    tab.window.ctx.store.set("vpx", tables=[
+        {"title": "rush_le", "titles": ["rush_le"], "output": "Rush LE 2.0.2 (PAD).vpx", "patched": True,
+         "source": r"D:\dl\Rush LE 2.0.2.vpx"},
+        {"title": "beatles", "titles": ["beatles"], "output": "The Beatles_007 (PAD).vpx", "patched": True, "source": ""},
+        {"title": "godzilla_le", "titles": ["godzilla_le"], "output": "Godzilla (PAD).vpx", "patched": False}])
+    rows = tab.get("tables")
+    tab.answers[("vpxauthor.py", "data")] = _data(title="rush_le", switches=54, coils=11, inserts=94, ids=True)
+    assert tab.row_checklist("Rush LE 2.0.2 (PAD).vpx")
+    _wait(tab)
+    args = [c for c in tab.calls if c[0] == "vpxauthor.py" and c[1][0] == "data"][-1][1]
+    assert args == ["data", "rush_le", "--table", r"D:\dl\Rush LE 2.0.2.vpx"]
+    tab.window.ctx.store.set("vpx", tables=rows)             # a job reloads the page's (stubbed, empty) tables
+    assert tab.row_checklist("The Beatles_007 (PAD).vpx")        # no record of the download: the (PAD) copy
+    _wait(tab)
+    args = [c for c in tab.calls if c[0] == "vpxauthor.py" and c[1][0] == "data"][-1][1]
+    assert args == ["data", "beatles", "--table", r"C:\VP\tables\The Beatles_007 (PAD).vpx"]
+    tab.window.ctx.store.set("vpx", tables=rows)
+    assert tab.row_checklist("Godzilla (PAD).vpx")                # not patched: the game alone
+    _wait(tab)
+    args = [c for c in tab.calls if c[0] == "vpxauthor.py" and c[1][0] == "data"][-1][1]
+    assert args == ["data", "godzilla_le"]
+    assert not tab.row_checklist("nosuch.vpx")

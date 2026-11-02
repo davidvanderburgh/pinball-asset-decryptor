@@ -319,3 +319,14 @@ def test_the_shipped_maps_read_through_coverage(A):
         m = json.load(open(path, encoding="utf-8"))
         cov = A.coverage(m)
         assert cov["switches"] and cov["coils"] and cov["leds"], path
+
+
+def test_summary_for_counts_what_a_table_owes_and_what_the_map_wires(A, tmp_path):
+    d = _tables(tmp_path)
+    got = A.summary_for("mini", MAP, str(tmp_path))
+    # owed: LEFT OUTLANE, LEFT SLINGSHOT, TROUGH 1, SHOOTER LANE, LEFT EJECT, ROCKET OPTO 1 (not the EOS);
+    # coils the game fires: TROUGH, LEFT EJECT (not the flipper, the sling, the shaker); two inserts
+    assert got["switches"] == [4, 6] and got["coils"] == [1, 2] and got["inserts"] == [1, 2]
+    assert got["pct"] == 60 and got["ids"]
+    assert A.summary_for("nosuch", MAP, str(tmp_path)) is None
+    assert os.path.isdir(d)

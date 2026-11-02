@@ -704,3 +704,19 @@ against Visual Pinball's own Nudge table (no map: a 46-switch, 14-coil,
 table, where the checklist names all 25 ids the map numbers otherwise.
 tests/test_vpx_author.py pins the readers, the coverage of every map shape,
 the gap rules and the starter's shape; tests/test_vpx_tab.py the card.
+
+David, on seeing it (2026-11-02): the card goes ABOVE the tables, every table
+row gets a Coverage cell, and the checklist lives IN the app, themed, with
+CSV export. So `vpxauthor.py data` hands the tab everything as JSON (the
+parts with their marks, the summary, the notes, the GUESS and id lists, the
+table's inventory, the starter map, and the same checklist as Markdown and
+CSV), and the tab shows it as a sheet (a modal in the app's own tables, "Only
+what is missing" to narrow it to the NO rows; Export CSV, Save Markdown, Save
+starter map write the texts out). `vpxauthor.py coverage` gives each mapped
+title's percentage (wired switches, game-fired coils and inserts over what
+the table owes) from this PC's tables; the tab reads it once per sitting
+and on Check again (ten seconds over WSL's share for twenty titles), and a
+row's cell is the button that opens that table's sheet, checked against the
+download it was patched from (or its (PAD) copy). On this PC: Beatles and
+Jurassic Park 99%, John Wick 97%, Godzilla LE and Sword of Rage 96%, Bond LE
+83%, TMNT 81%, Rush 78%, Stranger Things 76%.

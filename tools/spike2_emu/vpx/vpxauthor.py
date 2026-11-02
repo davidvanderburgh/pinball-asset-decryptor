@@ -4,7 +4,9 @@ what a table has (PAD-941): the checklist for whoever builds or finishes one.
 
     python vpxauthor.py checklist <title> [--table <file.vpx>] [--out DIR] [--tables DIR]
     python vpxauthor.py machine <title> [--tables DIR]          the machine as JSON
+    python vpxauthor.py data <title> [--table <file.vpx>]       the checklist as JSON (the app's sheet)
     python vpxauthor.py titles                                  the titles whose tables are on this PC
+    python vpxauthor.py coverage [--tables DIR]                 per mapped title: how much its map wires
 
 The real game behind a table (PAD.Controller, padcontroller.py) sees the
 table only through the machine's own numbers: a switch id, a coil's node and
@@ -409,11 +411,18 @@ def _win(distro, posix):
     return r"\\wsl.localhost\%s%s" % (distro, posix.replace("/", "\\"))
 
 
-def table_dirs(title):
-    """Every directory that may hold `title`'s tables on this PC, the most
-    likely first: PAD_TABLES, the run on the rig board (padcontroller.Rig),
-    the launch distro's rig (the app's data disk, or its home), each slot's
-    root, then every other distro's default rig."""
+_ROOTS = None
+
+
+def table_roots():
+    """The directories on this PC that hold per-title tables (each has one
+    folder per title), the most likely first: PAD_TABLES, the launch
+    distro's rig (the app's data disk, or its home) and each of its slots,
+    then every other distro's default rig and slots. Asked of WSL once per
+    process (padlaunch.distros/account are wsl.exe calls)."""
+    global _ROOTS
+    if _ROOTS is not None:
+        return _ROOTS
     out = []
 
     def add(d):
@@ -423,19 +432,9 @@ def table_dirs(title):
     if env:
         try:
             import padpath
-            add(os.path.join(padpath.to_win(env) or env, title))
+            add(padpath.to_win(env) or env)
         except Exception:                                   # noqa: BLE001
-            add(os.path.join(env, title))
-    try:
-        import padcontroller
-        rig = padcontroller.Rig(title)
-        if rig.dump:
-            add(os.path.join(rig.dump, "tables", title))
-            slots = os.path.dirname(os.path.dirname(os.path.dirname(rig.dump)))
-            for p in sorted(glob.glob(os.path.join(slots, "*", "root", "dump", "tables", title))):
-                add(p)
-    except Exception:                                       # noqa: BLE001
-        pass
+            add(env)
     try:
         import padlaunch
         dists = padlaunch.distros()
@@ -447,17 +446,42 @@ def table_dirs(title):
             except Exception:                               # noqa: BLE001
                 home = ""
             if home:
-                add(_win(dist, home + "/spike2root/dump/tables/" + title))
+                add(_win(dist, home + "/spike2root/dump/tables"))
             try:
                 _, acct = padlaunch.account(dist)
             except Exception:                               # noqa: BLE001
                 acct = ""
             if acct:
-                add(_win(dist, acct + "/spike2root/dump/tables/" + title))
-                for p in sorted(glob.glob(_win(dist, acct + "/padslots") + r"\*\root\dump\tables\%s" % title)):
+                add(_win(dist, acct + "/spike2root/dump/tables"))
+                for p in sorted(glob.glob(os.path.join(_win(dist, acct + "/padslots"), "*", "root", "dump", "tables"))):
                     add(p)
     except Exception:                                       # noqa: BLE001
         pass
+    _ROOTS = out
+    return out
+
+
+def table_dirs(title):
+    """Every directory that may hold `title`'s tables on this PC: the run on
+    the rig board for it (padcontroller.Rig) and its slots first, then
+    table_roots()."""
+    out = []
+
+    def add(d):
+        if d and d not in out:
+            out.append(d)
+    try:
+        import padcontroller
+        rig = padcontroller.Rig(title)
+        if rig.dump:
+            add(os.path.join(rig.dump, "tables", title))
+            slots = os.path.dirname(os.path.dirname(os.path.dirname(rig.dump)))
+            for p in sorted(glob.glob(os.path.join(slots, "*", "root", "dump", "tables", title))):
+                add(p)
+    except Exception:                                       # noqa: BLE001
+        pass
+    for root in table_roots():
+        add(os.path.join(root, title))
     return out
 
 
@@ -484,7 +508,7 @@ def find_tables(title, tables_dir=None):
 def titles_with_tables(tables_dir=None):
     """Every title whose device_xy.txt is somewhere on this PC."""
     titles = set()
-    dirs = [tables_dir] if tables_dir else [os.path.dirname(d) for d in table_dirs("_")]
+    dirs = [tables_dir] if tables_dir else table_roots()
     for d in dirs:
         try:
             names = os.listdir(d)
@@ -977,15 +1001,83 @@ def starter_map(machine, table_name=""):
     }
 
 
+# ------------------------------------------------- one line per title --
+
+def summary_for(title, m, tables_dir=None):
+    """How much of `title` the map `m` wires, from this PC's tables:
+    {switches: [wired, owed], coils: [...], inserts: [...], pct}, or None
+    when the title has no tables here. The parts a table owes: playfield
+    switches but the flipper EOS and the unnamed, coils but the board's and
+    the cabinet's, playfield inserts."""
+    files = find_tables(title, tables_dir)
+    if "device_xy.txt" not in files:
+        return None
+    machine = read_machine(os.path.dirname(files["device_xy.txt"]), title, files)
+    if not machine["coils"]:
+        machine["coils"] = coils_from_map(m)
+    if not machine["inserts"]:
+        machine["inserts"] = inserts_from_map(m)
+    cov = coverage(m)
+    gap = gaps(machine, cov)
+    sw = [s for s in machine["switches"] if s["where"] in ("playfield", "unplaced") and s["id"]
+          and s["kind"] not in ("flipper eos", "unnamed")]
+    coils = [c for c in machine["coils"] if c["node"] is not None and c["kind"] not in BOARD_COILS]
+    ins = [g for g in machine["inserts"] if g["where"] == "playfield"]
+    owed = len(sw) + len(coils) + len(ins)
+    missing = len(gap["switches"]) + len(gap["coils"]) + len(gap["coils_listed_only"]) + len(gap["inserts"])
+    return {"switches": [len(sw) - len(gap["switches"]), len(sw)],
+            "coils": [len(coils) - len(gap["coils"]) - len(gap["coils_listed_only"]), len(coils)],
+            "inserts": [len(ins) - len(gap["inserts"]), len(ins)],
+            "pct": int(round(100.0 * (owed - missing) / owed)) if owed else 0,
+            "ids": bool(machine["have"].get("switch_list.txt"))}
+
+
+def coverage_all(tables_dir=None):
+    """{title: summary_for(...)} for every map the kit has, on this PC's tables."""
+    import padvpx
+    out = {}
+    for title, info in padvpx.maps().items():
+        try:
+            m = json.load(open(info["map"], encoding="utf-8"))
+            got = summary_for(title, m, tables_dir)
+        except Exception as exc:                            # noqa: BLE001
+            got = {"error": str(exc)}
+        if got:
+            out[title] = got
+    return out
+
+
 # -------------------------------------------------------------- the job --
 
-def _safe(name):
-    return re.sub(r'[\\/:*?"<>|]+', "_", name).strip()
+def _sw_ok(s, cov, missing_ids):
+    if not cov:
+        return ""
+    if s["kind"] in ("flipper eos", "unnamed"):
+        return "-"
+    return "no" if s["id"] in missing_ids else "yes" if s["id"] in cov["switches"] else "-"
 
 
-def checklist(title, table=None, out_dir=None, tables_dir=None):
-    """Write the checklist (and a starter map when a table has no map).
-    Returns the summary the tab shows; `error` when nothing could be made."""
+def _coil_ok(c, cov):
+    if not cov:
+        return ""
+    key = (c["node"], c["index"])
+    if key in cov["coils"]:
+        return "yes"
+    if key in cov["coils_listed_only"]:
+        return "listed"
+    if c["kind"] in BOARD_COILS[:3]:
+        return "board"
+    if c["node"] is None or c["kind"] == "cabinet":
+        return "-"
+    return "no"
+
+
+def build(title, table=None, tables_dir=None):
+    """Everything the app's checklist sheet shows, as one JSON-able dict:
+    the machine's parts with their marks, the summary, the notes, the map's
+    GUESS marks and id disagreements, the table's inventory, the starter map
+    (a dict, when no map fits), and the same checklist as Markdown and CSV
+    for export. {"error": ...} when the title has no tables here."""
     asked = title
     pick = None
     if table:
@@ -1003,8 +1095,6 @@ def checklist(title, table=None, out_dir=None, tables_dir=None):
     machine = read_machine(os.path.dirname(files["device_xy.txt"]), title, files)
     map_info = cov = gap = inventory = None
     starter, wrong = None, []
-    out_dir = out_dir or (os.path.dirname(os.path.abspath(table)) if table else os.getcwd())
-    os.makedirs(out_dir, exist_ok=True)
     if table:
         inventory = table_inventory(table)
         if pick:
@@ -1020,32 +1110,138 @@ def checklist(title, table=None, out_dir=None, tables_dir=None):
             gap = gaps(machine, cov)
             wrong = misnumbered(machine, map_info)
         else:
-            starter = os.path.join(out_dir, "%s.starter.shadow.json" % title)
-            with open(starter, "w", encoding="utf-8") as f:
-                json.dump(starter_map(machine, inventory["name"]), f, indent=1)
-    text = markdown(machine, table, map_info, cov, gap, inventory, starter, wrong)
-    name = "%s - Visual Pinball table checklist%s.md" % (
-        title, " - " + _safe(os.path.splitext(inventory["name"])[0]) if inventory else "")
-    out = os.path.join(out_dir, name)
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(text)
-    pf_sw = [s for s in machine["switches"] if s["where"] in ("playfield", "unplaced")]
-    pf_ins = [g for g in machine["inserts"] if g["where"] == "playfield"]
-    coils = [c for c in machine["coils"] if c["node"] is not None]
-    summary = {"result": "ok", "out": out, "title": title, "switches": len(pf_sw), "coils": len(coils),
+            starter = starter_map(machine, inventory["name"])
+    text = markdown(machine, table, map_info, cov, gap, inventory,
+                    "%s.starter.shadow.json" % title if starter else None, wrong)
+
+    missing_ids = {s["id"] for s in gap["switches"]} if gap else set()
+    missing_ins = {id(g) for g in gap["inserts"]} if gap else set()
+    sol_by_coil = {}
+    if map_info:
+        for num, v in _entries(map_info.get("solenoids")):
+            if len(v.get("coil") or ()) == 2:
+                sol_by_coil[tuple(v["coil"])] = num
+    switches = [{"ok": _sw_ok(s, cov, missing_ids), "id": s["id"], "num": s["num"], "node": s["node"],
+                 "bit": s["bit"], "name": s["name"], "kind": s["kind"], "x": s["x"], "y": s["y"],
+                 "where": s["where"], "hint": _hint(SWITCH_HINTS, s["kind"])}
+                for s in sorted(machine["switches"], key=lambda s: (s["id"] is None, s["id"] or 0))]
+    coils = [{"ok": _coil_ok(c, cov), "node": c["node"], "index": c["index"],
+              "number": sol_by_coil.get((c["node"], c["index"]), "") or (str(c["number"]) if c["number"] else "-"),
+              "name": c["name"], "kind": c["kind"], "x": c["x"], "y": c["y"], "hint": _hint(COIL_HINTS, c["kind"])}
+             for c in sorted(machine["coils"], key=lambda c: (c["node"] is None, c["node"] or 0, c["index"]))]
+    inserts = [{"ok": ("no" if id(g) in missing_ins else "yes") if cov and g["where"] == "playfield" else
+                ("-" if cov else ""),
+                "lamp": g["lamp"], "leds": ", ".join("%d/%d" % k for k in g["leds"]), "name": g["name"],
+                "rgb": bool(g["rgb"]), "x": g["x"], "y": g["y"], "where": g["where"]}
+               for g in machine["inserts"]]
+
+    pf_sw = [s for s in switches if s["where"] in ("playfield", "unplaced")]
+    owed_sw = [s for s in pf_sw if s["kind"] not in ("flipper eos", "unnamed")]
+    owed_coils = [c for c in coils if c["node"] is not None and c["kind"] not in BOARD_COILS]
+    pf_ins = [g for g in inserts if g["where"] == "playfield"]
+    summary = {"title": title, "switches": len(pf_sw), "coils": len([c for c in coils if c["node"] is not None]),
                "inserts": len(pf_ins), "ids": bool(machine["have"].get("switch_list.txt")),
                "tables_from": os.path.dirname(files["device_xy.txt"])}
-    if gap:
+    if cov:
+        wired_sw = len([s for s in owed_sw if s["ok"] == "yes"])
+        wired_c = len([c for c in owed_coils if c["ok"] == "yes"])
+        wired_i = len([g for g in pf_ins if g["ok"] == "yes"])
+        owed = len(owed_sw) + len(owed_coils) + len(pf_ins)
         summary.update(missing_switches=len(gap["switches"]), missing_coils=len(gap["coils"]),
-                       missing_inserts=len(gap["inserts"]), guesses=len(cov["guesses"]),
-                       id_mismatch=len(wrong), map=os.path.basename(map_info["_path"]))
-    if starter:
-        summary["starter"] = starter
+                       listed_coils=len(gap["coils_listed_only"]), missing_inserts=len(gap["inserts"]),
+                       guesses=len(cov["guesses"]), id_mismatch=len(wrong), map=os.path.basename(map_info["_path"]),
+                       wired={"switches": [wired_sw, len(owed_sw)], "coils": [wired_c, len(owed_coils)],
+                              "inserts": [wired_i, len(pf_ins)]},
+                       pct=int(round(100.0 * (wired_sw + wired_c + wired_i) / owed)) if owed else 0)
     if inventory:
         summary["table"] = inventory["name"]
         summary["brain"] = inventory["brain"]
     if title != asked:
         summary["asked"] = asked
+
+    notes = []
+    if not machine.get("positions"):
+        notes.append("This build ships no device positions: place each part from the real playfield.")
+    if machine.get("coils_from_map"):
+        notes.append("The build's device table names no coil; the coils are the ones the map knows.")
+    if machine.get("inserts_from_map"):
+        notes.append("The build's device table names no LED; the inserts are the ones the map lights.")
+    if not summary["ids"]:
+        notes.append("No switch ids yet: the game builds its switch table when it runs. Play the title once "
+                     "and make the checklist again.")
+    if title != asked:
+        notes.append("%s is %s's table, not %s's: this is %s's checklist."
+                     % (inventory["name"] if inventory else "The table", title, asked, title))
+    if starter:
+        notes.append("No map in the app fits this table: a starter map lists every part of the machine under "
+                     "a TODO key to rename to the table's object (Save starter map).")
+
+    data = {"title": title, "asked": asked, "summary": summary, "notes": notes, "map": summary.get("map", ""),
+            "switches": switches, "coils": coils, "inserts": inserts,
+            "guesses": [list(g) for g in cov["guesses"]] if cov else [],
+            "wrong": [list(w) for w in wrong],
+            "inventory": ({"name": inventory["name"], "brain": inventory["brain"],
+                           "script_lines": inventory["script_lines"],
+                           "kinds": {k: inventory["kinds"].get(k) or [] for k in TABLE_KINDS}}
+                          if inventory else None),
+            "starter": starter, "markdown": text}
+    data["csv"] = to_csv(data)
+    return data
+
+
+def to_csv(data):
+    """The checklist as CSV: one row per part, every section in one sheet."""
+    import csv
+    import io
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\n")
+    marked = bool(data.get("map"))
+    w.writerow(["section", "ok" if marked else "", "id / lamp", "number", "node", "bit / index", "name", "kind",
+                "x", "y", "where", "the table does"])
+    for s in data["switches"]:
+        w.writerow(["switch", s["ok"], s["id"] if s["id"] is not None else "?", s["num"] if s["num"] is not None else "",
+                    s["node"] if s["node"] is not None else "", s["bit"] if s["bit"] is not None else "",
+                    s["name"], s["kind"], s["x"] if s["x"] is not None else "", s["y"] if s["y"] is not None else "",
+                    s["where"], s["hint"]])
+    for c in data["coils"]:
+        w.writerow(["coil", c["ok"], "", c["number"], c["node"] if c["node"] is not None else "", c["index"],
+                    c["name"], c["kind"], c["x"] if c["x"] is not None else "", c["y"] if c["y"] is not None else "",
+                    "playfield" if c["x"] is not None else "", c["hint"]])
+    for g in data["inserts"]:
+        w.writerow(["insert", g["ok"], g["lamp"], "", "", g["leds"], g["name"], "rgb" if g["rgb"] else "",
+                    g["x"] if g["x"] is not None else "", g["y"] if g["y"] is not None else "", g["where"], ""])
+    for kind, obj, name in data["guesses"]:
+        w.writerow(["guess", "", "", "", "", "", name, kind, "", "", obj, ""])
+    for obj, sid, name, got in data["wrong"]:
+        w.writerow(["map id disagrees", "", sid, "", "", "", name, "", "", "", obj, "this PC's game: " + got])
+    return out.getvalue()
+
+
+def _safe(name):
+    return re.sub(r'[\\/:*?"<>|]+', "_", name).strip()
+
+
+def checklist(title, table=None, out_dir=None, tables_dir=None):
+    """Write the checklist as Markdown (and a starter map when a table has
+    no map): the command-line form of build(). Returns the summary;
+    `error` when nothing could be made."""
+    data = build(title, table, tables_dir)
+    if "error" in data:
+        return data
+    out_dir = out_dir or (os.path.dirname(os.path.abspath(table)) if table else os.getcwd())
+    os.makedirs(out_dir, exist_ok=True)
+    summary = dict(data["summary"], result="ok")
+    if data["starter"]:
+        starter = os.path.join(out_dir, "%s.starter.shadow.json" % data["title"])
+        with open(starter, "w", encoding="utf-8") as f:
+            json.dump(data["starter"], f, indent=1)
+        summary["starter"] = starter
+    name = "%s - Visual Pinball table checklist%s.md" % (
+        data["title"], " - " + _safe(os.path.splitext(data["inventory"]["name"])[0]) if data["inventory"] else "")
+    out = os.path.join(out_dir, name)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(data["markdown"])
+    summary["out"] = out
     return summary
 
 
@@ -1053,9 +1249,17 @@ def main(argv):
     if argv and argv[0] == "titles":
         print(json.dumps({"titles": titles_with_tables()}), flush=True)
         return 0
-    if len(argv) >= 2 and argv[0] in ("checklist", "machine"):
+    if argv and argv[0] == "coverage":
+        print(json.dumps({"coverage": coverage_all(argv[2] if len(argv) > 2 and argv[1] == "--tables" else None)}),
+              flush=True)
+        return 0
+    if len(argv) >= 2 and argv[0] in ("checklist", "machine", "data"):
         title = argv[1]
         opt = lambda k: argv[argv.index(k) + 1] if k in argv and argv.index(k) + 1 < len(argv) else None  # noqa: E731
+        if argv[0] == "data":
+            # the app's sheet: everything build() knows, one JSON line
+            print(json.dumps(build(title, opt("--table"), opt("--tables"))), flush=True)
+            return 0
         if argv[0] == "machine":
             files = find_tables(title, opt("--tables"))
             if "device_xy.txt" not in files:

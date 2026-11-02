@@ -2980,6 +2980,32 @@ def test_the_grips_stand_aside_while_visual_pinball_is_paused(monkeypatch):
     assert not g.aside and any("grips back" in s for s in logged)
 
 
+def test_a_table_that_runs_without_its_window_still_gets_the_grips(monkeypatch):
+    """PAD-933: The Beatles (and TMNT) call a bare `Controller.Run`, as their
+    ROM scripts had it, so the bridge never got the player window: no grips,
+    no placing, and the playfield could not be moved or resized. The window
+    is found by its title then, once, and a handed one is never replaced."""
+    pc = pytest.importorskip("padcontroller")
+    logged = []
+    monkeypatch.setattr(pc, "log", logged.append)
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+    found = [0]
+    monkeypatch.setattr(pc, "find_player_window", lambda: found[0])
+    b = pc.Bridge()
+    b.player_hwnd = 0                     # what PadController's "run" key keeps for a bare Run
+    b._find_player()
+    assert b.player_hwnd == 0 and not logged             # not up yet: looked for again next second
+    found[0] = 4242
+    b._find_player()
+    assert b.player_hwnd == 4242 and any("found by its title" in s for s in logged)
+    found[0] = 99
+    b._find_player()
+    assert b.player_hwnd == 4242                         # kept
+    b.player_hwnd = 55                                   # Controller.Run GetPlayerHWnd
+    b._find_player()
+    assert b.player_hwnd == 55
+
+
 # --------------------------------- PAD-893: the backglass keeps the focus -----
 
 def test_the_backglass_hands_the_foreground_back_once_per_window(monkeypatch):
@@ -3249,7 +3275,7 @@ def test_beatles_patcher_rewrites_a_miniature(btmap):
     assert "LeftFlipper.RotateToEnd\n" in out and "LeftFlipper1.RotateToEnd:" not in out
     assert "If KeyCode = LeftFlipperKey Then Controller.Switch(1058) = True : vpmFlips.FlipUL True" in out
     assert "vpmNudge.TiltSwitch = 1035" in out
-    assert "bsTrough.InitSw 0,1068,1067,1066,1065,1064,1063,1069" in out and "bsTrough.Balls = 6" in out
+    assert "bsTrough.InitSw 0,1068,1067,1066,1065,1064,1063,1069" in out and "bsTrough.Balls = 4" in out   # PAD-933: the game counts 4
     assert "Array(sw40, sw39, sw38), Array(1052, 1053, 1054)" in out
     # both spinners pulsed Seawitch's 5: each its own now
     assert out.index("PulseSw 1082") < out.index("PulseSw 1092")

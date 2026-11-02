@@ -23,7 +23,8 @@ driven by beatles.vpxmap.json:
            shooter lane, the orbit optos) send theirs (`switch_subs`);
            the solenoid block -> the Spike 2 coils; the upper flippers on
            their own coils; the auto plunger fires the plunger;
-           the trough -> a cvpmBallStack on TROUGH 1..6 + JAM with six balls;
+           the trough -> a cvpmBallStack on TROUGH 1..6 + JAM with the four
+           balls the game counts (PAD-933: six made it serve three);
            the top magnet follows MAGNET-TOP, a new record magnet
            MAGNET-RECORD, the record turns on its motor's LED channels;
            UpdateLamps is regenerated: every insert on its Stern LED, the
@@ -261,13 +262,13 @@ def patch_script(src, m):
             out.append(line.replace("200", str(LAMP_ARRAY)))
             continue
 
-        # ---- the trough: six balls on the machine's own switches
+        # ---- the trough: the game's own ball count on the machine's switches
         if low.startswith("bstrough.initnotrough"):
             t = m["switch_holds"]["trough"]
             lead = line[:len(line) - len(line.lstrip())]
             out += [lead + "bsTrough.InitSw 0,%s" % ",".join("1%03d" % x for x in t),
                     lead + "bsTrough.InitKick ballrelease, 90, 4",
-                    lead + "bsTrough.Balls = 6",
+                    lead + "bsTrough.Balls = %d" % m["switch_holds"]["balls"],
                     lead + "superjlock.IsDropped = True   ' the tribute's lock post: no lock on the machine"]
             continue
         if low.startswith("vpmnudge.tiltswitch"):

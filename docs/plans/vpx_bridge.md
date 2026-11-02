@@ -563,7 +563,7 @@ Seawitch's switch numbers go to beatles' ids (both spinners pulsed Seawitch's
 sent nothing become the machine's switches (`switch_subs`: the two orbit
 targets, the mystery and super jackpot targets, the star as SKILL SHOT
 ROLLOVER, the plunger rest as SHOOTER LANE, the orbit triggers as the orbit
-optos); the drop banks' InitDrop numbers and the trough (six balls on TROUGH
+optos); the drop banks' InitDrop numbers and the trough (four balls on TROUGH
 1-6 + JAM) are rewritten. The upper flippers are their own coils (UP LEFT /
 UP RIGHT FLIPPER on sULFlipper / sURFlipper) and their buttons (UP LT / UP RT
 FLIPPER BUTTON) close with the lower ones' keys, as on the machine's one
@@ -594,3 +594,22 @@ Windows Script Host.
 `.directb2s` in the download's `b2s` folder (The Beatles ships
 `b2s\The-Beatles-Original-2018.directb2s`), or the only one beside a table
 that is its folder's only table.
+
+### PAD-933: four balls, and the playfield window of a bare `Controller.Run`
+
+"Always ejects two balls": The Beatles counts **4 balls installed**, and the
+table's trough held six. The game takes the balls in play as the balls
+installed less those home, so at Start six home read as none in play and it
+fired TROUGH again and again until the trough read 3. On the rig, driven
+through PAD.Controller with core.vbs's ball stack played as the table plays
+it (C:/tmp/PAD-933/proof3.py): six balls, three TROUGH fires at Start whether
+SHOOTER LANE stayed made or opened again; four balls, one fire and none in
+the 45 s after. The map's `switch_holds.balls` is the table's ball count now.
+
+"Cannot move or resize the virtual playfield window": the tribute's script
+calls a bare `Controller.Run` (TMNT's mash-up does too), so the bridge never
+had the player window and PlayerGrips never came up (the log had no "player
+grips on" for the Beatles, where John Wick and Deadpool had one). With no
+window handed over, the bridge now looks the player up by its title once a
+second while the run's windows are watched, as `_keep_player_front` already
+did, and the grips, the placing and the size watch follow it.

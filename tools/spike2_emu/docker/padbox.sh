@@ -455,8 +455,12 @@ host_player() {
 # in the engine's Linux when none is there, and says nothing when one is. A
 # failure is said and the run goes on: the guest check in the box then names
 # exactly what is missing.
+#
+# -u 0 IS NOT OPTIONAL: the image ends USER pad, and only root may mount the
+# handler table. v1.316 left it out, and on colima that step said "cannot see
+# the handler table" and the guest still could not start (PAD-884).
 if [ "${1:-}" = watch.sh ]; then
-    bf=$(docker run --rm --privileged -v "$RIG:/pad/rig:ro" \
+    bf=$(docker run --rm --privileged -u 0 -v "$RIG:/pad/rig:ro" \
              --entrypoint /bin/bash "$IMAGE" /pad/rig/docker/binfmt.sh 2>&1)
     # its own last line is the answer; anything docker printed comes before it
     case "$(printf '%s\n' "$bf" | tail -n 1)" in

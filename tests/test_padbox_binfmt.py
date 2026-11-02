@@ -117,6 +117,10 @@ def test_every_run_asks_the_engine_for_arm_first_in_a_privileged_box():
     assert len(runs) == 2, runs
     first, run = runs
     assert "binfmt.sh" in first and "--privileged" in first, first
+    # AS ROOT: the image ends USER pad, and pad cannot mount the handler
+    # table - v1.316 left this out and colima said "cannot see the handler
+    # table" (PAD-884, third log)
+    assert " -u 0 " in first, first
     assert "/pad/rig:ro" in first and "pad884-test:1" in first, first
     assert "binfmt.sh" not in run and run.endswith("watch.sh 30"), run
     # a handler that was there already is not news
@@ -138,3 +142,23 @@ def test_status_reads_never_start_a_privileged_box():
     for script in ("status.sh", "alive.sh"):
         rc, runs, text = _box(script)
         assert not runs, (script, runs)
+
+
+@needs_bash
+def test_without_the_table_a_non_root_run_says_it_needs_root():
+    """No table to read and none mountable (not root, as the image's own user
+    was): said in so many words. The ARM probe is read out of the rig's
+    ensurebuild.sh, absent here, so it cannot answer for the kernel."""
+    script = "\n".join([
+        "W=$(mktemp -d)", "trap 'rm -rf \"$W\"' EXIT", 'mkdir -p "$W/t"',
+        'export PAD_BINFMT_DIR="$W/t" PAD_RIG="$W"',
+        '[ "$(id -u)" = 0 ] && { echo SKIP-ROOT; exit 0; }',
+        "bash -s <<'EOS'", open(BINFMT, encoding="utf-8").read(), "EOS",
+        'echo "RC=$?"', ""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=60)
+    text = out.stdout.decode("utf-8", "replace")
+    if "SKIP-ROOT" in text:
+        pytest.skip("runs as root here")
+    assert "needs root" in text and "RC=2" in text, text

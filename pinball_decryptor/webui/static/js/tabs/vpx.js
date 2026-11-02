@@ -150,7 +150,7 @@ export default function Vpx() {
   const downloads = (s.downloads || []).filter((d) => !linked.has(d.path)).map((d) => {
     const c = d.catalog || {};
     return { name: c.name || d.name, by: c.by || "", where: c.where || "", output: d.file, patched: false,
-      extra: true, download: d, model: c.platform_name || "", card: d.card || "" };
+      extra: true, download: d, model: (c.platform_name || "").replace(/^Stern /, ""), card: d.card || "" };
   });
   const rows = tables.concat(patched.filter((n) => !known.has(n)).map((n) => ({
     name: n.replace(/ \(PAD\)\.vpx$/i, ""), output: n, patched: true, extra: true })), downloads)

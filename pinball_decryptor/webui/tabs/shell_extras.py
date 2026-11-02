@@ -42,6 +42,8 @@ from ..shellx_report import ReportMixin
 from ..shellx_reset import ResetMixin
 from ..update_interval import (UPDATE_INTERVAL_CHOICES,
                                normalize_update_interval)
+from ...core.old_versions import (OLD_VERSIONS_CHOICES, OLD_VERSIONS_TIP,
+                                  normalize_old_versions, running_appimage)
 from ..autosave_interval import (AUTOSAVE_INTERVAL_CHOICES, AUTOSAVE_TIP,
                                  normalize_autosave_interval)
 from .base import TabService, rpc
@@ -107,6 +109,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
     icon = ""
     exports = (
         "voice_quality_var", "update_interval_var", "autosave_interval_var",
+        "old_versions_var",
         "show_log_history_var",
         "scenes_own_colours_var", "agent_access_var",
         "set_update_check_running", "show_update_banner",
@@ -125,6 +128,9 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         self.update_interval_var = self.var(
             "update_interval", "int",
             normalize_update_interval(cb.get("initial_update_interval")))
+        self.old_versions_var = self.var(
+            "old_versions", "int",
+            normalize_old_versions(cb.get("initial_old_versions")))
         self.autosave_interval_var = self.var(
             "autosave_interval", "int",
             normalize_autosave_interval(cb.get("initial_autosave_interval")))
@@ -210,6 +216,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             "download_update": self._open_update_url,
             "check_updates": self._handle_check_updates,
             "update_interval": self._pick_update_interval,
+            "old_versions": self._pick_old_versions,
             "autosave_interval": self._pick_autosave_interval,
             "disk_space": lambda: self._open_dialog("disk_space"),
             "log_history": self._open_log_history,
@@ -350,7 +357,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         # Groups: how the app looks (the page's Appearance / Language / Zoom,
         # above these), how it runs, upkeep, then help and the rest.
         cur = self._int(self.update_interval_var.get())
-        items.append({"label": "Updates", "submenu": [
+        updates = [
             {"id": "check_updates",
              "label": ("Checking for updates…" if self._update_check_busy
                        else "Check for updates now"),
@@ -358,7 +365,17 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             {"header": "Check automatically"}] + [
             {"id": "update_interval", "args": [hours], "label": label,
              "checked": cur == hours, "radio": True}
-            for hours, label in UPDATE_INTERVAL_CHOICES]})
+            for hours, label in UPDATE_INTERVAL_CHOICES]
+        if running_appimage():
+            # PAD-937: only an AppImage keeps its old versions (Windows and
+            # macOS install over the top), so only an AppImage asks
+            keep = normalize_old_versions(self.old_versions_var.get())
+            updates += [{"header": "Old versions"}] + [
+                {"id": "old_versions", "args": [k], "label": label,
+                 "checked": keep == k, "radio": True,
+                 "title": OLD_VERSIONS_TIP}
+                for k, label in OLD_VERSIONS_CHOICES]
+        items.append({"label": "Updates", "submenu": updates})
         cur = self._int(self.autosave_interval_var.get())
         items.append({"label": "Save automatically", "submenu": [
             {"id": "autosave_interval", "args": [minutes], "label": label,
@@ -431,6 +448,15 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         fn = self.window.cb.get("on_update_interval_change")
         if fn is not None:
             fn(self.update_interval_var.get())
+        self.publish_settings_items()
+        return True
+
+    def _pick_old_versions(self, keep):
+        keep = normalize_old_versions(keep)
+        self.old_versions_var.set(keep)
+        fn = self.window.cb.get("on_old_versions_change")
+        if fn is not None:
+            fn(self.old_versions_var.get())
         self.publish_settings_items()
         return True
 

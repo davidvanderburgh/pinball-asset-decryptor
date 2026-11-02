@@ -12832,5 +12832,12 @@
 "Renamed {} sound(s).": "{} Sound(s) umbenannt.",
 "{} of them were modded with no extract baseline, so their names are not remembered for future extracts.": "{} davon wurden ohne Extraktions-Referenz verändert, daher werden ihre Namen nicht für künftige Extraktionen gemerkt.",
 "{} couldn't be renamed:": "{} konnten nicht umbenannt werden:",
-"Fixing many at once: correct the text column of the project's callouts.csv (by hand or in a spreadsheet), save it, then **More > Rename from callouts.csv…** renames every sound to its corrected text. Characters a file name can't hold become _, and the names are remembered like a rename in Properties.": "Viele auf einmal korrigieren: Korrigieren Sie die Spalte text der callouts.csv des Projekts (von Hand oder in einer Tabellenkalkulation), speichern Sie sie, dann benennt **Mehr > Aus callouts.csv umbenennen…** jeden Sound nach seinem korrigierten Text um. Zeichen, die ein Dateiname nicht enthalten darf, werden zu _, und die Namen werden wie eine Umbenennung in den Eigenschaften gemerkt."
+"Fixing many at once: correct the text column of the project's callouts.csv (by hand or in a spreadsheet), save it, then **More > Rename from callouts.csv…** renames every sound to its corrected text. Characters a file name can't hold become _, and the names are remembered like a rename in Properties.": "Viele auf einmal korrigieren: Korrigieren Sie die Spalte text der callouts.csv des Projekts (von Hand oder in einer Tabellenkalkulation), speichern Sie sie, dann benennt **Mehr > Aus callouts.csv umbenennen…** jeden Sound nach seinem korrigierten Text um. Zeichen, die ein Dateiname nicht enthalten darf, werden zu _, und die Namen werden wie eine Umbenennung in den Eigenschaften gemerkt.",
+"Old versions": "Alte Versionen",
+"Keep them all": "Alle behalten",
+"Keep the last 3": "Die letzten 3 behalten",
+"Keep the last one": "Die letzte behalten",
+"Delete them": "Löschen",
+"Old versions of PAD: {}.": "Alte Versionen von PAD: {}.",
+"Each update saves the new AppImage beside the old one. This picks how many older ones PAD keeps and deletes the rest, now and each time PAD starts. The one you are running and any newer download are never touched.": "Jedes Update speichert das neue AppImage neben dem alten. Hier wählen Sie, wie viele ältere PAD behält; den Rest löscht es, jetzt und bei jedem Start von PAD. Das laufende und jeder neuere Download werden nie angerührt."
 }

@@ -294,12 +294,68 @@ opened, and `/mnt/shared_memory` (the virtiofs share WSLg hands frames to
 Windows through) returns I/O error inside the VM: a WSL fault, every WSLg
 window blank until `wsl --shutdown` (David's call: it ends every run).
 
+## The tab on every manufacturer the app emulates (David, 2026-11-02, interactive)
+
+"We should add the Visual Pinball tab to the other manufacturers that we are
+adding support for." The rail's gate (`window._gate`) was `emulate` (Stern
+Spike 2) only; it is now any emulator capability (`emulate`, `emulate_spike1`,
+`emulate_jjp`, `_ap`, `_bof`, `_dp`, `_spooky`, `_pb`). The tab follows the
+manufacturer through `on_manufacturer`: `platform_of_manufacturer` gives
+Stern's era (spike2 / spike1; SAM and Whitestar have no emulator, so no tab)
+or the manufacturer's key, which is its platform key in catalog.json. The
+page then shows that machine's own: the Tables rows of that platform
+(known_tables rows carry `platform`; a download's from its catalogue match;
+another platform's (PAD) copy is not a row), the authors' card's titles of
+that platform (`vpxauthor.py titles` returns `platforms` for the titles that
+are not Spike 2's), the catalogue block of that platform as "More <machine>
+tables", and a line under the Tables naming where the other machines' tables
+went. A platform with no bridge yet (`BRIDGED` = spike2, spike1) says so in a
+note at the top, and its Setup hides the Controller and Card images rows,
+Patch a folder and the authors' card: the tables listed play as their authors
+wrote them. The intro no longer says "Stern".
+
+## Restart WSL… on the tab (David, 2026-11-02, interactive)
+
+"We should have the Restart WSL… button on the Visual Pinball tab too": the
+Emulate tabs' cure, beside Check again. `restart_wsl` asks first (the dialog
+names the three cases: the game's screen gone blank on the desktop while the
+table still plays - WSLg's frame share dead, as Metallica's was - a window
+that will not close, crackly sound; and that it closes every game on every
+tab), then `wsl --shutdown` on the tab's job thread, the page saying
+"Restarting WSL", and the state read again after.
+
+## Every table played (David, 2026-11-02, interactive)
+
+Pabst Can Crusher stopped on "Line 2344: Wrong number of arguments:
+bsTrough.InitSw". core.vbs's `cvpmBallStack.InitSw` takes exactly seven
+switches (`InitSw8` eight) and the one-ball trough of Can Crusher and Primus
+passed one. `vpxshadow.trough_init` pads to seven (InitSw8 for eight, more
+refused) the way a lock lane's stack already was; both tables re-patched and
+re-signed in David's folder; an arity pass over every (PAD) script in the
+folder found no other such call.
+
+David: "make sure you try and run each and every game in the list to ensure
+it can load and at least play one or two balls." `scripts/vpx_play_each.py`
+does that in the real Visual Pinball: each (PAD) table opened as Play opens
+it, the controller's log watched for the attach (or a Run failure), Visual
+Pinball's dialogs (class #32770: a script error, the patch's MsgBox) read
+off the desktop, then coin + Start + plunge sent to the player window and
+the trough's kicks (solenoid 1) counted until the asked balls were served;
+the player window closed cleanly so the controller stops the run it
+started; a report on stdout and as JSON. `--this-kit` registers THIS
+checkout's PAD.Controller for the current user (HKCU\Software\Classes
+wins over HKLM in HKCR, no elevation) for the run and removes it after: the
+way to play the Spike 1 tables from the worktree without touching the
+machine-wide registration. It refuses to start while Visual Pinball is
+open. NOT RUN YET in this sitting: it takes the desktop for an hour, David
+was playing, and every WSLg window on the PC was blank (the frame share
+fault above) until a WSL restart; it is the next step once he says so.
+
 ## Still to do
 
-Nothing of this ticket: the remaining piece, a map for VPW's Game of
-Thrones table (and KISS, Whoa Nellie, Primus, Can Crusher), needs the
-download (VPUniverse account) and is a fit like any shadow map's - the
-checklist and the starter are its starting point.
+The play-through of every table (`scripts/vpx_play_each.py --this-kit
+--out report.json`), on David's go: WSL restarted first (Restart WSL… on the
+tab), nothing playing, about an hour for 22 tables.
 
 Was:
 

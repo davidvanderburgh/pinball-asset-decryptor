@@ -198,7 +198,7 @@ export default function Vpx() {
     return html`<${Chip} sm kind="warn" ...${tip({ head, lines: [
       c ? "The name says it is " + c.name + " (" + c.game + ")." : "The app does not recognise this table.",
       "Nothing plays behind it: the app has no map for it yet, so it plays as its author wrote it.",
-      c && c.platform === "spike1" ? "A Spike 1 game: the checklist on the authors' card is where a map starts." : ""].filter(Boolean) })}>${head}<//>`;
+      c && c.platform === "spike1" ? "A Spike 1 game: the checklist on the authors' card is where a map starts." : ""].filter(Boolean) })}>No map yet<//>`;
   };
   // PAD-941: a row's coverage (the map's wired parts over what the game has, from
   // this PC's tables) is the button that writes that table's checklist
@@ -314,7 +314,7 @@ export default function Vpx() {
         <span class="vpx-pic">${picture(t)}</span>
         <b class="vpx-name" ...${tip(t.extra ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : ""))}>${t.name}</b>
         <span class="small vpx-by" ...${tip(t.download && t.extra ? t.download.file : t.by)}>${t.download && t.extra ? "your download" : t.by}</span>
-        <span class="small muted vpx-from" ...${tip(t.where)}>${t.where}</span>
+        <span class="small muted vpx-from" ...${tip(t.download && t.extra ? (t.download.catalog ? "The name says it is " + t.download.catalog.name : "") : t.where)}>${t.download && t.extra ? (t.download.catalog ? t.download.catalog.platform_name : "") : t.where}</span>
         <span class="small" ...${tip(fits(t).length > 1 ? playsAs(t) + "The table fits "
             + fits(t).map((x) => t.models[x]).join(" or ") + "." : "")}>${t.extra ? "" : (t.models || {})[t.title] || ""}</span>
         <span class="small muted vpx-card" ...${tip(t.extra ? "" : t.card ? playsAs(t) + "Card: " + t.card

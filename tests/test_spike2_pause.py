@@ -126,7 +126,71 @@ def test_the_video_schedule_and_the_audio_bucket_read_the_paused_clock():
     vid = _text("gstvid.c")
     assert "clock_gettime(1 /* CLOCK_MONOTONIC */, t);" in _func(vid, "vid_us")
     assert "dlsym" not in _func(vid, "vid_us")
-    assert "gettimeofday(&t, 0);" in _func(_text("alsastub.c"), "now_us")
+    aud = _func(_text("alsastub.c"), "now_us")
+    assert "clock_gettime(4 /* CLOCK_MONOTONIC_RAW */, &t);" in aud
+    assert "dlsym" not in aud
+
+
+# PAD-932: the card's bucket against a wall clock that is SET under it.  WSL 2
+# shares one clock between every distro, so timesyncd in the user's Ubuntu
+# steps it under a rig in PAD-Runtime.  The bucket read gettimeofday, and each
+# step, either way, let the game write a whole buffer ahead in one burst: the
+# stutter David heard on Deadpool and Jurassic Park.  A game keeps its card
+# fed, so the harness does too - a 1 ms loop writing 1024-frame periods while
+# there is room - and counts what it wrote per 250 ms.
+_ALSA_CLOCK_HARNESS = r"""
+#include <stdio.h>
+static long long raw_us = 1000000000LL, wall_off_us = 1700000000000000LL;
+struct t2 { long a, b; };
+static void put(long long us, struct t2 *t, long mul)
+{ t->a = us / 1000000; t->b = us % 1000000 * mul; }
+int clock_gettime(int clk, struct t2 *t)
+{ put(clk == 4 ? raw_us : raw_us + wall_off_us, t, 1000); return 0; }
+int gettimeofday(struct t2 *t, void *tz)
+{ (void)tz; put(raw_us + wall_off_us, t, 1); return 0; }
+int usleep(unsigned us) { raw_us += us; return 0; }
+void pad_say(const char *s) { (void)s; }
+long snd_pcm_avail(void *);
+long snd_pcm_writei(void *, const void *, unsigned long);
+int snd_pcm_open(void **, const char *, int, int);
+int snd_pcm_hw_params_set_rate_near(void *, void *, unsigned *, int *);
+int main(void)
+{
+    static short buf[1024 * 2];
+    void *pcm;
+    unsigned rate = 44100;
+    long win = 0;
+    int ms;
+    snd_pcm_open(&pcm, "sgtl5000main", 0, 0);
+    snd_pcm_hw_params_set_rate_near(pcm, 0, &rate, 0);
+    for (ms = 0; ms < 3000; ms++) {
+        if (ms == 1000) wall_off_us -= 2000000;   /* the wall clock set 2 s back */
+        if (ms == 2000) wall_off_us += 400000;    /* ... and 0.4 s forward */
+        while (snd_pcm_avail(pcm) >= 1024) { snd_pcm_writei(pcm, buf, 1024); win += 1024; }
+        raw_us += 1000;
+        if (ms % 250 == 249) { printf("%ld ", win); win = 0; }
+    }
+    printf("\n");
+    return 0;
+}
+"""
+
+
+@pytest.mark.skipif(not shutil.which("gcc"), reason="no C compiler")
+def test_the_audio_bucket_ignores_the_wall_clock_being_set(tmp_path):
+    """After the first window (the empty card filling), the game writes at
+    the speed of sound in every 250 ms - 11025 frames, in 1024-frame periods -
+    with the wall clock set back and forward under it.  The old bucket wrote
+    18432 in each window holding a step."""
+    src = tmp_path / "harness.c"
+    src.write_text(_ALSA_CLOCK_HARNESS)
+    exe = tmp_path / "harness"
+    subprocess.run(["gcc", "-std=gnu17", "-w", "-o", str(exe), str(src),
+                    os.path.join(RIG, "alsastub.c")], check=True)
+    out = subprocess.run([str(exe)], check=True, capture_output=True, text=True).stdout
+    wins = [int(x) for x in out.split()]
+    assert len(wins) == 12 and wins[0] == 18432
+    assert all(10240 <= w <= 11264 for w in wins[1:]), wins
 
 
 def _shim_time_helpers():

@@ -93,14 +93,22 @@ _PATH = re.compile(
     r"|/(?:home|Users|mnt|media|Volumes)/[^\s\"'<>|]*")
 
 
-def redact(text, user=None):
+def redact(text, user=None, known=()):
     """*text* with every file path replaced by ``<path>`` and the user's
     account name by ``<user>``.  The name comes from the home folder when
     *user* is not given; a one-letter name is left alone (it would hit
-    everywhere)."""
+    everywhere).  A path with a space in it cannot be told from the words
+    after it, so the *known* paths (the card's, the project's) go whole
+    first, with whatever runs on from them (PAD-929)."""
     if not text:
         return text or ""
-    out = _PATH.sub("<path>", text)
+    out = text
+    for path in sorted({p for p in known if p and len(p) > 3},
+                       key=len, reverse=True):
+        for form in {path, path.replace("\\", "/")}:
+            out = re.sub(re.escape(form.rstrip("\\/")) + r"[^\s\"'<>|]*",
+                         "<path>", out, flags=re.IGNORECASE)
+    out = _PATH.sub("<path>", out)
     if user is None:
         user = os.path.basename(os.path.expanduser("~").rstrip("\\/"))
     if user and len(user) > 1:
@@ -232,7 +240,9 @@ def as_text(report):
     preview and exactly what the service stores.  ``hide_paths`` redacts
     the facts and the log; the user's own words are never changed."""
     hide = bool(report.get("hide_paths"))
-    fix = redact if hide else (lambda s: s or "")
+    known = report.get("paths") or ()
+    fix = ((lambda s: redact(s, known=known)) if hide
+           else (lambda s: s or ""))
     at = report.get("at") or time.time()
     lines = ["Pinball Asset Decryptor problem report",
              "======================================",

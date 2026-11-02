@@ -147,7 +147,12 @@ class VpxTab(TabService):
                  authors_intro=AUTHORS_INTRO, authors_titles_tip=AUTHORS_TITLES_TIP,
                  author_titles=[], author_title="", author_note="", coverage={}, sheet=None,
                  catalog_tip=CATALOG_TIP, catalog={"platforms": {}, "tables": []},
-                 pictures={}, pictures_busy="", pictures_tip=PICTURES_TIP)
+                 pictures={}, pictures_busy="", pictures_tip=PICTURES_TIP,
+                 # PAD-943: the page is up the moment the kit's state is in (or
+                 # the last one seen, from the cache); these say what is still coming
+                 authors_busy=False, coverage_busy=False, stale=False)
+        self._extras_running = False
+        self._extras_gen = 0
 
     # -- hooks ---------------------------------------------------------------
     def on_show(self):
@@ -219,7 +224,21 @@ class VpxTab(TabService):
             pass
 
     def _load(self):
-        """Read the kit's state and the runtime's onto the page (any thread)."""
+        """Read the kit's state and the runtime's onto the page (any thread).
+
+        PAD-943 (David: the tables took ten seconds to show; they must be
+        instant, the rest lazy): the page is up as soon as the kit's state is
+        in (half a second), and before that from the LAST state seen on this
+        PC (the cache), so a second opening draws at once; the authors'
+        titles (~2 s, asks WSL) and the Coverage column (~7 s) come in on a
+        thread of their own with the page usable, each card saying it is
+        still looking; the pictures as PAD-942 had them."""
+        if not self.get("loaded"):
+            cached = self._cached_state()
+            if cached:
+                pictures, _todo = self._pictures_known(self._picture_files(cached))
+                self.set(loaded=True, stale=True, authors_busy=True, coverage_busy=True,
+                         pictures=pictures, **cached)
         st = self._kit("vpxsetup.py", ["state"])
         try:
             from ...core import runtime
@@ -227,40 +246,89 @@ class VpxTab(TabService):
         except Exception as exc:                            # noqa: BLE001
             rt_state, rt_text = "unknown", str(exc)
         if "error" in st:
-            self.set(loaded=True, busy="", runtime_state=rt_state, runtime_text=rt_text,
+            self.set(loaded=True, busy="", stale=False, runtime_state=rt_state, runtime_text=rt_text,
                      message=st["error"], message_level="error")
             return
         st.pop("_text", None)
-        # PAD-941: the titles a checklist can be made for (their device tables
-        # are on this PC); a separate call, since finding them asks WSL, and
-        # the page stays "Checking" until it is in (a shot taken on `loaded`
-        # showed the card empty)
-        got = self._kit("vpxauthor.py", ["titles"])
-        titles = sorted(got.get("titles") or []) if "error" not in got else []
-        chosen = self.get("author_title") or ""
-        if chosen not in titles:
-            # the title of the first table whose card is here, else the first
-            cards = set(st.get("cards") or {})
-            chosen = next((t.get("title") for t in st.get("tables") or []
-                           if t.get("title") in titles and set(t.get("titles") or []) & cards), None) \
-                or (titles[0] if titles else "")
-        # how much each table's map wires of its game (the Coverage column):
-        # read from the same tables, ~10 s over WSL's share for 20 titles, so
-        # once per sitting and on Check again, not after every job
-        coverage = self.get("coverage") or {}
-        if self._want_coverage or not coverage:
-            got = self._kit("vpxauthor.py", ["coverage"], timeout=300)
-            if "error" not in got and isinstance(got.get("coverage"), dict):
-                coverage = got["coverage"]
-            self._want_coverage = False
+        self._save_state(st)
         # PAD-942: the pictures already in the cache go up with the page; the
         # rest are read on their own thread, the page usable meanwhile
         pictures, todo = self._pictures_known(self._picture_files(st))
-        self.set(loaded=True, busy="", runtime_state=rt_state, runtime_text=rt_text,
-                 author_titles=titles, author_title=chosen, coverage=coverage,
-                 pictures=pictures, **st)
+        want_cov = self._want_coverage or not self.get("coverage")
+        self.set(loaded=True, busy="", stale=False, runtime_state=rt_state, runtime_text=rt_text,
+                 pictures=pictures, authors_busy=True, coverage_busy=want_cov, **st)
+        self._start_extras(st, want_cov)
         if todo:
             self._read_pictures(todo)
+
+    # -- the slow parts, after the page is up (PAD-943) ---------------------
+    @staticmethod
+    def _state_cache_path():
+        """The last kit state seen on this PC, beside the pictures' cache."""
+        return os.path.join(os.path.dirname(pictures_dir().rstrip("\\/")), "vpx_state.json")
+
+    def _cached_state(self):
+        try:
+            with open(self._state_cache_path(), encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) and "tables" in d else None
+        except (OSError, ValueError):
+            return None
+
+    def _save_state(self, st):
+        try:
+            path = self._state_cache_path()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(st, f)
+            os.replace(path + ".tmp", path)
+        except (OSError, TypeError, ValueError):
+            pass
+
+    def _start_extras(self, st, want_cov):
+        """The authors' titles, then the coverage, on their own thread: the
+        newest load wins (a job's reload while one is still looking starts
+        another; the older one's answers are dropped)."""
+        with self._lock:
+            self._extras_gen += 1
+            gen = self._extras_gen
+            self._extras_running = True
+        threading.Thread(target=self._load_extras, args=(st, want_cov, gen),
+                         daemon=True, name="pad-vpx-extras").start()
+
+    def _load_extras(self, st, want_cov, gen):
+        def mine():
+            return gen == self._extras_gen
+        try:
+            # PAD-941: the titles a checklist can be made for (their device
+            # tables, or a Spike 1 game, on this PC): asks WSL
+            got = self._kit("vpxauthor.py", ["titles"])
+            titles = sorted(got.get("titles") or []) if "error" not in got else []
+            chosen = self.get("author_title") or ""
+            if chosen not in titles:
+                # the title of the first table whose card is here, else the first
+                cards = set(st.get("cards") or {})
+                chosen = next((t.get("title") for t in st.get("tables") or []
+                               if t.get("title") in titles and set(t.get("titles") or []) & cards), None) \
+                    or (titles[0] if titles else "")
+            if mine():
+                self.set(author_titles=titles, author_title=chosen, authors_busy=False)
+            # how much each table's map wires of its game (the Coverage column):
+            # read from the same tables, ~7 s over WSL's share for 20 titles, so
+            # once per sitting and on Check again, not after every job
+            if want_cov:
+                got = self._kit("vpxauthor.py", ["coverage"], timeout=300)
+                coverage = got["coverage"] if "error" not in got and isinstance(got.get("coverage"), dict) \
+                    else (self.get("coverage") or {})
+                self._want_coverage = False
+                if mine():
+                    self.set(coverage=coverage, coverage_busy=False)
+            elif mine():
+                self.set(coverage_busy=False)
+        finally:
+            with self._lock:
+                if mine():
+                    self._extras_running = False
 
     # -- the tables' pictures (PAD-942) -------------------------------------
     @staticmethod

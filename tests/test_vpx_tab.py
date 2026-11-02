@@ -16,6 +16,7 @@ What is worth failing on:
 import json
 import os
 import sys
+import threading
 import time
 import types
 
@@ -65,9 +66,9 @@ class _Win:
 
 def _wait(tab):
     deadline = time.time() + 10
-    while tab._busy and time.time() < deadline:
+    while (tab._busy or tab._extras_running) and time.time() < deadline:
         time.sleep(0.02)
-    assert not tab._busy
+    assert not tab._busy and not tab._extras_running
 
 
 @pytest.fixture
@@ -688,3 +689,68 @@ def test_the_catalogue_rides_the_kits_state(monkeypatch):
 def test_the_tab_starts_with_an_empty_catalogue(tab):
     assert tab.get("catalog") == {"platforms": {}, "tables": []}
     assert "SAM" in tab.get("catalog_tip")
+
+
+# ---- PAD-943: the page is up before the slow parts are in -------------------
+
+def test_the_page_is_up_on_the_state_alone_and_the_rest_comes_after(tab, monkeypatch):
+    """David: the tables took ten seconds to show. The kit's state (half a
+    second) puts the page up; the authors' titles and the coverage come in
+    behind it with their own 'still looking' flags, never holding the page."""
+    seen = []
+    gate = threading.Event()
+    orig = type(tab)._kit
+
+    def slow_kit(self, script, args, timeout=0, on_line=None):
+        if script == "vpxauthor.py":
+            seen.append((args[0], self.get("loaded"), self.get("busy")))
+            gate.wait(5)                         # the slow WSL walk
+            if args[0] == "titles":
+                return {"titles": ["rush_le", "got_le"]}
+            return {"coverage": {"rush_le": {"pct": 90}}}
+        return orig(self, script, args, timeout, on_line)
+    monkeypatch.setattr(type(tab), "_kit", slow_kit)
+    tab.on_show()
+    deadline = time.time() + 5
+    while not tab.get("loaded") and time.time() < deadline:
+        time.sleep(0.02)
+    assert tab.get("loaded") and tab.get("busy") == ""   # up, and not busy, while the titles are looked for
+    assert tab.get("authors_busy") and tab.get("coverage_busy")
+    assert not tab._busy                                    # a button works meanwhile
+    gate.set()
+    _wait(tab)
+    assert seen[0][0] == "titles" and seen[0][1] is True and seen[0][2] == ""
+    assert tab.get("author_titles") == ["got_le", "rush_le"] and not tab.get("authors_busy")
+    assert tab.get("coverage") == {"rush_le": {"pct": 90}} and not tab.get("coverage_busy")
+
+
+def test_the_last_state_seen_draws_the_page_at_once(tab, monkeypatch, tmp_path):
+    cache = tmp_path / "vpx_state.json"
+    monkeypatch.setattr(type(tab), "_state_cache_path", staticmethod(lambda: str(cache)))
+    tab.on_show()
+    _wait(tab)
+    assert json.load(open(cache, encoding="utf-8"))["vpx"] == r"C:\VP"   # the fresh state is kept
+    # a new tab on the same PC: the cache is on the page before the kit answers
+    drawn = []
+    orig = type(tab)._kit
+
+    def kit(self, script, args, timeout=0, on_line=None):
+        if args and args[0] == "state":
+            drawn.append((self.get("loaded"), self.get("stale"), self.get("vpx")))
+        return orig(self, script, args, timeout, on_line)
+    monkeypatch.setattr(type(tab), "_kit", kit)
+    t2 = V.VpxTab(_Win())
+    t2.answers = {}
+    t2.on_show()
+    _wait(t2)
+    assert drawn == [(True, True, r"C:\VP")]
+    assert t2.get("loaded") and not t2.get("stale")
+
+
+def test_a_kit_without_titles_leaves_the_page_usable(tab):
+    tab.answers[("vpxauthor.py", "titles")] = {"error": "WSL is not answering"}
+    tab.answers[("vpxauthor.py", "coverage")] = {"error": "WSL is not answering"}
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("loaded") and tab.get("author_titles") == [] and not tab.get("authors_busy")
+    assert tab.get("coverage") == {} and not tab.get("coverage_busy")

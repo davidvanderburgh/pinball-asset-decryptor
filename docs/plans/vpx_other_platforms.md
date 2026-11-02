@@ -151,6 +151,22 @@ insert (the lamp table's column/row to the node's channel): read from a
 run against the table's own light names when VPW's GOT download is on the
 PC, the way the Spike 2 maps were matched (vpxlamps.py).
 
+## The tab opens at once (David, 2026-11-02, interactive)
+
+"The table view in the Visual Pinball window takes so long to load. It needs
+to be instant and any bits that need loading can lazy load in after render
+with a loading skeleton." Measured: `vpxsetup.py state` 0.5 s,
+`vpxauthor.py titles` 2.1 s (asks WSL), `vpxauthor.py coverage` 7.1 s - and
+the page waited for all three before showing a table. Now `_load` puts the
+page up on the state alone (and, on a PC that has opened the tab before,
+on the LAST state seen - `vpx_state.json` beside the pictures' cache -
+before the kit has even answered), the titles and the coverage come in on
+a thread of their own (`_start_extras`, the newest load wins) with the
+authors' card saying "Finding the games on this PC…" and the Coverage cells
+shimmering until they are in, and until the first state is in the Tables
+card shows four skeleton rows instead of "Checking…". The buttons work
+while the slow parts load (`_busy` is not held).
+
 ## Still to do
 
 Nothing of this ticket: the remaining piece, a map for VPW's Game of

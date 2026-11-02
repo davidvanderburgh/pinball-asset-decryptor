@@ -189,6 +189,7 @@ export default function Vpx() {
   const coverage = s.coverage || {};
   const coverBtn = (t) => {
     const c = coverage[t.title];
+    if (!c && s.coverage_busy) return html`<span class="vpx-skel vpx-skel-cov" ...${tip("Reading how much of the game the map wires…")}></span>`;
     const part = (k, name) => c && c[k] ? c[k][0] + " of " + c[k][1] + " " + name : "";
     const lines = c ? [part("switches", "switches"), part("coils", "coils the game fires"), part("inserts", "inserts"),
       "Click for the checklist: every part, marked by what the map wires, against "
@@ -262,15 +263,16 @@ export default function Vpx() {
       <div class="vpx-authors-row">
         <span class="small">Game</span>
         <${Select} sm width=${260} value=${s.author_title || ""} options=${authorTitles}
-          disabled=${busy || !s.ok || !authorTitles.length} title=${s.authors_titles_tip}
+          disabled=${busy || !s.ok || !authorTitles.length || s.authors_busy} title=${s.authors_titles_tip}
           onChange=${(v) => call("vpx.pick_author_title", v)} />
+        ${s.authors_busy ? html`<span class="small muted vpx-authors-busy"><${Spinner} /> Finding the games on this PC…</span>` : null}
         <${Button} size="sm" icon="file" disabled=${busy || !s.ok || !s.author_title}
           title="Open the game's checklist: every switch, coil and insert, its number and what a table does for it. Export it as CSV or Markdown from there."
           onClick=${() => call("vpx.checklist", false)}>Checklist…<//>
         <${Button} size="sm" kind="ghost" icon="search" disabled=${busy || !s.ok || !s.author_title}
           title="Choose a .vpx: the checklist marks every part of the game that table leaves out (against the app's map for it), or offers a starter map when the app has none."
           onClick=${() => call("vpx.checklist", true)}>Check a table…<//>
-        ${!authorTitles.length && s.loaded ? html`<span class="small muted">No game has run on this PC yet: play one once and it appears here.</span>` : null}
+        ${!authorTitles.length && s.loaded && !s.authors_busy ? html`<span class="small muted">No game has run on this PC yet: play one once and it appears here.</span>` : null}
       </div>
       ${s.author_note ? html`<div class="small vpx-authors-note">${s.author_note}</div>` : null}
     <//>
@@ -315,10 +317,25 @@ export default function Vpx() {
           Patch again to play it as the ${t.models[t.title]}.</div>` : null}
         ${missed(t) ? html`<div class="small vpx-stale">Your copy was patched before a fix: ${t.repatch.join("; ")}.
           Patch again to get it.</div>` : null}
-      </div>`)}</div>` : html`<div class="muted small">${s.loaded ? "No tables." : "Checking…"}</div>`}
+      </div>`)}</div>` : s.loaded ? html`<div class="muted small">No tables.</div>` : html`<${Skeleton} />`}
     <//>
     <${Catalog} s=${s} />
   </div>`;
+}
+
+// PAD-943: the tables' place while the kit's first state is read (half a
+// second; the page itself never waits): four rows the shape of a table row.
+function Skeleton() {
+  return html`<div class="vpx-list vpx-skel-list">${[0, 1, 2, 3].map((i) => html`<div class="vpx-table vpx-skel-row" key=${i}>
+    <span><span class="vpx-skel" style=${"width:" + (55 + (i * 17) % 35) + "%"}></span></span>
+    <span class="vpx-by"><span class="vpx-skel" style="width:60%"></span></span>
+    <span class="vpx-from"><span class="vpx-skel" style="width:70%"></span></span>
+    <span><span class="vpx-skel" style="width:30px"></span></span>
+    <span><span class="vpx-skel" style="width:80%"></span></span>
+    <span><span class="vpx-skel" style="width:64px"></span></span>
+    <span><span class="vpx-skel vpx-skel-cov"></span></span>
+    <span></span><span></span>
+  </div>`)}</div>`;
 }
 
 // PAD-943: the other platforms' tables. One card, a block per platform

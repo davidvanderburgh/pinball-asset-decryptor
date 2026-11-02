@@ -468,7 +468,7 @@ lamps whose LED the build calls something else (a map numbered for another
 build: Guardians LE once carried the Pro's numbers).
 `suggest ... [--write]` mends what audit found by the fit (the nearest free
 light, a free light beside a shown insert, otherwise a retrofit light;
-refused when the fit is over 10 px, as on Stranger Things), `rgb <map>
+refused when the fit is over 10 px), `rgb <map>
 <led_io.txt> [--write]` marks the RGB inserts, and `lit <map> <table.vpx>
 <led_io.txt> <padled> <out.png>` draws what the table shows for one sample
 of a rig's `dump/padled` on the table's own art.

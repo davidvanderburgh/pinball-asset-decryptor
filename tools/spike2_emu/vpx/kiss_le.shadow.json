@@ -481,38 +481,29 @@
   "i6": {
    "leds": [
     [
-     9,
-     43
+     11,
+     28
     ]
    ],
-   "name": "BONUS POP SPACEMAN (BLU)"
+   "name": "LEFT OUTLANE"
   },
   "i7": {
    "leds": [
     [
-     9,
-     17
-    ],
-    [
-     9,
-     18
-    ],
-    [
-     9,
-     19
+     11,
+     29
     ]
    ],
-   "rgb": true,
-   "name": "BONUS POP DEMON"
+   "name": "LEFT RETURN LANE (L)"
   },
   "i8": {
    "leds": [
     [
-     9,
-     18
+     11,
+     30
     ]
    ],
-   "name": "BONUS POP DEMON (GRN)"
+   "name": "LEFT RETURN LANE (R)"
   },
   "i34": {
    "leds": [
@@ -1013,12 +1004,201 @@
    "leds": [
     [
      9,
+     38
+    ],
+    [
+     9,
+     39
+    ],
+    [
+     9,
+     40
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS (K)ISS"
+  },
+  "i10": {
+   "leds": [
+    [
+     9,
+     35
+    ],
+    [
+     9,
+     36
+    ],
+    [
+     9,
+     37
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS K(I)SS"
+  },
+  "i11": {
+   "leds": [
+    [
+     9,
+     26
+    ],
+    [
+     9,
+     27
+    ],
+    [
+     9,
+     28
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS KI(S)S"
+  },
+  "i12": {
+   "leds": [
+    [
+     9,
+     29
+    ],
+    [
+     9,
+     30
+    ],
+    [
+     9,
+     31
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS KIS(S)"
+  },
+  "i13": {
+   "leds": [
+    [
+     9,
+     44
+    ],
+    [
+     9,
+     45
+    ],
+    [
+     9,
+     46
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS (A)RMY"
+  },
+  "i14": {
+   "leds": [
+    [
+     9,
+     32
+    ],
+    [
+     9,
+     33
+    ],
+    [
+     9,
+     34
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS A(R)MY"
+  },
+  "i15": {
+   "leds": [
+    [
+     9,
+     23
+    ],
+    [
+     9,
+     24
+    ],
+    [
+     9,
+     25
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS AR(M)Y"
+  },
+  "i16": {
+   "leds": [
+    [
+     9,
+     20
+    ],
+    [
+     9,
+     21
+    ],
+    [
+     9,
+     22
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS ARM(Y)"
+  },
+  "i17": {
+   "leds": [
+    [
+     9,
+     47
+    ],
+    [
+     9,
+     48
+    ],
+    [
+     9,
+     49
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS POP STARCHILD"
+  },
+  "i18": {
+   "leds": [
+    [
+     9,
+     41
+    ],
+    [
+     9,
+     42
+    ],
+    [
+     9,
+     43
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS POP SPACEMAN"
+  },
+  "i19": {
+   "leds": [
+    [
+     9,
+     17
+    ],
+    [
+     9,
+     18
+    ],
+    [
+     9,
      19
     ]
    ],
-   "name": "BONUS POP DEMON (BLU)"
+   "rgb": true,
+   "name": "BONUS POP DEMON"
   },
-  "i10": {
+  "i20": {
    "leds": [
     [
      9,
@@ -1036,25 +1216,7 @@
    "rgb": true,
    "name": "BONUS POP CATMAN"
   },
-  "i11": {
-   "leds": [
-    [
-     9,
-     15
-    ]
-   ],
-   "name": "BONUS POP CATMAN (GRN)"
-  },
-  "i12": {
-   "leds": [
-    [
-     9,
-     16
-    ]
-   ],
-   "name": "BONUS POP CATMAN (BLU)"
-  },
-  "i13": {
+  "i21": {
    "leds": [
     [
      9,
@@ -1072,25 +1234,7 @@
    "rgb": true,
    "name": "BONUS INSTRUMENT STARCHILD"
   },
-  "i14": {
-   "leds": [
-    [
-     9,
-     54
-    ]
-   ],
-   "name": "BONUS INSTRUMENT STARCHILD (GRN)"
-  },
-  "i15": {
-   "leds": [
-    [
-     9,
-     55
-    ]
-   ],
-   "name": "BONUS INSTRUMENT STARCHILD (BLU)"
-  },
-  "i16": {
+  "i22": {
    "leds": [
     [
      9,
@@ -1108,25 +1252,7 @@
    "rgb": true,
    "name": "BONUS INSTRUMENT SPACEMAN"
   },
-  "i17": {
-   "leds": [
-    [
-     9,
-     51
-    ]
-   ],
-   "name": "BONUS INSTRUMENT SPACEMAN (GRN)"
-  },
-  "i18": {
-   "leds": [
-    [
-     9,
-     52
-    ]
-   ],
-   "name": "BONUS INSTRUMENT SPACEMAN (BLU)"
-  },
-  "i19": {
+  "i23": {
    "leds": [
     [
      9,
@@ -1144,25 +1270,7 @@
    "rgb": true,
    "name": "BONUS INSTRUMENT DEMON"
   },
-  "i20": {
-   "leds": [
-    [
-     9,
-     9
-    ]
-   ],
-   "name": "BONUS INSTRUMENT DEMON (GRN)"
-  },
-  "i21": {
-   "leds": [
-    [
-     9,
-     10
-    ]
-   ],
-   "name": "BONUS INSTRUMENT DEMON (BLU)"
-  },
-  "i22": {
+  "i24": {
    "leds": [
     [
      9,
@@ -1179,24 +1287,6 @@
    ],
    "rgb": true,
    "name": "BONUS INSTRUMENT CATMAN"
-  },
-  "i23": {
-   "leds": [
-    [
-     9,
-     12
-    ]
-   ],
-   "name": "BONUS INSTRUMENT CATMAN (GRN)"
-  },
-  "i24": {
-   "leds": [
-    [
-     9,
-     13
-    ]
-   ],
-   "name": "BONUS INSTRUMENT CATMAN (BLU)"
   },
   "I107": {
    "leds": [
@@ -1242,6 +1332,96 @@
     ]
    ],
    "name": "ROCK AGAIN"
+  },
+  "B1L": {
+   "leds": [
+    [
+     11,
+     12
+    ],
+    [
+     11,
+     13
+    ],
+    [
+     11,
+     3
+    ]
+   ],
+   "rgb": true,
+   "name": "TOP POP BUMPER"
+  },
+  "B2L": {
+   "leds": [
+    [
+     11,
+     1
+    ],
+    [
+     11,
+     2
+    ],
+    [
+     11,
+     11
+    ]
+   ],
+   "rgb": true,
+   "name": "LEFT BUMPER"
+  },
+  "B3L": {
+   "leds": [
+    [
+     11,
+     4
+    ],
+    [
+     11,
+     5
+    ],
+    [
+     11,
+     16
+    ]
+   ],
+   "rgb": true,
+   "name": "RIGHT BUMPER"
+  },
+  "B4L": {
+   "leds": [
+    [
+     11,
+     9
+    ],
+    [
+     11,
+     10
+    ],
+    [
+     11,
+     0
+    ]
+   ],
+   "rgb": true,
+   "name": "BOTTOM BUMPER"
+  },
+  "RightRampLight": {
+   "leds": [
+    [
+     10,
+     34
+    ],
+    [
+     10,
+     16
+    ],
+    [
+     10,
+     8
+    ]
+   ],
+   "rgb": true,
+   "name": "R. RAMP ARROW"
   }
  },
  "quiet_subs": [

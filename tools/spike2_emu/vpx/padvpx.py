@@ -36,6 +36,14 @@ name the card a title boots, start or stop a run by hand.
     padvpx stop <title>                   stop a run padvpx or the controller started
     padvpx status                         the kit: controller, runs on the board, cards
     padvpx tables                         the tables this kit can patch
+    padvpx checklist <title> [--table "<file.vpx>"] [--out DIR]
+        For whoever builds or finishes a table of <title> (PAD-941): a
+        Markdown checklist of every switch, coil and insert the game has,
+        with its number and what a table does for it; with --table, what
+        that table has and every part the kit's map for it leaves out, or a
+        starter map when the kit has none. From the title's device tables
+        (vpxauthor.py), so the title must have run once on this PC.
+    padvpx titles                         the titles whose device tables are on this PC
 
 A run started here or by the controller takes a rig slot as PAD-VPX, visible
 and with sound; nothing of the app's or a session's is touched.
@@ -481,6 +489,12 @@ def main(argv):
         return stop(rest[0])
     if cmd == "status":
         return status()
+    if cmd == "checklist" and rest:
+        import vpxauthor
+        return vpxauthor.main(["checklist"] + rest)
+    if cmd == "titles":
+        import vpxauthor
+        return vpxauthor.main(["titles"])
     if cmd == "tables":
         for t, i in maps().items():
             print("%-18s %-7s %-40s %s" % (t, i["kind"], i["output"], ", ".join(i["detect"])))

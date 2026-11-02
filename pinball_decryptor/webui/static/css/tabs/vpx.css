@@ -29,17 +29,34 @@
 /* PAD-940: one table per line, the same columns on every line under a head
    row (Patch and Play a fixed-width column each, so every button lines up) */
 .vpx-table { display: grid; align-items: center; column-gap: 14px; padding: 3px 4px; min-height: 36px;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 1.7fr) minmax(0, 1.1fr) 56px minmax(0, 2fr) 104px 128px 76px;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1.7fr) minmax(0, 1.1fr) 56px minmax(0, 2fr) 104px 74px 128px 76px;
   border-bottom: 1px solid var(--line); }
 .vpx-table > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .vpx-table:not(.vpx-head):hover { background: var(--panel-2); }
 .vpx-head { min-height: 26px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
-.vpx-table > .vpx-patch, .vpx-table > .vpx-play { overflow: visible; }
+.vpx-table > .vpx-patch, .vpx-table > .vpx-play, .vpx-table > .vpx-cover { overflow: visible; }
 .vpx-table.unpatched > .vpx-name { color: var(--ink-3); font-weight: 500; }
 .vpx-stale { grid-column: 1 / -1; padding: 0 0 4px; white-space: normal; }
+/* PAD-941: the card for table authors, above the tables (David: visibility) */
+.vpx-authors { margin-bottom: 12px; }
+.vpx-authors > .hd { padding: 8px 16px; flex-wrap: wrap; }
+.vpx-authors-sub { min-width: 0; white-space: normal; flex: 1 1 400px; }
+.vpx-authors-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.vpx-authors-note { margin-top: 8px; overflow-wrap: anywhere; }
 /* narrower windows drop the author (still in the name's tip); From stays:
    it is where an unpatched table is downloaded from */
 @media (max-width: 1400px) {
-  .vpx-table { grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) 56px minmax(0, 2fr) 104px 128px 76px; }
+  .vpx-table { grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) 56px minmax(0, 2fr) 104px 74px 128px 76px; }
   .vpx-table > .vpx-by { display: none; }
 }
+/* PAD-941: the checklist sheet, in the app's own tables */
+.vpx-sheet h3 { margin: 10px 0 4px; font-size: 15px; display: flex; gap: 10px; align-items: baseline; }
+.vpx-sheet-sum { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vpx-sheet-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.vpx-sheet-table th { text-align: left; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 11px;
+  color: var(--ink-3); padding: 4px 8px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+.vpx-sheet-table td { padding: 3px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.vpx-sheet-table tr.miss > td { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.vpx-sheet-table tr:hover > td { background: var(--panel-2); }
+.vpx-sheet-table td.vpx-wrap { white-space: normal; overflow-wrap: anywhere; }
+.vpx-sheet-list { margin: 0; padding-left: 20px; font-size: 13px; }

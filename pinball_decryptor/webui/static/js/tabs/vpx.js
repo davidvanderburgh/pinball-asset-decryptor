@@ -11,7 +11,10 @@
 // crammed the model and the card into one cell; Patch and Play each a column
 // of their own, Play greyed on a table not patched yet (David).
 
-import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, call, tip } from "../core/ui.js";
+// PAD-941: a card for whoever builds or finishes a table: a checklist of
+// every switch, coil and insert the game has, checked against a table.
+
+import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, Select, Check, Modal, call, tip } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -24,6 +27,89 @@ function Row({ ok, label, value, children }) {
     <div class="vpx-what"><div>${label}</div>${value ? html`<div class="small muted vpx-val">${value}</div>` : null}</div>
     <div class="vpx-acts">${children}</div>
   </div>`;
+}
+
+// PAD-941: the checklist sheet (David: it lives in the app, themed, with CSV
+// export). One modal: the summary, the notes, then every part of the machine
+// in the app's own tables, marked yes/NO against the map when a table was
+// checked; "Only what is missing" narrows it to the NO rows.
+const OK_WORDS = { yes: "yes", no: "NO", board: "board", listed: "listed", "-": "–", "": "" };
+function Ok({ v }) {
+  if (!v) return null;
+  const kind = v === "no" ? "warn" : v === "yes" ? "ok" : "";
+  return html`<${Chip} kind=${kind} sm dot=${v === "yes" || v === "no"}
+    ...${tip(v === "no" ? "The map wires nothing for it: the table owes this part." : v === "yes" ? "Wired by the map."
+      : v === "board" ? "The node board fires it from its own switch; the table owes the switch, not the coil."
+      : v === "listed" ? "In the map with a number, but nothing on the table acts on it." : "Nothing to build.")}>${OK_WORDS[v]}<//>`;
+}
+const at = (r) => (r.x == null ? "–" : r.x + "," + r.y);
+// a hint names map keys in `backticks`: shown as code
+const hint = (t) => (t || "").split("`").map((part, i) => (i % 2 ? html`<code>${part}</code>` : part));
+function Sheet({ d, onClose }) {
+  const [onlyMissing, setOnlyMissing] = useState(false);
+  const sum = d.summary || {};
+  const marked = !!d.map;
+  const keep = (r) => !onlyMissing || r.ok === "no";
+  const pf = d.switches.filter((s) => (s.where === "playfield" || s.where === "unplaced") && keep(s));
+  const cab = d.switches.filter((s) => s.where === "cabinet");
+  const virt = d.switches.filter((s) => s.where === "virtual");
+  const coils = d.coils.filter(keep);
+  const ins = d.inserts.filter((g) => g.where === "playfield" && keep(g));
+  const off = d.inserts.filter((g) => g.where !== "playfield");
+  const inv = d.inventory;
+  const w = sum.wired || {};
+  const part = (k, name) => (w[k] ? html`<${Chip} kind=${w[k][0] === w[k][1] ? "ok" : "warn"} sm>${w[k][0]} of ${w[k][1]} ${name}<//>` : null);
+  const head = (cols) => html`<thead><tr>${cols.map((c) => html`<th>${c}</th>`)}</tr></thead>`;
+  return html`<${Modal} title=${(sum.title || d.title) + ": what a Visual Pinball table needs"} icon="file" xwide cls="vpx-sheet" onClose=${onClose}
+    footer=${html`
+      <${Check} checked=${onlyMissing} onChange=${setOnlyMissing} label="Only what is missing" disabled=${!marked} />
+      <span class="sp"></span>
+      ${d.starter ? html`<${Button} size="sm" icon="save" onClick=${() => call("vpx.export", "starter")}>Save starter map…<//>` : null}
+      <${Button} size="sm" icon="save" onClick=${() => call("vpx.export", "md")}>Save Markdown…<//>
+      <${Button} size="sm" kind="primary" icon="download" onClick=${() => call("vpx.export", "csv")}>Export CSV…<//>
+      <${Button} size="sm" kind="ghost" onClick=${onClose}>Close<//>`}>
+    <div class="vpx-sheet-sum">
+      ${marked ? html`<${Chip} kind=${sum.pct >= 95 ? "ok" : "warn"} dot>${sum.pct}% wired<//>
+        ${part("switches", "switches")}${part("coils", "coils the game fires")}${part("inserts", "inserts")}
+        ${sum.guesses ? html`<${Chip} sm>${sum.guesses} GUESS<//>` : null}
+        ${sum.id_mismatch ? html`<${Chip} kind="warn" sm>${sum.id_mismatch} ids disagree<//>` : null}`
+        : html`<${Chip} sm>${sum.switches} switches<//><${Chip} sm>${sum.coils} coils<//><${Chip} sm>${sum.inserts} inserts<//>`}
+      ${inv ? html`<span class="small muted">${inv.name}: ${inv.brain === "pad" ? "already patched for PAD.Controller" : inv.brain === "rom" ? "a ROM table" : "a scripted tribute"}, ${inv.script_lines} lines of script${d.map ? ", map " + d.map : ""}.</span>` : null}
+    </div>
+    <div class="small muted">The table talks to the game in the machine's own numbers: a switch is 1000 + id, a lamp 1000 + node × 100 + index (an RGB insert: its first LED), a coil the small number its map gives it (flippers 46/48/36). A map names the table object for each part; <code>tools/spike2_emu/vpx/README.md</code> has the shape.</div>
+    ${(d.notes || []).map((n) => html`<${Note} kind="warn">${n}<//>`)}
+    <h3>Switches <span class="small muted">${marked ? sum.missing_switches + " missing" : pf.length + " on the playfield"}</span></h3>
+    <table class="vpx-sheet-table">${head([marked ? "ok" : null, "id", "#", "node/bit", "switch", "kind", "at (px)", "the table does"].filter((c) => c !== null))}
+      <tbody>${pf.map((s) => html`<tr class=${s.ok === "no" ? "miss" : ""}>${marked ? html`<td><${Ok} v=${s.ok} /></td>` : null}
+        <td class="mono">${s.id == null ? "?" : s.id}</td><td class="mono muted">${s.num == null ? "–" : s.num}</td>
+        <td class="mono muted">${s.node == null ? "?" : s.node}/${s.bit == null ? "?" : s.bit}</td>
+        <td><b>${s.name}</b>${s.where === "unplaced" ? html` <span class="small muted">(no position in this build)</span>` : null}</td>
+        <td>${s.kind}</td><td class="mono muted">${at(s)}</td><td class="small">${hint(s.hint)}</td></tr>`)}</tbody></table>
+    ${virt.length ? html`<div class="small muted"><b>The game's own</b> (nothing to build): ${virt.map((s) => s.name + " (" + s.id + ")").join(", ")}</div>` : null}
+    <div class="small muted"><b>Cabinet</b> (PADSPIKE2.vbs presses these from the keys): ${cab.map((s) => s.name + " (" + s.id + ")").join(", ")}</div>
+    <h3>Coils and mechs <span class="small muted">${marked ? sum.missing_coils + " nothing fires, " + sum.listed_coils + " listed without a table action" : coils.length}</span></h3>
+    <div class="small muted">Flippers, slingshots and pop bumpers are fired by the node boards from their own switches: the table only has to send the switch. Every other coil is the game's decision, acted on through <code>solenoids</code>.</div>
+    <table class="vpx-sheet-table">${head([marked ? "ok" : null, "node/index", "number", "coil", "kind", "at (px)", "the table does"].filter((c) => c !== null))}
+      <tbody>${coils.map((c) => html`<tr class=${c.ok === "no" ? "miss" : ""}>${marked ? html`<td><${Ok} v=${c.ok} /></td>` : null}
+        <td class="mono muted">${c.node == null ? "?" : c.node}/${c.index}</td><td class="mono">${c.number}</td>
+        <td><b>${c.name}</b></td><td>${c.kind}</td><td class="mono muted">${at(c)}</td><td class="small">${hint(c.hint)}</td></tr>`)}</tbody></table>
+    <h3>Lights <span class="small muted">${marked ? sum.missing_inserts + " no table light shows" : ins.length + " playfield inserts"}</span></h3>
+    <div class="small muted">A Light at the insert's place; the map's <code>lamps</code> puts it on the LED (<code>"leds": [[node, index]]</code>, an RGB insert's three channels together with <code>"rgb": true</code>); an insert the table lacks is a <code>retrofit_lights</code> entry, a flasher or plastic a <code>lamp_calls</code> sub.</div>
+    <table class="vpx-sheet-table">${head([marked ? "ok" : null, "lamp", "node/index", "insert", "RGB", "at (px)"].filter((c) => c !== null))}
+      <tbody>${ins.map((g) => html`<tr class=${g.ok === "no" ? "miss" : ""}>${marked ? html`<td><${Ok} v=${g.ok} /></td>` : null}
+        <td class="mono">${g.lamp}</td><td class="mono muted">${g.leds}</td><td><b>${g.name}</b></td><td>${g.rgb ? "yes" : ""}</td><td class="mono muted">${at(g)}</td></tr>`)}</tbody></table>
+    ${off.length && !onlyMissing ? html`<div class="small muted"><b>Off the playfield</b> (no table light): ${off.slice(0, 120).map((g) => g.name + " (" + g.lamp + ")").join(", ")}${off.length > 120 ? " …" : ""}</div>` : null}
+    ${d.wrong && d.wrong.length ? html`<h3>The map and this PC's switch table disagree <span class="small muted">${d.wrong.length}</span></h3>
+      <div class="small muted">Either the map was built from an older reading of the title or the switch table here is stale: the switch table of the run the table attaches to is the numbering that counts.</div>
+      <table class="vpx-sheet-table">${head(["object", "map id", "the map says", "this PC's switch table says"])}
+        <tbody>${d.wrong.map(([obj, id, name, got]) => html`<tr><td class="mono">${obj}</td><td class="mono">${id}</td><td>${name}</td><td>${got}</td></tr>`)}</tbody></table>` : null}
+    ${d.guesses && d.guesses.length && !onlyMissing ? html`<h3>Marked GUESS in the map <span class="small muted">check these on the machine</span></h3>
+      <ul class="vpx-sheet-list">${d.guesses.map(([kind, obj, name]) => html`<li>${kind} <code>${obj}</code>: ${name}</li>`)}</ul>` : null}
+    ${inv && !onlyMissing ? html`<h3>The table: ${inv.name}</h3>
+      <table class="vpx-sheet-table">${head(["kind", "count", "objects"])}
+        <tbody>${Object.entries(inv.kinds).filter(([, v]) => v.length).map(([k, v]) => html`<tr><td>${k}</td><td class="mono">${v.length}</td>
+          <td class="small vpx-wrap">${v.slice(0, 40).join(", ")}${v.length > 40 ? " … (" + v.length + ")" : ""}</td></tr>`)}</tbody></table>` : null}
+  <//>`;
 }
 
 export default function Vpx() {
@@ -77,7 +163,23 @@ export default function Vpx() {
   // where they were last left (the kit saves the playfield's place, the
   // renderer the game screen's in display.conf)
   const inUse = presets.find((p) => p.key === s.layout);
+  const authorTitles = s.author_titles || [];
+  // PAD-941: a row's coverage (the map's wired parts over what the game has, from
+  // this PC's tables) is the button that writes that table's checklist
+  const coverage = s.coverage || {};
+  const coverBtn = (t) => {
+    const c = coverage[t.title];
+    const part = (k, name) => c && c[k] ? c[k][0] + " of " + c[k][1] + " " + name : "";
+    const lines = c ? [part("switches", "switches"), part("coils", "coils the game fires"), part("inserts", "inserts"),
+      "Click for the checklist: every part, marked by what the map wires, against "
+      + (t.source ? base(t.source) : t.patched ? "your (PAD) copy" : "the game alone") + "."]
+      : ["No tables for " + t.title + " on this PC yet: play it once and check again."];
+    return html`<${Button} size="sm" kind=${c && c.pct >= 95 ? "ghost" : ""} icon="file" disabled=${busy || !s.ok || !c}
+      ...${tip({ head: c ? "The map wires " + c.pct + "% of " + t.title + "." : "Coverage unknown.", lines })}
+      onClick=${() => call("vpx.row_checklist", t.output)}>${c ? c.pct + "%" : "–"}<//>`;
+  };
   return html`<div class="page vpx-page">
+    ${s.sheet ? html`<${Sheet} d=${s.sheet} onClose=${() => call("vpx.close_sheet")} />` : null}
     <${PageHead} title="Visual Pinball" sub=${(s.intro || "").split("\n").map((l) => html`${l}<br />`)}>
       <${Chip} kind="info" sm>Preview<//>
       <${Button} kind="ghost" icon="refresh" disabled=${busy || !s.ok} onClick=${() => call("vpx.refresh")}>Check again<//>
@@ -135,6 +237,23 @@ export default function Vpx() {
           onClick=${() => call("vpx.choose_library")}>Choose folder…<//>
       <//>` : null}
     <//>
+    <${Card} cls="vpx-authors" head=${html`<span class="h2">For table authors</span>
+        <span class="small muted vpx-authors-sub">${s.authors_intro}</span>`}>
+      <div class="vpx-authors-row">
+        <span class="small">Game</span>
+        <${Select} sm width=${260} value=${s.author_title || ""} options=${authorTitles}
+          disabled=${busy || !s.ok || !authorTitles.length} title=${s.authors_titles_tip}
+          onChange=${(v) => call("vpx.pick_author_title", v)} />
+        <${Button} size="sm" icon="file" disabled=${busy || !s.ok || !s.author_title}
+          title="Open the game's checklist: every switch, coil and insert, its number and what a table does for it. Export it as CSV or Markdown from there."
+          onClick=${() => call("vpx.checklist", false)}>Checklist…<//>
+        <${Button} size="sm" kind="ghost" icon="search" disabled=${busy || !s.ok || !s.author_title}
+          title="Choose a .vpx: the checklist marks every part of the game that table leaves out (against the app's map for it), or offers a starter map when the app has none."
+          onClick=${() => call("vpx.checklist", true)}>Check a table…<//>
+        ${!authorTitles.length && s.loaded ? html`<span class="small muted">No game has run on this PC yet: play one once and it appears here.</span>` : null}
+      </div>
+      ${s.author_note ? html`<div class="small vpx-authors-note">${s.author_note}</div>` : null}
+    <//>
     <${Card} cls="vpx-tables" head=${html`<span class="h2" ...${tip(s.tables_tip)}>Tables</span>
         <span class="mono small muted vpx-dir" ...${tip("Your tables folder: where Patch writes the (PAD) copies and Play looks for them.")}>${s.tables_dir || "No tables folder set"}</span>
         <span class="sp"></span>
@@ -147,7 +266,9 @@ export default function Vpx() {
         <div class="vpx-table vpx-head small muted">
           <span>Table</span><span class="vpx-by">By</span><span class="vpx-from">From</span>
           <span ...${tip("The machine the table plays as: the card image it boots is that model's.")}>Model</span>
-          <span>Card image</span><span>Your copy</span><span></span><span></span>
+          <span>Card image</span><span>Your copy</span>
+          <span ...${tip("How much of the game the app's map for this table wires, from the game's own tables on this PC: switches, coils and inserts the table owes, less what the map leaves out. Click a row's for its checklist.")}>Coverage</span>
+          <span></span><span></span>
         </div>
         ${rows.map((t) => html`<div class=${"vpx-table" + (t.patched ? "" : " unpatched")}>
         <b class="vpx-name" ...${tip(t.extra ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : ""))}>${t.name}</b>
@@ -161,6 +282,7 @@ export default function Vpx() {
         <span>${!t.patched ? html`<${Chip} sm>Not patched<//>`
           : stale(t) || missed(t) ? html`<${Chip} kind="warn" dot sm>Patch again<//>`
           : html`<${Chip} kind="ok" dot sm>Patched<//>`}</span>
+        <span class="vpx-cover">${t.extra ? null : coverBtn(t)}</span>
         <span class="vpx-patch">${t.extra ? null
           : patchBtn(t, !t.patched ? "Patch…" : t.source ? "Patch again" : "Patch again…")}</span>
         <span class="vpx-play"><${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx || !t.patched}

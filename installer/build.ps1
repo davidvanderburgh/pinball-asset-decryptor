@@ -107,6 +107,15 @@ $getPipUrl = "https://bootstrap.pypa.io/get-pip.py"
 $getPipFile = Join-Path $BuildDir "get-pip.py"
 Invoke-WebRequest -Uri $getPipUrl -OutFile $getPipFile -UseBasicParsing
 
+# get-pip.py from 2026-11 runs its bundled pip as "python <tmp>\pip install",
+# and pip refuses to modify itself on Windows when argv[0] is named "pip".
+# Run the same bundled pip through runpy instead (a no-op once upstream fixes it).
+$getPipRaw = Get-Content $getPipFile -Raw
+$getPipRaw = $getPipRaw.Replace(
+    'command.append(os.path.join(tmpdir, "pip"))',
+    'command += ["-c", "import runpy,sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module(''pip'', run_name=''__main__'', alter_sys=True)", tmpdir]')
+Set-Content -Path $getPipFile -Value $getPipRaw -Encoding UTF8 -NoNewline
+
 $pythonExe = Join-Path $PythonDir "python.exe"
 & $pythonExe $getPipFile --no-warn-script-location 2>&1 | ForEach-Object { Write-Host "    $_" }
 if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip"; exit 1 }

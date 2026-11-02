@@ -22,6 +22,7 @@ pywin32, its DPI awareness and its module names stay out of the app.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -33,9 +34,7 @@ PREVIEW_FEATURE = "vpx"
 
 INTRO = ("Play a Visual Pinball table with the real Stern game behind it: the "
          "game from your own card image serves the balls, fires the coils, lights "
-         "the table, keeps score and shows its own screen.\n"
-         "Download a table the app knows from its author, patch it here, then open "
-         "it with Play.")
+         "the table, keeps score and shows its own screen.")
 
 TABLES_TIP = ("The app ships no tables. Download a table below from its author, "
               "then Patch it: the app writes a copy named \"(PAD)\" into your tables "
@@ -315,11 +314,19 @@ class VpxTab(TabService):
         return self._start("Reading the tables folder", work)
 
     @rpc
-    def patch(self):
+    def patch(self, output=None):
         """The person's own download of a table the kit knows: recognised by
         its script and written as the "(PAD)" copy into Visual Pinball's
-        tables folder (beside the download while Visual Pinball is not set up)."""
-        path = self.window.ask_open("vpx_table", "Choose the Visual Pinball table you downloaded",
+        tables folder (beside the download while Visual Pinball is not set up).
+
+        PAD-927: each table's row has its own Patch button, *output* its
+        "(PAD)" name: the file dialog names that table, and a download that
+        turns out to be another table the kit knows is patched as that one,
+        with the page saying so."""
+        want = next((t for t in self.get("tables") or [] if output and t.get("output") == output), None)
+        title = ("Choose your download of %s" % want["name"] if want
+                 else "Choose the Visual Pinball table you downloaded")
+        path = self.window.ask_open("vpx_table", title,
                                     [("Visual Pinball table", "*.vpx"), ("All files", "*.*")])
         if not path:
             return False
@@ -338,7 +345,65 @@ class VpxTab(TabService):
                           "listed on this page.", "warning")
             elif "open \"" not in text:
                 self._say("The patch did not finish; the session log has what it said.", "error")
+            elif want:
+                got_out = re.search(r'open "([^"]+)"', text)
+                made = os.path.basename(got_out.group(1)) if got_out else ""
+                if made and made != want["output"]:
+                    self._say("%s is not %s: it was patched as the table it is, %s."
+                              % (os.path.basename(path), want["name"], made), "warning")
         return self._start("Patching the table", work)
+
+    @rpc
+    def patch_folder(self):
+        """PAD-927: every table in a folder of downloads at once. Each .vpx
+        in it (not a "(PAD)" copy) goes through the same patch; the ones the
+        kit does not know are counted, not errors. The page's progress bar
+        counts the files."""
+        folder = self.window.ask_folder("vpx_table", "The folder with the tables you downloaded",
+                                        initialdir=self.get("tables_dir") or None)
+        if not folder:
+            return False
+        folder = os.path.normpath(folder)
+        out = self.get("tables_dir") or folder
+
+        def work():
+            try:
+                names = os.listdir(folder)
+            except OSError as exc:
+                self._say("could not read %s: %s" % (folder, exc), "error")
+                return
+            files = sorted(f for f in names if f.lower().endswith(".vpx") and "(PAD)" not in f)
+            packed = sorted(f for f in names if f.lower().endswith((".zip", ".rar", ".7z")))
+            if not files:
+                self._say("no tables in %s (no .vpx files that are not (PAD) copies%s)."
+                          % (folder, "; %d archive%s to unpack first" % (len(packed), "" if len(packed) == 1 else "s")
+                             if packed else ""), "warning")
+                return
+            done, unknown, failed = [], [], []
+            for i, name in enumerate(files):
+                self.set(progress=i / len(files), busy="Patching %d of %d: %s" % (i + 1, len(files), name))
+                got = self._kit("padvpx.py", ["patch", os.path.join(folder, name), "--out", out], timeout=600)
+                text = got.get("_text") or ""
+                if "this table is not one the kit knows" in text:
+                    unknown.append(name)
+                elif "open \"" in text:
+                    done.append(name)
+                    self._say("patched %s." % name)
+                else:
+                    failed.append(name)
+                    self._say("%s did not patch; the session log has what it said." % name, "warning")
+            self.set(progress=None)
+            words = "%d of %d table%s patched" % (len(done), len(files), "" if len(files) == 1 else "s")
+            if unknown:
+                words += "; %d not one the app knows (%s)" % (len(unknown), ", ".join(unknown))
+            if failed:
+                words += "; %d did not patch (%s)" % (len(failed), ", ".join(failed))
+            if packed:
+                words += "; %d archive%s skipped, unpack %s first (%s)" % (
+                    len(packed), "" if len(packed) == 1 else "s", "it" if len(packed) == 1 else "them",
+                    ", ".join(packed))
+            self._say(words + ".", "warning" if failed else "info")
+        return self._start("Patching the folder", work)
 
     @rpc
     def layout(self, key):

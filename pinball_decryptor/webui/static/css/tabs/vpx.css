@@ -1,10 +1,32 @@
-/* Visual Pinball (PAD-802): the kit's setup, the tables it patches, Play. */
+/* Visual Pinball (PAD-802): the kit's setup, the tables it patches, Play.
+   PAD-927: laid out for one screen - a two-line strip (setup marks, windows)
+   over a two-column grid of one-line table rows. */
 .vpx-status { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; min-height: 24px; }
 .vpx-prog { flex: 1; max-width: 320px; }
-.vpx-row, .vpx-table { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
-.vpx-row + .vpx-row, .vpx-table + .vpx-table { border-top: 1px solid var(--line); }
+.vpx-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+.vpx-row + .vpx-row { border-top: 1px solid var(--line); }
 .vpx-row > .chip { flex: none; width: 74px; justify-content: center; }
 .vpx-what { flex: 1; min-width: 0; }
 .vpx-val { overflow-wrap: anywhere; }
 .vpx-acts { display: flex; gap: 6px; flex: none; }
-.vpx-pre { padding: 3px 0; }
+/* the strip: Setup and Windows, one line each */
+.vpx-top { margin-bottom: 12px; }
+.vpx-top > .hd { padding: 4px 16px; min-height: 0; }
+.vpx-strip { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.vpx-strip-row { display: flex; align-items: center; gap: 10px; min-height: 38px; flex-wrap: wrap; }
+.vpx-strip-row + .vpx-strip-row { border-top: 1px solid var(--line); }
+.vpx-strip-row .h2 { width: 76px; flex: none; }
+.vpx-marks { display: flex; flex-wrap: wrap; gap: 6px; }
+.vpx-now { min-width: 0; }
+.vpx-top.shut > .bd { display: none; }
+/* the tables: folder and buttons in the head, rows in two columns */
+.vpx-tables > .hd { padding: 8px 16px; }
+.vpx-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* alphabetical down each column, then the next (CSS columns, not grid) */
+.vpx-grid { columns: 560px auto; column-gap: 32px; }
+.vpx-table { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) auto; break-inside: avoid;
+  align-items: center; column-gap: 12px; padding: 3px 0; min-height: 36px; border-bottom: 1px solid var(--line); }
+.vpx-table > .vpx-name, .vpx-table > .vpx-card { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.vpx-table.unpatched > .vpx-name { color: var(--ink-3); font-weight: 500; }
+.vpx-stale { grid-column: 1 / -1; padding: 0 0 4px; }
+html.w-stack .vpx-grid { columns: 1; }

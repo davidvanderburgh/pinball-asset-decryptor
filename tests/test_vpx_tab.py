@@ -243,3 +243,78 @@ def test_the_runtime_row_no_longer_points_at_the_emulate_tab():
               encoding="utf-8").read()
     assert "Set it up on the Emulate tab" not in js
     assert 'call("vpx.install_runtime")' in js
+
+
+def _godzilla(tab, monkeypatch):
+    """A tab whose state lists Godzilla, not patched yet; the dialog titles it asks with."""
+    asked = []
+    monkeypatch.setattr(tab.window, "ask_open", lambda key, title, *a, **k: asked.append(title) or tab.window.pick,
+                        raising=False)
+    tab.on_show()
+    _wait(tab)
+    tab.set(tables=[{"name": "Godzilla Limited Edition v2.6", "output": "Godzilla (PAD).vpx", "patched": False}])
+    return asked
+
+
+def test_a_tables_own_patch_button_names_it_in_the_dialog(tab, monkeypatch):
+    """PAD-927: Patch is on the row of a table not patched yet, not one button
+    at the bottom of the list."""
+    asked = _godzilla(tab, monkeypatch)
+    tab.window.pick = r"D:\Downloads\Godzilla LE v2.6.vpx"
+    tab.answers[("padvpx.py", "patch")] = {"_text": r'open "C:\VP\tables\Godzilla (PAD).vpx" in Visual Pinball'}
+    assert tab.patch("Godzilla (PAD).vpx")
+    _wait(tab)
+    assert asked == ["Choose your download of Godzilla Limited Edition v2.6"]
+    assert not [ln for ln in tab.window.lines if ln[0] in ("error", "warning")]
+
+
+def test_a_rows_patch_says_when_the_download_was_another_table(tab, monkeypatch):
+    _godzilla(tab, monkeypatch)
+    tab.window.pick = r"D:\Downloads\Rush LE 2.0.2.vpx"
+    tab.answers[("padvpx.py", "patch")] = {"_text": r'open "C:\VP\tables\Rush LE 2.0.2 (PAD).vpx" in Visual Pinball'}
+    assert tab.patch("Godzilla (PAD).vpx")
+    _wait(tab)
+    warned = [t for lv, t in tab.window.lines if lv == "warning"]
+    assert warned and "is not Godzilla Limited Edition v2.6" in warned[0] and "Rush LE 2.0.2 (PAD).vpx" in warned[0]
+
+
+def test_the_page_is_laid_out_for_a_set_up_pc():
+    """PAD-927: no Patch button under the list, a Patch per table, and the
+    window layouts as Use buttons (no radio that nothing had picked)."""
+    js = open(os.path.join(os.path.dirname(V.__file__), "..", "static", "js", "tabs", "vpx.js"),
+              encoding="utf-8").read()
+    assert "Patch a table" not in js and "footer=" not in js
+    assert 'call("vpx.patch", t.output)' in js
+    assert "Radio" not in js and 'call("vpx.layout", p.key)' in js and "p.short" in js
+    assert "Where you left them" in js
+    assert 'call("vpx.patch_folder")' in js
+
+
+def test_a_folder_of_downloads_is_patched_in_one_go(tab, monkeypatch, tmp_path):
+    """PAD-927: Patch a folder... runs every .vpx that is not a (PAD) copy
+    through the patch; unknown tables and archives are counted, not errors."""
+    for n in ("Rush LE 2.0.2.vpx", "Batman66_1.1.0.vpx", "Other.vpx", "Rush LE (PAD).vpx", "Bond.zip"):
+        (tmp_path / n).write_bytes(b"x")
+    tab.on_show()
+    _wait(tab)
+    tab.window.pick = str(tmp_path)
+    seen = []
+
+    def kit(self, script, args, timeout=0, on_line=None):
+        if args and args[0] == "state":
+            return {"registered": True, "vpx": r"C:\VP", "tables_dir": r"C:\VP\tables", "library": "",
+                    "cards": {}, "tables": [], "patched": [], "presets": [], "layout": ""}
+        seen.append(args)
+        name = os.path.basename(args[1])
+        if name == "Other.vpx":
+            return {"_text": "this table is not one the kit knows; it can patch: rush_le"}
+        return {"_text": r'open "C:\VP\tables\%s (PAD).vpx" in Visual Pinball' % name[:-4]}
+    monkeypatch.setattr(V.VpxTab, "_kit", kit)
+    assert tab.patch_folder()
+    _wait(tab)
+    assert [os.path.basename(a[1]) for a in seen] == ["Batman66_1.1.0.vpx", "Other.vpx", "Rush LE 2.0.2.vpx"]
+    assert all(a[2:] == ["--out", r"C:\VP\tables"] for a in seen)
+    last = tab.window.lines[-1][1]
+    assert "2 of 3 tables patched" in last and "1 not one the app knows (Other.vpx)" in last
+    assert "1 archive skipped" in last and "Bond.zip" in last
+    assert not [ln for ln in tab.window.lines if ln[0] == "error"]

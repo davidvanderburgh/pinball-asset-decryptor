@@ -244,6 +244,10 @@ def patched_in(tables_dir):
                   and f not in DROPPED)
 
 
+#: PAD-927: the name on the page's layout buttons
+LAYOUT_SHORT = {"side": "Side by side", "two": "Two screens", "centre": "Centred"}
+
+
 def layout_presets(mons):
     """Window layouts for the monitors found: (key, words, player rect, lcd rect)."""
     out = []
@@ -453,7 +457,9 @@ def state():
         "tables": known_tables(tables),
         "patched": patched_in(tables),
         "monitors": len(mons),
-        "presets": [{"key": k, "words": w, "player": p, "lcd": q} for k, w, p, q in presets],
+        # PAD-927: the page's buttons carry the short name, the words its tip
+        "presets": [{"key": k, "words": w, "short": LAYOUT_SHORT.get(k, k), "player": p, "lcd": q}
+                    for k, w, p, q in presets],
         "layout": layout_key(kit, presets),
         # PAD-811: where the game's screen goes, as the layout or the
         # Emulate tab last set it

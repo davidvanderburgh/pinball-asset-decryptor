@@ -779,6 +779,44 @@ def _looks_like_out_of_memory(exc):
 _OOM_RETRY_WAITS = (1.5, 4.0)
 
 
+class _AvWithoutMetadataErrors:
+    """Stand-in for the ``av`` module inside ``faster_whisper.audio`` whose
+    ``open`` drops ``metadata_errors`` when this PyAV no longer takes it.
+
+    faster-whisper 1.2.1 (the newest) opens every clip with
+    ``av.open(..., metadata_errors="ignore")``; PyAV 19 removed that argument,
+    so on a fresh install (pip picks the newest av) every clip failed with
+    "open() got an unexpected keyword argument 'metadata_errors'" and nothing
+    was named (PAD-936).  Everything else is the real module."""
+
+    def __init__(self, av):
+        self._av = av
+
+    def __getattr__(self, name):
+        return getattr(self._av, name)
+
+    def open(self, *args, **kwargs):
+        try:
+            return self._av.open(*args, **kwargs)
+        except TypeError as e:
+            if "metadata_errors" not in kwargs or "metadata_errors" not in str(e):
+                raise
+            kwargs.pop("metadata_errors")
+            return self._av.open(*args, **kwargs)
+
+
+def _patch_faster_whisper_av():
+    """Point faster-whisper's audio decoder at :class:`_AvWithoutMetadataErrors`
+    (once per process; the serial loop and every pool worker call this)."""
+    try:
+        import faster_whisper.audio as fw_audio
+    except Exception:
+        return
+    av = getattr(fw_audio, "av", None)
+    if av is not None and not isinstance(av, _AvWithoutMetadataErrors):
+        fw_audio.av = _AvWithoutMetadataErrors(av)
+
+
 def _transcribe_one(model, rel, abs_path, music_min_seconds, oom_retries=2):
     """Transcribe one WAV with VAD and classify it as speech / music /
     non-speech.  Returns ``(rel, kind, text, errored)`` where ``errored`` is
@@ -794,6 +832,7 @@ def _transcribe_one(model, rel, abs_path, music_min_seconds, oom_retries=2):
     """
     import random
     import time
+    _patch_faster_whisper_av()
     last = None
     for attempt in range(oom_retries + 1):
         try:

@@ -54,6 +54,9 @@
     "flash2_hit": {"pulse": 70, "keep": true, "name": "LEFT ORBIT OPTO"},
     "flash4_hit": {"pulse": 72, "keep": true, "name": "RIGHT ORBIT OPTO"}
   },
+  "repatch": [
+    {"old": "bsTrough.Balls = 6", "why": "it serves two balls at Start", "since": "PAD-933: the trough holds the four balls the game counts"}
+  ],
   "switch_holds": {
     "_": "switches held while a ball sits somewhere (cvpmBallStack serves them)",
     "trough": [68, 67, 66, 65, 64, 63, 69],

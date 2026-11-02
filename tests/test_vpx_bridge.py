@@ -1348,6 +1348,50 @@ def test_setup_says_when_a_patched_table_is_for_another_model(tmp_path, monkeypa
     assert vs.patched_title(str(tables), "x (PAD).vpx") == "turtles_le"
 
 
+def test_a_table_patched_before_a_fix_says_so_and_where_it_came_from(tmp_path, monkeypatch):
+    """PAD-939: a Beatles copy patched before PAD-933 still served two balls
+    and the tab offered only Play. The map's `repatch` names the line only an
+    earlier patch wrote; the copy that has it is flagged, a fresh one is not,
+    and padvpx records the download a patch ran on for Patch again."""
+    vs = pytest.importorskip("vpxsetup")
+    pv = pytest.importorskip("padvpx")
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    tables = tmp_path / "tables"
+    tables.mkdir()
+    out = tables / "The Beatles_007 (PAD).vpx"
+    out.write_bytes(b"x")
+    script = tables / "The Beatles_007 (PAD).script.vbs"
+    script.write_text("Sub Table1_Init\n     \t\t  bsTrough.Balls = 6\nEnd Sub\n", encoding="utf-8")
+    (tables / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"x")
+    got = {t["output"]: t for t in vs.known_tables(str(tables))}
+    assert got[out.name]["repatch"] == ["it serves two balls at Start"]
+    assert got[out.name]["source"] == ""                 # patched before the record
+    assert got["Rush LE 2.0.2 (PAD).vpx"]["repatch"] == []
+    assert got["JP's Foo Fighters (PAD).vpx"]["repatch"] == [], "not patched"
+    # patched again: four balls, and the download recorded
+    script.write_text("Sub Table1_Init\n\tbsTrough.Balls = 4\nEnd Sub\n", encoding="utf-8")
+    src = tmp_path / "The Beatles_007.vpx"
+    src.write_bytes(b"x")
+    pv.remember_patch(str(out), str(src), "beatles")
+    got = {t["output"]: t for t in vs.known_tables(str(tables))}
+    assert got[out.name]["repatch"] == [] and got[out.name]["source"] == str(src)
+    src.unlink()                                         # the download moved: the dialog asks again
+    assert {t["output"]: t for t in vs.known_tables(str(tables))}[out.name]["source"] == ""
+
+
+def test_the_beatles_patcher_no_longer_writes_the_line_its_repatch_names():
+    """PAD-939: a `repatch` mark must be a line the current patcher never
+    writes, or every fresh copy would be told to patch again."""
+    m = json.load(open(os.path.join(VPX, "beatles.vpxmap.json"), encoding="utf-8"))
+    src = open(os.path.join(VPX, "patch_beatles.py"), encoding="utf-8").read()
+    for mark in m["repatch"]:
+        assert mark["old"] not in src and mark["why"]
+    assert m["switch_holds"]["balls"] != 6
+
+
 # ------------------------------------------------ the table generator -----
 
 MINI_TABLES = {

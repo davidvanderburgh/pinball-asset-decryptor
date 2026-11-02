@@ -322,12 +322,16 @@ class VpxTab(TabService):
         PAD-927: each table's row has its own Patch button, *output* its
         "(PAD)" name: the file dialog names that table, and a download that
         turns out to be another table the kit knows is patched as that one,
-        with the page saying so."""
+        with the page saying so.
+
+        PAD-939: a patched table's Patch again runs on the download it was
+        patched from when the kit recorded it and it is still there (the
+        row's `source`); else the dialog asks for it, as the first Patch did."""
         want = next((t for t in self.get("tables") or [] if output and t.get("output") == output), None)
         title = ("Choose your download of %s" % want["name"] if want
                  else "Choose the Visual Pinball table you downloaded")
-        path = self.window.ask_open("vpx_table", title,
-                                    [("Visual Pinball table", "*.vpx"), ("All files", "*.*")])
+        path = (want or {}).get("source") or self.window.ask_open(
+            "vpx_table", title, [("Visual Pinball table", "*.vpx"), ("All files", "*.*")])
         if not path:
             return False
         path = os.path.normpath(path)

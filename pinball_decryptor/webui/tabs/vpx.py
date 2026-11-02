@@ -34,9 +34,7 @@ PREVIEW_FEATURE = "vpx"
 
 INTRO = ("Play a Visual Pinball table with the real Stern game behind it: the "
          "game from your own card image serves the balls, fires the coils, lights "
-         "the table, keeps score and shows its own screen.\n"
-         "Download a table the app knows from its author, patch it here, then open "
-         "it with Play.")
+         "the table, keeps score and shows its own screen.")
 
 TABLES_TIP = ("The app ships no tables. Download a table below from its author, "
               "then Patch it: the app writes a copy named \"(PAD)\" into your tables "

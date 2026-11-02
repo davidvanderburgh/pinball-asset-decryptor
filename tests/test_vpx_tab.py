@@ -285,8 +285,9 @@ def test_the_page_is_laid_out_for_a_set_up_pc():
               encoding="utf-8").read()
     assert "Patch a table" not in js and "footer=" not in js
     assert 'call("vpx.patch", t.output)' in js
-    assert "Radio" not in js and ">Use<" in js
+    assert "Radio" not in js and 'call("vpx.layout", p.key)' in js and "p.short" in js
     assert "Where you left them" in js
+    assert 'call("vpx.patch_folder")' in js
 
 
 def test_a_folder_of_downloads_is_patched_in_one_go(tab, monkeypatch, tmp_path):

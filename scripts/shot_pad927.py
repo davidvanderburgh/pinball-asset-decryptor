@@ -39,7 +39,7 @@ def main():
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1500, "height": 2300})
+            page = browser.new_page(viewport={"width": 1500, "height": 1100})
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.add_init_script("try { localStorage.setItem('pad.log.open', '0'); } catch (e) {}")
@@ -66,8 +66,8 @@ def main():
             time.sleep(1.5)
             page.locator(".vpx-page").screenshot(path=os.path.join(out_dir, pre + "vpx_page.png"))
             extra = os.environ.get("PAD927_DETAILS")
-            if extra and page.locator(".vpx-setup button").count():
-                page.locator(".vpx-setup button").first.click()
+            if extra and page.locator(".vpx-top button").count():
+                page.locator(".vpx-top button").first.click()
                 time.sleep(0.5)
                 page.locator(".vpx-page").screenshot(path=extra)
             print("page errors:", errors, flush=True)

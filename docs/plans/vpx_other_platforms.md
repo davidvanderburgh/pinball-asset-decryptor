@@ -147,6 +147,49 @@ watches the folder every 3 s while it is up (`_watch_folder`) and re-reads
 the kit's state when a table comes, goes or changes, so a download dropped
 in shows by itself; Check again does the same by hand.
 
+## The five Spike 1 tables in David's folder, mapped (David, 2026-11-02, interactive)
+
+"We need to map the files that are 'no map yet' that I have added to my
+library." Five maps, each generated from the game's own program and the
+rig's curated switch map (the generators are the record of how each table's
+objects were matched; the maps carry the result with GUESS marks):
+
+* **got_le** (VPW's GOT LE 1.2.1): the table numbers its switches as Stern's
+  manual does, so each trigger was matched by its script's meaning and
+  place to the rig's names (40 switches, the throne saucer, the trough, the
+  shooter lane); its lights are named li<N> after the LE's own LED table (an
+  RGB insert = three LEDs in a row), so 85 lights came straight out of the
+  program; the game's coils (trough, auto launch, both drop resets, the
+  elevator diverter, the throne). The elevator and the dragon scoop keep
+  the table's script (no switch for them on the rig's walk).
+* **kiss_le** (masonm's KISS 2.0): its sw<N> are the program's switch N
+  (sw42 = DEMON EJECT); the lights i<N> are the Pro manual's lamp numbers =
+  the LE program's lamp N + 32, and LED L - 2 drives lamp L (checked on
+  seven named lamps); the Starchild and scoop saucers, the Demon's lock lane
+  (LOCK 1-3, let out through sw42TOP), the centre drop's up/down coils.
+  Eight switches the curated map lacks (right outlane, right return lane,
+  both orbits, the four ARMY targets) keep the table's subs: the registry
+  walk (s1swmap.py) could name them, but it looks for a guest with
+  comm=game and does not find a pivoted (S1_PIVOT=1) run - the rig's own
+  gap, not the map's.
+* **ghostbusters_le** (JP's Slimer v602): JP's own layout, loosely Stern's:
+  the six lanes, the pop lane, the loops, the bumpers, the scoops as
+  saucers on LEFT EJECT and SUBWAY, the storage lock on LOCK #1-3 with
+  LOCK POST, the Scoleri brothers as the two 1-bank drops with their up
+  and down coils; targets by place, GUESS. JP's lights are his own: not
+  mapped.
+* **primus**, **can_crusher** (Drummer72's, one script, Whoa Nellie's
+  layout): the lanes, the top lanes, the standups and star rollovers by
+  place, the five bumpers, the top eject as a saucer, one ball in the
+  trough; the authors' lights carry no numbering of the game's: not mapped.
+  Neither table loads core.vbs, so vpxshadow now loads it before
+  Table1_Init when a script lacks it, and their timers are cloned from the
+  table's ResetTimer (no PulseTimer).
+
+All five patch (`vpxfile verify` OK) and their (PAD) copies are in David's
+tables folder; the page lists them as patched with Play. What a game on
+each table will tell: every GUESS mark (vpxauthor's checklist lists them).
+
 ## The Spike 1 author's checklist (run 2)
 
 `vpxauthor.machine_for(title)` reads a Spike 1 title from its game ELF and

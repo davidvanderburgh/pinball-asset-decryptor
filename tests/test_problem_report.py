@@ -135,6 +135,30 @@ def test_paths_and_the_account_name_are_redacted_on_request():
     assert R.redact("", user="david") == ""
 
 
+def test_a_known_path_with_spaces_goes_whole():
+    """PAD-929: the regex stops at the first space, so 'C:\\...\\HEISEI
+    v1.99D + mods' left '<path> v1.99D + mods' behind.  The card's and the
+    project's own paths go whole, with whatever runs on from them."""
+    project = r"C:\Users\david\OneDrive\Desktop\HEISEI v1.99D + daveyvandy modes"
+    card = project + r"\build\Godzilla Premium 1.16 Heisei.raw"
+    known = [card, project]
+    assert R.redact(card + "  print 8f3a", user="david",
+                    known=known) == "<path>  print 8f3a"
+    assert R.redact(project, user="david", known=known) == "<path>"
+    assert R.redact("wrote %s\\images\\a.png fine" % project, user="david",
+                    known=known) == "wrote <path> fine"
+    # forward slashes and another case are the same folder
+    assert R.redact(project.replace("\\", "/").upper() + "/x", user="david",
+                    known=known) == "<path>"
+    # without them the old leak is what the regex alone can do
+    assert R.redact(project, user="david").startswith("<path> v1.99D")
+    hidden = R.as_text(_report(hide_paths=True, paths=known,
+                               facts=[["Card", card], ["Project", project]],
+                               log=["saved to " + project]))
+    assert "HEISEI" not in hidden and "Godzilla Premium" not in hidden
+    assert "Card: <path>\n" in hidden and "Project: <path>\n" in hidden
+
+
 def test_the_record_reads_top_to_bottom_and_hides_paths_when_asked():
     text = R.as_text(_report())
     assert text.startswith("Pinball Asset Decryptor problem report\n")
@@ -339,7 +363,7 @@ def test_the_facts_table_follows_the_leave_paths_out_box(app_with_worker,
     gets the facts both ways and shows the redacted ones when ticked."""
     w, _worker = app_with_worker
     user = os.path.basename(os.path.expanduser("~").rstrip("\\/"))
-    project = tmp_path / "HEISEI modes"
+    project = tmp_path / "HEISEI v1.99D + daveyvandy modes"
     project.mkdir()
     card = project / "Godzilla Premium.raw"
     card.write_bytes(b"\0" * 512)
@@ -351,8 +375,11 @@ def test_the_facts_table_follows_the_leave_paths_out_box(app_with_worker,
     assert [f[0] for f in info["facts_hidden"]] == [f[0] for f in info["facts"]]
     assert shown["Project"] == str(project)
     assert str(card) in shown["Card"]
+    assert hidden["Project"] == "<path>"
+    assert hidden["Card"].startswith("<path>")
     for label in ("Card", "Project"):
-        assert "<path>" in hidden[label]
+        assert "HEISEI" not in hidden[label]
+        assert "Godzilla" not in hidden[label]
         assert str(tmp_path) not in hidden[label]
         if len(user) > 1:
             assert user.lower() not in hidden[label].lower()

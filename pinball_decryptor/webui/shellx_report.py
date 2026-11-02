@@ -169,6 +169,19 @@ class ReportMixin:
                     facts.append(["History", h])
         return facts
 
+    def _report_paths(self):
+        """The card's and the projects' paths as typed, which the record
+        hides whole when asked: a regex cannot tell where a path with a
+        space in it ends (PAD-929)."""
+        out = []
+        for name in ("extract_input_var", "write_assets_var",
+                     "extract_output_var"):
+            var = self._var_or_none(name)
+            path = (var.get() or "").strip() if var is not None else ""
+            if path:
+                out.append(path)
+        return out
+
     def _report_record(self, text, name, hide_paths):
         tab = ""
         try:
@@ -183,6 +196,7 @@ class ReportMixin:
                 "vpx_log": problem_report.vpx_log_tail(tab),
                 "text": text or "", "name": name or "",
                 "hide_paths": bool(hide_paths),
+                "paths": self._report_paths(),
                 "picture": self._rep_picture, "at": time.time()}
 
     # -------------------------------------------------------------- calls
@@ -197,7 +211,8 @@ class ReportMixin:
         facts = self._report_facts()
         # the table under the form follows the box too (PAD-929): the
         # same redaction the record gets when it is ticked
-        hidden = [[label, problem_report.redact(str(value))]
+        known = self._report_paths()
+        hidden = [[label, problem_report.redact(str(value), known=known)]
                   for label, value in facts]
         return {"facts": facts, "facts_hidden": hidden,
                 "log_lines": len(problem_report.log_tail()),

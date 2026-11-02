@@ -1,0 +1,352 @@
+{
+ "_": [
+  "Primus (Stern 2018) 1.1 on the SPIKE 1 rig (PAD-943): Drummer72's table of Whoa Nellie's layout (the 2012 home-era firmware: one ball, two alphanumeric displays, a top eject).",
+  "platform: spike1 puts PAD.Controller on tools/spike1_emu's run (s1bridge.py): switches are 1000 + node*64 + index",
+  "(the rig's s1switches.json numbering), coils 1000 + node*64 + index.",
+  "The switches are the triggers by place and the script's meaning on the rig's curated map (GUESS where a game on",
+  "the table should confirm); the lights are the author's own with no numbering of the game's, so the lamps are",
+  "not mapped and the table's own light shows stay. The shooter lane is LampSplashOn, the trigger at the lane's",
+  "end; the game has no auto launch."
+ ],
+ "platform": "spike1",
+ "title": "primus",
+ "detect": [
+  "cgamename = \"primus\""
+ ],
+ "output": "Primus(Stern 2018) 1.1 (PAD).vpx",
+ "table": {
+  "name": "Primus (Stern 2018) 1.1",
+  "by": "Drummer72, Thalamus",
+  "where": "VPForums"
+ },
+ "solenoid_max": 68,
+ "game_on": {
+  "number": 40,
+  "coils": [
+   [
+    8,
+    4
+   ],
+   [
+    8,
+    5
+   ]
+  ]
+ },
+ "cabinet": {
+  "_": "1000 + node*64 + index from the rig's switchmaps/primus.json",
+  "start": 1075,
+  "left_flipper": 1514,
+  "right_flipper": 1515,
+  "tilt": 1078,
+  "coin": 1080,
+  "slam": 1086
+ },
+ "keys_skip_orig": [
+  "StartGameKey",
+  "AddCreditKey",
+  "AddCreditKey2"
+ ],
+ "switches": {
+  "_": "object -> Spike 1 switch id (node * 64 + index, the rig's s1switches.json); event hit (pulse), slingshot. GUESS marks what a game on the real table should confirm.",
+  "LeftInLaneTrigger": {
+   "id": 644,
+   "event": "hit",
+   "name": "LEFT RETURN LANE"
+  },
+  "RightInLaneTrigger": {
+   "id": 517,
+   "event": "hit",
+   "name": "RIGHT RETURN LANE"
+  },
+  "LeftOutLaneTrigger": {
+   "id": 664,
+   "event": "hit",
+   "name": "LEFT OUTLANE"
+  },
+  "RightOutLaneTrigger": {
+   "id": 645,
+   "event": "hit",
+   "name": "RIGHT OUTLANE"
+  },
+  "Trigger8": {
+   "id": 642,
+   "event": "hit",
+   "name": "CENTER DRAIN ROLLOVER"
+  },
+  "T9": {
+   "id": 641,
+   "event": "hit",
+   "name": "TOP LANE 1 (LEFT)"
+  },
+  "T10": {
+   "id": 640,
+   "event": "hit",
+   "name": "TOP LANE 2"
+  },
+  "T11": {
+   "id": 655,
+   "event": "hit",
+   "name": "TOP LANE 3"
+  },
+  "T12": {
+   "id": 654,
+   "event": "hit",
+   "name": "TOP LANE 4"
+  },
+  "T13": {
+   "id": 661,
+   "event": "hit",
+   "name": "STAR ROLLOVER POPS RED",
+   "note": "GUESS: the rollover beside the single top pop"
+  },
+  "Trigger1": {
+   "id": 667,
+   "event": "hit",
+   "name": "STANDUP SW.LT DUAL FRONT",
+   "note": "GUESS: the four bottom triggers left to right as the dual standups"
+  },
+  "Trigger2": {
+   "id": 668,
+   "event": "hit",
+   "name": "STANDUP SW.LT DUAL BACK",
+   "note": "GUESS"
+  },
+  "Trigger3": {
+   "id": 649,
+   "event": "hit",
+   "name": "STANDUP SW.RT DUAL FRONT",
+   "note": "GUESS"
+  },
+  "Trigger4": {
+   "id": 650,
+   "event": "hit",
+   "name": "STANDUP SW. RT DUAL BACK",
+   "note": "GUESS"
+  },
+  "Trigger5": {
+   "id": 663,
+   "event": "hit",
+   "name": "STAR ROLLOVER TOP RT RED",
+   "note": "GUESS: the star rollovers by place"
+  },
+  "Trigger6": {
+   "id": 660,
+   "event": "hit",
+   "name": "STAR ROLLOVER LT GRN",
+   "note": "GUESS"
+  },
+  "Trigger7": {
+   "id": 656,
+   "event": "hit",
+   "name": "STAR ROLLOVER BOTT 1 RED",
+   "note": "GUESS"
+  },
+  "Trigger14": {
+   "id": 662,
+   "event": "hit",
+   "name": "STAR ROLLOVER SHOOTER RTN",
+   "note": "GUESS"
+  },
+  "Bumper1": {
+   "id": 579,
+   "event": "hit",
+   "name": "TOP LEFT BUMPER"
+  },
+  "Bumper3": {
+   "id": 577,
+   "event": "hit",
+   "name": "TOP RIGHT BUMPER"
+  },
+  "Bumper2": {
+   "id": 578,
+   "event": "hit",
+   "name": "BOTTOM LEFT BUMPER"
+  },
+  "Bumper4": {
+   "id": 576,
+   "event": "hit",
+   "name": "BOTTOM RIGHT BUMPER"
+  },
+  "Bumper5": {
+   "id": 653,
+   "event": "hit",
+   "name": "TOP POP BUMPER SINGLE"
+  },
+  "LeftSlingShot": {
+   "id": 519,
+   "event": "slingshot",
+   "name": "LEFT SLINGSHOT"
+  },
+  "RightSlingShot": {
+   "id": 518,
+   "event": "slingshot",
+   "name": "RIGHT SLINGSHOT"
+  }
+ },
+ "plunger": {
+  "_": "GUESS: LampSplashOn is the trigger at the shooter lane's end; no auto launch on this game",
+  "lane_trigger": "LampSplashOn",
+  "lane_switch": 516,
+  "autoplunge": "Plunger"
+ },
+ "trough": {
+  "_": "one ball: TROUGH #1 (R) alone",
+  "release": "BallRelease",
+  "drain": "Drain",
+  "switches": [
+   643
+  ],
+  "balls": 1,
+  "kick": [
+   135,
+   4
+  ]
+ },
+ "saucers": {
+  "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power, kickz)",
+  "Kicker1": {
+   "switch": 646,
+   "dir": 260,
+   "power": 15,
+   "kickz": 0.1,
+   "name": "TOP EJECT"
+  }
+ },
+ "solenoids": {
+  "_": "Spike 1 coil [node, index] -> the small number the table sees (core.vbs flippers 46/48); callback a sub of the table's or the bridge's (null = nothing fires). Names are the game's own (s1elf --coils).",
+  "1": {
+   "coil": [
+    9,
+    1
+   ],
+   "name": "TROUGH UP-KICKER",
+   "callback": "bsTrough.SolOut"
+  },
+  "3": {
+   "coil": [
+    9,
+    0
+   ],
+   "name": "TOP EJECT",
+   "callback": "bsKicker1.SolOut"
+  },
+  "11": {
+   "coil": [
+    11,
+    3
+   ],
+   "name": "TOP LT POP BUMPER",
+   "callback": null
+  },
+  "12": {
+   "coil": [
+    11,
+    1
+   ],
+   "name": "TOP RT POP BUMPER",
+   "callback": null
+  },
+  "13": {
+   "coil": [
+    11,
+    2
+   ],
+   "name": "BOT LT POP BUMPER",
+   "callback": null
+  },
+  "14": {
+   "coil": [
+    11,
+    0
+   ],
+   "name": "BOT RT POP BUMPER",
+   "callback": null
+  },
+  "17": {
+   "coil": [
+    9,
+    3
+   ],
+   "name": "LEFT SLINGSHOT",
+   "callback": null
+  },
+  "18": {
+   "coil": [
+    9,
+    2
+   ],
+   "name": "RIGHT SLINGSHOT",
+   "callback": null
+  },
+  "46": {
+   "coil": [
+    8,
+    5
+   ],
+   "name": "RIGHT FLIPPER",
+   "callback": null
+  },
+  "48": {
+   "coil": [
+    8,
+    4
+   ],
+   "name": "LEFT FLIPPER",
+   "callback": null
+  }
+ },
+ "pup_stub": true,
+ "neuter": [
+  "BallRelease.createball",
+  "BallRelease.kick"
+ ],
+ "retrofit_timers": {
+  "_": "the table has no PulseTimer (core.vbs runs vpmTimer on one): all three cloned from ResetTimer",
+  "PulseTimer": {
+   "clone": "ResetTimer",
+   "interval_ms": 1
+  },
+  "PinMAMETimer": {
+   "clone": "ResetTimer",
+   "interval_ms": 1
+  },
+  "PadTestTimer": {
+   "clone": "ResetTimer",
+   "interval_ms": 100
+  }
+ },
+ "lamps": {
+  "_": "not mapped: the author's own lights (L1.., Light1.., b1l1..) carry no numbering of the game's"
+ },
+ "quiet_subs": [],
+ "orig_hits": false,
+ "orig_keep": [
+  "LeftInLaneTrigger",
+  "RightInLaneTrigger",
+  "LeftOutLaneTrigger",
+  "RightOutLaneTrigger",
+  "Trigger8",
+  "T9",
+  "T10",
+  "T11",
+  "T12",
+  "T13",
+  "Trigger1",
+  "Trigger2",
+  "Trigger3",
+  "Trigger4",
+  "Trigger5",
+  "Trigger6",
+  "Trigger7",
+  "Trigger14",
+  "Bumper1",
+  "Bumper3",
+  "Bumper2",
+  "Bumper4",
+  "Bumper5",
+  "LeftSlingShot",
+  "RightSlingShot"
+ ],
+ "listed": true
+}

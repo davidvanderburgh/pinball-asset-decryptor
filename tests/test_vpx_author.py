@@ -318,7 +318,10 @@ def test_the_shipped_maps_read_through_coverage(A):
         if m.get("listed") is False:
             continue            # a starter the tab does not offer (got_le, PAD-943): its table is not fitted yet
         cov = A.coverage(m)
-        assert cov["switches"] and cov["coils"] and cov["leds"], path
+        assert cov["switches"] and cov["coils"], path
+        # a map whose lamps are not mapped yet says so (JP's Ghostbusters, Primus, Can Crusher: the
+        # author's own lights carry no numbering of the game's, PAD-943) and wires no LED
+        assert cov["leds"] or not [k for k in m.get("lamps", {}) if k != "_"], path
 
 
 def test_summary_for_counts_what_a_table_owes_and_what_the_map_wires(A, tmp_path):

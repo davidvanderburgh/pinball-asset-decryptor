@@ -1047,6 +1047,15 @@ def patch(script, m):
                if ln.strip().lower().startswith("option explicit")), 0)
     lines.insert(at, "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0"
                      "   ' PAD: for core.vbs (vpxshadow.py)")
+    if not re.search(r'GetTextFile\("core\.vbs"\)', "\n".join(lines), re.I):
+        # PAD-943: a tribute on controller.vbs alone (Drummer72's Primus and Can
+        # Crusher) never loads core.vbs, which the bridge's cvpmBallStack and
+        # vpmTimer need: loaded before the table's Init sub, after its own
+        # Consts (core.vbs after the table's Consts - see the README's "What
+        # Visual Pinball itself turned up")
+        init = next((i for i, ln in enumerate(lines)
+                     if re.match(r"\s*Sub\s+Table1_Init\b", ln, re.I)), len(lines))
+        lines.insert(init, 'ExecuteGlobal GetTextFile("core.vbs")   \' PAD: the bridge needs core.vbs (vpxshadow.py)')
     text = "\n".join(lines) + gen(m, had, quiet, dof) + stub
     return text, rep
 

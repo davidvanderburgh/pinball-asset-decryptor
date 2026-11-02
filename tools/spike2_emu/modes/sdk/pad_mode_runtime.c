@@ -1488,10 +1488,13 @@ static volatile int juke_live;
 static int lookup_hooked;                   /* sound_lookup is hooked (on_sound_lookup), once */
 static int att_lookup(unsigned *r);         /* PAD-641: the flipper buttons' sounds in attract */
 static volatile int att_live;
+static int gms_lookup(unsigned *r);         /* PAD-945: a sound on a shot in one of the game's modes */
+static volatile int gms_live;
 
 static void on_sound_lookup(unsigned *r)
 {
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
+    if (gms_live && r[1] && gms_lookup(r)) return;   /* PAD-945: its carrier's record, swapped */
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
     if (sndt_live && r[1]) sndt_lookup(r);   /* PAD-565: a sound's files in turn */
     if (swaps_live && r[1]) {
@@ -14801,6 +14804,7 @@ static long edge_log_left;                   /* value switch_edge_log N: log the
 static int edge_hooked;                      /* switch_edge is hooked (on_switch_edge), once: shots and PAD-641 */
 static int edge_shots;                       /* the drain's edges are the port's switch shots (switches_arm) */
 static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask);
+static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
 
 static void on_switch_edge(unsigned *r)
 {
@@ -14828,6 +14832,7 @@ static void on_switch_edge(unsigned *r)
     mask = edge.mode_mask ? *(const unsigned short *)(unsigned long)edge.mode_mask : 0u;
     hit = edge_is_hit(level, flags, pol, edge.mode_mask != 0, mask);
     if (att_live) att_edge(id, level, flags, pol, mask);   /* PAD-641: a flipper button in attract */
+    if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
     playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
     if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
         say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level & 1u,
@@ -15989,6 +15994,186 @@ static void att_arm(void)
     if (att.gap_ms) say("attract flipper sounds: at most one every %u ms (agap)", att.gap_ms);
 }
 
+/* ---- the game's own modes: a sound on a shot (PAD-945) ----------------------------------------------
+ * A tester on Venom LE 1.07 asked to "use unused game's sounds on shots that don't have sound requests
+ * for now" in one of the game's OWN modes (Grendel Mode). The game's code plays a sound only where its
+ * rules ask for one, so the sound rides a CARRIER, as the flipper buttons' sounds in attract do (PAD-641):
+ * a request the game never plays, each file a record of its own no descriptor names, and sounds.cfg says
+ *   gshot  <request> <its record's key>                             the carrier
+ *   gsfile <k> <mode id> <switch id> <file k's record key> <ms>     file k (1..): played when that switch
+ *                                                                   is pressed while that mode runs
+ * The framework's switch drain (site switch_edge, shared with the shots from switches and PAD-641) hands
+ * every edge to gms_edge: the edge to a switch's active level, in a game, while the game's mode is ACTIVE
+ * for the player up, plays the carrier with the file's key swapped in where the game looks its record up
+ * (gms_lookup). A mode is the port's (`text block_name_<id>`, its object `data block_obj_<id>`, C++ rule
+ * titles) and ACTIVE is the virtual the game's own "a mode of mine is active" query calls (`value
+ * mode_slot_active`, else `value stock_slot_active`, else read off `site stock_any_running`). A press
+ * while the last one still plays (its length + GMS_GAP) plays nothing: a spinner is not a hundred sounds.
+ * The carrier plays at the modes' shot-call priority (3, no steal flag: MODE_SDK.md "Sounds of your
+ * own"), so it waits under the game's own big calls and is not cut by an equal one. */
+#define GMS_FILES 32
+#define GMS_GAP   150                       /* ms after a file's own length before another press plays */
+static struct {
+    unsigned request, n, plays, busy_skips, idle_skips;
+    long slot;                              /* the modes' ACTIVE virtual */
+    unsigned char key[8];
+    unsigned mode[GMS_FILES], sw[GMS_FILES], ms[GMS_FILES], obj[GMS_FILES];
+    unsigned char host[GMS_FILES][8];
+    volatile int cur;                       /* the file the carrier plays now (-1: none) */
+    volatile unsigned long swap_until, until;
+    volatile int looked;
+} gms = { .cur = -1 };
+static int gms_bad;
+
+static void gms_line(const char *rs, const char *ks)
+{
+    const char *p = rs;
+    int ok;
+    unsigned r = (unsigned)number(&p, &ok);
+    if (!ok || !r || !key_hex(ks, gms.key)) { gms_bad++; return; }
+    gms.request = r;
+}
+
+static void gms_file(const char *ks, const char *ms_, const char *ws, const char *keys, const char *mss)
+{
+    const char *p = ks;
+    unsigned k, m, w, ms;
+    int ok, ok2, ok3, ok4;
+    k = (unsigned)number(&p, &ok);
+    p = ms_;
+    m = (unsigned)number(&p, &ok2);
+    p = ws;
+    w = (unsigned)number(&p, &ok3);
+    p = mss;
+    ms = (unsigned)number(&p, &ok4);
+    if (!ok || !ok2 || !ok3 || !ok4 || k < 1 || k > GMS_FILES || m >= BLOCK_IDS || !w || w >= N_SWITCH_IDS || !ms
+        || !key_hex(keys, gms.host[k - 1])) { gms_bad++; return; }
+    gms.mode[k - 1] = m;
+    gms.sw[k - 1] = w;
+    gms.ms[k - 1] = ms;
+    if (k > gms.n) gms.n = k;
+}
+
+static const char *gms_name(unsigned id)
+{
+    char key[24];
+    const char *t;
+    pm_snprintf(key, sizeof key, "block_name_%u", id);
+    t = pm_port_text(key);
+    return t && t[0] ? t : "one of the game's modes";
+}
+
+/* the record lookup (any thread): the carrier's own record takes the file it plays now. 1 = swapped */
+static int gms_lookup(unsigned *r)
+{
+    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    int c = gms.cur;
+    if (c < 0 || (long)(gms.swap_until - pm_ms()) <= 0 || !key_is(k, gms.key)) return 0;
+    r[1] = (unsigned)(unsigned long)gms.host[c];
+    if (!gms.looked) {                      /* once per play: the proof it was the one played */
+        gms.looked = 1;
+        say("game mode shot sounds: request %u looked up its record, took file %d's", gms.request, c + 1);
+    }
+    return 1;
+}
+
+/* 1 while the game's mode of file k is active for the player up (its own ACTIVE virtual) */
+static int gms_active(int k)
+{
+    unsigned obj = gms.obj[k], act = place_vfn_at(obj, gms.slot);
+    return act && (((unsigned (*)(unsigned))(unsigned long)act)(obj) & 0xffu) != 0;
+}
+
+/* every edge of the switch drain (the game's thread): a switch of a row pressed while its mode runs */
+static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)
+{
+    unsigned closed;
+    unsigned long now;
+    int k;
+    if (!pm_in_game()) return;
+    for (k = 0; k < (int)gms.n && gms.sw[k] != id; k++) ;
+    if (k == (int)gms.n) return;                        /* no row has this switch */
+    closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
+    if ((level & 1u) != closed) return;                 /* the release */
+    for (; k < (int)gms.n; k++)
+        if (gms.sw[k] == id && gms_active(k)) break;
+    if (k == (int)gms.n) {
+        if (gms.idle_skips++ < 8)
+            say("game mode shot sounds: switch %u pressed - none of its modes runs, no sound", id);
+        return;
+    }
+    now = pm_ms();
+    if (gms.plays && (long)(gms.until - now) > 0) {     /* the last one still plays */
+        if (gms.busy_skips++ < 8)
+            say("game mode shot sounds: switch %u in %s - the last sound still plays, no sound", id, gms_name(gms.mode[k]));
+        return;
+    }
+    if (pm_sound_active(gms.request)) pm_sound_stop(gms.request);   /* the silence after a short file */
+    gms.looked = 0;
+    gms.swap_until = now + gms.ms[k] + 1000;
+    gms.until = now + gms.ms[k] + GMS_GAP;
+    gms.cur = k;
+    gms.plays++;
+    pm_sound(gms.request);
+    say("game mode shot sounds: switch %u pressed in %s (mode %u) - file %d (%u ms) on request %u", id,
+        gms_name(gms.mode[k]), gms.mode[k], k + 1, gms.ms[k], gms.request);
+}
+
+/* from sndm_arm: the switch drain's hook (shared with the shots from switches and PAD-641) and the record
+ * lookup's (shared with the sounds in turn and the modes' own sounds) */
+static void gms_arm(void)
+{
+    struct site *e = site("switch_edge");
+    const char *why = 0;
+    char key[24];
+    unsigned k;
+    if (gms_bad) say("game mode shot sounds: %d line(s) of sounds.cfg not read", gms_bad);
+    if (!gms.request || !gms.n) return;
+    for (k = 0; k < gms.n; k++)
+        if (!gms.ms[k]) { say("game mode shot sounds: off - file %u has no line", k + 1); return; }
+    if (!fn("sound_play") || !fn("sound_lookup")) {
+        say("game mode shot sounds: off - the port has no sound_play or sound_lookup for this build");
+        return;
+    }
+    gms.slot = pm_port_value("mode_slot_active", -1);
+    if (gms.slot < 0) gms.slot = pm_port_value("stock_slot_active", -1);
+    if (gms.slot < 0) gms.slot = mode_query_slot(0);
+    if (gms.slot < 0) {
+        say("game mode shot sounds: off - the port does not say which virtual tells that one of the game's modes runs");
+        return;
+    }
+    for (k = 0; k < gms.n; k++) {
+        pm_snprintf(key, sizeof key, "block_obj_%u", gms.mode[k]);
+        gms.obj[k] = data(key);
+        if (!gms.obj[k] || !place_vfn_at(gms.obj[k], gms.slot)) {
+            say("game mode shot sounds: off - the port names no object of the game's mode %u (file %u), or its ACTIVE "
+                "virtual v[%ld] is not in the game's code", gms.mode[k], k + 1, gms.slot);
+            return;
+        }
+    }
+    if (!e || !e->ok || !edge_arm(&why)) {
+        say("game mode shot sounds: off - %s", !e ? "the port has no switch_edge" : !e->ok
+            ? "switch_edge does not match this build" : why ? why : "the switch drain's tables are not there");
+        return;
+    }
+    if (!edge_hooked && !(edge_hooked = hook(e->addr, on_switch_edge))) {
+        say("game mode shot sounds: off - switch_edge 0x%08x cannot be hooked", e->addr);
+        return;
+    }
+    if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
+        say("game mode shot sounds: off - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
+        return;
+    }
+    if (pm_sound_priority(gms.request, 3, 0) < 0)
+        say("game mode shot sounds: the carrier's priority stays its own - the port has no request table");
+    gms_live = 1;
+    for (k = 0; k < gms.n; k++)
+        say("game mode shot sounds: file %u plays at switch %u in %s (mode %u, object 0x%08x)", k + 1, gms.sw[k],
+            gms_name(gms.mode[k]), gms.mode[k], gms.obj[k]);
+    say("game mode shot sounds: %u file(s) on request %u, ACTIVE v[%ld]; switch_edge 0x%08x and sound_lookup 0x%08x "
+        "are hooked", gms.n, gms.request, gms.slot, e->addr, fn("sound_lookup"));
+}
+
 /* ---- the jukebox (PAD-685) ------------------------------------------------------------------------
  * An owner rebuilding The Beatles asked for "a weighted song selection": 60 and more songs, any of them in
  * any of the five song modes, a surprise each time, the common ones more often than the rare ones, never the
@@ -16202,14 +16387,14 @@ static void juke_arm(void)
 static void sndm_line(char *s)
 {
     const char *p;
-    char *f[5];
+    char *f[6];
     unsigned n = 0, k, m;
     int ok;
     struct sndm *e;
     while (*s == ' ') s++;
     if (*s == '#' || !*s) return;
     for (;;) {
-        if (n < 5) f[n++] = s;
+        if (n < 6) f[n++] = s;
         while (*s && *s != '\t') s++;
         if (!*s) break;
         *s++ = 0;
@@ -16267,6 +16452,14 @@ static void sndm_line(char *s)
     }
     if (n >= 4 && str_eq(f[0], "afile")) {
         att_file(f[1], f[2], f[3]);
+        return;
+    }
+    if (n >= 3 && str_eq(f[0], "gshot")) {    /* PAD-945 */
+        gms_line(f[1], f[2]);
+        return;
+    }
+    if (n >= 6 && str_eq(f[0], "gsfile")) {
+        gms_file(f[1], f[2], f[3], f[4], f[5]);
         return;
     }
     if (n < 4 || !str_eq(f[0], "sound")) return;
@@ -16555,9 +16748,10 @@ static void sndm_arm(void)
     sndt_arm();                               /* PAD-565: the files in turn need no resolver */
     blist_arm();                              /* PAD-608: nor do the files in a sound bank */
     att_arm();                                /* PAD-641: nor the flipper buttons' sounds in attract */
+    gms_arm();                                /* PAD-945: nor a sound on a shot in one of the game's modes */
     juke_arm();                               /* PAD-685: nor the jukebox */
     if (!n_sndm) {
-        if (n_sndt || n_bsid || att.n || n_jmode) return;
+        if (n_sndt || n_bsid || att.n || n_jmode || gms.n) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }

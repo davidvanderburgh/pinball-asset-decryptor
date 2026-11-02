@@ -120,13 +120,14 @@ def test_the_runtime_reads_the_lines_and_hooks_the_drain_and_the_lookup_once():
     # the record lookup takes the playing file's key first; the drain's edges reach it as well as the shots
     assert "if (att_live && r[1] && att_lookup(r)) return;" in c
     assert "if (att_live) att_edge(id, level, flags, pol, mask);" in c
-    assert c.count("hook(e->addr, on_switch_edge)") == 2 and c.count("edge_hooked = hook(e->addr") == 2
+    # (PAD-945: the sounds on the shots of the game's own modes hook it the same once-only way)
+    assert c.count("hook(e->addr, on_switch_edge)") == 3 and c.count("edge_hooked = hook(e->addr") == 3
     # only in attract (the mode mask's attract bit, no game), not while the last one still plays
     assert "if (!(mask & att.attract_bit) || pm_in_game()) return;" in c
     assert "if (att.plays && (long)(att.until - now) > 0) return;" in c
     assert 'pm_port_value("mode_mask_attract", 0x10)' in c
     # it works on a card with no modes (`only`): armed with the sounds.cfg it rides
-    assert "att_arm();" in c and "if (n_sndt || n_bsid || att.n || n_jmode) return;" in c
+    assert "att_arm();" in c and "if (n_sndt || n_bsid || att.n || n_jmode || gms.n) return;" in c
 
 
 # ---- the build ------------------------------------------------------------------------------------

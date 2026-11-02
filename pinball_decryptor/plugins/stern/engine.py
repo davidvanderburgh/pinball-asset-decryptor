@@ -8517,6 +8517,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                              desc_sites, assets_dir, audio_edits,
                                              sound_modes, sound_modes_prof,
                                              mode_own_used, log)
+                        if sound_modes.shots:
+                            # PAD-945: the sounds on the shots of the game's
+                            # own modes ride another carrier
+                            _shot_carrier(gr_path, img_path, params,
+                                          desc_sites, assets_dir, audio_edits,
+                                          sound_modes, sound_modes_prof,
+                                          mode_own_used, log)
                         # PAD-791: the records the game plays in a sequence,
                         # off its descriptors read whole (the play tables stop
                         # at 80 bytes; Iron Maiden's 974 plays idx 919 past
@@ -8565,6 +8572,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         # which the runtime swaps in at the record lookup only)
                         _sm_key = [u for u in sound_mode_used
                                    if _SMo_is_attract(u["mode"])
+                                   or _SMo_is_shot(u["mode"])
                                    or _SMo_is_mode_turn(u["mode"])
                                    or _SMo_is_juke(u["mode"])]
                         _sm_frags, _sm_sids, _sm_seqs = _sound_modes_for_banks(
@@ -9487,7 +9495,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         _who = ("Modes" if _modes_on else "Random clips" if variant_slots
                 else "Music modes" if sound_modes_cfg and (sound_modes.count or sound_modes.turns)
                 else "Jukebox" if sound_modes_cfg and sound_modes.jukebox and not sound_modes.attract
-                else "Attract flipper sounds" if sound_modes_cfg  # PAD-641: theirs alone
+                else "Attract flipper sounds" if sound_modes_cfg and sound_modes.attract  # PAD-641: theirs alone
+                else "Sounds on shots" if sound_modes_cfg  # PAD-945: theirs alone
                 else "Picture settings" if picture_cfg
                 else "Attract items")
         if _modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on:
@@ -10755,10 +10764,20 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                 log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are "
                     "left out of this build: %s" % (len(modes.attract), a_why), "warning")
                 modes.attract = []
-                if not modes.count and not modes.turns and not modes.jukebox:
+                if not modes.count and not modes.turns and not modes.jukebox and not modes.shots:
+                    return None, None
+        if modes.shots:
+            # PAD-945: the sounds on the shots of the game's own modes: the switch drain, a carrier
+            # and the modes' objects, on their own as the flipper sounds are
+            s_why = _SMo.shot_refusal(prof)
+            if s_why:
+                log("Sounds on shots: %d sound(s) on the shots of the game's own modes are left out "
+                    "of this build: %s" % (len(modes.shots), s_why), "warning")
+                modes.shots = []
+                if not modes.count and not modes.turns and not modes.jukebox and not modes.attract:
                     return None, None
         why = _SMo.title_refusal(prof) if modes.count else ""
-        if why and modes.attract and not modes.turns:
+        if why and (modes.attract or modes.shots) and not modes.turns:
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
                 % (len(modes.files()), why.rstrip(".")), "warning")
             modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
@@ -10770,7 +10789,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
             modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
         elif not why and modes.turns:
             why = _SMo.title_refusal(prof, turns=True)
-            if why and modes.attract:
+            if why and (modes.attract or modes.shots):
                 log("Sounds in turn: %d file(s) the game would play in turn are left out of this "
                     "build: %s." % (sum(map(len, modes.turns.values())), why.rstrip(".")), "warning")
                 modes.slots, modes.names, modes.turns, why = {}, [], {}, ""
@@ -10782,6 +10801,9 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
         elif modes.attract and not modes.count and not modes.turns:
             log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are "
                 "left out of this build: %s." % (len(modes.attract), why.rstrip(".")), "warning")
+        elif modes.shots and not modes.count and not modes.turns:
+            log("Sounds on shots: %d sound(s) on the shots of the game's own modes are left out of "
+                "this build: %s." % (len(modes.shots), why.rstrip(".")), "warning")
         elif modes.count:
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
                 % (n, why.rstrip(".")), "warning")
@@ -10808,6 +10830,8 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                 "info")
     if modes.attract:
         log("Found %d sound(s) for the flipper buttons in attract mode." % len(modes.attract), "info")
+    if modes.shots:
+        log("Found %d sound(s) on the shots of the game's own modes." % len(modes.shots), "info")
     if modes.jukebox:
         log("Found a jukebox of %d song(s) (%d with an intro video of its own) for the %d song "
             "modes." % (len(modes.jukebox), sum(1 for s in box.songs if s.video),
@@ -11346,13 +11370,15 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                 "too %s." % (
                     who, ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
                     when), "info")
-        if (not longer_ok or (_SMo.is_turn(mode) and not _SMo.is_attract(mode))) and want > room \
+        if (not longer_ok or (_SMo.is_turn(mode) and not _SMo.is_attract(mode)
+                               and not _SMo.is_shot(mode))) and want > room \
                 and not _SMo.is_juke(mode):
             # as a replacement is when the bank can't grow (direct-SD, PAD_STERN_AUDIO_GROW=0); a file
             # in turn always (PAD-565: the game plays it for as long as its slot's descriptor says).
             # Never a jukebox song (PAD-685): the game plays a record it is handed whole. PAD-809: nor
             # a flipper sound in attract: the runtime hands the carrier its own record, which plays
-            # whole past the carrier's length (PAD-533), and waits out the file's own length (afile)
+            # whole past the carrier's length (PAD-533), and waits out the file's own length (afile);
+            # PAD-945: nor a sound on a shot, the same road (gsfile)
             try:
                 wav = _SMo.cut(wav, room)
             except (OSError, EOFError) as e:
@@ -11362,7 +11388,7 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
             log("%s: %s (%.2f s) is cut to its %s %.2f s: %s." % (
                 who, what, want / 44100.0, "song's" if song else "slot's", room / 44100.0,
                 "the game plays it for as long as its sound"
-                if _SMo.is_turn(mode) and not _SMo.is_attract(mode)
+                if _SMo.is_turn(mode) and not _SMo.is_attract(mode) and not _SMo.is_shot(mode)
                 else longer_why or "longer replacements are off"), "info")
             want = room
         host = _sound_mode_host(params, p, want, audio_edits, taken, parts=in_seq)
@@ -11729,7 +11755,8 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     from . import sound_modes as _SMo
     from .adjustments import AdjustmentTable
     who = ("Music modes" if modes.count else "Sounds in turn" if modes.turns
-           else "Attract flipper sounds" if modes.attract else "Jukebox")
+           else "Attract flipper sounds" if modes.attract
+           else "Sounds on shots" if modes.shots else "Jukebox")
     live = 0
     banked = [u for u in used if u.get("bank") is not None]
     used = [u for u in used if u.get("bank") is None]
@@ -11738,6 +11765,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
                                    list_ids or {}, log)
     attract = _attract_lines(params, [u for u in used if _SMo.is_attract(u["mode"])],
                              modes, log)
+    shots = _shot_lines(params, [u for u in used if _SMo.is_shot(u["mode"])], modes, log)
     # PAD-638: a music mode's own files in turn are turned at that mode file's record (one in
     # image.bin: a mode file in a sound bank is played by a bank sound id, never its key)
     mode_hosts = {(u["rel"], int(u["mode"])): int(u["host"]) for u in used
@@ -11747,6 +11775,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
             mode_hosts.pop((u["rel"], int(u["mode"])), None)
     turns = _turn_key_lines(params, [u for u in used if _SMo.is_turn(u["mode"])
                                      and not _SMo.is_attract(u["mode"])
+                                     and not _SMo.is_shot(u["mode"])
                                      and not _SMo.is_juke(u["mode"])], log,
                             mode_hosts=mode_hosts)
     jukebox = _jukebox_lines(params, [u for u in used + banked if _SMo.is_juke(u["mode"])],
@@ -11766,18 +11795,19 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     if modes.count and not sounds and not bsids:
         log("Music modes: none of the files for the other modes can be played on this card, so "
             "MUSIC MODE is not added.", "warning")
-        if not turns and not tsids and not jukebox:
+        if not turns and not tsids and not jukebox and not attract and not shots:
             return ""
         modes.slots, modes.names = {}, []
-    if not sounds and not turns and not bsids and not tsids and not attract and not jukebox:
+    if not sounds and not turns and not bsids and not tsids and not attract and not jukebox and not shots:
         log("%s: none of the files can be played on this card; every sound plays its "
-            "own." % ("Sounds in turn" if modes.turns or not modes.attract
-                      else "Attract flipper sounds"), "warning")
+            "own." % ("Sounds in turn" if modes.turns or not (modes.attract or modes.shots)
+                      else "Attract flipper sounds" if modes.attract else "Sounds on shots"), "warning")
         return ""
     # PAD-638: the slots whose files in turn play at random, by the key their turn lines name
     byidx = {p["idx"]: p for p in params}
     randoms = sorted({bytes(byidx[int(u["slot"])]["findkey"]) for u in used + banked
                       if _SMo.is_turn(u["mode"]) and not _SMo.is_mode_turn(u["mode"])
+                      and not _SMo.is_shot(u["mode"])
                       and u.get("lines") and u["rel"] in modes.random
                       and (byidx.get(int(u["slot"])) or {}).get("findkey")})
     for u in used:                            # PAD-638: a music mode's own, by its file's record
@@ -11791,7 +11821,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
         f.write(_SMo.cfg_text(live, modes.count if sounds or bsids else 0, sounds, only,
                               turns=turns, bsids=bsids, tsids=tsids, randoms=randoms, attract=attract,
-                              jukebox=jukebox, record=_SMo.card_record(modes, used + banked)))
+                              jukebox=jukebox, shots=shots, record=_SMo.card_record(modes, used + banked)))
     return path
 
 
@@ -11875,25 +11905,16 @@ def _bank_sid_lines(params, used, list_ids, log):
     return sorted(set(bsids)), sorted(set(tsids), key=lambda t: (t[1], t[0], t[2]))
 
 
-def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, modes, prof,
-                     mode_own_used, log):
-    """PAD-641: the carrier the flipper buttons' sounds in attract ride (*modes*.attract), a
+def _free_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, modes, prof,
+                  mode_own_used, skip=()):
+    """PAD-641 / PAD-945: a carrier for sounds of the project's own the game has no request for, a
     request the game never plays (:func:`.mode_sounds.carriers`, its calls longest first), and the
     slot of the record it plays: the first whose record this build leaves alone (no replacement, no
-    file of a music mode or in turn, no mode's own sound) and that the project has as a file. Sets
-    ``modes.attract_rel`` and ``modes.attract_plan`` ``{"request", "slot", "switches"}`` (the
-    flipper buttons' switch ids, :func:`.sound_modes.flipper_buttons`); with none, logs why and
-    empties ``modes.attract`` (the card plays nothing new in attract)."""
+    file of a music mode or in turn, no mode's own sound, none of *skip*'s slots) and that the project
+    has as a file. ``(request, slot, rel, whose, "")``, or ``(None, None, None, "", why)``."""
     from . import mode_sounds as _MSo
     from . import mode_write as _MW
     from . import sound_modes as _SMo
-    n = len(modes.attract)
-
-    def _out(why):
-        log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are left out "
-            "of this build: %s." % (n, why), "warning")
-        modes.attract, modes.attract_rel, modes.attract_plan = [], "", {}
-
     c = _MSo.carriers(prof.game_dir, prof.version) if prof is not None else None
     try:
         mask = _desc_key_mask(params, sites)
@@ -11902,12 +11923,12 @@ def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, 
         with open(_lp(img_path), "rb") as f:
             head = f.read(1 << 16)
     except (RuntimeError, OSError) as e:
-        return _out("the game's play tables cannot be read (%s)" % e)
+        return None, None, None, "", "the game's play tables cannot be read (%s)" % e
     if params and not any(p.get("findkey") or p.get("key0") is not None for p in params):
         # PAD-645: TMNT Pro 1.58's sound bank is read by the one path that never learns each
         # record's play key, so nothing can say which record a request plays
-        return _out("the app cannot tell which of this game's sound records each of its sounds "
-                    "plays, so no sound of its own can carry them")
+        return None, None, None, "", ("the app cannot tell which of this game's sound records each "
+                                      "of its sounds plays, so no sound of its own can carry them")
     calls, whose = (tuple(c.calls) if c is not None else ()), "which the game never plays"
     if not calls:
         # PAD-645: a build no carrier was measured on (an older or a derived one): calls read off
@@ -11915,10 +11936,7 @@ def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, 
         calls = _MSo.own_calls(elf, head, sites, params, mask)
         whose = "a call of the game's own that no other sound of it plays, read off its play tables"
     if not calls:
-        return _out("no sound of the game's that it never plays is known to carry them")
-    switches = _SMo.flipper_buttons(elf)
-    if len(switches) != 2:
-        return _out("the game program does not name its left and right flipper buttons")
+        return None, None, None, "", "no sound of the game's that it never plays is known to carry them"
     files = {}
     audio = os.path.join(assets_dir, "audio")
     try:
@@ -11931,6 +11949,7 @@ def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, 
     busy = set(audio_edits) | {i for i in (_SMo.slot_idx(r) for r in list(modes.slots)
                                              + list(modes.turns)) if i is not None}
     busy |= {int(u["idx"]) for u in (mode_own_used or ()) if u and u.get("idx") is not None}
+    busy |= {int(i) for i in skip}
     why = "none of them could be placed"
     for request in calls:
         try:
@@ -11944,14 +11963,66 @@ def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, 
         if slot not in files:
             why = "this project has no file of sound idx %d (carrier request %d)" % (slot, request)
             continue
-        modes.attract_rel = files[slot]
-        modes.attract_plan = {"request": int(request), "slot": int(slot), "switches": switches}
-        # PAD-645: a short silence beside them, for the game's own sound at a press to play
-        modes.attract_quiet = _attract_quiet_wav(log)
-        log("Attract flipper sounds: %d file(s) ride request %d (sound idx %d, %s); the flipper "
-            "buttons are switches %d and %d." % (n, request, slot, whose, switches[0], switches[1]), "info")
+        return int(request), int(slot), files[slot], whose, ""
+    return None, None, None, "", why
+
+
+def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, modes, prof,
+                     mode_own_used, log):
+    """PAD-641: the carrier the flipper buttons' sounds in attract ride (*modes*.attract), a
+    request the game never plays (:func:`_free_carrier`), and the slot of the record it plays. Sets
+    ``modes.attract_rel`` and ``modes.attract_plan`` ``{"request", "slot", "switches"}`` (the
+    flipper buttons' switch ids, :func:`.sound_modes.flipper_buttons`); with none, logs why and
+    empties ``modes.attract`` (the card plays nothing new in attract)."""
+    from . import sound_modes as _SMo
+    n = len(modes.attract)
+
+    def _out(why):
+        log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are left out "
+            "of this build: %s." % (n, why), "warning")
+        modes.attract, modes.attract_rel, modes.attract_plan = [], "", {}
+
+    request, slot, rel, whose, why = _free_carrier(gr_path, img_path, params, sites, assets_dir,
+                                                   audio_edits, modes, prof, mode_own_used)
+    if request is None:
+        return _out(why)
+    try:
+        with open(_lp(gr_path), "rb") as f:
+            switches = _SMo.flipper_buttons(f.read())
+    except OSError as e:
+        return _out("the game program cannot be read (%s)" % e)
+    if len(switches) != 2:
+        return _out("the game program does not name its left and right flipper buttons")
+    modes.attract_rel = rel
+    modes.attract_plan = {"request": request, "slot": slot, "switches": switches}
+    # PAD-645: a short silence beside them, for the game's own sound at a press to play
+    modes.attract_quiet = _attract_quiet_wav(log)
+    log("Attract flipper sounds: %d file(s) ride request %d (sound idx %d, %s); the flipper "
+        "buttons are switches %d and %d." % (n, request, slot, whose, switches[0], switches[1]), "info")
+    return None
+
+
+def _shot_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, modes, prof,
+                  mode_own_used, log):
+    """PAD-945: the carrier the sounds on the shots of the game's own modes ride (*modes*.shots), a
+    request the game never plays (:func:`_free_carrier`) and not the flipper sounds' in attract.
+    Sets ``modes.shot_rel`` and ``modes.shot_plan`` ``{"request", "slot"}``; with none, logs why
+    and empties ``modes.shots``."""
+    n = len(modes.shots)
+    skip = [modes.attract_plan["slot"]] if (modes.attract and modes.attract_plan) else []
+    request, slot, rel, whose, why = _free_carrier(gr_path, img_path, params, sites, assets_dir,
+                                                   audio_edits, modes, prof, mode_own_used, skip=skip)
+    if request is None:
+        log("Sounds on shots: %d sound(s) on the shots of the game's own modes are left out of this "
+            "build: %s." % (n, why), "warning")
+        modes.shots, modes.shot_rel, modes.shot_plan = [], "", {}
         return None
-    return _out(why)
+    modes.shot_rel = rel
+    modes.shot_plan = {"request": request, "slot": slot}
+    log("Sounds on shots: %d sound(s) on the shots of the game's own modes ride request %d (sound "
+        "idx %d, %s): %s." % (n, request, slot, whose, "; ".join(
+            "%s in %s" % (r["switch_name"], r["mode_name"]) for r in modes.shots)), "info")
+    return None
 
 
 def _attract_quiet_wav(log):
@@ -12009,6 +12080,36 @@ def _attract_lines(params, used, modes, log):
     if files_gap:
         out["gap_ms"] = files_gap
     return out
+
+
+def _shot_lines(params, used, modes, log):
+    """PAD-945: the ``sounds.cfg`` table of the sounds on the shots of the game's own modes (*used*,
+    their entries off the grow) for :func:`.sound_modes.cfg_text`: ``{"request", "key" (the carrier's
+    own record key), "files": [(mode id, switch id, the file's record key, its length in ms), ...]}``
+    in row order, or ``None`` when none landed. An entry whose keys did not come out of the grown bank
+    is left out and logged; one that did gets ``lines`` 1 (the card's record names it)."""
+    from . import sound_modes as _SMo
+    plan = getattr(modes, "shot_plan", None) or {}
+    if not used or not plan:
+        return None
+    byidx = {p["idx"]: p for p in params}
+    key, files = None, []
+    for u in sorted(used, key=lambda u: int(u["mode"])):
+        k = _SMo.shot_of(u["mode"])
+        row = modes.shots[k - 1] if 0 < k <= len(modes.shots) else None
+        sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
+        if row is None or not sp or not hp or not hp.get("grown") or not sp.get("findkey") \
+                or not hp.get("findkey"):
+            log("Sounds on shots: %s is left out: its record did not come out of the grown bank."
+                % _SMo.what(u["rel"], u["mode"]), "warning")
+            continue
+        key = bytes(sp["findkey"])
+        files.append((int(row["mode"]), int(row["switch"]), bytes(hp["findkey"]),
+                      int(-(-int(u["frames"]) * 1000 // 44100))))
+        u["lines"] = 1
+    if not files:
+        return None
+    return {"request": int(plan["request"]), "key": key, "files": files}
 
 
 def _turn_key_lines(params, used, log, mode_hosts=None):
@@ -20339,6 +20440,12 @@ def _SMo_is_mode_turn(mode):
 def _SMo_is_attract(mode):
     from . import sound_modes as _SMo
     return _SMo.is_attract(mode)
+
+
+def _SMo_is_shot(mode):
+    """PAD-945: a sound on a shot stays in image.bin: the runtime swaps its record's key in."""
+    from . import sound_modes as _SMo
+    return _SMo.is_shot(mode)
 
 
 def _SMo_is_juke(mode):

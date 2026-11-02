@@ -352,7 +352,9 @@ function Catalog({ s }) {
   return html`<${Card} cls="vpx-cat" head=${html`<span class="h2" ...${tip(s.catalog_tip)}>Tables of other machines</span>
       <span class="small muted vpx-cat-sub">The app ships none of them: each is its author's download, and it plays as its author wrote it until the app has a map for it (Stern SAM games are Visual PinMAME's already, so they are not here).</span>`}>
     ${order.map((k) => html`<div class="vpx-cat-plat">
-      <div class="vpx-cat-head"><b>${plats[k].name}</b> <span class="small muted">${plats[k].runs}</span></div>
+      <div class="vpx-cat-head"><b>${plats[k].name}</b> <span class="small muted">${plats[k].runs}</span>
+        ${plats[k].needs ? html`<${Chip} kind="warn" dot sm ...${tip(plats[k].needs)}>needs the machine's security key<//>` : null}</div>
+      ${plats[k].needs ? html`<div class="small vpx-cat-needs">${plats[k].needs}</div>` : null}
       ${tables.filter((t) => t.platform === k).map((t) => html`<div class=${"vpx-cat-row" + (t.url ? "" : " none")}>
         <span class="small vpx-cat-game" ...${tip(t.game)}>${t.game}</span>
         <span class="vpx-cat-name" ...${tip(t.url ? "Open " + t.where + ": " + t.url : t.notes)}>${t.url

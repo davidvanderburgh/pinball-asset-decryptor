@@ -118,6 +118,17 @@ which run their Williams ROMs the same way): the card is the modern
 machines only. The focus is Spike 1, Spike 2 and the other modern
 machines.
 
+## JJP: the security key, up front (David, 2026-11-02, interactive)
+
+"The JJP games may be misleading: you need the security dongle on the
+machine to emulate those, so we should be up front about that." The JJP
+game is decrypted by its own Sentinel HL key (tools/jjp_emu/README.md:
+"the dongle is not a check, it is the decryption key"; one per title,
+H0007 without it), so no bridge could play the real game behind a table
+without the machine's key on the PC. The catalogue's platform entry
+carries `needs`, and the card shows it on the Jersey Jack block as a
+warning chip and a line.
+
 ## The Spike 1 author's checklist (run 2)
 
 `vpxauthor.machine_for(title)` reads a Spike 1 title from its game ELF and

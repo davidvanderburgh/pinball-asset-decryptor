@@ -665,6 +665,8 @@ def test_the_catalogue_names_every_platform_and_where_each_table_is():
     plats, tables = cat["platforms"], cat["tables"]
     assert {"spike1", "jjp", "ap", "cgc", "dp", "spooky", "bof", "pb", "turner", "multimorphic"} <= set(plats)
     assert "sam" not in plats                   # David: SAM is Visual PinMAME's already
+    # David: JJP games run only with the machine's own security key; the card says so up front
+    assert "security key" in plats["jjp"]["needs"] and "H0007" in plats["jjp"]["needs"]
     assert all(p.get("name") and p.get("runs") and p.get("bridge") in ("pad", "vpm", "none") for p in plats.values())
     assert tables and all(t["platform"] in plats for t in tables)
     for t in tables:

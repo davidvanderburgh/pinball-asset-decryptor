@@ -94,3 +94,5 @@
 .vpx-skel-row:hover { background: none; }
 .vpx-authors-busy { display: inline-flex; align-items: center; gap: 6px; }
 @keyframes vpx-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.vpx-cat-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vpx-cat-needs { padding: 0 4px 6px; color: var(--ink-2); }

@@ -428,6 +428,158 @@ def pup_stub(lines, rep):
     return "\n".join(out)
 
 
+def _paren_span(text, start):
+    """(open, close) of the parenthesised list that opens at text[start] ==
+    "(", or None when it does not close on this text."""
+    depth, inq = 0, False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == '"':
+            inq = not inq
+        elif not inq:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return start, i
+    return None
+
+
+FLEX_CLASS = "PadNoFlex"
+
+
+def flexdmd_stub(lines, rep):
+    """FlexDMD (a DMD library, a separate install) is the whole display of a
+    tribute like VPW's Game of Thrones: "No FlexDMD found. This table will
+    not run without it." Behind a PAD table the machine's own display is
+    the game's (the app's window), so FlexDMD becomes a null object:
+    PadNoFlex, a class with every member the script uses on FlexDMD or on
+    anything made from it (scenes, fonts, labels, actors...): a property
+    takes anything and reads back Empty, a method does nothing and gives
+    back another PadNoFlex (so chains and Set work). A method the script
+    calls with two argument counts (NewLabel: 3 or 6) takes the most and
+    the shorter calls are padded with 0; a name that is both assigned and
+    called with arguments (Show) has its assignments renamed to Show_set.
+    Returns the class text, "" when the script makes no FlexDMD."""
+    made = [i for i, ln in enumerate(lines)
+            if re.search(r'Set\s+(\w+)\s*=\s*CreateObject\("FlexDMD\.FlexDMD"\)', ln, re.I)
+            and not ln.lstrip().startswith("'")]
+    if not made:
+        return ""
+    roots = {re.search(r'Set\s+(\w+)\s*=', lines[i], re.I).group(1).lower() for i in made}
+    # everything made from it: Set x = <var>.Member...
+    objs = set(roots)
+    grew = True
+    while grew:
+        grew = False
+        for ln in lines:
+            m = re.match(r"\s*Set\s+(\w+)\s*=\s*(\w+)\.", _code(ln), re.I)
+            if m and m.group(2).lower() in objs and m.group(1).lower() not in objs:
+                objs.add(m.group(1).lower())
+                grew = True
+    use = re.compile(r"\b(%s)\." % "|".join(sorted(re.escape(o) for o in objs)), re.I)
+    member = re.compile(r"(\w+)")
+    lets, calls, spelling = set(), {}, {}
+    sites = []                      # (line index, statement start, member, args, paren) for the padding
+    for i, ln in enumerate(lines):
+        code = _code(ln)
+        for a, b in _statements(code):
+            seg = code[a:b]
+            for m in use.finditer(seg):
+                lead = seg[:m.start()].strip()
+                pos = m.end()
+                # the chain: obj.Member(args).Member.Member args
+                while True:
+                    mm = member.match(seg, pos)
+                    if not mm:
+                        break
+                    name = mm.group(1).lower()
+                    spelling.setdefault(name, mm.group(1))
+                    pos = mm.end()
+                    after = seg[pos:]
+                    if re.match(r"\s*\(", after):
+                        at = pos + after.index("(")
+                        span = _paren_span(seg, at)
+                        if span is None:
+                            calls.setdefault(name, set())
+                            break
+                        n = _argcount(seg[span[0] + 1:span[1]])
+                        calls.setdefault(name, set()).add(n)
+                        sites.append((i, a, name, n, True))
+                        pos = span[1] + 1
+                        if seg[pos:pos + 1] == ".":
+                            pos += 1
+                            continue
+                        break
+                    if re.match(r"\s*=(?!=)", after) and not lead:
+                        lets.add(name)
+                    elif after.startswith("."):
+                        calls.setdefault(name, set()).add(0)
+                        pos += 1
+                        continue
+                    elif not lead and after.strip() and not after.strip().startswith(("=", ")", ",", "&", "+", "-", "*", "/", "<", ">", ":")):
+                        n = _argcount(after.strip())          # a bare call: obj.AddActor actor
+                        calls.setdefault(name, set()).add(n)
+                        sites.append((i, a, name, n, False))
+                    else:
+                        calls.setdefault(name, set()).add(0)
+                    break
+    # a name assigned AND called with arguments: its assignments become name_set
+    both = {n for n in lets if n in calls and calls[n] and max(calls[n]) > 0}
+    for i, ln in enumerate(lines):
+        for n in both:
+            ln = re.sub(r"\b(%s)\.(%s)(\s*=(?!=))" % ("|".join(sorted(objs)), re.escape(n)), lambda m: "%s.%s_set%s" % (m.group(1), spelling[n], m.group(3)), ln, flags=re.I)
+        lines[i] = ln
+    # the shorter calls padded to the stub's arity
+    padded = 0
+    for i, a, name, n, paren in sorted(sites, key=lambda t: (t[0], -t[1])):
+        want = max(calls[name])
+        if n >= want:
+            continue
+        code = _code(lines[i])
+        spans = _statements(code)
+        seg_span = next(((x, y) for x, y in spans if x == a), None)
+        if seg_span is None:
+            continue
+        seg = code[seg_span[0]:seg_span[1]]
+        m = re.search(r"\b%s\s*" % re.escape(spelling[name]), seg, re.I)
+        if not m:
+            continue
+        fill = ", 0" * (want - n) if n else (", ".join(["0"] * want) if paren else " " + ", ".join(["0"] * want))
+        if paren:
+            at = seg.index("(", m.end() - 1) if "(" in seg[m.end() - 1:] else None
+            span = _paren_span(seg, at) if at is not None else None
+            if span is None:
+                rep.append("WARNING: %s call on line %d spans lines; not padded" % (name, i + 1))
+                continue
+            seg = seg[:span[1]] + (fill if n else fill) + seg[span[1]:]
+        else:
+            seg = seg.rstrip() + fill
+        lines[i] = code[:seg_span[0]] + seg + code[seg_span[1]:] + lines[i][len(code):]
+        padded += 1
+    for i in made:
+        var = re.search(r'Set\s+(\w+)\s*=', lines[i], re.I).group(1)
+        lines[i] = re.sub(r'CreateObject\("FlexDMD\.FlexDMD"\)', "New %s   ' PAD: FlexDMD stands in (vpxshadow.py)" % FLEX_CLASS, lines[i], flags=re.I)
+        rep.append("FlexDMD replaced by %s (%s): the machine's display is the game's" % (FLEX_CLASS, var))
+    out = ["", "'---- PAD: FlexDMD's shape, a null object (the machine's own display is the game's)", "Class %s" % FLEX_CLASS]
+    names = sorted(set(lets) | set(calls))
+    for name in names:
+        sp = spelling[name]
+        if name in both:
+            out.append("\tPublic Property Let %s_set(v) : End Property" % sp)
+        elif name in lets:
+            out.append("\tPublic Property Get %s : %s = Empty : End Property" % (sp, sp))
+            out.append("\tPublic Property Let %s(v) : End Property" % sp)
+            continue
+        n = max(calls.get(name) or {0})
+        args = ", ".join("a%d" % k for k in range(n))
+        out.append("\tPublic Function %s(%s) : Set %s = New %s : End Function" % (sp, args, sp, FLEX_CLASS))
+    out += ["End Class", ""]
+    rep.append("%s: %d members (%d padded call%s)" % (FLEX_CLASS, len(names), padded, "" if padded == 1 else "s"))
+    return "\n".join(out)
+
+
 def flex_optional(lines, rep):
     """FlexDMD is a separate install too, and JP's Deadpool (DMD Type
     defaults to FlexDMD) dies at its CreateObject. When it fails, the table
@@ -1050,6 +1202,8 @@ def patch(script, m):
     route_b2s(lines, rep)
     own_lamp_reads(lines, rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
+    if m.get("flexdmd_stub"):
+        stub += flexdmd_stub(lines, rep)
     flex_optional(lines, rep)
     # what core.vbs's PinMAMETimer expects a VPM table to declare, at the TOP:
     # Iron Maiden loads core.vbs and controller.vbs itself near its start,

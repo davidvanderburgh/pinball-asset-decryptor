@@ -469,6 +469,7 @@
   }
  },
  "pup_stub": true,
+ "flexdmd_stub": true,
  "neuter": [
   "BallRelease.CreateSizedBallWithMass",
   "BallRelease.Kick",

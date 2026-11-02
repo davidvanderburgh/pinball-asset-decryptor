@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import struct
 import sys
 
@@ -3574,4 +3575,48 @@ def test_a_trough_of_fewer_switches_pads_init_sw(tmp_path, monkeypatch):
     assert sh.trough_init(list(range(10, 18))) == "InitSw8 0,1010,1011,1012,1013,1014,1015,1016,1017"
     with pytest.raises(ValueError):
         sh.trough_init(list(range(9)))
+
+
+def test_flexdmd_stands_in_as_a_null_object(tmp_path):
+    """PAD-943: VPW's Game of Thrones stops on "No FlexDMD found. This table
+    will not run without it." (a DMD library this PC lacks) and twenty of its
+    subs dereference FlexDMD unguarded. With `flexdmd_stub` the CreateObject
+    becomes a PadNoFlex: every member the script uses on FlexDMD or on what
+    it makes, assignments taken, methods giving back another PadNoFlex;
+    shorter calls padded to the stub's arity; a name both assigned and called
+    with arguments renamed at its assignments."""
+    sh = pytest.importorskip("vpxshadow")
+    lines = [
+        'Dim FlexDMD, scene, font, a',
+        'Set FlexDMD = CreateObject("FlexDMD.FlexDMD")',
+        'FlexDMD.RenderMode = 2 : FlexDMD.Run = True',
+        'Set font = FlexDMD.NewFont("f.fnt", vbWhite, vbWhite, 0)',
+        'Set scene = FlexDMD.NewGroup("s")',
+        'scene.AddActor FlexDMD.NewLabel("a", font, "t")',
+        'scene.AddActor FlexDMD.NewLabel("b", FlexDMD.NewFont("g.fnt", 1, 2, 3), "u")',
+        'Set a = FlexDMD.NewLabel("c", font)          \' two arguments: padded',
+        'FlexDMD.LockRenderThread',
+        'FlexDMD.Stage.AddActor scene',
+        'a.Text = "hi" : a.Visible = False',
+        'a.SetAlignedPosition 64, 16, 4',
+        'FlexDMD.Show = True',
+        'scene.GetLabel("a").Show 1',
+        'x = a.Text',
+    ]
+    rep = []
+    cls = sh.flexdmd_stub(lines, rep)
+    assert "New PadNoFlex   \' PAD: FlexDMD stands in" in lines[1]
+    assert lines[7].startswith('Set a = FlexDMD.NewLabel("c", font, 0)'), lines[7]       # padded to three
+    assert lines[12].startswith("FlexDMD.Show_set = True"), lines[12]                  # assigned AND called
+    assert "Public Function NewLabel(a0, a1, a2)" in cls and "Public Function NewFont(a0, a1, a2, a3)" in cls
+    assert "Public Property Let Text(v)" in cls and "Public Property Let Show_set(v)" in cls
+    assert "Public Function Show(a0)" in cls and "Public Function Stage()" in cls
+    assert any("1 padded call" in r for r in rep), rep
+    # the class and the script's uses run under VBScript itself
+    if sys.platform != "win32" or not shutil.which("cscript"):
+        pytest.skip("no cscript")
+    vbs = tmp_path / "flex.vbs"
+    vbs.write_text(cls + "\n" + "\n".join(lines[:-1]) + '\nx = a.Text\nWScript.Echo "ok"\n', encoding="utf-8")
+    out = subprocess.run(["cscript", "//Nologo", str(vbs)], capture_output=True, text=True, timeout=30)
+    assert out.stdout.strip() == "ok", out.stdout + out.stderr
 

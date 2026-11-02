@@ -31,6 +31,7 @@ import ctypes
 import ctypes.wintypes as wt
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -40,6 +41,7 @@ KIT = os.path.join(os.path.dirname(HERE), "tools", "spike2_emu", "vpx")
 sys.path.insert(0, KIT)
 
 import padcontroller  # noqa: E402
+import padlaunch  # noqa: E402
 import padvpx  # noqa: E402
 import vpxsetup  # noqa: E402
 
@@ -72,14 +74,18 @@ def dialog_text(hwnd):
     """The static texts of a dialog (its message)."""
     parts = []
 
+    WM_GETTEXTLENGTH, WM_GETTEXT = 0x000E, 0x000D
+
     def cb(h, _l):
-        cls = ctypes.create_unicode_buffer(64)
-        u32.GetClassNameW(h, cls, 64)
-        n = u32.GetWindowTextLengthW(h)
-        if cls.value in ("Static", "Edit", "RichEdit20W", "RichEdit20A") and n:
+        # WM_GETTEXT, not GetWindowText: an Edit box's text in another
+        # process (the error's own lines) comes only through the message
+        n = u32.SendMessageW(ctypes.c_void_p(h), WM_GETTEXTLENGTH, 0, 0)
+        if n:
             buf = ctypes.create_unicode_buffer(n + 1)
-            u32.GetWindowTextW(h, buf, n + 1)
-            parts.append(buf.value.strip())
+            u32.SendMessageW(ctypes.c_void_p(h), WM_GETTEXT, n + 1, buf)
+            text = " ".join(buf.value.split())
+            if text and text not in ("OK", "Cancel", "Continue", "Stop") and not text.startswith("Install a script debugger"):
+                parts.append(text)
         return True
     u32.EnumChildWindows(ctypes.c_void_p(hwnd), ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)(cb), 0)
     return " | ".join(p for p in parts if p)
@@ -107,9 +113,37 @@ def error_dialogs(pids):
     a MsgBox from the patch ("Can't start the game"), a VPX error."""
     out = []
     for h, title, cls, pid in windows():
-        if pid in pids and cls == "#32770":
+        # "Preparing Table" is the progress box every load shows, not an error
+        if pid in pids and cls == "#32770" and not title.startswith("Preparing Table"):
             out.append((title, dialog_text(h)))
     return out
+
+
+def kill_stale_controllers():
+    """PAD.Controller servers left from a killed Visual Pinball: a COM local
+    server outlives a client that never released it, keeps polling, attaches
+    to the NEXT run on the slot and hands it its old table's switches (the
+    first pass: Batman's trough switches went into Aerosmith's game)."""
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name = 'pythonw.exe' or Name = 'python.exe'\" "
+          "| Where-Object { $_.CommandLine -like '*localserver.py*' } | ForEach-Object { $_.ProcessId }")
+    try:
+        out = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=60).stdout
+    except Exception:                                       # noqa: BLE001
+        return 0
+    pids = [int(line) for line in out.split() if line.strip().isdigit()]
+    for pid in pids:
+        subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=30)
+    if pids:
+        print("   killed %d stale PAD.Controller server%s" % (len(pids), "" if len(pids) == 1 else "s"), flush=True)
+    return len(pids)
+
+
+def main_window(pids):
+    """Visual Pinball's editor window: closing it ends the player and quits."""
+    for h, title, cls, pid in windows():
+        if pid in pids and title.startswith("Visual Pinball - ["):
+            return h
+    return None
 
 
 def player_window(pids):
@@ -127,8 +161,19 @@ def press(key, hold=0.08):
 
 
 def focus(hwnd):
-    u32.SetForegroundWindow(ctypes.c_void_p(hwnd))
-    time.sleep(0.3)
+    """The player window to the foreground, and really there (Visual Pinball
+    reads the keys through DirectInput: a press lands only on the foreground
+    window). Windows refuses SetForegroundWindow to a process that did not
+    get the last input; a tap on Alt first is the classic way round it."""
+    for _ in range(6):
+        u32.SetForegroundWindow(ctypes.c_void_p(hwnd))
+        time.sleep(0.3)
+        if u32.GetForegroundWindow() == hwnd:
+            return True
+        u32.keybd_event(0x12, 0, 0, 0)                      # Alt down / up
+        u32.keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0)
+        time.sleep(0.2)
+    return u32.GetForegroundWindow() == hwnd
 
 
 def log_tail(path, start):
@@ -150,6 +195,55 @@ def log_size(path):
 def sol_pulses(text, number=1):
     """How many times solenoid `number` went on (the trough's up-kicker)."""
     return sum(1 for line in text.splitlines() if line.rstrip().endswith("sol %d -> 1" % number))
+
+
+def rig_script(slot, title, script, timeout):
+    """`script` in the slot's own WSL environment (the app's launch shape),
+    in the rig folder with rigjob.sh sourced and this title's switch list."""
+    launch = padlaunch.Launch(title, "")
+    launch.slot = slot
+    head, _root = launch.head()
+    env = launch.board_env() + ["PAD_SLOT=%d" % slot]
+    pre = ("cd %s && . ./rigjob.sh && LIST=$ROOT/dump/tables/%s/switch_list.txt && "
+           "JOB_OUT=/tmp/vpxplay.$$ && mkdir -p $JOB_OUT && JOB_T0=$(date +%%s) && " % (launch.rig_wsl, title))
+    try:
+        return subprocess.run(head + env + ["bash", "-c", pre + script], capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:                                # noqa: BLE001
+        print("   rig script failed: %s" % exc, flush=True)
+        return None
+
+
+def wait_attract(slot, title, wait_s):
+    """Until the game is in attract mode (the rig library's job_wait_attract:
+    the controller attaches at the shim's first frame, a minute before the
+    game has left Tech Alerts; a first boot's Guided Setup is walked on the
+    way). True when it is."""
+    out = rig_script(slot, title, "job_wait_attract %d && echo ATTRACT" % wait_s, wait_s + 90)
+    if out is None:
+        return False
+    for line in (out.stdout or "").splitlines():
+        if "attract at" in line or "Guided Setup" in line or "no attract" in line:
+            print("   rig: " + line.split("s ", 1)[-1].strip(), flush=True)
+    return "ATTRACT" in (out.stdout or "")
+
+
+def guided_setup_walk(slot, title):
+    """Stern's Guided Setup, on a title's first boot in this rig, swallows
+    coins and Start (the rig's NVRAM is per title). The rig library's
+    job_guided_setup walks it: service Plus down to Save & Exit, read off a
+    frame of the game's screen (menurow.py), then Select. True when it did."""
+    launch = padlaunch.Launch(title, "")
+    launch.slot = slot
+    head, _root = launch.head()
+    env = launch.board_env() + ["PAD_SLOT=%d" % slot]
+    script = ("cd %s && . ./rigjob.sh && LIST=$ROOT/dump/tables/%s/switch_list.txt && "
+              "job_guided_setup 2 && echo WALKED" % (launch.rig_wsl, title))
+    try:
+        out = subprocess.run(head + env + ["bash", "-c", script], capture_output=True, text=True, timeout=240)
+    except Exception as exc:                                # noqa: BLE001
+        print("   guided setup walk failed: %s" % exc, flush=True)
+        return False
+    return "WALKED" in (out.stdout or "")
 
 
 # ----------------------------------------------------------- this kit's COM --
@@ -213,6 +307,21 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
     rec = {"name": name, "title": title, "platform": platform, "errors": [], "balls": 0,
            "attached_s": None, "verdict": ""}
     log = padcontroller.LOG
+    kill_stale_controllers()
+    if platform == "spike1":
+        # one Spike 1 rig: a run of the kit's left from an earlier table (or a
+        # hand try from the tab) is stopped first, or the controller refuses
+        try:
+            other = padlaunch.Spike1Launch(title, "").other_run()
+        except Exception:                                   # noqa: BLE001
+            other = None
+        if other and other.get("game"):
+            print("   the Spike 1 rig is running %s: stopping it" % other["game"], flush=True)
+            try:
+                padvpx.stop(other["game"])
+            except Exception:                               # noqa: BLE001
+                pass
+            time.sleep(3)
     mark = log_size(log)
     t0 = time.monotonic()
     print("\n== %s (%s, %s)" % (name, title or "no title", platform), flush=True)
@@ -232,6 +341,9 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
             if "attached to " in tail:
                 attached = True
                 rec["attached_s"] = round(time.monotonic() - t0)
+                m = re.search(r"attached to rig board slot (\d+)", tail)
+                slot = int(m.group(1)) if m else None
+                mark += len(tail.encode("utf-8", "replace"))   # the balls are counted from here
                 break
             if "failed:" in tail and "Run(" in tail:
                 rec["errors"].append(tail[tail.index("Run("):].splitlines()[0])
@@ -249,13 +361,38 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
             if hwnd is None:
                 rec["errors"].append("no Visual Pinball Player window")
             else:
-                focus(hwnd)
-                press("5")
-                time.sleep(0.6)
-                press("5")
-                time.sleep(1.5)
-                press("1")
-                served = 0
+                def try_start(wait_s=25):
+                    """Coins and Start to the player; the trough's kicks within wait_s."""
+                    focus(hwnd)
+                    press("5")
+                    time.sleep(0.6)
+                    press("5")
+                    time.sleep(1.5)
+                    press("1", hold=0.25)
+                    end = time.monotonic() + wait_s
+                    while time.monotonic() < end:
+                        n = sol_pulses(log_tail(log, mark))
+                        if n or error_dialogs(pids):
+                            return n
+                        time.sleep(1)
+                    return 0
+                # the game to attract mode first (Tech Alerts, a first boot's
+                # Guided Setup), then coins and Start; a second try walks a
+                # Guided Setup that came up late
+                if slot is not None:
+                    if not wait_attract(slot, title, wait_attach):
+                        rec["errors"].append("the game did not reach attract mode within %d s" % wait_attach)
+                else:
+                    time.sleep(45)                           # Spike 1: no status word; its boot is shorter
+                served = 0 if rec["errors"] else try_start()
+                if not served and slot is not None and not rec["errors"] and not error_dialogs(pids):
+                    print("   no game at Start: looking for Guided Setup", flush=True)
+                    if guided_setup_walk(slot, title):
+                        rec.setdefault("notes", []).append("Guided Setup walked (the title's first boot here)")
+                        time.sleep(6)
+                    served = try_start()
+                if served:
+                    print("   ball %d served" % served, flush=True)
                 plunged = False
                 deadline = time.monotonic() + wait_ball * balls
                 while time.monotonic() < deadline:
@@ -268,9 +405,9 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
                     if n > served:
                         served = n
                         print("   ball %d served" % served, flush=True)
-                        if served >= balls:
-                            break
                         plunged = False
+                    if served >= balls:
+                        break
                     if served and not plunged:
                         time.sleep(3)
                         focus(hwnd)
@@ -281,19 +418,23 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
                 if served < balls and not rec["errors"]:
                     rec["errors"].append("%d of %d balls served within %d s" % (served, balls, wait_ball * balls))
     finally:
-        # the player window closed cleanly: the controller stops the run it started
-        hwnd = player_window(pids)
-        if hwnd is not None:
-            u32.PostMessageW(ctypes.c_void_p(hwnd), WM_CLOSE, 0, 0)
+        # Visual Pinball closed cleanly (its editor window: the player ends and
+        # the controller stops the run it started), else killed - then the
+        # controller server it leaves is killed too, before the next table
         for h, _t, cls, pid in windows():
             if pid in pids and cls == "#32770":
                 u32.PostMessageW(ctypes.c_void_p(h), WM_CLOSE, 0, 0)
+        hwnd = main_window(pids) or player_window(pids)
+        if hwnd is not None:
+            u32.PostMessageW(ctypes.c_void_p(hwnd), WM_CLOSE, 0, 0)
         end = time.monotonic() + 40
         while time.monotonic() < end and vpx_pids():
             time.sleep(1)
         if vpx_pids():
             subprocess.run(["taskkill", "/F", "/IM", "VPinballX64.exe"], capture_output=True, timeout=30)
-            rec["errors"].append("Visual Pinball had to be killed")
+            rec.setdefault("notes", []).append("Visual Pinball had to be killed")
+            time.sleep(2)
+            kill_stale_controllers()
         if title:
             try:
                 padvpx.stop(title)                       # whatever the run left
@@ -332,6 +473,7 @@ def main(argv):
     if vpx_pids():
         print("Visual Pinball is open: close it first (never run this while someone is playing)")
         return 2
+    kill_stale_controllers()
     print("%d tables in %s; Visual Pinball %s; %d balls each" % (len(names), tables_dir, vpx, balls), flush=True)
     if "--this-kit" in argv:
         register_this_kit()

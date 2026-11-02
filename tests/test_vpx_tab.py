@@ -349,6 +349,8 @@ def test_a_folder_of_downloads_is_patched_in_one_go(tab, monkeypatch, tmp_path):
         if args and args[0] == "state":
             return {"registered": True, "vpx": r"C:\VP", "tables_dir": r"C:\VP\tables", "library": "",
                     "cards": {}, "tables": [], "patched": [], "presets": [], "layout": ""}
+        if args and args[0] == "titles":                 # PAD-941: the authors' card asks after each job
+            return {"titles": []}
         seen.append(args)
         name = os.path.basename(args[1])
         if name == "Other.vpx":
@@ -363,3 +365,91 @@ def test_a_folder_of_downloads_is_patched_in_one_go(tab, monkeypatch, tmp_path):
     assert "2 of 3 tables patched" in last and "1 not one the app knows (Other.vpx)" in last
     assert "1 archive skipped" in last and "Bond.zip" in last
     assert not [ln for ln in tab.window.lines if ln[0] == "error"]
+
+
+# -- PAD-941: the card for table authors ---------------------------------------
+
+def test_the_author_titles_come_from_the_kit_and_a_card_title_is_picked_first(tab):
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["godzilla_le", "rush_le", "james_bond_le"]}
+    tab.window.ctx.store.set("vpx", cards={"rush_le": ["rush_le-1_19_0.Release.16G.sdcard.raw"]},
+                             tables=[{"title": "rush_le", "titles": ["rush_le"]}])
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("author_titles") == ["godzilla_le", "james_bond_le", "rush_le"]
+    assert ("vpxauthor.py", ["titles"]) in tab.calls
+    # the first table whose card is in the folder, not the alphabetical first
+    # (the kit's state call in this harness returns no cards, so the first)
+    assert tab.get("author_title") in ("rush_le", "godzilla_le")
+    assert tab.pick_author_title("james_bond_le") and tab.get("author_title") == "james_bond_le"
+    assert not tab.pick_author_title("nosuch") and tab.get("author_title") == "james_bond_le"
+
+
+def test_the_checklist_runs_the_kit_on_the_chosen_title_and_folder(tab, monkeypatch):
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["james_bond_le"]}
+    tab.on_show()
+    _wait(tab)
+    opened = []
+    monkeypatch.setattr(V.os, "startfile", lambda p: opened.append(p), raising=False)
+    tab.window.pick = r"D:\checklists"
+    tab.answers[("padvpx.py", "checklist")] = {
+        "result": "ok", "out": r"D:\checklists\james_bond_le - Visual Pinball table checklist.md",
+        "title": "james_bond_le", "switches": 63, "coils": 17, "inserts": 86, "ids": True}
+    assert tab.checklist(False)
+    _wait(tab)
+    script, args = [c for c in tab.calls if c[0] == "padvpx.py" and c[1][0] == "checklist"][-1]
+    assert args == ["checklist", "james_bond_le", "--out", r"D:\checklists"]
+    assert opened == [r"D:\checklists\james_bond_le - Visual Pinball table checklist.md"]
+    assert tab.get("author_note").startswith("james_bond_le: 63 switches, 17 coils, 86 inserts.")
+    assert tab.get("author_out") == opened[0]
+
+
+def test_checking_a_table_passes_it_and_says_what_it_lacks(tab, monkeypatch):
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["james_bond_le"]}
+    tab.on_show()
+    _wait(tab)
+    monkeypatch.setattr(V.os, "startfile", lambda p: None, raising=False)
+    tab.window.pick = r"D:\Downloads\bond.vpx"            # the table AND the folder in this harness
+    tab.answers[("padvpx.py", "checklist")] = {
+        "result": "ok", "out": r"D:\Downloads\bond.vpx\x.md", "title": "james_bond_le",
+        "switches": 63, "coils": 17, "inserts": 86, "ids": True, "table": "bond.vpx",
+        "missing_switches": 19, "missing_coils": 0, "missing_inserts": 0, "guesses": 10, "id_mismatch": 0}
+    assert tab.checklist(True)
+    _wait(tab)
+    script, args = [c for c in tab.calls if c[0] == "padvpx.py" and c[1][0] == "checklist"][-1]
+    assert args == ["checklist", "james_bond_le", "--table", r"D:\Downloads\bond.vpx", "--out", r"D:\Downloads\bond.vpx"]
+    note = tab.get("author_note")
+    assert "bond.vpx against the kit's map: 19 switches, 0 coils and 0 inserts the table leaves out, 10 marked GUESS" in note
+
+
+def test_a_title_with_no_tables_yet_is_a_warning_not_an_error(tab, monkeypatch):
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["venom_le"]}
+    tab.on_show()
+    _wait(tab)
+    tab.window.pick = r"D:\checklists"
+    tab.answers[("padvpx.py", "checklist")] = {
+        "error": "No device tables for venom_le on this PC yet: play it once (the Emulate tab, or its table) and try again."}
+    assert tab.checklist(False)
+    _wait(tab)
+    assert [lv for lv, t in tab.window.lines if "No device tables" in t] == ["warning"]
+    assert "No device tables" in tab.get("author_note")
+
+
+def test_the_words_name_a_starter_map_and_another_titles_table():
+    words = V.VpxTab._checklist_words({"title": "godzilla_le", "switches": 48, "coils": 14, "inserts": 89,
+                                       "ids": True, "table": "Nudge.vpx", "starter": "x.json", "out": "o.md"})
+    assert "The kit has no map for Nudge.vpx: a starter map is beside the checklist" in words
+    words = V.VpxTab._checklist_words({"title": "rush_le", "asked": "stranger_things_le", "table": "Rush.vpx",
+                                       "switches": 54, "coils": 17, "inserts": 72, "ids": True, "out": "o.md",
+                                       "missing_switches": 0, "missing_coils": 0, "missing_inserts": 0,
+                                       "guesses": 35, "id_mismatch": 3})
+    assert words.startswith("Rush.vpx is rush_le's table. rush_le: 54 switches")
+    assert "3 switches the map numbers otherwise than this PC's game" in words
+
+
+def test_nothing_runs_when_the_checklist_dialog_is_cancelled(tab):
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["rush_le"]}
+    tab.on_show()
+    _wait(tab)
+    tab.window.pick = ""
+    assert not tab.checklist(False) and not tab.checklist(True)
+    assert not [c for c in tab.calls if c[1] and c[1][0] == "checklist"]

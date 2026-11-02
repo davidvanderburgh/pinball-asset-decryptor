@@ -44,6 +44,15 @@ CARDS_TIP = ("The folder with your SD card images (the normal .raw files, named 
              "like rush_le-1_19_0.Release.16G.sdcard.raw). A title plays its "
              "newest build in this folder.")
 
+# PAD-941: the card for whoever builds or finishes a table
+AUTHORS_INTRO = ("Building a table of a Stern game, or finishing one? The game sees the table only "
+                 "through its own switches, coils and lights. The checklist lists every one the game "
+                 "has, with its number and what a table does for it; checked against a table it "
+                 "marks what that table still lacks.")
+AUTHORS_TITLES_TIP = ("The titles whose game has run on this PC: the checklist is read from the "
+                      "game's own tables, which the emulator writes on a title's first run. Play a "
+                      "title once (here, or on the Emulate tab) and it appears.")
+
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 _RUN_TIMEOUT_S = 120
 
@@ -89,7 +98,9 @@ class VpxTab(TabService):
                  progress=None, registered=False, vpx="", tables_dir="",
                  library="", cards={}, tables=[], patched=[], presets=[],
                  layout="", monitors=0, display=None, runtime_state="unknown",
-                 runtime_text="Checking…", message="", message_level="info")
+                 runtime_text="Checking…", message="", message_level="info",
+                 authors_intro=AUTHORS_INTRO, authors_titles_tip=AUTHORS_TITLES_TIP,
+                 author_titles=[], author_title="", author_note="", author_out="")
 
     # -- hooks ---------------------------------------------------------------
     def on_show(self):
@@ -173,7 +184,21 @@ class VpxTab(TabService):
                      message=st["error"], message_level="error")
             return
         st.pop("_text", None)
-        self.set(loaded=True, busy="", runtime_state=rt_state, runtime_text=rt_text, **st)
+        # PAD-941: the titles a checklist can be made for (their device tables
+        # are on this PC); a separate call, since finding them asks WSL, and
+        # the page stays "Checking" until it is in (a shot taken on `loaded`
+        # showed the card empty)
+        got = self._kit("vpxauthor.py", ["titles"])
+        titles = sorted(got.get("titles") or []) if "error" not in got else []
+        chosen = self.get("author_title") or ""
+        if chosen not in titles:
+            # the title of the first table whose card is here, else the first
+            cards = set(st.get("cards") or {})
+            chosen = next((t.get("title") for t in st.get("tables") or []
+                           if t.get("title") in titles and set(t.get("titles") or []) & cards), None) \
+                or (titles[0] if titles else "")
+        self.set(loaded=True, busy="", runtime_state=rt_state, runtime_text=rt_text,
+                 author_titles=titles, author_title=chosen, **st)
 
     # -- the page's buttons -------------------------------------------------
     @rpc
@@ -423,6 +448,76 @@ class VpxTab(TabService):
             else:
                 self._say("window layout: %s." % preset.get("words", key))
         return self._start("Saving the layout", work)
+
+    # -- for table authors (PAD-941) -----------------------------------------
+    @rpc
+    def pick_author_title(self, title):
+        if title in (self.get("author_titles") or []):
+            self.set(author_title=title)
+            return True
+        return False
+
+    @rpc
+    def checklist(self, with_table=False):
+        """Write the title's checklist (padvpx checklist, vpxauthor.py) into a
+        folder of the person's choosing and open it. With *with_table*, the
+        dialog first asks for the .vpx to check: the checklist then marks
+        every part of the machine that table leaves out, and a table the kit
+        has no map for gets a starter map beside it."""
+        title = self.get("author_title") or ""
+        if not title:
+            return False
+        table = ""
+        if with_table:
+            table = self.window.ask_open("vpx_table", "Choose the table to check against %s" % title,
+                                         [("Visual Pinball table", "*.vpx"), ("All files", "*.*")])
+            if not table:
+                return False
+            table = os.path.normpath(table)
+        folder = self.window.ask_folder("vpx_checklist", "Where to write the checklist",
+                                        initialdir=self.get("tables_dir") or None)
+        if not folder:
+            return False
+        folder = os.path.normpath(folder)
+
+        def work():
+            args = ["checklist", title] + (["--table", table] if table else []) + ["--out", folder]
+            got = self._kit("padvpx.py", args, timeout=300)
+            if "error" in got:
+                self.set(author_note=got["error"])
+                self._say(got["error"], "warning" if "No device tables" in got["error"] else "error")
+                return
+            words = self._checklist_words(got)
+            self.set(author_note=words, author_out=got.get("out") or "")
+            self._say(words)
+            if sys.platform == "win32" and got.get("out"):
+                try:
+                    os.startfile(got["out"])                # noqa: S606
+                except OSError:
+                    pass
+        return self._start("Writing the checklist", work)
+
+    @staticmethod
+    def _checklist_words(got):
+        """One sentence of what the checklist found, for the page and the log."""
+        t = got.get("title", "")
+        words = "%s: %d switches, %d coils, %d inserts" % (t, got.get("switches", 0),
+                                                           got.get("coils", 0), got.get("inserts", 0))
+        if got.get("asked") and got["asked"] != t:
+            words = "%s is %s's table. " % (got.get("table", "the table"), t) + words
+        if "missing_switches" in got:
+            words += (". %s against the kit's map: %d switches, %d coils and %d inserts the table "
+                      "leaves out, %d marked GUESS" % (got.get("table", "the table"), got["missing_switches"],
+                                                       got["missing_coils"], got["missing_inserts"],
+                                                       got.get("guesses", 0)))
+            if got.get("id_mismatch"):
+                words += ("; %d switches the map numbers otherwise than this PC's game (see the "
+                          "checklist)" % got["id_mismatch"])
+        elif got.get("starter"):
+            words += ". The kit has no map for %s: a starter map is beside the checklist" % got.get("table", "it")
+        if not got.get("ids", True):
+            words += ". No switch ids yet: play the title once and make it again"
+        return words + ". Written to %s." % (got.get("out") or "")
 
     @rpc
     def play(self, name):

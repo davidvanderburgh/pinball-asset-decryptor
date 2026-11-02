@@ -11,7 +11,10 @@
 // crammed the model and the card into one cell; Patch and Play each a column
 // of their own, Play greyed on a table not patched yet (David).
 
-import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, call, tip } from "../core/ui.js";
+// PAD-941: a card for whoever builds or finishes a table: a checklist of
+// every switch, coil and insert the game has, checked against a table.
+
+import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, Select, call, tip } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -77,6 +80,7 @@ export default function Vpx() {
   // where they were last left (the kit saves the playfield's place, the
   // renderer the game screen's in display.conf)
   const inUse = presets.find((p) => p.key === s.layout);
+  const authorTitles = s.author_titles || [];
   return html`<div class="page vpx-page">
     <${PageHead} title="Visual Pinball" sub=${(s.intro || "").split("\n").map((l) => html`${l}<br />`)}>
       <${Chip} kind="info" sm>Preview<//>
@@ -171,6 +175,23 @@ export default function Vpx() {
         ${missed(t) ? html`<div class="small vpx-stale">Your copy was patched before a fix: ${t.repatch.join("; ")}.
           Patch again to get it.</div>` : null}
       </div>`)}</div>` : html`<div class="muted small">${s.loaded ? "No tables." : "Checking…"}</div>`}
+    <//>
+    <${Card} cls="vpx-authors" head=${html`<span class="h2">For table authors</span>
+        <span class="small muted vpx-authors-sub">${s.authors_intro}</span>`}>
+      <div class="vpx-authors-row">
+        <span class="small">Game</span>
+        <${Select} sm width=${260} value=${s.author_title || ""} options=${authorTitles}
+          disabled=${busy || !s.ok || !authorTitles.length} title=${s.authors_titles_tip}
+          onChange=${(v) => call("vpx.pick_author_title", v)} />
+        <${Button} size="sm" icon="file" disabled=${busy || !s.ok || !s.author_title}
+          title="Write the game's checklist: every switch, coil and insert, its number and what a table does for it. Opens when written."
+          onClick=${() => call("vpx.checklist", false)}>Checklist…<//>
+        <${Button} size="sm" kind="ghost" icon="search" disabled=${busy || !s.ok || !s.author_title}
+          title="Choose a .vpx: the checklist marks every part of the game that table leaves out (against the app's map for it), or comes with a starter map when the app has none."
+          onClick=${() => call("vpx.checklist", true)}>Check a table…<//>
+        ${!authorTitles.length && s.loaded ? html`<span class="small muted">No game has run on this PC yet: play one once and it appears here.</span>` : null}
+      </div>
+      ${s.author_note ? html`<div class="small vpx-authors-note">${s.author_note}</div>` : null}
     <//>
   </div>`;
 }

@@ -637,3 +637,70 @@ patched for another model (PAD-900). Now:
 Repatching David's download (`originals\beatles\The Beatles_007.vpx`) into a
 scratch folder: `bsTrough.Balls = 4`, the record names the download, the mark
 clears, and `vpxfile.py verify` says OK.
+
+## What a table of a title needs: the author's checklist (PAD-941)
+
+David (2026-11-02): "helpful game by game, table by table help to authors of
+VPX tables on what is needed to complete integration, whether from scratch or
+from existing work they've done: a checklist of all the switches and mechs
+needed, and the lights that are missing from the integration."
+
+The game sees a table only through its own numbers, and every one of them is
+in the title's device tables the rig writes on its first run
+(`dump/tables/<title>/`: device_xy.txt and led_io.txt out of the binary,
+switch_list.txt out of the running game's heap, group_node.txt the coils'
+addresses). `vpxauthor.py` reads them and writes one Markdown checklist
+(`padvpx checklist <title> [--table x.vpx] [--out DIR]`; the tab's "For table
+authors" card runs it and opens the file):
+
+* every playfield switch with its id (the number the table sends + 1000),
+  its service-menu number, node/bit, kind (lane, target, drop, opto, spinner,
+  saucer, lock, magnet, mech end stop...) by its name, its place on the
+  game's drawing, and what a table does for one of its kind (the map key
+  and event); the flipper EOS marked as the board's; the cabinet switches
+  PADSPIKE2.vbs presses set apart; the game's own virtual ones listed;
+* every coil with node/index and the small solenoid number the map gives
+  it, its kind, and what fires it: the node boards from their own switch
+  (flippers, slings, pops: the table owes the switch, never the coil) or the
+  game, which the table acts on through `solenoids`;
+* every insert as one row per LED group (an RGB insert's three channels
+  together), with its lamp number (1000 + node*100 + first index), the
+  cabinet, speaker and topper LEDs set aside.
+
+Against a table (`--table`), `padvpx.fitting` finds the kit's map, and the
+same checklist carries a yes/NO column from what the map wires (every place a
+map names a part: `switches`, the rewrite tables, `switch_subs`, holds,
+fakes, trough, plunger, saucers, cabinet; `solenoids` with a callback or a
+flipper number, `game_on`, the trough's kick; `lamps`, `lamp_calls`,
+retrofit lights, GI and disc LEDs), with the gaps summed at the top of each
+section, the coils the map lists with no table action ("listed"), the map's
+GUESS marks collected, the table's own inventory (triggers, kickers,
+targets, bumpers, spinners, flippers, lights, and whether its brain is a ROM,
+a script or already PAD) and, when the map's switch names disagree with
+this PC's switch table at the same id, the list of them - Rush's first map
+was one off, and a stale switch_list.txt reads the same the other way. A
+table no map fits gets `<title>.starter.shadow.json` beside the checklist:
+every part of the machine in the shape vpxshadow.py reads, each under a
+`TODO_<NAME>` key to rename to the table's object, the trough, plunger,
+cabinet and flipper numbers filled in.
+
+Where the tables are: `table_dirs` tries PAD_TABLES, the rig board's run
+(padcontroller.Rig), the launch distro's rig (the app's data disk or its
+home) and each slot's root, then every other distro's default rig; each
+file is taken from the newest place that has it (`find_tables`). A build
+that ships no positions (rush_le 1.19 read by reader 1) lists its parts
+with none; one whose table names no coil or LED takes them from the map.
+
+Proven on this PC's real tables and David's downloads (2026-11-02): Bond's
+table against the LE map (63 switches, 19 the Pro table has no object for:
+the jetpack optos, rocket locks and targets, tank targets; 86 of 86 inserts
+shown; 10 GUESS marks); Rush (54 switches, 7 unwired: the drum clock and
+lift ramp homes, the topper's four buttons, RUS(H) target...; 24 of 94
+inserts no light shows); John Wick LE (10 switches the Pro-shaped table
+lacks); TMNT Pro (19 inserts no light shows: the flasher domes and pop
+lights); The Beatles (every switch, coil and insert wired); Godzilla LE
+against Visual Pinball's own Nudge table (no map: a 46-switch, 14-coil,
+90-insert starter map); and the stale Ubuntu-rig copy of rush_le's switch
+table, where the checklist names all 25 ids the map numbers otherwise.
+tests/test_vpx_author.py pins the readers, the coverage of every map shape,
+the gap rules and the starter's shape; tests/test_vpx_tab.py the card.

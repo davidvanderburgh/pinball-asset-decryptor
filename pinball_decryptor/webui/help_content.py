@@ -3552,6 +3552,24 @@ PREVIEW_HELP = {
                 "double-click to fill the screen and again to go back. The playfield keeps "
                 "the table's proportions.",
             ]),
+            ("For table authors",
+             "The game sees a table only through its own switches, coils and lights, so a "
+             "table of a Stern game is complete when every one of them has its object. "
+             "**Checklist...** writes a Markdown file for the game chosen: every playfield "
+             "switch (its id and number, what kind of part it is, where it sits on the "
+             "game's own drawing, and what a table does for one of its kind), every coil "
+             "(which ones the node boards fire themselves from their switch, which the game "
+             "fires and the table must act on) and every insert (its lamp number, RGB or not), "
+             "with the cabinet switches the kit already presses set apart.\n"
+             "- **Check a table...** asks for a .vpx and marks, against the app's map for it, "
+             "every part the table leaves out: switches with no object, coils nothing fires, "
+             "inserts no light shows, and the places the map marks GUESS. A table the app has "
+             "no map for gets a starter map beside the checklist, every part of the machine "
+             "listed under a TODO key to rename to the table's object.\n"
+             "- The games listed are the ones that have run on this PC: the checklist is read "
+             "from the game's own tables, which the emulator writes on a title's first run. "
+             "Play a game once and it appears.\n"
+             "- The file opens when written; it is plain Markdown, so it reads anywhere."),
             ("Playing",
              "| Key | Does |\n"
              "|---|---|\n"

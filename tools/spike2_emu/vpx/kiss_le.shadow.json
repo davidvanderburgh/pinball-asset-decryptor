@@ -422,6 +422,7 @@
   }
  },
  "pup_stub": true,
+ "ultradmd_stub": true,
  "neuter": [
   "BallRelease.CreateSizedBall",
   "BallRelease.Kick",

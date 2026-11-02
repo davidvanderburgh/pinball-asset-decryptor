@@ -197,6 +197,24 @@ def sol_pulses(text, number=1):
     return sum(1 for line in text.splitlines() if line.rstrip().endswith("sol %d -> 1" % number))
 
 
+def trough_solenoid(title):
+    """The small number the map gives the trough's kicker: 1 in the shadow
+    maps, whatever the older vpxmap shape names TROUGH (The Beatles: 10, its
+    Seawitch numbering), 1 when the map cannot be read."""
+    try:
+        info = padvpx.maps().get(title) or {}
+        m = json.load(open(info["map"], encoding="utf-8"))
+        for num, v in (m.get("solenoids") or {}).items():
+            if num.isdigit() and isinstance(v, dict) and "trough" in (v.get("name") or "").lower()                     and "kick" not in (v.get("name") or "").lower().replace("up-kicker", "trough"):
+                return int(num)
+        for num, v in (m.get("solenoids") or {}).items():
+            if num.isdigit() and isinstance(v, dict) and "trough" in (v.get("name") or "").lower():
+                return int(num)
+    except Exception:                                       # noqa: BLE001
+        pass
+    return 1
+
+
 def rig_script(slot, title, script, timeout):
     """`script` in the slot's own WSL environment (the app's launch shape),
     in the rig folder with rigjob.sh sourced and this title's switch list."""
@@ -306,6 +324,7 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
     platform = padvpx.platform_of(title) if title else "spike2"
     rec = {"name": name, "title": title, "platform": platform, "errors": [], "balls": 0,
            "attached_s": None, "verdict": ""}
+    trough = trough_solenoid(title) if title else 1
     log = padcontroller.LOG
     kill_stale_controllers()
     if platform == "spike1":
@@ -362,16 +381,29 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
                 rec["errors"].append("no Visual Pinball Player window")
             else:
                 def try_start(wait_s=25):
-                    """Coins and Start to the player; the trough's kicks within wait_s."""
+                    """Coins and Start to the player; the trough's kicks within
+                    wait_s, counted from the Start press: a kick before it is
+                    the game's own trough check at boot (John Wick's ball sat
+                    in the lane through attract and Start was ignored with a
+                    ball missing), so whatever is in the lane is plunged and
+                    given time to come home first."""
+                    nonlocal mark
                     focus(hwnd)
-                    press("5")
-                    time.sleep(0.6)
-                    press("5")
+                    press("enter", hold=1.0)
+                    time.sleep(20)
+                    focus(hwnd)
+                    # a Spike 1 game counted no credit for an 80 ms coin pulse
+                    # (Can Crusher: CREDITS 0 on the DMD after two): longer, and three
+                    coins = 3 if platform == "spike1" else 2
+                    for _ in range(coins):
+                        press("5", hold=0.3 if platform == "spike1" else 0.08)
+                        time.sleep(0.8)
                     time.sleep(1.5)
-                    press("1", hold=0.25)
+                    mark = log_size(log)
+                    press("1", hold=0.3)
                     end = time.monotonic() + wait_s
                     while time.monotonic() < end:
-                        n = sol_pulses(log_tail(log, mark))
+                        n = sol_pulses(log_tail(log, mark), trough)
                         if n or error_dialogs(pids):
                             return n
                         time.sleep(1)
@@ -383,7 +415,7 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
                     if not wait_attract(slot, title, wait_attach):
                         rec["errors"].append("the game did not reach attract mode within %d s" % wait_attach)
                 else:
-                    time.sleep(45)                           # Spike 1: no status word; its boot is shorter
+                    time.sleep(120)                          # Spike 1: no status word; attract ~110 s after the rig is up
                 served = 0 if rec["errors"] else try_start()
                 if not served and slot is not None and not rec["errors"] and not error_dialogs(pids):
                     print("   no game at Start: looking for Guided Setup", flush=True)
@@ -401,7 +433,7 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
                     if rec["errors"]:
                         break
                     tail = log_tail(log, mark)
-                    n = sol_pulses(tail)
+                    n = sol_pulses(tail, trough)
                     if n > served:
                         served = n
                         print("   ball %d served" % served, flush=True)
@@ -441,9 +473,14 @@ def play_one(vpx, tables_dir, name, balls, wait_attach, wait_ball):
             except Exception:                           # noqa: BLE001
                 pass
         time.sleep(4)
-    rec["verdict"] = "ok" if not rec["errors"] else "FAIL"
+    # ok: every asked ball; partial: a game played but a ball never came home
+    # within the wait (nothing plays the table); FAIL: an error, or no ball
+    if rec["errors"] and rec["balls"] and len(rec["errors"]) == 1 and "balls served within" in rec["errors"][0]:
+        rec.setdefault("notes", []).append(rec["errors"].pop())
+    rec["verdict"] = "FAIL" if rec["errors"] else "ok" if rec["balls"] >= balls else "partial"
     print("   %s%s" % (rec["verdict"], (": " + "; ".join(rec["errors"])) if rec["errors"] else
-                       " (%d balls)" % rec["balls"]), flush=True)
+                       " (%d ball%s%s)" % (rec["balls"], "" if rec["balls"] == 1 else "s",
+                                           "; " + "; ".join(rec.get("notes", [])) if rec.get("notes") else "")), flush=True)
     return rec
 
 
@@ -490,8 +527,10 @@ def main(argv):
     for r in results:
         print("%-62s %-18s %-7s %-6s %s" % (r["name"][:62], r["title"][:18], r["attached_s"] if r["attached_s"] is not None else "-",
                                            r["balls"], r["verdict"] + (": " + "; ".join(r["errors"]) if r["errors"] else "")))
-    bad = sum(1 for r in results if r["verdict"] != "ok")
-    print("\n%d of %d played %d ball%s; %d failed" % (len(results) - bad, len(results), balls, "" if balls == 1 else "s", bad))
+    bad = sum(1 for r in results if r["verdict"] == "FAIL")
+    part = sum(1 for r in results if r["verdict"] == "partial")
+    print("\n%d of %d played %d ball%s, %d one ball; %d failed" % (len(results) - bad - part, len(results), balls,
+                                                                  "" if balls == 1 else "s", part, bad))
     return bad
 
 

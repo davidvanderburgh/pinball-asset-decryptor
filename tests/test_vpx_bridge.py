@@ -3601,6 +3601,13 @@ def test_flexdmd_stands_in_as_a_null_object(tmp_path):
         'a.SetAlignedPosition 64, 16, 4',
         'FlexDMD.Show = True',
         'scene.GetLabel("a").Show 1',
+        'With FlexDMD',
+        '    .GameName = "got" : .Width = 128',
+        '    If x = 0 Then .Show = True Else .Show = False',
+        '    .Stage.AddActor scene',
+        '    .SetAlignedPosition ((1-1)*25)+14, 32, 7',
+        'End With',
+        'Do While FlexDMD.IsRendering : Loop',
         'x = a.Text',
     ]
     rep = []
@@ -3611,6 +3618,12 @@ def test_flexdmd_stands_in_as_a_null_object(tmp_path):
     assert "Public Function NewLabel(a0, a1, a2)" in cls and "Public Function NewFont(a0, a1, a2, a3)" in cls
     assert "Public Property Let Text(v)" in cls and "Public Property Let Show_set(v)" in cls
     assert "Public Function Show(a0)" in cls and "Public Function Stage()" in cls
+    assert "Public Property Let GameName(v)" in cls and "Public Property Let Width(v)" in cls   # the With block's
+    assert lines[16].strip() == "If x = 0 Then .Show_set = True Else .Show_set = False", lines[16]
+    assert lines[18].strip() == ".SetAlignedPosition ((1-1)*25)+14, 32, 7", lines[18]     # a bare call, untouched
+    assert "Public Function SetAlignedPosition(a0, a1, a2)" in cls
+    assert "Public Function IsRendering() : IsRendering = Empty" in cls          # a value read: False
+    assert "Public Function Stage() : Set Stage = New PadNoFlex" in cls          # chained: an object
     assert any("1 padded call" in r for r in rep), rep
     # the class and the script's uses run under VBScript itself
     if sys.platform != "win32" or not shutil.which("cscript"):
@@ -3620,3 +3633,16 @@ def test_flexdmd_stands_in_as_a_null_object(tmp_path):
     out = subprocess.run(["cscript", "//Nologo", str(vbs)], capture_output=True, text=True, timeout=30)
     assert out.stdout.strip() == "ok", out.stdout + out.stderr
 
+
+def test_ultradmd_stands_in_too():
+    """PAD-943: KISS stops on "ActiveX component can't create object:
+    'UltraDMD.DMDObject'": the same null object, its own class."""
+    sh = pytest.importorskip("vpxshadow")
+    lines = ['Set UltraDMD = CreateObject("UltraDMD.DMDObject")', 'UltraDMD.Init', 'UltraDMD.SetProjectFolder ".\\x"',
+             'Do While UltraDMD.IsRendering : Loop', 'UltraDMD.DisplayScene "a", "b", 0, 1, 2, 3, 4, 5, 6, 7']
+    rep = []
+    cls = sh.flexdmd_stub(lines, rep, "UltraDMD.DMDObject", "PadNoUltra", "UltraDMD")
+    assert "New PadNoUltra   \' PAD: UltraDMD stands in" in lines[0]
+    assert "Class PadNoUltra" in cls and "Public Function IsRendering() : IsRendering = Empty" in cls
+    assert "Public Function DisplayScene(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9)" in cls
+    assert sh.flexdmd_stub(["x = 1"], [], "UltraDMD.DMDObject", "PadNoUltra", "UltraDMD") == ""

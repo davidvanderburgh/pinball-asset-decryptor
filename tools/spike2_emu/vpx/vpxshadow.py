@@ -447,9 +447,12 @@ def _paren_span(text, start):
 
 
 FLEX_CLASS = "PadNoFlex"
+#: the DMD libraries a tribute may need, and the null object each becomes
+DMD_STUBS = {"flexdmd_stub": ("FlexDMD.FlexDMD", "PadNoFlex", "FlexDMD"),
+             "ultradmd_stub": ("UltraDMD.DMDObject", "PadNoUltra", "UltraDMD")}
 
 
-def flexdmd_stub(lines, rep):
+def flexdmd_stub(lines, rep, progid="FlexDMD.FlexDMD", cls=FLEX_CLASS, label="FlexDMD"):
     """FlexDMD (a DMD library, a separate install) is the whole display of a
     tribute like VPW's Game of Thrones: "No FlexDMD found. This table will
     not run without it." Behind a PAD table the machine's own display is
@@ -463,7 +466,7 @@ def flexdmd_stub(lines, rep):
     called with arguments (Show) has its assignments renamed to Show_set.
     Returns the class text, "" when the script makes no FlexDMD."""
     made = [i for i, ln in enumerate(lines)
-            if re.search(r'Set\s+(\w+)\s*=\s*CreateObject\("FlexDMD\.FlexDMD"\)', ln, re.I)
+            if re.search(r'Set\s+(\w+)\s*=\s*CreateObject\("%s"\)' % re.escape(progid), ln, re.I)
             and not ln.lstrip().startswith("'")]
     if not made:
         return ""
@@ -479,16 +482,38 @@ def flexdmd_stub(lines, rep):
                 objs.add(m.group(1).lower())
                 grew = True
     use = re.compile(r"\b(%s)\." % "|".join(sorted(re.escape(o) for o in objs)), re.I)
+    withobj = re.compile(r"(%s)(\.|\s*$)" % "|".join(sorted(re.escape(o) for o in objs)), re.I)
     member = re.compile(r"(\w+)")
     lets, calls, spelling = set(), {}, {}
+    objects = set()                 # members read as objects: chained, Set, or a statement
     sites = []                      # (line index, statement start, member, args, paren) for the padding
+    # `With FlexDMD` / `With scene.GetImage(x)`: the block's bare .Member lines
+    # are the object's (GOT sets GameName, Width, Run, Show that way)
+    with_stack = []
+    in_with = [False] * len(lines)
+    for i, ln in enumerate(lines):
+        code = _code(ln).strip()
+        mw = re.match(r"With\s+(\S.*)$", code, re.I)
+        if mw:
+            with_stack.append(bool(withobj.match(mw.group(1).strip())))
+        elif re.match(r"End\s+With\b", code, re.I):
+            if with_stack:
+                with_stack.pop()
+        elif with_stack and with_stack[-1]:
+            in_with[i] = True
+    bare = re.compile(r"(?:^|(?<=\bThen )|(?<=\bElse ))\s*\.(?=\w)", re.I)
     for i, ln in enumerate(lines):
         code = _code(ln)
         for a, b in _statements(code):
             seg = code[a:b]
-            for m in use.finditer(seg):
-                lead = seg[:m.start()].strip()
-                pos = m.end()
+            starts = [(m.start(), m.end()) for m in use.finditer(seg)]
+            if in_with[i]:
+                starts += [(m.start(), m.end()) for m in bare.finditer(seg)]
+            for st, pos in sorted(starts):
+                lead = seg[:st].strip()
+                if re.search(r"\b(Then|Else)$", lead, re.I):
+                    lead = ""
+                is_set = bool(re.match(r"Set\s", lead, re.I))
                 # the chain: obj.Member(args).Member.Member args
                 while True:
                     mm = member.match(seg, pos)
@@ -504,32 +529,52 @@ def flexdmd_stub(lines, rep):
                         if span is None:
                             calls.setdefault(name, set())
                             break
+                        tail = seg[span[1] + 1:].strip()
+                        # `.SetAlignedPosition ((i-1)*25)+14, 32, x`: a bare call whose
+                        # first argument merely starts with a parenthesis
+                        if not lead and tail and tail[0] not in ".:":
+                            n = _argcount(after.strip())
+                            calls.setdefault(name, set()).add(n)
+                            sites.append((i, a, name, n, False))
+                            objects.add(name)
+                            break
                         n = _argcount(seg[span[0] + 1:span[1]])
                         calls.setdefault(name, set()).add(n)
                         sites.append((i, a, name, n, True))
                         pos = span[1] + 1
                         if seg[pos:pos + 1] == ".":
+                            objects.add(name)
                             pos += 1
                             continue
+                        if is_set or not lead:
+                            objects.add(name)
                         break
                     if re.match(r"\s*=(?!=)", after) and not lead:
                         lets.add(name)
                     elif after.startswith("."):
                         calls.setdefault(name, set()).add(0)
+                        objects.add(name)
                         pos += 1
                         continue
                     elif not lead and after.strip() and not after.strip().startswith(("=", ")", ",", "&", "+", "-", "*", "/", "<", ">", ":")):
                         n = _argcount(after.strip())          # a bare call: obj.AddActor actor
                         calls.setdefault(name, set()).add(n)
                         sites.append((i, a, name, n, False))
+                        objects.add(name)
                     else:
                         calls.setdefault(name, set()).add(0)
+                        if is_set or not lead:
+                            objects.add(name)
                     break
     # a name assigned AND called with arguments: its assignments become name_set
     both = {n for n in lets if n in calls and calls[n] and max(calls[n]) > 0}
     for i, ln in enumerate(lines):
         for n in both:
-            ln = re.sub(r"\b(%s)\.(%s)(\s*=(?!=))" % ("|".join(sorted(objs)), re.escape(n)), lambda m: "%s.%s_set%s" % (m.group(1), spelling[n], m.group(3)), ln, flags=re.I)
+            ln = re.sub(r"\b(%s)\.(%s)(\s*=(?!=))" % ("|".join(sorted(objs)), re.escape(n)),
+                        lambda m: "%s.%s_set%s" % (m.group(1), spelling[n], m.group(3)), ln, flags=re.I)
+            if in_with[i]:
+                ln = re.sub(r"(^|\bThen |\bElse |:)(\s*)\.(%s)(\s*=(?!=))" % re.escape(n),
+                            lambda m: "%s%s.%s_set%s" % (m.group(1), m.group(2), spelling[n], m.group(4)), ln, flags=re.I)
         lines[i] = ln
     # the shorter calls padded to the stub's arity
     padded = 0
@@ -554,15 +599,22 @@ def flexdmd_stub(lines, rep):
                 rep.append("WARNING: %s call on line %d spans lines; not padded" % (name, i + 1))
                 continue
             seg = seg[:span[1]] + (fill if n else fill) + seg[span[1]:]
+            head = seg[:m.start()]
+            if not head.strip() or re.search(r"\b(Then|Else)\s*$", head, re.I) or head.strip() == ".":
+                # a statement: parentheses round more than one argument need Call
+                lead_ws = len(head) - len(head.lstrip())
+                seg = head[:lead_ws] + "Call " + seg[lead_ws:] if not head.strip() else \
+                    re.sub(r"(\b(?:Then|Else)\s*)$", r"\1Call ", head, flags=re.I) + seg[len(head):]
         else:
             seg = seg.rstrip() + fill
         lines[i] = code[:seg_span[0]] + seg + code[seg_span[1]:] + lines[i][len(code):]
         padded += 1
     for i in made:
         var = re.search(r'Set\s+(\w+)\s*=', lines[i], re.I).group(1)
-        lines[i] = re.sub(r'CreateObject\("FlexDMD\.FlexDMD"\)', "New %s   ' PAD: FlexDMD stands in (vpxshadow.py)" % FLEX_CLASS, lines[i], flags=re.I)
-        rep.append("FlexDMD replaced by %s (%s): the machine's display is the game's" % (FLEX_CLASS, var))
-    out = ["", "'---- PAD: FlexDMD's shape, a null object (the machine's own display is the game's)", "Class %s" % FLEX_CLASS]
+        lines[i] = re.sub(r'CreateObject\("%s"\)' % re.escape(progid),
+                          "New %s   ' PAD: %s stands in (vpxshadow.py)" % (cls, label), lines[i], flags=re.I)
+        rep.append("%s replaced by %s (%s): the machine's display is the game's" % (label, cls, var))
+    out = ["", "'---- PAD: %s's shape, a null object (the machine's own display is the game's)" % label, "Class %s" % cls]
     names = sorted(set(lets) | set(calls))
     for name in names:
         sp = spelling[name]
@@ -574,9 +626,13 @@ def flexdmd_stub(lines, rep):
             continue
         n = max(calls.get(name) or {0})
         args = ", ".join("a%d" % k for k in range(n))
-        out.append("\tPublic Function %s(%s) : Set %s = New %s : End Function" % (sp, args, sp, FLEX_CLASS))
+        if name in objects:
+            out.append("\tPublic Function %s(%s) : Set %s = New %s : End Function" % (sp, args, sp, cls))
+        else:
+            # read as a value (`Do While UltraDMD.IsRendering`): Empty, which is False and 0
+            out.append("\tPublic Function %s(%s) : %s = Empty : End Function" % (sp, args, sp))
     out += ["End Class", ""]
-    rep.append("%s: %d members (%d padded call%s)" % (FLEX_CLASS, len(names), padded, "" if padded == 1 else "s"))
+    rep.append("%s: %d members (%d padded call%s)" % (cls, len(names), padded, "" if padded == 1 else "s"))
     return "\n".join(out)
 
 
@@ -777,7 +833,12 @@ def gen(m, had, quiet=None, dof=None):
     for key, sw in keymap:
         out.append("\tIf KeyCode = %s Then Controller.Switch(%d) = True" % (key, sw))
     if cab.get("coin"):
-        out.append("\tIf KeyCode = AddCreditKey Then vpmTimer.PulseSw %d" % cab["coin"])
+        if m.get("platform") == "spike1":
+            # PulseSw is one timer tick, which the Spike 1 node bus's polls miss
+            # (Ghostbusters: CREDITS 0 after three); 600 ms counted on the rig
+            out.append("\tIf KeyCode = AddCreditKey Then vpmTimer.PulseSwitch %d, 600, 0" % cab["coin"])
+        else:
+            out.append("\tIf KeyCode = AddCreditKey Then vpmTimer.PulseSw %d" % cab["coin"])
     if skip:
         out.append("\tSelect Case KeyCode")
         out.append("\t\tCase %s" % ", ".join(skip))
@@ -1202,8 +1263,9 @@ def patch(script, m):
     route_b2s(lines, rep)
     own_lamp_reads(lines, rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
-    if m.get("flexdmd_stub"):
-        stub += flexdmd_stub(lines, rep)
+    for key, (progid, cls, label) in DMD_STUBS.items():
+        if m.get(key):
+            stub += flexdmd_stub(lines, rep, progid, cls, label)
     flex_optional(lines, rep)
     # what core.vbs's PinMAMETimer expects a VPM table to declare, at the TOP:
     # Iron Maiden loads core.vbs and controller.vbs itself near its start,

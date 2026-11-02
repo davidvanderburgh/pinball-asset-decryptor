@@ -239,8 +239,10 @@ def known_tables(tables_dir=None):
     for row in rows.values():
         title, _ = padvpx.choose(row.pop("fits"))
         marks = row.pop("marks")
-        # PAD-943: a Spike 1 title's card is its .iso, in the spike1 library
-        row.update(title=title, card=padlaunch.card_for(title, padvpx.platform_of(title)) or "",
+        # PAD-943: a Spike 1 title's card is its .iso, in the spike1 library;
+        # the row's platform is what the tab filters by on each manufacturer
+        row.update(title=title, platform=padvpx.platform_of(title),
+                   card=padlaunch.card_for(title, padvpx.platform_of(title)) or "",
                    patched_title=patched_title(tables_dir, row["output"]) if row["patched"] else "",
                    repatch=missed_fixes(tables_dir, row["output"], marks) if row["patched"] else [],
                    source=patched_from(tables_dir, row["output"]) if row["patched"] else "")

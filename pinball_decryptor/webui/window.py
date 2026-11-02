@@ -413,6 +413,9 @@ class WebWindow:
     _tab_visible = tab_visible
 
     def _gate(self, mfr):
+        # every tab that runs a game: the Visual Pinball tab follows them
+        VPX_EMULATORS = ("emulate", "emulate_spike1", "emulate_jjp", "emulate_ap",
+                         "emulate_bof", "emulate_dp", "emulate_spooky", "emulate_pb")
         caps = mfr.capabilities
         g = lambda name: bool(getattr(caps, name, False))   # noqa: E731
         gates = {
@@ -445,8 +448,9 @@ class WebWindow:
             "Modes": self.modes_preview_on(mfr),
             # PAD-782: the attract mode editor rides the mode runtime (Stern Spike 2)
             "Attract": g("modes"),
-            # PAD-802: Visual Pinball on the Spike 2 emulator, a preview
-            "Visual Pinball": g("emulate") and self.vpx_preview_on(),
+            # PAD-802: Visual Pinball on the Spike 2 emulator, a preview;
+            # PAD-943 (David): on every manufacturer the app emulates
+            "Visual Pinball": any(g(c) for c in VPX_EMULATORS) and self.vpx_preview_on(),
         }
         return gates
 

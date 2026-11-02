@@ -48,16 +48,22 @@ def main():
             page.add_init_script("try { localStorage.setItem('pad.log.open', '0'); } catch (e) {}")
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
-            webui_shot.api(url, "ui.pick_manufacturer", "stern")
+            # --mfr <key> [--era <era>]: the tab on another manufacturer (PAD-943);
+            # the shot is <pre>vpx_<key>[_<era>].png, with the rail in it
+            mfr = sys.argv[sys.argv.index("--mfr") + 1] if "--mfr" in sys.argv else "stern"
+            era = sys.argv[sys.argv.index("--era") + 1] if "--era" in sys.argv else ("spike2" if mfr == "stern" else "")
+            webui_shot.api(url, "ui.pick_manufacturer", mfr)
             time.sleep(1)
-            if webui_shot.state(url)["shell"]["mfr"].get("era") != "spike2":
-                webui_shot.api(url, "ui.set_era", "spike2")
+            if era and webui_shot.state(url)["shell"]["mfr"].get("era") != era:
+                webui_shot.api(url, "ui.set_era", era)
                 time.sleep(1)
             webui_shot.api(url, "ui.select_tab", "vpx")
+            suffix = "" if "--mfr" not in sys.argv else "_" + mfr + ("_" + era if era and mfr == "stern" else "")
             deadline = time.time() + 120
             while time.time() < deadline:
                 st = webui_shot.state(url).get("vpx") or {}
-                if st.get("loaded") and not st.get("busy"):
+                # the fresh state, not the last sitting's cache (stale)
+                if st.get("loaded") and not st.get("busy") and not st.get("stale"):
                     break
                 time.sleep(1)
             st = webui_shot.state(url).get("vpx") or {}
@@ -66,7 +72,11 @@ def main():
                 len(st.get("tables") or []), len(cat.get("platforms") or {}), len(cat.get("tables") or [])),
                 flush=True)
             time.sleep(1.5)
-            if "--setup" in sys.argv:
+            if suffix:
+                page.set_viewport_size({"width": WIDTH, "height": 1300})
+                time.sleep(0.5)
+                page.screenshot(path=os.path.join(out_dir, pre + "vpx" + suffix + ".png"))
+            elif "--setup" in sys.argv:
                 # the set-up rows at the page's top (the controller's row says
                 # whose registration it is), in a short window
                 page.set_viewport_size({"width": WIDTH, "height": 700})

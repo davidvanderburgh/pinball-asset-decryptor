@@ -115,6 +115,10 @@ def test_the_tab_shows_only_with_a_code_on_windows(monkeypatch):
     assert win._gate(mfr)["Visual Pinball"] is False
     monkeypatch.setattr(preview, "_active", frozenset({"vpx"}))
     assert win._gate(mfr)["Visual Pinball"] is True
+    # PAD-943 (David): on every manufacturer the app emulates
+    for cap in ("emulate_spike1", "emulate_jjp", "emulate_ap", "emulate_bof", "emulate_dp", "emulate_spooky", "emulate_pb"):
+        other = types.SimpleNamespace(capabilities=types.SimpleNamespace(**{cap: True}))
+        assert win._gate(other)["Visual Pinball"] is True, cap
     # not for a manufacturer the Spike 2 emulator does not run
     assert win._gate(types.SimpleNamespace(capabilities=types.SimpleNamespace()))["Visual Pinball"] is False
     # Visual Pinball and the controller are Windows only
@@ -952,3 +956,47 @@ def test_the_coverage_column_is_kept_between_sittings(tab, monkeypatch, tmp_path
     assert reads() == 5 and t5.get("coverage") == {"rush_le": {"pct": 1}}
     assert json.load(open(tmp_path / "vpx_coverage.json", encoding="utf-8"))["coverage"] == {"rush_le": {"pct": 90}}
 
+
+# ---- PAD-943: the tab on every manufacturer the app emulates ---------------
+def test_the_tab_follows_the_manufacturer_and_its_era(tab):
+    """David: "add the Visual Pinball tab to the other manufacturers we are
+    adding support for". The tab's platform is the machine's (Stern's eras
+    are platforms of their own); the authors' card's game is one of that
+    platform's; a platform with no bridge yet says so (bridged False)."""
+    tab.set(author_titles=["got_le", "rush_le"], author_platforms={"got_le": "spike1"}, author_title="rush_le")
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike2"))
+    assert tab.get("platform") == "spike2" and tab.get("bridged") is True and tab.get("author_title") == "rush_le"
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike1"))
+    assert tab.get("platform") == "spike1" and tab.get("bridged") is True and tab.get("author_title") == "got_le"
+    tab.on_manufacturer(types.SimpleNamespace(key="jjp"))
+    assert tab.get("platform") == "jjp" and tab.get("bridged") is False and tab.get("author_title") == ""
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="sam"))
+    assert tab.get("platform") == "" and tab.get("bridged") is True
+    # the titles' platforms come with the titles, and the pick follows them
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["got_le", "rush_le"], "platforms": {"got_le": "spike1"}}
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike1"))
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("author_platforms") == {"got_le": "spike1"} and tab.get("author_title") == "got_le"
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike2"))
+    assert tab.get("author_title") == "rush_le"
+
+
+def test_restart_wsl_asks_first_then_shuts_wsl_down(tab, monkeypatch):
+    # PAD-943 (David): the Emulate tabs' Restart WSL… on this tab too - the cure
+    # for the game's screen gone blank on the desktop (WSLg's frame share dead)
+    answers = [False, True]
+    monkeypatch.setattr(V.compat.messagebox, "askyesno", lambda *a, **k: answers.pop(0))
+    runs = []
+    monkeypatch.setattr(V.subprocess, "run", lambda cmd, **k: runs.append(list(cmd))
+                        or types.SimpleNamespace(returncode=0, stdout=b"", stderr=b""))
+    assert tab.restart_wsl() is False and runs == []                             # No: nothing
+    assert tab.restart_wsl() is True
+    _wait(tab)
+    assert runs == [["wsl.exe", "--shutdown"]]
+    assert "starts again by itself" in tab.get("message") and tab.get("message_level") == "info"
+    monkeypatch.setattr(V.subprocess, "run", lambda cmd, **k: types.SimpleNamespace(returncode=1, stdout=b"boom", stderr=b""))
+    answers.append(True)
+    assert tab.restart_wsl() is True
+    _wait(tab)
+    assert tab.get("message_level") == "error" and "boom" in tab.get("message")

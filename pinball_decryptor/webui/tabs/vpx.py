@@ -37,14 +37,33 @@ import sys
 import threading
 import time
 
-from .. import emulate_core
+from .. import compat, emulate_core
 from .base import TabService, rpc
 
 PREVIEW_FEATURE = "vpx"
 
-INTRO = ("Play a Visual Pinball table with the real Stern game behind it: the "
+INTRO = ("Play a Visual Pinball table with the real game behind it: the "
          "game from your own card image serves the balls, fires the coils, lights "
          "the table, keeps score and shows its own screen.")
+
+#: PAD-943 (David: "add the Visual Pinball tab to the other manufacturers
+#: we are adding support for"): the tab is on every manufacturer the app
+#: emulates and shows that machine's tables. Stern's eras are platforms of
+#: their own; every other manufacturer's key is its platform in the kit's
+#: catalogue (catalog.json). The platforms the app's emulator plays a table
+#: on (a map and a bridge) are BRIDGED; the rest list their tables and say
+#: they play as their authors wrote them.
+BRIDGED = ("spike2", "spike1")
+STERN_ERAS = ("spike2", "spike1")
+
+
+def platform_of_manufacturer(mfr):
+    key = getattr(mfr, "key", "") or ""
+    if key == "stern":
+        era = getattr(mfr, "current_era", "") or "spike2"
+        return era if era in STERN_ERAS else ""
+    return key
+
 
 #: PAD-943: the other platforms' tables, where their authors put them
 CATALOG_TIP = ("Every modern platform the app reads, and the Visual Pinball tables of its games: "
@@ -148,7 +167,8 @@ class VpxTab(TabService):
                  layout="", monitors=0, display=None, runtime_state="unknown",
                  runtime_text="Checking…", message="", message_level="info",
                  authors_intro=AUTHORS_INTRO, authors_titles_tip=AUTHORS_TITLES_TIP,
-                 author_titles=[], author_title="", author_note="", coverage={}, sheet=None,
+                 author_titles=[], author_platforms={}, author_title="", author_note="", coverage={},
+                 sheet=None, platform="", bridged=True,
                  catalog_tip=CATALOG_TIP, catalog={"platforms": {}, "tables": []},
                  pictures={}, pictures_busy="", pictures_tip=PICTURES_TIP,
                  # PAD-943: the page is up the moment the kit's state is in (or
@@ -162,6 +182,30 @@ class VpxTab(TabService):
         self._folder_sig = None
 
     # -- hooks ---------------------------------------------------------------
+    def on_manufacturer(self, mfr):
+        """The machine this tab is for (PAD-943): its platform's tables,
+        catalogue block and author titles; the rest of the kit's state is
+        the same on every manufacturer."""
+        platform = platform_of_manufacturer(mfr)
+        self.set(platform=platform, bridged=not platform or platform in BRIDGED)
+        self._pick_author_title()
+
+    def _pick_author_title(self):
+        """The authors' card's game: one of this platform's, the current pick
+        when it is one, else the title of the first table whose card is
+        here, else the first."""
+        platform = self.get("platform") or ""
+        plats = self.get("author_platforms") or {}
+        titles = [t for t in self.get("author_titles") or []
+                  if not platform or plats.get(t, "spike2") == platform]
+        chosen = self.get("author_title") or ""
+        if chosen not in titles:
+            cards = set(self.get("cards") or {})
+            chosen = next((t.get("title") for t in self.get("tables") or []
+                           if t.get("title") in titles and set(t.get("titles") or []) & cards), None) \
+                or (titles[0] if titles else "")
+        self.set(author_title=chosen)
+
     def on_show(self):
         if self.get("ok") and not self._busy:
             self._check()
@@ -403,15 +447,10 @@ class VpxTab(TabService):
             got = self._kit("vpxauthor.py", ["titles"])
             titles_ok = "error" not in got
             titles = sorted(got.get("titles") or []) if titles_ok else []
-            chosen = self.get("author_title") or ""
-            if chosen not in titles:
-                # the title of the first table whose card is here, else the first
-                cards = set(st.get("cards") or {})
-                chosen = next((t.get("title") for t in st.get("tables") or []
-                               if t.get("title") in titles and set(t.get("titles") or []) & cards), None) \
-                    or (titles[0] if titles else "")
             if mine():
-                self.set(author_titles=titles, author_title=chosen, authors_busy=False)
+                self.set(author_titles=titles, author_platforms=got.get("platforms") or {} if titles_ok else {},
+                         authors_busy=False)
+                self._pick_author_title()
             # PAD-943: the downloads not read yet (which map fits, which
             # catalogue table the name is), ~0.3 s a file, once per file
             if any(not d.get("read") for d in st.get("downloads") or []):
@@ -550,6 +589,40 @@ class VpxTab(TabService):
     def refresh(self):
         self._want_coverage = True
         return self._check()
+
+    @rpc
+    def restart_wsl(self):
+        """"Restart WSL…" (PAD-943, David: the Emulate tabs have it, so this
+        tab too). The cure for the game's screen gone blank on the desktop
+        (WSLg's window with no picture while the game draws behind it - its
+        frame share to Windows dead), a window that will not close, or
+        crackly sound. `wsl --shutdown` closes EVERYTHING in WSL: every game
+        on every tab, and it starts again by itself on the next use."""
+        if sys.platform != "win32" or self._busy:
+            return False
+        if not compat.messagebox.askyesno(
+                "Restart WSL",
+                "Restart WSL?\n\n"
+                "This is the cure for what the emulator cannot fix itself:\n\n"
+                "  \u2022 the game's screen gone blank on the desktop (on the taskbar, "
+                "but nothing in its window) while the table still plays\n"
+                "  \u2022 a game window left on screen that will not close\n"
+                "  \u2022 crackly or stuttery sound after a long session\n\n"
+                "This closes EVERYTHING running in WSL - every game on every "
+                "tab, not only this table's. Nothing on disk is lost, and WSL "
+                "starts again by itself the next time it is used.\n\n"
+                "Restart WSL now?"):
+            return False
+
+        def work():
+            out = subprocess.run(["wsl.exe", "--shutdown"], capture_output=True,
+                                 timeout=_RUN_TIMEOUT_S, creationflags=_CREATE_NO_WINDOW)
+            if out.returncode:
+                raise RuntimeError("wsl --shutdown returned %d: %s"
+                                   % (out.returncode, (out.stdout or out.stderr or b"").decode("utf-8", "replace").strip()))
+            self._say("WSL is down; it starts again by itself the next time a table opens. "
+                      "Open the table again when ready.")
+        return self._start("Restarting WSL", work)
 
     @rpc
     def install_runtime(self):

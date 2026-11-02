@@ -119,7 +119,16 @@ export default function Vpx() {
   const s = useNs("vpx");
   const [details, setDetails] = useState(false);
   const busy = !!s.busy;
-  const tables = s.tables || [];
+  // PAD-943: the tab is on every manufacturer the app emulates and shows that
+  // machine's own (Stern's eras are platforms of their own); a row or title
+  // that names no platform is Spike 2's. On a platform the app has no bridge
+  // for yet, the tables play as their authors wrote them: no Patch, no cards.
+  const platform = s.platform || "";
+  const plats = (s.catalog || {}).platforms || {};
+  const platName = (plats[platform] || {}).name || (platform === "spike2" ? "Stern Spike 2" : platform);
+  const bridged = s.bridged !== false;
+  const mine = (p) => !platform || (p || "spike2") === platform;
+  const tables = (s.tables || []).filter((t) => mine(t.platform));
   const patched = s.patched || [];
   const presets = s.presets || [];
   const titles = Object.keys(s.cards || {});
@@ -140,14 +149,15 @@ export default function Vpx() {
     && fits(t).includes(t.patched_title) && (t.models || {})[t.patched_title] && t.models[t.title];
   // PAD-850: ONE list, alphabetical - the tables the app knows, a patched one
   // with its Play button, and any other (PAD) table in the folder as its own row
-  const known = new Set(tables.map((t) => t.output));
+  // (every platform's: another machine's (PAD) copy is not a row of its own here)
+  const known = new Set((s.tables || []).map((t) => t.output));
   // PAD-943: the person's own downloads in the folder: the one a known table's
   // map fits is that table's row (Patch takes it); the rest are rows of their
   // own, "no map yet", named after the catalogue's table where the name matches
   const linked = new Set(tables.map((t) => t.download).filter(Boolean));
   // its row carries the author's description from the catalogue (name, by, where
   // from, platform, card) when the file's name says which table it is
-  const downloads = (s.downloads || []).filter((d) => !linked.has(d.path)).map((d) => {
+  const downloads = (s.downloads || []).filter((d) => !linked.has(d.path) && mine((d.catalog || {}).platform)).map((d) => {
     const c = d.catalog || {};
     return { name: c.name || d.name, by: c.by || "", where: c.where || "", output: d.file, patched: false,
       extra: true, download: d, model: (c.platform_name || "").replace(/^Stern /, ""), card: d.card || "" };
@@ -156,14 +166,17 @@ export default function Vpx() {
     name: n.replace(/ \(PAD\)\.vpx$/i, ""), output: n, patched: true, extra: true })), downloads)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   const rtOk = s.runtime_state === "ready";
+  // the other platforms' tables are on their own manufacturer's tab now
+  const others = platform ? Object.keys(plats).filter((k) => k !== platform
+    && ((s.catalog || {}).tables || []).some((t) => t.platform === k && t.url)).map((k) => plats[k].name) : [];
   // PAD-840: installed from here; the Emulate tab only offers it in some cases
   const rtFix = s.runtime_state === "absent" || s.runtime_state === "stale";
   const vpxOk = !!s.vpx && !s.vpx_old;
   // set up once, then only looked at: its rows (and their buttons) show under
   // Details, or by themselves while any of it is not ready
   const setup = [["The emulator's Linux", rtOk],
-    ["Visual Pinball" + (s.vpx_version ? " " + s.vpx_version : ""), vpxOk],
-    ["Controller", !!s.registered && s.registered_here !== false], ["Card images", have.length > 0]];
+    ["Visual Pinball" + (s.vpx_version ? " " + s.vpx_version : ""), vpxOk]].concat(bridged
+    ? [["Controller", !!s.registered && s.registered_here !== false], ["Card images", have.length > 0]] : []);
   const allOk = !!s.loaded && setup.every(([, ok]) => ok);
   const open = details || (!!s.loaded && !allOk);
   // PAD-939: a copy patched before a fix its map names (The Beatles' trough)
@@ -225,8 +238,13 @@ export default function Vpx() {
     <${PageHead} title="Visual Pinball" sub=${(s.intro || "").split("\n").map((l) => html`${l}<br />`)}>
       <${Chip} kind="info" sm>Preview<//>
       <${Button} kind="ghost" icon="refresh" disabled=${busy || !s.ok} onClick=${() => call("vpx.refresh")}>Check again<//>
+      <${Button} kind="ghost" disabled=${busy || !s.ok} ...${tip({ head: "Restart WSL.", lines: [
+        "The cure for the game's screen gone blank on the desktop while the table still plays, a game window that will not close, or crackly sound.",
+        "It closes everything running in WSL: every game on every tab. WSL starts again by itself on the next use."] })}
+        onClick=${() => call("vpx.restart_wsl")}>Restart WSL…<//>
     <//>
     ${s.note ? html`<${Note} kind="warn">${s.note}<//>` : null}
+    ${platform && !bridged ? html`<${Note} kind="info">${platName} tables play as their authors wrote them: the app has no link from a table to its ${platName} emulator yet${(plats[platform] || {}).runs ? " (" + plats[platform].runs + ")" : ""}. The list below is where to get them.<//>` : null}
     ${busy || s.message ? html`<div class="vpx-status">
       ${busy ? html`<${Spinner} /><span>${s.busy}…</span>`
         : s.message_level === "error" ? html`<${Note} kind="warn">${s.message}<//>`
@@ -269,7 +287,7 @@ export default function Vpx() {
         ${vpxOk ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"
           onClick=${() => call("vpx.download_vpx")}>Download 10.8.0<//>`}
       <//>
-      <${Row} ok=${!!s.registered && s.registered_here !== false} label="The game's link to Visual Pinball (PAD.Controller)"
+      ${bridged ? html`<${Row} ok=${!!s.registered && s.registered_here !== false} label="The game's link to Visual Pinball (PAD.Controller)"
         value=${!s.registered ? "Not registered."
           : s.registered_here === false ? html`Registered to another copy of the app: <span class="mono">${s.registered_to}</span>.
             Every table calls that one, so what is new here (a Spike 1 game, say) is not in play until this copy is registered.`
@@ -280,9 +298,9 @@ export default function Vpx() {
         value=${html`<span class="mono">${s.library || "No folder chosen."}</span>${cardWords ? html`<br />${cardWords}` : null}`}>
         <${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
           onClick=${() => call("vpx.choose_library")}>Choose folder…<//>
-      <//>` : null}
+      <//>` : null}` : null}
     <//>
-    <${Card} cls="vpx-authors" head=${html`<span class="h2">For table authors</span>
+    ${bridged ? html`<${Card} cls="vpx-authors" head=${html`<span class="h2">For table authors</span>
         <span class="small muted vpx-authors-sub">${s.authors_intro}</span>`}>
       <div class="vpx-authors-row">
         <span class="small">Game</span>
@@ -299,16 +317,16 @@ export default function Vpx() {
         ${!authorTitles.length && s.loaded && !s.authors_busy ? html`<span class="small muted">No game has run on this PC yet: play one once and it appears here.</span>` : null}
       </div>
       ${s.author_note ? html`<div class="small vpx-authors-note">${s.author_note}</div>` : null}
-    <//>
+    <//>` : null}
     <${Card} cls="vpx-tables" head=${html`<span class="h2" ...${tip(s.tables_tip)}>Tables</span>
         <span class="mono small muted vpx-dir" ...${tip("Your tables folder: where Patch writes the (PAD) copies and Play looks for them.")}>${s.tables_dir || "No tables folder set"}</span>
         ${s.pictures_busy ? html`<span class="small muted vpx-pics-busy"><${Spinner} /> ${s.pictures_busy}…</span>` : null}
         <span class="sp"></span>
         <${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
           onClick=${() => call("vpx.choose_tables")}>Choose folder…<//>
-        <${Button} drop size="sm" kind="ghost" icon="upload" disabled=${busy || !s.ok}
+        ${bridged ? html`<${Button} drop size="sm" kind="ghost" icon="upload" disabled=${busy || !s.ok}
           title="Patch every table in a folder of downloads at once: the ones the app knows get their (PAD) copy, the rest are counted."
-          onClick=${() => call("vpx.patch_folder")}>Patch a folder…<//>`}>
+          onClick=${() => call("vpx.patch_folder")}>Patch a folder…<//>` : null}`}>
       ${rows.length ? html`<div class="vpx-list">
         <div class="vpx-table vpx-head small muted">
           <span class="vpx-pic" ...${tip(s.pictures_tip)}></span>
@@ -342,9 +360,10 @@ export default function Vpx() {
           Patch again to play it as the ${t.models[t.title]}.</div>` : null}
         ${missed(t) ? html`<div class="small vpx-stale">Your copy was patched before a fix: ${t.repatch.join("; ")}.
           Patch again to get it.</div>` : null}
-      </div>`)}</div>` : s.loaded ? html`<div class="muted small">No tables.</div>` : html`<${Skeleton} />`}
+      </div>`)}</div>` : s.loaded ? html`<div class="muted small">No tables${platform ? " for a " + platName + " machine in your folder yet" : ""}.</div>` : html`<${Skeleton} />`}
+      ${others.length ? html`<div class="small muted vpx-others">Tables of other machines are on their own manufacturer's Visual Pinball tab: ${others.join(", ")}.</div>` : null}
     <//>
-    <${Catalog} s=${s} />
+    <${Catalog} s=${s} platform=${platform} platName=${platName} />
   </div>`;
 }
 
@@ -368,16 +387,17 @@ function Skeleton() {
 // (a link to where its author put it), who made it, and whether it is the
 // machine's own layout or a themed original.
 const KIND_WORDS = { tribute: "scripted", mashup: "older ROM", "": "none" };
-function Catalog({ s }) {
+function Catalog({ s, platform, platName }) {
   const cat = s.catalog || {};
   const plats = cat.platforms || {};
   // a table that is in the person's folder is on the Tables list above, not here
   const have = new Set((s.downloads || []).map((d) => d.catalog && d.catalog.name).filter(Boolean));
   const tables = (cat.tables || []).filter((t) => !t.url || !have.has(t.name));
-  const order = Object.keys(plats).filter((k) => k !== "spike2" && tables.some((t) => t.platform === k));
+  // this manufacturer's block (every other machine's when the tab has no manufacturer)
+  const order = Object.keys(plats).filter((k) => (platform ? k === platform : k !== "spike2") && tables.some((t) => t.platform === k));
   if (!order.length) return null;
-  return html`<${Card} cls="vpx-cat" head=${html`<span class="h2" ...${tip(s.catalog_tip)}>Tables of other machines</span>
-      <span class="small muted vpx-cat-sub">The app ships none of them: each is its author's download, and it plays as its author wrote it until the app has a map for it (Stern SAM games are Visual PinMAME's already, so they are not here).</span>`}>
+  return html`<${Card} cls="vpx-cat" head=${html`<span class="h2" ...${tip(s.catalog_tip)}>${platform ? "More " + platName + " tables" : "Tables of other machines"}</span>
+      <span class="small muted vpx-cat-sub">The app ships none of them: each is its author's download, and it plays as its author wrote it until the app has a map for it${platform ? "" : " (Stern SAM games are Visual PinMAME's already, so they are not here)"}.</span>`}>
     ${order.map((k) => html`<div class="vpx-cat-plat">
       <div class="vpx-cat-head"><b>${plats[k].name}</b> <span class="small muted">${plats[k].runs}</span>
         ${plats[k].needs ? html`<${Chip} kind="warn" dot sm ...${tip(plats[k].needs)}>needs the machine's security key<//>` : null}</div>

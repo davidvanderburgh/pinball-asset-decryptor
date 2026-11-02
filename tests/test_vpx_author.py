@@ -374,6 +374,7 @@ def test_spike1_titles_and_sources_come_from_the_work_dirs_cache(A, tmp_path, mo
     assert src["switchmap"].endswith(os.path.join("switchmaps", "GOT_LE.json"))   # the rig's curated map
     assert A.spike1_sources("kiss_le") == {}
     assert "got_le" in A.titles_with_tables()
+    assert A.title_platforms(["got_le", "rush_le"]) == {"got_le": "spike1"}       # PAD-943: the tab's filter
 
 
 def test_spike1_machine_is_the_elfs_parts_in_the_rigs_numbering(A, tmp_path, monkeypatch):

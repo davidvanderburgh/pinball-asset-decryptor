@@ -1431,9 +1431,17 @@ def checklist(title, table=None, out_dir=None, tables_dir=None):
     return summary
 
 
+def title_platforms(titles):
+    """{title: platform} for the titles that are not Spike 2's (PAD-943:
+    the tab shows its manufacturer's own)."""
+    s1 = set(spike1_titles())
+    return {t: "spike1" for t in titles if t in s1}
+
+
 def main(argv):
     if argv and argv[0] == "titles":
-        print(json.dumps({"titles": titles_with_tables()}), flush=True)
+        titles = titles_with_tables()
+        print(json.dumps({"titles": titles, "platforms": title_platforms(titles)}), flush=True)
         return 0
     if argv and argv[0] == "coverage":
         print(json.dumps({"coverage": coverage_all(argv[2] if len(argv) > 2 and argv[1] == "--tables" else None)}),

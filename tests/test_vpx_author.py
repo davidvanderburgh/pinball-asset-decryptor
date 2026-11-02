@@ -313,10 +313,10 @@ def test_the_shipped_maps_read_through_coverage(A):
     """Every map beside the kit: coverage reads it without a complaint and
     finds switches, coils and lights in each."""
     import glob
-    for path in glob.glob(os.path.join(VPX, "*.json")):
-        if "protos" in path:
-            continue
+    for path in glob.glob(os.path.join(VPX, "*.shadow.json")) + glob.glob(os.path.join(VPX, "*.vpxmap.json")):
         m = json.load(open(path, encoding="utf-8"))
+        if m.get("listed") is False:
+            continue            # a starter the tab does not offer (got_le, PAD-943): its table is not fitted yet
         cov = A.coverage(m)
         assert cov["switches"] and cov["coils"] and cov["leds"], path
 

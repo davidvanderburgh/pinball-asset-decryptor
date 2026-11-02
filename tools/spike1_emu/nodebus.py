@@ -289,6 +289,95 @@ class WireParser:
             yield ("frame", frame[0], frame[2:], resp_len)
 
 
+# ---- the switch window's view of the machine on THIS era (PAD-943) ---------
+#
+# Nothing wrote s1hw.state for the 2015-2016 titles: the early era's responder
+# (s1early.py) painted it, this one answered switches and nothing else, so the
+# app's Spike 1 switch window showed no lamp and no coil on GOT, KISS or
+# Ghostbusters - and a Visual Pinball table (tools/spike2_emu/vpx, which
+# reads the block for its lights and solenoids) had nothing to show.  The
+# frames are the game's own senders, read out of the GOT LE 1.37 ELF (it is
+# not stripped):
+#
+#   NODEBUS_SetLED(node, idx, level, time)   @0xc1530
+#       idx <= 63:  [0x80|idx][time][level]
+#       idx  > 63:  [0xc0][idx lo][idx hi][time][level]
+#   NODEBUS_SetLEDMultiple(node, idx, n, levels, time)   @0xc1428
+#       the same two shapes with n levels, idx onward
+#   cmd 0x70 [idx][v16 lo][v16 hi]   the base-layer lamp write Spike 2 has too
+#       (hwshim.c led_level70: full at 0x800)
+#   cmd 0x40 [idx][pulse pwr][pulse t lo hi][hold pwr][hold t lo hi][x lo hi]
+#       a coil drive (coildecode.py has the Spike 2 frame; it is the same);
+#       a 1-byte [idx] fires it by its cmd 0x41 rule, cmd 0x4d [idx] is OFF.
+#   cmd 0x41 [idx][pwr][..][t lo hi]...   the rule a short 0x40 fires with
+#
+# A `time` is a ramp the board runs; the block takes the level it lands at.
+# The times are board ticks; the Spike 1 boards are not asked their rate
+# (Spike 2 reads it from the 0xfe identity), so they are taken as
+# milliseconds with a floor of DMD_COIL_MIN_S, which is what a reader needs
+# to see a pulse at all.  A hold with no time is kept DMD_COIL_HOLD_S from
+# each frame (the game re-sends while it holds) or until the OFF frame.
+LEVEL70_FULL = 0x800
+DMD_COIL_MIN_S = 0.03
+DMD_COIL_MAX_S = 10.0
+DMD_COIL_HOLD_S = 2.0
+
+
+def level70(lo, hi):
+    v = min(lo | (hi << 8), LEVEL70_FULL)
+    return v * 255 // LEVEL70_FULL
+
+
+class DmdFrames:
+    """Reads the lamp and coil frames of the DMD-era wire into a HwStateWriter
+    (s1early.HwStateWriter, or anything with lamp_level / coil_on / coil_off).
+    `frame(node, body)` takes a frame's body as WireParser yields it (the
+    command byte first, the checksum last); the rules are kept per coil."""
+
+    def __init__(self, hw):
+        self.hw = hw
+        self.rules = {}                   # (node, idx) -> pulse ticks
+
+    def frame(self, node, body):
+        if len(body) < 2:
+            return
+        cmd, data = body[0], body[1:-1]
+        if 0x80 <= cmd <= 0xBF and len(data) >= 2:
+            for i, level in enumerate(data[1:]):
+                self.hw.lamp_level(node, (cmd & 0x3F) + i, level)
+        elif cmd == 0xC0 and len(data) >= 4:
+            idx = data[0] | (data[1] << 8)
+            for i, level in enumerate(data[3:]):
+                self.hw.lamp_level(node, idx + i, level)
+        elif cmd == 0x70 and len(data) == 3:
+            self.hw.lamp_level(node, data[0], level70(data[1], data[2]))
+        elif cmd == 0x41 and len(data) >= 6:
+            self.rules[(node, data[0])] = data[4] | (data[5] << 8)
+        elif cmd == 0x40 and len(data) >= 9:
+            pulse = data[2] | (data[3] << 8)
+            hold_pwr, hold = data[4], data[5] | (data[6] << 8)
+            if hold_pwr and not hold:
+                # a hold with no end: the game re-sends it while it holds
+                # (GOT's trough retried every few seconds), so it is kept
+                # for DMD_COIL_HOLD_S from each, and an OFF ends it sooner
+                self.hw.coil_on(node, data[0], DMD_COIL_HOLD_S)
+            else:
+                self.hw.coil_on(node, data[0], self._seconds(pulse + hold))
+        elif cmd == 0x40 and len(data) == 1:
+            self.hw.coil_on(node, data[0], self._seconds(self.rules.get((node, data[0]), 0)))
+        elif cmd == 0x4D and len(data) == 1:
+            self.hw.coil_off(node, data[0])
+
+    @staticmethod
+    def _seconds(ticks):
+        return min(max(ticks / 1000.0, DMD_COIL_MIN_S), DMD_COIL_MAX_S)
+
+
+def closed_indexes(active_low):
+    """The indexes a node's active-low switch bytes close."""
+    return [i for i in range(len(active_low) * 8) if not active_low[i >> 3] & (1 << (i & 7))]
+
+
 def main():
     # The EARLY firmware era (the 2012 home models, PAD-101) speaks a wire
     # format five years older than the one below — no checksums, implied reply
@@ -323,6 +412,17 @@ def main():
         if log:
             log.write(s + "\n")
             log.flush()
+
+    # s1hw.state beside the capture (PAD-943): the switches this responder
+    # tells the game are closed, the lamps and the coils it drives
+    try:
+        import s1early
+        hw = s1early.HwStateWriter(os.path.join(os.path.dirname(capture_file) or ".",
+                                                "s1hw.state"))
+        dmd = DmdFrames(hw)
+    except (OSError, ImportError, AttributeError) as exc:
+        hw = dmd = None
+        logline("s1hw.state: not written (%s)" % exc)
 
     import time as _t
     _dbgpath = os.environ.get("NB_DEBUG")
@@ -545,6 +645,8 @@ def main():
                         # and clear its spin-guard counter.
                         last_reported[node] = injected.get(node, SW_IDLE)
                         sw_attempts[node] = 0
+                        if hw:
+                            hw.set_switches(node, closed_indexes(last_reported[node]))
                     logline("REQ addr=0x%02x node=%d cmd=0x%02x resp_len=%d -> %s"
                             % (addr, node, cmd if cmd is not None else 0,
                                resp_len, resp.hex()))
@@ -559,10 +661,16 @@ def main():
                 else:
                     if cmd == 0xF0:                 # traffic block/unblock
                         handle_traffic(addr, body)
+                    elif dmd:
+                        dmd.frame(addr & 0x7F, body)
                     logline("REQ addr=0x%02x node=%d cmd=0x%02x data=%s (no reply)"
                             % (addr, addr & 0x7F, cmd if cmd is not None else 0,
                                body.hex()))
+            if hw:
+                hw.flush()
     finally:
+        if hw:
+            hw.flush(force=True)
         cap.close()
         if log:
             log.close()

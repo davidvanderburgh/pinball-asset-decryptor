@@ -84,6 +84,7 @@ import coilmap    # noqa: E402  offsets into padled, the drive decoder
 import padpath    # noqa: E402  where the rig is
 import padsw      # noqa: E402  offsets into padsw
 import padlaunch  # noqa: E402  starts a run for a table when none is up
+import s1bridge   # noqa: E402  the Spike 1 rig's files, for a Spike 1 title (PAD-943)
 
 try:
     import pythoncom
@@ -366,6 +367,7 @@ class VpxMap:
         self.fakes = {}                     # name -> dict (switch_fakes)
         self.game_on = None                 # (number, [coils]) "flippers armed"
         self.cabinet = {}                   # cabinet switch names -> 1000+id
+        self.platform = "spike2"            # which rig the title runs on (PAD-943)
         # core.vbs indexes SolCallback(68) and friends by the number it is
         # handed, so ChangedSolenoids may only carry numbers up to this; a
         # coil's 1000+ name still answers Controller.Solenoid(n).
@@ -389,6 +391,7 @@ class VpxMap:
 
     def load(self, path):
         m = json.load(open(path, encoding="utf-8"))
+        self.platform = (m.get("platform") or "spike2").lower()
         g = m.get("game_on") or {}
         self.game_on = (int(g["number"]), [tuple(c) for c in g["coils"]]) if g else None
         self.cabinet = {k: int(v) for k, v in m.get("cabinet", {}).items()
@@ -1271,6 +1274,7 @@ class Bridge:
         self.sw_ids = {}                   # (node, input bit) -> switch id
         self._button_coils = {}            # (node, idx) -> button input bit
         self.mrg = bytes(padsw.MAX_ID)     # the guest's merged switch truth
+        self.max_id = padsw.MAX_ID         # one past the highest switch id (set_game)
         self.polls = 0
         self.poll_fail = 0
         self.last_poll_ms = 0.0
@@ -1283,9 +1287,24 @@ class Bridge:
     def set_game(self, title):
         self.title = title
         self.map = VpxMap(title)
-        log("game %s: map %s: switches=%d solenoids=%d lamp groups=%d"
-            % (title, self.map.path or "NONE", len(self.map.switch_rewrite),
+        # PAD-943: a Spike 1 title's switches are slots up to 1023
+        self.max_id = s1bridge.N_SLOTS if self.spike1 else padsw.MAX_ID
+        log("game %s: map %s (%s): switches=%d solenoids=%d lamp groups=%d"
+            % (title, self.map.path or "NONE", self.map.platform, len(self.map.switch_rewrite),
                len(self.map.solenoids), len(self.map.lamp_groups)))
+
+    @property
+    def spike1(self):
+        return getattr(self.map, "platform", "spike2") == "spike1"
+
+    def _sol_number(self, node, idx):
+        return s1bridge.sol_number(node, idx) if self.spike1 else sol_number(node, idx)
+
+    def _rig_up(self, data):
+        """A fresh read of the run's output block says the game is up."""
+        if self.spike1:
+            return s1bridge.is_up(data)
+        return bool(data) and coilmap.has_magic(data)
 
     def dof_init(self, rom, table_file, factory=None):
         """Start DOF for the table's ROM name (PADSPIKE2.vbs, before it
@@ -1332,7 +1351,7 @@ class Bridge:
         thread attaches when the game is up, and the table plays from then
         on - switches before that are kept and handed over at attach (the
         table's trough, set once at its Init), Visual Pinball never waits."""
-        self.rig = Rig(self.title)
+        self.rig = s1bridge.Spike1Rig(self.title) if self.spike1 else Rig(self.title)
         self.pipe = None
         self.launch = None
         self.attached = False
@@ -1346,18 +1365,19 @@ class Bridge:
         self._player_client = self._player_unfill = self._player_filled = None
         log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         data = read_block(self.rig.led_path(), READ_N)
-        if data and coilmap.has_magic(data):
+        if self._rig_up(data):
             self._attach(data)
         else:
-            card = padlaunch.card_for(self.title)
+            card = padlaunch.card_for(self.title, self.map.platform)
             if not card:
                 raise RuntimeError(
-                    "no Spike 2 run is up for %s and no card image to start one "
+                    "no %s run is up for %s and no card image to start one "
                     "(looked in %s). Start the game first (the app's Emulate tab, "
                     "or watch.sh), or record its card: padvpx card %s <image>."
-                    % (self.title or "this title", padlaunch.card_places(self.title),
+                    % (padlaunch.PLATFORM_NAMES.get(self.map.platform, self.map.platform),
+                       self.title or "this title", padlaunch.card_places(self.title),
                        self.title))
-            self.launch = padlaunch.Launch(self.title, card)
+            self.launch = padlaunch.launch_for(self.map.platform, self.title, card)
             self._loading_start()
             try:
                 slot = self.launch.start()
@@ -1378,7 +1398,7 @@ class Bridge:
 
     def _attach(self, data):
         """The run is up: read its tables, open the switch pipe, own the balls."""
-        pipe = SwitchPipe(self.rig)
+        pipe = s1bridge.Spike1Pipe(self.rig) if self.spike1 else SwitchPipe(self.rig)
         with self.lock:
             early, self._early = self._early, {}
             self.pipe = pipe
@@ -1473,10 +1493,17 @@ class Bridge:
         is up, so a run this bridge started may be read again) and the
         flipper buttons' coils for a run without the rule plane."""
         self.sw_ids = self.rig.switch_ids(self.title)
-        ver = struct.unpack_from("<I", data, 4)[0]
-        log("switch table: %d ids; padled version %d%s"
-            % (len(self.sw_ids), ver, "" if ver >= 7 else
-               " (no coil-rule plane: button coils assumed live)"))
+        if self.spike1:
+            # PAD-943: no rule plane on this rig; a held flipper button is a
+            # held flipper coil, and the map's game_on is always armed
+            log("switch table: %d ids from s1switches.json (Spike 1: button coils assumed live)"
+                % len(self.sw_ids))
+            ver = 0
+        else:
+            ver = struct.unpack_from("<I", data, 4)[0]
+            log("switch table: %d ids; padled version %d%s"
+                % (len(self.sw_ids), ver, "" if ver >= 7 else
+                   " (no coil-rule plane: button coils assumed live)"))
         # the flipper buttons' coils, for a run without the rule plane:
         # {coil: the board input of its button}, from the map's cabinet ids
         self._button_coils = {}
@@ -1498,13 +1525,15 @@ class Bridge:
         if self.launch is None:
             return
         if self.rig is None:
-            rec = Rig.board_slot(self.launch.slot)
+            rec = (s1bridge.board_record(self.title) if self.spike1
+                   else Rig.board_slot(self.launch.slot))
             if rec:
-                self.rig = Rig(self.title, record=rec)
+                self.rig = (s1bridge.Spike1Rig(self.title, record=rec) if self.spike1
+                            else Rig(self.title, record=rec))
                 log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         if self.rig is not None:
             data = read_block(self.rig.led_path(), READ_N)
-            if data and coilmap.has_magic(data):
+            if self._rig_up(data):
                 self._attach(data)
                 return
         if not self.launch.alive() and self.rig is None:
@@ -1557,6 +1586,9 @@ class Bridge:
             return
         if want:
             self._release_buttons()
+        if self.spike1:
+            self.pipe.pause()                # says once that this rig has none
+            return
         if want and kit_window_in_front():
             # the player clicked the game's own LCD or playfield window (to
             # move it, to look at it): Visual Pinball pauses, the GAME does
@@ -1622,7 +1654,7 @@ class Bridge:
         if getattr(self, "dof", None) and self.dof.up:
             for w in self.map.dof_switches.get(sid, ()):
                 self._dof_set("W", w, 1 if level else 0)
-        if not 0 < sid < padsw.MAX_ID:
+        if not 0 < sid < getattr(self, "max_id", padsw.MAX_ID):
             return
         if not self.pipe:
             with self.lock:
@@ -2012,6 +2044,8 @@ class Bridge:
         return False
 
     def _poll_once(self):
+        if self.spike1:
+            return self._poll_once_s1()
         data = read_block(self.rig.led_path(), READ_N)
         if not data or len(data) < coilmap.DRIVE_READ or not coilmap.has_magic(data):
             self.poll_fail += 1
@@ -2030,6 +2064,68 @@ class Bridge:
             self._poll_coils(data, now)
             if self.dof and self.dof.up:
                 self._poll_dof(data)
+
+    def _poll_once_s1(self):
+        """The Spike 1 rig's block (s1bridge): every lamp's level, every coil
+        on or off as the responder saw it, the switches the game is being
+        told. The map's groups and RGB inserts work as on Spike 2; a lamp
+        with no group is reported under its own 1000+ number."""
+        data = read_block(self.rig.led_path(), s1bridge.STATE_SIZE)
+        parts = s1bridge.unpack(data)
+        if not parts:
+            self.poll_fail += 1
+            return
+        switches, lamps, coils, _ = parts
+        self.polls += 1
+        if not self.sw_ids and self.polls % 250 == 0:      # ~ every 2 s until the walk wrote it
+            self._read_tables(data)
+            if self.sw_ids:
+                log("switch table arrived: %d ids" % len(self.sw_ids))
+        now = time.monotonic()
+        with self.lock:
+            self.mrg = switches
+            for n, leds in self.map.lamp_groups.items():
+                levels = [s1bridge.lamp_level(lamps, nd, ix) for nd, ix in leds]
+                if max(levels) < LAMP_ON:
+                    self._lamp_set(n, 0)
+                elif n in self.map.rgb_groups:
+                    self._lamp_set(n, rgb_value(*levels))
+                else:
+                    self._lamp_set(n, 1)
+            for node in range(s1bridge.MAX_NODES):
+                for idx in range(s1bridge.MAX_INDEX):
+                    n = lamp_number(node, idx)
+                    if n in self.map.lamp_groups:
+                        continue
+                    self._lamp_set(n, 1 if s1bridge.lamp_level(lamps, node, idx) >= LAMP_ON else 0)
+            for node in range(s1bridge.MAX_NODES):
+                for idx in range(s1bridge.MAX_INDEX):
+                    key = (node, idx)
+                    on = 1 if coils[s1bridge.slot(node, idx)] else 0
+                    # a flipper button held in this bridge is a held coil
+                    # (no rule plane here: the board's reflex is assumed live)
+                    bit = self._button_coils.get(key)
+                    if bit is not None:
+                        sid = self.sw_ids.get((node, bit))
+                        if sid and (self.pipe.held.get(sid) if self.pipe else 0):
+                            on = 1
+                    self._coil_set(key, on)
+            if self.map.game_on:
+                self._sol_set(self.map.game_on[0], 1)
+            self._fakes_tick(now)
+            if self.dof and self.dof.up:
+                self._poll_dof_s1(lamps)
+
+    def _poll_dof_s1(self, lamps):
+        m = self.map
+        for n, key in m.dof_sols.items():
+            self._dof_set("S", n, 1 if self.sol_state.get(self._sol_number(*key)) else 0)
+        for n, leds in m.dof_lamps.items():
+            level = max(s1bridge.lamp_level(lamps, nd, ix) for nd, ix in leds)
+            self._dof_set("L", n, 1 if level >= LAMP_ON else 0)
+        for n, leds in m.dof_flashers.items():
+            level = max(s1bridge.lamp_level(lamps, nd, ix) for nd, ix in leds)
+            self._dof_set("S", n, level if level >= LAMP_ON else 0)
 
     @staticmethod
     def _led_level(data, node, idx):
@@ -2123,7 +2219,7 @@ class Bridge:
         """Every number a coil is reported under: its 1000+ number and any
         the map gives it (core.vbs's flipper Consts, a table's own number)."""
         node, idx = key
-        nums = [sol_number(node, idx)]
+        nums = [self._sol_number(node, idx)]
         for n, coil in self.map.solenoids.items():
             if coil == key and n not in nums:
                 nums.append(n)

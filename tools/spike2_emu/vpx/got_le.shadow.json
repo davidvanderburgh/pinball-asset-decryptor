@@ -1,0 +1,62 @@
+{
+  "_": [
+    "Game of Thrones LE on the SPIKE 1 rig (PAD-943): the first map of a Spike 1 title.",
+    "platform: spike1 puts PAD.Controller on tools/spike1_emu's run (s1bridge.py): switches are 1000 + node*64 + index",
+    "(the rig's s1switches.json numbering), lamps 1000 + node*100 + index, coils 1000 + node*64 + index.",
+    "The cabinet switches and the coils are the game's own, read out of the GOT LE 1.37 ELF (s1elf.py --coils) and the",
+    "curated switch map (switchmaps/GOT_LE.json). The table half - VPW's 'Game of Thrones LE (Stern 2015)' 1.2.1,",
+    "VPUniverse file 12510 - is not mapped yet: no `detect` words, so no download is patched with this map until its",
+    "switches, saucers and lamps are fitted (vpxauthor.py checklist got_le, then as for any shadow map).",
+    "What the map carries today is what the controller proof drives (test_controller.vbs run got_le ...)."
+  ],
+  "platform": "spike1",
+  "title": "got_le",
+  "listed": false,
+  "detect": [],
+  "output": "Game of Thrones LE (PAD).vpx",
+  "table": {"name": "Game of Thrones LE (Stern 2015) VPW 1.2.1", "by": "VPinWorkshop", "where": "VPUniverse"},
+  "solenoid_max": 68,
+  "cabinet": {
+    "_": "1000 + node*64 + index from switchmaps/GOT_LE.json",
+    "start": 1075,
+    "tournament_start": 1076,
+    "left_flipper": 1514,
+    "right_flipper": 1515,
+    "up_left_flipper": 1518,
+    "up_right_flipper": 1519,
+    "tilt": 1078,
+    "coin": 1080
+  },
+  "trough": {
+    "_": "TROUGH #6 (L) .. #1 (R) are 8,9 .. 8,14; the jam opto 8,15; the shooter lane 9,1",
+    "switches": [1521, 1522, 1523, 1524, 1525, 1526],
+    "jam": 1527,
+    "shooter": 1577
+  },
+  "solenoids": {
+    "_": "core.vbs numbers -> the coil on the wire; names are the ELF's (s1elf.py --coils)",
+    "1": {"coil": [9, 2], "name": "TROUGH UP-KICKER"},
+    "2": {"coil": [9, 1], "name": "AUTO LAUNCH"},
+    "3": {"coil": [8, 0], "name": "LEFT 3-BANK DROP TARGET RESET"},
+    "7": {"coil": [1, 0], "name": "KICKBACK LANE UP-POST"},
+    "9": {"coil": [8, 4], "name": "LEFT POP BUMPER"},
+    "10": {"coil": [10, 1], "name": "RIGHT POP BUMPER"},
+    "11": {"coil": [10, 2], "name": "BOTTOM POP BUMPER"},
+    "12": {"coil": [10, 3], "name": "ELEVATOR DIVERTER"},
+    "17": {"coil": [8, 3], "name": "LEFT SLINGSHOT"},
+    "18": {"coil": [8, 6], "name": "RIGHT SLINGSHOT"},
+    "20": {"coil": [9, 3], "name": "SWORD"},
+    "21": {"coil": [9, 0], "name": "LEFT CONTROL GATE"},
+    "26": {"coil": [11, 1], "name": "UP RIGHT MAGNET"},
+    "27": {"coil": [11, 0], "name": "SINGLE DROP RESET"},
+    "29": {"coil": [11, 7], "name": "THRONE"},
+    "36": {"coil": [8, 2], "name": "UP RIGHT FLIPPER (core.vbs sULFlipper)"},
+    "46": {"coil": [8, 7], "name": "RIGHT FLIPPER POWER (core.vbs sLRFlipper)"},
+    "48": {"coil": [8, 7], "name": "LEFT FLIPPER: the game drives no left flipper coil on the node bus; the right's shows for both until the left's driver is found"}
+  },
+  "game_on": {"number": 40, "coils": [[8, 7]]},
+  "lamps": {
+    "_": "the only LED the ELF names a lamp for; the inserts are the matrix channels on nodes 8-11, mapped by watching (padvpx lamps)",
+    "TournamentStart": {"leds": [[1, 0]]}
+  }
+}

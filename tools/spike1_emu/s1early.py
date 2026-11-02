@@ -295,10 +295,33 @@ class HwStateWriter:
                 self.dirty = True
 
     def coil_fire(self, node, coil):
+        self.coil_on(node, coil, COIL_SHOW_S)
+
+    # PAD-943: the DMD era's responder (nodebus.py) writes the block too, and
+    # its wire says how long a coil is driven, so these take the time.
+    def lamp_level(self, node, ch, level):
+        """One mono lamp at *level* (a Spike 1 lamp has no colour)."""
+        if 0 <= ch < 64 and self.state.get_lamp(node, ch) != (level, level, level):
+            self.state.set_lamp(node, ch, level)
+            self.dirty = True
+
+    def coil_on(self, node, coil, seconds):
+        """A coil energized for *seconds* (None: until coil_off)."""
         if 0 <= coil < 64:
-            self.coil_until[(node, coil)] = self.clock() + COIL_SHOW_S
+            key = (node, coil)
+            if seconds is None:
+                self.coil_until.pop(key, None)
+            else:
+                self.coil_until[key] = self.clock() + seconds
             if not self.state.get_coil(node, coil):
                 self.state.set_coil(node, coil, True)
+                self.dirty = True
+
+    def coil_off(self, node, coil):
+        if 0 <= coil < 64:
+            self.coil_until.pop((node, coil), None)
+            if self.state.get_coil(node, coil):
+                self.state.set_coil(node, coil, False)
                 self.dirty = True
 
     def flush(self, force=False):

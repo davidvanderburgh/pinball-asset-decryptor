@@ -288,3 +288,73 @@ def test_wireparser_split_feeds():
     evs = list(p.feed(f[3:]))
     assert len(evs) == 1 and evs[0][0] == "frame"
     assert evs[0][2][:3] == bytes([0x40, 2, 0xFF])
+
+
+# ---- the DMD era's s1hw.state (PAD-943) ------------------------------------
+# The frames are GOT LE 1.37's own, as a run's ttyS4.cap carries them (the
+# command byte first, the checksum last); the shapes are the ELF's senders
+# (NODEBUS_SetLED @0xc1530, NODEBUS_SetLEDMultiple @0xc1428).
+
+class _Hw:
+    def __init__(self):
+        self.lamps, self.coils, self.offs = {}, [], []
+
+    def lamp_level(self, node, ch, level):
+        self.lamps[(node, ch)] = level
+
+    def coil_on(self, node, coil, seconds):
+        self.coils.append((node, coil, seconds))
+
+    def coil_off(self, node, coil):
+        self.offs.append((node, coil))
+
+
+def test_dmd_single_lamp_write_is_time_then_level():
+    hw = _Hw()
+    d = nodebus.DmdFrames(hw)
+    d.frame(8, bytes.fromhex("a900ffcc"))        # SetLED(8, 41, 0xff, time 0)
+    d.frame(10, bytes.fromhex("903e891b"))       # SetLED(10, 16, 0x89, ramp 0x3e)
+    assert hw.lamps == {(8, 41): 0xFF, (10, 16): 0x89}
+
+
+def test_dmd_multiple_lamps_run_from_the_index():
+    hw = _Hw()
+    nodebus.DmdFrames(hw).frame(9, bytes([0x85, 0x00, 0x10, 0x20, 0x30, 0x00]))
+    assert hw.lamps == {(9, 5): 0x10, (9, 6): 0x20, (9, 7): 0x30}
+
+
+def test_dmd_wide_index_form_and_base_layer_write():
+    hw = _Hw()
+    d = nodebus.DmdFrames(hw)
+    d.frame(8, bytes([0xC0, 0x45, 0x00, 0x00, 0x7F, 0x00]))      # idx 69 (> 63)
+    d.frame(10, bytes.fromhex("70050001fb"))                    # cmd 70, v16 0x0100
+    assert hw.lamps[(8, 69)] == 0x7F
+    assert hw.lamps[(10, 5)] == nodebus.level70(0x00, 0x01) == 0x100 * 255 // 0x800
+
+
+def test_dmd_coil_drive_pulse_hold_rule_and_off():
+    hw = _Hw()
+    d = nodebus.DmdFrames(hw)
+    d.frame(8, bytes.fromhex("4100ff00001e0000000000000000000000000000004200004000000000000000000500006f"))
+    d.frame(8, bytes([0x40, 0x00, 0x00]))                       # short 40: the rule's 0x1e ticks
+    d.frame(8, bytes.fromhex("4004ff6400ff3200000000"))         # pulse 100 + hold 50 ticks
+    d.frame(1, bytes.fromhex("4002ff0000ff0000000034"))         # hold with no end
+    d.frame(1, bytes([0x4D, 0x02, 0x00]))
+    assert d.rules[(8, 0)] == 0x1E
+    assert hw.coils == [(8, 0, nodebus.DMD_COIL_MIN_S), (8, 4, 0.15), (1, 2, nodebus.DMD_COIL_HOLD_S)]
+    assert hw.offs == [(1, 2)]
+
+
+def test_dmd_frames_ignore_what_they_do_not_know():
+    hw = _Hw()
+    d = nodebus.DmdFrames(hw)
+    d.frame(8, bytes.fromhex("430400050607010403020801"))
+    d.frame(8, bytes.fromhex("72ffffffffffffffffffffffff04"))
+    d.frame(8, bytes([0x11, 0x6C]))
+    d.frame(8, b"")
+    assert not hw.lamps and not hw.coils and not hw.offs
+
+
+def test_closed_indexes_reads_active_low_bytes():
+    assert nodebus.closed_indexes(nodebus.SW_IDLE) == []
+    assert nodebus.closed_indexes(bytes([0xFF, 0xF7, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F])) == [11, 63]

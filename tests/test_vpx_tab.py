@@ -524,3 +524,45 @@ def test_a_rows_coverage_button_checks_the_download_it_was_patched_from(tab, mon
     args = [c for c in tab.calls if c[0] == "vpxauthor.py" and c[1][0] == "data"][-1][1]
     assert args == ["data", "godzilla_le"]
     assert not tab.row_checklist("nosuch.vpx")
+
+
+# ---- PAD-943: the other platforms' tables -----------------------------------
+
+def _vpxsetup():
+    kit = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "tools", "spike2_emu", "vpx")
+    if kit not in sys.path:
+        sys.path.insert(0, kit)
+    return pytest.importorskip("vpxsetup")
+
+
+def test_the_catalogue_names_every_platform_and_where_each_table_is():
+    vs = _vpxsetup()
+    cat = vs.load_catalog()
+    plats, tables = cat["platforms"], cat["tables"]
+    assert {"spike1", "sam", "jjp", "ap", "cgc", "dp", "spooky", "bof", "pb", "turner", "multimorphic"} <= set(plats)
+    assert all(p.get("name") and p.get("runs") and p.get("bridge") in ("pad", "vpm", "none") for p in plats.values())
+    assert tables and all(t["platform"] in plats for t in tables)
+    for t in tables:
+        if t.get("url"):
+            assert t["url"].startswith("https://") and t["name"] and t["where"], t
+            assert t["kind"] in ("tribute", "mashup", "vpm"), t
+        else:
+            assert t.get("notes"), t            # a game with no table says so
+    # SAM tables run the real game through Visual PinMAME: each names its ROM set
+    assert all(t.get("rom") for t in tables if t["platform"] == "sam" and t.get("url"))
+    # the Spike 1 title the kit has a map for is in it, and names the map
+    assert any(t.get("title") == "got_le" and t.get("map") for t in tables)
+
+
+def test_the_catalogue_rides_the_kits_state(monkeypatch):
+    vs = _vpxsetup()
+    monkeypatch.setattr(vs, "load_catalog", lambda: {"platforms": {"sam": {"name": "Stern SAM"}}, "tables": [{"platform": "sam"}]})
+    st = vs.state()
+    assert st["catalog"]["platforms"]["sam"]["name"] == "Stern SAM"
+    assert st["catalog"]["tables"] == [{"platform": "sam"}]
+
+
+def test_the_tab_starts_with_an_empty_catalogue(tab):
+    assert tab.get("catalog") == {"platforms": {}, "tables": []}
+    assert "SAM" in tab.get("catalog_tip")

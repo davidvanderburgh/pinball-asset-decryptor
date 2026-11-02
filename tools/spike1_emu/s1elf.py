@@ -260,14 +260,129 @@ def extract_switch_map(path):
     return out
 
 
+# ---- coils and LEDs by node and position (PAD-943) --------------------------
+#
+# The same device chain the switches take, read for the other two device
+# kinds, so a Visual Pinball table of a Spike 1 title can be mapped from the
+# game's own tables (vpx/vpxauthor.py) and the bridge can name what it sees:
+#
+#   node_board_device_cl_table_data   one 56-byte entry per driven coil:
+#       +32 u16  device id (node_board_device_table_data)
+#       +50 u16  low byte the coil id (coil_table_data: +12 ptr -> name block)
+#   node_board_device_led_table_data  one 24-byte entry per LED:
+#       +14 u16  device id
+#       +22 u16  0x01nn = lamp nn (lamp_table_data: +0 ptr -> name block);
+#                anything else is a light with no lamp name (GI, RGB)
+#
+# Read off GOT LE 1.37 and checked against its curated switch map: the
+# TROUGH UP-KICKER lands on (9, 2) and AUTO LAUNCH on (9, 1) - two of the
+# three `_trough_coils` the map's sweep found.
+CLDEV_ENTRY = 56
+_CLDEV_DEVID_OFF = 32
+_CLDEV_COIL_OFF = 50
+COILTAB_ENTRY = 28
+_COILTAB_NAME_OFF = 12
+LEDDEV_ENTRY = 24
+_LEDDEV_DEVID_OFF = 14
+_LEDDEV_LAMP_OFF = 22
+LAMPTAB_ENTRY = 12
+
+
+def _device_node_pos(elf, s, devid):
+    dev_e = s["node_board_device_table_data"] + DEV_ENTRY * devid
+    pos = elf.read_u16(dev_e + _DEV_POS_OFF) & 0xFF
+    boardid = elf.read_u16(dev_e + _DEV_BOARD_OFF)
+    node = elf.read_u8(s["node_board_table_data"] + BOARD_ENTRY * boardid + _BOARD_ADDR_OFF)
+    return node, pos
+
+
+def _name(elf, block):
+    return elf.read_cstr(elf.read_u32(block)) or elf.read_cstr(block)
+
+
+def extract_coil_map(path):
+    """``{(node, index): name}`` for every coil the game drives over the node
+    bus (the flippers' own power drivers may not be among them). {} when the
+    ELF lacks the symbols."""
+    with open(path, "rb") as f:
+        elf = _Elf(f.read())
+    s = elf.syms
+    need = ("NODE_BOARD_DEVICE_CL_TABLE_DATA_ENTRY_COUNT", "node_board_device_cl_table_data",
+            "COIL_TABLE_DATA_ENTRY_COUNT", "coil_table_data",
+            "node_board_device_table_data", "node_board_table_data")
+    if any(n not in s for n in need):
+        return {}
+    out = {}
+    try:
+        count = elf.read_u32(s["NODE_BOARD_DEVICE_CL_TABLE_DATA_ENTRY_COUNT"])
+        ncoil = elf.read_u32(s["COIL_TABLE_DATA_ENTRY_COUNT"])
+    except ValueError:
+        return {}
+    if not (0 < count <= 256 and 0 < ncoil <= 256):
+        return {}
+    for t in range(1, count):
+        try:
+            base = s["node_board_device_cl_table_data"] + CLDEV_ENTRY * t
+            devid = elf.read_u16(base + _CLDEV_DEVID_OFF)
+            cid = elf.read_u16(base + _CLDEV_COIL_OFF) & 0xFF
+            if not devid or not 0 < cid < ncoil:
+                continue
+            node, pos = _device_node_pos(elf, s, devid)
+            name = _name(elf, elf.read_u32(s["coil_table_data"] + COILTAB_ENTRY * cid + _COILTAB_NAME_OFF))
+        except (ValueError, struct.error):
+            continue
+        if node <= 31 and name:
+            out[(node, pos)] = name
+    return out
+
+
+def extract_led_map(path):
+    """``{(node, index): name}`` for every LED on the node bus: the lamp's
+    name where the LED is a named lamp, "" for a light the game names no
+    lamp for (GI strings, RGB lights). {} when the ELF lacks the symbols."""
+    with open(path, "rb") as f:
+        elf = _Elf(f.read())
+    s = elf.syms
+    need = ("NODE_BOARD_DEVICE_LED_TABLE_DATA_ENTRY_COUNT", "node_board_device_led_table_data",
+            "LAMP_TABLE_DATA_ENTRY_COUNT", "lamp_table_data",
+            "node_board_device_table_data", "node_board_table_data")
+    if any(n not in s for n in need):
+        return {}
+    out = {}
+    try:
+        count = elf.read_u32(s["NODE_BOARD_DEVICE_LED_TABLE_DATA_ENTRY_COUNT"])
+        nlamp = elf.read_u32(s["LAMP_TABLE_DATA_ENTRY_COUNT"])
+    except ValueError:
+        return {}
+    if not (0 < count <= 2048 and 0 < nlamp <= 512):
+        return {}
+    for t in range(1, count):
+        try:
+            base = s["node_board_device_led_table_data"] + LEDDEV_ENTRY * t
+            devid = elf.read_u16(base + _LEDDEV_DEVID_OFF)
+            tag = elf.read_u16(base + _LEDDEV_LAMP_OFF)
+            if not devid:
+                continue
+            node, pos = _device_node_pos(elf, s, devid)
+            name = ""
+            if tag >> 8 == 1 and 0 < (tag & 0xFF) < nlamp:
+                name = _name(elf, elf.read_u32(s["lamp_table_data"] + LAMPTAB_ENTRY * (tag & 0xFF)))
+        except (ValueError, struct.error):
+            continue
+        if node <= 31:
+            out[(node, pos)] = name or ""
+    return out
+
+
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     if not argv:
-        print("usage: s1elf.py [--switches] <game-elf>", file=sys.stderr)
+        print("usage: s1elf.py [--switches|--coils|--leds] <game-elf>", file=sys.stderr)
         return 2
-    if argv[0] == "--switches":
+    if argv[0] in ("--switches", "--coils", "--leds"):
         import json
-        smap = extract_switch_map(argv[1])
+        smap = {"--switches": extract_switch_map, "--coils": extract_coil_map,
+                "--leds": extract_led_map}[argv[0]](argv[1])
         # JSON keys must be strings: "node,index"
         print(json.dumps({"%d,%d" % k: v for k, v in sorted(smap.items())},
                          indent=0))

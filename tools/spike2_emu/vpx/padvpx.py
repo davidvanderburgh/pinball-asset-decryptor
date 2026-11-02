@@ -88,6 +88,8 @@ def maps():
                           "patcher": m.get("patcher", "patch_godzilla.py"),
                           # one patcher, several maps (TMNT's LE and Pro)
                           "patcher_takes_map": bool(m.get("patcher_takes_map")),
+                          # PAD-943: which rig the title runs on (spike2 unless said)
+                          "platform": (m.get("platform") or "spike2").lower(),
                           # PAD-848: off the tab's Tables list (TMNT's LE: its card
                           # starts no game in the emulator, PAD-829; the Pro plays)
                           "listed": m.get("listed", True) is not False}
@@ -275,11 +277,37 @@ def vpx_ini_set(keys, section="Player", path=None):
 
 # ------------------------------------------------------------- the runs ---
 
+def platform_of(title):
+    """What a title's map says it runs on: "spike2" unless it says (PAD-943)."""
+    return (maps().get(title) or {}).get("platform") or "spike2"
+
+
 def run(title, hidden=False, mute=False):
-    card = padlaunch.card_for(title)
+    platform = platform_of(title)
+    card = padlaunch.card_for(title, platform)
     if not card:
         print("no card for %s (looked in %s)" % (title, padlaunch.card_places(title)))
         return 2
+    if platform == "spike1":
+        # PAD-943: one Spike 1 rig, start.sh with the card; its env is
+        # padlaunch.Spike1Launch's, hidden / muted as asked
+        launch = padlaunch.Spike1Launch(title, card)
+        other = launch.other_run()
+        if other:
+            print("the Spike 1 rig is running %s (%s); stop it first"
+                  % (other.get("game"), other.get("label") or "the app"))
+            return 1
+        env, card_wsl = launch.env()
+        if hidden:
+            env = [e for e in env if not e.startswith("PAD_HIDDEN=")] + ["PAD_HIDDEN=1"]
+        if mute or hidden:
+            env = [e for e in env if not e.startswith("PAD_AUDIO=")] + ["PAD_AUDIO=0"]
+        cmd = launch.head() + env + ["bash", "%s/start.sh" % launch.rig_wsl, card_wsl]
+        out = open(launch.logfile, "ab")
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                         creationflags=_CREATE_NO_WINDOW)
+        print("started %s on the Spike 1 rig from %s (log %s)" % (title, card, launch.logfile))
+        return 0
     launch = padlaunch.Launch(title, card)
     slot = launch.take_slot()
     env = launch.env()
@@ -298,6 +326,21 @@ def run(title, hidden=False, mute=False):
 
 def stop(title):
     from padcontroller import Rig
+    if platform_of(title) == "spike1":
+        import s1bridge
+        rec = s1bridge.board_record(title)
+        if not rec:
+            print("no Spike 1 run of %s on the board" % title)
+            return 1
+        if rec.get("label") != padlaunch.LABEL:
+            print("the Spike 1 run of %s is %s's, not the kit's; leaving it"
+                  % (title, rec.get("label") or "somebody"))
+            return 1
+        launch = padlaunch.Spike1Launch(title, "", dist=rec.get("distro"))
+        launch.work = rec.get("root") or ""
+        launch.stop()
+        print("stopped %s on the Spike 1 rig" % title)
+        return 0
     rec = Rig.board_run(title)
     if not rec:
         print("no run of %s on the board" % title)

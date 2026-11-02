@@ -36,6 +36,11 @@ INTRO = ("Play a Visual Pinball table with the real Stern game behind it: the "
          "game from your own card image serves the balls, fires the coils, lights "
          "the table, keeps score and shows its own screen.")
 
+#: PAD-943: the other platforms' tables, where their authors put them
+CATALOG_TIP = ("Every platform the app reads, and the Visual Pinball tables of its games: "
+               "where each one is downloaded, who made it, and what plays behind it. Stern SAM "
+               "tables run the real game through Visual PinMAME with your ROM set; a Spike 1 "
+               "table plays on the app's emulator once the app has a map for it, like Spike 2's.")
 TABLES_TIP = ("The app ships no tables. Download a table below from its author, "
               "then Patch it: the app writes a copy named \"(PAD)\" into your tables "
               "folder and leaves your download as it is.")
@@ -101,7 +106,8 @@ class VpxTab(TabService):
                  layout="", monitors=0, display=None, runtime_state="unknown",
                  runtime_text="Checking…", message="", message_level="info",
                  authors_intro=AUTHORS_INTRO, authors_titles_tip=AUTHORS_TITLES_TIP,
-                 author_titles=[], author_title="", author_note="", coverage={}, sheet=None)
+                 author_titles=[], author_title="", author_note="", coverage={}, sheet=None,
+                 catalog_tip=CATALOG_TIP, catalog={"platforms": {}, "tables": []})
 
     # -- hooks ---------------------------------------------------------------
     def on_show(self):

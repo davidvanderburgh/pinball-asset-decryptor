@@ -362,6 +362,9 @@ log "The DMD and switch windows open in the app."
 # run started without the app (PAD_HIDDEN=1) is a hidden one.
 if [ -f "$HERE/../rigboard.sh" ]; then
     . "$HERE/../rigboard.sh"
+    # the work dir goes on the record (PAD-943): the Visual Pinball controller
+    # reads this run's s1hw.state / s1sw.input there, over \\wsl.localhost
+    RIGBOARD_ROOT="$S1_WORK" \
     rigboard_post spike1 0 "$S1_EMU_PID" "${_title:-$(basename "$(dirname "$(readlink -f "$S1_WORK/game")")")}" \
         "${PAD_TITLE:-}" "$([ "${PAD_HIDDEN:-0}" = 1 ] && echo 0 || echo 1)" "${PAD_AUDIO:-0}"
 fi

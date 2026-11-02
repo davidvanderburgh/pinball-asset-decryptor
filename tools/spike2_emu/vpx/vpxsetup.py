@@ -379,6 +379,20 @@ def download_vpx(folder, say=print, progress=None):
     return set_vpx(folder)
 
 
+CATALOG = os.path.join(HERE, "catalog.json")
+
+
+def load_catalog():
+    """The kit's survey of the Visual Pinball tables of every platform PAD
+    reads (catalog.json, PAD-943): {"platforms": {...}, "tables": [...]},
+    or empty when the file is not there."""
+    try:
+        d = json.load(open(CATALOG, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"platforms": {}, "tables": []}
+    return {"platforms": d.get("platforms") or {}, "tables": d.get("tables") or []}
+
+
 def refresh_system_script(tables):
     """A patch copies PADSPIKE2.vbs beside the table, and the table loads that
     copy: one an older release left there is brought up to this kit's, so a
@@ -489,6 +503,8 @@ def state():
         "cards": cards_in(lib),
         "tables": known_tables(tables),
         "patched": patched_in(tables),
+        # PAD-943: every platform's tables, where their authors put them
+        "catalog": load_catalog(),
         "monitors": len(mons),
         # PAD-927: the page's buttons carry the short name, the words its tip
         "presets": [{"key": k, "words": w, "short": LAYOUT_SHORT.get(k, k), "player": p, "lcd": q}

@@ -332,6 +332,38 @@ def _banner(w, bid):
                  if b.get("id") == bid), None)
 
 
+def test_the_facts_table_follows_the_leave_paths_out_box(app_with_worker,
+                                                        tmp_path):
+    """PAD-929: ticked, the table under the form showed the card's and the
+    project's full paths although the record leaves them out.  The window
+    gets the facts both ways and shows the redacted ones when ticked."""
+    w, _worker = app_with_worker
+    user = os.path.basename(os.path.expanduser("~").rstrip("\\/"))
+    project = tmp_path / "HEISEI modes"
+    project.mkdir()
+    card = project / "Godzilla Premium.raw"
+    card.write_bytes(b"\0" * 512)
+    w.run(lambda: w.window.extract_input_var.set(str(card)))
+    w.run(lambda: w.window.write_assets_var.set(str(project)))
+    info = w.call("shellx.report_open", "")
+    shown = dict(info["facts"])
+    hidden = dict(info["facts_hidden"])
+    assert [f[0] for f in info["facts_hidden"]] == [f[0] for f in info["facts"]]
+    assert shown["Project"] == str(project)
+    assert str(card) in shown["Card"]
+    for label in ("Card", "Project"):
+        assert "<path>" in hidden[label]
+        assert str(tmp_path) not in hidden[label]
+        if len(user) > 1:
+            assert user.lower() not in hidden[label].lower()
+    assert hidden["App"] == shown["App"]
+    # what the table shows ticked is what the record carries
+    preview = w.call("shellx.report_preview", "Write stopped at 40% today",
+                     "", True)["text"]
+    assert "Project: %s" % hidden["Project"] in preview
+    assert "Card: %s" % hidden["Card"] in preview
+
+
 def test_the_window_opens_with_the_facts_and_sends_the_record(app_with_worker,
                                                               tmp_path):
     w, worker = app_with_worker

@@ -195,7 +195,11 @@ class ReportMixin:
         if age > problem_report.STATUS_AFTER:
             self._report_check_status()
         facts = self._report_facts()
-        return {"facts": facts,
+        # the table under the form follows the box too (PAD-929): the
+        # same redaction the record gets when it is ticked
+        hidden = [[label, problem_report.redact(str(value))]
+                  for label, value in facts]
+        return {"facts": facts, "facts_hidden": hidden,
                 "log_lines": len(problem_report.log_tail()),
                 "name": self._rep_settings.get("name") or "",
                 "hide_paths": bool(self._rep_settings.get("hide_paths", True)),

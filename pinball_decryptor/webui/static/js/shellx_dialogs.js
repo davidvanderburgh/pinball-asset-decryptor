@@ -1269,7 +1269,8 @@ function ReportDialog({ close, prefill = "" }) {
       <${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached. Your reports shows where it is in the queue, and when a release addresses it this app tells you with a notice at the top.<//>
     <//>`;
   }
-  const facts = (info && info.facts) || [];
+  // ticked, the table shows the facts the way the record will carry them
+  const facts = (info && (hidePaths && info.facts_hidden || info.facts)) || [];
   return html`<${Modal} title="Report a problem" icon="flag" wide onClose=${onClose} cls=${"sx-report " + uid}
     footer=${html`<${Button} kind="ghost" onClick=${save} disabled=${busy}>Save as a file…<//>
       <span class="grow"></span>

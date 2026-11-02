@@ -62,6 +62,14 @@ _ATTRACT_TIP = ("Sounds the machine plays when a flipper button is pressed in at
                 "being played), one after another, in place of the game's own sound there. Each "
                 "is played for at most the length of the game sound it rides on.")
 
+#: PAD-945: what the Sounds on shots button and window say they do
+_SHOT_TIP = ("Sounds the machine plays when a shot is hit while one of the game's own modes runs: "
+             "pick the mode, the shot and the sound (one of the game's own, or a file of yours). "
+             "A sound plays whole, and a hit while the last one still plays adds no other. Write "
+             "puts them on the card.")
+#: PAD-945: the most of them (sound_modes.SHOT_MAX)
+_SHOT_MAX = 32
+
 from .. import compat
 from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
@@ -275,6 +283,12 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._attract_gap = 0            # PAD-641 round 2: seconds between two of them (0: any time)
         # PAD-685: the jukebox's songs ([{"audio", "video", "weight"}]), its own sidecar key
         self._juke = []
+        # PAD-945: the sounds on the shots of the game's own modes ([{"mode", "mode_name",
+        # "switch", "switch_name", "file"}]), the same record; the sound the window adds next and
+        # the game's modes and shots it offers (read once per project)
+        self._shots = []
+        self._shot_pick = ""
+        self._shot_choices = None
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -826,7 +840,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._dup_groups = None
         self.set(prefix=self._common_prefix(),
                  modes_share=(self._sm_offer is not None or bool(self._modes)
-                              or bool(self._turns) or bool(self._attract)))
+                              or bool(self._turns) or bool(self._attract) or bool(self._shots)))
         if self.audio_group_dups_var.get():
             self._ensure_dup_groups(quiet=True)
         self._refresh_list()
@@ -1448,7 +1462,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         self.set(rows=rows, empty=hint, sel=list(self._sel),
                  sort={"key": col, "desc": desc},
                  dup_scanning=self._dup_scanning, attract=self._attract_state(),
-                 jukebox=self._jukebox_state())
+                 jukebox=self._jukebox_state(), shots=self._shots_state())
         self._publish_status()
         self._update_clear_all()
         self._level_sync()
@@ -2618,6 +2632,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         if tm:
             items += [] if sm else [{"sep": True}]
             items.append(tm)
+        if self._shots_state() is not None:       # PAD-945
+            items += [] if sm or tm else [{"sep": True}]
+            items.append({"label": "Play on a shot in one of the game's modes…", "action": "shot_here",
+                          "icon": "audio", "disabled": bool(self._shots_why())})
         if self._audio_grow_active() and re.match(
                 r"idx\d+", os.path.basename(rel) or ""):
             items += [{"sep": True},
@@ -2655,6 +2673,11 @@ class AudioTab(FindOriginalsMixin, TabService):
             return self.choose(rel)
         elif action == "props":
             return {"open": "props", "data": self.props_info(rel)}
+        elif action == "shot_here":                  # PAD-945: this sound, on a shot of a game mode
+            if self._shots_why():
+                return False
+            self._shot_pick = self._shot_source(rel)
+            return {"open": "shots", "data": self._shots_rows()}
         elif action == "play_rep":
             if not self._assign.get(rel):
                 compat.messagebox.showinfo(
@@ -2799,8 +2822,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         attract = raw.get("attract")
         self._attract = ([f for f in attract if isinstance(f, str) and f.strip()][:_ATTRACT_MAX]
                          if isinstance(attract, (list, tuple)) else [])
-        from ...plugins.stern.sound_modes import clean_gap
+        from ...plugins.stern.sound_modes import clean_gap, clean_shots
         self._attract_gap = clean_gap(raw.get("attract_gap")) if self._attract else 0
+        self._shots = clean_shots(raw.get("shots"))           # PAD-945
+        self._shot_choices = None
         # PAD-685: the jukebox
         from ...plugins.stern import jukebox as _JB
         box = _JB.clean(staged.get(_JB.STAGED_KEY) if isinstance(staged, dict) else None)
@@ -2813,7 +2838,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         slots = {rel: {str(m): f for m, f in sorted(v.items())}
                  for rel, v in sorted(self._modes.items()) if v}
         turns = {rel: list(v) for rel, v in sorted(self._turns.items()) if v}
-        if not slots and not names and not turns and not self._attract:
+        if not slots and not names and not turns and not self._attract and not self._shots:
             return None
         levels = {}
         for rel, v in sorted(self._mode_levels.items()):
@@ -2854,6 +2879,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             out["attract"] = list(self._attract)
             if self._attract_gap:
                 out["attract_gap"] = int(self._attract_gap)
+        if self._shots:
+            out["shots"] = [dict(r) for r in self._shots]
         return out
 
     def _mode_level(self, rel, m):
@@ -3478,7 +3505,128 @@ class AudioTab(FindOriginalsMixin, TabService):
     def _attract_changed(self):
         self._save_staged_changes()
         self.set(modes_share=(self._sm_offer is not None or bool(self._modes)
-                              or bool(self._turns) or bool(self._attract)))
+                              or bool(self._turns) or bool(self._attract) or bool(self._shots)))
+        self._refresh_list()
+
+    # ------------------------------------------------------------------
+    # PAD-945: sounds on the shots of the game's own modes
+    # ------------------------------------------------------------------
+    def _shots_why(self):
+        return str((self._sm_offer or {}).get("shots_why") or "")
+
+    def _shots_state(self):
+        """The page's Sounds on shots button: ``{"n", "why", "tip"}``, or None where the plugin
+        offers no such thing and the project has none."""
+        if "shots_why" not in (self._sm_offer or {}) and not self._shots:
+            return None
+        tip = [_SHOT_TIP]
+        for r in self._shots:
+            tip.append("%s in %s: %s." % (r["switch_name"], r["mode_name"], os.path.basename(r["file"])))
+        if self._shots_why():
+            tip.append(self._shots_why())
+        return {"n": len(self._shots), "why": self._shots_why(), "tip": tip}
+
+    def _shot_source(self, rel):
+        """The file a slot plays now: its replacement when it has one, else the game's own sound."""
+        rep = self._assign.get(rel)
+        if isinstance(rep, str) and rep.strip() and os.path.isfile(rep):
+            return os.path.normpath(rep)
+        slot = self._by_rel.get(rel)
+        return os.path.normpath(slot.abs_path) if slot is not None else ""
+
+    def _shot_menus(self):
+        """``(why, modes, switches)`` of the project's game, read once per project
+        (:func:`.sound_modes.shot_choices`)."""
+        assets = self._scan_dir or self._assets()
+        if self._shot_choices is None or self._shot_choices[0] != assets:
+            from ...plugins.stern import sound_modes as _SMo
+            try:
+                got = _SMo.shot_choices(assets)
+            except Exception as e:                      # noqa: BLE001 - said in the window
+                got = ("The game's modes and shots could not be read (%s)." % e, [], [])
+            self._shot_choices = (assets, got)
+        return self._shot_choices[1]
+
+    def _shots_rows(self):
+        why, modes, switches = self._shot_menus()
+        why = self._shots_why() or why
+        return {"rows": [{"k": k, "mode": r["mode_name"], "shot": r["switch_name"],
+                          "sound": os.path.basename(r["file"]), "gone": not os.path.isfile(r["file"])}
+                         for k, r in enumerate(self._shots, 1)],
+                "modes": [{"value": str(i), "label": n} for i, n in modes],
+                "shots": [{"value": str(i), "label": n} for i, n in switches],
+                "pick": os.path.basename(self._shot_pick) if self._shot_pick else "",
+                "max": _SHOT_MAX, "why": why, "tip": _SHOT_TIP, "running": self._running()}
+
+    @rpc
+    def shots_open(self):
+        """The Sounds on shots window's rows (no sound picked yet)."""
+        self._shot_pick = ""
+        return self._shots_rows()
+
+    @rpc
+    def shots_action(self, action):
+        """The Sounds on shots window: ``choose`` (pick the sound from a file), ``add:<mode>:<switch>``
+        (the picked sound on that shot of that mode), ``play:k`` (row k's sound in the Replacement
+        pane), ``off:k``, ``why``. Returns the window's rows."""
+        kind, _c, rest = str(action or "").partition(":")
+        a, _c, b = rest.partition(":")
+        if kind == "why":
+            why = self._shots_rows()["why"]
+            if why:
+                compat.messagebox.showinfo("Sounds on shots", why)
+            return self._shots_rows()
+        if kind == "choose":
+            if self._shots_why() or not self._scan_dir:
+                return self._shots_rows()
+            self._cancel_select_job()
+            self.stop_all_preview_playback()
+            path = self._ask_path("open", "audio_replacement",
+                                  "Choose the sound a shot plays in one of the game's modes",
+                                  filetypes=_AUDIO_FILETYPES)
+            if isinstance(path, (list, tuple)):
+                path = path[0] if path else ""
+            if path:
+                self._shot_pick = os.path.normpath(path)
+            return self._shots_rows()
+        if kind == "add":
+            got = self._shots_rows()
+            if got["why"] or got["running"] or not self._shot_pick or len(self._shots) >= _SHOT_MAX:
+                return got
+            mode = {m["value"]: m["label"] for m in got["modes"]}.get(a)
+            shot = {s["value"]: s["label"] for s in got["shots"]}.get(b)
+            if mode is None or shot is None:
+                return got
+            row = {"mode": int(a), "mode_name": mode, "switch": int(b), "switch_name": shot,
+                   "file": self._shot_pick}
+            self._shots = [r for r in self._shots if (r["mode"], r["switch"]) != (row["mode"], row["switch"])]
+            self._shots.append(row)
+            self.log("Replace Audio: %s plays %s when %s is hit." % (mode, os.path.basename(self._shot_pick), shot),
+                     "info")
+            self._shot_pick = ""
+            self._shots_changed()
+            return self._shots_rows()
+        try:
+            k = int(a)
+        except ValueError:
+            return self._shots_rows()
+        if not 1 <= k <= len(self._shots):
+            return self._shots_rows()
+        r = self._shots[k - 1]
+        if kind == "play":
+            self._pane_load("rep", r["file"], autoplay=True,
+                            label="%s in %s: %s" % (r["switch_name"], r["mode_name"], os.path.basename(r["file"])))
+        elif kind == "off" and not self._running():
+            del self._shots[k - 1]
+            self.log("Replace Audio: %s no longer plays %s when %s is hit." % (
+                r["mode_name"], os.path.basename(r["file"]), r["switch_name"]), "info")
+            self._shots_changed()
+        return self._shots_rows()
+
+    def _shots_changed(self):
+        self._save_staged_changes()
+        self.set(modes_share=(self._sm_offer is not None or bool(self._modes)
+                              or bool(self._turns) or bool(self._attract) or bool(self._shots)))
         self._refresh_list()
 
     # ------------------------------------------------------------------

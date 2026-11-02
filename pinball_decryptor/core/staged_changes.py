@@ -355,7 +355,11 @@ def sound_modes_of(data):
     # PAD-641: the flipper buttons' sounds in attract belong to no slot: they go as they are
     attract = [f for f in (raw.get("attract") or []) if isinstance(f, str) and f.strip()] \
         if isinstance(raw.get("attract"), list) else []
-    if not slots and not any(names) and not turns and not attract:
+    # PAD-945: the sounds on the shots of the game's own modes belong to no slot either
+    shots = [dict(r) for r in (raw.get("shots") or []) if isinstance(r, dict)
+             and isinstance(r.get("file"), str) and r["file"].strip()] \
+        if isinstance(raw.get("shots"), list) else []
+    if not slots and not any(names) and not turns and not attract and not shots:
         return None
     levels = raw.get("levels")
     if isinstance(levels, dict):
@@ -413,6 +417,8 @@ def sound_modes_of(data):
         out["attract"] = attract
         if raw.get("attract_gap"):
             out["attract_gap"] = raw["attract_gap"]      # PAD-641 round 2
+    if shots:
+        out["shots"] = shots
     return out
 
 
@@ -480,6 +486,11 @@ def merge_sound_modes(data, rec):
         attract = [f for f in rec["attract"] if isinstance(f, str) and f.strip()]
         gap = rec.get("attract_gap")
         n += 1
+    # PAD-945: the record's sounds on the shots of the game's modes, when it has any, in place of these
+    shots = list(here.get("shots") or [])
+    if rec.get("shots"):
+        shots = [dict(r) for r in rec["shots"] if isinstance(r, dict)]
+        n += 1
     if not n and names == here["names"]:
         return 0
     turns, turn_levels = {}, {}
@@ -532,5 +543,7 @@ def merge_sound_modes(data, rec):
         out["attract"] = attract
         if gap:
             out["attract_gap"] = gap
+    if shots:
+        out["shots"] = shots
     data[SOUND_MODES_KEY] = out
     return n

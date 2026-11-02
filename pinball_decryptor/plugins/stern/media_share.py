@@ -247,12 +247,17 @@ def save_music_modes(project, path):
     # a project saved before mode files had a loudness of their own: its files take their
     # sound's, as a mod pack carries them
     own = (staged_changes.sound_modes_of(staged_changes.load(project)) or {}).get("levels") or {}
-    members, _g = _members([f for _r, _m, f in modes.files()] + list(modes.attract))
+    members, _g = _members([f for _r, _m, f in modes.files()] + list(modes.attract)
+                           + [r["file"] for r in modes.shots])
     gone = [(r, m, f) for r, m, f in modes.files() if not _member(members, f)]
     # PAD-641: the flipper buttons' sounds in attract, in their order
     attract = [_member(members, f) for f in modes.attract if _member(members, f)]
     gone += [("", SMo.attract_mode(k), f) for k, f in enumerate(modes.attract, 1)
              if not _member(members, f)]
+    # PAD-945: the sounds on the shots of the game's own modes, each with its mode and switch
+    shots = [dict(r, file=_member(members, r["file"])) for r in modes.shots if _member(members, r["file"])]
+    gone += [("", SMo.shot_mode(k), r["file"]) for k, r in enumerate(modes.shots, 1)
+             if not _member(members, r["file"])]
     slots, levels, sigs = {}, {}, {}
     for rel, m, f in modes.files():
         mem = _member(members, f)
@@ -263,7 +268,7 @@ def save_music_modes(project, path):
         if db:
             levels.setdefault(rel, {})[_carried_key(m)] = int(db)
         sigs[rel] = _sig(project, rel)
-    if not slots and not attract:
+    if not slots and not attract and not shots:
         raise ShareError("None of this project's music mode files is on this PC any more, so "
                          "there is nothing to save.")
     head = {"kind": MUSIC_KIND, "version": 1, "from": _about(project), "names": list(modes.names),
@@ -279,11 +284,15 @@ def save_music_modes(project, path):
         head["attract"] = attract
         if modes.attract_gap:
             head["attract_gap"] = int(modes.attract_gap)
-    every = {f for _r, _m, f in modes.files()} | set(modes.attract)
+    if shots:
+        head["shots"] = shots
+    every = {f for _r, _m, f in modes.files()} | set(modes.attract) | {r["file"] for r in modes.shots}
     _write_zip(path, head, [(mem, f) for f, mem in ((f, _member(members, f)) for f in every) if mem])
     out = {"slots": len(slots), "files": len(members), "gone": gone}
     if attract:
         out["attract"] = len(attract)
+    if shots:
+        out["shots"] = len(shots)
     return out
 
 
@@ -429,6 +438,11 @@ def load_music_modes(project, path):
         attract = [_unpack(z, m, folder, cache) for m in (head.get("attract") or [])
                    if isinstance(head.get("attract"), list) and _member_ok(m) and m in names
                    ][:SMo.ATTRACT_MAX]
+        # PAD-945: the sounds on the shots of the game's own modes, on the same game only: a mode and
+        # a shot are its program's own ids
+        shots = [dict(r, file=_unpack(z, r["file"], folder, cache))
+                 for r in SMo.clean_shots(head.get("shots"))
+                 if same and _member_ok(r["file"]) and r["file"] in names]
     names_in = head.get("names") if isinstance(head.get("names"), list) else []
     record = {"names": [str(n) if isinstance(n, str) else "" for n in names_in][:SMo.MAX_MODES],
               "slots": slots, "levels": levels}
@@ -440,6 +454,8 @@ def load_music_modes(project, path):
         record["attract"] = attract
         if SMo.clean_gap(head.get("attract_gap")):
             record["attract_gap"] = SMo.clean_gap(head.get("attract_gap"))
+    if shots:
+        record["shots"] = shots
     return {"record": record, "loaded": len(slots), "files": len(cache), "found": found,
             "left": left, "about": head.get("from") or {}}
 
@@ -516,6 +532,8 @@ def put_music(project, record, keep_own=False):
         if now.attract:                     # PAD-641: its own flipper sounds in attract stay
             rec.pop("attract", None)
             rec.pop("attract_gap", None)
+        if now.shots:                       # PAD-945: and its own sounds on shots
+            rec.pop("shots", None)
     data = staged_changes.load(project)
     n = staged_changes.merge_sound_modes(data, rec)
     if n:
@@ -654,6 +672,22 @@ def music_from_card(project, cfg_text):
         out["attract"] = attract
         if rec.get("attract_gap"):
             out["attract_gap"] = rec["attract_gap"]
+    # PAD-945: the sounds on the shots of the game's own modes, each from the record holding it
+    shots = []
+    for g in rec.get("shots") or ():
+        slot, host = idx.get(g["slot"]), _card_host(project, idx, g)
+        if host is None:
+            left.append((g["rel"], SMo.shot_mode(g["k"]), _card_missing(g, slot or g["rel"])))
+            continue
+        if host not in copied:
+            stem = os.path.splitext(_safe_name(g["name"], ""))[0] or "sound on a shot %d" % g["k"]
+            copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
+        shots.append({"mode": g["mode"], "mode_name": g.get("mode_name") or "",
+                      "switch": g["switch"], "switch_name": g.get("switch_name") or "",
+                      "file": copied[host]})
+    shots = SMo.clean_shots(shots)
+    if shots:
+        out["shots"] = shots
     return out, left
 
 
@@ -711,7 +745,8 @@ def _built_project_modes(card):
     for rel, mode, f in modes.files():
         if os.path.isfile(f):
             files.setdefault(rel, {})[_carried_key(mode)] = f
-    if not files and not any(os.path.isfile(f) for f in modes.attract):
+    if not files and not any(os.path.isfile(f) for f in modes.attract) \
+            and not any(os.path.isfile(r["file"]) for r in modes.shots):
         return None
     rec = {"names": list(modes.names), "slots": files}
     if modes.random & set(files):
@@ -721,6 +756,9 @@ def _built_project_modes(card):
         rec["attract"] = attract
         if modes.attract_gap:
             rec["attract_gap"] = int(modes.attract_gap)
+    shots = [dict(r) for r in modes.shots if os.path.isfile(r["file"])]      # PAD-945
+    if shots:
+        rec["shots"] = shots
     if modes.levels is not None:
         rec["levels"] = {rel: {str(m): db for m, db in v.items() if str(m) in files.get(rel, {})}
                          for rel, v in modes.levels.items()}
@@ -778,11 +816,15 @@ def readback(card, project, log=None, padmode=None):
                     SMo.who(m), SMo.what(rel, m) if SMo.is_turn(m) else "%s's file for mode %d"
                     % (os.path.basename(rel), m), why), "warning")
             had_attract = bool(SMo.load(project).attract)
+            had_shots = bool(SMo.load(project).shots)
             done["music"] = put_music(project, record, keep_own=True)
             if done["music"] and record.get("attract") and not had_attract:
                 log("Attract flipper sounds: this card's flipper buttons play %d sound(s) in attract "
                     "mode; they are back in the Audio tab%s." % (len(record["attract"]), where),
                     "success")
+            if done["music"] and record.get("shots") and not had_shots:
+                log("Sounds on shots: this card plays %d sound(s) on the shots of the game's own modes; "
+                    "they are back in the Audio tab%s." % (len(record["shots"]), where), "success")
             if done["music"] and record["slots"]:
                 names = SMo.clean(record)
                 log("Music modes: %d sound(s) of this card have files for other music modes (%s); "

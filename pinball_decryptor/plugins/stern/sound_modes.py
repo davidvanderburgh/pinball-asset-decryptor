@@ -844,6 +844,40 @@ def shot_refusal(prof):
     return ""
 
 
+def shot_choices(project):
+    """PAD-945: ``(why, modes, switches)`` for the project's game: :func:`offer_shots`'s reason
+    ("" when it can), the game's own modes ``[(id, name)]`` (:func:`game_modes`) and its shots
+    ``[(id, name)]`` - the playfield switches of the card's game program (:func:`shot_switches`), or
+    when the card is not on this PC, the port's ``switch`` lines."""
+    why = offer_shots(project, probe=True)
+    if why:
+        return why, [], []
+    from . import mode_project as MP
+    prof = project_title(project, probe=True)
+    modes = game_modes(prof)
+    switches = []
+    try:
+        card = MP.project_card(project)
+        if card is not None and card.image and os.path.isfile(card.image):
+            from .title_reader import game_program
+            switches = shot_switches(game_program(card.image)[2])
+    except Exception:                                   # noqa: BLE001 - the port's lines then
+        switches = []
+    if not switches:
+        try:
+            port = MP.read_port(MP.port_path(prof))
+            seen = {}
+            for sid, _mask, name in port.get("switch") or ():
+                seen.setdefault(int(sid), " ".join(str(name).split()))
+            switches = sorted(seen.items())
+        except (OSError, ValueError, TypeError):
+            switches = []
+    if not switches:
+        return (NO_SHOTS % (prof.label, "the app cannot read its switches from the card this project "
+                            "was extracted from") if prof is not None else NO_TITLE_SHOTS), modes, []
+    return "", modes, switches
+
+
 def offer_shots(project, probe=True):
     """PAD-945: why the project's game cannot play sounds on the shots of its own modes (``""``
     when it can)."""

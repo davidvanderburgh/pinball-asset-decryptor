@@ -1030,14 +1030,16 @@ class SternManufacturer(Manufacturer):
     def sound_modes_offer(self, assets_dir, rels):
         # PAD-494: the sound bank's sounds, on a title the music modes were
         # proven on (sound_modes.PROVEN)
-        from .sound_modes import MAX_MODES, offer, offer_attract, offer_turns
+        from .sound_modes import MAX_MODES, offer, offer_attract, offer_shots, offer_turns
         why, slots = offer(assets_dir, rels, probe=True)
         # PAD-565: and which can play files in turn (no menu setting, so more titles)
         twhy, tslots = offer_turns(assets_dir, rels, probe=True)
         # PAD-641: and whether the flipper buttons can play sounds in attract
         out = {"why": why, "slots": slots, "max": MAX_MODES,
                "turns_why": twhy, "turn_slots": tslots,
-               "attract_why": offer_attract(assets_dir, probe=True)}
+               "attract_why": offer_attract(assets_dir, probe=True),
+               # PAD-945: and whether the game's own modes can play sounds on shots
+               "shots_why": offer_shots(assets_dir, probe=True)}
         # PAD-685: a jukebox for the song modes, on a title that has them (no key elsewhere)
         from .jukebox import offer as jukebox_offer
         jw = jukebox_offer(assets_dir, probe=True)

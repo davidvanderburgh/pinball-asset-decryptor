@@ -34,6 +34,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 
 from .. import emulate_core
 from .base import TabService, rpc
@@ -151,14 +152,67 @@ class VpxTab(TabService):
                  pictures={}, pictures_busy="", pictures_tip=PICTURES_TIP,
                  # PAD-943: the page is up the moment the kit's state is in (or
                  # the last one seen, from the cache); these say what is still coming
-                 authors_busy=False, coverage_busy=False, stale=False)
+                 authors_busy=False, coverage_busy=False, stale=False, downloads=[])
         self._extras_running = False
         self._extras_gen = 0
+        # PAD-943: the tables folder is watched while the tab is up, so a
+        # download dropped in shows without Check again
+        self._watching = False
+        self._folder_sig = None
 
     # -- hooks ---------------------------------------------------------------
     def on_show(self):
         if self.get("ok") and not self._busy:
             self.refresh()
+        self._watch_folder()
+
+    # -- the tables folder, watched (PAD-943) --------------------------------
+    WATCH_S = 3.0
+
+    def _folder_signature(self):
+        d = self.get("tables_dir") or ""
+        if not d:
+            return None
+        try:
+            names = os.listdir(d)
+        except OSError:
+            return None
+        sig = []
+        for n in names:
+            if n.lower().endswith(".vpx"):
+                try:
+                    st = os.stat(os.path.join(d, n))
+                    sig.append((n, st.st_size, int(st.st_mtime)))
+                except OSError:
+                    continue
+        return tuple(sorted(sig))
+
+    def _watch_folder(self):
+        """A thread that looks at the tables folder every WATCH_S seconds
+        and re-reads the kit's state when a table came, went or changed
+        (David: a download dropped in the folder must show by itself)."""
+        if self._watching or not self.get("ok"):
+            return
+        self._watching = True
+
+        def run():
+            while self._watching:
+                time.sleep(self.WATCH_S)
+                try:
+                    sig = self._folder_signature()
+                except Exception:                           # noqa: BLE001
+                    continue
+                if sig is None:
+                    continue
+                if self._folder_sig is not None and sig != self._folder_sig and not self._busy:
+                    self._folder_sig = sig
+                    self._start("Checking", lambda: None)
+                elif self._folder_sig is None or not self._busy:
+                    self._folder_sig = sig
+        threading.Thread(target=run, daemon=True, name="pad-vpx-watch").start()
+
+    def on_close(self):
+        self._watching = False
 
     # -- the kit, out of process --------------------------------------------
     def _kit(self, script, args, timeout=_RUN_TIMEOUT_S, on_line=None):
@@ -314,6 +368,12 @@ class VpxTab(TabService):
                     or (titles[0] if titles else "")
             if mine():
                 self.set(author_titles=titles, author_title=chosen, authors_busy=False)
+            # PAD-943: the downloads not read yet (which map fits, which
+            # catalogue table the name is), ~0.3 s a file, once per file
+            if any(not d.get("read") for d in st.get("downloads") or []):
+                got = self._kit("vpxsetup.py", ["downloads"], timeout=600)
+                if "error" not in got and mine():
+                    self.set(downloads=got.get("downloads") or [], tables=got.get("tables") or self.get("tables"))
             # how much each table's map wires of its game (the Coverage column):
             # read from the same tables, ~7 s over WSL's share for 20 titles, so
             # once per sitting and on Check again, not after every job
@@ -588,7 +648,8 @@ class VpxTab(TabService):
         want = next((t for t in self.get("tables") or [] if output and t.get("output") == output), None)
         title = ("Choose your download of %s" % want["name"] if want
                  else "Choose the Visual Pinball table you downloaded")
-        path = (want or {}).get("source") or self.window.ask_open(
+        # PAD-943: the download in the tables folder its map fits needs no dialog
+        path = (want or {}).get("source") or (want or {}).get("download") or self.window.ask_open(
             "vpx_table", title, [("Visual Pinball table", "*.vpx"), ("All files", "*.*")])
         if not path:
             return False

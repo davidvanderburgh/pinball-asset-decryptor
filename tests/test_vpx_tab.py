@@ -755,3 +755,96 @@ def test_a_kit_without_titles_leaves_the_page_usable(tab):
     _wait(tab)
     assert tab.get("loaded") and tab.get("author_titles") == [] and not tab.get("authors_busy")
     assert tab.get("coverage") == {} and not tab.get("coverage_busy")
+
+
+# ---- PAD-943: the downloads in the folder show by themselves --------------
+
+def _vpx_file(folder, name, script=""):
+    p = folder / name
+    p.write_bytes(b"vpx" + script.encode("utf-8"))
+    return str(p)
+
+
+def test_the_folders_downloads_are_listed_at_once_and_read_once(tmp_path, monkeypatch):
+    vs = _vpxsetup()
+    import padvpx
+    folder = tmp_path / "tables"
+    folder.mkdir()
+    _vpx_file(folder, "Game of Thrones LE (Stern 2015) VPW 1.2.1.vpx")
+    _vpx_file(folder, "Rush LE 2.0.2.vpx")
+    _vpx_file(folder, "Rush LE 2.0.2 (PAD).vpx")
+    monkeypatch.setattr(vs, "DOWNLOADS_CACHE", str(tmp_path / "cache.json"))
+    reads = []
+
+    def fitting(path):
+        reads.append(os.path.basename(path))
+        return [("rush_le", {"listed": True})] if "Rush" in path else []
+    monkeypatch.setattr(padvpx, "fitting", fitting)
+    rows = vs.downloads_in(str(folder))
+    assert [r["file"] for r in rows] == ["Game of Thrones LE (Stern 2015) VPW 1.2.1.vpx", "Rush LE 2.0.2.vpx"]
+    assert not any(r["read"] for r in rows)         # listed at once, not read yet
+    rows = vs.read_downloads(str(folder))
+    assert sorted(reads) == ["Game of Thrones LE (Stern 2015) VPW 1.2.1.vpx", "Rush LE 2.0.2.vpx"]
+    got, rush = rows
+    assert got["read"] and got["title"] == "" and got["catalog"]["platform"] == "spike1" \
+        and got["catalog"]["game"] == "Game of Thrones"
+    assert rush["read"] and rush["title"] == "rush_le"
+    # read once: the cache answers the next look, a changed file is read again
+    assert all(r["read"] for r in vs.downloads_in(str(folder)))
+    vs.read_downloads(str(folder))
+    assert len(reads) == 2
+    (folder / "Rush LE 2.0.2.vpx").write_bytes(b"vpx more")
+    vs.read_downloads(str(folder))
+    assert len(reads) == 3
+    # a known table's row takes the download its map fits
+    linked = vs.link_downloads([{"titles": ["rush_le"]}, {"titles": ["godzilla_le"]}], rows)
+    assert linked[0]["download"].endswith("Rush LE 2.0.2.vpx") and linked[1]["download"] == ""
+    assert vs.catalog_match("KISS (Stern 2015) 2.0.vpx")["game"] == "KISS"
+    assert vs.catalog_match("something else entirely.vpx") is None
+
+
+def test_a_download_dropped_in_the_folder_shows_without_check_again(tab, tmp_path, monkeypatch):
+    folder = tmp_path / "tables"
+    folder.mkdir()
+    monkeypatch.setattr(type(tab), "WATCH_S", 0.05)
+    tab.on_show()
+    _wait(tab)
+    tab.set(tables_dir=str(folder))
+    time.sleep(0.2)                                  # the watcher has seen the empty folder
+    n = len([c for c in tab.calls if c == ("vpxsetup.py", ["state"])])
+    _vpx_file(folder, "KISS (Stern 2015) 2.0.vpx")
+    deadline = time.time() + 5
+    while len([c for c in tab.calls if c == ("vpxsetup.py", ["state"])]) == n and time.time() < deadline:
+        time.sleep(0.02)
+    _wait(tab)
+    assert len([c for c in tab.calls if c == ("vpxsetup.py", ["state"])]) > n
+    tab.on_close()
+    assert not tab._watching
+
+
+def test_patch_takes_the_download_the_folder_holds_without_asking(tab):
+    tab.on_show()
+    _wait(tab)
+    tab.set(tables=[{"name": "Rush LE Tribute", "output": "Rush LE 2.0.2 (PAD).vpx", "patched": False,
+                     "title": "rush_le", "titles": ["rush_le"], "download": r"C:\VP\tables\Rush LE 2.0.2.vpx"}])
+    tab.window.pick = ""                             # no dialog answer: the folder's download is taken
+    tab.answers[("padvpx.py", "patch")] = {"result": "ok", "_text": 'open "C:/VP/tables/Rush LE 2.0.2 (PAD).vpx"'}
+    assert tab.patch("Rush LE 2.0.2 (PAD).vpx")
+    _wait(tab)
+    assert ("padvpx.py", ["patch", r"C:\VP\tables\Rush LE 2.0.2.vpx", "--out", r"C:\VP\tables"]) in tab.calls
+
+
+def test_unread_downloads_are_read_after_the_page_is_up(tab, monkeypatch):
+    state_rows = {"downloads": [{"name": "KISS", "file": "KISS.vpx", "path": r"C:\VP\tables\KISS.vpx", "read": False}]}
+    orig = type(tab)._kit
+
+    def kit(self, script, args, timeout=0, on_line=None):
+        if args and args[0] == "state":
+            return dict(orig(self, script, args, timeout, on_line), **state_rows)
+        if args and args[0] == "downloads":
+            return {"downloads": [dict(state_rows["downloads"][0], read=True, title="", catalog=None)], "tables": []}
+        return orig(self, script, args, timeout, on_line)
+    monkeypatch.setattr(type(tab), "_kit", kit)
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("downloads")[0]["read"] is True      # read on the extras thread, after the page was up

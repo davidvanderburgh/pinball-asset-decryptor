@@ -129,6 +129,24 @@ without the machine's key on the PC. The catalogue's platform entry
 carries `needs`, and the card shows it on the Jersey Jack block as a
 warning chip and a line.
 
+## The downloads in the folder (David, 2026-11-02, interactive)
+
+"I just added a handful of VPX original tables to the folder, but the app
+is not showing them (KISS, GoT, GB, etc.). It should ideally update the
+table listing live, or require 'Check again' to be pressed and react to
+that." The Tables card listed only the kit's known tables and the (PAD)
+copies; a download of the person's in the folder was invisible. Now every
+.vpx in the tables folder that is not a (PAD) copy is listed at once
+(`vpxsetup.downloads_in`), read once per file on the extras thread
+(`vpxsetup.py downloads`: which listed map fits its script, which
+catalogue table its name is, kept in `~/.pad-vpx.downloads.json` by size
+and mtime), a download a known table's map fits goes on that table's row
+(its Patch takes the file without a dialog), and the rest are rows of their
+own: "Stern Spike 1 game: no map yet" with the catalogue's name. The tab
+watches the folder every 3 s while it is up (`_watch_folder`) and re-reads
+the kit's state when a table comes, goes or changes, so a download dropped
+in shows by itself; Check again does the same by hand.
+
 ## The Spike 1 author's checklist (run 2)
 
 `vpxauthor.machine_for(title)` reads a Spike 1 title from its game ELF and

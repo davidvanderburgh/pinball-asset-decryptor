@@ -12,6 +12,7 @@ process:
     vpxsetup.py download <folder>         download the 10.8.0 release and unpack it there
                                           (progress lines first: `progress <0..1>`)
     vpxsetup.py library <folder>          the folder of card images
+    vpxsetup.py downloads [<folder>]      read the downloads in the tables folder (PAD-943)
     vpxsetup.py tables [<folder>]         where the patched tables live (none:
                                           Visual Pinball's own tables folder)
     vpxsetup.py layout <key> <player> <lcd>
@@ -206,6 +207,134 @@ def known_tables(tables_dir=None):
                    source=patched_from(tables_dir, row["output"]) if row["patched"] else "")
         out.append(row)
     return out
+
+
+# ---------------------------------------------- the downloads in the folder --
+#
+# PAD-943 (David: "I just added a handful of VPX original tables to the folder,
+# but the app is not showing them"): every .vpx in the tables folder that is
+# not a (PAD) copy is a download of the person's, and the page lists it - the
+# one a listed map fits on that table's row (its Patch takes the file without
+# asking), the rest as rows of their own saying there is no map yet, named
+# from the catalogue where the file's name matches a table in it. Reading a
+# table's script to see what fits it takes ~0.3 s a file, so that is done
+# once per (file, size, mtime) and kept in the kit's cache; `state` lists the
+# files at once from the cache, `downloads` reads the unread ones.
+DOWNLOADS_CACHE = os.path.join(os.path.expanduser("~"), ".pad-vpx.downloads.json")
+_STOP_WORDS = {"the", "and", "for", "stern", "original", "vpx", "mod", "table", "tribute", "edition",
+               "limited", "pro", "premium", "le", "se", "vpw", "version", "with"}
+
+
+def _words(text):
+    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) > 2 and w not in _STOP_WORDS}
+
+
+def catalog_match(file_name, catalog=None):
+    """The catalogue table a download's file name names, or None: the entry
+    whose name (or game) shares the most significant words with the file,
+    at least two of them and half of its own."""
+    cat = catalog or load_catalog()
+    fw = _words(os.path.splitext(file_name)[0])
+    best, score = None, 0
+    for t in cat.get("tables") or []:
+        if not t.get("url"):
+            continue
+        for key in ("name", "game"):
+            tw = _words(t.get(key))
+            hit = len(fw & tw)
+            if hit >= 2 and hit * 2 >= len(tw) and hit > score:
+                best, score = t, hit
+    if not best:
+        return None
+    plats = cat.get("platforms") or {}
+    return {"platform": best["platform"], "platform_name": (plats.get(best["platform"]) or {}).get("name", ""),
+            "game": best.get("game", ""), "name": best.get("name", ""), "map": best.get("map", "")}
+
+
+def _downloads_cache():
+    try:
+        d = json.load(open(DOWNLOADS_CACHE, encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_downloads_cache(d):
+    try:
+        with open(DOWNLOADS_CACHE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(d, f, indent=1, sort_keys=True)
+        os.replace(DOWNLOADS_CACHE + ".tmp", DOWNLOADS_CACHE)
+    except OSError:
+        pass
+
+
+def downloads_in(tables_dir, cache=None):
+    """The person's own downloads in the tables folder, at once: [{name,
+    file, path, size, mtime, read, title, catalog}], `read` False until
+    read_downloads has looked at the file (then `title` is the listed map
+    that fits it, "" when none, and `catalog` the catalogue's table it is
+    named after, or None)."""
+    if not tables_dir or not os.path.isdir(tables_dir):
+        return []
+    cache = _downloads_cache() if cache is None else cache
+    out = []
+    for f in sorted(os.listdir(tables_dir), key=str.lower):
+        if not f.lower().endswith(".vpx") or "(PAD)" in f:
+            continue
+        path = os.path.join(tables_dir, f)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        row = {"name": os.path.splitext(f)[0], "file": f, "path": path, "size": st.st_size,
+               "mtime": int(st.st_mtime), "read": False, "title": "", "catalog": None}
+        c = cache.get(path)
+        if c and c.get("size") == row["size"] and c.get("mtime") == row["mtime"]:
+            row.update(read=True, title=c.get("title") or "", catalog=c.get("catalog"))
+        out.append(row)
+    return out
+
+
+def read_downloads(tables_dir, say=None):
+    """Read every download not read yet: which listed map fits its script,
+    which catalogue table its name is; kept in the cache. Returns
+    downloads_in() afterwards."""
+    cache = _downloads_cache()
+    catalog = load_catalog()
+    changed = False
+    for row in downloads_in(tables_dir, cache):
+        if row["read"]:
+            continue
+        title = ""
+        try:
+            fits = [t for t, info in padvpx.fitting(row["path"]) if info.get("listed", True)]
+            title = fits[0] if fits else ""
+        except Exception as exc:                            # noqa: BLE001
+            if say:
+                say("%s: not read (%s)" % (row["file"], exc))
+        cache[row["path"]] = {"size": row["size"], "mtime": row["mtime"], "title": title,
+                              "catalog": catalog_match(row["file"], catalog)}
+        changed = True
+        if say:
+            say("read %s: %s" % (row["file"], title or "no map fits it"))
+    if changed:
+        # what is gone from the folder leaves the cache
+        keep = {r["path"] for r in downloads_in(tables_dir, cache)}
+        cache = {k: v for k, v in cache.items() if k in keep or not k.startswith(tables_dir)}
+        _save_downloads_cache(cache)
+    return downloads_in(tables_dir, cache)
+
+
+def link_downloads(rows, downloads):
+    """A known table's row gets `download`: the folder's download its map
+    fits (its Patch then takes the file without asking)."""
+    by_title = {}
+    for d in downloads:
+        if d["read"] and d["title"]:
+            by_title.setdefault(d["title"], d["path"])
+    for row in rows:
+        row["download"] = next((by_title[t] for t in row.get("titles") or [] if t in by_title), "")
+    return rows
 
 
 #: a scripted tribute's bridge names it on Controller; a ROM table's patcher
@@ -501,8 +630,10 @@ def state():
         "tables_own": bool(kit.get("tables")) and tables == kit.get("tables"),
         "library": lib,
         "cards": cards_in(lib),
-        "tables": known_tables(tables),
+        "tables": link_downloads(known_tables(tables), downloads_in(tables)),
         "patched": patched_in(tables),
+        # PAD-943: the person's own downloads in the folder, listed at once
+        "downloads": downloads_in(tables),
         # PAD-943: every platform's tables, where their authors put them
         "catalog": load_catalog(),
         "monitors": len(mons),
@@ -526,6 +657,11 @@ def main(argv):
         out = {"result": "ok", "cards": set_library(os.path.abspath(rest[0]))}
     elif cmd == "layout" and len(rest) == 3:
         out = {"result": apply_layout(rest[0], json.loads(rest[1]), json.loads(rest[2]))}
+    elif cmd == "downloads":
+        # PAD-943: read the downloads in the tables folder (or the one given)
+        tables = rest[0] if rest else vpx_tables_dir()
+        out = {"downloads": read_downloads(tables, say=lambda m: print("say " + m, flush=True)),
+               "tables": link_downloads(known_tables(tables), downloads_in(tables))}
     elif cmd == "download" and len(rest) == 1:
         def prog(f):
             print("progress %.3f" % f, flush=True)

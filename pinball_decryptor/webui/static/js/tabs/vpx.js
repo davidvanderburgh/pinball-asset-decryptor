@@ -141,8 +141,14 @@ export default function Vpx() {
   // PAD-850: ONE list, alphabetical - the tables the app knows, a patched one
   // with its Play button, and any other (PAD) table in the folder as its own row
   const known = new Set(tables.map((t) => t.output));
+  // PAD-943: the person's own downloads in the folder: the one a known table's
+  // map fits is that table's row (Patch takes it); the rest are rows of their
+  // own, "no map yet", named after the catalogue's table where the name matches
+  const linked = new Set(tables.map((t) => t.download).filter(Boolean));
+  const downloads = (s.downloads || []).filter((d) => !linked.has(d.path)).map((d) => ({
+    name: d.name, output: d.file, patched: false, extra: true, download: d }));
   const rows = tables.concat(patched.filter((n) => !known.has(n)).map((n) => ({
-    name: n.replace(/ \(PAD\)\.vpx$/i, ""), output: n, patched: true, extra: true })))
+    name: n.replace(/ \(PAD\)\.vpx$/i, ""), output: n, patched: true, extra: true })), downloads)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   const rtOk = s.runtime_state === "ready";
   // PAD-840: installed from here; the Emulate tab only offers it in some cases
@@ -183,6 +189,16 @@ export default function Vpx() {
       : !t.patched ? "No picture until the table is patched: it is read from your (PAD) copy."
       : s.pictures_busy ? "Reading the table's picture…" : "No picture read yet.";
     return html`<span class="vpx-nopic" ...${tip(why)}></span>`;
+  };
+  // PAD-943: a download's row says what the app knows of it
+  const downloadChip = (d) => {
+    if (!d.read) return html`<span class="vpx-skel vpx-skel-cov" ...${tip("Reading the table…")}></span>`;
+    const c = d.catalog;
+    const head = c ? c.platform_name + " game: no map yet" : "No map yet";
+    return html`<${Chip} sm kind="warn" ...${tip({ head, lines: [
+      c ? "The name says it is " + c.name + " (" + c.game + ")." : "The app does not recognise this table.",
+      "Nothing plays behind it: the app has no map for it yet, so it plays as its author wrote it.",
+      c && c.platform === "spike1" ? "A Spike 1 game: the checklist on the authors' card is where a map starts." : ""].filter(Boolean) })}>${head}<//>`;
   };
   // PAD-941: a row's coverage (the map's wired parts over what the game has, from
   // this PC's tables) is the button that writes that table's checklist
@@ -297,14 +313,15 @@ export default function Vpx() {
         ${rows.map((t) => html`<div class=${"vpx-table" + (t.patched ? "" : " unpatched")}>
         <span class="vpx-pic">${picture(t)}</span>
         <b class="vpx-name" ...${tip(t.extra ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : ""))}>${t.name}</b>
-        <span class="small vpx-by" ...${tip(t.by)}>${t.by}</span>
+        <span class="small vpx-by" ...${tip(t.download && t.extra ? t.download.file : t.by)}>${t.download && t.extra ? "your download" : t.by}</span>
         <span class="small muted vpx-from" ...${tip(t.where)}>${t.where}</span>
         <span class="small" ...${tip(fits(t).length > 1 ? playsAs(t) + "The table fits "
             + fits(t).map((x) => t.models[x]).join(" or ") + "." : "")}>${t.extra ? "" : (t.models || {})[t.title] || ""}</span>
         <span class="small muted vpx-card" ...${tip(t.extra ? "" : t.card ? playsAs(t) + "Card: " + t.card
             : "No card image for " + fits(t).join(" or ") + " in your card folder yet.")}>${t.extra ? ""
           : !t.card ? "No card yet" : base(t.card)}</span>
-        <span>${!t.patched ? html`<${Chip} sm>Not patched<//>`
+        <span>${t.download && t.extra ? downloadChip(t.download)
+          : !t.patched ? html`<${Chip} sm ...${tip(t.download ? "Your download is in the folder: " + base(t.download) + ". Patch writes its (PAD) copy." : "")}>Not patched<//>`
           : stale(t) || missed(t) ? html`<${Chip} kind="warn" dot sm>Patch again<//>`
           : html`<${Chip} kind="ok" dot sm>Patched<//>`}</span>
         <span class="vpx-cover">${t.extra ? null : coverBtn(t)}</span>

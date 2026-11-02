@@ -46,6 +46,20 @@ WINDOW_GAP = 64
 DESC_ALIGN = 0x4000
 #: ``PAD_STERN_COMPACT=0`` leaves ``image.bin`` as the build made it.
 ENV = "PAD_STERN_COMPACT"
+#: PAD-938: how many bytes each descriptor op takes, its op byte with its arguments: the
+#: game's own op table (19 handlers, each beside its argument count, which its goto op skips
+#: ops by), the same on all 90 Spike 2 builds on hand.
+OP_LEN = (1, 3, 3, 1, 3, 7, 1, 2, 5, 16, 2, 12, 10, 3, 5, 2, 5, 2, 9)
+#: PAD-938: the op that hands a channel a sequence table: a channel byte, then the table's
+#: absolute offset in image.bin (8 bytes, whitened with the rest of the descriptor).  The
+#: table is plain bytes, a track count and each track's absolute offset (8 bytes), and the
+#: game reads both straight out of its mapping of image.bin.  Led Zeppelin's songs carry one
+#: each (sound ids 68-93 on LE 1.22): moved without its offsets, the next song crashed the game.
+OP_SEQ = 0x0c
+#: Where a descriptor's script starts (after its magic, two bytes and its declared length).
+OPS_AT = 7
+#: The most of a descriptor read for its script: they lie back to back, a few dozen bytes each.
+DESC_READ = 0x400
 
 Layout = collections.namedtuple(
     "Layout", "moves offsets region region_at region_len md_off size saved gone")
@@ -277,6 +291,7 @@ def compact(fw_path, src_path, dst_path, dead, log, firmware_for=None, samples=8
         keys.boot()
         d = MD.read_directory(src_path, keys)
         slots, vf2 = fragment_slots(src_path, head, keys)
+        fields, tables = song_sequences(fw_path, src_path, md_off)
         emu = Spike2Emu(fw_path, src_path)
         try:
             emu.boot()
@@ -335,6 +350,8 @@ def compact(fw_path, src_path, dst_path, dead, log, firmware_for=None, samples=8
         d2.md_off = layout.md_off
         tail = MD.write_directory(d2, keys)
         tail.update(slot_writes(head, slots, vf2, layout))
+        with open(src_path, "rb") as f:
+            tail.update(sequence_writes(layout, fields, tables, lambda o, n: _read(f, o, n)))
     finally:
         keys.close()
     write_layout(src_path, dst_path, layout, tail)
@@ -359,10 +376,12 @@ def compact(fw_path, src_path, dst_path, dead, log, firmware_for=None, samples=8
                                    % i)
     finally:
         emu.close()
-    n = check_descriptors(fw_path, src_path, fw_out, dst_path, layout)
+    n = check_descriptors(fw_path, src_path, fw_out, dst_path, layout, fields)
+    seqs = check_sequences(src_path, dst_path, layout, fields, tables, fw_out)
     log("image.bin without the bodies nothing plays: %d record(s) checked by a full derive, "
-        "%d sound(s) decoded the same and %d sound id(s) resolved to the same descriptor."
-        % (len(rows2), len(before), n), "info")
+        "%d sound(s) decoded the same, %d sound id(s) resolved to the same descriptor and "
+        "%d song sequence table(s) found where they moved."
+        % (len(rows2), len(before), n, seqs), "info")
     return layout, fw_out
 
 
@@ -415,10 +434,162 @@ def slot_writes(head, slots, vf2, layout):
     return out
 
 
-def check_descriptors(fw_in, src_path, fw_out, dst_path, layout):
+def script_ops(desc):
+    """``[(position, op)]`` - descriptor *desc*'s script (:data:`OP_LEN`) through its end op
+    (0x00), a byte that is no op, or the end of *desc*."""
+    p, out = OPS_AT, []
+    while p < len(desc):
+        op = desc[p]
+        if op >= len(OP_LEN) or p + OP_LEN[op] > len(desc):
+            break
+        out.append((p, op))
+        if op == 0:
+            break
+        p += OP_LEN[op]
+    return out
+
+
+def sequence_fields(descs):
+    """PAD-938: ``{file offset: table offset}`` - every sequence op (:data:`OP_SEQ`) of the
+    descriptors *descs* ``{descriptor offset: de-whitened bytes}``: where its 8-byte offset
+    field is in the file, and the table it names."""
+    import struct
+    out = {}
+    for off, desc in descs.items():
+        for p, op in script_ops(desc):
+            if op == OP_SEQ:
+                out[off + p + 2] = struct.unpack_from("<Q", desc, p + 2)[0]
+    return out
+
+
+def sequence_tables(read, fields, end):
+    """PAD-938: ``{table offset: [track offset, ...]}`` for the tables *fields* names, read
+    with *read(offset, n)*; every one of them must lie before *end* (the directory)."""
+    import struct
+    out = {}
+    for table in sorted(set(fields.values())):
+        head = read(table, 1) if 0 < table < end else b""
+        if not head or not head[0] or table + 8 * (head[0] + 1) > end:
+            raise CompactError("a song's sequence table (offset %d) does not read" % table)
+        raw = read(table, 8 * (head[0] + 1))
+        tracks = [struct.unpack_from("<Q", raw, 8 * (k + 1))[0] for k in range(head[0])]
+        if not all(0 < t < end for t in tracks):
+            raise CompactError("a song's sequence table (offset %d) names a track outside "
+                               "image.bin" % table)
+        out[table] = tracks
+    return out
+
+
+def sequence_writes(layout, fields, tables, read):
+    """PAD-938: ``{file offset: bytes}`` that keep every sequence table *layout* moves named
+    where it lands: each descriptor's offset field (whitened: the bytes on the card XORed
+    with the old offset and the new one, the descriptor's keystream being the same where it
+    moved) and each table's track offsets (plain).  A table and its tracks must move
+    together, so the bytes between them stay as they were."""
+    import struct
+    new = {}
+    for table, tracks in tables.items():
+        moved = {at: translate(layout, at) for at in [table, table + 8 * len(tracks)] + tracks}
+        if None in moved.values() or len({b - a for a, b in moved.items()}) != 1:
+            raise CompactError("a song's sequence table (offset %d) and its tracks do not "
+                               "move together" % table)
+        new[table] = moved[table]
+    out = {}
+    for at, table in fields.items():
+        dst = translate(layout, at)
+        if dst is None:
+            raise CompactError("a song's descriptor (offset %d) would be dropped" % at)
+        if (dst - at) % DESC_ALIGN:
+            raise CompactError("a song's descriptor (offset %d) moves by %d, not a multiple "
+                               "of %#x" % (at, dst - at, DESC_ALIGN))
+        if new[table] != table:
+            disk = read(at, 8)
+            out[dst] = bytes(a ^ b ^ c for a, b, c in zip(
+                disk, struct.pack("<Q", table), struct.pack("<Q", new[table])))
+    for table, tracks in tables.items():
+        if new[table] != table:
+            out[new[table] + 8] = b"".join(
+                struct.pack("<Q", translate(layout, t)) for t in tracks)
+    return out
+
+
+def read_descriptors(emu, path, md_off):
+    """``{offset: de-whitened bytes}`` - every descriptor the game's resolver finds in *path*
+    (*emu*, booted on it), read through to where the next one (or the directory, at
+    *md_off*) starts."""
+    import struct
+
+    from .spike2 import sfx_names as SN
+    res, buf = SN._find_resolver(emu)
+    if res is None:
+        raise CompactError("the game's descriptor resolver could not be located")
+    keys = {}
+    for sid in range(SN.sid_ceiling(path) + 1):
+        r = SN.resolve_descriptor(emu, res, buf, sid)
+        if r is not None:
+            keys[r[0]] = struct.unpack("<I", bytes(emu.mu.mem_read(buf, 4)))[0] - emu.VF2_VA
+    order = sorted(keys)
+    out = {}
+    for off, nxt in zip(order, order[1:] + [md_off]):
+        n = max(0, min(DESC_READ, nxt - off))
+        body = bytes(emu.mm[off:off + n])
+        vf2 = bytes(emu.mu.mem_read(emu.VF2_VA + keys[off], len(body)))
+        out[off] = bytes(a ^ b for a, b in zip(body, vf2))
+    return out
+
+
+def _read(f, off, n):
+    f.seek(off)
+    return f.read(n)
+
+
+def song_sequences(fw_path, path, md_off):
+    """PAD-938: ``(fields, tables)`` of *path* played by *fw_path*: :func:`sequence_fields`
+    of every descriptor and :func:`sequence_tables` of what they name."""
+    from .spike2.emulator import Spike2Emu
+    emu = Spike2Emu(fw_path, path)
+    try:
+        emu.boot()
+        fields = sequence_fields(read_descriptors(emu, path, md_off))
+    finally:
+        emu.close()
+    with open(path, "rb") as f:
+        return fields, sequence_tables(lambda o, n: _read(f, o, n), fields, md_off)
+
+
+def check_sequences(src_path, dst_path, layout, fields, tables, fw_out):
+    """PAD-938: the compacted file read back: its descriptors name every sequence table
+    where *layout* put it, and each table and its tracks hold the same bytes there (but for
+    the track offsets, which name the tracks where they moved).  Returns how many tables."""
+    if not fields:
+        return 0
+    got, moved = song_sequences(fw_out, dst_path, layout.md_off)
+    want = {translate(layout, at): translate(layout, t) for at, t in fields.items()}
+    if got != want:
+        raise CompactError("%d song sequence reference(s) name another place in the compacted "
+                           "image.bin" % len(set(got.items()) ^ set(want.items())))
+    with open(src_path, "rb") as a, open(dst_path, "rb") as b:
+        for table, tracks in tables.items():
+            nt = translate(layout, table)
+            if moved.get(nt) != [translate(layout, t) for t in tracks]:
+                raise CompactError("a song's sequence table (offset %d) names other tracks "
+                                   "in the compacted image.bin" % table)
+            if _read(a, table, 1) != _read(b, nt, 1):
+                raise CompactError("a song's sequence table (offset %d) has another track "
+                                   "count in the compacted image.bin" % table)
+            for t in tracks:
+                n = min(256, table - t) if t < table else 256
+                if _read(a, t, n) != _read(b, translate(layout, t), n):
+                    raise CompactError("a song's sequence track (offset %d) holds other "
+                                       "bytes in the compacted image.bin" % t)
+    return len(tables)
+
+
+def check_descriptors(fw_in, src_path, fw_out, dst_path, layout, fields=None):
     """Every sound id resolved through the game's own resolver on both files: the same
-    descriptor bytes, where *layout* put them.  Returns how many resolved; raises
-    :class:`CompactError` on the first that does not match."""
+    descriptor bytes, where *layout* put them (but for the sequence offsets *fields*
+    ``{file offset: table offset}``, which name the tables where they moved).  Returns how
+    many resolved; raises :class:`CompactError` on the first that does not match."""
     import struct
 
     from .spike2 import sfx_names as SN
@@ -452,7 +623,14 @@ def check_descriptors(fw_in, src_path, fw_out, dst_path, layout):
         # (the resolver's window runs on past the last descriptor into the directory,
         # which is not the same bytes where it moved)
         n = max(0, min(len(desc), md_off - off))
-        if noff != translate(layout, off) or ndesc[:n] != desc[:n]:
+        want = bytearray(desc[:n])
+        for at, table in (fields or {}).items():
+            # (the window may hold the next descriptor's field, or part of it, de-whitened
+            # with this one's keystream: either way its bytes moved by old ^ new)
+            old, new = struct.pack("<Q", table), struct.pack("<Q", translate(layout, table))
+            for k in range(max(at, off), min(at + 8, off + n)):
+                want[k - off] ^= old[k - at] ^ new[k - at]
+        if noff != translate(layout, off) or ndesc[:n] != bytes(want):
             raise CompactError("sound id %d resolves to another descriptor on the compacted "
                                "image.bin (offset %d -> %d)" % (sid, off, noff))
     if not a:

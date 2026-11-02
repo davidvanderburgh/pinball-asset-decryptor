@@ -116,6 +116,98 @@ def test_fragment_slots_are_rewritten_for_the_moved_descriptors():
         IC.slot_writes(bytes(head), {3: records[2][0] + 1000}, vf2, lay)
 
 
+# --------------------------------------------------------------------------
+# PAD-938: the songs' sequence tables (Led Zeppelin) move with their offsets
+# --------------------------------------------------------------------------
+def _song_desc(table, ch=0):
+    """A descriptor that plays a record after handing channel *ch* the sequence table at
+    *table*: magic, two bytes, declared length, then the script."""
+    return (b"\x05\x80\x01" + struct.pack("<I", 4000)[:3] + b"\x00"
+            + bytes([IC.OP_SEQ, ch]) + struct.pack("<Q", table)
+            + bytes([0x0b, ch, 0, 0]) + b"K" * 8 + b"\x11\x00" + b"\x00")
+
+
+def test_script_ops_walks_by_the_game_s_op_lengths():
+    d = _song_desc(1234)
+    assert [op for _p, op in IC.script_ops(d)] == [IC.OP_SEQ, 0x0b, 0x11, 0x00]
+    # a loop back (0x03) does not end the walk, the end op does; a byte that is no op stops it
+    d2 = d[:7] + b"\x07\x00\x03\x09" + b"\0" * 15 + b"\x00"
+    assert [op for _p, op in IC.script_ops(d2)] == [0x07, 0x03, 0x09, 0x00]
+    assert IC.script_ops(d[:7] + b"\x30\x00") == []
+    assert IC.OP_LEN[IC.OP_SEQ] == 10 and len(IC.OP_LEN) == 19
+
+
+def test_sequence_fields_name_each_song_s_table():
+    descs = {5000: _song_desc(900), 5040: _song_desc(950), 5080: b"\x05" + b"\0" * 7}
+    assert IC.sequence_fields(descs) == {5000 + 9: 900, 5040 + 9: 950}
+
+
+def _tables_card(tmp_path):
+    """A card of 6 records, two song tracks and their tables after the last body, then the
+    descriptor block (two song descriptors, whitened with a keystream) and the tail."""
+    records, windows, desc_at, md_off, size = _card(n=6, size=50_000, desc=3000)
+    rnd = random.Random(938)
+    data = bytearray(rnd.getrandbits(8) for _ in range(size))
+    seq_at = desc_at
+    track = [seq_at, seq_at + 300]
+    tables = [seq_at + 600, seq_at + 640]
+    for t, tr in zip(tables, track):
+        data[t:t + 16] = b"\x01" + b"\0" * 7 + struct.pack("<Q", tr)
+    d_at = seq_at + 1000                            # the descriptors, past the tables
+    descs = {d_at: _song_desc(tables[0]), d_at + 40: _song_desc(tables[1])}
+    ks = bytes(rnd.getrandbits(8) for _ in range(64))
+    for off, d in descs.items():
+        data[off:off + len(d)] = bytes(a ^ b for a, b in zip(d, ks))
+    src = tmp_path / "in.bin"
+    src.write_bytes(bytes(data))
+    return records, windows, seq_at, md_off, size, descs, ks, tables, track, src
+
+
+def test_sequence_writes_name_the_tables_where_they_moved(tmp_path):
+    (records, windows, seq_at, md_off, size, descs, ks, tables, track,
+     src) = _tables_card(tmp_path)
+    fields = IC.sequence_fields(descs)
+    with open(src, "rb") as f:
+        tabs = IC.sequence_tables(lambda o, n: IC._read(f, o, n), fields, md_off)
+    assert tabs == {tables[0]: [track[0]], tables[1]: [track[1]]}
+    lay = IC.plan_layout(size, md_off, 40, records, {1, 3}, {r: windows[r] for r in (1, 3)},
+                         pinned=[min(descs)])
+    assert IC.translate(lay, tables[0]) != tables[0]            # the songs' data moved
+    with open(src, "rb") as f:
+        w = IC.sequence_writes(lay, fields, tabs, lambda o, n: IC._read(f, o, n))
+    dst = tmp_path / "out.bin"
+    IC.write_layout(str(src), str(dst), lay, w)
+    out, data = dst.read_bytes(), src.read_bytes()
+    for off, d in descs.items():
+        n = IC.translate(lay, off)
+        plain = bytes(a ^ b for a, b in zip(out[n:n + len(d)], ks))   # the same keystream
+        (at, table), = IC.sequence_fields({off: plain}).items()
+        assert table == IC.translate(lay, struct.unpack_from("<Q", d, 9)[0])
+        # every other byte of the descriptor is as it was
+        assert plain[:9] == d[:9] and plain[17:] == d[17:]
+        old_track = dict(zip(tables, track))[struct.unpack_from("<Q", d, 9)[0]]
+        cnt, tr = out[table], struct.unpack_from("<Q", out, table + 8)[0]
+        assert cnt == 1 and tr == IC.translate(lay, old_track)
+        assert out[tr:tr + 64] == data[old_track:old_track + 64]
+
+
+def test_a_sequence_table_that_does_not_read_or_does_not_move_whole_is_refused(tmp_path):
+    (records, windows, seq_at, md_off, size, descs, _ks, tables, track,
+     src) = _tables_card(tmp_path)
+    fields = IC.sequence_fields(descs)
+    with open(src, "rb") as f:
+        rd = lambda o, n: IC._read(f, o, n)                         # noqa: E731
+        with pytest.raises(IC.CompactError, match="does not read"):
+            IC.sequence_tables(rd, {1: md_off + 10}, md_off)        # past the directory
+        tabs = IC.sequence_tables(rd, fields, md_off)
+        # a track the layout drops (it lay in a body that came out) is refused
+        tabs[tables[0]] = [records[1][0] + 5000]
+        lay = IC.plan_layout(size, md_off, 40, records, {1}, {1: windows[1]},
+                             pinned=[min(descs)])
+        with pytest.raises(IC.CompactError, match="do not move together"):
+            IC.sequence_writes(lay, fields, tabs, rd)
+
+
 def test_rows_differ_allows_only_the_body_offset():
     records, windows, desc_at, md_off, size = _card(n=3, size=50_000)
     lay = IC.plan_layout(size, md_off, 40, records, {1}, {1: windows[1]}, pinned=[desc_at])

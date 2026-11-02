@@ -41,6 +41,7 @@ class _App:
 
     def __init__(self):
         self.window = _Window()
+        self._settings = {}          # PAD-937: Old versions unset
         self.closed = False
         self.saved = 0
 

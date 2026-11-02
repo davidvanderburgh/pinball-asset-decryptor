@@ -520,7 +520,7 @@ def test_a_rows_coverage_button_checks_the_download_it_was_patched_from(tab, mon
     assert tab.row_checklist("The Beatles_007 (PAD).vpx")        # no record of the download: the (PAD) copy
     _wait(tab)
     args = [c for c in tab.calls if c[0] == "vpxauthor.py" and c[1][0] == "data"][-1][1]
-    assert args == ["data", "beatles", "--table", r"C:\VP\tables\The Beatles_007 (PAD).vpx"]
+    assert args == ["data", "beatles", "--table", os.path.join(r"C:\VP\tables", "The Beatles_007 (PAD).vpx")]
     tab.window.ctx.store.set("vpx", tables=rows)
     assert tab.row_checklist("Godzilla (PAD).vpx")                # not patched: the game alone
     _wait(tab)

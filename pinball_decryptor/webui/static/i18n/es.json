@@ -12832,5 +12832,12 @@
 "Renamed {} sound(s).": "{} sonido(s) renombrado(s).",
 "{} of them were modded with no extract baseline, so their names are not remembered for future extracts.": "{} de ellos se modificaron sin referencia de extracción, así que sus nombres no se recuerdan para futuras extracciones.",
 "{} couldn't be renamed:": "{} no se pudieron renombrar:",
-"Fixing many at once: correct the text column of the project's callouts.csv (by hand or in a spreadsheet), save it, then **More > Rename from callouts.csv…** renames every sound to its corrected text. Characters a file name can't hold become _, and the names are remembered like a rename in Properties.": "Para corregir muchos a la vez: corrige la columna text del callouts.csv del proyecto (a mano o en una hoja de cálculo), guárdalo y **Más > Renombrar desde callouts.csv…** renombra cada sonido con su texto corregido. Los caracteres que un nombre de archivo no admite pasan a ser _, y los nombres se recuerdan como un cambio de nombre en Propiedades."
+"Fixing many at once: correct the text column of the project's callouts.csv (by hand or in a spreadsheet), save it, then **More > Rename from callouts.csv…** renames every sound to its corrected text. Characters a file name can't hold become _, and the names are remembered like a rename in Properties.": "Para corregir muchos a la vez: corrige la columna text del callouts.csv del proyecto (a mano o en una hoja de cálculo), guárdalo y **Más > Renombrar desde callouts.csv…** renombra cada sonido con su texto corregido. Los caracteres que un nombre de archivo no admite pasan a ser _, y los nombres se recuerdan como un cambio de nombre en Propiedades.",
+"Old versions": "Versiones antiguas",
+"Keep them all": "Conservarlas todas",
+"Keep the last 3": "Conservar las 3 últimas",
+"Keep the last one": "Conservar la última",
+"Delete them": "Eliminarlas",
+"Old versions of PAD: {}.": "Versiones antiguas de PAD: {}.",
+"Each update saves the new AppImage beside the old one. This picks how many older ones PAD keeps and deletes the rest, now and each time PAD starts. The one you are running and any newer download are never touched.": "Cada actualización guarda el nuevo AppImage junto al anterior. Esto elige cuántos de los anteriores conserva PAD y elimina el resto, ahora y cada vez que PAD se inicia. El que estás usando y cualquier descarga más reciente nunca se tocan."
 }

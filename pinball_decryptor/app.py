@@ -506,6 +506,8 @@ class App:
             on_voice_quality_change=self._on_voice_quality_change,
             initial_update_interval=s.get("update_check_hours"),
             on_update_interval_change=self._on_update_interval_change,
+            initial_old_versions=s.get("old_versions_keep"),
+            on_old_versions_change=self._on_old_versions_change,
             initial_autosave_interval=s.get("autosave_minutes"),
             on_autosave_interval_change=self._on_autosave_interval_change,
             initial_audio_advanced=s.get("audio_advanced") or {},
@@ -560,6 +562,9 @@ class App:
         self._refresh_title()
         self._log_preview_startup()
         self.root.after(1500, self._check_for_update)
+        if not os.environ.get("PAD_UI_NO_UPDATE_CHECK"):
+            # captures and tests never delete the PC's real files
+            self.root.after(2500, self._prune_old_versions, True)
         self._schedule_autosave()
 
     def accept_disclaimer(self, accepted):
@@ -5390,6 +5395,60 @@ class App:
             "Automatic update check: %s." % label.lower(), "info")
         self._schedule_update_recheck()
 
+    def _on_old_versions_change(self, keep):
+        """Persist the ⚙ Updates > Old versions pick and apply it now
+        (PAD-937)."""
+        from .core.old_versions import (OLD_VERSIONS_CHOICES,
+                                        normalize_old_versions)
+        keep = normalize_old_versions(keep)
+        self._settings["old_versions_keep"] = keep
+        self._save_settings()
+        label = dict(OLD_VERSIONS_CHOICES).get(keep, str(keep))
+        self.window.append_log(
+            "Old versions of PAD: %s." % label.lower(), "info")
+        self._prune_old_versions()
+
+    def _prune_old_versions(self, installers=False):
+        """Delete what earlier updates left behind (PAD-937): old AppImages
+        past the ⚙ Old versions pick and, with ``installers`` (at startup),
+        the temp folder's old setup exes and disk images.  Off the main
+        thread (a slow home folder); each deleted file is logged."""
+        from .core import old_versions
+        keep = old_versions.normalize_old_versions(
+            self._settings.get("old_versions_keep"))
+        current = old_versions.running_appimage()
+
+        def _run():
+            deleted, failed = [], []
+            jobs = [lambda: old_versions.prune_old_appimages(
+                current, __version__, keep)]
+            if installers:
+                jobs.append(
+                    lambda: old_versions.prune_old_installers(__version__))
+            for fn in jobs:
+                try:
+                    d, f = fn()
+                except Exception as e:                  # noqa: BLE001
+                    d, f = [], [("", str(e))]
+                deleted += d
+                failed += f
+
+            def _report():
+                for path in deleted:
+                    self.window.append_log(
+                        "Deleted an old version of PAD: %s" % path, "info")
+                for path, err in failed:
+                    self.window.append_log(
+                        "Couldn't delete an old version of PAD%s: %s" % (
+                            " (%s)" % path if path else "", err), "warning")
+            if deleted or failed:
+                try:
+                    self.root.after(0, _report)
+                except RuntimeError:
+                    pass                   # window gone
+        threading.Thread(target=_run, daemon=True,
+                         name="prune-old-versions").start()
+
     def _schedule_autosave(self):
         """(Re-)arm the ⚙ "Save automatically" timer (PAD-541).
 
@@ -5676,12 +5735,22 @@ class App:
                 f"({e}) — run `chmod +x` on it before starting it.", "warning")
         self.window.append_log(f"Update v{version} downloaded to {path}.",
                                "success")
+        # PAD-937: with ⚙ Updates > Old versions set, the new one clears the
+        # old ones away when it starts, so don't hand the user the chore
+        from .core.old_versions import normalize_old_versions
+        if normalize_old_versions(self._settings.get("old_versions_keep")) < 0:
+            old_note = ("The version you're running now is untouched — "
+                        "delete its AppImage whenever you're happy with the "
+                        "new one, or pick Settings > Updates > Old versions "
+                        "to have PAD do it.")
+        else:
+            old_note = ("The version you're running now is untouched; the "
+                        "new one clears old versions away when it starts "
+                        "(Settings > Updates > Old versions).")
         if not messagebox.askyesno(
                 "Update downloaded",
                 f"Version {version} has been saved to:\n\n{path}\n\n"
-                "Start it now?  This window will close.\n\n"
-                "The version you're running now is untouched — delete its "
-                "AppImage whenever you're happy with the new one.",
+                "Start it now?  This window will close.\n\n" + old_note,
                 default="yes"):
             return
         # BEFORE THE SUCCESSOR IS STARTED, not on the way out behind it: the

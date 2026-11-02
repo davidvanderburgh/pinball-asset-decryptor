@@ -1,6 +1,6 @@
 /* Visual Pinball (PAD-802): the kit's setup, the tables it patches, Play.
    PAD-927: laid out for one screen - a two-line strip (setup marks, windows)
-   over a two-column grid of one-line table rows. */
+   over the tables, one per line under labelled columns (PAD-940). */
 .vpx-status { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; min-height: 24px; }
 .vpx-prog { flex: 1; max-width: 320px; }
 .vpx-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
@@ -22,11 +22,20 @@
 /* the tables: folder and buttons in the head, rows in two columns */
 .vpx-tables > .hd { padding: 8px 16px; }
 .vpx-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* alphabetical down each column, then the next (CSS columns, not grid) */
-.vpx-grid { columns: 560px auto; column-gap: 32px; }
-.vpx-table { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) auto; break-inside: avoid;
-  align-items: center; column-gap: 12px; padding: 3px 0; min-height: 36px; border-bottom: 1px solid var(--line); }
-.vpx-table > .vpx-name, .vpx-table > .vpx-card { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* PAD-940: one table per line, the same columns on every line under a head
+   row (Patch and Play a fixed-width column each, so every button lines up) */
+.vpx-table { display: grid; align-items: center; column-gap: 14px; padding: 3px 4px; min-height: 36px;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1.7fr) minmax(0, 1.1fr) 56px minmax(0, 2fr) 104px 128px 76px;
+  border-bottom: 1px solid var(--line); }
+.vpx-table > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.vpx-table:not(.vpx-head):hover { background: var(--panel-2); }
+.vpx-head { min-height: 26px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+.vpx-table > .vpx-patch, .vpx-table > .vpx-play { overflow: visible; }
 .vpx-table.unpatched > .vpx-name { color: var(--ink-3); font-weight: 500; }
-.vpx-stale { grid-column: 1 / -1; padding: 0 0 4px; }
-html.w-stack .vpx-grid { columns: 1; }
+.vpx-stale { grid-column: 1 / -1; padding: 0 0 4px; white-space: normal; }
+/* narrower windows drop the author (still in the name's tip); From stays:
+   it is where an unpatched table is downloaded from */
+@media (max-width: 1400px) {
+  .vpx-table { grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) 56px minmax(0, 2fr) 104px 128px 76px; }
+  .vpx-table > .vpx-by { display: none; }
+}

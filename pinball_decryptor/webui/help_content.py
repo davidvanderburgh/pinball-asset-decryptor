@@ -256,6 +256,20 @@ HELP_CONTENT = {
          "they are: make them the same for every song on the Video and Text tabs.\n"
          "- An extract of a card built with a jukebox brings it back.\n"
          "- Needs an image build, not a direct SD write."),
+        ("Sounds on shots",
+         "Stern Spike 2. While one of the game's modes runs, a hit on a shot you pick "
+         "plays a sound you pick: one of the game's own sounds (one it never plays, say) or a "
+         "file of yours.\n\n"
+         "- Right-click a sound > **Play on a shot in one of the game's modes…** opens the "
+         "window with that sound, or **Sounds on shots** at the top of the tab. Pick the mode "
+         "(the game's own name for it), the shot (the game's own switch name) and the sound, "
+         "then **Add**. Up to 32.\n"
+         "- The sound plays whole, beside the game's own sounds, and only while that mode runs. "
+         "A hit while it still plays adds no other one, so a spinner does not stack them.\n"
+         "- On a game whose modes the app cannot tell running, the button says why.\n"
+         "- An extract of a card built with them brings them back, and **Save the music modes "
+         "to a file…** carries them to another project of the same game.\n"
+         "- Needs an image build, not a direct SD write."),
         ("Replace from folder",
          "**Replace from folder…**, beside the project folder, picks a whole folder "
          "of your files at once: each file goes to the slot with its name.\n\n"

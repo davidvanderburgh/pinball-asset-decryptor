@@ -474,6 +474,57 @@ function JukeboxModal({ data, onClose }) {
   <//>`;
 }
 
+// PAD-945: sounds on the shots of the game's modes - a hit on a shot while one of the game's modes
+// runs plays a sound: the header button (and a row's right-click) opens the list
+function ShotsButton({ g, onOpen }) {
+  return html`<span ...${tip({ head: "Sounds on shots", lines: g.tip || [] })}><${Button} kind="ghost" icon="audio"
+    onClick=${() => (g.why ? call("audio.shots_action", "why") : onOpen())}>${g.n ? `Sounds on shots (${g.n})` : "Sounds on shots"}<//></span>`;
+}
+
+function ShotsModal({ data, onClose }) {
+  const [d, setD] = useState(data);
+  const [mode, setMode] = useState("");
+  const [shot, setShot] = useState("");
+  const act = async (a) => { const got = await call("audio.shots_action", a); if (got) setD(got); };
+  const rows = d.rows || [];
+  const modes = d.modes || [];
+  const shots = d.shots || [];
+  const m = mode || (modes[0] || {}).value || "";
+  const s = shot || (shots[0] || {}).value || "";
+  const full = rows.length >= (d.max || 0);
+  return html`<${Modal} title="Sounds on shots" icon="audio" wide onClose=${onClose}
+    footer=${html`<span class="grow"></span><${Button} kind="primary" onClick=${onClose}>Close<//>`}>
+    <div class="stack" style="gap:10px">
+      <p class="aud-p">${d.tip}</p>
+      ${d.why ? html`<${Note} kind="warn">${d.why}<//>` : null}
+      ${rows.length ? html`<div class="aud-juke"><table>
+        <thead><tr><th>#</th><th>In the game's mode</th><th>When this shot is hit</th><th>It plays</th><th></th></tr></thead>
+        <tbody>${rows.map((r) => html`<tr class=${cx(r.gone && "gone")} title=${r.gone ? "This sound's file is not on this PC any more" : ""}>
+          <td class="muted">${r.k}</td>
+          <td><span class="nw">${r.mode}</span></td>
+          <td><span class="nw">${r.shot}</span></td>
+          <td><span class="nw">${r.sound}</span></td>
+          <td class="nw">
+            <${Button} size="sm" kind="ghost" icon="play" title="Play this sound" onClick=${() => act(`play:${r.k}`)} />
+            <${Button} size="sm" kind="ghost" icon="x" title="Take this one out" disabled=${d.running} onClick=${() => act(`off:${r.k}`)} />
+          </td></tr>`)}</tbody></table></div>`
+        : html`<div class="muted">None yet. Pick a mode, a shot and a sound below, then Add.</div>`}
+      ${d.why ? null : html`<div class="row wrap" style="gap:8px">
+        <span class="lbl nw">In</span>
+        <${Select} sm value=${m} options=${modes} onChange=${setMode} width=${200} title="One of the game's modes" />
+        <span class="lbl nw">when</span>
+        <${Select} sm value=${s} options=${shots} onChange=${setShot} width=${200} title="The shot (the game's own switch name)" />
+        <span class="lbl nw">is hit, play</span>
+        <${Button} size="sm" drop title="The sound: one of the game's own (in the project's audio folder) or a file of yours"
+          onClick=${() => act("choose")}>${d.pick || "Choose a sound…"}<//>
+        <${Button} size="sm" kind="primary" icon="plus" disabled=${!d.pick || !m || !s || full || d.running}
+          title=${full ? `At most ${d.max}` : !d.pick ? "Choose the sound first" : "Add this sound on that shot"}
+          onClick=${() => act(`add:${m}:${s}`)}>Add<//>
+      </div>`}
+    </div>
+  <//>`;
+}
+
 export default function AudioTab() {
   const s = useNs("audio");
   const shell = useNs("shell");
@@ -489,6 +540,7 @@ export default function AudioTab() {
   const [props, setProps] = useState(null);
   const [adv, setAdv] = useState(null);
   const [juke, setJuke] = useState(null);
+  const [shotsWin, setShotsWin] = useState(null);
   const selKey = JSON.stringify(s.sel || []);
   useEffect(() => {
     const next = s.sel || [];
@@ -600,6 +652,7 @@ export default function AudioTab() {
   const doAction = async (action, rel, cur) => {
     const res = await call("audio.menu_action", action, rel, cur);
     if (res && res.open === "props" && res.data) setProps(res.data);
+    if (res && res.open === "shots" && res.data) setShotsWin(res.data);
   };
   const onContext = async (r, i, e) => {
     if (!r || r.g) return;
@@ -630,6 +683,10 @@ export default function AudioTab() {
   const openJuke = async () => {
     const data = await call("audio.jukebox_open");
     if (data) setJuke(data);
+  };
+  const openShots = async () => {
+    const data = await call("audio.shots_open");
+    if (data) setShotsWin(data);
   };
   const onKey = (e) => {
     if (e.key === " " || e.code === "Space") {
@@ -739,6 +796,7 @@ export default function AudioTab() {
       ${s.attract ? html`<${Button} kind="ghost" icon="audio" title="The attract flipper sounds are on the Attract page now"
         onClick=${() => call("ui.select_tab", "attract")}>Attract flipper sounds…<//>` : null}
       ${s.jukebox ? html`<${JukeboxButton} j=${s.jukebox} onOpen=${openJuke} />` : null}
+      ${s.shots ? html`<${ShotsButton} g=${s.shots} onOpen=${openShots} />` : null}
       ${s.adv_cap ? html`<${Button} kind="ghost" icon="gear" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>` : null}
       <${Button} kind="ghost" icon="more" label="More" busy=${s.profile_busy}
         title=${"More: Export CSV, Rename from callouts.csv, Clear replacements…, Save / load settings" + (s.modes_share ? ", Save / load music modes" : "") + (s.adv_full ? ", Profile vs stock" : "")}
@@ -806,6 +864,7 @@ export default function AudioTab() {
     ${props ? html`<${PropsModal} data=${props} onClose=${() => setProps(null)} />` : null}
     ${adv ? html`<${AdvancedModal} data=${adv} onClose=${() => setAdv(null)} />` : null}
     ${juke ? html`<${JukeboxModal} data=${juke} onClose=${() => setJuke(null)} />` : null}
+    ${shotsWin ? html`<${ShotsModal} data=${shotsWin} onClose=${() => setShotsWin(null)} />` : null}
     ${s.originals && s.originals.open ? html`<${OriginalsWindow} ns="audio" o=${s.originals} />` : null}
   </div>`;
 }

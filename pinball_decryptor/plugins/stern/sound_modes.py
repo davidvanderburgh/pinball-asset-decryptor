@@ -101,6 +101,18 @@ key, the flipper buttons' switch ids and each file's record key and length (``at
 ``afile`` lines). The runtime (pad_mode_runtime.c "attract flipper sounds") hooks the framework's
 switch drain and plays the carrier with the next file's key swapped in at the game's record lookup,
 only while the game's mode mask says attract, and not while the last one still plays.
+
+SOUNDS ON SHOTS IN THE GAME'S MODES (PAD-945): a tester on Venom asked to put "unused game's
+sounds on shots that don't have sound requests" in one of the game's modes (Grendel Mode). The
+project lists rows (``shots``: ``[{"mode", "mode_name", "switch", "switch_name", "file"}, ...]``, at
+most :data:`SHOT_MAX`): while the game's mode ``mode`` (an id the card's port names, ``text
+block_name_<id>``) runs, a press of switch ``switch`` plays ``file``. The game has no sound there, so
+the files ride a carrier as the flipper buttons' sounds in attract do (another request the game never
+plays): each a record of its own under a pseudo mode (:func:`shot_mode`) on the carrier's slot, played
+whole, and ``sounds.cfg`` names the carrier and its record's key (``gshot``) and, per file, the mode,
+the switch, its record's key and its length (``gsfile``). The runtime (pad_mode_runtime.c "a sound on a
+shot") hooks the framework's switch drain and plays the carrier with the file's key swapped in, only
+in a game while that mode's own ACTIVE virtual says it runs, and not while the last one still plays.
 """
 from __future__ import annotations
 
@@ -160,6 +172,13 @@ MODE_TURN_BASE = 1000
 #: above :data:`TURN_BASE`, so the build treats it as a file in turn, matched to its slot's loudness -
 #: but never cut: the game plays a song whole, :mod:`.jukebox`)
 JUKE_BASE = 5000
+#: PAD-945: the sound on a shot k (1..) is built under pseudo mode SHOT_BASE + k (:func:`shot_mode`;
+#: above :data:`TURN_BASE`, so the build treats it as a file in turn, matched to the carrier's loudness -
+#: but never cut, as a flipper sound in attract is not); between the music modes' own files in turn
+#: (up to MODE_TURN_BASE + 8 * 20 + 16) and the jukebox
+SHOT_BASE = 3000
+#: PAD-945: the most sounds on shots a project may have (pad_mode_runtime.c GMS_FILES)
+SHOT_MAX = 32
 #: PAD-565: ``<game>-<version>`` of the builds where the sounds in turn were SEEN working: the
 #: LATEST build of every Stern Spike 2 game in the image library (David: "just the latest
 #: versions"), each swept in the emulator (an override set built by Write's own code, the slot's
@@ -200,6 +219,10 @@ NOT_SOUND_TURN = "Only a sound the game keeps in its sound bank (an idx file) ca
 NO_TITLE_ATTRACT = ("The app cannot tell which game this project is for, so it cannot give its flipper "
                     "buttons sounds in attract mode.")
 NO_ATTRACT = ("Sounds for the flipper buttons in attract mode are not offered on %s: %s.")
+#: PAD-945: why the game's modes cannot play sounds on shots on a build
+NO_TITLE_SHOTS = ("The app cannot tell which game this project is for, so it cannot add sounds to "
+                  "the shots of the game's modes.")
+NO_SHOTS = "Sounds on the shots of the game's modes are not offered on %s: %s."
 
 _IDX_RE = re.compile(r"(?:^|/)idx(\d+)")
 
@@ -244,12 +267,19 @@ class Modes:
     juke_rel: str = ""
     #: PAD-685: the build's jukebox: ``{"box": jukebox.Jukebox, "prof": profile}`` (never saved)
     juke_plan: dict = field(default_factory=dict)
+    #: PAD-945: sounds on shots in the game's modes: ``[{"mode", "mode_name", "switch",
+    #: "switch_name", "file"}, ...]``
+    shots: list = field(default_factory=list)
+    #: PAD-945: the carrier's slot the files are built on, and the build's carrier ``{"request",
+    #: "slot"}`` (a build sets them; never saved)
+    shot_rel: str = ""
+    shot_plan: dict = field(default_factory=dict)
 
     @property
     def any(self):
         """Whether a build has anything of these to carry: a music mode, a sound in turn or a
-        sound for the flipper buttons in attract."""
-        return bool(self.count or self.turns or self.attract or self.jukebox)
+        sound for the flipper buttons in attract (PAD-945: or a sound on a shot in a game mode)."""
+        return bool(self.count or self.turns or self.attract or self.jukebox or self.shots)
 
     @property
     def count(self):
@@ -260,6 +290,8 @@ class Modes:
     def name(self, mode):
         if is_juke(mode):
             return "jukebox"
+        if is_shot(mode):
+            return "on a shot"
         if is_attract(mode):
             return "in attract"
         if is_mode_turn(mode):
@@ -288,13 +320,15 @@ class Modes:
                 + ([(self.attract_rel, attract_mode(ATTRACT_QUIET), self.attract_quiet)]
                    if self.attract_rel and self.attract_quiet and self.attract else [])
                 + ([(self.juke_rel, juke_mode(k), f) for k, f in enumerate(self.jukebox, 1)]
-                   if self.juke_rel else []))
+                   if self.juke_rel else [])
+                + ([(self.shot_rel, shot_mode(k), r["file"]) for k, r in enumerate(self.shots, 1)]
+                   if self.shot_rel else []))
 
     def level(self, rel, mode):
         """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
         sound), or ``None`` for a project saved before mode files had their own. A file in turn
         has a loudness of its own too (PAD-638: ``turn_levels``), 0 unless one was set."""
-        if is_juke(mode):
+        if is_juke(mode) or is_shot(mode):
             return 0
         if is_mode_turn(mode):
             m, k = mode_turn_of(mode)
@@ -333,7 +367,21 @@ def mode_turn(m, k):
 
 
 def is_mode_turn(mode):
-    return MODE_TURN_BASE < int(mode) < JUKE_BASE
+    return MODE_TURN_BASE < int(mode) < SHOT_BASE
+
+
+def shot_mode(k):
+    """PAD-945: the pseudo mode the sound on a shot *k* (1..:data:`SHOT_MAX`) is built under."""
+    return SHOT_BASE + int(k)
+
+
+def is_shot(mode):
+    return SHOT_BASE < int(mode) < JUKE_BASE
+
+
+def shot_of(mode):
+    """Row k of the sounds on shots, from its pseudo mode."""
+    return int(mode) - SHOT_BASE
 
 
 def juke_mode(k):
@@ -370,6 +418,8 @@ def turn_of(mode):
     """File k of a slot's sounds in turn, from its pseudo mode (PAD-638: of a music mode's too)."""
     if is_juke(mode):
         return int(mode) - JUKE_BASE
+    if is_shot(mode):
+        return shot_of(mode)
     if is_mode_turn(mode):
         return mode_turn_of(mode)[1]
     return int(mode) - TURN_BASE
@@ -379,6 +429,8 @@ def who(mode):
     """The log lines' heading for a file built under *mode*."""
     if is_juke(mode):
         return "Jukebox"
+    if is_shot(mode):
+        return "Sounds on shots"
     if is_attract(mode):
         return "Attract flipper sounds"
     return "Sounds in turn" if is_turn(mode) else "Music modes"
@@ -389,6 +441,8 @@ def what(rel, mode, name=""):
     base = os.path.basename(str(rel).replace("\\", "/"))
     if is_juke(mode):
         return "song %d" % turn_of(mode)
+    if is_shot(mode):
+        return "sound on a shot %d" % shot_of(mode)
     if is_attract(mode):
         if attract_of(mode) == ATTRACT_QUIET:
             return "the silence the game's own sound at a press plays"
@@ -406,6 +460,8 @@ def tag(rel, mode):
     base = os.path.basename(str(rel).replace("\\", "/"))
     if is_juke(mode):
         return "jukebox song %d" % turn_of(mode)
+    if is_shot(mode):
+        return "sound on a shot %d in one of the game's modes" % shot_of(mode)
     if is_attract(mode):
         if attract_of(mode) == ATTRACT_QUIET:
             return "the silence for the game's own sound at a flipper button press in attract"
@@ -421,6 +477,8 @@ def when(mode):
     """When the game plays a file built under *mode*: "while MUSIC MODE is 2", "every 2nd time"."""
     if is_juke(mode):
         return "when the jukebox draws it for a song mode"
+    if is_shot(mode):
+        return "at a shot in one of the game's modes (sound %d)" % shot_of(mode)
     if is_attract(mode):
         if attract_of(mode) == ATTRACT_QUIET:
             return "in place of the game's own sound at a flipper button press in attract"
@@ -555,6 +613,7 @@ def clean(raw):
     if isinstance(attract, (list, tuple)):
         out.attract = [f for f in attract if isinstance(f, str) and f.strip()][:ATTRACT_MAX]
     out.attract_gap = clean_gap(raw.get("attract_gap")) if out.attract else 0
+    out.shots = clean_shots(raw.get("shots"))
     levels = raw.get("levels")
     if not isinstance(levels, dict):
         out.levels = None
@@ -572,7 +631,7 @@ def to_json(modes):
     names = [n for n in modes.names]
     while names and not str(names[-1] or "").strip():
         names.pop()
-    if not modes.slots and not names and not modes.turns and not modes.attract:
+    if not modes.slots and not names and not modes.turns and not modes.attract and not modes.shots:
         return None
     out = {"names": names,
            "slots": {rel: {str(m): f for m, f in sorted(files.items())}
@@ -608,9 +667,34 @@ def to_json(modes):
         out["attract"] = list(modes.attract)
         if modes.attract_gap:
             out["attract_gap"] = int(modes.attract_gap)
+    if modes.shots:
+        out["shots"] = [dict(r) for r in modes.shots]
     if modes.levels is not None:
         out["levels"] = {rel: {str(m): int(db) for m, db in sorted(v.items()) if db}
                          for rel, v in sorted(modes.levels.items()) if any(v.values())}
+    return out
+
+
+def clean_shots(raw):
+    """PAD-945: the sounds on shots as kept: rows with a mode id, a switch id and a file, at most
+    :data:`SHOT_MAX`, a (mode, switch) once (the first row wins)."""
+    out, seen = [], set()
+    for r in (raw if isinstance(raw, (list, tuple)) else ()):
+        if not isinstance(r, dict):
+            continue
+        try:
+            mode, sw = int(r.get("mode")), int(r.get("switch"))
+        except (TypeError, ValueError):
+            continue
+        f = r.get("file")
+        if not (0 <= mode < 128 and 0 < sw < 1024 and isinstance(f, str) and f.strip()) or (mode, sw) in seen:
+            continue
+        seen.add((mode, sw))
+        out.append({"mode": mode, "mode_name": _rec_word(r.get("mode_name")) or "mode %d" % mode,
+                    "switch": sw, "switch_name": _rec_word(r.get("switch_name")) or "switch %d" % sw,
+                    "file": f})
+        if len(out) >= SHOT_MAX:
+            break
     return out
 
 
@@ -698,6 +782,122 @@ def offer_attract(project, probe=True):
     if not enabled():
         return "%s=0 leaves the flipper buttons' sounds in attract out of this app." % GATE_ENV
     return attract_refusal(project_title(project, probe=probe))
+
+
+#: PAD-945: what the runtime needs of a build's port for sounds on the shots of the game's modes:
+#: the switch drain (the presses), the record lookup (the swap) and the sound play, as PAD-641's; and
+#: one of the virtuals that tell a mode of the game's runs
+SHOT_SITES = ATTRACT_SITES
+SHOT_VALUES = ATTRACT_VALUES
+SHOT_DATA = ("switch_records",)
+SHOT_ACTIVE = ("mode_slot_active", "stock_slot_active")
+
+
+def game_modes(prof):
+    """PAD-945: ``[(id, name)]`` of the game's modes the card's port names with an object
+    (``text block_name_<id>`` and ``data block_obj_<id>``: the runtime asks the object whether the
+    mode runs), in id order; ``[]`` when there is no port or it names none."""
+    from . import mode_project as MP
+    if prof is None:
+        return []
+    try:
+        port = MP.read_port(MP.port_path(prof))
+    except OSError:
+        return []
+    out = []
+    for key, name in port.get("text", {}).items():
+        if not key.startswith("block_name_"):
+            continue
+        try:
+            mid = int(key[len("block_name_"):])
+        except ValueError:
+            continue
+        if port.get("data", {}).get("block_obj_%d" % mid) and name.strip():
+            out.append((mid, " ".join(name.split())))
+    return sorted(out)
+
+
+def shot_refusal(prof):
+    """PAD-945: why ``prof``'s build cannot play sounds on the shots of the game's modes, or
+    ``""``: the port needs the switch drain, the record lookup and the sound play (as PAD-641's),
+    a virtual that tells whether a mode of the game's runs, and modes it names with their objects
+    (C++ rule titles; a plain-C title's modes have none)."""
+    if prof is None:
+        return NO_TITLE_SHOTS
+    if title_key(prof) in ATTRACT_NO_KEYS:
+        return NO_SHOTS % (prof.label, "the app cannot tell which of its sound records each of its "
+                           "sounds plays")
+    from . import mode_project as MP
+    try:
+        port = MP.read_port(MP.port_path(prof))
+    except OSError:
+        return NO_SHOTS % (prof.label, "the app has no map of its game program")
+    if any(x not in port["site"] for x in SHOT_SITES) or any(
+            x not in port.get("data", {}) for x in SHOT_DATA) or any(
+            x not in port.get("value", {}) for x in SHOT_VALUES):
+        return NO_SHOTS % (prof.label, "the app has not found where its game program reads the "
+                           "switches or looks its sounds up")
+    if not any(x in port.get("value", {}) for x in SHOT_ACTIVE) and "stock_any_running" not in port["site"]:
+        return NO_SHOTS % (prof.label, "the app cannot tell when one of its modes runs")
+    if not game_modes(prof):
+        return NO_SHOTS % (prof.label, "the app knows none of its modes by name")
+    return ""
+
+
+def shot_choices(project):
+    """PAD-945: ``(why, modes, switches)`` for the project's game: :func:`offer_shots`'s reason
+    ("" when it can), the game's modes ``[(id, name)]`` (:func:`game_modes`) and its shots
+    ``[(id, name)]`` - the playfield switches of the card's game program (:func:`shot_switches`), or
+    when the card is not on this PC, the port's ``switch`` lines."""
+    why = offer_shots(project, probe=True)
+    if why:
+        return why, [], []
+    from . import mode_project as MP
+    prof = project_title(project, probe=True)
+    modes = game_modes(prof)
+    switches = []
+    try:
+        card = MP.project_card(project)
+        if card is not None and card.image and os.path.isfile(card.image):
+            from .title_reader import game_program
+            switches = shot_switches(game_program(card.image)[2])
+    except Exception:                                   # noqa: BLE001 - the port's lines then
+        switches = []
+    if not switches:
+        try:
+            port = MP.read_port(MP.port_path(prof))
+            seen = {}
+            for sid, _mask, name in port.get("switch") or ():
+                seen.setdefault(int(sid), " ".join(str(name).split()))
+            switches = sorted(seen.items())
+        except (OSError, ValueError, TypeError):
+            switches = []
+    if not switches:
+        return (NO_SHOTS % (prof.label, "the app cannot read its switches from the card this project "
+                            "was extracted from") if prof is not None else NO_TITLE_SHOTS), modes, []
+    return "", modes, switches
+
+
+def offer_shots(project, probe=True):
+    """PAD-945: why the project's game cannot play sounds on the shots of its modes (``""``
+    when it can)."""
+    if not enabled():
+        return "%s=0 leaves the sounds on the shots of the game's modes out of this app." % GATE_ENV
+    return shot_refusal(project_title(project, probe=probe))
+
+
+def shot_switches(game_elf):
+    """PAD-945: ``[(id, name)]`` of the playfield switches in the game program *game_elf* (bytes) that
+    are shots, by the game's own switch names in sentence case, in id order (the derived ports'
+    ``switch`` lines' pick, :func:`.portswitch.shot_switches`: not the ball's way in or out, a button,
+    a flipper's end of stroke or a mechanism's position). ``[]`` when its switch table cannot be read."""
+    from . import portgen as G
+    from . import portswitch as PS
+    try:
+        got = PS.shot_switches(PS.switches(G.Elf(bytes(game_elf))))
+    except (G.PortgenError, ValueError, struct.error, IndexError):
+        return []
+    return sorted((int(i), PS.nice(n)) for i, n in got if int(i) > 0)
 
 
 _FLIPPER_BUTTON = re.compile(r"^(LEFT|L|RIGHT|R) FLIPPER BUTTON$")
@@ -862,7 +1062,7 @@ def cut(wav, frames):
 
 # ---- the runtime's table ------------------------------------------------------------------------
 def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(), randoms=(),
-             attract=None, jukebox=None):
+             attract=None, jukebox=None, shots=None):
     """``sounds.cfg``: *live* the setting's value address, *count* the modes (0: no MUSIC MODE,
     the card has sounds in turn only), *sounds* ``[(mode, sound id, descriptor bytes)]`` (a
     *only* when the card carries no modes, *turns* ``[(k, slot key, file k's key)]`` the sounds in
@@ -880,7 +1080,10 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     at a press plays it instead.
     PAD-685: *jukebox* ``{"modes": [(start site, [intro clip names], [record keys])], "songs":
     [(weight, record key, clip name or "")]}``, a ``jmode`` line per song mode and a ``jsong`` line per
-    song (pad_mode_runtime.c "the jukebox")."""
+    song (pad_mode_runtime.c "the jukebox").
+    PAD-945: *shots* ``{"request", "key", "files": [(mode id, switch id, record key, ms), ...]}``, the
+    sounds on the shots of the game's modes: a ``gshot`` line (the carrier, its own record's key)
+    and a ``gsfile`` line per file (pad_mode_runtime.c "a sound on a shot")."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
@@ -911,6 +1114,10 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
                                                  ",".join(bytes(k).hex() for k in keys)))
         for weight, key, clip in jukebox["songs"]:
             lines.append("jsong\t%d\t%s\t%s" % (int(weight), bytes(key).hex(), clip or "-"))
+    if shots and shots.get("files"):
+        lines.append("gshot\t%d\t%s" % (int(shots["request"]), bytes(shots["key"]).hex()))
+        for k, (mode, sw, key, ms) in enumerate(shots["files"], 1):
+            lines.append("gsfile\t%d\t%d\t%d\t%s\t%d" % (k, int(mode), int(sw), bytes(key).hex(), int(ms)))
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -937,6 +1144,9 @@ REC_AGAP = "#agap"
 #: PAD-685: a jukebox song: ``#jsong <k> <slot idx> <record idx> <weight> <slot rel> <the file's own
 #: name>`` (its intro clip, when it has one, is in the video bank as ``jukebox.clip_name(k)``)
 REC_JSONG = "#jsong"
+#: PAD-945: a sound on a shot: ``#gshot <k> <slot idx> <record idx> <mode id> <switch id> <slot rel>
+#: <the file's own name> <the mode's name> <the switch's name>`` (the slot is the carrier's)
+REC_GSHOT = "#gshot"
 #: PAD-608: a file in a sound bank names its record as ``<bank category>:<record idx>`` (an app
 #: before PAD-608 skips such a line: its record field is not a number)
 _BANK_HOST = re.compile(r"^(\d{1,2}):(\d+)$")
@@ -982,6 +1192,15 @@ def card_record(modes, used):
                                   _rec_word(u["rel"]),
                                   _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
             continue
+        if is_shot(m):
+            k = shot_of(m)
+            row = modes.shots[k - 1] if 0 < k <= len(modes.shots) else {}
+            out.append("\t".join([REC_GSHOT, str(k), str(int(u["slot"])), _rec_host(u),
+                                  str(int(row.get("mode", 0))), str(int(row.get("switch", 0))),
+                                  _rec_word(u["rel"]),
+                                  _rec_word(os.path.basename(str(row.get("file") or "").replace("\\", "/"))),
+                                  _rec_word(row.get("mode_name")), _rec_word(row.get("switch_name"))]))
+            continue
         if is_attract(m):
             k = attract_of(m)
             if k == ATTRACT_QUIET:                  # the build's own silence: nothing to bring back
@@ -1011,7 +1230,7 @@ def card_record(modes, used):
                               "-" if db is None else str(int(db)), _rec_word(u["rel"]),
                               _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
     landed = {u["rel"]: int(u["slot"]) for u in used if u.get("lines") and is_turn(u["mode"])
-              and not is_mode_turn(u["mode"]) and not is_juke(u["mode"])}
+              and not is_mode_turn(u["mode"]) and not is_juke(u["mode"]) and not is_shot(u["mode"])}
     out += ["%s\t%d\t%s" % (REC_RANDOM, landed[rel], _rec_word(rel))
             for rel in sorted(modes.random) if rel in landed]
     mlanded = {(u["rel"], mode_turn_of(u["mode"])[0]): int(u["slot"]) for u in used
@@ -1029,11 +1248,13 @@ def read_card_record(text):
     ``"turns"`` ``[{"turn", "slot", "host", "db", "rel", "name"}]`` when the card plays sounds in
     turn, PAD-565; ``"random"`` ``[{"slot", "rel"}]`` the slots of them that play at random,
     PAD-638; ``"attract"`` ``[{"k", "slot", "host", "rel", "name"}]`` when its flipper buttons
-    play sounds in attract, PAD-641) from a card's ``sounds.cfg`` (*text*), or ``None``
+    play sounds in attract, PAD-641; ``"shots"`` ``[{"k", "slot", "host", "mode", "switch", "rel",
+    "name", "mode_name", "switch_name"}]`` when the game's modes play sounds on shots, PAD-945)
+    from a card's ``sounds.cfg`` (*text*), or ``None``
     when it has no record (a card written before PAD-553). PAD-608: an entry whose file is in a
     sound bank has ``"bank"``, the bank's category, and ``"host"`` is the bank's record."""
     names, files, turns, rnd, attract, seen = {}, [], [], [], [], False
-    mturns, mrnd, juke = [], [], []
+    mturns, mrnd, juke, gshots = [], [], [], []
     agap = 0
     for line in str(text or "").splitlines():
         f = line.split("\t")
@@ -1082,6 +1303,16 @@ def read_card_record(text):
                     attract.append(dict({"k": k, "slot": int(f[2]), "host": host, "rel": f[5],
                                          "name": f[6] if len(f) > 6 else ""},
                                         **({"bank": bank} if bank is not None else {})))
+            elif f[0] == REC_GSHOT and len(f) >= 7:          # PAD-945
+                seen = True
+                k = int(f[1])
+                if 1 <= k <= SHOT_MAX:
+                    host, bank = _read_host(f[3])
+                    gshots.append(dict({"k": k, "slot": int(f[2]), "host": host, "mode": int(f[4]),
+                                        "switch": int(f[5]), "rel": f[6], "name": f[7] if len(f) > 7 else "",
+                                        "mode_name": f[8] if len(f) > 8 else "",
+                                        "switch_name": f[9] if len(f) > 9 else ""},
+                                       **({"bank": bank} if bank is not None else {})))
             elif f[0] == REC_AGAP and len(f) >= 2:
                 agap = clean_gap(f[1])
             elif f[0] == REC_JSONG and len(f) >= 6:          # PAD-685
@@ -1109,6 +1340,8 @@ def read_card_record(text):
             out["mode_random"] = mrnd
     if juke:
         out["jukebox"] = sorted(juke, key=lambda j: j["k"])
+    if gshots:
+        out["shots"] = sorted(gshots, key=lambda g: g["k"])
     return out
 
 
@@ -1117,7 +1350,7 @@ def card_bank_records(rec):
     (:func:`read_card_record`) names (PAD-608: files in a sound bank), for an extract to decode."""
     out = {}
     for f in (list((rec or {}).get("files") or ()) + list((rec or {}).get("turns") or ())
-              + list((rec or {}).get("attract") or ())):
+              + list((rec or {}).get("attract") or ()) + list((rec or {}).get("shots") or ())):
         if f.get("bank") is not None:
             out.setdefault(int(f["bank"]), set()).add(int(f["host"]))
     return out

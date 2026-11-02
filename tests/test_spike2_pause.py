@@ -150,6 +150,10 @@ int gettimeofday(struct t2 *t, void *tz)
 { (void)tz; put(raw_us + wall_off_us, t, 1); return 0; }
 int usleep(unsigned us) { raw_us += us; return 0; }
 void pad_say(const char *s) { (void)s; }
+#ifndef __linux__
+/* the stub reads errno the glibc way; macOS libc has no __errno_location */
+int *__errno_location(void) { static int e; return &e; }
+#endif
 long snd_pcm_avail(void *);
 long snd_pcm_writei(void *, const void *, unsigned long);
 int snd_pcm_open(void **, const char *, int, int);

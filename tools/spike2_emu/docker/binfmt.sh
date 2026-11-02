@@ -30,10 +30,38 @@ set -u
 D=${PAD_BINFMT_DIR:-/proc/sys/fs/binfmt_misc}
 CONF=${PAD_BINFMT_CONF:-/usr/lib/binfmt.d/qemu-arm.conf}
 
-# A fresh container's /proc has the table unmounted; privileged, it may mount it.
+# Does a 32-bit ARM program run here? ensurebuild.sh's 96-byte exit(0), read
+# out of the rig rather than copied, so there is one of it.
+arm_runs() {
+    local b t rc=1
+    b=$(sed -n 's/^PAD_ARM_EXIT0_B64=//p' "${PAD_RIG:-/pad/rig}/ensurebuild.sh" 2>/dev/null)
+    [ -n "$b" ] || return 1
+    t=$(mktemp 2>/dev/null) || return 1
+    printf '%s' "$b" | base64 -d > "$t" 2>/dev/null && chmod +x "$t" &&
+        "$t" >/dev/null 2>&1 && rc=0
+    rm -f "$t"
+    return $rc
+}
+
+# A fresh container's /proc has the table unmounted; privileged ROOT may mount
+# it. Root, not just privileged: the image ends USER pad, and v1.316 ran this
+# as pad - the mount failed and colima stayed without ARM (PAD-884, third log).
+# padbox.sh passes -u 0; this says so plainly if that is ever lost.
 if [ ! -e "$D/status" ]; then
     mount -t binfmt_misc binfmt_misc "$D" 2>/dev/null
-    [ -e "$D/status" ] || { echo "binfmt: cannot see the handler table"; exit 2; }
+    if [ ! -e "$D/status" ]; then
+        # Nothing to read, but an engine whose handler is there runs ARM all
+        # the same (F flag): ask it the way ensurebuild.sh does, by running one.
+        if arm_runs; then
+            echo "binfmt: present (32-bit ARM runs)"; exit 0
+        fi
+        if [ "$(id -u)" != 0 ]; then
+            echo "binfmt: cannot mount the handler table as uid $(id -u) (needs root)"
+        else
+            echo "binfmt: cannot see the handler table"
+        fi
+        exit 2
+    fi
 fi
 
 # Already there? Matched on the ELF magic (e_machine 0x28 = ARM, 32-bit,

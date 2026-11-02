@@ -450,6 +450,9 @@ FLEX_CLASS = "PadNoFlex"
 #: the DMD libraries a tribute may need, and the null object each becomes
 DMD_STUBS = {"flexdmd_stub": ("FlexDMD.FlexDMD", "PadNoFlex", "FlexDMD"),
              "ultradmd_stub": ("UltraDMD.DMDObject", "PadNoUltra", "UltraDMD")}
+#: what a null object answers where a value matters: the library's version
+#: a table checks before it goes on (UltraDMD 1.9: major 1, minor 9)
+DMD_VALUES = {"getmajorversion": "1", "getminorversion": "9", "isrendering": "False"}
 
 
 def flexdmd_stub(lines, rep, progid="FlexDMD.FlexDMD", cls=FLEX_CLASS, label="FlexDMD"):
@@ -626,7 +629,10 @@ def flexdmd_stub(lines, rep, progid="FlexDMD.FlexDMD", cls=FLEX_CLASS, label="Fl
             continue
         n = max(calls.get(name) or {0})
         args = ", ".join("a%d" % k for k in range(n))
-        if name in objects:
+        if name in DMD_VALUES:
+            # a version the script checks (KISS: "Incompatible Version of UltraDMD")
+            out.append("\tPublic Function %s(%s) : %s = %s : End Function" % (sp, args, sp, DMD_VALUES[name]))
+        elif name in objects:
             out.append("\tPublic Function %s(%s) : Set %s = New %s : End Function" % (sp, args, sp, cls))
         else:
             # read as a value (`Do While UltraDMD.IsRendering`): Empty, which is False and 0

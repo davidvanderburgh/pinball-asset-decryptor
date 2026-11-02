@@ -2102,6 +2102,45 @@ def test_a_registration_whose_folder_is_gone_is_not_registered(tmp_path):
     assert vs.controller_registered() in (True, False)                          # never raises
 
 
+def test_the_registration_is_known_to_be_this_kits_or_anothers(tmp_path, monkeypatch):
+    """PAD-943: David's Spike 1 tables stopped on "no Spike 2 run is up": the
+    registered PAD.Controller was an older checkout's. The state says whose
+    the registration is, and the page offers Register when it is another's."""
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    pd = pytest.importorskip("padisplay")
+    assert vs.registered_here(vs.HERE) and vs.registered_here(os.path.join(vs.HERE, "."))
+    assert not vs.registered_here(str(tmp_path)) and not vs.registered_here("")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pd, "CONF", str(tmp_path / "display.conf"))
+    monkeypatch.setattr(pd, "monitors", lambda: [{"n": 1, "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True}])
+    monkeypatch.setattr(vs, "vpx_tables_dir", lambda: "")
+    monkeypatch.setattr(vs, "controller_registration", lambda: (True, str(tmp_path)))
+    st = vs.state()
+    assert st["registered"] and st["registered_to"] == str(tmp_path) and st["registered_here"] is False
+    monkeypatch.setattr(vs, "controller_registration", lambda: (True, vs.HERE))
+    assert vs.state()["registered_here"] is True
+    monkeypatch.setattr(vs, "controller_registration", lambda: (False, ""))
+    st = vs.state()
+    assert not st["registered"] and not st["registered_here"] and st["registered_to"] == ""
+
+
+def test_the_places_a_card_is_looked_for_name_the_platforms_libraries(tmp_path, monkeypatch):
+    # PAD-943: the Spike 1 refusal named the Spike 2 library only
+    pl = pytest.importorskip("padlaunch")
+    lib = tmp_path / "Stern" / "spike2"
+    lib.mkdir(parents=True)
+    (tmp_path / "Stern" / "spike1").mkdir()
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    json.dump({"library": str(lib)}, open(pl.KIT, "w", encoding="utf-8"))
+    two = pl.card_places("got_le", "spike1")
+    assert str(lib) in two and str(tmp_path / "Stern" / "spike1") in two and "libraries" in two
+    one = pl.card_places("rush_le")
+    assert str(lib) in one and "spike1" not in one and "library " in one
+
+
 # ------------------------------------------------- the backglass (PAD-852) --
 
 _B2S_HARNESS = r'''

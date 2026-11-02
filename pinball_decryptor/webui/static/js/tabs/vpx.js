@@ -163,7 +163,7 @@ export default function Vpx() {
   // Details, or by themselves while any of it is not ready
   const setup = [["The emulator's Linux", rtOk],
     ["Visual Pinball" + (s.vpx_version ? " " + s.vpx_version : ""), vpxOk],
-    ["Controller", !!s.registered], ["Card images", have.length > 0]];
+    ["Controller", !!s.registered && s.registered_here !== false], ["Card images", have.length > 0]];
   const allOk = !!s.loaded && setup.every(([, ok]) => ok);
   const open = details || (!!s.loaded && !allOk);
   // PAD-939: a copy patched before a fix its map names (The Beatles' trough)
@@ -269,9 +269,12 @@ export default function Vpx() {
         ${vpxOk ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"
           onClick=${() => call("vpx.download_vpx")}>Download 10.8.0<//>`}
       <//>
-      <${Row} ok=${!!s.registered} label="The game's link to Visual Pinball (PAD.Controller)"
-        value=${s.registered ? "Registered." : "Not registered."}>
-        ${s.registered ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} onClick=${() => call("vpx.register")}>Register<//>`}
+      <${Row} ok=${!!s.registered && s.registered_here !== false} label="The game's link to Visual Pinball (PAD.Controller)"
+        value=${!s.registered ? "Not registered."
+          : s.registered_here === false ? html`Registered to another copy of the app: <span class="mono">${s.registered_to}</span>.
+            Every table calls that one, so what is new here (a Spike 1 game, say) is not in play until this copy is registered.`
+          : "Registered."}>
+        ${s.registered && s.registered_here !== false ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} onClick=${() => call("vpx.register")}>Register<//>`}
       <//>
       <${Row} ok=${have.length > 0} label=${html`Card images <span class="small muted">${s.cards_tip}</span>`}
         value=${html`<span class="mono">${s.library || "No folder chosen."}</span>${cardWords ? html`<br />${cardWords}` : null}`}>

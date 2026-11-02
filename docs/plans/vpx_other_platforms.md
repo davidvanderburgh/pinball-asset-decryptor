@@ -249,6 +249,51 @@ shimmering until they are in, and until the first state is in the Tables
 card shows four skeleton rows instead of "Checking…". The buttons work
 while the slow parts load (`_busy` is not held).
 
+## The Coverage column is kept between sittings (David, 2026-11-02, interactive)
+
+"It seems like the coverage metric is recalculated every time the app
+restarts? Can't we cache it?" It was, on every start, not only a dev
+launch: `_want_coverage` began True and the column lived in the page store
+only, so each start paid `vpxauthor.py coverage` (~7 s over WSL). Now the
+last read is written to `vpx_coverage.json` beside `vpx_state.json` with a
+key of what it was read from - every `*.shadow.json` in the kit and
+`vpxauthor.py` (their mtimes: a map edited or the app updated with new
+owed rules reads again) and the titles with tables on this PC (a title
+played for the first time reads again). A new sitting draws the column at
+once from the cache, before the kit has answered, and reads nothing when
+the key still matches; Check again reads it anyway (the button sets
+`_want_coverage`; opening the tab no longer does). When the kit's titles
+cannot be read (WSL down) the cache is neither trusted nor rewritten.
+
+## Whose controller a table calls (David, 2026-11-02, interactive)
+
+JP's Ghostbusters (a Spike 1 title) stopped on "PAD.Controller: no Spike 2
+run is up for ghostbusters_le ... the library D:\Pinball\images\Stern\spike2".
+Two things:
+
+1. PAD.Controller is one COM registration per PC (HKLM, `PythonCOMPath`),
+   and on David's PC it names the MAIN checkout's kit - every table,
+   whichever copy of the app patched it, calls that one, and main has no
+   Spike 1 yet. So a Spike 1 table cannot start from Visual Pinball until
+   this ticket is merged (or the ticket's kit is registered, which the
+   worktree's removal after the release would then break). The emulator
+   proof of the Spike 1 path drives `Bridge` from Python for that reason.
+   The tab now says so: `vpxsetup.py state` carries `registered_to` and
+   `registered_here` (the registered folder is THIS kit's), and the
+   controller row reads "Registered to another copy of the app: <path>
+   ... Register" with the button, instead of a plain "Registered."
+2. The refusal named the Spike 2 library only: `card_places(title,
+   platform)` names the platform's libraries (for Spike 1 the `spike1`
+   sibling too).
+
+Seen in the same sitting, not this ticket's: Metallica's machine-screen
+window (WSLg) up on the taskbar but blank. WSLg's weston.log says
+`rdp_allocate_shared_memory: Failed to open "/mnt/shared_memory/{...}":
+Input/output error` thirty times a second from the moment the window
+opened, and `/mnt/shared_memory` (the virtiofs share WSLg hands frames to
+Windows through) returns I/O error inside the VM: a WSL fault, every WSLg
+window blank until `wsl --shutdown` (David's call: it ends every run).
+
 ## Still to do
 
 Nothing of this ticket: the remaining piece, a map for VPW's Game of

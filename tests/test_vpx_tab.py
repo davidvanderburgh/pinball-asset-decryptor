@@ -886,3 +886,69 @@ def test_a_spike1_tables_row_finds_its_iso(monkeypatch, tmp_path):
     monkeypatch.setattr(vs, "downloads_in", lambda d, cache=None: [])
     vs.known_tables(str(tmp_path))
     assert ("got_le", "spike1") in seen and ("rush_le", "spike2") in seen
+
+
+# ---- PAD-943: the Coverage column is kept between sittings ------------------
+def test_the_coverage_column_is_kept_between_sittings(tab, monkeypatch, tmp_path):
+    """David: "it seems like the coverage metric is recalculated every time the
+    app restarts? can't we cache it?" - it was (~7 s over WSL on every start).
+    Now the last read is kept on this PC, keyed by the kit's maps and reader
+    and the titles with tables: a new sitting draws it at once and reads
+    nothing; a map edited, a title new to the PC, or Check again reads it."""
+    kit = tmp_path / "kit"
+    kit.mkdir()
+    (kit / "rush_le.shadow.json").write_text("{}")
+    (kit / "vpxauthor.py").write_text("")
+    monkeypatch.setattr(V, "kit_dir", lambda: str(kit))
+    monkeypatch.setattr(type(tab), "_state_cache_path", staticmethod(lambda: str(tmp_path / "vpx_state.json")))
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["rush_le"]}
+    tab.answers[("vpxauthor.py", "coverage")] = {"coverage": {"rush_le": {"pct": 78}}}
+    reads = lambda: len([c for c in tab.calls if c == ("vpxauthor.py", ["coverage"])])  # noqa: E731
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("coverage") == {"rush_le": {"pct": 78}} and reads() == 1
+    assert json.load(open(tmp_path / "vpx_coverage.json", encoding="utf-8"))["coverage"] == {"rush_le": {"pct": 78}}
+
+    def sitting():
+        drawn = []
+        orig = type(tab)._kit
+
+        def kit_call(self, script, args, timeout=0, on_line=None):
+            if args and args[0] == "state":
+                drawn.append((self.get("coverage"), self.get("coverage_busy")))
+            return orig(self, script, args, timeout, on_line)
+        monkeypatch.setattr(type(tab), "_kit", kit_call)
+        try:
+            t = V.VpxTab(_Win())
+            t.answers = tab.answers
+            t.on_show()
+            _wait(t)
+        finally:
+            monkeypatch.setattr(type(tab), "_kit", orig)
+        return t, drawn
+    # a new sitting on the same PC: the column is up before the kit answers, and not read again
+    t2, drawn = sitting()
+    assert drawn == [({"rush_le": {"pct": 78}}, False)]
+    assert t2.get("coverage") == {"rush_le": {"pct": 78}} and not t2.get("coverage_busy") and reads() == 1
+    # a map edited: read again (the old numbers stay up while it is)
+    t = os.path.getmtime(kit / "rush_le.shadow.json") + 100
+    os.utime(kit / "rush_le.shadow.json", (t, t))
+    tab.answers[("vpxauthor.py", "coverage")] = {"coverage": {"rush_le": {"pct": 90}}}
+    t3, drawn = sitting()
+    assert drawn[0][0] == {"rush_le": {"pct": 78}}
+    assert t3.get("coverage") == {"rush_le": {"pct": 90}} and reads() == 2
+    # a title new to this PC: read again
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["got_le", "rush_le"]}
+    t4, _ = sitting()
+    assert reads() == 3
+    # Check again: always
+    t4.refresh()
+    _wait(t4)
+    assert reads() == 4
+    # the kit's titles unreadable (WSL down): the cache is neither trusted nor rewritten
+    tab.answers[("vpxauthor.py", "titles")] = {"error": "WSL is not answering"}
+    tab.answers[("vpxauthor.py", "coverage")] = {"coverage": {"rush_le": {"pct": 1}}}
+    t5, _ = sitting()
+    assert reads() == 5 and t5.get("coverage") == {"rush_le": {"pct": 1}}
+    assert json.load(open(tmp_path / "vpx_coverage.json", encoding="utf-8"))["coverage"] == {"rush_le": {"pct": 90}}
+

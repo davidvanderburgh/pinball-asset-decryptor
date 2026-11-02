@@ -149,10 +149,12 @@ def launch_for(platform, title, card):
     return Spike1Launch(title, card) if platform == "spike1" else Launch(title, card)
 
 
-def card_places(title):
+def card_places(title, platform="spike2"):
     kit = kit_load()
-    return ("PAD_VPX_CARD, ~/.pad-vpx.json cards[%s]%s, the library %s"
+    libs = libraries(platform, kit)
+    return ("PAD_VPX_CARD, ~/.pad-vpx.json cards[%s]%s, the librar%s %s"
             % (title, "" if not (kit.get("cards") or {}).get(title) else " (missing file)",
+               "y" if len(libs) < 2 else "ies", ", ".join(libs) if libs else
                os.environ.get("PAD_VPX_LIBRARY") or kit.get("library") or "(none set)"))
 
 

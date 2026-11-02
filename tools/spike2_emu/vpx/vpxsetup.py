@@ -52,12 +52,12 @@ VPX_DEFAULT_DIR = r"C:\Visual Pinball"
 VPX_MIN = (10, 8, 0)
 
 
-def controller_registered():
-    """PAD.Controller is registered AND what it is registered to is still
-    there (PAD-850). The key alone said "Registered" while the folder it
-    named had been deleted, and every table then stopped on "Can't load
-    PAD.Controller: ActiveX component can't create object"; now the tab
-    offers Register again instead."""
+def controller_registration():
+    """(registered, the folder PAD.Controller is registered to): registered
+    only when what it points at is still there (PAD-850). The key alone said
+    "Registered" while the folder it named had been deleted, and every table
+    then stopped on "Can't load PAD.Controller: ActiveX component can't
+    create object"; now the tab offers Register again instead."""
     try:
         import winreg
         root = winreg.HKEY_CLASSES_ROOT
@@ -65,8 +65,25 @@ def controller_registered():
         path = winreg.QueryValue(root, "CLSID\\%s\\PythonCOMPath" % clsid)
         server = winreg.QueryValue(root, "CLSID\\%s\\LocalServer32" % clsid)
     except Exception:                                       # noqa: BLE001
+        return False, ""
+    return registration_ok(path, server), path or ""
+
+
+def controller_registered():
+    return controller_registration()[0]
+
+
+def registered_here(path):
+    """The registered folder is THIS kit's (PAD-943). A table patched by
+    one copy of the app calls whichever PAD.Controller the registry names:
+    David's Spike 1 tables stopped on "no Spike 2 run is up" because the
+    registration was an older checkout's, with no Spike 1 in it."""
+    if not path:
         return False
-    return registration_ok(path, server)
+    try:
+        return os.path.normcase(os.path.realpath(path)) == os.path.normcase(os.path.realpath(HERE))
+    except OSError:
+        return False
 
 
 def registration_ok(com_path, server_cmd):
@@ -645,8 +662,13 @@ def state():
     shown = padisplay.load(padisplay.CONF)
     vpx = find_vpx()
     have = vpx_version(vpx)
+    registered, reg_path = controller_registration()
     return {
-        "registered": controller_registered(),
+        "registered": registered,
+        # PAD-943: registered, but to another copy of the app (a checkout or
+        # an older install): its tables would call that one
+        "registered_to": reg_path,
+        "registered_here": registered and registered_here(reg_path),
         "vpx": vpx,
         # PAD-887: the minimum shown beside the Visual Pinball line, and an
         # older copy is "Needed", not "Ready" (unread: taken as fine)

@@ -27,6 +27,7 @@ sidecar keyed by the file's size and time), on a thread of its own after
 the page is up so nothing waits for it; the page serves them as ``/media``.
 """
 
+import glob
 import hashlib
 import json
 import os
@@ -132,7 +133,7 @@ class VpxTab(TabService):
         super().__init__(window)
         self._lock = threading.Lock()
         self._busy = False
-        self._want_coverage = True
+        self._want_coverage = False       # Check again forces the Coverage column's read
         self._pictures_lock = threading.Lock()
         self._pictures_running = False
         ok = sys.platform == "win32"
@@ -163,8 +164,13 @@ class VpxTab(TabService):
     # -- hooks ---------------------------------------------------------------
     def on_show(self):
         if self.get("ok") and not self._busy:
-            self.refresh()
+            self._check()
         self._watch_folder()
+
+    def _check(self):
+        """Read everything again; the Coverage column from its cache when
+        nothing it was read from has changed (Check again reads it anyway)."""
+        return self._start("Checking", lambda: None)
 
     # -- the tables folder, watched (PAD-943) --------------------------------
     WATCH_S = 3.0
@@ -289,10 +295,15 @@ class VpxTab(TabService):
         thread of their own with the page usable, each card saying it is
         still looking; the pictures as PAD-942 had them."""
         if not self.get("loaded"):
+            # the Coverage column as it was last read on this PC (~7 s over
+            # WSL otherwise): kept until a map, the kit or the titles change
+            cov = self._cached_coverage()
+            if cov and not self.get("coverage"):
+                self.set(coverage=cov["coverage"])
             cached = self._cached_state()
             if cached:
                 pictures, _todo = self._pictures_known(self._picture_files(cached))
-                self.set(loaded=True, stale=True, authors_busy=True, coverage_busy=True,
+                self.set(loaded=True, stale=True, authors_busy=True, coverage_busy=not self.get("coverage"),
                          pictures=pictures, **cached)
         st = self._kit("vpxsetup.py", ["state"])
         try:
@@ -331,14 +342,46 @@ class VpxTab(TabService):
             return None
 
     def _save_state(self, st):
+        self._write_cache(self._state_cache_path(), st)
+
+    @staticmethod
+    def _write_cache(path, d):
         try:
-            path = self._state_cache_path()
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path + ".tmp", "w", encoding="utf-8") as f:
-                json.dump(st, f)
+                json.dump(d, f)
             os.replace(path + ".tmp", path)
         except (OSError, TypeError, ValueError):
             pass
+
+    # -- the Coverage column, kept between sittings (PAD-943) ---------------
+    @classmethod
+    def _coverage_cache_path(cls):
+        return os.path.join(os.path.dirname(cls._state_cache_path()), "vpx_coverage.json")
+
+    @staticmethod
+    def _coverage_key(titles):
+        """What the column was read from: the kit's maps and the reader
+        (their times), and the titles with tables on this PC. A map edited, the
+        app updated (new owed rules) or a title played for the first time
+        reads it again; nothing else does."""
+        kit = kit_dir()
+        parts = []
+        for f in sorted(glob.glob(os.path.join(kit, "*.shadow.json"))) + [os.path.join(kit, "vpxauthor.py")]:
+            try:
+                parts.append("%s:%d" % (os.path.basename(f), int(os.path.getmtime(f))))
+            except OSError:
+                parts.append(os.path.basename(f))
+        return ";".join(parts) + "|" + ",".join(sorted(titles or []))
+
+    def _cached_coverage(self):
+        """{key, coverage} as last written, or None."""
+        try:
+            with open(self._coverage_cache_path(), encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) and isinstance(d.get("coverage"), dict) and d.get("key") else None
+        except (OSError, ValueError):
+            return None
 
     def _start_extras(self, st, want_cov):
         """The authors' titles, then the coverage, on their own thread: the
@@ -358,7 +401,8 @@ class VpxTab(TabService):
             # PAD-941: the titles a checklist can be made for (their device
             # tables, or a Spike 1 game, on this PC): asks WSL
             got = self._kit("vpxauthor.py", ["titles"])
-            titles = sorted(got.get("titles") or []) if "error" not in got else []
+            titles_ok = "error" not in got
+            titles = sorted(got.get("titles") or []) if titles_ok else []
             chosen = self.get("author_title") or ""
             if chosen not in titles:
                 # the title of the first table whose card is here, else the first
@@ -376,16 +420,25 @@ class VpxTab(TabService):
                     self.set(downloads=got.get("downloads") or [], tables=got.get("tables") or self.get("tables"))
             # how much each table's map wires of its game (the Coverage column):
             # read from the same tables, ~7 s over WSL's share for 20 titles, so
-            # once per sitting and on Check again, not after every job
-            if want_cov:
+            # kept on this PC between sittings (David: "can't we cache it?"),
+            # read again when a map, the kit or the titles change, and on
+            # Check again; never after a job
+            key = self._coverage_key(titles)
+            cached = self._cached_coverage()
+            if not want_cov and cached and cached["key"] == key and titles_ok:
+                if mine():
+                    self.set(coverage=cached["coverage"], coverage_busy=False)
+            else:
+                if mine():
+                    self.set(coverage_busy=True)
                 got = self._kit("vpxauthor.py", ["coverage"], timeout=300)
-                coverage = got["coverage"] if "error" not in got and isinstance(got.get("coverage"), dict) \
-                    else (self.get("coverage") or {})
+                fresh = "error" not in got and isinstance(got.get("coverage"), dict)
+                coverage = got["coverage"] if fresh else (self.get("coverage") or {})
                 self._want_coverage = False
+                if fresh and titles_ok:
+                    self._write_cache(self._coverage_cache_path(), {"key": key, "coverage": coverage})
                 if mine():
                     self.set(coverage=coverage, coverage_busy=False)
-            elif mine():
-                self.set(coverage_busy=False)
         finally:
             with self._lock:
                 if mine():
@@ -496,7 +549,7 @@ class VpxTab(TabService):
     @rpc
     def refresh(self):
         self._want_coverage = True
-        return self._start("Checking", lambda: None)
+        return self._check()
 
     @rpc
     def install_runtime(self):

@@ -1375,7 +1375,7 @@ class Bridge:
                     "(looked in %s). Start the game first (the app's Emulate tab, "
                     "or watch.sh), or record its card: padvpx card %s <image>."
                     % (padlaunch.PLATFORM_NAMES.get(self.map.platform, self.map.platform),
-                       self.title or "this title", padlaunch.card_places(self.title),
+                       self.title or "this title", padlaunch.card_places(self.title, self.map.platform),
                        self.title))
             self.launch = padlaunch.launch_for(self.map.platform, self.title, card)
             self._loading_start()

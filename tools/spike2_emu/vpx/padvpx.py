@@ -286,7 +286,7 @@ def run(title, hidden=False, mute=False):
     platform = platform_of(title)
     card = padlaunch.card_for(title, platform)
     if not card:
-        print("no card for %s (looked in %s)" % (title, padlaunch.card_places(title)))
+        print("no card for %s (looked in %s)" % (title, padlaunch.card_places(title, platform)))
         return 2
     if platform == "spike1":
         # PAD-943: one Spike 1 rig, start.sh with the card; its env is

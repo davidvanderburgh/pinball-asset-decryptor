@@ -70,6 +70,9 @@ class _Ole:
     def openstream(self, name):
         return io.BytesIO(self.streams[name])
 
+    def get_size(self, name):
+        return len(self.streams[name])
+
     def close(self):
         pass
 
@@ -97,6 +100,28 @@ def test_a_raw_or_missing_playfield_falls_back_to_the_screenshot(monkeypatch, vp
     assert source == "screenshot" and img.size == (30, 10)
     _table(monkeypatch, vpxpicture, playfield="nothere", screenshot=_png(6, 6, (0, 255, 0)))
     assert vpxpicture.picture_of("x.vpx")[1] == "screenshot"
+
+
+def test_a_baked_playfield_falls_back_to_a_playfield_named_image_then_the_backglass(monkeypatch, vpxpicture):
+    """David (PAD-942): a guess beats an empty outline. VPW's Metallica names
+    an HDR ball texture as its playfield; the backglass shows instead - never
+    the largest image, which there is a cabinet strobe texture."""
+    hdr = b"#?RADIANCE\n" + b"\0" * 40
+    _table(monkeypatch, vpxpicture, playfield="ball_Test8B",
+           images=[("ball_Test8B", hdr, False), ("CabRightStrobe", _png(90, 90, (9, 9, 9)), False),
+                   ("backglass_small", _png(4, 3, (0, 0, 255)), False),
+                   ("BackglassImagePM", _png(40, 30, (20, 40, 20)), False)])
+    img, source = vpxpicture.picture_of("x.vpx")
+    assert source == "backglass" and img.size == (40, 30)
+    # drawn dark to be lit in play: lifted, at most 2.5x
+    assert img.getpixel((1, 1)) == (50, 100, 50)
+    # an image named like a playfield comes before the screenshot and the backglass
+    _table(monkeypatch, vpxpicture, playfield="ball_Test8B",
+           images=[("ball_Test8B", hdr, False), ("GION_playfield_cutout", _png(20, 40, (255, 0, 0)), False),
+                   ("BackglassImagePM", _png(40, 30, (0, 255, 0)), False)],
+           screenshot=_png(30, 10, (0, 255, 0)))
+    img, source = vpxpicture.picture_of("x.vpx")
+    assert source == "playfield" and img.size == (20, 40)
 
 
 def test_a_table_with_no_picture_the_kit_reads_is_an_error(monkeypatch, vpxpicture):

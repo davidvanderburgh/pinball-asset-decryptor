@@ -66,7 +66,8 @@ _RUN_TIMEOUT_S = 120
 
 # PAD-942: the pictures. The reader's version is in the cache key, so a
 # better reader (one that reads a BITS playfield, say) remakes them all
-PICTURE_VERSION = 1
+# (2: the backglass fallback for a baked playfield)
+PICTURE_VERSION = 2
 PICTURES_TIP = ("The table's own playfield picture, read from your (PAD) copy once it is patched "
                 "(the app ships no picture of any table). Hover over it for the large one.")
 

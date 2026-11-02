@@ -18,10 +18,13 @@ What a .vpx holds (vpxfile.py has the file's shape):
   uses it for the playfield). A table whose playfield is baked into
   primitives has none to show (VPW's Metallica names a ball texture, an
   HDR file).
-* `TableInfo/Screenshot`, when there is no playfield picture: the picture
-  the author put under Table > Table Info, the bytes of the file as they
-  were (PNG or JPEG). Whatever the author chose - TMNT's is the instruction
-  card - so it is the fallback, not the first choice.
+* when that is not a picture: an image named like a playfield (`pf...`,
+  `...playfield...`), then `TableInfo/Screenshot` (the picture the author put
+  under Table > Table Info, the bytes of the file as they were; whatever
+  the author chose - TMNT's is the instruction card), then the biggest
+  image named `backglass`, so a baked table still shows the game's art
+  (David, PAD-942: a guess beats an empty outline; the LARGEST image is
+  never taken, on Metallica it is a cabinet-side strobe texture).
 
 Each table's picture goes to <out_dir>/<name>.jpg with the long side at
 most --size (1200) px, and a line `picture {json}` is printed as each is
@@ -95,18 +98,34 @@ def picture_of(path):
     ImageFile.LOAD_TRUNCATED_IMAGES = True
     ole = open_table(path)
     try:
-        # the playfield first: the screenshot is whatever the author put there
-        # (TMNT's is the instruction card, Aerosmith's a render of the cabinet)
-        tries = []
+        # In order (David, PAD-942): the playfield GameData names; an image
+        # named like a playfield when that one is not a picture (a table whose
+        # playfield is baked into primitives names a ball texture there); the
+        # author's screenshot (whatever they put there: TMNT's is the
+        # instruction card); last, the backglass image, so a baked table (VPW's
+        # Metallica) still shows the game's art. Never the largest image: on
+        # Metallica that is a cabinet-side strobe texture.
+        images = list(image_streams(ole))
         want = playfield_name(ole).lower()
-        if want:
-            for name, stream in image_streams(ole):
-                if name.lower() == want:
-                    tries.append(("playfield", image_bytes(ole.openstream(stream).read())))
-                    break
+        tries = []
+        for name, stream in images:
+            if want and name.lower() == want:
+                tries.append(("playfield", stream))
+        for name, stream in images:
+            low = name.lower()
+            if (low.startswith("pf") or "playfield" in low) and not (want and low == want):
+                tries.append(("playfield", stream))
         if ole.exists("TableInfo/Screenshot"):
-            tries.append(("screenshot", ole.openstream("TableInfo/Screenshot").read()))
-        for source, data in tries:
+            tries.append(("screenshot", "TableInfo/Screenshot"))
+        # the biggest backglass-named image: VPW keeps a small one too
+        backs = sorted((ole.get_size(stream), name, stream) for name, stream in images
+                       if "backglass" in name.lower())
+        for _, name, stream in reversed(backs):
+            tries.append(("backglass", stream))
+        for source, stream in tries:
+            data = ole.openstream(stream).read()
+            if source != "screenshot":
+                data = image_bytes(data)
             if not data:
                 continue
             try:
@@ -120,13 +139,22 @@ def picture_of(path):
                 back = Image.new("RGBA", img.size, (0, 0, 0, 255))
                 back.alpha_composite(img)
                 img = back
-            return img.convert("RGB"), source
+            img = img.convert("RGB")
+            if source == "backglass":
+                # a backglass texture is drawn dark, lit by the table's own
+                # lights in play (Metallica's mean is 45 of 255): lift it to
+                # look lit, never more than 2.5x
+                from PIL import ImageEnhance, ImageStat
+                mean = ImageStat.Stat(img.convert("L")).mean[0]
+                if 0 < mean < 100:
+                    img = ImageEnhance.Brightness(img).enhance(min(2.5, 100.0 / mean))
+            return img, source
     finally:
         ole.close()
     if not tries:
         raise ValueError("the table has no screenshot and names no playfield image")
     raise ValueError("the table's %s is not a picture the kit reads"
-                     % " or ".join(s for s, _ in tries))
+                     % " or ".join(dict.fromkeys(s for s, _ in tries)))
 
 
 def write_picture(path, out_dir, size=SIZE):

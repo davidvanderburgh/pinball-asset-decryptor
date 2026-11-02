@@ -736,9 +736,16 @@ author put there (TMNT's is the instruction card, Aerosmith's a render of
 the cabinet) and only 3 of David's 18 tables have one, while 17 of 18 have
 a playfield picture the kit reads. The one that does not is VPW's
 Metallica, whose playfield is baked into primitives (its IMAG names a ball
-texture, an HDR file); a BITS playfield (Visual Pinball's own LZW of raw
-pixels) is not read either - none of the kit's tables uses one. A
-transparent cut-out lies over black, as on the table.
+texture, an HDR file; the playfield itself is eight 8192 px lightmap
+atlases). David (2026-11-02), on seeing its empty outline: a guess beats
+none. The literal "largest image" guess is a cabinet-side strobe texture
+there, so the kit falls back in order: an image named like a playfield
+(`pf...`, `...playfield...`), the author's screenshot, then the biggest
+image named `backglass` - Metallica shows the game's backglass art, and the
+tooltip says it is the backglass because the playfield is baked. A BITS
+playfield (Visual Pinball's own LZW of raw pixels) is not read - none of
+the kit's tables uses one. A transparent cut-out lies over black, as on
+the table.
 
 In the app: the tab reads the picture from the (PAD) copy of every patched
 row (the person's own file, so nothing of a table ships) into

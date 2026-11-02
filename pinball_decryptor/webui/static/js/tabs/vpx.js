@@ -176,6 +176,7 @@ export default function Vpx() {
       const url = mediaUrl(p.file);
       return html`<img class="vpx-pic-img" src=${url} width=${p.w} height=${p.h} alt=""
         ...${tip({ head: t.name, lines: [p.source === "screenshot" ? "The author's own picture of the table."
+          : p.source === "backglass" ? "The table's backglass: its playfield is baked into its 3D parts, not a picture."
           : "The table's playfield, as its author drew it."], image: url, w: p.w, h: p.h })} />`;
     }
     const why = p && p.error ? "No picture: " + p.error + "."

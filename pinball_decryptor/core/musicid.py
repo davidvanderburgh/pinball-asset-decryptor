@@ -117,8 +117,10 @@ _FINGERPRINT_FORMS = (
     (),
 )
 # AcoustID wants base64; anything else (a text-format fp, a muxer banner,
-# a Windows console mixing garbage into stdout) must not be sent.
-_B64_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}$")
+# a Windows console mixing garbage into stdout) must not be sent.  Chromaprint
+# writes the URL-safe alphabet ('-' and '_', same as fpcalc), so any clip long
+# enough to be music has them; leaving them out failed every one (PAD-936).
+_B64_RE = re.compile(r"[A-Za-z0-9+/_-]+={0,2}$")
 
 
 def _fpcalc_fp(path):

@@ -258,6 +258,9 @@ def test_a_second_build_patches_the_set_it_finds(card, tmp_path, monkeypatch):
     second = engine.read_override_manifest(str(out))
     assert second["parent"] == first["generation"]
     assert second["generation"] != first["generation"]
+    # PAD-938: the set says how its image.bin was built, so the next Start reuses it
+    from pinball_decryptor.plugins.stern.image_compact import IMAGE_REV
+    assert first["image_rev"] == second["image_rev"] == IMAGE_REV
 
 
 def test_an_edit_taken_back_gets_the_card_bytes_back(card, tmp_path,
@@ -877,6 +880,27 @@ def test_a_set_prepared_for_another_card_to_run_on_is_rebuilt(tmp_path):
         man, str(img), str(assets), "1 2.0", run_card=str(built)) == ""
     assert "run on a different card" in emulate_core.overrides_reason(
         man, str(img), str(assets), "1 2.0", run_card=str(other))
+
+
+def test_a_set_whose_image_bin_an_earlier_version_built_is_rebuilt(tmp_path):
+    """PAD-938: an image.bin built before the song sequence tables moved with their
+    offsets crashed Led Zeppelin at its first song, and a set is otherwise reused for as
+    long as the edits stay as they were - so a set holding one is built again, once."""
+    from pinball_decryptor.plugins.stern.image_compact import IMAGE_REV
+    img = tmp_path / "card.raw"
+    img.write_bytes(b"x" * 32)
+    assets = tmp_path / "lz"
+    assets.mkdir()
+    man = _manifest(img, assets)
+    man["files"] = [{"path": "led_zeppelin_le/image.bin"}]
+    assert "earlier version" in emulate_core.overrides_reason(
+        man, str(img), str(assets), "1 2.0")
+    man["image_rev"] = IMAGE_REV
+    assert emulate_core.overrides_reason(man, str(img), str(assets), "1 2.0") == ""
+    # a set without an image.bin (pictures, videos) has nothing to build again
+    man = _manifest(img, assets)
+    man["files"] = [{"path": "led_zeppelin_le/assets/lcd/x.png"}]
+    assert emulate_core.overrides_reason(man, str(img), str(assets), "1 2.0") == ""
 
 
 def test_the_fingerprint_moves_for_any_edit(tmp_path):

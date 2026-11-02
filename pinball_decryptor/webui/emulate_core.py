@@ -619,6 +619,13 @@ def overrides_reason(manifest, card_path, assets_dir, fingerprint,
     if str(manifest.get("colour_profile") or "") != colour_profile.signature(
             assets_dir):
         return "the color profile was changed or switched since it was built"
+    # PAD-938: an image.bin an earlier version took sounds out of could send the game's
+    # songs to the wrong place (Led Zeppelin crashed at its first song)
+    from ..plugins.stern.image_compact import IMAGE_REV
+    if int(manifest.get("image_rev") or 0) < IMAGE_REV and any(
+            ntpath.basename(str(r.get("path") or "")) == "image.bin"
+            for r in manifest.get("files") or []):
+        return "its sound file was built by an earlier version of the app"
     return ""
 
 

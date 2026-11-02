@@ -60,6 +60,10 @@ OP_SEQ = 0x0c
 OPS_AT = 7
 #: The most of a descriptor read for its script: they lie back to back, a few dozen bytes each.
 DESC_READ = 0x400
+#: What an override set's manifest records as ``image_rev``: a set holding an ``image.bin``
+#: stamped lower is built again (``emulate_core.overrides_reason``).  1: PAD-938, the song
+#: sequence tables moved with their offsets.
+IMAGE_REV = 1
 
 Layout = collections.namedtuple(
     "Layout", "moves offsets region region_at region_len md_off size saved gone")

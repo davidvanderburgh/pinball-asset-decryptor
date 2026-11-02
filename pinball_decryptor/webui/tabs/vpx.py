@@ -433,7 +433,8 @@ class VpxTab(TabService):
             got = self._kit("vpxsetup.py", ["open", name])
             res = got.get("result") or got.get("error")
             if res == "ok":
-                self._say("opening %s. The game starts by itself, within a minute." % name)
+                self._say("opening %s. The game starts by itself: a window where its screen goes "
+                          "shows how far it is." % name)
             else:
                 self._say(res, "error")
         return self._start("Opening the table", work)

@@ -3407,3 +3407,104 @@ def test_patched_table_finds_a_backglass_named_its_own_way(tmp_path):
     (out / "The Beatles_007 (PAD).directb2s").unlink()
     (src / "b2s" / "other.directb2s").write_bytes(b"x")
     assert pv.copy_backglass(str(src / "The Beatles_007.vpx"), str(out / "The Beatles_007 (PAD).vpx")) is None
+
+
+# ------------------------------------------------- PAD-940: loading window --
+
+#: the lines of a real start (David's Jurassic Park Pro, 2026-11-02: 79 s to
+#: the game, a minute of it before the game's window opened), in order
+JP_START = [
+    "[event] [sw] id=94  num=37   node=8  bit=39 raw=? logical=0 flags=0x0024 Left Return Lane",
+    "[card] evicting cached Godzilla Premium 1.16 (least recently booted) to make room",
+    "[card] caching jurassic_park_pro-1_16_0.Release.8G.sdcard.raw to the WSL disk in the background",
+    "[card]   ([card] mounting jurassic_park_pro-1_16_0.raw p3 at offset 364904448 (read only)",
+    "[card] title: jurassic_park_pro",
+    "[watch] cfg GAME=jurassic_park_pro",
+    "[watch] starting renderer (it opens the game window; the picture arrives",
+    "[watch] game window opened 1452x845 on DISPLAY=:0",
+    "[watch] starting jurassic_park_pro (boot to the first picture takes ~15 s)",
+    "[watch] waiting for the game to start...",
+    "[watch] running. CLOSE THE WINDOW to stop (or press Ctrl-C here).",
+]
+
+
+def test_the_loading_window_names_each_step_of_a_real_start():
+    """PAD-940: Play showed nothing for a minute; the loading window says
+    which step the run is on, read from its log, and its bar only moves on."""
+    ld = pytest.importorskip("padloading")
+    seen, floors = [], []
+    for n in range(len(JP_START) + 1):
+        floor, words = ld.step_of("\n".join(JP_START[:n]))
+        floors.append(floor)
+        if not seen or seen[-1] != words:
+            seen.append(words)
+    assert seen == ["Starting the emulator's Linux", "Making room for the card image",
+                    "Reading the card image", "Getting the game ready",
+                    "Opening the game's screen", "Starting the game"]
+    assert floors == sorted(floors) and floors[-1] < 1.0
+    # the pace of the last start, never past 95% before the game is up
+    assert ld.progress(0.1, 10, 80) == 0.125 and ld.progress(0.6, 10, 80) == 0.6
+    assert ld.progress(0.0, 500, 80) == 0.95
+    assert ld.name_of("jurassic_park_pro") == "Jurassic Park Pro Le 4.02"     # the table's own name
+    assert ld.name_of("some_new_le") == "Some New LE"
+
+
+def test_a_started_run_shows_the_loading_window_until_the_game_is_up(monkeypatch, tmp_path):
+    """The bridge starts padloading.py with a run it starts (pythonw, its own
+    process), says `up` when the game is, keeps how long it took for the next
+    bar, and says why when the run dies first."""
+    pc = pytest.importorskip("padcontroller")
+    pl = pc.padlaunch
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    monkeypatch.setattr(pc, "LOG", str(tmp_path / "padcontroller.log"))
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+    started, killed = [], []
+
+    class Proc:
+        def __init__(self, cmd, **kw):
+            started.append(cmd)
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            killed.append(self)
+    monkeypatch.setattr(pc.subprocess, "Popen", Proc)
+
+    class Launch:
+        logfile = str(tmp_path / "padvpx-jurassic_park_pro.log")
+        slot = 1
+
+        def alive(self):
+            return False
+
+        def stop(self):
+            pass
+
+    b = pc.Bridge()
+    b.title = "jurassic_park_pro"
+    b.launch = Launch()
+    b._loading_start()
+    cmd = started[-1]
+    assert cmd[1].endswith("padloading.py") and cmd[2:4] == ["jurassic_park_pro", Launch.logfile]
+    assert "--parent" in cmd and "--expect" not in cmd                  # no start timed yet
+    status = cmd[4]
+    b._loading_end("up", 79.4)
+    assert open(status).read() == "up"
+    for _ in range(50):                                                 # and its process ended, for sure
+        if killed:
+            break
+        pc.time.sleep(0.02)
+    assert len(killed) == 1
+    assert pl.kit_load()["start_s"] == {"jurassic_park_pro": 79}
+    b._loading_end("up")                                                # once: nothing up any more
+
+    b._loading_start()
+    assert started[-1][-2:] == ["--expect", "79"]                       # paced by the last start
+    monkeypatch.setattr(pc.Rig, "board_slot", staticmethod(lambda slot: None))
+    b.start_t = pc.time.monotonic()
+    b._poll_starting()                                                  # the run died before it was up
+    said = open(status).read()
+    assert said.startswith("failed The emulator stopped") and Launch.logfile in said
+    assert b.launch is None

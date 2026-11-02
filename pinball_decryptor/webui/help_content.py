@@ -3526,7 +3526,7 @@ PREVIEW_HELP = {
                     {"icon": "upload", "title": "Patch",
                      "text": "the table you downloaded from its author"},
                     {"icon": "play", "title": "Play",
-                     "text": "the game boots by itself, within a minute"}]},
+                     "text": "the game boots by itself; a window shows how far it is"}]},
                 "- The app ships no tables. The Tables list names each one it knows and "
                 "who made it; download it from there.\n"
                 "- **Choose folder...** on the Tables card names the folder your patched "

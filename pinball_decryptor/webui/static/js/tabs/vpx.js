@@ -6,6 +6,10 @@
 // PAD-927 laid it out again: the setup folds to one line of marks once all of
 // it is ready, the tables take the page with Patch on each table not yet
 // patched, and the window layouts are Use buttons, not radios nobody had picked.
+// PAD-940: the tables are ONE column under labelled headings (table, author,
+// where from, model, card, your copy), not two or three columns of rows that
+// crammed the model and the card into one cell; Patch and Play each a column
+// of their own, Play greyed on a table not patched yet (David).
 
 import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, call, tip } from "../core/ui.js";
 import { useNs } from "../core/store.js";
@@ -139,19 +143,29 @@ export default function Vpx() {
         <${Button} drop size="sm" kind="ghost" icon="upload" disabled=${busy || !s.ok}
           title="Patch every table in a folder of downloads at once: the ones the app knows get their (PAD) copy, the rest are counted."
           onClick=${() => call("vpx.patch_folder")}>Patch a folder…<//>`}>
-      ${rows.length ? html`<div class="vpx-grid">${rows.map((t) => html`<div class=${"vpx-table" + (t.patched ? "" : " unpatched")}>
+      ${rows.length ? html`<div class="vpx-list">
+        <div class="vpx-table vpx-head small muted">
+          <span>Table</span><span class="vpx-by">By</span><span class="vpx-from">From</span>
+          <span ...${tip("The machine the table plays as: the card image it boots is that model's.")}>Model</span>
+          <span>Card image</span><span>Your copy</span><span></span><span></span>
+        </div>
+        ${rows.map((t) => html`<div class=${"vpx-table" + (t.patched ? "" : " unpatched")}>
         <b class="vpx-name" ...${tip(t.extra ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : ""))}>${t.name}</b>
+        <span class="small vpx-by" ...${tip(t.by)}>${t.by}</span>
+        <span class="small muted vpx-from" ...${tip(t.where)}>${t.where}</span>
+        <span class="small" ...${tip(fits(t).length > 1 ? playsAs(t) + "The table fits "
+            + fits(t).map((x) => t.models[x]).join(" or ") + "." : "")}>${t.extra ? "" : (t.models || {})[t.title] || ""}</span>
         <span class="small muted vpx-card" ...${tip(t.extra ? "" : t.card ? playsAs(t) + "Card: " + t.card
             : "No card image for " + fits(t).join(" or ") + " in your card folder yet.")}>${t.extra ? ""
-          : !t.card ? "No card yet"
-          : !t.patched && t.where ? "Get it on " + t.where
-          : playsAs(t) + base(t.card)}</span>
-        <div class="vpx-acts">
-          ${t.patched && !t.extra ? patchBtn(t, t.source ? "Patch again" : "Patch again…") : null}
-          ${t.patched ? html`<${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx}
-              onClick=${() => call("vpx.play", t.output)}>Play<//>`
-            : patchBtn(t, "Patch…")}
-        </div>
+          : !t.card ? "No card yet" : base(t.card)}</span>
+        <span>${!t.patched ? html`<${Chip} sm>Not patched<//>`
+          : stale(t) || missed(t) ? html`<${Chip} kind="warn" dot sm>Patch again<//>`
+          : html`<${Chip} kind="ok" dot sm>Patched<//>`}</span>
+        <span class="vpx-patch">${t.extra ? null
+          : patchBtn(t, !t.patched ? "Patch…" : t.source ? "Patch again" : "Patch again…")}</span>
+        <span class="vpx-play"><${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx || !t.patched}
+          title=${t.patched ? "" : "Patch " + t.name + " first: Play opens its (PAD) copy."}
+          onClick=${() => call("vpx.play", t.output)}>Play<//></span>
         ${stale(t) && t.card ? html`<div class="small vpx-stale">Your copy was patched for the ${t.models[t.patched_title]} and still plays as it.
           Patch again to play it as the ${t.models[t.title]}.</div>` : null}
         ${missed(t) ? html`<div class="small vpx-stale">Your copy was patched before a fix: ${t.repatch.join("; ")}.

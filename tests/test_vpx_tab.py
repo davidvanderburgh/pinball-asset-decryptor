@@ -301,7 +301,7 @@ def test_a_patched_tables_patch_again_runs_on_its_recorded_download(tab, monkeyp
     assert asked == ["Choose your download of Godzilla Limited Edition v2.6"]
     js = open(os.path.join(os.path.dirname(V.__file__), "..", "static", "js", "tabs", "vpx.js"),
               encoding="utf-8").read()
-    assert 't.patched && !t.extra ? patchBtn(t, t.source ? "Patch again" : "Patch again…")' in js
+    assert 'patchBtn(t, !t.patched ? "Patch…" : t.source ? "Patch again" : "Patch again…")' in js
     assert "Your copy was patched before a fix" in js
 
 
@@ -315,6 +315,24 @@ def test_the_page_is_laid_out_for_a_set_up_pc():
     assert "Radio" not in js and 'call("vpx.layout", p.key)' in js and "p.short" in js
     assert "Where you left them" in js
     assert 'call("vpx.patch_folder")' in js
+
+
+def test_the_tables_are_one_labelled_column():
+    """PAD-940: one table per line under labelled columns, not two or three
+    CSS columns of rows with the model and the card crammed into one cell."""
+    here = os.path.join(os.path.dirname(V.__file__), "..", "static")
+    js = open(os.path.join(here, "js", "tabs", "vpx.js"), encoding="utf-8").read()
+    css = open(os.path.join(here, "css", "tabs", "vpx.css"), encoding="utf-8").read()
+    assert "vpx-grid" not in js and "columns:" not in css.replace("grid-template-columns:", "")
+    for head in ("<span>Table</span>", ">By</span>", ">From</span>", ">Model</span>",
+                 "<span>Card image</span>", "<span>Your copy</span>"):
+        assert head in js
+    assert "Get it on" not in js
+    # David: Patch and Play a column each on every line, Play greyed until patched
+    assert 'class="vpx-patch"' in js and 'class="vpx-play"' in js
+    assert "disabled=${busy || !s.vpx || !t.patched}" in js
+    # a short window scrolls the page; the Tables card is never squeezed under its rows
+    assert ".vpx-page > .card { flex: 0 0 auto; }" in css
 
 
 def test_a_folder_of_downloads_is_patched_in_one_go(tab, monkeypatch, tmp_path):

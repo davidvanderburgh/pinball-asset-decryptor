@@ -243,3 +243,47 @@ def test_the_runtime_row_no_longer_points_at_the_emulate_tab():
               encoding="utf-8").read()
     assert "Set it up on the Emulate tab" not in js
     assert 'call("vpx.install_runtime")' in js
+
+
+def _godzilla(tab, monkeypatch):
+    """A tab whose state lists Godzilla, not patched yet; the dialog titles it asks with."""
+    asked = []
+    monkeypatch.setattr(tab.window, "ask_open", lambda key, title, *a, **k: asked.append(title) or tab.window.pick,
+                        raising=False)
+    tab.on_show()
+    _wait(tab)
+    tab.set(tables=[{"name": "Godzilla Limited Edition v2.6", "output": "Godzilla (PAD).vpx", "patched": False}])
+    return asked
+
+
+def test_a_tables_own_patch_button_names_it_in_the_dialog(tab, monkeypatch):
+    """PAD-927: Patch is on the row of a table not patched yet, not one button
+    at the bottom of the list."""
+    asked = _godzilla(tab, monkeypatch)
+    tab.window.pick = r"D:\Downloads\Godzilla LE v2.6.vpx"
+    tab.answers[("padvpx.py", "patch")] = {"_text": r'open "C:\VP\tables\Godzilla (PAD).vpx" in Visual Pinball'}
+    assert tab.patch("Godzilla (PAD).vpx")
+    _wait(tab)
+    assert asked == ["Choose your download of Godzilla Limited Edition v2.6"]
+    assert not [ln for ln in tab.window.lines if ln[0] in ("error", "warning")]
+
+
+def test_a_rows_patch_says_when_the_download_was_another_table(tab, monkeypatch):
+    _godzilla(tab, monkeypatch)
+    tab.window.pick = r"D:\Downloads\Rush LE 2.0.2.vpx"
+    tab.answers[("padvpx.py", "patch")] = {"_text": r'open "C:\VP\tables\Rush LE 2.0.2 (PAD).vpx" in Visual Pinball'}
+    assert tab.patch("Godzilla (PAD).vpx")
+    _wait(tab)
+    warned = [t for lv, t in tab.window.lines if lv == "warning"]
+    assert warned and "is not Godzilla Limited Edition v2.6" in warned[0] and "Rush LE 2.0.2 (PAD).vpx" in warned[0]
+
+
+def test_the_page_is_laid_out_for_a_set_up_pc():
+    """PAD-927: no Patch button under the list, a Patch per table, and the
+    window layouts as Use buttons (no radio that nothing had picked)."""
+    js = open(os.path.join(os.path.dirname(V.__file__), "..", "static", "js", "tabs", "vpx.js"),
+              encoding="utf-8").read()
+    assert "Patch a table" not in js and "footer=" not in js
+    assert 'call("vpx.patch", t.output)' in js
+    assert "Radio" not in js and ">Use<" in js
+    assert "Where you left them" in js

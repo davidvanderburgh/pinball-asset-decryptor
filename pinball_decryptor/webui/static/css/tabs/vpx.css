@@ -2,9 +2,18 @@
 .vpx-status { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; min-height: 24px; }
 .vpx-prog { flex: 1; max-width: 320px; }
 .vpx-row, .vpx-table { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
-.vpx-row + .vpx-row, .vpx-table + .vpx-table { border-top: 1px solid var(--line); }
+.vpx-row + .vpx-row, .vpx-table + .vpx-table, .vpx-row + .vpx-table { border-top: 1px solid var(--line); }
 .vpx-row > .chip { flex: none; width: 74px; justify-content: center; }
 .vpx-what { flex: 1; min-width: 0; }
 .vpx-val { overflow-wrap: anywhere; }
 .vpx-acts { display: flex; gap: 6px; flex: none; }
-.vpx-pre { padding: 3px 0; }
+/* PAD-927: the setup is one line of marks once it is all ready */
+.vpx-setup { margin-bottom: 16px; }
+.vpx-setup .hd { flex-wrap: wrap; row-gap: 6px; }
+.vpx-marks { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 12px; }
+.vpx-setup.shut > .bd { display: none; }
+.vpx-cols { align-items: start; }
+.vpx-now { padding: 2px 0 10px; }
+.vpx-or { padding: 4px 0 2px; border-top: 1px solid var(--line); padding-top: 10px; }
+.vpx-pre .vpx-what { font-size: 13px; }
+.vpx-disp { padding-top: 10px; border-top: 1px solid var(--line); }

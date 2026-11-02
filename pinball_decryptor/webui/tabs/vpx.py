@@ -22,6 +22,7 @@ pywin32, its DPI awareness and its module names stay out of the app.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -315,11 +316,19 @@ class VpxTab(TabService):
         return self._start("Reading the tables folder", work)
 
     @rpc
-    def patch(self):
+    def patch(self, output=None):
         """The person's own download of a table the kit knows: recognised by
         its script and written as the "(PAD)" copy into Visual Pinball's
-        tables folder (beside the download while Visual Pinball is not set up)."""
-        path = self.window.ask_open("vpx_table", "Choose the Visual Pinball table you downloaded",
+        tables folder (beside the download while Visual Pinball is not set up).
+
+        PAD-927: each table's row has its own Patch button, *output* its
+        "(PAD)" name: the file dialog names that table, and a download that
+        turns out to be another table the kit knows is patched as that one,
+        with the page saying so."""
+        want = next((t for t in self.get("tables") or [] if output and t.get("output") == output), None)
+        title = ("Choose your download of %s" % want["name"] if want
+                 else "Choose the Visual Pinball table you downloaded")
+        path = self.window.ask_open("vpx_table", title,
                                     [("Visual Pinball table", "*.vpx"), ("All files", "*.*")])
         if not path:
             return False
@@ -338,6 +347,12 @@ class VpxTab(TabService):
                           "listed on this page.", "warning")
             elif "open \"" not in text:
                 self._say("The patch did not finish; the session log has what it said.", "error")
+            elif want:
+                got_out = re.search(r'open "([^"]+)"', text)
+                made = os.path.basename(got_out.group(1)) if got_out else ""
+                if made and made != want["output"]:
+                    self._say("%s is not %s: it was patched as the table it is, %s."
+                              % (os.path.basename(path), want["name"], made), "warning")
         return self._start("Patching the table", work)
 
     @rpc

@@ -261,7 +261,10 @@ def test_a_tables_own_patch_button_names_it_in_the_dialog(tab, monkeypatch):
     at the bottom of the list."""
     asked = _godzilla(tab, monkeypatch)
     tab.window.pick = r"D:\Downloads\Godzilla LE v2.6.vpx"
-    tab.answers[("padvpx.py", "patch")] = {"_text": r'open "C:\VP\tables\Godzilla (PAD).vpx" in Visual Pinball'}
+    # The kit prints the made table's path in the host's own form (PAD-931:
+    # a Windows path read as one whole name on the Linux and macOS runners).
+    made = os.path.join(os.sep + "VP", "tables", "Godzilla (PAD).vpx")
+    tab.answers[("padvpx.py", "patch")] = {"_text": 'open "%s" in Visual Pinball' % made}
     assert tab.patch("Godzilla (PAD).vpx")
     _wait(tab)
     assert asked == ["Choose your download of Godzilla Limited Edition v2.6"]

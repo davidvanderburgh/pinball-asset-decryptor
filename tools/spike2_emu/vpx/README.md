@@ -561,7 +561,12 @@ like a Spike 2 one (`padlaunch.Spike1Launch`: start.sh with the title's
 .iso, on the app's data disk, visible and with sound; `padvpx run got_le
 --mute` by hand) - ONE rig, so a run of another title is refused, not
 replaced. The game's DMD is drawn by the app's Spike 1 tab, so a player keeps
-the app open beside Visual Pinball. `got_le.shadow.json` is the first Spike 1
+the app open beside Visual Pinball. The author's checklist (`padvpx
+checklist got_le`, the tab's "For table authors") reads a Spike 1 title
+from its game program and switch map in the rig's cache (every Spike 1
+game extracted on the PC is offered): the switches with their slot ids,
+the coils the program drives, every LED channel named where the program
+names a lamp; nothing is placed (no Spike 1 build ships positions). `got_le.shadow.json` is the first Spike 1
 map: the cabinet and the coils (the ELF's), not yet VPW's table
 (`listed: false`, no `detect`). Proven on the rig: `test_controller.vbs run
 got_le 1075 1515 1578 1519 "1521,1522,1523,1524,1525,1526" 1080` - the

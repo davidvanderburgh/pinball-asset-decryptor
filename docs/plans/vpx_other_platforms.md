@@ -131,7 +131,34 @@ Not done: a button on the Write tab (its summary sentences are translated
 in three languages; the kit command and the catalogue tip carry it for
 now), and the Visual Pinball tab stays gated to the Spike 2 era.
 
-## Still to do (the next runs of PAD-943)
+## The Spike 1 author's checklist (run 2)
+
+`vpxauthor.machine_for(title)` reads a Spike 1 title from its game ELF and
+switch map when it has no device tables: `spike1_works()` (PAD_S1_WORK, the
+app's data disk, each distro's ~/s1emu), `spike1_titles()` (every
+`cache/<CARD>/game/<exe>` there, the card stem lowercased as the title),
+`spike1_sources()` (the rig's curated `switchmaps/<CARD>.json`, else the
+run's s1switches.json), `read_machine_spike1()` in read_machine's shape
+(switch id = slot, coils and LEDs from `s1elf --coils/--leds`, nothing
+placed). The tab's authors' card offers the Spike 1 titles (got_le, kiss_le,
+wn, wwe_le, primus, can_crusher, ghostbusters_le, transformers_pin on this
+PC), the sheet and the Markdown say it is a Spike 1 title and how it is
+numbered, and a starter map carries `platform: spike1`. GOT LE: 62
+playfield switches, 10 cabinet, 24 coils, 246 LEDs.
+
+Fitting a Spike 1 table's lamps will need the matrix channel of each named
+insert (the lamp table's column/row to the node's channel): read from a
+run against the table's own light names when VPW's GOT download is on the
+PC, the way the Spike 2 maps were matched (vpxlamps.py).
+
+## Still to do
+
+Nothing of this ticket: the remaining piece, a map for VPW's Game of
+Thrones table (and KISS, Whoa Nellie, Primus, Can Crusher), needs the
+download (VPUniverse account) and is a fit like any shadow map's - the
+checklist and the starter are its starting point.
+
+Was:
 
 1. **The Spike 1 author's checklist**: `vpxauthor.py checklist` for a Spike
    1 title from its ELF (`s1elf --coils/--leds` + the switch map) and the

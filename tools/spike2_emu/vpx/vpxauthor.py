@@ -98,7 +98,7 @@ _SW_KINDS = (
     ("cabinet", r"QR SCANNER|\bDIP\b|SERVICE|HEADPHONE|VOLUME|COIN|START BUTTON|TOURNAMENT|TILT|SLAM|"
                 r"ACTION BUTTON|LOCKDOWN|TICKET|DOOR|TOPPER|KNOCKER"),
     ("mech", r"DIVERTER|MOTOR|STEPPER|ENCODER"),
-    ("flipper eos", r"FLIP(PER)?\s*EOS"),
+    ("flipper eos", r"FLIP(PER)?\s*(EOS|E\.O\.S)"),
     ("flipper button", r"FLIP(PER)?\s*BUTTON|FLIP BUTTON"),
     ("trough", r"\bTROUGH\b"),
     ("shooter", r"SHOOTER LANE|PLUNGER LANE|BALL LAUNCH"),
@@ -356,6 +356,7 @@ def read_machine(tables_dir, title=None, files=None):
                 g["x"] = g["y"] = None
 
     return {"title": title or "", "binary": binary, "image": image, "image_size": size,
+            "tables_from": os.path.dirname(files["device_xy.txt"]),
             "have": {f: os.path.isfile(files[f]) for f in TABLE_FILES},
             "positions": any(_is_playfield(r["image"]) for r in rows),
             "switches": switches, "coils": coils, "inserts": inserts}
@@ -412,6 +413,162 @@ def _win(distro, posix):
 
 
 _ROOTS = None
+
+
+# ------------------------------------------- a Spike 1 title (PAD-943) --
+#
+# A Spike 1 title has no device_xy.txt: its parts come out of its game ELF
+# (tools/spike1_emu/s1elf.py: the coils and LEDs by node and position, named
+# where the game names them) and its switch map (the rig's curated
+# switchmaps/<CARD>.json, else the run's own s1switches.json). The ELF is
+# the extracted game in a Spike 1 work dir's cache (<work>/cache/<CARD>/game/
+# <exe>); no build ships positions, so every part is listed unplaced.
+
+def _s1elf():
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.dirname(HERE)), "spike1_emu", "s1elf.py")
+    spec = importlib.util.spec_from_file_location("_s1elf", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_S1_WORKS = None
+
+
+def spike1_works():
+    """The Spike 1 work dirs on this PC as Windows sees them: PAD_S1_WORK,
+    the app's data disk, each distro's ~/s1emu. Asked of WSL once."""
+    global _S1_WORKS
+    if _S1_WORKS is not None:
+        return _S1_WORKS
+    out = []
+
+    def add(d):
+        if d and d not in out:
+            out.append(d)
+    env = os.environ.get("PAD_S1_WORK")
+    if env:
+        add(env)
+    try:
+        import padlaunch
+        dists = padlaunch.distros()
+        first = padlaunch.distro()
+        for dist in ([first] if first in dists else []) + [d for d in dists if d != first]:
+            try:
+                work = padlaunch.app_work(dist, "spike1") if dist == first else ""
+            except Exception:                               # noqa: BLE001
+                work = ""
+            if work:
+                add(_win(dist, work))
+            try:
+                _, acct = padlaunch.account(dist)
+            except Exception:                               # noqa: BLE001
+                acct = ""
+            if acct:
+                add(_win(dist, acct + "/s1emu"))
+    except Exception:                                       # noqa: BLE001
+        pass
+    _S1_WORKS = out
+    return out
+
+
+def _s1_card_stem(name):
+    """`GOT_LE-1_37` -> (`GOT_LE`, `got_le`): the card's stem and the title."""
+    stem = name.split("-")[0]
+    return stem, stem.lower()
+
+
+def spike1_titles(works=None):
+    """{title: (card stem, elf path)} for every Spike 1 game extracted on this PC."""
+    out = {}
+    for w in (spike1_works() if works is None else works):
+        try:
+            names = sorted(os.listdir(os.path.join(w, "cache")))
+        except OSError:
+            continue
+        for n in names:
+            stem, title = _s1_card_stem(n)
+            game = os.path.join(w, "cache", n, "game")
+            try:
+                exe = open(os.path.join(game, ".game_exe"), encoding="utf-8").read().strip() or "game"
+            except OSError:
+                exe = "game"
+            elf = os.path.join(game, exe)
+            if os.path.isfile(elf) and title not in out:
+                out[title] = (stem, elf)
+    return out
+
+
+def spike1_sources(title, works=None):
+    """{elf, switchmap} for a Spike 1 title, or {} when it is not extracted
+    here. The switch map: the rig's curated one for the card, else the
+    newest s1switches.json of a work dir whose game is this title."""
+    got = spike1_titles(works).get(title)
+    if not got:
+        return {}
+    stem, elf = got
+    curated = os.path.join(os.path.dirname(os.path.dirname(HERE)), "spike1_emu", "switchmaps", stem + ".json")
+    swmap = curated if os.path.isfile(curated) else ""
+    if not swmap:
+        best = None
+        for w in (spike1_works() if works is None else works):
+            p = os.path.join(w, "s1switches.json")
+            try:
+                if _s1_card_stem(os.path.basename(os.path.realpath(os.path.join(w, "game"))))[1] != title:
+                    continue
+                mt = os.path.getmtime(p)
+            except OSError:
+                continue
+            if best is None or mt > best[0]:
+                best = (mt, p)
+        swmap = best[1] if best else ""
+    return {"elf": elf, "switchmap": swmap}
+
+
+def read_machine_spike1(title, elf, switchmap=""):
+    """The machine of a Spike 1 title, in read_machine's shape: switches
+    from the switch map (id = node * 64 + index, the rig's numbering),
+    coils and inserts from the ELF; nothing placed."""
+    import s1bridge
+    s1elf = _s1elf()
+    names = s1bridge.read_names(switchmap) if switchmap else {}
+    switches = []
+    for (node, idx), name in sorted(names.items()):
+        kind = switch_kind(name)
+        if kind == "other" and node < 8:
+            kind = "cabinet"                     # the cabinet's node (node 1 on GOT)
+        switches.append({"id": s1bridge.slot(node, idx), "num": None, "node": node, "bit": idx,
+                         "name": name, "kind": kind, "x": None, "y": None,
+                         "where": "cabinet" if kind == "cabinet" else "virtual" if kind == "virtual"
+                         else "unplaced"})
+    coils = []
+    for (node, idx), name in sorted(s1elf.extract_coil_map(elf).items()):
+        coils.append({"name": name, "node": node, "index": idx, "kind": coil_kind(name), "x": None, "y": None,
+                      "number": s1bridge.sol_number(node, idx)})
+    inserts = []
+    for (node, idx), name in sorted(s1elf.extract_led_map(elf).items()):
+        nm = name or "LED %d/%d" % (node, idx)
+        inserts.append({"name": nm, "leds": [(node, idx)], "names": [nm], "x": None, "y": None, "image": "-",
+                        "where": "playfield", "rgb": False, "lamp": lamp_number(node, idx)})
+    return {"title": title, "platform": "spike1", "binary": os.path.basename(elf), "image": "", "image_size": None,
+            "tables_from": os.path.dirname(elf),
+            # the names the Spike 2 reader's notes ask about: the ELF is the device table
+            "have": {"device_xy.txt": True, "led_io.txt": True, "switch_list.txt": bool(switchmap),
+                     "elf": True, "switchmap": bool(switchmap)}, "positions": False,
+            "switches": switches, "coils": coils, "inserts": inserts}
+
+
+def machine_for(title, tables_dir=None):
+    """The machine of any title on this PC: a Spike 2 one from its device
+    tables, a Spike 1 one from its ELF; None when neither is here."""
+    files = find_tables(title, tables_dir)
+    if "device_xy.txt" in files:
+        return read_machine(os.path.dirname(files["device_xy.txt"]), title, files)
+    src = spike1_sources(title) if not tables_dir else {}
+    if src:
+        return read_machine_spike1(title, src["elf"], src["switchmap"])
+    return None
 
 
 def table_roots():
@@ -517,6 +674,8 @@ def titles_with_tables(tables_dir=None):
         for n in names:
             if re.match(r"^[a-z0-9_]+$", n) and os.path.isfile(os.path.join(d, n, "device_xy.txt")):
                 titles.add(n)
+    if not tables_dir:
+        titles |= set(spike1_titles())          # PAD-943: the Spike 1 games extracted here
     return sorted(titles)
 
 
@@ -705,6 +864,13 @@ def markdown(machine, table=None, map_info=None, cov=None, gap=None, inventory=N
     w("| switch | 1000 + id | the id column below (switch_list.txt) |")
     w("| coil | the small number its map gives it (1..68; flippers 46/48/36) | `solenoids` in the map |")
     w("| lamp | 1000 + node x 100 + index (an RGB insert: its first LED) | the lamp column below (led_io.txt) |")
+    if machine.get("platform") == "spike1":
+        w("")
+        w("> **A Spike 1 title** (the map says `\"platform\": \"spike1\"`): the ids are the rig's own, "
+          "node x 64 + index (switchmaps/<card>.json, s1switches.json); a coil is 1000 + node x 64 + index "
+          "until the map gives it its small number; the inserts are the matrix channels the game drives, "
+          "named only where its ELF names a lamp - match the rest by watching a run "
+          "(tools/spike2_emu/vpx/README.md, \"Other platforms\").")
     w("")
     w("A map (`<title>.shadow.json` for a scripted tribute, `<title>.vpxmap.json` for a ROM table) names "
       "the table object for each part; `tools/spike2_emu/vpx/README.md` has the shape and the kit's "
@@ -978,6 +1144,7 @@ def starter_map(machine, table_name=""):
               % (machine["title"], table_name or "a table"),
               "See tools/spike2_emu/vpx/README.md and the maps beside it for finished examples."],
         "title": machine["title"],
+        **({"platform": "spike1"} if machine.get("platform") == "spike1" else {}),
         "detect": ["TODO: two words only this table's script has"],
         "output": "%s (PAD).vpx" % (os.path.splitext(table_name)[0] if table_name else machine["title"]),
         "table": {"name": table_name or "", "by": "", "where": ""},
@@ -1009,10 +1176,9 @@ def summary_for(title, m, tables_dir=None):
     when the title has no tables here. The parts a table owes: playfield
     switches but the flipper EOS and the unnamed, coils but the board's and
     the cabinet's, playfield inserts."""
-    files = find_tables(title, tables_dir)
-    if "device_xy.txt" not in files:
+    machine = machine_for(title, tables_dir)
+    if machine is None:
         return None
-    machine = read_machine(os.path.dirname(files["device_xy.txt"]), title, files)
     if not machine["coils"]:
         machine["coils"] = coils_from_map(m)
     if not machine["inserts"]:
@@ -1084,15 +1250,14 @@ def build(title, table=None, tables_dir=None):
         import padvpx
         fits = padvpx.fitting(table)
         pick = next(((t, i) for t, i in fits if t == title), None) or (fits[0] if fits else None)
-        if pick and pick[0] != title and "device_xy.txt" in find_tables(pick[0], tables_dir):
+        if pick and pick[0] != title and machine_for(pick[0], tables_dir) is not None:
             # the table is another title's (Rush's asked as Stranger Things): the
             # checklist is that title's, and the summary says so
             title = pick[0]
-    files = find_tables(title, tables_dir)
-    if "device_xy.txt" not in files:
+    machine = machine_for(title, tables_dir)
+    if machine is None:
         return {"error": "No device tables for %s on this PC yet: play it once (the Emulate tab, or its "
                          "table) and try again." % title}
-    machine = read_machine(os.path.dirname(files["device_xy.txt"]), title, files)
     map_info = cov = gap = inventory = None
     starter, wrong = None, []
     if table:
@@ -1141,7 +1306,7 @@ def build(title, table=None, tables_dir=None):
     pf_ins = [g for g in inserts if g["where"] == "playfield"]
     summary = {"title": title, "switches": len(pf_sw), "coils": len([c for c in coils if c["node"] is not None]),
                "inserts": len(pf_ins), "ids": bool(machine["have"].get("switch_list.txt")),
-               "tables_from": os.path.dirname(files["device_xy.txt"])}
+               "tables_from": machine.get("tables_from", "")}
     if cov:
         wired_sw = len([s for s in owed_sw if s["ok"] == "yes"])
         wired_c = len([c for c in owed_coils if c["ok"] == "yes"])
@@ -1169,6 +1334,10 @@ def build(title, table=None, tables_dir=None):
     if not summary["ids"]:
         notes.append("No switch ids yet: the game builds its switch table when it runs. Play the title once "
                      "and make the checklist again.")
+    if machine.get("platform") == "spike1":
+        notes.append("A Spike 1 title: its parts are read from the game's own program and switch map; the "
+                     "switch ids are node x 64 + index, and the inserts are matrix channels named only where "
+                     "the game names a lamp.")
     if title != asked:
         notes.append("%s is %s's table, not %s's: this is %s's checklist."
                      % (inventory["name"] if inventory else "The table", title, asked, title))

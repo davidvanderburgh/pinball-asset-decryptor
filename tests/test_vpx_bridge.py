@@ -1112,7 +1112,7 @@ def test_kit_recognises_each_supported_table(monkeypatch):
         def script(self):
             return self._s
 
-    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: None)
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t, platform="spike2": None)
     for title, words in (("rush_le", ["Rush LE ver 2.0.2 / PUP ver 2.0.0 - By DrHotWing"]),
                          ("foo_fighters_pro", ["'  JP's Foo Fighters - a tribute", "script by jpsalas - 2025"]),
                          ("godzilla_le", ["' Godzilla Limited Edition", 'ExecuteGlobal GetTextFile("SEGA.VBS")'])):
@@ -1137,7 +1137,7 @@ def test_jps_foo_fighters_plays_as_the_pro_unless_only_an_le_card_is_there(monke
     fits = [t for t, _ in pv.fitting("x.vpx")]
     assert fits == ["foo_fighters_pro", "foo_fighters_le"], "the preferred map first"
     cards = {}
-    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: cards.get(t))
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t, platform="spike2": cards.get(t))
     assert pv.recognise("x.vpx")[0] == "foo_fighters_pro"
     cards["foo_fighters_le"] = "D:/c/foo_fighters_le-1_04_0.Release.16G.sdcard.raw"
     assert pv.recognise("x.vpx")[0] == "foo_fighters_le", "only an LE card: the LE"
@@ -1203,7 +1203,7 @@ def test_the_bond_table_plays_as_the_pro(monkeypatch):
     monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
     assert [t for t, _ in pv.fitting("x.vpx")] == ["james_bond_pro", "james_bond_le"]
     cards = {}
-    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: cards.get(t))
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t, platform="spike2": cards.get(t))
     assert pv.recognise("x.vpx")[0] == "james_bond_pro"
     cards["james_bond_le"] = "D:/c/james_bond_le-1_06_0.Release.16G.sdcard.raw"
     assert pv.recognise("x.vpx")[0] == "james_bond_le", "only an LE card: the LE"
@@ -1229,7 +1229,7 @@ def test_the_john_wick_table_plays_as_the_pro(monkeypatch):
     monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
     assert [t for t, _ in pv.fitting("x.vpx")] == ["john_wick_pro", "john_wick_le"]
     cards = {}
-    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: cards.get(t))
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t, platform="spike2": cards.get(t))
     assert pv.recognise("x.vpx")[0] == "john_wick_pro"
     cards["john_wick_le"] = "D:/c/john_wick_le-1_02_0.Release.16G.sdcard.raw"
     assert pv.recognise("x.vpx")[0] == "john_wick_le", "only an LE card: the LE"

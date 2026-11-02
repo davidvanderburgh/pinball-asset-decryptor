@@ -187,6 +187,20 @@ Right-click a sound > **Play in turn** > **Add a sound to play in turn…**
 - Each file plays for as long as the sound it stands in for.
 - Needs an image build, not a direct SD write.
 
+### Sounds on shots in the game's own modes (Stern Spike 2)
+
+While one of the game's own modes runs, a hit on a shot you pick plays a sound you pick: one of
+the game's own sounds (one it never plays, say) or a file of yours.
+
+- Right-click a sound > **Play on a shot in one of the game's modes…**, or **Sounds on shots** at
+  the top of the tab. Pick the mode (the game's own name for it, such as Grendel Mode), the shot
+  (the game's own switch name) and the sound, then **Add**. Up to 32.
+- The sound plays whole, beside the game's own sounds. A hit while it still plays adds no
+  other one, so a spinner does not stack them.
+- **Where:** the games whose modes the app can tell running (Venom, Godzilla, Deadpool, TMNT,
+  Jaws, Mandalorian and most others). The tab says why on one where it cannot.
+- Needs an image build, not a direct SD write.
+
 ### More on this tab
 
 - **Attract flipper sounds** gives the flipper buttons your own sounds in

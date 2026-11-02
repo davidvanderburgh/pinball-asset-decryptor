@@ -16010,7 +16010,11 @@ static void att_arm(void)
  * mode_slot_active`, else `value stock_slot_active`, else read off `site stock_any_running`). A press
  * while the last one still plays (its length + GMS_GAP) plays nothing: a spinner is not a hundred sounds.
  * The carrier plays at the modes' shot-call priority (3, no steal flag: MODE_SDK.md "Sounds of your
- * own"), so it waits under the game's own big calls and is not cut by an equal one. */
+ * own"), so it waits under the game's own big calls and is not cut by an equal one. The carrier's own
+ * descriptor says how long it plays, so a file shorter than its record is followed by silence that would
+ * hold the voice bus: gms_tick stops it once the file's own length (+1/8 +120 ms, as mode_file.c's own
+ * calls) has played - from a hook of its own on the tick site, since a card with no modes (`only`) hooks
+ * no tick of the modes'. */
 #define GMS_FILES 32
 #define GMS_GAP   150                       /* ms after a file's own length before another press plays */
 static struct {
@@ -16020,8 +16024,9 @@ static struct {
     unsigned mode[GMS_FILES], sw[GMS_FILES], ms[GMS_FILES], obj[GMS_FILES];
     unsigned char host[GMS_FILES][8];
     volatile int cur;                       /* the file the carrier plays now (-1: none) */
-    volatile unsigned long swap_until, until;
+    volatile unsigned long swap_until, until, stop_at;
     volatile int looked;
+    unsigned stops;
 } gms = { .cur = -1 };
 static int gms_bad;
 
@@ -16077,11 +16082,20 @@ static int gms_lookup(unsigned *r)
     return 1;
 }
 
-/* 1 while the game's mode of file k is active for the player up (its own ACTIVE virtual) */
+/* 1 while the game's mode of file k is active for the player up (its own ACTIVE virtual). Asked at the press,
+ * never at arm: the mode objects are the game's C++ statics, built by its start-up after this object loads
+ * (the emulator, Venom LE 1.07: at arm Grendel Mode's object had no vtable yet) */
 static int gms_active(int k)
 {
+    static int said;
     unsigned obj = gms.obj[k], act = place_vfn_at(obj, gms.slot);
-    return act && (((unsigned (*)(unsigned))(unsigned long)act)(obj) & 0xffu) != 0;
+    if (!act) {
+        if (!said++)
+            say("game mode shot sounds: the game's mode %u (object 0x%08x) has no ACTIVE virtual v[%ld] in the game's "
+                "code - its sounds do not play", gms.mode[k], obj, gms.slot);
+        return 0;
+    }
+    return (((unsigned (*)(unsigned))(unsigned long)act)(obj) & 0xffu) != 0;
 }
 
 /* every edge of the switch drain (the game's thread): a switch of a row pressed while its mode runs */
@@ -16112,11 +16126,23 @@ static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     gms.looked = 0;
     gms.swap_until = now + gms.ms[k] + 1000;
     gms.until = now + gms.ms[k] + GMS_GAP;
+    gms.stop_at = (now + gms.ms[k] + gms.ms[k] / 8 + 120) | 1;
     gms.cur = k;
     gms.plays++;
     pm_sound(gms.request);
     say("game mode shot sounds: switch %u pressed in %s (mode %u) - file %d (%u ms) on request %u", id,
         gms_name(gms.mode[k]), gms.mode[k], k + 1, gms.ms[k], gms.request);
+}
+
+/* the tick (its own hook): the carrier stopped once the file has played, so its silence holds no bus */
+static void gms_tick(unsigned *r)
+{
+    unsigned long at = gms.stop_at;
+    (void)r;
+    if (!at || (long)(pm_ms() - at) < 0) return;
+    gms.stop_at = 0;
+    if (pm_sound_active(gms.request) && pm_sound_stop(gms.request) && gms.stops++ < 8)
+        say("game mode shot sounds: request %u stopped at its file's end, so its silence holds no sound bus", gms.request);
 }
 
 /* from sndm_arm: the switch drain's hook (shared with the shots from switches and PAD-641) and the record
@@ -16145,9 +16171,9 @@ static void gms_arm(void)
     for (k = 0; k < gms.n; k++) {
         pm_snprintf(key, sizeof key, "block_obj_%u", gms.mode[k]);
         gms.obj[k] = data(key);
-        if (!gms.obj[k] || !place_vfn_at(gms.obj[k], gms.slot)) {
-            say("game mode shot sounds: off - the port names no object of the game's mode %u (file %u), or its ACTIVE "
-                "virtual v[%ld] is not in the game's code", gms.mode[k], k + 1, gms.slot);
+        if (!gms.obj[k]) {
+            say("game mode shot sounds: off - the port names no object of the game's mode %u (file %u)", gms.mode[k],
+                k + 1);
             return;
         }
     }
@@ -16166,6 +16192,8 @@ static void gms_arm(void)
     }
     if (pm_sound_priority(gms.request, 3, 0) < 0)
         say("game mode shot sounds: the carrier's priority stays its own - the port has no request table");
+    if (!site("tick") || !hook(site("tick")->addr, gms_tick))
+        say("game mode shot sounds: the tick cannot be hooked - the carrier plays out its own length after a file");
     gms_live = 1;
     for (k = 0; k < gms.n; k++)
         say("game mode shot sounds: file %u plays at switch %u in %s (mode %u, object 0x%08x)", k + 1, gms.sw[k],

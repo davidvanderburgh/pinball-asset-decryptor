@@ -133,6 +133,13 @@ def test_the_runtime_reads_the_lines_and_plays_on_a_press_while_the_mode_runs():
     assert 'pm_snprintf(key, sizeof key, "block_obj_%u", gms.mode[k]);' in c
     # at the modes' shot-call priority, no steal flag
     assert "pm_sound_priority(gms.request, 3, 0)" in c
+    # the carrier stopped once the file has played (its own record's silence would hold the voice bus), from a
+    # tick hook of its own: a card with no modes hooks no tick of the modes'
+    assert "gms.stop_at = (now + gms.ms[k] + gms.ms[k] / 8 + 120) | 1;" in c
+    assert 'hook(site("tick")->addr, gms_tick)' in c and "pm_sound_stop(gms.request)" in c
+    # ACTIVE is asked at the press: at arm the mode objects (C++ statics) are not built yet
+    arm = c[c.index("static void gms_arm(void)"):c.index("/* ---- the jukebox (PAD-685)")]
+    assert "place_vfn_at" not in arm
     # it works on a card with no modes (`only`)
     assert "gms_arm();" in c and "if (n_sndt || n_bsid || att.n || n_jmode || gms.n) return;" in c
 

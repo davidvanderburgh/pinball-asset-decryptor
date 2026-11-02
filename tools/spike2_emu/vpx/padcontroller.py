@@ -1583,6 +1583,7 @@ class Bridge:
             # one this bridge started, so the watch runs for every Run
             if now - last_front >= 1.0 and now - self.start_t < FRONT_WATCH_S:
                 last_front = now
+                self._find_player()
                 if self.launch is not None and not self.lcd_placed:
                     self._place_lcd()
                 self._keep_player_front()
@@ -1600,6 +1601,22 @@ class Bridge:
                 self._watch_player()
             self.last_poll_ms = (time.monotonic() - t0) * 1000.0
             time.sleep(POLL_S)
+
+    def _find_player(self):
+        """The player window of a table that ran the controller without
+        GetPlayerHWnd (PAD-933: The Beatles' and TMNT's `Controller.Run`, as
+        their ROM scripts had it): found by its title, as B2S.Server finds it,
+        so the grips, the placing and the size watch follow it as they do a
+        handed one - the Beatles' playfield could not be moved or resized."""
+        if sys.platform != "win32" or getattr(self, "player_hwnd", 0):
+            return
+        try:
+            hwnd = find_player_window()
+        except Exception:                                   # noqa: BLE001
+            return
+        if hwnd:
+            self.player_hwnd = hwnd
+            log("player window found by its title (the table ran the controller without it)")
 
     def _watch_focus(self):
         """Not every table tells the controller it lost the focus (TMNT's

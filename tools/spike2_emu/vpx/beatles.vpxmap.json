@@ -56,7 +56,9 @@
   },
   "switch_holds": {
     "_": "switches held while a ball sits somewhere (cvpmBallStack serves them)",
-    "trough": [68, 67, 66, 65, 64, 63, 69]
+    "trough": [68, 67, 66, 65, 64, 63, 69],
+    "balls": 4,
+    "balls_why": "the game counts 4 balls installed (TROUGH 1..4); with six on the rig it fired TROUGH until the trough read 3 - three balls served at Start (PAD-933), with four it fires once"
   },
   "quiet_subs": {
     "_": "the tribute's own rules, emptied: the real game scores, lights, saves and locks. Their callers stay; these do nothing now",

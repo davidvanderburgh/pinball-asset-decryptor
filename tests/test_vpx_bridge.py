@@ -1103,8 +1103,7 @@ def test_kit_recognises_each_supported_table(monkeypatch):
     pv = pytest.importorskip("padvpx")
     titles = pv.maps()
     assert set(titles) >= {"rush_le", "foo_fighters_le", "foo_fighters_pro", "godzilla_le"}
-    # a map off the tab (listed: false - got_le, a Spike 1 starter, PAD-943) names no download yet
-    assert all(t["detect"] for t in titles.values() if t["listed"]), "every listed map names the words that identify its table"
+    assert all(t["detect"] for t in titles.values()), "every map names the words that identify its table"
 
     class Fake:
         def __init__(self, script):

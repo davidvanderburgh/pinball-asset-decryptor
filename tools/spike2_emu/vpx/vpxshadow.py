@@ -553,7 +553,7 @@ def gen(m, had, quiet=None, dof=None):
             "\tIf Err Then MsgBox \"Can't load PAD.Controller: \" & Err.Description",
             "\tController.GameName = %s" % vb(m["title"]),
             "\tController.Run GetPlayerHWnd",
-            "\tIf Err Then MsgBox \"Can't start the Spike 2 game: \" & Err.Description",
+            "\tIf Err Then MsgBox \"Can't start the game: \" & Err.Description",
             "\tOn Error Goto 0",
             "\tPinMAMETimer.Interval = PinMAMEInterval",
             "\tPinMAMETimer.Enabled = True",

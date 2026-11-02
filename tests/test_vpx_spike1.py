@@ -66,21 +66,25 @@ def test_numbering(s1):
 def test_the_got_le_map_numbers_the_rigs_switches_and_the_elfs_coils(s1):
     m = json.load(open(os.path.join(VPX, "got_le.shadow.json"), encoding="utf-8"))
     names = json.load(open(os.path.join(ROOT, "tools", "spike1_emu", "switchmaps", "GOT_LE.json"), encoding="utf-8"))
-    assert m["platform"] == "spike1" and m["listed"] is False and m["detect"] == []
+    assert m["platform"] == "spike1" and m["listed"] is True and m["detect"]   # VPW's table is fitted
     by_name = {v: k for k, v in names.items() if not k.startswith("_")}
     for key, want in (("start", "START BUTTON"), ("left_flipper", "L. FLIPPER BUTTON"),
                       ("right_flipper", "R. FLIPPER BUTTON"), ("coin", "LEFT COIN SLOT")):
         node, idx = (int(x) for x in by_name[want].split(","))
         assert m["cabinet"][key] == 1000 + s1.slot(node, idx), key
-    trough = [1000 + s1.slot(*(int(x) for x in by_name["TROUGH #%d%s" % (n, s)].split(",")))
-              for n, s in ((6, " (L)"), (5, " (L)"), (4, " (L)"), (3, ""), (2, ""), (1, " (R)"))]
-    assert m["trough"]["switches"] == trough
+    # the kit's trough: TROUGH #1 (R), nearest the up-kicker, first; the jam opto last
+    trough = [s1.slot(*(int(x) for x in by_name["TROUGH #%d%s" % (n, s)].split(",")))
+              for n, s in ((1, " (R)"), (2, ""), (3, ""), (4, " (L)"), (5, " (L)"), (6, " (L)"))]
+    assert m["trough"]["switches"] == trough + [s1.slot(*(int(x) for x in by_name["TROUGH JAM"].split(",")))]
     assert m["solenoids"]["1"]["coil"] == [9, 2] and "TROUGH" in m["solenoids"]["1"]["name"]
     assert [tuple(c) for c in names["_trough_coils"]][:2] == [(1, 1), (1, 2)]   # the sweep's, kept as they were
     pc = pytest.importorskip("padcontroller")
     vm = pc.VpxMap("got_le")
     assert vm.platform == "spike1" and vm.game_on == (40, [(8, 7)])
-    assert vm.solenoids[1] == (9, 2) and vm.lamp_groups[pc.lamp_number(1, 0)] == [(1, 0)]
+    assert vm.solenoids[1] == (9, 2)
+    # the table's li11 is LED 11 of the game's LED table: an RGB insert on node 8 at 20..22
+    assert vm.lamp_groups[pc.lamp_number(8, 20)] == [(8, 20), (8, 21), (8, 22)]
+    assert pc.lamp_number(8, 20) in vm.rgb_groups and pc.lamp_number(12, 2) in vm.lamp_groups   # fl235, a flasher on node 12
 
 
 def test_board_record_is_the_titles_case_apart(s1, tmp_path):
@@ -158,14 +162,14 @@ def test_spike1_poll_reports_lamps_coils_and_held_flippers(tmp_path):
     b.sw_ids = {(8, 3): 515, (1, 11): 75}
     b._button_coils = {(8, 7): 3}                  # RIGHT FLIPPER POWER from R. FLIPPER BUTTON
     st = m.HardwareState()
-    st.set_lamp(1, 0, 255)                          # TournamentStart, mapped
-    st.set_lamp(9, 7, 200)                          # an unmapped channel
+    st.set_lamp(8, 20, 255)                         # li11, an RGB insert, mapped
+    st.set_lamp(9, 63, 200)                         # an unmapped channel
     st.set_coil(9, 2, True)                         # TROUGH UP-KICKER
     st.set_switch(1, 11, True)
     (tmp_path / "s1hw.state").write_bytes(m.StateBlock.pack(st, seq=1))
     b._poll_once()
     lamps = dict(b.changed_lamps() or [])
-    assert lamps[pc.lamp_number(1, 0)] == 1 and lamps[pc.lamp_number(9, 7)] == 1
+    assert lamps[pc.lamp_number(8, 20)] > 1 and lamps[pc.lamp_number(9, 63)] == 1   # the insert lit in its colour
     sols = dict(b.changed_solenoids() or [])
     assert sols[1] == 1                             # the map's number reaches core.vbs
     assert b.sol_state[1578] == 1                   # the 1000+ one is kept (Solenoid(n) reads it)
@@ -220,4 +224,4 @@ def test_padvpx_knows_a_maps_platform():
     pv = pytest.importorskip("padvpx")
     assert pv.platform_of("got_le") == "spike1"
     assert pv.platform_of("rush_le") == "spike2"
-    assert pv.maps()["got_le"]["platform"] == "spike1" and pv.maps()["got_le"]["listed"] is False
+    assert pv.maps()["got_le"]["platform"] == "spike1" and pv.maps()["got_le"]["listed"] is True

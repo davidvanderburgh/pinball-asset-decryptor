@@ -243,15 +243,31 @@ static unsigned long long card_written[NPCM];
 static unsigned long long card_t0[NPCM];
 static unsigned long long card_queued[NPCM];   /* the leaky bucket, in frames */
 static unsigned long long t0_us;
-extern int gettimeofday(void *, void *);
+extern int clock_gettime(int, void *);
 extern int usleep(unsigned);
-struct tv { long sec, usec; };
+struct ts { long sec, nsec; };
 
+/* PAD-932: THE RAW MONOTONIC CLOCK, NOT THE WALL'S.  This bucket drains at
+ * the rate time passes, so whatever moves the clock moves the sound.  It read
+ * gettimeofday, and the wall clock is the one clock that gets SET: on WSL 2
+ * every distro shares one kernel and one clock, so systemd-timesyncd in the
+ * user's own Ubuntu (or Windows' resync after a sleep) steps it under a rig
+ * running in PAD-Runtime, which has no time service at all.  Every step,
+ * either way, emptied the bucket at once and the game wrote a whole buffer
+ * ahead in one burst - measured on Godzilla Pro, 0.4 s of sound extra at each
+ * of two 2 s steps - stutter on Deadpool and Jurassic Park (David,
+ * 2026-11-01) that went away when he disabled timesyncd.
+ *
+ * RAW, because what timesyncd does most is not step but SLEW (offsets under
+ * 0.4 s), and a slew speeds or slows CLOCK_MONOTONIC too, by up to 500 ppm.
+ * MONOTONIC_RAW is the hardware's (Hyper-V's reference clock on WSL) and
+ * nothing disciplines it.  The plain symbol is hwshim's interposer, so pause
+ * and game speed still apply, as they do to gstvid's video schedule. */
 static unsigned long long now_us(void)
 {
-    struct tv t;
-    gettimeofday(&t, 0);
-    return (unsigned long long)t.sec * 1000000ULL + (unsigned long long)t.usec;
+    struct ts t;
+    clock_gettime(4 /* CLOCK_MONOTONIC_RAW */, &t);
+    return (unsigned long long)t.sec * 1000000ULL + (unsigned long long)t.nsec / 1000ULL;
 }
 
 static unsigned card_rate(int i)
@@ -303,6 +319,9 @@ static long card_backlog(int i)
     unsigned long long drained;
     if (!rate) return 0;
     if (!card_t0[i]) { card_t0[i] = t; return (long)card_queued[i]; }
+    /* A clock behind the last reading drains nothing, rather than wrapping
+     * into a huge unsigned gap. */
+    if (t < card_t0[i]) { card_t0[i] = t; return (long)card_queued[i]; }
     drained = ((t - card_t0[i]) * rate) / 1000000ULL;
     if (drained) {
         /* Advance the clock by exactly the frames accounted for, so the

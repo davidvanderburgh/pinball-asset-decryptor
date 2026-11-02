@@ -1,6 +1,10 @@
 /* Visual Pinball (PAD-802): the kit's setup, the tables it patches, Play.
    PAD-927: laid out for one screen - a two-line strip (setup marks, windows)
    over the tables, one per line under labelled columns (PAD-940). */
+/* the cards keep their whole height and the page scrolls: a .card may shrink
+   in the page's column (min-height: 0), and the list then ran out under the
+   Tables card's border in a short window (PAD-940) */
+.vpx-page > .card { flex: 0 0 auto; }
 .vpx-status { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; min-height: 24px; }
 .vpx-prog { flex: 1; max-width: 320px; }
 .vpx-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; }

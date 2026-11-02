@@ -331,6 +331,8 @@ def test_the_tables_are_one_labelled_column():
     # David: Patch and Play a column each on every line, Play greyed until patched
     assert 'class="vpx-patch"' in js and 'class="vpx-play"' in js
     assert "disabled=${busy || !s.vpx || !t.patched}" in js
+    # a short window scrolls the page; the Tables card is never squeezed under its rows
+    assert ".vpx-page > .card { flex: 0 0 auto; }" in css
 
 
 def test_a_folder_of_downloads_is_patched_in_one_go(tab, monkeypatch, tmp_path):

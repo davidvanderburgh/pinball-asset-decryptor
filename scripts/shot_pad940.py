@@ -1,12 +1,13 @@
 """PAD-940 proof shots: the Visual Pinball tab's tables as one labelled list.
 
-    python scripts/shot_pad940.py <out_dir> [--after] [--width N]
+    python scripts/shot_pad940.py <out_dir> [--after] [--width N] [--height N]
 
 Serves THIS checkout on a scratch settings.json holding one preview code,
 PAD802_CODE from the environment (``tools/preview_code.py issue --name x
 --feature vpx``), and Stern Spike 2. Writes <before_|after_>vpx_tables.png, the Tables card: a
 column per field (table, author, where from, model, card), one table per line.
-``--width N`` sets the window width (default 1900, David's wide window).
+``--width N`` sets the window width (default 1900, David's wide window); ``--height N``
+(not 1500) shoots the whole page of a short window, scrolled down: <pre>vpx_short.png.
 
 The tab's state is the kit's real one on this PC (~/.pad-vpx.json, Visual
 Pinball's folder, the card folder). Needs Playwright and the installed Edge.
@@ -23,6 +24,7 @@ sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
 WIDTH = int(sys.argv[sys.argv.index("--width") + 1]) if "--width" in sys.argv else 1900
+HEIGHT = int(sys.argv[sys.argv.index("--height") + 1]) if "--height" in sys.argv else 1500
 
 
 def main():
@@ -42,7 +44,7 @@ def main():
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": WIDTH, "height": 1500})
+            page = browser.new_page(viewport={"width": WIDTH, "height": HEIGHT})
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.add_init_script("try { localStorage.setItem('pad.log.open', '0'); } catch (e) {}")
@@ -67,7 +69,14 @@ def main():
                 print("  table:", t.get("name"), t.get("titles"), t.get("title"), t.get("patched"),
                       t.get("patched_title"), t.get("repatch"), t.get("source"), flush=True)
             time.sleep(1.5)
-            page.locator(".vpx-tables").screenshot(path=os.path.join(out_dir, pre + ("vpx_tables.png" if WIDTH == 1900 else "vpx_tables_%d.png" % WIDTH)))
+            if HEIGHT != 1500:
+                # a short window: the whole page, scrolled to the end of the list
+                page.locator(".vpx-page").evaluate("e => { e.scrollTop = e.scrollHeight; }")
+                time.sleep(0.5)
+                page.screenshot(path=os.path.join(out_dir, pre + "vpx_short.png"))
+            else:
+                page.locator(".vpx-tables").screenshot(path=os.path.join(out_dir, pre + (
+                    "vpx_tables.png" if WIDTH == 1900 else "vpx_tables_%d.png" % WIDTH)))
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

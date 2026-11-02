@@ -33,8 +33,6 @@ name the card a title boots, start or stop a run by hand.
     padvpx library <dir>                  a directory of cards: the newest build of a title is its card
     padvpx register | unregister          PAD.Controller in the registry (this Python, this folder)
     padvpx run <title> [--hidden] [--mute]   start a run the way the controller would
-    padvpx sam <edited game.bin> [--table <x.vpx> | --rom <romset>] [--roms <folder>]
-                                           a SAM edit into the table's Visual PinMAME ROM set (vpxsam.py)
     padvpx stop <title>                   stop a run padvpx or the controller started
     padvpx status                         the kit: controller, runs on the board, cards
     padvpx tables                         the tables this kit can patch
@@ -528,10 +526,6 @@ def main(argv):
         d["rig"] = RIG
         padlaunch.kit_save(d)
         return padcontroller.main(["--" + cmd])
-    if cmd == "sam" and rest:
-        # PAD-943: PAD's edited SAM game into a table's Visual PinMAME ROM set
-        import vpxsam
-        return vpxsam.main(rest)
     if cmd == "run" and rest:
         return run(rest[0], hidden="--hidden" in rest, mute="--mute" in rest)
     if cmd == "stop" and rest:

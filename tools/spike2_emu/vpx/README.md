@@ -573,20 +573,11 @@ got_le 1075 1515 1578 1519 "1521,1522,1523,1524,1525,1526" 1080` - the
 trough held through the bridge, three coins and Start put the game in
 CHOOSE YOUR HOUSE and its TROUGH UP-KICKER came back as solenoid 1.
 
-**Stern SAM**: VPinMAME has the SAM core, so a SAM table runs the REAL
-game from its ROM set, nothing to bridge; PAD's edited game (the Write
-tab's .bin, sounds and pictures replaced, the size unchanged) goes into
-that ROM set: `padvpx sam "<edited game.bin>" --table "<the table.vpx>"`
-(`vpxsam.py`) writes `<romset>.zip` holding it under the member name
-PinMAME loads, in VPinMAME's roms folder (`--roms`, the kit's record, the
-registry's rompath, or `roms` beside the tables folder), keeps the stock
-zip as `<romset>.stock.zip` (`padvpx sam restore <romset>` puts it back)
-and sets the game's "skip ROM verification" where VPinMAME is registered.
-The ROM set is the table's `cGameName`, or `--rom`; the edit must be of
-that version's file (CSI's six versions share one size, so a bare .bin is
-asked which). Proven: CSI 2.4 with every sound rewritten by sam_audio
-booted under libpinmame from the written zip into its attract (the
-checksum mismatch logged, nothing stopped).
+**Stern SAM**: VPinMAME has the SAM core, so a SAM table already runs the
+REAL game from the person's own ROM set: nothing for this kit to do, and
+nothing it does (David, 2026-11-02: no reinventing the wheel; Spike 1,
+Spike 2 and the other modern machines are the point). The catalogue lists
+the SAM tables only to say so.
 
 **The rest** (JJP, American, Spooky, Dutch, Barrels of Fun, Pinball
 Brothers, Turner, Multimorphic, Chicago Gaming's own titles): no VPinMAME

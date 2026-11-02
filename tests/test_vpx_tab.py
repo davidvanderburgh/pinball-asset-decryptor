@@ -13,6 +13,7 @@ What is worth failing on:
   * THE PAD RUNTIME ROW INSTALLS IT (PAD-840). It sent people to the Emulate
     tab, which offers no install on a PC with a working Ubuntu.
 """
+import json
 import os
 import sys
 import time
@@ -70,8 +71,10 @@ def _wait(tab):
 
 
 @pytest.fixture
-def tab(monkeypatch):
+def tab(monkeypatch, tmp_path):
     monkeypatch.setattr(V.sys, "platform", "win32")
+    # PAD-942: the pictures' cache is a folder of this test's own, never the PC's
+    monkeypatch.setenv("PAD_VPX_PICTURES", str(tmp_path / "pictures"))
     monkeypatch.setattr(V.os.path, "isfile", lambda p, _f=os.path.isfile: True if p.endswith("vpxsetup.py") else _f(p))
     calls = []
     state = {"registered": True, "vpx": r"C:\VP", "tables_dir": r"C:\VP\tables", "library": "",
@@ -524,3 +527,122 @@ def test_a_rows_coverage_button_checks_the_download_it_was_patched_from(tab, mon
     args = [c for c in tab.calls if c[0] == "vpxauthor.py" and c[1][0] == "data"][-1][1]
     assert args == ["data", "godzilla_le"]
     assert not tab.row_checklist("nosuch.vpx")
+
+
+# ---------------------------------------------------------- PAD-942 -----
+
+def _picture_state(tmp_path):
+    tables = tmp_path / "tables"
+    tables.mkdir()
+    (tables / "Rush LE 2.0.2 (PAD).vpx").write_bytes(b"x" * 10)
+    (tables / "Other (PAD).vpx").write_bytes(b"y" * 10)
+    return {"registered": True, "vpx": r"C:\VP", "tables_dir": str(tables), "library": "", "cards": {},
+            "tables": [{"name": "Rush LE Tribute", "output": "Rush LE 2.0.2 (PAD).vpx", "patched": True,
+                        "title": "rush_le", "titles": ["rush_le"]},
+                       {"name": "Godzilla", "output": "Godzilla (PAD).vpx", "patched": False,
+                        "title": "godzilla_le", "titles": ["godzilla_le"]}],
+            "patched": ["Rush LE 2.0.2 (PAD).vpx", "Other (PAD).vpx"], "presets": [], "layout": ""}
+
+
+def _wait_pictures(tab):
+    deadline = time.time() + 10
+    while (tab._pictures_running or tab._busy) and time.time() < deadline:
+        time.sleep(0.02)
+    assert not tab._pictures_running and not tab._busy
+
+
+def test_pictures_in_the_cache_go_up_with_the_page_and_the_rest_are_read(tab, monkeypatch, tmp_path):
+    """PAD-942: a patched row's picture is read from its (PAD) copy by the
+    kit, once; the cache (keyed by the file) answers the next sitting."""
+    state = _picture_state(tmp_path)
+    cache = tmp_path / "pictures"
+    cache.mkdir()
+    rush = os.path.join(state["tables_dir"], "Rush LE 2.0.2 (PAD).vpx")
+    other = os.path.join(state["tables_dir"], "Other (PAD).vpx")
+    # Rush is in the cache already; a stale sidecar of a table no longer here is dropped
+    (cache / "rush.jpg").write_bytes(b"jpg")
+    (cache / (V.picture_key(rush) + ".json")).write_text(
+        json.dumps({"file": str(cache / "rush.jpg"), "w": 50, "h": 100, "source": "playfield"}))
+    (cache / "gone.json").write_text("{}")
+    (cache / "gone.jpg").write_bytes(b"")
+    kit_calls = []
+
+    def kit(self, script, args, timeout=0, on_line=None):
+        if args and args[0] == "state":
+            return dict(state)
+        if script == "vpxpicture.py":
+            kit_calls.append(list(args))
+            (cache / "Other (PAD).jpg").write_bytes(b"jpg")
+            on_line("picture " + json.dumps({"table": other, "file": str(cache / "Other (PAD).jpg"),
+                                             "w": 40, "h": 80, "source": "screenshot", "full": [400, 800]}))
+            return {"pictures": {}, "errors": {}, "_text": ""}
+        return {"result": "ok", "_text": ""}
+    monkeypatch.setattr(V.VpxTab, "_kit", kit)
+    tab.refresh()
+    _wait(tab)
+    _wait_pictures(tab)
+    assert kit_calls == [[str(cache), other]]
+    pics = tab.get("pictures")
+    assert pics["Rush LE 2.0.2 (PAD).vpx"] == {"file": str(cache / "rush.jpg"), "w": 50, "h": 100, "source": "playfield"}
+    assert pics["Other (PAD).vpx"] == {"file": str(cache / "Other (PAD).jpg"), "w": 40, "h": 80, "source": "screenshot"}
+    assert "Godzilla (PAD).vpx" not in pics and tab.get("pictures_busy") == ""
+    assert not (cache / "gone.json").exists() and not (cache / "gone.jpg").exists()
+    assert json.load(open(cache / (V.picture_key(other) + ".json"))) == pics["Other (PAD).vpx"]
+    # the next sitting: both from the cache, nothing read
+    tab.refresh()
+    _wait(tab)
+    _wait_pictures(tab)
+    assert len(kit_calls) == 1 and tab.get("pictures") == pics
+
+
+def test_a_table_with_no_picture_is_remembered_as_such_until_it_changes(tab, monkeypatch, tmp_path):
+    """Metallica's playfield is an HDR file: its error is kept, so the kit is
+    not asked every sitting; a new copy of the file (a re-patch) asks again."""
+    state = _picture_state(tmp_path)
+    rush = os.path.join(state["tables_dir"], "Rush LE 2.0.2 (PAD).vpx")
+    other = os.path.join(state["tables_dir"], "Other (PAD).vpx")
+    cache = tmp_path / "pictures"
+    kit_calls = []
+
+    def kit(self, script, args, timeout=0, on_line=None):
+        if args and args[0] == "state":
+            return dict(state)
+        if script == "vpxpicture.py":
+            kit_calls.append(list(args))
+            for path in args[1:]:
+                on_line("picture " + json.dumps({"table": path, "error": "the table's playfield is not a picture the kit reads"}))
+            return {"pictures": {}, "errors": {}, "_text": ""}
+        return {"result": "ok", "_text": ""}
+    monkeypatch.setattr(V.VpxTab, "_kit", kit)
+    tab.refresh()
+    _wait(tab)
+    _wait_pictures(tab)
+    assert kit_calls == [[str(cache), other, rush]]
+    assert tab.get("pictures")["Rush LE 2.0.2 (PAD).vpx"] == {"error": "the table's playfield is not a picture the kit reads"}
+    tab.refresh()
+    _wait(tab)
+    _wait_pictures(tab)
+    assert len(kit_calls) == 1
+    with open(rush, "wb") as f:
+        f.write(b"z" * 20)
+    tab.refresh()
+    _wait(tab)
+    _wait_pictures(tab)
+    assert kit_calls[-1] == [str(cache), rush]
+
+
+def test_the_rows_carry_a_picture_and_the_tip_shows_it_large():
+    """PAD-942: the picture column at the head of every row, served as media;
+    the tooltip takes an image, laid out at its size before it loads."""
+    here = os.path.join(os.path.dirname(V.__file__), "..", "static")
+    js = open(os.path.join(here, "js", "tabs", "vpx.js"), encoding="utf-8").read()
+    ui = open(os.path.join(here, "js", "core", "ui.js"), encoding="utf-8").read()
+    css = open(os.path.join(here, "css", "tabs", "vpx.css"), encoding="utf-8").read()
+    app = open(os.path.join(here, "css", "app.css"), encoding="utf-8").read()
+    assert "mediaUrl" in js and '<span class="vpx-pic">${picture(t)}</span>' in js
+    assert "image: url, w: p.w, h: p.h" in js and 'class="vpx-nopic"' in js
+    assert "spec.image" in ui and 'className = "tip-img"' in ui and "img.width = spec.w" in ui
+    assert css.count("grid-template-columns: 40px") == 2
+    assert ".tip.tip-pic { max-width: none; }" in app and ".tip .tip-img" in app
+    # the stale note sits under the name, not under the picture
+    assert ".vpx-stale { grid-column: 2 / -1;" in css

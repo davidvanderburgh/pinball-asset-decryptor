@@ -281,6 +281,30 @@ def test_a_rows_patch_says_when_the_download_was_another_table(tab, monkeypatch)
     assert warned and "is not Godzilla Limited Edition v2.6" in warned[0] and "Rush LE 2.0.2 (PAD).vpx" in warned[0]
 
 
+def test_a_patched_tables_patch_again_runs_on_its_recorded_download(tab, monkeypatch):
+    """PAD-939: "No button to do that in the app" - a patched table offers
+    Patch again; with the download the kit recorded still there it runs on
+    it, no dialog; a copy patched before the record asks for the download."""
+    asked = _godzilla(tab, monkeypatch)
+    src = r"D:\Downloads\Godzilla LE v2.6.vpx"
+    tab.set(tables=[{"name": "Godzilla Limited Edition v2.6", "output": "Godzilla (PAD).vpx",
+                     "patched": True, "source": src}])
+    tab.answers[("padvpx.py", "patch")] = {"_text": r'open "C:\VP	ables\Godzilla (PAD).vpx" in Visual Pinball'}
+    assert tab.patch("Godzilla (PAD).vpx")
+    _wait(tab)
+    assert asked == [] and ("padvpx.py", ["patch", os.path.normpath(src), "--out", r"C:\VP\tables"]) in tab.calls
+    tab.set(tables=[{"name": "Godzilla Limited Edition v2.6", "output": "Godzilla (PAD).vpx",
+                     "patched": True, "source": ""}])
+    tab.window.pick = src
+    assert tab.patch("Godzilla (PAD).vpx")
+    _wait(tab)
+    assert asked == ["Choose your download of Godzilla Limited Edition v2.6"]
+    js = open(os.path.join(os.path.dirname(V.__file__), "..", "static", "js", "tabs", "vpx.js"),
+              encoding="utf-8").read()
+    assert 't.patched && !t.extra ? patchBtn(t, t.source ? "Patch again" : "Patch again…")' in js
+    assert "Your copy was patched before a fix" in js
+
+
 def test_the_page_is_laid_out_for_a_set_up_pc():
     """PAD-927: no Patch button under the list, a Patch per table, and the
     window layouts as Use buttons (no radio that nothing had picked)."""

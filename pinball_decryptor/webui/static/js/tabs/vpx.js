@@ -62,8 +62,11 @@ export default function Vpx() {
     ["Controller", !!s.registered], ["Card images", have.length > 0]];
   const allOk = !!s.loaded && setup.every(([, ok]) => ok);
   const open = details || (!!s.loaded && !allOk);
-  const patchBtn = (t, words) => html`<${Button} drop size="sm" kind=${t.patched ? "ghost" : ""} icon="upload"
-    disabled=${busy || !s.ok} title=${"Choose your download of " + t.name + (t.where ? " (from " + t.where + ")" : "")
+  // PAD-939: a copy patched before a fix its map names (The Beatles' trough)
+  const missed = (t) => t.patched && (t.repatch || []).length > 0;
+  const patchBtn = (t, words) => html`<${Button} drop size="sm" kind=${t.patched && !missed(t) && !stale(t) ? "ghost" : ""} icon="upload"
+    disabled=${busy || !s.ok} title=${(t.source ? "Patch " + base(t.source) + " again"
+      : "Choose your download of " + t.name + (t.where ? " (from " + t.where + ")" : ""))
       + ": the app writes its \"(PAD)\" copy into your tables folder."}
     onClick=${() => call("vpx.patch", t.output)}>${words}<//>`;
   // no layout taken is the usual case, not a blank to fill: the windows open
@@ -144,13 +147,15 @@ export default function Vpx() {
           : !t.patched && t.where ? "Get it on " + t.where
           : playsAs(t) + base(t.card)}</span>
         <div class="vpx-acts">
-          ${stale(t) && t.card ? patchBtn(t, "Patch again…") : null}
+          ${t.patched && !t.extra ? patchBtn(t, t.source ? "Patch again" : "Patch again…") : null}
           ${t.patched ? html`<${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx}
               onClick=${() => call("vpx.play", t.output)}>Play<//>`
             : patchBtn(t, "Patch…")}
         </div>
         ${stale(t) && t.card ? html`<div class="small vpx-stale">Your copy was patched for the ${t.models[t.patched_title]} and still plays as it.
           Patch again to play it as the ${t.models[t.title]}.</div>` : null}
+        ${missed(t) ? html`<div class="small vpx-stale">Your copy was patched before a fix: ${t.repatch.join("; ")}.
+          Patch again to get it.</div>` : null}
       </div>`)}</div>` : html`<div class="muted small">${s.loaded ? "No tables." : "Checking…"}</div>`}
     <//>
   </div>`;

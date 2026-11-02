@@ -161,8 +161,25 @@ def patch(table_path, outdir=None, card=None, title=None):
         b2s = copy_backglass(table_path, out)
         if b2s:
             print("backglass: %s" % b2s)
+        remember_patch(out, table_path, title)
         print("open \"%s\" in Visual Pinball; the game starts with it when its card is known" % out)
     return r.returncode
+
+
+def patch_record_path(out_vpx):
+    """`<name> (PAD).patch.json` beside the patched table (PAD-939)."""
+    return out_vpx[:-4] + ".patch.json"
+
+
+def remember_patch(out_vpx, table_path, title):
+    """PAD-939: which download a (PAD) table was patched from, so the tab's
+    Patch again runs on it without asking for it once more. Never in the
+    patch's way."""
+    try:
+        with open(patch_record_path(out_vpx), "w", encoding="utf-8") as f:
+            json.dump({"source": os.path.abspath(table_path), "title": title}, f)
+    except OSError:
+        pass
 
 
 def copy_backglass(table_path, out_vpx):

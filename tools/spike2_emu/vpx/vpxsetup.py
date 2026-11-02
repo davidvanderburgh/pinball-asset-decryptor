@@ -195,11 +195,15 @@ def known_tables(tables_dir=None):
         row["titles"].append(title)
         row["models"][title] = info["model"]
         row["fits"].append((title, info))
+        row.setdefault("marks", []).extend(m.get("repatch") or [])
     out = []
     for row in rows.values():
         title, _ = padvpx.choose(row.pop("fits"))
+        marks = row.pop("marks")
         row.update(title=title, card=padlaunch.card_for(title) or "",
-                   patched_title=patched_title(tables_dir, row["output"]) if row["patched"] else "")
+                   patched_title=patched_title(tables_dir, row["output"]) if row["patched"] else "",
+                   repatch=missed_fixes(tables_dir, row["output"], marks) if row["patched"] else [],
+                   source=patched_from(tables_dir, row["output"]) if row["patched"] else "")
         out.append(row)
     return out
 
@@ -226,6 +230,35 @@ def patched_title(tables_dir, out_name):
         if m:
             return m.group(1)
     return ""
+
+
+def missed_fixes(tables_dir, out_name, marks):
+    """PAD-939: the fixes a (PAD) table was patched before. A map's `repatch`
+    lists {"old": a line only an earlier patcher wrote, "why": what patching
+    again mends} (The Beatles' six-ball trough, PAD-933); the script written
+    beside the table is read for them. The `why` of each one found."""
+    if not marks:
+        return []
+    try:
+        text = open(os.path.join(tables_dir, out_name[:-4] + ".script.vbs"),
+                    encoding="utf-8", errors="replace").read()
+    except OSError:
+        return []
+    squash = lambda t: re.sub(r"\s+", " ", t).lower()      # noqa: E731
+    text = squash(text)
+    return [k["why"] for k in marks if squash(k.get("old", "")).strip() in text and k.get("old")]
+
+
+def patched_from(tables_dir, out_name):
+    """The download a (PAD) table was patched from (padvpx.remember_patch,
+    PAD-939), while it is still there: Patch again runs on it. "" when the
+    table was patched before the record or the download moved."""
+    try:
+        src = json.load(open(os.path.join(tables_dir, out_name[:-4] + ".patch.json"),
+                             encoding="utf-8")).get("source") or ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return src if os.path.isfile(src) else ""
 
 
 #: (PAD) tables an earlier release patched whose map the kit no longer has

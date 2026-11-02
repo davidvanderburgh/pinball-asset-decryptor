@@ -613,3 +613,27 @@ grips on" for the Beatles, where John Wick and Deadpool had one). With no
 window handed over, the bridge now looks the player up by its title once a
 second while the run's windows are watched, as `_keep_player_front` already
 did, and the grips, the placing and the size watch follow it.
+
+### PAD-939: Patch again on every patched table
+
+"Still getting two balls ejected... no button to do that in the app": the
+fix for the trough (PAD-933) is in the patcher, and David's copy was patched
+at 20:30 on Nov 1, before it (its script still had `bsTrough.Balls = 6`). The
+tab gave a patched table only Play; Patch again came up only for a copy
+patched for another model (PAD-900). Now:
+
+* every patched table the kit knows has **Patch again**;
+* a patch writes `<name> (PAD).patch.json` beside the table with the download
+  it ran on (`padvpx.remember_patch`), and Patch again runs on that download
+  without the file dialog while it is still there (a copy patched before the
+  record asks for it, as the first Patch did);
+* a map's `repatch` lists `{"old", "why"}`: a line only an earlier patcher
+  wrote, and what patching again mends. The script written beside the copy
+  is read for it (`vpxsetup.missed_fixes`, whitespace and case ignored), and
+  the row says "Your copy was patched before a fix: <why>". The Beatles has
+  one: `bsTrough.Balls = 6`, "it serves two balls at Start". A mark must be
+  a line the current patcher never writes (tests/test_vpx_bridge.py checks).
+
+Repatching David's download (`originals\beatles\The Beatles_007.vpx`) into a
+scratch folder: `bsTrough.Balls = 4`, the record names the download, the mark
+clears, and `vpxfile.py verify` says OK.

@@ -13189,6 +13189,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         "scene_edits": bool(scene_edits),
         # PAD-305: the color profile the set's pictures and clips carry
         "colour_profile": _colour_signature(assets_dir),
+        # PAD-938: how its image.bin was built (a set from before the fix is built again)
+        "image_rev": _IC_image_rev(),
     }
     if own_out.get("added") or own_out.get("rewritten"):
         manifest["own_clips"] = own_out
@@ -20528,6 +20530,11 @@ def _list_ids(plan, old_map, touched):
 def _IC_enabled():
     from . import image_compact as IC
     return IC.enabled()
+
+
+def _IC_image_rev():
+    from . import image_compact as IC
+    return IC.IMAGE_REV
 
 
 def _alone_room(mem_img, staged):

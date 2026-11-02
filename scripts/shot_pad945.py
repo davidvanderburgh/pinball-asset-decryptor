@@ -1,4 +1,4 @@
-"""PAD-945 proof shots: SOUNDS ON SHOTS in the game's own modes (scripts/shot_pad638.py's rig).
+"""PAD-945 proof shots: SOUNDS ON SHOTS in the game's modes (scripts/shot_pad638.py's rig).
 
     python scripts/shot_pad945.py <repo> <out_dir> [--after]
 

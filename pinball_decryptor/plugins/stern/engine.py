@@ -10767,11 +10767,11 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                 if not modes.count and not modes.turns and not modes.jukebox and not modes.shots:
                     return None, None
         if modes.shots:
-            # PAD-945: the sounds on the shots of the game's own modes: the switch drain, a carrier
+            # PAD-945: the sounds on the shots of the game's modes: the switch drain, a carrier
             # and the modes' objects, on their own as the flipper sounds are
             s_why = _SMo.shot_refusal(prof)
             if s_why:
-                log("Sounds on shots: %d sound(s) on the shots of the game's own modes are left out "
+                log("Sounds on shots: %d sound(s) on the shots of the game's modes are left out "
                     "of this build: %s" % (len(modes.shots), s_why), "warning")
                 modes.shots = []
                 if not modes.count and not modes.turns and not modes.jukebox and not modes.attract:
@@ -10802,7 +10802,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
             log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are "
                 "left out of this build: %s." % (len(modes.attract), why.rstrip(".")), "warning")
         elif modes.shots and not modes.count and not modes.turns:
-            log("Sounds on shots: %d sound(s) on the shots of the game's own modes are left out of "
+            log("Sounds on shots: %d sound(s) on the shots of the game's modes are left out of "
                 "this build: %s." % (len(modes.shots), why.rstrip(".")), "warning")
         elif modes.count:
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
@@ -10831,7 +10831,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     if modes.attract:
         log("Found %d sound(s) for the flipper buttons in attract mode." % len(modes.attract), "info")
     if modes.shots:
-        log("Found %d sound(s) on the shots of the game's own modes." % len(modes.shots), "info")
+        log("Found %d sound(s) on the shots of the game's modes." % len(modes.shots), "info")
     if modes.jukebox:
         log("Found a jukebox of %d song(s) (%d with an intro video of its own) for the %d song "
             "modes." % (len(modes.jukebox), sum(1 for s in box.songs if s.video),
@@ -12004,7 +12004,7 @@ def _attract_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, 
 
 def _shot_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, modes, prof,
                   mode_own_used, log):
-    """PAD-945: the carrier the sounds on the shots of the game's own modes ride (*modes*.shots), a
+    """PAD-945: the carrier the sounds on the shots of the game's modes ride (*modes*.shots), a
     request the game never plays (:func:`_free_carrier`) and not the flipper sounds' in attract.
     Sets ``modes.shot_rel`` and ``modes.shot_plan`` ``{"request", "slot"}``; with none, logs why
     and empties ``modes.shots``."""
@@ -12013,13 +12013,13 @@ def _shot_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, mod
     request, slot, rel, whose, why = _free_carrier(gr_path, img_path, params, sites, assets_dir,
                                                    audio_edits, modes, prof, mode_own_used, skip=skip)
     if request is None:
-        log("Sounds on shots: %d sound(s) on the shots of the game's own modes are left out of this "
+        log("Sounds on shots: %d sound(s) on the shots of the game's modes are left out of this "
             "build: %s." % (n, why), "warning")
         modes.shots, modes.shot_rel, modes.shot_plan = [], "", {}
         return None
     modes.shot_rel = rel
     modes.shot_plan = {"request": request, "slot": slot}
-    log("Sounds on shots: %d sound(s) on the shots of the game's own modes ride request %d (sound "
+    log("Sounds on shots: %d sound(s) on the shots of the game's modes ride request %d (sound "
         "idx %d, %s): %s." % (n, request, slot, whose, "; ".join(
             "%s in %s" % (r["switch_name"], r["mode_name"]) for r in modes.shots)), "info")
     return None
@@ -12083,7 +12083,7 @@ def _attract_lines(params, used, modes, log):
 
 
 def _shot_lines(params, used, modes, log):
-    """PAD-945: the ``sounds.cfg`` table of the sounds on the shots of the game's own modes (*used*,
+    """PAD-945: the ``sounds.cfg`` table of the sounds on the shots of the game's modes (*used*,
     their entries off the grow) for :func:`.sound_modes.cfg_text`: ``{"request", "key" (the carrier's
     own record key), "files": [(mode id, switch id, the file's record key, its length in ms), ...]}``
     in row order, or ``None`` when none landed. An entry whose keys did not come out of the grown bank

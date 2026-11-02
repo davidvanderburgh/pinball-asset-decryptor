@@ -257,7 +257,7 @@ HELP_CONTENT = {
          "- An extract of a card built with a jukebox brings it back.\n"
          "- Needs an image build, not a direct SD write."),
         ("Sounds on shots",
-         "Stern Spike 2. While one of the game's own modes runs, a hit on a shot you pick "
+         "Stern Spike 2. While one of the game's modes runs, a hit on a shot you pick "
          "plays a sound you pick: one of the game's own sounds (one it never plays, say) or a "
          "file of yours.\n\n"
          "- Right-click a sound > **Play on a shot in one of the game's modes…** opens the "

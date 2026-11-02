@@ -63,7 +63,7 @@ _ATTRACT_TIP = ("Sounds the machine plays when a flipper button is pressed in at
                 "is played for at most the length of the game sound it rides on.")
 
 #: PAD-945: what the Sounds on shots button and window say they do
-_SHOT_TIP = ("Sounds the machine plays when a shot is hit while one of the game's own modes runs: "
+_SHOT_TIP = ("Sounds the machine plays when a shot is hit while one of the game's modes runs: "
              "pick the mode, the shot and the sound (one of the game's own, or a file of yours). "
              "A sound plays whole, and a hit while the last one still plays adds no other. Write "
              "puts them on the card.")
@@ -283,7 +283,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._attract_gap = 0            # PAD-641 round 2: seconds between two of them (0: any time)
         # PAD-685: the jukebox's songs ([{"audio", "video", "weight"}]), its own sidecar key
         self._juke = []
-        # PAD-945: the sounds on the shots of the game's own modes ([{"mode", "mode_name",
+        # PAD-945: the sounds on the shots of the game's modes ([{"mode", "mode_name",
         # "switch", "switch_name", "file"}]), the same record; the sound the window adds next and
         # the game's modes and shots it offers (read once per project)
         self._shots = []
@@ -3509,7 +3509,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._refresh_list()
 
     # ------------------------------------------------------------------
-    # PAD-945: sounds on the shots of the game's own modes
+    # PAD-945: sounds on the shots of the game's modes
     # ------------------------------------------------------------------
     def _shots_why(self):
         return str((self._sm_offer or {}).get("shots_why") or "")

@@ -254,7 +254,7 @@ def save_music_modes(project, path):
     attract = [_member(members, f) for f in modes.attract if _member(members, f)]
     gone += [("", SMo.attract_mode(k), f) for k, f in enumerate(modes.attract, 1)
              if not _member(members, f)]
-    # PAD-945: the sounds on the shots of the game's own modes, each with its mode and switch
+    # PAD-945: the sounds on the shots of the game's modes, each with its mode and switch
     shots = [dict(r, file=_member(members, r["file"])) for r in modes.shots if _member(members, r["file"])]
     gone += [("", SMo.shot_mode(k), r["file"]) for k, r in enumerate(modes.shots, 1)
              if not _member(members, r["file"])]
@@ -438,7 +438,7 @@ def load_music_modes(project, path):
         attract = [_unpack(z, m, folder, cache) for m in (head.get("attract") or [])
                    if isinstance(head.get("attract"), list) and _member_ok(m) and m in names
                    ][:SMo.ATTRACT_MAX]
-        # PAD-945: the sounds on the shots of the game's own modes, on the same game only: a mode and
+        # PAD-945: the sounds on the shots of the game's modes, on the same game only: a mode and
         # a shot are its program's own ids
         shots = [dict(r, file=_unpack(z, r["file"], folder, cache))
                  for r in SMo.clean_shots(head.get("shots"))
@@ -672,7 +672,7 @@ def music_from_card(project, cfg_text):
         out["attract"] = attract
         if rec.get("attract_gap"):
             out["attract_gap"] = rec["attract_gap"]
-    # PAD-945: the sounds on the shots of the game's own modes, each from the record holding it
+    # PAD-945: the sounds on the shots of the game's modes, each from the record holding it
     shots = []
     for g in rec.get("shots") or ():
         slot, host = idx.get(g["slot"]), _card_host(project, idx, g)
@@ -823,7 +823,7 @@ def readback(card, project, log=None, padmode=None):
                     "mode; they are back in the Audio tab%s." % (len(record["attract"]), where),
                     "success")
             if done["music"] and record.get("shots") and not had_shots:
-                log("Sounds on shots: this card plays %d sound(s) on the shots of the game's own modes; "
+                log("Sounds on shots: this card plays %d sound(s) on the shots of the game's modes; "
                     "they are back in the Audio tab%s." % (len(record["shots"]), where), "success")
             if done["music"] and record["slots"]:
                 names = SMo.clean(record)

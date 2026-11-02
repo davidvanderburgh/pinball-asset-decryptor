@@ -1,5 +1,5 @@
 """PAD-945 (a tester on Venom LE 1.07: "use unused game's sounds on shots that don't have sound requests
-for now", in Grendel Mode): SOUNDS ON SHOTS IN THE GAME'S OWN MODES - while one of the game's own modes
+for now", in Grendel Mode): SOUNDS ON SHOTS IN THE GAME'S MODES - while one of the game's modes
 runs, a hit on a chosen shot plays a chosen sound (one of the game's own, or a file of the project's).
 
 The game asks for no sound there, so each file rides a CARRIER as the attract flipper sounds do (PAD-641):
@@ -184,7 +184,7 @@ def test_the_carrier_is_one_the_build_leaves_alone_and_not_the_flipper_sounds(tm
     E._shot_carrier(*args)
     assert m.attract_plan["slot"] == 46 and m.shot_rel == "audio/idx0047.wav"     # not the attract's
     assert m.shot_plan == {"request": calls[1], "slot": 47}
-    assert logs[-1] == ("Sounds on shots: 1 sound(s) on the shots of the game's own modes ride request %d "
+    assert logs[-1] == ("Sounds on shots: 1 sound(s) on the shots of the game's modes ride request %d "
                         "(sound idx 47, which the game never plays): R ramp made opto in Grendel Mode."
                         % calls[1])
     # none left: they are left out, and the log says why
@@ -192,7 +192,7 @@ def test_the_carrier_is_one_the_build_leaves_alone_and_not_the_flipper_sounds(tm
     E._shot_carrier(str(tmp_path / "game"), str(tmp_path / "image.bin"), [], [], str(proj),
                     {46: "x", 47: "y", 48: "z"}, m, prof, [], log)
     assert m.shots == [] and m.shot_rel == "" and len(logs) == 1
-    assert logs[0].startswith("Sounds on shots: 1 sound(s) on the shots of the game's own modes are left out "
+    assert logs[0].startswith("Sounds on shots: 1 sound(s) on the shots of the game's modes are left out "
                               "of this build: ")
 
 
@@ -241,7 +241,7 @@ def test_a_game_that_cannot_have_them_leaves_them_out_and_keeps_the_rest(tmp_pat
     got = E._sound_modes_for_build(str(tmp_path), False, lambda t, lvl="info": logs.append((t, lvl)),
                                    ext4_available=lambda: (True, ""))
     assert got == (None, None)
-    assert logs == [("Sounds on shots: 1 sound(s) on the shots of the game's own modes are left out of this "
+    assert logs == [("Sounds on shots: 1 sound(s) on the shots of the game's modes are left out of this "
                      "build: " + SMo.shot_refusal(MP.profile("beatles_1_29")), "warning")]
     # Venom: they go on, with files in turn beside them
     monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: MP.profile("venom_le_1_07"))
@@ -250,7 +250,7 @@ def test_a_game_that_cannot_have_them_leaves_them_out_and_keeps_the_rest(tmp_pat
     modes, prof = E._sound_modes_for_build(str(tmp_path), False, lambda t, lvl="info": logs.append((t, lvl)),
                                            ext4_available=lambda: (True, ""))
     assert prof.game_dir == "venom_le" and modes.shots == [ROW] and modes.turns
-    assert ("Found 1 sound(s) on the shots of the game's own modes.", "info") in logs
+    assert ("Found 1 sound(s) on the shots of the game's modes.", "info") in logs
 
 
 # ---- carried: the mod routes keep them, the music modes file, back out of a card -------------------
@@ -306,7 +306,7 @@ def test_an_extract_of_the_card_has_them_back(tmp_path):
                        padmode={"sounds.cfg": cfg.encode()})["music"] == 1
     back = SMo.load(proj).shots
     assert back == [dict(ROW, file=os.path.join(proj, "Music mode files", "Roar.wav"))]
-    assert any(t.startswith("Sounds on shots: this card plays 1 sound(s) on the shots of the game's own modes; "
+    assert any(t.startswith("Sounds on shots: this card plays 1 sound(s) on the shots of the game's modes; "
                             "they are back in the Audio tab") for t in said)
 
 

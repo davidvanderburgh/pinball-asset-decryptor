@@ -102,8 +102,8 @@ key, the flipper buttons' switch ids and each file's record key and length (``at
 switch drain and plays the carrier with the next file's key swapped in at the game's record lookup,
 only while the game's mode mask says attract, and not while the last one still plays.
 
-SOUNDS ON SHOTS IN THE GAME'S OWN MODES (PAD-945): a tester on Venom asked to put "unused game's
-sounds on shots that don't have sound requests" in one of the game's own modes (Grendel Mode). The
+SOUNDS ON SHOTS IN THE GAME'S MODES (PAD-945): a tester on Venom asked to put "unused game's
+sounds on shots that don't have sound requests" in one of the game's modes (Grendel Mode). The
 project lists rows (``shots``: ``[{"mode", "mode_name", "switch", "switch_name", "file"}, ...]``, at
 most :data:`SHOT_MAX`): while the game's mode ``mode`` (an id the card's port names, ``text
 block_name_<id>``) runs, a press of switch ``switch`` plays ``file``. The game has no sound there, so
@@ -219,10 +219,10 @@ NOT_SOUND_TURN = "Only a sound the game keeps in its sound bank (an idx file) ca
 NO_TITLE_ATTRACT = ("The app cannot tell which game this project is for, so it cannot give its flipper "
                     "buttons sounds in attract mode.")
 NO_ATTRACT = ("Sounds for the flipper buttons in attract mode are not offered on %s: %s.")
-#: PAD-945: why the game's own modes cannot play sounds on shots on a build
+#: PAD-945: why the game's modes cannot play sounds on shots on a build
 NO_TITLE_SHOTS = ("The app cannot tell which game this project is for, so it cannot add sounds to "
-                  "the shots of the game's own modes.")
-NO_SHOTS = "Sounds on the shots of the game's own modes are not offered on %s: %s."
+                  "the shots of the game's modes.")
+NO_SHOTS = "Sounds on the shots of the game's modes are not offered on %s: %s."
 
 _IDX_RE = re.compile(r"(?:^|/)idx(\d+)")
 
@@ -267,7 +267,7 @@ class Modes:
     juke_rel: str = ""
     #: PAD-685: the build's jukebox: ``{"box": jukebox.Jukebox, "prof": profile}`` (never saved)
     juke_plan: dict = field(default_factory=dict)
-    #: PAD-945: sounds on shots in the game's own modes: ``[{"mode", "mode_name", "switch",
+    #: PAD-945: sounds on shots in the game's modes: ``[{"mode", "mode_name", "switch",
     #: "switch_name", "file"}, ...]``
     shots: list = field(default_factory=list)
     #: PAD-945: the carrier's slot the files are built on, and the build's carrier ``{"request",
@@ -784,7 +784,7 @@ def offer_attract(project, probe=True):
     return attract_refusal(project_title(project, probe=probe))
 
 
-#: PAD-945: what the runtime needs of a build's port for sounds on the shots of the game's own modes:
+#: PAD-945: what the runtime needs of a build's port for sounds on the shots of the game's modes:
 #: the switch drain (the presses), the record lookup (the swap) and the sound play, as PAD-641's; and
 #: one of the virtuals that tell a mode of the game's runs
 SHOT_SITES = ATTRACT_SITES
@@ -794,7 +794,7 @@ SHOT_ACTIVE = ("mode_slot_active", "stock_slot_active")
 
 
 def game_modes(prof):
-    """PAD-945: ``[(id, name)]`` of the game's own modes the card's port names with an object
+    """PAD-945: ``[(id, name)]`` of the game's modes the card's port names with an object
     (``text block_name_<id>`` and ``data block_obj_<id>``: the runtime asks the object whether the
     mode runs), in id order; ``[]`` when there is no port or it names none."""
     from . import mode_project as MP
@@ -818,7 +818,7 @@ def game_modes(prof):
 
 
 def shot_refusal(prof):
-    """PAD-945: why ``prof``'s build cannot play sounds on the shots of the game's own modes, or
+    """PAD-945: why ``prof``'s build cannot play sounds on the shots of the game's modes, or
     ``""``: the port needs the switch drain, the record lookup and the sound play (as PAD-641's),
     a virtual that tells whether a mode of the game's runs, and modes it names with their objects
     (C++ rule titles; a plain-C title's modes have none)."""
@@ -846,7 +846,7 @@ def shot_refusal(prof):
 
 def shot_choices(project):
     """PAD-945: ``(why, modes, switches)`` for the project's game: :func:`offer_shots`'s reason
-    ("" when it can), the game's own modes ``[(id, name)]`` (:func:`game_modes`) and its shots
+    ("" when it can), the game's modes ``[(id, name)]`` (:func:`game_modes`) and its shots
     ``[(id, name)]`` - the playfield switches of the card's game program (:func:`shot_switches`), or
     when the card is not on this PC, the port's ``switch`` lines."""
     why = offer_shots(project, probe=True)
@@ -879,7 +879,7 @@ def shot_choices(project):
 
 
 def offer_shots(project, probe=True):
-    """PAD-945: why the project's game cannot play sounds on the shots of its own modes (``""``
+    """PAD-945: why the project's game cannot play sounds on the shots of its modes (``""``
     when it can)."""
     if not enabled():
         return "%s=0 leaves the sounds on the shots of the game's modes out of this app." % GATE_ENV
@@ -1082,7 +1082,7 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     [(weight, record key, clip name or "")]}``, a ``jmode`` line per song mode and a ``jsong`` line per
     song (pad_mode_runtime.c "the jukebox").
     PAD-945: *shots* ``{"request", "key", "files": [(mode id, switch id, record key, ms), ...]}``, the
-    sounds on the shots of the game's own modes: a ``gshot`` line (the carrier, its own record's key)
+    sounds on the shots of the game's modes: a ``gshot`` line (the carrier, its own record's key)
     and a ``gsfile`` line per file (pad_mode_runtime.c "a sound on a shot")."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
@@ -1249,7 +1249,7 @@ def read_card_record(text):
     turn, PAD-565; ``"random"`` ``[{"slot", "rel"}]`` the slots of them that play at random,
     PAD-638; ``"attract"`` ``[{"k", "slot", "host", "rel", "name"}]`` when its flipper buttons
     play sounds in attract, PAD-641; ``"shots"`` ``[{"k", "slot", "host", "mode", "switch", "rel",
-    "name", "mode_name", "switch_name"}]`` when the game's own modes play sounds on shots, PAD-945)
+    "name", "mode_name", "switch_name"}]`` when the game's modes play sounds on shots, PAD-945)
     from a card's ``sounds.cfg`` (*text*), or ``None``
     when it has no record (a card written before PAD-553). PAD-608: an entry whose file is in a
     sound bank has ``"bank"``, the bank's category, and ``"host"`` is the bank's record."""

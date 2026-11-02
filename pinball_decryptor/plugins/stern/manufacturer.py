@@ -1038,7 +1038,7 @@ class SternManufacturer(Manufacturer):
         out = {"why": why, "slots": slots, "max": MAX_MODES,
                "turns_why": twhy, "turn_slots": tslots,
                "attract_why": offer_attract(assets_dir, probe=True),
-               # PAD-945: and whether the game's own modes can play sounds on shots
+               # PAD-945: and whether the game's modes can play sounds on shots
                "shots_why": offer_shots(assets_dir, probe=True)}
         # PAD-685: a jukebox for the song modes, on a title that has them (no key elsewhere)
         from .jukebox import offer as jukebox_offer

@@ -187,9 +187,9 @@ Right-click a sound > **Play in turn** > **Add a sound to play in turn…**
 - Each file plays for as long as the sound it stands in for.
 - Needs an image build, not a direct SD write.
 
-### Sounds on shots in the game's own modes (Stern Spike 2)
+### Sounds on shots in the game's modes (Stern Spike 2)
 
-While one of the game's own modes runs, a hit on a shot you pick plays a sound you pick: one of
+While one of the game's modes runs, a hit on a shot you pick plays a sound you pick: one of
 the game's own sounds (one it never plays, say) or a file of yours.
 
 - Right-click a sound > **Play on a shot in one of the game's modes…**, or **Sounds on shots** at

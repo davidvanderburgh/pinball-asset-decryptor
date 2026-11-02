@@ -355,7 +355,7 @@ def sound_modes_of(data):
     # PAD-641: the flipper buttons' sounds in attract belong to no slot: they go as they are
     attract = [f for f in (raw.get("attract") or []) if isinstance(f, str) and f.strip()] \
         if isinstance(raw.get("attract"), list) else []
-    # PAD-945: the sounds on the shots of the game's own modes belong to no slot either
+    # PAD-945: the sounds on the shots of the game's modes belong to no slot either
     shots = [dict(r) for r in (raw.get("shots") or []) if isinstance(r, dict)
              and isinstance(r.get("file"), str) and r["file"].strip()] \
         if isinstance(raw.get("shots"), list) else []

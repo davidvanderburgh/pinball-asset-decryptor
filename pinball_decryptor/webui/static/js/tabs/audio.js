@@ -474,7 +474,7 @@ function JukeboxModal({ data, onClose }) {
   <//>`;
 }
 
-// PAD-945: sounds on the shots of the game's own modes - a hit on a shot while one of the game's modes
+// PAD-945: sounds on the shots of the game's modes - a hit on a shot while one of the game's modes
 // runs plays a sound: the header button (and a row's right-click) opens the list
 function ShotsButton({ g, onOpen }) {
   return html`<span ...${tip({ head: "Sounds on shots", lines: g.tip || [] })}><${Button} kind="ghost" icon="audio"
@@ -511,7 +511,7 @@ function ShotsModal({ data, onClose }) {
         : html`<div class="muted">None yet. Pick a mode, a shot and a sound below, then Add.</div>`}
       ${d.why ? null : html`<div class="row wrap" style="gap:8px">
         <span class="lbl nw">In</span>
-        <${Select} sm value=${m} options=${modes} onChange=${setMode} width=${200} title="One of the game's own modes" />
+        <${Select} sm value=${m} options=${modes} onChange=${setMode} width=${200} title="One of the game's modes" />
         <span class="lbl nw">when</span>
         <${Select} sm value=${s} options=${shots} onChange=${setShot} width=${200} title="The shot (the game's own switch name)" />
         <span class="lbl nw">is hit, play</span>

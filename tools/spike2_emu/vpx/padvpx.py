@@ -175,7 +175,8 @@ def copy_backglass(table_path, out_vpx):
     dst = os.path.splitext(out_vpx)[0] + ".directb2s"
     if os.path.exists(dst):
         return dst
-    for d in (os.path.dirname(os.path.abspath(table_path)), os.path.dirname(os.path.abspath(out_vpx))):
+    here = os.path.dirname(os.path.abspath(table_path))
+    for d in (here, os.path.dirname(os.path.abspath(out_vpx))):
         try:
             names = os.listdir(d)
         except OSError:
@@ -184,6 +185,23 @@ def copy_backglass(table_path, out_vpx):
             if n.lower() == want:   # B2S files ship as .directb2s and .directb2S
                 shutil.copy2(os.path.join(d, n), dst)
                 return dst
+    # a download whose one backglass has a name of its own, in its b2s folder
+    # (PAD-926: The Beatles' b2s\The-Beatles-Original-2018) or beside the table
+    # when the table is the folder's only one (a tables folder of several
+    # would hand one table's backglass to another)
+    found = []
+    try:
+        tables = [n for n in os.listdir(here) if n.lower().endswith(".vpx")]
+    except OSError:
+        tables = []
+    for d in ([here] if len(tables) == 1 else []) + [os.path.join(here, "b2s")]:
+        try:
+            found += [os.path.join(d, n) for n in os.listdir(d) if n.lower().endswith(".directb2s")]
+        except OSError:
+            continue
+    if len(found) == 1:
+        shutil.copy2(found[0], dst)
+        return dst
     return None
 
 

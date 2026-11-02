@@ -541,3 +541,56 @@ the left flipper flipped, ten table objects reached the switches they are
 named for, and a ball held on LEFT EJECT and on RIGHT VUK OPTO was kicked
 by its coil. Both patched tables re-sign and their scripts compile under
 Windows Script Host (the first runtime stop is a table object).
+
+## The Beatles, on a Seawitch ROM table (PAD-926)
+
+A user asked for "The Beatles" (Original 2018) v007 (VPForums; its archive
+password was the user's to give, the table itself is not locked). Its body
+is Stern's Beatles, which is a Seawitch playfield, and its brain was Stern's
+1980 Seawitch ROM (`seawitfp`) under VPinMAME, with a script of the author's
+own on top: five modes and Beatlemania, a ball save that destroys and
+creates balls, a lock behind a post that makes a ball of its own, mystery,
+three skill shots, extra points scored by pulsing the star rollover while a
+wall holds the ball in play, and a PinUP pack. Fitted to the rig's drawing
+(beatles 1.29.0) on 29 switches it holds at 18 table units (about 6 drawing
+px); every one of the machine's 46 playfield switches has a table object, and
+every placed insert a table light but JACKPOT (a cloned light).
+
+So it is a ROM table, patched the Godzilla way: `beatles.vpxmap.json` and
+`patch_beatles.py`. PADSPIKE2.vbs takes controller.vbs + stern.vbs's place;
+Seawitch's switch numbers go to beatles' ids (both spinners pulsed Seawitch's
+5: each its own now, by object); the tribute's own targets and triggers that
+sent nothing become the machine's switches (`switch_subs`: the two orbit
+targets, the mystery and super jackpot targets, the star as SKILL SHOT
+ROLLOVER, the plunger rest as SHOOTER LANE, the orbit triggers as the orbit
+optos); the drop banks' InitDrop numbers and the trough (six balls on TROUGH
+1-6 + JAM) are rewritten. The upper flippers are their own coils (UP LEFT /
+UP RIGHT FLIPPER on sULFlipper / sURFlipper) and their buttons (UP LT / UP RT
+FLIPPER BUTTON) close with the lower ones' keys, as on the machine's one
+button. The top magnet follows MAGNET-TOP; the record gets a magnet of its
+own on a trigger cloned from the turntable's, on MAGNET-RECORD, and the
+turntable turns on the two LED channels the drawing puts at the record
+(MOTOR A0 / A1 DRIVER: one alone turns it one way, the other the other way).
+The author's rules are emptied (`quiet_subs`: their callers stay, the subs do
+nothing), PinUP Player is off (`PadNoPuP` stands in: the game's LCD is the
+display) and the flasher domes and spinner flashes are lamp calls.
+
+On the rig (beatles 1.29.0, hidden and muted, driven through PAD.Controller on
+the map as the table drives it): every switch the map sends is in the run's
+own switch table under the name the map gives it; coins and Start started a
+game (flippers armed, the trough coil); all four flipper coils came back from
+their buttons; each drop bank held down was reset by its own coil (LEFT 3 on
+8, CENTER 4 on 7, RIGHT 4 on 9); the orbit optos and the top magnet opto made
+the game fire MAGNET-TOP (and MAGNET-RECORD); the ball search fired the
+slings, pops and auto plunger under the map's numbers; and 80 of the map's 85
+inserts were lit at some point. Not seen lit in attract or a game: the record
+motor's two channels and three flasher domes (RIGHT SLING, TOP MAGNET, UP
+RIGHT FLIPPER; LEFT SLING, the same kind, was). That the motor channels turn
+the record is a guess from the drawing; if the game never lights them, the
+record stays still. The patched table re-signs and its script compiles under
+Windows Script Host.
+
+`padvpx` copies a backglass with a name of its own, too: the one
+`.directb2s` in the download's `b2s` folder (The Beatles ships
+`b2s\The-Beatles-Original-2018.directb2s`), or the only one beside a table
+that is its folder's only table.

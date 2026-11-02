@@ -70,6 +70,7 @@ SWITCH_HINTS = {
     "magnet": "a Trigger over the magnet, Hit/UnHit held (`event: hold`); the coil a cvpmMagnet",
     "mech": "a moving part's end stop: `switch_fakes` answers it when the table has no object",
     "virtual": "nothing: the game makes it itself",
+    "unnamed": "nothing yet: this build's switch table has no name for it, so no part is known",
     "cabinet": "PADSPIKE2.vbs presses it from the key (`cabinet`)",
     "other": "a Trigger or HitTarget where the drawing puts it, Hit (`event: hit`)",
 }
@@ -147,6 +148,8 @@ def _kind(name, table, default):
 
 
 def switch_kind(name):
+    if (name or "").strip() in ("", "?"):
+        return "unnamed"             # the game's table names it "?" (swnames could not): nothing to build
     return _kind(name, _SW_KINDS, "other")
 
 
@@ -607,7 +610,7 @@ def gaps(machine, cov):
     """The machine parts a map leaves out, by kind."""
     sw = [s for s in machine["switches"]
           if s["where"] in ("playfield", "unplaced") and s["id"] and s["id"] not in cov["switches"]
-          and s["kind"] != "flipper eos"]
+          and s["kind"] not in ("flipper eos", "unnamed")]
     # flippers, slings and pops are the board's: the switch is what the table owes (checked above)
     coils = [c for c in machine["coils"] if c["node"] is not None and c["kind"] not in BOARD_COILS
              and (c["node"], c["index"]) not in cov["coils"]]
@@ -723,7 +726,7 @@ def markdown(machine, table=None, map_info=None, cov=None, gap=None, inventory=N
                                 s["bit"] if s["bit"] is not None else "?"),
                      s["name"], s["kind"], _pos(s["x"], s["y"]), _hint(SWITCH_HINTS, s["kind"])]
             if cov:
-                if s["kind"] == "flipper eos":
+                if s["kind"] in ("flipper eos", "unnamed"):
                     mark = "-"
                 elif s["id"] in wired_sw:
                     mark = "yes"

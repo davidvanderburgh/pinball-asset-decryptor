@@ -13,8 +13,11 @@
 
 // PAD-941: a card for whoever builds or finishes a table: a checklist of
 // every switch, coil and insert the game has, checked against a table.
+// PAD-942: a picture of each patched table at the head of its row (the
+// playfield out of the (PAD) copy, read by the kit into the app's cache),
+// the large one in its tooltip.
 
-import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, Select, Check, Modal, call, tip } from "../core/ui.js";
+import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, Select, Check, Modal, call, tip, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -164,6 +167,22 @@ export default function Vpx() {
   // renderer the game screen's in display.conf)
   const inUse = presets.find((p) => p.key === s.layout);
   const authorTitles = s.author_titles || [];
+  // PAD-942: the row's picture, the large one on hover; a patched table
+  // whose picture is not read yet (or cannot be) shows an empty outline
+  const pictures = s.pictures || {};
+  const picture = (t) => {
+    const p = pictures[t.output];
+    if (p && p.file) {
+      const url = mediaUrl(p.file);
+      return html`<img class="vpx-pic-img" src=${url} width=${p.w} height=${p.h} alt=""
+        ...${tip({ head: t.name, lines: [p.source === "screenshot" ? "The author's own picture of the table."
+          : "The table's playfield, as its author drew it."], image: url, w: p.w, h: p.h })} />`;
+    }
+    const why = p && p.error ? "No picture: " + p.error + "."
+      : !t.patched ? "No picture until the table is patched: it is read from your (PAD) copy."
+      : s.pictures_busy ? "Reading the table's picture…" : "No picture read yet.";
+    return html`<span class="vpx-nopic" ...${tip(why)}></span>`;
+  };
   // PAD-941: a row's coverage (the map's wired parts over what the game has, from
   // this PC's tables) is the button that writes that table's checklist
   const coverage = s.coverage || {};
@@ -256,6 +275,7 @@ export default function Vpx() {
     <//>
     <${Card} cls="vpx-tables" head=${html`<span class="h2" ...${tip(s.tables_tip)}>Tables</span>
         <span class="mono small muted vpx-dir" ...${tip("Your tables folder: where Patch writes the (PAD) copies and Play looks for them.")}>${s.tables_dir || "No tables folder set"}</span>
+        ${s.pictures_busy ? html`<span class="small muted vpx-pics-busy"><${Spinner} /> ${s.pictures_busy}…</span>` : null}
         <span class="sp"></span>
         <${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
           onClick=${() => call("vpx.choose_tables")}>Choose folder…<//>
@@ -264,6 +284,7 @@ export default function Vpx() {
           onClick=${() => call("vpx.patch_folder")}>Patch a folder…<//>`}>
       ${rows.length ? html`<div class="vpx-list">
         <div class="vpx-table vpx-head small muted">
+          <span class="vpx-pic" ...${tip(s.pictures_tip)}></span>
           <span>Table</span><span class="vpx-by">By</span><span class="vpx-from">From</span>
           <span ...${tip("The machine the table plays as: the card image it boots is that model's.")}>Model</span>
           <span>Card image</span><span>Your copy</span>
@@ -271,6 +292,7 @@ export default function Vpx() {
           <span></span><span></span>
         </div>
         ${rows.map((t) => html`<div class=${"vpx-table" + (t.patched ? "" : " unpatched")}>
+        <span class="vpx-pic">${picture(t)}</span>
         <b class="vpx-name" ...${tip(t.extra ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : ""))}>${t.name}</b>
         <span class="small vpx-by" ...${tip(t.by)}>${t.by}</span>
         <span class="small muted vpx-from" ...${tip(t.where)}>${t.where}</span>

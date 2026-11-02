@@ -315,6 +315,11 @@ input[type=range] { accent-color: var(--accent); }
 .tip .tip-cp { color: var(--cp-ink); }
 .tip .tip-cp b { font-weight: 600; }
 .tip .tip-k { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--accent); padding-top: 1px; }
+/* PAD-942: tip({image}) - a picture under the words (a table's playfield), as tall as
+   the window allows; width and height attributes keep its shape before it loads */
+.tip.tip-pic { max-width: none; }
+.tip .tip-img { display: block; max-height: min(80vh, 1000px); max-width: min(60vw, 1000px); width: auto; height: auto;
+  margin-top: 6px; border-radius: 4px; }
 .badge-i { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; font-family: var(--cond); color: var(--info); background: var(--info-soft); border: 0; cursor: help; flex: 0 0 18px; }
 
 /* picker */

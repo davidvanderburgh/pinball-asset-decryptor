@@ -720,3 +720,42 @@ row's cell is the button that opens that table's sheet, checked against the
 download it was patched from (or its (PAD) copy). On this PC: Beatles and
 Jurassic Park 99%, John Wick 97%, Godzilla LE and Sword of Rage 96%, Bond LE
 83%, TMNT 81%, Rush 78%, Stranger Things 76%.
+
+## A picture of each table on the tab (PAD-942)
+
+David (2026-11-02): a small thumbnail on each table's row, the large render
+in a tooltip on hover; no table pictures committed to the repo, so fed live
+or once the table is there.
+
+The picture is IN THE TABLE. A .vpx carries the playfield image its author
+imported (GameData's `IMAG` names it; the `GameStg/Image<n>` whose NAME
+that is holds the file's own bytes - PNG, JPEG or WebP - under the DATA
+record after JPEG) and, sometimes, a screenshot under `TableInfo/Screenshot`.
+`vpxpicture.py` reads the playfield first: the screenshot is whatever the
+author put there (TMNT's is the instruction card, Aerosmith's a render of
+the cabinet) and only 3 of David's 18 tables have one, while 17 of 18 have
+a playfield picture the kit reads. The one that does not is VPW's
+Metallica, whose playfield is baked into primitives (its IMAG names a ball
+texture, an HDR file); a BITS playfield (Visual Pinball's own LZW of raw
+pixels) is not read either - none of the kit's tables uses one. A
+transparent cut-out lies over black, as on the table.
+
+In the app: the tab reads the picture from the (PAD) copy of every patched
+row (the person's own file, so nothing of a table ships) into
+`%LOCALAPPDATA%\pinball_decryptor\vpx_pictures` - one JPEG per table, the
+long side 1200 px, and a sidecar keyed by the file's path, size and time
+(and the reader's version), so a re-patched copy is read again and a copy
+that is gone is dropped from the cache. What the cache has goes up with the
+page; the rest is one kit run on a thread of its own, never under the
+page's busy, each picture landing as it is done (`pictures_busy` in the
+Tables head meanwhile). A table with no picture the kit reads is remembered
+as such (its error in the sidecar) so the kit is not asked every sitting.
+The row's 48 px picture is the JPEG served as `/media`; `tip({image, w,
+h})` in ui.js puts it under the tooltip's words at up to 80% of the window's
+height, laid out at its size before it loads. 18 tables read in 4.7 s on
+this PC; the second sitting reads nothing.
+
+Not done: a capture of the table as Visual Pinball renders it (David's
+"fed live"). It would need Visual Pinball running on David's desktop to
+prove, which a session never does, and the table's own picture covers
+every table here but Metallica.

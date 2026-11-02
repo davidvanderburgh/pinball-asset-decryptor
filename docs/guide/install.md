@@ -219,7 +219,7 @@ line in the log.
 |---|---|---|
 | Windows | **Install update** | Downloads the installer, checks its SHA-256, installs silently and reopens. No SmartScreen or UAC prompt. |
 | macOS | **Install update** | Downloads the DMG, replaces the app in place and restarts it. No security prompt. |
-| Linux | **Download update** | Saves the new AppImage next to the old one (or in `~/Downloads`), makes it executable and offers to start it. The old one is kept. |
+| Linux | **Download update** | Saves the new AppImage next to the old one (or in `~/Downloads`), makes it executable and offers to start it. The old one is kept unless **Settings > Updates > Old versions** says how many to keep. |
 
 - **No security prompts,** because the app downloads the file itself:
   only a browser download gets marked as "from the internet".

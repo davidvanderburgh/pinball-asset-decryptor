@@ -45,10 +45,11 @@ INTRO = ("Play a Visual Pinball table with the real Stern game behind it: the "
          "the table, keeps score and shows its own screen.")
 
 #: PAD-943: the other platforms' tables, where their authors put them
-CATALOG_TIP = ("Every platform the app reads, and the Visual Pinball tables of its games: "
-               "where each one is downloaded, who made it, and what plays behind it. Stern SAM "
-               "tables run the real game through Visual PinMAME with your ROM set; a Spike 1 "
-               "table plays on the app's emulator once the app has a map for it, like Spike 2's.")
+CATALOG_TIP = ("Every modern platform the app reads, and the Visual Pinball tables of its games: "
+               "where each one is downloaded, who made it, and what plays behind it. A Spike 1 "
+               "table plays on the app's emulator once the app has a map for it, like Spike 2's; "
+               "the rest play as their authors wrote them. Stern SAM is not here: Visual PinMAME "
+               "runs those games already.")
 TABLES_TIP = ("The app ships no tables. Download a table below from its author, "
               "then Patch it: the app writes a copy named \"(PAD)\" into your tables "
               "folder and leaves your download as it is.")

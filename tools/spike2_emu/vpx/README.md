@@ -573,11 +573,10 @@ got_le 1075 1515 1578 1519 "1521,1522,1523,1524,1525,1526" 1080` - the
 trough held through the bridge, three coins and Start put the game in
 CHOOSE YOUR HOUSE and its TROUGH UP-KICKER came back as solenoid 1.
 
-**Stern SAM**: VPinMAME has the SAM core, so a SAM table already runs the
-REAL game from the person's own ROM set: nothing for this kit to do, and
-nothing it does (David, 2026-11-02: no reinventing the wheel; Spike 1,
-Spike 2 and the other modern machines are the point). The catalogue lists
-the SAM tables only to say so.
+**Stern SAM** (and the WPC remakes): VPinMAME runs those games from the
+person's own ROM set already, so nothing for this kit to do, and they are
+not in the catalogue (David, 2026-11-02: no reinventing the wheel; Spike 1,
+Spike 2 and the other modern machines are the point).
 
 **The rest** (JJP, American, Spooky, Dutch, Barrels of Fun, Pinball
 Brothers, Turner, Multimorphic, Chicago Gaming's own titles): no VPinMAME

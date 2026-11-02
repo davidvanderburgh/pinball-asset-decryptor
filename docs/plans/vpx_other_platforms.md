@@ -112,10 +112,11 @@ pinball machines? We don't need to reinvent the wheel. Spike 1 and 2 and
 other modern pinball machines are what we want to support." VPinMAME has
 the SAM core, so a SAM table already runs the real game from its ROM set;
 the hand-off of PAD's edited game file into that ROM set built in run 2
-(vpxsam.py, `padvpx sam`) was taken out again (reverted), and the
-catalogue keeps the SAM rows only to say that those tables run on Visual
-PinMAME with the person's own ROM set. The focus is Spike 1, Spike 2 and
-the other modern machines.
+(vpxsam.py, `padvpx sam`) was taken out again (reverted), and the SAM
+block came out of the catalogue too (with Chicago Gaming's WPC remakes,
+which run their Williams ROMs the same way): the card is the modern
+machines only. The focus is Spike 1, Spike 2 and the other modern
+machines.
 
 ## The Spike 1 author's checklist (run 2)
 

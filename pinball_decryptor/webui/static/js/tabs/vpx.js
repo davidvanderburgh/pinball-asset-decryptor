@@ -342,7 +342,7 @@ function Skeleton() {
 // (what plays behind a table there), a line per table: the game, the table
 // (a link to where its author put it), who made it, and whether it is the
 // machine's own layout or a themed original.
-const KIND_WORDS = { tribute: "scripted", mashup: "older ROM", vpm: "Visual PinMAME", "": "none" };
+const KIND_WORDS = { tribute: "scripted", mashup: "older ROM", "": "none" };
 function Catalog({ s }) {
   const cat = s.catalog || {};
   const plats = cat.platforms || {};
@@ -350,7 +350,7 @@ function Catalog({ s }) {
   const order = Object.keys(plats).filter((k) => k !== "spike2" && tables.some((t) => t.platform === k));
   if (!order.length) return null;
   return html`<${Card} cls="vpx-cat" head=${html`<span class="h2" ...${tip(s.catalog_tip)}>Tables of other machines</span>
-      <span class="small muted vpx-cat-sub">The app ships none of them: each is its author's download. A Stern SAM table plays the real game through Visual PinMAME; the rest play as their authors wrote them until the app has a map for them.</span>`}>
+      <span class="small muted vpx-cat-sub">The app ships none of them: each is its author's download, and it plays as its author wrote it until the app has a map for it (Stern SAM games are Visual PinMAME's already, so they are not here).</span>`}>
     ${order.map((k) => html`<div class="vpx-cat-plat">
       <div class="vpx-cat-head"><b>${plats[k].name}</b> <span class="small muted">${plats[k].runs}</span></div>
       ${tables.filter((t) => t.platform === k).map((t) => html`<div class=${"vpx-cat-row" + (t.url ? "" : " none")}>
@@ -361,8 +361,7 @@ function Catalog({ s }) {
         <span class="small muted vpx-cat-from">${t.where}</span>
         <span class="vpx-cat-kind">${t.url ? html`<${Chip} sm kind=${t.faithful ? "ok" : ""} dot=${t.faithful}
           ...${tip((t.faithful ? "The machine's own layout" : "A themed original, not the machine's layout") + "; "
-            + (t.kind === "vpm" ? "the real game's code plays through Visual PinMAME" + (t.rom ? " (ROM set " + t.rom + ")" : "")
-              : t.kind === "mashup" ? "an older game's ROM plays under the playfield" : "its own script plays"
+            + (t.kind === "mashup" ? "an older game's ROM plays under the playfield" : "its own script plays"
               ) + (t.map ? ". The app's map: " + t.map : "") + (t.notes ? ". " + t.notes : ""))}>${(t.faithful ? "layout" : "themed") + ", " + KIND_WORDS[t.kind || ""]}<//>` : null}</span>
       </div>`)}
     </div>`)}

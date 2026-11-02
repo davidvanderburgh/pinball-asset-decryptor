@@ -18,8 +18,16 @@ THIN: every step is the kit's own code, run with the app's Windows Python
 (``vpxsetup.py`` for the state and settings, ``padvpx.py`` for patch and
 register), and one JSON object comes back from its last line.  The kit's
 pywin32, its DPI awareness and its module names stay out of the app.
+
+PAD-942: each patched table's row carries a small picture of it, the large
+one on hover.  PAD SHIPS NO PICTURE, as it ships no table: the kit's
+``vpxpicture.py`` reads the playfield picture out of the person's own (PAD)
+copy, once, into the app's cache (``pictures_dir()``, a JPEG per table and a
+sidecar keyed by the file's size and time), on a thread of its own after
+the page is up so nothing waits for it; the page serves them as ``/media``.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -61,9 +69,38 @@ AUTHORS_TITLES_TIP = ("The titles whose game has run on this PC: the checklist i
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 _RUN_TIMEOUT_S = 120
 
+# PAD-942: the pictures. The reader's version is in the cache key, so a
+# better reader (one that reads a BITS playfield, say) remakes them all
+# (2: the backglass fallback for a baked playfield)
+PICTURE_VERSION = 2
+PICTURES_TIP = ("The table's own playfield picture, read from your (PAD) copy once it is patched "
+                "(the app ships no picture of any table). Hover over it for the large one.")
+
 
 def kit_dir():
     return os.path.join(emulate_core.rig_dir(), "vpx")
+
+
+def pictures_dir():
+    """Where the tables' pictures are kept: machine-local, under LOCALAPPDATA
+    like the app's other caches (they are remade from the tables)."""
+    override = os.environ.get("PAD_VPX_PICTURES")
+    if override:
+        return override
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "pinball_decryptor", "vpx_pictures")
+
+
+def picture_key(path):
+    """The cache name for the table at *path*: its path, size and time, so a
+    re-patched copy (a new file) gets a new picture; None when it is not there."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    words = "%d|%s|%d|%d" % (PICTURE_VERSION, os.path.normcase(os.path.abspath(path)),
+                             st.st_size, st.st_mtime_ns)
+    return hashlib.sha1(words.encode("utf-8")).hexdigest()[:20]
 
 
 def kit_python():
@@ -94,6 +131,8 @@ class VpxTab(TabService):
         self._lock = threading.Lock()
         self._busy = False
         self._want_coverage = True
+        self._pictures_lock = threading.Lock()
+        self._pictures_running = False
         ok = sys.platform == "win32"
         missing = not os.path.isfile(os.path.join(kit_dir(), "vpxsetup.py"))
         note = ("Visual Pinball runs on Windows only." if not ok else
@@ -107,7 +146,8 @@ class VpxTab(TabService):
                  runtime_text="Checking…", message="", message_level="info",
                  authors_intro=AUTHORS_INTRO, authors_titles_tip=AUTHORS_TITLES_TIP,
                  author_titles=[], author_title="", author_note="", coverage={}, sheet=None,
-                 catalog_tip=CATALOG_TIP, catalog={"platforms": {}, "tables": []})
+                 catalog_tip=CATALOG_TIP, catalog={"platforms": {}, "tables": []},
+                 pictures={}, pictures_busy="", pictures_tip=PICTURES_TIP)
 
     # -- hooks ---------------------------------------------------------------
     def on_show(self):
@@ -213,8 +253,115 @@ class VpxTab(TabService):
             if "error" not in got and isinstance(got.get("coverage"), dict):
                 coverage = got["coverage"]
             self._want_coverage = False
+        # PAD-942: the pictures already in the cache go up with the page; the
+        # rest are read on their own thread, the page usable meanwhile
+        pictures, todo = self._pictures_known(self._picture_files(st))
         self.set(loaded=True, busy="", runtime_state=rt_state, runtime_text=rt_text,
-                 author_titles=titles, author_title=chosen, coverage=coverage, **st)
+                 author_titles=titles, author_title=chosen, coverage=coverage,
+                 pictures=pictures, **st)
+        if todo:
+            self._read_pictures(todo)
+
+    # -- the tables' pictures (PAD-942) -------------------------------------
+    @staticmethod
+    def _picture_files(st):
+        """{row output name: the table file its picture is read from}: the
+        (PAD) copy of every patched row, known to the kit or not (the page
+        lists any other (PAD) table in the folder as a row of its own)."""
+        tables_dir = st.get("tables_dir") or ""
+        if not tables_dir:
+            return {}
+        files = {}
+        for t in st.get("tables") or []:
+            if t.get("patched") and t.get("output"):
+                files[t["output"]] = os.path.join(tables_dir, t["output"])
+        for name in st.get("patched") or []:
+            files.setdefault(name, os.path.join(tables_dir, name))
+        return files
+
+    def _pictures_known(self, files):
+        """What the cache holds for *files* ({output: record}) and what it
+        lacks ({output: (file, key)}); sidecars and pictures of tables no
+        longer here are dropped."""
+        d = pictures_dir()
+        known, todo, keep = {}, {}, set()
+        for output, path in files.items():
+            key = picture_key(path)
+            if not key:
+                continue
+            rec = None
+            try:
+                with open(os.path.join(d, key + ".json"), encoding="utf-8") as f:
+                    rec = json.load(f)
+            except (OSError, ValueError):
+                rec = None
+            if isinstance(rec, dict) and (rec.get("error") or
+                                          (rec.get("file") and os.path.isfile(rec["file"]))):
+                known[output] = rec
+                keep.add(key + ".json")
+                if rec.get("file"):
+                    keep.add(os.path.basename(rec["file"]))
+            else:
+                todo[output] = (path, key)
+        # (not while a read is writing there: its files are not in keep yet)
+        with self._pictures_lock:
+            prune = not self._pictures_running
+        if prune:
+            try:
+                for name in os.listdir(d):
+                    if name not in keep and name.endswith((".json", ".jpg")):
+                        os.remove(os.path.join(d, name))
+            except OSError:
+                pass
+        return known, todo
+
+    def _read_pictures(self, todo):
+        """Read the pictures *todo* ({output: (file, key)}) with the kit, one
+        run for all of them, each onto the page as it is done; never under
+        the page's busy, so Patch and Play stay usable."""
+        with self._pictures_lock:
+            if self._pictures_running:
+                return False
+            self._pictures_running = True
+        d = pictures_dir()
+        by_file = {}
+        for output, (path, key) in todo.items():
+            by_file.setdefault(path, []).append((output, key))
+
+        def line(text):
+            if not text.startswith("picture "):
+                return
+            try:
+                got = json.loads(text[8:])
+            except ValueError:
+                return
+            for output, key in by_file.get(got.get("table"), []):
+                rec = ({"error": got["error"]} if got.get("error")
+                       else {k: got.get(k) for k in ("file", "w", "h", "source")})
+                try:
+                    with open(os.path.join(d, key + ".json"), "w", encoding="utf-8") as f:
+                        json.dump(rec, f)
+                except OSError:
+                    pass
+                pictures = dict(self.get("pictures") or {})
+                pictures[output] = rec
+                self.set(pictures=pictures)
+
+        def run():
+            n = len(by_file)
+            self.set(pictures_busy="Reading the picture%s of %d table%s" % ("" if n == 1 else "s", n,
+                                                                             "" if n == 1 else "s"))
+            try:
+                os.makedirs(d, exist_ok=True)
+                got = self._kit("vpxpicture.py", [d] + sorted(by_file), timeout=900, on_line=line)
+                if "error" in got and not got.get("pictures"):
+                    self._say("the tables' pictures were not read: %s" % got["error"], "warning")
+            finally:
+                self.set(pictures_busy="")
+                with self._pictures_lock:
+                    self._pictures_running = False
+        threading.Thread(target=run, daemon=True, name="pad-vpx-pictures").start()
+        return True
 
     # -- the page's buttons -------------------------------------------------
     @rpc

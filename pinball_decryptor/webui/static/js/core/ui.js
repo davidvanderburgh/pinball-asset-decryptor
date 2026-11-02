@@ -135,6 +135,9 @@ function tipBox(text, rich) {
   tipEl.textContent = "";
   let spec = null;
   try { spec = rich ? JSON.parse(rich) : null; } catch (e) { spec = null; }
+  // PAD-942: tip({image, w, h}) shows a picture under the words (a table's
+  // playfield); its size is on the element, so the box is laid out before it loads
+  tipEl.className = "tip" + (spec && spec.image ? " tip-pic" : "");
   if (spec) {
     // a heading, then one line each; a [key, what] line puts the key in its own column
     const add = (cls, txt) => {
@@ -163,6 +166,14 @@ function tipBox(text, rich) {
       const v = document.createElement("span");
       v.textContent = ln[1];
       row.append(k, v);
+    }
+    if (spec.image) {
+      const img = document.createElement("img");
+      img.className = "tip-img";
+      img.alt = "";
+      if (spec.w && spec.h) { img.width = spec.w; img.height = spec.h; }
+      img.src = spec.image;
+      tipEl.appendChild(img);
     }
   } else {
     tipEl.textContent = text;

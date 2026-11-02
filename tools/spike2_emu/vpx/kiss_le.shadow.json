@@ -1,0 +1,1287 @@
+{
+ "_": [
+  "KISS LE on the SPIKE 1 rig (PAD-943): masonm's 'KISS (Stern 2015)' 2.0 (VPUniverse file 29259).",
+  "platform: spike1 puts PAD.Controller on tools/spike1_emu's run (s1bridge.py): switches are 1000 + node*64 + index",
+  "(the rig's s1switches.json numbering), lamps 1000 + node*100 + index, coils 1000 + node*64 + index.",
+  "The table's sw<N> are the game program's switch N (sw42 = DEMON EJECT), placed by the rig's curated switch map;",
+  "the switches that map lacks (right outlane, right return lane, the orbits, the ARMY targets, the spinner) keep",
+  "the table's own subs and do not reach the game yet. The lamps are read off the program's lamp and LED tables",
+  "(GUESS until seen on the table). The Demon's mouth is a lock lane (DEMON LOCK 1-3 behind the entrance opto),",
+  "let out through sw42TOP as the table does."
+ ],
+ "platform": "spike1",
+ "title": "kiss_le",
+ "detect": [
+  "Start_LoveGun",
+  "KISSHurryUp"
+ ],
+ "output": "KISS (Stern 2015) 2.0 (PAD).vpx",
+ "table": {
+  "name": "KISS (Stern 2015) 2.0",
+  "by": "masonm (from allknowing2012, jpsalas, balutito, hauntfreaks)",
+  "where": "VPUniverse"
+ },
+ "solenoid_max": 68,
+ "game_on": {
+  "number": 40,
+  "coils": [
+   [
+    8,
+    0
+   ],
+   [
+    8,
+    1
+   ]
+  ]
+ },
+ "cabinet": {
+  "_": "1000 + node*64 + index from switchmaps/KISS_LE.json; the lockdown bar button is ACTION BUTTON",
+  "start": 1075,
+  "tournament_start": 1076,
+  "launch": 1066,
+  "launch_key": "LockBarKey",
+  "left_flipper": 1514,
+  "right_flipper": 1515,
+  "tilt": 1078,
+  "coin": 1080,
+  "slam": 1085
+ },
+ "keys_skip_orig": [
+  "StartGameKey",
+  "AddCreditKey",
+  "AddCreditKey2",
+  "LockBarKey"
+ ],
+ "switches": {
+  "_": "object -> Spike 1 switch id (node * 64 + index, the rig's s1switches.json); event hit (pulse), hold (Hit/UnHit), spin, slingshot. The table's sw<N> is the game program's switch N. GUESS marks what a game on the real table should confirm.",
+  "sw1": {
+   "id": 705,
+   "event": "hit",
+   "name": "LEFT RETURN LANE (L)"
+  },
+  "sw3": {
+   "id": 704,
+   "event": "hit",
+   "name": "LEFT OUTLANE"
+  },
+  "sw25": {
+   "id": 708,
+   "event": "hit",
+   "name": "(S)TAR"
+  },
+  "sw26": {
+   "id": 709,
+   "event": "hit",
+   "name": "S(T)AR"
+  },
+  "sw27": {
+   "id": 710,
+   "event": "hit",
+   "name": "ST(A)R"
+  },
+  "sw28": {
+   "id": 711,
+   "event": "hit",
+   "name": "STA(R)"
+  },
+  "sw38": {
+   "id": 644,
+   "event": "hit",
+   "name": "(K)ISS"
+  },
+  "sw39": {
+   "id": 645,
+   "event": "hit",
+   "name": "K(I)SS"
+  },
+  "sw40": {
+   "id": 646,
+   "event": "hit",
+   "name": "KI(S)S"
+  },
+  "sw41": {
+   "id": 647,
+   "event": "hit",
+   "name": "KIS(S)"
+  },
+  "sw44": {
+   "id": 712,
+   "event": "hit",
+   "name": "LIGHT LOCK TARGET-L"
+  },
+  "sw45": {
+   "id": 713,
+   "event": "hit",
+   "name": "LIGHT LOCK TARGET-R"
+  },
+  "sw46": {
+   "id": 706,
+   "event": "hit",
+   "name": "LEFT RETURN LANE (R)"
+  },
+  "sw56": {
+   "id": 725,
+   "event": "hit",
+   "name": "R. RAMP EXIT"
+  },
+  "sw64": {
+   "id": 721,
+   "event": "hit",
+   "name": "LEFT RAMP EXIT"
+  },
+  "sctarget": {
+   "id": 578,
+   "event": "hit",
+   "name": "CENTER DROP TARGET"
+  },
+  "Bumper1": {
+   "id": 583,
+   "event": "hit",
+   "name": "TOP BUMPER",
+   "note": "GUESS: the four bumpers by place"
+  },
+  "Bumper2": {
+   "id": 580,
+   "event": "hit",
+   "name": "LEFT BUMPER",
+   "note": "GUESS"
+  },
+  "Bumper3": {
+   "id": 581,
+   "event": "hit",
+   "name": "RIGHT BUMPER",
+   "note": "GUESS"
+  },
+  "Bumper4": {
+   "id": 582,
+   "event": "hit",
+   "name": "BOTTOM BUMPER",
+   "note": "GUESS"
+  },
+  "LeftSlingShot": {
+   "id": 519,
+   "event": "slingshot",
+   "name": "LEFT SLINGSHOT"
+  },
+  "RightSlingShot": {
+   "id": 518,
+   "event": "slingshot",
+   "name": "RIGHT SLINGSHOT"
+  },
+  "LeftSlingShot1": {
+   "id": 576,
+   "event": "slingshot",
+   "name": "L. SLINGSHOT (TOP)"
+  },
+  "RightSlingShot1": {
+   "id": 577,
+   "event": "slingshot",
+   "name": "R. SLINGSHOT (TOP)"
+  }
+ },
+ "plunger": {
+  "lane_trigger": "swPlungerRest",
+  "lane_switch": 516,
+  "autoplunge": "plungerIM"
+ },
+ "trough": {
+  "_": "TROUGH #1 (R), nearest the up-kicker, first; the jam opto last",
+  "release": "BallRelease",
+  "drain": "Drain",
+  "switches": [
+   526,
+   525,
+   524,
+   523,
+   522,
+   521,
+   527
+  ],
+  "balls": 6,
+  "kick": [
+   90,
+   4
+  ]
+ },
+ "saucers": {
+  "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power[, kickz]); enter = the opto on the way in, stack = the lock switches behind, kick_from = the kicker the ball leaves by",
+  "sw47": {
+   "switch": 640,
+   "enter": 579,
+   "dir": 225,
+   "power": 6,
+   "kickz": 1,
+   "name": "STAR EJECT (the Starchild scoop, STAR ENTRANCE OPTO on the way in)"
+  },
+  "sw43": {
+   "switch": 642,
+   "dir": 177,
+   "power": 38,
+   "kickz": 1,
+   "name": "SCOOP EJECT"
+  },
+  "sw42": {
+   "switch": 715,
+   "enter": 714,
+   "stack": [
+    716,
+    717
+   ],
+   "kick_from": "sw42TOP",
+   "dir": 220,
+   "power": 22,
+   "name": "DEMON EJECT: the Demon's mouth takes the ball in, LOCK 1-3 hold it, sw42TOP lets it out"
+  }
+ },
+ "solenoids": {
+  "_": "Spike 1 coil [node, index] -> the small number the table sees (core.vbs flippers 46/48); callback a sub of the table's or the bridge's (null = nothing fires). Names are the game's own (s1elf --coils).",
+  "1": {
+   "coil": [
+    8,
+    5
+   ],
+   "name": "TROUGH UP-KICKER",
+   "callback": "bsTrough.SolOut"
+  },
+  "2": {
+   "coil": [
+    8,
+    4
+   ],
+   "name": "AUTO LAUNCH",
+   "callback": "PadAutoPlunge"
+  },
+  "3": {
+   "coil": [
+    10,
+    0
+   ],
+   "name": "STAR EJECT",
+   "callback": "bssw47.SolOut"
+  },
+  "4": {
+   "coil": [
+    10,
+    1
+   ],
+   "name": "DEMON EJECT",
+   "callback": "bssw42.SolOut"
+  },
+  "5": {
+   "coil": [
+    10,
+    2
+   ],
+   "name": "SCOOP EJECT",
+   "callback": "bssw43.SolOut"
+  },
+  "6": {
+   "coil": [
+    9,
+    2
+   ],
+   "name": "CENTER DROP TARGET UP",
+   "callback": "PadDropUp"
+  },
+  "7": {
+   "coil": [
+    9,
+    3
+   ],
+   "name": "CENTER DROP TARGET DOWN",
+   "callback": "PadDropDown"
+  },
+  "8": {
+   "coil": [
+    10,
+    3
+   ],
+   "name": "LEFT 4-BANK DROP RESET",
+   "callback": null
+  },
+  "9": {
+   "coil": [
+    10,
+    5
+   ],
+   "name": "RIGHT RAMP DIVERTER",
+   "callback": null
+  },
+  "10": {
+   "coil": [
+    10,
+    6
+   ],
+   "name": "RIGHT RAMP DIVERTER HOLD POWER",
+   "callback": null
+  },
+  "11": {
+   "coil": [
+    10,
+    7
+   ],
+   "name": "DEMON LOCKUP",
+   "callback": null
+  },
+  "12": {
+   "coil": [
+    10,
+    4
+   ],
+   "name": "PAUL DANCER",
+   "callback": null
+  },
+  "13": {
+   "coil": [
+    9,
+    4
+   ],
+   "name": "LEFT POP BUMPER",
+   "callback": null
+  },
+  "14": {
+   "coil": [
+    9,
+    5
+   ],
+   "name": "RIGHT POP BUMPER",
+   "callback": null
+  },
+  "15": {
+   "coil": [
+    9,
+    6
+   ],
+   "name": "BOTTOM POP BUMPER",
+   "callback": null
+  },
+  "16": {
+   "coil": [
+    9,
+    7
+   ],
+   "name": "TOP POP BUMPER",
+   "callback": null
+  },
+  "17": {
+   "coil": [
+    8,
+    7
+   ],
+   "name": "LEFT SLINGSHOT",
+   "callback": null
+  },
+  "18": {
+   "coil": [
+    8,
+    6
+   ],
+   "name": "RIGHT SLINGSHOT",
+   "callback": null
+  },
+  "19": {
+   "coil": [
+    9,
+    0
+   ],
+   "name": "L. SLINGSHOT (TOP)",
+   "callback": null
+  },
+  "20": {
+   "coil": [
+    9,
+    1
+   ],
+   "name": "R. SLINGSHOT (TOP)",
+   "callback": null
+  },
+  "21": {
+   "coil": [
+    1,
+    0
+   ],
+   "name": "SHAKER MOTOR (OPTIONAL)",
+   "callback": null
+  },
+  "46": {
+   "coil": [
+    8,
+    1
+   ],
+   "name": "RIGHT FLIPPER",
+   "callback": null
+  },
+  "48": {
+   "coil": [
+    8,
+    0
+   ],
+   "name": "LEFT FLIPPER",
+   "callback": null
+  }
+ },
+ "pup_stub": true,
+ "neuter": [
+  "BallRelease.CreateSizedBall",
+  "BallRelease.Kick",
+  "PlungerIM.AutoFire",
+  "sw42top.createball",
+  "sw42top.Kick"
+ ],
+ "extra_vbs": "Sub PadDropUp(e) : If e Then sctarget.isdropped = False : End If : End Sub\nSub PadDropDown(e) : If e Then sctarget.isdropped = True : End If : End Sub\n",
+ "retrofit_timers": {
+  "PinMAMETimer": {
+   "clone": "PulseTimer",
+   "interval_ms": 1
+  },
+  "PadTestTimer": {
+   "clone": "PulseTimer",
+   "interval_ms": 100
+  }
+ },
+ "lamps": {
+  "_": "table light -> the LE's LEDs [node, index]: the table's i<N> is the Pro manual's lamp N = the LE program's lamp N + 32, and LED L - 2 drives lamp L; an RGB insert is the (RED)(GRN)(BLU) triple (rgb, lit in its colour). GUESS: read off the program's tables, not yet seen on the table.",
+  "I35": {
+   "leds": [
+    [
+     11,
+     24
+    ]
+   ],
+   "name": "(K)ISS"
+  },
+  "I36": {
+   "leds": [
+    [
+     11,
+     25
+    ]
+   ],
+   "name": "K(I)SS"
+  },
+  "I37": {
+   "leds": [
+    [
+     11,
+     26
+    ]
+   ],
+   "name": "KI(S)S"
+  },
+  "I38": {
+   "leds": [
+    [
+     11,
+     27
+    ]
+   ],
+   "name": "KIS(S)"
+  },
+  "i6": {
+   "leds": [
+    [
+     9,
+     43
+    ]
+   ],
+   "name": "BONUS POP SPACEMAN (BLU)"
+  },
+  "i7": {
+   "leds": [
+    [
+     9,
+     17
+    ],
+    [
+     9,
+     18
+    ],
+    [
+     9,
+     19
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS POP DEMON"
+  },
+  "i8": {
+   "leds": [
+    [
+     9,
+     18
+    ]
+   ],
+   "name": "BONUS POP DEMON (GRN)"
+  },
+  "i34": {
+   "leds": [
+    [
+     10,
+     62
+    ]
+   ],
+   "name": "SPECIAL"
+  },
+  "i33": {
+   "leds": [
+    [
+     10,
+     61
+    ]
+   ],
+   "name": "RIGHT RETURN LANE"
+  },
+  "i31": {
+   "leds": [
+    [
+     9,
+     62
+    ]
+   ],
+   "name": "COLOSSAL BONUS"
+  },
+  "i25": {
+   "leds": [
+    [
+     9,
+     61
+    ]
+   ],
+   "name": "BONUS STARCHILD"
+  },
+  "i30": {
+   "leds": [
+    [
+     9,
+     60
+    ]
+   ],
+   "name": "BONUS 3X"
+  },
+  "i26": {
+   "leds": [
+    [
+     9,
+     58
+    ]
+   ],
+   "name": "BONUS SPACEMAN"
+  },
+  "i28": {
+   "leds": [
+    [
+     9,
+     56
+    ]
+   ],
+   "name": "BONUS CATMAN"
+  },
+  "i27": {
+   "leds": [
+    [
+     9,
+     57
+    ]
+   ],
+   "name": "BONUS DEMON"
+  },
+  "i103": {
+   "leds": [
+    [
+     10,
+     9
+    ]
+   ],
+   "name": "RIGHT ORBIT (STARCHILD)"
+  },
+  "i102": {
+   "leds": [
+    [
+     10,
+     10
+    ]
+   ],
+   "name": "RIGHT ORBIT (SPACEMAN)"
+  },
+  "i101": {
+   "leds": [
+    [
+     10,
+     11
+    ]
+   ],
+   "name": "RIGHT ORBIT (CATMAN)"
+  },
+  "i73": {
+   "leds": [
+    [
+     10,
+     48
+    ],
+    [
+     10,
+     19
+    ],
+    [
+     10,
+     20
+    ]
+   ],
+   "rgb": true,
+   "name": "L. RAMP ARROW"
+  },
+  "i29": {
+   "leds": [
+    [
+     9,
+     59
+    ]
+   ],
+   "name": "BONUS 2X"
+  },
+  "i42": {
+   "leds": [
+    [
+     11,
+     15
+    ]
+   ],
+   "name": "BACKSTAGE PASS (RIGHT)"
+  },
+  "i64": {
+   "leds": [
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "(S)TAR"
+  },
+  "i65": {
+   "leds": [
+    [
+     9,
+     3
+    ]
+   ],
+   "name": "S(T)AR"
+  },
+  "i66": {
+   "leds": [
+    [
+     10,
+     49
+    ]
+   ],
+   "name": "ST(A)R"
+  },
+  "i67": {
+   "leds": [
+    [
+     10,
+     50
+    ]
+   ],
+   "name": "STA(R)"
+  },
+  "i58": {
+   "leds": [
+    [
+     11,
+     17
+    ],
+    [
+     11,
+     18
+    ],
+    [
+     11,
+     19
+    ]
+   ],
+   "rgb": true,
+   "name": "LEFT ORBIT ARROW"
+  },
+  "i98": {
+   "leds": [
+    [
+     10,
+     54
+    ],
+    [
+     10,
+     55
+    ],
+    [
+     10,
+     56
+    ]
+   ],
+   "rgb": true,
+   "name": "RIGHT ORBIT ARROW"
+  },
+  "i68": {
+   "leds": [
+    [
+     10,
+     51
+    ],
+    [
+     10,
+     21
+    ],
+    [
+     10,
+     23
+    ]
+   ],
+   "rgb": true,
+   "name": "STARCHILD ARROW"
+  },
+  "i79": {
+   "leds": [
+    [
+     10,
+     45
+    ],
+    [
+     10,
+     29
+    ],
+    [
+     10,
+     27
+    ]
+   ],
+   "rgb": true,
+   "name": "DEMON ARROW"
+  },
+  "i84": {
+   "leds": [
+    [
+     10,
+     31
+    ]
+   ],
+   "name": "LIGHT LOCK (RIGHT)"
+  },
+  "i82": {
+   "leds": [
+    [
+     10,
+     26
+    ]
+   ],
+   "name": "LIGHT LOCK (LEFT)"
+  },
+  "i92": {
+   "leds": [
+    [
+     10,
+     34
+    ],
+    [
+     10,
+     16
+    ],
+    [
+     10,
+     8
+    ]
+   ],
+   "rgb": true,
+   "name": "R. RAMP ARROW"
+  },
+  "i71": {
+   "leds": [
+    [
+     10,
+     46
+    ]
+   ],
+   "name": "STARCHILD"
+  },
+  "i41": {
+   "leds": [
+    [
+     11,
+     14
+    ]
+   ],
+   "name": "BACKSTAGE PASS (LEFT)"
+  },
+  "i104": {
+   "leds": [
+    [
+     10,
+     12
+    ]
+   ],
+   "name": "RIGHT ORBIT (DEMON)"
+  },
+  "i76": {
+   "leds": [
+    [
+     10,
+     22
+    ]
+   ],
+   "name": "SPACEMAN"
+  },
+  "i83": {
+   "leds": [
+    [
+     10,
+     30
+    ]
+   ],
+   "name": "DEMON"
+  },
+  "i39": {
+   "leds": [
+    [
+     11,
+     22
+    ]
+   ],
+   "name": "EXTRA BALL"
+  },
+  "i40": {
+   "leds": [
+    [
+     11,
+     23
+    ]
+   ],
+   "name": "KISS ARMY"
+  },
+  "i44": {
+   "leds": [
+    [
+     10,
+     17
+    ]
+   ],
+   "name": "NEW TRACK"
+  },
+  "i43": {
+   "leds": [
+    [
+     10,
+     15
+    ]
+   ],
+   "name": "ROCK CITY"
+  },
+  "i78": {
+   "leds": [
+    [
+     10,
+     44
+    ]
+   ],
+   "name": "INSTRUMENT SPACEMAN"
+  },
+  "i72": {
+   "leds": [
+    [
+     10,
+     47
+    ]
+   ],
+   "name": "INSTRUMENT STARCHILD"
+  },
+  "i91": {
+   "leds": [
+    [
+     10,
+     33
+    ]
+   ],
+   "name": "INSTRUMENT DEMON"
+  },
+  "i97": {
+   "leds": [
+    [
+     10,
+     53
+    ]
+   ],
+   "name": "INSTRUMENT POWER ON"
+  },
+  "i90": {
+   "leds": [
+    [
+     10,
+     32
+    ]
+   ],
+   "name": "LOCK"
+  },
+  "i96": {
+   "leds": [
+    [
+     10,
+     52
+    ]
+   ],
+   "name": "LOVE GUN MULTIBALL"
+  },
+  "i77": {
+   "leds": [
+    [
+     10,
+     43
+    ]
+   ],
+   "name": "LEFT RAMP ARMY"
+  },
+  "i86": {
+   "leds": [
+    [
+     10,
+     24
+    ]
+   ],
+   "name": "D(E)MON"
+  },
+  "i87": {
+   "leds": [
+    [
+     10,
+     25
+    ]
+   ],
+   "name": "DE(M)ON"
+  },
+  "i88": {
+   "leds": [
+    [
+     10,
+     18
+    ]
+   ],
+   "name": "DEM(O)N"
+  },
+  "i61": {
+   "leds": [
+    [
+     11,
+     20
+    ]
+   ],
+   "name": "SUPER BUMPERS"
+  },
+  "i62": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "INSTRUMENT CATMAN"
+  },
+  "i85": {
+   "leds": [
+    [
+     10,
+     28
+    ]
+   ],
+   "name": "(D)EMON"
+  },
+  "i89": {
+   "leds": [
+    [
+     10,
+     14
+    ]
+   ],
+   "name": "DEMO(N)"
+  },
+  "i95": {
+   "leds": [
+    [
+     10,
+     13
+    ]
+   ],
+   "name": "SUPER TARGETS"
+  },
+  "i9": {
+   "leds": [
+    [
+     9,
+     19
+    ]
+   ],
+   "name": "BONUS POP DEMON (BLU)"
+  },
+  "i10": {
+   "leds": [
+    [
+     9,
+     14
+    ],
+    [
+     9,
+     15
+    ],
+    [
+     9,
+     16
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS POP CATMAN"
+  },
+  "i11": {
+   "leds": [
+    [
+     9,
+     15
+    ]
+   ],
+   "name": "BONUS POP CATMAN (GRN)"
+  },
+  "i12": {
+   "leds": [
+    [
+     9,
+     16
+    ]
+   ],
+   "name": "BONUS POP CATMAN (BLU)"
+  },
+  "i13": {
+   "leds": [
+    [
+     9,
+     53
+    ],
+    [
+     9,
+     54
+    ],
+    [
+     9,
+     55
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS INSTRUMENT STARCHILD"
+  },
+  "i14": {
+   "leds": [
+    [
+     9,
+     54
+    ]
+   ],
+   "name": "BONUS INSTRUMENT STARCHILD (GRN)"
+  },
+  "i15": {
+   "leds": [
+    [
+     9,
+     55
+    ]
+   ],
+   "name": "BONUS INSTRUMENT STARCHILD (BLU)"
+  },
+  "i16": {
+   "leds": [
+    [
+     9,
+     50
+    ],
+    [
+     9,
+     51
+    ],
+    [
+     9,
+     52
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS INSTRUMENT SPACEMAN"
+  },
+  "i17": {
+   "leds": [
+    [
+     9,
+     51
+    ]
+   ],
+   "name": "BONUS INSTRUMENT SPACEMAN (GRN)"
+  },
+  "i18": {
+   "leds": [
+    [
+     9,
+     52
+    ]
+   ],
+   "name": "BONUS INSTRUMENT SPACEMAN (BLU)"
+  },
+  "i19": {
+   "leds": [
+    [
+     9,
+     8
+    ],
+    [
+     9,
+     9
+    ],
+    [
+     9,
+     10
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS INSTRUMENT DEMON"
+  },
+  "i20": {
+   "leds": [
+    [
+     9,
+     9
+    ]
+   ],
+   "name": "BONUS INSTRUMENT DEMON (GRN)"
+  },
+  "i21": {
+   "leds": [
+    [
+     9,
+     10
+    ]
+   ],
+   "name": "BONUS INSTRUMENT DEMON (BLU)"
+  },
+  "i22": {
+   "leds": [
+    [
+     9,
+     11
+    ],
+    [
+     9,
+     12
+    ],
+    [
+     9,
+     13
+    ]
+   ],
+   "rgb": true,
+   "name": "BONUS INSTRUMENT CATMAN"
+  },
+  "i23": {
+   "leds": [
+    [
+     9,
+     12
+    ]
+   ],
+   "name": "BONUS INSTRUMENT CATMAN (GRN)"
+  },
+  "i24": {
+   "leds": [
+    [
+     9,
+     13
+    ]
+   ],
+   "name": "BONUS INSTRUMENT CATMAN (BLU)"
+  },
+  "I107": {
+   "leds": [
+    [
+     10,
+     60
+    ]
+   ],
+   "name": "A(R)MY"
+  },
+  "I106": {
+   "leds": [
+    [
+     10,
+     59
+    ]
+   ],
+   "name": "(A)RMY"
+  },
+  "I108": {
+   "leds": [
+    [
+     10,
+     63
+    ]
+   ],
+   "name": "AR(M)Y"
+  },
+  "I109": {
+   "leds": [
+    [
+     11,
+     31
+    ]
+   ],
+   "name": "ARM(Y)"
+  },
+  "LightRockAgain": {
+   "leds": [
+    [
+     9,
+     63
+    ]
+   ],
+   "name": "ROCK AGAIN"
+  }
+ },
+ "quiet_subs": [
+  "StartAttractMode",
+  "AttractMode_Timer",
+  "StartLightSeq",
+  "GiEffect",
+  "LightEffect",
+  "GIUpdateTimer_Timer"
+ ],
+ "orig_hits": false,
+ "orig_keep": [
+  "LeftSlingShot",
+  "RightSlingShot",
+  "LeftSlingShot1",
+  "RightSlingShot1",
+  "Bumper1",
+  "Bumper2",
+  "Bumper3",
+  "Bumper4",
+  "sctarget",
+  "sw1",
+  "sw2",
+  "sw3",
+  "sw4",
+  "sw14",
+  "sw24",
+  "sw25",
+  "sw26",
+  "sw27",
+  "sw28",
+  "sw38",
+  "sw39",
+  "sw40",
+  "sw41",
+  "sw44",
+  "sw45",
+  "sw46",
+  "sw56",
+  "sw64"
+ ],
+ "listed": true
+}

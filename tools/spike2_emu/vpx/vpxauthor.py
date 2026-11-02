@@ -134,6 +134,27 @@ _COIL_KINDS = (
 #: a table owes the switch, never the coil. Cabinet parts have no table side.
 BOARD_COILS = ("flipper", "slingshot", "pop bumper", "cabinet")
 
+#: PAD-943: what a table can never have, so is not owed: a mech's own
+#: position switches (motor home/away, encoder optos, a reel's home), a switch
+#: or coil the game itself leaves unnamed, a meter or ticket drive
+_NOT_OWED_SW = re.compile(r"REEL HOME|^SWITCH #\d+$|MOTOR|ENCODER|STEPPER|POS\.|HOME|AWAY|EOS|E\.O\.S", re.I)
+_NOT_OWED_COIL = re.compile(r"^COIL #\d+$|OPTIONAL|METER|TICKET|TEST FIXTURE|^AUX ", re.I)
+
+
+def owed_switch(s):
+    """A playfield switch a table owes the game: one with an id, not the
+    board's flipper EOS, not unnamed, not a mech's own position."""
+    return (s["where"] in ("playfield", "unplaced") and bool(s["id"])
+            and s["kind"] not in ("flipper eos", "unnamed", "mech")
+            and not _NOT_OWED_SW.search(s["name"] or ""))
+
+
+def owed_coil(c):
+    """A coil a table owes: on the bus, not one the board fires itself, not
+    one the game leaves unnamed."""
+    return (c["node"] is not None and c["kind"] not in BOARD_COILS
+            and not _NOT_OWED_COIL.search(c["name"] or ""))
+
 #: LEDs that are not on the playfield, by name (vpxlamps.NOT_PLAYFIELD's
 #: rule, with the topper boards' rows set aside by node as well)
 NOT_PLAYFIELD = re.compile(r"SPEAKER|TOPPER|BACKBOX|CABINET|COIN|START BUTTON|TOURNAMENT|LOCKDOWN|"
@@ -550,7 +571,7 @@ def read_machine_spike1(title, elf, switchmap=""):
     for (node, idx), name in sorted(s1elf.extract_led_map(elf).items()):
         nm = name or "LED %d/%d" % (node, idx)
         inserts.append({"name": nm, "leds": [(node, idx)], "names": [nm], "x": None, "y": None, "image": "-",
-                        "where": "playfield", "rgb": False, "lamp": lamp_number(node, idx)})
+                        "where": "cabinet" if node < 8 else "playfield", "rgb": False, "lamp": lamp_number(node, idx)})
     return {"title": title, "platform": "spike1", "binary": os.path.basename(elf), "image": "", "image_size": None,
             "tables_from": os.path.dirname(elf),
             # the names the Spike 2 reader's notes ask about: the ELF is the device table
@@ -791,12 +812,9 @@ def misnumbered(machine, m):
 
 def gaps(machine, cov):
     """The machine parts a map leaves out, by kind."""
-    sw = [s for s in machine["switches"]
-          if s["where"] in ("playfield", "unplaced") and s["id"] and s["id"] not in cov["switches"]
-          and s["kind"] not in ("flipper eos", "unnamed")]
+    sw = [s for s in machine["switches"] if owed_switch(s) and s["id"] not in cov["switches"]]
     # flippers, slings and pops are the board's: the switch is what the table owes (checked above)
-    coils = [c for c in machine["coils"] if c["node"] is not None and c["kind"] not in BOARD_COILS
-             and (c["node"], c["index"]) not in cov["coils"]]
+    coils = [c for c in machine["coils"] if owed_coil(c) and (c["node"], c["index"]) not in cov["coils"]]
     only = [c for c in coils if (c["node"], c["index"]) in cov["coils_listed_only"]]
     coils = [c for c in coils if c not in only]
     inserts = [g for g in machine["inserts"] if g["where"] == "playfield"
@@ -1185,9 +1203,8 @@ def summary_for(title, m, tables_dir=None):
         machine["inserts"] = inserts_from_map(m)
     cov = coverage(m)
     gap = gaps(machine, cov)
-    sw = [s for s in machine["switches"] if s["where"] in ("playfield", "unplaced") and s["id"]
-          and s["kind"] not in ("flipper eos", "unnamed")]
-    coils = [c for c in machine["coils"] if c["node"] is not None and c["kind"] not in BOARD_COILS]
+    sw = [s for s in machine["switches"] if owed_switch(s)]
+    coils = [c for c in machine["coils"] if owed_coil(c)]
     ins = [g for g in machine["inserts"] if g["where"] == "playfield"]
     owed = len(sw) + len(coils) + len(ins)
     missing = len(gap["switches"]) + len(gap["coils"]) + len(gap["coils_listed_only"]) + len(gap["inserts"])

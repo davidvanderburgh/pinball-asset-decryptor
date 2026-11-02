@@ -143,10 +143,10 @@
    "note": "GUESS"
   },
   "Trigger14": {
-   "id": 662,
+   "id": 652,
    "event": "hit",
-   "name": "STAR ROLLOVER SHOOTER RTN",
-   "note": "GUESS"
+   "name": "PARACHUTE LANE",
+   "note": "GUESS: the lane on the right beside the shooter"
   },
   "Bumper1": {
    "id": 579,

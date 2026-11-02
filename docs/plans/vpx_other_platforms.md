@@ -190,6 +190,29 @@ All five patch (`vpxfile verify` OK) and their (PAD) copies are in David's
 tables folder; the page lists them as patched with Play. What a game on
 each table will tell: every GUESS mark (vpxauthor's checklist lists them).
 
+## The once-over on coverage (David, 2026-11-02, interactive)
+
+"Do a once-over on all the VPX tables to improve the coverage ... get the
+coverage as high as possible. Also remove Stranger Things (not a valid
+table at all)." Stranger Things' map is gone. KISS went 62% -> 86%: its
+lights follow the Pro manual in three blocks (6-8 the lanes, 9-24 the
+sixteen bonus inserts as RGB triples, 25+ = the LE's number - 32), plus the
+bumper caps and the right ramp arrow. The metric itself was counting what
+no table can have: a mech's own position switches (motor home/away,
+encoder optos, reel homes), switches and coils the game leaves unnamed
+("SWITCH #71", "COIL #38"), meters, ticket drives, the cabinet's LEDs on a
+Spike 1 title - `owed_switch` / `owed_coil` in vpxauthor say what a table
+owes, and summary_for and gaps both use them. Every map moved up a little
+(Bond LE 83 -> 85, Batman 92 -> 94, Godzilla 96 -> 98 ...). What is left,
+per the gaps: parts the tables do not have (Bond's rocket, JAWS' shark
+positions, Metallica's 6-ball trough on a 4-ball table), flashers and
+hardwired GI, and a handful of inserts on Rush, the Turtles, Guardians,
+Foo Fighters and Metallica that `vpxlamps.py suggest` refuses to place
+(the fit does not hold on those tables): those are by-eye work with the
+playfield, one table at a time. Primus and Can Crusher (24%) and JP's
+Ghostbusters (26%) stay low because their authors' lights carry no
+numbering of the game's and Drummer72's tables have no standup targets.
+
 ## The Spike 1 author's checklist (run 2)
 
 `vpxauthor.machine_for(title)` reads a Spike 1 title from its game ELF and

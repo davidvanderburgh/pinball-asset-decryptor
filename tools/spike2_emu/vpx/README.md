@@ -30,6 +30,7 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `padvpx.py` | the kit's command: patch a table (recognised by its map's `detect` words), register the controller, record cards, run and stop by hand, status. |
 | `vpxsetup.py` | the app's Visual Pinball tab's half here: what is set up (Visual Pinball, the controller, the cards, each known table and whether it is patched), the card folder, the window layout, the Visual Pinball download, Play; one JSON line back. |
 | `padlaunch.py` | starts a run for a title when Visual Pinball opens its table and none is up, and stops what it started. |
+| `padloading.py` | the window a run the controller started shows until the game is up (PAD-940): where the game's screen goes, then over it, a bar paced by the title's last start (`start_s` in the kit) and the step read from the run's log. Never takes the focus (Visual Pinball pauses). |
 | `vpxgen.py`, `vpxgen_protos.json` | a table GENERATED from a title's own device tables (switch, coil and LED positions over the game's playfield drawing), for a title with no tribute; the prototypes are Visual Pinball's example table's objects with their strings blanked. |
 | `test_controller.vbs` | `cscript //nologo test_controller.vbs [run]` - the controller from VPX's own script engine, with no VPX installed; `run` presses Start and a flipper through a live rig and expects the coils back. |
 
@@ -151,7 +152,10 @@ visible (the LCD window on the desktop, for the backglass monitor) and with
 sound, but without the rig's virtual playfield window (Visual Pinball is the
 playfield, and that window would take the keyboard from it). `Run` returns
 at once; the table plays once the game is up, half a minute to a minute
-later, and `Controller.Stop` (Visual Pinball closing the table) stops what it
+and more later (a title's first boot on a slot caches and mounts its card
+first), and meanwhile `padloading.py` stands where the game's screen goes
+with a progress bar and the step it is on, so the wait does not look like a
+hang (PAD-940); and `Controller.Stop` (Visual Pinball closing the table) stops what it
 started and gives the slot back. A run started any other way (the app's
 Emulate tab, `watch.sh`) is attached to and left alone; with several runs of
 a title up, the newest is taken. The kit's record is `~/.pad-vpx.json`

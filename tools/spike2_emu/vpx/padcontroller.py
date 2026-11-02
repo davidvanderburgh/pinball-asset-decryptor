@@ -1358,7 +1358,12 @@ class Bridge:
                     % (self.title or "this title", padlaunch.card_places(self.title),
                        self.title))
             self.launch = padlaunch.Launch(self.title, card)
-            slot = self.launch.start()
+            self._loading_start()
+            try:
+                slot = self.launch.start()
+            except Exception as exc:
+                self._loading_end("failed %s" % exc)
+                raise
             self.rig = None
             log("starting %s on slot %d; the table plays once the game is up" % (self.title, slot))
         self.running = True
@@ -1402,6 +1407,66 @@ class Bridge:
             log("ballfeed.off not written: %s" % exc)
         self.attached = True
         log("attached to %s after %.0f s" % (self.rig.how, time.monotonic() - self.start_t))
+        if self.launch is not None:
+            self._loading_end("up", time.monotonic() - self.start_t)
+
+    # -- PAD-940: the loading window, while a run this bridge started comes up
+    def _loading_start(self):
+        """padloading.py where the game's screen goes, for a run this bridge
+        starts: a minute and more of nothing read as broken. Its own
+        process (Tk), so nothing here waits on it; Windows only."""
+        self._loading = None
+        if sys.platform != "win32":
+            return
+        self._loading_file = os.path.join(os.path.dirname(LOG), "padloading-%s.txt" % (self.title or "game"))
+        try:
+            os.remove(self._loading_file)
+        except OSError:
+            pass
+        exe = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+        exe = exe if os.path.isfile(exe) else sys.executable
+        cmd = [exe, os.path.join(HERE, "padloading.py"), self.title or "", self.launch.logfile,
+               self._loading_file, "--parent", str(os.getpid())]
+        took = (padlaunch.kit_load().get("start_s") or {}).get(self.title)
+        if took:
+            cmd += ["--expect", "%d" % took]
+        try:
+            self._loading = subprocess.Popen(cmd, cwd=HERE, creationflags=0x08000000)
+            log("loading window up for %s%s" % (self.title, " (%d s last time)" % took if took else ""))
+        except OSError as exc:
+            log("loading window not started: %s" % exc)
+
+    @staticmethod
+    def _loading_kill(proc):
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+        except Exception:                                   # noqa: BLE001
+            pass
+
+    def _loading_end(self, word, took=None):
+        """`up` closes it; `failed <why>` shows why, then closes it. The time
+        a start took paces the next one's bar."""
+        if not getattr(self, "_loading", None):
+            return
+        proc, self._loading = self._loading, None
+        try:
+            with open(self._loading_file, "w", encoding="utf-8") as f:
+                f.write(word)
+        except OSError as exc:
+            log("loading window not told %s: %s" % (word, exc))
+        # and gone for sure: `up` at once, a failure once it has been read
+        wait = 0.0 if word == "up" else 10.0
+        kill = threading.Timer(wait, self._loading_kill, (proc,))
+        kill.daemon = True
+        kill.start()
+        if took:
+            try:
+                kit = padlaunch.kit_load()
+                kit.setdefault("start_s", {})[self.title] = int(round(took))
+                padlaunch.kit_save(kit)
+            except (OSError, ValueError) as exc:
+                log("start time not kept: %s" % exc)
 
     def _read_tables(self, data):
         """The run's switch table (the rig writes it a little after the game
@@ -1445,10 +1510,14 @@ class Bridge:
         if not self.launch.alive() and self.rig is None:
             log("the run started for %s ended before it came up (see %s)"
                 % (self.title, self.launch.logfile))
+            self._loading_end("failed The emulator stopped before the game came up. Its log: %s"
+                              % self.launch.logfile)
             self.launch = None
         elif time.monotonic() - self.start_t > self.START_TIMEOUT_S:
             log("the run started for %s is not up after %d s; giving up on it"
                 % (self.title, self.START_TIMEOUT_S))
+            self._loading_end("failed The game was not up after %d s. Its log: %s"
+                              % (self.START_TIMEOUT_S, self.launch.logfile))
             self.launch.stop()
             self.launch = None
 
@@ -1468,6 +1537,7 @@ class Bridge:
             except OSError:
                 pass
         log("stop after %d polls (%d failed)" % (self.polls, self.poll_fail))
+        self._loading_end("up")                  # the table closed while the game started
         if self.launch is not None:
             self.launch.stop()           # what this bridge started, it stops
             self.launch = None

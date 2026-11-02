@@ -1238,6 +1238,9 @@ def test_the_john_wick_table_plays_as_the_pro(monkeypatch):
     rows = [r for r in vs.known_tables("") if "john_wick_pro" in r["titles"]]
     assert [(r["output"], sorted(r["titles"])) for r in rows] == \
         [("John_Wick_Legend (PAD).vpx", ["john_wick_le", "john_wick_pro"])]
+    # PAD-943: each row names its platform (the tab shows its manufacturer's own)
+    assert rows[0]["platform"] == "spike2"
+    assert [r for r in vs.known_tables("") if "got_le" in r["titles"]][0]["platform"] == "spike1"
 
 
 def test_the_john_wick_maps_split_at_the_les_mechs():
@@ -3559,3 +3562,16 @@ def test_a_started_run_shows_the_loading_window_until_the_game_is_up(monkeypatch
     said = open(status).read()
     assert said.startswith("failed The emulator stopped") and Launch.logfile in said
     assert b.launch is None
+
+
+def test_a_trough_of_fewer_switches_pads_init_sw(tmp_path, monkeypatch):
+    """PAD-943: Can Crusher's one-ball trough stopped the table on "Wrong
+    number of arguments: bsTrough.InitSw" - core.vbs's InitSw takes seven
+    switches (InitSw8 eight), so the call is padded with 0 like a lock lane's."""
+    sh = pytest.importorskip("vpxshadow")
+    assert sh.trough_init([643]) == "InitSw 0,1643,0,0,0,0,0,0"
+    assert sh.trough_init([71, 70, 69, 68, 67, 66, 72]) == "InitSw 0,1071,1070,1069,1068,1067,1066,1072"
+    assert sh.trough_init(list(range(10, 18))) == "InitSw8 0,1010,1011,1012,1013,1014,1015,1016,1017"
+    with pytest.raises(ValueError):
+        sh.trough_init(list(range(9)))
+

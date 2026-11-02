@@ -73,6 +73,17 @@ EVENT_SUBS = {"hit": ("_Hit",), "hold": ("_Hit", "_UnHit"), "spin": ("_Spin",),
 PASS_MS = 600
 
 
+def trough_init(switches):
+    """The cvpmBallStack InitSw call for a trough's switches (ids): seven
+    arguments, or InitSw8 for eight (core.vbs has no other arity)."""
+    sw = ["1%03d" % n for n in switches]
+    if len(sw) > 8:
+        raise ValueError("a trough of %d switches: core.vbs takes at most 8" % len(sw))
+    if len(sw) == 8:
+        return "InitSw8 0,%s" % ",".join(sw)
+    return "InitSw 0,%s" % ",".join((sw + ["0"] * 7)[:7])
+
+
 def saucers(m):
     return {k: v for k, v in m.get("saucers", {}).items() if k != "_"}
 
@@ -558,7 +569,10 @@ def gen(m, had, quiet=None, dof=None):
             "\tPinMAMETimer.Interval = PinMAMEInterval",
             "\tPinMAMETimer.Enabled = True",
             "\tSet bsTrough = New cvpmBallStack",
-            "\t\tbsTrough.InitSw 0,%s" % ",".join("1%03d" % s for s in m["trough"]["switches"]),
+            # core.vbs's InitSw takes seven switches (InitSw8 eight): a trough
+            # of fewer is padded with 0 - Can Crusher's one ball stopped on
+            # "Wrong number of arguments" (PAD-943)
+            "\t\tbsTrough.%s" % trough_init(m["trough"]["switches"]),
             "\t\tbsTrough.Balls = %d" % m["trough"].get("balls", 6),
             "\t\tbsTrough.InitKick %s, %d, %d" % (m["trough"]["release"], *m["trough"]["kick"])]
     for k, s in saucers(m).items():

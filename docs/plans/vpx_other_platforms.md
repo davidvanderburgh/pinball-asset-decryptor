@@ -105,17 +105,37 @@ nine times (the table has no ball to serve). `test_controller.vbs` took the
 same arguments for the COM path (`run got_le 1075 1515 1578 1519 "1521,
 ...,1526" 1080`).
 
+## The SAM hand-off (run 2)
+
+`vpxsam.py` / `padvpx sam <edited.bin> --table <x.vpx>`: the ROM set from
+the table's `cGameName` (or `--rom`; a bare .bin whose size several
+versions share - all six CSI versions are 31596480 bytes - is asked
+which), the .bin written into `<roms>/<romset>.zip` under the member name
+the app's own SAM table gives that version (stored, zip64), the stock zip
+kept once as `<romset>.stock.zip` with a `restore`, VPinMAME's per-game
+`ignore_rom_crc` set where VPinMAME is registered (not on this PC: said
+so). The roms folder: `--roms` (remembered), the kit's record, VPinMAME's
+`rompath`, or `roms` beside the tables folder (David's library has it).
+
+Proof: CSI 2.4's stock zip, every sound rewritten through
+`sam_audio.write_image` (same size, CRC 0x4e1d1a90 against the stock
+0x2be97fa3), written as csi_240.zip and booted under libpinmame 3.6
+through the app's own PinmameCapture (LOCALAPPDATA pointed at a scratch
+dir so the app's cache was not touched): PinMAME logged
+`csi_240a.bin WRONG CHECKSUMS` and ran on, 1417 non-blank DMD frames in
+25 s, the attract's HIGH SCORE page captured
+(proof_sam_csi_edited_romset_boots_in_pinmame.png). VPinMAME is the same
+core with a dialog on that log line, which `ignore_rom_crc` skips.
+
+Not done: a button on the Write tab (its summary sentences are translated
+in three languages; the kit command and the catalogue tip carry it for
+now), and the Visual Pinball tab stays gated to the Spike 2 era.
+
 ## Still to do (the next runs of PAD-943)
 
-1. **SAM hand-off**: PAD's edited SAM game into the table's VPinMAME ROM set
-   (replace the game's .bin in the zip in VPinMAME's roms folder, set the
-   game's `ignore_rom_crc` so VPinMAME does not stop on the changed sum),
-   proven by booting the written set under libpinmame (the app's PinMAME
-   capture) - the same core VPinMAME runs. A button on the SAM Write side
-   and `padvpx sam`.
-2. **The Spike 1 author's checklist**: `vpxauthor.py checklist` for a Spike
+1. **The Spike 1 author's checklist**: `vpxauthor.py checklist` for a Spike
    1 title from its ELF (`s1elf --coils/--leds` + the switch map) and the
    starter map from it, so VPW's GOT table (and KISS, Whoa Nellie, Primus,
    Can Crusher) can be fitted the day the download is on the PC.
-3. **The Spike 1 inserts**: which matrix channel is which lamp (the lamp
+2. **The Spike 1 inserts**: which matrix channel is which lamp (the lamp
    table's column/row to the node's channel), from the ELF or a run.

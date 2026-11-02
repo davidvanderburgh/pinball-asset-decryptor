@@ -53,8 +53,10 @@ int pm_in_game(void) { return in_game; }
 static volatile unsigned switch_fired[N_SWITCH_IDS];
 static void lit_hold_check(unsigned id) { (void)id; }    /* PAD-503's, not under test here */
 static volatile int att_live;                            /* PAD-641's, not under test here */
+static volatile int gms_live;                            /* PAD-945's, not under test here */
 @EDGE@
 static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask) {}
+static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity) {}
 
 /* generation B: 0x20-byte records (level byte at +0x18) pointing at 0x28-byte descriptors from +8 */
 static unsigned char recs_b[16][0x20] __attribute__((aligned(8)));

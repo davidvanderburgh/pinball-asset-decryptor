@@ -851,3 +851,38 @@ def test_unread_downloads_are_read_after_the_page_is_up(tab, monkeypatch):
     tab.on_show()
     _wait(tab)
     assert tab.get("downloads")[0]["read"] is True      # read on the extras thread, after the page was up
+
+
+def test_a_download_read_before_its_map_existed_is_read_again(tmp_path, monkeypatch):
+    """David saw KISS and GOT twice: once as a download 'No map yet', once
+    patched. The download had been read when the kit had no map for it and
+    the cache said 'no map fits' for good."""
+    vs = _vpxsetup()
+    import padvpx
+    folder = tmp_path / "tables"
+    folder.mkdir()
+    _vpx_file(folder, "KISS (Stern 2015) 2.0.vpx")
+    monkeypatch.setattr(vs, "DOWNLOADS_CACHE", str(tmp_path / "cache.json"))
+    maps = {}
+    monkeypatch.setattr(padvpx, "maps", lambda: dict(maps))
+    monkeypatch.setattr(padvpx, "fitting", lambda path: [(t, dict(i, listed=True)) for t, i in maps.items()])
+    rows = vs.read_downloads(str(folder))
+    assert rows[0]["read"] and rows[0]["title"] == ""           # no map yet: none fits
+    assert vs.downloads_in(str(folder))[0]["read"]               # and the cache answers
+    mp = tmp_path / "kiss_le.shadow.json"
+    mp.write_text("{}", encoding="utf-8")
+    maps["kiss_le"] = {"map": str(mp), "listed": True}
+    assert not vs.downloads_in(str(folder))[0]["read"]           # a new map: read again
+    rows = vs.read_downloads(str(folder))
+    assert rows[0]["title"] == "kiss_le"
+    assert vs.link_downloads([{"titles": ["kiss_le"]}], rows)[0]["download"].endswith("KISS (Stern 2015) 2.0.vpx")
+
+
+def test_a_spike1_tables_row_finds_its_iso(monkeypatch, tmp_path):
+    vs = _vpxsetup()
+    import padlaunch
+    seen = []
+    monkeypatch.setattr(padlaunch, "card_for", lambda title, platform="spike2": seen.append((title, platform)) or "")
+    monkeypatch.setattr(vs, "downloads_in", lambda d, cache=None: [])
+    vs.known_tables(str(tmp_path))
+    assert ("got_le", "spike1") in seen and ("rush_le", "spike2") in seen

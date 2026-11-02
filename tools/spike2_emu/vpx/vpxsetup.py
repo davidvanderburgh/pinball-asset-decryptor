@@ -201,7 +201,8 @@ def known_tables(tables_dir=None):
     for row in rows.values():
         title, _ = padvpx.choose(row.pop("fits"))
         marks = row.pop("marks")
-        row.update(title=title, card=padlaunch.card_for(title) or "",
+        # PAD-943: a Spike 1 title's card is its .iso, in the spike1 library
+        row.update(title=title, card=padlaunch.card_for(title, padvpx.platform_of(title)) or "",
                    patched_title=patched_title(tables_dir, row["output"]) if row["patched"] else "",
                    repatch=missed_fixes(tables_dir, row["output"], marks) if row["patched"] else [],
                    source=patched_from(tables_dir, row["output"]) if row["patched"] else "")
@@ -259,6 +260,19 @@ def catalog_match(file_name, catalog=None):
 DOWNLOADS_CACHE_V = 2
 
 
+def maps_signature():
+    """What the kit's maps are, as a string: a download read with an older set
+    (before got_le's map existed) is read again, or it would say 'no map
+    fits' for good (David saw KISS and GOT listed twice, PAD-943)."""
+    out = []
+    for title, info in sorted(padvpx.maps().items()):
+        try:
+            out.append("%s:%d" % (title, int(os.path.getmtime(info["map"]))))
+        except OSError:
+            out.append(title)
+    return ";".join(out)
+
+
 def _downloads_cache():
     try:
         d = json.load(open(DOWNLOADS_CACHE, encoding="utf-8"))
@@ -285,6 +299,7 @@ def downloads_in(tables_dir, cache=None):
     if not tables_dir or not os.path.isdir(tables_dir):
         return []
     cache = _downloads_cache() if cache is None else cache
+    maps_sig = maps_signature()
     out = []
     for f in sorted(os.listdir(tables_dir), key=str.lower):
         if not f.lower().endswith(".vpx") or "(PAD)" in f:
@@ -297,7 +312,7 @@ def downloads_in(tables_dir, cache=None):
         row = {"name": os.path.splitext(f)[0], "file": f, "path": path, "size": st.st_size,
                "mtime": int(st.st_mtime), "read": False, "title": "", "catalog": None}
         c = cache.get(path)
-        if c and c.get("size") == row["size"] and c.get("mtime") == row["mtime"] and c.get("v") == DOWNLOADS_CACHE_V:
+        if c and c.get("size") == row["size"] and c.get("mtime") == row["mtime"] and c.get("v") == DOWNLOADS_CACHE_V                 and (c.get("title") or c.get("maps") == maps_sig):
             row.update(read=True, title=c.get("title") or "", catalog=c.get("catalog"))
             cat = row["catalog"] or {}
             # the card image the game boots, when the catalogue names the title
@@ -324,7 +339,8 @@ def read_downloads(tables_dir, say=None):
             if say:
                 say("%s: not read (%s)" % (row["file"], exc))
         cache[row["path"]] = {"size": row["size"], "mtime": row["mtime"], "title": title,
-                              "catalog": catalog_match(row["file"], catalog), "v": DOWNLOADS_CACHE_V}
+                              "catalog": catalog_match(row["file"], catalog), "v": DOWNLOADS_CACHE_V,
+                              "maps": maps_signature()}
         changed = True
         if say:
             say("read %s: %s" % (row["file"], title or "no map fits it"))

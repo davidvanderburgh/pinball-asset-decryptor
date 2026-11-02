@@ -356,6 +356,58 @@ class VpxTab(TabService):
         return self._start("Patching the table", work)
 
     @rpc
+    def patch_folder(self):
+        """PAD-927: every table in a folder of downloads at once. Each .vpx
+        in it (not a "(PAD)" copy) goes through the same patch; the ones the
+        kit does not know are counted, not errors. The page's progress bar
+        counts the files."""
+        folder = self.window.ask_folder("vpx_table", "The folder with the tables you downloaded",
+                                        initialdir=self.get("tables_dir") or None)
+        if not folder:
+            return False
+        folder = os.path.normpath(folder)
+        out = self.get("tables_dir") or folder
+
+        def work():
+            try:
+                names = os.listdir(folder)
+            except OSError as exc:
+                self._say("could not read %s: %s" % (folder, exc), "error")
+                return
+            files = sorted(f for f in names if f.lower().endswith(".vpx") and "(PAD)" not in f)
+            packed = sorted(f for f in names if f.lower().endswith((".zip", ".rar", ".7z")))
+            if not files:
+                self._say("no tables in %s (no .vpx files that are not (PAD) copies%s)."
+                          % (folder, "; %d archive%s to unpack first" % (len(packed), "" if len(packed) == 1 else "s")
+                             if packed else ""), "warning")
+                return
+            done, unknown, failed = [], [], []
+            for i, name in enumerate(files):
+                self.set(progress=i / len(files), busy="Patching %d of %d: %s" % (i + 1, len(files), name))
+                got = self._kit("padvpx.py", ["patch", os.path.join(folder, name), "--out", out], timeout=600)
+                text = got.get("_text") or ""
+                if "this table is not one the kit knows" in text:
+                    unknown.append(name)
+                elif "open \"" in text:
+                    done.append(name)
+                    self._say("patched %s." % name)
+                else:
+                    failed.append(name)
+                    self._say("%s did not patch; the session log has what it said." % name, "warning")
+            self.set(progress=None)
+            words = "%d of %d table%s patched" % (len(done), len(files), "" if len(files) == 1 else "s")
+            if unknown:
+                words += "; %d not one the app knows (%s)" % (len(unknown), ", ".join(unknown))
+            if failed:
+                words += "; %d did not patch (%s)" % (len(failed), ", ".join(failed))
+            if packed:
+                words += "; %d archive%s skipped, unpack %s first (%s)" % (
+                    len(packed), "" if len(packed) == 1 else "s", "it" if len(packed) == 1 else "them",
+                    ", ".join(packed))
+            self._say(words + ".", "warning" if failed else "info")
+        return self._start("Patching the folder", work)
+
+    @rpc
     def layout(self, key):
         preset = next((p for p in self.get("presets") or [] if p.get("key") == key), None)
         if preset is None:

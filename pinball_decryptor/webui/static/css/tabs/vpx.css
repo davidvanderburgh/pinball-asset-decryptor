@@ -1,7 +1,14 @@
 /* Visual Pinball (PAD-802): the kit's setup, the tables it patches, Play. */
 .vpx-status { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; min-height: 24px; }
 .vpx-prog { flex: 1; max-width: 320px; }
-.vpx-row, .vpx-table { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+.vpx-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+/* PAD-927: one line per table - name, author, card, button - so the whole
+   list fits a screen; the stale-copy note is the one second line */
+.vpx-table { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) minmax(0, 5fr) auto;
+  align-items: center; column-gap: 12px; padding: 5px 0; }
+.vpx-table > .vpx-name, .vpx-table > .vpx-by, .vpx-table > .vpx-card { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.vpx-table.unpatched > .vpx-name { color: var(--ink-3); }
+.vpx-stale { grid-column: 1 / -1; padding-top: 2px; }
 .vpx-row + .vpx-row, .vpx-table + .vpx-table, .vpx-row + .vpx-table { border-top: 1px solid var(--line); }
 .vpx-row > .chip { flex: none; width: 74px; justify-content: center; }
 .vpx-what { flex: 1; min-width: 0; }
@@ -12,7 +19,8 @@
 .vpx-setup .hd { flex-wrap: wrap; row-gap: 6px; }
 .vpx-marks { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 12px; }
 .vpx-setup.shut > .bd { display: none; }
-.vpx-cols { align-items: start; }
+.vpx-stack { gap: 16px; }
+.vpx-pre { max-width: 760px; }
 .vpx-now { padding: 2px 0 10px; }
 .vpx-or { padding: 4px 0 2px; border-top: 1px solid var(--line); padding-top: 10px; }
 .vpx-pre .vpx-what { font-size: 13px; }

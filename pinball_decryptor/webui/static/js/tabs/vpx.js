@@ -7,7 +7,7 @@
 // it is ready, the tables take the page with Patch on each table not yet
 // patched, and the window layouts are Use buttons, not radios nobody had picked.
 
-import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, call } from "../core/ui.js";
+import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, call, tip } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -112,27 +112,33 @@ export default function Vpx() {
           onClick=${() => call("vpx.choose_library")}>Choose folder…<//>
       <//>` : null}
     <//>
-    <div class="cols c75 vpx-cols">
+    <div class="stack vpx-stack">
       <${Card} title="Tables" sub=${s.tables_tip}>
         <div class="vpx-row">
           <div class="vpx-what"><div class="small muted">Your tables folder</div>
             <div class="mono small vpx-val">${s.tables_dir || "Not set: choose where your patched tables are."}</div></div>
-          <div class="vpx-acts"><${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
-            onClick=${() => call("vpx.choose_tables")}>Choose folder…<//></div>
+          <div class="vpx-acts">
+            <${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
+              onClick=${() => call("vpx.choose_tables")}>Choose folder…<//>
+            <${Button} drop size="sm" kind="ghost" icon="upload" disabled=${busy || !s.ok}
+              title="Patch every table in a folder of downloads at once: the ones the app knows get their (PAD) copy, the rest are counted."
+              onClick=${() => call("vpx.patch_folder")}>Patch a folder…<//>
+          </div>
         </div>
-        ${rows.length ? rows.map((t) => html`<div class="vpx-table">
-          <div class="vpx-what"><div><b>${t.name}</b>${t.patched ? null : html` <span class="small muted">· not patched yet</span>`}</div>
-            ${t.extra ? html`<div class="small muted">${t.output}</div>` : html`
-            <div class="small muted">${t.by ? "by " + t.by : ""}${t.where ? ", on " + t.where : ""}</div>
-            <div class="small muted">${t.card ? playsAs(t) + "Card: " + base(t.card) : "No card image for " + fits(t).join(" or ") + " yet."}</div>
-            ${stale(t) && t.card ? html`<div class="small">Your copy was patched for the ${t.models[t.patched_title]} and still plays as it.
-              Patch the table again to play it as the ${t.models[t.title]}.</div>` : null}`}</div>
+        ${rows.length ? rows.map((t) => html`<div class=${"vpx-table" + (t.patched ? "" : " unpatched")}>
+          <b class="vpx-name" ...${tip(t.extra ? t.output : t.name)}>${t.name}</b>
+          <span class="small muted vpx-by" ...${tip(t.extra ? "" : (t.by ? "by " + t.by : "") + (t.where ? ", on " + t.where : ""))}>${t.extra ? t.output
+            : (t.by ? "by " + t.by : "") + (t.where ? ", on " + t.where : "")}</span>
+          <span class="small muted vpx-card" ...${tip(t.extra ? "" : t.card ? playsAs(t) + "Card: " + t.card : "")}>${t.extra ? ""
+            : t.card ? playsAs(t) + base(t.card) : "No card image for " + fits(t).join(" or ") + " yet."}</span>
           <div class="vpx-acts">
             ${stale(t) && t.card ? patchBtn(t, "Patch again…") : null}
             ${t.patched ? html`<${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx}
                 onClick=${() => call("vpx.play", t.output)}>Play<//>`
               : patchBtn(t, "Patch…")}
           </div>
+          ${stale(t) && t.card ? html`<div class="small vpx-stale">Your copy was patched for the ${t.models[t.patched_title]} and still plays as it.
+            Patch the table again to play it as the ${t.models[t.title]}.</div>` : null}
         </div>`) : html`<div class="muted small">${s.loaded ? "No tables." : "Checking…"}</div>`}
       <//>
       <${Card} title="Windows" sub="Where Visual Pinball's playfield and the game's screen go when a table opens.">

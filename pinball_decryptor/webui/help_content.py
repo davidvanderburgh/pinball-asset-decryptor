@@ -3534,6 +3534,8 @@ PREVIEW_HELP = {
                 "- **Patch...** on a table not patched yet asks for your download of it and "
                 "writes a copy named \"(PAD)\" into your tables folder. Your download stays "
                 "as it was.\n"
+                "- **Patch a folder...** patches every table in a folder of downloads at "
+                "once; zips in it are counted, unpack them first.\n"
                 "- **Setup** shows one line of marks once all of it is ready; **Details** "
                 "opens its rows to change a folder.\n"
                 "- A backglass (.directb2s) named like the table, beside it or already in "

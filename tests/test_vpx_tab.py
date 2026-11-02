@@ -287,3 +287,33 @@ def test_the_page_is_laid_out_for_a_set_up_pc():
     assert 'call("vpx.patch", t.output)' in js
     assert "Radio" not in js and ">Use<" in js
     assert "Where you left them" in js
+
+
+def test_a_folder_of_downloads_is_patched_in_one_go(tab, monkeypatch, tmp_path):
+    """PAD-927: Patch a folder... runs every .vpx that is not a (PAD) copy
+    through the patch; unknown tables and archives are counted, not errors."""
+    for n in ("Rush LE 2.0.2.vpx", "Batman66_1.1.0.vpx", "Other.vpx", "Rush LE (PAD).vpx", "Bond.zip"):
+        (tmp_path / n).write_bytes(b"x")
+    tab.on_show()
+    _wait(tab)
+    tab.window.pick = str(tmp_path)
+    seen = []
+
+    def kit(self, script, args, timeout=0, on_line=None):
+        if args and args[0] == "state":
+            return {"registered": True, "vpx": r"C:\VP", "tables_dir": r"C:\VP\tables", "library": "",
+                    "cards": {}, "tables": [], "patched": [], "presets": [], "layout": ""}
+        seen.append(args)
+        name = os.path.basename(args[1])
+        if name == "Other.vpx":
+            return {"_text": "this table is not one the kit knows; it can patch: rush_le"}
+        return {"_text": r'open "C:\VP\tables\%s (PAD).vpx" in Visual Pinball' % name[:-4]}
+    monkeypatch.setattr(V.VpxTab, "_kit", kit)
+    assert tab.patch_folder()
+    _wait(tab)
+    assert [os.path.basename(a[1]) for a in seen] == ["Batman66_1.1.0.vpx", "Other.vpx", "Rush LE 2.0.2.vpx"]
+    assert all(a[2:] == ["--out", r"C:\VP\tables"] for a in seen)
+    last = tab.window.lines[-1][1]
+    assert "2 of 3 tables patched" in last and "1 not one the app knows (Other.vpx)" in last
+    assert "1 archive skipped" in last and "Bond.zip" in last
+    assert not [ln for ln in tab.window.lines if ln[0] == "error"]

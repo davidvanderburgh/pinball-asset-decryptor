@@ -2556,8 +2556,12 @@ def test_every_shadow_maps_lamps_are_consistent():
                 if sect == "retrofit_lights" and path.endswith(".shadow.json"):
                     assert v.get("clone") or m["retrofit_lights"].get("clone"), (path, name)
                     assert len(v["at"]) == 2, (path, name)
-                if sect == "lamp_calls":
+                if sect == "lamp_calls" and path.endswith(".shadow.json"):
                     assert v["call"] in m.get("extra_vbs", ""), "%s: %s calls a sub extra_vbs lacks" % (path, name)
+                elif sect == "lamp_calls":
+                    # a ROM table's patcher writes the sub (PAD-926: The Beatles' domes)
+                    src = open(os.path.join(VPX, m["patcher"]), encoding="utf-8").read()
+                    assert '"Sub %s(' % v["call"] in src, "%s: %s calls a sub its patcher lacks" % (path, name)
                 wired.add(name)
         assert not wired & set(m.get("dark", [])), "%s: dark and wired" % path
 
@@ -3124,3 +3128,212 @@ def test_dof_helper_loads_dofs_own_dll(tmp_path, monkeypatch):
     said = out.read_text().splitlines()
     assert said[0] == "init B2SServer mtl_180h %s" % dof        # DOF's log lands in its main folder
     assert said[1:] == ["S16=1", "S16=0", "L17=1", "finish"]
+
+
+# ---- PAD-926: The Beatles (Original 2018) on Stern's Seawitch ROM -> beatles
+
+#: beatles 1.29.0's switch table (the rig's switch_list.txt): the playfield
+#: ids the map may send, by name
+BEATLES_SWITCHES = {
+    43: "LOWER LEFT TARGET", 44: "SUPER JACKPOT TARGET", 48: "LEFT OUTLANE", 49: "LEFT RETURN LANE",
+    50: "RIGHT RETURN LANE", 51: "RIGHT OUTLANE", 52: "LT 3 BANK DROP LT", 53: "LT 3 BANK DROP CNTR",
+    54: "LT 3 BANK DROP RT", 59: "SHOOTER LANE", 60: "RIGHT SLINGSHOT", 61: "LEFT SLINGSHOT",
+    63: "TROUGH 6", 64: "TROUGH 5", 65: "TROUGH 4", 66: "TROUGH 3", 67: "TROUGH 2", 68: "TROUGH 1",
+    69: "TROUGH JAM", 70: "LEFT ORBIT OPTO", 71: "TOP MAGNET OPTO", 72: "RIGHT ORBIT OPTO",
+    73: "TARGET 1", 74: "TARGET 2", 75: "TARGET 3", 76: "TARGET 4", 77: "LEFT ORBIT TARGET",
+    78: "RT 4 BANK DROP LEFT", 79: "RT 4 BANK DROP LT CTR", 80: "RT 4BANK DROP R-CNTR",
+    81: "RT 4 BANK DROP RIGHT", 82: "SPINNER RIGHT ORBIT", 83: "SKILL SHOT ROLLOVER",
+    84: "RIGHT ORBIT TARGET", 85: "CNTR 4 BANK DROP LT", 86: "CNTR 4 BANK DROP LT CNTR",
+    87: "CNTR 4BANK DROP R-CNTR", 88: "CNTR 4 BANK DROP RT", 89: "LEFT POP BUMPER",
+    90: "RIGHT POP BUMPER", 91: "TOP POP BUMPER", 92: "SPINNER LEFT",
+}
+
+
+@pytest.fixture
+def btmap():
+    return json.load(open(os.path.join(VPX, "beatles.vpxmap.json"), encoding="utf-8"))
+
+
+def test_beatles_map_sends_only_beatles_switches(btmap):
+    sent = [v for k, v in btmap["switch_rewrite"].items() if k != "_"]
+    sent += [v for k, v in btmap["switch_by_object"].items() if k != "_"]
+    sent += [v.get("pulse", v.get("hold")) for k, v in btmap["switch_subs"].items() if k != "_"]
+    sent += btmap["switch_holds"]["trough"]
+    # every playfield switch the machine has is reached (the star's release goes
+    # through the rewrite of Seawitch's 25, its press through switch_subs)
+    assert set(sent) == set(BEATLES_SWITCHES)
+    assert len(sent) == len(BEATLES_SWITCHES) + 1
+    assert btmap["switch_subs"]["sw25_Hit"]["hold"] == 83                  # the star rollover
+    assert btmap["switch_subs"]["pupballstart_hit"]["hold"] == 59         # where the ball rests
+    # the controller finds the map and maps the coils the patcher calls by number
+    pc = pytest.importorskip("padcontroller")
+    m = pc.VpxMap("beatles")
+    assert m.coil(10) == (8, 1) and m.coil(7) == (9, 5) and m.coil(8) == (8, 8) and m.coil(9) == (9, 1)
+    assert m.coil(36) == (8, 6) and m.coil(34) == (8, 7)                   # the upper flippers
+    assert m.game_on == (40, [(8, 5), (8, 0)])
+    assert m.switch_id(4) == 71 and m.switch_id(1083) == 83
+    # DOF hears Seawitch's own coil numbers, and nothing for the coils Seawitch never had
+    assert m.dof_sols[10] == (8, 1) and m.dof_sols[7] == (9, 5)
+    assert not {1, 2, 3, 4, 5, 11, 12, 13, 34, 36} & set(m.dof_sols)
+    # the record's motor LEDs reach the table (lamp_calls are lamps the controller reports)
+    assert m.lamp_groups[1804] == [(8, 4)] and m.lamp_groups[1805] == [(8, 5)]
+
+
+def test_beatles_patcher_rewrites_a_miniature(btmap):
+    pb = pytest.importorskip("patch_beatles")
+    mini = "\n".join([
+        'Option Explicit',
+        'ExecuteGlobal GetTextFile("controller.vbs")',
+        'If Err Then MsgBox "You need the controller.vbs in order to run this table, available in the vp10 package"',
+        'Const cGameName="seawitfp",UseSolenoids=1,UseLamps=0,UseGI=0,SSolenoidOn="SolOn",SSolenoidOff="SolOff",SCoin="coin"',
+        'LoadVPM "01560000", "stern.vbs", 3.26',
+        'SolCallback(6) =  "vpmSolSound SoundFX(""Knocker"",DOFKnocker),"',
+        'SolCallback(10) = "SolBallRelease"',
+        'Sub SolBallRelease(enabled)',
+        '\tbsTrough.ExitSol_On',
+        'End Sub',
+        'SolCallback(sLLFlipper) = "SolLFlipper"',
+        'Sub SolLFlipper(Enabled)',
+        '     If Enabled Then',
+        '         PlaySound SoundFX("fx_Flipperup",DOFContactors):LeftFlipper.RotateToEnd:LeftFlipper1.RotateToEnd',
+        '     End If',
+        'End Sub',
+        'Sub Table1_KeyDown(ByVal KeyCode)',
+        '\tIf KeyDownHandler(keycode) Then Exit Sub',
+        'End Sub',
+        '          vpmNudge.TiltSwitch = 7',
+        '     \t  bsTrough.InitNoTrough ballrelease, 33, 90, 4 ',
+        '              dtLBank.InitDrop Array(sw40, sw39, sw38), Array(40, 39, 38)',
+        'Sub sw5_Spin()',
+        '\tvpmTimer.PulseSw 5',
+        'End Sub',
+        'Sub leftspin_Spin()',
+        '\tvpmTimer.PulseSw 5',
+        'End Sub',
+        'Sub sw34_Hit::Controller.Switch(34) = 1:PlaySound "rollover":flashdrum:CheckBeatlemania:End Sub',
+        'Sub AddPoints(PointsPar)',
+        '\tvpmTimer.PulseSw 25',
+        'End Sub',
+        'Sub superjball_hit',
+        '\tballrelease.createball:BallRelease.Kick 90, 4',
+        'End Sub',
+        'Sub MysteryTarget_Hit',
+        '\tif MysteryActive then AddPoints 5000',
+        'End Sub',
+        'sub flash2_hit',
+        '\tstrip3.visible = 1',
+        'End Sub',
+        'Sub sw25_Hit()',
+        '\tController.Switch(25) = 1',
+        '\tAddpoints 10000',
+        'End Sub',
+        'Dim LampState(200), FadingLevel(200)',
+        'Sub UpdateLamps',
+        '        NFadeL 1, l1 ',
+        '\tif haspup then PuPlayer.LabelSet pBackglass,"GameOverbg","Game Over",1,""',
+        'End Sub',
+        'Dim HasPup:HasPuP = True',
+        'Dim PuPlayer',
+        'if HasPuP Then',
+        '\tSet PuPlayer = CreateObject("PinUpPlayer.PinDisplay") ',
+        'end If',
+    ])
+    out, rep = pb.patch_script(mini, btmap)
+    assert 'GetTextFile("PADSPIKE2.vbs")' in out and "stern.vbs" not in out
+    assert 'Const cGameName="beatles",UseSolenoids=2' in out and 'PadB2SName = "seawitfp"' in out
+    assert "swULFlip = 1058 : swURFlip = 1057" in out
+    assert out.count("PAD: Spike 2 coils") == 1 and "Knocker" not in out
+    assert 'SolCallback(10) = "bsTrough.SolOut"' in out
+    assert 'SolCallback(sULFlipper) = "SolULFlipper"' in out and 'SolCallback(sURFlipper) = "SolURFlipper"' in out
+    # the upper flippers are their own coils now; their buttons close with the lower ones
+    assert "LeftFlipper.RotateToEnd\n" in out and "LeftFlipper1.RotateToEnd:" not in out
+    assert "If KeyCode = LeftFlipperKey Then Controller.Switch(1058) = True : vpmFlips.FlipUL True" in out
+    assert "vpmNudge.TiltSwitch = 1035" in out
+    assert "bsTrough.InitSw 0,1068,1067,1066,1065,1064,1063,1069" in out and "bsTrough.Balls = 6" in out
+    assert "Array(sw40, sw39, sw38), Array(1052, 1053, 1054)" in out
+    # both spinners pulsed Seawitch's 5: each its own now
+    assert out.index("PulseSw 1082") < out.index("PulseSw 1092")
+    assert "Controller.Switch(1048) = 1" in out
+    # the tribute's rules are emptied: no extra scoring through the star, no balls of its own
+    assert "PulseSw 1083" not in out and "createball" not in out.lower()
+    assert "Sub MysteryTarget_Hit\n\tvpmTimer.PulseSw 1043" in out and "MysteryActive" not in out
+    assert "Sub flash2_hit\n\tvpmTimer.PulseSw 1070" in out and "strip3.visible = 1" in out   # its own flash kept
+    assert "Controller.Switch(1083) = 1" in out and "Sub sw25_UnHit : Controller.Switch(1083) = 0" in out
+    assert "Sub pupballstart_UnHit : Controller.Switch(1059) = 0 : End Sub" in out
+    lamps = out.split("Sub UpdateLamps")[1].split("End Sub")[0]
+    assert "Dim LampState(3000)" in out and "NFadeL 1942, l1" in lamps and "GameOverbg" not in lamps
+    assert "PadDome 3, 1" in lamps and "PadRecordMotor 1, 1" in lamps
+    assert "HasPuP = False" in out and "Set PuPlayer = New PadNoPuP" in out and "Class PadNoPuP" in out
+    assert "MagnetW2.Solenoid = 2" in out and ".Solenoid = 3" in out
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="compiles the generated script under cscript")
+def test_beatles_generated_subs_compile(tmp_path, btmap):
+    pb = pytest.importorskip("patch_beatles")
+    out, _ = pb.patch_script("Option Explicit\nSub UpdateLamps\nEnd Sub\nDim PuPlayer\n", btmap)
+    lines = out.split("\n")
+    f = tmp_path / "t.vbs"
+    # WScript.Quit first: the whole file compiles, nothing runs (no message box on the desktop)
+    f.write_text(lines[0] + "\nWScript.Quit 0\n" + "\n".join(lines[1:]), encoding="utf-8")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(f)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated subs under cscript")
+def test_beatles_record_motor_and_domes_run(tmp_path, btmap):
+    # the generated subs for real, with stand-ins for the table's objects
+    pb = pytest.importorskip("patch_beatles")
+    out, _ = pb.patch_script("Option Explicit\nDim PuPlayer\n", btmap)
+    tail = out.split("'==== PAD: the Spike 2 emulator")[1].split("Class PadNoPuP")[0]
+    tail = "\n".join(ln for ln in tail.split("\n")[1:]
+                     if not ln.startswith(("MagnetW2.", "Set mRecordMagnet", "With mRecordMagnet", "\t.", "End With")))
+    harness = "\n".join([
+        "Class FakeTT : Public MotorOn, SpinCW : End Class",
+        "Dim spinner : Set spinner = New FakeTT",
+        "Dim padMotor(1), FlashLevel1, FlashLevel2, FlashLevel3, FlashLevel5, flashed",
+        "Sub Flasherflash1_Timer : flashed = flashed & \"1\" : End Sub",
+        "Sub Flasherflash2_Timer : flashed = flashed & \"2\" : End Sub",
+        "Sub Flasherflash3_Timer : flashed = flashed & \"3\" : End Sub",
+        "Sub Flasherflash5_Timer : flashed = flashed & \"5\" : End Sub",
+        tail,
+        "PadRecordMotor 0, 1 : WScript.Echo CBool(spinner.MotorOn) & \" \" & CBool(spinner.SpinCW)",
+        "PadRecordMotor 1, 1 : WScript.Echo CBool(spinner.MotorOn)",
+        "PadRecordMotor 0, 0 : WScript.Echo CBool(spinner.MotorOn) & \" \" & CBool(spinner.SpinCW)",
+        "PadRecordMotor 1, 0 : WScript.Echo CBool(spinner.MotorOn)",
+        "PadDome 3, 1 : PadDome 1, 0 : PadDome 5, 1 : WScript.Echo flashed & \" \" & FlashLevel3 & FlashLevel5",
+    ])
+    f = tmp_path / "t.vbs"
+    f.write_text(harness, encoding="utf-8")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(f)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    # A0 alone turns it one way, A1 alone the other, both (a brake) or neither stops it
+    # (cscript prints a Boolean False as "False" or, on some Windows setups, "0")
+    got = ["False" if w == "0" else w for w in r.stdout.split()]
+    assert got == ["True", "True", "False", "True", "False", "False", "35", "11"], r.stdout
+
+
+def test_patched_table_finds_a_backglass_named_its_own_way(tmp_path):
+    # PAD-926: The Beatles ships b2s\The-Beatles-Original-2018.directb2s
+    pv = pytest.importorskip("padvpx")
+    src, out = tmp_path / "src", tmp_path / "out"
+    (src / "b2s").mkdir(parents=True)
+    out.mkdir()
+    (src / "The Beatles_007.vpx").write_bytes(b"t")
+    (src / "b2s" / "The-Beatles-Original-2018.directb2s").write_bytes(b"bg")
+    got = pv.copy_backglass(str(src / "The Beatles_007.vpx"), str(out / "The Beatles_007 (PAD).vpx"))
+    assert got == str(out / "The Beatles_007 (PAD).directb2s")
+    assert (out / "The Beatles_007 (PAD).directb2s").read_bytes() == b"bg"
+    # one beside the only table in its folder
+    solo = tmp_path / "solo"
+    solo.mkdir()
+    (solo / "T.vpx").write_bytes(b"t")
+    (solo / "Some Backglass.directb2s").write_bytes(b"s")
+    assert pv.copy_backglass(str(solo / "T.vpx"), str(out / "T (PAD).vpx")) == str(out / "T (PAD).directb2s")
+    # two to choose from: none is a guess worth making
+    (out / "The Beatles_007 (PAD).directb2s").unlink()
+    (src / "b2s" / "other.directb2s").write_bytes(b"x")
+    assert pv.copy_backglass(str(src / "The Beatles_007.vpx"), str(out / "The Beatles_007 (PAD).vpx")) is None

@@ -21,7 +21,7 @@ macOS and Linux.
   go near the machine.
 - **Play in Visual Pinball** (preview): the Stern Spike 2 emulator can drive a
   Visual Pinball X table. With a preview code, the **Visual Pinball** tab
-  patches a table you downloaded from its author and opens it.
+  patches the tables you downloaded from their authors and opens them.
 - **Multi-boot**: put several complete games on one Stern Spike 2 SD card
   (or Jersey Jack install stick, or Barrels of Fun update) and pick one from a
   menu at power-up.

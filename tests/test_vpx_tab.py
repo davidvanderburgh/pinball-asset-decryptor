@@ -788,6 +788,9 @@ def test_the_folders_downloads_are_listed_at_once_and_read_once(tmp_path, monkey
     got, rush = rows
     assert got["read"] and got["title"] == "" and got["catalog"]["platform"] == "spike1" \
         and got["catalog"]["game"] == "Game of Thrones"
+    # the author's description rides along, for the row on the page
+    assert got["catalog"]["by"] == "VPinWorkshop" and got["catalog"]["where"] == "VPUniverse"
+    assert got["catalog"]["title"] == "got_le" and got["catalog"]["url"].startswith("https://")
     assert rush["read"] and rush["title"] == "rush_le"
     # read once: the cache answers the next look, a changed file is read again
     assert all(r["read"] for r in vs.downloads_in(str(folder)))

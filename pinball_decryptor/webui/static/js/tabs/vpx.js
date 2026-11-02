@@ -145,8 +145,13 @@ export default function Vpx() {
   // map fits is that table's row (Patch takes it); the rest are rows of their
   // own, "no map yet", named after the catalogue's table where the name matches
   const linked = new Set(tables.map((t) => t.download).filter(Boolean));
-  const downloads = (s.downloads || []).filter((d) => !linked.has(d.path)).map((d) => ({
-    name: d.name, output: d.file, patched: false, extra: true, download: d }));
+  // its row carries the author's description from the catalogue (name, by, where
+  // from, platform, card) when the file's name says which table it is
+  const downloads = (s.downloads || []).filter((d) => !linked.has(d.path)).map((d) => {
+    const c = d.catalog || {};
+    return { name: c.name || d.name, by: c.by || "", where: c.where || "", output: d.file, patched: false,
+      extra: true, download: d, model: c.platform_name || "", card: d.card || "" };
+  });
   const rows = tables.concat(patched.filter((n) => !known.has(n)).map((n) => ({
     name: n.replace(/ \(PAD\)\.vpx$/i, ""), output: n, patched: true, extra: true })), downloads)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
@@ -312,14 +317,14 @@ export default function Vpx() {
         </div>
         ${rows.map((t) => html`<div class=${"vpx-table" + (t.patched ? "" : " unpatched")}>
         <span class="vpx-pic">${picture(t)}</span>
-        <b class="vpx-name" ...${tip(t.extra ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : ""))}>${t.name}</b>
-        <span class="small vpx-by" ...${tip(t.download && t.extra ? t.download.file : t.by)}>${t.download && t.extra ? "your download" : t.by}</span>
-        <span class="small muted vpx-from" ...${tip(t.download && t.extra ? (t.download.catalog ? "The name says it is " + t.download.catalog.name : "") : t.where)}>${t.download && t.extra ? (t.download.catalog ? t.download.catalog.platform_name : "") : t.where}</span>
+        <b class="vpx-name" ...${tip(t.extra && !t.download ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : "") + (t.download ? " (your file: " + t.download.file + ")" : ""))}>${t.name}</b>
+        <span class="small vpx-by" ...${tip(t.by)}>${t.by}</span>
+        <span class="small muted vpx-from" ...${tip(t.where)}>${t.where}</span>
         <span class="small" ...${tip(fits(t).length > 1 ? playsAs(t) + "The table fits "
-            + fits(t).map((x) => t.models[x]).join(" or ") + "." : "")}>${t.extra ? "" : (t.models || {})[t.title] || ""}</span>
-        <span class="small muted vpx-card" ...${tip(t.extra ? "" : t.card ? playsAs(t) + "Card: " + t.card
-            : "No card image for " + fits(t).join(" or ") + " in your card folder yet.")}>${t.extra ? ""
-          : !t.card ? "No card yet" : base(t.card)}</span>
+            + fits(t).map((x) => t.models[x]).join(" or ") + "." : t.download ? "A " + t.model + " game: " + t.download.file : "")}>${t.extra ? t.model || "" : (t.models || {})[t.title] || ""}</span>
+        <span class="small muted vpx-card" ...${tip(t.extra ? (t.card ? "Card: " + t.card : "") : t.card ? playsAs(t) + "Card: " + t.card
+            : "No card image for " + fits(t).join(" or ") + " in your card folder yet.")}>${t.extra && !t.download ? ""
+          : !t.card ? (t.extra ? "" : "No card yet") : base(t.card)}</span>
         <span>${t.download && t.extra ? downloadChip(t.download)
           : !t.patched ? html`<${Chip} sm ...${tip(t.download ? "Your download is in the folder: " + base(t.download) + ". Patch writes its (PAD) copy." : "")}>Not patched<//>`
           : stale(t) || missed(t) ? html`<${Chip} kind="warn" dot sm>Patch again<//>`
@@ -363,7 +368,9 @@ const KIND_WORDS = { tribute: "scripted", mashup: "older ROM", "": "none" };
 function Catalog({ s }) {
   const cat = s.catalog || {};
   const plats = cat.platforms || {};
-  const tables = cat.tables || [];
+  // a table that is in the person's folder is on the Tables list above, not here
+  const have = new Set((s.downloads || []).map((d) => d.catalog && d.catalog.name).filter(Boolean));
+  const tables = (cat.tables || []).filter((t) => !t.url || !have.has(t.name));
   const order = Object.keys(plats).filter((k) => k !== "spike2" && tables.some((t) => t.platform === k));
   if (!order.length) return null;
   return html`<${Card} cls="vpx-cat" head=${html`<span class="h2" ...${tip(s.catalog_tip)}>Tables of other machines</span>

@@ -247,8 +247,16 @@ def catalog_match(file_name, catalog=None):
     if not best:
         return None
     plats = cat.get("platforms") or {}
+    # the author's own description, for the download's row on the page
     return {"platform": best["platform"], "platform_name": (plats.get(best["platform"]) or {}).get("name", ""),
-            "game": best.get("game", ""), "name": best.get("name", ""), "map": best.get("map", "")}
+            "game": best.get("game", ""), "name": best.get("name", ""), "map": best.get("map", ""),
+            "by": best.get("by", ""), "where": best.get("where", ""), "url": best.get("url", ""),
+            "version": best.get("version", ""), "kind": best.get("kind", ""), "faithful": bool(best.get("faithful")),
+            "title": best.get("title", "")}
+
+
+#: what a cache entry must carry (older ones are read again)
+DOWNLOADS_CACHE_V = 2
 
 
 def _downloads_cache():
@@ -289,8 +297,11 @@ def downloads_in(tables_dir, cache=None):
         row = {"name": os.path.splitext(f)[0], "file": f, "path": path, "size": st.st_size,
                "mtime": int(st.st_mtime), "read": False, "title": "", "catalog": None}
         c = cache.get(path)
-        if c and c.get("size") == row["size"] and c.get("mtime") == row["mtime"]:
+        if c and c.get("size") == row["size"] and c.get("mtime") == row["mtime"] and c.get("v") == DOWNLOADS_CACHE_V:
             row.update(read=True, title=c.get("title") or "", catalog=c.get("catalog"))
+            cat = row["catalog"] or {}
+            # the card image the game boots, when the catalogue names the title
+            row["card"] = padlaunch.card_for(cat["title"], cat.get("platform") or "spike2") or ""                 if cat.get("title") else ""
         out.append(row)
     return out
 
@@ -313,7 +324,7 @@ def read_downloads(tables_dir, say=None):
             if say:
                 say("%s: not read (%s)" % (row["file"], exc))
         cache[row["path"]] = {"size": row["size"], "mtime": row["mtime"], "title": title,
-                              "catalog": catalog_match(row["file"], catalog)}
+                              "catalog": catalog_match(row["file"], catalog), "v": DOWNLOADS_CACHE_V}
         changed = True
         if say:
             say("read %s: %s" % (row["file"], title or "no map fits it"))

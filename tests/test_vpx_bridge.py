@@ -1632,6 +1632,18 @@ def test_setup_reads_the_card_folder(tmp_path):
     cards = vs.cards_in(str(lib))
     assert sorted(cards) == ["foo_fighters_le", "rush_le"] and len(cards["rush_le"]) == 2
     assert vs.cards_in(str(tmp_path / "missing")) == {}
+    # PAD-943: the Spike 1 .iso cards in the library's spike1 sibling count too
+    pl = pytest.importorskip("padlaunch")
+    s1 = tmp_path / "spike1"
+    s1.mkdir()
+    for n in ("GOT_LE-1_37.iso", "transformers_pin-1.0.18.iso", "kiss_le-1_41_0.iso", "readme.iso.txt"):
+        (s1 / n).write_bytes(b"x")
+    assert sorted(vs.cards_in(str(s1), "spike1")) == ["got_le", "kiss_le", "transformers_pin"]
+    assert vs.cards_in(str(s1)) == {}                                           # not Spike 2 cards
+    both = vs.all_cards(str(lib), {"library": str(lib)})
+    assert sorted(both) == ["foo_fighters_le", "got_le", "kiss_le", "rush_le", "transformers_pin"]
+    assert both["got_le"] == ["GOT_LE-1_37.iso"]
+    assert pl.libraries("spike1", {"library": str(lib)}) == [str(lib), str(s1)]
 
 
 def test_setup_names_each_known_table_and_what_is_patched(tmp_path, monkeypatch):

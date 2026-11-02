@@ -173,14 +173,35 @@ def set_library(folder):
     return cards_in(folder)
 
 
-def cards_in(folder):
-    """{title: [file names]} of the Stern card images in `folder`."""
+CARD_RE = {"spike2": r"^([a-z0-9_]+)-\d+_\d+_\d+.*\.sdcard\.raw$",
+           "spike1": r"^([a-z0-9_]+)-\d+[._]\d+(?:[._]\d+)?.*\.iso$"}       # GOT_LE-1_37.iso, transformers_pin-1.0.18.iso
+
+
+def cards_in(folder, platform="spike2"):
+    """{title: [file names]} of the platform's card images in `folder`."""
     out = {}
     if folder and os.path.isdir(folder):
         for f in os.listdir(folder):
-            m = re.match(r"^([a-z0-9_]+)-\d+_\d+_\d+.*\.sdcard\.raw$", f, re.I)
+            m = re.match(CARD_RE.get(platform, CARD_RE["spike2"]), f, re.I)
             if m:
                 out.setdefault(m.group(1).lower(), []).append(f)
+    return out
+
+
+def all_cards(lib, kit=None):
+    """The library's Spike 2 cards and, from the Spike 1 libraries beside it
+    (padlaunch.libraries), the Spike 1 .iso cards (PAD-943): the Card images
+    row said "No card for got_le, kiss_le..." while their rows had found
+    the .iso."""
+    out = cards_in(lib)
+    seen = {os.path.normcase(os.path.abspath(lib))} if lib else set()
+    for d in padlaunch.libraries("spike1", kit):
+        key = os.path.normcase(os.path.abspath(d))
+        if key in seen:
+            continue
+        seen.add(key)
+        for title, files in cards_in(d, "spike1").items():
+            out.setdefault(title, []).extend(files)
     return out
 
 
@@ -678,7 +699,7 @@ def state():
         "tables_dir": tables,
         "tables_own": bool(kit.get("tables")) and tables == kit.get("tables"),
         "library": lib,
-        "cards": cards_in(lib),
+        "cards": all_cards(lib, kit),
         "tables": link_downloads(known_tables(tables), downloads_in(tables)),
         "patched": patched_in(tables),
         # PAD-943: the person's own downloads in the folder, listed at once

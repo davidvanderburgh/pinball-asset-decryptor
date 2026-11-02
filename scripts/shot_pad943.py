@@ -1,7 +1,7 @@
 """PAD-943 proof shots: the Visual Pinball tab whole, with the other
 platforms' tables card under the Tables card.
 
-    python scripts/shot_pad943.py <out_dir> [--after]
+    python scripts/shot_pad943.py <out_dir> [--after] [--setup]
 
 Serves THIS checkout on a scratch settings.json holding one preview code,
 PAD802_CODE from the environment (``tools/preview_code.py issue --name x
@@ -66,9 +66,16 @@ def main():
                 len(st.get("tables") or []), len(cat.get("platforms") or {}), len(cat.get("tables") or [])),
                 flush=True)
             time.sleep(1.5)
-            page.locator(".vpx-page").evaluate("e => { e.scrollTop = e.scrollHeight; }")
-            time.sleep(0.5)
-            page.screenshot(path=os.path.join(out_dir, pre + "vpx_page.png"))
+            if "--setup" in sys.argv:
+                # the set-up rows at the page's top (the controller's row says
+                # whose registration it is), in a short window
+                page.set_viewport_size({"width": WIDTH, "height": 700})
+                time.sleep(0.5)
+                page.screenshot(path=os.path.join(out_dir, pre + "vpx_setup.png"))
+            else:
+                page.locator(".vpx-page").evaluate("e => { e.scrollTop = e.scrollHeight; }")
+                time.sleep(0.5)
+                page.screenshot(path=os.path.join(out_dir, pre + "vpx_page.png"))
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

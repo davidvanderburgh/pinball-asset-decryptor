@@ -19,6 +19,7 @@ def _no_tools(monkeypatch, tmp_path):
     monkeypatch.setenv("PAD_MULTIBOOT_AUTO", "0")
     monkeypatch.setenv("PAD_MULTIBOOT_PLAN", "0")
     monkeypatch.setenv("PAD_MULTIBOOT_PROBE", "0")
+    monkeypatch.setattr(mt._mac, "enabled", lambda: False)
     from pinball_decryptor.webui import multiboot_panel as mbp
 
     def refuse(*a, **k):

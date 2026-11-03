@@ -8587,6 +8587,7 @@ class MultibootPanel:
         self._refresh_tree(select=len(self._rows) - 1)
         if len(self._rows) == 1:
             self._maybe_default_output()
+        self._warm_container()
         self._ok("")
 
     #: What the add row at the foot of the list offers, as
@@ -9374,6 +9375,7 @@ class MultibootPanel:
         # the preview' manually. if we're on this tab after we load the app,
         # it should fire off that event for us").  Opening the tab is the
         # deliberate act; the app still starts no tool merely by launching.
+        self._warm_container()
         self.schedule_preview()
         # AND SO DOES THE SIZE, for exactly the same reason - and it needs
         # asking for, because _maybe_plan will NEVER ask by itself after a
@@ -12932,6 +12934,11 @@ class MultibootPanel:
             self._pv_ready = None
             self._pv_visual = None
             self._stop_play(None)
+            note = container_note(_texts.get(failed, ""))
+            if note:
+                self._media_say("video", "waiting for container")
+                self._pv_say(note, error=False)
+                return
             self._media_say("video", "failed - see the Log")
             self._pv_say("Preview failed at %s (exit %d) - see the tool "
                          "output." % (failed or "the start", rc), error=True)
@@ -13339,12 +13346,16 @@ class MultibootPanel:
         """The worker itself - see :meth:`_run_commands`, which owns the
         guards.  Split out so a queued action can be started from the
         render's own finish without going through them again."""
+        paths = self._run_paths() if preview and _mac.enabled() else ()
+        log_fn = getattr(self, "_warm_log", self._append)
+
         def run():
+            mac_ready = True
             if preview and _mac.enabled():
-                # Never raises; False leaves the step to fail and say why
-                # (container_note).
-                _mac.ensure_ready_container(self._run_paths(), rig_repo_dir(),
-                                            log=self._append)
+                # Never raises; False stops any docker exec step before
+                # spawning a process against a container that is not up.
+                mac_ready = _mac.ensure_ready_container(
+                    paths, rig_repo_dir(), log=log_fn)
             rc = 0
             failed = None
             texts = {}
@@ -13376,6 +13387,11 @@ class MultibootPanel:
                 # other, and failed at frame 0 (PAD-307; runtime.rehead, which
                 # leaves anything that is not a wsl.exe command alone).
                 argv = runtime.rehead(argv)
+                if not mac_ready and list(argv[:2]) == ["docker", "exec"]:
+                    texts[label] = "No such container"
+                    self._say_once(container_note(texts[label]))
+                    rc, failed = 1, label
+                    break
                 self._append("$ " + argv[-1])
                 try:
                     proc = subprocess.Popen(
@@ -13626,6 +13642,61 @@ class MultibootPanel:
         if md:
             paths.append(md)
         return paths
+
+    def _warm_log(self, line):
+        """Log a container warm-up or image-build line, and show it on the
+        preview caption strip while no frame is on screen yet."""
+        self._append(line)
+        if getattr(self, "_pv_src", None) is None:
+            self._ui(lambda m=line: self._pv_say(m, error=False, log=False))
+
+    def _warm_container(self):
+        """Build the Linux toolbox image if needed and start the container in
+        the background on macOS when the Multi-boot tab opens or an image is
+        added, without locking the UI."""
+        if not _mac.enabled() or getattr(self, "_stopped", False):
+            return False
+        if (os.environ.get("PAD_UI_NO_RIG", "") not in ("", "0")
+                or os.environ.get("PAD_MULTIBOOT_AUTO") == "0"):
+            return False
+        auto = getattr(self, "_auto_preview", None)
+        if auto is not None and not auto.get():
+            return False
+        if (getattr(self, "_busy", False)
+                or getattr(self, "_pv_busy", False)
+                or getattr(self, "_warming_container", False)):
+            return False
+        paths = self._run_paths()
+        self._warming_container = True
+
+        def work():
+            ok = _mac.ensure_ready_container(
+                paths, rig_repo_dir(), log=self._warm_log)
+
+            def back():
+                self._warming_container = False
+                if getattr(self, "_stopped", False):
+                    return
+                if (ok and _mac.mount_points(self._run_paths())
+                        != _mac.mount_points(paths)):
+                    self._warm_container()
+                    return
+                if ok and getattr(self, "_rows", None):
+                    self.schedule_preview()
+                    if getattr(self, "_plan_info", None) is None:
+                        self._plan_for = None
+                        self._maybe_plan()
+            self._ui(back)
+
+        threading.Thread(target=work, daemon=True).start()
+        if getattr(self, "_drain_job", None) is not None:
+            try:
+                self._timer().after_cancel(self._drain_job)
+            except (tk.TclError, ValueError):
+                pass
+            self._drain_job = None
+        self._drain()
+        return True
 
     def _append(self, line):
         """A tool line, from the worker.  Queued for the main loop, because

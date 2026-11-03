@@ -347,6 +347,16 @@ Also fixed on the way: batman-1.13 sends cmd 55 to its END-STOP motor (node 9
 motor 1); the encoder change briefly let that fall into the end-stop model as
 "go to end 1". An end-stop motor ignores 55 again, as under PAD-237.
 
+**PAD-955 plays that 55.** On an end-stop motor its byte 4 names an INPUT
+(`0x40|bit`), not a position count: batman 1.14 in attract sends
+`55 01 48 ..` (crane to input 8, its POS. #6 AWAY stop) and `55 02 43 ..`
+(turntable to input 3, TURNTABLE POS. #2, between its stops 2 and 4).
+Ignored, neither arrived, and the VPX tribute table, whose turntable follows
+the position switches, never turned (a player's report). The model now runs
+the motor there like a 53/54: where it was opens at once, the named input
+closes `PAD_MOTOR_MS` later, and a 55 naming a stop is that end. Rig, batman
+1.14 from Start: `+78m +82m`, both arrived, no re-sends.
+
 ## Not done
 
 - **jaws_le's shark is not a board motor.** SharkMotor derives from

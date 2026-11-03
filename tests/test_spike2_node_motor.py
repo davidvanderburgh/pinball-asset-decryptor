@@ -152,7 +152,8 @@ int main(int argc, char **argv)
 @pytest.fixture(scope="module")
 def cbin(tmp_path_factory):
     d = tmp_path_factory.mktemp("nbmotor")
-    body = chr(10).join([_state(), _extract("nb_motor_on"), _extract("motor_ms"),
+    body = chr(10).join([_state(), _extract("motor_place_bit"),
+                         _extract("nb_motor_on"), _extract("motor_ms"),
                          _extract("motor_say"), _extract("motor_pos"),
                          _extract("motor_status"), _extract("motor_tick"),
                          _extract("motor_note"), _extract("nb_rx_count_on"),
@@ -386,11 +387,64 @@ def test_the_count_follows_the_off_switch(cbin):
     assert _says(cbin, ["t0:9", "f" + JB_CONFIG, "r9"], PAD_NB_RXCOUNT="0") == [0]
 
 
-def test_an_end_stop_motor_ignores_cmd_55(cbin):
-    """batman-1.13 sends 55 to its end-stop motor 1; PAD-237 never played it.
+# ---- PAD-955: cmd 55 on an END-STOP motor, batman's turntable and crane ----
+#
+# batman 1.14 (rig 1 trace, 2026-11-03) configures node 9 motor 1 (the crane,
+# stops 13 = POS. #1 HOME and 8 = POS. #6 AWAY, positions #2..#5 on inputs
+# 12..9) and motor 2 (the turntable, stops 2 = POS. #1 HOME and 4 = POS. #3
+# AWAY, POS. #2 on input 3), and in attract sends both a cmd 55 whose byte 4
+# names the input to run to (0x40|bit). Ignored (PAD-249's rule), neither ever
+# arrived, and the turntable a VPX table follows never turned.
 
-    Frames: batman node 9 motor 1, stops 13 and 8 (rig trace 2026-09-28)."""
-    cfg = "891451014d480f0000b33534000080000014000000bd00"
-    to = "89095501480080c800028600"
-    assert _run(cbin, ["t0:9", "f" + cfg, "f" + to, "t5000:9"]) == []
-    assert _replies(cbin, ["t0:9", "f" + cfg, "f" + to, "s9:1"]) == [(0, "none")]
+BAT_CRANE = "891551014d480f000000b33534000080000014000000bc00"
+BAT_TT = "8915510242440f000000b031320000800000e20400000100"
+BAT_TT_POS2 = "89095502430080f401025d00"     # turntable to input 3 (POS. #2)
+BAT_CRANE_POS6 = "89095501480080c800028600"  # crane to input 8 = its AWAY stop
+BAT_TT_HOME = "89075302fa14c8004700"          # cmd 53 on motor 2
+
+
+def test_cmd_55_runs_an_end_stop_motor_to_the_input_it_names(cbin):
+    """The turntable, between its stops at boot, reaches POS. #2 (input 3)."""
+    edges = _run(cbin, ["t0:9", "f" + BAT_TT, "t1000:9", "f" + BAT_TT_POS2,
+                        "t1599:9", "t1600:9"])
+    assert edges == [(1600, 9, 3, 1)]
+
+
+def test_cmd_55_leaves_the_stop_it_was_at(cbin):
+    """Home, then POS. #2: home opens at once, #2 closes after the travel;
+    then home again leaves #2 - never two positions made at once."""
+    edges = _run(cbin, ["t0:9", "f" + BAT_TT, "f" + BAT_TT_HOME, "t600:9",
+                        "t2000:9", "f" + BAT_TT_POS2, "t2600:9",
+                        "t4000:9", "f" + BAT_TT_HOME, "t4600:9"])
+    assert edges == [(600, 9, 2, 1),
+                     (2000, 9, 2, 0), (2600, 9, 3, 1),
+                     (4000, 9, 3, 0), (4600, 9, 2, 1)]
+
+
+def test_cmd_55_resend_and_already_there_move_nothing(cbin):
+    edges = _run(cbin, ["t0:9", "f" + BAT_TT, "f" + BAT_TT_POS2,
+                        "t300:9", "f" + BAT_TT_POS2, "t600:9",
+                        "t2000:9", "f" + BAT_TT_POS2, "t3000:9"])
+    assert edges == [(600, 9, 3, 1)]
+
+
+def test_cmd_55_to_a_stop_is_that_end(cbin):
+    """The crane sent to input 8 is its cmd 54 end: a 54 after it is no move."""
+    edges = _run(cbin, ["t0:9", "f" + BAT_CRANE, "f" + BAT_CRANE_POS6,
+                        "t600:9", "t2000:9", "f89075401fa14c8004600",
+                        "t3000:9"])
+    assert edges == [(600, 9, 8, 1)]
+
+
+def test_cmd_55_keeps_the_end_stop_reply_and_the_off_switch(cbin):
+    """Still no encoder status for it; PAD_NB_MOTOR=0 still moves nothing."""
+    assert _replies(cbin, ["t0:9", "f" + BAT_CRANE, "f" + BAT_CRANE_POS6,
+                           "s9:1"]) == [(0, "none")]
+    assert _run(cbin, ["t0:9", "f" + BAT_TT, "f" + BAT_TT_POS2, "t600:9"],
+                PAD_NB_MOTOR="0") == []
+
+
+def test_cmd_55_without_an_input_flag_is_not_played(cbin):
+    """A 55 whose byte 4 names no input (no 0x40) is left alone."""
+    assert _run(cbin, ["t0:9", "f" + BAT_TT, "f89095502030080f401025d00",
+                       "t5000:9"]) == []

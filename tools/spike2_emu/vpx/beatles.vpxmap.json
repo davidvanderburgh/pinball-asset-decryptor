@@ -55,7 +55,8 @@
     "flash4_hit": {"pulse": 72, "keep": true, "name": "RIGHT ORBIT OPTO"}
   },
   "repatch": [
-    {"old": "bsTrough.Balls = 6", "why": "it serves two balls at Start", "since": "PAD-933: the trough holds the four balls the game counts"}
+    {"old": "bsTrough.Balls = 6", "why": "it serves two balls at Start", "since": "PAD-933: the trough holds the four balls the game counts"},
+    {"old": ".InitMagnet PadRecordMagnet, 30", "why": "the record's magnet catches the ball and drops it down the middle", "since": "PAD-950: the record's magnet pulls without grabbing"}
   ],
   "switch_holds": {
     "_": "switches held while a ball sits somewhere (cvpmBallStack serves them)",
@@ -94,7 +95,9 @@
     "10": {"coil": [8, 1], "name": "TROUGH", "callback": "bsTrough.SolOut"},
     "1":  {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "PadAutoPlunger", "dof": null},
     "2":  {"coil": [9, 6], "name": "MAGNET-TOP", "magnet": "MagnetW2", "dof": null},
-    "3":  {"coil": [9, 0], "name": "MAGNET-RECORD", "magnet": "mRecordMagnet", "dof": null},
+    "3":  {"coil": [9, 0], "name": "MAGNET-RECORD", "magnet": "mRecordMagnet", "dof": null,
+           "strength": 10, "grab": false,
+           "why": "the game only pulses it, in bursts of about 0.4 + 0.15 + 0.08 s as a ball crosses TOP MAGNET OPTO (emulator, PAD-950); a grabbing magnet pinned a ball on the record dead centre and dropped it down the middle, a strength 10 pull bends its path"},
     "4":  {"coil": [9, 2], "name": "LEFT POP BUMPER", "callback": null, "dof": null},
     "5":  {"coil": [9, 3], "name": "RIGHT POP BUMPER", "callback": null, "dof": null},
     "11": {"coil": [9, 4], "name": "TOP POP BUMPER", "callback": null, "dof": null},

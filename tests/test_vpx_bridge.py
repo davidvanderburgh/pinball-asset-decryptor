@@ -1396,6 +1396,28 @@ def test_the_beatles_patcher_no_longer_writes_the_line_its_repatch_names():
     assert m["switch_holds"]["balls"] != 6
 
 
+def test_the_beatles_record_magnet_pulls_without_grabbing(tmp_path):
+    """PAD-950: the game only pulses MAGNET-RECORD (bursts of ~0.4 + 0.15 +
+    0.08 s), and a GrabCenter magnet pinned a ball on the record dead centre
+    and dropped it down the middle. The record's magnet pulls; the top one
+    still grabs (it holds the ball for seconds); a copy patched with the
+    grab is told to patch again."""
+    pb = pytest.importorskip("patch_beatles")
+    vs = pytest.importorskip("vpxsetup")
+    m = json.load(open(os.path.join(VPX, "beatles.vpxmap.json"), encoding="utf-8"))
+    out, _ = pb.patch_script("Option Explicit\nSub UpdateLamps\nEnd Sub\nDim PuPlayer\n", m)
+    rec = out.split("With mRecordMagnet")[1].split("End With")[0]
+    assert ".GrabCenter = False" in rec and ".InitMagnet PadRecordMagnet, 10" in rec
+    assert ".Solenoid = 3" in rec and "MagnetW2.Solenoid = 2" in out
+    old = tmp_path / "The Beatles_007 (PAD).script.vbs"
+    old.write_text("With mRecordMagnet\n\t.InitMagnet PadRecordMagnet, 30\n\t.GrabCenter = True\nEnd With\n",
+                   encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), "The Beatles_007 (PAD).vpx", m["repatch"]) == [
+        "the record's magnet catches the ball and drops it down the middle"]
+    old.write_text(out, encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), "The Beatles_007 (PAD).vpx", m["repatch"]) == []
+
+
 # ------------------------------------------------ the table generator -----
 
 MINI_TABLES = {

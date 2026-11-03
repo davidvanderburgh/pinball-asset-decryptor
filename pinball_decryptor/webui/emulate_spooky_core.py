@@ -163,11 +163,38 @@ def rig_available():
 
 
 def platform_ok():
-    """watch.sh runs as root, and only WSL gives the app a root without a
-    password prompt (``webui/rig.rig_cmd_root``) - so Windows only.  A
-    function, not an inline test, so tests stub THIS rather than faking
-    ``sys.platform``."""
-    return sys.platform == "win32"
+    """watch.sh runs as root: WSL gives the app a root without a password
+    prompt (``webui/rig.rig_cmd_root``), and on a Mac the rig runs in a
+    container where it is root (``tools/spooky_emu/docker/spkbox.sh``,
+    PAD-953).  A function, not an inline test, so tests stub THIS rather
+    than faking ``sys.platform``."""
+    return sys.platform in ("win32", "darwin")
+
+
+def in_box():
+    """Does this machine run the rig in the container (macOS)?  Its own
+    function for the same reason as :func:`platform_ok`."""
+    return sys.platform == "darwin"
+
+
+#: The box's screen, which macOS Screen Sharing opens: the game and the
+#: virtual playfield side by side (spkbox.sh: port 5901, beside the Spike 2
+#: box's 5900; the password because Screen Sharing refuses a VNC server
+#: with none).
+BOX_VNC_URL = "vnc://:pinball@localhost:5901"
+
+
+def box_script():
+    return os.path.join(rig_dir(), "docker", "spkbox.sh")
+
+
+def box_cmd(script, *args, env=()):
+    """The command that runs *script* of the rig in the Mac's container:
+    spkbox.sh takes the rig's own script names and forwards the settings it
+    is given in its environment into the box (a ``docker run -e`` and not an
+    ``env`` around docker, which would set them on the docker client)."""
+    return (["/usr/bin/env"] + list(env)
+            + ["bash", box_script(), script] + [str(a) for a in args])
 
 
 def rig_distro():
@@ -187,10 +214,15 @@ def _rig_kw(kw):
 
 
 def rig_cmd(*args, **kw):
+    if in_box():
+        return box_cmd(*args, env=rigslot.rig_env() + list(kw.get("env") or ()))
     return _rig.rig_cmd(rig_dir(), *args, **_rig_kw(kw))
 
 
 def rig_cmd_root(*args, **kw):
+    """As root - in the Mac's container every script already is."""
+    if in_box():
+        return rig_cmd(*args, **kw)
     return _rig.rig_cmd_root(rig_dir(), *args, **_rig_kw(kw))
 
 
@@ -199,6 +231,9 @@ def state_text(info):
     if not info:
         return "Checking…", ""
     if info.get("wsl") != "1":
+        if in_box():
+            return ("Docker not answering",
+                    "The game runs in a Linux container on this Mac.")
         return ("WSL not answering",
                 "The game runs inside WSL, the app's Linux.")
     if info.get("running") == "1":

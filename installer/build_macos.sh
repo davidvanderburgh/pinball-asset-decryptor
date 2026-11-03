@@ -114,6 +114,16 @@ pyinstaller \
     `# The Dutch Pinball rig, for the Big Lebowski Multi-boot tab (PAD-853),` \
     `# staged into the tab's container like the others (multiboot_docker._RIGS).` \
     --add-data "$ROOT_DIR/tools/dp_emu:tools/dp_emu" \
+    `# The Spooky rig (PAD-953): the Emulate Spooky tab runs it in a container` \
+    `# (tools/spooky_emu/docker/spkbox.sh), which mounts it with the rigs it` \
+    `# borrows from - proc_emu (the P-ROC board), ap_emu (the games' Python and` \
+    `# the playfield window), rigboard.sh - and the Spooky plugin's games.py,` \
+    `# read from disk by the rig's python3 for the update files' keys.` \
+    --add-data "$ROOT_DIR/tools/spooky_emu:tools/spooky_emu" \
+    --add-data "$ROOT_DIR/tools/proc_emu:tools/proc_emu" \
+    --add-data "$ROOT_DIR/tools/ap_emu:tools/ap_emu" \
+    --add-data "$ROOT_DIR/tools/rigboard.sh:tools" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/games.py:pinball_decryptor/plugins/spooky" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/pck_directory.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \

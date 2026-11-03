@@ -34,6 +34,9 @@ SPP_RIG=$SPP_ROOT/rig$SPP_SLOT
 SPP_PY=${SPP_PY:-/var/tmp/pad_ap/py27}
 SPP_PY3=${SPP_PY3:-/var/tmp/pad_ap/py3}
 SPP_DISPLAY=${SPP_DISPLAY:-:$((200 + SPP_SLOT))}
+# The PulseAudio server a run with sound plays to: WSLg's, or the Mac
+# container's own (../docker/entrypoint.sh, PAD-953).
+SPP_PULSE=${PAD_PULSE_SOCK:-/mnt/wslg/PulseServer}
 
 # The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
 # this rig's runs where the triage dashboard and the app can see them.

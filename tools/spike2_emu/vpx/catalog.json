@@ -8,7 +8,8 @@
     "(what a .vpxmap.json patcher bridges). `faithful`: the table is the machine's own layout, so the real game's",
     "switches and inserts fit it; a themed tribute of the film or band is not. `map`: the kit's map for it, when there",
     "is one. VPUniverse and VPForums downloads take a free account.",
-    "`needs`: what playing the real game would take on this PC however a bridge is built (JJP: the machine's own security key)."
+    "`needs`: what playing the real game would take on this PC however a bridge is built (JJP: the machine's own security key).",
+    "`no_game`: why no table can ever play that title's real game on this PC, whatever map is written (PAD-952)."
   ],
   "platforms": {
     "spike2": {
@@ -44,8 +45,8 @@
     },
     "spooky": {
       "name": "Spooky",
-      "runs": "no emulator behind a table yet: the tribute's own script plays",
-      "bridge": "none"
+      "runs": "PAD's own emulator behind the table for Halloween and Ultraman (PAD.Controller); the other tables' own scripts play",
+      "bridge": "pad"
     },
     "bof": {
       "name": "Barrels of Fun",
@@ -328,7 +329,8 @@
       "url": "https://vpuniverse.com/files/file/27073-americas-most-haunted-nfozzy/",
       "kind": "tribute",
       "faithful": true,
-      "notes": "Backglass separate (file 10686)."
+      "notes": "Backglass separate (file 10686).",
+      "no_game": "Its game cannot run on this PC: America's Most Haunted's update holds the screen and sound files only, not the game program, so no table can play the real game."
     },
     {
       "platform": "spooky",
@@ -340,7 +342,8 @@
       "url": "https://vpuniverse.com/files/file/14359-total-nuclear-annihilation-spooky-2017-vpw/",
       "kind": "tribute",
       "faithful": true,
-      "notes": "Backglass in the download; the game's own DMD media and sounds with Scott Danesi's blessing."
+      "notes": "Backglass in the download; the game's own DMD media and sounds with Scott Danesi's blessing.",
+      "no_game": "Its game cannot run on this PC: TNA's game file is encrypted with a key nobody has found, so the app cannot read it, and no table can play the real game."
     },
     {
       "platform": "spooky",
@@ -364,7 +367,9 @@
       "url": "https://vpuniverse.com/files/file/16526-halloween-mm-edition/",
       "kind": "tribute",
       "faithful": false,
-      "notes": "'Inspired by' Spooky's; rules of its own."
+      "notes": "'Inspired by' Spooky's, not its layout; rules of its own. Ultraman is Halloween's code on the same wiring, so it plays on this table too.",
+      "title": "h78",
+      "map": "h78 and um: the real Halloween or Ultraman behind it (by place: GUESS marks to confirm)"
     },
     {
       "platform": "spooky",
@@ -380,7 +385,7 @@
     },
     {
       "platform": "spooky",
-      "game": "Domino's, Ultraman, Texas Chainsaw Massacre",
+      "game": "Domino's, Texas Chainsaw Massacre",
       "name": "",
       "by": "",
       "version": "",
@@ -388,7 +393,7 @@
       "url": "",
       "kind": "",
       "faithful": false,
-      "notes": "No table."
+      "notes": "No table. (Ultraman plays on the Halloween MM Edition table: it is Halloween's code on the same wiring.)"
     },
     {
       "platform": "bof",

@@ -125,7 +125,7 @@ def choose(fits, title=None, card=None):
         if want in by:
             return want, by[want]
     for t, info in fits:
-        if padlaunch.card_for(t):
+        if padlaunch.card_for(t, info.get("platform") or "spike2"):
             return t, info
     return fits[0]
 
@@ -308,6 +308,27 @@ def run(title, hidden=False, mute=False):
                          creationflags=_CREATE_NO_WINDOW)
         print("started %s on the Spike 1 rig from %s (log %s)" % (title, card, launch.logfile))
         return 0
+    if platform == "spooky":
+        # PAD-952: tools/spooky_emu's watch.sh with the title's update file,
+        # on a Spooky rig slot of the kit's
+        launch = padlaunch.SpookyLaunch(title, card)
+        other = launch.other_run()
+        if other:
+            print("%s is running on the Spooky rig's slot %s (%s); stop it first"
+                  % (title, other.get("slot"), other.get("label") or "the app"))
+            return 1
+        slot = launch.take_slot()
+        env, card_wsl = launch.env()
+        if hidden:
+            env = [e for e in env if not e.startswith("PAD_VISIBLE=")] + ["PAD_VISIBLE=0"]
+        if mute or hidden:
+            env = [e for e in env if not e.startswith("PAD_AUDIO=")] + ["PAD_AUDIO=0"]
+        cmd = launch.head() + env + ["bash", "%s/watch.sh" % launch.rig_wsl, card_wsl]
+        out = open(launch.logfile, "ab")
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                         creationflags=_CREATE_NO_WINDOW)
+        print("started %s on the Spooky rig's slot %d from %s (log %s)" % (title, slot, card, launch.logfile))
+        return 0
     launch = padlaunch.Launch(title, card)
     slot = launch.take_slot()
     env = launch.env()
@@ -341,6 +362,21 @@ def stop(title):
         launch.stop()
         print("stopped %s on the Spike 1 rig" % title)
         return 0
+    if platform_of(title) == "spooky":
+        import spkbridge
+        rec = spkbridge.board_record(title)
+        if not rec:
+            print("no Spooky run of %s on the board" % title)
+            return 1
+        if rec.get("label") != padlaunch.LABEL:
+            print("the Spooky run of %s is %s's, not the kit's; leaving it"
+                  % (title, rec.get("label") or "somebody"))
+            return 1
+        launch = padlaunch.SpookyLaunch(title, "", dist=rec.get("distro"))
+        launch.slot = int(rec.get("slot") or 0)
+        launch.stop()
+        print("stopped %s on the Spooky rig's slot %d" % (title, launch.slot))
+        return 0
     rec = Rig.board_run(title)
     if not rec:
         print("no run of %s on the board" % title)
@@ -364,7 +400,7 @@ def status():
     print("library: %s" % (os.environ.get("PAD_VPX_LIBRARY") or kit.get("library") or "(none)"))
     cards = kit.get("cards") or {}
     for t in sorted(set(maps()) | set(cards)):
-        c = padlaunch.card_for(t)
+        c = padlaunch.card_for(t, platform_of(t))
         print("  %-18s %s" % (t, c or "no card"))
     from padcontroller import Rig, BOARD
     try:

@@ -405,3 +405,77 @@ Was:
    Can Crusher) can be fitted the day the download is on the PC.
 3. **The Spike 1 inserts**: which matrix channel is which lamp (the lamp
    table's column/row to the node's channel), from the ELF or a run.
+
+## Spooky: Halloween and Ultraman behind marty02's table (PAD-952)
+
+David, 2026-11-02: "Add Halloween and TNA VPX support. They are now added to
+my originals folder. Complete the mapping and integration for them", then
+"And America's Most Haunted", and "Ultraman and Halloween are rethemes. Both
+codes can run on the same table."
+
+What can play behind a table depends on whether the real game runs here:
+
+* **Halloween and Ultraman** run on tools/spooky_emu's Pinotaur board
+  (PAD-268, PAD-316), so they are bridged like Spike 1. `spkbridge.py` is the
+  Spooky half: the board (`spkwarden.Board.bridge_loop`) writes `vpxhw.state`
+  (s1bridge's layout, magic "SPHW": switches, every LED's RGB, coils) and
+  reads `vpxsw.input` (the bitmap the table holds, "SPSW") in its rig folder;
+  `vpxball.off` (written at attach) makes its trough, lanes and coil-made
+  switches stand aside for the table's. A switch, coil and LED are the game's
+  own numbers; Halloween lifts its two subways with servos 0 and 1, published
+  as coils 32 and 33 (up at 90 degrees or more). The board publishes a
+  flipper's coils on while its button is held (no ids needed controller
+  side). `run_game.sh` posts the rig folder as the board record's `root`;
+  `padlaunch.SpookyLaunch` starts watch.sh with the title's update file
+  (`code_H78.pkg` / `code_UM.pkg`, found in the maker's folder beside
+  Stern's: images/Spooky) on the kit's slots 7..4. padcontroller's Spike 1
+  paths take any "slot platform" (`rigmod`: s1bridge or spkbridge); a map's
+  cabinet can name the coin door's buttons (`service_select` ...: MENU
+  ENTER, VOLUME UP / DOWN, MENU BACK); a Spooky lamp marked `rgb` is one LED
+  lit in its own colour.
+* **The table**: marty02's "Halloween MM Edition" 3.1 is JPSalas' template
+  dressed as Halloween, not the machine's layout. `gen_halloween_maps.py`
+  writes `h78.shadow.json` and `um.shadow.json` (one table, two titles,
+  Halloween preferred) and says how each object was matched: the three
+  left-channel kickers are the three left "hedge" scoops into LEFT SUBWAY
+  1-4 (one stack, the left lifter lets one out of Kicker003); K1D is the
+  lower right scoop into the right lifter; the pyramid kicker is the MID PF
+  SCOOP; the Jungle three-bank is the pumpkin bank (made while standing:
+  vpxshadow's new `drop` event with `up_closed`, and `drop_resets` for the
+  bank reset coil); feeders (`saucers.<k>.feeders`) let several holes fill
+  one lane. Eleven of marty's lights sit where the game has the insert
+  (shoot again, the bank, the spinner, outlanes, hedge progress). Coverage
+  38%: the rest are parts the table does not have (the drop targets of the
+  middle and upper playfield, the crossover, most inserts).
+* **Total Nuclear Annihilation**: a P-ROC game whose `tna-gamecode.pkg` is
+  encrypted with a key nobody has (neither known Spooky key opens it), so
+  its game never runs here and no map can put it behind VPW's table.
+* **America's Most Haunted**: a pinHeck game whose update holds the
+  Propeller's media only, not the PIC32 program (tools/pinheck_emu), so the
+  same.
+  The catalogue's `no_game` says so for both; their downloads' rows read
+  "Author's rules" with the reason, and Play opens the download as it is
+  (`vpxsetup.py open_download`: never modified).
+
+**The tab**: Spooky is BRIDGED; its update files count as its cards; the
+downloads list (and the folder watch) reads the folders directly in the
+tables folder too, where David keeps his (`originals`); vpxauthor reads a
+Spooky machine from the rig profile (switches; `PINOTAUR_COILS` and the two
+lifter servos added to spktitles) and the prepared build's
+`config/lightconfig.json`, so the Coverage column and the authors' card
+know h78 and um.
+
+**Proof** (the rig, PAD-Runtime slot 7, hidden and muted): Halloween v1.18
+and Ultraman v1.18 started by watch.sh from the worktree; PAD.Controller's
+Bridge driven from Python as a table drives it, the trough held as
+core.vbs's ball stack keeps it. Attached at once from the board record;
+124 LEDs lit in attract; coin + Start fired the trough coil (solenoid 1)
+0.2 s later; a held left flipper button read solenoid 48 on, off on release;
+a sling hit fired the sling coil; LEFT BOTTOM SCOOP + LEFT SUBWAY 1 raised
+the left lifter (solenoid 4) 2.3 s later; the MID PF SCOOP fired
+middle_scoop; switches scored (71,750 -> 93,500 on the game's screen);
+a drain had the next ball served (and the ball save's launch coil, solenoid
+2). Ultraman the same on the same map. The patched table verifies
+(`vpxfile verify`) and its script compiles (cscript reaches its first
+runtime line). Not run: the table in Visual Pinball itself (it would take
+David's desktop); every GUESS mark is what a game on the table will tell.

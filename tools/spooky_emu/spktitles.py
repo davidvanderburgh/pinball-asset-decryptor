@@ -93,6 +93,23 @@ PINOTAUR_SWITCHES = {
             84: "LAUNCH BUTTON", 85: "TILT", 87: "START BUTTON",
         }
 
+# Halloween v1.18.1's coils (CoilConfig.cs; 8 and 10 are unused) - Ultraman
+# names the same ones - and the servos that lift its two subways
+# (subwayMode.cs), which a Visual Pinball table's controller sees as coils
+# 32 + n (PAD-952, tools/spike2_emu/vpx/spkbridge.py).
+PINOTAUR_COILS = {
+            0: "UPPER FLIPPER LEFT", 1: "UPPER FLIPPER LEFT LOW",
+            2: "UPPER FLIPPER RIGHT", 3: "UPPER FLIPPER RIGHT LOW",
+            4: "UPPER DROP RESET", 5: "MIDDLE SCOOP", 6: "MIDDLE DROP RESET",
+            7: "MIDDLE DROP KNOCKDOWN", 9: "RIGHT SLING",
+            11: "BANK TARGET RESET", 12: "RIGHT FRONT DROP KNOCKDOWN",
+            13: "RIGHT FRONT DROP RESET", 14: "RIGHT FLIPPER HIGH",
+            15: "RIGHT FLIPPER LOW", 16: "LEFT SLING", 17: "CROSSOVER DUMP",
+            18: "TROUGH", 19: "LEFT FLIPPER HIGH", 20: "LEFT FLIPPER LOW",
+            21: "LAUNCH", 22: "KNOCKER", 23: "SHAKER",
+        }
+PINOTAUR_SERVOS = {0: "LEFT SUBWAY LIFTER", 1: "RIGHT SUBWAY LIFTER"}
+
 TITLES = {
     # Beetlejuice v2026.09.15.11 (Switches.cs).
     "bj": {
@@ -343,6 +360,7 @@ TITLES = {
                     "enter": 60, "back": 63, "up": 61, "down": 62,
                     "lflip": 81, "rflip": 80, "ulflip": 83, "urflip": 82},
         "switches": PINOTAUR_SWITCHES,
+        "coils": PINOTAUR_COILS, "servos": PINOTAUR_SERVOS,
     },
     # Ultraman v1.18 (SwitchConfig.cs, CoilConfig.cs, VirtualCoil.cs):
     # Halloween's code base ("H78UM") on the same Pinotaur board, wired the
@@ -364,6 +382,7 @@ TITLES = {
                     "enter": 60, "back": 63, "up": 61, "down": 62,
                     "lflip": 81, "rflip": 80, "ulflip": 83, "urflip": 82},
         "switches": PINOTAUR_SWITCHES,
+        "coils": PINOTAUR_COILS, "servos": PINOTAUR_SERVOS,
     },
 }
 

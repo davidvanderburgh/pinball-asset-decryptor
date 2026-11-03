@@ -580,15 +580,98 @@ def read_machine_spike1(title, elf, switchmap=""):
             "switches": switches, "coils": coils, "inserts": inserts}
 
 
+# ------------------------------------------------ Spooky titles (PAD-952) --
+#
+# A Spooky game's switches and coils are its rig profile's
+# (tools/spooky_emu/spktitles.py: SwitchConfig.cs and CoilConfig.cs, by
+# number); its LEDs are the update's own config/lightconfig.json, read from
+# the rig's prepared build when one is on this PC.
+
+def _spktitles():
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.dirname(HERE)), "spooky_emu", "spktitles.py")
+    spec = importlib.util.spec_from_file_location("spktitles", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+#: the titles a Visual Pinball table plays on the Spooky rig (padlaunch's
+#: update files): the authors' card and the coverage know them
+def spooky_titles():
+    import padlaunch
+    return sorted(t for t in padlaunch.SPOOKY_UPDATES if padlaunch.card_for(t, "spooky"))
+
+
+def spooky_lightconfig(title):
+    """The prepared build's config/lightconfig.json for `title` on this PC
+    (PAD_SPOOKY_CACHE, else each distro's /var/tmp/pad_spooky/cache), or ""."""
+    import glob
+    roots = [os.environ["PAD_SPOOKY_CACHE"]] if os.environ.get("PAD_SPOOKY_CACHE") else []
+    if not roots:
+        try:
+            import padlaunch
+            for dist in padlaunch.distros():
+                roots.append(_win(dist, "/var/tmp/pad_spooky/cache"))
+        except Exception:                                   # noqa: BLE001
+            pass
+    for root in roots:
+        found = sorted(glob.glob(os.path.join(root, title + "_*", "config", "lightconfig.json")))
+        if found:
+            return found[-1]
+    return ""
+
+
+#: Spooky cabinet switches by name: a table does not owe them
+_SPOOKY_CABINET = re.compile(r"COIN|MENU|VOLUME|FLIPPER BUTTON|LAUNCH BUTTON|START BUTTON|^TILT$", re.I)
+
+
+def read_machine_spooky(title, lights=None):
+    """The machine of a Spooky title, in read_machine's shape: the switch,
+    coil and LED numbers are the game's own (spkbridge.py), so a switch's
+    id is its number, a coil is (0, n) - a subway servo (0, 32 + s) - and
+    an LED n is (n // 64, n % 64). Nothing placed."""
+    prof = _spktitles().TITLES[title]
+    switches = []
+    for n, name in sorted(prof["switches"].items()):
+        kind = "cabinet" if _SPOOKY_CABINET.search(name) else switch_kind(name)
+        switches.append({"id": n, "num": n, "node": None, "bit": None, "name": name, "kind": kind,
+                         "x": None, "y": None, "where": "cabinet" if kind == "cabinet" else "unplaced"})
+    coils = [{"name": name, "node": 0, "index": n, "kind": coil_kind(name), "x": None, "y": None,
+              "number": 1000 + n} for n, name in sorted((prof.get("coils") or {}).items())]
+    coils += [{"name": name, "node": 0, "index": 32 + s, "kind": "other", "x": None, "y": None,
+               "number": 1032 + s} for s, name in sorted((prof.get("servos") or {}).items())]
+    lights = spooky_lightconfig(title) if lights is None else lights
+    inserts = []
+    try:
+        table = json.load(open(lights, encoding="utf-8")) if lights else {}
+    except (OSError, ValueError):
+        table = {}
+    for key, v in sorted(table.items(), key=lambda kv: kv[1].get("num", 0)):
+        n = int(v.get("num", 0))
+        nm = v.get("label") or key
+        strip = "light_strip" in nm.lower()          # the playfield's edge strips: lit by shows, not inserts
+        inserts.append({"name": nm, "leds": [(n // 64, n % 64)], "names": [nm], "x": None, "y": None,
+                        "image": "-", "where": "cabinet" if strip else "playfield", "rgb": True,
+                        "lamp": lamp_number(n // 64, n % 64)})
+    return {"title": title, "platform": "spooky", "binary": "Assembly-CSharp.dll", "image": "",
+            "image_size": None, "tables_from": os.path.dirname(os.path.dirname(lights)) if lights else "",
+            "have": {"device_xy.txt": True, "led_io.txt": bool(table), "switch_list.txt": True},
+            "positions": False, "switches": switches, "coils": coils, "inserts": inserts}
+
+
 def machine_for(title, tables_dir=None):
     """The machine of any title on this PC: a Spike 2 one from its device
-    tables, a Spike 1 one from its ELF; None when neither is here."""
+    tables, a Spike 1 one from its ELF, a Spooky one from its rig profile;
+    None when none is here."""
     files = find_tables(title, tables_dir)
     if "device_xy.txt" in files:
         return read_machine(os.path.dirname(files["device_xy.txt"]), title, files)
     src = spike1_sources(title) if not tables_dir else {}
     if src:
         return read_machine_spike1(title, src["elf"], src["switchmap"])
+    if not tables_dir and title in spooky_titles():
+        return read_machine_spooky(title)
     return None
 
 
@@ -697,6 +780,7 @@ def titles_with_tables(tables_dir=None):
                 titles.add(n)
     if not tables_dir:
         titles |= set(spike1_titles())          # PAD-943: the Spike 1 games extracted here
+        titles |= set(spooky_titles())          # PAD-952: the Spooky updates in the library
     return sorted(titles)
 
 
@@ -1435,7 +1519,10 @@ def title_platforms(titles):
     """{title: platform} for the titles that are not Spike 2's (PAD-943:
     the tab shows its manufacturer's own)."""
     s1 = set(spike1_titles())
-    return {t: "spike1" for t in titles if t in s1}
+    spk = set(spooky_titles())
+    out = {t: "spike1" for t in titles if t in s1}
+    out.update({t: "spooky" for t in titles if t in spk})
+    return out
 
 
 def main(argv):

@@ -52,8 +52,9 @@ INTRO = ("Play a Visual Pinball table with the real game behind it: the "
 #: their own; every other manufacturer's key is its platform in the kit's
 #: catalogue (catalog.json). The platforms the app's emulator plays a table
 #: on (a map and a bridge) are BRIDGED; the rest list their tables and say
-#: they play as their authors wrote them.
-BRIDGED = ("spike2", "spike1")
+#: they play as their authors wrote them. PAD-952: Spooky's Halloween and
+#: Ultraman play behind marty02's Halloween table (spkbridge.py).
+BRIDGED = ("spike2", "spike1", "spooky")
 STERN_ERAS = ("spike2", "spike1")
 
 
@@ -80,7 +81,8 @@ CARDS_TIP = ("The folder with your SD card images (the normal .raw files, named 
              "newest build in this folder.")
 
 # PAD-941: the card for whoever builds or finishes a table
-AUTHORS_INTRO = ("Building a table of a Stern game, or finishing one? The game sees the table only "
+# (PAD-952: not "a Stern game" - the card is on the Spooky tab too)
+AUTHORS_INTRO = ("Building a table of one of these games, or finishing one? The game sees the table only "
                  "through its own switches, coils and lights. The checklist lists every one the game "
                  "has, with its number and what a table does for it; checked against a table it "
                  "marks what that table still lacks.")
@@ -229,10 +231,18 @@ class VpxTab(TabService):
             return None
         sig = []
         for n in names:
-            if n.lower().endswith(".vpx"):
+            path = os.path.join(d, n)
+            # PAD-952: the downloads in the folders in it too (originals)
+            subs = []
+            if os.path.isdir(path):
                 try:
-                    st = os.stat(os.path.join(d, n))
-                    sig.append((n, st.st_size, int(st.st_mtime)))
+                    subs = [os.path.join(n, m) for m in os.listdir(path) if m.lower().endswith(".vpx")]
+                except OSError:
+                    subs = []
+            for rel in subs or ([n] if n.lower().endswith(".vpx") else []):
+                try:
+                    st = os.stat(os.path.join(d, rel))
+                    sig.append((rel, st.st_size, int(st.st_mtime)))
                 except OSError:
                     continue
         return tuple(sorted(sig))
@@ -992,6 +1002,22 @@ class VpxTab(TabService):
             if res == "ok":
                 self._say("opening %s. The game starts by itself: a window where its screen goes "
                           "shows how far it is." % name)
+            else:
+                self._say(res, "error")
+        return self._start("Opening the table", work)
+
+    @rpc
+    def play_download(self, path):
+        """PAD-952: a download whose real game can never run on this PC (TNA,
+        America's Most Haunted), opened in Visual Pinball as it is."""
+        if not path:
+            return False
+
+        def work():
+            got = self._kit("vpxsetup.py", ["open_download", path])
+            res = got.get("result") or got.get("error")
+            if res == "ok":
+                self._say("opening %s as its author wrote it." % os.path.basename(path))
             else:
                 self._say(res, "error")
         return self._start("Opening the table", work)

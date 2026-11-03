@@ -95,9 +95,12 @@ def _version_key(path):
 
 
 #: what a title's map says it runs on (`platform`), and the rig that is
-PLATFORM_NAMES = {"spike2": "Spike 2", "spike1": "Spike 1"}
+PLATFORM_NAMES = {"spike2": "Spike 2", "spike1": "Spike 1", "spooky": "Spooky"}
 #: the card images a platform's library holds, by glob after `<title>-`
 CARD_GLOBS = {"spike2": ("*.sdcard.raw",), "spike1": ("*.iso",)}
+#: PAD-952: a Spooky title boots its UPDATE file (tools/spooky_emu prepares
+#: it), named by Spooky, not after the title: the rig's title key -> globs
+SPOOKY_UPDATES = {"h78": ("code_H78*.pkg",), "um": ("code_UM*.pkg",)}
 
 
 def card_for(title, platform="spike2"):
@@ -114,7 +117,10 @@ def card_for(title, platform="spike2"):
     for lib in libraries(platform, kit):
         # by name in any case, as Windows does: a Spike 1 card is GOT_LE-1_37.iso
         # for got_le, and Linux/macOS glob tells the cases apart (PAD-951)
-        pats = [("%s-%s" % (title, g)).lower() for g in CARD_GLOBS.get(platform, CARD_GLOBS["spike2"])]
+        if platform == "spooky":
+            pats = [g.lower() for g in SPOOKY_UPDATES.get(title, ())]
+        else:
+            pats = [("%s-%s" % (title, g)).lower() for g in CARD_GLOBS.get(platform, CARD_GLOBS["spike2"])]
         found = [os.path.join(lib, n) for n in sorted(os.listdir(lib))
                  if any(fnmatch.fnmatchcase(n.lower(), p) for p in pats)]
         if found:
@@ -141,14 +147,23 @@ def libraries(platform="spike2", kit=None):
     lib = kit.get("library")
     if lib:
         out.append(lib)
-        if platform != "spike2":
+        if platform == "spooky":
+            # PAD-952: the maker's own folder beside Stern's (David's library:
+            # images/Stern/spike2 and images/Spooky)
+            out.append(os.path.join(os.path.dirname(os.path.dirname(lib.rstrip("\\/"))), "Spooky"))
+        elif platform != "spike2":
             out.append(os.path.join(os.path.dirname(lib.rstrip("\\/")), platform))
     return [d for d in out if os.path.isdir(d)]
 
 
 def launch_for(platform, title, card):
-    """The launch for a title's platform: Spike 2's Launch, or Spike1Launch."""
-    return Spike1Launch(title, card) if platform == "spike1" else Launch(title, card)
+    """The launch for a title's platform: Spike 2's Launch, Spike1Launch or
+    SpookyLaunch."""
+    if platform == "spike1":
+        return Spike1Launch(title, card)
+    if platform == "spooky":
+        return SpookyLaunch(title, card)
+    return Launch(title, card)
 
 
 def card_places(title, platform="spike2"):
@@ -610,6 +625,92 @@ class Spike1Launch:
             log("stopped %s on the Spike 1 rig" % self.title)
         except Exception as exc:                            # noqa: BLE001
             log("stop of the Spike 1 run failed: %s" % exc)
+        if self.proc is not None:
+            try:
+                self.proc.wait(timeout=10)
+            except Exception:                               # noqa: BLE001
+                pass
+        self.proc = None
+
+
+# ----------------------------------------------------------------- Spooky --
+
+class SpookyLaunch(Spike1Launch):
+    """One Spooky run started for a table (PAD-952): tools/spooky_emu's
+    watch.sh with the title's update file (code_H78.pkg), as the app's
+    Spooky Emulate tab starts one (`wsl -u root`), visible and with sound,
+    on a rig slot no other Spooky run holds. The game draws its own screen
+    in its own window; watch.sh returns at attract and the run lives on."""
+
+    #: the Spooky rig's slots the kit takes, the highest first (the app's
+    #: Emulate tab starts at 0)
+    SLOTS = (7, 6, 5, 4)
+
+    def __init__(self, title, card, dist=None, minutes=240):
+        super().__init__(title, card, dist, minutes)
+        self.slot = None
+        self.rig_wsl = padpath.to_wsl(os.path.join(os.path.dirname(rig_dir()), "spooky_emu"),
+                                      self.distro)
+
+    def other_run(self):
+        """A Spooky run of this title already up that is not the kit's: one
+        title runs once (its rig folder is per slot, its saved game is not)."""
+        import spkbridge
+        rec = spkbridge.board_record(self.title)
+        if rec and rec.get("label") != LABEL:
+            return rec
+        return None
+
+    def take_slot(self):
+        import spkbridge
+        for n in self.SLOTS:
+            if spkbridge.board_record(slot=n) is None:
+                self.slot = n
+                return n
+        raise RuntimeError("every Spooky rig slot the kit uses (%s) is running a game; stop one "
+                           "first" % ", ".join(str(n) for n in self.SLOTS))
+
+    def env(self):
+        card = padpath.to_wsl(self.card, self.distro)
+        env = ["PAD_LABEL=%s" % LABEL, "PAD_VISIBLE=1", "PAD_AUDIO=1", "PAD_SLOT=%d" % self.slot]
+        if sys.platform == "win32":
+            env.append("PAD_BOARD=%s" % padpath.to_wsl(BOARD, self.distro))
+        return env, card
+
+    def start(self):
+        why = no_linux(self.distro)
+        if why:
+            log(why)
+            raise RuntimeError(why)
+        other = self.other_run()
+        if other:
+            raise RuntimeError("%s is running on the Spooky rig's slot %s (%s); stop it first"
+                               % (other.get("title") or self.title, other.get("slot"),
+                                  other.get("label") or "the app"))
+        if self.slot is None:
+            self.take_slot()
+        env, card = self.env()
+        cmd = self.head() + env + ["bash", "%s/watch.sh" % self.rig_wsl, card]
+        out = open(self.logfile, "ab")
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                                     creationflags=_CREATE_NO_WINDOW)
+        log("started %s on the Spooky rig's slot %d from %s (distro %s, log %s)"
+            % (self.title, self.slot, self.card, self.distro or "default", self.logfile))
+        return self.slot
+
+    def alive(self):
+        if self.proc is not None and self.proc.poll() is None:
+            return True
+        import spkbridge
+        return spkbridge.board_record(self.title, slot=self.slot) is not None
+
+    def stop(self):
+        try:
+            _run(self.head() + ["PAD_SLOT=%d" % (self.slot or 0), "bash", "%s/stop.sh" % self.rig_wsl],
+                 timeout=120)
+            log("stopped %s on the Spooky rig's slot %s" % (self.title, self.slot))
+        except Exception as exc:                            # noqa: BLE001
+            log("stop of the Spooky run failed: %s" % exc)
         if self.proc is not None:
             try:
                 self.proc.wait(timeout=10)

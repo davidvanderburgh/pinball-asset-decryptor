@@ -277,7 +277,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 177 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 178 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -418,6 +418,7 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_lamp_flash(shots, rgb, ms)` | PAD-415: a hit answers - the inserts of `shots` strobe `rgb` (60 ms on, 60 off) for `ms` (480 when 0, 2000 at most) over whatever the mode holds them in, then show it again; one it does not hold is held for the strobe only and handed back after it; one it releases mid-strobe finishes the strobe first. How many strobe | F (a scoring shot), the kit's `kit_hit` (every example's counted hit) | PAD-415, emulator (stock Premium/LE 1.16 card build: the shim's LED view had the hit insert's three channels flip 11 times in the 1.2 s after the hit) |
 | `pm_lamp_priority(p)` | the calling mode's lamp layer priority, 1-255 (255 when never called); its held inserts move to that layer | F `lamp_probe.c` | item mode-leds RUN 5 (`prio 1` put the game's own layer back on MASER in a battle) |
 | `pm_lamp_layers(prio, max)` | the game's lamp layers now, bottom to top, 0x100 added for ours; -1 without the port's layer list | `lamp_probe.c` | item mode-leds RUN 5 (the layer lists in MODE_SDK.md) |
+| `pm_lamp_game_rgb(i)` | PAD-945: what the GAME shows on insert i now - the top of its own layers holding each light, none of ours - as 0xRRGGBB (a one-light insert: its level as a grey); -1 when i is not an insert or the port names no lamp layers | R (a sound on a shot by the color of its light) | PAD-945 round 2, emulator (Venom LE 1.07, Grendel Mode: `0000ff`, `c02000`, `ff0000` read off the hit inserts) |
 | `pm_display_priority(priority)` | PAD-353: the running mode's display priority (1-255) is NOTED, 0 gives it up; nothing of the game's is ever made to wait, refused, dropped or hidden for it (a held Magna-Grab screen kept Godzilla's magnet on). 1 = noted (the runtime watches the game's displays for `pm_display_covered`); 0 without the port's display lines or when the mode is not running | F | item 154 display: Premium 1.16 r2-r6, Pro 1.15 r5 (the hold); withdrawn by PAD-353 (MODE_SDK.md "Display priority") |
 | `pm_display_covered()` | 1 while a display of the game's has the screen - an effect over the layered display, or any layered foreground (a framed award's words sit where a mode's title does) - for the mode that noted a priority; a mode keeps its words off the glass while it is 1 | none (`display_test_mode.c`); `examples/intricate_kit.h` (PAD-353) | item 154 display r4; PAD-353 (every game display counts now: none is held back) |
 | `pm_end_holding(ms)` | the running mode ends (as `pm_end`: another may begin at once) and `pm_display_covered` keeps watching for `ms` more, for its ending clip and total; given up when the time is over, another mode begins or the game ends. Nothing of the game's waits for it (PAD-353) | `examples/intricate_kit.h` (`kit_end_after`) | hud-layers run t8; PAD-353 (nothing of the game's waits for it) |

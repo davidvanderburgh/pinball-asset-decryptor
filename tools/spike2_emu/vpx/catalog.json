@@ -214,19 +214,7 @@
     },
     {
       "platform": "jjp",
-      "game": "Guns N' Roses",
-      "name": "GUNS EDITION LIMITED",
-      "by": "not named on the page",
-      "version": "2021",
-      "where": "VPUniverse",
-      "url": "https://vpuniverse.com/files/file/7254-guns-edition-limited/",
-      "kind": "mashup",
-      "faithful": false,
-      "notes": "JJP's look over Data East's 1994 game and ROM."
-    },
-    {
-      "platform": "jjp",
-      "game": "Elton John, Harry Potter, Pirates of the Caribbean, Toy Story 4, The Hobbit, Dialed In",
+      "game": "Guns N' Roses, Elton John, Harry Potter, Pirates of the Caribbean, Toy Story 4, The Hobbit, Dialed In",
       "name": "",
       "by": "",
       "version": "",
@@ -234,7 +222,7 @@
       "url": "",
       "kind": "",
       "faithful": false,
-      "notes": "No table: the community does not recreate machines still on sale, and the IP tributes that exist (Scottywic's Harry Potter, the 2005 Sonic) predate the machines."
+      "notes": "No table: the community does not recreate machines still on sale, and the IP tributes that exist (Scottywic's Harry Potter, the 2005 Sonic) predate the machines. The Guns N' Roses tables are Data East's 1994 game, not JJP's (PAD-959)."
     },
     {
       "platform": "ap",

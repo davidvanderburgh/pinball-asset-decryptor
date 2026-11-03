@@ -48,9 +48,15 @@ def _project(scratch):
     with open(os.path.join(dst, ".checksums.md5"), "w", encoding="utf-8") as f:
         f.writelines(lines)
     with open(os.path.join(dst, ".staged_changes.json"), "w", encoding="utf-8") as f:
+        # round 2: Left ramp in Grendel Mode, a sound per color of its light (a main without the colors
+        # reads the rows as three of the same shot and keeps the first)
+        ramp = {"mode": 16, "mode_name": "Grendel Mode", "switch": 98, "switch_name": "Left ramp made opto"}
         json.dump({"sound_modes": {"names": [], "slots": {}, "shots": [
+            dict(ramp, lit="blue", file=os.path.join(dst, "audio", "idx0006.wav")),
+            dict(ramp, lit="orange", file=os.path.join(dst, "audio", "idx0008.wav")),
+            dict(ramp, lit="red", file=os.path.join(dst, "audio", "idx0017.wav")),
             {"mode": 16, "mode_name": "Grendel Mode", "switch": 99, "switch_name": "Left orbit",
-             "file": os.path.join(dst, "audio", "idx0006.wav")}]}}, f, indent=2)
+             "file": os.path.join(dst, "audio", "idx0021.wav")}]}}, f, indent=2)
     return dst
 
 
@@ -119,7 +125,14 @@ def main():
             if item.count():
                 item.click()
                 time.sleep(1.5)
-                print("window:", page.locator(".modal").first.inner_text()[:400], flush=True)
+                print("window:", page.locator(".modal").first.inner_text()[:600], flush=True)
+                sels = page.locator(".modal select")
+                if sels.count() >= 3:                          # round 2: the color box, beside the shot
+                    sels.nth(0).select_option("16")
+                    sels.nth(1).select_option("98")
+                    time.sleep(0.3)
+                    sels.nth(2).select_option("purple")
+                    time.sleep(0.5)
             else:
                 page.keyboard.press("Escape")
                 time.sleep(0.8)

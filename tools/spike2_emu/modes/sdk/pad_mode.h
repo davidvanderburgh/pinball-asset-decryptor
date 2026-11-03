@@ -248,6 +248,9 @@ int pm_lamp_priority(unsigned priority);
 /* The game's lamp layers right now, bottom to top: each one's priority, with 0x100 added for a
  * layer of ours. Returns how many there are (up to max), or -1 without the port's layer list. */
 int pm_lamp_layers(unsigned *priorities, int max);
+/* PAD-945: what the GAME shows on insert i now - the top of its own layers holding each light, none of ours - as
+ * 0xRRGGBB (a one-light insert: its level as a grey); -1 when i is not an insert or the port names no lamp layers. */
+int pm_lamp_game_rgb(int i);
 
 /* ---- the display --------------------------------------------------------------------
  * A SCREEN of your own is a node the build added to the game's "hud" scene (the Modes

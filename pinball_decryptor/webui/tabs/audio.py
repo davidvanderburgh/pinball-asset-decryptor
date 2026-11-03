@@ -65,8 +65,10 @@ _ATTRACT_TIP = ("Sounds the machine plays when a flipper button is pressed in at
 #: PAD-945: what the Sounds on shots button and window say they do
 _SHOT_TIP = ("Sounds the machine plays when a shot is hit while one of the game's modes runs: "
              "pick the mode, the shot and the sound (one of the game's own, or a file of yours). "
-             "A sound plays whole, and a hit while the last one still plays adds no other. Write "
-             "puts them on the card.")
+             "A shot can have a sound for each color its light shows (a mode whose lit shots "
+             "change color with each level, say): the color it was lit when it was hit picks the "
+             "sound. A sound plays whole, and a hit while the last one still plays adds no other. "
+             "Write puts them on the card.")
 #: PAD-945: the most of them (sound_modes.SHOT_MAX)
 _SHOT_MAX = 32
 
@@ -3520,8 +3522,11 @@ class AudioTab(FindOriginalsMixin, TabService):
         if "shots_why" not in (self._sm_offer or {}) and not self._shots:
             return None
         tip = [_SHOT_TIP]
+        from ...plugins.stern.sound_modes import shot_lit_words
         for r in self._shots:
-            tip.append("%s in %s: %s." % (r["switch_name"], r["mode_name"], os.path.basename(r["file"])))
+            lit = shot_lit_words(r.get("lit"))
+            tip.append("%s%s in %s: %s." % (r["switch_name"], " (%s)" % lit if lit else "", r["mode_name"],
+                                             os.path.basename(r["file"])))
         if self._shots_why():
             tip.append(self._shots_why())
         return {"n": len(self._shots), "why": self._shots_why(), "tip": tip}
@@ -3543,18 +3548,24 @@ class AudioTab(FindOriginalsMixin, TabService):
             try:
                 got = _SMo.shot_choices(assets)
             except Exception as e:                      # noqa: BLE001 - said in the window
-                got = ("The game's modes and shots could not be read (%s)." % e, [], [])
+                got = ("The game's modes and shots could not be read (%s)." % e, [], [], set())
             self._shot_choices = (assets, got)
         return self._shot_choices[1]
 
     def _shots_rows(self):
-        why, modes, switches = self._shot_menus()
+        from ...plugins.stern.sound_modes import SHOT_LIT, shot_lit_words
+        why, modes, switches, lit = self._shot_menus()
         why = self._shots_why() or why
-        return {"rows": [{"k": k, "mode": r["mode_name"], "shot": r["switch_name"],
+        return {"rows": [{"k": k, "mode": r["mode_name"],
+                          "shot": r["switch_name"] + (" (%s)" % shot_lit_words(r.get("lit"))
+                                                      if r.get("lit") else ""),
                           "sound": os.path.basename(r["file"]), "gone": not os.path.isfile(r["file"])}
                          for k, r in enumerate(self._shots, 1)],
                 "modes": [{"value": str(i), "label": n} for i, n in modes],
                 "shots": [{"value": str(i), "label": n} for i, n in switches],
+                # round 2: the conditions on the shot's light, and the shots whose light can be read
+                "lits": [{"value": v, "label": shot_lit_words(v) or "any time"} for v in SHOT_LIT],
+                "lit_ok": sorted(str(i) for i in lit),
                 "pick": os.path.basename(self._shot_pick) if self._shot_pick else "",
                 "max": _SHOT_MAX, "why": why, "tip": _SHOT_TIP, "running": self._running()}
 
@@ -3566,11 +3577,13 @@ class AudioTab(FindOriginalsMixin, TabService):
 
     @rpc
     def shots_action(self, action):
-        """The Sounds on shots window: ``choose`` (pick the sound from a file), ``add:<mode>:<switch>``
-        (the picked sound on that shot of that mode), ``play:k`` (row k's sound in the Replacement
-        pane), ``off:k``, ``why``. Returns the window's rows."""
+        """The Sounds on shots window: ``choose`` (pick the sound from a file),
+        ``add:<mode>:<switch>[:<lit>]`` (the picked sound on that shot of that mode; round 2: only when its
+        light shows *lit*, one of :data:`.sound_modes.SHOT_LIT`), ``play:k`` (row k's sound in the
+        Replacement pane), ``off:k``, ``why``. Returns the window's rows."""
         kind, _c, rest = str(action or "").partition(":")
         a, _c, b = rest.partition(":")
+        b, _c, lit = b.partition(":")
         if kind == "why":
             why = self._shots_rows()["why"]
             if why:
@@ -3595,14 +3608,20 @@ class AudioTab(FindOriginalsMixin, TabService):
                 return got
             mode = {m["value"]: m["label"] for m in got["modes"]}.get(a)
             shot = {s["value"]: s["label"] for s in got["shots"]}.get(b)
-            if mode is None or shot is None:
+            if mode is None or shot is None or not any(x["value"] == lit for x in got["lits"]) \
+                    or (lit and b not in got["lit_ok"]):
                 return got
             row = {"mode": int(a), "mode_name": mode, "switch": int(b), "switch_name": shot,
                    "file": self._shot_pick}
-            self._shots = [r for r in self._shots if (r["mode"], r["switch"]) != (row["mode"], row["switch"])]
+            if lit:
+                row["lit"] = lit
+            key = (row["mode"], row["switch"], lit)
+            self._shots = [r for r in self._shots if (r["mode"], r["switch"], r.get("lit") or "") != key]
             self._shots.append(row)
-            self.log("Replace Audio: %s plays %s when %s is hit." % (mode, os.path.basename(self._shot_pick), shot),
-                     "info")
+            from ...plugins.stern.sound_modes import shot_lit_words
+            self.log("Replace Audio: %s plays %s when %s is hit%s." % (
+                mode, os.path.basename(self._shot_pick), shot,
+                " while it is %s" % shot_lit_words(lit) if lit else ""), "info")
             self._shot_pick = ""
             self._shots_changed()
             return self._shots_rows()
@@ -3614,8 +3633,11 @@ class AudioTab(FindOriginalsMixin, TabService):
             return self._shots_rows()
         r = self._shots[k - 1]
         if kind == "play":
+            from ...plugins.stern.sound_modes import shot_lit_words
+            lit = shot_lit_words(r.get("lit"))
             self._pane_load("rep", r["file"], autoplay=True,
-                            label="%s in %s: %s" % (r["switch_name"], r["mode_name"], os.path.basename(r["file"])))
+                            label="%s%s in %s: %s" % (r["switch_name"], " (%s)" % lit if lit else "",
+                                                      r["mode_name"], os.path.basename(r["file"])))
         elif kind == "off" and not self._running():
             del self._shots[k - 1]
             self.log("Replace Audio: %s no longer plays %s when %s is hit." % (

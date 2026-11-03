@@ -119,16 +119,21 @@ export default function Vpx() {
   const s = useNs("vpx");
   const [details, setDetails] = useState(false);
   const busy = !!s.busy;
-  // PAD-943: the tab is on every manufacturer the app emulates and shows that
-  // machine's own (Stern's eras are platforms of their own); a row or title
-  // that names no platform is Spike 2's. On a platform the app has no bridge
-  // for yet, the tables play as their authors wrote them: no Patch, no cards.
+  // PAD-958: the tab lists every machine's tables, whatever the manufacturer;
+  // the filter at the top narrows them to one machine (Stern's eras are
+  // machines of their own). A row or title that names no platform is Spike
+  // 2's. On a platform the app has no bridge for yet, the tables play as their
+  // authors wrote them: no Patch, no cards.
   const platform = s.platform || "";
   const plats = (s.catalog || {}).platforms || {};
-  const platName = (plats[platform] || {}).name || (platform === "spike2" ? "Stern Spike 2" : platform);
+  const nameOf = (k) => (plats[k] || {}).name || (k === "spike2" ? "Stern Spike 2" : k || "");
+  const shortOf = (k) => nameOf(k).replace(/^Stern /, "");
+  const platName = nameOf(platform);
   const bridged = s.bridged !== false;
-  const mine = (p) => !platform || (p || "spike2") === platform;
-  const tables = (s.tables || []).filter((t) => mine(t.platform));
+  const platOf = (p) => p || "spike2";
+  const mine = (p) => !platform || platOf(p) === platform;
+  const allTables = s.tables || [];
+  const tables = allTables.filter((t) => mine(t.platform));
   const patched = s.patched || [];
   const presets = s.presets || [];
   const titles = Object.keys(s.cards || {});
@@ -154,21 +159,31 @@ export default function Vpx() {
   // PAD-943: the person's own downloads in the folder: the one a known table's
   // map fits is that table's row (Patch takes it); the rest are rows of their
   // own, "no map yet", named after the catalogue's table where the name matches
-  const linked = new Set(tables.map((t) => t.download).filter(Boolean));
   // its row carries the author's description from the catalogue (name, by, where
   // from, platform, card) when the file's name says which table it is
-  const downloads = (s.downloads || []).filter((d) => !linked.has(d.path) && mine((d.catalog || {}).platform)).map((d) => {
+  // (a download another machine's table takes is that row's, filtered or not)
+  const allLinked = new Set(allTables.map((t) => t.download).filter(Boolean));
+  const allDownloads = (s.downloads || []).filter((d) => !allLinked.has(d.path));
+  const downloads = allDownloads.filter((d) => mine((d.catalog || {}).platform)).map((d) => {
     const c = d.catalog || {};
     return { name: c.name || d.name, by: c.by || "", where: c.where || "", output: d.file, patched: false,
-      extra: true, download: d, model: (c.platform_name || "").replace(/^Stern /, ""), card: d.card || "" };
+      extra: true, download: d, platform: c.platform || "", card: d.card || "" };
   });
   const rows = tables.concat(patched.filter((n) => !known.has(n)).map((n) => ({
     name: n.replace(/ \(PAD\)\.vpx$/i, ""), output: n, patched: true, extra: true })), downloads)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   const rtOk = s.runtime_state === "ready";
-  // the other platforms' tables are on their own manufacturer's tab now
-  const others = platform ? Object.keys(plats).filter((k) => k !== platform
-    && ((s.catalog || {}).tables || []).some((t) => t.platform === k && t.url)).map((k) => plats[k].name) : [];
+  // PAD-958: the filter's machines: the ones with a table here or one to
+  // download in the catalogue below, in the catalogue's order
+  const catTables = ((s.catalog || {}).tables || []).filter((t) => !t.complete && t.url);
+  const has = new Set(allTables.map((t) => platOf(t.platform))
+    .concat(allDownloads.map((d) => (d.catalog || {}).platform).filter(Boolean), catTables.map((t) => t.platform)));
+  const machines = Object.keys(plats).filter((k) => has.has(k)).concat([...has].filter((k) => !plats[k]));
+  if (platform && !machines.includes(platform)) machines.push(platform);
+  const filterOpts = [{ value: "", label: "All machines" }].concat(machines.map((k) => ({ value: k, label: nameOf(k) })));
+  // the rows the filter leaves out, to say so under the list
+  const hidden = platform ? allTables.length - tables.length
+    + allDownloads.filter((d) => !mine((d.catalog || {}).platform)).length : 0;
   // PAD-840: installed from here; the Emulate tab only offers it in some cases
   const rtFix = s.runtime_state === "absent" || s.runtime_state === "stale";
   const vpxOk = !!s.vpx && !s.vpx_old;
@@ -242,6 +257,10 @@ export default function Vpx() {
   return html`<div class="page vpx-page">
     ${s.sheet ? html`<${Sheet} d=${s.sheet} onClose=${() => call("vpx.close_sheet")} />` : null}
     <${PageHead} title="Visual Pinball" sub=${(s.intro || "").split("\n").map((l) => html`${l}<br />`)}>
+      <span class="small muted">Machine</span>
+      <${Select} sm width=${200} value=${platform} options=${filterOpts} cls="vpx-filter"
+        title="Every machine's tables are listed. Pick one to see only its tables, its games for table authors and its tables to download."
+        onChange=${(v) => call("vpx.set_filter", v)} />
       <${Chip} kind="info" sm>Preview<//>
       <${Button} kind="ghost" icon="refresh" disabled=${busy || !s.ok} onClick=${() => call("vpx.refresh")}>Check again<//>
       <${Button} kind="ghost" disabled=${busy || !s.ok} ...${tip({ head: "Restart WSL.", lines: [
@@ -337,6 +356,7 @@ export default function Vpx() {
         <div class="vpx-table vpx-head small muted">
           <span class="vpx-pic" ...${tip(s.pictures_tip)}></span>
           <span>Table</span><span class="vpx-by">By</span><span class="vpx-from">From</span>
+          <span class="vpx-machine">Machine</span>
           <span ...${tip("The machine the table plays as: the card image it boots is that model's.")}>Model</span>
           <span>Card image</span><span>Your copy</span>
           <span ...${tip("How much of the game the app's map for this table wires, from the game's own tables on this PC: switches, coils and inserts the table owes, less what the map leaves out. Click a row's for its checklist.")}>Coverage</span>
@@ -347,8 +367,9 @@ export default function Vpx() {
         <b class="vpx-name" ...${tip(t.extra && !t.download ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : "") + (t.download ? " (your file: " + t.download.file + ")" : ""))}>${t.name}</b>
         <span class="small vpx-by" ...${tip(t.by)}>${t.by}</span>
         <span class="small muted vpx-from" ...${tip(t.where)}>${t.where}</span>
+        <span class="small vpx-machine" ...${tip(t.extra && !t.platform ? "" : nameOf(platOf(t.platform)))}>${t.extra && !t.platform ? "" : shortOf(platOf(t.platform))}</span>
         <span class="small" ...${tip(fits(t).length > 1 ? playsAs(t) + "The table fits "
-            + fits(t).map((x) => t.models[x]).join(" or ") + "." : t.download ? "A " + t.model + " game: " + t.download.file : "")}>${t.extra ? t.model || "" : (t.models || {})[t.title] || ""}</span>
+            + fits(t).map((x) => t.models[x]).join(" or ") + "." : t.download && t.platform ? "A " + nameOf(t.platform) + " game: " + t.download.file : "")}>${t.extra ? "" : (t.models || {})[t.title] || ""}</span>
         <span class="small muted vpx-card" ...${tip(t.extra ? (t.card ? "Card: " + t.card : "") : t.card ? playsAs(t) + "Card: " + t.card
             : "No card image for " + fits(t).join(" or ") + " in your card folder yet.")}>${t.extra && !t.download ? ""
           : !t.card ? (t.extra ? "" : "No card yet") : base(t.card)}</span>
@@ -370,7 +391,7 @@ export default function Vpx() {
         ${missed(t) ? html`<div class="small vpx-stale">Your copy was patched before a fix: ${t.repatch.join("; ")}.
           Patch again to get it.</div>` : null}
       </div>`)}</div>` : s.loaded ? html`<div class="muted small">No tables${platform ? " for a " + platName + " machine in your folder yet" : ""}.</div>` : html`<${Skeleton} />`}
-      ${others.length ? html`<div class="small muted vpx-others">Tables of other machines are on their own manufacturer's Visual Pinball tab: ${others.join(", ")}.</div>` : null}
+      ${hidden ? html`<div class="small muted vpx-others">Only ${platName} tables are shown: ${hidden} more of other machines are under <a href="#" onClick=${(e) => { e.preventDefault(); call("vpx.set_filter", ""); }}>All machines</a>.</div>` : null}
     <//>
     <${Catalog} s=${s} platform=${platform} platName=${platName} />
   </div>`;
@@ -383,6 +404,7 @@ function Skeleton() {
     <span><span class="vpx-skel" style=${"width:" + (55 + (i * 17) % 35) + "%"}></span></span>
     <span class="vpx-by"><span class="vpx-skel" style="width:60%"></span></span>
     <span class="vpx-from"><span class="vpx-skel" style="width:70%"></span></span>
+    <span class="vpx-machine"><span class="vpx-skel" style="width:60%"></span></span>
     <span><span class="vpx-skel" style="width:30px"></span></span>
     <span><span class="vpx-skel" style="width:80%"></span></span>
     <span><span class="vpx-skel" style="width:64px"></span></span>
@@ -403,10 +425,10 @@ function Catalog({ s, platform, platName }) {
   const have = new Set((s.downloads || []).map((d) => d.catalog && d.catalog.name).filter(Boolean));
   // PAD-956: nor is one complete on its own (TNA): it needs nothing from the app
   const tables = (cat.tables || []).filter((t) => !t.complete && (!t.url || !have.has(t.name)));
-  // this manufacturer's block (every other machine's when the tab has no manufacturer)
-  const order = Object.keys(plats).filter((k) => (platform ? k === platform : k !== "spike2") && tables.some((t) => t.platform === k));
+  // the filter's machine's block, every machine's under All machines (PAD-958)
+  const order = Object.keys(plats).filter((k) => (!platform || k === platform) && tables.some((t) => t.platform === k));
   if (!order.length) return null;
-  return html`<${Card} cls="vpx-cat" head=${html`<span class="h2" ...${tip(s.catalog_tip)}>${platform ? "More " + platName + " tables" : "Tables of other machines"}</span>
+  return html`<${Card} cls="vpx-cat" head=${html`<span class="h2" ...${tip(s.catalog_tip)}>${platform ? "More " + platName + " tables" : "More tables"}</span>
       <span class="small muted vpx-cat-sub">The app ships none of them: each is its author's download, and it plays as its author wrote it until the app has a map for it${platform ? "" : " (Stern SAM games are Visual PinMAME's already, so they are not here)"}.</span>`}>
     ${order.map((k) => html`<div class="vpx-cat-plat">
       <div class="vpx-cat-head"><b>${plats[k].name}</b> <span class="small muted">${plats[k].runs}</span>

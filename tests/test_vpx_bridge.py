@@ -1418,6 +1418,27 @@ def test_the_beatles_record_magnet_pulls_without_grabbing(tmp_path):
     assert vs.missed_fixes(str(tmp_path), "The Beatles_007 (PAD).vpx", m["repatch"]) == []
 
 
+def test_the_beatles_record_spins_up_while_its_magnet_holds_the_ball(tmp_path):
+    """PAD-965: the game runs the record (node cmd 50, which the shim now puts
+    on MOTOR A0 DRIVER) 15 ms before each MAGNET-RECORD burst, for 5.2 s.
+    core.vbs's default SpinUp of 10 is 6 s to full speed, so the record had
+    hardly turned when the magnet let the ball go; the patched table spins it
+    up in 0.6 s, and a copy patched before is told to patch again."""
+    pb = pytest.importorskip("patch_beatles")
+    vs = pytest.importorskip("vpxsetup")
+    m = json.load(open(os.path.join(VPX, "beatles.vpxmap.json"), encoding="utf-8"))
+    out, _ = pb.patch_script("Option Explicit\nSub UpdateLamps\nEnd Sub\nDim PuPlayer\n", m)
+    assert "spinner.SpinUp = 100" in out
+    assert out.index("spinner.SpinUp = 100") > out.index("Set mRecordMagnet = New cvpmMagnet")
+    old = tmp_path / "The Beatles_007 (PAD).script.vbs"
+    old.write_text("' the record turns on its motor's two LED channels (MOTOR A0 / A1 DRIVER)\n"
+                   "Sub PadRecordMotor(n, v)\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), "The Beatles_007 (PAD).vpx", m["repatch"]) == [
+        "the record spins up too slowly to throw the ball its magnet caught"]
+    old.write_text(out, encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), "The Beatles_007 (PAD).vpx", m["repatch"]) == []
+
+
 # ------------------------------------------------ the table generator -----
 
 MINI_TABLES = {
@@ -3560,7 +3581,7 @@ def test_beatles_record_motor_and_domes_run(tmp_path, btmap):
     tail = "\n".join(ln for ln in tail.split("\n")[1:]
                      if not ln.startswith(("MagnetW2.", "Set mRecordMagnet", "With mRecordMagnet", "\t.", "End With")))
     harness = "\n".join([
-        "Class FakeTT : Public MotorOn, SpinCW : End Class",
+        "Class FakeTT : Public MotorOn, SpinCW, SpinUp : End Class",
         "Dim spinner : Set spinner = New FakeTT",
         "Dim padMotor(1), FlashLevel1, FlashLevel2, FlashLevel3, FlashLevel5, flashed",
         "Sub Flasherflash1_Timer : flashed = flashed & \"1\" : End Sub",
@@ -3573,6 +3594,7 @@ def test_beatles_record_motor_and_domes_run(tmp_path, btmap):
         "PadRecordMotor 0, 0 : WScript.Echo CBool(spinner.MotorOn) & \" \" & CBool(spinner.SpinCW)",
         "PadRecordMotor 1, 0 : WScript.Echo CBool(spinner.MotorOn)",
         "PadDome 3, 1 : PadDome 1, 0 : PadDome 5, 1 : WScript.Echo flashed & \" \" & FlashLevel3 & FlashLevel5",
+        "WScript.Echo spinner.SpinUp",
     ])
     f = tmp_path / "t.vbs"
     f.write_text(harness, encoding="utf-8")
@@ -3582,7 +3604,7 @@ def test_beatles_record_motor_and_domes_run(tmp_path, btmap):
     # A0 alone turns it one way, A1 alone the other, both (a brake) or neither stops it
     # (cscript prints a Boolean False as "False" or, on some Windows setups, "0")
     got = ["False" if w == "0" else w for w in r.stdout.split()]
-    assert got == ["True", "True", "False", "True", "False", "False", "35", "11"], r.stdout
+    assert got == ["True", "True", "False", "True", "False", "False", "35", "11", "100"], r.stdout
 
 
 def test_patched_table_finds_a_backglass_named_its_own_way(tmp_path):

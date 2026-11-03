@@ -56,7 +56,8 @@
   },
   "repatch": [
     {"old": "bsTrough.Balls = 6", "why": "it serves two balls at Start", "since": "PAD-933: the trough holds the four balls the game counts"},
-    {"old": ".InitMagnet PadRecordMagnet, 30", "why": "the record's magnet catches the ball and drops it down the middle", "since": "PAD-950: the record's magnet pulls without grabbing"}
+    {"old": ".InitMagnet PadRecordMagnet, 30", "why": "the record's magnet catches the ball and drops it down the middle", "since": "PAD-950: the record's magnet pulls without grabbing"},
+    {"old": "' the record turns on its motor's two LED channels (MOTOR A0 / A1 DRIVER)", "why": "the record spins up too slowly to throw the ball its magnet caught", "since": "PAD-965: the record spins up as the game runs it"}
   ],
   "switch_holds": {
     "_": "switches held while a ball sits somewhere (cvpmBallStack serves them)",
@@ -201,7 +202,9 @@
     "TopMagnetDome":  {"leds": [[8, 40]], "call": "PadDome", "arg": 3, "name": "TOP MAGNET FLASH", "show": ["Flasherflash3"]},
     "LeftSpinFlash":  {"leds": [[9, 3]],  "call": "PadShow", "arg": "spinflashleft", "name": "LEFT SPINNER FLASH", "show": ["spinflashleft"]},
     "RightSpinFlash": {"leds": [[9, 4]],  "call": "PadShow", "arg": "spinflashright", "name": "RIGHT SPINNER FLASH", "show": ["spinflashright"]},
-    "RecordMotorA0":  {"leds": [[8, 4]],  "call": "PadRecordMotor", "arg": 0, "name": "MOTOR A0 DRIVER (the record's motor)"},
+    "RecordMotorA0":  {"leds": [[8, 4]],  "call": "PadRecordMotor", "arg": 0, "name": "MOTOR A0 DRIVER (the record's motor)",
+                       "spin_up": 100,
+                       "why": "the game runs the record (node cmd 50 on outputs 4/5, PAD-965) 15 ms before each MAGNET-RECORD burst and stops it 5.2 s later; core.vbs's default SpinUp 10 takes 6 s to full speed, so the ball the magnet let go of left a record that had hardly turned and dropped down the middle; at 100 it is at full speed in 0.6 s, as the burst ends"},
     "RecordMotorA1":  {"leds": [[8, 5]],  "call": "PadRecordMotor", "arg": 1, "name": "MOTOR A1 DRIVER (the record's motor)"}
   },
   "retrofit_lights": {

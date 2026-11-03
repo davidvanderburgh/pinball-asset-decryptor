@@ -81,7 +81,8 @@ CARDS_TIP = ("The folder with your SD card images (the normal .raw files, named 
              "newest build in this folder.")
 
 # PAD-941: the card for whoever builds or finishes a table
-AUTHORS_INTRO = ("Building a table of a Stern game, or finishing one? The game sees the table only "
+# (PAD-952: not "a Stern game" - the card is on the Spooky tab too)
+AUTHORS_INTRO = ("Building a table of one of these games, or finishing one? The game sees the table only "
                  "through its own switches, coils and lights. The checklist lists every one the game "
                  "has, with its number and what a table does for it; checked against a table it "
                  "marks what that table still lacks.")

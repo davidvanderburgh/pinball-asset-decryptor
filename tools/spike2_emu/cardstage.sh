@@ -150,6 +150,7 @@ if [ "$STAGE" = cache ]; then
             echo "no card at $card" > "$S/$i.fail"; continue
         fi
         case "$card" in
+            /mnt/wsl/*) echo "$card" > "$S/$i"; continue ;;   # the store's own disk (PAD-966): booted where it lies
             /mnt/*) ;;
             *) echo "$card" > "$S/$i"; continue ;;   # on a Linux disk already: no 9p to save
         esac
@@ -162,6 +163,8 @@ if [ "$STAGE" = cache ]; then
                    bash "$RIG/cardmount.sh" "$card" --cache-now 2>> "$OUT/stage.cache.log" | tail -1 )
         bash "$RIG/cardmount.sh" "$card" --board-copy clear 2>/dev/null < /dev/null
         case "$got" in
+            /mnt/wsl/cards/library/*)
+                echo "$(date +%T) in the library $(basename "$card")" ;;          # PAD-966: booted from the store's copy
             "$PAD_HOME"/cardcache/*|/mnt/wsl/cards/cardcache/*|"${PAD_CARD_CACHE_DIR:-/nonexistent}"/*)
                 echo "$(date +%T) cached $(basename "$card")  in $(( $(date +%s) - t0 ))s" ;;
             *)

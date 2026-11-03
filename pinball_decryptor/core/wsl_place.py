@@ -48,6 +48,18 @@ SPARE_BYTES = 5 * 1024 ** 3
 #: VHDX attaches the data disks use).
 DISK_FS = ("NTFS", "REFS")
 
+#: Items that stay where they are when the destination is a hard disk
+#: (PAD-966): the card store is the library's fast copy, and a Spike 2 card
+#: boots from an ext4 disk on a hard disk in near twice the time it takes from
+#: an SSD (Godzilla Pro 1.16 to attract from a cold cache: 40 and 33 s against
+#: 20 and 23 s, David's SATA HDD and NVMe, 2026-11-03) - still far better than
+#: reading it where it lies through 9p (79-148 s), but a slowdown nobody asked
+#: for when all they wanted was room on C:.  It can still be put on a hard disk
+#: on purpose (cardstore.ps1 create -Path).
+SLOW_STAYS = ("cards",)
+SLOW_WHY = ("%s is a hard disk, and a card boots from one in near twice the "
+            "time (33-40 s against 20-23 s to attract, measured)")
+
 COPY_CHUNK = 16 * 1024 * 1024
 
 
@@ -157,15 +169,41 @@ def _fixed_letters():
     return out
 
 
-def drives(letters=None, volume=None, usage=None):
-    """Every fixed drive: ``[{letter, label, fs, free, total, ok, why}]``.
-    ``ok`` is False with ``why`` for one a WSL disk cannot live on."""
+def _media_types():
+    """``{"D:": "HDD" | "SSD" | ...}`` from Windows' own storage stack, one
+    PowerShell call; ``{}`` when it cannot say (then nothing is a hard disk)."""
+    if sys.platform != "win32":
+        return {}
+    script = ("Get-Partition | ForEach-Object { if ($_.DriveLetter) { "
+              "$pd = Get-PhysicalDisk -DeviceNumber $_.DiskNumber "
+              "-ErrorAction SilentlyContinue; "
+              "\"$($_.DriveLetter): $($pd.MediaType)\" } }")
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30,
+            creationflags=_CREATE_FLAGS).stdout.decode("utf-8", "replace")
+    except Exception:                                          # noqa: BLE001
+        return {}
+    kinds = {}
+    for line in out.splitlines():
+        bits = line.strip().split(None, 1)
+        if len(bits) == 2 and len(bits[0]) == 2 and bits[0][1] == ":":
+            kinds[bits[0].upper()] = bits[1].strip().upper()
+    return kinds
+
+
+def drives(letters=None, volume=None, usage=None, media=None):
+    """Every fixed drive: ``[{letter, label, fs, free, total, ok, why, hdd}]``.
+    ``ok`` is False with ``why`` for one a WSL disk cannot live on; ``hdd``
+    says it is a hard disk (:data:`SLOW_STAYS` stay off one)."""
     if letters is None:
         if sys.platform != "win32":
             return []
         letters = _fixed_letters()
     volume = volume or _volume
     usage = usage or shutil.disk_usage
+    kinds = (media or _media_types)()
     out = []
     for letter in letters:
         try:
@@ -177,7 +215,8 @@ def drives(letters=None, volume=None, usage=None):
             continue
         label, fs = vol
         d = {"letter": letter, "label": label, "fs": fs,
-             "free": du.free, "total": du.total, "ok": True, "why": ""}
+             "free": du.free, "total": du.total, "ok": True, "why": "",
+             "hdd": kinds.get(letter.upper()) == "HDD"}
         if fs.upper() not in DISK_FS:
             d["ok"], d["why"] = False, "%s: WSL needs NTFS" % fs
         out.append(d)
@@ -240,15 +279,21 @@ def plan(drive, all_items=None, all_drives=None):
     all_drives = drives() if all_drives is None else all_drives
     drive = drive.rstrip("\\/").upper()
     dest_root = root_on(drive)
-    to_move = [i for i in all_items
-               if not i["pinned"] and drive_of(i["path"]) != drive]
     d = next((x for x in all_drives if x["letter"].upper() == drive), None)
+    kept = stays(drive, all_items, all_drives)
+    to_move = [i for i in all_items
+               if not i["pinned"] and drive_of(i["path"]) != drive
+               and i not in kept]
     if d is None:
         return to_move, dest_root, "%s is not a drive this PC has." % drive
     if not d["ok"]:
         return to_move, dest_root, ("%s can't hold WSL's disks (%s)."
                                     % (drive, d["why"]))
     if not to_move:
+        if kept:
+            return to_move, dest_root, (
+                "Only %s is elsewhere, and it stays where it is: %s."
+                % (" and ".join(i["label"] for i in kept), SLOW_WHY % drive))
         return to_move, dest_root, "Everything is on %s already." % drive
     need = sum(i["size"] for i in to_move) + SPARE_BYTES
     if d["free"] < need:
@@ -256,6 +301,20 @@ def plan(drive, all_items=None, all_drives=None):
             "%s has %s free; the move needs %s (the disks, and 5 GB to "
             "spare)." % (drive, _gb(d["free"]), _gb(need)))
     return to_move, dest_root, ""
+
+
+def stays(drive, all_items=None, all_drives=None):
+    """The items a move onto *drive* leaves where they are because *drive* is
+    a hard disk (:data:`SLOW_STAYS`, PAD-966); ``[]`` for an SSD or a drive
+    nothing is known about."""
+    all_items = items() if all_items is None else all_items
+    all_drives = drives() if all_drives is None else all_drives
+    drive = drive.rstrip("\\/").upper()
+    d = next((x for x in all_drives if x["letter"].upper() == drive), None)
+    if not d or not d.get("hdd"):
+        return []
+    return [i for i in all_items if i["key"] in SLOW_STAYS
+            and not i["pinned"] and drive_of(i["path"]) != drive]
 
 
 def _gb(n):

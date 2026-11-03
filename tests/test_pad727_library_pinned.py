@@ -47,6 +47,11 @@ ln -s "$T/lib" "$T/junction"                  # the repo's images/ junction: the
 CAP_KB=$((10 * 1024))
 df() { local u=0 f; for f in "$CACHE"/*.raw; do [ -e "$f" ] && u=$((u + $(stat -c %s "$f") / 1024)); done
        echo Avail; echo $((CAP_KB - u)); }
+# PAD-964's room rule asks these two: a card needs its whole (apparent) size here, and there is no Windows drive
+# behind this cache (the real ones read cardcopy.py's plan and the drive's df)
+cache_need_kb() { echo $(( $(stat -c %s "$1") / 1024 )); }
+host_free_kb() { return 1; }
+room_say() { [ "${DRY:-0}" = 1 ] || echo "$@" >&2; }       # the script's one-liner, which _funcs cannot lift
 img() { truncate -s "$2" "$1"; touch -d "@$3" "$1"; }
 entry() {   # <label> <image> <boot-epoch>: a cached copy of <image>, last booted then
     truncate -s "$(stat -c %s "$2")" "$CACHE/$1.raw"; cache_stamp "$2" > "$CACHE/$1.src"
@@ -92,7 +97,9 @@ def test_the_library_is_never_evicted_and_dead_entries_go_first():
 
 def test_the_store_keeps_a_margin_and_a_distro_disk_its_floor():
     cm = _text("cardmount.sh")
-    assert "LIBRARY=${PAD_CARD_LIBRARY:-/mnt/d/Pinball/images/Stern/spike2}" in cm
+    # PAD-966: the library is the store's own folder once it exists, the intake folder (D:) before that
+    assert "INTAKE=${PAD_CARD_INTAKE:-/mnt/d/Pinball/images/Stern/spike2}" in cm
+    assert "    LIBRARY=$STORE_LIBRARY\nelse\n    LIBRARY=$INTAKE\nfi" in cm
     # precache.sh fills exactly the folder cardmount.sh pins
     assert "LIB=${1:-/mnt/d/Pinball/images/Stern/spike2}" in _text("precache.sh")
     assert 'if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then\n    CACHE_KEEP_GB=${PAD_STORE_KEEP_FREE_GB:-2}' in cm
@@ -120,7 +127,7 @@ def test_cache_list_names_the_library_and_the_clean_up_leaves_it():
 
 def test_every_attach_at_logon_tops_the_library_up():
     ps = _text("cardstore.ps1")
-    assert "[ValidateSet('create', 'mount', 'fill', 'status', 'task')]" in ps
+    assert "[ValidateSet('create', 'mount', 'fill', 'status', 'task', 'prune')]" in ps
     mount = ps[ps.index("    'mount' {"):ps.index("    'fill' {")]
     # only after a real attach (an already-mounted store returns first), and never with -NoFill
     assert mount.index('exit 0') < mount.index("if (-not $NoFill) { & $PSCommandPath fill")
@@ -129,4 +136,5 @@ def test_every_attach_at_logon_tops_the_library_up():
     assert "/precache.sh' > $log 2>&1" in fill
     # status says how much of the library is held
     assert "/cardmount.sh' --cache-list\" | Where-Object { $_ -like \"pinned`t*\" }" in ps
-    assert 'Say "  library: $held of $all newest builds held, never evicted"' in ps
+    assert 'Say "  library: not on the store yet (fill takes it in); $held of $($all.Count) newest builds held in the cache"' in ps
+    assert 'Say "  library: $($lib.Count) cards on the store ($taken of the $($all.Count) in the intake folder taken in)"' in ps

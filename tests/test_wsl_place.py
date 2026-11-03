@@ -29,10 +29,11 @@ def place(tmp_path, monkeypatch):
     return tmp_path
 
 
-def drive(letter, free=500 * GB, fs="NTFS"):
+def drive(letter, free=500 * GB, fs="NTFS", hdd=False):
     return {"letter": letter, "label": "", "fs": fs, "free": free,
             "total": 2000 * GB, "ok": fs in ("NTFS", "ReFS"),
-            "why": "" if fs in ("NTFS", "ReFS") else "%s: WSL needs NTFS" % fs}
+            "why": "" if fs in ("NTFS", "ReFS") else "%s: WSL needs NTFS" % fs,
+            "hdd": hdd}
 
 
 def item(key, path, size, **kw):
@@ -108,6 +109,39 @@ def test_plan_moves_only_what_is_elsewhere_and_not_pinned(place):
     assert problem == "" and root == r"D:\pinball_decryptor"
     assert [i["path"] for i in moving] == [r"C:\rt\ext4.vhdx",
                                            r"C:\d\pad-data.vhdx"]
+
+
+def test_the_card_store_stays_off_a_hard_disk(place):
+    """PAD-966: a card boots from an ext4 disk on a hard disk in near twice the time (33-40 s against 20-23 s),
+    so Move to another drive leaves the store where it is when the destination is one, and says so."""
+    items = ITEMS + [item("cards", r"C:\d\pad-cards.vhdx", 300 * GB,
+                          label="the Spike 2 card store")]
+    ssd, hdd = [drive("D:")], [drive("D:", hdd=True)]
+    moving, _root, problem = wsl_place.plan("D:", items, ssd)
+    assert problem == "" and [i["key"] for i in moving] == ["distro", "data", "cards"]
+    assert wsl_place.stays("D:", items, ssd) == []
+    moving, _root, problem = wsl_place.plan("D:", items, hdd)
+    assert problem == "" and [i["key"] for i in moving] == ["distro", "data"]
+    assert [i["key"] for i in wsl_place.stays("D:", items, hdd)] == ["cards"]
+    assert wsl_place.SLOW_WHY % "D:" == ("D: is a hard disk, and a card boots from one in near twice "
+                                         "the time (33-40 s against 20-23 s to attract, measured)")
+    # only the store is elsewhere: nothing moves, and the reason names it
+    assert wsl_place.plan("D:", [items[2]], hdd)[2] == (
+        "Only the Spike 2 card store is elsewhere, and it stays where it is: " + wsl_place.SLOW_WHY % "D:" + ".")
+    # a drive Windows could not classify is not a hard disk; a pinned store never moves anyway
+    assert [i["key"] for i in wsl_place.plan("D:", items, [dict(drive("D:"), hdd=None)])[0]][-1] == "cards"
+    pinned = items[:2] + [dict(items[2], pinned="PAD_CARDS_DISK")]
+    assert wsl_place.stays("D:", pinned, hdd) == []
+
+
+def test_drives_say_which_is_a_hard_disk():
+    usage = lambda p: types.SimpleNamespace(free=9 * GB, total=10 * GB)
+    vols = {"C:": ("Windows", "NTFS"), "D:": ("Data", "NTFS")}
+    got = wsl_place.drives(["C:", "D:"], volume=vols.get, usage=usage,
+                           media=lambda: {"C:": "SSD", "D:": "HDD"})
+    assert [(d["letter"], d["hdd"]) for d in got] == [("C:", False), ("D:", True)]
+    # when Windows cannot say, nothing is one
+    assert wsl_place.drives(["D:"], volume=vols.get, usage=usage, media=dict)[0]["hdd"] is False
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows drive paths")

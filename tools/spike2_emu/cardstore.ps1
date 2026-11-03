@@ -7,6 +7,7 @@ distro sees it at /mnt/wsl/cards, where cardmount.sh keeps its card cache (PAD-6
     powershell -ExecutionPolicy Bypass -File cardstore.ps1 fill                  (top the library up, in the background)
     powershell -ExecutionPolicy Bypass -File cardstore.ps1 task                  (register / repoint the logon task)
     powershell -ExecutionPolicy Bypass -File cardstore.ps1 status
+    powershell -ExecutionPolicy Bypass -File cardstore.ps1 prune [-KeepDays 30] [-DryRun]   (PAD-966, below)
 
 The file is %LOCALAPPDATA%\pinball_decryptor\data\pad-cards.vhdx, beside the app's work disk (pad-data.vhdx,
 core/rigdata.py) and made the same way: diskpart makes an expandable VHDX and `wsl --mount --vhd` attaches it, both
@@ -26,10 +27,30 @@ booted on purpose, and a 53-build sweep copied them off D: again. cardmount.sh n
 is the library's (cache_pinned), and every attach at logon tops the library up in the background (`fill`: precache.sh,
 seconds when nothing is new, a copy for a new image dropped into the folder), so the store holds every newest build
 for good. `status` says how many of them it holds.
+
+PRUNED (PAD-966). The copier makes room one entry at a time and only when a copy needs it, so a store nothing new
+goes into keeps every dead copy for good: two weeks in, David's 590 GB store held 548 GB, 173 GB of it the library
+and the rest copies no boot could use (30 stamped against themselves after their cache paths were booted as cards,
+older versions, ticket scratch, superseded custom builds) - while 29 newest builds had been pushed out. `prune`
+runs cardmount.sh --cache-prune: dead entries go, so does anything not the library's and not booted in -KeepDays
+days (0: the library alone stays), never a card in use or being copied; then `fill` puts back any newest build that
+is missing. -DryRun lists what would go and takes nothing. The space reaches Windows only when the VHDX is compacted
+(fstrim does not shrink it; Manage disk space > Reclaim, with the store attached, or diskpart compact vdisk).
+
+THE LIBRARY, ONCE (PAD-966). David: "I want to be storing ONE copy of a disk image since they are so large". The
+library now lives on the store itself, /mnt/wsl/cards/library (Windows: \\wsl.localhost\<distro>\mnt\wsl\cards\library),
+one compact file per card under its own name and mtime; a card there boots where it lies, and a boot of the raw in
+the intake folder (D:\Pinball\images\Stern\spike2) is served from the library file, so the raws on D: are intake and
+archive, not a working copy. `fill` is the intake (precache.sh): a new raw in the folder is taken in once, in the
+background. Not on D: itself: a SATA hard disk gives five rigs 95 random reads a second between them, and a
+330 GB sweep is 39+ minutes of its time against nothing from the NVMe (measured 2026-11-03).
 #>
 param(
-    [Parameter(Position = 0)] [ValidateSet('create', 'mount', 'fill', 'status', 'task')] [string] $Cmd = 'status',
+    [Parameter(Position = 0)] [ValidateSet('create', 'mount', 'fill', 'status', 'task', 'prune')] [string] $Cmd = 'status',
     [int] $SizeGB = 400,
+    # prune: entries not the library's and not booted this many days stay (0 = only the library stays)
+    [int] $KeepDays = 30,
+    [switch] $DryRun,
     [string] $Path = '',
     [string] $Distro = 'Ubuntu',
     # the copy of this script the logon task runs: the main checkout's, which outlives a ticket's worktree
@@ -59,7 +80,7 @@ function Mounted($d) { return ((WslRoot $d "mountpoint -q $MountPoint && echo ye
 # (forward slashes: wsl.exe hands its command line to a shell, which eats backslashes)
 function RigDir() { return (Wsl @('-d', $Distro, '--', 'wslpath', '-u', ($PSScriptRoot -replace '\\', '/'))) }
 $AsUser = 'export HOME=$(getent passwd 1000 | cut -d: -f6);'
-$Library = '/mnt/d/Pinball/images/Stern/spike2'
+$Intake = '/mnt/d/Pinball/images/Stern/spike2'          # where downloads land; precache.sh takes them into the library
 function AttachByName() {
     $o = Wsl @('--mount', $Path, '--vhd', '--name', $Name)
     if ($LASTEXITCODE -ne 0) { throw "wsl --mount --name $Name failed: $o" }
@@ -72,14 +93,21 @@ switch ($Cmd) {
         foreach ($d in @($Distro, 'PAD-Runtime')) {
             if (Mounted $d) {
                 Say "$d  mounted at $MountPoint"
-                WslRoot $d "df -h $MountPoint | tail -1; du -sh $MountPoint/cardcache 2>/dev/null; ls $MountPoint/cardcache/*.raw 2>/dev/null | wc -l | sed 's/^/cards cached: /'" | ForEach-Object { Say "  $_" }
+                WslRoot $d "df -h $MountPoint | tail -1; du -sh $MountPoint/library $MountPoint/cardcache 2>/dev/null; ls $MountPoint/cardcache/*.raw 2>/dev/null | wc -l | sed 's/^/cards cached: /'" | ForEach-Object { Say "  $_" }
                 if ($d -eq $Distro) {
-                    # the library's newest builds held for good (cardmount.sh's `pinned` lines) against its images
+                    # the library on the store (PAD-966) against the intake folder; before the first intake the
+                    # library is the intake folder and its newest builds are held in the cache (`pinned` lines)
                     # (counted here: a bash -c line with its own quotes does not survive PowerShell 5.1's native
                     # argument passing)
-                    $held = @(WslRoot $d "$AsUser bash '$(RigDir)/cardmount.sh' --cache-list" | Where-Object { $_ -like "pinned`t*" }).Count
-                    $all = @(WslRoot $d "ls $Library/*.raw" | Where-Object { $_ -like '*.raw' }).Count
-                    Say "  library: $held of $all newest builds held, never evicted"
+                    $lib = @(WslRoot $d "ls $MountPoint/library/*.raw" | Where-Object { $_ -like '*.raw' })
+                    $all = @(WslRoot $d "ls $Intake/*.raw" | Where-Object { $_ -like '*.raw' })
+                    if ($lib.Count -gt 0) {
+                        $taken = @($all | Where-Object { $n = Split-Path $_ -Leaf; $lib | Where-Object { (Split-Path $_ -Leaf) -eq $n } }).Count
+                        Say "  library: $($lib.Count) cards on the store ($taken of the $($all.Count) in the intake folder taken in)"
+                    } else {
+                        $held = @(WslRoot $d "$AsUser bash '$(RigDir)/cardmount.sh' --cache-list" | Where-Object { $_ -like "pinned`t*" }).Count
+                        Say "  library: not on the store yet (fill takes it in); $held of $($all.Count) newest builds held in the cache"
+                    }
                 }
             } else { Say "$d  not mounted" }
         }
@@ -104,6 +132,22 @@ switch ($Cmd) {
         Start-Process -WindowStyle Hidden -FilePath 'wsl.exe' -ArgumentList @('-d', $Distro, '-u', 'root', '--',
             'bash', '-c', "`"$AsUser bash '$(RigDir)/precache.sh' > $log 2>&1`"")
         Say "topping the library up in the background ($Distro`:$log)"
+    }
+    'prune' {
+        if (-not (Mounted $Distro)) { throw "$MountPoint is not mounted: cardstore.ps1 mount" }
+        $opts = "--cache-prune --keep-days $KeepDays"
+        if ($DryRun) { $opts += ' --dry' }
+        $verb = if ($DryRun) { 'would take' } else { 'took' }
+        foreach ($line in (WslRoot $Distro "$AsUser bash '$(RigDir)/cardmount.sh' $opts")) {
+            $f = "$line" -split "`t"
+            switch ($f[0]) {
+                'prune'  { Say ('{0}  {1,7:N1} GB  {2}  ({3})' -f $verb, ([double]$f[3] / 1MB), $f[2], $f[1]) }
+                'kept'   { Say ('kept        {0,7:N1} GB  {1}  ({2})' -f ([double]$f[3] / 1MB), $f[2], $f[1]) }
+                'pruned' { Say ('{0} {1} entries, {2:N1} GB; {3} kept, {4:N1} GB' -f $verb, $f[1], ([double]$f[2] / 1MB), $f[3], ([double]$f[4] / 1MB)) }
+                default  { Say $line }
+            }
+        }
+        if (-not $DryRun) { & $PSCommandPath fill -Path $Path -Distro $Distro }
     }
     'task' {
         if (-not $TaskScript) {

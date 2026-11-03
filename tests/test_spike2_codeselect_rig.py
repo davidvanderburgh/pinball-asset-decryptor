@@ -1634,7 +1634,11 @@ def test_cardmount_cache_budgets_what_a_sparse_card_really_takes():
     allocated (card_size.py grows it sparse). Budgeting the apparent size
     asked for more than the whole work disk and evicted every cached card."""
     code = _code(_read("cardmount.sh"))
+    # the budget is cache_need_kb's since PAD-964 (the compact size first, the allocation as the fallback), and the
+    # room rule asks it
+    need = code[code.index("cache_need_kb() {"):code.index("cache_make_room() {")]
+    assert "stat -c '%b * %B'" in need
+    assert 'echo $(( alloc / 1024 ))' in need
+    assert 'echo $(( size / 1024 ))' in need      # no allocation reported
     room = code[code.index("cache_make_room() {"):code.index("cache_wait() {")]
-    assert "stat -c '%b * %B'" in room
-    assert 'need=$(( alloc / 1024 ))' in room
-    assert 'need=$(( size / 1024 ))' in room      # no allocation reported
+    assert 'need=$(cache_need_kb "$1")' in room

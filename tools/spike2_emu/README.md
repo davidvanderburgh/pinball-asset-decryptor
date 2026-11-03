@@ -1386,6 +1386,15 @@ Three container details are load-bearing, all in `padbox.sh`:
 | `--cap-add SYS_ADMIN --device /dev/fuse` | `cardmount.sh`'s read-only card mount |
 | `-p 127.0.0.1:5900` | the VNC display is an unauthenticated view of the machine; loopback only |
 
+**Sound leaves over loopback TCP** (`playaudio.sh`'s relay sink) and the Mac
+plays it with `ffplay`. ffplay cannot be given a new level while it plays,
+so the Emulate tab's Volume / Mute are applied by `padrelay.py` in the box
+(PAD-957): `padbox.sh`'s `ctl_pusher` copies `audio_ctl.json` to
+`/tmp/pad_audio_ctl.json` in the box whenever it changes, and the relay,
+told of it by `PAD_RELAY_CTL`, scales the samples and logs
+`[padrelay] volume -> 0.50` in `~/padaudio.log`. A copy, not a mount: the
+app replaces the file on every slider move, which a file bind mount loses.
+
 **x11vnc runs with `-threads`** (`entrypoint.sh`, PAD-805). Without it, clicks
 and keys wait in line behind the ~1.5 MB frames the server is sending. The
 picture stays smooth, but input gets later and later while the mouse moves:

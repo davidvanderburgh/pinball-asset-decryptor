@@ -199,6 +199,7 @@ black, so restarting WSL won't help.
 - The picture opens in macOS **Screen Sharing** once the game is up (VNC
   password `pinball`). Click a window there to give it the keyboard.
 - Sound plays through `ffplay`, part of the ffmpeg the app already needs.
+  **Volume** and **Mute** work there too, live, as on Windows.
 - **Start Docker** starts the engine you have; **Get Docker…** opens the
   download page when there's nothing to install with.
 

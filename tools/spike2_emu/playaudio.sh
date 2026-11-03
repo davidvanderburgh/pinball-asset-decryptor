@@ -172,10 +172,14 @@ fi
 # Same padrelay.py as the win sink below, for the same load-bearing reason:
 # it listens FIRST and opens the FIFO only once a player attaches, where an
 # ffmpeg would block on the silent FIFO and never open the socket at all.
+# THE VOLUME IS APPLIED HERE (PAD-957): the Mac's player is ffplay, which
+# cannot be given a new level while it plays, so the relay scales the samples
+# by PAD_RELAY_CTL, the copy of the Emulate tab's audio_ctl.json that
+# padbox.sh keeps in the box.
 if [ "$SINK" = relay ]; then
     PORT=${PAD_AUDIO_PORT:-45997}
     echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> host player (tcp/$PORT)"
-    python3 "$(dirname "$0")/padrelay.py" "$FIFO" "$PORT" &
+    python3 "$(dirname "$0")/padrelay.py" "$FIFO" "$PORT" "${PAD_RELAY_CTL:-}" &
     SRV=$!
     trap 'kill $HOLD $SRV 2>/dev/null; rm -f "$FIFO"' EXIT
     wait $SRV

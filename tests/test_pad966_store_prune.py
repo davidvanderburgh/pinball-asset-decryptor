@@ -1,0 +1,136 @@
+"""The card store is pruned to what a boot can use, and a card already on it boots where it lies (PAD-966).
+
+David, 2026-11-03: "compact them as much as possible ... ideally we should not be caching the whole raw sd card,
+only what is necessary. even more ideally, not duplicating bytes from the raw sd card at all". Measured first: every
+copy in the store was already at cardcopy.py's used-block floor, so the 548 GB were in WHAT was kept - 173 GB of
+library and 375 GB no boot could use. Thirty of those were copies stamped against THEMSELVES: ~/cardcache is a
+symlink to the store, and on 2026-10-29 those copies were booted as cards by that path, so cardmount.sh copied each
+onto itself and re-stamped it with its own size+mtime. Now such an image is booted where it lies (no copy, no
+re-stamp), such an entry reads as dead, and --cache-prune takes the dead and the stale in one pass.
+"""
+import os
+import re
+import subprocess
+import sys
+
+import pytest
+
+from tests.conftest import HAS_BASH
+
+RIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "spike2_emu")
+
+
+def _text(name):
+    with open(os.path.join(RIG, name), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _funcs(*names):
+    """The named shell functions out of cardmount.sh, verbatim (each runs from `name() {` to its column-0 `}`)."""
+    cm = _text("cardmount.sh")
+    out = []
+    for n in names:
+        m = re.search(r"^%s\(\) \{.*?^\}\n" % re.escape(n), cm, re.S | re.M)
+        assert m, n
+        out.append(m.group(0))
+    return "".join(out)
+
+
+FUNCS = ("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
+         "cache_readers", "cache_in_use", "cache_source_state", "on_cache_disk", "cache_prune")
+
+# One bash (WSL's on this machine), its own scratch folder: a cache with a library entry, one stamped against
+# itself, an older version, a fresh custom build, one a run holds, and a copy that never finished.
+SETUP = r"""
+set -u
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+CACHE=$T/cache; CARDS=$T/cards; LIBRARY=$T/lib
+mkdir -p "$CACHE" "$CARDS" "$LIBRARY/older versions" "$T/desk"
+cache_kind() { echo "${KIND:-distro}"; }
+NOW=$(date +%s)
+img() { truncate -s "$2" "$1"; touch -d "@$3" "$1"; }
+entry() {   # <label> <image> <days since the last boot>
+    truncate -s "$(stat -c %s "$2")" "$CACHE/$1.raw"; cache_stamp "$2" > "$CACHE/$1.src"
+    : > "$CACHE/$1.boot"; touch -d "@$((NOW - $3 * 86400))" "$CACHE/$1.boot"
+}
+img "$LIBRARY/new_le-1_10_0.raw" 2M 1000;  entry new_le "$LIBRARY/new_le-1_10_0.raw" 400       # the library's
+img "$LIBRARY/older versions/new_le-1_09_0.raw" 2M 900; entry old_le "$LIBRARY/older versions/new_le-1_09_0.raw" 40
+img "$T/desk/custom.raw" 2M 800; entry custom "$T/desk/custom.raw" 2                             # booted this week
+img "$T/desk/live.raw" 2M 700; entry live "$T/desk/live.raw" 90
+truncate -s 2M "$CACHE/self.raw"; touch -d "@$((NOW - 5 * 86400))" "$CACHE/self.raw"
+cache_stamp "$CACHE/self.raw" > "$CACHE/self.src"                                                # stamped against itself
+truncate -s 1M "$CACHE/half.raw.partial"; : > "$CACHE/half.src"                                  # never finished
+cache_readers() { echo "$CACHE/live.raw"; }                                                      # a run reads live
+"""
+
+
+def _run(script):
+    out = subprocess.run(["bash", "-s"], input=script.encode(), stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, timeout=60).stdout.decode("utf-8", "replace")
+    return out.splitlines()
+
+
+linux_bash = pytest.mark.skipif(not HAS_BASH or sys.platform == "darwin",
+                                reason="cardmount.sh is the rig's (WSL/Linux) and speaks GNU stat/touch")
+
+
+@linux_bash
+def test_a_copy_stamped_against_itself_is_dead_and_an_image_on_the_store_boots_in_place():
+    lines = _run(_funcs(*FUNCS) + SETUP + r"""
+echo "self=$(cache_source_state self) new_le=$(cache_source_state new_le) old_le=$(cache_source_state old_le)"
+on_cache_disk "$CACHE/self.raw" && echo "in cache: in place"
+on_cache_disk "$LIBRARY/new_le-1_10_0.raw" || echo "distro disk: library image is copied"
+KIND=store on_cache_disk "$LIBRARY/new_le-1_10_0.raw" && echo "store disk: library image in place"
+on_cache_disk "$T/nowhere.raw" || echo "missing image: not in place"
+""")
+    assert "self=changed new_le=ok old_le=ok" in lines
+    assert "in cache: in place" in lines
+    assert "distro disk: library image is copied" in lines
+    assert "store disk: library image in place" in lines
+    assert "missing image: not in place" in lines
+
+
+@linux_bash
+def test_the_prune_takes_the_dead_and_the_stale_and_keeps_the_library_and_the_live():
+    lines = _run(_funcs(*FUNCS) + SETUP + r"""
+echo "--- dry 30"; DRY=1 cache_prune 30
+ls "$CACHE" | sed -n 's/\.raw$//p' | tr '\n' ' '; echo
+echo "--- 30"; DRY=0 cache_prune 30
+ls "$CACHE" | sed -n 's/\.raw$//p' | tr '\n' ' '; echo
+ls "$CACHE"/half* 2>/dev/null | wc -l
+echo "--- 0"; cache_prune 0
+ls "$CACHE" | sed -n 's/\.raw$//p' | tr '\n' ' '; echo
+""")
+    text = "\n".join(lines)
+    dry, thirty, zero = text.split("--- dry 30")[1].split("--- 30")[0], text.split("--- 30")[1].split("--- 0")[0], \
+        text.split("--- 0")[1]
+    # the dry run names the same takes and leaves every file where it was
+    assert re.search(r"^prune\tdead: .*\tself\t", dry, re.M)
+    assert re.search(r"^prune\tnot booted in 30 days \(ok\)\told_le\t", dry, re.M)
+    assert re.search(r"^prune\tunfinished copy\thalf\t", dry, re.M)
+    assert re.search(r"^kept\tpinned\tnew_le\t", dry, re.M)
+    assert re.search(r"^kept\tin use\tlive\t", dry, re.M)
+    assert re.search(r"^kept\tbooted 2 days ago\tcustom\t", dry, re.M)
+    assert re.search(r"^pruned\t3\t\d+\t3\t\d+$", dry, re.M)
+    assert "custom live new_le old_le self" in dry
+    # the real run takes them: the library's, the one in use and this week's stay; the half copy's sidecar goes too
+    assert "custom live new_le" in thirty and "old_le" not in thirty.split("pruned")[1] and "self" not in \
+        thirty.split("pruned")[1]
+    assert "\n0\n" in thirty or thirty.strip().endswith("0")
+    # keep 0: only the library's and the live stay
+    assert re.search(r"^prune\tnot the library's \(ok\)\tcustom\t", zero, re.M)
+    assert zero.strip().endswith("live new_le")
+
+
+def test_the_modes_the_fill_and_the_store_script_know_the_prune_and_the_in_place_boot():
+    cm = _text("cardmount.sh")
+    assert '"--cache-prune"' in cm and "--keep-days" in cm and "--dry" in cm
+    # a boot never copies an image that already lives on the store, and the space check says so (nothing to copy)
+    pick = cm[cm.index("cache_pick() {"):]
+    assert pick.index('on_cache_disk "$img"') < pick.index('cache_valid "$img" "$copy" "$stamp"')
+    check = cm[cm.index("cache_check() {"):cm.index("cache_kind() {")]
+    assert 'on_cache_disk "$img"' in check and "need=0" in check
+    pre = _text("precache.sh")
+    assert "lives on the card store already" in pre
+    ps = _text("cardstore.ps1")
+    assert "'prune'" in ps and "--cache-prune --keep-days $KeepDays" in ps and "fill -Path" in ps

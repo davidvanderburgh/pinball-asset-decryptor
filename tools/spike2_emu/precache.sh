@@ -46,7 +46,12 @@ for card in "${CARDS[@]}"; do
                 done_=$((done_ + 1)); echo "$(date +%T) [$n/$TOTAL] cached in ${secs}s  $name"
             fi ;;
         *)
-            failed=$((failed + 1)); echo "$(date +%T) [$n/$TOTAL] NOT cached  $name: $(printf '%s\n' "$out" | grep -a '\[card\]' | tail -1 | cut -c1-120)" ;;
+            # a card that lives on the store's disk boots where it lies (PAD-966): nothing to copy
+            if printf '%s' "$out" | grep -q "lives on the card store already"; then
+                skipped=$((skipped + 1)); echo "$(date +%T) [$n/$TOTAL] on the store already  $name"
+            else
+                failed=$((failed + 1)); echo "$(date +%T) [$n/$TOTAL] NOT cached  $name: $(printf '%s\n' "$out" | grep -a '\[card\]' | tail -1 | cut -c1-120)"
+            fi ;;
     esac
     report "$n" "$TOTAL" "$name: $( [ "$failed" = 0 ] && echo ok || echo "$failed not cached" ) ($done_ copied, $skipped already there)"
 done

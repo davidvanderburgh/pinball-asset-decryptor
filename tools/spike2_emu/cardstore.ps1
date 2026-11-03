@@ -7,6 +7,7 @@ distro sees it at /mnt/wsl/cards, where cardmount.sh keeps its card cache (PAD-6
     powershell -ExecutionPolicy Bypass -File cardstore.ps1 fill                  (top the library up, in the background)
     powershell -ExecutionPolicy Bypass -File cardstore.ps1 task                  (register / repoint the logon task)
     powershell -ExecutionPolicy Bypass -File cardstore.ps1 status
+    powershell -ExecutionPolicy Bypass -File cardstore.ps1 prune [-KeepDays 30] [-DryRun]   (PAD-966, below)
 
 The file is %LOCALAPPDATA%\pinball_decryptor\data\pad-cards.vhdx, beside the app's work disk (pad-data.vhdx,
 core/rigdata.py) and made the same way: diskpart makes an expandable VHDX and `wsl --mount --vhd` attaches it, both
@@ -26,10 +27,22 @@ booted on purpose, and a 53-build sweep copied them off D: again. cardmount.sh n
 is the library's (cache_pinned), and every attach at logon tops the library up in the background (`fill`: precache.sh,
 seconds when nothing is new, a copy for a new image dropped into the folder), so the store holds every newest build
 for good. `status` says how many of them it holds.
+
+PRUNED (PAD-966). The copier makes room one entry at a time and only when a copy needs it, so a store nothing new
+goes into keeps every dead copy for good: two weeks in, David's 590 GB store held 548 GB, 173 GB of it the library
+and the rest copies no boot could use (30 stamped against themselves after their cache paths were booted as cards,
+older versions, ticket scratch, superseded custom builds) - while 29 newest builds had been pushed out. `prune`
+runs cardmount.sh --cache-prune: dead entries go, so does anything not the library's and not booted in -KeepDays
+days (0: the library alone stays), never a card in use or being copied; then `fill` puts back any newest build that
+is missing. -DryRun lists what would go and takes nothing. The space reaches Windows only when the VHDX is compacted
+(fstrim does not shrink it; Manage disk space > Reclaim, with the store attached, or diskpart compact vdisk).
 #>
 param(
-    [Parameter(Position = 0)] [ValidateSet('create', 'mount', 'fill', 'status', 'task')] [string] $Cmd = 'status',
+    [Parameter(Position = 0)] [ValidateSet('create', 'mount', 'fill', 'status', 'task', 'prune')] [string] $Cmd = 'status',
     [int] $SizeGB = 400,
+    # prune: entries not the library's and not booted this many days stay (0 = only the library stays)
+    [int] $KeepDays = 30,
+    [switch] $DryRun,
     [string] $Path = '',
     [string] $Distro = 'Ubuntu',
     # the copy of this script the logon task runs: the main checkout's, which outlives a ticket's worktree
@@ -104,6 +117,22 @@ switch ($Cmd) {
         Start-Process -WindowStyle Hidden -FilePath 'wsl.exe' -ArgumentList @('-d', $Distro, '-u', 'root', '--',
             'bash', '-c', "`"$AsUser bash '$(RigDir)/precache.sh' > $log 2>&1`"")
         Say "topping the library up in the background ($Distro`:$log)"
+    }
+    'prune' {
+        if (-not (Mounted $Distro)) { throw "$MountPoint is not mounted: cardstore.ps1 mount" }
+        $opts = "--cache-prune --keep-days $KeepDays"
+        if ($DryRun) { $opts += ' --dry' }
+        $verb = if ($DryRun) { 'would take' } else { 'took' }
+        foreach ($line in (WslRoot $Distro "$AsUser bash '$(RigDir)/cardmount.sh' $opts")) {
+            $f = "$line" -split "`t"
+            switch ($f[0]) {
+                'prune'  { Say ('{0}  {1,7:N1} GB  {2}  ({3})' -f $verb, ([double]$f[3] / 1MB), $f[2], $f[1]) }
+                'kept'   { Say ('kept        {0,7:N1} GB  {1}  ({2})' -f ([double]$f[3] / 1MB), $f[2], $f[1]) }
+                'pruned' { Say ('{0} {1} entries, {2:N1} GB; {3} kept, {4:N1} GB' -f $verb, $f[1], ([double]$f[2] / 1MB), $f[3], ([double]$f[4] / 1MB)) }
+                default  { Say $line }
+            }
+        }
+        if (-not $DryRun) { & $PSCommandPath fill -Path $Path -Distro $Distro }
     }
     'task' {
         if (-not $TaskScript) {

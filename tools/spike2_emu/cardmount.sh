@@ -223,6 +223,9 @@ cache_source_state() {   # <label>
     local s img
     s=$(cat "$CACHE/$1.src" 2>/dev/null) || { echo changed; return; }
     img=${s% * *}
+    # A stamp naming a file in the cache itself is the copy stamped against ITSELF (on_cache_disk below says how
+    # that happened): no image anyone boots carries that identity, so the entry is dead however present the file is.
+    case $(readlink -f "$img" 2>/dev/null) in "$(readlink -f "$CACHE" 2>/dev/null)"/*) echo changed; return ;; esac
     if [ -f "$img" ]; then
         cache_valid "$img" "$CACHE/$1.raw" "$CACHE/$1.src" && echo ok || echo changed
     elif [ -d "$(dirname "$img")" ]; then
@@ -448,12 +451,14 @@ card_label() {   # <img>
 # behind it when that is the smaller (then `host` names the drive); keep_kb the floor the copier leaves. The
 # `cache` line before them names the cache itself for the same reader.
 cache_check() {   # <img>
-    local img="$1" label copy stamp state host
+    local img="$1" label copy stamp state host need=""
     label=$(card_label "$img")
     copy="$CACHE/$label.raw"; stamp="$CACHE/$label.src"
     DRY_GONE=""; ROOM_WHY=""; ROOM_EVICT_N=0; ROOM_EVICT_KB=0; ROOM_FREE_KB=""
     if [ "${PAD_CARD_CACHE:-1}" = 0 ]; then
         state=off
+    elif on_cache_disk "$img"; then
+        state=cached; need=0           # PAD-966: booted where it lies - nothing to copy, no room to make
     elif cache_valid "$img" "$copy" "$stamp"; then
         state=cached
     elif copier_alive "$CACHE/$label.pid" "$copy"; then
@@ -470,10 +475,84 @@ cache_check() {   # <img>
     host=""
     [ "$ROOM_WHY" = host ] && host=${PAD_HOST_DRIVE:-}
     [ -n "$ROOM_FREE_KB" ] || ROOM_FREE_KB=$(cache_disk_avail_kb)
-    printf 'check\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$state" "$(cache_need_kb "$img")" "$ROOM_FREE_KB" \
+    printf 'check\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$state" "${need:-$(cache_need_kb "$img")}" "$ROOM_FREE_KB" \
         $(( CACHE_KEEP_GB * 1048576 )) "$ROOM_EVICT_N" "$ROOM_EVICT_KB" "$(cache_kind)" "$host" "$label" "$img"
 }
 cache_kind() { if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then echo store; else echo distro; fi; }
+
+# AN IMAGE THAT ALREADY LIVES ON THE CACHE'S DISK IS BOOTED WHERE IT LIES (PAD-966): a copy of it would be the same
+# bytes on the same disk at the same speed. Two cases. A file inside the cache itself: ~/cardcache has been a symlink
+# to the store since 2026-10-20, and on 2026-10-29 thirty of the store's copies were booted AS cards by that path -
+# each was copied onto itself and re-stamped with its own size+mtime, so no library boot matched it again and 29
+# newest builds came off D: once more (cache_source_state reads such an entry as dead). And any file on the store's
+# disk (cache_kind store: a disk that holds nothing but cards), which is what lets a library live there ONCE, with no
+# copy: a card put under /mnt/wsl/cards/ boots from where it is. Not a distro's own disk: there the whole system
+# shares the device, and a scratch image under /var/tmp is better copied compact than mounted where a build may
+# still be rewriting it.
+on_cache_disk() {   # <img>
+    local r c
+    r=$(readlink -f "$1" 2>/dev/null) && c=$(readlink -f "$CACHE" 2>/dev/null) && [ -n "$r" ] || return 1
+    case $r in "$c"/*) return 0 ;; esac
+    [ "$(cache_kind)" = store ] || return 1
+    [ -e "$r" ] && [ "$(stat -c %d "$r" 2>/dev/null)" = "$(stat -c %d "$c" 2>/dev/null)" ]
+}
+
+# PRUNE THE CACHE TO WHAT A BOOT CAN USE (PAD-966). cache_make_room takes entries one at a time and only when a copy
+# needs the room, so a store nothing new is copied into keeps every dead copy for good: on 2026-11-03 David's 590 GB
+# store held 548 GB, of which 173 GB were the library's newest builds and the rest the 30 self-stamped copies above,
+# older versions, ticket scratch and superseded custom builds - while 29 newest builds had been pushed out and would
+# come off D: again. This takes, in one pass: an unfinished copy with no copier on it; an entry whose image state is
+# `changed` (a rebuilt image, or a stamp naming the copy itself); and every other entry that is not the library's and
+# was last booted (never booted: copied) more than KEEP days ago - KEEP 0 leaves the library alone in the cache.
+# Never one in use or being copied. With DRY=1 it says what it would take and takes nothing. Tab-separated:
+#   prune  <TAB> why <TAB> label <TAB> real_kb            taken (with DRY=1: would be)
+#   kept   <TAB> why <TAB> label <TAB> real_kb            why: pinned | in use | copying | booted N days ago
+#   pruned <TAB> taken_n <TAB> taken_kb <TAB> kept_n <TAB> kept_kb     the sum, last
+cache_prune() {   # <keep-days>
+    local keep=${1:-30} keep_s now f l why last kb st seen="" n=0 nkb=0 kn=0 kkb=0
+    keep_s=$(( keep * 86400 )); now=$(date +%s)
+    CACHE_READERS=$(cache_readers)
+    take() {   # <why> <label> <kb>
+        printf 'prune\t%s\t%s\t%s\n' "$1" "$2" "$3"
+        n=$((n + 1)); nkb=$((nkb + $3))
+        [ "${DRY:-0}" = 1 ] && return 0
+        rm -f "$CACHE/$2.raw" "$CACHE/$2.raw.partial" "$CACHE/$2.src" "$CACHE/$2.log" \
+              "$CACHE/$2.boot" "$CACHE/$2.pid" "$CACHE/$2.need" 2>/dev/null
+    }
+    hold() {   # <why> <label> <kb>
+        printf 'kept\t%s\t%s\t%s\n' "$1" "$2" "$3"
+        kn=$((kn + 1)); kkb=$((kkb + $3))
+    }
+    for f in "$CACHE"/*.raw; do
+        [ -e "$f" ] || break
+        l=$(basename "$f" .raw)
+        kb=$(du -k "$f" 2>/dev/null | cut -f1); kb=${kb:-0}
+        if copier_alive "$CACHE/$l.pid" "$f"; then hold copying "$l" "$kb"; continue; fi
+        if cache_in_use "$l"; then hold "in use" "$l" "$kb"; continue; fi
+        if cache_pinned "$l"; then hold pinned "$l" "$kb"; continue; fi
+        st=$(cache_source_state "$l")
+        if [ "$st" = changed ]; then take "dead: its image changed, or the stamp names the copy itself" "$l" "$kb"; continue; fi
+        last=$(stat -c %Y "$CACHE/$l.boot" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+        if [ $(( now - last )) -ge "$keep_s" ]; then
+            if [ "$keep" = 0 ]; then why="not the library's ($st)"; else why="not booted in $keep days ($st)"; fi
+            take "$why" "$l" "$kb"
+        else
+            hold "booted $(( (now - last) / 86400 )) days ago" "$l" "$kb"
+        fi
+    done
+    # a copy that never finished with no copier on it, and sidecars whose card is gone (as --cache-list's leftovers)
+    for f in "$CACHE"/*.raw.partial "$CACHE"/*.src "$CACHE"/*.log "$CACHE"/*.boot "$CACHE"/*.pid "$CACHE"/*.need; do
+        [ -e "$f" ] || continue
+        case $f in *.raw.partial) l=$(basename "$f" .raw.partial) ;; *) l=$(basename "${f%.*}") ;; esac
+        [ -e "$CACHE/$l.raw" ] && continue
+        case " $seen " in *" $l "*) continue ;; esac
+        seen="$seen $l"
+        if copier_alive "$CACHE/$l.pid" "$CACHE/$l.raw" || cache_in_use "$l"; then hold copying "$l" 0; continue; fi
+        kb=$(du -ck "$CACHE/$l.raw.partial" 2>/dev/null | tail -1 | cut -f1)
+        take "unfinished copy" "$l" "${kb:-0}"
+    done
+    printf 'pruned\t%s\t%s\t%s\t%s\n' "$n" "$nkb" "$kn" "$kkb"
+}
 # df of the cache folder, or of the nearest folder above it that exists (a cache never made yet).
 cache_disk_df() {   # <df --output fields>
     local d=$CACHE
@@ -559,6 +638,10 @@ cache_pick() {
     local img="$1" label="$2" mode="${3:-sync}"
     local copy="$CACHE/$label.raw" stamp="$CACHE/$label.src"
     if [ "${PAD_CARD_CACHE:-1}" = 0 ]; then echo "$img"; return; fi
+    if on_cache_disk "$img"; then
+        echo "[card] $(basename "$img") lives on the card store already - booting it where it lies" >&2
+        echo "$img"; return
+    fi
     [ "${PAD_CARD_PRECOPY:-1}" = 0 ] && mode=async
     if cache_valid "$img" "$copy" "$stamp"; then
         echo "[card] using local cache $copy" >&2
@@ -905,6 +988,20 @@ if [ "${1:-}" = "--cache-list" ]; then
     printf 'limit\t%s\t%s\t%s\t%s\n' "$(cache_limit_gb)" "$(cache_used_kb)" "$CACHE" "$k"
     df -k --output=avail,size "$CACHE" 2>/dev/null | tail -1 \
         | awk '{printf "disk\t%s\t%s\n", $1, $2}'
+    exit 0
+fi
+if [ "${1:-}" = "--cache-prune" ]; then
+    # --cache-prune [--keep-days N] [--dry]   (PAD-966; cache_prune above): what cardstore.ps1 prune runs
+    shift; keep=30
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --keep-days) keep=${2:-}; shift 2 ;;
+            --dry) DRY=1; shift ;;
+            *) die "usage: cardmount.sh --cache-prune [--keep-days N] [--dry]" ;;
+        esac
+    done
+    case $keep in ''|*[!0-9]*) die "--keep-days is whole days (0 = the library only)" ;; esac
+    cache_prune "$keep"
     exit 0
 fi
 if [ "${1:-}" = "--cache-drop" ]; then

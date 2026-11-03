@@ -182,3 +182,52 @@ Proven 2026-10-26 in Ubuntu with the real script on a scratch cache (five 1 GiB 
 by the rig's own fuse2fs): the mounted card was refused and never evicted though booted longest ago; the limit took
 the unfinished copy, the rebuilt custom build, then the oldest boot; a new copy under the limit evicted the next
 oldest; a root-owned side file in a sticky folder was reported, not counted as freed.
+
+## Pruned to the library, and a card on the store boots where it lies (PAD-966)
+
+David, 2026-11-03: "compact them as much as possible ... ideally we should not be caching the whole raw sd card,
+only what is necessary. even more ideally, not duplicating bytes from the raw sd card at all"; and, with the WSL
+disks possibly moving to D: (PAD-819), where the originals live: "would be great to not have to duplicate them from
+D: to C: and then compact. I want the library to be performant though for doing tickets."
+
+**Measured first.** Every copy in the store was already at cardcopy.py's used-block floor (43 library and archive
+pins compared, each `du` at or under `cardcopy.py --size`: the old `dd conv=sparse` pass at 4 MB had dropped the same
+empty space), so re-copying gains nothing. The 548 GB on the 590 GB disk were in WHAT was kept: 31 library pins
+(181 GB) and 72 entries no library boot would use - 43 dead (201 GB: 42 stamped against themselves, below, and one
+rebuilt), 9 custom dev builds (77 GB), ten older versions, ticket scratch, five whose image is gone or on a folder
+that is not there - while 29 newest builds had been pushed out and would come off D: again at the next sweep.
+
+**How 42 entries died.** `~/cardcache` in Ubuntu has been a symlink to the store since 2026-10-20, and on 10-29 a
+list booted the store's copies AS cards by that path. cardmount.sh saw an image whose label's copy did not match
+it (the copy's own size+mtime against the library stamp), copied the file onto itself through `.partial` and
+re-stamped it with its own identity. From then on no boot of the library file matched the entry, and the next
+sweep re-copied the card off D: - into the same label, over the dead copy.
+
+**What changed.**
+1. `on_cache_disk`: an image that already lives on the cache's disk - inside the cache itself, or anywhere on the
+   store's disk (`cache_kind` store) - is booted where it lies: `cache_pick` returns it with "lives on the card
+   store already", nothing is copied or stamped, `--cache-check` answers `cached` with need 0 and precache.sh counts
+   it as there. That ends the self-stamping, and it is what lets a library live on the store ONCE: a card under
+   `/mnt/wsl/cards/` boots from where it is. A distro's own disk is not treated so (the whole system shares it).
+2. `cache_source_state` reads a stamp naming a file in the cache as `changed`: the Cache window shows it as never
+   used again, the 30-day clean-up and the copier's room rule take it first.
+3. `cardmount.sh --cache-prune [--keep-days N] [--dry]` / `cardstore.ps1 prune [-KeepDays N] [-DryRun]`: one pass
+   takes unfinished copies, dead entries and everything not the library's and not booted in N days (0 = the library
+   alone stays), never a card in use or being copied, then `fill` puts back any newest build that is missing.
+4. Manage disk space > Move to another drive leaves the card store where it is when the destination is a hard
+   disk (`wsl_place.stays`, Windows' own MediaType), and says so and why in the confirm.
+
+**The one-copy question, with numbers.** D: is a SATA hard disk: 95 random 64 KB reads a second and 141 MB/s
+sequential, against the NVMe's 4,300+ and 5.2 GB/s. Godzilla Pro 1.16 to attract, real speed, cold page cache,
+mounted where it lies: **40 s and 33 s from an ext4 disk on D:** (a 20 GB VHDX made for the measurement and
+removed), **20 s and 23 s from the store on the NVMe**; 79-148 s through 9p off the same D: (PAD-651, PAD-963).
+So: the store's copies are already the compact version (used blocks only, ~55% of a raw image), reading the raws
+where they lie stays 4-7x slower, and a store moved to D: with the other WSL disks would be near twice as slow
+and still a second copy on the same spindle. The duplicate on the PC is the raw library on D: (616 GB of raws for
+61 files), kept as the originals; the way to one copy is to move the library INTO the store (a folder on
+`/mnt/wsl/cards`, boots in place by rule 1, Windows reads it through `\wsl.localhost`) and retire the D: raws to
+the archive - David's call on his own files, not made here.
+
+Proven 2026-11-03: the dry prune of the real store named 72 entries / 393 GB to take and 31 / 181 GB to keep (the
+library's pins, and nothing in use); the new module's bash drivers under WSL Ubuntu and Git Bash; the two timed
+boots above on rig 1.

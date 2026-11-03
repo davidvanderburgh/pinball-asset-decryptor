@@ -813,6 +813,12 @@ class DiskMixin:
             _mb().showwarning("Can't move there", problem)
             return False
         size = sum(i["size"] for i in moving)
+        # the card store stays off a hard disk (PAD-966): say so, and why
+        kept = wsl_place.stays(letter, d["place"])
+        stay = "".join(
+            "\n• %s stays on %s: %s." % (
+                i["label"], wsl_place.drive_of(i["path"]),
+                wsl_place.SLOW_WHY % letter) for i in kept)
         if not _mb().askyesno(
                 "Move to another drive",
                 "Move %s (%s) to %s?\n\n%s\n\n• WSL will be shut down, and "
@@ -820,11 +826,11 @@ class DiskMixin:
                 "running extract, build or emulator first.\n• Copying %s "
                 "can take a while.\n• Close Docker Desktop and any Linux "
                 "terminal windows first: they start WSL again and keep its "
-                "disk in use.\n\nContinue?" % (
+                "disk in use.%s\n\nContinue?" % (
                     " and ".join(i["label"] for i in moving), _fmt(size),
                     letter, "\n".join("%s  →  %s" % (
                         i["path"], wsl_place.target_of(i, dest_root))
-                        for i in moving), _fmt(size))):
+                        for i in moving), _fmt(size), stay)):
             return False
         self._disk_busy(True, "Moving…")
         place = list(d["place"])

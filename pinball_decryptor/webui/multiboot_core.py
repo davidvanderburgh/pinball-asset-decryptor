@@ -346,7 +346,22 @@ FOOTER_MAX = 199
 #: prefixes after resolving links; the repo's own images/ is a junction into
 #: it).  Both spellings, because the form holds Windows paths and the tool
 #: sees WSL ones.  tests/test_multiboot_tab.py pins this to the tool's list.
-LIBRARY_PREFIXES = ("D:/Pinball/images", "/mnt/d/Pinball/images")
+LIBRARY_PREFIXES = ("D:/Pinball/images", "/mnt/d/Pinball/images", "/mnt/wsl/cards/library")
+
+#: The library on the card store (PAD-966), as WSL spells it; from Windows it is
+#: ``\\wsl.localhost\<distro>\mnt\wsl\cards\library`` (or ``\\wsl$\...``),
+#: which :func:`under_library` reads back to this.
+STORE_LIBRARY = "/mnt/wsl/cards/library"
+
+
+def _wsl_share_path(n):
+    """``//wsl.localhost/<distro>/mnt/wsl/...`` (or ``//wsl$/...``), lower-cased
+    with forward slashes, -> the path inside the distro; None otherwise."""
+    for host in ("//wsl.localhost/", "//wsl$/"):
+        if n.startswith(host):
+            rest = n[len(host):].split("/", 1)
+            return "/" + rest[1] if len(rest) == 2 else "/"
+    return None
 
 #: images.conf v2 carries up to 16 images.
 #: WHAT THE PLAYER SCROLLS THROUGH: one per table row.  A row that carries
@@ -1393,6 +1408,11 @@ def under_library(path, resolve=True):
     callers that must not stat - see there.  The gates leave it True."""
     if not path:
         return False
+    # the store's library seen from Windows through WSL's own share (PAD-966): read from the text as typed, since
+    # abspath on any other platform would fold a share into the working directory
+    w = _wsl_share_path(path.strip().strip('"').replace("\\", "/").lower())
+    if w is not None and (w == STORE_LIBRARY or w.startswith(STORE_LIBRARY + "/")):
+        return True
     norm = _norm if resolve else _plain
     sep = "/" if resolve else os.sep
     n = norm(path)

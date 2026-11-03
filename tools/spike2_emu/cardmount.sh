@@ -58,7 +58,25 @@ fi
 # the copier making room and not by the app's 30-day clean-up (--cache-list says which). A newer build replacing
 # it, or the image moving to `older versions`, makes it an ordinary entry again. PAD_CARD_LIBRARY names another
 # folder; a machine without that folder pins nothing and the cache works as it always did.
-LIBRARY=${PAD_CARD_LIBRARY:-/mnt/d/Pinball/images/Stern/spike2}
+#
+# THE LIBRARY LIVES ON THE STORE, ONCE (PAD-966). David: "I want to be storing ONE copy of a disk image since they
+# are so large". With the store mounted, the library is /mnt/wsl/cards/library: precache.sh takes every card from
+# the INTAKE folder (D:\Pinball\images\Stern\spike2, where downloads land) into it once, compact (used blocks only,
+# same name, same mtime), and a card there boots where it lies (on_cache_disk) - no cache entry, no copy. The raw in
+# the intake folder is then redundant: a boot of it, by whatever path names it (the app's picker, an old sweep list,
+# the Write tab), is served from the library file (library_copy), so nothing is copied twice. Not on the hard disk
+# D: itself, measured: five rigs share its 95 random reads a second and a 330 GB sweep is 39+ minutes of its time,
+# against nothing from the NVMe. Without the store, or before the first intake, the library is the intake folder as
+# before and the cache does the work.
+STORE_LIBRARY=/mnt/wsl/cards/library
+INTAKE=${PAD_CARD_INTAKE:-/mnt/d/Pinball/images/Stern/spike2}
+if [ -n "${PAD_CARD_LIBRARY:-}" ]; then
+    LIBRARY=$PAD_CARD_LIBRARY
+elif [ "$CACHE" = /mnt/wsl/cards/cardcache ] && [ -d "$STORE_LIBRARY" ]; then
+    LIBRARY=$STORE_LIBRARY
+else
+    LIBRARY=$INTAKE
+fi
 # The space the copier leaves free. On a distro's own disk that space is the distro's (cardstage.sh asks 30 GB);
 # the store holds nothing but the cache, so it keeps only a margin - with the library pinned in it, that margin is
 # the difference between an older version cached and one booted where it lies.
@@ -457,8 +475,8 @@ cache_check() {   # <img>
     DRY_GONE=""; ROOM_WHY=""; ROOM_EVICT_N=0; ROOM_EVICT_KB=0; ROOM_FREE_KB=""
     if [ "${PAD_CARD_CACHE:-1}" = 0 ]; then
         state=off
-    elif on_cache_disk "$img"; then
-        state=cached; need=0           # PAD-966: booted where it lies - nothing to copy, no room to make
+    elif on_cache_disk "$img" || library_copy "$img" >/dev/null; then
+        state=cached; need=0           # PAD-966: booted where it lies, or from its library copy - nothing to copy
     elif cache_valid "$img" "$copy" "$stamp"; then
         state=cached
     elif copier_alive "$CACHE/$label.pid" "$copy"; then
@@ -495,6 +513,19 @@ on_cache_disk() {   # <img>
     case $r in "$c"/*) return 0 ;; esac
     [ "$(cache_kind)" = store ] || return 1
     [ -e "$r" ] && [ "$(stat -c %d "$r" 2>/dev/null)" = "$(stat -c %d "$c" 2>/dev/null)" ]
+}
+
+# THE INTAKE RAW BOOTS FROM ITS LIBRARY COPY (PAD-966): prints the library file that holds this card - same name,
+# same size+mtime (precache.sh keeps the original's mtime) - when the library is the store's and the image is not
+# that file itself. A raw rebuilt under the same name gets a new identity and is taken in again.
+library_copy() {   # <img>
+    local lib
+    [ "$LIBRARY" = "$STORE_LIBRARY" ] || return 1
+    lib="$LIBRARY/$(basename "$1")"
+    [ -f "$lib" ] || return 1
+    [ "$(readlink -f "$1" 2>/dev/null)" = "$(readlink -f "$lib" 2>/dev/null)" ] && return 1
+    [ "$(stamp_key "$(cache_stamp "$1")")" = "$(stamp_key "$(cache_stamp "$lib")")" ] || return 1
+    echo "$lib"
 }
 
 # PRUNE THE CACHE TO WHAT A BOOT CAN USE (PAD-966). cache_make_room takes entries one at a time and only when a copy
@@ -641,6 +672,11 @@ cache_pick() {
     if on_cache_disk "$img"; then
         echo "[card] $(basename "$img") lives on the card store already - booting it where it lies" >&2
         echo "$img"; return
+    fi
+    local lib
+    if lib=$(library_copy "$img"); then
+        echo "[card] $(basename "$img") is in the card library - booting it from there" >&2
+        echo "$lib"; return
     fi
     [ "${PAD_CARD_PRECOPY:-1}" = 0 ] && mode=async
     if cache_valid "$img" "$copy" "$stamp"; then

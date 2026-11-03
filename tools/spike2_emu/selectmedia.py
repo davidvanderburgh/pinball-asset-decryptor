@@ -184,7 +184,8 @@ ATTRACT_CLIP = "attract_background"
 LOGO_CANDIDATES = ("assets/lcd/GameLogo.png",
                    "assets/lcd/GameLogos/backglass_{model}.png",
                    "assets/lcd/ALGameLogo.png")
-FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\Pinball\\images")
+FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\Pinball\\images",
+                             "/mnt/wsl/cards/library")       # the library on the card store (PAD-966)
 PARAMS_CACHE_DIRNAME = "pinball_spike2_params"
 PARAMS_REV_TAG = ".r2"
 # an art spec 'PATH@T' grabs a frame of these.  .webm and .flv (item 120): what PAD

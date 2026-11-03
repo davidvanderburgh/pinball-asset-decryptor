@@ -59,6 +59,15 @@ def _unc_wsl_path(p):
     parts = [x for x in p.split("/") if x]
     if len(parts) < 2:
         return p                          # a bare //server: nothing to mount
+    # \\wsl.localhost\<distro>\... (and the older \\wsl$\...) is WSL's own file
+    # system seen from Windows: inside WSL it is the path after the distro's
+    # name, and there is nothing to mount.  PAD-966: the card library lives on
+    # the store, \\wsl.localhost\Ubuntu\mnt\wsl\cards\library, and /mnt/wsl is
+    # the same in every distro - which is what makes this right for the
+    # runtime distro the app runs its tools in, whichever distro the share
+    # named.  (A distro's own /home is not shared; nothing of ours lives there.)
+    if parts[0].lower() in ("wsl.localhost", "wsl$"):
+        return "/" + "/".join(parts[2:])
     return "/".join([UNC_ROOT, parts[0].lower(), parts[1].lower()]
                     + parts[2:])
 

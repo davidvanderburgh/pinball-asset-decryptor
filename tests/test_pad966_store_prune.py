@@ -131,6 +131,82 @@ def test_the_modes_the_fill_and_the_store_script_know_the_prune_and_the_in_place
     check = cm[cm.index("cache_check() {"):cm.index("cache_kind() {")]
     assert 'on_cache_disk "$img"' in check and "need=0" in check
     pre = _text("precache.sh")
-    assert "lives on the card store already" in pre
+    assert "in the library  $name" in pre
     ps = _text("cardstore.ps1")
     assert "'prune'" in ps and "--cache-prune --keep-days $KeepDays" in ps and "fill -Path" in ps
+
+
+# --------------------------------------------------------------------- the library lives on the store, once
+@linux_bash
+def test_a_raw_in_the_intake_folder_boots_from_its_library_copy():
+    """David: "I want to be storing ONE copy of a disk image". The library is /mnt/wsl/cards/library; the raw it
+    was taken from (same name, same size+mtime) is booted from the library file by whatever path names it."""
+    lines = _run(_funcs("cache_stamp", "stamp_key", "on_cache_disk", "library_copy", "cache_pick") + r"""
+set -u
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+CACHE=$T/cache; STORE_LIBRARY=$T/lib; LIBRARY=$T/lib
+mkdir -p "$CACHE" "$T/lib" "$T/intake"
+cache_kind() { echo distro; }    # here intake and library share one device; on David's PC the intake is D:
+truncate -s 2M "$T/intake/gz-1_16_0.Release.8G.sdcard.raw"; touch -d @1000 "$T/intake/gz-1_16_0.Release.8G.sdcard.raw"
+truncate -s 2M "$T/lib/gz-1_16_0.Release.8G.sdcard.raw";    touch -d @1000 "$T/lib/gz-1_16_0.Release.8G.sdcard.raw"
+truncate -s 2M "$T/intake/new.raw"; touch -d @2000 "$T/intake/new.raw"
+truncate -s 2M "$T/lib/new.raw";    touch -d @1500 "$T/lib/new.raw"                 # rebuilt since: a new identity
+echo "taken: $(library_copy "$T/intake/gz-1_16_0.Release.8G.sdcard.raw")"
+library_copy "$T/intake/new.raw" || echo "rebuilt: no library copy"
+library_copy "$T/lib/new.raw" || echo "the library file itself: not a copy of itself"
+LIBRARY=$T/intake library_copy "$T/intake/gz-1_16_0.Release.8G.sdcard.raw" || echo "no store library: nothing"
+echo "pick: $(cache_pick "$T/intake/gz-1_16_0.Release.8G.sdcard.raw" gz-1_16_0 2>&1 | tr '\n' ' ')"
+""")
+    T = [l for l in lines if l.startswith("taken: ")][0][len("taken: "):].rsplit("/lib/", 1)[0]
+    assert "taken: %s/lib/gz-1_16_0.Release.8G.sdcard.raw" % T in lines
+    assert "rebuilt: no library copy" in lines
+    assert "the library file itself: not a copy of itself" in lines
+    assert "no store library: nothing" in lines
+    assert ("pick: [card] gz-1_16_0.Release.8G.sdcard.raw is in the card library - booting it from there "
+            "%s/lib/gz-1_16_0.Release.8G.sdcard.raw " % T) in lines
+
+
+def test_the_library_is_the_store_the_intake_is_taken_in_and_every_gate_knows_the_new_place():
+    cm = _text("cardmount.sh")
+    assert "STORE_LIBRARY=/mnt/wsl/cards/library" in cm
+    assert 'INTAKE=${PAD_CARD_INTAKE:-/mnt/d/Pinball/images/Stern/spike2}' in cm
+    assert 'elif [ "$CACHE" = /mnt/wsl/cards/cardcache ] && [ -d "$STORE_LIBRARY" ]; then\n    LIBRARY=$STORE_LIBRARY' in cm
+    check = cm[cm.index("cache_check() {"):cm.index("cache_kind() {")]
+    assert 'on_cache_disk "$img" || library_copy "$img" >/dev/null' in check
+    # the intake: a valid cache copy of the card is MOVED into the library, anything else copied compact, with the
+    # original's mtime, and the store-less machine keeps the old cache fill
+    pre = _text("precache.sh")
+    assert "DEST=/mnt/wsl/cards/library" in pre
+    assert 'mv "$CACHE/$label.raw" "$dest.partial"' in pre
+    assert 'touch -r "$card" "$dest.partial"' in pre
+    assert 'bash "$RIG/cardmount.sh" "$card" --cache-now' in pre
+    # rigbatch's stager leaves a card on the store's disk alone and names a library boot for what it is
+    st = _text("cardstage.sh")
+    assert '/mnt/wsl/*) echo "$card" > "$S/$i"; continue ;;' in st
+    assert "/mnt/wsl/cards/library/*)" in st
+    # nothing may build INTO the library, by either spelling
+    from pinball_decryptor.webui import multiboot_core
+    sys.path.insert(0, RIG)
+    try:
+        import mkmulticard, selectmedia       # noqa: E401
+    finally:
+        sys.path.pop(0)
+    for lst in (multiboot_core.LIBRARY_PREFIXES, mkmulticard.FORBIDDEN_OUTPUT_PREFIXES,
+                selectmedia.FORBIDDEN_OUTPUT_PREFIXES):
+        assert "/mnt/wsl/cards/library" in lst
+    for p in (r"\\wsl.localhost\Ubuntu\mnt\wsl\cards\library\x.raw", r"\\wsl$\PAD-Runtime\mnt\wsl\cards\library",
+              "//wsl.localhost/Ubuntu/mnt/wsl/cards/library/sub/x.raw"):
+        assert multiboot_core.under_library(p, resolve=False), p
+        assert multiboot_core.under_library(p), p
+    assert not multiboot_core.under_library(r"\\wsl.localhost\Ubuntu\mnt\wsl\cards\cardcache\x.raw", resolve=False)
+    assert not multiboot_core.under_library(r"\\wsl.localhost\Ubuntu\home\david\library\x.raw", resolve=False)
+
+
+def test_the_app_reads_a_wsl_share_path_as_the_distro_does():
+    """rig.wsl_path (PAD-849) spelled \\wsl.localhost\... as an SMB share to mount under /mnt/unc; it is WSL's own
+    file system, and the library on the store is reached through it from Windows."""
+    from pinball_decryptor.webui import rig
+    assert rig.wsl_path(r"\\wsl.localhost\Ubuntu\mnt\wsl\cards\library\gz.raw") == "/mnt/wsl/cards/library/gz.raw"
+    assert rig.wsl_path(r"\\wsl$\PAD-Runtime\mnt\wsl\cards\library\gz.raw") == "/mnt/wsl/cards/library/gz.raw"
+    assert rig.wsl_path(r"\\NAS\Pinball\a.raw") == "/mnt/unc/nas/pinball/a.raw"        # a real share, as before
+    assert rig.unc_mounts(["x", "/mnt/wsl/cards/library/gz.raw"]) == []

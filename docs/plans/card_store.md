@@ -231,3 +231,29 @@ the archive - David's call on his own files, not made here.
 Proven 2026-11-03: the dry prune of the real store named 72 entries / 393 GB to take and 31 / 181 GB to keep (the
 library's pins, and nothing in use); the new module's bash drivers under WSL Ubuntu and Git Bash; the two timed
 boots above on rig 1.
+
+### The library moved onto the store, once (PAD-966, same day)
+
+David: "instead of filing the ticket, do it now on this one" - "ideally I want to be storing ONE copy of a disk
+image since they are so large. and not using up my C: drive so much." And on the store-on-D: idea: "is that going
+to work ok for when we are running multiple rigs in parallel off of D:?" No: five rigs would share the hard disk's
+95 random reads a second, and a 330 GB sweep is 39+ minutes of its sequential time against nothing from the NVMe.
+So the one working copy is on the NVMe, and D: is intake and archive:
+
+- **`/mnt/wsl/cards/library`** holds one compact file per card under the card's own name with the original's
+  mtime (`precache.sh`, now the intake: a valid cache entry of the card is MOVED in - a rename on one disk - and
+  anything new is copied compact from the intake folder). A card there boots where it lies (`on_cache_disk`).
+- **A raw in the intake folder** (`D:\Pinball\images\Stern\spike2`, `INTAKE`) of the same name and identity is
+  booted from its library file (`library_copy`): the app's picker, an old sweep list and `--cache-check` all keep
+  working from the D: path and nothing is copied twice. A raw rebuilt under the same name is taken in again.
+- `LIBRARY` is the store's folder once it exists (pinning then has nothing to pin; the cache holds only what is
+  not the library's - older versions, custom builds, scratch - under the usual rules), the intake folder before.
+- From Windows the library is `\wsl.localhost\<distro>\mnt\wsl\cards\library`: `rig.wsl_path` reads a WSL share
+  back to the distro's own path (it used to spell it as an SMB share to mount, PAD-849), and `under_library` /
+  the builders' forbidden prefixes refuse to build into it by either spelling.
+- The raws on D: are now David's originals and archive, not a working copy: 616 GB he can thin at will. Nothing
+  on D: was changed by this ticket.
+
+Run 2026-11-03 12:24: 60 cards moved from the cache into the library in 14 s (0 copied, 0 failed), `cardcache/`
+left empty, 299 GB on the store, identities equal to the D: originals (size+mtime). `--cache-check` on the D: raw
+of Aerosmith LE answers `cached 0`, as does the library file itself.

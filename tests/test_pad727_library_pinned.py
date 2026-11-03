@@ -97,7 +97,9 @@ def test_the_library_is_never_evicted_and_dead_entries_go_first():
 
 def test_the_store_keeps_a_margin_and_a_distro_disk_its_floor():
     cm = _text("cardmount.sh")
-    assert "LIBRARY=${PAD_CARD_LIBRARY:-/mnt/d/Pinball/images/Stern/spike2}" in cm
+    # PAD-966: the library is the store's own folder once it exists, the intake folder (D:) before that
+    assert "INTAKE=${PAD_CARD_INTAKE:-/mnt/d/Pinball/images/Stern/spike2}" in cm
+    assert "    LIBRARY=$STORE_LIBRARY\nelse\n    LIBRARY=$INTAKE\nfi" in cm
     # precache.sh fills exactly the folder cardmount.sh pins
     assert "LIB=${1:-/mnt/d/Pinball/images/Stern/spike2}" in _text("precache.sh")
     assert 'if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then\n    CACHE_KEEP_GB=${PAD_STORE_KEEP_FREE_GB:-2}' in cm
@@ -134,4 +136,5 @@ def test_every_attach_at_logon_tops_the_library_up():
     assert "/precache.sh' > $log 2>&1" in fill
     # status says how much of the library is held
     assert "/cardmount.sh' --cache-list\" | Where-Object { $_ -like \"pinned`t*\" }" in ps
-    assert 'Say "  library: $held of $all newest builds held, never evicted"' in ps
+    assert 'Say "  library: not on the store yet (fill takes it in); $held of $($all.Count) newest builds held in the cache"' in ps
+    assert 'Say "  library: $($lib.Count) cards on the store ($taken of the $($all.Count) in the intake folder taken in)"' in ps

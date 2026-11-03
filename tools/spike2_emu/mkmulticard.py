@@ -245,7 +245,8 @@ SELECTOR_FILES = collections.OrderedDict([
     # a build that MAKES a delta refuses a selector dir without it (need_materializer)
     ("materialize.py", ("materialize.py", 0o755, False)),
 ])
-FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\Pinball\\images")
+FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\Pinball\\images",
+                             "/mnt/wsl/cards/library")       # the library on the card store (PAD-966)
 
 # ---- media (item 90 v2) --------------------------------------------------------------------
 MEDIA_DIR = SELECT_DIR + "/media"

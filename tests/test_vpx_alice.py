@@ -16,6 +16,11 @@ What is worth failing on, none of it needing a run:
     every light one of its LEDs; the flippers on the coils the game drives.
   * THE PATCHER renames every definition of a sub (the table defines some
     twice, and the last one runs).
+  * THE LAUNCH (PAD-960): autoFire fires the table's plunger at full
+    strength. It was pulled back 150 ms and let go, and VPX fires a plain
+    plunger from where it is, so the ball went a little way up the lane and
+    back: the patched file ticks the plunger's Auto Plunger box (a script
+    cannot) and autoFire calls its Fire.
 """
 import importlib.util
 import json
@@ -294,6 +299,77 @@ def test_every_definition_of_a_sub_is_renamed():
     rep = []
     assert vs.rename_sub(lines, "Other_Hit", rep) and rep == ["renamed Sub Other_Hit -> Other_Hit_orig"]
     assert not vs.rename_sub(lines, "Nothing_Hit", [])
+
+
+# --- the launch (PAD-960) -------------------------------------------------
+
+def test_autofire_fires_the_tables_plunger_as_a_solenoid_launcher():
+    m = json.load(open(VPX / "ac.shadow.json", encoding="utf-8"))
+    assert m["plunger"]["autoplunge"] == "Plunger" and m["plunger"]["auto_plunger"]
+    assert m["solenoids"]["2"]["name"] == "autoFire" and m["solenoids"]["2"]["callback"] == "PadAutoPlunge"
+    # no pull-and-let-go of its own: that was the 150 ms shot
+    assert "PullBack" not in m["extra_vbs"] and "PadLaunch" not in m["extra_vbs"]
+
+
+def test_an_auto_plunger_map_fires_with_fire_an_impulse_one_with_autofire():
+    vs = pytest.importorskip("vpxshadow")
+
+    def body(p):
+        m = {"plunger": dict({"lane_trigger": "Trigger1", "lane_switch": 50, "autoplunge": "Plunger"}, **p)}
+        return [ln for ln in vs.gen_plunger(m, {}) if ln.startswith("Sub PadAutoPlunge")]
+
+    assert body({"auto_plunger": True}) == ["Sub PadAutoPlunge(e) : If e Then Plunger.Fire : End If : End Sub"]
+    assert body({}) == ["Sub PadAutoPlunge(e) : If e Then Plunger.AutoFire : End If : End Sub"]
+
+
+def _item(kind, name, **fields):
+    vf = pytest.importorskip("vpxfile")
+    out = struct.pack("<i", kind) + vf.biff_record("NAME", struct.pack("<I", 2 * len(name)) + name.encode("utf-16-le"))
+    for tag, v in fields.items():
+        out += vf.biff_record(tag, struct.pack("<i", v))
+    return out + vf.biff_record("ENDB", b"")
+
+
+class _Table:
+    def __init__(self, items):
+        self.items = items
+
+    @staticmethod
+    def item_info(data):
+        import vpxfile
+        return vpxfile.VpxTable.item_info(data)
+
+
+def test_the_patched_file_ticks_the_plungers_auto_plunger_box():
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+    table = _Table([_item(8, "BallRelease"), _item(3, "Plunger", MECH=1, APLG=0, TMON=0)])
+    m = {"plunger": {"autoplunge": "Plunger", "auto_plunger": True}}
+    streams = vs.auto_plunger_item(table, m)
+    assert list(streams) == ["GameItem1"]
+    got = {t: struct.unpack("<i", p)[0] for t, p, _ in vf.item_records(streams["GameItem1"]) if len(p) == 4}
+    assert got == {"MECH": 1, "APLG": 1, "TMON": 0}
+    assert vf.VpxTable.item_info(streams["GameItem1"])[:2] == ("Plunger", "Plunger")
+    # a map without it leaves the table's plunger alone
+    assert vs.auto_plunger_item(table, {"plunger": {"autoplunge": "Plunger"}}) == {}
+    with pytest.raises(AssertionError):            # an impulse plunger's kicker is no Plunger
+        vs.auto_plunger_item(_Table([_item(8, "Plunger")]), m)
+
+
+def test_a_copy_patched_before_the_fix_is_asked_to_patch_again(tmp_path):
+    vs = pytest.importorskip("vpxsetup")
+    m = json.load(open(VPX / "ac.shadow.json", encoding="utf-8"))
+    (mark,) = m["repatch"]
+    # a line only the old patcher wrote: the map no longer carries it anywhere
+    rest = dict(m)
+    del rest["repatch"]
+    assert mark["old"].split("(")[0] not in json.dumps(rest)
+    name = "Alice Cooper's Nightmare Castle (Spooky Pinball 2017) (PAD).vpx"
+    script = tmp_path / (name[:-4] + ".script.vbs")
+    script.write_text("Sub PadLaunch(e)\n\tIf e Then\n\t\tPlunger.PullBack\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == [mark["why"]]
+    script.write_text("Sub PadAutoPlunge(e) : If e Then Plunger.Fire : End If : End Sub\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == []
 
 
 # --- the authors' card ---------------------------------------------------

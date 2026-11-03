@@ -9420,8 +9420,8 @@ int pad_sw_level(unsigned id)
 struct nb_motor {
     unsigned char cfg;          /* cmd 51 seen for this motor              */
     signed char stop[2];        /* input bit per end: [0] cmd 53, [1] 54    */
-    signed char at;             /* the end it is at; -1 between             */
-    signed char going;          /* the end it is travelling to; -1 idle     */
+    signed char at;             /* the place it is at; -1 between           */
+    signed char going;          /* the place it is going to; -1 idle        */
     unsigned long due;          /* pad_ms() it arrives                     */
     /* PAD-249: an encoder motor - homed, then sent to positions */
     unsigned char enc;          /* cmd 51 named encoder inputs              */
@@ -9431,6 +9431,13 @@ struct nb_motor {
     unsigned long start;        /* pad_ms() that move began                 */
 };
 static struct nb_motor nb_motors[64][NB_MOTORS];
+
+/* An end-stop motor's place: 0 and 1 are its ends (cmd 53's and 54's stop),
+ * 2 + bit a position switch a cmd 55 named, between them (PAD-955). */
+static int motor_place_bit(const struct nb_motor *m, int place)
+{
+    return place < 2 ? m->stop[place] : place - 2;
+}
 
 static unsigned long motor_ms(void)
 {
@@ -9675,14 +9682,18 @@ static void motor_tick(unsigned nid)
             motor_say(b);
             continue;
         }
-        motor_switch(nid, m->stop[(int)m->going], 1);
+        motor_switch(nid, motor_place_bit(m, m->going), 1);
         m->at = m->going;
         m->going = -1;
         {
             char b[96];
-            snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u arrived at "
-                     "end %d (input %d made)\n", pad_ms(), nid, k, m->at,
-                     m->stop[(int)m->at]);
+            if (m->at < 2)
+                snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u arrived "
+                         "at end %d (input %d made)\n", pad_ms(), nid, k, m->at,
+                         m->stop[(int)m->at]);
+            else
+                snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u arrived "
+                         "at input %d (made)\n", pad_ms(), nid, k, m->at - 2);
             motor_say(b);
         }
     }
@@ -9755,19 +9766,35 @@ static void motor_note(const unsigned char *p, int n)
         motor_say(b);
         return;
     }
-    if (p[2] == 0x55) return;   /* batman's end-stop motor sends 55 too: not
-                                 * ours to play (PAD-237 never did) */
     {
-        int end = p[2] == 0x53 ? 0 : 1;
+        /* PAD-955: cmd 55 on an end-stop motor runs it until the input its
+         * byte 4 names (0x40|bit) is made - batman's turntable to TURNTABLE
+         * POS. #2 (input 3, between its stops 2 and 4), its crane to
+         * positions #2..#5 (inputs 9..12, between 13 and 8). Ignored, the
+         * game sent both in attract and neither ever arrived. */
+        int end;
+        if (p[2] == 0x55) {
+            if (!(p[4] & 0x40)) return;
+            end = 2 + (p[4] & 0x3f);
+            if (end - 2 == m->stop[0]) end = 0;     /* an end by its input */
+            else if (end - 2 == m->stop[1]) end = 1;
+        } else {
+            end = p[2] == 0x53 ? 0 : 1;
+        }
         if (m->going == end || (m->going < 0 && m->at == end)) return;
-        if (m->going < 0 && m->at >= 0)
-            motor_switch(nid, m->stop[(int)m->at], 0);   /* it leaves the stop */
+        if (m->going < 0 && m->at >= 0)               /* it leaves where it is */
+            motor_switch(nid, motor_place_bit(m, m->at), 0);
         m->at = -1;
         m->going = (signed char)end;
         m->due = pad_ms() + motor_ms();
-        snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u sent to end %d "
-                 "(cmd %02x), arrives in %lu ms\n", pad_ms(), nid, k, end,
-                 p[2], motor_ms());
+        if (end < 2)
+            snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u sent to end "
+                     "%d (cmd %02x), arrives in %lu ms\n", pad_ms(), nid, k,
+                     end, p[2], motor_ms());
+        else
+            snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u sent to "
+                     "input %d (cmd %02x), arrives in %lu ms\n", pad_ms(), nid,
+                     k, end - 2, p[2], motor_ms());
         motor_say(b);
     }
 }

@@ -811,6 +811,7 @@ DOCKER_DIRS = (
                                                        # /usr/local/bin
     "~/.rd/bin",                                       # Rancher Desktop
     "~/.orbstack/bin",                                 # OrbStack
+    "/opt/podman/bin",                                 # Podman Desktop / package
     "/Applications/Docker.app/Contents/Resources/bin",  # Desktop's own copy,
                                                         # there even when the
                                                         # symlink was declined
@@ -822,6 +823,7 @@ DOCKER_ENGINE_APPS = (
     ("Docker Desktop", "/Applications/Docker.app"),
     ("OrbStack", "/Applications/OrbStack.app"),
     ("Rancher Desktop", "/Applications/Rancher Desktop.app"),
+    ("Podman Desktop", "/Applications/Podman Desktop.app"),
 )
 
 
@@ -850,7 +852,7 @@ def which_tool(name, dirs=DOCKER_DIRS):
 
 
 def docker_cli():
-    """The `docker` command on this machine, or None.
+    """The `docker` or `podman` command on this machine, or None.
 
     ``PAD_DOCKER`` overrides, for the Mac that keeps it somewhere none of
     :data:`DOCKER_DIRS` names - and a wrong override answers None rather than
@@ -860,7 +862,34 @@ def docker_cli():
     override = (os.environ.get("PAD_DOCKER") or "").strip()
     if override:
         return override if os.path.isfile(override) else None
-    return which_tool("docker")
+    d = which_tool("docker")
+    p = which_tool("podman")
+    if d and p:
+        # Both installed; prefer whichever engine is currently responsive.
+        # Every docker call in the app asks this, so a pick that answered is
+        # kept for _BOTH_PICK_S; one that did not is asked again next time,
+        # so starting either engine is seen at once.
+        when, pick = _BOTH_PICK.get((d, p), (0.0, None))
+        if pick and time.monotonic() - when < _BOTH_PICK_S:
+            return pick
+        for exe in (d, p):
+            try:
+                r = subprocess.run([exe, "info"], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, timeout=2,
+                                   creationflags=_CREATE_FLAGS)
+                if r.returncode == 0:
+                    _BOTH_PICK[(d, p)] = (time.monotonic(), exe)
+                    return exe
+            except Exception:
+                pass
+        return d
+    return d or p
+
+
+#: docker_cli()'s last answered pick when docker and podman are both
+#: installed, {(docker, podman): (monotonic time, exe)} (PR #17 review).
+_BOTH_PICK = {}
+_BOTH_PICK_S = 30.0
 
 
 def docker_engine():
@@ -884,6 +913,9 @@ def docker_engine():
     colima = which_tool("colima")
     if colima:
         return ("Colima", "cli", colima)
+    podman = which_tool("podman")
+    if podman:
+        return ("Podman", "cli", podman)
     return None
 
 
@@ -2434,8 +2466,8 @@ def setup_report_darwin(docker, cli=None, engine=None):
                                          + ", ".join(DOCKER_DIRS)))
     lines.append("  container engine: "
                  + ("%s (%s)" % (engine[0], engine[2]) if engine else
-                    "none installed — Docker Desktop, OrbStack, Rancher "
-                    "Desktop and Colima each provide one"))
+                    "none installed — Docker Desktop, Podman, OrbStack, "
+                    "Rancher Desktop and Colima each provide one"))
     lines.append("this Mac can run the emulator." if docker == "ok" else
                  "this Mac cannot run the emulator yet.")
     return lines

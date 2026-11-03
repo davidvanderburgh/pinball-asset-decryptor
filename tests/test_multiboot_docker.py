@@ -16,6 +16,7 @@ import hashlib
 import os
 import re
 import shlex
+import subprocess
 import sys
 from dataclasses import replace
 
@@ -1371,3 +1372,34 @@ def test_preview_worker_skips_docker_exec_when_container_not_ready(
     assert not popens
     assert len(done) == 1 and done[0][0] == 1 and done[0][1] == "selector"
     assert any("not up yet" in w for w in p.written)
+
+
+def test_strip_sha256():
+    assert D._strip_sha256("sha256:abcdef0123") == "abcdef0123"
+    assert D._strip_sha256("abcdef0123") == "abcdef0123"
+    assert D._strip_sha256("") == ""
+    assert D._strip_sha256(None) == ""
+
+
+def test_unavailable_reason_when_podman_cli_used(monkeypatch):
+    monkeypatch.setattr(D, "_cli", lambda: "/opt/podman/bin/podman")
+    monkeypatch.setattr(D, "_docker", lambda *a, **k: subprocess.CompletedProcess(
+        ["podman", "info"], 1, stdout="", stderr="error"))
+    reason = D.unavailable_reason()
+    assert "Podman is installed but not running" in reason
+
+
+def test_running_state_ignores_var_lib_volume_mounts(monkeypatch):
+    stdout = "true\nsha256:img123\n/tmp\n/host/Volumes/Card\n/var/lib/containers/storage/volumes/pad-vol\n"
+    monkeypatch.setattr(D, "_docker", lambda *a, **k: subprocess.CompletedProcess(
+        ["podman", "inspect"], 0, stdout=stdout))
+    img, mounts = D._running_state()
+    assert img == "sha256:img123"
+    assert mounts == {"/tmp", "/host/Volumes/Card"}
+
+
+def test_unshared_reason_podman(monkeypatch):
+    monkeypatch.setattr(D, "_engine_name", lambda: "podman")
+    msg = D.unshared_reason(["/Volumes/External"])
+    assert "Podman" in msg
+    assert "Settings > Resources" in msg

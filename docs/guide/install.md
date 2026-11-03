@@ -106,7 +106,8 @@ xattr -dr com.apple.quarantine "/Applications/Pinball Asset Decryptor.app"
   up emulator…** button installs a container engine with Homebrew or
   MacPorts for you.
 
-Docker Desktop, OrbStack, Rancher Desktop or Colima all work. Every other
+Docker Desktop, OrbStack, Rancher Desktop, Colima or Podman (with or without
+Podman Desktop) all work. Every other
 manufacturer runs without Docker, and Windows and Linux never need it.
 
 ## Linux

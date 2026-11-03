@@ -1201,8 +1201,10 @@ class EmulateTab(TabService):
         if eng and eng[1] == "cli":
             self.log("[emulate] starting %s; the first start takes a couple "
                      "of minutes" % eng[0])
+            start_cmd = ([eng[2], "machine", "start"] if eng[0] == "Podman"
+                         else [eng[2], "start"])
             self._run_engine_setup([("starting %s" % eng[0],
-                                     [eng[2], "start"], False)])
+                                     start_cmd, False)])
             return
         target = eng[2] if eng else "Docker"
         label = eng[0] if eng else "Docker Desktop"

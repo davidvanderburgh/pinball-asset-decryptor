@@ -479,3 +479,58 @@ a drain had the next ball served (and the ball save's launch coil, solenoid
 (`vpxfile verify`) and its script compiles (cscript reaches its first
 runtime line). Not run: the table in Visual Pinball itself (it would take
 David's desktop); every GUESS mark is what a game on the table will tell.
+
+## Spooky: Alice Cooper's Nightmare Castle on the P-ROC emulator (PAD-954)
+
+Alice Cooper runs on tools/spooky_emu/proc (its own Python 2.7 game on
+tools/proc_emu's emulated P3-ROC), not the Warden board, so PAD-952's bridge
+did not reach it and the tab listed Helshaks' table as "No map yet".
+
+* **The board** (`prochw.py --bridge DIR`) now keeps the Warden board's two
+  files in the rig folder, in the same layout and magics, so spkbridge's Rig
+  and Pipe drive it unchanged: switches by the board's number (`SD24` = 24),
+  LEDs (r, g, b) and coils by their places in the machine yaml's PRLEDs and
+  PRCoils. A coil's driver number depends on the order the game configures
+  its driver groups, so `spprun.py` sends the game's coil objects to the
+  board at attract (`coils name=number ...`; `coils` alone lists them). A
+  pulse reads on for BRIDGE_PULSE_S; attached (`vpxball.off`), the first
+  input sets the trough, jam and shooter lane whole and the ball model
+  stands aside. Found on the way: a timed patter ("patter 2/2 for 15 ms", a
+  sling's kick) never ended on the board, so a sling coil read on for ever;
+  it now ends by itself.
+* **The run**: `run_game.sh` posts the rig folder as `root` on its
+  `spooky-proc-<slot>.run`; spkbridge takes `spooky-proc` records as Spooky
+  runs. `padlaunch.SPOOKY_UPDATES["ac"]` is `ac-gamecode*.pkg` (the same
+  watch.sh hands it to the P-ROC rig); `SPOOKY_PROC` says the title's
+  machine is its yaml.
+* **The table**: Helshaks' WIP 1.0.2 is an EM-style script on a photo of the
+  machine's lower playfield, so its lights sit on the real inserts.
+  `gen_alice_map.py` writes `ac.shadow.json` and says how each object was
+  matched (by place: GUESS marks to confirm): outlanes, inlanes, slings, the
+  left orbit's spinner and top, the inner and right orbits, the ramps'
+  entrances, the chop, the right subway, the hurry-up, two monster-select
+  targets, the multiplier and extra-ball targets, the left scoop (Kicker2,
+  coil leftScoop), the three drop targets (their reset and knockdown coils
+  raise and drop the table's targets), the upper lanes; 33 lights on 32 of
+  the game's LEDs. The game flips on the MAIN coils (pulse, then patter: the
+  yaml's hold coils are never driven); autoFire pulls and lets go the
+  table's own plunger, and the plunger key is the launch button. The table
+  defines several subs two or three times (VBScript runs the last), so
+  `vpxshadow.rename_sub` now renames every definition. Coverage 65%: the
+  castle and guillotine locks and the subways are servo-held on the machine
+  and the rig drives no servos, so balls pass their switches and play on.
+* **The authors' card** reads the machine from the prepared build's
+  `config/alice.yaml` (`read_machine_spooky_proc`, with a line reader: the
+  app ships no YAML library).
+
+**Proof** (PAD-Runtime, the kit's Spooky slots 7 then 6, hidden and muted;
+started by `padvpx run ac` from this worktree): attached at once from the
+board record; 84 LEDs lit in attract, all the map's inserts lit by the game;
+coin + Start fired the trough (solenoid 1); the launch button fired autoFire
+(solenoid 2); the left, right and upper flipper buttons held solenoids 48,
+46 and 34 and let them go; both slings pulsed 12 and 13 and let go; the left
+scoop held kicked by leftScoop (solenoid 3) 1.7 s later; a drop target's
+knockdown coil (7) fired at the ball's start; a drain ended the ball and the
+next was served. The game logged every switch (its own log). The patched
+table verifies and its script compiles. Not run: the table in Visual Pinball
+itself; every GUESS mark is what a game on the table will tell.

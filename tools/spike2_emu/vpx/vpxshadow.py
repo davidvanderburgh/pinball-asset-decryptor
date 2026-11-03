@@ -89,15 +89,21 @@ def saucers(m):
 
 
 def rename_sub(lines, name, rep):
-    """Rename `Sub <name>` to `Sub <name>_orig`; True if it existed."""
+    """Rename `Sub <name>` to `Sub <name>_orig`; True if it existed. Every
+    definition of it (PAD-954): a script that defines a Sub twice runs the
+    LAST one (VBScript: no error), and Alice Cooper's tribute defines sw9_Hit,
+    the drop targets' and Spinner_Spin two or three times - renaming only the
+    first left the later copy in force over the bridge's own sub."""
     pat = re.compile(SUB_RE % re.escape(name), re.I)
+    n = 0
     for i, line in enumerate(lines):
         m = pat.match(line.rstrip())  # Batman 66: a header can end in a space
         if m:
             lines[i] = line.replace(m.group(3), name + "_orig", 1)
-            rep.append("renamed Sub %s -> %s_orig" % (name, name))
-            return True
-    return False
+            n += 1
+    if n:
+        rep.append("renamed Sub %s -> %s_orig%s" % (name, name, " (%d definitions)" % n if n > 1 else ""))
+    return bool(n)
 
 
 def _statements(line):

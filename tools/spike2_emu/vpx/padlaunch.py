@@ -99,8 +99,13 @@ PLATFORM_NAMES = {"spike2": "Spike 2", "spike1": "Spike 1", "spooky": "Spooky"}
 #: the card images a platform's library holds, by glob after `<title>-`
 CARD_GLOBS = {"spike2": ("*.sdcard.raw",), "spike1": ("*.iso",)}
 #: PAD-952: a Spooky title boots its UPDATE file (tools/spooky_emu prepares
-#: it), named by Spooky, not after the title: the rig's title key -> globs
-SPOOKY_UPDATES = {"h78": ("code_H78*.pkg",), "um": ("code_UM*.pkg",)}
+#: it), named by Spooky, not after the title: the rig's title key -> globs.
+#: PAD-954: Alice Cooper's game-code package, which the same watch.sh hands
+#: to the P-ROC rig (tools/spooky_emu/proc)
+SPOOKY_UPDATES = {"h78": ("code_H78*.pkg",), "um": ("code_UM*.pkg",), "ac": ("ac-gamecode*.pkg",)}
+#: the Spooky titles that run on the P-ROC rig, not the Warden board: their
+#: rig profile is the machine yaml in the prepared build (PAD-954)
+SPOOKY_PROC = {"ac": "config/alice.yaml"}
 
 
 def card_for(title, platform="spike2"):

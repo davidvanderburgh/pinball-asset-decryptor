@@ -96,7 +96,10 @@ chown "$SPP_USER": "$SPP_RIG/rig.log"     # spprun.py writes it too
 # The board, seeded from the machine yaml: the trough full of balls (an NC
 # trough opto with a ball is open), everything else at rest.  prochw.py
 # needs PyYAML, which PAD-Runtime's python lacks and AP's py3 env has.
+# --bridge: a Visual Pinball table's files in the rig folder (PAD-954,
+# tools/spike2_emu/vpx/spkbridge.py), as on the Warden board.
 PATH=$SPP_PY3/bin:$PATH PAD_SLOT=$SPP_SLOT bash "$SPP_PROC/hw.sh" --yaml "$SPP_RIG/game/$DIR/$YAML" \
+    --bridge "$SPP_RIG" \
     >> "$SPP_RIG/rig.log" \
     || { echo "run_game.sh: the board did not come up" >&2; exit 3; }
 FPGA=$(. "$SPP_PROC/procpath.sh"; echo "$PROC_FPGA")
@@ -157,7 +160,9 @@ if [ "$AUDIO" = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S "$SPP_PULSE" ] && spp
         < /dev/null >> "$SPP_RIG/spkvol.log" 2>&1
 fi
 if spp_alive game && [ -f "$SPP_RIG/attract" ]; then
-    rigboard_post spooky-proc "$SPP_SLOT" "$(spp_pid game)" "$(basename "$BUILD")" "$NAME" "$VISIBLE" "$AUDIO"
+    # RIGBOARD_ROOT: the rig folder, where a table's controller finds the
+    # board's files (PAD-954)
+    RIGBOARD_ROOT=$SPP_RIG rigboard_post spooky-proc "$SPP_SLOT" "$(spp_pid game)" "$(basename "$BUILD")" "$NAME" "$VISIBLE" "$AUDIO"
     # The playfield window's keys in the game's own window too, as on the
     # Warden rig (PAD-313): gamekeys.py speaks the Warden board's ctl.sock,
     # which sppctl.py --serve answers from this board (its own socket has no

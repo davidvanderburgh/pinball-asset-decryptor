@@ -34,6 +34,10 @@ Control: a unix socket at <dir>/ctl.sock taking one command per line:
                        turn the ball model on (below); `balls` alone reports it
   drain                a ball from the playfield back into the trough
   plunge               the ball in the shooter lane goes onto the playfield
+  coils <name>=<driver> ...
+                       the game's coil objects' driver numbers (its runner
+                       sends them at attract), for a table's bridge; `coils`
+                       alone: JSON, the yaml's coils -> their drivers
   quit
 <sw> is a number, a name from the machine yaml, or a yaml-style address
 (SD12, 3/4, S21 ...).  Replies are one line; errors start with "err".
@@ -47,6 +51,25 @@ empties the shooter lane; `drain` puts a ball back.  The trough's balls sit
 packed from its lowest-numbered switch (trough1: the eject end), as the
 initial seeding has them.  No other physics: everything else is a switch
 you press.
+
+A Visual Pinball table (PAD-954; --bridge DIR): the Spooky Warden board's
+two files (tools/spooky_emu/spkwarden.py, tools/spike2_emu/vpx/spkbridge.py)
+in DIR, so PAD.Controller drives a P-ROC game as it drives Halloween:
+
+  vpxhw.state   "SPHW": u32 magic, version, seq, flags; u8 switches[1024]
+                (1 = active, by the board's switch number); u8 lamps[1024 *
+                3] (r, g, b of the yaml's PRLEDs entry n, in the yaml's
+                order); u8 coils[1024] (the yaml's PRCoils entry n, in the
+                yaml's order: on while its driver is, or pulsed in the last
+                BRIDGE_PULSE_S)
+  vpxsw.input   "SPSW": u32 magic, version, seq; a 128-byte bitmap, one bit
+                per switch number, set = active - what the table holds
+
+A coil is named by its place in the yaml, not its driver number, because
+that number depends on the order the game configures its driver groups (the
+`coils` command tells the board which is which).  While `vpxball.off` is in
+DIR the table owns the balls: the ball model stands aside, and the first
+input sets the trough and the shooter lane whole.
 
 Initial switches: with --yaml, the trough holds PRGame.numBalls balls
 (switches named trough<N>, lowest N first) and every other switch is at
@@ -62,6 +85,7 @@ import os
 import re
 import select
 import socket
+import struct
 import sys
 import time
 
@@ -75,6 +99,20 @@ CHIPS = {
     "proc": (pp.P_ROC_CHIP_ID, 1, 22),
 }
 EVENT_HEADER = 0x80000000 | (1 << 20)   # unrequested, one word follows
+
+# A Visual Pinball table's files (PAD-954): spkwarden.py's layout and magics
+BRIDGE_SLOTS = 1024
+BRIDGE_STATE = "vpxhw.state"
+BRIDGE_INPUT = "vpxsw.input"
+BRIDGE_ATTACHED = "vpxball.off"
+BRIDGE_STATE_MAGIC = 0x53504857          # "SPHW"
+BRIDGE_INPUT_MAGIC = 0x53505357          # "SPSW"
+BRIDGE_VERSION = 1
+BRIDGE_POLL_S = 0.005
+BRIDGE_IDLE_S = 0.5
+#: how long a pulsed coil reads on in the block (the controller polls every
+#: few ms; a 15 ms sling pulse must be seen)
+BRIDGE_PULSE_S = 0.08
 
 
 def u32(v):
@@ -119,6 +157,9 @@ class Machine:
         self.switches = {}          # name -> number
         self.nc = set()             # numbers of NC switches
         self.num_balls = 0
+        self.leds = []              # PRLEDs in the yaml's order: (board, r, g, b) or None
+        self.led_names = []
+        self.coil_names = []        # PRCoils in the yaml's order
         if yaml_path:
             self._load(yaml_path)
 
@@ -143,6 +184,18 @@ class Machine:
             self.switches[str(name)] = num
             if str(item.get("type", "NO")).upper() == "NC":
                 self.nc.add(num)
+        self.coil_names = [str(k) for k in (cfg.get("PRCoils") or {})]
+        for name, item in (cfg.get("PRLEDs") or {}).items():
+            self.led_names.append(str(name))
+            self.leds.append(self.decode_led(str((item or {}).get("number", ""))))
+
+    LED = re.compile(r"^A(\d+)-R(\d+)-G(\d+)-B(\d+)$", re.I)
+
+    def decode_led(self, text):
+        """A PD-LED address (`A1-R0-G1-B2`: board 1, its outputs for red,
+        green and blue) -> (board, r, g, b), or None."""
+        m = self.LED.match(text.strip())
+        return tuple(int(g) for g in m.groups()) if m else None
 
     def decode_switch(self, text):
         """The number pyprocgame gives a yaml switch address."""
@@ -274,6 +327,11 @@ class Fpga:
         self.counts = collections.Counter()
         self.ball_model = None                   # {"eject", "shooter", "launch"}
         self.in_play = 0                         # balls out of the trough
+        self.coil_drivers = {}                   # yaml coil name -> driver (`coils`)
+        self.pulsed_at = {}                      # driver -> when it last went on
+        self.bridged = False                     # a table owns the balls (PAD-954)
+        self.table_held = set()
+        self.bridge_first = True
 
     # ---- helpers
     def now_ms(self):
@@ -425,17 +483,26 @@ class Fpga:
         d["active"] = d["state"] == 1 or d["patterEnable"] == 1
         d["since"] = self.now_ms()
         self.drivers[num] = d
+        if d["active"]:
+            self.pulsed_at[num] = self.clock()
         pulse = d["state"] and d["outputDriveTime"] and not d["patterEnable"] \
             and not d["timeslots"] and not d["futureEnable"]
         if pulse:
             heapq.heappush(self.pulse_ends, (self.clock() + d["outputDriveTime"] / 1000.0,
                                              num, self.driver_seq[num]))
             same = False                        # every pulse is news
+        elif d["patterEnable"] and not d["state"] and d["outputDriveTime"]:
+            # "patter on/off FOR n ms" (a sling's kick, PDB bumper rules)
+            # ends by itself: it read as on for ever, and a table's sling
+            # coil never let go (PAD-954)
+            heapq.heappush(self.pulse_ends, (self.clock() + d["outputDriveTime"] / 1000.0,
+                                             num, self.driver_seq[num]))
+            same = False
         if not same:
             self.counts["driver_changes"] += 1
             self.log.append({"t": d["since"], "driver": num, "action": describe_driver(d),
                              "by": source})
-        if pulse and self.ball_model:
+        if pulse and self.ball_model and not self.bridged:
             if num == self.ball_model["eject"]:
                 self.eject_ball()
             elif num == self.ball_model.get("launch"):
@@ -460,6 +527,8 @@ class Fpga:
         self.after(0.5, self.set_active, self.ball_model["shooter"], True)
 
     def plunge(self):
+        if self.bridged:
+            return False                        # the table's plunger
         if self.ball_model and self.active(self.ball_model["shooter"]):
             self.set_active(self.ball_model["shooter"], False)
             self.counts["launches"] += 1
@@ -467,6 +536,8 @@ class Fpga:
         return False
 
     def drain(self):
+        if self.bridged:
+            return False                        # the table's drain
         balls = self.trough_balls()
         if balls >= len(self.machine.trough()):
             return False
@@ -529,6 +600,73 @@ class Fpga:
     def set_active(self, num, active):
         return self.set_switch(num, active != (num in self.machine.nc))
 
+    # ---- a Visual Pinball table (PAD-954)
+    def bridge_block(self, seq, now=None):
+        """vpxhw.state: every switch active, every LED's colour and every
+        coil on (held, or pulsed within BRIDGE_PULSE_S), by the yaml's
+        order for LEDs and coils."""
+        now = self.clock() if now is None else now
+        n = BRIDGE_SLOTS
+        sw = bytearray(n)
+        lamps = bytearray(n * 3)
+        coils = bytearray(n)
+        for k in range(256):
+            if self.active(k):
+                sw[k] = 1
+        for i, led in enumerate(self.machine.leds[:n]):
+            if led:
+                board = led[0]
+                lamps[i * 3:i * 3 + 3] = bytes(self.leds.get("%d:%d" % (board, c), 0) & 255
+                                               for c in led[1:])
+        for i, name in enumerate(self.machine.coil_names[:n]):
+            num = self.coil_drivers.get(name)
+            if num is None or not 0 <= num < len(self.drivers):
+                continue
+            d = self.drivers[num]
+            if (d and d["active"]) or now - self.pulsed_at.get(num, -1e9) < BRIDGE_PULSE_S:
+                coils[i] = 1
+        head = struct.pack("<4I", BRIDGE_STATE_MAGIC, BRIDGE_VERSION, seq & 0xFFFFFFFF,
+                           1 if self.bridged else 0)
+        return head + bytes(sw) + bytes(lamps) + bytes(coils)
+
+    def ball_switches(self):
+        """The switches the balls make: the trough's, its jam opto, the
+        shooter lane - set whole from the table's first input."""
+        out = set(self.machine.trough())
+        for name, num in self.machine.switches.items():
+            if re.match(r"^(trough\s*jam|shooter\w*)$", name, re.I):
+                out.add(num)
+        if self.ball_model:
+            out.add(self.ball_model["shooter"])
+        return out
+
+    def set_bridged(self, on):
+        if on != self.bridged:
+            self.bridged = on
+            self.bridge_first = True
+            self.table_held = set()
+
+    def bridge_input(self, data):
+        """Apply a vpxsw.input: each switch the table changed since the last
+        one; the first after attach sets the ball switches whole, so the
+        board's own full trough gives way to the table's."""
+        if len(data) < 12 + BRIDGE_SLOTS // 8 or not self.bridged:
+            return
+        magic, _, _ = struct.unpack_from("<3I", data, 0)
+        if magic != BRIDGE_INPUT_MAGIC:
+            return
+        bits = data[12:12 + BRIDGE_SLOTS // 8]
+        held = {i for i in range(256) if bits[i >> 3] >> (i & 7) & 1}
+        if self.bridge_first:
+            self.bridge_first = False
+            for k in self.ball_switches():
+                self.set_active(k, k in held)
+        for k in sorted(held - self.table_held):
+            self.set_active(k, True)
+        for k in sorted(self.table_held - held):
+            self.set_active(k, False)
+        self.table_held = held
+
     # ---- reports
     def driver_table(self):
         out = {}
@@ -560,6 +698,7 @@ class Fpga:
             "leds": len(self.leds),
             "dmd_frames": self.dmd_frames,
             "counts": dict(self.counts),
+            "bridged": self.bridged,
             "balls": None if not self.ball_model else dict(
                 self.ball_model, trough=self.trough_balls(), in_play=self.in_play),
         }
@@ -596,8 +735,12 @@ class InProcessLink:
 
 # ------------------------------------------------------------------- daemon
 class Daemon:
-    def __init__(self, root, fpga, log):
+    def __init__(self, root, fpga, log, bridge=None):
         self.root = root
+        self.bridge = bridge    # a table's folder (PAD-954), or None
+        self.bridge_seq = 0
+        self.bridge_seen = None
+        self.bridge_written = 0.0
         self.fpga = fpga
         self.logf = log
         self.hosts = {}         # sock -> Parser
@@ -661,6 +804,14 @@ class Daemon:
                     self.log("ball model: %s" % model)
                 return json.dumps(f.ball_model and dict(
                     f.ball_model, trough=f.trough_balls(), in_play=f.in_play))
+            if cmd == "coils" and not args:
+                return json.dumps(dict((n, f.coil_drivers.get(n)) for n in f.machine.coil_names))
+            if cmd == "coils":
+                kv = dict(a.split("=", 1) for a in args if "=" in a)
+                f.coil_drivers.update((k, int(v)) for k, v in kv.items())
+                known = sum(1 for n in f.machine.coil_names if n in f.coil_drivers)
+                self.log("coils: %d named, %d of the yaml's %d" % (len(kv), known, len(f.machine.coil_names)))
+                return "ok %d coils" % known
             if cmd == "drain":
                 return "ok drained" if f.drain() else "err the trough is full"
             if cmd == "plunge":
@@ -681,7 +832,8 @@ class Daemon:
             self.fpga.chip, sum(self.fpga.closed)))
         while self.running:
             deadline = self.fpga.next_deadline()
-            timeout = 0.05 if deadline is None else max(0.0, min(0.05, deadline - time.monotonic()))
+            cap = BRIDGE_POLL_S if self.fpga.bridged else 0.05
+            timeout = cap if deadline is None else max(0.0, min(cap, deadline - time.monotonic()))
             socks = [fpga_srv, ctl_srv] + list(self.hosts) + list(self.ctls)
             r, _, _ = select.select(socks, [], [], timeout)
             for s in r:
@@ -698,9 +850,49 @@ class Daemon:
                 else:
                     self.on_ctl_sock(s)
             self.fpga.tick()
+            if self.bridge:
+                self.bridge_tick()
             self.flush_events()
         for s in list(self.hosts) + list(self.ctls) + [fpga_srv, ctl_srv]:
             s.close()
+
+    def bridge_tick(self):
+        """A table's files: attach / let go on vpxball.off, take vpxsw.input
+        as it changes, publish vpxhw.state (every pass while attached, every
+        BRIDGE_IDLE_S otherwise)."""
+        f = self.fpga
+        on = os.path.exists(os.path.join(self.bridge, BRIDGE_ATTACHED))
+        if on != f.bridged:
+            f.set_bridged(on)
+            self.bridge_seen = None
+            self.log("a Visual Pinball table attached: it owns the balls" if on
+                     else "the table let go: the ball model serves the balls")
+        if on:
+            inp = os.path.join(self.bridge, BRIDGE_INPUT)
+            try:
+                st = os.stat(inp)
+                key = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                key = None
+            if key and key != self.bridge_seen:
+                self.bridge_seen = key
+                try:
+                    with open(inp, "rb") as fh:
+                        f.bridge_input(fh.read())
+                except OSError:
+                    self.bridge_seen = None
+        now = time.monotonic()
+        if on or now - self.bridge_written >= BRIDGE_IDLE_S:
+            self.bridge_seq += 1
+            state = os.path.join(self.bridge, BRIDGE_STATE)
+            try:
+                with open(state + ".tmp", "wb") as fh:
+                    fh.write(f.bridge_block(self.bridge_seq))
+                os.replace(state + ".tmp", state)
+            except OSError as e:
+                if self.bridge_seq < 3:
+                    self.log("bridge block not written: %s" % e)
+            self.bridge_written = now
 
     def drop_host(self, s):
         self.hosts.pop(s, None)
@@ -771,6 +963,7 @@ def main():
     ap.add_argument("--active", default="", help="more switches active at start")
     ap.add_argument("--closed", default="", help="switches whose contacts start closed")
     ap.add_argument("--dmd-fps", type=float, default=60.0)
+    ap.add_argument("--bridge", help="a Visual Pinball table's folder (vpxhw.state, vpxsw.input)")
     a = ap.parse_args()
     os.makedirs(a.dir, exist_ok=True)
     machine = Machine(a.yaml, a.machine_type)
@@ -779,7 +972,7 @@ def main():
     fpga = Fpga(a.chip, machine, machine.initial_closed(a.balls, active, closed),
                 dmd_fps=a.dmd_fps)
     with open(os.path.join(a.dir, "prochw.log"), "a") as log:
-        Daemon(a.dir, fpga, log).run()
+        Daemon(a.dir, fpga, log, a.bridge).run()
 
 
 if __name__ == "__main__":

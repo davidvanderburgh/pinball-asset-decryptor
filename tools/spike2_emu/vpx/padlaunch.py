@@ -23,7 +23,7 @@ board. When there is none, this starts one - no app in the loop:
 What this started, Controller.Stop stops (killgame.sh, then the slot is
 released); a run the user started another way is left alone.
 """
-import glob
+import fnmatch
 import json
 import os
 import re
@@ -112,9 +112,11 @@ def card_for(title, platform="spike2"):
     if card and os.path.isfile(card):
         return card
     for lib in libraries(platform, kit):
-        found = []
-        for g in CARD_GLOBS.get(platform, CARD_GLOBS["spike2"]):
-            found += glob.glob(os.path.join(lib, "%s-%s" % (title, g)))
+        # by name in any case, as Windows does: a Spike 1 card is GOT_LE-1_37.iso
+        # for got_le, and Linux/macOS glob tells the cases apart (PAD-951)
+        pats = [("%s-%s" % (title, g)).lower() for g in CARD_GLOBS.get(platform, CARD_GLOBS["spike2"])]
+        found = [os.path.join(lib, n) for n in sorted(os.listdir(lib))
+                 if any(fnmatch.fnmatchcase(n.lower(), p) for p in pats)]
         if found:
             # of one version, the stock Release build over a custom one beside
             # it (turtles_pro-1_59_0.1987-upscaled tied with the Release and

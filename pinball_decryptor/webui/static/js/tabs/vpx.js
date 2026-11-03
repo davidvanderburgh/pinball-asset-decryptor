@@ -214,7 +214,7 @@ export default function Vpx() {
     const c = d.catalog;
     const head = c ? c.platform_name + " game: no map yet" : "No map yet";
     return html`<${Chip} sm kind="warn" ...${tip({ head, lines: [
-      c ? "The name says it is " + c.name + " (" + c.game + ")." : "The app does not recognise this table.",
+      c ? "The name says it is " + c.name + " (" + c.game + ")." : "The app does not recognize this table.",
       "Nothing plays behind it: the app has no map for it yet, so it plays as its author wrote it.",
       c && c.platform === "spike1" ? "A Spike 1 game: the checklist on the authors' card is where a map starts." : ""].filter(Boolean) })}>No map yet<//>`;
   };

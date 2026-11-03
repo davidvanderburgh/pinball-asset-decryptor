@@ -368,6 +368,8 @@ def test_a_dmd_game_runs_in_its_own_window_not_the_rig(rig, monkeypatch, tmp_pat
     monkeypatch.setattr(subprocess, "Popen", Proc)
     monkeypatch.setattr(tab, "windows_python", lambda *a, **k: "py.exe")
     monkeypatch.setattr(tab.rigslot, "hidden", lambda: False)
+    # the Windows / Linux road: a Mac refuses these (the in_box tests below)
+    monkeypatch.setattr(core, "in_box", lambda: False)
     monkeypatch.setattr(core, "rig_cmd_root", lambda *a, **k: wsl.append(a))
     monkeypatch.setattr(core, "rig_cmd", lambda *a, **k: wsl.append(a))
     z = tmp_path / "Jetsons_Code.zip"

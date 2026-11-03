@@ -3174,7 +3174,7 @@ def test_the_backglass_hands_the_foreground_back_once_per_window(monkeypatch):
     lcd = "[rig 1: %s] Metallica - Stern Spike 2 emulator" % pc.padlaunch.LABEL
     assert not handed(104, lcd)                                     # not a run it started
     b.launch = object()
-    b.attached, b.attached_t = True, -1e9                           # long up: the start rule is over
+    b.attached, b.attached_t, b.ready_t = True, -1e9, -1e9          # long up: the start rule is over
     assert handed(104, lcd) and b.front_done
     assert not handed(104, lcd)                                     # once
     assert handed(105, "B2S Backglass Server")                      # a new backglass window
@@ -3201,13 +3201,17 @@ def test_the_started_runs_windows_are_handed_back_until_the_player_has_it(monkey
     assert b._hand_back_from(106, "C:\\Python314\\pythonw.exe", 777)    # the loading window
     assert not b._hand_back_from(107, "C:\\Python314\\pythonw.exe", 778)  # someone else's Tk
     assert not b._hand_back_from(103, "Untitled - Notepad")
-    b.attached, b.attached_t = True, pc.time.monotonic()            # just up: still
+    b.attached, b.attached_t = True, pc.time.monotonic()            # attached, still booting (PAD-963)
+    assert b._hand_back_from(104, lcd)
+    b.attached_t -= pc.FRONT_SETTLE_S + 1                           # however long the boot takes
+    assert b._hand_back_from(104, lcd)
+    b.ready_t = pc.time.monotonic()                                 # in attract, just: still
     assert b._hand_back_from(104, lcd)
     for _ in range(pc.FRONT_TRIES):                                 # refused: tried again, a while
         assert b._hand_back_from(108, lcd)
         b._handed_back(108, lcd, False)
     assert not b._hand_back_from(108, lcd)
-    b.attached_t -= pc.FRONT_SETTLE_S + 1                           # settled: a click on it is the user's
+    b.ready_t -= pc.FRONT_SETTLE_S + 1                              # settled: a click on it is the user's
     b._loading = None
     assert not b._hand_back_from(104, lcd)
     b.front_tries.clear()
@@ -3753,6 +3757,172 @@ def test_a_started_run_shows_the_loading_window_until_the_game_is_up(monkeypatch
     said = open(status).read()
     assert said.startswith("failed The emulator stopped") and Launch.logfile in said
     assert b.launch is None
+
+
+def test_a_launch_attaches_the_card_store_before_the_run(tmp_path, monkeypatch):
+    """PAD-963: a WSL restart detaches the shared card store; the app's
+    Emulate tab attaches it again before a run, the table's launch did not -
+    so Batman booted off D: through 9p, 148 s to attract (36 s from the
+    store). The launch attaches it before watch.sh, never refuses on it, and
+    leaves a PC without a store alone."""
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pl, "log", lambda s: None)
+    monkeypatch.setattr(pl.sys, "platform", "win32")
+    monkeypatch.setattr(pl, "no_linux", lambda d=None: "")
+    monkeypatch.setattr(pl, "win_python", lambda: None)
+    monkeypatch.setattr(pl, "account", lambda d=None: ("pad", "/home/pad"))
+    monkeypatch.setattr(pl, "app_home", lambda d: "")
+    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p, distro=None: "/mnt/x")
+    events = []
+
+    class Rigdata:
+        store = True
+        fail = False
+
+        def cards_exists(self):
+            return self.store
+
+        def ensure_cards(self, dist, log=None):
+            events.append(("store", dist))
+            if self.fail:
+                raise RuntimeError("wsl --mount refused")
+            return "/mnt/wsl/cards"
+    rd = Rigdata()
+    monkeypatch.setattr(pl, "_rigdata", lambda why: rd)
+
+    class Proc:
+        def __init__(self, cmd, **kw):
+            events.append(("watch", cmd[-2].endswith("watch.sh")))
+
+        def poll(self):
+            return None
+    monkeypatch.setattr(pl.subprocess, "Popen", Proc)
+
+    def start():
+        la = pl.Launch("batman", "/mnt/d/cards/batman.raw", dist="PAD-Runtime")
+        la.logfile = str(tmp_path / "padvpx-batman.log")
+        la.slot = 2
+        la.base_rig = lambda: ""
+        la.start()
+    start()
+    assert events == [("store", "PAD-Runtime"), ("watch", True)]
+    del events[:]
+    rd.fail = True                                          # a refusal is a line in the log, not a dead table
+    start()
+    assert events == [("store", "PAD-Runtime"), ("watch", True)]
+    del events[:]
+    rd.store = False                                        # no store made on this PC: nothing asked
+    start()
+    assert events == [("watch", True)]
+    monkeypatch.setattr(pl.sys, "platform", "linux")
+    rd.store = True
+    pl.card_store("PAD-Runtime")
+    assert events == [("watch", True)]
+
+
+def _boot_bridge(pc, monkeypatch, tmp_path, slot=1):
+    """A bridge with a run it started, attached, its loading window up."""
+    pl = pc.padlaunch
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    monkeypatch.setattr(pc, "LOG", str(tmp_path / "padcontroller.log"))
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+
+    class Proc:
+        def __init__(self, cmd, **kw):
+            self.status = cmd[4]
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+    monkeypatch.setattr(pc.subprocess, "Popen", Proc)
+
+    class Launch:
+        logfile = str(tmp_path / "padvpx-batman.log")
+
+        def stop(self):
+            pass
+
+    class Rig:
+        pass
+    rig = Rig()
+    rig.slot = slot
+    rig.dump = str(tmp_path / "padslots" / str(slot) / "root" / "dump")
+    b = pc.Bridge()
+    b.title = "batman"
+    b.launch = Launch()
+    b.rig = rig
+    b.start_t = pc.time.monotonic()
+    b._loading_start()
+    status = b._loading.status
+    b.attached, b.attached_t = True, pc.time.monotonic()
+    return b, status, tmp_path / "padslots" / str(slot)
+
+
+def test_a_started_run_is_up_at_attract_not_at_attach(monkeypatch, tmp_path):
+    """PAD-963: the padled block comes up early in a boot - Batman's 30 s
+    in, then two more minutes on "Startup In Progress" with the loading
+    window gone and the hand-backs over, so the game's LCD window kept the
+    foreground and Visual Pinball sat paused until David clicked it. A run
+    the bridge started is up at attract (the slot's own boot log, as
+    bootprog.py reads it); until then the loading window names the boot's
+    step and the run's windows are still handed back from."""
+    pc = pytest.importorskip("padcontroller")
+    b, status, logdir = _boot_bridge(pc, monkeypatch, tmp_path)
+    logdir.mkdir(parents=True)
+    log = logdir / "gzwatch.log"
+    log.write_text("[gst] factory_make\n" * 3 + "[nbsched] playfield nodes: 4 1 8 (x)\n", encoding="utf-8")
+    (logdir / "padauto.log").write_text("[auto] bus quiet; pressing Service Back once\n", encoding="utf-8")
+    b._boot_watch()
+    assert open(status, encoding="utf-8").read() == "boot 95 Passing Tech Alerts…"
+    assert not b.ready_t and b._starting()
+    assert pc.padlaunch.kit_load().get("start_s") is None          # not up yet: no time kept
+    with open(log, "a", encoding="utf-8") as f:
+        f.write("[led] light show running\n")
+    b._poll_boot()
+    assert open(status, encoding="utf-8").read() == "up" and b.ready_t and b.boot is None
+    assert "batman" in pc.padlaunch.kit_load()["start_s"]           # the next bar paced to attract
+    assert b._starting()                                            # hand-backs settle after it
+    b.ready_t -= pc.FRONT_SETTLE_S + 1
+    assert not b._starting()
+
+
+def test_a_started_run_without_a_boot_log_is_up_at_attach(monkeypatch, tmp_path):
+    """A rig that keeps no such log (no slot to find it by, or a log that
+    never shows) is up as before, never held; a game stuck at Tech Alerts is
+    the player's to clear, so the loading window stops covering it."""
+    pc = pytest.importorskip("padcontroller")
+    b, status, _ = _boot_bridge(pc, monkeypatch, tmp_path, slot=0)
+    b._boot_watch()
+    assert open(status, encoding="utf-8").read() == "up" and b.ready_t
+
+    b, status, logdir = _boot_bridge(pc, monkeypatch, tmp_path / "nolog")
+    b._boot_watch()
+    assert b.boot is not None and not b.ready_t                     # a log may take a moment
+    b._boot_seen -= b.BOOT_LOG_S + 1
+    b._poll_boot()
+    assert open(status, encoding="utf-8").read() == "up" and b.ready_t
+
+    b, status, logdir = _boot_bridge(pc, monkeypatch, tmp_path / "stuck")
+    logdir.mkdir(parents=True)
+    (logdir / "gzwatch.log").write_text("[gst] factory_make\n" * 3, encoding="utf-8")
+    (logdir / "padauto.log").write_text("[auto] 3 presses did not clear it\n", encoding="utf-8")
+    b._boot_watch()
+    assert open(status, encoding="utf-8").read() == "up" and b.ready_t
+
+
+def test_the_loading_window_shows_the_games_boot_step():
+    """PAD-963: `boot <pct> <words>` from the bridge moves the bar and names
+    the step; anything else is not a boot line."""
+    ld = pytest.importorskip("padloading")
+    assert ld.boot_step("boot 84 Node boards: 9 found") == (0.84, "Node boards: 9 found")
+    assert ld.boot_step("boot 100 Ready") == (0.95, "Ready")          # never done before `up`
+    assert ld.boot_step("up") is None and ld.boot_step("boot x Ready") is None
+    assert ld.boot_step("failed boot 3 x") is None
 
 
 def test_a_trough_of_fewer_switches_pads_init_sw(tmp_path, monkeypatch):

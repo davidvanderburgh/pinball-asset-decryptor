@@ -145,8 +145,8 @@ fi
 echo "$DISP" > "$SPK_RIG/display"
 echo "${W}x${H}" > "$SPK_RIG/window"
 
-if [ $AUDIO = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
-    AUDIO_ENV="PULSE_SERVER=unix:/mnt/wslg/PulseServer"; GODOT_AUDIO=PulseAudio
+if [ $AUDIO = 1 ] && [ -S "$SPK_PULSE" ]; then
+    AUDIO_ENV="PULSE_SERVER=unix:$SPK_PULSE"; GODOT_AUDIO=PulseAudio
 else
     AUDIO_ENV="PULSE_SERVER=unix:/nonexistent SDL_AUDIODRIVER=dummy"; GODOT_AUDIO=Dummy
 fi
@@ -216,8 +216,8 @@ setsid -f unshare -m -u --propagation private bash "$SPK_RIG/ns.sh" \
 # The app's Volume / Mute, live, as on the AP rig: spkvol.py holds this
 # slot's stream at the level in the control file every Emulate tab writes.
 # It waits for the game, and ends with it.
-if [ $AUDIO = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S /mnt/wslg/PulseServer ]; then
-    setsid -f python3 "$SPK_TOOLS/spkvol.py" --ctl "$PAD_AUDIO_CTL" --rig "$SPK_RIG" \
+if [ $AUDIO = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S "$SPK_PULSE" ]; then
+    setsid -f python3 "$SPK_TOOLS/spkvol.py" --ctl "$PAD_AUDIO_CTL" --rig "$SPK_RIG" --pulse "unix:$SPK_PULSE" \
         < /dev/null >> "$SPK_RIG/spkvol.log" 2>&1
 fi
 for _ in $(seq 1 50); do

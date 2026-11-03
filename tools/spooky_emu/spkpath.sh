@@ -28,6 +28,9 @@ SPK_SHIM=$SPK_TOOLS/spkshim.so
 SPK_PROC=$SPK_TOOLS/proc
 SPK_PROC_ROOT=${SPP_ROOT:-/var/tmp/pad_spkproc}
 SPK_PROC_RIG=$SPK_PROC_ROOT/rig$SPK_SLOT
+# The PulseAudio server a run with sound plays to: WSLg's, or the Mac
+# container's own (docker/entrypoint.sh, PAD-953).
+SPK_PULSE=${PAD_PULSE_SOCK:-/mnt/wslg/PulseServer}
 
 # The rig board (PAD-296): tools/rigboard.sh, shared by every emulator, posts
 # this rig's runs where the triage dashboard and the app can see them.

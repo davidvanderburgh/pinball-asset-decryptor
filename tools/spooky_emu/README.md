@@ -253,6 +253,43 @@ The game's log is `$SPK_RIG/player.log` (Unity's log, or Godot's stdout),
 the board's `$SPK_RIG/warden.log`, the no-op'd shell calls
 `$SPK_RIG/shell.log`, the volume keeper's `$SPK_RIG/spkvol.log`.
 
+## On a Mac (docker/, PAD-953)
+
+macOS has none of what the rig is made of (Linux namespaces, bind mounts,
+x86-64 Linux programs), so there it runs in a container:
+`docker/spkbox.sh` is what the app's `rig_cmd` calls on darwin
+(`emulate_spooky_core.in_box`). The image (`docker/Dockerfile`) is
+PAD-Runtime's packages on Ubuntu 24.04, built and run as **linux/amd64**
+everywhere: the games and the downloaded Python 2.7 are Intel programs, and
+an Apple-silicon engine translates them (Docker Desktop: Rosetta; colima
+registers an amd64 handler at start).
+
+* The box starts idle (`entrypoint.sh`: Xvfb 2400x1080, openbox, x11vnc,
+  PulseAudio) and every script, watch.sh included, is a `docker exec` as
+  root - watch.sh returns at attract and leaves the game running, so the
+  box cannot be its container. Stop and Cancel remove the box.
+* The game draws as a VISIBLE run on the box's screen; the virtual playfield
+  (`spkbox.sh playfield`) runs in the box beside it (openbox places the
+  playfield left, everything else right). The tab opens
+  `vnc://:pinball@localhost:5901` in Screen Sharing (5901, so the Spike 2
+  box's 5900 can be up too).
+* Sound: the rig plays to `$PAD_PULSE_SOCK` (WSLg's PulseServer unless set);
+  the box's null sink is served raw on loopback 45998 and `spkbox.sh` plays
+  it on the Mac with ffplay.
+* Mounted: the app folder at `/pad/app` read only (the rig, proc_emu,
+  ap_emu, spike2_emu's pfweb, the Spooky plugin's games.py for the .pkg
+  keys - copied under `~/Library/Application Support/pinball_decryptor/
+  spooky_box` when the app is outside home, since colima shares only home),
+  the update file's folder at `/pad/files` read only, and a named volume
+  `pad-spooky-var` at `/var/tmp` (builds, the games' Python, settings).
+* The DMD games (pinHeck) are not boxed: their window runs on a Python of
+  the computer's own, which the frozen Mac app lacks; the tab says so.
+
+Proven on Docker Desktop (amd64) on Windows, 2026-11-02: Alice Cooper to
+attract and played (Start, launch, slings), Beetlejuice to attract on
+llvmpipe, playfield window beside the game, coin sounds as PCM on the port.
+`tests/test_spkbox.py` holds the launcher's contract.
+
 ## What is open
 
 * **The P-ROC games are not in the app.** Rick and Morty and Alice Cooper

@@ -119,14 +119,14 @@ echo "$SCREEN" > "$SPP_RIG/screen"
 echo "$SCREEN" > "$SPP_RIG/window"
 
 AUDIO=$(rigboard_audio "$VISIBLE" "$AUDIO")
-if [ "$AUDIO" = 1 ] && [ -S /mnt/wslg/PulseServer ]; then
+if [ "$AUDIO" = 1 ] && [ -S "$SPP_PULSE" ]; then
     # No shared memory with WSLg's PulseAudio, as on the AP rig: the py27
     # env's libpulse (no memfd) wants WSLg's /dev/shm, which this distro
     # cannot see, and then fails the whole connection ("shm_open() failed"
     # -> "Could not connect to PulseAudio") - the game started with its
     # sound off on every visible run (PAD-405).
     echo 'enable-shm = no' > "$SPP_RIG/pulse-client.conf"
-    AUDIO_ENV="SDL_AUDIODRIVER=pulse PULSE_SERVER=unix:/mnt/wslg/PulseServer PULSE_CLIENTCONFIG=$SPP_RIG/pulse-client.conf"
+    AUDIO_ENV="SDL_AUDIODRIVER=pulse PULSE_SERVER=unix:$SPP_PULSE PULSE_CLIENTCONFIG=$SPP_RIG/pulse-client.conf"
 else
     AUDIO_ENV="SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=/dev/null SDL_DISKAUDIODELAY=0"
 fi
@@ -152,8 +152,8 @@ for i in $(seq 1 1800); do
 done
 # The app's Volume / Mute, live, as on the Warden rig: spkvol.py finds the
 # game's (and Alice Cooper's player's) streams by SPK_MARK (netns.sh).
-if [ "$AUDIO" = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S /mnt/wslg/PulseServer ] && spp_alive game; then
-    setsid -f python3 "$SPP_TOOLS/../spkvol.py" --ctl "$PAD_AUDIO_CTL" --rig "$SPP_RIG" \
+if [ "$AUDIO" = 1 ] && [ -n "${PAD_AUDIO_CTL:-}" ] && [ -S "$SPP_PULSE" ] && spp_alive game; then
+    setsid -f python3 "$SPP_TOOLS/../spkvol.py" --ctl "$PAD_AUDIO_CTL" --rig "$SPP_RIG" --pulse "unix:$SPP_PULSE" \
         < /dev/null >> "$SPP_RIG/spkvol.log" 2>&1
 fi
 if spp_alive game && [ -f "$SPP_RIG/attract" ]; then

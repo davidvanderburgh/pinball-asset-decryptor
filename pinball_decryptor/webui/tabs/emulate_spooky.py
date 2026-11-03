@@ -114,8 +114,8 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                     "this install looks incomplete.")
         elif not spk.platform_ok():
             ok = False
-            note = ("The Spooky emulator runs through WSL, so it is available "
-                    "on Windows only.")
+            note = ("The Spooky emulator runs through WSL on Windows and in a "
+                    "Linux container on macOS, so it is not available here.")
         else:
             note = ""
         self.set(intro=INTRO, file_tip=FILE_TIP, volume_tip=VOLUME_TIP,
@@ -402,6 +402,8 @@ class EmulateSpookyTab(RigTabMixin, TabService):
             self._log("Spooky: a hidden run opens no playfield window "
                       "(PAD_HIDDEN=0 in this app's environment shows it).")
             return False
+        if spk.in_box():
+            return self._open_box_screen(info)
         if self._sw_proc is not None and self._sw_proc.poll() is None:
             return True
         if info is None or not info.get("switches_json"):
@@ -420,6 +422,42 @@ class EmulateSpookyTab(RigTabMixin, TabService):
             self._sw_proc = None
             self._log("Spooky: could not open the virtual playfield: %s" % exc)
             return False
+
+    def _open_box_screen(self, info=None):
+        """macOS (PAD-953): the game and its virtual playfield are windows on
+        the container's screen, which Screen Sharing shows.  The playfield
+        is started IN the box (spkbox.sh playfield), beside the game; Stop
+        removes the box and both with it."""
+        if info is None or not info.get("switches_json"):
+            info = self._read_status()
+        table = (info or {}).get("switches_json")
+        if table:
+            try:
+                out = subprocess.run(
+                    spk.rig_cmd("playfield", table,
+                                env=["PAD_AUDIO_CTL=%s" % audio_ctl_file()]),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=60, creationflags=_rig.CREATE_FLAGS)
+                if out.returncode:
+                    self._log("Spooky: could not open the virtual playfield: "
+                              + out.stdout.decode("utf-8", "replace").strip())
+            except Exception as exc:                       # noqa: BLE001
+                self._log("Spooky: could not open the virtual playfield: %s"
+                          % exc)
+        else:
+            self._log("Spooky: no switch table for this game - the virtual "
+                      "playfield will not open.")
+        try:
+            subprocess.Popen(["open", spk.BOX_VNC_URL],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            self._log("Spooky: opening the game in Screen Sharing (VNC "
+                      "password: pinball) - the game and its virtual "
+                      "playfield side by side.")
+        except Exception as exc:                           # noqa: BLE001
+            self._log("Spooky: open %s in Screen Sharing to see the game "
+                      "(%s)." % (spk.BOX_VNC_URL, exc))
+        return True
 
     #: how long the window gets to close itself before it is killed
     SW_CLOSE_S = 4.0
@@ -501,6 +539,10 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                 self._log("Spooky: starting %s (a first start unpacks the "
                           "update - a few minutes; then the game loads for "
                           "a minute or two)." % os.path.basename(path))
+                if spk.in_box():
+                    self._log("Spooky: on a Mac the game runs in a Linux "
+                              "container; the very first start also builds "
+                              "it and downloads the games' Python.")
                 rc = self._run_streaming(
                     spk.rig_cmd_root(
                         "watch.sh", _rig.wsl_path(path),
@@ -535,6 +577,13 @@ class EmulateSpookyTab(RigTabMixin, TabService):
     # window of its own on this PC's Python (tools/pinheck_emu/window.py)
     # ------------------------------------------------------------------
     def _start_pinheck(self, path):
+        if spk.in_box():
+            # Their window runs on a Python of this computer's own, which
+            # the Mac app does not have (it is one frozen program).
+            self._log("Spooky: %s, one of the DMD games, runs on Windows "
+                      "and Linux; on a Mac the emulator runs every other "
+                      "title in the list." % spk.title_of(path))
+            return False
         if rigslot.hidden():
             self._log("Spooky: a hidden run opens no window, and a DMD game "
                       "runs in its window (PAD_HIDDEN=0 in this app's "
@@ -677,7 +726,8 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         ready = up and info.get("attract") == "1"
         label, hint = spk.state_text(info)
         tone = "ok" if ready else (
-            "warn" if label == "WSL not answering" else "")
+            "warn" if label in ("WSL not answering", "Docker not answering")
+            else "")
         rss = int(info.get("rss_kb") or 0)
         secs = int(info.get("uptime_s") or 0)
         game = spk.game_name(info) if up else ""

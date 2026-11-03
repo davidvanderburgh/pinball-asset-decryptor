@@ -471,3 +471,92 @@ def test_rig_commands_carry_the_apps_rig_slot(monkeypatch):
     monkeypatch.delenv("PAD_LABEL")
     monkeypatch.delenv("PAD_TICKET", raising=False)
     assert not any(c.startswith("PAD_SLOT=") for c in core.rig_cmd("status.sh"))
+
+
+# ------------------------------------------------------------- macOS (PAD-953)
+def test_on_a_mac_the_rig_runs_in_its_container(monkeypatch):
+    """No WSL on a Mac: every script, the root ones too, goes through
+    tools/spooky_emu/docker/spkbox.sh, with the settings in its environment
+    (spkbox.sh forwards them into the box) and the app's rig slot first."""
+    import os
+    from pinball_decryptor.webui import emulate_spooky_core as core
+    monkeypatch.setattr(core.sys, "platform", "darwin")
+    assert core.platform_ok() and core.in_box()
+    monkeypatch.setenv("PAD_SLOT", "2")
+    cmd = core.rig_cmd_root("watch.sh", "/Users/me/ac-gamecode.pkg",
+                            env=["PAD_VISIBLE=1"])
+    assert cmd[0] == "/usr/bin/env"
+    i = cmd.index("bash")
+    assert cmd[i + 1] == os.path.join(core.rig_dir(), "docker", "spkbox.sh")
+    assert cmd[i + 2:] == ["watch.sh", "/Users/me/ac-gamecode.pkg"]
+    assert cmd.index("PAD_SLOT=2") < cmd.index("PAD_VISIBLE=1") < i
+    assert "wsl.exe" not in cmd
+    assert core.rig_cmd("status.sh")[-1] == "status.sh"
+    assert core.state_text({})[0] == "Checking…"
+    assert core.state_text({"wsl": "0"})[0] == "Docker not answering"
+    # Linux desktops still have no root without a password
+    monkeypatch.setattr(core.sys, "platform", "linux")
+    assert not core.platform_ok()
+
+
+def test_the_shipped_box_is_complete():
+    import os
+    from pinball_decryptor.webui import emulate_spooky_core as core
+    d = os.path.join(core.DEFAULT_RIG_DIR, "docker")
+    for f in ("Dockerfile", "entrypoint.sh", "spkbox.sh"):
+        assert os.path.isfile(os.path.join(d, f)), f
+
+
+def test_on_a_mac_ready_opens_the_box_screen_and_its_playfield(rig, monkeypatch,
+                                                                tmp_path):
+    """The game and the virtual playfield are windows on the container's
+    screen: the playfield is started in the box, and Screen Sharing opens."""
+    import subprocess
+    from pinball_decryptor.webui import emulate_spooky_core as core
+    ran, opened = [], []
+
+    class Done:
+        returncode = 0
+        stdout = b""
+
+    from pinball_decryptor.webui.tabs import emulate_spooky as tab
+    monkeypatch.setattr(tab.rigslot, "hidden", lambda: False)
+    monkeypatch.setattr(core, "in_box", lambda: True)
+    monkeypatch.setattr(core, "rig_cmd",
+                        lambda *a, **k: ran.append((a, k)) or ["true"])
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Done())
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda cmd, **k: opened.append(cmd))
+    with web_app(tmp_path, mfr="spooky") as w:
+        _spooky(w)
+        svc = _svc(w)
+        table = "/var/tmp/pad_spkproc/rig0/switches.json"
+        assert svc._open_switches({"switches_json": table})
+        (args, kw), = ran
+        assert args == ("playfield", table)
+        assert any(e.startswith("PAD_AUDIO_CTL=") for e in kw["env"])
+        assert opened == [["open", "vnc://:pinball@localhost:5901"]]
+        assert svc._sw_proc is None
+
+
+def test_on_a_mac_a_dmd_game_says_where_it_runs(rig, monkeypatch, tmp_path):
+    """The DMD games' window needs a Python of the computer's own, which the
+    frozen Mac app has none of: said, nothing started."""
+    import subprocess
+    from pinball_decryptor.webui import emulate_spooky_core as core
+    launched = []
+    monkeypatch.setattr(core, "in_box", lambda: True)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: launched.append(a))
+    z = tmp_path / "Jetsons_Code.zip"
+    z.write_bytes(b"")
+    with web_app(tmp_path, mfr="spooky") as w:
+        _spooky(w)
+        svc = _svc(w)
+        said = []
+        monkeypatch.setattr(svc, "_log", said.append)
+        w.window.spooky_emulate_file_var.set(str(z))
+        monkeypatch.setattr(svc, "_refuse_off", lambda: False)
+        svc._start_async()
+        assert not launched and svc._ph_proc is None
+        assert "Jetsons, one of the DMD games, runs on Windows and Linux" \
+            in said[-1]

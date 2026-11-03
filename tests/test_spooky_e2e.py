@@ -156,3 +156,45 @@ def test_spooky_round_trip_rm_pkg(manufacturers_by_key, tmp_path):
     r3 = _run_extract(sp, pkg_out, re_extracted)
     assert r3.success, r3.summary
     assert (re_extracted / "game.txt").read_bytes() == b"AES_ROUND_TRIP_OK"
+
+
+def test_spooky_round_trip_p3_zip_installs_onto_sd_card(manufacturers_by_key,
+                                                         tmp_path):
+    """A pinHeck game's update goes onto its own SD card, formatted and filled
+    in one copy - not onto a USB drive (PAD-947: a WAV swapped on a used card
+    played on into the next file)."""
+    sp = manufacturers_by_key["spooky"]
+    z = synthetic.make_spooky_p3_zip(tmp_path / "Jetsons_Code.zip")
+    extracted = tmp_path / "ex"; extracted.mkdir()
+    r1 = _run_extract(sp, z, extracted)
+    assert r1.success, r1.summary
+
+    (extracted / "Jetsons" / "ATTRACT.VID").write_bytes(b"MODIFIED_BY_TEST")
+    out = tmp_path / "Jetsons_Code-modified.zip"
+    r2 = _run_write(sp, z, extracted, out)
+    assert r2.success, r2.summary
+    log = r2.log_text()
+    assert "Format the game's SD card" in log
+    assert "Never replace single files on the card" in log
+    assert "USB" not in log and "USB" not in r2.summary
+    assert "SD card" in r2.summary
+
+
+def test_spooky_round_trip_ed_installs_from_usb(manufacturers_by_key,
+                                                tmp_path):
+    sp = manufacturers_by_key["spooky"]
+    ed_in = synthetic.make_spooky_targz(tmp_path / "in.ed")
+    extracted = tmp_path / "ex"; extracted.mkdir()
+    assert _run_extract(sp, ed_in, extracted).success
+    (extracted / "game" / "data.bin").write_bytes(b"MODIFIED_BY_TEST")
+    r = _run_write(sp, ed_in, extracted, tmp_path / "out.ed")
+    assert r.success, r.summary
+    assert "Copy to USB drive root" in r.log_text()
+    assert "SD card" not in r.log_text()
+
+
+def test_spooky_install_help_names_the_sd_card_games(manufacturers_by_key):
+    text = manufacturers_by_key["spooky"].write_install_help()
+    assert "USB drive" in text
+    assert "Rob Zombie" in text and "SD card" in text
+    assert "Never replace single files on the card" in text

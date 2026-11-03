@@ -16,7 +16,7 @@ from .crypto import AES_KEYS, decrypt_aes_pkg, encrypt_aes_pkg
 from .formats import (GameFile, create_tar, create_tar_gz, create_zip,
                       detect_game, extract_tar_gz, extract_zip)
 from .games import (GAME_DB, GODOT_GAMES, GPG_PASSPHRASES, P3_GAMES,
-                    UNITY_GAMES, USB_NAMING)
+                    PINHECK_INSTALL, UNITY_GAMES, USB_NAMING)
 from .gpg import (decrypt_gpg_symmetric, encrypt_gpg_symmetric,
                   sign_beetlejuice, strip_gpg_signature)
 
@@ -623,8 +623,18 @@ class WritePipeline(_BasePipeline):
 
         # Phase 3: Cleanup / Done
         self.phase(3)
-        naming = USB_NAMING.get(ext, os.path.basename(self.output_path))
         self.log("--- Installation Instructions ---")
+        if game_name in P3_GAMES:
+            # onto the game's SD card, freshly formatted: see PINHECK_INSTALL
+            for line in PINHECK_INSTALL.splitlines()[1:]:
+                self.log(line)
+            self.done(True,
+                f"Successfully packaged modified {game_name} assets to:\n"
+                f"{self.output_path}\n\n"
+                f"Unzip it, then copy all of it onto a freshly formatted "
+                f"SD card.")
+            return
+        naming = USB_NAMING.get(ext, os.path.basename(self.output_path))
         self.log(f"1. Copy to USB drive root")
         self.log(f"2. Naming convention: {naming}")
         self.log("3. Insert USB into machine and follow update prompts")

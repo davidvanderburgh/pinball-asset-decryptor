@@ -5,7 +5,7 @@ import os
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from .formats import GENERATED_DIRS, detect_game as _detect_game
-from .games import GAME_DB
+from .games import GAME_DB, PINHECK_INSTALL
 from .pipeline import ExtractPipeline, WritePipeline
 
 
@@ -164,7 +164,9 @@ class SpookyManufacturer(Manufacturer):
                 "(.iso / .zip).")
 
     def write_install_help(self):
-        return ("1. Copy the output file to the root of a USB drive.\n"
+        return ("Most games:\n"
+                "1. Copy the output file to the root of a USB drive.\n"
                 "2. Use the per-game USB naming convention reported in the "
                 "log (e.g. rm-gamecode-YYYYMMDD.pkg, vYYYY.MM.DD.HH.scooby).\n"
-                "3. Insert USB into the machine and follow on-screen prompts.")
+                "3. Insert USB into the machine and follow on-screen prompts.\n"
+                "\n" + PINHECK_INSTALL)

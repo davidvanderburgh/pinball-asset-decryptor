@@ -65,6 +65,9 @@ def main():
                 print("  table:", t.get("name"), t.get("titles"), t.get("title"), t.get("patched"),
                       t.get("patched_title"), t.get("repatch"), t.get("source"), flush=True)
             time.sleep(1.5)
+            # the Beatles row sits below the fold of a long list
+            page.locator(".vpx-tables").get_by_text("The Beatles", exact=False).first.scroll_into_view_if_needed()
+            time.sleep(0.5)
             page.locator(".vpx-tables").screenshot(path=os.path.join(out_dir, pre + "vpx_tables.png"))
             print("page errors:", errors, flush=True)
             browser.close()

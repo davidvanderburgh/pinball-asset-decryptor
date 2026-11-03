@@ -3199,6 +3199,58 @@ def test_dof_comes_up_without_its_com_registration(monkeypatch):
     assert "no DirectOutputComObject.dll" in h.why
 
 
+def test_dof_takes_the_parent_roms_name_when_its_config_has_only_that(tmp_path, monkeypatch):
+    """PAD-948: The Beatles names the free-play Seawitch ROM (seawitfp); the
+    DOF config tool keys Seawitch as seawitch, and DOF's own match (exact,
+    name_, prefix) cannot get from one to the other, so a cabinet had no toys
+    until the user edited the script. DOF is started under the parent's name
+    when only the parent has a row; its own row, or no configs, keep it."""
+    pc = pytest.importorskip("padcontroller")
+    dof = tmp_path / "DirectOutput"
+    (dof / "x64").mkdir(parents=True)
+    (dof / "Config").mkdir()
+    ini = dof / "Config" / "directoutputconfig30.ini"
+    ini.write_text("[Config DOF]\nafm,S1 Blue,0\nseawitch,S9,0\n[Colors DOF]\nseawitfp=1,2,3\n")
+    dirs = [str(dof / "x64")]
+    assert pc.dof_config_names(pc.dof_config_dirs("", dirs)) == {"afm", "seawitch"}
+    assert pc.dof_rom_for("seawitfp", "", dirs) == "seawitch"
+    assert pc.dof_rom_for("afm_113b", "", dirs) == "afm_113b"          # not a listed clone
+    assert pc.dof_knows("afm_113b", {"afm"}) and not pc.dof_knows("seawitfp", {"seawitch"})
+    # a row of its own wins, wherever DOF reads it from: the table's folder too
+    tables = tmp_path / "Tables"
+    tables.mkdir()
+    (tables / "directoutputconfig51.ini").write_text("[Config DOF]\nseawitfp,S9,0\n")
+    assert pc.dof_rom_for("seawitfp", str(tables / "seawitfp.vpx"), dirs) == "seawitfp"
+    # the global config's IniFilesPath is read as well
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    (other / "directoutputconfig.ini").write_text("[Config DOF]\nseawitfp,S9,0\n")
+    (dof / "Config" / "GlobalConfig_B2SServer.xml").write_text(
+        "<GlobalConfig><IniFilesPath>%s</IniFilesPath></GlobalConfig>" % other)
+    assert pc.dof_rom_for("seawitfp", "", dirs) == "seawitfp"
+    # no configs to read: the table's own name, as before
+    assert pc.dof_rom_for("seawitfp", "", [str(tmp_path / "none")]) == "seawitfp"
+
+    # the bridge starts DOF under the name it picked
+    (dof / "Config" / "GlobalConfig_B2SServer.xml").unlink()
+    got = []
+
+    class Rec:
+        def Init(self, host, table, rom):                  # noqa: N802
+            got.append(rom)
+
+        def UpdateTableElement(self, *a):                  # noqa: N802
+            pass
+
+        def Finish(self):                                  # noqa: N802
+            pass
+    monkeypatch.setattr(pc, "_dof_dirs", lambda: dirs)
+    b = pc.Bridge()
+    assert b.dof_init("seawitfp", "", factory=Rec)
+    b.dof_finish()
+    assert got == ["seawitch"]
+
+
 def test_dof_dll_is_found_in_every_install_layout(tmp_path):
     pc = pytest.importorskip("padcontroller")
     ps64, ps32 = pc._dof_shells()

@@ -595,6 +595,14 @@ Windows Script Host.
 `b2s\The-Beatles-Original-2018.directb2s`), or the only one beside a table
 that is its folder's only table.
 
+DOF (PAD-948): the table names the free-play Seawitch ROM, `seawitfp`, but
+DOF's config tool keys Seawitch's table config as `seawitch`, and DOF only
+matches a ROM name exactly, as `<name>_...` or as a plain prefix, so a cabinet
+got no toys. PAD.Controller now reads DOF's table configs (the folders DOF
+reads them from) before it starts DOF, and a clone ROM in `DOF_PARENT_ROMS`
+whose name has no row there but whose parent's has is started under the
+parent's name. A config that has its own `seawitfp` row keeps it.
+
 ### PAD-933: four balls, and the playfield window of a bare `Controller.Run`
 
 "Always ejects two balls": The Beatles counts **4 balls installed**, and the

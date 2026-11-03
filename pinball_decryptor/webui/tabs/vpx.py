@@ -1008,8 +1008,8 @@ class VpxTab(TabService):
 
     @rpc
     def play_download(self, path):
-        """PAD-952: a download whose real game can never run on this PC (TNA,
-        America's Most Haunted), opened in Visual Pinball as it is."""
+        """PAD-952: a download whose real game can never run on this PC
+        (America's Most Haunted), opened in Visual Pinball as it is."""
         if not path:
             return False
 

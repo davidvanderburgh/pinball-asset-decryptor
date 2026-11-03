@@ -212,7 +212,7 @@ export default function Vpx() {
   const downloadChip = (d) => {
     if (!d.read) return html`<span class="vpx-skel vpx-skel-cov" ...${tip("Reading the table…")}></span>`;
     const c = d.catalog;
-    // PAD-952: a game no table can ever play (TNA, America's Most Haunted)
+    // PAD-952: a game no table can ever play (America's Most Haunted)
     if (c && c.no_game) return html`<${Chip} sm kind="info" ...${tip({ head: c.platform_name + " game: plays as its author wrote it",
       lines: ["The name says it is " + c.name + " (" + c.game + ").", c.no_game,
         "Play opens your download as it is: the table's own rules play."] })}>Author's rules<//>`;
@@ -401,7 +401,8 @@ function Catalog({ s, platform, platName }) {
   const plats = cat.platforms || {};
   // a table that is in the person's folder is on the Tables list above, not here
   const have = new Set((s.downloads || []).map((d) => d.catalog && d.catalog.name).filter(Boolean));
-  const tables = (cat.tables || []).filter((t) => !t.url || !have.has(t.name));
+  // PAD-956: nor is one complete on its own (TNA): it needs nothing from the app
+  const tables = (cat.tables || []).filter((t) => !t.complete && (!t.url || !have.has(t.name)));
   // this manufacturer's block (every other machine's when the tab has no manufacturer)
   const order = Object.keys(plats).filter((k) => (platform ? k === platform : k !== "spike2") && tables.some((t) => t.platform === k));
   if (!order.length) return null;

@@ -26,7 +26,8 @@ driven by beatles.vpxmap.json:
            the trough -> a cvpmBallStack on TROUGH 1..6 + JAM with the four
            balls the game counts (PAD-933: six made it serve three);
            the top magnet follows MAGNET-TOP, a new record magnet
-           MAGNET-RECORD, the record turns on its motor's LED channels;
+           MAGNET-RECORD (a pull, not a grab: PAD-950), the record turns
+           on its motor's LED channels;
            UpdateLamps is regenerated: every insert on its Stern LED, the
            flasher domes and spinner flashes on theirs;
            the tribute's own rules (modes, ball save, the lock and its balls,
@@ -316,6 +317,7 @@ def patch_script(src, m):
             if un.lower() not in seen_subs:
                 tail.append("Sub %s : Controller.Switch(%d) = 0 : End Sub" % (un, 1000 + v["hold"]))
     t = m["solenoids"]
+    rec = t[str(sol_for_magnet(m, "mRecordMagnet"))]
     tail += [
         "",
         "Sub SolULFlipper(Enabled)",
@@ -341,12 +343,13 @@ def patch_script(src, m):
         "\tEnd If",
         "End Sub",
         "",
-        "' the magnets: the top one on MAGNET-TOP, the record's on MAGNET-RECORD",
+        "' the magnets: the top one on MAGNET-TOP, the record's on MAGNET-RECORD;",
+        "' the record's pulls without grabbing (the game only pulses it)",
         "MagnetW2.Solenoid = %d" % sol_for_magnet(m, "MagnetW2"),
         "Set mRecordMagnet = New cvpmMagnet",
         "With mRecordMagnet",
-        "\t.InitMagnet PadRecordMagnet, 30",
-        "\t.GrabCenter = True",
+        "\t.InitMagnet PadRecordMagnet, %d" % rec["strength"],
+        "\t.GrabCenter = %s" % ("True" if rec["grab"] else "False"),
         "\t.Solenoid = %d" % sol_for_magnet(m, "mRecordMagnet"),
         "\t.CreateEvents \"mRecordMagnet\"",
         "End With",

@@ -345,10 +345,12 @@ class _Fake:
     """A stand-in for :func:`multiboot_docker._docker` that records every
     call and answers ``image inspect`` / ``inspect`` from *state*."""
 
-    def __init__(self, arch="", image_id="sha256:new", container=None):
+    def __init__(self, arch="", image_id="sha256:new", container=None,
+                 volumes=()):
         self.arch = arch                # "" = no image on this machine
         self.image_id = image_id
         self.container = container      # (image id, {mounts}) or None
+        self.volumes = set(volumes)     # named-volume sources, not binds
         self.running = "true"           # .State.Running of that container
         self.calls = []
 
@@ -367,8 +369,11 @@ class _Fake:
             if self.container is None:
                 rc = 1
             else:
+                mounts = set(self.container[1])
+                if 'eq .Type "bind"' not in " ".join(args):
+                    mounts |= self.volumes
                 out = "\n".join([self.running, self.container[0]]
-                                + sorted(self.container[1]))
+                                + sorted(mounts))
         elif args[0] == "build":
             self.arch = D.ARCH
 
@@ -529,15 +534,20 @@ def test_a_failed_background_build_is_not_retried_per_keystroke(
     assert not D._BUILD_FAILED
 
 
-def test_running_state_ignores_named_volume_mount_source(mac, monkeypatch):
-    """ROOT_VOLUME mounted at /root appears in .Mounts with a /var/lib/...
-    storage path inside the Linux VM; _running_state ignores it so the host
-    bind-mount comparison matches."""
+@pytest.mark.parametrize("source", [
+    "/var/lib/docker/volumes/%s/_data" % D.ROOT_VOLUME,
+    "/var/home/core/.local/share/containers/storage/volumes/%s/_data"
+    % D.ROOT_VOLUME,
+])
+def test_running_state_ignores_named_volume_mount_source(mac, monkeypatch,
+                                                         source):
+    """ROOT_VOLUME mounted at /root appears in .Mounts with the engine's own
+    storage path, which is not under /var/lib on a rootless Podman machine;
+    _running_state asks for bind mounts only, so the host bind-mount
+    comparison matches and the container is not restarted per redraw."""
     want = set(D.mount_points([ISO0])) | {D.cache_root()}
-    with_vol = want | {"/var/lib/containers/storage/volumes/%s/_data"
-                       % D.ROOT_VOLUME}
     fake = _Fake(arch=D.ARCH, image_id="sha256:new",
-                 container=("sha256:new", with_vol))
+                 container=("sha256:new", want), volumes=[source])
     monkeypatch.setattr(D, "_docker", fake)
     assert D.ensure_ready_container([ISO0], "/repo") is True
     assert not any(c[0] == "run" for c in fake.calls)

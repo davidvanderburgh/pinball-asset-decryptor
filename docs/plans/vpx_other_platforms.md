@@ -351,11 +351,45 @@ open. NOT RUN YET in this sitting: it takes the desktop for an hour, David
 was playing, and every WSLg window on the PC was blank (the frame share
 fault above) until a WSL restart; it is the next step once he says so.
 
+## The play-through's results (2026-11-02, evening)
+
+`scripts/vpx_play_each.py` ran all 22 (PAD) tables on David's desktop
+(four passes; `work/artifacts/PAD-943/vpx_play_each_pass{1..4}.json`,
+merged by `vpx_play_each_merge.py` into `vpx_play_each_final.md`):
+
+* **Stern Spike 2, 17 of 17 play two balls** through the real table:
+  Aerosmith, Batman, Black Knight, Iron Maiden, JAWS, Deadpool, Foo
+  Fighters, Jurassic Park LE and Pro, Metallica, Rush, Turtles, Bond, Star
+  Wars on the first pass; Guardians (a runtime error that came with a stale
+  controller feeding it another table's switches: clean on a retest), John
+  Wick (balls counted from the Start press) and The Beatles (its trough is
+  solenoid 10) on retests.
+* **Stern Spike 1, 5 of 5 load and the game begins, none serves a ball.**
+  Every table attaches, boots to attract, takes the coins (a 600 ms pulse
+  now; the one-tick PulseSw never counted) and Start, and the DMD shows
+  BALL 1 - but the game never serves the ball the table holds in the
+  trough: Ghostbusters fires no coil at all for five minutes, Primus and
+  Can Crusher go into a ball search that reaches the trough kicker a
+  hundred seconds in (Primus got one ball that way), GOT's table hands the
+  game five of its seven trough switches. The experiment on the rig with
+  the trough held through the bridge's own pipe got as far as BALL 1 the
+  same way. So the open item is the bridge's trough hand-off on Spike 1:
+  what the game sees of the table's trough switches at Start (the ids, the
+  optos' sense, the jam) - a rig session with the switch window, not more
+  Visual Pinball runs. GOT needed FlexDMD and KISS UltraDMD: both stand in
+  as null objects now and those tables load.
+
+What the runner learned on the way is in its docstring and the commits:
+the controller attaches a minute before attract; a killed Visual Pinball
+leaves a PAD.Controller server that attaches to the next run; keys need
+the real foreground; "Preparing Table" is not an error; dialog text comes
+only by WM_GETTEXT; a kick at attach is the game's own check.
+
 ## Still to do
 
-The play-through of every table (`scripts/vpx_play_each.py --this-kit
---out report.json`), on David's go: WSL restarted first (Restart WSL… on the
-tab), nothing playing, about an hour for 22 tables.
+The Spike 1 ball serve (above): a rig session on what the game sees of the
+table-held trough at Start. Until then a Spike 1 table loads and the game
+starts, and no ball comes.
 
 Was:
 

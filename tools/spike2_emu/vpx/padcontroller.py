@@ -1039,6 +1039,92 @@ def dof_dll_candidates(dirs=None):
     return out
 
 
+#: VPinMAME clone ROMs a table may name whose DOF table config (the config
+#: tool's) is keyed by the parent ROM (PAD-948: "The Beatles" plays the free
+#: play Seawitch, seawitfp; DOF's configs know Seawitch as seawitch). DOF
+#: itself only matches a name, its "<name>_" prefix or its plain prefix.
+DOF_PARENT_ROMS = {"seawitfp": ("seawitch",)}
+
+
+def dof_config_dirs(table_file="", dirs=None):
+    """Where DOF reads its table configs (GlobalConfig.GetIniFilesDictionary):
+    the global config's IniFilesPath, the table's folder, the global config's
+    folder (DOF's Config) and DOF's own folder."""
+    out = []
+    for d in (dirs if dirs is not None else _dof_dirs()):
+        d = os.path.normpath(d) if d else ""
+        if os.path.basename(d).lower() in ("x64", "x86"):
+            d = os.path.dirname(d)
+        if not d:
+            continue
+        cfg = os.path.join(d, "Config")
+        try:
+            xml = open(os.path.join(cfg, "GlobalConfig_B2SServer.xml"), encoding="utf-8",
+                       errors="replace").read()
+            hit = re.search(r"<IniFilesPath>([^<]*)</IniFilesPath>", xml)
+            if hit and hit.group(1).strip():
+                out.append(hit.group(1).strip())
+        except OSError:
+            pass
+        out.extend([cfg, d])
+    if table_file:
+        out.insert(1 if out else 0, os.path.dirname(table_file))
+    return out
+
+
+def dof_config_names(dirs):
+    """Every table name DOF's configs (directoutputconfig*.ini, ledcontrol*.ini)
+    in these folders have a row for: the first field of each [Config ...] row."""
+    names = set()
+    for d in dirs:
+        try:
+            files = os.listdir(d)
+        except OSError:
+            continue
+        for f in files:
+            low = f.lower()
+            if not low.endswith(".ini") or not low.startswith(("directoutputconfig", "ledcontrol")):
+                continue
+            try:
+                lines = open(os.path.join(d, f), encoding="utf-8", errors="replace").read().splitlines()
+            except OSError:
+                continue
+            section = ""
+            for line in lines:
+                line = line.strip()
+                if line.startswith("["):
+                    section = line.lower()
+                elif section.startswith("[config") and "," in line:
+                    name = line.split(",", 1)[0].strip()
+                    if name:
+                        names.add(name)
+    return names
+
+
+def dof_knows(rom, names):
+    """DOF's own match (LedControlConfigList.GetTableConfigDictionary): the
+    name, then "<name>_" as a prefix, then the name as a plain prefix."""
+    up = rom.upper()
+    return any(up == n.upper() or up.startswith(n.upper() + "_") or rom.startswith(n)
+               for n in names)
+
+
+def dof_rom_for(rom, table_file="", dirs=None):
+    """The name to Init DOF with: the table's ROM name, unless DOF's configs
+    have no row for it but do for its parent ROM. Configs unreadable: as is."""
+    parents = DOF_PARENT_ROMS.get((rom or "").lower())
+    if not parents:
+        return rom
+    names = dof_config_names(dof_config_dirs(table_file, dirs))
+    if not names or dof_knows(rom, names):
+        return rom
+    for p in parents:
+        if dof_knows(p, names):
+            log("DOF: no table config for %s; using its parent ROM's, %s" % (rom, p))
+            return p
+    return rom
+
+
 #: run by _DofProcess: DOF's ComObject loaded from its DLL, Init'ed from the
 #: environment, then one "<kind> <number> <value>" line per event on stdin
 _DOF_PS = r"""
@@ -1309,7 +1395,9 @@ class Bridge:
     def dof_init(self, rom, table_file, factory=None):
         """Start DOF for the table's ROM name (PADSPIKE2.vbs, before it
         starts B2S.Server). True when DOF is up; a second call for the same
-        name keeps the one that is up (the table's Reset key)."""
+        name keeps the one that is up (the table's Reset key). A clone ROM
+        whose config DOF keys by its parent gets the parent's (PAD-948)."""
+        rom = dof_rom_for(rom, table_file)
         if self.dof and self.dof.up and self.dof.rom == rom:
             return True
         self.dof_finish()

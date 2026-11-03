@@ -97,7 +97,8 @@ FREE_GB=21 DRY=0 cache_make_room "$T/img/big.raw" "$CACHE/big.raw" 2>&1; echo "r
 """
 
 
-@pytest.mark.skipif(not HAS_BASH, reason="needs bash")
+@pytest.mark.skipif(not HAS_BASH or sys.platform == "darwin",
+                    reason="needs bash; the driver speaks GNU stat/touch/truncate, as the rig's scripts do")
 def test_the_cache_check_is_a_dry_run_of_the_copiers_own_rule():
     """The same floors, the same victims in the same order (least recently booted first), nothing deleted:
     evict says how many and how much; full says the rule would run off the original; the real call with

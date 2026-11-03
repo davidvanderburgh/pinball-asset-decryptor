@@ -393,7 +393,11 @@ fi
 # PAD_CARD_MODES=0 is the opt-out from a card's own modes (modes/cardmodes.sh). That
 # feature needs nothing from out here - run_game.sh reads the card inside the box - but
 # a "no" has to be able to cross, for the same reason PAD_SELECT=0 does.
-for v in PAD_GAME PAD_PLAYFIELD PAD_AUDIO PAD_AUTO_ATTRACT \
+# PAD_AUDIO_DUMP is the game's own sound count every 30 s ("[aud] ... main
+# played="), which the Emulate tab's Audio row is read from: without it a Mac
+# said "not sampled" and its log could not tell a silent game from a lost
+# stream (PAD-832).
+for v in PAD_GAME PAD_PLAYFIELD PAD_AUDIO PAD_AUDIO_DUMP PAD_AUTO_ATTRACT \
          PAD_SELECT PAD_SELECT_TIMEOUT PAD_SELECT_MEDIA PAD_CARD_MODES \
          PAD_CAB_DIP PAD_COUNTRY PAD_MAINS_HZ PAD_FACTORY_HZ PAD_MODEL LOG; do
     [ -n "${!v:-}" ] && RUN_ARGS+=(-e "$v=${!v}")
@@ -438,16 +442,69 @@ host_player() {
     [ -n "$fmt" ] || { echo "[box] the guest never reported a PCM format; this run is silent" >&2; return 0; }
     set -- $fmt
     rate=${1:-48000}; ch=${2:-2}
-    if command -v ffplay >/dev/null 2>&1; then
-        chargs=$(ffplay_channel_args "$ch")
-        echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch ($chargs) from tcp/$AUDIO_PORT"
-        # $chargs unquoted on purpose: it is an option and its value
-        exec ffplay -hide_banner -loglevel error -nodisp -autoexit \
-             -fflags nobuffer -flags low_delay \
-             -f s16le -ar "$rate" $chargs "tcp://127.0.0.1:$AUDIO_PORT"
+    if ! command -v ffplay >/dev/null 2>&1; then
+        echo "[box] no ffplay on this Mac, so this run is silent. Fix:" >&2
+        echo "[box]   brew install ffmpeg   (the same package the app's previews use)" >&2
+        return 0
     fi
-    echo "[box] no ffplay on this Mac, so this run is silent. Fix:" >&2
-    echo "[box]   brew install ffmpeg   (the same package the app's previews use)" >&2
+    chargs=$(ffplay_channel_args "$ch")
+    echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch ($chargs) from tcp/$AUDIO_PORT"
+    # NOT exec'd, and STARTED AGAIN IF IT STOPS (PAD-832), so the TERM that
+    # takes this player down at the end has to reach ffplay as well.
+    fp=""
+    trap '[ -n "$fp" ] && kill "$fp" 2>/dev/null; exit 0' TERM INT
+    quick=0; rc=""
+    while :; do
+        # ONLY ONCE THE RELAY IS LISTENING. The fmt file appears a moment
+        # BEFORE playaudio.sh starts padrelay.py, and a Mac's port is
+        # published by the container engine's proxy, which accepts a
+        # connection whether or not anything in the box listens yet and then
+        # hangs up. ffplay reads that as the end of the stream and exits 0
+        # with nothing said - and as this was one exec, the whole run was
+        # silent: a Mac user's v1.287.5, where the -ac fix above had taken.
+        relay_listening || break
+        # said only now: a box being stopped ends ffplay too, and is no restart
+        [ -n "${rc:-}" ] && echo "[box] the speaker (ffplay) stopped (exit $rc); started it again"
+        st=$SECONDS
+        # $chargs unquoted on purpose: it is an option and its value
+        ffplay -hide_banner -loglevel error -nodisp -autoexit \
+             -fflags nobuffer -flags low_delay \
+             -f s16le -ar "$rate" $chargs "tcp://127.0.0.1:$AUDIO_PORT" &
+        fp=$!
+        wait "$fp"; rc=$?; fp=""
+        # The relay ends when the run does; so does this.
+        docker exec "$NAME" true >/dev/null 2>&1 || break
+        if [ $(( SECONDS - st )) -lt 5 ]; then quick=$(( quick + 1 )); else quick=0; fi
+        if [ "$quick" -ge 5 ]; then
+            echo "[box] the speaker (ffplay) stopped 5 times in a row as soon as it started (exit $rc); the rest of this run is silent" >&2
+            break
+        fi
+        sleep 1
+    done
+}
+
+# IS padrelay.py LISTENING IN THE BOX? Read off the box's own socket table,
+# never by connecting: a test connection IS a player to the relay, which then
+# opens the FIFO for it and sees it hang up (playaudio.sh, "NO READINESS
+# PROBE"). Listening sockets are state 0A; the port is the local address's
+# hex. Gives up after PAD_BOX_RELAY_WAIT_S (60 s) or when the box is gone.
+relay_listening() {
+    local hex i n
+    hex=$(printf '%04X' "$AUDIO_PORT")
+    n=$(( ${PAD_BOX_RELAY_WAIT_S:-60} * 4 ))
+    i=0
+    while [ "$i" -lt "$n" ]; do
+        # matched out here, by the Mac's own awk: the box's is mawk, which
+        # stops at a missing input file, and tcp6 is one where IPv6 is off
+        docker exec "$NAME" cat /proc/net/tcp /proc/net/tcp6 2>/dev/null |
+            awk -v p=":$hex" 'substr($2, length($2) - 4) == p && $4 == "0A" { f = 1 }
+                              END { exit !f }' && return 0
+        docker exec "$NAME" true >/dev/null 2>&1 || return 1
+        sleep 0.25
+        i=$(( i + 1 ))
+    done
+    echo "[box] the box's audio relay never started listening on tcp/$AUDIO_PORT; this run is silent" >&2
+    return 1
 }
 
 # THE ENGINE HAS TO RUN 32-BIT ARM (PAD-884), and colima's does not out of the

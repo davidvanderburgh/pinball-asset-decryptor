@@ -683,6 +683,17 @@ def test_the_catalogue_names_every_platform_and_where_each_table_is():
     assert any(t.get("title") == "got_le" and t.get("map") for t in tables)
 
 
+def test_jjp_guns_n_roses_has_no_table_listed():
+    """PAD-959: the only Guns N' Roses table is Data East's 1994 game in JJP's
+    look, not JJP's machine: it is not listed, and GnR sits on the no-table row."""
+    vs = _vpxsetup()
+    jjp = [t for t in vs.load_catalog()["tables"] if t["platform"] == "jjp"]
+    assert not any("guns" in (t.get("name") + t.get("url")).lower() for t in jjp)
+    gnr = [t for t in jjp if "Guns N' Roses" in t["game"]]
+    assert len(gnr) == 1 and not gnr[0]["url"] and "Data East" in gnr[0]["notes"]
+    assert vs.catalog_match("GUNS EDITION LIMITED.vpx") is None
+
+
 def test_the_catalogue_rides_the_kits_state(monkeypatch):
     vs = _vpxsetup()
     monkeypatch.setattr(vs, "load_catalog", lambda: {"platforms": {"jjp": {"name": "Jersey Jack"}}, "tables": [{"platform": "jjp"}]})

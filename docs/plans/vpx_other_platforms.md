@@ -23,8 +23,9 @@ it, and what is still to do.
   catalogue; 24 is `twenty4_150`, not `24_150`). Nothing to bridge: PAD's
   own code plays: nothing for PAD to bridge.
 * **Spider-Man Vault Edition** is a SAM game (`smanve_101`), not Spike 1.
-* **JJP**: Wonka, Godfather and Wizard of Oz tributes (marty02, MachWon); a
-  Data East GnR reskin; nothing for the rest - the community does not
+* **JJP**: Wonka, Godfather and Wizard of Oz tributes (marty02, MachWon); the
+  GnR tables are Data East's 1994 game, not JJP's (PAD-959: not listed);
+  nothing for the rest - the community does not
   recreate machines still on sale (Hobbit, Dialed In, TS4, Elton John,
   Pirates, Harry Potter, Sonic all say so in their threads).
 * **American, Spooky, Dutch, Barrels of Fun, Pinball Brothers**: themed

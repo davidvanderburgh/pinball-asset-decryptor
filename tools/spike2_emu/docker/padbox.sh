@@ -323,6 +323,16 @@ fi
 AUDIO_PORT=${PAD_AUDIO_PORT:-45997}
 RUN_ARGS+=(-p "127.0.0.1:$AUDIO_PORT:$AUDIO_PORT"
            -e "PAD_AUDIO_SINK=relay" -e "PAD_AUDIO_PORT=$AUDIO_PORT")
+# THE VOLUME AND MUTE GO IN WITH IT (PAD-957). ffplay cannot change its level
+# while it plays, so the box's relay scales the sound instead, by a copy of the
+# Emulate tab's audio_ctl.json that ctl_pusher() below keeps up to date. A
+# copy and not a mount: a bind mount of a file is lost the moment the app
+# replaces it (which it does on every slider move), and whether a change in a
+# mounted folder shows up inside the box at once is up to the container
+# engine. Under its own name, so the box's playfield window (which reads
+# PAD_AUDIO_CTL) is left as it was.
+BOX_CTL=/tmp/pad_audio_ctl.json
+[ -n "${PAD_AUDIO_CTL:-}" ] && RUN_ARGS+=(-e "PAD_RELAY_CTL=$BOX_CTL")
 
 # A card path on the HOST has to become one inside the box. Only the directory
 # is mounted, so this is a prefix swap and not a guess.
@@ -483,6 +493,29 @@ host_player() {
     done
 }
 
+# THE VOLUME FILE, copied into the box whenever it changes (PAD-957). Read
+# every quarter second on the Mac and sent only when different, so the
+# slider's every move reaches the relay inside half a second and an idle
+# knob costs a `cat`. As root, so every copy has the same owner whoever the
+# box runs as, and written beside and moved into place, so the relay never
+# reads half of one. Until the box is up the copy fails and is tried again;
+# no file on the Mac means full volume, which is what the relay plays
+# without one.
+ctl_pusher() {
+    [ "${PAD_AUDIO:-1}" = 0 ] && return 0
+    [ -n "${PAD_AUDIO_CTL:-}" ] || return 0
+    local last="" cur
+    while :; do
+        cur=$(cat "$PAD_AUDIO_CTL" 2>/dev/null) || cur=""
+        if [ -n "$cur" ] && [ "$cur" != "$last" ]; then
+            printf '%s\n' "$cur" | docker exec -i -u 0 "$NAME" sh -c \
+                "cat > $BOX_CTL.tmp && mv -f $BOX_CTL.tmp $BOX_CTL" \
+                >/dev/null 2>&1 && last=$cur
+        fi
+        sleep 0.25
+    done
+}
+
 # IS padrelay.py LISTENING IN THE BOX? Read off the box's own socket table,
 # never by connecting: a test connection IS a player to the relay, which then
 # opens the FIFO for it and sees it hang up (playaudio.sh, "NO READINESS
@@ -535,8 +568,9 @@ echo "[box] on macOS: open 'vnc://:$PAD_VNC_PASSWD@localhost:$PORT'   (Screen Sh
 # NOT exec'd any more: the run has a Mac-side child now, and something has to
 # be here afterwards to take it down when the box exits.
 host_player & HOSTAUD=$!
+ctl_pusher & HOSTCTL=$!
 docker run "${RUN_ARGS[@]}" "$IMAGE" "$@"
 RC=$?
-kill "$HOSTAUD" 2>/dev/null
-wait "$HOSTAUD" 2>/dev/null
+kill "$HOSTAUD" "$HOSTCTL" 2>/dev/null
+wait "$HOSTAUD" "$HOSTCTL" 2>/dev/null
 exit "$RC"

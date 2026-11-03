@@ -74,7 +74,7 @@ ffplay() {
   else echo "start $n EARLY" >> "$D/ffplay.log"; fi
   case "$(cat "$D/play$n" 2>/dev/null || echo eof)" in
     eof) return 0 ;;                       # the stream ended at once
-    long) exec sleep 31.832 ;;                 # a player that plays on
+    long) exec -a "padtest-player-$D" sleep 31 ;;   # a player that plays on
   esac
 }
 """
@@ -138,7 +138,8 @@ host_player & HP=$!
 for i in $(seq 1 80); do [ "$(cat "$D/starts" 2>/dev/null)" = 2 ] && break; sleep 0.1; done
 sleep 0.3; kill $HP; wait $HP 2>/dev/null
 sleep 0.3
-pgrep -f "sleep 31.832" >/dev/null && echo "PLAYER-LEFT-BEHIND"
+# this test's own player only: another test's may be playing right now
+pgrep -f "padtest-player-$D" >/dev/null && echo "PLAYER-LEFT-BEHIND"
 echo "HP-DONE"
 """)
     log = _cat(d, "ffplay.log")
@@ -213,3 +214,75 @@ def test_the_game_sound_count_crosses_into_the_box():
     m = re.search(r"^for v in (.*?); do\n", body, re.S | re.M)
     assert m
     assert "PAD_AUDIO_DUMP" in m.group(1).split()
+
+
+# ---- PAD-957: the tab's Volume and Mute reach the Mac's speaker -------------
+
+_CTL_PRELUDE = r"""
+set -u
+D=%(dir)s
+NAME=pad-test PAD_AUDIO=1 BOX_CTL=/tmp/pad_audio_ctl.json
+PAD_AUDIO_CTL="$D/audio_ctl.json"
+# docker exec -i -u 0 NAME sh -c CMD: the box takes a copy only once it is up
+docker() {
+  [ "$1" = exec ] || return 0
+  [ -f "$D/up" ] || { cat >/dev/null; return 1; }
+  cat > "$D/box_ctl"; echo push >> "$D/pushes"
+}
+"""
+
+
+def _run_pusher(d, body, timeout=30):
+    script = "\n".join([_CTL_PRELUDE % {"dir": _q(d)},
+                        _function("ctl_pusher"), body, ""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=timeout)
+    return out.returncode, out.stdout.decode("utf-8", "replace")
+
+
+@needs_bash
+def test_the_volume_file_is_copied_into_the_box_when_it_changes():
+    d = _fresh_dir()
+    rc, text = _run_pusher(d, r"""
+echo '{"gain": 0.5, "muted": false}' > "$D/audio_ctl.json"
+ctl_pusher & CP=$!
+sleep 0.8; touch "$D/up"                    # the box comes up later
+for i in $(seq 1 40); do [ -f "$D/pushes" ] && break; sleep 0.1; done
+sleep 0.8                                   # unchanged: no second copy
+echo '{"gain": 0.5, "muted": true}' > "$D/audio_ctl.json"
+for i in $(seq 1 40); do [ "$(wc -l < "$D/pushes")" -ge 2 ] && break; sleep 0.1; done
+kill $CP; wait $CP 2>/dev/null
+echo "PUSHES=$(wc -l < "$D/pushes")"
+""")
+    assert "PUSHES=2" in text, text
+    assert '"muted": true' in _cat(d, "box_ctl"), text
+
+
+@needs_bash
+def test_no_volume_file_or_a_silent_run_copies_nothing():
+    d = _fresh_dir()
+    rc, text = _run_pusher(d, r"""
+touch "$D/up"
+ctl_pusher & CP=$!                          # the file does not exist
+sleep 0.8; kill $CP; wait $CP 2>/dev/null
+PAD_AUDIO=0 ctl_pusher; echo "SILENT-RC=$?"
+PAD_AUDIO_CTL= ctl_pusher; echo "UNSET-RC=$?"
+""")
+    assert _cat(d, "pushes") == "", text
+    assert "SILENT-RC=0" in text and "UNSET-RC=0" in text, text
+
+
+def test_the_relay_is_told_where_the_copy_is_and_the_bridge_is_not():
+    with open(BOX, "rb") as fh:
+        box = fh.read().decode("utf-8")
+    assert '-e "PAD_RELAY_CTL=$BOX_CTL"' in box
+    assert "ctl_pusher & HOSTCTL=$!" in box
+    with open(os.path.join(RIG, "playaudio.sh"), "rb") as fh:
+        play = fh.read().decode("utf-8")
+    relay = play[play.index('if [ "$SINK" = relay ]'):]
+    relay_sink, win_sink = relay.split('if [ "$SINK" = win ]', 1)
+    # the Mac's relay scales; the Windows bridge's padplay.py scales its own,
+    # and a relay that scaled too would square the level
+    assert '"$PORT" "${PAD_RELAY_CTL:-}"' in relay_sink
+    assert "PAD_RELAY_CTL" not in win_sink

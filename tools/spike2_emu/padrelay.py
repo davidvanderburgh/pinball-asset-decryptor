@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""padrelay.py <fifo> <port> - hand the guest's PCM to a socket. That is all.
+"""padrelay.py <fifo> <port> [ctl] - hand the guest's PCM to a socket. That is all.
 
 THE POINT OF THIS FILE IS EVERYTHING IT DOES NOT DO. Its predecessor,
 audiotcp.py, filled silence against wall time, trimmed what it judged to be
@@ -17,44 +17,131 @@ that is where the device is.
 Measured end to end against the source, same file and capture rig throughout:
 audiotcp.py + ffplay scored +16 dB of damage; this + padplay.py scores -14.8 dB,
 level with Windows playing the file directly.
+
+THE ONE EXCEPTION IS THE VOLUME, AND ONLY ON A MAC (PAD-957). There the far end
+is ffplay, which has no way to be told a new level while it plays, so the
+Emulate tab's Volume and Mute did nothing at all. On a Mac the box's
+playaudio.sh hands this a third argument, the volume file padbox.sh keeps in
+step with the tab's audio_ctl.json ({"gain": 0-1, "muted": bool}), and the
+samples are scaled here on their way through. The Windows bridge passes none:
+padplay.py scales its own, and doing it twice would square the level.
 """
+import json
 import os
 import socket
 import sys
+import time
+from array import array
 
-if len(sys.argv) < 3:
-    print("usage: padrelay.py <fifo> <port>", file=sys.stderr)
-    raise SystemExit(2)
-fifo, port = sys.argv[1], int(sys.argv[2])
+#: how often the volume file is looked at, as padplay.py's poll_gain() does
+CTL_POLL_S = 0.25
 
-srv = socket.socket()
-srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(("0.0.0.0", port))
-srv.listen(1)
-print("[padrelay] listening on %d for a player" % port, flush=True)
 
-while True:
-    conn, addr = srv.accept()
-    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    print("[padrelay] player connected from %s" % (addr,), flush=True)
-
-    # OPENED ONLY NOW, and that ordering is load-bearing. Opening a FIFO for
-    # read blocks until a writer exists, so an ffmpeg told to read the FIFO and
-    # listen on a socket would sit on the empty FIFO and never open the socket
-    # at all - the player would find nothing to connect to and the run was
-    # silent. Listen first, open second.
-    fd = os.open(fifo, os.O_RDONLY)
-    total = 0
+def read_gain(path):
+    """The level the volume file asks for: 0 when muted, else its gain held
+    to 0-1. None when there is no file or it cannot be read, which leaves the
+    level as it was (a file being replaced is no reason to jump to full)."""
     try:
-        while True:
-            b = os.read(fd, 65536)
-            if not b:
-                break
-            conn.sendall(b)
-            total += len(b)
-    except (BrokenPipeError, ConnectionResetError, OSError) as exc:
-        print("[padrelay] player went away: %s" % exc, flush=True)
-    finally:
-        print("[padrelay] %d bytes forwarded" % total, flush=True)
-        os.close(fd)
-        conn.close()
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        g = 0.0 if data.get("muted") else float(data.get("gain", 1.0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    return max(0.0, min(1.0, g))
+
+
+def scale(b, g):
+    """s16le samples at gain g. Unity and silence cost nothing; anything in
+    between goes through array, because the box has no numpy and audioop
+    left the stdlib in 3.13. Little-endian is assumed, as the box is."""
+    if g >= 1.0:
+        return b
+    if g <= 0.0:
+        return bytes(len(b))
+    a = array("h")
+    a.frombytes(b)
+    return array("h", [int(s * g) for s in a]).tobytes()
+
+
+class Volume:
+    """The gain the volume file says, re-read at most every CTL_POLL_S and
+    only when the file has changed. A pass-through when there is no file."""
+
+    def __init__(self, path):
+        self.path = path
+        self.gain = 1.0
+        self._seen = None
+        self._next = 0.0
+
+    def poll(self, now=None):
+        if not self.path:
+            return self.gain
+        now = time.monotonic() if now is None else now
+        if now < self._next:
+            return self.gain
+        self._next = now + CTL_POLL_S
+        try:
+            st = os.stat(self.path)
+            seen = (st.st_mtime_ns, st.st_size, st.st_ino)
+        except OSError:
+            return self.gain
+        if seen == self._seen:
+            return self.gain
+        self._seen = seen
+        g = read_gain(self.path)
+        if g is not None and g != self.gain:
+            self.gain = g
+            print("[padrelay] volume -> %.2f" % g, flush=True)
+        return self.gain
+
+
+def main():
+    if len(sys.argv) < 3:
+        print("usage: padrelay.py <fifo> <port> [ctl]", file=sys.stderr)
+        raise SystemExit(2)
+    fifo, port = sys.argv[1], int(sys.argv[2])
+    vol = Volume(sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None)
+    vol.poll()
+
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("0.0.0.0", port))
+    srv.listen(1)
+    print("[padrelay] listening on %d for a player" % port, flush=True)
+
+    while True:
+        conn, addr = srv.accept()
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        print("[padrelay] player connected from %s" % (addr,), flush=True)
+
+        # OPENED ONLY NOW, and that ordering is load-bearing. Opening a FIFO for
+        # read blocks until a writer exists, so an ffmpeg told to read the FIFO and
+        # listen on a socket would sit on the empty FIFO and never open the socket
+        # at all - the player would find nothing to connect to and the run was
+        # silent. Listen first, open second.
+        fd = os.open(fifo, os.O_RDONLY)
+        total = 0
+        odd = b""
+        try:
+            while True:
+                b = os.read(fd, 65536)
+                if not b:
+                    break
+                # a sample cut in two by the read waits for its other half
+                if vol.path:
+                    b = odd + b
+                    n = len(b) & ~1
+                    b, odd = b[:n], b[n:]
+                    b = scale(b, vol.poll())
+                conn.sendall(b)
+                total += len(b)
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            print("[padrelay] player went away: %s" % exc, flush=True)
+        finally:
+            print("[padrelay] %d bytes forwarded" % total, flush=True)
+            os.close(fd)
+            conn.close()
+
+
+if __name__ == "__main__":
+    main()

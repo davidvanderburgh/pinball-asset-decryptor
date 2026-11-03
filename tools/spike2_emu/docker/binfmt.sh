@@ -77,8 +77,26 @@ for f in "$D"/*; do
     echo "binfmt: ${f##*/} is disabled and could not be enabled"; exit 1
 done
 
-[ -f "$CONF" ] || { echo "binfmt: no $CONF in this image"; exit 1; }
-if cat "$CONF" > "$D/register" 2>/dev/null; then
-    echo "binfmt: registered"; exit 0
+# THE LINE ITSELF, when the image has no file of it - which is EVERY Mac's
+# image (PAD-884, fourth log): qemu-user-static for arm64 leaves qemu-arm.conf
+# out, because Debian assumes a 64-bit ARM CPU runs 32-bit ARM natively. Apple
+# silicon cannot. The package still ships the interpreter it names (a symlink
+# to the static qemu, so with F nothing has to exist inside the guest), and a
+# copy of the line under /usr/share/doc - which Ubuntu's container images
+# strip. So: the file, the doc copy, then this, byte for byte the amd64
+# package's line (the one WSL runs every game with).
+LINE=':qemu-arm:M::\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/libexec/qemu-binfmt/arm-binfmt-P:OPF'
+INTERP=${PAD_BINFMT_INTERP:-/usr/libexec/qemu-binfmt/arm-binfmt-P}
+if [ ! -f "$CONF" ] && [ -f /usr/share/doc/qemu-user-static/qemu-arm.conf ] &&
+   [ -z "${PAD_BINFMT_CONF:-}" ]; then
+    CONF=/usr/share/doc/qemu-user-static/qemu-arm.conf
+fi
+if [ -f "$CONF" ]; then
+    cat "$CONF" > "$D/register" 2>/dev/null && { echo "binfmt: registered"; exit 0; }
+elif [ -x "$INTERP" ]; then
+    printf '%s\n' "$LINE" > "$D/register" 2>/dev/null &&
+        { echo "binfmt: registered (built-in line)"; exit 0; }
+else
+    echo "binfmt: no qemu-arm in this image ($CONF, $INTERP)"; exit 1
 fi
 echo "binfmt: registering failed"; exit 1

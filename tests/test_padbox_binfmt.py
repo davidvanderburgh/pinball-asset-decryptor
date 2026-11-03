@@ -33,11 +33,17 @@ ARM = "magic 7f454c4601010100000000000000000002002800"
 AARCH64 = "magic 7f454c460201010000000000000000000200b700"
 
 
-def _binfmt(table):
-    """`table` is {name: (state, magic)} - the entries already registered."""
+def _binfmt(table, arm64=None):
+    """`table` is {name: (state, magic)} - the entries already registered.
+    `arm64`: the image is the Mac's, with no qemu-arm.conf (PAD-884); True
+    gives it the interpreter the arm64 package does ship, False not even that."""
     lines = ["W=$(mktemp -d)", "trap 'rm -rf \"$W\"' EXIT",
-             'mkdir -p "$W/t"; echo enabled > "$W/t/status"',
-             "cat > \"$W/conf\" <<'EOF'", CONF, "EOF"]
+             'mkdir -p "$W/t"; echo enabled > "$W/t/status"']
+    if arm64 is None:
+        lines += ["cat > \"$W/conf\" <<'EOF'", CONF, "EOF"]
+    elif arm64:
+        lines += ['printf "#!/bin/sh\\n" > "$W/interp"; chmod +x "$W/interp"']
+    lines += ['export PAD_BINFMT_INTERP="$W/interp"']
     for name, (state, magic) in table.items():
         lines.append('printf "%%s\\ninterpreter /x\\nflags: F\\n%%s\\n" %s %s'
                      ' > "$W/t/%s"' % (state, magic.replace(" ", "\\ "), name))
@@ -62,6 +68,24 @@ def test_an_engine_without_an_arm_handler_gets_the_images_one():
     assert "binfmt: registered" in text and "RC=0" in text, text
     reg = text.split("== register", 1)[1]
     assert CONF in reg, text
+
+
+@needs_bash
+def test_a_mac_image_without_the_conf_registers_the_same_line_itself():
+    """qemu-user-static for arm64 ships the interpreter but not qemu-arm.conf
+    (Debian assumes an arm64 CPU runs 32-bit ARM; Apple silicon cannot), and
+    v1.323 stopped at "no /usr/lib/binfmt.d/qemu-arm.conf in this image"."""
+    text = _binfmt({"qemu-x86_64": ("enabled", "magic 7f454c4602")}, arm64=True)
+    assert "binfmt: registered (built-in line)" in text and "RC=0" in text, text
+    reg = text.split("== register", 1)[1].split("== ", 1)[0].strip()
+    assert reg == CONF, (reg, CONF)
+
+
+@needs_bash
+def test_an_image_with_no_qemu_arm_at_all_says_so():
+    text = _binfmt({}, arm64=False)
+    assert "binfmt: no qemu-arm in this image" in text and "RC=1" in text, text
+    assert "== register" not in text, text
 
 
 @needs_bash

@@ -48,6 +48,8 @@ DRIVER = r"""
 set -u
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 CACHE=$T/cache; CARDS=$T/cards; LIBRARY=$T/nolib; CACHE_KEEP_GB=0; PAD_HOST_KEEP_FREE_GB=0
+PAD_CARD_COPY_USED=0                          # the need is the image's size: no cardcopy.py plan in this driver
+room_say() { [ "${DRY:-0}" = 1 ] || echo "$@" >&2; }       # the script's one-liner, which _funcs cannot lift
 mkdir -p "$CACHE" "$CARDS" "$T/img" "$T/win"
 echo 0 > "$CACHE/.limit_gb"
 df() { local a; for a; do :; done
@@ -77,7 +79,7 @@ run nodrive 6000
 def test_the_copier_counts_the_windows_drive():
     script = _funcs("cardmount.sh", "cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned",
                     "label_mounted", "cache_readers", "cache_in_use", "cache_source_state", "cache_limit_gb",
-                    "cache_used_kb", "host_free_kb", "cache_make_room") + DRIVER
+                    "cache_used_kb", "card_label", "host_free_kb", "cache_need_kb", "cache_make_room") + DRIVER
     out = _bash(script)
     lines = out.splitlines()
     # 6 MB free on the drive for a 14 MB copy and nothing to evict: refused, naming the drive, booting off the card

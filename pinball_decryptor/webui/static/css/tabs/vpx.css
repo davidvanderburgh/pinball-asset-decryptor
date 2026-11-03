@@ -29,7 +29,7 @@
 /* PAD-940: one table per line, the same columns on every line under a head
    row (Patch and Play a fixed-width column each, so every button lines up) */
 .vpx-table { display: grid; align-items: center; column-gap: 14px; padding: 3px 4px; min-height: 36px;
-  grid-template-columns: 40px minmax(0, 3fr) minmax(0, 1.7fr) minmax(0, 1.1fr) 56px minmax(0, 2fr) 104px 74px 128px 76px;
+  grid-template-columns: 40px minmax(0, 3fr) minmax(0, 1.7fr) minmax(0, 1.1fr) 92px 56px minmax(0, 2fr) 104px 74px 128px 76px;
   border-bottom: 1px solid var(--line); }
 .vpx-table > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .vpx-table:not(.vpx-head):hover { background: var(--panel-2); }
@@ -55,7 +55,7 @@
 /* narrower windows drop the author (still in the name's tip); From stays:
    it is where an unpatched table is downloaded from */
 @media (max-width: 1400px) {
-  .vpx-table { grid-template-columns: 40px minmax(0, 3fr) minmax(0, 1fr) 56px minmax(0, 2fr) 104px 74px 128px 76px; }
+  .vpx-table { grid-template-columns: 40px minmax(0, 3fr) minmax(0, 1fr) 92px 56px minmax(0, 2fr) 104px 74px 128px 76px; }
   .vpx-table > .vpx-by { display: none; }
 }
 /* PAD-941: the checklist sheet, in the app's own tables */

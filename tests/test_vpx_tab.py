@@ -957,29 +957,54 @@ def test_the_coverage_column_is_kept_between_sittings(tab, monkeypatch, tmp_path
     assert json.load(open(tmp_path / "vpx_coverage.json", encoding="utf-8"))["coverage"] == {"rush_le": {"pct": 90}}
 
 
-# ---- PAD-943: the tab on every manufacturer the app emulates ---------------
-def test_the_tab_follows_the_manufacturer_and_its_era(tab):
-    """David: "add the Visual Pinball tab to the other manufacturers we are
-    adding support for". The tab's platform is the machine's (Stern's eras
-    are platforms of their own); the authors' card's game is one of that
-    platform's; a platform with no bridge yet says so (bridged False)."""
-    tab.set(author_titles=["got_le", "rush_le"], author_platforms={"got_le": "spike1"}, author_title="rush_le")
-    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike2"))
-    assert tab.get("platform") == "spike2" and tab.get("bridged") is True and tab.get("author_title") == "rush_le"
-    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike1"))
-    assert tab.get("platform") == "spike1" and tab.get("bridged") is True and tab.get("author_title") == "got_le"
+# ---- PAD-943 / PAD-958: every machine's tables, a filter for one ------------
+def test_the_tab_lists_every_machine_and_the_filter_narrows_it(tab):
+    """David (PAD-958): "I don't want to have to switch manufacturers to see
+    all the supported tables". The tab starts on every machine's ("") on any
+    manufacturer; the filter at the top picks one (Stern's eras are machines
+    of their own); the authors' card's game is one of that machine's; a
+    machine with no bridge yet says so (bridged False)."""
+    assert tab.get("platform") == "" and tab.get("bridged") is True
+    # the manufacturer no longer narrows the tab
     tab.on_manufacturer(types.SimpleNamespace(key="jjp"))
+    assert tab.get("platform") == "" and tab.get("bridged") is True
+    tab.set(author_titles=["got_le", "rush_le"], author_platforms={"got_le": "spike1"}, author_title="rush_le",
+            catalog={"platforms": {"jjp": {"name": "Jersey Jack"}, "spooky": {"name": "Spooky"}}, "tables": []})
+    assert tab.set_filter("spike2") is True
+    assert tab.get("platform") == "spike2" and tab.get("bridged") is True and tab.get("author_title") == "rush_le"
+    tab.set_filter("spike1")
+    assert tab.get("platform") == "spike1" and tab.get("bridged") is True and tab.get("author_title") == "got_le"
+    tab.set_filter("jjp")
     assert tab.get("platform") == "jjp" and tab.get("bridged") is False and tab.get("author_title") == ""
-    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="sam"))
+    tab.set_filter("spooky")
+    assert tab.get("platform") == "spooky" and tab.get("bridged") is True
+    # a machine nobody knows is refused and changes nothing
+    assert tab.set_filter("nosuch") is False and tab.get("platform") == "spooky"
+    tab.set_filter("")
     assert tab.get("platform") == "" and tab.get("bridged") is True
     # the titles' platforms come with the titles, and the pick follows them
     tab.answers[("vpxauthor.py", "titles")] = {"titles": ["got_le", "rush_le"], "platforms": {"got_le": "spike1"}}
-    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike1"))
+    tab.set_filter("spike1")
     tab.on_show()
     _wait(tab)
     assert tab.get("author_platforms") == {"got_le": "spike1"} and tab.get("author_title") == "got_le"
-    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike2"))
+    tab.set_filter("spike2")
     assert tab.get("author_title") == "rush_le"
+
+
+def test_the_page_has_the_machine_filter_and_a_machine_column():
+    """PAD-958: the filter at the top of the page, every machine's rows
+    under All machines, a Machine column, and the catalogue card with every
+    machine's block (no longer 'on their own manufacturer's tab')."""
+    here = os.path.join(os.path.dirname(V.__file__), "..", "static")
+    js = open(os.path.join(here, "js", "tabs", "vpx.js"), encoding="utf-8").read()
+    css = open(os.path.join(here, "css", "tabs", "vpx.css"), encoding="utf-8").read()
+    assert 'call("vpx.set_filter", v)' in js and '"All machines"' in js
+    assert '<span class="vpx-machine">Machine</span>' in js
+    assert "own manufacturer's Visual Pinball tab" not in js
+    assert '(!platform || k === platform)' in js
+    # one column more on every line, at both widths
+    assert css.count("92px 56px") == 2
 
 
 def test_restart_wsl_asks_first_then_shuts_wsl_down(tab, monkeypatch):

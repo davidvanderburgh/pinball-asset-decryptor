@@ -48,22 +48,17 @@ INTRO = ("Play a Visual Pinball table with the real game behind it: the "
 
 #: PAD-943 (David: "add the Visual Pinball tab to the other manufacturers
 #: we are adding support for"): the tab is on every manufacturer the app
-#: emulates and shows that machine's tables. Stern's eras are platforms of
-#: their own; every other manufacturer's key is its platform in the kit's
-#: catalogue (catalog.json). The platforms the app's emulator plays a table
-#: on (a map and a bridge) are BRIDGED; the rest list their tables and say
-#: they play as their authors wrote them. PAD-952: Spooky's Halloween and
-#: Ultraman play behind marty02's Halloween table (spkbridge.py).
+#: emulates. Stern's eras are platforms of their own; every other
+#: manufacturer's key is its platform in the kit's catalogue (catalog.json).
+#: The platforms the app's emulator plays a table on (a map and a bridge) are
+#: BRIDGED; the rest list their tables and say they play as their authors
+#: wrote them. PAD-952: Spooky's Halloween and Ultraman play behind marty02's
+#: Halloween table (spkbridge.py).
+#: PAD-958 (David: "I don't want to have to switch manufacturers to see all
+#: the supported tables"): the tab lists EVERY machine's tables whatever the
+#: manufacturer, with a filter at the top for one machine (``platform``, ""
+#: for all of them, which is where every sitting starts).
 BRIDGED = ("spike2", "spike1", "spooky")
-STERN_ERAS = ("spike2", "spike1")
-
-
-def platform_of_manufacturer(mfr):
-    key = getattr(mfr, "key", "") or ""
-    if key == "stern":
-        era = getattr(mfr, "current_era", "") or "spike2"
-        return era if era in STERN_ERAS else ""
-    return key
 
 
 #: PAD-943: the other platforms' tables, where their authors put them
@@ -184,13 +179,18 @@ class VpxTab(TabService):
         self._folder_sig = None
 
     # -- hooks ---------------------------------------------------------------
-    def on_manufacturer(self, mfr):
-        """The machine this tab is for (PAD-943): its platform's tables,
-        catalogue block and author titles; the rest of the kit's state is
-        the same on every manufacturer."""
-        platform = platform_of_manufacturer(mfr)
+    @rpc
+    def set_filter(self, platform=""):
+        """The page's machine filter (PAD-958): one platform's tables,
+        catalogue block and author titles, or "" for every machine's. A
+        platform with no bridge yet says so (bridged False)."""
+        platform = platform or ""
+        known = set(BRIDGED) | set(((self.get("catalog") or {}).get("platforms") or {}))
+        if platform and platform not in known:
+            return False
         self.set(platform=platform, bridged=not platform or platform in BRIDGED)
         self._pick_author_title()
+        return True
 
     def _pick_author_title(self):
         """The authors' card's game: one of this platform's, the current pick

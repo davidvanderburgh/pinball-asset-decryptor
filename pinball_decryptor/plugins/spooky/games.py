@@ -173,6 +173,20 @@ P3_GAMES = {"America's Most Haunted",
             "Domino's Spectacular Pinball Adventure",
             "Jetsons"}
 
+# How a pinHeck update goes on: onto the game's own SD card, not a USB drive.
+# The Propeller reads a file from its first cluster on, sector after sector,
+# and never follows the FAT chain (benheck/AMH av_kernel FindSFXEntry), so a
+# file swapped on a used card can land in pieces and then plays whatever lies
+# after its first piece - Rob Zombie's ZM0 ran on into ZNE (PAD-947).  A
+# freshly formatted card filled in one copy keeps every file in one piece.
+PINHECK_INSTALL = (
+    "Rob Zombie, America's Most Haunted, Domino's, Jetsons (SD card):\n"
+    "1. Unzip the output file to a folder on this computer.\n"
+    "2. Format the game's SD card on Windows (not a Mac).\n"
+    "3. Copy everything in that folder onto the empty card, then eject it.\n"
+    "Never replace single files on the card: the game reads each file as one "
+    "unbroken piece, and a replaced file can play parts of other files.")
+
 
 # ---------------------------------------------------------------------------
 # USB naming conventions for machine updates (for the "How to install" hint)

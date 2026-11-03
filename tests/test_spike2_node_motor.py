@@ -436,12 +436,53 @@ def test_cmd_55_to_a_stop_is_that_end(cbin):
     assert edges == [(600, 9, 8, 1)]
 
 
-def test_cmd_55_keeps_the_end_stop_reply_and_the_off_switch(cbin):
-    """Still no encoder status for it; PAD_NB_MOTOR=0 still moves nothing."""
-    assert _replies(cbin, ["t0:9", "f" + BAT_CRANE, "f" + BAT_CRANE_POS6,
-                           "s9:1"]) == [(0, "none")]
+def test_cmd_55_keeps_the_off_switch(cbin):
+    """PAD_NB_MOTOR=0 still moves nothing and reports nothing."""
     assert _run(cbin, ["t0:9", "f" + BAT_TT, "f" + BAT_TT_POS2, "t600:9"],
                 PAD_NB_MOTOR="0") == []
+    assert _replies(cbin, ["t0:9", "f" + BAT_CRANE, "f" + BAT_CRANE_POS6,
+                           "s9:1"], PAD_NB_MOTOR="0") == [(0, "none")]
+
+
+# ---- PAD-971: a cmd 55 move reports when it is done, and batman homes ----
+#
+# batman 1.14 at boot sends the crane a test move to POS. #6 AWAY and the
+# turntable one to POS. #2, polls cmd 52 for each, and on status 0x20 sends
+# both HOME (`55 01 4d ..` = crane to input 13, `55 02 42 ..` = turntable to
+# input 2). The node's raw switch byte never said 0x20, so both stayed at the
+# test move: a VPX table following them showed the crane away from home.
+
+BAT_CRANE_HOME = "890955014d0080c800067d00"   # crane to input 13 = POS. #1 HOME
+
+
+def test_an_end_stop_motor_not_sent_a_55_keeps_the_switch_byte(cbin):
+    """john_wick_le's car (53/54 only) is answered as PAD-237 measured it."""
+    assert _replies(cbin, ["t0:9", "f" + CONFIG, "f" + HOME, "s9:0"]) == [(0, "none")]
+    assert _replies(cbin, ["t0:9", "f" + BAT_CRANE, "s9:1"]) == [(0, "none")]
+
+
+def test_a_55_move_reports_moving_then_done(cbin):
+    steps = ["t0:9", "f" + BAT_CRANE, "f" + BAT_CRANE_POS6, "s9:1",
+             "t599:9", "s9:1", "t600:9", "s9:1"]
+    assert _replies(cbin, steps) == [(0, "00000100"), (599, "00000100"),
+                                     (600, "00002000")]
+
+
+def test_batman_boot_test_move_then_home(cbin):
+    """The test move done, the game's HOME: the crane leaves POS. #6 and makes
+    POS. #1 HOME, and says done again."""
+    steps = ["t0:9", "f" + BAT_CRANE, "f" + BAT_CRANE_POS6, "t600:9", "s9:1",
+             "t650:9", "f" + BAT_CRANE_HOME, "s9:1", "t1250:9", "s9:1"]
+    assert _run(cbin, steps) == [(600, 9, 8, 1), (650, 9, 8, 0), (1250, 9, 13, 1)]
+    assert _replies(cbin, steps) == [(600, "00002000"), (650, "00000100"),
+                                     (1250, "00002000")]
+
+
+def test_each_motor_reports_its_own_move(cbin):
+    """The crane done while the turntable still runs."""
+    steps = ["t0:9", "f" + BAT_CRANE, "f" + BAT_TT, "f" + BAT_CRANE_POS6,
+             "t600:9", "f" + BAT_TT_POS2, "s9:1", "s9:2"]
+    assert _replies(cbin, steps) == [(600, "00002000"), (600, "00000100")]
 
 
 def test_cmd_55_without_an_input_flag_is_not_played(cbin):

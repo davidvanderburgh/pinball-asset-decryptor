@@ -357,6 +357,23 @@ the motor there like a 53/54: where it was opens at once, the named input
 closes `PAD_MOTOR_MS` later, and a 55 naming a stop is that end. Rig, batman
 1.14 from Start: `+78m +82m`, both arrived, no re-sends.
 
+**PAD-971: those were TEST moves, and the game waits for them to finish.**
+The crane parked at POS. #6 AWAY for good, and the VPX tribute's crane with
+it ("crane isn't returning to home position"). The game polls cmd 52 for
+each motor (`52 01`, `52 02`, ~14 a second) and the end-stop model answered
+the node's raw switch byte, which never says a move is done. Swept with
+`PAD_NB_CREPLY=52:0000<v>00` / `52:000000<v>`, one bit at a time, batman
+1.14, 16 builds: on most values the game follows the test move with
+`55 01 4d ..` (crane to input 13, POS. #1 HOME) and `55 02 42 ..`
+(turntable to input 2, POS. #1 HOME), byte 9 `06` where the test move had
+`02`; **0x20 alone in byte 2 gives exactly that one sequence**, no retries;
+0x01 holds the game waiting (moving), and zero or 0x08 never got past the
+test move. So a motor sent a cmd 55 now reports its own status: 0x01 while
+it travels, 0x20 once there. Rig, batman 1.14, boot + Start: AWAY / POS. #2,
+done, HOME / HOME, done, 4 moves in all, crane on 87, turntable on 77. A
+motor never sent a 55 (john_wick_le's car) keeps the switch byte PAD-237
+measured.
+
 ## Not done
 
 - **jaws_le's shark is not a board motor.** SharkMotor derives from

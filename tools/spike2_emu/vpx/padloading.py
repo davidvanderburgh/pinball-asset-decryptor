@@ -2,10 +2,11 @@
 """padloading.py - the window a table's game shows while it starts (PAD-940).
 
     pythonw padloading.py <title> <launch log> <status file> [--expect S] [--parent PID]
-                          [--rect X Y W H]
+                          [--rect X Y W H] [--from BYTES]
 
 --rect pins it there instead (a test's spot, off the desktop: it never
-follows a game window then).
+follows a game window then). --from is where this run's lines start in the
+log (its size when the run began; else read here).
 
 A run the controller starts for a table takes a minute or more before the
 game's own window shows anything: WSL comes up, the card is cached and
@@ -26,6 +27,7 @@ shows why for a few seconds, then closes it. It also closes when the controller'
 never takes the focus: Visual Pinball pauses the table when it loses it.
 """
 import os
+import re
 import sys
 import time
 
@@ -37,10 +39,24 @@ for p in (HERE, RIG):
 
 #: the run's steps as its log shows them: (the line's start, how far the bar
 #: is at least once it is seen, what the window says). The last one seen wins.
+#: PAD-964: what the card image costs the disk is said before and while it
+#: is copied - the launch's own `[card-check]` line (padlaunch.space_words)
+#: and cardmount.sh's copy progress, both in the run's log - and a start that
+#: reads the image where it lies (no room, or caching off) says it is slow.
+#: None for the words: step_words reads them off the line.
 STEPS = (
+    ("[card-check] ", 0.08, None),
     ("[card] evicting", 0.10, "Making room for the card image"),
-    ("[card] caching", 0.12, "Reading the card image"),
-    ("[card] mounting", 0.30, "Reading the card image"),
+    ("[card] caching", 0.12, "Copying the card image into the emulator's cache (this first start only)"),
+    ("[card] copying ", 0.15, None),
+    ("[card] disk too full", 0.12, "No room in the cache for the card image: reading it where it lies (a slow start)"),
+    ("[card] the Windows drive behind WSL", 0.12,
+     "No room in the cache for the card image: reading it where it lies (a slow start)"),
+    ("[card] copy stalled", 0.25, "Reading the card image where it lies (a slow start)"),
+    ("[card] cache not usable", 0.25, "Reading the card image where it lies (a slow start)"),
+    ("[card] using local cache", 0.25, "Reading the card image from the cache"),
+    ("[card] local cache ready", 0.25, "Reading the card image from the cache"),
+    ("[card] mounting", 0.30, None),
     ("[card] title:", 0.40, "Getting the game ready"),
     ("[watch] cfg ", 0.45, "Getting the game ready"),
     ("[watch] starting renderer", 0.60, "Opening the game's screen"),
@@ -50,6 +66,33 @@ STEPS = (
     ("[watch] running.", 0.80, "Starting the game"),
 )
 FIRST = "Starting the emulator's Linux"
+#: cardmount.sh's progress line: `[card] copying <image>: <done> / <total> MB (<pct>%)`
+COPYING = re.compile(r"^\[card\] copying .*: (\d+) / (\d+) MB \((\d+)%\)")
+#: where the card is read from, once the log has said: the mount line's words
+#: keep it (a start that reads the image off D: stays a slow one in the window,
+#: rather than "Reading the card image" like any other once the mount begins)
+SLOW = ("[card] disk too full", "[card] the Windows drive behind WSL", "[card] copy stalled",
+        "[card] cache not usable", "[card-check] full:", "[card-check] off:")
+CACHED = ("[card] using local cache", "[card] local cache ready", "[card-check] cached:")
+MOUNT_WORDS = {"": "Reading the card image", "cache": "Reading the card image from the cache",
+               "slow": "Reading the card image where it lies (a slow start)"}
+
+
+def step_words(line, source=""):
+    """The words a line carries itself: the launch's `[card-check] <state>:
+    <words>`, the copier's progress as `Copying the card image into the
+    emulator's cache: 2.1 of 7.3 GB (28%)`, the mount by where it reads from."""
+    if line.startswith("[card-check] "):
+        rest = line[len("[card-check] "):]
+        return rest.split(": ", 1)[1] if ": " in rest else rest
+    if line.startswith("[card] mounting"):
+        return MOUNT_WORDS[source]
+    m = COPYING.match(line)
+    if m:
+        done, total, pct = (int(x) for x in m.groups())
+        return "Copying the card image into the emulator's cache: %.1f of %.1f GB (%d%%)" % (
+            done / 1024.0, total / 1024.0, pct)
+    return ""
 
 #: how long a failure stays up; how long to wait at most (the controller's
 #: own START_TIMEOUT_S is 420)
@@ -63,11 +106,17 @@ CAP_S = 480.0
 
 def step_of(text):
     """(floor, words) for the run's log so far; before any of it, Linux."""
-    floor, words = 0.0, FIRST
+    floor, words, source = 0.0, FIRST, ""
     for line in text.splitlines():
+        if line.startswith(SLOW):
+            source = "slow"
+        elif line.startswith(CACHED):
+            source = "cache"
         for start, f, w in STEPS:
             if line.startswith(start):
-                floor, words = f, w
+                w = w or step_words(line, source)
+                if w:
+                    floor, words = f, w
                 break
     return floor, words
 
@@ -160,10 +209,17 @@ def main(argv):
     parent = int(argv[argv.index("--parent") + 1]) if "--parent" in argv else 0
     pinned = (tuple(int(v) for v in argv[argv.index("--rect") + 1:argv.index("--rect") + 5])
               if "--rect" in argv else None)
-    try:
-        start = os.path.getsize(logfile)                    # the log is appended to, run after run
-    except OSError:
-        start = 0
+    if "--from" in argv:
+        # where this run's lines begin, as the controller saw the log when it
+        # started this window: the launch writes its card check (PAD-964) while
+        # this process is still coming up, and a size read here could fall
+        # after it
+        start = int(argv[argv.index("--from") + 1])
+    else:
+        try:
+            start = os.path.getsize(logfile)                # the log is appended to, run after run
+        except OSError:
+            start = 0
     import tkinter as tk
     import padcontroller
     padcontroller.dpi_aware()
@@ -197,7 +253,7 @@ def main(argv):
     bar = tk.Canvas(box, width=420, height=8, bg=TROUGH, highlightthickness=0, bd=0)
     bar.pack()
     fill = bar.create_rectangle(0, 0, 0, 8, fill=BAR, width=0)
-    step = tk.Label(box, text=FIRST + "…", bg=BG, fg=INK, font=("Segoe UI", 11))
+    step = tk.Label(box, text=FIRST + "…", bg=BG, fg=INK, font=("Segoe UI", 11), wraplength=900, justify="center")
     step.pack(pady=(14, 0))
     clock = tk.Label(box, text="", bg=BG, fg=MUTED, font=("Segoe UI", 10))
     clock.pack(pady=(4, 0))

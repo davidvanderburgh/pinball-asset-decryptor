@@ -17,6 +17,9 @@ process:
                                           Visual Pinball's own tables folder)
     vpxsetup.py layout <key> <player> <lcd>
                                           where the windows go: [x, y, w, h] JSON or null
+    vpxsetup.py cache [on|off]            what each title's card costs the emulator's disk before
+                                          a game (PAD-964), and whether a game copies its card into
+                                          the cache first (on) or reads it where it lies (off)
     vpxsetup.py open <table name>         open a (PAD) table in Visual Pinball
     vpxsetup.py open_download <path>      open a download as it is (PAD-952: AMH)
 
@@ -736,6 +739,55 @@ def open_download(path):
     return "ok"
 
 
+def card_space(lib=None, kit=None):
+    """PAD-964: what starting each title's game costs the disk, for the tab's
+    rows before Play: the card the launch would boot for every Spike 2 title
+    in the folder (padlaunch.card_for), asked of cardmount.sh's own room rule
+    in one call (Launch.cache_check: a dry run of the copier, nothing copied).
+    {"space": {title: {state, words, need_gb, free_gb, label}}, "cache":
+    {kind, dir, free_gb, size_gb, limit_gb, used_gb} or None, "card_cache":
+    on/off}; "error" when WSL did not answer (the rows then say nothing)."""
+    kit = padlaunch.kit_load() if kit is None else kit
+    lib = (os.environ.get("PAD_VPX_LIBRARY") or kit.get("library") or "") if lib is None else lib
+    cards = {}
+    for title in sorted(cards_in(lib)):
+        card = padlaunch.card_for(title, "spike2")
+        if card and card.lower().endswith(".raw"):
+            cards[title] = card
+    out = {"space": {}, "cache": None, "card_cache": padlaunch.cache_on(kit)}
+    if not cards:
+        return out
+    la = padlaunch.Launch(next(iter(cards)), next(iter(cards.values())))
+    why = padlaunch.no_linux(la.distro)
+    if why:
+        out["error"] = why
+        return out
+    got = la.cache_check(list(cards.values()))
+    if not got:
+        out["error"] = "The emulator's Linux did not answer what the cards cost its disk."
+        return out
+    by_img = {}
+    for rec in got["checks"].values():
+        by_img[rec["img"]] = rec
+    wsl = dict(zip(cards.values(), padlaunch.padpath.to_wsl_many(list(cards.values()), la.distro)))
+    for title, card in cards.items():
+        rec = by_img.get(wsl[card])
+        if not rec:
+            continue
+        state, words = padlaunch.space_words(rec)
+        out["space"][title] = {"state": state, "words": words, "label": rec["label"],
+                               "need_gb": round(rec["need_kb"] / 1048576.0, 1),
+                               "free_gb": round(rec["free_kb"] / 1048576.0, 1),
+                               "evict_n": rec["evict_n"], "host": rec["host"]}
+    c = got.get("cache")
+    if c:
+        out["cache"] = {"kind": c["kind"], "dir": c["dir"], "limit_gb": c["limit_gb"],
+                        "free_gb": round(c["avail_kb"] / 1048576.0, 1),
+                        "size_gb": round(c["size_kb"] / 1048576.0, 1),
+                        "used_gb": round(c["used_kb"] / 1048576.0, 1)}
+    return out
+
+
 def state():
     kit = padlaunch.kit_load()
     lib = os.environ.get("PAD_VPX_LIBRARY") or kit.get("library") or ""
@@ -767,6 +819,9 @@ def state():
         "tables_own": bool(kit.get("tables")) and tables == kit.get("tables"),
         "library": lib,
         "cards": all_cards(lib, kit),
+        # PAD-964: whether a game copies its card into the emulator's cache
+        # first (the kit's card_cache; `cache on|off` sets it)
+        "card_cache": padlaunch.cache_on(kit),
         "tables": link_downloads(known_tables(tables), downloads_in(tables)),
         "patched": patched_in(tables),
         # PAD-943: the person's own downloads in the folder, listed at once
@@ -810,6 +865,15 @@ def main(argv):
     elif cmd == "tables" and len(rest) <= 1:
         folder = os.path.abspath(rest[0]) if rest and rest[0] else ""
         out = {"result": set_tables(folder), "patched": patched_in(vpx_tables_dir())}
+    elif cmd == "cache" and len(rest) <= 1:
+        # PAD-964: `cache` says what each title's card costs the disk; `cache
+        # on|off` sets whether a game copies its card into the cache first
+        if rest:
+            if rest[0] not in ("on", "off"):
+                print(__doc__)
+                return 2
+            padlaunch.set_cache_on(rest[0] == "on")
+        out = card_space()
     elif cmd == "open" and len(rest) == 1:
         out = {"result": open_table(rest[0])}
     elif cmd == "open_download" and len(rest) == 1:

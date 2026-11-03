@@ -86,6 +86,87 @@ def remember_card(title, card):
     kit_save(d)
 
 
+#: PAD-964: whether a run copies its card into the emulator's cache first
+#: (the kit's `card_cache`, on unless turned off: `padvpx cache off`, the
+#: Visual Pinball tab's box). Off, the game reads the image where it lies
+#: (PAD_CARD_CACHE=0): nothing lands on the disk, and a first start is slow -
+#: Batman 1.14 took 148 s to attract off D: through 9p against 36 s cached.
+CACHE_KEY = "card_cache"
+
+
+def cache_on(kit=None):
+    kit = kit_load() if kit is None else kit
+    return kit.get(CACHE_KEY, True) is not False
+
+
+def set_cache_on(on):
+    d = kit_load()
+    if on:
+        d.pop(CACHE_KEY, None)
+    else:
+        d[CACHE_KEY] = False
+    kit_save(d)
+    return cache_on(d)
+
+
+def gb(kb):
+    """`6.6 GB` for a size in KB, as the tab and the loading window say it."""
+    return "%.1f GB" % (float(kb) / 1048576.0)
+
+
+def parse_check(text):
+    """`cardmount.sh --cache-check` read: ({state, need_kb, free_kb, keep_kb,
+    evict_n, evict_kb, kind, host, label, img} per `check` line, keyed by
+    image path, and the `cache` line as {dir, kind, avail_kb, size_kb,
+    limit_gb, used_kb} under "cache"). Lines it does not know are skipped."""
+    out = {"checks": {}, "cache": None}
+    for line in (text or "").splitlines():
+        p = line.rstrip("\r\n").split("\t")
+        try:
+            if p[0] == "check" and len(p) >= 11:
+                out["checks"][p[10]] = {
+                    "state": p[1], "need_kb": int(p[2] or 0), "free_kb": int(p[3] or 0),
+                    "keep_kb": int(p[4] or 0), "evict_n": int(p[5] or 0), "evict_kb": int(p[6] or 0),
+                    "kind": p[7], "host": p[8], "label": p[9], "img": p[10]}
+            elif p[0] == "cache" and len(p) >= 7:
+                out["cache"] = {"dir": p[1], "kind": p[2], "avail_kb": int(p[3] or 0),
+                                "size_kb": int(p[4] or 0), "limit_gb": int(p[5] or 0),
+                                "used_kb": int(p[6] or 0)}
+        except ValueError:
+            continue
+    return out
+
+
+def space_words(chk):
+    """What starting the game costs the disk, in one sentence, from a `check`
+    record: the launch's log line, the loading window's step and the tab's
+    tip say the same thing. (state, words)."""
+    state = chk.get("state") or ""
+    need, free = chk.get("need_kb") or 0, chk.get("free_kb") or 0
+    where = "the Windows drive behind WSL (%s)" % chk["host"] if chk.get("host") else "the cache"
+    if state == "cached":
+        words = "The card image is in the emulator's cache"
+    elif state == "off":
+        words = ("Caching is off: the game reads the card image (%s) where it lies, a slow start"
+                 % gb(need))
+    elif state == "copying":
+        words = "The card image (%s) is being copied into the emulator's cache now" % gb(need)
+    elif state == "room":
+        words = ("Copying the card image (%s) into the emulator's cache, this first start only (%s free there)"
+                 % (gb(need), gb(free)))
+    elif state == "evict":
+        n = chk.get("evict_n") or 0
+        words = ("Copying the card image (%s) into the emulator's cache once %d older card%s (%s) make%s room, "
+                 "this first start only" % (gb(need), n, "" if n == 1 else "s", gb(chk.get("evict_kb") or 0),
+                                             "s" if n == 1 else ""))
+    elif state == "full":
+        words = ("No room in %s for the card image (%s needed with %s kept free, %s free): the game reads it "
+                 "where it lies, a slow start" % (where, gb(need), gb(chk.get("keep_kb") or 0), gb(free)))
+    else:
+        words = "What the card image costs the disk could not be told"
+    return state, words
+
+
 def _version_key(path):
     """`rush_le-1_19_0.Release.16G.sdcard.raw` -> (1, 19, 0): newest last.
     A Spike 1 card's two parts (`GOT_LE-1_37.iso`) or dots
@@ -296,18 +377,54 @@ def wsl_head(dist=None, root=False):
     return head
 
 
-def _rigdata(why):
-    """The app's core/rigdata.py, from the app's package beside the kit, or
-    None (logged with `why`) where there is none."""
+def _app_module(name, why):
+    """A module of the app's core (`rigdata`, `wsl_disk`), from the app's
+    package beside the kit, or None (logged with `why`) where there is none."""
     app = os.path.dirname(os.path.dirname(os.path.abspath(rig_dir())))
     if app not in sys.path:
         sys.path.append(app)
     try:
-        from pinball_decryptor.core import rigdata
+        import importlib
+        return importlib.import_module("pinball_decryptor.core." + name)
     except Exception as exc:                                # noqa: BLE001
         log("no app package beside the rig (%s): %s" % (exc, why))
         return None
-    return rigdata
+
+
+def _rigdata(why):
+    """The app's core/rigdata.py, from the app's package beside the kit, or
+    None (logged with `why`) where there is none."""
+    return _app_module("rigdata", why)
+
+
+_HOST_DRIVE = {}
+
+
+def host_drive(dist):
+    """PAD_HOST_DRIVE for a run in `dist`: the Windows drive the distro's
+    ext4.vhdx is on, as WSL mounts it (`/mnt/c`), or "" when it cannot be
+    told. The app's Emulate tab passes it to every run (emulate_core
+    _host_drive_env, PAD-816): inside WSL df reports the virtual disk's size,
+    so without it cardmount.sh once started a 14.7 GB copy onto a C: with a
+    few GB left and the whole distro went read-only. A table's launch never
+    passed it (PAD-964). Asked once; the drive comes from the app's one
+    reader of the registry (core/wsl_disk)."""
+    if sys.platform != "win32":
+        return ""
+    if dist not in _HOST_DRIVE:
+        drive = ""
+        wsl_disk = _app_module("wsl_disk", "no host drive floor")
+        if wsl_disk is not None:
+            try:
+                _name, vhdx = wsl_disk._default_distro_vhdx()
+                letter = os.path.splitdrive(vhdx or "")[0]
+                if re.fullmatch(r"[A-Za-z]:", letter):
+                    drive = padpath.to_wsl(letter + "\\", dist).rstrip("/")
+            except Exception as exc:                        # noqa: BLE001
+                log("host drive not told (%s): the copier checks as before" % exc)
+                drive = ""
+        _HOST_DRIVE[dist] = drive
+    return _HOST_DRIVE[dist]
 
 
 def app_home(dist):
@@ -405,20 +522,67 @@ class Launch:
         self.rig_wsl = padpath.to_wsl(rig_dir(), self.distro)
         self.logfile = os.path.join(os.path.dirname(LOG), "padvpx-%s.log" % title)
         self.home = None        # app_home(), asked once
+        self.check = None       # cache_check(): what the card costs the disk (PAD-964)
 
-    def rig_head(self):
-        """How every riglock.sh call starts: as root, the way the run itself
-        starts (head()), on the app's board and in the app's rig. Root because
-        the board may be root's already (the app's runs are root) and because
-        taking a slot >= 1 also mounts its rootfs, which only root can
-        (riglock.sh, "RUN IT AS ROOT"). A distro whose account has no home
-        gets the plain user, as head() does."""
+    def rig_cmd(self, script, env=()):
+        """How a rig script is called from here: as root, the way the run
+        itself starts (head()), on the app's board and in the app's rig,
+        `env` entries before it. Root because the board may be root's already
+        (the app's runs are root) and because taking a slot >= 1 also mounts
+        its rootfs, which only root can (riglock.sh, "RUN IT AS ROOT"). A
+        distro whose account has no home gets the plain user, as head()
+        does."""
         user, home = account(self.distro)
         if home and user:
             head = wsl_head(self.distro, root=True) + ["-e", "env", "HOME=" + home]
         else:
             head = wsl_head(self.distro) + ["-e", "env"]
-        return head + self.board_env() + ["bash", "%s/riglock.sh" % self.rig_wsl]
+        return head + self.board_env() + list(env) + ["bash", "%s/%s" % (self.rig_wsl, script)]
+
+    def rig_head(self):
+        """How every riglock.sh call starts (rig_cmd)."""
+        return self.rig_cmd("riglock.sh")
+
+    def cache_env(self):
+        """What the card cache is told for this run: the Windows drive behind
+        WSL (host_drive) and, with caching off in the kit, PAD_CARD_CACHE=0."""
+        env = []
+        drive = host_drive(self.distro)
+        if drive:
+            env.append("PAD_HOST_DRIVE=%s" % drive)
+        if not cache_on():
+            env.append("PAD_CARD_CACHE=0")
+        return env
+
+    def cache_check(self, cards=None):
+        """What the card (or each of `cards`) costs the disk before the run:
+        `cardmount.sh --cache-check`, a dry run of the copier's own room rule
+        in the run's distro and rig, nothing copied (PAD-964). The record for
+        this run's card (parse_check), or None when WSL did not answer - a
+        start is never refused on it. With `cards`, every record by image path
+        and the cache's own line: {"checks", "cache"}."""
+        imgs = padpath.to_wsl_many(list(cards) if cards is not None else [self.card], self.distro)
+        cmd = self.rig_cmd("cardmount.sh", self.cache_env()) + [imgs[0], "--cache-check"] + imgs[1:]
+        try:
+            r = _run(cmd, timeout=120)
+        except Exception as exc:                            # noqa: BLE001
+            log("cache check not answered: %s" % exc)
+            return None
+        got = parse_check(_text(r.stdout))
+        if not got["checks"]:
+            log("cache check said nothing (%s): %s" % (r.returncode, (_text(r.stderr) or "").strip()[-200:]))
+            return None
+        if cards is not None:
+            return got
+        return got["checks"].get(imgs[0]) or next(iter(got["checks"].values()))
+
+    def note(self, line):
+        """A line of this run's own log (the loading window reads it)."""
+        try:
+            with open(self.logfile, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
 
     def board_env(self):
         """PAD_BOARD (see BOARD) and the app's PAD_HOME (see app_home)."""
@@ -469,6 +633,7 @@ class Launch:
         playfield = "1" if kit_load().get("playfield") else "0"
         env = self.board_env() + ["PAD_SLOT=%d" % self.slot, "PAD_LABEL=%s" % LABEL,
                "PAD_HIDDEN=0", "PAD_PLAYFIELD=%s" % playfield, "PAD_AUDIO=1", "PAD_CARD=%s" % card]
+        env += self.cache_env()
         py = win_python()
         if py:
             env.append("PAD_WINPYTHON=%s" % padpath.to_wsl(py, self.distro))
@@ -508,6 +673,16 @@ class Launch:
             log("no rig at %s" % base)
             raise RuntimeError(NO_RIG)
         card_store(self.distro)
+        # PAD-964: what the card costs the disk, said in the run's log before
+        # anything is copied - the loading window shows it, and a start with
+        # no room for the copy (the game reads the image where it lies, 2.5
+        # minutes to attract instead of 40 s) says so instead of "Reading the
+        # card image" for all of them. Never a refusal: a slow game beats none.
+        self.check = self.cache_check()
+        if self.check:
+            state, words = space_words(self.check)
+            self.note("[card-check] %s: %s" % (state, words))
+            log("card check for %s: %s: %s" % (self.title, state, words))
         if self.slot is None:
             self.take_slot()
         head, self.as_root = self.head()

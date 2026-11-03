@@ -3637,9 +3637,10 @@ def test_the_loading_window_names_each_step_of_a_real_start():
         floors.append(floor)
         if not seen or seen[-1] != words:
             seen.append(words)
+    # PAD-964: the copy is named for what it is, and says it is the first start's cost only
     assert seen == ["Starting the emulator's Linux", "Making room for the card image",
-                    "Reading the card image", "Getting the game ready",
-                    "Opening the game's screen", "Starting the game"]
+                    "Copying the card image into the emulator's cache (this first start only)",
+                    "Getting the game ready", "Opening the game's screen", "Starting the game"]
     assert floors == sorted(floors) and floors[-1] < 1.0
     # the pace of the last start, never past 95% before the game is up
     assert ld.progress(0.1, 10, 80) == 0.125 and ld.progress(0.6, 10, 80) == 0.6
@@ -3774,6 +3775,7 @@ def test_a_launch_attaches_the_card_store_before_the_run(tmp_path, monkeypatch):
     monkeypatch.setattr(pl, "account", lambda d=None: ("pad", "/home/pad"))
     monkeypatch.setattr(pl, "app_home", lambda d: "")
     monkeypatch.setattr(pl.padpath, "to_wsl", lambda p, distro=None: "/mnt/x")
+    monkeypatch.setattr(pl.Launch, "cache_check", lambda self, cards=None: None)   # PAD-964's own test
     events = []
 
     class Rigdata:

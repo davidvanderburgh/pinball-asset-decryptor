@@ -820,3 +820,64 @@ cache purged before each card read:
 | card from the store | 36 s | 41 s (attached at 24 s) |
 
 Off D: the guest drew at 4 fps while it booted; from the store, 30.
+
+## What a card costs the disk, said first (PAD-964)
+
+David (2026-11-03): "Visual Pinball needs disk space checks before starting
+games. Especially for Spike 2 where we cache games. We need clear visibility
+of how much space is needed before trying to start a game and the option to
+run it without caching." And from the dashboard, mid-way: "we should also
+have the option to compact the images too since they are RAW SD card images
+with a lot of blank space that we don't need to copy to cache."
+
+The 07:49 run above had found out in its own log, after the fact: `disk too
+full to cache (7 GB free, want 15 GB)`. Four things:
+
+* **`cardmount.sh --cache-check`** answers what a card will cost BEFORE
+  anything is copied, from a DRY RUN of the copier's own room rule
+  (`cache_make_room` with `DRY=1`: the same floors, the same victims in the
+  same order, nothing deleted, nothing said): `cached`, `room`, `evict` (how
+  many older entries and how much), `full` (the boot would run off the
+  original), `copying`, `off`; with the card's need, what is free (the
+  cache's disk, or the Windows drive behind WSL when that is the smaller),
+  the floor kept, and a `cache` line for the cache itself. Several cards go
+  in one call: 53 of David's in 2.9 s.
+* **The need is the compact size.** `cardcopy.py --size` is what the copy
+  reads at most - the blocks the card's filesystems use (PAD-484), the zeros
+  inside them landing as holes: 6.6 GB of Batman's 7.9 GB image, 9.7 of
+  Bond's 14.4, 6.1 of Foo Fighters' 14.4 - remembered beside the cache as
+  `<label>.need` under the image's size+mtime. "want 15 GB" had counted the
+  whole image plus the 8 GB floor. And cardcopy.py reads the partition
+  table itself now (parts.py): the app's PAD-Runtime ships no `sfdisk`, so
+  every copy there had died at `No such file or directory: 'sfdisk'` and
+  fallen back to dd - the whole image read through 9p, every 4 MB block with
+  a stray byte written - 103 of 103 cards in David's store. The compact copy
+  of PAD-484 had only ever run in a sessions' Ubuntu.
+* **The launch asks before watch.sh** (`Launch.cache_check`, as root in the
+  run's rig, with `PAD_HOST_DRIVE` - the PAD-816 floor the app's own runs
+  had and a table's launch never passed) and writes the answer into the
+  run's log as `[card-check] <state>: <words>`; the loading window shows it
+  (`--from` tells it where this run's lines begin, since the launch writes
+  while the window is still coming up), then the copier's own progress as
+  `Copying the card image into the emulator's cache: 2.1 of 7.3 GB (28%)`,
+  and a start that reads the image where it lies stays "a slow start" in
+  the window through the mount. Never a refusal: a slow game beats none.
+* **The tab says it before Play**: each row's card carries "In the cache",
+  "Copies 6.1 GB first" or "No room: slow start" (the full sentence in the
+  tip); the Card images row names the cache's room, offers **Copy a card
+  image into the cache before its game starts** (the kit's `card_cache`,
+  `padvpx cache on|off`; off is `PAD_CARD_CACHE=0` on the run) and a
+  **Cache…** to the Emulate tab's cache window. The check rides the tab's
+  slow-parts thread (3.4 s for 53 titles, `padpath.to_wsl_many`: one
+  wslpath per folder, not per card).
+
+What "compact" means here: the copy in the cache was already sparse, and
+with cardcopy.py working in the runtime it is only what the card uses; the
+library's own .raw files on D: are left as they are - a trimmed or
+hole-punched image there would change their size+mtime identity and the
+Write tab's reading of them, and PAD-467 already builds a new card as small
+as it can be. The store's 42 GB free on 2026-11-03 also held entries whose
+stamp names a copy in the sessions' `~/cardcache` rather than the library
+(aerosmith_le-1_16_0, beatles-1_29_0, elvira3-1_13_0 ...): never valid for a
+library boot, first to go when room is needed, and listed under "Select
+unused" in the cache window.

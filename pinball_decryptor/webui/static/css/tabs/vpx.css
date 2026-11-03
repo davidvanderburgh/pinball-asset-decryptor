@@ -49,6 +49,10 @@
 .vpx-from a { color: var(--accent); text-decoration: none; }
 .vpx-from a:hover { text-decoration: underline; }
 .vpx-stale { grid-column: 2 / -1; padding: 0 0 4px; white-space: normal; }
+/* PAD-964: what the card costs the disk, under the card's name; the cache's room and the copy box on the Card images row */
+.vpx-space { display: block; font-size: 11px; line-height: 1.2; }
+.vpx-cache { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 4px; }
+.vpx-cache > .chk { margin: 0; }
 /* PAD-941: the card for table authors, above the tables (David: visibility) */
 .vpx-authors { margin-bottom: 12px; }
 .vpx-authors > .hd { padding: 8px 16px; flex-wrap: wrap; }

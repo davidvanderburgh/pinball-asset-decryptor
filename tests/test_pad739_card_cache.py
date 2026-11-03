@@ -46,7 +46,7 @@ def _funcs(*names):
 DRIVER = r"""
 set -u
 T=$(mktemp -d); trap 'kill $HOLD 2>/dev/null; rm -rf "$T"' EXIT
-CACHE=$T/cache; CARDS=$T/cards; LIBRARY=$T/nolib; CACHE_KEEP_GB=8
+CACHE=$T/cache; CARDS=$T/cards; LIBRARY=$T/nolib; CACHE_KEEP_GB=8; PAD_CARD_COPY_USED=0
 mkdir -p "$CACHE" "$CARDS" "$T/img" "$T/desk"
 df() { echo Avail; echo 1073741824; }
 cache_used_kb() { local u=0 f; for f in "$CACHE"/*.raw "$CACHE"/*.raw.partial; do
@@ -83,7 +83,7 @@ CACHE=/mnt/wsl/cards/cardcache; echo "store $(cache_limit_gb)"
 def test_the_cache_keeps_under_its_limit_dead_first_never_one_in_use():
     script = _funcs("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
                     "cache_readers", "cache_in_use", "cache_source_state", "cache_limit_gb",
-                    "cache_make_room") + DRIVER
+                    "cache_need_kb", "room_say", "cache_make_room") + DRIVER
     out = subprocess.run(["bash", "-s"], input=script.encode(), stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, timeout=120).stdout.decode("utf-8", "replace")
     lines = out.splitlines()

@@ -1647,8 +1647,12 @@ class Bridge:
             pass
         exe = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
         exe = exe if os.path.isfile(exe) else sys.executable
+        try:
+            at = os.path.getsize(self.launch.logfile)       # this run's lines start here (PAD-964)
+        except OSError:
+            at = 0
         cmd = [exe, os.path.join(HERE, "padloading.py"), self.title or "", self.launch.logfile,
-               self._loading_file, "--parent", str(os.getpid())]
+               self._loading_file, "--parent", str(os.getpid()), "--from", str(at)]
         took = (padlaunch.kit_load().get("start_s") or {}).get(self.title)
         if took:
             cmd += ["--expect", "%d" % took]

@@ -515,6 +515,28 @@ def main(argv):
         padlaunch.kit_save(d)
         print("playfield: %s" % json.dumps(d.get("playfield", "off")))
         return 0
+    if cmd == "cache":
+        # PAD-964: `padvpx cache` says whether a game copies its card into
+        # the emulator's cache first and what each title's card costs the
+        # disk; `cache on|off` sets the first
+        import vpxsetup
+        if rest and rest[0] in ("on", "off"):
+            padlaunch.set_cache_on(rest[0] == "on")
+        elif rest:
+            print("usage: padvpx cache [on|off]")
+            return 2
+        got = vpxsetup.card_space()
+        print("caching: %s" % ("on" if got["card_cache"] else "off (the game reads the image where it lies)"))
+        c = got.get("cache")
+        if c:
+            print("cache: %s, %s GB free of %s GB (%s)" % (c["dir"], c["free_gb"], c["size_gb"],
+                                                        "the shared card store" if c["kind"] == "store"
+                                                        else "the emulator's own disk"))
+        if got.get("error"):
+            print(got["error"])
+        for t, s in sorted(got["space"].items()):
+            print("%-20s %-8s %s" % (t, s["state"], s["words"]))
+        return 0
     if cmd == "display":
         # the game window for every run, desktop and Visual Pinball alike
         # (PAD-811): padisplay.py's commands, applied live by the renderer

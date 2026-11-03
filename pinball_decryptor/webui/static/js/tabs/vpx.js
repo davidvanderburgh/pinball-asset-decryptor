@@ -142,6 +142,37 @@ export default function Vpx() {
   const fits = (t) => t.titles || [t.title];
   const have = tables.filter((t) => fits(t).some((x) => titles.includes(x))).map((t) => t.title);
   const lack = tables.filter((t) => !fits(t).some((x) => titles.includes(x))).map((t) => fits(t).join(" or "));
+  // PAD-964: what starting a game costs the disk. A Spike 2 game copies its
+  // card image into the emulator's cache before its first start (36 s to
+  // attract from there against 148 s read off the Windows drive through
+  // 9p): the row says whether the card is there, what the copy takes and
+  // the room for it, or that there is none (a slow start) - and the box
+  // turns the copy off for a PC with no room to give.
+  const space = s.space || {};
+  const ci = s.cache_info;
+  const spaceOf = (t) => (t.title && space[t.title]) || null;
+  const spaceShort = (sp) => !sp ? "" : sp.state === "cached" ? "In the cache"
+    : sp.state === "room" || sp.state === "evict" ? "Copies " + sp.need_gb + " GB first"
+    : sp.state === "copying" ? "Copying now"
+    : sp.state === "full" ? "No room: slow start"
+    : sp.state === "off" ? "Not cached: slow start" : "";
+  const cacheLine = !s.cards || !Object.keys(s.cards).length ? null : html`<br />
+    <span class="vpx-cache">
+      ${ci ? html`<span ...${tip({ head: "The emulator's card cache, in WSL: " + ci.dir + ".", lines: [
+          ci.kind === "store" ? "The shared card store: a disk of its own on this PC, holding nothing but cached cards."
+            : "The emulator's own disk" + (ci.limit_gb ? ", the cache kept under " + ci.limit_gb + " GB." : "."),
+          "A game's first start copies only what its card uses (a Spike 2 image is half blank); the next starts read the copy.",
+          "Cache… lists every cached card and deletes any of them."] })}>Card cache: ${ci.free_gb} GB free of ${ci.size_gb} GB${ci.kind === "store" ? " (the shared card store)" : ""}.</span>`
+        : s.space_busy ? html`<span class="muted">Asking the emulator's cache what each card needs…</span>`
+        : s.space_error ? html`<span class="muted">${s.space_error}</span>` : null}
+      <${Check} cls="vpx-cache-box" checked=${s.card_cache !== false} disabled=${busy || !s.ok}
+        label="Copy a card image into the cache before its game starts"
+        title=${"On: a game's first start copies its card image into the emulator's cache (what the card uses, not the blank space) and every later start reads the copy, 36 s to attract. Off: nothing is copied, and the game reads the image where it lies through WSL's share - about 2.5 minutes to attract, every time. Turn it off on a PC with no room to give."}
+        onChange=${(v) => call("vpx.set_card_cache", v)} />
+      ${ci ? html`<${Button} size="sm" kind="ghost" icon="disk" disabled=${busy}
+        ...${tip("Shows and manages the card cache on the Emulate tab: every cached card, its size and last boot. Deleting frees the space now; the card copies again on its next start.")}
+        onClick=${() => call("ui.select_tab", "emulate").then(() => call("emulate.open_cache"))}>Cache…<//>` : null}
+    </span>`;
   const cardWords = !s.library ? "" : !titles.length ? "No card images in this folder."
     : (titles.length + " title" + (titles.length === 1 ? "" : "s") + " in this folder. "
       + (have.length ? "For the tables here: " + have.join(", ") + "." : "None of them is for a table here.")
@@ -320,7 +351,8 @@ export default function Vpx() {
         ${s.registered && s.registered_here !== false ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} onClick=${() => call("vpx.register")}>Register<//>`}
       <//>
       <${Row} ok=${have.length > 0} label=${html`Card images <span class="small muted">${s.cards_tip}</span>`}
-        value=${html`<span class="mono">${s.library || "No folder chosen."}</span>${cardWords ? html`<br />${cardWords}` : null}`}>
+        value=${html`<span class="mono">${s.library || "No folder chosen."}</span>${cardWords ? html`<br />${cardWords}` : null}
+          ${cacheLine}`}>
         <${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
           onClick=${() => call("vpx.choose_library")}>Choose folder…<//>
       <//>` : null}` : null}
@@ -371,9 +403,11 @@ export default function Vpx() {
         <span class="small vpx-machine" ...${tip(t.extra && !t.platform ? "" : nameOf(platOf(t.platform)))}>${t.extra && !t.platform ? "" : shortOf(platOf(t.platform))}</span>
         <span class="small" ...${tip(fits(t).length > 1 ? playsAs(t) + "The table fits "
             + fits(t).map((x) => t.models[x]).join(" or ") + "." : t.download && t.platform ? "A " + nameOf(t.platform) + " game: " + t.download.file : "")}>${t.extra ? "" : (t.models || {})[t.title] || ""}</span>
-        <span class="small muted vpx-card" ...${tip(t.extra ? (t.card ? "Card: " + t.card : "") : t.card ? playsAs(t) + "Card: " + t.card
+        <span class="small muted vpx-card" ...${tip(t.extra ? (t.card ? "Card: " + t.card : "") : t.card ? { head: playsAs(t) + "Card: " + t.card,
+            lines: [spaceOf(t) ? spaceOf(t).words + "." : ""].filter(Boolean) }
             : "No card image for " + fits(t).join(" or ") + " in your card folder yet.")}>${t.extra && !t.download ? ""
-          : !t.card ? (t.extra ? "" : "No card yet") : base(t.card)}</span>
+          : !t.card ? (t.extra ? "" : "No card yet") : base(t.card)}${spaceShort(spaceOf(t))
+            ? html`<span class=${"vpx-space" + (["full", "off"].includes(spaceOf(t).state) ? " warn-ink" : "")}>${spaceShort(spaceOf(t))}</span>` : null}</span>
         <span>${t.download && t.extra ? downloadChip(t.download)
           : !t.patched ? html`<${Chip} sm ...${tip(t.download ? "Your download is in the folder: " + base(t.download) + ". Patch writes its (PAD) copy." : "")}>Not patched<//>`
           : stale(t) || missed(t) ? html`<${Chip} kind="warn" dot sm>Patch again<//>`

@@ -161,6 +161,9 @@ class VpxTab(TabService):
                  ok=ok and not missing, note=note, loaded=False, busy="",
                  progress=None, registered=False, vpx="", tables_dir="",
                  library="", cards={}, tables=[], patched=[], presets=[],
+                 # PAD-964: what each title's card costs the disk, the cache
+                 # itself, and whether a game copies its card into it first
+                 space={}, cache_info=None, space_error="", space_busy=False, card_cache=True,
                  layout="", monitors=0, display=None, runtime_state="unknown",
                  runtime_text="Checking…", message="", message_level="info",
                  authors_intro=AUTHORS_INTRO, authors_titles_tip=AUTHORS_TITLES_TIP,
@@ -376,7 +379,8 @@ class VpxTab(TabService):
         pictures, todo = self._pictures_known(self._picture_files(st))
         want_cov = self._want_coverage or not self.get("coverage")
         self.set(loaded=True, busy="", stale=False, runtime_state=rt_state, runtime_text=rt_text,
-                 pictures=pictures, authors_busy=True, coverage_busy=want_cov, **st)
+                 pictures=pictures, authors_busy=True, coverage_busy=want_cov, space_busy=bool(st.get("cards")),
+                 **st)
         self._start_extras(st, want_cov)
         if todo:
             self._read_pictures(todo)
@@ -461,6 +465,18 @@ class VpxTab(TabService):
                 self.set(author_titles=titles, author_platforms=got.get("platforms") or {} if titles_ok else {},
                          authors_busy=False)
                 self._pick_author_title()
+            # PAD-964: what starting each title's game costs the disk (its
+            # card in the emulator's cache, a copy to make and the room for
+            # it, or no room: a slow start), asked of the cache in WSL in one
+            # call, ~0.3 s for cards already cached
+            if st.get("cards"):
+                got = self._kit("vpxsetup.py", ["cache"], timeout=300)
+                if mine():
+                    self.set(space=got.get("space") or {}, cache_info=got.get("cache") or None,
+                             space_error=got.get("error") or "", space_busy=False,
+                             card_cache=got.get("card_cache", self.get("card_cache")))
+            elif mine():
+                self.set(space_busy=False)
             # PAD-943: the downloads not read yet (which map fits, which
             # catalogue table the name is), ~0.3 s a file, once per file
             if any(not d.get("read") for d in st.get("downloads") or []):
@@ -990,6 +1006,28 @@ class VpxTab(TabService):
         if not got.get("ids", True):
             words += ". No switch ids yet: play the title once and make it again"
         return words + "."
+
+    @rpc
+    def set_card_cache(self, on):
+        """PAD-964: whether a game copies its card into the emulator's cache
+        before it starts (faster from the second start on; needs the room)
+        or reads the image where it lies (nothing on the disk; every start
+        slow). The rows say what each card costs either way."""
+        on = bool(on)
+
+        def work():
+            self.set(space_busy=True)
+            got = self._kit("vpxsetup.py", ["cache", "on" if on else "off"], timeout=300)
+            if "error" in got and "space" not in got:
+                self.set(space_busy=False)
+                self._say(got["error"], "error")
+                return
+            self.set(card_cache=got.get("card_cache", on), space=got.get("space") or {},
+                     cache_info=got.get("cache") or None, space_error=got.get("error") or "", space_busy=False)
+            self._say("card images are %s." % ("copied into the emulator's cache before a game"
+                                               if got.get("card_cache", on) else
+                                               "read where they lie: nothing is copied, and every start is slow"))
+        return self._start("Saving", work)
 
     @rpc
     def play(self, name):

@@ -32,6 +32,7 @@ padled, padsw and the audio FIFO all live there. It is per machine, outside the
 checkout, and thrown away with the rootfs, which is exactly the lifetime derived
 data should have.
 """
+import ntpath
 import os
 import subprocess
 import sys
@@ -164,6 +165,24 @@ def to_wsl(path, distro=None):
         got = "/mnt/%s%s" % (path[0].lower(), path[2:].replace("\\", "/"))
     _WIN_CACHE[key] = got or path
     return _WIN_CACHE[key]
+
+
+def to_wsl_many(paths, distro=None):
+    """to_wsl for a list of paths, one wslpath per FOLDER rather than per
+    path (PAD-964: the Visual Pinball tab's check of 53 cards in one folder
+    spent 9 s in 53 wsl.exe calls against 3 s in the check itself; wslpath
+    takes one path). A file's WSL path is its folder's with the name joined
+    on - the mount is the folder's. Paths already known are not asked again."""
+    for p in dict.fromkeys(paths):
+        if not p or not is_windows_path(p) or "u:%s:%s" % (distro or "", p) in _WIN_CACHE:
+            continue
+        folder, name = ntpath.split(p)          # a Windows path, on whichever side asks
+        if not name or not folder or folder == p:
+            continue
+        got = to_wsl(folder, distro)
+        if got and not is_windows_path(got):
+            _WIN_CACHE["u:%s:%s" % (distro or "", p)] = got.rstrip("/") + "/" + name
+    return [to_wsl(p, distro) for p in paths]
 
 
 def wsl_home():

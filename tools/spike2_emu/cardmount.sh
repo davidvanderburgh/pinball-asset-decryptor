@@ -280,23 +280,65 @@ host_free_kb() {
     [ -n "${PAD_HOST_DRIVE:-}" ] && [ "$CACHE" != /mnt/wsl/cards/cardcache ] || return 1
     df -k --output=avail "$PAD_HOST_DRIVE" 2>/dev/null | tail -1 | tr -d " " | grep -E '^[0-9]+$'
 }
-cache_make_room() {   # <img> <own-copy-path>
-    local need keep free f vlabel vboot victim oldest size alloc pinned limit used over why
-    local host0 hnow hroom hkeep evicted=0 hshort=0
+# What the copy can really take, in KB. THE COMPACT SIZE FIRST (PAD-964, David: "they are RAW SD card images with
+# a lot of blank space that we don't need to copy to cache"): cardcopy.py reads only what the card's filesystems
+# use (PAD-484) and the zeros inside that land as holes, so `cardcopy.py --size` - the bytes it will read, at most
+# what it writes - is what the copy costs: 6.6 GB of Batman's 7.9 GB image, 9.7 of Bond's 14.4, 6.1 of Foo
+# Fighters' 14.4. The room check used the image's whole size and refused Batman with "want 15 GB" on a disk that
+# had the room. When cardcopy cannot plan the image (not a card, bitmaps that do not add up: then it copies whole
+# partitions, or dd takes over) it is the image's ALLOCATED bytes when its filesystem reports them (drvfs does,
+# for NTFS), else its apparent size. One definition, because --cache-check answers "how much does this card need"
+# with the same number the copier's room check uses.
+cache_need_kb() {   # <img>
+    local size alloc used key memo
+    if [ "${PAD_CARD_COPY_USED:-1}" != 0 ] && command -v python3 >/dev/null 2>&1; then
+        # the plan reads the image's bitmaps through 9p, about a second a card: remembered beside the cache as
+        # <label>.need under the image's own identity (size+mtime, as the copy's stamp), so the Visual Pinball
+        # tab's check of a whole folder costs that once, not every opening
+        key=$(stamp_key "$(cache_stamp "$1")")
+        memo="$CACHE/$(card_label "$1").need"
+        used=$(cat "$memo" 2>/dev/null)                 # "<need_kb> <size> <mtime>"
+        if [ "${used#* }" = "$key" ] && used=${used%% *} && [ "$used" -gt 0 ] 2>/dev/null; then
+            echo "$used"
+            return
+        fi
+        if used=$(python3 "$SELF/cardcopy.py" --size "$1" 2>/dev/null) && [ "$used" -gt 0 ] 2>/dev/null; then
+            used=$(( used / 1024 ))
+            [ -d "$CACHE" ] && { echo "$used $key" > "$memo"; give_back "$memo"; } 2>/dev/null
+            echo "$used"
+            return
+        fi
+    fi
     size=$(stat -c %s "$1" 2>/dev/null || echo 0)
     alloc=$(( $(stat -c '%b * %B' "$1" 2>/dev/null || echo 0) ))
     if [ "$alloc" -gt 0 ] && [ "$alloc" -lt "$size" ]; then
-        need=$(( alloc / 1024 ))
+        echo $(( alloc / 1024 ))
     else
-        need=$(( size / 1024 ))
+        echo $(( size / 1024 ))
     fi
+}
+
+# A DRY RUN OF THE ROOM RULE (PAD-964). With DRY=1 cache_make_room decides exactly as it would - the same floors,
+# the same victims in the same order - but deletes nothing and says nothing: the victims it would take are counted
+# in ROOM_EVICT_N / ROOM_EVICT_KB, the room it saw first in ROOM_FREE_KB, and ROOM_WHY names what was short when it
+# returns 1 (`disk`, or `host` for the Windows drive behind WSL). That is how a launch, and the Visual Pinball tab
+# before it, can say what a card will cost the disk BEFORE the copy starts, from the one rule rather than a guess.
+# (every read is ${DRY:-0}: the functions stand alone in the tests, with no top of file)
+room_say() { [ "${DRY:-0}" = 1 ] || echo "$@" >&2; }
+cache_make_room() {   # <img> <own-copy-path>
+    local need keep free f vlabel vboot victim oldest pinned limit used over why
+    local host0 hnow hroom hkeep evicted=0 hshort=0
+    need=$(cache_need_kb "$1")
     keep=$(( CACHE_KEEP_GB * 1048576 ))
     limit=$(( $(cache_limit_gb) * 1048576 ))
     host0=$(host_free_kb) || host0=""
     hkeep=$(( ${PAD_HOST_KEEP_FREE_GB:-4} * 1048576 ))
+    DRY_GONE=""; ROOM_WHY=""; ROOM_EVICT_N=0; ROOM_EVICT_KB=0; ROOM_FREE_KB=""
     while :; do
         free=$(df -k --output=avail "$CACHE" 2>/dev/null | tail -1 | tr -d " ")
         [ -n "$free" ] || return 0             # df unreadable: do not guess
+        # a dry run deletes nothing, so what it would have freed is counted in by hand
+        [ "${DRY:-0}" = 1 ] && free=$(( free + evicted ))
         hshort=0
         if [ -n "$host0" ]; then
             hnow=$(host_free_kb) || hnow=$host0
@@ -306,9 +348,11 @@ cache_make_room() {   # <img> <own-copy-path>
             hroom=$(( hroom - hkeep + keep ))
             if [ "$hroom" -lt "$free" ]; then free=$hroom; hshort=1; fi
         fi
+        [ -n "$ROOM_FREE_KB" ] || ROOM_FREE_KB=$free
         over=0
         if [ "$limit" -gt 0 ]; then
             used=$(cache_used_kb)
+            [ "${DRY:-0}" = 1 ] && used=$(( used - evicted ))
             [ $(( used + need )) -gt "$limit" ] && over=1
         fi
         [ $(( free - need )) -ge "$keep" ] && [ "$over" = 0 ] && return 0
@@ -318,6 +362,7 @@ cache_make_room() {   # <img> <own-copy-path>
         for f in "$CACHE"/*.raw.partial; do
             [ -e "$f" ] || break
             vlabel=$(basename "$f" .raw.partial)
+            case " ${DRY_GONE:-} " in *" $vlabel "*) continue ;; esac
             [ "$CACHE/$vlabel.raw" = "$2" ] && continue
             [ -e "$CACHE/$vlabel.raw" ] && continue
             cache_in_use "$vlabel" && continue
@@ -329,6 +374,7 @@ cache_make_room() {   # <img> <own-copy-path>
             [ -e "$f" ] || break
             [ "$f" = "$2" ] && continue
             vlabel=$(basename "$f" .raw)
+            case " ${DRY_GONE:-} " in *" $vlabel "*) continue ;; esac
             cache_in_use "$vlabel" && continue
             copier_alive "$CACHE/$vlabel.pid" "$f" && continue
             if cache_pinned "$vlabel"; then pinned=$((pinned + 1)); continue; fi
@@ -346,15 +392,17 @@ cache_make_room() {   # <img> <own-copy-path>
             if [ $(( free - need )) -ge "$keep" ]; then
                 # only the limit is unmet, by cards in use or the library's: the disk has the room, so cache anyway
                 if [ "$over" = 1 ]; then
-                    echo "[card] the cache is over its $(( limit / 1048576 )) GB limit and nothing else can go - in use, or the library's ($pinned)${1:+ - caching anyway}" >&2
+                    room_say "[card] the cache is over its $(( limit / 1048576 )) GB limit and nothing else can go - in use, or the library's ($pinned)${1:+ - caching anyway}"
                 fi
                 return 0
             fi
             if [ "$hshort" = 1 ]; then
-                echo "[card] the Windows drive behind WSL ($PAD_HOST_DRIVE) is too full to cache this card ($(awk "BEGIN { printf \"%.1f\", $hnow / 1048576 }") GB free, want $(( (need + hkeep) / 1048576 )) GB) - running off the original. Free space there and the next boot caches it." >&2
+                ROOM_WHY=host
+                room_say "[card] the Windows drive behind WSL ($PAD_HOST_DRIVE) is too full to cache this card ($(awk "BEGIN { printf \"%.1f\", $hnow / 1048576 }") GB free, want $(( (need + hkeep) / 1048576 )) GB) - running off the original. Free space there and the next boot caches it."
                 return 1
             fi
-            echo "[card] disk too full to cache ($(( free / 1048576 )) GB free, want $(( (need + keep) / 1048576 )) GB) and nothing evictable ($pinned library cards kept) - running off the original" >&2
+            ROOM_WHY=disk
+            room_say "[card] disk too full to cache ($(( free / 1048576 )) GB free, want $(( (need + keep) / 1048576 )) GB) and nothing evictable ($pinned library cards kept) - running off the original"
             return 1
         fi
         if [ -n "${why:-}" ]; then
@@ -365,17 +413,74 @@ cache_make_room() {   # <img> <own-copy-path>
             why="least recently booted"
         fi
         if [ "$over" = 1 ] && [ $(( free - need )) -ge "$keep" ]; then
-            echo "[card] evicting cached $victim ($why) to keep the cache under its $(( limit / 1048576 )) GB limit" >&2
+            room_say "[card] evicting cached $victim ($why) to keep the cache under its $(( limit / 1048576 )) GB limit"
         else
-            echo "[card] evicting cached $victim ($why) to make room" >&2
+            room_say "[card] evicting cached $victim ($why) to make room"
         fi
         why=""
         evicted=$(( evicted + $(du -ck "$CACHE/$victim.raw" "$CACHE/$victim.raw.partial" 2>/dev/null | tail -1 | cut -f1) ))
+        ROOM_EVICT_N=$(( ROOM_EVICT_N + 1 )); ROOM_EVICT_KB=$evicted
+        if [ "${DRY:-0}" = 1 ]; then
+            DRY_GONE="$DRY_GONE $victim"
+            continue
+        fi
         rm -f "$CACHE/$victim.raw" "$CACHE/$victim.raw.partial" \
               "$CACHE/$victim.src" "$CACHE/$victim.log" \
               "$CACHE/$victim.boot" "$CACHE/$victim.pid"
     done
 }
+
+# The cache label a card image gets: its file name up to `.Release` (or `.raw`), so one card at two paths and a
+# card beside its own build log share one copy. One definition for the mount below and --cache-check.
+card_label() {   # <img>
+    local l
+    l=$(basename "$1"); l=${l%%.Release*}; l=${l%%.raw}
+    echo "$l"
+}
+
+# WHAT A CARD WILL COST THE DISK (PAD-964), without copying or evicting anything: one tab-separated line
+#   check <TAB> state <TAB> need_kb <TAB> free_kb <TAB> keep_kb <TAB> evict_n <TAB> evict_kb <TAB> store|distro
+#         <TAB> host <TAB> label <TAB> image
+# state: off (PAD_CARD_CACHE=0: the game reads the image where it lies), cached (a valid copy is there), copying
+# (a copier is on it now), room (the copy fits as the cache stands), evict (it fits once evict_n older entries,
+# evict_kb in all, are taken - the copier's own order), full (nothing can make room: the boot runs off the original,
+# as cache_make_room's return 1 makes it). free_kb is the room the rule saw: the cache's disk, or the Windows drive
+# behind it when that is the smaller (then `host` names the drive); keep_kb the floor the copier leaves. The
+# `cache` line before them names the cache itself for the same reader.
+cache_check() {   # <img>
+    local img="$1" label copy stamp state host
+    label=$(card_label "$img")
+    copy="$CACHE/$label.raw"; stamp="$CACHE/$label.src"
+    DRY_GONE=""; ROOM_WHY=""; ROOM_EVICT_N=0; ROOM_EVICT_KB=0; ROOM_FREE_KB=""
+    if [ "${PAD_CARD_CACHE:-1}" = 0 ]; then
+        state=off
+    elif cache_valid "$img" "$copy" "$stamp"; then
+        state=cached
+    elif copier_alive "$CACHE/$label.pid" "$copy"; then
+        state=copying
+    else
+        DRY=1
+        if cache_make_room "$img" "$copy"; then
+            if [ "$ROOM_EVICT_N" -gt 0 ]; then state=evict; else state=room; fi
+        else
+            state=full
+        fi
+        DRY=0
+    fi
+    host=""
+    [ "$ROOM_WHY" = host ] && host=${PAD_HOST_DRIVE:-}
+    [ -n "$ROOM_FREE_KB" ] || ROOM_FREE_KB=$(cache_disk_avail_kb)
+    printf 'check\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$state" "$(cache_need_kb "$img")" "$ROOM_FREE_KB" \
+        $(( CACHE_KEEP_GB * 1048576 )) "$ROOM_EVICT_N" "$ROOM_EVICT_KB" "$(cache_kind)" "$host" "$label" "$img"
+}
+cache_kind() { if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then echo store; else echo distro; fi; }
+# df of the cache folder, or of the nearest folder above it that exists (a cache never made yet).
+cache_disk_df() {   # <df --output fields>
+    local d=$CACHE
+    while [ ! -d "$d" ] && [ "$d" != / ]; do d=$(dirname "$d"); done
+    df -k --output="$1" "$d" 2>/dev/null | tail -1
+}
+cache_disk_avail_kb() { cache_disk_df avail | tr -d " "; }
 
 # ITEM 74: wait for the detached copier, narrating progress so the minutes are
 # visible - one newline-terminated line every 2 s, because the GUI's drain
@@ -838,7 +943,7 @@ if [ "${1:-}" = "--cache-limit" ]; then
 fi
 
 IMG=${1:-}
-[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache|--cache-now] | --cache-list | --cache-drop <label> | --cache-limit [GB|default]"
+[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache|--cache-now|--cache-check [<card2.raw>...]] | --cache-list | --cache-drop <label> | --cache-limit [GB|default]"
 [ -f "$IMG" ] || die "no image at $IMG"
 
 # ★ A STERN SPIKE 3 CARD CANNOT BE MOUNTED - REFUSE IT BEFORE THE COPY (PAD-367).
@@ -857,7 +962,7 @@ if command -v python3 >/dev/null 2>&1 \
     die "$(basename "$IMG") is a Stern Spike 3 card (${S3#spike3: yes - }). Its partitions are encrypted (LUKS2) with a key kept in the machine, not on the card, so PAD cannot mount or emulate it."
 fi
 
-LABEL=$(basename "$IMG"); LABEL=${LABEL%%.Release*}; LABEL=${LABEL%%.raw}
+LABEL=$(card_label "$IMG")
 MNT="$CARDS/$LABEL"
 # ITEM 90: `--part N` mounts partition N (kernel numbering: p3 is the first
 # games partition, p7 the first appended one on a multi-image card) at its
@@ -913,6 +1018,22 @@ if [ "$MODE" = "--board-copy" ]; then
         clear) copy_board_clear "$LABEL" ;;
         *) die "usage: cardmount.sh <card.raw> --board-copy queued|clear" ;;
     esac
+    exit 0
+fi
+# --cache-check [<img2> ...]: what this card (and any more named after it) will cost the disk, one `check` line
+# each after a `cache` line, nothing copied or evicted (PAD-964; cache_check above). The Visual Pinball launch asks
+# it before watch.sh and the tab asks it for every card in the folder, in one call.
+#   cache <TAB> dir <TAB> store|distro <TAB> avail_kb <TAB> size_kb <TAB> limit_gb <TAB> used_kb
+if [ "$MODE" = "--cache-check" ]; then
+    CACHE_READERS=$(cache_readers)      # one pass over /proc for every card asked (as --cache-list takes it)
+    cache_disk_df avail,size | awk -v d="$CACHE" -v k="$(cache_kind)" -v l="$(cache_limit_gb)" -v u="$(cache_used_kb)" \
+        '{printf "cache\t%s\t%s\t%s\t%s\t%s\t%s\n", d, k, $1, $2, l, u}'
+    cache_check "$IMG"
+    shift 2
+    for img in "$@"; do
+        [ -f "$img" ] || { echo "[card] no image at $img" >&2; continue; }
+        cache_check "$img"
+    done
     exit 0
 fi
 if [ "$MODE" = "--precache" ]; then

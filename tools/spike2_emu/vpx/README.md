@@ -130,6 +130,24 @@ any run, its size Visual Pinball's own unless given. `padvpx playfield on`
 asks for the rig's own virtual playfield window as well (off by default;
 nobody needs it beside Visual Pinball), placed like the LCD, under it.
 
+**What a card costs the disk (PAD-964).** A Spike 2 game's first start
+copies its card image into the emulator's card cache - only what the card
+uses, not the blank half of the image (`cardcopy.py`; 6.6 GB of Batman's
+7.9 GB image) - and every later start reads the copy: 36 s to attract
+against 148 s read off the Windows drive through 9p. Before a run the
+launch asks `cardmount.sh --cache-check` (a dry run of the copier's own
+room rule: nothing copied, nothing evicted) and writes the answer into the
+run's log as `[card-check] <state>: <words>`, which the loading window
+shows: the card is in the cache, a copy of so many GB is made (so much
+free there, older cards making room), or there is no room and the game
+reads the image where it lies, a slow start. `padvpx cache` says it for
+every card in the folder; `padvpx cache off` (the kit's `card_cache`, the
+box on the app's Visual Pinball tab) makes every run read its image where
+it lies instead (`PAD_CARD_CACHE=0`), for a PC with no room to give; `on`
+puts it back. The app's Visual Pinball tab says the same under each row's
+card and on its Card images row, with the cache's room and a Cache… to the
+Emulate tab's cache window.
+
 **Sharing a table with somebody else.** The kit never ships a table or a
 card. What the other person needs: the PAD installer (the emulator, its
 runtime distro, the bundled Python with pywin32, and this kit - all in it),

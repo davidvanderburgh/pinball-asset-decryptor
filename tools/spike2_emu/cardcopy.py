@@ -3,6 +3,8 @@
 
     cardcopy.py card.raw copy.raw        the copy, sparse; exit 0 when it is whole
     cardcopy.py --plan card.raw          what would be read, and nothing written
+    cardcopy.py --size card.raw          the bytes the copy takes at most (one number), nothing written:
+                                         what cardmount.sh asks room for (PAD-964)
 
 PAD-484. The card cache (cardmount.sh) copied every byte of an image with
 `dd conv=sparse`: the zeros land as holes, but every one of them is still
@@ -25,12 +27,14 @@ latency the cache exists to avoid. A partition whose bitmaps do not add up to
 its group descriptors' free counts is copied whole, and anything else that
 goes wrong exits non-zero: cardmount.sh then copies the old way.
 """
-import json
 import os
 import re
 import struct
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import parts    # noqa: E402
 
 #: one read; and the size of an all-zero chunk left as a hole
 CHUNK = 4 << 20
@@ -41,11 +45,22 @@ EXT_MAGIC = b"\x53\xef"
 
 
 def partitions(img):
-    """[(offset, size)] in bytes, every partition sfdisk lists (an extended one included)."""
-    out = subprocess.run(["sfdisk", "-J", img], capture_output=True, text=True, check=True).stdout
-    pt = json.loads(out)["partitiontable"]
-    ss = int(pt.get("sectorsize", 512))
-    return [(int(p["start"]) * ss, int(p["size"]) * ss) for p in pt["partitions"]]
+    """[(offset, size)] in bytes, every partition of the image (an extended one included).
+
+    From the image's own MBR and EBR chain (parts.py, the rig's one reader of them), NOT
+    `sfdisk -J`: the app's PAD-Runtime ships no sfdisk, so every copy there died at
+    "No such file or directory: 'sfdisk'" and fell back to dd - the whole image read
+    through 9p and every 4 MB block with a stray byte in it written, 103 cards out of 103
+    in David's store (PAD-964; the used-only copy of PAD-484 had only ever run in a
+    sessions' Ubuntu). A file that is no card at all is a ValueError, as a bad bitmap is."""
+    try:
+        prim = parts.table(img)
+        logi = parts.logical(img)
+    except SystemExit as e:                         # parts.py's own word for "no MBR here"
+        raise ValueError(str(e))
+    out = [(start * parts.SECTOR, count * parts.SECTOR) for _i, _t, start, count in prim]
+    out += [(start * parts.SECTOR, count * parts.SECTOR) for _i, _t, start, count, _e in logi]
+    return out
 
 
 def is_ext(f, off):
@@ -228,6 +243,17 @@ def main(argv):
         for line in notes:
             print(line)
         print("read %.2f of %.2f GB in %d runs" % (sum(b - a for a, b in runs) / 1e9, size / 1e9, len(runs)))
+        return 0
+    if len(argv) == 2 and argv[0] == "--size":
+        # what the copy can take on the disk, at most: the runs read (the zeros inside them land as
+        # holes, so it is usually less). A file that cannot be planned is no answer, exit 1, and
+        # cardmount.sh counts the image's allocated size instead - as the copier itself then copies.
+        try:
+            runs, _size, _notes = plan(argv[1])
+        except (OSError, ValueError, KeyError, struct.error) as e:
+            print("cardcopy: %s" % e, file=sys.stderr)
+            return 1
+        print(sum(b - a for a, b in runs))
         return 0
     if len(argv) != 2:
         print(__doc__.split("\n\n")[0], file=sys.stderr)

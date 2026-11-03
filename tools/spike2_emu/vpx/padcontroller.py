@@ -109,6 +109,8 @@ READ_N = max(coilmap.HI_READ, coilmap.RULE_READ)   # one read takes every plane
 LAMP_ON = int(os.environ.get("PAD_VPX_LAMP_ON", "1"))   # LED level that is "lit"
 MIN_PULSE_MS = 40               # a coil pulse shorter than a poll still shows
 FRONT_WATCH_S = 300             # how long after Run a started run's windows are watched
+FRONT_SETTLE_S = 10.0           # after the game is up, its windows' grabs are still undone (PAD-949)
+FRONT_TRIES = 10                # hand-backs Windows refused before a window is left alone
 #: the coin door's service buttons by number: {number: (node, bit)}
 SERVICE = {9008: (0, 8),        # Service Select
            9009: (0, 9),        # Service Plus
@@ -200,6 +202,34 @@ def find_kit_window(word):
 
 def find_lcd_window():
     return find_kit_window("emulator")
+
+
+def window_pid(hwnd):
+    import ctypes
+    pid = ctypes.c_ulong(0)
+    ctypes.windll.user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(pid))
+    return pid.value
+
+
+def hand_foreground(hwnd, fg):
+    """The foreground to `hwnd`, from the window `fg` that has it, with
+    the input of fg's thread attached (Windows lets a thread that shares
+    the foreground's input take it). True only when hwnd is in front after:
+    SetForegroundWindow says yes when it only flashed the taskbar button."""
+    import ctypes
+    u = ctypes.windll.user32
+    k = ctypes.windll.kernel32
+    fg_tid = u.GetWindowThreadProcessId(ctypes.c_void_p(fg), None)
+    me = k.GetCurrentThreadId()
+    attached = bool(fg_tid) and fg_tid != me and u.AttachThreadInput(me, fg_tid, True)
+    try:
+        u.ShowWindow(ctypes.c_void_p(hwnd), 9)              # SW_RESTORE, if it was minimised
+        u.SetForegroundWindow(ctypes.c_void_p(hwnd))
+        u.BringWindowToTop(ctypes.c_void_p(hwnd))
+    finally:
+        if attached:
+            u.AttachThreadInput(me, fg_tid, False)
+    return u.GetForegroundWindow() == hwnd
 
 
 #: B2S.Server's own windows, by how B2SScreen.vb titles them: the backglass
@@ -1343,6 +1373,8 @@ class Bridge:
         self.attached = False              # the run is up and its tables read
         self.front_done = False            # the started run's LCD window was handed back once
         self.b2s_handed = set()            # ... and each backglass window, once (PAD-893)
+        self.front_tries = {}              # hand-backs tried per window (PAD-949)
+        self.attached_t = 0.0
         self.lcd_placed = False            # ... and put where the kit says, on top, once
         self.player_placed = False         # Visual Pinball's own window moved where the kit says, once
         self.start_t = 0.0
@@ -1446,6 +1478,7 @@ class Bridge:
         self.start_t = time.monotonic()
         self.front_done = False            # the LCD window's first grab is undone once, never again
         self.b2s_handed = set()            # backglass windows whose first grab was undone (PAD-893)
+        self.front_tries = {}
         self.lcd_placed = False
         self.lcd_tries = 0
         self.lcd_stable = 0
@@ -1514,6 +1547,7 @@ class Bridge:
         except OSError as exc:
             log("ballfeed.off not written: %s" % exc)
         self.attached = True
+        self.attached_t = time.monotonic()
         log("attached to %s after %.0f s" % (self.rig.how, time.monotonic() - self.start_t))
         if self.launch is not None:
             self._loading_end("up", time.monotonic() - self.start_t)
@@ -2078,11 +2112,19 @@ class Bridge:
         """A run this bridge started opens the game's LCD window, and that
         window takes the foreground - and Visual Pinball pauses the moment it
         loses it, so the table sat frozen until the player clicked it. While
-        the run comes up, the foreground is handed back to the player ONCE (a
-        click on the LCD window after that is the user wanting to see it), and
-        ONLY from a window of the kit's own run (its title carries the
-        PAD-VPX label) or the backglass's (_hand_back_from): never from
-        anything else the user has in front."""
+        the run comes up, the foreground is handed back to the player from a
+        window of the kit's own run (its title carries the PAD-VPX label, or
+        it is the loading window) or the backglass's (_hand_back_from): never
+        from anything else the user has in front.
+
+        PAD-949: one hand-back was not enough. Windows refuses it now and
+        then (1 in 3 with stand-in windows, the loading window up), and the
+        LCD window or the loading window can take the foreground again while
+        the run comes up - either way the table played on with the keyboard
+        in the game's window until Alt+Tab (Mike's Beatles). So it
+        counts only when the player really is in front after it, and the
+        run's own windows are handed back from every time until
+        FRONT_SETTLE_S after the game is up."""
         if sys.platform != "win32":
             return
         try:
@@ -2094,42 +2136,59 @@ class Bridge:
                 return
             buf = ctypes.create_unicode_buffer(256)
             u.GetWindowTextW(fg, buf, 256)
-            if not self._hand_back_from(fg, buf.value):
+            if not self._hand_back_from(fg, buf.value, window_pid(fg)):
                 return
-            k = ctypes.windll.kernel32
-            fg_tid = u.GetWindowThreadProcessId(fg, None)
-            me = k.GetCurrentThreadId()
-            u.AttachThreadInput(me, fg_tid, True)
-            try:
-                u.ShowWindow(hwnd, 9)            # SW_RESTORE, if it was minimised
-                u.SetForegroundWindow(hwnd)
-                u.BringWindowToTop(hwnd)
-            finally:
-                u.AttachThreadInput(me, fg_tid, False)
-            log("foreground: [%s] -> the player again (once; the window is the user's from here)" % buf.value)
+            ok = hand_foreground(hwnd, fg)
+            self._handed_back(fg, buf.value, ok)
+            if ok:
+                log("foreground: [%s] -> the player again" % buf.value)
+            else:
+                log("foreground: [%s] kept it, Windows refused the player (try %d of %d)"
+                    % (buf.value, self.front_tries.get(fg, 0), FRONT_TRIES))
         except Exception as exc:                            # noqa: BLE001
             log("foreground hand-back failed: %s" % exc)
 
-    def _hand_back_from(self, fg, title):
-        """Whether the window in front is one whose grab is undone, marking
-        it done. The started run's LCD window: once. THE BACKGLASS (PAD-893):
-        PADSPIKE2.vbs starts B2S.Server from LoadVPM, and its window takes
-        the foreground as it opens; B2S hands it back only to a VISIBLE
-        "Visual Pinball Player" window, at the moment it shows and 2 s later
-        (formBackglass.vb SetFocusToVPPlayer), so a backglass that opened
-        before the playfield did - later since DOF opens the cabinet first
-        (PAD-879) - kept it, and Metallica sat paused. Each backglass window
-        (the backglass, its DMD) is undone once, for any run: a later click
-        on it is the user's own."""
+    def _starting(self):
+        """A run this bridge started that is not up yet, or only just."""
+        return self.launch is not None and (
+            not self.attached or time.monotonic() - self.attached_t < FRONT_SETTLE_S)
+
+    def _hand_back_from(self, fg, title, pid=0):
+        """Whether the window in front is one whose grab is undone. The
+        started run's own windows (the LCD window, the loading window): every
+        time while it starts (_starting) - the loading window by its process
+        (Tk's windows are not all titled) - and the LCD window's first grab
+        after that once. THE BACKGLASS (PAD-893): PADSPIKE2.vbs starts
+        B2S.Server from LoadVPM, and its window takes the foreground as it
+        opens; B2S hands it back only to a VISIBLE "Visual Pinball Player"
+        window, at the moment it shows and 2 s later (formBackglass.vb
+        SetFocusToVPPlayer), so a backglass that opened before the playfield
+        did - later since DOF opens the cabinet first (PAD-879) - kept it,
+        and Metallica sat paused. Each backglass window (the backglass, its
+        DMD) is undone once, for any run: a later click on it is the user's
+        own. A window Windows refused FRONT_TRIES times is left alone."""
+        if self.front_tries.get(fg, 0) >= FRONT_TRIES:
+            return False
         if b2s_window(title):
-            if fg in self.b2s_handed:
-                return False
+            return fg not in self.b2s_handed
+        if self.launch is None:
+            return False
+        loading = getattr(self, "_loading", None)
+        if self._starting() and (padlaunch.LABEL in title or (pid and loading and pid == loading.pid)):
+            return True
+        return not self.front_done and padlaunch.LABEL in title
+
+    def _handed_back(self, fg, title, ok):
+        """Marks a hand-back: a refused one is tried again next second, a
+        done one makes a later grab of that window the user's own."""
+        if not ok:
+            self.front_tries[fg] = self.front_tries.get(fg, 0) + 1
+            return
+        self.front_tries.pop(fg, None)
+        if b2s_window(title):
             self.b2s_handed.add(fg)
-            return True
-        if self.launch is not None and not self.front_done and padlaunch.LABEL in title:
-            self.front_done = True       # ONCE: a later click on the LCD window is the user's own
-            return True
-        return False
+        elif padlaunch.LABEL in title:
+            self.front_done = True       # after the start, a click on the LCD window is the user's own
 
     def _poll_once(self):
         if self.spike1:

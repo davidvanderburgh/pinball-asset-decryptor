@@ -253,7 +253,7 @@ sleep 0.8                                   # unchanged: no second copy
 echo '{"gain": 0.5, "muted": true}' > "$D/audio_ctl.json"
 for i in $(seq 1 40); do [ "$(wc -l < "$D/pushes")" -ge 2 ] && break; sleep 0.1; done
 kill $CP; wait $CP 2>/dev/null
-echo "PUSHES=$(wc -l < "$D/pushes")"
+echo "PUSHES=$(( $(wc -l < "$D/pushes") ))"   # BSD wc pads the count
 """)
     assert "PUSHES=2" in text, text
     assert '"muted": true' in _cat(d, "box_ctl"), text

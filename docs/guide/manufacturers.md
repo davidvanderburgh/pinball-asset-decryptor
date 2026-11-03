@@ -255,6 +255,9 @@ sound. Needs libpinmame and ffmpeg; you supply the ROMs.
 - **The DMD titles** (Jetsons, Domino's Spectacular Pinball Adventure, Rob
   Zombie's Spookshow International) run from their update zip in a window
   of their own, without WSL.
+- **pinHeck-built games** (Rob Zombie, America's Most Haunted, Domino's,
+  Jetsons) install from a freshly formatted SD card, not a USB drive: copy
+  every file onto the empty card, never replace single files.
 - **America's Most Haunted** can't run: its update carries only the
   display card, not the game program.
 - **Total Nuclear Annihilation** can't be decrypted: its key is unknown.

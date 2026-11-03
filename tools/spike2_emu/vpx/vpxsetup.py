@@ -18,11 +18,13 @@ process:
     vpxsetup.py layout <key> <player> <lcd>
                                           where the windows go: [x, y, w, h] JSON or null
     vpxsetup.py open <table name>         open a (PAD) table in Visual Pinball
+    vpxsetup.py open_download <path>      open a download as it is (PAD-952: TNA, AMH)
 
 PAD SHIPS NO TABLE. The kit patches the copy the user downloaded from its
 author (`padvpx patch`); each map names the table it fits (`table`) so the
 tab can say which download that is.
 """
+import fnmatch
 import json
 import os
 import re
@@ -178,10 +180,16 @@ CARD_RE = {"spike2": r"^([a-z0-9_]+)-\d+_\d+_\d+.*\.sdcard\.raw$",
 
 
 def cards_in(folder, platform="spike2"):
-    """{title: [file names]} of the platform's card images in `folder`."""
+    """{title: [file names]} of the platform's card images in `folder`. A
+    Spooky title's is its update file (code_H78.pkg), PAD-952."""
     out = {}
     if folder and os.path.isdir(folder):
         for f in os.listdir(folder):
+            if platform == "spooky":
+                for title, globs in padlaunch.SPOOKY_UPDATES.items():
+                    if any(fnmatch.fnmatch(f.lower(), g.lower()) for g in globs):
+                        out.setdefault(title, []).append(f)
+                continue
             m = re.match(CARD_RE.get(platform, CARD_RE["spike2"]), f, re.I)
             if m:
                 out.setdefault(m.group(1).lower(), []).append(f)
@@ -195,13 +203,15 @@ def all_cards(lib, kit=None):
     the .iso."""
     out = cards_in(lib)
     seen = {os.path.normcase(os.path.abspath(lib))} if lib else set()
-    for d in padlaunch.libraries("spike1", kit):
-        key = os.path.normcase(os.path.abspath(d))
-        if key in seen:
-            continue
-        seen.add(key)
-        for title, files in cards_in(d, "spike1").items():
-            out.setdefault(title, []).extend(files)
+    # PAD-952: and the Spooky updates from the maker's folder beside it
+    for platform in ("spike1", "spooky"):
+        for d in padlaunch.libraries(platform, kit):
+            key = (platform, os.path.normcase(os.path.abspath(d)))
+            if key in seen or (platform == "spike1" and key[1] in seen):
+                continue
+            seen.add(key)
+            for title, files in cards_in(d, platform).items():
+                out.setdefault(title, []).extend(f for f in files if f not in out.get(title, []))
     return out
 
 
@@ -293,11 +303,14 @@ def catalog_match(file_name, catalog=None):
             "game": best.get("game", ""), "name": best.get("name", ""), "map": best.get("map", ""),
             "by": best.get("by", ""), "where": best.get("where", ""), "url": best.get("url", ""),
             "version": best.get("version", ""), "kind": best.get("kind", ""), "faithful": bool(best.get("faithful")),
-            "title": best.get("title", "")}
+            "title": best.get("title", ""),
+            # PAD-952: why nothing can ever play behind it (TNA: its game's key
+            # is unknown; AMH: its update holds no game program)
+            "no_game": best.get("no_game", "")}
 
 
-#: what a cache entry must carry (older ones are read again)
-DOWNLOADS_CACHE_V = 2
+#: what a cache entry must carry (older ones are read again; 3: no_game, PAD-952)
+DOWNLOADS_CACHE_V = 3
 
 
 def maps_signature():
@@ -330,21 +343,44 @@ def _save_downloads_cache(d):
         pass
 
 
+def download_files(tables_dir):
+    """The .vpx downloads in the tables folder and in the folders directly in
+    it (David keeps his in `originals`, PAD-952): [(file, path)], the
+    folder's own first, (PAD) copies left out."""
+    out = []
+    try:
+        top = sorted(os.listdir(tables_dir), key=str.lower)
+    except OSError:
+        return out
+    subs = []
+    for f in top:
+        path = os.path.join(tables_dir, f)
+        if f.lower().endswith(".vpx") and "(PAD)" not in f:
+            out.append((f, path))
+        elif os.path.isdir(path):
+            subs.append(path)
+    for d in subs:
+        try:
+            names = sorted(os.listdir(d), key=str.lower)
+        except OSError:
+            continue
+        out += [(f, os.path.join(d, f)) for f in names
+                if f.lower().endswith(".vpx") and "(PAD)" not in f]
+    return out
+
+
 def downloads_in(tables_dir, cache=None):
-    """The person's own downloads in the tables folder, at once: [{name,
-    file, path, size, mtime, read, title, catalog}], `read` False until
-    read_downloads has looked at the file (then `title` is the listed map
-    that fits it, "" when none, and `catalog` the catalogue's table it is
-    named after, or None)."""
+    """The person's own downloads in the tables folder (and the folders in
+    it), at once: [{name, file, path, size, mtime, read, title, catalog}],
+    `read` False until read_downloads has looked at the file (then `title`
+    is the listed map that fits it, "" when none, and `catalog` the
+    catalogue's table it is named after, or None)."""
     if not tables_dir or not os.path.isdir(tables_dir):
         return []
     cache = _downloads_cache() if cache is None else cache
     maps_sig = maps_signature()
     out = []
-    for f in sorted(os.listdir(tables_dir), key=str.lower):
-        if not f.lower().endswith(".vpx") or "(PAD)" in f:
-            continue
-        path = os.path.join(tables_dir, f)
+    for f, path in download_files(tables_dir):
         try:
             st = os.stat(path)
         except OSError:
@@ -671,6 +707,25 @@ def open_table(name):
     return "ok"
 
 
+def open_download(path):
+    """PAD-952: one of the person's downloads in the tables folder (or a
+    folder in it), opened as it is - a table whose real game cannot run on
+    this PC (TNA, America's Most Haunted) plays its author's rules. The file
+    is never changed: no muting, no keys."""
+    vpx = find_vpx()
+    if not vpx:
+        return "Visual Pinball is not set up."
+    tables = vpx_tables_dir()
+    full = os.path.normcase(os.path.abspath(path or ""))
+    if not tables or full not in {os.path.normcase(os.path.abspath(p)) for _, p in download_files(tables)}:
+        return "%s is not one of the downloads in %s." % (path, tables or "the tables folder")
+    why = missing_directx(vpx)
+    if why:
+        return why
+    subprocess.Popen([os.path.join(vpx, "VPinballX64.exe"), "-play", path], cwd=vpx)
+    return "ok"
+
+
 def state():
     kit = padlaunch.kit_load()
     lib = os.environ.get("PAD_VPX_LIBRARY") or kit.get("library") or ""
@@ -747,6 +802,8 @@ def main(argv):
         out = {"result": set_tables(folder), "patched": patched_in(vpx_tables_dir())}
     elif cmd == "open" and len(rest) == 1:
         out = {"result": open_table(rest[0])}
+    elif cmd == "open_download" and len(rest) == 1:
+        out = {"result": open_download(rest[0])}
     else:
         print(__doc__)
         return 2

@@ -1,0 +1,612 @@
+{
+ "_": [
+  "Ultraman (Halloween's code base and wiring) on the SPOOKY rig (PAD-952): marty02's 'Halloween MM Edition' 3.1 (VPUniverse file 16526),",
+  "JPSalas' template dressed as Halloween, not the machine's layout. Written by gen_halloween_maps.py,",
+  "which says how each object was matched.",
+  "platform: spooky puts PAD.Controller on tools/spooky_emu's board (spkbridge.py): switches, coils",
+  "and LEDs are the game's own numbers; the subway lifters are servos 0 and 1 (coils 32, 33)."
+ ],
+ "platform": "spooky",
+ "title": "um",
+ "model": "Ultraman",
+ "detect": [
+  "halloween script jpsalas",
+  "cpuppack = \"halloween\""
+ ],
+ "output": "halloween_MM_Edition (PAD).vpx",
+ "table": {
+  "name": "Halloween MM Edition",
+  "by": "marty02 (from Onevox, bord; script JPSalas)",
+  "where": "VPUniverse"
+ },
+ "solenoid_max": 68,
+ "game_on": {
+  "number": 40,
+  "coils": [
+   [
+    0,
+    19
+   ],
+   [
+    0,
+    14
+   ]
+  ]
+ },
+ "cabinet": {
+  "_": "the Pinotaur cabinet (spktitles.py aliases): 1000 + the switch number",
+  "start": 1087,
+  "left_flipper": 1081,
+  "right_flipper": 1080,
+  "up_left_flipper": 1083,
+  "up_right_flipper": 1082,
+  "launch": 1084,
+  "launch_key": "LockBarKey",
+  "tilt": 1085,
+  "coin": 1056,
+  "service_select": 1060,
+  "service_plus": 1061,
+  "service_minus": 1062,
+  "service_back": 1063
+ },
+ "keys_skip_orig": [
+  "StartGameKey",
+  "AddCreditKey",
+  "AddCreditKey2"
+ ],
+ "plunger": {
+  "lane_trigger": "swPlungerRest",
+  "lane_switch": 23,
+  "autoplunge": "plungerIM"
+ },
+ "trough": {
+  "_": "TROUGH 1 (by the eject) to TROUGH 7, the jam opto last; 7 balls (installed_balls)",
+  "release": "BallRelease",
+  "drain": "Drain",
+  "switches": [
+   65,
+   22,
+   21,
+   20,
+   16,
+   19,
+   18,
+   64
+  ],
+  "balls": 7,
+  "kick": [
+   90,
+   4
+  ]
+ },
+ "saucers": {
+  "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power); stack = the lane's switches behind; kick_from = where the ball leaves; enter = the opto it passes on the way in; feeders = other holes into the same lane",
+  "K1G": {
+   "switch": 66,
+   "stack": [
+    73,
+    78,
+    74
+   ],
+   "kick_from": "Kicker003",
+   "dir": 180,
+   "power": 10,
+   "enter": 76,
+   "feeders": {
+    "K2G": {
+     "enter": 79
+    },
+    "K3G": {
+     "enter": 77
+    }
+   },
+   "name": "the left scoops (LEFT BOTTOM / MIDDLE / TOP SCOOP) into LEFT SUBWAY 1-4"
+  },
+  "K1D": {
+   "switch": 70,
+   "kick_from": "Kicker004",
+   "dir": 170,
+   "power": 10,
+   "enter": 71,
+   "name": "LOWER RIGHT SCOOP into the RIGHT SUBWAY lifter"
+  },
+  "PyramidKicker": {
+   "switch": 6,
+   "dir": 200,
+   "power": 5,
+   "name": "MID PF SCOOP"
+  },
+  "lock": {
+   "switch": 67,
+   "dir": 270,
+   "power": 15,
+   "name": "GUESS: the top-left lock as the CROSSOVER, let out by the crossover dump"
+  }
+ },
+ "drop_resets": {
+  "_": "the bank reset coil's sub: every target of the bank stands again",
+  "PadPumpkinUp": [
+   "Target1",
+   "Target2",
+   "Target3"
+  ]
+ },
+ "solenoids": {
+  "_": "Spooky coil [0, n] (CoilConfig.cs; a servo s is [0, 32 + s]) -> the small number the table sees (core.vbs flippers 46/48); callback a sub of the table's or the bridge's (null = nothing fires). Names are the game's own.",
+  "1": {
+   "coil": [
+    0,
+    18
+   ],
+   "name": "trough",
+   "callback": "bsTrough.SolOut"
+  },
+  "2": {
+   "coil": [
+    0,
+    21
+   ],
+   "name": "launch",
+   "callback": "PadAutoPlunge"
+  },
+  "3": {
+   "coil": [
+    0,
+    5
+   ],
+   "name": "middle_scoop",
+   "callback": "bsPyramidKicker.SolOut"
+  },
+  "4": {
+   "coil": [
+    0,
+    32
+   ],
+   "name": "LEFT SUBWAY LIFTER (servo 0)",
+   "callback": "bsK1G.SolOut"
+  },
+  "5": {
+   "coil": [
+    0,
+    33
+   ],
+   "name": "RIGHT SUBWAY LIFTER (servo 1)",
+   "callback": "bsK1D.SolOut"
+  },
+  "6": {
+   "coil": [
+    0,
+    17
+   ],
+   "name": "crossover_dump",
+   "callback": "bslock.SolOut"
+  },
+  "7": {
+   "coil": [
+    0,
+    11
+   ],
+   "name": "bank_target_reset",
+   "callback": "PadPumpkinUp"
+  },
+  "8": {
+   "coil": [
+    0,
+    22
+   ],
+   "name": "knocker",
+   "callback": null
+  },
+  "9": {
+   "coil": [
+    0,
+    23
+   ],
+   "name": "shaker",
+   "callback": null
+  },
+  "10": {
+   "coil": [
+    0,
+    16
+   ],
+   "name": "left_sling",
+   "callback": null
+  },
+  "11": {
+   "coil": [
+    0,
+    9
+   ],
+   "name": "right_sling",
+   "callback": null
+  },
+  "12": {
+   "coil": [
+    0,
+    4
+   ],
+   "name": "upper_drop_reset",
+   "callback": null
+  },
+  "13": {
+   "coil": [
+    0,
+    6
+   ],
+   "name": "middle_drop_reset",
+   "callback": null
+  },
+  "14": {
+   "coil": [
+    0,
+    7
+   ],
+   "name": "middle_drop_knockdown",
+   "callback": null
+  },
+  "15": {
+   "coil": [
+    0,
+    12
+   ],
+   "name": "right_front_drop_knockdown",
+   "callback": null
+  },
+  "16": {
+   "coil": [
+    0,
+    13
+   ],
+   "name": "right_front_drop_reset",
+   "callback": null
+  },
+  "17": {
+   "coil": [
+    0,
+    0
+   ],
+   "name": "upper_flipper_left",
+   "callback": null
+  },
+  "18": {
+   "coil": [
+    0,
+    2
+   ],
+   "name": "upper_flipper_right",
+   "callback": null
+  },
+  "46": {
+   "coil": [
+    0,
+    14
+   ],
+   "name": "right_flipper_high",
+   "callback": null
+  },
+  "48": {
+   "coil": [
+    0,
+    19
+   ],
+   "name": "left_flipper_high",
+   "callback": null
+  }
+ },
+ "pup_stub": true,
+ "flexdmd_stub": true,
+ "neuter": [
+  "BallRelease.CreateSizedBallWithMass",
+  "BallRelease.Kick",
+  "PlungerIM.AutoFire"
+ ],
+ "retrofit_timers": {
+  "PinMAMETimer": {
+   "clone": "PulseTimer",
+   "interval_ms": 1
+  },
+  "PadTestTimer": {
+   "clone": "PulseTimer",
+   "interval_ms": 100
+  }
+ },
+ "lamps": {
+  "_": "table light -> the game's LED [n // 64, n % 64] (lightconfig.json's num; rgb: one LED, lit in its colour). marty's lights are the template's own: only those where the game has the insert, GUESS.",
+  "LightShootAgain": {
+   "leds": [
+    [
+     0,
+     25
+    ]
+   ],
+   "rgb": true,
+   "name": "save_light",
+   "note": "the shoot-again light"
+  },
+  "LightShootAgaina": {
+   "leds": [
+    [
+     0,
+     25
+    ]
+   ],
+   "rgb": true,
+   "name": "save_light",
+   "note": "the shoot-again light (its second)"
+  },
+  "Light12": {
+   "leds": [
+    [
+     0,
+     4
+    ]
+   ],
+   "rgb": true,
+   "name": "bank_1",
+   "note": "the light at Target1 (the pumpkin bank's left)"
+  },
+  "Light13": {
+   "leds": [
+    [
+     0,
+     3
+    ]
+   ],
+   "rgb": true,
+   "name": "bank_2",
+   "note": "the light at Target2"
+  },
+  "Light14": {
+   "leds": [
+    [
+     0,
+     2
+    ]
+   ],
+   "rgb": true,
+   "name": "bank_3",
+   "note": "the light at Target3"
+  },
+  "Light25": {
+   "leds": [
+    [
+     1,
+     43
+    ]
+   ],
+   "rgb": true,
+   "name": "left_spinner",
+   "note": "GUESS: the light by the left spinner"
+  },
+  "Light5": {
+   "leds": [
+    [
+     0,
+     21
+    ]
+   ],
+   "rgb": true,
+   "name": "left_outlane",
+   "note": "GUESS: the light above the left outlane"
+  },
+  "Light9": {
+   "leds": [
+    [
+     1,
+     1
+    ]
+   ],
+   "rgb": true,
+   "name": "right_outlane",
+   "note": "GUESS: the light above the right outlane"
+  },
+  "Light6a": {
+   "leds": [
+    [
+     0,
+     26
+    ]
+   ],
+   "rgb": true,
+   "name": "hedge_progress_1",
+   "note": "GUESS: the light by the left bottom scoop"
+  },
+  "Light20a": {
+   "leds": [
+    [
+     0,
+     27
+    ]
+   ],
+   "rgb": true,
+   "name": "hedge_progress_2",
+   "note": "GUESS: the light by the left middle scoop"
+  },
+  "Light8a": {
+   "leds": [
+    [
+     0,
+     28
+    ]
+   ],
+   "rgb": true,
+   "name": "hedge_progress_3",
+   "note": "GUESS: the light by the left top scoop"
+  }
+ },
+ "quiet_subs": [],
+ "orig_hits": false,
+ "orig_keep": [
+  "sw1",
+  "sw3",
+  "sw4",
+  "LeftSlingShot",
+  "RightSlingShot",
+  "sw5",
+  "sw5a",
+  "Spinner3",
+  "Spinner4",
+  "LeftRampDone",
+  "RightRampDone",
+  "sw8",
+  "Target1",
+  "Target2",
+  "Target3",
+  "Target6",
+  "Target12",
+  "Target11",
+  "Target4",
+  "Target7",
+  "Target5",
+  "Target8",
+  "Target9",
+  "Target10"
+ ],
+ "switches": {
+  "_": "object -> the Spooky game's switch number (spkbridge.py: the number itself); event hit (pulse), spin, slingshot, drop (stays until the bank resets; up_closed: made while it STANDS). Names are SwitchConfig.cs's labels. marty's table is not the machine's layout: GUESS where a game on the table should confirm.",
+  "sw1": {
+   "id": 50,
+   "event": "hit",
+   "name": "LEFT OUTLANE"
+  },
+  "sw3": {
+   "id": 34,
+   "event": "hit",
+   "name": "RIGHT INLANE"
+  },
+  "sw4": {
+   "id": 33,
+   "event": "hit",
+   "name": "RIGHT OUTLANE"
+  },
+  "LeftSlingShot": {
+   "id": 51,
+   "event": "slingshot",
+   "name": "LEFT SLING"
+  },
+  "RightSlingShot": {
+   "id": 37,
+   "event": "slingshot",
+   "name": "RIGHT SLING"
+  },
+  "sw5": {
+   "id": 48,
+   "event": "hit",
+   "name": "LEFT ORBIT",
+   "note": "GUESS: the top-left lane the table scores as its orbit"
+  },
+  "sw5a": {
+   "id": 35,
+   "event": "hit",
+   "name": "RIGHT ORBIT",
+   "note": "GUESS: the right lane the table scores as its orbit"
+  },
+  "Spinner3": {
+   "id": 12,
+   "event": "spin",
+   "name": "LEFT SPINNER",
+   "note": "GUESS: the left spinner (166, 613)"
+  },
+  "Spinner4": {
+   "id": 13,
+   "event": "spin",
+   "name": "RIGHT SPINNER",
+   "note": "GUESS: the right spinner (721, 1035)"
+  },
+  "LeftRampDone": {
+   "id": 41,
+   "event": "hit",
+   "name": "LEFT RAMP EXIT",
+   "note": "GUESS: the ramp ending at the top (564, 85)"
+  },
+  "RightRampDone": {
+   "id": 75,
+   "event": "hit",
+   "name": "MIDDLE RAMP",
+   "note": "GUESS: the ramp ending at the left (63, 250)"
+  },
+  "sw8": {
+   "id": 14,
+   "event": "hit",
+   "name": "UPPER PF ENTRY",
+   "note": "GUESS: the top-right lane"
+  },
+  "Target1": {
+   "id": 29,
+   "event": "drop",
+   "name": "DROP BANK LEFT",
+   "up_closed": true,
+   "note": "the pumpkin bank: made while standing"
+  },
+  "Target2": {
+   "id": 27,
+   "event": "drop",
+   "name": "DROP BANK MID",
+   "up_closed": true,
+   "note": "the pumpkin bank"
+  },
+  "Target3": {
+   "id": 28,
+   "event": "drop",
+   "name": "DROP BANK RIGHT",
+   "up_closed": true,
+   "note": "the pumpkin bank"
+  },
+  "Target6": {
+   "id": 32,
+   "event": "hit",
+   "name": "CAPTURE TARGET",
+   "note": "the captive ball's target"
+  },
+  "Target12": {
+   "id": 5,
+   "event": "hit",
+   "name": "MIDDLE LEFT TARGET",
+   "note": "GUESS: by place"
+  },
+  "Target11": {
+   "id": 7,
+   "event": "hit",
+   "name": "MIDDLE RIGHT TARGET",
+   "note": "GUESS: by place"
+  },
+  "Target4": {
+   "id": 52,
+   "event": "hit",
+   "name": "STANDUP 1",
+   "note": "GUESS: the left column, bottom"
+  },
+  "Target7": {
+   "id": 53,
+   "event": "hit",
+   "name": "STANDUP 2",
+   "note": "GUESS: the left column, middle"
+  },
+  "Target5": {
+   "id": 54,
+   "event": "hit",
+   "name": "STANDUP 3",
+   "note": "GUESS: the left column, top"
+  },
+  "Target8": {
+   "id": 55,
+   "event": "hit",
+   "name": "STANDUP 4",
+   "note": "GUESS: top left"
+  },
+  "Target9": {
+   "id": 39,
+   "event": "hit",
+   "name": "STANDUP 5",
+   "note": "GUESS: top middle"
+  },
+  "Target10": {
+   "id": 38,
+   "event": "hit",
+   "name": "STANDUP 6",
+   "note": "GUESS: top right"
+  }
+ },
+ "listed": true
+}

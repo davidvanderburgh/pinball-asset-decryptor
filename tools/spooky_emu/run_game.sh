@@ -236,7 +236,9 @@ for i in $(seq 1 3000); do
 done
 if spk_game_alive && spk_attract; then
     echo "Ready: $(basename "$BUILD"), slot $SPK_SLOT, display $DISP"
-    rigboard_post spooky "$SPK_SLOT" "$(spk_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget name)}" "$VISIBLE" "$AUDIO"
+    # the rig folder rides the record (PAD-952): a Visual Pinball table's
+    # controller finds the board's vpxhw.state there (spkbridge.py)
+    RIGBOARD_ROOT=$SPK_RIG rigboard_post spooky "$SPK_SLOT" "$(spk_game_pid)" "$(basename "$BUILD")" "${PAD_TITLE:-$(tget name)}" "$VISIBLE" "$AUDIO"
     # The playfield window's keys in the game's own window too (PAD-313),
     # except the keys the game already acts on there (spktitles own_keys):
     # on the desktop (PAD_GAMEKEYS=1 forces it on a hidden run, for tests).

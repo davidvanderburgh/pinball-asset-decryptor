@@ -83,6 +83,7 @@ import queue
 import select
 import signal
 import socket
+import struct
 import sys
 import threading
 import time
@@ -138,6 +139,35 @@ LED_MODE = {157: "blink", 175: "blink", 194: "blink", 195: "blink",
             184: "crossfade", 185: "crossfade"}
 LED_OPS = {128, 155, 157, 159, 160, 163, 164, 167, 170, 171, 184, 192, 194,
            196, 198, 218} | LED_OVERLAY
+
+# PAD-952: a Visual Pinball table on this board (the kit's PAD.Controller,
+# tools/spike2_emu/vpx/spkbridge.py).  The Spike 1 rig's two files, in their
+# layout (s1bridge.py), with magics of their own:
+#   vpxhw.state  "SPHW": u32 magic, version, seq, flags; u8 switches[1024];
+#                u8 lamps[1024 * 3] (r, g, b per LED); u8 coils[1024]
+#   vpxsw.input  "SPSW": u32 magic, version, seq; a 128-byte bitmap, one bit
+#                per switch, set = closed - what the table holds
+# A switch, an LED and a coil are their own numbers; a servo n is coil
+# SERVO_COIL + n, on while it stands up (the subway lifters).  The block is
+# written every BRIDGE_IDLE_S; once the controller has attached (it writes
+# vpxball.off) every BRIDGE_POLL_S, and the table owns the balls: the
+# board's trough, lanes and coil-made switches stand aside.
+BRIDGE_SLOTS = 1024
+BRIDGE_STATE = "vpxhw.state"
+BRIDGE_INPUT = "vpxsw.input"
+BRIDGE_ATTACHED = "vpxball.off"
+BRIDGE_STATE_MAGIC = 0x53504857          # "SPHW"
+BRIDGE_INPUT_MAGIC = 0x53505357          # "SPSW"
+BRIDGE_VERSION = 1
+BRIDGE_POLL_S = 0.005
+BRIDGE_IDLE_S = 0.5
+#: how long a pulsed coil reads on in the block (the controller polls every
+#: few ms; a 20 ms pulse must be seen)
+BRIDGE_PULSE_S = 0.08
+SERVO_COIL = 32
+#: a servo at or past this angle stands up (Halloween's subway lifters: 10-30
+#: down, 150 up - Machine_Servos.cs)
+SERVO_UP = 90
 
 
 def _keyed(d):
@@ -211,6 +241,9 @@ class Board:
         self.paused = False
         self.ripping = set()
         self.on_at = {}             # switch -> when it was made
+        self.pulsed_at = {}         # coil -> when it last fired (the bridge)
+        self.bridged = False        # a table owns the balls (PAD-952)
+        self.table_held = set()     # switches the table holds closed
         self.outq = queue.Queue()
         self._set_trough()
 
@@ -457,7 +490,10 @@ class Board:
         self.coil_fired[coil] = self.coil_fired.get(coil, 0) + 1
         self.coil_last.append([time.strftime("%H:%M:%S"), coil, how])
         del self.coil_last[:-20]
+        self.pulsed_at[coil] = time.monotonic()
         self.say("coil", coil, how)
+        if self.bridged:
+            return          # the table's ball and targets follow the coil
         for sw in self.resets.get(coil, ()):
             self.later(0.05, self.set_switch, sw, 1, "reset by coil %d" % coil)
         for sw, on in self.sets.get(coil, {}).items():
@@ -477,7 +513,7 @@ class Board:
             self.coil_held.add(coil)
         else:
             self.coil_held.discard(coil)
-        if coil in self.holds:
+        if coil in self.holds and not self.bridged:
             self.set_switch(self.holds[coil], not on, "coil %d" % coil)
 
     def feed_lane(self):
@@ -523,6 +559,106 @@ class Board:
         self.balls += 1
         self.say("drain:", self.balls, "in the trough")
         self.trough_changed()
+
+    # -- a Visual Pinball table (PAD-952) -------------------------------
+    def bridge_block(self, seq, now=None):
+        """vpxhw.state: what the game made of the switches, every lit LED,
+        every coil on (held, pulsed within BRIDGE_PULSE_S, a flipper whose
+        button is held while the flippers are on) and every servo up."""
+        now = time.monotonic() if now is None else now
+        n = BRIDGE_SLOTS
+        sw = bytearray(n)
+        lamps = bytearray(n * 3)
+        coils = bytearray(n)
+        with self.lock:
+            for k, v in self.state.items():
+                if v and 0 <= k < n:
+                    sw[k] = 1
+        for k, (r, g, b) in self.lit().items():
+            if 0 <= k < n:
+                lamps[k * 3:k * 3 + 3] = bytes((r & 255, g & 255, b & 255))
+        for c in list(self.coil_held):
+            if 0 <= c < n:
+                coils[c] = 1
+        for c, t in list(self.pulsed_at.items()):
+            if 0 <= c < n and now - t < BRIDGE_PULSE_S:
+                coils[c] = 1
+        if self.power.get("flippers", 1):
+            for button, (high, low, _) in list(self.flippers.items()):
+                if sw[button] if 0 <= button < n else 0:
+                    for c in (high, low):
+                        if 0 <= c < 255:           # 255: the flipper has no such coil
+                            coils[c] = 1
+        for s, angle in list(self.servos.items()):
+            if 0 <= SERVO_COIL + s < n and angle >= SERVO_UP:
+                coils[SERVO_COIL + s] = 1
+        head = struct.pack("<4I", BRIDGE_STATE_MAGIC, BRIDGE_VERSION, seq & 0xFFFFFFFF,
+                           1 if self.bridged else 0)
+        return head + bytes(sw) + bytes(lamps) + bytes(coils)
+
+    def bridge_input(self, data):
+        """Apply a vpxsw.input: each switch the table changed since the last
+        one.  The first after the controller attached sets the ball paths
+        whole (trough, jam, lanes, the rest switches), so the board's own
+        full trough gives way to the table's."""
+        if len(data) < 12 + BRIDGE_SLOTS // 8:
+            return
+        magic, _, _ = struct.unpack_from("<3I", data, 0)
+        if magic != BRIDGE_INPUT_MAGIC:
+            return
+        bits = data[12:12 + BRIDGE_SLOTS // 8]
+        held = {i for i in range(BRIDGE_SLOTS) if bits[i >> 3] >> (i & 7) & 1}
+        if not self.bridged:
+            return
+        if getattr(self, "_bridge_first", True):
+            self._bridge_first = False
+            for k in set(self.trough) | {self.jam} | set(self.lanes) | set(self.rest):
+                self.set_switch(k, k in held, "table", True)
+        for k in sorted(held - self.table_held):
+            self.set_switch(k, 1, "table")
+        for k in sorted(self.table_held - held):
+            self.set_switch(k, 0, "table")
+        self.table_held = held
+
+    def bridge_loop(self):
+        """Publish vpxhw.state; once attached, take vpxsw.input as it changes."""
+        state = os.path.join(self.rig, BRIDGE_STATE)
+        inp = os.path.join(self.rig, BRIDGE_INPUT)
+        attached = os.path.join(self.rig, BRIDGE_ATTACHED)
+        seq, seen, last_write = 0, None, 0.0
+        while True:
+            now = time.monotonic()
+            on = os.path.exists(attached)
+            if on != self.bridged:
+                self.bridged = on
+                self._bridge_first = True
+                self.table_held = set()
+                self.say("a Visual Pinball table attached: it owns the balls" if on
+                         else "the table let go: the board serves the balls")
+            if on:
+                try:
+                    st = os.stat(inp)
+                    key = (st.st_mtime_ns, st.st_size)
+                except OSError:
+                    key = None
+                if key and key != seen:
+                    seen = key
+                    try:
+                        with open(inp, "rb") as f:
+                            self.bridge_input(f.read())
+                    except OSError:
+                        seen = None
+            if on or now - last_write >= BRIDGE_IDLE_S:
+                seq += 1
+                try:
+                    with open(state + ".tmp", "wb") as f:
+                        f.write(self.bridge_block(seq, now))
+                    os.replace(state + ".tmp", state)
+                except OSError as e:
+                    if seq < 3:
+                        self.say("bridge block not written:", e)
+                last_write = now
+            time.sleep(BRIDGE_POLL_S if on else 0.05)
 
     # -- control socket -----------------------------------------------
     def balls_state(self):
@@ -693,6 +829,7 @@ def main():
     threading.Thread(target=b.writer, daemon=True).start()
     threading.Thread(target=b.ctl_loop, args=(os.path.join(rig, "ctl.sock"),),
                      daemon=True).start()
+    threading.Thread(target=b.bridge_loop, daemon=True).start()
     b.serve()
 
 

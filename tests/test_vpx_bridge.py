@@ -2672,7 +2672,9 @@ def test_every_shadow_maps_lamps_are_consistent():
                 leds = [tuple(x) for x in v["leds"]]
                 assert first.setdefault(leds[0], (leds, bool(v.get("rgb")))) == (leds, bool(v.get("rgb"))), \
                     "%s: %s starts on another insert's LED" % (path, name)
-                assert not v.get("rgb") or len(leds) == 3, "%s: %s rgb needs R, G, B" % (path, name)
+                # a Spooky LED is red, green and blue in one (PAD-952)
+                assert not v.get("rgb") or len(leds) == 3 or (len(leds) == 1 and m.get("platform") == "spooky"), \
+                    "%s: %s rgb needs R, G, B" % (path, name)
                 assert not (v.get("rgb") and path.endswith(".vpxmap.json")), "a ROM table's lamps are 0/1"
                 if sect == "retrofit_lights" and path.endswith(".shadow.json"):
                     assert v.get("clone") or m["retrofit_lights"].get("clone"), (path, name)

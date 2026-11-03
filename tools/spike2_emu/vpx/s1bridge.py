@@ -235,3 +235,8 @@ def _log(msg):
         padcontroller.log(msg)
     except Exception:                                       # noqa: BLE001
         pass
+
+
+#: the names padcontroller takes a slot platform's rig and pipe by (PAD-952)
+Rig = Spike1Rig
+Pipe = Spike1Pipe

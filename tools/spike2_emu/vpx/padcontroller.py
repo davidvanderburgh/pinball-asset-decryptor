@@ -85,6 +85,8 @@ import padpath    # noqa: E402  where the rig is
 import padsw      # noqa: E402  offsets into padsw
 import padlaunch  # noqa: E402  starts a run for a table when none is up
 import s1bridge   # noqa: E402  the Spike 1 rig's files, for a Spike 1 title (PAD-943)
+import spkbridge  # noqa: E402  the Spooky rig's files, for a Spooky title (PAD-952)
+SLOT_BRIDGES = {"spike1": s1bridge, "spooky": spkbridge}
 
 try:
     import pythoncom
@@ -116,6 +118,10 @@ SERVICE = {9008: (0, 8),        # Service Select
            9009: (0, 9),        # Service Plus
            9010: (0, 10),       # Service Minus
            9011: (0, 11)}       # Service Back
+#: PAD-952: a map's cabinet can name the coin door's buttons itself (a
+#: Spooky machine's are MENU ENTER, VOLUME UP / DOWN, MENU BACK: no Stern wire)
+SERVICE_KEYS = {9008: "service_select", 9009: "service_plus", 9010: "service_minus",
+                9011: "service_back"}
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT = 1, 2, 4
@@ -440,7 +446,9 @@ class VpxMap:
                     continue
                 leds = [tuple(x) for x in v["leds"]]
                 self.lamp_groups[lamp_number(*leds[0])] = leds
-                if v.get("rgb") and len(leds) == 3:
+                # an insert's R, G and B LEDs; or ONE LED that is all three
+                # (a Spooky board's, PAD-952: its colour is in the slot)
+                if v.get("rgb") and (len(leds) == 3 or (len(leds) == 1 and self.platform == "spooky")):
                     self.rgb_groups.add(lamp_number(*leds[0]))
         self.fakes = {k: v for k, v in m.get("switch_fakes", {}).items() if k != "_"}
         self._load_dof(m)
@@ -1406,22 +1414,33 @@ class Bridge:
         self.title = title
         self.map = VpxMap(title)
         # PAD-943: a Spike 1 title's switches are slots up to 1023
-        self.max_id = s1bridge.N_SLOTS if self.spike1 else padsw.MAX_ID
+        self.max_id = self.rigmod.N_SLOTS if self.slots else padsw.MAX_ID
         log("game %s: map %s (%s): switches=%d solenoids=%d lamp groups=%d"
             % (title, self.map.path or "NONE", self.map.platform, len(self.map.switch_rewrite),
                len(self.map.solenoids), len(self.map.lamp_groups)))
+
+    @property
+    def rigmod(self):
+        """The rig module of a platform whose run publishes one block of
+        slots (PAD-943, PAD-952): s1bridge for Spike 1, spkbridge for
+        Spooky; None for Spike 2 (padled / padsw)."""
+        return SLOT_BRIDGES.get(getattr(self.map, "platform", "spike2"))
+
+    @property
+    def slots(self):
+        return self.rigmod is not None
 
     @property
     def spike1(self):
         return getattr(self.map, "platform", "spike2") == "spike1"
 
     def _sol_number(self, node, idx):
-        return s1bridge.sol_number(node, idx) if self.spike1 else sol_number(node, idx)
+        return self.rigmod.sol_number(node, idx) if self.slots else sol_number(node, idx)
 
     def _rig_up(self, data):
         """A fresh read of the run's output block says the game is up."""
-        if self.spike1:
-            return s1bridge.is_up(data)
+        if self.slots:
+            return self.rigmod.is_up(data)
         return bool(data) and coilmap.has_magic(data)
 
     def dof_init(self, rom, table_file, factory=None):
@@ -1471,7 +1490,7 @@ class Bridge:
         thread attaches when the game is up, and the table plays from then
         on - switches before that are kept and handed over at attach (the
         table's trough, set once at its Init), Visual Pinball never waits."""
-        self.rig = s1bridge.Spike1Rig(self.title) if self.spike1 else Rig(self.title)
+        self.rig = self.rigmod.Rig(self.title) if self.slots else Rig(self.title)
         self.pipe = None
         self.launch = None
         self.attached = False
@@ -1519,7 +1538,7 @@ class Bridge:
 
     def _attach(self, data):
         """The run is up: read its tables, open the switch pipe, own the balls."""
-        pipe = s1bridge.Spike1Pipe(self.rig) if self.spike1 else SwitchPipe(self.rig)
+        pipe = self.rigmod.Pipe(self.rig) if self.slots else SwitchPipe(self.rig)
         with self.lock:
             early, self._early = self._early, {}
             self.pipe = pipe
@@ -1615,11 +1634,12 @@ class Bridge:
         is up, so a run this bridge started may be read again) and the
         flipper buttons' coils for a run without the rule plane."""
         self.sw_ids = self.rig.switch_ids(self.title)
-        if self.spike1:
+        if self.slots:
             # PAD-943: no rule plane on this rig; a held flipper button is a
-            # held flipper coil, and the map's game_on is always armed
-            log("switch table: %d ids from s1switches.json (Spike 1: button coils assumed live)"
-                % len(self.sw_ids))
+            # held flipper coil, and the map's game_on is always armed (the
+            # Spooky board publishes its flipper coils itself: no ids needed)
+            log("switch table: %d ids (%s: button coils assumed live)"
+                % (len(self.sw_ids), padlaunch.PLATFORM_NAMES.get(self.map.platform, self.map.platform)))
             ver = 0
         else:
             ver = struct.unpack_from("<I", data, 4)[0]
@@ -1647,10 +1667,10 @@ class Bridge:
         if self.launch is None:
             return
         if self.rig is None:
-            rec = (s1bridge.board_record(self.title) if self.spike1
+            rec = (self.rigmod.board_record(self.title) if self.slots
                    else Rig.board_slot(self.launch.slot))
             if rec:
-                self.rig = (s1bridge.Spike1Rig(self.title, record=rec) if self.spike1
+                self.rig = (self.rigmod.Rig(self.title, record=rec) if self.slots
                             else Rig(self.title, record=rec))
                 log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         if self.rig is not None:
@@ -1708,7 +1728,7 @@ class Bridge:
             return
         if want:
             self._release_buttons()
-        if self.spike1:
+        if self.slots:
             self.pipe.pause()                # says once that this rig has none
             return
         if want and kit_window_in_front():
@@ -1768,6 +1788,9 @@ class Bridge:
         """The map's switch id for table number `n`; a SERVICE button by its
         wire in this run's switch table (0 until the table is read)."""
         if n is not None and int(n) in SERVICE:
+            own = self.map.cabinet.get(SERVICE_KEYS[int(n)])
+            if own:
+                return own - 1000
             return (getattr(self, "sw_ids", None) or {}).get(SERVICE[int(n)], 0)
         return self.map.switch_id(n)
 
@@ -2191,7 +2214,7 @@ class Bridge:
             self.front_done = True       # after the start, a click on the LCD window is the user's own
 
     def _poll_once(self):
-        if self.spike1:
+        if self.slots:
             return self._poll_once_s1()
         data = read_block(self.rig.led_path(), READ_N)
         if not data or len(data) < coilmap.DRIVE_READ or not coilmap.has_magic(data):
@@ -2213,12 +2236,14 @@ class Bridge:
                 self._poll_dof(data)
 
     def _poll_once_s1(self):
-        """The Spike 1 rig's block (s1bridge): every lamp's level, every coil
+        """The Spike 1 rig's block (s1bridge), or the Spooky board's in the
+        same layout (spkbridge, PAD-952): every lamp's level, every coil
         on or off as the responder saw it, the switches the game is being
         told. The map's groups and RGB inserts work as on Spike 2; a lamp
         with no group is reported under its own 1000+ number."""
-        data = read_block(self.rig.led_path(), s1bridge.STATE_SIZE)
-        parts = s1bridge.unpack(data)
+        rm = self.rigmod
+        data = read_block(self.rig.led_path(), rm.STATE_SIZE)
+        parts = rm.unpack(data)
         if not parts:
             self.poll_fail += 1
             return
@@ -2232,23 +2257,23 @@ class Bridge:
         with self.lock:
             self.mrg = switches
             for n, leds in self.map.lamp_groups.items():
-                levels = [s1bridge.lamp_level(lamps, nd, ix) for nd, ix in leds]
+                levels = [rm.lamp_level(lamps, nd, ix) for nd, ix in leds]
                 if max(levels) < LAMP_ON:
                     self._lamp_set(n, 0)
                 elif n in self.map.rgb_groups:
-                    self._lamp_set(n, rgb_value(*levels))
+                    self._lamp_set(n, rgb_value(*(levels if len(leds) == 3 else rm.lamp_rgb(lamps, *leds[0]))))
                 else:
                     self._lamp_set(n, 1)
-            for node in range(s1bridge.MAX_NODES):
-                for idx in range(s1bridge.MAX_INDEX):
+            for node in range(rm.MAX_NODES):
+                for idx in range(rm.MAX_INDEX):
                     n = lamp_number(node, idx)
                     if n in self.map.lamp_groups:
                         continue
-                    self._lamp_set(n, 1 if s1bridge.lamp_level(lamps, node, idx) >= LAMP_ON else 0)
-            for node in range(s1bridge.MAX_NODES):
-                for idx in range(s1bridge.MAX_INDEX):
+                    self._lamp_set(n, 1 if rm.lamp_level(lamps, node, idx) >= LAMP_ON else 0)
+            for node in range(rm.MAX_NODES):
+                for idx in range(rm.MAX_INDEX):
                     key = (node, idx)
-                    on = 1 if coils[s1bridge.slot(node, idx)] else 0
+                    on = 1 if coils[rm.slot(node, idx)] else 0
                     # a flipper button held in this bridge is a held coil
                     # (no rule plane here: the board's reflex is assumed live)
                     bit = self._button_coils.get(key)
@@ -2261,17 +2286,17 @@ class Bridge:
                 self._sol_set(self.map.game_on[0], 1)
             self._fakes_tick(now)
             if self.dof and self.dof.up:
-                self._poll_dof_s1(lamps)
+                self._poll_dof_s1(lamps, rm)
 
-    def _poll_dof_s1(self, lamps):
+    def _poll_dof_s1(self, lamps, rm):
         m = self.map
         for n, key in m.dof_sols.items():
             self._dof_set("S", n, 1 if self.sol_state.get(self._sol_number(*key)) else 0)
         for n, leds in m.dof_lamps.items():
-            level = max(s1bridge.lamp_level(lamps, nd, ix) for nd, ix in leds)
+            level = max(rm.lamp_level(lamps, nd, ix) for nd, ix in leds)
             self._dof_set("L", n, 1 if level >= LAMP_ON else 0)
         for n, leds in m.dof_flashers.items():
-            level = max(s1bridge.lamp_level(lamps, nd, ix) for nd, ix in leds)
+            level = max(rm.lamp_level(lamps, nd, ix) for nd, ix in leds)
             self._dof_set("S", n, level if level >= LAMP_ON else 0)
 
     @staticmethod

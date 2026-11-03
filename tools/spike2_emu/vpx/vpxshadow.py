@@ -69,7 +69,7 @@ SUB_RE = r"^(\s*)(Public\s+|Private\s+)?Sub\s+(%s)\s*(\([^)]*\))?(\s*'.*|\s*:.*)
 #: spinner standing in for the machine's OPTO: a ball through it spins it a
 #: dozen times, and the opto must see one pass, not twelve
 EVENT_SUBS = {"hit": ("_Hit",), "hold": ("_Hit", "_UnHit"), "spin": ("_Spin",),
-              "pass": ("_Spin",), "slingshot": ("_Slingshot",)}
+              "pass": ("_Spin",), "slingshot": ("_Slingshot",), "drop": ("_Hit",)}
 PASS_MS = 600
 
 
@@ -789,6 +789,12 @@ def gen(m, had, quiet=None, dof=None):
             "\t\tbsTrough.%s" % trough_init(m["trough"]["switches"]),
             "\t\tbsTrough.Balls = %d" % m["trough"].get("balls", 6),
             "\t\tbsTrough.InitKick %s, %d, %d" % (m["trough"]["release"], *m["trough"]["kick"])]
+    for name, s in m["switches"].items():
+        if name != "_" and s.get("event") == "drop" and s.get("up_closed"):
+            # PAD-952: a bank whose switches are made while its targets STAND
+            # (Halloween's pumpkin bank): standing at the start, handed over
+            # when the game is up like the trough
+            out.append("\tController.Switch(%d) = True   ' %s stands" % (1000 + s["id"], name))
     for k, s in saucers(m).items():
         out.append("\tSet bs%s = New cvpmBallStack" % k)
         if s.get("stack") or s.get("kick_from"):
@@ -839,9 +845,11 @@ def gen(m, had, quiet=None, dof=None):
     for key, sw in keymap:
         out.append("\tIf KeyCode = %s Then Controller.Switch(%d) = True" % (key, sw))
     if cab.get("coin"):
-        if m.get("platform") == "spike1":
+        if (m.get("platform") or "spike2") != "spike2":
             # PulseSw is one timer tick, which the Spike 1 node bus's polls miss
-            # (Ghostbusters: CREDITS 0 after three); 600 ms counted on the rig
+            # (Ghostbusters: CREDITS 0 after three); 600 ms counted on the rig.
+            # The Spooky board takes the table's switches from a file it polls
+            # (PAD-952): the same long press
             out.append("\tIf KeyCode = AddCreditKey Then vpmTimer.PulseSwitch %d, 600, 0" % cab["coin"])
         else:
             out.append("\tIf KeyCode = AddCreditKey Then vpmTimer.PulseSw %d" % cab["coin"])
@@ -948,6 +956,24 @@ def gen(m, had, quiet=None, dof=None):
             else:
                 body += fx(name + "_Slingshot")
             out.append("Sub %s_Slingshot : %s : End Sub" % (name, body))
+        elif ev == "drop":
+            # PAD-952: a drop target's switch stays as the hit left it until
+            # the game resets the bank (drop_resets): open on a machine whose
+            # bank reads made while standing (`up_closed`), else made
+            body = "Controller.Switch(%d) = %s" % (sid, "False" if s.get("up_closed") else "True")
+            if had.get(name + "_Hit") and calls_orig(name):
+                body += " : %s_Hit_orig" % name
+            else:
+                body += fx(name + "_Hit")
+            out.append("Sub %s_Hit : %s : End Sub" % (name, body))
+    for sub_name, names in m.get("drop_resets", {}).items():
+        if sub_name == "_":
+            continue
+        # the bank's reset coil stands every target of it up again
+        sets = ["Controller.Switch(%d) = %s" % (1000 + m["switches"][n]["id"],
+                                                "True" if m["switches"][n].get("up_closed") else "False")
+                for n in names]
+        out.append("Sub %s(e) : If e Then %s : End If : End Sub" % (sub_name, " : ".join(sets)))
     # ---- lamps
     if lamps:
         out += ["", "'---- the machine's lamps: number 1000 + node * 100 + LED index, one",
@@ -1050,6 +1076,20 @@ def gen(m, had, quiet=None, dof=None):
         else:
             out.append("Sub %s_Hit : %sbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
                        % (k, enter + " : " if enter else "", k, k, fx(k + "_Hit")))
+        for f, fs in s.get("feeders", {}).items():
+            # PAD-952: another hole into the same lane (Halloween's three left
+            # scoops, one subway): its own entry opto, then the lane's stack
+            fenter = "vpmTimer.PulseSw 1%03d : " % fs["enter"] if fs.get("enter") else ""
+            cap = 1 + len(s.get("stack", []))
+            if s.get("kick_from"):      # a full lane: out where the lane lets balls out
+                full = "Me.DestroyBall : vpmCreateBall %s : %s.Kick %d, %d" % (
+                    s["kick_from"], s["kick_from"], s["dir"], s["power"])
+            else:
+                full = "Me.Kick %d, %d" % (s["dir"], s["power"])
+            out += ["Sub %s_Hit" % f,
+                    "\t%sIf bs%s.Balls >= %d Then %s : Exit Sub" % (fenter, k, cap, full),
+                    "\tbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s" % (k, f, fx(f + "_Hit")),
+                    "End Sub"]
         if s.get("held_ms"):
             # a lock POST (PAD-901): the game holds it down for as long as it
             # wants balls out (Deadpool: 12 s at a multiball, every locked
@@ -1256,8 +1296,10 @@ def patch(script, m):
             continue
         for ev in EVENT_SUBS[s.get("event", "hit")]:
             had[name + ev] = rename_sub(lines, name + ev, rep)
-    for k in saucers(m):
+    for k, sc in saucers(m).items():
         rename_sub(lines, k + "_Hit", rep)
+        for f in sc.get("feeders", {}):
+            rename_sub(lines, f + "_Hit", rep)
     for sub in ("SolLFlipper", "SolRFlipper", "SolULFlipper", "SolURFlipper"):
         had[sub] = has_sub(lines, sub)
     quiet = {}

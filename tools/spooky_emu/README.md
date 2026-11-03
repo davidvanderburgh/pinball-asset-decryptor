@@ -47,6 +47,13 @@ switches. The board reads 64 KB at a time, replies from a writer thread,
 runs at real-time priority, and `spkshim.so` makes a write that would get
 EAGAIN wait for room instead of failing.
 
+**A Visual Pinball table** (PAD-952): the board also keeps `vpxhw.state` and
+`vpxsw.input` in the rig folder for the kit's PAD.Controller
+(tools/spike2_emu/vpx/spkbridge.py); once the controller writes
+`vpxball.off` the table owns the balls and the board's ball model stands
+aside. Halloween and Ultraman play behind marty02's Halloween MM Edition
+(docs/plans/vpx_other_platforms.md).
+
 ## Why this is small
 
 Every one of these is a native x86-64 Linux program (Unity with the Mono

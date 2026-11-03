@@ -212,12 +212,18 @@ export default function Vpx() {
   const downloadChip = (d) => {
     if (!d.read) return html`<span class="vpx-skel vpx-skel-cov" ...${tip("Reading the table…")}></span>`;
     const c = d.catalog;
+    // PAD-952: a game no table can ever play (TNA, America's Most Haunted)
+    if (c && c.no_game) return html`<${Chip} sm kind="info" ...${tip({ head: c.platform_name + " game: plays as its author wrote it",
+      lines: ["The name says it is " + c.name + " (" + c.game + ").", c.no_game,
+        "Play opens your download as it is: the table's own rules play."] })}>Author's rules<//>`;
     const head = c ? c.platform_name + " game: no map yet" : "No map yet";
     return html`<${Chip} sm kind="warn" ...${tip({ head, lines: [
       c ? "The name says it is " + c.name + " (" + c.game + ")." : "The app does not recognize this table.",
       "Nothing plays behind it: the app has no map for it yet, so it plays as its author wrote it.",
       c && c.platform === "spike1" ? "A Spike 1 game: the checklist on the authors' card is where a map starts." : ""].filter(Boolean) })}>No map yet<//>`;
   };
+  // PAD-952: a download whose game can never run here plays from the file itself
+  const asIs = (t) => !!(t.extra && t.download && t.download.read && (t.download.catalog || {}).no_game);
   // PAD-941: a row's coverage (the map's wired parts over what the game has, from
   // this PC's tables) is the button that writes that table's checklist
   const coverage = s.coverage || {};
@@ -353,9 +359,12 @@ export default function Vpx() {
         <span class="vpx-cover">${t.extra ? null : coverBtn(t)}</span>
         <span class="vpx-patch">${t.extra ? null
           : patchBtn(t, !t.patched ? "Patch…" : t.source ? "Patch again" : "Patch again…")}</span>
-        <span class="vpx-play"><${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx || !t.patched}
+        <span class="vpx-play">${asIs(t) ? html`<${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx}
+          title=${"Open " + t.download.file + " in Visual Pinball as it is: its author's own rules play."}
+          onClick=${() => call("vpx.play_download", t.download.path)}>Play<//>`
+          : html`<${Button} size="sm" kind="primary" icon="play" disabled=${busy || !s.vpx || !t.patched}
           title=${t.patched ? "" : "Patch " + t.name + " first: Play opens its (PAD) copy."}
-          onClick=${() => call("vpx.play", t.output)}>Play<//></span>
+          onClick=${() => call("vpx.play", t.output)}>Play<//>`}</span>
         ${stale(t) && t.card ? html`<div class="small vpx-stale">Your copy was patched for the ${t.models[t.patched_title]} and still plays as it.
           Patch again to play it as the ${t.models[t.title]}.</div>` : null}
         ${missed(t) ? html`<div class="small vpx-stale">Your copy was patched before a fix: ${t.repatch.join("; ")}.

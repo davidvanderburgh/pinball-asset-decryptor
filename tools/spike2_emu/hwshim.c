@@ -12202,9 +12202,14 @@ static void led_strip_levels(unsigned node, int bank, const unsigned char *idx,
 static unsigned long led_move_at[LED_MOVE_RING];
 static unsigned led_moves;               /* moving lamp writes, ever */
 
+/* PAD-965: a motor the board drives on two LED-class outputs, as cmd 50 left
+ * it (see led_motor_publish); 0 = not driven, the lamp frames own the cell. */
+static unsigned char led_motor_out[16][96];
+
 static void led_val(unsigned node, unsigned idx, unsigned char v)
 {
     if (!led_shm || node >= 16 || idx >= 96) return;
+    if (led_motor_out[node][idx]) v = led_motor_out[node][idx];
     if (led_shm->val[node][idx] != v
             && (led_shm_len < 8192 || led_shm->seen[node][idx])) {
         led_move_at[led_moves % LED_MOVE_RING] = pad_ms();
@@ -12212,6 +12217,52 @@ static void led_val(unsigned node, unsigned idx, unsigned char v)
     }
     led_shm->val[node][idx] = v;
     led_seen(node, idx);
+}
+
+/* ---- PAD-965: A MOTOR ON TWO LED-CLASS OUTPUTS (cmd 50) ------------------
+ *
+ *     88 05 50 <A> <B> <SPEED> <cksum> 00
+ *
+ * beatles' spinning record (SpinningDiscMotor) has no coil. Its device records
+ * are two LEDs, MOTOR A0 DRIVER and MOTOR A1 DRIVER (node 8, outputs 4 and
+ * 5), and the game never writes them in a lamp frame: it sends cmd 50 naming
+ * the pair and a speed - `50 04 05 ff` to run the record, `50 04 05 00` to
+ * stop it. Measured on beatles 1.29 (PAD_NB_TRACE=1, rig 3, 2026-11-03): one
+ * run at boot (the record's test spin, 14.5 s .. 17.7 s) and then one before
+ * EVERY burst of MAGNET-RECORD, 15 ms ahead of the coil, stopped 5.2 s later
+ * - six catches, six spins. The real record throws the ball it caught.
+ *
+ * Nothing read cmd 50, so outputs 4 and 5 sat at 0 in the LED plane, the
+ * Visual Pinball table's record (lamp calls 1804/1805 -> PadRecordMotor) never
+ * turned, and every ball the magnet caught dropped off it down the middle.
+ * So the speed is published on output A while B is held at 0 - one side of
+ * the bridge driven, which is the motor running - and the cells stay that
+ * way against the lamp frames until the next cmd 50 says otherwise. Which
+ * way round SPEED turns the disc is not known (only 00 and ff were ever
+ * sent); the table only needs to know it runs. */
+static void led_motor_publish(const unsigned char *p, int n)
+{
+    unsigned node, a, b;
+    unsigned char v;
+    char line[128];
+    static int budget = 40;
+    if (n < 6 || !(p[0] & 0x80) || p[2] != 0x50) return;
+    node = p[0] & 0x3f;
+    a = p[3];
+    b = p[4];
+    v = p[5];
+    if (node >= 16 || a >= 96 || b >= 96 || a == b) return;
+    led_motor_out[node][a] = 0;
+    led_motor_out[node][b] = 0;
+    led_val(node, a, v);
+    led_val(node, b, 0);
+    led_motor_out[node][a] = v;
+    if (budget > 0) {
+        budget--;
+        snprintf(line, sizeof line, "[motor] %lu ms node %u outputs %u/%u: speed %02x%s\n",
+                 pad_ms(), node, a, b, v, v ? " (running)" : " (stopped)");
+        logmsg(line);
+    }
 }
 
 /* Is the picture moving at show rate right now: LED_MOVE_RING lamp writes
@@ -15302,6 +15353,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         nb_log("TX", nb_req, nb_req_len, 0);
         sw_find_maybe();
         led_publish(nb_req, nb_req_len);
+        led_motor_publish(nb_req, nb_req_len);  /* PAD-965 */
         coil_publish(nb_req, nb_req_len);
         coil_drive_note(nb_req, nb_req_len);    /* PAD-381 */
         coil_rule_note(nb_req, nb_req_len);     /* PAD-775 */

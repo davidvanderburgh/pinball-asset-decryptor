@@ -27,7 +27,8 @@ driven by beatles.vpxmap.json:
            balls the game counts (PAD-933: six made it serve three);
            the top magnet follows MAGNET-TOP, a new record magnet
            MAGNET-RECORD (a pull, not a grab: PAD-950), the record turns
-           on its motor's LED channels;
+           on its motor's outputs and spins up while the magnet holds the
+           ball, so it throws it (PAD-965);
            UpdateLamps is regenerated: every insert on its Stern LED, the
            flasher domes and spinner flashes on theirs;
            the tribute's own rules (modes, ball save, the lock and its balls,
@@ -354,7 +355,9 @@ def patch_script(src, m):
         "\t.CreateEvents \"mRecordMagnet\"",
         "End With",
         "",
-        "' the record turns on its motor's two LED channels (MOTOR A0 / A1 DRIVER)",
+        "' the record turns on its motor's two outputs (MOTOR A0 / A1 DRIVER), and",
+        "' gets to speed while the magnet still holds the ball (PAD-965)",
+        "spinner.SpinUp = %d" % m["lamp_calls"]["RecordMotorA0"]["spin_up"],
         "Sub PadRecordMotor(n, v)",
         "\tpadMotor(n) = v",
         "\tspinner.SpinCW = (padMotor(1) = 0)",

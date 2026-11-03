@@ -527,3 +527,28 @@ table names input 4 EXTRA BALL (FRONT LEFT) SWITCH and lists no coil on node
   out. Whether a real board reports "rule done" in some reply, and where, is
   open. Cost: anything that waits for the shark hears about it 10 s late.
 - The fin's SHARK POSITION 1..7 between its end stops (above).
+
+# A motor on two LED-class outputs: beatles' spinning record (PAD-965)
+
+The record (SpinningDiscMotor) has no coil and no stop switches. Its device
+records are two LEDs on node 8, MOTOR A0 DRIVER (output 4) and MOTOR A1
+DRIVER (output 5), and the game never writes them in a lamp frame. It sends
+
+    88 05 50 04 05 ff <ck> 00     run: the pair, then the speed
+    88 05 50 04 05 00 <ck> 00     stop
+
+Measured on beatles 1.29 (PAD_NB_TRACE=1, rig 3, 2026-11-03): one run at boot
+(the record's test spin, 14.5 s to 17.7 s), then one 15 ms ahead of EVERY
+burst of MAGNET-RECORD, stopped 5.2 s later - six catches, six spins. Only 00
+and ff were ever sent, so which way round the speed turns it is not known.
+
+Nothing read cmd 50, so both outputs sat at 0 in the LED plane and the Visual
+Pinball table's record (lamp calls 1804/1805 -> PadRecordMotor) never turned:
+every ball the magnet caught dropped off it down the middle (PAD-950 read that
+as "the game never runs the motor"). hwshim.c's led_motor_publish() now puts
+the speed on output A and holds B at 0 until the next cmd 50, and the lamp
+frames cannot overwrite a driven output (led_motor_out). The patched table
+also spins the record up in 0.6 s (SpinUp 100) where core.vbs's default takes
+6 s, longer than the game runs it. Proven: tests/test_spike2_led_motor.py, and
+a rig game through the bridge with lamp 1804 on 10-20 ms before each of six
+MAGNET-RECORD bursts and off 5.2 s later.

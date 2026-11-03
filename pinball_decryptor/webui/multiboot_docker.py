@@ -69,6 +69,12 @@ import time
 IMAGE = "pad-multiboot:5"
 CONTAINER = "pad-multiboot-worker"
 
+#: Named volume mounted at ``/root`` in the container so the unpacked Stern
+#: Spike 2 rootfs (``/root/spike2root``, ~350 MB) and built selector
+#: (``/root/emusrc``) survive container restarts and mount updates instead
+#: of being re-extracted from the 8 GB card every time a folder is added.
+ROOT_VOLUME = "pad-multiboot-root"
+
 #: The architecture the image and the container are built and run for - see
 #: the module docstring.  Named on the command line rather than left to the
 #: host, because the host is the one thing that must NOT decide it.
@@ -475,7 +481,12 @@ def _running_state():
     # "Error response from daemon: container ... is not running".
     if len(lines) < 2 or lines[0].strip() != "true" or not lines[1].strip():
         return None
-    return lines[1].strip(), set(x for x in lines[2:] if x.strip())
+    # Named volumes (such as ROOT_VOLUME at /root) appear in .Mounts under
+    # the VM's /var/lib/... storage path; only host bind mounts belong in the
+    # set compared against mount_points(paths) | {cache_root()}.
+    return (lines[1].strip(),
+            set(x.strip() for x in lines[2:]
+                if x.strip() and not x.strip().startswith("/var/lib/")))
 
 
 #: Left in a folder with nothing in it to look for from inside the
@@ -697,6 +708,7 @@ def ensure_container(paths, repo_src, log=None):
     with _LOCK:
         _ensure_container(paths, repo_src, log)
         _PREVIEW_REFUSED.clear()
+        _BUILD_FAILED.clear()
 
 
 def _ensure_container(paths, repo_src, log):
@@ -713,7 +725,8 @@ def _ensure_container(paths, repo_src, log):
         _docker(["rm", "-f", CONTAINER], timeout=30)
         args = ["run", "-d", "--name", CONTAINER, "--privileged",
                 "--platform", PLATFORM,
-                "-v", "%s:/tmp" % cache_root()]
+                "-v", "%s:/tmp" % cache_root(),
+                "-v", "%s:/root" % ROOT_VOLUME]
         for d in want:
             args += ["-v", "%s:/host%s" % (d, d)]
         args += [IMAGE, "sleep", "infinity"]
@@ -728,21 +741,20 @@ def _ensure_container(paths, repo_src, log):
 
 
 def ensure_ready_container(paths, repo_src, log=None):
-    """Start or remount the container when :data:`IMAGE` is ALREADY built.
+    """Build :data:`IMAGE` if needed and start or remount the container.
     True when a container that serves *paths* is up afterwards.
 
-    Background preview and size-check runs call this on the worker thread,
-    on every redraw.  So it never builds the multi-minute image behind a
-    keystroke, and when the container is already up on this image with
-    these folders mounted it stops after one ``docker inspect`` and one
-    ``docker image inspect``: no ``docker info``, and no copy of the rigs
-    (``tools/spike2_emu`` alone is ~50 MB) - :func:`stage_rig` runs once
-    per app session here, and on every writing run as before.
+    Background warm-up, preview and size-check runs call this on a worker
+    thread so the toolbox is ready before the user presses Build.  When the
+    container is already up on this image with these folders mounted it
+    stops after one ``docker inspect`` and one ``docker image inspect``: no
+    ``docker info``, and no copy of the rigs (``tools/spike2_emu`` alone is
+    ~50 MB) - :func:`stage_rig` runs once per app session here, and on every
+    writing run as before.
 
-    A mount set the engine could not see (:class:`Unshared`) is not tried
-    again on the next redraw: that would start and remove a container per
-    keystroke.  The Build offers to share the folders; once a writing run
-    has brought a container up, the set is tried again.
+    A mount set the engine could not see (:class:`Unshared`) or a failed
+    image build is not tried again on the next redraw: that would retry on
+    every keystroke.  A writing run (:func:`ensure_container`) clears both.
     """
     want = frozenset(mount_points(paths))
     with _LOCK:
@@ -754,10 +766,19 @@ def ensure_ready_container(paths, repo_src, log=None):
                     stage_rig(repo_src)
                     _STAGED.add(repo_src)
                 return True
-            if want in _PREVIEW_REFUSED:
+            if want in _PREVIEW_REFUSED or IMAGE in _BUILD_FAILED:
                 return False
-            if unavailable_reason() or _image_field(".Architecture") != ARCH:
+            if unavailable_reason():
                 return False
+            if not want:
+                # Opening the tab with an empty form warms the image and stages
+                # the rig in the background without starting a mountless
+                # container that the first picked image would have to replace.
+                ensure_image(log)
+                if repo_src not in _STAGED:
+                    stage_rig(repo_src)
+                    _STAGED.add(repo_src)
+                return True
             if log:
                 log("starting the Linux toolbox container"
                     + (" (mounting %s)..." % ", ".join(sorted(want))
@@ -767,6 +788,7 @@ def ensure_ready_container(paths, repo_src, log=None):
             _PREVIEW_REFUSED.add(want)
             return False
         except Exception:                               # noqa: BLE001
+            _BUILD_FAILED.add(IMAGE)
             return False
     return True
 
@@ -777,6 +799,9 @@ _LOCK = threading.RLock()
 
 #: Mount sets a preview found the engine could not see (see above).
 _PREVIEW_REFUSED = set()
+
+#: Images whose background build failed in this session (retried on Build).
+_BUILD_FAILED = set()
 
 #: Repo sources :func:`stage_rig` has copied in this app session.
 _STAGED = set()

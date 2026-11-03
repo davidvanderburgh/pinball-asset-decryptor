@@ -221,8 +221,10 @@ def known_tables(tables_dir=None):
     folder, the title Patch takes for it and the card that title boots.
     Maps for one download (JP's Foo Fighters: Pro and LE) are one row:
     `titles` all of them, preferred first, `title` the one padvpx.choose()
-    takes, `models` each one's model."""
+    takes, `models` each one's model, `url` the page its author put the
+    download on (PAD-961: the map's, else the catalogue's for that title)."""
     tables_dir = vpx_tables_dir() if tables_dir is None else tables_dir
+    cat_urls = {t["title"]: t["url"] for t in load_catalog()["tables"] if t.get("title") and t.get("url")}
     rows = {}
     for title, info in padvpx.maps().items():
         if not info.get("listed", True):
@@ -237,11 +239,12 @@ def known_tables(tables_dir=None):
         if row is None:
             row = rows[out_name or title] = {
                 "name": t.get("name") or title, "by": t.get("by") or "",
-                "where": t.get("where") or "", "output": out_name,
+                "where": t.get("where") or "", "url": t.get("url") or "", "output": out_name,
                 "patched": bool(out_name and tables_dir
                                 and os.path.isfile(os.path.join(tables_dir, out_name))),
                 "titles": [], "models": {}, "fits": []}
         row["titles"].append(title)
+        row["url"] = row["url"] or t.get("url") or cat_urls.get(title, "")
         row["models"][title] = info["model"]
         row["fits"].append((title, info))
         row.setdefault("marks", []).extend(m.get("repatch") or [])

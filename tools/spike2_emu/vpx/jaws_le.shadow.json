@@ -23,7 +23,7 @@
     "JAWS_50Th_Anniversary"
   ],
   "output": "JAWS_50Th_Anniversary (PAD).vpx",
-  "table": {"name": "JAWS 50th Anniversary 3.2", "by": "JPSalas & marty", "where": "VPUniverse"},
+  "table": {"name": "JAWS 50th Anniversary 3.2", "by": "JPSalas & marty", "where": "VPUniverse", "url": "https://vpuniverse.com/files/file/25943-jaws_50th_anniversary/"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
   "cabinet": {"start": 1036, "launch": 1034, "launch_key": "PlungerKey", "tilt": 1038, "slam": 1045, "left_flipper": 1054, "right_flipper": 1053, "up_right_flipper": 1055, "coin": 1039, "coin_door_interlock": 1033},

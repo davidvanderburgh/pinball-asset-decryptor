@@ -24,7 +24,7 @@
     "Team Hackjob"
   ],
   "output": "Iron Maiden (Original 2022) VPW 1.0.12 (PAD).vpx",
-  "table": {"name": "Iron Maiden Legacy of the Beast (Original 2022) VPW 1.0.12", "by": "Team Hackjob + VPW (on JPSalas' Mago de Oz)", "where": "VPUniverse"},
+  "table": {"name": "Iron Maiden Legacy of the Beast (Original 2022) VPW 1.0.12", "by": "Team Hackjob + VPW (on JPSalas' Mago de Oz)", "where": "VPUniverse", "url": "https://vpuniverse.com/files/file/12603-iron-maiden-legacy-of-the-beast-original-2022-vpw/"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
   "cabinet": {"start": 1036, "launch": 1034, "launch_key": "LockBarKey", "tilt": 1038, "slam": 1045, "left_flipper": 1062, "right_flipper": 1061, "up_right_flipper": 1063, "up_left_flipper": 1064, "coin": 1039, "coin_door_interlock": 1033},

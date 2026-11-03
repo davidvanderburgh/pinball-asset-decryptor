@@ -22,7 +22,7 @@
   "table": {
     "name": "BOND for Visual Pinball X 4.3",
     "by": "marty & jpsalas",
-    "where": "VPUniverse"
+    "where": "VPUniverse", "url": "https://vpuniverse.com/files/file/11827-bond-60-th/"
   },
   "solenoid_max": 68,
   "game_on": {

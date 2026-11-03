@@ -23,7 +23,7 @@
     "jpsdeadpool"
   ],
   "output": "JP's Deadpool v610 (PAD).vpx",
-  "table": {"name": "JP's Deadpool 6.10", "by": "jpsalas", "where": "VPForums"},
+  "table": {"name": "JP's Deadpool 6.10", "by": "jpsalas", "where": "VPForums", "url": "https://www.vpforums.org/index.php?app=downloads&showfile=15967"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
   "cabinet": {"start": 1036, "launch": 1034, "launch_key": "LockBarKey", "tilt": 1038, "slam": 1045, "left_flipper": 1063, "right_flipper": 1062, "coin": 1039, "coin_door_interlock": 1033},

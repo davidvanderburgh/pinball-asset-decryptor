@@ -43,9 +43,12 @@ PATH=$PATH:/usr/local/bin:/opt/homebrew/bin:/opt/local/bin
 PATH=$PATH:$HOME/.docker/bin:$HOME/.rd/bin:$HOME/.orbstack/bin
 PATH=$PATH:/opt/podman/bin
 PATH=$PATH:/Applications/Docker.app/Contents/Resources/bin
+# Podman stands in for docker through a `docker` link to it, in one shim
+# folder per user that every start reuses (a folder per run would pile up
+# in TMPDIR, as nothing after the exec below is left to remove it).
 if [ -n "${PAD_DOCKER:-}" ] && [ -x "$PAD_DOCKER" ]; then
     if [ "$(basename "$PAD_DOCKER")" != "docker" ]; then
-        _SHIM="${TMPDIR:-/tmp}/pad-docker-shim-$$"
+        _SHIM="${TMPDIR:-/tmp}/pad-docker-shim-$(id -u)"
         mkdir -p "$_SHIM"
         ln -sf "$PAD_DOCKER" "$_SHIM/docker"
         PATH="$_SHIM:$PATH"
@@ -56,7 +59,7 @@ fi
 export PATH
 
 if ! command -v docker >/dev/null 2>&1 && command -v podman >/dev/null 2>&1; then
-    _SHIM="${TMPDIR:-/tmp}/pad-docker-shim-$$"
+    _SHIM="${TMPDIR:-/tmp}/pad-docker-shim-$(id -u)"
     mkdir -p "$_SHIM"
     ln -sf "$(command -v podman)" "$_SHIM/docker"
     PATH="$_SHIM:$PATH"

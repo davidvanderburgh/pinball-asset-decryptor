@@ -491,9 +491,10 @@ def _running_state():
     # "Error response from daemon: container ... is not running".
     if len(lines) < 2 or lines[0].strip() != "true" or not lines[1].strip():
         return None
-    # Named volumes (such as ROOT_VOLUME at /root) appear in .Mounts under
-    # the VM's /var/lib/... storage path; only host bind mounts belong in the
-    # set compared against mount_points(paths) | {cache_root()}.
+    # A volume the engine adds itself (an image's VOLUME) shows in .Mounts
+    # under the VM's /var/lib/... storage path; only host bind mounts belong
+    # in the set compared against mount_points(paths) | {cache_root()}, and
+    # a Mac has no /var/lib of its own to bind.
     return (lines[1].strip(),
             set(x.strip() for x in lines[2:]
                 if x.strip() and not x.strip().startswith("/var/lib/")))

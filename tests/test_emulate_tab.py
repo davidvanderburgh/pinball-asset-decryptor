@@ -1155,6 +1155,7 @@ def test_docker_cli_prefers_running_engine_when_both_present(monkeypatch):
             return "/opt/podman/bin/podman"
         return None
     monkeypatch.setattr(emulate_core, "which_tool", fake_which)
+    monkeypatch.setattr(emulate_core, "_BOTH_PICK", {})
 
     def run_docker_up(cmd, **kwargs):
         rc = 0 if cmd[0] == "/usr/local/bin/docker" else 1
@@ -1165,6 +1166,26 @@ def test_docker_cli_prefers_running_engine_when_both_present(monkeypatch):
     def run_podman_up(cmd, **kwargs):
         rc = 0 if cmd[0] == "/opt/podman/bin/podman" else 1
         return subprocess.CompletedProcess(cmd, rc)
+    monkeypatch.setattr(emulate_core.subprocess, "run", run_podman_up)
+    # The answered pick is kept a while: no probe per docker call.
+    assert emulate_core.docker_cli() == "/usr/local/bin/docker"
+    emulate_core._BOTH_PICK.clear()
+    assert emulate_core.docker_cli() == "/opt/podman/bin/podman"
+    probes = []
+
+    def run_counted(cmd, **kwargs):
+        probes.append(cmd[0])
+        return run_podman_up(cmd, **kwargs)
+    monkeypatch.setattr(emulate_core.subprocess, "run", run_counted)
+    for _ in range(5):
+        assert emulate_core.docker_cli() == "/opt/podman/bin/podman"
+    assert probes == []
+
+    # Neither answering is not kept: starting one is seen on the next ask.
+    emulate_core._BOTH_PICK.clear()
+    monkeypatch.setattr(emulate_core.subprocess, "run",
+                        lambda cmd, **k: subprocess.CompletedProcess(cmd, 1))
+    assert emulate_core.docker_cli() == "/usr/local/bin/docker"
     monkeypatch.setattr(emulate_core.subprocess, "run", run_podman_up)
     assert emulate_core.docker_cli() == "/opt/podman/bin/podman"
 

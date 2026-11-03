@@ -865,18 +865,31 @@ def docker_cli():
     d = which_tool("docker")
     p = which_tool("podman")
     if d and p:
-        # Both installed; prefer whichever engine is currently responsive
+        # Both installed; prefer whichever engine is currently responsive.
+        # Every docker call in the app asks this, so a pick that answered is
+        # kept for _BOTH_PICK_S; one that did not is asked again next time,
+        # so starting either engine is seen at once.
+        when, pick = _BOTH_PICK.get((d, p), (0.0, None))
+        if pick and time.monotonic() - when < _BOTH_PICK_S:
+            return pick
         for exe in (d, p):
             try:
                 r = subprocess.run([exe, "info"], stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL, timeout=2,
                                    creationflags=_CREATE_FLAGS)
                 if r.returncode == 0:
+                    _BOTH_PICK[(d, p)] = (time.monotonic(), exe)
                     return exe
             except Exception:
                 pass
         return d
     return d or p
+
+
+#: docker_cli()'s last answered pick when docker and podman are both
+#: installed, {(docker, podman): (monotonic time, exe)} (PR #17 review).
+_BOTH_PICK = {}
+_BOTH_PICK_S = 30.0
 
 
 def docker_engine():

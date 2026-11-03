@@ -599,7 +599,8 @@ class DockerExecutor(CommandExecutor):
     def check_available(self):
         cli = self._cli()
         name = "Podman" if "podman" in os.path.basename(cli).lower() else "Docker"
-        desktop = f"{name} Desktop"
+        desktop = ("Podman Desktop, or run 'podman machine start'"
+                   if name == "Podman" else "Docker Desktop")
         try:
             result = subprocess.run(
                 [cli, "info"],

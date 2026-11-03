@@ -17,8 +17,10 @@ it opens - with a progress bar and the step the run is on, read from the
 run's own log, and goes when the game is up.
 
 The controller (padcontroller.Bridge) starts it with the run and writes the
-status file: `up` closes it; `failed <why>` shows why for a few seconds,
-then closes it. It also closes when the controller's process is gone, and
+status file: `boot <pct> <words>` is the step a Spike 2 game's own boot is
+on once the run is attached (bootprog.py: node boards, Tech Alerts - the
+game is not playable until attract, PAD-963); `up` closes it; `failed <why>`
+shows why for a few seconds, then closes it. It also closes when the controller's process is gone, and
 never takes the focus: Visual Pinball pauses the table when it loses it.
 """
 import os
@@ -71,6 +73,17 @@ def progress(floor, elapsed, expect):
     a floor, and it never reads done until the game is."""
     pace = elapsed / expect if expect > 0 else 0.0
     return min(0.95, max(floor, pace))
+
+
+def boot_step(said):
+    """(floor, words) from the controller's `boot <pct> <words>`, or None."""
+    parts = said.split(" ", 2)
+    if len(parts) < 3 or parts[0] != "boot":
+        return None
+    try:
+        return min(0.95, int(parts[1]) / 100.0), parts[2]
+    except ValueError:
+        return None
 
 
 def name_of(title):
@@ -224,6 +237,9 @@ def main(argv):
             root.after(250, tick)
             return
         floor, words = step_of(log_tail(logfile, start))
+        booting = boot_step(said)
+        if booting:
+            floor, words = max(floor, booting[0]), booting[1].rstrip("…")
         pct = progress(floor, now - t0, expect)
         bar.coords(fill, 0, 0, int(420 * pct), 8)
         step.configure(text=words + "…")

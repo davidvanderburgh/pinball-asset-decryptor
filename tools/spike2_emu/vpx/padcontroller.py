@@ -83,6 +83,7 @@ if RIG not in sys.path:
 import coilmap    # noqa: E402  offsets into padled, the drive decoder
 import padpath    # noqa: E402  where the rig is
 import padsw      # noqa: E402  offsets into padsw
+import bootprog   # noqa: E402  how far a Spike 2 boot is, off the run's own log (PAD-963)
 import padlaunch  # noqa: E402  starts a run for a table when none is up
 import s1bridge   # noqa: E402  the Spike 1 rig's files, for a Spike 1 title (PAD-943)
 import spkbridge  # noqa: E402  the Spooky rig's files, for a Spooky title (PAD-952)
@@ -1383,6 +1384,8 @@ class Bridge:
         self.b2s_handed = set()            # ... and each backglass window, once (PAD-893)
         self.front_tries = {}              # hand-backs tried per window (PAD-949)
         self.attached_t = 0.0
+        self.boot = None                   # a started run's boot, read until the game is in attract
+        self.ready_t = 0.0                 # ... and when it got there (PAD-963)
         self.lcd_placed = False            # ... and put where the kit says, on top, once
         self.player_placed = False         # Visual Pinball's own window moved where the kit says, once
         self.start_t = 0.0
@@ -1494,6 +1497,8 @@ class Bridge:
         self.pipe = None
         self.launch = None
         self.attached = False
+        self.boot = None
+        self.ready_t = 0.0
         self.start_t = time.monotonic()
         self.front_done = False            # the LCD window's first grab is undone once, never again
         self.b2s_handed = set()            # backglass windows whose first grab was undone (PAD-893)
@@ -1569,7 +1574,63 @@ class Bridge:
         self.attached_t = time.monotonic()
         log("attached to %s after %.0f s" % (self.rig.how, time.monotonic() - self.start_t))
         if self.launch is not None:
-            self._loading_end("up", time.monotonic() - self.start_t)
+            self._boot_watch()
+
+    # -- PAD-963: a started run is up when the game is in attract
+    #: how long a boot log may stay unreadable before the run counts as up
+    BOOT_LOG_S = 15.0
+
+    def _boot_watch(self):
+        """The padled block comes up early in a Spike 2 boot: Batman sat on
+        "Startup In Progress" for two more minutes after it (its card read
+        off D:), with the loading window gone and the hand-backs over, so the
+        game's LCD window took the foreground and Visual Pinball paused until
+        the player clicked it (David). So a run this bridge started is READY
+        only when its log says attract (bootprog.py, as the app's footer and
+        the playfield window read it); until then the loading window says
+        which step the boot is on, and the run's windows are still handed
+        back from (_starting). A rig that keeps no such log is ready now."""
+        logdir = ""
+        if not self.slots and self.rig is not None and getattr(self.rig, "slot", None):
+            # a slot's logs are beside its root: padslots/<n>/root/dump
+            logdir = os.path.dirname(os.path.dirname(self.rig.dump))
+        if not logdir:
+            self._ready()
+            return
+        self.boot = bootprog.BootLog(logdir)
+        self._boot_seen = time.monotonic()
+        self._poll_boot()
+
+    def _poll_boot(self):
+        """Once a second until the started run's game is in attract."""
+        if self.boot is None:
+            return
+        now = time.monotonic()
+        got = self.boot.poll()
+        if got is None:
+            if now - self._boot_seen > self.BOOT_LOG_S:
+                log("no boot log at %s: the game counts as up" % self.boot.logdir)
+                self._ready()
+            return
+        self._boot_seen = now
+        state, pct, words = got
+        if state == "attract":
+            self._ready()
+        elif "Stuck" in words or now - self.start_t > self.START_TIMEOUT_S:
+            # the game's own screen says what it needs (Service Back): the
+            # loading window must not stand over it
+            log("game not in attract after %.0f s (%s); its window is the player's"
+                % (now - self.start_t, words))
+            self._ready()
+        else:
+            self._loading_say("boot %d %s" % (pct, words))
+
+    def _ready(self):
+        self.boot = None
+        self.ready_t = time.monotonic()
+        took = self.ready_t - self.start_t
+        log("game ready after %.0f s" % took)
+        self._loading_end("up", took)
 
     # -- PAD-940: the loading window, while a run this bridge started comes up
     def _loading_start(self):
@@ -1603,6 +1664,17 @@ class Bridge:
             if proc.poll() is None:
                 proc.terminate()
         except Exception:                                   # noqa: BLE001
+            pass
+
+    def _loading_say(self, word):
+        """A line for the loading window while the game boots: `boot <pct>
+        <words>` (padloading.py shows it)."""
+        if not getattr(self, "_loading", None):
+            return
+        try:
+            with open(self._loading_file, "w", encoding="utf-8") as f:
+                f.write(word)
+        except OSError:
             pass
 
     def _loading_end(self, word, took=None):
@@ -1840,6 +1912,9 @@ class Bridge:
                 self._poll_starting()
                 time.sleep(1.0)
                 continue
+            if self.boot is not None and now - getattr(self, "_boot_check", 0.0) >= 1.0:
+                self._boot_check = now
+                self._poll_boot()
             t0 = time.monotonic()
             self._poll_once()
             if now - getattr(self, "_front_check", 0.0) >= 0.25:
@@ -2147,7 +2222,8 @@ class Bridge:
         in the game's window until Alt+Tab (Mike's Beatles). So it
         counts only when the player really is in front after it, and the
         run's own windows are handed back from every time until
-        FRONT_SETTLE_S after the game is up."""
+        FRONT_SETTLE_S after the game is up - in attract, not merely
+        attached (PAD-963)."""
         if sys.platform != "win32":
             return
         try:
@@ -2174,7 +2250,7 @@ class Bridge:
     def _starting(self):
         """A run this bridge started that is not up yet, or only just."""
         return self.launch is not None and (
-            not self.attached or time.monotonic() - self.attached_t < FRONT_SETTLE_S)
+            not self.attached or not self.ready_t or time.monotonic() - self.ready_t < FRONT_SETTLE_S)
 
     def _hand_back_from(self, fg, title, pid=0):
         """Whether the window in front is one whose grab is undone. The

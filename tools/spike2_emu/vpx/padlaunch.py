@@ -296,6 +296,20 @@ def wsl_head(dist=None, root=False):
     return head
 
 
+def _rigdata(why):
+    """The app's core/rigdata.py, from the app's package beside the kit, or
+    None (logged with `why`) where there is none."""
+    app = os.path.dirname(os.path.dirname(os.path.abspath(rig_dir())))
+    if app not in sys.path:
+        sys.path.append(app)
+    try:
+        from pinball_decryptor.core import rigdata
+    except Exception as exc:                                # noqa: BLE001
+        log("no app package beside the rig (%s): %s" % (exc, why))
+        return None
+    return rigdata
+
+
 def app_home(dist):
     """The app's PAD_HOME for a run in `dist`, or "" for the rig's own default.
 
@@ -306,15 +320,8 @@ def app_home(dist):
     asks rigdata the same question, from the app's package beside the kit."""
     if sys.platform != "win32" or dist != RUNTIME_DISTRO:
         return ""
-    app = os.path.dirname(os.path.dirname(os.path.abspath(rig_dir())))
-    if app not in sys.path:
-        sys.path.append(app)
-    try:
-        from pinball_decryptor.core import rigdata
-    except Exception as exc:                                # noqa: BLE001
-        log("no app package beside the rig (%s): the rig's own PAD_HOME" % exc)
-        return ""
-    if not rigdata.exists():
+    rigdata = _rigdata("the rig's own PAD_HOME")
+    if rigdata is None or not rigdata.exists():
         return ""
     try:
         rigdata.ensure(dist, log=log)
@@ -322,6 +329,27 @@ def app_home(dist):
         log("the app's data disk did not attach (%s): the rig's own PAD_HOME" % exc)
         return ""
     return rigdata.work_dir("spike2") or ""
+
+
+def card_store(dist):
+    """Attach the shared Spike 2 card store (PAD-651) when this PC has one and
+    a WSL restart left it off, as the app's Emulate tab does before every run.
+    Without it cardmount.sh falls back to the distro's own cache, and when
+    that has no room for the card the game boots off the Windows drive
+    through 9p: Batman 1.14 took 148 s to attract that way, the table sitting
+    on "Startup In Progress" (PAD-963). Never a refusal: the run goes on."""
+    if sys.platform != "win32":
+        return
+    rigdata = _rigdata("no card store")
+    if rigdata is None or not rigdata.cards_exists():
+        return
+    dist = dist or next(iter(distros()), None)
+    if not dist:
+        return
+    try:
+        rigdata.ensure_cards(dist, log=log)
+    except Exception as exc:                                # noqa: BLE001
+        log("the card store did not attach (%s): the card is read where it lies" % exc)
 
 
 _ACCOUNT = {}
@@ -479,6 +507,7 @@ class Launch:
                          timeout=60).returncode == 1:
             log("no rig at %s" % base)
             raise RuntimeError(NO_RIG)
+        card_store(self.distro)
         if self.slot is None:
             self.take_slot()
         head, self.as_root = self.head()
@@ -519,15 +548,8 @@ def app_work(dist, rig="spike2"):
     PAD_HOME, "spike1" the S1_WORK that tools/spike1_emu reads (PAD-943)."""
     if sys.platform != "win32" or dist != RUNTIME_DISTRO:
         return ""
-    app = os.path.dirname(os.path.dirname(os.path.abspath(rig_dir())))
-    if app not in sys.path:
-        sys.path.append(app)
-    try:
-        from pinball_decryptor.core import rigdata
-    except Exception as exc:                                # noqa: BLE001
-        log("no app package beside the rig (%s): the rig's own work dir" % exc)
-        return ""
-    if not rigdata.exists():
+    rigdata = _rigdata("the rig's own work dir")
+    if rigdata is None or not rigdata.exists():
         return ""
     try:
         rigdata.ensure(dist, log=log)

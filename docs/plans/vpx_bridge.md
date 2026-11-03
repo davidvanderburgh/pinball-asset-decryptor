@@ -774,3 +774,49 @@ Not done: a capture of the table as Visual Pinball renders it (David's
 "fed live"). It would need Visual Pinball running on David's desktop to
 prove, which a session never does, and the table's own picture covers
 every table here but Metallica.
+
+## A minute to the first ball (PAD-963)
+
+David (2026-11-03): "VPX stern game startup painfully slow ... needs to be
+less than 1 minute to when we can plunge a ball", with a picture of Batman
+66 on "Startup In Progress..." behind the table, and: "for batman i had to
+click on the virtual playfield to continue loading the game".
+
+His 07:49 run said why in its own log: `[card] disk too full to cache (7 GB
+free, want 15 GB) and nothing evictable - running off the original`. The
+shared card store (PAD-651) holds every newest build, but WSL had restarted
+15 hours before and nothing had attached the store again: the app's Emulate
+tab does that before every run (`_reattach_card_store`), a run Visual
+Pinball starts did not. So cardmount.sh fell back to PAD-Runtime's own
+cache, which had no room, and Batman read its card off D: through 9p.
+
+Two things changed:
+
+* **The launch attaches the store** (`padlaunch.card_store`, through the
+  app's `rigdata.ensure_cards`) before watch.sh, for a Spike 2 title: 2.3 s
+  when it is off, 0.5 s when it is on, nothing on a PC with no store, and a
+  refusal is a line in the log, never a dead table.
+* **A run the controller started is up at ATTRACT, not at attach.** The
+  padled block comes up early in a boot (24-30 s in on Batman); the
+  controller called the run up there, closed the loading window and ended
+  the focus hand-backs ten seconds later, while the game booted on for up to
+  two minutes - and a click on the game's LCD window in that time left
+  Visual Pinball paused until the playfield was clicked. Now `_boot_watch`
+  reads the slot's own boot log (`bootprog.BootLog`, as the app's footer and
+  the playfield window do) once a second: the loading window names the step
+  (`boot <pct> <words>`: node boards, Tech Alerts) and stays over the game's
+  screen, the run's windows are handed back from until FRONT_SETTLE_S after
+  attract, and the time kept for the next bar is the time to attract. A rig
+  with no such log (Spike 1, Spooky, slot 0) is up at attach as before; a
+  game stuck at Tech Alerts, or not in attract by START_TIMEOUT_S, is the
+  player's at once, so the window never stands over a screen that needs them.
+
+Measured on Batman 1.14 (8 GB card), hidden and muted, the Windows file
+cache purged before each card read:
+
+| | boot to attract (bootcheck.sh) | Controller.Run to attract (the bridge itself) |
+|---|---|---|
+| card off D: (the store not attached) | 148 s | 149 s (attached at 19 s) |
+| card from the store | 36 s | 41 s (attached at 24 s) |
+
+Off D: the guest drew at 4 fps while it booted; from the store, 30.

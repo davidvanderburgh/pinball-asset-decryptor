@@ -3122,16 +3122,65 @@ def test_the_backglass_hands_the_foreground_back_once_per_window(monkeypatch):
     assert pc.b2s_window("B2S Backglass")
     assert not pc.b2s_window("Visual Pinball Player") and not pc.b2s_window("Notepad")
     assert b.launch is None
-    assert b._hand_back_from(101, "B2S Backglass Server")           # no started run: still
-    assert not b._hand_back_from(101, "B2S Backglass Server")       # once
-    assert b._hand_back_from(102, "B2S DMD")                        # its DMD: its own once
-    assert not b._hand_back_from(103, "Untitled - Notepad")         # never the user's windows
+
+    def handed(fg, title):
+        if not b._hand_back_from(fg, title):
+            return False
+        b._handed_back(fg, title, True)
+        return True
+    assert handed(101, "B2S Backglass Server")                      # no started run: still
+    assert not handed(101, "B2S Backglass Server")                  # once
+    assert handed(102, "B2S DMD")                                   # its DMD: its own once
+    assert not handed(103, "Untitled - Notepad")                    # never the user's windows
     lcd = "[rig 1: %s] Metallica - Stern Spike 2 emulator" % pc.padlaunch.LABEL
-    assert not b._hand_back_from(104, lcd)                          # not a run it started
+    assert not handed(104, lcd)                                     # not a run it started
     b.launch = object()
-    assert b._hand_back_from(104, lcd) and b.front_done
-    assert not b._hand_back_from(104, lcd)                          # once
-    assert b._hand_back_from(105, "B2S Backglass Server")           # a new backglass window
+    b.attached, b.attached_t = True, -1e9                           # long up: the start rule is over
+    assert handed(104, lcd) and b.front_done
+    assert not handed(104, lcd)                                     # once
+    assert handed(105, "B2S Backglass Server")                      # a new backglass window
+
+
+def test_the_started_runs_windows_are_handed_back_until_the_player_has_it(monkeypatch):
+    """PAD-949: Mike's Beatles table played on with the keyboard in the game's
+    LCD window until Alt+Tab. The one hand-back the controller made was
+    refused by Windows now and then and never tried again, and the LCD window
+    or the loading window can take the foreground again while the run comes
+    up. A refused hand-back is tried again (up to FRONT_TRIES), and the run's
+    own windows - the LCD window, the loading window by its process - are
+    handed back from every time until FRONT_SETTLE_S after the game is up;
+    after that the old rules: the LCD window once, never the user's windows."""
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    b = pc.Bridge()
+    lcd = "[rig 1: %s] beatles - Stern Spike 2 emulator (PAD-Runtime)" % pc.padlaunch.LABEL
+    b.launch = object()
+    b._loading = type("P", (), {"pid": 777})()
+    for _ in range(3):                                              # not up yet: every grab
+        assert b._hand_back_from(104, lcd)
+        b._handed_back(104, lcd, True)
+    assert b._hand_back_from(106, "C:\\Python314\\pythonw.exe", 777)    # the loading window
+    assert not b._hand_back_from(107, "C:\\Python314\\pythonw.exe", 778)  # someone else's Tk
+    assert not b._hand_back_from(103, "Untitled - Notepad")
+    b.attached, b.attached_t = True, pc.time.monotonic()            # just up: still
+    assert b._hand_back_from(104, lcd)
+    for _ in range(pc.FRONT_TRIES):                                 # refused: tried again, a while
+        assert b._hand_back_from(108, lcd)
+        b._handed_back(108, lcd, False)
+    assert not b._hand_back_from(108, lcd)
+    b.attached_t -= pc.FRONT_SETTLE_S + 1                           # settled: a click on it is the user's
+    b._loading = None
+    assert not b._hand_back_from(104, lcd)
+    b.front_tries.clear()
+    b.front_done = False                                            # its first grab after the start: once
+    assert b._hand_back_from(104, lcd)
+    b._handed_back(104, lcd, False)                                 # refused: not done
+    assert not b.front_done and b._hand_back_from(104, lcd)
+    b._handed_back(104, lcd, True)
+    assert b.front_done and not b._hand_back_from(104, lcd)
+    b.launch = None                                                 # a run it did not start: never
+    b.front_done = False
+    assert not b._hand_back_from(104, lcd)
 
 
 def _fake_win32com(monkeypatch, objects):

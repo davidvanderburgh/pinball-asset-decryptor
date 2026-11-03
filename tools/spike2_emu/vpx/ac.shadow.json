@@ -56,9 +56,11 @@
   "PlungerKey"
  ],
  "plunger": {
+  "_": "autoFire launches with the table's own plunger, made a solenoid launcher (PAD-960: pulled back 150 ms and let go, it kicked the ball a little way up the lane and no more)",
   "lane_trigger": "Trigger1",
   "lane_switch": 50,
-  "autoplunge": "Plunger"
+  "autoplunge": "Plunger",
+  "auto_plunger": true
  },
  "trough": {
   "_": "trough1 (by the eject) to trough4, the jam opto last; 4 balls (numBalls)",
@@ -108,7 +110,7 @@
     9
    ],
    "name": "autoFire",
-   "callback": "PadLaunch"
+   "callback": "PadAutoPlunge"
   },
   "3": {
    "coil": [
@@ -254,7 +256,7 @@
    "interval_ms": 100
   }
  },
- "extra_vbs": "'---- PAD: Alice Cooper's mechs follow the machine (gen_alice_map.py)\n' the machine's auto plunger (autoFire): the table's own plunger, pulled and\n' let go as its own code did (Timer16, Timer17). Not a cvpmImpulseP: its\n' CreateEvents would define Trigger1_Hit over the shooter lane's switch\nSub PadLaunch(e)\n\tIf e Then\n\t\tPlunger.PullBack\n\t\tvpmTimer.AddTimer 150, \"Plunger.Fire '\"\n\tEnd If\nEnd Sub\n\n' the drop targets: the game's reset and knockdown coils (the table reset\n' them at its own drain)\nSub PadDrop(t, sw, down)\n\tt.IsDropped = down\n\tController.Switch(sw) = CBool(down)\n\tIf down Then\n\t\tPlaySoundAt \"fx_droptarget\", t\n\tElse\n\t\tPlaySoundAt \"fx_resetdrop\", t\n\tEnd If\nEnd Sub\nSub PadDT1Up(e) : If e Then PadDrop sw3, 1037, 0 : End If : End Sub\nSub PadDT2Up(e) : If e Then PadDrop sw2, 1036, 0 : End If : End Sub\nSub PadDT3Up(e) : If e Then PadDrop sw1, 1022, 0 : End If : End Sub\nSub PadDT1Down(e) : If e Then PadDrop sw3, 1037, 1 : End If : End Sub\nSub PadDT2Down(e) : If e Then PadDrop sw2, 1036, 1 : End If : End Sub\nSub PadDT3Down(e) : If e Then PadDrop sw1, 1022, 1 : End If : End Sub\n\n' the flippers: the table flipped inline in its key handlers; these are\n' those bodies, on the machine's coils\nSub PadLFlip(e)\n\tIf e Then\n\t\tLeftFlipper.RotateToEnd : PlaySound \"fx_flipperup\", 0, .67, -0.05, 0.05\n\tElse\n\t\tLeftFlipper.RotateToStart : PlaySound \"fx_flipperdown\", 0, 1, -0.05, 0.05\n\tEnd If\nEnd Sub\nSub PadRFlip(e)\n\tIf e Then\n\t\tRightFlipper.RotateToEnd : PlaySound \"fx_flipperup\", 0, .67, 0.05, 0.05\n\tElse\n\t\tRightFlipper.RotateToStart : PlaySound \"fx_flipperdown\", 0, 1, 0.05, 0.05\n\tEnd If\nEnd Sub\nSub PadURFlip(e)\n\tIf e Then\n\t\tRightFlipper1.RotateToEnd\n\tElse\n\t\tRightFlipper1.RotateToStart\n\tEnd If\nEnd Sub\n",
+ "extra_vbs": "'---- PAD: Alice Cooper's mechs follow the machine (gen_alice_map.py)\n' the drop targets: the game's reset and knockdown coils (the table reset\n' them at its own drain)\nSub PadDrop(t, sw, down)\n\tt.IsDropped = down\n\tController.Switch(sw) = CBool(down)\n\tIf down Then\n\t\tPlaySoundAt \"fx_droptarget\", t\n\tElse\n\t\tPlaySoundAt \"fx_resetdrop\", t\n\tEnd If\nEnd Sub\nSub PadDT1Up(e) : If e Then PadDrop sw3, 1037, 0 : End If : End Sub\nSub PadDT2Up(e) : If e Then PadDrop sw2, 1036, 0 : End If : End Sub\nSub PadDT3Up(e) : If e Then PadDrop sw1, 1022, 0 : End If : End Sub\nSub PadDT1Down(e) : If e Then PadDrop sw3, 1037, 1 : End If : End Sub\nSub PadDT2Down(e) : If e Then PadDrop sw2, 1036, 1 : End If : End Sub\nSub PadDT3Down(e) : If e Then PadDrop sw1, 1022, 1 : End If : End Sub\n\n' the flippers: the table flipped inline in its key handlers; these are\n' those bodies, on the machine's coils\nSub PadLFlip(e)\n\tIf e Then\n\t\tLeftFlipper.RotateToEnd : PlaySound \"fx_flipperup\", 0, .67, -0.05, 0.05\n\tElse\n\t\tLeftFlipper.RotateToStart : PlaySound \"fx_flipperdown\", 0, 1, -0.05, 0.05\n\tEnd If\nEnd Sub\nSub PadRFlip(e)\n\tIf e Then\n\t\tRightFlipper.RotateToEnd : PlaySound \"fx_flipperup\", 0, .67, 0.05, 0.05\n\tElse\n\t\tRightFlipper.RotateToStart : PlaySound \"fx_flipperdown\", 0, 1, 0.05, 0.05\n\tEnd If\nEnd Sub\nSub PadURFlip(e)\n\tIf e Then\n\t\tRightFlipper1.RotateToEnd\n\tElse\n\t\tRightFlipper1.RotateToStart\n\tEnd If\nEnd Sub\n",
  "lamps": {
   "_": "table light -> the game's LED [n // 64, n % 64] (n: its place in config/alice.yaml's PRLEDs; rgb: one LED, lit in its colour). The table's lights sit on the photo's inserts.",
   "LightShootAgain": {
@@ -774,5 +776,12 @@
    "note": "GUESS"
   }
  },
- "listed": true
+ "listed": true,
+ "repatch": [
+  {
+   "old": "Sub PadLaunch(e)",
+   "why": "the launch button sends the ball all the way up the lane",
+   "since": "PAD-960: autoFire fires the table's plunger at full strength"
+  }
+ ]
 }

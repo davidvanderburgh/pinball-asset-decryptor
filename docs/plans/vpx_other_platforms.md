@@ -534,3 +534,16 @@ knockdown coil (7) fired at the ball's start; a drain ended the ball and the
 next was served. The game logged every switch (its own log). The patched
 table verifies and its script compiles. Not run: the table in Visual Pinball
 itself; every GUESS mark is what a game on the table will tell.
+
+**PAD-960: the launch.** In Visual Pinball the ball never left the lane.
+autoFire reached the table (the rig: the game fires it 0.1 s after each
+launch-button press, and once more 0.6 s later while the lane switch stays
+made; it never launches by itself), but `PadLaunch` pulled the table's
+plunger back for 150 ms and let go, and VPX fires a plain plunger "from the
+current position": a quarter of a pull, the ball a little way up the lane
+and back. A script cannot tick a plunger's Auto Plunger box (`AutoPlunger`
+is read-only), so the patcher does: a map's `plunger.auto_plunger` makes
+vpxshadow set APLG on the table's Plunger item (GameItems are not in the
+MAC) and `PadAutoPlunge` call its `Fire`, a full-strength launch, as the
+machine's coil is. The map's `repatch` mark (`Sub PadLaunch(e)`) tells a
+copy patched before this to Patch again.

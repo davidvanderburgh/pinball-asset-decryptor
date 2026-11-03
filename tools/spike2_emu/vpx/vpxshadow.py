@@ -735,6 +735,24 @@ def _calls_orig(m, name):
     return m.get("orig_hits", True) or name.lower() in {n.lower() for n in m.get("orig_keep", [])}
 
 
+def gen_plunger(m, had):
+    """The plunger lane's switch and PadAutoPlunge, the machine's launch coil."""
+    p = m.get("plunger")
+    if not p:
+        return []
+    return ["Sub %s_Hit : Controller.Switch(1%03d) = True" % (p["lane_trigger"], p["lane_switch"])
+            + (" : %s_Hit_orig" % p["lane_trigger"] if had.get(p["lane_trigger"] + "_Hit") else "")
+            + " : End Sub",
+            "Sub %s_UnHit : Controller.Switch(1%03d) = False" % (p["lane_trigger"], p["lane_switch"])
+            + (" : %s_UnHit_orig" % p["lane_trigger"] if had.get(p["lane_trigger"] + "_UnHit") else "")
+            + " : End Sub",
+            # PAD-960: a VPX Plunger the patched file makes a solenoid
+            # launcher (auto_plunger_item) fires at full strength on Fire;
+            # an impulse plunger (cvpmImpulseP) has AutoFire
+            "Sub PadAutoPlunge(e) : If e Then %s.%s : End If : End Sub"
+            % (p["autoplunge"], "Fire" if p.get("auto_plunger") else "AutoFire")]
+
+
 def gen(m, had, quiet=None, dof=None):
     """The bridge's own script, appended after the original. `dof`: handler
     (`sw001_Hit`, `sol:3`) -> the table's DOF calls it must fire itself."""
@@ -890,15 +908,7 @@ def gen(m, had, quiet=None, dof=None):
             "\tPlaySoundAt \"fx_drain\", %s" % t["drain"]]
     out += ["\t" + c for c in dof.get(t["drain"] + "_Hit", ())]
     out += ["End Sub"]
-    p = m.get("plunger")
-    if p:
-        out += ["Sub %s_Hit : Controller.Switch(1%03d) = True" % (p["lane_trigger"], p["lane_switch"])
-                + (" : %s_Hit_orig" % p["lane_trigger"] if had.get(p["lane_trigger"] + "_Hit") else "")
-                + " : End Sub",
-                "Sub %s_UnHit : Controller.Switch(1%03d) = False" % (p["lane_trigger"], p["lane_switch"])
-                + (" : %s_UnHit_orig" % p["lane_trigger"] if had.get(p["lane_trigger"] + "_UnHit") else "")
-                + " : End Sub",
-                "Sub PadAutoPlunge(e) : If e Then %s.AutoFire : End If : End Sub" % p["autoplunge"]]
+    out += gen_plunger(m, had)
     # ---- switches
     out.append("")
     if any(s.get("event") == "pass" for k, s in m["switches"].items() if k != "_"):
@@ -1389,6 +1399,25 @@ def retrofit_items(table, m):
     return items
 
 
+def auto_plunger_item(table, m):
+    """PAD-960: {GameItem stream name: data} for a map whose `plunger` says
+    `auto_plunger`: the table's own Plunger with its Auto Plunger box ticked
+    (APLG), so PadAutoPlunge's Fire launches at full strength the moment the
+    machine's launch coil fires. VPX fires a plain plunger "from the current
+    position" and a script cannot tick the box (AutoPlunger is read-only):
+    Alice Cooper's PullBack, 150 ms, Fire rolled the ball a little way up the
+    lane and back. GameItems are not in the MAC, so the stream is replaced."""
+    p = m.get("plunger") or {}
+    if not p.get("auto_plunger"):
+        return {}
+    for i, data in enumerate(table.items):
+        kind, name, _ = table.item_info(data)
+        if name.lower() == p["autoplunge"].lower():
+            assert kind == "Plunger", (name, kind)
+            return {"GameItem%d" % i: vpxfile.set_fields(data, {"APLG": struct.pack("<i", 1)})}
+    raise KeyError("the table has no plunger named %s" % p["autoplunge"])
+
+
 def main(argv):
     if len(argv) != 4:
         print(__doc__)
@@ -1409,6 +1438,10 @@ def main(argv):
     script, rep = patch(table.script(), m)
     script, streams = vpxsounds.quiet(script, table.ole, rep)   # PAD-858
     items = retrofit_items(table, m)
+    streams.update(auto_plunger_item(table, m))
+    if m.get("plunger", {}).get("auto_plunger"):
+        rep.append("%s made a solenoid launcher: the machine's launch coil fires it at full strength"
+                   % m["plunger"]["autoplunge"])
     table.ole.close()
     dst = os.path.join(outdir, m["output"])
     mac = vpxfile.write_patched(src, dst, script=script, new_items=items, streams=streams)

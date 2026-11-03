@@ -151,7 +151,7 @@ def solenoids():
         out[str(num)] = {"coil": coil(name), "name": name, "callback": cb}
 
     put(1, "trough", "bsTrough.SolOut")
-    put(2, "autoFire", "PadLaunch")
+    put(2, "autoFire", "PadAutoPlunge")
     put(3, "leftScoop", "bsKicker2.SolOut")
     put(4, "dropTarget1Reset", "PadDT1Up")
     put(5, "dropTarget2Reset", "PadDT2Up")
@@ -175,16 +175,6 @@ def solenoids():
 
 EXTRA_VBS = "\n".join([
     "'---- PAD: Alice Cooper's mechs follow the machine (gen_alice_map.py)",
-    "' the machine's auto plunger (autoFire): the table's own plunger, pulled and",
-    "' let go as its own code did (Timer16, Timer17). Not a cvpmImpulseP: its",
-    "' CreateEvents would define Trigger1_Hit over the shooter lane's switch",
-    "Sub PadLaunch(e)",
-    "\tIf e Then",
-    "\t\tPlunger.PullBack",
-    "\t\tvpmTimer.AddTimer 150, \"Plunger.Fire '\"",
-    "\tEnd If",
-    "End Sub",
-    "",
     "' the drop targets: the game's reset and knockdown coils (the table reset",
     "' them at its own drain)",
     "Sub PadDrop(t, sw, down)",
@@ -258,7 +248,9 @@ def build():
             "service_select": 1004, "service_plus": 1005, "service_minus": 1006, "service_back": 1007
         },
         "keys_skip_orig": ["StartGameKey", "AddCreditKey", "AddCreditKey2", "PlungerKey"],
-        "plunger": {"lane_trigger": "Trigger1", "lane_switch": 50, "autoplunge": "Plunger"},
+        "plunger": {"_": "autoFire launches with the table's own plunger, made a solenoid launcher (PAD-960: "
+                         "pulled back 150 ms and let go, it kicked the ball a little way up the lane and no more)",
+                    "lane_trigger": "Trigger1", "lane_switch": 50, "autoplunge": "Plunger", "auto_plunger": True},
         "trough": {"_": "trough1 (by the eject) to trough4, the jam opto last; 4 balls (numBalls)",
                    "release": "BallRelease", "drain": "Drain",
                    "switches": [52, 53, 54, 55, 51], "balls": 4, "kick": [90, 5]},
@@ -281,6 +273,9 @@ def build():
         "orig_keep": ["LeftSlingShot", "RightSlingShot"],
         "switches": sw,
         "listed": True,
+        # PAD-939: a copy patched before the fix says so on the tab
+        "repatch": [{"old": "Sub PadLaunch(e)", "why": "the launch button sends the ball all the way up the lane",
+                     "since": "PAD-960: autoFire fires the table's plunger at full strength"}],
     }
 
 

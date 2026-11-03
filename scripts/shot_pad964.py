@@ -86,7 +86,8 @@ def main():
             # on this PC): the rows say what its first start copies
             row = page.locator(".vpx-tables").get_by_text("Metallica", exact=False).first
             if row.count():
-                row.scroll_into_view_if_needed()
+                # in the middle of the window, not at its bottom edge under the status bar
+                row.evaluate("el => el.scrollIntoView({block: 'center'})")
                 time.sleep(0.5)
                 b = row.bounding_box()
                 tb = page.locator(".vpx-tables").bounding_box()

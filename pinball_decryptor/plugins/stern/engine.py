@@ -12085,7 +12085,7 @@ def _attract_lines(params, used, modes, log):
 def _shot_lines(params, used, modes, log):
     """PAD-945: the ``sounds.cfg`` table of the sounds on the shots of the game's modes (*used*,
     their entries off the grow) for :func:`.sound_modes.cfg_text`: ``{"request", "key" (the carrier's
-    own record key), "files": [(mode id, switch id, the file's record key, its length in ms), ...]}``
+    own record key), "files": [(mode id, switch id, the file's record key, its length in ms, lit), ...]}``
     in row order, or ``None`` when none landed. An entry whose keys did not come out of the grown bank
     is left out and logged; one that did gets ``lines`` 1 (the card's record names it)."""
     from . import sound_modes as _SMo
@@ -12105,7 +12105,7 @@ def _shot_lines(params, used, modes, log):
             continue
         key = bytes(sp["findkey"])
         files.append((int(row["mode"]), int(row["switch"]), bytes(hp["findkey"]),
-                      int(-(-int(u["frames"]) * 1000 // 44100))))
+                      int(-(-int(u["frames"]) * 1000 // 44100)), row.get("lit") or ""))
         u["lines"] = 1
     if not files:
         return None

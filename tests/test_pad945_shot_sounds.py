@@ -9,6 +9,10 @@ file, the game's mode, the switch, the file's record key and its length. The run
 switch drain while that mode's own ACTIVE virtual says it runs."""
 
 import os
+import re
+import shutil
+import subprocess
+import sys
 
 import pytest
 
@@ -70,9 +74,9 @@ def test_the_card_record_brings_them_back():
     assert rec["files"] == [] and "turns" not in rec and "random" not in rec
     assert rec["shots"] == [
         {"k": 1, "slot": 943, "host": 2001, "mode": 16, "switch": 85, "rel": CARRIER,
-         "name": "idx1234 - unused.wav", "mode_name": "Grendel Mode", "switch_name": "R ramp made opto"},
+         "name": "idx1234 - unused.wav", "mode_name": "Grendel Mode", "switch_name": "R ramp made opto", "lit": ""},
         {"k": 2, "slot": 943, "host": 2002, "mode": 12, "switch": 85, "rel": CARRIER, "name": "Roar.wav",
-         "mode_name": "Riot Mode", "switch_name": "R ramp made opto"}]
+         "mode_name": "Riot Mode", "switch_name": "R ramp made opto", "lit": ""}]
     used[1].update(bank=1, bank_idx=7)
     rec = SMo.read_card_record(SMo.cfg_text(0, 0, [], True, record=SMo.card_record(m, used)))
     assert SMo.card_bank_records(rec) == {1: {7}}
@@ -119,13 +123,13 @@ def test_the_runtime_reads_the_lines_and_plays_on_a_press_while_the_mode_runs():
     with open(RUNTIME, encoding="utf-8") as f:
         c = f.read()
     assert 'str_eq(f[0], "gshot")' in c and 'str_eq(f[0], "gsfile")' in c
-    assert "gms_file(f[1], f[2], f[3], f[4], f[5]);" in c and "char *f[6];" in c   # six fields on a line
+    assert "gms_file(f[1], f[2], f[3], f[4], f[5], n >= 7 ? f[6] : 0);" in c and "char *f[7];" in c   # 6 or 7
     assert "#define GMS_FILES 32" in c
     # the record lookup takes the playing file's key; the drain's edges reach it beside the attract sounds'
     assert "if (gms_live && r[1] && gms_lookup(r)) return;" in c
     assert "if (gms_live) gms_edge(id, level, flags, pol);" in c
     # in a game only, while the row's mode is ACTIVE for the player up, not while the last one still plays
-    assert "if (!pm_in_game()) return;" in c and "gms_active(k)" in c
+    assert "if (!pm_in_game()) return;" in c and "if (gms.sw[j] != id || !gms_active(j)) continue;" in c
     assert "if (gms.plays && (long)(gms.until - now) > 0) {" in c
     # ACTIVE: the port's mode slot, else the mode table's, else read off the game's own query
     i = c.index('gms.slot = pm_port_value("mode_slot_active", -1);')
@@ -224,7 +228,7 @@ def test_the_table_names_each_file_s_mode_switch_key_and_length():
             {"rel": CARRIER, "slot": 943, "mode": SMo.shot_mode(2), "host": 81, "frames": 44100}]
     logs = []
     got = E._shot_lines(params, used, m, lambda t, lvl="info": logs.append(t))
-    assert got == {"request": 943, "key": b"C" * 8, "files": [(16, 85, b"A" * 8, 800)]}
+    assert got == {"request": 943, "key": b"C" * 8, "files": [(16, 85, b"A" * 8, 800, "")]}
     assert used[0]["lines"] == 1 and "lines" not in used[1]
     assert logs == ["Sounds on shots: sound on a shot 2 is left out: its record did not come out of the grown "
                     "bank."]
@@ -317,7 +321,7 @@ def _offers(monkeypatch, why=""):
     monkeypatch.setattr(SMo, "offer_attract", lambda project, probe=True: "not here")
     monkeypatch.setattr(SMo, "offer_shots", lambda project, probe=True: why)
     monkeypatch.setattr(SMo, "shot_choices", lambda project: (
-        why, [(12, "Riot Mode"), (16, "Grendel Mode")], [(85, "R ramp made opto"), (99, "Left orbit")]))
+        why, [(12, "Riot Mode"), (16, "Grendel Mode")], [(85, "R ramp made opto"), (99, "Left orbit")], {99}))
 
 
 def test_the_audio_tab_adds_plays_and_takes_off_sounds_on_shots(tmp_path, monkeypatch):
@@ -382,4 +386,98 @@ def test_the_page_draws_the_button_and_the_window():
               encoding="utf-8") as f:
         js = f.read()
     assert "s.shots ? html`<${ShotsButton}" in js and 'call("audio.shots_open")' in js
-    assert 'res.open === "shots"' in js and "act(`add:${m}:${s}`)" in js and 'act("choose")' in js
+    assert 'res.open === "shots"' in js and "act(`add:${m}:${s}:${l}`)" in js and 'act("choose")' in js
+
+
+# ---- round 2: a sound per color of the shot's light (the tester: Grendel Mode's roving lit shots, blue / orange /
+# red / purple, one per attack level) ------------------------------------------------------------------------
+def test_a_row_may_ask_for_its_shot_lit_and_in_which_color():
+    m = SMo.clean({"shots": [dict(ROW, lit="blue"), dict(ROW, lit="orange", file="o.wav"), dict(ROW, lit="BLUE"),
+                             dict(ROW, lit="mauve"), dict(ROW, file="any.wav"), dict(ROW, lit="lit", file="l.wav")]})
+    assert [(r.get("lit"), r["file"]) for r in m.shots] == [
+        ("blue", ROW["file"]), ("orange", "o.wav"), (None, "any.wav"), ("lit", "l.wav")]   # blue once, no mauve
+    assert SMo.clean(SMo.to_json(m)).shots == m.shots
+    assert [SMo.shot_lit_words(x) for x in ("", "lit", "red")] == ["", "lit", "lit red"]
+    # the runtime's classes, in its order (pad_mode_runtime.c GMS_*)
+    assert SMo.SHOT_LIT == ("", "lit", "white", "red", "orange", "yellow", "green", "cyan", "blue", "purple")
+
+
+def test_the_table_and_the_record_carry_the_color():
+    a, b = bytes(range(8)), bytes(range(8, 16))
+    text = SMo.cfg_text(0, 0, [], True, shots={"request": 943, "key": b"C" * 8, "files": [
+        (16, 98, a, 1500, "blue"), (16, 98, b, 800, "purple"), (16, 99, a, 1500, "")]})
+    assert text.splitlines()[3:6] == ["gsfile	1	16	98	0001020304050607	1500	8",
+                                      "gsfile	2	16	98	08090a0b0c0d0e0f	800	9",
+                                      "gsfile	3	16	99	0001020304050607	1500"]
+    m = SMo.clean({"shots": [dict(ROW, lit="red")]})
+    used = [{"rel": CARRIER, "slot": 943, "mode": SMo.shot_mode(1), "host": 2001, "db": 0, "lines": 1}]
+    rec = SMo.read_card_record(SMo.cfg_text(0, 0, [], True, record=SMo.card_record(m, used)))
+    assert rec["shots"][0]["lit"] == "red"
+    params = [{"idx": 943, "findkey": b"C" * 8}, {"idx": 80, "findkey": b"A" * 8, "grown": True}]
+    m.shot_rel, m.shot_plan = CARRIER, {"request": 943, "slot": 943}
+    got = E._shot_lines(params, [dict(used[0], host=80, frames=44100)], m, lambda *a, **k: None)
+    assert got["files"] == [(16, 85, b"A" * 8, 1000, "red")]
+
+
+def test_the_shots_whose_light_can_be_read_are_the_ones_with_an_insert():
+    lit = SMo.lit_switches(MP.read_port(MP.port_path(MP.profile("venom_le_1_07"))))
+    assert {98, 99, 93, 89, 80, 90, 86} <= lit          # Grendel Mode's roving shots: each has its RGB insert
+    assert 85 not in lit and 66 not in lit               # R ramp made opto, a slingshot: no insert of their own
+    assert SMo.lit_switches({"switch": [(5, 0x4, "x")], "lamp": [("X", (1, 2, 3), 0x4)]}) == {5}
+
+
+def test_the_runtime_judges_the_light_at_the_press_and_the_most_particular_row_plays():
+    with open(RUNTIME, encoding="utf-8") as f:
+        c = f.read()
+    assert "gms_file(f[1], f[2], f[3], f[4], f[5], n >= 7 ? f[6] : 0);" in c and "char *f[7];" in c
+    assert "int pm_lamp_game_rgb(int i)" in c
+    # a blink's dark half takes the color the shot showed last, within GMS_LIT_MS
+    assert "#define GMS_LIT_MS 3000" in c and "cls = gms.seen_cls[k];" in c
+    # a color row before a lit row before a row with no condition
+    assert "if (gms.lit[k] == GMS_LIT) return 2;" in c and "return cls == gms.lit[k] ? 3 : 0;" in c
+    assert "if ((f = gms_fits(j, now, &rgb)) > best)" in c
+
+
+_CLASS_HARNESS = r"""
+#include <stdio.h>
+#include <stdlib.h>
+@ENUM@
+@FUNC@
+int main(int argc, char **argv)
+{
+    int i;
+    for (i = 1; i < argc; i++) printf("%u\n", gms_class((unsigned)strtoul(argv[i], 0, 16)));
+    return 0;
+}
+"""
+
+
+def test_the_runtime_s_color_classes_on_the_colors_grendel_mode_shows():
+    """gms_class lifted verbatim into a host program: the three colors the emulator read off Grendel Mode's lit
+    shots (Venom LE 1.07), purple, white and dark."""
+    if os.name == "nt" or sys.platform == "darwin":
+        pytest.skip("the harness needs a host ELF C toolchain")
+    cc = next((x for x in ("gcc", "cc", "clang") if shutil.which(x)), None)
+    if not cc:
+        pytest.skip("no host C compiler")
+    with open(RUNTIME, encoding="utf-8") as f:
+        src = f.read()
+    enum = re.search(r"enum \{ GMS_ANY.*?\};", src, re.S).group(0)
+    m = re.search(r"static unsigned gms_class\(unsigned rgb\)", src)
+    i, depth = src.index("{", m.start()), 0
+    for j in range(i, len(src)):
+        depth += {"{": 1, "}": -1}.get(src[j], 0)
+        if depth == 0:
+            break
+    import tempfile
+    d = tempfile.mkdtemp(prefix="gms945-")
+    with open(os.path.join(d, "h.c"), "w", encoding="utf-8") as f:
+        f.write(_CLASS_HARNESS.replace("@ENUM@", enum).replace("@FUNC@", src[m.start():j + 1]))
+    exe = os.path.join(d, "h")
+    r = subprocess.run([cc, "-std=gnu17", "-Wall", "-o", exe, os.path.join(d, "h.c")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    colors = ["0000ff", "c02000", "ff0000", "ff00ff", "8000ff", "ffffff", "000000", "202020", "e9ef00", "00d8ea",
+              "00ff00"]
+    out = subprocess.run([exe] + colors, capture_output=True, text=True, check=True).stdout.split()
+    names = [SMo.SHOT_LIT[int(x)] or "dark" for x in out]
+    assert names == ["blue", "orange", "red", "purple", "purple", "white", "dark", "dark", "yellow", "cyan", "green"]

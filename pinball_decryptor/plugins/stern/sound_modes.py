@@ -179,6 +179,15 @@ JUKE_BASE = 5000
 SHOT_BASE = 3000
 #: PAD-945: the most sounds on shots a project may have (pad_mode_runtime.c GMS_FILES)
 SHOT_MAX = 32
+#: PAD-945 round 2 (the tester: Grendel Mode's roving lit shots come in four colors, one per attack level): a
+#: row may ask for its shot's insert to be lit, in any color or in one of these, as the game shows it at the
+#: hit. The index is the runtime's class (pad_mode_runtime.c GMS_*: 0 any time, 1 lit, 2.. a color)
+SHOT_LIT = ("", "lit", "white", "red", "orange", "yellow", "green", "cyan", "blue", "purple")
+
+
+def shot_lit_words(lit):
+    """How a row's condition reads: "" (any hit), "lit", "lit blue"."""
+    return "" if not lit else "lit" if lit == "lit" else "lit " + lit
 #: PAD-565: ``<game>-<version>`` of the builds where the sounds in turn were SEEN working: the
 #: LATEST build of every Stern Spike 2 game in the image library (David: "just the latest
 #: versions"), each swept in the emulator (an override set built by Write's own code, the slot's
@@ -677,7 +686,8 @@ def to_json(modes):
 
 def clean_shots(raw):
     """PAD-945: the sounds on shots as kept: rows with a mode id, a switch id and a file, at most
-    :data:`SHOT_MAX`, a (mode, switch) once (the first row wins)."""
+    :data:`SHOT_MAX`, a (mode, switch, lit) once (the first row wins). Round 2: ``lit`` (one of
+    :data:`SHOT_LIT`, "" when absent) is the condition on the shot's insert."""
     out, seen = [], set()
     for r in (raw if isinstance(raw, (list, tuple)) else ()):
         if not isinstance(r, dict):
@@ -687,12 +697,17 @@ def clean_shots(raw):
         except (TypeError, ValueError):
             continue
         f = r.get("file")
-        if not (0 <= mode < 128 and 0 < sw < 1024 and isinstance(f, str) and f.strip()) or (mode, sw) in seen:
+        lit = str(r.get("lit") or "").strip().lower()
+        if lit not in SHOT_LIT:
             continue
-        seen.add((mode, sw))
-        out.append({"mode": mode, "mode_name": _rec_word(r.get("mode_name")) or "mode %d" % mode,
-                    "switch": sw, "switch_name": _rec_word(r.get("switch_name")) or "switch %d" % sw,
-                    "file": f})
+        if not (0 <= mode < 128 and 0 < sw < 1024 and isinstance(f, str) and f.strip()) or (mode, sw, lit) in seen:
+            continue
+        seen.add((mode, sw, lit))
+        row = {"mode": mode, "mode_name": _rec_word(r.get("mode_name")) or "mode %d" % mode,
+               "switch": sw, "switch_name": _rec_word(r.get("switch_name")) or "switch %d" % sw, "file": f}
+        if lit:
+            row["lit"] = lit
+        out.append(row)
         if len(out) >= SHOT_MAX:
             break
     return out
@@ -844,14 +859,27 @@ def shot_refusal(prof):
     return ""
 
 
+def lit_switches(port):
+    """PAD-945 round 2: the switch ids whose shot has an insert the runtime can read the color of: a
+    ``switch`` line of *port* (:func:`.mode_project.read_port`) sharing a bit with a ``lamp`` line's shot."""
+    lamp = 0
+    for entry in port.get("lamp") or ():
+        try:
+            lamp |= int(entry[-1])
+        except (TypeError, ValueError, IndexError):
+            continue
+    return {int(sid) for sid, mask, _name in port.get("switch") or () if int(mask) & lamp}
+
+
 def shot_choices(project):
-    """PAD-945: ``(why, modes, switches)`` for the project's game: :func:`offer_shots`'s reason
-    ("" when it can), the game's modes ``[(id, name)]`` (:func:`game_modes`) and its shots
+    """PAD-945: ``(why, modes, switches, lit)`` for the project's game: :func:`offer_shots`'s reason
+    ("" when it can), the game's modes ``[(id, name)]`` (:func:`game_modes`), its shots
     ``[(id, name)]`` - the playfield switches of the card's game program (:func:`shot_switches`), or
-    when the card is not on this PC, the port's ``switch`` lines."""
+    when the card is not on this PC, the port's ``switch`` lines - and (round 2) the ids of those whose
+    insert's color a row can ask for (:func:`lit_switches`)."""
     why = offer_shots(project, probe=True)
     if why:
-        return why, [], []
+        return why, [], [], set()
     from . import mode_project as MP
     prof = project_title(project, probe=True)
     modes = game_modes(prof)
@@ -863,19 +891,23 @@ def shot_choices(project):
             switches = shot_switches(game_program(card.image)[2])
     except Exception:                                   # noqa: BLE001 - the port's lines then
         switches = []
+    try:
+        port = MP.read_port(MP.port_path(prof))
+    except OSError:
+        port = {}
+    lit = lit_switches(port)
     if not switches:
         try:
-            port = MP.read_port(MP.port_path(prof))
             seen = {}
             for sid, _mask, name in port.get("switch") or ():
                 seen.setdefault(int(sid), " ".join(str(name).split()))
             switches = sorted(seen.items())
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             switches = []
     if not switches:
         return (NO_SHOTS % (prof.label, "the app cannot read its switches from the card this project "
-                            "was extracted from") if prof is not None else NO_TITLE_SHOTS), modes, []
-    return "", modes, switches
+                            "was extracted from") if prof is not None else NO_TITLE_SHOTS), modes, [], set()
+    return "", modes, switches, lit
 
 
 def offer_shots(project, probe=True):
@@ -1081,9 +1113,10 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     PAD-685: *jukebox* ``{"modes": [(start site, [intro clip names], [record keys])], "songs":
     [(weight, record key, clip name or "")]}``, a ``jmode`` line per song mode and a ``jsong`` line per
     song (pad_mode_runtime.c "the jukebox").
-    PAD-945: *shots* ``{"request", "key", "files": [(mode id, switch id, record key, ms), ...]}``, the
-    sounds on the shots of the game's modes: a ``gshot`` line (the carrier, its own record's key)
-    and a ``gsfile`` line per file (pad_mode_runtime.c "a sound on a shot")."""
+    PAD-945: *shots* ``{"request", "key", "files": [(mode id, switch id, record key, ms[, lit]), ...]}``,
+    the sounds on the shots of the game's modes: a ``gshot`` line (the carrier, its own record's key)
+    and a ``gsfile`` line per file (pad_mode_runtime.c "a sound on a shot"); round 2: a row with a
+    condition on its shot's insert (*lit*, one of :data:`SHOT_LIT`) adds its class as a 7th field."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
@@ -1116,8 +1149,11 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
             lines.append("jsong\t%d\t%s\t%s" % (int(weight), bytes(key).hex(), clip or "-"))
     if shots and shots.get("files"):
         lines.append("gshot\t%d\t%s" % (int(shots["request"]), bytes(shots["key"]).hex()))
-        for k, (mode, sw, key, ms) in enumerate(shots["files"], 1):
-            lines.append("gsfile\t%d\t%d\t%d\t%s\t%d" % (k, int(mode), int(sw), bytes(key).hex(), int(ms)))
+        for k, row in enumerate(shots["files"], 1):
+            mode, sw, key, ms = row[:4]
+            lit = row[4] if len(row) > 4 else ""
+            lines.append("gsfile\t%d\t%d\t%d\t%s\t%d" % (k, int(mode), int(sw), bytes(key).hex(), int(ms))
+                         + ("\t%d" % SHOT_LIT.index(lit) if lit else ""))
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -1145,7 +1181,8 @@ REC_AGAP = "#agap"
 #: name>`` (its intro clip, when it has one, is in the video bank as ``jukebox.clip_name(k)``)
 REC_JSONG = "#jsong"
 #: PAD-945: a sound on a shot: ``#gshot <k> <slot idx> <record idx> <mode id> <switch id> <slot rel>
-#: <the file's own name> <the mode's name> <the switch's name>`` (the slot is the carrier's)
+#: <the file's own name> <the mode's name> <the switch's name> [<lit>]`` (the slot is the carrier's;
+#: round 2: the condition on the shot's insert, one of :data:`SHOT_LIT`, when it has one)
 REC_GSHOT = "#gshot"
 #: PAD-608: a file in a sound bank names its record as ``<bank category>:<record idx>`` (an app
 #: before PAD-608 skips such a line: its record field is not a number)
@@ -1199,7 +1236,8 @@ def card_record(modes, used):
                                   str(int(row.get("mode", 0))), str(int(row.get("switch", 0))),
                                   _rec_word(u["rel"]),
                                   _rec_word(os.path.basename(str(row.get("file") or "").replace("\\", "/"))),
-                                  _rec_word(row.get("mode_name")), _rec_word(row.get("switch_name"))]))
+                                  _rec_word(row.get("mode_name")), _rec_word(row.get("switch_name"))]
+                                 + ([row["lit"]] if row.get("lit") else [])))
             continue
         if is_attract(m):
             k = attract_of(m)
@@ -1311,7 +1349,8 @@ def read_card_record(text):
                     gshots.append(dict({"k": k, "slot": int(f[2]), "host": host, "mode": int(f[4]),
                                         "switch": int(f[5]), "rel": f[6], "name": f[7] if len(f) > 7 else "",
                                         "mode_name": f[8] if len(f) > 8 else "",
-                                        "switch_name": f[9] if len(f) > 9 else ""},
+                                        "switch_name": f[9] if len(f) > 9 else "",
+                                        "lit": f[10] if len(f) > 10 and f[10] in SHOT_LIT else ""},
                                        **({"bank": bank} if bank is not None else {})))
             elif f[0] == REC_AGAP and len(f) >= 2:
                 agap = clean_gap(f[1])

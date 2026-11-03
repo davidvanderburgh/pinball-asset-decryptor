@@ -684,7 +684,7 @@ def music_from_card(project, cfg_text):
             copied[host] = _put(folder, stem + ".wav", src=os.path.join(project, *host.split("/")))
         shots.append({"mode": g["mode"], "mode_name": g.get("mode_name") or "",
                       "switch": g["switch"], "switch_name": g.get("switch_name") or "",
-                      "file": copied[host]})
+                      "file": copied[host], "lit": g.get("lit") or ""})
     shots = SMo.clean_shots(shots)
     if shots:
         out["shots"] = shots

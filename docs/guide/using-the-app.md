@@ -195,6 +195,10 @@ the game's own sounds (one it never plays, say) or a file of yours.
 - Right-click a sound > **Play on a shot in one of the game's modes…**, or **Sounds on shots** at
   the top of the tab. Pick the mode (the game's own name for it, such as Grendel Mode), the shot
   (the game's own switch name) and the sound, then **Add**. Up to 32.
+- **By the color of its light:** pick **lit** or a color (**lit blue**, **lit red**...)
+  beside the shot, and its sound plays only when the shot's light showed it at the hit.
+  A mode whose lit shots change color with each level (Venom's Grendel Mode) then plays
+  one sound per level; a color sound wins over a lit one, which wins over an any-time one.
 - The sound plays whole, beside the game's own sounds. A hit while it still plays adds no
   other one, so a spinner does not stack them.
 - **Where:** the games whose modes the app can tell running (Venom, Godzilla, Deadpool, TMNT,

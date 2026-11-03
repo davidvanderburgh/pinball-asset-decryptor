@@ -485,12 +485,15 @@ function ShotsModal({ data, onClose }) {
   const [d, setD] = useState(data);
   const [mode, setMode] = useState("");
   const [shot, setShot] = useState("");
+  const [lit, setLit] = useState("");
   const act = async (a) => { const got = await call("audio.shots_action", a); if (got) setD(got); };
   const rows = d.rows || [];
   const modes = d.modes || [];
   const shots = d.shots || [];
   const m = mode || (modes[0] || {}).value || "";
   const s = shot || (shots[0] || {}).value || "";
+  const litOk = (d.lit_ok || []).includes(s);
+  const l = litOk ? lit : "";
   const full = rows.length >= (d.max || 0);
   return html`<${Modal} title="Sounds on shots" icon="audio" wide onClose=${onClose}
     footer=${html`<span class="grow"></span><${Button} kind="primary" onClick=${onClose}>Close<//>`}>
@@ -514,12 +517,15 @@ function ShotsModal({ data, onClose }) {
         <${Select} sm value=${m} options=${modes} onChange=${setMode} width=${200} title="One of the game's modes" />
         <span class="lbl nw">when</span>
         <${Select} sm value=${s} options=${shots} onChange=${setShot} width=${200} title="The shot (the game's own switch name)" />
-        <span class="lbl nw">is hit, play</span>
+        <span class="lbl nw">is hit</span>
+        <${Select} sm value=${l} options=${d.lits || []} onChange=${setLit} width=${140} disabled=${!litOk}
+          title=${litOk ? "Any time, or only while the shot's light shows this color (the color it was lit when it was hit). A shot can have a sound for each color." : "The app cannot read this shot's light, so its sound plays at any hit."} />
+        <span class="lbl nw">play</span>
         <${Button} size="sm" drop title="The sound: one of the game's own (in the project's audio folder) or a file of yours"
           onClick=${() => act("choose")}>${d.pick || "Choose a sound…"}<//>
         <${Button} size="sm" kind="primary" icon="plus" disabled=${!d.pick || !m || !s || full || d.running}
           title=${full ? `At most ${d.max}` : !d.pick ? "Choose the sound first" : "Add this sound on that shot"}
-          onClick=${() => act(`add:${m}:${s}`)}>Add<//>
+          onClick=${() => act(`add:${m}:${s}:${l}`)}>Add<//>
       </div>`}
     </div>
   <//>`;

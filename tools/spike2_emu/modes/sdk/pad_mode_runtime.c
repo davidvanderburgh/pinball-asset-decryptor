@@ -9392,6 +9392,13 @@ static unsigned stock_game_rgb(int k, unsigned mono_rgb)
     return c[0] << 16 | c[1] << 8 | c[2];
 }
 
+/* PAD-945 (pad_mode.h): the game's own colour of insert i now, for a mode or the sounds on shots */
+int pm_lamp_game_rgb(int i)
+{
+    if (i < 0 || i >= n_lamps || !data("lamp_layers") || pm_port_value("lamp_slot_size", 0) <= 0) return -1;
+    return (int)(stock_game_rgb(i, 0xffffffu) & 0xffffffu);
+}
+
 /* every tick: the new shots of a rule's lit instead_of rows show the old shots' light, the old ones dark */
 static void stock_mirror_tick(void)
 {
@@ -16014,15 +16021,34 @@ static void att_arm(void)
  * descriptor says how long it plays, so a file shorter than its record is followed by silence that would
  * hold the voice bus: gms_tick stops it once the file's own length (+1/8 +120 ms, as mode_file.c's own
  * calls) has played - from a hook of its own on the tick site, since a card with no modes (`only`) hooks
- * no tick of the modes'. */
+ * no tick of the modes'.
+ * PAD-945 round 2 (the tester: in Grendel Mode "the lit shots are roving, and there are four different shot
+ * colors, each corresponding to a different attack level"): a gsfile line's 7th field asks for the shot's
+ * own insert to be LIT, in any colour (1) or one colour class (GMS_* below), as the game shows it at the
+ * press - read before the game's own handler for the switch runs, so a hit that moves the shot up a level
+ * is judged by the level it was hit at. The shot's inserts are the port's `lamp` lines sharing a bit with
+ * the switch's `switch` line. Grendel's lit shots BLINK (the emulator, Venom LE 1.07: about 2.4 s on, 2 s
+ * off, in 0000ff / c02000 / ff0000), so gms_tick keeps the last colour each such row's shot showed and a
+ * press while the insert is dark takes it when it was seen within GMS_LIT_MS. Of the rows that fit a
+ * press, the most particular plays: a colour row before a lit-in-any-colour row before a row with no
+ * condition. */
 #define GMS_FILES 32
+#define GMS_LIT_MS 3000                     /* a blinking insert's last colour still counts this long */
+enum { GMS_ANY, GMS_LIT, GMS_WHITE, GMS_RED, GMS_ORANGE, GMS_YELLOW, GMS_GREEN, GMS_CYAN, GMS_BLUE, GMS_PURPLE,
+       GMS_CLASSES };
+static const char *const GMS_CLASS_NAMES[GMS_CLASSES] = { "any time", "lit", "lit white", "lit red", "lit orange",
+                                                           "lit yellow", "lit green", "lit cyan", "lit blue",
+                                                           "lit purple" };
 #define GMS_GAP   150                       /* ms after a file's own length before another press plays */
 static struct {
     unsigned request, n, plays, busy_skips, idle_skips;
     long slot;                              /* the modes' ACTIVE virtual */
     unsigned char key[8];
-    unsigned mode[GMS_FILES], sw[GMS_FILES], ms[GMS_FILES], obj[GMS_FILES];
+    unsigned mode[GMS_FILES], sw[GMS_FILES], ms[GMS_FILES], obj[GMS_FILES], lit[GMS_FILES];
     unsigned char host[GMS_FILES][8];
+    short ins[GMS_FILES][4];                /* round 2: the inserts of a lit row's shot (-1: none) */
+    volatile unsigned seen_cls[GMS_FILES];  /* round 2: the colour class its shot last showed, and when */
+    volatile unsigned long seen_at[GMS_FILES];
     volatile int cur;                       /* the file the carrier plays now (-1: none) */
     volatile unsigned long swap_until, until, stop_at;
     volatile int looked;
@@ -16039,11 +16065,12 @@ static void gms_line(const char *rs, const char *ks)
     gms.request = r;
 }
 
-static void gms_file(const char *ks, const char *ms_, const char *ws, const char *keys, const char *mss)
+static void gms_file(const char *ks, const char *ms_, const char *ws, const char *keys, const char *mss,
+                     const char *lits)
 {
     const char *p = ks;
-    unsigned k, m, w, ms;
-    int ok, ok2, ok3, ok4;
+    unsigned k, m, w, ms, lit = GMS_ANY;
+    int ok, ok2, ok3, ok4, ok5 = 1;
     k = (unsigned)number(&p, &ok);
     p = ms_;
     m = (unsigned)number(&p, &ok2);
@@ -16051,8 +16078,13 @@ static void gms_file(const char *ks, const char *ms_, const char *ws, const char
     w = (unsigned)number(&p, &ok3);
     p = mss;
     ms = (unsigned)number(&p, &ok4);
-    if (!ok || !ok2 || !ok3 || !ok4 || k < 1 || k > GMS_FILES || m >= BLOCK_IDS || !w || w >= N_SWITCH_IDS || !ms
-        || !key_hex(keys, gms.host[k - 1])) { gms_bad++; return; }
+    if (lits && lits[0]) {
+        p = lits;
+        lit = (unsigned)number(&p, &ok5);
+    }
+    if (!ok || !ok2 || !ok3 || !ok4 || !ok5 || k < 1 || k > GMS_FILES || m >= BLOCK_IDS || !w || w >= N_SWITCH_IDS
+        || !ms || lit >= GMS_CLASSES || !key_hex(keys, gms.host[k - 1])) { gms_bad++; return; }
+    gms.lit[k - 1] = lit;
     gms.mode[k - 1] = m;
     gms.sw[k - 1] = w;
     gms.ms[k - 1] = ms;
@@ -16098,25 +16130,82 @@ static int gms_active(int k)
     return (((unsigned (*)(unsigned))(unsigned long)act)(obj) & 0xffu) != 0;
 }
 
+/* round 2: the colour class of an rgb as the game shows it (tests lift it verbatim): GMS_ANY when the insert is
+ * dark, GMS_WHITE when its three lights are near one level, else by hue - red under 5 degrees or from 345 (the
+ * Grendel Mode's ff0000), orange to 40 (its c02000, 10 degrees), yellow to 75, green to 160, cyan to 200, blue
+ * to 260 (its 0000ff), purple to 345 */
+static unsigned gms_class(unsigned rgb)
+{
+    int r = (int)(rgb >> 16 & 255u), g = (int)(rgb >> 8 & 255u), b = (int)(rgb & 255u);
+    int hi = r > g ? (r > b ? r : b) : (g > b ? g : b), lo = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    int d = hi - lo, h;
+    if (hi < 48) return GMS_ANY;
+    if (d * 10 < hi * 4) return GMS_WHITE;
+    if (hi == r) h = (60 * (g - b) / d + 360) % 360;
+    else if (hi == g) h = 60 * (b - r) / d + 120;
+    else h = 60 * (r - g) / d + 240;
+    return h < 5 || h >= 345 ? GMS_RED : h < 40 ? GMS_ORANGE : h < 75 ? GMS_YELLOW : h < 160 ? GMS_GREEN
+           : h < 200 ? GMS_CYAN : h < 260 ? GMS_BLUE : GMS_PURPLE;
+}
+
+/* round 2: the colour class row k's shot shows now - its brightest insert's (GMS_ANY: dark, or no insert) */
+static unsigned gms_shows(int k, unsigned *rgb_out)
+{
+    unsigned best = 0, bv = 0, cls;
+    int i;
+    for (i = 0; i < 4 && gms.ins[k][i] >= 0; i++) {
+        int rgb = pm_lamp_game_rgb(gms.ins[k][i]);
+        unsigned v;
+        if (rgb < 0) continue;
+        v = ((unsigned)rgb >> 16 & 255u) + ((unsigned)rgb >> 8 & 255u) + ((unsigned)rgb & 255u);
+        if (v > bv) { bv = v; best = (unsigned)rgb; }
+    }
+    cls = bv ? gms_class(best) : GMS_ANY;
+    if (rgb_out) *rgb_out = best;
+    return cls;
+}
+
+/* round 2: row k's condition at a press now: 0 = it does not fit, else how particular it is (3 a colour, 2 lit
+ * in any colour, 1 no condition) */
+static int gms_fits(int k, unsigned long now, unsigned *rgb_out)
+{
+    unsigned cls;
+    if (gms.lit[k] == GMS_ANY) return 1;
+    cls = gms_shows(k, rgb_out);
+    if (cls == GMS_ANY && gms.seen_at[k] && (long)(now - gms.seen_at[k]) <= GMS_LIT_MS) {
+        cls = gms.seen_cls[k];                           /* a blink's dark half: the colour it last showed */
+        *rgb_out = 0x1000000u | cls;                     /* (the log says so) */
+    }
+    if (cls == GMS_ANY) return 0;
+    if (gms.lit[k] == GMS_LIT) return 2;
+    return cls == gms.lit[k] ? 3 : 0;
+}
+
 /* every edge of the switch drain (the game's thread): a switch of a row pressed while its mode runs */
 static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)
 {
     unsigned closed;
     unsigned long now;
-    int k;
+    int k, j, best = 0, any = 0;
+    unsigned rgb = 0, rgb_k = 0;
     if (!pm_in_game()) return;
     for (k = 0; k < (int)gms.n && gms.sw[k] != id; k++) ;
     if (k == (int)gms.n) return;                        /* no row has this switch */
     closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
     if ((level & 1u) != closed) return;                 /* the release */
-    for (; k < (int)gms.n; k++)
-        if (gms.sw[k] == id && gms_active(k)) break;
-    if (k == (int)gms.n) {
+    now = pm_ms();
+    for (j = k, k = -1; j < (int)gms.n; j++) {
+        int f;
+        if (gms.sw[j] != id || !gms_active(j)) continue;
+        any = 1;
+        if ((f = gms_fits(j, now, &rgb)) > best) { best = f; k = j; rgb_k = rgb; }
+    }
+    if (k < 0) {
         if (gms.idle_skips++ < 8)
-            say("game mode shot sounds: switch %u pressed - none of its modes runs, no sound", id);
+            say("game mode shot sounds: switch %u pressed - %s, no sound", id,
+                any ? "its shot is not lit as a row of its mode asks" : "none of its modes runs");
         return;
     }
-    now = pm_ms();
     if (gms.plays && (long)(gms.until - now) > 0) {     /* the last one still plays */
         if (gms.busy_skips++ < 8)
             say("game mode shot sounds: switch %u in %s - the last sound still plays, no sound", id, gms_name(gms.mode[k]));
@@ -16130,16 +16219,31 @@ static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     gms.cur = k;
     gms.plays++;
     pm_sound(gms.request);
-    say("game mode shot sounds: switch %u pressed in %s (mode %u) - file %d (%u ms) on request %u", id,
-        gms_name(gms.mode[k]), gms.mode[k], k + 1, gms.ms[k], gms.request);
+    if (gms.lit[k] && (rgb_k >> 24))
+        say("game mode shot sounds: switch %u pressed in %s (mode %u), its shot %s (dark in its blink: the color it "
+            "showed last) - file %d (%u ms) on request %u", id, gms_name(gms.mode[k]), gms.mode[k],
+            GMS_CLASS_NAMES[gms.lit[k]], k + 1, gms.ms[k], gms.request);
+    else
+        say("game mode shot sounds: switch %u pressed in %s (mode %u)%s%s - file %d (%u ms) on request %u", id,
+            gms_name(gms.mode[k]), gms.mode[k], gms.lit[k] ? ", its shot " : "",
+            gms.lit[k] ? GMS_CLASS_NAMES[gms.lit[k]] : "", k + 1, gms.ms[k], gms.request);
+    if (gms.lit[k] && !(rgb_k >> 24))
+        say("game mode shot sounds: its light read %06x at the press", rgb_k & 0xffffffu);
 }
 
 /* the tick (its own hook): the carrier stopped once the file has played, so its silence holds no bus */
 static void gms_tick(unsigned *r)
 {
-    unsigned long at = gms.stop_at;
+    unsigned long at = gms.stop_at, now = pm_ms();
+    unsigned k;
     (void)r;
-    if (!at || (long)(pm_ms() - at) < 0) return;
+    for (k = 0; k < gms.n; k++) {                        /* round 2: the colour a lit row's shot last showed */
+        unsigned cls;
+        if (gms.lit[k] == GMS_ANY || gms.ins[k][0] < 0 || (cls = gms_shows((int)k, 0)) == GMS_ANY) continue;
+        gms.seen_cls[k] = cls;
+        gms.seen_at[k] = now | 1;
+    }
+    if (!at || (long)(now - at) < 0) return;
     gms.stop_at = 0;
     if (pm_sound_active(gms.request) && pm_sound_stop(gms.request) && gms.stops++ < 8)
         say("game mode shot sounds: request %u stopped at its file's end, so its silence holds no sound bus", gms.request);
@@ -16167,6 +16271,19 @@ static void gms_arm(void)
     if (gms.slot < 0) {
         say("game mode shot sounds: off - the port does not say which virtual tells that one of the game's modes runs");
         return;
+    }
+    for (k = 0; k < gms.n; k++) {                        /* round 2: a lit row's shot's inserts */
+        uint64_t mask = 0;
+        int i, n = 0;
+        for (i = 0; i < 4; i++) gms.ins[k][i] = -1;
+        if (gms.lit[k] == GMS_ANY) continue;
+        for (i = 0; i < port.n_switch; i++)
+            if (port.sw[i].id == gms.sw[k]) mask |= port.sw[i].mask;
+        for (i = 0; i < n_lamps && n < 4 && mask; i++)
+            if (lamps[i].shot & mask) gms.ins[k][n++] = (short)i;
+        if (!n)
+            say("game mode shot sounds: file %u asks for switch %u %s, but the port names no insert of that shot - it "
+                "never plays", k + 1, gms.sw[k], GMS_CLASS_NAMES[gms.lit[k]]);
     }
     for (k = 0; k < gms.n; k++) {
         pm_snprintf(key, sizeof key, "block_obj_%u", gms.mode[k]);
@@ -16196,8 +16313,9 @@ static void gms_arm(void)
         say("game mode shot sounds: the tick cannot be hooked - the carrier plays out its own length after a file");
     gms_live = 1;
     for (k = 0; k < gms.n; k++)
-        say("game mode shot sounds: file %u plays at switch %u in %s (mode %u, object 0x%08x)", k + 1, gms.sw[k],
-            gms_name(gms.mode[k]), gms.mode[k], gms.obj[k]);
+        say("game mode shot sounds: file %u plays at switch %u in %s (mode %u, object 0x%08x)%s%s", k + 1, gms.sw[k],
+            gms_name(gms.mode[k]), gms.mode[k], gms.obj[k], gms.lit[k] ? ", when its shot is " : "",
+            gms.lit[k] ? GMS_CLASS_NAMES[gms.lit[k]] : "");
     say("game mode shot sounds: %u file(s) on request %u, ACTIVE v[%ld]; switch_edge 0x%08x and sound_lookup 0x%08x "
         "are hooked", gms.n, gms.request, gms.slot, e->addr, fn("sound_lookup"));
 }
@@ -16415,14 +16533,14 @@ static void juke_arm(void)
 static void sndm_line(char *s)
 {
     const char *p;
-    char *f[6];
+    char *f[7];
     unsigned n = 0, k, m;
     int ok;
     struct sndm *e;
     while (*s == ' ') s++;
     if (*s == '#' || !*s) return;
     for (;;) {
-        if (n < 6) f[n++] = s;
+        if (n < 7) f[n++] = s;
         while (*s && *s != '\t') s++;
         if (!*s) break;
         *s++ = 0;
@@ -16487,7 +16605,7 @@ static void sndm_line(char *s)
         return;
     }
     if (n >= 6 && str_eq(f[0], "gsfile")) {
-        gms_file(f[1], f[2], f[3], f[4], f[5]);
+        gms_file(f[1], f[2], f[3], f[4], f[5], n >= 7 ? f[6] : 0);
         return;
     }
     if (n < 4 || !str_eq(f[0], "sound")) return;

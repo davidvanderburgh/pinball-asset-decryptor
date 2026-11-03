@@ -491,7 +491,9 @@ def missed_fixes(tables_dir, out_name, marks):
         return []
     squash = lambda t: re.sub(r"\s+", " ", t).lower()      # noqa: E731
     text = squash(text)
-    return [k["why"] for k in marks if squash(k.get("old", "")).strip() in text and k.get("old")]
+    found = [k["why"] for k in marks if squash(k.get("old", "")).strip() in text and k.get("old")]
+    # a table both models' maps fit (Foo Fighters, PAD-968) carries each mark twice
+    return list(dict.fromkeys(found))
 
 
 def patched_from(tables_dir, out_name):

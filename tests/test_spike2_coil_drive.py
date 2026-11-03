@@ -307,3 +307,64 @@ def test_padled_h_documents_those_offsets():
         assert re.search(r"\b%s %d\b" % (name, off), hdr), name
     # version 5's block, or a later one that only appends to it (6, PAD-500)
     assert int(re.search(r"#define PADLED_VERSION (\d+)", hdr).group(1)) >= 5
+
+
+PUBLISH = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+%s
+
+static struct padled_shm shm;
+static struct padled_shm *led_shm = &shm;
+static void led_map(void) { }
+
+%s
+
+int main(int argc, char **argv)
+{
+    int a;
+    for (a = 1; a < argc; a++) {
+        unsigned char f[64];
+        int n = 0;
+        const char *s = argv[a];
+        while (s[0] && s[1] && n < 64) {
+            char t[3]; t[0] = s[0]; t[1] = s[1]; t[2] = 0;
+            f[n++] = (unsigned char)strtoul(t, 0, 16);
+            s += 2;
+        }
+        coil_publish(f, n);
+    }
+    printf("C %%u %%u %%u lvl=%%u\n", shm.coil[9][3], shm.coil[9][0], shm.coil_decoded, shm.lvl[9][3]);
+    return 0;
+}
+"""
+
+
+def test_the_short_40_counts_as_the_coil_firing(tmp_path):
+    """PAD-968: Foo Fighters lets the Overlord's fork go with a 20 ms FORK DOWN
+    rule (cmd 41) and then the SHORT cmd 40, 89 03 40 03. coil_publish()
+    counted only the 14-byte form, so the controller (and a VPX table) never
+    saw FORK DOWN fire and the captive ball was never let out. The short form
+    counts every time - it is never the coil's boot configuration - and
+    leaves the coil's power alone (its byte 4 is the checksum)."""
+    if not CC:
+        pytest.skip("no C compiler on this host")
+    decls = "\n".join([_block(r"^struct padled_shm \{.*?^\};")])
+    src = tmp_path / "publish.c"
+    src.write_text(PUBLISH % (decls, _extract("coil_publish")), encoding="utf-8")
+    exe = tmp_path / ("publish.exe" if os.name == "nt" else "publish")
+    r = subprocess.run([CC, "-O1", "-Wall", "-o", str(exe), str(src)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    boot = "890b4003ff000000000000002a00"           # foo_fighters_pro's boot configuration
+    short = "890340033100"                         # the short 40, as traced on the rig
+
+    def counts(*frames):
+        out = subprocess.run([str(exe)] + list(frames), capture_output=True, text=True).stdout
+        return out.split()[1:]
+    assert counts(boot) == ["0", "0", "0", "lvl=255"]                 # seeds, not an event
+    assert counts(boot, short, short) == ["2", "0", "2", "lvl=255"]   # each short fire counts
+    assert counts(short) == ["1", "0", "1", "lvl=0"]                  # even before any long one
+    assert counts(boot, boot) == ["1", "0", "1", "lvl=255"]           # the long form as before
+    assert counts(RULE) == ["0", "1", "1", "lvl=0"]                   # jaws_le's (node 9 coil 0)

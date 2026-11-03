@@ -63,14 +63,21 @@
   "plunger": {"lane_trigger": "swPlungerRest", "lane_switch": 65, "autoplunge": "plungerIM"},
   "trough": {"release": "BallRelease", "drain": "Drain", "switches": [74, 73, 72, 71, 70, 69, 75], "balls": 6, "kick": [90, 4]},
   "saucers": {},
+  "repatch": [
+    {"old": "Sub PadForkDown(e)", "why": "the Overlord never holds a ball, so its lock and All My Life Multiball never start", "since": "PAD-968: the Overlord fork is followed as the latch it is"}
+  ],
+  "switch_fakes": {
+    "_": "PAD-968: the Overlord fork is a latched post the table has no switch for. FORK RELEASE pops it up (it catches the ball: with capture lit the game arms both coils on the OVERLORD OPTO), FORK DOWN pulls it back onto its latch (the ball goes). The controller follows it, answers OVERLORD FORK UP and hands the table its state as solenoid 60 (up = the posts up, the ball held)",
+    "fork": {"kind": "latch", "up": [9, 4], "down": [9, 3], "switch": 87, "solenoid": 60, "callback": "PadForkPost", "name": "OVERLORD FORK"}
+  },
   "solenoids": {
     "1": {"coil": [8, 1], "name": "TROUGH", "callback": "bsTrough.SolOut"},
     "2": {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "PadAutoPlunge"},
     "3": {"coil": [8, 8], "name": "OUTLANE UP POST", "callback": "PadSavePost"},
     "4": {"coil": [9, 7], "name": "VAN UP POST", "callback": "PadVanPost"},
     "5": {"coil": [9, 8], "name": "3 BANK DROP", "callback": "PadResetDrops"},
-    "6": {"coil": [9, 3], "name": "FORK DOWN", "callback": "PadForkDown"},
-    "7": {"coil": [9, 4], "name": "FORK RELEASE", "callback": "PadForkRelease"},
+    "6": {"coil": [9, 3], "name": "FORK DOWN", "callback": null},
+    "7": {"coil": [9, 4], "name": "FORK RELEASE", "callback": null},
     "8": {"coil": [9, 0], "name": "OVERLORD MAGNET", "callback": null},
     "9": {"coil": [9, 1], "name": "OVERLORD HIT", "callback": null},
     "10": {"coil": [9, 2], "name": "KICK TARGET", "callback": null},
@@ -85,7 +92,7 @@
     "BallRelease.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "Sub PadSavePost(e) : SavePost.IsDropped = Not e : End Sub\nSub PadVanPost(e) : VanPost.IsDropped = Not e : End Sub\nSub PadResetDrops(e) : If e Then dt1.IsDropped = 0 : dt2.IsDropped = 0 : dt3.IsDropped = 0 : End If : End Sub\nSub PadForkDown(e) : If e Then OverPost1.IsDropped = 0 : OverPost2.IsDropped = 0 : End If : End Sub\nSub PadForkRelease(e) : If e Then OverPost1.IsDropped = 1 : OverPost2.IsDropped = 1 : End If : End Sub\n",
+  "extra_vbs": "Sub PadSavePost(e) : SavePost.IsDropped = Not e : End Sub\nSub PadVanPost(e) : VanPost.IsDropped = Not e : End Sub\nSub PadResetDrops(e) : If e Then dt1.IsDropped = 0 : dt2.IsDropped = 0 : dt3.IsDropped = 0 : End If : End Sub\nSub PadForkPost(e) : OverPost1.IsDropped = Not e : OverPost2.IsDropped = Not e : End Sub\n",
   "retrofit_timers": {
     "PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1},
     "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100}

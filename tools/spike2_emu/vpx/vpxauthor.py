@@ -398,8 +398,9 @@ def coils_from_map(m):
     if kick and len(kick) == 2:
         out.setdefault(tuple(kick), "TROUGH")
     for obj, v in _entries(m.get("switch_fakes")):
-        if v.get("coil"):
-            out.setdefault(tuple(v["coil"]), v.get("name") or obj.upper())
+        for k in ("coil", "up", "down"):
+            if v.get(k):
+                out.setdefault(tuple(v[k]), v.get("name") or obj.upper())
     return [{"name": name, "node": n, "index": i, "kind": coil_kind(name), "x": None, "y": None,
              "number": lamp_coil_number(n, i)} for (n, i), name in sorted(out.items())]
 
@@ -931,9 +932,10 @@ def coverage(m):
         if k not in ("_", "balls", "balls_why"):
             sw.update(_ints(v))
     for obj, v in _entries(m.get("switch_fakes")):
-        sw.update(_ints({k: x for k, x in v.items() if k in ("open", "closed")}))
-        if v.get("coil"):
-            coils.add(tuple(v["coil"]))
+        sw.update(_ints({k: x for k, x in v.items() if k in ("open", "closed", "switch")}))
+        for k in ("coil", "up", "down"):
+            if v.get(k):
+                coils.add(tuple(v[k]))
     sw.update(_ints((m.get("trough") or {}).get("switches")))
     if (m.get("plunger") or {}).get("lane_switch"):
         sw.add(int(m["plunger"]["lane_switch"]))

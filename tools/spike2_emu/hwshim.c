@@ -12316,13 +12316,20 @@ static int led_moved_recently(unsigned long now)
  *
  * The FIRST 0x40 for a given coil is its boot configuration - nine arrive back
  * to back on node 8 at startup, one on node 9 - so it seeds the record and does
- * not count as an event. Everything after it does. */
+ * not count as an event. Everything after it does.
+ *
+ * PAD-968: the SHORT form, 89 03 40 <IDX> <cksum> 00, fires the coil by the
+ * rule a cmd 41 just set (Foo Fighters lets the Overlord's fork go that way:
+ * a 20 ms FORK DOWN rule, then the short 40). It carries no power byte and is
+ * never a boot configuration, so it only counts. Uncounted, a table played
+ * through the controller never saw that coil fire and the ball stayed held. */
 static void coil_publish(const unsigned char *p, int n)
 {
     static unsigned char configured[16][16];
     unsigned node, idx;
+    int brief = (n == 6 && p[1] == 0x03);
 
-    if (n != 14 || !(p[0] & 0x80) || p[2] != 0x40) return;
+    if ((n != 14 && !brief) || !(p[0] & 0x80) || p[2] != 0x40) return;
     node = (unsigned)p[0] & 0x3f;
     if (node != 8 && node != 9) return;
     idx = p[3];
@@ -12330,8 +12337,10 @@ static void coil_publish(const unsigned char *p, int n)
 
     led_map();
     if (!led_shm) return;
-    led_shm->lvl[node][idx] = p[4];
-    if (!configured[node][idx]) { configured[node][idx] = 1; return; }
+    if (!brief) {
+        led_shm->lvl[node][idx] = p[4];
+        if (!configured[node][idx]) { configured[node][idx] = 1; return; }
+    }
     led_shm->coil[node][idx]++;
     led_shm->coil_decoded++;
     led_shm->coil_gen++;

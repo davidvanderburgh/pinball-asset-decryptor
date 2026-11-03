@@ -9,7 +9,8 @@
     "switches and inserts fit it; a themed tribute of the film or band is not. `map`: the kit's map for it, when there",
     "is one. VPUniverse and VPForums downloads take a free account.",
     "`needs`: what playing the real game would take on this PC however a bridge is built (JJP: the machine's own security key).",
-    "`no_game`: why no table can ever play that title's real game on this PC, whatever map is written (PAD-952)."
+    "`no_game`: why no table can ever play that title's real game on this PC, whatever map is written (PAD-952).",
+    "`complete`: a table that is whole on its own, with nothing for PAD to add: the tab lists neither it nor a download of it (PAD-956)."
   ],
   "platforms": {
     "spike2": {
@@ -343,7 +344,7 @@
       "kind": "tribute",
       "faithful": true,
       "notes": "Backglass in the download; the game's own DMD media and sounds with Scott Danesi's blessing.",
-      "no_game": "Its game cannot run on this PC: TNA's game file is encrypted with a key nobody has found, so the app cannot read it, and no table can play the real game."
+      "complete": "A complete table on its own (the game's own DMD media and sounds): it needs nothing from PAD, so the tab does not list it."
     },
     {
       "platform": "spooky",

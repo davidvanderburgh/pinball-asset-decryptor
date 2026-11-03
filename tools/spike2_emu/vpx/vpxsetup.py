@@ -18,7 +18,7 @@ process:
     vpxsetup.py layout <key> <player> <lcd>
                                           where the windows go: [x, y, w, h] JSON or null
     vpxsetup.py open <table name>         open a (PAD) table in Visual Pinball
-    vpxsetup.py open_download <path>      open a download as it is (PAD-952: TNA, AMH)
+    vpxsetup.py open_download <path>      open a download as it is (PAD-952: AMH)
 
 PAD SHIPS NO TABLE. The kit patches the copy the user downloaded from its
 author (`padvpx patch`); each map names the table it fits (`table`) so the
@@ -304,9 +304,11 @@ def catalog_match(file_name, catalog=None):
             "by": best.get("by", ""), "where": best.get("where", ""), "url": best.get("url", ""),
             "version": best.get("version", ""), "kind": best.get("kind", ""), "faithful": bool(best.get("faithful")),
             "title": best.get("title", ""),
-            # PAD-952: why nothing can ever play behind it (TNA: its game's key
-            # is unknown; AMH: its update holds no game program)
-            "no_game": best.get("no_game", "")}
+            # PAD-952: why nothing can ever play behind it (AMH: its update
+            # holds no game program)
+            "no_game": best.get("no_game", ""),
+            # PAD-956: a whole table on its own (TNA), not listed at all
+            "complete": best.get("complete", "")}
 
 
 #: what a cache entry must carry (older ones are read again; 3: no_game, PAD-952)
@@ -379,8 +381,13 @@ def downloads_in(tables_dir, cache=None):
         return []
     cache = _downloads_cache() if cache is None else cache
     maps_sig = maps_signature()
+    catalog = load_catalog()
     out = []
     for f, path in download_files(tables_dir):
+        # PAD-956: a table complete on its own (TNA) needs nothing from PAD:
+        # it is not on the list (by its name, so not even while unread)
+        if (catalog_match(f, catalog) or {}).get("complete"):
+            continue
         try:
             st = os.stat(path)
         except OSError:
@@ -710,7 +717,7 @@ def open_table(name):
 def open_download(path):
     """PAD-952: one of the person's downloads in the tables folder (or a
     folder in it), opened as it is - a table whose real game cannot run on
-    this PC (TNA, America's Most Haunted) plays its author's rules. The file
+    this PC (America's Most Haunted) plays its author's rules. The file
     is never changed: no muting, no keys."""
     vpx = find_vpx()
     if not vpx:

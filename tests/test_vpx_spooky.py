@@ -17,8 +17,9 @@ What is worth failing on, none of it needing a run:
   * THE PATCHER'S NEW PIECES: a drop target's switch made while it stands,
     a bank reset that stands them again, and other holes feeding one lane.
   * THE TAB: Spooky updates count as its cards, downloads are read from the
-    folders in the tables folder, TNA and AMH say why nothing can play
-    behind them and open as they are.
+    folders in the tables folder, AMH says why nothing can play
+    behind it and opens as it is; TNA is complete on its own, so it is
+    not listed (PAD-956).
 """
 import importlib.util
 import json
@@ -344,23 +345,44 @@ def test_downloads_are_read_from_the_folders_in_the_tables_folder(tmp_path):
     assert got[1]["path"] == str(orig / "halloween_MM_Edition.vpx")
 
 
-@pytest.mark.parametrize("name,game", [
-    ("Total Nuclear Annihilation (Spooky 2017) VPW v2.3.vpx", "Total Nuclear Annihilation"),
-    ("America's Most Haunted (Spooky Pinball 2014) LW.vpx", "America's Most Haunted")])
-def test_tna_and_amh_say_why_no_game_plays_behind_them(name, game):
+def test_amh_says_why_no_game_plays_behind_it():
     setup = pytest.importorskip("vpxsetup")
-    c = setup.catalog_match(name)
-    assert c and c["platform"] == "spooky" and c["game"] == game and c["no_game"]
+    c = setup.catalog_match("America's Most Haunted (Spooky Pinball 2014) LW.vpx")
+    assert c and c["platform"] == "spooky" and c["game"] == "America's Most Haunted" and c["no_game"]
+    assert not c["complete"]
     cat = setup.load_catalog()
     assert cat["platforms"]["spooky"]["bridge"] == "pad"
     hw = [t for t in cat["tables"] if t.get("game") == "Halloween"][0]
     assert hw["title"] == "h78" and not hw.get("no_game")
 
 
+def test_tna_is_complete_on_its_own_so_neither_list_has_it(tmp_path):
+    """PAD-956: TNA's table is whole without PAD: its download is not on the
+    Tables list (read or not) and its catalogue row is marked to be left out."""
+    setup = pytest.importorskip("vpxsetup")
+    c = setup.catalog_match("Total Nuclear Annihilation (Spooky 2017) VPW v2.3.vpx")
+    assert c and c["game"] == "Total Nuclear Annihilation" and c["complete"] and not c["no_game"]
+    assert [t for t in setup.load_catalog()["tables"] if t.get("complete")] == [
+        t for t in setup.load_catalog()["tables"] if t.get("game") == "Total Nuclear Annihilation"]
+    orig = tmp_path / "originals"
+    orig.mkdir()
+    for f in ("Total Nuclear Annihilation (Spooky 2017) VPW v2.3.vpx",
+              "America's Most Haunted (Spooky Pinball 2014) LW.vpx"):
+        (orig / f).write_bytes(b"x")
+    got = setup.downloads_in(str(tmp_path), cache={})
+    assert [d["file"] for d in got] == ["America's Most Haunted (Spooky Pinball 2014) LW.vpx"]
+
+
+def test_the_catalogue_card_leaves_out_a_complete_table():
+    js = open(os.path.join(os.path.dirname(__file__), "..", "pinball_decryptor", "webui", "static",
+                           "js", "tabs", "vpx.js"), encoding="utf-8").read()
+    assert "filter((t) => !t.complete && " in js
+
+
 def test_a_download_opens_as_it_is_only_from_the_folder(tmp_path, monkeypatch):
     setup = pytest.importorskip("vpxsetup")
     (tmp_path / "originals").mkdir()
-    tna = tmp_path / "originals" / "TNA.vpx"
+    tna = tmp_path / "originals" / "AMH.vpx"
     tna.write_bytes(b"x")
     vpx = tmp_path / "vp"
     vpx.mkdir()

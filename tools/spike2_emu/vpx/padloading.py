@@ -14,7 +14,9 @@ opens a black window and the game boots into it. Visual Pinball sat there
 with nothing to say it was coming (David, 2026-11-02: "we feel that it's
 broken"). This window stands where the game's screen goes - on top of it once
 it opens - with a progress bar and the step the run is on, read from the
-run's own log, and goes when the game is up.
+run's own log, and goes when the game is up. It lets the mouse through
+(PAD-962): a press on it is a press on the game's window under it, so that
+window drags and resizes as ever while this one follows it.
 
 The controller (padcontroller.Bridge) starts it with the run and writes the
 status file: `up` closes it; `failed <why>` shows why for a few seconds,
@@ -52,6 +54,8 @@ FIRST = "Starting the emulator's Linux"
 FAILED_S = 8.0
 #: how long after its first show no window may take the foreground (main)
 LOCK_S = 2.0
+#: how often it moves to where the game's window is now
+FOLLOW_MS = 40
 CAP_S = 480.0
 
 
@@ -195,15 +199,28 @@ def main(argv):
             return
         state["rect"] = rect
         x, y, w, h = rect
-        if sys.platform == "win32" and not state["hwnd"]:
-            hwnd = int(root.wm_frame(), 16)                 # Tk's own frame window
-            state["hwnd"] = hwnd
-            GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW = -20, 0x08000000, 0x00000080
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-                                  | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
         root.geometry("%dx%d+%d+%d" % (w, h, x, y))
         root.deiconify()
         root.attributes("-topmost", True)
+        if sys.platform == "win32":
+            # styled once it is mapped: Tk makes its frame window anew when
+            # a withdrawn override-redirect window is first shown, and the
+            # one styled before that was thrown away (PAD-962 found the
+            # styles below had never landed)
+            root.update_idletasks()
+            hwnd = int(root.wm_frame(), 16)                 # Tk's own frame window
+            state["hwnd"] = hwnd
+            GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW = -20, 0x08000000, 0x00000080
+            # PAD-962: layered + transparent is click-through - it stood
+            # over the game's window and took every press, so that window
+            # could not be dragged until the game was up. A layered window
+            # shows nothing until it is given its alpha (opaque here).
+            WS_EX_LAYERED, WS_EX_TRANSPARENT, LWA_ALPHA = 0x00080000, 0x00000020, 0x2
+            want = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT
+            had = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if had & want != want:
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, had | want)
+                user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
 
     def tick():
         now = time.monotonic()
@@ -229,8 +246,19 @@ def main(argv):
         step.configure(text=words + "…")
         secs = int(now - t0)
         clock.configure(text="%d s" % secs + (" (about %d s last time)" % expect if "--expect" in argv else ""))
-        # over the game's own window once it is there (it is black until the
-        # game's first picture), else where it will open
+        state.setdefault("shown", now)
+        if now - state["shown"] > LOCK_S:
+            unlock()
+        if state["hwnd"]:
+            padcontroller.raise_window(state["hwnd"], True)     # over the game's window, which is on top too
+        root.after(250, tick)
+
+    def follow():
+        """Over the game's own window once it is there (it is black until
+        the game's first picture), else where it will open - often enough
+        to keep up with a hand drag of that window (PAD-962)."""
+        if state["failed"]:
+            return
         rect = pinned
         if rect is None and sys.platform == "win32":
             try:
@@ -243,12 +271,7 @@ def main(argv):
         if rect is None and "first" not in state:
             state["first"] = first_rect()
         put(rect or state["first"])
-        state.setdefault("shown", now)
-        if now - state["shown"] > LOCK_S:
-            unlock()
-        if state["hwnd"]:
-            padcontroller.raise_window(state["hwnd"], True)     # over the game's window, which is on top too
-        root.after(250, tick)
+        root.after(FOLLOW_MS, follow)
 
     def watchdog():
         """The window goes whatever Tk's loop is doing: one run in a dozen
@@ -268,6 +291,7 @@ def main(argv):
                 os._exit(0)
     import threading
     threading.Thread(target=watchdog, daemon=True).start()
+    root.after(0, follow)
     root.after(0, tick)
     try:
         root.mainloop()

@@ -3629,6 +3629,56 @@ def test_the_loading_window_names_each_step_of_a_real_start():
     assert ld.name_of("some_new_le") == "Some New LE"
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows' own hit test")
+def test_a_press_on_the_loading_window_reaches_the_game_window_under_it(tmp_path):
+    """PAD-962: the loading window stood over the game's window and took
+    every press, so that window could not be dragged until the game was up.
+    It is click-through now: Windows' hit test at its middle passes it by.
+    Off the desktop (--rect), so nothing shows."""
+    import ctypes
+    import time
+    u = ctypes.windll.user32
+    u.WindowFromPoint.argtypes = [ctypes.c_int64]
+    u.WindowFromPoint.restype = ctypes.c_void_p
+    u.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    u.GetAncestor.restype = ctypes.c_void_p
+    log, status = tmp_path / "run.log", tmp_path / "status.txt"
+    log.write_text("")
+    x, y, w, h = -7000, 100, 640, 360
+    p = subprocess.Popen([sys.executable, os.path.join(VPX, "padloading.py"), "pad962_test", str(log), str(status),
+                          "--parent", str(os.getpid()), "--rect", str(x), str(y), str(w), str(h)],
+                         creationflags=0x08000000)
+    try:
+        found = []
+        proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+        def cb(hw, _):
+            buf = ctypes.create_unicode_buffer(256)
+            u.GetWindowTextW(ctypes.c_void_p(hw), buf, 256)
+            if u.IsWindowVisible(ctypes.c_void_p(hw)) and buf.value == "PAD - starting pad962_test":
+                found.append(hw)
+            return True
+        styled = 0
+        for _ in range(100):
+            found.clear()
+            u.EnumWindows(proc(cb), 0)
+            styled = found and u.GetWindowLongW(ctypes.c_void_p(found[0]), -20) & 0x080800a0
+            if styled == 0x080800a0:        # NOACTIVATE, LAYERED, TRANSPARENT, TOOLWINDOW
+                break
+            time.sleep(0.1)
+        assert found, "the loading window never showed"
+        assert styled == 0x080800a0, hex(u.GetWindowLongW(ctypes.c_void_p(found[0]), -20) & 0xffffffff)
+        cx, cy = x + w // 2, y + h // 2
+        hit = u.WindowFromPoint(ctypes.c_int64((cy << 32) | (cx & 0xffffffff)))
+        assert (u.GetAncestor(hit, 2) if hit else 0) != found[0]
+    finally:
+        status.write_text("up")
+        try:
+            p.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+
 def test_a_started_run_shows_the_loading_window_until_the_game_is_up(monkeypatch, tmp_path):
     """The bridge starts padloading.py with a run it starts (pythonw, its own
     process), says `up` when the game is, keeps how long it took for the next

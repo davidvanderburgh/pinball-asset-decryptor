@@ -3562,6 +3562,8 @@ PREVIEW_HELP = {
                 "opens its rows to change a folder.\n"
                 "- A backglass (.directb2s) named like the table, beside it or already in "
                 "your tables folder, is copied to match the \"(PAD)\" name.\n"
+                "- **Machine** at the top lists every machine's tables, whatever manufacturer "
+                "is picked; choose one machine to see only its rows.\n"
                 "- A title plays the newest build of its card in the card folder.\n"
                 "- **Windows**: each window opens where you last moved it. A layout button "
                 "(Side by side, Centred) sets them out that way once; drag them anywhere "

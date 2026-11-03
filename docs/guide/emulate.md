@@ -194,8 +194,8 @@ black, so restarting WSL won't help.
 
 ### On a Mac
 
-- The game runs in a container (Docker Desktop, OrbStack, Rancher Desktop
-  or Colima). Nothing has to be added to Docker's file sharing.
+- The game runs in a container (Docker Desktop, OrbStack, Rancher Desktop,
+  Colima or Podman). Nothing has to be added to Docker's file sharing.
 - The picture opens in macOS **Screen Sharing** once the game is up (VNC
   password `pinball`). Click a window there to give it the keyboard.
 - Sound plays through `ffplay`, part of the ffmpeg the app already needs.

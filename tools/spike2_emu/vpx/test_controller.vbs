@@ -8,16 +8,27 @@
 ' rows are (number, state), or Empty). With `run` and a Spike 2 run up, it
 ' presses the left flipper button through the rig and expects the game's
 ' LEFT FLIPPER coil (1133 on godzilla_le) back in ChangedSolenoids.
+'
+' Another title (PAD-943, the Spike 1 rig): `run <title> <start> <flipper>
+' <trough coil> <flipper coil>` names the numbers - on GOT LE (Spike 1,
+' slots node*64+index) `run got_le 1075 1514 1065 1512`: START BUTTON 1,11,
+' L. FLIPPER BUTTON 8,2, the trough's eject 1,1, LEFT FLIPPER coil 8,0.
 Option Explicit
-Dim c, chg, i, want, t0
+Dim c, chg, i, want, t0, title, swStart, swFlip, coilTrough, coilFlip
+title = "godzilla_le" : swStart = 1036 : swFlip = 1060 : coilTrough = 1129 : coilFlip = 1133
+If WScript.Arguments.Count > 1 Then title = WScript.Arguments(1)
+If WScript.Arguments.Count > 5 Then
+	swStart = CLng(WScript.Arguments(2)) : swFlip = CLng(WScript.Arguments(3))
+	coilTrough = CLng(WScript.Arguments(4)) : coilFlip = CLng(WScript.Arguments(5))
+End If
 Set c = CreateObject("PAD.Controller")
 WScript.Echo "created: Version=" & c.Version
-c.GameName = "godzilla_le"
+c.GameName = title
 WScript.Echo "GameName=" & c.GameName
 c.SplashInfoLine = "x" : c.HandleKeyboard = 0 : c.HandleMechanics = 0
 c.ShowDMDOnly = 1 : c.ShowFrame = 0 : c.ShowTitle = 0 : c.Hidden = 0
-WScript.Echo "Games().Settings.Value(volume)=" & c.Games("godzilla_le").Settings.Value("volume")
-WScript.Echo "Lamp(1860)=" & c.Lamp(1860) & "  Solenoid(1133)=" & c.Solenoid(1133) & "  Switch(1060)=" & c.Switch(1060)
+WScript.Echo "Games().Settings.Value(volume)=" & c.Games(title).Settings.Value("volume")
+WScript.Echo "Lamp(1860)=" & c.Lamp(1860) & "  Solenoid(" & coilFlip & ")=" & c.Solenoid(coilFlip) & "  Switch(" & swFlip & ")=" & c.Switch(swFlip)
 chg = c.ChangedLamps
 WScript.Echo "ChangedLamps before Run: IsEmpty=" & IsEmpty(chg)
 
@@ -41,30 +52,52 @@ chg = c.ChangedSolenoids   ' drain whatever the attract did so far
 ' A Spike 2 game in attract has dead flippers, so: Start a game (the trough
 ' holds six balls on a rig run) and expect the TROUGH coil, then the left
 ' flipper button and expect its coil.
-Dim seen
-c.Switch(1036) = 1
+Dim seen, held, h
+' a 6th argument holds switches before Start: the trough's, on a rig whose
+' ball keeper stands aside for the bridge (Spike 1: "1521,1522,1523,1524,1525,1526")
+If WScript.Arguments.Count > 6 Then
+	held = Split(WScript.Arguments(6), ",")
+	For Each h In held
+		c.Switch(CLng(h)) = 1
+	Next
+	WScript.Echo "holding " & WScript.Arguments(6)
+	WScript.Sleep 3000
+	chg = c.ChangedSolenoids
+End If
+' a 7th argument is a coin switch, pulsed three times before Start: a title
+' not on free play (GOT LE's LEFT COIN SLOT is 1080)
+If WScript.Arguments.Count > 7 Then
+	For i = 1 To 3
+		c.Switch(CLng(WScript.Arguments(7))) = 1
+		WScript.Sleep 500
+		c.Switch(CLng(WScript.Arguments(7))) = 0
+		WScript.Sleep 1000
+	Next
+	WScript.Echo "coins through " & WScript.Arguments(7)
+End If
+c.Switch(swStart) = 1
 WScript.Sleep 300
-c.Switch(1036) = 0
+c.Switch(swStart) = 0
 seen = Collect(c, 4000)
 WScript.Echo "after Start:   " & seen
-If InStr(seen, "1129=") = 0 Then
-	WScript.Echo "FAIL: 1129 (TROUGH) never fired after Start - no game started?"
+If InStr(" " & seen, " " & coilTrough & "=") = 0 Then
+	WScript.Echo "FAIL: " & coilTrough & " (TROUGH) never fired after Start - no game started?"
 	c.Stop
 	WScript.Quit 1
 End If
 WScript.Sleep 1500
-c.Switch(1060) = 1
+c.Switch(swFlip) = 1
 WScript.Sleep 300
-c.Switch(1060) = 0
+c.Switch(swFlip) = 0
 seen = Collect(c, 1500)
 WScript.Echo "after flipper: " & seen
 WScript.Echo "status: " & c.PadStatus
 c.Stop
-If InStr(seen, "1133=") > 0 Then
+If InStr(" " & seen, " " & coilFlip & "=") > 0 Then
 	WScript.Echo "PASS: the trough answered Start and the left flipper coil answered the button"
 	WScript.Quit 0
 End If
-WScript.Echo "FAIL: 1133 (LEFT FLIPPER) not among the changes"
+WScript.Echo "FAIL: " & coilFlip & " (LEFT FLIPPER) not among the changes"
 WScript.Quit 1
 
 ' every (number=state) ChangedSolenoids reports over `ms`, in order

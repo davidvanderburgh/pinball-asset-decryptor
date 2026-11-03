@@ -556,8 +556,32 @@ class Keeper:
                        "plunge only)" if self.mapped
                        else "NO curated map - passive (one-shot commands only)"),
                  self.balls, self.cap_path), flush=True)
+        aside = False
         while True:
             now = time.monotonic()
+            # PAD-943: a Visual Pinball table attached to this run owns the
+            # balls (its own trough, on the switches the game reads), so the
+            # keeper stands aside while <work>/s1ball.off is there: its own
+            # trough switches let go once, nothing served, nothing pulsed.
+            # Back to its trough when the file goes (the table closed).
+            if os.path.exists(os.path.join(self.work, "s1ball.off")):
+                if not aside:
+                    aside = True
+                    self.pulses.clear()
+                    self.seq += 1
+                    tmp = self.auto_path + ".tmp"
+                    with open(tmp, "wb") as f:
+                        f.write(pack_input(set(), self.seq))
+                    os.replace(tmp, self.auto_path)
+                    print("standing aside: s1ball.off (a table owns the balls)", flush=True)
+                self.poll_cmds()
+                self.publish()
+                time.sleep(0.25)
+                continue
+            if aside:
+                aside = False
+                print("back: s1ball.off gone", flush=True)
+                self.write_state()
             # (re)open the capture; start at EOF so old traffic is ignored
             if cap is None:
                 try:

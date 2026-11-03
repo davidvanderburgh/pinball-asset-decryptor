@@ -111,10 +111,15 @@ rigboard_post() {                   # <emu> <slot> <pid> <game> <title> <visible
     f=$d/$emu-$slot.run
     [ "${6:-1}" = 0 ] && hidden=true
     [ "${7:-0}" = 1 ] && audio=true
-    printf '{"emu":"%s","slot":%s,"game":"%s","title":"%s","label":"%s","distro":"%s","pid":%s,"started":%s,"hidden":%s,"audio":%s}\n' \
+    # RIGBOARD_ROOT (PAD-943): the run's work dir as its own distro sees it,
+    # for a Windows reader that attaches to the run's files (the Visual
+    # Pinball controller reads a Spike 1 run's s1hw.state over
+    # \\wsl.localhost); Spike 2's slot-N.run has carried `root` all along.
+    printf '{"emu":"%s","slot":%s,"game":"%s","title":"%s","label":"%s","distro":"%s","pid":%s,"started":%s,"hidden":%s,"audio":%s,"root":"%s"}\n' \
         "$emu" "$slot" "$(rigboard_clean "$game")" "$(rigboard_clean "$title")" \
         "$(rigboard_label)" "${WSL_DISTRO_NAME:-$(uname -n)}" "$pid" "$(date +%s)" \
-        "$hidden" "$audio" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f" 2>/dev/null || return 0
+        "$hidden" "$audio" "$(printf '%s' "${RIGBOARD_ROOT:-}" | tr -cd 'A-Za-z0-9._/-')" \
+        > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f" 2>/dev/null || return 0
     # The beater.  It removes the record only while the record is still ITS
     # run's: a new run on the same rig has rewritten it with another pid.
     # Detached whole (setsid -f, stdin closed), or it dies with the wsl.exe

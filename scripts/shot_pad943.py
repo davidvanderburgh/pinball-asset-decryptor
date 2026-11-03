@@ -1,0 +1,101 @@
+"""PAD-943 proof shots: the Visual Pinball tab whole, with the other
+platforms' tables card under the Tables card.
+
+    python scripts/shot_pad943.py <out_dir> [--after] [--setup]
+
+Serves THIS checkout on a scratch settings.json holding one preview code,
+PAD802_CODE from the environment (``tools/preview_code.py issue --name x
+--feature vpx``), and Stern Spike 2. Writes <before_|after_>vpx_page.png: the
+tab's page scrolled to its end in a tall window (1900 x 2400), so the card
+below the tables is in the shot. The tab's state is the kit's real one on
+this PC (~/.pad-vpx.json, Visual Pinball's folder, the card folder). Needs
+Playwright and the installed Edge.
+"""
+import json
+import os
+import shutil
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import webui_shot  # noqa: E402
+
+WIDTH, HEIGHT = 1900, 2400
+
+
+def main():
+    out_dir = os.path.abspath(sys.argv[1])
+    pre = "after_" if "--after" in sys.argv else "before_"
+    code = os.environ.get("PAD802_CODE", "")
+    os.makedirs(out_dir, exist_ok=True)
+    scratch = tempfile.mkdtemp(prefix="pad943-")
+    settings = os.path.join(scratch, "settings.json")
+    with open(settings, "w", encoding="utf-8") as f:
+        json.dump({"disclaimer_accepted": True, "last_manufacturer": "stern", "theme": "dark",
+                   "preview_codes": [code] if code else []}, f)
+    userbase = os.path.join(os.environ.get("APPDATA", ""), "Python")
+    proc, url = webui_shot.start_server(settings, os.path.join(scratch, "srv"),
+                                        extra_env={"PYTHONUSERBASE": userbase})
+    from playwright.sync_api import sync_playwright
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(channel="msedge")
+            page = browser.new_page(viewport={"width": WIDTH, "height": HEIGHT})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.add_init_script("try { localStorage.setItem('pad.log.open', '0'); } catch (e) {}")
+            page.goto(url)
+            page.wait_for_function("window.__padReady === true", timeout=60000)
+            # --mfr <key> [--era <era>]: the tab on another manufacturer (PAD-943);
+            # the shot is <pre>vpx_<key>[_<era>].png, with the rail in it
+            mfr = sys.argv[sys.argv.index("--mfr") + 1] if "--mfr" in sys.argv else "stern"
+            era = sys.argv[sys.argv.index("--era") + 1] if "--era" in sys.argv else ("spike2" if mfr == "stern" else "")
+            webui_shot.api(url, "ui.pick_manufacturer", mfr)
+            time.sleep(1)
+            if era and webui_shot.state(url)["shell"]["mfr"].get("era") != era:
+                webui_shot.api(url, "ui.set_era", era)
+                time.sleep(1)
+            webui_shot.api(url, "ui.select_tab", "vpx")
+            suffix = "" if "--mfr" not in sys.argv else "_" + mfr + ("_" + era if era and mfr == "stern" else "")
+            deadline = time.time() + 120
+            while time.time() < deadline:
+                st = webui_shot.state(url).get("vpx") or {}
+                # the fresh state, not the last sitting's cache (stale)
+                if st.get("loaded") and not st.get("busy") and not st.get("stale"):
+                    break
+                time.sleep(1)
+            st = webui_shot.state(url).get("vpx") or {}
+            cat = st.get("catalog") or {}
+            print("vpx: tables=%d catalog platforms=%d tables=%d" % (
+                len(st.get("tables") or []), len(cat.get("platforms") or {}), len(cat.get("tables") or [])),
+                flush=True)
+            time.sleep(1.5)
+            if suffix:
+                page.set_viewport_size({"width": WIDTH, "height": 1300})
+                time.sleep(0.5)
+                page.screenshot(path=os.path.join(out_dir, pre + "vpx" + suffix + ".png"))
+            elif "--setup" in sys.argv:
+                # the set-up rows at the page's top (the controller's row says
+                # whose registration it is), in a short window
+                page.set_viewport_size({"width": WIDTH, "height": 700})
+                time.sleep(0.5)
+                page.screenshot(path=os.path.join(out_dir, pre + "vpx_setup.png"))
+            else:
+                page.locator(".vpx-page").evaluate("e => { e.scrollTop = e.scrollHeight; }")
+                time.sleep(0.5)
+                page.screenshot(path=os.path.join(out_dir, pre + "vpx_page.png"))
+            print("page errors:", errors, flush=True)
+            browser.close()
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(10)
+        except Exception:                                   # noqa: BLE001
+            proc.kill()
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -12,6 +12,7 @@ process:
     vpxsetup.py download <folder>         download the 10.8.0 release and unpack it there
                                           (progress lines first: `progress <0..1>`)
     vpxsetup.py library <folder>          the folder of card images
+    vpxsetup.py downloads [<folder>]      read the downloads in the tables folder (PAD-943)
     vpxsetup.py tables [<folder>]         where the patched tables live (none:
                                           Visual Pinball's own tables folder)
     vpxsetup.py layout <key> <player> <lcd>
@@ -51,12 +52,12 @@ VPX_DEFAULT_DIR = r"C:\Visual Pinball"
 VPX_MIN = (10, 8, 0)
 
 
-def controller_registered():
-    """PAD.Controller is registered AND what it is registered to is still
-    there (PAD-850). The key alone said "Registered" while the folder it
-    named had been deleted, and every table then stopped on "Can't load
-    PAD.Controller: ActiveX component can't create object"; now the tab
-    offers Register again instead."""
+def controller_registration():
+    """(registered, the folder PAD.Controller is registered to): registered
+    only when what it points at is still there (PAD-850). The key alone said
+    "Registered" while the folder it named had been deleted, and every table
+    then stopped on "Can't load PAD.Controller: ActiveX component can't
+    create object"; now the tab offers Register again instead."""
     try:
         import winreg
         root = winreg.HKEY_CLASSES_ROOT
@@ -64,8 +65,25 @@ def controller_registered():
         path = winreg.QueryValue(root, "CLSID\\%s\\PythonCOMPath" % clsid)
         server = winreg.QueryValue(root, "CLSID\\%s\\LocalServer32" % clsid)
     except Exception:                                       # noqa: BLE001
+        return False, ""
+    return registration_ok(path, server), path or ""
+
+
+def controller_registered():
+    return controller_registration()[0]
+
+
+def registered_here(path):
+    """The registered folder is THIS kit's (PAD-943). A table patched by
+    one copy of the app calls whichever PAD.Controller the registry names:
+    David's Spike 1 tables stopped on "no Spike 2 run is up" because the
+    registration was an older checkout's, with no Spike 1 in it."""
+    if not path:
         return False
-    return registration_ok(path, server)
+    try:
+        return os.path.normcase(os.path.realpath(path)) == os.path.normcase(os.path.realpath(HERE))
+    except OSError:
+        return False
 
 
 def registration_ok(com_path, server_cmd):
@@ -155,14 +173,35 @@ def set_library(folder):
     return cards_in(folder)
 
 
-def cards_in(folder):
-    """{title: [file names]} of the Stern card images in `folder`."""
+CARD_RE = {"spike2": r"^([a-z0-9_]+)-\d+_\d+_\d+.*\.sdcard\.raw$",
+           "spike1": r"^([a-z0-9_]+)-\d+[._]\d+(?:[._]\d+)?.*\.iso$"}       # GOT_LE-1_37.iso, transformers_pin-1.0.18.iso
+
+
+def cards_in(folder, platform="spike2"):
+    """{title: [file names]} of the platform's card images in `folder`."""
     out = {}
     if folder and os.path.isdir(folder):
         for f in os.listdir(folder):
-            m = re.match(r"^([a-z0-9_]+)-\d+_\d+_\d+.*\.sdcard\.raw$", f, re.I)
+            m = re.match(CARD_RE.get(platform, CARD_RE["spike2"]), f, re.I)
             if m:
                 out.setdefault(m.group(1).lower(), []).append(f)
+    return out
+
+
+def all_cards(lib, kit=None):
+    """The library's Spike 2 cards and, from the Spike 1 libraries beside it
+    (padlaunch.libraries), the Spike 1 .iso cards (PAD-943): the Card images
+    row said "No card for got_le, kiss_le..." while their rows had found
+    the .iso."""
+    out = cards_in(lib)
+    seen = {os.path.normcase(os.path.abspath(lib))} if lib else set()
+    for d in padlaunch.libraries("spike1", kit):
+        key = os.path.normcase(os.path.abspath(d))
+        if key in seen:
+            continue
+        seen.add(key)
+        for title, files in cards_in(d, "spike1").items():
+            out.setdefault(title, []).extend(files)
     return out
 
 
@@ -200,12 +239,169 @@ def known_tables(tables_dir=None):
     for row in rows.values():
         title, _ = padvpx.choose(row.pop("fits"))
         marks = row.pop("marks")
-        row.update(title=title, card=padlaunch.card_for(title) or "",
+        # PAD-943: a Spike 1 title's card is its .iso, in the spike1 library;
+        # the row's platform is what the tab filters by on each manufacturer
+        row.update(title=title, platform=padvpx.platform_of(title),
+                   card=padlaunch.card_for(title, padvpx.platform_of(title)) or "",
                    patched_title=patched_title(tables_dir, row["output"]) if row["patched"] else "",
                    repatch=missed_fixes(tables_dir, row["output"], marks) if row["patched"] else [],
                    source=patched_from(tables_dir, row["output"]) if row["patched"] else "")
         out.append(row)
     return out
+
+
+# ---------------------------------------------- the downloads in the folder --
+#
+# PAD-943 (David: "I just added a handful of VPX original tables to the folder,
+# but the app is not showing them"): every .vpx in the tables folder that is
+# not a (PAD) copy is a download of the person's, and the page lists it - the
+# one a listed map fits on that table's row (its Patch takes the file without
+# asking), the rest as rows of their own saying there is no map yet, named
+# from the catalogue where the file's name matches a table in it. Reading a
+# table's script to see what fits it takes ~0.3 s a file, so that is done
+# once per (file, size, mtime) and kept in the kit's cache; `state` lists the
+# files at once from the cache, `downloads` reads the unread ones.
+DOWNLOADS_CACHE = os.path.join(os.path.expanduser("~"), ".pad-vpx.downloads.json")
+_STOP_WORDS = {"the", "and", "for", "stern", "original", "vpx", "mod", "table", "tribute", "edition",
+               "limited", "pro", "premium", "le", "se", "vpw", "version", "with"}
+
+
+def _words(text):
+    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) > 2 and w not in _STOP_WORDS}
+
+
+def catalog_match(file_name, catalog=None):
+    """The catalogue table a download's file name names, or None: the entry
+    whose name (or game) shares the most significant words with the file,
+    at least two of them and half of its own."""
+    cat = catalog or load_catalog()
+    fw = _words(os.path.splitext(file_name)[0])
+    best, score = None, 0
+    for t in cat.get("tables") or []:
+        if not t.get("url"):
+            continue
+        for key in ("name", "game"):
+            tw = _words(t.get(key))
+            hit = len(fw & tw)
+            if hit >= 2 and hit * 2 >= len(tw) and hit > score:
+                best, score = t, hit
+    if not best:
+        return None
+    plats = cat.get("platforms") or {}
+    # the author's own description, for the download's row on the page
+    return {"platform": best["platform"], "platform_name": (plats.get(best["platform"]) or {}).get("name", ""),
+            "game": best.get("game", ""), "name": best.get("name", ""), "map": best.get("map", ""),
+            "by": best.get("by", ""), "where": best.get("where", ""), "url": best.get("url", ""),
+            "version": best.get("version", ""), "kind": best.get("kind", ""), "faithful": bool(best.get("faithful")),
+            "title": best.get("title", "")}
+
+
+#: what a cache entry must carry (older ones are read again)
+DOWNLOADS_CACHE_V = 2
+
+
+def maps_signature():
+    """What the kit's maps are, as a string: a download read with an older set
+    (before got_le's map existed) is read again, or it would say 'no map
+    fits' for good (David saw KISS and GOT listed twice, PAD-943)."""
+    out = []
+    for title, info in sorted(padvpx.maps().items()):
+        try:
+            out.append("%s:%d" % (title, int(os.path.getmtime(info["map"]))))
+        except OSError:
+            out.append(title)
+    return ";".join(out)
+
+
+def _downloads_cache():
+    try:
+        d = json.load(open(DOWNLOADS_CACHE, encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_downloads_cache(d):
+    try:
+        with open(DOWNLOADS_CACHE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(d, f, indent=1, sort_keys=True)
+        os.replace(DOWNLOADS_CACHE + ".tmp", DOWNLOADS_CACHE)
+    except OSError:
+        pass
+
+
+def downloads_in(tables_dir, cache=None):
+    """The person's own downloads in the tables folder, at once: [{name,
+    file, path, size, mtime, read, title, catalog}], `read` False until
+    read_downloads has looked at the file (then `title` is the listed map
+    that fits it, "" when none, and `catalog` the catalogue's table it is
+    named after, or None)."""
+    if not tables_dir or not os.path.isdir(tables_dir):
+        return []
+    cache = _downloads_cache() if cache is None else cache
+    maps_sig = maps_signature()
+    out = []
+    for f in sorted(os.listdir(tables_dir), key=str.lower):
+        if not f.lower().endswith(".vpx") or "(PAD)" in f:
+            continue
+        path = os.path.join(tables_dir, f)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        row = {"name": os.path.splitext(f)[0], "file": f, "path": path, "size": st.st_size,
+               "mtime": int(st.st_mtime), "read": False, "title": "", "catalog": None}
+        c = cache.get(path)
+        if c and c.get("size") == row["size"] and c.get("mtime") == row["mtime"] and c.get("v") == DOWNLOADS_CACHE_V                 and (c.get("title") or c.get("maps") == maps_sig):
+            row.update(read=True, title=c.get("title") or "", catalog=c.get("catalog"))
+            cat = row["catalog"] or {}
+            # the card image the game boots, when the catalogue names the title
+            row["card"] = padlaunch.card_for(cat["title"], cat.get("platform") or "spike2") or ""                 if cat.get("title") else ""
+        out.append(row)
+    return out
+
+
+def read_downloads(tables_dir, say=None):
+    """Read every download not read yet: which listed map fits its script,
+    which catalogue table its name is; kept in the cache. Returns
+    downloads_in() afterwards."""
+    cache = _downloads_cache()
+    catalog = load_catalog()
+    changed = False
+    for row in downloads_in(tables_dir, cache):
+        if row["read"]:
+            continue
+        title = ""
+        try:
+            fits = [t for t, info in padvpx.fitting(row["path"]) if info.get("listed", True)]
+            title = fits[0] if fits else ""
+        except Exception as exc:                            # noqa: BLE001
+            if say:
+                say("%s: not read (%s)" % (row["file"], exc))
+        cache[row["path"]] = {"size": row["size"], "mtime": row["mtime"], "title": title,
+                              "catalog": catalog_match(row["file"], catalog), "v": DOWNLOADS_CACHE_V,
+                              "maps": maps_signature()}
+        changed = True
+        if say:
+            say("read %s: %s" % (row["file"], title or "no map fits it"))
+    if changed:
+        # what is gone from the folder leaves the cache
+        keep = {r["path"] for r in downloads_in(tables_dir, cache)}
+        cache = {k: v for k, v in cache.items() if k in keep or not k.startswith(tables_dir)}
+        _save_downloads_cache(cache)
+    return downloads_in(tables_dir, cache)
+
+
+def link_downloads(rows, downloads):
+    """A known table's row gets `download`: the folder's download its map
+    fits (its Patch then takes the file without asking)."""
+    by_title = {}
+    for d in downloads:
+        if d["read"] and d["title"]:
+            by_title.setdefault(d["title"], d["path"])
+    for row in rows:
+        row["download"] = next((by_title[t] for t in row.get("titles") or [] if t in by_title), "")
+    return rows
 
 
 #: a scripted tribute's bridge names it on Controller; a ROM table's patcher
@@ -379,6 +575,20 @@ def download_vpx(folder, say=print, progress=None):
     return set_vpx(folder)
 
 
+CATALOG = os.path.join(HERE, "catalog.json")
+
+
+def load_catalog():
+    """The kit's survey of the Visual Pinball tables of every platform PAD
+    reads (catalog.json, PAD-943): {"platforms": {...}, "tables": [...]},
+    or empty when the file is not there."""
+    try:
+        d = json.load(open(CATALOG, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"platforms": {}, "tables": []}
+    return {"platforms": d.get("platforms") or {}, "tables": d.get("tables") or []}
+
+
 def refresh_system_script(tables):
     """A patch copies PADSPIKE2.vbs beside the table, and the table loads that
     copy: one an older release left there is brought up to this kit's, so a
@@ -475,8 +685,13 @@ def state():
     shown = padisplay.load(padisplay.CONF)
     vpx = find_vpx()
     have = vpx_version(vpx)
+    registered, reg_path = controller_registration()
     return {
-        "registered": controller_registered(),
+        "registered": registered,
+        # PAD-943: registered, but to another copy of the app (a checkout or
+        # an older install): its tables would call that one
+        "registered_to": reg_path,
+        "registered_here": registered and registered_here(reg_path),
         "vpx": vpx,
         # PAD-887: the minimum shown beside the Visual Pinball line, and an
         # older copy is "Needed", not "Ready" (unread: taken as fine)
@@ -486,9 +701,13 @@ def state():
         "tables_dir": tables,
         "tables_own": bool(kit.get("tables")) and tables == kit.get("tables"),
         "library": lib,
-        "cards": cards_in(lib),
-        "tables": known_tables(tables),
+        "cards": all_cards(lib, kit),
+        "tables": link_downloads(known_tables(tables), downloads_in(tables)),
         "patched": patched_in(tables),
+        # PAD-943: the person's own downloads in the folder, listed at once
+        "downloads": downloads_in(tables),
+        # PAD-943: every platform's tables, where their authors put them
+        "catalog": load_catalog(),
         "monitors": len(mons),
         # PAD-927: the page's buttons carry the short name, the words its tip
         "presets": [{"key": k, "words": w, "short": LAYOUT_SHORT.get(k, k), "player": p, "lcd": q}
@@ -510,6 +729,11 @@ def main(argv):
         out = {"result": "ok", "cards": set_library(os.path.abspath(rest[0]))}
     elif cmd == "layout" and len(rest) == 3:
         out = {"result": apply_layout(rest[0], json.loads(rest[1]), json.loads(rest[2]))}
+    elif cmd == "downloads":
+        # PAD-943: read the downloads in the tables folder (or the one given)
+        tables = rest[0] if rest else vpx_tables_dir()
+        out = {"downloads": read_downloads(tables, say=lambda m: print("say " + m, flush=True)),
+               "tables": link_downloads(known_tables(tables), downloads_in(tables))}
     elif cmd == "download" and len(rest) == 1:
         def prog(f):
             print("progress %.3f" % f, flush=True)

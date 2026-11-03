@@ -16,6 +16,7 @@ What is worth failing on:
 import json
 import os
 import sys
+import threading
 import time
 import types
 
@@ -65,9 +66,9 @@ class _Win:
 
 def _wait(tab):
     deadline = time.time() + 10
-    while tab._busy and time.time() < deadline:
+    while (tab._busy or tab._extras_running) and time.time() < deadline:
         time.sleep(0.02)
-    assert not tab._busy
+    assert not tab._busy and not tab._extras_running
 
 
 @pytest.fixture
@@ -114,6 +115,10 @@ def test_the_tab_shows_only_with_a_code_on_windows(monkeypatch):
     assert win._gate(mfr)["Visual Pinball"] is False
     monkeypatch.setattr(preview, "_active", frozenset({"vpx"}))
     assert win._gate(mfr)["Visual Pinball"] is True
+    # PAD-943 (David): on every manufacturer the app emulates
+    for cap in ("emulate_spike1", "emulate_jjp", "emulate_ap", "emulate_bof", "emulate_dp", "emulate_spooky", "emulate_pb"):
+        other = types.SimpleNamespace(capabilities=types.SimpleNamespace(**{cap: True}))
+        assert win._gate(other)["Visual Pinball"] is True, cap
     # not for a manufacturer the Spike 2 emulator does not run
     assert win._gate(types.SimpleNamespace(capabilities=types.SimpleNamespace()))["Visual Pinball"] is False
     # Visual Pinball and the controller are Windows only
@@ -646,3 +651,352 @@ def test_the_rows_carry_a_picture_and_the_tip_shows_it_large():
     assert ".tip.tip-pic { max-width: none; }" in app and ".tip .tip-img" in app
     # the stale note sits under the name, not under the picture
     assert ".vpx-stale { grid-column: 2 / -1;" in css
+
+
+# ---- PAD-943: the other platforms' tables -----------------------------------
+
+def _vpxsetup():
+    kit = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "tools", "spike2_emu", "vpx")
+    if kit not in sys.path:
+        sys.path.insert(0, kit)
+    return pytest.importorskip("vpxsetup")
+
+
+def test_the_catalogue_names_every_platform_and_where_each_table_is():
+    vs = _vpxsetup()
+    cat = vs.load_catalog()
+    plats, tables = cat["platforms"], cat["tables"]
+    assert {"spike1", "jjp", "ap", "cgc", "dp", "spooky", "bof", "pb", "turner", "multimorphic"} <= set(plats)
+    assert "sam" not in plats                   # David: SAM is Visual PinMAME's already
+    # David: JJP games run only with the machine's own security key; the card says so up front
+    assert "security key" in plats["jjp"]["needs"] and "H0007" in plats["jjp"]["needs"]
+    assert all(p.get("name") and p.get("runs") and p.get("bridge") in ("pad", "vpm", "none") for p in plats.values())
+    assert tables and all(t["platform"] in plats for t in tables)
+    for t in tables:
+        if t.get("url"):
+            assert t["url"].startswith("https://") and t["name"] and t["where"], t
+            assert t["kind"] in ("tribute", "mashup"), t    # nothing Visual PinMAME runs by itself
+        else:
+            assert t.get("notes"), t            # a game with no table says so
+    # the Spike 1 title the kit has a map for is in it, and names the map
+    assert any(t.get("title") == "got_le" and t.get("map") for t in tables)
+
+
+def test_the_catalogue_rides_the_kits_state(monkeypatch):
+    vs = _vpxsetup()
+    monkeypatch.setattr(vs, "load_catalog", lambda: {"platforms": {"jjp": {"name": "Jersey Jack"}}, "tables": [{"platform": "jjp"}]})
+    st = vs.state()
+    assert st["catalog"]["platforms"]["jjp"]["name"] == "Jersey Jack"
+    assert st["catalog"]["tables"] == [{"platform": "jjp"}]
+
+
+def test_the_tab_starts_with_an_empty_catalogue(tab):
+    assert tab.get("catalog") == {"platforms": {}, "tables": []}
+    assert "Spike 1" in tab.get("catalog_tip")
+
+
+# ---- PAD-943: the page is up before the slow parts are in -------------------
+
+def test_the_page_is_up_on_the_state_alone_and_the_rest_comes_after(tab, monkeypatch):
+    """David: the tables took ten seconds to show. The kit's state (half a
+    second) puts the page up; the authors' titles and the coverage come in
+    behind it with their own 'still looking' flags, never holding the page."""
+    seen = []
+    gate = threading.Event()
+    orig = type(tab)._kit
+
+    def slow_kit(self, script, args, timeout=0, on_line=None):
+        if script == "vpxauthor.py":
+            seen.append((args[0], self.get("loaded"), self.get("busy")))
+            gate.wait(5)                         # the slow WSL walk
+            if args[0] == "titles":
+                return {"titles": ["rush_le", "got_le"]}
+            return {"coverage": {"rush_le": {"pct": 90}}}
+        return orig(self, script, args, timeout, on_line)
+    monkeypatch.setattr(type(tab), "_kit", slow_kit)
+    tab.on_show()
+    deadline = time.time() + 5
+    while not tab.get("loaded") and time.time() < deadline:
+        time.sleep(0.02)
+    assert tab.get("loaded") and tab.get("busy") == ""   # up, and not busy, while the titles are looked for
+    assert tab.get("authors_busy") and tab.get("coverage_busy")
+    assert not tab._busy                                    # a button works meanwhile
+    gate.set()
+    _wait(tab)
+    assert seen[0][0] == "titles" and seen[0][1] is True and seen[0][2] == ""
+    assert tab.get("author_titles") == ["got_le", "rush_le"] and not tab.get("authors_busy")
+    assert tab.get("coverage") == {"rush_le": {"pct": 90}} and not tab.get("coverage_busy")
+
+
+def test_the_last_state_seen_draws_the_page_at_once(tab, monkeypatch, tmp_path):
+    cache = tmp_path / "vpx_state.json"
+    monkeypatch.setattr(type(tab), "_state_cache_path", staticmethod(lambda: str(cache)))
+    tab.on_show()
+    _wait(tab)
+    assert json.load(open(cache, encoding="utf-8"))["vpx"] == r"C:\VP"   # the fresh state is kept
+    # a new tab on the same PC: the cache is on the page before the kit answers
+    drawn = []
+    orig = type(tab)._kit
+
+    def kit(self, script, args, timeout=0, on_line=None):
+        if args and args[0] == "state":
+            drawn.append((self.get("loaded"), self.get("stale"), self.get("vpx")))
+        return orig(self, script, args, timeout, on_line)
+    monkeypatch.setattr(type(tab), "_kit", kit)
+    t2 = V.VpxTab(_Win())
+    t2.answers = {}
+    t2.on_show()
+    _wait(t2)
+    assert drawn == [(True, True, r"C:\VP")]
+    assert t2.get("loaded") and not t2.get("stale")
+
+
+def test_a_kit_without_titles_leaves_the_page_usable(tab):
+    tab.answers[("vpxauthor.py", "titles")] = {"error": "WSL is not answering"}
+    tab.answers[("vpxauthor.py", "coverage")] = {"error": "WSL is not answering"}
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("loaded") and tab.get("author_titles") == [] and not tab.get("authors_busy")
+    assert tab.get("coverage") == {} and not tab.get("coverage_busy")
+
+
+# ---- PAD-943: the downloads in the folder show by themselves --------------
+
+def _vpx_file(folder, name, script=""):
+    p = folder / name
+    p.write_bytes(b"vpx" + script.encode("utf-8"))
+    return str(p)
+
+
+def test_the_folders_downloads_are_listed_at_once_and_read_once(tmp_path, monkeypatch):
+    vs = _vpxsetup()
+    import padvpx
+    folder = tmp_path / "tables"
+    folder.mkdir()
+    _vpx_file(folder, "Game of Thrones LE (Stern 2015) VPW 1.2.1.vpx")
+    _vpx_file(folder, "Rush LE 2.0.2.vpx")
+    _vpx_file(folder, "Rush LE 2.0.2 (PAD).vpx")
+    monkeypatch.setattr(vs, "DOWNLOADS_CACHE", str(tmp_path / "cache.json"))
+    reads = []
+
+    def fitting(path):
+        reads.append(os.path.basename(path))
+        return [("rush_le", {"listed": True})] if "Rush" in path else []
+    monkeypatch.setattr(padvpx, "fitting", fitting)
+    rows = vs.downloads_in(str(folder))
+    assert [r["file"] for r in rows] == ["Game of Thrones LE (Stern 2015) VPW 1.2.1.vpx", "Rush LE 2.0.2.vpx"]
+    assert not any(r["read"] for r in rows)         # listed at once, not read yet
+    rows = vs.read_downloads(str(folder))
+    assert sorted(reads) == ["Game of Thrones LE (Stern 2015) VPW 1.2.1.vpx", "Rush LE 2.0.2.vpx"]
+    got, rush = rows
+    assert got["read"] and got["title"] == "" and got["catalog"]["platform"] == "spike1" \
+        and got["catalog"]["game"] == "Game of Thrones"
+    # the author's description rides along, for the row on the page
+    assert got["catalog"]["by"] == "VPinWorkshop" and got["catalog"]["where"] == "VPUniverse"
+    assert got["catalog"]["title"] == "got_le" and got["catalog"]["url"].startswith("https://")
+    assert rush["read"] and rush["title"] == "rush_le"
+    # read once: the cache answers the next look, a changed file is read again
+    assert all(r["read"] for r in vs.downloads_in(str(folder)))
+    vs.read_downloads(str(folder))
+    assert len(reads) == 2
+    (folder / "Rush LE 2.0.2.vpx").write_bytes(b"vpx more")
+    vs.read_downloads(str(folder))
+    assert len(reads) == 3
+    # a known table's row takes the download its map fits
+    linked = vs.link_downloads([{"titles": ["rush_le"]}, {"titles": ["godzilla_le"]}], rows)
+    assert linked[0]["download"].endswith("Rush LE 2.0.2.vpx") and linked[1]["download"] == ""
+    assert vs.catalog_match("KISS (Stern 2015) 2.0.vpx")["game"] == "KISS"
+    assert vs.catalog_match("something else entirely.vpx") is None
+
+
+def test_a_download_dropped_in_the_folder_shows_without_check_again(tab, tmp_path, monkeypatch):
+    folder = tmp_path / "tables"
+    folder.mkdir()
+    monkeypatch.setattr(type(tab), "WATCH_S", 0.05)
+    tab.on_show()
+    _wait(tab)
+    tab.set(tables_dir=str(folder))
+    time.sleep(0.2)                                  # the watcher has seen the empty folder
+    n = len([c for c in tab.calls if c == ("vpxsetup.py", ["state"])])
+    _vpx_file(folder, "KISS (Stern 2015) 2.0.vpx")
+    deadline = time.time() + 5
+    while len([c for c in tab.calls if c == ("vpxsetup.py", ["state"])]) == n and time.time() < deadline:
+        time.sleep(0.02)
+    _wait(tab)
+    assert len([c for c in tab.calls if c == ("vpxsetup.py", ["state"])]) > n
+    tab.on_close()
+    assert not tab._watching
+
+
+def test_patch_takes_the_download_the_folder_holds_without_asking(tab):
+    tab.on_show()
+    _wait(tab)
+    tab.set(tables=[{"name": "Rush LE Tribute", "output": "Rush LE 2.0.2 (PAD).vpx", "patched": False,
+                     "title": "rush_le", "titles": ["rush_le"], "download": r"C:\VP\tables\Rush LE 2.0.2.vpx"}])
+    tab.window.pick = ""                             # no dialog answer: the folder's download is taken
+    tab.answers[("padvpx.py", "patch")] = {"result": "ok", "_text": 'open "C:/VP/tables/Rush LE 2.0.2 (PAD).vpx"'}
+    assert tab.patch("Rush LE 2.0.2 (PAD).vpx")
+    _wait(tab)
+    assert ("padvpx.py", ["patch", r"C:\VP\tables\Rush LE 2.0.2.vpx", "--out", r"C:\VP\tables"]) in tab.calls
+
+
+def test_unread_downloads_are_read_after_the_page_is_up(tab, monkeypatch):
+    state_rows = {"downloads": [{"name": "KISS", "file": "KISS.vpx", "path": r"C:\VP\tables\KISS.vpx", "read": False}]}
+    orig = type(tab)._kit
+
+    def kit(self, script, args, timeout=0, on_line=None):
+        if args and args[0] == "state":
+            return dict(orig(self, script, args, timeout, on_line), **state_rows)
+        if args and args[0] == "downloads":
+            return {"downloads": [dict(state_rows["downloads"][0], read=True, title="", catalog=None)], "tables": []}
+        return orig(self, script, args, timeout, on_line)
+    monkeypatch.setattr(type(tab), "_kit", kit)
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("downloads")[0]["read"] is True      # read on the extras thread, after the page was up
+
+
+def test_a_download_read_before_its_map_existed_is_read_again(tmp_path, monkeypatch):
+    """David saw KISS and GOT twice: once as a download 'No map yet', once
+    patched. The download had been read when the kit had no map for it and
+    the cache said 'no map fits' for good."""
+    vs = _vpxsetup()
+    import padvpx
+    folder = tmp_path / "tables"
+    folder.mkdir()
+    _vpx_file(folder, "KISS (Stern 2015) 2.0.vpx")
+    monkeypatch.setattr(vs, "DOWNLOADS_CACHE", str(tmp_path / "cache.json"))
+    maps = {}
+    monkeypatch.setattr(padvpx, "maps", lambda: dict(maps))
+    monkeypatch.setattr(padvpx, "fitting", lambda path: [(t, dict(i, listed=True)) for t, i in maps.items()])
+    rows = vs.read_downloads(str(folder))
+    assert rows[0]["read"] and rows[0]["title"] == ""           # no map yet: none fits
+    assert vs.downloads_in(str(folder))[0]["read"]               # and the cache answers
+    mp = tmp_path / "kiss_le.shadow.json"
+    mp.write_text("{}", encoding="utf-8")
+    maps["kiss_le"] = {"map": str(mp), "listed": True}
+    assert not vs.downloads_in(str(folder))[0]["read"]           # a new map: read again
+    rows = vs.read_downloads(str(folder))
+    assert rows[0]["title"] == "kiss_le"
+    assert vs.link_downloads([{"titles": ["kiss_le"]}], rows)[0]["download"].endswith("KISS (Stern 2015) 2.0.vpx")
+
+
+def test_a_spike1_tables_row_finds_its_iso(monkeypatch, tmp_path):
+    vs = _vpxsetup()
+    import padlaunch
+    seen = []
+    monkeypatch.setattr(padlaunch, "card_for", lambda title, platform="spike2": seen.append((title, platform)) or "")
+    monkeypatch.setattr(vs, "downloads_in", lambda d, cache=None: [])
+    vs.known_tables(str(tmp_path))
+    assert ("got_le", "spike1") in seen and ("rush_le", "spike2") in seen
+
+
+# ---- PAD-943: the Coverage column is kept between sittings ------------------
+def test_the_coverage_column_is_kept_between_sittings(tab, monkeypatch, tmp_path):
+    """David: "it seems like the coverage metric is recalculated every time the
+    app restarts? can't we cache it?" - it was (~7 s over WSL on every start).
+    Now the last read is kept on this PC, keyed by the kit's maps and reader
+    and the titles with tables: a new sitting draws it at once and reads
+    nothing; a map edited, a title new to the PC, or Check again reads it."""
+    kit = tmp_path / "kit"
+    kit.mkdir()
+    (kit / "rush_le.shadow.json").write_text("{}")
+    (kit / "vpxauthor.py").write_text("")
+    monkeypatch.setattr(V, "kit_dir", lambda: str(kit))
+    monkeypatch.setattr(type(tab), "_state_cache_path", staticmethod(lambda: str(tmp_path / "vpx_state.json")))
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["rush_le"]}
+    tab.answers[("vpxauthor.py", "coverage")] = {"coverage": {"rush_le": {"pct": 78}}}
+    reads = lambda: len([c for c in tab.calls if c == ("vpxauthor.py", ["coverage"])])  # noqa: E731
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("coverage") == {"rush_le": {"pct": 78}} and reads() == 1
+    assert json.load(open(tmp_path / "vpx_coverage.json", encoding="utf-8"))["coverage"] == {"rush_le": {"pct": 78}}
+
+    def sitting():
+        drawn = []
+        orig = type(tab)._kit
+
+        def kit_call(self, script, args, timeout=0, on_line=None):
+            if args and args[0] == "state":
+                drawn.append((self.get("coverage"), self.get("coverage_busy")))
+            return orig(self, script, args, timeout, on_line)
+        monkeypatch.setattr(type(tab), "_kit", kit_call)
+        try:
+            t = V.VpxTab(_Win())
+            t.answers = tab.answers
+            t.on_show()
+            _wait(t)
+        finally:
+            monkeypatch.setattr(type(tab), "_kit", orig)
+        return t, drawn
+    # a new sitting on the same PC: the column is up before the kit answers, and not read again
+    t2, drawn = sitting()
+    assert drawn == [({"rush_le": {"pct": 78}}, False)]
+    assert t2.get("coverage") == {"rush_le": {"pct": 78}} and not t2.get("coverage_busy") and reads() == 1
+    # a map edited: read again (the old numbers stay up while it is)
+    t = os.path.getmtime(kit / "rush_le.shadow.json") + 100
+    os.utime(kit / "rush_le.shadow.json", (t, t))
+    tab.answers[("vpxauthor.py", "coverage")] = {"coverage": {"rush_le": {"pct": 90}}}
+    t3, drawn = sitting()
+    assert drawn[0][0] == {"rush_le": {"pct": 78}}
+    assert t3.get("coverage") == {"rush_le": {"pct": 90}} and reads() == 2
+    # a title new to this PC: read again
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["got_le", "rush_le"]}
+    t4, _ = sitting()
+    assert reads() == 3
+    # Check again: always
+    t4.refresh()
+    _wait(t4)
+    assert reads() == 4
+    # the kit's titles unreadable (WSL down): the cache is neither trusted nor rewritten
+    tab.answers[("vpxauthor.py", "titles")] = {"error": "WSL is not answering"}
+    tab.answers[("vpxauthor.py", "coverage")] = {"coverage": {"rush_le": {"pct": 1}}}
+    t5, _ = sitting()
+    assert reads() == 5 and t5.get("coverage") == {"rush_le": {"pct": 1}}
+    assert json.load(open(tmp_path / "vpx_coverage.json", encoding="utf-8"))["coverage"] == {"rush_le": {"pct": 90}}
+
+
+# ---- PAD-943: the tab on every manufacturer the app emulates ---------------
+def test_the_tab_follows_the_manufacturer_and_its_era(tab):
+    """David: "add the Visual Pinball tab to the other manufacturers we are
+    adding support for". The tab's platform is the machine's (Stern's eras
+    are platforms of their own); the authors' card's game is one of that
+    platform's; a platform with no bridge yet says so (bridged False)."""
+    tab.set(author_titles=["got_le", "rush_le"], author_platforms={"got_le": "spike1"}, author_title="rush_le")
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike2"))
+    assert tab.get("platform") == "spike2" and tab.get("bridged") is True and tab.get("author_title") == "rush_le"
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike1"))
+    assert tab.get("platform") == "spike1" and tab.get("bridged") is True and tab.get("author_title") == "got_le"
+    tab.on_manufacturer(types.SimpleNamespace(key="jjp"))
+    assert tab.get("platform") == "jjp" and tab.get("bridged") is False and tab.get("author_title") == ""
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="sam"))
+    assert tab.get("platform") == "" and tab.get("bridged") is True
+    # the titles' platforms come with the titles, and the pick follows them
+    tab.answers[("vpxauthor.py", "titles")] = {"titles": ["got_le", "rush_le"], "platforms": {"got_le": "spike1"}}
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike1"))
+    tab.on_show()
+    _wait(tab)
+    assert tab.get("author_platforms") == {"got_le": "spike1"} and tab.get("author_title") == "got_le"
+    tab.on_manufacturer(types.SimpleNamespace(key="stern", current_era="spike2"))
+    assert tab.get("author_title") == "rush_le"
+
+
+def test_restart_wsl_asks_first_then_shuts_wsl_down(tab, monkeypatch):
+    # PAD-943 (David): the Emulate tabs' Restart WSL… on this tab too - the cure
+    # for the game's screen gone blank on the desktop (WSLg's frame share dead)
+    answers = [False, True]
+    monkeypatch.setattr(V.compat.messagebox, "askyesno", lambda *a, **k: answers.pop(0))
+    runs = []
+    monkeypatch.setattr(V.subprocess, "run", lambda cmd, **k: runs.append(list(cmd))
+                        or types.SimpleNamespace(returncode=0, stdout=b"", stderr=b""))
+    assert tab.restart_wsl() is False and runs == []                             # No: nothing
+    assert tab.restart_wsl() is True
+    _wait(tab)
+    assert runs == [["wsl.exe", "--shutdown"]]
+    assert "starts again by itself" in tab.get("message") and tab.get("message_level") == "info"
+    monkeypatch.setattr(V.subprocess, "run", lambda cmd, **k: types.SimpleNamespace(returncode=1, stdout=b"boom", stderr=b""))
+    answers.append(True)
+    assert tab.restart_wsl() is True
+    _wait(tab)
+    assert tab.get("message_level") == "error" and "boom" in tab.get("message")

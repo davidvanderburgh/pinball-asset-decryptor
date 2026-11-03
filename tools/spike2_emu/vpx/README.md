@@ -468,7 +468,7 @@ lamps whose LED the build calls something else (a map numbered for another
 build: Guardians LE once carried the Pro's numbers).
 `suggest ... [--write]` mends what audit found by the fit (the nearest free
 light, a free light beside a shown insert, otherwise a retrofit light;
-refused when the fit is over 10 px, as on Stranger Things), `rgb <map>
+refused when the fit is over 10 px), `rgb <map>
 <led_io.txt> [--write]` marks the RGB inserts, and `lit <map> <table.vpx>
 <led_io.txt> <padled> <out.png>` draws what the table shows for one sample
 of a rig's `dump/padled` on the table's own art.
@@ -532,3 +532,53 @@ table's own comments, decide the rest by hand. A ROM mash-up (Godzilla on
 Sega's ROM) gets a `<title>.vpxmap.json` and a patcher like
 `patch_godzilla.py` for the script's conventions; a scripted tribute gets a
 `<title>.shadow.json` and `vpxshadow.py` as it is.
+
+## Other platforms (PAD-943)
+
+A map's `platform` says which rig is behind the table; `spike2` when it says
+nothing. The kit's survey of what exists for every platform PAD reads is
+`catalog.json` (the app's Visual Pinball tab shows it as "Tables of other
+machines": each table a link to its author's download, who made it, whether
+it is the machine's own layout, and what plays behind it).
+
+**Stern Spike 1** (`"platform": "spike1"`): PAD.Controller attaches to the
+Spike 1 rig's run (tools/spike1_emu) through the two files the app's switch
+window uses, `s1hw.state` (switches told, lamps, coils) and `s1sw.input`
+(switches in), read over `\wsl.localhost` from the work dir the run posts
+on the board (`spike1-0.run`, `root`). The rig's DMD-era responder now
+writes the state block (nodebus.py `DmdFrames`: the lamp and coil frames as
+the GOT LE 1.37 ELF's own senders build them; the early era's s1early.py did
+already), and the ball keeper stands aside while `s1ball.off` is in the work
+dir (the table owns the balls). Numbering: switches `1000 + node * 64 +
+index` (the rig's s1switches.json), lamps `1000 + node * 100 + index`, coils
+`1000 + node * 64 + index`; the flippers are held coils while their buttons
+are, `game_on` is always armed (no rule plane on this rig), and Visual
+Pinball's pause leaves the game running (the rig has no pause). A title's
+coils and LEDs come out of its own ELF (`s1elf.py --coils`, `--leds`: the
+node and position of each, named where the game names them); the matrix
+inserts are mapped by watching the run. A run is started by the controller
+like a Spike 2 one (`padlaunch.Spike1Launch`: start.sh with the title's
+.iso, on the app's data disk, visible and with sound; `padvpx run got_le
+--mute` by hand) - ONE rig, so a run of another title is refused, not
+replaced. The game's DMD is drawn by the app's Spike 1 tab, so a player keeps
+the app open beside Visual Pinball. The author's checklist (`padvpx
+checklist got_le`, the tab's "For table authors") reads a Spike 1 title
+from its game program and switch map in the rig's cache (every Spike 1
+game extracted on the PC is offered): the switches with their slot ids,
+the coils the program drives, every LED channel named where the program
+names a lamp; nothing is placed (no Spike 1 build ships positions). `got_le.shadow.json` is the first Spike 1
+map: the cabinet and the coils (the ELF's), not yet VPW's table
+(`listed: false`, no `detect`). Proven on the rig: `test_controller.vbs run
+got_le 1075 1515 1578 1519 "1521,1522,1523,1524,1525,1526" 1080` - the
+trough held through the bridge, three coins and Start put the game in
+CHOOSE YOUR HOUSE and its TROUGH UP-KICKER came back as solenoid 1.
+
+**Stern SAM** (and the WPC remakes): VPinMAME runs those games from the
+person's own ROM set already, so nothing for this kit to do, and they are
+not in the catalogue (David, 2026-11-02: no reinventing the wheel; Spike 1,
+Spike 2 and the other modern machines are the point).
+
+**The rest** (JJP, American, Spooky, Dutch, Barrels of Fun, Pinball
+Brothers, Turner, Multimorphic, Chicago Gaming's own titles): no VPinMAME
+core and no rig behind a table yet; `catalog.json` says what tables exist
+(few are the machine's layout) and `platforms[].bridge` is `none`.

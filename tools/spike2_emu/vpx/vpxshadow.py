@@ -73,6 +73,17 @@ EVENT_SUBS = {"hit": ("_Hit",), "hold": ("_Hit", "_UnHit"), "spin": ("_Spin",),
 PASS_MS = 600
 
 
+def trough_init(switches):
+    """The cvpmBallStack InitSw call for a trough's switches (ids): seven
+    arguments, or InitSw8 for eight (core.vbs has no other arity)."""
+    sw = ["1%03d" % n for n in switches]
+    if len(sw) > 8:
+        raise ValueError("a trough of %d switches: core.vbs takes at most 8" % len(sw))
+    if len(sw) == 8:
+        return "InitSw8 0,%s" % ",".join(sw)
+    return "InitSw 0,%s" % ",".join((sw + ["0"] * 7)[:7])
+
+
 def saucers(m):
     return {k: v for k, v in m.get("saucers", {}).items() if k != "_"}
 
@@ -417,6 +428,220 @@ def pup_stub(lines, rep):
     return "\n".join(out)
 
 
+def _paren_span(text, start):
+    """(open, close) of the parenthesised list that opens at text[start] ==
+    "(", or None when it does not close on this text."""
+    depth, inq = 0, False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == '"':
+            inq = not inq
+        elif not inq:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return start, i
+    return None
+
+
+FLEX_CLASS = "PadNoFlex"
+#: the DMD libraries a tribute may need, and the null object each becomes
+DMD_STUBS = {"flexdmd_stub": ("FlexDMD.FlexDMD", "PadNoFlex", "FlexDMD"),
+             "ultradmd_stub": ("UltraDMD.DMDObject", "PadNoUltra", "UltraDMD")}
+#: what a null object answers where a value matters: the library's version
+#: a table checks before it goes on (UltraDMD 1.9: major 1, minor 9)
+DMD_VALUES = {"getmajorversion": "1", "getminorversion": "9", "isrendering": "False"}
+
+
+def flexdmd_stub(lines, rep, progid="FlexDMD.FlexDMD", cls=FLEX_CLASS, label="FlexDMD"):
+    """FlexDMD (a DMD library, a separate install) is the whole display of a
+    tribute like VPW's Game of Thrones: "No FlexDMD found. This table will
+    not run without it." Behind a PAD table the machine's own display is
+    the game's (the app's window), so FlexDMD becomes a null object:
+    PadNoFlex, a class with every member the script uses on FlexDMD or on
+    anything made from it (scenes, fonts, labels, actors...): a property
+    takes anything and reads back Empty, a method does nothing and gives
+    back another PadNoFlex (so chains and Set work). A method the script
+    calls with two argument counts (NewLabel: 3 or 6) takes the most and
+    the shorter calls are padded with 0; a name that is both assigned and
+    called with arguments (Show) has its assignments renamed to Show_set.
+    Returns the class text, "" when the script makes no FlexDMD."""
+    made = [i for i, ln in enumerate(lines)
+            if re.search(r'Set\s+(\w+)\s*=\s*CreateObject\("%s"\)' % re.escape(progid), ln, re.I)
+            and not ln.lstrip().startswith("'")]
+    if not made:
+        return ""
+    roots = {re.search(r'Set\s+(\w+)\s*=', lines[i], re.I).group(1).lower() for i in made}
+    # everything made from it: Set x = <var>.Member...
+    objs = set(roots)
+    grew = True
+    while grew:
+        grew = False
+        for ln in lines:
+            m = re.match(r"\s*Set\s+(\w+)\s*=\s*(\w+)\.", _code(ln), re.I)
+            if m and m.group(2).lower() in objs and m.group(1).lower() not in objs:
+                objs.add(m.group(1).lower())
+                grew = True
+    use = re.compile(r"\b(%s)\." % "|".join(sorted(re.escape(o) for o in objs)), re.I)
+    withobj = re.compile(r"(%s)(\.|\s*$)" % "|".join(sorted(re.escape(o) for o in objs)), re.I)
+    member = re.compile(r"(\w+)")
+    lets, calls, spelling = set(), {}, {}
+    objects = set()                 # members read as objects: chained, Set, or a statement
+    sites = []                      # (line index, statement start, member, args, paren) for the padding
+    # `With FlexDMD` / `With scene.GetImage(x)`: the block's bare .Member lines
+    # are the object's (GOT sets GameName, Width, Run, Show that way)
+    with_stack = []
+    in_with = [False] * len(lines)
+    for i, ln in enumerate(lines):
+        code = _code(ln).strip()
+        mw = re.match(r"With\s+(\S.*)$", code, re.I)
+        if mw:
+            with_stack.append(bool(withobj.match(mw.group(1).strip())))
+        elif re.match(r"End\s+With\b", code, re.I):
+            if with_stack:
+                with_stack.pop()
+        elif with_stack and with_stack[-1]:
+            in_with[i] = True
+    bare = re.compile(r"(?:^|(?<=\bThen )|(?<=\bElse ))\s*\.(?=\w)", re.I)
+    for i, ln in enumerate(lines):
+        code = _code(ln)
+        for a, b in _statements(code):
+            seg = code[a:b]
+            starts = [(m.start(), m.end()) for m in use.finditer(seg)]
+            if in_with[i]:
+                starts += [(m.start(), m.end()) for m in bare.finditer(seg)]
+            for st, pos in sorted(starts):
+                lead = seg[:st].strip()
+                if re.search(r"\b(Then|Else)$", lead, re.I):
+                    lead = ""
+                is_set = bool(re.match(r"Set\s", lead, re.I))
+                # the chain: obj.Member(args).Member.Member args
+                while True:
+                    mm = member.match(seg, pos)
+                    if not mm:
+                        break
+                    name = mm.group(1).lower()
+                    spelling.setdefault(name, mm.group(1))
+                    pos = mm.end()
+                    after = seg[pos:]
+                    if re.match(r"\s*\(", after):
+                        at = pos + after.index("(")
+                        span = _paren_span(seg, at)
+                        if span is None:
+                            calls.setdefault(name, set())
+                            break
+                        tail = seg[span[1] + 1:].strip()
+                        # `.SetAlignedPosition ((i-1)*25)+14, 32, x`: a bare call whose
+                        # first argument merely starts with a parenthesis
+                        if not lead and tail and tail[0] not in ".:":
+                            n = _argcount(after.strip())
+                            calls.setdefault(name, set()).add(n)
+                            sites.append((i, a, name, n, False))
+                            objects.add(name)
+                            break
+                        n = _argcount(seg[span[0] + 1:span[1]])
+                        calls.setdefault(name, set()).add(n)
+                        sites.append((i, a, name, n, True))
+                        pos = span[1] + 1
+                        if seg[pos:pos + 1] == ".":
+                            objects.add(name)
+                            pos += 1
+                            continue
+                        if is_set or not lead:
+                            objects.add(name)
+                        break
+                    if re.match(r"\s*=(?!=)", after) and not lead:
+                        lets.add(name)
+                    elif after.startswith("."):
+                        calls.setdefault(name, set()).add(0)
+                        objects.add(name)
+                        pos += 1
+                        continue
+                    elif not lead and after.strip() and not after.strip().startswith(("=", ")", ",", "&", "+", "-", "*", "/", "<", ">", ":")):
+                        n = _argcount(after.strip())          # a bare call: obj.AddActor actor
+                        calls.setdefault(name, set()).add(n)
+                        sites.append((i, a, name, n, False))
+                        objects.add(name)
+                    else:
+                        calls.setdefault(name, set()).add(0)
+                        if is_set or not lead:
+                            objects.add(name)
+                    break
+    # a name assigned AND called with arguments: its assignments become name_set
+    both = {n for n in lets if n in calls and calls[n] and max(calls[n]) > 0}
+    for i, ln in enumerate(lines):
+        for n in both:
+            ln = re.sub(r"\b(%s)\.(%s)(\s*=(?!=))" % ("|".join(sorted(objs)), re.escape(n)),
+                        lambda m: "%s.%s_set%s" % (m.group(1), spelling[n], m.group(3)), ln, flags=re.I)
+            if in_with[i]:
+                ln = re.sub(r"(^|\bThen |\bElse |:)(\s*)\.(%s)(\s*=(?!=))" % re.escape(n),
+                            lambda m: "%s%s.%s_set%s" % (m.group(1), m.group(2), spelling[n], m.group(4)), ln, flags=re.I)
+        lines[i] = ln
+    # the shorter calls padded to the stub's arity
+    padded = 0
+    for i, a, name, n, paren in sorted(sites, key=lambda t: (t[0], -t[1])):
+        want = max(calls[name])
+        if n >= want:
+            continue
+        code = _code(lines[i])
+        spans = _statements(code)
+        seg_span = next(((x, y) for x, y in spans if x == a), None)
+        if seg_span is None:
+            continue
+        seg = code[seg_span[0]:seg_span[1]]
+        m = re.search(r"\b%s\s*" % re.escape(spelling[name]), seg, re.I)
+        if not m:
+            continue
+        fill = ", 0" * (want - n) if n else (", ".join(["0"] * want) if paren else " " + ", ".join(["0"] * want))
+        if paren:
+            at = seg.index("(", m.end() - 1) if "(" in seg[m.end() - 1:] else None
+            span = _paren_span(seg, at) if at is not None else None
+            if span is None:
+                rep.append("WARNING: %s call on line %d spans lines; not padded" % (name, i + 1))
+                continue
+            seg = seg[:span[1]] + (fill if n else fill) + seg[span[1]:]
+            head = seg[:m.start()]
+            if not head.strip() or re.search(r"\b(Then|Else)\s*$", head, re.I) or head.strip() == ".":
+                # a statement: parentheses round more than one argument need Call
+                lead_ws = len(head) - len(head.lstrip())
+                seg = head[:lead_ws] + "Call " + seg[lead_ws:] if not head.strip() else \
+                    re.sub(r"(\b(?:Then|Else)\s*)$", r"\1Call ", head, flags=re.I) + seg[len(head):]
+        else:
+            seg = seg.rstrip() + fill
+        lines[i] = code[:seg_span[0]] + seg + code[seg_span[1]:] + lines[i][len(code):]
+        padded += 1
+    for i in made:
+        var = re.search(r'Set\s+(\w+)\s*=', lines[i], re.I).group(1)
+        lines[i] = re.sub(r'CreateObject\("%s"\)' % re.escape(progid),
+                          "New %s   ' PAD: %s stands in (vpxshadow.py)" % (cls, label), lines[i], flags=re.I)
+        rep.append("%s replaced by %s (%s): the machine's display is the game's" % (label, cls, var))
+    out = ["", "'---- PAD: %s's shape, a null object (the machine's own display is the game's)" % label, "Class %s" % cls]
+    names = sorted(set(lets) | set(calls))
+    for name in names:
+        sp = spelling[name]
+        if name in both:
+            out.append("\tPublic Property Let %s_set(v) : End Property" % sp)
+        elif name in lets:
+            out.append("\tPublic Property Get %s : %s = Empty : End Property" % (sp, sp))
+            out.append("\tPublic Property Let %s(v) : End Property" % sp)
+            continue
+        n = max(calls.get(name) or {0})
+        args = ", ".join("a%d" % k for k in range(n))
+        if name in DMD_VALUES:
+            # a version the script checks (KISS: "Incompatible Version of UltraDMD")
+            out.append("\tPublic Function %s(%s) : %s = %s : End Function" % (sp, args, sp, DMD_VALUES[name]))
+        elif name in objects:
+            out.append("\tPublic Function %s(%s) : Set %s = New %s : End Function" % (sp, args, sp, cls))
+        else:
+            # read as a value (`Do While UltraDMD.IsRendering`): Empty, which is False and 0
+            out.append("\tPublic Function %s(%s) : %s = Empty : End Function" % (sp, args, sp))
+    out += ["End Class", ""]
+    rep.append("%s: %d members (%d padded call%s)" % (cls, len(names), padded, "" if padded == 1 else "s"))
+    return "\n".join(out)
+
+
 def flex_optional(lines, rep):
     """FlexDMD is a separate install too, and JP's Deadpool (DMD Type
     defaults to FlexDMD) dies at its CreateObject. When it fails, the table
@@ -553,12 +778,15 @@ def gen(m, had, quiet=None, dof=None):
             "\tIf Err Then MsgBox \"Can't load PAD.Controller: \" & Err.Description",
             "\tController.GameName = %s" % vb(m["title"]),
             "\tController.Run GetPlayerHWnd",
-            "\tIf Err Then MsgBox \"Can't start the Spike 2 game: \" & Err.Description",
+            "\tIf Err Then MsgBox \"Can't start the game: \" & Err.Description",
             "\tOn Error Goto 0",
             "\tPinMAMETimer.Interval = PinMAMEInterval",
             "\tPinMAMETimer.Enabled = True",
             "\tSet bsTrough = New cvpmBallStack",
-            "\t\tbsTrough.InitSw 0,%s" % ",".join("1%03d" % s for s in m["trough"]["switches"]),
+            # core.vbs's InitSw takes seven switches (InitSw8 eight): a trough
+            # of fewer is padded with 0 - Can Crusher's one ball stopped on
+            # "Wrong number of arguments" (PAD-943)
+            "\t\tbsTrough.%s" % trough_init(m["trough"]["switches"]),
             "\t\tbsTrough.Balls = %d" % m["trough"].get("balls", 6),
             "\t\tbsTrough.InitKick %s, %d, %d" % (m["trough"]["release"], *m["trough"]["kick"])]
     for k, s in saucers(m).items():
@@ -611,7 +839,12 @@ def gen(m, had, quiet=None, dof=None):
     for key, sw in keymap:
         out.append("\tIf KeyCode = %s Then Controller.Switch(%d) = True" % (key, sw))
     if cab.get("coin"):
-        out.append("\tIf KeyCode = AddCreditKey Then vpmTimer.PulseSw %d" % cab["coin"])
+        if m.get("platform") == "spike1":
+            # PulseSw is one timer tick, which the Spike 1 node bus's polls miss
+            # (Ghostbusters: CREDITS 0 after three); 600 ms counted on the rig
+            out.append("\tIf KeyCode = AddCreditKey Then vpmTimer.PulseSwitch %d, 600, 0" % cab["coin"])
+        else:
+            out.append("\tIf KeyCode = AddCreditKey Then vpmTimer.PulseSw %d" % cab["coin"])
     if skip:
         out.append("\tSelect Case KeyCode")
         out.append("\t\tCase %s" % ", ".join(skip))
@@ -1036,6 +1269,9 @@ def patch(script, m):
     route_b2s(lines, rep)
     own_lamp_reads(lines, rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
+    for key, (progid, cls, label) in DMD_STUBS.items():
+        if m.get(key):
+            stub += flexdmd_stub(lines, rep, progid, cls, label)
     flex_optional(lines, rep)
     # what core.vbs's PinMAMETimer expects a VPM table to declare, at the TOP:
     # Iron Maiden loads core.vbs and controller.vbs itself near its start,
@@ -1047,6 +1283,15 @@ def patch(script, m):
                if ln.strip().lower().startswith("option explicit")), 0)
     lines.insert(at, "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0"
                      "   ' PAD: for core.vbs (vpxshadow.py)")
+    if not re.search(r'GetTextFile\("core\.vbs"\)', "\n".join(lines), re.I):
+        # PAD-943: a tribute on controller.vbs alone (Drummer72's Primus and Can
+        # Crusher) never loads core.vbs, which the bridge's cvpmBallStack and
+        # vpmTimer need: loaded before the table's Init sub, after its own
+        # Consts (core.vbs after the table's Consts - see the README's "What
+        # Visual Pinball itself turned up")
+        init = next((i for i, ln in enumerate(lines)
+                     if re.match(r"\s*Sub\s+Table1_Init\b", ln, re.I)), len(lines))
+        lines.insert(init, 'ExecuteGlobal GetTextFile("core.vbs")   \' PAD: the bridge needs core.vbs (vpxshadow.py)')
     text = "\n".join(lines) + gen(m, had, quiet, dof) + stub
     return text, rep
 

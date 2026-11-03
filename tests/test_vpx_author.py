@@ -313,12 +313,15 @@ def test_the_shipped_maps_read_through_coverage(A):
     """Every map beside the kit: coverage reads it without a complaint and
     finds switches, coils and lights in each."""
     import glob
-    for path in glob.glob(os.path.join(VPX, "*.json")):
-        if "protos" in path:
-            continue
+    for path in glob.glob(os.path.join(VPX, "*.shadow.json")) + glob.glob(os.path.join(VPX, "*.vpxmap.json")):
         m = json.load(open(path, encoding="utf-8"))
+        if m.get("listed") is False:
+            continue            # a starter the tab does not offer (got_le, PAD-943): its table is not fitted yet
         cov = A.coverage(m)
-        assert cov["switches"] and cov["coils"] and cov["leds"], path
+        assert cov["switches"] and cov["coils"], path
+        # a map whose lamps are not mapped yet says so (JP's Ghostbusters, Primus, Can Crusher: the
+        # author's own lights carry no numbering of the game's, PAD-943) and wires no LED
+        assert cov["leds"] or not [k for k in m.get("lamps", {}) if k != "_"], path
 
 
 def test_summary_for_counts_what_a_table_owes_and_what_the_map_wires(A, tmp_path):
@@ -330,3 +333,85 @@ def test_summary_for_counts_what_a_table_owes_and_what_the_map_wires(A, tmp_path
     assert got["pct"] == 60 and got["ids"]
     assert A.summary_for("nosuch", MAP, str(tmp_path)) is None
     assert os.path.isdir(d)
+
+
+# ---- PAD-943: a Spike 1 title, from its ELF and switch map ----------------
+
+def _s1_work(tmp_path):
+    """A Spike 1 work dir with GOT extracted (an empty stand-in ELF) and a
+    switch map of a few of its switches."""
+    work = tmp_path / "s1emu"
+    game = work / "cache" / "GOT_LE-1_37" / "game"
+    game.mkdir(parents=True)
+    (game / "game").write_bytes(b"\x7fELF")
+    (game / ".game_exe").write_text("game", encoding="utf-8")
+    (work / "s1switches.json").write_text(json.dumps({
+        "_trough_coils": [[9, 2]], "1,11": "START BUTTON", "8,0": "LEFT FLIPPER E.O.S.",
+        "8,2": "L. FLIPPER BUTTON", "8,9": "TROUGH #6 (L)", "9,1": "SHOOTER LANE", "9,0": "LOCK 1"}),
+        encoding="utf-8")
+    return work
+
+
+def _fake_s1elf(A, monkeypatch):
+    class Elf:
+        @staticmethod
+        def extract_coil_map(path):
+            return {(9, 2): "TROUGH UP-KICKER", (8, 7): "RIGHT FLIPPER POWER", (8, 3): "LEFT SLINGSHOT"}
+
+        @staticmethod
+        def extract_led_map(path):
+            return {(1, 0): "TOURNAMENT START BUTTON", (8, 17): ""}
+    monkeypatch.setattr(A, "_s1elf", lambda: Elf)
+
+
+def test_spike1_titles_and_sources_come_from_the_work_dirs_cache(A, tmp_path, monkeypatch):
+    work = _s1_work(tmp_path)
+    monkeypatch.setattr(A, "spike1_works", lambda: [str(work)])
+    titles = A.spike1_titles()
+    assert list(titles) == ["got_le"] and titles["got_le"][0] == "GOT_LE"
+    src = A.spike1_sources("got_le")
+    assert src["elf"] == str(work / "cache" / "GOT_LE-1_37" / "game" / "game")
+    assert src["switchmap"].endswith(os.path.join("switchmaps", "GOT_LE.json"))   # the rig's curated map
+    assert A.spike1_sources("kiss_le") == {}
+    assert "got_le" in A.titles_with_tables()
+    assert A.title_platforms(["got_le", "rush_le"]) == {"got_le": "spike1"}       # PAD-943: the tab's filter
+
+
+def test_spike1_machine_is_the_elfs_parts_in_the_rigs_numbering(A, tmp_path, monkeypatch):
+    work = _s1_work(tmp_path)
+    _fake_s1elf(A, monkeypatch)
+    m = A.read_machine_spike1("got_le", str(work / "cache" / "GOT_LE-1_37" / "game" / "game"),
+                              str(work / "s1switches.json"))
+    assert m["platform"] == "spike1" and not m["positions"] and m["have"]["switch_list.txt"]
+    by = {s["name"]: s for s in m["switches"]}
+    assert by["START BUTTON"]["id"] == 75 and by["START BUTTON"]["where"] == "cabinet"
+    assert by["LEFT FLIPPER E.O.S."]["kind"] == "flipper eos"
+    assert by["L. FLIPPER BUTTON"]["kind"] == "flipper button" and by["L. FLIPPER BUTTON"]["id"] == 514
+    assert by["TROUGH #6 (L)"]["kind"] == "trough" and by["LOCK 1"]["where"] == "unplaced"
+    coils = {c["name"]: c for c in m["coils"]}
+    assert coils["TROUGH UP-KICKER"]["kind"] == "trough" and coils["TROUGH UP-KICKER"]["number"] == 1578
+    assert coils["RIGHT FLIPPER POWER"]["kind"] == "flipper"
+    ins = {g["name"]: g for g in m["inserts"]}
+    assert ins["TOURNAMENT START BUTTON"]["lamp"] == 1100 and ins["LED 8/17"]["leds"] == [(8, 17)]
+    # machine_for falls back to it when the title has no device tables
+    monkeypatch.setattr(A, "spike1_works", lambda: [str(work)])
+    monkeypatch.setattr(A, "find_tables", lambda title, tables_dir=None: {})
+    assert A.machine_for("got_le")["platform"] == "spike1"
+    assert A.machine_for("nobody") is None
+
+
+def test_spike1_starter_and_markdown_say_the_platform(A, tmp_path, monkeypatch):
+    work = _s1_work(tmp_path)
+    _fake_s1elf(A, monkeypatch)
+    m = A.read_machine_spike1("got_le", str(work / "cache" / "GOT_LE-1_37" / "game" / "game"),
+                              str(work / "s1switches.json"))
+    st = A.starter_map(m, "Game of Thrones LE.vpx")
+    assert st["platform"] == "spike1" and st["cabinet"]["start"] == 1075
+    assert st["trough"]["switches"] == [521] and st["trough"]["kick"] == [9, 2]
+    assert st["game_on"]["coils"] == [[8, 7]]
+    text = A.markdown(m)
+    assert "A Spike 1 title" in text and "node x 64 + index" in text
+    assert "No switch ids yet" not in text
+    sp2 = {"title": "x", "platform": "spike2", "binary": "", "image": "", "image_size": None, "have": {},
+           "positions": False, "switches": [], "coils": [], "inserts": []}
+    assert "platform" not in A.starter_map(sp2, "t.vpx")

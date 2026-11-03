@@ -119,7 +119,16 @@ export default function Vpx() {
   const s = useNs("vpx");
   const [details, setDetails] = useState(false);
   const busy = !!s.busy;
-  const tables = s.tables || [];
+  // PAD-943: the tab is on every manufacturer the app emulates and shows that
+  // machine's own (Stern's eras are platforms of their own); a row or title
+  // that names no platform is Spike 2's. On a platform the app has no bridge
+  // for yet, the tables play as their authors wrote them: no Patch, no cards.
+  const platform = s.platform || "";
+  const plats = (s.catalog || {}).platforms || {};
+  const platName = (plats[platform] || {}).name || (platform === "spike2" ? "Stern Spike 2" : platform);
+  const bridged = s.bridged !== false;
+  const mine = (p) => !platform || (p || "spike2") === platform;
+  const tables = (s.tables || []).filter((t) => mine(t.platform));
   const patched = s.patched || [];
   const presets = s.presets || [];
   const titles = Object.keys(s.cards || {});
@@ -140,19 +149,34 @@ export default function Vpx() {
     && fits(t).includes(t.patched_title) && (t.models || {})[t.patched_title] && t.models[t.title];
   // PAD-850: ONE list, alphabetical - the tables the app knows, a patched one
   // with its Play button, and any other (PAD) table in the folder as its own row
-  const known = new Set(tables.map((t) => t.output));
+  // (every platform's: another machine's (PAD) copy is not a row of its own here)
+  const known = new Set((s.tables || []).map((t) => t.output));
+  // PAD-943: the person's own downloads in the folder: the one a known table's
+  // map fits is that table's row (Patch takes it); the rest are rows of their
+  // own, "no map yet", named after the catalogue's table where the name matches
+  const linked = new Set(tables.map((t) => t.download).filter(Boolean));
+  // its row carries the author's description from the catalogue (name, by, where
+  // from, platform, card) when the file's name says which table it is
+  const downloads = (s.downloads || []).filter((d) => !linked.has(d.path) && mine((d.catalog || {}).platform)).map((d) => {
+    const c = d.catalog || {};
+    return { name: c.name || d.name, by: c.by || "", where: c.where || "", output: d.file, patched: false,
+      extra: true, download: d, model: (c.platform_name || "").replace(/^Stern /, ""), card: d.card || "" };
+  });
   const rows = tables.concat(patched.filter((n) => !known.has(n)).map((n) => ({
-    name: n.replace(/ \(PAD\)\.vpx$/i, ""), output: n, patched: true, extra: true })))
+    name: n.replace(/ \(PAD\)\.vpx$/i, ""), output: n, patched: true, extra: true })), downloads)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   const rtOk = s.runtime_state === "ready";
+  // the other platforms' tables are on their own manufacturer's tab now
+  const others = platform ? Object.keys(plats).filter((k) => k !== platform
+    && ((s.catalog || {}).tables || []).some((t) => t.platform === k && t.url)).map((k) => plats[k].name) : [];
   // PAD-840: installed from here; the Emulate tab only offers it in some cases
   const rtFix = s.runtime_state === "absent" || s.runtime_state === "stale";
   const vpxOk = !!s.vpx && !s.vpx_old;
   // set up once, then only looked at: its rows (and their buttons) show under
   // Details, or by themselves while any of it is not ready
   const setup = [["The emulator's Linux", rtOk],
-    ["Visual Pinball" + (s.vpx_version ? " " + s.vpx_version : ""), vpxOk],
-    ["Controller", !!s.registered], ["Card images", have.length > 0]];
+    ["Visual Pinball" + (s.vpx_version ? " " + s.vpx_version : ""), vpxOk]].concat(bridged
+    ? [["Controller", !!s.registered && s.registered_here !== false], ["Card images", have.length > 0]] : []);
   const allOk = !!s.loaded && setup.every(([, ok]) => ok);
   const open = details || (!!s.loaded && !allOk);
   // PAD-939: a copy patched before a fix its map names (The Beatles' trough)
@@ -184,11 +208,22 @@ export default function Vpx() {
       : s.pictures_busy ? "Reading the table's picture…" : "No picture read yet.";
     return html`<span class="vpx-nopic" ...${tip(why)}></span>`;
   };
+  // PAD-943: a download's row says what the app knows of it
+  const downloadChip = (d) => {
+    if (!d.read) return html`<span class="vpx-skel vpx-skel-cov" ...${tip("Reading the table…")}></span>`;
+    const c = d.catalog;
+    const head = c ? c.platform_name + " game: no map yet" : "No map yet";
+    return html`<${Chip} sm kind="warn" ...${tip({ head, lines: [
+      c ? "The name says it is " + c.name + " (" + c.game + ")." : "The app does not recognise this table.",
+      "Nothing plays behind it: the app has no map for it yet, so it plays as its author wrote it.",
+      c && c.platform === "spike1" ? "A Spike 1 game: the checklist on the authors' card is where a map starts." : ""].filter(Boolean) })}>No map yet<//>`;
+  };
   // PAD-941: a row's coverage (the map's wired parts over what the game has, from
   // this PC's tables) is the button that writes that table's checklist
   const coverage = s.coverage || {};
   const coverBtn = (t) => {
     const c = coverage[t.title];
+    if (!c && s.coverage_busy) return html`<span class="vpx-skel vpx-skel-cov" ...${tip("Reading how much of the game the map wires…")}></span>`;
     const part = (k, name) => c && c[k] ? c[k][0] + " of " + c[k][1] + " " + name : "";
     const lines = c ? [part("switches", "switches"), part("coils", "coils the game fires"), part("inserts", "inserts"),
       "Click for the checklist: every part, marked by what the map wires, against "
@@ -203,8 +238,13 @@ export default function Vpx() {
     <${PageHead} title="Visual Pinball" sub=${(s.intro || "").split("\n").map((l) => html`${l}<br />`)}>
       <${Chip} kind="info" sm>Preview<//>
       <${Button} kind="ghost" icon="refresh" disabled=${busy || !s.ok} onClick=${() => call("vpx.refresh")}>Check again<//>
+      <${Button} kind="ghost" disabled=${busy || !s.ok} ...${tip({ head: "Restart WSL.", lines: [
+        "The cure for the game's screen gone blank on the desktop while the table still plays, a game window that will not close, or crackly sound.",
+        "It closes everything running in WSL: every game on every tab. WSL starts again by itself on the next use."] })}
+        onClick=${() => call("vpx.restart_wsl")}>Restart WSL…<//>
     <//>
     ${s.note ? html`<${Note} kind="warn">${s.note}<//>` : null}
+    ${platform && !bridged ? html`<${Note} kind="info">${platName} tables play as their authors wrote them: the app has no link from a table to its ${platName} emulator yet${(plats[platform] || {}).runs ? " (" + plats[platform].runs + ")" : ""}. The list below is where to get them.<//>` : null}
     ${busy || s.message ? html`<div class="vpx-status">
       ${busy ? html`<${Spinner} /><span>${s.busy}…</span>`
         : s.message_level === "error" ? html`<${Note} kind="warn">${s.message}<//>`
@@ -247,42 +287,46 @@ export default function Vpx() {
         ${vpxOk ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} icon="download"
           onClick=${() => call("vpx.download_vpx")}>Download 10.8.0<//>`}
       <//>
-      <${Row} ok=${!!s.registered} label="The game's link to Visual Pinball (PAD.Controller)"
-        value=${s.registered ? "Registered." : "Not registered."}>
-        ${s.registered ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} onClick=${() => call("vpx.register")}>Register<//>`}
+      ${bridged ? html`<${Row} ok=${!!s.registered && s.registered_here !== false} label="The game's link to Visual Pinball (PAD.Controller)"
+        value=${!s.registered ? "Not registered."
+          : s.registered_here === false ? html`Registered to another copy of the app: <span class="mono">${s.registered_to}</span>.
+            Every table calls that one, so what is new here (a Spike 1 game, say) is not in play until this copy is registered.`
+          : "Registered."}>
+        ${s.registered && s.registered_here !== false ? null : html`<${Button} size="sm" disabled=${busy || !s.ok} onClick=${() => call("vpx.register")}>Register<//>`}
       <//>
       <${Row} ok=${have.length > 0} label=${html`Card images <span class="small muted">${s.cards_tip}</span>`}
         value=${html`<span class="mono">${s.library || "No folder chosen."}</span>${cardWords ? html`<br />${cardWords}` : null}`}>
         <${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
           onClick=${() => call("vpx.choose_library")}>Choose folder…<//>
-      <//>` : null}
+      <//>` : null}` : null}
     <//>
-    <${Card} cls="vpx-authors" head=${html`<span class="h2">For table authors</span>
+    ${bridged ? html`<${Card} cls="vpx-authors" head=${html`<span class="h2">For table authors</span>
         <span class="small muted vpx-authors-sub">${s.authors_intro}</span>`}>
       <div class="vpx-authors-row">
         <span class="small">Game</span>
         <${Select} sm width=${260} value=${s.author_title || ""} options=${authorTitles}
-          disabled=${busy || !s.ok || !authorTitles.length} title=${s.authors_titles_tip}
+          disabled=${busy || !s.ok || !authorTitles.length || s.authors_busy} title=${s.authors_titles_tip}
           onChange=${(v) => call("vpx.pick_author_title", v)} />
+        ${s.authors_busy ? html`<span class="small muted vpx-authors-busy"><${Spinner} /> Finding the games on this PC…</span>` : null}
         <${Button} size="sm" icon="file" disabled=${busy || !s.ok || !s.author_title}
           title="Open the game's checklist: every switch, coil and insert, its number and what a table does for it. Export it as CSV or Markdown from there."
           onClick=${() => call("vpx.checklist", false)}>Checklist…<//>
         <${Button} size="sm" kind="ghost" icon="search" disabled=${busy || !s.ok || !s.author_title}
           title="Choose a .vpx: the checklist marks every part of the game that table leaves out (against the app's map for it), or offers a starter map when the app has none."
           onClick=${() => call("vpx.checklist", true)}>Check a table…<//>
-        ${!authorTitles.length && s.loaded ? html`<span class="small muted">No game has run on this PC yet: play one once and it appears here.</span>` : null}
+        ${!authorTitles.length && s.loaded && !s.authors_busy ? html`<span class="small muted">No game has run on this PC yet: play one once and it appears here.</span>` : null}
       </div>
       ${s.author_note ? html`<div class="small vpx-authors-note">${s.author_note}</div>` : null}
-    <//>
+    <//>` : null}
     <${Card} cls="vpx-tables" head=${html`<span class="h2" ...${tip(s.tables_tip)}>Tables</span>
         <span class="mono small muted vpx-dir" ...${tip("Your tables folder: where Patch writes the (PAD) copies and Play looks for them.")}>${s.tables_dir || "No tables folder set"}</span>
         ${s.pictures_busy ? html`<span class="small muted vpx-pics-busy"><${Spinner} /> ${s.pictures_busy}…</span>` : null}
         <span class="sp"></span>
         <${Button} drop size="sm" kind="ghost" icon="folder" disabled=${busy || !s.ok}
           onClick=${() => call("vpx.choose_tables")}>Choose folder…<//>
-        <${Button} drop size="sm" kind="ghost" icon="upload" disabled=${busy || !s.ok}
+        ${bridged ? html`<${Button} drop size="sm" kind="ghost" icon="upload" disabled=${busy || !s.ok}
           title="Patch every table in a folder of downloads at once: the ones the app knows get their (PAD) copy, the rest are counted."
-          onClick=${() => call("vpx.patch_folder")}>Patch a folder…<//>`}>
+          onClick=${() => call("vpx.patch_folder")}>Patch a folder…<//>` : null}`}>
       ${rows.length ? html`<div class="vpx-list">
         <div class="vpx-table vpx-head small muted">
           <span class="vpx-pic" ...${tip(s.pictures_tip)}></span>
@@ -294,15 +338,16 @@ export default function Vpx() {
         </div>
         ${rows.map((t) => html`<div class=${"vpx-table" + (t.patched ? "" : " unpatched")}>
         <span class="vpx-pic">${picture(t)}</span>
-        <b class="vpx-name" ...${tip(t.extra ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : ""))}>${t.name}</b>
+        <b class="vpx-name" ...${tip(t.extra && !t.download ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : "") + (t.download ? " (your file: " + t.download.file + ")" : ""))}>${t.name}</b>
         <span class="small vpx-by" ...${tip(t.by)}>${t.by}</span>
         <span class="small muted vpx-from" ...${tip(t.where)}>${t.where}</span>
         <span class="small" ...${tip(fits(t).length > 1 ? playsAs(t) + "The table fits "
-            + fits(t).map((x) => t.models[x]).join(" or ") + "." : "")}>${t.extra ? "" : (t.models || {})[t.title] || ""}</span>
-        <span class="small muted vpx-card" ...${tip(t.extra ? "" : t.card ? playsAs(t) + "Card: " + t.card
-            : "No card image for " + fits(t).join(" or ") + " in your card folder yet.")}>${t.extra ? ""
-          : !t.card ? "No card yet" : base(t.card)}</span>
-        <span>${!t.patched ? html`<${Chip} sm>Not patched<//>`
+            + fits(t).map((x) => t.models[x]).join(" or ") + "." : t.download ? "A " + t.model + " game: " + t.download.file : "")}>${t.extra ? t.model || "" : (t.models || {})[t.title] || ""}</span>
+        <span class="small muted vpx-card" ...${tip(t.extra ? (t.card ? "Card: " + t.card : "") : t.card ? playsAs(t) + "Card: " + t.card
+            : "No card image for " + fits(t).join(" or ") + " in your card folder yet.")}>${t.extra && !t.download ? ""
+          : !t.card ? (t.extra ? "" : "No card yet") : base(t.card)}</span>
+        <span>${t.download && t.extra ? downloadChip(t.download)
+          : !t.patched ? html`<${Chip} sm ...${tip(t.download ? "Your download is in the folder: " + base(t.download) + ". Patch writes its (PAD) copy." : "")}>Not patched<//>`
           : stale(t) || missed(t) ? html`<${Chip} kind="warn" dot sm>Patch again<//>`
           : html`<${Chip} kind="ok" dot sm>Patched<//>`}</span>
         <span class="vpx-cover">${t.extra ? null : coverBtn(t)}</span>
@@ -315,7 +360,59 @@ export default function Vpx() {
           Patch again to play it as the ${t.models[t.title]}.</div>` : null}
         ${missed(t) ? html`<div class="small vpx-stale">Your copy was patched before a fix: ${t.repatch.join("; ")}.
           Patch again to get it.</div>` : null}
-      </div>`)}</div>` : html`<div class="muted small">${s.loaded ? "No tables." : "Checking…"}</div>`}
+      </div>`)}</div>` : s.loaded ? html`<div class="muted small">No tables${platform ? " for a " + platName + " machine in your folder yet" : ""}.</div>` : html`<${Skeleton} />`}
+      ${others.length ? html`<div class="small muted vpx-others">Tables of other machines are on their own manufacturer's Visual Pinball tab: ${others.join(", ")}.</div>` : null}
     <//>
+    <${Catalog} s=${s} platform=${platform} platName=${platName} />
   </div>`;
+}
+
+// PAD-943: the tables' place while the kit's first state is read (half a
+// second; the page itself never waits): four rows the shape of a table row.
+function Skeleton() {
+  return html`<div class="vpx-list vpx-skel-list">${[0, 1, 2, 3].map((i) => html`<div class="vpx-table vpx-skel-row" key=${i}>
+    <span><span class="vpx-skel" style=${"width:" + (55 + (i * 17) % 35) + "%"}></span></span>
+    <span class="vpx-by"><span class="vpx-skel" style="width:60%"></span></span>
+    <span class="vpx-from"><span class="vpx-skel" style="width:70%"></span></span>
+    <span><span class="vpx-skel" style="width:30px"></span></span>
+    <span><span class="vpx-skel" style="width:80%"></span></span>
+    <span><span class="vpx-skel" style="width:64px"></span></span>
+    <span><span class="vpx-skel vpx-skel-cov"></span></span>
+    <span></span><span></span>
+  </div>`)}</div>`;
+}
+
+// PAD-943: the other platforms' tables. One card, a block per platform
+// (what plays behind a table there), a line per table: the game, the table
+// (a link to where its author put it), who made it, and whether it is the
+// machine's own layout or a themed original.
+const KIND_WORDS = { tribute: "scripted", mashup: "older ROM", "": "none" };
+function Catalog({ s, platform, platName }) {
+  const cat = s.catalog || {};
+  const plats = cat.platforms || {};
+  // a table that is in the person's folder is on the Tables list above, not here
+  const have = new Set((s.downloads || []).map((d) => d.catalog && d.catalog.name).filter(Boolean));
+  const tables = (cat.tables || []).filter((t) => !t.url || !have.has(t.name));
+  // this manufacturer's block (every other machine's when the tab has no manufacturer)
+  const order = Object.keys(plats).filter((k) => (platform ? k === platform : k !== "spike2") && tables.some((t) => t.platform === k));
+  if (!order.length) return null;
+  return html`<${Card} cls="vpx-cat" head=${html`<span class="h2" ...${tip(s.catalog_tip)}>${platform ? "More " + platName + " tables" : "Tables of other machines"}</span>
+      <span class="small muted vpx-cat-sub">The app ships none of them: each is its author's download, and it plays as its author wrote it until the app has a map for it${platform ? "" : " (Stern SAM games are Visual PinMAME's already, so they are not here)"}.</span>`}>
+    ${order.map((k) => html`<div class="vpx-cat-plat">
+      <div class="vpx-cat-head"><b>${plats[k].name}</b> <span class="small muted">${plats[k].runs}</span>
+        ${plats[k].needs ? html`<${Chip} kind="warn" dot sm ...${tip(plats[k].needs)}>needs the machine's security key<//>` : null}</div>
+      ${plats[k].needs ? html`<div class="small vpx-cat-needs">${plats[k].needs}</div>` : null}
+      ${tables.filter((t) => t.platform === k).map((t) => html`<div class=${"vpx-cat-row" + (t.url ? "" : " none")}>
+        <span class="small vpx-cat-game" ...${tip(t.game)}>${t.game}</span>
+        <span class="vpx-cat-name" ...${tip(t.url ? "Open " + t.where + ": " + t.url : t.notes)}>${t.url
+          ? html`<a href=${t.url} target="_blank" rel="noopener">${t.name}</a>` : html`<span class="muted">${t.notes}</span>`}</span>
+        <span class="small vpx-cat-by" ...${tip(t.by)}>${t.by}</span>
+        <span class="small muted vpx-cat-from">${t.where}</span>
+        <span class="vpx-cat-kind">${t.url ? html`<${Chip} sm kind=${t.faithful ? "ok" : ""} dot=${t.faithful}
+          ...${tip((t.faithful ? "The machine's own layout" : "A themed original, not the machine's layout") + "; "
+            + (t.kind === "mashup" ? "an older game's ROM plays under the playfield" : "its own script plays"
+              ) + (t.map ? ". The app's map: " + t.map : "") + (t.notes ? ". " + t.notes : ""))}>${(t.faithful ? "layout" : "themed") + ", " + KIND_WORDS[t.kind || ""]}<//>` : null}</span>
+      </div>`)}
+    </div>`)}
+  <//>`;
 }

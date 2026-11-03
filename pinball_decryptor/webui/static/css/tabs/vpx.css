@@ -69,3 +69,30 @@
 .vpx-sheet-table tr:hover > td { background: var(--panel-2); }
 .vpx-sheet-table td.vpx-wrap { white-space: normal; overflow-wrap: anywhere; }
 .vpx-sheet-list { margin: 0; padding-left: 20px; font-size: 13px; }
+
+/* PAD-943: the other platforms' tables */
+.vpx-cat { margin-top: 12px; }
+.vpx-cat > .hd { padding: 8px 16px; flex-wrap: wrap; }
+.vpx-cat-sub { min-width: 0; white-space: normal; flex: 1 1 400px; }
+.vpx-cat-plat { padding: 6px 0 4px; border-top: 1px solid var(--line); }
+.vpx-cat-plat:first-child { border-top: 0; padding-top: 0; }
+.vpx-cat-head { padding: 2px 4px 4px; }
+.vpx-cat-row { display: grid; align-items: center; column-gap: 14px; padding: 2px 4px; min-height: 28px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 3fr) minmax(0, 2fr) minmax(0, 1fr) 200px; }
+.vpx-cat-row > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.vpx-cat-row > .vpx-cat-kind { overflow: visible; }
+.vpx-cat-row:hover { background: var(--panel-2); }
+.vpx-cat-row.none > .vpx-cat-name { white-space: normal; }
+.vpx-cat-name a { color: var(--accent); text-decoration: none; }
+.vpx-cat-name a:hover { text-decoration: underline; }
+
+/* PAD-943: what is still being read: a bar the shape of the text to come */
+.vpx-skel { display: inline-block; height: 12px; border-radius: 4px; vertical-align: middle;
+  background: linear-gradient(90deg, var(--panel-2) 25%, var(--line) 50%, var(--panel-2) 75%);
+  background-size: 200% 100%; animation: vpx-shimmer 1.3s linear infinite; }
+.vpx-skel-cov { width: 46px; height: 22px; border-radius: 6px; }
+.vpx-skel-row:hover { background: none; }
+.vpx-authors-busy { display: inline-flex; align-items: center; gap: 6px; }
+@keyframes vpx-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.vpx-cat-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vpx-cat-needs { padding: 0 4px 6px; color: var(--ink-2); }

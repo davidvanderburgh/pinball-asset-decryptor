@@ -1,0 +1,227 @@
+"""The Spike 1 rig behind PAD.Controller (PAD-943): tools/spike2_emu/vpx/s1bridge.
+
+What is worth failing on, none of it needing a run:
+  * THE TWO FILE LAYOUTS ARE THE RIG'S. s1bridge restates spike1_emulate's
+    StateBlock / SwitchInput (so the controller never imports the app); a
+    drift between them reads lamps off by a node or writes a bitmap the
+    responder refuses.
+  * THE NUMBERING: a Spike 1 switch is 1000 + node*64 + index, a coil the
+    same, a lamp 1000 + node*100 + index; the got_le map says so.
+  * THE BOARD RECORD: a Spike 1 run is taken only when it is the title's
+    (case apart: the rig posts GOT_LE, the map says got_le), its work dir
+    from the record's `root`.
+  * THE PIPE: every change rewrites the whole bitmap; close lets go.
+  * THE LAUNCH: a Spike 1 title's card is its .iso in a spike1 library beside
+    the Spike 2 one; a run of another title on the one rig is refused.
+"""
+import json
+import os
+import struct
+import sys
+
+import pytest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VPX = os.path.join(ROOT, "tools", "spike2_emu", "vpx")
+for p in (os.path.join(ROOT, "tools", "spike2_emu"), VPX):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+pytestmark = pytest.mark.skipif(not os.path.isdir(VPX), reason="rig not present")
+
+
+@pytest.fixture(scope="module")
+def s1():
+    return pytest.importorskip("s1bridge")
+
+
+def test_layouts_match_the_apps_state_model(s1):
+    m = pytest.importorskip("pinball_decryptor.plugins.stern.spike1_emulate")
+    assert (s1.MAX_NODES, s1.MAX_INDEX, s1.N_SLOTS) == (m.MAX_NODES, m.MAX_INDEX, m.N_SLOTS)
+    assert s1.STATE_SIZE == m.StateBlock.SIZE
+    assert s1.INPUT_SIZE == m.SwitchInput.SIZE
+    st = m.HardwareState()
+    st.set_switch(8, 2, True)
+    st.set_lamp(9, 5, 0x58)
+    st.set_coil(9, 2, True)
+    data = m.StateBlock.pack(st, seq=7)
+    assert s1.is_up(data)
+    sw, lamps, coils, seq = s1.unpack(data)
+    assert seq == 7 and sw[s1.slot(8, 2)] == 1 and coils[s1.slot(9, 2)] == 1
+    assert s1.lamp_level(lamps, 9, 5) == 0x58 and s1.lamp_rgb(lamps, 9, 5) == (0x58, 0x58, 0x58)
+    assert s1.lamp_level(lamps, 9, 6) == 0
+    closed, seq2 = m.SwitchInput.unpack(s1.pack_input({75, 521}, 3))
+    assert closed == {75, 521} and seq2 == 3
+
+
+def test_not_a_state_block(s1):
+    assert not s1.is_up(None) and not s1.is_up(b"\0" * 10)
+    assert not s1.is_up(struct.pack("<4I", 0x12345678, 1, 0, 0) + bytes(s1.STATE_SIZE))
+    assert s1.unpack(b"") is None
+
+
+def test_numbering(s1):
+    assert s1.slot(1, 11) == 75 and s1.sol_number(9, 2) == 1578 and s1.sol_number(8, 7) == 1519
+
+
+def test_the_got_le_map_numbers_the_rigs_switches_and_the_elfs_coils(s1):
+    m = json.load(open(os.path.join(VPX, "got_le.shadow.json"), encoding="utf-8"))
+    names = json.load(open(os.path.join(ROOT, "tools", "spike1_emu", "switchmaps", "GOT_LE.json"), encoding="utf-8"))
+    assert m["platform"] == "spike1" and m["listed"] is True and m["detect"]   # VPW's table is fitted
+    by_name = {v: k for k, v in names.items() if not k.startswith("_")}
+    for key, want in (("start", "START BUTTON"), ("left_flipper", "L. FLIPPER BUTTON"),
+                      ("right_flipper", "R. FLIPPER BUTTON"), ("coin", "LEFT COIN SLOT")):
+        node, idx = (int(x) for x in by_name[want].split(","))
+        assert m["cabinet"][key] == 1000 + s1.slot(node, idx), key
+    # the kit's trough: TROUGH #1 (R), nearest the up-kicker, first; the jam opto last
+    trough = [s1.slot(*(int(x) for x in by_name["TROUGH #%d%s" % (n, s)].split(",")))
+              for n, s in ((1, " (R)"), (2, ""), (3, ""), (4, " (L)"), (5, " (L)"), (6, " (L)"))]
+    assert m["trough"]["switches"] == trough + [s1.slot(*(int(x) for x in by_name["TROUGH JAM"].split(",")))]
+    assert m["solenoids"]["1"]["coil"] == [9, 2] and "TROUGH" in m["solenoids"]["1"]["name"]
+    assert [tuple(c) for c in names["_trough_coils"]][:2] == [(1, 1), (1, 2)]   # the sweep's, kept as they were
+    pc = pytest.importorskip("padcontroller")
+    vm = pc.VpxMap("got_le")
+    assert vm.platform == "spike1" and vm.game_on == (40, [(8, 7)])
+    assert vm.solenoids[1] == (9, 2)
+    # the table's li11 is LED 11 of the game's LED table: an RGB insert on node 8 at 20..22
+    assert vm.lamp_groups[pc.lamp_number(8, 20)] == [(8, 20), (8, 21), (8, 22)]
+    assert pc.lamp_number(8, 20) in vm.rgb_groups and pc.lamp_number(12, 2) in vm.lamp_groups   # fl235, a flasher on node 12
+
+
+def test_board_record_is_the_titles_case_apart(s1, tmp_path):
+    rec = {"emu": "spike1", "slot": 0, "game": "GOT_LE", "distro": "PAD-Runtime", "pid": 1,
+           "root": "/mnt/wsl/paddata/spike1"}
+    (tmp_path / "spike1-0.run").write_text(json.dumps(rec), encoding="utf-8")
+    assert s1.board_record("got_le", board=str(tmp_path)) == rec
+    assert s1.board_record("kiss_le", board=str(tmp_path)) is None
+    assert s1.board_record(None, board=str(tmp_path)) == rec
+    (tmp_path / "spike1-0.run").write_text(json.dumps(dict(rec, emu="spike2")), encoding="utf-8")
+    assert s1.board_record("got_le", board=str(tmp_path)) is None
+
+
+def test_rig_reads_its_files_from_the_records_work_dir(s1, monkeypatch):
+    monkeypatch.setattr(s1.sys, "platform", "win32")
+    rig = s1.Spike1Rig("got_le", record={"emu": "spike1", "game": "GOT_LE", "distro": "PAD-Runtime",
+                                         "root": "/mnt/wsl/paddata/spike1"})
+    assert rig.dump == r"\\wsl.localhost\PAD-Runtime\mnt\wsl\paddata\spike1"
+    assert rig.led_path().endswith("s1hw.state") and rig.sw_path().endswith("s1sw.input")
+    assert rig.ballfeed_off_path().endswith("s1ball.off")
+    assert rig.how == "rig board spike1-0 (GOT_LE)"
+
+
+def test_switch_ids_are_the_names_tables_slots(s1, tmp_path, monkeypatch):
+    names = {"1,11": "START BUTTON", "8,2": "L. FLIPPER BUTTON", "_trough_coils": [[1, 1]]}
+    (tmp_path / "s1switches.json").write_text(json.dumps(names), encoding="utf-8")
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.dump = str(tmp_path)
+    assert rig.switch_ids() == {(1, 11): 75, (8, 2): 514}
+    rig.dump = str(tmp_path / "nowhere")
+    assert rig.switch_ids() == {}
+
+
+def test_pipe_rewrites_the_bitmap_and_lets_go_on_close(s1, tmp_path):
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.dump = str(tmp_path)
+    pipe = s1.Spike1Pipe(rig)
+    assert pipe.set(75, 1) and pipe.set(521, 1)
+    assert pipe.set(75, 1) is True                  # unchanged: nothing written again
+    buf = (tmp_path / "s1sw.input").read_bytes()
+    assert len(buf) == s1.INPUT_SIZE and struct.unpack_from("<I", buf, 0)[0] == s1.INPUT_MAGIC
+    bits = buf[s1.INPUT_HEADER.size:]
+    assert bits[75 >> 3] & (1 << (75 & 7)) and bits[521 >> 3] & (1 << (521 & 7))
+    pipe.set(75, 0)
+    bits = (tmp_path / "s1sw.input").read_bytes()[s1.INPUT_HEADER.size:]
+    assert not bits[75 >> 3] & (1 << (75 & 7)) and bits[521 >> 3] & (1 << (521 & 7))
+    pipe.close()
+    assert not any((tmp_path / "s1sw.input").read_bytes()[s1.INPUT_HEADER.size:])
+    assert pipe.held == {}
+    assert pipe.pause() is False                    # no pause on this rig
+
+
+def test_bridge_takes_the_spike1_rig_for_a_spike1_map():
+    pc = pytest.importorskip("padcontroller")
+    b = pc.Bridge()
+    b.set_game("got_le")
+    assert b.spike1 and b.max_id == 1024 and b._sol_number(9, 2) == 1578
+    assert b._rig_up(struct.pack("<4I", 0x53314857, 1, 0, 0) + bytes(5 * 1024))
+    assert not b._rig_up(b"\0" * 32)
+    b2 = pc.Bridge()
+    b2.set_game("rush_le")
+    assert not b2.spike1 and b2.max_id == 256 and b2._sol_number(8, 1) == 1129
+
+
+def test_spike1_poll_reports_lamps_coils_and_held_flippers(tmp_path):
+    pc = pytest.importorskip("padcontroller")
+    s1 = pytest.importorskip("s1bridge")
+    m = pytest.importorskip("pinball_decryptor.plugins.stern.spike1_emulate")
+    b = pc.Bridge()
+    b.set_game("got_le")
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.dump = str(tmp_path)
+    b.rig = rig
+    b.pipe = s1.Spike1Pipe(rig)
+    b.sw_ids = {(8, 3): 515, (1, 11): 75}
+    b._button_coils = {(8, 7): 3}                  # RIGHT FLIPPER POWER from R. FLIPPER BUTTON
+    st = m.HardwareState()
+    st.set_lamp(8, 20, 255)                         # li11, an RGB insert, mapped
+    st.set_lamp(9, 63, 200)                         # an unmapped channel
+    st.set_coil(9, 2, True)                         # TROUGH UP-KICKER
+    st.set_switch(1, 11, True)
+    (tmp_path / "s1hw.state").write_bytes(m.StateBlock.pack(st, seq=1))
+    b._poll_once()
+    lamps = dict(b.changed_lamps() or [])
+    assert lamps[pc.lamp_number(8, 20)] > 1 and lamps[pc.lamp_number(9, 63)] == 1   # the insert lit in its colour
+    sols = dict(b.changed_solenoids() or [])
+    assert sols[1] == 1                             # the map's number reaches core.vbs
+    assert b.sol_state[1578] == 1                   # the 1000+ one is kept (Solenoid(n) reads it)
+    assert sols[40] == 1                            # game_on: always armed here
+    assert sols.get(46, 0) == 0 and b.get_switch(1075)
+    b.pipe.set(515, 1)
+    b._poll_once()
+    sols = dict(b.changed_solenoids() or [])
+    assert sols[46] == 1 and b.sol_state[1519] == 1  # the held button holds the coil
+    assert b.polls == 2 and b.poll_fail == 0
+
+
+def test_launch_finds_a_spike1_card_in_the_sister_library(tmp_path, monkeypatch):
+    pl = pytest.importorskip("padlaunch")
+    lib2 = tmp_path / "spike2"
+    lib1 = tmp_path / "spike1"
+    lib2.mkdir()
+    lib1.mkdir()
+    (lib1 / "GOT_LE-1_37.iso").write_bytes(b"x")
+    (lib1 / "GOT_LE-1_36.iso").write_bytes(b"x")
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    monkeypatch.setattr(pl, "kit_load", lambda: {"library": str(lib2)})
+    assert pl.libraries("spike1") == [str(lib2), str(lib1)]
+    assert pl.card_for("got_le", "spike1") == str(lib1 / "GOT_LE-1_37.iso")
+    assert pl.card_for("got_le") is None            # a Spike 2 look finds no .iso
+    monkeypatch.setattr(pl, "kit_load", lambda: {"libraries": {"spike1": str(lib1)}})
+    assert pl.card_for("got_le", "spike1") == str(lib1 / "GOT_LE-1_37.iso")
+    assert isinstance(pl.launch_for("spike1", "got_le", "c.iso"), pl.Spike1Launch)
+    assert isinstance(pl.launch_for("spike2", "rush_le", "c.raw"), pl.Launch)
+
+
+def test_spike1_launch_refuses_another_titles_run(tmp_path, monkeypatch):
+    pl = pytest.importorskip("padlaunch")
+    s1 = pytest.importorskip("s1bridge")
+    monkeypatch.setattr(s1, "BOARD", str(tmp_path))
+    (tmp_path / "spike1-0.run").write_text(json.dumps({"emu": "spike1", "game": "KISS_LE", "label": "PAD", "pid": 1}),
+                                           encoding="utf-8")
+    launch = pl.Spike1Launch("got_le", "c.iso", dist="PAD-Runtime")
+    other = launch.other_run()
+    assert other and other["game"] == "KISS_LE"
+    monkeypatch.setattr(pl, "no_linux", lambda d: "")
+    with pytest.raises(RuntimeError, match="running KISS_LE"):
+        launch.start()
+    (tmp_path / "spike1-0.run").write_text(json.dumps({"emu": "spike1", "game": "GOT_LE", "label": "PAD", "pid": 1}),
+                                           encoding="utf-8")
+    assert launch.other_run() is None
+    assert launch.alive()                           # the board says the title's run is up
+
+
+def test_padvpx_knows_a_maps_platform():
+    pv = pytest.importorskip("padvpx")
+    assert pv.platform_of("got_le") == "spike1"
+    assert pv.platform_of("rush_le") == "spike2"
+    assert pv.maps()["got_le"]["platform"] == "spike1" and pv.maps()["got_le"]["listed"] is True

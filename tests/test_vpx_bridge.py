@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import struct
 import sys
 
@@ -1112,7 +1113,7 @@ def test_kit_recognises_each_supported_table(monkeypatch):
         def script(self):
             return self._s
 
-    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: None)
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t, platform="spike2": None)
     for title, words in (("rush_le", ["Rush LE ver 2.0.2 / PUP ver 2.0.0 - By DrHotWing"]),
                          ("foo_fighters_pro", ["'  JP's Foo Fighters - a tribute", "script by jpsalas - 2025"]),
                          ("godzilla_le", ["' Godzilla Limited Edition", 'ExecuteGlobal GetTextFile("SEGA.VBS")'])):
@@ -1137,7 +1138,7 @@ def test_jps_foo_fighters_plays_as_the_pro_unless_only_an_le_card_is_there(monke
     fits = [t for t, _ in pv.fitting("x.vpx")]
     assert fits == ["foo_fighters_pro", "foo_fighters_le"], "the preferred map first"
     cards = {}
-    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: cards.get(t))
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t, platform="spike2": cards.get(t))
     assert pv.recognise("x.vpx")[0] == "foo_fighters_pro"
     cards["foo_fighters_le"] = "D:/c/foo_fighters_le-1_04_0.Release.16G.sdcard.raw"
     assert pv.recognise("x.vpx")[0] == "foo_fighters_le", "only an LE card: the LE"
@@ -1203,7 +1204,7 @@ def test_the_bond_table_plays_as_the_pro(monkeypatch):
     monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
     assert [t for t, _ in pv.fitting("x.vpx")] == ["james_bond_pro", "james_bond_le"]
     cards = {}
-    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: cards.get(t))
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t, platform="spike2": cards.get(t))
     assert pv.recognise("x.vpx")[0] == "james_bond_pro"
     cards["james_bond_le"] = "D:/c/james_bond_le-1_06_0.Release.16G.sdcard.raw"
     assert pv.recognise("x.vpx")[0] == "james_bond_le", "only an LE card: the LE"
@@ -1229,7 +1230,7 @@ def test_the_john_wick_table_plays_as_the_pro(monkeypatch):
     monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
     assert [t for t, _ in pv.fitting("x.vpx")] == ["john_wick_pro", "john_wick_le"]
     cards = {}
-    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t: cards.get(t))
+    monkeypatch.setattr(pv.padlaunch, "card_for", lambda t, platform="spike2": cards.get(t))
     assert pv.recognise("x.vpx")[0] == "john_wick_pro"
     cards["john_wick_le"] = "D:/c/john_wick_le-1_02_0.Release.16G.sdcard.raw"
     assert pv.recognise("x.vpx")[0] == "john_wick_le", "only an LE card: the LE"
@@ -1238,6 +1239,9 @@ def test_the_john_wick_table_plays_as_the_pro(monkeypatch):
     rows = [r for r in vs.known_tables("") if "john_wick_pro" in r["titles"]]
     assert [(r["output"], sorted(r["titles"])) for r in rows] == \
         [("John_Wick_Legend (PAD).vpx", ["john_wick_le", "john_wick_pro"])]
+    # PAD-943: each row names its platform (the tab shows its manufacturer's own)
+    assert rows[0]["platform"] == "spike2"
+    assert [r for r in vs.known_tables("") if "got_le" in r["titles"]][0]["platform"] == "spike1"
 
 
 def test_the_john_wick_maps_split_at_the_les_mechs():
@@ -1632,6 +1636,18 @@ def test_setup_reads_the_card_folder(tmp_path):
     cards = vs.cards_in(str(lib))
     assert sorted(cards) == ["foo_fighters_le", "rush_le"] and len(cards["rush_le"]) == 2
     assert vs.cards_in(str(tmp_path / "missing")) == {}
+    # PAD-943: the Spike 1 .iso cards in the library's spike1 sibling count too
+    pl = pytest.importorskip("padlaunch")
+    s1 = tmp_path / "spike1"
+    s1.mkdir()
+    for n in ("GOT_LE-1_37.iso", "transformers_pin-1.0.18.iso", "kiss_le-1_41_0.iso", "readme.iso.txt"):
+        (s1 / n).write_bytes(b"x")
+    assert sorted(vs.cards_in(str(s1), "spike1")) == ["got_le", "kiss_le", "transformers_pin"]
+    assert vs.cards_in(str(s1)) == {}                                           # not Spike 2 cards
+    both = vs.all_cards(str(lib), {"library": str(lib)})
+    assert sorted(both) == ["foo_fighters_le", "got_le", "kiss_le", "rush_le", "transformers_pin"]
+    assert both["got_le"] == ["GOT_LE-1_37.iso"]
+    assert pl.libraries("spike1", {"library": str(lib)}) == [str(lib), str(s1)]
 
 
 def test_setup_names_each_known_table_and_what_is_patched(tmp_path, monkeypatch):
@@ -2100,6 +2116,45 @@ def test_a_registration_whose_folder_is_gone_is_not_registered(tmp_path):
     assert not vs.registration_ok(str(kit), str(tmp_path / "nopython.exe") + " x")
     assert not vs.registration_ok("", server)
     assert vs.controller_registered() in (True, False)                          # never raises
+
+
+def test_the_registration_is_known_to_be_this_kits_or_anothers(tmp_path, monkeypatch):
+    """PAD-943: David's Spike 1 tables stopped on "no Spike 2 run is up": the
+    registered PAD.Controller was an older checkout's. The state says whose
+    the registration is, and the page offers Register when it is another's."""
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    pd = pytest.importorskip("padisplay")
+    assert vs.registered_here(vs.HERE) and vs.registered_here(os.path.join(vs.HERE, "."))
+    assert not vs.registered_here(str(tmp_path)) and not vs.registered_here("")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pd, "CONF", str(tmp_path / "display.conf"))
+    monkeypatch.setattr(pd, "monitors", lambda: [{"n": 1, "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True}])
+    monkeypatch.setattr(vs, "vpx_tables_dir", lambda: "")
+    monkeypatch.setattr(vs, "controller_registration", lambda: (True, str(tmp_path)))
+    st = vs.state()
+    assert st["registered"] and st["registered_to"] == str(tmp_path) and st["registered_here"] is False
+    monkeypatch.setattr(vs, "controller_registration", lambda: (True, vs.HERE))
+    assert vs.state()["registered_here"] is True
+    monkeypatch.setattr(vs, "controller_registration", lambda: (False, ""))
+    st = vs.state()
+    assert not st["registered"] and not st["registered_here"] and st["registered_to"] == ""
+
+
+def test_the_places_a_card_is_looked_for_name_the_platforms_libraries(tmp_path, monkeypatch):
+    # PAD-943: the Spike 1 refusal named the Spike 2 library only
+    pl = pytest.importorskip("padlaunch")
+    lib = tmp_path / "Stern" / "spike2"
+    lib.mkdir(parents=True)
+    (tmp_path / "Stern" / "spike1").mkdir()
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    json.dump({"library": str(lib)}, open(pl.KIT, "w", encoding="utf-8"))
+    two = pl.card_places("got_le", "spike1")
+    assert str(lib) in two and str(tmp_path / "Stern" / "spike1") in two and "libraries" in two
+    one = pl.card_places("rush_le")
+    assert str(lib) in one and "spike1" not in one and "library " in one
 
 
 # ------------------------------------------------- the backglass (PAD-852) --
@@ -3508,3 +3563,89 @@ def test_a_started_run_shows_the_loading_window_until_the_game_is_up(monkeypatch
     said = open(status).read()
     assert said.startswith("failed The emulator stopped") and Launch.logfile in said
     assert b.launch is None
+
+
+def test_a_trough_of_fewer_switches_pads_init_sw(tmp_path, monkeypatch):
+    """PAD-943: Can Crusher's one-ball trough stopped the table on "Wrong
+    number of arguments: bsTrough.InitSw" - core.vbs's InitSw takes seven
+    switches (InitSw8 eight), so the call is padded with 0 like a lock lane's."""
+    sh = pytest.importorskip("vpxshadow")
+    assert sh.trough_init([643]) == "InitSw 0,1643,0,0,0,0,0,0"
+    assert sh.trough_init([71, 70, 69, 68, 67, 66, 72]) == "InitSw 0,1071,1070,1069,1068,1067,1066,1072"
+    assert sh.trough_init(list(range(10, 18))) == "InitSw8 0,1010,1011,1012,1013,1014,1015,1016,1017"
+    with pytest.raises(ValueError):
+        sh.trough_init(list(range(9)))
+
+
+def test_flexdmd_stands_in_as_a_null_object(tmp_path):
+    """PAD-943: VPW's Game of Thrones stops on "No FlexDMD found. This table
+    will not run without it." (a DMD library this PC lacks) and twenty of its
+    subs dereference FlexDMD unguarded. With `flexdmd_stub` the CreateObject
+    becomes a PadNoFlex: every member the script uses on FlexDMD or on what
+    it makes, assignments taken, methods giving back another PadNoFlex;
+    shorter calls padded to the stub's arity; a name both assigned and called
+    with arguments renamed at its assignments."""
+    sh = pytest.importorskip("vpxshadow")
+    lines = [
+        'Dim FlexDMD, scene, font, a',
+        'Set FlexDMD = CreateObject("FlexDMD.FlexDMD")',
+        'FlexDMD.RenderMode = 2 : FlexDMD.Run = True',
+        'Set font = FlexDMD.NewFont("f.fnt", vbWhite, vbWhite, 0)',
+        'Set scene = FlexDMD.NewGroup("s")',
+        'scene.AddActor FlexDMD.NewLabel("a", font, "t")',
+        'scene.AddActor FlexDMD.NewLabel("b", FlexDMD.NewFont("g.fnt", 1, 2, 3), "u")',
+        'Set a = FlexDMD.NewLabel("c", font)          \' two arguments: padded',
+        'FlexDMD.LockRenderThread',
+        'FlexDMD.Stage.AddActor scene',
+        'a.Text = "hi" : a.Visible = False',
+        'a.SetAlignedPosition 64, 16, 4',
+        'FlexDMD.Show = True',
+        'scene.GetLabel("a").Show 1',
+        'With FlexDMD',
+        '    .GameName = "got" : .Width = 128',
+        '    If x = 0 Then .Show = True Else .Show = False',
+        '    .Stage.AddActor scene',
+        '    .SetAlignedPosition ((1-1)*25)+14, 32, 7',
+        'End With',
+        'Do While FlexDMD.IsRendering : Loop',
+        'x = a.Text',
+    ]
+    rep = []
+    cls = sh.flexdmd_stub(lines, rep)
+    assert "New PadNoFlex   \' PAD: FlexDMD stands in" in lines[1]
+    assert lines[7].startswith('Set a = FlexDMD.NewLabel("c", font, 0)'), lines[7]       # padded to three
+    assert lines[12].startswith("FlexDMD.Show_set = True"), lines[12]                  # assigned AND called
+    assert "Public Function NewLabel(a0, a1, a2)" in cls and "Public Function NewFont(a0, a1, a2, a3)" in cls
+    assert "Public Property Let Text(v)" in cls and "Public Property Let Show_set(v)" in cls
+    assert "Public Function Show(a0)" in cls and "Public Function Stage()" in cls
+    assert "Public Property Let GameName(v)" in cls and "Public Property Let Width(v)" in cls   # the With block's
+    assert lines[16].strip() == "If x = 0 Then .Show_set = True Else .Show_set = False", lines[16]
+    assert lines[18].strip() == ".SetAlignedPosition ((1-1)*25)+14, 32, 7", lines[18]     # a bare call, untouched
+    assert "Public Function SetAlignedPosition(a0, a1, a2)" in cls
+    assert "Public Function IsRendering() : IsRendering = False" in cls          # a value read: False
+    assert "Public Function Stage() : Set Stage = New PadNoFlex" in cls          # chained: an object
+    assert any("1 padded call" in r for r in rep), rep
+    # the class and the script's uses run under VBScript itself
+    if sys.platform != "win32" or not shutil.which("cscript"):
+        pytest.skip("no cscript")
+    vbs = tmp_path / "flex.vbs"
+    vbs.write_text(cls + "\n" + "\n".join(lines[:-1]) + '\nx = a.Text\nWScript.Echo "ok"\n', encoding="utf-8")
+    out = subprocess.run(["cscript", "//Nologo", str(vbs)], capture_output=True, text=True, timeout=30)
+    assert out.stdout.strip() == "ok", out.stdout + out.stderr
+
+
+def test_ultradmd_stands_in_too():
+    """PAD-943: KISS stops on "ActiveX component can't create object:
+    'UltraDMD.DMDObject'": the same null object, its own class."""
+    sh = pytest.importorskip("vpxshadow")
+    lines = ['Set UltraDMD = CreateObject("UltraDMD.DMDObject")', 'UltraDMD.Init', 'UltraDMD.SetProjectFolder ".\\x"',
+             'Do While UltraDMD.IsRendering : Loop', 'UltraDMD.DisplayScene "a", "b", 0, 1, 2, 3, 4, 5, 6, 7',
+             'If Not UltraDMD.GetMajorVersion = 1 Then MsgBox "Incompatible" : End If',
+             'If UltraDMD.GetMinorVersion < 3 Then MsgBox "Incompatible" : End If']
+    rep = []
+    cls = sh.flexdmd_stub(lines, rep, "UltraDMD.DMDObject", "PadNoUltra", "UltraDMD")
+    assert "New PadNoUltra   \' PAD: UltraDMD stands in" in lines[0]
+    assert "Class PadNoUltra" in cls and "Public Function IsRendering() : IsRendering = False" in cls
+    assert "Public Function DisplayScene(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9)" in cls
+    assert "GetMajorVersion() : GetMajorVersion = 1" in cls and "GetMinorVersion() : GetMinorVersion = 9" in cls
+    assert sh.flexdmd_stub(["x = 1"], [], "UltraDMD.DMDObject", "PadNoUltra", "UltraDMD") == ""

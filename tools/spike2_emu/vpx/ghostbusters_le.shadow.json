@@ -1,0 +1,491 @@
+{
+ "_": [
+  "Ghostbusters LE on the SPIKE 1 rig (PAD-943): JP's 'Ghostbusters Slimer' v602 (VPForums file 12488), JP's own",
+  "layout loosely on Stern's.",
+  "platform: spike1 puts PAD.Controller on tools/spike1_emu's run (s1bridge.py): switches are 1000 + node*64 + index",
+  "(the rig's s1switches.json numbering), coils 1000 + node*64 + index.",
+  "The switches go to the game's by place and meaning (GUESS where a game on the table should confirm): the six",
+  "lanes, the pop lane, the loops, the bumpers, the scoops as saucers on the game's eject and subway coils, the",
+  "storage facility lock on LOCK #1-3 and its post, the Scoleri brothers as the two 1-bank drops with their up and",
+  "down coils. JP's lights (l1..l77) are his own and are not mapped: the table's own light shows stay."
+ ],
+ "platform": "spike1",
+ "title": "ghostbusters_le",
+ "detect": [
+  "jp_ghostbusters"
+ ],
+ "output": "JP's Ghostbusters Slimer v602 (PAD).vpx",
+ "b2s_name": "jp_ghostbusters",
+ "table": {
+  "name": "JP's Ghostbusters Slimer v602",
+  "by": "JP Salas",
+  "where": "VPForums"
+ },
+ "solenoid_max": 68,
+ "game_on": {
+  "number": 40,
+  "coils": [
+   [
+    8,
+    6
+   ],
+   [
+    8,
+    7
+   ]
+  ]
+ },
+ "cabinet": {
+  "_": "1000 + node*64 + index from the rig's switchmaps/ghostbusters_le.json",
+  "start": 1075,
+  "tournament_start": 1076,
+  "left_flipper": 1537,
+  "right_flipper": 1536,
+  "tilt": 1078,
+  "coin": 1080,
+  "slam": 1085
+ },
+ "keys_skip_orig": [
+  "StartGameKey",
+  "AddCreditKey",
+  "AddCreditKey2"
+ ],
+ "switches": {
+  "_": "object -> Spike 1 switch id (node * 64 + index, the rig's s1switches.json); event hit (pulse), spin, slingshot. JP's table is its own layout: the game's switches are given by place and meaning, GUESS where a game on the table should confirm. The right outlane, the right orbit and the right ramp's exit are not in the rig's switch map yet.",
+  "sw1": {
+   "id": 529,
+   "event": "hit",
+   "name": "LEFT OUTLANE"
+  },
+  "sw2": {
+   "id": 530,
+   "event": "hit",
+   "name": "LEFT RETURN LANE (L)"
+  },
+  "sw3": {
+   "id": 533,
+   "event": "hit",
+   "name": "LEFT RETURN LANE (R)"
+  },
+  "sw4": {
+   "id": 534,
+   "event": "hit",
+   "name": "RIGHT RETURN LANE (L)"
+  },
+  "sw5": {
+   "id": 531,
+   "event": "hit",
+   "name": "RIGHT RETURN LANE (R)"
+  },
+  "sw7": {
+   "id": 592,
+   "event": "hit",
+   "name": "POP BUMPER LANE"
+  },
+  "sw12": {
+   "id": 595,
+   "event": "hit",
+   "name": "LEFT ORBIT"
+  },
+  "sw13": {
+   "id": 644,
+   "event": "hit",
+   "name": "ECTO GOGGLES"
+  },
+  "sw8": {
+   "id": 596,
+   "event": "hit",
+   "name": "(P)KE",
+   "note": "GUESS: JP's three top lanes stand for the P-K-E targets"
+  },
+  "sw9": {
+   "id": 597,
+   "event": "hit",
+   "name": "P(K)E",
+   "note": "GUESS"
+  },
+  "sw10": {
+   "id": 598,
+   "event": "hit",
+   "name": "PK(E)",
+   "note": "GUESS"
+  },
+  "Spinner": {
+   "id": 593,
+   "event": "spin",
+   "name": "SPINNER"
+  },
+  "Bumper1": {
+   "id": 605,
+   "event": "hit",
+   "name": "LEFT BUMPER"
+  },
+  "Bumper2": {
+   "id": 541,
+   "event": "hit",
+   "name": "RIGHT BUMPER"
+  },
+  "Bumper3": {
+   "id": 542,
+   "event": "hit",
+   "name": "BOTTOM BUMPER"
+  },
+  "LeftSlingShot": {
+   "id": 607,
+   "event": "slingshot",
+   "name": "LEFT SLINGSHOT"
+  },
+  "RightSlingShot": {
+   "id": 606,
+   "event": "slingshot",
+   "name": "RIGHT SLINGSHOT"
+  },
+  "LScoleriTarget": {
+   "id": 576,
+   "event": "hit",
+   "name": "DROP TARGET (L.)"
+  },
+  "RScoleriTarget": {
+   "id": 577,
+   "event": "hit",
+   "name": "DROP TARGET (R.)"
+  },
+  "Target7": {
+   "id": 603,
+   "event": "hit",
+   "name": "GOZER TARGET",
+   "note": "GUESS: the target at the top"
+  },
+  "Target4": {
+   "id": 535,
+   "event": "hit",
+   "name": "L. 3-BANK #3 (TOP)",
+   "note": "GUESS: JP's three mid targets as the left 3-bank"
+  },
+  "Target5": {
+   "id": 539,
+   "event": "hit",
+   "name": "LEFT 3-BANK #2",
+   "note": "GUESS"
+  },
+  "Target6": {
+   "id": 538,
+   "event": "hit",
+   "name": "L. 3-BANK #1 (BOT)",
+   "note": "GUESS"
+  },
+  "Target10": {
+   "id": 526,
+   "event": "hit",
+   "name": "TERROR DOG TARGET",
+   "note": "GUESS: the far-left target"
+  },
+  "Target9": {
+   "id": 588,
+   "event": "hit",
+   "name": "GHOST TARGET",
+   "note": "GUESS"
+  },
+  "Target8": {
+   "id": 591,
+   "event": "hit",
+   "name": "LIGHT LOCK TARGET-R",
+   "note": "GUESS: the right-side target"
+  },
+  "Target3": {
+   "id": 590,
+   "event": "hit",
+   "name": "LIGHT LOCK TARGET-L",
+   "note": "GUESS: the left-side column's top target"
+  },
+  "LeftRampDone": {
+   "id": 524,
+   "event": "hit",
+   "name": "LEFT RAMP EXIT"
+  },
+  "CapTrigger1": {
+   "id": 589,
+   "event": "hit",
+   "name": "CAPTIVE BALL",
+   "note": "GUESS: the right captive ball"
+  },
+  "SlimerTrigger1": {
+   "id": 512,
+   "event": "hit",
+   "name": "SLIMER HIT",
+   "note": "GUESS: a hit on Slimer where the table's ghost hangs"
+  }
+ },
+ "plunger": {
+  "lane_trigger": "swPlungerRest",
+  "lane_switch": 540,
+  "autoplunge": "plungerIM"
+ },
+ "trough": {
+  "_": "TROUGH #1 (R), nearest the up-kicker, first; the jam opto last",
+  "release": "BallRelease",
+  "drain": "Drain",
+  "switches": [
+   549,
+   548,
+   547,
+   546,
+   545,
+   544,
+   550
+  ],
+  "balls": 6,
+  "kick": [
+   90,
+   4
+  ]
+ },
+ "saucers": {
+  "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power[, kickz]); stack = the lock switches behind",
+  "LeftScoop": {
+   "switch": 525,
+   "dir": 150,
+   "power": 25,
+   "name": "LEFT EJECT"
+  },
+  "RightScoop": {
+   "switch": 645,
+   "stack": [
+    646,
+    647
+   ],
+   "dir": 226,
+   "power": 16,
+   "name": "GUESS: the subway (SUBWAY LOCK 1-3 behind, the SUBWAY coil)"
+  },
+  "StorageLock": {
+   "switch": 600,
+   "stack": [
+    601,
+    602
+   ],
+   "dir": 0,
+   "power": 30,
+   "kickz": 1.56,
+   "name": "GUESS: the storage facility lock (LOCK #1-3, let out by LOCK POST)"
+  }
+ },
+ "solenoids": {
+  "_": "Spike 1 coil [node, index] -> the small number the table sees (core.vbs flippers 46/48); callback a sub of the table's or the bridge's (null = nothing fires). Names are the game's own (s1elf --coils).",
+  "1": {
+   "coil": [
+    8,
+    1
+   ],
+   "name": "TROUGH UP-KICKER",
+   "callback": "bsTrough.SolOut"
+  },
+  "2": {
+   "coil": [
+    8,
+    4
+   ],
+   "name": "AUTO LAUNCH",
+   "callback": "PadAutoPlunge"
+  },
+  "3": {
+   "coil": [
+    8,
+    8
+   ],
+   "name": "LEFT EJECT",
+   "callback": "bsLeftScoop.SolOut"
+  },
+  "4": {
+   "coil": [
+    9,
+    2
+   ],
+   "name": "SUBWAY",
+   "callback": "bsRightScoop.SolOut"
+  },
+  "5": {
+   "coil": [
+    9,
+    1
+   ],
+   "name": "LOCK POST",
+   "callback": "bsStorageLock.SolOut"
+  },
+  "6": {
+   "coil": [
+    8,
+    0
+   ],
+   "name": "LEFT 1BANK DROP TARGET UP",
+   "callback": "PadLScoleriUp"
+  },
+  "7": {
+   "coil": [
+    9,
+    6
+   ],
+   "name": "LEFT 1BANK DROP TARGET DOWN",
+   "callback": "PadLScoleriDown"
+  },
+  "8": {
+   "coil": [
+    10,
+    0
+   ],
+   "name": "RIGHT 1BANK DROP TARGET UP",
+   "callback": "PadRScoleriUp"
+  },
+  "9": {
+   "coil": [
+    10,
+    1
+   ],
+   "name": "RIGHT 1BANK DROP TARGET DOWN",
+   "callback": "PadRScoleriDown"
+  },
+  "10": {
+   "coil": [
+    8,
+    5
+   ],
+   "name": "LEFT 4-BANK DROP RESET",
+   "callback": null
+  },
+  "11": {
+   "coil": [
+    9,
+    7
+   ],
+   "name": "ELECTRIC GATE",
+   "callback": null
+  },
+  "12": {
+   "coil": [
+    1,
+    0
+   ],
+   "name": "ORBIT UP/DOWN POST",
+   "callback": null
+  },
+  "13": {
+   "coil": [
+    9,
+    4
+   ],
+   "name": "SUBWAY DIVERTER",
+   "callback": null
+  },
+  "14": {
+   "coil": [
+    9,
+    5
+   ],
+   "name": "PKE METER",
+   "callback": null
+  },
+  "15": {
+   "coil": [
+    9,
+    8
+   ],
+   "name": "STAY PUFT",
+   "callback": null
+  },
+  "16": {
+   "coil": [
+    8,
+    2
+   ],
+   "name": "RIGHT POP BUMPER",
+   "callback": null
+  },
+  "17": {
+   "coil": [
+    9,
+    0
+   ],
+   "name": "BOTTOM POP BUMPER",
+   "callback": null
+  },
+  "18": {
+   "coil": [
+    8,
+    3
+   ],
+   "name": "RIGHT SLINGSHOT",
+   "callback": null
+  },
+  "46": {
+   "coil": [
+    8,
+    7
+   ],
+   "name": "RIGHT FLIPPER",
+   "callback": null
+  },
+  "48": {
+   "coil": [
+    8,
+    6
+   ],
+   "name": "LEFT FLIPPER",
+   "callback": null
+  }
+ },
+ "pup_stub": true,
+ "neuter": [
+  "BallRelease.CreateSizedball",
+  "BallRelease.Kick",
+  "PlungerIM.AutoFire"
+ ],
+ "extra_vbs": "Sub PadLScoleriUp(e) : If e Then LScoleriTarget.IsDropped = 0 : End If : End Sub\nSub PadLScoleriDown(e) : If e Then LScoleriTarget.IsDropped = 1 : End If : End Sub\nSub PadRScoleriUp(e) : If e Then RScoleriTarget.IsDropped = 0 : End If : End Sub\nSub PadRScoleriDown(e) : If e Then RScoleriTarget.IsDropped = 1 : End If : End Sub\n",
+ "retrofit_timers": {
+  "PinMAMETimer": {
+   "clone": "PulseTimer",
+   "interval_ms": 1
+  },
+  "PadTestTimer": {
+   "clone": "PulseTimer",
+   "interval_ms": 100
+  }
+ },
+ "lamps": {
+  "_": "not mapped: JP's own lights (l1..l77) carry no numbering of the game's"
+ },
+ "quiet_subs": [],
+ "orig_hits": false,
+ "orig_keep": [
+  "sw1",
+  "sw2",
+  "sw3",
+  "sw4",
+  "sw5",
+  "sw7",
+  "sw12",
+  "sw13",
+  "sw8",
+  "sw9",
+  "sw10",
+  "Spinner",
+  "Bumper1",
+  "Bumper2",
+  "Bumper3",
+  "LeftSlingShot",
+  "RightSlingShot",
+  "LScoleriTarget",
+  "RScoleriTarget",
+  "Target7",
+  "Target4",
+  "Target5",
+  "Target6",
+  "Target10",
+  "Target9",
+  "Target8",
+  "Target3",
+  "LeftRampDone",
+  "CapTrigger1",
+  "SlimerTrigger1"
+ ],
+ "listed": true
+}

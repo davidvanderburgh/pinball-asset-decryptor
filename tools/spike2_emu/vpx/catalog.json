@@ -1,0 +1,478 @@
+{
+  "_": [
+    "Visual Pinball tables of the modern games PAD reads, by platform (PAD-943, surveyed 2026-11-02). Stern SAM and the",
+    "WPC remakes are not here: Visual PinMAME runs those games from their own ROM sets already (David: no reinventing",
+    "the wheel; Spike 1, Spike 2 and the other modern machines are the point).",
+    "PAD ships no table: each entry says where its author put it. `kind`: tribute = a scripted original with its own",
+    "VBScript rules (what vpxshadow.py bridges to the real game); mashup = an older game's ROM under the playfield",
+    "(what a .vpxmap.json patcher bridges). `faithful`: the table is the machine's own layout, so the real game's",
+    "switches and inserts fit it; a themed tribute of the film or band is not. `map`: the kit's map for it, when there",
+    "is one. VPUniverse and VPForums downloads take a free account.",
+    "`needs`: what playing the real game would take on this PC however a bridge is built (JJP: the machine's own security key)."
+  ],
+  "platforms": {
+    "spike2": {
+      "name": "Stern Spike 2",
+      "runs": "PAD's own emulator behind the table (PAD.Controller)",
+      "bridge": "pad"
+    },
+    "spike1": {
+      "name": "Stern Spike 1",
+      "runs": "PAD's own emulator behind the table (PAD.Controller)",
+      "bridge": "pad"
+    },
+    "jjp": {
+      "name": "Jersey Jack",
+      "runs": "no emulator behind a table yet: the tribute's own script plays",
+      "bridge": "none",
+      "needs": "The real game runs only with the machine's own security key: the purple USB dongle (Sentinel HL), one per title, plugged into this PC. Without it the game stops at 'Sentinel key not found (H0007)', so no table could ever play the real game without the key."
+    },
+    "ap": {
+      "name": "American Pinball",
+      "runs": "no emulator behind a table yet: the tribute's own script plays",
+      "bridge": "none"
+    },
+    "cgc": {
+      "name": "Chicago Gaming",
+      "runs": "no emulator behind a table yet: the tribute's own script plays (the WPC remakes run their Williams ROMs in Visual PinMAME)",
+      "bridge": "none"
+    },
+    "dp": {
+      "name": "Dutch Pinball",
+      "runs": "no emulator behind a table yet: the tribute's own script plays",
+      "bridge": "none"
+    },
+    "spooky": {
+      "name": "Spooky",
+      "runs": "no emulator behind a table yet: the tribute's own script plays",
+      "bridge": "none"
+    },
+    "bof": {
+      "name": "Barrels of Fun",
+      "runs": "no emulator behind a table yet: the tribute's own script plays",
+      "bridge": "none"
+    },
+    "pb": {
+      "name": "Pinball Brothers",
+      "runs": "no emulator behind a table yet: the tribute's own script plays",
+      "bridge": "none"
+    },
+    "turner": {
+      "name": "Turner Pinball",
+      "runs": "no table exists",
+      "bridge": "none"
+    },
+    "multimorphic": {
+      "name": "Multimorphic",
+      "runs": "no table exists",
+      "bridge": "none"
+    }
+  },
+  "tables": [
+    {
+      "platform": "spike1",
+      "game": "Game of Thrones",
+      "title": "got_le",
+      "name": "Game of Thrones LE (Stern 2015) VPW",
+      "by": "VPinWorkshop",
+      "version": "1.2.1",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/12510-game-of-thrones-le-stern-2015-vpw/",
+      "kind": "tribute",
+      "faithful": true,
+      "map": "got_le (switches and inserts still to fit)",
+      "notes": "Visual Pinball 10.8, FlexDMD 1.9.1 or newer; backglass separate."
+    },
+    {
+      "platform": "spike1",
+      "game": "KISS",
+      "title": "kiss_le",
+      "name": "KISS (Stern 2015)",
+      "by": "masonm (from allknowing2012, jpsalas, balutito, hauntfreaks)",
+      "version": "2.0",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/29259-kiss-stern-2015/",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "UltraDMD; backglass separate (file 4321)."
+    },
+    {
+      "platform": "spike1",
+      "game": "WWE WrestleMania",
+      "title": "wwe_le",
+      "name": "WWE Wrestlemania LE (Legends of Wrestlemania)",
+      "by": "ryguy417 (on roccodimarco's Tag Team)",
+      "version": "1.1",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/15918-wwe-wrestlemania-le-legends-of-wrestlemania-ryguy417-2023/",
+      "kind": "mashup",
+      "faithful": false,
+      "notes": "Gottlieb Tag Team (1985) ROM under a reskin: no mini-ring upper playfield."
+    },
+    {
+      "platform": "spike1",
+      "game": "Whoa Nellie! Big Juicy Melons",
+      "title": "wn",
+      "name": "Whoa Nellie! Big Juicy Melons (Stern 2015)",
+      "by": "HauntFreaks (script allknowing2012)",
+      "version": "2.1.4",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/6341-whoa-nellie-big-juicy-melons-stern-2015/",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "Backglass separate (file 24041); MachWon's MW Mod 2.5.1 is a patch of it (file 24043)."
+    },
+    {
+      "platform": "spike1",
+      "game": "Ghostbusters",
+      "title": "ghostbusters_le",
+      "name": "JP's Ghostbusters Slimer",
+      "by": "JP Salas",
+      "version": "VPX8 update",
+      "where": "VPForums",
+      "url": "https://www.vpforums.org/index.php?app=downloads&showfile=12488",
+      "kind": "tribute",
+      "faithful": false,
+      "notes": "An original on Stern's layout, loosely. The 'Ghostbusters LE (Stern 2016)' by ninuzzu, Tom Tower and DJRobX was withdrawn from VPForums."
+    },
+    {
+      "platform": "spike1",
+      "game": "Primus",
+      "title": "primus",
+      "name": "Primus (Stern 2018)",
+      "by": "Drummer72, Thalamus",
+      "version": "1.1",
+      "where": "VPForums",
+      "url": "https://www.vpforums.org/index.php?app=downloads&showfile=14890",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "Whoa Nellie's code base; backglass in the download; needs its music files. MachWon's MW Mod 1.3 on VPUniverse (file 23528)."
+    },
+    {
+      "platform": "spike1",
+      "game": "Pabst Can Crusher",
+      "title": "can_crusher",
+      "name": "Pabst Can Crusher (Stern 2016)",
+      "by": "Drummer72, HauntFreaks",
+      "version": "1.0",
+      "where": "VPForums",
+      "url": "https://www.vpforums.org/index.php?app=downloads&showfile=15439",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "Needs its music files; backglass separate (VPUniverse file 23810). MachWon's MW Mod 1.31 on VPUniverse (file 21020)."
+    },
+    {
+      "platform": "spike1",
+      "game": "Transformers The Pin",
+      "title": "transformers_pin",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "No table of the 2012 home game: every 'Transformers' table is the 2011 full-size machine."
+    },
+    {
+      "platform": "jjp",
+      "game": "Willy Wonka",
+      "name": "Willy Wonka Pro LE",
+      "by": "marty02",
+      "version": "3.5",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/21563-willy-wonka-pro-le/",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "Animated backglass separate (file 10765)."
+    },
+    {
+      "platform": "jjp",
+      "game": "The Godfather",
+      "name": "Godfather",
+      "by": "marty02",
+      "version": "2.2",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/19352-godfather/",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "Own rules (19 missions); video backglass separate (file 19398)."
+    },
+    {
+      "platform": "jjp",
+      "game": "Wizard of Oz",
+      "name": "WoZ (Original 2019) Yellow Brick Road LE MOD",
+      "by": "MachWon (from ckpin)",
+      "version": "2024",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/22851-woz-original-2019-yellow-brick-road-le-mod/",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": ""
+    },
+    {
+      "platform": "jjp",
+      "game": "Guns N' Roses",
+      "name": "GUNS EDITION LIMITED",
+      "by": "not named on the page",
+      "version": "2021",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/7254-guns-edition-limited/",
+      "kind": "mashup",
+      "faithful": false,
+      "notes": "JJP's look over Data East's 1994 game and ROM."
+    },
+    {
+      "platform": "jjp",
+      "game": "Elton John, Harry Potter, Pirates of the Caribbean, Toy Story 4, The Hobbit, Dialed In",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "No table: the community does not recreate machines still on sale, and the IP tributes that exist (Scottywic's Harry Potter, the 2005 Sonic) predate the machines."
+    },
+    {
+      "platform": "ap",
+      "game": "Houdini",
+      "name": "Great Houdini",
+      "by": "marty02",
+      "version": "2.4",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/12456-great-houdini/",
+      "kind": "tribute",
+      "faithful": false,
+      "notes": "A Houdini of its own, not American Pinball's layout."
+    },
+    {
+      "platform": "ap",
+      "game": "Hot Wheels",
+      "name": "hot wheels DT",
+      "by": "fastdraw",
+      "version": "0.84 (unfinished)",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/8584-hot-wheels-dt/",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "A desktop work in progress of the layout, basic rules, no backglass."
+    },
+    {
+      "platform": "ap",
+      "game": "Legends of Valhalla",
+      "name": "Legends of Valhalla (RyGuy417 2023) Tribute",
+      "by": "RyGuy417",
+      "version": "1.0.0",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/13998-legends-of-valhalla-ryguy417-2023-tribute/",
+      "kind": "tribute",
+      "faithful": false,
+      "notes": "'Not a full recreation'; PuP pack from the real machine's video."
+    },
+    {
+      "platform": "ap",
+      "game": "Oktoberfest, Galactic Tank Force, Barry O's Barbecue Challenge",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "No table (Oktoberfest has a Future Pinball one only)."
+    },
+    {
+      "platform": "cgc",
+      "game": "Pulp Fiction",
+      "name": "Pulp Fiction",
+      "by": "marty02",
+      "version": "3.1",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/14616-pulp-fiction/",
+      "kind": "tribute",
+      "faithful": false,
+      "notes": "A film tribute with rules of its own, not Chicago Gaming's layout."
+    },
+    {
+      "platform": "dp",
+      "game": "The Big Lebowski",
+      "name": "Big lebowski",
+      "by": "marty02",
+      "version": "3.6",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/23627-big-lebowski/",
+      "kind": "tribute",
+      "faithful": false,
+      "notes": "Rules of its own on the theme; backglass and media in the download."
+    },
+    {
+      "platform": "dp",
+      "game": "Bride of Pinbot 2.0, Alice in Wonderland",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "No table of the Dutch Pinball games (the Williams 1991 Bride of Pinbot runs its own ROM: VPW mod, file 12029)."
+    },
+    {
+      "platform": "spooky",
+      "game": "America's Most Haunted",
+      "name": "America's Most Haunted (nfozzy)",
+      "by": "LoadedWeapon (from freneticamnesic, Shoopity, Dozer316)",
+      "version": "1.0.1",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/27073-americas-most-haunted-nfozzy/",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "Backglass separate (file 10686)."
+    },
+    {
+      "platform": "spooky",
+      "game": "Total Nuclear Annihilation",
+      "name": "Total Nuclear Annihilation (Spooky 2017) VPW",
+      "by": "VPinWorkshop (from JPSalas)",
+      "version": "2.3",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/14359-total-nuclear-annihilation-spooky-2017-vpw/",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "Backglass in the download; the game's own DMD media and sounds with Scott Danesi's blessing."
+    },
+    {
+      "platform": "spooky",
+      "game": "Alice Cooper's Nightmare Castle",
+      "name": "Alice Cooper's Nightmare Castle (Spooky Pinball 2017) WIP",
+      "by": "Helshaks (from Ling Woo)",
+      "version": "1.0.2",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/30571-alice-coopers-nightmare-castle-spooky-pinball-2017-wip/",
+      "kind": "tribute",
+      "faithful": true,
+      "notes": "Unfinished: no modes yet; backglass separate (file 5920)."
+    },
+    {
+      "platform": "spooky",
+      "game": "Halloween",
+      "name": "Halloween MM Edition",
+      "by": "marty02 (from Onevox, bord; script JPSalas)",
+      "version": "3.1",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/16526-halloween-mm-edition/",
+      "kind": "tribute",
+      "faithful": false,
+      "notes": "'Inspired by' Spooky's; rules of its own."
+    },
+    {
+      "platform": "spooky",
+      "game": "Rick and Morty, Looney Tunes, Scooby-Doo, Evil Dead, The Jetsons",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "Themed tributes and reskins only (Rick and Morty: VPUniverse file 10602; Looney Tunes: file 9889; Scooby Doo 2022: VPForums file 16631), none the machine's layout."
+    },
+    {
+      "platform": "spooky",
+      "game": "Domino's, Ultraman, Texas Chainsaw Massacre",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "No table."
+    },
+    {
+      "platform": "bof",
+      "game": "Dune",
+      "name": "DUNE",
+      "by": "ZandysArcade (script JP Salas)",
+      "version": "1.4.0",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/19580-dune/",
+      "kind": "tribute",
+      "faithful": false,
+      "notes": "An original on the films, released before Barrels of Fun's game; backglass in the download."
+    },
+    {
+      "platform": "bof",
+      "game": "Labyrinth",
+      "name": "The Labyrinth",
+      "by": "ZandysArcade (on JPSalas' Skateball)",
+      "version": "3.0",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/15100-the-labyrinth/",
+      "kind": "mashup",
+      "faithful": false,
+      "notes": "Bally Skateball's ROM under a film theme; not the machine's layout."
+    },
+    {
+      "platform": "bof",
+      "game": "Winchester Mystery House, Bon Jovi",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "No table; the designer asked for none."
+    },
+    {
+      "platform": "pb",
+      "game": "Queen",
+      "name": "Queen show must go on",
+      "by": "marty02 (on allknowing's Kiss)",
+      "version": "3.5",
+      "where": "VPUniverse",
+      "url": "https://vpuniverse.com/files/file/11583-queen-show-must-go-on/",
+      "kind": "tribute",
+      "faithful": false,
+      "notes": "Made before the machine, rules of its own; backglass and UltraDMD in the download."
+    },
+    {
+      "platform": "pb",
+      "game": "Alien, Predator",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "Film reskins of older ROM games only (Aliens 3.0 on Sorcerer, file 19644; Predator on Raven, file 28543)."
+    },
+    {
+      "platform": "turner",
+      "game": "Merlin's Arcade, Ninja Eclipse",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "No table."
+    },
+    {
+      "platform": "multimorphic",
+      "game": "Lexy Lightspeed, Cosmic Cart Racing, Weird Al's, Final Resistance, Heist, Drained",
+      "name": "",
+      "by": "",
+      "version": "",
+      "where": "",
+      "url": "",
+      "kind": "",
+      "faithful": false,
+      "notes": "No table of any P3 game."
+    }
+  ]
+}

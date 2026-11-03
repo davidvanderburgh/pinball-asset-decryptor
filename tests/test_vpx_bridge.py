@@ -2024,6 +2024,21 @@ def test_tmnt_lists_only_the_pro():
     assert pv.maps()["turtles_le"]["listed"] is False and pv.maps()["turtles_pro"]["listed"]
 
 
+def test_every_table_row_links_its_download():
+    # PAD-961: David, "I need to find Godzilla Limited Edition v2.6 and I don't
+    # have the link": a row carries the page its author put the download on,
+    # the map's own or (a Spike 1 or Spooky title) the catalogue's
+    vs = pytest.importorskip("vpxsetup")
+    rows = {r["title"]: r for r in vs.known_tables("")}
+    assert rows["godzilla_le"]["url"] == "https://vpuniverse.com/files/file/8449-godzilla-limited-edition/"
+    assert rows["got_le"]["url"] == "https://vpuniverse.com/files/file/12510-game-of-thrones-le-stern-2015-vpw/"
+    assert "showfile=15967" in rows["deadpool_pro"]["url"]
+    for r in rows.values():
+        assert r["url"] == "" or re.match(r"https://(vpuniverse\.com/files/file/\d+-|www\.vpforums\.org/index\.php\?app=downloads&showfile=\d+$)", r["url"]), r
+    # the ones no page could be found for say so by having none
+    assert sorted(t for t, r in rows.items() if not r["url"]) == ["aerosmith", "beatles", "star_wars_pro"]
+
+
 def test_jurassic_park_table_is_dropped(tmp_path, monkeypatch):
     # PAD-860: marty's "Jurassic Park Limited Edition" is not the real JP's
     # playfield; the kit recognises nothing in it, and a copy an earlier

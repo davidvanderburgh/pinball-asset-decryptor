@@ -21,7 +21,7 @@
     "Daphishbowl and Mr H."
   ],
   "output": "Batman 66 1.1.0 (PAD).vpx",
-  "table": {"name": "Batman 66 1.1.0", "by": "Daphishbowl and Mr H.", "where": "VPUniverse"},
+  "table": {"name": "Batman 66 1.1.0", "by": "Daphishbowl and Mr H.", "where": "VPUniverse", "url": "https://vpuniverse.com/files/file/6868-batman-66-stern-tribute/"},
   "solenoid_max": 68,
   "switch_rewrite": {"_": "the table's own low numbers -> Spike 2 ids: core.vbs's vpmNudge.TiltSwitch 14 is the tilt bob", "14": 38},
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},

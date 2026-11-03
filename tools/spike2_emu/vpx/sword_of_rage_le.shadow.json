@@ -20,7 +20,7 @@
   "preferred": true,
   "detect": ["Meakin68", "cGameName = \"bksor\""],
   "output": "Black Knight Sword Of Rage LE (Stern 2019) (PAD).vpx",
-  "table": {"name": "Black Knight Sword Of Rage LE (Stern 2019)", "by": "Vinch52, reworked by Meakin68", "where": "VPUniverse"},
+  "table": {"name": "Black Knight Sword Of Rage LE (Stern 2019)", "by": "Vinch52, reworked by Meakin68", "where": "VPUniverse", "url": "https://vpuniverse.com/files/file/32118-black-knight-sword-of-rage-stern-2019/"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
   "cabinet": {"start": 1036, "launch": 1034, "launch_key": "RightMagnaSave", "tilt": 1038, "slam": 1045, "left_flipper": 1061, "right_flipper": 1060, "up_right_flipper": 1062, "coin": 1039, "coin_door_interlock": 1033},

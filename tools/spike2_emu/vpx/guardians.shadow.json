@@ -28,7 +28,7 @@
     "gotg_2020"
   ],
   "output": "GOTG_2.1.1 (PAD).vpx",
-  "table": {"name": "Guardians of the Galaxy 2.1.1", "by": "Pincredibles", "where": "VPUniverse"},
+  "table": {"name": "Guardians of the Galaxy 2.1.1", "by": "Pincredibles", "where": "VPUniverse", "url": "https://vpuniverse.com/files/file/6127-guardians-of-the-galaxy/"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
   "cabinet": {"start": 1036, "launch": 1034, "launch_key": "LockBarKey", "tilt": 1038, "slam": 1045, "left_flipper": 1058, "right_flipper": 1057, "coin": 1039, "coin_door_interlock": 1033},

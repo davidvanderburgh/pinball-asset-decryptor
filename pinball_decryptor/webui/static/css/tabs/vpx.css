@@ -45,6 +45,9 @@
 .vpx-nopic { display: block; width: 19px; height: 40px; border: 1px dashed var(--line-2); border-radius: 3px; opacity: .7; }
 .vpx-pics-busy { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .vpx-table.unpatched > .vpx-name { color: var(--ink-3); font-weight: 500; }
+/* PAD-961: From links to the author's download page */
+.vpx-from a { color: var(--accent); text-decoration: none; }
+.vpx-from a:hover { text-decoration: underline; }
 .vpx-stale { grid-column: 2 / -1; padding: 0 0 4px; white-space: normal; }
 /* PAD-941: the card for table authors, above the tables (David: visibility) */
 .vpx-authors { margin-bottom: 12px; }

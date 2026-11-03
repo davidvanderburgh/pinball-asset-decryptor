@@ -26,7 +26,7 @@
     "JOHN WICK Script JPSalas & marty"
   ],
   "output": "John_Wick_Legend (PAD).vpx",
-  "table": {"name": "John Wick 3.0", "by": "JPSalas & marty", "where": "not named in the table"},
+  "table": {"name": "John Wick 3.0", "by": "JPSalas & marty", "where": "VPUniverse", "url": "https://vpuniverse.com/files/file/32204-john-wick-legend/"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
   "cabinet": {"start": 1036, "launch": 1034, "launch_key": "PlungerKey", "tilt": 1038, "slam": 1045, "left_flipper": 1065, "right_flipper": 1064, "coin": 1039, "coin_door_interlock": 1033},

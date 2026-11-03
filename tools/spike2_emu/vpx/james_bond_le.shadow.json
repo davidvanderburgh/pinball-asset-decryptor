@@ -26,7 +26,7 @@
     "bondjetpack"
   ],
   "output": "bond (PAD).vpx",
-  "table": {"name": "BOND for Visual Pinball X 4.3", "by": "marty & jpsalas", "where": "VPUniverse"},
+  "table": {"name": "BOND for Visual Pinball X 4.3", "by": "marty & jpsalas", "where": "VPUniverse", "url": "https://vpuniverse.com/files/file/11827-bond-60-th/"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
   "cabinet": {"start": 1036, "launch": 1034, "launch_key": "PlungerKey", "tilt": 1038, "slam": 1045, "left_flipper": 1064, "right_flipper": 1063, "up_left_flipper": 1065, "coin": 1039, "coin_door_interlock": 1033},

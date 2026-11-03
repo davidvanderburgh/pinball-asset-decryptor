@@ -166,7 +166,7 @@ export default function Vpx() {
   const allDownloads = (s.downloads || []).filter((d) => !allLinked.has(d.path));
   const downloads = allDownloads.filter((d) => mine((d.catalog || {}).platform)).map((d) => {
     const c = d.catalog || {};
-    return { name: c.name || d.name, by: c.by || "", where: c.where || "", output: d.file, patched: false,
+    return { name: c.name || d.name, by: c.by || "", where: c.where || "", url: c.url || "", output: d.file, patched: false,
       extra: true, download: d, platform: c.platform || "", card: d.card || "" };
   });
   const rows = tables.concat(patched.filter((n) => !known.has(n)).map((n) => ({
@@ -366,7 +366,8 @@ export default function Vpx() {
         <span class="vpx-pic">${picture(t)}</span>
         <b class="vpx-name" ...${tip(t.extra && !t.download ? t.output : t.name + (t.by ? ", by " + t.by : "") + (t.where ? ", on " + t.where : "") + (t.download ? " (your file: " + t.download.file + ")" : ""))}>${t.name}</b>
         <span class="small vpx-by" ...${tip(t.by)}>${t.by}</span>
-        <span class="small muted vpx-from" ...${tip(t.where)}>${t.where}</span>
+        <span class="small muted vpx-from" ...${tip(t.url ? "Open " + t.where + ": " + t.url : t.where)}>${t.url
+          ? html`<a href=${t.url} target="_blank" rel="noopener">${t.where}</a>` : t.where}</span>
         <span class="small vpx-machine" ...${tip(t.extra && !t.platform ? "" : nameOf(platOf(t.platform)))}>${t.extra && !t.platform ? "" : shortOf(platOf(t.platform))}</span>
         <span class="small" ...${tip(fits(t).length > 1 ? playsAs(t) + "The table fits "
             + fits(t).map((x) => t.models[x]).join(" or ") + "." : t.download && t.platform ? "A " + nameOf(t.platform) + " game: " + t.download.file : "")}>${t.extra ? "" : (t.models || {})[t.title] || ""}</span>

@@ -45,7 +45,7 @@
     },
     "spooky": {
       "name": "Spooky",
-      "runs": "PAD's own emulator behind the table for Halloween and Ultraman (PAD.Controller); the other tables' own scripts play",
+      "runs": "PAD's own emulator behind the table for Halloween, Ultraman and Alice Cooper's Nightmare Castle (PAD.Controller); the other tables' own scripts play",
       "bridge": "pad"
     },
     "bof": {
@@ -355,7 +355,9 @@
       "url": "https://vpuniverse.com/files/file/30571-alice-coopers-nightmare-castle-spooky-pinball-2017-wip/",
       "kind": "tribute",
       "faithful": true,
-      "notes": "Unfinished: no modes yet; backglass separate (file 5920)."
+      "notes": "Unfinished: no modes yet; backglass separate (file 5920). Its playfield is a photo of the machine's, so the real game's inserts light where they are.",
+      "title": "ac",
+      "map": "ac: the real Alice Cooper's Nightmare Castle behind it on the P-ROC emulator (by place: GUESS marks to confirm)"
     },
     {
       "platform": "spooky",

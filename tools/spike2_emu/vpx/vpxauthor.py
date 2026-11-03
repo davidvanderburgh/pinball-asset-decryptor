@@ -631,6 +631,9 @@ def read_machine_spooky(title, lights=None):
     coil and LED numbers are the game's own (spkbridge.py), so a switch's
     id is its number, a coil is (0, n) - a subway servo (0, 32 + s) - and
     an LED n is (n // 64, n % 64). Nothing placed."""
+    import padlaunch
+    if title in padlaunch.SPOOKY_PROC:
+        return read_machine_spooky_proc(title)
     prof = _spktitles().TITLES[title]
     switches = []
     for n, name in sorted(prof["switches"].items()):
@@ -657,6 +660,111 @@ def read_machine_spooky(title, lights=None):
     return {"title": title, "platform": "spooky", "binary": "Assembly-CSharp.dll", "image": "",
             "image_size": None, "tables_from": os.path.dirname(os.path.dirname(lights)) if lights else "",
             "have": {"device_xy.txt": True, "led_io.txt": bool(table), "switch_list.txt": True},
+            "positions": False, "switches": switches, "coils": coils, "inserts": inserts}
+
+
+# ------------------------------- Spooky's P-ROC titles (PAD-954) --
+#
+# Alice Cooper's Nightmare Castle runs on the P-ROC rig (tools/spooky_emu/
+# proc); its switches, coils and LEDs are its machine yaml's, read from the
+# rig's prepared build: a switch is the board's number (SD24 = 24), a coil
+# and an LED their places in PRCoils and PRLEDs (spkbridge.py).
+
+def spooky_proc_yaml(title):
+    """The prepared build's machine yaml for a P-ROC `title` on this PC
+    (PAD_SPOOKY_PROC_CACHE, else each distro's /var/tmp/pad_spkproc/cache),
+    or ""."""
+    import glob
+    import padlaunch
+    rel = padlaunch.SPOOKY_PROC.get(title)
+    if not rel:
+        return ""
+    roots = [os.environ["PAD_SPOOKY_PROC_CACHE"]] if os.environ.get("PAD_SPOOKY_PROC_CACHE") else []
+    if not roots:
+        try:
+            for dist in padlaunch.distros():
+                roots.append(_win(dist, "/var/tmp/pad_spkproc/cache"))
+        except Exception:                                   # noqa: BLE001
+            pass
+    for root in roots:
+        found = sorted(glob.glob(os.path.join(root, title + "_*", *rel.split("/"))))
+        if found:
+            return found[-1]
+    return ""
+
+
+def read_machine_yaml(path):
+    """{section: {name: {key: value}}} of a pyprocgame machine yaml, in its
+    order. Its two levels (a section, its items, their fields) are all a
+    table needs, and the app ships no YAML library, so the lines are read
+    as they stand."""
+    out, sec, item = {}, None, None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for raw in f:
+            line = raw.split(" #", 1)[0].rstrip()
+            if not line.strip() or line.lstrip().startswith(("#", "-")):
+                continue
+            ind = len(line) - len(line.lstrip())
+            key, _, val = line.strip().partition(":")
+            val = val.strip().strip("'\"")
+            if ind == 0:
+                sec, item = key, None
+                out[sec] = {}
+            elif sec is not None and not val and (item is None or ind <= item[1]):
+                item = (key, ind)
+                out[sec][key] = {}
+            elif sec is not None and item is not None and ind > item[1]:
+                out[sec][item[0]][key] = val
+            elif sec is not None:
+                out[sec][key] = {"_": val}
+    return out
+
+
+def _proc_switch_number(text):
+    """pyprocgame's number of a PDB yaml switch address (prochw.Machine)."""
+    up = (text or "").strip().upper()
+    if up.startswith("SD") and up[2:].isdigit():
+        return int(up[2:])
+    if "/" in up:
+        col, row = up.split("/")[:2]
+        return 32 + int(col) * 16 + int(row)
+    return int(up) if up.isdigit() else None
+
+
+#: a P-ROC yaml's cabinet switches by name: a table does not owe them
+_PROC_CABINET = re.compile(r"^(coin\d*|enter|up|down|exit|tilt|slamTilt|startButton|launchBall\w*|flipper\w+)$",
+                           re.I)
+
+
+def read_machine_spooky_proc(title, path=None):
+    """The machine of a Spooky P-ROC title, in read_machine's shape, from its
+    machine yaml: switch id = the board's number, coil n = (0, n) and LED n
+    = (n // 64, n % 64) by their places in the yaml. Unused SD<n> switches
+    are left out; the GI and the flashers are not inserts a table owes."""
+    path = spooky_proc_yaml(title) if path is None else path
+    cfg = read_machine_yaml(path) if path and os.path.isfile(path) else {}
+    switches = []
+    for name, v in (cfg.get("PRSwitches") or {}).items():
+        n = _proc_switch_number(v.get("number", ""))
+        if n is None or (re.match(r"^SD\d+$", name, re.I) and not v.get("label")):
+            continue                                 # a spare input (SD29 has a label: it is wired)
+        label = v.get("label") or name
+        kind = "cabinet" if _PROC_CABINET.match(name) else switch_kind(label)
+        switches.append({"id": n, "num": n, "node": None, "bit": None, "name": label, "kind": kind,
+                         "x": None, "y": None, "where": "cabinet" if kind == "cabinet" else "unplaced"})
+    switches.sort(key=lambda s: s["id"])
+    coils = [{"name": name, "node": 0, "index": i, "kind": coil_kind(v.get("label") or name), "x": None,
+              "y": None, "number": 1000 + i} for i, (name, v) in enumerate((cfg.get("PRCoils") or {}).items())]
+    inserts = []
+    for i, (name, v) in enumerate((cfg.get("PRLEDs") or {}).items()):
+        nm = v.get("label") or name
+        tags = {t.strip().lower() for t in v.get("tags", "").split(",")}
+        inserts.append({"name": nm, "leds": [(i // 64, i % 64)], "names": [nm], "x": None, "y": None,
+                        "image": "-", "where": "cabinet" if tags & {"gi", "flasher"} else "playfield",
+                        "rgb": True, "lamp": lamp_number(i // 64, i % 64)})
+    return {"title": title, "platform": "spooky", "binary": os.path.basename(path) if path else "", "image": "",
+            "image_size": None, "tables_from": os.path.dirname(os.path.dirname(path)) if path else "",
+            "have": {"device_xy.txt": True, "led_io.txt": bool(inserts), "switch_list.txt": bool(switches)},
             "positions": False, "switches": switches, "coils": coils, "inserts": inserts}
 
 

@@ -15,6 +15,9 @@ PYTHONPATH); this only watches it:
   numbers (a PDB coil's number depends on the order the game set up its
   driver groups, which only the game knows).  It goes to the board's control
   socket, $PROC_EMU_CTL.
+* and the game's coil objects' driver numbers (`coils name=number ...`),
+  which a Visual Pinball table's bridge on the board names coils by
+  (PAD-954: the board publishes them in the yaml's order).
 * every mode added and removed is logged to $SPP_LOG, the rig's record of
   what the game is doing (it ships bytecode, and its own log is mostly off).
 * files of the machine's OS the game READS are answered from the rig:
@@ -119,6 +122,23 @@ def _ball_model(game):
         log("ball model failed: %r" % (e,))
 
 
+def _coils(game):
+    """Every coil's driver number to the board (PAD-954)."""
+    ctl = os.environ.get("PROC_EMU_CTL")
+    if not ctl:
+        return
+    try:
+        words = ["coils"] + ["%s=%d" % (c.name, c.number) for c in game.coils]
+        s = socket.socket(socket.AF_UNIX)
+        s.settimeout(5)
+        s.connect(ctl)
+        s.sendall((" ".join(words) + "\n").encode())
+        log("coils: %d -> %s" % (len(words) - 1, s.recv(4096).strip()))
+        s.close()
+    except Exception as e:                      # a rig nicety, never the game's end
+        log("coils failed: %r" % (e,))
+
+
 def _add(self, m):
     name = type(m).__name__
     log("mode + %s" % name)
@@ -126,6 +146,7 @@ def _add(self, m):
         _seen["attract"] = True
         log("attract: %s" % name)
         _ball_model(m.game)
+        _coils(m.game)
         if RIG:
             open(os.path.join(RIG, "attract"), "w").close()
     return _orig_add(self, m)

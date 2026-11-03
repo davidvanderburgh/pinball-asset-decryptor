@@ -24,6 +24,14 @@ the rig (tests pin the two together).
 The run is found on the rig board as `spooky-<slot>.run` whose game is the
 title's build (`h78_v118` for h78); its record carries the rig folder as
 `root` (RIGBOARD_ROOT, set by run_game.sh), read over \\\\wsl.localhost.
+
+PAD-954: a P-ROC title (Alice Cooper's Nightmare Castle: tools/spooky_emu/
+proc on tools/proc_emu's board) posts `spooky-proc-<slot>.run` (game
+`ac_1.1.0.5`) and its board (prochw.py --bridge) keeps the same two files in
+the same layout, so the same Rig and Pipe drive it. There a switch is the
+board's number (`SD24` = 24), an LED n and a coil n are the n-th of the
+machine yaml's PRLEDs and PRCoils (in its order: a driver's number depends on
+the order the game sets its driver groups up), and there are no servos.
 """
 import json
 import os
@@ -44,6 +52,11 @@ SERVO_COIL = 32
 BOARD = s1bridge.BOARD
 #: the rig's own folders (tools/spooky_emu/spkpath.sh: SPK_ROOT/rig<slot>)
 DEFAULT_ROOT = "/var/tmp/pad_spooky"
+#: the P-ROC rig's (tools/spooky_emu/proc/sppath.sh: SPP_ROOT/rig<slot>)
+PROC_ROOT = "/var/tmp/pad_spkproc"
+#: the rig board's `emu` of a Spooky run: the Warden board's, and the P-ROC
+#: rig's (tools/spooky_emu/proc, PAD-954)
+EMUS = ("spooky", "spooky-proc")
 
 
 def is_up(data):
@@ -86,7 +99,7 @@ def board_record(title=None, board=None, slot=None):
             rec = json.load(open(os.path.join(d, n), encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if not isinstance(rec, dict) or rec.get("emu") != "spooky":
+        if not isinstance(rec, dict) or rec.get("emu") not in EMUS:
             continue
         if slot is not None and rec.get("slot") != slot:
             continue
@@ -105,7 +118,8 @@ class SpookyRig(s1bridge.Spike1Rig):
         self.record = rec
         self.distro = (rec or {}).get("distro") or os.environ.get("PAD_WSL_DISTRO")
         self.slot = int((rec or {}).get("slot") or 0)
-        self.root = (rec or {}).get("root") or "%s/rig%d" % (DEFAULT_ROOT, self.slot)
+        self.root = (rec or {}).get("root") or "%s/rig%d" % (
+            PROC_ROOT if (rec or {}).get("emu") == "spooky-proc" else DEFAULT_ROOT, self.slot)
         self.how = ("rig board spooky-%d (%s)" % (self.slot, rec.get("game"))) if rec \
             else "no Spooky run on the board"
         if sys.platform == "win32" and self.distro:

@@ -106,6 +106,18 @@ hidden run stays silent unless asked, tools/rigboard.sh). The game's output is
 `$SPP_RIG/game.out`, Unity's `$SPP_RIG/player.log`, the board's
 `/var/tmp/pad_proc/rig<slot>/prochw.log`.
 
+## Behind a Visual Pinball table (PAD-954)
+
+The board keeps a table's two files in the rig folder (`prochw.py --bridge
+$SPP_RIG`, the Warden board's layout: tools/spike2_emu/vpx/spkbridge.py), and
+`run_game.sh` posts that folder as the board record's `root`. A switch is the
+board's number; an LED and a coil are their places in the machine yaml's
+PRLEDs and PRCoils (a driver's number depends on the order the game sets its
+driver groups up, so `spprun.py` sends the game's `coils name=number` to the
+board at attract). While the table's `vpxball.off` is there, the ball model
+stands aside. Alice Cooper plays behind Helshaks' table this way
+(`ac.shadow.json`, docs/plans/vpx_other_platforms.md).
+
 ## What is open
 
 * **Heavy**: Rick and Morty preloads its assets (~4 GB resident); Alice

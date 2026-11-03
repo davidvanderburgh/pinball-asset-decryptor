@@ -41,10 +41,26 @@ RIG=/pad/app/tools/spooky_emu
 # Spike 2 box's lesson, padbox.sh); appended, so a user's own PATH wins.
 PATH=$PATH:/usr/local/bin:/opt/homebrew/bin:/opt/local/bin
 PATH=$PATH:$HOME/.docker/bin:$HOME/.rd/bin:$HOME/.orbstack/bin
+PATH=$PATH:/opt/podman/bin
 PATH=$PATH:/Applications/Docker.app/Contents/Resources/bin
-[ -n "${PAD_DOCKER:-}" ] && [ -x "$PAD_DOCKER" ] && \
-    PATH=$(dirname "$PAD_DOCKER"):$PATH
+if [ -n "${PAD_DOCKER:-}" ] && [ -x "$PAD_DOCKER" ]; then
+    if [ "$(basename "$PAD_DOCKER")" != "docker" ]; then
+        _SHIM="${TMPDIR:-/tmp}/pad-docker-shim-$$"
+        mkdir -p "$_SHIM"
+        ln -sf "$PAD_DOCKER" "$_SHIM/docker"
+        PATH="$_SHIM:$PATH"
+    else
+        PATH=$(dirname "$PAD_DOCKER"):$PATH
+    fi
+fi
 export PATH
+
+if ! command -v docker >/dev/null 2>&1 && command -v podman >/dev/null 2>&1; then
+    _SHIM="${TMPDIR:-/tmp}/pad-docker-shim-$$"
+    mkdir -p "$_SHIM"
+    ln -sf "$(command -v podman)" "$_SHIM/docker"
+    PATH="$_SHIM:$PATH"
+fi
 
 command -v docker >/dev/null 2>&1 || {
     echo "[box] docker is not installed. In the app: Emulate tab (Stern) ->" >&2
@@ -104,7 +120,7 @@ case "${1:-}" in
 esac
 
 docker info >/dev/null 2>&1 || {
-    echo "[box] docker is installed but not running - start it (the Stern" >&2
+    echo "[box] docker / podman is installed but not running - start it (the Stern" >&2
     echo "[box] Emulate tab's \"Start Docker\" button), then Start again." >&2
     exit 1
 }

@@ -15,6 +15,7 @@ methods on a bare instance, where the method reads nothing but a variable.
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -1135,6 +1136,52 @@ def test_pad_docker_overrides_and_a_wrong_one_is_not_ignored(tmp_path,
     assert emulate_core.docker_cli() == str(tool)
     monkeypatch.setenv("PAD_DOCKER", str(tmp_path / "nope"))
     assert emulate_core.docker_cli() is None
+
+
+def test_docker_cli_detects_podman_when_docker_absent(monkeypatch):
+    """When docker is not installed, docker_cli detects podman."""
+    def fake_which(name, dirs=None):
+        return "/opt/podman/bin/podman" if name == "podman" else None
+    monkeypatch.setattr(emulate_core, "which_tool", fake_which)
+    assert emulate_core.docker_cli() == "/opt/podman/bin/podman"
+
+
+def test_docker_cli_prefers_running_engine_when_both_present(monkeypatch):
+    """When both docker and podman exist, docker_cli prefers whichever is running."""
+    def fake_which(name, dirs=None):
+        if name == "docker":
+            return "/usr/local/bin/docker"
+        if name == "podman":
+            return "/opt/podman/bin/podman"
+        return None
+    monkeypatch.setattr(emulate_core, "which_tool", fake_which)
+
+    def run_docker_up(cmd, **kwargs):
+        rc = 0 if cmd[0] == "/usr/local/bin/docker" else 1
+        return subprocess.CompletedProcess(cmd, rc)
+    monkeypatch.setattr(emulate_core.subprocess, "run", run_docker_up)
+    assert emulate_core.docker_cli() == "/usr/local/bin/docker"
+
+    def run_podman_up(cmd, **kwargs):
+        rc = 0 if cmd[0] == "/opt/podman/bin/podman" else 1
+        return subprocess.CompletedProcess(cmd, rc)
+    monkeypatch.setattr(emulate_core.subprocess, "run", run_podman_up)
+    assert emulate_core.docker_cli() == "/opt/podman/bin/podman"
+
+
+def test_docker_engine_detects_podman(monkeypatch):
+    """docker_engine recognises Podman Desktop or podman CLI."""
+    monkeypatch.setattr(emulate_core.os.path, "isdir",
+                        lambda p: p == "/Applications/Podman Desktop.app")
+    assert emulate_core.docker_engine() == (
+        "Podman Desktop", "app", "/Applications/Podman Desktop.app")
+
+    monkeypatch.setattr(emulate_core.os.path, "isdir", lambda p: False)
+    def fake_which(name, dirs=None):
+        return "/opt/podman/bin/podman" if name == "podman" else None
+    monkeypatch.setattr(emulate_core, "which_tool", fake_which)
+    assert emulate_core.docker_engine() == (
+        "Podman", "cli", "/opt/podman/bin/podman")
 
 
 def test_a_client_with_no_engine_is_not_a_missing_docker(monkeypatch):

@@ -36,13 +36,29 @@ PAD_VNC_PASSWD=${PAD_VNC_PASSWD:-pinball}
 # who set PATH themselves has already answered this and their answer wins.
 PATH=$PATH:/usr/local/bin:/opt/homebrew/bin:/opt/local/bin
 PATH=$PATH:$HOME/.docker/bin:$HOME/.rd/bin:$HOME/.orbstack/bin
+PATH=$PATH:/opt/podman/bin
 PATH=$PATH:/Applications/Docker.app/Contents/Resources/bin
 # The app's own override (see docker_cli() in emulate_tab.py), for the Mac that
 # keeps it somewhere none of those name. Its DIRECTORY goes first, so `docker`
 # means the same binary here as it did in the check that let this run start.
-[ -n "${PAD_DOCKER:-}" ] && [ -x "$PAD_DOCKER" ] && \
-    PATH=$(dirname "$PAD_DOCKER"):$PATH
+if [ -n "${PAD_DOCKER:-}" ] && [ -x "$PAD_DOCKER" ]; then
+    if [ "$(basename "$PAD_DOCKER")" != "docker" ]; then
+        _SHIM="${TMPDIR:-/tmp}/pad-docker-shim-$$"
+        mkdir -p "$_SHIM"
+        ln -sf "$PAD_DOCKER" "$_SHIM/docker"
+        PATH="$_SHIM:$PATH"
+    else
+        PATH=$(dirname "$PAD_DOCKER"):$PATH
+    fi
+fi
 export PATH
+
+if ! command -v docker >/dev/null 2>&1 && command -v podman >/dev/null 2>&1; then
+    _SHIM="${TMPDIR:-/tmp}/pad-docker-shim-$$"
+    mkdir -p "$_SHIM"
+    ln -sf "$(command -v podman)" "$_SHIM/docker"
+    PATH="$_SHIM:$PATH"
+fi
 
 command -v docker >/dev/null 2>&1 || {
     echo "[box] docker is not installed." >&2
@@ -56,8 +72,10 @@ docker info >/dev/null 2>&1 || {
     # names an app that Mac does not have. See docker_state() in emulate_tab.py.
     if [ -d /Applications/Docker.app ] || [ -d /Applications/OrbStack.app ] \
        || [ -d "/Applications/Rancher Desktop.app" ] \
+       || [ -d "/Applications/Podman Desktop.app" ] \
+       || command -v podman >/dev/null 2>&1 \
        || command -v colima >/dev/null 2>&1; then
-        echo "[box] docker is installed but not running - start it and try again." >&2
+        echo "[box] docker / podman is installed but not running - start it and try again." >&2
     else
         echo "[box] the docker command is installed, but nothing on this Mac runs" >&2
         echo "[box] containers. docker is only the client; the containers need a" >&2

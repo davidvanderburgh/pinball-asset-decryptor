@@ -36,7 +36,7 @@ import sys
 import threading
 import time
 
-_CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+_CREATE_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 APP_DIR = "pinball_decryptor"
 

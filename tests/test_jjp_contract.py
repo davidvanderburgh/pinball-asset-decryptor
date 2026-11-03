@@ -768,3 +768,35 @@ def test_jjp_dongle_probe_uses_no_shell_variables():
     pipe._dongle_visible()
     assert seen, "probe never ran"
     assert "$" not in seen[0], seen[0]
+
+
+def test_jjp_docker_executor_uses_docker_cli_and_detects_podman(monkeypatch):
+    import subprocess
+    from pinball_decryptor.plugins.jjp.executor import DockerExecutor
+    exec = DockerExecutor()
+    monkeypatch.setattr(exec, "_cli", lambda: "/opt/podman/bin/podman")
+    assert exec._cli() == "/opt/podman/bin/podman"
+
+    def run_fake(cmd, **kwargs):
+        assert cmd[0] == "/opt/podman/bin/podman"
+        return subprocess.CompletedProcess(cmd, 0, stdout="podman info", stderr="")
+    monkeypatch.setattr(subprocess, "run", run_fake)
+    ok, msg = exec.check_available()
+    assert ok is True
+    assert "Podman available" in msg
+
+
+def test_spooky_docker_executor_uses_docker_cli_and_detects_podman(monkeypatch):
+    import subprocess
+    from pinball_decryptor.plugins.spooky.executor import DockerExecutor
+    exec = DockerExecutor()
+    monkeypatch.setattr(exec, "_cli", lambda: "/opt/podman/bin/podman")
+    assert exec._cli() == "/opt/podman/bin/podman"
+
+    def run_fake(cmd, **kwargs):
+        assert cmd[0] == "/opt/podman/bin/podman"
+        return subprocess.CompletedProcess(cmd, 0, stdout="podman info", stderr="")
+    monkeypatch.setattr(subprocess, "run", run_fake)
+    ok, msg = exec.check_available()
+    assert ok is True
+    assert "Podman available" in msg

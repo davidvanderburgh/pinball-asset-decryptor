@@ -255,6 +255,9 @@ sound. Needs libpinmame and ffmpeg; you supply the ROMs.
 - **The DMD titles** (Jetsons, Domino's Spectacular Pinball Adventure, Rob
   Zombie's Spookshow International) run from their update zip in a window
   of their own, without WSL.
+- **On a Mac** the Spooky emulator runs in a Linux container (Docker or
+  Colima) and opens in Screen Sharing; the DMD titles run on Windows and
+  Linux only.
 - **pinHeck-built games** (Rob Zombie, America's Most Haunted, Domino's,
   Jetsons) install from a freshly formatted SD card, not a USB drive: copy
   every file onto the empty card, never replace single files.

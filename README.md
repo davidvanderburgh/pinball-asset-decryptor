@@ -19,7 +19,7 @@ macOS and Linux.
 - **Share** your changes as a small mod pack, or apply someone else's.
 - **Emulate** the game on your PC to see and hear your changes before they
   go near the machine.
-- **Play in Visual Pinball** (preview): the Stern Spike 1 and Spike 2
+- **Play in Visual Pinball** (preview): the Stern Spike 1 and Spike 2 and Spooky
   emulators can drive a Visual Pinball X table. With a preview code, the
   **Visual Pinball** tab lists the tables you downloaded from their authors
   and the ones out there for the other machines, patches and opens them, and

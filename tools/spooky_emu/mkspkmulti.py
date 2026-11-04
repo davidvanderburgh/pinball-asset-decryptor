@@ -194,13 +194,44 @@ class SpkUpdate:
         return ("uptest/" + name) if self.title["flat"] else name
 
     def members(self, work):
-        """(TarInfo, build path) for every member, in archive order, as a stream"""
-        with tarfile.open(self.tar_path(work), "r|*") as tf:
-            for ti in tf:
-                bp = self.build_path(ti.name)
-                if bp is None:
-                    continue
-                yield tf, ti, bp
+        """(TarInfo, build path) for every member, in archive order, as a stream.  A GPG-
+        packed update is read straight off `gpg --decrypt` when there is a gpg (and its
+        layer is not unpacked already): writing a 2 GB Beetlejuice tar out first and reading
+        it back doubled the first plan of the tab, which the preview waits behind."""
+        proc = self._gpg_stream()
+        try:
+            src = {"fileobj": proc.stdout} if proc else {"name": self.tar_path(work)}
+            with tarfile.open(mode="r|*", **src) as tf:
+                for ti in tf:
+                    bp = self.build_path(ti.name)
+                    if bp is None:
+                        continue
+                    yield tf, ti, bp
+        finally:
+            if proc:
+                proc.stdout.close()
+                proc.kill()
+                proc.wait()
+                shutil.rmtree(proc.pad_home, ignore_errors=True)
+
+    def _gpg_stream(self):
+        """`gpg --decrypt` of this update on a pipe, or None (not GPG-packed, already
+        unpacked into the cache, or no gpg here)"""
+        if self.fmt in ("tar_gz", "plain_tar") or (self._tar and os.path.isfile(self._tar)):
+            return None
+        _f, gpg, games = _spooky()
+        exe = gpg._find_gpg()
+        if not exe or (self.fmt != "gpg_tar_gz" and self.fmt not in games.GPG_PASSPHRASES):
+            return None
+        import subprocess
+        home = tempfile.mkdtemp(prefix="spkgpg.")
+        cmd = [exe, "--homedir", home, "--batch", "--yes", "--no-default-keyring"]
+        if self.fmt != "gpg_tar_gz":
+            cmd += ["--passphrase", games.GPG_PASSPHRASES[self.fmt]]
+        cmd += ["--decrypt", self.path]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc.pad_home = home
+        return proc
 
     def index(self, work):
         """{build path: (kind, size, sha1 or link target, mode)} - every member, hashed once and

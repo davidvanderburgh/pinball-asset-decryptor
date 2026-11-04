@@ -276,12 +276,24 @@ $(PROCSW): dpprocsw.c $(BUILD)/libpinproc.so.2.0 | $(BUILD)
 >     -nostartfiles dpprocsw.c $(BUILD)/libpinproc.so.2.0 -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
 else ifeq ($(PLATFORM),spk)
-# the button reader (spksw.c): plain POSIX on the board's tty, static like the menu
+# the button reader (spksw.c): plain POSIX on the board's tty, static like the menu;
+# and the P-ROC titles' (Rick and Morty, Alice Cooper): the Big Lebowski's dpprocsw on the
+# machine's own libpinproc (padselect_proc.sh)
 SPKSW = $(BUILD)/spksw
-all: $(BIN) $(SPKSW)
+PROCSW = $(BUILD)/dpprocsw
+all: $(BIN) $(SPKSW) $(PROCSW)
 
 $(SPKSW): spksw.c | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -static spksw.c -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
+
+$(BUILD)/libpinproc.so.2.0: | $(BUILD)
+> printf 'void PRCreate(void){} void PRDelete(void){} void PRSwitchGetStates(void){} void PRGetLastErrorText(void){}\n' > $(BUILD)/pinproc_stub.c
+> $(CC) -shared -fPIC -Wl,-soname,libpinproc.so.2.0 -o $@ $(BUILD)/pinproc_stub.c
+
+$(PROCSW): dpprocsw.c $(BUILD)/libpinproc.so.2.0 | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
+>     -nostartfiles dpprocsw.c $(BUILD)/libpinproc.so.2.0 -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
 else
 all: $(BIN)
@@ -352,21 +364,25 @@ install: $(BIN) $(PROCSW)
 > install -m 755 padselect_dp.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi
 else ifeq ($(PLATFORM),spk)
-check: $(BIN) $(SPKSW)
+check: $(BIN) $(SPKSW) $(PROCSW)
 > bash test/check_elf_spk.sh "$(BIN)" "$(SPKSW)"
+> bash test/check_elf_dp.sh "$(BIN)" "$(PROCSW)"
 > bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > $(PYTHON) test/x11_dp_test.py "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > bash -n padselect_spk.sh && bash test/padselect_spk_test.sh "$(BIN)" "$(SPKSW)" "$(DEJAVU)"
+> bash -n padselect_proc.sh && bash test/padselect_proc_test.sh "$(BIN)" "$(DEJAVU)"
 > @echo "check: OK (spk)"
 
 check-hw:
 > @echo "check-hw: the node-bus test is Stern's; spksw is proven on the rig's boards (tools/spooky_emu/MULTIBOOT.md)"
 
-install: $(BIN) $(SPKSW)
+install: $(BIN) $(SPKSW) $(PROCSW)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/spkselect"
 > install -m 755 "$(SPKSW)" "$(DESTDIR)$(PREFIX)/spksw"
+> install -m 755 "$(PROCSW)" "$(DESTDIR)$(PREFIX)/dpprocsw"
 > install -m 755 padselect_spk.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
+> install -m 755 padselect_proc.sh "$(DESTDIR)$(PREFIX)/padselect_proc.sh"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi
 else ifeq ($(PLATFORM),jjp)
 check: $(BIN) capbin

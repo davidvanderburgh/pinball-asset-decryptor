@@ -715,3 +715,22 @@ sound_fire instrument firing ten requests in attract on each, captures compared)
 0 segv, 0 fatal on every run. The bisection that found the descriptor block (moving a record
 past the end with its old copy zeroed plays; zeroing the old range of the last 271 records does
 not; then idx 970, i.e. the bytes after its body) is in `C:\tmp\PAD-880\tools\variants.py`.
+
+## Music modes' files in banks even when image.bin has room (PAD-749)
+
+A build used to keep every sound a bank can hold in `image.bin` while it fitted under 2 GiB, and
+only once one had to leave did they all go to banks. A Heisei Godzilla card with four music modes
+carried them all in `image.bin`: 2,020 MB against the stock 1,650 MB, about 2,170 MB mapped with its
+biggest banks, near `MAPPED_MAX`, and its owners' city map video failed to start on some first
+balls (not proven to be the cause: the emulator decodes video on the PC with 4 GiB of address
+space). The game holds `image.bin` for good and a bank only while it plays, so a build with music
+modes' files a bank can hold now puts every bankable sound into banks whether or not `image.bin`
+has room (`_plan_sound_banks`, `forced`). A mode file with files in turn of its own (PAD-638) stays
+in `image.bin`: those are turned at its record key, which a bank sound is never played by
+(`_sm_turn_hosts` -> `sm_hold`). Builds without music modes are unchanged.
+
+Proof (2026-11-03, `C:\tmp\PAD-749`): David's v38 card (Heisei V2.1 base) with eight stand-in songs
+(64-279 s) as music mode 2. main: `image.bin` 1,956 MB. This change: `image.bin` 1,765 MB, the songs
+in six banks (`image-sc21..26`, 192 MB). On the rig (PAD-Runtime, `sounds.cfg` `force 2`,
+`sound_fire_mode.c`), request 76 (sid 2504, idx 1304) played the stand-in's 285/415 Hz tones on both
+builds, on this one from `image-sc21.bin` (sound id 0x150000); no segv. The capture is 44.1 kHz.

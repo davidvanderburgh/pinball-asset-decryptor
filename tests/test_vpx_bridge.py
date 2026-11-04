@@ -20,6 +20,7 @@ What is worth failing on, none of it needing Windows, VPX or a run:
     numbers become Spike 2 ids + 1000, dropped ones become 0, the per-object
     overrides win, the solenoid block appears once, UpdateLamps is regenerated.
 """
+import glob
 import json
 import os
 import re
@@ -1885,7 +1886,7 @@ def test_foo_fighters_kick_target_is_the_games_switch_and_kicks_harder(title, si
     out = vs.gen(m, {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")})
     assert "Sub LightningTarget_Slingshot : vpmTimer.PulseSw %d" % (1000 + sid) in out
     assert 'SolCallback(10) = "PadKickTarget"' in out
-    assert 'Sub PadKickTarget(e) : If e Then PlaySoundAt "fx_slingshot_EM", LightningTarget' in out
+    assert 'Sub PadKickTarget(e) : If e Then PlaySoundAt "fx_slingshot_EM", Target004' in out
 
 
 def test_item_fields_sets_the_tables_own_objects_fields():
@@ -1925,6 +1926,37 @@ def test_a_foo_fighters_copy_patched_before_the_kick_target_fix_asks_for_a_new_p
     script.write_text("Sub Trigger015_Hit : Controller.Switch(1082) = True : End Sub\n"
                       "Sub Trigger015_UnHit : Controller.Switch(1082) = False : End Sub\n", encoding="utf-8")
     assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == [m["repatch"][2]["why"]]
+    # PAD-992: a copy whose kick target sound was played at the wall itself
+    script.write_text('Sub PadKickTarget(e) : If e Then PlaySoundAt "fx_slingshot_EM", LightningTarget : End If : End Sub\n',
+                      encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == [m["repatch"][3]["why"]]
+
+
+def test_sounds_at_shapes_names_a_sound_played_at_a_wall():
+    """PAD-992: Foo Fighters' first KICK TARGET coil stopped Visual Pinball
+    with "Object doesn't support this property or method: 'ball.x'": the
+    bridge played its sound at LightningTarget, a wall, and JP's PlaySoundAt
+    pans by the object's .x. A wall, ramp or rubber has no position."""
+    vs = pytest.importorskip("vpxshadow")
+    info = [("Wall", "LightningTarget", None), ("HitTarget", "Target004", (700.0, 1500.0)),
+            ("Ramp", "Ramp1", None), ("Kicker", "scoop", (10.0, 20.0))]
+    vbs = ('Sub A(e) : If e Then PlaySoundAt "fx_slingshot_EM", lightningtarget : End If : End Sub\n'
+           'Sub B(e) : PlaySoundAt "fx_popper", scoop : PlaySoundAt "x", Target004 : End Sub\n'
+           'Sub C(e) : PlaySoundAt  "fx_ramp" ,Ramp1 : End Sub\n')
+    assert vs.sounds_at_shapes(vbs, info) == ["LightningTarget", "Ramp1"]
+    assert vs.sounds_at_shapes('PlaySoundAt "x", Target004', info) == []
+
+
+@pytest.mark.parametrize("path", sorted(glob.glob(os.path.join(VPX, "*.shadow.json"))),
+                         ids=os.path.basename)
+def test_no_map_plays_a_sound_at_one_of_its_slingshot_walls(path):
+    """PAD-992: a slingshot switch is a wall, which PlaySoundAt cannot pan."""
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(path, encoding="utf-8"))
+    walls = [("Wall", k, None) for k, s in m["switches"].items()
+             if k != "_" and s.get("event") == "slingshot"]
+    out = vs.gen(m, {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")})
+    assert vs.sounds_at_shapes(out, walls) == []
 
 
 def _inside(pt, poly):

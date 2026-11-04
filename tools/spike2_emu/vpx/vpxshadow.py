@@ -1522,6 +1522,20 @@ def item_fields(table, m):
     return out
 
 
+SHAPELESS = ("Wall", "Ramp", "Rubber")
+
+
+def sounds_at_shapes(script, info):
+    """PAD-992: the objects `PlaySoundAt "...", <obj>` in a map's own code
+    names that have no position. JP's PlaySoundAt pans by `obj.x`, which a
+    wall, ramp or rubber has not: Foo Fighters' kick target (a slingshot wall)
+    stopped Visual Pinball with "Object doesn't support this property or
+    method: 'ball.x'" the first time its coil fired."""
+    shapes = {n.lower(): n for k, n, _ in info if k in SHAPELESS}
+    found = re.findall(r'PlaySoundAt\s+"[^"]*"\s*,\s*(\w+)', script, re.I)
+    return sorted({shapes[o.lower()] for o in found if o.lower() in shapes})
+
+
 def main(argv):
     if len(argv) != 4:
         print(__doc__)
@@ -1538,6 +1552,8 @@ def main(argv):
     for name in list(m["switches"]) + list(saucers(m)) + list(m.get("lamps", {})) + m.get("dark", []):
         if name != "_" and name.lower() not in names:
             print("WARNING: the table has no object named %s" % name)
+    for name in sounds_at_shapes(m.get("extra_vbs", ""), info):
+        print("WARNING: a sound is played at %s, which has no position (PlaySoundAt reads its .x)" % name)
     m["_lightseqs"] = sorted(n for k, n, _ in info if k == "LightSeq")
     script, rep = patch(table.script(), m)
     script, streams = vpxsounds.quiet(script, table.ole, rep)   # PAD-858

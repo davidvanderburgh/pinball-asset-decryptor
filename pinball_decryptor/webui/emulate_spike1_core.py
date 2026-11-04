@@ -66,6 +66,13 @@ def rig_dir():
     return os.environ.get("PAD_SPIKE1_EMU_DIR") or DEFAULT_RIG_DIR
 
 
+#: The TCP port the rig's speaker relay listens on - prereqs.sh's
+#: S1_AUDIO_PORT, the one number both sides must agree on.  Below the Spike 2
+#: rig's 45997 + slot: on 45998 it was slot 1's port, and a Spike 1 speaker
+#: left up silenced the next slot-1 game (PAD-978).
+AUDIO_PORT = 45996
+
+
 def rig_available():
     """Present? Checked by script, not by directory — a half-copied tools tree
     is the failure this catches."""

@@ -7,6 +7,11 @@
 # (this is only ever invoked directly, never parsed).
 BF=/proc/sys/fs/binfmt_misc
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# S1_WORK and S1_AUDIO_PORT, worked out the way start.sh works them out: the
+# speaker below is matched on start.sh's own FIFO and port, so a guess here
+# is a speaker left running (PAD-978).
+. "$HERE/prereqs.sh"
+s1_paths
 
 pkill -KILL -f qemu-arm-pad  2>/dev/null
 # a PIVOTED or criu-RESTORED guest's cmdline is "/.padqemu/game ./game" — no
@@ -38,8 +43,14 @@ pkill -KILL -f "s1view.py"   2>/dev/null
 # the speaker chain (start.sh 6a): playaudio.sh's own trap takes the Windows
 # padplay.py child with it; TERM (not KILL) so that trap actually runs.
 # Matched on this rig's FIFO so a Spike 2 run's speaker is left alone.
-pkill -f "playaudio.sh /home/.*/s1emu/audio.fifo" 2>/dev/null
-pkill -f "padrelay.py /home/.*/s1emu/audio.fifo"  2>/dev/null
+# $S1_WORK's, NOT a fixed /home/*/s1emu: the work moved onto its own disk
+# (/mnt/wsl/paddata/spike1) and that pattern stopped matching anything, so
+# every Spike 1 speaker outlived its run and kept its port (PAD-978). The
+# old place stays matched for a speaker an older start left there.
+for _fifo in "$S1_WORK/audio.fifo" "/home/[^ ]*/s1emu/audio.fifo"; do
+    pkill -f "playaudio.sh $_fifo" 2>/dev/null
+    pkill -f "padrelay.py $_fifo"  2>/dev/null
+done
 # Reap the WINDOWS players synchronously, here, not only via playaudio's trap:
 # the interop padplay.exe children survive their bash parents' TERM (bash
 # defers death until the foreground child exits), so restart-loop subshells
@@ -55,7 +66,7 @@ pkill -f "padrelay.py /home/.*/s1emu/audio.fifo"  2>/dev/null
     -Command "Get-CimInstance Win32_Process |
               Where-Object { \$_.Name -like 'py*' -and
                              \$_.CommandLine -like '*padplay.py*' -and
-                             \$_.CommandLine -like '* 45998 *' } |
+                             \$_.CommandLine -like '* $S1_AUDIO_PORT *' } |
               ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
     >/dev/null 2>&1 || true
 sleep 1

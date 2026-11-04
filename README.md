@@ -25,8 +25,8 @@ macOS and Linux.
   and the ones out there for the other machines, patches and opens them, and
   gives table authors a checklist of every switch, coil and insert a game has.
 - **Multi-boot**: put several complete games on one Stern Spike 2 SD card
-  (or Jersey Jack install stick, or Barrels of Fun update) and pick one from a
-  menu at power-up.
+  (or Jersey Jack install stick, or Barrels of Fun or Spooky update) and pick
+  one from a menu at power-up.
 
 <p>
   <a href="docs/screenshots/stern-extract.png"><img src="docs/screenshots/stern-extract.png" width="49%" alt="The Extract tab with a Stern Godzilla LE SD-card image detected and per-type extract checkboxes"></a>
@@ -47,7 +47,7 @@ macOS and Linux.
 | Jersey Jack Pinball | 12 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate, Direct-SSD, Multi-boot |
 | Pinball Brothers | 4 | Extract, Write, Apply Delta, Mod Pack, Replace Audio/Video, Emulate |
 | Sega (Whitestar DMD) | 18 | Capture DMD animations + sound with PinMAME |
-| Spooky Pinball | 14 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate |
+| Spooky Pinball | 14 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate, Multi-boot |
 | Stern Spike 2 | 26 | Extract, Write, Direct-SD, Replace Audio/Video/Images/Text, Scenes, Partition Explorer, Emulate, Multi-boot |
 | Stern Spike 1 | 6 | Extract, Write, Replace Audio, Replace Images, Replace Text, Emulate |
 | Stern SAM | 26 | Extract, Write, Replace Audio, Replace Images (stills, fonts and DMD animation frames), Mod Pack; capture DMD animations with PinMAME |

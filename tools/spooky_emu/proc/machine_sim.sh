@@ -73,6 +73,10 @@ fi
 # zip members keep their modes when extracted by unzip; Python's extractall does not
 find "$G" -name "*.sh" -exec chmod +x {} +
 chmod +x "$G/uptest/main.x86_64" "$G/PAD_MULTIBOOT/"{spkselect,dpprocsw} 2>/dev/null
+# codeupdate's last step on Rick and Morty: chown -R launch the folder (the game is not
+# root); Alice Cooper's game runs as root.  The rig's game runs as $SPP_USER either way, and
+# the kernel refuses a hard link to a file someone else owns (protected_hardlinks)
+chown -R "$SPP_USER": "$GAME"
 [ -f "$G/PAD_MULTIBOOT_LIVE" ] && [ -d "$G/PAD_MULTIBOOT" ] && pass "installed: the stock build in $DIR, PAD_MULTIBOOT beside it" \
     || fail "the install left no PAD_MULTIBOOT"
 
@@ -106,6 +110,12 @@ gcc -shared -fPIC -O2 -o "$W/aaiwshim.so" "$REPO/tools/dp_emu/aaiw/aaiwshim.c" -
 mkdir -p "$W/lib"
 cp "$(ls -d "$SPP_CACHE"/rm_*/payload/libpinproc.so.2.0 | head -1)" "$W/lib/" 2>/dev/null \
     || cp "$G/payload/libpinproc.so.2.0" "$W/lib/" || { echo "machine_sim: no libpinproc (prepare the Rick and Morty .pkg once)" >&2; exit 1; }
+# the libraries it names that this distro lacks: empty stand-ins - aaiwshim.so, preloaded,
+# answers every ftdi_* call itself, and nothing calls libusb directly
+echo 'void pad_stub(void) {}' > "$W/stub.c"
+for so in libftdi1.so.2 libusb-0.1.so.4; do
+    ldconfig -p | grep -q "^[[:space:]]*$so " || gcc -shared -fPIC -Wl,-soname,$so -o "$W/lib/$so" "$W/stub.c"
+done
 FIFO=$W/proc.fifo; rm -f "$FIFO"; mkfifo "$FIFO"; chmod 666 "$FIFO"
 chown -R "$SPP_USER": "$W/lib" "$W/aaiwshim.so"
 exec 7<>"$FIFO"

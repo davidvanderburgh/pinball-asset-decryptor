@@ -94,7 +94,7 @@ fi
 # A SWAP A POWER CUT INTERRUPTED.  .pad/swap says "out <from> <to>" while the live build's
 # entries move out, "in <from> <to>" while the chosen one's move in; the marker is written
 # when it is over.  Out: put back what went out.  In: finish bringing the rest in.
-if read -r phase from to < "$P/swap" 2>/dev/null; then
+if [ -f "$P/swap" ] && read -r phase from to < "$P/swap"; then
     say "a swap was interrupted ($phase $from -> $to): finishing it"
     if [ "$phase" = out ]; then
         for e in "$P/$from.out"/* "$P/$from.out"/.[!.]*; do

@@ -15,7 +15,11 @@ PY
 mount --bind "$SPP_RIG/game" /game || exit 3
 echo $$ > "$SPP_RIG/ns.pid"
 if [ "${SPP_XVFB:-0}" = 1 ]; then
-    Xvfb "$DISPLAY" -screen 0 "${SPP_SCREEN}x24" -nolisten tcp -nocursor < /dev/null > "$SPP_RIG/xvfb.log" 2>&1 &
+    # -noreset with the multi-boot's launcher (PAD-980): its menu is the server's first
+    # client, and a server that resets when its last client leaves cut off the game's player
+    # connecting just then (XIO fatal IO error) - a cabinet's X session stays up between them
+    Xvfb "$DISPLAY" -screen 0 "${SPP_SCREEN}x24" -nolisten tcp -nocursor ${SPP_MACHINE_LAUNCH:+-noreset} \
+        < /dev/null > "$SPP_RIG/xvfb.log" 2>&1 &
     echo $! > "$SPP_RIG/xvfb.pid"
     for _ in $(seq 1 50); do grep -q "@/tmp/.X11-unix/X${DISPLAY#:}\$" /proc/net/unix && break; sleep 0.1; done
 fi
@@ -58,7 +62,8 @@ if [ -n "${SPP_MACHINE_LAUNCH:-}" ]; then
         PADSELECT_PROCSW_PRELOAD="$SPP_MSIM_SHIM" LD_LIBRARY_PATH="$SPP_MSIM_LIB" \
         bash "$SPP_MACHINE_LAUNCH" < /dev/null > "$SPP_RIG/launcher.out" 2>&1
     echo "launcher exit $?" >> "$SPP_RIG/launcher.out"
-    rm -f "$SPP_RIG/launcher.running"
+    # launcher.running stays until the game's pid is written (below): run_game.sh's wait
+    # would otherwise give up in the seconds between the menu and the game's start
 fi
 cd "/game/$SPP_DIR" || exit 3
 if [ -n "$SPP_UNITY" ]; then
@@ -83,4 +88,5 @@ for n in unity game; do
     r=$(cat "$SPP_RIG/$n.rpid"); c=$(pgrep -P "$r" | head -1)
     echo "${c:-$r}" > "$SPP_RIG/$n.pid"
 done
+rm -f "$SPP_RIG/launcher.running"
 wait

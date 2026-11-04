@@ -1256,6 +1256,9 @@ def test_the_build_streams_and_says_it_is_still_going(mac, monkeypatch):
     are read as they come, and every BUILD_HEARTBEAT seconds the Log says
     it is still going and the step it is on."""
     monkeypatch.setattr(D, "_image_field", lambda f: "")
+    # a machine with docker AND podman (the Linux runner) asks the clock
+    # inside docker_cli() too, and would eat the build's ticks
+    monkeypatch.setattr(D, "_cli", lambda: "docker")
     clock = iter([0, 5, 31, 40, 70, 75])
     monkeypatch.setattr(D.time, "monotonic", lambda: next(clock))
     lines = ["#5 1.0 Get:1 http://deb.debian.org/debian bookworm/main gzip",

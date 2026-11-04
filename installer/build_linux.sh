@@ -81,6 +81,9 @@ pyinstaller \
     `# The Dutch Pinball rig: the Big Lebowski Multi-boot tab runs` \
     `# tools/dp_emu/mkdpmulti.py and ensuredpselect.sh the same way (PAD-853).` \
     --add-data "$ROOT_DIR/tools/dp_emu:tools/dp_emu" \
+    `# The Spooky rig: the Spooky Multi-boot tab runs tools/spooky_emu/` \
+    `# mkspkmulti.py and ensurespkselect.sh the same way (PAD-980).` \
+    --add-data "$ROOT_DIR/tools/spooky_emu:tools/spooky_emu"     `# Spooky Multi-boot leaf modules (mkspkmulti.py, PAD-980): the updates are`     `# read and packed with the plugin's own detection and GPG layers.`     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/formats.py:pinball_decryptor/plugins/spooky"     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/gpg.py:pinball_decryptor/plugins/spooky"     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/games.py:pinball_decryptor/plugins/spooky" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/pck_directory.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \

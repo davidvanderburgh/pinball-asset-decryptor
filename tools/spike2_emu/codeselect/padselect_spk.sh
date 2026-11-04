@@ -287,6 +287,9 @@ else
     board=$(conf board warden)
     if [ "$board" = pinotaur ]; then dl=81; ddev=/dev/pinheck; else dl=86; ddev=/dev/WARDEN; fi
     L=$(conf L $dl); R=$(conf R 80); S=$(conf S 87); dev=$(conf dev $ddev)
+    # the emulator rig's board is a pty its preload shim maps /dev/WARDEN onto, which a
+    # static reader never loads: the rig hands the game the pty's own path (run_game.sh)
+    [ -n "${SPK_WARDEN:-}" ] && dev=$SPK_WARDEN
     if mkfifo -m 600 "$BTN" 2>/dev/null; then
         if [ -n "${PADSELECT_SW:-}" ]; then
             $PADSELECT_SW L="$L" R="$R" S="$S" >"$BTN" 2>>"$P/spksw.log" &

@@ -123,7 +123,7 @@ pyinstaller \
     --add-data "$ROOT_DIR/tools/proc_emu:tools/proc_emu" \
     --add-data "$ROOT_DIR/tools/ap_emu:tools/ap_emu" \
     --add-data "$ROOT_DIR/tools/rigboard.sh:tools" \
-    --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/games.py:pinball_decryptor/plugins/spooky" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/games.py:pinball_decryptor/plugins/spooky"     `# Spooky Multi-boot leaf modules (mkspkmulti.py, PAD-980): the updates are`     `# read and packed with the plugin's own detection and GPG layers.`     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/formats.py:pinball_decryptor/plugins/spooky"     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/gpg.py:pinball_decryptor/plugins/spooky" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/pck_directory.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/aes_py.py:pinball_decryptor/plugins/bof" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/bof/source_converter.py:pinball_decryptor/plugins/bof" \

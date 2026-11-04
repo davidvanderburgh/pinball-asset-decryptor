@@ -30,6 +30,13 @@
 # out to (sudo, unlock-root, reboot, avrdude, timedatectl...) are no-ops
 # first on the game's PATH, logged to $SPK_RIG/shell.log.
 # Switches: sw.py.  Picture: shot.sh.  Stop: killgame.sh.
+#
+# SPK_MACHINE=1 (machine_sim.sh, the multi-boot proof, PAD-980): the game is
+# INSTALLED in the slot's /game ($NV/game/code/...) the way a machine's own
+# update install leaves it, and nothing is bound over /game/code - one file
+# system, as on the cabinet, so the multi-boot launcher's renames between
+# /game/code and /game/pad are the machine's.  <build> still names the stock
+# build the title's rig settings come from.
 set -u
 . "$(dirname "$0")/spkpath.sh"
 ARGS=("$@")             # a start again on the CPU runs this script again
@@ -198,8 +205,10 @@ hostname pad-rig-$SPK_SLOT
 mkdir -p /game && mount --bind "$NV/game" /game || exit 1
 mkdir -p /game/code/uptest /game/code/assets /game/logs /game/tmp /game/media \\
     /game/backup /game/update /game/vosk
-mount --bind "$UPTEST" /game/code/uptest
-[ -d "$G/assets" ] && [ "$LAYOUT" = code ] && mount --bind "$G/assets" /game/code/assets
+if [ "${SPK_MACHINE:-0}" != 1 ]; then
+    mount --bind "$UPTEST" /game/code/uptest
+    [ -d "$G/assets" ] && [ "$LAYOUT" = code ] && mount --bind "$G/assets" /game/code/assets
+fi
 for d in logs tmp media backup update; do mount --bind "$SPK_RIG/\$d" /game/\$d; done
 chown "$SPK_USER": /game /game/code /game/vosk
 cd /game/code/uptest || exit 1

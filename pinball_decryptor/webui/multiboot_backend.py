@@ -147,6 +147,8 @@ class MultibootBackend:
         each build's)."""
         if self.key == "dp":
             return "stock" if img == 0 else "build%d" % img
+        if self.key == "spooky":
+            return "b%d" % img           # mkspkmulti.py: b0 the primary, carried whole
         if self.key == "bof":
             return "GDCraze.x86_64" if img == 0 else "pad_image%d.bin" % img
         if self.key == "jjp":
@@ -171,6 +173,17 @@ class MultibootBackend:
                 rest = re.sub(r"[_\s]+", " ", m.group(2) or "").strip()
                 return "THE BIG LEBOWSKI", rest or ("Version %s" % m.group(1))
             return "THE BIG LEBOWSKI", re.sub(r"[_\s]+", " ", stem).strip()
+        if self.key == "spooky":
+            # A Spooky update is named for its date or version (v2025.12.01.09.scooby,
+            # tcm-1_00.pkg, code_H78.pkg), the same for a mod PAD wrote: the extension
+            # says which game, the folder may say which build ("Scooby (my mod)")
+            parts = [x for x in re.split(r"[\\/]", path or "") if x]
+            folder = re.sub(r"[_\s]+", " ", parts[-2] if len(parts) > 1 else "").strip()
+            game = spooky_game_name(b)
+            stem = re.sub(r"\.(scooby|beetlejuice|looney|ed|pkg)$", "", b, flags=re.I)
+            if folder and game.lower() in folder.lower():
+                return folder, stem
+            return game, stem
         if self.key == "bof":
             # A .fun is named for its TITLE (lab.fun) whatever build it is, so
             # the file says which game and the folder may say which build:
@@ -196,7 +209,9 @@ class MultibootBackend:
         keeps its title's own name (lab.fun) - the machine's updater looks
         for exactly that name on the stick - in the multi/ folder the caller
         puts every output in."""
-        if self.key == "bof":
+        if self.key in ("bof", "spooky"):
+            # Spooky (PAD-980): the machines' update menus list a title's own names
+            # (Texas Chainsaw's tcm-N_NN.pkg), so the multi-boot keeps the primary's
             return os.path.basename(primary or "") or "lab.fun"
         if self.key == "dp":
             # the machine's update menu reads the version off the NAME, and it
@@ -420,7 +435,76 @@ DP = MultibootBackend(
     add_choices=frozenset({"_add_image"}),
     update_file=True)
 
-BACKENDS = {STERN.key: STERN, JJP.key: JJP, BOF.key: BOF, DP.key: DP}
+#: SPOOKY PINBALL (PAD-980): every Linux Spooky title starts /game/code/uptest/
+#: main.x86_64 and installs an update into that folder, so ONE update of the title's
+#: own kind carries the launcher as its main.x86_64, the menu, the primary build whole
+#: and every other build's differences (tools/spooky_emu/mkspkmulti.py, MULTIBOOT.md).
+#: Nothing needs root: the updates are read with Python (the GPG layers with gpg), and
+#: the menu programs are built natively (ensurespkselect.sh), the static menu also
+#: drawing the preview.
+_SPK = "tools/spooky_emu"
+SPOOKY = MultibootBackend(
+    key="spooky", label="Spooky Pinball",
+    tool_dir=_SPK, tool=_SPK + "/mkspkmulti.py",
+    media_tool=(_SPK + "/mkspkmulti.py", "media"),
+    selector_src=_SPIKE2 + "/codeselect", ensure_tool=_SPK + "/ensurespkselect.sh",
+    card_flag="--update",
+    image_exts=(".scooby", ".beetlejuice", ".looney", ".ed", ".pkg"),
+    image_types=(("Spooky updates", "*.scooby *.beetlejuice *.looney *.ed *.pkg"), ("All files", "*.*")),
+    image_noun="update",
+    image_pick_title="Pick a Spooky game update for the menu",
+    out_ext="", out_suffix="", out_noun="update",
+    out_label="Multi-boot update:",
+    empty_path_text=("No update yet. Add the updates below - the stock one first - and "
+                     "the path fills itself in, or type the folder the multi-boot update "
+                     "should be written to (it keeps the stock update's name)."),
+    medium="USB stick", medium_needed="USB stick needed:", medium_holds="stick holds",
+    flash_frame="Put it on a USB stick",
+    flash_tick="Copy the update onto a USB stick",
+    flash_detail=("Copy the finished update onto a USB stick under its own name and "
+                  "install it the way every update of the game is installed. The menu "
+                  "shows from the next power-up; installing any normal update later "
+                  "takes it away again."),
+    build_flash_text="Build update…",
+    overhead_label="The menu, its pictures and the launcher",
+    sizes=(("8G", "8 GB"), ("16G", "16 GB"), ("32G", "32 GB"), ("64G", "64 GB")),
+    fits_re=re.compile(r"fits USB\s+(\d+G)\s+stick size\s+\d+:\s+(YES|NO)\s*\(spare\s+(-?\d+)\)"),
+    total_re=re.compile(r"^upd-size\s+(\d+)"),
+    status_checks=(("card", "Update"), ("images", "Images"),
+                   ("built", "Built"), ("ready", "Ready for the stick")),
+    max_cards=9, groups=False, compact=False, machine_volume=False,
+    volume_default=50, volume_max=100, attract_clip=False,
+    update=False, bypass=False, extract=False, read_card=False,
+    selector_default="/var/tmp/spkselect",
+    selector_suffix="/spkselect", selector_binary="spkselect",
+    preview_native=True, conf_font="/var/tmp/spkselect/font.ttf",
+    root_steps=frozenset(),
+    sound=True, scores_column=False, emulate=False, flash=False,
+    tab_sub=("Several builds of one Spooky game on one machine, in one update, with a "
+             "boot menu the machine shows on power-up."),
+    add_choices=frozenset({"_add_image"}),
+    update_file=True)
+
+#: a Spooky update's file name -> the game (the title a fresh row starts with)
+SPOOKY_EXT_NAMES = {".scooby": "Scooby-Doo", ".beetlejuice": "Beetlejuice",
+                    ".looney": "Looney Tunes", ".ed": "Evil Dead"}
+
+
+def spooky_game_name(name):
+    n = (name or "").lower()
+    for ext, game in SPOOKY_EXT_NAMES.items():
+        if n.endswith(ext):
+            return game
+    if n.startswith("tcm-"):
+        return "Texas Chainsaw Massacre"
+    if "h78" in n:
+        return "Halloween"
+    if "um" in n and n.startswith("code"):
+        return "Ultraman"
+    return re.sub(r"\.[^.]*$", "", name or "")
+
+
+BACKENDS = {STERN.key: STERN, JJP.key: JJP, BOF.key: BOF, DP.key: DP, SPOOKY.key: SPOOKY}
 
 
 def backend_for(what):

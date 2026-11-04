@@ -4152,3 +4152,7 @@ def test_gotg_patched_before_the_fix_is_asked_to_patch_again(tmp_path):
     script.write_text("Sub AddScore_orig(points)\n\tdim multiplierVal\n"
                       "Sub AddScore(points) : End Sub   ' PAD: quiet\n", encoding="utf-8")
     assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == []
+    # the row gathers both GotG maps' marks; the reason shows once
+    script.write_text("Sub AddScore(points)\n\tdim multiplierVal\n", encoding="utf-8")
+    pro = json.load(open(os.path.join(VPX, "guardians.shadow.json"), encoding="utf-8"))
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"] + pro["repatch"]) == [m["repatch"][0]["why"]]

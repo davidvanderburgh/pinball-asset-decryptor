@@ -414,6 +414,12 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   (`{"LightningTarget": {"SLGF": 300.0}}`: Foo Fighters' kick target kicks
   harder; a JSON float is written as a float, an int as an int). The object's
   GameItem stream is replaced, which the MAC does not cover.
+* **A sound played at a wall stops the table** (PAD-992). JP's
+  `PlaySoundAt` pans by the object's `.x`, which a wall, ramp or rubber has
+  not: Foo Fighters' first KICK TARGET coil stopped Visual Pinball with
+  "Object doesn't support this property or method: 'ball.x'". Play a map's
+  sound at an object with a position (the kick target's sound is at
+  Target004, as JP's own sub has it); the patch warns of one that is not.
 * **A magnet the table has no object for** (PAD-925). drhotwing's Rush has
   no time machine magnet: the game holds MAGNET ~4.1 s after each LIFT RAMP
   OPTO (emulator), while the tribute's ball ran up Ramp011 and straight back

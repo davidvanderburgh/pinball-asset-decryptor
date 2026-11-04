@@ -14,10 +14,12 @@
 #      copy of build 0 (the stock one, carried whole) with the build's own files laid over;
 #   2. points the machine's paths at the chosen build: every entry of uptest/ except this
 #      script (and the game's .update_file / .backup_file markers) is a symlink into
-#      /game/pad/live/uptest/, every other root the conf names
-#      (root=<name> <absolute path>: /game/code/assets on the titles that keep media there)
-#      a symlink to pad/live/<name>, and pad/live itself a symlink to pad/b<k> - so the
-#      switch is one rename;
+#      /game/pad/live/uptest/, and pad/live itself a symlink to pad/b<k>; every other root
+#      the conf names (root=<name> <absolute path>: /game/code/assets, /game/code/config on
+#      the titles that keep per-build files there) is the build's own folder, MOVED there
+#      (one rename) and moved home again at the next power-up.  Those stay real folders
+#      because the stock installers work on them by glob: Evil Dead's .profile runs
+#      `rm -rf /game/code/assets/*`, which through a symlink would empty a build;
 #   3. shows the boot menu (spkselect on the X server, the flippers and START through spksw
 #      on the playfield board);
 #   4. starts the chosen build's program from its own folder (pad/b<k>/<exe>), so the
@@ -93,29 +95,61 @@ link_top() {
         case "$(readlink "$e")" in "$P"/live/uptest/*|pad/live/uptest/*) [ -e "$e" ] || rm -f "$e" ;; esac
     done
 }
-# the other roots: /game/code/assets and the like, each a symlink to pad/live/<name>.  A
-# real folder there (the stock install's) moves into pad/stock_<name> once - build 0's own
-# copy wins when it carries one.
-link_roots() {
-    local name path
-    [ -f "$SPK" ] || return 0
+# the other roots: /game/code/assets and the like.  pad/roots says whose folder sits at
+# each ("<name> b<k>", "-" = nobody's); it is written after every rename, so a power cut
+# between two leaves a state the next park understands.
+roots_list() { [ -f "$SPK" ] && sed -n 's/^root=//p' "$SPK" | tr -d '\r'; }
+owner_of() { awk -v n="$1" '$1 == n { o = $2 } END { print o }' "$P/roots" 2>/dev/null; }
+set_owner() {
+    { grep -v "^$1 " "$P/roots" 2>/dev/null; echo "$1 $2"; } > "$P/roots.new" && mv -f "$P/roots.new" "$P/roots"
+    sync
+}
+# park: every root's folder back into the build it belongs to.  One nobody claims (the
+# stock install's, or a rename the last power cut interrupted before pad/roots said so) is
+# the single made build that lacks it, else the machine's own: pad/stock_<name>.
+park_roots() {
+    local name path o d dest
     while read -r name path; do
         [ -n "$name" ] && [ -n "$path" ] || continue
-        if [ -L "$path" ]; then
-            [ "$(readlink "$path")" = "$P/live/$name" ] && continue
-            rm -f "$path"
-        elif [ -e "$path" ]; then
-            rm -rf "$P/stock_$name"
-            mv "$path" "$P/stock_$name" || { say "paths: cannot move $path aside"; continue; }
-            say "paths: the machine's $path kept as pad/stock_$name"
+        [ -L "$path" ] && rm -f "$path"
+        if [ ! -d "$path" ]; then
+            [ "$(owner_of "$name")" = - ] || set_owner "$name" -
+            continue
         fi
-        ln -s "$P/live/$name" "$path" || say "paths: cannot link $path"
-    done < <(sed -n 's/^root=//p' "$SPK" | tr -d '\r')
+        o=$(owner_of "$name")
+        if [ -z "$o" ] || [ "$o" = - ] || [ -e "$P/$o/$name" ]; then
+            o=""
+            for d in "$P"/b[0-9] "$P"/b[1-9][0-9]; do
+                [ -f "$d/$EXE" ] && [ ! -e "$d/$name" ] || continue
+                if [ -z "$o" ]; then o=${d##*/}; else o=many; fi
+            done
+            case "$o" in ""|many) o=stock ;; esac
+        fi
+        if [ "$o" = stock ]; then
+            dest=$P/stock_$name
+            rm -rf "$dest"
+            say "paths: the machine's own $path kept as $dest"
+        else
+            dest=$P/$o/$name
+        fi
+        mv -T "$path" "$dest" && set_owner "$name" - || say "paths: cannot move $path home to $dest"
+    done < <(roots_list)
+}
+bring_roots() { # bring_roots b<k>: its folders to their places
+    local name path
+    while read -r name path; do
+        [ -n "$name" ] && [ -n "$path" ] || continue
+        [ -d "$path" ] && continue           # not parked (a failed move): leave it
+        [ -d "$P/$1/$name" ] || { say "paths: $1 has no $name/"; continue; }
+        mkdir -p "$(dirname "$path")" 2>/dev/null
+        mv -T "$P/$1/$name" "$path" && set_owner "$name" "$1" || say "paths: cannot move $1's $name to $path"
+    done < <(roots_list)
 }
 point_at() {    # point_at b<k>: pad/live -> b<k> (one rename), then every path
+    park_roots
     ln -sfn "$1" "$P/live.new" && mv -T "$P/live.new" "$P/live" || return 1
     sync
-    link_top && link_roots
+    link_top && bring_roots "$1"
     say "paths: live = $1"
 }
 
@@ -143,6 +177,8 @@ fallback() {    # build 0, whatever happened
 
 [ -f "$P/b0/$EXE" ] || fallback "no build 0 ($P/b0/$EXE)"
 [ -f "$CONF" ] || fallback "no $CONF"
+# every root home before a build is copied from b0: its folders must be in it
+park_roots
 
 # ---- 1. the builds -----------------------------------------------------------
 make_build() {  # make_build b<k> <files>
@@ -190,6 +226,12 @@ n=${#targets[@]}
 # the first boot has no pad/live yet: build 0's paths, so the menu's sounds and anything
 # the desktop reads are there while it shows
 [ -L "$P/live" ] || point_at b0 || fallback "cannot point the paths at b0"
+
+# The game marks a good start with uptest/.backup_file and the login profile rolls the
+# machine back to /game/backup at the next boot when it is missing: a power-off at the menu
+# of the first boot would throw the multi-boot away.  The builds are made and the paths are
+# sound by now, so this start counts as good.
+touch "$TOP/.backup_file" 2>/dev/null
 
 # ---- 3. the menu ---------------------------------------------------------------
 timeout_s=$(sed -n 's/^timeout=\([0-9][0-9]*\).*/\1/p' "$CONF" | tail -1)

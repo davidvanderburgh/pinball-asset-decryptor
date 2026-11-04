@@ -87,7 +87,8 @@ if [ "$rc" = 0 ] && [ "$(started)" = "$P/b1/uptest/main.x86_64 $U -force-glcore"
     && [ "$(readlink "$P/live")" = b1 ] && [ "$(readlink "$U/version.txt")" = "$P/live/uptest/version.txt" ] \
     && [ ! -e "$S" ] && grep -q "moved there from the update" "$P/padselect.log" \
     && [ "$(cat "$U/main_Data/x")" = "data of my build" ] && [ -f "$U/.update_file" ] && [ ! -L "$U/.update_file" ] \
-    && [ "$(cat "$T/code/assets/a.png")" = "art of my build" ] \
+    && [ "$(cat "$T/code/assets/a.png")" = "art of my build" ] && [ ! -L "$T/code/assets" ] \
+    && [ ! -e "$P/b1/assets" ] && grep -q "^assets b1$" "$P/roots" && [ -f "$U/.backup_file" ] \
     && [ "$(cat "$P/stock_assets/a.png")" = "the machine's own assets" ] \
     && [ "$(cat "$T/sw.args")" = "L=81 R=80 S=87" ]; then
     ok "1 b1 made from b0 (links, its file over, b0 untouched, its deletion), b2 left out, paths through pad/live, b1 started from its folder in uptest, stock assets kept aside"
@@ -101,6 +102,7 @@ rc=$(run)
 if [ "$rc" = 0 ] && [ "$(started)" = "$P/b0/uptest/main.x86_64 $U -force-glcore" ] \
     && [ "$(readlink "$P/live")" = b0 ] && [ "$(cat "$U/main_Data/x")" = "data of b0" ] \
     && [ "$(cat "$U/gone.txt")" = "only in b0" ] && [ "$(cat "$T/code/assets/a.png")" = "art of b0" ] \
+    && [ "$(cat "$P/b1/assets/a.png")" = "art of my build" ] && [ ! -e "$P/b0/assets" ] \
     && ! pgrep -f "$T/sw" >/dev/null; then
     ok "2 RIGHT + START -> b0, pad/live and every path follow, the reader gone"
 else
@@ -113,6 +115,17 @@ if [ "$(readlink "$P/live")" = b1 ] && [ ! -e "$U/gone.txt" ] && [ ! -L "$U/gone
     ok "2b back on b1: b0's own entry is gone from uptest"
 else
     bad "2b back on b1 (live $(readlink "$P/live"), gone.txt $(ls -l "$U/gone.txt" 2>&1))"
+fi
+
+# 2c a power cut between the rename and its record: b1's assets in place, pad/roots says nobody's
+echo "assets -" > "$P/roots"
+rm -f "$P/last"
+run >/dev/null
+if [ "$(readlink "$P/live")" = b1 ] && [ "$(cat "$T/code/assets/a.png")" = "art of my build" ] \
+    && [ "$(cat "$P/b0/assets/a.png")" = "art of b0" ] && [ "$(cat "$P/stock_assets/a.png")" = "the machine's own assets" ]; then
+    ok "2c an unrecorded rename is put home to the build that lacked it, not taken for the machine's own"
+else
+    bad "2c recovery (live $(readlink "$P/live"), assets '$(cat "$T/code/assets/a.png")', b0 '$(cat "$P/b0/assets/a.png" 2>&1)')"
 fi
 
 # 3

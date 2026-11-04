@@ -442,7 +442,7 @@
   }
  },
  "lamps": {
-  "_": "table light -> the LE's LEDs [node, index]: the table's i<N> is the Pro manual's lamp N = the LE program's lamp N + 32, and LED L - 2 drives lamp L; an RGB insert is the (RED)(GRN)(BLU) triple (rgb, lit in its colour). GUESS: read off the program's tables, not yet seen on the table.",
+  "_": "table light -> the LE's LEDs [node, index]: the table's i<N> is the Pro manual's lamp N = the LE program's lamp N + 32, and LED L - 2 drives lamp L; an RGB insert is the (RED)(GRN)(BLU) triple (rgb, lit in its colour). GUESS: read off the program's tables, not yet seen on the table. gi bulbs (aGiLights) are the game's playfield GI, white (8,4), red (9,4) and blue (10,4) (KISS LE 1.41's GI light lists, s1elf --gi): lit while any is; the table's GI comes on only in its own ResetForNewGame (PAD-977).",
   "I35": {
    "leds": [
     [
@@ -1423,6 +1423,941 @@
    ],
    "rgb": true,
    "name": "R. RAMP ARROW"
+  },
+  "gi10": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi11": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi12": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi14": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi15": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi16": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi21": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi22": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi23": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi24": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi25": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi26": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi27": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi28": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi29": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi3": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi30": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi31": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi32": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi4": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi5": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi6": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi7": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi8": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi9": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "SPL1": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "SPL2": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light1": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light3": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light2": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light12": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light11": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light10": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light9": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light8": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light7": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light6": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light13": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light14": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light15": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light5": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light4": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light16": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light18": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light17": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light20": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light19": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light21": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light22": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi2": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "gi1": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light001": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light002": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light003": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
+  },
+  "Light004": {
+   "leds": [
+    [
+     8,
+     4
+    ],
+    [
+     9,
+     4
+    ],
+    [
+     10,
+     4
+    ]
+   ],
+   "name": "WHITE / RED / BLUE PLAYFIELD GI"
   }
  },
  "quiet_subs": [
@@ -1464,5 +2399,12 @@
   "sw56",
   "sw64"
  ],
- "listed": true
+ "listed": true,
+ "repatch": [
+  {
+   "old": "Sub Table1_Init_orig()\n\tInitLeftSling",
+   "why": "the playfield's GI lights with the game's, and the table's own rules no longer stop it",
+   "since": "PAD-977: the GI bulbs are the machine's GI strings; renamed subs run under On Error Resume Next and name their object for Me"
+  }
+ ]
 }

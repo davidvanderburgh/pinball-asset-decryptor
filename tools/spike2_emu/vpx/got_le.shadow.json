@@ -487,7 +487,7 @@
   }
  },
  "lamps": {
-  "_": "table light -> the LE's LEDs [node, index] (the table's li<N> is LED N of the game's own LED table; an RGB insert is three in a row: rgb, lit in its colour). fl<N> are the flashers on node 12.",
+  "_": "table light -> the LE's LEDs [node, index] (the table's li<N> is LED N of the game's own LED table; an RGB insert is three in a row: rgb, lit in its colour). fl<N> are the flashers on node 12. gi<N> are the table's GI bulbs (aGiLights) on the game's three GI strings, LOWER PLAYFIELD GI (8,4), LEFT PLAYFIELD GI (9,0) and UP RIGHT PLAYFIELD GI (10,0) (the program's GI light lists name those LEDs); a bulb goes by its place, the three the baked lightmaps follow (gi010, gi026, gi036) by their lightmaps'.",
   "li168b": {
    "leds": [
     [
@@ -1806,6 +1806,519 @@
      11
     ]
    ]
+  },
+  "gi001": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi002": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi003": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi004": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi005": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi006": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi007": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi008": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi009": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi010": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi011": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi012": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi013": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi014": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi015": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi016": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi017": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi018": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi019": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi020": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi021": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi024": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi025": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi026": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi027": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi028": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi029": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi030": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi033": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi034": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi035": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi036": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi037": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi038": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi040": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi041": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi042": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi043": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi045": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi047": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi048": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi049": {
+   "leds": [
+    [
+     9,
+     0
+    ]
+   ],
+   "name": "LEFT PLAYFIELD GI"
+  },
+  "gi050": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi051": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi052": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi053": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi054": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi057": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi058": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi059": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi060": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi061": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi062": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi063": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi064": {
+   "leds": [
+    [
+     10,
+     0
+    ]
+   ],
+   "name": "UP RIGHT PLAYFIELD GI"
+  },
+  "gi071": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
+  },
+  "gi072": {
+   "leds": [
+    [
+     8,
+     4
+    ]
+   ],
+   "name": "LOWER PLAYFIELD GI"
   }
  },
  "quiet_subs": [
@@ -1861,5 +2374,12 @@
   "sw83",
   "sw84"
  ],
- "listed": true
+ "listed": true,
+ "repatch": [
+  {
+   "old": "Sub Kicker37_Hit_orig\n    If Tilted then Exit Sub",
+   "why": "the playfield's GI lights with the game's, and the table no longer stops when a ball reaches the top lanes, the dragon or the spinner",
+   "since": "PAD-977: the GI bulbs are the machine's GI strings; renamed subs run under On Error Resume Next and name their object for Me"
+  }
+ ]
 }

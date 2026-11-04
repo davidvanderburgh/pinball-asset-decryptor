@@ -137,6 +137,58 @@ def test_pipe_rewrites_the_bitmap_and_lets_go_on_close(s1, tmp_path):
     assert pipe.pause() is False                    # no pause on this rig
 
 
+def test_pipe_writes_in_place_when_its_tmp_cannot_be_made(s1, tmp_path):
+    # PAD-977: GoT's first write at attach could not make s1sw.input.tmp over
+    # \\wsl.localhost; the bitmap in place still reaches the responder
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.dump = str(tmp_path)
+    (tmp_path / "s1sw.input.tmp").mkdir()           # nothing can be opened at the .tmp path
+    pipe = s1.Spike1Pipe(rig)
+    assert pipe.set(75, 1) and pipe.set(521, 1)
+    bits = (tmp_path / "s1sw.input").read_bytes()[s1.INPUT_HEADER.size:]
+    assert bits[75 >> 3] & (1 << (75 & 7)) and bits[521 >> 3] & (1 << (521 & 7))
+    assert pipe.set(75, 0)
+    bits = (tmp_path / "s1sw.input").read_bytes()[s1.INPUT_HEADER.size:]
+    assert not bits[75 >> 3] & (1 << (75 & 7)) and bits[521 >> 3] & (1 << (521 & 7))
+    assert pipe._failed == 0
+
+
+def test_the_got_le_maps_gi_bulbs_follow_the_games_gi_strings():
+    # PAD-977: VPW's table turns its GI on only in its own game start, which
+    # the shadow game never gets: every aGiLights bulb is the machine's now, on
+    # the LEDs GOT LE 1.37's GI light lists name (LOWER / LEFT / UP RIGHT
+    # PLAYFIELD GI = LED entries 0xdc, 0xdd, 0xde)
+    m = json.load(open(os.path.join(VPX, "got_le.shadow.json"), encoding="utf-8"))
+    gi = {k: v for k, v in m["lamps"].items() if k.startswith("gi")}
+    strings = {(8, 4): "LOWER PLAYFIELD GI", (9, 0): "LEFT PLAYFIELD GI", (10, 0): "UP RIGHT PLAYFIELD GI"}
+    assert len(gi) == 57
+    for k, v in gi.items():
+        (led,) = [tuple(x) for x in v["leds"]]
+        assert strings[led] == v["name"], k
+    # the three bulbs the baked GI lightmaps follow (LampTimer3: Lampz 80-82)
+    assert [tuple(gi[k]["leds"][0]) for k in ("gi010", "gi026", "gi036")] == [(8, 4), (10, 0), (9, 0)]
+    pc = pytest.importorskip("padcontroller")
+    vm = pc.VpxMap("got_le")
+    assert all(pc.lamp_number(*led) in vm.lamp_groups for led in strings)
+
+
+@pytest.mark.parametrize("title,leds,n", [
+    ("kiss_le", [(8, 4), (9, 4), (10, 4)], 55),       # white / red / blue playfield GI
+    ("ghostbusters_le", [(9, 0), (9, 2)], 50)])       # playfield GI 3 / 2
+def test_the_other_spike1_tributes_gi_is_the_machines_too(title, leds, n):
+    # PAD-977: KISS's and Ghostbusters' tributes, like GoT's, turn their GI on
+    # only in their own ResetForNewGame; their aGiLights bulbs are lit while
+    # any of the game's playfield GI strings is (one group, not RGB)
+    m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
+    gi = [v for v in m["lamps"].values() if isinstance(v, dict) and "GI" in v.get("name", "")]
+    assert len(gi) == n and all([tuple(x) for x in v["leds"]] == leds and not v.get("rgb") for v in gi)
+    assert m["repatch"][-1]["since"].startswith("PAD-977")
+    pc = pytest.importorskip("padcontroller")
+    vm = pc.VpxMap(title)
+    g = pc.lamp_number(*leds[0])
+    assert vm.lamp_groups[g] == leds and g not in vm.rgb_groups
+
+
 def test_bridge_takes_the_spike1_rig_for_a_spike1_map():
     pc = pytest.importorskip("padcontroller")
     b = pc.Bridge()

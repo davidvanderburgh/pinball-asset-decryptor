@@ -472,6 +472,70 @@ def test_shadow_switches_ignore_the_tributes_helper_balls(tmp_path):
         MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))[0]
 
 
+#: PAD-977, VPW's Game of Thrones: the shadow game never got a Start, so its
+#: House objects were never made; and a renamed sub is no event handler, so
+#: its `Me` is not the object
+GOT_LIKE = MINI_TRIBUTE + """Dim House(4), CurrentPlayer
+Sub Kicker37_Hit
+    House(CurrentPlayer).RegisterHit 1
+    Me.Kick 190, 55
+End Sub
+Sub Spinner_Spin : Me.TimerEnabled = False : Me.TimerInterval = 1000 : House(CurrentPlayer).AddGold 5 : Me.TimerEnabled = True : End Sub
+Sub sw001_UnHit
+    Dim s : s = "Me" ' Me in a string or a comment stays
+End Sub
+"""
+
+
+def test_shadow_renamed_subs_name_their_object_and_cannot_stop_the_table():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["switches"]["Kicker37"] = {"id": 120, "event": "hit"}
+    out, _ = vs.patch(GOT_LIKE, m)
+    lines = out.split("\n")
+    k = lines.index("Sub Kicker37_Hit_orig")
+    assert lines[k + 1:k + 4] == ["\tOn Error Resume Next   ' PAD: the shadow game's rules never stop the table",
+                                  "    House(CurrentPlayer).RegisterHit 1", "    Kicker37.Kick 190, 55"]
+    assert ("Sub Spinner_Spin_orig : On Error Resume Next : Spinner.TimerEnabled = False : Spinner.TimerInterval"
+            " = 1000 : House(CurrentPlayer).AddGold 5 : Spinner.TimerEnabled = True : End Sub") in lines
+    assert "Sub Kicker37_Hit : vpmTimer.PulseSw 1120 : Kicker37_Hit_orig : End Sub" in lines
+    assert "    Dim s : s = \"Me\" ' Me in a string or a comment stays" in lines     # not renamed: untouched
+    t = lines.index("Sub Table1_Init_orig")
+    assert lines[t + 1].endswith("' PAD: the shadow game's rules never stop the table")
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out)), \
+        "every Sub closes once"
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_renamed_subs_run_on_past_the_shadow_games_missing_state(tmp_path):
+    # the scoop still kicks and the spinner's timer still runs, with no error
+    # for Visual Pinball to stop the table on. Run for real under VBScript
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["switches"]["Kicker37"] = {"id": 120, "event": "hit"}
+    lines = vs.patch(GOT_LIKE, m)[0].split("\n")
+    k = lines.index("Sub Kicker37_Hit_orig")
+    s = [ln for ln in lines if ln.startswith("Sub Spinner_Spin_orig")][0]
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log, House(4), CurrentPlayer",
+        "Class FakeKicker : Public Sub Kick(a, p) : Log = Log & \"kick \" & a & \" \" & p & \" \" : End Sub : End Class",
+        "Class FakeSpinner : Public TimerInterval",
+        "\tPublic Property Let TimerEnabled(v) : Log = Log & \"timer \" & v & \" \" : End Property",
+        "End Class",
+        "Dim Kicker37 : Set Kicker37 = New FakeKicker",
+        "Dim Spinner : Set Spinner = New FakeSpinner",
+        "\n".join(lines[k:lines.index("End Sub", k) + 1]),
+        s,
+        "Kicker37_Hit_orig : Spinner_Spin_orig",    # an error out of either ends the script here
+        "WScript.Echo Log & \"|\""]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.split() == ["kick", "190", "55", "timer", "False", "timer", "True", "|"], r.stdout + r.stderr
+    assert r.returncode == 0 and not r.stderr
+
+
 def test_batmans_unseen_balls_are_helpers():
     # PAD-974: the tribute's Table1_Init makes three balls it never shows
     # (bShowBalls = False): the bat disc's two posts and the crane's spring
@@ -703,7 +767,7 @@ def test_shadow_neuters_the_tributes_own_balls(shadow):
     out, rep = shadow
     assert "'PAD neutered: BallRelease.CreateBall" in out
     assert "'PAD neutered: BallRelease.Kick 90, 4" in out
-    assert "Sub Drain_Hit_orig : If False Then PlungerIM.AutoFire : End Sub" in out   # one-liner kept whole
+    assert "Sub Drain_Hit_orig : On Error Resume Next : If False Then PlungerIM.AutoFire : End Sub" in out   # one-liner kept whole
     assert "Sub PadAutoPlunge(e) : If e Then plungerIM.AutoFire : End If : End Sub" in out
     assert "neutered 3 line(s)" in " ".join(rep)
     assert "Sub Drain_Hit\n\tbsTrough.AddBall Me" in out

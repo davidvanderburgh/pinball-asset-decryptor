@@ -51,7 +51,7 @@ echo "== install it into the slot's /game"
 NV=$SPK_ROOT/nv$SPK_SLOT/$TITLE
 rm -rf "$NV/game/code" "$NV/game/pad" "$NV/game/backup"
 mkdir -p "$W/update" "$NV/game/code/uptest"
-TAR=$(cd "$T" && python3 -c "import sys, mkspkmulti as m; print(m.SpkUpdate(sys.argv[1]).tar_path(sys.argv[2]))" "$MULTI" "$W/cache")
+TAR=$(cd "$T" && python3 -c "import sys, mkspkmulti as m; print(m.SpkUpdate(sys.argv[1]).tar_path(sys.argv[2]))" "$MULTI" "$W/cache" | tail -1)
 tar -xf "$TAR" -C "$W/update" || { echo "machine_sim: cannot unpack the update" >&2; exit 1; }
 if [ "$LAYOUT" = flat ]; then
     cp -a "$W/update/." "$NV/game/code/uptest/"            # .profile: gcp -rf /game/update/* uptest/

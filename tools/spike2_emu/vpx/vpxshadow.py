@@ -923,6 +923,25 @@ def gen(m, had, quiet=None, dof=None):
                 "\tPadPassAt(sw) = GameTime",
                 "\tvpmTimer.PulseSw sw",
                 "End Sub"]
+    # PAD-974: balls the tribute makes for its own mechanics and never shows
+    # are not the machine's (Batman 66's bat disc posts ride the turntable
+    # over its lock triggers): a switch sub one of them runs does nothing. The
+    # tribute calls some of these subs itself, with no ball (Batman 66's
+    # swPlungerRest_UnHit): an ActiveBall that errors is not a helper
+    helpers = m.get("helper_balls", [])
+    if helpers:
+        out += ["Function PadHelperBall()   ' ActiveBall is one of the tribute's unseen helper balls",
+                "\tDim b, y",
+                "\tPadHelperBall = False",
+                "\tOn Error Resume Next",
+                "\tSet b = ActiveBall",
+                "\tIf Not IsObject(b) Then Exit Function",
+                "\tOn Error GoTo 0",
+                "\ty = False"]
+        for h in helpers:
+            out.append("\tIf IsObject(%s) Then y = y Or (b Is %s)" % (h, h))
+        out += ["\tPadHelperBall = y", "End Function"]
+    guard = "\tIf PadHelperBall() Then Exit Sub"
     for name, s in m["switches"].items():
         if name == "_":
             continue
@@ -938,11 +957,13 @@ def gen(m, had, quiet=None, dof=None):
                 # a ramp's opto the ball also rolls back over: one pulse a
                 # shot, on the way up (PAD-907, Rush's time machine); the
                 # table's own sub still runs on every hit
-                out += ["Sub %s_Hit" % name,
+                out += ["Sub %s_Hit" % name] + ([guard] if helpers else []) + [
                         "\tIf ActiveBall.VelY < 0 Then %s" % pulse]
                 if rest:
                     out.append("\t" + rest[3:])
                 out.append("End Sub")
+            elif helpers:
+                out += ["Sub %s_Hit" % name, guard, "\t%s%s" % (pulse, rest), "End Sub"]
             else:
                 out.append("Sub %s_Hit : %s%s : End Sub" % (name, pulse, rest))
         elif ev == "hold":
@@ -956,8 +977,12 @@ def gen(m, had, quiet=None, dof=None):
                 b0 += " : %s_UnHit_orig" % name
             else:
                 b0 += fx(name + "_UnHit")
-            out.append("Sub %s_Hit : %s : End Sub" % (name, b1))
-            out.append("Sub %s_UnHit : %s : End Sub" % (name, b0))
+            if helpers:
+                out += ["Sub %s_Hit" % name, guard, "\t" + b1, "End Sub",
+                        "Sub %s_UnHit" % name, guard, "\t" + b0, "End Sub"]
+            else:
+                out.append("Sub %s_Hit : %s : End Sub" % (name, b1))
+                out.append("Sub %s_UnHit : %s : End Sub" % (name, b0))
         elif ev in ("spin", "pass"):
             body = ("vpmTimer.PulseSw %d" if ev == "spin" else "PadPassSw %d") % sid
             if had.get(name + "_Spin") and calls_orig(name):
@@ -981,7 +1006,10 @@ def gen(m, had, quiet=None, dof=None):
                 body += " : %s_Hit_orig" % name
             else:
                 body += fx(name + "_Hit")
-            out.append("Sub %s_Hit : %s : End Sub" % (name, body))
+            if helpers:
+                out += ["Sub %s_Hit" % name, guard, "\t" + body, "End Sub"]
+            else:
+                out.append("Sub %s_Hit : %s : End Sub" % (name, body))
     for sub_name, names in m.get("drop_resets", {}).items():
         if sub_name == "_":
             continue

@@ -273,6 +273,53 @@ class ReportMixin:
         self._publish_report()
         return {"picture": self.get("report", {}).get("picture")}
 
+    @rpc
+    def report_paste(self, data="", rid=""):
+        """Ctrl+V in the window (PAD-975): *data* is the picture the page
+        read off the paste, base64; empty, the clipboard is read here (a
+        webview that hands the page no picture).  *rid* empty, it becomes
+        the report's picture; otherwise a file of the answer to *rid*'s
+        question.  ``{"picture": None}``-style answers when there is no
+        picture to paste, so the page can let a text paste through."""
+        if data:
+            try:
+                raw = problem_report.decode_pasted(data)
+            except ValueError as e:
+                raise RpcError(str(e))
+        else:
+            raw = problem_report.clipboard_picture()
+        if not raw:
+            return {"pasted": False}
+        try:
+            pic, kind = problem_report.shrink_picture(raw)
+        except ValueError as e:
+            raise RpcError(str(e))
+        if not rid:
+            self._rep_picture = {"name": "pasted picture", "type": kind,
+                                 "data": pic}
+            self._publish_report()
+            return {"pasted": True,
+                    "picture": self.get("report", {}).get("picture")}
+        if not self._report_waiting(rid):
+            raise RpcError("This question is no longer open.")
+        r = self._report_reply(rid)
+        if len(r["files"]) >= problem_report.REPLY_FILES:
+            raise RpcError("At most %d files go with an answer."
+                           % problem_report.REPLY_FILES)
+        room = problem_report.REPLY_MAX_BYTES - sum(
+            len(f["data"]) for f in r["files"])
+        if len(pic) > room:
+            raise RpcError("The answer can't carry another picture: remove "
+                           "a file first.")
+        n = sum(1 for f in r["files"]
+                if f["name"].startswith("pasted picture")) + 1
+        r["error"] = None
+        r["files"].append({"name": "pasted picture%s.jpg" % (
+            "" if n == 1 else " %d" % n), "type": kind, "data": pic,
+            "size": len(pic), "trimmed": False})
+        self._publish_report()
+        return {"pasted": True, "reply": self._report_replies_view().get(rid)}
+
     @rpc(loop=False)
     def report_capture(self):
         """A shot of the app's own window, taken a moment after the window

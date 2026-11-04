@@ -1198,6 +1198,35 @@ registerDialog("donations", DonationsDialog);
 // before it goes, then Send (the app's service) or Save as a file
 // (webui/shellx_report.py, core/problem_report.py).  `prefill` is the
 // error box's words when its own link opened this.
+// PAD-975: Ctrl+V with a picture on the clipboard (Win+Shift+S, Print
+// Screen, a copied image or picture file) adds it, the same as one picked
+// from disk.  The page reads the picture off the paste when the webview
+// hands it over; when the paste carries neither a picture nor text, the
+// app reads the clipboard itself.  A text paste goes through untouched.
+// `rid` empty is the report's picture, otherwise a file of that answer.
+function pastePicture(e, rid, onErr) {
+  const cd = e.clipboardData;
+  const items = cd && cd.items ? Array.from(cd.items) : [];
+  const img = items.find((it) => it.kind === "file" && /^image\//.test(it.type || ""));
+  const send = (b64) => call("shellx.report_paste", b64, rid || "")
+    .catch((x) => onErr(x && x.message ? x.message : String(x)));
+  if (img) {
+    const file = img.getAsFile();
+    if (!file) return;
+    e.preventDefault();
+    const rd = new FileReader();
+    rd.onload = () => send(String(rd.result || ""));
+    rd.onerror = () => send("");
+    rd.readAsDataURL(file);
+    return;
+  }
+  const words = cd ? cd.getData("text/plain") : "";
+  if (words) return;
+  // the paste itself is left alone: when the webview hid text too, the
+  // box still gets it, and the app finds no picture and changes nothing
+  send("");
+}
+
 function ReportDialog({ close, prefill = "" }) {
   const sx = useNs("shellx");
   const r = sx.report || {};
@@ -1236,6 +1265,13 @@ function ReportDialog({ close, prefill = "" }) {
     if (r.last.ok) setSentId(r.last.id || "sent");
     else setErr(r.last.error || "The report could not be sent.");
   }, [r.last, r.busy]);
+  useEffect(() => {
+    // anywhere in the window, the text box or not (PAD-975)
+    if (sentId) return undefined;
+    const onPaste = (e) => { setErr(null); pastePicture(e, "", setErr); };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [sentId]);
   const picture = r.picture;
   const act = async (fn) => {
     setErr(null);
@@ -1294,7 +1330,8 @@ function ReportDialog({ close, prefill = "" }) {
         ${picture ? html`<span class="chip acc sm notr" title=${picture.name}>${picture.name} · ${picture.kb} KB</span>
             <${Button} size="sm" kind="ghost" onClick=${clearPic}>Remove<//>`
           : html`<${Button} drop size="sm" onClick=${pick}>Add a picture…<//>
-            ${r.capture ? html`<${Button} size="sm" onClick=${shoot} title="Hides this window for a moment and takes a picture of the app">Take a picture of the app<//>` : null}`}
+            ${r.capture ? html`<${Button} size="sm" onClick=${shoot} title="Hides this window for a moment and takes a picture of the app">Take a picture of the app<//>` : null}
+            <span class="small muted">or paste one with Ctrl+V</span>`}
       </div>
       <${Check} checked=${hidePaths} onChange=${setHidePaths} label="Leave file paths and my account name out of the report" />
       <details class="sx-rep-facts" open=${showPreview} onToggle=${(e) => setShowPreview(e.target.open)}>
@@ -1339,7 +1376,11 @@ function AnswerBox({ m, reply, focus }) {
   const send = () => act(() => call("shellx.report_reply_send", m.id, text));
   const b = m.board || {};
   const busy = !!rp.busy;
-  return html`<section class="sx-ask" ref=${ref} data-id=${m.id}>
+  const onPaste = (e) => {
+    if (busy || files.length >= 5) return;
+    setErr(null); pastePicture(e, m.id, setErr);
+  };
+  return html`<section class="sx-ask" ref=${ref} data-id=${m.id} onPaste=${onPaste}>
     <div class="row wrap" style="gap:8px">
       <span class="chip sm warn">Needs your answer</span>
       <b class="sx-ask-title">${m.title || "A problem report"}</b>
@@ -1357,7 +1398,7 @@ function AnswerBox({ m, reply, focus }) {
       <${Button} kind="primary" size="sm" onClick=${send} busy=${busy}
         disabled=${busy || (!text.trim() && !files.length)}>${busy ? "Sending…" : "Send"}<//>
     </div>
-    <div class="small muted" style="margin-top:4px">Any file helps, such as a log. Up to 5 files, about 1 MB in all; a log too big to send whole keeps its last part.</div>
+    <div class="small muted" style="margin-top:4px">Any file helps, such as a log; paste a picture into the box with Ctrl+V. Up to 5 files, about 1 MB in all; a log too big to send whole keeps its last part.</div>
     <${ErrorNote} text=${err || rp.error} />
   </section>`;
 }

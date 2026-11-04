@@ -548,6 +548,101 @@ def test_a_picked_picture_rides_along_and_can_be_removed(app_with_worker,
     assert w.call("shellx.report_picture", "clear") == {"picture": None}
 
 
+def test_the_clipboard_picture_is_an_image_or_a_copied_picture_file(tmp_path):
+    from PIL import Image
+    # PAD-975: what ImageGrab.grabclipboard answers on Windows
+    im = Image.new("RGBA", (30, 20), (10, 200, 30, 255))
+    data = R.clipboard_picture(grab=lambda: im)
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    pic = tmp_path / "shot.jpg"
+    pic.write_bytes(b"jpeg-bytes")
+    (tmp_path / "notes.txt").write_text("x")
+    assert R.clipboard_picture(grab=lambda: [str(tmp_path / "notes.txt"),
+                                             str(pic)]) == b"jpeg-bytes"
+    assert R.clipboard_picture(grab=lambda: [str(tmp_path / "notes.txt")]) \
+        is None
+    assert R.clipboard_picture(grab=lambda: None) is None
+
+    def broken():
+        raise OSError("clipboard busy")
+    assert R.clipboard_picture(grab=broken) is None
+    raw = _png(10, 10)
+    b64 = base64.b64encode(raw).decode()
+    assert R.decode_pasted(b64) == raw
+    assert R.decode_pasted("data:image/png;base64," + b64) == raw
+    with pytest.raises(ValueError, match="not a picture"):
+        R.decode_pasted("not base64 at all!")
+
+
+def test_a_pasted_picture_is_the_reports_picture(app_with_worker,
+                                                 monkeypatch):
+    w, worker = app_with_worker
+    # the page read the picture off the paste
+    url = "data:image/png;base64," + base64.b64encode(_png(900, 700)).decode()
+    out = w.call("shellx.report_paste", url)
+    assert out["pasted"] is True and out["picture"]["name"] == "pasted picture"
+    assert w.state("shellx")["report"]["picture"]["name"] == "pasted picture"
+    w.call("shellx.report_send", "Write stopped at 40% today", "", True)
+    assert until(w, lambda: (w.state("shellx")["report"]["last"] or {}
+                             ).get("ok"))
+    body = worker.posts[0][2]
+    assert base64.b64decode(body["picture_b64"])[:3] == b"\xff\xd8\xff"
+    # the webview handed over nothing: the app reads the clipboard itself
+    monkeypatch.setattr(R, "clipboard_picture", lambda: _png(50, 40))
+    assert w.call("shellx.report_paste", "")["pasted"] is True
+    assert w.state("shellx")["report"]["picture"]["name"] == "pasted picture"
+    w.call("shellx.report_picture", "clear")
+    # nothing on the clipboard: nothing changes, no error
+    monkeypatch.setattr(R, "clipboard_picture", lambda: None)
+    assert w.call("shellx.report_paste", "") == {"pasted": False}
+    assert w.state("shellx")["report"]["picture"] is None
+    with pytest.raises(Exception, match="not a picture"):
+        w.call("shellx.report_paste",
+               base64.b64encode(b"plain words").decode())
+
+
+def test_a_pasted_picture_is_a_file_of_the_answer(tmp_path, worker,
+                                                  monkeypatch):
+    from tests.webui_harness import web_app
+    monkeypatch.setenv("PAD_REPORTS_URL", worker.url)
+    monkeypatch.setattr(config, "REPORTS_URL", worker.url)
+    cfg = tmp_path / "cfg"
+    cfg.mkdir(parents=True, exist_ok=True)
+    R.save_cache(R.cache_path(str(cfg / "settings.json")), {"mine": [
+        {"id": "r-a", "title": "No DOF", "at": 1700000000,
+         "state": "filed", "stage": "working", "seen": True}],
+        "checked_at": 0})
+    worker.states["r-a"] = {"state": "filed", "stage": "question",
+                            "ticket": "PAD-968", "question_at": 100,
+                            "reply_at": 0, "question": "What do you see?"}
+    b64 = base64.b64encode(_png(300, 200)).decode()
+    with web_app(tmp_path) as w:
+        assert until(w, lambda: w.state("shellx")["report"]["mine"] and
+                     w.state("shellx")["report"]["mine"][0]["waiting"])
+        out = w.call("shellx.report_paste", b64, "r-a")
+        assert [f["name"] for f in out["reply"]["files"]] == [
+            "pasted picture.jpg"]
+        out = w.call("shellx.report_paste", b64, "r-a")
+        assert [f["name"] for f in out["reply"]["files"]] == [
+            "pasted picture.jpg", "pasted picture 2.jpg"]
+        # the report's own picture is untouched
+        assert w.state("shellx")["report"]["picture"] is None
+        with pytest.raises(Exception, match="no longer open"):
+            w.call("shellx.report_paste", b64, "r-zz")
+        for _ in range(3):
+            w.call("shellx.report_paste", b64, "r-a")
+        with pytest.raises(Exception, match="At most 5"):
+            w.call("shellx.report_paste", b64, "r-a")
+        assert w.call("shellx.report_reply_send", "r-a",
+                      "Here.") == {"sent": True}
+        assert until(w, lambda: worker.replies)
+        rid, body = worker.replies[0]
+        assert len(body["files"]) == 5
+        f = body["files"][0]
+        assert f["type"] == "image/jpeg"
+        assert base64.b64decode(f["b64"])[:3] == b"\xff\xd8\xff"
+
+
 def test_no_service_configured_means_save_only(tmp_path, monkeypatch):
     from tests.webui_harness import web_app
     monkeypatch.setenv("PAD_REPORTS_URL", "")

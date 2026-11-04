@@ -49,6 +49,7 @@ it goes.
 import base64
 import io
 import json
+import logging
 import os
 import re
 import secrets
@@ -60,6 +61,8 @@ import zipfile
 
 from . import session_log
 from .net import urlopen
+
+log = logging.getLogger(__name__)
 
 #: Cloudflare's browser integrity check refuses Python's default
 #: User-Agent (403, error 1010) in production, so every request to the
@@ -231,6 +234,59 @@ def shrink_picture(source):
         else:
             side = int(side * 0.75)
             quality = 70
+
+
+def clipboard_picture(grab=None):
+    """The picture on the system clipboard as image bytes, or ``None``
+    (PAD-975: Ctrl+V in the report window when the page could not read
+    the picture itself).  A copied picture FILE (Explorer's Copy) counts:
+    its bytes are read.  *grab* stands in for ``ImageGrab.grabclipboard``
+    in tests."""
+    if grab is None:
+        try:
+            from PIL import ImageGrab
+        except ImportError:                             # pragma: no cover
+            return None
+        grab = ImageGrab.grabclipboard
+    try:
+        got = grab()
+    except Exception as e:                              # noqa: BLE001
+        log.info("clipboard read failed: %s", e)
+        return None
+    if got is None:
+        return None
+    if isinstance(got, (list, tuple)):
+        for path in got:
+            if os.path.splitext(str(path))[1].lower() in _PICTURE_EXT:
+                try:
+                    with open(path, "rb") as fh:
+                        return fh.read()
+                except OSError:
+                    continue
+        return None
+    if hasattr(got, "save"):
+        buf = io.BytesIO()
+        im = got if got.mode in ("RGB", "RGBA", "L") else got.convert("RGB")
+        im.save(buf, "PNG")
+        return buf.getvalue()
+    return None
+
+
+_PICTURE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+
+def decode_pasted(b64):
+    """The bytes of a picture the page read off a paste (base64, with or
+    without a ``data:`` prefix).  ``ValueError`` when it is not base64."""
+    import binascii
+    s = str(b64 or "")
+    if s.startswith("data:"):
+        s = s.split(",", 1)[-1]
+    try:
+        return base64.b64decode(s, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise ValueError("That paste is not a picture the app can read.") \
+            from e
 
 
 # ---------------------------------------------------------------- the record

@@ -163,6 +163,23 @@ if [ "$SINK" = pulse ] && is_wsl && [ "${PAD_AUDIO_SINK:-auto}" = auto ]; then
     pad_sounddevice_hint | sed 's/^/[play]   /' >&2
 fi
 
+# A RELAY ALREADY ON OUR PORT IS A LEFTOVER, and it is reaped before ours
+# listens. The port is this rig's by allocation (45997 + slot; Spike 1 has its
+# own), so whatever relay holds it belongs to a run that is over - and while
+# it held it, ours could not bind and the new game played in silence
+# (PAD-978: a Spike 1 speaker its stop.sh no longer found sat on slot 1's
+# 45998). Matched on the relay's own argv, `padrelay.py <fifo> <port>`, so no
+# other program and no other port's relay is touched.
+reap_port_relay() {
+    local pat="padrelay\.py [^ ]+ $1( |\$)" i
+    pgrep -f "$pat" >/dev/null || return 0
+    echo "[play] port $1 was held by a speaker left from an earlier run; stopping it"
+    pkill -f "$pat" 2>/dev/null
+    for i in $(seq 1 20); do pgrep -f "$pat" >/dev/null || return 0; sleep 0.1; done
+    pkill -KILL -f "$pat" 2>/dev/null
+    sleep 0.2
+}
+
 # ---- relay sink: the macOS CONTAINER ---------------------------------------
 # There is no audio server inside the box and VNC carries no sound, so the
 # PCM leaves the same way it leaves WSL: raw bytes over loopback TCP. Only the
@@ -179,6 +196,7 @@ fi
 if [ "$SINK" = relay ]; then
     PORT=${PAD_AUDIO_PORT:-45997}
     echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> host player (tcp/$PORT)"
+    reap_port_relay "$PORT"
     python3 "$(dirname "$0")/padrelay.py" "$FIFO" "$PORT" "${PAD_RELAY_CTL:-}" &
     SRV=$!
     trap 'kill $HOLD $SRV 2>/dev/null; rm -f "$FIFO"' EXIT
@@ -190,6 +208,7 @@ if [ "$SINK" = win ]; then
     PORT=${PAD_AUDIO_PORT:-45997}
     echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> WINDOWS (tcp/$PORT)"
     echo "[play] bypassing WSLg audio entirely: $WINPY"
+    reap_port_relay "$PORT"
 
     # The FIFO, handed out as raw bytes by a relay that makes no decisions.
     # It is padrelay.py and NOT another ffmpeg, and the reason is load-bearing:

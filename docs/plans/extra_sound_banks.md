@@ -759,3 +759,44 @@ stays). Proof (fixed build, same card, same firing with no stops): 1900, 999, 19
 1327s all played in turn, our calls whole (tone seconds) and the stock ones at 0.88-0.96
 correlation, and request 76 played the mode 2 file. A build whose `image.bin` is FULL still moves
 the user's calls into banks (PAD-593/606): those still hold their channel after they end.
+
+## Why a bank sound played once kept its channel: its script was cut at 80 bytes (PAD-995)
+
+PAD-994's hold, found. The channel struct (196 bytes at `data sound_channels`) is the game's
+sound-script state (`sscr_state`, named in a Spike 2 build that kept its symbols,
+`reference/spike2 decompile`): `+0x88`/`+0x8c` the script's two read pointers (the descriptor
+in the mapped file, and the vf2 keystream: a byte is their XOR), `+0x90` the WAIT op's count
+down, `+0x5c` the eight voice pointers (a voice's `+0x2d` says it is playing). Dumped once a
+second on the rig (`C:\tmp\PAD-995\rig`, `voicedump_mode.c`), the same 7.4 s call from
+`image.bin` and from `image-sc01.bin`: both voices ran to the record's end; then both scripts
+moved 0x77 bytes on to a WAIT, which counted 0 from `image.bin` and 0x7c0ffe7b (about two
+billion ticks) from the bank. The channel waited out that count.
+
+The script was the game's own, cut short. A descriptor runs to its end op, and the game reads
+it in place; the app read every one through the resolver's 80-byte window (`DESC_WINDOW`) and
+wrote that much into a bank's 0x50-byte slot. 1661 of Godzilla Pro 1.16's 2599 descriptors are 94
+bytes (a call: duck the buses, play, wait, two `0x09` ops that put the buses back, the second at
+0x4b..0x5a, `11 01` for the voice, `00`); the three longest are 108. Past byte 0x50 the bank
+held zeros, which de-whiten to keystream: the music never came back up and a false WAIT held the
+channel. A looping tune's script is shorter, so the music modes' files played right. In
+`image.bin` the app only ever rewrites a descriptor in place, so its tail stayed the game's.
+
+Now every descriptor is read whole once a build (`engine._whole_descriptors`: to where the next
+one starts, they lie back to back; the last cut at its end op) and copied whole: a game sound's
+or a mode's own sound's carrier (`bank_build.write_bank_tables`), a music mode's file in a bank
+(`_bank_mode_descs`), and the runtime's mode descriptors (`_sound_mode_descriptors`, up to the 96
+bytes the runtime holds, `sound_modes.RUNTIME_DESC`; they were 80 too). A bank's descriptor slot is
+0x100 (`soundbank.DESC_SLOT`), what a whole read ever takes.
+
+With the cause gone, PAD-994's rule (only looping music modes' files into banks while
+`image.bin` has room) is lifted: a build with music modes' files puts every bankable sound into
+banks again, as PAD-749 had it, the user's longer calls included.
+
+Proof (2026-11-04, `C:\tmp\PAD-995`): PAD-994's project (Godzilla Pro 1.16, one music mode file and
+32 longer calls), built on this branch: all 32 calls and both of the mode file's sound ids in
+`image-sc01.bin`; request 1900's bank descriptor (sound id 0x10015) now ends `09 02 18 .. 11 01 00`
+as `image.bin`'s does. On the rig, the same firing with no stops: 1900 (our 7.4 s call, from the
+bank) freed channel 7 7.5 s after it started, where PAD-994's bank build held it for good; then
+999 (ours, 9.4 s, from the bank), 1904 and four 1327s (stock, 0.88-0.96 correlation) and 76 (the
+mode 2 file) each played and freed it in turn. Request 134, which plays TUNE 1 once (sound id 2556,
+the mode file's bank id 0x10021), played the 60 s file and freed the channel at 60.3 s.

@@ -720,8 +720,11 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
     descriptor}`` are fragments whose descriptor the caller wrote (a music
     mode's file: the game sound id's own, naming the bank record), every
     fragment past the records among them.  PAD-779: *desc_slot* the bank's room a
-    descriptor (:func:`.soundbank.plan_bank`).  Returns ``{new_idx: (sid, plain,
-    ks)}`` for :func:`verify_tables`."""
+    descriptor (:func:`.soundbank.plan_bank`).  PAD-995: a carrier's descriptor is
+    copied whole (:func:`.engine._whole_descriptors`): the game reads a bank's script
+    in place to its end.  Returns ``{new_idx: (sid, plain, ks)}`` for
+    :func:`verify_tables`."""
+    from . import engine as E
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
     if stride is None:
@@ -738,20 +741,22 @@ def write_bank_tables(gr_path, img_path, bank_path, cat, places, rows, carriers,
         mask, xor = resolver_rule(emu, resolver, out, img_path)
         vf2 = bytes(emu.mu.mem_read(emu.VF2_VA, SB.VF2_WINDOW + max(SB.DESC_SLOT,
                                                                     int(desc_slot))))
-        descs = {n: bytes(d) for n, d in (given or {}).items()}
-        for pl in places:
-            if pl.new_idx in descs:
-                continue
-            r = by_new[pl.new_idx]
-            csid = carriers[pl.idx]
-            got = SN.resolve_descriptor(emu, resolver, out, csid)
-            if got is None:
-                raise RuntimeError("sound id %d (the carrier of the sound in bank record %d) has no "
-                                   "descriptor to copy" % (csid, pl.new_idx))
-            descs[pl.new_idx] = compose_descriptor(got[2], r["findkey"], durations[pl.idx],
-                                                   pl.idx in music_idx)
     finally:
         emu.close()
+    descs = {n: bytes(d) for n, d in (given or {}).items()}
+    whole = None
+    for pl in places:
+        if pl.new_idx in descs:
+            continue
+        if whole is None:
+            whole = {sid: d for sid, _o, d in E._whole_descriptors_once(gr_path, img_path)}
+        r = by_new[pl.new_idx]
+        csid = carriers[pl.idx]
+        if csid not in whole:
+            raise RuntimeError("sound id %d (the carrier of the sound in bank record %d) has no "
+                               "descriptor to copy" % (csid, pl.new_idx))
+        descs[pl.new_idx] = compose_descriptor(whole[csid], r["findkey"], durations[pl.idx],
+                                               pl.idx in music_idx)
     ks_by = SB.write_tables(_lp(bank_path), places, descs, vf2,
                             lambda off: (off ^ xor) & mask, stride, desc_slot=desc_slot)
     log("Sound bank %s: %d fragment(s) and descriptor(s) written (keystream rule mask %#x xor "

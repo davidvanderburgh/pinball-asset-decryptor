@@ -110,10 +110,11 @@ TITLES = {
                      free=14_600_000_000),
     # The P-ROC titles (mkspkproc.py): the package's root IS the game's folder, the stock
     # build stays there, and the menu, the launcher and the other builds travel in
-    # PAD_MULTIBOOT/.  Free: Rick and Morty's /home (7.4 GB, the build 3.5 GB), Alice
-    # Cooper's /game (16 GB, 3.2 GB used) - the builds share b0's files by hard links.
+    # PAD_MULTIBOOT/.  Free for the folder (its old build is deleted first): Rick and Morty's
+    # /home is 7.4 GB (its stock build 3.5 GB), Alice Cooper's /game 16 GB - the builds share
+    # b0's files by hard links.
     "rick_and_morty": dict(sp.PROC["rick_and_morty"], name="RICK AND MORTY", flat=False, proc=True,
-                           roots=(), free=3_500_000_000),
+                           roots=(), free=7_000_000_000),
     "alice_cooper": dict(sp.PROC["alice_cooper"], name="ALICE COOPER'S NIGHTMARE CASTLE", flat=False,
                          proc=True, roots=(), free=14_000_000_000),
 }
@@ -402,10 +403,19 @@ def print_plan(plan):
     print("image-size overhead %d the menu, its pictures and the launcher" % plan["menu"])
     print("upd-size %d estimated multi-boot update" % plan["total"])
     # on the machine: the file in /game/tmp, it unpacked, the old build backed up, the new copy
-    need = plan["total"] + 2 * plan["unpacked"] + us[0].unpacked(None)
-    print("machine-free %d while it installs (the file, it unpacked and copied in, the old build backed up)" % need)
+    if t["proc"]:
+        # codeupdate empties the game's folder first and unpacks it there (the package itself
+        # is decrypted on a partition of its own): the folder needs what the package holds,
+        # and every build beyond b0 only its own files (hard links to b0's)
+        need = plan["unpacked"]
+        print("machine-free %d for the game's folder (the stock build, the other builds' own files, the menu)"
+              % need)
+    else:
+        need = plan["total"] + 2 * plan["unpacked"] + us[0].unpacked(None)
+        print("machine-free %d while it installs (the file, it unpacked and copied in, the old build backed up)"
+              % need)
     if t["free"]:
-        print("machine: a factory %s has %s free on /game: %s" % (
+        print("machine: a factory %s has %s free for it: %s" % (
             us[0].game, _gb(t["free"]), "fits" if need < t["free"] else "TOO BIG - fewer builds"))
     ok32 = plan["total"] + FAT32_MARGIN <= FAT32_MAX
     print("fat32: %s (one file on a FAT32 stick holds at most %s; an exFAT or NTFS stick has no limit)"

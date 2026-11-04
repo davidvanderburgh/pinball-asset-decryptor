@@ -129,3 +129,9 @@ def test_the_tips_are_the_spooky_ones():
     p = mt.MultibootPanel.__new__(mt.MultibootPanel)
     p._backend = SPOOKY
     assert "update of the game's own kind" in p.about_tip()
+
+
+def test_the_p_roc_titles_name_themselves():
+    assert mt.suggest_title("D:/x/rm-gamecode-20220902.pkg", "spooky")[0] == "Rick and Morty"
+    assert mt.suggest_title("D:/x/ac-gamecode.pkg", "spooky")[0] == "Alice Cooper's Nightmare Castle"
+    assert SPOOKY.output_name("D:/x/ac-gamecode.pkg") == "ac-gamecode.pkg"

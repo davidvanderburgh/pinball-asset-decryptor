@@ -32,6 +32,25 @@ def main(argv):
         return 2
     work = tempfile.mkdtemp(prefix="spkmark.", dir=out_dir)
     try:
+        if u.title["proc"]:
+            # a P-ROC package: an AES zip whose root is the game's folder
+            import zipfile
+            import mkspkproc as sp
+            tmp = os.path.join(work, "mod.zip")
+            with zipfile.ZipFile(u.tar_path(work)) as zin, \
+                    zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, allowZip64=True, compresslevel=1) as zout:
+                for zi in zin.infolist():
+                    with zin.open(zi) as s, zout.open(zi, "w", force_zip64=True) as d:
+                        while True:
+                            b = s.read(1 << 20)
+                            if not b:
+                                break
+                            d.write(b)
+                zout.writestr("PAD_MULTIBOOT_MARK", mark)
+            sp.aes_encrypt(tmp, out + ".part", u.fmt)
+            os.replace(out + ".part", out)
+            print(out)
+            return 0
         gz = u.fmt != "plain_tar"
         tmp = os.path.join(work, "mod.tar" + (".gz" if gz else ""))
         name = "PAD_MULTIBOOT_MARK" if u.title["flat"] else "uptest/PAD_MULTIBOOT_MARK"

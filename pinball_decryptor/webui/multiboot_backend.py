@@ -495,6 +495,10 @@ def spooky_game_name(name):
     for ext, game in SPOOKY_EXT_NAMES.items():
         if n.endswith(ext):
             return game
+    if n.startswith("rm-gamecode"):
+        return "Rick and Morty"
+    if n.startswith("ac-gamecode"):
+        return "Alice Cooper's Nightmare Castle"
     if n.startswith("tcm-"):
         return "Texas Chainsaw Massacre"
     if "h78" in n:

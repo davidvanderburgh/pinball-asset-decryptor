@@ -46,6 +46,20 @@ for c in unlock-root lock-root reboot shutdown killall hwclock timedatectl mount
     chmod 755 "$SPP_RIG/bin/$c"
 done
 
+# THE MULTI-BOOT'S LAUNCHER (machine_sim.sh, PAD-980), where the machine's start script runs
+# it: the menu on this display, the buttons through dpprocsw on a real libpinproc over the
+# Big Lebowski rig's fake P3-ROC (SPP_MSIM_SHIM, presses on SPP_MSIM_FIFO), the chosen build
+# moved into the game's folder - and then the game starts below, the rig's own way.
+if [ -n "${SPP_MACHINE_LAUNCH:-}" ]; then
+    : > "$SPP_RIG/launcher.running"
+    runuser -u "$SPP_USER" -- env -i PATH="$SPP_RIG/bin:/usr/local/bin:/usr/bin:/bin" HOME="$SPP_RIG" \
+        USER="$SPP_USER" LANG=C.UTF-8 DISPLAY="$DISPLAY" PADSELECT_START=: \
+        AAIW_PROC_CHIP=p3 DPEMU_FIFO="$SPP_MSIM_FIFO" DPEMU_LOG="$SPP_RIG/shim.log" \
+        PADSELECT_PROCSW_PRELOAD="$SPP_MSIM_SHIM" LD_LIBRARY_PATH="$SPP_MSIM_LIB" \
+        bash "$SPP_MACHINE_LAUNCH" < /dev/null > "$SPP_RIG/launcher.out" 2>&1
+    echo "launcher exit $?" >> "$SPP_RIG/launcher.out"
+    rm -f "$SPP_RIG/launcher.running"
+fi
 cd "/game/$SPP_DIR" || exit 3
 if [ -n "$SPP_UNITY" ]; then
     # Alice Cooper: the Unity player draws the screen and listens on :9999;

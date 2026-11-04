@@ -105,7 +105,16 @@ def main():
 
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("0.0.0.0", port))
+    # SAID IN A [play] LINE, the tag watch.sh carries into the app's log. A
+    # bare traceback here stayed in padaudio.log, and the run went on with
+    # picture, switches and no sound and nothing anywhere saying why
+    # (PAD-978: a Spike 1 speaker left up on the same port).
+    try:
+        srv.bind(("0.0.0.0", port))
+    except OSError as exc:
+        print("[play] NO SOUND this run: the speaker's port %d is taken (%s)"
+              % (port, exc.strerror or exc), flush=True)
+        raise SystemExit(3)
     srv.listen(1)
     print("[padrelay] listening on %d for a player" % port, flush=True)
 

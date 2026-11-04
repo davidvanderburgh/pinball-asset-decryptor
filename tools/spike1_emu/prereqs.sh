@@ -166,7 +166,14 @@ s1_paths() {
     : "${S1_SHIM_DIR:=$S1_HOME/s1emu}"
     : "${QEMU_WORK:=$S1_HOME/qemubuild}"
     : "${S1_QEMU:=$QEMU_WORK/qemu-arm}"
-    export S1_DESKTOP_USER S1_HOME S1_WORK S1_SHIM_DIR QEMU_WORK S1_QEMU
+    # THE SPEAKER'S TCP PORT, OUTSIDE THE SPIKE 2 RIG'S WHOLE RANGE. Spike 2
+    # takes 45997 + slot (padpath.sh), and this rig sat on 45998 - slot 1's
+    # port.  A Spike 1 speaker still up when a slot-1 run started (PAD-978:
+    # stop.sh had stopped finding it) left that run's relay unable to listen,
+    # and the game played in silence.  The app's player reads the same number
+    # (emulate_spike1_core.AUDIO_PORT).
+    : "${S1_AUDIO_PORT:=45996}"
+    export S1_DESKTOP_USER S1_HOME S1_WORK S1_SHIM_DIR QEMU_WORK S1_QEMU S1_AUDIO_PORT
 }
 
 # s1_build_groups RIGDIR - which build steps this machine still has to run:

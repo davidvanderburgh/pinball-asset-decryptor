@@ -21255,9 +21255,13 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
                                         if dir_rel else SB.bank_name(cat), size))
             except Exception:  # noqa: BLE001 - the copy at the end checks the room
                 pass
-        log("%d sound(s) go into a sound bank of their own, %s (%.1f MB): with them "
-            "image.bin would come to %d MB, past the %d MB the game can open. In the bank: %s."
-            % (len(group), SB.bank_name(cat), size / 1e6, with_all // 10**6, cap // 10**6,
+        why = ("with them image.bin would come to %d MB, past the %d MB the game can open"
+               % (with_all // 10**6, cap // 10**6) if with_all > cap else
+               # PAD-749: a music mode's file goes into a bank even when image.bin has room
+               "with them image.bin would come to %d MB, held in memory for good, where a "
+               "bank is held only while it plays" % (with_all // 10**6))
+        log("%d sound(s) go into a sound bank of their own, %s (%.1f MB): %s. In the bank: %s."
+            % (len(group), SB.bank_name(cat), size / 1e6, why,
                ", ".join(_named(e.idx) for e in group)), "info")
     plan = _BankPlan(banks, wavs, spilled, dir_rel)
     plan.game = {i: game_sids[i] for i in spilled if i in game_sids}

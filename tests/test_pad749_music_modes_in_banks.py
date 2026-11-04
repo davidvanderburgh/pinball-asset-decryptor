@@ -31,7 +31,9 @@ def test_music_modes_files_go_into_a_bank_although_image_bin_has_room(monkeypatc
     # the files and the user's longer game sound beside them: image.bin keeps none of them
     assert sorted(plan.grows) == [1, 2, 3] and grows2 == {} and edits2 == {}
     assert sorted(plan.sm_frags) == [2, 3] and plan.game == {1: 501}
-    assert any("sound bank" in m for m in lines)
+    assert any("held in memory for good, where a bank is held only while it plays" in m
+               for m in lines)
+    assert not any("past the" in m for m in lines)
 
 
 def test_without_music_modes_a_build_that_fits_is_the_build_it_was(monkeypatch, tmp_path):

@@ -355,6 +355,47 @@ def test_dmd_frames_ignore_what_they_do_not_know():
     assert not hw.lamps and not hw.coils and not hw.offs
 
 
+# PAD-979: frames Ghostbusters LE 1.17's own NODEBUS_SetLEDMultiple2 built
+# (run under Unicorn) for these runs, one per way it packs them. The last
+# byte is the checksum slot.
+_LED2_FRAMES = [
+    ("940b0800", [11], [0], [8]),                               # one index, all off
+    ("a603a8ff0000", [3, 40], [255, 0], [0, 0]),                # an index list
+    ("99c004ff3fb66ddbb62dffc900", list(range(38)), [255] * 38,  # short mask, two times
+     [255 if i % 3 == 0 else 201 for i in range(38)]),
+    ("a28f0bde020202401010108001800a141e28323c46505a64"         # long mask + extra byte
+     "0102030405060708090a00", [1, 9, 17, 30, 44, 52, 60, 71, 80, 95],
+     [10, 20, 30, 40, 50, 60, 70, 80, 90, 100], list(range(1, 11))),
+    ("9f8012ffff2184070532373c4100", list(range(8, 24)), [7] * 16,  # times listed
+     [5 if i % 5 else 50 + i for i in range(16)]),
+]
+
+
+def test_led2_frames_read_back_to_what_the_game_packed():
+    for hexbody, idx, levels, times in _LED2_FRAMES:
+        assert nodebus.led2_frame(bytes.fromhex(hexbody)) == list(zip(idx, levels, times)), hexbody
+
+
+def test_led2_frames_are_read_only_for_a_game_that_sends_them():
+    hw = _Hw()
+    nodebus.DmdFrames(hw, led2=True).frame(9, bytes.fromhex("8a8067ffff0e8000ffffff0000000000000000000000ff0a5c"))
+    # off the rig's wire: 0x8a = a short mask over bytes 6-7 (48-63), levels each
+    levels = bytes.fromhex("00ffffff0000000000000000000000ff")
+    assert hw.lamps == {(9, 48 + i): v for i, v in enumerate(levels)}
+    old = _Hw()
+    nodebus.DmdFrames(old).frame(9, bytes([0x85, 0x00, 0x10, 0x20, 0x30, 0x00]))
+    assert old.lamps == {(9, 5): 0x10, (9, 6): 0x20, (9, 7): 0x30}
+
+
+def test_a_garbled_led2_frame_is_dropped():
+    hw = _Hw()
+    d = nodebus.DmdFrames(hw, led2=True)
+    d.frame(8, bytes.fromhex("8ac0"))
+    d.frame(8, bytes.fromhex("95ffff0000"))
+    d.frame(8, bytes.fromhex("70050001fb"))                    # the base layer still reads
+    assert hw.lamps == {(8, 5): nodebus.level70(0x00, 0x01)}
+
+
 def test_closed_indexes_reads_active_low_bytes():
     assert nodebus.closed_indexes(nodebus.SW_IDLE) == []
     assert nodebus.closed_indexes(bytes([0xFF, 0xF7, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F])) == [11, 63]

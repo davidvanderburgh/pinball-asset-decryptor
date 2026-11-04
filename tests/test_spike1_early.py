@@ -218,6 +218,33 @@ def test_switches_and_fired_coils_land_in_s1hw_state(tmp_path):
     assert not st.get_coil(8, 7)              # a pulse, not a latch
 
 
+def test_a_node_past_the_block_leaves_the_lamps_where_they_are(tmp_path):
+    # PAD-979: Ghostbusters LE has a board at node 24. Its switch reads grew
+    # the 1024-byte switch area to 1600 bytes, so its lamps on node 1, 8, 9,
+    # 10 and 12 were read back three nodes up.
+    from pinball_decryptor.plugins.stern.spike1_emulate import MAX_NODES, StateBlock
+    assert s1early.STATE_NODES == MAX_NODES
+    path = tmp_path / "s1hw.state"
+    w = s1early.HwStateWriter(str(path), clock=lambda: 0.0)
+    for _ in range(12):
+        w.set_switches(24, {3})
+    w.lamp_level(24, 5, 200)
+    w.lamp_frame(31, 0x80, b"\xff")
+    w.coil_on(24, 2, 1.0)
+    w.coil_off(24, 2)
+    w.lamp_level(1, 7, 191)
+    w.lamp_level(8, 4, 255)
+    w.set_switches(12, {5})
+    assert w.flush(force=True)
+    assert path.stat().st_size == StateBlock.SIZE
+    st, _ = _read_block(path)
+    assert st.get_lamp(1, 7) == (191, 191, 191)
+    assert st.get_lamp(8, 4) == (255, 255, 255)
+    assert st.get_lamp(4, 7) == (0, 0, 0)
+    assert st.get_lamp(11, 4) == (0, 0, 0)
+    assert [i for i in range(64) if st.get_switch(12, i)] == [5]
+
+
 def test_state_writes_are_throttled_and_only_on_change(tmp_path):
     t = [0.0]
     w = s1early.HwStateWriter(str(tmp_path / "s1hw.state"), clock=lambda: t[0])

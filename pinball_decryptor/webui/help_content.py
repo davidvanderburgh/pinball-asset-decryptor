@@ -3111,6 +3111,38 @@ HELP_CONTENT = {
             {"note": "Installing any normal update afterwards takes the menu away "
                      "again.", "kind": "warn"},
         ]),
+        ("Spooky Pinball (one update file)", [
+            "Pick **Spooky Pinball** and the tab takes a game's stock update plus up "
+            "to eight more builds of the same game. **Build update…** writes ONE "
+            "update of the game's own kind, under the stock update's own name, into "
+            "the folder you choose.",
+            {"flow": [
+                {"icon": "file", "title": "Build update…", "text": "one update file"},
+                {"icon": "upload", "title": "USB stick",
+                 "text": "install it like any update of the game"},
+                {"icon": "multiboot", "title": "Next power-up",
+                 "text": "the menu shows before the game"}]},
+            "- Flippers choose, START boots, and the countdown boots the build "
+            "chosen last.\n"
+            "- The first row is the stock build. It travels whole, and the machine "
+            "falls back to it if anything goes wrong. Every other build carries only "
+            "the files it changes.\n"
+            "- All builds share one set of settings and scores.\n"
+            "- **Beetlejuice** installs an update that is not Spooky's own only in "
+            "its developer mode, as with any Beetlejuice mod.\n"
+            "- **Texas Chainsaw Massacre** has about 6 GB free, room for about two "
+            "builds. The size strip shows what the update needs.\n\n"
+            "| Game | Supported |\n"
+            "|---|---|\n"
+            "| Beetlejuice, Scooby-Doo, Evil Dead, Texas Chainsaw Massacre, Looney "
+            "Tunes, Halloween, Ultraman | Yes |\n"
+            "| Rick and Morty, Alice Cooper's Nightmare Castle | not yet (they update "
+            "differently) |\n"
+            "| America's Most Haunted, Rob Zombie, Domino's, Jetsons | No (the game "
+            "board holds one game, and only the game can read the flippers) |",
+            {"note": "Installing any normal update afterwards takes the menu away "
+                     "again.", "kind": "warn"},
+        ]),
     ],
 }
 

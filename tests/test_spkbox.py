@@ -222,13 +222,29 @@ def test_the_mac_build_carries_the_spooky_rig():
 
 
 # PR #17: a Mac with Podman and no docker. The stand-in becomes `podman`
-# (saying PODMAN), and every other docker on PATH is taken off it.
+# (saying PODMAN), and every other docker on PATH is taken off it. Not with
+# `sed -i` (BSD sed on macOS reads its next word as the suffix), and not by
+# dropping a folder that has a docker: on the Linux runner that is /usr/bin,
+# mkdir and all - its other tools stay, as links in a folder of their own.
 _PODMAN_ONLY = r"""
-sed -i 's/"DOCKER /"PODMAN /' "$W/bin/docker"
-mv "$W/bin/docker" "$W/bin/podman"
-PATH=$(printf %s "$PATH" | tr : '\n' | while IFS= read -r d; do
-    [ -n "$d" ] && [ ! -x "$d/docker" ] && printf '%s:' "$d"; done)
-export PATH=${PATH%:} TMPDIR="$W/tmp"
+sed 's/"DOCKER /"PODMAN /' "$W/bin/docker" > "$W/bin/podman"
+rm "$W/bin/docker"
+chmod +x "$W/bin/podman"
+_p= _n=0
+while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    if [ -x "$d/docker" ]; then
+        _n=$((_n + 1))
+        mkdir -p "$W/path$_n"
+        ln -s "$d"/* "$W/path$_n/" 2>/dev/null
+        rm -f "$W/path$_n/docker"
+        d="$W/path$_n"
+    fi
+    _p="$_p:$d"
+done <<EOF
+$(printf %s "$PATH" | tr : '\n')
+EOF
+export PATH=${_p#:} TMPDIR="$W/tmp"
 mkdir -p "$TMPDIR"
 """
 
@@ -248,7 +264,8 @@ def test_pad_docker_naming_podman_wins_and_the_shim_is_one_per_user():
     tmp = subprocess.run(["bash", "-c", "mktemp -d"], stdout=subprocess.PIPE,
                          timeout=30).stdout.decode().strip()
     # inline, not as $0: `bash -c CMD ARG` through WSL's bash.exe loses ARG
-    assert tmp.startswith("/tmp/tmp."), tmp
+    # (a Mac's mktemp answers under /var/folders/.../T, not /tmp)
+    assert tmp.startswith("/") and "/tmp." in tmp, tmp
     try:
         setup = (_PODMAN_ONLY + 'export PAD_DOCKER="$W/bin/podman" '
                  'TMPDIR="%s"\n' % tmp)

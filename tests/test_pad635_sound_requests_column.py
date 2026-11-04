@@ -139,6 +139,23 @@ def test_the_audio_tab_shows_which_requests_play_each_sound(tmp_path):
         assert text[3].endswith(",#12")
 
 
+def test_a_renamed_sound_keeps_its_requests(tmp_path):
+    """PAD-984: a rename keeps the slot's idx, so its Requests count and tip stay
+    (they read blank until the tab reloaded)."""
+    proj = _project(tmp_path)
+    CS.write_requests(os.path.join(proj, CS.REQUESTS_TSV), [[1]] * 20,
+                      {4: [1], 9: [1]}, {4: "SE GZ VO JACKPOT"}, also={12: [3]})
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        _open(w, proj)
+        assert w.call("audio.rename", RELS[0], "Big jackpot", "callouts") is True
+        row = _row(w, "audio/idx0001 - Big jackpot.wav")
+        assert row["rq"] == 2
+        assert row["rq_tip"][1:] == ["#4  SE GZ VO JACKPOT", "#9"]
+        # and a bare one given its first name
+        assert w.call("audio.rename", RELS[1], "Roar", "sfx") is True
+        assert _row(w, "audio/idx0002 - Roar.wav")["rq"] == 0
+
+
 def test_no_request_map_no_column(tmp_path):
     proj = _project(tmp_path)
     # an extract made before the later parts were recorded

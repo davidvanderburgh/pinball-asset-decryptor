@@ -533,5 +533,8 @@ Write what you did and what you expected; the app fills in the rest.
   (with how far along the fix is), Fix ready and Done. Each card shows its
   ticket number; mention it if you write about the problem elsewhere.
   **Check now** asks for the latest.
+- **A question from the developer** shows as a notice at the top and a
+  **Needs your answer** card on the board. **Answer it** opens a box to
+  write your answer and add up to five files; it goes straight back.
 - **Save as a file…** writes the same report as a .zip to attach to a
   Discord post or a mail when the service cannot be reached.

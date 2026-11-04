@@ -139,7 +139,7 @@ CMD ["bash"]
 #: Docker Desktop shares by default, and the JJP pipeline already answers
 #: this the same way (``_stage_project_file`` copies partclone_to_raw.py
 #: into the cache rather than mounting the bundle).
-_RIGS = ("jjp_emu", "spike2_emu", "bof_emu", "dp_emu")
+_RIGS = ("jjp_emu", "spike2_emu", "bof_emu", "dp_emu", "spooky_emu")
 
 #: ...and the package's leaf modules a rig imports from a bare python3 (see
 #: plugins/__init__.py): mkbofmulti.py reads both programs' Godot pack
@@ -175,7 +175,12 @@ _PACKAGE_FILES = ("pinball_decryptor/plugins/bof/pck_directory.py",
                   "pinball_decryptor/plugins/stern/progreloc.py",
                   "pinball_decryptor/plugins/stern/shader_profile.py",
                   "pinball_decryptor/plugins/stern/sidx.py",
-                  "pinball_decryptor/plugins/stern/valpatch.py")
+                  "pinball_decryptor/plugins/stern/valpatch.py",
+                  # Spooky's mkspkmulti.py reads and packs the updates with the
+                  # plugin's own detection and GPG layers (PAD-980)
+                  "pinball_decryptor/plugins/spooky/formats.py",
+                  "pinball_decryptor/plugins/spooky/games.py",
+                  "pinball_decryptor/plugins/spooky/gpg.py")
 
 #: Copied without these - build scratch that is large, useless in the
 #: container, and in __pycache__'s case actively wrong (host .pyc files).

@@ -217,7 +217,7 @@ from .theme import THEMES
 # ISO.  Every builder below takes its backend from the form (``platform``),
 # the panel from the manufacturer the app switched to, and the default is
 # Stern - so every argv the Stern tests pin is unchanged.
-from pinball_decryptor.webui.multiboot_backend import BOF, DP, JJP, backend_for
+from pinball_decryptor.webui.multiboot_backend import BACKENDS, BOF, DP, JJP, SPOOKY, backend_for
 
 #: Where the JJP builder keeps its scratch (a loop-mounted copy of root A, the
 #: re-imaged pieces): a Linux path, never beside the output on a Windows drive.
@@ -2405,13 +2405,14 @@ def jjp_selector_dir(selector_dir):
 
 
 def platform_selector_dir(selector_dir, be):
-    """A non-Stern platform's menu program directory (JJP, BOF): what the
-    form names, unless that is empty or ANOTHER platform's default - a form
-    born on one platform and switched keeps a default that is no place for
-    this platform's binary."""
+    """A non-Stern platform's menu program directory (JJP, BOF, DP, Spooky):
+    what the form names, unless that is empty or ANOTHER platform's default - a
+    form born on one platform and switched keeps a default that is no place for
+    this platform's binary.  Every backend's default counts (the Big Lebowski's
+    was missing until PAD-980)."""
     sel = (selector_dir or "").strip().rstrip("/")
-    others = {DEFAULT_SELECTOR_DIR.rstrip("/"), JJP.selector_default.rstrip("/"),
-              BOF.selector_default.rstrip("/")}
+    others = {DEFAULT_SELECTOR_DIR.rstrip("/")} | {
+        b.selector_default.rstrip("/") for b in BACKENDS.values() if b.key != "stern"}
     if not sel or (sel in others and sel != be.selector_default.rstrip("/")):
         return be.selector_default
     return sel
@@ -6644,6 +6645,34 @@ class MultibootPanel:
         "costs its own update zip's files. The gray band at the end is the menu "
         "and the launcher. A FAT32 stick holds at most 4 GB in one file, and the "
         "machine's USB update wants 2.5 times the unpacked size free on its drive.")
+    #: ...and on a Spooky Pinball game (PAD-980).
+    ABOUT_TIP_SPK = ("Builds ONE update of the game's own kind (a .scooby, a "
+                     ".beetlejuice, a .looney, an .ed, a tcm or code .pkg) that "
+                     "puts several builds of the game on the machine - the stock "
+                     "build and your own - and a menu it shows at power-up: the "
+                     "flippers choose, START boots, a countdown boots the "
+                     "remembered choice. The first row is the STOCK build: it "
+                     "travels whole, and the machine falls back to it if anything "
+                     "goes wrong. Every other row is another update of the same "
+                     "game (a mod PAD wrote, or another Spooky version); only its "
+                     "files that differ travel, and the machine makes the build "
+                     "the first time the menu starts. Install it the way every "
+                     "update of the game is installed; installing a normal update "
+                     "later takes the menu away. Settings and scores are shared by "
+                     "every build. Nothing here touches the updates you pick.")
+    ADD_ROW_TEXT_SPK = "Add another build…"
+    LIST_TIP_SPK = ("Each row carries its own icons: ✎ edits the image, − takes it "
+                    "out of the update, ▲ / ▼ move it in the menu's order (the "
+                    "outlined arrow means that row cannot go further). The first "
+                    "row is the STOCK build (Spooky's own update file): it travels "
+                    "whole and is the one the machine falls back to. Every other row "
+                    "is an update of the same game; only the files it changes travel.")
+    SIZE_TIP_SPK = (
+        "How big the update comes out - measured from the updates themselves. The "
+        "stock build travels whole; every other build costs only the files it "
+        "changes. The gray band at the end is the menu and the launcher. A FAT32 "
+        "stick holds at most 4 GB in one file (an exFAT or NTFS stick has no such "
+        "limit).")
     LIST_TIP_BOF = ("Each row carries its own icons: ✎ edits the image, − takes "
                     "it out of the update, ▲ / ▼ move it in the menu's order "
                     "(the outlined arrow means that row cannot go further). "
@@ -7342,7 +7371,7 @@ class MultibootPanel:
     def about_tip(self):
         """The badge's words for the platform the tab is on."""
         return {"jjp": self.ABOUT_TIP_JJP, "bof": self.ABOUT_TIP_BOF,
-                "dp": self.ABOUT_TIP_DP}.get(
+                "dp": self.ABOUT_TIP_DP, "spooky": self.ABOUT_TIP_SPK}.get(
             self._backend.key, self.ABOUT_TIP)
 
     def _apply_platform_words(self):
@@ -7360,11 +7389,11 @@ class MultibootPanel:
         if sel is not None:
             cur = sel.get().strip()
             defaults = (DEFAULT_SELECTOR_DIR, JJP.selector_default, BOF.selector_default,
-                        DP.selector_default)
+                        DP.selector_default, SPOOKY.selector_default)
             if be.key != "stern" and (not cur or cur in defaults):
                 sel.set(be.selector_default)
             elif be.key == "stern" and cur in (JJP.selector_default, BOF.selector_default,
-                                               DP.selector_default):
+                                               DP.selector_default, SPOOKY.selector_default):
                 sel.set(os.environ.get("PAD_MULTIBOOT_SELECTOR") or DEFAULT_SELECTOR_DIR)
         about = getattr(getattr(self, "_about_badge", None), "icon_tip", None)
         if about is not None:
@@ -7374,7 +7403,7 @@ class MultibootPanel:
         # compact layout or in-place update to explain.  Instance attributes
         # over the class's, so a Stern panel keeps the texts its tests pin.
         cls = type(self)
-        suffix = {"jjp": "_JJP", "bof": "_BOF", "dp": "_DP"}.get(be.key, "")
+        suffix = {"jjp": "_JJP", "bof": "_BOF", "dp": "_DP", "spooky": "_SPK"}.get(be.key, "")
         self.ADD_ROW_TEXT = getattr(cls, "ADD_ROW_TEXT" + suffix)
         self.LIST_TIP = getattr(cls, "LIST_TIP" + suffix)
         self.SIZE_TIP = getattr(cls, "SIZE_TIP" + suffix)
@@ -8578,10 +8607,10 @@ class MultibootPanel:
             # card, and its own music while it is highlighted (mkbofmulti.py
             # media pulls both out of the .fun); the menu-wide confirm sound
             row.art, row.anim, row.music, row.confirm = "auto", "auto", "auto", ""
-        elif be.key == "dp":
+        elif be.key in ("dp", "spooky"):
             # PAD-853: a Big Lebowski update has no still or clip the tools can
             # take, so a card is its words until a picture is given; the
-            # menu-wide confirm sound
+            # menu-wide confirm sound.  A Spooky update the same (PAD-980)
             row.art, row.anim, row.music, row.confirm = "none", "none", "none", ""
         self._rows.append(row)
         self._refresh_tree(select=len(self._rows) - 1)
@@ -11373,6 +11402,12 @@ class MultibootPanel:
                       "the machine, every other build's files go into the zip "
                       "beside the menu, and the zip is read back (a minute or "
                       "two)." % field)
+        elif can and self._backend.key == "spooky":
+            # PAD-980: what a Spooky build does, in its own words
+            detail = ("Writes a new update into %s, under the stock update's "
+                      "own name - the stock build whole, every other build's "
+                      "changed files beside it, and the menu - and reads it "
+                      "back (minutes)." % field)
         elif can and bof:
             # PAD-342: what a BOF build does, in its own words
             detail = ("Writes a new update at %s - the .fun files are "

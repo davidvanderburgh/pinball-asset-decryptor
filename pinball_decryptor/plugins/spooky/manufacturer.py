@@ -46,6 +46,12 @@ class SpookyManufacturer(Manufacturer):
         # emulated Warden board in tools/spooky_emu.  Beetlejuice only so
         # far; the tab lists the games it runs.
         emulate_spooky=True,
+        # Multi-boot (PAD-980): the Multi-boot tab with its Spooky backend - one
+        # update of the title's own kind whose main.x86_64 is a launcher with a
+        # boot menu, carrying the stock build whole and the others' differences
+        # (tools/spooky_emu/mkspkmulti.py, MULTIBOOT.md).  The Linux titles only:
+        # the pinHeck games cannot run a menu (MULTIBOOT.md).
+        multiboot=True,
     )
     input_spec = InputSpec(
         label="Spooky game files",

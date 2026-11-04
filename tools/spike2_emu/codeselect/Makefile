@@ -27,6 +27,12 @@
 #                           draws on), input_pipe.c (dpprocsw's lines) and
 #                           stubs_dp.c stand in for the Stern hardware files.
 #                           tools/dp_emu/MULTIBOOT.md.
+#   make PLATFORM=spk       a Spooky Pinball machine (PAD-980): the DP build
+#                           (static, drawing on the X server - the cabinets'
+#                           sway runs Xwayland) as $(BUILD)/spkselect, plus
+#                           $(BUILD)/spksw, the static button reader for the
+#                           Warden / Pinotaur board (spksw.c), which feeds it
+#                           input_pipe's lines.  tools/spooky_emu/MULTIBOOT.md.
 #
 # THE STERN BUILD.  The card rootfs copy ($(ROOT)) is used as the sysroot BY
 # HAND: the cross gcc searches its own tooldir /usr/arm-linux-gnueabihf/
@@ -54,6 +60,8 @@ else ifeq ($(PLATFORM),bof)
 BUILD    ?= build-bof
 else ifeq ($(PLATFORM),dp)
 BUILD    ?= build-dp
+else ifeq ($(PLATFORM),spk)
+BUILD    ?= build-spk
 else
 BUILD    ?= build
 endif
@@ -150,14 +158,21 @@ AUDLIBS   =
 LIBC      = -lpthread -lm
 SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_bof.c log.c art.c audio.c audio_fifo.c nvm.c
 HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
-else ifeq ($(PLATFORM),dp)
+else ifneq ($(filter dp spk,$(PLATFORM)),)
 # ---- DP: native x86-64, the host gcc, STATIC (as BOF), drawing on X ----
 # Every path is passed by the launcher (padselect_dp.sh): the menu's folder
-# is <V>/pad, and V is the update's own version folder name.
+# is <V>/pad, and V is the update's own version folder name.  A Spooky
+# machine's (spk) is the same program under its own name; its launcher
+# (padselect_spk.sh) passes every path as well.
 CC        = gcc
 CROSS     =
+ifeq ($(PLATFORM),spk)
+BINNAME   = spkselect
+PREFIX   ?= /game/code/pad
+else
 BINNAME   = dpselect
 PREFIX   ?= /home/dp/game/pad
+endif
 QEMU      = $(CURDIR)/test/native.sh
 export QEMU
 CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
@@ -260,6 +275,26 @@ $(PROCSW): dpprocsw.c $(BUILD)/libpinproc.so.2.0 | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
 >     -nostartfiles dpprocsw.c $(BUILD)/libpinproc.so.2.0 -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
+else ifeq ($(PLATFORM),spk)
+# the button reader (spksw.c): plain POSIX on the board's tty, static like the menu;
+# and the P-ROC titles' (Rick and Morty, Alice Cooper): the Big Lebowski's dpprocsw on the
+# machine's own libpinproc (padselect_proc.sh)
+SPKSW = $(BUILD)/spksw
+PROCSW = $(BUILD)/dpprocsw
+all: $(BIN) $(SPKSW) $(PROCSW)
+
+$(SPKSW): spksw.c | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -static spksw.c -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
+
+$(BUILD)/libpinproc.so.2.0: | $(BUILD)
+> printf 'void PRCreate(void){} void PRDelete(void){} void PRSwitchGetStates(void){} void PRGetLastErrorText(void){}\n' > $(BUILD)/pinproc_stub.c
+> $(CC) -shared -fPIC -Wl,-soname,libpinproc.so.2.0 -o $@ $(BUILD)/pinproc_stub.c
+
+$(PROCSW): dpprocsw.c $(BUILD)/libpinproc.so.2.0 | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
+>     -nostartfiles dpprocsw.c $(BUILD)/libpinproc.so.2.0 -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
 else
 all: $(BIN)
 endif
@@ -327,6 +362,27 @@ install: $(BIN) $(PROCSW)
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/dpselect"
 > install -m 755 "$(PROCSW)" "$(DESTDIR)$(PREFIX)/dpprocsw"
 > install -m 755 padselect_dp.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
+> if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi
+else ifeq ($(PLATFORM),spk)
+check: $(BIN) $(SPKSW) $(PROCSW)
+> bash test/check_elf_spk.sh "$(BIN)" "$(SPKSW)"
+> bash test/check_elf_dp.sh "$(BIN)" "$(PROCSW)"
+> bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> $(PYTHON) test/x11_dp_test.py "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> bash -n padselect_spk.sh && bash test/padselect_spk_test.sh "$(BIN)" "$(SPKSW)" "$(DEJAVU)"
+> bash -n padselect_proc.sh && bash test/padselect_proc_test.sh "$(BIN)" "$(DEJAVU)"
+> @echo "check: OK (spk)"
+
+check-hw:
+> @echo "check-hw: the node-bus test is Stern's; spksw is proven on the rig's boards (tools/spooky_emu/MULTIBOOT.md)"
+
+install: $(BIN) $(SPKSW) $(PROCSW)
+> install -d "$(DESTDIR)$(PREFIX)"
+> install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/spkselect"
+> install -m 755 "$(SPKSW)" "$(DESTDIR)$(PREFIX)/spksw"
+> install -m 755 "$(PROCSW)" "$(DESTDIR)$(PREFIX)/dpprocsw"
+> install -m 755 padselect_spk.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
+> install -m 755 padselect_proc.sh "$(DESTDIR)$(PREFIX)/padselect_proc.sh"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi
 else ifeq ($(PLATFORM),jjp)
 check: $(BIN) capbin

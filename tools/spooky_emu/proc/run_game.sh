@@ -62,9 +62,18 @@ esac
 bash "$SPP_TOOLS/killgame.sh" >/dev/null 2>&1
 
 rm -rf "$SPP_RIG"
-mkdir -p "$SPP_RIG/game"
-cp -al "$(realpath "$BUILD")" "$SPP_RIG/game/$DIR"
-rm -f "$SPP_RIG/game/$DIR/title"
+if [ -n "${SPP_MACHINE_GAME:-}" ]; then
+    # THE MACHINE'S /game (machine_sim.sh, the multi-boot proof, PAD-980): installed the way
+    # the title's codeupdate leaves it and kept between power-ups, so the multi-boot
+    # launcher's renames in the game's folder are the machine's.  <build> still names the
+    # stock build the rig's settings come from.
+    mkdir -p "$SPP_RIG"
+    ln -s "$SPP_MACHINE_GAME" "$SPP_RIG/game"
+else
+    mkdir -p "$SPP_RIG/game"
+    cp -al "$(realpath "$BUILD")" "$SPP_RIG/game/$DIR"
+    rm -f "$SPP_RIG/game/$DIR/title"
+fi
 echo "$BUILD" > "$SPP_RIG/build"
 echo "$VISIBLE" > "$SPP_RIG/visible"
 echo "$TITLE" > "$SPP_RIG/title"
@@ -75,7 +84,7 @@ touch "$(realpath "$BUILD")/used"            # the Cache window's "Last played"
 # are the cache's own inodes (hard links), and the game must not rewrite
 # them.  A file it does rewrite is copied first (below).
 chown "$SPP_USER": "$SPP_RIG"
-find "$SPP_RIG/game" -type d -exec chown "$SPP_USER": {} +
+find "$SPP_RIG/game/" -type d -exec chown "$SPP_USER": {} +
 # Alice Cooper's Unity player uses /game/code/... only when this file exists
 # (else its developer's C:/ALICECOOPER/...).
 # Its launcher reads two files of the machine's OS and, finding them missing,
@@ -143,6 +152,8 @@ setsid -f unshare --net --mount --propagation private \
         SPP_SITE="$SPP_ROOT/site" SPP_STUB="$SPP_PROC/pystub" SPP_DIR="$DIR" SPP_LAUNCH="$LAUNCH" \
         SPP_UNITY="$UNITY" SPP_OSFILES="$OSFILES" SPP_SCREEN="$SCREEN" SPP_XVFB=$XVFB DISPLAY="$DISP" \
         SPP_BALLS="$BALLS" PROC_EMU_FPGA="$FPGA" PROC_EMU_CTL="$CTL" SPP_VISIBLE=$VISIBLE $AUDIO_ENV \
+        SPP_MACHINE_LAUNCH="${SPP_MACHINE_LAUNCH:-}" SPP_MSIM_FIFO="${SPP_MSIM_FIFO:-}" \
+        SPP_MSIM_SHIM="${SPP_MSIM_SHIM:-}" SPP_MSIM_LIB="${SPP_MSIM_LIB:-}" \
     bash "$SPP_TOOLS/netns.sh" < /dev/null >> "$SPP_RIG/rig.log" 2>&1
 
 # Up = the game's run loop is going and attract has shown its first page:
@@ -150,7 +161,8 @@ setsid -f unshare --net --mount --propagation private \
 # starts.  A cold cache reads ~3 GB of assets first.
 for i in $(seq 1 1800); do
     [ -f "$SPP_RIG/attract" ] && break
-    [ "$i" -gt 50 ] && ! spp_alive game && break
+    # (the multi-boot's launcher shows its menu before the game starts: netns.sh)
+    [ "$i" -gt 50 ] && ! spp_alive game && [ ! -f "$SPP_RIG/launcher.running" ] && break
     sleep 0.1
 done
 # The app's Volume / Mute, live, as on the Warden rig: spkvol.py finds the

@@ -186,6 +186,12 @@ class MultibootTab(TabService):
             self.window.append_log("[multi-boot] the Barrels of Fun emulator runs one "
                                    "program and has no boot-menu step yet")
             return
+        if getattr(self._multiboot_panel, "platform", "stern") == "spooky":
+            # PAD-980: proven on the rig by tools/spooky_emu/machine_sim.sh;
+            # the Emulate Spooky tab runs one build
+            self.window.append_log("[multi-boot] the Emulate Spooky tab runs one build "
+                                   "and has no boot-menu step yet")
+            return
         if getattr(self._multiboot_panel, "platform", "stern") == "dp":
             # PAD-853: the whole multi-boot is proven on the rig by
             # tools/dp_emu/machine_sim.sh; the Emulate DP tab runs one build

@@ -1407,7 +1407,8 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 continue
             m = d["m"]
             want = (sizes or {}).get(d.get("image"))
-            if d["kind"] == "bitmap" and d.get("w") and d.get("h") and own_size(img.size, want):
+            if d["kind"] == "bitmap" and d.get("w") and d.get("h") and not d.get("own") \
+                    and own_size(img.size, want):
                 # kept at its own size: in the original's place and size, fitted and
                 # centred, as the Write lays it out (PAD-865, radium_grow.keep_boxes)
                 m = ev.compose(m, radium_grow.fit_box(img.size[0], img.size[1],

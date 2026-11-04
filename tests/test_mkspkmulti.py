@@ -214,3 +214,15 @@ def test_refusals(tmp_path, scooby, sel):
     assert mk.main(["build", "--primary", stock, "--extra", path, "--out", str(tmp_path / "multi2"),
                     "--selector-dir", sel]) == 2
     json.dumps(mk.inspect_update(path))
+
+
+def test_a_second_plan_reads_the_kept_member_lists(tmp_path, scooby, monkeypatch):
+    stock, mod = scooby
+    monkeypatch.setattr(mk, "INDEX_CACHE", str(tmp_path / "idx"))
+    assert mk.main(["plan", "--primary", stock, "--extra", mod]) == 0
+    assert len(os.listdir(tmp_path / "idx")) == 2
+    opened = []
+    real = tarfile.open
+    monkeypatch.setattr(tarfile, "open", lambda *a, **k: opened.append(a) or real(*a, **k))
+    assert mk.main(["plan", "--primary", stock, "--extra", mod]) == 0
+    assert opened == [], "the plan read an update again instead of its kept list"

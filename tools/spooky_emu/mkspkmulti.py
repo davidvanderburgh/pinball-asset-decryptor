@@ -107,6 +107,9 @@ TITLES = {
 }
 #: the launcher and the menu are ours; a build's own file by these names would be shadowed
 RESERVED = ("uptest/main.x86_64",)
+#: where an update's member list is kept when no --cache-dir is given (SpkUpdate.index):
+#: a few hundred KB per update, never the update itself
+INDEX_CACHE = os.environ.get("SPK_MULTI_INDEX") or os.path.join(tempfile.gettempdir(), "pad_spkmulti")
 
 
 def _gb(n):
@@ -197,15 +200,22 @@ class SpkUpdate:
 
     def index(self, work):
         """{build path: (kind, size, sha1 or link target, mode)} - every member, hashed once and
-        kept beside the cache"""
+        kept: in --cache-dir, else in INDEX_CACHE.  The tab plans again on every change of the
+        list, and reading a 2 GB signed update through gpg takes a minute or two; its list,
+        kept by path, size and time, makes every plan after the first instant."""
         if self._index is not None:
             return self._index
         st = os.stat(self.path)
         cache = None
-        if self.cache_dir:
-            os.makedirs(self.cache_dir, exist_ok=True)
-            cache = os.path.join(self.cache_dir, "%s.%d.%d.index.json" % (
-                re.sub(r"[^\w.-]", "_", os.path.basename(self.path)), st.st_size, int(st.st_mtime)))
+        cdir = self.cache_dir or INDEX_CACHE
+        try:
+            os.makedirs(cdir, exist_ok=True)
+        except OSError:
+            cdir = None
+        if cdir:
+            tag = hashlib.sha1(self.path.encode("utf-8", "replace")).hexdigest()[:10]
+            cache = os.path.join(cdir, "%s.%s.%d.%d.index.json" % (
+                re.sub(r"[^\w.-]", "_", os.path.basename(self.path)), tag, st.st_size, int(st.st_mtime)))
             if os.path.isfile(cache):
                 try:
                     with open(cache, encoding="utf-8") as f:
@@ -231,9 +241,12 @@ class SpkUpdate:
                     PROGRESS.add(len(b))
                 idx[bp] = ("f", ti.size, h.hexdigest(), ti.mode)
         if cache:
-            with open(cache + ".part", "w", encoding="utf-8") as f:
-                json.dump(idx, f)
-            os.replace(cache + ".part", cache)
+            try:
+                with open(cache + ".part", "w", encoding="utf-8") as f:
+                    json.dump(idx, f)
+                os.replace(cache + ".part", cache)
+            except OSError:
+                pass
         self._index = idx
         return idx
 

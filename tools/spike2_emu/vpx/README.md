@@ -269,6 +269,12 @@ A load in VPX itself is David's to run, when he asks for one.
   from the key (`UseSolenoids=2`).
 * **Motors the table has no object for** (`switch_fakes`): the controller
   answers their end stops itself, the way hwshim does for node-board motors.
+  A `"kind": "latch"` entry is a latched post with an `up` and a `down` coil
+  (Foo Fighters' Overlord fork, PAD-968): the controller follows it, answers
+  its `switch` (closed = up) and hands the table its state as the synthetic
+  `solenoid`, whose `callback` the patcher wires. The game catches a ball by
+  arming both coils on an opto and lets it go with the short cmd 40 (fire by
+  its rule), which hwshim's `coil_publish` counts like any other fire.
 * **The LCD and the sound are the rig's.** Nothing to bridge; put the game
   window on the backglass monitor. The table keeps only its PLAYFIELD sounds
   (ball rolling, flippers, rubbers, bumpers, coils): every patcher runs

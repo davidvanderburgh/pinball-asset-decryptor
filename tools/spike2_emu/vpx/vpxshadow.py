@@ -1220,6 +1220,12 @@ def gen(m, had, quiet=None, dof=None):
                     "SolCallback(%s) = %s          ' %s" % (num, vb("PadSol" + num), s["name"])]
         else:
             out.append("SolCallback(%s) = %s          ' %s" % (num, vb(cb), s["name"]))
+    for name, f in m.get("switch_fakes", {}).items():
+        # a latched post the controller follows (PAD-968): its state, as a
+        # solenoid of its own
+        if name != "_" and isinstance(f, dict) and f.get("callback") and f.get("solenoid"):
+            out.append("SolCallback(%d) = %s          ' %s, as the controller follows it"
+                       % (int(f["solenoid"]), vb(f["callback"]), f.get("name", name)))
     for const, sub in flips.items():
         out.append("SolCallback(%s) = %s          ' the machine's flipper coil" % (const, vb(sub)))
     # ---- test hook

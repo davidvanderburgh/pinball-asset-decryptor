@@ -1563,6 +1563,12 @@ class Bridge:
                 % (len(early), " ".join("%d=%d" % kv for kv in early.items())))
         self._read_tables(data)
         for name, f in self.map.fakes.items():
+            if f.get("kind") == "latch":
+                # PAD-968: a latched post starts down (open), as the game leaves it
+                self._fake[name] = {"up": 0, "was": (0, 0)}
+                self.pipe.set(f["switch"], 0)
+                self._sol_set(int(f["solenoid"]), 0)
+                continue
             self._fake[name] = {"open": 0}
             self.pipe.set(f["closed"], 1)
             self.pipe.set(f["open"], 0)
@@ -2496,6 +2502,9 @@ class Bridge:
         stop it leaves opens at once and the other closes `travel_ms` later
         (the same answer hwshim gives a node-board motor, PAD-237)."""
         for name, f in self.map.fakes.items():
+            if f.get("kind") == "latch":
+                self._latch_tick(name, f)
+                continue
             st = self._fake.setdefault(name, {"open": 0})
             n = self._sol_num(tuple(f["coil"]))
             if self.sol_state.get(n) and not st.get("moving"):
@@ -2505,6 +2514,31 @@ class Bridge:
                 st["moving"] = None
                 st["open"] = 0 if st["open"] else 1
                 self.pipe.set(f["open" if st["open"] else "closed"], 1)
+
+    def _latch_tick(self, name, f):
+        """A latched post the table has no switch for (PAD-968, Foo Fighters'
+        Overlord fork): its `up` coil pops it up (it catches the ball), its
+        `down` coil pulls it down onto the latch (the ball goes). The game
+        fires both at once to catch - an opto rule, which this bridge sees
+        as both coils on while the opto is made - and lets go by clearing
+        the up coil's rule while it fires the down coil, so: up coil on =
+        up; down coil on, up coil not = down; up coil off while the down
+        coil is on = down. The post's state is the map's `switch` (closed =
+        up), and the table hears it as the synthetic `solenoid`."""
+        st = self._fake.setdefault(name, {"up": 0, "was": (0, 0)})
+        up_on = bool(self.sol_state.get(self._sol_num(tuple(f["up"]))))
+        down_on = bool(self.sol_state.get(self._sol_num(tuple(f["down"]))))
+        was_up, was_down = st["was"]
+        state = st["up"]
+        if up_on and not was_up:
+            state = 1
+        elif down_on and not up_on and (not was_down or was_up):
+            state = 0
+        st["was"] = (up_on, down_on)
+        if state != st["up"]:
+            st["up"] = state
+            self.pipe.set(f["switch"], state)
+            self._sol_set(int(f["solenoid"]), state)
 
     # -- what core.vbs asks
     def changed_lamps(self):

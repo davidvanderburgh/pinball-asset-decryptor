@@ -295,6 +295,7 @@ def test_a_patched_tables_patch_again_runs_on_its_recorded_download(tab, monkeyp
     it, no dialog; a copy patched before the record asks for the download."""
     asked = _godzilla(tab, monkeypatch)
     src = r"D:\Downloads\Godzilla LE v2.6.vpx"
+    monkeypatch.setattr(V.os.path, "isfile", lambda p: p == src)
     tab.set(tables=[{"name": "Godzilla Limited Edition v2.6", "output": "Godzilla (PAD).vpx",
                      "patched": True, "source": src}])
     tab.answers[("padvpx.py", "patch")] = {"_text": r'open "C:\VP	ables\Godzilla (PAD).vpx" in Visual Pinball'}
@@ -840,7 +841,8 @@ def test_a_download_dropped_in_the_folder_shows_without_check_again(tab, tmp_pat
     assert not tab._watching
 
 
-def test_patch_takes_the_download_the_folder_holds_without_asking(tab):
+def test_patch_takes_the_download_the_folder_holds_without_asking(tab, monkeypatch):
+    monkeypatch.setattr(V.os.path, "isfile", lambda p: p == r"C:\VP\tables\Rush LE 2.0.2.vpx")
     tab.on_show()
     _wait(tab)
     tab.set(tables=[{"name": "Rush LE Tribute", "output": "Rush LE 2.0.2 (PAD).vpx", "patched": False,
@@ -850,6 +852,20 @@ def test_patch_takes_the_download_the_folder_holds_without_asking(tab):
     assert tab.patch("Rush LE 2.0.2 (PAD).vpx")
     _wait(tab)
     assert ("padvpx.py", ["patch", r"C:\VP\tables\Rush LE 2.0.2.vpx", "--out", r"C:\VP\tables"]) in tab.calls
+
+
+def test_a_download_deleted_since_the_page_read_the_folder_is_asked_for(tab, monkeypatch):
+    """PAD-968: Mike deleted his Foo Fighters files and pressed Patch. A row's
+    download (or recorded source) that is gone by then is not handed to the
+    patcher: the dialog asks for the download, as on a first Patch."""
+    asked = _godzilla(tab, monkeypatch)
+    monkeypatch.setattr(V.os.path, "isfile", lambda p: False)
+    tab.set(tables=[{"name": "Godzilla Limited Edition v2.6", "output": "Godzilla (PAD).vpx", "patched": True,
+                     "source": r"D:\gone\Godzilla.vpx", "download": r"C:\VP\tables\Godzilla.vpx"}])
+    tab.window.pick = ""                             # the person cancels the dialog
+    assert tab.patch("Godzilla (PAD).vpx") is False
+    assert asked == ["Choose your download of Godzilla Limited Edition v2.6"]
+    assert not any(c[0] == "padvpx.py" and c[1][:1] == ["patch"] for c in tab.calls)
 
 
 def test_unread_downloads_are_read_after_the_page_is_up(tab, monkeypatch):

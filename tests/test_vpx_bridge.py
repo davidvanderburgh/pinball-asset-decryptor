@@ -1747,6 +1747,8 @@ def test_shadow_maps_are_consistent(title):
     if m.get("plunger"):
         sw.append(m["plunger"]["lane_switch"])
     sw += ids
+    fakes = {k: f for k, f in m.get("switch_fakes", {}).items() if k != "_"}
+    sw += [f["switch"] for f in fakes.values() if f.get("kind") == "latch"]
     assert len(set(sw)) == len(sw), "a switch id named twice: %s" % sorted(i for i in sw if sw.count(i) > 1)
     assert all(1 <= i < 1000 for i in sw)
     assert len(m["trough"]["switches"]) == 7, "TROUGH 1..6 + JAM"
@@ -1773,6 +1775,13 @@ def test_shadow_maps_are_consistent(title):
             assert cb[2:-7] in saucers, cb
         else:
             assert re.search(r"(?i)\bSub\s+%s\b" % re.escape(cb), extra), "%s has no Sub" % cb
+    for name, f in fakes.items():
+        if f.get("kind") != "latch":
+            continue
+        assert tuple(f["up"]) in coils and tuple(f["down"]) in coils, name
+        assert f["solenoid"] not in nums and f["solenoid"] != g["number"]
+        assert f["solenoid"] <= m.get("solenoid_max", 68)
+        assert re.search(r"(?i)\bSub\s+%s\b" % re.escape(f["callback"]), extra), name
     # every lamp names LEDs on a board, one table light per entry
     lamps = m.get("lamps", {})
     for name, v in lamps.items():
@@ -1783,6 +1792,82 @@ def test_shadow_maps_are_consistent(title):
     had = {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")}
     out = vs.gen(m, had)
     assert "None" not in out and "Sub Table1_Init\n" in out
+
+
+@pytest.mark.parametrize("title,fork_up", [("foo_fighters_pro", 84), ("foo_fighters_le", 87)])
+def test_overlord_fork_is_a_latch_the_controller_follows(monkeypatch, title, fork_up):
+    """PAD-968: Mike's Foo Fighters table never held a ball at the Overlord.
+    The map had FORK DOWN raise the posts and FORK RELEASE drop them, and no
+    one answered OVERLORD FORK UP. On the emulator (foo_fighters_pro 1.04)
+    the fork rests down (open); with capture lit the game arms BOTH coils on
+    the OVERLORD OPTO (the bridge sees both on while the opto is made), the
+    post pops up and catches the ball; it lets go by clearing FORK RELEASE's
+    rule while it fires FORK DOWN, and pulses FORK DOWN again while FORK UP
+    still reads up. The controller follows the post, answers FORK UP and
+    hands the table the post as solenoid 60."""
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    b = pc.Bridge()
+    b.set_game(title)
+    f = b.map.fakes["fork"]
+    assert f["kind"] == "latch" and f["switch"] == fork_up
+    assert b.map.solenoids[6] == (9, 3) and b.map.solenoids[7] == (9, 4)
+
+    class Pipe:
+        def __init__(self):
+            self.held = {}
+
+        def set(self, sid, level):
+            self.held[sid] = level
+    b.pipe = Pipe()
+    down, up = (9, 3), (9, 4)
+
+    def step(d, u):
+        b._coil_set(down, d)
+        b._coil_set(up, u)
+        b._fakes_tick(0.0)
+        return b.pipe.held.get(fork_up, 0), b.sol_state.get(60, 0)
+
+    assert step(0, 0) == (0, 0)                  # rests down: the ball rolls through
+    assert step(1, 0) == (0, 0)                  # FORK DOWN alone: stays down
+    assert step(0, 0) == (0, 0)
+    assert step(1, 1) == (1, 1)                  # capture: both on the opto -> up, held
+    assert step(1, 1) == (1, 1)                  # the ball sits on the opto
+    assert step(1, 0) == (0, 0)                  # release: rule cleared, FORK DOWN fires
+    assert step(0, 0) == (0, 0)
+    assert step(0, 1) == (1, 1)                  # RELEASE alone (coil test): up
+    assert step(0, 0) == (1, 1)                  # a latch: it stays up
+    assert step(1, 0) == (0, 0)                  # FORK DOWN puts it back
+    assert step(1, 1) == (1, 1)                  # both at once, once more
+    assert step(0, 0) == (1, 1)                  # the opto opened, nothing caught: still up
+    sols = dict(b.changed_solenoids())
+    assert sols[60] == 1                         # the table hears it (<= solenoid_max)
+
+
+def test_a_foo_fighters_copy_patched_before_the_fork_fix_asks_for_a_new_patch(tmp_path):
+    """The copy's script still has the old fork subs; both models' maps carry
+    the mark (the row fits both), and the tab says it once."""
+    vs = pytest.importorskip("vpxsetup")
+    marks = []
+    for t in ("foo_fighters_pro", "foo_fighters_le"):
+        marks += json.load(open(os.path.join(VPX, t + ".shadow.json"), encoding="utf-8"))["repatch"]
+    name = "JP's Foo Fighters (PAD).vpx"
+    (tmp_path / (name[:-4] + ".script.vbs")).write_text(
+        "Sub PadForkDown(e) : If e Then OverPost1.IsDropped = 0 : End If : End Sub\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, marks) == [marks[0]["why"]]
+    (tmp_path / (name[:-4] + ".script.vbs")).write_text(
+        "Sub PadForkPost(e) : OverPost1.IsDropped = Not e : End Sub\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, marks) == []
+
+
+def test_shadow_wires_the_fork_post_to_the_followed_solenoid():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "foo_fighters_pro.shadow.json"), encoding="utf-8"))
+    had = {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")}
+    out = vs.gen(m, had)
+    assert 'SolCallback(60) = "PadForkPost"' in out
+    assert "SolCallback(6)" not in out and "SolCallback(7)" not in out
+    assert "Sub PadForkPost(e) : OverPost1.IsDropped = Not e : OverPost2.IsDropped = Not e" in out
 
 
 # ------------------------------------------------- the app's setup -----

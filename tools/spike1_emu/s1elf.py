@@ -141,6 +141,12 @@ class _Elf:
         return None
 
 
+def has_symbol(path, name):
+    """True when the game ELF's symbol table names *name*."""
+    with open(path, "rb") as f:
+        return name in _Elf(f.read()).syms
+
+
 def extract_topology(path):
     """Return ``{node_addr: {"type": int, "part": int}}`` for a game ELF.
 

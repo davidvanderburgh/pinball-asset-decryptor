@@ -328,21 +328,121 @@ def level70(lo, hi):
     return v * 255 // LEVEL70_FULL
 
 
+# ---- the 0.52 node firmware's LED frame (PAD-979) --------------------------
+#
+# Ghostbusters LE (node firmware 0.52; GOT and KISS are 0.49 and 0.28) sends
+# every LED write through NODEBUS_SetLEDMultiple2 @0xcf150, which packs a run
+# of (index, level, time) into one frame - analyze_pack_data @0xcd304 picks
+# the shortest form.  Reading it as the [0x80|idx][time][level] above put
+# header bytes in as levels.  The command byte says how the rest is packed:
+#
+#   cmd = 0x80 | idx form 0x20 | time form 0x1c | level form 0x03
+#
+#   indexes  byte0 bit7 clear: byte0 is the one index, and with 0x20 a list
+#            follows, the last one marked by bit7.
+#            byte0 bit7 set: a bitmask over mask bytes first..last
+#            (byte1 = first << 4 | last); 0x40 in byte0 says the bytes left
+#            out are 0xff, not 0.  Up to 8 bytes: the first and last are
+#            sent, middle byte j only when byte0 bit j-1 is set.  More:
+#            bytes 0-3 by byte0 bits 0-3, the rest by bits 0-7 of an extra
+#            byte after byte1 when 0x20 is set (all sent when it is not).
+#            Then, with time form 0x08, one select bit per LED.
+#   levels   0: all 0, 1: all 0xff, 2: one per LED, 3: one for all
+#   times    0: one per LED; else 0x10 sends a default (0 without it), and
+#            0x08 one more for the selected LEDs, 0x0c one each for them
+#
+# The game's own packer, run under Unicorn on thousands of random runs, comes
+# back exactly through this; tests/test_spike1_nodebus.py keeps its frames.
+# The ELF carries the sender's name, so a game without it keeps the old form.
+LED2_SENDER = "_Z23NODEBUS_SetLEDMultiple2hhPhS_S_"
+
+
+def led2_frame(body):
+    """[(index, level, time)] from a SetLEDMultiple2 frame body (the command
+    byte first, the checksum last). Raises IndexError/ValueError on a frame
+    that does not parse to its length."""
+    cmd, d = body[0], body[1:-1]
+    p = 1
+    if d[0] & 0x80:
+        flags, ext, p = d[0], 0xFF, 2
+        if cmd & 0x20:
+            ext, p = d[2], 3
+        left_out = 0xFF if flags & 0x40 else 0x00
+        first, last = d[1] >> 4, d[1] & 0x0F
+        span = last - first + 1
+        idx = []
+        for pos in range(span):
+            if span <= 8:
+                sent = pos in (0, span - 1) or flags >> (pos - 1) & 1
+            elif pos <= 3:
+                sent = flags >> pos & 1
+            else:
+                sent = ext >> (pos - 4) & 1
+            b = left_out
+            if sent:
+                b, p = d[p], p + 1
+            idx += [(first + pos) * 8 + bit for bit in range(8) if b >> bit & 1]
+        sel = b""
+        if cmd & 0x08:
+            sel, p = d[p:p + (len(idx) + 7) // 8], p + (len(idx) + 7) // 8
+    else:
+        idx, sel = [d[0]], b""
+        while cmd & 0x20:
+            idx.append(d[p] & 0x7F)
+            p += 1
+            if d[p - 1] & 0x80:
+                break
+    n = len(idx)
+    form = cmd & 0x03
+    if form == 2:
+        levels, p = list(d[p:p + n]), p + n
+    elif form == 3:
+        levels, p = [d[p]] * n, p + 1
+    else:
+        levels = [0xFF * form] * n
+    form = cmd & 0x1C
+    if form == 0:
+        times, p = list(d[p:p + n]), p + n
+    else:
+        times = [0] * n
+        if form & 0x10:
+            times, p = [d[p]] * n, p + 1
+        picked = [i for i in range(n) if sel and sel[i >> 3] >> (i & 7) & 1]
+        if form & 0x0C == 0x08:
+            for i in picked:
+                times[i] = d[p]
+            p += 1
+        elif form & 0x0C == 0x0C:
+            for i in picked:
+                times[i], p = d[p], p + 1
+    if p != len(d):
+        raise ValueError("SetLEDMultiple2 frame of %d bytes read as %d" % (len(d), p))
+    return list(zip(idx, levels, times))
+
+
 class DmdFrames:
     """Reads the lamp and coil frames of the DMD-era wire into a HwStateWriter
     (s1early.HwStateWriter, or anything with lamp_level / coil_on / coil_off).
     `frame(node, body)` takes a frame's body as WireParser yields it (the
-    command byte first, the checksum last); the rules are kept per coil."""
+    command byte first, the checksum last); the rules are kept per coil.
+    *led2*: the game sends its LEDs as SetLEDMultiple2 frames (led2_frame)."""
 
-    def __init__(self, hw):
+    def __init__(self, hw, led2=False):
         self.hw = hw
+        self.led2 = led2
         self.rules = {}                   # (node, idx) -> pulse ticks
 
     def frame(self, node, body):
         if len(body) < 2:
             return
         cmd, data = body[0], body[1:-1]
-        if 0x80 <= cmd <= 0xBF and len(data) >= 2:
+        if self.led2 and 0x80 <= cmd <= 0xBF:
+            try:
+                for idx, level, _time in led2_frame(body):
+                    self.hw.lamp_level(node, idx, level)
+            except (IndexError, ValueError):
+                pass
+        elif 0x80 <= cmd <= 0xBF and len(data) >= 2:
             for i, level in enumerate(data[1:]):
                 self.hw.lamp_level(node, (cmd & 0x3F) + i, level)
         elif cmd == 0xC0 and len(data) >= 4:
@@ -444,6 +544,9 @@ def main():
     if elf_path:
         try:
             import s1elf
+            if dmd:
+                dmd.led2 = s1elf.has_symbol(elf_path, LED2_SENDER)
+                logline("LED frames: %s" % ("SetLEDMultiple2" if dmd.led2 else "SetLED"))
             topology = s1elf.extract_topology(elf_path)
             _d("topology: %r" % topology)
             logline("topology: %d boards from %s" % (len(topology), elf_path))

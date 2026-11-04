@@ -56,7 +56,27 @@ CREATE TABLE IF NOT EXISTS reports (
   progress     INTEGER NOT NULL DEFAULT -1,
   stage_at     INTEGER NOT NULL DEFAULT 0,
   seen_at      INTEGER NOT NULL DEFAULT 0,
-  install      TEXT    NOT NULL DEFAULT ''
+  install      TEXT    NOT NULL DEFAULT '',
+  -- PAD-972, a question for the reporter and their answer: the question's
+  -- words and when it was pushed (the stage "question"), and the answer
+  -- the app sent (words, files as a JSON list of {name, type, b64}) until
+  -- the tracker takes it (reply_pending 1 until then; reply_at stays).  A
+  -- database made before these is brought up with migrate_pad972.sql.
+  question      TEXT    NOT NULL DEFAULT '',
+  question_at   INTEGER NOT NULL DEFAULT 0,
+  reply         TEXT    NOT NULL DEFAULT '',
+  reply_files   TEXT    NOT NULL DEFAULT '[]',
+  reply_at      INTEGER NOT NULL DEFAULT 0,
+  reply_pending INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS reports_at ON reports (at);
 CREATE INDEX IF NOT EXISTS reports_ip ON reports (ip_hash, at);
+
+-- PAD-972: when each answer came, by the same salted address hash, so an
+-- answer counts toward the reports' five an hour.  Rows older than the
+-- hour are deleted as each new answer comes.
+CREATE TABLE IF NOT EXISTS reply_log (
+  ip_hash TEXT    NOT NULL,
+  at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reply_log_ip ON reply_log (ip_hash, at);

@@ -546,6 +546,39 @@ def test_the_window_opens_once_after_the_first_card_write(app_with_worker, tmp_p
     assert w.run(w.window.note_card_written) is False
 
 
+def shellx(w):
+    """The ShellExtras service itself (the window shim only forwards its
+    exported calls)."""
+    return w.window.__dict__["_exports"]["note_card_written"]
+
+
+def test_a_stale_window_wiping_the_flag_does_not_reopen_it(app_with_worker, tmp_path):
+    # PAD-991: a second app window opened before the prompt saves settings.json
+    # whole, without donations.prompted.  The marker file keeps "once ever".
+    w, worker = app_with_worker
+    assert w.run(w.window.note_card_written) is True
+    settings_file = tmp_path / "cfg" / "settings.json"
+    data = settings_of(tmp_path)
+    data["donations"] = {}
+    settings_file.write_text(json.dumps(data), encoding="utf-8")
+    shellx(w)._don_settings = {}
+    assert D.was_prompted(str(settings_file))
+    assert w.run(w.window.note_card_written) is False
+
+
+def test_opening_the_window_by_hand_counts_as_the_prompt(app_with_worker, tmp_path):
+    w, worker = app_with_worker
+    w.call("shellx.donations_open", False)
+    assert settings_of(tmp_path)["donations"]["prompted"] is True
+    assert w.run(w.window.note_card_written) is False
+
+
+def test_an_install_that_already_gave_is_not_prompted(app_with_worker, tmp_path):
+    w, worker = app_with_worker
+    shellx(w)._don_cache["mine"] = [{"id": "x", "token": "t"}]
+    assert w.run(w.window.note_card_written) is False
+
+
 def test_no_service_configured_means_no_network_and_a_kept_entry(tmp_path, monkeypatch):
     from tests.webui_harness import web_app
     monkeypatch.delenv("PAD_DONATIONS_URL", raising=False)

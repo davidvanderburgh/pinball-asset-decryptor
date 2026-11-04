@@ -513,6 +513,32 @@ def cache_path(settings_file):
     return os.path.join(os.path.dirname(settings_file), "donations_cache.json")
 
 
+def prompted_marker_path(settings_file):
+    """The file that says the Animal shelters window has opened on its own
+    once on this install (PAD-991).  A file of its own, written once and
+    never rewritten: ``settings.json`` and the cache are saved whole by
+    every app window, so a second window opened before the prompt, or a
+    settings reset, used to put the flag back to unset and the window
+    opened again after the next write."""
+    return os.path.join(os.path.dirname(settings_file), "donations_prompted")
+
+
+def was_prompted(settings_file):
+    return os.path.exists(prompted_marker_path(settings_file))
+
+
+def mark_prompted(settings_file):
+    """Never raises: a marker that cannot be written leaves the settings
+    flag as the only memory, which is what there was before."""
+    path = prompted_marker_path(settings_file)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("%d\n" % int(time.time()))
+    except OSError:
+        pass
+
+
 def load_cache(path):
     """``{"summary": dict|None, "fetched_at": float, "pending": [entries]}``;
     a missing or broken file is an empty cache."""

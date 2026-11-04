@@ -426,6 +426,60 @@ def test_shadow_up_only_opto_pulses_on_the_way_up(tmp_path):
     assert r.stdout.strip() == "[1053 ] 2", r.stdout + r.stderr
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_switches_ignore_the_tributes_helper_balls(tmp_path):
+    # PAD-974: Batman 66's bat disc posts are unseen balls riding the turntable;
+    # at the phone they sat on the lock trigger, the table said TURNTABLE LOCK 3
+    # and the machine turned home and out again for good. A helper ball
+    # neither makes nor breaks a switch; the player's ball still does both.
+    # Run for real under VBScript
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["helper_balls"] = ["postBall1", "postBall2"]
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    lines = out.split("\n")
+    f = lines.index("Function PadHelperBall()   ' ActiveBall is one of the tribute's unseen helper balls")
+    h = lines.index("Sub Opto1_Hit")
+    u = lines.index("Sub Opto1_UnHit")
+    s = lines.index("Sub sw001_Hit")
+    assert lines[u + 1] == lines[h + 1] == lines[s + 1] == "\tIf PadHelperBall() Then Exit Sub"
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log",
+        "Class FakeCtl : Public Property Let Switch(n, v) : Log = Log & n & \"=\" & v & \" \" : End Property : End Class",
+        "Class FakeTimer : Public Sub PulseSw(n) : Log = Log & n & \" \" : End Sub : End Class",
+        "Class FakeBall : Public VelY : End Class",
+        "Dim Controller : Set Controller = New FakeCtl",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim postBall1, postBall2, ActiveBall, Hits : Hits = 0",
+        "Set postBall1 = New FakeBall",            # postBall2 never made: Empty
+        "Sub sw001_Hit_orig : Hits = Hits + 1 : End Sub",
+        "\n".join(lines[f:lines.index("End Function", f) + 1]),
+        "\n".join(lines[h:u + 4]),
+        "\n".join(lines[s:s + 4]),
+        "Set ActiveBall = postBall1 : Opto1_Hit : Opto1_UnHit : sw001_Hit",
+        "Set ActiveBall = New FakeBall : Opto1_Hit : Opto1_UnHit : sw001_Hit",
+        # the tribute's own call, with no ball at all: still the machine's switch
+        "Set ActiveBall = Nothing : Opto1_UnHit",
+        "ActiveBall = Empty : Opto1_UnHit",
+        "WScript.Echo \"[\" & Log & \"] \" & Hits"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "[1085=True 1085=False 1053 1085=False 1085=False ] 1", r.stdout + r.stderr
+    # a map without helper balls generates what it always did
+    assert "Sub Opto1_Hit : Controller.Switch(1085) = True : End Sub" in vs.patch(
+        MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))[0]
+
+
+def test_batmans_unseen_balls_are_helpers():
+    # PAD-974: the tribute's Table1_Init makes three balls it never shows
+    # (bShowBalls = False): the bat disc's two posts and the crane's spring
+    m = json.load(open(os.path.join(VPX, "batman.shadow.json"), encoding="utf-8"))
+    assert m["helper_balls"] == ["postBall1", "postBall2", "craneBall"]
+    assert m["switches"]["trgBallLock3"]["event"] == "hold"
+
+
 def test_rushs_time_machine_is_the_lift_ramp_opto():
     # PAD-907: the game starts its modes and multiballs at the time machine,
     # LIFT RAMP OPTO (82); the tribute's time machine trigger is tm2. LL3 is

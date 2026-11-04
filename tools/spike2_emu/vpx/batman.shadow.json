@@ -14,7 +14,11 @@
     "turns the tribute's spinning bat disc's half turns into the two optos.",
     "quiet_subs: the tribute's light shows, plus the hit subs of objects the machine",
     "has no switch for (they run the shadow game's rules: back gate, ball lock, combos),",
-    "and its crane-mode sweep tmrCrane_Timer: the crane is the machine's (PAD-971)."
+    "and its crane-mode sweep tmrCrane_Timer: the crane is the machine's (PAD-971).",
+    "helper_balls: the tribute's three unseen balls, the bat disc's two posts and the",
+    "crane's spring. At the phone the disc rides over trgBallLock3, which the table",
+    "then reported as TURNTABLE LOCK 3, and the machine turned the turntable home from",
+    "the phone and out again, for good (PAD-974)."
   ],
   "title": "batman",
   "detect": [
@@ -116,6 +120,7 @@
     "48": {"coil": [8, 5], "name": "LEFT FLIPPER", "callback": null}
   },
   "pup_stub": true,
+  "helper_balls": ["postBall1", "postBall2", "craneBall"],
   "neuter": [
     "BallRelease.CreateSizedball BallSize",
     "BallRelease.Kick 90",

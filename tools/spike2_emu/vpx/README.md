@@ -409,6 +409,11 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   it on the playfield whatever surface the clone sat on; the switches map
   names it like any table object (`PadCarHit`: the band in front of the car's
   nose, CAR HIT OPTO).
+* **A table object that needs another setting** (PAD-982). `item_fields`
+  gives the table's own objects new field values by their BIFF tag
+  (`{"LightningTarget": {"SLGF": 300.0}}`: Foo Fighters' kick target kicks
+  harder; a JSON float is written as a float, an int as an int). The object's
+  GameItem stream is replaced, which the MAC does not cover.
 * **A magnet the table has no object for** (PAD-925). drhotwing's Rush has
   no time machine magnet: the game holds MAGNET ~4.1 s after each LIFT RAMP
   OPTO (emulator), while the tribute's ball ran up Ramp011 and straight back

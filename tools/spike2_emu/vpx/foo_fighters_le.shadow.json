@@ -42,7 +42,7 @@
     "Target008": {"id": 83, "event": "hit", "name": "OVERLORD L TARGET"},
     "Target009": {"id": 84, "event": "hit", "name": "OVERLORD R TARGET"},
     "OverlordTarget": {"id": 86, "event": "hit", "name": "OVERLORD HIT TARGET"},
-    "Trigger015": {"id": 85, "event": "hold", "name": "OVERLORD OPTO"},
+    "PadOverlordOpto": {"id": 85, "event": "hold", "name": "OVERLORD OPTO (where the held ball rests at the fork, PAD-982)"},
     "Trigger009": {"id": 81, "event": "hit", "name": "UFO ROLLOVER"},
     "dt1": {"id": 90, "event": "hit", "name": "3 DROP LEFT OPTO"},
     "dt2": {"id": 91, "event": "hit", "name": "3 DROP CENTER OPTO"},
@@ -58,13 +58,16 @@
     "DaveTrigger": {"id": 78, "event": "hit", "name": "R RAMP OPTO"},
     "ChrisTrigger": {"id": 79, "event": "hit", "name": "RIGHT ORBIT"},
     "LeftSlingShot": {"id": 67, "event": "slingshot", "name": "LEFT SLINGSHOT"},
-    "RightSlingShot": {"id": 66, "event": "slingshot", "name": "RIGHT SLINGSHOT"}
+    "RightSlingShot": {"id": 66, "event": "slingshot", "name": "RIGHT SLINGSHOT"},
+    "LightningTarget": {"id": 94, "event": "slingshot", "name": "KICK TARGET"}
   },
   "plunger": {"lane_trigger": "swPlungerRest", "lane_switch": 65, "autoplunge": "plungerIM"},
   "trough": {"release": "BallRelease", "drain": "Drain", "switches": [74, 73, 72, 71, 70, 69, 75], "balls": 6, "kick": [90, 4]},
   "saucers": {},
   "repatch": [
-    {"old": "Sub PadForkDown(e)", "why": "the Overlord never holds a ball, so its lock and All My Life Multiball never start", "since": "PAD-968: the Overlord fork is followed as the latch it is"}
+    {"old": "Sub PadForkDown(e)", "why": "the Overlord never holds a ball, so its lock and All My Life Multiball never start", "since": "PAD-968: the Overlord fork is followed as the latch it is"},
+    {"old": "Sub LightningTarget_Slingshot\n    If Tilted Then Exit Sub", "why": "the kick target scores nothing and kicks weaker than the real one", "since": "PAD-982: the kick target is the game's KICK TARGET switch and kicks harder"},
+    {"old": "Sub Trigger015_UnHit : Controller.Switch(", "why": "hits on the ball the Overlord holds do not count, so All My Life Multiball never starts", "since": "PAD-982: the Overlord opto sees only the held ball's spot"}
   ],
   "switch_fakes": {
     "_": "PAD-968: the Overlord fork is a latched post the table has no switch for. FORK RELEASE pops it up (it catches the ball: with capture lit the game arms both coils on the OVERLORD OPTO), FORK DOWN pulls it back onto its latch (the ball goes). The controller follows it, answers OVERLORD FORK UP and hands the table its state as solenoid 60 (up = the posts up, the ball held)",
@@ -80,7 +83,7 @@
     "7": {"coil": [9, 4], "name": "FORK RELEASE", "callback": null},
     "8": {"coil": [9, 0], "name": "OVERLORD MAGNET", "callback": null},
     "9": {"coil": [9, 1], "name": "OVERLORD HIT", "callback": null},
-    "10": {"coil": [9, 2], "name": "KICK TARGET", "callback": null},
+    "10": {"coil": [9, 2], "name": "KICK TARGET", "callback": "PadKickTarget"},
     "11": {"coil": [9, 6], "name": "UP PF DIVERTER", "callback": null},
     "46": {"coil": [8, 0], "name": "RIGHT FLIPPER", "callback": null},
     "48": {"coil": [8, 5], "name": "LEFT FLIPPER", "callback": null},
@@ -92,7 +95,15 @@
     "BallRelease.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "Sub PadSavePost(e) : SavePost.IsDropped = Not e : End Sub\nSub PadVanPost(e) : VanPost.IsDropped = Not e : End Sub\nSub PadResetDrops(e) : If e Then dt1.IsDropped = 0 : dt2.IsDropped = 0 : dt3.IsDropped = 0 : End If : End Sub\nSub PadForkPost(e) : OverPost1.IsDropped = Not e : OverPost2.IsDropped = Not e : End Sub\n",
+  "extra_vbs": "Sub PadSavePost(e) : SavePost.IsDropped = Not e : End Sub\nSub PadVanPost(e) : VanPost.IsDropped = Not e : End Sub\nSub PadResetDrops(e) : If e Then dt1.IsDropped = 0 : dt2.IsDropped = 0 : dt3.IsDropped = 0 : End If : End Sub\nSub PadForkPost(e) : OverPost1.IsDropped = Not e : OverPost2.IsDropped = Not e : End Sub\nSub PadKickTarget(e) : If e Then PlaySoundAt \"fx_slingshot_EM\", LightningTarget : End If : End Sub\n",
+  "item_fields": {
+    "_": "PAD-982: the kick target (LightningTarget, a slingshot wall) kicks a quarter harder than JP's 240: Mike found it weaker than the real one, which can send the ball up the ramp",
+    "LightningTarget": {"SLGF": 300.0}
+  },
+  "retrofit_triggers": {
+    "_": "PAD-982: JP's Overlord opto (Trigger015) covers the whole pocket up to the hit target, so a held ball knocked back onto the target never left it, and the game counts a hit on the held ball only when its opto opens (emulator, 1.04.0: fourteen OVERLORD HIT TARGET hits with the opto made counted none). This one is the pocket's mouth, where the ball rests against the fork's posts: a ball knocked 45 units back leaves it",
+    "PadOverlordOpto": {"clone": "Trigger015", "surface": "10m", "shape": [[531, 398], [538, 426], [546, 453], [576, 461], [606, 468], [628, 447], [650, 425], [655, 412], [660, 398]]}
+  },
   "retrofit_timers": {
     "PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1},
     "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100}

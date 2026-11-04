@@ -6,10 +6,15 @@
 # into /game/code/uptest, the folder its desktop (sway or i3) starts the game from, as
 # uptest/main.x86_64 - which in a multi-boot update is THIS script.  At every power-up it:
 #
+#   0. the first time after an install, moves the update's pad/ out of uptest into /game/pad:
+#      the machine's next install backs up ALL of uptest and then wipes it, so builds kept
+#      there would be copied once more and lost; outside it they cost nothing then, and a
+#      stock update leaves the menu out of the picture by replacing main.x86_64;
 #   1. makes every build the update carries that is not made yet (builds.txt): a hard-linked
 #      copy of build 0 (the stock one, carried whole) with the build's own files laid over;
 #   2. points the machine's paths at the chosen build: every entry of uptest/ except this
-#      script and pad/ is a symlink into pad/live/uptest/, every other root the conf names
+#      script (and the game's .update_file / .backup_file markers) is a symlink into
+#      /game/pad/live/uptest/, every other root the conf names
 #      (root=<name> <absolute path>: /game/code/assets on the titles that keep media there)
 #      a symlink to pad/live/<name>, and pad/live itself a symlink to pad/b<k> - so the
 #      switch is one rename;
@@ -30,13 +35,13 @@
 # from starting a game: no conf, no menu program, a menu that dies or hangs (killed after
 # its own timeout and a minute), a build that cannot be made, a choice that names nothing.
 #
-# PADSELECT_TOP moves uptest (the tests: the folder this script stands in by default);
+# PADSELECT_HOME moves /game/pad; PADSELECT_TOP moves uptest (the tests: the folder this script stands in by default);
 # PADSELECT_SW replaces spksw (the tests: a script printing its lines); PADSELECT_MENU_ARGS
 # adds menu options; PADSELECT_AUDIO_PLAYER replaces aplay; PADSELECT_DRY=1 prints what
 # would be started instead of starting it.
 SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
 TOP=${PADSELECT_TOP:-$(dirname "$SELF")}
-P=$TOP/pad
+P=${PADSELECT_HOME:-/game/pad}
 SPK=$P/spk.conf
 CONF=$P/images.conf
 BUILDS=$P/builds.txt
@@ -44,10 +49,20 @@ CHOICE=$P/choice
 LOG=$P/padselect.log
 ME=$(basename "$SELF")
 
+# ---- 0. a fresh install: uptest/pad -> /game/pad (one rename: the same file system) ----
+moved=""
+if [ -d "$TOP/pad" ] && [ ! -L "$TOP/pad" ]; then
+    mkdir -p "$(dirname "$P")" 2>/dev/null
+    rm -rf "$P.old"
+    { [ ! -e "$P" ] || mv -T "$P" "$P.old"; } && mv -T "$TOP/pad" "$P" && moved=1
+    if [ -n "$moved" ]; then rm -rf "$P.old"; sync
+    else P=$TOP/pad                 # cannot move it: run it where it is
+    fi
+fi
 [ -f "$LOG" ] && mv -f "$LOG" "$LOG.1" 2>/dev/null
 { exec 3>>"$LOG"; } 2>/dev/null || exec 3>/dev/null
 say() { echo "$(date '+%F %T') $*" >&3; }
-say "start ($*) in $TOP"
+say "start ($*) in $TOP, home $P${moved:+ (moved there from the update)}"
 ARGS=("$@")
 
 conf() {        # conf <key> <default>: the last <key>= line of spk.conf
@@ -68,14 +83,14 @@ link_top() {
         [ -e "$e" ] || [ -L "$e" ] || continue
         name=${e##*/}
         case "$name" in "$ME"|pad|.update_file|.backup_file) continue ;; esac
-        if [ -L "$TOP/$name" ] && [ "$(readlink "$TOP/$name")" = "pad/live/uptest/$name" ]; then continue; fi
+        if [ -L "$TOP/$name" ] && [ "$(readlink "$TOP/$name")" = "$P/live/uptest/$name" ]; then continue; fi
         rm -rf "$TOP/$name" 2>/dev/null
-        ln -s "pad/live/uptest/$name" "$TOP/$name" || say "paths: cannot link $name"
+        ln -s "$P/live/uptest/$name" "$TOP/$name" || say "paths: cannot link $name"
     done
     for e in "$TOP"/* "$TOP"/.[!.]*; do
         [ -L "$e" ] || continue
         name=${e##*/}
-        case "$(readlink "$e")" in pad/live/uptest/*) [ -e "$e" ] || rm -f "$e" ;; esac
+        case "$(readlink "$e")" in "$P"/live/uptest/*|pad/live/uptest/*) [ -e "$e" ] || rm -f "$e" ;; esac
     done
 }
 # the other roots: /game/code/assets and the like, each a symlink to pad/live/<name>.  A

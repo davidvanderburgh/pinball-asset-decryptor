@@ -25,7 +25,8 @@ T=$(mktemp -d /tmp/padselect_spk_test.XXXXXX)
 trap 'pkill -f "$T/sw" 2>/dev/null; rm -rf "$T"' EXIT
 FAILS=0
 U=$T/code/uptest
-P=$U/pad
+S=$U/pad                 # the update's pad/ as the install leaves it
+P=$T/game/pad            # where the launcher keeps it (PADSELECT_HOME)
 ok() { echo "ok $*"; }
 bad() { echo "FAIL $*"; FAILS=$((FAILS + 1)); [ -f "$P/padselect.log" ] && cat "$P/padselect.log"; }
 
@@ -35,26 +36,26 @@ prog() {   # prog <file>: a "game" that records its own path, its cwd and argume
     chmod +x "$1"
 }
 setup() {
-    rm -rf "$T/code" "$T/started"
-    mkdir -p "$P/b0/uptest/main_Data" "$P/b0/assets" "$P/d1/uptest/main_Data" "$P/d1/assets" "$T/code/assets"
+    rm -rf "$T/code" "$T/game" "$T/started"
+    mkdir -p "$S/b0/uptest/main_Data" "$S/b0/assets" "$S/d1/uptest/main_Data" "$S/d1/assets" "$T/code/assets"
     cp "$HERE/padselect_spk.sh" "$U/main.x86_64"
     chmod +x "$U/main.x86_64"
-    prog "$P/b0/uptest/main.x86_64"
-    echo "data of b0" > "$P/b0/uptest/main_Data/x"
-    echo "v1" > "$P/b0/uptest/version.txt"
-    echo "only in b0" > "$P/b0/uptest/gone.txt"
-    echo "art of b0" > "$P/b0/assets/a.png"
-    echo "data of my build" > "$P/d1/uptest/main_Data/x"
-    echo "art of my build" > "$P/d1/assets/a.png"
-    echo "uptest/gone.txt" > "$P/d1.removed"
+    prog "$S/b0/uptest/main.x86_64"
+    echo "data of b0" > "$S/b0/uptest/main_Data/x"
+    echo "v1" > "$S/b0/uptest/version.txt"
+    echo "only in b0" > "$S/b0/uptest/gone.txt"
+    echo "art of b0" > "$S/b0/assets/a.png"
+    echo "data of my build" > "$S/d1/uptest/main_Data/x"
+    echo "art of my build" > "$S/d1/assets/a.png"
+    echo "uptest/gone.txt" > "$S/d1.removed"
     echo "the machine's own assets" > "$T/code/assets/a.png"
     touch "$U/.update_file"
-    cp "$BIN" "$P/spkselect"
-    [ -n "$FONT" ] && cp "$FONT" "$P/font.ttf"
-    printf 'b1 d1\nb2 d2\n' > "$P/builds.txt"
-    printf 'board=pinotaur\nL=81\nR=80\nS=87\nroot=assets %s/code/assets\n' "$T" > "$P/spk.conf"
+    cp "$BIN" "$S/spkselect"
+    [ -n "$FONT" ] && cp "$FONT" "$S/font.ttf"
+    printf 'b1 d1\nb2 d2\n' > "$S/builds.txt"
+    printf 'board=pinotaur\nL=81\nR=80\nS=87\nroot=assets %s/code/assets\n' "$T" > "$S/spk.conf"
     printf 'image=b1|SCOOBY-DOO|My build\nimage=b0|SCOOBY-DOO|Stock\nimage=b2|SCOOBY-DOO|Another\ndefault=0\ntimeout=1\n' \
-        > "$P/images.conf"
+        > "$S/images.conf"
     cat > "$T/sw" <<S
 #!/bin/bash
 echo "\$*" > $T/sw.args
@@ -67,7 +68,7 @@ S
 }
 run() {
     rm -f "$T/started"
-    PADSELECT_SW="${RUN_SW:-$T/sw}" PAD_SELECT_FAKEFB="1920x1080x32:$T/fb" \
+    PADSELECT_HOME="$P" PADSELECT_SW="${RUN_SW:-$T/sw}" PAD_SELECT_FAKEFB="1920x1080x32:$T/fb" \
         timeout 60 "$U/main.x86_64" -force-glcore >/dev/null 2>&1
     echo $?
 }
@@ -83,7 +84,8 @@ if [ "$rc" = 0 ] && [ "$(started)" = "$P/b1/uptest/main.x86_64 $U -force-glcore"
     && [ "$(cat "$P/b0/uptest/main_Data/x")" = "data of b0" ] \
     && [ ! -e "$P/b1/uptest/gone.txt" ] && [ -e "$P/b0/uptest/gone.txt" ] \
     && [ ! -e "$P/b2" ] && grep -q "build b2: no $P/d2" "$P/padselect.log" \
-    && [ "$(readlink "$P/live")" = b1 ] && [ "$(readlink "$U/version.txt")" = pad/live/uptest/version.txt ] \
+    && [ "$(readlink "$P/live")" = b1 ] && [ "$(readlink "$U/version.txt")" = "$P/live/uptest/version.txt" ] \
+    && [ ! -e "$S" ] && grep -q "moved there from the update" "$P/padselect.log" \
     && [ "$(cat "$U/main_Data/x")" = "data of my build" ] && [ -f "$U/.update_file" ] && [ ! -L "$U/.update_file" ] \
     && [ "$(cat "$T/code/assets/a.png")" = "art of my build" ] \
     && [ "$(cat "$P/stock_assets/a.png")" = "the machine's own assets" ] \
@@ -132,7 +134,7 @@ else
 fi
 
 # 5
-setup; rm -f "$P/spkselect"
+setup; rm -f "$S/spkselect"
 run >/dev/null
 if [ "$(started)" = "$P/b1/uptest/main.x86_64 $U -force-glcore" ] && grep -q "no menu program" "$P/padselect.log"; then
     ok "5 no menu program -> no menu, the first card (b1) starts"
@@ -157,11 +159,11 @@ fi
 # 7
 if [ -n "$SW" ]; then
     setup
-    cp "$SW" "$P/spksw"
-    printf 'dev=%s/no-board\n' "$T" >> "$P/spk.conf"
+    cp "$SW" "$S/spksw"
+    printf 'dev=%s/no-board\n' "$T" >> "$S/spk.conf"
     RUN_SW="" ; unset RUN_SW
     rm -f "$T/started"
-    PAD_SELECT_FAKEFB="1920x1080x32:$T/fb" timeout 60 "$U/main.x86_64" -force-glcore >/dev/null 2>&1
+    PADSELECT_HOME="$P" PAD_SELECT_FAKEFB="1920x1080x32:$T/fb" timeout 60 "$U/main.x86_64" -force-glcore >/dev/null 2>&1
     if [ "$(started)" = "$P/b1/uptest/main.x86_64 $U -force-glcore" ] && grep -q "pid" "$P/padselect.log" \
         && ! pgrep -f "$P/spksw" >/dev/null; then
         ok "7 the real spksw on a missing board: the countdown boots b1, the reader is gone"

@@ -11,7 +11,9 @@ State: ``shellx.donations`` is :func:`core.donations.view` (the chip's
 words, the thermometer, the recent list, the form's remembered currency
 and name).  Settings (``settings.json`` ``donations``): ``prompted`` (the
 once-only window has been shown), ``currency`` and ``name`` (what the form
-remembers), persisted through the ``on_donations_change`` callback.
+remembers), persisted through the ``on_donations_change`` callback.  The
+once-only prompt is also kept in a ``donations_prompted`` marker file beside
+``settings.json`` that no settings save rewrites (PAD-991).
 """
 
 import logging
@@ -112,7 +114,11 @@ class DonationsMixin:
     @rpc
     def donations_open(self, auto=False):
         """The window opened: give it the view and refresh the total if the
-        cache is stale (or has never been filled)."""
+        cache is stale (or has never been filled).  Opened by hand, it also
+        counts as the one prompt: someone who found the chip needs no
+        nudge after their next write (PAD-991)."""
+        if not auto and not self._donations_prompted():
+            self._mark_donations_prompted()
         age = time.time() - float(self._don_cache.get("fetched_at") or 0)
         if self._don_cache.get("summary") is None or age > REFRESH_AFTER \
                 or self._don_cache.get("pending"):
@@ -274,9 +280,22 @@ class DonationsMixin:
         """A card write finished well (app.py ``_on_done``).  The first time
         on this install, open the window once, unasked: the moment the app
         has just saved someone money is the one time to ask.  Never again
-        after that; the chip is always there."""
-        if self._don_settings.get("prompted"):
+        after that; the chip is always there.
+
+        "Ever" is kept in three places, any one of which is enough: the
+        settings flag, a marker file no settings save can overwrite, and
+        this install having added a donation already (PAD-991)."""
+        if self._donations_prompted() or self._don_cache.get("mine") \
+                or self._don_cache.get("pending"):
             return False
-        self._save_donations_settings(prompted=True)
+        self._mark_donations_prompted()
         self._open_dialog("donations", auto=True)
         return True
+
+    def _donations_prompted(self):
+        return bool(self._don_settings.get("prompted")) \
+            or donations.was_prompted(config.SETTINGS_FILE)
+
+    def _mark_donations_prompted(self):
+        donations.mark_prompted(config.SETTINGS_FILE)
+        self._save_donations_settings(prompted=True)

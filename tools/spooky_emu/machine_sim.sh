@@ -81,6 +81,8 @@ power_up() {    # power_up <n> <press: yes|no>
     local n=$1 press=$2 log=$NV/game/pad/padselect.log i
     echo "== power-up $n"
     rm -f "$W/run$n.out"
+    # the last power-up's log would answer for this one before the launcher rotates it
+    [ -f "$log" ] && mv -f "$log" "$W/padselect$((n - 1)).log"
     SPK_MACHINE=1 bash "$T/run_game.sh" "$BUILD" > "$W/run$n.out" 2>&1 &
     local rg=$!
     for i in $(seq 1 600); do
@@ -116,8 +118,11 @@ p=$(spk_game_pid)
 exe=$(readlink "/proc/$p/exe" 2>/dev/null)
 case "$exe" in */pad/b1/uptest/main.x86_64) pass "1: the game runs $exe";; *) fail "1: the game runs '$exe' (pid $p)";; esac
 spk_attract && pass "1: $TITLE in attract" || fail "1: no attract"
-[ "$(cat "$NV/game/code/uptest/PAD_MULTIBOOT_MARK" 2>/dev/null)" = "PAD-980 marked build" ] \
-    && pass "1: uptest shows b1's own file" || fail "1: uptest does not show b1's mark"
+# the links name /game/..., which only the game's mount namespace has: read them as it would
+lk=$(readlink "$NV/game/code/uptest/PAD_MULTIBOOT_MARK")
+[ "$lk" = /game/pad/live/uptest/PAD_MULTIBOOT_MARK ] && [ "$(readlink "$NV/game/pad/live")" = b1 ] \
+    && [ "$(cat "$NV/game/pad/b1/uptest/PAD_MULTIBOOT_MARK" 2>/dev/null)" = "PAD-980 marked build" ] \
+    && pass "1: uptest shows b1's own file (-> $lk, live = b1)" || fail "1: uptest does not show b1's mark ('$lk')"
 sleep 5
 bash "$T/shot.sh" "$W/attract1.png" >/dev/null 2>&1 && pass "1: shot $W/attract1.png"
 bash "$T/stop.sh" >/dev/null 2>&1; bash "$T/killgame.sh" >/dev/null 2>&1
@@ -130,7 +135,6 @@ grep -q "starting b1" "$L" && pass "2: the countdown booted the remembered b1" |
 spk_attract && pass "2: $TITLE in attract" || fail "2: no attract"
 bash "$T/stop.sh" >/dev/null 2>&1; bash "$T/killgame.sh" >/dev/null 2>&1
 cp "$NV/game/pad/padselect.log" "$W/padselect2.log" 2>/dev/null
-cp "$NV/game/pad/padselect.log.1" "$W/padselect1.log" 2>/dev/null
 
 echo "machine_sim: $([ $FAILS = 0 ] && echo PASS || echo "$FAILS FAILED") ($TITLE, shots in $W)"
 exit $((FAILS > 0))

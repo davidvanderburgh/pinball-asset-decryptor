@@ -166,7 +166,12 @@ s1_paths() {
     : "${S1_SHIM_DIR:=$S1_HOME/s1emu}"
     : "${QEMU_WORK:=$S1_HOME/qemubuild}"
     : "${S1_QEMU:=$QEMU_WORK/qemu-arm}"
-    export S1_DESKTOP_USER S1_HOME S1_WORK S1_SHIM_DIR QEMU_WORK S1_QEMU
+    # The speaker's TCP port, below the Spike 2 slots' 45997 + N. Spike 1 sat
+    # on 45998, which is Spike 2 slot 1's: a Spike 1 relay still up held it,
+    # and a Visual Pinball run on slot 1 after a Spike 1 game had no sound
+    # (PAD-976). The app's Windows player uses the same number.
+    : "${S1_AUDIO_PORT:=45996}"
+    export S1_DESKTOP_USER S1_HOME S1_WORK S1_SHIM_DIR QEMU_WORK S1_QEMU S1_AUDIO_PORT
 }
 
 # s1_build_groups RIGDIR - which build steps this machine still has to run:

@@ -4087,3 +4087,68 @@ def test_ultradmd_stands_in_too():
     assert "Public Function DisplayScene(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9)" in cls
     assert "GetMajorVersion() : GetMajorVersion = 1" in cls and "GetMinorVersion() : GetMinorVersion = 9" in cls
     assert sh.flexdmd_stub(["x = 1"], [], "UltraDMD.DMDObject", "PadNoUltra", "UltraDMD") == ""
+
+
+# PAD-976: GotG's own scoring, run with the table's own game never started
+_GOTG_SCORING = [
+    "Dim PlayersPlayingGame, CurrentPlayer, DefScoreSize, Tilted",
+    "Dim ScoreTable(3, 18), Score(3)",
+    "DefScoreSize = 8.5",
+    "Sub AddScore(points)",
+    "\tdim multiplierVal",
+    "\tIf (Tilted = False) Then",
+    "\t\tScore(CurrentPlayer) = Score(CurrentPlayer) + points",
+    "\t\tUpdateNumberPlayers2 False",
+    "\tEnd If",
+    "End Sub",
+    "Sub UpdateNumberPlayers2(bForce)",
+    "\tDim i",
+    "\tfor i = 0 to 3",
+    "\t\tif DefScoreSize > ScoreTable(PlayersPlayingGame-1, 17) then DefScoreSize = 1",
+    "\tNext",
+    "End Sub",
+    "Sub tgAntiqueShop_Dropped",
+    "\tAddScore 1110",
+    "End Sub",
+]
+
+
+def _gotg_run(tmp_path, lines):
+    vbs = tmp_path / "gotg.vbs"
+    vbs.write_text("\n".join(lines + ["tgAntiqueShop_Dropped", 'WScript.Echo "played on"']),
+                   encoding="latin-1")
+    return subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the table's VBScript under cscript")
+def test_gotg_scoring_with_no_player_of_its_own_stays_quiet(tmp_path):
+    """The table's own game never starts behind the machine, so its
+    PlayersPlayingGame is 0, and the first sub the bridge leaves it that scored
+    ended Visual Pinball on 'Subscript out of range: [number: -1]' (the ball's
+    first trip up the playfield). The GotG maps quiet AddScore."""
+    vs = pytest.importorskip("vpxshadow")
+    r = _gotg_run(tmp_path, list(_GOTG_SCORING))
+    assert "Subscript out of range" in r.stdout + r.stderr          # as David hit it
+    for f in ("guardians_le.shadow.json", "guardians.shadow.json"):
+        m = json.load(open(os.path.join(VPX, f), encoding="utf-8"))
+        assert {"AddScore", "tgAntiqueShop_Dropped", "GrootMouth_Hit"} <= set(m["quiet_subs"]), f
+    lines = list(_GOTG_SCORING)
+    stubs = []
+    for name in ("AddScore", "tgAntiqueShop_Dropped"):
+        args = vs.quiet_sub(lines, name, [])
+        stubs.append("Sub %s%s : End Sub" % (name, args))
+    r = _gotg_run(tmp_path, lines + stubs)
+    assert r.stdout.strip() == "played on", r.stdout + r.stderr
+
+
+def test_gotg_patched_before_the_fix_is_asked_to_patch_again(tmp_path):
+    vs = pytest.importorskip("vpxsetup")
+    m = json.load(open(os.path.join(VPX, "guardians_le.shadow.json"), encoding="utf-8"))
+    name = m["output"]
+    script = tmp_path / (name[:-4] + ".script.vbs")
+    script.write_text("Sub AddScore(points)\n\tdim multiplierVal\n\tResetBallSearch\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == [m["repatch"][0]["why"]]
+    script.write_text("Sub AddScore_orig(points)\n\tdim multiplierVal\n"
+                      "Sub AddScore(points) : End Sub   ' PAD: quiet\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == []

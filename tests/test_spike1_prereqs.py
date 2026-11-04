@@ -344,3 +344,22 @@ def test_the_status_panel_looks_for_the_shim_where_the_app_installs_it():
     text = (RIG / "status.sh").read_text(encoding="utf-8")
     assert "$S1_SHIM_DIR/s1hwshim" in text
     assert "$S1_WORK/s1hwshim" not in text
+
+
+def test_the_speaker_port_is_clear_of_every_spike2_slot():
+    """PAD-976: Spike 1 spoke on 45998, Spike 2 slot 1's port (45997 + N); a
+    Spike 1 relay still up held it and the next Visual Pinball run on slot 1
+    had no sound. Rig, stop.sh and the app's player all use one number."""
+    from pinball_decryptor.webui import emulate_spike1_core as s1
+    port = int(re.search(r'S1_AUDIO_PORT:=(\d+)', PREREQS.read_text(encoding="utf-8")).group(1))
+    padpath = (REPO / "tools" / "spike2_emu" / "padpath.sh").read_text(encoding="utf-8")
+    base = int(re.search(r"PAD_AUDIO_PORT:=\$\(\((\d+) \+ PAD_SLOT\)\)", padpath).group(1))
+    slots = int(re.search(r'PAD_SLOTS_MAX:=(\d+)', padpath).group(1))
+    assert port not in range(base, base + slots + 1)
+    assert s1.AUDIO_PORT == str(port)
+    for script in ("start.sh", "stop.sh"):
+        src = (RIG / script).read_text(encoding="utf-8")
+        assert "45998" not in src and "$S1_AUDIO_PORT" in src, script
+    stop = (RIG / "stop.sh").read_text(encoding="utf-8")
+    # the relay is found by the work folder it reads, wherever that is
+    assert 'pkill -f "padrelay.py $S1_WORK/audio.fifo"' in stop and "s1_paths" in stop

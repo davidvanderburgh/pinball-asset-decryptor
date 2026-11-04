@@ -298,9 +298,10 @@ if [ "${PAD_AUDIO:-0}" = "1" ]; then
     # 60 s silent stall.
     # Spike 1 speaks on ITS OWN TCP port: sharing Spike 2's 45997 meant the
     # two rigs' port-matched player cleanups could reap each other's LIVE
-    # player, and one wedged WSL localhost-proxy binding silenced both.
+    # player, and one wedged WSL localhost-proxy binding silenced both. The
+    # port is S1_AUDIO_PORT (s1_paths), clear of every Spike 2 slot's.
     setsid env PAD_GAME="Spike 1" PAD_AUDIO_FMT_FIXED=1 \
-        PAD_AUDIO_PORT="${S1_AUDIO_PORT:-45998}" \
+        PAD_AUDIO_PORT="$S1_AUDIO_PORT" \
         bash "$REPO/tools/spike2_emu/playaudio.sh" \
         "$S1_AUDIO_FIFO" "${S1_PCM_RATE:-44100}" "${S1_PCM_CH:-2}" \
         "$S1_WORK/audio.fmt" \

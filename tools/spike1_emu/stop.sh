@@ -7,6 +7,9 @@
 # (this is only ever invoked directly, never parsed).
 BF=/proc/sys/fs/binfmt_misc
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# the same paths and speaker port start.sh used (S1_WORK, S1_AUDIO_PORT)
+. "$HERE/prereqs.sh"
+s1_paths
 
 pkill -KILL -f qemu-arm-pad  2>/dev/null
 # a PIVOTED or criu-RESTORED guest's cmdline is "/.padqemu/game ./game" — no
@@ -37,7 +40,11 @@ pkill -KILL -f "s1dmd.py"    2>/dev/null
 pkill -KILL -f "s1view.py"   2>/dev/null
 # the speaker chain (start.sh 6a): playaudio.sh's own trap takes the Windows
 # padplay.py child with it; TERM (not KILL) so that trap actually runs.
-# Matched on this rig's FIFO so a Spike 2 run's speaker is left alone.
+# Matched on this rig's FIFO so a Spike 2 run's speaker is left alone: the
+# one in S1_WORK, wherever that is. A home-only pattern missed the app's data
+# disk (/mnt/wsl/paddata/spike1) and left the relay running (PAD-976).
+pkill -f "playaudio.sh $S1_WORK/audio.fifo" 2>/dev/null
+pkill -f "padrelay.py $S1_WORK/audio.fifo"  2>/dev/null
 pkill -f "playaudio.sh /home/.*/s1emu/audio.fifo" 2>/dev/null
 pkill -f "padrelay.py /home/.*/s1emu/audio.fifo"  2>/dev/null
 # Reap the WINDOWS players synchronously, here, not only via playaudio's trap:
@@ -55,7 +62,7 @@ pkill -f "padrelay.py /home/.*/s1emu/audio.fifo"  2>/dev/null
     -Command "Get-CimInstance Win32_Process |
               Where-Object { \$_.Name -like 'py*' -and
                              \$_.CommandLine -like '*padplay.py*' -and
-                             \$_.CommandLine -like '* 45998 *' } |
+                             \$_.CommandLine -like '* $S1_AUDIO_PORT *' } |
               ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
     >/dev/null 2>&1 || true
 sleep 1

@@ -130,7 +130,7 @@ def quiet_sub(lines, name, rep):
         m = pat.match(line.rstrip())  # Batman 66: a header can end in a space
         if m:
             lines[i] = line.replace(m.group(3), name + "_orig", 1)
-            rep.append("quieted Sub %s (its lights are the machine's now)" % name)
+            rep.append("quieted Sub %s (the machine runs that now)" % name)
             return m.group(4) or "()"
     rep.append("WARNING: quiet_subs names %s, which the script has no Sub for" % name)
     return None
@@ -1095,7 +1095,7 @@ def gen(m, had, quiet=None, dof=None):
                 "\tfso.MoveFile path & \".tmp\", path",
                 "End Sub"]
     for name, args in quiet.items():
-        out.append("Sub %s%s : End Sub   ' PAD: quiet; the machine lights the table" % (name, args))
+        out.append("Sub %s%s : End Sub   ' PAD: quiet; the machine runs this now" % (name, args))
     # ---- saucers
     for k, s in saucers(m).items():
         # an entry opto the ball passes on its way in (PAD-910: Rush's side

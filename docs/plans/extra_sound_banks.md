@@ -734,3 +734,28 @@ Proof (2026-11-03, `C:\tmp\PAD-749`): David's v38 card (Heisei V2.1 base) with e
 in six banks (`image-sc21..26`, 192 MB). On the rig (PAD-Runtime, `sounds.cfg` `force 2`,
 `sound_fire_mode.c`), request 76 (sid 2504, idx 1304) played the stand-in's 285/415 Hz tones on both
 builds, on this one from `image-sc21.bin` (sound id 0x150000); no segv. The capture is 44.1 kHz.
+
+## Only looping music modes' files, and nothing else, while image.bin has room (PAD-994)
+
+DoomWalrus666's Heisei Pro card, rebuilt on v1.332.5+: calls "playing at odd times or not at all",
+his longer replacements and stock ones alike (idx2034, 1870, 1103 GODZILLA POWERUP, a London call).
+PAD-749's `forced` path had moved every bankable sound into banks beside the music modes' files:
+the user's longer replacements of the game's sounds (`game_sids`) and the modes' own sounds too.
+**A sound the game plays once from a bank keeps its sound channel after it ends.** Emulator,
+Godzilla Pro 1.16 (`C:\tmp\PAD-994`), one music mode file plus 32 longer calls: request 1900's
+7.4 s call (idx2034, `image-sc01.bin`) sounded whole, then channel 7 stayed taken 225 s later, and
+requests 999, 1904 and 1327 fired after it played nothing; on the v1.332.4 build (the calls in
+`image.bin`) the channel freed at 7.6 s and all of them played. The bank descriptor is
+byte-identical to `image.bin`'s re-pointed one but for its record key (same duration, same wait);
+the hold is not the runtime's (the same with no `bsid` lines, so no `sound_worker` hook); a
+looping tune in a bank keeps looping and is stopped by the game; the audio thread is not wedged
+(another channel plays on). Why the game does not end a bank one-shot is not known.
+
+So while `image.bin` has room, only the music modes' files every game sound id of which LOOPS
+(`_sm_loop_hosts`: `_MUSIC_LOOP_TAIL` after a record, `_loops_at_end`) go into banks; every other
+sound stays in `image.bin`, as before PAD-749, and the log names a file kept for being played once
+(Godzilla Pro 1.16's TUNE 1 slot is also played once by request 134, sound id 2556, so its file
+stays). Proof (fixed build, same card, same firing with no stops): 1900, 999, 1904 and four
+1327s all played in turn, our calls whole (tone seconds) and the stock ones at 0.88-0.96
+correlation, and request 76 played the mode 2 file. A build whose `image.bin` is FULL still moves
+the user's calls into banks (PAD-593/606): those still hold their channel after they end.

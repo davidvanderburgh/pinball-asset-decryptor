@@ -8600,13 +8600,18 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             busy=set(grows) - set(_user_grows))
                     if (mode_own_used or _game_ok or _sm_frags or _game_seqs
                             or _sm_seqs):
+                        _sm_once = {}
                         bank_plan, audio_edits, grows = _plan_sound_banks(
                             gr_path, img_path, params, audio_edits, grows,
                             _user_grows, mode_own_used, reader, img_node,
                             space_chk, log, game_sids=_game_ok,
                             game_why=_game_why, sm_frags=_sm_frags,
                             game_seqs=_game_seqs, sm_seqs=_sm_seqs,
-                            sm_hold=_sm_turn_hosts(sound_mode_used))
+                            sm_hold=_sm_turn_hosts(sound_mode_used),
+                            sm_loops=_sm_loop_hosts(gr_path, img_path, params,
+                                                    desc_sites, _sm_frags, _sm_seqs,
+                                                    once=_sm_once),
+                            sm_once=_sm_once)
                         if bank_plan is not None:
                             bank_plan.old_map = dict(_old_bank_map)
                             _user_grows = {i: g for i, g in _user_grows.items()
@@ -20881,9 +20886,53 @@ def _sm_turn_hosts(used):
             if not _SMo.is_turn(u["mode"]) and (u["rel"], int(u["mode"])) in turns}
 
 
+def _loops_at_end(desc):
+    """PAD-994: whether descriptor *desc* (plain bytes) goes back to its loop mark after a
+    record it plays (:data:`_MUSIC_LOOP_TAIL`): the game's looping tunes do, a call or a tune
+    played once does not.  Any record, not the last: a descriptor read wide carries bytes past
+    its end op, where a false op11 can turn up (Godzilla Pro 1.16's TUNE 1, sid 2544)."""
+    d = bytes(desc or b"")
+    n = len(_MUSIC_LOOP_TAIL)
+    return any(d[p + 8:p + 8 + n] == _MUSIC_LOOP_TAIL for p, _k in _op11_payloads(d))
+
+
+def _sm_loop_hosts(gr_path, img_path, params, sites, sm_frags, sm_seqs, once=None):
+    """PAD-994: the music modes' files (hosts of *sm_frags*, and of *sm_seqs* group by group)
+    every game sound id of which plays a looping tune: the only ones a build moves into a sound
+    bank while ``image.bin`` has room for them (:func:`_plan_sound_banks`).  A sound the game
+    plays once from a bank sounds whole and then keeps its channel (emulator, Godzilla Pro
+    1.16: request 1900's 7.4 s call still held channel 7 225 s later, and every request after it
+    waited behind it), where a looping tune is stopped by the game anyway.  ``set()`` when the
+    descriptors cannot be read: every file then stays in ``image.bin``, as before PAD-749.
+    *once* (a dict) is given ``{host: a sound id that plays it once}`` for the others."""
+    out = set()
+    once = {} if once is None else once
+    for g in sm_seqs or ():
+        bad = [sid for sid, d in sorted(g.descs.items()) if not _loops_at_end(d)]
+        if g.descs and not bad:
+            out.update(int(h) for h in g.hosts)
+        else:
+            once.update((int(h), bad[0] if bad else None) for h in g.hosts)
+    if not sm_frags:
+        return out
+    try:
+        wide = _wide_descriptors_once(gr_path, img_path, params, _desc_key_mask(params, sites))
+    except (RuntimeError, OSError):
+        return out
+    for host, frags in sm_frags.items():
+        sids = sorted({int(sid) for _u, sid in frags})
+        bad = [sid for sid in sids if sid not in wide or not _loops_at_end(wide[sid][0])]
+        if sids and not bad:
+            out.add(int(host))
+        else:
+            once[int(host)] = bad[0] if bad else None
+    return out
+
+
 def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows, used,
                       reader, img_node, space_chk, log, game_sids=None, game_why=None,
-                      sm_frags=None, game_seqs=None, sm_seqs=None, sm_hold=()):
+                      sm_frags=None, game_seqs=None, sm_seqs=None, sm_hold=(), sm_loops=None,
+                      sm_once=None):
     """Decide which of the modes' own sounds leave ``image.bin`` for a sound
     bank of their own (PAD-595), and take them out of *grows* and
     *audio_edits*.  Returns ``(plan or None, audio_edits, grows)``.
@@ -20909,9 +20958,10 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     take what ``image.bin`` has left under the game's limit, largest first out
     when it is full (:func:`.bank_build.plan_spill`), so the fewest move.  A
     build whose sounds all fit is exactly the build it was, unless it has music modes'
-    files a bank can hold (PAD-749): then every bankable sound goes into a bank but the
-    music modes' files *sm_hold* (hosts with files in turn of their own, PAD-638, which play
-    only from a record in image.bin)."""
+    files a bank can hold (PAD-749): then those go into a bank, but those the game plays once
+    (not in *sm_loops*, :func:`_sm_loop_hosts`; ``None`` counts every one as looping) and
+    those in *sm_hold* (hosts with files in turn of their own, PAD-638, which play only from a
+    record in image.bin), and every other sound stays in image.bin (PAD-994)."""
     from . import bank_build as BB
     from .spike2 import masterdir as MD
     from .spike2 import soundbank as SB
@@ -20943,8 +20993,22 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # holds image.bin in memory for good and a bank only while it plays: a Heisei card with
     # its music modes in image.bin (2,020 MB, stock 1,650) left its city map video short of
     # room on some first balls, and capped how many songs a card could carry.
+    # PAD-994: but only the looping ones (*sm_loops*), and nothing else: a sound the game plays
+    # once from a bank keeps its channel after it ends, so a Heisei Pro card whose longer
+    # calls all went into a bank beside its music modes lost calls after them, or heard them
+    # late. Those stay in image.bin while it has room, as before PAD-749.
     forced = not spilled
-    if forced and not (set(sm_frags) | set(mseq_of)) - set(sm_hold):
+    to_bank = {i for i in set(sm_frags) - set(sm_hold) | set(mseq_of)
+               if sm_loops is None or i in sm_loops}
+    if forced:
+        for i in sorted(set(sm_frags) | set(mseq_of)):
+            if i not in to_bank and i not in sm_hold:
+                sid = (sm_once or {}).get(i)
+                log("idx %d's music mode file stays in image.bin rather than a sound bank: the "
+                    "game plays it once%s, and a sound played once from a bank keeps its sound "
+                    "channel after it ends." % (i, " (sound id %d)" % sid if sid else ""),
+                    "info")
+    if forced and not to_bank:
         return None, audio_edits, grows
     # PAD-593: the game maps image.bin and the bank playing whole, side by side, so
     # once any sound needs a bank they ALL go to banks, kept as small as Stern's own
@@ -20952,9 +21016,8 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # adds little beside it (soundbank.MAPPED_MAX).
     spilled.update(kept)
     kept = {}
-    if forced:          # (PAD-749: image.bin had room; a file with turns of its own stays)
-        kept = {i: spilled.pop(i) for i in sorted(set(sm_hold) & set(spilled))
-                if i not in mseq_of}
+    if forced:          # (image.bin had room: only the looping music modes' files move)
+        kept = {i: spilled.pop(i) for i in sorted(spilled) if i not in to_bank}
     for idx, why in sorted((game_why or {}).items()):
         if idx in user_grows:
             log("idx %d stays in image.bin rather than a sound bank: %s, and a bank sound is "

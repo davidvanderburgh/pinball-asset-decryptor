@@ -75,7 +75,9 @@ and lines; ``sounds.cfg`` adds a ``random`` line naming the slot's record key (p
 IN A SOUND BANK (PAD-608): a file goes into a sound bank of the app's own (``image-scNN.bin``,
 PAD-595), as the modes' own sounds and the longer replacements do: since PAD-749 every file a bank
 can hold, even while ``image.bin`` has room (the game holds ``image.bin`` in memory for good and a
-bank only while it plays), but a file with files in turn of its own, which stays where it is turned. The game
+bank only while it plays), but a file with files in turn of its own, which stays where it is turned,
+and (PAD-994) while ``image.bin`` has room, a file one of whose sound ids the game plays once: a
+sound played once from a bank keeps its channel after it ends. The game
 plays a bank's sound only under a sound id of the bank's own (it streams from the file of the id's
 category), so such a file gets one bank sound id for every game sound id that plays its slot, each
 with that game id's descriptor naming the bank's record, and ``sounds.cfg`` says which (``bsid``

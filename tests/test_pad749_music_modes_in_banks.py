@@ -28,9 +28,10 @@ def test_music_modes_files_go_into_a_bank_although_image_bin_has_room(monkeypatc
     frags = {2: [(u, 20)], 3: [(dict(u, host=3, rel="b.wav"), 21)]}
     (plan, edits2, grows2), _e, _g, lines = _plan(monkeypatch, tmp_path, frags, {1: 501})
     assert plan is not None
-    # the files and the user's longer game sound beside them: image.bin keeps none of them
-    assert sorted(plan.grows) == [1, 2, 3] and grows2 == {} and edits2 == {}
-    assert sorted(plan.sm_frags) == [2, 3] and plan.game == {1: 501}
+    # the files go; the user's longer game sound beside them stays in image.bin (PAD-994: a
+    # sound the game plays once from a bank keeps its channel after it ends)
+    assert sorted(plan.grows) == [2, 3] and sorted(grows2) == [1] and sorted(edits2) == [1]
+    assert sorted(plan.sm_frags) == [2, 3] and plan.game == {}
     assert any("held in memory for good, where a bank is held only while it plays" in m
                for m in lines)
     assert not any("past the" in m for m in lines)

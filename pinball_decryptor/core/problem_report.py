@@ -33,7 +33,13 @@ Three parts, none of them touching the UI (the window is
   each report's stage to the service, and draws the very same board from
   the same script (``webui/static/js/report_board.js``) in the ticket, so
   what the user sees is what the developer sees.  An anonymous id made on
-  this PC (:func:`install_id`) ties the app's reports together there.
+  this PC (:func:`install_id`) ties the app's reports together there;
+* the question (PAD-972): when the developer needs something only the
+  user has (a log, what they see), the tracker puts the report in the
+  stage ``question`` with its words.  The board marks it "Needs your
+  answer" (:func:`waiting`), and the user answers in the app with words
+  and files (:func:`reply_file`, :func:`send_reply`), which the tracker
+  collects from the service.
 
 Nothing personal is gathered on its own: a name is what the user typed,
 the log is the app's own log, and the user sees the whole record before
@@ -69,11 +75,22 @@ MAX_TEXT = 4000
 MAX_NAME = 80
 #: this many of the app's own reports are remembered and asked after
 KEEP_MINE = 20
-#: the service is asked after the open ones at most this often in the
-#: background ...
-STATUS_AFTER = 6 * 3600
-#: ... and when the user opens the board, when the last ask is older
+#: the service is asked after the open ones this often in the background
+#: while any is open (a question must reach a running app, PAD-972) ...
+STATUS_AFTER = 15 * 60
+#: ... and when the user opens the board or the Report a problem window,
+#: when the last ask is older
 BOARD_STATUS_AFTER = 10 * 60
+#: an answer to the developer's question (tools/donations_worker's
+#: REPLY_* limits): its words, its files, and every file's base64 together
+MAX_REPLY = 20_000
+REPLY_FILES = 5
+REPLY_MAX_B64 = 1_500_000
+#: ... which is this many bytes of files before base64
+REPLY_MAX_BYTES = REPLY_MAX_B64 // 4 * 3
+#: a log too big to go whole keeps at most this much of its end, which
+#: leaves room for another file beside it
+REPLY_TRIM_TO = 768 * 1024
 #: a picture is shrunk until it fits this (the service keeps a row under
 #: Cloudflare D1's 2 MB; base64 adds a third)
 MAX_PICTURE_BYTES = 700_000
@@ -82,6 +99,11 @@ PICTURE_MAX_SIDE = 1600
 
 class ReportError(Exception):
     """The service refused the report, with a message meant for the user."""
+
+
+class QuestionClosed(ReportError):
+    """The answer came too late: the report's question is no longer open
+    (answered already, or the developer moved on)."""
 
 
 # ---------------------------------------------------------------- redaction
@@ -352,14 +374,38 @@ STATE_WORDS = {
 STAGES = ("received", "queued", "working", "ready", "done")
 
 
+#: the stage the tracker puts a report in while it waits on the user's
+#: answer (PAD-972); the board draws it in Being worked on, with a look
+#: of its own
+QUESTION = "question"
+
+
+def _int(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def waiting(entry):
+    """True while *entry* has a question the user has not answered: the
+    stage is ``question`` and no answer came after it."""
+    return ((entry.get("stage") or "") == QUESTION and not answered(entry)
+            and _int(entry.get("reply_at")) < _int(entry.get("question_at")))
+
+
 def stage_of(entry):
     """Which column of the board *entry* is in.  The tracker's own stage
     when the service has one; a service that predates the board
-    (PAD-914) has only the state, which says as much as it can."""
+    (PAD-914) has only the state, which says as much as it can.  A
+    question waiting on the user is :data:`QUESTION`; one answered is
+    back to being worked on."""
     state = entry.get("state") or "received"
     if answered(entry):
         return "done"
     stage = entry.get("stage") or ""
+    if stage == QUESTION:
+        return QUESTION if waiting(entry) else "working"
     if stage in STAGES and stage != "done":
         return stage
     return "queued" if state == "filed" else "received"
@@ -379,6 +425,10 @@ def board_entry(entry):
             "progress": progress if 0 <= progress <= 100 else -1,
             "version": entry.get("version") or "",
             "message": entry.get("message") or "",
+            "question": entry.get("question") or "",
+            "waiting": waiting(entry),
+            "answer_sent": bool(entry.get("answer_sent"))
+            and not waiting(entry) and not answered(entry),
             "new": entry.get("seen") is False}
 
 
@@ -398,9 +448,10 @@ def answered(entry):
 
 def fetch_status(url, key, ids, timeout=TIMEOUT):
     """``{id: {"state", "version", "message", "answered_at", "stage",
-    "ticket", "progress"}}`` for the app's own report *ids* (at most 20 a
-    call).  The last three are the board's; an older service leaves them
-    out (blank, and -1 for no progress)."""
+    "ticket", "progress", "question", "question_at", "reply_at"}}`` for
+    the app's own report *ids* (at most 20 a call).  From ``stage`` on
+    they are the board's and the question's; an older service leaves them
+    out (blank, -1 for no progress, 0 for no moment)."""
     ids = [i for i in ids if i][:20]
     if not url or not ids:
         return {}
@@ -420,7 +471,10 @@ def fetch_status(url, key, ids, timeout=TIMEOUT):
                              "answered_at": r.get("answered_at") or 0,
                              "stage": r.get("stage") or "",
                              "ticket": r.get("ticket") or "",
-                             "progress": _progress(r.get("progress"))}
+                             "progress": _progress(r.get("progress")),
+                             "question": str(r.get("question") or ""),
+                             "question_at": _int(r.get("question_at")),
+                             "reply_at": _int(r.get("reply_at"))}
     return rows
 
 
@@ -494,13 +548,15 @@ def remember(cache, report, answer):
 
 def apply_status(cache, rows):
     """Fold the service's answers into the cache.  Returns the entries
-    whose answer is NEW (just released or closed, not yet seen)."""
+    whose news is NEW: just released or closed, or a question the user
+    has not seen yet."""
     news = []
     for m in cache.get("mine") or ():
         r = rows.get(m.get("id"))
         if not r:
             continue
         was = m.get("state") or "received"
+        asked_at = _int(m.get("question_at"))
         m["state"] = r["state"]
         m["version"] = r["version"]
         m["message"] = r["message"]
@@ -508,10 +564,146 @@ def apply_status(cache, rows):
         m["stage"] = r.get("stage") or ""
         m["ticket"] = r.get("ticket") or ""
         m["progress"] = r.get("progress", -1)
-        if answered(m) and not answered({"state": was}):
+        m["question"] = r.get("question") or ""
+        m["question_at"] = _int(r.get("question_at"))
+        # an answer sent from here is kept as said until the service has
+        # it too (its clock is the service's; ours only stood in)
+        m["reply_at"] = max(_int(r.get("reply_at")),
+                            _int(m.get("reply_at"))
+                            if m.get("question_at") == asked_at else 0)
+        if waiting(m) and m["question_at"] != asked_at:
+            m["answer_sent"] = False
+            m["seen"] = False
+            news.append(m)
+        elif answered(m) and not answered({"state": was}):
             m["seen"] = False
             news.append(m)
     return news
+
+
+def note_answer_sent(cache, rid, now=None):
+    """The service took the user's answer to *rid*'s question: the entry
+    is no longer waiting (the service's own reply_at comes with the next
+    ask) and its card says the answer went."""
+    for m in cache.get("mine") or ():
+        if m.get("id") == rid:
+            m["reply_at"] = max(int(now or time.time()),
+                                _int(m.get("question_at")))
+            m["stage"] = "working"
+            m["answer_sent"] = True
+            return m
+    return None
+
+
+# ------------------------------------------------------------- the answer back
+#: files the app reads as text, and so may trim to their tail to fit
+_TEXT_EXT = (".log", ".txt", ".ini", ".cfg", ".xml", ".json", ".csv",
+             ".vbs", ".md", ".yaml", ".yml")
+
+
+def _looks_text(name, data):
+    if os.path.splitext(name)[1].lower() in _TEXT_EXT:
+        return True
+    head = data[:4096]
+    if b"\0" in head:
+        return False
+    try:
+        head.decode("utf-8")
+    except UnicodeDecodeError as e:
+        return e.start > len(head) - 4          # cut mid-character at the end
+    return True
+
+
+def _kb(n):
+    return "%d KB" % ((n + 1023) // 1024) if n < 1024 * 1024 \
+        else "%.1f MB" % (n / (1024 * 1024))
+
+
+def reply_file(path, room=REPLY_MAX_BYTES):
+    """One file for an answer: ``{"name", "type", "data", "size",
+    "trimmed"}``.  *room* is how many bytes are left for it.  A text file
+    (a log) too big for that keeps its last lines, with a first line
+    saying it was trimmed; anything else too big is a ``ValueError`` with
+    the words the window shows."""
+    import mimetypes
+    name = os.path.basename(path) or "file"
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as e:
+        raise ValueError("Couldn't read %s: %s" % (name, e.strerror or e))
+    kind = mimetypes.guess_type(name)[0] or (
+        "text/plain" if os.path.splitext(name)[1].lower() in _TEXT_EXT
+        else "application/octet-stream")
+    size = len(data)
+    if size <= room:
+        return {"name": name, "type": kind, "data": data, "size": size,
+                "trimmed": False}
+    if room < 4096 or not _looks_text(name, data):
+        raise ValueError(
+            "%s is %s, more than the %s an answer can still carry. Attach a "
+            "smaller file, or a picture of the part that matters."
+            % (name, _kb(size), _kb(max(0, room))))
+    keep = min(room, REPLY_TRIM_TO)
+    note = ("[The app trimmed this file to fit: the last %s of %s.]\n"
+            % (_kb(keep - 200), _kb(size))).encode("utf-8")
+    tail = data[-(keep - len(note) - 100):]
+    cut = tail.find(b"\n")
+    if 0 <= cut < 4096:
+        tail = tail[cut + 1:]
+    if kind == "application/octet-stream":
+        kind = "text/plain"
+    return {"name": name, "type": kind, "data": note + tail, "size": size,
+            "trimmed": True}
+
+
+def send_reply(url, key, rid, message, files, timeout=TIMEOUT):
+    """Post the user's answer to *rid*'s question: *message* and *files*
+    (:func:`reply_file` dicts).  :class:`QuestionClosed` when the question
+    is no longer open (409), :class:`ReportError` for another refusal; a
+    network failure is the urllib error."""
+    if not url:
+        raise ReportError("No report service is configured.")
+    message = (message or "").strip()
+    files = list(files or ())
+    if not message and not files:
+        raise ReportError("Write an answer or attach a file.")
+    if len(message) > MAX_REPLY:
+        raise ReportError("The answer is too long: keep it under %d "
+                          "characters, or attach it as a file." % MAX_REPLY)
+    if len(files) > REPLY_FILES:
+        raise ReportError("At most %d files go with an answer." % REPLY_FILES)
+    body = {"message": message,
+            "files": [{"name": f["name"], "type": f.get("type") or "",
+                       "b64": base64.b64encode(f["data"]).decode("ascii")}
+                      for f in files]}
+    if sum(len(f["b64"]) for f in body["files"]) > REPLY_MAX_B64:
+        raise ReportError("The files are too big to send together.")
+    req = urllib.request.Request(
+        url.rstrip("/") + "/v1/report/%s/reply" % rid,
+        data=json.dumps(body).encode("utf-8"), method="POST",
+        headers=_headers(**{"Content-Type": "application/json",
+                            "X-PAD-Key": key or ""}))
+    try:
+        with urlopen(req, timeout) as resp:
+            out = _read_json(resp)
+    except urllib.error.HTTPError as e:
+        if 400 <= e.code < 500:
+            try:
+                msg = _read_json(e).get("error")
+            except Exception:                           # noqa: BLE001
+                msg = None
+            if e.code == 409:
+                raise QuestionClosed(
+                    "This question is no longer open. Check now shows "
+                    "where the report is.")
+            if e.code == 404:
+                msg = None                  # a service from before PAD-972
+            raise ReportError(msg or "The service refused the answer.")
+        raise
+    if not out.get("ok"):
+        raise ReportError(out.get("error") or "The service refused the answer.")
+    return out
 
 
 # ------------------------------------------------------------------ the file

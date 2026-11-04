@@ -74,11 +74,14 @@ with mentions disarmed.
 | `POST /v1/admin/review/<id>` | header `X-PAD-Admin`; JSON `{"approve": true}` counts a held row from then on, `false` hides it |
 | `DELETE /v1/donate/<id>` | header `X-PAD-Admin` hides any row; `X-PAD-Key` plus `X-PAD-Edit` (the token the POST answered) lets the app that added a row take it back |
 | `POST /v1/report` | header `X-PAD-Key`; JSON `title, body, name, app_version, platform, install, picture_type, picture_b64`: the app's Report a problem (PAD-780) |
-| `GET /v1/report/status?ids=a,b` | header `X-PAD-Key`; each id's `state` (received, filed, released, closed, unknown), `version`, `message`, and the board's `stage`, `ticket`, `progress`: how the app tells its user. Stamps `seen_at` |
+| `GET /v1/report/status?ids=a,b` | header `X-PAD-Key`; each id's `state` (received, filed, released, closed, unknown), `version`, `message`, and the board's `stage`, `ticket`, `progress`, and `question`, `question_at`, `reply_at` (PAD-972): how the app tells its user. Stamps `seen_at` |
+| `POST /v1/report/<id>/reply` | header `X-PAD-Key`; JSON `{"message", "files": [{"name", "type", "b64"}]}`: the user's answer to the report's open question (PAD-972). Up to 20,000 characters and 5 files, 1,500,000 base64 characters in all; 409 unless a question is open and not yet answered; counts toward the five an hour |
+| `GET /v1/admin/replies` | header `X-PAD-Admin`; up to 10 answers the tracker has not taken, oldest first: `id, ticket, question, question_at, reply_at, message, files` |
+| `POST /v1/admin/reports/<id>/reply-taken` | header `X-PAD-Admin`; the tracker has the answer: its words and files are blanked (`reply_at` stays) |
 | `GET /v1/admin/reports` | header `X-PAD-Admin`; the reports not yet taken, oldest first, picture included |
 | `POST /v1/admin/reports/<id>/taken` | header `X-PAD-Admin`; blanks everything the user wrote, state `filed` |
 | `POST /v1/admin/reports/<id>/answer` | header `X-PAD-Admin`; JSON `{"state": "released"\|"closed", "version", "message"}`: what the app shows its user |
-| `POST /v1/admin/reports/<id>/stage` | header `X-PAD-Admin`; JSON `{"stage": "queued"\|"working"\|"ready"\|"done", "ticket", "progress"}`: the report's column on the app's Your reports board (PAD-914); answers `seen_at`, when the app last asked |
+| `POST /v1/admin/reports/<id>/stage` | header `X-PAD-Admin`; JSON `{"stage": "queued"\|"working"\|"ready"\|"done"\|"question", "ticket", "progress", "question"}`: the report's column on the app's Your reports board (PAD-914); `question` (PAD-972) also takes the question's words (up to 4000 characters) and clears an answer not yet taken. Answers `seen_at`, when the app last asked |
 
 Remove a junk entry:
 
@@ -122,6 +125,29 @@ before the deploy:
 npx wrangler d1 execute pad-donations --remote --file migrate_pad914.sql
 npx wrangler deploy
 ```
+
+**Questions to the reporter (PAD-972).** When a ticket needs something only
+the reporter has (a log, what they see), the tracker posts `/stage` with
+`stage: "question"` and the question's words. The app shows it on the board
+as "Needs your answer", with a notice at the top, and the user answers in
+the app with words and files (`/v1/report/<id>/reply`), which moves the
+report back to being worked on. The tracker collects answers from
+`/v1/admin/replies` and posts `/reply-taken` once it has one, which blanks
+the words and files. One answer per question; a new question opens the way
+again. A database made before PAD-972 needs its new columns once, before
+the deploy (everything here is safe for the app versions already out):
+
+```bash
+npx wrangler d1 execute pad-donations --remote --file migrate_pad972.sql
+npx wrangler deploy
+```
+
+To try it all on this PC without wrangler, `node local_worker.mjs 8799`
+runs `worker.js` over a real SQLite database (Node 22.5+); point the app at
+it with `PAD_REPORTS_URL=http://127.0.0.1:8799`. `--migrate
+migrate_pad972.sql` with `--dir` on an older checkout tries a migration.
+`scripts/shot_pad972.py` drives the whole question-and-answer loop through
+it.
 
 ## Big entries wait for you
 

@@ -12,8 +12,12 @@
 // --ok...); a page with other names maps them on a wrapper.
 //
 // An entry is core/problem_report.py's board_entry(): id, title, at
-// (seconds), stage (received | queued | working | ready | done), state,
-// ticket, progress (0-100, -1 for none), version, message, new.
+// (seconds), stage (received | queued | working | ready | done |
+// question), state, ticket, progress (0-100, -1 for none), version,
+// message, new, and (PAD-972) question, waiting, answer_sent.  A report
+// whose question waits on the user is drawn in Being worked on with a look
+// of its own, "Needs your answer"; a stage this script does not know goes
+// in Received rather than nowhere.
 (function () {
   const STAGES = [
     { key: "received", label: "Received", hint: "On its way to the developer" },
@@ -40,12 +44,16 @@
 .prb-card { background: var(--panel, rgba(127,127,127,.12)); border: 1px solid var(--line-2, rgba(127,127,127,.35)); border-radius: 6px; padding: 7px 8px; margin-top: 6px; font-size: 12.5px; line-height: 1.35; color: var(--ink, inherit); }
 .prb-card.prb-new { border-color: var(--info, #6aa0d8); box-shadow: inset 3px 0 0 var(--info, #6aa0d8); }
 .prb-card.prb-cur { border-color: var(--accent, #e8a33d); box-shadow: inset 3px 0 0 var(--accent, #e8a33d); }
+.prb-card.prb-ask { border-color: var(--warn, #e0b34a); box-shadow: inset 3px 0 0 var(--warn, #e0b34a); }
 .prb-title { font-weight: 500; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; word-break: break-word; }
 .prb-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; color: var(--ink-3, #888); font-size: 11.5px; }
 .prb-chip { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--line-2, rgba(127,127,127,.35)); color: var(--ink-2, inherit); }
 .prb-tag { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 0 5px; border-radius: 4px; }
 .prb-tag.new { background: var(--info-soft, rgba(106,160,216,.18)); color: var(--info, #6aa0d8); }
 .prb-tag.cur { background: var(--accent-soft, rgba(232,163,61,.18)); color: var(--accent, #e8a33d); }
+.prb-tag.ask { background: var(--warn-soft, rgba(224,179,74,.18)); color: var(--warn, #e0b34a); }
+.prb-q { margin-top: 5px; padding: 5px 7px; border-radius: 5px; background: var(--warn-soft, rgba(224,179,74,.12)); color: var(--ink, inherit); white-space: pre-line; word-break: break-word; }
+.prb-q-hint { margin-top: 4px; font-size: 11.5px; color: var(--ink-3, #888); }
 .prb-bar { height: 5px; border-radius: 3px; background: var(--line, rgba(127,127,127,.25)); margin-top: 6px; overflow: hidden; }
 .prb-bar > i { display: block; height: 100%; background: var(--accent, #e8a33d); }
 .prb-pct { font-size: 11px; color: var(--ink-3, #888); margin-top: 2px; }
@@ -88,17 +96,38 @@
     return null;
   }
 
-  function card(e, cur) {
+  // the column a report is drawn in: a question is still being worked on
+  const KEYS = STAGES.map((s) => s.key);
+  function column(e) {
+    const s = e.stage || "received";
+    if (s === "question") return "working";
+    return KEYS.includes(s) ? s : "received";
+  }
+  // waiting on the user: the app says so outright; the tracker's copy
+  // knows it from the stage it pushed
+  function asking(e) {
+    return e.waiting === undefined ? e.stage === "question" : !!e.waiting;
+  }
+
+  function card(e, cur, opts) {
     const isCur = cur && e.id === cur;
-    const cls = "prb-card" + (isCur ? " prb-cur" : e.new ? " prb-new" : "");
+    const ask = asking(e);
+    const cls = "prb-card" + (isCur ? " prb-cur" : ask ? " prb-ask" : e.new ? " prb-new" : "");
     let out = '<div class="' + cls + '" data-id="' + esc(e.id) + '">';
     out += '<div class="prb-title" title="' + esc(e.title) + '">' +
       esc(e.title || "A problem report") + "</div>";
     out += '<div class="prb-meta"><span>' + esc(when(e.at)) + "</span>";
     if (e.ticket) out += '<span class="prb-chip">' + esc(e.ticket) + "</span>";
     if (isCur) out += '<span class="prb-tag cur">This ticket</span>';
-    else if (e.new) out += '<span class="prb-tag new">New</span>';
+    if (ask) out += '<span class="prb-tag ask">Needs your answer</span>';
+    else if (e.new && !isCur) out += '<span class="prb-tag new">New</span>';
     out += "</div>";
+    if (ask) {
+      if (e.question) out += '<div class="prb-q">' + esc(e.question) + "</div>";
+      if (opts.askHint) out += '<div class="prb-q-hint">' + esc(opts.askHint) + "</div>";
+    } else if (e.answer_sent && e.stage !== "done") {
+      out += '<div class="prb-out ok">Answer sent</div>';
+    }
     const p = Number(e.progress);
     if (e.stage === "working" && p >= 0 && p <= 100) {
       out += '<div class="prb-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
@@ -115,6 +144,7 @@
   // The board as HTML.  `entries` newest first or not: each column lists
   // its reports newest first.  opts.current: the id to mark "This ticket"
   // (the tracker's view of one ticket).  opts.empty: words for no reports.
+  // opts.askHint: a line under a question saying where to answer it.
   function html(entries, opts) {
     opts = opts || {};
     addStyle();
@@ -125,12 +155,12 @@
     }
     let out = '<div class="prb-wrap"><div class="prb">';
     for (const s of STAGES) {
-      const here = list.filter((e) => (e.stage || "received") === s.key);
+      const here = list.filter((e) => column(e) === s.key);
       out += '<section class="prb-col' + (here.length ? "" : " prb-blank") +
         '" data-stage="' + s.key + '"><div class="prb-head"><span class="prb-dot"></span>' +
         esc(s.label) + ' <span class="prb-n">' + here.length + "</span></div>" +
         '<div class="prb-hint">' + esc(s.hint) + "</div>";
-      out += here.length ? here.map((e) => card(e, opts.current)).join("")
+      out += here.length ? here.map((e) => card(e, opts.current, opts)).join("")
         : '<div class="prb-none">Nothing here</div>';
       out += "</section>";
     }

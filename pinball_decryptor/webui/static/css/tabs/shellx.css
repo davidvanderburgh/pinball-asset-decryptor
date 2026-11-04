@@ -341,4 +341,11 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-rep-tab { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .sx-rep-tab td { padding: 2px 8px 2px 0; vertical-align: top; }
 .sx-rep-tab td:first-child { width: 96px; white-space: nowrap; }
+/* PAD-972: a question waiting on the user, above the Your reports board */
+.sx-ask { border: 1px solid var(--warn); box-shadow: inset 3px 0 0 var(--warn); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
+.sx-ask-title { font-weight: 600; }
+.sx-ask-q { margin: 2px 0 8px; padding: 7px 9px; border-radius: 6px; background: var(--warn-soft); color: var(--ink); white-space: pre-line; word-break: break-word; }
+.sx-ask .area { width: 100%; box-sizing: border-box; }
+.sx-ask-x { margin-left: 4px; padding: 0 2px; border: 0; background: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; }
+.sx-ask-x:disabled { cursor: default; opacity: .5; }
 .dlg-report { margin-right: auto; }

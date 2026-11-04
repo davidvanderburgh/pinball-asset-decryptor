@@ -21,8 +21,15 @@ report in the column of where it is in the developer's queue, with its
 ticket and how far the work is, drawn by ``static/js/report_board.js`` -
 the same script the developer's tracker draws the ticket's copy with.
 
+A question from the developer (PAD-972) comes the same way: the report's
+stage is ``question`` with its words, the notice at the top says so, and
+the board's window shows the question with a box to answer it in, words
+and files (``report_reply_attach`` / ``report_reply_send``).  While any
+report is open the app asks after them every
+``problem_report.STATUS_AFTER``, so a question reaches a running app.
+
 State: ``shellx.report`` = ``{"available", "busy", "last", "picture",
-"capture", "mine"}``.  Settings (``settings.json`` ``report``): ``name``
+"capture", "mine", "replies"}``.  Settings (``settings.json`` ``report``): ``name``
 and ``hide_paths``, what the form remembers, through the
 ``on_report_change`` callback; the reports themselves in
 ``reports_cache.json`` beside settings.json.
@@ -66,6 +73,9 @@ class ReportMixin:
         self._rep_busy = False
         self._rep_last = None
         self._rep_checking = False
+        # answers being put together, per report id: {"files", "busy",
+        # "error"}
+        self._rep_replies = {}
         self._publish_report()
         # the notice, once the window has published its own first state
         # (a banner set during the services' construction is overwritten)
@@ -74,6 +84,7 @@ class ReportMixin:
                 os.environ.get("PAD_UI_NO_UPDATE_CHECK")
                 and not os.environ.get("PAD_REPORTS_URL")):
             self._report_check_status()
+            self._report_tick_later()
 
     # ------------------------------------------------------------ helpers
     @staticmethod
@@ -89,7 +100,18 @@ class ReportMixin:
                         "words": problem_report.state_words(m),
                         "message": m.get("message") or "",
                         "seen": m.get("seen", True),
+                        "waiting": problem_report.waiting(m),
                         "board": problem_report.board_entry(m)})
+        return out
+
+    def _report_replies_view(self):
+        out = {}
+        for rid, r in self._rep_replies.items():
+            out[rid] = {"busy": bool(r.get("busy")), "error": r.get("error"),
+                        "files": [{"name": f["name"],
+                                   "kb": (len(f["data"]) + 1023) // 1024,
+                                   "trimmed": bool(f.get("trimmed"))}
+                                  for f in r.get("files") or ()]}
         return out
 
     def _publish_report(self):
@@ -103,7 +125,8 @@ class ReportMixin:
             "capture": self._report_can_capture(),
             "mine": self._report_mine_view(),
             "checking": self._rep_checking,
-            "checked_at": float(self._rep_cache.get("checked_at") or 0)})
+            "checked_at": float(self._rep_cache.get("checked_at") or 0),
+            "replies": self._report_replies_view()})
 
     def _save_report_settings(self, **changes):
         self._rep_settings.update(changes)
@@ -206,7 +229,7 @@ class ReportMixin:
         form remembers and the words an error box handed over.  An old
         ask after the app's own reports is repeated."""
         age = time.time() - float(self._rep_cache.get("checked_at") or 0)
-        if age > problem_report.STATUS_AFTER:
+        if age > problem_report.BOARD_STATUS_AFTER:
             self._report_check_status()
         facts = self._report_facts()
         # the table under the form follows the box too (PAD-929): the
@@ -365,6 +388,18 @@ class ReportMixin:
         return {"path": path}
 
     # ---------------------------------------------------------- the answer
+    def _report_tick_later(self):
+        self.ctx.loop.after(int(problem_report.STATUS_AFTER * 1000),
+                            self._report_tick)
+
+    def _report_tick(self):
+        """The background ask, while the app runs: only when a report is
+        still open (so a question reaches the user without a restart)."""
+        try:
+            self._report_check_status()
+        finally:
+            self._report_tick_later()
+
     def _report_check_status(self):
         """Ask the service after the app's own reports that have no last
         word yet, off the loop.  One at a time; nothing to ask, no call."""
@@ -404,15 +439,26 @@ class ReportMixin:
             self._report_show_news()
 
     def _report_show_news(self):
-        """The notice at the top for every answered report the user has
-        not seen yet: the release that addressed it, or that it closed."""
+        """The notice at the top for every report with news the user has
+        not seen yet: a question waiting on them first, then the release
+        that addressed one, or that it closed."""
         news = [m for m in self._rep_cache.get("mine") or ()
                 if m.get("seen") is False]
         if not news:
             self.window.set_banner("report_answer", None)
             return
-        m = news[-1]
+        asks = [m for m in news if problem_report.waiting(m)]
+        m = (asks or news)[-1]
         title = m.get("title") or "your report"
+        if asks:
+            text = "A question about your report \"%s\"." % title
+            if len(news) > 1:
+                text += " (%d reports have news.)" % len(news)
+            self.window.set_banner("report_answer", {
+                "kind": "info", "text": text,
+                "actions": [{"id": "view", "label": "Answer it",
+                             "primary": True}]})
+            return
         if m.get("state") == "released":
             text = "Your report \"%s\" is addressed in v%s." % (
                 title, m.get("version") or "?")
@@ -431,7 +477,13 @@ class ReportMixin:
 
     def _report_banner_action(self, action):
         if action == "view":
-            self._open_dialog("reports")
+            # a question opens the board at it
+            asks = [m.get("id") for m in self._rep_cache.get("mine") or ()
+                    if m.get("seen") is False and problem_report.waiting(m)]
+            if asks:
+                self._open_dialog("reports", focus=asks[-1])
+            else:
+                self._open_dialog("reports")
             return True
         self.report_mine_seen()
         return True
@@ -463,3 +515,129 @@ class ReportMixin:
     def report_refresh(self):
         """The window's own ask after the reports."""
         return self._report_check_status()
+
+    # --------------------------------------------- the answer to a question
+    def _report_reply(self, rid):
+        return self._rep_replies.setdefault(rid, {"files": [], "busy": False,
+                                                  "error": None})
+
+    def _report_waiting(self, rid):
+        for m in self._rep_cache.get("mine") or ():
+            if m.get("id") == rid:
+                return m if problem_report.waiting(m) else None
+        return None
+
+    @rpc
+    def report_reply_attach(self, rid=""):
+        """Attach files to the answer to *rid*'s question.  Each must fit
+        what the answer can still carry; a log too big keeps its tail and
+        says so.  The words for a file that cannot go are an RpcError."""
+        if not self._report_waiting(rid):
+            raise RpcError("This question is no longer open.")
+        r = self._report_reply(rid)
+        paths = self.window.ask_open(
+            "report_reply", "Attach files to your answer",
+            filetypes=[("All files", "*.*")], multiple=True)
+        if not paths:
+            return self._report_replies_view().get(rid)
+        if isinstance(paths, str):
+            paths = [paths]
+        r["error"] = None
+        problems = []
+        for path in paths:
+            if len(r["files"]) >= problem_report.REPLY_FILES:
+                problems.append("At most %d files go with an answer."
+                                % problem_report.REPLY_FILES)
+                break
+            room = problem_report.REPLY_MAX_BYTES - sum(
+                len(f["data"]) for f in r["files"])
+            try:
+                f = problem_report.reply_file(path, room)
+            except ValueError as e:
+                problems.append(str(e))
+                continue
+            r["files"].append(f)
+            if f["trimmed"]:
+                self.toast("%s is too big to send whole, so its last part "
+                           "goes (the end of a log is the part that "
+                           "matters)." % f["name"], "info")
+        self._publish_report()
+        if problems:
+            raise RpcError(" ".join(problems))
+        return self._report_replies_view().get(rid)
+
+    @rpc
+    def report_reply_remove(self, rid="", index=0):
+        r = self._report_reply(rid)
+        try:
+            del r["files"][int(index)]
+        except (IndexError, TypeError, ValueError):
+            pass
+        self._publish_report()
+        return self._report_replies_view().get(rid)
+
+    @rpc
+    def report_reply_send(self, rid="", message=""):
+        """Send the answer to *rid*'s question off the UI loop.  Sent, the
+        card says so and the report is back to being worked on; a question
+        no longer open says so and asks after the reports again."""
+        if not self._report_waiting(rid):
+            raise RpcError("This question is no longer open.")
+        r = self._report_reply(rid)
+        if r["busy"]:
+            raise RpcError("Your answer is already on its way.")
+        message = (message or "").strip()
+        if not message and not r["files"]:
+            raise RpcError("Write an answer or attach a file.")
+        if len(message) > problem_report.MAX_REPLY:
+            raise RpcError("The answer is too long: keep it under %d "
+                           "characters, or attach it as a file."
+                           % problem_report.MAX_REPLY)
+        url = self._report_url()
+        if not url:
+            raise RpcError("No report service is configured.")
+        r["busy"] = True
+        r["error"] = None
+        self._publish_report()
+        key = config.REPORTS_APP_KEY
+        files = list(r["files"])
+
+        def _run():
+            try:
+                problem_report.send_reply(url, key, rid, message, files)
+            except problem_report.QuestionClosed as e:
+                self.ctx.loop.post(self._report_reply_failed, rid, str(e),
+                                   True)
+                return
+            except problem_report.ReportError as e:
+                self.ctx.loop.post(self._report_reply_failed, rid, str(e),
+                                   False)
+                return
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                log.info("answer not sent: %s", e)
+                self.ctx.loop.post(
+                    self._report_reply_failed, rid,
+                    "The report service can't be reached right now. Try "
+                    "again in a while: your answer stays here.", False)
+                return
+            self.ctx.loop.post(self._report_reply_sent, rid)
+        threading.Thread(target=_run, daemon=True,
+                         name="pad-report-reply").start()
+        return {"sent": True}
+
+    def _report_reply_sent(self, rid):
+        self._rep_replies.pop(rid, None)
+        problem_report.note_answer_sent(self._rep_cache, rid)
+        problem_report.save_cache(self._rep_path, self._rep_cache)
+        self._publish_report()
+        self._report_show_news()
+        self.toast("Answer sent. Thank you.", "success")
+
+    def _report_reply_failed(self, rid, message, closed):
+        r = self._report_reply(rid)
+        r["busy"] = False
+        r["error"] = message
+        self._publish_report()
+        self.toast(message, "warning")
+        if closed:
+            self._report_check_status()

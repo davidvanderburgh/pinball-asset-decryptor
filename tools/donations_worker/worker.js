@@ -9,6 +9,12 @@
 //   GET    /v1/summary              the total, count, milestones, recent list
 //   GET    /v1/all?offset=0         every donation, newest first, 100 a page
 //   POST   /v1/donate               add one (header X-PAD-Key = APP_KEY)
+//   POST   /v1/report               a problem report from the app (X-PAD-Key)
+//   GET    /v1/report/status?ids=   how the app's own reports are doing
+//   POST   /v1/report/<id>/reply    the user's answer to a question (PAD-972)
+//   GET    /v1/admin/reports        reports not yet taken; .../<id>/taken,
+//                                   /answer, /stage, /reply-taken (X-PAD-Admin)
+//   GET    /v1/admin/replies        answers waiting for the tracker (X-PAD-Admin)
 //   GET    /v1/admin/list           the last 200 rows with ids (X-PAD-Admin);
 //                                   held = 1 marks one waiting for review
 //   POST   /v1/admin/review/<id>    {"approve": true|false}: count a held
@@ -69,7 +75,17 @@ const REPORT_MAX_BODY = 400000;    // the record (log tail included)
 const REPORT_MAX_PICTURE = 1000000; // base64 of a shrunk JPEG
 const REPORT_KEEP_DAYS = 90;
 const REPORT_STATES = ["released", "closed"];
-const REPORT_STAGES = ["queued", "working", "ready", "done"];
+const REPORT_STAGES = ["queued", "working", "ready", "done", "question"];
+// PAD-972: a question for the reporter.  The tracker pushes the stage
+// "question" with its words; the app shows it on the board and posts the
+// user's answer (words and files) to /v1/report/<id>/reply, which the
+// tracker collects from /v1/admin/replies and clears with /reply-taken.
+// One answer per question: a new question opens the way again.
+const QUESTION_MAX = 4000;
+const REPLY_MAX = 20000;
+const REPLY_FILES = 5;
+const REPLY_MAX_B64 = 1500000;     // every file's base64 together (D1: 2 MB a row)
+const REPLY_NAME = 120;
 
 const json = (body, status = 200, extra = {}) =>
   new Response(JSON.stringify(body), {
@@ -425,9 +441,16 @@ async function reportStage(request, env, id) {
   if (!REPORT_STAGES.includes(stage)) return fail("stage must be one of " + REPORT_STAGES.join(", ") + ".", 400);
   const p = Number.isInteger(body.progress) && body.progress >= 0 && body.progress <= 100 ? body.progress : -1;
   const now = Math.floor(Date.now() / 1000);
-  const r = await env.DB.prepare(
-    "UPDATE reports SET stage = ?, ticket = ?, progress = ?, stage_at = ? WHERE id = ?")
-    .bind(stage, clean(body.ticket, 20), p, now, id).run();
+  // a question also carries its words and clears any earlier answer;
+  // every other stage leaves the question columns as they are
+  const r = stage === "question"
+    ? await env.DB.prepare(
+      "UPDATE reports SET stage = ?, ticket = ?, progress = ?, stage_at = ?, question = ?, " +
+      "question_at = ?, reply = '', reply_files = '[]', reply_pending = 0 WHERE id = ?")
+      .bind(stage, clean(body.ticket, 20), p, now, cleanText(body.question, QUESTION_MAX), now, id).run()
+    : await env.DB.prepare(
+      "UPDATE reports SET stage = ?, ticket = ?, progress = ?, stage_at = ? WHERE id = ?")
+      .bind(stage, clean(body.ticket, 20), p, now, id).run();
   if (!r.meta.changes) return fail("No such report.", 404);
   const row = await env.DB.prepare("SELECT seen_at FROM reports WHERE id = ?").bind(id).first();
   // `at` is this Worker's clock, which seen_at is on too: the tracker
@@ -450,11 +473,12 @@ async function reportStatus(request, env, url) {
   const rows = [];
   for (const id of ids) {
     const r = await env.DB.prepare(
-      "SELECT id, state, version, message, answered_at, stage, ticket, progress " +
-      "FROM reports WHERE id = ?")
+      "SELECT id, state, version, message, answered_at, stage, ticket, progress, " +
+      "question, question_at, reply_at FROM reports WHERE id = ?")
       .bind(id).first();
     rows.push(r || { id, state: "unknown", version: "", message: "", answered_at: 0,
-                     stage: "", ticket: "", progress: -1 });
+                     stage: "", ticket: "", progress: -1, question: "", question_at: 0,
+                     reply_at: 0 });
   }
   // when the app last looked, for the tracker's copy of the board
   if (ids.length) {
@@ -463,6 +487,93 @@ async function reportStatus(request, env, url) {
       .bind(now, ...ids).run();
   }
   return json({ ok: true, rows });
+}
+
+// ---- questions and answers (PAD-972) ----------------------------------------
+// A question or an answer keeps its lines; only the ends are trimmed.
+function cleanText(text, max) {
+  return String(text == null ? "" : text).replace(/\r\n?/g, "\n").trim().slice(0, max);
+}
+
+function validateReply(body) {
+  const message = typeof body.message === "string" ? cleanText(body.message, REPLY_MAX + 1) : "";
+  if (message.length > REPLY_MAX) return [null, "The answer is too long."];
+  const list = Array.isArray(body.files) ? body.files : [];
+  if (list.length > REPLY_FILES) return [null, "At most " + REPLY_FILES + " files go with an answer."];
+  const files = [];
+  let total = 0;
+  for (const f of list) {
+    const b64 = f && typeof f.b64 === "string" ? f.b64 : "";
+    if (!b64 || !/^[A-Za-z0-9+/=\r\n]+$/.test(b64)) return [null, "A file is not base64."];
+    total += b64.length;
+    const name = String(f.name || "").replace(/[^A-Za-z0-9._ -]/g, "_").trim().slice(0, REPLY_NAME) || "file";
+    files.push({ name, type: clean(f.type, 80) || "application/octet-stream", b64 });
+  }
+  if (total > REPLY_MAX_B64) return [null, "The files are too big to send together."];
+  if (!message && !files.length) return [null, "Write an answer or attach a file."];
+  return [{ message, files }, null];
+}
+
+// the user's answer, from the app that sent the report: the report's id is
+// the secret (nothing else names it once /taken blanked the row)
+async function reportReply(request, env, id) {
+  if (env.APP_KEY && request.headers.get("X-PAD-Key") !== env.APP_KEY) {
+    return fail("Not from the app.", 403);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch (e) {
+    return fail("Bad request.", 400);
+  }
+  const [rep, error] = validateReply(body || {});
+  if (error) return fail(error, 400);
+  const who = await ipHash(request, env);
+  const now = Math.floor(Date.now() / 1000);
+  // one allowance an hour for reports and answers together
+  const reports = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM reports WHERE ip_hash = ? AND at > ?")
+    .bind(who, now - 3600).first();
+  const answers = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM reply_log WHERE ip_hash = ? AND at > ?")
+    .bind(who, now - 3600).first();
+  if (reports.n + answers.n >= REPORTS_PER_HOUR) return fail("Too many in one hour. Try again later.", 429);
+  const r = await env.DB.prepare(
+    "UPDATE reports SET reply = ?, reply_files = ?, reply_at = ?, reply_pending = 1, stage = 'working' " +
+    "WHERE id = ? AND stage = 'question' AND reply_pending = 0 AND reply_at < question_at")
+    .bind(rep.message, JSON.stringify(rep.files), now, id).run();
+  if (!r.meta.changes) return fail("That question is no longer open.", 409);
+  // the log is for that count alone, so nothing older than the hour stays
+  await env.DB.prepare("DELETE FROM reply_log WHERE at <= ?").bind(now - 3600).run();
+  await env.DB.prepare("INSERT INTO reply_log (ip_hash, at) VALUES (?, ?)").bind(who, now).run();
+  return json({ ok: true, id });
+}
+
+// the tracker collecting the answers that came in, oldest first
+async function adminReplies(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT id, ticket, question, question_at, reply_at, reply, reply_files FROM reports " +
+    "WHERE reply_pending = 1 ORDER BY reply_at LIMIT 10").all();
+  const rows = results.map((r) => {
+    let files;
+    try {
+      files = JSON.parse(r.reply_files || "[]");
+    } catch (e) {
+      files = [];
+    }
+    return { id: r.id, ticket: r.ticket, question: r.question, question_at: r.question_at,
+             reply_at: r.reply_at, message: r.reply, files: Array.isArray(files) ? files : [] };
+  });
+  return json({ ok: true, rows });
+}
+
+// ... and saying it has one: the words and files go, the moment stays
+async function replyTaken(env, id) {
+  const r = await env.DB.prepare(
+    "UPDATE reports SET reply = '', reply_files = '[]', reply_pending = 0 WHERE id = ?")
+    .bind(id).run();
+  if (!r.meta.changes) return fail("No such report.", 404);
+  return json({ ok: true, id });
 }
 
 export default {
@@ -485,14 +596,23 @@ export default {
       if (request.method === "GET" && path === "/v1/report/status") {
         return reportStatus(request, env, url);
       }
+      const rp = path.match(/^\/v1\/report\/([0-9a-f-]{8,40})\/reply$/);
+      if (request.method === "POST" && rp) {
+        return reportReply(request, env, rp[1]);
+      }
+      if (request.method === "GET" && path === "/v1/admin/replies") {
+        if (!isAdmin(request, env)) return fail("Not allowed.", 403);
+        return adminReplies(env);
+      }
       if (request.method === "GET" && path === "/v1/admin/reports") {
         if (!isAdmin(request, env)) return fail("Not allowed.", 403);
         return adminReports(env);
       }
-      const tk = path.match(/^\/v1\/admin\/reports\/([0-9a-f-]{8,40})\/(taken|answer|stage)$/);
+      const tk = path.match(/^\/v1\/admin\/reports\/([0-9a-f-]{8,40})\/(taken|answer|stage|reply-taken)$/);
       if (request.method === "POST" && tk) {
         if (!isAdmin(request, env)) return fail("Not allowed.", 403);
         if (tk[2] === "stage") return reportStage(request, env, tk[1]);
+        if (tk[2] === "reply-taken") return replyTaken(env, tk[1]);
         return tk[2] === "taken" ? reportTaken(env, tk[1]) : reportAnswer(request, env, tk[1]);
       }
       if (path === "/v1/admin/list") {
@@ -523,4 +643,4 @@ export default {
 export function meta() {
   return { MILESTONES, RATES, HOLD_OVER_USD };
 }
-export { validate, validateReport };
+export { validate, validateReport, validateReply };

@@ -169,9 +169,11 @@ def aes_decrypt(pkg, out_zip, fmt):
                         break
                     o.write(dec.decrypt(b))
         else:
-            with open(out_zip, "wb") as o:
+            # a file of its own at byte 24: f's buffered reads have moved its descriptor on
+            with open(out_zip, "wb") as o, open(pkg, "rb") as src:
+                src.seek(24)
                 p = subprocess.Popen(["openssl", "enc", "-d", "-aes-256-cbc", "-nopad",
-                                      "-K", key.hex(), "-iv", iv.hex()], stdin=f, stdout=o)
+                                      "-K", key.hex(), "-iv", iv.hex()], stdin=src, stdout=o)
                 if p.wait() != 0:
                     raise Refused("openssl could not decrypt %s" % os.path.basename(pkg))
     os.truncate(out_zip, size)

@@ -186,3 +186,21 @@ def test_refusals(tmp_path, sel):
     with pytest.raises(sp.Refused):
         sp.ac_xinitrc("#!/bin/sh\nstartx\n")
     assert io  # (imported for symmetry with the Linux tests)
+
+
+def test_the_openssl_path_matches(tmp_path, monkeypatch):
+    """PAD-Runtime's python has no AES module: the rig and the tab's Linux use openssl"""
+    import shutil
+    if not shutil.which("openssl"):
+        pytest.skip("no openssl here")
+    z = tmp_path / "a.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.writestr("x", b"y" * 5000)
+    sp.aes_encrypt(str(z), str(tmp_path / "crypto.pkg"), "ac_pkg")             # pycryptodome
+    monkeypatch.setattr(sp, "_have_crypto", lambda: False)
+    sp.aes_decrypt(str(tmp_path / "crypto.pkg"), str(tmp_path / "b.zip"), "ac_pkg")   # openssl
+    assert open(z, "rb").read() == open(tmp_path / "b.zip", "rb").read()
+    sp.aes_encrypt(str(z), str(tmp_path / "ossl.pkg"), "ac_pkg")                 # openssl
+    monkeypatch.setattr(sp, "_have_crypto", lambda: True)
+    sp.aes_decrypt(str(tmp_path / "ossl.pkg"), str(tmp_path / "c.zip"), "ac_pkg")     # pycryptodome
+    assert open(z, "rb").read() == open(tmp_path / "c.zip", "rb").read()

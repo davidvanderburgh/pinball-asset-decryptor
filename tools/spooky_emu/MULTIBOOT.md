@@ -125,8 +125,7 @@ cannot even update its game code from the card. Owners can keep one card per bui
 5. DONE `machine_sim.sh` (+ `spkmarkmod.py`, `run_game.sh` SPK_MACHINE=1): the multi-boot
    built from the stock update and a marked copy, installed into the slot's /game as the
    title's own install leaves it, two power-ups through the title's start command on the
-   rig's board. PASS (2026-11-03, slot 1, PAD-Runtime): Scooby-Doo, Evil Dead (its
-   /game/code/assets b1's own folder, moved in). The other five: see *Proofs*.
+   rig's board. PASS on all seven: see *Proofs*.
 6. DONE The Multi-boot tab: `multiboot_backend.SPOOKY`, `multiboot=True` on the Spooky
    manufacturer, the words, the help, docs/guide/multi-boot.md, tests/test_multiboot_spk.py,
    scripts/shot_pad980.py.
@@ -177,4 +176,13 @@ cannot even update its game code from the card. Owners can keep one card per bui
 | title | result |
 |---|---|
 | Scooby-Doo v2025.12.01.09 | PASS |
-| Evil Dead 2026.07.15 | PASS |
+| Evil Dead 2026.07.15 | PASS (/game/code/assets = b1's own folder, moved in) |
+| Texas Chainsaw Massacre tcm-1_00 | PASS |
+| Looney Tunes 2025.10.08 | PASS |
+| Halloween code_H78.pkg v1.18.1 | PASS (Pinotaur board) |
+| Beetlejuice v2026.09.15.11 | PASS |
+| Ultraman code_UM.pkg v1.18 | PASS (Pinotaur board) |
+
+Each: the menu on the game's screen, RIGHT + START on the rig's board picked the marked
+build, the game in attract from /game/pad/b1, the next power-up's countdown booted it again
+without making it again (2026-11-03/04, slot 1).

@@ -801,7 +801,10 @@ class VpxTab(TabService):
         title = ("Choose your download of %s" % want["name"] if want
                  else "Choose the Visual Pinball table you downloaded")
         # PAD-943: the download in the tables folder its map fits needs no dialog
-        path = (want or {}).get("source") or (want or {}).get("download") or self.window.ask_open(
+        path = next((p for p in ((want or {}).get("source"), (want or {}).get("download"))
+                     if p and os.path.isfile(p)), None)
+        # PAD-968: a download deleted since the page last read the folder is asked for
+        path = path or self.window.ask_open(
             "vpx_table", title, [("Visual Pinball table", "*.vpx"), ("All files", "*.*")])
         if not path:
             return False

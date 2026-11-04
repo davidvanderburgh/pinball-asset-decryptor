@@ -1503,6 +1503,25 @@ def auto_plunger_item(table, m):
     raise KeyError("the table has no plunger named %s" % p["autoplunge"])
 
 
+def item_fields(table, m):
+    """PAD-982: {GameItem stream name: data} for a map's `item_fields`, the
+    table's own objects given new field values: {"LightningTarget": {"SLGF":
+    300.0}} is Foo Fighters' kick target with a stronger slingshot kick. A
+    JSON float is written as a float, an int as an int (VPX's bools are
+    ints). GameItems are not in the MAC, so each stream is replaced."""
+    want = {k.lower(): v for k, v in m.get("item_fields", {}).items() if k != "_"}
+    out = {}
+    for i, data in enumerate(table.items):
+        kind, name, _ = table.item_info(data)
+        fields = want.pop(name.lower(), None)
+        if fields is not None:
+            out["GameItem%d" % i] = vpxfile.set_fields(data, {
+                tag: struct.pack("<f" if isinstance(v, float) else "<i", v) for tag, v in fields.items()})
+    if want:
+        raise KeyError("the table has no object named %s" % ", ".join(sorted(want)))
+    return out
+
+
 def main(argv):
     if len(argv) != 4:
         print(__doc__)
@@ -1524,6 +1543,7 @@ def main(argv):
     script, streams = vpxsounds.quiet(script, table.ole, rep)   # PAD-858
     items = retrofit_items(table, m)
     streams.update(auto_plunger_item(table, m))
+    streams.update(item_fields(table, m))
     if m.get("plunger", {}).get("auto_plunger"):
         rep.append("%s made a solenoid launcher: the machine's launch coil fires it at full strength"
                    % m["plunger"]["autoplunge"])

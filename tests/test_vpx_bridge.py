@@ -1284,7 +1284,8 @@ def test_the_foo_fighters_pro_map_is_the_le_map_on_the_pros_numbers():
     assert pro["title"] == "foo_fighters_pro" and pro["model"] == "Pro" and pro["preferred"]
     assert le["model"] == "LE" and not le.get("preferred")
     for k in ("detect", "output", "table", "game_on", "keys_skip_orig", "neuter", "extra_vbs",
-              "quiet_subs", "orig_keep", "retrofit_timers"):
+              "quiet_subs", "orig_keep", "retrofit_timers",
+              "retrofit_triggers", "item_fields"):
         assert pro[k] == le[k], k
     assert {k: v["name"] for k, v in pro["switches"].items() if k != "_"} == \
         {k: v["name"] for k, v in le["switches"].items() if k != "_"}
@@ -1294,7 +1295,7 @@ def test_the_foo_fighters_pro_map_is_the_le_map_on_the_pros_numbers():
     assert pro["switches"]["Target004"]["id"] == 48, "LOWER RIGHT TARGET: below every UP PF switch"
     assert pro["switches"]["Trigger003"]["id"] == 54, "LEFT OUTLANE on the Pro"
     assert pro["switches"]["LeftSlingShot"]["id"] == 65
-    assert pro["switches"]["Trigger015"]["id"] == 82, "OVERLORD OPTO on the Pro"
+    assert pro["switches"]["PadOverlordOpto"]["id"] == 82, "OVERLORD OPTO on the Pro"
     assert pro["trough"]["switches"] == [72, 71, 70, 69, 68, 67, 73]
     assert pro["plunger"]["lane_switch"] == 63
     assert pro["cabinet"]["left_flipper"] == 1061 and pro["cabinet"]["start"] == 1036
@@ -1868,6 +1869,96 @@ def test_shadow_wires_the_fork_post_to_the_followed_solenoid():
     assert 'SolCallback(60) = "PadForkPost"' in out
     assert "SolCallback(6)" not in out and "SolCallback(7)" not in out
     assert "Sub PadForkPost(e) : OverPost1.IsDropped = Not e : OverPost2.IsDropped = Not e" in out
+
+
+@pytest.mark.parametrize("title,sid", [("foo_fighters_pro", 91), ("foo_fighters_le", 94)])
+def test_foo_fighters_kick_target_is_the_games_switch_and_kicks_harder(title, sid):
+    """PAD-982: JP's kick target (LightningTarget, a slingshot wall at the
+    lower right) reached no switch, so the game never counted it, and it
+    kicked weaker than the real one. It is KICK TARGET (each program's own
+    switch table, 1.04.0), the game's KICK TARGET coil sounds it, and the
+    patched table's wall kicks at 300 where JP's kicked at 240."""
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
+    assert m["switches"]["LightningTarget"] == {"id": sid, "event": "slingshot", "name": "KICK TARGET"}
+    assert m["item_fields"]["LightningTarget"] == {"SLGF": 300.0}
+    out = vs.gen(m, {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")})
+    assert "Sub LightningTarget_Slingshot : vpmTimer.PulseSw %d" % (1000 + sid) in out
+    assert 'SolCallback(10) = "PadKickTarget"' in out
+    assert 'Sub PadKickTarget(e) : If e Then PlaySoundAt "fx_slingshot_EM", LightningTarget' in out
+
+
+def test_item_fields_sets_the_tables_own_objects_fields():
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+
+    def item(kind, name, **fields):
+        out = struct.pack("<i", kind) + vf.biff_record("NAME", struct.pack("<I", 2 * len(name)) + name.encode("utf-16-le"))
+        for tag, v in fields.items():
+            out += vf.biff_record(tag, struct.pack("<f" if isinstance(v, float) else "<i", v))
+        return out + vf.biff_record("ENDB", b"")
+
+    class Table:
+        items = [item(0, "LeftSling", SLGF=80.0), item(0, "LightningTarget", SLGF=240.0, SLTH=2.0, CLDW=1)]
+        item_info = staticmethod(vf.VpxTable.item_info)
+
+    streams = vs.item_fields(Table, {"item_fields": {"_": "why", "lightningtarget": {"SLGF": 300.0, "CLDW": 0}}})
+    assert list(streams) == ["GameItem1"]
+    recs = {t: p for t, p, _ in vf.item_records(streams["GameItem1"])}
+    assert struct.unpack("<f", recs["SLGF"])[0] == 300.0 and struct.unpack("<i", recs["CLDW"])[0] == 0
+    assert struct.unpack("<f", recs["SLTH"])[0] == 2.0, "the rest of the object as it was"
+    assert vs.item_fields(Table, {}) == {}
+    with pytest.raises(KeyError):
+        vs.item_fields(Table, {"item_fields": {"NoSuchWall": {"SLGF": 1.0}}})
+
+
+def test_a_foo_fighters_copy_patched_before_the_kick_target_fix_asks_for_a_new_patch(tmp_path):
+    vs = pytest.importorskip("vpxsetup")
+    m = json.load(open(os.path.join(VPX, "foo_fighters_pro.shadow.json"), encoding="utf-8"))
+    name = "JP's Foo Fighters (PAD).vpx"
+    script = (tmp_path / (name[:-4] + ".script.vbs"))
+    script.write_text("Sub LightningTarget_Slingshot\n    If Tilted Then Exit Sub\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == [m["repatch"][1]["why"]]
+    script.write_text("Sub LightningTarget_Slingshot_orig\n    If Tilted Then Exit Sub\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == []
+    # PAD-982: a copy whose Overlord opto was JP's whole-pocket trigger
+    script.write_text("Sub Trigger015_Hit : Controller.Switch(1082) = True : End Sub\n"
+                      "Sub Trigger015_UnHit : Controller.Switch(1082) = False : End Sub\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == [m["repatch"][2]["why"]]
+
+
+def _inside(pt, poly):
+    x, y = pt
+    n, hit = len(poly), False
+    for i in range(n):
+        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % n]
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            hit = not hit
+    return hit
+
+
+@pytest.mark.parametrize("title,sid", [("foo_fighters_pro", 82), ("foo_fighters_le", 85)])
+def test_the_overlord_opto_sees_only_where_the_held_ball_rests(title, sid):
+    """PAD-982: hits on the ball the Overlord holds never counted. The game
+    counts one only when OVERLORD OPTO opens (emulator, 1.04.0: fourteen
+    OVERLORD HIT TARGET hits with the opto made counted none; opto open, hit,
+    opto made counts), and JP's opto, Trigger015, is the whole pocket up to
+    the hit target: the knocked ball never left it. PadOverlordOpto is the
+    pocket's mouth: the ball at rest against the fork's posts is on it, the
+    ball on its way back to the hit target (591, 252) is off it."""
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
+    assert "Trigger015" not in m["switches"]
+    assert m["switches"]["PadOverlordOpto"]["id"] == sid and m["switches"]["PadOverlordOpto"]["event"] == "hold"
+    rt = m["retrofit_triggers"]["PadOverlordOpto"]
+    assert rt["clone"] == "Trigger015" and rt["surface"] == "10m"
+    assert len(rt["shape"]) == 9, "reshape_item keeps the clone's nine drag points"
+    assert _inside((577, 440), rt["shape"]), "the held ball, against OverPost1 (552, 452) and OverPost2 (603, 463)"
+    assert not _inside((585, 370), rt["shape"]) and not _inside((591, 300), rt["shape"])
+    out = vs.gen(m, {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")})
+    assert "Sub PadOverlordOpto_Hit : Controller.Switch(%d) = True" % (1000 + sid) in out
+    assert "Sub PadOverlordOpto_UnHit : Controller.Switch(%d) = False" % (1000 + sid) in out
+    assert "Trigger015_Hit" not in out
 
 
 # ------------------------------------------------- the app's setup -----

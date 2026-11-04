@@ -223,10 +223,12 @@ def fit_box(w, h, bw, bh):
     return (s, 0.0, 0.0, s, (bw - s * w) / 2.0, (bh - s * h) / 2.0)
 
 
-def keep_boxes(stock, grown, offs):
+def keep_boxes(stock, grown, offs, own=()):
     """*grown* (a scene :func:`regrow` resized the pictures at the stock offsets *offs* in)
     with each of those pictures shown in its stock place and size, fitted and centred:
-    ``(bytes, n nodes, n shapes, n left)``.
+    ``(bytes, n nodes, n shapes, n left)``.  The nodes in *own* were moved or resized in the
+    Scenes window over the picture at its own size, before this fit (PAD-981,
+    :func:`scene_edit.own_size_nodes`), so they keep drawing it at that size.
 
     The game draws a Bitmap's ``[w][h]`` texels 1:1 in its node's units from the node's
     origin, and a bigger texture under a stock ``[w][h]`` is CROPPED to its top-left corner
@@ -265,7 +267,7 @@ def keep_boxes(stock, grown, offs):
             n_left += 1
             continue
         fit = fits.pop()
-        if fit is None:
+        if fit is None or n.id in own:
             continue
         tracks = n.tracks or [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])]
         n.tracks = [(f, _m16_with(m, _composed(_m6_of16(m), fit))) for f, m in tracks]

@@ -116,31 +116,91 @@ def path_of(assets_dir):
     return os.path.join(assets_dir, *RELDIR, FILENAME)
 
 
-def load(assets_dir):
-    """``{card path: [op, ...]}`` (``{}`` when there is none or it is unreadable)."""
+#: in the file of a version that draws a picture kept at its own size in the original's place
+#: and size (PAD-865): its moves and resizes were made over the fitted picture.  A file
+#: without it was laid out over the picture at its own size (PAD-981)
+FIT_KEY = "_fit"
+#: ``{card: [node, ...]}``: the nodes laid out over a kept picture at its own size, so they
+#: keep drawing it so (PAD-981)
+OWN_KEY = "_own"
+
+
+def _raw(assets_dir):
     try:
         with open(path_of(assets_dir), "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
-        return {}
-    if not isinstance(data, dict):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def load(assets_dir):
+    """``{card path: [op, ...]}`` (``{}`` when there is none or it is unreadable)."""
+    data = _raw(assets_dir)
+    if data is None:
         return {}
     return {k: [op for op in v if isinstance(op, dict) and op.get("op")]
             for k, v in data.items() if isinstance(v, list) and v}
 
 
+def _laid_out(ops):
+    """The nodes *ops* move or resize."""
+    return {op["node"] for op in ops or ()
+            if isinstance(op, dict) and op.get("op") in ("move", "scale")
+            and isinstance(op.get("node"), int)}
+
+
+def _own_of(data):
+    """``{card: [node]}`` of the file *data*: what it records, or, written before PAD-865,
+    every node its edits move or resize (each was placed over its picture's own size)."""
+    if not isinstance(data, dict):
+        return {}
+    if FIT_KEY in data:
+        own = data.get(OWN_KEY)
+        return {k: list(v) for k, v in own.items() if isinstance(v, list) and v} \
+            if isinstance(own, dict) else {}
+    return {k: sorted(_laid_out(v)) for k, v in data.items()
+            if isinstance(v, list) and _laid_out(v)}
+
+
+def own_size_nodes(assets_dir, card):
+    """The nodes of *card* whose moves and resizes were made over a picture kept at its own
+    size, before PAD-865 fitted such a picture into the original's box: they keep drawing it
+    at its own size, so the layout stays as it was built (PAD-981: DoomWalrus666's Battle
+    Select grid and portraits, centred by hand, came out shrunk and shifted).  A node whose
+    edits are reset is fitted like any other."""
+    data = _raw(assets_dir)
+    own = set(_own_of(data).get(card) or ())
+    return frozenset(own & _laid_out((data or {}).get(card))) if own else frozenset()
+
+
+def mark_own(man, nodes):
+    """Preview manifest *man* with each of *nodes* marked ``own`` (its kept picture drawn at
+    its own size, :func:`own_size_nodes`); *man* itself is changed and returned."""
+    if nodes:
+        for n, _sibs in _man_index(man).values():
+            if n.get("id") in nodes:
+                n["own"] = True
+    return man
+
+
 def save(assets_dir, edits):
     path = path_of(assets_dir)
-    edits = {k: v for k, v in (edits or {}).items() if v}
+    edits = {k: v for k, v in (edits or {}).items() if isinstance(v, list) and v}
     if not edits:
         try:
             os.remove(path)
         except OSError:
             pass
         return
+    own = {k: v for k, v in _own_of(_raw(assets_dir)).items() if k in edits}
+    data = dict(edits)
+    data[FIT_KEY] = 1
+    if own:
+        data[OWN_KEY] = own
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(edits, f, indent=1, sort_keys=True)
+        json.dump(data, f, indent=1, sort_keys=True)
 
 
 def ops_for(assets_dir, card):

@@ -347,6 +347,8 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
     def emit(n, o, w, t, path, f, only=None):
         k = o["kind"]
         common = {"node": n["id"], "path": path, "m": w, "mul": t[0], "add": t[1]}
+        if n.get("own"):
+            common["own"] = True            # a kept picture laid out at its own size (PAD-981)
         if only is not None and k not in ("Sprite", "StreamingFlipbook"):
             return                                  # only the way through to *show*
         if k in ("Sprite", "StreamingFlipbook"):

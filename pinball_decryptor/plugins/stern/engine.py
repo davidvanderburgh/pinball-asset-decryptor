@@ -5004,7 +5004,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
 
 
 def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
-                         tree_ops=None):
+                         tree_ops=None, assets_dir=None):
     """Re-serialise every scene in *grown_radium* and stage the result whole
     under *grow_dir*.  An entry is ``{card_path: (node, {original:
     replacement}[, {data_off: (width, height, block bytes)}])}``: the longer
@@ -5021,7 +5021,9 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
 
     *tree_ops* ``{card_path: (ops, names, assets_dir)}`` (PAD-251, the Scenes window's
     moves, resizes, layers and added pictures/text) are applied LAST, to the scene read back as
-    a tree (:mod:`scene_edit`), so they compose with longer text and resized pictures."""
+    a tree (:mod:`scene_edit`), so they compose with longer text and resized pictures.
+    *assets_dir* (the project) names the nodes laid out over a resized picture at its own
+    size, which keep it so (PAD-981)."""
     from . import radium_grow
     jobs, grown_files = [], {}
     tree_ops = tree_ops or {}
@@ -5054,8 +5056,13 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
             # PAD-865: a picture kept at its own size shows in the original's place and
             # size, fitted and centred, over whatever the Scenes window did to its node
             try:
+                own = ()
+                if assets_dir:
+                    # PAD-981: a layout made over the picture at its own size stays so
+                    from . import scene_edit as _scene_edit
+                    own = _scene_edit.own_size_nodes(assets_dir, card_path)
                 new, n_fit, n_box, n_left = radium_grow.keep_boxes(bytes(buf), new,
-                                                                    got["images"])
+                                                                    got["images"], own)
             except Exception as e:                          # noqa: BLE001
                 n_fit = n_box = n_left = 0
                 log("Scene %s: its resized picture(s) couldn't be fitted to the original's "
@@ -9448,7 +9455,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             radium_grow_jobs, grown_files = _stage_grown_radiums(
                 reader, grown_radium, radium_overlays, grow_work, log,
-                tree_ops={cp: plan for cp, (_n, plan) in tree_whole.items()})
+                tree_ops={cp: plan for cp, (_n, plan) in tree_whole.items()},
+                assets_dir=assets_dir)
             for _gnode, *_gedits in grown_radium.values():
                 if bytes(_gnode["i_block"]) not in grown_files:
                     continue

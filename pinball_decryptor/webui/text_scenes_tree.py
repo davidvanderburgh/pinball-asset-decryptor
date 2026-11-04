@@ -199,6 +199,8 @@ class TreeEditMixin:
             game = []
         if game:
             edited, _n = scene_edit.apply_manifest(edited, game)
+        # PAD-981: a layout made over a kept picture at its own size draws it so
+        scene_edit.mark_own(edited, scene_edit.own_size_nodes(self.assets_dir, card))
         return edited, notes
 
     def _tree_default(self, card):
@@ -1408,7 +1410,9 @@ class TreeEditMixin:
         size; one the Write grows shows in the original's place and size, fitted and centred
         (PAD-865, radium_grow.keep_boxes), so its draw is scaled into the stock box: what is
         picked and measured on the glass is the picture where it shows.  Only a Bitmap drawn
-        by its own node: a Shape's fill is fitted into the shape's rect as it is drawn."""
+        by its own node: a Shape's fill is fitted into the shape's rect as it is drawn.  A
+        node laid out over the picture at its own size before that fit keeps it so (PAD-981,
+        ``own``)."""
         from ..plugins.stern import radium_grow, scene_eval, scene_render
         picks = self._tree_pictures()
         sizes = self._tree_sizes()
@@ -1421,7 +1425,8 @@ class TreeEditMixin:
                               sizes.get(d["image"]))
             if size is None:
                 continue
-            if d.get("w") and d.get("h") and scene_render.own_size(size, sizes.get(d["image"])):
+            if d.get("w") and d.get("h") and not d.get("own") \
+                    and scene_render.own_size(size, sizes.get(d["image"])):
                 d["m"] = scene_eval.compose(d["m"], radium_grow.fit_box(
                     size[0], size[1], d["w"], d["h"]))
             d["w"], d["h"] = size

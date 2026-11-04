@@ -204,9 +204,12 @@ HELP_CONTENT = {
          "preview, which then reads **Mode 2's loudness**. The loudness set "
          "on the sound itself is its own replacement's: it never reaches its mode "
          "files, and on a sound with no replacement the stock sound stays as it is.\n"
-         "- Needs an image build, not a direct SD write. Every file takes room in the "
-         "sound bank; past its 2 GB the files go into extra sound banks of their own "
-         "beside it (image-sc01.bin and on), so they are not left out for it. A file "
+         "- Needs an image build, not a direct SD write. The files go into extra sound "
+         "banks of their own beside the sound bank (image-sc01.bin and on): the game "
+         "holds the main bank in memory all the time and an extra bank only while it "
+         "plays, so the music modes leave the game the most room. A file with files of "
+         "its own One after another or At random stays in the main bank while it has "
+         "room. A file "
          "for a sound the game plays together with other sounds (a song with an intro, "
          "or a medley) takes a copy of those sounds into its extra bank. A file for a "
          "sound the game does not play through its sound list stays in the main bank "
@@ -236,8 +239,8 @@ HELP_CONTENT = {
          "its own One after another / At random and loudness. Its own sound's part plays in "
          "every mode the sound has no file for. A mode's sounds play as long as its file.\n"
          "- Needs an image build, not a direct SD write. Each file takes room in the "
-         "sound bank, and in extra sound banks beside it once that is full, as a music "
-         "mode's files do."),
+         "sound bank, and in extra sound banks beside it once that is full, or always "
+         "on a card with music modes."),
         ("Jukebox",
          "The Beatles 1.29. **Jukebox**, beside **Find originals…**, gives the five song "
          "modes songs of your own: each time a song mode starts, the game plays one of them, "

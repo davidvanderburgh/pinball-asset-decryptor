@@ -8598,7 +8598,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             _user_grows, mode_own_used, reader, img_node,
                             space_chk, log, game_sids=_game_ok,
                             game_why=_game_why, sm_frags=_sm_frags,
-                            game_seqs=_game_seqs, sm_seqs=_sm_seqs)
+                            game_seqs=_game_seqs, sm_seqs=_sm_seqs,
+                            sm_hold=_sm_turn_hosts(sound_mode_used))
                         if bank_plan is not None:
                             bank_plan.old_map = dict(_old_bank_map)
                             _user_grows = {i: g for i, g in _user_grows.items()
@@ -20861,9 +20862,20 @@ class SoundRoomError(RuntimeError):
     (PAD-880, as card_size.CardSizeError is)."""
 
 
+def _sm_turn_hosts(used):
+    """PAD-749: the host records of the music modes' files that have files in turn of their own
+    (PAD-638): those are turned at the mode file's record key, so they play only while that
+    record is in image.bin."""
+    from . import sound_modes as _SMo
+    turns = {(u["rel"], _SMo.mode_turn_of(u["mode"])[0]) for u in used or ()
+             if _SMo.is_mode_turn(u["mode"])}
+    return {int(u["host"]) for u in used or ()
+            if not _SMo.is_turn(u["mode"]) and (u["rel"], int(u["mode"])) in turns}
+
+
 def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows, used,
                       reader, img_node, space_chk, log, game_sids=None, game_why=None,
-                      sm_frags=None, game_seqs=None, sm_seqs=None):
+                      sm_frags=None, game_seqs=None, sm_seqs=None, sm_hold=()):
     """Decide which of the modes' own sounds leave ``image.bin`` for a sound
     bank of their own (PAD-595), and take them out of *grows* and
     *audio_edits*.  Returns ``(plan or None, audio_edits, grows)``.
@@ -20888,7 +20900,10 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     end sound on a re-pointed request) are placed first; the bankable ones
     take what ``image.bin`` has left under the game's limit, largest first out
     when it is full (:func:`.bank_build.plan_spill`), so the fewest move.  A
-    build whose sounds all fit is exactly the build it was."""
+    build whose sounds all fit is exactly the build it was, unless it has music modes'
+    files a bank can hold (PAD-749): then every bankable sound goes into a bank but the
+    music modes' files *sm_hold* (hosts with files in turn of their own, PAD-638, which play
+    only from a record in image.bin)."""
     from . import bank_build as BB
     from .spike2 import masterdir as MD
     from .spike2 import soundbank as SB
@@ -20916,7 +20931,12 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             if i not in user_grows]
     kept, spilled = BB.plan_spill({i: grows[i] for i in bankable}, bankable, byidx,
                                   img_path, start=start)
-    if not spilled:
+    # PAD-749: music modes' files never grow image.bin when a bank can hold them. The game
+    # holds image.bin in memory for good and a bank only while it plays: a Heisei card with
+    # its music modes in image.bin (2,020 MB, stock 1,650) left its city map video short of
+    # room on some first balls, and capped how many songs a card could carry.
+    forced = not spilled
+    if forced and not (set(sm_frags) | set(mseq_of)) - set(sm_hold):
         return None, audio_edits, grows
     # PAD-593: the game maps image.bin and the bank playing whole, side by side, so
     # once any sound needs a bank they ALL go to banks, kept as small as Stern's own
@@ -20924,6 +20944,9 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # adds little beside it (soundbank.MAPPED_MAX).
     spilled.update(kept)
     kept = {}
+    if forced:          # (PAD-749: image.bin had room; a file with turns of its own stays)
+        kept = {i: spilled.pop(i) for i in sorted(set(sm_hold) & set(spilled))
+                if i not in mseq_of}
     for idx, why in sorted((game_why or {}).items()):
         if idx in user_grows:
             log("idx %d stays in image.bin rather than a sound bank: %s, and a bank sound is "

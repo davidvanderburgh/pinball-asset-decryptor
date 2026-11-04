@@ -6,16 +6,16 @@ selector the Stern card, JJP, Barrels of Fun and Big Lebowski machines carry
 (`tools/spike2_emu/codeselect`), built for these machines as `spkselect` (`make PLATFORM=spk`).
 Asked for by daveyvandy: "for all supported Spooky games".
 
-STATUS: the seven Linux titles are built end to end (menu, button reader, launcher, builder,
-the Multi-boot tab) and proven in the rig title by title (*Proofs*); the two P-ROC titles are
-the next step (*Work list* 7).
+STATUS: done for every Spooky title that runs on a PC - the seven Linux ones and the two
+P-ROC ones - built end to end (menu, button readers, launchers, builder, the Multi-boot tab)
+and proven in the rig title by title (*Proofs*).
 
 ## Which games
 
 | family | titles | multi-boot |
 |---|---|---|
 | Debian PC, Warden/Pinotaur board, the game is `/game/code/uptest/main.x86_64` | Beetlejuice, Scooby-Doo, Texas Chainsaw Massacre, Evil Dead, Looney Tunes, Halloween, Ultraman | this design |
-| Arch PC, P-ROC, Python game | Rick and Morty, Alice Cooper's Nightmare Castle | a second design (*P-ROC titles*, below) |
+| Arch PC, P-ROC, Python game | Rick and Morty, Alice Cooper's Nightmare Castle | a second design (*P-ROC titles*, below; *Work list* 7) |
 | pinHeck System (PIC32 + Propeller, DMD) | America's Most Haunted, Rob Zombie, Domino's, Jetsons | **not possible** without new firmware (below) |
 | Total Nuclear Annihilation | - | the app cannot open its updates at all |
 
@@ -89,7 +89,7 @@ noted for the help).
 
 ## P-ROC titles (Rick and Morty, Alice Cooper)
 
-Possible, by a different hook; not built yet.
+A different hook (*Work list* 7 has what was built).
 
 * **Rick and Morty**: plugging in a stick with `rm-gamecode*.pkg` runs `codeupdate` as root
   (udev), which wipes `/game/RickAndMorty`, decrypts (AES, the app's key) and runs the
@@ -139,7 +139,7 @@ cannot even update its game code from the card. Owners can keep one card per bui
       `.pad/swap` recovering a power cut either side. `PAD_MULTIBOOT_LIVE` in the folder
       ("b<k> <stamp>", a plain file the updaters' wipe takes) says it is ours; without it
       the folder's own game starts; a new stamp is a new multi-boot (old builds go).
-   b. `mkspkmulti.py` for `rm_pkg` / `ac_pkg` (AES zip: plugins/spooky/crypto.py): the
+   b. DONE `mkspkmulti.py` (+ `mkspkproc.py`, tests/test_mkspkproc.py) for `rm_pkg` / `ac_pkg` (AES zip: plugins/spooky/crypto.py): the
       zip's root = the stock build whole (it is what the updater unzips into the folder),
       `PAD_MULTIBOOT/` = the launcher (padselect_proc.sh), spkselect, dpprocsw, font,
       proc.conf, images.conf, builds.txt, d<k>/, d<k>.removed, media/ - NOT a dot folder:
@@ -161,13 +161,16 @@ cannot even update its game code from the card. Owners can keep one card per bui
         lib=/usr/lib, L=SD14 R=SD10 S=SD15, start = the two stock lines.
       SELECTOR_FILES gains dpprocsw + padselect_proc.sh (required for these two only);
       inspect/verify/inject read the zip; tests in tests/test_mkspkmulti.py.
-   c. The proof: proc/run_game.sh SPP_MACHINE=1 (the update installed into the slot's
+   c. DONE `proc/machine_sim.sh` - PASS on both (*Proofs*). The proof: proc/run_game.sh SPP_MACHINE_GAME (the update installed into the slot's
       /game the updater's way, the hook run), netns.sh running `.pad/padselect.sh` with
       PADSELECT_START=: before it starts the game its own way; the reader is dpprocsw over
       the R&M package's payload/libpinproc.so.2.0 + tools/dp_emu/aaiw/aaiwshim.so
       (PADSELECT_PROCSW_PRELOAD, AAIW_PROC_CHIP=p3, presses on DPEMU_FIFO), libftdi1
       from a TBL cache folder, as tools/dp_emu/machine_sim.sh did.
-   d. The tab: TITLES gains both; the Spooky backend already takes .pkg.
+   d. DONE The tab: TITLES gains both; the Spooky backend already took .pkg; fresh rows name
+      them. The rig needed: Xvfb -noreset (the menu is its first client), the launcher flag
+      held until the game's pid is written, the installed folder chowned as codeupdate does
+      (protected_hardlinks), stand-in libftdi1 / libusb-0.1 for the reader's libpinproc.
 
 ## Proofs
 
@@ -182,6 +185,8 @@ cannot even update its game code from the card. Owners can keep one card per bui
 | Halloween code_H78.pkg v1.18.1 | PASS (Pinotaur board) |
 | Beetlejuice v2026.09.15.11 | PASS |
 | Ultraman code_UM.pkg v1.18 | PASS (Pinotaur board) |
+| Rick and Morty rm-gamecode-20220902.pkg | PASS (proc/machine_sim.sh; P3-ROC reader over aaiwshim) |
+| Alice Cooper ac-gamecode.pkg 1.1.0.5 | PASS (proc/machine_sim.sh; the stub's xinitrc + reboot) |
 
 Each: the menu on the game's screen, RIGHT + START on the rig's board picked the marked
 build, the game in attract from /game/pad/b1, the next power-up's countdown booted it again

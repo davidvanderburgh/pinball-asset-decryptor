@@ -1198,6 +1198,35 @@ registerDialog("donations", DonationsDialog);
 // before it goes, then Send (the app's service) or Save as a file
 // (webui/shellx_report.py, core/problem_report.py).  `prefill` is the
 // error box's words when its own link opened this.
+// PAD-975: Ctrl+V with a picture on the clipboard (Win+Shift+S, Print
+// Screen, a copied image or picture file) adds it, the same as one picked
+// from disk.  The page reads the picture off the paste when the webview
+// hands it over; when the paste carries neither a picture nor text, the
+// app reads the clipboard itself.  A text paste goes through untouched.
+// `rid` empty is the report's picture, otherwise a file of that answer.
+function pastePicture(e, rid, onErr) {
+  const cd = e.clipboardData;
+  const items = cd && cd.items ? Array.from(cd.items) : [];
+  const img = items.find((it) => it.kind === "file" && /^image\//.test(it.type || ""));
+  const send = (b64) => call("shellx.report_paste", b64, rid || "")
+    .catch((x) => onErr(x && x.message ? x.message : String(x)));
+  if (img) {
+    const file = img.getAsFile();
+    if (!file) return;
+    e.preventDefault();
+    const rd = new FileReader();
+    rd.onload = () => send(String(rd.result || ""));
+    rd.onerror = () => send("");
+    rd.readAsDataURL(file);
+    return;
+  }
+  const words = cd ? cd.getData("text/plain") : "";
+  if (words) return;
+  // the paste itself is left alone: when the webview hid text too, the
+  // box still gets it, and the app finds no picture and changes nothing
+  send("");
+}
+
 function ReportDialog({ close, prefill = "" }) {
   const sx = useNs("shellx");
   const r = sx.report || {};
@@ -1236,6 +1265,13 @@ function ReportDialog({ close, prefill = "" }) {
     if (r.last.ok) setSentId(r.last.id || "sent");
     else setErr(r.last.error || "The report could not be sent.");
   }, [r.last, r.busy]);
+  useEffect(() => {
+    // anywhere in the window, the text box or not (PAD-975)
+    if (sentId) return undefined;
+    const onPaste = (e) => { setErr(null); pastePicture(e, "", setErr); };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [sentId]);
   const picture = r.picture;
   const act = async (fn) => {
     setErr(null);
@@ -1257,10 +1293,12 @@ function ReportDialog({ close, prefill = "" }) {
   // the reports this app sent are a board of their own (PAD-914)
   const mine = r.mine || [];
   const hasNews = !!mine.find((m) => m.seen === false);
+  const asked = !!mine.find((m) => m.waiting);
   const board = () => { close(); openDialog("reports"); };
   const Mine = () => mine.length ? html`<div class="row" style="gap:8px">
     <${Button} size="sm" onClick=${board}>Your reports (${mine.length})<//>
-    ${hasNews ? html`<span class="chip sm info">News</span>` : null}
+    ${asked ? html`<span class="chip sm warn">Needs your answer</span>`
+      : hasNews ? html`<span class="chip sm info">News</span>` : null}
   </div>` : null;
   if (hidden) return null;
   if (sentId) {
@@ -1292,7 +1330,8 @@ function ReportDialog({ close, prefill = "" }) {
         ${picture ? html`<span class="chip acc sm notr" title=${picture.name}>${picture.name} · ${picture.kb} KB</span>
             <${Button} size="sm" kind="ghost" onClick=${clearPic}>Remove<//>`
           : html`<${Button} drop size="sm" onClick=${pick}>Add a picture…<//>
-            ${r.capture ? html`<${Button} size="sm" onClick=${shoot} title="Hides this window for a moment and takes a picture of the app">Take a picture of the app<//>` : null}`}
+            ${r.capture ? html`<${Button} size="sm" onClick=${shoot} title="Hides this window for a moment and takes a picture of the app">Take a picture of the app<//>` : null}
+            <span class="small muted">or paste one with Ctrl+V</span>`}
       </div>
       <${Check} checked=${hidePaths} onChange=${setHidePaths} label="Leave file paths and my account name out of the report" />
       <details class="sx-rep-facts" open=${showPreview} onToggle=${(e) => setShowPreview(e.target.open)}>
@@ -1312,12 +1351,65 @@ function ReportDialog({ close, prefill = "" }) {
 }
 registerDialog("report", ReportDialog);
 
+// PAD-972: the developer's question about one report, in full, and the
+// box the user answers it in: words and files (a log, a picture), sent
+// off the UI loop.  The files live in the service until sent, so the box
+// only keeps the words.
+function AnswerBox({ m, reply, focus }) {
+  const rp = reply || {};
+  const files = rp.files || [];
+  const [text, setText] = useState("");
+  const [err, setErr] = useState(null);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!focus || !ref.current) return;
+    ref.current.scrollIntoView({ block: "nearest" });
+    const t = ref.current.querySelector("textarea");
+    if (t) t.focus();
+  }, [focus]);
+  const act = async (fn) => {
+    setErr(null);
+    try { return await fn(); } catch (e) { setErr(e && e.message ? e.message : String(e)); return null; }
+  };
+  const attach = () => act(() => call("shellx.report_reply_attach", m.id));
+  const remove = (i) => act(() => call("shellx.report_reply_remove", m.id, i));
+  const send = () => act(() => call("shellx.report_reply_send", m.id, text));
+  const b = m.board || {};
+  const busy = !!rp.busy;
+  const onPaste = (e) => {
+    if (busy || files.length >= 5) return;
+    setErr(null); pastePicture(e, m.id, setErr);
+  };
+  return html`<section class="sx-ask" ref=${ref} data-id=${m.id} onPaste=${onPaste}>
+    <div class="row wrap" style="gap:8px">
+      <span class="chip sm warn">Needs your answer</span>
+      <b class="sx-ask-title">${m.title || "A problem report"}</b>
+      ${b.ticket ? html`<span class="chip sm mono notr">${b.ticket}</span>` : null}
+    </div>
+    <div class="small muted" style="margin-top:6px">The developer asks:</div>
+    <div class="sx-ask-q">${b.question || "Something more about this report."}</div>
+    <textarea class="area" rows="4" value=${text} disabled=${busy} aria-label="Your answer"
+      placeholder="Your answer…" onInput=${(e) => setText(e.target.value)}></textarea>
+    <div class="row wrap" style="gap:8px;margin-top:6px">
+      <${Button} size="sm" onClick=${attach} disabled=${busy || files.length >= 5}>Attach files…<//>
+      ${files.map((f, i) => html`<span class="chip acc sm notr" title=${f.trimmed ? "Too big to send whole: its last part goes" : f.name}>${f.name} · ${f.kb} KB${f.trimmed ? " (trimmed)" : ""}
+        <button class="sx-ask-x" aria-label=${"Remove " + f.name} disabled=${busy} onClick=${() => remove(i)}>×</button></span>`)}
+      <span class="grow"></span>
+      <${Button} kind="primary" size="sm" onClick=${send} busy=${busy}
+        disabled=${busy || (!text.trim() && !files.length)}>${busy ? "Sending…" : "Send"}<//>
+    </div>
+    <div class="small muted" style="margin-top:4px">Any file helps, such as a log; paste a picture into the box with Ctrl+V. Up to 5 files, about 1 MB in all; a log too big to send whole keeps its last part.</div>
+    <${ErrorNote} text=${err || rp.error} />
+  </section>`;
+}
+
 // PAD-914: Your reports, a board of every report this app sent, in the
 // column of where it is in the developer's queue.  report_board.js draws
 // it, the same script the developer's tracker draws the ticket's copy
 // with, so both see the same thing.  Opening it asks after the open
 // reports when the last ask is a few minutes old, and marks news seen.
-function ReportsDialog({ close }) {
+// A question waiting on the user (PAD-972) is answered above the board.
+function ReportsDialog({ close, focus }) {
   const sx = useNs("shellx");
   const r = sx.report || {};
   const [uid, onClose] = useWin(close);
@@ -1328,8 +1420,10 @@ function ReportsDialog({ close }) {
   // the news stays marked for as long as the window is open
   const [news] = useState(() => new Set(mine.filter((m) => m.seen === false).map((m) => m.id)));
   const entries = mine.map((m) => Object.assign({}, m.board, { new: news.has(m.id) }));
+  const asks = mine.filter((m) => m.waiting);
   const board = window.PADReportBoard
-    ? window.PADReportBoard.html(entries, { empty: "No reports sent from this app yet. Report a problem sends one." })
+    ? window.PADReportBoard.html(entries, { empty: "No reports sent from this app yet. Report a problem sends one.",
+      askHint: "Answer it above the board." })
     : "";
   const ago = r.checked_at ? Math.max(0, Math.round((Date.now() / 1000 - r.checked_at) / 60)) : null;
   const checked = r.checking ? "Asking the developer's service…"
@@ -1344,6 +1438,7 @@ function ReportsDialog({ close }) {
       <${Button} kind="primary" onClick=${close}>Close<//>`}>
     <div class="stack" style="gap:10px">
       <p class="sx-p">Every report this app sent, and where it is in the developer's queue. The number on a card is its ticket: mention it if you write about the problem anywhere else.</p>
+      ${asks.map((m) => html`<${AnswerBox} key=${m.id} m=${m} reply=${(r.replies || {})[m.id]} focus=${focus === m.id} />`)}
       <div class="sx-board" dangerouslySetInnerHTML=${{ __html: board }}></div>
     </div>
   <//>`;

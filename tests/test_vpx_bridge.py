@@ -426,6 +426,124 @@ def test_shadow_up_only_opto_pulses_on_the_way_up(tmp_path):
     assert r.stdout.strip() == "[1053 ] 2", r.stdout + r.stderr
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_switches_ignore_the_tributes_helper_balls(tmp_path):
+    # PAD-974: Batman 66's bat disc posts are unseen balls riding the turntable;
+    # at the phone they sat on the lock trigger, the table said TURNTABLE LOCK 3
+    # and the machine turned home and out again for good. A helper ball
+    # neither makes nor breaks a switch; the player's ball still does both.
+    # Run for real under VBScript
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["helper_balls"] = ["postBall1", "postBall2"]
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    lines = out.split("\n")
+    f = lines.index("Function PadHelperBall()   ' ActiveBall is one of the tribute's unseen helper balls")
+    h = lines.index("Sub Opto1_Hit")
+    u = lines.index("Sub Opto1_UnHit")
+    s = lines.index("Sub sw001_Hit")
+    assert lines[u + 1] == lines[h + 1] == lines[s + 1] == "\tIf PadHelperBall() Then Exit Sub"
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log",
+        "Class FakeCtl : Public Property Let Switch(n, v) : Log = Log & n & \"=\" & v & \" \" : End Property : End Class",
+        "Class FakeTimer : Public Sub PulseSw(n) : Log = Log & n & \" \" : End Sub : End Class",
+        "Class FakeBall : Public VelY : End Class",
+        "Dim Controller : Set Controller = New FakeCtl",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim postBall1, postBall2, ActiveBall, Hits : Hits = 0",
+        "Set postBall1 = New FakeBall",            # postBall2 never made: Empty
+        "Sub sw001_Hit_orig : Hits = Hits + 1 : End Sub",
+        "\n".join(lines[f:lines.index("End Function", f) + 1]),
+        "\n".join(lines[h:u + 4]),
+        "\n".join(lines[s:s + 4]),
+        "Set ActiveBall = postBall1 : Opto1_Hit : Opto1_UnHit : sw001_Hit",
+        "Set ActiveBall = New FakeBall : Opto1_Hit : Opto1_UnHit : sw001_Hit",
+        # the tribute's own call, with no ball at all: still the machine's switch
+        "Set ActiveBall = Nothing : Opto1_UnHit",
+        "ActiveBall = Empty : Opto1_UnHit",
+        "WScript.Echo \"[\" & Log & \"] \" & Hits"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "[1085=True 1085=False 1053 1085=False 1085=False ] 1", r.stdout + r.stderr
+    # a map without helper balls generates what it always did
+    assert "Sub Opto1_Hit : Controller.Switch(1085) = True : End Sub" in vs.patch(
+        MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))[0]
+
+
+#: PAD-977, VPW's Game of Thrones: the shadow game never got a Start, so its
+#: House objects were never made; and a renamed sub is no event handler, so
+#: its `Me` is not the object
+GOT_LIKE = MINI_TRIBUTE + """Dim House(4), CurrentPlayer
+Sub Kicker37_Hit
+    House(CurrentPlayer).RegisterHit 1
+    Me.Kick 190, 55
+End Sub
+Sub Spinner_Spin : Me.TimerEnabled = False : Me.TimerInterval = 1000 : House(CurrentPlayer).AddGold 5 : Me.TimerEnabled = True : End Sub
+Sub sw001_UnHit
+    Dim s : s = "Me" ' Me in a string or a comment stays
+End Sub
+"""
+
+
+def test_shadow_renamed_subs_name_their_object_and_cannot_stop_the_table():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["switches"]["Kicker37"] = {"id": 120, "event": "hit"}
+    out, _ = vs.patch(GOT_LIKE, m)
+    lines = out.split("\n")
+    k = lines.index("Sub Kicker37_Hit_orig")
+    assert lines[k + 1:k + 4] == ["\tOn Error Resume Next   ' PAD: the shadow game's rules never stop the table",
+                                  "    House(CurrentPlayer).RegisterHit 1", "    Kicker37.Kick 190, 55"]
+    assert ("Sub Spinner_Spin_orig : On Error Resume Next : Spinner.TimerEnabled = False : Spinner.TimerInterval"
+            " = 1000 : House(CurrentPlayer).AddGold 5 : Spinner.TimerEnabled = True : End Sub") in lines
+    assert "Sub Kicker37_Hit : vpmTimer.PulseSw 1120 : Kicker37_Hit_orig : End Sub" in lines
+    assert "    Dim s : s = \"Me\" ' Me in a string or a comment stays" in lines     # not renamed: untouched
+    t = lines.index("Sub Table1_Init_orig")
+    assert lines[t + 1].endswith("' PAD: the shadow game's rules never stop the table")
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out)), \
+        "every Sub closes once"
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_renamed_subs_run_on_past_the_shadow_games_missing_state(tmp_path):
+    # the scoop still kicks and the spinner's timer still runs, with no error
+    # for Visual Pinball to stop the table on. Run for real under VBScript
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["switches"]["Kicker37"] = {"id": 120, "event": "hit"}
+    lines = vs.patch(GOT_LIKE, m)[0].split("\n")
+    k = lines.index("Sub Kicker37_Hit_orig")
+    s = [ln for ln in lines if ln.startswith("Sub Spinner_Spin_orig")][0]
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log, House(4), CurrentPlayer",
+        "Class FakeKicker : Public Sub Kick(a, p) : Log = Log & \"kick \" & a & \" \" & p & \" \" : End Sub : End Class",
+        "Class FakeSpinner : Public TimerInterval",
+        "\tPublic Property Let TimerEnabled(v) : Log = Log & \"timer \" & v & \" \" : End Property",
+        "End Class",
+        "Dim Kicker37 : Set Kicker37 = New FakeKicker",
+        "Dim Spinner : Set Spinner = New FakeSpinner",
+        "\n".join(lines[k:lines.index("End Sub", k) + 1]),
+        s,
+        "Kicker37_Hit_orig : Spinner_Spin_orig",    # an error out of either ends the script here
+        "WScript.Echo Log & \"|\""]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.split() == ["kick", "190", "55", "timer", "False", "timer", "True", "|"], r.stdout + r.stderr
+    assert r.returncode == 0 and not r.stderr
+
+
+def test_batmans_unseen_balls_are_helpers():
+    # PAD-974: the tribute's Table1_Init makes three balls it never shows
+    # (bShowBalls = False): the bat disc's two posts and the crane's spring
+    m = json.load(open(os.path.join(VPX, "batman.shadow.json"), encoding="utf-8"))
+    assert m["helper_balls"] == ["postBall1", "postBall2", "craneBall"]
+    assert m["switches"]["trgBallLock3"]["event"] == "hold"
+
+
 def test_rushs_time_machine_is_the_lift_ramp_opto():
     # PAD-907: the game starts its modes and multiballs at the time machine,
     # LIFT RAMP OPTO (82); the tribute's time machine trigger is tm2. LL3 is
@@ -649,7 +767,7 @@ def test_shadow_neuters_the_tributes_own_balls(shadow):
     out, rep = shadow
     assert "'PAD neutered: BallRelease.CreateBall" in out
     assert "'PAD neutered: BallRelease.Kick 90, 4" in out
-    assert "Sub Drain_Hit_orig : If False Then PlungerIM.AutoFire : End Sub" in out   # one-liner kept whole
+    assert "Sub Drain_Hit_orig : On Error Resume Next : If False Then PlungerIM.AutoFire : End Sub" in out   # one-liner kept whole
     assert "Sub PadAutoPlunge(e) : If e Then plungerIM.AutoFire : End If : End Sub" in out
     assert "neutered 3 line(s)" in " ".join(rep)
     assert "Sub Drain_Hit\n\tbsTrough.AddBall Me" in out
@@ -4118,3 +4236,72 @@ def test_ultradmd_stands_in_too():
     assert "Public Function DisplayScene(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9)" in cls
     assert "GetMajorVersion() : GetMajorVersion = 1" in cls and "GetMinorVersion() : GetMinorVersion = 9" in cls
     assert sh.flexdmd_stub(["x = 1"], [], "UltraDMD.DMDObject", "PadNoUltra", "UltraDMD") == ""
+
+
+# PAD-976: GotG's own scoring, run with the table's own game never started
+_GOTG_SCORING = [
+    "Dim PlayersPlayingGame, CurrentPlayer, DefScoreSize, Tilted",
+    "Dim ScoreTable(3, 18), Score(3)",
+    "DefScoreSize = 8.5",
+    "Sub AddScore(points)",
+    "\tdim multiplierVal",
+    "\tIf (Tilted = False) Then",
+    "\t\tScore(CurrentPlayer) = Score(CurrentPlayer) + points",
+    "\t\tUpdateNumberPlayers2 False",
+    "\tEnd If",
+    "End Sub",
+    "Sub UpdateNumberPlayers2(bForce)",
+    "\tDim i",
+    "\tfor i = 0 to 3",
+    "\t\tif DefScoreSize > ScoreTable(PlayersPlayingGame-1, 17) then DefScoreSize = 1",
+    "\tNext",
+    "End Sub",
+    "Sub tgAntiqueShop_Dropped",
+    "\tAddScore 1110",
+    "End Sub",
+]
+
+
+def _gotg_run(tmp_path, lines):
+    vbs = tmp_path / "gotg.vbs"
+    vbs.write_text("\n".join(lines + ["tgAntiqueShop_Dropped", 'WScript.Echo "played on"']),
+                   encoding="latin-1")
+    return subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the table's VBScript under cscript")
+def test_gotg_scoring_with_no_player_of_its_own_stays_quiet(tmp_path):
+    """The table's own game never starts behind the machine, so its
+    PlayersPlayingGame is 0, and the first sub the bridge leaves it that scored
+    ended Visual Pinball on 'Subscript out of range: [number: -1]' (the ball's
+    first trip up the playfield). The GotG maps quiet AddScore."""
+    vs = pytest.importorskip("vpxshadow")
+    r = _gotg_run(tmp_path, list(_GOTG_SCORING))
+    assert "Subscript out of range" in r.stdout + r.stderr          # as David hit it
+    for f in ("guardians_le.shadow.json", "guardians.shadow.json"):
+        m = json.load(open(os.path.join(VPX, f), encoding="utf-8"))
+        assert {"AddScore", "tgAntiqueShop_Dropped", "GrootMouth_Hit"} <= set(m["quiet_subs"]), f
+    lines = list(_GOTG_SCORING)
+    stubs = []
+    for name in ("AddScore", "tgAntiqueShop_Dropped"):
+        args = vs.quiet_sub(lines, name, [])
+        stubs.append("Sub %s%s : End Sub" % (name, args))
+    r = _gotg_run(tmp_path, lines + stubs)
+    assert r.stdout.strip() == "played on", r.stdout + r.stderr
+
+
+def test_gotg_patched_before_the_fix_is_asked_to_patch_again(tmp_path):
+    vs = pytest.importorskip("vpxsetup")
+    m = json.load(open(os.path.join(VPX, "guardians_le.shadow.json"), encoding="utf-8"))
+    name = m["output"]
+    script = tmp_path / (name[:-4] + ".script.vbs")
+    script.write_text("Sub AddScore(points)\n\tdim multiplierVal\n\tResetBallSearch\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == [m["repatch"][0]["why"]]
+    script.write_text("Sub AddScore_orig(points)\n\tdim multiplierVal\n"
+                      "Sub AddScore(points) : End Sub   ' PAD: quiet\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == []
+    # the row gathers both GotG maps' marks; the reason shows once
+    script.write_text("Sub AddScore(points)\n\tdim multiplierVal\n", encoding="utf-8")
+    pro = json.load(open(os.path.join(VPX, "guardians.shadow.json"), encoding="utf-8"))
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"] + pro["repatch"]) == [m["repatch"][0]["why"]]

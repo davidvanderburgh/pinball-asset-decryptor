@@ -23,15 +23,19 @@ from pinball_decryptor.core import session_log
 
 # ---------------------------------------------------------- a fake Worker
 class FakeWorker:
-    """Answers /v1/report and /v1/report/status the way worker.js does.
-    ``refuse`` answers every report with that 4xx message; ``states`` is
-    what the status call says per id; ``stop()`` takes the line down."""
+    """Answers /v1/report, /v1/report/status and /v1/report/<id>/reply
+    the way worker.js does.  ``refuse`` answers every report with that 4xx
+    message; ``states`` is what the status call says per id;
+    ``reply_code`` is how a reply is answered (``replies`` records them);
+    ``stop()`` takes the line down."""
 
     def __init__(self):
         self.posts = []
         self.asked = []
         self.refuse = None
         self.states = {}
+        self.replies = []
+        self.reply_code = 200
         self._srv = None
         self.url = ""
 
@@ -71,6 +75,21 @@ class FakeWorker:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}")
                 fake.posts.append((self.path, dict(self.headers), body))
+                if (self.path.startswith("/v1/report/")
+                        and self.path.endswith("/reply")):
+                    if self.headers.get("X-PAD-Key") != config.REPORTS_APP_KEY:
+                        return self._send(403, {"ok": False,
+                                                "error": "Not from the app."})
+                    rid = self.path.split("/")[3]
+                    if fake.reply_code != 200:
+                        return self._send(fake.reply_code, {
+                            "ok": False, "error": "That question is no "
+                                                  "longer open."})
+                    fake.replies.append((rid, body))
+                    st = fake.states.setdefault(rid, {})
+                    st.update(stage="working", reply_at=st.get(
+                        "question_at", 0) + 1)
+                    return self._send(200, {"ok": True, "id": rid})
                 if self.path != "/v1/report":
                     return self._send(404, {"ok": False, "error": "Not found."})
                 if self.headers.get("X-PAD-Key") != config.REPORTS_APP_KEY:
@@ -317,7 +336,8 @@ def test_send_and_status_talk_to_the_worker_and_tell_a_refusal_from_a_dead_line(
     rows = R.fetch_status(worker.url, config.REPORTS_APP_KEY, ["r-1", "zz"])
     assert rows["r-1"] == {"state": "released", "version": "1.275.0",
                            "message": "Fixed.", "answered_at": 9,
-                           "stage": "", "ticket": "", "progress": -1}
+                           "stage": "", "ticket": "", "progress": -1,
+                           "question": "", "question_at": 0, "reply_at": 0}
     assert rows["zz"]["state"] == "received"
     assert R.fetch_status(worker.url, config.REPORTS_APP_KEY, []) == {}
     with pytest.raises(R.ReportError, match="Not from the app"):
@@ -528,6 +548,101 @@ def test_a_picked_picture_rides_along_and_can_be_removed(app_with_worker,
     assert w.call("shellx.report_picture", "clear") == {"picture": None}
 
 
+def test_the_clipboard_picture_is_an_image_or_a_copied_picture_file(tmp_path):
+    from PIL import Image
+    # PAD-975: what ImageGrab.grabclipboard answers on Windows
+    im = Image.new("RGBA", (30, 20), (10, 200, 30, 255))
+    data = R.clipboard_picture(grab=lambda: im)
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    pic = tmp_path / "shot.jpg"
+    pic.write_bytes(b"jpeg-bytes")
+    (tmp_path / "notes.txt").write_text("x")
+    assert R.clipboard_picture(grab=lambda: [str(tmp_path / "notes.txt"),
+                                             str(pic)]) == b"jpeg-bytes"
+    assert R.clipboard_picture(grab=lambda: [str(tmp_path / "notes.txt")]) \
+        is None
+    assert R.clipboard_picture(grab=lambda: None) is None
+
+    def broken():
+        raise OSError("clipboard busy")
+    assert R.clipboard_picture(grab=broken) is None
+    raw = _png(10, 10)
+    b64 = base64.b64encode(raw).decode()
+    assert R.decode_pasted(b64) == raw
+    assert R.decode_pasted("data:image/png;base64," + b64) == raw
+    with pytest.raises(ValueError, match="not a picture"):
+        R.decode_pasted("not base64 at all!")
+
+
+def test_a_pasted_picture_is_the_reports_picture(app_with_worker,
+                                                 monkeypatch):
+    w, worker = app_with_worker
+    # the page read the picture off the paste
+    url = "data:image/png;base64," + base64.b64encode(_png(900, 700)).decode()
+    out = w.call("shellx.report_paste", url)
+    assert out["pasted"] is True and out["picture"]["name"] == "pasted picture"
+    assert w.state("shellx")["report"]["picture"]["name"] == "pasted picture"
+    w.call("shellx.report_send", "Write stopped at 40% today", "", True)
+    assert until(w, lambda: (w.state("shellx")["report"]["last"] or {}
+                             ).get("ok"))
+    body = worker.posts[0][2]
+    assert base64.b64decode(body["picture_b64"])[:3] == b"\xff\xd8\xff"
+    # the webview handed over nothing: the app reads the clipboard itself
+    monkeypatch.setattr(R, "clipboard_picture", lambda: _png(50, 40))
+    assert w.call("shellx.report_paste", "")["pasted"] is True
+    assert w.state("shellx")["report"]["picture"]["name"] == "pasted picture"
+    w.call("shellx.report_picture", "clear")
+    # nothing on the clipboard: nothing changes, no error
+    monkeypatch.setattr(R, "clipboard_picture", lambda: None)
+    assert w.call("shellx.report_paste", "") == {"pasted": False}
+    assert w.state("shellx")["report"]["picture"] is None
+    with pytest.raises(Exception, match="not a picture"):
+        w.call("shellx.report_paste",
+               base64.b64encode(b"plain words").decode())
+
+
+def test_a_pasted_picture_is_a_file_of_the_answer(tmp_path, worker,
+                                                  monkeypatch):
+    from tests.webui_harness import web_app
+    monkeypatch.setenv("PAD_REPORTS_URL", worker.url)
+    monkeypatch.setattr(config, "REPORTS_URL", worker.url)
+    cfg = tmp_path / "cfg"
+    cfg.mkdir(parents=True, exist_ok=True)
+    R.save_cache(R.cache_path(str(cfg / "settings.json")), {"mine": [
+        {"id": "r-a", "title": "No DOF", "at": 1700000000,
+         "state": "filed", "stage": "working", "seen": True}],
+        "checked_at": 0})
+    worker.states["r-a"] = {"state": "filed", "stage": "question",
+                            "ticket": "PAD-968", "question_at": 100,
+                            "reply_at": 0, "question": "What do you see?"}
+    b64 = base64.b64encode(_png(300, 200)).decode()
+    with web_app(tmp_path) as w:
+        assert until(w, lambda: w.state("shellx")["report"]["mine"] and
+                     w.state("shellx")["report"]["mine"][0]["waiting"])
+        out = w.call("shellx.report_paste", b64, "r-a")
+        assert [f["name"] for f in out["reply"]["files"]] == [
+            "pasted picture.jpg"]
+        out = w.call("shellx.report_paste", b64, "r-a")
+        assert [f["name"] for f in out["reply"]["files"]] == [
+            "pasted picture.jpg", "pasted picture 2.jpg"]
+        # the report's own picture is untouched
+        assert w.state("shellx")["report"]["picture"] is None
+        with pytest.raises(Exception, match="no longer open"):
+            w.call("shellx.report_paste", b64, "r-zz")
+        for _ in range(3):
+            w.call("shellx.report_paste", b64, "r-a")
+        with pytest.raises(Exception, match="At most 5"):
+            w.call("shellx.report_paste", b64, "r-a")
+        assert w.call("shellx.report_reply_send", "r-a",
+                      "Here.") == {"sent": True}
+        assert until(w, lambda: worker.replies)
+        rid, body = worker.replies[0]
+        assert len(body["files"]) == 5
+        f = body["files"][0]
+        assert f["type"] == "image/jpeg"
+        assert base64.b64decode(f["b64"])[:3] == b"\xff\xd8\xff"
+
+
 def test_no_service_configured_means_save_only(tmp_path, monkeypatch):
     from tests.webui_harness import web_app
     monkeypatch.setenv("PAD_REPORTS_URL", "")
@@ -557,7 +672,8 @@ def test_the_board_column_comes_from_the_tracker_or_from_the_state():
                        "ticket": "PAD-914", "progress": 45, "seen": False})
     assert e == {"id": "r-1", "title": "Write stopped", "at": 5,
                  "stage": "working", "state": "filed", "ticket": "PAD-914",
-                 "progress": 45, "version": "", "message": "", "new": True}
+                 "progress": 45, "version": "", "message": "", "new": True,
+                 "question": "", "waiting": False, "answer_sent": False}
     assert R.board_entry({"progress": 250})["progress"] == -1
     assert R.board_entry({"progress": None})["progress"] == -1
 
@@ -701,3 +817,281 @@ def test_the_board_script_draws_five_columns_and_escapes_the_words(tmp_path):
     assert "Fixed in v1.300.0" in b and "Sound is back." in b
     assert 'class="prb-card prb-new"' in b
     assert "none yet" in out["empty"]
+
+
+# ---------------------------------------------- a question for the reporter
+def test_a_question_waits_on_the_user_until_an_answer_comes_after_it():
+    """PAD-972: the stage "question" with no answer after it is waiting on
+    the user; the board draws it so, and once answered it is back to
+    being worked on."""
+    e = {"id": "r-1", "state": "filed", "stage": "question",
+         "question": "Can you send DirectOutput.log?", "question_at": 100,
+         "reply_at": 0, "ticket": "PAD-968"}
+    assert R.waiting(e) and R.stage_of(e) == R.QUESTION
+    b = R.board_entry(e)
+    assert (b["stage"], b["waiting"], b["question"], b["answer_sent"]) == (
+        "question", True, "Can you send DirectOutput.log?", False)
+    e["reply_at"] = 100
+    assert not R.waiting(e) and R.stage_of(e) == "working"
+    e["reply_at"] = 50                   # an answer to an earlier question
+    assert R.waiting(e)
+    # a released report is done, whatever its stage says
+    assert not R.waiting(dict(e, state="released"))
+    # an older service has none of it: never waiting
+    assert not R.waiting({"state": "filed", "stage": "working"})
+
+
+def test_a_new_question_is_news_and_an_answer_sent_here_holds(tmp_path):
+    cache = {"mine": [{"id": "r-1", "title": "DOF dead", "state": "filed",
+                       "stage": "working", "seen": True}]}
+    row = {"state": "filed", "version": "", "message": "", "answered_at": 0,
+           "stage": "question", "ticket": "PAD-968", "progress": -1,
+           "question": "Log?", "question_at": 100, "reply_at": 0}
+    news = R.apply_status(cache, {"r-1": row})
+    m = cache["mine"][0]
+    assert news == [m] and m["seen"] is False and R.waiting(m)
+    # the same question again is not news again
+    m["seen"] = True
+    assert R.apply_status(cache, {"r-1": dict(row)}) == []
+    # answered here: no longer waiting, the card says so ...
+    assert R.note_answer_sent(cache, "r-1", now=50) is m
+    assert (m["stage"], m["answer_sent"], R.waiting(m)) == ("working", True,
+                                                            False)
+    assert R.board_entry(m)["answer_sent"] is True
+    # ... even when an ask from before the send comes back late
+    assert R.apply_status(cache, {"r-1": dict(row)}) == []
+    assert not R.waiting(m)
+    # the service's own answer
+    R.apply_status(cache, {"r-1": dict(row, stage="working", reply_at=105)})
+    assert m["reply_at"] == 105 and R.board_entry(m)["answer_sent"] is True
+    # a second question is news again and opens the box again
+    R.apply_status(cache, {"r-1": dict(row, question="And the table?",
+                                       question_at=200, reply_at=105)})
+    assert R.waiting(m) and m["seen"] is False and m["answer_sent"] is False
+    assert R.note_answer_sent(cache, "nope") is None
+
+
+def test_an_answer_file_fits_or_a_log_keeps_its_tail(tmp_path):
+    small = tmp_path / "DirectOutput.log"
+    small.write_text("line\n" * 10, encoding="utf-8")
+    f = R.reply_file(str(small))
+    assert (f["name"], f["type"], f["trimmed"]) == ("DirectOutput.log",
+                                                    "text/plain", False)
+    assert f["data"] == small.read_bytes()
+    big = tmp_path / "huge.log"
+    big.write_bytes(b"".join(b"line %07d\n" % i for i in range(200_000)))
+    f = R.reply_file(str(big), room=100_000)
+    assert f["trimmed"] and len(f["data"]) <= 100_000
+    assert f["data"].startswith(b"[The app trimmed this file to fit")
+    assert f["data"].endswith(b"line 0199999\n")
+    # the tail starts on a whole line
+    assert f["data"].split(b"\n")[1].startswith(b"line ")
+    # a picture too big is refused, with the words the window shows
+    pic = tmp_path / "shot.png"
+    pic.write_bytes(_png(10, 10) + os.urandom(300_000))
+    with pytest.raises(ValueError, match="more than the"):
+        R.reply_file(str(pic), room=100_000)
+    with pytest.raises(ValueError, match="Couldn't read"):
+        R.reply_file(str(tmp_path / "missing.log"))
+
+
+def test_send_reply_posts_the_words_and_files_and_tells_a_closed_question(
+        worker):
+    files = [{"name": "DirectOutput.log", "type": "text/plain",
+              "data": b"hello\n"}]
+    out = R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1", " here ",
+                       files)
+    assert out == {"ok": True, "id": "r-1"}
+    rid, body = worker.replies[0]
+    assert rid == "r-1" and body["message"] == "here"
+    assert body["files"] == [{"name": "DirectOutput.log", "type": "text/plain",
+                              "b64": base64.b64encode(b"hello\n").decode()}]
+    worker.reply_code = 409
+    with pytest.raises(R.QuestionClosed, match="no longer open"):
+        R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1", "again", [])
+    worker.reply_code = 404              # a service from before PAD-972
+    with pytest.raises(R.ReportError, match="refused the answer"):
+        R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1", "again", [])
+    with pytest.raises(R.ReportError, match="Write an answer"):
+        R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1", "  ", [])
+    with pytest.raises(R.ReportError, match="too long"):
+        R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1",
+                     "x" * (R.MAX_REPLY + 1), [])
+
+
+def test_a_question_is_a_notice_and_answered_in_the_app(tmp_path, worker,
+                                                        monkeypatch):
+    from tests.webui_harness import web_app
+    monkeypatch.setenv("PAD_REPORTS_URL", worker.url)
+    monkeypatch.setattr(config, "REPORTS_URL", worker.url)
+    cfg = tmp_path / "cfg"
+    cfg.mkdir(parents=True, exist_ok=True)
+    R.save_cache(R.cache_path(str(cfg / "settings.json")), {"mine": [
+        {"id": "r-a", "title": "Foo Fighters: no DOF in VPX", "at": 1700000000,
+         "state": "filed", "stage": "working", "seen": True}],
+        "checked_at": 0})
+    worker.states["r-a"] = {"state": "filed", "stage": "question",
+                            "ticket": "PAD-968", "question_at": 100,
+                            "reply_at": 0,
+                            "question": "Could you send DirectOutput.log?"}
+    log = tmp_path / "DirectOutput.log"
+    log.write_bytes(b"".join(b"DOF line %07d\n" % i
+                             for i in range(150_000)))       # ~2.4 MB
+    note = tmp_path / "notes.txt"
+    note.write_text("Cabinet: 3 screens", encoding="utf-8")
+    with web_app(tmp_path) as w:
+        assert until(w, lambda: _banner(w, "report_answer") is not None)
+        b = _banner(w, "report_answer")
+        assert b["text"] == ('A question about your report "Foo Fighters: '
+                             'no DOF in VPX".')
+        assert [(a["id"], a["label"]) for a in b["actions"]] == [
+            ("view", "Answer it")]
+        m = w.state("shellx")["report"]["mine"][0]
+        assert m["waiting"] is True and m["seen"] is False
+        assert (m["board"]["stage"], m["board"]["question"]) == (
+            "question", "Could you send DirectOutput.log?")
+        # the notice opens the board at the question
+        svc = w.ctx.registry._methods["shellx.report_board_open"][0].__self__
+        opened = []
+        real_open = svc._open_dialog
+        svc._open_dialog = lambda name, **kw: opened.append((name, kw)) or True
+        svc._report_banner_action("view")
+        assert opened == [("reports", {"focus": "r-a"})]
+        svc._open_dialog = real_open
+        # files: a log too big to go whole keeps its tail, and says so
+        w.answers.append([str(log), str(note)])
+        out = w.call("shellx.report_reply_attach", "r-a")
+        assert [(f["name"], f["trimmed"]) for f in out["files"]] == [
+            ("DirectOutput.log", True), ("notes.txt", False)]
+        assert w.state("shellx")["report"]["replies"]["r-a"]["files"][0][
+            "kb"] <= R.REPLY_MAX_BYTES // 1024 + 1
+        w.call("shellx.report_reply_remove", "r-a", 1)
+        w.answers.append([str(note)])
+        w.call("shellx.report_reply_attach", "r-a")
+        # nothing to say is refused before anything goes
+        with pytest.raises(Exception, match="no longer open"):
+            w.call("shellx.report_reply_send", "r-zz", "hi")
+        assert w.call("shellx.report_reply_send", "r-a",
+                      "Here it is.") == {"sent": True}
+        assert until(w, lambda: not w.state("shellx")["report"]["mine"][0][
+            "waiting"])
+        rid, body = worker.replies[0]
+        assert rid == "r-a" and body["message"] == "Here it is."
+        assert [f["name"] for f in body["files"]] == ["DirectOutput.log",
+                                                      "notes.txt"]
+        sent = base64.b64decode(body["files"][0]["b64"])
+        assert sent.startswith(b"[The app trimmed") and sent.endswith(
+            b"DOF line 0149999\n")
+        assert sum(len(f["b64"]) for f in body["files"]) <= R.REPLY_MAX_B64
+        m = w.state("shellx")["report"]["mine"][0]
+        assert (m["board"]["stage"], m["board"]["answer_sent"]) == (
+            "working", True)
+        assert "r-a" not in w.state("shellx")["report"]["replies"]
+        # one answer per question: the box is gone
+        with pytest.raises(Exception, match="no longer open"):
+            w.call("shellx.report_reply_send", "r-a", "more")
+        # the board looked: the notice goes
+        assert w.call("shellx.report_mine_seen") is True
+        w.drain()
+        assert _banner(w, "report_answer") is None
+        saved = R.load_cache(R.cache_path(str(cfg / "settings.json")))
+        assert saved["mine"][0]["answer_sent"] is True
+
+
+def test_a_question_closed_meanwhile_says_so_and_asks_again(app_with_worker,
+                                                            tmp_path):
+    w, worker = app_with_worker
+    svc = w.ctx.registry._methods["shellx.report_board_open"][0].__self__
+    w.run(lambda: svc._rep_cache["mine"].append(
+        {"id": "r-q", "title": "Sound", "state": "filed", "stage": "question",
+         "question": "Which table?", "question_at": 100, "reply_at": 0,
+         "seen": True}))
+    worker.states["r-q"] = {"state": "filed", "stage": "working",
+                            "question_at": 100, "reply_at": 101}
+    worker.reply_code = 409
+    asked = len(worker.asked)
+    assert w.call("shellx.report_reply_send", "r-q", "Godzilla") == {
+        "sent": True}
+    assert until(w, lambda: (w.state("shellx")["report"]["replies"].get(
+        "r-q") or {}).get("error"))
+    assert "no longer open" in w.state("shellx")["report"]["replies"]["r-q"][
+        "error"]
+    # ... and the board asks again, which shows it answered
+    assert until(w, lambda: len(worker.asked) > asked)
+    assert until(w, lambda: not w.state("shellx")["report"]["mine"][0][
+        "waiting"])
+
+
+def test_a_running_app_asks_every_quarter_hour_while_a_report_is_open(
+        app_with_worker):
+    w, worker = app_with_worker
+    svc = w.ctx.registry._methods["shellx.report_board_open"][0].__self__
+    assert R.STATUS_AFTER == 15 * 60
+    later = []
+    svc._report_tick_later = lambda: later.append(1)
+    # nothing open: no ask, but the next tick is still set
+    w.run(svc._report_tick)
+    assert later == [1] and worker.asked == []
+    w.run(lambda: svc._rep_cache["mine"].append(
+        {"id": "r-o", "title": "x", "state": "filed", "seen": True}))
+    w.run(svc._report_tick)
+    assert until(w, lambda: worker.asked == [["r-o"]])
+    assert later == [1, 1]
+    # the Report a problem window asks too, once the last ask is old
+    svc._rep_cache["checked_at"] = time.time() - R.BOARD_STATUS_AFTER - 5
+    w.call("shellx.report_open", "")
+    assert until(w, lambda: len(worker.asked) == 2)
+
+
+def test_the_board_script_draws_a_question_and_survives_an_unknown_stage(
+        tmp_path):
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("no node")
+    js = os.path.join(os.path.dirname(__file__), "..", "pinball_decryptor",
+                      "webui", "static", "js", "report_board.js")
+    entries = [
+        # the app's entry: waiting said outright
+        {"id": "q", "title": "DOF dead", "at": 1700000000, "stage": "question",
+         "state": "filed", "ticket": "PAD-968", "progress": -1,
+         "question": "Send <DirectOutput.log>?\nPlease.", "waiting": True,
+         "answer_sent": False, "new": True},
+        # the tracker's: only the stage it pushed
+        {"id": "t", "title": "Tracker copy", "at": 1700000500,
+         "stage": "question", "state": "filed", "ticket": "PAD-969"},
+        {"id": "s", "title": "Answered", "at": 1700001000, "stage": "working",
+         "state": "filed", "ticket": "PAD-970", "progress": 20,
+         "answer_sent": True},
+        {"id": "u", "title": "From the future", "at": 1700002000,
+         "stage": "someday", "state": "filed"}]
+    drive = tmp_path / "drive.js"
+    drive.write_text(
+        "globalThis.window = globalThis;\n"
+        "require(%s);\n"
+        "const e = %s;\n"
+        "const B = window.PADReportBoard;\n"
+        "const cols = {};\n"
+        "const h = B.html(e, {askHint: 'Answer it above.'});\n"
+        "for (const part of h.split('<section').slice(1)) {\n"
+        "  const st = part.match(/data-stage=\"(\\w+)\"/)[1];\n"
+        "  cols[st] = [...part.matchAll(/data-id=\"(\\w+)\"/g)].map((m) => m[1]);\n"
+        "}\n"
+        "process.stdout.write(JSON.stringify({board: h, cols,\n"
+        "  tracker: B.html([e[1]], {current: 't'})}));\n"
+        % (json.dumps(os.path.abspath(js)), json.dumps(entries)),
+        encoding="utf-8")
+    out = json.loads(subprocess.run([node, str(drive)], capture_output=True,
+                                    text=True, check=True).stdout)
+    assert out["cols"]["working"] == ["s", "t", "q"]
+    assert out["cols"]["received"] == ["u"]
+    b = out["board"]
+    assert b.count('class="prb-card prb-ask"') == 2
+    assert b.count("Needs your answer") == 2
+    assert "Send &lt;DirectOutput.log&gt;?\nPlease." in b
+    assert "Answer it above." in b
+    assert "Answer sent" in b and "20% through the work" in b
+    # in the tracker's page: its own ticket, and still asking
+    assert "This ticket" in out["tracker"]
+    assert "Needs your answer" in out["tracker"]

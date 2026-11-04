@@ -211,16 +211,26 @@ class Spike1Pipe:
     def _write(self):
         self.seq = (self.seq + 1) & 0xFFFFFFFF
         closed = {s for s, lv in self.held.items() if lv}
+        data = pack_input(closed, self.seq)
         try:
             tmp = self.rig.sw_path() + ".tmp"
             with open(tmp, "wb") as f:
-                f.write(pack_input(closed, self.seq))
+                f.write(data)
             os.replace(tmp, self.rig.sw_path())
+            return True
+        except OSError as exc:
+            first = exc
+        # PAD-977: GoT's first write at attach could not make the .tmp over
+        # \\wsl.localhost ("Permission denied"); the bitmap in place, the way
+        # the app's switch window writes it, still reaches the responder
+        try:
+            with open(self.rig.sw_path(), "r+b" if os.path.exists(self.rig.sw_path()) else "wb") as f:
+                f.write(data)
             return True
         except OSError as exc:
             self._failed += 1
             if self._failed <= 3:
-                _log("s1sw.input write failed: %s" % exc)
+                _log("s1sw.input write failed: %s (in place: %s)" % (first, exc))
             return False
 
     def close(self):

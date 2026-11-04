@@ -16,6 +16,7 @@ import hashlib
 import os
 import re
 import shlex
+import subprocess
 import sys
 from dataclasses import replace
 
@@ -37,6 +38,7 @@ def mac(monkeypatch, tmp_path):
     monkeypatch.setattr(D, "cache_root", lambda: str(tmp_path / "cache"))
     monkeypatch.setattr(D, "_STAGED", set())
     monkeypatch.setattr(D, "_PREVIEW_REFUSED", set())
+    monkeypatch.setattr(D, "_BUILD_FAILED", set())
     # the build streams through its own Popen; route it to whatever _docker
     # fake the test installs, so no test here ever runs a real docker build
     def build(args, on_line, timeout):
@@ -344,10 +346,12 @@ class _Fake:
     """A stand-in for :func:`multiboot_docker._docker` that records every
     call and answers ``image inspect`` / ``inspect`` from *state*."""
 
-    def __init__(self, arch="", image_id="sha256:new", container=None):
+    def __init__(self, arch="", image_id="sha256:new", container=None,
+                 volumes=()):
         self.arch = arch                # "" = no image on this machine
         self.image_id = image_id
         self.container = container      # (image id, {mounts}) or None
+        self.volumes = set(volumes)     # named-volume sources, not binds
         self.running = "true"           # .State.Running of that container
         self.calls = []
 
@@ -366,8 +370,11 @@ class _Fake:
             if self.container is None:
                 rc = 1
             else:
+                mounts = set(self.container[1])
+                if 'eq .Type "bind"' not in " ".join(args):
+                    mounts |= self.volumes
                 out = "\n".join([self.running, self.container[0]]
-                                + sorted(self.container[1]))
+                                + sorted(mounts))
         elif args[0] == "build":
             self.arch = D.ARCH
 
@@ -464,26 +471,87 @@ def test_a_stopped_container_is_started_again(mac, monkeypatch):
         "the stopped one still holds the name"
 
 
-def test_ensure_ready_container_starts_when_image_exists_and_never_builds(
+def test_ensure_ready_container_builds_and_starts_in_background(
         mac, monkeypatch):
-    """Background preview and size-check runs call ensure_ready_container on
-    the worker thread: when the image is not built yet it returns False
-    without building one; once the image exists it starts (or remounts) the
-    container and logs the mounted folders."""
+    """Background warm-up, preview and size-check runs call
+    ensure_ready_container on a worker thread: when the image is not built
+    yet it builds it and starts the container; once the image exists it
+    starts (or remounts) the container and logs the mounted folders."""
     monkeypatch.setattr(D, "unavailable_reason", lambda: "")
     monkeypatch.setattr(D, "stage_rig", lambda src: D.staged_repo())
 
     no_img = _Fake(arch="")
     monkeypatch.setattr(D, "_docker", no_img)
-    assert D.ensure_ready_container([ISO0], "/repo") is False
-    assert not any(c[0] in ("build", "run") for c in no_img.calls)
+    logs = []
+    assert D.ensure_ready_container([ISO0], "/repo", log=logs.append) is True
+    assert any(c[0] == "build" for c in no_img.calls)
+    run = [c for c in no_img.calls if c[0] == "run"]
+    assert run and "%s:/root" % D.ROOT_VOLUME in run[0]
+    assert any("building the Linux toolbox image" in m for m in logs)
 
     ready = _Fake(arch=D.ARCH, image_id="sha256:new")
     monkeypatch.setattr(D, "_docker", ready)
     logs = []
     assert D.ensure_ready_container([ISO0], "/repo", log=logs.append) is True
+    assert not any(c[0] == "build" for c in ready.calls)
     assert any(c[0] == "run" for c in ready.calls)
     assert any("starting the Linux toolbox container" in m for m in logs)
+
+
+def test_ensure_ready_container_with_no_paths_only_builds_image(
+        mac, monkeypatch):
+    """Opening the tab before any image is picked builds the image and stages
+    the rig in the background, waiting to start the container until there are
+    folders to mount."""
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    staged = []
+    monkeypatch.setattr(D, "stage_rig", lambda src: staged.append(src))
+    no_img = _Fake(arch="")
+    monkeypatch.setattr(D, "_docker", no_img)
+    assert D.ensure_ready_container([], "/repo") is True
+    assert any(c[0] == "build" for c in no_img.calls)
+    assert not any(c[0] == "run" for c in no_img.calls)
+    assert staged == ["/repo"]
+
+
+def test_a_failed_background_build_is_not_retried_per_keystroke(
+        mac, monkeypatch):
+    """If a background build fails, ensure_ready_container records
+    _BUILD_FAILED so every keystroke does not start another docker build;
+    pressing Build (ensure_container) clears it."""
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    tries = []
+
+    def fail(paths, repo_src, log):
+        tries.append(paths)
+        raise RuntimeError("could not build the Linux toolbox image")
+    monkeypatch.setattr(D, "_ensure_container", fail)
+    monkeypatch.setattr(D, "_docker", _Fake(arch=""))
+    assert D.ensure_ready_container([ISO0], "/repo") is False
+    assert D.ensure_ready_container([ISO0], "/repo") is False
+    assert len(tries) == 1
+    monkeypatch.setattr(D, "_ensure_container", lambda p, r, l: None)
+    D.ensure_container([ISO0], "/repo")
+    assert not D._BUILD_FAILED
+
+
+@pytest.mark.parametrize("source", [
+    "/var/lib/docker/volumes/%s/_data" % D.ROOT_VOLUME,
+    "/var/home/core/.local/share/containers/storage/volumes/%s/_data"
+    % D.ROOT_VOLUME,
+])
+def test_running_state_ignores_named_volume_mount_source(mac, monkeypatch,
+                                                         source):
+    """ROOT_VOLUME mounted at /root appears in .Mounts with the engine's own
+    storage path, which is not under /var/lib on a rootless Podman machine;
+    _running_state asks for bind mounts only, so the host bind-mount
+    comparison matches and the container is not restarted per redraw."""
+    want = set(D.mount_points([ISO0])) | {D.cache_root()}
+    fake = _Fake(arch=D.ARCH, image_id="sha256:new",
+                 container=("sha256:new", want), volumes=[source])
+    monkeypatch.setattr(D, "_docker", fake)
+    assert D.ensure_ready_container([ISO0], "/repo") is True
+    assert not any(c[0] == "run" for c in fake.calls)
 
 
 def test_a_preview_finds_the_container_up_with_two_calls(mac, monkeypatch):
@@ -1188,6 +1256,9 @@ def test_the_build_streams_and_says_it_is_still_going(mac, monkeypatch):
     are read as they come, and every BUILD_HEARTBEAT seconds the Log says
     it is still going and the step it is on."""
     monkeypatch.setattr(D, "_image_field", lambda f: "")
+    # a machine with docker AND podman (the Linux runner) asks the clock
+    # inside docker_cli() too, and would eat the build's ticks
+    monkeypatch.setattr(D, "_cli", lambda: "docker")
     clock = iter([0, 5, 31, 40, 70, 75])
     monkeypatch.setattr(D.time, "monotonic", lambda: next(clock))
     lines = ["#5 1.0 Get:1 http://deb.debian.org/debian bookworm/main gzip",
@@ -1226,3 +1297,112 @@ def test_cancel_build_kills_the_client(monkeypatch):
     assert D.cancel_build() is True and proc.killed
     monkeypatch.setitem(D._BUILD, "proc", None)
     assert D.cancel_build() is False
+
+
+def test_warm_container_runs_in_background_without_locking_ui(monkeypatch):
+    """Opening the tab or adding an image warms the container in the
+    background without setting _busy, then schedules a preview and plan."""
+    monkeypatch.setenv("PAD_UI_NO_RIG", "0")
+    monkeypatch.setenv("PAD_MULTIBOOT_AUTO", "1")
+    monkeypatch.setattr(D, "enabled", lambda: True)
+    seen, scheduled, planned = [], [], []
+    p = _Panel()
+    p._rows = [ImageRow(path=ISO0)]
+    p._plan_info = None
+    p._pv_src = None
+    p._pv_say = lambda msg, **kw: p.written.append("pv: %s" % msg)
+    p.schedule_preview = lambda: scheduled.append(1)
+    p._maybe_plan = lambda: planned.append(1)
+    for name in ("_warm_container", "_warm_log"):
+        monkeypatch.setattr(_Panel, name, getattr(mt.MultibootPanel, name),
+                            raising=False)
+
+    def ensure_ready(paths, repo, log=None):
+        seen.append(paths)
+        if log:
+            log("starting the Linux toolbox container...")
+        return True
+    monkeypatch.setattr(D, "ensure_ready_container", ensure_ready)
+    threads = []
+
+    class _T:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            threads.append(self.target)
+    monkeypatch.setattr(mt.threading, "Thread", _T)
+    assert p._warm_container() is True
+    assert not p._busy and p._warming_container and len(threads) == 1
+    assert p._warm_container() is False             # already warming
+    threads.pop()()
+    assert not p._warming_container
+    assert seen == [[ISO0]] and scheduled == [1] and planned == [1]
+    assert any("pv: starting the Linux toolbox" in w for w in p.written)
+
+
+def test_preview_worker_skips_docker_exec_when_container_not_ready(
+        mac, monkeypatch):
+    """When ensure_ready_container returns False, _start_worker does not
+    spawn a doomed `docker exec` process and instead records the container
+    note once."""
+    monkeypatch.setattr(D, "ensure_ready_container", lambda *a, **k: False)
+    popens = []
+    monkeypatch.setattr(mt.subprocess, "Popen",
+                        lambda *a, **k: popens.append(a))
+    p = _Panel()
+    p._pv_cancel = False
+    p._pending_run = None
+    p._pv_say = lambda *a, **k: None
+    for name in ("_start_worker", "_say_once"):
+        monkeypatch.setattr(_Panel, name, getattr(mt.MultibootPanel, name),
+                            raising=False)
+
+    class _T:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+    monkeypatch.setattr(mt.threading, "Thread", _T)
+    done = []
+    p._start_worker(
+        [("selector", ["docker", "exec", D.CONTAINER, "bash", "-lc", "make"])],
+        on_step=None,
+        on_done=lambda rc, failed, texts: done.append((rc, failed, texts)),
+        quiet=frozenset(),
+        preview=True)
+    assert not popens
+    assert len(done) == 1 and done[0][0] == 1 and done[0][1] == "selector"
+    assert any("not up yet" in w for w in p.written)
+
+
+def test_strip_sha256():
+    assert D._strip_sha256("sha256:abcdef0123") == "abcdef0123"
+    assert D._strip_sha256("abcdef0123") == "abcdef0123"
+    assert D._strip_sha256("") == ""
+    assert D._strip_sha256(None) == ""
+
+
+def test_unavailable_reason_when_podman_cli_used(monkeypatch):
+    monkeypatch.setattr(D, "_cli", lambda: "/opt/podman/bin/podman")
+    monkeypatch.setattr(D, "_docker", lambda *a, **k: subprocess.CompletedProcess(
+        ["podman", "info"], 1, stdout="", stderr="error"))
+    reason = D.unavailable_reason()
+    assert "Podman is installed but not running" in reason
+
+
+def test_running_state_ignores_var_lib_volume_mounts(monkeypatch):
+    stdout = "true\nsha256:img123\n/tmp\n/host/Volumes/Card\n/var/lib/containers/storage/volumes/pad-vol\n"
+    monkeypatch.setattr(D, "_docker", lambda *a, **k: subprocess.CompletedProcess(
+        ["podman", "inspect"], 0, stdout=stdout))
+    img, mounts = D._running_state()
+    assert img == "sha256:img123"
+    assert mounts == {"/tmp", "/host/Volumes/Card"}
+
+
+def test_unshared_reason_podman(monkeypatch):
+    monkeypatch.setattr(D, "_engine_name", lambda: "podman")
+    msg = D.unshared_reason(["/Volumes/External"])
+    assert "Podman" in msg
+    assert "Settings > Resources" in msg

@@ -9429,6 +9429,7 @@ struct nb_motor {
     short pos;                  /* where it is, in encoder counts           */
     short from, to;             /* the move under way (going >= 0)          */
     unsigned long start;        /* pad_ms() that move began                 */
+    unsigned char run55;        /* PAD-971: an end-stop motor sent a cmd 55 */
 };
 static struct nb_motor nb_motors[64][NB_MOTORS];
 
@@ -9521,11 +9522,24 @@ static int motor_status(unsigned nid, unsigned k, unsigned char *p)
     short pos;
     if (nid >= 64 || k >= NB_MOTORS || !nb_motor_on()) return 0;
     m = &nb_motors[nid][k];
-    if (!m->cfg || !m->enc) return 0;
-    pos = motor_pos(m);
-    p[0] = (unsigned char)(pos & 0xff);
-    p[1] = (unsigned char)((pos >> 8) & 0xff);
-    p[2] = m->going >= 0 ? 0x01 : (m->homed ? 0x08 : 0x00);
+    if (!m->cfg || (!m->enc && !m->run55)) return 0;
+    if (m->enc) {
+        pos = motor_pos(m);
+        p[0] = (unsigned char)(pos & 0xff);
+        p[1] = (unsigned char)((pos >> 8) & 0xff);
+        p[2] = m->going >= 0 ? 0x01 : (m->homed ? 0x08 : 0x00);
+    } else {
+        /* PAD-971: an end-stop motor the game runs with cmd 55 (batman's
+         * crane and turntable) waits for its move to FINISH: 0x01 while it
+         * travels, 0x20 once it is there. At boot batman sends each one a
+         * test move (crane to POS. #6 AWAY, turntable to POS. #2) and, on
+         * 0x20, sends it HOME. The node's switch byte never said 0x20, so
+         * both were left at the test move for good. Measured with
+         * PAD_NB_CREPLY=52:0000<v>00, one bit at a time: 0x20 alone gives
+         * the one clean test-then-home; 0x01 holds the game waiting. */
+        p[0] = p[1] = 0;
+        p[2] = m->going >= 0 ? 0x01 : 0x20;
+    }
     p[3] = 0;
     {   /* what the game was told, each time the flags change */
         static unsigned char last[64][NB_MOTORS];
@@ -9775,6 +9789,7 @@ static void motor_note(const unsigned char *p, int n)
         int end;
         if (p[2] == 0x55) {
             if (!(p[4] & 0x40)) return;
+            m->run55 = 1;               /* PAD-971: it reports its status */
             end = 2 + (p[4] & 0x3f);
             if (end - 2 == m->stop[0]) end = 0;     /* an end by its input */
             else if (end - 2 == m->stop[1]) end = 1;

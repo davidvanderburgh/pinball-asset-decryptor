@@ -219,3 +219,74 @@ def test_the_mac_build_carries_the_spooky_rig():
                 "pinball_decryptor/plugins/spooky/games.py:"
                 "pinball_decryptor/plugins/spooky"):
         assert '--add-data "$ROOT_DIR/%s"' % src in build, src
+
+
+# PR #17: a Mac with Podman and no docker. The stand-in becomes `podman`
+# (saying PODMAN), and every other docker on PATH is taken off it. Not with
+# `sed -i` (BSD sed on macOS reads its next word as the suffix), and not by
+# dropping a folder that has a docker: on the Linux runner that is /usr/bin,
+# mkdir and all - its other tools stay, as links in a folder of their own.
+_PODMAN_ONLY = r"""
+sed 's/"DOCKER /"PODMAN /' "$W/bin/docker" > "$W/bin/podman"
+rm "$W/bin/docker"
+chmod +x "$W/bin/podman"
+_p= _n=0
+while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    if [ -x "$d/docker" ]; then
+        _n=$((_n + 1))
+        mkdir -p "$W/path$_n"
+        ln -s "$d"/* "$W/path$_n/" 2>/dev/null
+        rm -f "$W/path$_n/docker"
+        d="$W/path$_n"
+    fi
+    _p="$_p:$d"
+done <<EOF
+$(printf %s "$PATH" | tr : '\n')
+EOF
+export PATH=${_p#:} TMPDIR="$W/tmp"
+mkdir -p "$TMPDIR"
+"""
+
+
+@needs_bash
+def test_podman_with_no_docker_runs_the_box_through_a_shim():
+    rc, text = _box("home/dev", 'watch.sh "$W/home/games/ac-gamecode.pkg"',
+                    setup=_PODMAN_ONLY)
+    assert rc == 0, text
+    log = text.split("--LOG--", 1)[1]
+    assert [ln for ln in _lines(log, "PODMAN run ") if " -d " in ln], text
+    assert [ln for ln in _lines(log, "PODMAN exec ") if "watch.sh" in ln], text
+
+
+@needs_bash
+def test_pad_docker_naming_podman_wins_and_the_shim_is_one_per_user():
+    tmp = subprocess.run(["bash", "-c", "mktemp -d"], stdout=subprocess.PIPE,
+                         timeout=30).stdout.decode().strip()
+    # inline, not as $0: `bash -c CMD ARG` through WSL's bash.exe loses ARG
+    # (a Mac's mktemp answers under /var/folders/.../T, not /tmp)
+    assert tmp.startswith("/") and "/tmp." in tmp, tmp
+    try:
+        setup = (_PODMAN_ONLY + 'export PAD_DOCKER="$W/bin/podman" '
+                 'TMPDIR="%s"\n' % tmp)
+        for _ in range(2):
+            rc, text = _box("home/dev", "status.sh", setup=setup)
+            assert rc == 0, text
+            assert "PODMAN ps " in text, text
+        shims = subprocess.run(["bash", "-c", 'ls "%s"' % tmp],
+                               stdout=subprocess.PIPE, timeout=30)
+        shims = shims.stdout.decode().split()
+    finally:
+        subprocess.run(["bash", "-c", 'rm -rf "%s"' % tmp], timeout=30)
+    assert len(shims) == 1 and shims[0].startswith("pad-docker-shim-"), shims
+
+
+def test_the_spike2_box_finds_podman_the_same_way():
+    with open(BOX, encoding="utf-8") as fh:
+        spk = fh.read()
+    pad = os.path.join(ROOT, "tools", "spike2_emu", "docker", "padbox.sh")
+    with open(pad, encoding="utf-8") as fh:
+        pb = fh.read()
+    start = spk.index("# Podman stands in for docker")
+    end = spk.index("command -v docker >/dev/null 2>&1 ||", start)
+    assert spk[start:end] in pb

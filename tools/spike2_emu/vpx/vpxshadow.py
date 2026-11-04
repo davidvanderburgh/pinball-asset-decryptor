@@ -93,17 +93,68 @@ def rename_sub(lines, name, rep):
     definition of it (PAD-954): a script that defines a Sub twice runs the
     LAST one (VBScript: no error), and Alice Cooper's tribute defines sw9_Hit,
     the drop targets' and Spinner_Spin two or three times - renaming only the
-    first left the later copy in force over the bridge's own sub."""
+    first left the later copy in force over the bridge's own sub.
+
+    The renamed sub is no longer an event handler, and two things follow
+    (PAD-977, VPW's Game of Thrones):
+      * `Me` in it was the object; in a plain Sub it is the script itself, so
+        Spinner001_Spin's `Me.TimerEnabled` stopped the table. It becomes the
+        object's name (`<object>_<event>`; Table1_* is Table1).
+      * its rules are the SHADOW game's, which never got a Start: GoT's top
+        lanes, dragon scoop, pops and upper lanes reach `House(CurrentPlayer)`,
+        made only by its own ResetForNewGame, and Visual Pinball ends the
+        table on the "Object required". It runs under On Error Resume Next,
+        so a statement that needs that game is skipped and the rest (the
+        sound, the animation, the scoop's kick) still happens."""
     pat = re.compile(SUB_RE % re.escape(name), re.I)
-    n = 0
-    for i, line in enumerate(lines):
-        m = pat.match(line.rstrip())  # Batman 66: a header can end in a space
-        if m:
-            lines[i] = line.replace(m.group(3), name + "_orig", 1)
-            n += 1
-    if n:
+    found = [(i, m) for i, m in ((i, pat.match(line.rstrip())) for i, line in enumerate(lines)) if m]
+    obj = name.rsplit("_", 1)[0] if "_" in name else None
+    for i, m in reversed(found):   # from the bottom, so an inserted line moves nothing still to do
+        lines[i] = lines[i].replace(m.group(3), name + "_orig", 1)
+        end = _sub_end(lines, i)
+        if obj:
+            for k in range(i, end + 1):
+                lines[k] = _me_to(lines[k], obj)
+        if end == i:                # one line: `Sub x_Hit : a : b : End Sub`
+            h = re.match(r"\s*(?:Public\s+|Private\s+)?Sub\s+\w+(?:\s*\([^)]*\))?", lines[i], re.I).end()
+            lines[i] = lines[i][:h] + " : On Error Resume Next" + lines[i][h:]
+        else:
+            lines.insert(i + 1, m.group(1) + "\tOn Error Resume Next   ' PAD: the shadow game's rules never stop the table")
+    if found:
+        n = len(found)
         rep.append("renamed Sub %s -> %s_orig%s" % (name, name, " (%d definitions)" % n if n > 1 else ""))
-    return bool(n)
+    return bool(found)
+
+
+def _sub_end(lines, i):
+    """The line of the `End Sub` closing the Sub whose header is line i (i
+    itself for a one-line Sub)."""
+    if any(re.match(r"\s*End\s+Sub\b", lines[i][a:b], re.I) for a, b in _statements(lines[i])[1:]):
+        return i
+    for k in range(i + 1, len(lines)):
+        if re.match(r"\s*End\s+Sub\b", lines[k], re.I):
+            return k
+    return i
+
+
+def _me_to(line, obj):
+    """`Me` -> obj in a line's code, quotes and the comment left alone."""
+    out, inq, i = [], False, 0
+    while i < len(line):
+        ch = line[i]
+        if ch == '"':
+            inq = not inq
+        elif not inq and ch == "'":
+            out.append(line[i:])
+            break
+        elif (not inq and line[i:i + 2].lower() == "me" and (i == 0 or not (line[i - 1].isalnum() or line[i - 1] == "_"))
+              and not (line[i + 2:i + 3].isalnum() or line[i + 2:i + 3] == "_")):
+            out.append(obj)
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def _statements(line):
@@ -130,7 +181,7 @@ def quiet_sub(lines, name, rep):
         m = pat.match(line.rstrip())  # Batman 66: a header can end in a space
         if m:
             lines[i] = line.replace(m.group(3), name + "_orig", 1)
-            rep.append("quieted Sub %s (its lights are the machine's now)" % name)
+            rep.append("quieted Sub %s (the machine runs that now)" % name)
             return m.group(4) or "()"
     rep.append("WARNING: quiet_subs names %s, which the script has no Sub for" % name)
     return None
@@ -923,6 +974,25 @@ def gen(m, had, quiet=None, dof=None):
                 "\tPadPassAt(sw) = GameTime",
                 "\tvpmTimer.PulseSw sw",
                 "End Sub"]
+    # PAD-974: balls the tribute makes for its own mechanics and never shows
+    # are not the machine's (Batman 66's bat disc posts ride the turntable
+    # over its lock triggers): a switch sub one of them runs does nothing. The
+    # tribute calls some of these subs itself, with no ball (Batman 66's
+    # swPlungerRest_UnHit): an ActiveBall that errors is not a helper
+    helpers = m.get("helper_balls", [])
+    if helpers:
+        out += ["Function PadHelperBall()   ' ActiveBall is one of the tribute's unseen helper balls",
+                "\tDim b, y",
+                "\tPadHelperBall = False",
+                "\tOn Error Resume Next",
+                "\tSet b = ActiveBall",
+                "\tIf Not IsObject(b) Then Exit Function",
+                "\tOn Error GoTo 0",
+                "\ty = False"]
+        for h in helpers:
+            out.append("\tIf IsObject(%s) Then y = y Or (b Is %s)" % (h, h))
+        out += ["\tPadHelperBall = y", "End Function"]
+    guard = "\tIf PadHelperBall() Then Exit Sub"
     for name, s in m["switches"].items():
         if name == "_":
             continue
@@ -938,11 +1008,13 @@ def gen(m, had, quiet=None, dof=None):
                 # a ramp's opto the ball also rolls back over: one pulse a
                 # shot, on the way up (PAD-907, Rush's time machine); the
                 # table's own sub still runs on every hit
-                out += ["Sub %s_Hit" % name,
+                out += ["Sub %s_Hit" % name] + ([guard] if helpers else []) + [
                         "\tIf ActiveBall.VelY < 0 Then %s" % pulse]
                 if rest:
                     out.append("\t" + rest[3:])
                 out.append("End Sub")
+            elif helpers:
+                out += ["Sub %s_Hit" % name, guard, "\t%s%s" % (pulse, rest), "End Sub"]
             else:
                 out.append("Sub %s_Hit : %s%s : End Sub" % (name, pulse, rest))
         elif ev == "hold":
@@ -956,8 +1028,12 @@ def gen(m, had, quiet=None, dof=None):
                 b0 += " : %s_UnHit_orig" % name
             else:
                 b0 += fx(name + "_UnHit")
-            out.append("Sub %s_Hit : %s : End Sub" % (name, b1))
-            out.append("Sub %s_UnHit : %s : End Sub" % (name, b0))
+            if helpers:
+                out += ["Sub %s_Hit" % name, guard, "\t" + b1, "End Sub",
+                        "Sub %s_UnHit" % name, guard, "\t" + b0, "End Sub"]
+            else:
+                out.append("Sub %s_Hit : %s : End Sub" % (name, b1))
+                out.append("Sub %s_UnHit : %s : End Sub" % (name, b0))
         elif ev in ("spin", "pass"):
             body = ("vpmTimer.PulseSw %d" if ev == "spin" else "PadPassSw %d") % sid
             if had.get(name + "_Spin") and calls_orig(name):
@@ -981,7 +1057,10 @@ def gen(m, had, quiet=None, dof=None):
                 body += " : %s_Hit_orig" % name
             else:
                 body += fx(name + "_Hit")
-            out.append("Sub %s_Hit : %s : End Sub" % (name, body))
+            if helpers:
+                out += ["Sub %s_Hit" % name, guard, "\t" + body, "End Sub"]
+            else:
+                out.append("Sub %s_Hit : %s : End Sub" % (name, body))
     for sub_name, names in m.get("drop_resets", {}).items():
         if sub_name == "_":
             continue
@@ -1067,7 +1146,7 @@ def gen(m, had, quiet=None, dof=None):
                 "\tfso.MoveFile path & \".tmp\", path",
                 "End Sub"]
     for name, args in quiet.items():
-        out.append("Sub %s%s : End Sub   ' PAD: quiet; the machine lights the table" % (name, args))
+        out.append("Sub %s%s : End Sub   ' PAD: quiet; the machine runs this now" % (name, args))
     # ---- saucers
     for k, s in saucers(m).items():
         # an entry opto the ball passes on its way in (PAD-910: Rush's side

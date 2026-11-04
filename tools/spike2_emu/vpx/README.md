@@ -459,6 +459,15 @@ switch pulses it only while the ball moves up the table
 edge, the way the machine's magnet or lift would have kept it. Rush's time
 machine (`tm2`) is LIFT RAMP OPTO this way.
 
+**Balls the tribute keeps for itself** (PAD-974): `"helper_balls"` names
+the script's variables for balls it makes for its own mechanics and never
+shows. A switch sub one of them runs makes and breaks nothing on the
+machine (`PadHelperBall()`; a sub the script calls itself, with no ball,
+still does). Batman 66's bat disc posts (`postBall1`, `postBall2`) ride the
+turntable; at the phone they sat on `trgBallLock3`, the table reported
+TURNTABLE LOCK 3, and the game turned the turntable home and back out
+again, over and over.
+
 Four more map fields (PAD-859), all in the generated script:
 
 * `"rgb": true` on a lamp whose three LEDs are an insert's -R, -G, -B: the

@@ -332,7 +332,7 @@ class EmulateSpike1Tab(RigTabMixin, TabService):
         if not py or not os.path.isfile(pp):
             return None
         rate, ch = self._audio_format()
-        return [py, pp, "127.0.0.1", "45998", rate, ch]
+        return [py, pp, "127.0.0.1", str(s1.AUDIO_PORT), rate, ch]
 
     def _audio_format(self):
         work = self._info.get("work")

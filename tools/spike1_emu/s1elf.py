@@ -141,6 +141,12 @@ class _Elf:
         return None
 
 
+def has_symbol(path, name):
+    """True when the game ELF's symbol table names *name*."""
+    with open(path, "rb") as f:
+        return name in _Elf(f.read()).syms
+
+
 def extract_topology(path):
     """Return ``{node_addr: {"type": int, "part": int}}`` for a game ELF.
 
@@ -374,11 +380,64 @@ def extract_led_map(path):
     return out
 
 
+_GI_LIST = "subtable_index_lt_"
+
+
+def extract_gi_leds(path):
+    """``{light name: [(node, index), ...]}`` for the game's GI lights (PAD-977).
+
+    The LED table names no GI (its tag is no lamp), but the game's light
+    lists do: ``subtable_index_lt_<light>`` points into one long run of u16
+    LED-entry indices (node_board_device_led_table_data), a light's own
+    entries ending at 0. GOT LE 1.37: lower_playfield_gi = [0xdc] = (8, 4),
+    left_playfield_gi = [0xdd] = (9, 0), upper_right_playfield_gi = [0xde] =
+    (10, 0). Lights named *gi* only; {} when the ELF lacks the symbols."""
+    with open(path, "rb") as f:
+        return _gi_leds(_Elf(f.read()))
+
+
+def _gi_leds(elf):
+    s = elf.syms
+    need = ("NODE_BOARD_DEVICE_LED_TABLE_DATA_ENTRY_COUNT", "node_board_device_led_table_data",
+            "node_board_device_table_data", "node_board_table_data")
+    if any(n not in s for n in need):
+        return {}
+    try:
+        count = elf.read_u32(s["NODE_BOARD_DEVICE_LED_TABLE_DATA_ENTRY_COUNT"])
+    except ValueError:
+        return {}
+    out = {}
+    for sym, addr in s.items():
+        if not sym.startswith(_GI_LIST) or "gi" not in sym[len(_GI_LIST):].split("_"):
+            continue
+        leds = []
+        try:
+            for k in range(16):
+                t = elf.read_u16(addr + 2 * k)
+                if not t:
+                    break
+                if t >= count:
+                    leds = []
+                    break
+                devid = elf.read_u16(s["node_board_device_led_table_data"] + LEDDEV_ENTRY * t + _LEDDEV_DEVID_OFF)
+                if devid:
+                    leds.append(_device_node_pos(elf, s, devid))
+        except (ValueError, struct.error):
+            continue
+        if leds:
+            out[sym[len(_GI_LIST):]] = leds
+    return out
+
+
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     if not argv:
-        print("usage: s1elf.py [--switches|--coils|--leds] <game-elf>", file=sys.stderr)
+        print("usage: s1elf.py [--switches|--coils|--leds|--gi] <game-elf>", file=sys.stderr)
         return 2
+    if argv[0] == "--gi":
+        import json
+        print(json.dumps({k: ["%d,%d" % nl for nl in v] for k, v in sorted(extract_gi_leds(argv[1]).items())}, indent=0))
+        return 0
     if argv[0] in ("--switches", "--coils", "--leds"):
         import json
         smap = {"--switches": extract_switch_map, "--coils": extract_coil_map,

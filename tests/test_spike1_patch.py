@@ -133,6 +133,39 @@ def test_read_cstr_rejects_binary():
     assert elf.read_cstr(0x1006) is None      # 0xff -> not printable
 
 
+def test_gi_leds_follow_the_light_lists_to_their_node_and_position():
+    # PAD-977: GOT LE 1.37's LOWER PLAYFIELD GI is LED entry 0xdc = (8, 4); a
+    # light's list ends at 0, a light not named *gi* is not GI
+    s1elf = _load("s1elf")
+    BOARDS, DEVS, LEDS, LISTS = 0x1000, 0x1100, 0x1400, 0x1800
+    data = bytearray(0x2000)
+
+    def u16(va, v):
+        struct.pack_into("<H", data, va, v)
+    data[BOARDS + 1 * s1elf.BOARD_ENTRY + s1elf._BOARD_ADDR_OFF] = 8      # board 1 at node 8
+    data[BOARDS + 2 * s1elf.BOARD_ENTRY + s1elf._BOARD_ADDR_OFF] = 9      # board 2 at node 9
+    for devid, board, pos in ((1, 1, 4), (2, 2, 0), (3, 2, 2), (4, 1, 20)):
+        u16(DEVS + devid * s1elf.DEV_ENTRY + s1elf._DEV_BOARD_OFF, board)
+        u16(DEVS + devid * s1elf.DEV_ENTRY + s1elf._DEV_POS_OFF, pos)
+    for led, devid in ((1, 1), (2, 2), (3, 3), (4, 4)):
+        u16(LEDS + led * s1elf.LEDDEV_ENTRY + s1elf._LEDDEV_DEVID_OFF, devid)
+    for k, v in enumerate((1, 0, 2, 3, 0, 4, 0)):    # one long run, as the game lays it out
+        u16(LISTS + 2 * k, v)
+    struct.pack_into("<I", data, 0x1f00, 5)          # the LED table's entry count
+    elf = s1elf._Elf.__new__(s1elf._Elf)
+    elf.data = bytes(data)
+    elf.sections = [dict(off=0x1000, addr=0x1000, size=0x1000, type=1)]
+    elf.syms = {"NODE_BOARD_DEVICE_LED_TABLE_DATA_ENTRY_COUNT": 0x1f00,
+                "node_board_device_led_table_data": LEDS, "node_board_device_table_data": DEVS,
+                "node_board_table_data": BOARDS,
+                "subtable_index_lt_lower_playfield_gi": LISTS,
+                "subtable_index_lt_playfield_gi_2_gi": LISTS + 4,
+                "subtable_index_lt_left_ramp_sigil": LISTS + 10}
+    assert s1elf._gi_leds(elf) == {"lower_playfield_gi": [(8, 4)], "playfield_gi_2_gi": [(9, 0), (9, 2)]}
+    del elf.syms["node_board_table_data"]
+    assert s1elf._gi_leds(elf) == {}
+
+
 # --- signature-aware stub selection (the WWE-crash regression) ---------------
 
 def _mini_elf_with_freq_symbol(mangled):

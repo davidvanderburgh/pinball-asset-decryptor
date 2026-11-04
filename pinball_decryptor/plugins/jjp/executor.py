@@ -399,6 +399,13 @@ class DockerExecutor(CommandExecutor):
         self._container_running = False
         self._host_mounts = []  # list of host paths to bind-mount
 
+    def _cli(self):
+        try:
+            from ...webui.emulate_core import docker_cli
+            return docker_cli() or "docker"
+        except Exception:
+            return "docker"
+
     def _dockerfile_path(self):
         """Find the bundled Dockerfile."""
         # Check inside the package directory first
@@ -426,7 +433,7 @@ class DockerExecutor(CommandExecutor):
         """Build the Docker image if it doesn't exist."""
         try:
             result = subprocess.run(
-                ["docker", "image", "inspect", _DOCKER_IMAGE],
+                [self._cli(), "image", "inspect", _DOCKER_IMAGE],
                 capture_output=True, timeout=15,
             )
             if result.returncode == 0:
@@ -442,7 +449,7 @@ class DockerExecutor(CommandExecutor):
         build_dir = os.path.dirname(dockerfile)
         try:
             result = subprocess.run(
-                ["docker", "build", "-t", _DOCKER_IMAGE, "-f", dockerfile, build_dir],
+                [self._cli(), "build", "-t", _DOCKER_IMAGE, "-f", dockerfile, build_dir],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -469,7 +476,7 @@ class DockerExecutor(CommandExecutor):
 
         # Stop any leftover container
         subprocess.run(
-            ["docker", "rm", "-f", _DOCKER_CONTAINER],
+            [self._cli(), "rm", "-f", _DOCKER_CONTAINER],
             capture_output=True, timeout=15,
         )
 
@@ -484,7 +491,7 @@ class DockerExecutor(CommandExecutor):
                 self._host_mounts.append(hp)
 
         cmd = [
-            "docker", "run", "-d",
+            self._cli(), "run", "-d",
             "--name", _DOCKER_CONTAINER,
             "--privileged",
             *mount_args,
@@ -515,7 +522,7 @@ class DockerExecutor(CommandExecutor):
             return
         try:
             subprocess.run(
-                ["docker", "rm", "-f", _DOCKER_CONTAINER],
+                [self._cli(), "rm", "-f", _DOCKER_CONTAINER],
                 capture_output=True, timeout=30,
             )
         except Exception:
@@ -529,7 +536,7 @@ class DockerExecutor(CommandExecutor):
                 "Docker container not running. Call start_container() first.")
 
         full_cmd = [
-            "docker", "exec", _DOCKER_CONTAINER,
+            self._cli(), "exec", _DOCKER_CONTAINER,
             "bash", "-c", bash_cmd,
         ]
         try:
@@ -556,7 +563,7 @@ class DockerExecutor(CommandExecutor):
                 "Docker container not running. Call start_container() first.")
 
         full_cmd = [
-            "docker", "exec", _DOCKER_CONTAINER,
+            self._cli(), "exec", _DOCKER_CONTAINER,
             "bash", "-c", bash_cmd,
         ]
         proc = subprocess.Popen(
@@ -606,18 +613,22 @@ class DockerExecutor(CommandExecutor):
         return f"/host{path}"
 
     def check_available(self):
+        cli = self._cli()
+        name = "Podman" if "podman" in os.path.basename(cli).lower() else "Docker"
+        desktop = ("Podman Desktop, or run 'podman machine start'"
+                   if name == "Podman" else "Docker Desktop")
         try:
             result = subprocess.run(
-                ["docker", "info"],
+                [cli, "info"],
                 capture_output=True, timeout=15,
             )
             if result.returncode == 0:
-                return True, "Docker Desktop available"
-            return False, "Docker Desktop not running. Start Docker Desktop."
+                return True, f"{name} available"
+            return False, f"{name} not running. Start {desktop}."
         except FileNotFoundError:
-            return False, "Docker not installed. Install Docker Desktop."
+            return False, f"{name} not installed. Install Docker Desktop or Podman."
         except Exception:
-            return False, "Docker check failed."
+            return False, f"{name} check failed."
 
 
 # Standard install locations for usbipd-win (Windows only)

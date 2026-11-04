@@ -97,13 +97,20 @@ FRAG_SLOT = 8
 #: Slots a fragment has on every card seen (the game reads the count off
 #: image.bin's own tables: :func:`fragment_stride`).
 DEFAULT_STRIDE = 5
-#: Room a bank descriptor gets: the window the resolver's callers read.
-DESC_SLOT = 0x50
-#: PAD-779: the most room a bank's descriptors may get, for a bank that holds a song's whole
-#: sequence (intro, song, outro: Iron Maiden LE 1.18's sound id 974 plays four records in 87
-#: bytes).  The game's own descriptors run to 108 bytes there, at keystream offsets from the
-#: same rule (:func:`.bank_build.resolver_rule`), so its keystream covers this far.
-DESC_SLOT_MAX = 0x60
+#: Room a bank descriptor gets.  PAD-995: a whole script, as far as one is ever read
+#: (``engine._WIDE_DESC``): the game reads a descriptor in place to its end op, and most of its
+#: scripts run past the 80 bytes the resolver's callers read (1661 of Godzilla Pro 1.16's 2599
+#: are 94 bytes, the calls'; the longest anywhere seen 108).  A copy cut at 80 left a call's
+#: last ops to whatever lay after it in the bank, and the game read a WAIT of some two billion
+#: ticks there: the call kept its sound channel for good.  It was 0x50.
+DESC_SLOT = 0x100
+#: PAD-779: the most room a bank's descriptors may get (a song's whole sequence, intro, song,
+#: outro: Iron Maiden LE 1.18's sound id 974 plays four records in 87 bytes); since PAD-995 every
+#: bank's.  The game's own descriptors run as far past their keystream offsets, which the
+#: rule keeps small (``& 0x2a6`` on Godzilla LE 1.16, ``& 0xb95`` on Deadpool LE 1.16).
+DESC_SLOT_MAX = 0x100
+#: The least room :func:`plan_bank` takes: the 80 bytes the resolver's callers read.
+DESC_SLOT_MIN = 0x50
 #: The vf2 keystream window the resolver can point into.
 VF2_WINDOW = 0x3F00
 #: The bank's sid map (PAD-606), between the descriptor block and the directory: which of
@@ -460,12 +467,12 @@ def plan_bank(edits, stride=DEFAULT_STRIDE, aliases=(), desc_slot=DESC_SLOT, map
     set), for a sound several of the game's sound ids play, each through a
     descriptor of its own.
 
-    PAD-779: *desc_slot* the room each descriptor gets (up to :data:`DESC_SLOT_MAX`, for a
-    song's whole sequence), and room for the sid map's extension of *mapped* aliases (each a
+    PAD-779: *desc_slot* the room each descriptor gets (:data:`DESC_SLOT_MIN` up to
+    :data:`DESC_SLOT_MAX`; each descriptor written must fit it whole, :func:`write_tables`), and room for the sid map's extension of *mapped* aliases (each a
     sound id of the game's that plays a song in parts)."""
     edits = [BankEdit(*e) for e in edits]
     desc_slot = int(desc_slot)
-    if not DESC_SLOT <= desc_slot <= DESC_SLOT_MAX or desc_slot % 16:
+    if not DESC_SLOT_MIN <= desc_slot <= DESC_SLOT_MAX or desc_slot % 16:
         raise SoundBankError("a descriptor slot of %d bytes" % desc_slot)
     if not edits:
         raise SoundBankError("plan_bank called with no sounds")
@@ -551,7 +558,7 @@ def write_tables(path, places, descs, vf2, ks_of, stride=DEFAULT_STRIDE, desc_sl
     fragment slots each naming its descriptor's offset (whitened with four
     bytes of *vf2*, the firmware's keystream window, at
     :func:`slot_vf2_offset`), and the descriptor *descs[new_idx]* (plain
-    bytes, at most :data:`DESC_SLOT`) at ``desc_off`` whitened with *vf2* at
+    bytes, at most *desc_slot*, its whole script) at ``desc_off`` whitened with *vf2* at
     ``ks_of(desc_off)``, the offset the resolver will derive.  Returns
     ``{new_idx: keystream offset}``.  PAD-779: *desc_slot* is the bank's room
     a descriptor (:func:`plan_bank`)."""

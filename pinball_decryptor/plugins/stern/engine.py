@@ -8600,18 +8600,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             busy=set(grows) - set(_user_grows))
                     if (mode_own_used or _game_ok or _sm_frags or _game_seqs
                             or _sm_seqs):
-                        _sm_once = {}
                         bank_plan, audio_edits, grows = _plan_sound_banks(
                             gr_path, img_path, params, audio_edits, grows,
                             _user_grows, mode_own_used, reader, img_node,
                             space_chk, log, game_sids=_game_ok,
                             game_why=_game_why, sm_frags=_sm_frags,
                             game_seqs=_game_seqs, sm_seqs=_sm_seqs,
-                            sm_hold=_sm_turn_hosts(sound_mode_used),
-                            sm_loops=_sm_loop_hosts(gr_path, img_path, params,
-                                                    desc_sites, _sm_frags, _sm_seqs,
-                                                    once=_sm_once),
-                            sm_once=_sm_once)
+                            sm_hold=_sm_turn_hosts(sound_mode_used))
                         if bank_plan is not None:
                             bank_plan.old_map = dict(_old_bank_map)
                             _user_grows = {i: g for i, g in _user_grows.items()
@@ -11614,24 +11609,16 @@ def _sound_mode_descriptors(gr_path, staged, params, sites, used, log):
     finished bank) with the slot's record swapped for the mode's (its key, under the build's key
     mask) and its declared length moved to the mode file's (bytes 3..6, 1/4000 s; a one-sound
     descriptor declares the file's own length, a sequence moves by the difference)
-    (:func:`_mode_descriptor_table`)."""
-    from .spike2 import sfx_names as SN
-    from .spike2.emulator import Spike2Emu
+    (:func:`_mode_descriptor_table`).  PAD-995: each read whole (:func:`_whole_descriptors`),
+    as far as the runtime holds one (:data:`.sound_modes.RUNTIME_DESC`): cut at the 80 bytes
+    the resolver's callers read, a call's script lost the ops that put the music back up and
+    end it."""
+    from . import sound_modes as _SMo
     mask = _desc_key_mask(params, sites)
-    found = []
-    emu = Spike2Emu(gr_path, staged)
-    try:
-        emu.boot()
-        resolver, buf = SN._find_resolver(emu)
-        if resolver is None:
-            raise RuntimeError("the game's descriptor resolver could not be located")
-        for sid in range(SN.sid_ceiling(staged) + 1):
-            r = SN.resolve_descriptor(emu, resolver, buf, sid)
-            if r is not None:
-                found.append((sid, r[0], r[2]))
-    finally:
-        emu.close()
-    return _mode_descriptor_table(found, params, mask, used, log)
+    found = _whole_descriptors_once(gr_path, staged)
+    out = _mode_descriptor_table(found, params, mask, used, log,
+                                 ends={sid: len(d) for sid, _o, d in found})
+    return [(m, sid, bytes(d)[:_SMo.RUNTIME_DESC]) for m, sid, d in out]
 
 
 def _mode_descriptor_table(found, params, mask, used, log, ends=None):
@@ -20406,16 +20393,27 @@ _WIDE_DESC = 0x100
 
 def _wide_descriptors(gr_path, img_path, params, mask):
     """PAD-779: ``{sid: (descriptor, [idx or None, ...])}`` - every sound id's descriptor
-    read through the game's own resolver up to where the next one starts (they lie back to
-    back), at most :data:`_WIDE_DESC` bytes, and the records its op11 payloads play in
+    read whole (:func:`_whole_descriptors`), and the records its op11 payloads play in
     order (``None`` for one naming no record of *params*).  The play tables
     (:func:`_descriptor_sites`) read 80 bytes, and Iron Maiden's sound id 974 plays its
-    fourth record at byte 76.  A descriptor that runs to the end of the window (none
-    after it) is cut at its end op when its script parses (:func:`_desc_ops`).  Raises
-    when the resolver cannot be located."""
+    fourth record at byte 76.  Raises when the resolver cannot be located."""
+    by_key = {bytes(p["findkey"]): p["idx"] for p in params if p.get("findkey")}
+    return {sid: (desc, [by_key.get(_play_key(pl, sid, mask)) for _o, pl in _op11_payloads(desc)])
+            for sid, _off, desc in _whole_descriptors_once(gr_path, img_path)}
+
+
+def _whole_descriptors(gr_path, img_path):
+    """PAD-995: ``[(sid, offset in image.bin, descriptor)]`` - every sound id's descriptor read
+    through the game's own resolver up to where the next one starts (they lie back to back), at
+    most :data:`_WIDE_DESC` bytes; one that runs to the end of that window (none after it) is
+    cut at its end op when its script parses (:func:`_desc_ops`).  The resolver's callers here
+    read :data:`.sfx_names.DESC_WINDOW` (80) bytes, and most of the game's scripts run past
+    that: 1661 of Godzilla Pro 1.16's 2599 are 94 bytes, a call's (its last ops put the music
+    back up and end it), and the game reads a script in place to its end.  A copy cut at 80
+    bytes reads on into whatever follows it: from a sound bank, a WAIT of some two billion
+    ticks that kept the call's channel for good.  Raises when the resolver cannot be located."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
-    by_key = {bytes(p["findkey"]): p["idx"] for p in params if p.get("findkey")}
     found = []
     emu = Spike2Emu(gr_path, img_path)
     try:
@@ -20435,15 +20433,31 @@ def _wide_descriptors(gr_path, img_path, params, mask):
     finally:
         emu.close()
     ext = _descriptor_extents([o for _s, o, _d in found], _WIDE_DESC)
-    out = {}
+    out = []
     for sid, off, desc in found:
         n = ext[off]
         if n >= _WIDE_DESC:
             ops = _desc_ops(desc)
             n = _DESC_OPS_AT + sum(len(o) for o in ops) if ops else len(desc)
-        desc = desc[:n]
-        out[sid] = (desc, [by_key.get(_play_key(pl, sid, mask)) for _o, pl in _op11_payloads(desc)])
+        out.append((sid, off, desc[:n]))
     return out
+
+
+_WHOLE_ONCE = [None, None]
+
+
+def _whole_descriptors_once(gr_path, img_path):
+    """:func:`_whole_descriptors`, read once for one staged ``image.bin`` and program."""
+    key = []
+    for path in (gr_path, img_path):
+        st = os.stat(_lp(path))
+        key.append((os.path.abspath(path), st.st_size, st.st_mtime_ns))
+    key = tuple(key)
+    if _WHOLE_ONCE[0] != key:
+        _WHOLE_ONCE[:] = [None, None]
+        got = _whole_descriptors(gr_path, img_path)
+        _WHOLE_ONCE[:] = [key, got]
+    return _WHOLE_ONCE[1]
 
 
 def _SMo_is_mode_turn(mode):
@@ -20886,53 +20900,9 @@ def _sm_turn_hosts(used):
             if not _SMo.is_turn(u["mode"]) and (u["rel"], int(u["mode"])) in turns}
 
 
-def _loops_at_end(desc):
-    """PAD-994: whether descriptor *desc* (plain bytes) goes back to its loop mark after a
-    record it plays (:data:`_MUSIC_LOOP_TAIL`): the game's looping tunes do, a call or a tune
-    played once does not.  Any record, not the last: a descriptor read wide carries bytes past
-    its end op, where a false op11 can turn up (Godzilla Pro 1.16's TUNE 1, sid 2544)."""
-    d = bytes(desc or b"")
-    n = len(_MUSIC_LOOP_TAIL)
-    return any(d[p + 8:p + 8 + n] == _MUSIC_LOOP_TAIL for p, _k in _op11_payloads(d))
-
-
-def _sm_loop_hosts(gr_path, img_path, params, sites, sm_frags, sm_seqs, once=None):
-    """PAD-994: the music modes' files (hosts of *sm_frags*, and of *sm_seqs* group by group)
-    every game sound id of which plays a looping tune: the only ones a build moves into a sound
-    bank while ``image.bin`` has room for them (:func:`_plan_sound_banks`).  A sound the game
-    plays once from a bank sounds whole and then keeps its channel (emulator, Godzilla Pro
-    1.16: request 1900's 7.4 s call still held channel 7 225 s later, and every request after it
-    waited behind it), where a looping tune is stopped by the game anyway.  ``set()`` when the
-    descriptors cannot be read: every file then stays in ``image.bin``, as before PAD-749.
-    *once* (a dict) is given ``{host: a sound id that plays it once}`` for the others."""
-    out = set()
-    once = {} if once is None else once
-    for g in sm_seqs or ():
-        bad = [sid for sid, d in sorted(g.descs.items()) if not _loops_at_end(d)]
-        if g.descs and not bad:
-            out.update(int(h) for h in g.hosts)
-        else:
-            once.update((int(h), bad[0] if bad else None) for h in g.hosts)
-    if not sm_frags:
-        return out
-    try:
-        wide = _wide_descriptors_once(gr_path, img_path, params, _desc_key_mask(params, sites))
-    except (RuntimeError, OSError):
-        return out
-    for host, frags in sm_frags.items():
-        sids = sorted({int(sid) for _u, sid in frags})
-        bad = [sid for sid in sids if sid not in wide or not _loops_at_end(wide[sid][0])]
-        if sids and not bad:
-            out.add(int(host))
-        else:
-            once[int(host)] = bad[0] if bad else None
-    return out
-
-
 def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows, used,
                       reader, img_node, space_chk, log, game_sids=None, game_why=None,
-                      sm_frags=None, game_seqs=None, sm_seqs=None, sm_hold=(), sm_loops=None,
-                      sm_once=None):
+                      sm_frags=None, game_seqs=None, sm_seqs=None, sm_hold=()):
     """Decide which of the modes' own sounds leave ``image.bin`` for a sound
     bank of their own (PAD-595), and take them out of *grows* and
     *audio_edits*.  Returns ``(plan or None, audio_edits, grows)``.
@@ -20958,10 +20928,9 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     take what ``image.bin`` has left under the game's limit, largest first out
     when it is full (:func:`.bank_build.plan_spill`), so the fewest move.  A
     build whose sounds all fit is exactly the build it was, unless it has music modes'
-    files a bank can hold (PAD-749): then those go into a bank, but those the game plays once
-    (not in *sm_loops*, :func:`_sm_loop_hosts`; ``None`` counts every one as looping) and
-    those in *sm_hold* (hosts with files in turn of their own, PAD-638, which play only from a
-    record in image.bin), and every other sound stays in image.bin (PAD-994)."""
+    files a bank can hold (PAD-749): then every bankable sound goes into a bank but the
+    music modes' files *sm_hold* (hosts with files in turn of their own, PAD-638, which play
+    only from a record in image.bin)."""
     from . import bank_build as BB
     from .spike2 import masterdir as MD
     from .spike2 import soundbank as SB
@@ -20993,22 +20962,8 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # holds image.bin in memory for good and a bank only while it plays: a Heisei card with
     # its music modes in image.bin (2,020 MB, stock 1,650) left its city map video short of
     # room on some first balls, and capped how many songs a card could carry.
-    # PAD-994: but only the looping ones (*sm_loops*), and nothing else: a sound the game plays
-    # once from a bank keeps its channel after it ends, so a Heisei Pro card whose longer
-    # calls all went into a bank beside its music modes lost calls after them, or heard them
-    # late. Those stay in image.bin while it has room, as before PAD-749.
     forced = not spilled
-    to_bank = {i for i in set(sm_frags) - set(sm_hold) | set(mseq_of)
-               if sm_loops is None or i in sm_loops}
-    if forced:
-        for i in sorted(set(sm_frags) | set(mseq_of)):
-            if i not in to_bank and i not in sm_hold:
-                sid = (sm_once or {}).get(i)
-                log("idx %d's music mode file stays in image.bin rather than a sound bank: the "
-                    "game plays it once%s, and a sound played once from a bank keeps its sound "
-                    "channel after it ends." % (i, " (sound id %d)" % sid if sid else ""),
-                    "info")
-    if forced and not to_bank:
+    if forced and not (set(sm_frags) | set(mseq_of)) - set(sm_hold):
         return None, audio_edits, grows
     # PAD-593: the game maps image.bin and the bank playing whole, side by side, so
     # once any sound needs a bank they ALL go to banks, kept as small as Stern's own
@@ -21016,8 +20971,9 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # adds little beside it (soundbank.MAPPED_MAX).
     spilled.update(kept)
     kept = {}
-    if forced:          # (image.bin had room: only the looping music modes' files move)
-        kept = {i: spilled.pop(i) for i in sorted(spilled) if i not in to_bank}
+    if forced:          # (PAD-749: image.bin had room; a file with turns of its own stays)
+        kept = {i: spilled.pop(i) for i in sorted(set(sm_hold) & set(spilled))
+                if i not in mseq_of}
     for idx, why in sorted((game_why or {}).items()):
         if idx in user_grows:
             log("idx %d stays in image.bin rather than a sound bank: %s, and a bank sound is "
@@ -21541,9 +21497,7 @@ def _bank_mode_descs(gr_path, img_path, params, sites, plan, cat, places, rows, 
     could be made for takes another of its record's, and is never played."""
     from . import bank_build as BB
     from . import sound_modes as _SMo
-    from .spike2 import sfx_names as SN
     from .spike2 import soundbank as SB
-    from .spike2.emulator import Spike2Emu
     order = {}
     for pl in sorted(places, key=lambda pl: pl.new_idx):
         if pl.idx in plan.sm_frags:
@@ -21553,21 +21507,13 @@ def _bank_mode_descs(gr_path, img_path, params, sites, plan, cat, places, rows, 
     mask = _desc_key_mask(params, sites)
     byidx = {p["idx"]: p for p in params}
     byrow = {r["idx"]: r for r in rows}
-    found = []
-    emu = Spike2Emu(gr_path, img_path)
+    # PAD-995: each descriptor whole, as the game reads it from the bank (to its end)
     try:
-        emu.boot()
-        resolver, buf = SN._find_resolver(emu)
-        if resolver is None:
-            raise RuntimeError("the game's descriptor resolver could not be located, so the "
-                               "music modes' files cannot be played from a sound bank")
-        for sid in range(SN.sid_ceiling(img_path) + 1):
-            got = SN.resolve_descriptor(emu, resolver, buf, sid)
-            if got is not None:
-                found.append((sid, got[0], got[2]))
-    finally:
-        emu.close()
-    extents = _descriptor_extents([o for _s, o, _d in found], SN.DESC_WINDOW)
+        found = _whole_descriptors_once(gr_path, img_path)
+    except RuntimeError as e:
+        raise RuntimeError("%s, so the music modes' files cannot be played from a sound bank" % e)
+    extents = {off: len(desc) for _s, off, desc in found}
+    ends = {sid: len(desc) for sid, _o, desc in found}
     at = {sid: (off, desc) for sid, off, desc in found}
     given, played = {}, []
     for host, pls in order.items():
@@ -21584,7 +21530,7 @@ def _bank_mode_descs(gr_path, img_path, params, sites, plan, cat, places, rows, 
         for (u, sid), pl in zip(frs, pls):
             if id(u) not in tables:
                 tables[id(u)] = {s_: d for _m, s_, d in _mode_descriptor_table(
-                    found, mine, mask, [dict(u)], lambda *a, **k: None)}
+                    found, mine, mask, [dict(u)], lambda *a, **k: None, ends=ends)}
             d = tables[id(u)].get(sid)
             if d is not None and sid in at:
                 d = _bank_descriptor(d, sid, extents[at[sid][0]], held, key, mask)

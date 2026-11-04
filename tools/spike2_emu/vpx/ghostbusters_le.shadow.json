@@ -451,7 +451,657 @@
   }
  },
  "lamps": {
-  "_": "not mapped: JP's own lights (l1..l77) carry no numbering of the game's"
+  "_": "not mapped: JP's own lights (l1..l77) carry no numbering of the game's gi bulbs (aGiLights) are the game's playfield GI strings 3 (9,0) and 2 (9,2) (Ghostbusters LE 1.17's GI light lists, s1elf --gi): lit while either is; the table's GI comes on only in its own ResetForNewGame (PAD-977).",
+  "gi1": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi10": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi11": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi12": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi13": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi14": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi15": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi16": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi18": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi19": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi2": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi20": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi21": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi22": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi23": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi24": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi25": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi26": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi27": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi28": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi3": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi4": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi5": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi6": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi8": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi9": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi31": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi30": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi29": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi17": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi004": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi021": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi020": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi019": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi018": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi017": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi016": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi015": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi014": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi013": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi012": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi011": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi009": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi008": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi007": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi006": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi005": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi003": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi001": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  },
+  "gi002": {
+   "leds": [
+    [
+     9,
+     0
+    ],
+    [
+     9,
+     2
+    ]
+   ],
+   "name": "PLAYFIELD GI 3 / 2"
+  }
  },
  "quiet_subs": [],
  "orig_hits": false,
@@ -487,5 +1137,12 @@
   "CapTrigger1",
   "SlimerTrigger1"
  ],
- "listed": true
+ "listed": true,
+ "repatch": [
+  {
+   "old": "Sub Table1_Init_orig()\n    LoadEM",
+   "why": "the playfield's GI lights with the game's, and the table's own rules no longer stop it",
+   "since": "PAD-977: the GI bulbs are the machine's GI strings; renamed subs run under On Error Resume Next and name their object for Me"
+  }
+ ]
 }

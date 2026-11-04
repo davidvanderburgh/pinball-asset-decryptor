@@ -36,7 +36,7 @@ LAYOUT=$(python3 "$T/spktitles.py" get "$TITLE" layout)
 echo "build $BUILD, title $TITLE, layout $LAYOUT"
 echo "== the marked build and the multi-boot update"
 rm -rf "$W/mod" "$W/multi" "$W/update"
-MOD=$(python3 "$T/spkmarkmod.py" "$UPD" "$W/mod" "PAD-980 marked build") || { echo "machine_sim: spkmarkmod failed" >&2; exit 1; }
+MOD=$(python3 "$T/spkmarkmod.py" "$UPD" "$W/mod" "PAD-980 marked build" | tail -1) && [ -f "$MOD" ] || { echo "machine_sim: spkmarkmod failed" >&2; exit 1; }
 SEL=$(bash "$T/ensurespkselect.sh" x "$W/sel" | sed -n 's/^\[selector\] menu program: //p')
 [ -n "$SEL" ] || { echo "machine_sim: no menu program" >&2; exit 1; }
 mkdir -p "$W/multi"

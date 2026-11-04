@@ -45,6 +45,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -56,6 +57,9 @@ for _p in (SPIKE2_EMU, BOF_EMU, REPO_ROOT):
 import mkmulticard as mkc                                           # noqa: E402  the shared pure parts
 from mkmulticard import Refused, say, PROGRESS, check_output_path   # noqa: E402
 import mkbofmulti as bof                                            # noqa: E402  the conf writer
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import mkspkproc as sp                                              # noqa: E402  the P-ROC titles
 
 TOOL = "mkspkmulti"
 #: build.json's shape; a reader must accept an older (or missing) one.
@@ -104,7 +108,25 @@ TITLES = {
     "ultraman": dict(name="ULTRAMAN", flat=False, board="pinotaur", sw=(81, 80, 87),
                      roots=(("assets", "/game/code/assets"), ("config", "/game/code/config")),
                      free=14_600_000_000),
+    # The P-ROC titles (mkspkproc.py): the package's root IS the game's folder, the stock
+    # build stays there, and the menu, the launcher and the other builds travel in
+    # PAD_MULTIBOOT/.  Free: Rick and Morty's /home (7.4 GB, the build 3.5 GB), Alice
+    # Cooper's /game (16 GB, 3.2 GB used) - the builds share b0's files by hard links.
+    "rick_and_morty": dict(sp.PROC["rick_and_morty"], name="RICK AND MORTY", flat=False, proc=True,
+                           roots=(), free=3_500_000_000),
+    "alice_cooper": dict(sp.PROC["alice_cooper"], name="ALICE COOPER'S NIGHTMARE CASTLE", flat=False,
+                         proc=True, roots=(), free=14_000_000_000),
 }
+for _t in TITLES.values():
+    _t.setdefault("program", "uptest/main.x86_64")
+    _t.setdefault("proc", False)
+#: the multi-boot's own folder in a build's paths: inside uptest on the Linux titles, beside
+#: the game on the P-ROC ones
+def pad_of(title):
+    return (sp.PAD_DIR if title["proc"] else "uptest/" + PAD) + "/"
+
+
+AES_FMTS = ("rm_pkg", "ac_pkg")
 #: the launcher and the menu are ours; a build's own file by these names would be shadowed
 RESERVED = ("uptest/main.x86_64",)
 #: where an update's member list is kept when no --cache-dir is given (SpkUpdate.index):
@@ -144,7 +166,8 @@ class SpkUpdate:
         if gf is None or gf.game_key not in TITLES:
             what = gf.game_name if gf is not None and gf.game_key else "not a Spooky update the menu takes"
             raise Refused("%s: %s (a multi-boot takes Beetlejuice, Scooby-Doo, Texas Chainsaw, Evil Dead, "
-                          "Looney Tunes, Halloween and Ultraman updates)" % (os.path.basename(self.path), what))
+                          "Looney Tunes, Halloween, Ultraman, Rick and Morty and Alice Cooper updates)"
+                          % (os.path.basename(self.path), what))
         self.key = gf.game_key
         self.game = gf.game_name
         self.fmt = gf.format_type
@@ -166,8 +189,16 @@ class SpkUpdate:
         base = self.cache_dir or work
         os.makedirs(base, exist_ok=True)
         st = os.stat(self.path)
-        out = os.path.join(base, "%s.%d.%d.tar.gz" % (re.sub(r"[^\w.-]", "_", os.path.basename(self.path)),
-                                                      st.st_size, int(st.st_mtime)))
+        out = os.path.join(base, "%s.%d.%d.%s" % (re.sub(r"[^\w.-]", "_", os.path.basename(self.path)),
+                                                  st.st_size, int(st.st_mtime),
+                                                  "zip" if self.fmt in AES_FMTS else "tar.gz"))
+        if not os.path.isfile(out) and self.fmt in AES_FMTS:
+            say("unpacking %s's encryption layer" % os.path.basename(self.path))
+            try:
+                sp.aes_decrypt(self.path, out + ".part", self.fmt)
+            except sp.Refused as e:
+                raise Refused(str(e))
+            os.replace(out + ".part", out)
         if not os.path.isfile(out):
             part = out + ".part"
             say("unpacking %s's %s layer" % (os.path.basename(self.path),
@@ -198,6 +229,12 @@ class SpkUpdate:
         packed update is read straight off `gpg --decrypt` when there is a gpg (and its
         layer is not unpacked already): writing a 2 GB Beetlejuice tar out first and reading
         it back doubled the first plan of the tab, which the preview waits behind."""
+        if self.fmt in AES_FMTS:
+            for r, ti, name in sp.zip_members(self.tar_path(work)):
+                bp = self.build_path(name)
+                if bp is not None:
+                    yield r, ti, bp
+            return
         proc = self._gpg_stream()
         try:
             src = {"fileobj": proc.stdout} if proc else {"name": self.tar_path(work)}
@@ -217,7 +254,7 @@ class SpkUpdate:
     def _gpg_stream(self):
         """`gpg --decrypt` of this update on a pipe, or None (not GPG-packed, already
         unpacked into the cache, or no gpg here)"""
-        if self.fmt in ("tar_gz", "plain_tar") or (self._tar and os.path.isfile(self._tar)):
+        if self.fmt in ("tar_gz", "plain_tar") + AES_FMTS or (self._tar and os.path.isfile(self._tar)):
             return None
         _f, gpg, games = _spooky()
         exe = gpg._find_gpg()
@@ -302,10 +339,11 @@ def _inputs(a, work):
                           "same game" % (i, os.path.basename(u.path), u.game, us[0].game))
     for u in us:
         idx = u.index(work)
-        if "uptest/main.x86_64" not in idx or idx["uptest/main.x86_64"][0] != "f":
+        prog = u.title["program"]
+        if prog not in idx or idx[prog][0] != "f":
             raise Refused("%s has no game program (%s): the machine's install would refuse it"
-                          % (os.path.basename(u.path), "main.x86_64" if u.title["flat"] else "uptest/main.x86_64"))
-        if "uptest/pad/images.conf" in idx:
+                          % (os.path.basename(u.path), "main.x86_64" if u.title["flat"] else prog))
+        if pad_of(u.title) + "images.conf" in idx or sp.MARK in idx:
             raise Refused("%s is a multi-boot already: add the builds it was made from instead"
                           % os.path.basename(u.path))
     return us
@@ -442,11 +480,14 @@ def builds_text(n):
 
 
 # ============================================================================== the archive
-def check_selector_dir(d):
+def check_selector_dir(d, title=None):
     if not d or not os.path.isdir(d):
         raise Refused("--selector-dir %s is not a directory (ensurespkselect.sh installs one)" % d)
-    for name, (_mode, required) in SELECTOR_FILES.items():
-        if required and not os.path.isfile(os.path.join(d, name)):
+    need = [n for n, (_m, req) in SELECTOR_FILES.items() if req]
+    if title is not None and title["proc"]:
+        need = [n for n, _m in sp.SELECTOR_FILES if n != "font.ttf"]
+    for name in need:
+        if not os.path.isfile(os.path.join(d, name)):
             raise Refused("--selector-dir %s has no %s (ensurespkselect.sh installs it)" % (d, name))
 
 
@@ -555,7 +596,7 @@ def build_update(a):
             raise Refused("--out %s: the machine's update menu lists the title's own names, so the "
                           "multi-boot keeps the primary's (%s) - in another folder" % (os.path.basename(out), want))
         out = os.path.abspath(check_output_path(out, [u.path for u in us], force=a.force))
-        check_selector_dir(a.selector_dir)
+        check_selector_dir(a.selector_dir, us[0].title)
         media = mkc.plan_media(a.media_dir, len(us)) if a.media_dir else None
         targets = targets_of(us)
         tdef = default_titles(us)
@@ -574,6 +615,9 @@ def build_update(a):
                 ("size", u.size), ("files", None if i == 0 else len(changes[i])),
                 ("removed", None if i == 0 else len(removed[i]))])
                 for i, (u, t) in enumerate(zip(us, targets))])])
+        if us[0].title["proc"]:
+            _build_proc(a, us, work, out, conf, manifest, media, changes, removed)
+            return 0
         gz = us[0].fmt != "plain_tar"
         tar_tmp = os.path.join(work, "multi.tar" + (".gz" if gz else ""))
         total = us[0].unpacked(work) + sum(sum(u.index(work)[p][1] for p in changes[k])
@@ -628,6 +672,61 @@ def build_update(a):
             shutil.rmtree(work, ignore_errors=True)
 
 
+def _build_proc(a, us, work, out, conf, manifest, media, changes, removed, stock=None):
+    """The P-ROC package (mkspkproc.py): the stock build at the root as it came, the menu,
+    the launcher and the other builds' files in PAD_MULTIBOOT/, the marker and the hook;
+    zipped and encrypted with the title's key.  *stock* (inject): the hook files read off
+    the multi-boot being rewritten instead of the stock package."""
+    t = us[0].title
+    manifest.setdefault("stamp", time.strftime("%Y%m%d%H%M%S"))
+    if stock is None:
+        stock = sp.read_all(us[0], work, {"run-on-update.sh", "xinitrc"})
+    zip_tmp = os.path.join(work, "multi.zip")
+    total = us[0].unpacked(work) + sum(sum(u.index(work)[p][1] for p in changes.get(k, ()))
+                                       for k, u in enumerate(us[1:], 1))
+    PROGRESS.start(max(total, 1), "update")
+    with zipfile.ZipFile(zip_tmp, "w", zipfile.ZIP_DEFLATED, allowZip64=True, compresslevel=6) as zf:
+        o = sp.ZipOut(zf)
+        try:
+            sp.write_menu(o, a.selector_dir, _font_src(a.selector_dir), conf, t, builds_text(len(us)),
+                          manifest, media, a.media_dir, removed, mkc.BUILD_MANIFEST, mkc.MEDIA_MANIFEST,
+                          stock.get("run-on-update.sh"), stock.get("xinitrc"))
+        except sp.Refused as e:
+            raise Refused(str(e))
+        for k, u in enumerate(us):
+            PROGRESS.step("build %d (%s)" % (k, os.path.basename(u.path)), 0)
+            n = 0
+            for r, ti, bp in u.members(work):
+                if k == 0:
+                    dest = sp.rename_b0(t, bp)
+                    if dest is None:
+                        continue
+                elif bp not in changes[k]:
+                    continue
+                else:
+                    dest = "%s/d%d/%s" % (sp.PAD_DIR, k, bp)
+                if ti.isfile():
+                    o.member(dest, ti, _Meter(r.extractfile(ti)))
+                else:
+                    o.member(dest, ti)
+                n += 1
+            say("image %d: %s, %d %s -> b%d" % (
+                k, os.path.basename(u.path), n, "members (whole, in the game's folder)" if k == 0
+                else "changed members", k))
+    PROGRESS.finish()
+    part = out + ".part"
+    try:
+        say("encrypting it with %s's key" % us[0].game)
+        sp.aes_encrypt(zip_tmp, part, us[0].fmt)
+        os.replace(part, out)
+    finally:
+        if os.path.exists(part):
+            os.unlink(part)
+    say("wrote %s (%s)" % (out, _gb(os.path.getsize(out))))
+    say("on the machine: install it the way every %s update is installed (the USB stick); the menu "
+        "shows from the next power-up" % us[0].game)
+
+
 class _Meter:
     """a member's stream that moves the progress bar as it is read"""
 
@@ -651,6 +750,8 @@ def _open_out(path, work):
 def _menu_of(path, work):
     """the menu files (pad/ minus the builds), the launcher, the builds' member counts"""
     u, tp = _open_out(path, work)
+    if u.title["proc"]:
+        return _menu_of_proc(u, path, work)
     pre = ("" if u.title["flat"] else "uptest/") + PAD + "/"
     got, builds, start = {}, collections.Counter(), b""
     launcher = ("" if u.title["flat"] else "uptest/") + "main.x86_64"
@@ -670,6 +771,27 @@ def _menu_of(path, work):
                 continue
             if ti.isfile():
                 got[rel] = tf.extractfile(ti).read()
+    if "images.conf" not in got:
+        raise Refused("%s carries no boot menu (no %simages.conf): it is not a multi-boot"
+                      % (os.path.basename(path), pre))
+    return u, got, start, builds
+
+
+def _menu_of_proc(u, path, work):
+    pre = sp.PAD_DIR + "/"
+    got, builds, start = {}, collections.Counter(), b""
+    for r, ti, bp in u.members(work):
+        if not bp.startswith(pre):
+            continue
+        rel = bp[len(pre):]
+        m = re.match(r"^(d\d+)/", rel)
+        if m:
+            if not ti.isdir():
+                builds[m.group(1)] += 1
+            continue
+        if ti.isfile():
+            got[rel] = r.extractfile(ti).read()
+    start = got.get("padselect.sh", b"")
     if "images.conf" not in got:
         raise Refused("%s carries no boot menu (no %simages.conf): it is not a multi-boot"
                       % (os.path.basename(path), pre))
@@ -750,6 +872,38 @@ def print_inspect(rep):
         print("warning: " + w)
 
 
+class _Done(Exception):
+    pass
+
+
+def _verify_proc(u, got, start, work):
+    """a P-ROC package's own checks (verify_update does the cards)"""
+    bad = []
+    t = u.title
+    if not start.startswith(b"#!") or b"multi-boot launcher" not in start:
+        bad.append("PAD_MULTIBOOT/padselect.sh is not the launcher")
+    for name in ("spkselect", "dpprocsw", "proc.conf"):
+        if name not in got:
+            bad.append("PAD_MULTIBOOT/%s is missing" % name)
+    idx = u.index(work)
+    if t["program"] not in idx:
+        bad.append("no %s: the stock build is not in the package" % t["program"])
+    if sp.MARK not in idx:
+        bad.append("no %s: the launcher would take the folder for a normal update" % sp.MARK)
+    hooks = sp.read_all(u, work, {"run-on-update.sh", "uptest/main.x86_64"})
+    if t["hook"] == "rm" and b"PAD multi-boot" not in hooks.get("run-on-update.sh", b""):
+        bad.append("run-on-update.sh is not the multi-boot's install step")
+    if t["hook"] == "ac":
+        if b"PAD multi-boot" not in hooks.get("uptest/main.x86_64", b""):
+            bad.append("uptest/main.x86_64 is not the multi-boot's install step")
+        if "uptest/main.x86_64.real" not in idx:
+            bad.append("the real Unity player (uptest/main.x86_64.real) is missing")
+        x = got.get("xinitrc", b"")
+        if b"padselect.sh" not in x or b"uptest" not in x or b"delete" not in x:
+            bad.append("PAD_MULTIBOOT/xinitrc does not start the menu, or lost the words the game checks for")
+    return bad
+
+
 def verify_update(a):
     """The update read back (every member, so a damaged gzip shows): the launcher, the menu
     programs, b0's game program, and every card naming b0 or a build the update carries."""
@@ -758,6 +912,10 @@ def verify_update(a):
     bad = []
     try:
         u, got, start, builds = _menu_of(path, work)
+        if u.title["proc"]:
+            bad += _verify_proc(u, got, start, work)
+            conf = parse_conf(got["images.conf"].decode("utf-8", errors="replace"))
+            raise _Done()
         if not start.startswith(b"#!") or b"multi-boot launcher" not in start:
             bad.append("main.x86_64 is not the launcher")
         for name, (_mode, required) in SELECTOR_FILES.items():
@@ -782,9 +940,11 @@ def verify_update(a):
                 bad.append("image %d (%s) is no build in builds.txt" % (i, dev))
             elif not builds.get(made[dev]) and ("%s.removed" % made[dev]) not in got:
                 bad.append("image %d (%s): pad/%s/ carries nothing" % (i, dev, made[dev]))
+    except _Done:
+        pass
     except Refused as e:
         bad.append(str(e))
-    except (tarfile.TarError, OSError, EOFError) as e:
+    except (tarfile.TarError, zipfile.BadZipFile, OSError, EOFError) as e:
         bad.append("the update does not read back: %s" % e)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -805,6 +965,7 @@ def inject_update(a):
     try:
         u, got, start, _builds = _menu_of(path, work)
         old = parse_conf(got["images.conf"].decode("utf-8", errors="replace"))
+        proc = u.title["proc"]
         targets = [p for p, _t, _s in old["images"]]
         media_dir = a.media_dir
         if media_dir is None and mkc.MEDIA_MANIFEST in got:
@@ -832,12 +993,15 @@ def inject_update(a):
         else:
             sel = os.path.join(work, "sel")
             os.makedirs(sel)
-            for name in SELECTOR_FILES:
+            for name in list(SELECTOR_FILES) + [n for n, _m in sp.SELECTOR_FILES]:
                 if name in got:
                     with open(os.path.join(sel, name), "wb") as f:
                         f.write(got[name])
-            with open(os.path.join(sel, "padselect.sh"), "wb") as f:
+            with open(os.path.join(sel, "padselect_proc.sh" if proc else "padselect.sh"), "wb") as f:
                 f.write(start)
+        if proc:
+            _inject_proc(a, u, got, work, path, conf, media, media_dir, sel)
+            return 0
         pre = ("" if u.title["flat"] else "uptest/") + PAD + "/"
         gz = u.fmt != "plain_tar"
         tar_tmp = os.path.join(work, "multi.tar" + (".gz" if gz else ""))
@@ -874,6 +1038,51 @@ def inject_update(a):
         return 0
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _inject_proc(a, u, got, work, path, conf, media, media_dir, sel):
+    """inject for a P-ROC package: every member but the menu's copied across, the menu, the
+    marker (the same stamp: the builds on the machine stay) and the hook written again"""
+    man = json.loads(got.get(mkc.BUILD_MANIFEST, b"{}").decode("utf-8") or "{}",
+                     object_pairs_hook=collections.OrderedDict)
+    man["menu_written"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    removed = {}
+    for n, data in got.items():
+        m = re.match(r"^d(\d+)\.removed$", n)
+        if m:
+            removed[int(m.group(1))] = [p for p in data.decode("utf-8").splitlines() if p]
+    n_img = len(parse_conf(conf)["images"])
+    stock = {"run-on-update.sh": got.get("run-on-update.stock.sh"),
+             "xinitrc": sp.read_all(u, work, {"xinitrc"}).get("xinitrc")}
+    ours = {sp.MARK, "run-on-update.sh"} | ({"uptest/main.x86_64"} if u.title["hook"] == "ac" else set())
+    pre = sp.PAD_DIR + "/"
+    zip_tmp = os.path.join(work, "multi.zip")
+    PROGRESS.start(max(os.path.getsize(path), 1), "inject")
+    with zipfile.ZipFile(zip_tmp, "w", zipfile.ZIP_DEFLATED, allowZip64=True, compresslevel=6) as zf:
+        o = sp.ZipOut(zf)
+        try:
+            sp.write_menu(o, sel, _font_src(sel), conf, u.title, builds_text(n_img), man, media, media_dir,
+                          removed, mkc.BUILD_MANIFEST, mkc.MEDIA_MANIFEST, stock["run-on-update.sh"],
+                          stock["xinitrc"])
+        except sp.Refused as e:
+            raise Refused(str(e))
+        for r, ti, bp in u.members(work):
+            if bp in ours or (bp.startswith(pre) and not re.match(r"^%sd\d+(/|$)" % re.escape(pre), bp)) \
+                    or bp == sp.PAD_DIR:
+                continue
+            if ti.isfile():
+                o.member(bp, ti, _Meter(r.extractfile(ti)))
+            else:
+                o.member(bp, ti)
+    PROGRESS.finish()
+    part = path + ".part"
+    try:
+        sp.aes_encrypt(zip_tmp, part, u.fmt)
+        os.replace(part, path)
+    finally:
+        if os.path.exists(part):
+            os.unlink(part)
+    say("the menu of %s is rewritten (%s)" % (path, _gb(os.path.getsize(path))))
 
 
 # ============================================================================== media

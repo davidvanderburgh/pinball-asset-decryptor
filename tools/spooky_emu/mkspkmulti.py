@@ -108,8 +108,12 @@ TITLES = {
 #: the launcher and the menu are ours; a build's own file by these names would be shadowed
 RESERVED = ("uptest/main.x86_64",)
 #: where an update's member list is kept when no --cache-dir is given (SpkUpdate.index):
-#: a few hundred KB per update, never the update itself
-INDEX_CACHE = os.environ.get("SPK_MULTI_INDEX") or os.path.join(tempfile.gettempdir(), "pad_spkmulti")
+#: a few hundred KB per update, never the update itself.  /var/tmp, not /tmp: WSL empties
+#: /tmp whenever the distro restarts, and the tab's next plan read every update again
+#: (the preview's picture waits behind the plan: they share one worker)
+INDEX_CACHE = os.environ.get("SPK_MULTI_INDEX") or (
+    "/var/tmp/pad_spkmulti" if os.path.isdir("/var/tmp")
+    else os.path.join(tempfile.gettempdir(), "pad_spkmulti"))
 
 
 def _gb(n):

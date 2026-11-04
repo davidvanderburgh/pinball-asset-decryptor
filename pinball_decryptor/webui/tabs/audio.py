@@ -4138,8 +4138,10 @@ class AudioTab(FindOriginalsMixin, TabService):
                 self.log(
                     "Replace Audio: couldn't remember \"%s\" for future "
                     "extracts (%s)." % (new_label, e), "error")
+        # PAD-984: and what the tab read about the slot when it loaded (the
+        # Requests count, the variants note): the bytes and idx are unchanged
         for d in (self._assign, self._loop, self._keep, self._cats,
-                  self._level):
+                  self._level, self._uses or {}, self._variants or {}):
             if rel in d:
                 d[new_rel] = d.pop(rel)
         if rel in self._changed:

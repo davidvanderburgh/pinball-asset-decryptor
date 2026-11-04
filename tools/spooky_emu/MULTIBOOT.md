@@ -130,9 +130,45 @@ cannot even update its game code from the card. Owners can keep one card per bui
 6. DONE The Multi-boot tab: `multiboot_backend.SPOOKY`, `multiboot=True` on the Spooky
    manufacturer, the words, the help, docs/guide/multi-boot.md, tests/test_multiboot_spk.py,
    scripts/shot_pad980.py.
-7. P-ROC titles (Rick and Morty, Alice Cooper): the next step (above for their hooks). The
-   reader is dpprocsw (the game's own libpinproc); the launchers rename build folders into
-   `/game/RickAndMorty` / `/game/code`; the proof is tools/spooky_emu/proc's rig.
+7. P-ROC titles (Rick and Morty, Alice Cooper).
+   a. DONE `codeselect/padselect_proc.sh` + `test/padselect_proc_test.sh` (7 cases; in
+      `make PLATFORM=spk check`, which builds dpprocsw too; ensurespkselect.sh installs
+      both). The stock build stays IN the folder (`/game/RickAndMorty`, `/game/code`);
+      the others live in `<folder>/.pad` (both updaters' `rm -rf <folder>/*` skip it); a
+      switch renames the folder's entries out (`.pad/<live>`) and the chosen one's in,
+      carrying `keep=` files (`config/game_user_data.yaml`, `game_user_settings.yaml`),
+      `.pad/swap` recovering a power cut either side. `PAD_MULTIBOOT_LIVE` in the folder
+      ("b<k> <stamp>", a plain file the updaters' wipe takes) says it is ours; without it
+      the folder's own game starts; a new stamp is a new multi-boot (old builds go).
+   b. `mkspkmulti.py` for `rm_pkg` / `ac_pkg` (AES zip: plugins/spooky/crypto.py): the
+      zip's root = the stock build whole (it is what the updater unzips into the folder),
+      `PAD_MULTIBOOT/` = the launcher (padselect_proc.sh), spkselect, dpprocsw, font,
+      proc.conf, images.conf, builds.txt, d<k>/, d<k>.removed, media/ - NOT a dot folder:
+      Alice Cooper's pkgprocess copies `extracted/*`, which skips dot entries - and
+      `PAD_MULTIBOOT_LIVE` = "b0 <stamp>". The hook renames PAD_MULTIBOOT to .pad:
+      * Rick and Morty: the zip's `run-on-update.sh` is ours (codeupdate runs it as root,
+        then deletes it): run Spooky's own (shipped as PAD_MULTIBOOT/run-on-update.stock.sh)
+        first, then `.pad` in place, then `~launch/.local/rmstart.sh` (back up the stock
+        one once) = `[ -f /game/RickAndMorty/.pad/padselect.sh ] && exec bash ...; cd
+        /game/RickAndMorty; exec python RMGame.pyc 2>> /tmp/runlog`. proc.conf: lib=
+        /usr/local/lib, L=SD14 R=SD8 S=SD15, start=python RMGame.pyc 2>> /tmp/runlog.
+      * Alice Cooper: its codeupdate runs no package script; its xinitrc (root) runs
+        `./main.x86_64 . &` from uptest and then `python2 ACGame.py`. The zip's
+        uptest/main.x86_64 is a one-time stub (the real player shipped as
+        main.x86_64.real): put the real one back, PAD_MULTIBOOT -> .pad, install
+        .pad/xinitrc (the stock one with the two start lines replaced by the launcher,
+        falling back to them when it is gone; it keeps the words `uptest` and `delete`,
+        so the game's self-heal leaves it) under unlock-root, then reboot. proc.conf:
+        lib=/usr/lib, L=SD14 R=SD10 S=SD15, start = the two stock lines.
+      SELECTOR_FILES gains dpprocsw + padselect_proc.sh (required for these two only);
+      inspect/verify/inject read the zip; tests in tests/test_mkspkmulti.py.
+   c. The proof: proc/run_game.sh SPP_MACHINE=1 (the update installed into the slot's
+      /game the updater's way, the hook run), netns.sh running `.pad/padselect.sh` with
+      PADSELECT_START=: before it starts the game its own way; the reader is dpprocsw over
+      the R&M package's payload/libpinproc.so.2.0 + tools/dp_emu/aaiw/aaiwshim.so
+      (PADSELECT_PROCSW_PRELOAD, AAIW_PROC_CHIP=p3, presses on DPEMU_FIFO), libftdi1
+      from a TBL cache folder, as tools/dp_emu/machine_sim.sh did.
+   d. The tab: TITLES gains both; the Spooky backend already takes .pkg.
 
 ## Proofs
 

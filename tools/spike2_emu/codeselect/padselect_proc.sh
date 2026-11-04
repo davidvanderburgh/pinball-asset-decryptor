@@ -37,7 +37,8 @@
 # starting a game: no conf, no menu program, a menu that dies or hangs, a build that cannot
 # be made, a choice that names nothing.
 #
-# PADSELECT_GAME moves the folder (the tests); PADSELECT_PROCSW replaces dpprocsw;
+# PADSELECT_GAME moves the folder (the tests); PADSELECT_START replaces the start= line (the
+# rig: ":" hands back to its own start); PADSELECT_PROCSW replaces dpprocsw;
 # PADSELECT_PROCSW_PRELOAD preloads the rig's fake board under the reader only;
 # PADSELECT_MENU_ARGS adds menu options; PADSELECT_AUDIO_PLAYER replaces the player;
 # PADSELECT_DRY=1 prints what would be started instead of starting it.
@@ -55,7 +56,7 @@ CONF=$P/images.conf
 BUILDS=$P/builds.txt
 CHOICE=$P/choice
 LOG=$P/padselect.log
-START=$(conf start "")
+START=${PADSELECT_START:-$(conf start "")}
 
 [ -f "$LOG" ] && mv -f "$LOG" "$LOG.1" 2>/dev/null
 { exec 3>>"$LOG"; } 2>/dev/null || exec 3>/dev/null

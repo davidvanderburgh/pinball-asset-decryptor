@@ -6,9 +6,9 @@ selector the Stern card, JJP, Barrels of Fun and Big Lebowski machines carry
 (`tools/spike2_emu/codeselect`), built for these machines as `spkselect` (`make PLATFORM=spk`).
 Asked for by daveyvandy: "for all supported Spooky games".
 
-STATUS: design settled from the machines' own files (below); the menu, its button reader and
-the launcher are built and tested; the builder, the tab and the emulator proof are the *Work
-list*.
+STATUS: the seven Linux titles are built end to end (menu, button reader, launcher, builder,
+the Multi-boot tab) and proven in the rig title by title (*Proofs*); the two P-ROC titles are
+the next step (*Work list* 7).
 
 ## Which games
 
@@ -119,14 +119,26 @@ cannot even update its game code from the card. Owners can keep one card per bui
    boards: presses and releases of L, R and START.
 2. DONE `make PLATFORM=spk` (spkselect + spksw, static, `test/check_elf_spk.sh`).
 3. DONE `padselect_spk.sh` + `test/padselect_spk_test.sh` (9 cases).
-4. `mkspkmulti.py` - the builder: plan / build / verify / inspect / inject / media, the DP
-   builder's command line. Reads every kind (tar.gz, tar, GPG-signed, GPG-symmetric), refuses
-   images of different titles, writes b0 whole and d<k> as the differences, packs the output
-   the way the primary came (signs a .beetlejuice, encrypts a code_*.pkg). `ensurespkselect.sh`.
-5. `machine_sim.sh` - the whole thing in the rig, per family: the title's own install steps
-   (profile copy / Halloween's helper), then power-ups through sway's command with the rig's
-   board: menu shot, RIGHT + START, the chosen build in attract. Scooby-Doo, Evil Dead, Halloween
-   at least (one per family), then every title.
-6. The Multi-boot tab: `multiboot_backend.SPK`, `multiboot=True` on the Spooky manufacturer,
-   the words, tests, help (docs/guide/multi-boot.md), the before/after shots.
-7. P-ROC titles (above).
+4. DONE `mkspkmulti.py` (plan / build / verify / inspect / inject / media, the DP builder's
+   command line; every packing; member lists kept so the tab's plans are instant) +
+   `ensurespkselect.sh`; tests/test_mkspkmulti.py.
+5. DONE `machine_sim.sh` (+ `spkmarkmod.py`, `run_game.sh` SPK_MACHINE=1): the multi-boot
+   built from the stock update and a marked copy, installed into the slot's /game as the
+   title's own install leaves it, two power-ups through the title's start command on the
+   rig's board. PASS (2026-11-03, slot 1, PAD-Runtime): Scooby-Doo, Evil Dead (its
+   /game/code/assets b1's own folder, moved in). The other five: see *Proofs*.
+6. DONE The Multi-boot tab: `multiboot_backend.SPOOKY`, `multiboot=True` on the Spooky
+   manufacturer, the words, the help, docs/guide/multi-boot.md, tests/test_multiboot_spk.py,
+   scripts/shot_pad980.py.
+7. P-ROC titles (Rick and Morty, Alice Cooper): the next step (above for their hooks). The
+   reader is dpprocsw (the game's own libpinproc); the launchers rename build folders into
+   `/game/RickAndMorty` / `/game/code`; the proof is tools/spooky_emu/proc's rig.
+
+## Proofs
+
+`PAD_SLOT=<n> bash machine_sim.sh <stock update>` as root in PAD-Runtime, one title at a time:
+
+| title | result |
+|---|---|
+| Scooby-Doo v2025.12.01.09 | PASS |
+| Evil Dead 2026.07.15 | PASS |

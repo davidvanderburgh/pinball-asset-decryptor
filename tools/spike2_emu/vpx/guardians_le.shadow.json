@@ -16,6 +16,11 @@
     "target follows CENTER DROP TARGET-UP/DOWN and its inside target stands back up.",
     "PuPInit is quieted and PadNoPuP always stands in for PinUP Player (the table's",
     "PuPInit calls puplayer.getroot, which the stub lacks).",
+    "AddScore is quieted (PAD-976): the machine keeps the score, and the table's own",
+    "game never starts, so its PlayersPlayingGame stays 0 and AddScore's",
+    "UpdateNumberPlayers2 died on ScoreTable(-1, ...) the first time a sub the bridge",
+    "leaves the table (tgAntiqueShop_Dropped, GrootMouth_Hit) scored. Those two are",
+    "the table's own rules besides and are quieted with it.",
     "neuter: ball creation and kicks, the table's own `dim bsTrough` (the bridge Dims",
     "it), and every B2S Controller call (they would reach PAD.Controller and steal",
     "its ChangedLamps)."
@@ -226,11 +231,17 @@
     "OrbTarget1_Dropped",
     "OrbTarget2_Dropped",
     "GrootMouth_Drop",
-    "PuPInit"
+    "PuPInit",
+    "AddScore",
+    "GrootMouth_Hit",
+    "tgAntiqueShop_Dropped"
   ],
   "orig_hits": false,
   "orig_keep": [
     "LeftSlingShot",
     "RightSlingShot"
+  ],
+  "repatch": [
+    {"old": "Sub AddScore(points) dim multiplierVal", "why": "Visual Pinball stops on a script error the first time the table scores", "since": "PAD-976: the table's own scoring stays quiet"}
   ]
 }

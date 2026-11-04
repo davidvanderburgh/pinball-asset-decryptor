@@ -491,7 +491,10 @@ def missed_fixes(tables_dir, out_name, marks):
         return []
     squash = lambda t: re.sub(r"\s+", " ", t).lower()      # noqa: E731
     text = squash(text)
-    return [k["why"] for k in marks if squash(k.get("old", "")).strip() in text and k.get("old")]
+    # each once: a table two titles' maps fit (GotG's LE and Pro) carries the
+    # same mark in both, and the row gathers every map's (PAD-976)
+    return list(dict.fromkeys(k["why"] for k in marks
+                              if squash(k.get("old", "")).strip() in text and k.get("old")))
 
 
 def patched_from(tables_dir, out_name):

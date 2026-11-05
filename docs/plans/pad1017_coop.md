@@ -42,10 +42,14 @@ The player change (Godzilla LE, read in the disassembly): extra ball taken -> sa
 
 ### Runtime (pad_mode_runtime.c)
 
-Status: steps 1 and 2 are IN (`coop_arm`, `coop_change_wrap`, `coop_add_wrap`, `coop.cfg` `coop on` / `button <id>`;
-the card takes the whole gate as attract items do). They are host-tested against a model of the framework
-(`tests/test_pad1017_coop_turns.py`; on Windows compile the lifted harness in PAD-Runtime with gcc) but NOT yet
-rigged. Steps 3-5 and the port lines are left.
+Status: ALL IN and emulator-proven on Godzilla LE 1.16 (rig kit C:/tmp/PAD-1017/rig). Changes made from the plan
+below while building it:
+- the game COUNTS the teammates (David: "all the scores displayed in the HUD are the same"): each has a score panel,
+  the runtime copies player 1's score into the others, and the count is 1 only inside the player change;
+- whose turn: the game's own "BALL %d" message reads "PLAYER n  BALL %d" (found by its words; all 53 builds have it);
+  the bonus count keeps its "PLAYER 1" head (borrowing "PLAYER %d" blanked the bonus screen);
+- boards: one champion per team size ("2-PLAYER CO-OP" ...), PAD-640/663's own-record filing; X-Men got the
+  end-of-game high scores' lines in its ports for it.
 
 1. **Teammate turns.** Wrap `coop_player_change`. In a co-op game with N teammates, turn t:
    - t < N: ball byte - 1 before the game's call. The game then puts it back (ball++), so the ball number does not
@@ -76,7 +80,7 @@ rigged. Steps 3-5 and the port lines are left.
   program; `cur_player` agrees wherever a port has one). Their recipes were rebuilt, and so was prebuilt/mode.so.
   The finder also reads the older shape (the count in a struct at +0x50, Aerosmith LE 1.15 ... TMNT Pro 1.58: all
   16 older shipped builds give the lines), but those ports were left as they were.
-- Left: the emulator proof on Godzilla LE 1.16 (2 and 4 teammates: turns, shared progress, game over after N x
-  balls, an extra ball, the score panel after a teammate joins); then the turn display, the co-op boards and the
-  Write tab option (coop.cfg + the right flipper button's id from sound_modes.flipper_buttons); then a rigbatch
-  sweep over the 53.
+- Proven on Godzilla LE 1.16: 2 and 4 teammates (6 and 12 balls in turn, game over after the last), every panel the
+  team's score, PLAYER n BALL n on top, the team's score on its own board (initials under 2-/4-PLAYER CO-OP; the
+  attract page showed the 2-PLAYER CO-OP champion), no faults. Then a rigbatch sweep of the other 37 offered builds
+  (C:/tmp/PAD-1017/rig/sweep.txt, out C:/tmp/PAD-1017/rig/sweep1).

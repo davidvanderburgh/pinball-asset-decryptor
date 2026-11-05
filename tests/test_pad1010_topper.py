@@ -236,3 +236,31 @@ def test_offered_only_for_registered_games():
     assert pj["sites"] != T._find(jaws)["sites"]
     # Mandalorian has no registered topper feature: nothing offered
     assert T.plan(mando, "mando_le") is None
+
+
+#: John Wick (board_call strategy): {card: the one inline ``bl board_usable(<Topper Stepper Motor Board>)`` the
+#: mode-of-play menu asks before offering TICK TOCK MR. WICK - rig-proven (LE and Pro, topper off) to list, select
+#: and play the challenge once it reports present.
+_JW = {
+    "john_wick_le-1_02_0.Release.16G.sdcard.raw": ("john_wick_le", 0x75368),
+    "john_wick_pro-1_02_0.Release.16G.sdcard.raw": ("john_wick_pro", 0x751E8),
+}
+
+
+@pytest.mark.parametrize("card", sorted(_JW))
+def test_john_wick_board_call(card):
+    path = os.path.join(_LIB, card)
+    if not os.path.isfile(path):
+        pytest.skip("the card library is not on this machine")
+    title, site = _JW[card]
+    elf = bytes(_program(path))
+    p = T.plan(elf, title)
+    assert p and p["feature"] == T.FEATURES[title][0]
+    # exactly one site: the inline call, turned into "present"; the tail-call forms (the topper light/motor
+    # drivers) are never touched
+    assert [(va, new) for va, _old, new in p["sites"]] == [(site, 0xE3A00001)]
+    assert (p["sites"][0][1] >> 24) == 0xEB                    # it was a `bl`
+    out = T.patched_bytes(elf, p)
+    assert len(out) == len(elf) and _word_at_elf(out, site) == 0xE3A00001
+    # another title's strategy does not apply, and a plain device_usable gate is still not there
+    assert T._find(elf) is None and T.plan(elf, "jaws_le") is None

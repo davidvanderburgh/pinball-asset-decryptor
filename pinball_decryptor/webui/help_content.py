@@ -1875,8 +1875,10 @@ HELP_CONTENT = {
         ("Make the game treat the topper as installed", [
             "Some games lock a feature behind the topper accessory being fitted. Venom only "
             "offers the Ghost Rider host on the character-select screen when a topper is "
-            "detected. The **Topper** box appears only on the games checked to work this "
-            "way, and names the feature it frees.",
+            "detected; Jaws hides the The Shark Is Broken challenge and John Wick hides "
+            "the Tick Tock Mr. Wick challenge from the mode-of-play menu. The **Topper** "
+            "box appears only on the games checked to work this way, and names the "
+            "feature it frees.",
             "- Tick **Make the game treat the topper as installed** and the next Build "
             "makes the game read the topper as fitted, so the feature is available on a "
             "cabinet that has none.\n"

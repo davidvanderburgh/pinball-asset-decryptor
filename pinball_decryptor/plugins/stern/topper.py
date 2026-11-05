@@ -76,13 +76,19 @@ _BX_LR = 0xE12FFF1E             # bx lr
 #:   ``device_usable(topper)`` call) that the mode-of-play menu consults to show the exclusive challenge - force the
 #:   whole predicate to return present (:func:`_validity_fn_sites`), which is what the rig proved unlocks it.
 #:
-#: Games whose topper content is gated another way (John Wick's challenge, not yet cracked; the topper-mode titles'
-#: checks only drive the topper display; the many light/motor toppers) are deliberately absent.
+#: * ``"board_call"`` (John Wick): the mode-of-play menu asks whether the topper's own node board answers
+#:   (``board_usable(<Topper Stepper Motor Board>)``, inline) - make that one call yield present
+#:   (:func:`_board_call_sites`).
+#:
+#: Games whose topper content is gated another way (the topper-mode titles' checks only drive the topper display;
+#: the many light/motor toppers) are deliberately absent.
 FEATURES = {
     "venom_le": ("the Ghost Rider host on the character-select screen", "wrapper"),
     "venom_pro": ("the Ghost Rider host on the character-select screen", "wrapper"),
     "jaws_le": ('the "The Shark Is Broken" challenge in the mode-of-play menu', "validity_fn"),
     "jaws_pro": ('the "The Shark Is Broken" challenge in the mode-of-play menu', "validity_fn"),
+    "john_wick_le": ('the "Tick Tock Mr. Wick" challenge in the mode-of-play menu', "board_call"),
+    "john_wick_pro": ('the "Tick Tock Mr. Wick" challenge in the mode-of-play menu', "board_call"),
 }
 
 
@@ -272,6 +278,70 @@ def _validity_fn_sites(elf_bytes):
     return out or None
 
 
+def _name_group(elf, name):
+    """The address of the five-language name cell for board *name* (five copies of one string pointer, then 0)."""
+    i = elf.b.find(name.encode() + b"\0")
+    if i < 0 or elf.va(i) is None:
+        return None
+    j = elf.b.find(struct.pack("<I", elf.va(i)) * 5)
+    return elf.va(j) if j >= 0 and j % 4 == 0 else None
+
+
+def _is_name_group(elf, g):
+    w = [elf.word(g + 4 * k) for k in range(6)]
+    return None not in w and w[0] != 0 and len(set(w[:5])) == 1 and w[5] == 0
+
+
+def _board_index(elf, name):
+    """Index of the board called *name* in the node-board table: 16-byte records whose +8 is a name cell.  The
+    table is walked back from the board's own record to its first, so nothing here is an address."""
+    g = _name_group(elf, name)
+    if g is None:
+        return None
+    k = elf.b.find(struct.pack("<I", g))
+    while k >= 0 and (k % 4 or elf.va(k) is None):
+        k = elf.b.find(struct.pack("<I", g), k + 1)
+    if k < 0:
+        return None
+    rec = elf.va(k) - 8
+    first = rec
+    while _is_name_group(elf, elf.word(first - 16 + 8) or 0):
+        first -= 16
+    return (rec - first) // 16
+
+
+def _board_call_sites(elf_bytes, board="Topper Stepper Motor Board"):
+    """John Wick: the mode-of-play menu offers TICK TOCK MR. WICK only when the topper's own board answers - an
+    inline ``mov r0, #<board> ; mov r1, #0 ; bl board_usable`` (board_usable resolves the board's node and reads its
+    present bit in the node census).  Rewrite each such inline ``bl`` to ``mov r0, #1``.  The tail-call ``b`` forms
+    of the same question (the topper-light/motor drivers) are left alone, so nothing drives a board that is not
+    there.  Proven on the emulator: topper off, the challenge is listed, selected and played.  ``None`` if absent."""
+    try:
+        elf = _Elf(elf_bytes)
+    except (ValueError, struct.error):
+        return None
+    k = _board_index(elf, board)
+    if not k or k > 0xFF:
+        return None
+    base, w, n = _words(elf)
+    mov_k, mov_0 = 0xE3A00000 | k, 0xE3A01000
+    calls = []
+    for i in range(3, n):
+        x = w[i]
+        if (x & 0x0E000000) != 0x0A000000 or (x >> 28) != 0xE:
+            continue
+        before = w[i - 3:i]                             # the call's arguments, set up just above it
+        if mov_k in before and mov_0 in before:
+            calls.append((base + 4 * i, bool((x >> 24) & 1), _bl_target(base + 4 * i, x)))
+    if not calls:
+        return None
+    # the board-usable function is the one every such call goes to
+    tgts = [t for _va, _l, t in calls]
+    usable = max(set(tgts), key=tgts.count)
+    sites = [(va, _at(w, base, n, va), _MOV_R0_1) for va, link, t in calls if t == usable and link]
+    return sites or None
+
+
 def plan(elf_bytes, title=None):
     """The unlock for *title* (its game program directory name), or None.  Offered only on the games in
     :data:`FEATURES`, each confirmed on the emulator; the result carries the ``feature`` text for the box.  The
@@ -285,6 +355,9 @@ def plan(elf_bytes, title=None):
         p = _find(elf_bytes)
     elif strategy == "validity_fn":
         sites = _validity_fn_sites(elf_bytes)
+        p = {"sites": sites, "devices": []} if sites else None
+    elif strategy == "board_call":
+        sites = _board_call_sites(elf_bytes)
         p = {"sites": sites, "devices": []} if sites else None
     else:
         return None

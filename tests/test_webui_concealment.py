@@ -10,6 +10,7 @@ sweep that stopped seeing the pages' text cannot pass by finding nothing.
 
 import json
 import re
+import time
 
 import pytest
 
@@ -25,8 +26,11 @@ WORDS = re.compile(r"\b(modes?|mode maker|mode editor|try it|code modes?|film cu
 
 #: the game's OWN modes as any pinball player says it, on tabs that have nothing to do with
 #: the preview feature (on main before it): these phrases are allowed. "Attract Mode" is the
-#: operator menu page EDITION sits on (PAD-495), named as the machine names it
-ALLOWED = ("topper-only modes", "how a mode looks", "Attract Mode")
+#: operator menu page EDITION sits on (PAD-495), named as the machine names it. The Audio
+#: tab's Attract flipper sounds (PAD-641) and Sounds on shots (PAD-945) tips speak of the
+#: game's own modes too; they show once its scan of the project ends
+ALLOWED = ("topper-only modes", "how a mode looks", "Attract Mode", "attract mode",
+           "game's modes", "pick the mode", "a mode whose lit shots")
 
 #: store keys whose VALUES are data, not words a page shows (paths, ids, option values)
 _DATA_KEYS = {"mode", "modes", "kind", "key", "ns", "id", "icon", "path", "value"}
@@ -106,6 +110,12 @@ def _sweep(tmp_path, with_project, switch_on):
         for ns in shown:
             w.call("ui.select_tab", ns)
             w.drain()
+            # a tab still scanning the project draws more when it ends (the Audio tab's
+            # tips came or not by the runner's speed): read what it draws once done
+            deadline = time.monotonic() + 30
+            while w.state(ns).get("scanning") and time.monotonic() < deadline:
+                time.sleep(0.1)
+                w.drain()
             found += _hits(ns, w.state(ns))
         found += _hits("shell", {k: v for k, v in w.state("shell").items() if k != "tabs"})
         found += _hits("shell.tabs", [t.get("label", "") for t in w.state("shell")["tabs"]

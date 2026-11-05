@@ -821,7 +821,7 @@ set one of which has to stay in `image.bin` (its mode file a song in parts, a so
 be a bank's) all stays, turned at the record key as before, and the log says why. An extract
 decodes them back out of their banks (`card_bank_records` names `mode_turns`).
 
-Proof (2026-11-04, `C:	mpPAD-1005`): the reproduction's build has 21 banks of 52.9 MB, `image.bin`
+Proof (2026-11-04, `C:\tmp\PAD-1005`): the reproduction's build has 21 banks of 52.9 MB, `image.bin`
 1,649 MB, at most 2,073 MB in memory. On the rig (Godzilla Pro 1.16, `force 2`), request 76 (TUNE 1,
 sound id 2544) fired ten times played 3, 2, 1, 2, 3, 1, 3, 2, 1, 3 from the banks, the runtime's picks
 exactly, never one twice running; with `force 1` it played the game's own TUNE 1 (NCC 0.97) and no

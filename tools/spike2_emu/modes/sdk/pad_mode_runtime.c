@@ -16371,7 +16371,14 @@ static void gms_arm(void)
  *   jmode <start site> <clips> <record keys> [<pool>]     jsong <weight> <record key> <clip or -> [<pool>]
  * and a mode draws only its own pool's songs (none of the last few drawn OF THAT POOL); a mode whose pool has
  * no song plays its own. A mode with no start site draws again at each new game (game_start), not only after
- * JUKE_GAP: the background music is asked for all game long, so a gap never comes. */
+ * JUKE_GAP: the background music is asked for all game long, so a gap never comes.
+ * ONE SONG IN TWO POOLS (PAD-1012): a song wanted in two pools is a record in each, so the owner asked that
+ * a song played in one pool is not drawn in another in the same game. A jsong line may end, after its pool,
+ * in the song's number (the same number on each pool's copy of one song, none for a song in one pool only):
+ *   jsong <weight> <record key> <clip or -> <pool> [<same>]
+ * and a draw passes over a song whose copy in another pool was drawn since the game started (the pool's
+ * last-few window shrinks to the songs left, so one played last game comes back first); when every song of
+ * the pool was, it draws as before (the song again rather than the game's own music). */
 #define JUKE_MODES      16                  /* PAD-1007: 9 on Beatles (5 song modes, 2 special, 2 background) */
 #define JUKE_SONGS      128
 #define JUKE_KEYS       4                   /* a song mode's records: its opening, its body... */
@@ -16395,12 +16402,16 @@ struct jsong {
     unsigned str;                           /* the clip's name as a std::string, made at first use */
     unsigned char weight;
     unsigned char pool;                     /* PAD-1007 */
+    unsigned short same;                    /* PAD-1012: one song's copies in several pools, 0 none */
 };
 static struct jmode jmode[JUKE_MODES];
 static struct jsong jsong[JUKE_SONGS];
 static unsigned n_jmode, n_jsong, juke_says;
 static short juke_recent[JUKE_RECENT * JUKE_POOLS];
 static unsigned n_juke_recent;
+static unsigned char juke_in_game[JUKE_SONGS];    /* PAD-1012: the songs drawn since the game started */
+static unsigned juke_in_game_of;                  /* the game_start count they are of */
+static unsigned juke_game(void);
 
 /* PAD-1007: a line's pool number, 0 when it has none */
 static unsigned char juke_pool(const char *ps)
@@ -16440,7 +16451,7 @@ static void jmode_line(const char *site, char *clips, const char *keys, const ch
     n_jmode++;
 }
 
-static void jsong_line(const char *ws, const char *key, const char *clip, const char *pool)
+static void jsong_line(const char *ws, const char *key, const char *clip, const char *pool, const char *same)
 {
     const char *p = ws;
     struct jsong *s;
@@ -16454,20 +16465,54 @@ static void jsong_line(const char *ws, const char *key, const char *clip, const 
     s->clip = clip && *clip && !str_eq(clip, "-") ? clip : 0;
     s->str = 0;
     s->pool = juke_pool(pool);
+    s->same = 0;
+    if (same && *same) {                  /* PAD-1012 */
+        p = same;
+        w = (unsigned)number(&p, &ok);
+        if (ok && w <= 0xffff) s->same = (unsigned short)w;
+        else sndm_bad++;
+    }
     n_jsong++;
 }
 
-/* the song a new start of a mode of *pool* draws: one of the pool's, weighted, none of the pool's last few
- * drawn (fewer when the pool has fewer songs); -1 when the pool has no song */
-static short juke_draw(unsigned pool)
+/* PAD-1012: song i has a copy in another pool than *pool* drawn this game */
+static int juke_played_elsewhere(unsigned i, unsigned pool)
 {
-    unsigned i, j, total = 0, r, in_pool = 0, keep, kept = 0;
+    unsigned j;
+    if (!jsong[i].same) return 0;
+    for (j = 0; j < n_jsong; j++)
+        if (juke_in_game[j] && jsong[j].same == jsong[i].same && jsong[j].pool != pool) return 1;
+    return 0;
+}
+
+/* the song a new start of a mode of *pool* draws: one of the pool's, weighted, none of the pool's last few
+ * drawn (fewer when the pool has fewer songs); -1 when the pool has no song. PAD-1012: none played in
+ * another pool this game either, while the pool has a song that was not (*passed* counts the ones passed
+ * over); the last-few window then counts only those, so a song played in the last game comes back before
+ * one played earlier in this one. */
+static short juke_draw(unsigned pool, unsigned *passed)
+{
+    unsigned i, j, total = 0, r, avail = 0, keep, kept = 0, game = juke_game();
     unsigned char skip[JUKE_SONGS] = {0};
-    for (i = 0; i < n_jsong; i++) if (jsong[i].pool == pool) in_pool++;
-    if (!in_pool) return -1;
-    keep = in_pool > JUKE_RECENT ? JUKE_RECENT : in_pool - 1;
+    *passed = 0;
+    if (game != juke_in_game_of) {        /* PAD-1012: a new game: nothing played in it yet */
+        for (i = 0; i < JUKE_SONGS; i++) juke_in_game[i] = 0;
+        juke_in_game_of = game;
+    }
+    for (i = 0; i < n_jsong; i++)
+        if (jsong[i].pool == pool) {
+            avail++;
+            if (juke_played_elsewhere(i, pool)) skip[i] = 1, (*passed)++;
+        }
+    if (!avail) return -1;
+    if (*passed == avail) {               /* every song of the pool was played in another: draw as before */
+        for (i = 0; i < n_jsong; i++) skip[i] = 0;
+        *passed = 0;
+    }
+    avail -= *passed;
+    keep = avail > JUKE_RECENT ? JUKE_RECENT : avail - 1;
     for (j = 0; j < n_juke_recent && kept < keep; j++)
-        if (jsong[juke_recent[j]].pool == pool) skip[juke_recent[j]] = 1, kept++;
+        if (jsong[juke_recent[j]].pool == pool && !skip[juke_recent[j]]) skip[juke_recent[j]] = 1, kept++;
     for (i = 0; i < n_jsong; i++) if (jsong[i].pool == pool && !skip[i]) total += jsong[i].weight;
     if (!total) return -1;
     r = clipv_rand() % total;
@@ -16480,6 +16525,7 @@ static short juke_draw(unsigned pool)
     for (j = JUKE_RECENT * JUKE_POOLS - 1; j > 0; j--) juke_recent[j] = juke_recent[j - 1];
     juke_recent[0] = (short)i;
     if (n_juke_recent < JUKE_RECENT * JUKE_POOLS) n_juke_recent++;
+    juke_in_game[i] = 1;
     return (short)i;
 }
 
@@ -16493,7 +16539,8 @@ static unsigned juke_game(void)
 static void juke_start(unsigned m, const char *how)
 {
     struct jmode *e = &jmode[m];
-    e->pick = juke_draw(e->pool);
+    unsigned passed;
+    e->pick = juke_draw(e->pool, &passed);
     e->game = juke_game();
     e->draws++;
     if (juke_says < 200 || !(e->draws % 50)) {
@@ -16502,9 +16549,10 @@ static void juke_start(unsigned m, const char *how)
             say("jukebox: song mode %u started (%s, %u time(s)) - pool %u has no song, it plays its own", m + 1, how,
                 e->draws, e->pool);
         else
-            say("jukebox: song mode %u started (%s, %u time(s)) - song %d of %u (pool %u) plays%s%s", m + 1, how,
+            say("jukebox: song mode %u started (%s, %u time(s)) - song %d of %u (pool %u) plays%s%s%s", m + 1, how,
                 e->draws, e->pick + 1, n_jsong, e->pool, jsong[e->pick].clip ? ", intro " : "",
-                jsong[e->pick].clip ? jsong[e->pick].clip : "");
+                jsong[e->pick].clip ? jsong[e->pick].clip : "",
+                passed ? " - passed over a song played in another pool this game" : "");
     }
 }
 
@@ -16650,7 +16698,7 @@ static void sndm_line(char *s)
         return;
     }
     if (n >= 3 && str_eq(f[0], "jsong")) {
-        jsong_line(f[1], f[2], n >= 4 ? f[3] : 0, n >= 5 ? f[4] : 0);
+        jsong_line(f[1], f[2], n >= 4 ? f[3] : 0, n >= 5 ? f[4] : 0, n >= 6 ? f[5] : 0);   /* same PAD-1012 */
         return;
     }
     if (n >= 4 && str_eq(f[0], "bsid")) {

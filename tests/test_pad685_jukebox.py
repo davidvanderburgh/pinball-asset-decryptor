@@ -245,16 +245,23 @@ _HARNESS = r"""
 @FUNCS@
 int main(int argc, char **argv)
 {
-    /* <songs> <draws> <the pools drawn from in turn, "0" "01"...> <weight[:pool]>... (PAD-1007) */
-    unsigned i, n = (unsigned)atoi(argv[1]), draws = (unsigned)atoi(argv[2]);
+    /* <songs> <draws> <the pools drawn from in turn, "0" "01"...; "g" a new game, PAD-1012>
+     * <weight[:pool[:same]]>... (PAD-1007, the song's number in several pools PAD-1012) */
+    unsigned i, k = 0, n = (unsigned)atoi(argv[1]), draws = (unsigned)atoi(argv[2]), passed;
     const char *seq = argv[3];
     for (i = 0; i < n; i++) {
         char *c;
         jsong[i].weight = (unsigned char)strtoul(argv[4 + i], &c, 10);
-        jsong[i].pool = (unsigned char)(*c == ':' ? atoi(c + 1) : 0);
+        jsong[i].pool = (unsigned char)(*c == ':' ? strtoul(c + 1, &c, 10) : 0);
+        jsong[i].same = (unsigned short)(*c == ':' ? atoi(c + 1) : 0);
     }
     n_jsong = n;
-    for (i = 0; i < draws; i++) printf("%d ", juke_draw((unsigned)(seq[i % strlen(seq)] - '0')));
+    for (i = 0; i < draws; k++) {
+        char p = seq[k % strlen(seq)];
+        if (p == 'g') { harness_game++; continue; }
+        printf("%d ", juke_draw((unsigned)(p - '0'), &passed));
+        i++;
+    }
     printf("\n");
     return 0;
 }
@@ -285,9 +292,13 @@ def draws(tmp_path_factory):
     jsong = src[src.index("struct jsong {"):src.index("};", src.index("struct jsong {")) + 2]
     state = (defs + "\n" + jsong + "\nstatic struct jsong jsong[JUKE_SONGS];\nstatic unsigned n_jsong;\n"
              "static short juke_recent[JUKE_RECENT * JUKE_POOLS];\nstatic unsigned n_juke_recent;\n"
-             "static unsigned clipv_rng;\n")
+             "static unsigned clipv_rng;\n"
+             # PAD-1012: the songs drawn this game; a harness "g" starts a new game
+             "static unsigned char juke_in_game[JUKE_SONGS];\nstatic unsigned juke_in_game_of;\n"
+             "static unsigned harness_game;\nstatic unsigned juke_game(void) { return harness_game; }\n")
     funcs = [_c_function(src, r) for r in (r"static unsigned clipv_rand\(void\)",
-                                           r"static short juke_draw\(unsigned pool\)")]
+                                           r"static int juke_played_elsewhere\(unsigned i, unsigned pool\)",
+                                           r"static short juke_draw\(unsigned pool, unsigned \*passed\)")]
     d = tmp_path_factory.mktemp("juke")
     (d / "h.c").write_text(_HARNESS.replace("@STATE@", state).replace("@FUNCS@", "\n".join(funcs)))
     exe = d / "h"

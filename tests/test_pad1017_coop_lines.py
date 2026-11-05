@@ -105,7 +105,8 @@ def test_no_player_change_no_lines(monkeypatch):
     assert portcoop.lines(_elf(words)) == ([], ["no player change of the known shape"])
 
 
-ELFS = sorted(glob.glob(os.path.join(os.environ.get("PAD_GAME_ELFS", "C:/tmp/PAD-1010/elfs"), "*.elf")))
+ELFS = sorted(p for d in os.environ.get("PAD_GAME_ELFS", "C:/tmp/PAD-1010/elfs;C:/tmp/PAD-1017/elfs_old").split(";")
+              for p in glob.glob(os.path.join(d, "*.elf")))
 
 
 @pytest.mark.skipif(not ELFS, reason="no shipped game programs here (PAD_GAME_ELFS)")
@@ -115,3 +116,27 @@ def test_every_shipped_build_has_the_lines():
     gz = found.get("godzilla_le-1_16_0_spike2.elf")
     if gz:
         assert [l.split()[2] for l in gz] == ["0x00338950", "0x00338790", "0x00713b94", "0x007d116c"]
+    old = found.get("aerosmith_le-1_15_0.elf")   # the older shape: the count at +0x50 in a struct
+    if old:
+        assert [l.split()[2] for l in old] == ["0x001a51c4", "0x001a4fb8", "0x005a02f4", "0x00608e80"]
+
+
+def _latest_ports():
+    """The newest shipped port of each title (David, 2026-11-05: co-op on the latest versions only)."""
+    best = {}
+    for p in glob.glob(os.path.join(os.path.dirname(__file__), "..", "tools", "spike2_emu", "modes", "sdk", "ports",
+                                    "*.port")):
+        title, ver = os.path.basename(p)[:-5].rsplit("-", 1)
+        v = tuple(int(x) for x in ver.split("."))
+        if title not in best or v > best[title][0]:
+            best[title] = (v, p)
+    return sorted(p for _v, p in best.values())
+
+
+def test_every_latest_port_carries_the_lines():
+    ports = _latest_ports()
+    assert len(ports) == 53
+    for p in ports:
+        text = open(p, encoding="utf-8").read()
+        for key in ("site  coop_player_change", "site  coop_add_player", "data  coop_player ", "data  coop_players"):
+            assert key in text, (os.path.basename(p), key)

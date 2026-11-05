@@ -689,3 +689,9 @@ site  attract_show        0x0031fa44 0xe92d4070 0xe30d41b4
 site coil_frame            0x004e4514 0xe5d13000 0xe3530008
 site coil_off              0x004e0600 0xe3510008 0xe1a02001
 data sw_struct             0x0068f974
+
+# ---- PAD-1017: co-op play (portcoop.py, read off this build's program) ----
+site  coop_player_change 0x002751e0 0xe92d41f0 0xe24dd008
+site  coop_add_player    0x00275020 0xe92d4038 0xe3a00051
+data  coop_player        0x006110fc
+data  coop_players       0x0069ade0

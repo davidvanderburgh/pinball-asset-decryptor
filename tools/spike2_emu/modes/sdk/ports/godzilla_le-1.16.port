@@ -1103,3 +1103,9 @@ site coil_off              0x005afb28 0xe3510008 0xe1a02001
 data sw_struct             0x007d2004
 data coil_count            0x007d49ec
 data coil_table            0x007d6144
+
+# ---- PAD-1017: co-op play (portcoop.py, read off this build's program) ----
+site  coop_player_change 0x00338950 0xe92d41f0 0xe24dd008
+site  coop_add_player    0x00338790 0xe92d4038 0xe3a00051
+data  coop_player        0x00713b94
+data  coop_players       0x007d116c

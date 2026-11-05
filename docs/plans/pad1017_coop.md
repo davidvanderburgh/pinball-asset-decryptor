@@ -72,8 +72,11 @@ rigged. Steps 3-5 and the port lines are left.
 
 ### Coverage
 
-- 53 of 53 shipped programs give all four lines. Next: add `portcoop.lines` to portgen, as the challenge lines are
-  added (portgen.py "portchallenge.py" list). Then append the lines to the 69 shipped ports and the derived older
-  builds, and check each older port's lines against its own program.
-- Emulator proof: Godzilla LE 1.16 first (2 and 4 teammates: turns, shared progress, game over after N x balls,
-  extra ball, the co-op board). Then a rigbatch sweep over every build.
+- David, 2026-11-05: the latest versions only. The 53 latest shipped ports carry the lines (each read off its own
+  program; `cur_player` agrees wherever a port has one). Their recipes were rebuilt, and so was prebuilt/mode.so.
+  The finder also reads the older shape (the count in a struct at +0x50, Aerosmith LE 1.15 ... TMNT Pro 1.58: all
+  16 older shipped builds give the lines), but those ports were left as they were.
+- Left: the emulator proof on Godzilla LE 1.16 (2 and 4 teammates: turns, shared progress, game over after N x
+  balls, an extra ball, the score panel after a teammate joins); then the turn display, the co-op boards and the
+  Write tab option (coop.cfg + the right flipper button's id from sound_modes.flipper_buttons); then a rigbatch
+  sweep over the 53.

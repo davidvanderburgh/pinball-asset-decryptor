@@ -706,3 +706,9 @@ value mode_wins_at           0x8c
 site coil_frame            0x0042f14c 0xe5d13000 0xe3530008
 site coil_off              0x0042b238 0xe3510008 0xe1a02001
 data sw_struct             0x00659ca0
+
+# ---- PAD-1017: co-op play (portcoop.py, read off this build's program) ----
+site  coop_player_change 0x002b6758 0xe92d41f0 0xe24dd008
+site  coop_add_player    0x002b6598 0xe92d4038 0xe3a00051
+data  coop_player        0x005e3fed
+data  coop_players       0x00663984

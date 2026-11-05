@@ -16,7 +16,10 @@ of 53 shipped programs, Aerosmith .. Venom):
                                                   bne ... ; movw/movt rG, <player> ; ... ldrb rX, [rG] ;
                                                   movw/movt rP, <players> ; ldrb rY, [rP] ... ldrb rZ, [rG, #1]
     add a player (Start in the first ball):       push {.., lr} ; mov r0, #<AD_MAX_PLAYERS_PER_GAME> ; bl <adj> ;
-                                                  movw/movt rP, <players> ; ldrb ; ... ; strbne rY, [rP]
+                                                  movw/movt rP, <players> ; ldrb ; ... ; strb(ne) rY, [rP]
+
+The older builds (Aerosmith LE 1.15, Batman 1.13, Rush LE 1.18, ...) keep the count in a struct ([rP, #0x50]) and
+put a `mov r0, #n` between the player change's test and its bne; the same lines come out of them.
 
 (the framework's "can a player be added" test has the same opening but stores nothing - it is told apart by that).
 The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, the count of players at <players>.
@@ -66,25 +69,27 @@ def player_change(e):
     test = int(xb[0].split()[2], 16)
     w, base = e.words, e.text_va
     found = set()
-    for k in range(len(w) - 3):
-        if bl_target(base + 4 * k, w[k]) != test or w[k + 1] & 0xFFFF0FFF != 0xE2500000 or w[k + 2] >> 24 != 0x1A:
+    for k in range(len(w) - 4):
+        # PAD-1017: older builds (Aerosmith LE 1.15, Batman 1.13, ...) put a `mov r0, #n` between the test and the bne
+        if bl_target(base + 4 * k, w[k]) != test or w[k + 1] & 0xFFFF0FFF != 0xE2500000                 or not any(w[j] >> 24 == 0x1A for j in (k + 2, k + 3)):
             continue
         pairs = _movw_movt(w, k + 3, k + 16)
         loads = []
         for j, r, val in pairs:
             ld = next((_ldrb_imm(w[q]) for q in range(j + 1, min(j + 6, len(w)))
                        if _ldrb_imm(w[q]) and _ldrb_imm(w[q])[0] == r), None)
-            if ld == (r, 0):
-                loads.append((r, val))
-        if len(loads) < 2:
+            if ld:
+                loads.append((r, val, ld[1]))
+        if len(loads) < 2 or loads[0][2] != 0:
             continue
-        (rg, g), (_rp, p) = loads[0], loads[1]
-        # the ball's byte, right after the player's, is read further on through the same register
-        if not any(_ldrb_imm(w[q]) == (rg, 1) for q in range(k + 3, min(k + 40, len(w)))):
+        (rg, g, _o), (_rp, p, po) = loads[0], loads[1]
+        # the ball's byte, right after the player's, is read further on through the same register (or the
+        # register the older builds load the player's address into again)
+        if not any(_ldrb_imm(w[q]) and _ldrb_imm(w[q])[1] == 1 for q in range(k + 3, min(k + 48, len(w)))):
             continue
         start = _function_start(w, k)
         if start is not None:
-            found.add((base + 4 * start, g, p))
+            found.add((base + 4 * start, g, p + po))
     return found.pop() if len(found) == 1 else None
 
 
@@ -103,11 +108,18 @@ def add_player(e, players):
         if w[k - 1] & PUSH_LR_MASK != PUSH_LR or w[k] not in mov_r0(mp) or bl_target(base + 4 * k + 4, w[k + 1]) is None:
             continue
         pair = _movw_movt(w, k + 2, k + 4)
-        if len(pair) != 1 or pair[0][2] != players:
+        if len(pair) != 1:
             continue
-        rp = pair[0][1]
-        # strbne rT, [rP]: the count goes up only when the game's hooks let the player in
-        if any(w[q] & 0xFFFF0FFF == 0x15C00000 | rp << 16 for q in range(k + 4, min(k + 24, len(w)))):
+        j, rp, val = pair[0]
+        # the count: [rP] on most builds, [rP, #off] where the older ones keep it in a struct (Aerosmith LE 1.15 +0x50)
+        ld = next((_ldrb_imm(w[q]) for q in range(j + 1, min(j + 3, len(w)))
+                   if _ldrb_imm(w[q]) and _ldrb_imm(w[q])[0] == rp), None)
+        if not ld or val + ld[1] != players:
+            continue
+        # strb(ne) rT, [rP, #off]: the count goes up once the game's hooks let the player in (strbne on most builds, a
+        # plain strb after the hook's test on the older ones)
+        if any(w[q] & 0x0FFF0FFF == 0x05C00000 | rp << 16 | ld[1] and w[q] >> 28 in (0xE, 0x1)
+               for q in range(k + 4, min(k + 32, len(w)))):
             hits.append(base + 4 * (k - 1))
     return hits[0] if len(hits) == 1 else None
 

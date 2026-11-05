@@ -710,6 +710,12 @@ def merge(drafts, refs, tgt, game, version, family):
                and line.split()[:2] not in [l.split()[:2] for l in body if l.strip()]] if b else []
     if attract:
         body += ["", "# ---- PAD-782: the attract mode's page table (portattract.py) ----"] + attract
+    # PAD-1017: co-op play - the framework's player change, add player and player bytes
+    from . import portcoop
+    coop = [line for line in portcoop.lines(b)[0]
+            if line.split()[:2] not in [l.split()[:2] for l in body if l.strip()]] if b else []
+    if coop:
+        body += ["", "# ---- PAD-1017: co-op play (portcoop.py) ----"] + coop
     # PAD-710: the game's own mode framework, read off this build's program (a mode in the place of one of the game's
     # modes counts as it)
     from . import mode_framework

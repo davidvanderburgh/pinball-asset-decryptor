@@ -329,6 +329,9 @@ These work on the Audio, Video and Images tabs.
   see your picks side by side.
 - **Clear replacements…** drops every pick on the tab. A slot a build or an
   emulator Start already wrote gets the card's own file back too.
+- **Clear replacements identical to the original…** (Images tab, More
+  menu) clears only the picks that are the same picture as the game's own,
+  pixel for pixel. It says how many before it clears.
 - **Revert to original** (per slot) and **Revert all changes…** (Write
   tab) put files back from the extract, without re-extracting.
 - **Replace from folder…** picks a whole folder of your files at once, each

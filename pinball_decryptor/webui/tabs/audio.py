@@ -3699,7 +3699,8 @@ class AudioTab(FindOriginalsMixin, TabService):
     def jukebox_action(self, action):
         """The Jukebox window: ``add`` (choose songs' audio files), ``video:k`` (song k's intro
         video), ``novideo:k``, ``weight:k:w`` (1 Rare .. 3 Common), ``play:k`` (song k in the
-        Replacement pane), ``up:k`` / ``down:k`` and ``off:k``. Returns the window's rows."""
+        Replacement pane), ``up:k`` / ``down:k``, ``off:k`` and ``clear`` (every song, once the
+        person says yes: PAD-1002). Returns the window's rows."""
         from ...plugins.stern import jukebox as _JB
         kind, _c, rest = str(action or "").partition(":")
         k_s, _c, val = rest.partition(":")
@@ -3728,6 +3729,18 @@ class AudioTab(FindOriginalsMixin, TabService):
                 return self._jukebox_rows()
             self.window.remember_browse_dir("audio_replacement", os.path.dirname(paths[0]))
             self._juke_add(paths)
+            return self._jukebox_rows()
+        if kind == "clear":
+            if self._running() or not self._juke:
+                return self._jukebox_rows()
+            n = len(self._juke)
+            if not compat.messagebox.askyesno(
+                    "Jukebox", "Take all %d song%s out of the jukebox and start over?"
+                    % (n, "" if n == 1 else "s")):
+                return self._jukebox_rows()
+            del self._juke[:]
+            self.log("Replace Audio: the jukebox's %d song(s) were taken out; it is empty." % n, "info")
+            self._juke_changed()
             return self._jukebox_rows()
         if not 1 <= k <= len(self._juke):
             return self._jukebox_rows()

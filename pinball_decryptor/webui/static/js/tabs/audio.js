@@ -512,6 +512,8 @@ function JukeVideo({ k, path, name, onClose }) {
 const JUKE_COLS = { k: { val: (g) => g.k }, audio: { val: (g) => g.audio }, video: { val: (g) => g.video || "" },
   weight: { val: (g) => Number(g.weight), desc: true } };
 
+// PAD-1008: a song's ▶ sits before its name, as the intro video's button does before the video's (and
+// a sound's in the Sounds on shots window before the sound's)
 function JukeboxModal({ data, onClose }) {
   const [d, setD] = useState(data);
   const [watch, setWatch] = useState(null);
@@ -536,14 +538,13 @@ function JukeboxModal({ data, onClose }) {
         <thead><tr><${Th} k="k">#<//><${Th} k="audio">Song<//><${Th} k="video">Intro video<//><${Th} k="weight">How often<//><th></th></tr></thead>
         <tbody>${shown.map((g) => html`<tr class=${cx(g.gone && "gone")} title=${g.gone ? "A file of this song is not on this PC any more" : ""}>
           <td class="muted">${g.k}</td>
-          <td><span class="nw">${g.audio}</span></td>
+          <td><span class="nw"><${RowPlay} path=${g.path} title="Play this song" onPlay=${() => act(`play:${g.k}`)} /> ${g.audio}</span></td>
           <td>${g.video ? html`<span class="nw"><${Button} size="sm" kind="ghost" icon="video" title="Watch this intro video"
               onClick=${() => setWatch(g)} /> ${g.video}</span>`
             : html`<span class="muted">its song mode's own</span>`}</td>
           <td><${Select} sm value=${String(g.weight)} options=${weights} disabled=${d.running}
             onChange=${(v) => act(`weight:${g.k}:${v}`)} width=${110} /></td>
           <td class="nw">
-            <${RowPlay} path=${g.path} title="Play this song" onPlay=${() => act(`play:${g.k}`)} />
             <${Button} size="sm" kind="ghost" icon="more" title="More for this song" onClick=${(e) => openMenu(e.currentTarget, [
               { label: g.video ? "Change the intro video…" : "Choose an intro video…", icon: "video", disabled: d.running,
                 title: "The video the song mode opens with when this song is drawn, the song's name in it", onClick: () => act(`video:${g.k}`) },
@@ -598,9 +599,8 @@ function ShotsModal({ data, onClose }) {
           <td class="muted">${r.k}</td>
           <td><span class="nw">${r.mode}</span></td>
           <td><span class="nw">${r.shot}</span></td>
-          <td><span class="nw">${r.sound}</span></td>
+          <td><span class="nw"><${RowPlay} path=${r.path} title="Play this sound" onPlay=${() => act(`play:${r.k}`)} /> ${r.sound}</span></td>
           <td class="nw">
-            <${RowPlay} path=${r.path} title="Play this sound" onPlay=${() => act(`play:${r.k}`)} />
             <${Button} size="sm" kind="ghost" icon="x" title="Take this one out" disabled=${d.running} onClick=${() => act(`off:${r.k}`)} />
           </td></tr>`)}</tbody></table></div>`
         : html`<div class="muted">None yet. Pick a mode, a shot and a sound below, then Add.</div>`}

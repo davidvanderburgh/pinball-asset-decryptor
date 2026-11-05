@@ -13425,9 +13425,10 @@ class MultibootPanel:
                 # other, and failed at frame 0 (PAD-307; runtime.rehead, which
                 # leaves anything that is not a wsl.exe command alone).
                 argv = runtime.rehead(argv)
-                is_container_exec = (len(argv) >= 2
-                                     and os.path.basename(argv[0]).lower() in ("docker", "podman")
-                                     and argv[1] == "exec")
+                is_container_exec = (
+                    len(argv) >= 2 and argv[1] == "exec"
+                    and os.path.basename(argv[0]).lower()
+                    in ("docker", "podman"))
                 if not mac_ready and is_container_exec:
                     texts[label] = "No such container"
                     self._say_once(container_note(texts[label]))

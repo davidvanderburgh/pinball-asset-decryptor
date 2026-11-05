@@ -590,10 +590,14 @@ def unseen_mounts(dirs):
 
 
 def _engine_name():
-    """Which engine docker is talking to: "colima" / "colima-<profile>"
+    """Which engine docker is talking to: "podman", "colima" / "colima-<profile>"
     (the docker context colima makes, or its VM's name), "docker-desktop",
-    "podman", or whatever else ``docker info`` calls the machine; "" when
-    neither answers.  Lima, under colima, may name the VM "lima-colima[-<p>]"."""
+    or whatever else ``docker info`` calls the machine; "" when neither
+    answers.  Lima, under colima, may name the VM "lima-colima[-<p>]".
+    The podman CLI is answered before asking it anything: whatever its
+    ``context show`` / ``info`` printed would only hide the Podman advice."""
+    if "podman" in os.path.basename(_cli()).lower():
+        return "podman"
     names = []
     for args in (["context", "show"], ["info", "-f", "{{.Name}}"]):
         try:
@@ -607,12 +611,7 @@ def _engine_name():
             n = n[len("lima-"):]
         if n == "colima" or n.startswith("colima-"):
             return n
-    if names:
-        return names[-1]
-    cli = _cli()
-    if "podman" in os.path.basename(cli).lower():
-        return "podman"
-    return ""
+    return names[-1] if names else ""
 
 
 def _share_roots(unseen):

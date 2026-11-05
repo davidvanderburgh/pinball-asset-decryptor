@@ -1412,3 +1412,13 @@ def test_exec_argv_uses_podman_when_selected(monkeypatch):
     monkeypatch.setattr(D, "_cli", lambda: "/opt/podman/bin/podman")
     argv = D.exec_argv("echo test")
     assert argv[:3] == ["/opt/podman/bin/podman", "exec", D.CONTAINER]
+
+
+def test_engine_name_is_podman_without_asking_podman(monkeypatch):
+    """The podman CLI is Podman whatever it prints for a context or an info
+    name, so the unshared-folder advice stays the Podman one."""
+    monkeypatch.setattr(D, "_cli", lambda: "/opt/podman/bin/podman")
+    asked = []
+    monkeypatch.setattr(D, "_docker", lambda args, **kw: asked.append(args))
+    assert D._engine_name() == "podman"
+    assert asked == []

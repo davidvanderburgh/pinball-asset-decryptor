@@ -3681,6 +3681,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         words = dict(_JB.WEIGHTS)
         return {"songs": [{"k": k, "audio": os.path.basename(g["audio"]), "path": g["audio"],
                            "video": os.path.basename(g["video"]) if g.get("video") else "",
+                           "vpath": g.get("video") or "",
                            "gone": not os.path.isfile(g["audio"]) or bool(
                                g.get("video") and not os.path.isfile(g["video"])),
                            "weight": int(g.get("weight") or _JB.DEFAULT_WEIGHT),
@@ -3694,6 +3695,24 @@ class AudioTab(FindOriginalsMixin, TabService):
     def jukebox_open(self):
         """The Jukebox window's rows."""
         return self._jukebox_rows()
+
+    @rpc(loop=False)
+    def jukebox_preview(self, k, fmt="mp4"):
+        """PAD-1003: a copy of jukebox song *k*'s intro video the page's engine can play, for the
+        Jukebox window's preview when the engine can't take the file as it is (an .avi, .wmv, .mpg,
+        ProRes...): ``{"path"}``, or ``{"error"}``. Off the loop: ffmpeg can take a while."""
+        juke = list(self._juke)
+        try:
+            path = juke[int(k) - 1].get("video") or ""
+        except (IndexError, TypeError, ValueError):
+            path = ""
+        if not path or not os.path.isfile(path):
+            return {"error": "This intro video is not on this PC any more."}
+        from .. import video_helpers as _vh
+        try:
+            return {"path": _vh.browser_proxy(path, fmt)}
+        except Exception as e:                              # noqa: BLE001
+            return {"error": "This video can't be played here: %s" % (str(e) or e.__class__.__name__)}
 
     @rpc
     def jukebox_action(self, action):

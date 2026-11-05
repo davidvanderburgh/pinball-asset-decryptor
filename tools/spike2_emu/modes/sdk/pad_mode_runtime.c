@@ -9058,19 +9058,20 @@ static int stock_any_weighed(void)
  * but a shot that carries it with its own bit (Godzilla's Big loop arrives as 0x1000000001) is
  * decided by its own bit, and keeps the 0x1 when it becomes the target (the handler saw it so in
  * stock). An instead_of row's old shot, alone (with or without the 0x1), while its bit is lit, is
- * DROPPED (2 returned): the handler is not run for it. */
+ * DROPPED (2 returned): the handler is not run for it. switch_flag is 0 for the
+ * Munsters 32-bit dispatch, where 0x1 is the left orbit; otherwise it is 0x1. */
 static int stock_decide(const struct stock_table *t, unsigned rule, uint64_t *shot, uint64_t field,
-                        const struct stock_row **hit)
+                        uint64_t switch_flag, const struct stock_row **hit)
 {
     unsigned i;
     *hit = 0;
-    uint64_t bits = *shot & ~1ull;
+    uint64_t bits = *shot & ~switch_flag;
     for (i = 0; i < t->n; i++) {
         const struct stock_row *r = &t->row[i];
         if (r->rule != rule || !bits || (bits & ~r->from)) continue;
         *hit = r;
         if (!(field & r->to)) return 0;
-        *shot = r->to | (*shot & 1ull);
+        *shot = r->to | (*shot & switch_flag);
         return 1;
     }
     /* PAD-699: an instead_of row's OLD shot, alone, while its bit is lit: dropped (2). A dispatch with
@@ -9089,7 +9090,9 @@ static int stock_remap_shot(struct stock_rule *x, uint64_t *shot)
     const struct stock_row *r;
     unsigned p = pm_player();
     uint64_t was = *shot, field = stock_field(x, p);
-    int d = stock_decide(stock_live, x->id, shot, field, &r);
+    /* Munsters has no switch-hit flag: bit 0 is its left-orbit shot. */
+    uint64_t switch_flag = pm_port_value("stock_shot_bits", 64) == 32 ? 0ull : 1ull;
+    int d = stock_decide(stock_live, x->id, shot, field, switch_flag, &r);
     if (d == 2) {
         x->drops++;
         if (x->drops <= 200 || x->drops % 100 == 0)

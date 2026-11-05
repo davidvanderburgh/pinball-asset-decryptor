@@ -8980,12 +8980,17 @@ static struct stock_rule *stock_find(unsigned self)
 static unsigned *stock_vtab(const struct stock_rule *x) { return (unsigned *)(unsigned long)x->vt; }
 static int stock_slot(const char *name, long fallback) { return (int)pm_port_value(name, fallback); }
 
-/* the rule's per-player lit mask: u64 at obj + stock_field + 8 * player */
+/* PR #18 (Munsters Pro 1.28): `value stock_shot_bits 32` = the game's rules take a u32 shot, (this, shot) with no
+ * factor, and keep u32 lit masks; every other port's are u64 (the default, 64) */
+static int stock_narrow(void) { return pm_port_value("stock_shot_bits", 64) == 32; }
+
+/* the rule's per-player lit mask: at obj + stock_field + 8 * player (u64), or + 4 * player (u32, stock_narrow) */
 static uint64_t stock_field(const struct stock_rule *x, unsigned p)
 {
     unsigned a;
     if (!x->obj || p < 1 || p > 4) return 0;
-    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + 8u * p;
+    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + (stock_narrow() ? 4u : 8u) * p;
+    if (stock_narrow()) return *(volatile const unsigned *)(unsigned long)a;
     return (uint64_t)*(volatile const unsigned *)(unsigned long)a | (uint64_t)*(volatile const unsigned *)(unsigned long)(a + 4) << 32;
 }
 
@@ -9057,19 +9062,20 @@ static int stock_any_weighed(void)
  * but a shot that carries it with its own bit (Godzilla's Big loop arrives as 0x1000000001) is
  * decided by its own bit, and keeps the 0x1 when it becomes the target (the handler saw it so in
  * stock). An instead_of row's old shot, alone (with or without the 0x1), while its bit is lit, is
- * DROPPED (2 returned): the handler is not run for it. */
+ * DROPPED (2 returned): the handler is not run for it. switch_flag is 0 for the
+ * Munsters 32-bit dispatch, where 0x1 is the left orbit; otherwise it is 0x1. */
 static int stock_decide(const struct stock_table *t, unsigned rule, uint64_t *shot, uint64_t field,
-                        const struct stock_row **hit)
+                        uint64_t switch_flag, const struct stock_row **hit)
 {
     unsigned i;
     *hit = 0;
-    uint64_t bits = *shot & ~1ull;
+    uint64_t bits = *shot & ~switch_flag;
     for (i = 0; i < t->n; i++) {
         const struct stock_row *r = &t->row[i];
         if (r->rule != rule || !bits || (bits & ~r->from)) continue;
         *hit = r;
         if (!(field & r->to)) return 0;
-        *shot = r->to | (*shot & 1ull);
+        *shot = r->to | (*shot & switch_flag);
         return 1;
     }
     /* PAD-699: an instead_of row's OLD shot, alone, while its bit is lit: dropped (2). A dispatch with
@@ -9088,7 +9094,9 @@ static int stock_remap_shot(struct stock_rule *x, uint64_t *shot)
     const struct stock_row *r;
     unsigned p = pm_player();
     uint64_t was = *shot, field = stock_field(x, p);
-    int d = stock_decide(stock_live, x->id, shot, field, &r);
+    /* Munsters has no switch-hit flag: bit 0 is its left-orbit shot. */
+    uint64_t switch_flag = stock_narrow() ? 0ull : 1ull;
+    int d = stock_decide(stock_live, x->id, shot, field, switch_flag, &r);
     if (d == 2) {
         x->drops++;
         if (x->drops <= 200 || x->drops % 100 == 0)
@@ -9115,11 +9123,13 @@ static uint64_t stock_w_shot(unsigned r0, unsigned r1, unsigned r2, unsigned r3,
                              unsigned s0, unsigned s1, unsigned s2, unsigned s3)
 {
     struct stock_rule *x = stock_find(r0);
-    uint64_t shot = (uint64_t)r2 | (uint64_t)r3 << 32;
+    int narrow = stock_narrow();                 /* (this, u32 shot): no factor, s0 is not the game's */
+    uint64_t shot = narrow ? r1 : (uint64_t)r2 | (uint64_t)r3 << 32;
+    unsigned s0f = narrow ? 1u : s0;
     if (!x) return 0;                            /* cannot happen: only wrapped rules' vtables point here */
     if (x->obj != r0) return x->orig(r0, r1, r2, r3, s0, s1, s2, s3);   /* another object of the class: not ours, untouched */
     if (x->in_original) return x->orig(r0, r1, r2, r3, s0, s1, s2, s3);   /* item 161: a replay of the game's handler passes straight through */
-    if (x->h161 && stock161_first(x, &shot, s0)) return 0;                  /* item 161: the C handler took the shot */
+    if (x->h161 && stock161_first(x, &shot, s0f)) return 0;                  /* item 161: the C handler took the shot */
     if (x->fn) {
         const struct pm_mode *was = current;
         int keep;
@@ -9130,6 +9140,7 @@ static uint64_t stock_w_shot(unsigned r0, unsigned r1, unsigned r2, unsigned r3,
     } else if (stock_remap_shot(x, &shot) == 2) {
         return 0;                                /* PAD-699: an instead_of row's old shot: the handler does not see it */
     }
+    if (narrow) return x->orig(r0, (unsigned)shot, r2, r3, s0, s1, s2, s3);
     return x->orig(r0, r1, (unsigned)shot, (unsigned)(shot >> 32), s0, s1, s2, s3);
 }
 
@@ -9800,7 +9811,9 @@ uint64_t pm_stock_call_original(struct pm_stock_rule *r, uint64_t shot, unsigned
     uint64_t ret;
     if (!x || !x->wrapped || !x->orig || !x->obj) return 0;
     x->in_original++;
-    ret = x->orig(x->obj, 0, (unsigned)shot, (unsigned)(shot >> 32), factor, 0, 0, 0);
+    if (stock_narrow())
+        ret = x->orig(x->obj, (unsigned)shot, 0, 0, 0, 0, 0, 0);
+    else ret = x->orig(x->obj, 0, (unsigned)shot, (unsigned)(shot >> 32), factor, 0, 0, 0);
     x->in_original--;
     return ret;
 }
@@ -9816,9 +9829,11 @@ int pm_stock_field_set(struct pm_stock_rule *r, unsigned player, uint64_t mask)
     struct stock_rule *x = stock161_of(r);
     unsigned a;
     if (!x || !x->obj || player < 1 || player > 4) return 0;
-    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + 8u * player;
+    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + (stock_narrow() ? 4u : 8u) * player;
+    if (stock_narrow() && (mask >> 32)) return 0;  /* a bit the game's u32 mask has no room for */
     *(volatile unsigned *)(unsigned long)a = (unsigned)mask;
-    *(volatile unsigned *)(unsigned long)(a + 4) = (unsigned)(mask >> 32);
+    if (!stock_narrow())
+        *(volatile unsigned *)(unsigned long)(a + 4) = (unsigned)(mask >> 32);
     return 1;
 }
 
@@ -9827,6 +9842,8 @@ uint64_t pm_stock_lit(struct pm_stock_rule *r)
     struct stock_rule *x = stock161_of(r);
     long slot = x ? stock161_value("stock_slot_lit") : -1;
     if (!x || !x->obj || slot < 0 || slot > 96) return 0;
+    if (stock_narrow())
+        return ((unsigned (*)(unsigned))(unsigned long)stock_vtab(x)[slot])(x->obj);
     return ((stock_vfn1)(unsigned long)stock_vtab(x)[slot])(x->obj);
 }
 

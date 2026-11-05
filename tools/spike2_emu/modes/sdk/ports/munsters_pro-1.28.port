@@ -58,7 +58,6 @@ site agent_header     0x004801a0 0xe92d40f8 0xe2505000
 site agent_begin      0x0048ab0c 0xe590c004 0xe1a00001
 site balls_in_play    0x0032ce7c 0xe92d4010 0xe3034768
 site multiball_serve  0x0032cff8 0xe92d41f0 0xe30be09a
-site stock_rule_get   0x000bdff4 0xe3510026 0xe92d4008
 site scene_show       0x00345238 0xe92d4070 0xe3034fac
 site frame_end        0x00345440 0xe3500000 0xe92d40f8
 site frame_kick       0x003b4148 0xe92d4070 0xe2906008
@@ -121,19 +120,12 @@ value sound_channel_voices      188
 value sound_channel_bus         189
 value sound_channel_voice_ptrs  92
 value sound_voice_volume        48
-value stock_slot_shot   42
-value stock_slot_active     39
-value stock_slot_lit    25
-value stock_field       0x18
-value stock_slot_start      33
 value stock_slot_end        10
-value stock_slot_stop       11
 value stock_slot_running    12
 value stock_slot_shot_entry 15
 value stock_slot_mask       45
 value stock_running_at      0x1b      # + player: running byte
 value stock_level_at        0x3c      # + 4 * player: starts this game
-value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
 value countdown_step -1
 value lamp_slot_size       40
 value lamp_slot_level      2
@@ -477,7 +469,46 @@ site  attract_sleep       0x0039e090 0xe3033fa8 0xe3403062
 # PAD-782: the scene show an attract item's page puts the video bank's scene on the glass with
 site  attract_show        0x00345238 0xe92d4070 0xe3034fac
 
-
+# Local Spot baseline extension: exact Munsters Pro 1.28 ELF only.
+rule 17 0x004c87c0 Spot Mode
+data stock_mode_manager 0x005a2248
+value stock_shot_bits 32
+value stock_slot_shot 25
+value stock_slot_start 33
+value stock_slot_stop 36
+value stock_slot_active 37
+value stock_slot_lit 11
+value stock_field 0x20
+value stock_award_at 0x34
+value spot_phase_at 0x80
+value spot_hits_at 0x8c
+value spot_post_super_at 0x84
+value spot_timer_extended_at 0x84
+data spot_lamps_dirty 0x005abf20
+data spot_screen_info 0x005527a8
+data spot_toy_vtable 0x004c8dd0
+site stock_rule_get          0x000bdff4 0xe3510026 0xe92d4008
+site spot_level_get          0x0008b450 0xe92d4010 0xe30143d0
+site spot_rule_get           0x000bed08 0xe92d4010 0xe1a04000
+site spot_award_grow         0x0002ab9c 0xe92d43f8 0xe1a04000
+site spot_award_collect      0x0002af18 0xe92d4ff8 0xe1a09002
+site spot_super_available    0x000df4e4 0xe92d4038 0xe1a05001
+site spot_super_light        0x000df578 0xe92d4070 0xe24dd010
+site spot_process_cancel     0x0039e1e0 0xe92d40f8 0xe3036fa8
+site spot_process_start      0x0039e270 0xe92d4070 0xe1a05001
+site spot_pre_super_seq      0x000d6620 0xe92d4008 0xe3a00011
+site spot_post_super_seq     0x000d65a0 0xe92d4008 0xe3a00011
+site spot_add_ball           0x0032d138 0xe92d47f0 0xe1a04000
+site spot_add_eligible       0x0001bff8 0xe92d4008 0xe3a00007
+site spot_clock_bind_call    0x000d9840 0xebff9f6e 0xe594b034
+site spot_timer_pause        0x000697f8 0xe5c0101f 0xe12fff1e
+site spot_grandpa_eject_save 0x0009ae8c 0xe92d4010 0xe3a000a6
+site spot_adjust_get         0x00064260 0xe92d4010 0xe1a04000
+site spot_save_start         0x000fb280 0xe92d4070 0xe24dd010
+site spot_mystery_eligible   0x000b42ac 0xe92d4010 0xe3a00009
+site spot_mystery_collect    0x000b4fd8 0xe92d4030 0xe24dd014
+site spot_mystery_lottery    0x000b4edc 0xe92d4ff0 0xe24dd00c
+site spot_toy_get            0x000414bc 0xe92d4010 0xe1a04000
 
 # ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
 # docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch

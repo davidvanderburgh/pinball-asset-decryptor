@@ -231,7 +231,7 @@ int main(void)
                                    { 14, 0x400000ull, 0x200000ull, 0, 0, 0, 0, 0, 1 } } };
     const struct stock_row *hit;
     uint64_t shot;
-    #define TRY(rule, in, field) do { shot = (in); int r = stock_decide(&t, rule, &shot, field, &hit); \
+    #define TRY(rule, in, field) do { shot = (in); int r = stock_decide(&t, rule, &shot, field, 1ull, &hit); \
         printf("%%u 0x%%llx 0x%%llx -> %%d 0x%%llx %%d\n", (unsigned)(rule), (unsigned long long)(in), \
                (unsigned long long)(field), r, (unsigned long long)shot, hit ? (int)(hit - t.row) : -1); } while (0)
     TRY(12, 0x100000ull, 0x22200ull);        /* lit: the ramp becomes 0x200 */
@@ -388,3 +388,64 @@ def test_a_derived_port_takes_the_shot_slot_from_its_own_program(monkeypatch):
     keep = ["value stock_slot_shot   42"]
     portgen._stock_slots(keep, T())
     assert keep == ["value stock_slot_shot   42"]
+
+
+# Munsters' 32-bit dispatch uses bit 0 for a real shot, not a switch-hit flag.
+def test_munsters_port_retains_spare_io_and_left_orbit():
+    p = MP.read_port(str(SDK / "ports" / "munsters_pro-1.28.port"))
+    assert p["value"]["stock_shot_bits"] == 32
+    assert dict(SR.port_shots(str(SDK / "ports" / "munsters_pro-1.28.port")))["Left orbit"] == 1
+    assert p["site"]["coil_frame"] == (0x45e00c, 0xe5d13000, 0xe3530008)
+    assert p["site"]["coil_off"] == (0x45a0f8, 0xe3510008, 0xe1a02001)
+    assert p["data"]["sw_struct"] == 0x5a74f0
+
+
+MUNSTERS_DECIDE_HARNESS = r"""
+#include <assert.h>
+#include <stdint.h>
+struct stock_row { unsigned rule; uint64_t from, to; unsigned rgb, ms, on_ms; int pattern, from_c, instead; };
+struct stock_table { unsigned n; struct stock_row row[24]; };
+%s
+int main(void) {
+    struct stock_table t = {0};
+    const struct stock_row *hit;
+    uint64_t shot;
+    t.n=1; t.row[0].rule=17; t.row[0].from=1; t.row[0].to=4;
+    shot=1;
+    assert(stock_decide(&t,17,&shot,4,0,&hit)==1 && shot==4);
+    shot=1;
+    assert(stock_decide(&t,17,&shot,0,0,&hit)==0 && shot==1);
+    /* A real orbit plus ramp must not be mistaken for a ramp plus switch flag. */
+    t.row[0].from=4; t.row[0].to=8;
+    shot=5;
+    assert(stock_decide(&t,17,&shot,8,0,&hit)==0 && shot==5);
+    shot=4;
+    assert(stock_decide(&t,17,&shot,8,0,&hit)==1 && shot==8);
+    /* Moving a shot away from left orbit must suppress the old orbit itself. */
+    t.row[0].to=1; t.row[0].instead=1;
+    shot=4;
+    assert(stock_decide(&t,17,&shot,1,0,&hit)==1 && shot==1);
+    shot=1;
+    assert(stock_decide(&t,17,&shot,1,0,&hit)==2 && shot==1);
+    shot=3;
+    assert(stock_decide(&t,17,&shot,1,0,&hit)==0 && shot==3);
+    shot=1;
+    assert(stock_decide(&t,17,&shot,0,0,&hit)==0 && shot==1);
+    /* The original 64-bit format still preserves its switch flag. */
+    t.row[0].to=8; t.row[0].instead=0;
+    shot=5;
+    assert(stock_decide(&t,17,&shot,8,1,&hit)==1 && shot==9);
+    shot=1;
+    assert(stock_decide(&t,17,&shot,8,1,&hit)==0 && shot==1);
+    return 0;
+}
+"""
+
+
+def test_munsters_remaps_left_orbit_and_preserves_real_combined_shots(tmp_path):
+    from tests.test_spike2_mode_roster import _host_run, _lift
+    fn = _lift(RUNTIME.read_text(encoding="utf-8"), "static int stock_decide(")
+    # _host_run returns stdout only, so make success observable after the assertions.
+    harness = MUNSTERS_DECIDE_HARNESS.replace("#include <assert.h>", "#include <assert.h>\n#include <stdio.h>")
+    harness = harness.replace("    return 0;", '    puts("munsters remapping passed"); return 0;')
+    assert _host_run(tmp_path, harness % fn).strip() == "munsters remapping passed"

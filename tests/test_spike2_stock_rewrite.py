@@ -45,7 +45,7 @@ def test_every_call_the_header_declares_is_defined_in_the_runtime():
         assert re.search(r"^[A-Za-z_][\w \*]*?\b%s\s*\(" % re.escape(c), runtime, re.M), c
     # the section walk and the wrap's two branches
     assert "__start_pm_stock" in runtime and "stock161_attach();" in runtime
-    assert "if (x->in_original) return x->orig(" in runtime and "stock161_first(x, &shot, s0)" in runtime
+    assert "if (x->in_original) return x->orig(" in runtime and "stock161_first(x, &shot, s0f)" in runtime
     assert '"pad_stock.h"' in runtime
 
 

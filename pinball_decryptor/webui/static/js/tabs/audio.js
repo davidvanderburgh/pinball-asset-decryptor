@@ -440,7 +440,7 @@ function JukeboxModal({ data, onClose }) {
   const songs = d.songs || [];
   const full = songs.length >= (d.max || 0);
   const weights = (d.weights || []).map((w) => ({ value: String(w.w), label: w.label }));
-  return html`<${Modal} title="Jukebox" icon="audio" wide onClose=${onClose}
+  return html`<${Modal} title="Jukebox" icon="audio" wide remember="jukebox" onClose=${onClose}
     footer=${html`<${Button} icon="plus" disabled=${d.running || full || !!d.why}
         title=${full ? `At most ${d.max} songs` : "Choose one or more songs' audio files"}
         onClick=${() => act("add")}>Add songs…<//><span class="grow"></span>
@@ -495,7 +495,7 @@ function ShotsModal({ data, onClose }) {
   const litOk = (d.lit_ok || []).includes(s);
   const l = litOk ? lit : "";
   const full = rows.length >= (d.max || 0);
-  return html`<${Modal} title="Sounds on shots" icon="audio" wide onClose=${onClose}
+  return html`<${Modal} title="Sounds on shots" icon="audio" wide remember="shots" onClose=${onClose}
     footer=${html`<span class="grow"></span><${Button} kind="primary" onClick=${onClose}>Close<//>`}>
     <div class="stack" style="gap:10px">
       <p class="aud-p">${d.tip}</p>

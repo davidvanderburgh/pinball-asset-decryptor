@@ -284,6 +284,14 @@ input[type=range] { accent-color: var(--accent); }
 .modal { background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow); width: min(560px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; min-height: 0; }
 .modal.wide { width: min(860px, 100%); }
 .modal.xwide { width: min(1120px, 100%); }
+/* PAD-1000: a dialog that can be moved (its title bar) and resized (its corner grip) */
+.modal.movable { position: relative; }
+.modal.movable > .hd { cursor: move; user-select: none; }
+.modal.movable > .hd button { cursor: pointer; }
+.modal.placed { position: fixed; max-height: none; max-width: none; }
+.modal-grip { position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; cursor: nwse-resize; opacity: .55;
+  background: linear-gradient(135deg, transparent 0 55%, var(--ink-3) 55% 62%, transparent 62% 72%, var(--ink-3) 72% 79%, transparent 79%); }
+.modal-grip:hover { opacity: 1; }
 .modal > .hd { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .modal > .hd .h2 { flex: 1 1 auto; font-size: 17px; }
 .modal > .bd { padding: 16px 18px; overflow: auto; display: flex; flex-direction: column; gap: 12px; min-height: 0; }

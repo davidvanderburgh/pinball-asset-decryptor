@@ -47,3 +47,23 @@ Ben (Beatles 1.29, 60+ late-era songs) answered the easy/medium/hard ask on 2026
   Taxman clip) on the glass in place of "I Should Have Known Better"; each song heard (r 0.93-0.96 against
   its file, others under 0.08); song 3 (81 s) looked up again 81 s in. Write's "only" cfg arms it too.
 - Before/after shots of the Audio tab.
+
+## Pools (PAD-1007)
+
+Ben asked for "X pools, each with its own song/audio list", restricting which songs replace which of the
+game's music, a song wanted in two pools added to each. Beatles 1.29 has nine musics (sound ids 952-960, one
+opening + body record pair each; the request table):
+
+- **Song modes** (pool 0): the five above.
+- **Special modes** (pool 1), the two multiballs: Beatlemania Multiball, the four-ball one, sid 952 (request
+  90, records 461 + 370; emulator: its own start, wizard_go_1, showed `Taxman_Start` and looked 952 up ~20 s
+  in), and the jackpot multiball, sid 955 (request 82, records 574 + 797; called from the multiball start's
+  other branch and beside the `Multiball_A` clips: intro `Multiball_feature.Multiball_A_Start`).
+- **Background music** (pool 2): sids 958 (148 + 311, "MUSIC: MULTIBALL READY") and 956 (294 + 494). No intro.
+
+`jmode` / `jsong` lines end in their pool's number (none for 0, so an old cfg reads as before); a music draws
+only its pool's songs, none of that pool's last five; a pool with no song leaves its musics alone (no jmode
+line). The four new musics have no start site: they draw at the first ask, again at each new game
+(game_start) or after JUKE_GAP. JUKE_MODES went 8 -> 16. The sidecar's songs carry `"pool"` (none = song
+modes), the card's `#jsong` record a trailing pool key, so an extract puts each song back in its pool. The
+Jukebox window shows one pool at a time (a picker over the list); Add songs and Clear all work on that pool.

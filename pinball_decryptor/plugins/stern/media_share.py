@@ -722,7 +722,8 @@ def jukebox_from_card(project, cfg_text, log=None):
         video = vids.get(JB.clip_name(f["k"]).lower(), "")
         if video:
             video = _put(folder, stem + " intro" + os.path.splitext(video)[1], src=video)
-        back.append(JB.Song(audio=audio, video=video, weight=JB.clean_weight(f["weight"])))
+        back.append(JB.Song(audio=audio, video=video, weight=JB.clean_weight(f["weight"]),
+                            pool=JB.clean_pool(f.get("pool"))))
     if back:
         JB.save(project, JB.Jukebox(songs=back))
         log("Jukebox: this card's jukebox has %d song(s); they are back in the Audio tab (their files "

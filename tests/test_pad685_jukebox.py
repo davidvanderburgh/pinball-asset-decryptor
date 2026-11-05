@@ -60,7 +60,7 @@ def test_the_record_lives_in_the_project_s_sidecar(tmp_path):
 
 # ---- which titles ---------------------------------------------------------------------------------
 def test_the_beatles_has_five_song_modes_and_nothing_else_has_a_jukebox():
-    modes = JB.song_modes(_Prof())
+    modes = JB.pool_modes(_Prof(), JB.DEFAULT_POOL)       # PAD-1007: the song modes' pool
     assert [m.name for m in modes] == ["All My Loving", "Drive My Car", "I Should Have Known Better",
                                        "Ticket to Ride", "It Won't Be Long"]
     assert [m.records for m in modes] == [(419, 848), (200, 417), (753, 669), (722, 431), (42, 667)]
@@ -72,7 +72,7 @@ def test_the_beatles_has_five_song_modes_and_nothing_else_has_a_jukebox():
 def test_each_song_mode_s_start_is_a_site_of_the_beatles_port():
     with open(PORT, encoding="utf-8") as f:
         port = f.read()
-    for m in JB.song_modes(_Prof()):
+    for m in JB.pool_modes(_Prof(), JB.DEFAULT_POOL):
         assert re.search(r"^site %s\s" % m.site, port, re.M), m.site
         assert len(m.intros) == len(m.clips) == 2 and len(m.records) == 2
     assert re.search(r"^site surface_set_video\s", port, re.M)
@@ -239,15 +239,22 @@ def test_the_runtime_reads_the_jukebox_lines_and_swaps_at_the_lookup_and_the_sur
 _HARNESS = r"""
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 @STATE@
 @FUNCS@
 int main(int argc, char **argv)
 {
+    /* <songs> <draws> <the pools drawn from in turn, "0" "01"...> <weight[:pool]>... (PAD-1007) */
     unsigned i, n = (unsigned)atoi(argv[1]), draws = (unsigned)atoi(argv[2]);
-    for (i = 0; i < n; i++) jsong[i].weight = (unsigned char)atoi(argv[3 + i]);
+    const char *seq = argv[3];
+    for (i = 0; i < n; i++) {
+        char *c;
+        jsong[i].weight = (unsigned char)strtoul(argv[4 + i], &c, 10);
+        jsong[i].pool = (unsigned char)(*c == ':' ? atoi(c + 1) : 0);
+    }
     n_jsong = n;
-    for (i = 0; i < draws; i++) printf("%d ", juke_draw());
+    for (i = 0; i < draws; i++) printf("%d ", juke_draw((unsigned)(seq[i % strlen(seq)] - '0')));
     printf("\n");
     return 0;
 }
@@ -277,8 +284,10 @@ def draws(tmp_path_factory):
     defs = "\n".join(re.findall(r"^#define JUKE_\w+.*$", src, re.M))
     jsong = src[src.index("struct jsong {"):src.index("};", src.index("struct jsong {")) + 2]
     state = (defs + "\n" + jsong + "\nstatic struct jsong jsong[JUKE_SONGS];\nstatic unsigned n_jsong;\n"
-             "static short juke_recent[JUKE_RECENT];\nstatic unsigned n_juke_recent;\nstatic unsigned clipv_rng;\n")
-    funcs = [_c_function(src, r) for r in (r"static unsigned clipv_rand\(void\)", r"static short juke_draw\(void\)")]
+             "static short juke_recent[JUKE_RECENT * JUKE_POOLS];\nstatic unsigned n_juke_recent;\n"
+             "static unsigned clipv_rng;\n")
+    funcs = [_c_function(src, r) for r in (r"static unsigned clipv_rand\(void\)",
+                                           r"static short juke_draw\(unsigned pool\)")]
     d = tmp_path_factory.mktemp("juke")
     (d / "h.c").write_text(_HARNESS.replace("@STATE@", state).replace("@FUNCS@", "\n".join(funcs)))
     exe = d / "h"
@@ -289,8 +298,8 @@ def draws(tmp_path_factory):
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 
-    def run(weights, n):
-        out = subprocess.run([str(exe), str(len(weights)), str(n)] + [str(w) for w in weights],
+    def run(weights, n, pools="0"):
+        out = subprocess.run([str(exe), str(len(weights)), str(n), pools] + [str(w) for w in weights],
                              capture_output=True, text=True, check=True).stdout.split()
         return [int(x) for x in out]
     return run
@@ -306,6 +315,23 @@ def test_fewer_songs_than_the_window_still_draws_every_time(draws):
     got = draws([1, 1, 1], 60)
     assert all(len(set(got[i:i + 3])) == 3 for i in range(len(got) - 2))    # none of the last two
     assert draws([1], 5) == [0, 0, 0, 0, 0]
+
+
+def test_a_pool_draws_only_its_own_songs_and_never_one_of_its_own_last_five(draws):
+    """PAD-1007: songs 0-7 the song modes' (pool 0), 8-9 the special modes' (pool 1), 10 the background's
+    (pool 2); the three pools drawn in turn."""
+    got = draws(["2"] * 8 + ["2:1", "2:1", "1:2"], 900, "012")
+    assert {k for k in got[0::3]} == set(range(8))
+    assert {k for k in got[1::3]} == {8, 9}
+    assert {k for k in got[2::3]} == {10}
+    songs = got[0::3]
+    assert all(len(set(songs[i:i + 6])) == 6 for i in range(len(songs) - 5))    # the others' draws don't count
+    special = got[1::3]
+    assert all(a != b for a, b in zip(special, special[1:]))                     # two songs: never twice running
+
+
+def test_a_pool_with_no_song_draws_none(draws):
+    assert draws(["1", "1"], 3, "1") == [-1, -1, -1]
 
 
 def test_a_common_song_comes_up_three_times_as_often_as_a_rare_one(draws):

@@ -32,8 +32,8 @@ def test_both_audio_windows_sort_by_their_column_titles():
 
 def test_moving_a_song_waits_for_the_lists_own_order():
     js = _read("js", "tabs", "audio.js")
-    assert "disabled: d.running || sorted || g.k === 1" in js
-    assert "disabled: d.running || sorted || g.k === songs.length" in js
+    assert "disabled: d.running || sorted || (g.n ?? g.k) === 1" in js            # PAD-1007: its pool's first
+    assert "disabled: d.running || sorted || (g.n ?? g.k) === songs.length" in js
 
 
 def test_the_column_titles_stay_at_the_top_of_the_list():

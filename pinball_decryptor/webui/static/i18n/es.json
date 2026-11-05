@@ -12849,5 +12849,19 @@
 "Keep the last one": "Conservar la última",
 "Delete them": "Eliminarlas",
 "Old versions of PAD: {}.": "Versiones antiguas de PAD: {}.",
-"Each update saves the new AppImage beside the old one. This picks how many older ones PAD keeps and deletes the rest, now and each time PAD starts. The one you are running and any newer download are never touched.": "Cada actualización guarda el nuevo AppImage junto al anterior. Esto elige cuántos de los anteriores conserva PAD y elimina el resto, ahora y cada vez que PAD se inicia. El que estás usando y cualquier descarga más reciente nunca se tocan."
+"Each update saves the new AppImage beside the old one. This picks how many older ones PAD keeps and deletes the rest, now and each time PAD starts. The one you are running and any newer download are never touched.": "Cada actualización guarda el nuevo AppImage junto al anterior. Esto elige cuántos de los anteriores conserva PAD y elimina el resto, ahora y cada vez que PAD se inicia. El que estás usando y cualquier descarga más reciente nunca se tocan.",
+"**Pools**: the buttons at the top pick which of the game's music the list is for. **Song modes** are the five song modes, **Special modes** the two multiballs (each opens with its own intro video), **Background music** the two background songs (no intro video). Each music plays only its own pool's songs, and a pool with no songs keeps the game's own. **Add songs…** adds to the pool shown; a song wanted in two pools is added to each.": "**Grupos**: los botones de arriba eligen para qué música del juego es la lista. **Modos de canción** son los cinco modos de canción, **Modos especiales** las dos multibolas (cada una empieza con su propio vídeo de introducción), **Música de fondo** las dos canciones de fondo (sin vídeo de introducción). Cada música solo toca las canciones de su propio grupo, y un grupo sin canciones mantiene la del juego. **Añadir canciones…** añade al grupo mostrado; una canción que quieras en dos grupos se añade a cada uno.",
+"**Clear all…** takes every song of the pool shown out, after asking, to start over.": "**Quitar todas…** saca todas las canciones del grupo mostrado, tras preguntar, para empezar de nuevo.",
+"Song modes": "Modos de canción",
+"Special modes": "Modos especiales",
+"Background music": "Música de fondo",
+"The five song modes: each start draws one of these songs.": "Los cinco modos de canción: cada inicio sortea una de estas canciones.",
+"The song modes: each start draws one of these songs.": "Los modos de canción: cada inicio sortea una de estas canciones.",
+"The two multiballs (the four-ball one and the jackpot one): each start draws one of these songs, with its own intro video.": "Las dos multibolas (la de cuatro bolas y la del jackpot): cada inicio sortea una de estas canciones, con su propio vídeo de introducción.",
+"The two background songs: each game draws one of these in the place of each. They open with no intro video.": "Las dos canciones de fondo: cada partida sortea una de estas en lugar de cada una. Empiezan sin vídeo de introducción.",
+"This game has no pool of this name: these songs are left out of a build.": "Este juego no tiene ningún grupo con este nombre: estas canciones quedan fuera de la compilación.",
+"This music opens with no intro video of its own, so its songs show none": "Esta música empieza sin vídeo de introducción propio, así que sus canciones no muestran ninguno",
+"none": "ninguno",
+"No songs in {} yet: the game plays its own music there.": "Aún no hay canciones en {}: el juego toca allí su propia música.",
+"Take all {} song{} out of {} and start over?": "¿Quitar las {} canción{} de {} y empezar de nuevo?"
 }

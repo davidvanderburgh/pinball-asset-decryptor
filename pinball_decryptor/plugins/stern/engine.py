@@ -10842,9 +10842,9 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     if modes.shots:
         log("Found %d sound(s) on the shots of the game's modes." % len(modes.shots), "info")
     if modes.jukebox:
-        log("Found a jukebox of %d song(s) (%d with an intro video of its own) for the %d song "
-            "modes." % (len(modes.jukebox), sum(1 for s in box.songs if s.video),
-                        len(_JB.song_modes(prof))), "info")
+        log("Found a jukebox of %d song(s) (%d with an intro video of its own) for the game's %d "
+            "musics in %d pool(s)." % (len(modes.jukebox), sum(1 for s in box.songs if s.video),
+                                        len(_JB.song_modes(prof)), len(_JB.pools(prof))), "info")
     return modes, prof
 
 
@@ -11833,7 +11833,9 @@ def _jukebox_lines(params, used, modes, log):
     a record of its own in image.bin) with its weight, its record's key and its intro clip's name
     (``PadJukebox<k>``, added to the video bank by the random clips' road) when it has a video. A
     song in a sound bank is left out: a bank's record is played by a bank sound id, never a key.
-    An entry that landed gets ``lines`` 1 (the card's record names it)."""
+    An entry that landed gets ``lines`` 1 (the card's record names it). PAD-1007: each mode and each
+    song carries its pool's number (:func:`.jukebox.pool_number`); a mode whose pool has no song that
+    landed keeps its own music (no line), and a song in a pool the title does not have is left out."""
     from . import jukebox as _JB
     from . import sound_modes as _SMo
     plan = modes.juke_plan or {}
@@ -11841,14 +11843,6 @@ def _jukebox_lines(params, used, modes, log):
     if not used or box is None:
         return None
     byidx = {p["idx"]: p for p in params}
-    smodes = []
-    for m in _JB.song_modes(prof):
-        keys = [bytes(byidx[i]["findkey"]) for i in m.records if (byidx.get(i) or {}).get("findkey")]
-        if not keys:
-            log("Jukebox: the song mode %s keeps its own song: its sounds are not in this card's "
-                "sound bank." % m.name, "warning")
-            continue
-        smodes.append((m.site, list(m.clips), keys))
     songs = []
     for u in sorted(used, key=lambda u: _SMo.turn_of(u["mode"])):
         k = _SMo.turn_of(u["mode"])
@@ -11856,21 +11850,39 @@ def _jukebox_lines(params, used, modes, log):
         hp = byidx.get(int(u["host"]))
         if song is None:
             continue
+        pool = _JB.pool_number(prof, song.pool)
+        if pool is None:
+            log("Jukebox: song %d (%s) is left out: this game has no \"%s\" pool." % (
+                k, os.path.basename(song.audio), song.pool), "warning")
+            continue
         if u.get("bank") is not None or not hp or not hp.get("grown") or not hp.get("findkey"):
             log("Jukebox: song %d (%s) is left out: its record is not in the main sound bank."
                 % (k, os.path.basename(song.audio)), "warning")
             continue
-        clip = _JB.clip_name(k) if song.video and os.path.isfile(song.video) else ""
-        songs.append((int(song.weight), bytes(hp["findkey"]), clip))
+        clip = (_JB.clip_name(k) if song.video and os.path.isfile(song.video)
+                and _JB.pool_intro(prof, song.pool) else "")
+        songs.append((int(song.weight), bytes(hp["findkey"]), clip, pool))
         u["lines"] = 1
+    filled = {g[3] for g in songs}
+    smodes = []
+    for m in _JB.song_modes(prof):
+        pool = _JB.pool_number(prof, m.pool)
+        if pool not in filled:
+            continue
+        keys = [bytes(byidx[i]["findkey"]) for i in m.records if (byidx.get(i) or {}).get("findkey")]
+        if not keys:
+            log("Jukebox: %s keeps its own song: its sounds are not in this card's sound bank."
+                % m.name, "warning")
+            continue
+        smodes.append((m.site, list(m.clips), keys, pool))
     if not smodes or not songs:
         log("Jukebox: not put on this card: %s." % (
             "none of its songs landed" if smodes else "none of the song modes' sounds is in this "
             "card's sound bank"), "warning")
         return None
-    log("Jukebox: %d song(s) for %d song mode(s); each song mode's start draws one of them (a "
-        "Common song three times as often as a Rare one, never one of the last five) and plays its "
-        "intro video and its song." % (len(songs), len(smodes)), "info")
+    log("Jukebox: %d song(s) for %d song mode(s) in %d pool(s); each song mode's start draws one of its "
+        "pool's songs (a Common song three times as often as a Rare one, never one of the pool's last "
+        "five) and plays its intro video and its song." % (len(songs), len(smodes), len(filled)), "info")
     return {"modes": smodes, "songs": songs}
 
 

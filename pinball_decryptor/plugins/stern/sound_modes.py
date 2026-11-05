@@ -1115,9 +1115,9 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     buttons' switch ids) and an ``afile`` line per file (its record's key, its length in ms);
     PAD-645: and with ``"quiet"`` (a silent record's key) an ``aquiet`` line: the game's own sound
     at a press plays it instead.
-    PAD-685: *jukebox* ``{"modes": [(start site, [intro clip names], [record keys])], "songs":
-    [(weight, record key, clip name or "")]}``, a ``jmode`` line per song mode and a ``jsong`` line per
-    song (pad_mode_runtime.c "the jukebox").
+    PAD-685: *jukebox* ``{"modes": [(start site, [intro clip names], [record keys], pool)], "songs":
+    [(weight, record key, clip name or "", pool)]}``, a ``jmode`` line per song mode and a ``jsong`` line per
+    song (pad_mode_runtime.c "the jukebox"); PAD-1007: a pool other than 0 ends the line.
     PAD-945: *shots* ``{"request", "key", "files": [(mode id, switch id, record key, ms[, lit]), ...]}``,
     the sounds on the shots of the game's modes: a ``gshot`` line (the carrier, its own record's key)
     and a ``gsfile`` line per file (pad_mode_runtime.c "a sound on a shot"); round 2: a row with a
@@ -1147,11 +1147,13 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
         if attract.get("gap_ms"):
             lines.append("agap\t%d" % int(attract["gap_ms"]))      # PAD-641 round 2
     if jukebox and jukebox.get("modes") and jukebox.get("songs"):
-        for site, clips, keys in jukebox["modes"]:
+        for site, clips, keys, *pool in jukebox["modes"]:
             lines.append("jmode\t%s\t%s\t%s" % (site or "-", ",".join(clips) or "-",
-                                                 ",".join(bytes(k).hex() for k in keys)))
-        for weight, key, clip in jukebox["songs"]:
-            lines.append("jsong\t%d\t%s\t%s" % (int(weight), bytes(key).hex(), clip or "-"))
+                                                 ",".join(bytes(k).hex() for k in keys))
+                         + ("\t%d" % int(pool[0]) if pool and pool[0] else ""))
+        for weight, key, clip, *pool in jukebox["songs"]:
+            lines.append("jsong\t%d\t%s\t%s" % (int(weight), bytes(key).hex(), clip or "-")
+                         + ("\t%d" % int(pool[0]) if pool and pool[0] else ""))
     if shots and shots.get("files"):
         lines.append("gshot\t%d\t%s" % (int(shots["request"]), bytes(shots["key"]).hex()))
         for k, row in enumerate(shots["files"], 1):
@@ -1183,7 +1185,8 @@ REC_ATTRACT = "#attract"
 #: PAD-641 round 2: the time between two of them: ``#agap <seconds>``
 REC_AGAP = "#agap"
 #: PAD-685: a jukebox song: ``#jsong <k> <slot idx> <record idx> <weight> <slot rel> <the file's own
-#: name>`` (its intro clip, when it has one, is in the video bank as ``jukebox.clip_name(k)``)
+#: name> [<pool>]`` (its intro clip, when it has one, is in the video bank as ``jukebox.clip_name(k)``;
+#: PAD-1007: its pool's key, none for the song modes')
 REC_JSONG = "#jsong"
 #: PAD-945: a sound on a shot: ``#gshot <k> <slot idx> <record idx> <mode id> <switch id> <slot rel>
 #: <the file's own name> <the mode's name> <the switch's name> [<lit>]`` (the slot is the carrier's;
@@ -1230,9 +1233,11 @@ def card_record(modes, used):
             src = modes.jukebox[k - 1] if 0 < k <= len(modes.jukebox) else ""
             box = (modes.juke_plan or {}).get("box")
             weight = box.songs[k - 1].weight if box is not None and 0 < k <= len(box.songs) else 2
+            pool = box.songs[k - 1].pool if box is not None and 0 < k <= len(box.songs) else ""
             out.append("\t".join([REC_JSONG, str(k), str(int(u["slot"])), _rec_host(u), str(int(weight)),
                                   _rec_word(u["rel"]),
-                                  _rec_word(os.path.basename(str(src).replace("\\", "/")))]))
+                                  _rec_word(os.path.basename(str(src).replace("\\", "/")))]
+                                 + ([_rec_word(pool)] if pool and pool != "songs" else [])))
             continue
         if is_shot(m):
             k = shot_of(m)
@@ -1363,7 +1368,8 @@ def read_card_record(text):
                 seen = True
                 juke.append({"k": int(f[1]), "slot": int(f[2]), "host": int(f[3]),
                              "weight": int(f[4]) if f[4].isdigit() else 2, "rel": f[5],
-                             "name": f[6] if len(f) > 6 else ""})
+                             "name": f[6] if len(f) > 6 else "",
+                             "pool": f[7] if len(f) > 7 and f[7] else "songs"})     # PAD-1007
         except ValueError:
             continue
     if not seen:

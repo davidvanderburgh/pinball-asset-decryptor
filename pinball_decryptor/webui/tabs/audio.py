@@ -286,8 +286,9 @@ class AudioTab(FindOriginalsMixin, TabService):
         # PAD-641: the sounds the flipper buttons play in attract ([path, ...]), the same record
         self._attract = []
         self._attract_gap = 0            # PAD-641 round 2: seconds between two of them (0: any time)
-        # PAD-685: the jukebox's songs ([{"audio", "video", "weight"}]), its own sidecar key
+        # PAD-685: the jukebox's songs ([{"audio", "video", "weight", "pool"}]), its own sidecar key
         self._juke = []
+        self._juke_pool = ""             # PAD-1007: the pool the Jukebox window shows (its first: "")
         # PAD-945: the sounds on the shots of the game's modes ([{"mode", "mode_name",
         # "switch", "switch_name", "file"}]), the same record; the sound the window adds next and
         # the game's modes and shots it offers (read once per project)
@@ -2834,7 +2835,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         # PAD-685: the jukebox
         from ...plugins.stern import jukebox as _JB
         box = _JB.clean(staged.get(_JB.STAGED_KEY) if isinstance(staged, dict) else None)
-        self._juke = [{"audio": g.audio, "video": g.video, "weight": g.weight} for g in box.songs]
+        self._juke = [{"audio": g.audio, "video": g.video, "weight": g.weight, "pool": g.pool} for g in box.songs]
 
     def _modes_json(self):
         names = list(self._mode_names)
@@ -3676,17 +3677,50 @@ class AudioTab(FindOriginalsMixin, TabService):
             tip.append(why)
         return {"n": len(self._juke), "why": why, "tip": tip}
 
+    def _juke_pools(self):
+        """PAD-1007: the Jukebox window's pools (``jukebox.pool_rows``, read off the UI thread with the
+        offer), any pool a song names that the offer did not list after them."""
+        from ...plugins.stern import jukebox as _JB
+        rows = [dict(r) for r in ((self._sm_offer or {}).get("jukebox_pools") or ())] or [
+            {"key": _JB.DEFAULT_POOL, "name": _JB.SONG_MODES_POOL.name, "about": _JB.SONG_MODES_POOL.about,
+             "intro": True}]
+        have = {r["key"] for r in rows}
+        for g in self._juke:
+            key = g.get("pool") or _JB.DEFAULT_POOL
+            if key not in have:
+                have.add(key)
+                rows.append({"key": key, "name": key, "intro": False,
+                             "about": "This game has no pool of this name: these songs are left out of a build."})
+        return rows
+
+    def _juke_pool_now(self, pools=None):
+        """The pool the window shows: the one picked last, while the game has it; else its first."""
+        pools = pools or self._juke_pools()
+        keys = [r["key"] for r in pools]
+        return self._juke_pool if self._juke_pool in keys else keys[0]
+
+    def _juke_in(self, pool):
+        """PAD-1007: ``[(k, song)]`` - the songs of *pool*, k their place in the whole jukebox (1..)."""
+        from ...plugins.stern import jukebox as _JB
+        return [(k, g) for k, g in enumerate(self._juke, 1) if (g.get("pool") or _JB.DEFAULT_POOL) == pool]
+
     def _jukebox_rows(self):
         from ...plugins.stern import jukebox as _JB
         words = dict(_JB.WEIGHTS)
-        return {"songs": [{"k": k, "audio": os.path.basename(g["audio"]), "path": g["audio"],
+        pools = self._juke_pools()
+        pool = self._juke_pool_now(pools)
+        here = self._juke_in(pool)
+        for r in pools:
+            r["n"] = len(self._juke_in(r["key"]))
+        return {"songs": [{"k": k, "n": n, "audio": os.path.basename(g["audio"]), "path": g["audio"],
                            "video": os.path.basename(g["video"]) if g.get("video") else "",
                            "vpath": g.get("video") or "",
                            "gone": not os.path.isfile(g["audio"]) or bool(
                                g.get("video") and not os.path.isfile(g["video"])),
                            "weight": int(g.get("weight") or _JB.DEFAULT_WEIGHT),
                            "weight_word": words.get(int(g.get("weight") or _JB.DEFAULT_WEIGHT), "")}
-                          for k, g in enumerate(self._juke, 1)],
+                          for n, (k, g) in enumerate(here, 1)],
+                "pools": pools, "pool": pool, "total": len(self._juke),
                 "weights": [{"w": w, "label": n} for w, n in _JB.WEIGHTS],
                 "max": _JB.MAX_SONGS, "why": str(self._jukebox_why() or ""),
                 "tip": _JUKE_TIP, "running": self._running()}
@@ -3719,9 +3753,14 @@ class AudioTab(FindOriginalsMixin, TabService):
         """The Jukebox window: ``add`` (choose songs' audio files), ``video:k`` (song k's intro
         video), ``novideo:k``, ``weight:k:w`` (1 Rare .. 3 Common), ``play:k`` (song k in the
         Replacement pane), ``up:k`` / ``down:k``, ``off:k`` and ``clear`` (every song, once the
-        person says yes: PAD-1002). Returns the window's rows."""
+        person says yes: PAD-1002). PAD-1007: ``pool:<key>`` shows that pool's songs; ``add``,
+        ``clear`` and the moves are the shown pool's. Returns the window's rows."""
         from ...plugins.stern import jukebox as _JB
         kind, _c, rest = str(action or "").partition(":")
+        if kind == "pool":
+            if rest in [r["key"] for r in self._juke_pools()]:
+                self._juke_pool = rest
+            return self._jukebox_rows()
         k_s, _c, val = rest.partition(":")
         try:
             k = int(k_s) if k_s else 0
@@ -3750,15 +3789,25 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._juke_add(paths)
             return self._jukebox_rows()
         if kind == "clear":
-            if self._running() or not self._juke:
+            # PAD-1007: the shown pool's songs (the whole jukebox when the game has one pool)
+            pools = self._juke_pools()
+            pool = self._juke_pool_now(pools)
+            here = self._juke_in(pool)
+            if self._running() or not here:
                 return self._jukebox_rows()
-            n = len(self._juke)
+            n = len(here)
+            name = next((r["name"] for r in pools if r["key"] == pool), pool)
             if not compat.messagebox.askyesno(
-                    "Jukebox", "Take all %d song%s out of the jukebox and start over?"
+                    "Jukebox", ("Take all %d song%s out of the jukebox and start over?" if len(pools) == 1 else
+                                "Take all %d song%s out of " + name + " and start over?")
                     % (n, "" if n == 1 else "s")):
                 return self._jukebox_rows()
-            del self._juke[:]
-            self.log("Replace Audio: the jukebox's %d song(s) were taken out; it is empty." % n, "info")
+            gone = {k for k, _g in here}
+            self._juke[:] = [g for k, g in enumerate(self._juke, 1) if k not in gone]
+            if len(pools) == 1:
+                self.log("Replace Audio: the jukebox's %d song(s) were taken out; it is empty." % n, "info")
+            else:
+                self.log("Replace Audio: the jukebox's %d song(s) of %s were taken out." % (n, name), "info")
             self._juke_changed()
             return self._jukebox_rows()
         if not 1 <= k <= len(self._juke):
@@ -3792,9 +3841,13 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._pane_load("rep", g["audio"], autoplay=True, label="Jukebox song %d: %s" % (k, name))
             return self._jukebox_rows()
         elif kind in ("up", "down"):
-            j = k - 2 if kind == "up" else k
-            if not 0 <= j < len(self._juke):
+            # PAD-1007: past the next song of its own pool
+            places = [i for i, _g in self._juke_in(g.get("pool") or _JB.DEFAULT_POOL)]
+            at = places.index(k)
+            other = at - 1 if kind == "up" else at + 1
+            if not 0 <= other < len(places):
                 return self._jukebox_rows()
+            j = places[other] - 1
             self._juke[k - 1], self._juke[j] = self._juke[j], self._juke[k - 1]
         elif kind == "off":
             del self._juke[k - 1]
@@ -3827,17 +3880,20 @@ class AudioTab(FindOriginalsMixin, TabService):
         an audio with no video is a song with its song mode's own intro. Several audio (or video)
         files of one name ask which one. A song whose name is in the jukebox already takes that
         song's place (its weight and place in the list kept, its intro video kept when none came
-        with it), and the person is told."""
+        with it), and the person is told. PAD-1007: the songs go in the pool the window shows, and
+        only a song of that pool is taken to be the same song (one song may be in several pools)."""
         from ...plugins.stern import jukebox as _JB
         songs, lone = _JB.pair_files(paths)
         added, replaced, full = 0, [], []
+        pool = self._juke_pool_now()
+        mine = [g for _k, g in self._juke_in(pool)]
         for key, audios, videos in songs:
             audio = self._juke_pick("song's audio", audios, "Leave this song out")
             if audio is None:
                 continue
             video = self._juke_pick("intro video", videos, "No intro video") if videos else ""
             name = os.path.basename(audio)
-            old = next((g for g in self._juke if _JB.song_key(g["audio"]) == key), None)
+            old = next((g for g in mine if _JB.song_key(g["audio"]) == key), None)
             if old is not None:
                 old["audio"] = audio
                 if video:
@@ -3847,7 +3903,9 @@ class AudioTab(FindOriginalsMixin, TabService):
             if len(self._juke) >= _JB.MAX_SONGS:
                 full.append(name)
                 continue
-            self._juke.append({"audio": audio, "video": video or "", "weight": _JB.DEFAULT_WEIGHT})
+            g = {"audio": audio, "video": video or "", "weight": _JB.DEFAULT_WEIGHT, "pool": pool}
+            self._juke.append(g)
+            mine.append(g)
             added += 1
         lone_names = [os.path.basename(v) for v in lone]
         said = ["the jukebox has %d more song(s) (%d in all)" % (added, len(self._juke))]

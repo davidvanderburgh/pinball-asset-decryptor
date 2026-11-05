@@ -512,12 +512,16 @@ function JukeVideo({ k, path, name, onClose }) {
 const JUKE_COLS = { k: { val: (g) => g.k }, audio: { val: (g) => g.audio }, video: { val: (g) => g.video || "" },
   weight: { val: (g) => Number(g.weight), desc: true } };
 
+// PAD-1007: the jukebox's pools - each of the game's musics draws from its own pool's songs (the song
+// modes, the special modes, the background music): the window shows one pool at a time
 function JukeboxModal({ data, onClose }) {
   const [d, setD] = useState(data);
   const [watch, setWatch] = useState(null);
   const act = async (a) => { const got = await call("audio.jukebox_action", a); if (got) setD(got); };
   const songs = d.songs || [];
-  const full = songs.length >= (d.max || 0);
+  const pools = d.pools || [];
+  const pool = pools.find((p) => p.key === d.pool) || pools[0] || { intro: true };
+  const full = (d.total ?? songs.length) >= (d.max || 0);
   const weights = (d.weights || []).map((w) => ({ value: String(w.w), label: w.label }));
   const { shown, Th, sorted } = useColSort(songs, JUKE_COLS);
   const moveTip = sorted ? "Sort by # to move songs: the list is sorted by another column" : undefined;
@@ -532,12 +536,17 @@ function JukeboxModal({ data, onClose }) {
     <div class="stack" style="gap:10px">
       <p class="aud-p">${d.tip}</p>
       ${d.why ? html`<${Note} kind="warn">${d.why}<//>` : null}
+      ${pools.length > 1 ? html`<div class="row aud-juke-pools" style="gap:10px;flex-wrap:wrap">
+        <${Seg} value=${d.pool} options=${pools.map((p) => ({ value: p.key, label: `${p.name} (${p.n || 0})`, title: p.about }))}
+          onChange=${(v) => act(`pool:${v}`)} />
+        <span class="muted small">${pool.about}</span></div>` : null}
       ${songs.length ? html`<div class="aud-juke"><table>
         <thead><tr><${Th} k="k">#<//><${Th} k="audio">Song<//><${Th} k="video">Intro video<//><${Th} k="weight">How often<//><th></th></tr></thead>
         <tbody>${shown.map((g) => html`<tr class=${cx(g.gone && "gone")} title=${g.gone ? "A file of this song is not on this PC any more" : ""}>
-          <td class="muted">${g.k}</td>
+          <td class="muted">${g.n ?? g.k}</td>
           <td><span class="nw">${g.audio}</span></td>
-          <td>${g.video ? html`<span class="nw"><${Button} size="sm" kind="ghost" icon="video" title="Watch this intro video"
+          <td>${!pool.intro ? html`<span class="muted" title="This music opens with no intro video of its own, so its songs show none">none</span>`
+            : g.video ? html`<span class="nw"><${Button} size="sm" kind="ghost" icon="video" title="Watch this intro video"
               onClick=${() => setWatch(g)} /> ${g.video}</span>`
             : html`<span class="muted">its song mode's own</span>`}</td>
           <td><${Select} sm value=${String(g.weight)} options=${weights} disabled=${d.running}
@@ -545,17 +554,18 @@ function JukeboxModal({ data, onClose }) {
           <td class="nw">
             <${RowPlay} path=${g.path} title="Play this song" onPlay=${() => act(`play:${g.k}`)} />
             <${Button} size="sm" kind="ghost" icon="more" title="More for this song" onClick=${(e) => openMenu(e.currentTarget, [
-              { label: g.video ? "Change the intro video…" : "Choose an intro video…", icon: "video", disabled: d.running,
-                title: "The video the song mode opens with when this song is drawn, the song's name in it", onClick: () => act(`video:${g.k}`) },
-              g.video ? { label: "Watch the intro video", icon: "play", onClick: () => setWatch(g) } : null,
-              g.video ? { label: "Use the song mode's own intro", icon: "undo", disabled: d.running, onClick: () => act(`novideo:${g.k}`) } : null,
-              { sep: true },
-              { label: "Move up", icon: "up", disabled: d.running || sorted || g.k === 1, title: moveTip, onClick: () => act(`up:${g.k}`) },
-              { label: "Move down", icon: "down", disabled: d.running || sorted || g.k === songs.length, title: moveTip, onClick: () => act(`down:${g.k}`) },
+              pool.intro ? { label: g.video ? "Change the intro video…" : "Choose an intro video…", icon: "video", disabled: d.running,
+                title: "The video the song mode opens with when this song is drawn, the song's name in it", onClick: () => act(`video:${g.k}`) } : null,
+              pool.intro && g.video ? { label: "Watch the intro video", icon: "play", onClick: () => setWatch(g) } : null,
+              pool.intro && g.video ? { label: "Use the song mode's own intro", icon: "undo", disabled: d.running, onClick: () => act(`novideo:${g.k}`) } : null,
+              pool.intro ? { sep: true } : null,
+              { label: "Move up", icon: "up", disabled: d.running || sorted || (g.n ?? g.k) === 1, title: moveTip, onClick: () => act(`up:${g.k}`) },
+              { label: "Move down", icon: "down", disabled: d.running || sorted || (g.n ?? g.k) === songs.length, title: moveTip, onClick: () => act(`down:${g.k}`) },
               { sep: true },
               { label: "Take out of the jukebox", icon: "x", disabled: d.running, onClick: () => act(`off:${g.k}`) },
             ].filter(Boolean), { align: "right" })} />
           </td></tr>`)}</tbody></table></div>`
+        : pools.length > 1 ? html`<div class="muted">No songs in ${pool.name} yet: the game plays its own music there.</div>`
         : html`<div class="muted">No songs yet. Add the songs' audio files, and their intro videos with them: Hey Jude.mp4 is the intro of Hey Jude.wav.</div>`}
     </div>
     ${watch ? html`<${JukeVideo} k=${watch.k} path=${watch.vpath} name=${watch.video} onClose=${() => setWatch(null)} />` : null}

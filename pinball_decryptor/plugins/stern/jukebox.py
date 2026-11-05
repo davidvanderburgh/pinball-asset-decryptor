@@ -23,13 +23,22 @@ The project lists its songs (``jukebox`` in ``.staged_changes.json``: ``{"songs"
 
 Emulator-proven on Beatles 1.29 with the stock songs dealt among their own modes (Drive My Car's start
 drew It Won't Be Long: its intro and its audio, r 0.992 against the stock capture).
+
+POOLS (PAD-1007): the same owner asked for "X pools, each with its own song/audio list", which "drive and
+restrict which audio clips are rotated based on the original audio track": the five song modes draw from one
+list, the two special modes from another, the two background songs from a third, and a song wanted in two
+pools is added to each (each pool has its own songs). A song's ``pool`` is the key of one of its title's
+:data:`POOLS` (:data:`DEFAULT_POOL` when it names none: a jukebox made before pools is the song modes');
+every music of the title (:data:`TITLES`) belongs to one pool, and a Write ends each ``jmode`` / ``jsong``
+line with its pool's number (its place in the title's pools): a music's start draws one of its own pool's
+songs, and a music whose pool has no song plays its own.
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
 
-#: the project sidecar's key: ``{"songs": [{"audio": file, "video": file, "weight": 1..3}, ...]}``
+#: the project sidecar's key: ``{"songs": [{"audio": file, "video": file, "weight": 1..3, "pool": key}, ...]}``
 STAGED_KEY = "jukebox"
 #: songs a card may carry (pad_mode_runtime.c JUKE_SONGS)
 MAX_SONGS = 128
@@ -38,19 +47,33 @@ WEIGHTS = ((3, "Common"), (2, "Normal"), (1, "Rare"))
 DEFAULT_WEIGHT = 2
 #: what an added intro clip is called in the bank (k = the song's number, 1..)
 CLIP_NAME = "PadJukebox%d"
+#: PAD-1007: the pool of a song that names none (a jukebox made before pools): the song modes'
+DEFAULT_POOL = "songs"
+#: pools a card may have (pad_mode_runtime.c JUKE_POOLS)
+MAX_POOLS = 8
 
 
 @dataclass(frozen=True)
 class SongMode:
-    """A song mode of a title: its name, its start (a port site the runtime hooks), its intro clips
-    (the project's video slots, its own first: the songs' clips are made into its format), their
-    names in the video bank, and its music's records (the sound bank's idx numbers, its opening
-    first)."""
+    """A song mode of a title: its name, its start (a port site the runtime hooks, ``""`` for none:
+    it draws when the game first asks for its music), its intro clips (the project's video slots, its
+    own first: the songs' clips are made into its format), their names in the video bank, its music's
+    records (the sound bank's idx numbers, its opening first) and (PAD-1007) its pool."""
     name: str
     site: str
     intros: tuple
     clips: tuple
     records: tuple
+    pool: str = DEFAULT_POOL
+
+
+@dataclass(frozen=True)
+class Pool:
+    """PAD-1007: one of a title's pools of music: its key (a song's ``pool``), its name in the Jukebox
+    window and what plays its songs (the window's line under it)."""
+    key: str
+    name: str
+    about: str
 
 
 #: ``<game>-<version>``: the song modes, read off the emulator (each song mode started and its
@@ -79,8 +102,35 @@ TITLES = {
                  ("video/FeatureStarts_POP_Start.mov",
                   "video/Feature_Starts_Short_POP_Bumper_Start_Short.mov"),
                  ("FeatureStarts.POP_Start", "Feature_Starts_Short.POP_Bumper_Start_Short"), (42, 667)),
+        # PAD-1007: the game's other four musics (sound ids 952-960 are its nine, one record pair each; the
+        # request table). The two multiballs' (the special modes): Beatlemania Multiball, the four-ball one
+        # (emulator: its own start, wizard_go_1, showed Taxman_Start and looked up sid 952's records, request
+        # 90 "MUSIC: TAXMAN MULTIBALL"), and the jackpot multiball (sid 955, request 82 "MUSIC: MULTIBALL
+        # 1", called from the multiball start's other branch and beside the Multiball_A clips: its intro
+        # Multiball_feature.Multiball_A_Start). The other two, 958 ("MUSIC: MULTIBALL READY") and 956, are
+        # the background songs, with no intro of their own. No start site: each draws when the game first
+        # asks for it (again at the next game, or after JUKE_GAP without it)
+        SongMode("Beatlemania Multiball", "", ("video/Taxman_Start.mov",), ("Taxman_Start",), (461, 370),
+                 "special"),
+        SongMode("Jackpot multiball", "", ("video/Multiball_feature_Multiball_A_Start.mov",),
+                 ("Multiball_feature.Multiball_A_Start",), (574, 797), "special"),
+        SongMode("Background song (multiball ready)", "", (), (), (148, 311), "background"),
+        SongMode("Background song", "", (), (), (294, 494), "background"),
     ),
 }
+
+#: PAD-1007: ``<game>-<version>``: its pools, in the order the Jukebox window shows them (a title with no
+#: entry has one: the song modes)
+POOLS = {
+    "beatles-1.29": (
+        Pool("songs", "Song modes", "The five song modes: each start draws one of these songs."),
+        Pool("special", "Special modes", "The two multiballs (the four-ball one and the jackpot one): "
+                                         "each start draws one of these songs, with its own intro video."),
+        Pool("background", "Background music", "The two background songs: each game draws one of these in "
+                                               "the place of each. They open with no intro video."),
+    ),
+}
+SONG_MODES_POOL = Pool(DEFAULT_POOL, "Song modes", "The song modes: each start draws one of these songs.")
 
 NO_TITLE = "The app cannot tell which game this project is for, so it cannot give it a jukebox."
 NOT_OFFERED = ("A jukebox is not offered on %s. It is made for the song modes of The Beatles 1.29.")
@@ -97,6 +147,7 @@ class Song:
     audio: str
     video: str = ""
     weight: int = DEFAULT_WEIGHT
+    pool: str = DEFAULT_POOL
 
 
 @dataclass
@@ -116,9 +167,15 @@ def clean_weight(v):
     return max(1, min(3, v))
 
 
+def clean_pool(v):
+    """PAD-1007: a song's pool key (:data:`DEFAULT_POOL` when it names none)."""
+    v = str(v).strip() if isinstance(v, str) else ""
+    return v[:40] if v else DEFAULT_POOL
+
+
 def clean(raw):
     """A :class:`Jukebox` from a sidecar's value: songs with an audio file, at most
-    :data:`MAX_SONGS`."""
+    :data:`MAX_SONGS`, each in its pool (PAD-1007)."""
     out = Jukebox()
     songs = raw.get("songs") if isinstance(raw, dict) else None
     for s in (songs if isinstance(songs, (list, tuple)) else ()):
@@ -128,7 +185,8 @@ def clean(raw):
         if not isinstance(audio, str) or not audio.strip():
             continue
         video = s.get("video") if isinstance(s.get("video"), str) else ""
-        out.songs.append(Song(audio=audio, video=video.strip(), weight=clean_weight(s.get("weight"))))
+        out.songs.append(Song(audio=audio, video=video.strip(), weight=clean_weight(s.get("weight")),
+                              pool=clean_pool(s.get("pool"))))
         if len(out.songs) >= MAX_SONGS:
             break
     return out
@@ -165,7 +223,8 @@ def to_json(box):
     """The sidecar value for *box* (``None`` when it has no song)."""
     if not box.songs:
         return None
-    return {"songs": [dict({"audio": s.audio, "weight": int(s.weight)}, **({"video": s.video} if s.video else {}))
+    return {"songs": [dict({"audio": s.audio, "weight": int(s.weight)}, **({"video": s.video} if s.video else {}),
+                           **({"pool": s.pool} if s.pool != DEFAULT_POOL else {}))
                       for s in box.songs]}
 
 
@@ -201,6 +260,37 @@ def song_modes(prof):
     return TITLES.get(title_key(prof), ())
 
 
+def pools(prof):
+    """PAD-1007: the title's pools (:data:`POOLS`), in the Jukebox window's order: the song modes' alone on a
+    title with no entry, ``()`` on a title with no song modes."""
+    if not song_modes(prof):
+        return ()
+    return POOLS.get(title_key(prof), (SONG_MODES_POOL,))
+
+
+def pool_number(prof, key):
+    """PAD-1007: the pool *key*'s number on *prof*'s card (its place in :func:`pools`), None when the title
+    has no such pool."""
+    for n, p in enumerate(pools(prof)):
+        if p.key == key:
+            return n
+    return None
+
+
+def pool_modes(prof, key):
+    """PAD-1007: the title's musics that play pool *key*'s songs."""
+    return tuple(m for m in song_modes(prof) if m.pool == key)
+
+
+def pool_intro(prof, key):
+    """PAD-1007: the intro slot (``video/...``) pool *key*'s songs' intro videos are made like, ``""`` when
+    none of its musics has an intro the jukebox can show a song's in place of."""
+    for m in pool_modes(prof, key):
+        if m.intros:
+            return m.intros[0]
+    return ""
+
+
 def title_refusal(prof):
     """Why *prof*'s card cannot have a jukebox, or ``""``."""
     if prof is None:
@@ -227,6 +317,24 @@ def offer(project, probe=True):
     return why if load(project).any else None
 
 
+def pool_rows(project, probe=True):
+    """PAD-1007: the Jukebox window's pools for the project's game: ``[{"key", "name", "about", "intro"}]``
+    (*intro*: its musics have an intro a song's video shows in place of), the title's own in its order, then
+    any pool the project's songs name that the game does not have (made for another game: they stay listed,
+    so they can be moved or taken out). *probe* as :func:`offer`."""
+    prof = project_title(project, probe=probe)
+    rows = [{"key": p.key, "name": p.name, "about": p.about, "intro": bool(pool_intro(prof, p.key))}
+            for p in pools(prof)] or [{"key": DEFAULT_POOL, "name": SONG_MODES_POOL.name,
+                                       "about": SONG_MODES_POOL.about, "intro": True}]
+    have = {r["key"] for r in rows}
+    for s in load(project).songs:
+        if s.pool not in have:
+            have.add(s.pool)
+            rows.append({"key": s.pool, "name": s.pool, "intro": False,
+                         "about": "This game has no pool of this name: these songs are left out of a build."})
+    return rows
+
+
 def slot_rel(project, idx):
     """The project's audio slot of record *idx* (``audio/idx0848.wav`` or however its file is named
     there), ``""`` when it has none."""
@@ -244,9 +352,15 @@ def slot_rel(project, idx):
 
 def host_slot(project, prof):
     """The slot whose format the songs' audio is made into: the longest song mode record of the title
-    the project has (every song mode's records share one format)."""
+    the project has (every song mode's records share one format). PAD-1007: the first pool's records
+    (the song modes', as before pools), another pool's only when the project has none of those."""
+    first = pools(prof)[0].key if pools(prof) else DEFAULT_POOL
+    return _longest(project, pool_modes(prof, first)) or _longest(project, song_modes(prof))
+
+
+def _longest(project, modes):
     best = ("", -1)
-    for m in song_modes(prof):
+    for m in modes:
         for idx in m.records:
             rel = slot_rel(project, idx)
             if not rel:

@@ -37,14 +37,16 @@ the feature's gate.** It is used two ways across the library:
   host-availability mask. Flip it → the host is offered. *This is the clean,
   unlockable case.* It is also the only title whose gate is a pure tail-call
   wrapper; everywhere else the predicate is embedded in a larger function.
-- **Jaws**: the matching `device_usable(topper)` call sits in the code that
-  draws the topper's **display**; "The Shark Is Broken" challenge is unlocked
-  by in-play progress (shark teeth), not by the topper being present. Flipping
-  the gate frees nothing.
-- **Avengers / Jurassic Park / King Kong / Rush / Foo Fighters**: the predicate
-  is `device_usable(topper) AND <another condition>` (a game-state bit, or a
-  part-number check against valid topper models). The flip satisfies only the
-  presence half.
+- **Jaws**: the inline `device_usable(topper)` call sits inside a small "is a
+  valid topper present" predicate (device present AND a valid topper part). The
+  mode-of-play menu consults that predicate to decide whether to show THE SHARK
+  IS BROKEN. Flipping only the `device_usable` half is not enough (the part
+  check still fails), but forcing the WHOLE predicate to report present unlocks
+  it. Proven on the rig. *(So these are two different patches, chosen per game.)*
+- **Avengers / Jurassic Park / King Kong / Rush / Foo Fighters**: here the
+  `device_usable(topper)` call is in a void action that only drives the topper's
+  own effect; the modes themselves start from playfield collection with or
+  without the topper, so nothing is locked for this patch to free.
 
 So the box is **offered per game**, from `topper.FEATURES`, which lists only the
 games confirmed on the emulator to unlock, with the feature each adds. A title
@@ -53,15 +55,19 @@ joins it once checked, never before.
 ## Compatibility (what the topper adds, and whether this frees it)
 
 ### Confirmed — box offered, proven on the rig
-| Game | Topper adds |
-|---|---|
-| Venom LE / Pro | **Ghost Rider** — an 8th playable host on CHOOSE A HOST (a character with its own rules; plays on the normal playfield, so it is meaningful without the topper) |
+| Game | Topper adds | Patch strategy |
+|---|---|---|
+| Venom LE / Pro | **Ghost Rider** — an 8th playable host on CHOOSE A HOST | `wrapper` — the `device_usable(topper)` tail-call wrapper the host-select reads |
+| Jaws LE / Pro | **"The Shark Is Broken"** — a challenge (EXCLUSIVE TOPPER MODE) in CHOOSE YOUR MODE OF PLAY; alternate rules on the normal playfield | `validity_fn` — force the "is a valid topper present" predicate to report present |
 
-### Topper adds a playable mode, but this patch does not free it
+Jaws, proven end to end (topper absent): the stock card drops THE SHARK IS
+BROKEN from the menu; the built card shows it in red, and selecting it starts
+and plays the challenge (menu → start → ball in play).
+
+### Not freed by this patch (yet)
 | Game | Topper adds | Why not |
 |---|---|---|
-| Jaws LE / Pro | "The Shark Is Broken" challenge | unlocked by shark-teeth progress; the topper call is display-only |
-| John Wick LE / Pro | "Tick Tock Mr. Wick" challenge | unlocked in play; no topper-presence gate at all |
+| John Wick LE / Pro | "Tick Tock Mr. Wick" challenge | its menu reads a different topper signal than Jaws' predicate (its part-number/board checks only drive the topper display). Still being worked. |
 
 ### Topper adds a mode that is NOT locked by the topper (patch does nothing)
 Avengers Infinity (Gem Mania), Jurassic Park (Goat Mania), King Kong (Golden

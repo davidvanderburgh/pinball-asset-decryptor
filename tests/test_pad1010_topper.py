@@ -206,17 +206,33 @@ def test_every_build(card):
     assert T._find(out) is None
 
 
+def _word_at_elf(elf, va):
+    from pinball_decryptor.plugins.stern.coin_door import _Elf
+    e = _Elf(elf)
+    return struct.unpack_from("<I", elf, e.off(va))[0]
+
+
 def test_offered_only_for_registered_games():
-    """plan() offers nothing for a game not in FEATURES, even when _find locates a gate (Jaws)."""
-    for card in ("venom_le-1_07_0.Release.8G.sdcard.raw", "jaws_le-1_02_0.Release.16G.sdcard.raw"):
+    """plan() is per-game: offered for registered games with the right strategy, nothing otherwise."""
+    for card in ("venom_le-1_07_0.Release.8G.sdcard.raw", "jaws_le-1_02_0.Release.16G.sdcard.raw",
+                 "mando_le-1_45_0.Release.8G.sdcard.raw"):
         if not os.path.isfile(os.path.join(_LIB, card)):
             pytest.skip("the card library is not on this machine")
     venom = bytes(_program(os.path.join(_LIB, "venom_le-1_07_0.Release.8G.sdcard.raw")))
     jaws = bytes(_program(os.path.join(_LIB, "jaws_le-1_02_0.Release.16G.sdcard.raw")))
-    # Venom is registered: its plan carries the feature text and the same sites _find gives
+    mando = bytes(_program(os.path.join(_LIB, "mando_le-1_45_0.Release.8G.sdcard.raw")))
+    # Venom (wrapper strategy): the plan carries the feature text and the device_usable-wrapper sites
     pv = T.plan(venom, "venom_le")
-    assert pv and pv["feature"] == T.FEATURES["venom_le"] and pv["sites"] == T._find(venom)["sites"]
+    assert pv and pv["feature"] == T.FEATURES["venom_le"][0] and pv["sites"] == T._find(venom)["sites"]
     assert T.plan(venom, None) is None and T.plan(venom, "jaws_le") is None
-    # Jaws has a gate (_find finds it) but is NOT registered: the box is not offered
-    assert T._find(jaws) is not None
-    assert T.plan(jaws, "jaws_le") is None
+    # Jaws (validity_fn strategy): its plan patches a function entry to mov r0,#1 ; bx lr, and _find alone (the
+    # device_usable flip) is a DIFFERENT, insufficient patch
+    pj = T.plan(jaws, "jaws_le")
+    assert pj and pj["feature"] == T.FEATURES["jaws_le"][0]
+    assert {s[2] for s in pj["sites"]} == {0xE3A00001, 0xE12FFF1E}
+    out = T.patched_bytes(jaws, pj)
+    entry = pj["sites"][0][0]
+    assert _word_at_elf(out, entry) == 0xE3A00001 and _word_at_elf(out, entry + 4) == 0xE12FFF1E
+    assert pj["sites"] != T._find(jaws)["sites"]
+    # Mandalorian has no registered topper feature: nothing offered
+    assert T.plan(mando, "mando_le") is None

@@ -66,14 +66,23 @@ from .coin_door import _Elf
 _MOV_R0_1 = 0xE3A00001          # mov r0, #1
 _BX_LR = 0xE12FFF1E             # bx lr
 
-#: ``game program directory -> what the topper adds that this unlock frees``.  Only games where the topper-present
-#: gate IS the feature's gate (so flipping it to "present" makes the feature available without the topper), each
-#: confirmed on the emulator.  Keyed by the game program's own directory name (``venom_le``...), which the caller
-#: takes from its firmware path.  Games whose topper content is gated another way (Jaws / John Wick's challenges,
-#: unlocked by in-play progress; the many light-only and motor toppers) are deliberately absent.
+#: ``game program directory -> (what the topper adds that this frees, patch strategy)``.  Only games confirmed on
+#: the emulator to unlock, keyed by the game program's own directory name (``venom_le``...), which the caller takes
+#: from its firmware path.  The strategy differs because the topper-present check is wired differently per game:
+#:
+#: * ``"wrapper"`` (Venom): the check is a thin ``device_usable(topper)`` tail-call wrapper the host-select reads
+#:   directly - rewrite the wrapper to report present (:func:`_find`).
+#: * ``"validity_fn"`` (Jaws): the check is a small "is a valid topper present" predicate (it holds the inline
+#:   ``device_usable(topper)`` call) that the mode-of-play menu consults to show the exclusive challenge - force the
+#:   whole predicate to return present (:func:`_validity_fn_sites`), which is what the rig proved unlocks it.
+#:
+#: Games whose topper content is gated another way (John Wick's challenge, not yet cracked; the topper-mode titles'
+#: checks only drive the topper display; the many light/motor toppers) are deliberately absent.
 FEATURES = {
-    "venom_le": "the Ghost Rider host on the character-select screen",
-    "venom_pro": "the Ghost Rider host on the character-select screen",
+    "venom_le": ("the Ghost Rider host on the character-select screen", "wrapper"),
+    "venom_pro": ("the Ghost Rider host on the character-select screen", "wrapper"),
+    "jaws_le": ('the "The Shark Is Broken" challenge in the mode-of-play menu', "validity_fn"),
+    "jaws_pro": ('the "The Shark Is Broken" challenge in the mode-of-play menu', "validity_fn"),
 }
 
 
@@ -226,15 +235,59 @@ def _find(elf_bytes):
     return {"sites": sites, "devices": devices}
 
 
+def _validity_fn_sites(elf_bytes):
+    """Jaws-style: the two words at the entry of the "is a valid topper present" predicate - the function that holds
+    the inline ``device_usable(topper)`` call - rewritten to ``mov r0, #1 ; bx lr`` so it always reports present.
+    Proven on the emulator to put THE SHARK IS BROKEN back in the mode-of-play menu without the topper.  ``None`` if
+    no such predicate is found."""
+    try:
+        elf = _Elf(elf_bytes)
+    except (ValueError, struct.error):
+        return None
+    base, w, n = _words(elf)
+    usables = _find_device_usable(w, base, n)
+    if not usables:
+        return None
+    table = None
+    for u, b in usables:
+        if b is not None:
+            table = _device_table(elf, w, base, n, b)
+            if table:
+                break
+    out = []
+    for va, idx, link in _gates(w, base, n, usables):
+        if not link:                                    # only the inline-call form sits inside such a predicate
+            continue
+        name = _device_name(elf, table, idx) if table else None
+        if not _is_main_topper(name):
+            continue
+        i = (va - base) // 4                            # the function start: the push {..., lr} above the call
+        start = next((k for k in range(i, max(0, i - 600), -1)
+                      if (w[k] & 0xFFFF4000) == 0xE92D4000), None)
+        if start is None:
+            continue
+        entry = base + 4 * start
+        out.append((entry, w[start], _MOV_R0_1))
+        out.append((entry + 4, w[start + 1], _BX_LR))
+    return out or None
+
+
 def plan(elf_bytes, title=None):
     """The unlock for *title* (its game program directory name), or None.  Offered only on the games in
-    :data:`FEATURES`, each confirmed that flipping the gate frees the named feature; the result carries that
-    ``feature`` text for the box.  A game not in the table is offered nothing even when :func:`_find` locates a
-    topper gate in it."""
-    feature = FEATURES.get(title)
-    if feature is None:
+    :data:`FEATURES`, each confirmed on the emulator; the result carries the ``feature`` text for the box.  The
+    patch is found by the game's strategy (see :data:`FEATURES`).  A game not in the table is offered nothing even
+    when :func:`_find` locates a topper gate in it."""
+    entry = FEATURES.get(title)
+    if entry is None:
         return None
-    p = _find(elf_bytes)
+    feature, strategy = entry
+    if strategy == "wrapper":
+        p = _find(elf_bytes)
+    elif strategy == "validity_fn":
+        sites = _validity_fn_sites(elf_bytes)
+        p = {"sites": sites, "devices": []} if sites else None
+    else:
+        return None
     if not p:
         return None
     p["feature"] = feature

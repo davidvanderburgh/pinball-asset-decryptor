@@ -14951,10 +14951,14 @@ static void switches_arm(void)
  * coop.cfg (beside the runtime, or /dump for a rig):
  *   coop on
  *   button <switch id>        the button held at Start to add a teammate (the right flipper button)
- * A teammate joins when Start adds a player while the button is held, in a one-player game or a co-op one: the game's
- * own add runs (credits, its own hooks, the most players it allows), then its count of players goes back to 1. A
- * plain Start in a one-player game adds a competing player as the game always has, and a game of competing players
- * takes no teammate.
+ * A teammate joins when Start adds a player while the button is held, in a one-player game (then any Start in that
+ * co-op game): the game's own add runs (credits, its own hooks, the most players it allows) and counts the player, so
+ * the teammate has a score panel of its own. A plain Start in a one-player game adds a competing player as the game
+ * always has, and a game of competing players takes no teammate.
+ * Every panel shows the team's score (David, PAD-1017: "all the scores displayed in the HUD are the same"): the
+ * tick, and each ball's end, copy player 1's score into every teammate's (`data scores` u64[4], or `data scores32`).
+ * The game still PLAYS one player: inside its player change its count of players is 1 (coop_change_wrap), so it never
+ * changes to player 2's flags and lamps - the progress stays the team's.
  * At a ball's end with teammate t of n up: t < n - the ball's byte one down before the game's change, which puts it
  * back up (the same ball, the next teammate); an extra ball taken leaves it down - put back, the same teammate. t = n -
  * the game's change as it is: the next ball (or the game's end) and teammate 1. So the game ends after the last
@@ -15047,23 +15051,28 @@ static int coop_page_names(char names[][40], int n, int cap)
 /* Whose turn it is, on the screen: the game's own top line "BALL 1" (the message table's "BALL %d", every build's
  * words for it) reads "PLAYER 2  BALL 1" while teammate 2 is up, and is the game's own again when the game is over or
  * not a co-op one (coop_tick). The line is found by its English words once, when co-op is armed. */
-static void coop_ball_find(void)
+static int coop_msg_find(const char *words)
 {
     unsigned count, idx;
     const char **group;
     const char *w;
-    if (!(can & PM_CAN_MESSAGES) || !data("message_table") || !data("message_count")) return;
+    if (!(can & PM_CAN_MESSAGES) || !data("message_table") || !data("message_count")) return -1;
     count = *(unsigned *)(unsigned long)data("message_count");
-    if (count > 20000 || !maps_has(data("message_table"), 4u * count, MAP_R)) return;
+    if (count > 20000 || !maps_has(data("message_table"), 4u * count, MAP_R)) return -1;
     for (idx = 0; idx < count; idx++) {
         group = *(const char ***)(unsigned long)(data("message_table") + 4u * idx);
         if (!group || !maps_has((unsigned long)group, 4, MAP_R)) continue;
         w = group[0];
-        if (w && maps_has((unsigned long)w, 8, MAP_R) && str_eq(w, "BALL %d")) {
-            coop_ball_msg = (int)idx;
-            return;
-        }
+        if (w && maps_has((unsigned long)w, 8, MAP_R) && str_eq(w, words)) return (int)idx;
     }
+    return -1;
+}
+
+/* (The bonus count's head, the game's "PLAYER %d", stays the game's: borrowed for the teammate, the bonus screen lost
+ * its head and its TOTAL SCORE line - rig, Godzilla LE 1.16. It says PLAYER 1: the team.) */
+static void coop_ball_find(void)
+{
+    coop_ball_msg = coop_msg_find("BALL %d");
 }
 
 static void coop_turn_show(void)
@@ -15075,11 +15084,28 @@ static void coop_turn_show(void)
 }
 
 /* from the tick: the game's own words back once its co-op game is over */
+static void coop_scores_same(unsigned n);
 static void coop_tick(void)
 {
+    unsigned n = coop_teammates();
+    if (n && pm_in_game()) coop_scores_same(n);
     if (coop_ball_held && !(coop_teammates() && pm_in_game())) {
         pm_message_restore(COOP_MSG_ID);
         coop_ball_held = 0;
+    }
+}
+
+/* every teammate's score is the team's (player 1's): the HUD's panels all show the same */
+static void coop_scores_same(unsigned n)
+{
+    unsigned k, s32 = data("scores32"), s64 = data("scores");
+    if (n < 2 || n > 4) return;
+    if (s32) {
+        volatile unsigned *v = (volatile unsigned *)(unsigned long)s32;
+        for (k = 1; k < n; k++) if (v[k] != v[0]) v[k] = v[0];
+    } else if (s64) {
+        volatile uint64_t *v = (volatile uint64_t *)(unsigned long)s64;
+        for (k = 1; k < n; k++) if (v[k] != v[0]) v[k] = v[0];
     }
 }
 
@@ -15096,14 +15122,15 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         say("co-op: Start - the game added no one (credits, or the most players it allows)");
         return ret;
     }
-    *coop_players_byte = 1;                                   /* the game plays one player: the team */
     if (!n) {
         coop.game = chg_game_now() + 1;
         coop.turn = 1;
         n = 1;
     }
     coop.n = n + 1;
-    say("co-op: teammate %u joins (%u in the team; the game plays one player for them all)", coop.n, coop.n);
+    coop_scores_same(coop.n);
+    say("co-op: teammate %u joins (%u in the team, one score panel each; the game plays one player for them all)",
+        coop.n, coop.n);
     coop_scores_mark(coop.n);
     coop_turn_show();
     return ret;
@@ -15111,12 +15138,16 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
 
 static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
-    unsigned n = coop_teammates(), before, down, ret, next;
+    unsigned n = coop_teammates(), before, down, ret, next, players;
     if (!n) return coop_change_game(r0, r1, r2, r3);
+    coop_scores_same(n);                                      /* the ball's bonus is in: before the game's end reads them */
     before = *coop_ball_byte;
     down = coop.turn < n && before > 0;
     if (down) *coop_ball_byte = (unsigned char)(before - 1);
+    players = *coop_players_byte;
+    *coop_players_byte = 1;                                   /* one player to change to: player 1, the team */
     ret = coop_change_game(r0, r1, r2, r3);
+    *coop_players_byte = (unsigned char)players;
     next = coop_next_turn(n, coop.turn, before, *coop_ball_byte, down);
     if (down && *coop_ball_byte == before - 1) *coop_ball_byte = (unsigned char)before;   /* an extra ball: back up */
     say("co-op: ball %u, teammate %u of %u done - %s", before, coop.turn, n,

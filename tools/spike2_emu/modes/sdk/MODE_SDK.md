@@ -6111,16 +6111,20 @@ tab's **Co-op play**):
     coop on
     button 59        the switch held at Start to add a teammate (the right flipper button; the build reads its id)
 
-On the machine, a Start pressed with the button held, in the first ball of a one-player game (or a co-op one), adds a
-teammate. The game's own add-a-player runs as always (credits, its hooks, the most players it allows), then its count
-of players goes back to 1. A plain Start adds a competing player as stock, and a game of competing players takes no
+On the machine, a Start pressed with the button held, in the first ball of a one-player game (then any Start in that
+co-op game), adds a teammate. The game's own add-a-player runs as always (credits, its hooks, the most players it
+allows) and counts the player, so the teammate has a score panel. Every panel shows the team's score: the tick and
+each ball's end copy player 1's score into every teammate's (`data scores`, or `scores32`). The game still PLAYS one
+player, because inside its player change its count of players is 1, so it never changes to player 2's flags and lamps. A plain Start adds a competing player as stock, and a game of competing players takes no
 teammates. At each ball's end with teammate t of n up: for t < n, the ball's byte goes one down before the game's
 player change, which puts it back up, so the next teammate plays the same ball. An extra ball taken leaves the byte
 down; it is put back up and the same teammate shoots again. For t = n the game's change runs as it is (the next ball,
 or the game's end). So the game ends after the last teammate's last ball.
 
 - **Whose turn:** the game's own top line `BALL %d` (found in the message table by its English words) reads
-  `PLAYER 2  BALL %d` while teammate 2 is up. It goes back to the game's own words when the co-op game is over.
+  `PLAYER 2  BALL %d` while teammate 2 is up. It goes back to the game's own words when the co-op game is over. The
+  bonus count keeps the game's head (PLAYER 1, the team): borrowing its `PLAYER %d` for the teammate blanked the
+  bonus screen's head and TOTAL SCORE line on Godzilla LE 1.16.
 - **Its own boards:** one champion per team size (`2-PLAYER CO-OP` ... `4-PLAYER CO-OP`), kept the way a mode's
   challenge game keeps its own (PAD-640/663: the record in `/dump/pad_challenge_scores`, HIGHEST SCORES' first entry
   pointed at it for the game's end, the game's own records shut for that game). The attract champion pages show

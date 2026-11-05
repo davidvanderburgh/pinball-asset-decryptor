@@ -23,6 +23,7 @@ static volatile unsigned char *coop_ball_byte = &bytes[1], *coop_players_byte = 
 static unsigned shown_turn, board;                   /* what the screen and the board were told last */
 static void coop_scores_mark(unsigned n) { board = n; }
 static void coop_turn_show(void) { shown_turn = coop.turn; }
+static void coop_scores_same(unsigned n) { (void)n; }
 /* the framework's own, modelled */
 static unsigned game_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
@@ -103,7 +104,8 @@ def _turns(out, team):
 
 def test_each_teammate_plays_each_ball_and_the_game_ends_after_the_last(tmp_path):
     out = _run(tmp_path)
-    assert "team 2 players 1 board 2" in out               # the game plays one player for the team
+    # the game counts the team (a score panel each) but plays one player: player 1 is up every ball (below)
+    assert "team 2 players 2 board 2" in out and "team 4 players 4 board 4" in out
     assert not any(l.startswith("SCREEN SAYS") for l in out)   # the screen names the teammate up, every ball
     ups, over = _turns(out, 2)
     assert ups == ["up ball %d teammate %d player 1" % (b, t) for b in (1, 2, 3) for t in (1, 2)]

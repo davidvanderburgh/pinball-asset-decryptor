@@ -407,8 +407,8 @@ Tick **Co-op play** (under Editions) and Write: 2 to 4 players can play one
 game as a team, on the latest version of a game that has no co-op of its
 own. On the machine, start a game, then hold the **right flipper button**
 and press **Start** for each teammate. The team shares one score and all
-the game's progress and takes turns ball by ball; the top of the screen says
-whose turn it is. Each team size has its own high score board. A plain
+the game's progress (every teammate's score panel shows the team's score)
+and takes turns ball by ball; the top of the screen says whose turn it is. Each team size has its own high score board. A plain
 Start still adds a competing player.
 
 ## Mod Pack tab

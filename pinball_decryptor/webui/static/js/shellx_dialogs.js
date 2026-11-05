@@ -1,7 +1,7 @@
 // The app-wide windows (service ns "shellx"): Tips, Preview features, the
 // disclaimer, Manage disk space, and the Project menu's windows (New
 // project, Save as (fork), Properties, Change history, Projects, Relink
-// moved files).  Python opens them with bus.publish("open_dialog", name=...);
+// moved files, Export replacement files).  Python opens them with bus.publish("open_dialog", name=...);
 // the menus in shell.js open them too.  State-driven windows (a project
 // copy's progress, the update download) are ShellxOverlays, which shell.js
 // renders once.
@@ -776,6 +776,56 @@ function RelinkDialog({ close, folder }) {
   <//>`;
 }
 registerDialog("project_relink", RelinkDialog);
+
+// --------------------------------------- Export replacement files (PAD-1015)
+// Every file of the user's the project names, copied into one folder (Video,
+// Audio, Images) with replacements.json beside them; floating like Relink.
+function ExportFilesDialog({ close, folder }) {
+  const dup = useSingleton("project_export_files", close);
+  const sx = useNs("shellx");
+  const [ready, setReady] = useState(false);
+  const [dest, setDest] = useState(null);
+  const [widths, setWidths] = useState(null);
+  const ex = sx.export;
+  useEffect(() => {
+    if (dup) return;
+    call("shellx.export_open", folder || null).then((r) => { if (!r) close(); else setReady(true); });
+    return () => { call("shellx.export_close"); };
+  }, []);
+  if (dup || !ready || !ex) return null;
+  const destShown = dest == null ? ex.dest || "" : dest;
+  const commit = (t) => { setDest(null); call("shellx.export_set_dest", t); };
+  // a folder typed and not yet committed is taken first (Export blurs the field)
+  const run = async () => {
+    if (dest != null) { await call("shellx.export_set_dest", dest); setDest(null); }
+    call("shellx.export_run");
+  };
+  const browse = async () => { const p = await call("shellx.export_browse"); if (p) setDest(null); };
+  const cols = [
+    { key: "file", label: "File", width: "minmax(0,1.4fr)", render: (r) => html`<span class="ellip sx-cell" title=${r.path}>${r.file}</span>` },
+    { key: "uses", label: "Used by", width: "80px", num: true },
+    { key: "to", label: "Goes to", width: "minmax(0,1.6fr)", render: (r) => html`<span class="mono small ellip sx-cell" title=${r.to}>${r.to}</span>` },
+    { key: "state", label: "", width: "110px", render: (r) => html`<span class=${cx("small", r.state === "already there" && "ok-ink")}>${r.state}</span>` },
+  ];
+  return html`<${FloatWin} title="Export replacement files" icon="download" onClose=${close} cls="sx-export"
+    footer=${html`<${Check} checked=${ex.repoint !== false} onChange=${(v) => call("shellx.export_set_repoint", v)}
+        label="Use the copies in this project" title=${{ head: "Use the copies in this project", lines: [["On", "every slot is pointed at its copy, so the project builds from the export folder"], ["Off", "the project keeps using the files where they are now"]] }} />
+      <span class="grow"></span>
+      <${Button} kind="primary" disabled=${!ex.can_export && dest == null} onClick=${run}>Export<//>
+      <${Button} onClick=${close}>Close<//>`}>
+    <div class="sx-p">${ex.head}</div>
+    <div class="row">
+      <span class="lbl nw">Export into</span>
+      <${Field} value=${destShown} onChange=${setDest} onCommit=${commit} mono cls="grow" />
+      <${Button} drop onClick=${browse}>Browse...<//>
+    </div>
+    <${Table} columns=${cols} rows=${ex.rows || []} rowKey=${(r) => r.path} cls="card sx-fill"
+      resizable widths=${widths} onResize=${setWidths}
+      empty=${html`<div class="empty small">Nothing to export.</div>`} />
+    <div class="small muted sx-wrap">${ex.status}</div>
+  <//>`;
+}
+registerDialog("project_export_files", ExportFilesDialog);
 
 // ------------------------------------------- state-driven windows
 // A project copy / archive in progress (projects_ui._ProgressDialog) and

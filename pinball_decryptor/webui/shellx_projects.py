@@ -1,6 +1,7 @@
 """The Project menu's windows on the page: New project, Save project as
-(fork), Project properties, Change history, Projects (the manager) and
-Relink moved files.
+(fork), Project properties, Change history, Projects (the manager),
+Relink moved files, and (PAD-1015) Export replacement files / Import
+replacements.
 
 A port of ``gui/projects_ui.py`` and ``MainWindow._open_change_history``: the
 same ``core.project_file`` / ``project_ops`` / ``project_registry`` /
@@ -48,9 +49,10 @@ class ProjectsMixin:
         self._job_ids = itertools.count(1)
         self._jobs = {}
         self._relink = None
+        self._export = None
         self._pm_token = 0
         self._props_token = 0
-        self.set(job=None, relink=None, pm_rows=[], pm_sizes={},
+        self.set(job=None, relink=None, export=None, pm_rows=[], pm_sizes={},
                  props=None)
 
     # ------------------------------------------------------------------
@@ -844,4 +846,210 @@ class ProjectsMixin:
             st["cancel"] = True
         self._relink = None
         self.ctx.loop.post(lambda: self.set(relink=None))
+        return True
+
+    # ------------------------------------------------------------------
+    # Export replacement files / Import replacements (PAD-1015)
+    # ------------------------------------------------------------------
+    @rpc
+    def export_open(self, folder=None):
+        """The window's first look: None (and an info box) when the project
+        records no replacement files, else the state it shows."""
+        from ..core import replacement_export as rx, staged_changes
+        target = os.path.normpath(folder or self._active_folder() or "")
+        if not target or target == "." or not os.path.isdir(target):
+            return None
+        if not rx.recorded_files(staged_changes.load(target)):
+            _mb().showinfo(
+                "Export replacement files",
+                "This project has no replacement videos, sounds or pictures "
+                "yet, so there is nothing to export.\n\n%s" % target)
+            return None
+        self._export = {"target": target, "plan": None}
+        dest = os.path.join(os.path.dirname(target),
+                            os.path.basename(target.rstrip("\\/")) + " files")
+        self.set(export=None)
+        self._export_refresh(dest)
+        return self.get("export")
+
+    def _export_refresh(self, dest):
+        from ..core import replacement_export as rx, staged_changes
+        st = self._export
+        target = st["target"]
+        dest = os.path.normpath(dest.strip()) if (dest or "").strip() else ""
+        repoint = (self.get("export") or {}).get("repoint", True)
+        data = staged_changes.load(target)
+        res = off_loop(self.ctx, rx.plan, data, dest or target, target)
+        st["plan"] = res if dest else None
+        rows = []
+        for f in res["files"]:
+            rows.append({"file": os.path.basename(f["src"]), "path": f["src"],
+                         "kind": rx.KIND_DIRS[f["kind"]], "uses": f["uses"],
+                         "to": rx._rel(f["to"], dest) if dest else "",
+                         "state": "to copy" if f["state"] == "copy"
+                         else "already there"})
+        head = ("This project uses %s of your own. Export copies every one of "
+                "them into one folder, in a Video, an Audio and an Images "
+                "folder, with \"%s\" beside them: each slot's file, the "
+                "random clips, the music modes and the loudness, so Project "
+                "> Import replacements can put them all back on a fresh "
+                "extract." % (rx.words(res["counts"]), rx.RECORD_NAME))
+        status = ""
+        if dest:
+            n_copy = sum(1 for f in res["files"] if f["state"] == "copy")
+            status = "%d file(s) to copy (%s)%s." % (
+                n_copy, human_size(res["bytes"]),
+                ", %d already there" % (len(res["files"]) - n_copy)
+                if len(res["files"]) > n_copy else "")
+        else:
+            status = "Pick the folder to export them into."
+        if res["gone"]:
+            status += ("  %d file(s) the project names are not on this PC and "
+                       "are left out: Relink moved files finds them first."
+                       % len(res["gone"]))
+        self.set(export={"target": target, "dest": dest, "rows": rows,
+                         "head": head, "status": status,
+                         "can_export": bool(dest and res["files"]),
+                         "repoint": repoint})
+
+    @rpc
+    def export_set_dest(self, dest):
+        if self._export is not None:
+            self._export_refresh(dest or "")
+        return True
+
+    @rpc
+    def export_set_repoint(self, on):
+        cur = self.get("export")
+        if cur is not None:
+            self.set(export=dict(cur, repoint=bool(on)))
+        return True
+
+    @rpc
+    def export_browse(self):
+        if self._export is None:
+            return ""
+        p = _fd().askdirectory(title="The folder to export the files into")
+        if p:
+            self._export_refresh(p)
+            return os.path.normpath(p)
+        return ""
+
+    @rpc
+    def export_run(self):
+        """Export: the copy behind a progress window, then the record, then
+        (with "Use the copies in this project") the project re-pointed."""
+        from ..core import replacement_export as rx, staged_changes
+        title = "Export replacement files"
+        st = self._export
+        if st is None or not st.get("plan"):
+            return False
+        if self._running():
+            _mb().showwarning(title, "Wait for the running job to finish first.")
+            return False
+        res = st["plan"]
+        dest, target = res["dest"], st["target"]
+        repoint = bool((self.get("export") or {}).get("repoint", True))
+        try:
+            os.makedirs(dest, exist_ok=True)
+        except OSError as e:
+            _mb().showerror(title, "Couldn't make the folder:\n%s" % e)
+            return False
+        game = getattr(self.app, "_detected_caption", None) or ""
+
+        def work(progress, cancel):
+            return rx.export(staged_changes.load(target), res,
+                             progress=progress, cancel=cancel)
+
+        def done(out, error):
+            from ..core import history_log
+            win = self.window
+            if error is not None:
+                _mb().showerror(title, "The export failed:\n%s" % error)
+                return
+            if out["cancelled"]:
+                win.append_log("Export of the replacement files stopped after "
+                               "%d file(s); the project is as it was."
+                               % out["copied"], "info")
+                if self._export is st:
+                    self._export_refresh(dest)
+                return
+            data = staged_changes.load(target)
+            rx.write_record(dest, rx.make_record(data, out["mapping"], dest,
+                                                 game=game))
+            line = ("Exported %d replacement file(s) to %s (%d copied, %s)"
+                    % (len(out["mapping"]), dest, out["copied"],
+                       human_size(out["bytes"])))
+            if repoint:
+                data, n_refs = rx.repoint(data, out["mapping"])
+                if n_refs:
+                    staged_changes.save(target, data)
+                line += "; this project uses the copies now"
+            line += "."
+            history_log.record(target, [line])
+            win.append_log(line, "success")
+            if repoint and same_path(target, self._active_folder()):
+                win.reload_assets_tabs()
+            if self._export is st:
+                self._export_refresh(dest)
+            _mb().showinfo(
+                title, line + "\n\n\"%s\" in that folder puts them back on "
+                "another extract of this game: Project > Import replacements."
+                % rx.RECORD_NAME)
+
+        self._start_job(title, "Copying the replacement files to %s..." % dest,
+                        work, done)
+        return True
+
+    @rpc(loop=False)
+    def export_close(self):
+        self._export = None
+        self.ctx.loop.post(lambda: self.set(export=None))
+        return True
+
+    @rpc
+    def import_replacements(self, path=None):
+        """Project > Import replacements: a ``replacements.json`` an export
+        left, its files found beside it, put on this project's slots."""
+        from ..core import history_log, replacement_export as rx, staged_changes
+        title = "Import replacements"
+        target = os.path.normpath(self._active_folder() or "")
+        if not target or target == "." or not os.path.isdir(target):
+            return False
+        if self._running():
+            _mb().showwarning(title, "Wait for the running job to finish first.")
+            return False
+        if not path:
+            path = _fd().askopenfilename(
+                title="The %s an export left" % rx.RECORD_NAME,
+                filetypes=[("Replacements", rx.RECORD_NAME), ("JSON", "*.json")])
+        if not path:
+            return False
+        try:
+            rec, records, missing = rx.read_record(path)
+        except (OSError, ValueError) as e:
+            _mb().showerror(title, "That is not a replacements file an export "
+                            "made:\n%s\n\n%s" % (path, e))
+            return False
+        counts = rx.counts_of(records)
+        msg = ("Put %s from\n%s\non this project's slots, with the random "
+               "clips, music modes and loudness they had?\n\nA slot this "
+               "project already replaced takes the file from there."
+               % (rx.words(counts), os.path.dirname(os.path.abspath(path))))
+        if rec.get("game"):
+            msg += "\n\nExported from: %s" % rec["game"]
+        if missing:
+            msg += ("\n\n%d file(s) it names are not there and stay unapplied "
+                    "until Relink moved files finds them." % len(missing))
+        if not _mb().askyesno(title, msg):
+            return False
+        data, n_slots = rx.import_record(staged_changes.load(target), records)
+        staged_changes.save(target, data)
+        line = ("Imported replacements from %s: %s on %d slot(s)."
+                % (path, rx.words(counts), n_slots))
+        history_log.record(target, [line])
+        self.window.append_log(line, "success")
+        if same_path(target, self._active_folder()):
+            self.window.reload_assets_tabs()
+        _mb().showinfo(title, line)
         return True

@@ -3808,6 +3808,19 @@ GENERAL_CONTENT = [
      "3. Press **Relink**: every slot is re-pointed at once, matched by file name, "
      "so a new drive letter or a re-sorted library still works.\n\n"
      "Nothing is copied, and nothing is written until you press Relink."),
+    ("All your files in one folder",
+     "**Project ▾ > Export replacement files…** copies every video, sound and picture "
+     "the project uses (each slot's file, random clips, music mode files, attract "
+     "photos and clips) into one folder, sorted into **Video**, **Audio** and "
+     "**Images**. Two different files with one name are both kept (\"intro (2).mp4\"); "
+     "a file several slots use is copied once, and exporting again copies only what "
+     "is new.\n\n"
+     "With **Use the copies in this project** on, the project builds from that folder "
+     "from then on. Beside the files goes **replacements.json**: every slot's file, "
+     "the random clips, the music modes, loudness and loop settings.\n\n"
+     "To rebuild on a fresh extract, open it and pick that file with **Project ▾ > "
+     "Import replacements…**. The files are found wherever the folder is by then, "
+     "so it can move to another drive or PC with them."),
     ("The log",
      "The progress dots and log at the bottom follow every job. Right-click the log "
      "to copy text for a bug report."),

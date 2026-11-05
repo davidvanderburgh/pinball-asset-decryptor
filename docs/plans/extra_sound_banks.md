@@ -840,7 +840,7 @@ bank, and ours share the other 7). Every card Stern ships fits `image.bin` plus 
 request plays keeps its files in `image.bin` (`_sound_modes_for_banks`); the chip counts them there
 and names the slot.
 
-Checked against real Writes (`C:	mp\PAD-1005`): Godzilla Pro 1.16 7 x 3 five-minute songs, chip 2,071
+Checked against real Writes (`C:\tmp\PAD-1005`): Godzilla Pro 1.16 7 x 3 five-minute songs, chip 2,071
 MB vs planned 2,073; seven-minute songs, 2,240 vs a refusal at 2,241. Deadpool Pro 1.16 (6 tracks x 3
 five-minute songs), chip 2,063 vs planned 2,067 with its 80 MB bank; with idx 2131 (no request plays it)
 too, image.bin 1,771 vs 1,775 and both over.

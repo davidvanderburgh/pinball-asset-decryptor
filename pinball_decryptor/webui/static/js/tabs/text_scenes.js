@@ -664,6 +664,138 @@ export function dragTo(d, sx, sy, x, y) {
   return { ...d, go: true, f: Math.max(0.05, Math.hypot(x - d.cx, y - d.cy) / d.d0) };
 }
 
+// PAD-1014 (DragonRR): snapping, as drawing programs do it.  Snap to grid puts what is dragged
+// on a grid of *size* glass px; Snap to other parts pulls its edges and middle onto the edges and
+// middles of the other pictures and lines of text in the scene (and the screen's), when they
+// come within SNAP_PX screen px, a guide line showing where.  *handle* is the point of what is
+// dragged that snaps: "auto" (any of its edges or its middle; the grid takes the top-left
+// corner) or one of the nine of SNAP_HANDLES.  Alt held down while dragging places it freely.
+// A corner dragged to resize snaps the same way.  Kept for the next session (per viewer).
+export const SNAP_PX = 8;
+export const SNAP_SIZES = [2, 4, 5, 8, 10, 16, 20, 25, 32, 50, 64, 100];
+export const SNAP_HANDLES = [["tl", "Top left"], ["tc", "Top middle"], ["tr", "Top right"],
+  ["ml", "Middle left"], ["mc", "Middle"], ["mr", "Middle right"],
+  ["bl", "Bottom left"], ["bc", "Bottom middle"], ["br", "Bottom right"]];
+const SNAP_KEY = "pad.scenes.snap";
+const SNAP_DEFAULT = { grid: false, size: 10, objects: false, handle: "auto" };
+let snapNow = (() => {
+  try { return { ...SNAP_DEFAULT, ...(JSON.parse(localStorage.getItem(SNAP_KEY) || "{}") || {}) }; }
+  catch (e) { return { ...SNAP_DEFAULT }; }
+})();
+const snapSubs = new Set();
+function setSnap(ch) {
+  snapNow = { ...snapNow, ...ch };
+  try { localStorage.setItem(SNAP_KEY, JSON.stringify(snapNow)); } catch (e) { /* not kept */ }
+  snapSubs.forEach((f) => f(snapNow));
+}
+function useSnap() {
+  const [v, setV] = useState(snapNow);
+  useEffect(() => { snapSubs.add(setV); return () => { snapSubs.delete(setV); }; }, []);
+  return v;
+}
+// a handle as fractions of the box across and down
+const handleAt = (h) => [{ l: 0, c: 0.5, r: 1 }[h[1]], { t: 0, m: 0.5, b: 1 }[h[0]]];
+// the box round a set of outline points
+export function boxOfPts(pts) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+// the lines a part snaps onto, across (xs) and down (ys): the screen's edges and middle, and
+// each other part's (o.others: boxes)
+function snapLines(o) {
+  const xs = [0, o.W / 2, o.W], ys = [0, o.H / 2, o.H];
+  for (const b of o.others || []) { xs.push(b.x, b.x + b.w / 2, b.x + b.w); ys.push(b.y, b.y + b.h / 2, b.y + b.h); }
+  return [xs, ys];
+}
+// one way (across or down): pts are where the snapping points are now -> {d, line}: how far to
+// move them, and the guide (null: on the grid, or not snapped).  The nearest line within tol
+// wins over the grid; the grid takes pts[0].
+function snapAxis(pts, lines, o) {
+  let best = null;
+  if (o.objects) {
+    for (const p of pts) {
+      for (const l of lines) {
+        const d = l - p;
+        if (Math.abs(d) <= o.tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, line: l };
+      }
+    }
+  }
+  if (best) return best;
+  if (o.grid && o.size > 0) return { d: Math.round(pts[0] / o.size) * o.size - pts[0], line: null };
+  return { d: 0, line: null };
+}
+const guidesOf = (sx, sy) => [...(sx.line != null ? [{ x: sx.line }] : []), ...(sy.line != null ? [{ y: sy.line }] : [])];
+// a part (box *b*) moved by (dx, dy) -> the move snapped, and its guides
+export function snapMove(b, dx, dy, o) {
+  const [fx, fy] = o.handle && o.handle !== "auto" ? handleAt(o.handle).map((f) => [f]) : [[0, 0.5, 1], [0, 0.5, 1]];
+  const [xs, ys] = snapLines(o);
+  const sx = snapAxis(fx.map((f) => b.x + b.w * f + dx), xs, o);
+  const sy = snapAxis(fy.map((f) => b.y + b.h * f + dy), ys, o);
+  return { dx: dx + sx.d, dy: dy + sy.d, guides: guidesOf(sx, sy) };
+}
+// a corner dragged to (x, y) -> where it snaps
+export function snapPoint(x, y, o) {
+  const [xs, ys] = snapLines(o);
+  const sx = snapAxis([x], xs, o), sy = snapAxis([y], ys, o);
+  return { x: x + sx.d, y: y + sy.d, guides: guidesOf(sx, sy) };
+}
+// a picture scaled by *f* about (cx, cy) from its corner (kx, ky): the size that puts that
+// corner on the nearest line (across or down, whichever is nearer), else on the grid
+export function snapScale(c, k, f, o) {
+  const [xs, ys] = snapLines(o);
+  const tries = [];
+  for (const [i, lines] of [[0, xs], [1, ys]]) {
+    const span = k[i] - c[i];
+    if (Math.abs(span) < 1) continue;
+    const s = snapAxis([c[i] + span * f], lines, o);
+    if (s.d) tries.push({ ...s, i, f: f + s.d / span });
+  }
+  // a part's line before the grid, then the nearer
+  tries.sort((a, b) => (a.line == null) - (b.line == null) || Math.abs(a.d) - Math.abs(b.d));
+  const t = tries.find((q) => q.f >= 0.05);
+  if (!t) return { f, guides: [] };
+  return { f: t.f, guides: t.line == null ? [] : [t.i ? { y: t.line } : { x: t.line }] };
+}
+// a drag (dragTo's) with the snapping *o* put on it; o null: none
+export function snapDrag(d, o) {
+  if (!d.go) return d;
+  if (!o || (!o.grid && !o.objects)) return d.guides ? { ...d, guides: null } : d;
+  if (d.mode === "move" && d.b) { const s = snapMove(d.b, d.dx, d.dy, o); return { ...d, dx: s.dx, dy: s.dy, guides: s.guides }; }
+  if (d.mode === "box") { const s = snapPoint(d.x, d.y, o); return { ...d, x: s.x, y: s.y, guides: s.guides }; }
+  if (d.mode === "scale" && d.kx != null) {
+    const s = snapScale([d.cx, d.cy], [d.kx, d.ky], d.f, o);
+    return { ...d, f: s.f, guides: s.guides };
+  }
+  return d;
+}
+
+// The Snap menu under the preview
+function SnapButton() {
+  const sn = useSnap();
+  const on = sn.grid || sn.objects;
+  const hName = (SNAP_HANDLES.find(([k]) => k === sn.handle) || [0, "Auto"])[1];
+  return html`<${Button} size="sm" kind="ghost" iconRight="down" cls=${cx("tree-snap", on && "on")}
+    title=${{ head: on ? "Snapping is on" : "Snapping is off",
+      lines: ["Snap to a grid, or to the edges and middles of the other parts, as you drag a part or a corner.",
+        ["Alt", "held while dragging places it freely"]] }}
+    onClick=${(e) => openMenu(e.currentTarget, [
+      { label: "Snap to grid", checked: !!sn.grid, onClick: () => setSnap({ grid: !sn.grid }),
+        title: "Drop what you drag on a grid (drawn on the preview while this is on): its top-left corner, or the point picked under Snap with" },
+      { label: `Grid size: ${sn.size} px`, submenu: SNAP_SIZES.map((v) => ({ label: `${v} px`, checked: v === sn.size,
+        onClick: () => setSnap({ size: v, grid: true }) })) },
+      { sep: true },
+      { label: "Snap to other parts", checked: !!sn.objects, onClick: () => setSnap({ objects: !sn.objects }),
+        title: "Pull what you drag onto the edges and middles of the other pictures and lines of text, and of the screen, when it comes near; a line shows where" },
+      { label: `Snap with: ${hName}`, submenu: [
+        { label: "Auto (any edge or the middle)", checked: sn.handle === "auto", onClick: () => setSnap({ handle: "auto" }),
+          title: "Whichever of its edges or its middle is nearest a line snaps onto it. On the grid, its top-left corner." },
+        { sep: true },
+        ...SNAP_HANDLES.map(([k, label]) => ({ label, checked: sn.handle === k, onClick: () => setSnap({ handle: k }),
+          title: `Only its ${label.toLowerCase()} point snaps, onto any edge or middle of the others (or the grid). It shows as a dot on the selection.` }))] },
+    ])}>Snap${on ? html`<span class="tree-snap-dot"></span>` : null}<//>`;
+}
+
 function TreeTop({ s, onMenu }) {
   const [view, setView] = useState("layers");
   return html`<div class="scenes-top">
@@ -1253,6 +1385,7 @@ function TreeCanvas({ s }) {
   const [hover, setHover] = useState(null);
   // a text's box resized on the canvas, shown until the redraw that has it comes back
   const [boxPend, setBoxPend] = useState(null);
+  const sn = useSnap();
   const p = t.props;
   // the selection (PAD-279: several at once): what a drag, the arrow keys and Delete act on.
   // *key* names it for the edits shown by hand and the layers the server draws for it.
@@ -1338,9 +1471,16 @@ function TreeCanvas({ s }) {
     const tol = (10 * W) / r.width;
     for (const [cx0, cy0] of [[selBox.x, selBox.y], [selBox.x + selBox.w, selBox.y],
       [selBox.x, selBox.y + selBox.h], [selBox.x + selBox.w, selBox.y + selBox.h]]) {
-      if (Math.abs(x - cx0) < tol && Math.abs(y - cy0) < tol) return true;
+      if (Math.abs(x - cx0) < tol && Math.abs(y - cy0) < tol) return [cx0, cy0];
     }
-    return false;
+    return null;
+  };
+  // PAD-1014: what a drag snaps onto: the boxes of the parts not being dragged
+  const othersOf = (ids) => (t.hits || []).filter((h) => !ids.includes(h.id)).map((h) => boxOfPts(h.pts));
+  const snapOf = (e, d) => {
+    if (e.altKey || !d || (!sn.grid && !sn.objects)) return null;
+    const r = box.current.getBoundingClientRect();
+    return { ...sn, W, H, tol: (SNAP_PX * W) / (r.width || W), others: sn.objects ? d.others : null };
   };
   const down = (e) => {
     if (e.button !== 0) return;
@@ -1348,21 +1488,23 @@ function TreeCanvas({ s }) {
     const [x, y] = toStage(e);
     box.current.setPointerCapture(e.pointerId);
     const at = { sx: e.clientX, sy: e.clientY, x0: x, y0: y };      // where it went down (PAD-447)
-    if (corner(x, y) && p.kind === "Text") {
+    const k = corner(x, y);
+    if (k && p.kind === "Text") {
       // the corner across from the one picked stays put
       const left = Math.abs(x - selBox.x) < Math.abs(x - (selBox.x + selBox.w));
       const top = Math.abs(y - selBox.y) < Math.abs(y - (selBox.y + selBox.h));
       const fx = left ? selBox.x + selBox.w : selBox.x, fy = top ? selBox.y + selBox.h : selBox.y;
       const mx = left ? selBox.x : selBox.x + selBox.w, my = top ? selBox.y : selBox.y + selBox.h;
-      setDrag({ mode: "box", node: p.id, fx, fy, mx, my, x: mx, y: my, ...at });
+      setDrag({ mode: "box", node: p.id, fx, fy, mx, my, x: mx, y: my, others: othersOf([p.id]), ...at });
       return;
     }
-    if (corner(x, y)) {
+    if (k) {
       // PAD-557: Resize from Top-left keeps the corner across from the one dragged; Middle, the middle
       const mid = s.resize_from === "middle";
       const cx0 = mid ? selBox.x + selBox.w / 2 : x < selBox.x + selBox.w / 2 ? selBox.x + selBox.w : selBox.x;
       const cy0 = mid ? selBox.y + selBox.h / 2 : y < selBox.y + selBox.h / 2 ? selBox.y + selBox.h : selBox.y;
-      setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1, ...at });
+      setDrag({ mode: "scale", id: String(p.id), node: p.id, cx: cx0, cy: cy0, d0: Math.hypot(x - cx0, y - cy0) || 1, f: 1,
+        kx: k[0], ky: k[1], others: othersOf([p.id]), ...at });
       return;
     }
     const h = pick(x, y);
@@ -1372,12 +1514,16 @@ function TreeCanvas({ s }) {
     // a picture already in a selection of several drags them all
     const ids = multi && sels.includes(h.id) ? sels : [h.id];
     if (!p || (ids.length === 1 && h.id !== p.id)) call("text_scenes.tree_select", h.id);
-    setDrag({ mode: "move", id: keyOf(ids), ids, dx: 0, dy: 0, ...at });
+    // PAD-1014: the box that snaps: the selection's own (a text's box), else round its outlines
+    const own = ids.length === 1 && p && ids[0] === p.id && selBox;
+    const mine = (t.hits || []).filter((q) => ids.includes(q.id));
+    const b = own ? { ...selBox } : mine.length ? boxOfPts(mine.flatMap((q) => q.pts)) : null;
+    setDrag({ mode: "move", id: keyOf(ids), ids, dx: 0, dy: 0, b, others: othersOf(ids), ...at });
   };
   const move = (e) => {
     const [x, y] = toStage(e);
     if (!drag) { const h = pick(x, y); setHover(h ? h.id : null); return; }
-    setDrag((q) => q && dragTo(q, e.clientX, e.clientY, x, y));
+    setDrag((q) => q && snapDrag(dragTo(q, e.clientX, e.clientY, x, y), snapOf(e, q)));
   };
   const up = () => {
     const d = drag;
@@ -1448,6 +1594,12 @@ function TreeCanvas({ s }) {
   const pk = multi ? "" : outlineKind(p);
   const poly = (h, key, cls) => html`<polygon key=${key} points=${h.pts.map((q) => q.join(",")).join(" ")}
     class=${cx(cls, outlineKind(h))} />`;
+  // PAD-1014: the grid while Snap to grid is on (every few lines when they would crowd on the
+  // screen), the guides of the drag's snap, and the snapping point picked on the selection
+  const scr = box.current ? box.current.getBoundingClientRect().width / W || 0.5 : 0.5;
+  const gridStep = sn.grid ? sn.size * Math.max(1, Math.ceil(6 / (sn.size * scr))) : 0;
+  const guides = (drag && drag.guides) || [];
+  const hp = (sn.grid || sn.objects) && sn.handle !== "auto" && selBox ? handleAt(sn.handle) : null;
   return html`<div class=${cx("scenes-canvas tree-canvas", loading && "loading")} ref=${box} tabIndex="0" onKeyDown=${key}
       style=${`background:${s.bg_rgb || "#101014"};aspect-ratio:${W} / ${H}`}
       onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerLeave=${() => setHover(null)}>
@@ -1459,7 +1611,13 @@ function TreeCanvas({ s }) {
       : full ? html`<img src=${mediaUrl(full.srcs[0])} alt="" draggable="false" />`
       : html`<span class="scenes-msg">${s.canvas_msg}</span>`}
     ${loading ? null : html`<svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" class="tree-svg">
+      ${gridStep ? html`<defs><pattern id="tree-grid" width=${gridStep} height=${gridStep} patternUnits="userSpaceOnUse">
+          <path d=${`M ${gridStep} 0 L 0 0 0 ${gridStep}`} class="tree-grid-line" /></pattern></defs>
+        <rect x="0" y="0" width=${W} height=${H} fill="url(#tree-grid)" class="tree-grid" />` : null}
       ${hov.map((h, i) => poly(h, "h" + i, "tree-hover"))}
+      ${guides.map((g, i) => (g.x != null
+        ? html`<line key=${"g" + i} x1=${g.x} y1="0" x2=${g.x} y2=${H} class="tree-guide" />`
+        : html`<line key=${"g" + i} x1="0" y1=${g.y} x2=${W} y2=${g.y} class="tree-guide" />`))}
       <g transform=${svgTf(lineOps)}>
         ${selPolys.map((h, i) => poly(h, "s" + i, "tree-sel"))}
         ${selBox ? html`<rect x=${selBox.x} y=${selBox.y} width=${selBox.w} height=${selBox.h} class=${cx("tree-box", pk)} />` : null}
@@ -1468,6 +1626,7 @@ function TreeCanvas({ s }) {
         ${selBox ? [[selBox.x, selBox.y], [selBox.x + selBox.w, selBox.y], [selBox.x, selBox.y + selBox.h],
           [selBox.x + selBox.w, selBox.y + selBox.h]].map(([hx, hy], i) =>
           html`<rect key=${"k" + i} x=${hx - 7} y=${hy - 7} width="14" height="14" class=${cx("tree-handle", pk)} />`) : null}
+        ${hp ? html`<circle cx=${selBox.x + selBox.w * hp[0]} cy=${selBox.y + selBox.h * hp[1]} r=${Math.max(3, 5 / scr)} class="tree-snap-at" />` : null}
       </g>
     </svg>`}
     ${busy ? html`<div class="tree-busy" role="status"><${Spinner} /><span>Updating</span></div>` : null}
@@ -1801,6 +1960,7 @@ function TreeActions({ t }) {
       onClick=${() => call("text_scenes.tree_add_picture")}>Picture…<//>
     <${Button} size="sm" kind="ghost" icon="plus" title="Add a line of text to this scene"
       onClick=${() => { setWords(""); setAdding(true); }}>Text…<//>
+    <${SnapButton} />
     <span class="tree-actions-sep"></span>
     <${Button} size="sm" kind="ghost" icon="undo" disabled=${!t.can_undo} title="Undo the last edit in this scene, an eye click in Layers too (Ctrl+Z)"
       onClick=${() => call("text_scenes.tree_undo")}>Undo<//>

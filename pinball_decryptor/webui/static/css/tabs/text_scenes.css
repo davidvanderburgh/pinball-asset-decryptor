@@ -198,6 +198,17 @@
 .tgc-src { flex: none; }
 .tree-box { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
 .tree-handle { fill: var(--accent); stroke: #000; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
+/* PAD-1014: snapping - the grid, the guide a snap shows, the point that snaps, and the Snap
+   button's dot while it is on */
+:root { --snap-guide: #f472b6; }
+:root.light { --snap-guide: #db2777; }
+.tree-grid { pointer-events: none; }
+.tree-grid-line { fill: none; stroke: rgba(255, 255, 255, .2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+:root.light .tree-grid-line { stroke: rgba(0, 0, 0, .18); }
+.tree-guide { stroke: var(--snap-guide); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.tree-snap-at { fill: var(--snap-guide); stroke: #000; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.tree-snap.on { color: var(--accent); }
+.tree-snap-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--snap-guide); margin-left: 2px; }
 .tree-side { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .tree-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 /* PAD-468: a line's Words, with Previous / Next through every line of text */

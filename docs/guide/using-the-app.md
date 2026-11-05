@@ -210,7 +210,9 @@ the game's own sounds (one it never plays, say) or a file of yours.
 - **Attract flipper sounds** gives the flipper buttons your own sounds in
   attract mode (Stern Spike 2, up to 16).
 - **Jukebox** (The Beatles 1.29) gives the five song modes songs of your
-  own, drawn at random.
+  own, drawn at random. Drag its title bar to move its window and its
+  corner to resize it; it keeps its place, and a double-click on the title
+  bar puts it back.
 - **Replace from folder…**, **Find originals…** and clearing picks work
   the same on every Replace tab: see [Bulk picks and
   clearing](#bulk-picks-and-clearing).

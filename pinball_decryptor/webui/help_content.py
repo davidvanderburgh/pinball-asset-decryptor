@@ -258,6 +258,8 @@ HELP_CONTENT = {
          "- The rest of a song mode's screens (its level clips, its Champion name) stay as "
          "they are: make them the same for every song on the Video and Text tabs.\n"
          "- An extract of a card built with a jukebox brings it back.\n"
+         "- Drag the window's title bar to move it and its bottom-right corner to resize it. "
+         "It opens where you left it; a double-click on the title bar puts it back.\n"
          "- Needs an image build, not a direct SD write."),
         ("Sounds on shots",
          "Stern Spike 2. While one of the game's modes runs, a hit on a shot you pick "

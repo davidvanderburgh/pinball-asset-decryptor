@@ -40,7 +40,12 @@ The framework's player code has the same shape on all 53 shipped builds (`pinbal
 The player change (Godzilla LE, read in the disassembly): extra ball taken -> same player, same ball. Otherwise
 `next = player + 1`; when `next > players`: if `balls_per_game(player) > ball` then ball++ and player 1, else game over.
 
-### Runtime plan (pad_mode_runtime.c, next run)
+### Runtime (pad_mode_runtime.c)
+
+Status: steps 1 and 2 are IN (`coop_arm`, `coop_change_wrap`, `coop_add_wrap`, `coop.cfg` `coop on` / `button <id>`;
+the card takes the whole gate as attract items do). They are host-tested against a model of the framework
+(`tests/test_pad1017_coop_turns.py`; on Windows compile the lifted harness in PAD-Runtime with gcc) but NOT yet
+rigged. Steps 3-5 and the port lines are left.
 
 1. **Teammate turns.** Wrap `coop_player_change`. In a co-op game with N teammates, turn t:
    - t < N: ball byte - 1 before the game's call. The game then puts it back (ball++), so the ball number does not

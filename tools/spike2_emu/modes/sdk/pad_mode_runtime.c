@@ -14935,6 +14935,187 @@ static void switches_arm(void)
     }
 }
 
+/* ---- PAD-1017: co-op play (MODE_SDK.md "Co-op play"; docs/plans/pad1017_coop.md) ------------------------------
+ * daveyvandy: co-op on the games without it, 2-4 players sharing progress, with high score boards of its own. The
+ * game plays ONE player - its progress, score, lights and flags are the team's, since there is one of each - and the
+ * runtime takes the teammates in turn, a ball each: every teammate plays ball 1, then ball 2, ... The port names the
+ * framework's player code, the same on every Spike 2 build (portcoop.py):
+ *   site coop_player_change   the player change at a ball's end (wrapped)
+ *   site coop_add_player      add a player: Start in the first ball (wrapped)
+ *   data coop_player          the player up's byte; the ball in play is the next byte
+ *   data coop_players         the count of players' byte
+ * coop.cfg (beside the runtime, or /dump for a rig):
+ *   coop on
+ *   button <switch id>        the button held at Start to add a teammate (the right flipper button)
+ * A teammate joins when Start adds a player while the button is held, in a one-player game or a co-op one: the game's
+ * own add runs (credits, its own hooks, the most players it allows), then its count of players goes back to 1. A
+ * plain Start in a one-player game adds a competing player as the game always has, and a game of competing players
+ * takes no teammate.
+ * At a ball's end with teammate t of n up: t < n - the ball's byte one down before the game's change, which puts it
+ * back up (the same ball, the next teammate); an extra ball taken leaves it down - put back, the same teammate. t = n -
+ * the game's change as it is: the next ball (or the game's end) and teammate 1. So the game ends after the last
+ * teammate's last ball. */
+static const char *const COOP_FILES[] = { "/usr/local/padmode/coop.cfg", "/dump/coop.cfg" };
+static struct {
+    int on;                              /* coop.cfg says so and the sites are hooked */
+    unsigned button;                     /* the switch held at Start to add a teammate (0: none) */
+    unsigned game;                       /* the game (chg_game_now() + 1) the teammates belong to; 0: none */
+    unsigned n, turn;                    /* teammates (2-4) and the one up (1..n) */
+} coop;
+static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
+static unsigned (*coop_add_game)(unsigned, unsigned, unsigned, unsigned);
+static volatile unsigned char *coop_ball_byte, *coop_players_byte;
+
+/* the one up after a ball's end: (teammates, the one up, the game's ball byte before its change, after it, how far it
+ * was put down first) -> the one up next (tests lift it verbatim) */
+static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsigned after, unsigned down)
+{
+    if (turn < n) return after == before - down ? turn : turn + 1;   /* still down: an extra ball, the same one */
+    return after == before ? turn : 1;                                /* the ball did not move: an extra ball */
+}
+
+/* this game's co-op teammates (0 when it is not a co-op game) */
+static unsigned coop_teammates(void)
+{
+    if (!coop.game || coop.game != chg_game_now() + 1) return 0;
+    return coop.n;
+}
+
+/* the button held now: the switch's level byte from its record, closed as its descriptor says */
+static int coop_button_held(void)
+{
+    unsigned base, rec, st, desc, pol, level;
+    if (!coop.button || !edge.records || coop.button >= N_SWITCH_IDS) return 0;
+    base = *(const unsigned *)(unsigned long)edge.records;
+    if (!base) return 0;
+    rec = base + coop.button * (unsigned)edge.size;
+    st = edge.level_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.level_via) : rec;
+    desc = edge.desc_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.desc_via) : rec;
+    if (st < 0x10000u || desc < 0x10000u) return 0;
+    level = *(const unsigned char *)(unsigned long)(st + (unsigned)edge.level_at) & 1u;
+    pol = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.polarity_at);
+    return level == ((pol & 4u) ? 1u : 0u);
+}
+
+static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    unsigned n = coop_teammates(), ret;
+    if (!n && !(*coop_players_byte == 1 && coop_button_held())) return coop_add_game(r0, r1, r2, r3);
+    if (n >= 4) {
+        say("co-op: Start - the team is full (4)");
+        return 0;
+    }
+    ret = coop_add_game(r0, r1, r2, r3);
+    if (!ret) {
+        say("co-op: Start - the game added no one (credits, or the most players it allows)");
+        return ret;
+    }
+    *coop_players_byte = 1;                                   /* the game plays one player: the team */
+    if (!n) {
+        coop.game = chg_game_now() + 1;
+        coop.turn = 1;
+        n = 1;
+    }
+    coop.n = n + 1;
+    say("co-op: teammate %u joins (%u in the team; the game plays one player for them all)", coop.n, coop.n);
+    return ret;
+}
+
+static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    unsigned n = coop_teammates(), before, down, ret, next;
+    if (!n) return coop_change_game(r0, r1, r2, r3);
+    before = *coop_ball_byte;
+    down = coop.turn < n && before > 0;
+    if (down) *coop_ball_byte = (unsigned char)(before - 1);
+    ret = coop_change_game(r0, r1, r2, r3);
+    next = coop_next_turn(n, coop.turn, before, *coop_ball_byte, down);
+    if (down && *coop_ball_byte == before - 1) *coop_ball_byte = (unsigned char)before;   /* an extra ball: back up */
+    say("co-op: ball %u, teammate %u of %u done - %s", before, coop.turn, n,
+        !(ret & 0xff) ? "the game is over" : next == coop.turn ? "an extra ball: the same teammate shoots again"
+        : next == 1 ? "teammate 1, the next ball" : "the next teammate, the same ball");
+    if (ret & 0xff) coop.turn = next;
+    return ret;
+}
+
+static void coop_line(const char *s)
+{
+    const char *p;
+    int ok;
+    while (*s == ' ' || *s == '\t') s++;
+    if (!*s || *s == '#') return;
+    if (str_starts(s, "coop on")) { coop.on = 1; return; }
+    if (str_starts(s, "button ")) {
+        p = s + 7;
+        coop.button = (unsigned)number(&p, &ok);
+        if (!ok) coop.button = 0;
+    }
+}
+
+/* coop.cfg asks for co-op: the card takes the runtime's whole gate, as attract items do */
+static int coop_wanted(void)
+{
+    static char raw[1024];
+    long n = -1, i;
+    unsigned k;
+    for (k = 0; k < sizeof COOP_FILES / sizeof COOP_FILES[0] && n < 0; k++)
+        n = pm_read_file(COOP_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return 0;
+    raw[n] = 0;
+    for (i = 0; i < n; i++)
+        if ((!i || raw[i - 1] == '\n') && str_starts(raw + i, "coop on")) return 1;
+    return 0;
+}
+
+static void coop_arm(void)
+{
+    static char raw[1024];
+    long n = -1, i, start = 0;
+    unsigned k;
+    const char *why = 0;
+    struct site *e = site("switch_edge");
+    for (k = 0; k < sizeof COOP_FILES / sizeof COOP_FILES[0] && n < 0; k++)
+        n = pm_read_file(COOP_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i <= n; i++)
+        if (i == n || raw[i] == '\n' || raw[i] == '\r') {
+            raw[i] = 0;
+            coop_line(raw + start);
+            start = i + 1;
+        }
+    if (!coop.on) return;
+    coop.on = 0;
+    if (!site("coop_player_change") || !fn("coop_player_change") || !site("coop_add_player") || !fn("coop_add_player")
+        || !data("coop_player") || !data("coop_players")) {
+        say("co-op: off - the port does not name this build's player change, add player and player bytes");
+        return;
+    }
+    if (!maps_has(data("coop_player"), 2, MAP_R) || !maps_has(data("coop_players"), 1, MAP_R)) {
+        say("co-op: off - the player bytes are not mapped");
+        return;
+    }
+    if (!coop.button) { say("co-op: off - coop.cfg names no button"); return; }
+    if (!e || !e->ok || !edge_arm(&why)) {
+        say("co-op: off - the button cannot be read (%s)", !e ? "the port has no switch_edge" : !e->ok
+            ? "switch_edge does not match this build" : why ? why : "?");
+        return;
+    }
+    coop_ball_byte = (volatile unsigned char *)(unsigned long)(data("coop_player") + 1);
+    coop_players_byte = (volatile unsigned char *)(unsigned long)data("coop_players");
+    if (!(coop_add_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn("coop_add_player"),
+                                                                                        (void *)coop_add_wrap))
+        || !(coop_change_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(
+                 fn("coop_player_change"), (void *)coop_change_wrap))) {
+        say("co-op: off - the player change or add player could not be wrapped");
+        return;
+    }
+    coop.on = 1;
+    say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
+        "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
+        data("coop_player"), data("coop_player") + 1, data("coop_players"));
+}
+
 /* Which sites and data each capability needs; all must be present and verified. */
 static int have_sites(const char *const *names)
 {
@@ -17642,7 +17823,7 @@ static void pad_mode_start(void)
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
     sndm_arm();                               /* PAD-494: nor does a music mode */
     pic_arm();                                /* PAD-537: nor do the picture settings */
-    if ((clipv_only || sndm_only || pic_only) && !attract_wanted()) {   /* PAD-782: attract items take the whole gate */
+    if ((clipv_only || sndm_only || pic_only) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
         say("armed: %s%s%s only (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
             clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : "picture.cfg");
@@ -17768,6 +17949,7 @@ static void pad_mode_start(void)
     wizards_arm();                                  /* PAD-436: the game's own mini-wizards */
     challenges_arm();                               /* PAD-615: the game's Challenge list */
     attract_arm();                                  /* PAD-782: the owner's attract items */
+    coop_arm();                                     /* PAD-1017: co-op play */
     if (pm_hit_sounds()) {                          /* PAD-415: the game's own hit sounds */
         char key[20];
         pm_snprintf(key, sizeof key, "hit_sound_%d", pm_hit_sounds());

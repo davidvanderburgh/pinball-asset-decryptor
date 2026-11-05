@@ -109,7 +109,10 @@ _TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion",
                 "coin_door",
                 # PAD-786: a final wizard that does not end the game; a target
                 # whose final wizard the app doesn't know is left alone
-                "final_wizard")
+                "final_wizard",
+                # PAD-1010: topper-only features unlocked without the topper; a
+                # target with no such feature the app can unlock is left alone
+                "topper")
 # Staged Defaults-tab edits.  These need no reconciliation at all: they are
 # keyed by the firmware's own ``AD_`` names and high-score slot labels, which
 # are the same words on a new version and on the other model of the same title

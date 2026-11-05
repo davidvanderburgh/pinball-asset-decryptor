@@ -1883,6 +1883,25 @@ HELP_CONTENT = {
             {"note": "A Player Challenge game that is the final wizard itself plays on after "
                      "it as well."},
         ]),
+        ("Make the game treat the topper as installed", [
+            "Some games lock a feature behind the topper accessory being fitted. Venom only "
+            "offers the Ghost Rider host on the character-select screen when a topper is "
+            "detected; Jaws hides the The Shark Is Broken challenge and John Wick hides "
+            "the Tick Tock Mr. Wick challenge from the mode-of-play menu. The **Topper** "
+            "box appears only on the games checked to work this way, and names the "
+            "feature it frees.",
+            "- Tick **Make the game treat the topper as installed** and the next Build "
+            "makes the game read the topper as fitted, so the feature is available on a "
+            "cabinet that has none.\n"
+            "- It changes the game itself (same card size), so it works on a machine that "
+            "is already set up.\n"
+            "- A cabinet without the topper drives nothing extra and raises no node-board "
+            "error (the topper is an optional board).\n"
+            "- Staged with the project and carried by mod packs.",
+            {"note": "The box is shown only where flipping this gate was confirmed to free "
+                     "the feature. A game whose topper content is unlocked another way "
+                     "(an in-play unlock, say) does not get the box."},
+        ]),
         ("Show hidden settings on the machine", [
             "**Show hidden settings in the machine's menu…** moves where the Feature "
             "Adjustments page stops, so the machine lists and edits the Debug settings "

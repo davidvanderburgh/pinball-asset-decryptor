@@ -78,8 +78,11 @@ def _project(root, repo):
 def main():
     repo, out_dir = sys.argv[1:3]
     after = "--after" in sys.argv
+    # the follow-up: attract_logo's "Correct its colors for the machine" on,
+    # and the identical-clear run in both shots (it existed by then)
+    colour = "--colour" in sys.argv
     os.makedirs(out_dir, exist_ok=True)
-    out = lambda n: os.path.join(out_dir, ("after_" if after else "before_") + n)  # noqa: E731
+    out = lambda n: os.path.join(out_dir, ("after_" if after else "before_") + ("colour_" if colour else "") + n)  # noqa: E731
     scratch = tempfile.mkdtemp(prefix="pad1016-")
     project = _project(scratch, repo)
     launcher = os.path.join(scratch, "launch1016.py")
@@ -116,11 +119,14 @@ def main():
             time.sleep(6)
             api("images.select", "images/attract_logo.png")
             time.sleep(2)
+            if colour:
+                page.get_by_text("Correct its colors for the machine").first.click()
+                time.sleep(2)
             page.get_by_role("button", name="More").click()
             time.sleep(1)
             page.screenshot(path=out("more_menu.png"))
             item = page.get_by_text("Clear replacements identical to the original…")
-            if after and item.count():
+            if (after or colour) and item.count():
                 item.first.click()
                 time.sleep(1.5)
                 page.screenshot(path=out("confirm.png"))

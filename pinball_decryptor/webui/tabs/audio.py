@@ -40,6 +40,116 @@ _TURNS_MAX = 16
 #: PAD-638: the Replacement pane holds file k in turn as pseudo mode _TURN_BASE + k
 #: (sound_modes.TURN_BASE), so the loudness box is that file's own
 _TURN_BASE = 100
+
+
+#: PAD-1005: the headers :func:`_memory_estimate` read for slots the scan had not, by (path, size,
+#: modified): the tab reads a slot's format lazily, and a Deadpool card's 8,252 are mostly unread
+_HEADERS = {}
+
+
+def _header_info(path):
+    from ...core import audio as _audio
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    key = (path, st.st_size, st.st_mtime_ns)
+    if key not in _HEADERS:
+        if len(_HEADERS) > 50000:
+            _HEADERS.clear()
+        try:
+            _HEADERS[key] = _audio.detect_audio_info(path)
+        except Exception:                                   # noqa: BLE001
+            _HEADERS[key] = None
+    return _HEADERS[key]
+
+
+def _memory_estimate(project, slots, modes, mturns, turns, assign, juke, uses=None):
+    """PAD-1005: :func:`...plugins.stern.memory_budget.estimate` for an Audio tab's project:
+    *slots* ``[(rel, path, info)]``, *modes* ``{rel: {m: path}}``, *mturns* ``{rel: {m: [path,
+    ...]}}``, *turns* ``{rel: [path, ...]}``, *assign* ``{rel: path}`` the replacements that keep
+    their own length, *juke* the jukebox's songs. As the build plans it (``engine.
+    _plan_sound_banks``): with music modes' files every sound a bank can hold goes into one, each
+    at the slot's own channels, a file in turn cut to its slot's (or its mode file's) length, a
+    longer replacement whole with the game's own recording out of ``image.bin``; a jukebox song
+    stays in ``image.bin``; a game's own sound banks' sounds (``music_catNN_*``) count as those
+    banks (PAD-1005: Deadpool, Metallica, D&D)."""
+    from ...core import audio as _audio
+    from ...core import card_paths
+    from ...core import staged_originals
+    from ...plugins.stern import memory_budget as _MB
+
+    def dur(path):
+        try:
+            info = _audio.detect_audio_info(path)
+            if info is not None and info.duration:
+                return float(info.duration)
+            return float(_audio.probe_duration(path) or 0.0)
+        except Exception:                                   # noqa: BLE001
+            return 0.0
+    stock, chans, secs, vendor = 0, {}, {}, {}
+    for rel, path, info in slots:
+        orig = staged_originals.snapshot_path(project, rel)
+        if orig and os.path.isfile(orig):
+            info = _audio.detect_audio_info(orig) or info
+        if info is None:                                    # (a header the scan has not read yet)
+            info = _header_info(path)
+        if info is None:
+            continue
+        ch = int(info.channels or 1)
+        chans[rel], secs[rel] = ch, float(info.duration or 0.0)
+        # (a game's own sound bank's sounds come out as music_catNN_*: that bank's, not
+        # image.bin's; Deadpool Pro 1.16's add up to each image-scNN.bin's size)
+        where = card_paths.audio_container(rel) or "image.bin"
+        if where == "image.bin":
+            stock += _MB.pcm_bytes(info.duration, ch)
+        else:
+            vendor[where] = vendor.get(where, 0) + _MB.pcm_bytes(info.duration, ch)
+    banked, credit, grow = [], 0, 0
+    # (a slot no sound request plays, *uses* ``{rel: [(request, name)]}``: the build keeps its
+    # files in image.bin, and the game never plays them; Deadpool Pro 1.16's idx 2131)
+    unplayed = {}
+
+    def put(rel, name, nbytes):
+        if uses is not None and rel in uses and not uses[rel]:
+            unplayed[rel] = unplayed.get(rel, 0) + 1
+            return nbytes
+        banked.append((name, nbytes))
+        return 0
+    held = 0
+    for rel, by in sorted(modes.items()):
+        ch = chans.get(rel, 2)
+        own = {}
+        for m, f in sorted(by.items()):
+            if f not in own:                                # (one file in two modes: one record)
+                own[f] = dur(f)
+                held += put(rel, os.path.basename(f), _MB.pcm_bytes(own[f], ch))
+            d = own[f]
+            for t in (mturns.get(rel) or {}).get(m) or ():
+                held += put(rel, os.path.basename(t), _MB.pcm_bytes(min(dur(t), d), ch))
+    for rel, files in sorted(turns.items()):
+        ch, room = chans.get(rel, 1), secs.get(rel, 0.0)
+        for t in files:
+            held += put(rel, os.path.basename(t), _MB.pcm_bytes(min(dur(t), room), ch))
+    grow += held
+    music = bool(banked or held) and bool(modes or turns)
+    for rel, path in sorted(assign.items()):
+        if rel not in secs:
+            continue
+        d, ch = dur(path), chans[rel]
+        if d <= secs[rel] + 0.01:
+            continue
+        if music:                                           # (PAD-995: into a bank, whole)
+            banked.append((os.path.basename(path), _MB.pcm_bytes(d, ch)))
+            credit += _MB.pcm_bytes(secs[rel], ch)
+        else:
+            grow += _MB.pcm_bytes(d, ch) - _MB.pcm_bytes(secs[rel], ch)
+    for f in juke:
+        if f and os.path.isfile(f):
+            grow += _MB.pcm_bytes(dur(f), 2)
+    est = _MB.estimate(stock, banked, credit=credit, grow=grow, vendor=list(vendor.values()))
+    est["unplayed"] = [(os.path.basename(rel), n) for rel, n in sorted(unplayed.items())]
+    return est
 #: PAD-638: music mode m's own file k in turn is pseudo mode _MODE_TURN_BASE + m * 20 + k
 #: (sound_modes.mode_turn)
 _MODE_TURN_BASE = 1000
@@ -295,6 +405,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._shots = []
         self._shot_pick = ""
         self._shot_choices = None
+        # PAD-1005: the machine-memory estimate's generation (a newer one drops an older's answer)
+        self._mem_gen = 0
         self._cats = {}
         self._music_by_length = True
         self._sort = ("#0", False)
@@ -341,7 +453,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                  running=False, profile_busy=False, adv_marker=False,
                  prefix="", sort={"key": "#0", "desc": False},
                  panes=dict(self._panes), dup_scanning=False,
-                 widths=self._saved_widths(), pex=False, modes_share=False, attract=None)
+                 widths=self._saved_widths(), pex=False, modes_share=False, attract=None, mem=None)
 
     # ------------------------------------------------------------------
     # small helpers
@@ -1209,6 +1321,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         cb = self.window.cb.get("on_folder_state_written")
         if cb is not None:
             cb(assets_dir)
+        self._memory_soon()
 
     # ------------------------------------------------------------------
     # the trim / pad lock and the Advanced marker
@@ -1473,6 +1586,54 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._update_clear_all()
         self._level_sync()
         self._publish_cur()
+        self._memory_soon()
+
+    # ------------------------------------------------------------------
+    # PAD-1005: the machine's memory, known before a Write
+    # ------------------------------------------------------------------
+    def _memory_soon(self):
+        """Estimate how much of the machine's memory the card's sounds will take
+        (:mod:`...plugins.stern.memory_budget`) off the UI thread, and show it beside the status
+        (``mem``: None where it does not apply). An owner found out only at Write time that his
+        songs at random did not fit, and asked what the limit was; it applies where a build puts
+        sounds into sound banks: a Spike 2 project with music modes' files or files in turn."""
+        self._mem_gen += 1
+        gen = self._mem_gen
+        offer = self._sm_offer
+        project = self._scan_dir
+        if (offer is None or offer.get("why") or not project or self._scanning
+                or not (any(self._modes.values()) or any(self._turns.values()))):
+            self.set(mem=None)
+            return
+        trim = bool(self.audio_trim_var.get())
+        keep = set(self._keep_whole)
+        slots = [(s.rel_path, s.abs_path, s.info) for s in self._slots]
+        modes = {rel: dict(v) for rel, v in self._modes.items() if v}
+        mturns = {rel: {m: list(f) for m, f in by.items()} for rel, by in self._mode_turns.items()}
+        turns = {rel: list(v) for rel, v in self._turns.items() if v}
+        assign = {rel: p for rel, p in self._assign.items()
+                  if isinstance(p, str) and p.strip() and (not trim or rel in keep)}
+        juke = [str(g.get("audio") or "") for g in self._juke]
+        uses = dict(self._uses) if isinstance(self._uses, dict) else None
+
+        def _work():
+            try:
+                got = _memory_estimate(project, slots, modes, mturns, turns, assign, juke,
+                                       uses=uses)
+            except Exception:                           # noqa: BLE001 - the chip is left off
+                got = None
+            self._post(self._memory_show, gen, got)
+        threading.Thread(target=_work, daemon=True, name="pad-audio-memory").start()
+
+    def _memory_show(self, gen, got):
+        if gen != self._mem_gen:
+            return
+        if not got:
+            self.set(mem=None)
+            return
+        from ...plugins.stern import memory_budget as _MB
+        text, kind, head, lines = _MB.words(got)
+        self.set(mem={"text": text, "kind": kind, "head": head, "lines": lines})
 
     def _idle_hint(self):
         if self._cancelled:

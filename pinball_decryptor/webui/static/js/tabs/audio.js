@@ -898,6 +898,7 @@ export default function AudioTab() {
   return html`<div class="page aud-page">
     <${PageHead} title="Audio" sub=${T.intro}>
       ${s.status ? html`<${Chip} kind="acc">${s.status}<//>` : null}
+      ${s.mem ? html`<${Chip} kind=${s.mem.kind} dot=${!!s.mem.kind} title=${{ head: s.mem.head, lines: s.mem.lines }}>${s.mem.text}<//>` : null}
       <${Button} onClick=${() => call("audio.scan")} icon=${s.scanning ? "x" : "refresh"}>${s.scanning ? "Cancel scan" : "Scan"}<//>
       <${Button} drop icon="folder" disabled=${s.running} title=${T.fromFolder} onClick=${() => call("audio.replace_from_folder")}>Replace from folder…<//>
       <${Button} icon="search" disabled=${s.running} title=${T.originals} onClick=${() => call("audio.originals_open")}>Find originals…<//>

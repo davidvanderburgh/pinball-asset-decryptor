@@ -150,6 +150,36 @@ function tipBox(text, rich) {
     if (spec.head) add("tip-h", spec.head);
     for (const ln of spec.lines || []) {
       if (ln == null || ln === "") continue;
+      // PAD-1005: {sec} a section's own small heading, {li} a bulleted line, {bar: [{v, label,
+      // kind}], of} a bar of parts against a whole (the machine's memory: what each part takes)
+      if (ln && typeof ln === "object" && ln.sec != null) { add("tip-sec", ln.sec); continue; }
+      if (ln && typeof ln === "object" && ln.li != null) { add("tip-li", ln.li); continue; }
+      if (ln && typeof ln === "object" && Array.isArray(ln.bar)) {
+        const bar = add("tip-bar");
+        const whole = Math.max(ln.of || 0, ln.bar.reduce((t, p) => t + (p.v || 0), 0)) || 1;
+        for (const p of ln.bar) {
+          const seg = document.createElement("span");
+          seg.className = "tip-seg " + (p.kind || "");
+          seg.style.width = (100 * (p.v || 0) / whole).toFixed(2) + "%";
+          bar.appendChild(seg);
+        }
+        if (ln.of && ln.of < whole) {                       // the limit, inside an overfull bar
+          const mark = document.createElement("span");
+          mark.className = "tip-cap";
+          mark.style.left = (100 * ln.of / whole).toFixed(2) + "%";
+          bar.appendChild(mark);
+        }
+        const key = add("tip-keys");
+        for (const p of ln.bar) {
+          if (!p.label) continue;
+          const k = document.createElement("span");
+          const sw = document.createElement("i");
+          sw.className = "tip-seg " + (p.kind || "");
+          k.append(sw, p.label);
+          key.appendChild(k);
+        }
+        continue;
+      }
       if (typeof ln === "object" && !Array.isArray(ln)) {
         // PAD-369 (DragonRR): a file's color profile, in one color of its own in every tooltip
         const row = add("tip-l tip-cp");
@@ -265,7 +295,9 @@ export function tip(text) {
   if (typeof text === "object") {
     rich = JSON.stringify(text);
     text = [text.head, ...(text.lines || []).map((l) => (Array.isArray(l) ? l.join(": ")
-      : l && typeof l === "object" ? "Color profile: " + l.profile : l))]
+      : l && typeof l === "object" ? (l.sec != null ? l.sec : l.li != null ? "• " + l.li
+        : Array.isArray(l.bar) ? l.bar.map((p) => p.label).filter(Boolean).join(", ")
+        : "Color profile: " + l.profile) : l))]
       .filter(Boolean).join("\n");
   }
   return {

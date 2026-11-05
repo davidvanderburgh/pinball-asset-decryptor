@@ -271,7 +271,8 @@ def test_the_runtime_points_the_request_at_the_bank_s_id_at_the_play_worker():
     with open(RUNTIME, encoding="utf-8") as f:
         c = f.read()
     assert 'str_eq(f[0], "bsid")' in c and 'str_eq(f[0], "tsid")' in c
-    assert "bsid_line(f[1], 0, f[2], f[3]);" in c and "bsid_line(f[1], f[2], f[3], f[4]);" in c
+    assert "bsid_line(f[1], 0, f[2], f[3], 0);" in c        # (PAD-1005: tsid's 6th field, a mode)
+    assert "bsid_line(f[1], f[2], f[3], f[4], n >= 6 ? f[5] : 0);" in c
     # one hook on the worker for the sound log and the banks
     assert "if (blist_live) blist_play(r[0]);" in c
     # every place that hooks it goes through the one worker_hooked (PAD-645 adds the attract silence's and the

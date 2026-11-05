@@ -12,13 +12,14 @@ from tests.test_pad685_jukebox import _gui_offer
 
 
 def test_files_named_alike_are_one_song_and_a_lone_video_none():
-    songs, lone = JB.pair_files([r"C:\m\Hey Jude.wav", r"C:\m\hey jude.MP4", r"C:\m\Revolution.mp3",
-                                 r"C:\m\Let It Be.mov", r"C:\m\Get Back.wav", r"C:\m\Get Back.flac"])
-    assert songs == [("hey jude", [r"C:\m\Hey Jude.wav"], [r"C:\m\hey jude.MP4"]),
-                     ("revolution", [r"C:\m\Revolution.mp3"], []),
-                     ("get back", [r"C:\m\Get Back.wav", r"C:\m\Get Back.flac"], [])]
-    assert lone == [r"C:\m\Let It Be.mov"]
-    assert JB.song_key(r"C:\x\Hey Jude.wav") == JB.song_key("/y/HEY JUDE.mp4")
+    m = lambda n: os.path.join(os.sep, "m", n)                  # noqa: E731  (this OS's own paths)
+    songs, lone = JB.pair_files([m("Hey Jude.wav"), m("hey jude.MP4"), m("Revolution.mp3"),
+                                 m("Let It Be.mov"), m("Get Back.wav"), m("Get Back.flac")])
+    assert songs == [("hey jude", [m("Hey Jude.wav")], [m("hey jude.MP4")]),
+                     ("revolution", [m("Revolution.mp3")], []),
+                     ("get back", [m("Get Back.wav"), m("Get Back.flac")], [])]
+    assert lone == [m("Let It Be.mov")]
+    assert JB.song_key(os.path.join(os.sep, "x", "Hey Jude.wav")) == JB.song_key("/y/HEY JUDE.mp4")
 
 
 def test_add_songs_pairs_the_videos_and_replaces_a_song_of_the_same_name(tmp_path, monkeypatch):

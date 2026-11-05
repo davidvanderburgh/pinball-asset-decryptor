@@ -711,8 +711,58 @@ export function isTopScrim(el) {
   return all.length > 0 && all[all.length - 1] === el;
 }
 
-export function Modal({ title, icon, onClose, wide, xwide, children, footer, cls = "" }) {
+// PAD-1000: remember="<name>" lets the dialog be moved (drag its title bar) and resized (drag
+// its corner); where it was left and its size are kept under pad.modal.<name> for next time, and a
+// double-click on the title bar puts it back in the middle at its own size.
+const MODAL_MIN_W = 360, MODAL_MIN_H = 220;
+function loadGeom(name) {
+  try { const g = JSON.parse(localStorage.getItem("pad.modal." + name) || "null");
+    return g && g.w > 0 && g.h > 0 ? g : null; } catch (e) { return null; }
+}
+function saveGeom(name, g) {
+  try { if (g) localStorage.setItem("pad.modal." + name, JSON.stringify(g)); else localStorage.removeItem("pad.modal." + name); } catch (e) { /* private mode */ }
+}
+// the geometry kept on the page: no bigger than the page, and all of it on the page
+function fitGeom(g) {
+  const z = pageZoom(), vw = window.innerWidth / z, vh = window.innerHeight / z;
+  const w = Math.max(Math.min(MODAL_MIN_W, vw), Math.min(g.w, vw)), h = Math.max(Math.min(MODAL_MIN_H, vh), Math.min(g.h, vh));
+  return { x: Math.max(0, Math.min(g.x, vw - w)), y: Math.max(0, Math.min(g.y, vh - h)), w, h };
+}
+
+export function Modal({ title, icon, onClose, wide, xwide, children, footer, cls = "", remember }) {
   const scrimRef = useRef(null);
+  const boxRef = useRef(null);
+  const [geom, setGeom] = useState(() => (remember ? loadGeom(remember) : null));
+  const [, setVp] = useState(0);
+  useEffect(() => {
+    if (!remember) return undefined;
+    const onResize = () => setVp((n) => n + 1);       // re-fit to the page's new size
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [remember]);
+  // a drag of the title bar (move) or the corner grip (size), from where the dialog is now
+  const startDrag = (e, sizing) => {
+    if (e.button !== 0 || (!sizing && e.target.closest("button"))) return;
+    e.preventDefault();
+    const z = pageZoom(), r = boxRef.current.getBoundingClientRect();
+    const g0 = { x: r.left / z, y: r.top / z, w: r.width / z, h: r.height / z };
+    const x0 = e.clientX, y0 = e.clientY;
+    let cur = g0;
+    const move = (ev) => {
+      const dx = (ev.clientX - x0) / z, dy = (ev.clientY - y0) / z;
+      cur = fitGeom(sizing ? { ...g0, w: Math.max(MODAL_MIN_W, g0.w + dx), h: Math.max(MODAL_MIN_H, g0.h + dy) }
+        : { ...g0, x: g0.x + dx, y: g0.y + dy });
+      setGeom(cur);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+      const out = { x: Math.round(cur.x), y: Math.round(cur.y), w: Math.round(cur.w), h: Math.round(cur.h) };
+      setGeom(out); saveGeom(remember, out);
+    };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  };
+  const reset = (e) => { if (e.target.closest("button")) return; setGeom(null); saveGeom(remember, null); };
+  const g = remember && geom ? fitGeom(geom) : null;
   useEffect(() => {
     // Escape closes an open menu first, not the dialog under it
     const onKey = (e) => {
@@ -723,11 +773,15 @@ export function Modal({ title, icon, onClose, wide, xwide, children, footer, cls
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
   return html`<div class="scrim" ref=${scrimRef} onMouseDown=${(e) => { if (e.target === e.currentTarget && onClose) onClose(); }}>
-    <div class=${cx("modal", wide && "wide", xwide && "xwide", cls)} role="dialog" aria-modal="true" aria-label=${title}>
-      <div class="hd">${icon ? html`<${Icon} name=${icon} cls="lg" />` : null}<span class="h2">${title}</span>
+    <div class=${cx("modal", wide && "wide", xwide && "xwide", remember && "movable", g && "placed", cls)} ref=${boxRef}
+      role="dialog" aria-modal="true" aria-label=${title}
+      style=${g ? `left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px` : null}>
+      <div class="hd" onMouseDown=${remember ? (e) => startDrag(e, false) : null}
+        onDblClick=${remember ? reset : null}>${icon ? html`<${Icon} name=${icon} cls="lg" />` : null}<span class="h2">${title}</span>
         ${onClose ? html`<${Button} kind="ghost" size="sm" icon="x" title="Close" onClick=${onClose} />` : null}</div>
       <div class="bd">${children}</div>
       ${footer ? html`<div class="ft">${footer}</div>` : null}
+      ${remember ? html`<span class="modal-grip" aria-hidden="true" onMouseDown=${(e) => startDrag(e, true)}></span>` : null}
     </div>
   </div>`;
 }

@@ -104,6 +104,9 @@ html.bp-1020 .aud-card { min-height: 520px; }
 html.bp-760 .aud-kv { grid-template-columns: minmax(0, 1fr); }
 /* PAD-685: the Jukebox window's song list */
 .aud-juke { max-height: 52vh; overflow: auto; }
+/* PAD-1000: in a window sized by hand the list takes all its room */
+.modal.placed .aud-juke { max-height: none; flex: 1 1 auto; min-height: 0; }
+.modal.placed .bd > .stack { flex: 1 1 auto; min-height: 0; }
 .aud-juke table { width: 100%; border-collapse: collapse; }
 .aud-juke th, .aud-juke td { padding: 4px 10px; text-align: left; vertical-align: middle; }
 .aud-juke th { font-family: var(--cond); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); font-weight: 600; border-bottom: 1px solid var(--line); }

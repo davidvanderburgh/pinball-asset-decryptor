@@ -18,6 +18,8 @@
 #   5  no menu program -> no menu, the first card starts
 #   6  no conf -> b0; no build 0 at all -> whatever pad/live points at
 #   7  the real spksw (when given) on a dead port says "wait", and the countdown still boots
+#   8  two games (Halloween + Ultraman, PAD-997): each keeps its own files of /game (own=);
+#      a game's first start gets its seed= file from its build; a power cut mid-swap is finished
 set -u
 BIN=$1; SW=${2:-}; FONT=${3:-}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -68,7 +70,7 @@ S
 }
 run() {
     rm -f "$T/started"
-    PADSELECT_HOME="$P" PADSELECT_SW="${RUN_SW:-$T/sw}" PAD_SELECT_FAKEFB="1920x1080x32:$T/fb" \
+    PADSELECT_HOME="$P" PADSELECT_GAME="$T/game" PADSELECT_SW="${RUN_SW:-$T/sw}" PAD_SELECT_FAKEFB="1920x1080x32:$T/fb" \
         timeout 60 "$U/main.x86_64" -force-glcore >/dev/null 2>&1
     echo $?
 }
@@ -183,6 +185,49 @@ if [ -n "$SW" ]; then
     else
         bad "7 real spksw (started '$(started)')"
     fi
+fi
+
+# 8
+setup
+G=$T/game
+mkdir -p "$G" "$S/b0/config" "$S/d1/config"
+echo "um defaults" > "$S/b0/config/default_highscores.config"
+echo "h78 defaults" > "$S/d1/config/default_highscores.config"
+echo "um scores" > "$G/highscores.config"
+echo "um features" > "$G/_game_features.json"
+echo "shared" > "$G/notes.txt"
+printf 'title=b0 ultraman\ntitle=b1 halloween_78\ntitle=b2 halloween_78\nown=*.config *.json\nseed=highscores.config config/default_highscores.config\n' >> "$S/spk.conf"
+# a file named like a glob in the launcher's own folder must not be taken for /game's
+touch "$U/x.json"
+run >/dev/null
+if [ "$(started)" = "$P/b1/uptest/main.x86_64 $U -force-glcore" ] && [ "$(cat "$G/highscores.config")" = "h78 defaults" ] \
+    && [ ! -e "$G/_game_features.json" ] && [ "$(cat "$P/home_ultraman/highscores.config")" = "um scores" ] \
+    && [ "$(cat "$P/home_ultraman/_game_features.json")" = "um features" ] && [ "$(cat "$P/home_owner")" = halloween_78 ] \
+    && [ "$(cat "$G/notes.txt")" = shared ] && [ -e "$U/x.json" ]; then
+    ok "8 b1 (Halloween): Ultraman's own files kept in pad/home_ultraman, Halloween's scores seeded from its build"
+else
+    bad "8 first Halloween start ($(ls "$G" | tr '\n' ' '), owner $(cat "$P/home_owner" 2>&1))"
+fi
+echo "h78 scores" > "$G/highscores.config"; echo "h78 features" > "$G/_game_features.json"
+printf 'sw R 1\nsw R 0\nsw S 1\n' > "$T/presses"
+run >/dev/null; rm -f "$T/presses"
+if [ "$(started)" = "$P/b0/uptest/main.x86_64 $U -force-glcore" ] && [ "$(cat "$G/highscores.config")" = "um scores" ] \
+    && [ "$(cat "$G/_game_features.json")" = "um features" ] && [ ! -e "$P/home_ultraman" ] \
+    && [ "$(cat "$P/home_halloween_78/highscores.config")" = "h78 scores" ] && [ "$(cat "$P/home_owner")" = ultraman ]; then
+    ok "8b b0 (Ultraman): its own scores and settings back, Halloween's kept"
+else
+    bad "8b back to Ultraman ($(ls "$G" | tr '\n' ' '), owner $(cat "$P/home_owner" 2>&1))"
+fi
+# a power cut after pad/home_owner moved on but before every file came back
+rm -f "$P/last"; run >/dev/null
+mkdir -p "$P/home_halloween_78"; mv "$G/_game_features.json" "$P/home_halloween_78/"
+rm -f "$P/last"; run >/dev/null
+if [ "$(started)" = "$P/b1/uptest/main.x86_64 $U -force-glcore" ] && [ "$(cat "$G/highscores.config")" = "h78 scores" ] \
+    && [ "$(cat "$G/_game_features.json")" = "h78 features" ] && [ ! -e "$P/home_halloween_78" ] \
+    && [ "$(cat "$P/home_ultraman/highscores.config")" = "um scores" ]; then
+    ok "8c Halloween again: its own files back, a swap cut short is finished"
+else
+    bad "8c Halloween again ($(ls "$G" | tr '\n' ' '), owner $(cat "$P/home_owner" 2>&1))"
 fi
 
 echo "padselect_spk_test: $([ $FAILS = 0 ] && echo OK || echo "$FAILS FAILED")"

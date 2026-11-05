@@ -6654,19 +6654,22 @@ class MultibootPanel:
                      "remembered choice. The first row is the STOCK build: it "
                      "travels whole, and the machine falls back to it if anything "
                      "goes wrong. Every other row is another update of the same "
-                     "game (a mod PAD wrote, or another Spooky version); only its "
+                     "game (a mod PAD wrote, or another Spooky version; Halloween "
+                     "and Ultraman are one machine, so either goes with the other); only its "
                      "files that differ travel, and the machine makes the build "
                      "the first time the menu starts. Install it the way every "
                      "update of the game is installed; installing a normal update "
                      "later takes the menu away. Settings and scores are shared by "
-                     "every build. Nothing here touches the updates you pick.")
+                     "every build of a game; Halloween and Ultraman each keep their "
+                     "own. Nothing here touches the updates you pick.")
     ADD_ROW_TEXT_SPK = "Add another build…"
     LIST_TIP_SPK = ("Each row carries its own icons: ✎ edits the image, − takes it "
                     "out of the update, ▲ / ▼ move it in the menu's order (the "
                     "outlined arrow means that row cannot go further). The first "
                     "row is the STOCK build (Spooky's own update file): it travels "
                     "whole and is the one the machine falls back to. Every other row "
-                    "is an update of the same game; only the files it changes travel.")
+                    "is an update of the same game (Halloween and Ultraman go together); "
+                    "only the files it changes travel.")
     SIZE_TIP_SPK = (
         "How big the update comes out - measured from the updates themselves. The "
         "stock build travels whole; every other build costs only the files it "

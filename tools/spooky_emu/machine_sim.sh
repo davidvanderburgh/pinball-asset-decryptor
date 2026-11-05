@@ -12,6 +12,12 @@
 #   2  the next power-up: nobody presses, the countdown boots the remembered b1, b1 is not
 #      made again
 #
+# MSIM_EXTRA=<update of another game of the family> (PAD-997: an Ultraman stock update and a
+# Halloween one) makes that update build 1 instead of the marked copy; then power-up 1 also
+# checks that the stock game's own settings and scores were kept aside and the other game's
+# scores came from its build, and a power-up 3 (LEFT + START: back to b0) that the stock
+# game's came back.
+#
 # As root in the rig's distro, with PAD_SLOT set to a slot you took (riglock.sh).  Prints
 # PASS / FAIL lines and "machine_sim: PASS" at the end.  The shots and logs are in <work dir>
 # (default /var/tmp/pad_spooky/msim<slot>).
@@ -36,12 +42,19 @@ LAYOUT=$(python3 "$T/spktitles.py" get "$TITLE" layout)
 echo "build $BUILD, title $TITLE, layout $LAYOUT"
 echo "== the marked build and the multi-boot update"
 rm -rf "$W/mod" "$W/multi" "$W/update"
-MOD=$(python3 "$T/spkmarkmod.py" "$UPD" "$W/mod" "PAD-980 marked build" | tail -1) && [ -f "$MOD" ] || { echo "machine_sim: spkmarkmod failed" >&2; exit 1; }
+EXTRA=${MSIM_EXTRA:+$(realpath "$MSIM_EXTRA")}
+if [ -n "$EXTRA" ]; then
+    MOD=$EXTRA
+    NAMES=("STOCK;OTHER GAME" "as shipped;$(basename "$EXTRA")")
+else
+    MOD=$(python3 "$T/spkmarkmod.py" "$UPD" "$W/mod" "PAD-980 marked build" | tail -1) && [ -f "$MOD" ] || { echo "machine_sim: spkmarkmod failed" >&2; exit 1; }
+    NAMES=("STOCK;MARKED" "as shipped;PAD-980 marked build")
+fi
 SEL=$(bash "$T/ensurespkselect.sh" x "$W/sel" | sed -n 's/^\[selector\] menu program: //p')
 [ -n "$SEL" ] || { echo "machine_sim: no menu program" >&2; exit 1; }
 mkdir -p "$W/multi"
 python3 "$T/mkspkmulti.py" build --primary "$UPD" --extra "$MOD" --out "$W/multi" --selector-dir "$SEL" \
-    --timeout 20 --titles "STOCK;MARKED" --subtitles "as shipped;PAD-980 marked build" \
+    --timeout 20 --titles "${NAMES[0]}" --subtitles "${NAMES[1]}" \
     --cache-dir "$W/cache" || { echo "machine_sim: the build failed" >&2; exit 1; }
 MULTI=$W/multi/$(basename "$UPD")
 python3 "$T/mkspkmulti.py" verify --zip "$MULTI" && pass "the update verifies" || fail "verify"
@@ -107,6 +120,8 @@ power_up() {    # power_up <n> <press: yes|no>
 }
 
 # ---- 1 ------------------------------------------------------------------------------
+G=$NV/game
+STOCK_SCORES=$(cat "$G/highscores.config" 2>/dev/null)
 power_up 1 yes
 L=$NV/game/pad/padselect.log
 [ -d "$NV/game/pad/b1" ] && [ ! -e "$NV/game/code/uptest/pad" ] && grep -q "moved there from the update" "$L" \
@@ -119,10 +134,25 @@ exe=$(readlink "/proc/$p/exe" 2>/dev/null)
 case "$exe" in */pad/b1/uptest/main.x86_64) pass "1: the game runs $exe";; *) fail "1: the game runs '$exe' (pid $p)";; esac
 spk_attract && pass "1: $TITLE in attract" || fail "1: no attract"
 # the links name /game/..., which only the game's mount namespace has: read them as it would
-lk=$(readlink "$NV/game/code/uptest/PAD_MULTIBOOT_MARK")
-[ "$lk" = /game/pad/live/uptest/PAD_MULTIBOOT_MARK ] && [ "$(readlink "$NV/game/pad/live")" = b1 ] \
-    && [ "$(cat "$NV/game/pad/b1/uptest/PAD_MULTIBOOT_MARK" 2>/dev/null)" = "PAD-980 marked build" ] \
-    && pass "1: uptest shows b1's own file (-> $lk, live = b1)" || fail "1: uptest does not show b1's mark ('$lk')"
+if [ -n "$EXTRA" ]; then
+    other=$(sed -n 's/^title=b1 //p' "$G/pad/spk.conf"); mine=$(sed -n 's/^title=b0 //p' "$G/pad/spk.conf")
+    grep -q "^own=" "$G/pad/spk.conf" && [ -n "$other" ] && [ "$other" != "$mine" ] \
+        && pass "1: spk.conf names two games (b0 $mine, b1 $other)" || fail "1: spk.conf names no two games"
+    [ "$(cat "$G/pad/home_owner" 2>/dev/null)" = "$other" ] \
+        && [ "$(cat "$G/pad/home_$mine/highscores.config" 2>/dev/null)" = "$STOCK_SCORES" ] \
+        && pass "1: $mine's settings and scores kept in pad/home_$mine ($(ls "$G/pad/home_$mine" | tr '\n' ' '))" \
+        || fail "1: $mine's files not kept ($(ls "$G/pad" | tr '\n' ' '))"
+    grep -q "home: highscores.config from b1's" "$L" && pass "1: $other's scores started from its own build's defaults" \
+        || fail "1: no seed ($(grep -o 'home: .*' "$L" | tr '\n' '|'))"
+    dll=uptest/main_Data/Managed/Assembly-CSharp.dll
+    [ -f "$G/pad/b1/$dll" ] && ! cmp -s "$G/pad/b0/$dll" "$G/pad/b1/$dll" \
+        && pass "1: b1 runs the other game's own code" || fail "1: b1's code is b0's"
+else
+    lk=$(readlink "$NV/game/code/uptest/PAD_MULTIBOOT_MARK")
+    [ "$lk" = /game/pad/live/uptest/PAD_MULTIBOOT_MARK ] && [ "$(readlink "$NV/game/pad/live")" = b1 ] \
+        && [ "$(cat "$NV/game/pad/b1/uptest/PAD_MULTIBOOT_MARK" 2>/dev/null)" = "PAD-980 marked build" ] \
+        && pass "1: uptest shows b1's own file (-> $lk, live = b1)" || fail "1: uptest does not show b1's mark ('$lk')"
+fi
 sleep 5
 bash "$T/shot.sh" "$W/attract1.png" >/dev/null 2>&1 && pass "1: shot $W/attract1.png"
 bash "$T/stop.sh" >/dev/null 2>&1; bash "$T/killgame.sh" >/dev/null 2>&1
@@ -135,6 +165,30 @@ grep -q "starting b1" "$L" && pass "2: the countdown booted the remembered b1" |
 spk_attract && pass "2: $TITLE in attract" || fail "2: no attract"
 bash "$T/stop.sh" >/dev/null 2>&1; bash "$T/killgame.sh" >/dev/null 2>&1
 cp "$NV/game/pad/padselect.log" "$W/padselect2.log" 2>/dev/null
+
+# ---- 3 (two games): LEFT + START, back to the stock game and its own files ---------
+if [ -n "$EXTRA" ]; then
+    OTHER_SCORES=$(cat "$G/highscores.config" 2>/dev/null)
+    echo "== power-up 3"
+    L=$G/pad/padselect.log
+    [ -f "$L" ] && mv -f "$L" "$W/padselect2b.log"
+    SPK_MACHINE=1 bash "$T/run_game.sh" "$BUILD" > "$W/run3.out" 2>&1 &
+    rg=$!
+    for i in $(seq 1 600); do grep -qs " menu: " "$L" && break; kill -0 $rg 2>/dev/null || break; sleep 0.2; done
+    sleep 3
+    ctl "tap $(sw_of L) 300"; sleep 1.0; ctl "tap $(sw_of S) 600"
+    wait $rg
+    grep -q "starting b0" "$L" && pass "3: LEFT + START booted b0" || fail "3: $(grep -o 'starting .*' "$L")"
+    [ "$(cat "$G/highscores.config" 2>/dev/null)" = "$STOCK_SCORES" ] && [ "$(cat "$G/pad/home_owner")" = "$mine" ] \
+        && [ "$(cat "$G/pad/home_$other/highscores.config" 2>/dev/null)" = "$OTHER_SCORES" ] \
+        && pass "3: $mine's own scores back in /game, $other's kept in pad/home_$other" \
+        || fail "3: the files ($(ls "$G" | tr '\n' ' '); pad: $(ls "$G/pad" | tr '\n' ' '))"
+    spk_attract && pass "3: $mine in attract" || fail "3: no attract"
+    sleep 5
+    bash "$T/shot.sh" "$W/attract3.png" >/dev/null 2>&1 && pass "3: shot $W/attract3.png"
+    bash "$T/stop.sh" >/dev/null 2>&1; bash "$T/killgame.sh" >/dev/null 2>&1
+    cp "$L" "$W/padselect3.log" 2>/dev/null
+fi
 
 echo "machine_sim: $([ $FAILS = 0 ] && echo PASS || echo "$FAILS FAILED") ($TITLE, shots in $W)"
 exit $((FAILS > 0))

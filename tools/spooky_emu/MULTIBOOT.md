@@ -76,6 +76,20 @@ At every power-up the launcher (tested by `codeselect/test/padselect_spk_test.sh
    build's `assets`/`config` folders into place, and runs `/game/pad/b<k>/uptest/main.x86_64`
    with uptest as its working directory.
 
+**Two games on one machine (PAD-997).** Ultraman is Halloween's code base on the same Pinotaur
+board, wired the same (`spktitles.py`), so the builder takes either beside the other
+(`TITLES` `family`); every other title must still be one game. Both keep their settings,
+audits and scores in `/game/*.config` and `/game/*.json` under the SAME names, each with its
+own text in them (Ultraman's `BUMP BALTANS` is Halloween's `BUMP MIKES`), so a two-game
+update's `spk.conf` names each build's game (`title=b<k> <key>`) and those files (`own=*.config
+*.json`): before a build of the other game starts, the launcher moves them into
+`pad/home_<old game>` and brings `pad/home_<new game>`'s back (`pad/home_owner` says whose sit
+in /game; it changes only once every old file is kept, so a power cut is finished by the next
+start). A game's first start gets `highscores.config` from its own build's
+`config/default_highscores.config` (`seed=`): Halloween started without one writes one it then
+dies on (`run_game.sh`). A one-game update writes none of these lines. A stock update installed
+later starts with whichever game's files sit in /game.
+
 Every failure ends on b0. A stock update later replaces `main.x86_64` and the menu is gone;
 `/game/pad` stays (the owner can delete it from a stock install only by a restore image -
 noted for the help).
@@ -191,3 +205,10 @@ cannot even update its game code from the card. Owners can keep one card per bui
 Each: the menu on the game's screen, RIGHT + START on the rig's board picked the marked
 build, the game in attract from /game/pad/b1, the next power-up's countdown booted it again
 without making it again (2026-11-03/04, slot 1).
+
+Two games (PAD-997, 2026-11-04, slot 1): `MSIM_EXTRA=code_H78.pkg machine_sim.sh code_UM.pkg`
+- PASS. Ultraman v1.18 stock + Halloween v1.18.1 in one code_UM.pkg; RIGHT + START booted
+Halloween's own code on the Ultraman board to its attract (Compass International Pictures),
+Ultraman's seven /game files kept in pad/home_ultraman and Halloween's scores seeded from its
+build; the countdown booted it again; LEFT + START booted Ultraman with its own files back
+and Halloween's kept.

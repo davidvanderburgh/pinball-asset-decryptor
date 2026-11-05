@@ -362,6 +362,34 @@ def test_the_audio_tab_keeps_the_jukebox_s_songs(tmp_path, monkeypatch):
         assert w.call("audio.jukebox_open")["songs"][0]["video"] == "Hey Jude intro.mp4"
 
 
+def test_clear_all_takes_every_song_out_once_the_person_says_yes(tmp_path, monkeypatch):
+    # PAD-1002: Clear all… starts the jukebox over; a No keeps the songs
+    from tests.test_webui_audio import _open, _project, _sidecar, _wav as wav
+    from tests.webui_harness import web_app
+    _gui_offer(monkeypatch, "")
+    proj = _project(tmp_path)
+    paths = [str(tmp_path / "mine" / ("%s.wav" % n)) for n in ("Hey Jude", "Revolution", "Get Back")]
+    for f in paths:
+        wav(f)
+    with web_app(tmp_path, mfr="stern", era="spike2") as w:
+        _open(w, proj)
+        w.answers.append(paths)
+        assert len(w.call("audio.jukebox_action", "add")["songs"]) == 3
+        w.answers.append("no")
+        assert len(w.call("audio.jukebox_action", "clear")["songs"]) == 3
+        assert "3 songs" in w.asked[-1]["message"]
+        w.answers.append("yes")
+        assert w.call("audio.jukebox_action", "clear")["songs"] == []
+        assert "jukebox" not in _sidecar(proj)
+        assert w.state("audio")["jukebox"]["n"] == 0
+        n = len(w.asked)
+        assert w.call("audio.jukebox_action", "clear")["songs"] == []    # nothing to clear: no question
+        assert len(w.asked) == n
+    with web_app(tmp_path / "again", mfr="stern", era="spike2") as w:      # and it stays empty
+        _open(w, proj)
+        assert w.call("audio.jukebox_open")["songs"] == []
+
+
 def test_a_game_with_no_song_modes_shows_no_jukebox(tmp_path, monkeypatch):
     from tests.test_webui_audio import _open, _project
     from tests.webui_harness import web_app
@@ -377,7 +405,7 @@ def test_the_page_has_the_jukebox_window():
               encoding="utf-8") as f:
         js = f.read()
     assert 'call("audio.jukebox_open")' in js and "function JukeboxModal" in js
-    for a in ('"add"', "`video:${g.k}`", "`weight:${g.k}:${v}`", "`off:${g.k}`", "`play:${g.k}`"):
+    for a in ('"add"', "`video:${g.k}`", "`weight:${g.k}:${v}`", "`off:${g.k}`", "`play:${g.k}`", '"clear"'):
         assert a in js, a
     # PAD-998: the song plays in the pane behind the window, so its ▶ turns into ■ there and stops it (as the
     # Sounds on shots window's does)

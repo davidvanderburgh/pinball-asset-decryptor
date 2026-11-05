@@ -252,6 +252,7 @@ HELP_CONTENT = {
          "with no video is added without one. Two files of one name (**Hey Jude.wav** and "
          "**Hey Jude.mp3**) ask which one. A song already in the jukebox takes the old one's "
          "place, keeping its place in the list and how often it comes up, and you are told.\n"
+         "- **Clear all…** takes every song out, after asking, to start over.\n"
          "- **…** on a song: **Choose an intro video…** gives it the video its song mode "
          "opens with, the song's name in it. A song without one opens with its song mode's "
          "own intro.\n"

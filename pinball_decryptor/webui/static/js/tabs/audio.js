@@ -448,6 +448,33 @@ export function FilePlay({ path, title }) {
     onClick=${() => { if (on) stopPlayer(p); else startPlayer(syncPlayer("file", { path, v: ++fileV }), 0); }} />`;
 }
 
+// PAD-1004: the Jukebox and Sounds on shots lists sort by a column's title: the first click sorts by it
+// (A to Z, or most first where the column says desc), the second turns it round, the third gives the
+// list its own order back. Only the view sorts: the list's own order (#) stays as it was.
+// cols: {key: {val(row), desc}}
+function useColSort(rows, cols) {
+  const [by, setBy] = useState(null);
+  const click = (k) => setBy((c) => (!c || c.key !== k ? { key: k, desc: !!cols[k].desc }
+    : c.desc === !!cols[k].desc ? { key: k, desc: !c.desc } : null));
+  const shown = useMemo(() => {
+    if (!by || !cols[by.key]) return rows;
+    const val = cols[by.key].val;
+    const cmp = (a, b) => {
+      const x = val(a), y = val(b);
+      const ex = x === "" || x == null, ey = y === "" || y == null;
+      if (ex || ey) return ex === ey ? 0 : ex ? 1 : -1;            // empties last, either way round
+      const d = typeof x === "number" && typeof y === "number" ? x - y
+        : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+      return by.desc ? -d : d;
+    };
+    return [...rows].sort((a, b) => cmp(a, b) || a.k - b.k);
+  }, [rows, by]);
+  const Th = ({ k, children }) => html`<th><button type="button" class="aud-sort"
+    ...${tip(by && by.key === k && by.desc !== !!cols[k].desc ? "Click for the list's own order" : "Click to sort by this")}
+    onClick=${() => click(k)}>${children}${by && by.key === k ? (by.desc ? " ▼" : " ▲") : ""}</button></th>`;
+  return { shown, Th, sorted: !!by && !(by.key === "k" && !by.desc) };
+}
+
 // PAD-685: the jukebox - the song modes play one of these songs, drawn at random, each with its own
 // intro video: the header button opens its song list
 function JukeboxButton({ j, onOpen }) {
@@ -482,6 +509,8 @@ function JukeVideo({ k, path, name, onClose }) {
     </div>
   <//>`;
 }
+const JUKE_COLS = { k: { val: (g) => g.k }, audio: { val: (g) => g.audio }, video: { val: (g) => g.video || "" },
+  weight: { val: (g) => Number(g.weight), desc: true } };
 
 function JukeboxModal({ data, onClose }) {
   const [d, setD] = useState(data);
@@ -490,17 +519,22 @@ function JukeboxModal({ data, onClose }) {
   const songs = d.songs || [];
   const full = songs.length >= (d.max || 0);
   const weights = (d.weights || []).map((w) => ({ value: String(w.w), label: w.label }));
+  const { shown, Th, sorted } = useColSort(songs, JUKE_COLS);
+  const moveTip = sorted ? "Sort by # to move songs: the list is sorted by another column" : undefined;
   return html`<${Modal} title="Jukebox" icon="audio" wide remember="jukebox" onClose=${onClose}
     footer=${html`<${Button} icon="plus" disabled=${d.running || full || !!d.why}
         title=${full ? `At most ${d.max} songs` : "Choose songs' audio files, and their intro videos with them: a video goes with the song of the same name"}
-        onClick=${() => act("add")}>Add songs…<//><span class="grow"></span>
+        onClick=${() => act("add")}>Add songs…<//>
+      <${Button} kind="ghost" icon="trash" disabled=${d.running || !songs.length}
+        title="Take every song out of the jukebox to start over (it asks first)"
+        onClick=${() => act("clear")}>Clear all…<//><span class="grow"></span>
       <${Button} kind="primary" onClick=${onClose}>Close<//>`}>
     <div class="stack" style="gap:10px">
       <p class="aud-p">${d.tip}</p>
       ${d.why ? html`<${Note} kind="warn">${d.why}<//>` : null}
       ${songs.length ? html`<div class="aud-juke"><table>
-        <thead><tr><th>#</th><th>Song</th><th>Intro video</th><th>How often</th><th></th></tr></thead>
-        <tbody>${songs.map((g) => html`<tr class=${cx(g.gone && "gone")} title=${g.gone ? "A file of this song is not on this PC any more" : ""}>
+        <thead><tr><${Th} k="k">#<//><${Th} k="audio">Song<//><${Th} k="video">Intro video<//><${Th} k="weight">How often<//><th></th></tr></thead>
+        <tbody>${shown.map((g) => html`<tr class=${cx(g.gone && "gone")} title=${g.gone ? "A file of this song is not on this PC any more" : ""}>
           <td class="muted">${g.k}</td>
           <td><span class="nw">${g.audio}</span></td>
           <td>${g.video ? html`<span class="nw"><${Button} size="sm" kind="ghost" icon="video" title="Watch this intro video"
@@ -516,8 +550,8 @@ function JukeboxModal({ data, onClose }) {
               g.video ? { label: "Watch the intro video", icon: "play", onClick: () => setWatch(g) } : null,
               g.video ? { label: "Use the song mode's own intro", icon: "undo", disabled: d.running, onClick: () => act(`novideo:${g.k}`) } : null,
               { sep: true },
-              { label: "Move up", icon: "up", disabled: d.running || g.k === 1, onClick: () => act(`up:${g.k}`) },
-              { label: "Move down", icon: "down", disabled: d.running || g.k === songs.length, onClick: () => act(`down:${g.k}`) },
+              { label: "Move up", icon: "up", disabled: d.running || sorted || g.k === 1, title: moveTip, onClick: () => act(`up:${g.k}`) },
+              { label: "Move down", icon: "down", disabled: d.running || sorted || g.k === songs.length, title: moveTip, onClick: () => act(`down:${g.k}`) },
               { sep: true },
               { label: "Take out of the jukebox", icon: "x", disabled: d.running, onClick: () => act(`off:${g.k}`) },
             ].filter(Boolean), { align: "right" })} />
@@ -535,6 +569,9 @@ function ShotsButton({ g, onOpen }) {
     onClick=${() => (g.why ? call("audio.shots_action", "why") : onOpen())}>${g.n ? `Sounds on shots (${g.n})` : "Sounds on shots"}<//></span>`;
 }
 
+const SHOT_COLS = { k: { val: (r) => r.k }, mode: { val: (r) => r.mode }, shot: { val: (r) => r.shot },
+  sound: { val: (r) => r.sound } };
+
 function ShotsModal({ data, onClose }) {
   const [d, setD] = useState(data);
   const [mode, setMode] = useState("");
@@ -549,14 +586,15 @@ function ShotsModal({ data, onClose }) {
   const litOk = (d.lit_ok || []).includes(s);
   const l = litOk ? lit : "";
   const full = rows.length >= (d.max || 0);
+  const { shown, Th } = useColSort(rows, SHOT_COLS);
   return html`<${Modal} title="Sounds on shots" icon="audio" wide remember="shots" onClose=${onClose}
     footer=${html`<span class="grow"></span><${Button} kind="primary" onClick=${onClose}>Close<//>`}>
     <div class="stack" style="gap:10px">
       <p class="aud-p">${d.tip}</p>
       ${d.why ? html`<${Note} kind="warn">${d.why}<//>` : null}
       ${rows.length ? html`<div class="aud-juke"><table>
-        <thead><tr><th>#</th><th>In the game's mode</th><th>When this shot is hit</th><th>It plays</th><th></th></tr></thead>
-        <tbody>${rows.map((r) => html`<tr class=${cx(r.gone && "gone")} title=${r.gone ? "This sound's file is not on this PC any more" : ""}>
+        <thead><tr><${Th} k="k">#<//><${Th} k="mode">In the game's mode<//><${Th} k="shot">When this shot is hit<//><${Th} k="sound">It plays<//><th></th></tr></thead>
+        <tbody>${shown.map((r) => html`<tr class=${cx(r.gone && "gone")} title=${r.gone ? "This sound's file is not on this PC any more" : ""}>
           <td class="muted">${r.k}</td>
           <td><span class="nw">${r.mode}</span></td>
           <td><span class="nw">${r.shot}</span></td>

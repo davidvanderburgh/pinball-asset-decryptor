@@ -463,7 +463,7 @@ function JukeboxModal({ data, onClose }) {
   const weights = (d.weights || []).map((w) => ({ value: String(w.w), label: w.label }));
   return html`<${Modal} title="Jukebox" icon="audio" wide remember="jukebox" onClose=${onClose}
     footer=${html`<${Button} icon="plus" disabled=${d.running || full || !!d.why}
-        title=${full ? `At most ${d.max} songs` : "Choose one or more songs' audio files"}
+        title=${full ? `At most ${d.max} songs` : "Choose songs' audio files, and their intro videos with them: a video goes with the song of the same name"}
         onClick=${() => act("add")}>Add songs…<//><span class="grow"></span>
       <${Button} kind="primary" onClick=${onClose}>Close<//>`}>
     <div class="stack" style="gap:10px">
@@ -490,7 +490,7 @@ function JukeboxModal({ data, onClose }) {
               { label: "Take out of the jukebox", icon: "x", disabled: d.running, onClick: () => act(`off:${g.k}`) },
             ].filter(Boolean), { align: "right" })} />
           </td></tr>`)}</tbody></table></div>`
-        : html`<div class="muted">No songs yet. Add the songs' audio files, then give each one its intro video.</div>`}
+        : html`<div class="muted">No songs yet. Add the songs' audio files, and their intro videos with them: Hey Jude.mp4 is the intro of Hey Jude.wav.</div>`}
     </div>
   <//>`;
 }

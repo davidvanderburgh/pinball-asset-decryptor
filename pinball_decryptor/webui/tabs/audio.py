@@ -138,6 +138,9 @@ _FOLDER_MATCH_EXTS = (".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac",
 #: PAD-685: a jukebox song's intro video
 _VIDEO_FILETYPES = [("Video files", "*.mp4 *.mov *.m4v *.mkv *.avi *.webm *.wmv *.mpg *.mpeg"),
                     ("All files", "*.*")]
+#: PAD-999: Add songs takes a song's audio and its intro video at once, named alike
+_JUKE_FILETYPES = [("Songs and their intro videos", _AUDIO_FILETYPES[0][1] + " " + _VIDEO_FILETYPES[0][1]),
+                   _AUDIO_FILETYPES[0], _VIDEO_FILETYPES[0], ("All files", "*.*")]
 _JUKE_TIP = ("A jukebox for the song modes: each time a song mode starts, the game plays one of these "
              "songs, drawn at random, with its own intro video. A Common song comes up three times as "
              "often as a Rare one, and a song never comes back within five song modes, so none plays "
@@ -3716,19 +3719,15 @@ class AudioTab(FindOriginalsMixin, TabService):
             self.stop_all_preview_playback()
             start = self.window.last_browse_dir("audio_replacement")
             paths = compat.filedialog.askopenfilenames(
-                title="Choose the jukebox's songs", initialdir=start if start and os.path.isdir(start) else "",
-                filetypes=_AUDIO_FILETYPES)
+                title="Choose the jukebox's songs (and their intro videos)",
+                initialdir=start if start and os.path.isdir(start) else "", filetypes=_JUKE_FILETYPES)
             if isinstance(paths, str):
                 paths = [paths] if paths else []
-            paths = [os.path.normpath(p) for p in (paths or ()) if p][:_JB.MAX_SONGS - len(self._juke)]
+            paths = [os.path.normpath(p) for p in (paths or ()) if p]
             if not paths:
                 return self._jukebox_rows()
             self.window.remember_browse_dir("audio_replacement", os.path.dirname(paths[0]))
-            for path in paths:
-                self._juke.append({"audio": path, "video": "", "weight": _JB.DEFAULT_WEIGHT})
-            self.log("Replace Audio: the jukebox has %d more song(s) (%d in all)."
-                     % (len(paths), len(self._juke)), "info")
-            self._juke_changed()
+            self._juke_add(paths)
             return self._jukebox_rows()
         if not 1 <= k <= len(self._juke):
             return self._jukebox_rows()
@@ -3772,6 +3771,75 @@ class AudioTab(FindOriginalsMixin, TabService):
             return self._jukebox_rows()
         self._juke_changed()
         return self._jukebox_rows()
+
+    def _juke_pick(self, what, files, none_label):
+        """PAD-999: one of several files picked for a song under one name (``Hey Jude.wav`` and
+        ``Hey Jude.mp3``): which is it? None for *none_label*."""
+        if len(files) == 1:
+            return files[0]
+        buttons = [dict({"id": str(i), "label": os.path.basename(f)}, **({"style": "primary"} if not i else {}))
+                   for i, f in enumerate(files)] + [{"id": "none", "label": none_label}]
+        answer = compat.ctx().dialogs.message(
+            "question", "Jukebox: which %s?" % what,
+            "%d of the files you picked are the %s of %s. Which one goes in the jukebox?"
+            % (len(files), what, os.path.splitext(os.path.basename(files[0]))[0]),
+            buttons, default="0")
+        try:
+            return files[int(answer)]
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    def _juke_add(self, paths):
+        """PAD-999: Add songs with the songs' audio and intro videos picked at once. A song's files
+        are named alike but for the extension; a video with no audio of its name makes no song, and
+        an audio with no video is a song with its song mode's own intro. Several audio (or video)
+        files of one name ask which one. A song whose name is in the jukebox already takes that
+        song's place (its weight and place in the list kept, its intro video kept when none came
+        with it), and the person is told."""
+        from ...plugins.stern import jukebox as _JB
+        songs, lone = _JB.pair_files(paths)
+        added, replaced, full = 0, [], []
+        for key, audios, videos in songs:
+            audio = self._juke_pick("song's audio", audios, "Leave this song out")
+            if audio is None:
+                continue
+            video = self._juke_pick("intro video", videos, "No intro video") if videos else ""
+            name = os.path.basename(audio)
+            old = next((g for g in self._juke if _JB.song_key(g["audio"]) == key), None)
+            if old is not None:
+                old["audio"] = audio
+                if video:
+                    old["video"] = video
+                replaced.append(name)
+                continue
+            if len(self._juke) >= _JB.MAX_SONGS:
+                full.append(name)
+                continue
+            self._juke.append({"audio": audio, "video": video or "", "weight": _JB.DEFAULT_WEIGHT})
+            added += 1
+        lone_names = [os.path.basename(v) for v in lone]
+        said = ["the jukebox has %d more song(s) (%d in all)" % (added, len(self._juke))]
+        if replaced:
+            said.append("%d took the place of the song(s) of the same name" % len(replaced))
+        self.log("Replace Audio: %s." % ", ".join(said), "info")
+        for v in lone_names:
+            self.log("Replace Audio: %s was left out of the jukebox: no song's audio of its name was "
+                     "picked with it." % v, "warning")
+        notes = []
+        if replaced:
+            notes.append("Already in the jukebox, so these took the place of the song of the same "
+                         "name (it keeps its place in the list and how often it comes up):\n"
+                         + "\n".join(replaced))
+        if lone_names:
+            notes.append("Left out: these videos have no song's audio file of the same name, and a "
+                         "video is only a song's intro:\n" + "\n".join(lone_names))
+        if full:
+            notes.append("Left out: the jukebox takes at most %d songs:\n%s"
+                         % (_JB.MAX_SONGS, "\n".join(full)))
+        if notes:
+            compat.messagebox.showwarning("Jukebox", "\n\n".join(notes))
+        if added or replaced:
+            self._juke_changed()
 
     def _juke_changed(self):
         from ...plugins.stern import jukebox as _JB

@@ -53,6 +53,7 @@ LOOKS_KEPT = 128
 log = logging.getLogger(__name__)
 LABEL = "Replace Images"
 SCAN_LABEL = "Images"
+SAME_TITLE = "Clear replacements identical to the original"
 
 EMPTY_NO_FOLDER = "Set the project folder on the Extract tab, then click Scan."
 EMPTY_SCANNING = "Scanning for image files…"
@@ -283,6 +284,39 @@ def _plural(n, word):
     return "%d %s%s" % (n, word, "" if n == 1 else "s")
 
 
+def same_picture(a, b):
+    """Whether pictures *a* and *b* look the same: the same bytes, else the
+    same size and the same pixels once both are RGBA (a PNG saved again, an
+    RGB copy of an opaque picture).  A fully clear pixel is clear whatever
+    color it holds underneath, since nothing of it is drawn (PAD-1016)."""
+    try:
+        if os.path.getsize(a) == os.path.getsize(b):
+            with open(a, "rb") as fa, open(b, "rb") as fb:
+                if fa.read() == fb.read():
+                    return True
+    except OSError:
+        return False
+    from PIL import Image
+    try:
+        with Image.open(a) as ia, Image.open(b) as ib:
+            if ia.size != ib.size:
+                return False
+            ia, ib = ia.convert("RGBA"), ib.convert("RGBA")
+    except Exception:                                    # noqa: BLE001
+        return False
+    if ia.tobytes() == ib.tobytes():
+        return True
+    da, db = ia.getchannel("A"), ib.getchannel("A")
+    if da.tobytes() != db.tobytes():
+        return False
+    # differ only under clear pixels? blank those on both and look again
+    clear = da.point(lambda v: 255 if v == 0 else 0)
+    blank = Image.new("RGBA", ia.size, (0, 0, 0, 0))
+    ia.paste(blank, (0, 0), clear)
+    ib.paste(blank, (0, 0), clear)
+    return ia.tobytes() == ib.tobytes()
+
+
 # ---------------------------------------------------------------------------
 class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
     ns = "images"
@@ -363,6 +397,7 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
         self._cmp = []               # Compare's tiles
         self._cmp_ids = 0
         self._cmp_open = False
+        self._same_cancel = None
         for v in (self.image_search_var, self.image_source_filter_var,
                   self.image_change_filter_var,
                   self.image_group_by_scene_var):
@@ -372,7 +407,7 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
                  sort={"key": "#0", "desc": False},
                  cols={"n": False, "keep": False, "color": False},
                  color_unlock={"offered": False, "on": False},
-                 can_clear=False,
+                 can_clear=False, same=None,
                  running=False, preview=self._empty_preview(), dir="",
                  focus=None, total=0, shown=0,
                  reveal_label=reveal_menu_label(), sources=list(SOURCES),
@@ -2382,6 +2417,105 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
                 self._clear_confirm_text(
                     targets, "Clear all %d replacement%s on this tab?"
                              % (n, "" if n == 1 else "s"))):
+            return 0
+        return self._clear_replacement_picks(targets, reselect=False)
+
+    @rpc
+    def clear_same(self):
+        """More menu: "Clear replacements identical to the original…"
+        (PAD-1016, DoomWalrus666).  Each pick (or picture a build already put
+        in) is compared with the game's own picture off the loop, pixel for
+        pixel, and the ones that change nothing are cleared together."""
+        if self._is_running() or self._same_cancel is not None:
+            return False
+        pairs = []
+        for rel in self._replacement_targets():
+            rep = self._rep_pane_path(rel)
+            orig = self._orig_pane_path(rel)[0]
+            if not (rep and orig):
+                continue
+            pairs.append((rel, rep, orig, bool(self._color_state(rel))))
+        if not pairs:
+            compat.messagebox.showinfo(
+                SAME_TITLE, "Nothing is picked on this tab, so there is "
+                "nothing to compare.")
+            return False
+        stop = threading.Event()
+        self._same_cancel = stop
+        self.set(same={"text": "Comparing %d replacement%s with the "
+                               "originals…" % (len(pairs),
+                                               "" if len(pairs) == 1 else "s"),
+                       "pct": 0})
+        scan_dir = self._scan_dir
+
+        def run():
+            same = []
+            for i, (rel, rep, orig, col) in enumerate(pairs):
+                if stop.is_set():
+                    break
+                try:
+                    if same_picture(rep, orig):
+                        same.append((rel, col))
+                except Exception:                        # noqa: BLE001
+                    log.exception("compare %s", rel)
+                self.ctx.loop.post(self._same_progress, stop, i + 1,
+                                   len(pairs))
+            self.ctx.loop.post(self._same_done, stop, scan_dir, len(pairs),
+                               same)
+
+        threading.Thread(target=run, daemon=True,
+                         name="images-same").start()
+        return True
+
+    def _same_progress(self, stop, done, total):
+        if self._same_cancel is not stop or stop.is_set():
+            return
+        self.set(same={"text": "Comparing replacements with the originals: "
+                               "%d of %d" % (done, total),
+                       "pct": int(100 * done / total) if total else 100})
+
+    @rpc
+    def clear_same_cancel(self):
+        stop = self._same_cancel
+        if stop is None:
+            return False
+        stop.set()
+        return True
+
+    def _same_done(self, stop, scan_dir, total, same):
+        if self._same_cancel is stop:
+            self._same_cancel = None
+        self.set(same=None)
+        self._update_clear_all()
+        if stop.is_set() or scan_dir != self._scan_dir:
+            return 0
+        # still picked as compared (a pick changed meanwhile is left alone)
+        live = set(self._replacement_targets())
+        coloured = [rel for rel, col in same if col and rel in live]
+        targets = [rel for rel, col in same if not col and rel in live]
+        note = ""
+        if coloured:
+            note = ("\n\n%d more %s the same picture but %s “Correct "
+                    "its colors for the machine” on, so %s kept."
+                    % (len(coloured), "is" if len(coloured) == 1 else "are",
+                       "has" if len(coloured) == 1 else "have",
+                       "it is" if len(coloured) == 1 else "they are"))
+        if not targets:
+            compat.messagebox.showinfo(
+                SAME_TITLE, "None of the %d replacement%s on this tab is the "
+                "same picture as the original it replaces.%s"
+                % (total, "" if total == 1 else "s", note))
+            return 0
+        n = len(targets)
+        question = ("%d of the %d replacement%s on this tab %s the same "
+                    "picture as the original, pixel for pixel, so %s nothing "
+                    "on the card. Clear %s?%s"
+                    % (n, total, "" if total == 1 else "s",
+                       "is" if n == 1 else "are",
+                       "it changes" if n == 1 else "they change",
+                       "it" if n == 1 else "them", note))
+        if not compat.messagebox.askyesno(
+                SAME_TITLE, self._clear_confirm_text(targets, question)):
             return 0
         return self._clear_replacement_picks(targets, reselect=False)
 

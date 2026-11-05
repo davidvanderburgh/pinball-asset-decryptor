@@ -427,6 +427,27 @@ const MIN_W = { "#0": 80, rep: 110 };    // the Tk columns' minwidth
 const once = (fn) => (e) => { e.stopPropagation(); if (e.detail > 1) return; fn(e); };
 const noDbl = (e) => e.stopPropagation();
 
+// PAD-998: a window row's ▶ plays its file in the Replacement pane behind the window, where the
+// pane's own Stop can't be reached: while that file plays the button turns into ■ and stops it
+function RowPlay({ path, title, onPlay }) {
+  const p = usePlayer("rep");
+  const on = !!path && p.path === path && (p.playing || p.want);
+  return html`<${Button} size="sm" kind="ghost" icon=${on ? "stop" : "play"} title=${on ? "Stop" : title}
+    onClick=${() => { if (on) { stopPlayer(p); call("audio.stop"); } else onPlay(); }} />`;
+}
+
+// PAD-998: ▶ / ■ that plays a file right where it is, on a page with no Replacement pane (the Attract
+// page's flipper sounds: their ▶ played into the Audio tab's pane, which isn't mounted there, so it
+// played nothing): a player of its own, never one of the panes
+let fileV = 0;
+export function FilePlay({ path, title }) {
+  const p = usePlayer("file");
+  const on = !!path && p.path === path && (p.playing || p.want);
+  useEffect(() => () => { const f = player("file"); if (f.path === path) stopPlayer(f); }, [path]);
+  return html`<${Button} size="sm" kind="ghost" icon=${on ? "stop" : "play"} title=${on ? "Stop" : title} disabled=${!path}
+    onClick=${() => { if (on) stopPlayer(p); else startPlayer(syncPlayer("file", { path, v: ++fileV }), 0); }} />`;
+}
+
 // PAD-685: the jukebox - the song modes play one of these songs, drawn at random, each with its own
 // intro video: the header button opens its song list
 function JukeboxButton({ j, onOpen }) {
@@ -457,7 +478,7 @@ function JukeboxModal({ data, onClose }) {
           <td><${Select} sm value=${String(g.weight)} options=${weights} disabled=${d.running}
             onChange=${(v) => act(`weight:${g.k}:${v}`)} width=${110} /></td>
           <td class="nw">
-            <${Button} size="sm" kind="ghost" icon="play" title="Play this song" onClick=${() => act(`play:${g.k}`)} />
+            <${RowPlay} path=${g.path} title="Play this song" onPlay=${() => act(`play:${g.k}`)} />
             <${Button} size="sm" kind="ghost" icon="more" title="More for this song" onClick=${(e) => openMenu(e.currentTarget, [
               { label: g.video ? "Change the intro video…" : "Choose an intro video…", icon: "video", disabled: d.running,
                 title: "The video the song mode opens with when this song is drawn, the song's name in it", onClick: () => act(`video:${g.k}`) },
@@ -508,7 +529,7 @@ function ShotsModal({ data, onClose }) {
           <td><span class="nw">${r.shot}</span></td>
           <td><span class="nw">${r.sound}</span></td>
           <td class="nw">
-            <${Button} size="sm" kind="ghost" icon="play" title="Play this sound" onClick=${() => act(`play:${r.k}`)} />
+            <${RowPlay} path=${r.path} title="Play this sound" onPlay=${() => act(`play:${r.k}`)} />
             <${Button} size="sm" kind="ghost" icon="x" title="Take this one out" disabled=${d.running} onClick=${() => act(`off:${r.k}`)} />
           </td></tr>`)}</tbody></table></div>`
         : html`<div class="muted">None yet. Pick a mode, a shot and a sound below, then Add.</div>`}

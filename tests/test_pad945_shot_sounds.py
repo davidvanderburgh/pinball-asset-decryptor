@@ -342,7 +342,7 @@ def test_the_audio_tab_adds_plays_and_takes_off_sounds_on_shots(tmp_path, monkey
         assert got["data"]["modes"] == [{"value": "12", "label": "Riot Mode"}, {"value": "16", "label": "Grendel Mode"}]
         rows = w.call("audio.shots_action", "add:16:85")["rows"]
         assert rows == [{"k": 1, "mode": "Grendel Mode", "shot": "R ramp made opto", "sound": "idx0002.wav",
-                         "gone": False}]
+                         "path": os.path.normpath(os.path.join(proj, "audio", "idx0002.wav")), "gone": False}]
         saved = _sidecar(proj)["sound_modes"]["shots"]
         assert saved == [{"mode": 16, "mode_name": "Grendel Mode", "switch": 85, "switch_name": "R ramp made opto",
                           "file": os.path.normpath(os.path.join(proj, "audio", "idx0002.wav"))}]

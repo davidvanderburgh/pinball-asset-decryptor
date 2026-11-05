@@ -340,6 +340,7 @@ def test_the_audio_tab_keeps_the_jukebox_s_songs(tmp_path, monkeypatch):
         w.answers.append([a, b])
         rows = w.call("audio.jukebox_action", "add")
         assert [g["audio"] for g in rows["songs"]] == ["Hey Jude.wav", "Revolution.wav"]
+        assert [g["path"] for g in rows["songs"]] == [os.path.normpath(a), os.path.normpath(b)]   # PAD-998
         assert [g["weight_word"] for g in rows["songs"]] == ["Normal", "Normal"]
         w.answers.append(str(v))
         rows = w.call("audio.jukebox_action", "video:1")
@@ -378,6 +379,10 @@ def test_the_page_has_the_jukebox_window():
     assert 'call("audio.jukebox_open")' in js and "function JukeboxModal" in js
     for a in ('"add"', "`video:${g.k}`", "`weight:${g.k}:${v}`", "`off:${g.k}`", "`play:${g.k}`"):
         assert a in js, a
+    # PAD-998: the song plays in the pane behind the window, so its ▶ turns into ■ there and stops it (as the
+    # Sounds on shots window's does)
+    assert '<${RowPlay} path=${g.path} title="Play this song"' in js and '<${RowPlay} path=${r.path}' in js
+    assert 'icon=${on ? "stop" : "play"}' in js and "stopPlayer(p); call(\"audio.stop\")" in js
 
 
 # ---- back out of a card ----------------------------------------------------------------------------

@@ -6,6 +6,7 @@
 import { html, useState, PageHead, Card, Button, Field, Check, Chip, Note, Icon, Empty, Spinner, tip, call, cx,
          openMenu } from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { FilePlay } from "./audio.js";
 
 export const css = true;
 
@@ -93,7 +94,7 @@ function FlipperSounds() {
   return html`<div class="stack" style="gap:6px">
     ${files.map((f, i) => html`<div class="at-row at-item">
       <span class="at-ic"><${Icon} name="audio" /></span><span class="at-name">${i + 1}. ${f}</span><span class="sp"></span>
-      <${Button} size="sm" kind="ghost" icon="play" title="Play it" onClick=${() => call("audio.attract_action", `play:${i + 1}`)} />
+      <${FilePlay} path=${(at.paths || [])[i]} title="Play it" />
       <${Button} size="sm" kind="ghost" icon="x" title="Take it off" onClick=${() => call("audio.attract_action", `off:${i + 1}`)} />
     </div>`)}
     <div class="row">

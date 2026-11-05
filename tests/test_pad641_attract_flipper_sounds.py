@@ -275,6 +275,7 @@ def test_the_audio_tab_adds_plays_and_takes_off_the_flipper_sounds(tmp_path, mon
         assert _sidecar(proj)["sound_modes"]["attract"] == [os.path.normpath(a), os.path.normpath(b)]
         st = w.state("audio")["attract"]
         assert st["files"] == ["Shaken.wav", "The name's Bond.wav"]
+        assert st["paths"] == [os.path.normpath(a), os.path.normpath(b)]      # PAD-998: the page plays them
         assert st["tip"][-1] == "In turn: 1. Shaken.wav; 2. The name's Bond.wav."
         assert w.call("audio.attract_action", "play:2") is True
         assert w.state("audio")["panes"]["rep"]["name"] == "Attract flipper sound 2: The name's Bond.wav"
@@ -314,6 +315,9 @@ def test_the_page_draws_the_button_from_the_tabs_state():
     with open(os.path.join(tabs, "attract.js"), encoding="utf-8") as f:
         js = f.read()
     assert 'useNs("audio")' in js and 'call("audio.attract_action", "add")' in js and "at.why" in js
+    # PAD-998: ▶ plays the file on the page itself (the Audio tab's panes are not mounted there), ■ stops it
+    assert '<${FilePlay} path=${(at.paths || [])[i]}' in js and 'import { FilePlay } from "./audio.js"' in js
+    assert 'call("audio.attract_action", `play:' not in js
 
 
 # ---- carried: mod routes, the music modes file, back out of a card ---------------------------------

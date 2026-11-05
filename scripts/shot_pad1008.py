@@ -3,7 +3,8 @@
     python scripts/shot_pad1008.py <repo> <out_dir> [--after]
 
 The PAD-1000 rig (shot_pad1000: a scratch Stern project whose jukebox has 20 songs, most with an
-intro video), with three sounds on shots in its sidecar too. Writes <before_|after_>audio_jukebox.png
+intro video), with three sounds on shots in its sidecar too (the window shows a note that the
+scratch project's game can't be told: it is the rows that are shown). Writes <before_|after_>audio_jukebox.png
 (the Jukebox window) and <before_|after_>shots_window.png (the Sounds on shots window), and prints
 which buttons each window's first row has in which cell.
 
@@ -23,6 +24,15 @@ import webui_shot  # noqa: E402
 
 CELLS = """() => [...document.querySelectorAll('.modal .aud-juke tbody tr:first-child td')]
   .map((td) => [...td.querySelectorAll('button')].map((b) => b.getAttribute('aria-label')))"""
+
+
+def _serve(repo, scratch, project):
+    """shot_pad1000's server, its launcher also letting this title offer sounds on shots (the scratch
+    project's game can't be told, which would keep the window shut)."""
+    J.LAUNCHER = J.LAUNCHER.replace("_A.AudioTab._jukebox_why = lambda self: None",
+                                    "_A.AudioTab._jukebox_why = lambda self: None\n"
+                                    "_A.AudioTab._shots_why = lambda self: ''")
+    return J._serve(repo, scratch, project)
 
 
 def _shots(project):
@@ -46,7 +56,7 @@ def main():
     scratch = tempfile.mkdtemp(prefix="pad1008-")
     project = J._project(scratch)
     _shots(project)
-    proc, url = J._serve(repo, scratch, project)
+    proc, url = _serve(repo, scratch, project)
     api = lambda m, *a: webui_shot.api(url, m, *a)          # noqa: E731
     state = lambda: webui_shot.state(url)                    # noqa: E731
     from playwright.sync_api import sync_playwright
@@ -67,8 +77,8 @@ def main():
             J._open(page, state)
             page.screenshot(path=os.path.join(out_dir, pre + "audio_jukebox.png"))
             print("jukebox first row cells:", page.evaluate(CELLS), flush=True)
-            page.keyboard.press("Escape")
-            time.sleep(0.8)
+            page.locator(".modal button:has-text('Close')").last.click()
+            page.wait_for_selector(".modal", state="detached", timeout=10000)
             page.locator("button:has-text('Sounds on shots')").first.click()
             page.wait_for_selector(".modal .aud-juke", timeout=20000)
             time.sleep(1)

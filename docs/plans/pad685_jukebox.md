@@ -67,3 +67,18 @@ line). The four new musics have no start site: they draw at the first ask, again
 (game_start) or after JUKE_GAP. JUKE_MODES went 8 -> 16. The sidecar's songs carry `"pool"` (none = song
 modes), the card's `#jsong` record a trailing pool key, so an extract puts each song back in its pool. The
 Jukebox window shows one pool at a time (a picker over the list); Add songs and Clear all work on that pool.
+
+## One song in two pools (PAD-1012)
+
+Ben asked that a song added to more than one pool is not played twice in a game ("if song A was played as one
+of the 5 main modes, it will not be picked ... when special mode or background music starts"), telling them
+alike by name. Each pool's copy is its own jsong line (one file in two pools shares one record, a second file
+of that name has its own), so the runtime could not tell. Write now joins a song's copies, alike by name
+(`jukebox.song_key`, the file's name without extension, case ignored) or played from one record, and gives
+each copy the first one's k as a 6th field after the pool (`jsong <w> <key> <clip> <pool> <same>`, the pool
+then written even when 0). The runtime keeps the songs drawn since the game started (reset when the
+game_start count moves) and a draw passes over a song whose copy in ANOTHER pool is among them; the pool's
+last-five window then counts only the songs left, so a song played last game comes back before one played
+earlier in this one; when every song of the pool was played elsewhere it draws as before (the song again,
+not the game's own music). The same pool's rule is unchanged. The log says "passed over a song played in
+another pool this game".

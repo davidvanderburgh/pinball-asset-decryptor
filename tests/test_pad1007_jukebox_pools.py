@@ -136,7 +136,7 @@ def test_the_runtime_reads_a_pool_on_each_line_and_holds_nine_musics():
         src = f.read()
     assert int(re.search(r"#define JUKE_MODES\s+(\d+)", src).group(1)) >= 9
     assert "jmode_line(f[1], f[2], f[3], n >= 5 ? f[4] : 0);" in src
-    assert "jsong_line(f[1], f[2], n >= 4 ? f[3] : 0, n >= 5 ? f[4] : 0);" in src
+    assert "jsong_line(f[1], f[2], n >= 4 ? f[3] : 0, n >= 5 ? f[4] : 0, n >= 6 ? f[5] : 0);" in src   # PAD-1012
     assert re.search(r"JUKE_HOOK\(15\)", src) and "on_juke_start_15," in src
     # a music with no start site draws again at each new game: the background is asked for all game long
     assert "e->game != juke_game()" in src

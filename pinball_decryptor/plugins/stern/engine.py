@@ -11841,7 +11841,10 @@ def _jukebox_lines(params, used, modes, log):
     song in a sound bank is left out: a bank's record is played by a bank sound id, never a key.
     An entry that landed gets ``lines`` 1 (the card's record names it). PAD-1007: each mode and each
     song carries its pool's number (:func:`.jukebox.pool_number`); a mode whose pool has no song that
-    landed keeps its own music (no line), and a song in a pool the title does not have is left out."""
+    landed keeps its own music (no line), and a song in a pool the title does not have is left out.
+    PAD-1012: a song in more than one pool (its file's name alike, :func:`.jukebox.song_key`, or one
+    file Write plays from one record) carries one number on each copy (the first copy's k), so the
+    runtime never plays it in two pools in a game."""
     from . import jukebox as _JB
     from . import sound_modes as _SMo
     plan = modes.juke_plan or {}
@@ -11867,8 +11870,29 @@ def _jukebox_lines(params, used, modes, log):
             continue
         clip = (_JB.clip_name(k) if song.video and os.path.isfile(song.video)
                 and _JB.pool_intro(prof, song.pool) else "")
-        songs.append((int(song.weight), bytes(hp["findkey"]), clip, pool))
+        songs.append((int(song.weight), bytes(hp["findkey"]), clip, pool, k, _JB.song_key(song.audio)))
         u["lines"] = 1
+    # PAD-1012: one song's copies in several pools - alike by name, or one file played from one record -
+    # are joined, and each copy carries the first one's k
+    up = {}
+
+    def top(x):
+        while up.setdefault(x, x) != x:
+            x = up[x]
+        return x
+    for g in songs:
+        for other in (("name", g[5]), ("key", g[1])):
+            up[top(other)] = top(("song", g[4]))
+    roots = [top(("song", g[4])) for g in songs]
+    first, pools_of = {}, {}
+    for g, r in zip(songs, roots):
+        first.setdefault(r, g[4])
+        pools_of.setdefault(r, set()).add(g[3])
+    shared = sum(1 for v in pools_of.values() if len(v) > 1)
+    songs = [g[:4] + ((first[r],) if len(pools_of[r]) > 1 else ()) for g, r in zip(songs, roots)]
+    if shared:
+        log("Jukebox: %d song(s) are in more than one pool; one played in a pool is not drawn in another "
+            "in the same game." % shared, "info")
     filled = {g[3] for g in songs}
     smodes = []
     for m in _JB.song_modes(prof):

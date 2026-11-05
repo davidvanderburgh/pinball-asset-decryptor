@@ -19,7 +19,7 @@ TEXT_VA, TEXT_OFF, TEXT_SIZE = 0x8000, 0x1000, 0x1000
 DATA_VA, DATA_OFF = 0x100000, 0x2000
 
 DEVICE_USABLE, BOARD_CHECK, GET_BOARD = 0x8000, 0x8080, 0x80C0
-WRAP_TOPPER, WRAP_PLAYFIELD = 0x8100, 0x8120
+WRAP_TOPPER, WRAP_PLAYFIELD, INLINE_TOPPER = 0x8100, 0x8120, 0x8140
 COUNT_VAR, TBLPTR_VAR = DATA_VA + 0x00, DATA_VA + 0x10
 TABLE = DATA_VA + 0x100
 TOPPER_IDX, PLAYFIELD_IDX = 3, 1
@@ -92,9 +92,13 @@ def _prog():
     p.put(BOARD_CHECK, 0xE92D4010, _b(BOARD_CHECK + 4, GET_BOARD, link=True), 0xE8BD8010)
     # GET_BOARD tail: movw/movt table ptr; ldr r3,[r3]; add r0,r3,r0,lsl#4; bx lr
     p.put(GET_BOARD, _movw(3, TBLPTR_VAR), _movt(3, TBLPTR_VAR), 0xE5933000, 0xE0830200, 0xE12FFF1E)
-    # wrappers: mov r0,#idx; mov r1,#0; b DEVICE_USABLE
+    # tail-call wrapper: mov r0,#idx; mov r1,#0; b DEVICE_USABLE
     p.put(WRAP_TOPPER, 0xE3A00000 | TOPPER_IDX, 0xE3A01000, _b(WRAP_TOPPER + 8, DEVICE_USABLE))
     p.put(WRAP_PLAYFIELD, 0xE3A00000 | PLAYFIELD_IDX, 0xE3A01000, _b(WRAP_PLAYFIELD + 8, DEVICE_USABLE))
+    # inline gate inside a function: push; mov r0,#idx; mov r1,#0; bl DEVICE_USABLE; cmp r0,#0; ...; pop
+    p.put(INLINE_TOPPER, 0xE92D4010,
+          0xE3A00000 | TOPPER_IDX, 0xE3A01000, _b(INLINE_TOPPER + 0xC, DEVICE_USABLE, link=True),
+          0xE3500000, 0xE8BD8010)
     # data: count, table pointer, device names, node bytes
     p.d32(COUNT_VAR, 8)
     p.d32(TBLPTR_VAR, TABLE)
@@ -109,19 +113,28 @@ def _word_at(elf, va):
     return struct.unpack_from("<I", elf, TEXT_OFF + va - TEXT_VA)[0]
 
 
-def test_finds_and_patches_only_the_topper_wrapper():
+def test_finds_and_patches_both_gate_forms_only_for_the_topper():
     elf = _prog()
     p = T.plan(elf)
     assert p is not None
-    assert {s[0] for s in p["sites"]} == {WRAP_TOPPER, WRAP_TOPPER + 4}
-    assert p["devices"] == ["Topper"]
+    assert sorted(set(p["devices"])) == ["Topper"]
     out = T.patched_bytes(elf, p)
     assert len(out) == len(elf)
-    assert _word_at(out, WRAP_TOPPER) == 0xE3A00001          # mov r0, #1
-    assert _word_at(out, WRAP_TOPPER + 4) == 0xE12FFF1E      # bx lr
+    # tail-call wrapper -> mov r0,#1 ; bx lr
+    assert _word_at(out, WRAP_TOPPER) == 0xE3A00001
+    assert _word_at(out, WRAP_TOPPER + 4) == 0xE12FFF1E
+    # inline bl -> only the call becomes mov r0,#1; the surrounding function is intact (no bx lr spliced in)
+    assert _word_at(out, INLINE_TOPPER) == 0xE92D4010                 # push, untouched
+    assert _word_at(out, INLINE_TOPPER + 0x4) == (0xE3A00000 | TOPPER_IDX)  # mov r0,#idx, untouched
+    assert _word_at(out, INLINE_TOPPER + 0xC) == 0xE3A00001           # the bl is now mov r0,#1
+    assert _word_at(out, INLINE_TOPPER + 0x10) == 0xE3500000          # cmp r0,#0 still follows
+    assert _word_at(out, INLINE_TOPPER + 0x14) == 0xE8BD8010          # pop, untouched
+    # no site writes bx lr into the inline gate's body
+    assert all(not (INLINE_TOPPER <= va <= INLINE_TOPPER + 0x14 and new == 0xE12FFF1E)
+               for va, _old, new in p["sites"])
     # the playfield wrapper is untouched
     assert _word_at(out, WRAP_PLAYFIELD) == (0xE3A00000 | PLAYFIELD_IDX)
-    # idempotent: the rewritten wrapper is no longer the gate shape
+    # idempotent: neither rewritten gate is still the gate shape
     assert T.plan(out) is None
 
 
@@ -187,4 +200,7 @@ def test_every_build(card):
     assert len(out) == len(elf)
     for va, old, new in p["sites"]:
         assert new in (0xE3A00001, 0xE12FFF1E)
+        # bx lr is only ever written over a tail-call wrapper's `mov r1, #0`, never over live code
+        if new == 0xE12FFF1E:
+            assert old == 0xE3A01000
     assert T.plan(out) is None

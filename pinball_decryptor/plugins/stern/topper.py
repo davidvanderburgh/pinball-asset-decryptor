@@ -32,9 +32,18 @@ The topper device is the one whose device-table record names it ``...TOPPER...``
 
 each 16-byte record carrying its node at +0xe and a name cell at +8.
 
-THE PATCH.  :func:`patched_bytes` rewrites each topper-present wrapper to
-``mov r0, #1 ; bx lr`` - the feature's gate now always sees the topper, so the
-extra character/mode is available on a cabinet that has none.  Only the
+The predicate reaches the topper two ways, and they are patched differently:
+
+* a thin standalone wrapper that TAIL-calls it (``...; b device_usable``, Venom's
+  Ghost Rider check): rewritten to ``mov r0, #1 ; bx lr`` so it returns
+  "present";
+* an INLINE call (``...; bl device_usable ; cmp r0, #0 ; ...``, Jaws' challenge
+  gate): only the ``bl`` becomes ``mov r0, #1``, so the code that follows reads
+  the topper as present.  Writing ``bx lr`` here would return from the middle of
+  the feature's own function, so the two forms are never patched alike.
+
+THE PATCH.  :func:`patched_bytes` makes the feature's gate always see the topper,
+so the extra character/mode is available on a cabinet that has none.  Only the
 gameplay predicate changes: the node-board health layer still reads the real
 bus, so a cabinet without the topper drives nothing and raises no node-board
 error (the topper boards are optional, flags bit 2 - see PAD-498).  Size
@@ -145,16 +154,19 @@ def _is_main_topper(name):
     return "TOPPER" in u and not any(s in u for s in _SUBDEVICE)
 
 
-def _wrappers(w, base, n, usables):
-    """``[(va, idx, du)]`` for every thin ``mov r0, #idx ; mov r1, #k ; b/bl device_usable`` wrapper."""
+def _gates(w, base, n, usables):
+    """``[(va, idx, link)]`` for every ``mov r0, #idx ; mov r1, #k ; b/bl device_usable`` gate: *va* is the first
+    word, *link* True for an inline ``bl`` call, False for a tail-call ``b`` wrapper."""
     tgts = {u for u, _b in usables}
     out = []
     for i in range(n - 2):
         if (w[i] & 0xFFFFF000) == 0xE3A00000 and ((w[i] >> 12) & 0xF) == 0 \
                 and (w[i + 1] & 0xFFFFF000) == 0xE3A01000:
-            t = _bl_target(base + 4 * (i + 2), w[i + 2])
-            if t in tgts:
-                out.append((base + 4 * i, w[i] & 0xFF, t))
+            x = w[i + 2]
+            if (x & 0x0E000000) != 0x0A000000 or (x >> 28) != 0xE:
+                continue
+            if _bl_target(base + 4 * (i + 2), x) in tgts:
+                out.append((base + 4 * i, w[i] & 0xFF, bool((x >> 24) & 1)))
     return out
 
 
@@ -180,14 +192,17 @@ def plan(elf_bytes):
     if table is None:
         return None
     sites, devices = [], []
-    for va, idx, du in _wrappers(w, base, n, usables):
+    for va, idx, link in _gates(w, base, n, usables):
         name = _device_name(elf, table, idx)
         if not _is_main_topper(name):
             continue
-        w0 = _at(w, base, n, va)
-        w1 = _at(w, base, n, va + 4)
-        sites.append((va, w0, _MOV_R0_1))
-        sites.append((va + 4, w1, _BX_LR))
+        if link:
+            # inline `bl device_usable`: make the call itself yield "present", leaving the function's flow intact
+            sites.append((va + 8, _at(w, base, n, va + 8), _MOV_R0_1))
+        else:
+            # tail-call wrapper `b device_usable`: it IS the predicate - return "present"
+            sites.append((va, _at(w, base, n, va), _MOV_R0_1))
+            sites.append((va + 4, _at(w, base, n, va + 4), _BX_LR))
         devices.append(name)
     if not sites:
         return None

@@ -48,7 +48,7 @@ def test_the_record_keeps_each_song_s_audio_video_and_weight():
     assert [(s.audio, s.video, s.weight) for s in again.songs] == [
         ("a.wav", "a.mov", 3), ("b.wav", "", 3), ("c.wav", "", 2)]
     assert JB.to_json(JB.Jukebox()) is None
-    assert len(JB.clean({"songs": [{"audio": "%d.wav" % i} for i in range(200)]}).songs) == JB.MAX_SONGS
+    assert len(JB.clean({"songs": [{"audio": "%d.wav" % i} for i in range(300)]}).songs) == JB.MAX_SONGS == 256    # PAD-1018: 128 -> 256
 
 
 def test_the_record_lives_in_the_project_s_sidecar(tmp_path):
@@ -339,6 +339,15 @@ def test_a_pool_draws_only_its_own_songs_and_never_one_of_its_own_last_five(draw
     assert all(len(set(songs[i:i + 6])) == 6 for i in range(len(songs) - 5))    # the others' draws don't count
     special = got[1::3]
     assert all(a != b for a, b in zip(special, special[1:]))                     # two songs: never twice running
+
+
+def test_three_full_pools_of_85_draw_every_song(draws):
+    """PAD-1018: 256 songs in all - 86 for the song modes, 85 each for the special modes and the background
+    music (the pools' songs past the old 128 included); each pool draws all of its own and only those."""
+    got = draws(["2"] * 86 + ["2:1"] * 85 + ["2:2"] * 85, 6000, "012")
+    assert set(got[0::3]) == set(range(86))
+    assert set(got[1::3]) == set(range(86, 171))
+    assert set(got[2::3]) == set(range(171, 256))
 
 
 def test_a_pool_with_no_song_draws_none(draws):

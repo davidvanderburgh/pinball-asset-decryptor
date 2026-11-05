@@ -40,8 +40,8 @@ from dataclasses import dataclass, field
 
 #: the project sidecar's key: ``{"songs": [{"audio": file, "video": file, "weight": 1..3, "pool": key}, ...]}``
 STAGED_KEY = "jukebox"
-#: songs a card may carry (pad_mode_runtime.c JUKE_SONGS)
-MAX_SONGS = 128
+#: songs a card may carry, every pool's together (pad_mode_runtime.c JUKE_SONGS; PAD-1018: 128 -> 256)
+MAX_SONGS = 256
 #: a song's weight: a Common song comes up three times as often as a Rare one
 WEIGHTS = ((3, "Common"), (2, "Normal"), (1, "Rare"))
 DEFAULT_WEIGHT = 2

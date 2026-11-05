@@ -246,7 +246,7 @@ HELP_CONTENT = {
          "modes songs of your own: each time a song mode starts, the game plays one of them, "
          "drawn at random, with its own intro video. No setting and no choosing: every start "
          "throws the dice.\n\n"
-         "- **Add songs…** picks one or more audio files (up to 128), and their intro videos "
+         "- **Add songs…** picks one or more audio files (up to 256 in all, every pool's together), and their intro videos "
          "with them: a video goes with the song of the same name (**Hey Jude.mp4** is the "
          "intro of **Hey Jude.wav**). A video with no song of its name is left out; a song "
          "with no video is added without one. Two files of one name (**Hey Jude.wav** and "

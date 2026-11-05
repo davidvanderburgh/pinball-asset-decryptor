@@ -16351,13 +16351,21 @@ static void gms_arm(void)
  * lasts) and its intro is that song's clip (the mode's own when the song has none). A mode whose start site
  * the port does not have draws at its first ask (clip or record) in a game JUKE_GAP ms after its last.
  * A mode's intro clips are comma-separated: Beatles has a short intro of each beside its own
- * (Feature_Starts_Short.Spinner_Start_Short), and whichever the game asks for shows the song's. */
-#define JUKE_MODES      8
+ * (Feature_Starts_Short.Spinner_Start_Short), and whichever the game asks for shows the song's.
+ * POOLS (PAD-1007): the same owner asked for "X pools, each with its own song/audio list": the five song modes
+ * draw from one list, the special modes (the multiballs) from another, the background music from a third. A
+ * jmode line and a jsong line may end in a pool number (0 when they do not):
+ *   jmode <start site> <clips> <record keys> [<pool>]     jsong <weight> <record key> <clip or -> [<pool>]
+ * and a mode draws only its own pool's songs (none of the last few drawn OF THAT POOL); a mode whose pool has
+ * no song plays its own. A mode with no start site draws again at each new game (game_start), not only after
+ * JUKE_GAP: the background music is asked for all game long, so a gap never comes. */
+#define JUKE_MODES      16                  /* PAD-1007: 9 on Beatles (5 song modes, 2 special, 2 background) */
 #define JUKE_SONGS      128
 #define JUKE_KEYS       4                   /* a song mode's records: its opening, its body... */
 #define JUKE_CLIPS      4                   /* a song mode's intro clips: its own, its short one... */
 #define JUKE_GAP        180000              /* ms: no start site - a mode asked again after this is a new start */
 #define JUKE_RECENT     5                   /* never one of the last 5 songs drawn: none twice in a game */
+#define JUKE_POOLS      8                   /* PAD-1007: the pools a title's music is dealt into */
 struct jmode {
     unsigned char key[JUKE_KEYS][8];        /* the records its song plays, in parts */
     unsigned char n_key, n_clip, hooked;
@@ -16365,20 +16373,35 @@ struct jmode {
     short pick;                             /* the song drawn, -1 none yet */
     unsigned long at;                       /* pm_ms() of its last ask (no start site) */
     unsigned draws;
+    unsigned char pool;                     /* PAD-1007: the pool it draws from */
+    unsigned game;                          /* PAD-1007: the game_start count at its draw (no start site) */
 };
 struct jsong {
     unsigned char key[8];
     const char *clip;
     unsigned str;                           /* the clip's name as a std::string, made at first use */
     unsigned char weight;
+    unsigned char pool;                     /* PAD-1007 */
 };
 static struct jmode jmode[JUKE_MODES];
 static struct jsong jsong[JUKE_SONGS];
 static unsigned n_jmode, n_jsong, juke_says;
-static short juke_recent[JUKE_RECENT];
+static short juke_recent[JUKE_RECENT * JUKE_POOLS];
 static unsigned n_juke_recent;
 
-static void jmode_line(const char *site, char *clips, const char *keys)
+/* PAD-1007: a line's pool number, 0 when it has none */
+static unsigned char juke_pool(const char *ps)
+{
+    const char *p = ps;
+    unsigned v;
+    int ok;
+    if (!ps || !*ps) return 0;
+    v = (unsigned)number(&p, &ok);
+    if (!ok || v >= JUKE_POOLS) { sndm_bad++; return 0; }
+    return (unsigned char)v;
+}
+
+static void jmode_line(const char *site, char *clips, const char *keys, const char *pool)
 {
     struct jmode *m;
     const char *p = keys;
@@ -16400,10 +16423,11 @@ static void jmode_line(const char *site, char *clips, const char *keys)
         if (*clips) *clips++ = 0;
     }
     m->pick = -1;
+    m->pool = juke_pool(pool);
     n_jmode++;
 }
 
-static void jsong_line(const char *ws, const char *key, const char *clip)
+static void jsong_line(const char *ws, const char *key, const char *clip, const char *pool)
 {
     const char *p = ws;
     struct jsong *s;
@@ -16416,40 +16440,58 @@ static void jsong_line(const char *ws, const char *key, const char *clip)
     s->weight = (unsigned char)(w > 9 ? 9 : w);
     s->clip = clip && *clip && !str_eq(clip, "-") ? clip : 0;
     s->str = 0;
+    s->pool = juke_pool(pool);
     n_jsong++;
 }
 
-/* the song a new start draws: weighted, none of the last few drawn */
-static short juke_draw(void)
+/* the song a new start of a mode of *pool* draws: one of the pool's, weighted, none of the pool's last few
+ * drawn (fewer when the pool has fewer songs); -1 when the pool has no song */
+static short juke_draw(unsigned pool)
 {
-    unsigned i, j, total = 0, r, keep = n_jsong > 1 ? n_jsong - 1 : 0;
+    unsigned i, j, total = 0, r, in_pool = 0, keep, kept = 0;
     unsigned char skip[JUKE_SONGS] = {0};
-    if (keep > n_juke_recent) keep = n_juke_recent;
-    for (j = 0; j < keep; j++) skip[juke_recent[j]] = 1;
-    for (i = 0; i < n_jsong; i++) if (!skip[i]) total += jsong[i].weight;
-    if (!total) return 0;
+    for (i = 0; i < n_jsong; i++) if (jsong[i].pool == pool) in_pool++;
+    if (!in_pool) return -1;
+    keep = in_pool > JUKE_RECENT ? JUKE_RECENT : in_pool - 1;
+    for (j = 0; j < n_juke_recent && kept < keep; j++)
+        if (jsong[juke_recent[j]].pool == pool) skip[juke_recent[j]] = 1, kept++;
+    for (i = 0; i < n_jsong; i++) if (jsong[i].pool == pool && !skip[i]) total += jsong[i].weight;
+    if (!total) return -1;
     r = clipv_rand() % total;
     for (i = 0; i < n_jsong; i++) {
-        if (skip[i]) continue;
+        if (jsong[i].pool != pool || skip[i]) continue;
         if (r < jsong[i].weight) break;
         r -= jsong[i].weight;
     }
-    if (i >= n_jsong) i = n_jsong - 1;
-    for (j = JUKE_RECENT - 1; j > 0; j--) juke_recent[j] = juke_recent[j - 1];
+    if (i >= n_jsong) return -1;
+    for (j = JUKE_RECENT * JUKE_POOLS - 1; j > 0; j--) juke_recent[j] = juke_recent[j - 1];
     juke_recent[0] = (short)i;
-    if (n_juke_recent < JUKE_RECENT) n_juke_recent++;
+    if (n_juke_recent < JUKE_RECENT * JUKE_POOLS) n_juke_recent++;
     return (short)i;
+}
+
+/* PAD-1007: the game_start events so far - a new game draws a mode with no start site again */
+static unsigned juke_game(void)
+{
+    int ev = pm_event("game_start");
+    return ev >= 0 ? event_count(ev) : 0;
 }
 
 static void juke_start(unsigned m, const char *how)
 {
     struct jmode *e = &jmode[m];
-    e->pick = juke_draw();
+    e->pick = juke_draw(e->pool);
+    e->game = juke_game();
     e->draws++;
     if (juke_says < 200 || !(e->draws % 50)) {
         juke_says++;
-        say("jukebox: song mode %u started (%s, %u time(s)) - song %d of %u plays%s%s", m + 1, how, e->draws,
-            e->pick + 1, n_jsong, jsong[e->pick].clip ? ", intro " : "", jsong[e->pick].clip ? jsong[e->pick].clip : "");
+        if (e->pick < 0)
+            say("jukebox: song mode %u started (%s, %u time(s)) - pool %u has no song, it plays its own", m + 1, how,
+                e->draws, e->pool);
+        else
+            say("jukebox: song mode %u started (%s, %u time(s)) - song %d of %u (pool %u) plays%s%s", m + 1, how,
+                e->draws, e->pick + 1, n_jsong, e->pool, jsong[e->pick].clip ? ", intro " : "",
+                jsong[e->pick].clip ? jsong[e->pick].clip : "");
     }
 }
 
@@ -16458,7 +16500,8 @@ static struct jsong *juke_song(unsigned m)
 {
     struct jmode *e = &jmode[m];
     unsigned long now = pm_ms();
-    if (!e->hooked && (e->pick < 0 || now - e->at > JUKE_GAP) && pm_in_game() == 1) juke_start(m, "asked for");
+    if (!e->hooked && (!e->draws || now - e->at > JUKE_GAP || e->game != juke_game()) && pm_in_game() == 1)
+        juke_start(m, "asked for");
     e->at = now;
     return e->pick < 0 ? 0 : &jsong[e->pick];
 }
@@ -16469,9 +16512,12 @@ static void on_juke_start(unsigned *r, unsigned m)
 }
 #define JUKE_HOOK(n) static void on_juke_start_##n(unsigned *r) { on_juke_start(r, n); }
 JUKE_HOOK(0) JUKE_HOOK(1) JUKE_HOOK(2) JUKE_HOOK(3) JUKE_HOOK(4) JUKE_HOOK(5) JUKE_HOOK(6) JUKE_HOOK(7)
+JUKE_HOOK(8) JUKE_HOOK(9) JUKE_HOOK(10) JUKE_HOOK(11) JUKE_HOOK(12) JUKE_HOOK(13) JUKE_HOOK(14) JUKE_HOOK(15)
 static void (*const juke_hooks[JUKE_MODES])(unsigned *) = {
     on_juke_start_0, on_juke_start_1, on_juke_start_2, on_juke_start_3,
     on_juke_start_4, on_juke_start_5, on_juke_start_6, on_juke_start_7,
+    on_juke_start_8, on_juke_start_9, on_juke_start_10, on_juke_start_11,
+    on_juke_start_12, on_juke_start_13, on_juke_start_14, on_juke_start_15,
 };
 
 static int juke_lookup(unsigned *r)
@@ -16509,7 +16555,12 @@ static void juke_set_video(unsigned *r)
     if (!bank || (unsigned)(unsigned long)bank != r[0]) return;
     if (!(g = juke_song(m)) || !g->clip) return;
     if (!g->str) g->str = std_string(g->clip);
-    if (g->str) r[1] = (unsigned)(unsigned long)&g->str;
+    if (!g->str) return;
+    r[1] = (unsigned)(unsigned long)&g->str;
+    if (juke_says < 200) {                /* PAD-1007: which intro showed which song's */
+        juke_says++;
+        say("jukebox: song mode %u's intro %s shows %s", m + 1, name, g->clip);
+    }
 }
 
 /* from sndm_arm: hook each song mode's start, the record lookup and the bank's surface for the intros */
@@ -16581,12 +16632,12 @@ static void sndm_line(char *s)
         sndt_random_line(f[1]);
         return;
     }
-    if (n >= 4 && str_eq(f[0], "jmode")) {    /* PAD-685 */
-        jmode_line(f[1], f[2], f[3]);
+    if (n >= 4 && str_eq(f[0], "jmode")) {    /* PAD-685; its pool PAD-1007 */
+        jmode_line(f[1], f[2], f[3], n >= 5 ? f[4] : 0);
         return;
     }
     if (n >= 3 && str_eq(f[0], "jsong")) {
-        jsong_line(f[1], f[2], n >= 4 ? f[3] : 0);
+        jsong_line(f[1], f[2], n >= 4 ? f[3] : 0, n >= 5 ? f[4] : 0);
         return;
     }
     if (n >= 4 && str_eq(f[0], "bsid")) {

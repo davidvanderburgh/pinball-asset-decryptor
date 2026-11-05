@@ -693,8 +693,9 @@ def jukebox_clips(project, prof):
     from . import jukebox as JB
     if not JB.enabled() or JB.title_refusal(prof):
         return None
+    # PAD-1007: a song in a pool whose musics have no intro of their own shows none (its video stays out)
     songs = [(k, s.video) for k, s in enumerate(JB.load(project).songs, 1)
-             if s.video and os.path.isfile(s.video)]
+             if s.video and os.path.isfile(s.video) and JB.pool_intro(prof, s.pool)]
     modes = JB.song_modes(prof)
     if not songs or not modes:
         return None

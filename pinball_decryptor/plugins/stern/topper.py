@@ -49,9 +49,15 @@ bus, so a cabinet without the topper drives nothing and raises no node-board
 error (the topper boards are optional, flags bit 2 - see PAD-498).  Size
 neutral; every site is checked against its expected words.
 
-Found generically, no per-title addresses, and offered only where a topper
-predicate is found (like :mod:`.coin_door` and :mod:`.final_wizard`): a build
-with no such gate is offered nothing.
+The gate is found generically (no per-title addresses), but the box is OFFERED
+only on the games below, each proven on the emulator that flipping this gate
+frees the feature named.  The reason is that the same topper-present predicate
+is used two ways across the library: on Venom it gates whether the Ghost Rider
+host is offered (flipping it unlocks the host), but on Jaws the matching call
+only gates the topper's own DISPLAY while the challenge itself is unlocked by
+in-play progress - so flipping it there frees nothing and the box must not
+pretend otherwise.  A title joins :data:`FEATURES` once it has been checked,
+and never before.
 """
 import struct
 
@@ -59,6 +65,16 @@ from .coin_door import _Elf
 
 _MOV_R0_1 = 0xE3A00001          # mov r0, #1
 _BX_LR = 0xE12FFF1E             # bx lr
+
+#: ``game program directory -> what the topper adds that this unlock frees``.  Only games where the topper-present
+#: gate IS the feature's gate (so flipping it to "present" makes the feature available without the topper), each
+#: confirmed on the emulator.  Keyed by the game program's own directory name (``venom_le``...), which the caller
+#: takes from its firmware path.  Games whose topper content is gated another way (Jaws / John Wick's challenges,
+#: unlocked by in-play progress; the many light-only and motor toppers) are deliberately absent.
+FEATURES = {
+    "venom_le": "the Ghost Rider host on the character-select screen",
+    "venom_pro": "the Ghost Rider host on the character-select screen",
+}
 
 
 def _imm16(x):
@@ -170,9 +186,10 @@ def _gates(w, base, n, usables):
     return out
 
 
-def plan(elf_bytes):
-    """``{"sites": [(va, old word, new word)], "devices": [names]}`` for a build that gates a feature on the topper
-    being present, else None (nothing is offered)."""
+def _find(elf_bytes):
+    """``{"sites": [(va, old word, new word)], "devices": [names]}`` for a build whose game code asks whether the
+    topper is present through the device_usable shape, else None.  Title-agnostic: finding the gate does not mean
+    flipping it frees a feature - see :data:`FEATURES` and :func:`plan`."""
     try:
         elf = _Elf(elf_bytes)
     except (ValueError, struct.error):
@@ -209,10 +226,25 @@ def plan(elf_bytes):
     return {"sites": sites, "devices": devices}
 
 
+def plan(elf_bytes, title=None):
+    """The unlock for *title* (its game program directory name), or None.  Offered only on the games in
+    :data:`FEATURES`, each confirmed that flipping the gate frees the named feature; the result carries that
+    ``feature`` text for the box.  A game not in the table is offered nothing even when :func:`_find` locates a
+    topper gate in it."""
+    feature = FEATURES.get(title)
+    if feature is None:
+        return None
+    p = _find(elf_bytes)
+    if not p:
+        return None
+    p["feature"] = feature
+    return p
+
+
 def patched_bytes(elf_bytes, p=None):
     """*elf_bytes* with every topper-present predicate rewritten to report the topper present (see the module
     doc).  Same size; every site must hold its expected word."""
-    p = p or plan(elf_bytes)
+    p = p or _find(elf_bytes)
     if not p:
         raise ValueError("this build has no topper-gated feature this app can unlock")
     elf = _Elf(elf_bytes)

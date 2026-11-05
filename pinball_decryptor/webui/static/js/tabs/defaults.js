@@ -34,8 +34,9 @@ const COIN_TEXT = "This is a Home Edition: it ships without a coin door, and its
 const COIN_WARN = "Only with a door and its interlock switch fitted. With nothing on that input the game reads the door as open all the time and keeps the 48V DISABLED message up.";
 const WIZARD_TEXT = "In this game, playing the final wizard ends the player's game: every ball they have left ends the moment it starts. Tick this and the next Build changes the game so the final wizard no longer does that, and the player goes on to their remaining balls. This is a change to the game itself, so it works on a machine that is already set up.";
 const WIZARD_NOTE = "A Player Challenge game that is the final wizard itself plays on after it as well.";
-const TOPPER_TEXT = "Some games lock an extra feature behind the topper accessory: Venom, for one, only offers the Ghost Rider host on the character-select screen when the topper is fitted. Tick this and the next Build changes the game so those topper-only features are available even on a cabinet that has no topper. This is a change to the game itself, so it works on a machine that is already set up.";
-const TOPPER_NOTE = "A cabinet with no topper drives nothing extra and shows no error; the features just stop waiting for it.";
+const TOPPER_TEXT = "On this game the topper accessory unlocks a feature a cabinet without one cannot reach. Tick this and the next Build makes the game treat the topper as installed, so the feature is available anyway. It is a change to the game itself, so it works on a machine that is already set up.";
+const TOPPER_NOTE = "A cabinet with no topper drives nothing extra and shows no error; the feature just stops waiting for the topper. The box only appears on games checked to work this way.";
+const TOPPER_UNLOCKS = "On this game it unlocks";
 const RANGE_CELL_TIP = "Change the lowest and highest value the machine's own menu offers for this setting.";
 const FRESH_TIP = "A machine uses these defaults on a fresh flash or after a factory reset. A machine that has "
   + "already been set up keeps its own settings — Stern stores those on the board, not on the card, so the app "
@@ -436,7 +437,8 @@ export default function DefaultsTab() {
 
     ${s.topper_offer ? html`<${Card} title="Topper" cls="dflt-card-topper">
       <p class="dflt-coin-text">${TOPPER_TEXT}</p>
-      <${Check} checked=${!!s.topper_on} wrap label="Topper features work without the topper"
+      ${s.topper_feature ? html`<p class="dflt-coin-text">${TOPPER_UNLOCKS} <strong>${s.topper_feature}</strong>.</p>` : null}
+      <${Check} checked=${!!s.topper_on} wrap label="Make the game treat the topper as installed"
         onChange=${(v) => call(NS + ".topper_set", v)} />
       <${Note}>${TOPPER_NOTE}<//>
     <//>` : null}

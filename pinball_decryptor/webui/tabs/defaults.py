@@ -214,11 +214,12 @@ def read_image(path):
             wizard = final_wizard.plan(elf)
         except Exception:                               # noqa: BLE001
             wizard = None
-        # PAD-1010: a feature locked behind the topper (None on a build with no
-        # topper-gated feature this app can unlock)
+        # PAD-1010: a feature locked behind the topper, on the games proven to
+        # have one (keyed by the game program's own directory name)
         try:
             from ...plugins.stern import topper
-            topper_plan = topper.plan(elf)
+            title = (fw or "").strip("/").split("/")[0]
+            topper_plan = topper.plan(elf, title)
         except Exception:                               # noqa: BLE001
             topper_plan = None
         # The volume a machine actually starts at is a byte of its own, not
@@ -300,7 +301,7 @@ class DefaultsTab(TabService):
                  all_total=0, menu_enabled=False, reset_enabled=False,
                  coin_offer=False, coin_fitted=False,
                  wizard_offer=False, wizard_on=False,
-                 topper_offer=False, topper_on=False,
+                 topper_offer=False, topper_on=False, topper_feature="",
                  status="", presets=[], auto_enabled=False,
                  sort={"key": None, "desc": False}, spike1=False,
                  loaded=False, era="")
@@ -617,7 +618,7 @@ class DefaultsTab(TabService):
                  all_legend="", all_total=0, menu_enabled=False,
                  coin_offer=False, coin_fitted=False,
                  wizard_offer=False, wizard_on=False,
-                 topper_offer=False, topper_on=False,
+                 topper_offer=False, topper_on=False, topper_feature="",
                  loaded=False, spike1=False)
 
     # ------------------------------------------------------------------
@@ -1740,7 +1741,8 @@ class DefaultsTab(TabService):
         offer = bool(self._topper)
         assets_dir = self._staged_dir()
         on = offer and bool(assets_dir) and self.staged_topper(assets_dir)
-        self.set(topper_offer=offer, topper_on=bool(on))
+        feature = (self._topper or {}).get("feature", "") if offer else ""
+        self.set(topper_offer=offer, topper_on=bool(on), topper_feature=feature)
 
     @rpc
     def topper_set(self, on):
@@ -1766,15 +1768,15 @@ class DefaultsTab(TabService):
         staged_changes.save(assets_dir, data)
         self._folder_written(assets_dir)
         if on:
-            self.log("Defaults: after the next Build, the topper-only "
-                     "features are available without the topper.", "info")
-            self._status("After the next Build, the topper-only features "
-                         "work without the topper.")
+            self.log("Defaults: after the next Build, the game treats the "
+                     "topper as installed - a feature gated on the topper "
+                     "being detected is then available without one.", "info")
+            self._status("After the next Build, the game treats the topper "
+                         "as installed.")
         else:
-            self.log("Defaults: the topper-only features will need the "
-                     "topper, as the game ships.", "info")
-            self._status("The topper-only features will need the topper, as "
-                         "the game ships.")
+            self.log("Defaults: the game will need the topper fitted for its "
+                     "topper-gated features, as it ships.", "info")
+            self._status("The game will need the topper fitted, as it ships.")
         self._publish_topper()
         return True
 

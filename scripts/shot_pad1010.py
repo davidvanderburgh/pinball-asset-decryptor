@@ -61,7 +61,7 @@ def main():
             page.wait_for_selector(".dflt-all", timeout=120000)
             time.sleep(1.5)
             if after:
-                page.get_by_text("Topper features work without the topper").click()
+                page.get_by_text("Make the game treat the topper as installed").click()
                 time.sleep(1)
             page.screenshot(path=out)
             print("shot", out, flush=True)

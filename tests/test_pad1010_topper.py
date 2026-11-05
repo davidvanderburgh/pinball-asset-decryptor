@@ -115,7 +115,7 @@ def _word_at(elf, va):
 
 def test_finds_and_patches_both_gate_forms_only_for_the_topper():
     elf = _prog()
-    p = T.plan(elf)
+    p = T._find(elf)
     assert p is not None
     assert sorted(set(p["devices"])) == ["Topper"]
     out = T.patched_bytes(elf, p)
@@ -135,22 +135,22 @@ def test_finds_and_patches_both_gate_forms_only_for_the_topper():
     # the playfield wrapper is untouched
     assert _word_at(out, WRAP_PLAYFIELD) == (0xE3A00000 | PLAYFIELD_IDX)
     # idempotent: neither rewritten gate is still the gate shape
-    assert T.plan(out) is None
+    assert T._find(out) is None
 
 
 def test_not_an_elf():
-    assert T.plan(b"nope") is None
+    assert T._find(b"nope") is None and T.plan(b"nope", "venom_le") is None
 
 
 def test_no_gate_when_no_device_usable():
     p = _Prog()
     p.put(WRAP_TOPPER, 0xE3A00003, 0xE3A01000, _b(WRAP_TOPPER + 8, DEVICE_USABLE))
-    assert T.plan(p.elf()) is None
+    assert T._find(p.elf()) is None
 
 
 def test_patch_rejects_moved_site():
     elf = _prog()
-    p = T.plan(elf)
+    p = T._find(elf)
     bad = bytearray(elf)
     struct.pack_into("<I", bad, TEXT_OFF + WRAP_TOPPER - TEXT_VA, 0xE3A00005)   # different word
     with pytest.raises(ValueError):
@@ -189,7 +189,7 @@ def test_every_build(card):
     if not os.path.isfile(path):
         pytest.skip("the card library is not on this machine")
     elf = bytes(_program(path))
-    p = T.plan(elf)
+    p = T._find(elf)
     want = _EXPECT[card]
     if want is None:
         assert p is None
@@ -203,4 +203,20 @@ def test_every_build(card):
         # bx lr is only ever written over a tail-call wrapper's `mov r1, #0`, never over live code
         if new == 0xE12FFF1E:
             assert old == 0xE3A01000
-    assert T.plan(out) is None
+    assert T._find(out) is None
+
+
+def test_offered_only_for_registered_games():
+    """plan() offers nothing for a game not in FEATURES, even when _find locates a gate (Jaws)."""
+    for card in ("venom_le-1_07_0.Release.8G.sdcard.raw", "jaws_le-1_02_0.Release.16G.sdcard.raw"):
+        if not os.path.isfile(os.path.join(_LIB, card)):
+            pytest.skip("the card library is not on this machine")
+    venom = bytes(_program(os.path.join(_LIB, "venom_le-1_07_0.Release.8G.sdcard.raw")))
+    jaws = bytes(_program(os.path.join(_LIB, "jaws_le-1_02_0.Release.16G.sdcard.raw")))
+    # Venom is registered: its plan carries the feature text and the same sites _find gives
+    pv = T.plan(venom, "venom_le")
+    assert pv and pv["feature"] == T.FEATURES["venom_le"] and pv["sites"] == T._find(venom)["sites"]
+    assert T.plan(venom, None) is None and T.plan(venom, "jaws_le") is None
+    # Jaws has a gate (_find finds it) but is NOT registered: the box is not offered
+    assert T._find(jaws) is not None
+    assert T.plan(jaws, "jaws_le") is None

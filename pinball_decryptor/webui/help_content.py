@@ -1872,21 +1872,22 @@ HELP_CONTENT = {
             {"note": "A Player Challenge game that is the final wizard itself plays on after "
                      "it as well."},
         ]),
-        ("Topper features without the topper", [
-            "Some games lock an extra feature behind the topper accessory. Venom only "
-            "offers the Ghost Rider host on the character-select screen when the topper is "
-            "fitted; others gate a mode the same way. The **Topper** box appears on the "
-            "cards where one of these gates is found.",
-            "- Tick **Topper features work without the topper** and the next Build changes "
-            "the game so those features are available on a cabinet that has no topper.\n"
+        ("Make the game treat the topper as installed", [
+            "Some games lock a feature behind the topper accessory being fitted. Venom only "
+            "offers the Ghost Rider host on the character-select screen when a topper is "
+            "detected. The **Topper** box appears only on the games checked to work this "
+            "way, and names the feature it frees.",
+            "- Tick **Make the game treat the topper as installed** and the next Build "
+            "makes the game read the topper as fitted, so the feature is available on a "
+            "cabinet that has none.\n"
             "- It changes the game itself (same card size), so it works on a machine that "
             "is already set up.\n"
-            "- Only the feature's gate changes: a cabinet without the topper drives "
-            "nothing extra and raises no node-board error (the topper is an optional "
-            "board).\n"
+            "- A cabinet without the topper drives nothing extra and raises no node-board "
+            "error (the topper is an optional board).\n"
             "- Staged with the project and carried by mod packs.",
-            {"note": "A cabinet with no topper shows no error; the features just stop "
-                     "waiting for it."},
+            {"note": "The box is shown only where flipping this gate was confirmed to free "
+                     "the feature. A game whose topper content is unlocked another way "
+                     "(an in-play unlock, say) does not get the box."},
         ]),
         ("Show hidden settings on the machine", [
             "**Show hidden settings in the machine's menu…** moves where the Feature "

@@ -652,7 +652,8 @@ class CardImage:
         if final_wizard:
             new = self._with_final_wizard(new, log)
         if topper:
-            new = self._with_topper(new, log)
+            title = path.strip("/").split("/")[0]
+            new = self._with_topper(new, title, log)
         _n, refreshed = self.replace_file_bytes(part_index, path, new)
         return n, refreshed
 
@@ -700,21 +701,21 @@ class CardImage:
         return elf
 
     @staticmethod
-    def _with_topper(elf, log=None):
-        """*elf* with the topper-only features unlocked (see :mod:`.topper`), or
-        unchanged with a note when this build has no topper-gated feature the
-        app can unlock."""
+    def _with_topper(elf, title, log=None):
+        """*elf* with the topper-gated feature unlocked (see :mod:`.topper`), or
+        unchanged with a note when *title* is not a game this app unlocks (so a
+        mod pack carrying the choice onto another title leaves it alone)."""
         from . import topper
-        p = topper.plan(elf)
+        p = topper.plan(elf, title)
         if p:
             out = topper.patched_bytes(elf, p)
             if log:
-                log("Topper: the game's topper-only features are now available "
-                    "without the topper accessory fitted.", "info")
+                log("Topper: %s is now available without the topper accessory "
+                    "fitted." % p["feature"], "info")
             return out
         if log:
-            log("Topper: this build has no topper-only feature this app can "
-                "unlock, so it was left as it ships.", "warning")
+            log("Topper: this game has no topper feature this app can unlock, "
+                "so it was left as it ships.", "warning")
         return elf
 
     @staticmethod

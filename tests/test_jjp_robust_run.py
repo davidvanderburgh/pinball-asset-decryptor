@@ -80,3 +80,29 @@ def test_unknown_executor_falls_back(monkeypatch):
     ex = Weird()
     ex.run = P._robust_run(ex)
     assert ex.run("x") == "orig:x"
+
+
+def test_docker_executor_runs_through_its_own_cli(monkeypatch):
+    # On a Mac with Podman and no docker binary, the hardened run must call
+    # the CLI the executor resolved, not a literal "docker" (PR #19).
+    from pinball_decryptor.plugins.jjp.executor import DockerExecutor
+    ex = DockerExecutor.__new__(DockerExecutor)
+    ex._container_running = True
+    monkeypatch.setattr(ex, "_cli", lambda: "/opt/podman/bin/podman",
+                        raising=False)
+    seen = []
+
+    class _Proc:
+        returncode = 0
+
+        def communicate(self, timeout=None):
+            return b"ok", b""
+
+    def _popen(argv, **kw):
+        seen.append(argv)
+        return _Proc()
+
+    monkeypatch.setattr(P.subprocess, "Popen", _popen)
+    assert P._robust_run(ex)("true") == "ok"
+    assert seen[0][:2] == ["/opt/podman/bin/podman", "exec"]
+    assert seen[0][-1] == "true"

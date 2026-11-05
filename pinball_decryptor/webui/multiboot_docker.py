@@ -593,9 +593,10 @@ def _engine_name():
     """Which engine docker is talking to: "podman", "colima" / "colima-<profile>"
     (the docker context colima makes, or its VM's name), "docker-desktop",
     or whatever else ``docker info`` calls the machine; "" when neither
-    answers.  Lima, under colima, may name the VM "lima-colima[-<p>]"."""
-    cli = _cli()
-    if "podman" in os.path.basename(cli).lower():
+    answers.  Lima, under colima, may name the VM "lima-colima[-<p>]".
+    The podman CLI is answered before asking it anything: whatever its
+    ``context show`` / ``info`` printed would only hide the Podman advice."""
+    if "podman" in os.path.basename(_cli()).lower():
         return "podman"
     names = []
     for args in (["context", "show"], ["info", "-f", "{{.Name}}"]):
@@ -853,7 +854,7 @@ def exec_argv(line):
     it could not have used.  ``argv[-1]`` stays the shell line, because the
     tab's Log echoes it with a ``$`` in front.
     """
-    return ["docker", "exec", CONTAINER, "bash", "-lc", line]
+    return [_cli(), "exec", CONTAINER, "bash", "-lc", line]
 
 
 # every tool a multi-boot run starts inside the container (see kill_running)

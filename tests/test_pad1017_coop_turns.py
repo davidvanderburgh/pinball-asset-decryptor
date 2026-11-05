@@ -20,6 +20,9 @@ static unsigned chg_game_now(void) { return game_no; }
 static int coop_button_held(void) { return button; }
 static struct { int on; unsigned button, game, n, turn; } coop;
 static volatile unsigned char *coop_ball_byte = &bytes[1], *coop_players_byte = &players;
+static unsigned shown_turn, board;                   /* what the screen and the board were told last */
+static void coop_scores_mark(unsigned n) { board = n; }
+static void coop_turn_show(void) { shown_turn = coop.turn; }
 /* the framework's own, modelled */
 static unsigned game_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
@@ -49,9 +52,10 @@ static void play(unsigned team, int extra_at)
     button = 1;
     for (k = 1; k < team; k++) coop_add_wrap(0, 0, 0, 0);
     button = 0;
-    printf("team %u players %u\n", coop.n, players);
+    printf("team %u players %u board %u\n", coop.n, players, board);
     for (;;) {
         printf("up ball %u teammate %u player %u\n", bytes[1], coop.turn ? coop.turn : 1, bytes[0]);
+        if (shown_turn != coop.turn) printf("SCREEN SAYS %u\n", shown_turn);
         balls++;
         if ((int)balls == extra_at) extra = 1;
         if (!coop_change_wrap(0, 0, 0, 0)) break;
@@ -92,13 +96,15 @@ def _run(tmp_path):
 
 def _turns(out, team):
     start = out.index(next(l for l in out if l.startswith("team %d " % team)))
+    assert out[start].endswith("board %d" % team)                # the team's own board, by its size
     end = next(i for i in range(start, len(out)) if out[i].startswith("over after"))
     return [l for l in out[start:end] if l.startswith("up ")], out[end]
 
 
 def test_each_teammate_plays_each_ball_and_the_game_ends_after_the_last(tmp_path):
     out = _run(tmp_path)
-    assert "team 2 players 1" in out                       # the game plays one player for the team
+    assert "team 2 players 1 board 2" in out               # the game plays one player for the team
+    assert not any(l.startswith("SCREEN SAYS") for l in out)   # the screen names the teammate up, every ball
     ups, over = _turns(out, 2)
     assert ups == ["up ball %d teammate %d player 1" % (b, t) for b in (1, 2, 3) for t in (1, 2)]
     assert over == "over after 6 balls"

@@ -10161,6 +10161,7 @@ static void scoop_tick(void);             /* PAD-381 */
 static void launch_tick(void);            /* PAD-643 */
 static void chg_pages_tick(void);         /* PAD-663 */
 
+static void coop_tick(void);                /* PAD-1017, below */
 static void on_tick(unsigned *r)
 {
     static int started, said;
@@ -10188,6 +10189,7 @@ static void on_tick(unsigned *r)
     spare_tick();                             /* PAD-826: spare inputs' closes as shots; spare outputs' ends */
     stock_balls_tick();                      /* PAD-687: how long two balls have been in play */
     dto_tick();                               /* PAD-733: dead flippers until the balls drain to one */
+    coop_tick();                              /* PAD-1017: the game's own "BALL %d" back after a co-op game */
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
@@ -14966,6 +14968,9 @@ static struct {
 } coop;
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
 static int coop_scores;                  /* the game's end-of-game high scores are wrapped (PAD-640/663) */
+static int coop_ball_msg = -1;           /* the message table's line that says "BALL %d" (-1: none found) */
+static int coop_ball_held;               /* it says whose turn it is now */
+#define COOP_MSG_ID 0xC0090u             /* our borrow of it (no message id of the game's is this high) */
 static unsigned (*coop_add_game)(unsigned, unsigned, unsigned, unsigned);
 static volatile unsigned char *coop_ball_byte, *coop_players_byte;
 
@@ -15039,6 +15044,45 @@ static int coop_page_names(char names[][40], int n, int cap)
     return n;
 }
 
+/* Whose turn it is, on the screen: the game's own top line "BALL 1" (the message table's "BALL %d", every build's
+ * words for it) reads "PLAYER 2  BALL 1" while teammate 2 is up, and is the game's own again when the game is over or
+ * not a co-op one (coop_tick). The line is found by its English words once, when co-op is armed. */
+static void coop_ball_find(void)
+{
+    unsigned count, idx;
+    const char **group;
+    const char *w;
+    if (!(can & PM_CAN_MESSAGES) || !data("message_table") || !data("message_count")) return;
+    count = *(unsigned *)(unsigned long)data("message_count");
+    if (count > 20000 || !maps_has(data("message_table"), 4u * count, MAP_R)) return;
+    for (idx = 0; idx < count; idx++) {
+        group = *(const char ***)(unsigned long)(data("message_table") + 4u * idx);
+        if (!group || !maps_has((unsigned long)group, 4, MAP_R)) continue;
+        w = group[0];
+        if (w && maps_has((unsigned long)w, 8, MAP_R) && str_eq(w, "BALL %d")) {
+            coop_ball_msg = (int)idx;
+            return;
+        }
+    }
+}
+
+static void coop_turn_show(void)
+{
+    char words[40];
+    if (coop_ball_msg < 0) return;
+    pm_snprintf(words, sizeof words, "PLAYER %u  BALL %%d", coop.turn);
+    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+}
+
+/* from the tick: the game's own words back once its co-op game is over */
+static void coop_tick(void)
+{
+    if (coop_ball_held && !(coop_teammates() && pm_in_game())) {
+        pm_message_restore(COOP_MSG_ID);
+        coop_ball_held = 0;
+    }
+}
+
 static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     unsigned n = coop_teammates(), ret;
@@ -15061,6 +15105,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     coop.n = n + 1;
     say("co-op: teammate %u joins (%u in the team; the game plays one player for them all)", coop.n, coop.n);
     coop_scores_mark(coop.n);
+    coop_turn_show();
     return ret;
 }
 
@@ -15077,7 +15122,10 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     say("co-op: ball %u, teammate %u of %u done - %s", before, coop.turn, n,
         !(ret & 0xff) ? "the game is over" : next == coop.turn ? "an extra ball: the same teammate shoots again"
         : next == 1 ? "teammate 1, the next ball" : "the next teammate, the same ball");
-    if (ret & 0xff) coop.turn = next;
+    if (ret & 0xff) {
+        coop.turn = next;
+        coop_turn_show();
+    }
     return ret;
 }
 
@@ -15154,6 +15202,8 @@ static void coop_arm(void)
         return;
     }
     coop.on = 1;
+    coop_ball_find();
+    if (coop_ball_msg < 0) say("co-op: the game's \"BALL %%d\" line was not found - the screen does not say whose turn it is");
     if (!chg_scores_on) chg_scores_arm();                     /* the team's own boards (PAD-640/663) */
     coop_scores = chg_scores_on && chg_scores_game;
     if (!coop_scores)

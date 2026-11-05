@@ -6708,7 +6708,13 @@ class App:
             wizard = bool(self.window.staged_final_wizard(assets_dir))
         except AttributeError:
             wizard = False
-        if not vals and not ranges and not names and not expose and not coin and not wizard:
+        # PAD-1010: unlock the topper-only features without the topper
+        try:
+            topper = bool(self.window.staged_topper(assets_dir))
+        except AttributeError:
+            topper = False
+        if not vals and not ranges and not names and not expose and not coin \
+                and not wizard and not topper:
             return
         try:
             out = self.window._target_write_path()
@@ -6791,13 +6797,13 @@ class App:
                             "settings) — the rest of the staged defaults were "
                             "still applied." % expose, "warning")
                 if (overrides or ranges or name_overrides
-                        or menu_last_id is not None or coin or wizard):
+                        or menu_last_id is not None or coin or wizard or topper):
                     n, _ref = c.write_adjustment_defaults(
                         part, path, table, overrides,
                         high_scores=hstd, name_overrides=name_overrides,
                         menu_last_id=menu_last_id, menu_plan=menu_plan,
                         log=self.window.append_log, ranges=ranges,
-                        coin_door=coin, final_wizard=wizard)
+                        coin_door=coin, final_wizard=wizard, topper=topper)
                     if n:
                         self.window.append_log(
                             "Applied %d staged default setting(s) to the built "

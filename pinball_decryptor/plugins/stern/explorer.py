@@ -593,7 +593,7 @@ class CardImage:
                                   high_scores=None, name_overrides=None,
                                   menu_last_id=None, menu_plan=None,
                                   log=None, ranges=None, coin_door=False,
-                                  final_wizard=False):
+                                  final_wizard=False, topper=False):
         """Patch the game ELF's compiled defaults and write it back in place
         (exact-size, extent-mapped) with the ``.sidx`` record refreshed.
 
@@ -621,6 +621,11 @@ class CardImage:
         :mod:`.final_wizard`): the player's balls after it are played.  A build
         whose final wizard is not one the app knows is left alone and said so.
 
+        *topper* unlocks the topper-only features without the topper (PAD-1010,
+        :mod:`.topper`): the gate that waits for the topper accessory reports it
+        present.  A build with no topper-gated feature the app can unlock is
+        left alone and said so.
+
         Returns ``(n_settings, sidx_refreshed)``, where n_settings counts every
         adjustment and high-score slot changed (the menu page is one edit to
         the firmware's code, not a setting, and isn't counted).
@@ -646,6 +651,8 @@ class CardImage:
             new = self._with_coin_door(table, new, log)
         if final_wizard:
             new = self._with_final_wizard(new, log)
+        if topper:
+            new = self._with_topper(new, log)
         _n, refreshed = self.replace_file_bytes(part_index, path, new)
         return n, refreshed
 
@@ -690,6 +697,24 @@ class CardImage:
         if log:
             log("Final wizard: this build's final wizard is not one this app "
                 "can change, so it still ends the game as it ships.", "warning")
+        return elf
+
+    @staticmethod
+    def _with_topper(elf, log=None):
+        """*elf* with the topper-only features unlocked (see :mod:`.topper`), or
+        unchanged with a note when this build has no topper-gated feature the
+        app can unlock."""
+        from . import topper
+        p = topper.plan(elf)
+        if p:
+            out = topper.patched_bytes(elf, p)
+            if log:
+                log("Topper: the game's topper-only features are now available "
+                    "without the topper accessory fitted.", "info")
+            return out
+        if log:
+            log("Topper: this build has no topper-only feature this app can "
+                "unlock, so it was left as it ships.", "warning")
         return elf
 
     @staticmethod

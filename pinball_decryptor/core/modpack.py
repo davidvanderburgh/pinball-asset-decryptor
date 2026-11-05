@@ -49,7 +49,9 @@ _EXTRA_SCALARS = ("menu_expose_through",
                   # PAD-755: a Home Edition's coin door ("fitted")
                   "coin_door",
                   # PAD-786: a final wizard that does not end the game ("plays_on")
-                  "final_wizard")
+                  "final_wizard",
+                  # PAD-1010: topper-only features unlocked without the topper ("unlocked")
+                  "topper")
 # The game's own modes (item 145): the Modes tab's record of a stock mode's staged timers and
 # awards, ``{"build", "values": {row key: value}, "touched": [row key]}``.  Not a flat map: its
 # row keys only mean something for the build they were staged against, so it is merged by
@@ -963,6 +965,7 @@ def apply_extras(assets_folder, extras, log_cb=None):
                  "menu_expose_through": "the Adjustments-menu reveal",
                  "coin_door": "the coin door",
                  "final_wizard": "the final wizard choice",
+                 "topper": "the topper unlock",
                  _EXTRA_STOCK_MODES: "%d " + _stock_modes_words(),
                  _EXTRA_SOUND_MODES: "music mode files for %d sound(s)",
                  _EXTRA_VARIANTS: "random clips for %d clip(s)",

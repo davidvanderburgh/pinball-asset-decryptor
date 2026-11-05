@@ -482,11 +482,39 @@ function JukeboxButton({ j, onOpen }) {
     onClick=${() => (j.why ? call("audio.jukebox_action", "why") : onOpen())}>${j.n ? `Jukebox (${j.n})` : "Jukebox"}<//></span>`;
 }
 
+// PAD-1003: a song's intro video, watched in a window over the jukebox's. A file the page's engine
+// can't play as it is (an .avi, .wmv, .mpg, ProRes...), or plays with no picture, plays from a copy
+// Python makes of it
+const H264 = 'video/mp4; codecs="avc1.42E01E"';
+function JukeVideo({ k, path, name, onClose }) {
+  const [src, setSrc] = useState(path);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => { stopAll(); call("audio.stop"); }, []);
+  const onError = async () => {
+    if (src !== path || busy) { setErr(err || "This video can't be played here."); return; }
+    setBusy(true);
+    const fmt = document.createElement("video").canPlayType(H264) ? "mp4" : "webm";
+    const got = (await call("audio.jukebox_preview", k, fmt)) || {};
+    setBusy(false);
+    if (got.path) setSrc(got.path); else setErr(got.error || "This video can't be played here.");
+  };
+  return html`<${Modal} title=${name} icon="video" wide onClose=${onClose}
+    footer=${html`<span class="small mono muted grow ellip">${path}</span><${Button} kind="primary" onClick=${onClose}>Close<//>`}>
+    <div class="thumb aud-juke-video">
+      ${err ? html`<span class="err-ink">${err}</span>`
+        : busy ? html`<span class="row"><${Spinner} /><span>Preparing a preview copy…</span></span>`
+        : html`<video key=${src} src=${mediaUrl(src)} controls autoplay playsinline onError=${onError}
+            onLoadedMetadata=${(e) => { if (!e.currentTarget.videoWidth && src === path) onError(); }}></video>`}
+    </div>
+  <//>`;
+}
 const JUKE_COLS = { k: { val: (g) => g.k }, audio: { val: (g) => g.audio }, video: { val: (g) => g.video || "" },
   weight: { val: (g) => Number(g.weight), desc: true } };
 
 function JukeboxModal({ data, onClose }) {
   const [d, setD] = useState(data);
+  const [watch, setWatch] = useState(null);
   const act = async (a) => { const got = await call("audio.jukebox_action", a); if (got) setD(got); };
   const songs = d.songs || [];
   const full = songs.length >= (d.max || 0);
@@ -509,7 +537,9 @@ function JukeboxModal({ data, onClose }) {
         <tbody>${shown.map((g) => html`<tr class=${cx(g.gone && "gone")} title=${g.gone ? "A file of this song is not on this PC any more" : ""}>
           <td class="muted">${g.k}</td>
           <td><span class="nw">${g.audio}</span></td>
-          <td>${g.video ? html`<span class="nw">${g.video}</span>` : html`<span class="muted">its song mode's own</span>`}</td>
+          <td>${g.video ? html`<span class="nw"><${Button} size="sm" kind="ghost" icon="video" title="Watch this intro video"
+              onClick=${() => setWatch(g)} /> ${g.video}</span>`
+            : html`<span class="muted">its song mode's own</span>`}</td>
           <td><${Select} sm value=${String(g.weight)} options=${weights} disabled=${d.running}
             onChange=${(v) => act(`weight:${g.k}:${v}`)} width=${110} /></td>
           <td class="nw">
@@ -517,6 +547,7 @@ function JukeboxModal({ data, onClose }) {
             <${Button} size="sm" kind="ghost" icon="more" title="More for this song" onClick=${(e) => openMenu(e.currentTarget, [
               { label: g.video ? "Change the intro video…" : "Choose an intro video…", icon: "video", disabled: d.running,
                 title: "The video the song mode opens with when this song is drawn, the song's name in it", onClick: () => act(`video:${g.k}`) },
+              g.video ? { label: "Watch the intro video", icon: "play", onClick: () => setWatch(g) } : null,
               g.video ? { label: "Use the song mode's own intro", icon: "undo", disabled: d.running, onClick: () => act(`novideo:${g.k}`) } : null,
               { sep: true },
               { label: "Move up", icon: "up", disabled: d.running || sorted || g.k === 1, title: moveTip, onClick: () => act(`up:${g.k}`) },
@@ -527,6 +558,7 @@ function JukeboxModal({ data, onClose }) {
           </td></tr>`)}</tbody></table></div>`
         : html`<div class="muted">No songs yet. Add the songs' audio files, and their intro videos with them: Hey Jude.mp4 is the intro of Hey Jude.wav.</div>`}
     </div>
+    ${watch ? html`<${JukeVideo} k=${watch.k} path=${watch.vpath} name=${watch.video} onClose=${() => setWatch(null)} />` : null}
   <//>`;
 }
 

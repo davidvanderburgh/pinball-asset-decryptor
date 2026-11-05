@@ -8576,11 +8576,12 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     _sm_frags, _sm_sids, _sm_seqs = {}, set(), []
                     if _sm_grows and desc_sites:
                         # (PAD-641: not the flipper buttons' sounds in attract,
-                        # which the runtime swaps in at the record lookup only)
+                        # which the runtime swaps in at the record lookup only;
+                        # PAD-1005: a music mode's own files in turn go, with
+                        # their mode file: _sound_modes_for_banks)
                         _sm_key = [u for u in sound_mode_used
                                    if _SMo_is_attract(u["mode"])
                                    or _SMo_is_shot(u["mode"])
-                                   or _SMo_is_mode_turn(u["mode"])
                                    or _SMo_is_juke(u["mode"])]
                         _sm_frags, _sm_sids, _sm_seqs = _sound_modes_for_banks(
                             gr_path, img_path, params, desc_sites,
@@ -8606,7 +8607,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             space_chk, log, game_sids=_game_ok,
                             game_why=_game_why, sm_frags=_sm_frags,
                             game_seqs=_game_seqs, sm_seqs=_sm_seqs,
-                            sm_hold=_sm_turn_hosts(sound_mode_used))
+                            sm_hold=_sm_turn_hosts(sound_mode_used, _sm_frags))
                         if bank_plan is not None:
                             bank_plan.old_map = dict(_old_bank_map)
                             _user_grows = {i: g for i, g in _user_grows.items()
@@ -11817,6 +11818,11 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
             hp = byidx.get(mode_hosts.get((u["rel"], _m)))
             if _m in (modes.mode_random.get(u["rel"]) or ()) and hp and hp.get("findkey"):
                 randoms = sorted(set(randoms) | {bytes(hp["findkey"])})
+    for u in banked:                          # PAD-1005: in a sound bank, by its tsid lines' key
+        if _SMo.is_mode_turn(u["mode"]) and u.get("lines"):
+            _m = _SMo.mode_turn_of(u["mode"])[0]
+            if _m in (modes.mode_random.get(u["rel"]) or ()):
+                randoms = sorted(set(randoms) | {_SMo.mode_turn_key(int(u["slot"]), _m)})
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
@@ -11890,7 +11896,9 @@ def _bank_sid_lines(params, used, list_ids, log):
     """PAD-608: ``(bsids, tsids)`` - the ``sounds.cfg`` lines of the files in a sound bank
     (*used*, their entries with ``bank_sids`` ``{game sid: bank sid}``): ``(mode, list id, bank
     sid)`` for a music mode's file, ``(k, slot key, list id, bank sid)`` for file k in turn, the
-    slot key the one its ``turn`` lines name (the runtime keeps one turn per slot). *list_ids*
+    slot key the one its ``turn`` lines name (the runtime keeps one turn per slot); PAD-1005: and
+    ``(k, key, list id, bank sid, m)`` for music mode m's own file k in turn, its key
+    :func:`.sound_modes.mode_turn_key`. *list_ids*
     ``{game sid: id}``: what the game's request lists hold for a sound id, where not its own.
     Each entry gets ``lines``, how many sound ids play it (the card's record names the ones
     that landed)."""
@@ -11902,7 +11910,12 @@ def _bank_sid_lines(params, used, list_ids, log):
         u["lines"] = len(got)
         for sid, bank in sorted(got.items()):
             lid = int(list_ids.get(int(sid), sid))
-            if _SMo.is_turn(u["mode"]):
+            if _SMo.is_mode_turn(u["mode"]):
+                # PAD-1005: music mode m's own file k in turn, turned at a key of the mode
+                # file's own (one no lookup names: the worker turns it, only in mode m)
+                _m, _k = _SMo.mode_turn_of(u["mode"])
+                tsids.append((_k, _SMo.mode_turn_key(int(u["slot"]), _m), lid, int(bank), _m))
+            elif _SMo.is_turn(u["mode"]):
                 sp = byidx.get(int(u["slot"])) or {}
                 if not sp.get("findkey"):
                     u["lines"] -= 1
@@ -20632,10 +20645,33 @@ def _sound_modes_for_banks(gr_path, img_path, params, sites, sm_used, used, old_
                     ", ".join(map(str, sorted({s for _m, s, _f, _u in g.lines}))),
                     "it" if len(us) == 1 else "they", "es" if len(us) == 1 else "",
                     ", ".join("idx %d" % j for j in g.parts) or "none"), "info")
+    # PAD-1005: a music mode's own files in turn (PAD-638) go into banks only with their mode file
+    # and each other: the runtime turns them at the worker, each a bank sound id of its own, the
+    # mode file's the first; a set one of which stays in image.bin all stays, turned at the mode
+    # file's record key there.  A Godzilla card with three songs at random on each of seven tracks
+    # kept the fourteen others in image.bin, 2,390 MB of it, and was refused for room.
+    groups = {}
+    for u in sm_used or ():
+        if _SMo.is_mode_turn(u["mode"]):
+            groups.setdefault((u["rel"], _SMo.mode_turn_of(u["mode"])[0]), []).append(u)
+    fixed = list(fixed or ())
+    for (rel, m), turns in sorted(groups.items()):
+        own = [u for u in sm_used if u["rel"] == rel and int(u["mode"]) == m]
+        if own and all(int(u["host"]) in frags for u in own + turns):
+            continue
+        mine = not own or any(int(o["host"]) not in frags for o in own)
+        for u in turns:
+            if frags.pop(int(u["host"]), None) is not None:
+                log("%s: %s stays in image.bin rather than a sound bank: %s does, and a mode's "
+                    "files in turn take turns where its file is." % (
+                        _SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u.get("name", "")),
+                        "the slot's file for mode %d" % m if mine
+                        else "another of its files in turn"), "info")
+            fixed.append(u)
     stay = set()
     for host in why:
         stay |= host_sids.get(host, set())
-    for u in fixed or ():
+    for u in fixed:
         stay |= slot_sids(u)
     return frags, stay, seqs
 
@@ -20901,13 +20937,14 @@ class SoundRoomError(RuntimeError):
     (PAD-880, as card_size.CardSizeError is)."""
 
 
-def _sm_turn_hosts(used):
+def _sm_turn_hosts(used, banked=()):
     """PAD-749: the host records of the music modes' files that have files in turn of their own
     (PAD-638): those are turned at the mode file's record key, so they play only while that
-    record is in image.bin."""
+    record is in image.bin. PAD-1005: but for those whose files in turn go into sound banks with
+    them (*banked*, :func:`_sound_modes_for_banks`' hosts): the runtime turns those at the worker."""
     from . import sound_modes as _SMo
     turns = {(u["rel"], _SMo.mode_turn_of(u["mode"])[0]) for u in used or ()
-             if _SMo.is_mode_turn(u["mode"])}
+             if _SMo.is_mode_turn(u["mode"]) and int(u["host"]) not in banked}
     return {int(u["host"]) for u in used or ()
             if not _SMo.is_turn(u["mode"]) and (u["rel"], int(u["mode"])) in turns}
 

@@ -437,6 +437,13 @@ def test_the_page_has_the_jukebox_window():
     # Sounds on shots window's does)
     assert '<${RowPlay} path=${g.path} title="Play this song"' in js and '<${RowPlay} path=${r.path}' in js
     assert 'icon=${on ? "stop" : "play"}' in js and "stopPlayer(p); call(\"audio.stop\")" in js
+    # PAD-1008: the ▶ sits before the song's (the sound's) name, as the intro video's button does, not in
+    # the row's last column across the window
+    assert ('<td><span class="nw"><${RowPlay} path=${g.path} title="Play this song" '
+            'onPlay=${() => act(`play:${g.k}`)} /> ${g.audio}</span></td>') in js
+    assert ('<td><span class="nw"><${RowPlay} path=${r.path} title="Play this sound" '
+            'onPlay=${() => act(`play:${r.k}`)} /> ${r.sound}</span></td>') in js
+    assert js.count("<${RowPlay}") == 2
 
 
 # ---- back out of a card ----------------------------------------------------------------------------

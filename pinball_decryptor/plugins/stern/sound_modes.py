@@ -63,8 +63,12 @@ slot?"): a slot's file for music mode m can have files in turn (or at random) of
 ``mode_turn_levels``: ``{rel: {m: {k: dB}}}``). Mode m's descriptors name the mode file's own new
 record, so the game looks THAT record's key up while the setting says m: its ``turn`` / ``random``
 lines name that key, and the runtime swaps it as it does a slot's (no runtime change). Each is cut
-to its mode file's length (the descriptor declares it). They stay in image.bin: a mode file in a
-sound bank is reached by a bank sound id, not its key, so its own files in turn are left out.
+to its mode file's length (the descriptor declares it). PAD-1005: a mode file in a sound bank is
+reached by a bank sound id, not its key, so its own files in turn go into banks with it, each a bank
+sound id of its own (``tsid`` lines with a 6th field, m, and a key of their own,
+:func:`mode_turn_key`): the play worker turns them, in mode m alone. A set one of which has to stay
+in image.bin all stays there (an owner's seven multiball tracks with three songs at random each
+were refused when the fourteen others filled image.bin).
 
 AT RANDOM (PAD-638): an owner asked for "random audio variants ... like a jukebox". A slot with
 files in turn can play them AT RANDOM instead (``random``: ``[rel, ...]``, slots with files in
@@ -75,7 +79,7 @@ and lines; ``sounds.cfg`` adds a ``random`` line naming the slot's record key (p
 IN A SOUND BANK (PAD-608): a file goes into a sound bank of the app's own (``image-scNN.bin``,
 PAD-595), as the modes' own sounds and the longer replacements do: since PAD-749 every file a bank
 can hold, even while ``image.bin`` has room (the game holds ``image.bin`` in memory for good and a
-bank only while it plays), but a file with files in turn of its own, which stays where it is turned. The game
+bank only while it plays), a file with files in turn of its own with them (PAD-1005). The game
 plays a bank's sound only under a sound id of the bank's own (it streams from the file of the id's
 category), so such a file gets one bank sound id for every game sound id that plays its slot, each
 with that game id's descriptor naming the bank's record, and ``sounds.cfg`` says which (``bsid``
@@ -382,6 +386,14 @@ def mode_turn(m, k):
 
 def is_mode_turn(mode):
     return MODE_TURN_BASE < int(mode) < SHOT_BASE
+
+
+def mode_turn_key(slot, m):
+    """PAD-1005: the key the ``tsid`` lines of music mode *m*'s own files in turn on sound idx
+    *slot* name, when they are in sound banks. It names their turn alone: the worker moves it on,
+    and no record lookup is ever swapped at it (one in image.bin is turned at its mode file's own
+    record key instead)."""
+    return b"\xfa\xde" + struct.pack(">IBB", int(slot), int(m), 0x1d)
 
 
 def shot_mode(k):
@@ -1106,7 +1118,8 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     turn (PAD-565: ``turn`` lines, the record keys the runtime swaps at the game's lookup).
     PAD-608: *bsids* ``[(mode, sound id, bank sound id)]`` and *tsids* ``[(k, slot key, sound id,
     bank sound id)]``, the files in a sound bank (``bsid`` / ``tsid`` lines: the runtime points the
-    game's requests at the bank's id). PAD-638: *randoms* the slot keys whose files play at random
+    game's requests at the bank's id); PAD-1005: a *tsids* entry ``(k, key, sound id, bank sound
+    id, m)`` is music mode m's own file k in turn (:func:`mode_turn_key`), its line a 6th field. PAD-638: *randoms* the slot keys whose files play at random
     (``random`` lines).
     PAD-553: *record* (:func:`card_record`) goes in as comment lines the runtime skips, so an
     extract of the card brings the modes back (:func:`read_card_record`).
@@ -1133,8 +1146,9 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
         lines.append("turn\t%d\t%s\t%s" % (int(k), bytes(slot).hex(), bytes(host).hex()))
     for mode, sid, bank in bsids:
         lines.append("bsid\t%d\t%d\t%d" % (int(mode), int(sid), int(bank)))
-    for k, slot, sid, bank in tsids:
-        lines.append("tsid\t%d\t%s\t%d\t%d" % (int(k), bytes(slot).hex(), int(sid), int(bank)))
+    for k, slot, sid, bank, *m in tsids:
+        lines.append("tsid\t%d\t%s\t%d\t%d" % (int(k), bytes(slot).hex(), int(sid), int(bank))
+                     + ("\t%d" % int(m[0]) if m else ""))       # PAD-1005: a music mode's own
     for slot in randoms:
         lines.append("random\t%s" % bytes(slot).hex())
     if attract and attract.get("files"):
@@ -1400,6 +1414,7 @@ def card_bank_records(rec):
     (:func:`read_card_record`) names (PAD-608: files in a sound bank), for an extract to decode."""
     out = {}
     for f in (list((rec or {}).get("files") or ()) + list((rec or {}).get("turns") or ())
+              + list((rec or {}).get("mode_turns") or ())             # (PAD-1005)
               + list((rec or {}).get("attract") or ()) + list((rec or {}).get("shots") or ())):
         if f.get("bank") is not None:
             out.setdefault(int(f["bank"]), set()).add(int(f["host"]))

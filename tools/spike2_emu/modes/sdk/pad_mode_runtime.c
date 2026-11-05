@@ -15540,6 +15540,8 @@ static void clipv_arm(void)
  *                                                            sound bank's id
  *     tsid <TAB> <k> <TAB> <slot key> <TAB> <id> <TAB> <bank id>   PAD-608: file k in turn of the slot
  *                                                            keyed <slot key> plays as a bank's id
+ *     tsid <TAB> <k> <TAB> <key> <TAB> <id> <TAB> <bank id> <TAB> <m>   PAD-1005: music mode m's own
+ *                                                            file k in turn, in a sound bank
  *     random <TAB> <slot key>              PAD-638: the slot's files play AT RANDOM, not in turn
  *
  * The setting is read at every resolve (one word), so a change in the menu is heard from the next
@@ -15570,6 +15572,12 @@ static void clipv_arm(void)
  * and at its own list again when it wants none - as pm_sound_sid points a mode's carrier. A slot with
  * a file in turn in a bank takes its turns from the worker too: a play of a request naming the slot
  * moves the turn on (SNDT_GAP apart), and the record lookup only swaps in the turn's image.bin file.
+ *
+ * A MUSIC MODE'S OWN FILES IN TURN IN A SOUND BANK (PAD-1005): an owner's seven multiball tracks with
+ * three songs at random each filled image.bin, so a mode file's own files in turn go into banks with it.
+ * The mode file plays as its `bsid` id (file 1); file k as its `tsid` line's, whose 6th field is the
+ * mode: the worker moves that turn on only while the setting says m, and a turn at file 1 plays the
+ * mode's `bsid` id. Its key is the build's own (no record has it), naming the turn alone.
  *
  * AT RANDOM (PAD-638): an owner asked for "random audio variants ... like a jukebox" (each of
  * Godzilla's multiball songs one of several). A slot with a `random` line takes the same files, but
@@ -15608,7 +15616,7 @@ struct sndt {                               /* a sound that plays files in turn 
 static struct sndt sndt[SNDT_SLOTS];
 static unsigned n_sndt, sndt_says;
 /* PAD-608: a game id that plays as a bank's id in music mode `mode` (2..), or, with `turn` k (2..), when
- * the turn of sndt[t] is at file k */
+ * the turn of sndt[t] is at file k (PAD-1005: with both, music mode `mode`'s own file k in turn) */
 #define BSID_MAX        2048
 #define BLIST_MAX       512                 /* requests whose sid list names a game id with a bank id */
 #define BLIST_LEN       32                  /* the longest such list followed */
@@ -15681,20 +15689,25 @@ static void sndt_random_line(const char *slot)
 }
 
 /* PAD-608: a `bsid` line (mode m's bank id for a game id: `slot` 0) or a `tsid` line (file k in turn
- * of the slot keyed `slot`) */
-static void bsid_line(const char *ms, const char *slot, const char *ids, const char *banks)
+ * of the slot keyed `slot`; PAD-1005: of music mode `mode`'s file, with `mode`) */
+static void bsid_line(const char *ms, const char *slot, const char *ids, const char *banks, const char *mode)
 {
     const char *p = ms;
     unsigned char key[8];
-    unsigned m, id, bank;
-    int ok, ok2, ok3, j = -1;
+    unsigned m, id, bank, mm = 0;
+    int ok, ok2, ok3, ok4 = 1, j = -1;
     struct bsid *e;
     m = (unsigned)number(&p, &ok);
     p = ids;
     id = (unsigned)number(&p, &ok2);
     p = banks;
     bank = (unsigned)number(&p, &ok3);
-    if (!ok || !ok2 || !ok3 || !id || !(bank >> 16)) { sndm_bad++; return; }
+    if (mode) {
+        p = mode;
+        mm = (unsigned)number(&p, &ok4);
+        ok4 = ok4 && mm >= 2 && mm <= SNDM_MODES;
+    }
+    if (!ok || !ok2 || !ok3 || !ok4 || !id || !(bank >> 16)) { sndm_bad++; return; }
     if (slot) {
         if (m < 2 || m > SNDT_MAX || !key_hex(slot, key)) { sndm_bad++; return; }
         if ((j = sndt_slot(key)) < 0) { sndm_dropped++; return; }
@@ -15705,7 +15718,7 @@ static void bsid_line(const char *ms, const char *slot, const char *ids, const c
     e = &bsid[n_bsid++];
     e->id = id;
     e->bank = bank;
-    e->mode = slot ? 0 : (unsigned char)m;
+    e->mode = slot ? (unsigned char)mm : (unsigned char)m;
     e->turn = slot ? (unsigned char)m : 0;
     e->t = (unsigned short)(j < 0 ? 0 : j);
     e->said = 0;
@@ -16628,11 +16641,11 @@ static void sndm_line(char *s)
         return;
     }
     if (n >= 4 && str_eq(f[0], "bsid")) {
-        bsid_line(f[1], 0, f[2], f[3]);
+        bsid_line(f[1], 0, f[2], f[3], 0);
         return;
     }
     if (n >= 5 && str_eq(f[0], "tsid")) {
-        bsid_line(f[1], f[2], f[3], f[4]);
+        bsid_line(f[1], f[2], f[3], f[4], n >= 6 ? f[5] : 0);
         return;
     }
     if (n >= 4 && str_eq(f[0], "attract")) {
@@ -16788,22 +16801,30 @@ static void sndt_play(struct sndt *t)
     t->last = now;
 }
 
-/* PAD-608: the id game id `id` plays as now - a bank's for music mode m, else for its slot's turn,
- * else its own */
+/* PAD-608: the id game id `id` plays as now - a bank's for music mode m (PAD-1005: its own file in
+ * turn first, at the turn's file 2..), else for its slot's turn, else its own */
 static unsigned bsid_now(unsigned id, unsigned m)
 {
     unsigned i;
     struct bsid *e;
     for (i = 0; i < n_bsid; i++)
-        if (bsid[i].id == id && bsid[i].mode && bsid[i].mode == m) break;
+        if (bsid[i].id == id && bsid[i].mode == m && bsid[i].turn && sndt[bsid[i].t].pick + 1u == bsid[i].turn)
+            break;
     if (i == n_bsid)
         for (i = 0; i < n_bsid; i++)
-            if (bsid[i].id == id && bsid[i].turn && sndt[bsid[i].t].pick + 1u == bsid[i].turn) break;
+            if (bsid[i].id == id && bsid[i].mode && bsid[i].mode == m && !bsid[i].turn) break;
+    if (i == n_bsid)
+        for (i = 0; i < n_bsid; i++)
+            if (bsid[i].id == id && !bsid[i].mode && bsid[i].turn && sndt[bsid[i].t].pick + 1u == bsid[i].turn)
+                break;
     if (i == n_bsid) return id;
     e = &bsid[i];
     if (!e->said) {
         e->said = 1;
-        if (e->mode)
+        if (e->mode && e->turn)
+            say("sound banks: sound id %u plays mode %u's file %u in turn, sound id %u (0x%x) in a sound bank", id,
+                m, e->turn, e->bank, e->bank);
+        else if (e->mode)
             say("sound banks: sound id %u plays mode %u's file, sound id %u (0x%x) in a sound bank", id, m,
                 e->bank, e->bank);
         else
@@ -16828,14 +16849,17 @@ static void blist_play(unsigned request)
     if (cur != e->orig && cur != (unsigned)(unsigned long)e->list[0] && cur != (unsigned)(unsigned long)e->list[1])
         return;
     own = (unsigned *)(unsigned long)e->orig;
-    for (i = 0; i < e->n; i++)              /* a play of a slot whose turn the worker moves on */
-        for (j = 0; j < n_bsid; j++)
-            if (bsid[j].turn && bsid[j].id == own[i]) { sndt_play(&sndt[bsid[j].t]); break; }
     m = sndm_mode();
     if (m != sndm_last) {
         sndm_last = m;
         say("music modes: mode %u from here on (request %u is the first sound it starts)", m, request);
     }
+    /* a play of a slot whose turn the worker moves on (PAD-1005: a music mode's own, in that mode; a
+     * turn's further lines are the same play, SNDT_GAP) */
+    for (i = 0; i < e->n; i++)
+        for (j = 0; j < n_bsid; j++)
+            if (bsid[j].turn && bsid[j].id == own[i] && (!bsid[j].mode || bsid[j].mode == m))
+                sndt_play(&sndt[bsid[j].t]);
     out = e->list[e->which ^ 1];
     for (i = 0; i < e->n; i++) {
         out[i] = bsid_now(own[i], m);

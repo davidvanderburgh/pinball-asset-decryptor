@@ -67,7 +67,39 @@ and plays the challenge (menu → start → ball in play).
 ### Not freed by this patch (yet)
 | Game | Topper adds | Why not |
 |---|---|---|
-| John Wick LE / Pro | "Tick Tock Mr. Wick" challenge | its menu reads a different topper signal than Jaws' predicate (its part-number/board checks only drive the topper display). Still being worked. |
+| John Wick LE / Pro | "Tick Tock Mr. Wick" challenge (EXCLUSIVE TOPPER MODE in CHOOSE YOUR MODE OF PLAY) | gate found in data, but not in code — the reader can't be pinned with the tools this emulator has. Deferred, not offered. See below. |
+
+**John Wick — how far it got, and the wall.** The mode-of-play menu filters each
+challenge by whether its accessory board is present. Tick Tock's board is
+**520-5781** (name-hash `0x1f002e80` in the `.flash` board manifest at
+`0x66a3dc`). The live present/absent state sits in a 0xe0-byte accessory-node
+record at **`0x71f5d4`** (`.bss`): word0 `3`/`1`, a `+0x90` present flag `1`/`0`,
+and the part string/hash populated only when present — all proven by a
+present-vs-absent memory diff. **Poking that record present on a topper-absent
+run makes Tick Tock appear in the menu and play** (rig-proven) — so that record
+*is* the gate's data.
+
+What could not be found is the **code that reads it**. Every static route is
+exhausted: no Ghidra xref, no `movw/movt` or add/orr immediate that builds any
+address in the table (capstone value-tracking over all of `.text`), no literal
+pool, no relocation, and — scanning the whole live process — no stored pointer
+to the table anywhere (only one coincidental byte match inside a library). It is
+reached purely through runtime pointer chains. The two dynamic tools that would
+pin it are both absent here: **qemu-user has no data watchpoints** (the gdbstub
+rejects `Z3`/`Z4`) and this **qemu build has no TCG plugins** (`-plugin`
+unknown). A guest-side fault-probe (`rig/jwprobe.c`: `LD_PRELOAD` via
+`PAD_TRACE_SO`, `mprotect` the node page to `PROT_NONE`, log the faulting PC)
+was built and confirmed guest `mprotect` *does* fault under qemu — but with the
+page unreadable for ~15 s of menu activity the game never faulted on it, i.e.
+the menu does **not** read `0x71f5d4` at display time. So the gating read is
+indirected further (a cached roster, or a copy the census builds), and pinning
+it needs more work: fix the probe's SIGSEGV handler (the self-test read crashed
+instead of logging — the ARM `ucontext`/`sigaction` path is off) and widen the
+watched range to catch what the menu *does* read, or use real hardware / a
+watchpoint- or plugin-capable qemu. Scratch for all of this is under
+`C:\tmp\PAD-1010\rig` (`jwprobe.c`, `ptrhunt.py`, `dumpstate.py`) and
+`gh/` (the Ghidra decompiles: menu builder `FUN_00334b94`, census
+`FUN_00237c88`, accessors `FUN_0023639c`/`FUN_003f2ca8`).
 
 ### Topper adds a mode that is NOT locked by the topper (patch does nothing)
 Avengers Infinity (Gem Mania), Jurassic Park (Goat Mania), King Kong (Golden

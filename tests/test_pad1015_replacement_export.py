@@ -267,3 +267,96 @@ def test_export_window_and_import(tmp_path):
         assert data["video"]["video/intro.mp4"] == os.path.join(dest, "Video", "intro.mp4")
         assert data["sound_modes"]["slots"]["audio/m.wav"]["2"] == \
             os.path.join(dest, "Audio", "song.wav")
+
+
+# --- "anything customized" (the reporter, round 2) ---------------------------------
+
+def _stock_project(tmp_path, name):
+    """A Godzilla project with one scene, a line of text, a font letter and a
+    baseline: what a fresh extract of the same card gives."""
+    import hashlib
+    from tests.test_gui_scene_editor import _seed
+    folder = tmp_path / name
+    folder.mkdir()
+    _seed(folder)
+    card = "godzilla_pro-1_15_0.raw"
+    (folder / ".extract_source.json").write_text(json.dumps(
+        {"input_path": str(folder / card), "input_name": card}), encoding="utf-8")
+    (folder / "text").mkdir()
+    (folder / "text" / "strings.tsv").write_text(
+        "# scene\toriginal\treplacement\n/g/scene1/scene.radium\tJACKPOT\t\n", encoding="utf-8")
+    glyph = "images/scene_textures/glyphs/radimg_font/A.png"
+    _file(folder / glyph, b"stock A")
+    (folder / ".checksums.md5").write_text(
+        "%s\t%s\n" % (glyph, hashlib.md5(b"stock A").hexdigest()), encoding="utf-8")
+    return str(folder), glyph
+
+
+def test_every_customization_round_trips(tmp_path):
+    from pinball_decryptor.core import text_manifest
+    from pinball_decryptor.plugins.stern import mode_project as MP, scene_edit, text_colors
+    from tests.test_gui_scene_editor import CARD
+    from tests.webui_harness import web_app
+    mine, glyph = _stock_project(tmp_path, "mine")
+    scene_edit.save(mine, {CARD: [{"op": "move", "node": 5, "dx": 3, "dy": 4}]})
+    rows = text_manifest.load(mine)
+    rows[0]["replacement"] = "KAIJU"
+    text_manifest.save(mine, rows)
+    text_colors.set_color(mine, CARD, "JACKPOT", (255, 255, 255), (255, 0, 0))
+    slug, _spec = MP.new_mode(mine, spec=MP.ModeSpec(name="TARGET RUSH",
+                                                     title=MP.GODZILLA_PRO_1_15.key))
+    _file(os.path.join(mine, *glyph.split("/")), b"my bolder A")       # the Fonts window
+    clip = _file(tmp_path / "lib" / "intro.mp4", b"clip")
+    staged_changes.save(mine, {"video": {"video/intro.mp4": clip},
+                               "settings": {"AD_BALLS_PER_GAME": 5},
+                               "score_colors": {"p1": [255, 0, 0]}})
+    fresh, _g = _stock_project(tmp_path, "fresh")
+    dest = str(tmp_path / "export")
+    with web_app(tmp_path / "h", mfr="stern") as w:
+        w.run(lambda: w.window.write_assets_var.set(mine))
+        st = w.call("shellx.export_open")
+        assert "Scenes edits of 1 scene" in st["head"] and "1 text edit" in st["head"]
+        assert "1 mode" in st["head"] and "the Defaults" in st["head"]
+        w.call("shellx.export_set_dest", dest)
+        w.answers.append("ok")
+        assert w.call("shellx.export_run")
+        assert _until(w, lambda: w.state("shellx")["job"] is None
+                      and os.path.isfile(os.path.join(dest, rx.RECORD_NAME)))
+        w.call("shellx.export_close")
+        rec = json.loads(open(os.path.join(dest, rx.RECORD_NAME), encoding="utf-8").read())
+        assert rec["scenes"] == rx.SCENES_NAME and rec["modes"] == rx.MODES_NAME
+        assert rec["changed"] == [glyph]
+        assert rec["text"] == [["/g/scene1/scene.radium", "JACKPOT", "KAIJU"]]
+        assert rec["defaults"]["settings"] == {"AD_BALLS_PER_GAME": 5}
+        assert rec["records"]["score_colors"] == {"p1": [255, 0, 0]}
+        assert os.path.isfile(os.path.join(dest, rx.CHANGED_DIR, *glyph.split("/")))
+
+        w.run(lambda: w.window.write_assets_var.set(fresh))
+        w.answers.extend(["yes", "ok"])
+        assert w.call("shellx.import_replacements", os.path.join(dest, rx.RECORD_NAME))
+        q = [a for a in w.asked if a.get("title") == "Import replacements"][0]["message"]
+        assert "the Scenes edits of 1 scene" in q and "1 text edit" in q
+    data = staged_changes.load(fresh)
+    assert data["video"]["video/intro.mp4"] == os.path.join(dest, "Video", "intro.mp4")
+    assert data["settings"] == {"AD_BALLS_PER_GAME": 5}
+    assert data["score_colors"] == {"p1": [255, 0, 0]}
+    assert scene_edit.ops_for(fresh, CARD) == [{"op": "move", "node": 5, "dx": 3, "dy": 4}]
+    assert text_manifest.load(fresh)[0]["replacement"] == "KAIJU"
+    assert text_colors.load(fresh)[CARD]["JACKPOT"] == ((255, 255, 255), (255, 0, 0))
+    assert [s for s, _ in MP.list_modes(fresh)[0]] == [slug]
+    with open(os.path.join(fresh, *glyph.split("/")), "rb") as f:
+        assert f.read() == b"my bolder A"
+    from pinball_decryptor.core import staged_originals
+    assert glyph in staged_originals.snapshot_rels(fresh)      # Revert puts the stock A back
+
+
+def test_changed_files_leave_out_picked_slots_and_the_text_manifest(tmp_path):
+    import hashlib
+    p = tmp_path / "p"
+    for rel in ("video/a.mp4", "images/b.png", "text/strings.tsv"):
+        _file(p / rel, b"now")
+    (p / ".checksums.md5").write_text("".join(
+        "%s\t%s\n" % (rel, hashlib.md5(b"then").hexdigest())
+        for rel in ("video/a.mp4", "images/b.png", "text/strings.tsv")), encoding="utf-8")
+    staged = {"video": {"video/a.mp4": r"C:\lib\a.mp4"}}
+    assert rx.changed_files(str(p), staged) == ["images/b.png"]

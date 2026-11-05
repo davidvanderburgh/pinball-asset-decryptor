@@ -3817,7 +3817,11 @@ GENERAL_CONTENT = [
      "is new.\n\n"
      "With **Use the copies in this project** on, the project builds from that folder "
      "from then on. Beside the files goes **replacements.json**: every slot's file, "
-     "the random clips, the music modes, loudness and loop settings.\n\n"
+     "the random clips, the music modes, loudness and loop settings, color profiles, "
+     "the Text tab's edits and text colors, and the Defaults. The Scenes edits go in "
+     "**Scenes.zip**, the modes you made in **Modes.zip**, and every file of the "
+     "extract changed in place (the Fonts window's letters, a file a mod pack brought) "
+     "under **Changed files**.\n\n"
      "To rebuild on a fresh extract, open it and pick that file with **Project ▾ > "
      "Import replacements…**. The files are found wherever the folder is by then, "
      "so it can move to another drive or PC with them."),

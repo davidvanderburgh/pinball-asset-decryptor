@@ -496,8 +496,9 @@ it again restores the whole setup.
   is copied or written until you press Relink.
 - **Export replacement files…** (folder button) copies every video, sound
   and picture the project uses into one folder (`Video`, `Audio`, `Images`)
-  with a `replacements.json`; **Import replacements…** puts them, their
-  random clips, music modes and loudness back on a fresh extract.
+  with a `replacements.json`, plus the Scenes edits (`Scenes.zip`), the
+  modes (`Modes.zip`), text edits, defaults and font changes; **Import
+  replacements…** puts all of it back on a fresh extract.
 - **Recent paths:** every file and folder box keeps a dropdown of your
   recent paths, per manufacturer.
 - **Drag and drop:** drop a file or folder from the desktop on any

@@ -854,16 +854,19 @@ class ProjectsMixin:
     @rpc
     def export_open(self, folder=None):
         """The window's first look: None (and an info box) when the project
-        records no replacement files, else the state it shows."""
+        has nothing of the user's to export, else the state it shows."""
         from ..core import replacement_export as rx, staged_changes
         target = os.path.normpath(folder or self._active_folder() or "")
         if not target or target == "." or not os.path.isdir(target):
             return None
-        if not rx.recorded_files(staged_changes.load(target)):
+        if not rx.recorded_files(staged_changes.load(target)) \
+                and not _rest_preview(target) \
+                and not off_loop(self.ctx, rx.changed_files, target):
             _mb().showinfo(
                 "Export replacement files",
-                "This project has no replacement videos, sounds or pictures "
-                "yet, so there is nothing to export.\n\n%s" % target)
+                "This project has no customizations yet (no replaced videos, "
+                "sounds or pictures, Scenes or text edits, modes, defaults or "
+                "font changes), so there is nothing to export.\n\n%s" % target)
             return None
         self._export = {"target": target, "plan": None}
         dest = os.path.join(os.path.dirname(target),
@@ -888,12 +891,15 @@ class ProjectsMixin:
                          "to": rx._rel(f["to"], dest) if dest else "",
                          "state": "to copy" if f["state"] == "copy"
                          else "already there"})
-        head = ("This project uses %s of your own. Export copies every one of "
-                "them into one folder, in a Video, an Audio and an Images "
-                "folder, with \"%s\" beside them: each slot's file, the "
-                "random clips, the music modes and the loudness, so Project "
-                "> Import replacements can put them all back on a fresh "
-                "extract." % (rx.words(res["counts"]), rx.RECORD_NAME))
+        rest = rx.rest_summary(_rest_preview(target))
+        files = (("the %s of your own, in a Video, an Audio and an Images "
+                  "folder, with " % rx.words(res["counts"])) if res["files"] else "")
+        head = ("Export copies everything this project changes into one folder, "
+                "so Project > Import replacements can put it all back on a "
+                "fresh extract: %s\"%s\" (each slot's file, the random clips, "
+                "the music modes and the loudness)%s, and every file of the "
+                "extract changed in place, font letters included."
+                % (files, rx.RECORD_NAME, (", " + ", ".join(rest)) if rest else ""))
         status = ""
         if dest:
             n_copy = sum(1 for f in res["files"] if f["state"] == "copy")
@@ -909,7 +915,7 @@ class ProjectsMixin:
                        % len(res["gone"]))
         self.set(export={"target": target, "dest": dest, "rows": rows,
                          "head": head, "status": status,
-                         "can_export": bool(dest and res["files"]),
+                         "can_export": bool(dest),
                          "repoint": repoint})
 
     @rpc
@@ -937,8 +943,9 @@ class ProjectsMixin:
 
     @rpc
     def export_run(self):
-        """Export: the copy behind a progress window, then the record, then
-        (with "Use the copies in this project") the project re-pointed."""
+        """Export: the copy and the rest of the project behind a progress
+        window, then the record, then (with "Use the copies in this project")
+        the project re-pointed."""
         from ..core import replacement_export as rx, staged_changes
         title = "Export replacement files"
         st = self._export
@@ -956,10 +963,17 @@ class ProjectsMixin:
             _mb().showerror(title, "Couldn't make the folder:\n%s" % e)
             return False
         game = getattr(self.app, "_detected_caption", None) or ""
+        # the tabs that keep edits in memory write them out first
+        self._flush_tabs()
 
         def work(progress, cancel):
-            return rx.export(staged_changes.load(target), res,
-                             progress=progress, cancel=cancel)
+            out = rx.export(staged_changes.load(target), res,
+                            progress=progress, cancel=cancel)
+            if not out["cancelled"]:
+                out["rest"] = rx.export_rest(target, dest, progress=progress,
+                                             cancel=cancel)
+                out["cancelled"] = bool(out["rest"].pop("cancelled", False))
+            return out
 
         def done(out, error):
             from ..core import history_log
@@ -975,11 +989,15 @@ class ProjectsMixin:
                     self._export_refresh(dest)
                 return
             data = staged_changes.load(target)
+            rest = out.get("rest") or {}
             rx.write_record(dest, rx.make_record(data, out["mapping"], dest,
-                                                 game=game))
+                                                 game=game, rest=rest))
             line = ("Exported %d replacement file(s) to %s (%d copied, %s)"
                     % (len(out["mapping"]), dest, out["copied"],
                        human_size(out["bytes"])))
+            more = rx.rest_summary(rest)
+            if more:
+                line += ", with " + ", ".join(more)
             if repoint:
                 data, n_refs = rx.repoint(data, out["mapping"])
                 if n_refs:
@@ -993,13 +1011,26 @@ class ProjectsMixin:
             if self._export is st:
                 self._export_refresh(dest)
             _mb().showinfo(
-                title, line + "\n\n\"%s\" in that folder puts them back on "
+                title, line + "\n\n\"%s\" in that folder puts it all back on "
                 "another extract of this game: Project > Import replacements."
                 % rx.RECORD_NAME)
 
         self._start_job(title, "Copying the replacement files to %s..." % dest,
                         work, done)
         return True
+
+    def _flush_tabs(self):
+        """The Images tab keeps its picks in memory and the Modes tab its open
+        mode's edits: write them first, so the export is what they show."""
+        for name, fn in (("images", "_save_staged_changes"),
+                         ("modes", "_save_if_edited")):
+            svc = self.window.service(name)
+            call = getattr(svc, fn, None) if svc is not None else None
+            if call is not None:
+                try:
+                    call()
+                except Exception:                       # noqa: BLE001
+                    log.exception("flush %s before export", name)
 
     @rpc(loop=False)
     def export_close(self):
@@ -1010,7 +1041,8 @@ class ProjectsMixin:
     @rpc
     def import_replacements(self, path=None):
         """Project > Import replacements: a ``replacements.json`` an export
-        left, its files found beside it, put on this project's slots."""
+        left, its files found beside it, put on this project: the slots' files
+        and settings, then each other part the way its own tab loads it."""
         from ..core import history_log, replacement_export as rx, staged_changes
         title = "Import replacements"
         target = os.path.normpath(self._active_folder() or "")
@@ -1032,10 +1064,17 @@ class ProjectsMixin:
                             "made:\n%s\n\n%s" % (path, e))
             return False
         counts = rx.counts_of(records)
+        scenes = rx.scenes_file(path, rec)
+        modes = rx.modes_file(path, rec)
+        more = rx.rest_summary(dict(rec, scenes=rec.get("scenes") if scenes else None,
+                                    modes=rec.get("modes") if modes else None))
         msg = ("Put %s from\n%s\non this project's slots, with the random "
-               "clips, music modes and loudness they had?\n\nA slot this "
-               "project already replaced takes the file from there."
-               % (rx.words(counts), os.path.dirname(os.path.abspath(path))))
+               "clips, music modes and loudness they had%s?\n\nWhat this "
+               "project already changed the same way takes the file's (a "
+               "slot's file, a scene's edits, a line of text, a mode of the "
+               "same name); everything else of it stays."
+               % (rx.words(counts), os.path.dirname(os.path.abspath(path)),
+                  (", and " + ", ".join(more)) if more else ""))
         if rec.get("game"):
             msg += "\n\nExported from: %s" % rec["game"]
         if missing:
@@ -1043,13 +1082,144 @@ class ProjectsMixin:
                     "until Relink moved files finds them." % len(missing))
         if not _mb().askyesno(title, msg):
             return False
+        self._flush_tabs()
         data, n_slots = rx.import_record(staged_changes.load(target), records)
         staged_changes.save(target, data)
-        line = ("Imported replacements from %s: %s on %d slot(s)."
-                % (path, rx.words(counts), n_slots))
-        history_log.record(target, [line])
+        bits = ["%s on %d slot(s)" % (rx.words(counts), n_slots)]
+        notes = []
+
+        def part(label, fn):
+            try:
+                return fn()
+            except Exception as e:                      # noqa: BLE001
+                log.exception("import %s", label)
+                notes.append("%s could not be loaded: %s" % (label, e))
+                return None
+
+        if isinstance(rec.get("defaults"), dict) and rec["defaults"]:
+            from ..core import modpack
+            got = part("The Defaults", lambda: modpack.apply_extras(target, rec["defaults"]))
+            if got:
+                bits.append("the Defaults")
+        if scenes:
+            got = part("The Scenes edits", lambda: rx.import_scenes(target, scenes))
+            if got and got[0]:
+                bits.append("the Scenes edits of %d scene%s" % (got[0], "" if got[0] == 1 else "s"))
+                self._scenes_reload(target)
+            if got and got[1]:
+                notes.append("%d scene%s of the file %s not on this card."
+                             % (len(got[1]), "" if len(got[1]) == 1 else "s",
+                                "is" if len(got[1]) == 1 else "are"))
+        if rec.get("text"):
+            got = part("The text edits", lambda: self._import_text(target, rec["text"]))
+            if got:
+                n, gone, long_ = got
+                if n:
+                    bits.append("%d text edit%s" % (n, "" if n == 1 else "s"))
+                if gone:
+                    notes.append("%d text edit%s found no such line on this card."
+                                 % (gone, "" if gone == 1 else "s"))
+                if long_:
+                    notes.append("%d text edit%s too long for the line here, left out."
+                                 % (long_, "" if long_ == 1 else "s"))
+        if rec.get("text_colors"):
+            n = part("The text colors", lambda: rx.import_text_colors(target, rec["text_colors"]))
+            if n:
+                bits.append("%d text color%s" % (n, "" if n == 1 else "s"))
+        if modes:
+            report = part("The modes", lambda: rx.import_modes(target, modes))
+            if report is not None:
+                got = [m for m in report.modes if m.new_slug]
+                if got:
+                    bits.append("%d mode%s" % (len(got), "" if len(got) == 1 else "s"))
+                notes.extend(report.lines())
+                svc = self.window.service("modes")
+                if svc is not None and getattr(svc, "refresh", None):
+                    try:
+                        svc.refresh()
+                    except Exception:                   # noqa: BLE001
+                        log.exception("modes refresh after import")
+        if rec.get("changed"):
+            got = part("The changed files", lambda: rx.import_changed(target, path, rec["changed"]))
+            if got:
+                done, gone = got
+                if done:
+                    bits.append("%d changed file%s of the extract (font letters, sounds or pictures changed on disk)"
+                                % (len(done), "" if len(done) == 1 else "s"))
+                if gone:
+                    notes.append("%d changed file%s of the export %s not in this extract."
+                                 % (len(gone), "" if len(gone) == 1 else "s",
+                                    "is" if len(gone) == 1 else "are"))
+        line = "Imported from %s: %s." % (path, ", ".join(bits))
+        history_log.record(target, [line] + notes)
         self.window.append_log(line, "success")
+        for n in notes:
+            self.window.append_log("  " + n, "info")
         if same_path(target, self._active_folder()):
             self.window.reload_assets_tabs()
-        _mb().showinfo(title, line)
+        _mb().showinfo(title, "\n\n".join([line] + notes))
         return True
+
+    def _import_text(self, target, edits):
+        """The record's Text tab edits on this card's lines, through the Text
+        tab when it holds this project (its list and history stay in step).
+        Returns ``(put on, found no line, too long)``."""
+        from ..core import tab_settings, text_manifest
+        from ..plugins.stern import scene_share
+        from . import text_rules as R
+        svc = self.window.service("text")
+        rows = getattr(svc, "_text_rows", None) if svc is not None else None
+        tab = svc if rows and same_path(getattr(svc, "_text_scan_dir", ""), target) else None
+        if tab is None:
+            rows = text_manifest.load(target)
+        pairs, missing = tab_settings.match_text({"edits": edits}, rows)
+        fits = [(r, new) for r, new in pairs if R.row_len(r, new) <= R.row_budget(r)]
+        if tab is not None:
+            tab._set_replacements([(r, "" if new == r["original"] else new) for r, new in fits])
+        else:
+            scene_share.import_text(target, rows, fits)
+        return len(fits), len(missing), len(pairs) - len(fits)
+
+    def _scenes_reload(self, target):
+        """The Scenes tab shows the edits an import loaded, when it has this
+        project open."""
+        svc = self.window.service("text_scenes")
+        if svc is None or not same_path(getattr(svc, "assets_dir", ""), target):
+            return
+        try:
+            svc._trees = None
+            svc.reload()
+        except Exception:                               # noqa: BLE001
+            log.exception("scenes reload after import")
+
+
+def _rest_preview(project):
+    """The parts of *project* besides its files, for the window (the changed
+    files are found on Export: that reads every file)."""
+    from ..core import replacement_export as rx
+    out = {}
+    try:
+        from ..plugins.stern import scene_edit
+        n = scene_edit.count(project) and len(scene_edit.load(project))
+        if n:
+            out["scenes"], out["scenes_n"] = rx.SCENES_NAME, n
+    except Exception:                                   # noqa: BLE001
+        pass
+    try:
+        from ..plugins.stern import code_modes as CM, mode_project as MP
+        n = len(MP.list_modes(project)[0]) + len(CM.code_slugs(project))
+        if n:
+            out["modes"], out["modes_n"] = rx.MODES_NAME, n
+    except Exception:                                   # noqa: BLE001
+        pass
+    edits, colours = rx.text_edits(project)
+    if edits:
+        out["text"] = edits
+    if colours:
+        out["text_colors"] = colours
+    try:
+        if rx.defaults_of(project):
+            out["defaults"] = True
+    except Exception:                                   # noqa: BLE001
+        pass
+    return out

@@ -32,6 +32,7 @@ const CSAVE_TIP = "Save a copy of every picture with a color profile attached (g
 const CSV_TIP = "Save every row of the list as a spreadsheet (CSV), exactly as it reads here.";
 const FOLDER_TIP = "Pick a folder of your own files and each one becomes the replacement for the slot with the same name — for a whole set you reworked outside the app, like every clip made black and white. The file type and capital letters don't have to match (Intro.mp4 is used for Intro.mov and converted to suit it), and subfolders are fine. Nothing changes until you confirm, and every file left out is named in the log.\n\nKeep the extract's own files where they are: files dropped into the project folder only count under the card's exact name.";
 const ORIGINALS_TIP = "Find the files your replacements were made from in a folder of your own, by how they look: the names don't matter.\n\nFor picks that are copies off a card, like the ones \"Transfer Mods to New Version\" takes from an extract of a built card: those pictures were already squeezed into the card's format once by the Write that built that card. With your own files picked instead, the next Write converts from them. Nothing changes until you press Use.";
+const SAME_TIP = "Compare every replacement on this tab with the game's own picture it replaces, pixel for pixel, and clear the ones that are the same picture: they change nothing on the card. A file saved again (other bytes, same pixels) counts as the same. You see how many first and nothing is cleared until you say yes; your own files are untouched.";
 const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.";
 // PAD-534: the scene(s) a picture is in, and how the game turns it there
 const SCENES_TIP = "Where the game draws this picture. The picture here is the file as it is stored; a scene can draw it turned or mirrored, as the Scenes tab shows.";
@@ -656,6 +657,8 @@ export default function ImagesTab() {
       ${status ? html`<${Chip} kind=${s.changed ? "acc" : ""}>${status.trim()}<//>` : null}
       ${s.csave ? html`<${Chip} kind="acc">${s.csave.text}<//>
         <${Button} kind="ghost" icon="x" onClick=${() => call("images.colour_save_cancel")}>Cancel save<//>` : null}
+      ${s.same ? html`<${Chip} kind="acc">${s.same.text}<//>
+        <${Button} kind="ghost" icon="x" onClick=${() => call("images.clear_same_cancel")}>Cancel<//>` : null}
       ${s.scanning
         ? html`<${Button} icon="x" onClick=${() => call("images.cancel_scan")}>Cancel scan<//>`
         : html`<${Button} icon="refresh" onClick=${() => call("images.scan")}>Scan<//>`}
@@ -671,6 +674,8 @@ export default function ImagesTab() {
             onClick: () => call("images.colour_save") } : null,
           { label: "Clear replacements…", icon: "trash", title: CLEAR_TIP, disabled: !s.can_clear,
             onClick: () => call("images.clear_all") },
+          { label: "Clear replacements identical to the original…", icon: "trash", title: SAME_TIP,
+            disabled: !s.can_clear || !!s.same, onClick: () => call("images.clear_same") },
           { sep: true },
           { label: "Save settings to a file…", icon: "download", title: "Which file replaces which slot, and this tab's ticks and options, in one small file to keep or to send. The pictures themselves are not in it.",
             onClick: () => call("images.settings_save") },

@@ -497,6 +497,99 @@ def test_clear_one_selected_and_all(scanned):
     assert "Clear all 1 replacement on this tab?" in w.asked[-1]["message"]
 
 
+def test_same_picture(tmp_path):
+    """PAD-1016: the same picture saved again, an RGB copy of an opaque one
+    and color under fully clear pixels all count as the same; one pixel, the
+    size or the alpha changed does not, nor does a file that is no picture."""
+    from pinball_decryptor.webui.tabs.images import same_picture
+    p = lambda n: str(tmp_path / n)                         # noqa: E731
+    im = Image.new("RGBA", (16, 8), (10, 20, 30, 255))
+    im.putpixel((3, 3), (200, 0, 0, 255))
+    im.save(p("a.png"))
+    im.save(p("a_again.png"), compress_level=1)
+    assert open(p("a.png"), "rb").read() != open(p("a_again.png"), "rb").read()
+    assert same_picture(p("a.png"), p("a_again.png"))
+    im.convert("RGB").save(p("a_rgb.png"))
+    assert same_picture(p("a.png"), p("a_rgb.png"))
+    one = im.copy()
+    one.putpixel((0, 0), (10, 20, 31, 255))
+    one.save(p("one.png"))
+    assert not same_picture(p("a.png"), p("one.png"))
+    im.resize((16, 9)).save(p("big.png"))
+    assert not same_picture(p("a.png"), p("big.png"))
+    clear = im.copy()
+    clear.putpixel((0, 0), (10, 20, 30, 0))
+    clear.save(p("clear.png"))
+    assert not same_picture(p("a.png"), p("clear.png"))
+    under = clear.copy()
+    under.putpixel((0, 0), (255, 255, 255, 0))
+    under.save(p("under.png"))
+    assert same_picture(p("clear.png"), p("under.png"))
+    (tmp_path / "junk.png").write_bytes(b"not a picture")
+    assert not same_picture(p("a.png"), p("junk.png"))
+    assert not same_picture(p("a.png"), p("gone.png"))
+
+
+def _same_done(w):
+    _wait(w, lambda st: not st.get("same"))
+
+
+def test_clear_same(scanned):
+    """PAD-1016 (DoomWalrus666): More > Clear replacements identical to the
+    original clears just the picks that are the game's own picture again."""
+    w, assets, reps, _st = scanned
+    same = os.path.join(reps, "banner_again.png")
+    Image.open(os.path.join(assets, BANNER)).save(same, compress_level=1)
+    sprite = os.path.join(reps, "sprite_again.png")
+    Image.open(os.path.join(assets, SPRITE)).save(sprite, compress_level=1)
+    other = os.path.join(reps, "SpaceGodzilla.png")
+    for rel, rep in ((BANNER, same), (SPRITE, sprite), (PLAIN, other)):
+        w.answers = [rep]
+        w.call("images.choose", rel)
+    # the answer is no: nothing goes
+    w.answers = ["no"]
+    assert w.call("images.clear_same") is True
+    _same_done(w)
+    q = w.asked[-1]["message"]
+    assert q.startswith("2 of the 3 replacements on this tab are the same "
+                        "picture as the original"), q
+    assert len(w.window.pending_image_assignments(assets)[1]) == 3
+    # yes: the two copies go, the real change stays
+    w.answers = ["yes"]
+    assert w.call("images.clear_same") is True
+    _same_done(w)
+    _wait(w, lambda st: len(
+        w.window.pending_image_assignments(assets)[1]) == 1)
+    assert w.window.pending_image_assignments(assets)[1] == {PLAIN: other}
+    log = " ".join(l["text"] for l in w.window._log["stern"])
+    assert "cleared 2 replacements" in log
+    # nothing left that is the same: says so, clears nothing
+    assert w.call("images.clear_same") is True
+    _same_done(w)
+    assert w.asked[-1]["message"].startswith(
+        "None of the 1 replacement on this tab is the same picture")
+    assert w.window.pending_image_assignments(assets)[1] == {PLAIN: other}
+
+
+def test_clear_same_keeps_colour_corrected(scanned):
+    """A same-picture pick with its colors corrected for the machine still
+    changes the card, so it is kept and the question says why."""
+    w, assets, reps, _st = scanned
+    same = os.path.join(reps, "banner_again.png")
+    Image.open(os.path.join(assets, BANNER)).save(same, compress_level=1)
+    w.answers = [same]
+    w.call("images.choose", BANNER)
+    tab = w.window.service("images")
+    w.run(lambda: tab._color.__setitem__(BANNER, True))
+    w.run(lambda: setattr(tab, "_per_file_colour", lambda: True))
+    assert w.call("images.clear_same") is True
+    _same_done(w)
+    q = w.asked[-1]["message"]
+    assert q.startswith("None of the 1 replacement"), q
+    assert "1 more is the same picture but has" in q
+    assert w.window.pending_image_assignments(assets)[1] == {BANNER: same}
+
+
 def test_replace_from_folder(scanned):
     w, assets, reps, _st = scanned
     # a folder inside the project is refused

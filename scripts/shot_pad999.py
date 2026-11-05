@@ -8,7 +8,8 @@ is then answered (``agent.use_files``) with a folder's Hey Jude and Revolution (
 .mp4), Get Back.wav again, and Let It Be.mp4 with no audio of its name. Writes, under the same name
 before and after:
 
-- <before_|after_>jukebox_add.png   the Jukebox window after the add (and its warning, if any)
+- <before_|after_>jukebox_warning.png   right after the add: what it says, if anything
+- <before_|after_>jukebox_add.png       the Jukebox window's songs after the add
 
 Before (main) every picked file became a song, the videos too, and Get Back came in twice. After, the
 videos are the intros of the songs of their names, Get Back takes the old one's place, and a warning
@@ -82,6 +83,7 @@ def main():
     api = lambda m, *a: webui_shot.api(url, m, *a)          # noqa: E731
     state = lambda: webui_shot.state(url)                    # noqa: E731
     out = os.path.join(out_dir, ("after_" if after else "before_") + "jukebox_add.png")
+    warn = os.path.join(out_dir, ("after_" if after else "before_") + "jukebox_warning.png")
     from playwright.sync_api import sync_playwright
     try:
         with sync_playwright() as p:
@@ -106,6 +108,11 @@ def main():
             api("agent.use_files", picked)
             page.locator(".modal button:has-text('Add songs')").first.click()
             time.sleep(3)
+            page.screenshot(path=warn)                      # what the add says, if anything
+            ok = page.locator(".modal button:has-text('OK')")
+            if ok.count():
+                ok.first.click()
+                time.sleep(2)
             print("window:", page.locator(".modal .aud-juke tr").all_inner_texts(), flush=True)
             page.screenshot(path=out)
             print("shot", out, "| page errors:", errors, flush=True)

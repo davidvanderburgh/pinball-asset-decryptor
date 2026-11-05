@@ -8078,6 +8078,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-782: the owner's attract items: clips in the video bank and attract.cfg beside the runtime
     attract_prof = _attract_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _attract_on = attract_prof is not None
+    # PAD-1017: co-op play - coop.cfg beside the runtime (the modes' delivery)
+    coop_prof = _coop_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    _coop_on = coop_prof is not None
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -8085,7 +8088,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not tree_edits
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
-            and picture_prof is None and not _attract_on
+            and picture_prof is None and not _attract_on and not _coop_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -9508,8 +9511,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Attract flipper sounds" if sound_modes_cfg and sound_modes.attract  # PAD-641: theirs alone
                 else "Sounds on shots" if sound_modes_cfg  # PAD-945: theirs alone
                 else "Picture settings" if picture_cfg
-                else "Attract items")
-        if _modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on:
+                else "Attract items" if _attract_on
+                else "Co-op play")
+        if _modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on:
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -9517,7 +9521,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if variant_slots else "Adding the jukebox to the video bank..."
                          if _clips_on else "Adding the music modes..."
                          if sound_modes_cfg else "Adding the picture settings..."
-                         if picture_cfg else "Adding the attract items...")
+                         if picture_cfg else "Adding the attract items..."
+                         if _attract_on else "Adding co-op play...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -9528,7 +9533,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     if _mprof is None:
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
-                    _mprof = variant_prof or sound_modes_prof or picture_prof or attract_prof
+                    _mprof = variant_prof or sound_modes_prof or picture_prof or attract_prof or coop_prof
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
                     if not _rel or (not _modes_on and (
@@ -9582,6 +9587,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     sound_modes=sound_modes_cfg, sound_modes_prof=sound_modes_prof,
                     picture=picture_cfg, picture_prof=picture_prof,
                     attract=_attract_on, attract_prof=attract_prof,   # PAD-782
+                    coop=_coop_on, coop_prof=coop_prof,               # PAD-1017
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -9622,7 +9628,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               if mode_plan.variants is not None
                               else "adding the music modes" if sound_modes_cfg
                               else "adding the picture settings" if picture_cfg
-                              else "adding the attract items"), t0)
+                              else "adding the attract items" if _attract_on
+                              else "adding co-op play"), t0)
 
         # PAD-444: the own copies' bank entries and files, on the bank the
         # modes just rewrote when they did.  The program part already landed
@@ -9912,6 +9919,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 # PAD-782: the owner's attract items (their clips' names)
                 "attract": ([n for _e, _w, n, _ms in _attract_entries(mode_plan.attract_file)]
                             if getattr(mode_plan, "attract_file", "") else []),
+                # PAD-1017: co-op play
+                "coop": bool(getattr(mode_plan, "coop_file", "")),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -10974,6 +10983,36 @@ def _attract_for_build(assets_dir, dest_is_device, log, ext4_available=None):
         "the attract mode is changed",
         "" if rec.champions else "; the modes' challenge champions are not shown in attract",
         _AI.INSIDER_WORDS), "info")
+    return prof
+
+
+def _coop_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-1017: the title of the card co-op play goes on, or ``None`` when the project does not ask for it or it is
+    left out (one warning says why). The modes' gate: an image file, a host that can add files to it, a title whose
+    players the app can find."""
+    from . import coop_play as _CP
+    from . import mode_write as _MW
+    if not _CP.load(assets_dir):
+        return None
+    if dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry it"
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _CP.project_title(assets_dir, probe=True)
+        why = _CP.title_refusal(prof)
+    if why:
+        log("Co-op play: left out of this build: %s." % why.rstrip("."), "warning")
+        return None
+    log("Co-op play: %s." % _CP.HOW, "info")
     return prof
 
 
@@ -12216,10 +12255,12 @@ def _install_modes(output_path, modes, landed, planned, log):
     # PAD-446: a card of random clips and no mode; PAD-494: of music modes only;
     # PAD-537: of picture settings only
     who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
-                                                 or modes.get("picture") or modes.get("attract"))
+                                                 or modes.get("picture") or modes.get("attract")
+                                                 or modes.get("coop"))
            else "Random clips" if modes.get("variants") else "Music modes"
            if modes.get("music_modes") else "Picture settings" if modes.get("picture")
-           else "Attract items")              # PAD-782
+           else "Attract items" if modes.get("attract")   # PAD-782
+           else "Co-op play")                 # PAD-1017
     if who == "Music modes" and all(t.endswith(" in attract") for t in modes["music_modes"]):
         who = "Attract flipper sounds"   # PAD-641: the same program, its own words
     elif who == "Music modes" and all(t.endswith((" in turn)", " in attract"))
@@ -12294,8 +12335,12 @@ def _install_modes(output_path, modes, landed, planned, log):
         log("Attract items: %d item(s) of your own between the game's attract screens on the card. %s"
             % (len(modes["attract"]), "A card with attract items of your own keeps its scores off Insider "
                "Connected: they stay on the machine."), "success")
+    if modes.get("coop"):                     # PAD-1017
+        from . import coop_play as _CP
+        log("Co-op play on the card: %s. A card with co-op play keeps its scores off Insider Connected: they "
+            "stay on the machine." % _CP.HOW, "success")
     if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
-                                  or modes.get("picture") or modes.get("attract")):
+                                  or modes.get("picture") or modes.get("attract") or modes.get("coop")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")

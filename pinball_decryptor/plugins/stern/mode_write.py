@@ -589,6 +589,8 @@ class ModePlan:
     picture_file: str = ""
     #: PAD-782: ``attract.cfg`` beside the mode files, the owner's attract items ("" = none)
     attract_file: str = ""
+    #: PAD-1017: ``coop.cfg`` beside the mode files, co-op play ("" = none)
+    coop_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -803,7 +805,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"", stock_select=b"",
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
-         attract=False, attract_prof=None, find_scene=None):
+         attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -828,7 +830,10 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
     PAD-782: *attract* adds the project's attract items (:mod:`.attract_items`) to the same bank, and
     ``attract.cfg`` beside the mode files; with nothing else it is a plan of its own, for
-    *attract_prof*."""
+    *attract_prof*.
+
+    PAD-1017: *coop* puts co-op play's ``coop.cfg`` beside the mode files (the right flipper button read off
+    *game_elf*); with nothing else it is a plan of its own, for *coop_prof*."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -854,6 +859,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                                       attract_prof or variants_prof or sound_modes_prof or picture_prof)
             attract_into(project, result, stock_bank, os.path.join(scratch, "tree"), log=log,
                          progress=progress, cancel=cancel, read_card=read_card, find_scene=find_scene)
+        if coop:                                     # PAD-1017: co-op play, alone or with the above
+            if result is None:
+                result = coop_plan(project, game_elf, coop_prof or attract_prof or variants_prof
+                                   or sound_modes_prof or picture_prof)
+            coop_into(result, game_elf, scratch)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -933,6 +943,43 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                      read_card=read_card, find_scene=find_scene)
     result.sounds_file = sound_modes or ""
     result.picture_file = picture or ""
+    if coop:                                         # PAD-1017
+        coop_into(result, game_elf, scratch)
+    return result
+
+
+# ---- PAD-1017: co-op play ----------------------------------------------------------------------
+def coop_plan(project, game_elf, prof):
+    """A plan carrying only co-op play: no mode, no scene; the runtime and the title's port on p2 with
+    ``coop.cfg`` (:func:`coop_into`)."""
+    from . import coop_play as CP
+    why = CP.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to add co-op play to"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def coop_into(result, game_elf, scratch):
+    """``coop.cfg`` for *result*'s card: co-op on, the right flipper button read off *game_elf*."""
+    from . import coop_play as CP
+    why = CP.title_refusal(result.profile)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        text = CP.cfg_text(game_elf)
+    except CP.CoopError as e:
+        raise ModeWriteError(str(e)) from None
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, CP.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.coop_file = path
+    result.lines.append("co-op play: %s" % CP.HOW)
     return result
 
 
@@ -1535,6 +1582,11 @@ def p2_payload(result, out_dir, project=None):
             from . import attract_items as AI
             dst = os.path.join(out_dir, AI.CFG_NAME)
             shutil.copyfile(result.attract_file, dst)
+            extras.append(dst)
+        if getattr(result, "coop_file", ""):           # PAD-1017: coop.cfg, co-op play
+            from . import coop_play as CP
+            dst = os.path.join(out_dir, CP.CFG_NAME)
+            shutil.copyfile(result.coop_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

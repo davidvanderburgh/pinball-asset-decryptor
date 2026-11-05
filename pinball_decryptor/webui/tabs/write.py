@@ -129,6 +129,14 @@ PICTURE_TIP = (
     "takes an extra step on the machine, which can slow busy scenes. They share the "
     "game's spare settings with the Audio tab's music choice and with Editions: with "
     "both on the card, only Brightness fits.")
+#: PAD-1017: co-op play (plugins/stern/coop_play.py): the game plays one player for a team of 2-4 that takes
+#: each ball in turn
+COOP_LABEL = "Co-op play"
+COOP_TIP = (
+    "Lets 2 to 4 players play one game together on games that have no co-op of their own. "
+    "Hold the right flipper button and press Start to add a teammate. The team shares one "
+    "score and all of the game's progress, and takes turns ball by ball: every teammate plays "
+    "ball 1, then ball 2, and so on. A plain Start adds a competing player as always.")
 EDITABLE_HINT = (
     "Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
     "files in pck/_EDITABLE ASSETS/ inside your Modified Assets "
@@ -559,7 +567,9 @@ class WriteTab(TabService):
                  editions_note_kind="", editions_label=EDITIONS_LABEL,
                  editions_tip=EDITIONS_TIP, picture_cap=False, picture_on=False,
                  picture_note="", picture_note_kind="",
-                 picture_label=PICTURE_LABEL, picture_tip=PICTURE_TIP)
+                 picture_label=PICTURE_LABEL, picture_tip=PICTURE_TIP,
+                 coop_cap=False, coop_on=False, coop_note="", coop_note_kind="",
+                 coop_label=COOP_LABEL, coop_tip=COOP_TIP)
         self._hook_mirrors()
 
     # ------------------------------------------------------------------
@@ -700,6 +710,7 @@ class WriteTab(TabService):
         self._refresh_card_size()
         self._publish_editions()
         self._publish_picture()
+        self._publish_coop()
         self._sync_buttons()
 
     @staticmethod
@@ -1845,6 +1856,46 @@ class WriteTab(TabService):
         self._publish_picture()
         return True
 
+    def _publish_coop(self):
+        """PAD-1017: the Co-op play tick, and under it how a teammate joins, or in red why this project's game
+        cannot have it."""
+        from ...plugins.stern import coop_play as _CP
+        if not self._editions_applies():
+            self.set(coop_cap=False)
+            return
+        assets = self._info_assets_dir()
+        on = bool(assets) and _CP.load(assets)
+        note, kind = "", ""
+        if on:
+            why = _CP.title_refusal(_CP.project_title(assets))
+            if why:
+                note, kind = why, "err"
+            else:
+                note = "On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + "."
+        self.set(coop_cap=True, coop_on=on, coop_note=note, coop_note_kind=kind)
+
+    @rpc
+    def set_coop(self, on):
+        """Tick or untick co-op play for this project."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        if self.window._running or not self._editions_applies():
+            return False
+        assets = self._info_assets_dir()
+        if not assets:
+            compat.messagebox.showinfo("Co-op play", "Set the project folder on the Extract tab first.")
+            self._publish_coop()
+            return False
+        was = _CP.save(assets, bool(on))
+        hist = history_log.diff_scalar("write  co-op play", "on" if was else "off", "on" if on else "off")
+        history_log.record(assets, [hist] if hist else [])
+        self.log("Co-op play: %s." % ("the card gets co-op play" if on else "the card gets no co-op play"), "info")
+        cb = self.window.cb.get("on_folder_state_written")
+        if cb is not None:
+            cb(assets)
+        self._publish_coop()
+        return True
+
     # ------------------------------------------------------------------
     # Modified Files: the scan
     # ------------------------------------------------------------------
@@ -2693,6 +2744,7 @@ class WriteTab(TabService):
         self._refresh_card_size()
         self._publish_editions()
         self._publish_picture()
+        self._publish_coop()
         self.set_admin_warning_collapsed(self._shared_admin_collapsed())
 
     def on_close(self):

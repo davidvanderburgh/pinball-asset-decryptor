@@ -221,6 +221,7 @@ function Destination({ s }) {
     ${s.card_fit_cap && !direct ? html`<${CardFit} s=${s} />` : null}
     ${s.editions_cap && !direct ? html`<${Editions} s=${s} />` : null}
     ${s.picture_cap && !direct ? html`<${Picture} s=${s} />` : null}
+    ${s.coop_cap && !direct ? html`<${Coop} s=${s} />` : null}
   <//>`;
 }
 
@@ -247,6 +248,16 @@ function Picture({ s }) {
     <${Check} checked=${s.picture_on} wrap label=${s.picture_label} title=${s.picture_tip}
       disabled=${s.running} onChange=${(v) => call("write.set_picture", v)} />
     ${s.picture_note ? html`<span class=${cx("small", s.picture_note_kind === "err" ? "err-ink" : "muted")}>${s.picture_note}</span>` : null}
+  </div>`;
+}
+
+// PAD-1017: co-op play on a game with none of its own.  The tick, and a note:
+// how a teammate joins, or, in red, why this game cannot have it.
+function Coop({ s }) {
+  return html`<div class="stack wr-build">
+    <${Check} checked=${s.coop_on} wrap label=${s.coop_label} title=${s.coop_tip}
+      disabled=${s.running} onChange=${(v) => call("write.set_coop", v)} />
+    ${s.coop_note ? html`<span class=${cx("small", s.coop_note_kind === "err" ? "err-ink" : "muted")}>${s.coop_note}</span>` : null}
   </div>`;
 }
 

@@ -1,4 +1,4 @@
-"""PAD-1015 proof shots: Project > Export replacement files.
+"""PAD-1015 proof shots: Project > Export replacement files (round 2: every customization).
 
     python scripts/shot_pad1015.py <repo> <out_dir> <before|after>
 
@@ -62,8 +62,26 @@ def make_project(scratch):
         "image": {"images/score/bg_1.png": i("bg red.png"),
                   "images/score/bg_2.png": i("bg blue.png")},
     }
+    staged["settings"] = {"AD_BALLS_PER_GAME": 5}
     with open(os.path.join(project, ".staged_changes.json"), "w", encoding="utf-8") as f:
         json.dump(staged, f, indent=1)
+    # round 2: the rest of a customized project (Scenes edits, a mode, a text edit)
+    card = "godzilla_pro-1_20_0.raw"
+    with open(os.path.join(project, ".extract_source.json"), "w", encoding="utf-8") as f:
+        json.dump({"input_path": os.path.join(project, card), "input_name": card}, f)
+    tex = os.path.join(project, "images", "scene_textures")
+    os.makedirs(tex)
+    with open(os.path.join(tex, "scene_edits.json"), "w", encoding="utf-8") as f:
+        json.dump({"/gz/attract/scene.radium": [{"op": "move", "node": 5, "dx": 3, "dy": 4}],
+                   "/gz/kaiju/scene.radium": [{"op": "hide", "node": 7}]}, f)
+    os.makedirs(os.path.join(project, "text"))
+    with open(os.path.join(project, "text", "strings.tsv"), "w", encoding="utf-8") as f:
+        f.write("# scene\toriginal\treplacement\n"
+                "/gz/kaiju/scene.radium\tKAIJU AWARD\tDOOM AWARD\n")
+    mode = os.path.join(project, "modes", "target_rush")
+    os.makedirs(mode)
+    with open(os.path.join(mode, "mode.json"), "w", encoding="utf-8") as f:
+        json.dump({"name": "TARGET RUSH", "title": "godzilla_pro_1_20"}, f)
     return project
 
 

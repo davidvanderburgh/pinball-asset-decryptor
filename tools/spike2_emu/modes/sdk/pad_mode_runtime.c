@@ -15072,6 +15072,18 @@ static int coop_msg_find(const char *words)
  * its head and its TOTAL SCORE line - rig, Godzilla LE 1.16. It says PLAYER 1: the team.) */
 static void coop_ball_find(void)
 {
+    long v = pm_port_value("coop_ball_msg", -1);              /* the port's (portcoop.py), checked by its words */
+    unsigned t = data("message_table");
+    const char **group;
+    if (v >= 0 && v < 20000 && t && maps_has(t + 4u * (unsigned)v, 4, MAP_R)) {
+        group = *(const char ***)(unsigned long)(t + 4u * (unsigned)v);
+        if (group && maps_has((unsigned long)group, 4, MAP_R) && group[0] && maps_has((unsigned long)group[0], 8, MAP_R)
+            && str_eq(group[0], "BALL %d")) {
+            coop_ball_msg = (int)v;
+            return;
+        }
+        say("co-op: the port's coop_ball_msg %ld is not \"BALL %%d\" on this build", v);
+    }
     coop_ball_msg = coop_msg_find("BALL %d");
 }
 

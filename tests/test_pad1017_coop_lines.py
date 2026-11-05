@@ -8,6 +8,7 @@ import pytest
 
 from pinball_decryptor.plugins.stern import adjustments
 from pinball_decryptor.plugins.stern import portcoop
+from pinball_decryptor.plugins.stern.coop_play import OWN_COOP
 
 BASE = 0x10000
 PLAYER, PLAYERS, XB_COUNT = 0x713B94, 0x7D116C, 0x7CA5C8
@@ -142,3 +143,7 @@ def test_every_latest_port_carries_the_lines():
         text = open(p, encoding="utf-8").read()
         for key in ("site  coop_player_change", "site  coop_add_player", "data  coop_player ", "data  coop_players"):
             assert key in text, (os.path.basename(p), key)
+        # where co-op is offered: the "BALL %d" line that says whose turn it is, and the end-of-game high scores
+        if not os.path.basename(p).startswith(OWN_COOP):
+            for key in ("value coop_ball_msg", "message_table", "challenge_scores "):
+                assert key in text, (os.path.basename(p), key)

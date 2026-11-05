@@ -29,6 +29,9 @@ The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, th
   data  coop_player         the player up's byte (the ball's is the next)
   data  coop_players        the count of players' byte
 
+  data  message_table         the game's message table (portchallenge.message_table), and
+  value coop_ball_msg         its "BALL %d" line, which says whose turn it is in a co-op game
+
 and, for the team's own high score boards, the end-of-game high scores' lines (portchallenge.scores_lines).
 
 Read-only (bytes in, lines out).
@@ -142,8 +145,13 @@ def lines(elf):
            "data  coop_players       0x%08x" % players]
     # the team's own high score boards go through the game's end-of-game high scores (PAD-640/663's lines); a build
     # with no challenge list (X-Men) has none of them in its port otherwise. The caller drops what the port has.
-    from .portchallenge import scores_lines, screen_lines
+    from .portchallenge import message_table, message_text, scores_lines, screen_lines
     scores = scores_lines(e, 0)
     if scores:
         scores += screen_lines(e)
+    # whose turn it is: the game's own "BALL %d" line reads "PLAYER 2  BALL %d" (the framework's line, the first)
+    table, count = message_table(e)
+    ball = next((i for i in range(count) if message_text(e, table, i) == "BALL %d"), None) if table else None
+    if ball is not None:
+        out += ["data  message_table          0x%08x" % table, "value coop_ball_msg          %d" % ball]
     return out + [line for line in scores if not line.startswith("#")], []

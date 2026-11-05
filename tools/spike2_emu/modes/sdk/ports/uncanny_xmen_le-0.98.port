@@ -737,3 +737,7 @@ data  challenge_scores_table 0x0060af0c
 data  challenge_scores_count 0x00539054
 value challenge_scores_cat   1
 site  challenge_pages_0     0x0005447c 0xe92d4ff0 0xe1a05003
+
+# ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
+data  message_table          0x00615478
+value coop_ball_msg          1255

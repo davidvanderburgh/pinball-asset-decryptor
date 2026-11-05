@@ -8980,13 +8980,17 @@ static struct stock_rule *stock_find(unsigned self)
 static unsigned *stock_vtab(const struct stock_rule *x) { return (unsigned *)(unsigned long)x->vt; }
 static int stock_slot(const char *name, long fallback) { return (int)pm_port_value(name, fallback); }
 
-/* Per-player lit mask: u64 by default; stock_shot_bits 32 selects u32 / 4-byte stride. */
+/* PR #18 (Munsters Pro 1.28): `value stock_shot_bits 32` = the game's rules take a u32 shot, (this, shot) with no
+ * factor, and keep u32 lit masks; every other port's are u64 (the default, 64) */
+static int stock_narrow(void) { return pm_port_value("stock_shot_bits", 64) == 32; }
+
+/* the rule's per-player lit mask: at obj + stock_field + 8 * player (u64), or + 4 * player (u32, stock_narrow) */
 static uint64_t stock_field(const struct stock_rule *x, unsigned p)
 {
     unsigned a;
     if (!x->obj || p < 1 || p > 4) return 0;
-    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + (pm_port_value("stock_shot_bits", 64) == 32 ? 4u : 8u) * p;
-    if (pm_port_value("stock_shot_bits", 64) == 32) return *(volatile const unsigned *)(unsigned long)a;
+    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + (stock_narrow() ? 4u : 8u) * p;
+    if (stock_narrow()) return *(volatile const unsigned *)(unsigned long)a;
     return (uint64_t)*(volatile const unsigned *)(unsigned long)a | (uint64_t)*(volatile const unsigned *)(unsigned long)(a + 4) << 32;
 }
 
@@ -9091,7 +9095,7 @@ static int stock_remap_shot(struct stock_rule *x, uint64_t *shot)
     unsigned p = pm_player();
     uint64_t was = *shot, field = stock_field(x, p);
     /* Munsters has no switch-hit flag: bit 0 is its left-orbit shot. */
-    uint64_t switch_flag = pm_port_value("stock_shot_bits", 64) == 32 ? 0ull : 1ull;
+    uint64_t switch_flag = stock_narrow() ? 0ull : 1ull;
     int d = stock_decide(stock_live, x->id, shot, field, switch_flag, &r);
     if (d == 2) {
         x->drops++;
@@ -9119,13 +9123,13 @@ static uint64_t stock_w_shot(unsigned r0, unsigned r1, unsigned r2, unsigned r3,
                              unsigned s0, unsigned s1, unsigned s2, unsigned s3)
 {
     struct stock_rule *x = stock_find(r0);
-    /* Munsters uses (this, uint32_t shot), with no factor argument. */
-    int narrow = pm_port_value("stock_shot_bits", 64) == 32;
+    int narrow = stock_narrow();                 /* (this, u32 shot): no factor, s0 is not the game's */
     uint64_t shot = narrow ? r1 : (uint64_t)r2 | (uint64_t)r3 << 32;
+    unsigned s0f = narrow ? 1u : s0;
     if (!x) return 0;                            /* cannot happen: only wrapped rules' vtables point here */
     if (x->obj != r0) return x->orig(r0, r1, r2, r3, s0, s1, s2, s3);   /* another object of the class: not ours, untouched */
     if (x->in_original) return x->orig(r0, r1, r2, r3, s0, s1, s2, s3);   /* item 161: a replay of the game's handler passes straight through */
-    if (x->h161 && stock161_first(x, &shot, narrow ? 1u : s0)) return 0;                  /* item 161: the C handler took the shot */
+    if (x->h161 && stock161_first(x, &shot, s0f)) return 0;                  /* item 161: the C handler took the shot */
     if (x->fn) {
         const struct pm_mode *was = current;
         int keep;
@@ -9807,7 +9811,7 @@ uint64_t pm_stock_call_original(struct pm_stock_rule *r, uint64_t shot, unsigned
     uint64_t ret;
     if (!x || !x->wrapped || !x->orig || !x->obj) return 0;
     x->in_original++;
-    if (pm_port_value("stock_shot_bits", 64) == 32)
+    if (stock_narrow())
         ret = x->orig(x->obj, (unsigned)shot, 0, 0, 0, 0, 0, 0);
     else ret = x->orig(x->obj, 0, (unsigned)shot, (unsigned)(shot >> 32), factor, 0, 0, 0);
     x->in_original--;
@@ -9825,10 +9829,10 @@ int pm_stock_field_set(struct pm_stock_rule *r, unsigned player, uint64_t mask)
     struct stock_rule *x = stock161_of(r);
     unsigned a;
     if (!x || !x->obj || player < 1 || player > 4) return 0;
-    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + (pm_port_value("stock_shot_bits", 64) == 32 ? 4u : 8u) * player;
-    if (pm_port_value("stock_shot_bits", 64) == 32 && (mask >> 32)) return 0;
+    a = x->obj + (unsigned)pm_port_value("stock_field", 0x18) + (stock_narrow() ? 4u : 8u) * player;
+    if (stock_narrow() && (mask >> 32)) return 0;  /* a bit the game's u32 mask has no room for */
     *(volatile unsigned *)(unsigned long)a = (unsigned)mask;
-    if (pm_port_value("stock_shot_bits", 64) != 32)
+    if (!stock_narrow())
         *(volatile unsigned *)(unsigned long)(a + 4) = (unsigned)(mask >> 32);
     return 1;
 }
@@ -9838,7 +9842,7 @@ uint64_t pm_stock_lit(struct pm_stock_rule *r)
     struct stock_rule *x = stock161_of(r);
     long slot = x ? stock161_value("stock_slot_lit") : -1;
     if (!x || !x->obj || slot < 0 || slot > 96) return 0;
-    if (pm_port_value("stock_shot_bits", 64) == 32)
+    if (stock_narrow())
         return ((unsigned (*)(unsigned))(unsigned long)stock_vtab(x)[slot])(x->obj);
     return ((stock_vfn1)(unsigned long)stock_vtab(x)[slot])(x->obj);
 }

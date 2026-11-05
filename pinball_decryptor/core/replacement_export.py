@@ -24,6 +24,15 @@ rather than a list of known sections, so a section added later (as music
 modes, attract items and their shots all were) is exported with no change
 here.  A file is a string that is an absolute path with a picture, video or
 sound extension; slot keys and every other value are relative or not a file.
+
+"This function should include any form of customization modification, and the
+replacements.json file should be able to restore every customization" (the
+same modder): :func:`export_rest` / :func:`import_rest` carry the rest of a
+project beside the files, each in the form its own tab saves and loads it --
+the Scenes edits (:data:`SCENES_NAME`), the modes (:data:`MODES_NAME`), the
+Text tab's edits and text colors, the Defaults (the mod pack's records), and
+every file of the extract changed in place (the Fonts window's letters, a file
+a mod pack brought) under :data:`CHANGED_DIR`.
 """
 
 import json
@@ -287,30 +296,315 @@ def record_keys():
     replaced pictures, videos and sounds are (each slot's file and its
     settings, the random clips, the music modes, the attract items, the color
     profiles of those files), nothing about the card it was made from."""
-    from . import project_reset
+    from . import project_reset, tab_settings
     keys = []
     for kind in ("images", "videos", "sounds"):
         keys += [k for k in project_reset._SIDECAR[kind] if k != "own_clips"]
+    # every section a Replace tab saves to its own settings file (PAD-300)
+    for kind in ("images", "audio", "video"):
+        keys += list(tab_settings.SECTIONS[kind])
     keys += ["attract_items", "replacement_names"]
+    keys += list(project_reset._SIDECAR["scenes"])      # the score panel's colors
     keys += list(project_reset._colour_keys())
     return tuple(dict.fromkeys(keys))
+
+
+#: the Scenes tab's edits, beside the record: the Scenes tab's own file of edits
+#: (``scene_edit.export_edits``: the ops, the pictures they add, how each scene
+#: looked), so "Can this function please include scene modifications?" loads
+#: them the way Load edits from a file does
+SCENES_NAME = "Scenes.zip"
+
+
+def export_scenes(project, dest):
+    """Write *project*'s Scenes edits to :data:`SCENES_NAME` in *dest*.
+    Returns the number of scenes written (0: none, and no file)."""
+    from ..plugins.stern import scene_edit
+    if not scene_edit.count(project):
+        return 0
+    path = os.path.join(dest, SCENES_NAME)
+    part = path + ".part"
+    try:
+        n = scene_edit.export_edits(project, part)
+        os.replace(part, path)
+    finally:
+        if os.path.exists(part):
+            os.remove(part)
+    return n
+
+
+def scenes_file(record_path, rec):
+    """The Scenes file a record names, when it is beside it, else ``None``."""
+    name = rec.get("scenes") if isinstance(rec, dict) else None
+    return _beside(record_path, SCENES_NAME) if name == SCENES_NAME else None
+
+
+def modes_file(record_path, rec):
+    """The file of modes a record names, when it is beside it, else ``None``."""
+    name = rec.get("modes") if isinstance(rec, dict) else None
+    return _beside(record_path, MODES_NAME) if name == MODES_NAME else None
+
+
+def scenes_count(path):
+    from ..plugins.stern import scene_edit
+    try:
+        return len(scene_edit.read_share(path))
+    except scene_edit.SceneEditError:
+        return 0
+
+
+def import_scenes(project, path):
+    """Load the Scenes file at *path* into *project* as the Scenes tab's Load
+    edits from a file does for a project with no edits of its own: each scene
+    it has takes the file's edits (a scene of the project's own is replaced),
+    the pictures they add are copied in, and the scenes that already show some
+    of them (a card built with them) are noted.  Returns ``(scenes loaded,
+    scenes of the file this card does not have)``."""
+    from ..plugins.stern import scene_edit
+    trees = scene_edit.trees_of(project)
+    got, missing = scene_edit.import_edits(project, path, trees.keys())
+    if got:
+        states = scene_edit.read_states(path)
+        find = scene_edit.card_finder(states.keys())
+        scene_edit.note_shown(project, {c: trees[c] for c in got if c in trees},
+                              states={c: states[find(c)] for c in got
+                                      if find(c) in states})
+    return len(got), missing
+
+
+#: the modes made in the project (the Modes tab's own file of modes)
+MODES_NAME = "Modes.zip"
+#: the extract's files changed in place, each at its path in the extract
+CHANGED_DIR = "Changed files"
+#: written by the app from the Text tab's edits, which travel as edits
+_TEXT_MANIFEST = "text/strings.tsv"
+
+
+def export_modes(project, dest):
+    """Write *project*'s modes to :data:`MODES_NAME` in *dest*; returns how many."""
+    from ..plugins.stern import mode_project as MP
+    part = os.path.join(dest, MODES_NAME + ".part")
+    try:
+        try:
+            got = MP.export_modes(project, part)
+        except MP.ModeProjectError:                     # no modes
+            return 0
+        os.replace(part, os.path.join(dest, MODES_NAME))
+    finally:
+        if os.path.exists(part):
+            os.remove(part)
+    return len(got)
+
+
+def changed_files(project, staged=None, cancel=None):
+    """The extract's files changed in place (rels): every baselined file whose
+    bytes are not the extract's, except a slot given a file of the user's (its
+    pick is in the record and rebuilds it), the Text tab's manifest (its edits
+    travel as edits) and the working files a mod pack leaves out too."""
+    from . import hashcache, modpack
+    from .checksums import read_baseline_any
+    baseline = read_baseline_any(project)
+    if not baseline:
+        return []
+    staged = staged_changes.load(project) if staged is None else staged
+    picked = set()
+    for key in ("audio", "video", "image"):
+        sec = staged.get(key)
+        if isinstance(sec, dict):
+            picked.update(rel for rel, src in sec.items() if src)
+    cache = hashcache.load(project)
+    out = []
+    for rel, md5 in baseline.items():
+        if cancel is not None and cancel():
+            break
+        rel = rel.replace("\\", "/")
+        if rel in picked or rel == _TEXT_MANIFEST or not modpack._is_packable(rel):
+            continue
+        path = os.path.join(project, *rel.split("/"))
+        if not os.path.isfile(path):
+            continue
+        got = hashcache.md5_for(path, rel, cache)
+        if got is not None and got != md5:
+            out.append(rel)
+    hashcache.save(project, cache)
+    return sorted(out)
+
+
+def text_edits(project):
+    """``(the Text tab's edits [[scene, original, new], ...], its text colors
+    {card: {text: [from, to]}})``."""
+    from . import tab_settings, text_manifest
+    try:
+        edits = tab_settings.text_edits(text_manifest.load(project))
+    except Exception:                                   # noqa: BLE001
+        edits = []
+    colours = {}
+    try:
+        from ..plugins.stern import text_colors as TC
+        for card, by in TC.load(project).items():
+            colours[card] = {t: [TC.to_hex(a), TC.to_hex(b)] for t, (a, b) in by.items()}
+    except Exception:                                   # noqa: BLE001
+        colours = {}
+    return edits, colours
+
+
+def defaults_of(project):
+    """The Defaults tab's records and the rest a mod pack carries as values
+    (:func:`modpack.project_extras`), the ones the record has already left out."""
+    from . import modpack
+    skip = {"sound_modes", "video_variants", "attract_items", "replacement_names",
+            "audio_levels"}
+    return {k: v for k, v in modpack.project_extras(project).items() if k not in skip}
+
+
+def export_rest(project, dest, progress=None, cancel=None):
+    """Everything else of *project* into *dest*: the Scenes edits, the modes,
+    the changed files, and (returned, for the record) the text edits, text
+    colors and defaults.  Returns the record's part ``{"scenes", "modes",
+    "changed", "text", "text_colors", "defaults"}`` (empty ones left out)."""
+    out = {}
+    if progress is not None:
+        progress(0, 0, "Scenes edits and modes")
+    n = export_scenes(project, dest)
+    if n:
+        out["scenes"], out["scenes_n"] = SCENES_NAME, n
+    n = export_modes(project, dest)
+    if n:
+        out["modes"], out["modes_n"] = MODES_NAME, n
+    if progress is not None:
+        progress(0, 0, "Finding the extract's files changed in place")
+    changed = changed_files(project, cancel=cancel)
+    done = []
+    try:
+        for i, rel in enumerate(changed):
+            src = os.path.join(project, *rel.split("/"))
+            to = os.path.join(dest, CHANGED_DIR, *rel.split("/"))
+            if not (os.path.isfile(to) and _same_file(to, src)):
+                _copy(src, to, None, 0, 0, cancel)
+            done.append(rel)
+            if progress is not None:
+                progress(i + 1, len(changed), rel)
+    except _Cancelled:
+        out["cancelled"] = True
+    if done:
+        out["changed"] = done
+    edits, colours = text_edits(project)
+    if edits:
+        out["text"] = edits
+    if colours:
+        out["text_colors"] = colours
+    d = defaults_of(project)
+    if d:
+        out["defaults"] = d
+    return out
+
+
+def rest_summary(rec):
+    """The parts of a record besides its files, in words, for the question and the log."""
+    bits = []
+    if rec.get("scenes"):
+        n = rec.get("scenes_n") or 0
+        bits.append("the Scenes edits%s" % (" of %d scene%s" % (n, "" if n == 1 else "s")
+                                            if n else ""))
+    if rec.get("text"):
+        bits.append("%d text edit%s" % (len(rec["text"]), "" if len(rec["text"]) == 1 else "s"))
+    if rec.get("text_colors"):
+        n = sum(len(v) for v in rec["text_colors"].values())
+        bits.append("%d text color%s" % (n, "" if n == 1 else "s"))
+    if rec.get("modes"):
+        n = rec.get("modes_n") or 0
+        bits.append("%s mode%s" % (n or "the", "" if n == 1 else "s"))
+    if rec.get("changed"):
+        n = len(rec["changed"])
+        bits.append("%d file%s of the extract changed in place (font letters, sounds or pictures changed on disk)"
+                    % (n, "" if n == 1 else "s"))
+    if rec.get("defaults"):
+        bits.append("the Defaults")
+    return bits
+
+
+def _beside(record_path, name):
+    path = os.path.join(os.path.dirname(os.path.abspath(record_path)), name)
+    return path if os.path.isfile(path) else None
+
+
+def import_changed(project, record_path, rels):
+    """Put the record's changed files on *project*: each one this extract has
+    goes over it, its extracted bytes backed up first (``.orig``, so Revert
+    puts them back).  Returns ``(rels written, rels this extract has not)``."""
+    from . import staged_originals
+    from .checksums import read_baseline_any
+    base = os.path.dirname(os.path.abspath(record_path))
+    baseline = read_baseline_any(project)
+    done, gone = [], []
+    for rel in rels or ():
+        parts = str(rel).replace("\\", "/").split("/")
+        if any(p in ("", ".", "..") for p in parts) or ":" in rel:
+            continue
+        src = os.path.join(base, CHANGED_DIR, *parts)
+        to = os.path.join(project, *parts)
+        if not os.path.isfile(src) or not os.path.isfile(to):
+            gone.append(rel)
+            continue
+        if _same_file(src, to):
+            done.append(rel)
+            continue
+        md5 = baseline.get("/".join(parts))
+        if md5 is not None:
+            staged_originals.snapshot(project, "/".join(parts), md5)
+        _copy(src, to, None, 0, 0, None)
+        done.append(rel)
+    return done, gone
+
+
+def import_text_colors(project, colours):
+    """Merge the record's text colors into *project*'s (the record's win). Returns how many."""
+    from ..plugins.stern import text_colors as TC
+    have = TC.load(project)
+    n = 0
+    for card, by in (colours or {}).items():
+        if not isinstance(by, dict):
+            continue
+        for text, pair in by.items():
+            if not (isinstance(pair, list) and len(pair) == 2):
+                continue
+            a, b = TC.parse_hex(pair[0]), TC.parse_hex(pair[1])
+            if a is None or b is None:
+                continue
+            have.setdefault(card, {})[text] = (a, b)
+            n += 1
+    if n:
+        TC.save(project, have)
+    return n
+
+
+def import_modes(project, path):
+    """Load the record's file of modes: a mode of the same name here takes the
+    file's, one already the same is left as it is.  Returns the :class:`CopyReport`
+    or None."""
+    from ..plugins.stern import mode_project as MP
+    conflicts, same = MP.share_conflicts(path, project)
+    return MP.import_modes(path, project, replace=[c["slug"] for c in conflicts], skip=same)
 
 
 def _rel(path, dest):
     return os.path.relpath(path, dest).replace("\\", "/")
 
 
-def make_record(staged, mapping, dest, game=""):
+def make_record(staged, mapping, dest, game="", rest=None):
     """The record of *staged*'s replacements with every exported file (in
     *mapping*) named relative to *dest*; a file not exported (not on this PC)
-    keeps its full path, for a later Relink to find."""
+    keeps its full path, for a later Relink to find.  *rest*: what
+    :func:`export_rest` wrote beside it."""
     rel = {src: _rel(to, dest) for src, to in mapping.items()}
     carried = {k: staged[k] for k in record_keys()
                if k in (staged or {}) and staged[k] not in (None, {}, [], "")}
     carried, _n = repoint(carried, rel)
-    return {"format": RECORD_FORMAT, "version": RECORD_VERSION,
-            "game": game or "", "made": time.strftime("%Y-%m-%d %H:%M"),
-            "files": len(mapping), "records": carried}
+    out = {"format": RECORD_FORMAT, "version": RECORD_VERSION,
+           "game": game or "", "made": time.strftime("%Y-%m-%d %H:%M"),
+           "files": len(mapping), "records": carried}
+    out.update(rest or {})
+    return out
 
 
 def write_record(dest, record):

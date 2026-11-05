@@ -323,6 +323,20 @@ input[type=range] { accent-color: var(--accent); }
 .tip .tip-cp { color: var(--cp-ink); }
 .tip .tip-cp b { font-weight: 600; }
 .tip .tip-k { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--accent); padding-top: 1px; }
+/* PAD-1005: {sec} a small heading, {li} a bulleted line, {bar} parts of a whole with a key */
+.tip .tip-sec { margin-top: 8px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.tip .tip-li { color: var(--ink-2); margin-top: 2px; padding-left: 12px; position: relative; }
+.tip .tip-li::before { content: "•"; position: absolute; left: 1px; color: var(--ink-3); }
+.tip .tip-bar { position: relative; display: flex; height: 10px; margin: 6px 0 4px; border-radius: 3px; overflow: hidden; background: var(--line); }
+.tip .tip-seg { display: block; height: 100%; }
+.tip .tip-seg.img { background: var(--info); }
+.tip .tip-seg.ours { background: var(--accent); }
+.tip .tip-seg.game { background: var(--ink-3); }
+.tip .tip-seg.over { background: var(--err); }
+.tip .tip-seg.free { background: var(--ok-soft); }
+.tip .tip-cap { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); }
+.tip .tip-keys { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11.5px; color: var(--ink-2); }
+.tip .tip-keys i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 /* PAD-942: tip({image}) - a picture under the words (a table's playfield), as tall as
    the window allows; width and height attributes keep its shape before it loads */
 .tip.tip-pic { max-width: none; }

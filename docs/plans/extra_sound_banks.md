@@ -826,3 +826,21 @@ Proof (2026-11-04, `C:\tmp\PAD-1005`): the reproduction's build has 21 banks of 
 sound id 2544) fired ten times played 3, 2, 1, 2, 3, 1, 3, 2, 1, 3 from the banks, the runtime's picks
 exactly, never one twice running; with `force 1` it played the game's own TUNE 1 (NCC 0.97) and no
 turn moved. 0 segv, 0 fatal.
+
+## A game's own sound banks, and the memory known before a Write (PAD-1005, rounds 2-3)
+
+The Audio tab's "Machine memory" chip estimates what `_plan_sound_banks` will: `image.bin` (the
+project's extracted `idx` sounds' PCM, which add up to it: Godzilla Pro 1.16 1,647.7 MB vs 1,650,
+Deadpool Pro 1.16 1,612 vs 1,616.9) plus the biggest banks (`memory_budget.estimate`). A game that
+ships banks of its own (Deadpool 16, Metallica 24, D&D 29; `music_catNN_*` in its extract, which add
+up to each `image-scNN.bin` exactly) plays from them beside ours, so the Write now counts its biggest
+in one of the 8 places (`soundbank.room_beside`: the cap beside `image.bin` is `MAPPED_MAX` less that
+bank, and ours share the other 7). Every card Stern ships fits `image.bin` plus its biggest bank in
+`MAPPED_MAX` (D&D's pair sets it), so D&D 1.10 has no room left for banks of ours. A slot no sound
+request plays keeps its files in `image.bin` (`_sound_modes_for_banks`); the chip counts them there
+and names the slot.
+
+Checked against real Writes (`C:	mp\PAD-1005`): Godzilla Pro 1.16 7 x 3 five-minute songs, chip 2,071
+MB vs planned 2,073; seven-minute songs, 2,240 vs a refusal at 2,241. Deadpool Pro 1.16 (6 tracks x 3
+five-minute songs), chip 2,063 vs planned 2,067 with its 80 MB bank; with idx 2131 (no request plays it)
+too, image.bin 1,771 vs 1,775 and both over.

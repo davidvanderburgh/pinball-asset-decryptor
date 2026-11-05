@@ -20920,7 +20920,9 @@ def _memory_check(img_path, plan):
     from .spike2 import soundbank as SB
     img = os.path.getsize(_lp(img_path))
     banks = sorted((os.path.getsize(_lp(bp)) for _c, bp in plan.files), reverse=True)
-    live = sum(banks[:SB.SOUND_CHANNELS])
+    # (PAD-1005: beside the game's own biggest sound bank, in one of the channels' places)
+    game_bank = int(getattr(plan, "game_bank", 0) or 0)
+    live = sum(banks[:int(getattr(plan, "chans", 0) or SB.SOUND_CHANNELS)]) + game_bank
     if img + live > SB.MAPPED_MAX:
         raise SoundRoomError(
             "The game holds image.bin and every sound bank it is playing a sound from in "
@@ -21036,19 +21038,27 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         _grown_body_bytes(byidx[i], g[1])
         for i, g in sorted(kept.items()) + sorted(spilled.items())])
     # the bank files: one per 2 GiB, the lowest category ids the card lacks
-    on_card = []
+    on_card, vendor = [], []
     dir_rel = ""
     try:
         for path, _ino, _node in reader.iter_regular_files(min_size=1):
             base = path.rsplit("/", 1)[-1]
             if base.startswith("image-sc") and base.endswith(".bin"):
                 on_card.append(base)
+                size = int(_node["size"])
+                if not SB.is_pad_bank_at(
+                        lambda off, k, _n=_node: reader.read_range(_n, off, k), size):
+                    vendor.append(size)
         if img_node is not None:
             dir_rel = os.path.dirname(_card_rel_path(reader, img_node) or "")
     except Exception:  # noqa: BLE001 - the ids then avoid image.bin's list alone
         pass
     _c, ids, _room = SB.category_slots(head)
     stride = SB.fragment_stride(head)
+    # PAD-1005: a game that ships sound banks of its own (Deadpool 16, Metallica 24, D&D 29) plays
+    # from them beside ours: its biggest takes one of the sound channels' places, and what is left
+    # beside image.bin is the room for ours (soundbank.room_beside).  Godzilla ships none.
+    game_bank, cap, chans = SB.room_beside(vendor)
     # PAD-606: a sound's start holds its bank mapped and mapping another bank unmaps only
     # the idle ones, so up to one bank a channel (soundbank.SOUND_CHANNELS) can be mapped
     # beside image.bin: banks are cut so that many of them still fit beside it.  A game
@@ -21074,8 +21084,8 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         credit = _dead_credit(byidx, dead_idx, reads)
         mem_img = max(0, staged - credit)
         slice_max = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged), SB.BANK_SLICE)
-        limit = min(slice_max, max(0, SB.MAPPED_MAX - mem_img) // SB.SOUND_CHANNELS)
-        alone = _alone_room(mem_img, staged)
+        limit = min(slice_max, max(0, cap - mem_img) // chans)
+        alone = _alone_room(mem_img + game_bank, staged)
         big = [i for i in sorted(spilled) if i in game_sids and SB.bank_bytes(
             [_grown_body_bytes(byidx[i], spilled[i][1])], stride) > alone]
         # (PAD-779: a song in parts with every record its sound ids play)
@@ -21200,7 +21210,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     longs = sorted((u for u in units if one_of[id(u)] > limit),
                    key=lambda u: (-one_of[id(u)], u.edits[0].idx))
     bank_units = SB.split_units(small, limit=limit, stride=stride) if small else []
-    cap_alone = _alone_room(mem_img, staged)
+    cap_alone = _alone_room(mem_img + game_bank, staged)
     def _bank_words(g):
         """The sounds of bank *g* a user can shorten, one line of the refusal (PAD-880)."""
         names = [os.path.basename(str(audio_edits[e.idx]))
@@ -21212,10 +21222,9 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         return "    %d MB  %s" % (SB.unit_bytes(g, stride) // 10**6, ", ".join(names))
     for n, u in enumerate(longs):
         e = u.edits[0]
-        others_g = sorted(bank_units, key=lambda g: -SB.unit_bytes(g, stride))[
-            :SB.SOUND_CHANNELS - 1]
+        others_g = sorted(bank_units, key=lambda g: -SB.unit_bytes(g, stride))[:chans - 1]
         others = [SB.unit_bytes(g, stride) for g in others_g]
-        room = min(cap_alone, max(0, SB.MAPPED_MAX - mem_img - sum(others)))
+        room = min(cap_alone, max(0, cap - mem_img - sum(others)))
         if one_of[id(u)] > room:
             stereo = byidx[e.idx].get("chan") == 2
             # PAD-880: an Iron Maiden card with a dozen longer songs was refused naming one
@@ -21223,16 +21232,17 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             # machine's memory) to make room: name every bank that can play beside it, and
             # how much the longest of the card's sounds, this one and the rest still to
             # place, have to lose all told
-            top = sorted(others + [one_of[id(x)] for x in longs[n:]],
-                         reverse=True)[:SB.SOUND_CHANNELS]
-            over = mem_img + sum(top) - SB.MAPPED_MAX
+            top = sorted(others + [one_of[id(x)] for x in longs[n:]], reverse=True)[:chans]
+            over = mem_img + sum(top) - cap
             what = (
                 "%s is too long for this card: it goes into a sound bank, and the game holds "
                 "image.bin (%d MB) and every bank it is playing a sound from in memory at once, "
-                "so beside the %d other bank(s) that can play with it (%d MB) this sound's bank "
-                "can be at most %d MB here, about %.1f minutes of %s sound (this one needs %d "
-                "MB%s)."
-                % (_named(e.idx)[0].upper() + _named(e.idx)[1:], mem_img // 10**6, len(others),
+                "so beside %sthe %d other bank(s) that can play with it (%d MB) this sound's "
+                "bank can be at most %d MB here, about %.1f minutes of %s sound (this one needs "
+                "%d MB%s)."
+                % (_named(e.idx)[0].upper() + _named(e.idx)[1:], mem_img // 10**6,
+                   "the game's own biggest sound bank (%d MB) and " % (game_bank // 10**6)
+                   if game_bank else "", len(others),
                    sum(others) // 10**6, room // 10**6,
                    room / float(_STEREO_BYTES_PER_MIN // (1 if stereo else 2)),
                    "stereo" if stereo else "mono", one_of[id(u)] // 10**6,
@@ -21262,16 +21272,17 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
                     one.append(e)
         groups.append(one)
     sizes = sorted((SB.unit_bytes(g, stride) for g in bank_units), reverse=True)
-    live = sum(sizes[:SB.SOUND_CHANNELS])
-    if mem_img + live > SB.MAPPED_MAX:
+    live = sum(sizes[:chans])
+    if mem_img + live > cap:
         raise SoundRoomError(
             "The game holds image.bin and every sound bank it is playing a sound from in "
             "memory at once (up to one for each of its %d sound channels), and here they could "
-            "come to %d MB (image.bin %d MB with the card's own sounds, the banks %d MB), past "
+            "come to %d MB (image.bin %d MB with the card's own sounds, the banks %d MB%s), past "
             "the %d MB a machine has been seen to hold (Stern's own largest). The modes' own "
             "sounds or the music modes' files have to be fewer or shorter."
-            % (SB.SOUND_CHANNELS, (mem_img + live) // 10**6, mem_img // 10**6, live // 10**6,
-               SB.MAPPED_MAX // 10**6))
+            % (SB.SOUND_CHANNELS, (mem_img + live + game_bank) // 10**6, mem_img // 10**6,
+               live // 10**6, ", the game's own biggest bank %d MB" % (game_bank // 10**6)
+               if game_bank else "", SB.MAPPED_MAX // 10**6))
     kinds = [w for w, on in (
         ("the modes' own sounds", set(spilled) - set(game_sids) - set(sm_frags) - set(seq_of)
          - set(mseq_of)),
@@ -21280,10 +21291,12 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     who = " and ".join(kinds) if len(kinds) < 3 else "%s, %s and %s" % tuple(kinds)
     log("%s go into %d sound bank(s) of up to %d MB each: the game holds image.bin (%d MB) "
         "and every bank it is playing a sound from in memory at once, one for each of its %d "
-        "sound channels at most, and together they come to at most %d MB (Stern's largest "
+        "sound channels at most%s, and together they come to at most %d MB (Stern's largest "
         "is %d MB)." % (who[0].upper() + who[1:], len(groups), limit // 10**6,
-                        mem_img // 10**6, SB.SOUND_CHANNELS, (mem_img + live) // 10**6,
-                        SB.MAPPED_MAX // 10**6), "info")
+                        mem_img // 10**6, SB.SOUND_CHANNELS,
+                        " (one of them the game's own biggest sound bank, %d MB)"
+                        % (game_bank // 10**6) if game_bank else "",
+                        (mem_img + live + game_bank) // 10**6, SB.MAPPED_MAX // 10**6), "info")
     if credit:
         log("image.bin comes to about %d MB on the card rather than %d MB: the game's own "
             "recordings of the %d sound(s) the banks play instead come out of it, which "
@@ -21343,7 +21356,8 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     plan.game = {i: game_sids[i] for i in spilled if i in game_sids}
     # PAD-777: the most image.bin may come to beside the banks: the user's longer sounds
     # that stay in it are trimmed to this
-    plan.image_room = SB.MAPPED_MAX - live + credit
+    plan.image_room = cap - live + credit
+    plan.game_bank, plan.chans = game_bank, chans           # (PAD-1005: _memory_check)
     # PAD-880: what that counted on: image_compact takes these records' bodies out, and a
     # build that could not is refused rather than shipped past what the machine holds
     plan.dead_credit, plan.dead_idx = credit, set(dead_idx)

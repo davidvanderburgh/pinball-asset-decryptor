@@ -605,11 +605,34 @@ def is_pad_bank(path):
     trailer word is :data:`PAD_TRAILER`.  False for a vendor bank, or a file
     that is not a bank at all."""
     try:
-        md_off, count, size = read_bank_header(path)
+        with open(path, "rb") as f:
+            def read(off, n):
+                f.seek(off)
+                return f.read(n)
+            return is_pad_bank_at(read, os.fstat(f.fileno()).st_size)
+    except OSError:
+        return False
+
+
+def is_pad_bank_at(read, size):
+    """:func:`is_pad_bank` of the bank *size* bytes long that ``read(off, n)`` reads (a file
+    on a card, PAD-1005)."""
+    try:
+        md_off, count = MD.header_geometry(bytes(read(0, HDR_LEN)))
         if not 0 < count <= MD.MAX_RECORDS or md_off + MD.tail_len(count) != size:
             return False
-        with open(path, "rb") as f:
-            f.seek(md_off + MD.align16(MD.RECORD_SIZE * count) + 4)
-            return f.read(4) == PAD_TRAILER
+        return bytes(read(md_off + MD.align16(MD.RECORD_SIZE * count) + 4, 4)) == PAD_TRAILER
     except (OSError, ValueError, struct.error, MD.MasterDirError):
         return False
+
+
+def room_beside(vendor_banks):
+    """PAD-1005: ``(game bank, cap, channels)`` for a card whose game ships sound banks of its own
+    (*vendor_banks* their sizes; Deadpool 1.16 16 of them, up to 80 MB; D&D 1.10 29): the game
+    plays from them beside the app's, so its biggest takes one of the :data:`SOUND_CHANNELS`
+    places (every card Stern ships holds ``image.bin`` and its biggest bank within
+    :data:`MAPPED_MAX`, which D&D's pair sets), and ``image.bin`` and the app's banks share the
+    *cap* left in the other *channels*. ``(0, MAPPED_MAX, SOUND_CHANNELS)`` for a game with none
+    (Godzilla)."""
+    game = max((int(b) for b in vendor_banks or ()), default=0)
+    return game, MAPPED_MAX - game, SOUND_CHANNELS - (1 if game else 0)

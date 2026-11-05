@@ -623,8 +623,8 @@ drops the medley's duplicate).
 sound ids of a music mode's file used to be kept out of PAD-606/779's banks altogether
 (`exclude_sids`), so those songs stayed in `image.bin`; with the files' banks taking memory
 beside it, a first run of this ticket cut 8 of them (PAD-777 cut 2). Now only the sound ids of a file that stays in
-`image.bin` (and of the files the runtime swaps by key: files in turn of a mode's file, the
-attract flipper sounds, the jukebox) are kept out; a game song on a banked file's sound ids
+`image.bin` (and of the files the runtime swaps by key: files in turn of a mode's file that
+stay in `image.bin`, PAD-1005, the attract flipper sounds, the jukebox) are kept out; a game song on a banked file's sound ids
 goes into a bank of its own, its request lists name its bank id, and the file's `bsid` line
 names that id (`_list_ids`), which the runtime swaps from in the file's mode. If the planner
 then keeps such a file in `image.bin` after all (too big), the song stays with it
@@ -800,3 +800,29 @@ bank) freed channel 7 7.5 s after it started, where PAD-994's bank build held it
 999 (ours, 9.4 s, from the bank), 1904 and four 1327s (stock, 0.88-0.96 correlation) and 76 (the
 mode 2 file) each played and freed it in turn. Request 134, which plays TUNE 1 once (sound id 2556,
 the mode file's bank id 0x10021), played the 60 s file and freed the channel at 60.3 s.
+
+## A music mode's own files in turn go into banks with their mode file (PAD-1005)
+
+DoomWalrus666's Godzilla card, three to six songs at random on each of the seven multiball tracks
+(PAD-638's files in turn of a music mode's file), was refused: "image.bin (2846 MB) ... at most 0
+MB". Those files were turned at the mode file's record key, which a bank record is never played by,
+so they and their mode file were kept in `image.bin` (`_sm_key`, `sm_hold`): a whole song each. The
+reproduction (stock Godzilla Pro 1.16, 7 slots x 3 five-minute songs) had `image.bin` at 2,390 MB,
+past `MAPPED_MAX` on its own.
+
+Now a mode file's own files in turn go through `_sound_modes_for_banks` with it, each a bank sound
+id of its own for every game sound id that plays the slot (its descriptor the mode's, naming the
+file's bank record, `_bank_mode_descs`). `sounds.cfg` names them on `tsid` lines with the mode in a
+6th field and a key of the set's own (`sound_modes.mode_turn_key`, never a record's: nothing looks
+it up), and a `random` line names that key. The runtime (`bsid_now`) plays, for a game id in mode m:
+the mode's own file in turn at the set's pick, else the mode's file (`bsid`, pick 0), else a
+slot's plain turn; the worker (`blist_play`) moves a set's turn on only while the setting says m. A
+set one of which has to stay in `image.bin` (its mode file a song in parts, a sound id that cannot
+be a bank's) all stays, turned at the record key as before, and the log says why. An extract
+decodes them back out of their banks (`card_bank_records` names `mode_turns`).
+
+Proof (2026-11-04, `C:	mp\PAD-1005`): the reproduction's build has 21 banks of 52.9 MB, `image.bin`
+1,649 MB, at most 2,073 MB in memory. On the rig (Godzilla Pro 1.16, `force 2`), request 76 (TUNE 1,
+sound id 2544) fired ten times played 3, 2, 1, 2, 3, 1, 3, 2, 1, 3 from the banks, the runtime's picks
+exactly, never one twice running; with `force 1` it played the game's own TUNE 1 (NCC 0.97) and no
+turn moved. 0 segv, 0 fatal.

@@ -3113,7 +3113,8 @@ HELP_CONTENT = {
         ]),
         ("Spooky Pinball (one update file)", [
             "Pick **Spooky Pinball** and the tab takes a game's stock update plus up "
-            "to eight more builds of the same game. **Build update…** writes ONE "
+            "to eight more builds of the same game (Halloween and Ultraman are one "
+            "machine, so those two can share one). **Build update…** writes ONE "
             "update of the game's own kind, under the stock update's own name, into "
             "the folder you choose.",
             {"flow": [
@@ -3127,7 +3128,9 @@ HELP_CONTENT = {
             "- The first row is the stock build. It travels whole, and the machine "
             "falls back to it if anything goes wrong. Every other build carries only "
             "the files it changes.\n"
-            "- Settings and scores follow you from build to build.\n"
+            "- Settings and scores follow you from build to build. **Halloween** "
+            "and **Ultraman** on one machine each keep their own settings and "
+            "scores.\n"
             "- **Beetlejuice** installs an update that is not Spooky's own only in "
             "its developer mode, as with any Beetlejuice mod.\n"
             "- **Alice Cooper's Nightmare Castle** restarts once by itself after the "

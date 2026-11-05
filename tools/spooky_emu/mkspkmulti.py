@@ -28,8 +28,9 @@ machine's own install puts it in /game/code/uptest:
     uptest/pad/d<k>/       build k's files that differ from b0's; d<k>.removed the ones it lacks
 
 (A flat title - Beetlejuice, Scooby-Doo, Looney Tunes - has no uptest/ in its archive: the
-archive's root IS uptest.)  Every image must be the same title; the primary is the stock build
-everything falls back to.
+archive's root IS uptest.)  Every image must be the same title, or one of its family (Halloween
+and Ultraman: one code base on one cabinet, PAD-997); the primary is the stock build everything
+falls back to.
 
 Pure Python (tarfile) plus the Spooky plugin's GPG helpers; runs anywhere the tab does.
 """
@@ -90,6 +91,11 @@ CONF_HEADER = [
 #:   board    warden | pinotaur, and its L / R / START switches (spktitles.py's cabinet rows)
 #:   roots    per-build folders outside uptest: name -> where the game reads them
 #:   free     what /game has free on the factory restore image (MULTIBOOT.md), for the plan
+#:   family   titles one machine can run side by side (default: the title alone)
+#:   own      /game's files that are one game's own (spk.conf own=): when the builds are more
+#:            than one game, the launcher keeps each game's apart (PAD-997)
+#:   seed     <file in /game> <file in a build>: what a game started without that file
+#:            first gets from its build (spk.conf seed=)
 TITLES = {
     "beetlejuice": dict(name="BEETLEJUICE", flat=True, board="warden", sw=(86, 80, 87), roots=(),
                         free=219_600_000_000),
@@ -102,12 +108,19 @@ TITLES = {
     "texas_chainsaw": dict(name="TEXAS CHAINSAW MASSACRE", flat=False, board="warden", sw=(86, 80, 87),
                            roots=(("assets", "/game/code/assets"), ("config", "/game/code/config")),
                            free=5_800_000_000),
+    # Ultraman is Halloween's code base ("H78UM") on the same Pinotaur board, wired the same
+    # (spktitles.py), so one machine runs either.  Both keep their settings, audits and scores
+    # in /game under the same names (highscores.config, _game_features.json ...) but each its
+    # own text in them (Ultraman's BUMP BALTANS is Halloween's BUMP MIKES); Halloween started
+    # without highscores.config writes one it then dies on (run_game.sh), hence the seed.
     "halloween_78": dict(name="HALLOWEEN", flat=False, board="pinotaur", sw=(81, 80, 87),
                          roots=(("assets", "/game/code/assets"), ("config", "/game/code/config")),
-                         free=14_800_000_000),
+                         free=14_800_000_000, family="h78um", own=("*.config", "*.json"),
+                         seed=(("highscores.config", "config/default_highscores.config"),)),
     "ultraman": dict(name="ULTRAMAN", flat=False, board="pinotaur", sw=(81, 80, 87),
                      roots=(("assets", "/game/code/assets"), ("config", "/game/code/config")),
-                     free=14_600_000_000),
+                     free=14_600_000_000, family="h78um", own=("*.config", "*.json"),
+                     seed=(("highscores.config", "config/default_highscores.config"),)),
     # The P-ROC titles (mkspkproc.py): the package's root IS the game's folder, the stock
     # build stays there, and the menu, the launcher and the other builds travel in
     # PAD_MULTIBOOT/.  Free for the folder (its old build is deleted first): Rick and Morty's
@@ -118,9 +131,12 @@ TITLES = {
     "alice_cooper": dict(sp.PROC["alice_cooper"], name="ALICE COOPER'S NIGHTMARE CASTLE", flat=False,
                          proc=True, roots=(), free=14_000_000_000),
 }
-for _t in TITLES.values():
+for _k, _t in TITLES.items():
     _t.setdefault("program", "uptest/main.x86_64")
     _t.setdefault("proc", False)
+    _t.setdefault("family", _k)
+    _t.setdefault("own", ())
+    _t.setdefault("seed", ())
 #: the multi-boot's own folder in a build's paths: inside uptest on the Linux titles, beside
 #: the game on the P-ROC ones
 def pad_of(title):
@@ -335,9 +351,10 @@ def _inputs(a, work):
     cache = getattr(a, "cache_dir", None)
     us = [SpkUpdate(a.primary, cache)] + [SpkUpdate(e, cache) for e in a.extra]
     for i, u in enumerate(us[1:], 1):
-        if u.key != us[0].key:
+        if u.title["family"] != us[0].title["family"]:
             raise Refused("image %d (%s) is %s, the primary is %s: every build on one machine must be the "
-                          "same game" % (i, os.path.basename(u.path), u.game, us[0].game))
+                          "same game (Halloween and Ultraman are the one pair that share a machine)"
+                          % (i, os.path.basename(u.path), u.game, us[0].game))
     for u in us:
         idx = u.index(work)
         prog = u.title["program"]
@@ -389,6 +406,10 @@ def print_plan(plan):
           "/game/code/uptest, its desktop starts the launcher; image 0 = the primary, carried whole; every "
           "other image = its own files over it, made on the machine the first time the menu starts"
           % (us[0].game, os.path.basename(us[0].path)))
+    games = list(collections.OrderedDict.fromkeys(u.game for u in us))
+    if len(games) > 1:
+        print("== games: %s on one machine (one cabinet, board and wiring); each keeps its own settings "
+              "and scores" % " + ".join(games))
     print("== game code versions")
     for i, u in enumerate(us):
         kind = "whole (the stock build)" if i == 0 else "%d changed, %d removed" % (
@@ -440,10 +461,9 @@ def parse_conf(text):
 
 
 def default_titles(us):
-    name = us[0].title["name"]
-    out = [(name, "Stock %s" % _stem(us[0].path))]
+    out = [(us[0].title["name"], "Stock %s" % _stem(us[0].path))]
     for u in us[1:]:
-        out.append((name, _stem(u.path)))
+        out.append((u.title["name"], _stem(u.path)))
     return out
 
 
@@ -474,12 +494,29 @@ def conf_from_args(a, targets, media, titles_default, subtitles_default):
                        default_card=getattr(a, "default_card", None))
 
 
-def spk_conf(title):
+def spk_conf(title, keys=None):
+    """*keys*: each build's title (b0 first).  A multi-boot of more than one game names them
+    (title=b<k> <key>), with the files in /game each game keeps its own (own=, seed=)."""
     l, r, s = title["sw"]
     lines = ["# spk.conf - the machine, for the launcher; written by mkspkmulti.py",
              "board=%s" % title["board"], "L=%d" % l, "R=%d" % r, "S=%d" % s]
     lines += ["root=%s %s" % kv for kv in title["roots"]]
+    if keys and len(set(keys)) > 1:
+        lines += ["title=b%d %s" % kv for kv in enumerate(keys)]
+        if title["own"]:
+            lines.append("own=%s" % " ".join(title["own"]))
+        lines += ["seed=%s %s" % kv for kv in title["seed"]]
     return "\n".join(lines) + "\n"
+
+
+def keys_of_conf(text):
+    """the build titles an spk.conf names (title=b<k> <key>), b0 first; [] when it names none"""
+    got = {}
+    for ln in text.splitlines():
+        m = re.match(r"^title=b(\d+)\s+(\S+)", ln.strip())
+        if m:
+            got[int(m.group(1))] = m.group(2)
+    return [got[k] for k in sorted(got)] if sorted(got) == list(range(len(got))) else []
 
 
 def builds_text(n):
@@ -559,7 +596,7 @@ class _Out:
         self.tf.addfile(n, f)
 
 
-def _write_menu(out, a, conf, title, n, manifest, media, media_dir, removed):
+def _write_menu(out, a, conf, title, n, manifest, media, media_dir, removed, keys=None):
     out.data("main.x86_64", open(os.path.join(a.selector_dir, "padselect.sh"), "rb").read(), 0o755)
     pad = PAD + "/"
     for name, (mode, _req) in SELECTOR_FILES.items():
@@ -569,7 +606,7 @@ def _write_menu(out, a, conf, title, n, manifest, media, media_dir, removed):
         out.file(pad + name, src, mode)
     out.data(pad + "images.conf", conf.encode("utf-8"))
     out.data(pad + "builds.txt", builds_text(n).encode("utf-8"))
-    out.data(pad + "spk.conf", spk_conf(title).encode("utf-8"))
+    out.data(pad + "spk.conf", spk_conf(title, keys).encode("utf-8"))
     out.data(pad + mkc.BUILD_MANIFEST, (json.dumps(manifest, indent=1) + "\n").encode("utf-8"))
     for k, rm in removed.items():
         out.data(pad + "d%d.removed" % k, ("".join(p + "\n" for p in rm)).encode("utf-8"))
@@ -622,6 +659,7 @@ def build_update(a):
             ("title", us[0].key), ("game", us[0].game), ("format", us[0].fmt),
             ("images", [collections.OrderedDict([
                 ("index", i), ("build", t), ("source", u.path), ("name", os.path.basename(u.path)),
+                ("game", u.game),
                 ("size", u.size), ("files", None if i == 0 else len(changes[i])),
                 ("removed", None if i == 0 else len(removed[i]))])
                 for i, (u, t) in enumerate(zip(us, targets))])])
@@ -637,7 +675,8 @@ def build_update(a):
                 tarfile.open(tar_tmp, "w") as tf:
             o = _Out(tf, us[0].title["flat"])
             # the menu first: inspect reads it without the rest
-            _write_menu(o, a, conf, us[0].title, len(us), manifest, media, a.media_dir, removed)
+            _write_menu(o, a, conf, us[0].title, len(us), manifest, media, a.media_dir, removed,
+                        [u.key for u in us])
             for k, u in enumerate(us):
                 PROGRESS.step("build %d (%s)" % (k, os.path.basename(u.path)), 0)
                 n = 0
@@ -1027,7 +1066,9 @@ def inject_update(a):
                 m = re.match(r"^d(\d+)\.removed$", n)
                 if m:
                     removed[int(m.group(1))] = [p for p in data.decode("utf-8").splitlines() if p]
-            _write_menu(o, sa, conf, u.title, len(targets), man, media, media_dir, removed)
+            # the builds' games as the update named them: a new menu keeps each game's files apart
+            _write_menu(o, sa, conf, u.title, len(targets), man, media, media_dir, removed,
+                        keys_of_conf(got.get("spk.conf", b"").decode("utf-8", errors="replace")))
             o.dirs.add(pre.rstrip("/"))
             with tarfile.open(u.tar_path(work), "r|*") as tin:
                 for ti in tin:

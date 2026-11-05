@@ -244,7 +244,8 @@ The tab takes the stock version plus more builds of the game, and **Build update
 ## Spooky Pinball
 
 The tab takes a game's stock update plus more builds of the same game (a mod you made
-here, say). **Build update…** writes one update of the game's own kind (a `.scooby`,
+here, say). Halloween and Ultraman are one machine, so those two can share one menu.
+**Build update…** writes one update of the game's own kind (a `.scooby`,
 `.beetlejuice`, `.looney`, `.ed`, `tcm-*.pkg`, `code_*.pkg`, `rm-gamecode-*.pkg` or
 `ac-gamecode.pkg`), under the stock update's own name, into the folder you choose.
 
@@ -254,7 +255,8 @@ here, say). **Build update…** writes one update of the game's own kind (a `.sc
 
 - The first row is the stock build: it travels whole, and the machine falls back to it if
   anything goes wrong. Every other build carries only the files it changes.
-- Settings and scores follow you from build to build.
+- Settings and scores follow you from build to build. Halloween and Ultraman on one
+  machine each keep their own settings and scores.
 - Beetlejuice installs an update that is not Spooky's own only in its developer mode, as
   with any Beetlejuice mod.
 - Alice Cooper's Nightmare Castle restarts once by itself after the install; the menu shows

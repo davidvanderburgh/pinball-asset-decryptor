@@ -226,3 +226,66 @@ def test_a_second_plan_reads_the_kept_member_lists(tmp_path, scooby, monkeypatch
     monkeypatch.setattr(tarfile, "open", lambda *a, **k: opened.append(a) or real(*a, **k))
     assert mk.main(["plan", "--primary", stock, "--extra", mod]) == 0
     assert opened == [], "the plan read an update again instead of its kept list"
+
+
+@pytest.fixture
+def h78um(tmp_path):
+    """synthetic Ultraman (the stock) and Halloween updates, GPG-packed as the machines take them"""
+    from pinball_decryptor.plugins.spooky import games, gpg
+    out = {}
+    for key, name, fmt in (("um", "code_UM.pkg", "um_pkg"), ("h78", "code_H78.pkg", "h78_pkg")):
+        (tmp_path / key).mkdir()
+        t = _tar(tmp_path / key / "x.tar.gz", {
+            "uptest/main.x86_64": b"\x7fELF " + key.encode(), "uptest/main_Data/a": key.encode() * 10,
+            "uptest/main_Data/same": b"S", "assets/v.webm": key.encode(),
+            "config/default_highscores.config": key.encode() + b" defaults"})
+        p = str(tmp_path / key / name)
+        gpg.encrypt_gpg_symmetric(t, p, games.GPG_PASSPHRASES[fmt])
+        out[key] = p
+    return out
+
+
+def test_halloween_and_ultraman_share_one_machine(tmp_path, h78um, sel, capsys):
+    """PAD-997: Ultraman is Halloween's code base on the same board and wiring, so the two
+    mix; the launcher is told each build's game, and which /game files each keeps its own."""
+    um, h78 = h78um["um"], h78um["h78"]
+    assert mk.main(["plan", "--primary", um, "--extra", h78, "--cache-dir", str(tmp_path / "cache")]) == 0
+    assert "== games: Ultraman + Halloween on one machine" in capsys.readouterr().out
+    out = tmp_path / "multi"
+    out.mkdir()
+    rc = mk.main(["build", "--primary", um, "--extra", h78, "--out", str(out), "--selector-dir", sel,
+                  "--cache-dir", str(tmp_path / "cache")])
+    assert rc == 0
+    path = str(out / "code_UM.pkg")
+    m = _members(path, tmp_path)
+    assert m["uptest/pad/d1/uptest/main_Data/a"][1] == b"h78" * 10
+    assert "uptest/pad/d1/uptest/main_Data/same" not in m, "an identical file travels once"
+    spk = m["uptest/pad/spk.conf"][1].decode()
+    for line in ("board=pinotaur", "title=b0 ultraman", "title=b1 halloween_78", "own=*.config *.json",
+                 "seed=highscores.config config/default_highscores.config"):
+        assert line in spk.splitlines(), line
+    conf = m["uptest/pad/images.conf"][1].decode()
+    assert "image=b0|ULTRAMAN|" in conf and "image=b1|HALLOWEEN|" in conf, "each card names its own game"
+    man = json.loads(m["uptest/pad/build.json"][1])
+    assert [i["game"] for i in man["images"]] == ["Ultraman", "Halloween"]
+    assert mk.main(["verify", "--zip", path]) == 0
+    # a new menu keeps the launcher told which game each build is
+    assert mk.main(["inject", "--zip", path, "--titles", "UM;H78"]) == 0
+    m = _members(path, tmp_path)
+    assert "title=b1 halloween_78" in m["uptest/pad/spk.conf"][1].decode()
+    assert "image=b1|H78|" in m["uptest/pad/images.conf"][1].decode()
+
+
+def test_one_game_writes_no_game_lines(tmp_path, scooby, sel):
+    stock, mod = scooby
+    out = tmp_path / "multi"
+    out.mkdir()
+    m = _members(_build(stock, [mod], str(out), sel), tmp_path)
+    assert "title=" not in m["pad/spk.conf"][1].decode() and "own=" not in m["pad/spk.conf"][1].decode()
+    assert mk.keys_of_conf("title=b0 a\ntitle=b1 b\n") == ["a", "b"] and mk.keys_of_conf("title=b1 b\n") == []
+
+
+def test_other_games_still_refused(tmp_path, h78um, scooby, sel):
+    stock, _mod = scooby
+    assert mk.main(["plan", "--primary", h78um["um"], "--extra", stock]) == 2
+    assert mk.TITLES["scooby_doo"]["family"] == "scooby_doo"

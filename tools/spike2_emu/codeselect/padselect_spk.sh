@@ -20,6 +20,9 @@
 #      (one rename) and moved home again at the next power-up.  Those stay real folders
 #      because the stock installers work on them by glob: Evil Dead's .profile runs
 #      `rm -rf /game/code/assets/*`, which through a symlink would empty a build;
+#      on a multi-boot of two games (Halloween + Ultraman, PAD-997) each game also keeps
+#      its own settings and scores: the files of /game that own= names are the game's whose
+#      build last ran (pad/home_owner), and the other game's wait in pad/home_<title>;
 #   3. shows the boot menu (spkselect on the X server, the flippers and START through spksw
 #      on the playfield board);
 #   4. starts the chosen build's program from its own folder (pad/b<k>/<exe>), so the
@@ -27,7 +30,9 @@
 #      working directory the game always had.
 #
 #   pad/spk.conf     the machine: board=warden|pinotaur, dev=, L=, R=, S= (switch numbers),
-#                    exe= (the program under a build, default uptest/main.x86_64), root= lines
+#                    exe= (the program under a build, default uptest/main.x86_64), root= lines;
+#                    two games: title=b<k> <title> per build, own=<globs in /game>,
+#                    seed=<file in /game> <file in a build> (copied in when /game lacks it)
 #   pad/images.conf  the menu; image=b<k>|<title>|<subtitle>...
 #   pad/builds.txt   "b<k> <files>" per build after the first: <files> its files' folder
 #                    under pad/ (a tree like a build's: uptest/..., assets/...)
@@ -37,7 +42,7 @@
 # from starting a game: no conf, no menu program, a menu that dies or hangs (killed after
 # its own timeout and a minute), a build that cannot be made, a choice that names nothing.
 #
-# PADSELECT_HOME moves /game/pad; PADSELECT_TOP moves uptest (the tests: the folder this script stands in by default);
+# PADSELECT_HOME moves /game/pad; PADSELECT_GAME moves /game (own=, seed=); PADSELECT_TOP moves uptest (the tests: the folder this script stands in by default);
 # PADSELECT_SW replaces spksw (the tests: a script printing its lines); PADSELECT_MENU_ARGS
 # adds menu options; PADSELECT_AUDIO_PLAYER replaces aplay; PADSELECT_DRY=1 prints what
 # would be started instead of starting it.
@@ -145,8 +150,52 @@ bring_roots() { # bring_roots b<k>: its folders to their places
         mv -T "$P/$1/$name" "$path" && set_owner "$name" "$1" || say "paths: cannot move $1's $name to $path"
     done < <(roots_list)
 }
+# one game's own files in /game (own=): written by the game whose build ran last, which
+# pad/home_owner names (none yet: build 0's).  pad/home_owner changes only once every file of
+# the old game is kept in pad/home_<old>, so a power cut mid-way is finished by the next start.
+GAMEDIR=${PADSELECT_GAME:-/game}
+title_of() { sed -n 's/^title=//p' "$SPK" 2>/dev/null | tr -d '\r' | awk -v b="$1" '$1 == b { t = $2 } END { print t }'; }
+swap_home() {   # swap_home b<k>: /game's own files are b<k>'s game's
+    local want have g f dst src globs
+    want=$(title_of "$1")
+    set -f; globs=($(conf own "")); set +f      # the globs are /game's, never this folder's
+    [ -n "$want" ] && [ ${#globs[@]} -gt 0 ] || return 0
+    have=$(head -1 "$P/home_owner" 2>/dev/null | tr -d '\r')
+    [ -n "$have" ] || have=$(title_of b0)
+    if [ "$have" != "$want" ]; then
+        mkdir -p "$P/home_$have" || { say "home: cannot keep $have's files"; return 1; }
+        for g in "${globs[@]}"; do
+            for f in "$GAMEDIR"/$g; do
+                [ -f "$f" ] && [ ! -L "$f" ] || continue
+                mv -f "$f" "$P/home_$have/" || { say "home: cannot keep $f"; return 1; }
+            done
+        done
+        echo "$want" > "$P/home_owner.new" && mv -f "$P/home_owner.new" "$P/home_owner" || return 1
+        sync
+        say "home: $have's settings and scores kept in $P/home_$have"
+    fi
+    if [ -d "$P/home_$want" ]; then
+        for f in "$P/home_$want"/* "$P/home_$want"/.[!.]*; do
+            [ -f "$f" ] || continue
+            [ -e "$GAMEDIR/${f##*/}" ] || mv "$f" "$GAMEDIR/" || say "home: cannot bring back ${f##*/}"
+        done
+        rmdir "$P/home_$want" 2>/dev/null && say "home: $want's settings and scores back in $GAMEDIR"
+        sync
+    fi
+    # a game seen here for the first time: what it must not start without, from its build
+    while read -r dst src; do
+        [ -n "$dst" ] && [ -n "$src" ] || continue
+        case "$dst$src" in /*|*..*) continue ;; esac
+        f=$GAMEDIR/$dst
+        if [ ! -s "$f" ] || grep -qx null "$f" 2>/dev/null; then
+            cp "$P/$1/$src" "$f" 2>/dev/null && say "home: $dst from $1's $src"
+        fi
+    done < <(sed -n 's/^seed=//p' "$SPK" 2>/dev/null | tr -d '\r')
+    return 0
+}
 point_at() {    # point_at b<k>: pad/live -> b<k> (one rename), then every path
     park_roots
+    swap_home "$1" || say "home: not swapped; the next start tries again"
     ln -sfn "$1" "$P/live.new" && mv -T "$P/live.new" "$P/live" || return 1
     sync
     link_top && bring_roots "$1"

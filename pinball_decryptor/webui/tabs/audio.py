@@ -3429,7 +3429,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         return str((self._sm_offer or {}).get("attract_why") or "")
 
     def _attract_state(self):
-        """The page's Attract flipper sounds button: ``{"files": [name, ...], "why", "max",
+        """The page's Attract flipper sounds button: ``{"files": [name, ...], "paths", "why", "max",
         "tip"}``, or None where the plugin offers no such thing and the project has none."""
         if "attract_why" not in (self._sm_offer or {}) and not self._attract:
             return None
@@ -3441,7 +3441,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             tip.append("At most one every %s." % _gap_words(self._attract_gap))
         if self._attract_why():
             tip.append(self._attract_why())
-        return {"files": names, "why": self._attract_why(), "max": _ATTRACT_MAX, "tip": tip,
+        return {"files": names, "paths": list(self._attract), "why": self._attract_why(), "max": _ATTRACT_MAX, "tip": tip,
                 "gap": int(self._attract_gap),
                 "gaps": [{"s": g, "label": "Any time" if not g else "At most one every %s" % _gap_words(g)}
                          for g in sorted(set(_ATTRACT_GAPS) | {int(self._attract_gap)})]}
@@ -3559,7 +3559,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         return {"rows": [{"k": k, "mode": r["mode_name"],
                           "shot": r["switch_name"] + (" (%s)" % shot_lit_words(r.get("lit"))
                                                       if r.get("lit") else ""),
-                          "sound": os.path.basename(r["file"]), "gone": not os.path.isfile(r["file"])}
+                          "sound": os.path.basename(r["file"]), "path": r["file"],
+                          "gone": not os.path.isfile(r["file"])}
                          for k, r in enumerate(self._shots, 1)],
                 "modes": [{"value": str(i), "label": n} for i, n in modes],
                 "shots": [{"value": str(i), "label": n} for i, n in switches],
@@ -3675,7 +3676,7 @@ class AudioTab(FindOriginalsMixin, TabService):
     def _jukebox_rows(self):
         from ...plugins.stern import jukebox as _JB
         words = dict(_JB.WEIGHTS)
-        return {"songs": [{"k": k, "audio": os.path.basename(g["audio"]),
+        return {"songs": [{"k": k, "audio": os.path.basename(g["audio"]), "path": g["audio"],
                            "video": os.path.basename(g["video"]) if g.get("video") else "",
                            "gone": not os.path.isfile(g["audio"]) or bool(
                                g.get("video") and not os.path.isfile(g["video"])),

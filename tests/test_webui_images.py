@@ -571,23 +571,30 @@ def test_clear_same(scanned):
     assert w.window.pending_image_assignments(assets)[1] == {PLAIN: other}
 
 
-def test_clear_same_keeps_colour_corrected(scanned):
-    """A same-picture pick with its colors corrected for the machine still
-    changes the card, so it is kept and the question says why."""
+def test_clear_same_clears_colour_corrected(scanned):
+    """A same-picture pick with its colors corrected for the machine is
+    cleared too (DoomWalrus666's follow-up: the box is often on for all), and
+    the question says the game's own picture goes back uncorrected."""
     w, assets, reps, _st = scanned
     same = os.path.join(reps, "banner_again.png")
     Image.open(os.path.join(assets, BANNER)).save(same, compress_level=1)
-    w.answers = [same]
-    w.call("images.choose", BANNER)
+    sprite = os.path.join(reps, "sprite_again.png")
+    Image.open(os.path.join(assets, SPRITE)).save(sprite, compress_level=1)
+    for rel, rep in ((BANNER, same), (SPRITE, sprite)):
+        w.answers = [rep]
+        w.call("images.choose", rel)
     tab = w.window.service("images")
     w.run(lambda: tab._color.__setitem__(BANNER, True))
     w.run(lambda: setattr(tab, "_per_file_colour", lambda: True))
+    w.answers = ["yes"]
     assert w.call("images.clear_same") is True
     _same_done(w)
     q = w.asked[-1]["message"]
-    assert q.startswith("None of the 1 replacement"), q
-    assert "1 more is the same picture but has" in q
-    assert w.window.pending_image_assignments(assets)[1] == {BANNER: same}
+    assert q.startswith("2 of the 2 replacements on this tab are the same "
+                        "picture as the original"), q
+    assert "1 of them has “Correct its colors for the machine” on" in q, q
+    _wait(w, lambda st: w.window.pending_image_assignments(assets) is None)
+    assert BANNER not in tab._color
 
 
 def test_replace_from_folder(scanned):

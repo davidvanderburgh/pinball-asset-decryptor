@@ -464,7 +464,10 @@ function JukeboxModal({ data, onClose }) {
   return html`<${Modal} title="Jukebox" icon="audio" wide remember="jukebox" onClose=${onClose}
     footer=${html`<${Button} icon="plus" disabled=${d.running || full || !!d.why}
         title=${full ? `At most ${d.max} songs` : "Choose songs' audio files, and their intro videos with them: a video goes with the song of the same name"}
-        onClick=${() => act("add")}>Add songs…<//><span class="grow"></span>
+        onClick=${() => act("add")}>Add songs…<//>
+      <${Button} kind="ghost" icon="trash" disabled=${d.running || !songs.length}
+        title="Take every song out of the jukebox to start over (it asks first)"
+        onClick=${() => act("clear")}>Clear all…<//><span class="grow"></span>
       <${Button} kind="primary" onClick=${onClose}>Close<//>`}>
     <div class="stack" style="gap:10px">
       <p class="aud-p">${d.tip}</p>

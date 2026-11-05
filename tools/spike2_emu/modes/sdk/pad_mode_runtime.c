@@ -13077,8 +13077,10 @@ static void chg_page_title_of(char *out, unsigned cap, const char *name, const c
     out[n + t] = 0;
 }
 
+static int coop_page_names(char names[][40], int n, int cap);    /* PAD-1017, below */
+
 /* the names on the game's challenge list now that a mode holds (a taken one's menu name, or its mode's; the modes'
- * own), upper case as PAD-640 files them, each once: n of them in names[] */
+ * own), upper case as PAD-640 files them, each once: n of them in names[]; PAD-1017: then co-op play's boards */
 static int chg_page_names(char names[][40], int cap)
 {
     int n = 0, i, k, s;
@@ -13096,7 +13098,7 @@ static int chg_page_names(char names[][40], int cap)
         for (k = 0; k < 40; k++) names[n][k] = w[k];
         n++;
     }
-    return n;
+    return coop_page_names(names, n, cap);
 }
 
 /* the last challenge champion page, wrapped: the game's own, then each mode's champion in the same page */
@@ -14963,6 +14965,7 @@ static struct {
     unsigned n, turn;                    /* teammates (2-4) and the one up (1..n) */
 } coop;
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
+static int coop_scores;                  /* the game's end-of-game high scores are wrapped (PAD-640/663) */
 static unsigned (*coop_add_game)(unsigned, unsigned, unsigned, unsigned);
 static volatile unsigned char *coop_ball_byte, *coop_players_byte;
 
@@ -14997,6 +15000,45 @@ static int coop_button_held(void)
     return level == ((pol & 4u) ? 1u : 0u);
 }
 
+/* The team's own high score board (daveyvandy: "its own high score boards"): one champion for each size of team, kept
+ * the way a mode's challenge game keeps its own (PAD-640/663, chg_scores_wrap: the record in CHG_SCORES under the
+ * board's name, HIGHEST SCORES' first entry pointed at it for the game's end, the game's own records shut for that
+ * game), so a co-op game never goes on the game's own boards and a 2-player team never goes on a 4-player one's. The
+ * attract mode shows each board that has a champion after the game's own (chg_page_names). */
+static void coop_board_name(char *out, unsigned n)
+{
+    pm_snprintf(out, 40, "%u-PLAYER CO-OP", n);
+}
+
+static void coop_scores_mark(unsigned n)
+{
+    char words[40];
+    if (!coop_scores) return;
+    coop_board_name(words, n);
+    challenge_words(chg_hs.name, words);
+    chg_hs.slot = ~0u;                                        /* no challenge of the game's behind it */
+    chg_hs.on = 1;
+    chg_hs.game = chg_game_now();
+    say("co-op: this game's score goes on the %s board, not on the game's own", chg_hs.name);
+}
+
+static int coop_page_names(char names[][40], int n, int cap)
+{
+    unsigned t;
+    int i, k;
+    char w[40], words[40];
+    if (!coop.on || !coop_scores) return n;
+    for (t = 2; t <= 4 && n < cap; t++) {
+        coop_board_name(words, t);
+        challenge_words(w, words);
+        for (i = 0; i < n && !str_eq(names[i], w); i++) ;
+        if (i < n) continue;
+        for (k = 0; k < 40; k++) names[n][k] = w[k];
+        n++;
+    }
+    return n;
+}
+
 static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     unsigned n = coop_teammates(), ret;
@@ -15018,6 +15060,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     }
     coop.n = n + 1;
     say("co-op: teammate %u joins (%u in the team; the game plays one player for them all)", coop.n, coop.n);
+    coop_scores_mark(coop.n);
     return ret;
 }
 
@@ -15111,6 +15154,11 @@ static void coop_arm(void)
         return;
     }
     coop.on = 1;
+    if (!chg_scores_on) chg_scores_arm();                     /* the team's own boards (PAD-640/663) */
+    coop_scores = chg_scores_on && chg_scores_game;
+    if (!coop_scores)
+        say("co-op: no board of its own - the port does not name this build's end-of-game high scores, so a team's "
+            "score goes on the game's boards");
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
         data("coop_player"), data("coop_player") + 1, data("coop_players"));

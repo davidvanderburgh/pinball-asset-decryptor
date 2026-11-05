@@ -29,6 +29,8 @@ The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, th
   data  coop_player         the player up's byte (the ball's is the next)
   data  coop_players        the count of players' byte
 
+and, for the team's own high score boards, the end-of-game high scores' lines (portchallenge.scores_lines).
+
 Read-only (bytes in, lines out).
 """
 from .portchallenge import Elf, bl_target, extra_ball_lines, mov_r0
@@ -134,7 +136,14 @@ def lines(elf):
     add = add_player(e, players)
     if add is None:
         return [], ["no add-a-player function of the known shape"]
-    return ["site  coop_player_change 0x%08x 0x%08x 0x%08x" % (fn, e.word(fn), e.word(fn + 4)),
-            "site  coop_add_player    0x%08x 0x%08x 0x%08x" % (add, e.word(add), e.word(add + 4)),
-            "data  coop_player        0x%08x" % player,
-            "data  coop_players       0x%08x" % players], []
+    out = ["site  coop_player_change 0x%08x 0x%08x 0x%08x" % (fn, e.word(fn), e.word(fn + 4)),
+           "site  coop_add_player    0x%08x 0x%08x 0x%08x" % (add, e.word(add), e.word(add + 4)),
+           "data  coop_player        0x%08x" % player,
+           "data  coop_players       0x%08x" % players]
+    # the team's own high score boards go through the game's end-of-game high scores (PAD-640/663's lines); a build
+    # with no challenge list (X-Men) has none of them in its port otherwise. The caller drops what the port has.
+    from .portchallenge import scores_lines, screen_lines
+    scores = scores_lines(e, 0)
+    if scores:
+        scores += screen_lines(e)
+    return out + [line for line in scores if not line.startswith("#")], []

@@ -112,13 +112,15 @@ ELFS = sorted(p for d in os.environ.get("PAD_GAME_ELFS", "C:/tmp/PAD-1010/elfs;C
 @pytest.mark.skipif(not ELFS, reason="no shipped game programs here (PAD_GAME_ELFS)")
 def test_every_shipped_build_has_the_lines():
     found = {os.path.basename(p): portcoop.lines(p)[0] for p in ELFS}
-    assert [k for k, v in found.items() if len(v) != 4] == []
+    assert [k for k, v in found.items() if len(v) < 4 or not v[0].startswith("site  coop_player_change")] == []
+    # and the end-of-game high scores' lines, for the team's own boards (X-Men has no challenge list to bring them)
+    assert all(any(line.startswith("site  challenge_scores ") for line in v) for v in found.values())
     gz = found.get("godzilla_le-1_16_0_spike2.elf")
     if gz:
-        assert [l.split()[2] for l in gz] == ["0x00338950", "0x00338790", "0x00713b94", "0x007d116c"]
+        assert [l.split()[2] for l in gz[:4]] == ["0x00338950", "0x00338790", "0x00713b94", "0x007d116c"]
     old = found.get("aerosmith_le-1_15_0.elf")   # the older shape: the count at +0x50 in a struct
     if old:
-        assert [l.split()[2] for l in old] == ["0x001a51c4", "0x001a4fb8", "0x005a02f4", "0x00608e80"]
+        assert [l.split()[2] for l in old[:4]] == ["0x001a51c4", "0x001a4fb8", "0x005a02f4", "0x00608e80"]
 
 
 def _latest_ports():

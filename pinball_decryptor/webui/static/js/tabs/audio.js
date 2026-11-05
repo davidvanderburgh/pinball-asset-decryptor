@@ -533,7 +533,9 @@ function JukeboxModal({ data, onClose }) {
         onClick=${() => act("add")}>Add songs…<//>
       <${Button} kind="ghost" icon="trash" disabled=${d.running || !songs.length}
         title="Take every song out of the jukebox to start over (it asks first)"
-        onClick=${() => act("clear")}>Clear all…<//><span class="grow"></span>
+        onClick=${() => act("clear")}>Clear all…<//>
+      <span class="muted small" title="Every pool's songs count toward the most the jukebox takes">${d.total ?? songs.length} of ${d.max} songs in all</span>
+      <span class="grow"></span>
       <${Button} kind="primary" onClick=${onClose}>Close<//>`}>
     <div class="stack" style="gap:10px">
       <p class="aud-p">${d.tip}</p>

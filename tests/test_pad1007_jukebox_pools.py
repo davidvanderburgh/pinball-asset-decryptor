@@ -189,3 +189,4 @@ def test_the_page_has_the_pool_picker():
         js = f.read()
     assert "act(`pool:${v}`)" in js and "aud-juke-pools" in js
     assert "!pool.intro ?" in js                                     # a pool with no intro shows none
+    assert "${d.total ?? songs.length} of ${d.max} songs in all" in js     # PAD-1018: every pool's together

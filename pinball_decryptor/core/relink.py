@@ -90,6 +90,18 @@ def recorded_sources(staged):
             for path in paths if isinstance(paths, (list, tuple)) else ():
                 if isinstance(path, str) and path.strip():
                     out.setdefault(path, []).append((kind, rel))
+    # every other section's files (the music modes, the attract items...), found
+    # the way an export finds them (PAD-1015): a moved project lost those too
+    from .replacement_export import _walk, _looks_like_file
+    for key, val in (staged or {}).items():
+        if key in KINDS or key in LIST_KINDS:
+            continue
+
+        def see(s, section, key=key):
+            if _looks_like_file(s, section):
+                out.setdefault(s, []).append((key, None))
+            return None
+        _walk(val, key, see)
     return out
 
 
@@ -250,7 +262,8 @@ def apply_plan(staged, found):
     """Rewrite *staged* (a copy) with every ``old -> new`` in *found*.
 
     Returns ``(new staged dict, slots repointed, files repointed)``.  Only
-    the three assignment maps are touched — the per-slot loop / loudness /
+    the files are touched (the three assignment maps, the random clips, and
+    since PAD-1015 every other section's: music modes, attract items) — the per-slot loop / loudness /
     as-is flags are keyed on the SLOT, not the source file, so a relink
     leaves every one of them exactly where it was."""
     data = dict(staged or {})
@@ -282,6 +295,20 @@ def apply_plan(staged, found):
                 section[rel] = moved
                 n_slots += 1
         data[kind] = section
+    from .replacement_export import _walk
+    for key in list(data):
+        if key in KINDS or key in LIST_KINDS:
+            continue
+
+        def swap(s, _section):
+            new = found.get(s)
+            if new:
+                used.add(s)
+                hits[0] += 1
+            return new or None
+        hits = [0]
+        data[key] = _walk(data[key], key, swap)
+        n_slots += hits[0]
     return data, n_slots, len(used)
 
 

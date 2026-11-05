@@ -1130,7 +1130,9 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     at a press plays it instead.
     PAD-685: *jukebox* ``{"modes": [(start site, [intro clip names], [record keys], pool)], "songs":
     [(weight, record key, clip name or "", pool)]}``, a ``jmode`` line per song mode and a ``jsong`` line per
-    song (pad_mode_runtime.c "the jukebox"); PAD-1007: a pool other than 0 ends the line.
+    song (pad_mode_runtime.c "the jukebox"); PAD-1007: a pool other than 0 ends the line. PAD-1012: a
+    song's 5th field, its number when it is in several pools (one number on each pool's copy), follows
+    its pool (written then even when 0).
     PAD-945: *shots* ``{"request", "key", "files": [(mode id, switch id, record key, ms[, lit]), ...]}``,
     the sounds on the shots of the game's modes: a ``gshot`` line (the carrier, its own record's key)
     and a ``gsfile`` line per file (pad_mode_runtime.c "a sound on a shot"); round 2: a row with a
@@ -1166,8 +1168,10 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
                                                  ",".join(bytes(k).hex() for k in keys))
                          + ("\t%d" % int(pool[0]) if pool and pool[0] else ""))
         for weight, key, clip, *pool in jukebox["songs"]:
+            same = int(pool[1]) if len(pool) > 1 and pool[1] else 0          # PAD-1012
             lines.append("jsong\t%d\t%s\t%s" % (int(weight), bytes(key).hex(), clip or "-")
-                         + ("\t%d" % int(pool[0]) if pool and pool[0] else ""))
+                         + ("\t%d" % int(pool[0]) if pool and (pool[0] or same) else "")
+                         + ("\t%d" % same if same else ""))
     if shots and shots.get("files"):
         lines.append("gshot\t%d\t%s" % (int(shots["request"]), bytes(shots["key"]).hex()))
         for k, row in enumerate(shots["files"], 1):

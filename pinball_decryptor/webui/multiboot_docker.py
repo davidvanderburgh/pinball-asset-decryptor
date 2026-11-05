@@ -590,13 +590,10 @@ def unseen_mounts(dirs):
 
 
 def _engine_name():
-    """Which engine docker is talking to: "podman", "colima" / "colima-<profile>"
+    """Which engine docker is talking to: "colima" / "colima-<profile>"
     (the docker context colima makes, or its VM's name), "docker-desktop",
-    or whatever else ``docker info`` calls the machine; "" when neither
-    answers.  Lima, under colima, may name the VM "lima-colima[-<p>]"."""
-    cli = _cli()
-    if "podman" in os.path.basename(cli).lower():
-        return "podman"
+    "podman", or whatever else ``docker info`` calls the machine; "" when
+    neither answers.  Lima, under colima, may name the VM "lima-colima[-<p>]"."""
     names = []
     for args in (["context", "show"], ["info", "-f", "{{.Name}}"]):
         try:
@@ -610,7 +607,12 @@ def _engine_name():
             n = n[len("lima-"):]
         if n == "colima" or n.startswith("colima-"):
             return n
-    return names[-1] if names else ""
+    if names:
+        return names[-1]
+    cli = _cli()
+    if "podman" in os.path.basename(cli).lower():
+        return "podman"
+    return ""
 
 
 def _share_roots(unseen):
@@ -853,7 +855,7 @@ def exec_argv(line):
     it could not have used.  ``argv[-1]`` stays the shell line, because the
     tab's Log echoes it with a ``$`` in front.
     """
-    return ["docker", "exec", CONTAINER, "bash", "-lc", line]
+    return [_cli(), "exec", CONTAINER, "bash", "-lc", line]
 
 
 # every tool a multi-boot run starts inside the container (see kill_running)

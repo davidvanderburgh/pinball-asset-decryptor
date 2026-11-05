@@ -56,7 +56,7 @@ def test_a_root_step_carries_no_sudo_at_all(mac):
     doing rather than teaching a GUI to ask for a password that could not
     have been spent on a losetup which is not there."""
     argv = mt.wsl_shell_root("make -C x")
-    assert argv[:3] == ["docker", "exec", D.CONTAINER]
+    assert argv[:3] == [D._cli(), "exec", D.CONTAINER]
     assert "sudo" not in argv
     # The Log echoes argv[-1] with a "$ " in front, so the line stays last.
     assert argv[-1] == "make -C x"
@@ -1406,3 +1406,9 @@ def test_unshared_reason_podman(monkeypatch):
     msg = D.unshared_reason(["/Volumes/External"])
     assert "Podman" in msg
     assert "Settings > Resources" in msg
+
+
+def test_exec_argv_uses_podman_when_selected(monkeypatch):
+    monkeypatch.setattr(D, "_cli", lambda: "/opt/podman/bin/podman")
+    argv = D.exec_argv("echo test")
+    assert argv[:3] == ["/opt/podman/bin/podman", "exec", D.CONTAINER]

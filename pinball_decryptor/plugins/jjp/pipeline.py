@@ -911,7 +911,8 @@ def _robust_run(executor):
             if not getattr(executor, "_container_running", False):
                 return None  # let orig_run raise the canonical "not running"
             from .executor import _DOCKER_CONTAINER
-            return ["docker", "exec", _DOCKER_CONTAINER, "bash", "-c", bash_cmd]
+            cli = executor._cli() if hasattr(executor, "_cli") else "docker"
+            return [cli, "exec", _DOCKER_CONTAINER, "bash", "-c", bash_cmd]
         return None
 
     def _run(bash_cmd, timeout=120):
@@ -2108,20 +2109,21 @@ class DecryptionPipeline:
 
         # Docker info (macOS only)
         if sys.platform == "darwin":
+            cli = self.executor._cli() if hasattr(self.executor, "_cli") else "docker"
             try:
                 rc, out, _ = self.executor.run_host(
-                    "docker --version", timeout=5)
+                    f"{cli} --version", timeout=5)
                 if rc == 0 and out.strip():
-                    self.log(f"  Docker: {out.strip()}", "info")
+                    self.log(f"  Container engine: {out.strip()}", "info")
             except Exception:
-                self.log("  Docker: (could not detect)", "info")
+                self.log("  Container engine: (could not detect)", "info")
 
-            # Docker Desktop VM resources vs the host — an underprovisioned
+            # Docker Desktop / Podman VM resources vs the host — an underprovisioned
             # VM (the default is often half the cores) directly throttles
             # the compress/decompress phases.
             try:
                 rc, out, _ = self.executor.run_host(
-                    "docker info --format '{{.NCPU}} {{.MemTotal}}'",
+                    f"{cli} info --format '{{.NCPU}} {{.MemTotal}}'",
                     timeout=10)
                 rc2, host_cpus, _ = self.executor.run_host(
                     "sysctl -n hw.ncpu", timeout=5)
@@ -9235,13 +9237,14 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
             self.log("Copying SSD partition to Docker VM (this may take "
                      "several minutes)...", "info")
 
-            # Stream: dd on host -> pipe -> docker exec cat > file
+            # Stream: dd on host -> pipe -> docker/podman exec cat > file
+            cli = self.executor._cli() if hasattr(self.executor, "_cli") else "docker"
             try:
                 dd_proc = subprocess.Popen(
                     ["dd", f"if={raw_dev}", "bs=1048576"],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 docker_proc = subprocess.Popen(
-                    ["docker", "exec", "-i", "jjp-decryptor-worker",
+                    [cli, "exec", "-i", "jjp-decryptor-worker",
                      "sh", "-c", f"cat > '{container_img}'"],
                     stdin=dd_proc.stdout,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -9637,9 +9640,10 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
             self.executor.run_host(
                 f"diskutil unmountDisk {device}", timeout=15)
             import subprocess as _sp
+            cli = self.executor._cli() if hasattr(self.executor, "_cli") else "docker"
             try:
                 docker_proc = _sp.Popen(
-                    ["docker", "exec", "jjp-decryptor-worker",
+                    [cli, "exec", "jjp-decryptor-worker",
                      "cat", container_img],
                     stdout=_sp.PIPE, stderr=_sp.PIPE)
                 dd_proc = _sp.Popen(

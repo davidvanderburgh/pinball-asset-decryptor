@@ -134,6 +134,33 @@ def clean(raw):
     return out
 
 
+#: PAD-999: the files Add songs takes as a song's intro video (every other file is a song's audio)
+VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm", ".wmv", ".mpg", ".mpeg")
+
+
+def song_key(path):
+    """A song's name for pairing and for telling a song already in the jukebox: its file's name
+    without the extension, case ignored (``Hey Jude.wav`` and ``hey jude.MP4`` are one song)."""
+    return os.path.splitext(os.path.basename(str(path)))[0].strip().casefold()
+
+
+def pair_files(paths):
+    """PAD-999: Add songs with audio and video files picked together. ``(songs, lone_videos)``:
+    *songs* is ``[(key, [audio files], [video files])]`` in the order their names first came, a
+    song's files named alike but for the extension; *lone_videos* the videos with no audio file of
+    their name, which make no song (a song is its audio; a video is only its intro)."""
+    groups = {}
+    for p in paths:
+        k = song_key(p)
+        g = groups.setdefault(k, ([], []))
+        kind = 1 if os.path.splitext(str(p))[1].lower() in VIDEO_EXTS else 0
+        if p not in g[kind]:
+            g[kind].append(p)
+    songs = [(k, a, v) for k, (a, v) in groups.items() if a]
+    lone = [p for _k, (a, v) in groups.items() if not a for p in v]
+    return songs, lone
+
+
 def to_json(box):
     """The sidecar value for *box* (``None`` when it has no song)."""
     if not box.songs:

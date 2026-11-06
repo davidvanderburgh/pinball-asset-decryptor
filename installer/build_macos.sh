@@ -294,6 +294,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.source_find" \
     --hidden-import "pinball_decryptor.plugins.stern.text_colors" \
     --hidden-import "pinball_decryptor.plugins.stern.text_layout" \
+    --hidden-import "pinball_decryptor.plugins.stern.topper" \
     --hidden-import "pinball_decryptor.plugins.stern.dds" \
     --hidden-import "pinball_decryptor.plugins.stern.spine" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2" \

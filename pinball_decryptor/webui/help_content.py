@@ -3408,7 +3408,14 @@ PREVIEW_HELP = {
                 "4-PLAYER CO-OP), shown with the game's champions in attract. A team's score never "
                 "goes on the game's own boards.\n"
                 "- Like a card with modes, a card with co-op play keeps its scores and achievements "
-                "off Insider Connected: they stay on the machine.",
+                "off Insider Connected: they stay on the machine.\n\n"
+                "**Awards…**, under the tick, picks the awards shown after each co-op game: who of the "
+                "team scored the most points, used the most ball saves, had the longest ball, started "
+                "the most modes, and any count the game keeps itself (on Godzilla, the jet fighters "
+                "destroyed). Each is a champion page in attract, in the game's own look: the award's "
+                "name, PLAYER 2, the count. A tie names every teammate in it (PLAYERS 1+3). They stay "
+                "in attract until the next game starts. Untick an award to leave it out, or type new "
+                "words for its name; Defaults puts the game's back.",
             ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "

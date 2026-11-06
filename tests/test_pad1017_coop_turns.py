@@ -24,6 +24,9 @@ static unsigned shown_turn, board;                   /* what the screen and the 
 static void coop_scores_mark(unsigned n) { board = n; }
 static void coop_turn_show(void) { shown_turn = coop.turn; }
 static void coop_scores_same(unsigned n) { (void)n; }
+static void coop_awards_begin(void) {}                /* PAD-1028: the awards (test_pad1028_coop_awards.py) */
+static void coop_awards_read(unsigned t) { (void)t; }
+static void coop_awards_end(unsigned n) { (void)n; }
 /* the framework's own, modelled */
 static unsigned game_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {

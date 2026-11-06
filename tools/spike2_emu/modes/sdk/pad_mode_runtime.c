@@ -660,6 +660,14 @@ static int hook_veto_bl(unsigned addr, veto_n_fn logger, unsigned n, unsigned re
  * another object stops at our jump and refuses the site rather than reading a wrong pair. */
 static void *hook_wrap_at(unsigned addr, void *wrapper, int opens_with_push);
 
+/* PAD-1022: where the ARM `bl` word w at addr calls (tests lift it verbatim) */
+static unsigned bl_target(unsigned addr, unsigned w)
+{
+    unsigned off = (w & 0x00FFFFFFu) << 2;
+    if (off & 0x02000000u) off |= 0xFC000000u;            /* the 26-bit offset's sign */
+    return addr + 8u + off;
+}
+
 static void *hook_wrap(unsigned addr, void *wrapper)
 {
     return hook_wrap_at(addr, wrapper, 1);
@@ -679,6 +687,7 @@ static void *hook_wrap_at(unsigned addr, void *wrapper, int opens_with_push)
             && (p[i] & 0xFFFF0000u) != 0xE92D0000u) return 0;
     for (i = 0; i < 2; i++) {
         unsigned w = p[i];
+        if (i == 1 && opens_with_push && (w & 0xFF000000u) == 0xEB000000u) continue;   /* PAD-1022: a bl, below */
         if ((w & 0x0C000000u) == 0x04000000u && ((w >> 16) & 0xF) == 15) return 0;   /* ldr/str [pc, ..] */
         if ((w & 0x0C000000u) == 0x00000000u                                 /* data processing: */
             && (((w >> 16) & 0xF) == 15 || (!(w & 0x02000000u) && (w & 0xF) == 15))) return 0;   /* pc in */
@@ -690,6 +699,18 @@ static void *hook_wrap_at(unsigned addr, void *wrapper, int opens_with_push)
     t[1] = p[1];
     t[2] = 0xe51ff004u;                       /* ldr pc, [pc, #-4] -> t[3] */
     t[3] = addr + 8u;
+    if (opens_with_push && (p[1] & 0xFF000000u) == 0xEB000000u) {
+        /* PAD-1022: the second word is a call (Guardians 1.15's "are the timers paused" check opens with
+         * `push {r3, lr}; bl <ball on the playfield>`). A bl moved here would land far from its target, so the
+         * trampoline makes the call itself and comes back to the next word:
+         *   1 add lr, pc, #0 (pc reads 8 on: lr = t[3])   2 ldr pc, [pc, #4] -> t[5]
+         *   3 ldr pc, [pc, #-4] -> t[4]   4 addr + 8   5 the bl's target */
+        t[1] = 0xe28fe000u;
+        t[2] = 0xe59ff004u;
+        t[3] = 0xe51ff004u;
+        t[4] = addr + 8u;
+        t[5] = bl_target(addr + 4u, p[1]);
+    }
     t[14] = p[0];
     t[15] = p[1];
     mprotect(tramp, sizeof tramp, 7);
@@ -15262,6 +15283,214 @@ static void coop_arm(void)
         data("coop_player"), data("coop_player") + 1, data("coop_players"));
 }
 
+/* ---- PAD-1022: inactivity pauses the game's timers ------------------------------------------------------------------
+ * Joe_Blasi (Pinside): "allow inactivity to pause timers ... does not work on guardians". Every Spike 2 framework
+ * offers the operator ALLOW INACTIVITY TO PAUSE TIMERS (AD_INACTIVE_TIMER, 0..1, on by default) and the titles honour
+ * it in their own timer code: a mode's clock stops when nobody has scored for a few seconds (a ball held on a
+ * flipper, a ball stuck), and runs on at the next score. TMNT 1.59 and Godzilla 1.16 each ask it in their timers'
+ * should-pause check (0xadf70 / 0x622e8): the adjustment is 1 and a framework timer the title re-arms to 372 ticks
+ * (6 s) at every score (0x1432e4 / 0x18de90) has run out. Guardians of the Galaxy 1.15 (Pro and LE) shows the
+ * adjustment in its menu and nothing of the game reads it, and its clocks are of two kinds (Pro addresses):
+ *
+ * 1. THE SONG CLOCKS. A mission's clock (Pod Chase, Escape Kyln, Knowhere, Quill's Quest, Yaka Arrow, Sanctuary,
+ *    Sibling Rivalry, Antiquities Shop: the shared timer process 0xbfc14, started by 0xc00a8) is its song: the time
+ *    left is the song's end marker less where the song is, in samples (44100 a second), and the mission ends when the
+ *    song gets there. Where the song is comes from a table, by player and song, that the game's song tracker 0xfb518
+ *    writes each frame from the playing voice's position (and the mission's status screen 0xbf3b8, the multiballs'
+ *    song callbacks and a song played again later all read it). So a clock that waits is a song position that waits:
+ *    the tracker is wrapped and writes the table its own HELD position: it moves with the song while the player is
+ *    active and stands still while they are not. The song plays on, its lights stay on the beat, the clock holds;
+ *    at the next score the clock runs on from where it held. A song that runs out under a hold and comes round again
+ *    (its voice back near 0, far from the held position) keeps counting from the held position, so a long hold can
+ *    never give the clock its full time back (a 54 s song did that, before). Any other break in the song's play
+ *    (another song, another player, a jump: the game playing it again from the table, or seeking it) ends the hold,
+ *    since the game starts a song from where the table says it is. A song that stops with its mission still running
+ *    hands the clock back to the timer process, which counts the seconds left by itself, as it always does then.
+ *      site  song_track <addr> <w0> <w1>   the song tracker (wrapped)
+ *      data  song_positions <addr>         the table: u32 [song * 4 + player - 1]
+ *      value song_now_at <offset>          the tracker's own words, this far past the table (0x160 on both builds):
+ *                                          [0] the song (1..20, 0 none), [2] where the voice is, [3] where it was at
+ *                                          the last call (the game wrote [2] when they differ). An offset and not a
+ *                                          data line: the code names them once, too few places for port_tool to
+ *                                          place a global, and a value is carried to another build's port as it is
+ *      data  cur_player <addr>             the player up (1..4)
+ * 2. THE CHECK. Headphone Hurryup and the value hurry-ups wait while the game's one shared "are the timers paused"
+ *    check says so (0x41824: the ball is not on the playfield, a show runs in process group 0x88..0xb8, or a pause
+ *    process 0x83 runs), and it has no inactivity test: it is wrapped to answer paused while the player is inactive.
+ *      site  timers_paused <addr> <w0> <w1>   the check (wrapped): nonzero = paused
+ * Double Scoring calls that check and drops the answer, so it never waits, for this or anything else, as Stern made it;
+ * Super Scoring's and the Groot lock's clocks never ask. Both kinds need
+ *      value inactive_adj <adj id>        AD_INACTIVE_TIMER, read each time (the operator may change it)
+ *      value inactive_ms <ms>             (optional) this long with no score is inactive: 6000, the titles' 372 ticks
+ * and the port's adjustment and score_add sites: a score is the activity, as in TMNT's and Godzilla's own. It arms
+ * whenever the port names either kind (it is the operator's own setting, and it is how the titles that read it behave),
+ * before the score gate: it scores nothing. The Modes tab's tick puts idle.cfg beside the runtime so a card with no
+ * modes carries it; its `only` line says the card has no modes, and the runtime then arms this and nothing else (like
+ * the picture settings, the scores stay on Insider Connected). */
+#define IDLE_MS_DEFAULT 6000u
+#define IDLE_SONGS 20u                          /* the songs the tracker knows (the table's rows) */
+#define IDLE_JUMP 88200u                        /* 2 s of a song: more between two calls is a jump, not play */
+static const char *const IDLE_FILES[] = { "/usr/local/padmode/idle.cfg", "/dump/idle.cfg" };
+static unsigned (*idle_game)(unsigned, unsigned, unsigned, unsigned);         /* the game's check (its trampoline) */
+static unsigned (*idle_track_game)(unsigned, unsigned, unsigned, unsigned);   /* the song tracker (its trampoline) */
+static volatile unsigned long idle_score_ms;    /* when the last score was */
+static unsigned idle_adj;
+static unsigned long idle_ms = IDLE_MS_DEFAULT;
+static volatile int idle_said;                  /* 1 while the log says the timers wait for the player */
+static volatile int idle_playing;               /* in play at the last look: coming into play is a score */
+static int idle_only;                           /* idle.cfg: the card carries no modes */
+static volatile unsigned *idle_song_now, *idle_song_pos;
+static volatile unsigned char *idle_player;
+static struct { unsigned song, player, at, held, waited; } idle_song;   /* the song playing now: its clock's place */
+
+/* 1 when the game's timers wait for a player who has not scored for `quiet` ms with the operator's adjustment on; a
+ * score stamped after `now` was read is not a wait (tests lift it verbatim) */
+static int idle_is_paused(unsigned adj_value, unsigned long now, unsigned long last, unsigned long quiet)
+{
+    return adj_value == 1u && now >= last && now - last >= quiet;
+}
+
+/* The tracker found `song` at `at` for `player`; *last_* are the last call's. *held moves with the song's advance while
+ * the player is active and stands while they are not (*waited counts what it let pass); a song that came round under
+ * a hold (back to the start, far from *held) advances it by `at`; any other break in its play starts it again from
+ * `at`. Returns *held, the position the table should hold (tests lift it verbatim). */
+static unsigned idle_song_step(unsigned song, unsigned player, unsigned at, int inactive, unsigned *last_song,
+                               unsigned *last_player, unsigned *last_at, unsigned *held, unsigned *waited)
+{
+    unsigned step;
+    int same = song == *last_song && player == *last_player;
+    if (same && at >= *last_at && at - *last_at <= IDLE_JUMP) step = at - *last_at;            /* play */
+    else if (same && at < *last_at && at <= IDLE_JUMP && *held != *last_at
+             && (at > *held ? at - *held : *held - at) > IDLE_JUMP) step = at;                /* came round */
+    else {                                                                                    /* a break */
+        *held = at;
+        *waited = 0;
+        step = 0;
+    }
+    if (inactive) *waited += step;
+    else *held += step;
+    *last_song = song;
+    *last_player = player;
+    *last_at = at;
+    return *held;
+}
+
+static void on_idle_score(unsigned *r)
+{
+    (void)r;
+    idle_score_ms = pm_ms();
+}
+
+/* 1 = in a game, the player is inactive and the operator lets that pause the timers; the log says so as it changes */
+static int idle_now(void)
+{
+    unsigned adj = ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))(idle_adj);
+    unsigned long now = pm_ms(), last;
+    int playing = pm_in_game(), paused;
+    if (playing && !idle_playing) idle_score_ms = now;   /* a ball in play: the player has had no chance to score */
+    idle_playing = playing;
+    last = idle_score_ms;
+    paused = playing && idle_is_paused(adj, now, last, idle_ms);
+    if (paused && !idle_said) {
+        idle_said = 1;
+        say("inactivity: no score for %lu ms - the game's timers wait (ALLOW INACTIVITY TO PAUSE TIMERS is on)",
+            now - last);
+    } else if (!paused && idle_said) {
+        const char *why = adj != 1u ? "the adjustment is off" : !playing ? "out of play" : "a score";
+        idle_said = 0;
+        if (idle_song.waited)
+            say("inactivity: %s - the game's timers run again; song %u's clock has waited %u.%02u s", why,
+                idle_song.song, idle_song.waited / 44100u, idle_song.waited % 44100u * 100u / 44100u);
+        else
+            say("inactivity: %s - the game's timers run again", why);
+    }
+    return paused;
+}
+
+static unsigned idle_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    unsigned ret = idle_game(r0, r1, r2, r3);
+    if (ret) return ret;                        /* the game's own reasons first */
+    return idle_now() ? 1u : ret;
+}
+
+static unsigned idle_track_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    unsigned ret = idle_track_game(r0, r1, r2, r3), song = idle_song_now[0], at = idle_song_now[2], player, held;
+    if (!song || song > IDLE_SONGS || !at || !pm_in_game()) {   /* no song in a game: the next starts afresh */
+        idle_song.song = 0;
+        return ret;
+    }
+    if (at == idle_song_now[3]) return ret;     /* the voice has not moved: the game wrote nothing */
+    player = *idle_player;
+    if (player < 1 || player > 4) return ret;
+    held = idle_song_step(song, player, at, idle_now(), &idle_song.song, &idle_song.player, &idle_song.at,
+                          &idle_song.held, &idle_song.waited);
+    if (held != at) idle_song_pos[song * 4u + player - 1u] = held;
+    return ret;
+}
+
+/* idle.cfg's `only`: the card carries no modes (read before the gate) */
+static int idle_cfg_only(void)
+{
+    static char raw[256];
+    long n = -1, i;
+    unsigned k;
+    for (k = 0; k < sizeof IDLE_FILES / sizeof IDLE_FILES[0] && n < 0; k++)
+        n = pm_read_file(IDLE_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return 0;
+    raw[n] = 0;
+    for (i = 0; i < n; i++)
+        if ((!i || raw[i - 1] == '\n') && str_starts(raw + i, "only")) return 1;
+    return 0;
+}
+
+static void idle_arm(void)
+{
+    struct site *c = site("timers_paused"), *t = site("song_track"), *s = site("score_add");
+    long adj = pm_port_value("inactive_adj", -1), ms = pm_port_value("inactive_ms", (long)IDLE_MS_DEFAULT);
+    long now_at = pm_port_value("song_now_at", -1);
+    int songs = 0, check = 0;
+    idle_only = idle_cfg_only();
+    if (!c && !t) return;                       /* the game reads its adjustment itself */
+    if (adj <= 0 || !fn("adjustment") || !s || !s->ok) {
+        say("inactivity: off - %s", adj <= 0 ? "the port names no inactive_adj" : !fn("adjustment")
+            ? "the port has no adjustment site" : "the port has no score_add site to see a score");
+        return;
+    }
+    idle_adj = (unsigned)adj;
+    idle_ms = ms > 0 ? (unsigned long)ms : IDLE_MS_DEFAULT;
+    idle_score_ms = pm_ms();
+    if (!hook(fn("score_add"), on_idle_score)) {
+        say("inactivity: off - score_add could not be hooked");
+        return;
+    }
+    if (t && t->ok && now_at > 0 && data("song_positions") && data("cur_player")
+        && maps_has(data("song_positions") + (unsigned)now_at, 16, MAP_R)
+        && maps_has(data("song_positions"), (IDLE_SONGS + 1u) * 16u, MAP_R) && maps_has(data("cur_player"), 1, MAP_R)) {
+        idle_song_now = (volatile unsigned *)(unsigned long)(data("song_positions") + (unsigned)now_at);
+        idle_song_pos = (volatile unsigned *)(unsigned long)data("song_positions");
+        idle_player = (volatile unsigned char *)(unsigned long)data("cur_player");
+        idle_track_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn("song_track"),
+                                                                                       (void *)idle_track_wrap);
+        songs = idle_track_game != 0;
+    }
+    if (t && !songs)
+        say("inactivity: the song clocks run on - %s", !t->ok ? "song_track does not match this build"
+            : idle_song_now ? "the song tracker could not be wrapped"
+            : "the port's song words are missing or not mapped");
+    if (c && c->ok)
+        check = (idle_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn("timers_paused"),
+                                                                                           (void *)idle_wrap)) != 0;
+    if (c && !check)
+        say("inactivity: the hurry-ups run on - %s", !c->ok ? "timers_paused does not match this build"
+            : "the timers' check could not be wrapped");
+    if (!songs && !check) return;
+    say("inactivity: armed - with adjustment %u (ALLOW INACTIVITY TO PAUSE TIMERS) on, %lu ms with no score holds %s "
+        "(score_add 0x%08x%s%s)", idle_adj, idle_ms, songs && check ? "the song clocks and the hurry-ups" : songs
+        ? "the song clocks" : "the hurry-ups", fn("score_add"), songs ? ", song tracker" : "", check ? ", check" : "");
+}
+
 /* Which sites and data each capability needs; all must be present and verified. */
 static int have_sites(const char *const *names)
 {
@@ -17969,10 +18198,12 @@ static void pad_mode_start(void)
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
     sndm_arm();                               /* PAD-494: nor does a music mode */
     pic_arm();                                /* PAD-537: nor do the picture settings */
-    if ((clipv_only || sndm_only || pic_only) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
-        say("armed: %s%s%s only (%s says the card has no modes) - nothing else is hooked",
+    idle_arm();                               /* PAD-1022: nor does inactivity pausing the timers */
+    if ((clipv_only || sndm_only || pic_only || idle_only) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
+        say("armed: %s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
-            clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : "picture.cfg");
+            idle_only ? "inactivity pausing timers " : "",
+            clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : "idle.cfg");
         return;
     }
     if (!insider_arm()) return;               /* no score gate, no modes: see insider_arm */

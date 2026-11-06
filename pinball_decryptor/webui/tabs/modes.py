@@ -397,6 +397,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._init_sheet()
         self.set(coop_on=False, coop_note="", coop_note_kind="", coop_shown=False,   # PAD-1017
                  coop_tip=self.COOP_TIP)
+        self.set(idle_on=False, idle_note="", idle_note_kind="", idle_shown=False,   # PAD-1022
+                 idle_tip=self.IDLE_TIP)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -661,6 +663,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._refresh_port_targets(project)                 # PAD-396: after the card's title is known
         self._show_cap(project, len(found))
         self._publish_coop(project)                          # PAD-1017
+        self._publish_idle(project)                          # PAD-1022
         codes = [s for s, _n in self._code_list]
         game = self._game_ids()
         if select_game is not None and select_game in game:
@@ -730,6 +733,47 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         history_log.record(project, [hist] if hist else [])
         self._say("co-op play: %s" % ("the card gets co-op play at the next Write" if on else "no co-op play on the card"))
         self._publish_coop(project)
+        return True
+
+    #: PAD-1022: inactivity pausing the timers (plugins/stern/idle_pause.py), offered on the games whose own timers
+    #: ignore their ALLOW INACTIVITY TO PAUSE TIMERS setting (Guardians of the Galaxy). It runs on the mode runtime; a
+    #: card with it and no modes keeps its scores on Insider Connected, as the picture settings do
+    IDLE_TIP = (
+        "This game has the setting ALLOW INACTIVITY TO PAUSE TIMERS but ignores it. With this on, the card makes it "
+        "work: while the setting is on (it is by default), the missions' clocks and the hurry-ups wait when nobody "
+        "has scored for 6 seconds, as on Stern's other games, and run on at the next score. The music keeps playing. "
+        "Write puts it on the card.")
+
+    def _publish_idle(self, project):
+        """PAD-1022: the Inactivity pauses timers tick, shown only for a game that ignores its own setting, and under
+        it what the card does, or in red why it cannot."""
+        from ...plugins.stern import idle_pause as _IP
+        prof = _IP.project_title(project) if project else None
+        shown = bool(project) and prof is not None and not _IP.title_refusal(prof)
+        on = bool(project) and _IP.load(project)
+        note, kind = "", ""
+        if on:
+            why = _IP.title_refusal(prof)
+            if why:
+                note, kind = why, "err"
+            else:
+                note = _IP.NOTE
+        self.set(idle_shown=shown or on, idle_on=on, idle_note=note, idle_note_kind=kind)
+
+    @rpc
+    def set_idle_pause(self, on):
+        """Tick or untick inactivity pausing the timers for this project (PAD-1022)."""
+        from ...core import history_log
+        from ...plugins.stern import idle_pause as _IP
+        project = self.project()
+        if not project:
+            return False
+        was = _IP.save(project, bool(on))
+        hist = history_log.diff_scalar("modes  inactivity pauses timers", "on" if was else "off", "on" if on else "off")
+        history_log.record(project, [hist] if hist else [])
+        self._say("inactivity pauses timers: %s" % ("the card gets it at the next Write" if on
+                                                    else "not on the card"))
+        self._publish_idle(project)
         return True
 
     def _no_modes_words(self):

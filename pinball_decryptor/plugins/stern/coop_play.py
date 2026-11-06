@@ -412,7 +412,8 @@ def abilities(game_elf, label="This game", sites=()):
         elif how[0] == "boost":
             cfg, why = ("boost:%d" % how[1], "") if "coop_boost" in sites else ("", NO_SITE % label)
         elif how[0] == "count":
-            cfg, why = (("count:%s+%d" % (how[1], how[2]), "") if "coop_count_%s" % how[1] in sites
+            cfg, why = (("count:%s+%d" % (how[1], how[2]), "")
+                        if {"coop_count_%s" % how[1], "coop_count_%s_rule" % how[1]} & sites
                         else ("", NO_SITE % label))
         else:
             idx = table.by_name.get(how[1]) if table is not None else None
@@ -570,12 +571,13 @@ def _abilities_v():
 
 
 def port_sites(prof):
-    """The site names of *prof*'s port (empty when it has none)."""
+    """The site and data names of *prof*'s port (empty when it has none)."""
     from . import mode_project as MP
     if prof is None:
         return []
     try:
-        return sorted(MP.read_port(MP.port_path(prof)).get("site", {}))
+        port = MP.read_port(MP.port_path(prof))
+        return sorted(set(port.get("site", {})) | set(port.get("data", {})))
     except (OSError, MP.ModeProjectError):
         return []
 

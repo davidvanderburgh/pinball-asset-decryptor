@@ -1126,3 +1126,10 @@ value coop_cache_173_at   0x10
 # copies BUILDING DIFFICULTY into the building rule's record (hooked: the rule's object)
 site coop_cache_168       0x0012e168 0xe92d40f8 0xe1a07000
 value coop_cache_168_at   0x4
+# the jets rule (rule 0x15 of the game's rule table): JET FIGHTER CHAMPION's and the bonus's jets destroyed at
+# rule + player x 4 + 0xa8
+data  coop_count_jets_rule 0x007b4afc
+value coop_count_jets_at   0xa8
+# the tank rule's game-start method; the city map's TANKS n/10 at this + (player - 1) x 4 + 0x48
+site coop_count_tanks     0x00180e44 0xe92d43f0 0xe1a04000
+value coop_count_tanks_at 0x44

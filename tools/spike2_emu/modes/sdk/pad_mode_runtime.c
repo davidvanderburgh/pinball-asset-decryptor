@@ -15410,9 +15410,10 @@ static void coop_turn_show(void)
  *   boost:<pct>                      the title's "add n of something" call (`site coop_boost`; Godzilla: its power-ups)
  *                                    adds n x pct / 100 while the teammate is up
  *   count:<name>+<n>                 at the teammate's pick, a rule's count for the player raised by n (Godzilla: the
- *                                    jets destroyed, the tanks toward TANKS n/10): `site coop_count_<name>` is the
- *                                    rule's method that clears it at the game's start (hooked to learn the rule's
- *                                    object), `value coop_count_<name>_at` where (this + player x 4 + at)
+ *                                    jets destroyed, the tanks toward TANKS n/10): the rule is found by `site
+ *                                    coop_count_<name>`, its method that clears it at the game's start (hooked to
+ *                                    learn the object), or by `data coop_count_<name>_rule`, where the game keeps a
+ *                                    pointer to it; `value coop_count_<name>_at`: the count at rule + player x 4 + at
  *   gift:<id>                        at the teammate's pick, the game's own one-shot feature adjustment <id> (Godzilla:
  *                                    LIGHT ALLY): the game's adjustment-changed handler (`site coop_adj_changed`, given
  *                                    {u16 id}) is called with the getter answering 1 for it, once
@@ -15458,7 +15459,7 @@ static int coop_cache_n;
 static unsigned (*coop_boost_game)(unsigned, unsigned, unsigned, unsigned);
 static volatile unsigned coop_gift_now;     /* the getter answers 1 for this adjustment, once */
 #define COOP_COUNTS 4
-static struct { char name[12]; unsigned at, obj; } coop_count[COOP_COUNTS];
+static struct { char name[12]; unsigned at, obj, ptr; } coop_count[COOP_COUNTS];
 static int coop_count_n;
 
 /* the next character from `at` in `dir` (+1/-1) over n characters and RANDOM (index n), skipping the ones `taken`
@@ -15623,6 +15624,8 @@ static void coop_counts_give(const struct coop_char *c)
     int i;
     for (k = 0; k < c->n_count; k++) {
         for (i = 0; i < coop_count_n && !str_eq(coop_count[i].name, c->count[k].name); i++) ;
+        if (i < coop_count_n && coop_count[i].ptr && maps_has(coop_count[i].ptr, 4, MAP_R))
+            coop_count[i].obj = *(const unsigned *)(unsigned long)coop_count[i].ptr;
         if (i == coop_count_n || !coop_count[i].obj || p < 1 || p > 4) {
             say("co-op: %s - no %s count to raise (%s)", c->name, c->count[k].name,
                 i == coop_count_n ? "the port does not name it" : "its rule not seen yet");
@@ -15921,15 +15924,22 @@ static void coop_chars_arm(struct site *e)
             if (j < coop_count_n) continue;
             pm_snprintf(name, sizeof name, "coop_count_%s_at", coop_ch[i].count[k].name);
             coop_count[coop_count_n].at = (unsigned)pm_port_value(name, 0);
+            pm_snprintf(name, sizeof name, "coop_count_%s_rule", coop_ch[i].count[k].name);
+            coop_count[coop_count_n].ptr = data(name);
+            coop_count[coop_count_n].obj = 0;
             pm_snprintf(name, sizeof name, "coop_count_%s", coop_ch[i].count[k].name);
-            if (!site(name) || !fn(name) || !hook(fn(name), cseen[coop_count_n])) {
+            if (!coop_count[coop_count_n].ptr && (!site(name) || !fn(name) || !hook(fn(name), cseen[coop_count_n]))) {
                 say("co-op characters: the %s count is off - the port names no %s", coop_ch[i].count[k].name, name);
                 continue;
             }
             str_copy(coop_count[coop_count_n].name, sizeof coop_count[0].name, coop_ch[i].count[k].name,
                      sizeof coop_count[0].name);
-            say("co-op characters: the %s count is cleared by 0x%08x (this + player x 4 + 0x%x)",
-                coop_count[coop_count_n].name, fn(name), coop_count[coop_count_n].at);
+            if (coop_count[coop_count_n].ptr)
+                say("co-op characters: the %s count's rule is kept at 0x%08x (rule + player x 4 + 0x%x)",
+                    coop_count[coop_count_n].name, coop_count[coop_count_n].ptr, coop_count[coop_count_n].at);
+            else
+                say("co-op characters: the %s count is cleared by 0x%08x (this + player x 4 + 0x%x)",
+                    coop_count[coop_count_n].name, fn(name), coop_count[coop_count_n].at);
             coop_count_n++;
         }
     if (gift && !fn("coop_adj_changed")) {

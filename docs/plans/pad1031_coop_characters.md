@@ -140,3 +140,24 @@ process; guestmem.py takes the first `game` on the box), job4.sh (proof job), jo
 - Jets and tanks fields (above), then their port lines on LE 1.16 and Pro 1.16.
 - Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle.
 - The pick's screen, and the Characters dialog's pictures/preview (David: DoomWalrus666 iterates the look himself).
+
+## Run 4 (2026-11-06): jets and tanks
+
+- Tanks: a diff of the tank rule (0x7b0d68 on LE) across 64 shots: +0x48 went 0 -> 1 with the map's TANKS 1/10, so the
+  count is this + (player - 1) x 4 + 0x48 (port `value coop_count_tanks_at 0x44`; +0x18 was wrong). gz_run9: 4 at the
+  pick, three tanks killed by shots, the map read TANKS 7/10 (proof_tanks_4_plus_3.png). The count is the game's per
+  ball/city one: it was 0/10 again in teammate 2's turn, as the game resets it.
+- Jets: the game's readers (JET FIGHTER CHAMPION's getter 0x6425c, the bonus 0x197260) use rule_table[0x15] (LE table
+  0x7b4aa8, Pro 0x7a83f0; 0x3386e0 only checks the player is 1-4) + player x 4 + 0xa8. The hooked method 0x15c7a8 is
+  another rule's. The runtime takes `data coop_count_<name>_rule` (where the game keeps the rule's pointer: LE
+  0x7b4afc, Pro 0x7a8444). gz_run9: rule 0x7b5b20, 0x7b5bcc = 4 after the pick.
+- Pro 1.16 lines: tank method 0x17d46c (+0x18 / +0x48 stores matched), jets getter 0x63de4 (rule 0x15, +0xa8).
+
+## Left (run 5+)
+
+- Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle (the game unlocks tier 2 on a WON city:
+  CBattle::stop's bookkeeping, MODE_SDK "A monster in the roster").
+- The pick's screen: per character a screen (picture + words) in the HUD scene, as a mode's own (scene_write.
+  add_screens via mode_assets.build), shown by the runtime while that character is the pick's; coop_plan has no
+  build today (build=None) - a co-op card with characters needs one. Pictures are the owner's (Characters dialog),
+  with a preview there so DoomWalrus666 can iterate the look himself.

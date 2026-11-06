@@ -295,16 +295,22 @@ def test_the_godzilla_ports_name_the_character_sites():
             assert name in text, (key, name)
 
 
-def test_jets_and_tanks_wait_for_their_port_lines():
-    """count:<name>+<n> raises a rule's count at the pick where the port names the rule's game-start method; until a
-    build's port does (Godzilla's jets and tanks counts are not proven yet), the app does not offer them."""
+def test_jets_and_tanks_count_where_the_port_names_their_rules():
+    """count:<name>+<n> raises a rule's count at the pick: Godzilla's jets through the pointer the game keeps to its
+    rule (data coop_count_jets_rule), its tanks through the rule's game-start method (site coop_count_tanks)."""
     if not os.path.isfile(GZ_ELF):
         pytest.skip("no Godzilla LE 1.16 program here")
+    from pinball_decryptor.plugins.stern import mode_project as MP
     elf = open(GZ_ELF, "rb").read()
-    got = {a["key"]: a for a in CP.abilities(elf, "Godzilla", ["coop_count_jets"])}
-    assert got["jets"]["cfg"] == "count:jets+4"
-    assert not got["tanks"]["cfg"] and got["tanks"]["why"]
+    port = MP.read_port(str(RUNTIME.parent / "ports" / "godzilla_le-1.16.port"))
+    sites = sorted(set(port["site"]) | set(port["data"]))
+    got = {a["key"]: a for a in CP.abilities(elf, "Godzilla", sites)}
+    assert got["jets"]["cfg"] == "count:jets+4" and got["tanks"]["cfg"] == "count:tanks+4"
+    bare = {a["key"]: a for a in CP.abilities(elf, "Godzilla")}
+    assert not bare["jets"]["cfg"] and not bare["tanks"]["cfg"]
+    for key in ("godzilla_le-1.16", "godzilla_pro-1.16"):
+        text = (RUNTIME.parent / "ports" / (key + ".port")).read_text(encoding="utf-8")
+        assert "data  coop_count_jets_rule" in text and "site coop_count_tanks" in text
     src = RUNTIME.read_text(encoding="utf-8")
-    line = R._lift(src, "static void coop_char_line(const char *s)")
-    assert 'str_starts(p, "count:")' in line
+    assert 'str_starts(p, "count:")' in R._lift(src, "static void coop_char_line(const char *s)")
     assert "coop_counts_give(&coop_ch[c]);" in R._lift(src, "static void coop_pick_close(const char *how)")

@@ -1,10 +1,11 @@
-"""PAD-1017 proof shot: the Write tab's Co-op play tick.
+"""PAD-1017 proof shot: the Modes tab's Co-op play tick (under the mode list).
 
     python scripts/shot_pad1017.py <repo> <out.png> [--tick]
 
-Serves <repo> on a scratch project made from the Godzilla LE 1.16 card (its .extract_source.json names it) and shows
-the Write tab's options under Build Image. Before (main) there is no co-op row; after there is "Co-op play" and, with
---tick, the note under it saying how a teammate joins.
+Serves <repo>, with the mode maker's preview on, on a scratch project made from the Godzilla LE 1.16 card (its
+.extract_source.json names it) and shows the Modes tab. Before (main) there is no co-op row; after there is "Co-op play"
+under the list and, with --tick, the note under it saying how a teammate joins and that the scores stay off Insider
+Connected.
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
 """
@@ -22,6 +23,8 @@ CARD = r"D:\Pinball\images\Stern\spike2\godzilla_le-1_16_0_spike2.Release.8G.sdc
 LAUNCHER = r'''
 import sys
 sys.path.insert(0, %r)
+from pinball_decryptor.core import preview
+preview.enabled = lambda feature: True
 from pinball_decryptor.webui import host
 sys.argv = ["host"] + sys.argv[1:]
 sys.exit(host.main())
@@ -56,18 +59,15 @@ def main():
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1500, "height": 1300})
+            page = browser.new_page(viewport={"width": 1500, "height": 1000})
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             time.sleep(2)
-            webui_shot.api(url, "ui.select_tab", "write")
-            time.sleep(4)
+            webui_shot.api(url, "ui.select_tab", "modes")
+            time.sleep(6)
             if tick:
-                webui_shot.api(url, "write.set_coop", True)
+                webui_shot.api(url, "modes.set_coop", True)
                 time.sleep(3)
-            anchor = page.locator(".wr-build").last
-            anchor.scroll_into_view_if_needed()
-            time.sleep(1)
             page.screenshot(path=out)
             print("shot", out, flush=True)
             browser.close()

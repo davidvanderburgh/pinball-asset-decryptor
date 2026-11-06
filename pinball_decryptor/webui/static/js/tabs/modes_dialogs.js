@@ -162,3 +162,36 @@ export function PlayButton({ path, label = "Play" }) {
   };
   return html`<${Button} size="xs" kind="ghost" icon=${on ? "stop" : "play"} title=${on ? "Stop" : label + ": " + path} onClick=${toggle}>${on ? "Stop" : label}<//>`;
 }
+
+// ------------------------------------------------------------------ co-op awards (PAD-1028)
+// What the machine shows after a co-op game: one award a row, ticked or not, its words as the page's title.
+// Python reads the rows off the project's card (modes.coop_aw) and keeps the choices in the project.
+export function CoopAwardsDialog({ s, onClose }) {
+  const aw = s.coop_aw || {};
+  const rows = aw.rows || [];
+  useEffect(() => { call("modes.coop_awards_refresh"); }, []);
+  const every = rows.filter((r) => r.kind !== "champion");
+  const own = rows.filter((r) => r.kind === "champion");
+  const row = (r) => html`<div class="modes-coop-aw-row" key=${r.key}>
+    <${Check} checked=${r.on} title=${`Counts ${r.counts}.`}
+      onChange=${(v) => call("modes.coop_award_set", r.key, v, null)} />
+    <${Field} value=${r.words} sm maxLength=${aw.max_words || 27} width=${260} disabled=${!r.on}
+      title=${`The page's title. The game's own words: ${r.stock_words}`}
+      onCommit=${(v) => { if (v !== r.words) call("modes.coop_award_set", r.key, null, v); }} />
+    <span class="small dim wrap">${r.counts}</span>
+  </div>`;
+  return html`<${Modal} title="Co-op awards" icon="star" wide onClose=${onClose}
+    footer=${html`<span class="small muted">${aw.note}</span><span class="grow"></span>
+      <${Button} size="sm" kind="ghost" disabled=${!rows.length} onClick=${() => call("modes.coop_awards_defaults")}
+        title="Every award ticked and worded as the app first had it for this game.">Defaults<//>
+      <${Button} onClick=${onClose}>Close<//>`}>
+    <div class="small dim wrap">${s.coop_awards_tip}</div>
+    ${aw.why ? html`<${Note} kind="info">${aw.why}<//>` : null}
+    ${rows.length ? html`<div class="modes-coop-aw" style="max-height:min(56vh, 520px)">
+      <div class="modes-list-grp">Every game</div>
+      ${every.map(row)}
+      ${own.length ? html`<div class="modes-list-grp">This game's own counts</div>` : null}
+      ${own.map(row)}
+    </div>` : null}
+  <//>`;
+}

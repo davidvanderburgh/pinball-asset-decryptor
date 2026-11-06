@@ -1017,7 +1017,8 @@ def coop_into(result, game_elf, scratch, setting=0, only=False):
     if why:
         raise ModeWriteError(why)
     try:
-        text = CP.cfg_text(game_elf, setting, only)
+        text = CP.cfg_text(game_elf, CP.load_awards(getattr(result, "project", "")),   # PAD-1028: + its awards
+                           setting=setting, only=only)
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)
@@ -1030,6 +1031,8 @@ def coop_into(result, game_elf, scratch, setting=0, only=False):
         result.lines.append("co-op play: switched in the service menu (CO-OP PLAY); %s" % (
             "Insider Connected is off only while it is On" if only
             else "the card's modes keep its scores off Insider Connected either way"))
+    got = [line.split(" ", 3)[3] for line in text.splitlines() if line.startswith("award ")]
+    result.lines.append("co-op awards after each co-op game: %s" % (", ".join(got) if got else "none"))
     return result
 
 

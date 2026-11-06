@@ -13072,7 +13072,7 @@ static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
  * the game's record is never read or written for a mode's page, and a page cut short (a flipper, a game start) is cut
  * at a yield, when it is already back. The game's own pages and their order are unchanged; the modes' follow its
  * last challenge champion's, and only while the game shows its champions at all (the same adjustment). */
-#define CHG_PAGES_MAX 8
+#define CHG_PAGES_MAX 24                 /* PAD-1028: the modes' champions, co-op's boards and a co-op game's awards */
 static int ait_champions_off;                     /* PAD-782: attract.cfg "champions off" */
 static void (*chg_page_game)(void);
 static const char *(*chg_page_text_game)(unsigned, unsigned, unsigned, unsigned);
@@ -13129,12 +13129,14 @@ static void chg_page_title_of(char *out, unsigned cap, const char *name, const c
 }
 
 static int coop_page_names(char names[][40], int n, int cap);    /* PAD-1017, below */
+static int coop_award_names(char names[][40], int n, int cap);   /* PAD-1028, below */
+static int coop_award_page(const char *name, unsigned char *rec, char *title, unsigned cap);
 
 /* the names on the game's challenge list now that a mode holds (a taken one's menu name, or its mode's; the modes'
  * own), upper case as PAD-640 files them, each once: n of them in names[]; PAD-1017: then co-op play's boards */
 static int chg_page_names(char names[][40], int cap)
 {
-    int n = 0, i, k, s;
+    int n = coop_award_names(names, 0, cap), i, k, s;          /* PAD-1028: the last co-op game's awards first */
     char w[40];
     for (s = 0; s < CHALLENGE_OWN + N_OWN_CHALLENGE && n < cap; s++) {
         const char *name = 0;
@@ -13164,17 +13166,19 @@ static void chg_page_wrap(void)
     chg_page_game();                                             /* the game's own page, as it was */
     if (ait_champions_off) return;                               /* PAD-782: the owner switched them off */
     n = pm_read_file(CHG_SCORES, b, sizeof b);
-    if (n <= 0) return;
+    if (n < 0) n = 0;                                            /* PAD-1028: a co-op game's awards need no file */
     k = chg_page_names(names, CHG_PAGES_MAX);
     for (i = 0; i < k; i++) {
-        if (!chg_rec_find(b, n, names[i], chg_page_rec) || !chg_rec_score(chg_page_rec)) continue;
+        int award = coop_award_page(names[i], chg_page_rec, chg_page_title, sizeof chg_page_title);
+        if (!award && (!chg_rec_find(b, n, names[i], chg_page_rec) || !chg_rec_score(chg_page_rec))) continue;
         ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))(
             (unsigned)pm_port_value("challenge_page_cat", 0), 0);
         if (!ent || !maps_has((unsigned long)ent, 28, MAP_R)) return;
-        chg_page_title_of(chg_page_title, sizeof chg_page_title, names[i], chg_page_text_game(chg_page_title_id, 0, 0, 0));
+        if (!award)
+            chg_page_title_of(chg_page_title, sizeof chg_page_title, names[i], chg_page_text_game(chg_page_title_id, 0, 0, 0));
         if (said < 2 * CHG_PAGES_MAX) {
             said++;
-            say("challenge scores: the attract mode shows %s's champion (%llu, %s) under \"%s\"", names[i],
+            say("challenge scores: the attract mode shows %s (%llu, %s) under \"%s\"", award ? "a co-op award" : names[i],
                 chg_rec_score(chg_page_rec), (const char *)chg_page_rec + 32, chg_page_title);
         }
         chg_page_was = ent[0];
@@ -13334,20 +13338,21 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
     if (pm_in_game() || chg_scores_running || (k != CHG_LIST_PAGE && chg_pages_n != 0)
         || !chg_pages_follow(cat, chg_pages_count, &chg_pages_first)) return ret;
     n = pm_read_file(CHG_SCORES, b, sizeof b);
-    if (n <= 0) return ret;
+    if (n < 0) n = 0;                                            /* PAD-1028: a co-op game's awards need no file */
     m = chg_page_names(names, CHG_PAGES_MAX);
     for (i = 0; i < m && !pm_in_game(); i++) {
-        if (!chg_rec_find(b, n, names[i], chg_pages_rec) || !chg_rec_score(chg_pages_rec)) continue;
+        int award = coop_award_page(names[i], chg_pages_rec, chg_pages_title, sizeof chg_pages_title);
+        if (!award && (!chg_rec_find(b, n, names[i], chg_pages_rec) || !chg_rec_score(chg_pages_rec))) continue;
         ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))((unsigned)cat, 0);
         if (!ent || !maps_has((unsigned long)ent, 28, MAP_R)) return ret;
-        chg_champion_title(chg_pages_title, sizeof chg_pages_title, names[i]);
+        if (!award) chg_champion_title(chg_pages_title, sizeof chg_pages_title, names[i]);
         for (j = 0; j + 1 < (int)(sizeof chg_pages_titles / sizeof chg_pages_titles[0]); j++)
             chg_pages_titles[j] = chg_pages_title;
         chg_pages_titles[j] = 0;
         if (said < 2 * CHG_PAGES_MAX) {
             said++;
-            say("challenge scores: the attract mode shows %s's champion (%llu, %s) under \"%s\", after category %d's page",
-                names[i], chg_rec_score(chg_pages_rec), (const char *)chg_pages_rec + 32,
+            say("challenge scores: the attract mode shows %s (%llu, %s) under \"%s\", after category %d's page",
+                award ? "a co-op award" : names[i], chg_rec_score(chg_pages_rec), (const char *)chg_pages_rec + 32,
                 chg_pages_title, cat);
         }
         chg_pages_was[0] = ent[0]; chg_pages_was[1] = ent[5]; chg_pages_was[2] = ent[6];
@@ -15110,6 +15115,246 @@ static int coop_page_names(char names[][40], int n, int cap)
     return n;
 }
 
+/* ---- PAD-1028: a co-op game's awards (MODE_SDK.md "Co-op awards") ---------------------------------------------------
+ * DoomWalrus666: "At the end of a co-op mode game, could we show different awards for the players? Player that
+ * destroyed the most jets, player that used the most ball save, player that collected the most power-ups ..."; David:
+ * "on rails with the awards ahead of time ... a generic skinning of them so they look good in all games ... customizable
+ * per game". The game plays ONE player for the team, so what a teammate did is what the team's counts did while that
+ * teammate was up: the runtime reads each count at every turn's end (coop_change_wrap, on the game's thread, before the
+ * game's own change) and gives the rise since the last read to the teammate whose turn it was. coop.cfg names them, the
+ * app having read them off the card's own program (coop_play.py):
+ *   award champion <cat> <words>       a champion category of the game's own (`data challenge_scores_table`, 36 bytes
+ *                                      a category, +4 its value for a player: value(player) -> u64): Godzilla's JET
+ *                                      FIGHTER CHAMPION counts the jet fighters destroyed, GODZILLA POWERUP the power-ups
+ *   award audit <id>[,<id>..] <words>  audits of the game's (`site audit_add`, hooked: id r0, amount r1): AUD_TOTAL_
+ *                                      BALLS_SAVED, AUD_TOTAL_EXTRA_BALLS, AUD_SHOT_LEFT_RAMP + AUD_SHOT_RIGHT_RAMP, ...
+ *   award score - <words>              the team's points scored while the teammate was up (the ball's bonus in)
+ *   award time - <words>               the teammate's longest ball, in seconds
+ * At the game's end each award goes to the teammate with the most (a tie: each of them; no one when the most is 0). They
+ * are shown the way the game shows its own champions, so in each game's own look: a champion page an award - its words
+ * as the title, "PLAYER 2" in the initials' place, the count as the score - first among the pages the runtime adds to
+ * the attract mode (PAD-660/663), from the game's end until the next game starts. mode.log has every teammate's count. */
+#define COOP_AWARDS 16
+#define COOP_AWARD_IDS 48                   /* the mode audits of a title with many modes (Godzilla: 27) */
+enum { COOP_AW_SCORE = 1, COOP_AW_TIME, COOP_AW_AUDIT, COOP_AW_CHAMPION };
+static struct coop_award {
+    int kind;
+    unsigned ids[COOP_AWARD_IDS], n_ids;    /* the audit ids, or the champion category */
+    char words[28];
+    unsigned long long last;                /* the team's count at the last read */
+    unsigned long long got[4];              /* each teammate's */
+} coop_aw[COOP_AWARDS];
+static int coop_aw_n;
+static int coop_audits;                     /* the game's audit add is hooked */
+static unsigned long coop_turn_ms;          /* when the turn up began */
+static struct { char words[28], who[24]; unsigned long long value; } coop_won[COOP_AWARDS];
+static int coop_won_n;
+static unsigned coop_won_game;              /* the game they are of (chg_game_now()) */
+
+/* the team's count now: its points, or a champion category's value for player 1 (the team) */
+static unsigned long long coop_award_now(const struct coop_award *a)
+{
+    unsigned table, get;
+    if (a->kind == COOP_AW_SCORE) {
+        unsigned s32 = data("scores32"), s64 = data("scores");
+        if (s32) return *(volatile unsigned *)(unsigned long)s32;
+        return s64 ? *(volatile uint64_t *)(unsigned long)s64 : 0;
+    }
+    if (a->kind != COOP_AW_CHAMPION) return 0;
+    table = data("challenge_scores_table");
+    if (!table || !maps_has(table + 36u * a->ids[0] + 4u, 4, MAP_R)) return 0;
+    get = *(const unsigned *)(unsigned long)(table + 36u * a->ids[0] + 4u);
+    if (!maps_has(get, 4, MAP_R | MAP_GAME)) return 0;
+    return ((unsigned long long (*)(unsigned))(unsigned long)get)(1u);
+}
+
+/* a read at the end of a teammate's turn: the rise since the last read is theirs; a count that went down (the game
+ * cleared it) is only noted (tests lift it verbatim) */
+static void coop_award_credit(unsigned long long *last, unsigned long long now, unsigned long long *got)
+{
+    if (now > *last) *got += now - *last;
+    *last = now;
+}
+
+/* the end of teammate t's turn */
+static void coop_awards_read(unsigned t)
+{
+    int i;
+    unsigned long secs = (pm_ms() - coop_turn_ms) / 1000ul;
+    if (t < 1 || t > 4) return;
+    for (i = 0; i < coop_aw_n; i++) {
+        struct coop_award *a = &coop_aw[i];
+        if (a->kind == COOP_AW_SCORE || a->kind == COOP_AW_CHAMPION)
+            coop_award_credit(&a->last, coop_award_now(a), &a->got[t - 1]);
+        else if (a->kind == COOP_AW_TIME && secs > a->got[t - 1])
+            a->got[t - 1] = secs;
+    }
+    coop_turn_ms = pm_ms();
+}
+
+/* a new co-op game: every count from 0 (the game's start has cleared its player's) */
+static void coop_awards_begin(void)
+{
+    int i, k;
+    for (i = 0; i < coop_aw_n; i++) {
+        coop_aw[i].last = 0;
+        for (k = 0; k < 4; k++) coop_aw[i].got[k] = 0;
+    }
+    coop_won_n = 0;
+    coop_turn_ms = pm_ms();
+}
+
+/* the game counts an audit (id r0, amount r1): the teammate up's */
+static void coop_audit_seen(unsigned *r)
+{
+    int i;
+    unsigned k;
+    if (!coop_teammates() || coop.turn < 1 || coop.turn > 4) return;
+    for (i = 0; i < coop_aw_n; i++)
+        if (coop_aw[i].kind == COOP_AW_AUDIT)
+            for (k = 0; k < coop_aw[i].n_ids; k++)
+                if (coop_aw[i].ids[k] == r[0]) coop_aw[i].got[coop.turn - 1] += r[1];
+}
+
+/* who has the most of n teammates' counts: "PLAYER 2", "PLAYERS 1+3", "ALL PLAYERS" (every one tied) in who (24
+ * bytes at least) - short, as the page letter-spaces the initials' place - and the most; 0 and "" when the most is 0
+ * (tests lift it verbatim) */
+static unsigned long long coop_award_winner(const unsigned long long *got, unsigned n, char *who)
+{
+    unsigned long long top = 0;
+    unsigned k, c = 0, o = 0;
+    const char *head;
+    who[0] = 0;
+    for (k = 0; k < n; k++) if (got[k] > top) top = got[k];
+    if (!top) return 0;
+    for (k = 0; k < n; k++) c += got[k] == top;
+    for (head = c == n && n > 1 ? "ALL PLAYERS" : c > 1 ? "PLAYERS " : "PLAYER "; *head; ) who[o++] = *head++;
+    for (k = 0; k < n && !(c == n && n > 1); k++) {
+        if (got[k] != top) continue;
+        if (o && who[o - 1] != ' ') who[o++] = '+';
+        who[o++] = (char)('1' + k);
+    }
+    who[o] = 0;
+    return top;
+}
+
+/* the game is over: each award to the teammate(s) with the most, for the attract mode's pages and mode.log */
+static void coop_awards_end(unsigned n)
+{
+    int i;
+    unsigned k, o;
+    char counts[64];
+    coop_won_n = 0;
+    coop_won_game = chg_game_now();
+    for (i = 0; i < coop_aw_n; i++) {
+        struct coop_award *a = &coop_aw[i];
+        unsigned long long top = coop_award_winner(a->got, n, coop_won[coop_won_n].who);
+        for (o = 0, k = 0; k < n && o + 24 < sizeof counts; k++)
+            o += (unsigned)pm_snprintf(counts + o, sizeof counts - o, "%s%u:%llu", k ? " " : "", k + 1, a->got[k]);
+        say("co-op award: %s - %s (%s)", a->words, top ? coop_won[coop_won_n].who : "no one, none counted", counts);
+        if (!top) continue;
+        for (k = 0; k + 1 < sizeof coop_won[0].words && a->words[k]; k++) coop_won[coop_won_n].words[k] = a->words[k];
+        coop_won[coop_won_n].words[k] = 0;
+        coop_won[coop_won_n].value = top;
+        coop_won_n++;
+    }
+    if (coop_aw_n)
+        say("co-op: %d award%s on the attract mode's champion pages until the next game starts", coop_won_n,
+            coop_won_n == 1 ? "" : "s");
+}
+
+/* the attract mode's pages: a name an award ("\001" and a letter), before the modes' champions */
+static int coop_award_names(char names[][40], int n, int cap)
+{
+    int i;
+    for (i = 0; i < coop_won_n && n < cap; i++, n++) {
+        names[n][0] = '\001';
+        names[n][1] = (char)('A' + i);
+        names[n][2] = 0;
+    }
+    return n;
+}
+
+/* an award's page: its record (the winner in the initials' place, the count as the score) and its title; 0 for any
+ * other name */
+static int coop_award_page(const char *name, unsigned char *rec, char *title, unsigned cap)
+{
+    unsigned i, k;
+    unsigned long long v;
+    unsigned short c;
+    if (name[0] != '\001' || !name[1] || name[2]) return 0;
+    i = (unsigned)(name[1] - 'A');
+    if (i >= (unsigned)coop_won_n) return 0;
+    chg_rec_fresh(rec, coop_won[i].who);
+    for (v = coop_won[i].value, k = 0; k < chg_rec_score_size; k++, v >>= 8) rec[chg_rec_score_at + k] = (unsigned char)v;
+    c = chg_rec_check(rec);
+    rec[chg_rec_check_at] = (unsigned char)c;
+    rec[chg_rec_check_at + 1] = (unsigned char)(c >> 8);
+    for (k = 0; k + 1 < cap && coop_won[i].words[k]; k++) title[k] = coop_won[i].words[k];
+    title[k] = 0;
+    return 1;
+}
+
+/* coop.cfg: award <kind> <ids, or -> <words> */
+static void coop_award_line(const char *s)
+{
+    struct coop_award *a;
+    const char *p;
+    unsigned k;
+    int ok;
+    if (coop_aw_n >= COOP_AWARDS) return;
+    a = &coop_aw[coop_aw_n];
+    a->kind = str_starts(s, "score ") ? COOP_AW_SCORE : str_starts(s, "time ") ? COOP_AW_TIME
+            : str_starts(s, "audit ") ? COOP_AW_AUDIT : str_starts(s, "champion ") ? COOP_AW_CHAMPION : 0;
+    if (!a->kind) return;
+    while (*s && *s != ' ') s++;
+    while (*s == ' ') s++;
+    for (a->n_ids = 0, p = s; *p != '-' && a->n_ids < COOP_AWARD_IDS; p++) {
+        a->ids[a->n_ids] = (unsigned)number(&p, &ok);
+        if (!ok) break;
+        a->n_ids++;
+        if (*p != ',') break;
+    }
+    while (*s && *s != ' ') s++;
+    while (*s == ' ') s++;
+    for (k = 0; k + 1 < sizeof a->words && s[k] && s[k] != '\r' && s[k] != '\n'; k++) a->words[k] = s[k];
+    a->words[k] = 0;
+    if (k && (a->kind == COOP_AW_SCORE || a->kind == COOP_AW_TIME || a->n_ids)) coop_aw_n++;
+}
+
+/* armed with co-op: the awards this build can count (audits through the game's audit add, champions through its
+ * category table), the rest left out */
+static void coop_awards_arm(void)
+{
+    static const char *const kinds[] = { "", "points scored", "the longest ball", "audit", "champion category" };
+    int i, kept = 0, audits = 0;
+    unsigned count = data("challenge_scores_count"), cats;
+    cats = data("challenge_scores_table") && count && maps_has(count, 4, MAP_R) ? *(const unsigned *)(unsigned long)count : 0;
+    for (i = 0; i < coop_aw_n; i++) audits |= coop_aw[i].kind == COOP_AW_AUDIT;
+    if (audits && fn("audit_add") && hook(fn("audit_add"), coop_audit_seen)) coop_audits = 1;
+    for (i = 0; i < coop_aw_n; i++) {
+        struct coop_award *a = &coop_aw[i];
+        int ok = a->kind == COOP_AW_SCORE ? data("scores32") || data("scores") : a->kind == COOP_AW_TIME ? 1
+               : a->kind == COOP_AW_AUDIT ? coop_audits : a->ids[0] > 0 && a->ids[0] < cats && cats <= 64;
+        if (!ok) {
+            say("co-op awards: \"%s\" cannot be counted on this build (%s) - left out", a->words,
+                a->kind == COOP_AW_AUDIT ? "the port names no audit add" : "no champion category table");
+            continue;
+        }
+        if (kept != i) coop_aw[kept] = *a;
+        kept++;
+    }
+    coop_aw_n = kept;
+    for (i = 0; i < coop_aw_n; i++) {
+        char ids[64];
+        unsigned o = 0, k;
+        ids[0] = 0;
+        for (k = 0; k < coop_aw[i].n_ids && o + 12 < sizeof ids; k++)
+            o += (unsigned)pm_snprintf(ids + o, sizeof ids - o, "%s%u", k ? "," : "", coop_aw[i].ids[k]);
+        say("co-op award %d: \"%s\" - %s %s", i + 1, coop_aw[i].words, kinds[coop_aw[i].kind], ids);
+    }
+}
+
 /* Whose turn it is, on the screen: the game's own top line "BALL 1" (the message table's "BALL %d", every build's
  * words for it) reads "PLAYER 2  BALL 1" while teammate 2 is up, and is the game's own again when the game is over or
  * not a co-op one (coop_tick). The line is found by its English words once, when co-op is armed. */
@@ -15163,6 +15408,10 @@ static void coop_tick(void)
 {
     unsigned n = coop_teammates();
     if (n && pm_in_game()) coop_scores_same(n);
+    if (coop_won_n && pm_in_game() && chg_game_now() != coop_won_game) {     /* PAD-1028: the next game's start */
+        coop_won_n = 0;
+        say("co-op: the last co-op game's awards are off the attract mode (a new game)");
+    }
     if (coop_ball_held && !(coop_teammates() && pm_in_game())) {
         pm_message_restore(COOP_MSG_ID);
         coop_ball_held = 0;
@@ -15201,6 +15450,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.game = chg_game_now() + 1;
         coop.turn = 1;
         n = 1;
+        coop_awards_begin();                                  /* PAD-1028 */
     }
     coop.n = n + 1;
     coop_scores_same(coop.n);
@@ -15216,6 +15466,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     unsigned n = coop_teammates(), before, down, ret, next, players;
     if (!n) return coop_change_game(r0, r1, r2, r3);
     coop_scores_same(n);                                      /* the ball's bonus is in: before the game's end reads them */
+    coop_awards_read(coop.turn);                              /* PAD-1028: the turn's counts, bonus in, are its teammate's */
     before = *coop_ball_byte;
     down = coop.turn < n && before > 0;
     if (down) *coop_ball_byte = (unsigned char)(before - 1);
@@ -15236,6 +15487,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     } else {
         say("co-op: the game's end counts %u player(s): one match draw and one high score for the team",
             *coop_players_byte);
+        coop_awards_end(n);                                   /* PAD-1028 */
     }
     return ret;
 }
@@ -15247,6 +15499,7 @@ static void coop_line(const char *s)
     while (*s == ' ' || *s == '\t') s++;
     if (!*s || *s == '#') return;
     if (str_starts(s, "coop on")) { coop.on = 1; return; }
+    if (str_starts(s, "award ")) { coop_award_line(s + 6); return; }      /* PAD-1028 */
     if (str_starts(s, "button ")) {
         p = s + 7;
         coop.button = (unsigned)number(&p, &ok);
@@ -15287,7 +15540,7 @@ static unsigned coop_setting_wanted(void)
 /* coop.cfg asks for co-op: the card takes the runtime's whole gate, as attract items do */
 static int coop_wanted(void)
 {
-    static char raw[1024];
+    static char raw[8192];                   /* PAD-1028: the award lines too */
     long n = -1, i;
     unsigned k;
     for (k = 0; k < sizeof COOP_FILES / sizeof COOP_FILES[0] && n < 0; k++)
@@ -15301,7 +15554,7 @@ static int coop_wanted(void)
 
 static void coop_arm(void)
 {
-    static char raw[1024];
+    static char raw[8192];
     long n = -1, i, start = 0;
     unsigned k;
     const char *why = 0;
@@ -15357,6 +15610,7 @@ static void coop_arm(void)
     if (coop.setting)
         say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08x, now %s)", coop.setting,
             coop_switched_on() ? "On" : "Off");
+    coop_awards_arm();                                        /* PAD-1028 */
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
         data("coop_player"), data("coop_player") + 1, data("coop_players"));

@@ -395,7 +395,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._init_check()
         self._init_reading()
         self._init_sheet()
-        self.set(coop_on=False, coop_note="", coop_note_kind="", coop_shown=False,   # PAD-1017
+        self.set(coop_on=False, coop_note="", coop_note_kind="", coop_shown=False, coop_awards_ok=False,   # PAD-1017
+                 coop_aw={"why": "", "note": "", "rows": [], "max_words": 27}, coop_awards_tip="",   # PAD-1028
                  coop_tip=self.COOP_TIP)
         self.set(idle_on=False, idle_note="", idle_note_kind="", idle_shown=False,   # PAD-1022
                  idle_tip=self.IDLE_TIP)
@@ -726,7 +727,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             else:
                 note = "On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + ". Its scores stay off Insider Connected."
         self.set(coop_shown=bool(project), coop_on=on, coop_menu=menu, coop_note=note, coop_note_kind=kind,
-                 coop_menu_tip=self.COOP_MENU_TIP)
+                 coop_menu_tip=self.COOP_MENU_TIP,
+                 coop_awards_ok=on and kind != "err", coop_awards_tip=self.COOP_AWARDS_TIP)   # PAD-1028
 
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
@@ -752,6 +754,67 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         history_log.record(project, [hist] if hist else [])
         self._say("co-op play: %s" % ("switched in the game's service menu (CO-OP PLAY)" if on else "always on"))
         self._publish_coop(project)
+        return True
+
+    #: PAD-1028: the co-op game's awards (plugins/stern/coop_play.py "a co-op game's awards")
+    COOP_AWARDS_TIP = (
+        "After each co-op game the machine shows who did best at each award you tick here: most points, most ball "
+        "saves, the longest ball, and any count of the game's own (on Godzilla, the jet fighters destroyed). They "
+        "show in the attract mode the way the game shows its champions, in the game's own look, until the next game "
+        "starts.")
+
+    def _publish_coop_awards(self, project):
+        from ...plugins.stern import coop_play as _CP
+        why, rows = _CP.project_awards(project) if project else ("", [])
+        on = sum(1 for a in rows if a["on"] and a["words"])
+        note = ("%d of %d ticked. The card takes the first %d ticked." % (on, len(rows), _CP.MAX_AWARDS)
+                if on > _CP.MAX_AWARDS else "%d ticked." % on if rows else "")
+        self.set(coop_aw={"why": why, "note": note, "max_words": _CP.MAX_WORDS,
+                          "rows": [{"key": a["key"], "words": a["words"], "on": bool(a["on"]), "counts": a["counts"],
+                                    "stock_words": a["stock_words"], "kind": a["kind"]} for a in rows]})
+
+    @rpc
+    def coop_awards_refresh(self):
+        """PAD-1028: the Co-op awards dialog's rows, read off the project's card (cached)."""
+        self._publish_coop_awards(self.project())
+        return True
+
+    @rpc
+    def coop_award_set(self, key, on=None, words=None):
+        """PAD-1028: tick, untick or rename one co-op award."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project or not key:
+            return False
+        rows = {a["key"]: a for a in (self.get("coop_aw") or {}).get("rows") or []}
+        was = rows.get(key) or {}
+        if words is not None and not _CP.clean_words(words):
+            words = was.get("stock_words") or None
+        _CP.save_award(project, key, on=on, words=words)
+        hist = []
+        if on is not None:
+            hist.append(history_log.diff_scalar("modes  co-op award %s" % (was.get("words") or key),
+                                                "on" if was.get("on") else "off", "on" if on else "off"))
+        if words is not None:
+            hist.append(history_log.diff_scalar("modes  co-op award %s words" % key, was.get("words") or "",
+                                                _CP.clean_words(words)))
+        history_log.record(project, [h for h in hist if h])
+        self._publish_coop_awards(project)
+        return True
+
+    @rpc
+    def coop_awards_defaults(self):
+        """PAD-1028: every co-op award as the game's defaults again."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        _CP.save_award(project, None)
+        hist = history_log.diff_scalar("modes  co-op awards", "changed", "defaults")
+        history_log.record(project, [hist] if hist else [])
+        self._publish_coop_awards(project)
         return True
 
     @rpc

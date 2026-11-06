@@ -751,7 +751,8 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         if not can_auto:
             stage = None
         self._update_stage = stage
-        self._update_pct = pct if stage == "downloading" else None
+        self._update_pct = (pct if stage in ("downloading", "installing")
+                            else None)
         self._update_available = (version, url,
                                   installer if can_auto else None)
         verb = update_action_verb(installer) if can_auto else ""
@@ -760,7 +761,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             tip = ("Pinball Asset Decryptor v%s is downloading in the "
                    "background — you're on v%s." % (version, __version__))
         elif stage == "installing":
-            label = "Installing v%s…" % version
+            label = "Installing v%s…%s" % (version, self._pct_text())
             tip = ("Pinball Asset Decryptor v%s is installing in the "
                    "background — you're on v%s." % (version, __version__))
         elif stage == "ready":
@@ -790,8 +791,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             text = ("Pinball Asset Decryptor v%s is %s in the background%s "
                     "— PAD restarts into it by itself when it's ready."
                     % (version, stage,
-                       " (%d%%)" % pct if stage == "downloading"
-                       and pct is not None else ""))
+                       " (%d%%)" % pct if pct is not None else ""))
             actions = [not_now]
         elif stage == "downloading":
             text = ("Pinball Asset Decryptor v%s is downloading in the "
@@ -802,8 +802,10 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             actions = [{"id": "notes", "label": "Release notes"}]
         elif stage == "installing":
             text = ("Pinball Asset Decryptor v%s is installing in the "
-                    "background — you're on v%s. Keep working; Restart to "
-                    "update appears when it's done." % (version, __version__))
+                    "background%s — you're on v%s. Keep working; Restart to "
+                    "update appears when it's done."
+                    % (version, " (%d%%)" % pct if pct is not None else "",
+                       __version__))
             actions = [{"id": "notes", "label": "Release notes"}]
         elif stage == "ready":
             text = ("Pinball Asset Decryptor v%s is ready — restart to "
@@ -820,9 +822,14 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             text = ("Pinball Asset Decryptor v%s is available — you're on "
                     "v%s." % (version, __version__))
             actions = [{"id": "notes", "label": "Download", "primary": True}]
-        self.window.set_banner("update", {
-            "kind": "info", "icon": "bolt", "text": text,
-            "actions": actions, "dismiss": True})
+        banner = {"kind": "info", "icon": "bolt", "text": text,
+                  "actions": actions, "dismiss": True}
+        if stage in ("downloading", "installing"):
+            # PAD-1029: a bar while it works - the percent when there is
+            # one, a spinner until the first one comes in
+            banner["progress"] = (self._update_pct
+                                  if self._update_pct is not None else -1)
+        self.window.set_banner("update", banner)
         self._update_banner_shown = True
 
     def _update_banner_action(self, action):

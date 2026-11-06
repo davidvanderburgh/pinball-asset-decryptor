@@ -9,7 +9,7 @@ repairing its permissions and compiling ~400 modules.  None of that needs
 the app closed if it happens somewhere else.  So:
 
 * **Stage** (in the background, while the user works).  The downloaded setup
-  exe runs silently with ``/STAGED=1 /DIR=<app>.next``: a whole install of
+  exe runs silently with ``/STAGED=2 /DIR=<app>.next``: a whole install of
   the new version in a sibling folder.  ``/STAGED`` (pinball_decryptor.iss,
   ``IsStaged``) leaves out everything that points outside that folder - the
   shortcuts, the uninstall entry, the Visual Pinball controller's
@@ -51,9 +51,12 @@ OLD_SUFFIX = ".old"
 #: written into the staged folder once it is whole: what version it holds
 MARKER = ".pad_staged.json"
 
-#: the setup exe's switches for the background install
+#: the setup exe's switches for the background install.  ``/STAGED=2``, not
+#: 1: the setup exe refuses 1, which only v1.349.0 - v1.350.0 send, so those
+#: copies (whose swap helper never ran, PAD-1029) update through the plain
+#: installer instead
 STAGE_ARGS = ('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS '
-              '/STAGED=1 /MERGETASKS="!runprereqs,!desktopicon" /DIR="%s"')
+              '/STAGED=2 /MERGETASKS="!runprereqs,!desktopicon" /DIR="%s"')
 #: how long the background install may take before it is given up on
 STAGE_TIMEOUT = 20 * 60
 
@@ -224,21 +227,25 @@ def _repair_acls(folder, run):
 _STAGE_LOCK = threading.Lock()
 
 
-def stage_install(setup_path, app_dir, version, run=None, cancel_cb=None):
+def stage_install(setup_path, app_dir, version, run=None, cancel_cb=None,
+                  progress_cb=None):
     """See :func:`_stage_install`; serialised by :data:`_STAGE_LOCK`."""
     with _STAGE_LOCK:
         if cancel_cb and cancel_cb():
             raise InterruptedError("staging canceled")
-        return _stage_install(setup_path, app_dir, version, run, cancel_cb)
+        return _stage_install(setup_path, app_dir, version, run, cancel_cb,
+                              progress_cb)
 
 
-def _stage_install(setup_path, app_dir, version, run=None, cancel_cb=None):
+def _stage_install(setup_path, app_dir, version, run=None, cancel_cb=None,
+                   progress_cb=None):
     """Install *version* from *setup_path* into ``<app>.next`` without
     touching the running app.  Returns ``(True, carried)`` or
     ``(False, reason)``, with no half-staged folder left behind on failure.
 
     *cancel_cb* is checked between the steps; a cancel removes the folder
-    and raises InterruptedError.
+    and raises InterruptedError.  *progress_cb* is told how far along it
+    is, 0-100 (see :func:`_watch_progress`).
     """
     run = run or subprocess.run
     target = next_dir(app_dir)
@@ -246,14 +253,67 @@ def _stage_install(setup_path, app_dir, version, run=None, cancel_cb=None):
     if os.path.exists(target):
         return False, "%s could not be cleared" % target
     ok, info = _stage_into(setup_path, app_dir, target, version, run,
-                           cancel_cb)
+                           cancel_cb, progress_cb or (lambda pct: None))
     if not ok:
         shutil.rmtree(target, ignore_errors=True)
     return ok, info
 
 
-def _stage_into(setup_path, app_dir, target, version, run, cancel_cb):
+def folder_bytes(folder):
+    """The bytes of every file under *folder* (0 when it is not there);
+    files that vanish or cannot be read mid-walk are skipped."""
+    total = 0
+    stack = [folder]
+    while stack:
+        try:
+            entries = list(os.scandir(stack.pop()))
+        except OSError:
+            continue
+        for e in entries:
+            try:
+                if e.is_dir(follow_symlinks=False):
+                    stack.append(e.path)
+                else:
+                    total += e.stat(follow_symlinks=False).st_size
+            except OSError:
+                pass
+    return total
+
+
+#: how far the bar goes while the setup exe copies; carrying over and the
+#: ACL repair take it the rest of the way
+COPY_SHARE = 90
+#: how often the copy is measured (seconds)
+WATCH_EVERY = 1.0
+
+
+def _watch_progress(app_dir, target, progress_cb, stop):
+    """While the setup exe runs: report how much of the new folder is
+    written, against the size of the running install (PAD-1029, David:
+    "while it's installing in the background, I want to see a progress
+    circle / bar").  The silent setup exe says nothing while it works, and
+    the new version is about as big as the one in place, so its folder
+    filling up is the honest measure.  Never past COPY_SHARE - 1: the copy
+    is not done until the setup exe says so."""
+    whole = folder_bytes(app_dir) or 1
+    last = -1
+    while not stop.wait(WATCH_EVERY):
+        pct = min(COPY_SHARE - 1,
+                  int(folder_bytes(target) * COPY_SHARE / whole))
+        if pct > last:
+            last = pct
+            progress_cb(pct)
+
+
+def _stage_into(setup_path, app_dir, target, version, run, cancel_cb,
+                progress_cb):
     try:
+        progress_cb(0)
+        stop = threading.Event()
+        watcher = threading.Thread(
+            target=_watch_progress, args=(app_dir, target, progress_cb, stop),
+            daemon=True, name="update-stage-progress")
+        watcher.start()
         try:
             r = run('"%s" %s' % (setup_path, STAGE_ARGS % target),
                     capture_output=True, timeout=STAGE_TIMEOUT,
@@ -266,6 +326,9 @@ def _stage_into(setup_path, app_dir, target, version, run, cancel_cb):
             return False, "the installer did not start (%s)" % e
         except subprocess.TimeoutExpired:
             return False, "the installer took too long"
+        finally:
+            stop.set()
+            watcher.join()
         code = getattr(r, "returncode", 1)
         if code != 0:
             return False, "the installer stopped with code %s" % code
@@ -274,12 +337,15 @@ def _stage_into(setup_path, app_dir, target, version, run, cancel_cb):
         problem = _layout_problem(target, version)
         if problem:
             return False, problem
+        progress_cb(COPY_SHARE)
         carried = carry_over(app_dir, target)
         if cancel_cb and cancel_cb():
             raise InterruptedError("staging canceled")
+        progress_cb(COPY_SHARE + 3)
         _repair_acls(target, run)
         with open(os.path.join(target, MARKER), "w", encoding="utf-8") as f:
             json.dump({"version": version, "setup": str(setup_path)}, f)
+        progress_cb(100)
         return True, carried
     except BaseException as e:
         shutil.rmtree(target, ignore_errors=True)
@@ -402,6 +468,14 @@ def start_swap(app_dir, version, setup_path, pid=None, popen=None,
     Started from the temp folder, never from inside the app's: a process
     whose working directory is in the folder holds it open, and the rename
     would fail on our own helper.
+
+    NEVER WITH DETACHED_PROCESS (PAD-1029, David: "Pressing restart to
+    update is not restarting the app").  Windows PowerShell started with no
+    console at all exits 0 at once without running a line of the script -
+    no log, no swap, no relaunch - so the app closed and nothing brought it
+    back.  CREATE_NO_WINDOW gives it a console nobody sees, and a child
+    outlives its parent on Windows anyway; the new process group keeps the
+    app's Ctrl+C / Ctrl+Break from reaching it.
     """
     popen = popen or subprocess.Popen
     tmp = tempfile.gettempdir()
@@ -412,8 +486,7 @@ def start_swap(app_dir, version, setup_path, pid=None, popen=None,
                             pid if pid is not None else os.getpid(),
                             log_path, launch=launch, register=register))
     flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
-             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-             | getattr(subprocess, "DETACHED_PROCESS", 0))
+             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     try:
         popen(["powershell.exe", "-NoProfile", "-NonInteractive",
                "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",

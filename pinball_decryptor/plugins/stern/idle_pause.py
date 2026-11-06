@@ -24,6 +24,8 @@ NO_NEED = "%s pauses its timers by itself when its ALLOW INACTIVITY TO PAUSE TIM
 #: what the card does, for the tab and the log
 HOW = ("with ALLOW INACTIVITY TO PAUSE TIMERS on (the game's own setting, on by default), the missions' clocks and "
        "the hurry-ups wait when nobody has scored for 6 seconds, and run on at the next score")
+#: the Modes tab's line under the tick
+NOTE = "On the card: the clocks wait after 6 seconds with no score, while the game's setting is on."
 
 
 def load(project):

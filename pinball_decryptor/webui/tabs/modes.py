@@ -757,7 +757,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             if why:
                 note, kind = why, "err"
             else:
-                note = "On the card: " + _IP.HOW[0].upper() + _IP.HOW[1:] + "."
+                note = _IP.NOTE
         self.set(idle_shown=shown or on, idle_on=on, idle_note=note, idle_note_kind=kind)
 
     @rpc

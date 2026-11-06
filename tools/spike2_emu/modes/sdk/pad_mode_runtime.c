@@ -15170,6 +15170,9 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     if (ret & 0xff) {
         coop.turn = next;
         coop_turn_show();
+    } else {
+        say("co-op: the game's end counts %u player(s): one match draw and one high score for the team",
+            *coop_players_byte);
     }
     return ret;
 }

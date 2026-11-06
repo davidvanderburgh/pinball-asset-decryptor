@@ -38,6 +38,7 @@ class _App:
     _update_download_dir = app_mod.App._update_download_dir
     _update_downloaded = app_mod.App._update_downloaded
     _finish_appimage_update = app_mod.App._finish_appimage_update
+    _close_for_update = app_mod.App._close_for_update
 
     def __init__(self):
         self.window = _Window()

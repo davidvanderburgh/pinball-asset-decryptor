@@ -340,9 +340,12 @@ def test_the_pick_has_a_screen_for_each_character_and_random(tmp_path):
     assert CP.load_characters(project)["list"][1]["picture"] == "coop/character_2.png"
     screens = CP.pick_screens(project, words_for=CP.words_for())
     assert [s["name"] for s in screens] == ["PadCoop_1", "PadCoop_2", "PadCoop_Random"]
-    assert screens[0]["words"] == "GODZILLA 1954 - LONGER BALL SAVE" and screens[1]["words"] == "SHIN GODZILLA"
-    assert screens[1]["art_rgba"].shape[:2] == (200, 300)              # the owner's picture, not the panel
-    assert screens[0]["art_rgba"].shape[:2] == (160, 640)              # the generated panel
+    for sc in screens:                                                 # one finished card each, all words on it
+        assert sc["art_rgba"].shape == (CP.CARD_SIZE[1], CP.CARD_SIZE[0], 4) and sc["words"] == " "
+        assert (sc["x"], sc["y"]) == CP.CARD_AT
+    px, py = 40 + 190, 84 + 150                                        # the portrait's middle on card 2: the picture
+    assert tuple(screens[1]["art_rgba"][py, px][:3]) == (10, 120, 10)
+    assert tuple(screens[0]["art_rgba"][py, px][:3]) != (10, 120, 10)  # card 1: the monogram plate
     assert CP.preview(project, None, CP.words_for(), 1)[:8] == b"\x89PNG\r\n\x1a\n"
     with pytest.raises(CP.CoopError):
         CP.save_picture(project, 0, str(tmp_path / "x.txt")) if (tmp_path / "x.txt").write_text("no") else None
@@ -411,3 +414,13 @@ def test_spot_and_unlock_read_from_coop_cfg():
     assert "c->unlock_adj == id && (coop_started[coop.turn] & c->unlock_rules)" in wrap
     spot = R._lift(src, "static int coop_spot(const struct coop_char *c)")
     assert 'fn("shot_dispatch")' in spot and "lit & (~lit + 1)" in spot
+
+
+def test_tags_name_what_sets_a_character_apart():
+    names = ["GODZILLA 1954", "GODZILLA GMK", "DESTROY ALL MONSTERS", "KING KONG VS GODZILLA", "GODZILLA VS MECHAGODZILLA"]
+    assert [CP.tag_of(n, names) for n in names] == ["1954", "GMK", "DAM", "KK", "MECHA"]
+    assert CP.theme_of({"title": "choose your godzilla", "accent": "#38c8ff", "bogus": 1}) == {
+        "title": "CHOOSE YOUR GODZILLA", "accent": "#38c8ff", "accent2": CP.THEME["accent2"]}
+    preset = CP.read_preset(CP.presets()["godzilla"])["characters"]
+    assert preset["theme"]["title"] == "CHOOSE YOUR GODZILLA"
+    assert set(CP.CARD_LINES) == {a[0] for a in CP.ABILITIES}         # every ability has the player's words

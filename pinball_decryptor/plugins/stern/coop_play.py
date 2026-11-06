@@ -375,6 +375,21 @@ ABILITIES = (
     ("tanks", "STARTS WITH 4 TANKS", "Four tanks count as destroyed when they pick: the city map's TANKS n/10 starts "
      "at 4.", ("count", "tanks", 4)),
 )
+#: what the pick's card says each ability does, in the player's words
+CARD_LINES = {
+    "longer_save": "Twice the ball save at the start of every ball.",
+    "action_save": "Press Action twice for a 10 second ball save, once a ball.",
+    "heat_ray": "The heat ray charges in half the spins.",
+    "battles": "One ramp lights a battle.",
+    "building": "Building Multiball is easier to start.",
+    "powerups": "Every Godzilla power-up counts twice.",
+    "ally": "Starts with an ally lit.",
+    "jets": "Starts with 4 jet fighters destroyed.",
+    "tanks": "Starts with 4 tanks destroyed.",
+    "spot": "Press Action twice in a battle to hit its next shot, once a ball.",
+    "tier2": "Starting a tier 1 battle opens tier 2.",
+}
+
 #: why an ability is not offered on a card
 NO_ADJ = "%s's game program has no %s setting."
 NO_ACTION = "%s has no Action button."
@@ -479,7 +494,11 @@ def _characters(got):
         if isinstance(c, dict) and clean_name(c.get("name")):
             out.append({"name": clean_name(c.get("name")), "ability": str(c.get("ability") or ""),
                         "picture": str(c.get("picture") or "")})
-    return {"pick": bool(got.get("pick")), "list": out[:MAX_CHARACTERS]}
+    theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
+    out = {"pick": bool(got.get("pick")), "list": out[:MAX_CHARACTERS]}
+    if theme:
+        out["theme"] = {k: str(v) for k, v in theme.items() if k in ("title", "accent", "accent2") and v}
+    return out
 
 
 def save_characters(project, characters):
@@ -540,7 +559,8 @@ def read_preset(path):
         raise CoopError("The co-op characters file could not be read: %s" % e) from e
     if not isinstance(raw, dict) or not isinstance(raw.get("characters"), list):
         raise CoopError("The file is not a co-op characters file (it has no characters list).")
-    return {"game": str(raw.get("game") or ""), "characters": _characters({"pick": True, "list": raw["characters"]})}
+    return {"game": str(raw.get("game") or ""),
+            "characters": _characters({"pick": True, "list": raw["characters"], "theme": raw.get("theme")})}
 
 
 def project_abilities(project):
@@ -669,18 +689,14 @@ def pick_screens(project, characters=None, words_for=None):
     chars = _characters(characters if characters is not None else load_characters(project))
     if not chars["pick"] or not chars["list"]:
         return []
+    del MA
     out = []
-    for i, c in enumerate(chars["list"] + [{"name": "RANDOM", "ability": "", "picture": ""}]):
-        node = SCREEN_NODE % ("Random" if i == len(chars["list"]) else i + 1)
-        path = picture_path(project, c)
-        art = MA.load_art(path) if path else MA.panel_art(c["name"], PANEL_COLOR, TITLE_COLOR)
-        x, y, words_at = MA.screen_place(art)
-        if words_at is not None:
-            art = MA.band_art(art)
-        does = (words_for or {}).get(c["ability"], "") if c["ability"] else ""
-        words = c["name"] if i == len(chars["list"]) else (c["name"] + (" - " + does if does else ""))
-        out.append(dict(name=node, art_rgba=art, words=words[:60], words_name=node + "_Words", x=x, y=y,
-                        words_at=words_at))
+    n = len(chars["list"])
+    for i in range(n + 1):                    # every word is on the card: the screen's own line stays empty
+        out.append(dict(name=SCREEN_NODE % ("Random" if i == n else i + 1),
+                        art_rgba=pick_card(project, chars, i, words_for, chars.get("theme")),
+                        words=" ", words_name=(SCREEN_NODE % ("Random" if i == n else i + 1)) + "_Words",
+                        x=float(CARD_AT[0]), y=float(CARD_AT[1]), words_at=(20.0, float(CARD_SIZE[1] - 30))))
     return out
 
 
@@ -715,18 +731,312 @@ def preview(project, characters=None, words_for=None, index=0):
     import numpy as np
     from PIL import Image
     from . import mode_assets as MA
-    screens = pick_screens(project, characters, words_for)
-    if not screens:
+    chars = _characters(characters if characters is not None else load_characters(project))
+    if not chars["list"]:
         return b""
-    s = screens[max(0, min(int(index), len(screens) - 1))]
-    glass = Image.new("RGBA", (1360, 768), (12, 12, 16, 255))
-    art = Image.fromarray(np.asarray(s["art_rgba"], dtype=np.uint8), "RGBA")
-    glass.alpha_composite(art, (int(s["x"]), int(s["y"])))
+    index = max(0, min(int(index), len(chars["list"])))           # only the one card: a click redraws in a moment
+    s = {"art_rgba": pick_card(project, chars, index, words_for, chars.get("theme")), "x": CARD_AT[0], "y": CARD_AT[1]}
+    glass = Image.new("RGBA", (1360, 768), (40, 34, 58, 255))
     from PIL import ImageDraw
     d = ImageDraw.Draw(glass)
-    wx, wy = s["words_at"] if s["words_at"] is not None else (20.0, art.height + 50.0)
-    d.text((int(s["x"] + wx), int(s["y"] + wy - 40)), s["words"], fill=(255, 230, 0, 255),
-           font=MA._fit_font(d, s["words"], 1300 - int(s["x"] + wx), 34))
+    d.rounded_rectangle((470, -20, 890, 76), radius=18, fill=(30, 30, 36, 255))     # the game's top bar
+    d.text((680, 30), "PLAYER 1 PICK", fill=(255, 255, 255, 255), anchor="mm", font=MA._font(26))
+    for k in range(4):                                                            # its score panels
+        d.rounded_rectangle((30 + k * 330, 612, 330 + k * 330, 760), radius=14, fill=(26, 26, 30, 255))
+    del MA
+    art = Image.fromarray(np.asarray(s["art_rgba"], dtype=np.uint8), "RGBA")
+    glass.alpha_composite(art, (int(s["x"]), int(s["y"])))
     buf = io.BytesIO()
     glass.convert("RGB").save(buf, "PNG")
     return buf.getvalue()
+
+
+# ---- PAD-1031: the pick's card design ---------------------------------------------------------------------------------
+# David: "a much better stylized design ... production quality". Each pick screen is one finished card the size of the
+# glass between the game's top bar and its score panels: a themed header, the character's portrait in a lit frame,
+# its name in a heavy display face, its ability as a badge with what it does, the whole roster as a strip with this
+# one lit, and how to choose. Drawn at 2x and scaled down (smooth edges); the picture is the owner's, never the app's.
+
+#: where the card sits on the 1360x768 glass: under the top bar, above the score panels
+CARD_AT = (40, 86)
+CARD_SIZE = (1280, 516)
+#: the default look; a preset may give its own ("theme": {"title", "accent", "accent2"})
+THEME = {"title": "CHOOSE YOUR CHARACTER", "accent": "#ffb400", "accent2": "#ff5a1f"}
+_DISPLAY_FONTS = (r"C:\Windows\Fonts\impact.ttf", "/System/Library/Fonts/Supplemental/Impact.ttf",
+                  r"C:\Windows\Fonts\ariblk.ttf", "/System/Library/Fonts/Supplemental/Arial Black.ttf",
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+_TEXT_FONTS = (r"C:\Windows\Fonts\arialbd.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+               "/Library/Fonts/Arial Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+
+
+def _face(paths, size):
+    import os
+    from PIL import ImageFont
+    for p in paths:
+        if os.path.exists(p):
+            return ImageFont.truetype(p, size)
+    return ImageFont.load_default()
+
+
+def _fit(draw, text, paths, max_w, start, least=14):
+    size = start
+    while size > least:
+        f = _face(paths, size)
+        if draw.textlength(text, font=f) <= max_w:
+            return f
+        size -= 2
+    return _face(paths, least)
+
+
+def _hex(c, a=255):
+    c = str(c).lstrip("#")
+    return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16), a)
+
+
+def theme_of(theme=None):
+    """The card's look: :data:`THEME` with a preset's own over it."""
+    t = dict(THEME)
+    for k, v in (theme or {}).items():
+        if k in THEME and v:
+            t[k] = " ".join(str(v).upper().split())[:40] if k == "title" else str(v)
+    return t
+
+
+_TAG_SKIP = {"VS", "VS.", "AND", "THE", "OF", "&"}
+
+
+def tag_of(name, roster=()):
+    """A short tag for a monogram or a roster tile: the words that set *name* apart from the rest of the *roster*
+    (GODZILLA GMK -> GMK, GODZILLA VS MECHAGODZILLA -> MECHA, DESTROY ALL MONSTERS -> DAM)."""
+    names = [str(n).upper().split() for n in roster] or [[]]
+    common = {w for w in set(sum(names, [])) if sum(w in n for n in names) * 2 > len(names)}
+    words = [w for w in str(name).upper().split() if w not in common and w not in _TAG_SKIP] or \
+        [w for w in str(name).upper().split() if w not in _TAG_SKIP] or ["?"]
+    if len(words) == 1:
+        w = words[0]
+        return w if len(w) <= 5 else (w[:5] if w.startswith("MECHA") else w[:4])
+    return "".join(w[:1] for w in words[:3])
+
+
+def _cover(img, w, h):
+    """*img* scaled to cover w x h, centred, cropped."""
+    from PIL import Image
+    s = max(w / img.width, h / img.height)
+    im = img.resize((max(1, round(img.width * s)), max(1, round(img.height * s))), Image.LANCZOS)
+    x, y = (im.width - w) // 2, (im.height - h) // 4          # keep heads: crop more from the bottom
+    return im.crop((x, y, x + w, y + h))
+
+
+def _glow(img, box, radius, color, blur, width):
+    """*img* with a soft coloured outline round *box* (a lit frame), blurred in its own patch only."""
+    from PIL import Image, ImageDraw, ImageFilter
+    m = int(blur * 3 + width)
+    x0, y0 = max(0, int(box[0]) - m), max(0, int(box[1]) - m)
+    x1, y1 = min(img.width, int(box[2]) + m), min(img.height, int(box[3]) + m)
+    layer = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+    ImageDraw.Draw(layer).rounded_rectangle((box[0] - x0, box[1] - y0, box[2] - x0, box[3] - y0), radius=radius,
+                                            outline=color, width=width)
+    patch = img.crop((x0, y0, x1, y1))
+    img.paste(Image.alpha_composite(patch, layer.filter(ImageFilter.GaussianBlur(blur))), (x0, y0))
+    return img
+
+
+def _wrap(draw, text, font, width, lines):
+    out, cur = [], ""
+    for word in str(text).split():
+        t = (cur + " " + word).strip()
+        if draw.textlength(t, font=font) <= width:
+            cur = t
+        else:
+            if cur:
+                out.append(cur)
+            cur = word
+    if cur:
+        out.append(cur)
+    if len(out) > lines:
+        out = out[:lines]
+        while out[-1] and draw.textlength(out[-1] + "...", font=font) > width:
+            out[-1] = out[-1].rsplit(" ", 1)[0] if " " in out[-1] else out[-1][:-1]
+        out[-1] += "..."
+    return out
+
+
+def _portrait(project, character, w, h, accent, accent2):
+    """The character's portrait: the owner's picture, covering the frame; without one a monogram plate."""
+    from PIL import Image, ImageDraw, ImageFilter
+    path = picture_path(project, character) if character else ""
+    if path:
+        with Image.open(path) as im:
+            pic = _cover(im.convert("RGBA"), w, h)
+        shade = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(shade)
+        for i in range(h // 3):                                  # a dark fade at the foot, as a poster's
+            a = int(170 * (1 - i / (h / 3)) ** 1.6)
+            sd.line([(0, h - 1 - i), (w, h - 1 - i)], fill=(0, 0, 0, a))
+        return Image.alpha_composite(pic, shade)
+    plate = Image.new("RGBA", (w, h), (0, 0, 0, 255))
+    pd = ImageDraw.Draw(plate)
+    a1, a2 = _hex(accent), _hex(accent2)
+    for y in range(h):                                           # a deep diagonal wash in the theme's colours
+        t = y / h
+        pd.line([(0, y), (w, y)], fill=(int(8 + a2[0] * 0.18 * t), int(10 + a2[1] * 0.10 * t), int(16 + a1[2] * 0.22 * (1 - t)), 255))
+    for x in range(-h, w, 18):                                   # fine hatching
+        pd.line([(x, h), (x + h, 0)], fill=(255, 255, 255, 10), width=2)
+    ring = min(w, h) * 0.36
+    cx, cy = w / 2, h * 0.46
+    pd.ellipse((cx - ring, cy - ring, cx + ring, cy + ring), outline=a1[:3] + (200,), width=max(4, w // 90))
+    glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse((cx - ring, cy - ring, cx + ring, cy + ring), outline=a1[:3] + (160,), width=w // 40)
+    plate = Image.alpha_composite(plate, glow.filter(ImageFilter.GaussianBlur(w // 50)))
+    pd = ImageDraw.Draw(plate)
+    mono = "?" if character is None else (character.get("tag") or tag_of(character["name"]))
+    f = _fit(pd, mono, _DISPLAY_FONTS, ring * 1.5, int(ring * 1.25))
+    pd.text((cx, cy), mono, font=f, fill=(255, 255, 255, 235), anchor="mm")
+    return plate
+
+
+def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
+    """The pick's card for character *index* (``len(list)`` = RANDOM) as an RGBA array of :data:`CARD_SIZE`."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    chars = [dict(c) for c in _characters(characters)["list"]]
+    for c_ in chars:
+        c_["tag"] = tag_of(c_["name"], [x["name"] for x in chars])
+    th = theme_of(theme)
+    acc, acc2 = th["accent"], th["accent2"]
+    A, A2 = _hex(acc), _hex(acc2)
+    S = scale
+    W, H = CARD_SIZE[0] * S, CARD_SIZE[1] * S
+    n = len(chars)
+    rnd = index >= n
+    c = None if rnd else chars[index]
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    # the panel: a near-black body with a cold-to-warm wash, a fine grid, a lit border and corner brackets
+    body = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(body)
+    for y in range(H):
+        t = y / H
+        bd.line([(0, y), (W, y)], fill=(int(10 + 16 * t), int(12 + 6 * t), int(20 + 10 * (1 - t)), 255))
+    for x in range(0, W, 28 * S):                                # the grid: drawn opaque, a shade off the body
+        bd.line([(x, 0), (x, H)], fill=(30, 34, 48, 255), width=S)
+    for y in range(0, H, 28 * S):
+        bd.line([(0, y), (W, y)], fill=(30, 34, 48, 255), width=S)
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=26 * S, fill=255)
+    img.paste(body, (0, 0), mask)
+    img = _glow(img, (4 * S, 4 * S, W - 5 * S, H - 5 * S), 24 * S, A[:3] + (200,), 6 * S, 4 * S)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((3 * S, 3 * S, W - 4 * S, H - 4 * S), radius=25 * S, outline=A[:3] + (255,), width=3 * S)
+    d.rounded_rectangle((12 * S, 12 * S, W - 13 * S, H - 13 * S), radius=18 * S, outline=(255, 255, 255, 40), width=S)
+    L = 46 * S
+    for (x, y, dx, dy) in ((14, 14, 1, 1), (W // S - 15, 14, -1, 1), (14, H // S - 15, 1, -1), (W // S - 15, H // S - 15, -1, -1)):
+        x, y = x * S, y * S
+        d.line([(x, y), (x + dx * L, y)], fill=A2[:3] + (255,), width=5 * S)
+        d.line([(x, y), (x, y + dy * L)], fill=A2[:3] + (255,), width=5 * S)
+    # the header: the title, a rule, and where in the roster this one is
+    hf = _fit(d, th["title"], _DISPLAY_FONTS, W * 0.62, 46 * S)
+    d.text((40 * S, 44 * S), th["title"], font=hf, fill=(255, 255, 255, 255), anchor="lm")
+    tw = d.textlength(th["title"], font=hf)
+    d.line([(40 * S + tw + 18 * S, 44 * S), (W - 190 * S, 44 * S)], fill=A[:3] + (150,), width=2 * S)
+    count = "?? / %02d" % n if rnd else "%02d / %02d" % (index + 1, n)
+    cf = _face(_DISPLAY_FONTS, 34 * S)
+    d.text((W - 40 * S, 44 * S), count, font=cf, fill=A[:3] + (255,), anchor="rm")
+    # the portrait, in a lit frame
+    px, py, pw, ph = 40 * S, 84 * S, 380 * S, 306 * S
+    img = _glow(img, (px - 4 * S, py - 4 * S, px + pw + 4 * S, py + ph + 4 * S), 16 * S, A[:3] + (230,), 10 * S, 6 * S)
+    por = _portrait(project, c, pw, ph, acc, acc2)
+    pm = Image.new("L", (pw, ph), 0)
+    ImageDraw.Draw(pm).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=14 * S, fill=255)
+    img.paste(por, (px, py), pm)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((px, py, px + pw - 1, py + ph - 1), radius=14 * S, outline=A[:3] + (255,), width=3 * S)
+    # the name, the ability badge, what it does
+    ix, iw = px + pw + 44 * S, W - (px + pw + 44 * S) - 44 * S
+    mark = "?" if rnd else c["tag"]                              # the tag, huge and faint, behind the words
+    wm = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    wf = _fit(ImageDraw.Draw(wm), mark, _DISPLAY_FONTS, iw * 0.9, 300 * S, 60 * S)
+    ImageDraw.Draw(wm).text((W - 50 * S, 250 * S), mark, font=wf, fill=A[:3] + (15,), anchor="rm")
+    img = Image.alpha_composite(img, wm)
+    d = ImageDraw.Draw(img)
+    name = "RANDOM" if rnd else c["name"]
+    nf = _fit(d, name, _DISPLAY_FONTS, iw, 92 * S, 30 * S)
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).text((ix + 4 * S, 166 * S + 5 * S), name, font=nf, fill=(0, 0, 0, 220), anchor="ls")
+    img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(4 * S)))
+    d = ImageDraw.Draw(img)
+    d.text((ix, 166 * S), name, font=nf, fill=(255, 255, 255, 255), anchor="ls",
+           stroke_width=max(1, S), stroke_fill=(0, 0, 0, 255))
+    nw = min(iw - 40 * S, d.textlength(name, font=nf))
+    d.rectangle((ix, 180 * S, ix + nw, 186 * S), fill=A[:3] + (255,))
+    d.rectangle((ix + nw + 8 * S, 180 * S, ix + nw + 40 * S, 186 * S), fill=A2[:3] + (255,))
+    if rnd:
+        label, does = "A SURPRISE", "The machine picks one of the characters nobody has taken yet."
+    else:
+        label = (words_for or {}).get(c["ability"], "") if c["ability"] else ""
+        label = label or "NO SPECIAL ABILITY"
+        does = CARD_LINES.get(c["ability"], "") if label != "NO SPECIAL ABILITY" else "Plays as the game always does."
+    bf = _face(_TEXT_FONTS, 24 * S)
+    bw = d.textlength(label, font=bf) + 40 * S
+    by = 208 * S
+    d.rounded_rectangle((ix, by, ix + bw, by + 46 * S), radius=23 * S, fill=A[:3] + (255,))
+    d.text((ix + bw / 2, by + 23 * S), label, font=bf, fill=(12, 12, 18, 255), anchor="mm")
+    tf = _face(_TEXT_FONTS, 27 * S)
+    for k, line in enumerate(_wrap(d, does, tf, iw, 2)):
+        d.text((ix, by + 88 * S + k * 38 * S), line, font=tf, fill=(222, 228, 240, 255), anchor="ls")
+    # how to choose
+    hy = 372 * S
+    hf2 = _face(_TEXT_FONTS, 20 * S)
+    x = ix
+    for kind, words in (("lr", "FLIPPERS TO CHOOSE"), ("dot", "ACTION BUTTON TO SELECT")):
+        if kind == "lr":
+            d.polygon([(x, hy), (x + 16 * S, hy - 11 * S), (x + 16 * S, hy + 11 * S)], fill=A2[:3] + (255,))
+            d.polygon([(x + 40 * S, hy), (x + 24 * S, hy - 11 * S), (x + 24 * S, hy + 11 * S)], fill=A2[:3] + (255,))
+            x += 52 * S
+        else:
+            d.ellipse((x, hy - 11 * S, x + 22 * S, hy + 11 * S), fill=A2[:3] + (255,))
+            x += 34 * S
+        d.text((x, hy), words, font=hf2, fill=(255, 255, 255, 220), anchor="lm")
+        x += d.textlength(words, font=hf2) + 36 * S
+    # the roster strip: every character and RANDOM, this one lit
+    tiles = chars + [None]
+    gap = 10 * S
+    sy, sh = 414 * S, 80 * S
+    tw_ = min(96 * S, (W - 80 * S - gap * (len(tiles) - 1)) // max(1, len(tiles)))
+    sx = (W - (tw_ * len(tiles) + gap * (len(tiles) - 1))) // 2
+    for k, t in enumerate(tiles):
+        x0 = sx + k * (tw_ + gap)
+        on = k == index or (rnd and t is None)
+        tile = _portrait(project, t, tw_, sh, acc, acc2) if (t is None or picture_path(project, t)) else None
+        if tile is None:
+            tile = Image.new("RGBA", (tw_, sh), (22, 26, 38, 255))
+            td = ImageDraw.Draw(tile)
+            td.text((tw_ / 2, sh / 2), t["tag"], font=_fit(td, t["tag"], _DISPLAY_FONTS, tw_ - 14 * S, 30 * S),
+                    fill=(235, 238, 245, 255), anchor="mm")
+        if not on:
+            tile = Image.blend(tile, Image.new("RGBA", tile.size, (8, 10, 16, 255)), 0.55)
+        tm = Image.new("L", (tw_, sh), 0)
+        ImageDraw.Draw(tm).rounded_rectangle((0, 0, tw_ - 1, sh - 1), radius=10 * S, fill=255)
+        img.paste(tile, (x0, sy), tm)
+        d = ImageDraw.Draw(img)
+        if on:
+            img = _glow(img, (x0 - 3 * S, sy - 3 * S, x0 + tw_ + 3 * S, sy + sh + 3 * S), 12 * S, A[:3] + (255,), 6 * S,
+                        5 * S)
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle((x0 - 2 * S, sy - 2 * S, x0 + tw_ + 2 * S, sy + sh + 2 * S), radius=11 * S,
+                                outline=A[:3] + (255,), width=3 * S)
+        else:
+            d.rounded_rectangle((x0, sy, x0 + tw_ - 1, sy + sh - 1), radius=10 * S, outline=(255, 255, 255, 50),
+                                width=S)
+    # ImageDraw REPLACES an RGBA image's pixels (a line at alpha 10 punched a hole, not a tint): everything inside the
+    # frame goes over the opaque body, so only the glow outside it is see-through
+    base = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    base.paste(Image.new("RGBA", (W, H), (12, 14, 22, 255)), (0, 0), mask)
+    img = Image.alpha_composite(base, img)
+    out = np.asarray(img.resize(CARD_SIZE, Image.LANCZOS), dtype=np.uint8).copy()
+    # the game blends its pictures PREMULTIPLIED (emulator: a white line at alpha 7 came out bright white, a body at
+    # alpha 240 let the city through): the colour goes in already scaled by its alpha, so the glow and the rounded
+    # corners fade as drawn
+    a = out[..., 3:4].astype(np.uint16)
+    out[..., :3] = (out[..., :3].astype(np.uint16) * a // 255).astype(np.uint8)
+    return out

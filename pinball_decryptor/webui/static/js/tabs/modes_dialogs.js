@@ -241,7 +241,7 @@ export function CoopCharsDialog({ s, onClose }) {
     </div>
     ${ch.preview ? html`<div class="modes-coop-ch-pv">
       <img src=${mediaUrl(ch.preview.path) + "&v=" + ch.preview.seq} alt="The machine's pick screen" />
-      <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"} (the game's own font draws the words). Change the pictures here as often as you like; Write puts them on the card.</span>
+      <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"}. Give each character a picture of your own with Picture... and see it here; Write puts the cards on the machine.</span>
     </div>` : null}
     ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(40vh, 400px)">${rows.map(row)}</div>`
       : html`<div class="small muted" style="margin-top:8px">No characters yet: press Add${ch.preset ? `, or load ${ch.preset}'s set` : ""}.</div>`}

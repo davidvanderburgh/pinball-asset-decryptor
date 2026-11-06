@@ -346,7 +346,8 @@ PRESET_DIR = "coop_presets"
 #: (key, words the pick shows, what it does, how): how is ("adj", adjustment name, "x<pct>" | "min" | "max"),
 #: ("cache", adjustment name, "min" | ...): an adjustment the game copies into a player's record at the game's start
 #: (the port's ``coop_cache_<id>`` names the copy), ("boost", pct): the port's ``coop_boost`` call adds pct %,
-#: ("gift", adjustment name): the game's own one-shot feature at the pick (the port's ``coop_adj_changed``), or
+#: ("gift", adjustment name): the game's own one-shot feature at the pick (the port's ``coop_adj_changed``),
+#: ("count", name, n): a rule's count for the player raised by n at the pick (the port's ``coop_count_<name>``), or
 #: ("save", seconds)
 ABILITIES = (
     ("longer_save", "LONGER BALL SAVE",
@@ -361,8 +362,13 @@ ABILITIES = (
     ("building", "EASIER BUILDING MB", "Building Multiball is as easy to start as on the game's easiest BUILDING "
      "DIFFICULTY.", ("cache", "AD_BUILDING_DIFFICULTY", "min")),
     ("powerups", "DOUBLE POWER-UPS", "Every Godzilla power-up the game gives counts twice.", ("boost", 200)),
-    ("ally", "STARTS WITH AN ALLY", "An ally is lit at the start of their first ball (the game's LIGHT ALLY).",
+    ("ally", "STARTS WITH AN ALLY", ("An ally is lit when they pick: the next of Mothra, Rodan and Anguirus in the game's own order (its LIGHT "
+      "ALLY)."),
      ("gift", "AD_LIGHT_ALLY")),
+    ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
+     "the bonus count them).", ("count", "jets", 4)),
+    ("tanks", "STARTS WITH 4 TANKS", "Four tanks count as destroyed when they pick: the city map's TANKS n/10 starts "
+     "at 4.", ("count", "tanks", 4)),
 )
 #: why an ability is not offered on a card
 NO_ADJ = "%s's game program has no %s setting."
@@ -405,6 +411,9 @@ def abilities(game_elf, label="This game", sites=()):
             cfg, why = ("save:%d" % how[1], "") if action is not None else ("", NO_ACTION % label)
         elif how[0] == "boost":
             cfg, why = ("boost:%d" % how[1], "") if "coop_boost" in sites else ("", NO_SITE % label)
+        elif how[0] == "count":
+            cfg, why = (("count:%s+%d" % (how[1], how[2]), "") if "coop_count_%s" % how[1] in sites
+                        else ("", NO_SITE % label))
         else:
             idx = table.by_name.get(how[1]) if table is not None else None
             if idx is None:

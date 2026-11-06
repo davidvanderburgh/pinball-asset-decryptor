@@ -15409,6 +15409,10 @@ static void coop_turn_show(void)
  *                                    the teammate's ball already out gives that ball the save it would have had
  *   boost:<pct>                      the title's "add n of something" call (`site coop_boost`; Godzilla: its power-ups)
  *                                    adds n x pct / 100 while the teammate is up
+ *   count:<name>+<n>                 at the teammate's pick, a rule's count for the player raised by n (Godzilla: the
+ *                                    jets destroyed, the tanks toward TANKS n/10): `site coop_count_<name>` is the
+ *                                    rule's method that clears it at the game's start (hooked to learn the rule's
+ *                                    object), `value coop_count_<name>_at` where (this + player x 4 + at)
  *   gift:<id>                        at the teammate's pick, the game's own one-shot feature adjustment <id> (Godzilla:
  *                                    LIGHT ALLY): the game's adjustment-changed handler (`site coop_adj_changed`, given
  *                                    {u16 id}) is called with the getter answering 1 for it, once
@@ -15431,6 +15435,8 @@ static struct coop_char {
     unsigned n_adj;
     struct { unsigned id, op, v, lo, hi; } adj[COOP_CHAR_ADJ];   /* op 0: = v; 1: x v% held to lo..hi */
     unsigned save_s, bs_adj, boost, gift;
+    unsigned n_count;
+    struct { char name[12]; unsigned n; } count[2];
 } coop_ch[COOP_CHARS];
 static int coop_ch_n, coop_pick_on;
 static unsigned coop_left, coop_action;
@@ -15451,6 +15457,9 @@ static struct coop_cache {
 static int coop_cache_n;
 static unsigned (*coop_boost_game)(unsigned, unsigned, unsigned, unsigned);
 static volatile unsigned coop_gift_now;     /* the getter answers 1 for this adjustment, once */
+#define COOP_COUNTS 4
+static struct { char name[12]; unsigned at, obj; } coop_count[COOP_COUNTS];
+static int coop_count_n;
 
 /* the next character from `at` in `dir` (+1/-1) over n characters and RANDOM (index n), skipping the ones `taken`
  * (a bit each); `at` itself when nothing else is free (tests lift it verbatim) */
@@ -15594,6 +15603,39 @@ static unsigned coop_boost_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
     return coop_boost_game(r0, r1, r2, r3);
 }
 
+/* the methods that clear a count at the game's start: hooked before they run, to learn the rule's object */
+static void coop_count_seen(int i, unsigned *r)
+{
+    if (i < coop_count_n && coop_count[i].obj != r[0]) {
+        coop_count[i].obj = r[0];
+        say("co-op: the %s count is the rule at 0x%08x's", coop_count[i].name, r[0]);
+    }
+}
+static void coop_count_seen0(unsigned *r) { coop_count_seen(0, r); }
+static void coop_count_seen1(unsigned *r) { coop_count_seen(1, r); }
+static void coop_count_seen2(unsigned *r) { coop_count_seen(2, r); }
+static void coop_count_seen3(unsigned *r) { coop_count_seen(3, r); }
+
+/* a character's counts at its pick: the team's count raised */
+static void coop_counts_give(const struct coop_char *c)
+{
+    unsigned k, p = coop_ball_byte ? coop_ball_byte[-1] : 1u, a;
+    int i;
+    for (k = 0; k < c->n_count; k++) {
+        for (i = 0; i < coop_count_n && !str_eq(coop_count[i].name, c->count[k].name); i++) ;
+        if (i == coop_count_n || !coop_count[i].obj || p < 1 || p > 4) {
+            say("co-op: %s - no %s count to raise (%s)", c->name, c->count[k].name,
+                i == coop_count_n ? "the port does not name it" : "its rule not seen yet");
+            continue;
+        }
+        a = coop_count[i].obj + p * 4u + coop_count[i].at;
+        if (!maps_has(a, 4, MAP_R)) continue;
+        *(volatile unsigned *)(unsigned long)a += c->count[k].n;
+        say("co-op: %s - the %s count raised by %u, now %u", c->name, c->count[k].name, c->count[k].n,
+            *(volatile unsigned *)(unsigned long)a);
+    }
+}
+
 /* a character's gift at its pick: the game's own one-shot feature, through its adjustment-changed handler */
 static void coop_gift(const struct coop_char *c)
 {
@@ -15653,6 +15695,7 @@ static void coop_pick_close(const char *how)
         say("co-op: teammate %u has no character - every one is taken", pk.who);
     coop_turn_show();
     if (c >= 0) coop_gift(&coop_ch[c]);
+    if (c >= 0) coop_counts_give(&coop_ch[c]);
     if (c >= 0 && pk.who == coop.turn) coop_cache_hold();
     if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game) {   /* the ball out was served before it */
         unsigned v = coop_adj_wrap(coop_ch[c].bs_adj);
@@ -15755,7 +15798,7 @@ static void coop_char_line(const char *s)
     if (coop_ch_n >= COOP_CHARS) return;
     c = &coop_ch[coop_ch_n];
     c->n_adj = 0;
-    c->save_s = c->bs_adj = c->boost = c->gift = 0;
+    c->save_s = c->bs_adj = c->boost = c->gift = c->n_count = 0;
     for (k = 0; k + 1 < sizeof tok && s[k] && s[k] != ' '; k++) tok[k] = s[k];   /* number() eats the space after */
     tok[k] = 0;
     s += k;
@@ -15788,6 +15831,16 @@ static void coop_char_line(const char *s)
             p += 6;
             c->boost = (unsigned)number(&p, &ok);
             if (!ok || c->boost > 1000) c->boost = 0;
+        } else if (str_starts(p, "count:") && c->n_count < 2) {
+            p += 6;
+            for (k = 0; k + 1 < sizeof c->count[0].name && *p && *p != '+' && *p != ','; k++)
+                c->count[c->n_count].name[k] = *p++;
+            c->count[c->n_count].name[k] = 0;
+            if (*p == '+') {
+                p++;
+                c->count[c->n_count].n = (unsigned)number(&p, &ok);
+                if (ok && k && c->count[c->n_count].n && c->count[c->n_count].n < 1000) c->n_count++;
+            }
         } else if (str_starts(p, "gift:")) {
             p += 5;
             c->gift = (unsigned)number(&p, &ok);
@@ -15859,6 +15912,26 @@ static void coop_chars_arm(struct site *e)
         say("co-op characters: the boost is off - the port names no coop_boost, or it could not be wrapped");
         for (i = 0; i < coop_ch_n; i++) coop_ch[i].boost = 0;
     }
+    for (i = 0; i < coop_ch_n; i++)                              /* the rules whose counts a character raises */
+        for (k = 0; k < coop_ch[i].n_count && coop_count_n < COOP_COUNTS; k++) {
+            static void (*const cseen[COOP_COUNTS])(unsigned *) = { coop_count_seen0, coop_count_seen1,
+                                                                      coop_count_seen2, coop_count_seen3 };
+            int j;
+            for (j = 0; j < coop_count_n && !str_eq(coop_count[j].name, coop_ch[i].count[k].name); j++) ;
+            if (j < coop_count_n) continue;
+            pm_snprintf(name, sizeof name, "coop_count_%s_at", coop_ch[i].count[k].name);
+            coop_count[coop_count_n].at = (unsigned)pm_port_value(name, 0);
+            pm_snprintf(name, sizeof name, "coop_count_%s", coop_ch[i].count[k].name);
+            if (!site(name) || !fn(name) || !hook(fn(name), cseen[coop_count_n])) {
+                say("co-op characters: the %s count is off - the port names no %s", coop_ch[i].count[k].name, name);
+                continue;
+            }
+            str_copy(coop_count[coop_count_n].name, sizeof coop_count[0].name, coop_ch[i].count[k].name,
+                     sizeof coop_count[0].name);
+            say("co-op characters: the %s count is cleared by 0x%08x (this + player x 4 + 0x%x)",
+                coop_count[coop_count_n].name, fn(name), coop_count[coop_count_n].at);
+            coop_count_n++;
+        }
     if (gift && !fn("coop_adj_changed")) {
         say("co-op characters: the gifts are off - the port names no coop_adj_changed");
         for (i = 0; i < coop_ch_n; i++) coop_ch[i].gift = 0;
@@ -15884,6 +15957,9 @@ static void coop_chars_arm(struct site *e)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sAction x2: %u s save", o ? ", " : "", coop_ch[i].save_s);
         if (coop_ch[i].boost && o + 24 < sizeof how)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sboost %u%%", o ? ", " : "", coop_ch[i].boost);
+        for (k = 0; k < coop_ch[i].n_count && o + 24 < sizeof how; k++)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s +%u", o ? ", " : "", coop_ch[i].count[k].name,
+                                       coop_ch[i].count[k].n);
         if (coop_ch[i].gift && o + 24 < sizeof how)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sgift %u", o ? ", " : "", coop_ch[i].gift);
         say("co-op character %d: %s (%s) - %s", i + 1, coop_ch[i].name, coop_ch[i].does, o ? how : "no ability");

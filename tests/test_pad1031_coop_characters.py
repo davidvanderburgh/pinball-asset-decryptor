@@ -44,6 +44,7 @@ static unsigned own_adj(unsigned id) { return id == 94 ? 5 : id == 195 ? 20 : 1;
 static volatile unsigned char *coop_ball_byte;
 static int maps_has(unsigned long a, unsigned n, unsigned f) { (void)a; (void)n; (void)f; return 0; }
 static unsigned fn(const char *name) { (void)name; return 0; }
+static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
 @DECL@
 @FNS@
 static void press(unsigned id) { coop_edge(id, 1, 0x800, 0); }
@@ -106,6 +107,7 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static unsigned coop_adj_wrap(unsigned id)",
        "static void coop_cache_hold(void)",
        "static void coop_gift(const struct coop_char *c)",
+       "static void coop_counts_give(const struct coop_char *c)",
        "static void coop_pick_say(void)",
        "static void coop_pick_open(unsigned t)",
        "static void coop_pick_close(const char *how)",
@@ -119,7 +121,7 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
 def _decl(src):
     """The character section's declarations, verbatim: from its #defines to the last of its globals."""
     start = src.index("#define COOP_CHARS 16")
-    end = src.index("static volatile unsigned coop_gift_now;", start)
+    end = src.index("static int coop_count_n;", start)
     return src[start:src.index("\n", end) + 1]
 
 
@@ -291,3 +293,18 @@ def test_the_godzilla_ports_name_the_character_sites():
         for name in ("site coop_adj_changed", "site coop_boost", "site coop_cache_173", "site coop_cache_168",
                      "value coop_cache_173_at", "value coop_cache_168_at"):
             assert name in text, (key, name)
+
+
+def test_jets_and_tanks_wait_for_their_port_lines():
+    """count:<name>+<n> raises a rule's count at the pick where the port names the rule's game-start method; until a
+    build's port does (Godzilla's jets and tanks counts are not proven yet), the app does not offer them."""
+    if not os.path.isfile(GZ_ELF):
+        pytest.skip("no Godzilla LE 1.16 program here")
+    elf = open(GZ_ELF, "rb").read()
+    got = {a["key"]: a for a in CP.abilities(elf, "Godzilla", ["coop_count_jets"])}
+    assert got["jets"]["cfg"] == "count:jets+4"
+    assert not got["tanks"]["cfg"] and got["tanks"]["why"]
+    src = RUNTIME.read_text(encoding="utf-8")
+    line = R._lift(src, "static void coop_char_line(const char *s)")
+    assert 'str_starts(p, "count:")' in line
+    assert "coop_counts_give(&coop_ch[c]);" in R._lift(src, "static void coop_pick_close(const char *how)")

@@ -112,3 +112,31 @@ No power-up was earned in that play, so the boost never fired.
   +(p-1)*4+0x18 cleared) - find the kill increment and what qualifies, then a `count:` kind (record += n at the pick).
 - Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle (PAD-706's battle progression code).
 - The pick's screen (run 1's note) and the Characters dialog's pictures/preview.
+
+## Run 3 (2026-11-06): visible proofs; jets/tanks not yet
+
+Rig kit additions: `rig/memrd.py <dump> <addr>...` reads THIS slot's game memory (guest at +0x10000 in the host
+process; guestmem.py takes the first `game` on the box), job4.sh (proof job), job5/6.sh (counts).
+- Ally (run gz_run4, mem.txt): LIGHT ALLY's object 0x7b2e28 (LE), ally vector at +0x1c, 16-byte entries, word
+  (player - 1): before the pick 0/0/0, after the gift 0/0/1 - it lights the next unlit ally in the game's own order
+  (0x121c28), not a random one (the ability says so).
+- Easier battles: battle rule 0x7b0c70 (+0x14 difficulty, +0x24/+0x34 left/right ramp still needed, player 1): the
+  control teammate's one left ramp left 1/1 and the map said SHOOT RAMPS TO LIGHT BATTLE; GODZILLA 1985 (held 0):
+  one left ramp -> 0/0 and the map said BATTLE READY; the next teammate: difficulty back to 1. Proof frames in
+  artifacts\PAD-1031\proof_*.png.
+- Double power-ups (gz_run3): ADD 1 POWERUP through the gift path, boosted: "the game adds 1, 2 with the boost" and
+  the power-up meter filled two segments.
+- Building: same mechanism as battles (held 0, given back); the rig's BUILDING DIFFICULTY is already 0, so no visible
+  difference to show.
+- `count:<name>+<n>` is in the runtime (site coop_count_<name> = the rule's game-start method, hooked; value
+  coop_count_<name>_at = this + player x 4 + at). NOT in any port yet: jets at the method 0x15c7a8 (LE; Pro
+  0x159084) +0xa4 wrote 4, but the bonus (0x197260: rule 0x15 + p*4 + 0xa8) and the champion getter (0x6425c: via
+  0x3386e0(player)) index the player differently - prove which slot is read (the PAD-1028 champion award's count, or
+  the bonus page) before shipping. Tanks: 0x180e44 (Pro 0x17d46c) +0x14 is NOT the map's TANKS n/10 (it stayed 0/10);
+  no rig press killed a tank (scoop, Godzilla target, left ramp) - find what does, then diff the rule (job6.sh).
+
+## Left (run 4+)
+
+- Jets and tanks fields (above), then their port lines on LE 1.16 and Pro 1.16.
+- Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle.
+- The pick's screen, and the Characters dialog's pictures/preview (David: DoomWalrus666 iterates the look himself).

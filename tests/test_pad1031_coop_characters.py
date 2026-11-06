@@ -40,6 +40,10 @@ static unsigned saved_s;
 static int pm_ball_save(unsigned s) { saved_s = s; return 1; }
 static unsigned own_adj(unsigned id) { return id == 94 ? 5 : id == 195 ? 20 : 1; }
 #define COOP_MSG_ID 0xC0090u
+#define MAP_R 1u
+static volatile unsigned char *coop_ball_byte;
+static int maps_has(unsigned long a, unsigned n, unsigned f) { (void)a; (void)n; (void)f; return 0; }
+static unsigned fn(const char *name) { (void)name; return 0; }
 @DECL@
 @FNS@
 static void press(unsigned id) { coop_edge(id, 1, 0x800, 0); }
@@ -47,13 +51,15 @@ int main(void)
 {
     static const char *const cfg[] = {
         "adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE", "save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE",
-        "adj:195x50:4:30,adj:173=0 GODZILLA GMK|EASIER HEAT RAY", "- SHIN GODZILLA|", "adj:oops NO ABILITY|", 0 };
+        "adj:195x50:4:30,adj:173=0 GODZILLA GMK|EASIER HEAT RAY", "- SHIN GODZILLA|", "adj:oops NO ABILITY|",
+        "boost:200,gift:311 KING KONG|DOUBLE POWER-UPS", 0 };
     int i;
     for (i = 0; cfg[i]; i++) coop_char_line(cfg[i]);
     coop_pick_on = 1; coop.button = 59; coop_left = 60; coop_action = 34; coop_adj_game = own_adj;
     printf("chars %d\n", coop_ch_n);
     for (i = 0; i < coop_ch_n; i++)
-        printf("char %d [%s] [%s] adj %u save %u\n", i, coop_ch[i].name, coop_ch[i].does, coop_ch[i].n_adj, coop_ch[i].save_s);
+        printf("char %d [%s] [%s] adj %u save %u boost %u gift %u\n", i, coop_ch[i].name, coop_ch[i].does,
+               coop_ch[i].n_adj, coop_ch[i].save_s, coop_ch[i].boost, coop_ch[i].gift);
     coop.n = 3; coop.turn = 1;
     coop_chars_begin();
     printf("before a pick: %u\n", coop_adj_wrap(94));
@@ -93,10 +99,13 @@ int main(void)
 """
 
 FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
+       "static volatile unsigned *coop_cache_field(const struct coop_cache *k)",
        "static unsigned coop_adj_value(unsigned own, unsigned op, unsigned v, unsigned lo, unsigned hi)",
        "static unsigned coop_taken(unsigned except)",
        "static const struct coop_char *coop_char_up(void)",
        "static unsigned coop_adj_wrap(unsigned id)",
+       "static void coop_cache_hold(void)",
+       "static void coop_gift(const struct coop_char *c)",
        "static void coop_pick_say(void)",
        "static void coop_pick_open(unsigned t)",
        "static void coop_pick_close(const char *how)",
@@ -110,7 +119,7 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
 def _decl(src):
     """The character section's declarations, verbatim: from its #defines to the last of its globals."""
     start = src.index("#define COOP_CHARS 16")
-    end = src.index("static int coop_adj_said;", start)
+    end = src.index("static volatile unsigned coop_gift_now;", start)
     return src[start:src.index("\n", end) + 1]
 
 
@@ -125,12 +134,13 @@ def _run(tmp_path):
 
 def test_each_teammate_picks_one_nobody_else_has_and_its_ability_holds_while_they_are_up(tmp_path):
     out = _run(tmp_path)
-    assert "chars 5" in out
-    assert "char 0 [GODZILLA 1954] [LONGER BALL SAVE] adj 1 save 0" in out
-    assert "char 1 [GODZILLA 2000] [ACTION BUTTON BALL SAVE] adj 0 save 10" in out
-    assert "char 2 [GODZILLA GMK] [EASIER HEAT RAY] adj 2 save 0" in out
-    assert "char 3 [SHIN GODZILLA] [] adj 0 save 0" in out
-    assert "char 4 [NO ABILITY] [] adj 0 save 0" in out             # an ability it cannot read: none
+    assert "chars 6" in out
+    assert "char 0 [GODZILLA 1954] [LONGER BALL SAVE] adj 1 save 0 boost 0 gift 0" in out
+    assert "char 1 [GODZILLA 2000] [ACTION BUTTON BALL SAVE] adj 0 save 10 boost 0 gift 0" in out
+    assert "char 2 [GODZILLA GMK] [EASIER HEAT RAY] adj 2 save 0 boost 0 gift 0" in out
+    assert "char 3 [SHIN GODZILLA] [] adj 0 save 0 boost 0 gift 0" in out
+    assert "char 4 [NO ABILITY] [] adj 0 save 0 boost 0 gift 0" in out
+    assert "char 5 [KING KONG] [DOUBLE POWER-UPS] adj 0 save 0 boost 200 gift 311" in out             # an ability it cannot read: none
     assert "before a pick: 5" in out                                # no character yet: the game's own value
     assert "open [PLAYER 1 PICK: GODZILLA 1954]" in out
     assert "flip [LONGER BALL SAVE]" in out                         # then what it does, in turn
@@ -243,3 +253,41 @@ def test_godzillas_abilities_and_lines_read_off_its_program():
     assert lines[:4] == ["pick on", "left 60", "action 34", "character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE"]
     text = CP.cfg_text(elf, None, {"pick": True, "list": [{"name": "A", "ability": "heat_ray"}]})
     assert text.endswith("character adj:195x50:4:30 A|EASIER HEAT RAY\n")
+
+
+def test_a_held_record_gives_back_the_harder_of_the_teams_and_plays(tmp_path):
+    """Godzilla raises LIGHT BATTLE DIFFICULTY's record a notch after each battle: held at 0 for an easy teammate, it
+    goes back to the team's own, or to what play made of it when that is harder."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    fn = R._lift(src, "static unsigned coop_cache_back(unsigned saved, unsigned wrote, unsigned now)")
+    main = r"""
+#include <stdio.h>
+@FN@
+int main(void)
+{
+    printf("[%u %u %u]", coop_cache_back(1, 0, 0), coop_cache_back(1, 0, 2), coop_cache_back(0, 0, 0));
+    return 0;
+}
+""".replace("@FN@", fn)
+    assert R._host_run(tmp_path, main) == "[1 2 0]"
+
+
+def test_godzillas_own_abilities_need_their_port_sites():
+    if not os.path.isfile(GZ_ELF):
+        pytest.skip("no Godzilla LE 1.16 program here")
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    elf = open(GZ_ELF, "rb").read()
+    sites = sorted(MP.read_port(str(RUNTIME.parent / "ports" / "godzilla_le-1.16.port"))["site"])
+    got = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", sites)}
+    assert got["battles"] == "adj:173=0" and got["building"] == "adj:168=0"
+    assert got["powerups"] == "boost:200" and got["ally"] == "gift:311"
+    bare = {a["key"]: a for a in CP.abilities(elf, "Godzilla")}         # a port without them: not offered, and why
+    assert all(not bare[k]["cfg"] and bare[k]["why"] for k in ("battles", "building", "powerups", "ally"))
+
+
+def test_the_godzilla_ports_name_the_character_sites():
+    for key in ("godzilla_le-1.16", "godzilla_pro-1.16"):
+        text = (RUNTIME.parent / "ports" / (key + ".port")).read_text(encoding="utf-8")
+        for name in ("site coop_adj_changed", "site coop_boost", "site coop_cache_173", "site coop_cache_168",
+                     "value coop_cache_173_at", "value coop_cache_168_at"):
+            assert name in text, (key, name)

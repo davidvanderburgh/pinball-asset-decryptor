@@ -15407,6 +15407,16 @@ static void coop_turn_show(void)
  *   save:<s>                         the Action button pressed twice within 0.6 s: an s second ball save, once a ball
  *   bs:<id>                          <id> is the game's ball save time, read when a ball is served: a pick made with
  *                                    the teammate's ball already out gives that ball the save it would have had
+ *   boost:<pct>                      the title's "add n of something" call (`site coop_boost`; Godzilla: its power-ups)
+ *                                    adds n x pct / 100 while the teammate is up
+ *   gift:<id>                        at the teammate's pick, the game's own one-shot feature adjustment <id> (Godzilla:
+ *                                    LIGHT ALLY): the game's adjustment-changed handler (`site coop_adj_changed`, given
+ *                                    {u16 id}) is called with the getter answering 1 for it, once
+ * An adjustment the game copies into a player's record when the game starts reads the same through the getter but
+ * plays as the record says (Godzilla: LIGHT BATTLE DIFFICULTY into the battle rule's, raised a notch by each battle):
+ * the port names the method that copies it (`site coop_cache_<id>`, hooked to learn the rule's object) and where
+ * (`value coop_cache_<id>_at`: this + player x 4 + at). While the teammate is up the record holds what the getter
+ * would answer; at the turn's end it gets back the harder of its own and what play made of it.
  * The getter (`site adjustment`) is wrapped: only what the game READS changes, never what NVRAM holds, and only in a
  * co-op game while that teammate is up (a pick not yet made: nothing). The pick says itself on the game's top line
  * (PAD-1017's borrow of "BALL %d"): its name, then what it does, in turn; the flippers walk (a character another
@@ -15420,7 +15430,7 @@ static struct coop_char {
     char name[28], does[28];
     unsigned n_adj;
     struct { unsigned id, op, v, lo, hi; } adj[COOP_CHAR_ADJ];   /* op 0: = v; 1: x v% held to lo..hi */
-    unsigned save_s, bs_adj;
+    unsigned save_s, bs_adj, boost, gift;
 } coop_ch[COOP_CHARS];
 static int coop_ch_n, coop_pick_on;
 static unsigned coop_left, coop_action;
@@ -15432,6 +15442,15 @@ static int coop_save_used;                  /* this ball's is given */
 static unsigned (*coop_adj_game)(unsigned);
 static unsigned coop_rng;
 static int coop_adj_said;                   /* the log's adjustment reads, the first 32 */
+#define COOP_CACHES 4
+static struct coop_cache {
+    unsigned id, at, obj;                   /* the adjustment, its record's offset, the rule's object (0: not seen) */
+    int held;
+    unsigned saved, wrote;
+} coop_cache[COOP_CACHES];
+static int coop_cache_n;
+static unsigned (*coop_boost_game)(unsigned, unsigned, unsigned, unsigned);
+static volatile unsigned coop_gift_now;     /* the getter answers 1 for this adjustment, once */
 
 /* the next character from `at` in `dir` (+1/-1) over n characters and RANDOM (index n), skipping the ones `taken`
  * (a bit each); `at` itself when nothing else is free (tests lift it verbatim) */
@@ -15477,6 +15496,10 @@ static unsigned coop_adj_wrap(unsigned id)
 {
     unsigned own = coop_adj_game(id), k;
     const struct coop_char *c = coop_char_up();
+    if (coop_gift_now && id == coop_gift_now) {
+        coop_gift_now = 0;
+        return 1u;
+    }
     if (!c || !pm_in_game()) return own;
     for (k = 0; k < c->n_adj; k++)
         if (c->adj[k].id == id) {
@@ -15488,6 +15511,102 @@ static unsigned coop_adj_wrap(unsigned id)
             return v;
         }
     return own;
+}
+
+/* the record a cache holds for the player up: this + player x 4 + at (0 when the rule's object is not seen yet) */
+static volatile unsigned *coop_cache_field(const struct coop_cache *k)
+{
+    unsigned p = coop_ball_byte ? coop_ball_byte[-1] : 1u, a;
+    if (!k->obj || p < 1 || p > 4) return 0;
+    a = k->obj + p * 4u + k->at;
+    return maps_has(a, 4, MAP_R) ? (volatile unsigned *)(unsigned long)a : 0;
+}
+
+/* the turn's teammate is up with a character: each cache of an adjustment of theirs holds what the getter answers */
+static void coop_cache_hold(void)
+{
+    const struct coop_char *c = coop_char_up();
+    volatile unsigned *f;
+    int i;
+    unsigned k;
+    if (!c) return;
+    for (i = 0; i < coop_cache_n; i++) {
+        struct coop_cache *q = &coop_cache[i];
+        if (q->held || !(f = coop_cache_field(q))) continue;
+        for (k = 0; k < c->n_adj && c->adj[k].id != q->id; k++) ;
+        if (k == c->n_adj) continue;
+        q->saved = *f;
+        q->wrote = coop_adj_value(q->saved, c->adj[k].op, c->adj[k].v, c->adj[k].lo, c->adj[k].hi);
+        *f = q->wrote;
+        q->held = 1;
+        say("co-op: %s - the record of adjustment %u holds %u while they are up (the team's %u)", c->name, q->id,
+            q->wrote, q->saved);
+    }
+}
+
+/* the turn's end (or the game's): the harder of the team's own and what play made of the held one (tests lift it) */
+static unsigned coop_cache_back(unsigned saved, unsigned wrote, unsigned now)
+{
+    (void)wrote;
+    return now > saved ? now : saved;
+}
+
+static void coop_cache_let_go(void)
+{
+    volatile unsigned *f;
+    int i;
+    for (i = 0; i < coop_cache_n; i++) {
+        struct coop_cache *q = &coop_cache[i];
+        unsigned now;
+        if (!q->held) continue;
+        q->held = 0;
+        if (!(f = coop_cache_field(q))) continue;
+        now = *f;
+        *f = coop_cache_back(q->saved, q->wrote, now);
+        say("co-op: the record of adjustment %u back to %u (the team's %u, %u at the turn's end)", q->id, *f, q->saved,
+            now);
+    }
+}
+
+/* the methods that copy an adjustment into a rule's record: hooked before they run, to learn the rule's object */
+static void coop_cache_seen(int i, unsigned *r)
+{
+    if (i < coop_cache_n && coop_cache[i].obj != r[0]) {
+        coop_cache[i].obj = r[0];
+        coop_cache[i].held = 0;                     /* a new game's record: nothing of ours in it */
+        say("co-op: adjustment %u's record is the rule at 0x%08x", coop_cache[i].id, r[0]);
+    }
+}
+static void coop_cache_seen0(unsigned *r) { coop_cache_seen(0, r); }
+static void coop_cache_seen1(unsigned *r) { coop_cache_seen(1, r); }
+static void coop_cache_seen2(unsigned *r) { coop_cache_seen(2, r); }
+static void coop_cache_seen3(unsigned *r) { coop_cache_seen(3, r); }
+
+/* the title's "add n" call (Godzilla: power-ups), wrapped when a character has a boost */
+static unsigned coop_boost_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    const struct coop_char *c = coop_char_up();
+    if (c && c->boost && pm_in_game() && r1 && r1 < 1000u) {
+        unsigned n = (unsigned)(((unsigned long long)r1 * c->boost + 50u) / 100u);
+        say("co-op: %s - the game adds %u, %u with the boost", c->name, r1, n);
+        r1 = n;
+    }
+    return coop_boost_game(r0, r1, r2, r3);
+}
+
+/* a character's gift at its pick: the game's own one-shot feature, through its adjustment-changed handler */
+static void coop_gift(const struct coop_char *c)
+{
+    unsigned short ev[8];
+    unsigned k;
+    if (!c->gift || !fn("coop_adj_changed") || !coop_adj_game) return;
+    for (k = 0; k < 8; k++) ev[k] = 0;
+    ev[0] = (unsigned short)c->gift;
+    coop_gift_now = c->gift;
+    ((unsigned (*)(void *))(unsigned long)fn("coop_adj_changed"))(ev);
+    say("co-op: %s - the game's own feature %u given (%s)", c->name, c->gift,
+        coop_gift_now ? "it did not read it" : "it read it");
+    coop_gift_now = 0;
 }
 
 static void coop_pick_say(void)
@@ -15533,6 +15652,8 @@ static void coop_pick_close(const char *how)
     else
         say("co-op: teammate %u has no character - every one is taken", pk.who);
     coop_turn_show();
+    if (c >= 0) coop_gift(&coop_ch[c]);
+    if (c >= 0 && pk.who == coop.turn) coop_cache_hold();
     if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game) {   /* the ball out was served before it */
         unsigned v = coop_adj_wrap(coop_ch[c].bs_adj);
         say("co-op: %s - the ball in play gets its ball save now (%u s)", coop_ch[c].name, v);
@@ -15607,6 +15728,7 @@ static void coop_chars_begin(void)
 {
     int t;
     for (t = 0; t <= 4; t++) coop_pick_of[t] = -1;
+    for (t = 0; t < coop_cache_n; t++) coop_cache[t].held = 0;
     pk.open = 0;
     coop_save_used = 0;
     coop_adj_said = 0;
@@ -15619,6 +15741,7 @@ static void coop_chars_turn(void)
     coop_tap_ms = 0;
     if (pk.open && pk.who != coop.turn) coop_pick_close("their turn ended");
     coop_pick_open(coop.turn);
+    coop_cache_hold();
 }
 
 /* coop.cfg: character <abilities> <name>|<what it does> */
@@ -15632,7 +15755,7 @@ static void coop_char_line(const char *s)
     if (coop_ch_n >= COOP_CHARS) return;
     c = &coop_ch[coop_ch_n];
     c->n_adj = 0;
-    c->save_s = c->bs_adj = 0;
+    c->save_s = c->bs_adj = c->boost = c->gift = 0;
     for (k = 0; k + 1 < sizeof tok && s[k] && s[k] != ' '; k++) tok[k] = s[k];   /* number() eats the space after */
     tok[k] = 0;
     s += k;
@@ -15661,6 +15784,14 @@ static void coop_char_line(const char *s)
             p += 5;
             c->save_s = (unsigned)number(&p, &ok);
             if (!ok || c->save_s > 60) c->save_s = 0;
+        } else if (str_starts(p, "boost:")) {
+            p += 6;
+            c->boost = (unsigned)number(&p, &ok);
+            if (!ok || c->boost > 1000) c->boost = 0;
+        } else if (str_starts(p, "gift:")) {
+            p += 5;
+            c->gift = (unsigned)number(&p, &ok);
+            if (!ok) c->gift = 0;
         } else if (str_starts(p, "bs:")) {
             p += 3;
             c->bs_adj = (unsigned)number(&p, &ok);
@@ -15685,19 +15816,52 @@ static void coop_char_line(const char *s)
 /* armed with co-op: the adjustment getter wrapped when a character asks for one, the switch edges for the pick */
 static void coop_chars_arm(struct site *e)
 {
-    int i, adj = 0, save = 0;
+    static void (*const seen[COOP_CACHES])(unsigned *) = { coop_cache_seen0, coop_cache_seen1, coop_cache_seen2,
+                                                           coop_cache_seen3 };
+    int i, adj = 0, save = 0, boost = 0, gift = 0;
     unsigned k;
+    char name[48];
     coop_chars_begin();
     if (!coop_ch_n) return;
     for (i = 0; i < coop_ch_n; i++) {
-        adj |= coop_ch[i].n_adj != 0;
+        adj |= coop_ch[i].n_adj != 0 || coop_ch[i].gift != 0;
         save |= coop_ch[i].save_s != 0;
+        boost |= coop_ch[i].boost != 0;
+        gift |= coop_ch[i].gift != 0;
     }
     if (adj && !(fn("adjustment") && (coop_adj_game = (unsigned (*)(unsigned))hook_wrap(fn("adjustment"),
                                                                                          (void *)coop_adj_wrap)))) {
         say("co-op characters: the adjustment abilities are off - the port names no adjustment getter, or it could "
             "not be wrapped");
-        for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_adj = 0;
+        for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_adj = coop_ch[i].gift = 0;
+        gift = 0;
+    }
+    for (i = 0; coop_adj_game && i < coop_ch_n; i++)            /* the records an adjustment of theirs is copied into */
+        for (k = 0; k < coop_ch[i].n_adj && coop_cache_n < COOP_CACHES; k++) {
+            unsigned id = coop_ch[i].adj[k].id;
+            int j;
+            for (j = 0; j < coop_cache_n && coop_cache[j].id != id; j++) ;
+            pm_snprintf(name, sizeof name, "coop_cache_%u_at", id);
+            coop_cache[coop_cache_n].at = (unsigned)pm_port_value(name, 0);
+            pm_snprintf(name, sizeof name, "coop_cache_%u", id);
+            if (j < coop_cache_n || !site(name) || !fn(name)) continue;
+            coop_cache[coop_cache_n].id = id;
+            if (!hook(fn(name), seen[coop_cache_n])) {
+                say("co-op characters: adjustment %u's record cannot be found (%s 0x%08x not hooked)", id, name, fn(name));
+                continue;
+            }
+            say("co-op characters: adjustment %u is copied into a record by 0x%08x (this + player x 4 + 0x%x)", id,
+                fn(name), coop_cache[coop_cache_n].at);
+            coop_cache_n++;
+        }
+    if (boost && !(fn("coop_boost") && (coop_boost_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))
+                                         hook_wrap(fn("coop_boost"), (void *)coop_boost_wrap)))) {
+        say("co-op characters: the boost is off - the port names no coop_boost, or it could not be wrapped");
+        for (i = 0; i < coop_ch_n; i++) coop_ch[i].boost = 0;
+    }
+    if (gift && !fn("coop_adj_changed")) {
+        say("co-op characters: the gifts are off - the port names no coop_adj_changed");
+        for (i = 0; i < coop_ch_n; i++) coop_ch[i].gift = 0;
     }
     if ((coop_pick_on || save) && !(edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
         say("co-op characters: off - the switch drain could not be hooked, so no pick could be made");
@@ -15718,6 +15882,10 @@ static void coop_chars_arm(struct site *e)
                                        coop_ch[i].adj[k].op ? "x" : "= ", coop_ch[i].adj[k].v);
         if (coop_ch[i].save_s && o + 24 < sizeof how)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sAction x2: %u s save", o ? ", " : "", coop_ch[i].save_s);
+        if (coop_ch[i].boost && o + 24 < sizeof how)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sboost %u%%", o ? ", " : "", coop_ch[i].boost);
+        if (coop_ch[i].gift && o + 24 < sizeof how)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sgift %u", o ? ", " : "", coop_ch[i].gift);
         say("co-op character %d: %s (%s) - %s", i + 1, coop_ch[i].name, coop_ch[i].does, o ? how : "no ability");
     }
     say("co-op characters: %d; %s", coop_ch_n, coop_pick_on ? "each teammate picks one at their first ball"
@@ -15794,6 +15962,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     if (!n) return coop_change_game(r0, r1, r2, r3);
     coop_scores_same(n);                                      /* the ball's bonus is in: before the game's end reads them */
     coop_awards_read(coop.turn);                              /* PAD-1028: the turn's counts, bonus in, are its teammate's */
+    coop_cache_let_go();                                      /* PAD-1031: the team's records back before the change */
     before = *coop_ball_byte;
     down = coop.turn < n && before > 0;
     if (down) *coop_ball_byte = (unsigned char)(before - 1);

@@ -1016,7 +1016,8 @@ def coop_into(result, game_elf, scratch):
         raise ModeWriteError(why)
     try:
         project = getattr(result, "project", "")
-        text = CP.cfg_text(game_elf, CP.load_awards(project), CP.load_characters(project))   # PAD-1028/1031
+        text = CP.cfg_text(game_elf, CP.load_awards(project), CP.load_characters(project),     # PAD-1028/1031
+                           CP.port_sites(result.profile))
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)

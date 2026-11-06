@@ -87,3 +87,28 @@ r0), which then sets them back to 0: run 2 calls it with the getter answering 1.
    Characters dialog, a still preview of the pick screen there (battle_select.preview's way), and on Godzilla the
    battle selection screen dressed with them (PAD-707's tiles/portraits/cursor walk) while a teammate picks; any other
    game a screen of the runtime's own (the build's mode-screen node) in place of the top line.
+
+## Run 2 (2026-11-06): Godzilla's ally, battles, building, power-ups - mechanics emulator-proven
+
+Runtime kinds: `boost:<pct>` (`site coop_boost`, the title's add-n call, n scaled while up), `gift:<id>` (`site
+coop_adj_changed`, called with {u16 id} at the pick while the getter answers 1 once) and the record holds (`site
+coop_cache_<id>` hooked to learn the rule's object, `value coop_cache_<id>_at`; held at what the getter would answer
+while up, given back as the harder of the team's own and what play made of it). Port lines on LE 1.16 and Pro 1.16
+(Pro 1.15 has no co-op: none). LE 1.16 / Pro 1.16: adj-changed 0x598b4 / 0x595b8, power-up add 0x14cb3c / 0x149654,
+battle record 0x12406c / 0x12175c (+0x10), building record 0x12e168 / 0x12b7a4 (+0x4).
+
+Rig run r3 (job2.sh, gz2.cfg, 4 teammates): the battle rule at 0x7b0c70 and building rule at 0x7b1d10 seen at the
+game's start; DESTROY ALL MONSTERS' gift: "the game's own feature 311 given (it read it)"; GODZILLA 1985: the battle
+record held 0 (team's 1) in each of its turns, back to 1 at their end; MOTHRA: building held 0 (team's 0); no fault.
+No power-up was earned in that play, so the boost never fired.
+
+## Left (run 3+)
+
+- Visible proofs: an ally lit after the gift (lamps/ally state), a battle lit by ONE ramp while GODZILLA 1985 is up
+  (two for the others), a power-up counted twice (a play that earns one, or the ADD 1 POWERUP gift `gift:312` with
+  `boost:200` in a test cfg: "the game adds 1, 2 with the boost").
+- Jets / tanks at the first ball: JET FIGHTER count = rule 0x15 (manager 0x7b0ce4 lookup 0xd3fa0) + p*4 + 0xa8 (LE),
+  a bonus/champion count; the TANKS n/10 qualify is the tank rule's record (init 0x180e44 on LE: +4 qualify difficulty,
+  +(p-1)*4+0x18 cleared) - find the kill increment and what qualifies, then a `count:` kind (record += n at the pick).
+- Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle (PAD-706's battle progression code).
+- The pick's screen (run 1's note) and the Characters dialog's pictures/preview.

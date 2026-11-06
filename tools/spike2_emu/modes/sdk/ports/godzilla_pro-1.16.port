@@ -1005,3 +1005,14 @@ value coop_ball_msg          1255
 
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x00409454 0xe92d43f0 0xe2505000
+# PAD-1031: co-op characters (pad_mode_runtime.c "co-op characters")
+# the adjustment-changed handler ({u16 id}): LIGHT ALLY's one-shot (a gift)
+site coop_adj_changed     0x000595b8 0xe92d4070 0xe1a05000
+# the power-up add (this, n): a boost scales n
+site coop_boost           0x00149654 0xe92d4030 0xe24dd014
+# copies LIGHT BATTLE DIFFICULTY into the battle rule's record (hooked: the rule's object)
+site coop_cache_173       0x0012175c 0xe92d40f8 0xe1a04000
+value coop_cache_173_at   0x10
+# copies BUILDING DIFFICULTY into the building rule's record (hooked: the rule's object)
+site coop_cache_168       0x0012b7a4 0xe92d40f8 0xe1a07000
+value coop_cache_168_at   0x4

@@ -88,15 +88,15 @@ def project_title(project, probe=False):
     return _pt(project, probe=probe)
 
 
-def cfg_text(game_elf, awards=None, characters=None):
+def cfg_text(game_elf, awards=None, characters=None, sites=()):
     """``coop.cfg`` for the card whose game program is *game_elf* (bytes): co-op on, the right flipper button,
     (PAD-1028) an ``award`` line for each award ticked (*awards*: the project's choices, :func:`load_awards`) and
-    (PAD-1031) the characters' lines (*characters*: :func:`load_characters`)."""
+    (PAD-1031) the characters' lines (*characters*: :func:`load_characters`; *sites*: the port's site names)."""
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) != 2:
         raise CoopError(NO_BUTTON)
     return ("coop on\nbutton %d\n" % buttons[1] + "".join(line + "\n" for line in award_lines(game_elf, awards))
-            + "".join(line + "\n" for line in character_lines(game_elf, characters)))
+            + "".join(line + "\n" for line in character_lines(game_elf, characters, sites)))
 
 
 # ---- PAD-1028: a co-op game's awards -----------------------------------------------------------------------------
@@ -343,7 +343,10 @@ MAX_NAME = 27
 #: the presets beside this module: ``coop_presets/<title stem>.json`` (the customization file per game)
 PRESET_DIR = "coop_presets"
 
-#: (key, words the pick shows, what it does, how): how is ("adj", adjustment name, "x<pct>" | "min" | "max") or
+#: (key, words the pick shows, what it does, how): how is ("adj", adjustment name, "x<pct>" | "min" | "max"),
+#: ("cache", adjustment name, "min" | ...): an adjustment the game copies into a player's record at the game's start
+#: (the port's ``coop_cache_<id>`` names the copy), ("boost", pct): the port's ``coop_boost`` call adds pct %,
+#: ("gift", adjustment name): the game's own one-shot feature at the pick (the port's ``coop_adj_changed``), or
 #: ("save", seconds)
 ABILITIES = (
     ("longer_save", "LONGER BALL SAVE",
@@ -353,10 +356,18 @@ ABILITIES = (
      "A 10 second ball save when they press the Action button twice quickly, once a ball.", ("save", 10)),
     ("heat_ray", "EASIER HEAT RAY", "The heat ray needs half the spinner spins a level (HEAT RAY SPINS PER LEVEL).",
      ("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50")),
+    ("battles", "EASIER BATTLES", "The ramps light a battle as on the game's easiest LIGHT BATTLE DIFFICULTY.",
+     ("cache", "AD_LIGHT_BATTLE_DIFFICULTY", "min")),
+    ("building", "EASIER BUILDING MB", "Building Multiball is as easy to start as on the game's easiest BUILDING "
+     "DIFFICULTY.", ("cache", "AD_BUILDING_DIFFICULTY", "min")),
+    ("powerups", "DOUBLE POWER-UPS", "Every Godzilla power-up the game gives counts twice.", ("boost", 200)),
+    ("ally", "STARTS WITH AN ALLY", "An ally is lit at the start of their first ball (the game's LIGHT ALLY).",
+     ("gift", "AD_LIGHT_ALLY")),
 )
 #: why an ability is not offered on a card
 NO_ADJ = "%s's game program has no %s setting."
 NO_ACTION = "%s has no Action button."
+NO_SITE = "The app does not know where %s keeps this yet."
 
 _ACTION = re.compile(r"^(LOCKDOWN|ACTION) BUTTON( \(OPTIONAL\))?$")
 
@@ -376,9 +387,11 @@ def action_button(game_elf):
     return None
 
 
-def abilities(game_elf, label="This game"):
+def abilities(game_elf, label="This game", sites=()):
     """Every ability, as the card *game_elf* (bytes) can have it: ``[{"key", "words", "does", "cfg", "why"}]``; ``cfg``
-    is the runtime's ability text (``adj:94x200:0:15``), ``""`` with ``why`` when the card cannot have it."""
+    is the runtime's ability text (``adj:94x200:0:15``), ``""`` with ``why`` when the card cannot have it. *sites*:
+    the site names of the build's port (the cache, boost and gift abilities need theirs)."""
+    sites = set(sites or ())
     from .adjustments import AdjustmentTable
     try:
         table = AdjustmentTable(bytes(game_elf))
@@ -390,10 +403,16 @@ def abilities(game_elf, label="This game"):
         cfg, why = "", ""
         if how[0] == "save":
             cfg, why = ("save:%d" % how[1], "") if action is not None else ("", NO_ACTION % label)
+        elif how[0] == "boost":
+            cfg, why = ("boost:%d" % how[1], "") if "coop_boost" in sites else ("", NO_SITE % label)
         else:
             idx = table.by_name.get(how[1]) if table is not None else None
             if idx is None:
                 why = NO_ADJ % (label, how[1][3:].replace("_", " "))
+            elif how[0] == "gift":
+                cfg, why = ("gift:%d" % idx, "") if "coop_adj_changed" in sites else ("", NO_SITE % label)
+            elif how[0] == "cache" and "coop_cache_%d" % idx not in sites:
+                why = NO_SITE % label
             else:
                 e = table.entry(idx)
                 lo, hi = int(e["min"]), int(e["max"])
@@ -454,14 +473,14 @@ def save_characters(project, characters):
     return chars
 
 
-def character_lines(game_elf, characters=None):
+def character_lines(game_elf, characters=None, sites=()):
     """coop.cfg's character lines: ``pick on``, ``left``/``action`` (the buttons the pick and the save use) and
     ``character <abilities> <name>|<what it does>`` for each character, an ability the card cannot have left out
     (``-``). None when *characters* has no pick or no characters."""
     chars = _characters(characters)
     if not chars["pick"] or not chars["list"]:
         return []
-    by_key = {a["key"]: a for a in abilities(game_elf)}
+    by_key = {a["key"]: a for a in abilities(game_elf, sites=sites)}
     out = ["pick on"]
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) == 2:
@@ -512,7 +531,8 @@ def project_abilities(project):
     card = getattr(got, "image", "") if got is not None else ""
     if not card or not os.path.isfile(card):
         return NO_CARD_CHARS, []
-    key = "%s|%d|%d" % (card, os.path.getsize(card), int(os.path.getmtime(card)))
+    prof = project_title(project)
+    key = "%s|%d|%d|%s" % (card, os.path.getsize(card), int(os.path.getmtime(card)), ",".join(port_sites(prof)))
     cache = os.path.join(TR.cache_dir("coop_abilities"), hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
     try:
         with open(cache, encoding="utf-8") as f:
@@ -523,7 +543,7 @@ def project_abilities(project):
         pass
     prof = project_title(project)
     try:
-        got = abilities(TR.game_program(card)[2], prof.label if prof is not None else "This game")
+        got = abilities(TR.game_program(card)[2], prof.label if prof is not None else "This game", port_sites(prof))
     except Exception as e:                              # noqa: BLE001 - an unreadable card: say so
         return "The game program could not be read from the card: %s" % e, []
     try:
@@ -540,49 +560,15 @@ def _abilities_v():
     return hashlib.sha1(repr(ABILITIES).encode("utf-8")).hexdigest()[:12]
 
 
-#: why the Modes tab cannot list a project's abilities
-NO_CARD_CHARS = ("The app reads the abilities a game can have off its card, and this project's card image is not on "
-                 "this computer.")
-
-
-def project_abilities(project):
-    """``(why, abilities)`` for the Modes tab: :func:`abilities` read off the project's card's game program, cached per
-    card; ``why`` says why there are none ("" when there are)."""
-    import hashlib
-    import json
-    import os
+def port_sites(prof):
+    """The site names of *prof*'s port (empty when it has none)."""
     from . import mode_project as MP
-    from . import title_reader as TR
-    got = MP.project_card(project) if project else None
-    card = getattr(got, "image", "") if got is not None else ""
-    if not card or not os.path.isfile(card):
-        return NO_CARD_CHARS, []
-    key = "%s|%d|%d" % (card, os.path.getsize(card), int(os.path.getmtime(card)))
-    cache = os.path.join(TR.cache_dir("coop_abilities"), hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
+    if prof is None:
+        return []
     try:
-        with open(cache, encoding="utf-8") as f:
-            raw = json.load(f)
-        if raw.get("key") == key and raw.get("v") == _abilities_v():
-            return "", raw["abilities"]
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
-    prof = project_title(project)
-    try:
-        got = abilities(TR.game_program(card)[2], prof.label if prof is not None else "This game")
-    except Exception as e:                              # noqa: BLE001 - an unreadable card: say so
-        return "The game program could not be read from the card: %s" % e, []
-    try:
-        with open(cache, "w", encoding="utf-8") as f:
-            json.dump({"v": _abilities_v(), "key": key, "abilities": got}, f)
-    except OSError:
-        pass
-    return "", got
-
-
-def _abilities_v():
-    """The abilities cache's version: the catalog itself, so a changed word reads the card again."""
-    import hashlib
-    return hashlib.sha1(repr(ABILITIES).encode("utf-8")).hexdigest()[:12]
+        return sorted(MP.read_port(MP.port_path(prof)).get("site", {}))
+    except (OSError, MP.ModeProjectError):
+        return []
 
 
 #: why the Modes tab cannot list a project's abilities

@@ -1036,7 +1036,7 @@ def coop_into(result, game_elf, scratch, stock_hud=b"", stock_font=b""):
             result.replaced.append(("%s/%s" % (result.profile.game_dir, rel), src))
     try:
         text = CP.cfg_text(game_elf, CP.load_awards(project), CP.load_characters(project),     # PAD-1028/1031
-                           CP.port_sites(result.profile))
+                           CP.port_sites(result.profile), CP.port_values(result.profile))
         if screens:
             text += "screens %s\n" % result.profile.hud_scene
     except CP.CoopError as e:

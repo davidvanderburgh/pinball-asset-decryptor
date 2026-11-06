@@ -56,7 +56,7 @@ def test_the_plan_puts_coop_cfg_beside_the_runtime(tmp_path, monkeypatch):
     from pinball_decryptor.plugins.stern import mode_write as MW
     prof = MP.profile_for_card("godzilla", "1.16") if hasattr(MP, "profile_for_card") else None
     prof = prof or next(p for p in MP.profiles().values() if SMo.title_key(p) == "godzilla_le-1.16")
-    monkeypatch.setattr(CP, "cfg_text", lambda elf, awards=None, characters=None, sites=(): "coop on\nbutton 59\n")
+    monkeypatch.setattr(CP, "cfg_text", lambda elf, awards=None, characters=None, sites=(), values=None: "coop on\nbutton 59\n")
     monkeypatch.setattr(MW, "find_port", lambda prof, elf: MP.port_path(prof))
     result = MW.plan(str(tmp_path), b"", b"", b"elf", str(tmp_path / "scratch"), modes_on=False,
                      coop=True, coop_prof=prof)

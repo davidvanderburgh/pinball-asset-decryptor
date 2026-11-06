@@ -3417,13 +3417,18 @@ PREVIEW_HELP = {
                 "in attract until the next game starts. Untick an award to leave it out, or type new "
                 "words for its name; Defaults puts the game's back.\n\n"
                 "**Characters…**, beside it, gives the team characters to pick from. Each teammate picks "
-                "one at the start of their first ball: the machine's top line names it and what it does, "
-                "the flippers move to the next one (one another teammate has is skipped), the Action "
-                "button takes it, and after 20 seconds the one shown is taken. RANDOM picks one nobody "
-                "has. A character's ability holds while its teammate is up: a longer ball save, a ball "
-                "save on two quick presses of the Action button, an easier heat ray (Godzilla). Only "
-                "the abilities the game's program can have are offered. On Godzilla, **Load Godzilla's "
-                "set** puts in eleven characters, one for each ability; rename them as you like.",
+                "one at the start of their first ball: the machine shows the character's picture, its "
+                "name and what it does, the flippers move to the next one (one another teammate has is "
+                "skipped), the Action button takes it, and after 20 seconds the one shown is taken. "
+                "RANDOM picks one nobody has. **Picture…** gives a character a picture of your own "
+                "(without one it gets a panel with its name), and the dialog previews what the machine "
+                "shows. A character's ability holds while its teammate is up: on every game a longer "
+                "ball save and a ball save on two quick presses of the Action button; on Godzilla also "
+                "an easier heat ray, easier battles, easier Building Multiball, double power-ups, an "
+                "ally lit at the pick, 4 jets or 4 tanks destroyed at the pick, a battle shot spotted "
+                "with two quick Action presses, and tier 2 open once a tier-1 battle has started. Only "
+                "the abilities the game can have are offered. On Godzilla, **Load Godzilla's set** puts "
+                "in eleven characters, one for each ability; rename them as you like.",
             ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "

@@ -6222,8 +6222,47 @@ takes it, 20 s takes the one shown. RANDOM takes one nobody has. `mode.log`:
 
 The app offers each ability where the card's program has what it needs (`coop_play.ABILITIES`, by adjustment name);
 `coop_presets/<title stem>.json` beside `coop_play.py` is a game's customization file (Godzilla's: eleven characters,
-one per ability the reporter asked for, those not yet built carrying none). Emulator-proven on Godzilla LE 1.16
-(3 teammates). Plan and what is left: `docs/plans/pad1031_coop_characters.md`.
+one per ability the reporter asked for). Plan and the proof runs: `docs/plans/pad1031_coop_characters.md`.
+
+The rest of the kinds, each needing its port lines (the app offers an ability only where the build's port names
+what it needs):
+
+- `boost:<pct>`: the title's "add n of something" call (`site coop_boost`; Godzilla: its power-up add, `(this, n)`)
+  adds n x pct / 100 while the teammate is up.
+- `gift:<id>`: at the teammate's pick, the game's own one-shot feature adjustment `<id>` (Godzilla: LIGHT ALLY 311,
+  which lights the next of Mothra, Rodan and Anguirus): the game's adjustment-changed handler (`site
+  coop_adj_changed`, given `{u16 id}`) is called while the getter answers 1 for it, once.
+- An `adj:` the game copies into a player's record at the game's start reads the same through the getter but plays
+  as the record says. `site coop_cache_<id>` is the method that copies it (hooked to learn the rule's object) and
+  `value coop_cache_<id>_at` where (this + player x 4 + at): held at what the getter would answer while the teammate
+  is up, given back as the harder of the team's own and what play made of it (Godzilla's LIGHT BATTLE DIFFICULTY 173
+  at +0x10 of the battle rule, BUILDING DIFFICULTY 168 at +0x4 of the building rule; each battle or building raises
+  its record a notch).
+- `count:<name>+<n>`: at the pick, a rule's count for the player raised by n. The rule is found by `site
+  coop_count_<name>` (its game-start method, hooked) or `data coop_count_<name>_rule` (where the game keeps its
+  pointer); `value coop_count_<name>_at` where (rule + player x 4 + at). Godzilla: `jets` (rule 0x15 of the rule
+  table, +0xa8: what JET FIGHTER CHAMPION and the bonus read), `tanks` (the tank rule, +(player - 1) x 4 + 0x48: the
+  city map's TANKS n/10).
+- `spot:<rules>`: two Action presses within 0.6 s while one of the game's rules in the mask runs (`pm_stock_active`):
+  its lowest lit shot (`pm_stock_lit`, not 0x1) goes through the game's own `site shot_dispatch`, once a ball
+  (Godzilla `value coop_battle_rules 0x7f000`: the seven battles, ids 12-18).
+- `unlock:<id>@<rules>`: once one of the rules has STARTED on the teammate's turn this game, adjustment `<id>` reads 1
+  while they are up (Godzilla: UNLOCK ALL MONSTER BATTLES 334, which the selection screen's slot state reads live,
+  after a tier-1 battle, `value coop_tier1_rules 0xf000`: tier 2 opens).
+
+**The pick's own screens.** The top line is small (on Godzilla a long name ran into CREDITS), so a card with a pick
+gets a screen per character in the HUD scene, as a mode's own screen: `PadCoop_<n>` (1-based) and `PadCoop_Random`,
+each the owner's picture (the Characters dialog's Picture..., copied to `<project>/coop/`) or a generated panel with
+the name, and `<NAME> - <WHAT IT DOES>` under it. coop.cfg `screens <scene>` names the scene; the runtime finds them
+once the scene is up, keeps them hidden, shows the one the pick is on, and the top line then says only `PLAYER 2
+PICK`. With modes they go in the modes' own HUD pass (mode_assets.build); co-op alone, Write rewrites the HUD itself.
+
+Emulator-proven on Godzilla LE 1.16: the pick (Action, the flipper walk past taken ones, RANDOM, the time), the
+screens (12 of 12 found and hidden, the shown one's picture and words, a set built by Write's own override path), the
+save time 15 instead of 12 and the heat ray's 10 spins instead of 20 while the right teammate is up, the Action save
+giving a drain back, one ramp lighting a battle (BATTLE READY) for the easy teammate and not for another, the ally
+record 0/0/0 -> 0/0/1, a power-up counted twice (the meter's two segments), TANKS 7/10 after 4 given and 3 shot down,
+the jets count 4. Pro 1.16 carries the same lines (its sites matched to LE's code, not run).
 
 ## Inactivity pauses the timers (PAD-1022)
 

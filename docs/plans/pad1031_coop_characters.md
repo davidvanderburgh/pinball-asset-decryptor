@@ -181,3 +181,17 @@ process; guestmem.py takes the first `game` on the box), job4.sh (proof job), jo
 
 - Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle.
 - MODE_SDK.md / help: the new kinds (boost, gift, count, caches, screens) and the pick screens.
+
+## Run 6 (2026-11-06): spot a shot, tier 2, docs
+
+- Spot: `spot:<rules>`: two Action presses during a running battle (rules 12-18, `pm_stock_active`) send its lowest
+  lit shot through Godzilla's own shot dispatch (0xd3e2c LE: a static walk of every rule's v[15] with the mask in
+  r2:r3 and a factor on the stack), once a ball. gz_spot3: rule 15's lit 0x800 -> spotted -> lit 0x0.
+- Tier 2: the selection screen's slot state (LE 0x122ae8) reads UNLOCK ALL MONSTER BATTLES (334) live; `unlock:334@
+  0xf000` answers 1 once a tier-1 battle has started on the teammate's turn. gz_spot3: places at the pick 0 0 0 0 1 1 1
+  (tier 2 locked), after rule 15 started 0 0 0 0 0 0 0.
+- MODE_SDK.md (every kind, the screens, the proofs), help text, the Characters dialog's shot.
+
+## Left
+
+- Pro 1.16: its lines are matched to LE's code (same shapes); one emulator run on the Pro card to prove them.

@@ -47,6 +47,12 @@ static unsigned fn(const char *name) { (void)name; return 0; }
 static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
 static void *pm_node(const char *where, const char *path) { (void)where; (void)path; return 0; }
 static void pm_show(void *node, int on) { (void)node; (void)on; }
+struct pm_stock_rule;
+static struct pm_stock_rule *pm_stock_rule(unsigned id) { (void)id; return 0; }
+static int pm_stock_active(struct pm_stock_rule *r) { (void)r; return 0; }
+static uint64_t pm_stock_lit(struct pm_stock_rule *r) { (void)r; return 0; }
+static unsigned more_state(unsigned slot) { (void)slot; return 0; }
+static unsigned long data(const char *name) { (void)name; return 0; }
 @DECL@
 @FNS@
 static void press(unsigned id) { coop_edge(id, 1, 0x800, 0); }
@@ -114,6 +120,9 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static void coop_pick_open(unsigned t)",
        "static void coop_pick_close(const char *how)",
        "static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)",
+       "static int coop_rule_running(unsigned rules)",
+       "static void coop_rules_watch(void)",
+       "static int coop_spot(const struct coop_char *c)",
        "static void coop_screens_tick(void)",
        "static void coop_chars_tick(void)",
        "static void coop_chars_begin(void)",
@@ -124,7 +133,7 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
 def _decl(src):
     """The character section's declarations, verbatim: from its #defines to the last of its globals."""
     start = src.index("#define COOP_CHARS 16")
-    end = src.index("static int coop_count_n;", start)
+    end = src.index("static unsigned coop_started[5];", start)
     return src[start:src.index("\n", end) + 1]
 
 
@@ -377,3 +386,28 @@ def test_the_runtime_shows_the_picks_screen_and_reads_where_they_are():
     tick = R._lift(src, "static void coop_screens_tick(void)")
     assert '"PadCoop_%d"' in tick and '"PadCoop_Random"' in tick and "pm_show(coop_scr[want], 1);" in tick
     assert "coop_screens_tick();" in R._lift(src, "static void coop_chars_tick(void)")
+
+
+def test_godzilla_offers_all_eleven_abilities_from_its_ports():
+    if not os.path.isfile(GZ_ELF):
+        pytest.skip("no Godzilla LE 1.16 program here")
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    elf = open(GZ_ELF, "rb").read()
+    for key in ("godzilla_le-1.16", "godzilla_pro-1.16"):
+        port = MP.read_port(str(RUNTIME.parent / "ports" / (key + ".port")))
+        got = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", set(port["site"]) | set(port["data"]),
+                                                         port["value"])}
+        assert all(got.values()), (key, [k for k, v in got.items() if not v])
+        assert got["spot"] == "spot:0x7f000" and got["tier2"] == "unlock:334@0xf000"
+    keys = {c["ability"] for c in CP.read_preset(CP.presets()["godzilla"])["characters"]["list"]}
+    assert keys == {a[0] for a in CP.ABILITIES}                      # the preset uses every ability once
+
+
+def test_spot_and_unlock_read_from_coop_cfg():
+    src = RUNTIME.read_text(encoding="utf-8")
+    line = R._lift(src, "static void coop_char_line(const char *s)")
+    assert 'str_starts(p, "spot:")' in line and 'str_starts(p, "unlock:")' in line
+    wrap = R._lift(src, "static unsigned coop_adj_wrap(unsigned id)")
+    assert "c->unlock_adj == id && (coop_started[coop.turn] & c->unlock_rules)" in wrap
+    spot = R._lift(src, "static int coop_spot(const struct coop_char *c)")
+    assert 'fn("shot_dispatch")' in spot and "lit & (~lit + 1)" in spot

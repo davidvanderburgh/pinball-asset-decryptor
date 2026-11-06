@@ -88,7 +88,7 @@ def project_title(project, probe=False):
     return _pt(project, probe=probe)
 
 
-def cfg_text(game_elf, awards=None, characters=None, sites=()):
+def cfg_text(game_elf, awards=None, characters=None, sites=(), values=None):
     """``coop.cfg`` for the card whose game program is *game_elf* (bytes): co-op on, the right flipper button,
     (PAD-1028) an ``award`` line for each award ticked (*awards*: the project's choices, :func:`load_awards`) and
     (PAD-1031) the characters' lines (*characters*: :func:`load_characters`; *sites*: the port's site names)."""
@@ -96,7 +96,7 @@ def cfg_text(game_elf, awards=None, characters=None, sites=()):
     if len(buttons) != 2:
         raise CoopError(NO_BUTTON)
     return ("coop on\nbutton %d\n" % buttons[1] + "".join(line + "\n" for line in award_lines(game_elf, awards))
-            + "".join(line + "\n" for line in character_lines(game_elf, characters, sites)))
+            + "".join(line + "\n" for line in character_lines(game_elf, characters, sites, values)))
 
 
 # ---- PAD-1028: a co-op game's awards -----------------------------------------------------------------------------
@@ -367,6 +367,11 @@ ABILITIES = (
      ("gift", "AD_LIGHT_ALLY")),
     ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
      "the bonus count them).", ("count", "jets", 4)),
+    ("spot", "SPOT A BATTLE SHOT", "Two quick presses of the Action button during a battle count as its next lit "
+     "shot, once a ball.", ("spot", "coop_battle_rules")),
+    ("tier2", "TIER 2 AFTER A BATTLE", "Once a tier-1 battle has started on their turn, every battle on the selection "
+     "screen is open while they are up, tier 2 included (the game's UNLOCK ALL MONSTER BATTLES).",
+     ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", "coop_tier1_rules")),
     ("tanks", "STARTS WITH 4 TANKS", "Four tanks count as destroyed when they pick: the city map's TANKS n/10 starts "
      "at 4.", ("count", "tanks", 4)),
 )
@@ -393,11 +398,13 @@ def action_button(game_elf):
     return None
 
 
-def abilities(game_elf, label="This game", sites=()):
+def abilities(game_elf, label="This game", sites=(), values=None):
     """Every ability, as the card *game_elf* (bytes) can have it: ``[{"key", "words", "does", "cfg", "why"}]``; ``cfg``
     is the runtime's ability text (``adj:94x200:0:15``), ``""`` with ``why`` when the card cannot have it. *sites*:
-    the site names of the build's port (the cache, boost and gift abilities need theirs)."""
+    the site names of the build's port (the cache, boost and gift abilities need theirs); *values*: its ``value``
+    lines (``{name: number}``; the spot and unlock abilities need the rules they watch)."""
     sites = set(sites or ())
+    values = dict(values or {})
     from .adjustments import AdjustmentTable
     try:
         table = AdjustmentTable(bytes(game_elf))
@@ -411,6 +418,10 @@ def abilities(game_elf, label="This game", sites=()):
             cfg, why = ("save:%d" % how[1], "") if action is not None else ("", NO_ACTION % label)
         elif how[0] == "boost":
             cfg, why = ("boost:%d" % how[1], "") if "coop_boost" in sites else ("", NO_SITE % label)
+        elif how[0] == "spot":
+            rules = values.get(how[1])
+            cfg, why = (("spot:0x%x" % rules, "") if rules and action is not None and "shot_dispatch" in sites
+                        else ("", NO_ACTION % label if action is None else NO_SITE % label))
         elif how[0] == "count":
             cfg, why = (("count:%s+%d" % (how[1], how[2]), "")
                         if {"coop_count_%s" % how[1], "coop_count_%s_rule" % how[1]} & sites
@@ -419,6 +430,9 @@ def abilities(game_elf, label="This game", sites=()):
             idx = table.by_name.get(how[1]) if table is not None else None
             if idx is None:
                 why = NO_ADJ % (label, how[1][3:].replace("_", " "))
+            elif how[0] == "unlock":
+                rules = values.get(how[2])
+                cfg, why = ("unlock:%d@0x%x" % (idx, rules), "") if rules else ("", NO_SITE % label)
             elif how[0] == "gift":
                 cfg, why = ("gift:%d" % idx, "") if "coop_adj_changed" in sites else ("", NO_SITE % label)
             elif how[0] == "cache" and "coop_cache_%d" % idx not in sites:
@@ -483,14 +497,14 @@ def save_characters(project, characters):
     return chars
 
 
-def character_lines(game_elf, characters=None, sites=()):
+def character_lines(game_elf, characters=None, sites=(), values=None):
     """coop.cfg's character lines: ``pick on``, ``left``/``action`` (the buttons the pick and the save use) and
     ``character <abilities> <name>|<what it does>`` for each character, an ability the card cannot have left out
     (``-``). None when *characters* has no pick or no characters."""
     chars = _characters(characters)
     if not chars["pick"] or not chars["list"]:
         return []
-    by_key = {a["key"]: a for a in abilities(game_elf, sites=sites)}
+    by_key = {a["key"]: a for a in abilities(game_elf, sites=sites, values=values)}
     out = ["pick on"]
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) == 2:
@@ -553,7 +567,8 @@ def project_abilities(project):
         pass
     prof = project_title(project)
     try:
-        got = abilities(TR.game_program(card)[2], prof.label if prof is not None else "This game", port_sites(prof))
+        got = abilities(TR.game_program(card)[2], prof.label if prof is not None else "This game", port_sites(prof),
+                        port_values(prof))
     except Exception as e:                              # noqa: BLE001 - an unreadable card: say so
         return "The game program could not be read from the card: %s" % e, []
     try:
@@ -568,6 +583,17 @@ def _abilities_v():
     """The abilities cache's version: the catalog itself, so a changed word reads the card again."""
     import hashlib
     return hashlib.sha1(repr(ABILITIES).encode("utf-8")).hexdigest()[:12]
+
+
+def port_values(prof):
+    """The ``value`` lines of *prof*'s port (``{}`` when it has none)."""
+    from . import mode_project as MP
+    if prof is None:
+        return {}
+    try:
+        return dict(MP.read_port(MP.port_path(prof)).get("value", {}))
+    except (OSError, MP.ModeProjectError):
+        return {}
 
 
 def port_sites(prof):

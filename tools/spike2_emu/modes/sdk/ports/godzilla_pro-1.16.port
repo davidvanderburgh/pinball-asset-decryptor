@@ -1023,3 +1023,8 @@ value coop_count_jets_at   0xa8
 # the tank rule's game-start method; the city map's TANKS n/10 at this + (player - 1) x 4 + 0x48
 site coop_count_tanks     0x0017d46c 0xe92d43f0 0xe1a04000
 value coop_count_tanks_at 0x44
+# the battles' rules (ids 12-18: the seven places of the selection screen) and the tier-1 ones (12-15): a character's
+# spot sends one of a running battle's lit shots; its unlock reads UNLOCK ALL MONSTER BATTLES (334) as 1 once a
+# tier-1 battle has started on its turn (the selection screen's slot state reads it live: Premium/LE 0x122ae8)
+value coop_battle_rules    0x7f000
+value coop_tier1_rules     0xf000

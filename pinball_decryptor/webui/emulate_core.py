@@ -892,6 +892,26 @@ _BOTH_PICK = {}
 _BOTH_PICK_S = 30.0
 
 
+def docker_env(env=None, cli=None):
+    """An os.environ mapping that prepends DOCKER_DIRS and the resolved
+    CLI's folder to PATH, ensuring docker plugins, credential helpers
+    (such as docker-credential-desktop), and engine binaries can be found
+    when launched from a macOS GUI environment with a minimal PATH."""
+    base = os.environ.copy() if env is None else dict(env)
+    if cli is None:
+        cli = docker_cli()
+    cli_dir = os.path.dirname(cli) if cli else ""
+    extra = [cli_dir] if cli_dir else []
+    for d in DOCKER_DIRS:
+        exp = os.path.expanduser(d)
+        if exp not in extra:
+            extra.append(exp)
+    if extra:
+        cur = base.get("PATH", "")
+        base["PATH"] = os.pathsep.join(extra + ([cur] if cur else []))
+    return base
+
+
 def docker_engine():
     """What on THIS Mac can provide the daemon, as ``(label, kind, path)``,
     or None.

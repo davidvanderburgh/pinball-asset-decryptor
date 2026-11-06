@@ -1422,3 +1422,70 @@ def test_engine_name_is_podman_without_asking_podman(monkeypatch):
     monkeypatch.setattr(D, "_docker", lambda args, **kw: asked.append(args))
     assert D._engine_name() == "podman"
     assert asked == []
+
+
+def test_docker_env_prepends_docker_dirs(monkeypatch):
+    monkeypatch.setattr(D, "_cli", lambda: "/Users/test/.docker/bin/docker")
+    env = D._docker_env()
+    assert "/Users/test/.docker/bin" in env["PATH"]
+
+    from pinball_decryptor.webui.emulate_core import docker_env
+    # Empty PATH shouldn't leave a trailing separator
+    env_empty = docker_env(env={"PATH": ""}, cli="/custom/bin/docker")
+    assert not env_empty["PATH"].endswith(os.pathsep)
+    assert env_empty["PATH"].startswith("/custom/bin")
+
+    # Existing PATH is preserved at the end
+    env_existing = docker_env(env={"PATH": "/system/bin"}, cli="/custom/bin/docker")
+    assert env_existing["PATH"].endswith("/system/bin")
+
+
+def test_plugin_executors_env():
+    from pinball_decryptor.plugins.jjp.executor import DockerExecutor as JjpExecutor
+    from pinball_decryptor.plugins.spooky.executor import DockerExecutor as SpookyExecutor
+
+    jjp_ex = JjpExecutor()
+    env = jjp_ex._env()
+    assert env is not None
+    assert "PATH" in env
+
+    spk_ex = SpookyExecutor()
+    env_spk = spk_ex._env()
+    assert env_spk is not None
+    assert "PATH" in env_spk
+
+
+def test_docker_build_and_run_pass_env(monkeypatch):
+    monkeypatch.setattr(D, "_cli", lambda: "/usr/local/bin/docker")
+    popen_calls = []
+    run_calls = []
+
+    class DummyProc:
+        stdout = []
+
+        def wait(self):
+            return 0
+
+        def kill(self):
+            pass
+
+    def fake_popen(cmd, **kw):
+        popen_calls.append((cmd, kw))
+        return DummyProc()
+
+    def fake_run(cmd, **kw):
+        run_calls.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(D.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(D.subprocess, "run", fake_run)
+
+    D._docker_build(["build", "."], lambda l: None, 10)
+    assert len(popen_calls) == 1
+    assert "env" in popen_calls[0][1]
+    assert popen_calls[0][1]["env"] is not None
+
+    D._docker(["info"], 10)
+    assert len(run_calls) == 1
+    assert "env" in run_calls[0][1]
+    assert run_calls[0][1]["env"] is not None

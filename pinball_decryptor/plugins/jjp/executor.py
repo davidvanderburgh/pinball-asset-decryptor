@@ -406,6 +406,13 @@ class DockerExecutor(CommandExecutor):
         except Exception:
             return "docker"
 
+    def _env(self):
+        try:
+            from ...webui.emulate_core import docker_env
+            return docker_env(cli=self._cli())
+        except Exception:
+            return None
+
     def _dockerfile_path(self):
         """Find the bundled Dockerfile."""
         # Check inside the package directory first
@@ -434,7 +441,7 @@ class DockerExecutor(CommandExecutor):
         try:
             result = subprocess.run(
                 [self._cli(), "image", "inspect", _DOCKER_IMAGE],
-                capture_output=True, timeout=15,
+                capture_output=True, timeout=15, env=self._env(),
             )
             if result.returncode == 0:
                 return  # Image exists
@@ -455,6 +462,7 @@ class DockerExecutor(CommandExecutor):
                 encoding="utf-8",
                 errors="replace",
                 timeout=300,
+                env=self._env(),
             )
             if result.returncode != 0:
                 raise CommandError("docker build", result.returncode,
@@ -477,7 +485,7 @@ class DockerExecutor(CommandExecutor):
         # Stop any leftover container
         subprocess.run(
             [self._cli(), "rm", "-f", _DOCKER_CONTAINER],
-            capture_output=True, timeout=15,
+            capture_output=True, timeout=15, env=self._env(),
         )
 
         mount_args = []
@@ -507,6 +515,7 @@ class DockerExecutor(CommandExecutor):
                 encoding="utf-8",
                 errors="replace",
                 timeout=30,
+                env=self._env(),
             )
             if result.returncode != 0:
                 raise CommandError("docker run", result.returncode,
@@ -523,7 +532,7 @@ class DockerExecutor(CommandExecutor):
         try:
             subprocess.run(
                 [self._cli(), "rm", "-f", _DOCKER_CONTAINER],
-                capture_output=True, timeout=30,
+                capture_output=True, timeout=30, env=self._env(),
             )
         except Exception:
             pass
@@ -547,6 +556,7 @@ class DockerExecutor(CommandExecutor):
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout,
+                env=self._env(),
             )
         except subprocess.TimeoutExpired as e:
             raise CommandError(bash_cmd, -1, f"Command timed out after {timeout}s") from e
@@ -574,6 +584,7 @@ class DockerExecutor(CommandExecutor):
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            env=self._env(),
         )
 
         with self._lock:
@@ -620,7 +631,7 @@ class DockerExecutor(CommandExecutor):
         try:
             result = subprocess.run(
                 [cli, "info"],
-                capture_output=True, timeout=15,
+                capture_output=True, timeout=15, env=self._env(),
             )
             if result.returncode == 0:
                 return True, f"{name} available"

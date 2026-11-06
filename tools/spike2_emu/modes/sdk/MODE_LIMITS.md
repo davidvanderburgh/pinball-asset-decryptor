@@ -270,7 +270,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | HUD (Godzilla) | title, line or award 40 characters; 3 counters with 16-character labels; badge 12; gauge up to 12 pips |
 | Light show | 10 steps |
 | Multiball | 2 to 6 balls, ball save up to 60 seconds |
-| Clips | form mode: one at the start, one at the end. Blocks or C: 12. Up to 30 seconds each, any common video format, silent. |
+| Clips | form mode: one at the start, one at the end. Blocks or C: 32. Up to 30 seconds each, any common video format, silent. |
 | Pictures | up to 1360 x 768 (bigger is scaled down) |
 | Sounds | form mode: start, scoring shot, end and music. Blocks or C: 16. WAV only. |
 | Form end sound | one per card, from the first mode that has one |

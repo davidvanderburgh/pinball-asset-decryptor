@@ -66,6 +66,8 @@ EDITION = "edition"
 BRIGHTNESS = "brightness"
 CONTRAST = "contrast"
 SATURATION = "saturation"
+#: PAD-1017 round 2: co-op play switched in the service menu (:mod:`.coop_play`): 1 Off, 2 On
+COOP_PLAY = "coop_play"
 #: each setting of ours: the adjustment it takes over, its descriptor caption, its row caption and
 #: the menu category whose page lists it. EDITION sits on Attract Mode (16), beside the game's own
 #: BOOT SCREEN and 70TH BOOT SCREEN, which is where an operator already picks how the game looks.
@@ -77,6 +79,7 @@ SETTINGS = {
     BRIGHTNESS: (None, "BRIGHTNESS", "Brightness", 11),
     CONTRAST: (None, "CONTRAST", "Contrast", 11),
     SATURATION: (None, "SATURATION", "Saturation", 11),
+    COOP_PLAY: (None, "CO-OP PLAY", "Co-op Play", 16),
 }
 #: the firmware's own word for an adjustment nothing reads any more
 DEPRECATED = "DEPRECATED"
@@ -241,6 +244,8 @@ ANY_MENU_PATH = {
                 "Adjustments on a game whose Adjustments have that page",
     EDITION: "Adjustments > Machine Settings > Attract Mode, or at the end of Standard "
              "Adjustments on a game whose Adjustments have that page",
+    COOP_PLAY: "Adjustments > Machine Settings > Attract Mode, or at the end of Standard "
+               "Adjustments on a game whose Adjustments have that page",
 }
 
 
@@ -541,12 +546,19 @@ def plan_many(table, wanted):
                 refused[key] = ("the game has no spare setting left for %s (the card's other menu "
                                 "settings of ours use them)" % caption)
                 continue
-            ad = free[0]
-        try:
-            setting, w, c = plan(table, key, values, names, ad=ad, **opts)
-        except MenuSettingError as e:
-            refused[key] = str(e)
+        # PAD-1017: a spare one this program cannot give (Iron Maiden Pro 1.18's first shares its row caption) is passed
+        # over for the next
+        tries = free if row in pooled else [None]
+        setting = None
+        for ad in tries:
+            try:
+                setting, w, c = plan(table, key, values, names, ad=ad, **opts)
+                break
+            except MenuSettingError as e:
+                refused[key] = str(e)
+        if setting is None:
             continue
+        refused.pop(key, None)
         taken.add(setting.id)
         settings.append(setting)
         writes.update(w)

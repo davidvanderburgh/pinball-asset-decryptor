@@ -6124,6 +6124,13 @@ tab's **Co-op play**):
 
     coop on
     button 59        the switch held at Start to add a teammate (the right flipper button; the build reads its id)
+    setting 0x...    (round 2) the live value of the game's own CO-OP PLAY row (1 Off, 2 On): co-op only while On
+
+Round 2 (DoomWalrus666): the Modes tab's "Switch it on and off in the service menu" puts a CO-OP PLAY row in the game's
+own menu (menu_settings.COOP_PLAY, on a spare setting, Off to start with) and its live value in coop.cfg. Teammates join
+only while it says On. On a card of co-op and nothing else (no mode, no attract item), the Insider Connected gate is
+hooked as always but holds back the game session, high scores, game events and the achievement query only while it
+says On (`insider_holding`); Off, the card is the game's own on Insider Connected. A card with modes keeps the whole gate.
 
 On the machine, a Start pressed with the button held, in the first ball of a one-player game (then any Start in that
 co-op game), adds a teammate. The game's own add-a-player runs as always (credits, its hooks, the most players it

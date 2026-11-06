@@ -15000,6 +15000,10 @@ static void switches_arm(void)
  * coop.cfg (beside the runtime, or /dump for a rig):
  *   coop on
  *   button <switch id>        the button held at Start to add a teammate (the right flipper button)
+ *   setting <address>         (round 2, DoomWalrus666) the live value of the game's own CO-OP PLAY row (1 Off, 2 On;
+ *                             menu_settings.py puts the row on a spare setting): co-op only while it says On.
+ *                             On a card of co-op and nothing else (no mode, no attract item), Insider Connected is
+ *                             held back only while it says On too (insider_while, below)
  * A teammate joins when Start adds a player while the button is held, in a one-player game (then any Start in that
  * co-op game): the game's own add runs (credits, its own hooks, the most players it allows) and counts the player, so
  * the teammate has a score panel of its own. A plain Start in a one-player game adds a competing player as the game
@@ -15018,6 +15022,7 @@ static struct {
     unsigned button;                     /* the switch held at Start to add a teammate (0: none) */
     unsigned game;                       /* the game (chg_game_now() + 1) the teammates belong to; 0: none */
     unsigned n, turn;                    /* teammates (2-4) and the one up (1..n) */
+    unsigned setting;                    /* round 2: the CO-OP PLAY row's live value (0: none - always on) */
 } coop;
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
 static int coop_scores;                  /* the game's end-of-game high scores are wrapped (PAD-640/663) */
@@ -15033,6 +15038,13 @@ static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsig
 {
     if (turn < n) return after == before - down ? turn : turn + 1;   /* still down: an extra ball, the same one */
     return after == before ? turn : 1;                                /* the ball did not move: an extra ball */
+}
+
+/* round 2: the service menu's CO-OP PLAY says On (or the card has no such row: co-op is always on) */
+static int coop_switched_on(void)
+{
+    if (!coop.setting) return 1;
+    return *(volatile const unsigned *)(unsigned long)coop.setting == 2u;
 }
 
 /* this game's co-op teammates (0 when it is not a co-op game) */
@@ -15173,7 +15185,8 @@ static void coop_scores_same(unsigned n)
 static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     unsigned n = coop_teammates(), ret;
-    if (!n && !(*coop_players_byte == 1 && coop_button_held())) return coop_add_game(r0, r1, r2, r3);
+    if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_button_held()))
+        return coop_add_game(r0, r1, r2, r3);
     if (n >= 4) {
         say("co-op: Start - the team is full (4)");
         return 0;
@@ -15238,6 +15251,32 @@ static void coop_line(const char *s)
         coop.button = (unsigned)number(&p, &ok);
         if (!ok) coop.button = 0;
     }
+    if (str_starts(s, "setting ")) {
+        p = s + 8;
+        coop.setting = (unsigned)number(&p, &ok);
+        if (!ok) coop.setting = 0;
+    }
+}
+
+/* round 2: the CO-OP PLAY row's live value from coop.cfg, read before the gate is armed (0: none) */
+static unsigned coop_setting_wanted(void)
+{
+    static char raw[1024];
+    long n = -1, i;
+    unsigned k, v = 0;
+    const char *p;
+    int ok;
+    for (k = 0; k < sizeof COOP_FILES / sizeof COOP_FILES[0] && n < 0; k++)
+        n = pm_read_file(COOP_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return 0;
+    raw[n] = 0;
+    for (i = 0; i < n; i++)
+        if ((!i || raw[i - 1] == '\n') && str_starts(raw + i, "setting ")) {
+            p = raw + i + 8;
+            v = (unsigned)number(&p, &ok);
+            return ok ? v : 0;
+        }
+    return 0;
 }
 
 /* coop.cfg asks for co-op: the card takes the runtime's whole gate, as attract items do */
@@ -15284,6 +15323,10 @@ static void coop_arm(void)
         return;
     }
     if (!coop.button) { say("co-op: off - coop.cfg names no button"); return; }
+    if (coop.setting && !maps_has(coop.setting, 4, MAP_R)) {
+        say("co-op: off - the CO-OP PLAY setting's value 0x%08x is not mapped", coop.setting);
+        return;
+    }
     if (!e || !e->ok || !edge_arm(&why)) {
         say("co-op: off - the button cannot be read (%s)", !e ? "the port has no switch_edge" : !e->ok
             ? "switch_edge does not match this build" : why ? why : "?");
@@ -15306,6 +15349,9 @@ static void coop_arm(void)
     if (!coop_scores)
         say("co-op: no board of its own - the port does not name this build's end-of-game high scores, so a team's "
             "score goes on the game's boards");
+    if (coop.setting)
+        say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08x, now %s)", coop.setting,
+            coop_switched_on() ? "On" : "Off");
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
         data("coop_player"), data("coop_player") + 1, data("coop_players"));
@@ -15785,10 +15831,23 @@ static void on_agent_header(unsigned *r)
     else insider_endpoint[0] = 0;
 }
 
+/* round 2 (PAD-1017, DoomWalrus666): on a card of co-op and nothing else, the gate holds back only while the service
+ * menu's CO-OP PLAY says On (the word at insider_while is 2): Off, the card's Insider Connected is the game's own -
+ * the game plays stock then. 0: the whole gate, always (a card with modes). */
+static unsigned insider_while;
+
+/* 1 when the gate holds back now (tests lift it verbatim) */
+static int insider_holding(unsigned while_at, unsigned value)
+{
+    return !while_at || value == 2u;
+}
+
 static int on_agent_begin(unsigned *r)
 {
     int i;
     unsigned n;
+    if (!insider_holding(insider_while, insider_while ? *(volatile const unsigned *)(unsigned long)insider_while : 0u))
+        return 0;                                                   /* CO-OP PLAY Off: the game's own */
     if (insider_achq >= 0 && r[2] == (unsigned)insider_achq) {      /* PAD-698: the achievement list */
         n = ++insider_achq_held;
         if (n == 1)
@@ -15809,6 +15868,9 @@ static int on_agent_begin(unsigned *r)
     insider_endpoint[0] = 0;
     return 1;
 }
+
+static unsigned coop_setting_wanted(void);       /* PAD-1017 round 2, below */
+static int attract_wanted(void);                 /* PAD-782, below */
 
 /* 1 = the gate is up. 0 = this port cannot keep scores off Insider Connected, or (PAD-698) the
  * game's achievement query was not found: NOTHING is hooked and the game runs stock, whatever else
@@ -15837,6 +15899,18 @@ static int insider_arm(void)
         "award (the achievement query, message type %d, loaded at 0x%08x, is held back); the login "
         "and the rest of Insider Connected are untouched", fn("agent_header"), fn("agent_begin"),
         insider_achq, insider_achq_at);
+    {   /* round 2: a card of co-op and nothing else holds back only while CO-OP PLAY says On */
+        const struct pm_mode *m;
+        int modes = 0;
+        unsigned at = coop_setting_wanted();
+        EACH_MODE(m) modes += m != 0;
+        if (at && !modes && !attract_wanted() && maps_has(at, 4, MAP_R)) {
+            insider_while = at;
+            say("insider: a card of co-op and nothing else - all of that only while the service menu's CO-OP PLAY "
+                "says On (value at 0x%08x, now %s); Off, Insider Connected is the game's own",
+                at, *(volatile const unsigned *)(unsigned long)at == 2u ? "On" : "Off");
+        }
+    }
     return 1;
 }
 

@@ -3408,7 +3408,15 @@ PREVIEW_HELP = {
                 "4-PLAYER CO-OP), shown with the game's champions in attract. A team's score never "
                 "goes on the game's own boards.\n"
                 "- Like a card with modes, a card with co-op play keeps its scores and achievements "
-                "off Insider Connected: they stay on the machine.",
+                "off Insider Connected: they stay on the machine.\n\n"
+                "**Switch it on and off in the service menu**, under the tick, gives the game's own "
+                "menu a **CO-OP PLAY** row instead (Adjustments > Machine Settings > Attract Mode, or "
+                "at the end of Standard Adjustments), Off to start with:\n\n"
+                "- **On:** teammates join as above, and the card's scores and achievements stay off "
+                "Insider Connected.\n"
+                "- **Off:** the game plays and reports to Insider Connected as it always has, on a card "
+                "with no modes. A card that also carries modes keeps its scores off Insider Connected "
+                "either way.",
             ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "

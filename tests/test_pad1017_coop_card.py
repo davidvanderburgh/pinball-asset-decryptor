@@ -56,7 +56,7 @@ def test_the_plan_puts_coop_cfg_beside_the_runtime(tmp_path, monkeypatch):
     from pinball_decryptor.plugins.stern import mode_write as MW
     prof = MP.profile_for_card("godzilla", "1.16") if hasattr(MP, "profile_for_card") else None
     prof = prof or next(p for p in MP.profiles().values() if SMo.title_key(p) == "godzilla_le-1.16")
-    monkeypatch.setattr(CP, "cfg_text", lambda elf: "coop on\nbutton 59\n")
+    monkeypatch.setattr(CP, "cfg_text", lambda elf, setting=0: "coop on\nbutton 59\n")
     monkeypatch.setattr(MW, "find_port", lambda prof, elf: MP.port_path(prof))
     result = MW.plan(str(tmp_path), b"", b"", b"elf", str(tmp_path / "scratch"), modes_on=False,
                      coop=True, coop_prof=prof)
@@ -138,3 +138,88 @@ def test_the_build_leaves_it_out_without_the_mode_maker(tmp_path, monkeypatch):
     said = []
     assert E._coop_for_build(str(tmp_path), False, lambda m, *a: said.append(m)) is None
     assert "mode maker" in said[-1]
+
+
+# ---- round 2 (DoomWalrus666, David): co-op switched in the game's own service menu ----------------------------------
+@pytest.mark.skipif(not os.path.isfile(GZ_ELF), reason="no Godzilla LE 1.16 program here")
+def test_the_service_menu_row_and_the_cfg_name_its_live_value():
+    from pinball_decryptor.plugins.stern import menu_settings as M
+    from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
+    with open(GZ_ELF, "rb") as f:
+        elf = f.read()
+    settings, writes, _cat, refused = M.plan_many(
+        AdjustmentTable(elf), [(M.COOP_PLAY, CP.MENU_VALUES, (), {"default": 1, "help_text": CP.MENU_HELP})])
+    assert not refused and len(settings) == 1
+    s = settings[0]
+    assert (s.caption, s.values, s.default) == ("Co-op Play", 2, 1)          # Off to start with
+    assert s.help == CP.MENU_HELP and s.where == "Adjustments > Machine Settings > Attract Mode"
+    assert CP.cfg_text(elf, s.live) == "coop on\nbutton 59\nsetting 0x%08x\n" % s.live
+    assert CP.cfg_text(elf) == "coop on\nbutton 59\n"                          # always on: no setting line
+
+
+def test_the_menu_choice_is_kept_in_the_sidecar(tmp_path):
+    assert not CP.menu_asked(str(tmp_path))
+    CP.save(str(tmp_path), True, menu=True)
+    assert CP.load(str(tmp_path)) and CP.menu_asked(str(tmp_path))
+    CP.save(str(tmp_path), True)                                               # None keeps it
+    assert CP.menu_asked(str(tmp_path))
+    CP.save(str(tmp_path), True, menu=False)
+    assert CP.load(str(tmp_path)) and not CP.menu_asked(str(tmp_path))
+    CP.save(str(tmp_path), False)
+    assert not CP.load(str(tmp_path)) and not CP.menu_asked(str(tmp_path))
+
+
+def test_a_spare_the_program_cannot_give_is_passed_over():
+    """Iron Maiden Pro 1.18's first spare adjustment shares its row caption: the next one takes CO-OP PLAY."""
+    elf = "C:/tmp/PAD-1010/elfs/iron_maiden_pro-1_18_0.elf"
+    if not os.path.isfile(elf):
+        pytest.skip("no Iron Maiden Pro 1.18 program here")
+    from pinball_decryptor.plugins.stern import menu_settings as M
+    from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
+    with open(elf, "rb") as f:
+        t = AdjustmentTable(f.read())
+    settings, _w, _c, refused = M.plan_many(t, [(M.COOP_PLAY, 2, (), {"help_text": CP.MENU_HELP})])
+    assert not refused and settings[0].key == M.COOP_PLAY
+
+
+def test_the_modes_tab_sub_tick_switches_it_in_the_service_menu(tmp_path, monkeypatch):
+    from pinball_decryptor.webui.tabs import modes as M
+    svc = M.ModesTab.__new__(M.ModesTab)
+    state = {}
+    monkeypatch.setattr(svc, "set", lambda **kw: state.update(kw), raising=False)
+    monkeypatch.setattr(svc, "project", lambda: str(tmp_path), raising=False)
+    monkeypatch.setattr(svc, "_say", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(CP, "project_title", lambda project, probe=False: object())
+    monkeypatch.setattr(CP, "title_refusal", lambda prof: "")
+    assert svc.set_coop_menu(True) is False                                    # co-op first
+    assert svc.set_coop(True) is True and state["coop_menu"] is False
+    assert svc.set_coop_menu(True) is True
+    assert state["coop_on"] is True and state["coop_menu"] is True
+    assert "CO-OP PLAY in the game's service menu" in state["coop_note"]
+    assert "Off, the game plays and reports as it always has" in state["coop_note"]
+    assert svc.set_coop_menu(False) is True and state["coop_menu"] is False
+    assert state["coop_note"].endswith("Its scores stay off Insider Connected.")
+    js = _read(os.path.join(REPO, "pinball_decryptor", "webui", "static", "js", "tabs", "modes.js"))
+    assert 'call("modes.set_coop_menu", v)' in js
+
+
+def test_the_build_takes_the_row_and_leaves_co_op_out_without_it():
+    src = _read(os.path.join(REPO, "pinball_decryptor", "plugins", "stern", "engine.py"))
+    assert "coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)" in src
+    assert "_coop_on = False" in src and "coop_setting = coop_menu.setting.live" in src
+    assert "coop_setting=coop_setting," in src
+
+
+def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
+    from tests import test_spike2_mode_roster as R
+    src = _read(os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c"))
+    body = R._lift(src, "static int insider_holding(unsigned while_at, unsigned value)")
+    assert "return !while_at || value == 2u;" in body                          # no row: always; a row: On (2)
+    gate = R._lift(src, "static int on_agent_begin(unsigned *r)")
+    assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
+    arm = R._lift(src, "static int insider_arm(void)")
+    assert "if (at && !modes && !attract_wanted() && maps_has(at, 4, MAP_R))" in arm   # only a card of co-op alone
+    add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    assert "coop_switched_on() && coop_button_held()" in add                   # Off: Start adds a competing player
+    assert "return *(volatile const unsigned *)(unsigned long)coop.setting == 2u;" in R._lift(
+        src, "static int coop_switched_on(void)")

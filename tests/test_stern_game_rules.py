@@ -16,6 +16,7 @@ RULED = {"avengers_infinity_le-1.09": 23, "avengers_infinity_le-1.10": 23, "aven
          "deadpool_le-1.14": 12, "deadpool_le-1.16": 12, "deadpool_pro-1.16": 12,
          "dungeons_and_dragons_le-1.00": 18, "dungeons_and_dragons_le-1.10": 18,
          "dungeons_and_dragons_pro-1.10": 18, "foo_fighters_le-1.04": 17, "foo_fighters_pro-1.04": 17,
+         "james_bond_le-1.06": 3, "james_bond_pro-1.06": 3,   # PAD-1026: the gadget countdowns' checks
          "godzilla_le-1.16": 24, "godzilla_pro-1.15": 24, "godzilla_pro-1.16": 24, "jaws_le-1.02": 22,
          "jaws_pro-1.02": 23,
          "john_wick_le-1.01": 20, "john_wick_le-1.02": 20, "john_wick_pro-1.02": 21, "king_kong_le-0.97": 21,
@@ -73,9 +74,11 @@ def test_every_ports_rule_lines_are_whole(port):
     assert len({v.lower() for v in names.values()}) == len(names), "two features of one name"
     others = {m.group(2) for m in re.finditer(r"^site (\S+)\s+(0x[0-9a-f]+)", text, re.M)
               if not m.group(1).startswith("block_rule_")}
-    for _n, addr, w0, w1 in sites:
+    gates = set(re.findall(r"^value block_rule_gate_(\d+)\s+1\b", text, re.M))     # PAD-1026: a check, vetoed
+    for n, addr, w0, w1 in sites:
         assert addr not in others, addr                      # two hooks on one entry are not possible
-        assert G.hookable((int(w0, 16), int(w1, 16))), addr
+        ok = G.movable if n in gates else G.hookable
+        assert ok((int(w0, 16), int(w1, 16))), addr
 
 
 ELF_DIRS = [os.environ.get("PAD_GAME_ELF_DIR", ""), r"C:\tmp\PAD-400\elf", "/mnt/c/tmp/PAD-400/elf"]

@@ -886,7 +886,7 @@ def parse_port(text):
 _GENERATED = re.compile(r"^(?:site block_start_\d+|data block_obj_\d+|text block_name_\d+|text block_default|"
                         r"rule \d+|"   # PAD-699: every mode's vtable pointer, from the build's own program
                         r"value block_default|value block_ret_\d+|"
-                        r"site block_rule_\d+|text block_rule_name_\d+|value block_rule_(?:lo|hi)_\d+|"   # PAD-398
+                        r"site block_rule_\d+|text block_rule_name_\d+|value block_rule_(?:lo|hi|gate)_\d+|"   # PAD-398 (PAD-1026: gate)
                         r"site challenge_go_\d+|value challenge_flag_\d+|text challenge_name_\d+|"   # PAD-615:
                         r"value challenge_on_flag|site challenge_menu(?:_pick)?|value challenge_menu_\w+|value challenge_name_msg_\d+|"
                         r"data game_play_modes|value game_play_mode_at|value challenge_mode_\w+|"
@@ -1582,6 +1582,8 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
     same = title_of(target_game or "") == title_of(ref_game or "")
     blocks = block_section(tgt, stock_rules=stock_rules, start_slot=own_start_slot(tgt, target_game, slot if same else None))
     out += blocks or own_plain_starts(tgt, target_game, port_text if same else None)
+    if not blocks:
+        out += own_gate_rules(tgt)                           # PAD-1026: Bond's gadget countdowns
     sites = {n for k, n in placed if k == "site"}
     data = {n for k, n in placed if k == "data"}
     return Draft(out, report, core_missing(sites, data), placed, hows)
@@ -1652,6 +1654,17 @@ def own_plain_starts(tgt, game, ref_text=None):
         out = []
     cache[key] = out
     return out
+
+
+def own_gate_rules(tgt):
+    """PAD-1026: a plain-C build's rules that ask one check before they count (James Bond's gadget countdowns,
+    game_mode_blocks.read_gate_rules), read from THIS program: [] on any other title or an odd build."""
+    try:
+        from . import game_mode_blocks as B
+        lines = B.gate_rule_lines(B.read_gate_rules(tgt.b))
+    except Exception:                                        # noqa: BLE001 - an odd build
+        lines = []
+    return [""] + lines if lines else []
 
 
 def _version_key(name):

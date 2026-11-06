@@ -5245,6 +5245,28 @@ static void on_rule_shots(unsigned *r, unsigned n)
     r[3] &= ~hi;
 }
 
+/* PAD-1026 (the Bond LE owner: "the (4) other mini wizard modes suppress progress of DB5 (right scoop) and powerpack
+ * (left scoop) during their mini wizard modes"): a plain-C rule has no shot handler of a rule base to hook, but a
+ * rule may ask ONE check before it counts, plays its clip or lights its inserts - Bond's gadget countdowns ask the
+ * game's "nothing of mine in the way" (its multiballs, its mini-wizards), which is how the game's own mini-wizards
+ * stop them. `value block_rule_gate_<n> 1` makes `site block_rule_<n>` that check: refused with 0 while a mode of
+ * ours blocks, unless the mode keeps that rule counting - the rule then does what it does under the game's own. */
+static int on_rule_gate(unsigned *r, unsigned n)
+{
+    char key[28];
+    const char *nm;
+    (void)r;
+    if (n >= BLOCK_RULES || !block_live() || !pm_in_game()) return 0;
+    if (block_rules_keep & (1u << n)) return 0;  /* the mode keeps this one counting */
+    if (!block_rules_said++) {
+        pm_snprintf(key, sizeof key, "block_rule_name_%u", n);
+        nm = pm_port_text(key);
+        say("block: the game's rules count nothing while %s runs (the first: %s, as under the game's own "
+            "mini-wizards%s)", block_who, nm ? nm : "a rule", block_rules_keep ? "; it keeps some counting" : "");
+    }
+    return 1;                                    /* refused: the check answers 0, "not now" */
+}
+
 /* a plain hook whose logger is told which (r1 = n), as hook_veto_n's */
 typedef void (*hook_n_fn)(unsigned *regs, unsigned n);
 static int hook_n(unsigned addr, hook_n_fn logger, unsigned n)
@@ -5316,6 +5338,12 @@ static void block_arm(void)
         pm_snprintf(lo, sizeof lo, "block_rule_lo_%d", i);
         pm_snprintf(hi, sizeof hi, "block_rule_hi_%d", i);
         if (!fn(name) || !(pm_port_value(lo, 0xffffffffL) | pm_port_value(hi, 0xffffffffL))) continue;
+        pm_snprintf(lo, sizeof lo, "block_rule_gate_%d", i);
+        if (pm_port_value(lo, 0)) {              /* PAD-1026: the rule's check, refused with 0 */
+            if (hook_veto_n(fn(name), on_rule_gate, (unsigned)i, 0)) block_rules_on++;
+            else say("block: %s (0x%08x) could not be hooked", name, fn(name));
+            continue;
+        }
         if (hook_n(fn(name), on_rule_shots, (unsigned)i)) block_rules_on++;
         else say("block: %s (0x%08x) could not be hooked", name, fn(name));
     }

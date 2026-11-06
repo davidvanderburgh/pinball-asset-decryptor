@@ -267,7 +267,7 @@ sound. Needs libpinmame and ffmpeg; you supply the ROMs.
 
 ## Stern Pinball (Spike 2)
 
-- **Games:** 26 (Godzilla, Jurassic Park, Deadpool, Star Wars, Iron Maiden, Led Zeppelin, James Bond, etc.)
+- **Games:** 28 (Godzilla, Jurassic Park, Deadpool, Star Wars, Iron Maiden, Led Zeppelin, James Bond, The Beatles, etc.)
 - **Reads:** raw SD-card `.img` / `.bin` / `.raw`, or **directly from the SD card**
 - **Tabs:** every tab the app has
 

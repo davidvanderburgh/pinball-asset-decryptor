@@ -59,6 +59,9 @@ GAME_DB = {
                        "filename_hints": ["godzilla"]},
     "rush":           {"display": "Rush (Spike 2)",
                        "filename_hints": ["rush"]},
+    # before james_bond: its "_bond" hint matches a 60th Anniversary card too
+    "james_bond_60th": {"display": "James Bond 007 60th Anniversary (Spike 2)",
+                        "filename_hints": ["james_bond_60th", "bond_60th"]},
     "james_bond":     {"display": "James Bond 007 (Spike 2)",
                        "filename_hints": ["james_bond", "_bond", "007"]},
     "foo_fighters":   {"display": "Foo Fighters (Spike 2)",
@@ -81,6 +84,8 @@ GAME_DB = {
                        "filename_hints": ["king_kong", "kong"]},
     "batman":         {"display": "Batman (Spike 2)",
                        "filename_hints": ["batman"]},
+    "beatles":        {"display": "The Beatles (Spike 2)",
+                       "filename_hints": ["beatles"]},
 }
 
 # Every Stern Spike 1 title (2015-2016, the 128x32 DMD generation that

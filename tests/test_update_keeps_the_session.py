@@ -81,6 +81,7 @@ class _App:
     _on_close = app_mod.App._on_close
     _launch_downloaded_installer = app_mod.App._launch_downloaded_installer
     _finish_appimage_update = app_mod.App._finish_appimage_update
+    _close_for_update = app_mod.App._close_for_update
 
     def __init__(self, settings_file, kill_at=None, state=None, boom=False):
         self.order = []

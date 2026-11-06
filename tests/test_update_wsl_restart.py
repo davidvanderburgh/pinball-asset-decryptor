@@ -161,6 +161,7 @@ class _App:
     _save_session_state = app_mod.App._save_session_state
     _launch_downloaded_installer = app_mod.App._launch_downloaded_installer
     _restart_wsl_for_update = app_mod.App._restart_wsl_for_update
+    _close_for_update = app_mod.App._close_for_update
 
     def __init__(self):
         self.order = []

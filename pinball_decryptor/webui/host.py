@@ -108,6 +108,28 @@ class Host:
         import webview
         self.screens = _screens(webview)
 
+    #: how long an update's quit may take before the process is ended outright
+    UPDATE_EXIT_S = 20
+
+    def quit_for_update(self):
+        """End the process for an update, which waits for it to be gone
+        (PAD-1032): close the window, and if anything still holds the
+        process up past UPDATE_EXIT_S - a thread that will not finish, a
+        window that will not close - end it outright.  The app has already
+        written its state and closed down (App._close_for_update).
+
+        Off the caller's thread: the caller is the UI loop, and the window's
+        close calls back into that loop (_close_app)."""
+        def _backstop():
+            time.sleep(self.UPDATE_EXIT_S)
+            log.warning("the app had not exited %d s after closing for the "
+                        "update; ending it", self.UPDATE_EXIT_S)
+            os._exit(0)
+        threading.Thread(target=_backstop, name="update-exit",
+                         daemon=True).start()
+        threading.Thread(target=self.quit, name="update-quit",
+                         daemon=True).start()
+
     @property
     def quitting(self):
         return self._quit.is_set()

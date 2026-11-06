@@ -281,6 +281,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.portgen" \
     --hidden-import "pinball_decryptor.plugins.stern.portshots" \
     --hidden-import "pinball_decryptor.plugins.stern.portchallenge" \
+    --hidden-import "pinball_decryptor.plugins.stern.portcoop" \
+    --hidden-import "pinball_decryptor.plugins.stern.coop_play" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_framework" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_reader" \
     --hidden-import "pinball_decryptor.plugins.stern.stock_scan" \

@@ -472,7 +472,8 @@ def slots(tmp_path, staged, monkeypatch):
     rec["gate"].set()
     monkeypatch.setattr(us, "installed_app_dir", lambda *a, **k: app_dir)
 
-    def _stage(setup, app, version, run=None, cancel_cb=None):
+    def _stage(setup, app, version, run=None, cancel_cb=None,
+               progress_cb=None):
         rec["stages"].append((setup, app, version))
         if not rec["stage_ok"]:
             return False, "the installer stopped with code 5"

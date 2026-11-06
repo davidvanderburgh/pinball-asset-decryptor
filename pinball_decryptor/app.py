@@ -5706,8 +5706,12 @@ class App:
             staged = err = None
             if bg["how"]:
                 _post(self._background_update_installing, bg)
+
+                def _installed(pct):
+                    _post(self._background_update_progress, bg, pct,
+                          "installing")
                 try:
-                    staged, err = self._stage_update(bg)
+                    staged, err = self._stage_update(bg, _installed)
                 except InterruptedError:
                     return
                 except Exception as e:                  # noqa: BLE001
@@ -5718,8 +5722,10 @@ class App:
         self.window.append_log(
             f"Downloading v{version} in the background...", "info")
 
-    def _background_update_progress(self, bg, pct):
-        if getattr(self, "_bg_update", None) is not bg:
+    def _background_update_progress(self, bg, pct, stage="downloading"):
+        """How far the background download - or, with *stage*
+        ``"installing"``, the background install (PAD-1029) - is."""
+        if getattr(self, "_bg_update", None) is not bg or bg["stage"] != stage:
             return
         bg["pct"] = pct
         self._show_background_update(bg)
@@ -5736,16 +5742,17 @@ class App:
             return "macos"
         return None
 
-    def _stage_update(self, bg):
+    def _stage_update(self, bg, progress_cb=None):
         """Worker thread: install the downloaded update beside the running
-        app.  Returns ``(staged, None)`` or ``(None, reason)``."""
+        app.  Returns ``(staged, None)`` or ``(None, reason)``.
+        *progress_cb* is told how far the Windows install is, 0-100."""
         if bg["how"] == "windows":
             app_dir = update_slots.installed_app_dir()
             if update_slots.staged_install_ok(app_dir, bg["version"]):
                 return update_slots.next_dir(app_dir), None
             ok, info = update_slots.stage_install(
                 bg["path"], app_dir, bg["version"],
-                cancel_cb=bg["cancel"].is_set)
+                cancel_cb=bg["cancel"].is_set, progress_cb=progress_cb)
             return (update_slots.next_dir(app_dir), None) if ok \
                 else (None, info)
         ok, info = stage_update_macos(bg["path"])

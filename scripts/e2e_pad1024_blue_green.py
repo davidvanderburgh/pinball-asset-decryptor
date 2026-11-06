@@ -171,18 +171,23 @@ def main():
     if os.path.exists(log):
         os.unlink(log)
     t = time.time()
-    script = us.swap_script(app, "9.9.9", fake_setup, stand_in.pid, log,
-                            launch=False, register=False)
-    ps1 = os.path.join(scratch, "swap.ps1")
-    open(ps1, "w", encoding="utf-8-sig", newline="\r\n").write(script)
-    r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive",
-                        "-ExecutionPolicy", "Bypass", "-File", ps1],
-                       cwd=scratch, capture_output=True, text=True)
+    # through the app's own launch (PAD-1029: running the script here by
+    # hand hid that start_swap's detached powershell.exe never ran it)
+    ok, info = us.start_swap(app, "9.9.9", fake_setup, pid=stand_in.pid,
+                             launch=False, register=False, log_path=log)
+    check("swap helper started", ok, str(info))
+
+    def _log():
+        return open(log, encoding="utf-8").read() \
+            if os.path.exists(log) else ""
+    while time.time() - t < 90 and not (
+            "swapped in" in _log() and not os.path.exists(us.old_dir(app))):
+        time.sleep(0.2)
     took = time.time() - t
-    print(open(log, encoding="utf-8").read() if os.path.exists(log) else
-          "(no log)", r.stdout, r.stderr, flush=True)
-    check("swap ran to the end", r.returncode == 0, "%.1f s incl. the "
-          "3 s stand-in app" % took)
+    print(_log() or "(no log)", flush=True)
+    check("swap ran to the end", "swapped in v9.9.9" in _log(),
+          "%.1f s incl. the 3 s stand-in app" % took)
+    ps1 = os.path.join(scratch, "swap.ps1")
     check("app folder now holds v9.9.9", us.tree_version(app) == "9.9.9")
     check("pip-added package still there after the swap", os.path.isfile(
         os.path.join(site, "padtest_extra", "__init__.py")))

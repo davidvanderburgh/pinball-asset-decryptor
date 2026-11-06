@@ -3416,6 +3416,14 @@ PREVIEW_HELP = {
                 "name, PLAYER 2, the count. A tie names every teammate in it (PLAYERS 1+3). They stay "
                 "in attract until the next game starts. Untick an award to leave it out, or type new "
                 "words for its name; Defaults puts the game's back.",
+                "**Switch it on and off in the service menu**, under the tick, gives the game's own "
+                "menu a **CO-OP PLAY** row instead (Adjustments > Machine Settings > Attract Mode, or "
+                "at the end of Standard Adjustments), Off to start with:\n\n"
+                "- **On:** teammates join as above, and most Insider Connected features are off: the "
+                "card's scores, high scores and achievements stay on the machine.\n"
+                "- **Off:** the game plays and reports to Insider Connected as it always has, on a card "
+                "with no modes. A card that also carries modes keeps its scores off Insider Connected "
+                "either way.",
             ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "

@@ -712,15 +712,49 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         """PAD-1017: the Co-op play tick, and under it how a teammate joins, or in red why this game cannot have it."""
         from ...plugins.stern import coop_play as _CP
         on = bool(project) and _CP.load(project)
+        menu = on and _CP.menu_asked(project)
         note, kind = "", ""
         if on:
             why = _CP.title_refusal(_CP.project_title(project))
             if why:
                 note, kind = why, "err"
+            elif menu:
+                note = ("On the card: CO-OP PLAY in the game's service menu (%s), Off to start with. Turning it On "
+                        "disables most Insider Connected features (scores, high scores and achievements stay on the "
+                        "machine) and lets the right flipper button + Start add a teammate; Off, the game plays and reports as it always has%s."
+                        % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
+                           else " (this project's modes keep the card's scores off Insider Connected anyway)"))
             else:
                 note = "On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + ". Its scores stay off Insider Connected."
-        self.set(coop_shown=bool(project), coop_on=on, coop_note=note, coop_note_kind=kind,
+        self.set(coop_shown=bool(project), coop_on=on, coop_menu=menu, coop_note=note, coop_note_kind=kind,
+                 coop_menu_tip=self.COOP_MENU_TIP,
                  coop_awards_ok=on and kind != "err", coop_awards_tip=self.COOP_AWARDS_TIP)   # PAD-1028
+
+    #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
+    COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
+    COOP_MENU_TIP = (
+        "Adds CO-OP PLAY to the game's own service menu, Off or On. On disables most Insider Connected features "
+        "(the card's scores, high scores and achievements stay on the machine) and teammates join with the right "
+        "flipper button and Start. Off: the game plays and "
+        "reports to Insider Connected as it always has. A card that also carries modes keeps its scores off Insider "
+        "Connected either way.")
+
+    @rpc
+    def set_coop_menu(self, on):
+        """Round 2: co-op switched in the service menu (CO-OP PLAY), or always on."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project or not _CP.load(project):
+            return False
+        was = _CP.menu_asked(project)
+        _CP.save(project, True, menu=bool(on))
+        hist = history_log.diff_scalar("modes  co-op play in the service menu", "on" if was else "off",
+                                       "on" if on else "off")
+        history_log.record(project, [hist] if hist else [])
+        self._say("co-op play: %s" % ("switched in the game's service menu (CO-OP PLAY)" if on else "always on"))
+        self._publish_coop(project)
+        return True
 
     #: PAD-1028: the co-op game's awards (plugins/stern/coop_play.py "a co-op game's awards")
     COOP_AWARDS_TIP = (

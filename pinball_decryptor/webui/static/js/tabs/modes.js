@@ -286,6 +286,8 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards }) {
       ${s.coop_shown ? html`<div class="stack modes-coop">
         <${Check} checked=${s.coop_on} wrap label="Co-op play" title=${s.coop_tip}
           onChange=${(v) => call("modes.set_coop", v)} />
+        ${s.coop_on ? html`<${Check} checked=${s.coop_menu} wrap label="Switch it on and off in the service menu"
+          title=${s.coop_menu_tip} onChange=${(v) => call("modes.set_coop_menu", v)} />` : null}
         ${s.coop_note ? html`<span class=${cx("small", s.coop_note_kind === "err" ? "err-ink" : "muted")}>${s.coop_note}</span>` : null}
         ${s.coop_awards_ok ? html`<${Button} size="sm" icon="star" onClick=${onCoopAwards} title=${s.coop_awards_tip}>Awards…<//>` : null}
       </div>` : null}

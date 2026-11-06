@@ -9259,10 +9259,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         from . import picture_settings as _PS
         picture_menus = ([_PictureMenu(_k, log) for _k in _PS.KEYS]
                          if picture_prof is not None else [])
-        menu_job = (_MenuJobs(music_menu, edition_menu, *picture_menus)
+        from . import coop_play as _CP_m
+        # PAD-1017 round 2: CO-OP PLAY, when the service menu switches co-op
+        coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)
+        menu_job = (_MenuJobs(music_menu, edition_menu, *picture_menus, coop_menu)
                     if music_menu is not None or edition_menu is not None
-                    or picture_menus else None)
+                    or picture_menus or coop_menu is not None else None)
         picture_cfg = ""
+        coop_setting = 0
         if (text_edits or shader_prof is not None or clip_job is not None
                 or menu_job is not None):
             if progress:
@@ -9280,6 +9284,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if music_menu is not None and not music_menu.ok:
                 # PAD-494: no MUSIC MODE, no other mode's sounds
                 sound_modes_cfg = ""
+            if coop_menu is not None and not coop_menu.ok:
+                # PAD-1017 round 2: no CO-OP PLAY row, no co-op (never always-on in its place)
+                _coop_on = False
+            elif coop_menu is not None:
+                coop_setting = coop_menu.setting.live
             # PAD-537: the rows that went in, and the runtime's table for them
             picture_cfg = _picture_cfg(picture_menus, grown_text,
                                        not (mode_list or code_list),
@@ -9594,6 +9603,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     picture=picture_cfg, picture_prof=picture_prof,
                     attract=_attract_on, attract_prof=attract_prof,   # PAD-782
                     coop=_coop_on, coop_prof=coop_prof,               # PAD-1017
+                    coop_setting=coop_setting,                         # PAD-1017 round 2
                     idle=_idle_on, idle_prof=idle_prof,               # PAD-1022
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
@@ -9624,6 +9634,12 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             for _line in mode_plan.lines:
                 if _line.startswith("attract items: "):      # PAD-782: said under their own name
                     log("Attract items: %s." % _line[len("attract items: "):], "info")
+                    continue
+                if _line.startswith("co-op play: "):         # PAD-1017: and co-op's, not "Random clips"
+                    log("Co-op play: %s." % _line[len("co-op play: "):].rstrip("."), "info")
+                    continue
+                if _line.startswith("co-op awards "):       # PAD-1028's line too
+                    log("Co-op play: %s." % _line.rstrip("."), "info")
                     continue
                 log("%s: %s." % ("Modes" if _modes_on else "Random clips",
                                  _line[len("random clips: "):]
@@ -11056,6 +11072,35 @@ def _idle_for_build(assets_dir, dest_is_device, log, ext4_available=None):
         return None
     log("Inactivity pauses timers: %s." % _IP.HOW, "info")
     return prof
+
+
+class _CoopMenu(_MusicModeMenu):
+    """PAD-1017 round 2 (DoomWalrus666): CO-OP PLAY in the game's own service menu, Off/On, on a spare setting;
+    co-op (and, on a card of nothing else, the Insider Connected gate) only while it says On."""
+
+    KEY = "coop_play"
+
+    def __init__(self, log):
+        from . import coop_play as _CP
+        super().__init__(_CP.MENU_VALUES, (), log)
+
+    def wanted(self):
+        from . import coop_play as _CP
+        return self.KEY, _CP.MENU_VALUES, (), {"default": 1, "help_text": _CP.MENU_HELP, "onoff": True}
+
+    def done(self):
+        self.ok = True
+        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), Off to start with: set it to On to play "
+                 "co-op. While it is On most Insider Connected features are off; Off, the card reports as it always "
+                 "has (with no modes on it)." % self.setting.where,
+                 "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Co-op play: CO-OP PLAY could not be added to the operator menu (%s), so co-op play is left out of "
+                 "this card." % self.why, "warning")
 
 
 def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):

@@ -323,6 +323,14 @@ def _cli():
         return "docker"
 
 
+def _docker_env():
+    try:
+        from .emulate_core import docker_env
+        return docker_env(cli=_cli())
+    except Exception:
+        return os.environ.copy()
+
+
 def _strip_sha256(id_str):
     s = (id_str or "").strip()
     return s[len("sha256:"):] if s.startswith("sha256:") else s
@@ -331,7 +339,7 @@ def _strip_sha256(id_str):
 def _docker(args, timeout=30):
     return subprocess.run([_cli()] + list(args), capture_output=True,
                           text=True, encoding="utf-8", errors="replace",
-                          timeout=timeout)
+                          timeout=timeout, env=_docker_env())
 
 
 def unavailable_reason():
@@ -392,7 +400,8 @@ def _docker_build(args, on_line, timeout):
     """
     proc = subprocess.Popen([_cli()] + list(args), stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
-                            encoding="utf-8", errors="replace")
+                            encoding="utf-8", errors="replace",
+                            env=_docker_env())
     _BUILD["proc"] = proc
     timer = threading.Timer(timeout, proc.kill)
     timer.daemon = True
@@ -668,7 +677,8 @@ def share_folders(fix, log=None):
         try:
             p = subprocess.Popen(argv, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True,
-                                 encoding="utf-8", errors="replace")
+                                 encoding="utf-8", errors="replace",
+                                 env=_docker_env())
         except OSError as exc:
             if log:
                 log(str(exc))

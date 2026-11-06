@@ -16711,7 +16711,7 @@ static void gms_arm(void)
  * last-few window shrinks to the songs left, so one played last game comes back first); when every song of
  * the pool was, it draws as before (the song again rather than the game's own music). */
 #define JUKE_MODES      16                  /* PAD-1007: 9 on Beatles (5 song modes, 2 special, 2 background) */
-#define JUKE_SONGS      128
+#define JUKE_SONGS      256                 /* PAD-1018: 128 -> 256, every pool's together */
 #define JUKE_KEYS       4                   /* a song mode's records: its opening, its body... */
 #define JUKE_CLIPS      4                   /* a song mode's intro clips: its own, its short one... */
 #define JUKE_GAP        180000              /* ms: no start site - a mode asked again after this is a new start */

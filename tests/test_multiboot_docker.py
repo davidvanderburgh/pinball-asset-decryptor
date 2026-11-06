@@ -1422,3 +1422,93 @@ def test_engine_name_is_podman_without_asking_podman(monkeypatch):
     monkeypatch.setattr(D, "_docker", lambda args, **kw: asked.append(args))
     assert D._engine_name() == "podman"
     assert asked == []
+
+
+def test_docker_env_adds_docker_dirs_on_macos(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(D, "_cli", lambda: "/Users/test/.docker/bin/docker")
+    monkeypatch.setenv("PATH", os.pathsep.join(["/usr/bin", "/bin"]))
+    env = D._docker_env()
+    parts = env["PATH"].split(os.pathsep)
+    assert "/Users/test/.docker/bin" in parts
+    assert "/Applications/Docker.app/Contents/Resources/bin" in parts
+
+    from pinball_decryptor.webui.emulate_core import docker_env
+    # Empty PATH shouldn't leave a stray separator
+    env_empty = docker_env(env={"PATH": ""}, cli="/custom/bin/docker")
+    assert not env_empty["PATH"].endswith(os.pathsep)
+    assert not env_empty["PATH"].startswith(os.pathsep)
+    assert env_empty["PATH"].startswith("/custom/bin")
+
+    # The inherited PATH stays first, so the user's own tools still win, and
+    # a folder already on it is not repeated
+    env_existing = docker_env(env={"PATH": os.pathsep.join(["/system/bin", "/usr/local/bin"])},
+                              cli="/custom/bin/docker")
+    parts = env_existing["PATH"].split(os.pathsep)
+    assert parts[:3] == ["/system/bin", "/usr/local/bin", "/custom/bin"]
+    assert parts.count("/usr/local/bin") == 1
+
+    # Other keys pass through untouched, and the caller's mapping is not changed
+    given = {"PATH": "/a", "HOME": "/Users/test"}
+    out = docker_env(env=given, cli="/custom/bin/docker")
+    assert out["HOME"] == "/Users/test" and given["PATH"] == "/a"
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_docker_env_leaves_path_alone_off_macos(monkeypatch, platform):
+    from pinball_decryptor.webui.emulate_core import docker_env
+    monkeypatch.setattr(sys, "platform", platform)
+    env = docker_env(env={"PATH": "/system/bin", "X": "1"},
+                     cli="/custom/bin/docker")
+    assert env == {"PATH": "/system/bin", "X": "1"}
+
+
+def test_plugin_executors_env():
+    from pinball_decryptor.plugins.jjp.executor import DockerExecutor as JjpExecutor
+    from pinball_decryptor.plugins.spooky.executor import DockerExecutor as SpookyExecutor
+
+    jjp_ex = JjpExecutor()
+    env = jjp_ex._env()
+    assert env is not None
+    assert "PATH" in env
+
+    spk_ex = SpookyExecutor()
+    env_spk = spk_ex._env()
+    assert env_spk is not None
+    assert "PATH" in env_spk
+
+
+def test_docker_build_and_run_pass_env(monkeypatch):
+    monkeypatch.setattr(D, "_cli", lambda: "/usr/local/bin/docker")
+    popen_calls = []
+    run_calls = []
+
+    class DummyProc:
+        stdout = []
+
+        def wait(self):
+            return 0
+
+        def kill(self):
+            pass
+
+    def fake_popen(cmd, **kw):
+        popen_calls.append((cmd, kw))
+        return DummyProc()
+
+    def fake_run(cmd, **kw):
+        run_calls.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(D.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(D.subprocess, "run", fake_run)
+
+    D._docker_build(["build", "."], lambda l: None, 10)
+    assert len(popen_calls) == 1
+    assert "env" in popen_calls[0][1]
+    assert popen_calls[0][1]["env"] is not None
+
+    D._docker(["info"], 10)
+    assert len(run_calls) == 1
+    assert "env" in run_calls[0][1]
+    assert run_calls[0][1]["env"] is not None

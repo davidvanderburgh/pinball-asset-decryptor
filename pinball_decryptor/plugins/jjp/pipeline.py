@@ -9239,6 +9239,7 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
 
             # Stream: dd on host -> pipe -> docker/podman exec cat > file
             cli = self.executor._cli() if hasattr(self.executor, "_cli") else "docker"
+            env = self.executor._env() if hasattr(self.executor, "_env") else None
             try:
                 dd_proc = subprocess.Popen(
                     ["dd", f"if={raw_dev}", "bs=1048576"],
@@ -9247,7 +9248,8 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                     [cli, "exec", "-i", "jjp-decryptor-worker",
                      "sh", "-c", f"cat > '{container_img}'"],
                     stdin=dd_proc.stdout,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=env)
                 dd_proc.stdout.close()
 
                 docker_out, docker_err = docker_proc.communicate(timeout=3600)

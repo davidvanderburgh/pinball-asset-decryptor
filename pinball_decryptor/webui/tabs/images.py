@@ -2425,7 +2425,7 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
         """More menu: "Clear replacements identical to the original…"
         (PAD-1016, DoomWalrus666).  Each pick (or picture a build already put
         in) is compared with the game's own picture off the loop, pixel for
-        pixel, and the ones that change nothing are cleared together."""
+        pixel, and the same ones are cleared together."""
         if self._is_running() or self._same_cancel is not None:
             return False
         pairs = []
@@ -2491,29 +2491,27 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
             return 0
         # still picked as compared (a pick changed meanwhile is left alone)
         live = set(self._replacement_targets())
-        coloured = [rel for rel, col in same if col and rel in live]
-        targets = [rel for rel, col in same if not col and rel in live]
-        note = ""
-        if coloured:
-            note = ("\n\n%d more %s the same picture but %s “Correct "
-                    "its colors for the machine” on, so %s kept."
-                    % (len(coloured), "is" if len(coloured) == 1 else "are",
-                       "has" if len(coloured) == 1 else "have",
-                       "it is" if len(coloured) == 1 else "they are"))
+        targets = [rel for rel, _col in same if rel in live]
         if not targets:
             compat.messagebox.showinfo(
                 SAME_TITLE, "None of the %d replacement%s on this tab is the "
-                "same picture as the original it replaces.%s"
-                % (total, "" if total == 1 else "s", note))
+                "same picture as the original it replaces."
+                % (total, "" if total == 1 else "s"))
             return 0
         n = len(targets)
         question = ("%d of the %d replacement%s on this tab %s the same "
-                    "picture as the original, pixel for pixel, so %s nothing "
-                    "on the card. Clear %s?%s"
+                    "picture as the original, pixel for pixel. Clear %s?"
                     % (n, total, "" if total == 1 else "s",
-                       "is" if n == 1 else "are",
-                       "it changes" if n == 1 else "they change",
-                       "it" if n == 1 else "them", note))
+                       "is" if n == 1 else "are", "it" if n == 1 else "them"))
+        # cleared whatever "Correct its colors" says (DoomWalrus666 asked):
+        # the slot gets the game's own picture back, uncorrected, as shipped
+        k = sum(1 for rel, col in same if col and rel in live)
+        if k:
+            who = (("It has" if n == 1 else "All of them have") if k == n
+                   else "%d of them %s" % (k, "has" if k == 1 else "have"))
+            question += ("\n\n%s “Correct its colors for the machine” on: "
+                         "clearing puts the game's own picture back as it "
+                         "shipped, without that correction." % who)
         if not compat.messagebox.askyesno(
                 SAME_TITLE, self._clear_confirm_text(targets, question)):
             return 0

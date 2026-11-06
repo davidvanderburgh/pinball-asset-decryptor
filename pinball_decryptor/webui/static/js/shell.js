@@ -218,7 +218,7 @@ function alignChecks(items) {
 
 // --------------------------------------------------------------- top bar
 // The Project menu (Tk _build_project_menu): every entry is off while a run
-// is in flight; Save / Save as / Properties / Change history / Relink need
+// is in flight; Save / Save as / Properties / Change history / Relink / Export / Import need
 // a project folder and a manufacturer.  "Recent projects" is a cascade of
 // the last 8 ("name    (path)", one disabled "(nothing yet)" when empty).
 // The gaps are no-break spaces, which HTML does not collapse.
@@ -245,6 +245,11 @@ export function projectMenuItems(shell) {
     { label: "Properties…", disabled: running || !have, onClick: () => call("ui.call_back", "on_project_properties") },
     { label: "Change history…", disabled: running || !have, onClick: () => call("shellx.change_history") },
     { label: "Relink moved files…", disabled: running || !have, onClick: () => call("ui.call_back", "on_relink_project") },
+    // PAD-1015: every replacement file in one folder, and back onto a fresh extract
+    { label: "Export replacement files…", disabled: running || !have, onClick: () => openDialog("project_export_files"),
+      title: { head: "Export replacement files", lines: [["Click", "copy every video, sound and picture this project uses into one folder (Video, Audio, Images), with a file that puts them back on a fresh extract"]] } },
+    { label: "Import replacements…", disabled: running || !have, onClick: () => call("shellx.import_replacements"),
+      title: { head: "Import replacements", lines: [["Click", "pick the replacements.json an export left: its files go on this project's slots, with the random clips, music modes and loudness"]] } },
     // PAD-576: here rather than a top-bar button, where it pulled the eye from the rest of the app
     { sep: true },
     { label: "Reset…", disabled: running || !have || shell.view !== "mfr", onClick: () => openDialog("reset"),

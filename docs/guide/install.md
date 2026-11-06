@@ -216,6 +216,37 @@ The app checks for a new release at launch and then as it runs (⚙ >
 hours by default). A new release shows a banner, a ● on the ⚙ gear and a
 line in the log.
 
+**It downloads and installs in the background.** While you keep working,
+the banner shows the download's progress and then "installing"; once it is
+done the one button left is **Restart to update**, and the restart takes
+seconds:
+
+- **Windows** installs the new version into a folder beside the app
+  (`Pinball Asset Decryptor.next`) while the old one runs, keeping
+  anything pip added to the app's Python (the voice-recognition packages,
+  for one). Restart to update closes the app, swaps the two folders and
+  opens the new one. Shortcuts, settings and the uninstaller stay as they
+  were. If the swap can't happen (a file still in use), it runs the
+  installer instead, as below.
+- **macOS** copies the new app out of the disk image beside the old one;
+  Restart to update swaps them.
+- **Linux**: the downloaded AppImage *is* the new version, so Restart to
+  update starts it.
+
+**Restart to update always lands on the newest release.** The click first
+asks for anything released since the ready update was found. If there is,
+the app gets that one ready instead and restarts into it by itself when it
+is (**Don't restart** on the banner calls that off), so several releases
+while the app was open still cost one restart. A release whose downloads are
+still being published is waited for, up to 10 minutes (**Restart with … now**
+skips the wait). Offline, it restarts into what it has.
+
+An update that is ready but not yet restarted into is still there the next
+time the app opens. To turn all this off, untick ⚙ > **Updates** >
+**Download and install updates in the background**; the update then waits
+for you to press **Install update** (or **Download update**) and works as
+in the table below.
+
 | | The banner offers | What happens |
 |---|---|---|
 | Windows | **Install update** | Downloads the installer, checks its SHA-256, installs silently and reopens. No SmartScreen or UAC prompt. |

@@ -30,6 +30,16 @@ import urllib.request
 from . import net
 from .config import GITHUB_REPO
 
+#: the ⚙ Updates > "Download and install updates in the background" switch
+#: (PAD-1024): settings.json key, default and tooltip
+AUTO_DOWNLOAD_KEY = "update_auto_download"
+AUTO_DOWNLOAD_DEFAULT = True
+AUTO_DOWNLOAD_TIP = (
+    "When a new version is found, download it and install it beside this "
+    "one while you work, so updating is one click on Restart to update and "
+    "takes seconds. Off, the update waits for you to press Install update "
+    "and downloads and installs then.")
+
 REQUEST_TIMEOUT = 5
 # How many releases the update check reads.
 #
@@ -295,15 +305,22 @@ def download_installer(url, dest_path, *, expected_sha256=None,
     aborts.  A cancelled, short, or digest-mismatched download deletes
     the partial file and raises — never leave a half-written exe where
     the caller might run it.
+
+    The bytes go to ``<dest>.part`` and are renamed into place only once the
+    whole file is in and verified (PAD-1024).  The background download can
+    be cut off by the app closing, which kills its thread with no exception
+    to clean up after, and a file under the final name is what
+    :func:`staged_update_ok` would otherwise be asked to vouch for next run.
     """
     do_open = opener or net.urlopen
     req = urllib.request.Request(
         url, headers={"User-Agent": "Pinball-Asset-Decryptor-UpdateCheck"})
     digest = hashlib.sha256()
     done = 0
+    part = str(dest_path) + PART_SUFFIX
     try:
         with do_open(req, timeout=DOWNLOAD_TIMEOUT) as resp, \
-                open(dest_path, "wb") as out:
+                open(part, "wb") as out:
             while True:
                 if cancel_cb and cancel_cb():
                     raise InterruptedError("download canceled")
@@ -320,13 +337,51 @@ def download_installer(url, dest_path, *, expected_sha256=None,
                 "installer download failed integrity check "
                 f"(sha256 {digest.hexdigest()[:12]}… != published "
                 f"{expected_sha256[:12]}…)")
+        os.replace(part, dest_path)
     except BaseException:
         try:
-            os.unlink(dest_path)
+            os.unlink(part)
         except OSError:
             pass
         raise
     return done
+
+
+#: what :func:`download_installer` writes to until the file is whole
+PART_SUFFIX = ".part"
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def staged_update_ok(path, installer, check_digest=True):
+    """True when *path* is a whole copy of *installer*'s release asset.
+
+    PAD-1024: the background download leaves the update on disk for a later
+    "Restart to update", possibly in a later run of the app (the user quit
+    instead).  The file is reused only when it is the size GitHub publishes
+    and, with ``check_digest``, hashes to the published SHA-256 - a few
+    seconds for the setup exe, which the background thread spends rather
+    than the click.  No published size or digest is not a reason to refuse
+    a file that is there; the download itself verified it when it could.
+    """
+    try:
+        if not os.path.isfile(path):
+            return False
+        size = int((installer or {}).get("size") or 0)
+        if size and os.path.getsize(path) != size:
+            return False
+        want = (installer or {}).get("sha256")
+        if check_digest and want and _file_sha256(path) != want:
+            return False
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 # Inno Setup switches for the unattended install-over-the-top:
@@ -477,13 +532,33 @@ def install_update_macos(dmg_path, bundle=None, run=None, popen=None,
     The swap runs after this process exits (see ``_MAC_SWAP_SCRIPT``) and moves
     the old bundle aside before moving the new one in, so a failure at the last
     step puts the working app back rather than leaving no app at all.
+
+    PAD-1024 split it in two, :func:`stage_update_macos` and
+    :func:`commit_update_macos`, so the background download can also do the
+    copying while the user works and Restart to update is only the swap.
     """
+    bundle = bundle or macos_app_bundle()
+    ok, staged = stage_update_macos(dmg_path, bundle=bundle, run=run)
+    if not ok:
+        return False, staged
+    return commit_update_macos(staged, bundle=bundle, popen=popen, pid=pid)
+
+
+def macos_staged_path(bundle):
+    """Where :func:`stage_update_macos` puts the new bundle: hidden, beside
+    the running one, so the swap is a rename on one volume."""
+    return os.path.join(os.path.dirname(bundle),
+                        ".%s.new" % os.path.basename(bundle))
+
+
+def stage_update_macos(dmg_path, bundle=None, run=None):
+    """Copy the new ``.app`` out of *dmg_path* to beside the running one,
+    unquarantined.  Returns ``(True, staged_path)`` or ``(False, reason)``
+    with nothing left behind."""
     import shutil
-    import stat
     import tempfile
 
     run = run or subprocess.run
-    popen = popen or subprocess.Popen
     bundle = bundle or macos_app_bundle()
     if not bundle:
         return False, "could not work out which application bundle to replace"
@@ -494,7 +569,7 @@ def install_update_macos(dmg_path, bundle=None, run=None, popen=None,
         return False, "%s is not writable by you" % parent
 
     mnt = tempfile.mkdtemp(prefix="pad-update-")
-    staged = os.path.join(parent, ".%s.new" % os.path.basename(bundle))
+    staged = macos_staged_path(bundle)
     try:
         r = run(["hdiutil", "attach", "-nobrowse", "-readonly",
                  "-mountpoint", mnt, str(dmg_path)],
@@ -522,7 +597,22 @@ def install_update_macos(dmg_path, bundle=None, run=None, popen=None,
 
     run(["xattr", "-dr", "com.apple.quarantine", staged],
         capture_output=True, text=True)
+    return True, staged
 
+
+def commit_update_macos(staged, bundle=None, popen=None, pid=None):
+    """Hand the swap of *staged* for the running bundle to a helper that
+    runs once this process has exited.  Returns ``(True, "")`` or
+    ``(False, reason)``."""
+    import stat
+    import tempfile
+
+    popen = popen or subprocess.Popen
+    bundle = bundle or macos_app_bundle()
+    if not bundle:
+        return False, "could not work out which application bundle to replace"
+    if not os.path.isdir(staged):
+        return False, "the new version is no longer where it was copied to"
     fd, script = tempfile.mkstemp(prefix="pad-swap-", suffix=".sh")
     with os.fdopen(fd, "w", newline="\n") as f:
         f.write(_MAC_SWAP_SCRIPT % {

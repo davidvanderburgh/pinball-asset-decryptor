@@ -892,6 +892,34 @@ _BOTH_PICK = {}
 _BOTH_PICK_S = 30.0
 
 
+def docker_env(env=None, cli=None):
+    """An os.environ mapping whose PATH also reaches :data:`DOCKER_DIRS` and
+    the resolved CLI's folder, so the helpers `docker` runs by name - the
+    credential helper (``docker-credential-desktop``) BuildKit asks for before
+    pulling a base image, buildx and compose plugins - are found when the app
+    was launched from Finder with launchd's /usr/bin:/bin:/usr/sbin:/sbin
+    (PR #20).  The same PATH padbox.sh and spkbox.sh already build.
+
+    APPENDED, not prepended: like :func:`which_tool`, the PATH the app was
+    given wins, and these folders only answer what it could not (PR #20
+    review).  macOS only - DOCKER_DIRS are Mac locations, and everywhere else
+    the inherited PATH is passed through untouched.
+    """
+    base = os.environ.copy() if env is None else dict(env)
+    if sys.platform != "darwin":
+        return base
+    if cli is None:
+        cli = docker_cli()
+    cur = [d for d in (base.get("PATH") or "").split(os.pathsep) if d]
+    extra = [os.path.dirname(cli)] if cli and os.path.dirname(cli) else []
+    extra += [os.path.expanduser(d) for d in DOCKER_DIRS]
+    for d in extra:
+        if d not in cur:
+            cur.append(d)
+    base["PATH"] = os.pathsep.join(cur)
+    return base
+
+
 def docker_engine():
     """What on THIS Mac can provide the daemon, as ``(label, kind, path)``,
     or None.

@@ -6154,6 +6154,39 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
 plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
 every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).
 
+### Co-op awards (PAD-1028)
+
+After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the
+longest ball, the jet fighters destroyed. The game plays one player for the team, so what a teammate did is what the
+team's counts did during that teammate's turns. The runtime reads each count at every turn's end (inside the player
+change, before the game's own) and gives the rise since the last read to the teammate who was up. `coop.cfg` names
+the awards, one line each, up to 16; the Modes tab's **Awards…** under **Co-op play** writes them, read off the
+card's own program:
+
+    award score - MOST POINTS              the team's points in the teammate's balls (the ball's bonus in)
+    award time - LONGEST BALL (SEC)        the teammate's longest ball, in seconds
+    award audit 116 MOST BALL SAVES        audits of the game's, added up (ids comma-separated, up to 48): counted
+    award audit 168,169 MOST RAMPS         as the game counts them, through its audit add (`site audit_add`, hooked)
+    award champion 4 JET FIGHTER CHAMPION  a champion category of the game's own: its value for player 1
+                                           (`data challenge_scores_table`, 36 bytes a category, +4 value(player))
+
+At the game's end each award goes to the teammate with the most: `PLAYER 2`, or every one tied (`PLAYERS 1+3`,
+`ALL PLAYERS`: short, as the page letter-spaces them); an award nobody has any of is not shown (`mode.log` says so).
+They show the way the game shows its own champions, so in each game's own
+look: one attract champion page an award, its words as the title, the winner in the initials' place, the count as
+the score. They come first among the pages the runtime adds (PAD-660/663), from the game's end until the next game
+starts, and only while the game shows its champions at all. `mode.log` has each teammate's count:
+
+    co-op award: MOST RAMPS - PLAYER 2 (1:0 2:12)
+
+What every game offers (coop_play.py): the points and the longest ball; the framework's audits by name
+(AUD_TOTAL_BALLS_SAVED, the game's mode STARTED and COMPLETED audits, AUD_TOTAL_EXTRA_BALLS, AUD_SHOT_*RAMP*,
+spinner spins, pop bumpers, slingshots, mystery awards, tilt warnings), where the build has its audit add (all the
+latest builds but Star Wars Home Edition); and the game's own champion categories but its score boards, challenge
+games, co-op boards and times. A category's value is what the game keeps for its one player: a count (Godzilla's JET
+FIGHTER CHAMPION, GODZILLA POWERUP CHAMPION) or a best score (GODZILLA MULTIBALL CHAMPION), so those are offered
+unticked, for the owner to pick per game.
+
 ## Inactivity pauses the timers (PAD-1022)
 
 Every Spike 2 framework offers the operator **ALLOW INACTIVITY TO PAUSE TIMERS** (`AD_INACTIVE_TIMER`, 0..1, on by

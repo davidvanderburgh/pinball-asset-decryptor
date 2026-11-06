@@ -1015,7 +1015,7 @@ def coop_into(result, game_elf, scratch):
     if why:
         raise ModeWriteError(why)
     try:
-        text = CP.cfg_text(game_elf)
+        text = CP.cfg_text(game_elf, CP.load_awards(getattr(result, "project", "")))   # PAD-1028: + its awards
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)
@@ -1024,6 +1024,8 @@ def coop_into(result, game_elf, scratch):
         f.write(text)
     result.coop_file = path
     result.lines.append("co-op play: %s" % CP.HOW)
+    got = [line.split(" ", 3)[3] for line in text.splitlines() if line.startswith("award ")]
+    result.lines.append("co-op awards after each co-op game: %s" % (", ".join(got) if got else "none"))
     return result
 
 

@@ -31,6 +31,7 @@ The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, th
 
   data  message_table         the game's message table (portchallenge.message_table), and
   value coop_ball_msg         its "BALL %d" line, which says whose turn it is in a co-op game
+  site  audit_add             the game's audit add, whose audits a co-op game's awards count per teammate (PAD-1028)
 
 and, for the team's own high score boards, the end-of-game high scores' lines (portchallenge.scores_lines).
 
@@ -154,4 +155,9 @@ def lines(elf):
     ball = next((i for i in range(count) if message_text(e, table, i) == "BALL %d"), None) if table else None
     if ball is not None:
         out += ["data  message_table          0x%08x" % table, "value coop_ball_msg          %d" % ball]
+    # PAD-1028: the awards counted from the game's audits (AUD_TOTAL_BALLS_SAVED, ...) - its audit add, hooked
+    from .mode_framework import audit_add
+    add_at = audit_add(e)
+    if add_at:
+        out.append("site  audit_add              0x%08x 0x%08x 0x%08x" % (add_at, e.word(add_at), e.word(add_at + 4)))
     return out + [line for line in scores if not line.startswith("#")], []

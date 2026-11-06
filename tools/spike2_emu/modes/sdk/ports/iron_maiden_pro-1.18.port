@@ -591,3 +591,6 @@ data  coop_players       0x00632520
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 data  message_table          0x005de5f0
 value coop_ball_msg          1255
+
+# ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
+site  audit_add              0x001ea304 0xe92d43f0 0xe2505000

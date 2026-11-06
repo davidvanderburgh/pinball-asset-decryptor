@@ -2,7 +2,9 @@
 side and kept, the code modes' object kept and compiled early (desk only; the clip tests need
 ffmpeg and skip without it)."""
 import os
+import shutil
 import threading
+import time
 
 import pytest
 
@@ -154,6 +156,37 @@ def test_the_first_failing_clip_is_the_error(tmp_path, monkeypatch):
     with pytest.raises(MA.ModeAssetError, match="encode B"):
         MA.make_clips(jobs, "ffmpeg")
     assert not [n for n in os.listdir(str(tmp_path / "cache")) if ".tmp" in n]
+
+
+@pytest.mark.parametrize("cache", ["1", "0"])
+def test_clips_of_the_same_bytes_are_made_once(tmp_path, monkeypatch, cache):
+    """PAD-1030: two files alike (a mode's 18 plain green cards) share one cache path. Encoded side by side, the
+    second rename onto it failed on Windows ("Access is denied") and Try it stopped; it is made once and both
+    clips use it."""
+    monkeypatch.setattr(MA, "clip_cache_dir", lambda: str(tmp_path / "cache"))
+    monkeypatch.setenv(MA.CLIP_CACHE_ENV, cache)
+    encoded, seen = [], []
+    lock = threading.Lock()
+
+    def encode(job, out, ffmpeg):
+        with lock:
+            encoded.append(job.src)
+        time.sleep(0.05)
+        with open(out, "wb") as f:
+            f.write(b"made")
+    monkeypatch.setattr(MA, "_encode_clip", encode)
+    jobs = []
+    for i in range(6):
+        src = tmp_path / ("green%d.mp4" % i)
+        src.write_bytes(b"same" if i < 5 else b"other")
+        jobs.append(MA.ClipJob("file", 8, 8, src=str(src)))
+    made, scratch = MA.make_clips(jobs, "ffmpeg", progress=lambda d, t, w: seen.append((d, t)))
+    assert len(encoded) == 2 and len(made) == 6
+    assert len({made[j] for j in jobs[:5]}) == 1 and made[jobs[5]] != made[jobs[0]]
+    assert max(seen) == (6, 6)
+    assert not [n for n in os.listdir(os.path.dirname(made[jobs[0]])) if ".tmp" in n]
+    if scratch:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_a_video_clip_is_kept_by_its_bytes(tmp_path, monkeypatch):

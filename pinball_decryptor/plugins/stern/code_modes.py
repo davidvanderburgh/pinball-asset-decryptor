@@ -66,7 +66,7 @@ RUNTIME_SUFFIX = ".assets"
 #: pad_mode_assets.h reads at most this many calls
 MAX_CALLS = 16
 #: pad_mode_assets.h reads at most this many clips (hud-layers)
-MAX_CLIPS = 12
+MAX_CLIPS = 32                   # pad_mode_assets.h PA_CLIPS_MAX (PAD-1030: was 12)
 #: PAD-658: pad_mode_assets.h reads at most this many further music beds (PA_BEDS_MAX)
 MAX_BEDS = 6
 CUE_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
@@ -244,13 +244,13 @@ def validate(spec, folder=None):
         out.append("%s: calls maps each cue to a WAV." % spec.name)
         calls = []
     if len(calls) > MAX_CALLS:
-        out.append("%s: a code mode carries at most %d calls." % (spec.name, MAX_CALLS))
+        out.append("%s: %d calls of its own: %d at most." % (spec.name, len(calls), MAX_CALLS))
     if not isinstance(spec.clips, dict) or not isinstance(spec.hud, dict):
         out.append("%s: clips maps each cue to a video, and hud is an object." % spec.name)
     else:
         clips = spec.clip_list()
         if len(clips) > MAX_CLIPS:
-            out.append("%s: a code mode carries at most %d clips." % (spec.name, MAX_CLIPS))
+            out.append("%s: %d clips of its own: %d at most." % (spec.name, len(clips), MAX_CLIPS))
         for cue, f in clips:
             if not CUE_RE.match(cue):
                 out.append("%s: the clip cue %r is 1 to 15 lower-case letters, digits or _." % (spec.name, cue))

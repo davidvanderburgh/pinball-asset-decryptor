@@ -93,7 +93,7 @@
 #define PA_SWAPS_MAX        24          /* the calls and the music, each swapped in (item 163) */
 #define PA_BEDS_MAX         6           /* PAD-658: further music beds, switched to by name (pa_music_bed) */
 #define PA_SWAP_TAG         24          /* "call:<cue>" or "music", with its 0 */
-#define PA_CLIPS_MAX        12          /* hud-layers: clips by cue */
+#define PA_CLIPS_MAX        32          /* hud-layers: clips by cue (PAD-1030: was 12) */
 #define PA_BLOCK_MAX        128         /* PAD-363: the game's mode ids `block_modes` may list */
 
 #define PA_UNUSED __attribute__((unused))

@@ -669,7 +669,7 @@ def test_own_clip_and_sound_problems_and_notes(tmp_path):
     assert "Script 3 falls back on a callout that is not one." in got
     many = _media_prog()
     many["clips"] = [{"name": "c%d" % i, "file": "c.mp4"} for i in range(BM.MAX_CLIPS + 1)]
-    assert "13 clips of its own: 12 at most." in BM.problems(many, SHOTS)
+    assert "33 clips of its own: 32 at most." in BM.problems(many, SHOTS)
     # once behind the HUD needs a loop to play in
     noloop = _media_prog()
     noloop["scripts"][1]["do"] = noloop["scripts"][1]["do"][:1]
@@ -678,33 +678,64 @@ def test_own_clip_and_sound_problems_and_notes(tmp_path):
     assert not any("behind the HUD" in t for t in BM.notes(_media_prog()))
 
 
-def test_a_clip_past_the_twelfth_stops_the_build_instead_of_going_missing(tmp_path):
+def test_a_clip_past_the_limit_stops_the_build_instead_of_going_missing(tmp_path):
     """PAD-1030: a Bond owner's 13th clip (a loop behind the HUD, added last) never played: assets.json kept the
-    first 12 and Try it built the mode without it. Now assets.json carries all 13 and the build refuses the mode,
-    in the words the editor shows."""
+    first 12 and Try it built the mode without it. The limit is 32 now (13 build), assets.json carries every clip,
+    and a mode past the limit is refused by the build in the words the editor shows, never built short."""
     from pinball_decryptor.plugins.stern import mode_assets as MA
+    assert BM.MAX_CLIPS == CM.MAX_CLIPS == 32
     project = _card(tmp_path)
     slug, _path = BM.new_blocks_mode(project, "Diamond", shots=SHOTS)
     p = _media_prog()
-    p["clips"] += [{"name": "c%d" % i, "file": "c.mp4"} for i in range(BM.MAX_CLIPS + 1 - len(p["clips"]))]
+    p["clips"] += [{"name": "c%d" % i, "file": "c.mp4"} for i in range(13 - len(p["clips"]))]
     p["clips"][-1] = {"name": "background2", "file": "bg.mp4"}
+    BM.save(project, slug, p)
+    spec = CM.load(project, slug)
+    assert len(spec.clips) == 13 and spec.clips["background2"] == "bg.mp4"
+    assert not [t for t in CM.validate(spec) if "of its own" in t]
+    assert not [t for t in BM.problems(p, SHOTS) if "of its own" in t]
+    # past the limit
+    p["clips"] += [{"name": "d%d" % i, "file": "c.mp4"} for i in range(BM.MAX_CLIPS + 1 - len(p["clips"]))]
     p["sounds"] += [{"name": "s%d" % i, "file": "s.wav", "priority": 4}
                     for i in range(BM.MAX_SOUNDS + 1 - len(p["sounds"]))]
     BM.save(project, slug, p)
     spec = CM.load(project, slug)
-    assert len(spec.clips) == 13 and spec.clips["background2"] == "bg.mp4" and len(spec.calls) == 17
+    assert len(spec.clips) == 33 and len(spec.calls) == 17
     got = CM.validate(spec)
-    assert "TEST MODE: 13 clips of its own: 12 at most." in got
+    assert "TEST MODE: 33 clips of its own: 32 at most." in got
     assert any(t.endswith(": 17 calls of its own: 16 at most.") for t in got)
     code = MT.code_modes_with_assets(project)
-    with pytest.raises(MA.ModeAssetError, match="13 clips of its own: 12 at most"):
+    with pytest.raises(MA.ModeAssetError, match="33 clips of its own: 32 at most"):
         MA.build(project, "", "", str(tmp_path / "out"), code=code)
-    # twelve build on as before
-    p["clips"] = p["clips"][:BM.MAX_CLIPS]
-    p["sounds"] = p["sounds"][:BM.MAX_SOUNDS]
-    BM.save(project, slug, p)
-    spec = CM.load(project, slug)
-    assert len(spec.clips) == 12 and not [t for t in CM.validate(spec) if "of its own" in t]
+
+
+def test_the_clip_limit_is_the_runtimes_and_its_file_fits_the_read():
+    """PAD-1030: MAX_CLIPS is pad_mode_assets.h's PA_CLIPS_MAX, and a mode's .assets file with every clip, call,
+    bed and swap at its longest still fits the buffer pa_load reads it into (PA_FILE_MAX, its 0 included)."""
+    h = open(os.path.join(os.path.dirname(__file__), "..", "tools", "spike2_emu", "modes", "sdk",
+                          "pad_mode_assets.h"), encoding="utf-8").read()
+    num = lambda n: int(re.search(r"#define %s\s+(\d+)" % n, h).group(1))
+    assert num("PA_CLIPS_MAX") == BM.MAX_CLIPS == CM.MAX_CLIPS
+    assert num("PA_CALLS_MAX") == BM.MAX_SOUNDS == CM.MAX_CALLS and num("PA_BEDS_MAX") == BM.MAX_BEDS
+    slug = "m" * 26                                          # a 24-letter name, then _2 for a second of it
+    cue = lambda c, i: (c + "%02d" % i).ljust(15, "x")
+    spec = CM.CodeAssets(screen=True)
+    spec.name = "N" * 24
+    spec.block_modes = list(range(128))
+    spec.clips = {cue("c", i): "c.mp4" for i in range(BM.MAX_CLIPS)}
+    spec.calls = {cue("s", i): {"wav": "s.wav", "priority": 4} for i in range(BM.MAX_SOUNDS)}
+    spec.music = "m.wav"
+    spec.beds = {cue("b", i): "b.wav" for i in range(BM.MAX_BEDS)}
+    key = "f" * 32
+    own = [{"slug": slug, "key": CM.call_key(c), "request": 99999, "ms": 99999, "stock_key": key, "our_key": key}
+           for c in spec.calls]
+    own.append({"slug": slug, "key": "music", "request": 99999, "sid": 99999})
+    own += [{"slug": slug, "key": "music:" + b, "request": 99999, "sid": 99999, "stock_key": key, "our_key": key}
+            for b in spec.beds]
+    text = CM.runtime_text(slug, spec, None, own_sounds=own, screen=True, clip=True)
+    assert text.count("\nclip ") == BM.MAX_CLIPS
+    assert all(len(CM.clip_name(slug, c)) < num("PA_NAME") for c in spec.clips)
+    assert len(text.encode("utf-8")) < num("PA_FILE_MAX") - 1, len(text)
 
 
 def test_media_names_come_from_the_files():

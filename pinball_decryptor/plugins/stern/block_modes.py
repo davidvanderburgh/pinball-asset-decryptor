@@ -537,7 +537,7 @@ CLIP_WHERE = {"full": "full screen", "behind": "behind the HUD, once",
               "loop": "behind the HUD, over and over"}
 #: a clip's or sound's name: its cue in assets.json and <slug>.assets (code_modes.CUE_RE)
 MEDIA_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
-MAX_CLIPS = 12                   # pad_mode_assets.h PA_CLIPS_MAX
+MAX_CLIPS = 32                   # pad_mode_assets.h PA_CLIPS_MAX (PAD-1030: was 12)
 MAX_SOUNDS = 16                  # pad_mode_assets.h PA_CALLS_MAX
 MAX_BEDS = 6                     # PAD-658: pad_mode_assets.h PA_BEDS_MAX
 VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm", ".gif")   # PAD-693: an animated GIF too

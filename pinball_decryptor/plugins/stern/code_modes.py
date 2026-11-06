@@ -66,7 +66,7 @@ RUNTIME_SUFFIX = ".assets"
 #: pad_mode_assets.h reads at most this many calls
 MAX_CALLS = 16
 #: pad_mode_assets.h reads at most this many clips (hud-layers)
-MAX_CLIPS = 12
+MAX_CLIPS = 32                   # pad_mode_assets.h PA_CLIPS_MAX (PAD-1030: was 12)
 #: PAD-658: pad_mode_assets.h reads at most this many further music beds (PA_BEDS_MAX)
 MAX_BEDS = 6
 CUE_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")

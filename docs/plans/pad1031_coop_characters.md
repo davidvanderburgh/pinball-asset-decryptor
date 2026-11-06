@@ -161,3 +161,23 @@ process; guestmem.py takes the first `game` on the box), job4.sh (proof job), jo
   add_screens via mode_assets.build), shown by the runtime while that character is the pick's; coop_plan has no
   build today (build=None) - a co-op card with characters needs one. Pictures are the owner's (Characters dialog),
   with a preview there so DoomWalrus666 can iterate the look himself.
+
+## Run 5 (2026-11-06): the pick's own screens
+
+- Build: one screen per character (`PadCoop_<n>`) and `PadCoop_Random` in the HUD scene (scene_write.add_screens, as a
+  mode's own screen): the owner's picture (Characters dialog, Picture...; copied to `<project>/coop/`) or a generated
+  panel with the name; the words "<NAME> - <WHAT IT DOES>". With modes they go into mode_assets.build's pass; co-op
+  alone, coop_into rewrites the HUD from the stock one (the engine now reads the HUD for a co-op pick: fixed the bank
+  path it cleared with it, found by the end-to-end build). coop.cfg `screens <scene>`.
+- Runtime: finds the 12 nodes once the scene is up, hides them, shows the one the pick is on; the top line then says
+  only PLAYER n PICK (it overflowed into CREDITS with names and abilities).
+- Proof: engine.write_overrides on a scratch project (Write's own path; C:\tmp\PAD-1031\tryset2.py -> ovr2), rig
+  jobpick.sh with PAD_OVERRIDE_DIR: "12 of the pick's 12 screens found ... hidden"; the stand-in picture with GODZILLA
+  1954 - LONGER BALL SAVE; right -> the GODZILLA 2000 panel; left x2 -> RANDOM; Action -> gone. artifacts
+  before_/after_pick_screen.png, proof_pick_*.png.
+- Dialog: Picture... / clear / preview (coop_play.preview: the screen on a dark glass) per character.
+
+## Left (run 6+)
+
+- Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle.
+- MODE_SDK.md / help: the new kinds (boost, gift, count, caches, screens) and the pick screens.

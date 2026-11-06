@@ -596,3 +596,111 @@ def preset_for(prof):
         if key.startswith(stem):
             return path
     return ""
+
+
+# ---- PAD-1031: the pick's screens ----------------------------------------------------------------------------------
+# The game's top line is small (Godzilla: a long name ran into CREDITS), so the pick has screens of its own: one per
+# character and one for RANDOM, each a picture (the owner's, or a generated panel with the name) and its words,
+# added to the HUD scene as a mode's own screen is (scene_write.add_screens), authored visible and hidden by the
+# runtime until the pick is on it. coop.cfg's ``screens <scene>`` names the scene they are in.
+
+#: the folder in the project the characters' pictures are copied into
+PICTURE_DIR = "coop"
+#: a screen's node: ``PadCoop_<n>`` (1-based) and ``PadCoop_Random``
+SCREEN_NODE = "PadCoop_%s"
+#: the generated panel's colours when a character has no picture of its own
+PANEL_COLOR, TITLE_COLOR = "#3a0a0a", "#ffb400"
+
+
+def picture_path(project, character):
+    """The absolute path of *character*'s picture in *project* (``""`` when it has none, or it is gone)."""
+    import os
+    rel = str((character or {}).get("picture") or "")
+    if not rel or not project:
+        return ""
+    path = os.path.join(project, *rel.replace("\\", "/").split("/"))
+    return path if os.path.isfile(path) else ""
+
+
+def words_for():
+    """``{ability key: the words the pick shows for it}``."""
+    return {a[0]: a[1] for a in ABILITIES}
+
+
+def wants_screens(project, prof):
+    """Whether *project*'s card gets the pick's screens: co-op on, characters with a pick, a title with screens."""
+    if not load(project) or prof is None or not prof.can("screen"):
+        return False
+    chars = load_characters(project)
+    return bool(chars["pick"] and chars["list"])
+
+
+def pick_screens(project, characters=None, words_for=None):
+    """The pick's screens for :func:`.scene_write.add_screens`: one per character (``PadCoop_1`` ...) and
+    ``PadCoop_Random``; ``[]`` when the project's characters have no pick. *words_for* (key -> words) names what
+    each ability does, as the top line says it."""
+    from . import mode_assets as MA
+    chars = _characters(characters if characters is not None else load_characters(project))
+    if not chars["pick"] or not chars["list"]:
+        return []
+    out = []
+    for i, c in enumerate(chars["list"] + [{"name": "RANDOM", "ability": "", "picture": ""}]):
+        node = SCREEN_NODE % ("Random" if i == len(chars["list"]) else i + 1)
+        path = picture_path(project, c)
+        art = MA.load_art(path) if path else MA.panel_art(c["name"], PANEL_COLOR, TITLE_COLOR)
+        x, y, words_at = MA.screen_place(art)
+        if words_at is not None:
+            art = MA.band_art(art)
+        does = (words_for or {}).get(c["ability"], "") if c["ability"] else ""
+        words = c["name"] if i == len(chars["list"]) else (c["name"] + (" - " + does if does else ""))
+        out.append(dict(name=node, art_rgba=art, words=words[:60], words_name=node + "_Words", x=x, y=y,
+                        words_at=words_at))
+    return out
+
+
+def save_picture(project, index, source):
+    """Copy *source* (a picture file) into the project for character *index* and name it there; returns the
+    characters as stored. Raises :class:`CoopError` when the file is not a picture."""
+    import os
+    import shutil
+    from PIL import Image
+    try:
+        with Image.open(source) as im:
+            im.verify()
+    except Exception as e:                              # noqa: BLE001 - say what the file is not
+        raise CoopError("That file is not a picture the app can read (%s)." % e) from None
+    chars = load_characters(project)
+    if not 0 <= int(index) < len(chars["list"]):
+        raise CoopError("There is no character %d." % (int(index) + 1))
+    folder = os.path.join(project, PICTURE_DIR)
+    os.makedirs(folder, exist_ok=True)
+    ext = os.path.splitext(source)[1].lower() or ".png"
+    name = "character_%d%s" % (int(index) + 1, ext)
+    shutil.copyfile(source, os.path.join(folder, name))
+    chars["list"][int(index)]["picture"] = "%s/%s" % (PICTURE_DIR, name)
+    return save_characters(project, chars)
+
+
+def preview(project, characters=None, words_for=None, index=0):
+    """A still of what the machine shows while the pick is on character *index* (RANDOM after the last): its
+    screen on a dark glass of the HUD's size, as PNG bytes - the Characters dialog's preview."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+    from . import mode_assets as MA
+    screens = pick_screens(project, characters, words_for)
+    if not screens:
+        return b""
+    s = screens[max(0, min(int(index), len(screens) - 1))]
+    glass = Image.new("RGBA", (1360, 768), (12, 12, 16, 255))
+    art = Image.fromarray(np.asarray(s["art_rgba"], dtype=np.uint8), "RGBA")
+    glass.alpha_composite(art, (int(s["x"]), int(s["y"])))
+    from PIL import ImageDraw
+    d = ImageDraw.Draw(glass)
+    wx, wy = s["words_at"] if s["words_at"] is not None else (20.0, art.height + 50.0)
+    d.text((int(s["x"] + wx), int(s["y"] + wy - 40)), s["words"], fill=(255, 230, 0, 255),
+           font=MA._fit_font(d, s["words"], 1300 - int(s["x"] + wx), 34))
+    buf = io.BytesIO()
+    glass.convert("RGB").save(buf, "PNG")
+    return buf.getvalue()

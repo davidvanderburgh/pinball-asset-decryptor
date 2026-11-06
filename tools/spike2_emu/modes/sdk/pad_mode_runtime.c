@@ -15401,6 +15401,8 @@ static void coop_turn_show(void)
  *   left <switch id>                 the left flipper button (the right is `button`): the pick walks with them
  *   action <switch id>               the Action button: takes the one shown; the `save` ability's button
  *   character <abilities> <name>|<what it does>
+ *   screens <scene>                  the pick's own screens are in this scene (the build added them, as a mode's own
+ *                                    screen): PadCoop_<n> per character, PadCoop_Random; hidden but the pick's one
  * abilities, comma-separated (`-` none):
  *   adj:<id>=<v>                     the game's adjustment <id> reads <v> while the teammate is up
  *   adj:<id>x<pct>:<lo>:<hi>         ... reads its own value x pct / 100, held to lo..hi
@@ -15448,6 +15450,10 @@ static volatile int coop_save_ask;          /* a double press: the tick gives th
 static int coop_save_used;                  /* this ball's is given */
 static unsigned (*coop_adj_game)(unsigned);
 static unsigned coop_rng;
+static char coop_scr_scene[96];             /* `screens <scene>`: "" none */
+static void *coop_scr[COOP_CHARS + 1];      /* PadCoop_1.., PadCoop_Random */
+static int coop_scr_found, coop_scr_shown = -1;
+static unsigned long coop_scr_try;
 static int coop_adj_said;                   /* the log's adjustment reads, the first 32 */
 #define COOP_CACHES 4
 static struct coop_cache {
@@ -15658,7 +15664,8 @@ static void coop_pick_say(void)
 {
     char words[64];
     if (coop_ball_msg < 0) return;
-    if (pk.at >= coop_ch_n) pm_snprintf(words, sizeof words, "PLAYER %u PICK: RANDOM", pk.who);
+    if (coop_scr_found) pm_snprintf(words, sizeof words, "PLAYER %u PICK", pk.who);   /* the screens say the rest */
+    else if (pk.at >= coop_ch_n) pm_snprintf(words, sizeof words, "PLAYER %u PICK: RANDOM", pk.who);
     else if (!pk.phase || !coop_ch[pk.at].does[0]) pm_snprintf(words, sizeof words, "PLAYER %u PICK: %s", pk.who, coop_ch[pk.at].name);
     else pm_snprintf(words, sizeof words, "%s", coop_ch[pk.at].does);
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
@@ -15729,12 +15736,43 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
     }
 }
 
+/* the pick's own screens: found once the scene is up (tried each second), all hidden, the pick's one shown */
+static void coop_screens_tick(void)
+{
+    int i, want, got = 0;
+    char name[32];
+    if (!coop_scr_scene[0]) return;
+    if (!coop_scr_found) {
+        if (pm_ms() - coop_scr_try < 1000ul) return;
+        coop_scr_try = pm_ms();
+        for (i = 0; i <= coop_ch_n; i++) {
+            if (i < coop_ch_n) pm_snprintf(name, sizeof name, "PadCoop_%d", i + 1);
+            else pm_snprintf(name, sizeof name, "PadCoop_Random");
+            if (!coop_scr[i]) coop_scr[i] = pm_node(coop_scr_scene, name);
+            got += coop_scr[i] != 0;
+        }
+        if (!got) return;
+        for (i = 0; i <= coop_ch_n; i++) if (coop_scr[i]) pm_show(coop_scr[i], 0);
+        coop_scr_found = 1;
+        coop_scr_shown = -1;
+        say("co-op characters: %d of the pick's %d screens found in %s - hidden until the pick is on one", got,
+            coop_ch_n + 1, coop_scr_scene);
+    }
+    want = pk.open && coop_teammates() && pm_in_game() ? pk.at : -1;
+    if (want == coop_scr_shown) return;
+    if (coop_scr_shown >= 0 && coop_scr_shown <= coop_ch_n && coop_scr[coop_scr_shown])
+        pm_show(coop_scr[coop_scr_shown], 0);
+    if (want >= 0 && want <= coop_ch_n && coop_scr[want]) pm_show(coop_scr[want], 1);
+    coop_scr_shown = want;
+}
+
 /* from the tick: the pick's walk, words and time; the save */
 static void coop_chars_tick(void)
 {
     const struct coop_char *c;
     int w;
     if (!coop_ch_n) return;
+    coop_screens_tick();                                      /* the shown one follows the last tick's pick */
     if (!coop_teammates() || !pm_in_game()) {
         pk.open = 0;
         coop_save_ask = 0;
@@ -16085,6 +16123,13 @@ static void coop_line(const char *s)
     if (str_starts(s, "award ")) { coop_award_line(s + 6); return; }      /* PAD-1028 */
     if (str_starts(s, "character ")) { coop_char_line(s + 10); return; }  /* PAD-1031 */
     if (str_starts(s, "pick on")) { coop_pick_on = 1; return; }
+    if (str_starts(s, "screens ")) {                                      /* PAD-1031: the pick's own screens */
+        for (p = s + 8; *p == ' '; p++) ;
+        str_copy(coop_scr_scene, sizeof coop_scr_scene, p, sizeof coop_scr_scene);
+        for (ok = 0; coop_scr_scene[ok] && coop_scr_scene[ok] != ' ' && coop_scr_scene[ok] != '\r'; ok++) ;
+        coop_scr_scene[ok] = 0;
+        return;
+    }
     if (str_starts(s, "left ")) { p = s + 5; coop_left = (unsigned)number(&p, &ok); if (!ok) coop_left = 0; return; }
     if (str_starts(s, "action ")) { p = s + 7; coop_action = (unsigned)number(&p, &ok); if (!ok) coop_action = 0; return; }
     if (str_starts(s, "button ")) {

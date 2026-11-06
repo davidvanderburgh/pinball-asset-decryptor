@@ -788,10 +788,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     #: PAD-1031: co-op characters (plugins/stern/coop_play.py "co-op characters")
     COOP_CHARS_TIP = (
-        "Each teammate picks a character at the start of their first ball: the top line names it and what it does, "
-        "the flippers move to the next one (one another teammate has is skipped), the Action button takes it, and "
-        "after 20 seconds the one shown is taken. RANDOM picks one nobody has. Its ability holds while that teammate "
-        "is up.")
+        "Each teammate picks a character at the start of their first ball: the machine shows its picture, its name "
+        "and what it does, the flippers move to the next one (one another teammate has is skipped), the Action button "
+        "takes it, and after 20 seconds the one shown is taken. RANDOM picks one nobody has. Its ability holds while "
+        "that teammate is up.")
 
     def _publish_coop_chars(self, project):
         from ...plugins.stern import coop_play as _CP
@@ -804,7 +804,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         for c in chars["list"]:
             a = by_key.get(c["ability"])
             rows.append({"name": c["name"], "ability": c["ability"] if a and a["cfg"] else "",
-                         "lost": bool(c["ability"]) and not (a and a["cfg"])})
+                         "lost": bool(c["ability"]) and not (a and a["cfg"]),
+                         "picture": bool(_CP.picture_path(project, c))})
         lost = sum(1 for r in rows if r["lost"])
         note = ("%d character(s). " % len(rows) if rows else "") + (
             "%d of them ask for an ability this game has not got yet; they have none on the card." % lost if lost
@@ -813,6 +814,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "abilities": [{"key": a["key"], "words": a["words"], "does": a["does"], "ok": bool(a["cfg"]),
                                          "why": a["why"]} for a in abil],
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
+                          "preview": self._coop_preview(project, chars),                        # PAD-1031
                           "max_name": _CP.MAX_NAME, "max": _CP.MAX_CHARACTERS})
 
     def _save_coop_chars(self, project, chars, what, was, now):
@@ -821,6 +823,59 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         _CP.save_characters(project, chars)
         hist = history_log.diff_scalar("modes  co-op characters %s" % what, was, now)
         history_log.record(project, [hist] if hist else [])
+        self._publish_coop_chars(project)
+        return True
+
+    def _coop_preview(self, project, chars):
+        """The Characters dialog's still of the machine's pick screen for the row picked (``coop_ch_at``), written
+        to the app's cache; ``{"path", "at", "seq"}`` or None."""
+        from ...plugins.stern import coop_play as _CP
+        from ...plugins.stern import title_reader as TR
+        if not project or not chars["list"]:
+            return None
+        at = max(0, min(int(self.get("coop_ch_at") or 0), len(chars["list"])))
+        try:
+            png = _CP.preview(project, dict(chars, pick=True), _CP.words_for(), at)
+        except Exception as e:                          # noqa: BLE001 - a picture that will not load: say so
+            self._say("co-op characters: the preview could not be drawn: %s" % e)
+            return None
+        self._coop_seq = getattr(self, "_coop_seq", 0) + 1
+        path = os.path.join(TR.cache_dir("coop_preview"), "pick_%d.png" % (self._coop_seq % 4))
+        with open(path, "wb") as f:
+            f.write(png)
+        return {"path": path, "at": at, "seq": self._coop_seq}
+
+    @rpc
+    def coop_chars_show(self, i):
+        """PAD-1031: the preview shows the pick screen of character *i* (RANDOM after the last)."""
+        self.set(coop_ch_at=int(i))
+        self._publish_coop_chars(self.project())
+        return True
+
+    @rpc
+    def coop_char_picture(self, i, clear=False):
+        """PAD-1031: Picture... on a character: a picture of the owner's copied into the project (``coop/``), shown on
+        its pick screen; *clear* puts the generated panel back."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        chars = _CP.load_characters(project) if project else None
+        if not chars or not 0 <= int(i) < len(chars["list"]):
+            return False
+        if clear:
+            chars["list"][int(i)]["picture"] = ""
+            _CP.save_characters(project, chars)
+        else:
+            path = self.window.ask_open("modes_file", "Choose %s's picture" % chars["list"][int(i)]["name"],
+                                        [("Pictures", "*.png *.jpg *.jpeg")])
+            if not path:
+                return False
+            try:
+                _CP.save_picture(project, int(i), path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op characters: %s's picture is %s" % (chars["list"][int(i)]["name"], os.path.basename(path)))
+        self.set(coop_ch_at=int(i))
         self._publish_coop_chars(project)
         return True
 

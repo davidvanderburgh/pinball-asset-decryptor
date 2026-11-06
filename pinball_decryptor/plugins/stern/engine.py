@@ -9541,8 +9541,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     _mprof = (variant_prof or sound_modes_prof or picture_prof or attract_prof or coop_prof
                               or idle_prof)
                 _mnodes = {"": None}
+                from . import coop_play as _CPS          # PAD-1031: the co-op pick's screens go in the HUD
+                _coop_hud = _coop_on and _CPS.wants_screens(assets_dir, _mprof)
                 for _rel in _MW.scene_rels(_mprof):
-                    if not _rel or (not _modes_on and (
+                    if not _rel or (not _modes_on and not (_coop_hud and _rel == _MW.scene_rels(_mprof)[0]) and (
                             not (_clips_on or _attract_on) or _rel != _MW.scene_rels(_mprof)[1])):
                         continue        # a part this title cannot do (item 148)
                     _mnodes[_rel] = _MW.lookup(reader, _rel)
@@ -9555,7 +9557,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                              "found")
                 _hud_rel, _bank_rel = _MW.scene_rels(_mprof)
                 if not _modes_on:
-                    _hud_rel = ""        # PAD-446: random clips change the bank only
+                    if not _coop_hud:    # PAD-1031: the co-op pick's screens are in the HUD
+                        _hud_rel = ""    # PAD-446: random clips change the bank only
                     if not (_clips_on or _attract_on):
                         _bank_rel = ""   # PAD-494: music modes change neither
                 # item 164: the system scene whose full font a HUD with too few glyphs

@@ -869,7 +869,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
             if result is None:
                 result = coop_plan(project, game_elf, coop_prof or attract_prof or variants_prof
                                    or sound_modes_prof or picture_prof)
-            coop_into(result, game_elf, scratch)
+            coop_into(result, game_elf, scratch, stock_hud=stock_hud, stock_font=stock_font)
         if idle:                                     # PAD-1022: inactivity pausing the timers, alone or with the above
             if result is None:
                 result = idle_plan(project, game_elf, idle_prof or coop_prof or attract_prof or variants_prof
@@ -955,7 +955,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     result.sounds_file = sound_modes or ""
     result.picture_file = picture or ""
     if coop:                                         # PAD-1017
-        coop_into(result, game_elf, scratch)
+        coop_into(result, game_elf, scratch)          # PAD-1031: the pick's screens went in with the modes' build
     if idle:                                         # PAD-1022
         idle_into(result, scratch, only=False)
     return result
@@ -1008,16 +1008,37 @@ def coop_plan(project, game_elf, prof):
     return ModePlan(project=project, profile=prof, port=port, build=None)
 
 
-def coop_into(result, game_elf, scratch):
-    """``coop.cfg`` for *result*'s card: co-op on, the right flipper button read off *game_elf*."""
+def coop_into(result, game_elf, scratch, stock_hud=b"", stock_font=b""):
+    """``coop.cfg`` for *result*'s card: co-op on, the right flipper button read off *game_elf*. PAD-1031: the pick's
+    screens go into the HUD scene - with the modes' own when *result* built them (mode_assets.build), else here from
+    *stock_hud* - and coop.cfg names the scene."""
     from . import coop_play as CP
+    from . import scene_write as SW
     why = CP.title_refusal(result.profile)
     if why:
         raise ModeWriteError(why)
+    project = getattr(result, "project", "")
+    screens = CP.wants_screens(project, result.profile)
+    if screens and result.build is None:
+        if not stock_hud:
+            screens = False
+        else:
+            try:
+                hud = SW.add_screens(stock_hud, CP.pick_screens(project, words_for=CP.words_for()),
+                                     font_source=stock_font or None)[0]
+            except SW.SceneWriteError as e:
+                raise ModeWriteError("the co-op pick's screens: %s" % e) from None
+            rel = "%s/scene.radium" % result.profile.lcd("hud")
+            src = os.path.join(scratch, "coop_tree", *rel.split("/"))
+            os.makedirs(os.path.dirname(src), exist_ok=True)
+            with open(src, "wb") as f:
+                f.write(hud)
+            result.replaced.append(("%s/%s" % (result.profile.game_dir, rel), src))
     try:
-        project = getattr(result, "project", "")
         text = CP.cfg_text(game_elf, CP.load_awards(project), CP.load_characters(project),     # PAD-1028/1031
                            CP.port_sites(result.profile))
+        if screens:
+            text += "screens %s\n" % result.profile.hud_scene
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)

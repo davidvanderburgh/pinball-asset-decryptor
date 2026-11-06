@@ -45,6 +45,8 @@ static volatile unsigned char *coop_ball_byte;
 static int maps_has(unsigned long a, unsigned n, unsigned f) { (void)a; (void)n; (void)f; return 0; }
 static unsigned fn(const char *name) { (void)name; return 0; }
 static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
+static void *pm_node(const char *where, const char *path) { (void)where; (void)path; return 0; }
+static void pm_show(void *node, int on) { (void)node; (void)on; }
 @DECL@
 @FNS@
 static void press(unsigned id) { coop_edge(id, 1, 0x800, 0); }
@@ -112,6 +114,7 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static void coop_pick_open(unsigned t)",
        "static void coop_pick_close(const char *how)",
        "static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)",
+       "static void coop_screens_tick(void)",
        "static void coop_chars_tick(void)",
        "static void coop_chars_begin(void)",
        "static void coop_chars_turn(void)",
@@ -314,3 +317,63 @@ def test_jets_and_tanks_count_where_the_port_names_their_rules():
     src = RUNTIME.read_text(encoding="utf-8")
     assert 'str_starts(p, "count:")' in R._lift(src, "static void coop_char_line(const char *s)")
     assert "coop_counts_give(&coop_ch[c]);" in R._lift(src, "static void coop_pick_close(const char *how)")
+
+
+def test_the_pick_has_a_screen_for_each_character_and_random(tmp_path):
+    project = str(tmp_path)
+    CP.save(project, True)
+    CP.save_characters(project, {"pick": True, "list": [{"name": "GODZILLA 1954", "ability": "longer_save"},
+                                                        {"name": "SHIN GODZILLA", "ability": ""}]})
+    from PIL import Image
+    pic = tmp_path / "mine.png"
+    Image.new("RGBA", (300, 200), (10, 120, 10, 255)).save(pic)
+    CP.save_picture(project, 1, str(pic))
+    assert CP.load_characters(project)["list"][1]["picture"] == "coop/character_2.png"
+    screens = CP.pick_screens(project, words_for=CP.words_for())
+    assert [s["name"] for s in screens] == ["PadCoop_1", "PadCoop_2", "PadCoop_Random"]
+    assert screens[0]["words"] == "GODZILLA 1954 - LONGER BALL SAVE" and screens[1]["words"] == "SHIN GODZILLA"
+    assert screens[1]["art_rgba"].shape[:2] == (200, 300)              # the owner's picture, not the panel
+    assert screens[0]["art_rgba"].shape[:2] == (160, 640)              # the generated panel
+    assert CP.preview(project, None, CP.words_for(), 1)[:8] == b"\x89PNG\r\n\x1a\n"
+    with pytest.raises(CP.CoopError):
+        CP.save_picture(project, 0, str(tmp_path / "x.txt")) if (tmp_path / "x.txt").write_text("no") else None
+    CP.save_characters(project, {"pick": False, "list": [{"name": "A"}]})
+    assert CP.pick_screens(project) == []
+
+
+def test_co_op_alone_puts_the_pick_screens_in_the_hud_and_names_the_scene(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    from pinball_decryptor.plugins.stern import scene_write as SW
+
+    class Prof:
+        label, game_dir, hud_scene, port = "Godzilla", "godzilla_le", "32e6ae28", ""
+
+        def can(self, part):
+            return part == "screen"
+
+        def lcd(self, part):
+            return "godzilla_le/assets/lcd/auto_loaded/32e6ae28"
+    project = str(tmp_path / "p")
+    os.makedirs(project)
+    CP.save(project, True)
+    CP.save_characters(project, {"pick": True, "list": [{"name": "A", "ability": ""}]})
+    got = {}
+    monkeypatch.setattr(CP, "title_refusal", lambda prof: "")
+    monkeypatch.setattr(CP, "cfg_text", lambda *a, **k: "coop on\nbutton 59\n")
+    monkeypatch.setattr(SW, "add_screens", lambda hud, screens, **k: (got.setdefault("names", [s["name"] for s in screens])
+                                                                      and hud + b"+screens", []))
+    result = MW.ModePlan(project=project, profile=Prof(), port="", build=None)
+    MW.coop_into(result, b"", str(tmp_path / "scratch"), stock_hud=b"HUD", stock_font=b"")
+    assert got["names"] == ["PadCoop_1", "PadCoop_Random"]
+    (card, src), = result.replaced
+    assert card == "godzilla_le/godzilla_le/assets/lcd/auto_loaded/32e6ae28/scene.radium"
+    assert open(src, "rb").read() == b"HUD+screens"
+    assert open(result.coop_file).read().endswith("screens 32e6ae28\n")
+
+
+def test_the_runtime_shows_the_picks_screen_and_reads_where_they_are():
+    src = RUNTIME.read_text(encoding="utf-8")
+    assert '"screens "' in R._lift(src, "static void coop_line(const char *s)")
+    tick = R._lift(src, "static void coop_screens_tick(void)")
+    assert '"PadCoop_%d"' in tick and '"PadCoop_Random"' in tick and "pm_show(coop_scr[want], 1);" in tick
+    assert "coop_screens_tick();" in R._lift(src, "static void coop_chars_tick(void)")

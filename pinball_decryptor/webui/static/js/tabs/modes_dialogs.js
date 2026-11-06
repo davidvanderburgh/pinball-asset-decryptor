@@ -210,14 +210,20 @@ export function CoopCharsDialog({ s, onClose }) {
   const does = (k) => { const a = abil.find((x) => x.key === k); return a ? a.does : "Plays as the game always does."; };
   const row = (r, i) => html`<div class="modes-coop-ch-row" key=${i + ":" + r.name}>
     <span class="small dim">${i + 1}</span>
-    <${Field} value=${r.name} sm maxLength=${ch.max_name || 27} width=${260}
+    <${Field} value=${r.name} sm maxLength=${ch.max_name || 27} width=${210}
       title="Its name, as the machine's top line shows it at the pick."
       onCommit=${(v) => { if (v !== r.name) call("modes.coop_char_set", i, v, null); }} />
-    <${Select} sm value=${r.ability} options=${opts} width=${230}
+    <${Select} sm value=${r.ability} options=${opts} width=${200}
       title=${r.lost ? "The ability this character had is not one this game can have yet." : "What it does while its teammate is up."}
       onChange=${(v) => call("modes.coop_char_set", i, null, v)} />
     <span class=${cx("small wrap modes-coop-ch-does", r.lost ? "warn-ink" : "dim")}>${r.lost ? "Its ability is not on this game yet: none on the card." : does(r.ability)}</span>
-    <${Button} size="xs" kind="ghost" icon="trash" title="Take this character out." onClick=${() => call("modes.coop_char_remove", i)} />
+    <span class="row" style="gap:4px">
+      <${Button} size="xs" kind="ghost" icon="image" onClick=${() => call("modes.coop_char_picture", i, false)}
+        title=${r.picture ? "Its picture on the pick screen: choose another." : "Choose a picture of your own for its pick screen (without one it gets a panel with its name)."}>${r.picture ? "Picture ✓" : "Picture…"}<//>
+      ${r.picture ? html`<${Button} size="xs" kind="ghost" icon="x" title="Back to the panel with its name." onClick=${() => call("modes.coop_char_picture", i, true)} />` : null}
+      <${Button} size="xs" kind="ghost" icon="eye" title="Show its pick screen in the preview below." onClick=${() => call("modes.coop_chars_show", i)} />
+      <${Button} size="xs" kind="ghost" icon="trash" title="Take this character out." onClick=${() => call("modes.coop_char_remove", i)} />
+    </span>
   </div>`;
   return html`<${Modal} title="Co-op characters" icon="list" wide onClose=${onClose}
     footer=${html`<span class="small muted">${ch.note}</span><span class="grow"></span>
@@ -233,7 +239,11 @@ export function CoopCharsDialog({ s, onClose }) {
         disabled=${!rows.length} title="Off: the card plays co-op as before, with no characters."
         onChange=${(v) => call("modes.coop_chars_pick", v)} />
     </div>
-    ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(56vh, 520px)">${rows.map(row)}</div>`
+    ${ch.preview ? html`<div class="modes-coop-ch-pv">
+      <img src=${mediaUrl(ch.preview.path) + "&v=" + ch.preview.seq} alt="The machine's pick screen" />
+      <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"} (the game's own font draws the words). Change the pictures here as often as you like; Write puts them on the card.</span>
+    </div>` : null}
+    ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(40vh, 400px)">${rows.map(row)}</div>`
       : html`<div class="small muted" style="margin-top:8px">No characters yet: press Add${ch.preset ? `, or load ${ch.preset}'s set` : ""}.</div>`}
   <//>`;
 }

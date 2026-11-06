@@ -192,7 +192,7 @@ process; guestmem.py takes the first `game` on the box), job4.sh (proof job), jo
   (tier 2 locked), after rule 15 started 0 0 0 0 0 0 0.
 - MODE_SDK.md (every kind, the screens, the proofs), help text, the Characters dialog's shot.
 
-- Pro 1.16 (gz_pro4, rig kit C:	mp\PAD-1031ig jobpro2.sh / gzpro2.cfg: one test character with every
+- Pro 1.16 (gz_pro4, rig kit C:/tmp/PAD-1031/rig jobpro2.sh / gzpro2.cfg: one test character with every
   port-dependent kind, all in teammate 1's turn - the Pro rig's drains never ended a ball): the boost (1 -> 2), the
   ADD 1 POWERUP and LIGHT ALLY gifts read, tanks and jets +4, both difficulty records held 0 (team's 1), places 0 0 0 0
   1 1 1 -> all 0 after Ebirah started, the spot sent Ebirah's 0x200. No fault.

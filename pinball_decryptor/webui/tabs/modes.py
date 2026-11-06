@@ -395,6 +395,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._init_check()
         self._init_reading()
         self._init_sheet()
+        self.set(coop_on=False, coop_note="", coop_note_kind="", coop_shown=False,   # PAD-1017
+                 coop_tip=self.COOP_TIP)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -658,6 +660,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._apply_project_title(project)
         self._refresh_port_targets(project)                 # PAD-396: after the card's title is known
         self._show_cap(project, len(found))
+        self._publish_coop(project)                          # PAD-1017
         codes = [s for s, _n in self._code_list]
         game = self._game_ids()
         if select_game is not None and select_game in game:
@@ -692,6 +695,42 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self._publish_rows()
             return
         self._open(want, self._found[want])
+
+    #: PAD-1017: co-op play (plugins/stern/coop_play.py), the card's game-wide option beside the modes: it runs on the
+    #: mode runtime, and a card with it keeps its scores off Insider Connected as a card with modes does
+    COOP_TIP = (
+        "Lets 2 to 4 players play one game together on a game that has no co-op of its own. On the machine, hold "
+        "the right flipper button and press Start to add a teammate. The team shares one score and all of the "
+        "game's progress, and takes turns ball by ball. Each team size has its own high score board. Like a card "
+        "with modes, its scores and achievements stay off Insider Connected. Write puts it on the card.")
+
+    def _publish_coop(self, project):
+        """PAD-1017: the Co-op play tick, and under it how a teammate joins, or in red why this game cannot have it."""
+        from ...plugins.stern import coop_play as _CP
+        on = bool(project) and _CP.load(project)
+        note, kind = "", ""
+        if on:
+            why = _CP.title_refusal(_CP.project_title(project))
+            if why:
+                note, kind = why, "err"
+            else:
+                note = "On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + ". Its scores stay off Insider Connected."
+        self.set(coop_shown=bool(project), coop_on=on, coop_note=note, coop_note_kind=kind)
+
+    @rpc
+    def set_coop(self, on):
+        """Tick or untick co-op play for this project (PAD-1017)."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        was = _CP.save(project, bool(on))
+        hist = history_log.diff_scalar("modes  co-op play", "on" if was else "off", "on" if on else "off")
+        history_log.record(project, [hist] if hist else [])
+        self._say("co-op play: %s" % ("the card gets co-op play at the next Write" if on else "no co-op play on the card"))
+        self._publish_coop(project)
+        return True
 
     def _no_modes_words(self):
         """The empty editor's sentence: what to press, for the shown title."""

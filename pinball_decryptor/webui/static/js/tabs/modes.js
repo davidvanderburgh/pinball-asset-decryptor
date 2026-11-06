@@ -283,6 +283,11 @@ function ModeList({ s, onNew, onAllNumbers, onSheet }) {
       </div>` : s.project ? html`<div class="small muted modes-list-empty">No modes yet.</div>` : null}
     </div>
     <div class="ft modes-list-ft">
+      ${s.coop_shown ? html`<div class="stack modes-coop">
+        <${Check} checked=${s.coop_on} wrap label="Co-op play" title=${s.coop_tip}
+          onChange=${(v) => call("modes.set_coop", v)} />
+        ${s.coop_note ? html`<span class=${cx("small", s.coop_note_kind === "err" ? "err-ink" : "muted")}>${s.coop_note}</span>` : null}
+      </div>` : null}
       ${s.cap_text ? html`<span class="small muted">${s.cap_text}</span>` : null}
       <div class="row modes-list-acts">
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>

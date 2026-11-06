@@ -6098,3 +6098,44 @@ battle's on-screen words (the BG layer's text follows the SPINNER bits, so a rew
 game's default line, "SHOOT POP BUMPER FOR FINAL BLOW!" after the third stage); whether the stage
 screens, which name the spinner completed, read well over a ramp. A rewrite's own words would need
 the rule's display layer, which this item does not touch.
+
+## Co-op play (PAD-1017)
+
+2 to 4 players play one game as a team, on a game without co-op of its own. TMNT, Venom, The Mandalorian, D&D,
+Jaws, Jurassic Park, King Kong and Bond 60th have co-op in their own rules, and that code copies each feature's
+per-player state across players. No other title can reuse it. Here the game plays ONE player instead. Its progress,
+score, lights and flags are the team's, because there is only one of each. The runtime takes the teammates in turn,
+one ball each. There is nothing for a mode to call: a card gets it from `coop.cfg` beside the runtime (the Write
+tab's **Co-op play**):
+
+    coop on
+    button 59        the switch held at Start to add a teammate (the right flipper button; the build reads its id)
+
+On the machine, a Start pressed with the button held, in the first ball of a one-player game (then any Start in that
+co-op game), adds a teammate. The game's own add-a-player runs as always (credits, its hooks, the most players it
+allows) and counts the player, so the teammate has a score panel. Every panel shows the team's score: the tick and
+each ball's end copy player 1's score into every teammate's (`data scores`, or `scores32`). The game still PLAYS one
+player, because inside its player change its count of players is 1, so it never changes to player 2's flags and lamps. A plain Start adds a competing player as stock, and a game of competing players takes no
+teammates. At each ball's end with teammate t of n up: for t < n, the ball's byte goes one down before the game's
+player change, which puts it back up, so the next teammate plays the same ball. An extra ball taken leaves the byte
+down; it is put back up and the same teammate shoots again. For t = n the game's change runs as it is (the next ball,
+or the game's end). So the game ends after the last teammate's last ball.
+
+- **Whose turn:** the game's own top line `BALL %d` (found in the message table by its English words) reads
+  `PLAYER 2  BALL %d` while teammate 2 is up. It goes back to the game's own words when the co-op game is over. The
+  bonus count keeps the game's head (PLAYER 1, the team): borrowing its `PLAYER %d` for the teammate blanked the
+  bonus screen's head and TOTAL SCORE line on Godzilla LE 1.16.
+- **Its own boards:** one champion per team size (`2-PLAYER CO-OP` ... `4-PLAYER CO-OP`), kept the way a mode's
+  challenge game keeps its own (PAD-640/663: the record in `/dump/pad_challenge_scores`, HIGHEST SCORES' first entry
+  pointed at it for the game's end, the game's own records shut for that game). The attract champion pages show
+  each board that has a champion.
+
+Port lines (portcoop.py; one framework shape on every Spike 2 build, the older ones' count at +0x50 of a struct):
+
+    site  coop_player_change  the player change at a ball's end (wrapped)
+    site  coop_add_player     add a player (wrapped)
+    data  coop_player         the player up's byte; the ball in play is the next one
+    data  coop_players        the count of players' byte
+
+plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
+every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).

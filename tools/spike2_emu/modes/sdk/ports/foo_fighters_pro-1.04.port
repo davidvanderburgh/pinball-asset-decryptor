@@ -610,3 +610,12 @@ site  attract_show        0x001c8a5c 0xe92d4070 0xe307475c
 site coil_frame            0x004ad13c 0xe5d13000 0xe3530008
 site coil_off              0x004a9228 0xe3510008 0xe1a02001
 data sw_struct             0x03bad014
+
+# ---- PAD-1017: co-op play (portcoop.py, read off this build's program) ----
+site  coop_player_change 0x001faad8 0xe92d41f0 0xe24dd008
+site  coop_add_player    0x001fa918 0xe92d4038 0xe3a00051
+data  coop_player        0x03b2cf4c
+data  coop_players       0x03bd70d0
+
+# ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
+value coop_ball_msg          1255

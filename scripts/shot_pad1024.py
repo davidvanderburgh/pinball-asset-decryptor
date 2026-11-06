@@ -8,12 +8,14 @@ writing a stand-in file slowly into a scratch TEMP, so nothing real is fetched
 or installed.  Saves into <out_dir>:
 
     <prefix>_banner_downloading.png  a few seconds after the check
-    <prefix>_banner.png              once the download has had time to finish
+    <prefix>_banner_installing.png   once the download is done
+    <prefix>_banner.png              once the install has had time to finish
     <prefix>_updates_menu.png        Settings > Updates open
 
 On main the banner offers Install update throughout; with PAD-1024 it shows
-the background download, then Restart to update, and the menu has the
-"Download updates in the background" switch.
+the background download, then the background install (standing in for an
+installed copy), then Restart to update, and the menu has the "Download and
+install updates in the background" switch.
 """
 import json
 import os
@@ -51,6 +53,22 @@ def fake_download(url, dest, expected_sha256=None, progress_cb=None,
 
 updater.check_for_update = fake_check
 updater.download_installer = fake_download
+try:
+    # blue-green (PAD-1024 part 2): pretend to be an installed copy whose
+    # background install takes a few seconds; main has no such module
+    import os
+    from pinball_decryptor.core import update_slots
+    APP = os.path.join(os.environ["TEMP"], "Pinball Asset Decryptor")
+
+    def fake_stage(setup, app, version, run=None, cancel_cb=None):
+        time.sleep(8)
+        os.makedirs(update_slots.next_dir(app), exist_ok=True)
+        return True, []
+    update_slots.installed_app_dir = lambda *a, **k: APP
+    update_slots.stage_install = fake_stage
+    update_slots.staged_install_ok = lambda app, v: False
+except ImportError:
+    pass
 from pinball_decryptor.webui import host
 sys.argv = ["host"] + sys.argv[1:]
 sys.exit(host.main())
@@ -94,7 +112,11 @@ def main():
             shot = os.path.join(out_dir, prefix + "_banner_downloading.png")
             page.screenshot(path=shot)
             print("shot:", shot, flush=True)
-            time.sleep(12.0)
+            time.sleep(8.0)
+            shot = os.path.join(out_dir, prefix + "_banner_installing.png")
+            page.screenshot(path=shot)
+            print("shot:", shot, flush=True)
+            time.sleep(10.0)
             shot = os.path.join(out_dir, prefix + "_banner.png")
             page.screenshot(path=shot)
             print("shot:", shot, flush=True)

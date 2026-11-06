@@ -290,3 +290,262 @@ def test_a_newer_release_replaces_the_one_downloading(tmp_path, staged):
         assert _until(w, lambda: "v9.9.10 is ready" in (
             _banner(w) or {}).get("text", ""))
         assert len(staged["downloads"]) == 2
+
+
+# ------------------------------------------------------------ blue-green
+# The real setup exe and swap helper are proven end to end by
+# scripts/e2e_pad1024_blue_green.py (it needs Inno Setup and a built Python
+# bundle); these pin the pieces that need neither.
+from pinball_decryptor.core import update_slots as us   # noqa: E402
+
+
+def _tree(root, version, site=(), extra=()):
+    """A stand-in install: the files a whole one has, plus *site* entries
+    in site-packages and *extra* top-level files."""
+    for rel in ("python/pythonw.exe", "python/python.exe", "launcher.vbs",
+                "Pinball Asset Decryptor.pyw"):
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+    init = root / "pinball_decryptor" / "__init__.py"
+    init.parent.mkdir(parents=True, exist_ok=True)
+    init.write_text('__version__ = "%s"\n' % version, encoding="utf-8")
+    sp = root / "python" / "Lib" / "site-packages"
+    sp.mkdir(parents=True, exist_ok=True)
+    for name in site:
+        (sp / name).mkdir()
+        (sp / name / "f.py").write_text("x", encoding="utf-8")
+    for name in extra:
+        (root / name).write_bytes(b"u")
+    return root
+
+
+def test_installed_app_dir_only_for_a_real_install(tmp_path):
+    app = _tree(tmp_path / "PAD", "1.0.0")
+    exe = str(app / "python" / "pythonw.exe")
+    assert us.installed_app_dir(exe, platform="win32") is None   # no unins
+    (app / "unins000.exe").write_bytes(b"u")
+    assert us.installed_app_dir(exe, platform="win32") == str(app)
+    assert us.installed_app_dir(exe, platform="darwin") is None
+    # a source checkout's interpreter is not under <app>\python
+    assert us.installed_app_dir(str(tmp_path / "Python314" / "pythonw.exe"),
+                                platform="win32") is None
+
+
+def test_carry_over_keeps_what_pip_added_and_never_downgrades(tmp_path):
+    app = _tree(tmp_path / "PAD", "1.0.0",
+                site=("faster_whisper", "faster_whisper-1.0.dist-info",
+                      "numpy", "numpy-1.0.dist-info"),
+                extra=("unins000.exe", "unins000.dat"))
+    (app / "python" / "Scripts").mkdir()
+    (app / "python" / "Scripts" / "ct2.exe").write_bytes(b"s")
+    new = _tree(tmp_path / "PAD.next", "9.9.9",
+                site=("numpy", "numpy-2.0.dist-info"))
+    (new / "python" / "Scripts").mkdir()
+    got = sorted(us.carry_over(str(app), str(new)))
+    sp = os.path.join("python", "Lib", "site-packages")
+    assert got == sorted([
+        "unins000.dat", "unins000.exe",
+        os.path.join(sp, "faster_whisper"),
+        os.path.join(sp, "faster_whisper-1.0.dist-info"),
+        os.path.join("python", "Scripts", "ct2.exe")])
+    # the bundle's newer numpy stands; the old dist-info is not added to it
+    left = sorted(os.listdir(new / "python" / "Lib" / "site-packages"))
+    assert "numpy-1.0.dist-info" not in left and "numpy-2.0.dist-info" in left
+
+
+def test_staged_install_needs_the_marker_and_the_version(tmp_path):
+    app = str(tmp_path / "PAD")
+    nxt = _tree(tmp_path / "PAD.next", "9.9.9")
+    assert not us.staged_install_ok(app, "9.9.9")          # no marker yet
+    (nxt / us.MARKER).write_text('{"version": "9.9.9"}', encoding="utf-8")
+    assert us.staged_install_ok(app, "9.9.9")
+    assert not us.staged_install_ok(app, "9.9.10")
+    (nxt / "launcher.vbs").unlink()
+    assert not us.staged_install_ok(app, "9.9.9")
+
+
+class _Run:
+    def __init__(self, code=0, make=None, raises=None):
+        self.code, self.make, self.raises, self.calls = code, make, raises, []
+
+    def __call__(self, cmd, **kw):
+        self.calls.append(cmd)
+        if self.raises:
+            raise self.raises
+        if self.make and isinstance(cmd, str) and "/STAGED=1" in cmd:
+            self.make()
+        return type("R", (), {"returncode": self.code})()
+
+
+def _elevation_error():
+    e = OSError("The requested operation requires elevation")
+    e.winerror = 740
+    return e
+
+
+def test_stage_install_runs_the_setup_staged_and_carries(tmp_path):
+    app = _tree(tmp_path / "PAD", "1.0.0", site=("extra",),
+                extra=("unins000.exe",))
+    run = _Run(make=lambda: _tree(tmp_path / "PAD.next", "9.9.9"))
+    ok, carried = us.stage_install("C:/dl/setup.exe", str(app), "9.9.9",
+                                   run=run)
+    assert ok, carried
+    setup_cmd = run.calls[0]
+    assert setup_cmd.startswith('"C:/dl/setup.exe" ')
+    assert "/STAGED=1" in setup_cmd and "/VERYSILENT" in setup_cmd
+    assert '/DIR="%s"' % us.next_dir(str(app)) in setup_cmd
+    assert "!runprereqs" in setup_cmd and "!desktopicon" in setup_cmd
+    assert any("icacls" in str(c) for c in run.calls[1:])     # ACL repair
+    assert "unins000.exe" in carried
+    assert us.staged_install_ok(str(app), "9.9.9")
+
+
+@pytest.mark.parametrize("run, says", [
+    (_Run(code=2), "code 2"),
+    (_Run(raises=_elevation_error()), "administrator"),
+    (_Run(), "no "),                       # exit 0 but nothing installed
+])
+def test_a_failed_stage_leaves_nothing(tmp_path, run, says):
+    app = _tree(tmp_path / "PAD", "1.0.0")
+    ok, why = us.stage_install("s.exe", str(app), "9.9.9", run=run)
+    assert not ok and says in why
+    assert not os.path.exists(us.next_dir(str(app)))
+
+
+def test_the_wrong_version_staged_is_refused(tmp_path):
+    app = _tree(tmp_path / "PAD", "1.0.0")
+    run = _Run(make=lambda: _tree(tmp_path / "PAD.next", "9.9.8"))
+    ok, why = us.stage_install("s.exe", str(app), "9.9.9", run=run)
+    assert not ok and "v9.9.8" in why
+    assert not os.path.exists(us.next_dir(str(app)))
+
+
+def test_clear_leftovers(tmp_path):
+    app = str(tmp_path / "PAD")
+    _tree(tmp_path / "PAD.old", "0.9.0")
+    nxt = _tree(tmp_path / "PAD.next", "1.0.0")
+    (nxt / us.MARKER).write_text('{"version": "1.0.0"}', encoding="utf-8")
+    deleted, failed = us.clear_leftovers(app, "1.0.0")
+    assert not failed
+    assert sorted(deleted) == sorted([us.old_dir(app), us.next_dir(app)])
+    # a staged NEWER version is kept for Restart to update
+    nxt = _tree(tmp_path / "PAD.next", "2.0.0")
+    (nxt / us.MARKER).write_text('{"version": "2.0.0"}', encoding="utf-8")
+    assert us.clear_leftovers(app, "1.0.0") == ([], [])
+
+
+def test_swap_script_says_what_it_does():
+    s = us.swap_script("C:\\Program Files\\Pinball Asset Decryptor", "9.9.9",
+                       "C:\\Temp\\it's setup.exe", 1234, "C:\\Temp\\swap.log")
+    assert "Wait-Process -Id 1234" in s
+    assert "'C:\\Program Files\\Pinball Asset Decryptor.next'" in s
+    assert "'C:\\Program Files\\Pinball Asset Decryptor.old'" in s
+    assert "'C:\\Temp\\it''s setup.exe'" in s           # quoted for PS
+    assert "/FORCECLOSEAPPLICATIONS" in s and "/RELAUNCH=1" in s
+    assert "InstallLocation" in s                       # only its own entry
+    assert "if ($true) {" in s and "launcher.vbs" in s
+    quiet = us.swap_script("C:\\a", "9.9.9", "", 1, "l", launch=False,
+                           register=False)
+    assert "if ($true)" not in quiet
+
+
+# ------------------------------------------------------------ app: staging
+@pytest.fixture
+def slots(tmp_path, staged, monkeypatch):
+    """The ``staged`` stand-ins plus an installed copy whose background
+    install and swap only record."""
+    from pinball_decryptor import app as app_mod
+    app_dir = str(tmp_path / "PAD")
+    rec = dict(staged, stages=[], swaps=[], stage_ok=True, saved=0)
+    rec["gate"].set()
+    monkeypatch.setattr(us, "installed_app_dir", lambda *a, **k: app_dir)
+
+    def _stage(setup, app, version, run=None, cancel_cb=None):
+        rec["stages"].append((setup, app, version))
+        if not rec["stage_ok"]:
+            return False, "the installer stopped with code 5"
+        nxt = _tree(tmp_path / "PAD.next", version)
+        (nxt / us.MARKER).write_text('{"version": "%s"}' % version,
+                                     encoding="utf-8")
+        return True, []
+    monkeypatch.setattr(us, "stage_install", _stage)
+
+    def _swap(app, version, setup, **k):
+        rec["swaps"].append((app, version, setup))
+        return True, "log"
+    monkeypatch.setattr(us, "start_swap", _swap)
+    real_save = app_mod.App._save_session_state
+
+    def _save(self):
+        rec["saved"] += 1
+        return real_save(self)
+    monkeypatch.setattr(app_mod.App, "_save_session_state", _save)
+    # the dict copy shares the lists, but the counters must be read here
+    staged_close = app_mod.App._on_close
+
+    def _close(self):
+        rec["closed"] += 1
+        return staged_close(self)
+    monkeypatch.setattr(app_mod.App, "_on_close", _close)
+    return rec
+
+
+def _ready(w):
+    return "is ready" in (_banner(w) or {}).get("text", "")
+
+
+def test_installed_copy_installs_in_background_then_swaps(tmp_path, slots):
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(w.app._offer_update, "9.9.9", "u", _installer())
+        assert _until(w, lambda: _ready(w))
+        dest = str(slots["dir"] / (WIN % "9.9.9"))
+        assert slots["stages"] == [(dest, str(tmp_path / "PAD"), "9.9.9")]
+        texts = [e["text"] for e in w.window.log_history()]
+        assert any("Installing v9.9.9 in the background" in t for t in texts)
+        assert any("Update v9.9.9 is installed" in t for t in texts)
+        saved = slots["saved"]
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: slots["closed"])
+        assert slots["swaps"] == [(str(tmp_path / "PAD"), "9.9.9", dest)]
+        assert slots["launched"] == []          # no installer: just the swap
+        assert slots["saved"] > saved           # state written before it
+        assert w.app._restart_wsl_on_close
+
+
+def test_the_installing_banner(tmp_path):
+    with web_app(tmp_path, mfr="stern") as w:
+        w.window.cb["on_install_update"] = lambda v, inst: None
+        w.run(lambda: w.window.show_update_banner(
+            "9.9.9", "u", installer=_installer(), stage="installing"))
+        b = _banner(w)
+        assert "installing in the background" in b["text"]
+        assert [a["label"] for a in b["actions"]] == ["Release notes"]
+        assert w.state("shell")["update"]["label"] == "Installing v9.9.9…"
+        top = w.state("shell")["settings_items"][0]
+        assert top["disabled"] and "Installing update v9.9.9" in top["label"]
+
+
+def test_a_failed_background_install_restarts_through_the_installer(
+        tmp_path, slots):
+    slots["stage_ok"] = False
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(w.app._offer_update, "9.9.9", "u", _installer())
+        assert _until(w, lambda: _ready(w))
+        texts = [e["text"] for e in w.window.log_history()]
+        assert any("Couldn't install v9.9.9 in the background" in t
+                   and "code 5" in t for t in texts)
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: slots["closed"])
+        assert slots["swaps"] == []
+        assert slots["launched"] == [str(slots["dir"] / (WIN % "9.9.9"))]
+
+
+def test_a_staged_copy_from_an_earlier_run_is_reused(tmp_path, slots):
+    (slots["dir"] / (WIN % "9.9.9")).write_bytes(PAYLOAD)
+    nxt = _tree(tmp_path / "PAD.next", "9.9.9")
+    (nxt / us.MARKER).write_text('{"version": "9.9.9"}', encoding="utf-8")
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(w.app._offer_update, "9.9.9", "u", _installer())
+        assert _until(w, lambda: _ready(w))
+        assert slots["downloads"] == [] and slots["stages"] == []

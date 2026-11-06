@@ -10,7 +10,7 @@ import threading
 import time
 
 from . import __version__
-from .core import build_output, desktop, modpack
+from .core import build_output, desktop, modpack, update_slots
 from .core.atomic_file import write_json_atomic
 from .core.config import APP_NAME, SETTINGS_FILE
 from .core.extract_source import write_extract_source
@@ -19,9 +19,10 @@ from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
 from .core.prereqs import check_prerequisite, probes_wsl
 from .core.registry import all_manufacturers, get_manufacturer, load_plugins
 from .core.updater import (AUTO_DOWNLOAD_DEFAULT, AUTO_DOWNLOAD_KEY,
-                           check_for_update, download_installer,
-                           install_update_macos, launch_installer_windows,
-                           restart_wsl_for_update, staged_update_ok)
+                           check_for_update, commit_update_macos,
+                           download_installer, install_update_macos,
+                           launch_installer_windows, restart_wsl_for_update,
+                           stage_update_macos, staged_update_ok)
 from .webui import compat
 from .webui.compat import filedialog, messagebox
 
@@ -5434,6 +5435,11 @@ class App:
             if installers:
                 jobs.append(
                     lambda: old_versions.prune_old_installers(__version__))
+                # PAD-1024: the version a blue-green swap replaced
+                app_dir = update_slots.installed_app_dir()
+                if app_dir:
+                    jobs.append(lambda: update_slots.clear_leftovers(
+                        app_dir, __version__))
             for fn in jobs:
                 try:
                     d, f = fn()
@@ -5607,8 +5613,17 @@ class App:
     # the download window it sat behind - a few hundred MB, watched.  So the
     # check now fetches the update as soon as it finds one, while the user
     # works, and the banner's one button becomes Restart to update.  ⚙
-    # Updates > Download updates in the background turns it off, and the
-    # update then waits for Install update as before.
+    # Updates > Download and install updates in the background turns it off,
+    # and the update then waits for Install update as before.
+    #
+    # And installs it in the background too, blue-green (David: "can we do
+    # like a blue-green where it installs in the background as well").  On an
+    # installed Windows copy the setup exe installs the new version into a
+    # sibling folder while this one runs, and Restart to update only swaps the
+    # two folders (core/update_slots.py); on macOS the new bundle is copied
+    # out of the disk image beside this one and Restart only swaps bundles.
+    # Either one failing leaves Restart to update running the downloaded
+    # installer as before.
     # ------------------------------------------------------------------
 
     def _auto_download_on(self):
@@ -5648,7 +5663,8 @@ class App:
                             installer["name"])
         bg = {"version": version, "url": url, "installer": installer,
               "path": dest, "stage": "downloading", "pct": None,
-              "cancel": threading.Event()}
+              "cancel": threading.Event(), "staged": None,
+              "how": self._staging_for(installer)}
         self._bg_update = bg
         self._show_background_update(bg)
         total = int(installer.get("size") or 0)
@@ -5684,7 +5700,16 @@ class App:
                 _post(self._background_update_failed, bg,
                       f"{type(e).__name__}: {e}")
                 return
-            _post(self._background_update_ready, bg, reused)
+            staged = err = None
+            if bg["how"]:
+                _post(self._background_update_installing, bg)
+                try:
+                    staged, err = self._stage_update(bg)
+                except InterruptedError:
+                    return
+                except Exception as e:                  # noqa: BLE001
+                    staged, err = None, f"{type(e).__name__}: {e}"
+            _post(self._background_update_ready, bg, reused, staged, err)
         threading.Thread(target=_run, daemon=True,
                          name="update-download").start()
         self.window.append_log(
@@ -5696,13 +5721,55 @@ class App:
         bg["pct"] = pct
         self._show_background_update(bg)
 
-    def _background_update_ready(self, bg, reused=False):
+    def _staging_for(self, installer):
+        """How this copy can install *installer* in the background:
+        ``"windows"`` (an installed copy and the setup exe), ``"macos"``
+        (the disk image), or None - the download is all there is to do
+        ahead (an AppImage, a source checkout)."""
+        kind = (installer or {}).get("kind")
+        if kind == "windows-installer" and update_slots.installed_app_dir():
+            return "windows"
+        if kind == "macos-dmg" and sys.platform == "darwin":
+            return "macos"
+        return None
+
+    def _stage_update(self, bg):
+        """Worker thread: install the downloaded update beside the running
+        app.  Returns ``(staged, None)`` or ``(None, reason)``."""
+        if bg["how"] == "windows":
+            app_dir = update_slots.installed_app_dir()
+            if update_slots.staged_install_ok(app_dir, bg["version"]):
+                return update_slots.next_dir(app_dir), None
+            ok, info = update_slots.stage_install(
+                bg["path"], app_dir, bg["version"],
+                cancel_cb=bg["cancel"].is_set)
+            return (update_slots.next_dir(app_dir), None) if ok \
+                else (None, info)
+        ok, info = stage_update_macos(bg["path"])
+        return (info, None) if ok else (None, info)
+
+    def _background_update_installing(self, bg):
         if getattr(self, "_bg_update", None) is not bg:
             return
-        bg["stage"], bg["pct"] = "ready", None
+        bg["stage"], bg["pct"] = "installing", None
+        self.window.append_log(
+            f"Installing v{bg['version']} in the background...", "info")
+        self._show_background_update(bg)
+
+    def _background_update_ready(self, bg, reused=False, staged=None,
+                                 err=None):
+        if getattr(self, "_bg_update", None) is not bg:
+            return
+        bg["stage"], bg["pct"], bg["staged"] = "ready", None, staged
+        if err:
+            self.window.append_log(
+                f"Couldn't install v{bg['version']} in the background "
+                f"({err}). Restart to update will run its installer instead.",
+                "warning")
         self.window.append_log(
             f"Update v{bg['version']} is "
-            + ("already downloaded" if reused else "downloaded")
+            + ("installed" if staged
+               else "already downloaded" if reused else "downloaded")
             + " - press Restart to update whenever you're ready.", "success")
         self._show_background_update(bg)
 
@@ -5725,11 +5792,11 @@ class App:
         self._settings[AUTO_DOWNLOAD_KEY] = bool(on)
         self._save_settings()
         self.window.append_log(
-            "Download updates in the background: %s." % ("on" if on
-                                                          else "off"), "info")
+            "Download and install updates in the background: %s."
+            % ("on" if on else "off"), "info")
         offer = getattr(self, "_update_offer", None)
         bg = getattr(self, "_bg_update", None)
-        if not on and bg and bg["stage"] == "downloading":
+        if not on and bg and bg["stage"] in ("downloading", "installing"):
             bg["cancel"].set()
             self._bg_update = None
             self.window.show_update_banner(bg["version"], bg["url"],
@@ -5744,10 +5811,12 @@ class App:
         bg = getattr(self, "_bg_update", None)
         if not bg or bg["version"] != version:
             return False
-        if bg["stage"] == "downloading":
+        if bg["stage"] in ("downloading", "installing"):
             self.window.append_log(
-                f"v{version} is still downloading - Restart to update "
+                f"v{version} is still {bg['stage']} - Restart to update "
                 "appears when it's done.", "info")
+            return True
+        if bg.get("staged") and self._swap_in_staged(bg):
             return True
         if not staged_update_ok(bg["path"], bg["installer"],
                                 check_digest=False):
@@ -5758,6 +5827,36 @@ class App:
                                "info")
         self._update_downloaded(_NO_DIALOG, bg["path"], version,
                                 bg["installer"].get("kind"), ask=False)
+        return True
+
+    def _swap_in_staged(self, bg):
+        """Restart to update with the new version already installed beside
+        this one: hand the swap to its helper and close.  False (nothing
+        done) when the staged copy is not usable any more, so the caller
+        runs the installer instead."""
+        version = bg["version"]
+        if bg["how"] == "windows":
+            app_dir = update_slots.installed_app_dir()
+            if not app_dir or not update_slots.staged_install_ok(app_dir,
+                                                                 version):
+                return False
+            # the helper only renames once this process is gone, so the
+            # state is written first, as for the installer (PAD-188)
+            self._save_session_state()
+            ok, info = update_slots.start_swap(app_dir, version, bg["path"])
+        else:
+            self._save_session_state()
+            ok, info = commit_update_macos(bg["staged"])
+        if not ok:
+            self.window.append_log(
+                f"Couldn't switch to v{version} in place ({info}) - running "
+                "its installer instead.", "warning")
+            return False
+        self.window.append_log(
+            f"Restarting into v{version} - the app will close and reopen "
+            "updated.", "info")
+        self._restart_wsl_on_close = True
+        self._on_close()
         return True
 
     def _install_update(self, version, installer):

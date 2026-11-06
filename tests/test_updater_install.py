@@ -577,3 +577,27 @@ def test_macos_install_refuses_rather_than_half_doing_it(tmp_path):
     assert not ok
 
     assert not started, "nothing may be launched on a failed install"
+
+
+def test_macos_stage_then_commit_is_the_same_install_in_two_steps(tmp_path):
+    """PAD-1024: the copy out of the image happens in the background; Restart
+    to update only hands over the swap."""
+    b = _bundle(tmp_path)
+    run = _FakeRun()
+    ok, staged = updater.stage_update_macos(tmp_path / "new.dmg",
+                                            bundle=str(b), run=run)
+    assert ok and staged == updater.macos_staged_path(str(b))
+    assert run.argv_for("ditto") and run.argv_for("xattr")
+    Path(staged).mkdir(parents=True, exist_ok=True)   # what ditto made
+    started = []
+    ok, err = updater.commit_update_macos(
+        staged, bundle=str(b), pid=99,
+        popen=lambda argv, **kw: started.append(list(argv)))
+    assert ok and err == ""
+    assert "kill -0 99" in Path(started[0][1]).read_text()
+    # a staged copy that went away is refused, not swapped in
+    import shutil
+    shutil.rmtree(staged)
+    ok, err = updater.commit_update_macos(
+        staged, bundle=str(b), popen=lambda argv, **kw: None)
+    assert not ok and "no longer" in err

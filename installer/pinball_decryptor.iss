@@ -49,6 +49,11 @@ PrivilegesRequired=admin
 WizardStyle=modern
 WizardSizePercent=110
 DisableProgramGroupPage=auto
+; PAD-1024: the in-app update's background install (/STAGED=1, see IsStaged)
+; goes into a sibling folder that is renamed into place on Restart to update,
+; so it must leave nothing behind that names that folder: no uninstall entry
+; (the one in place stays, and its uninstaller is copied across by the app).
+Uninstallable=not IsStaged
 VersionInfoVersion={#AppVersion}.0
 
 [Languages]
@@ -196,19 +201,19 @@ Source: "wsl_default_user.sh"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Pinball Asset Decryptor"; Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\pinball_decryptor\icon.ico"; Comment: "Decrypt and modify pinball machine assets across multiple manufacturers"
-Name: "{group}\Install Prerequisites"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_prerequisites.ps1"""; WorkingDir: "{app}"; Comment: "Install WSL2, partclone, debugfs, gpg"
-Name: "{group}\{cm:UninstallProgram,Pinball Asset Decryptor}"; Filename: "{uninstallexe}"
+Name: "{group}\Pinball Asset Decryptor"; Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\pinball_decryptor\icon.ico"; Comment: "Decrypt and modify pinball machine assets across multiple manufacturers"; Check: not IsStaged
+Name: "{group}\Install Prerequisites"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_prerequisites.ps1"""; WorkingDir: "{app}"; Comment: "Install WSL2, partclone, debugfs, gpg"; Check: not IsStaged
+Name: "{group}\{cm:UninstallProgram,Pinball Asset Decryptor}"; Filename: "{uninstallexe}"; Check: not IsStaged
 
 ; Inno deletes and re-creates a shortcut it writes, and Explorer places a
 ; re-created desktop icon in the next free slot, so every update threw the
 ; icon back to wherever Windows puts new ones.  DesktopShortcutNeeded leaves
 ; one that already launches this install alone; one that is missing or
 ; points at another install dir is still (re)written.
-Name: "{autodesktop}\Pinball Asset Decryptor"; Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\pinball_decryptor\icon.ico"; Tasks: desktopicon; Check: DesktopShortcutNeeded; Comment: "Decrypt and modify pinball machine assets"
+Name: "{autodesktop}\Pinball Asset Decryptor"; Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\pinball_decryptor\icon.ico"; Tasks: desktopicon; Check: DesktopShortcutNeeded and not IsStaged; Comment: "Decrypt and modify pinball machine assets"
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_prerequisites.ps1"""; WorkingDir: "{app}"; StatusMsg: "Installing prerequisites..."; Flags: runascurrentuser shellexec waituntilterminated; Tasks: runprereqs
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_prerequisites.ps1"""; WorkingDir: "{app}"; StatusMsg: "Installing prerequisites..."; Flags: runascurrentuser shellexec waituntilterminated; Tasks: runprereqs; Check: not IsStaged
 
 ; --- Repair bundled-Python file permissions ------------------------------
 ; install_prerequisites.ps1 pip-installs faster-whisper (and its
@@ -243,8 +248,10 @@ Filename: "{app}\python\python.exe"; Parameters: "-m compileall -q -j 0 ""{app}\
 ; Visual Pinball table creates; its registration is under HKLM, which this
 ; elevated installer can write.  Registered on every install so the
 ; LocalServer32 path follows the install directory.  Not fatal: a bundled
-; Python without pywin32 simply has no kit.
-Filename: "{app}\python\python.exe"; Parameters: """{app}\tools\spike2_emu\vpx\padvpx.py"" register"; WorkingDir: "{app}"; StatusMsg: "Registering the Visual Pinball controller..."; Flags: runhidden waituntilterminated
+; Python without pywin32 simply has no kit.  Not in a staged install: its
+; folder is renamed on Restart to update, and the app's swap registers the
+; controller from the final one (core/update_slots.py).
+Filename: "{app}\python\python.exe"; Parameters: """{app}\tools\spike2_emu\vpx\padvpx.py"" register"; WorkingDir: "{app}"; StatusMsg: "Registering the Visual Pinball controller..."; Flags: runhidden waituntilterminated; Check: not IsStaged
 
 Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Description: "Launch Pinball Asset Decryptor"; Flags: nowait postinstall skipifsilent
 
@@ -264,8 +271,8 @@ Filename: "{app}\python\python.exe"; Parameters: """{app}\tools\spike2_emu\vpx\p
 ; The Visual Pinball setup window and its Start-menu entries (v1.279.0 to
 ; v1.279.4) gave way to the app's Visual Pinball tab (PAD-802); an update
 ; takes the two shortcuts away rather than leave them starting nothing.
-Type: files; Name: "{group}\Visual Pinball setup.lnk"
-Type: files; Name: "{group}\Visual Pinball kit (padvpx).lnk"
+Type: files; Name: "{group}\Visual Pinball setup.lnk"; Check: not IsStaged
+Type: files; Name: "{group}\Visual Pinball kit (padvpx).lnk"; Check: not IsStaged
 
 [UninstallDelete]
 ; Wipe Python bytecode caches so the install dir is clean before removal.
@@ -312,6 +319,16 @@ end;
 function RelaunchRequested(): Boolean;
 begin
   Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
+{ True for the in-app update's background install (/STAGED=1, PAD-1024):
+  a whole install of the new version into a sibling folder the app swaps in
+  on Restart to update.  It writes nothing outside that folder - no
+  shortcuts, no uninstall entry, no Visual Pinball controller registration -
+  because the folder is about to be renamed; see core/update_slots.py. }
+function IsStaged(): Boolean;
+begin
+  Result := ExpandConstant('{param:STAGED|0}') = '1';
 end;
 
 function InitializeSetup(): Boolean;

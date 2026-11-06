@@ -358,6 +358,10 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
                               "disabled": True,
                               "label": "Downloading update v%s…%s" % (
                                   version, self._pct_text())})
+            elif self._update_stage == "installing":
+                items.append({"id": "install_update", "dot": True,
+                              "disabled": True,
+                              "label": "Installing update v%s…" % version})
             elif self._update_stage == "ready":
                 items.append({"id": "install_update", "dot": True,
                               "label": "Restart to update to v%s" % version})
@@ -386,7 +390,8 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             for hours, label in UPDATE_INTERVAL_CHOICES]
         updates += [{"sep": True},
                     {"id": "toggle_update_auto_download",
-                     "label": "Download updates in the background",
+                     "label": "Download and install updates in the "
+                              "background",
                      "checked": bool(self.update_auto_download_var.get()),
                      "title": AUTO_DOWNLOAD_TIP}]
         if running_appimage():
@@ -729,10 +734,12 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         its menu entry.  A version already dismissed this session does not
         re-open the banner; a newer one does.
 
-        ``stage`` (PAD-1024) is where the background download is: ``None``
+        ``stage`` (PAD-1024) is where the background update is: ``None``
         when there is none (the update waits for Install update),
-        ``"downloading"`` with its ``pct`` while it runs, and ``"ready"`` once
-        the file is on disk, when the one button left is Restart to update."""
+        ``"downloading"`` with its ``pct`` while it runs, ``"installing"``
+        while the new version is installed beside this one, and ``"ready"``
+        once it is all done, when the one button left is Restart to
+        update."""
         self._update_banner_url = url
         muted = (version == self._update_banner_dismissed
                  and not self._update_banner_shown)
@@ -747,6 +754,10 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         if stage == "downloading":
             label = "Downloading v%s…%s" % (version, self._pct_text())
             tip = ("Pinball Asset Decryptor v%s is downloading in the "
+                   "background — you're on v%s." % (version, __version__))
+        elif stage == "installing":
+            label = "Installing v%s…" % version
+            tip = ("Pinball Asset Decryptor v%s is installing in the "
                    "background — you're on v%s." % (version, __version__))
         elif stage == "ready":
             label = "Restart to update"
@@ -770,6 +781,11 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
                     "ready to install in a moment."
                     % (version, " (%d%%)" % pct if pct is not None else "",
                        __version__))
+            actions = [{"id": "notes", "label": "Release notes"}]
+        elif stage == "installing":
+            text = ("Pinball Asset Decryptor v%s is installing in the "
+                    "background — you're on v%s. Keep working; Restart to "
+                    "update appears when it's done." % (version, __version__))
             actions = [{"id": "notes", "label": "Release notes"}]
         elif stage == "ready":
             text = ("Pinball Asset Decryptor v%s is ready — restart to "
@@ -809,7 +825,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         if not self._update_available:
             return False
         version, url, installer = self._update_available
-        if self._update_stage == "downloading":
+        if self._update_stage in ("downloading", "installing"):
             return True        # nothing to press yet; the banner says so
         fn = self.window.cb.get("on_install_update")
         if installer and fn is not None:

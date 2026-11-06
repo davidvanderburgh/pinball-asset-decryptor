@@ -223,3 +223,59 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     assert "coop_switched_on() && coop_button_held()" in add                   # Off: Start adds a competing player
     assert "return *(volatile const unsigned *)(unsigned long)coop.setting == 2u;" in R._lift(
         src, "static int coop_switched_on(void)")
+
+
+# ---- round 2: the gate itself, lifted and run (a host C toolchain; on Windows compile it in PAD-Runtime) ---------------
+GATE_MAIN = r"""
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+static void say(const char *f, ...) { (void)f; }
+static void str_copy(char *dst, unsigned cap, const char *src, unsigned n) { (void)n; strncpy(dst, src, cap - 1); }
+#define INSIDER_ENDPOINT_MAX 96
+static char insider_endpoint[INSIDER_ENDPOINT_MAX];
+static unsigned insider_dropped[4];
+static int insider_achq = 28;
+static unsigned insider_achq_held;
+static unsigned coop_value = 1;                       /* the CO-OP PLAY row's live value */
+@BLOCKED@
+@FNS@
+static int ask(const char *endpoint, unsigned type)
+{
+    unsigned r[8] = {0};
+    strcpy(insider_endpoint, endpoint);
+    r[2] = type;
+    return on_agent_begin(r);
+}
+int main(void)
+{
+    insider_while = (unsigned)(unsigned long)&coop_value;
+    coop_value = 1;
+    printf("off %d %d %d %d\n", ask("/api/v3/game/session_end", 5), ask("/api/v1/game/high_score_events", 5),
+           ask("/ingest/v1/game/game_events", 5), ask("", 28));
+    coop_value = 2;
+    printf("on %d %d %d %d %d\n", ask("/api/v3/game/session_end", 5), ask("/api/v1/game/high_score_events", 5),
+           ask("/ingest/v1/game/game_events", 5), ask("", 28), ask("/api/v1/player/properties", 5));
+    insider_while = 0;                                   /* a card with modes: the whole gate */
+    coop_value = 1;
+    printf("modes %d %d\n", ask("/api/v3/game/session_start", 5), ask("", 28));
+    return 0;
+}
+"""
+
+
+def test_the_gate_holds_back_only_while_co_op_play_is_on(tmp_path):
+    from tests import test_spike2_mode_roster as R
+    src = _read(os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c"))
+    blocked = src[src.index("static const char *const INSIDER_BLOCKED[] = {"):]
+    blocked = blocked[:blocked.index("};") + 2]
+    fns = "\n".join(R._lift(src[src.index(sig + "\n{"):], sig) for sig in (     # the bodies, not a declaration
+        "static int str_starts(const char *s, const char *prefix)",
+        "static int insider_blocked(const char *endpoint)",
+        "static int insider_holding(unsigned while_at, unsigned value)")) + "\nstatic unsigned insider_while;\n" + \
+        R._lift(src, "static int on_agent_begin(unsigned *r)")
+    out = R._host_run(tmp_path, GATE_MAIN.replace("@BLOCKED@", blocked).replace("@FNS@", fns),
+                      flags=("-no-pie",)).splitlines()
+    assert out == ["off 0 0 0 0",            # CO-OP PLAY Off: the session, high scores, events and query all go out
+                   "on 1 1 1 1 0",           # On: all held back; the rest of Insider Connected still goes
+                   "modes 1 1"]              # a card with modes: always held back

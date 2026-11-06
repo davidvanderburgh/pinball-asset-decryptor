@@ -4,9 +4,9 @@
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the James Bond LE 1.06 card, with a
 blocks mode carrying 13 clips (crem1..crem12, then background2 looping behind the HUD when the mode starts), shows it
-and presses Try it. The hand-off to the Emulate tab is stubbed (nothing runs on the rig). Before (main) Try it goes
-ahead ("building the modes..."), and the build left background2 out; after, the footer says the mode has 13 clips and
-12 at most, and nothing is built.
+and presses Try it. The hand-off to the Emulate tab is stubbed (nothing runs on the rig). Before (v1.351.0) the mode is
+"To fix: 13 clips of its own: 12 at most", yet Try it goes ahead and assets.json carries 12 (background2 left out);
+after, the limit is 32: the mode is Ready to build and assets.json carries all 13 (the rig prints the count).
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
 """

@@ -3415,7 +3415,15 @@ PREVIEW_HELP = {
                 "destroyed). Each is a champion page in attract, in the game's own look: the award's "
                 "name, PLAYER 2, the count. A tie names every teammate in it (PLAYERS 1+3). They stay "
                 "in attract until the next game starts. Untick an award to leave it out, or type new "
-                "words for its name; Defaults puts the game's back.",
+                "words for its name; Defaults puts the game's back.\n\n"
+                "**Characters…**, beside it, gives the team characters to pick from. Each teammate picks "
+                "one at the start of their first ball: the machine's top line names it and what it does, "
+                "the flippers move to the next one (one another teammate has is skipped), the Action "
+                "button takes it, and after 20 seconds the one shown is taken. RANDOM picks one nobody "
+                "has. A character's ability holds while its teammate is up: a longer ball save, a ball "
+                "save on two quick presses of the Action button, an easier heat ray (Godzilla). Only "
+                "the abilities the game's program can have are offered. On Godzilla, **Load Godzilla's "
+                "set** puts in eleven characters, one for each ability; rename them as you like.",
             ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "

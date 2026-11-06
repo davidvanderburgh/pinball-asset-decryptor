@@ -6187,6 +6187,44 @@ games, co-op boards and times. A category's value is what the game keeps for its
 FIGHTER CHAMPION, GODZILLA POWERUP CHAMPION) or a best score (GODZILLA MULTIBALL CHAMPION), so those are offered
 unticked, for the owner to pick per game.
 
+### Co-op characters (PAD-1031)
+
+Each teammate picks a character at the start of their first ball (teammate 1 when the team forms; each join opens
+it again, since the joiner's held right flipper walked it), and its ability holds while that teammate is up. The game
+plays one player for the team, so nothing per player is copied: an ability changes what the game READS. `coop.cfg`
+(the Modes tab's **Characters…** under **Co-op play**):
+
+    pick on                                   each teammate picks at their first ball
+    left 60                                   the left flipper button (the right is `button`)
+    action 34                                 the Action button (LOCKDOWN / ACTION BUTTON)
+    character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE
+    character save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE
+    character adj:195x50:4:30 GODZILLA GMK|EASIER HEAT RAY
+
+Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
+
+- `adj:<id>=<v>` / `adj:<id>x<pct>:<lo>:<hi>`: the game's adjustment `<id>` reads `v`, or its own value x pct / 100
+  held to lo..hi, while the teammate is up. The getter (`site adjustment`, on every co-op port) is wrapped; NVRAM is
+  never written. Only an adjustment the game reads LIVE changes play: Godzilla reads BALL SAVE TIME (94) when a save
+  starts and HEAT RAY SPINS PER LEVEL (195) at each spin; it copies LIGHT BATTLE DIFFICULTY (173) and BUILDING
+  DIFFICULTY (168) into the player's record at the game's start, so those need more than the getter.
+- `bs:<id>`: `<id>` is the ball save time, read when a ball is served: a pick made with the teammate's ball already
+  out gives that ball the save now (`pm_ball_save` of what the getter answers).
+- `save:<s>`: two presses of the Action button within 0.6 s give an `s` second ball save, once a ball (one press is
+  the game's: Godzilla's heat ray is a hold).
+
+The pick says itself on the game's top line (PAD-1017's borrow of `BALL %d`): `PLAYER 2 PICK: <name>`, then what it
+does, every 1.5 s; the flippers walk (a character another teammate has is skipped; RANDOM after the last), Action
+takes it, 20 s takes the one shown. RANDOM takes one nobody has. `mode.log`:
+
+    co-op: teammate 1 is GODZILLA 1954 (LONGER BALL SAVE) - Action took it
+    co-op: GODZILLA 1954 - the game reads adjustment 94: 15 (its own 12)
+
+The app offers each ability where the card's program has what it needs (`coop_play.ABILITIES`, by adjustment name);
+`coop_presets/<title stem>.json` beside `coop_play.py` is a game's customization file (Godzilla's: eleven characters,
+one per ability the reporter asked for, those not yet built carrying none). Emulator-proven on Godzilla LE 1.16
+(3 teammates). Plan and what is left: `docs/plans/pad1031_coop_characters.md`.
+
 ## Inactivity pauses the timers (PAD-1022)
 
 Every Spike 2 framework offers the operator **ALLOW INACTIVITY TO PAUSE TIMERS** (`AD_INACTIVE_TIMER`, 0..1, on by

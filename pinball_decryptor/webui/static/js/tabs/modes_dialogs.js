@@ -195,3 +195,45 @@ export function CoopAwardsDialog({ s, onClose }) {
     </div>` : null}
   <//>`;
 }
+
+// ------------------------------------------------------------------ co-op characters (PAD-1031)
+// Each teammate picks one at the start of their first ball; its ability holds while they are up. One row a character:
+// its name (the top line shows it), its ability (only the ones this game's program can have are offered), what that
+// does. Python reads the abilities off the project's card (modes.coop_ch) and keeps the characters in the project.
+export function CoopCharsDialog({ s, onClose }) {
+  const ch = s.coop_ch || {};
+  const rows = ch.rows || [];
+  const abil = ch.abilities || [];
+  useEffect(() => { call("modes.coop_chars_refresh"); }, []);
+  const opts = [{ value: "", label: "No ability" }].concat(abil.map((a) => (
+    { value: a.key, label: a.ok ? a.words : `${a.words} (not on this game)`, disabled: !a.ok })));
+  const does = (k) => { const a = abil.find((x) => x.key === k); return a ? a.does : "Plays as the game always does."; };
+  const row = (r, i) => html`<div class="modes-coop-ch-row" key=${i + ":" + r.name}>
+    <span class="small dim">${i + 1}</span>
+    <${Field} value=${r.name} sm maxLength=${ch.max_name || 27} width=${260}
+      title="Its name, as the machine's top line shows it at the pick."
+      onCommit=${(v) => { if (v !== r.name) call("modes.coop_char_set", i, v, null); }} />
+    <${Select} sm value=${r.ability} options=${opts} width=${230}
+      title=${r.lost ? "The ability this character had is not one this game can have yet." : "What it does while its teammate is up."}
+      onChange=${(v) => call("modes.coop_char_set", i, null, v)} />
+    <span class=${cx("small wrap modes-coop-ch-does", r.lost ? "warn-ink" : "dim")}>${r.lost ? "Its ability is not on this game yet: none on the card." : does(r.ability)}</span>
+    <${Button} size="xs" kind="ghost" icon="trash" title="Take this character out." onClick=${() => call("modes.coop_char_remove", i)} />
+  </div>`;
+  return html`<${Modal} title="Co-op characters" icon="list" wide onClose=${onClose}
+    footer=${html`<span class="small muted">${ch.note}</span><span class="grow"></span>
+      ${ch.preset ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("modes.coop_chars_preset")}
+        title=${`The app's set for ${ch.preset}, in place of these: a character for each ability, named after the game's eras. Rename them as you like.`}>Load ${ch.preset}'s set<//>` : null}
+      <${Button} size="sm" icon="plus" disabled=${rows.length >= (ch.max || 16)} onClick=${() => call("modes.coop_char_add")}
+        title=${`One more character (up to ${ch.max || 16}).`}>Add<//>
+      <${Button} onClick=${onClose}>Close<//>`}>
+    <div class="small dim wrap">${s.coop_chars_tip}</div>
+    ${ch.why ? html`<${Note} kind="info">${ch.why}<//>` : null}
+    <div class="row" style="margin-top:8px">
+      <${Check} checked=${ch.pick} label="Each teammate picks a character at their first ball"
+        disabled=${!rows.length} title="Off: the card plays co-op as before, with no characters."
+        onChange=${(v) => call("modes.coop_chars_pick", v)} />
+    </div>
+    ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(56vh, 520px)">${rows.map(row)}</div>`
+      : html`<div class="small muted" style="margin-top:8px">No characters yet: press Add${ch.preset ? `, or load ${ch.preset}'s set` : ""}.</div>`}
+  <//>`;
+}

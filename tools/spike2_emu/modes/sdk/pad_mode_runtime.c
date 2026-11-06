@@ -14887,6 +14887,8 @@ static int edge_hooked;                      /* switch_edge is hooked (on_switch
 static int edge_shots;                       /* the drain's edges are the port's switch shots (switches_arm) */
 static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask);
 static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
+static int coop_live;                        /* PAD-1031: co-op characters watch the flippers and Action */
+static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
 
 static void on_switch_edge(unsigned *r)
 {
@@ -14915,6 +14917,7 @@ static void on_switch_edge(unsigned *r)
     hit = edge_is_hit(level, flags, pol, edge.mode_mask != 0, mask);
     if (att_live) att_edge(id, level, flags, pol, mask);   /* PAD-641: a flipper button in attract */
     if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
+    if (coop_live) coop_edge(id, level, flags, pol);       /* PAD-1031: a co-op character's pick, its save */
     playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
     if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
         say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level & 1u,
@@ -15389,12 +15392,345 @@ static void coop_turn_show(void)
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
 }
 
+/* ---- PAD-1031: co-op characters (MODE_SDK.md "Co-op characters"; docs/plans/pad1031_coop_characters.md) ----------
+ * DoomWalrus666 (Godzilla): "At the start of each player's Ball 1 ... Each player chooses their Godzilla (or selects
+ * Random) ... No player may choose the same godzilla as another player. Each godzilla will have a unique ability";
+ * daveyvandy: "a generic entry point for customization". The game plays ONE player for the team, so a character is
+ * what holds while its teammate is up. coop.cfg:
+ *   pick on                          each teammate picks at their first ball; RANDOM is offered after the last
+ *   left <switch id>                 the left flipper button (the right is `button`): the pick walks with them
+ *   action <switch id>               the Action button: takes the one shown; the `save` ability's button
+ *   character <abilities> <name>|<what it does>
+ * abilities, comma-separated (`-` none):
+ *   adj:<id>=<v>                     the game's adjustment <id> reads <v> while the teammate is up
+ *   adj:<id>x<pct>:<lo>:<hi>         ... reads its own value x pct / 100, held to lo..hi
+ *   save:<s>                         the Action button pressed twice within 0.6 s: an s second ball save, once a ball
+ *   bs:<id>                          <id> is the game's ball save time, read when a ball is served: a pick made with
+ *                                    the teammate's ball already out gives that ball the save it would have had
+ * The getter (`site adjustment`) is wrapped: only what the game READS changes, never what NVRAM holds, and only in a
+ * co-op game while that teammate is up (a pick not yet made: nothing). The pick says itself on the game's top line
+ * (PAD-1017's borrow of "BALL %d"): its name, then what it does, in turn; the flippers walk (a character another
+ * teammate has is skipped), Action takes it, and after COOP_PICK_MS the one shown is taken. */
+#define COOP_CHARS 16
+#define COOP_CHAR_ADJ 6
+#define COOP_PICK_MS 20000ul
+#define COOP_PICK_FLIP_MS 1500ul
+#define COOP_SAVE_TAP_MS 600ul
+static struct coop_char {
+    char name[28], does[28];
+    unsigned n_adj;
+    struct { unsigned id, op, v, lo, hi; } adj[COOP_CHAR_ADJ];   /* op 0: = v; 1: x v% held to lo..hi */
+    unsigned save_s, bs_adj;
+} coop_ch[COOP_CHARS];
+static int coop_ch_n, coop_pick_on;
+static unsigned coop_left, coop_action;
+static int coop_pick_of[5];                 /* teammate (1-4) -> character, -1 none yet */
+static struct { int open; unsigned who; int at; unsigned long since, said_ms; int phase; volatile int walk, take; } pk;
+static volatile unsigned long coop_tap_ms;  /* the Action button's last press */
+static volatile int coop_save_ask;          /* a double press: the tick gives the save */
+static int coop_save_used;                  /* this ball's is given */
+static unsigned (*coop_adj_game)(unsigned);
+static unsigned coop_rng;
+static int coop_adj_said;                   /* the log's adjustment reads, the first 32 */
+
+/* the next character from `at` in `dir` (+1/-1) over n characters and RANDOM (index n), skipping the ones `taken`
+ * (a bit each); `at` itself when nothing else is free (tests lift it verbatim) */
+static int coop_pick_step(int n, int at, int dir, unsigned taken)
+{
+    int k, i = at;
+    for (k = 0; k <= n; k++) {
+        i = (i + dir + n + 1) % (n + 1);
+        if (i == n || !(taken & (1u << i))) return i;
+    }
+    return at;
+}
+
+/* what the game reads for an adjustment of a character's: (its own value, op, v, lo, hi) (tests lift it verbatim) */
+static unsigned coop_adj_value(unsigned own, unsigned op, unsigned v, unsigned lo, unsigned hi)
+{
+    unsigned long long x;
+    if (!op) return v;
+    x = (unsigned long long)own * v / 100u;
+    if (x < lo) x = lo;
+    if (x > hi) x = hi;
+    return (unsigned)x;
+}
+
+static unsigned coop_taken(unsigned except)
+{
+    unsigned t, m = 0;
+    for (t = 1; t <= 4; t++)
+        if (t != except && coop_pick_of[t] >= 0) m |= 1u << coop_pick_of[t];
+    return m;
+}
+
+static const struct coop_char *coop_char_up(void)
+{
+    int c;
+    if (!coop_teammates() || coop.turn < 1 || coop.turn > 4) return 0;
+    c = coop_pick_of[coop.turn];
+    return c >= 0 && c < coop_ch_n ? &coop_ch[c] : 0;
+}
+
+/* the game's adjustment getter (wrapped when a character has an adj ability) */
+static unsigned coop_adj_wrap(unsigned id)
+{
+    unsigned own = coop_adj_game(id), k;
+    const struct coop_char *c = coop_char_up();
+    if (!c || !pm_in_game()) return own;
+    for (k = 0; k < c->n_adj; k++)
+        if (c->adj[k].id == id) {
+            unsigned v = coop_adj_value(own, c->adj[k].op, c->adj[k].v, c->adj[k].lo, c->adj[k].hi);
+            if (coop_adj_said < 32) {
+                coop_adj_said++;
+                say("co-op: %s - the game reads adjustment %u: %u (its own %u)", c->name, id, v, own);
+            }
+            return v;
+        }
+    return own;
+}
+
+static void coop_pick_say(void)
+{
+    char words[64];
+    if (coop_ball_msg < 0) return;
+    if (pk.at >= coop_ch_n) pm_snprintf(words, sizeof words, "PLAYER %u PICK: RANDOM", pk.who);
+    else if (!pk.phase || !coop_ch[pk.at].does[0]) pm_snprintf(words, sizeof words, "PLAYER %u PICK: %s", pk.who, coop_ch[pk.at].name);
+    else pm_snprintf(words, sizeof words, "%s", coop_ch[pk.at].does);
+    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+}
+
+static void coop_pick_open(unsigned t)
+{
+    if (!coop_pick_on || !coop_ch_n || t < 1 || t > 4 || coop_pick_of[t] >= 0) return;
+    pk.who = t;
+    pk.at = coop_pick_step(coop_ch_n, coop_ch_n, 1, coop_taken(t));   /* the first one free */
+    pk.since = pk.said_ms = pm_ms();
+    pk.phase = 0;
+    pk.walk = pk.take = 0;
+    pk.open = 1;
+    say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one", t, coop_ch_n);
+    coop_pick_say();
+}
+
+static void coop_pick_close(const char *how)
+{
+    int c = pk.at, free_n = 0, i;
+    unsigned taken = coop_taken(pk.who);
+    if (c >= coop_ch_n) {                                   /* RANDOM: one nobody has */
+        for (i = 0; i < coop_ch_n; i++) free_n += !(taken & (1u << i));
+        coop_rng = coop_rng * 1103515245u + 12345u + (unsigned)pm_ms();
+        c = -1;
+        if (free_n)
+            for (i = 0, free_n = (int)((coop_rng >> 8) % (unsigned)free_n); i < coop_ch_n; i++)
+                if (!(taken & (1u << i)) && !free_n--) { c = i; break; }
+    }
+    pk.open = 0;
+    coop_pick_of[pk.who] = c;
+    if (c >= 0)
+        say("co-op: teammate %u is %s (%s%s) - %s", pk.who, coop_ch[c].name, coop_ch[c].does,
+            pk.at >= coop_ch_n ? ", at random" : "", how);
+    else
+        say("co-op: teammate %u has no character - every one is taken", pk.who);
+    coop_turn_show();
+    if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game) {   /* the ball out was served before it */
+        unsigned v = coop_adj_wrap(coop_ch[c].bs_adj);
+        say("co-op: %s - the ball in play gets its ball save now (%u s)", coop_ch[c].name, v);
+        if (v) pm_ball_save(v);
+    }
+}
+
+/* every edge of the switch drain (the game's thread): the pick's flippers and Action, the save's double press */
+static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)
+{
+    unsigned closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
+    unsigned long now;
+    if ((level & 1u) != closed || !coop_teammates()) return;
+    if (pk.open) {
+        if (id == coop_left) pk.walk--;
+        else if (id == coop.button) pk.walk++;
+        else if (id == coop_action) pk.take = 1;
+        return;
+    }
+    if (id != coop_action) return;
+    now = pm_ms();
+    if (coop_tap_ms && now - coop_tap_ms <= COOP_SAVE_TAP_MS) {
+        coop_save_ask = 1;
+        coop_tap_ms = 0;
+    } else {
+        coop_tap_ms = now;
+    }
+}
+
+/* from the tick: the pick's walk, words and time; the save */
+static void coop_chars_tick(void)
+{
+    const struct coop_char *c;
+    int w;
+    if (!coop_ch_n) return;
+    if (!coop_teammates() || !pm_in_game()) {
+        pk.open = 0;
+        coop_save_ask = 0;
+        return;
+    }
+    if (pk.open) {
+        if ((w = pk.walk) != 0) {
+            __sync_fetch_and_sub(&pk.walk, w);
+            for (; w > 0; w--) pk.at = coop_pick_step(coop_ch_n, pk.at, 1, coop_taken(pk.who));
+            for (; w < 0; w++) pk.at = coop_pick_step(coop_ch_n, pk.at, -1, coop_taken(pk.who));
+            say("co-op: teammate %u's pick shows %s", pk.who, pk.at < coop_ch_n ? coop_ch[pk.at].name : "RANDOM");
+            pk.phase = 0;
+            pk.said_ms = pm_ms();
+            coop_pick_say();
+        }
+        if (pk.take) coop_pick_close("Action took it");
+        else if (pm_ms() - pk.since >= COOP_PICK_MS) coop_pick_close("the time ran out");
+        else if (pm_ms() - pk.said_ms >= COOP_PICK_FLIP_MS) {
+            pk.phase ^= 1;
+            pk.said_ms = pm_ms();
+            coop_pick_say();
+        }
+    }
+    if (coop_save_ask) {
+        coop_save_ask = 0;
+        c = coop_char_up();
+        if (c && c->save_s && !coop_save_used) {
+            coop_save_used = 1;
+            say("co-op: %s's Action button ball save (%u s, teammate %u)", c->name, c->save_s, coop.turn);
+            pm_ball_save(c->save_s);
+        }
+    }
+}
+
+/* a new co-op game: nobody has picked */
+static void coop_chars_begin(void)
+{
+    int t;
+    for (t = 0; t <= 4; t++) coop_pick_of[t] = -1;
+    pk.open = 0;
+    coop_save_used = 0;
+    coop_adj_said = 0;
+}
+
+/* the turn up changed (or the same teammate shoots again): a ball's save again; a first ball's pick */
+static void coop_chars_turn(void)
+{
+    coop_save_used = 0;
+    coop_tap_ms = 0;
+    if (pk.open && pk.who != coop.turn) coop_pick_close("their turn ended");
+    coop_pick_open(coop.turn);
+}
+
+/* coop.cfg: character <abilities> <name>|<what it does> */
+static void coop_char_line(const char *s)
+{
+    struct coop_char *c;
+    char tok[128];
+    const char *p;
+    unsigned k;
+    int ok;
+    if (coop_ch_n >= COOP_CHARS) return;
+    c = &coop_ch[coop_ch_n];
+    c->n_adj = 0;
+    c->save_s = c->bs_adj = 0;
+    for (k = 0; k + 1 < sizeof tok && s[k] && s[k] != ' '; k++) tok[k] = s[k];   /* number() eats the space after */
+    tok[k] = 0;
+    s += k;
+    p = tok;
+    while (*p) {
+        if (str_starts(p, "adj:") && c->n_adj < COOP_CHAR_ADJ) {
+            p += 4;
+            c->adj[c->n_adj].id = (unsigned)number(&p, &ok);
+            if (ok && *p == '=') {
+                p++;
+                c->adj[c->n_adj].op = 0;
+                c->adj[c->n_adj].v = (unsigned)number(&p, &ok);
+            } else if (ok && *p == 'x') {
+                p++;
+                c->adj[c->n_adj].op = 1;
+                c->adj[c->n_adj].v = (unsigned)number(&p, &ok);
+                c->adj[c->n_adj].lo = 0;
+                c->adj[c->n_adj].hi = 0xffffffffu;
+                if (ok && *p == ':') { p++; c->adj[c->n_adj].lo = (unsigned)number(&p, &ok); }
+                if (ok && *p == ':') { p++; c->adj[c->n_adj].hi = (unsigned)number(&p, &ok); }
+            } else {
+                ok = 0;
+            }
+            if (ok) c->n_adj++;
+        } else if (str_starts(p, "save:")) {
+            p += 5;
+            c->save_s = (unsigned)number(&p, &ok);
+            if (!ok || c->save_s > 60) c->save_s = 0;
+        } else if (str_starts(p, "bs:")) {
+            p += 3;
+            c->bs_adj = (unsigned)number(&p, &ok);
+            if (!ok) c->bs_adj = 0;
+        }
+        while (*p && *p != ',') p++;
+        if (*p == ',') p++;
+    }
+    p = s;
+    while (*p == ' ') p++;
+    for (k = 0; k + 1 < sizeof c->name && *p && *p != '|' && *p != '\r' && *p != '\n'; k++) c->name[k] = *p++;
+    while (k && c->name[k - 1] == ' ') k--;
+    c->name[k] = 0;
+    while (*p && *p != '|' && *p != '\r' && *p != '\n') p++;
+    if (*p == '|') p++;
+    while (*p == ' ') p++;
+    for (k = 0; k + 1 < sizeof c->does && *p && *p != '\r' && *p != '\n'; k++) c->does[k] = *p++;
+    c->does[k] = 0;
+    if (c->name[0]) coop_ch_n++;
+}
+
+/* armed with co-op: the adjustment getter wrapped when a character asks for one, the switch edges for the pick */
+static void coop_chars_arm(struct site *e)
+{
+    int i, adj = 0, save = 0;
+    unsigned k;
+    coop_chars_begin();
+    if (!coop_ch_n) return;
+    for (i = 0; i < coop_ch_n; i++) {
+        adj |= coop_ch[i].n_adj != 0;
+        save |= coop_ch[i].save_s != 0;
+    }
+    if (adj && !(fn("adjustment") && (coop_adj_game = (unsigned (*)(unsigned))hook_wrap(fn("adjustment"),
+                                                                                         (void *)coop_adj_wrap)))) {
+        say("co-op characters: the adjustment abilities are off - the port names no adjustment getter, or it could "
+            "not be wrapped");
+        for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_adj = 0;
+    }
+    if ((coop_pick_on || save) && !(edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
+        say("co-op characters: off - the switch drain could not be hooked, so no pick could be made");
+        coop_ch_n = 0;
+        return;
+    }
+    if (coop_pick_on && (!coop_left || !coop_action))
+        say("co-op characters: the pick walks with %s and takes with %s", coop_left ? "both flippers" : "the right flipper",
+            coop_action ? "Action" : "the time alone (coop.cfg names no Action button)");
+    if (save && !coop_action) say("co-op characters: no Action button in coop.cfg - the save ability is off");
+    coop_live = 1;
+    for (i = 0; i < coop_ch_n; i++) {
+        char how[96];
+        unsigned o = 0;
+        how[0] = 0;
+        for (k = 0; k < coop_ch[i].n_adj && o + 24 < sizeof how; k++)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sadjustment %u %s%u", o ? ", " : "", coop_ch[i].adj[k].id,
+                                       coop_ch[i].adj[k].op ? "x" : "= ", coop_ch[i].adj[k].v);
+        if (coop_ch[i].save_s && o + 24 < sizeof how)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sAction x2: %u s save", o ? ", " : "", coop_ch[i].save_s);
+        say("co-op character %d: %s (%s) - %s", i + 1, coop_ch[i].name, coop_ch[i].does, o ? how : "no ability");
+    }
+    say("co-op characters: %d; %s", coop_ch_n, coop_pick_on ? "each teammate picks one at their first ball"
+        : "no pick (coop.cfg has no `pick on`)");
+}
+
 /* from the tick: the game's own words back once its co-op game is over */
 static void coop_scores_same(unsigned n);
 static void coop_tick(void)
 {
     unsigned n = coop_teammates();
     if (n && pm_in_game()) coop_scores_same(n);
+    coop_chars_tick();                                        /* PAD-1031 */
     if (coop_won_n && pm_in_game() && chg_game_now() != coop_won_game) {     /* PAD-1028: the next game's start */
         coop_won_n = 0;
         say("co-op: the last co-op game's awards are off the attract mode (a new game)");
@@ -15437,13 +15773,18 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.turn = 1;
         n = 1;
         coop_awards_begin();                                  /* PAD-1028 */
+        coop_chars_begin();                                   /* PAD-1031 */
     }
     coop.n = n + 1;
     coop_scores_same(coop.n);
     say("co-op: teammate %u joins (%u in the team, one score panel each; the game plays one player for them all)",
         coop.n, coop.n);
     coop_scores_mark(coop.n);
+    /* PAD-1031: teammate 1 picks once there is a team; each join opens it again, since the one joining held the right
+     * flipper for Start and walked it (emulator, Godzilla LE 1.16: teammate 1 got the second character) */
+    if (pk.open && pk.who == 1) pk.open = 0;
     coop_turn_show();
+    coop_pick_open(1);
     return ret;
 }
 
@@ -15470,6 +15811,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     if (ret & 0xff) {
         coop.turn = next;
         coop_turn_show();
+        coop_chars_turn();                                    /* PAD-1031: a first ball's pick */
     } else {
         say("co-op: the game's end counts %u player(s): one match draw and one high score for the team",
             *coop_players_byte);
@@ -15486,6 +15828,10 @@ static void coop_line(const char *s)
     if (!*s || *s == '#') return;
     if (str_starts(s, "coop on")) { coop.on = 1; return; }
     if (str_starts(s, "award ")) { coop_award_line(s + 6); return; }      /* PAD-1028 */
+    if (str_starts(s, "character ")) { coop_char_line(s + 10); return; }  /* PAD-1031 */
+    if (str_starts(s, "pick on")) { coop_pick_on = 1; return; }
+    if (str_starts(s, "left ")) { p = s + 5; coop_left = (unsigned)number(&p, &ok); if (!ok) coop_left = 0; return; }
+    if (str_starts(s, "action ")) { p = s + 7; coop_action = (unsigned)number(&p, &ok); if (!ok) coop_action = 0; return; }
     if (str_starts(s, "button ")) {
         p = s + 7;
         coop.button = (unsigned)number(&p, &ok);
@@ -15560,6 +15906,7 @@ static void coop_arm(void)
         say("co-op: no board of its own - the port does not name this build's end-of-game high scores, so a team's "
             "score goes on the game's boards");
     coop_awards_arm();                                        /* PAD-1028 */
+    coop_chars_arm(e);                                        /* PAD-1031 */
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
         data("coop_player"), data("coop_player") + 1, data("coop_players"));

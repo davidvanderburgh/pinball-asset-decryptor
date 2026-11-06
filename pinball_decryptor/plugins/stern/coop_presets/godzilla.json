@@ -1,0 +1,17 @@
+{
+  "game": "Godzilla",
+  "about": "PAD-1031: co-op characters for Godzilla (Pro and Premium/LE). Each teammate picks one at the start of their first ball; no two teammates have the same one; RANDOM picks one nobody has. Each ability holds while its teammate is up. Pictures are your own files: add them in the Modes tab's Characters dialog.",
+  "characters": [
+    {"name": "GODZILLA 1954", "ability": "longer_save"},
+    {"name": "GODZILLA 2000", "ability": "action_save"},
+    {"name": "GODZILLA GMK", "ability": "heat_ray"},
+    {"name": "GODZILLA 1985", "ability": "battles"},
+    {"name": "DESTROY ALL MONSTERS", "ability": "ally"},
+    {"name": "BURNING GODZILLA", "ability": "spot"},
+    {"name": "KING KONG VS GODZILLA", "ability": "powerups"},
+    {"name": "MOTHRA VS GODZILLA", "ability": "building"},
+    {"name": "GODZILLA VS BIOLLANTE", "ability": "jets"},
+    {"name": "GODZILLA VS MECHAGODZILLA", "ability": "tanks"},
+    {"name": "SHIN GODZILLA", "ability": "tier2"}
+  ]
+}

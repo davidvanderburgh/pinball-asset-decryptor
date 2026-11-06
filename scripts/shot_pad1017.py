@@ -1,11 +1,11 @@
 """PAD-1017 proof shot: the Modes tab's Co-op play tick (under the mode list).
 
-    python scripts/shot_pad1017.py <repo> <out.png> [--tick]
+    python scripts/shot_pad1017.py <repo> <out.png> [--tick] [--menu]
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the Godzilla LE 1.16 card (its
 .extract_source.json names it) and shows the Modes tab. Before (main) there is no co-op row; after there is "Co-op play"
 under the list and, with --tick, the note under it saying how a teammate joins and that the scores stay off Insider
-Connected.
+Connected. With --menu (round 2) the sub-tick "Switch it on and off in the service menu" is ticked too.
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
 """
@@ -35,6 +35,7 @@ def main():
     repo = os.path.abspath(sys.argv[1])
     out = os.path.abspath(sys.argv[2])
     tick = "--tick" in sys.argv[3:]
+    menu = "--menu" in sys.argv[3:]
     scratch = tempfile.mkdtemp(prefix="pad1017-")
     project = os.path.join(scratch, "project")
     os.makedirs(project)
@@ -67,6 +68,9 @@ def main():
             time.sleep(6)
             if tick:
                 webui_shot.api(url, "modes.set_coop", True)
+                time.sleep(3)
+            if menu:
+                webui_shot.api(url, "modes.set_coop_menu", True)
                 time.sleep(3)
             page.screenshot(path=out)
             print("shot", out, flush=True)

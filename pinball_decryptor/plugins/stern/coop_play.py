@@ -9,7 +9,7 @@ The Modes tab's tick (the project sidecar's ``coop_play: {"on": true}``) puts ``
 card: ``coop on`` and the right flipper button's switch id, read off the card's own game program.
 
 Round 2 (DoomWalrus666, David): ``coop_play: {"on": true, "menu": true}`` also gives the game's own service menu a
-CO-OP PLAY row (1 Off, 2 On; :mod:`.menu_settings`, on a spare setting), and ``coop.cfg`` names its live value
+CO-OP PLAY row (Off/On like the game's CUSTOM MESSAGE, stored 0 and 1; :mod:`.menu_settings`, on a spare setting), and ``coop.cfg`` names its live value
 (``setting <address>``): teammates join only while it says On, and on a card of co-op and nothing else (no mode, no
 attract item) the Insider Connected gate holds back only while it says On - Off, the card is the game's own on Insider
 Connected."""
@@ -33,7 +33,8 @@ NO_PORT = ("The app does not know where %s keeps its players yet, so it cannot g
 NO_BUTTON = "The game program names no right flipper button, so a teammate could not join."
 #: round 2: the service menu's row (menu_settings.COOP_PLAY): its values, and its help line in the game's own menu
 MENU_VALUES = 2
-MENU_HELP = "1 Off, 2 On. On: R flipper+Start adds teammates, Insider off"
+#: (David) the row shows Off/On; the help says what On costs first (63 characters: the spare help lines' room)
+MENU_HELP = "On disables most Insider Connected features; R flip+Start joins"
 #: how a teammate joins, for the tab and the log
 HOW = ("hold the right flipper button and press Start to add a teammate (2-4 players share one game); "
        "a plain Start adds a competing player as always")

@@ -15000,7 +15000,7 @@ static void switches_arm(void)
  * coop.cfg (beside the runtime, or /dump for a rig):
  *   coop on
  *   button <switch id>        the button held at Start to add a teammate (the right flipper button)
- *   setting <address>         (round 2, DoomWalrus666) the live value of the game's own CO-OP PLAY row (1 Off, 2 On;
+ *   setting <address>         (round 2, DoomWalrus666) the live value of the game's own CO-OP PLAY row (Off/On, 0 and 1;
  *                             menu_settings.py puts the row on a spare setting): co-op only while it says On
  *   only                      (round 2) the card carries no modes (the build says so: the prebuilt runtime always
  *                             holds the form mode's reader, so the runtime cannot count them): with a setting and no
@@ -15045,7 +15045,7 @@ static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsig
 static int coop_switched_on(void)
 {
     if (!coop.setting) return 1;
-    return *(volatile const unsigned *)(unsigned long)coop.setting == 2u;
+    return *(volatile const unsigned *)(unsigned long)coop.setting == 1u;
 }
 
 /* this game's co-op teammates (0 when it is not a co-op game) */
@@ -15844,7 +15844,7 @@ static unsigned insider_while;
 /* 1 when the gate holds back now (tests lift it verbatim) */
 static int insider_holding(unsigned while_at, unsigned value)
 {
-    return !while_at || value == 2u;
+    return !while_at || value == 1u;
 }
 
 static int on_agent_begin(unsigned *r)

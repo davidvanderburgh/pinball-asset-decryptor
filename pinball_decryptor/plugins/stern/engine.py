@@ -11072,7 +11072,7 @@ def _idle_for_build(assets_dir, dest_is_device, log, ext4_available=None):
 
 
 class _CoopMenu(_MusicModeMenu):
-    """PAD-1017 round 2 (DoomWalrus666): CO-OP PLAY in the game's own service menu, 1 Off 2 On, on a spare setting;
+    """PAD-1017 round 2 (DoomWalrus666): CO-OP PLAY in the game's own service menu, Off/On, on a spare setting;
     co-op (and, on a card of nothing else, the Insider Connected gate) only while it says On."""
 
     KEY = "coop_play"
@@ -11083,12 +11083,13 @@ class _CoopMenu(_MusicModeMenu):
 
     def wanted(self):
         from . import coop_play as _CP
-        return self.KEY, _CP.MENU_VALUES, (), {"default": 1, "help_text": _CP.MENU_HELP}
+        return self.KEY, _CP.MENU_VALUES, (), {"default": 1, "help_text": _CP.MENU_HELP, "onoff": True}
 
     def done(self):
         self.ok = True
-        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), Off to start with: set it to On (2) to play "
-                 "co-op. Insider Connected is off only while it is On, on a card with no modes." % self.setting.where,
+        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), Off to start with: set it to On to play "
+                 "co-op. While it is On most Insider Connected features are off; Off, the card reports as it always "
+                 "has (with no modes on it)." % self.setting.where,
                  "info")
 
     def fail(self, why):

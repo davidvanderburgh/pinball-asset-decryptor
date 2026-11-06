@@ -6124,7 +6124,7 @@ tab's **Co-op play**):
 
     coop on
     button 59        the switch held at Start to add a teammate (the right flipper button; the build reads its id)
-    setting 0x...    (round 2) the live value of the game's own CO-OP PLAY row (1 Off, 2 On): co-op only while On
+    setting 0x...    (round 2) the live value of the game's own CO-OP PLAY row (Off/On, stored 0 and 1): co-op only while On
 
 Round 2 (DoomWalrus666): the Modes tab's "Switch it on and off in the service menu" puts a CO-OP PLAY row in the game's
 own menu (menu_settings.COOP_PLAY, on a spare setting, Off to start with) and its live value in coop.cfg. Teammates join

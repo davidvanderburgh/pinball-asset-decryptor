@@ -148,11 +148,17 @@ def test_the_service_menu_row_and_the_cfg_name_its_live_value():
     with open(GZ_ELF, "rb") as f:
         elf = f.read()
     settings, writes, _cat, refused = M.plan_many(
-        AdjustmentTable(elf), [(M.COOP_PLAY, CP.MENU_VALUES, (), {"default": 1, "help_text": CP.MENU_HELP})])
+        AdjustmentTable(elf), [__import__("pinball_decryptor.plugins.stern.engine", fromlist=["_"])._CoopMenu(lambda *a: None).wanted()])
     assert not refused and len(settings) == 1
     s = settings[0]
-    assert (s.caption, s.values, s.default) == ("Co-op Play", 2, 1)          # Off to start with
+    # (David) Off/On like the game's CUSTOM MESSAGE (stored 0 and 1), Off to start with
+    assert (s.caption, s.values, s.low, s.default, s.kind) == ("Co-op Play", 2, 0, 0, M.onoff_kind(AdjustmentTable(elf)))
+    assert s.kind == 1 and "disables most Insider Connected features" in CP.MENU_HELP and len(CP.MENU_HELP) <= 63
     assert s.help == CP.MENU_HELP and s.where == "Adjustments > Machine Settings > Attract Mode"
+    raw = bytearray(elf)
+    for off, data in writes.items():
+        raw[off:off + len(data)] = data
+    assert M.check(bytes(raw), s) in ([], ["no menu page lists it"])           # the page record is placed by the Write
     assert CP.cfg_text(elf, s.live) == "coop on\nbutton 59\nsetting 0x%08x\n" % s.live
     assert CP.cfg_text(elf, s.live, only=True) == "coop on\nbutton 59\nsetting 0x%08x\nonly\n" % s.live
     assert CP.cfg_text(elf) == "coop on\nbutton 59\n"                          # always on: no setting line
@@ -179,7 +185,7 @@ def test_a_spare_the_program_cannot_give_is_passed_over():
     from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
     with open(elf, "rb") as f:
         t = AdjustmentTable(f.read())
-    settings, _w, _c, refused = M.plan_many(t, [(M.COOP_PLAY, 2, (), {"help_text": CP.MENU_HELP})])
+    settings, _w, _c, refused = M.plan_many(t, [(M.COOP_PLAY, 2, (), {"help_text": CP.MENU_HELP, "onoff": True})])
     assert not refused and settings[0].key == M.COOP_PLAY
 
 
@@ -215,7 +221,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     from tests import test_spike2_mode_roster as R
     src = _read(os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c"))
     body = R._lift(src, "static int insider_holding(unsigned while_at, unsigned value)")
-    assert "return !while_at || value == 2u;" in body                          # no row: always; a row: On (2)
+    assert "return !while_at || value == 1u;" in body                          # no row: always; a row: On (1)
     gate = R._lift(src, "static int on_agent_begin(unsigned *r)")
     assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
     arm = R._lift(src, "static int insider_arm(void)")
@@ -223,7 +229,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     assert "return only ? v : 0;" in R._lift(src, "static unsigned coop_setting_wanted(void)\n{")   # ... the build says
     add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "coop_switched_on() && coop_button_held()" in add                   # Off: Start adds a competing player
-    assert "return *(volatile const unsigned *)(unsigned long)coop.setting == 2u;" in R._lift(
+    assert "return *(volatile const unsigned *)(unsigned long)coop.setting == 1u;" in R._lift(
         src, "static int coop_switched_on(void)")
 
 
@@ -239,7 +245,7 @@ static char insider_endpoint[INSIDER_ENDPOINT_MAX];
 static unsigned insider_dropped[4];
 static int insider_achq = 28;
 static unsigned insider_achq_held;
-static unsigned coop_value = 1;                       /* the CO-OP PLAY row's live value */
+static unsigned coop_value = 0;                       /* the CO-OP PLAY row's live value (0 Off, 1 On) */
 @BLOCKED@
 @FNS@
 static int ask(const char *endpoint, unsigned type)
@@ -252,14 +258,14 @@ static int ask(const char *endpoint, unsigned type)
 int main(void)
 {
     insider_while = (unsigned)(unsigned long)&coop_value;
-    coop_value = 1;
+    coop_value = 0;
     printf("off %d %d %d %d\n", ask("/api/v3/game/session_end", 5), ask("/api/v1/game/high_score_events", 5),
            ask("/ingest/v1/game/game_events", 5), ask("", 28));
-    coop_value = 2;
+    coop_value = 1;
     printf("on %d %d %d %d %d\n", ask("/api/v3/game/session_end", 5), ask("/api/v1/game/high_score_events", 5),
            ask("/ingest/v1/game/game_events", 5), ask("", 28), ask("/api/v1/player/properties", 5));
     insider_while = 0;                                   /* a card with modes: the whole gate */
-    coop_value = 1;
+    coop_value = 0;
     printf("modes %d %d\n", ask("/api/v3/game/session_start", 5), ask("", 28));
     return 0;
 }

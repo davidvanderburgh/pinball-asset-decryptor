@@ -718,9 +718,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             if why:
                 note, kind = why, "err"
             elif menu:
-                note = ("On the card: CO-OP PLAY in the game's service menu (%s), Off to start with. While it is On, "
-                        "hold the right flipper button and press Start to add a teammate, and the card's scores stay "
-                        "off Insider Connected; Off, the game plays and reports as it always has%s."
+                note = ("On the card: CO-OP PLAY in the game's service menu (%s), Off to start with. Turning it On "
+                        "disables most Insider Connected features (scores, high scores and achievements stay on the "
+                        "machine) and lets the right flipper button + Start add a teammate; Off, the game plays and reports as it always has%s."
                         % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
                            else " (this project's modes keep the card's scores off Insider Connected anyway)"))
             else:
@@ -731,8 +731,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
     COOP_MENU_TIP = (
-        "Adds CO-OP PLAY to the game's own service menu, Off or On. On: teammates join with the right flipper button "
-        "and Start, and the card's scores and achievements stay off Insider Connected. Off: the game plays and "
+        "Adds CO-OP PLAY to the game's own service menu, Off or On. On disables most Insider Connected features "
+        "(the card's scores, high scores and achievements stay on the machine) and teammates join with the right "
+        "flipper button and Start. Off: the game plays and "
         "reports to Insider Connected as it always has. A card that also carries modes keeps its scores off Insider "
         "Connected either way.")
 

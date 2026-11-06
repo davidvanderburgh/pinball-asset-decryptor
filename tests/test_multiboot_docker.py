@@ -1424,20 +1424,43 @@ def test_engine_name_is_podman_without_asking_podman(monkeypatch):
     assert asked == []
 
 
-def test_docker_env_prepends_docker_dirs(monkeypatch):
+def test_docker_env_adds_docker_dirs_on_macos(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(D, "_cli", lambda: "/Users/test/.docker/bin/docker")
+    monkeypatch.setenv("PATH", os.pathsep.join(["/usr/bin", "/bin"]))
     env = D._docker_env()
-    assert "/Users/test/.docker/bin" in env["PATH"]
+    parts = env["PATH"].split(os.pathsep)
+    assert "/Users/test/.docker/bin" in parts
+    assert "/Applications/Docker.app/Contents/Resources/bin" in parts
 
     from pinball_decryptor.webui.emulate_core import docker_env
-    # Empty PATH shouldn't leave a trailing separator
+    # Empty PATH shouldn't leave a stray separator
     env_empty = docker_env(env={"PATH": ""}, cli="/custom/bin/docker")
     assert not env_empty["PATH"].endswith(os.pathsep)
+    assert not env_empty["PATH"].startswith(os.pathsep)
     assert env_empty["PATH"].startswith("/custom/bin")
 
-    # Existing PATH is preserved at the end
-    env_existing = docker_env(env={"PATH": "/system/bin"}, cli="/custom/bin/docker")
-    assert env_existing["PATH"].endswith("/system/bin")
+    # The inherited PATH stays first, so the user's own tools still win, and
+    # a folder already on it is not repeated
+    env_existing = docker_env(env={"PATH": os.pathsep.join(["/system/bin", "/usr/local/bin"])},
+                              cli="/custom/bin/docker")
+    parts = env_existing["PATH"].split(os.pathsep)
+    assert parts[:3] == ["/system/bin", "/usr/local/bin", "/custom/bin"]
+    assert parts.count("/usr/local/bin") == 1
+
+    # Other keys pass through untouched, and the caller's mapping is not changed
+    given = {"PATH": "/a", "HOME": "/Users/test"}
+    out = docker_env(env=given, cli="/custom/bin/docker")
+    assert out["HOME"] == "/Users/test" and given["PATH"] == "/a"
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_docker_env_leaves_path_alone_off_macos(monkeypatch, platform):
+    from pinball_decryptor.webui.emulate_core import docker_env
+    monkeypatch.setattr(sys, "platform", platform)
+    env = docker_env(env={"PATH": "/system/bin", "X": "1"},
+                     cli="/custom/bin/docker")
+    assert env == {"PATH": "/system/bin", "X": "1"}
 
 
 def test_plugin_executors_env():

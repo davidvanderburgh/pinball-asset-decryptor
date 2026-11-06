@@ -77,7 +77,7 @@ def test_the_background_install_reports_how_far_it_is(tmp_path, monkeypatch):
     seen = []
 
     def _run(cmd, **kw):
-        if isinstance(cmd, str) and "/STAGED=1" in cmd:
+        if isinstance(cmd, str) and "/STAGED=2" in cmd:
             # the setup exe fills the new folder over a second or so
             _tree(target, "9.9.9")
             for i in range(10):

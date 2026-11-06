@@ -9,7 +9,7 @@ repairing its permissions and compiling ~400 modules.  None of that needs
 the app closed if it happens somewhere else.  So:
 
 * **Stage** (in the background, while the user works).  The downloaded setup
-  exe runs silently with ``/STAGED=1 /DIR=<app>.next``: a whole install of
+  exe runs silently with ``/STAGED=2 /DIR=<app>.next``: a whole install of
   the new version in a sibling folder.  ``/STAGED`` (pinball_decryptor.iss,
   ``IsStaged``) leaves out everything that points outside that folder - the
   shortcuts, the uninstall entry, the Visual Pinball controller's
@@ -51,9 +51,12 @@ OLD_SUFFIX = ".old"
 #: written into the staged folder once it is whole: what version it holds
 MARKER = ".pad_staged.json"
 
-#: the setup exe's switches for the background install
+#: the setup exe's switches for the background install.  ``/STAGED=2``, not
+#: 1: the setup exe refuses 1, which only v1.349.0 - v1.350.0 send, so those
+#: copies (whose swap helper never ran, PAD-1029) update through the plain
+#: installer instead
 STAGE_ARGS = ('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS '
-              '/STAGED=1 /MERGETASKS="!runprereqs,!desktopicon" /DIR="%s"')
+              '/STAGED=2 /MERGETASKS="!runprereqs,!desktopicon" /DIR="%s"')
 #: how long the background install may take before it is given up on
 STAGE_TIMEOUT = 20 * 60
 

@@ -384,7 +384,7 @@ class _Run:
         self.calls.append(cmd)
         if self.raises:
             raise self.raises
-        if self.make and isinstance(cmd, str) and "/STAGED=1" in cmd:
+        if self.make and isinstance(cmd, str) and "/STAGED=2" in cmd:
             self.make()
         return type("R", (), {"returncode": self.code})()
 
@@ -404,7 +404,7 @@ def test_stage_install_runs_the_setup_staged_and_carries(tmp_path):
     assert ok, carried
     setup_cmd = run.calls[0]
     assert setup_cmd.startswith('"C:/dl/setup.exe" ')
-    assert "/STAGED=1" in setup_cmd and "/VERYSILENT" in setup_cmd
+    assert "/STAGED=2" in setup_cmd and "/VERYSILENT" in setup_cmd
     assert '/DIR="%s"' % us.next_dir(str(app)) in setup_cmd
     assert "!runprereqs" in setup_cmd and "!desktopicon" in setup_cmd
     assert any("icacls" in str(c) for c in run.calls[1:])     # ACL repair

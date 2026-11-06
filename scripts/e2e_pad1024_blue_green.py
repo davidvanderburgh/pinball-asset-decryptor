@@ -113,6 +113,19 @@ def main():
     old_exe, new_exe = build(scratch, "1.0.0"), build(scratch, "9.9.9")
     print("built", old_exe, new_exe, flush=True)
 
+    # --- PAD-1029: the broken copies' /STAGED=1 is refused --------------
+    # v1.349.0 - v1.350.0 stage with /STAGED=1 and their swap helper never
+    # runs; a refused stage sends them to the plain installer instead
+    refused = os.path.join(scratch, "refused")
+    shutil.rmtree(refused, ignore_errors=True)
+    r = subprocess.run('"%s" %s' % (new_exe, (us.STAGE_ARGS % refused)
+                                    .replace("/STAGED=2", "/STAGED=1")),
+                       capture_output=True)
+    check("/STAGED=1 (v1.349.0 - v1.350.0) refused", r.returncode != 0
+          and not os.path.exists(os.path.join(refused, "launcher.vbs")),
+          "code %s" % r.returncode)
+    shutil.rmtree(refused, ignore_errors=True)
+
     # --- the "installed" v1.0.0 ---------------------------------------
     t = time.time()
     r = subprocess.run('"%s" %s' % (old_exe, us.STAGE_ARGS % app),

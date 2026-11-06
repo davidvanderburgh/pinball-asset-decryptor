@@ -545,3 +545,13 @@ data  coop_players       0x00625bac
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 data  message_table          0x005c0024
 value coop_ball_msg          1255
+# ---- PAD-1022: inactivity pauses the game's timers (pad_mode_runtime.c "inactivity pauses the game's timers"). The
+# game shows ALLOW INACTIVITY TO PAUSE TIMERS (AD_INACTIVE_TIMER, id 175) and never reads it. Its missions' clocks are
+# their songs: the song tracker (0x000fb518) writes where each song is into song_positions, by player, and the clock is
+# the song's end marker less that. Its hurry-ups wait on the shared check (0x00041824: ball off the playfield, a show in
+# process group 0x88..0xb8, pause process 0x83).
+site  timers_paused          0x00041824 0xe92d4008 0xeb0634cc
+site  song_track             0x000fb518 0xe92d40f8 0xe3024610
+data  song_positions         0x005f2610
+value song_now_at            0x160
+value inactive_adj           175

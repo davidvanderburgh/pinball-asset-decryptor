@@ -288,6 +288,11 @@ function ModeList({ s, onNew, onAllNumbers, onSheet }) {
           onChange=${(v) => call("modes.set_coop", v)} />
         ${s.coop_note ? html`<span class=${cx("small", s.coop_note_kind === "err" ? "err-ink" : "muted")}>${s.coop_note}</span>` : null}
       </div>` : null}
+      ${s.idle_shown ? html`<div class="stack modes-coop">
+        <${Check} checked=${s.idle_on} wrap label="Inactivity pauses timers" title=${s.idle_tip}
+          onChange=${(v) => call("modes.set_idle_pause", v)} />
+        ${s.idle_note ? html`<span class=${cx("small", s.idle_note_kind === "err" ? "err-ink" : "muted")}>${s.idle_note}</span>` : null}
+      </div>` : null}
       ${s.cap_text ? html`<span class="small muted">${s.cap_text}</span>` : null}
       <div class="row modes-list-acts">
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>

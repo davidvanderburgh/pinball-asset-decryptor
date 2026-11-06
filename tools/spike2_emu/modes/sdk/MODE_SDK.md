@@ -6139,3 +6139,46 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
 
 plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
 every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).
+
+## Inactivity pauses the timers (PAD-1022)
+
+Every Spike 2 framework offers the operator **ALLOW INACTIVITY TO PAUSE TIMERS** (`AD_INACTIVE_TIMER`, 0..1, on by
+default), and the titles honour it in their own timer code: a mode's clock stops when nobody has scored for 372
+ticks (6 s) and runs on at the next score (TMNT 1.59 0xadf70, Godzilla 1.16 0x622e8: the adjustment, then a framework
+timer the title re-arms at every score). Guardians of the Galaxy 1.15 (Pro and LE) shows the adjustment and never
+reads it; nothing else of the 53 latest builds is like it (each other title that shows it reads it once, Munsters
+through a wrapper). There is nothing for a mode to call: the runtime arms it whenever the port names the clocks, and
+the Modes tab's **Inactivity pauses timers** puts `idle.cfg` beside the runtime so a card with no modes carries it:
+
+    idle on
+    only             the card has no modes: the runtime arms this and nothing else (scores stay on Insider Connected)
+
+Guardians' clocks are of two kinds:
+
+- **The song clocks.** A mission's clock (the shared timer process: Pod Chase, Escape Kyln, Knowhere, Quill's Quest,
+  Yaka Arrow, Sanctuary, Sibling Rivalry, Antiquities Shop) is its song: the end marker less where the song is, in
+  samples. Where the song is comes from a table, by player and song, that the game's song tracker writes each frame
+  from the voice. The tracker is wrapped and writes a held position instead: it moves with the song while the player
+  is active and stands while they are not, so the song plays on and the clock holds. A song that runs out under a
+  hold and comes round again keeps counting from the held position (on Yaka Arrow's 54 s song a 30 s hold first gave
+  the clock its full 54 s back). Any other break in the song's play (another song, another player, a jump) starts
+  again from the voice, since the game starts a song from where the table says it is. The ball's song is picked at
+  the plunge; a mission whose song is not the one playing counts its seconds by itself.
+- **The check.** Headphone Hurryup and the value hurry-ups wait while the game's shared "are the timers paused" check
+  says so (ball off the playfield, a show in process group 0x88..0xb8, pause process 0x83). It is wrapped to answer
+  paused while the player is inactive. Its second word is a `bl`, which the wrap's trampoline calls itself (a bl moved
+  into the trampoline would miss its target). Double Scoring calls the check and drops the answer; Super Scoring and
+  the Groot lock never ask: those run on, as Stern made them.
+
+Port lines (one set per build):
+
+    site  timers_paused   the shared check (wrapped): nonzero = paused
+    site  song_track      the song tracker (wrapped)
+    data  song_positions  the table: u32 [song * 4 + player - 1]
+    value song_now_at     the tracker's words, this far past the table (0x160): [0] the song (1..20), [2] where
+                          the voice is, [3] where it was (an offset: the code names them too seldom to place)
+    value inactive_adj    AD_INACTIVE_TIMER's id (175), read at each check: the operator may change it
+    value inactive_ms     (optional) the quiet time, 6000
+
+plus `adjustment`, `score_add` and `cur_player`. `idle_test_mode.c` is the rig instrument: it starts the mission
+whose song is playing and logs its clock each second.

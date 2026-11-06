@@ -591,6 +591,8 @@ class ModePlan:
     attract_file: str = ""
     #: PAD-1017: ``coop.cfg`` beside the mode files, co-op play ("" = none)
     coop_file: str = ""
+    #: PAD-1022: ``idle.cfg`` beside the mode files, inactivity pausing the timers ("" = none)
+    idle_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -805,7 +807,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"", stock_select=b"",
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
-         attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None):
+         attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, idle=False,
+         idle_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -833,7 +836,10 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     *attract_prof*.
 
     PAD-1017: *coop* puts co-op play's ``coop.cfg`` beside the mode files (the right flipper button read off
-    *game_elf*); with nothing else it is a plan of its own, for *coop_prof*."""
+    *game_elf*); with nothing else it is a plan of its own, for *coop_prof*.
+
+    PAD-1022: *idle* puts ``idle.cfg`` beside the mode files (inactivity pauses the game's timers); with nothing
+    else it is a plan of its own, for *idle_prof*, and the file says the card has no modes."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -864,6 +870,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                 result = coop_plan(project, game_elf, coop_prof or attract_prof or variants_prof
                                    or sound_modes_prof or picture_prof)
             coop_into(result, game_elf, scratch)
+        if idle:                                     # PAD-1022: inactivity pausing the timers, alone or with the above
+            if result is None:
+                result = idle_plan(project, game_elf, idle_prof or coop_prof or attract_prof or variants_prof
+                                   or sound_modes_prof or picture_prof)
+            idle_into(result, scratch, only=True)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -945,6 +956,39 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     result.picture_file = picture or ""
     if coop:                                         # PAD-1017
         coop_into(result, game_elf, scratch)
+    if idle:                                         # PAD-1022
+        idle_into(result, scratch, only=False)
+    return result
+
+
+# ---- PAD-1022: inactivity pauses the game's timers -----------------------------------------------
+def idle_plan(project, game_elf, prof):
+    """A plan carrying only inactivity pausing the timers: no mode, no scene; the runtime and the title's port on p2
+    with ``idle.cfg`` (:func:`idle_into`)."""
+    from . import idle_pause as IP
+    why = IP.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to pause the timers of"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def idle_into(result, scratch, only):
+    """``idle.cfg`` for *result*'s card; *only* when the card carries no modes (the runtime then arms this alone)."""
+    from . import idle_pause as IP
+    why = IP.title_refusal(result.profile)
+    if why:
+        raise ModeWriteError(why)
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, IP.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(IP.cfg_text(only))
+    result.idle_file = path
+    result.lines.append("inactivity pauses timers: %s" % IP.HOW)
     return result
 
 
@@ -1587,6 +1631,11 @@ def p2_payload(result, out_dir, project=None):
             from . import coop_play as CP
             dst = os.path.join(out_dir, CP.CFG_NAME)
             shutil.copyfile(result.coop_file, dst)
+            extras.append(dst)
+        if getattr(result, "idle_file", ""):           # PAD-1022: idle.cfg, inactivity pausing the timers
+            from . import idle_pause as IP
+            dst = os.path.join(out_dir, IP.CFG_NAME)
+            shutil.copyfile(result.idle_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

@@ -3410,6 +3410,20 @@ PREVIEW_HELP = {
                 "- Like a card with modes, a card with co-op play keeps its scores and achievements "
                 "off Insider Connected: they stay on the machine.",
             ]),
+            ("Inactivity pauses timers", [
+                "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "
+                "LE, 1.15). Its operator menu has the setting **ALLOW INACTIVITY TO PAUSE TIMERS** like every "
+                "Spike 2 game, but the game ignores it. Tick it, then Write, and the card makes it work as "
+                "on Stern's other games:\n\n"
+                "- While the setting is on (it is by default), the missions' clocks and the hurry-ups wait "
+                "when nobody has scored for 6 seconds: a ball held on a flipper, a ball stuck. They run on "
+                "at the next score.\n"
+                "- A mission's clock on this game is its song. The song keeps playing while the clock waits, "
+                "and if a long wait outlasts the song, the clock counts down the rest by itself.\n"
+                "- Turn the setting off in the operator menu and the clocks never wait, as before.\n"
+                "- On its own, it keeps the card's scores on Insider Connected. With modes or co-op play on "
+                "the same card, the scores stay on the machine as those always do.",
+            ]),
             ("Making a mode", [
                 "**New mode**, over the list, asks how you want to build it, with a "
                 "tile for each way that says what it asks of you and what it can do:\n\n"

@@ -222,6 +222,10 @@ def test_settings_gear_and_prereq_strip_autohide(tmp_path):
         texts = [e["text"] for e in w.window.log_history()]
         assert any(t.startswith("Update available: v99.0.0") for t in texts)
 
+        # Background download off: the banner's own Install update button
+        # (with it on, PAD-1024, the update downloads first - covered in
+        # test_pad1024_background_update.py).
+        app._settings["update_auto_download"] = False
         setup = {"name": "setup.exe", "url": "https://x/w.exe", "size": 1,
                  "sha256": None, "kind": "windows-installer"}
         w.run(app._handle_update_check_result,

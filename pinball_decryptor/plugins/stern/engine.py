@@ -10994,6 +10994,9 @@ def _coop_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     from . import mode_write as _MW
     if not _CP.load(assets_dir):
         return None
+    if not _MW.preview_on():                       # a part of the mode maker (David): only with its preview on
+        log("Co-op play: left out of this build: it comes with the mode maker, which is not switched on.", "warning")
+        return None
     if dest_is_device:
         why = "a direct-SD write cannot add files to the card; build an image file to carry it"
     else:

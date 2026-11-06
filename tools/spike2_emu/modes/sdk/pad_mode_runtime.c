@@ -15159,7 +15159,9 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     players = *coop_players_byte;
     *coop_players_byte = 1;                                   /* one player to change to: player 1, the team */
     ret = coop_change_game(r0, r1, r2, r3);
-    *coop_players_byte = (unsigned char)players;
+    /* the game's end sees ONE player (David, PAD-1017): its match draws once, not once a teammate - every teammate
+     * has the team's last digits, so a match paid them all - and its high scores take the team's score once */
+    *coop_players_byte = (unsigned char)((ret & 0xff) ? players : 1);
     next = coop_next_turn(n, coop.turn, before, *coop_ball_byte, down);
     if (down && *coop_ball_byte == before - 1) *coop_ball_byte = (unsigned char)before;   /* an extra ball: back up */
     say("co-op: ball %u, teammate %u of %u done - %s", before, coop.turn, n,

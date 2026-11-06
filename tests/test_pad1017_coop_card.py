@@ -76,47 +76,65 @@ def test_the_card_install_and_the_emulator_carry_coop_cfg():
     assert 'if getattr(result, "coop_file", ""):' in stage
 
 
-def test_the_write_tab_tick_saves_the_choice_and_says_how_teammates_join(tmp_path, monkeypatch):
+def test_the_modes_tab_tick_saves_the_choice_and_says_how_teammates_join(tmp_path, monkeypatch):
+    """David (PAD-1017): co-op is a part of the mode maker - its tick is on the Modes tab, not the Write tab."""
+    from pinball_decryptor.webui.tabs import modes as M
     from pinball_decryptor.webui.tabs import write as W
     from pinball_decryptor.core import staged_changes
 
-    class Mfr:
-        key = "stern"
-        current_era = "spike2"
-
-    class Win:
-        _running = False
-        cb = {}
-
-    monkeypatch.setattr(W.WriteTab, "mfr", property(lambda self: Mfr()))
-    svc = W.WriteTab.__new__(W.WriteTab)
-    svc.window = Win()
+    svc = M.ModesTab.__new__(M.ModesTab)
     state = {}
     monkeypatch.setattr(svc, "set", lambda **kw: state.update(kw), raising=False)
-    monkeypatch.setattr(svc, "cap", lambda n: True, raising=False)
-    monkeypatch.setattr(svc, "_is_direct", lambda: False, raising=False)
-    monkeypatch.setattr(svc, "_info_assets_dir", lambda: str(tmp_path), raising=False)
-    monkeypatch.setattr(svc, "log", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(svc, "project", lambda: str(tmp_path), raising=False)
+    monkeypatch.setattr(svc, "_say", lambda *a, **k: None, raising=False)
     monkeypatch.setattr(CP, "project_title", lambda project, probe=False: object())
     monkeypatch.setattr(CP, "title_refusal", lambda prof: "")
     staged_changes.save(str(tmp_path), {"audio": {"x": "y"}})
     assert svc.set_coop(True) is True
     data = staged_changes.load(str(tmp_path))
     assert data[CP.STAGED_KEY] == {"on": True} and data["audio"] == {"x": "y"}
-    assert state["coop_cap"] is True and state["coop_on"] is True
+    assert state["coop_shown"] is True and state["coop_on"] is True
     assert state["coop_note"].startswith("On the card: Hold the right flipper button and press Start")
+    assert state["coop_note"].endswith("Its scores stay off Insider Connected.")
     monkeypatch.setattr(CP, "title_refusal", lambda prof: "Venom LE 1.07 has co-op play of its own.")
-    svc._publish_coop()
+    svc._publish_coop(str(tmp_path))
     assert state["coop_note_kind"] == "err"
     assert svc.set_coop(False) is True
     assert CP.STAGED_KEY not in staged_changes.load(str(tmp_path))
     assert state["coop_on"] is False and state["coop_note"] == ""
+    # the Write tab has no co-op tick any more
+    assert not hasattr(W.WriteTab, "set_coop")
+    js = _read(os.path.join(REPO, "pinball_decryptor", "webui", "static", "js", "tabs", "write.js"))
+    assert "coop" not in js
+    assert 'call("modes.set_coop", v)' in _read(os.path.join(REPO, "pinball_decryptor", "webui", "static", "js",
+                                                              "tabs", "modes.js"))
 
 
-def test_the_build_gate_leaves_it_out_of_a_direct_write(tmp_path):
+def test_the_public_help_and_guide_do_not_name_it():
+    """A part of the mode maker, so only its (preview) help names it."""
+    from pinball_decryptor.webui import help_content as H
+    assert "Co-op play" not in _read(os.path.join(REPO, "docs", "guide", "using-the-app.md"))
+    src = _read(os.path.join(REPO, "pinball_decryptor", "webui", "help_content.py"))
+    assert src.count('"### Co-op play') == 0
+    assert any(t == "Co-op play" for t, _b in H.PREVIEW_HELP["modes"]["Modes"])
+
+
+def test_the_build_gate_leaves_it_out_of_a_direct_write(tmp_path, monkeypatch):
     from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    monkeypatch.setattr(MW, "preview_on", lambda: True)
     said = []
     assert E._coop_for_build(str(tmp_path), False, lambda m, *a: said.append(m)) is None and not said
     CP.save(str(tmp_path), True)
     assert E._coop_for_build(str(tmp_path), True, lambda m, *a: said.append(m)) is None
     assert "direct-SD write" in said[-1]
+
+
+def test_the_build_leaves_it_out_without_the_mode_maker(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    monkeypatch.setattr(MW, "preview_on", lambda: False)
+    CP.save(str(tmp_path), True)
+    said = []
+    assert E._coop_for_build(str(tmp_path), False, lambda m, *a: said.append(m)) is None
+    assert "mode maker" in said[-1]

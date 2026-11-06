@@ -61,7 +61,7 @@ static void play(unsigned team, int extra_at)
         if ((int)balls == extra_at) extra = 1;
         if (!coop_change_wrap(0, 0, 0, 0)) break;
     }
-    printf("over after %u balls\n", balls);
+    printf("over after %u balls, the game's end sees %u player(s)\n", balls, players);
 }
 int main(void)
 {
@@ -109,10 +109,10 @@ def test_each_teammate_plays_each_ball_and_the_game_ends_after_the_last(tmp_path
     assert not any(l.startswith("SCREEN SAYS") for l in out)   # the screen names the teammate up, every ball
     ups, over = _turns(out, 2)
     assert ups == ["up ball %d teammate %d player 1" % (b, t) for b in (1, 2, 3) for t in (1, 2)]
-    assert over == "over after 6 balls"
+    assert over == "over after 6 balls, the game's end sees 1 player(s)"
     ups, over = _turns(out, 4)
     assert ups == ["up ball %d teammate %d player 1" % (b, t) for b in (1, 2, 3) for t in (1, 2, 3, 4)]
-    assert over == "over after 12 balls"
+    assert over == "over after 12 balls, the game's end sees 1 player(s)"
 
 
 def test_an_extra_ball_stays_with_the_teammate_who_earned_it(tmp_path):
@@ -121,7 +121,7 @@ def test_an_extra_ball_stays_with_the_teammate_who_earned_it(tmp_path):
     want += ["up ball 2 teammate 1 player 1", "up ball 2 teammate 1 player 1",      # its extra ball
              "up ball 2 teammate 2 player 1", "up ball 2 teammate 3 player 1"]
     want += ["up ball 3 teammate %d player 1" % t for t in (1, 2, 3)]
-    assert ups == want and over == "over after 10 balls"
+    assert ups == want and over == "over after 10 balls, the game's end sees 1 player(s)"
 
 
 def test_plain_start_adds_a_competing_player_and_a_team_tops_out_at_four(tmp_path):

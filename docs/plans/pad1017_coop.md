@@ -84,3 +84,11 @@ below while building it:
   team's score, PLAYER n BALL n on top, the team's score on its own board (initials under 2-/4-PLAYER CO-OP; the
   attract page showed the 2-PLAYER CO-OP champion), no faults. Then a rigbatch sweep of the other 37 offered builds
   (C:/tmp/PAD-1017/rig/sweep.txt, out C:/tmp/PAD-1017/rig/sweep1).
+
+### Sweep result (2026-11-05)
+
+All 38 offered builds proven in the emulator (rig kit C:/tmp/PAD-1017/rig, job2.sh): a teammate joined, 6 balls
+in turn, game over after the last, the team's score filed on the 2-PLAYER CO-OP board (Star Wars ELG and X-Men LE:
+their initials screens under 2-PLAYER CO-OP; the rig could not type their initials), no faults. Rig needs, not
+co-op: most titles re-serve every drain until an outlane is hit just before it (a stock one-player Batman did the
+same); Star Wars needs the Action (LOCKDOWN) button at each ball's start; X-Men Pro needs 4 coins a credit.

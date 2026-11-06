@@ -286,6 +286,9 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 /* ------------------------------------------------------------ banners */
 .sx-bolt { font-size: 16px; line-height: 1; color: var(--warn); width: 16px; text-align: center; }
 .banner.info.sx-banner-update { background: var(--info-soft); border-bottom-color: var(--info); }
+.sx-banner-prog { display: flex; align-items: center; gap: 8px; flex: 0 0 180px; }
+.sx-banner-prog .prog { flex: 1 1 auto; }
+.sx-banner-prog .mono { font-size: 12px; min-width: 34px; text-align: right; }
 .banner.warn.sx-banner-stale_source { border-bottom-color: var(--warn); }
 .sx-prereqs { gap: 10px; }
 .sx-prereq-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 300px; min-width: 0; }

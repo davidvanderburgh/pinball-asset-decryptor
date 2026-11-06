@@ -1,7 +1,7 @@
 // The frame around every tab: top bar, rail, status bar, log drawer,
 // the manufacturer picker, banners, toasts and the dialog host.
 
-import { html, useEffect, useLayoutEffect, useRef, useState, Icon, Button, Chip, Check, openMenu, cx, fmtClock, tip, Empty, Spinner, mediaUrl }
+import { html, useEffect, useLayoutEffect, useRef, useState, Icon, Button, Chip, Check, openMenu, cx, fmtClock, tip, Empty, Spinner, Progress, mediaUrl }
   from "./core/ui.js";
 import { Component } from "./vendor/preact-htm.js";
 import { useNs, useLog, useConnected, useEvent, state } from "./core/store.js";
@@ -835,6 +835,8 @@ function Prereqs({ shell }) {
 function Banners({ shell }) {
   return html`${(shell.banners || []).map((b) => html`<div class=${cx("banner", b.kind || "info", "sx-banner-" + b.id)} key=${b.id} role=${b.kind === "warn" ? "alert" : "status"}>
     ${b.icon === "bolt" ? html`<span class="sx-bolt" aria-hidden="true">⚡</span>` : html`<${Icon} name=${b.kind === "warn" ? "warn" : "info"} />`}<div class="body-text">${b.text}</div>
+    ${b.progress == null ? null : b.progress < 0 ? html`<${Spinner} />`
+      : html`<div class="sx-banner-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${b.progress}><${Progress} pct=${b.progress} /><span class="mono">${b.progress}%</span></div>`}
     ${(b.actions || []).map((a) => html`<${Button} size="sm" kind=${a.primary ? "primary" : ""} onClick=${() => call("ui.banner_action", b.id, a.id)}>${a.label}<//>`)}
     ${b.dismiss !== false ? html`<${Button} size="sm" kind="ghost" icon="x" title="Dismiss" onClick=${() => call("ui.banner_action", b.id, "dismiss")} />` : null}
   </div>`)}`;

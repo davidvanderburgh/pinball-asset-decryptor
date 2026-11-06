@@ -49,7 +49,7 @@ PrivilegesRequired=admin
 WizardStyle=modern
 WizardSizePercent=110
 DisableProgramGroupPage=auto
-; PAD-1024: the in-app update's background install (/STAGED=1, see IsStaged)
+; PAD-1024: the in-app update's background install (/STAGED=2, see IsStaged)
 ; goes into a sibling folder that is renamed into place on Restart to update,
 ; so it must leave nothing behind that names that folder: no uninstall entry
 ; (the one in place stays, and its uninstaller is copied across by the app).
@@ -321,20 +321,30 @@ begin
   Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
 end;
 
-{ True for the in-app update's background install (/STAGED=1, PAD-1024):
+{ True for the in-app update's background install (/STAGED=2, PAD-1024):
   a whole install of the new version into a sibling folder the app swaps in
   on Restart to update.  It writes nothing outside that folder - no
   shortcuts, no uninstall entry, no Visual Pinball controller registration -
   because the folder is about to be renamed; see core/update_slots.py. }
 function IsStaged(): Boolean;
 begin
-  Result := ExpandConstant('{param:STAGED|0}') = '1';
+  Result := ExpandConstant('{param:STAGED|0}') = '2';
 end;
 
 function InitializeSetup(): Boolean;
 var
   Version: TWindowsVersion;
 begin
+  { /STAGED=1 comes only from v1.349.0 - v1.350.0, whose swap helper never
+    ran (PAD-1029): a background install there closes the app on Restart to
+    update and nothing reopens it.  Refusing it here makes those copies log
+    that the background install failed and run this setup the ordinary way
+    instead, which closes, updates and reopens them. }
+  if ExpandConstant('{param:STAGED|0}') = '1' then
+  begin
+    Result := False;
+    Exit;
+  end;
   GetWindowsVersionEx(Version);
   if Version.Major < 10 then
   begin

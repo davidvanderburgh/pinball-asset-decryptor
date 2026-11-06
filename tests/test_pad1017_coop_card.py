@@ -56,7 +56,7 @@ def test_the_plan_puts_coop_cfg_beside_the_runtime(tmp_path, monkeypatch):
     from pinball_decryptor.plugins.stern import mode_write as MW
     prof = MP.profile_for_card("godzilla", "1.16") if hasattr(MP, "profile_for_card") else None
     prof = prof or next(p for p in MP.profiles().values() if SMo.title_key(p) == "godzilla_le-1.16")
-    monkeypatch.setattr(CP, "cfg_text", lambda elf, setting=0: "coop on\nbutton 59\n")
+    monkeypatch.setattr(CP, "cfg_text", lambda elf, setting=0, only=False: "coop on\nbutton 59\n")
     monkeypatch.setattr(MW, "find_port", lambda prof, elf: MP.port_path(prof))
     result = MW.plan(str(tmp_path), b"", b"", b"elf", str(tmp_path / "scratch"), modes_on=False,
                      coop=True, coop_prof=prof)
@@ -154,6 +154,7 @@ def test_the_service_menu_row_and_the_cfg_name_its_live_value():
     assert (s.caption, s.values, s.default) == ("Co-op Play", 2, 1)          # Off to start with
     assert s.help == CP.MENU_HELP and s.where == "Adjustments > Machine Settings > Attract Mode"
     assert CP.cfg_text(elf, s.live) == "coop on\nbutton 59\nsetting 0x%08x\n" % s.live
+    assert CP.cfg_text(elf, s.live, only=True) == "coop on\nbutton 59\nsetting 0x%08x\nonly\n" % s.live
     assert CP.cfg_text(elf) == "coop on\nbutton 59\n"                          # always on: no setting line
 
 
@@ -218,7 +219,8 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     gate = R._lift(src, "static int on_agent_begin(unsigned *r)")
     assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
     arm = R._lift(src, "static int insider_arm(void)")
-    assert "if (at && !modes && !attract_wanted() && maps_has(at, 4, MAP_R))" in arm   # only a card of co-op alone
+    assert "if (at && !attract_wanted() && maps_has(at, 4, MAP_R))" in arm   # only a card of co-op alone
+    assert "return only ? v : 0;" in R._lift(src, "static unsigned coop_setting_wanted(void)\n{")   # ... the build says
     add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "coop_switched_on() && coop_button_held()" in add                   # Off: Start adds a competing player
     assert "return *(volatile const unsigned *)(unsigned long)coop.setting == 2u;" in R._lift(

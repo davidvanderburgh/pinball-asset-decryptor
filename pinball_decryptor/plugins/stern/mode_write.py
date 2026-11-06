@@ -870,7 +870,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
             if result is None:
                 result = coop_plan(project, game_elf, coop_prof or attract_prof or variants_prof
                                    or sound_modes_prof or picture_prof)
-            coop_into(result, game_elf, scratch, coop_setting)
+            coop_into(result, game_elf, scratch, coop_setting, only=True)
         if idle:                                     # PAD-1022: inactivity pausing the timers, alone or with the above
             if result is None:
                 result = idle_plan(project, game_elf, idle_prof or coop_prof or attract_prof or variants_prof
@@ -1009,7 +1009,7 @@ def coop_plan(project, game_elf, prof):
     return ModePlan(project=project, profile=prof, port=port, build=None)
 
 
-def coop_into(result, game_elf, scratch, setting=0):
+def coop_into(result, game_elf, scratch, setting=0, only=False):
     """``coop.cfg`` for *result*'s card: co-op on, the right flipper button read off *game_elf*, and (round 2) the
     service menu's CO-OP PLAY value *setting* when it switches co-op."""
     from . import coop_play as CP
@@ -1017,7 +1017,7 @@ def coop_into(result, game_elf, scratch, setting=0):
     if why:
         raise ModeWriteError(why)
     try:
-        text = CP.cfg_text(game_elf, setting)
+        text = CP.cfg_text(game_elf, setting, only)
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)
@@ -1027,8 +1027,9 @@ def coop_into(result, game_elf, scratch, setting=0):
     result.coop_file = path
     result.lines.append("co-op play: %s" % CP.HOW)
     if setting:
-        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY); on a card with no modes, Insider "
-                            "Connected is off only while it is On")
+        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY); %s" % (
+            "Insider Connected is off only while it is On" if only
+            else "the card's modes keep its scores off Insider Connected either way"))
     return result
 
 

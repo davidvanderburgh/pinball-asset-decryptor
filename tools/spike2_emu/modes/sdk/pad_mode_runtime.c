@@ -15001,9 +15001,10 @@ static void switches_arm(void)
  *   coop on
  *   button <switch id>        the button held at Start to add a teammate (the right flipper button)
  *   setting <address>         (round 2, DoomWalrus666) the live value of the game's own CO-OP PLAY row (1 Off, 2 On;
- *                             menu_settings.py puts the row on a spare setting): co-op only while it says On.
- *                             On a card of co-op and nothing else (no mode, no attract item), Insider Connected is
- *                             held back only while it says On too (insider_while, below)
+ *                             menu_settings.py puts the row on a spare setting): co-op only while it says On
+ *   only                      (round 2) the card carries no modes (the build says so: the prebuilt runtime always
+ *                             holds the form mode's reader, so the runtime cannot count them): with a setting and no
+ *                             attract item, Insider Connected is held back only while it says On (insider_while)
  * A teammate joins when Start adds a player while the button is held, in a one-player game (then any Start in that
  * co-op game): the game's own add runs (credits, its own hooks, the most players it allows) and counts the player, so
  * the teammate has a score panel of its own. A plain Start in a one-player game adds a competing player as the game
@@ -15258,25 +15259,29 @@ static void coop_line(const char *s)
     }
 }
 
-/* round 2: the CO-OP PLAY row's live value from coop.cfg, read before the gate is armed (0: none) */
+/* round 2: the CO-OP PLAY row's live value from coop.cfg when the card carries no modes ("only"), read before the gate
+ * is armed (0: none - a card with modes keeps the whole gate) */
 static unsigned coop_setting_wanted(void)
 {
     static char raw[1024];
     long n = -1, i;
     unsigned k, v = 0;
     const char *p;
-    int ok;
+    int ok, only = 0;
     for (k = 0; k < sizeof COOP_FILES / sizeof COOP_FILES[0] && n < 0; k++)
         n = pm_read_file(COOP_FILES[k], raw, sizeof raw - 1);
     if (n <= 0) return 0;
     raw[n] = 0;
-    for (i = 0; i < n; i++)
-        if ((!i || raw[i - 1] == '\n') && str_starts(raw + i, "setting ")) {
+    for (i = 0; i < n; i++) {
+        if (i && raw[i - 1] != '\n') continue;
+        if (str_starts(raw + i, "only")) only = 1;
+        if (str_starts(raw + i, "setting ")) {
             p = raw + i + 8;
             v = (unsigned)number(&p, &ok);
-            return ok ? v : 0;
+            if (!ok) v = 0;
         }
-    return 0;
+    }
+    return only ? v : 0;
 }
 
 /* coop.cfg asks for co-op: the card takes the runtime's whole gate, as attract items do */
@@ -15900,11 +15905,8 @@ static int insider_arm(void)
         "and the rest of Insider Connected are untouched", fn("agent_header"), fn("agent_begin"),
         insider_achq, insider_achq_at);
     {   /* round 2: a card of co-op and nothing else holds back only while CO-OP PLAY says On */
-        const struct pm_mode *m;
-        int modes = 0;
-        unsigned at = coop_setting_wanted();
-        EACH_MODE(m) modes += m != 0;
-        if (at && !modes && !attract_wanted() && maps_has(at, 4, MAP_R)) {
+        unsigned at = coop_setting_wanted();          /* the card carries no modes ("only") */
+        if (at && !attract_wanted() && maps_has(at, 4, MAP_R)) {
             insider_while = at;
             say("insider: a card of co-op and nothing else - all of that only while the service menu's CO-OP PLAY "
                 "says On (value at 0x%08x, now %s); Off, Insider Connected is the game's own",

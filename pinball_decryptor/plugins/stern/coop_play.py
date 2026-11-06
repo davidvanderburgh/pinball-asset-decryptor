@@ -108,10 +108,12 @@ def project_title(project, probe=False):
     return _pt(project, probe=probe)
 
 
-def cfg_text(game_elf, setting=0):
+def cfg_text(game_elf, setting=0, only=False):
     """``coop.cfg`` for the card whose game program is *game_elf* (bytes): co-op on, the right flipper button, and
-    (round 2) *setting*, the CO-OP PLAY row's live value, when the service menu switches it."""
+    (round 2) *setting*, the CO-OP PLAY row's live value, when the service menu switches it; *only* when the card
+    carries no modes (then the Insider Connected gate holds back only while CO-OP PLAY says On)."""
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) != 2:
         raise CoopError(NO_BUTTON)
-    return "coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
+    return ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
+            + ("only\n" if setting and only else ""))

@@ -42,6 +42,8 @@ from ..shellx_report import ReportMixin
 from ..shellx_reset import ResetMixin
 from ..update_interval import (UPDATE_INTERVAL_CHOICES,
                                normalize_update_interval)
+from ...core.updater import (AUTO_DOWNLOAD_DEFAULT, AUTO_DOWNLOAD_KEY,
+                              AUTO_DOWNLOAD_TIP)
 from ...core.old_versions import (OLD_VERSIONS_CHOICES, OLD_VERSIONS_TIP,
                                   normalize_old_versions, running_appimage)
 from ..autosave_interval import (AUTOSAVE_INTERVAL_CHOICES, AUTOSAVE_TIP,
@@ -109,7 +111,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
     icon = ""
     exports = (
         "voice_quality_var", "update_interval_var", "autosave_interval_var",
-        "old_versions_var",
+        "old_versions_var", "update_auto_download_var",
         "show_log_history_var",
         "scenes_own_colours_var", "agent_access_var",
         "set_update_check_running", "show_update_banner",
@@ -131,6 +133,11 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         self.old_versions_var = self.var(
             "old_versions", "int",
             normalize_old_versions(cb.get("initial_old_versions")))
+        # PAD-1024: fetch a found update while the user works
+        self.update_auto_download_var = self.var(
+            "update_auto_download", "bool",
+            bool(cb.get("initial_update_auto_download",
+                        AUTO_DOWNLOAD_DEFAULT)))
         self.autosave_interval_var = self.var(
             "autosave_interval", "int",
             normalize_autosave_interval(cb.get("initial_autosave_interval")))
@@ -148,6 +155,8 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             bool(cb.get("initial_agent_access", False)))
         self._update_check_busy = False
         self._update_available = None       # (version, url, installer|None)
+        self._update_stage = None           # None | "downloading" | "ready"
+        self._update_pct = None
         self._update_banner_url = None
         self._update_banner_dismissed = None
         self._update_banner_shown = False
@@ -217,6 +226,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             "check_updates": self._handle_check_updates,
             "update_interval": self._pick_update_interval,
             "old_versions": self._pick_old_versions,
+            "toggle_update_auto_download": self._toggle_update_auto_download,
             "autosave_interval": self._pick_autosave_interval,
             "disk_space": lambda: self._open_dialog("disk_space"),
             "log_history": self._open_log_history,
@@ -343,7 +353,15 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         items = []
         if self._update_available:
             version, _url, installer = self._update_available
-            if installer and self.window.cb.get("on_install_update"):
+            if self._update_stage == "downloading":
+                items.append({"id": "install_update", "dot": True,
+                              "disabled": True,
+                              "label": "Downloading update v%s…%s" % (
+                                  version, self._pct_text())})
+            elif self._update_stage == "ready":
+                items.append({"id": "install_update", "dot": True,
+                              "label": "Restart to update to v%s" % version})
+            elif installer and self.window.cb.get("on_install_update"):
                 items.append({"id": "install_update", "dot": True,
                               "label": "%s v%s…" % (
                                   update_action_verb(installer), version)})
@@ -366,6 +384,11 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             {"id": "update_interval", "args": [hours], "label": label,
              "checked": cur == hours, "radio": True}
             for hours, label in UPDATE_INTERVAL_CHOICES]
+        updates += [{"sep": True},
+                    {"id": "toggle_update_auto_download",
+                     "label": "Download updates in the background",
+                     "checked": bool(self.update_auto_download_var.get()),
+                     "title": AUTO_DOWNLOAD_TIP}]
         if running_appimage():
             # PAD-937: only an AppImage keeps its old versions (Windows and
             # macOS install over the top), so only an AppImage asks
@@ -448,6 +471,16 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         fn = self.window.cb.get("on_update_interval_change")
         if fn is not None:
             fn(self.update_interval_var.get())
+        self.publish_settings_items()
+        return True
+
+    def _toggle_update_auto_download(self):
+        """⚙ Updates > Download updates in the background (PAD-1024)."""
+        on = not bool(self.update_auto_download_var.get())
+        self.update_auto_download_var.set(on)
+        fn = self.window.cb.get("on_update_auto_download_change")
+        if fn is not None:
+            fn(on)
         self.publish_settings_items()
         return True
 
@@ -686,34 +719,75 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         compat.messagebox.showinfo(
             "Up to date", f"You're on the latest version (v{__version__}).")
 
-    def show_update_banner(self, version, url, installer=None):
+    def _pct_text(self):
+        return (" %d%%" % self._update_pct
+                if self._update_pct is not None else "")
+
+    def show_update_banner(self, version, url, installer=None, stage=None,
+                           pct=None):
         """MainWindow.show_update_banner: the blue banner, the gear's dot and
         its menu entry.  A version already dismissed this session does not
-        re-open the banner; a newer one does."""
+        re-open the banner; a newer one does.
+
+        ``stage`` (PAD-1024) is where the background download is: ``None``
+        when there is none (the update waits for Install update),
+        ``"downloading"`` with its ``pct`` while it runs, and ``"ready"`` once
+        the file is on disk, when the one button left is Restart to update."""
         self._update_banner_url = url
         muted = (version == self._update_banner_dismissed
                  and not self._update_banner_shown)
         can_auto = bool(installer and self.window.cb.get("on_install_update"))
+        if not can_auto:
+            stage = None
+        self._update_stage = stage
+        self._update_pct = pct if stage == "downloading" else None
         self._update_available = (version, url,
                                   installer if can_auto else None)
         verb = update_action_verb(installer) if can_auto else ""
+        if stage == "downloading":
+            label = "Downloading v%s…%s" % (version, self._pct_text())
+            tip = ("Pinball Asset Decryptor v%s is downloading in the "
+                   "background — you're on v%s." % (version, __version__))
+        elif stage == "ready":
+            label = "Restart to update"
+            tip = ("Pinball Asset Decryptor v%s is downloaded — restart to "
+                   "update from v%s." % (version, __version__))
+        else:
+            label = (("%s v%s" % (verb, version)) if can_auto
+                     else "v%s available" % version)
+            tip = ("Pinball Asset Decryptor v%s is available — you're on "
+                   "v%s." % (version, __version__))
         self.ctx.store.set("shell", update={
-            "available": True, "version": version,
-            "label": ("%s v%s" % (verb, version)) if can_auto
-            else "v%s available" % version})
+            "available": True, "version": version, "label": label,
+            "tip": tip, "stage": stage or ""})
         self.set(update_state="available")
         self.publish_settings_items()
         if muted:
             return
-        if can_auto:
+        if stage == "downloading":
+            text = ("Pinball Asset Decryptor v%s is downloading in the "
+                    "background%s — you're on v%s. Keep working; it will be "
+                    "ready to install in a moment."
+                    % (version, " (%d%%)" % pct if pct is not None else "",
+                       __version__))
+            actions = [{"id": "notes", "label": "Release notes"}]
+        elif stage == "ready":
+            text = ("Pinball Asset Decryptor v%s is ready — restart to "
+                    "update. You're on v%s." % (version, __version__))
+            actions = [{"id": "install", "label": "Restart to update",
+                        "primary": True},
+                       {"id": "notes", "label": "Release notes"}]
+        elif can_auto:
+            text = ("Pinball Asset Decryptor v%s is available — you're on "
+                    "v%s." % (version, __version__))
             actions = [{"id": "install", "label": verb, "primary": True},
                        {"id": "notes", "label": "Release notes"}]
         else:
+            text = ("Pinball Asset Decryptor v%s is available — you're on "
+                    "v%s." % (version, __version__))
             actions = [{"id": "notes", "label": "Download", "primary": True}]
         self.window.set_banner("update", {
-            "kind": "info", "icon": "bolt",
-            "text": "Pinball Asset Decryptor v%s is available — you're on "
-                    "v%s." % (version, __version__),
+            "kind": "info", "icon": "bolt", "text": text,
             "actions": actions, "dismiss": True})
         self._update_banner_shown = True
 
@@ -735,6 +809,8 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         if not self._update_available:
             return False
         version, url, installer = self._update_available
+        if self._update_stage == "downloading":
+            return True        # nothing to press yet; the banner says so
         fn = self.window.cb.get("on_install_update")
         if installer and fn is not None:
             fn(version, installer)

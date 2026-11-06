@@ -159,10 +159,14 @@ def test_gear_menu_groups_and_no_top_level_checks(tmp_path):
         up = cascade(w, "Updates")["submenu"]
         assert up[0]["id"] == "check_updates"
         assert up[1] == {"header": "Check automatically"}
-        assert [it["label"] for it in up[2:]] == [
+        assert [it["label"] for it in up[2:6]] == [
             "Only at startup", "Every hour", "Every 6 hours", "Once a day"]
         assert all(it["id"] == "update_interval" and it["radio"]
-                   for it in up[2:])
+                   for it in up[2:6])
+        # PAD-1024: the background download's switch, on by default
+        assert up[6].get("sep")
+        assert up[7]["id"] == "toggle_update_auto_download"
+        assert up[7]["checked"]
         logs = cascade(w, "Logs")["submenu"]
         assert [it.get("id", "sep") for it in logs] == [
             "log_history", "project_log", "sep", "toggle_log_history"]

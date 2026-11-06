@@ -216,6 +216,14 @@ The app checks for a new release at launch and then as it runs (⚙ >
 hours by default). A new release shows a banner, a ● on the ⚙ gear and a
 line in the log.
 
+**It downloads in the background.** While you keep working, the banner
+shows the download's progress; once it is done the one button left is
+**Restart to update**, which goes straight to the install below with no
+download window to wait on. An update downloaded but not installed is still
+there next time the app opens. To turn it off, untick ⚙ > **Updates** >
+**Download updates in the background**; the update then waits for you to
+press **Install update** (or **Download update**) and downloads then.
+
 | | The banner offers | What happens |
 |---|---|---|
 | Windows | **Install update** | Downloads the installer, checks its SHA-256, installs silently and reopens. No SmartScreen or UAC prompt. |

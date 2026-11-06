@@ -219,3 +219,24 @@ def test_non_appimage_downloads_go_to_the_installer_path(monkeypatch, kind):
     app = _App()
     app._update_downloaded(_Dialog(), "C:\\Temp\\setup.exe", "9.0.0", kind)
     assert app.launched_installer == ("C:\\Temp\\setup.exe", "9.0.0")
+
+
+def test_restart_to_update_starts_it_without_asking_again(monkeypatch,
+                                                          tmp_path):
+    """PAD-1024: the background download is done and the user pressed Restart
+    to update; that press was the yes, so no second question."""
+    launched = []
+    monkeypatch.setattr(app_mod.desktop, "run_detached",
+                        lambda argv: (launched.append(argv), (True, ""))[1])
+
+    def _asked(*a, **k):
+        raise AssertionError("Restart to update asked again")
+    monkeypatch.setattr(app_mod.messagebox, "askyesno", _asked)
+    path = tmp_path / "new.AppImage"
+    path.write_bytes(b"x")
+    app = _App()
+    app._update_downloaded(_Dialog(), str(path), "9.0.0", "appimage",
+                           ask=False)
+    assert launched == [[str(path)]]
+    assert app.closed and app.saved
+    assert any("untouched" in text for _lvl, text in app.window.log)

@@ -30,6 +30,15 @@ import urllib.request
 from . import net
 from .config import GITHUB_REPO
 
+#: the ⚙ Updates > "Download updates in the background" switch (PAD-1024):
+#: settings.json key, default and tooltip
+AUTO_DOWNLOAD_KEY = "update_auto_download"
+AUTO_DOWNLOAD_DEFAULT = True
+AUTO_DOWNLOAD_TIP = (
+    "When a new version is found, download it while you work, so updating "
+    "is one click on Restart to update. Off, the update waits for you to "
+    "press Install update and downloads then.")
+
 REQUEST_TIMEOUT = 5
 # How many releases the update check reads.
 #
@@ -295,15 +304,22 @@ def download_installer(url, dest_path, *, expected_sha256=None,
     aborts.  A cancelled, short, or digest-mismatched download deletes
     the partial file and raises — never leave a half-written exe where
     the caller might run it.
+
+    The bytes go to ``<dest>.part`` and are renamed into place only once the
+    whole file is in and verified (PAD-1024).  The background download can
+    be cut off by the app closing, which kills its thread with no exception
+    to clean up after, and a file under the final name is what
+    :func:`staged_update_ok` would otherwise be asked to vouch for next run.
     """
     do_open = opener or net.urlopen
     req = urllib.request.Request(
         url, headers={"User-Agent": "Pinball-Asset-Decryptor-UpdateCheck"})
     digest = hashlib.sha256()
     done = 0
+    part = str(dest_path) + PART_SUFFIX
     try:
         with do_open(req, timeout=DOWNLOAD_TIMEOUT) as resp, \
-                open(dest_path, "wb") as out:
+                open(part, "wb") as out:
             while True:
                 if cancel_cb and cancel_cb():
                     raise InterruptedError("download canceled")
@@ -320,13 +336,51 @@ def download_installer(url, dest_path, *, expected_sha256=None,
                 "installer download failed integrity check "
                 f"(sha256 {digest.hexdigest()[:12]}… != published "
                 f"{expected_sha256[:12]}…)")
+        os.replace(part, dest_path)
     except BaseException:
         try:
-            os.unlink(dest_path)
+            os.unlink(part)
         except OSError:
             pass
         raise
     return done
+
+
+#: what :func:`download_installer` writes to until the file is whole
+PART_SUFFIX = ".part"
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def staged_update_ok(path, installer, check_digest=True):
+    """True when *path* is a whole copy of *installer*'s release asset.
+
+    PAD-1024: the background download leaves the update on disk for a later
+    "Restart to update", possibly in a later run of the app (the user quit
+    instead).  The file is reused only when it is the size GitHub publishes
+    and, with ``check_digest``, hashes to the published SHA-256 - a few
+    seconds for the setup exe, which the background thread spends rather
+    than the click.  No published size or digest is not a reason to refuse
+    a file that is there; the download itself verified it when it could.
+    """
+    try:
+        if not os.path.isfile(path):
+            return False
+        size = int((installer or {}).get("size") or 0)
+        if size and os.path.getsize(path) != size:
+            return False
+        want = (installer or {}).get("sha256")
+        if check_digest and want and _file_sha256(path) != want:
+            return False
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 # Inno Setup switches for the unattended install-over-the-top:

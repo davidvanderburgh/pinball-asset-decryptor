@@ -153,5 +153,8 @@ def prune_old_installers(current_version, folder=None):
     """Delete the setup exes and disk images earlier updates left in the temp
     folder.  Returns ``(deleted, failed)``."""
     folder = folder if folder is not None else tempfile.gettempdir()
-    older = _older_assets(folder, current_version, ("_windows.exe", ".dmg"))
+    # PAD-1024: and the half of one a background download was cut off in
+    older = _older_assets(folder, current_version,
+                          ("_windows.exe", ".dmg", "_windows.exe.part",
+                           ".dmg.part"))
     return _delete([p for _v, p in older])

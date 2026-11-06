@@ -18,13 +18,18 @@ from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
                             PrereqMsg, ProgressMsg, UiCallMsg)
 from .core.prereqs import check_prerequisite, probes_wsl
 from .core.registry import all_manufacturers, get_manufacturer, load_plugins
-from .core.updater import (check_for_update, download_installer,
+from .core.updater import (AUTO_DOWNLOAD_DEFAULT, AUTO_DOWNLOAD_KEY,
+                           check_for_update, download_installer,
                            install_update_macos, launch_installer_windows,
-                           restart_wsl_for_update)
+                           restart_wsl_for_update, staged_update_ok)
 from .webui import compat
 from .webui.compat import filedialog, messagebox
 
 log = logging.getLogger(__name__)
+
+#: the download window's stand-in when there was none to close: Restart to
+#: update installs what the background download fetched (PAD-1024)
+_NO_DIALOG = type("_NoDialog", (), {"close": staticmethod(lambda: None)})()
 
 
 #: The form fields that belong to the PROJECT, not to the app (David,
@@ -508,6 +513,10 @@ class App:
             on_update_interval_change=self._on_update_interval_change,
             initial_old_versions=s.get("old_versions_keep"),
             on_old_versions_change=self._on_old_versions_change,
+            initial_update_auto_download=bool(
+                s.get(AUTO_DOWNLOAD_KEY, AUTO_DOWNLOAD_DEFAULT)),
+            on_update_auto_download_change=(
+                self._on_update_auto_download_change),
             initial_autosave_interval=s.get("autosave_minutes"),
             on_autosave_interval_change=self._on_autosave_interval_change,
             initial_audio_advanced=s.get("audio_advanced") or {},
@@ -5551,7 +5560,7 @@ class App:
         self._schedule_update_recheck()
         if result:
             version, url, _notes, installer = result
-            self.window.show_update_banner(version, url, installer=installer)
+            self._offer_update(version, url, installer)
             self.window.append_log(
                 f"Update available: v{version} (you're on v{__version__}).",
                 "success")
@@ -5588,6 +5597,169 @@ class App:
             if show_up_to_date_toast:
                 self.window.show_up_to_date_toast()
 
+    # ------------------------------------------------------------------
+    # Background download (PAD-1024)
+    #
+    # daveyvandy: "One button push to restart the app and it quickly loads the
+    # new version.  Background downloads / installs to speed things up.
+    # Opt-out controls for the nerds."  The install itself was already one
+    # silent step (_launch_downloaded_installer); what made an update slow was
+    # the download window it sat behind - a few hundred MB, watched.  So the
+    # check now fetches the update as soon as it finds one, while the user
+    # works, and the banner's one button becomes Restart to update.  ⚙
+    # Updates > Download updates in the background turns it off, and the
+    # update then waits for Install update as before.
+    # ------------------------------------------------------------------
+
+    def _auto_download_on(self):
+        return bool(self._settings.get(AUTO_DOWNLOAD_KEY,
+                                       AUTO_DOWNLOAD_DEFAULT))
+
+    def _offer_update(self, version, url, installer):
+        """The check found *version*: banner it, and with the background
+        switch on, start fetching it."""
+        self._update_offer = (version, url, installer)
+        bg = getattr(self, "_bg_update", None)
+        if bg and bg["version"] == version:
+            # a re-check finding the same version: the download already
+            # running (or done) is the answer
+            self._show_background_update(bg)
+            return
+        if bg:
+            # a newer release since: the older one is not worth finishing
+            bg["cancel"].set()
+            self._bg_update = None
+        if installer is None or not self._auto_download_on():
+            self.window.show_update_banner(version, url, installer=installer)
+            return
+        self._start_background_update(version, url, installer)
+
+    def _show_background_update(self, bg):
+        self.window.show_update_banner(
+            bg["version"], bg["url"], installer=bg["installer"],
+            stage=bg["stage"], pct=bg["pct"])
+
+    def _start_background_update(self, version, url, installer):
+        """Fetch *installer* off the main thread into the place the Install
+        click would have put it.  A whole copy already there (an earlier run
+        downloaded it and the user quit instead of restarting) is used as it
+        is, once its digest checks out."""
+        dest = os.path.join(self._update_download_dir(installer),
+                            installer["name"])
+        bg = {"version": version, "url": url, "installer": installer,
+              "path": dest, "stage": "downloading", "pct": None,
+              "cancel": threading.Event()}
+        self._bg_update = bg
+        self._show_background_update(bg)
+        total = int(installer.get("size") or 0)
+        last = [-5]
+
+        def _post(fn, *args):
+            try:
+                self.root.after(0, fn, *args)
+            except RuntimeError:
+                pass                       # window gone
+
+        def _progress(done):
+            if not total:
+                return
+            pct = min(100, int(done * 100 / total))
+            if pct >= last[0] + 5:         # the banner redraws every 5 %
+                last[0] = pct
+                _post(self._background_update_progress, bg, pct)
+
+        def _run():
+            reused = False
+            try:
+                if staged_update_ok(dest, installer):
+                    reused = True
+                else:
+                    download_installer(
+                        installer["url"], dest,
+                        expected_sha256=installer.get("sha256"),
+                        progress_cb=_progress, cancel_cb=bg["cancel"].is_set)
+            except InterruptedError:
+                return                     # replaced, or switched off
+            except Exception as e:                      # noqa: BLE001
+                _post(self._background_update_failed, bg,
+                      f"{type(e).__name__}: {e}")
+                return
+            _post(self._background_update_ready, bg, reused)
+        threading.Thread(target=_run, daemon=True,
+                         name="update-download").start()
+        self.window.append_log(
+            f"Downloading v{version} in the background...", "info")
+
+    def _background_update_progress(self, bg, pct):
+        if getattr(self, "_bg_update", None) is not bg:
+            return
+        bg["pct"] = pct
+        self._show_background_update(bg)
+
+    def _background_update_ready(self, bg, reused=False):
+        if getattr(self, "_bg_update", None) is not bg:
+            return
+        bg["stage"], bg["pct"] = "ready", None
+        self.window.append_log(
+            f"Update v{bg['version']} is "
+            + ("already downloaded" if reused else "downloaded")
+            + " - press Restart to update whenever you're ready.", "success")
+        self._show_background_update(bg)
+
+    def _background_update_failed(self, bg, err):
+        """Fall back to the update waiting for Install update, which
+        downloads it again with the progress window."""
+        if getattr(self, "_bg_update", None) is not bg:
+            return
+        self._bg_update = None
+        self.window.append_log(
+            f"Couldn't download v{bg['version']} in the background ({err}). "
+            "Press Install update to try again.", "warning")
+        self.window.show_update_banner(bg["version"], bg["url"],
+                                       installer=bg["installer"])
+
+    def _on_update_auto_download_change(self, on):
+        """Persist ⚙ Updates > Download updates in the background and act on
+        it now: on starts fetching an update already on offer, off stops one
+        mid-download (a finished one stays ready - it costs nothing more)."""
+        self._settings[AUTO_DOWNLOAD_KEY] = bool(on)
+        self._save_settings()
+        self.window.append_log(
+            "Download updates in the background: %s." % ("on" if on
+                                                          else "off"), "info")
+        offer = getattr(self, "_update_offer", None)
+        bg = getattr(self, "_bg_update", None)
+        if not on and bg and bg["stage"] == "downloading":
+            bg["cancel"].set()
+            self._bg_update = None
+            self.window.show_update_banner(bg["version"], bg["url"],
+                                           installer=bg["installer"])
+        elif on and offer and not bg and offer[2] is not None:
+            self._start_background_update(*offer)
+
+    def _install_staged_update(self, version):
+        """Restart to update: the background download is on disk, so go
+        straight to the install, no re-check and no download window.
+        Returns False when there is nothing staged for *version* to use."""
+        bg = getattr(self, "_bg_update", None)
+        if not bg or bg["version"] != version:
+            return False
+        if bg["stage"] == "downloading":
+            self.window.append_log(
+                f"v{version} is still downloading - Restart to update "
+                "appears when it's done.", "info")
+            return True
+        if not staged_update_ok(bg["path"], bg["installer"],
+                                check_digest=False):
+            # gone from under us (a temp-folder cleaner): download it again
+            self._bg_update = None
+            return False
+        self.window.append_log(f"Restarting to update to v{version}...",
+                               "info")
+        self._update_downloaded(_NO_DIALOG, bg["path"], version,
+                                bg["installer"].get("kind"), ask=False)
+        return True
+
     def _install_update(self, version, installer):
         """Banner/gear "Install update" / "Download update" click.
 
@@ -5604,7 +5776,12 @@ class App:
         download machinery, different ending, because an AppImage isn't
         installed anywhere.  See core/updater._pick_installer_asset for
         why Linux stopped going through a browser at all.
+
+        With the update already downloaded in the background (PAD-1024) the
+        click is Restart to update and skips all of that.
         """
+        if self._install_staged_update(version):
+            return
         version, installer = self._freshest_update(version, installer)
         if installer is None:
             return
@@ -5673,10 +5850,11 @@ class App:
             return d
         return tempfile.gettempdir()
 
-    def _update_downloaded(self, dialog, path, version, kind):
-        """Main-thread continuation once the update file is on disk."""
+    def _update_downloaded(self, dialog, path, version, kind, ask=True):
+        """Main-thread continuation once the update file is on disk.
+        ``ask=False`` is Restart to update: the click was the yes."""
         if kind == "appimage":
-            self._finish_appimage_update(dialog, path, version)
+            self._finish_appimage_update(dialog, path, version, ask=ask)
         elif kind == "macos-dmg":
             self._finish_macos_update(dialog, path, version)
         else:
@@ -5715,7 +5893,7 @@ class App:
             f"Installing v{version} and restarting…", "success")
         self._on_close()
 
-    def _finish_appimage_update(self, dialog, path, version):
+    def _finish_appimage_update(self, dialog, path, version, ask=True):
         """Linux: the download IS the new app — make it runnable and offer
         to start it.
 
@@ -5747,7 +5925,9 @@ class App:
             old_note = ("The version you're running now is untouched; the "
                         "new one clears old versions away when it starts "
                         "(Settings > Updates > Old versions).")
-        if not messagebox.askyesno(
+        if not ask:
+            self.window.append_log(old_note, "info")
+        elif not messagebox.askyesno(
                 "Update downloaded",
                 f"Version {version} has been saved to:\n\n{path}\n\n"
                 "Start it now?  This window will close.\n\n" + old_note,

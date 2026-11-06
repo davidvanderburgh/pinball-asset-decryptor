@@ -225,7 +225,7 @@ seconds:
   (`Pinball Asset Decryptor.next`) while the old one runs, keeping
   anything pip added to the app's Python (the voice-recognition packages,
   for one). Restart to update closes the app, swaps the two folders and
-  opens the new one. Shortcuts, settings and the uninstaller stay as they
+  opens the new one, with shortcuts, settings and the uninstaller as they
   were. If the swap can't happen (a file still in use), it runs the
   installer instead, as below.
 - **macOS** copies the new app out of the disk image beside the old one;

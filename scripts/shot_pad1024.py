@@ -11,6 +11,9 @@ or installed.  Saves into <out_dir>:
     <prefix>_banner_installing.png   once the download is done
     <prefix>_banner.png              once the install has had time to finish
     <prefix>_updates_menu.png        Settings > Updates open
+    <prefix>_banner_newer_release.png  (PAD-1024 tree only) v9.9.10 released
+                                     after v9.9.9 got ready, then Restart to
+                                     update pressed
 
 On main the banner offers Install update throughout; with PAD-1024 it shows
 the background download, then the background install (standing in for an
@@ -28,12 +31,19 @@ sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
 LAUNCHER = r'''
-import sys, time
+import os, sys, time
 sys.path.insert(0, %r)
 from pinball_decryptor.core import updater
 SIZE = 4 * 1024 * 1024
 
+NEWER = os.path.join(os.environ["TEMP"], "newer_released")
+
 def fake_check(current_version, repo=None, not_ready_cb=None):
+    if os.path.exists(NEWER):
+        return ("9.9.10", "https://example.invalid/releases/v9.9.10", "notes", {
+            "name": "Pinball_Asset_Decryptor_v9.9.10_Windows.exe",
+            "url": "https://example.invalid/setup.exe", "size": SIZE,
+            "sha256": None, "kind": "windows-installer"})
     return ("9.9.9", "https://example.invalid/releases/v9.9.9", "notes", {
         "name": "Pinball_Asset_Decryptor_v9.9.9_Windows.exe",
         "url": "https://example.invalid/setup.exe", "size": SIZE,
@@ -53,6 +63,8 @@ def fake_download(url, dest, expected_sha256=None, progress_cb=None,
 
 updater.check_for_update = fake_check
 updater.download_installer = fake_download
+# never install or relaunch anything from a capture
+updater.launch_installer_windows = lambda path, shell_execute=None: False
 try:
     # blue-green (PAD-1024 part 2): pretend to be an installed copy whose
     # background install takes a few seconds; main has no such module
@@ -67,6 +79,7 @@ try:
     update_slots.installed_app_dir = lambda *a, **k: APP
     update_slots.stage_install = fake_stage
     update_slots.staged_install_ok = lambda app, v: False
+    update_slots.start_swap = lambda *a, **k: (False, "capture")
 except ImportError:
     pass
 from pinball_decryptor.webui import host
@@ -127,6 +140,18 @@ def main():
             shot = os.path.join(out_dir, prefix + "_updates_menu.png")
             page.screenshot(path=shot)
             print("shot:", shot, flush=True)
+            page.keyboard.press("Escape")
+            time.sleep(0.5)
+            if os.path.isfile(os.path.join(repo, "pinball_decryptor", "core",
+                                           "update_slots.py")):
+                # v9.9.10 comes out, then Restart to update is pressed
+                open(os.path.join(tmp, "newer_released"), "w").close()
+                webui_shot.api(url, "ui.banner_action", "update", "install")
+                time.sleep(4.0)
+                shot = os.path.join(out_dir,
+                                    prefix + "_banner_newer_release.png")
+                page.screenshot(path=shot)
+                print("shot:", shot, flush=True)
             print("temp:", sorted(os.listdir(tmp)), flush=True)
             browser.close()
     finally:

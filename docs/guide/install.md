@@ -233,6 +233,14 @@ seconds:
 - **Linux**: the downloaded AppImage *is* the new version, so Restart to
   update starts it.
 
+**Restart to update always lands on the newest release.** The click first
+asks for anything released since the ready update was found. If there is,
+the app gets that one ready instead and restarts into it by itself when it
+is (**Don't restart** on the banner calls that off), so several releases
+while the app was open still cost one restart. A release whose downloads are
+still being published is waited for, up to 10 minutes (**Restart with … now**
+skips the wait). Offline, it restarts into what it has.
+
 An update that is ready but not yet restarted into is still there the next
 time the app opens. To turn all this off, untick ⚙ > **Updates** >
 **Download and install updates in the background**; the update then waits

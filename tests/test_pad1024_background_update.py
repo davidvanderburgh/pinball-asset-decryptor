@@ -143,7 +143,7 @@ def staged(tmp_path, monkeypatch):
     dl.mkdir()
     gate = threading.Event()
     rec = {"downloads": [], "launched": [], "closed": 0, "gate": gate,
-           "dir": dl}
+           "dir": dl, "checks": [], "feed": None, "publishing": None}
 
     def _download(url, dest, expected_sha256=None, progress_cb=None,
                   cancel_cb=None, opener=None):
@@ -170,6 +170,17 @@ def staged(tmp_path, monkeypatch):
     def _no_recheck(self, version, installer):
         raise AssertionError("Restart to update must not re-check")
     monkeypatch.setattr(app_mod.App, "_freshest_update", _no_recheck)
+
+    def _check(current, repo=None, not_ready_cb=None):
+        """The release feed Restart to update asks: rec["feed"] (a result,
+        an exception, or None), and rec["publishing"] still uploading."""
+        rec["checks"].append(current)
+        if isinstance(rec["feed"], Exception):
+            raise rec["feed"]
+        if rec["publishing"] and not_ready_cb:
+            not_ready_cb(rec["publishing"])
+        return rec["feed"]
+    monkeypatch.setattr(app_mod, "check_for_update", _check)
     return rec
 
 
@@ -549,3 +560,130 @@ def test_a_staged_copy_from_an_earlier_run_is_reused(tmp_path, slots):
         w.run(w.app._offer_update, "9.9.9", "u", _installer())
         assert _until(w, lambda: _ready(w))
         assert slots["downloads"] == [] and slots["stages"] == []
+
+
+# ------------------------------------------------------------ several releases
+# David: "if I deploy multiple updates, and the user has the app open while
+# they are releasing, what happens when they restart? they should get the
+# LATEST one, not have to restart multiple times."
+
+def _newer():
+    return _installer(name=WIN % "9.9.10")
+
+
+def _ready_v999(w, staged):
+    staged["gate"].set()
+    w.run(w.app._offer_update, "9.9.9", "u", _installer())
+    assert _until(w, lambda: "v9.9.9 is ready" in (_banner(w) or {}).get(
+        "text", ""))
+
+
+def test_restart_gets_a_release_published_since(tmp_path, staged):
+    """9.9.9 is ready, 9.9.10 came out after: one click, one restart, and it
+    is into 9.9.10."""
+    with web_app(tmp_path, mfr="stern") as w:
+        _ready_v999(w, staged)
+        staged["feed"] = ("9.9.10", "u2", "notes", _newer())
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: staged["closed"])
+        assert staged["closed"] == 1
+        assert staged["launched"] == [str(staged["dir"] / (WIN % "9.9.10"))]
+        assert staged["downloads"][-1].endswith(WIN % "9.9.10")
+        # asked at the click, and again once 9.9.10 was ready
+        assert len(staged["checks"]) == 2
+        texts = [e["text"] for e in w.window.log_history()]
+        assert any("v9.9.10 has been released since v9.9.9" in t
+                   for t in texts)
+
+
+def test_while_the_newer_one_gets_ready_the_banner_says_so(tmp_path, staged):
+    with web_app(tmp_path, mfr="stern") as w:
+        _ready_v999(w, staged)
+        staged["gate"].clear()                  # hold 9.9.10's download
+        staged["feed"] = ("9.9.10", "u2", "notes", _newer())
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: "restarts into it by itself" in (
+            _banner(w) or {}).get("text", ""))
+        b = _banner(w)
+        assert "v9.9.10 is downloading" in b["text"]
+        assert [a["label"] for a in b["actions"]] == ["Don't restart"]
+        # Don't restart: it still gets ready, but waits for the click
+        w.call("ui.banner_action", "update", "not_now")
+        staged["gate"].set()
+        assert _until(w, lambda: "v9.9.10 is ready" in (_banner(w) or {}).get(
+            "text", ""))
+        time.sleep(0.3)
+        w.drain()
+        assert staged["closed"] == 0 and staged["launched"] == []
+        assert [a["label"] for a in _banner(w)["actions"]] == [
+            "Restart to update", "Release notes"]
+
+
+def test_nothing_newer_restarts_into_the_ready_one(tmp_path, staged):
+    with web_app(tmp_path, mfr="stern") as w:
+        _ready_v999(w, staged)
+        staged["feed"] = ("9.9.9", "u", "notes", _installer())
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: staged["closed"])
+        assert staged["launched"] == [str(staged["dir"] / (WIN % "9.9.9"))]
+        assert len(staged["downloads"]) == 1
+
+
+def test_offline_at_the_click_still_restarts(tmp_path, staged):
+    with web_app(tmp_path, mfr="stern") as w:
+        _ready_v999(w, staged)
+        staged["feed"] = OSError("no route to host")
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: staged["closed"])
+        assert staged["launched"] == [str(staged["dir"] / (WIN % "9.9.9"))]
+        texts = [e["text"] for e in w.window.log_history()]
+        assert any("Couldn't check for a newer release" in t
+                   and "no route to host" in t for t in texts)
+
+
+def test_a_release_still_being_published_is_waited_for(tmp_path, staged,
+                                                       monkeypatch):
+    from pinball_decryptor import app as app_mod
+    monkeypatch.setattr(app_mod.App, "PUBLISHING_POLL_MS", 200)
+    with web_app(tmp_path, mfr="stern") as w:
+        _ready_v999(w, staged)
+        staged["publishing"] = "9.9.10"         # installers still uploading
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: "still being published" in (
+            _banner(w) or {}).get("text", ""))
+        assert [a["label"] for a in _banner(w)["actions"]] == [
+            "Restart with v9.9.9 now", "Don't restart"]
+        assert staged["closed"] == 0
+        # its installers land: the next look gets it, then restarts into it
+        staged["publishing"] = None
+        staged["feed"] = ("9.9.10", "u2", "notes", _newer())
+        assert _until(w, lambda: staged["closed"], timeout=15)
+        assert staged["launched"] == [str(staged["dir"] / (WIN % "9.9.10"))]
+
+
+def test_restart_now_skips_the_wait(tmp_path, staged, monkeypatch):
+    from pinball_decryptor import app as app_mod
+    monkeypatch.setattr(app_mod.App, "PUBLISHING_POLL_MS", 60000)
+    with web_app(tmp_path, mfr="stern") as w:
+        _ready_v999(w, staged)
+        staged["publishing"] = "9.9.10"
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: "still being published" in (
+            _banner(w) or {}).get("text", ""))
+        w.call("ui.banner_action", "update", "restart_now")
+        assert _until(w, lambda: staged["closed"])
+        assert staged["launched"] == [str(staged["dir"] / (WIN % "9.9.9"))]
+
+
+def test_the_publishing_wait_gives_up(tmp_path, staged, monkeypatch):
+    from pinball_decryptor import app as app_mod
+    monkeypatch.setattr(app_mod.App, "PUBLISHING_POLL_MS", 100)
+    monkeypatch.setattr(app_mod.App, "PUBLISHING_WAIT_S", 0.5)
+    with web_app(tmp_path, mfr="stern") as w:
+        _ready_v999(w, staged)
+        staged["publishing"] = "9.9.10"
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: staged["closed"], timeout=15)
+        assert staged["launched"] == [str(staged["dir"] / (WIN % "9.9.9"))]
+        texts = [e["text"] for e in w.window.log_history()]
+        assert any("still being published after" in t for t in texts)

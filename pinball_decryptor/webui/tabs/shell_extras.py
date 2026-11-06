@@ -729,7 +729,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
                 if self._update_pct is not None else "")
 
     def show_update_banner(self, version, url, installer=None, stage=None,
-                           pct=None):
+                           pct=None, pending=None):
         """MainWindow.show_update_banner: the blue banner, the gear's dot and
         its menu entry.  A version already dismissed this session does not
         re-open the banner; a newer one does.
@@ -739,7 +739,11 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         ``"downloading"`` with its ``pct`` while it runs, ``"installing"``
         while the new version is installed beside this one, and ``"ready"``
         once it is all done, when the one button left is Restart to
-        update."""
+        update.
+
+        ``pending`` is a restart the user already asked for, waiting on a
+        newer release (``{"version", "publishing"}``): the banner says PAD
+        restarts by itself and offers Don't restart."""
         self._update_banner_url = url
         muted = (version == self._update_banner_dismissed
                  and not self._update_banner_shown)
@@ -773,9 +777,23 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
             "tip": tip, "stage": stage or ""})
         self.set(update_state="available")
         self.publish_settings_items()
-        if muted:
+        if muted and not pending:
             return
-        if stage == "downloading":
+        not_now = {"id": "not_now", "label": "Don't restart"}
+        if pending and pending.get("publishing") and stage == "ready":
+            text = ("Pinball Asset Decryptor v%s was just released and is "
+                    "still being published — PAD restarts into it as soon "
+                    "as it's ready." % pending.get("version"))
+            actions = [{"id": "restart_now",
+                        "label": "Restart with v%s now" % version}, not_now]
+        elif pending and stage in ("downloading", "installing"):
+            text = ("Pinball Asset Decryptor v%s is %s in the background%s "
+                    "— PAD restarts into it by itself when it's ready."
+                    % (version, stage,
+                       " (%d%%)" % pct if stage == "downloading"
+                       and pct is not None else ""))
+            actions = [not_now]
+        elif stage == "downloading":
             text = ("Pinball Asset Decryptor v%s is downloading in the "
                     "background%s — you're on v%s. Keep working; it will be "
                     "ready to install in a moment."
@@ -810,6 +828,11 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
     def _update_banner_action(self, action):
         if action == "install":
             return self._install_update_clicked()
+        if action in ("not_now", "restart_now"):
+            fn = self.window.cb.get("on_update_" + action)
+            if fn is not None:
+                fn()
+            return True
         if action == "notes":
             return self._open_update_url()
         if action == "dismiss":

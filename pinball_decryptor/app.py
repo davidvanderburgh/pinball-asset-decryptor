@@ -499,6 +499,8 @@ class App:
             initial_theme=saved_theme,
             on_check_updates=self._check_for_update_now,
             on_install_update=self._install_update,
+            on_update_not_now=self._cancel_pending_restart,
+            on_update_restart_now=self._restart_with_ready_now,
             initial_fda_acknowledged=bool(
                 s.get("macos_fda_acknowledged", False)),
             on_fda_acknowledge=self._on_fda_acknowledge,
@@ -5652,7 +5654,8 @@ class App:
     def _show_background_update(self, bg):
         self.window.show_update_banner(
             bg["version"], bg["url"], installer=bg["installer"],
-            stage=bg["stage"], pct=bg["pct"])
+            stage=bg["stage"], pct=bg["pct"],
+            pending=getattr(self, "_restart_pending", None))
 
     def _start_background_update(self, version, url, installer):
         """Fetch *installer* off the main thread into the place the Install
@@ -5770,8 +5773,15 @@ class App:
             f"Update v{bg['version']} is "
             + ("installed" if staged
                else "already downloaded" if reused else "downloaded")
-            + " - press Restart to update whenever you're ready.", "success")
+            + (" - restarting into it." if getattr(
+                self, "_restart_pending", None)
+               else " - press Restart to update whenever you're ready."),
+            "success")
         self._show_background_update(bg)
+        if getattr(self, "_restart_pending", None):
+            # the user already asked to restart: look once more for an even
+            # newer release, then go
+            self._recheck_then_restart(bg)
 
     def _background_update_failed(self, bg, err):
         """Fall back to the update waiting for Install update, which
@@ -5779,6 +5789,7 @@ class App:
         if getattr(self, "_bg_update", None) is not bg:
             return
         self._bg_update = None
+        self._restart_pending = None       # nothing to restart into by itself
         self.window.append_log(
             f"Couldn't download v{bg['version']} in the background ({err}). "
             "Press Install update to try again.", "warning")
@@ -5799,15 +5810,17 @@ class App:
         if not on and bg and bg["stage"] in ("downloading", "installing"):
             bg["cancel"].set()
             self._bg_update = None
+            self._restart_pending = None
             self.window.show_update_banner(bg["version"], bg["url"],
                                            installer=bg["installer"])
         elif on and offer and not bg and offer[2] is not None:
             self._start_background_update(*offer)
 
     def _install_staged_update(self, version):
-        """Restart to update: the background download is on disk, so go
-        straight to the install, no re-check and no download window.
-        Returns False when there is nothing staged for *version* to use."""
+        """Restart to update: the update is ready, so - once the release feed
+        says nothing newer has come out - go straight to it, no download
+        window.  Returns False when there is nothing staged for *version* to
+        use."""
         bg = getattr(self, "_bg_update", None)
         if not bg or bg["version"] != version:
             return False
@@ -5816,18 +5829,152 @@ class App:
                 f"v{version} is still {bg['stage']} - Restart to update "
                 "appears when it's done.", "info")
             return True
+        self._recheck_then_restart(bg)
+        return True
+
+    # How long Restart to update waits for a newer release whose installers
+    # are still uploading before it settles for the one it has (seconds), and
+    # how often it looks again meanwhile.
+    PUBLISHING_WAIT_S = 600
+    PUBLISHING_POLL_MS = 30000
+
+    def _recheck_then_restart(self, bg):
+        """Restart to update, step one: is the ready version still the newest?
+
+        David: "if I deploy multiple updates, and the user has the app open
+        while they are releasing, what happens when they restart? they should
+        get the LATEST one, not have to restart multiple times."  The ready
+        update is whatever the last automatic check found, and that check
+        runs every few hours, so a window left open across two releases had
+        the older one ready - restarting into it only for that version's own
+        startup check to find the newer one and ask for a second restart.
+
+        So the click asks the release feed first (one request, capped at
+        a few seconds, off the loop).  Something newer is fetched and
+        installed in the background instead, and the app restarts into it by
+        itself when it is ready (re-checking again then, so a third release
+        is caught the same way).  A newer release whose installers are still
+        uploading is waited for, up to :attr:`PUBLISHING_WAIT_S`.  No answer
+        (offline) restarts into what is ready - never a reason to refuse it.
+        """
+        if bg.get("rechecking"):
+            return
+        bg["rechecking"] = True
+        mfr_repo = (self._current_mfr.update_repo
+                    if self._current_mfr else None)
+        self.window.append_log(
+            "Checking whether v%s is still the newest release before "
+            "restarting..." % bg["version"], "info")
+
+        def _run():
+            publishing = []
+            try:
+                fresh = check_for_update(__version__, repo=mfr_repo,
+                                         not_ready_cb=publishing.append)
+                failed = None
+            except Exception as e:                      # noqa: BLE001
+                fresh, failed = None, f"{type(e).__name__}: {e}"
+            try:
+                self.root.after(0, self._after_restart_recheck, bg, fresh,
+                                failed, publishing[0] if publishing else None)
+            except RuntimeError:
+                pass                       # window gone
+        threading.Thread(target=_run, daemon=True,
+                         name="update-recheck").start()
+
+    def _after_restart_recheck(self, bg, fresh, failed, publishing):
+        bg["rechecking"] = False
+        if getattr(self, "_bg_update", None) is not bg:
+            return                         # replaced or switched off meanwhile
+        from .core.updater import _parse_version
+        have = _parse_version(bg["version"])
+        if (fresh and fresh[3] is not None
+                and _parse_version(fresh[0]) > have):
+            newest, url, _notes, installer = fresh
+            self.window.append_log(
+                f"v{newest} has been released since v{bg['version']} was got "
+                f"ready - getting v{newest} instead. PAD restarts into it by "
+                "itself as soon as it's ready.", "info")
+            self._restart_pending = {"version": newest, "publishing": False}
+            bg["cancel"].set()
+            self._bg_update = None
+            self._update_offer = (newest, url, installer)
+            self._start_background_update(newest, url, installer)
+            return
+        if publishing and _parse_version(publishing) > have:
+            since = bg.setdefault("waiting_since", time.time())
+            if time.time() - since < self.PUBLISHING_WAIT_S:
+                if not (getattr(self, "_restart_pending", None) or {}).get("publishing"):
+                    self.window.append_log(
+                        f"v{publishing} is being published right now - PAD "
+                        "restarts into it as soon as its download is up.",
+                        "info")
+                self._restart_pending = {"version": publishing,
+                                         "publishing": True}
+                self._show_background_update(bg)
+                try:
+                    self.root.after(self.PUBLISHING_POLL_MS,
+                                    self._publishing_poll, bg)
+                except RuntimeError:
+                    pass
+                return
+            self.window.append_log(
+                f"v{publishing} is still being published after "
+                f"{self.PUBLISHING_WAIT_S // 60} minutes - restarting into "
+                f"v{bg['version']} now.", "warning")
+        if failed:
+            self.window.append_log(
+                f"Couldn't check for a newer release ({failed}) - restarting "
+                f"into v{bg['version']}.", "warning")
+        self._restart_pending = None
+        self._restart_into(bg)
+
+    def _publishing_poll(self, bg):
+        """The wait for a release still being published: look again, unless
+        the user said Don't restart (or restarted) meanwhile."""
+        if (getattr(self, "_bg_update", None) is bg
+                and (getattr(self, "_restart_pending", None) or {}).get("publishing")):
+            self._recheck_then_restart(bg)
+
+    def _cancel_pending_restart(self):
+        """Banner: Don't restart.  The update carries on getting ready and
+        waits for Restart to update like any other."""
+        if not getattr(self, "_restart_pending", None):
+            return
+        self._restart_pending = None
+        self.window.append_log("Restart canceled - the update will wait for "
+                               "Restart to update.", "info")
+        bg = getattr(self, "_bg_update", None)
+        if bg:
+            bg.pop("waiting_since", None)
+            self._show_background_update(bg)
+
+    def _restart_with_ready_now(self):
+        """Banner, while a newer release is being published: Restart with
+        the ready version now rather than wait for it."""
+        bg = getattr(self, "_bg_update", None)
+        if not bg or bg["stage"] != "ready":
+            return
+        self._restart_pending = None
+        self._restart_into(bg)
+
+    def _restart_into(self, bg):
+        """Restart to update, step two: switch to *bg*'s version - the
+        staged swap, else its downloaded installer."""
+        version = bg["version"]
         if bg.get("staged") and self._swap_in_staged(bg):
             return True
         if not staged_update_ok(bg["path"], bg["installer"],
                                 check_digest=False):
-            # gone from under us (a temp-folder cleaner): download it again
+            # gone from under us (a temp-folder cleaner): the Install update
+            # route downloads it again
             self._bg_update = None
-            return False
+            self._install_update(version, bg["installer"])
+            return
         self.window.append_log(f"Restarting to update to v{version}...",
                                "info")
         self._update_downloaded(_NO_DIALOG, bg["path"], version,
                                 bg["installer"].get("kind"), ask=False)
-        return True
 
     def _swap_in_staged(self, bg):
         """Restart to update with the new version already installed beside

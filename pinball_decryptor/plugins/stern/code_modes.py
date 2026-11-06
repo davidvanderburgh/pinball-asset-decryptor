@@ -244,13 +244,13 @@ def validate(spec, folder=None):
         out.append("%s: calls maps each cue to a WAV." % spec.name)
         calls = []
     if len(calls) > MAX_CALLS:
-        out.append("%s: a code mode carries at most %d calls." % (spec.name, MAX_CALLS))
+        out.append("%s: %d calls of its own: %d at most." % (spec.name, len(calls), MAX_CALLS))
     if not isinstance(spec.clips, dict) or not isinstance(spec.hud, dict):
         out.append("%s: clips maps each cue to a video, and hud is an object." % spec.name)
     else:
         clips = spec.clip_list()
         if len(clips) > MAX_CLIPS:
-            out.append("%s: a code mode carries at most %d clips." % (spec.name, MAX_CLIPS))
+            out.append("%s: %d clips of its own: %d at most." % (spec.name, len(clips), MAX_CLIPS))
         for cue, f in clips:
             if not CUE_RE.match(cue):
                 out.append("%s: the clip cue %r is 1 to 15 lower-case letters, digits or _." % (spec.name, cue))

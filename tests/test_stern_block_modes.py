@@ -678,6 +678,35 @@ def test_own_clip_and_sound_problems_and_notes(tmp_path):
     assert not any("behind the HUD" in t for t in BM.notes(_media_prog()))
 
 
+def test_a_clip_past_the_twelfth_stops_the_build_instead_of_going_missing(tmp_path):
+    """PAD-1030: a Bond owner's 13th clip (a loop behind the HUD, added last) never played: assets.json kept the
+    first 12 and Try it built the mode without it. Now assets.json carries all 13 and the build refuses the mode,
+    in the words the editor shows."""
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    project = _card(tmp_path)
+    slug, _path = BM.new_blocks_mode(project, "Diamond", shots=SHOTS)
+    p = _media_prog()
+    p["clips"] += [{"name": "c%d" % i, "file": "c.mp4"} for i in range(BM.MAX_CLIPS + 1 - len(p["clips"]))]
+    p["clips"][-1] = {"name": "background2", "file": "bg.mp4"}
+    p["sounds"] += [{"name": "s%d" % i, "file": "s.wav", "priority": 4}
+                    for i in range(BM.MAX_SOUNDS + 1 - len(p["sounds"]))]
+    BM.save(project, slug, p)
+    spec = CM.load(project, slug)
+    assert len(spec.clips) == 13 and spec.clips["background2"] == "bg.mp4" and len(spec.calls) == 17
+    got = CM.validate(spec)
+    assert "TEST MODE: 13 clips of its own: 12 at most." in got
+    assert any(t.endswith(": 17 calls of its own: 16 at most.") for t in got)
+    code = MT.code_modes_with_assets(project)
+    with pytest.raises(MA.ModeAssetError, match="13 clips of its own: 12 at most"):
+        MA.build(project, "", "", str(tmp_path / "out"), code=code)
+    # twelve build on as before
+    p["clips"] = p["clips"][:BM.MAX_CLIPS]
+    p["sounds"] = p["sounds"][:BM.MAX_SOUNDS]
+    BM.save(project, slug, p)
+    spec = CM.load(project, slug)
+    assert len(spec.clips) == 12 and not [t for t in CM.validate(spec) if "of its own" in t]
+
+
 def test_media_names_come_from_the_files():
     assert BM.media_name("King Ghidorah - Sever!") == "king_ghidorah_s"
     assert BM.media_name("01 roar") == "s_01_roar"

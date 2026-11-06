@@ -290,6 +290,17 @@ def code_modes_with_assets(project):
         raise TryItError(str(e)) from None
 
 
+def code_mode_problems(project):
+    """PAD-1030: what stops the project's code modes (blocks modes too) from building, as the build would say it
+    (:func:`.mode_assets.build` checks the same), so Try it can say so before it asks the Emulate tab for
+    anything. Raises :class:`TryItError` as :func:`code_modes_with_assets` does."""
+    from . import code_modes as CM
+    out = []
+    for slug, spec in code_modes_with_assets(project):
+        out += CM.validate(spec, MP.mode_folder(project, slug))
+    return out
+
+
 def slot_of(project, slug):
     """The slot a mode's file takes (its place in the project's slug order), or None."""
     found, _broken = MP.list_modes(project)

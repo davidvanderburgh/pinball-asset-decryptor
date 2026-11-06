@@ -522,6 +522,14 @@ class TryItMixin:
             self._tryit_set("failed", why)
             self._tryit_note(why)
             return False
+        try:                                    # PAD-1030: a mode the build would refuse, said before anything runs
+            why = " ".join(MT.code_mode_problems(project))
+        except MT.TryItError as e:
+            why = str(e)
+        if why:
+            self._tryit_set("failed", why)
+            self._tryit_note(why)
+            return False
         state = self._emulate_state()
         if state:
             if state.get("busy"):

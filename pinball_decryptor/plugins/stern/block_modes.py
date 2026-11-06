@@ -1024,15 +1024,17 @@ def more_of(program):
 
 def media_assets(program):
     """``(clips, calls)`` as assets.json holds them: ``{name: file}`` and ``{name: {"wav",
-    "priority"}}``, every well-named entry with a file (the first of a name wins)."""
+    "priority"}}``, every well-named entry with a file (the first of a name wins). PAD-1030: all of them, past
+    MAX_CLIPS / MAX_SOUNDS too, so the build refuses the mode (code_modes.validate) instead of leaving the last
+    ones out quietly (13 clips: the background loop added last never played)."""
     clips, calls = {}, {}
     for c in program.get("clips") or []:
         name, f = str(c.get("name") or ""), str(c.get("file") or "")
-        if MEDIA_RE.match(name) and f and name not in clips and len(clips) < MAX_CLIPS:
+        if MEDIA_RE.match(name) and f and name not in clips:
             clips[name] = f
     for c in program.get("sounds") or []:
         name, f = str(c.get("name") or ""), str(c.get("file") or "")
-        if MEDIA_RE.match(name) and f and name not in calls and len(calls) < MAX_SOUNDS:
+        if MEDIA_RE.match(name) and f and name not in calls:
             calls[name] = {"wav": f, "priority": _priority(c.get("priority"))}
     return clips, calls
 

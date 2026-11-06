@@ -297,6 +297,34 @@ def test_tryit_refusals_before_the_hand_off(tmp_path, preview_on):
         assert w.state("modes")["tryit_line"].startswith("Try it runs on Windows and Linux for now")
 
 
+def test_tryit_refuses_a_blocks_mode_with_a_clip_too_many(tmp_path, preview_on):
+    """PAD-1030: 13 clips of its own used to build with the last left out (a Bond owner's loop behind the HUD
+    never played); Try it now says so before the Emulate tab is asked anything."""
+    from pinball_decryptor.plugins.stern import block_modes as BM
+    proj = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        svc._platform = "win32"
+        _project(w, proj)
+        slug, _p = BM.new_blocks_mode(str(proj), "Diamond", shots=["Left ramp"])
+        for f in ("c.mp4", "bg.mp4"):
+            (proj / "modes" / slug / f).write_bytes(b"x")
+        prog = BM.load(str(proj), slug)
+        prog["clips"] = [{"name": "crem%d" % i, "file": "c.mp4"} for i in range(1, 13)]
+        prog["clips"].append({"name": "background2", "file": "bg.mp4"})
+        BM.save(str(proj), slug, prog)
+        emu = _FakeEmulate()
+        _with_emu(w, emu)
+        assert w.call("modes.tryit") is False
+        st = w.state("modes")
+        assert st["tryit"]["state"] == "failed"
+        assert st["tryit_line"] == "Diamond: 13 clips of its own: 12 at most."
+        assert emu.handed == []
+        prog["clips"].pop(0)                    # twelve: handed on as before
+        BM.save(str(proj), slug, prog)
+        assert w.call("modes.tryit") is True and emu.handed == [svc.tryit_prepare]
+
+
 def test_tryit_hands_off_and_refuses_a_missing_card(tmp_path, preview_on):
     proj = tmp_path / "proj"
     with web_app(tmp_path, mfr="stern") as w:

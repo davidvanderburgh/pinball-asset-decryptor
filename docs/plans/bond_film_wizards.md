@@ -177,6 +177,21 @@ the game's Mr Osato running when the film completed (lit); a ramp mid-Osato `not
 out; the next ramp held off Under Water Fight and started the mode; it ran its 30 s out; the next ramp started the
 game's own mode as ever. No abort.
 
+## PAD-1026: the scoops count nothing under a mini-wizard of one's own
+
+The same owner: the game's four mini-wizards "suppress progress of DB5 (right scoop) and powerpack (left scoop)", and
+their own modes should too - "those 2 areas have videos that interrupt the new mini wizard mode videos". Read from
+the game program (LE 1.06): the right scoop is the Aston Martin VUK (its device handler `0x10f890` kicks with
+AD_ASTON_MARTIN_KICK_BACK_POWER; in the device table each record's handler word comes FIRST - `0x7d571c` is
+TROUGH's - so pairing it with the name before it reads every device one off) and its landing runs the DB5 countdown
+`0x6533c`; the left eject (`0x10fbfc`,
+AD_LEFT_EJECT_KICK_BACK_POWER, the port's `scoop_handler`) runs the Powerpack countdown `0x156568`. Each asks one
+check first - `0x651ec` (DB5: not `0x9f460` the multiballs, not `0x110b20` the mini-wizards, not `0x15f82c` a gadget
+lit, not `0x1d2978`) and `0x156424` (Powerpack, the same but the gadget) - and with 0 counts nothing, plays no clip
+and lights nothing; the Attache Case countdown `0xc6608` (a Right ramp shot) asks `0xc6410` the same way. The ports
+name the three checks as rules a blocking mode of ours refuses (MODE_SDK "A rule that asks first"); a mode keeps any
+of them counting with the Keep counting ticks.
+
 ## PAD-521: the owner's own mini-wizards should LOOK like the game's own
 
 The same owner's list, for their YOLT and DAF modes: (1) villain inserts cycling while qualified and the film insert

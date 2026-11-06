@@ -424,6 +424,22 @@ value block_ret_29          0
 # blocking: both checks 0, nothing counted, balls 1; its list without 28 / 29: Jetpack Multiball served (balls 2).
 # No abort. PROVEN.
 
+# PAD-1026: the game's gadget countdowns (game_mode_blocks.read_gate_rules, from the game program): each
+# asks one check before it counts, plays its clip or lights its inserts - the check the game's own
+# mini-wizards and multiballs make say no. While a mode of ours blocks, the runtime refuses it with 0
+# (`value block_rule_gate_<n> 1`) unless the mode keeps that countdown counting.
+site block_rule_0          0x000c61f8 0xe92d4008 0xebff6421  # the check of the countdown at 0x000c63f0 (gadget 1)
+value block_rule_gate_0    1
+text block_rule_name_0     Attache Case Countdown
+site block_rule_1          0x000651f4 0xe92d4008 0xeb00e822  # the check of the countdown at 0x00065344 (gadget 2)
+value block_rule_gate_1    1
+text block_rule_name_1     DB5 Countdown
+site block_rule_2          0x00155404 0xe92d4008 0xebfd279e  # the check of the countdown at 0x00155548 (gadget 3)
+value block_rule_gate_2    1
+text block_rule_name_2     Powerpack Countdown
+# EMU 2026-11-06 (PAD-1026, as the LE's: Right vuk opto 93, Left eject 52, DB5 0x81b028, Powerpack 0x81f6b8): main
+# with the mode running counted both 4-5-6-3; this port 4-4-4; no mode running 4-5-6-3. No abort. PROVEN.
+
 # ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards"), James Bond LE 1.06's code
 # on this build: the same table (4 entries of 0x20 bytes: index, bit, insert lamp, start, running query - the inserts
 # 34, 35, 36, 43 and Ahoy Mr. Bond's start 0x20530 as on the LE) and the same functions 0xfcc lower (LE 0x110d98

@@ -674,6 +674,25 @@ value block_ret_29          0
 # blocking: both checks 0, nothing counted, balls 1, the locks still lit for later. Its list without 28 / 29: Jetpack
 # Multiball served (balls 2); Bird One Multiball served (balls 3, its own run). No abort. PROVEN.
 
+# PAD-1026: the game's gadget countdowns (game_mode_blocks.read_gate_rules, from the game program): each
+# asks one check before it counts, plays its clip or lights its inserts - the check the game's own
+# mini-wizards and multiballs make say no. While a mode of ours blocks, the runtime refuses it with 0
+# (`value block_rule_gate_<n> 1`) unless the mode keeps that countdown counting.
+site block_rule_0          0x000c6410 0xe92d4008 0xebff6411  # the check of the countdown at 0x000c6608 (gadget 1)
+value block_rule_gate_0    1
+text block_rule_name_0     Attache Case Countdown
+site block_rule_1          0x000651ec 0xe92d4008 0xeb00e89a  # the check of the countdown at 0x0006533c (gadget 2)
+value block_rule_gate_1    1
+text block_rule_name_1     DB5 Countdown
+site block_rule_2          0x00156424 0xe92d4008 0xebfd240c  # the check of the countdown at 0x00156568 (gadget 3)
+value block_rule_gate_2    1
+text block_rule_name_2     Powerpack Countdown
+# EMU 2026-11-06 (PAD-1026, C:/tmp/PAD-1026/rig job.sh + mem1026.py, stock card, hidden, muted): a game, a mode file
+# (game_modes block) started, then the Right vuk opto (101) and the Left eject (53) held 2.5 s three times each, the
+# countdowns read from memory (player 1: DB5 0x8197c0, Powerpack 0x81de78). Main: both 4-5-6-3 (counted, the third
+# its award). This port: both 4-4-4, `the game's rules count nothing`; with keep_rules 1 DB5 4-5-6-3 and Powerpack
+# 4-4-4; no mode running: both counted. No abort. PROVEN.
+
 # ---- PAD-420: held coils by their board address (generation C)
 # (coils/coil_job_c.sh: each held 2000 ms - or its own longest - as a mode started, ONE command at the
 # game's own powers, ended on the board by itself; let go early by a mode stop (the game's OFF) or by the game)

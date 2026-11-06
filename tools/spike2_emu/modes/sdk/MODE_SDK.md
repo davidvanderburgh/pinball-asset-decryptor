@@ -1141,6 +1141,20 @@ MORE TO LIGHT SAUCER ATTACK", over KING GHIDORAH's words on David's Premium). A 
 handlers (`site block_rule_<n>`, `value block_rule_lo_<n>` / `block_rule_hi_<n>`, `text
 block_rule_name_<n>`), each shown the shot without those bits while a mode blocks, as the battle rule's is.
 
+**A rule that asks first (PAD-1026).** A plain-C title has no rule base to hook, but a rule of its own may ask
+ONE check before it counts, plays its clip or lights its inserts. James Bond's gadget countdowns do: the DB5
+countdown (the right scoop, LE 1.06 `0x6533c`), the Powerpack countdown (the left eject, `0x156568`) and the
+Attache Case countdown (`0xc6608`, a Right ramp shot) each ask the game's "nothing of mine in the way" (`0x651ec`,
+`0x156424`, `0xc6410`: its multiballs `0x9f460`, its mini-wizards `0x110b20`, ...) and stop there when it says
+0 - which is how the game's own four mini-wizards keep them from counting and from playing their clips over the
+mini-wizard's (the Bond LE owner: "those 2 areas have videos that interrupt the new mini wizard mode videos").
+`value block_rule_gate_<n> 1` makes `site block_rule_<n>` such a check: the runtime hooks it as a veto
+(`hook_veto_n`; a `push {.., lr}; bl` entry through `hook_veto_bl`) refused with 0 while a mode of ours blocks,
+unless the mode keeps that rule counting - the same `keep_rules` / Keep counting ticks as every rule's.
+`game_mode_blocks.read_gate_rules` reads the three from a Bond program (LE and Pro 1.06; the 60th Anniversary's
+rules ask no such check) and `gate_rule_lines` writes the port lines; a drafted Bond port gets its own
+(`portgen.own_gate_rules`).
+
 **Coverage.** `pm_aside()` is as good as the port's stock route (above and below). On the 37
 shipped builds: the manager's own queries on the three Godzillas, the mode table on 21, and the
 balls in play plus the game's own mode flags, live records, running bytes or rule objects on 11
